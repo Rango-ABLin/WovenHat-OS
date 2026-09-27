@@ -287,6 +287,9 @@ pub fn validate_bar_lease(lease: topology::MmioLease, owner: u32) -> bool {
     TOPOLOGY.lock().validate_mmio(lease, owner)
 }
 
+// Wired by the Stage 13.2 hotplug/unbind increment; keep the lifecycle entry
+// point explicit until removal events have a real caller.
+#[expect(dead_code)]
 pub fn teardown_function(handle: topology::FunctionHandle, owner: u32) -> Result<(), topology::Error> {
     TOPOLOGY.lock().teardown(handle, owner)
 }
