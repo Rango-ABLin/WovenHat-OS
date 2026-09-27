@@ -2,6 +2,8 @@ use core::{arch::asm, ptr};
 
 use crate::{hal::acpi::McfgAllocation, irq_lock::IrqMutex as Mutex};
 
+pub mod topology;
+
 const CONFIG_ADDRESS: u16 = 0x0cf8;
 const CONFIG_DATA: u16 = 0x0cfc;
 const MAX_DEVICES: usize = 64;
@@ -60,6 +62,7 @@ pub struct Device {
     pub status: u16,
     pub bars: [Bar; 6],
     pub capabilities: Capabilities,
+    pub bridge_buses: Option<topology::BridgeRoute>,
 }
 
 #[derive(Clone, Copy, Default)]
@@ -133,6 +136,8 @@ static CONFIG: Mutex<ConfigState> = Mutex::with_rank(
     10,
 );
 static INVENTORY: Mutex<Inventory> = Mutex::with_rank(Inventory::new(), 10);
+// Rank 20 is never acquired while a rank-10 PCI lock is held.
+static TOPOLOGY: Mutex<topology::Topology> = Mutex::with_rank(topology::Topology::new(), 20);
 
 pub fn configure(allocations: &[McfgAllocation]) {
     let mut state = CONFIG.lock();
@@ -171,8 +176,27 @@ pub fn discover() -> Summary {
         inventory.summary.segments = u8::try_from(seen_count).unwrap_or(u8::MAX);
     }
 
+    let mut replacement = topology::Topology::new();
+    let mut topology_ok = true;
+    for device in inventory.devices.iter().flatten() {
+        if replacement.insert(topology::FunctionDescriptor {
+            address: topology::FunctionAddress {
+                segment: device.segment, bus: device.bus, device: device.device, function: device.function,
+            },
+            bridge: device.bridge_buses,
+        }).is_err() {
+            topology_ok = false;
+            break;
+        }
+    }
+    if !topology_ok {
+        inventory.summary.truncated = true;
+        replacement = topology::Topology::new();
+    }
+
     let summary = inventory.summary;
     *INVENTORY.lock() = inventory;
+    *TOPOLOGY.lock() = replacement;
     summary
 }
 
@@ -213,6 +237,58 @@ fn scan_bus_range(inventory: &mut Inventory, segment: u16, start_bus: u8, end_bu
 
 pub fn device(index: usize) -> Option<Device> {
     INVENTORY.lock().devices.get(index).copied().flatten()
+}
+
+pub fn topology_handle(address: Address) -> Option<topology::FunctionHandle> {
+    let topology = TOPOLOGY.lock();
+    for slot in 0..topology::MAX_FUNCTIONS {
+        let Some(handle) = topology.handle_at(slot) else { continue; };
+        if topology.snapshot(handle).ok().is_some_and(|node| {
+            node.address == topology::FunctionAddress {
+                segment: address.segment, bus: address.bus, device: address.device, function: address.function,
+            }
+        }) {
+            return Some(handle);
+        }
+    }
+    None
+}
+
+pub fn claim_function(handle: topology::FunctionHandle, owner: u32) -> Result<(), topology::Error> {
+    TOPOLOGY.lock().claim(handle, owner)
+}
+
+pub fn release_function(handle: topology::FunctionHandle, owner: u32) -> Result<(), topology::Error> {
+    TOPOLOGY.lock().release(handle, owner)
+}
+
+pub fn lease_bar(
+    handle: topology::FunctionHandle,
+    owner: u32,
+    bar_index: u8,
+) -> Result<topology::MmioLease, topology::Error> {
+    let snapshot = TOPOLOGY.lock().snapshot(handle)?;
+    let inventory = INVENTORY.lock();
+    let Some(device) = inventory.devices.iter().flatten().find(|device| {
+        device.segment == snapshot.address.segment && device.bus == snapshot.address.bus
+            && device.device == snapshot.address.device && device.function == snapshot.address.function
+    }).copied() else { return Err(topology::Error::InvalidHandle); };
+    let Some(bar) = device.bars.get(bar_index as usize).copied() else {
+        return Err(topology::Error::InvalidBar);
+    };
+    if !bar.valid || bar.kind == BarKind::Io || bar.address == 0 {
+        return Err(topology::Error::InvalidBar);
+    }
+    drop(inventory);
+    TOPOLOGY.lock().lease_mmio(handle, owner, bar_index, bar.address)
+}
+
+pub fn validate_bar_lease(lease: topology::MmioLease, owner: u32) -> bool {
+    TOPOLOGY.lock().validate_mmio(lease, owner)
+}
+
+pub fn teardown_function(handle: topology::FunctionHandle, owner: u32) -> Result<(), topology::Error> {
+    TOPOLOGY.lock().teardown(handle, owner)
 }
 
 #[allow(dead_code)]
@@ -319,7 +395,19 @@ fn probe(address: Address) -> Option<Device> {
         status: (command_status >> 16) as u16,
         bars: read_bars(address, header_type),
         capabilities: read_capabilities(address, (command_status >> 16) as u16, header_type),
+        bridge_buses: read_bridge_route(address, header_type),
     })
+}
+
+fn read_bridge_route(address: Address, header_type: u8) -> Option<topology::BridgeRoute> {
+    if header_type & 0x7f != 0x01 { return None; }
+    let buses = read_config(address, 0x18)?;
+    let route = topology::BridgeRoute {
+        primary: buses as u8,
+        secondary: (buses >> 8) as u8,
+        subordinate: (buses >> 16) as u8,
+    };
+    (route.secondary != 0 && route.secondary <= route.subordinate).then_some(route)
 }
 
 fn read_bars(address: Address, header_type: u8) -> [Bar; 6] {
@@ -538,6 +626,30 @@ pub fn self_test() -> bool {
         && ecam_math
         && INVENTORY.lock().summary.recorded as usize <= MAX_DEVICES
         && device(MAX_DEVICES).is_none()
+        && topology_self_test()
+}
+
+fn topology_self_test() -> bool {
+    use topology::{BridgeRoute, FunctionAddress, FunctionDescriptor, Topology};
+    let mut topology = Topology::new();
+    let Ok(bridge) = topology.insert(FunctionDescriptor {
+        address: FunctionAddress { segment: 0, bus: 0, device: 1, function: 0 },
+        bridge: Some(BridgeRoute { primary: 0, secondary: 1, subordinate: 8 }),
+    }) else { return false; };
+    let Ok(function) = topology.insert(FunctionDescriptor {
+        address: FunctionAddress { segment: 0, bus: 2, device: 0, function: 0 },
+        bridge: None,
+    }) else { return false; };
+    if topology.snapshot(function).ok().and_then(|node| node.parent) != Some(bridge)
+        || topology.claim(function, 7).is_err() { return false; }
+    let Ok(lease) = topology.lease_mmio(function, 7, 0, 0x8000_0000) else { return false; };
+    if !topology.validate_mmio(lease, 7) || topology.teardown(function, 7).is_err()
+        || topology.validate_mmio(lease, 7) || topology.snapshot(function).is_ok() { return false; }
+    let Ok(reused) = topology.insert(FunctionDescriptor {
+        address: FunctionAddress { segment: 0, bus: 2, device: 0, function: 0 },
+        bridge: None,
+    }) else { return false; };
+    reused.slot == function.slot && reused.generation != function.generation
 }
 
 fn ecam_address_for(allocation: McfgAllocation, address: Address, offset: u16) -> Option<u64> {
