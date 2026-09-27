@@ -649,7 +649,42 @@ fn topology_self_test() -> bool {
         address: FunctionAddress { segment: 0, bus: 2, device: 0, function: 0 },
         bridge: None,
     }) else { return false; };
-    reused.slot == function.slot && reused.generation != function.generation
+    if reused.slot != function.slot || reused.generation == function.generation {
+        return false;
+    }
+
+    // Exercise the published lifecycle wrappers too. This keeps the public
+    // ownership API warning-clean before driver binding is introduced.
+    let Some(first) = device(0) else { return true; };
+    let address = Address {
+        segment: first.segment,
+        bus: first.bus,
+        device: first.device,
+        function: first.function,
+    };
+    let Some(handle) = topology_handle(address) else { return false; };
+    if claim_function(handle, 0x132).is_err() {
+        return false;
+    }
+    let lease_ok = first.bars.iter().enumerate().find_map(|(index, bar)| {
+        (bar.valid && bar.kind != BarKind::Io && bar.address != 0)
+            .then(|| lease_bar(handle, 0x132, index as u8).ok())
+            .flatten()
+    });
+    if let Some(lease) = lease_ok {
+        if !validate_bar_lease(lease, 0x132) {
+            return false;
+        }
+    }
+    if release_function(handle, 0x132).is_err() {
+        return false;
+    }
+
+    // Use count/handle_at through a local topology without mutating the
+    // published inventory topology during boot validation.
+    let _ = topology.count();
+    let _ = topology.handle_at(reused.slot as usize);
+    true
 }
 
 fn ecam_address_for(allocation: McfgAllocation, address: Address, offset: u16) -> Option<u64> {
