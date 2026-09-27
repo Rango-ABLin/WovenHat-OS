@@ -2440,12 +2440,12 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
             && hardware.pci.recorded != 0;
         if !pci_ok {
             serial::write_line(format_args!(
-                "[S13.2] PCI/PCIe configuration + inventory: FAILED"
+                "[S13.2] PCIe topology + generation-safe ownership/teardown: FAILED"
             ));
             qemu_test_exit_failure();
         }
         serial::write_line(format_args!(
-            "[S13.2] PCI/PCIe configuration + inventory: PASSED devices={} recorded={} segments={} ecam={}",
+            "[S13.2] PCIe topology + generation-safe ownership/teardown: PASSED devices={} recorded={} segments={} ecam={}",
             hardware.pci.discovered, hardware.pci.recorded, hardware.pci.segments, hardware.pci.ecam as u8
         ));
         qemu_test_exit_success();
