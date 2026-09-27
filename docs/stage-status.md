@@ -280,18 +280,23 @@ The WovenDriver manager passed device matching, binding, suspend/resume,
 build, freestanding Clippy, and 1/2/4-CPU QEMU validation. See
 [audit](audit-stage13-1-2026-09-16.md).
 
-## Stage 13.2 — accepted on 2026-09-26
+## Stage 13.2 — topology/ownership increment implemented; full acceptance open (2026-09-27)
 
-Stage 13.2 PCI/PCIe configuration and inventory now passes the focused gate:
-`cargo build --features stage13-2-test`, warning-denying kernel Clippy for
-`stage13-2-test`, and the `scripts/test-stage10-runtime.py --stage 13.2`
-QEMU matrix on 1/2/4 CPUs with exit 33.
+The PCIe foundation now includes bounded generation-tagged function/bridge
+topology, explicit single-owner claims, generation-tagged logical MMIO BAR
+leases, teardown-before-reuse invalidation, and bridge bus-window parentage.
+The dedicated preservation gate requires focused host tests, warning-denying
+kernel Clippy, runtime-harness regressions, and 1/2/4-CPU QEMU evidence.
 
-Additional audit reruns for stages 13.1 through 13.9 on 1 CPU all passed after
-resolving unresolved merge-content in Stage 13 harness/docs and repairing the
-AX200 runtime-image grouping path used by Stage 13.9Q.
+Full Stage 13.2 acceptance remains blocked on BAR size probing/allocation and
+rebalance, bridge I/O/MMIO/prefetchable resource routing, generic MSI/MSI-X
+vector allocation/programming/teardown, PCIe hotplug, and WovenDriver
+binding/unbinding integrated with generation ownership. The current paging
+layer also lacks a physical MMIO unmap/revoke primitive; topology teardown
+therefore revokes logical lease authority but must not be described as page
+table mapping revocation.
 
-Next: Stage 13.3 NVMe controller/queue foundation.
+Stage 13.3 NVMe is intentionally not advanced by this work.
 
 ## Stages 12.2–12.5 — accepted on 2026-09-16
 
