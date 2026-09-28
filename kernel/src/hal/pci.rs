@@ -1187,7 +1187,7 @@ fn topology_self_test() -> bool {
     }) else { return false; };
     if topology.snapshot(function).ok().and_then(|node| node.parent) != Some(bridge)
         || topology.claim(function, 7).is_err() { return false; }
-    let Ok(lease) = topology.lease_mmio(function, 7, 0, 0x8000_0000) else { return false; };
+    let Ok(lease) = topology.lease_mmio(function, 7, 0, 0x8000_0000, 0x4000) else { return false; };
     if !topology.validate_mmio(lease, 7) || topology.teardown(function, 7).is_err()
         || topology.validate_mmio(lease, 7) || topology.snapshot(function).is_ok() { return false; }
     let Ok(reused) = topology.insert(FunctionDescriptor {
