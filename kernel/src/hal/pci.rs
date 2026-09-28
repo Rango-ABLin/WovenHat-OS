@@ -239,6 +239,7 @@ pub fn device(index: usize) -> Option<Device> {
     INVENTORY.lock().devices.get(index).copied().flatten()
 }
 
+#[expect(dead_code)]
 pub fn topology_handle(address: Address) -> Option<topology::FunctionHandle> {
     let topology = TOPOLOGY.lock();
     for slot in 0..topology::MAX_FUNCTIONS {
@@ -254,14 +255,17 @@ pub fn topology_handle(address: Address) -> Option<topology::FunctionHandle> {
     None
 }
 
+#[expect(dead_code)]
 pub fn claim_function(handle: topology::FunctionHandle, owner: u32) -> Result<(), topology::Error> {
     TOPOLOGY.lock().claim(handle, owner)
 }
 
+#[expect(dead_code)]
 pub fn release_function(handle: topology::FunctionHandle, owner: u32) -> Result<(), topology::Error> {
     TOPOLOGY.lock().release(handle, owner)
 }
 
+#[expect(dead_code)]
 pub fn lease_bar(
     handle: topology::FunctionHandle,
     owner: u32,
@@ -283,6 +287,7 @@ pub fn lease_bar(
     TOPOLOGY.lock().lease_mmio(handle, owner, bar_index, bar.address)
 }
 
+#[expect(dead_code)]
 pub fn validate_bar_lease(lease: topology::MmioLease, owner: u32) -> bool {
     TOPOLOGY.lock().validate_mmio(lease, owner)
 }
@@ -653,33 +658,6 @@ fn topology_self_test() -> bool {
         bridge: None,
     }) else { return false; };
     if reused.slot != function.slot || reused.generation == function.generation {
-        return false;
-    }
-
-    // Exercise the published lifecycle wrappers too. This keeps the public
-    // ownership API warning-clean before driver binding is introduced.
-    let Some(first) = device(0) else { return true; };
-    let address = Address {
-        segment: first.segment,
-        bus: first.bus,
-        device: first.device,
-        function: first.function,
-    };
-    let Some(handle) = topology_handle(address) else { return false; };
-    if claim_function(handle, 0x132).is_err() {
-        return false;
-    }
-    let lease_ok = first.bars.iter().enumerate().find_map(|(index, bar)| {
-        (bar.valid && bar.kind != BarKind::Io && bar.address != 0)
-            .then(|| lease_bar(handle, 0x132, index as u8).ok())
-            .flatten()
-    });
-    if let Some(lease) = lease_ok {
-        if !validate_bar_lease(lease, 0x132) {
-            return false;
-        }
-    }
-    if release_function(handle, 0x132).is_err() {
         return false;
     }
 
