@@ -186,6 +186,7 @@ static HOST_APERTURES: Mutex<Option<HostApertures>> = Mutex::with_rank(None, 10)
 /// obtain these from platform resource descriptors (for ACPI systems, _CRS);
 /// ECAM/MCFG ranges are configuration space and are intentionally rejected as
 /// an implicit source of BAR allocation space.
+#[expect(dead_code, reason = "ACPI _CRS producer is the next Stage 13.2 integration step")]
 pub fn configure_host_apertures(apertures: HostApertures) -> bool {
     fn valid(range: HostAperture) -> bool {
         range.size != 0 && range.base.checked_add(range.size).is_some()
@@ -1099,6 +1100,16 @@ pub enum RebalanceError {
     Allocation(assignment::Error),
     Program(BarProgramError),
     RollbackFailed,
+}
+
+#[expect(dead_code, reason = "called by device admission once ACPI _CRS apertures are published")]
+pub fn rebalance_bars_from_firmware(
+    address: Address,
+    header_type: u8,
+) -> Result<[Option<assignment::Assignment>; 6], RebalanceError> {
+    let mut apertures = configured_assignment_apertures()
+        .map_err(|_| RebalanceError::Allocation(assignment::Error::Exhausted))?;
+    rebalance_bars(address, header_type, &mut apertures)
 }
 
 #[expect(dead_code)]
