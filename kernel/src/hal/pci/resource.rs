@@ -43,6 +43,7 @@ struct Slot {
 }
 
 impl Slot {
+    #[expect(dead_code, reason = "constructed through dormant Stage 13.2 aperture setup until host resources are wired")]
     const fn empty() -> Self {
         Self { occupied: false, generation: 1, range: Range { base: 0, size: 0 } }
     }
@@ -54,6 +55,7 @@ pub struct Allocator {
 }
 
 impl Allocator {
+    #[expect(dead_code, reason = "production constructor becomes live when host bridge apertures are discovered")]
     pub const fn new(base: u64, size: u64) -> Self {
         Self { aperture: Range { base, size }, slots: [Slot::empty(); MAX_RANGES] }
     }
