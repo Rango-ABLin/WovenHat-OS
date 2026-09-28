@@ -43,7 +43,6 @@ impl Apertures {
         }
     }
 
-    #[expect(dead_code, reason = "consumed when HostApertures migrates to firmware multi-range resources")]
     pub fn from_ranges(
         io: &[resource::Range],
         memory: &[resource::Range],
