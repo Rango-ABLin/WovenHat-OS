@@ -209,20 +209,20 @@ pub enum HostApertureError {
 
 fn configured_assignment_apertures() -> Result<assignment::Apertures, HostApertureError> {
     let configured = HOST_APERTURES.lock().ok_or(HostApertureError::Unavailable)?;
-    fn allocator(range: Option<HostAperture>) -> Result<resource::Allocator, HostApertureError> {
-        let mut result = resource::Allocator::new();
-        if let Some(range) = range {
-            let end = range.base.checked_add(range.size).ok_or(HostApertureError::InvalidRange)?;
-            result.add_range(resource::Range { base: range.base, end })
-                .map_err(|_| HostApertureError::InvalidRange)?;
+    fn range(value: Option<HostAperture>) -> Result<resource::Range, HostApertureError> {
+        match value {
+            Some(value) if value.size != 0 && value.base.checked_add(value.size).is_some() => {
+                Ok(resource::Range { base: value.base, size: value.size })
+            }
+            Some(_) => Err(HostApertureError::InvalidRange),
+            None => Ok(resource::Range { base: 0, size: 0 }),
         }
-        Ok(result)
     }
-    Ok(assignment::Apertures {
-        io: allocator(configured.io)?,
-        mmio32: allocator(configured.memory)?,
-        mmio64: allocator(configured.prefetch)?,
-    })
+    Ok(assignment::Apertures::new(
+        range(configured.io)?,
+        range(configured.memory)?,
+        range(configured.prefetch)?,
+    ))
 }
 
 pub fn discover() -> Summary {
@@ -657,6 +657,7 @@ fn restore_bridge_unlocked(address: Address, saved: BridgeRegisterSnapshot) -> b
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[expect(dead_code, reason = "Stage 13.2 bridge routing becomes live at device admission/hotplug integration")]
 pub enum BridgeChainError {
     NotBridge,
     InvalidWindow(bridge::Error),
@@ -667,6 +668,7 @@ pub enum BridgeChainError {
 }
 
 #[derive(Clone, Copy)]
+#[expect(dead_code, reason = "Stage 13.2 bridge routing becomes live at device admission/hotplug integration")]
 struct BridgeChainState {
     entry: bridge_transaction::Entry,
     registers: bridge::Registers,
@@ -698,6 +700,7 @@ fn bridge_forwarding_command(saved: u16, windows: bridge::Windows) -> u16 {
     command
 }
 
+#[expect(dead_code, reason = "Stage 13.2 bridge routing becomes live at device admission/hotplug integration")]
 fn restore_bridge_chain_unlocked(
     states: &[Option<BridgeChainState>; bridge_transaction::MAX_BRIDGES],
     count: usize,
@@ -714,6 +717,7 @@ fn restore_bridge_chain_unlocked(
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[expect(dead_code, reason = "Stage 13.2 bridge routing becomes live at device admission/hotplug integration")]
 pub enum BridgePlanError {
     Routing(routing::Error),
     Transaction(bridge_transaction::Error),
@@ -725,6 +729,7 @@ pub enum BridgePlanError {
 /// Build bridge forwarding windows from the currently published PCI generation.
 /// Existing BAR addresses are treated as demand; host aperture allocation remains
 /// a separate policy input and is never invented here.
+#[expect(dead_code, reason = "Stage 13.2 bridge routing becomes live at device admission/hotplug integration")]
 pub fn build_bridge_chain() -> Result<bridge_transaction::Chain, BridgePlanError> {
     let mut nodes = [None; topology::MAX_FUNCTIONS];
     let devices;
@@ -806,11 +811,13 @@ pub fn build_bridge_chain() -> Result<bridge_transaction::Chain, BridgePlanError
 /// Plan the complete forwarding hierarchy first, then apply it as one
 /// rollback-capable hardware transaction. No bridge register is touched unless
 /// topology discovery, BAR probing, demand aggregation, and encoding all pass.
+#[expect(dead_code, reason = "Stage 13.2 bridge routing becomes live at device admission/hotplug integration")]
 pub fn route_discovered_bridges() -> Result<(), BridgePlanError> {
     let chain = build_bridge_chain()?;
     program_bridge_chain(chain).map_err(BridgePlanError::Program)
 }
 
+#[expect(dead_code, reason = "Stage 13.2 bridge routing becomes live at device admission/hotplug integration")]
 fn merge_route_window(
     target: &mut Option<bridge::Window>,
     incoming: bridge::Window,
@@ -832,6 +839,7 @@ fn merge_route_window(
     Ok(())
 }
 
+#[expect(dead_code, reason = "Stage 13.2 bridge routing becomes live at device admission/hotplug integration")]
 pub fn program_bridge_chain(
     mut chain: bridge_transaction::Chain,
 ) -> Result<(), BridgeChainError> {
@@ -1108,7 +1116,7 @@ pub fn rebalance_bars_from_firmware(
     header_type: u8,
 ) -> Result<[Option<assignment::Assignment>; 6], RebalanceError> {
     let mut apertures = configured_assignment_apertures()
-        .map_err(|_| RebalanceError::Allocation(assignment::Error::Exhausted))?;
+        .map_err(|_| RebalanceError::Allocation(assignment::Error::Resource(resource::Error::InvalidRange)))?;
     rebalance_bars(address, header_type, &mut apertures)
 }
 
