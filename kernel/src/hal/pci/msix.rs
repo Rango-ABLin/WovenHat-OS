@@ -81,8 +81,34 @@ pub fn table_span(capability: Capability) -> Result<(u64, u64), Error> {
 }
 
 pub fn pba_span(capability: Capability) -> Result<(u64, u64), Error> {
-    let qwords = (u64::from(capability.table_size) + 63) / 64;
+    let qwords = u64::from(capability.table_size).div_ceil(64);
     let bytes = qwords.checked_mul(8).ok_or(Error::Overflow)?;
     let end = u64::from(capability.pba.offset).checked_add(bytes).ok_or(Error::Overflow)?;
     Ok((u64::from(capability.pba.offset), end))
+}
+
+
+/// Pure Stage 13.2 acceptance coverage for MSI-X capability decoding and
+/// table/PBA bounds. Hardware MMIO programming remains gated on BAR ownership.
+pub fn stage13_2_msix_self_test() -> bool {
+    let header = u32::from(PCI_CAP_ID_MSIX) | (3_u32 << 16); // four vectors
+    let Ok(capability) = decode_capability(0x60, header, 0x0000_2000, 0x0000_3000) else {
+        return false;
+    };
+    if capability.offset != 0x60
+        || capability.control & (PCI_MSIX_ENABLE | PCI_MSIX_FUNCTION_MASK) != 0
+        || capability.table_size != 4
+        || capability.table.bir != 0
+        || capability.pba.bir != 0
+    {
+        return false;
+    }
+    if table_span(capability) != Ok((0x2000, 0x2040))
+        || pba_span(capability) != Ok((0x3000, 0x3008))
+    {
+        return false;
+    }
+    decode_bir_offset(0x0000_1006) == Err(Error::InvalidBir)
+        && capability.table_size <= MAX_MSIX_VECTORS
+        && TABLE_ENTRY_BYTES == 16
 }
