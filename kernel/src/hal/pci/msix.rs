@@ -67,6 +67,7 @@ pub enum Error {
     InvalidLease,
     ConfigWrite,
     VerifyFailed,
+    MmioMap,
 }
 
 pub fn decode_bir_offset(raw: u32) -> Result<BirOffset, Error> {
@@ -120,6 +121,54 @@ pub fn pba_span(capability: Capability) -> Result<(u64, u64), Error> {
 }
 
 
+
+
+fn map_table_entry(table_base: u64, offset: u64) -> Result<*mut u32, Error> {
+    let physical = table_base.checked_add(offset).ok_or(Error::Overflow)?;
+    let page = physical & !0xfff;
+    let within = physical & 0xfff;
+    // A 16-byte MSI-X entry may straddle a 4 KiB boundary. Map both pages
+    // before returning a pointer into WovenHat's fixed MMIO virtual window.
+    let first = crate::paging::map_mmio(page).map_err(|_| Error::MmioMap)?;
+    if within > 0xff0 {
+        crate::paging::map_mmio(page.checked_add(0x1000).ok_or(Error::Overflow)?)
+            .map_err(|_| Error::MmioMap)?;
+    }
+    let virtual_address = first.checked_add(within).ok_or(Error::Overflow)?;
+    Ok(virtual_address as *mut u32)
+}
+
+/// Program one MSI-X table entry while it remains masked, then verify every
+/// dword using volatile MMIO. The caller must have already validated the BAR
+/// lease and function-masked MSI-X.
+pub fn program_masked_entry(
+    table_base: u64,
+    capability: Capability,
+    index: u16,
+    entry: TableEntry,
+) -> Result<(), Error> {
+    let offset = entry_offset(capability, index)?
+        .checked_sub(u64::from(capability.table.offset))
+        .ok_or(Error::Overflow)?;
+    let pointer = map_table_entry(table_base, offset)?;
+    // SAFETY: table_base came from a current owner-bound BAR lease; the entry
+    // is bounds-checked against the MSI-X capability; map_mmio created
+    // uncached writable NX mappings for all bytes in this 16-byte record.
+    unsafe {
+        pointer.add(3).write_volatile(VECTOR_CONTROL_MASKED);
+        pointer.write_volatile(entry.address_low);
+        pointer.add(1).write_volatile(entry.address_high);
+        pointer.add(2).write_volatile(entry.data);
+        if pointer.read_volatile() != entry.address_low
+            || pointer.add(1).read_volatile() != entry.address_high
+            || pointer.add(2).read_volatile() != entry.data
+            || pointer.add(3).read_volatile() & VECTOR_CONTROL_MASKED == 0
+        {
+            return Err(Error::VerifyFailed);
+        }
+    }
+    Ok(())
+}
 
 fn device_for(function: super::topology::FunctionHandle) -> Option<Device> {
     let snapshot = super::TOPOLOGY.lock().snapshot(function).ok()?;
