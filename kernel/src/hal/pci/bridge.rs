@@ -76,7 +76,17 @@ pub struct Registers {
 }
 
 pub fn encode_windows(windows: Windows) -> Result<Registers, Error> {
-    let mut registers = Registers::default();
+    // A disabled bridge window is encoded with base > limit. All-zero base/
+    // limit pairs can describe a real low-address aperture on some bridges and
+    // therefore must not be used as the generic disabled representation.
+    let mut registers = Registers {
+        io_low: 0x0000_f1,
+        memory: 0x0000_fff0,
+        prefetch_low: 0x0001_fff1,
+        prefetch_base_upper: 0,
+        prefetch_limit_upper: 0,
+        io_upper: 0,
+    };
     if let Some(window) = windows.io {
         let encoded = encode_io(window)?;
         registers.io_low = encoded.low;
