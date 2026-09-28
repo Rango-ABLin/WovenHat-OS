@@ -238,7 +238,6 @@ pub enum HostApertureError {
 /// obtain these from platform resource descriptors (for ACPI systems, _CRS);
 /// ECAM/MCFG ranges are configuration space and are intentionally rejected as
 /// an implicit source of BAR allocation space.
-#[expect(dead_code, reason = "ACPI _CRS producer is the next Stage 13.2 integration step")]
 pub fn configure_host_apertures(apertures: HostApertures) -> Result<(), HostApertureError> {
     fn validate(set: &HostApertureSet) -> Result<(), HostApertureError> {
         if set.count > set.ranges.len() { return Err(HostApertureError::Capacity); }
