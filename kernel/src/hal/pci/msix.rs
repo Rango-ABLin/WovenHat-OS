@@ -151,6 +151,13 @@ fn restore_table_entry(table_base: u64, capability: Capability, index: u16, entr
         pointer.add(1).write_volatile(entry.address_high);
         pointer.add(2).write_volatile(entry.data);
         pointer.add(3).write_volatile(entry.vector_control);
+        if pointer.read_volatile() != entry.address_low
+            || pointer.add(1).read_volatile() != entry.address_high
+            || pointer.add(2).read_volatile() != entry.data
+            || pointer.add(3).read_volatile() != entry.vector_control
+        {
+            return Err(Error::VerifyFailed);
+        }
     }
     Ok(())
 }
@@ -348,6 +355,13 @@ pub struct MsixLease {
 pub enum LifecycleError {
     Msix(Error),
     Vector(super::vector::Error),
+    /// Activation reached the point where the device-visible MSI-X table holds
+    /// the new vector. The lease must be retained by the caller and explicitly
+    /// disabled before the vector or interrupt mode can be recycled.
+    ActivationRetained {
+        error: Error,
+        lease: MsixLease,
+    },
 }
 
 impl From<Error> for LifecycleError {
@@ -430,12 +444,18 @@ pub fn enable_owned(
         }
         return Err(error.into());
     }
-    // Once the table contains the new vector, later failures fail closed:
-    // retain vector+mode ownership until explicit quiescence proves the device
-    // cannot target a recycled vector.
-    let enabled = enable_function_masked(device)?;
-    unmask_entry(table_base, enabled, entry_index)?;
-    Ok(MsixLease { function, bar, vector, entry: entry_index })
+    // Once the table contains the new vector, later failures fail closed.
+    // Return the retained lease with the error so the driver can persist the
+    // teardown obligation instead of leaking an unreachable vector/mode.
+    let lease = MsixLease { function, bar, vector, entry: entry_index };
+    let enabled = match enable_function_masked(device) {
+        Ok(value) => value,
+        Err(error) => return Err(LifecycleError::ActivationRetained { error, lease }),
+    };
+    if let Err(error) = unmask_entry(table_base, enabled, entry_index) {
+        return Err(LifecycleError::ActivationRetained { error, lease });
+    }
+    Ok(lease)
 }
 
 /// Quiesce the function before recycling its interrupt vector. Failure keeps
