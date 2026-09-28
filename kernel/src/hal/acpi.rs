@@ -749,6 +749,76 @@ fn aml_name_seg(bytes: &[u8], offset: usize) -> Result<([u8; 4], usize), Error> 
     Ok(([name[0], name[1], name[2], name[3]], offset + 4))
 }
 
+fn aml_skip_name_string(bytes: &[u8], mut offset: usize) -> Result<usize, Error> {
+    while matches!(bytes.get(offset), Some(b'\\' | b'^')) {
+        offset += 1;
+    }
+    match bytes.get(offset).copied().ok_or(Error::InvalidLength)? {
+        0x00 => Ok(offset + 1),
+        0x2e => {
+            let (_, next) = aml_name_seg(bytes, offset + 1)?;
+            let (_, next) = aml_name_seg(bytes, next)?;
+            Ok(next)
+        }
+        0x2f => {
+            let count = usize::from(*bytes.get(offset + 1).ok_or(Error::InvalidLength)?);
+            let mut next = offset + 2;
+            for _ in 0..count {
+                let (_, after) = aml_name_seg(bytes, next)?;
+                next = after;
+            }
+            Ok(next)
+        }
+        _ => aml_name_seg(bytes, offset).map(|(_, next)| next),
+    }
+}
+
+fn aml_namespace_walk(bytes: &[u8]) -> Result<usize, Error> {
+    fn walk(bytes: &[u8], mut offset: usize, end: usize, objects: &mut usize) -> Result<(), Error> {
+        while offset < end {
+            match bytes.get(offset).copied().ok_or(Error::InvalidLength)? {
+                0x10 => {
+                    let package = aml_package(bytes, offset + 1)?;
+                    if package.end_offset > end {
+                        return Err(Error::InvalidLength);
+                    }
+                    let body = aml_skip_name_string(bytes, package.body_offset)?;
+                    *objects = objects.checked_add(1).ok_or(Error::AddressOverflow)?;
+                    walk(bytes, body, package.end_offset, objects)?;
+                    offset = package.end_offset;
+                }
+                0x5b if bytes.get(offset + 1) == Some(&0x82) => {
+                    let package = aml_package(bytes, offset + 2)?;
+                    if package.end_offset > end {
+                        return Err(Error::InvalidLength);
+                    }
+                    let body = aml_skip_name_string(bytes, package.body_offset)?;
+                    *objects = objects.checked_add(1).ok_or(Error::AddressOverflow)?;
+                    walk(bytes, body, package.end_offset, objects)?;
+                    offset = package.end_offset;
+                }
+                0x08 => {
+                    offset = aml_skip_name_string(bytes, offset + 1)?;
+                    // This first walker intentionally recognizes the namespace
+                    // name but does not evaluate the attached DataRefObject.
+                    *objects = objects.checked_add(1).ok_or(Error::AddressOverflow)?;
+                    break;
+                }
+                _ => {
+                    // Unknown AML terms cannot be safely skipped without their
+                    // opcode grammar. Stop this package rather than guessing a
+                    // length and desynchronizing namespace traversal.
+                    break;
+                }
+            }
+        }
+        Ok(())
+    }
+    let mut objects = 0_usize;
+    walk(bytes, 0, bytes.len(), &mut objects)?;
+    Ok(objects)
+}
+
 fn decode_pci_root_resource_template(
     bytes: &[u8],
     output: &mut [PciRootResource; MAX_PCI_ROOT_RESOURCES],
@@ -924,6 +994,15 @@ pub fn self_test() -> bool {
         && topology.memory_affinities[0].base == 0x20_0000
         && topology.memory_affinities[0].length == 0x10_0000;
 
+    let aml_scope = [0x10, 0x06, b'_', b'S', b'B', b'_'];
+    let aml_scope_walk = aml_namespace_walk(&aml_scope) == Ok(1);
+    let aml_device = [0x5b, 0x82, 0x06, b'P', b'C', b'I', b'0'];
+    let aml_device_walk = aml_namespace_walk(&aml_device) == Ok(1);
+    let aml_nested = [
+        0x10, 0x0d, b'_', b'S', b'B', b'_', 0x5b, 0x82, 0x06, b'P', b'C', b'I', b'0',
+    ];
+    let aml_nested_walk = aml_namespace_walk(&aml_nested) == Ok(2);
+
     let aml_pkg_short = decode_aml_pkg_length(&[0x05], 0) == Ok((5, 1));
     let aml_pkg_multi = decode_aml_pkg_length(&[0x41, 0x02], 0) == Ok((33, 2));
     let aml_pkg_bounds = aml_package(&[0x04, 0xaa, 0xbb, 0xcc], 0)
@@ -1013,6 +1092,9 @@ pub fn self_test() -> bool {
         && malformed_rejected
         && srat_valid
         && memory_affinity_valid
+        && aml_scope_walk
+        && aml_device_walk
+        && aml_nested_walk
         && aml_pkg_short
         && aml_pkg_multi
         && aml_pkg_bounds
