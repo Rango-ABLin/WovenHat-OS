@@ -660,6 +660,7 @@ pub enum BridgePlanError {
     Routing(routing::Error),
     Transaction(bridge_transaction::Error),
     Probe(BarProbeError),
+    Program(BridgeChainError),
     Overflow,
 }
 
@@ -744,6 +745,14 @@ pub fn build_bridge_chain() -> Result<bridge_transaction::Chain, BridgePlanError
     Ok(chain)
 }
 
+/// Plan the complete forwarding hierarchy first, then apply it as one
+/// rollback-capable hardware transaction. No bridge register is touched unless
+/// topology discovery, BAR probing, demand aggregation, and encoding all pass.
+pub fn route_discovered_bridges() -> Result<(), BridgePlanError> {
+    let chain = build_bridge_chain()?;
+    program_bridge_chain(chain).map_err(BridgePlanError::Program)
+}
+
 fn merge_route_window(
     target: &mut Option<bridge::Window>,
     incoming: bridge::Window,
@@ -765,7 +774,6 @@ fn merge_route_window(
     Ok(())
 }
 
-#[expect(dead_code)]
 pub fn program_bridge_chain(
     mut chain: bridge_transaction::Chain,
 ) -> Result<(), BridgeChainError> {
