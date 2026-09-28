@@ -34,7 +34,7 @@ fn teardown_invalidates_owner_handle_and_mmio_before_reuse() {
     let mut t = Topology::new();
     let h = t.insert(endpoint(2, 0)).unwrap();
     t.claim(h, 41).unwrap();
-    let lease = t.lease_mmio(h, 41, 0, 0x8000_0000).unwrap();
+    let lease = t.lease_mmio(h, 41, 0, 0x8000_0000, 0x4000).unwrap();
     assert!(t.validate_mmio(lease, 41));
     t.teardown(h, 41).unwrap();
     assert!(!t.validate_mmio(lease, 41));
