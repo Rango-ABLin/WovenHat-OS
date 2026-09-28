@@ -64,45 +64,6 @@ pub fn release_all(
     first_error.map_or(Ok(()), Err)
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct BridgeRequirements {
-    pub io: Option<resource::Range>,
-    pub memory: Option<resource::Range>,
-    pub prefetch: Option<resource::Range>,
-}
-
-fn include_range(slot: &mut Option<resource::Range>, range: resource::Range) -> Result<(), resource::Error> {
-    let end = range.base.checked_add(range.size).ok_or(resource::Error::InvalidRange)?;
-    match slot {
-        None => *slot = Some(range),
-        Some(current) => {
-            let current_end = current.base.checked_add(current.size).ok_or(resource::Error::InvalidRange)?;
-            let base = core::cmp::min(current.base, range.base);
-            let limit = core::cmp::max(current_end, end);
-            current.base = base;
-            current.size = limit.checked_sub(base).ok_or(resource::Error::InvalidRange)?;
-        }
-    }
-    Ok(())
-}
-
-pub fn bridge_requirements(
-    assignments: &[Option<Assignment>; 6],
-) -> Result<BridgeRequirements, resource::Error> {
-    let mut requirements = BridgeRequirements::default();
-    for assignment in assignments.iter().flatten().copied() {
-        let target = match assignment.kind {
-            bar::Kind::Io => &mut requirements.io,
-            bar::Kind::Memory32 | bar::Kind::Memory64 if assignment.prefetchable => {
-                &mut requirements.prefetch
-            }
-            bar::Kind::Memory32 | bar::Kind::Memory64 => &mut requirements.memory,
-        };
-        include_range(target, assignment.reservation.range)?;
-    }
-    Ok(requirements)
-}
-
 pub struct Plan<'a> {
     apertures: &'a mut Apertures,
     assignments: [Option<Assignment>; 6],
@@ -152,8 +113,10 @@ impl Drop for Plan<'_> {
         for assignment in self.assignments[..self.count].iter().rev().flatten().copied() {
             let allocator = match assignment.kind {
                 bar::Kind::Io => &mut self.apertures.io,
-                bar::Kind::Memory32 => &mut self.apertures.mmio32,
-                bar::Kind::Memory64 => &mut self.apertures.mmio64,
+                bar::Kind::Memory32 | bar::Kind::Memory64 if assignment.prefetchable => {
+                    &mut self.apertures.mmio64
+                }
+                bar::Kind::Memory32 | bar::Kind::Memory64 => &mut self.apertures.mmio32,
             };
             let _ = allocator.release(assignment.reservation);
         }
