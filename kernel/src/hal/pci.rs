@@ -246,6 +246,40 @@ pub fn device(index: usize) -> Option<Device> {
     INVENTORY.lock().devices.get(index).copied().flatten()
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct RescanRemoval {
+    pub function: topology::FunctionHandle,
+    pub address: Address,
+}
+
+/// Detect functions that disappeared from configuration space without
+/// publishing a replacement inventory/topology. Callers must teardown each
+/// returned owner first; only then may a later discover() publish fresh state.
+pub fn rescan_removed(
+    removed: &mut [Option<RescanRemoval>; MAX_DEVICES],
+) -> usize {
+    *removed = [None; MAX_DEVICES];
+    let topology = TOPOLOGY.lock();
+    let mut count = 0usize;
+    for slot in 0..topology::MAX_FUNCTIONS {
+        let Some(function) = topology.handle_at(slot) else { continue; };
+        let Ok(snapshot) = topology.snapshot(function) else { continue; };
+        let address = Address {
+            segment: snapshot.address.segment,
+            bus: snapshot.address.bus,
+            device: snapshot.address.device,
+            function: snapshot.address.function,
+        };
+        let present = read_config(address, 0)
+            .is_some_and(|identity| identity as u16 != 0xffff);
+        if !present && count < removed.len() {
+            removed[count] = Some(RescanRemoval { function, address });
+            count += 1;
+        }
+    }
+    count
+}
+
 #[expect(dead_code)]
 pub fn topology_handle(address: Address) -> Option<topology::FunctionHandle> {
     let topology = TOPOLOGY.lock();
