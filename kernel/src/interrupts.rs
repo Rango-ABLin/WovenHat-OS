@@ -32,6 +32,7 @@ fn dispatch_pci_device_vector(vector: u8) {
     crate::smp::eoi();
 }
 
+#[expect(dead_code, reason = "consumed by Stage 13.2 driver binding/unbinding integration")]
 pub fn take_pci_device_work(vector: u8) -> bool {
     if !(PCI_VECTOR_FIRST..=PCI_VECTOR_LAST).contains(&vector) {
         return false;
