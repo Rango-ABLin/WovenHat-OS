@@ -281,21 +281,34 @@ pub fn rescan_removed(
     removed: &mut [Option<RescanRemoval>; MAX_DEVICES],
 ) -> usize {
     *removed = [None; MAX_DEVICES];
-    let topology = TOPOLOGY.lock();
+
+    // Snapshot topology identity while holding rank 20, then release it before
+    // any configuration-space access (rank 10). This preserves global lock
+    // ordering and prevents a topology -> config inversion during hotplug.
+    let mut candidates = [None; topology::MAX_FUNCTIONS];
+    {
+        let topology = TOPOLOGY.lock();
+        for (slot, candidate) in candidates.iter_mut().enumerate() {
+            let Some(function) = topology.handle_at(slot) else { continue; };
+            let Ok(snapshot) = topology.snapshot(function) else { continue; };
+            *candidate = Some(RescanRemoval {
+                function,
+                address: Address {
+                    segment: snapshot.address.segment,
+                    bus: snapshot.address.bus,
+                    device: snapshot.address.device,
+                    function: snapshot.address.function,
+                },
+            });
+        }
+    }
+
     let mut count = 0usize;
-    for slot in 0..topology::MAX_FUNCTIONS {
-        let Some(function) = topology.handle_at(slot) else { continue; };
-        let Ok(snapshot) = topology.snapshot(function) else { continue; };
-        let address = Address {
-            segment: snapshot.address.segment,
-            bus: snapshot.address.bus,
-            device: snapshot.address.device,
-            function: snapshot.address.function,
-        };
-        let present = read_config(address, 0)
+    for candidate in candidates.iter().flatten().copied() {
+        let present = read_config(candidate.address, 0)
             .is_some_and(|identity| identity as u16 != 0xffff);
         if !present && count < removed.len() {
-            removed[count] = Some(RescanRemoval { function, address });
+            removed[count] = Some(candidate);
             count += 1;
         }
     }
