@@ -246,7 +246,7 @@ pub fn device(index: usize) -> Option<Device> {
     INVENTORY.lock().devices.get(index).copied().flatten()
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Default, PartialEq, Eq)]
 pub struct RescanRemoval {
     pub function: topology::FunctionHandle,
     pub address: Address,
