@@ -1,6 +1,42 @@
 use super::*;
 use crate::irq_lock::IrqMutex;
 
+const INTERRUPT_MODE_SLOTS: usize = super::topology::MAX_FUNCTIONS;
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum InterruptMode {
+    #[default]
+    None,
+    Msi,
+    Msix,
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+struct ModeSlot {
+    function: topology::FunctionHandle,
+    owner: u32,
+    mode: InterruptMode,
+}
+
+static INTERRUPT_MODES: IrqMutex<[ModeSlot; INTERRUPT_MODE_SLOTS]> =
+    IrqMutex::with_rank([ModeSlot { function: topology::FunctionHandle { slot: 0, generation: 0 }, owner: 0, mode: InterruptMode::None }; INTERRUPT_MODE_SLOTS], 22);
+
+pub(super) fn claim_interrupt_mode(function: topology::FunctionHandle, owner: u32, mode: InterruptMode) -> bool {
+    if owner == 0 || mode == InterruptMode::None { return false; }
+    let mut slots = INTERRUPT_MODES.lock();
+    if slots.iter().any(|slot| slot.mode != InterruptMode::None && slot.function == function) { return false; }
+    let Some(slot) = slots.iter_mut().find(|slot| slot.mode == InterruptMode::None) else { return false; };
+    *slot = ModeSlot { function, owner, mode };
+    true
+}
+
+pub(super) fn release_interrupt_mode(function: topology::FunctionHandle, owner: u32, mode: InterruptMode) -> bool {
+    let mut slots = INTERRUPT_MODES.lock();
+    let Some(slot) = slots.iter_mut().find(|slot| slot.function == function && slot.owner == owner && slot.mode == mode) else { return false; };
+    *slot = ModeSlot::default();
+    true
+}
+
 static VECTOR_ALLOCATOR: IrqMutex<vector::Allocator> =
     IrqMutex::with_rank(vector::Allocator::new(), 21);
 
@@ -228,9 +264,19 @@ pub fn enable_owned_msi(
             && device.function == snapshot.address.function
     }).copied().ok_or(MsiLifecycleError::InvalidFunction)?;
 
-    let lease = VECTOR_ALLOCATOR.lock().allocate(owner)?;
+    if !claim_interrupt_mode(function, owner, InterruptMode::Msi) {
+        return Err(MsiLifecycleError::InvalidFunction);
+    }
+    let lease = match VECTOR_ALLOCATOR.lock().allocate(owner) {
+        Ok(lease) => lease,
+        Err(error) => {
+            let _ = release_interrupt_mode(function, owner, InterruptMode::Msi);
+            return Err(error.into());
+        }
+    };
     if let Err(error) = program_msi(device, destination_apic_id, lease.vector) {
         let _ = VECTOR_ALLOCATOR.lock().release(lease, owner);
+        let _ = release_interrupt_mode(function, owner, InterruptMode::Msi);
         return Err(MsiLifecycleError::Msi(error));
     }
     Ok(MsiLease { function, vector: lease, destination_apic_id })
@@ -255,5 +301,8 @@ pub fn disable_owned_msi(lease: MsiLease, owner: u32) -> Result<(), MsiLifecycle
     }).copied().ok_or(MsiLifecycleError::InvalidFunction)?;
     disable_msi(device)?;
     VECTOR_ALLOCATOR.lock().release(lease.vector, owner)?;
+    if !release_interrupt_mode(lease.function, owner, InterruptMode::Msi) {
+        return Err(MsiLifecycleError::InvalidFunction);
+    }
     Ok(())
 }
