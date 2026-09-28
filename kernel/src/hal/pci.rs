@@ -142,9 +142,21 @@ static CONFIG: Mutex<ConfigState> = Mutex::with_rank(
     },
     10,
 );
-static INVENTORY: Mutex<Inventory> = Mutex::with_rank(Inventory::new(), 10);
-// Rank 20 is never acquired while a rank-10 PCI lock is held.
-static TOPOLOGY: Mutex<topology::Topology> = Mutex::with_rank(topology::Topology::new(), 20);
+struct PublishedState {
+    inventory: Inventory,
+    topology: topology::Topology,
+}
+
+impl PublishedState {
+    const fn new() -> Self {
+        Self { inventory: Inventory::new(), topology: topology::Topology::new() }
+    }
+}
+
+// Inventory and topology describe one discovery generation and are therefore
+// published under one rank-20 lock. PCI configuration locks (rank 10) are
+// never acquired while this lock is held.
+static PUBLISHED: Mutex<PublishedState> = Mutex::with_rank(PublishedState::new(), 20);
 
 pub fn configure(allocations: &[McfgAllocation]) {
     let mut state = CONFIG.lock();
@@ -202,8 +214,9 @@ pub fn discover() -> Summary {
     }
 
     let summary = inventory.summary;
-    *INVENTORY.lock() = inventory;
-    *TOPOLOGY.lock() = replacement;
+    let mut published = PUBLISHED.lock();
+    published.inventory = inventory;
+    published.topology = replacement;
     summary
 }
 
@@ -243,7 +256,7 @@ fn scan_bus_range(inventory: &mut Inventory, segment: u16, start_bus: u8, end_bu
 }
 
 pub fn device(index: usize) -> Option<Device> {
-    INVENTORY.lock().devices.get(index).copied().flatten()
+    PUBLISHED.lock().inventory.devices.get(index).copied().flatten()
 }
 
 #[cfg(any(
@@ -287,7 +300,7 @@ pub fn rescan_removed(
     // ordering and prevents a topology -> config inversion during hotplug.
     let mut candidates = [None; topology::MAX_FUNCTIONS];
     {
-        let topology = TOPOLOGY.lock();
+        let topology = PUBLISHED.lock().topology;
         for (slot, candidate) in candidates.iter_mut().enumerate() {
             let Some(function) = topology.handle_at(slot) else { continue; };
             let Ok(snapshot) = topology.snapshot(function) else { continue; };
@@ -318,7 +331,7 @@ pub fn rescan_removed(
 
 #[expect(dead_code)]
 pub fn topology_handle(address: Address) -> Option<topology::FunctionHandle> {
-    let topology = TOPOLOGY.lock();
+    let topology = PUBLISHED.lock().topology;
     for slot in 0..topology::MAX_FUNCTIONS {
         let Some(handle) = topology.handle_at(slot) else { continue; };
         if topology.snapshot(handle).ok().is_some_and(|node| {
@@ -334,7 +347,7 @@ pub fn topology_handle(address: Address) -> Option<topology::FunctionHandle> {
 
 #[expect(dead_code)]
 pub fn claim_function(handle: topology::FunctionHandle, owner: u32) -> Result<(), topology::Error> {
-    TOPOLOGY.lock().claim(handle, owner)
+    PUBLISHED.lock().topology.claim(handle, owner)
 }
 
 #[cfg(any(
@@ -349,12 +362,12 @@ pub fn claim_function(handle: topology::FunctionHandle, owner: u32) -> Result<()
     feature = "stage13-9-test"
 ))]
 pub fn topology_owner(handle: topology::FunctionHandle) -> Result<u32, topology::Error> {
-    Ok(TOPOLOGY.lock().snapshot(handle)?.owner.unwrap_or(topology::NO_OWNER))
+    Ok(PUBLISHED.lock().topology.snapshot(handle)?.owner.unwrap_or(topology::NO_OWNER))
 }
 
 #[expect(dead_code)]
 pub fn release_function(handle: topology::FunctionHandle, owner: u32) -> Result<(), topology::Error> {
-    TOPOLOGY.lock().release(handle, owner)
+    PUBLISHED.lock().topology.release(handle, owner)
 }
 
 #[expect(dead_code)]
@@ -363,8 +376,8 @@ pub fn lease_bar(
     owner: u32,
     bar_index: u8,
 ) -> Result<topology::MmioLease, topology::Error> {
-    let snapshot = TOPOLOGY.lock().snapshot(handle)?;
-    let inventory = INVENTORY.lock();
+    let snapshot = PUBLISHED.lock().topology.snapshot(handle)?;
+    let inventory = PUBLISHED.lock().inventory;
     let Some(device) = inventory.devices.iter().flatten().find(|device| {
         device.segment == snapshot.address.segment && device.bus == snapshot.address.bus
             && device.device == snapshot.address.device && device.function == snapshot.address.function
@@ -384,12 +397,12 @@ pub fn lease_bar(
     };
     let probe = probe_bar_size(address, device.header_type, bar_index)
         .map_err(|_| topology::Error::InvalidBar)?;
-    TOPOLOGY.lock().lease_mmio(handle, owner, bar_index, bar.address, probe.size)
+    PUBLISHED.lock().topology.lease_mmio(handle, owner, bar_index, bar.address, probe.size)
 }
 
 #[expect(dead_code)]
 pub fn validate_bar_lease(lease: topology::MmioLease, owner: u32) -> bool {
-    TOPOLOGY.lock().validate_mmio(lease, owner)
+    PUBLISHED.lock().topology.validate_mmio(lease, owner)
 }
 
 #[expect(dead_code)]
@@ -397,14 +410,14 @@ pub fn release_bar_lease(
     lease: topology::MmioLease,
     owner: u32,
 ) -> Result<(), topology::Error> {
-    TOPOLOGY.lock().release_mmio(lease, owner)
+    PUBLISHED.lock().topology.release_mmio(lease, owner)
 }
 
 // Wired by the Stage 13.2 hotplug/unbind increment; keep the lifecycle entry
 // point explicit until removal events have a real caller.
 #[expect(dead_code)]
 pub fn teardown_function(handle: topology::FunctionHandle, owner: u32) -> Result<(), topology::Error> {
-    TOPOLOGY.lock().teardown(handle, owner)
+    PUBLISHED.lock().topology.teardown(handle, owner)
 }
 
 #[allow(dead_code)]
@@ -1257,7 +1270,7 @@ pub fn self_test() -> bool {
     ) == Some(0xe000_0000 + (1 << 20) + (3 << 15) + (4 << 12) + 0x100);
     config_address(2, 3, 4, 0x0b) == 0x8002_1c08
         && ecam_math
-        && INVENTORY.lock().summary.recorded as usize <= MAX_DEVICES
+        && PUBLISHED.lock().inventory.summary.recorded as usize <= MAX_DEVICES
         && device(MAX_DEVICES).is_none()
         && topology_self_test()
         && routing_self_test()
