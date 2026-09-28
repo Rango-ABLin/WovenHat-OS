@@ -47,7 +47,6 @@ fn upstream_ax200_image_preserves_all_groups_without_staging_markers() {
         counts[group] += 1;
     }
     assert_eq!(fw.sections().count(), fw.section_count());
-    assert_eq!(fw.sections().count(), fw.section_count());
     assert_eq!(counts, [14, 15, 19]);
     assert_eq!(fw.section(48), None);
     assert_eq!(fw.section_group(usize::MAX), None);
