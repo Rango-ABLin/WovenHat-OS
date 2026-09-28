@@ -535,11 +535,11 @@ pub fn program_bridge_chain(
 
     // Encode the complete transaction before acquiring CONFIG_LOCK or touching
     // hardware. Invalid windows therefore cannot leave a partial bridge chain.
-    for index in 0..chain.len() {
+    for (index, slot) in states.iter_mut().enumerate().take(chain.len()) {
         let entry = chain.get(index).ok_or(BridgeChainError::ConfigUnavailable)?;
         if entry.header_type & 0x7f != 0x01 { return Err(BridgeChainError::NotBridge); }
         let registers = bridge::encode_windows(entry.windows).map_err(BridgeChainError::InvalidWindow)?;
-        states[index] = Some(BridgeChainState {
+        *slot = Some(BridgeChainState {
             entry,
             registers,
             saved: BridgeRegisterSnapshot {
@@ -553,11 +553,11 @@ pub fn program_bridge_chain(
 
     // Snapshot every target before the first mutation. This is the rollback
     // boundary for the whole bridge chain, not an individual bridge.
-    for index in 0..chain.len() {
-        let mut state = states[index].ok_or(BridgeChainError::ConfigUnavailable)?;
+    for slot in states.iter_mut().take(chain.len()) {
+        let mut state = slot.ok_or(BridgeChainError::ConfigUnavailable)?;
         state.saved = bridge_snapshot_unlocked(state.entry.address)
             .ok_or(BridgeChainError::ConfigUnavailable)?;
-        states[index] = Some(state);
+        *slot = Some(state);
     }
 
     // Disable forwarding across the whole target set while routing registers
