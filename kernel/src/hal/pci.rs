@@ -3,6 +3,7 @@ use core::{arch::asm, ptr};
 use crate::{hal::acpi::McfgAllocation, irq_lock::IrqMutex as Mutex};
 
 pub mod topology;
+pub mod vector;
 pub mod resource;
 pub mod routing;
 pub mod bar;
@@ -1160,6 +1161,7 @@ pub fn self_test() -> bool {
         && topology_self_test()
         && routing_self_test()
         && bridge_transaction_self_test()
+        && vector_self_test()
 }
 
 fn topology_self_test() -> bool {
@@ -1246,6 +1248,19 @@ fn bridge_transaction_self_test() -> bool {
         && chain.get(0).is_some_and(|entry| entry.depth == 2)
         && chain.get(1).is_some_and(|entry| entry.depth == 1)
         && chain.get(2).is_some_and(|entry| entry.depth == 0)
+}
+
+fn vector_self_test() -> bool {
+    let mut allocator = vector::Allocator::new();
+    let Ok(first) = allocator.allocate(1) else { return false; };
+    if first.vector != vector::FIRST_VECTOR || allocator.validate(first, 1).is_err() {
+        return false;
+    }
+    if allocator.release(first, 1).is_err() || allocator.validate(first, 1).is_ok() {
+        return false;
+    }
+    let Ok(reused) = allocator.allocate(2) else { return false; };
+    reused.vector == first.vector && allocator.validate(reused, 2).is_ok()
 }
 
 fn ecam_address_for(allocation: McfgAllocation, address: Address, offset: u16) -> Option<u64> {
