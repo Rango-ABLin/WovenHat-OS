@@ -291,6 +291,73 @@ pub fn validate_owned_table(
     Ok((masked, base))
 }
 
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct MsixLease {
+    pub function: super::topology::FunctionHandle,
+    pub bar: super::topology::MmioLease,
+    pub vector: super::vector::Lease,
+    pub entry: u16,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LifecycleError {
+    Msix(Error),
+    Vector(super::vector::Error),
+}
+
+impl From<Error> for LifecycleError {
+    fn from(error: Error) -> Self { Self::Msix(error) }
+}
+impl From<super::vector::Error> for LifecycleError {
+    fn from(error: super::vector::Error) -> Self { Self::Vector(error) }
+}
+
+/// Complete one-vector MSI-X activation transaction. Vector ownership is
+/// retained on every failure after the device could have observed the vector.
+#[expect(dead_code)]
+pub fn enable_owned(
+    function: super::topology::FunctionHandle,
+    bar: super::topology::MmioLease,
+    owner: u32,
+    destination_apic_id: u32,
+    entry_index: u16,
+) -> Result<MsixLease, LifecycleError> {
+    let device = device_for(function).ok_or(Error::InvalidLease)?;
+    let (masked_capability, table_base) = validate_owned_table(function, bar, owner)?;
+    let vector = super::VECTOR_ALLOCATOR.lock().allocate(owner)?;
+    let entry = match masked_entry(destination_apic_id, vector.vector) {
+        Ok(entry) => entry,
+        Err(error) => {
+            let _ = super::VECTOR_ALLOCATOR.lock().release(vector, owner);
+            return Err(error.into());
+        }
+    };
+    if let Err(error) = program_masked_entry(table_base, masked_capability, entry_index, entry) {
+        let _ = super::VECTOR_ALLOCATOR.lock().release(vector, owner);
+        return Err(error.into());
+    }
+    // From this point onward the table contains the vector. On any failure,
+    // keep the vector reserved rather than risk delivery to a future owner.
+    let enabled = enable_function_masked(device)?;
+    unmask_entry(table_base, enabled, entry_index)?;
+    Ok(MsixLease { function, bar, vector, entry: entry_index })
+}
+
+/// Quiesce the function before recycling its interrupt vector. Failure keeps
+/// the lease live and the vector unavailable for reuse.
+#[expect(dead_code)]
+pub fn disable_owned(lease: MsixLease, owner: u32) -> Result<(), LifecycleError> {
+    super::VECTOR_ALLOCATOR.lock().validate(lease.vector, owner)?;
+    if !super::validate_bar_lease(lease.bar, owner) {
+        return Err(Error::InvalidLease.into());
+    }
+    let device = device_for(lease.function).ok_or(Error::InvalidLease)?;
+    disable_and_mask_function(device)?;
+    super::VECTOR_ALLOCATOR.lock().release(lease.vector, owner)?;
+    Ok(())
+}
+
 /// Pure Stage 13.2 acceptance coverage for MSI-X capability decoding and
 /// table/PBA bounds. Hardware MMIO programming remains gated on BAR ownership.
 pub fn stage13_2_msix_self_test() -> bool {
