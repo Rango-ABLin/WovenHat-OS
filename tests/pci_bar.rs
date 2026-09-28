@@ -37,3 +37,11 @@ fn encoding_rejects_misalignment_and_32_bit_overflow() {
     assert_eq!(encode(probe, 0x1800), Err(Error::AddressOverflow));
     assert_eq!(encode(probe, 0x1_0000_0000), Err(Error::AddressOverflow));
 }
+
+#[test]
+fn encoding_rejects_zero_and_non_power_of_two_probe_sizes() {
+    let zero = bar::Probe { kind: Kind::Memory32, size: 0, prefetchable: false, low_flags: 0 };
+    let malformed = bar::Probe { kind: Kind::Memory32, size: 0x3000, prefetchable: false, low_flags: 0 };
+    assert_eq!(encode(zero, 0), Err(Error::InvalidMask));
+    assert_eq!(encode(malformed, 0), Err(Error::InvalidMask));
+}
