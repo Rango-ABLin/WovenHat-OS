@@ -798,7 +798,7 @@ fn aml_namespace_walk(bytes: &[u8]) -> Result<usize, Error> {
                     offset = package.end_offset;
                 }
                 0x08 => {
-                    offset = aml_skip_name_string(bytes, offset + 1)?;
+                    let _ = aml_skip_name_string(bytes, offset + 1)?;
                     // This first walker intentionally recognizes the namespace
                     // name but does not evaluate the attached DataRefObject.
                     *objects = objects.checked_add(1).ok_or(Error::AddressOverflow)?;
