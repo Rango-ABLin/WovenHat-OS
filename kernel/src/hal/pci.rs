@@ -253,10 +253,10 @@ pub fn discover() -> Summary {
         inventory.summary.segments = u8::try_from(seen_count).unwrap_or(u8::MAX);
     }
 
-    let mut replacement = topology::Topology::new();
+    let mut published = PUBLISHED.lock();
     let mut topology_ok = true;
     for device in inventory.devices.iter().flatten() {
-        if replacement.insert(topology::FunctionDescriptor {
+        if published.topology.reconcile(topology::FunctionDescriptor {
             address: topology::FunctionAddress {
                 segment: device.segment, bus: device.bus, device: device.device, function: device.function,
             },
@@ -268,13 +268,10 @@ pub fn discover() -> Summary {
     }
     if !topology_ok {
         inventory.summary.truncated = true;
-        replacement = topology::Topology::new();
     }
 
     let summary = inventory.summary;
-    let mut published = PUBLISHED.lock();
     published.inventory = inventory;
-    published.topology = replacement;
     summary
 }
 
