@@ -202,6 +202,55 @@ pub fn attach_pci_msi(
     Ok(())
 }
 
+pub fn enable_pci_msix(
+    name: &'static str,
+    bar: crate::hal::pci::topology::MmioLease,
+    destination_apic_id: u32,
+    entry_index: u16,
+) -> Result<crate::hal::pci::msix::MsixLease, crate::hal::pci::msix::LifecycleError> {
+    let (function, owner) = {
+        let table = TABLE.lock();
+        let entry = table.iter().flatten()
+            .find(|entry| entry.name == name && entry.state == State::Bound)
+            .ok_or(crate::hal::pci::msix::LifecycleError::Msix(
+                crate::hal::pci::msix::Error::InvalidLease,
+            ))?;
+        let binding = entry.pci.ok_or(crate::hal::pci::msix::LifecycleError::Msix(
+            crate::hal::pci::msix::Error::InvalidLease,
+        ))?;
+        (binding.function, binding.owner)
+    };
+
+    match crate::hal::pci::msix::enable_owned(
+        function,
+        bar,
+        owner,
+        destination_apic_id,
+        entry_index,
+    ) {
+        Ok(lease) => {
+            attach_pci_msix(name, lease)
+                .map_err(|_| crate::hal::pci::msix::LifecycleError::Msix(
+                    crate::hal::pci::msix::Error::InvalidLease,
+                ))?;
+            Ok(lease)
+        }
+        Err(crate::hal::pci::msix::LifecycleError::ActivationRetained { error, lease }) => {
+            // Activation failed only after the device-visible table held the
+            // new vector. Persist both the table BAR and interrupt lease so the
+            // normal ordered unbind path can quiesce and recycle them safely.
+            if attach_pci_msix(name, lease).is_err() {
+                return Err(crate::hal::pci::msix::LifecycleError::ActivationRetained {
+                    error,
+                    lease,
+                });
+            }
+            Err(crate::hal::pci::msix::LifecycleError::ActivationRetained { error, lease })
+        }
+        Err(error) => Err(error),
+    }
+}
+
 pub fn attach_pci_msix(
     name: &'static str,
     lease: crate::hal::pci::msix::MsixLease,
