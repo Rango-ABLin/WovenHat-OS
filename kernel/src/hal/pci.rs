@@ -728,23 +728,101 @@ pub fn rebalance_bars(
         plan.commit()
     };
 
-    // Programming is deliberately separate from reservation. If a later BAR
-    // fails, restore every earlier BAR to its pre-rebalance address. Resource
-    // reservations are returned to the caller only after all writes succeed.
-    let original = read_bars(address, header_type);
-    for assignment in assignments.iter().flatten().copied() {
-        let probe = probes[assignment.index as usize].ok_or(RebalanceError::RollbackFailed)?;
-        if let Err(error) = program_bar(address, header_type, assignment.index, probe, assignment.reservation.range.base) {
-            for done in assignments.iter().flatten().copied() {
-                if done.index == assignment.index { break; }
-                let old = original[done.index as usize];
-                let old_probe = probes[done.index as usize].ok_or(RebalanceError::RollbackFailed)?;
-                if old.valid && program_bar(address, header_type, done.index, old_probe, old.address).is_err() {
-                    return Err(RebalanceError::RollbackFailed);
+    // Encode every assignment before touching hardware. Once config-space
+    // programming starts, I/O and memory decoding stay disabled until every BAR
+    // has been written and verified.
+    let mut encoded = [None; 6];
+    for item in assignments.iter().flatten().copied() {
+        let probe = probes[item.index as usize].ok_or(RebalanceError::RollbackFailed)?;
+        encoded[item.index as usize] = Some(
+            bar::encode(probe, item.reservation.range.base)
+                .map_err(|error| RebalanceError::Program(BarProgramError::Encode(error)))?,
+        );
+    }
+
+    let programming = {
+        let _guard = CONFIG_LOCK.lock();
+        let command = read_command_unlocked(address).ok_or(RebalanceError::Program(BarProgramError::ConfigUnavailable))?;
+        let mut original = [0u32; 6];
+        let mut raw = 0usize;
+        while raw < count {
+            original[raw] = read_config_unlocked(address, 0x10 + raw as u16 * 4)
+                .ok_or(RebalanceError::Program(BarProgramError::ConfigUnavailable))?;
+            raw += 1;
+        }
+
+        let restore = || -> bool {
+            let mut slot = 0usize;
+            let mut ok = true;
+            while slot < count {
+                ok &= write_config_unlocked(address, 0x10 + slot as u16 * 4, original[slot]);
+                slot += 1;
+            }
+            ok && write_command_unlocked(address, command)
+        };
+
+        if !write_command_unlocked(address, command & !0x3) {
+            Err(RebalanceError::Program(BarProgramError::WriteFailed))
+        } else {
+            let mut write_failed = false;
+            for item in assignments.iter().flatten().copied() {
+                let offset = 0x10 + u16::from(item.index) * 4;
+                let Some((low, high)) = encoded[item.index as usize] else {
+                    write_failed = true;
+                    break;
+                };
+                if !write_config_unlocked(address, offset, low)
+                    || high.is_some_and(|value| !write_config_unlocked(address, offset + 4, value))
+                {
+                    write_failed = true;
+                    break;
                 }
             }
-            return Err(RebalanceError::Program(error));
+            if write_failed {
+                if restore() {
+                    Err(RebalanceError::Program(BarProgramError::WriteFailed))
+                } else {
+                    Err(RebalanceError::RollbackFailed)
+                }
+            } else {
+                let mut verified = true;
+                for item in assignments.iter().flatten().copied() {
+                    let offset = 0x10 + u16::from(item.index) * 4;
+                    let Some((low, high)) = encoded[item.index as usize] else {
+                        verified = false;
+                        break;
+                    };
+                    if read_config_unlocked(address, offset) != Some(low)
+                        || high.is_some_and(|value| read_config_unlocked(address, offset + 4) != Some(value))
+                    {
+                        verified = false;
+                        break;
+                    }
+                }
+                if !verified {
+                    if restore() {
+                        Err(RebalanceError::Program(BarProgramError::VerifyFailed))
+                    } else {
+                        Err(RebalanceError::RollbackFailed)
+                    }
+                } else if !write_command_unlocked(address, command) {
+                    if restore() {
+                        Err(RebalanceError::Program(BarProgramError::WriteFailed))
+                    } else {
+                        Err(RebalanceError::RollbackFailed)
+                    }
+                } else {
+                    Ok(())
+                }
+            }
         }
+    };
+
+    if let Err(error) = programming {
+        if assignment::release_all(apertures, &assignments).is_err() {
+            return Err(RebalanceError::RollbackFailed);
+        }
+        return Err(error);
     }
     Ok(assignments)
 }
