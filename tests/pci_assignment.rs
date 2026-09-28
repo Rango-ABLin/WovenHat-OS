@@ -89,3 +89,32 @@ fn committed_assignments_can_be_released_after_hardware_failure() {
     assert_eq!(apertures.mmio32.active(), 0);
     assert_eq!(apertures.mmio64.active(), 0);
 }
+
+#[test]
+fn bridge_requirements_separate_prefetchable_memory() {
+    let mut apertures = Apertures::new(
+        Range { base: 0x1000, size: 0x10000 },
+        Range { base: 0x8000_0000, size: 0x1000_0000 },
+        Range { base: 0x1_0000_0000, size: 0x1000_0000 },
+    );
+    let assignments = {
+        let mut plan = Plan::new(&mut apertures);
+        plan.reserve(Request {
+            index: 0,
+            probe: Some(Probe { kind: Kind::Io, size: 0x1000, prefetchable: false, low_flags: 1 }),
+        }).unwrap();
+        plan.reserve(Request {
+            index: 1,
+            probe: Some(Probe { kind: Kind::Memory32, size: 0x20_0000, prefetchable: false, low_flags: 0 }),
+        }).unwrap();
+        plan.reserve(Request {
+            index: 2,
+            probe: Some(Probe { kind: Kind::Memory64, size: 0x20_0000, prefetchable: true, low_flags: 0x0c }),
+        }).unwrap();
+        plan.commit()
+    };
+    let requirements = assignment::bridge_requirements(&assignments).unwrap();
+    assert_eq!(requirements.io.unwrap().base, 0x1000);
+    assert_eq!(requirements.memory.unwrap().base, 0x8000_0000);
+    assert_eq!(requirements.prefetch.unwrap().base, 0x1_0000_0000);
+}
