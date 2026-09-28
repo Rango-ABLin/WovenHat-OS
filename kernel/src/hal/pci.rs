@@ -1057,6 +1057,7 @@ pub fn self_test() -> bool {
         && INVENTORY.lock().summary.recorded as usize <= MAX_DEVICES
         && device(MAX_DEVICES).is_none()
         && topology_self_test()
+        && routing_self_test()
 }
 
 fn topology_self_test() -> bool {
@@ -1088,6 +1089,37 @@ fn topology_self_test() -> bool {
     let _ = topology.count();
     let _ = topology.handle_at(reused.slot as usize);
     true
+}
+
+
+fn routing_self_test() -> bool {
+    use bridge::Window;
+    use routing::{Bridge, Demand, Plan};
+
+    let mut plan = Plan::new();
+    if plan.add_bridge(Bridge { id: 1, parent: None }).is_err()
+        || plan.add_bridge(Bridge { id: 2, parent: Some(1) }).is_err()
+        || plan.add_demand(
+            2,
+            Demand {
+                io: Some(Window { base: 0x2800, size: 0x800 }),
+                memory: Some(Window { base: 0x8123_4000, size: 0x2000 }),
+                prefetch: Some(Window { base: 0x2_1234_5000, size: 0x3000 }),
+            },
+        ).is_err()
+        || plan.solve().is_err()
+    {
+        return false;
+    }
+
+    let Ok(child) = plan.windows(2) else { return false; };
+    let Ok(parent) = plan.windows(1) else { return false; };
+    child == parent
+        && child.io == Some(Window { base: 0x2000, size: 0x1000 })
+        && child.memory == Some(Window { base: 0x8120_0000, size: 0x10_0000 })
+        && child.prefetch == Some(Window { base: 0x2_1230_0000, size: 0x10_0000 })
+        && plan.depth(1) == Ok(0)
+        && plan.depth(2) == Ok(1)
 }
 
 fn ecam_address_for(allocation: McfgAllocation, address: Address, offset: u16) -> Option<u64> {
