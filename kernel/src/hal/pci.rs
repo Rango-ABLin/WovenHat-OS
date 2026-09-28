@@ -1052,10 +1052,9 @@ fn read_capabilities(address: Address, status: u16, header_type: u8) -> Capabili
     capabilities
 }
 
-// MSI programming currently belongs to the opt-in AX200 transport.
-#[cfg(feature = "stage13-9-test")]
+// Generic MSI lifecycle is part of Stage 13.2. The existing AX200 path
+// continues to use the same programming primitives under its feature gate.
 mod msi;
-#[cfg(feature = "stage13-9-test")]
 pub use msi::*;
 fn read_config(address: Address, offset: u16) -> Option<u32> {
     let _guard = CONFIG_LOCK.lock();
