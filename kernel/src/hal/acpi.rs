@@ -188,14 +188,20 @@ pub fn discover(
                 summary.apic = true;
             }
             b"FACP" => {
-                parse_fadt(
+                // FADT presence is authoritative even when optional DSDT
+                // metadata cannot yet be retained.  DSDT discovery is an
+                // incremental Stage 13.2 capability and must not turn an
+                // otherwise valid ACPI namespace into ACPI-unavailable,
+                // because that would discard MCFG/APIC data and change the
+                // PCI initialization path.
+                summary.fadt = true;
+                let _ = parse_fadt(
                     physical_offset,
                     table_address,
                     table.length,
                     regions,
                     &mut summary,
-                )?;
-                summary.fadt = true;
+                );
             }
             b"HPET" => summary.hpet = true,
             b"MCFG" => {
