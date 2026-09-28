@@ -31,6 +31,37 @@ pub struct MemoryAffinity {
     pub length: u64,
 }
 
+pub const MAX_PCI_ROOT_RESOURCES: usize = 24;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PciRootResourceKind {
+    Io,
+    Memory,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PciRootResource {
+    pub kind: PciRootResourceKind,
+    pub base: u64,
+    pub length: u64,
+    pub translation_offset: u64,
+    pub prefetchable: bool,
+    pub address_width: u8,
+}
+
+impl Default for PciRootResource {
+    fn default() -> Self {
+        Self {
+            kind: PciRootResourceKind::Memory,
+            base: 0,
+            length: 0,
+            translation_offset: 0,
+            prefetchable: false,
+            address_width: 0,
+        }
+    }
+}
+
 #[derive(Clone, Copy, Default, PartialEq, Eq)]
 pub struct McfgAllocation {
     pub base_address: u64,
@@ -65,6 +96,11 @@ pub struct Summary {
     pub mcfg: bool,
     pub mcfg_allocations: [McfgAllocation; MAX_MCFG_ALLOCATIONS],
     pub mcfg_allocation_count: usize,
+    /// PCI root-bridge resource windows supplied by a firmware namespace
+    /// evaluator (ACPI _CRS on ACPI platforms). Raw SDT discovery does not
+    /// synthesize these from MCFG or SRAT.
+    pub pci_root_resources: [PciRootResource; MAX_PCI_ROOT_RESOURCES],
+    pub pci_root_resource_count: usize,
     pub truncated: bool,
 }
 
