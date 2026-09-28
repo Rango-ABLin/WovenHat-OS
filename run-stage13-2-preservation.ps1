@@ -4,6 +4,18 @@ Set-Location $PSScriptRoot
 cargo test --test pci_topology
 if ($LASTEXITCODE -ne 0) { throw 'Stage 13.2 host topology tests failed' }
 
+cargo test --test pci_resource
+if ($LASTEXITCODE -ne 0) { throw 'Stage 13.2 PCI resource tests failed' }
+
+cargo test --test pci_bar
+if ($LASTEXITCODE -ne 0) { throw 'Stage 13.2 PCI BAR tests failed' }
+
+cargo test --test pci_assignment
+if ($LASTEXITCODE -ne 0) { throw 'Stage 13.2 PCI assignment tests failed' }
+
+cargo test --test pci_bridge
+if ($LASTEXITCODE -ne 0) { throw 'Stage 13.2 PCI bridge tests failed' }
+
 cargo build --features stage13-2-test
 if ($LASTEXITCODE -ne 0) { throw 'Stage 13.2 build failed' }
 
