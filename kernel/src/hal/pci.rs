@@ -6,6 +6,7 @@ pub mod topology;
 pub mod resource;
 pub mod bar;
 pub mod assignment;
+pub mod bridge;
 
 const CONFIG_ADDRESS: u16 = 0x0cf8;
 const CONFIG_DATA: u16 = 0x0cfc;
