@@ -286,13 +286,13 @@ fn scan_inventory() -> Inventory {
     inventory.summary.ecam = config.ecam_count != 0;
 
     if config.ecam_count == 0 {
-        scan_bus_range(&mut inventory, 0, 0, u8::MAX);
+        scan_reachable_buses(&mut inventory, 0, 0, u8::MAX);
         inventory.summary.segments = 1;
     } else {
         let mut seen_segments = [None; MAX_ECAM_REGIONS];
         let mut seen_count = 0usize;
         for allocation in config.ecam[..config.ecam_count].iter().flatten().copied() {
-            scan_bus_range(
+            scan_reachable_buses(
                 &mut inventory,
                 allocation.segment_group,
                 allocation.start_bus,
@@ -376,9 +376,31 @@ pub(crate) fn reconcile_after_teardown() -> Summary {
     summary
 }
 
-fn scan_bus_range(inventory: &mut Inventory, segment: u16, start_bus: u8, end_bus: u8) {
-    for bus in u16::from(start_bus)..=u16::from(end_bus) {
-        let bus = bus as u8;
+fn scan_reachable_buses(
+    inventory: &mut Inventory,
+    segment: u16,
+    start_bus: u8,
+    end_bus: u8,
+) {
+    // MCFG commonly describes the entire 0..=255 ECAM aperture. Mapping and
+    // probing every possible function would touch up to 65,536 4-KiB ECAM
+    // pages even when only a handful of buses are reachable. Start at the
+    // firmware-described root bus and follow each discovered PCI-to-PCI
+    // bridge's secondary bus instead. This is both bounded and topology-aware.
+    let mut pending = [0_u8; 256];
+    let mut visited = [false; 256];
+    let mut head = 0_usize;
+    let mut tail = 1_usize;
+    pending[0] = start_bus;
+
+    while head < tail {
+        let bus = pending[head];
+        head += 1;
+        if bus < start_bus || bus > end_bus || visited[usize::from(bus)] {
+            continue;
+        }
+        visited[usize::from(bus)] = true;
+
         for device in 0_u8..32 {
             let address = Address {
                 segment,
@@ -393,19 +415,28 @@ fn scan_bus_range(inventory: &mut Inventory, segment: u16, start_bus: u8, end_bu
                 continue;
             }
             let header = read_config(address, 0x0c).unwrap_or(u32::MAX);
-            let functions = if ((header >> 16) as u8) & 0x80 != 0 {
-                8
-            } else {
-                1
-            };
+            let functions = if ((header >> 16) as u8) & 0x80 != 0 { 8 } else { 1 };
             for function in 0..functions {
-                let address = Address {
-                    function,
-                    ..address
+                let address = Address { function, ..address };
+                let Some(found) = probe(address) else {
+                    continue;
                 };
-                if let Some(found) = probe(address) {
-                    inventory.record(found);
+                if let Some(route) = found.bridge_buses {
+                    let secondary = route.secondary;
+                    if secondary >= start_bus
+                        && secondary <= end_bus
+                        && !visited[usize::from(secondary)]
+                        && !pending[head..tail].contains(&secondary)
+                    {
+                        if tail < pending.len() {
+                            pending[tail] = secondary;
+                            tail += 1;
+                        } else {
+                            inventory.summary.truncated = true;
+                        }
+                    }
                 }
+                inventory.record(found);
             }
         }
     }
