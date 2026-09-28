@@ -34,7 +34,6 @@ pub struct MemoryAffinity {
 pub const MAX_PCI_ROOT_RESOURCES: usize = 24;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[allow(dead_code, reason = "resource kinds are firmware-produced and construction varies by build feature until ACPI _CRS evaluation lands")]
 pub enum PciRootResourceKind {
     Io,
     Memory,
@@ -636,6 +635,69 @@ fn read_u64(bytes: &[u8], offset: usize) -> u64 {
     u64::from_le_bytes(bytes[offset..offset + 8].try_into().unwrap_or([0; 8]))
 }
 
+fn decode_address_space_resource(bytes: &[u8]) -> Result<Option<PciRootResource>, Error> {
+    if bytes.len() < 3 || bytes[0] & 0x80 == 0 {
+        return Err(Error::InvalidLength);
+    }
+    let payload_len = usize::from(u16::from_le_bytes([bytes[1], bytes[2]]));
+    if bytes.len() != payload_len.checked_add(3).ok_or(Error::AddressOverflow)? {
+        return Err(Error::InvalidLength);
+    }
+    let width = match bytes[0] {
+        0x88 if payload_len >= 13 => 2_usize,
+        0x87 if payload_len >= 23 => 4_usize,
+        0x8a if payload_len >= 43 => 8_usize,
+        _ => return Ok(None),
+    };
+    let resource_type = bytes[3];
+    if resource_type == 2 {
+        return Ok(None);
+    }
+    let kind = match resource_type {
+        0 => PciRootResourceKind::Memory,
+        1 => PciRootResourceKind::Io,
+        _ => return Ok(None),
+    };
+    if bytes[4] & 0xf0 != 0 {
+        return Err(Error::InvalidLength);
+    }
+    let type_flags = bytes[5];
+    // Memory-to-I/O and sparse/dense I/O translations require semantics that
+    // WovenHat's BAR allocator does not yet implement.
+    if type_flags & 0x20 != 0 {
+        return Err(Error::InvalidLength);
+    }
+    fn field(bytes: &[u8], offset: usize, width: usize) -> Result<u64, Error> {
+        let end = offset.checked_add(width).ok_or(Error::AddressOverflow)?;
+        let source = bytes.get(offset..end).ok_or(Error::InvalidLength)?;
+        let mut value = 0_u64;
+        for (shift, byte) in source.iter().copied().enumerate() {
+            value |= u64::from(byte) << (shift * 8);
+        }
+        Ok(value)
+    }
+    let minimum = field(bytes, 6 + width, width)?;
+    let maximum = field(bytes, 6 + width * 2, width)?;
+    let translation_offset = field(bytes, 6 + width * 3, width)?;
+    let length = field(bytes, 6 + width * 4, width)?;
+    if length == 0 || minimum.checked_add(length).is_none() {
+        return Err(Error::InvalidLength);
+    }
+    let inclusive_end = minimum.checked_add(length - 1).ok_or(Error::AddressOverflow)?;
+    if inclusive_end > maximum {
+        return Err(Error::InvalidLength);
+    }
+    Ok(Some(PciRootResource {
+        kind,
+        base: minimum,
+        length,
+        translation_offset,
+        prefetchable: matches!(kind, PciRootResourceKind::Memory)
+            && ((type_flags >> 1) & 0x3) == 0x3,
+        address_width: (width * 8) as u8,
+    }))
+}
+
 pub fn self_test() -> bool {
     let mut rsdp = [0_u8; RSDP_V2_LENGTH];
     rsdp[..8].copy_from_slice(b"RSD PTR ");
@@ -700,6 +762,40 @@ pub fn self_test() -> bool {
         && topology.memory_affinities[0].base == 0x20_0000
         && topology.memory_affinities[0].length == 0x10_0000;
 
+    let mut dword_memory = [0_u8; 26];
+    dword_memory[0] = 0x87;
+    dword_memory[1..3].copy_from_slice(&23_u16.to_le_bytes());
+    dword_memory[3] = 0;
+    dword_memory[5] = 0x06;
+    dword_memory[10..14].copy_from_slice(&0x8000_0000_u32.to_le_bytes());
+    dword_memory[14..18].copy_from_slice(&0x8fff_ffff_u32.to_le_bytes());
+    dword_memory[22..26].copy_from_slice(&0x1000_0000_u32.to_le_bytes());
+    let dword_memory_valid = decode_address_space_resource(&dword_memory).is_ok_and(|resource| {
+        resource.is_some_and(|resource| {
+            resource.kind == PciRootResourceKind::Memory
+                && resource.base == 0x8000_0000
+                && resource.length == 0x1000_0000
+                && resource.prefetchable
+                && resource.address_width == 32
+        })
+    });
+    let mut word_io = [0_u8; 16];
+    word_io[0] = 0x88;
+    word_io[1..3].copy_from_slice(&13_u16.to_le_bytes());
+    word_io[3] = 1;
+    word_io[8..10].copy_from_slice(&0x1000_u16.to_le_bytes());
+    word_io[10..12].copy_from_slice(&0x1fff_u16.to_le_bytes());
+    word_io[14..16].copy_from_slice(&0x1000_u16.to_le_bytes());
+    let word_io_valid = decode_address_space_resource(&word_io).is_ok_and(|resource| {
+        resource.is_some_and(|resource| {
+            resource.kind == PciRootResourceKind::Io
+                && resource.base == 0x1000
+                && resource.length == 0x1000
+                && !resource.prefetchable
+                && resource.address_width == 16
+        })
+    });
+
     let mut mcfg_entry = [0_u8; MCFG_ALLOCATION_LENGTH];
     mcfg_entry[..8].copy_from_slice(&0xe000_0000_u64.to_le_bytes());
     mcfg_entry[10] = 0;
@@ -720,6 +816,8 @@ pub fn self_test() -> bool {
         && malformed_rejected
         && srat_valid
         && memory_affinity_valid
+        && dword_memory_valid
+        && word_io_valid
         && mcfg_valid
         && malformed_mcfg_rejected
 }
