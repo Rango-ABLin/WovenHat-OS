@@ -33,7 +33,7 @@ pub struct Apertures {
 }
 
 impl Apertures {
-    #[expect(dead_code, reason = "caller-supplied apertures stay explicit until ACPI host bridge resources are available")]
+    #[cfg_attr(not(test), expect(dead_code, reason = "caller-supplied apertures stay explicit until ACPI host bridge resources are available"))]
     pub const fn new(io: resource::Range, mmio32: resource::Range, mmio64: resource::Range) -> Self {
         Self {
             io: resource::Allocator::new(io.base, io.size),
