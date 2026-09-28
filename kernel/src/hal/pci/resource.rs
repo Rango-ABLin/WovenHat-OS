@@ -66,6 +66,7 @@ impl Allocator {
         Self { apertures, slots: [Slot::empty(); MAX_RANGES] }
     }
 
+    #[expect(dead_code, reason = "consumed when HostApertures migrates to firmware multi-range resources")]
     pub fn from_ranges(ranges: &[Range]) -> Result<Self, Error> {
         if ranges.len() > MAX_APERTURES { return Err(Error::Capacity); }
         let mut allocator = Self::new(0, 0);
@@ -90,8 +91,7 @@ impl Allocator {
         for aperture in self.apertures.iter().flatten().copied() {
             let aperture_end = aperture.end().ok_or(Error::InvalidRange)?;
             let Some(mut candidate) = align_up(aperture.base, alignment) else { continue; };
-            loop {
-                let Some(end) = candidate.checked_add(size) else { break; };
+            while let Some(end) = candidate.checked_add(size) {
                 if end > aperture_end { break; }
                 let mut next = None;
                 for used in self.slots.iter().filter(|slot| slot.occupied) {
