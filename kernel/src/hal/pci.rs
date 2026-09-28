@@ -291,7 +291,15 @@ pub fn lease_bar(
         return Err(topology::Error::InvalidBar);
     }
     drop(inventory);
-    TOPOLOGY.lock().lease_mmio(handle, owner, bar_index, bar.address)
+    let address = Address {
+        segment: snapshot.address.segment,
+        bus: snapshot.address.bus,
+        device: snapshot.address.device,
+        function: snapshot.address.function,
+    };
+    let probe = probe_bar_size(address, device.header_type, bar_index)
+        .map_err(|_| topology::Error::InvalidBar)?;
+    TOPOLOGY.lock().lease_mmio(handle, owner, bar_index, bar.address, probe.size)
 }
 
 #[expect(dead_code)]
