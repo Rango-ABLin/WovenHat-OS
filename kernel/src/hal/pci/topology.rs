@@ -111,6 +111,7 @@ impl LeaseSlot {
     }
 }
 
+#[derive(Clone)]
 pub struct Topology {
     nodes: [Node; MAX_FUNCTIONS],
     leases: [LeaseSlot; MAX_MMIO_LEASES],
