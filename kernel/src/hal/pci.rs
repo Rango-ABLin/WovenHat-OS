@@ -4,6 +4,7 @@ use crate::{hal::acpi::McfgAllocation, irq_lock::IrqMutex as Mutex};
 
 pub mod topology;
 pub mod resource;
+pub mod bar;
 
 const CONFIG_ADDRESS: u16 = 0x0cf8;
 const CONFIG_DATA: u16 = 0x0cfc;
@@ -417,6 +418,74 @@ fn read_bridge_route(address: Address, header_type: u8) -> Option<topology::Brid
         subordinate: (buses >> 16) as u8,
     };
     (route.secondary != 0 && route.secondary <= route.subordinate).then_some(route)
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BarProbeError {
+    InvalidIndex,
+    ConfigUnavailable,
+    Probe(bar::Error),
+    RestoreFailed,
+}
+
+#[expect(dead_code)]
+pub fn probe_bar_size(address: Address, header_type: u8, bar_index: u8) -> Result<bar::Probe, BarProbeError> {
+    let count = match header_type & 0x7f {
+        0x00 => 6usize,
+        0x01 => 2usize,
+        _ => 0usize,
+    };
+    let index = bar_index as usize;
+    if index >= count {
+        return Err(BarProbeError::InvalidIndex);
+    }
+    let offset = 0x10 + (index as u16 * 4);
+    let _guard = CONFIG_LOCK.lock();
+    let command_status = read_config_unlocked(address, 0x04).ok_or(BarProbeError::ConfigUnavailable)?;
+    let original_low = read_config_unlocked(address, offset).ok_or(BarProbeError::ConfigUnavailable)?;
+    if original_low == u32::MAX {
+        return Err(BarProbeError::ConfigUnavailable);
+    }
+    let is_64 = original_low & 1 == 0 && ((original_low >> 1) & 0x3) == 2;
+    if is_64 && index + 1 >= count {
+        return Err(BarProbeError::InvalidIndex);
+    }
+    let original_high = if is_64 {
+        Some(read_config_unlocked(address, offset + 4).ok_or(BarProbeError::ConfigUnavailable)?)
+    } else {
+        None
+    };
+
+    // Disable I/O and memory decoding while BARs contain the sizing pattern.
+    // Bus mastering is preserved because no DMA address is changed here.
+    let decode_disabled = command_status & !0x3;
+    if !write_config_unlocked(address, 0x04, decode_disabled)
+        || !write_config_unlocked(address, offset, u32::MAX)
+        || (is_64 && !write_config_unlocked(address, offset + 4, u32::MAX))
+    {
+        let _ = write_config_unlocked(address, offset, original_low);
+        if let Some(high) = original_high {
+            let _ = write_config_unlocked(address, offset + 4, high);
+        }
+        let _ = write_config_unlocked(address, 0x04, command_status);
+        return Err(BarProbeError::RestoreFailed);
+    }
+
+    let mask_low = read_config_unlocked(address, offset).ok_or(BarProbeError::ConfigUnavailable);
+    let mask_high = if is_64 {
+        read_config_unlocked(address, offset + 4).ok_or(BarProbeError::ConfigUnavailable).map(Some)
+    } else {
+        Ok(None)
+    };
+
+    let restored = write_config_unlocked(address, offset, original_low)
+        && original_high.is_none_or(|high| write_config_unlocked(address, offset + 4, high))
+        && write_config_unlocked(address, 0x04, command_status);
+    if !restored {
+        return Err(BarProbeError::RestoreFailed);
+    }
+    let probe = bar::decode_probe(original_low, mask_low?, mask_high?).map_err(BarProbeError::Probe)?;
+    Ok(probe)
 }
 
 fn read_bars(address: Address, header_type: u8) -> [Bar; 6] {
