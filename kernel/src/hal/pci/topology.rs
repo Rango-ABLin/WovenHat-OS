@@ -28,6 +28,7 @@ pub struct MmioLease {
     pub function: FunctionHandle,
     pub bar: u8,
     pub base: u64,
+    pub size: u64,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -94,6 +95,7 @@ struct LeaseSlot {
     function: FunctionHandle,
     bar: u8,
     base: u64,
+    size: u64,
 }
 
 impl LeaseSlot {
@@ -104,6 +106,7 @@ impl LeaseSlot {
             function: FunctionHandle { slot: 0, generation: 0 },
             bar: 0,
             base: 0,
+            size: 0,
         }
     }
 }
@@ -191,20 +194,21 @@ impl Topology {
         owner: u32,
         bar: u8,
         base: u64,
+        size: u64,
     ) -> Result<MmioLease, Error> {
-        if bar >= 6 || base == 0 { return Err(Error::InvalidBar); }
+        if bar >= 6 || base == 0 || size == 0 { return Err(Error::InvalidBar); }
         let node = self.node(handle)?;
         if owner == NO_OWNER || node.owner != owner { return Err(Error::NotOwner); }
         let slot = self.leases.iter().position(|lease| !lease.occupied).ok_or(Error::Capacity)?;
         let generation = self.leases[slot].generation;
-        self.leases[slot] = LeaseSlot { generation, occupied: true, function: handle, bar, base };
-        Ok(MmioLease { slot: slot as u8, generation, function: handle, bar, base })
+        self.leases[slot] = LeaseSlot { generation, occupied: true, function: handle, bar, base, size };
+        Ok(MmioLease { slot: slot as u8, generation, function: handle, bar, base, size })
     }
 
     pub fn validate_mmio(&self, lease: MmioLease, owner: u32) -> bool {
         let Some(slot) = self.leases.get(lease.slot as usize) else { return false; };
         if !slot.occupied || slot.generation != lease.generation || slot.function != lease.function
-            || slot.bar != lease.bar || slot.base != lease.base {
+            || slot.bar != lease.bar || slot.base != lease.base || slot.size != lease.size {
             return false;
         }
         self.node(lease.function)
@@ -224,6 +228,7 @@ impl Topology {
                 lease.function = FunctionHandle::default();
                 lease.bar = 0;
                 lease.base = 0;
+                lease.size = 0;
             }
         }
 
