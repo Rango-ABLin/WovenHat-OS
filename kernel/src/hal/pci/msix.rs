@@ -123,6 +123,50 @@ pub fn pba_span(capability: Capability) -> Result<(u64, u64), Error> {
 
 
 
+fn read_table_entry(table_base: u64, capability: Capability, index: u16) -> Result<TableEntry, Error> {
+    let offset = entry_offset(capability, index)?
+        .checked_sub(u64::from(capability.table.offset)).ok_or(Error::Overflow)?;
+    let pointer = map_table_entry(table_base, offset)?;
+    // SAFETY: caller has already validated the owner-bound BAR and bounded
+    // entry; volatile reads snapshot device-visible MSI-X state.
+    unsafe {
+        Ok(TableEntry {
+            address_low: pointer.read_volatile(),
+            address_high: pointer.add(1).read_volatile(),
+            data: pointer.add(2).read_volatile(),
+            vector_control: pointer.add(3).read_volatile(),
+        })
+    }
+}
+
+fn restore_table_entry(table_base: u64, capability: Capability, index: u16, entry: TableEntry) -> Result<(), Error> {
+    let offset = entry_offset(capability, index)?
+        .checked_sub(u64::from(capability.table.offset)).ok_or(Error::Overflow)?;
+    let pointer = map_table_entry(table_base, offset)?;
+    // Keep the entry masked while restoring message fields, then restore its
+    // original vector-control value last.
+    unsafe {
+        pointer.add(3).write_volatile(entry.vector_control | VECTOR_CONTROL_MASKED);
+        pointer.write_volatile(entry.address_low);
+        pointer.add(1).write_volatile(entry.address_high);
+        pointer.add(2).write_volatile(entry.data);
+        pointer.add(3).write_volatile(entry.vector_control);
+    }
+    Ok(())
+}
+
+fn restore_control(device: Device, original: u16) -> Result<(), Error> {
+    let capability = capability(device)?;
+    let address = Address { segment: device.segment, bus: device.bus, device: device.device, function: device.function };
+    let _guard = super::CONFIG_LOCK.lock();
+    let header = super::read_config_unlocked(address, capability.offset).ok_or(Error::ConfigRead)?;
+    let restored = (header & 0x0000_ffff) | (u32::from(original) << 16);
+    if !super::write_config_unlocked(address, capability.offset, restored) { return Err(Error::ConfigWrite); }
+    let verify = super::read_config_unlocked(address, capability.offset).ok_or(Error::ConfigRead)?;
+    if (verify >> 16) as u16 != original { return Err(Error::VerifyFailed); }
+    Ok(())
+}
+
 fn map_table_entry(table_base: u64, offset: u64) -> Result<*mut u32, Error> {
     let physical = table_base.checked_add(offset).ok_or(Error::Overflow)?;
     let page = physical & !0xfff;
@@ -333,7 +377,33 @@ pub fn enable_owned(
     if !super::msi::claim_interrupt_mode(function, owner, super::msi::InterruptMode::Msix) {
         return Err(Error::InvalidLease.into());
     }
-    let (masked_capability, table_base) = match validate_owned_table(function, bar, owner) {
+    let discovered = match capability(device) {
+        Ok(value) => value,
+        Err(error) => {
+            let _ = super::msi::release_interrupt_mode(function, owner, super::msi::InterruptMode::Msix);
+            return Err(error.into());
+        }
+    };
+    let table_base = match validate_table_lease(bar, owner, discovered) {
+        Ok(value) if bar.function == function => value,
+        Ok(_) => {
+            let _ = super::msi::release_interrupt_mode(function, owner, super::msi::InterruptMode::Msix);
+            return Err(Error::InvalidLease.into());
+        }
+        Err(error) => {
+            let _ = super::msi::release_interrupt_mode(function, owner, super::msi::InterruptMode::Msix);
+            return Err(error.into());
+        }
+    };
+    let original_entry = match read_table_entry(table_base, discovered, entry_index) {
+        Ok(value) => value,
+        Err(error) => {
+            let _ = super::msi::release_interrupt_mode(function, owner, super::msi::InterruptMode::Msix);
+            return Err(error.into());
+        }
+    };
+    let original_control = discovered.control;
+    let masked_capability = match mask_function(device) {
         Ok(value) => value,
         Err(error) => {
             let _ = super::msi::release_interrupt_mode(function, owner, super::msi::InterruptMode::Msix);
@@ -343,6 +413,7 @@ pub fn enable_owned(
     let vector = match super::msi::allocate_vector(owner) {
         Ok(vector) => vector,
         Err(error) => {
+            let _ = restore_control(device, original_control);
             let _ = super::msi::release_interrupt_mode(function, owner, super::msi::InterruptMode::Msix);
             return Err(error.into());
         }
@@ -351,16 +422,23 @@ pub fn enable_owned(
         Ok(entry) => entry,
         Err(error) => {
             let _ = super::msi::release_vector(vector, owner);
+            let _ = restore_control(device, original_control);
             let _ = super::msi::release_interrupt_mode(function, owner, super::msi::InterruptMode::Msix);
             return Err(error.into());
         }
     };
     if let Err(error) = program_masked_entry(table_base, masked_capability, entry_index, entry) {
-        let _ = super::msi::release_vector(vector, owner);
+        let restored = restore_table_entry(table_base, masked_capability, entry_index, original_entry)
+            .and_then(|_| restore_control(device, original_control));
+        if restored.is_ok() {
+            let _ = super::msi::release_vector(vector, owner);
+            let _ = super::msi::release_interrupt_mode(function, owner, super::msi::InterruptMode::Msix);
+        }
         return Err(error.into());
     }
-    // From this point onward the table contains the vector. On any failure,
-    // keep the vector reserved rather than risk delivery to a future owner.
+    // Once the table contains the new vector, later failures fail closed:
+    // retain vector+mode ownership until explicit quiescence proves the device
+    // cannot target a recycled vector.
     let enabled = enable_function_masked(device)?;
     unmask_entry(table_base, enabled, entry_index)?;
     Ok(MsixLease { function, bar, vector, entry: entry_index })
