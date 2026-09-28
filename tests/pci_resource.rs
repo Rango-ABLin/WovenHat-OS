@@ -1,7 +1,7 @@
 #[path = "../kernel/src/hal/pci/resource.rs"]
 mod resource;
 
-use resource::{Allocator, Error, Transaction};
+use resource::{Allocator, Error};
 
 #[test]
 fn aligned_first_fit_reuses_released_space() {
@@ -16,30 +16,28 @@ fn aligned_first_fit_reuses_released_space() {
 }
 
 #[test]
-fn rollback_releases_every_partial_reservation() {
+fn explicit_release_recovers_partial_reservations_after_failure() {
     let mut allocator = Allocator::new(0x8000_0000, 0x4000);
-    {
-        let mut tx = Transaction::new(&mut allocator);
-        tx.reserve(0x1000, 0x1000).unwrap();
-        tx.reserve(0x2000, 0x2000).unwrap();
-        assert_eq!(tx.reserve(0x4000, 0x4000), Err(Error::Exhausted));
-    }
+    let first = allocator.reserve(0x1000, 0x1000).unwrap();
+    let second = allocator.reserve(0x2000, 0x2000).unwrap();
+    assert_eq!(allocator.reserve(0x4000, 0x4000), Err(Error::Exhausted));
+    allocator.release(second).unwrap();
+    allocator.release(first).unwrap();
     assert_eq!(allocator.active(), 0);
     assert_eq!(allocator.reserve(0x4000, 0x4000).unwrap().range.base, 0x8000_0000);
 }
 
 #[test]
-fn committed_transaction_keeps_reservations_live() {
+fn live_reservations_remain_owned_until_explicit_release() {
     let mut allocator = Allocator::new(0x1_0000_0000, 0x10000);
-    let reservations = {
-        let mut tx = Transaction::new(&mut allocator);
-        tx.reserve(0x1000, 0x1000).unwrap();
-        tx.reserve(0x2000, 0x2000).unwrap();
-        tx.commit()
-    };
+    let first = allocator.reserve(0x1000, 0x1000).unwrap();
+    let second = allocator.reserve(0x2000, 0x2000).unwrap();
     assert_eq!(allocator.active(), 2);
-    assert!(allocator.contains(reservations[0].unwrap()));
-    assert!(allocator.contains(reservations[1].unwrap()));
+    assert!(allocator.contains(first));
+    assert!(allocator.contains(second));
+    allocator.release(second).unwrap();
+    allocator.release(first).unwrap();
+    assert_eq!(allocator.active(), 0);
 }
 
 #[test]
