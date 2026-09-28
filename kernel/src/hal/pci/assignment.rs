@@ -70,15 +70,15 @@ pub struct BridgeRequirements {
 }
 
 fn include_range(slot: &mut Option<resource::Range>, range: resource::Range) -> Result<(), resource::Error> {
-    let end = range.base.checked_add(range.size).ok_or(resource::Error::Overflow)?;
+    let end = range.base.checked_add(range.size).ok_or(resource::Error::InvalidRange)?;
     match slot {
         None => *slot = Some(range),
         Some(current) => {
-            let current_end = current.base.checked_add(current.size).ok_or(resource::Error::Overflow)?;
+            let current_end = current.base.checked_add(current.size).ok_or(resource::Error::InvalidRange)?;
             let base = core::cmp::min(current.base, range.base);
             let limit = core::cmp::max(current_end, end);
             current.base = base;
-            current.size = limit.checked_sub(base).ok_or(resource::Error::Overflow)?;
+            current.size = limit.checked_sub(base).ok_or(resource::Error::InvalidRange)?;
         }
     }
     Ok(())
