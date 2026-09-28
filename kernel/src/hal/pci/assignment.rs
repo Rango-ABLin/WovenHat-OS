@@ -43,6 +43,7 @@ impl Apertures {
         }
     }
 
+    #[cfg_attr(test, expect(dead_code, reason = "standalone assignment tests do not compile the production HostApertures caller"))]
     pub fn from_ranges(
         io: &[resource::Range],
         memory: &[resource::Range],
