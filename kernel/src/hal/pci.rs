@@ -676,6 +676,69 @@ pub fn program_bar(
     Ok(())
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RebalanceError {
+    Probe(BarProbeError),
+    Allocation(assignment::Error),
+    Program(BarProgramError),
+    RollbackFailed,
+}
+
+#[expect(dead_code)]
+pub fn rebalance_bars(
+    address: Address,
+    header_type: u8,
+    apertures: &mut assignment::Apertures,
+) -> Result<[Option<assignment::Assignment>; 6], RebalanceError> {
+    let count = match header_type & 0x7f {
+        0x00 => 6usize,
+        0x01 => 2usize,
+        _ => 0usize,
+    };
+    let mut probes = [None; 6];
+    let mut index = 0usize;
+    while index < count {
+        let probe = probe_bar_size(address, header_type, index as u8).map_err(RebalanceError::Probe)?;
+        probes[index] = Some(probe);
+        index += if probe.kind == bar::Kind::Memory64 { 2 } else { 1 };
+    }
+
+    let assignments = {
+        let mut plan = assignment::Plan::new(apertures);
+        let mut slot = 0usize;
+        while slot < count {
+            if let Some(probe) = probes[slot] {
+                plan.reserve(assignment::Request { index: slot as u8, probe: Some(probe) })
+                    .map_err(RebalanceError::Allocation)?;
+                slot += if probe.kind == bar::Kind::Memory64 { 2 } else { 1 };
+            } else {
+                slot += 1;
+            }
+        }
+        plan.commit()
+    };
+
+    // Programming is deliberately separate from reservation. If a later BAR
+    // fails, restore every earlier BAR to its pre-rebalance address. Resource
+    // reservations are returned to the caller only after all writes succeed.
+    let original = read_bars(address, header_type);
+    for assignment in assignments.iter().flatten().copied() {
+        let probe = probes[assignment.index as usize].ok_or(RebalanceError::RollbackFailed)?;
+        if let Err(error) = program_bar(address, header_type, assignment.index, probe, assignment.reservation.range.base) {
+            for done in assignments.iter().flatten().copied() {
+                if done.index == assignment.index { break; }
+                let old = original[done.index as usize];
+                let old_probe = probes[done.index as usize].ok_or(RebalanceError::RollbackFailed)?;
+                if old.valid && program_bar(address, header_type, done.index, old_probe, old.address).is_err() {
+                    return Err(RebalanceError::RollbackFailed);
+                }
+            }
+            return Err(RebalanceError::Program(error));
+        }
+    }
+    Ok(assignments)
+}
+
 fn read_bars(address: Address, header_type: u8) -> [Bar; 6] {
     let mut bars = [Bar::default(); 6];
     let count = if header_type & 0x7f == 0x00 {
