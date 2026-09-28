@@ -43,6 +43,24 @@ impl Apertures {
     }
 }
 
+pub fn release_all(
+    apertures: &mut Apertures,
+    assignments: &[Option<Assignment>; 6],
+) -> Result<(), resource::Error> {
+    let mut first_error = None;
+    for assignment in assignments.iter().rev().flatten().copied() {
+        let allocator = match assignment.kind {
+            bar::Kind::Io => &mut apertures.io,
+            bar::Kind::Memory32 => &mut apertures.mmio32,
+            bar::Kind::Memory64 => &mut apertures.mmio64,
+        };
+        if let Err(error) = allocator.release(assignment.reservation) {
+            first_error.get_or_insert(error);
+        }
+    }
+    first_error.map_or(Ok(()), Err)
+}
+
 pub struct Plan<'a> {
     apertures: &'a mut Apertures,
     assignments: [Option<Assignment>; 6],
