@@ -116,7 +116,6 @@ impl Allocator {
     }
 
     #[cfg(test)]
-    #[expect(dead_code, reason = "used by assignment/resource tests, not every integration crate importing this module")]
     pub fn active(&self) -> usize {
         self.slots.iter().filter(|slot| slot.occupied).count()
     }
