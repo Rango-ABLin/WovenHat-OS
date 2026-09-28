@@ -56,3 +56,40 @@ pub fn encode_prefetch(window: Window) -> Result<PrefetchEncoding, Error> {
         limit_upper: (limit >> 32) as u32,
     })
 }
+
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Windows {
+    pub io: Option<Window>,
+    pub memory: Option<Window>,
+    pub prefetch: Option<Window>,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Registers {
+    pub io_low: u32,
+    pub memory: u32,
+    pub prefetch_low: u32,
+    pub prefetch_base_upper: u32,
+    pub prefetch_limit_upper: u32,
+    pub io_upper: u32,
+}
+
+pub fn encode_windows(windows: Windows) -> Result<Registers, Error> {
+    let mut registers = Registers::default();
+    if let Some(window) = windows.io {
+        let encoded = encode_io(window)?;
+        registers.io_low = encoded.low;
+        registers.io_upper = encoded.upper;
+    }
+    if let Some(window) = windows.memory {
+        registers.memory = encode_memory(window)?.value;
+    }
+    if let Some(window) = windows.prefetch {
+        let encoded = encode_prefetch(window)?;
+        registers.prefetch_low = encoded.low;
+        registers.prefetch_base_upper = encoded.base_upper;
+        registers.prefetch_limit_upper = encoded.limit_upper;
+    }
+    Ok(registers)
+}
