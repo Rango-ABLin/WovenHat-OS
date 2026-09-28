@@ -215,6 +215,20 @@ impl Topology {
             .is_ok_and(|node| owner != NO_OWNER && node.owner == owner)
     }
 
+    pub fn release_mmio(&mut self, lease: MmioLease, owner: u32) -> Result<(), Error> {
+        if !self.validate_mmio(lease, owner) {
+            return Err(Error::NotOwner);
+        }
+        let slot = &mut self.leases[lease.slot as usize];
+        slot.occupied = false;
+        slot.generation = next_generation(slot.generation);
+        slot.function = FunctionHandle::default();
+        slot.bar = 0;
+        slot.base = 0;
+        slot.size = 0;
+        Ok(())
+    }
+
     pub fn teardown(&mut self, handle: FunctionHandle, owner: u32) -> Result<(), Error> {
         let node = self.node(handle)?;
         if node.owner != NO_OWNER && node.owner != owner { return Err(Error::NotOwner); }
