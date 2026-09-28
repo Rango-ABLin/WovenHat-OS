@@ -25,7 +25,6 @@ pub enum Error {
     InvalidAlignment,
     Capacity,
     Exhausted,
-    Overlap,
     InvalidReservation,
 }
 
@@ -114,45 +113,6 @@ impl Allocator {
 
     pub fn active(&self) -> usize {
         self.slots.iter().filter(|slot| slot.occupied).count()
-    }
-}
-
-pub struct Transaction<'a> {
-    allocator: &'a mut Allocator,
-    reservations: [Option<Reservation>; 6],
-    count: usize,
-    committed: bool,
-}
-
-impl<'a> Transaction<'a> {
-    pub fn new(allocator: &'a mut Allocator) -> Self {
-        Self { allocator, reservations: [None; 6], count: 0, committed: false }
-    }
-
-    pub fn reserve(&mut self, size: u64, alignment: u64) -> Result<Reservation, Error> {
-        if self.count == self.reservations.len() {
-            return Err(Error::Capacity);
-        }
-        let reservation = self.allocator.reserve(size, alignment)?;
-        self.reservations[self.count] = Some(reservation);
-        self.count += 1;
-        Ok(reservation)
-    }
-
-    pub fn commit(mut self) -> [Option<Reservation>; 6] {
-        self.committed = true;
-        self.reservations
-    }
-}
-
-impl Drop for Transaction<'_> {
-    fn drop(&mut self) {
-        if self.committed {
-            return;
-        }
-        for reservation in self.reservations[..self.count].iter().rev().flatten().copied() {
-            let _ = self.allocator.release(reservation);
-        }
     }
 }
 
