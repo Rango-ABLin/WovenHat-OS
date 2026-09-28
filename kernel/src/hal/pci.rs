@@ -302,6 +302,10 @@ pub fn claim_function(handle: topology::FunctionHandle, owner: u32) -> Result<()
     TOPOLOGY.lock().claim(handle, owner)
 }
 
+pub fn topology_owner(handle: topology::FunctionHandle) -> Result<u32, topology::Error> {
+    Ok(TOPOLOGY.lock().snapshot(handle)?.owner.unwrap_or(topology::NO_OWNER))
+}
+
 #[expect(dead_code)]
 pub fn release_function(handle: topology::FunctionHandle, owner: u32) -> Result<(), topology::Error> {
     TOPOLOGY.lock().release(handle, owner)
