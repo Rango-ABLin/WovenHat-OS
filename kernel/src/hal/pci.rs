@@ -135,13 +135,13 @@ impl Inventory {
 /// Serializes the legacy CONFIG_ADDRESS/CONFIG_DATA transaction and PCI config
 /// read/modify/write operations across CPUs. Never sleep while this lock is held.
 static CONFIG_LOCK: Mutex<()> = Mutex::with_rank((), 10);
-static CONFIG: Mutex<ConfigState> = Mutex::with_rank(
-    ConfigState {
-        ecam: [None; MAX_ECAM_REGIONS],
-        ecam_count: 0,
-    },
-    10,
-);
+// CONFIG_LOCK is the sole owner of both PCI configuration transactions and
+// ECAM metadata. Keeping a second rank-10 mutex here would make an ECAM access
+// recursively acquire the same lock rank while CONFIG_LOCK is held.
+static mut CONFIG: ConfigState = ConfigState {
+    ecam: [None; MAX_ECAM_REGIONS],
+    ecam_count: 0,
+};
 struct PublishedState {
     inventory: Inventory,
     topology: topology::Topology,
@@ -159,11 +159,17 @@ impl PublishedState {
 static PUBLISHED: Mutex<PublishedState> = Mutex::with_rank(PublishedState::new(), 20);
 
 pub fn configure(allocations: &[McfgAllocation]) {
-    let mut state = CONFIG.lock();
-    state.ecam = [None; MAX_ECAM_REGIONS];
-    state.ecam_count = core::cmp::min(allocations.len(), MAX_ECAM_REGIONS);
-    for (slot, allocation) in state.ecam.iter_mut().zip(allocations.iter().copied()) {
-        *slot = Some(allocation);
+    let _guard = CONFIG_LOCK.lock();
+    let count = core::cmp::min(allocations.len(), MAX_ECAM_REGIONS);
+    // SAFETY: CONFIG_LOCK is the sole synchronization authority for CONFIG.
+    // Configuration is published before discovery and every later reader also
+    // holds CONFIG_LOCK.
+    unsafe {
+        CONFIG.ecam = [None; MAX_ECAM_REGIONS];
+        CONFIG.ecam_count = count;
+        for (slot, allocation) in CONFIG.ecam.iter_mut().zip(allocations.iter().copied()) {
+            *slot = Some(allocation);
+        }
     }
 }
 
@@ -267,7 +273,11 @@ fn configured_assignment_apertures() -> Result<assignment::Apertures, HostApertu
 }
 
 fn scan_inventory() -> Inventory {
-    let config = *CONFIG.lock();
+    let config = {
+        let _guard = CONFIG_LOCK.lock();
+        // SAFETY: CONFIG_LOCK serializes CONFIG reads and writes.
+        unsafe { CONFIG }
+    };
     let mut inventory = Inventory::new();
     inventory.summary.ecam = config.ecam_count != 0;
 
@@ -1519,7 +1529,10 @@ fn write_config_unlocked(address: Address, offset: u16, value: u32) -> bool {
 }
 
 fn ecam_physical(address: Address, offset: u16) -> Option<u64> {
-    let state = CONFIG.lock();
+    // Caller holds CONFIG_LOCK (all callers are *_config_unlocked helpers).
+    // Copy the fixed-capacity state so no reference to mutable static storage
+    // escapes this critical section.
+    let state = unsafe { CONFIG };
     let allocation = state.ecam[..state.ecam_count]
         .iter()
         .flatten()
