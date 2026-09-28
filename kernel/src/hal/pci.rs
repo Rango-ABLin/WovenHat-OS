@@ -280,32 +280,6 @@ pub fn rescan_removed(
     count
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum HotplugRescanError {
-    Driver(crate::driver::PciUnbindError),
-    Unowned(topology::Error),
-}
-
-/// Reconcile disappeared functions before publishing a fresh inventory.
-/// Bound functions are quiesced through WovenDriver; unbound functions are
-/// generation-invalidated directly. Discovery runs only after all removals
-/// have completed, so live ownership is never silently replaced.
-pub fn hotplug_rescan() -> Result<Summary, HotplugRescanError> {
-    let mut removed = [None; MAX_DEVICES];
-    let count = rescan_removed(&mut removed);
-    for removal in removed[..count].iter().flatten().copied() {
-        if crate::driver::pci_driver_name(removal.function).is_some() {
-            crate::driver::remove_pci_function(removal.function)
-                .map_err(HotplugRescanError::Driver)?;
-        } else {
-            let owner = TOPOLOGY.lock().snapshot(removal.function)
-                .ok().and_then(|snapshot| snapshot.owner).unwrap_or(topology::NO_OWNER);
-            TOPOLOGY.lock().teardown(removal.function, owner)
-                .map_err(HotplugRescanError::Unowned)?;
-        }
-    }
-    Ok(discover())
-}
 
 #[expect(dead_code)]
 pub fn topology_handle(address: Address) -> Option<topology::FunctionHandle> {
