@@ -20,9 +20,17 @@ jobs:
         run: sudo apt-get update && sudo apt-get install --yes qemu-system-x86 ovmf
       - name: Lint, host regressions, and 1/2/4-core boot matrix
         run: |
-          ovmf=$(find /usr/share/OVMF -name 'OVMF_CODE*.fd' -print -quit)
-          test -n "$ovmf"
-          python3 scripts/test-release.py --qemu /usr/bin/qemu-system-x86_64 --firmware "$ovmf"
+          qemu=/usr/bin/qemu-system-x86_64
+          ovmf_code=/usr/share/OVMF/OVMF_CODE.fd
+          ovmf_vars=/usr/share/OVMF/OVMF_VARS.fd
+          test -x "$qemu"
+          test -f "$ovmf_code"
+          test -f "$ovmf_vars"
+          "$qemu" --version
+          echo "OVMF CODE: $ovmf_code"
+          echo "OVMF VARS: $ovmf_vars"
+          sha256sum "$ovmf_code" "$ovmf_vars"
+          python3 scripts/test-release.py --qemu "$qemu" --firmware "$ovmf_code" --firmware-vars "$ovmf_vars"
       - name: Preserve validation evidence
         if: always()
         uses: actions/upload-artifact@v4
