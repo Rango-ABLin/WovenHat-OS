@@ -206,7 +206,7 @@ pub fn enable_owned_msi(
 ) -> Result<MsiLease, MsiLifecycleError> {
     let snapshot = TOPOLOGY.lock().snapshot(function)
         .map_err(|_| MsiLifecycleError::InvalidFunction)?;
-    if snapshot.owner != owner || owner == 0 {
+    if snapshot.owner != Some(owner) || owner == 0 {
         return Err(MsiLifecycleError::InvalidFunction);
     }
     let device = INVENTORY.lock().devices.iter().flatten().find(|device| {
@@ -232,7 +232,7 @@ pub fn disable_owned_msi(lease: MsiLease, owner: u32) -> Result<(), MsiLifecycle
     VECTOR_ALLOCATOR.lock().validate(lease.vector, owner)?;
     let snapshot = TOPOLOGY.lock().snapshot(lease.function)
         .map_err(|_| MsiLifecycleError::InvalidFunction)?;
-    if snapshot.owner != owner || owner == 0 {
+    if snapshot.owner != Some(owner) || owner == 0 {
         return Err(MsiLifecycleError::InvalidFunction);
     }
     let device = INVENTORY.lock().devices.iter().flatten().find(|device| {
