@@ -21,11 +21,26 @@ jobs:
       - name: Lint, host regressions, and 1/2/4-core boot matrix
         run: |
           qemu=/usr/bin/qemu-system-x86_64
-          ovmf_code=/usr/share/OVMF/OVMF_CODE.fd
-          ovmf_vars=/usr/share/OVMF/OVMF_VARS.fd
+          echo "Installed OVMF firmware files:"
+          find /usr/share/OVMF -maxdepth 1 -type f -name '*.fd' -printf '%f\n' | sort
+          ovmf_code=
+          ovmf_vars=
+          for variant in OVMF_CODE_4M.fd OVMF_CODE.fd; do
+            candidate="/usr/share/OVMF/$variant"
+            [ -f "$candidate" ] || continue
+            vars_name="${variant/CODE/VARS}"
+            vars_candidate="/usr/share/OVMF/$vars_name"
+            if [ -f "$vars_candidate" ]; then
+              ovmf_code="$candidate"
+              ovmf_vars="$vars_candidate"
+              break
+            fi
+          done
           test -x "$qemu"
-          test -f "$ovmf_code"
-          test -f "$ovmf_vars"
+          if [ -z "$ovmf_code" ] || [ -z "$ovmf_vars" ]; then
+            echo "::error::No matched OVMF CODE/VARS pair found"
+            exit 1
+          fi
           "$qemu" --version
           echo "OVMF CODE: $ovmf_code"
           echo "OVMF VARS: $ovmf_vars"
