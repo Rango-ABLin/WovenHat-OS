@@ -330,12 +330,28 @@ pub fn enable_owned(
     entry_index: u16,
 ) -> Result<MsixLease, LifecycleError> {
     let device = device_for(function).ok_or(Error::InvalidLease)?;
-    let (masked_capability, table_base) = validate_owned_table(function, bar, owner)?;
-    let vector = super::msi::allocate_vector(owner)?;
+    if !super::msi::claim_interrupt_mode(function, owner, super::msi::InterruptMode::Msix) {
+        return Err(Error::InvalidLease.into());
+    }
+    let (masked_capability, table_base) = match validate_owned_table(function, bar, owner) {
+        Ok(value) => value,
+        Err(error) => {
+            let _ = super::msi::release_interrupt_mode(function, owner, super::msi::InterruptMode::Msix);
+            return Err(error.into());
+        }
+    };
+    let vector = match super::msi::allocate_vector(owner) {
+        Ok(vector) => vector,
+        Err(error) => {
+            let _ = super::msi::release_interrupt_mode(function, owner, super::msi::InterruptMode::Msix);
+            return Err(error.into());
+        }
+    };
     let entry = match masked_entry(destination_apic_id, vector.vector) {
         Ok(entry) => entry,
         Err(error) => {
             let _ = super::msi::release_vector(vector, owner);
+            let _ = super::msi::release_interrupt_mode(function, owner, super::msi::InterruptMode::Msix);
             return Err(error.into());
         }
     };
@@ -361,6 +377,9 @@ pub fn disable_owned(lease: MsixLease, owner: u32) -> Result<(), LifecycleError>
     let device = device_for(lease.function).ok_or(Error::InvalidLease)?;
     disable_and_mask_function(device)?;
     super::msi::release_vector(lease.vector, owner)?;
+    if !super::msi::release_interrupt_mode(lease.function, owner, super::msi::InterruptMode::Msix) {
+        return Err(Error::InvalidLease.into());
+    }
     Ok(())
 }
 
