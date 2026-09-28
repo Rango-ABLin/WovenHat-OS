@@ -12,7 +12,7 @@ pub struct Request {
     pub probe: Option<bar::Probe>,
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Assignment {
     pub index: u8,
     pub kind: bar::Kind,
