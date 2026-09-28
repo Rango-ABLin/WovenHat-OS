@@ -92,6 +92,8 @@ pub struct Summary {
     pub interrupt_overrides: u16,
     pub madt_entries: u16,
     pub fadt: bool,
+    pub dsdt_address: u64,
+    pub dsdt_length: usize,
     pub hpet: bool,
     pub mcfg: bool,
     pub mcfg_allocations: [McfgAllocation; MAX_MCFG_ALLOCATIONS],
@@ -185,7 +187,16 @@ pub fn discover(
                 )?;
                 summary.apic = true;
             }
-            b"FACP" => summary.fadt = true,
+            b"FACP" => {
+                parse_fadt(
+                    physical_offset,
+                    table_address,
+                    table.length,
+                    regions,
+                    &mut summary,
+                )?;
+                summary.fadt = true;
+            }
             b"HPET" => summary.hpet = true,
             b"MCFG" => {
                 parse_mcfg(
@@ -212,6 +223,52 @@ pub fn discover(
         parse_srat(physical_offset, address, length, regions, &mut summary)?;
     }
     Ok(summary)
+}
+
+fn parse_fadt(
+    physical_offset: u64,
+    address: u64,
+    length: usize,
+    regions: &[MemoryRegion],
+    summary: &mut Summary,
+) -> Result<(), Error> {
+    // ACPI 1.0 FADT contains the 32-bit DSDT physical address at offset 40.
+    // ACPI 2.0+ adds X_DSDT at offset 140; prefer it when present/non-zero.
+    if length < 44 {
+        return Err(Error::InvalidLength);
+    }
+    let mut dsdt32 = [0_u8; 4];
+    read_physical(
+        physical_offset,
+        address.checked_add(40).ok_or(Error::AddressOverflow)?,
+        &mut dsdt32,
+        regions,
+    )?;
+    let legacy = u64::from(read_u32(&dsdt32, 0));
+    let extended = if length >= 148 {
+        let mut x_dsdt = [0_u8; 8];
+        read_physical(
+            physical_offset,
+            address.checked_add(140).ok_or(Error::AddressOverflow)?,
+            &mut x_dsdt,
+            regions,
+        )?;
+        read_u64(&x_dsdt, 0)
+    } else {
+        0
+    };
+    let dsdt = if extended != 0 { extended } else { legacy };
+    if dsdt == 0 {
+        return Err(Error::Missing);
+    }
+    let header = read_sdt_header(physical_offset, dsdt, regions)?;
+    if header.signature != *b"DSDT" {
+        return Err(Error::InvalidSignature);
+    }
+    validate_sdt_checksum(physical_offset, dsdt, header.length, regions)?;
+    summary.dsdt_address = dsdt;
+    summary.dsdt_length = header.length;
+    Ok(())
 }
 
 fn parse_mcfg(
