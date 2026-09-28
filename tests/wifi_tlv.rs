@@ -136,7 +136,7 @@ fn truncated_and_oversized_containers_are_rejected() {
     bytes.extend(u32::MAX.to_le_bytes());
     error(&bytes, IntelTlvError::TruncatedTlv);
     let mut bytes = image();
-    bytes.resize(INTEL_MAX_IMAGE_SIZE + 1, 0);
+    bytes.resize(MAX_FIRMWARE_IMAGE_SIZE + 1, 0);
     error(&bytes, IntelTlvError::ImageTooLarge);
 }
 
