@@ -1,6 +1,7 @@
 #[allow(dead_code)]
 #[path = "../kernel/src/hal/pci/bar.rs"]
 mod bar;
+#[allow(dead_code)]
 #[path = "../kernel/src/hal/pci/resource.rs"]
 mod resource;
 #[path = "../kernel/src/hal/pci/assignment.rs"]
