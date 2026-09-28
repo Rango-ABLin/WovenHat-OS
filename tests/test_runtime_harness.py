@@ -46,5 +46,16 @@ class RuntimeAcceptanceTests(unittest.TestCase):
             33, '\n'.join(harness.required_markers('13.9', 1)), required))
 
 
+    def test_stage13_2_requires_topology_lifecycle_marker(self):
+        required = harness.required_markers('13.2', 2)
+        self.assertIn('[S13.2] PCIe topology + generation-safe ownership/teardown: PASSED', required)
+        old_log = '\n'.join([
+            '[SMP] online=2 expected=2',
+            '[S10.3] userspace async completion ABI + cancellation/teardown: PASSED',
+            '[S13.2] PCI/PCIe configuration + inventory: PASSED',
+        ])
+        self.assertTrue(harness.validation_errors(33, old_log, required))
+
+
 if __name__ == '__main__':
     unittest.main()

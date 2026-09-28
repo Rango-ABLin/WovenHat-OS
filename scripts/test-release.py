@@ -13,6 +13,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--qemu')
     parser.add_argument('--firmware')
+    parser.add_argument('--firmware-vars')
     args = parser.parse_args()
     root = Path(__file__).resolve().parents[1]
     out = root / 'target' / 'release-validation'
@@ -41,9 +42,9 @@ def main():
         run(f'compile-{source.stem}', ['cargo', 'test', '--test', source.stem, '--no-run'])
         run(f'test-{source.stem}', ['cargo', 'test', '--test', source.stem])
     options = []
-    for key in ('qemu', 'firmware'):
+    for key in ('qemu', 'firmware', 'firmware_vars'):
         if getattr(args, key):
-            options.extend([f'--{key}', getattr(args, key)])
+            options.extend([f'--{key.replace("_", "-")}', getattr(args, key)])
     for cpus in (1, 2, 4):
         for suite in ('memory', 'storage'):
             run(f'{suite}-{cpus}-debug', [sys.executable, f'scripts/test-{suite}-qemu.py', '--cpus', str(cpus)] + options)

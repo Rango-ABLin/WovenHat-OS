@@ -2,6 +2,13 @@ use core::{arch::asm, ptr};
 
 use crate::{hal::acpi::McfgAllocation, irq_lock::IrqMutex as Mutex};
 
+pub mod topology;
+pub mod resource;
+pub mod routing;
+pub mod bar;
+pub mod assignment;
+pub mod bridge;
+
 const CONFIG_ADDRESS: u16 = 0x0cf8;
 const CONFIG_DATA: u16 = 0x0cfc;
 const MAX_DEVICES: usize = 64;
@@ -60,6 +67,7 @@ pub struct Device {
     pub status: u16,
     pub bars: [Bar; 6],
     pub capabilities: Capabilities,
+    pub bridge_buses: Option<topology::BridgeRoute>,
 }
 
 #[derive(Clone, Copy, Default)]
@@ -133,6 +141,8 @@ static CONFIG: Mutex<ConfigState> = Mutex::with_rank(
     10,
 );
 static INVENTORY: Mutex<Inventory> = Mutex::with_rank(Inventory::new(), 10);
+// Rank 20 is never acquired while a rank-10 PCI lock is held.
+static TOPOLOGY: Mutex<topology::Topology> = Mutex::with_rank(topology::Topology::new(), 20);
 
 pub fn configure(allocations: &[McfgAllocation]) {
     let mut state = CONFIG.lock();
@@ -171,8 +181,27 @@ pub fn discover() -> Summary {
         inventory.summary.segments = u8::try_from(seen_count).unwrap_or(u8::MAX);
     }
 
+    let mut replacement = topology::Topology::new();
+    let mut topology_ok = true;
+    for device in inventory.devices.iter().flatten() {
+        if replacement.insert(topology::FunctionDescriptor {
+            address: topology::FunctionAddress {
+                segment: device.segment, bus: device.bus, device: device.device, function: device.function,
+            },
+            bridge: device.bridge_buses,
+        }).is_err() {
+            topology_ok = false;
+            break;
+        }
+    }
+    if !topology_ok {
+        inventory.summary.truncated = true;
+        replacement = topology::Topology::new();
+    }
+
     let summary = inventory.summary;
     *INVENTORY.lock() = inventory;
+    *TOPOLOGY.lock() = replacement;
     summary
 }
 
@@ -215,6 +244,66 @@ pub fn device(index: usize) -> Option<Device> {
     INVENTORY.lock().devices.get(index).copied().flatten()
 }
 
+#[expect(dead_code)]
+pub fn topology_handle(address: Address) -> Option<topology::FunctionHandle> {
+    let topology = TOPOLOGY.lock();
+    for slot in 0..topology::MAX_FUNCTIONS {
+        let Some(handle) = topology.handle_at(slot) else { continue; };
+        if topology.snapshot(handle).ok().is_some_and(|node| {
+            node.address == topology::FunctionAddress {
+                segment: address.segment, bus: address.bus, device: address.device, function: address.function,
+            }
+        }) {
+            return Some(handle);
+        }
+    }
+    None
+}
+
+#[expect(dead_code)]
+pub fn claim_function(handle: topology::FunctionHandle, owner: u32) -> Result<(), topology::Error> {
+    TOPOLOGY.lock().claim(handle, owner)
+}
+
+#[expect(dead_code)]
+pub fn release_function(handle: topology::FunctionHandle, owner: u32) -> Result<(), topology::Error> {
+    TOPOLOGY.lock().release(handle, owner)
+}
+
+#[expect(dead_code)]
+pub fn lease_bar(
+    handle: topology::FunctionHandle,
+    owner: u32,
+    bar_index: u8,
+) -> Result<topology::MmioLease, topology::Error> {
+    let snapshot = TOPOLOGY.lock().snapshot(handle)?;
+    let inventory = INVENTORY.lock();
+    let Some(device) = inventory.devices.iter().flatten().find(|device| {
+        device.segment == snapshot.address.segment && device.bus == snapshot.address.bus
+            && device.device == snapshot.address.device && device.function == snapshot.address.function
+    }).copied() else { return Err(topology::Error::InvalidHandle); };
+    let Some(bar) = device.bars.get(bar_index as usize).copied() else {
+        return Err(topology::Error::InvalidBar);
+    };
+    if !bar.valid || bar.kind == BarKind::Io || bar.address == 0 {
+        return Err(topology::Error::InvalidBar);
+    }
+    drop(inventory);
+    TOPOLOGY.lock().lease_mmio(handle, owner, bar_index, bar.address)
+}
+
+#[expect(dead_code)]
+pub fn validate_bar_lease(lease: topology::MmioLease, owner: u32) -> bool {
+    TOPOLOGY.lock().validate_mmio(lease, owner)
+}
+
+// Wired by the Stage 13.2 hotplug/unbind increment; keep the lifecycle entry
+// point explicit until removal events have a real caller.
+#[expect(dead_code)]
+pub fn teardown_function(handle: topology::FunctionHandle, owner: u32) -> Result<(), topology::Error> {
+    TOPOLOGY.lock().teardown(handle, owner)
+}
+
 #[allow(dead_code)]
 pub fn read_config_dword(bus: u8, device: u8, function: u8, offset: u8) -> u32 {
     read_config(
@@ -242,6 +331,16 @@ pub fn write_config_dword(bus: u8, device: u8, function: u8, offset: u8, value: 
         value,
     );
 }
+fn read_command_unlocked(address: Address) -> Option<u16> {
+    Some((read_config_unlocked(address, 0x04)? & 0xffff) as u16)
+}
+
+fn write_command_unlocked(address: Address, command: u16) -> bool {
+    // PCI Status occupies the high 16 bits and contains write-one-to-clear bits.
+    // Writing zeros there preserves pending status while updating Command only.
+    write_config_unlocked(address, 0x04, u32::from(command))
+}
+
 pub fn enable_io_bus_master(bus: u8, device: u8, function: u8) {
     let address = Address {
         segment: 0,
@@ -250,9 +349,9 @@ pub fn enable_io_bus_master(bus: u8, device: u8, function: u8) {
         function,
     };
     let _guard = CONFIG_LOCK.lock();
-    if let Some(value) = read_config_unlocked(address, 0x04) {
-        // PCI command: bit0 I/O space, bit2 bus master. Preserve status/high bits.
-        let _ = write_config_unlocked(address, 0x04, value | 0x0000_0005);
+    if let Some(command) = read_command_unlocked(address) {
+        // PCI command: bit0 I/O space, bit2 bus master.
+        let _ = write_command_unlocked(address, command | 0x0005);
     }
 }
 
@@ -269,11 +368,11 @@ pub fn enable_io_bus_master(bus: u8, device: u8, function: u8) {
 ))]
 pub fn enable_memory_bus_master(address: Address) -> bool {
     let _guard = CONFIG_LOCK.lock();
-    let Some(value) = read_config_unlocked(address, 0x04) else {
+    let Some(command) = read_command_unlocked(address) else {
         return false;
     };
-    // PCI command: bit1 memory space, bit2 bus master. Preserve all other bits.
-    write_config_unlocked(address, 0x04, value | 0x0000_0006)
+    // PCI command: bit1 memory space, bit2 bus master.
+    write_command_unlocked(address, command | 0x0006)
 }
 
 pub fn bar0_io_base(bus: u8, device: u8, function: u8) -> Option<u16> {
@@ -319,7 +418,426 @@ fn probe(address: Address) -> Option<Device> {
         status: (command_status >> 16) as u16,
         bars: read_bars(address, header_type),
         capabilities: read_capabilities(address, (command_status >> 16) as u16, header_type),
+        bridge_buses: read_bridge_route(address, header_type),
     })
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BridgeProgramError {
+    NotBridge,
+    InvalidWindow(bridge::Error),
+    ConfigUnavailable,
+    WriteFailed,
+    VerifyFailed,
+    RestoreFailed,
+}
+
+#[derive(Clone, Copy)]
+struct BridgeRegisterSnapshot {
+    command: u16,
+    io_low: u16,
+    memory: u32,
+    prefetch_low: u32,
+    prefetch_base_upper: u32,
+    prefetch_limit_upper: u32,
+    io_upper: u32,
+}
+
+fn bridge_snapshot_unlocked(address: Address) -> Option<BridgeRegisterSnapshot> {
+    Some(BridgeRegisterSnapshot {
+        command: read_command_unlocked(address)?,
+        io_low: (read_config_unlocked(address, 0x1c)? & 0xffff) as u16,
+        memory: read_config_unlocked(address, 0x20)?,
+        prefetch_low: read_config_unlocked(address, 0x24)?,
+        prefetch_base_upper: read_config_unlocked(address, 0x28)?,
+        prefetch_limit_upper: read_config_unlocked(address, 0x2c)?,
+        io_upper: read_config_unlocked(address, 0x30)?,
+    })
+}
+
+fn restore_bridge_unlocked(address: Address, saved: BridgeRegisterSnapshot) -> bool {
+    // Keep forwarding disabled until every original window has been restored.
+    write_command_unlocked(address, saved.command & !0x3)
+        && write_config_unlocked(address, 0x1c, u32::from(saved.io_low))
+        && write_config_unlocked(address, 0x20, saved.memory)
+        && write_config_unlocked(address, 0x24, saved.prefetch_low)
+        && write_config_unlocked(address, 0x28, saved.prefetch_base_upper)
+        && write_config_unlocked(address, 0x2c, saved.prefetch_limit_upper)
+        && write_config_unlocked(address, 0x30, saved.io_upper)
+        && write_command_unlocked(address, saved.command)
+}
+
+#[expect(dead_code)]
+pub fn program_bridge_windows(
+    address: Address,
+    header_type: u8,
+    windows: bridge::Windows,
+) -> Result<(), BridgeProgramError> {
+    if header_type & 0x7f != 0x01 {
+        return Err(BridgeProgramError::NotBridge);
+    }
+    let registers = bridge::encode_windows(windows).map_err(BridgeProgramError::InvalidWindow)?;
+    let _guard = CONFIG_LOCK.lock();
+    let saved = bridge_snapshot_unlocked(address).ok_or(BridgeProgramError::ConfigUnavailable)?;
+
+    // Disable bridge I/O and memory forwarding while the routing windows are
+    // internally inconsistent. Bus mastering and unrelated command bits remain.
+    if !write_command_unlocked(address, saved.command & !0x3) {
+        return Err(BridgeProgramError::WriteFailed);
+    }
+
+    let programmed = write_config_unlocked(address, 0x1c, registers.io_low & 0xffff)
+        && write_config_unlocked(address, 0x20, registers.memory)
+        && write_config_unlocked(address, 0x24, registers.prefetch_low)
+        && write_config_unlocked(address, 0x28, registers.prefetch_base_upper)
+        && write_config_unlocked(address, 0x2c, registers.prefetch_limit_upper)
+        && write_config_unlocked(address, 0x30, registers.io_upper);
+    if !programmed {
+        return if restore_bridge_unlocked(address, saved) {
+            Err(BridgeProgramError::WriteFailed)
+        } else {
+            Err(BridgeProgramError::RestoreFailed)
+        };
+    }
+
+    let verified = read_config_unlocked(address, 0x1c).is_some_and(|value| value & 0xffff == registers.io_low & 0xffff)
+        && read_config_unlocked(address, 0x20) == Some(registers.memory)
+        && read_config_unlocked(address, 0x24) == Some(registers.prefetch_low)
+        && read_config_unlocked(address, 0x28) == Some(registers.prefetch_base_upper)
+        && read_config_unlocked(address, 0x2c) == Some(registers.prefetch_limit_upper)
+        && read_config_unlocked(address, 0x30) == Some(registers.io_upper);
+    if !verified {
+        return if restore_bridge_unlocked(address, saved) {
+            Err(BridgeProgramError::VerifyFailed)
+        } else {
+            Err(BridgeProgramError::RestoreFailed)
+        };
+    }
+
+    // Re-enable only the forwarding classes for which a valid window exists;
+    // preserve all unrelated command/status bits from the snapshot.
+    let mut command = saved.command & !0x3;
+    if windows.io.is_some() {
+        command |= 0x1;
+    }
+    if windows.memory.is_some() || windows.prefetch.is_some() {
+        command |= 0x2;
+    }
+    if !write_command_unlocked(address, command) {
+        return if restore_bridge_unlocked(address, saved) {
+            Err(BridgeProgramError::WriteFailed)
+        } else {
+            Err(BridgeProgramError::RestoreFailed)
+        };
+    }
+    Ok(())
+}
+
+fn read_bridge_route(address: Address, header_type: u8) -> Option<topology::BridgeRoute> {
+    if header_type & 0x7f != 0x01 { return None; }
+    let buses = read_config(address, 0x18)?;
+    let route = topology::BridgeRoute {
+        primary: buses as u8,
+        secondary: (buses >> 8) as u8,
+        subordinate: (buses >> 16) as u8,
+    };
+    (route.secondary != 0 && route.secondary <= route.subordinate).then_some(route)
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BarProbeError {
+    InvalidIndex,
+    ConfigUnavailable,
+    Probe(bar::Error),
+    RestoreFailed,
+}
+
+#[expect(dead_code)]
+pub fn probe_bar_size(address: Address, header_type: u8, bar_index: u8) -> Result<bar::Probe, BarProbeError> {
+    let count = match header_type & 0x7f {
+        0x00 => 6usize,
+        0x01 => 2usize,
+        _ => 0usize,
+    };
+    let index = bar_index as usize;
+    if index >= count {
+        return Err(BarProbeError::InvalidIndex);
+    }
+    let offset = 0x10 + (index as u16 * 4);
+    let _guard = CONFIG_LOCK.lock();
+    let command = read_command_unlocked(address).ok_or(BarProbeError::ConfigUnavailable)?;
+    let original_low = read_config_unlocked(address, offset).ok_or(BarProbeError::ConfigUnavailable)?;
+    if original_low == u32::MAX {
+        return Err(BarProbeError::ConfigUnavailable);
+    }
+    let is_64 = original_low & 1 == 0 && ((original_low >> 1) & 0x3) == 2;
+    if is_64 && index + 1 >= count {
+        return Err(BarProbeError::InvalidIndex);
+    }
+    let original_high = if is_64 {
+        Some(read_config_unlocked(address, offset + 4).ok_or(BarProbeError::ConfigUnavailable)?)
+    } else {
+        None
+    };
+
+    // Disable I/O and memory decoding while BARs contain the sizing pattern.
+    // Bus mastering is preserved because no DMA address is changed here.
+    let decode_disabled = command & !0x3;
+    if !write_command_unlocked(address, decode_disabled)
+        || !write_config_unlocked(address, offset, u32::MAX)
+        || (is_64 && !write_config_unlocked(address, offset + 4, u32::MAX))
+    {
+        let _ = write_config_unlocked(address, offset, original_low);
+        if let Some(high) = original_high {
+            let _ = write_config_unlocked(address, offset + 4, high);
+        }
+        let _ = write_command_unlocked(address, command);
+        return Err(BarProbeError::RestoreFailed);
+    }
+
+    let mask_low = read_config_unlocked(address, offset).ok_or(BarProbeError::ConfigUnavailable);
+    let mask_high = if is_64 {
+        read_config_unlocked(address, offset + 4).ok_or(BarProbeError::ConfigUnavailable).map(Some)
+    } else {
+        Ok(None)
+    };
+
+    let restored = write_config_unlocked(address, offset, original_low)
+        && original_high.is_none_or(|high| write_config_unlocked(address, offset + 4, high))
+        && write_command_unlocked(address, command);
+    if !restored {
+        return Err(BarProbeError::RestoreFailed);
+    }
+    let probe = bar::decode_probe(original_low, mask_low?, mask_high?).map_err(BarProbeError::Probe)?;
+    Ok(probe)
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BarProgramError {
+    InvalidIndex,
+    ConfigUnavailable,
+    Encode(bar::Error),
+    WriteFailed,
+    VerifyFailed,
+    RestoreFailed,
+}
+
+#[expect(dead_code)]
+pub fn program_bar(
+    address: Address,
+    header_type: u8,
+    bar_index: u8,
+    probe: bar::Probe,
+    base: u64,
+) -> Result<(), BarProgramError> {
+    let count = match header_type & 0x7f {
+        0x00 => 6usize,
+        0x01 => 2usize,
+        _ => 0usize,
+    };
+    let index = bar_index as usize;
+    let is_64 = probe.kind == bar::Kind::Memory64;
+    if index >= count || (is_64 && index + 1 >= count) {
+        return Err(BarProgramError::InvalidIndex);
+    }
+    let (encoded_low, encoded_high) = bar::encode(probe, base).map_err(BarProgramError::Encode)?;
+    let offset = 0x10 + (index as u16 * 4);
+    let _guard = CONFIG_LOCK.lock();
+    let command = read_command_unlocked(address).ok_or(BarProgramError::ConfigUnavailable)?;
+    let original_low = read_config_unlocked(address, offset).ok_or(BarProgramError::ConfigUnavailable)?;
+    let original_high = if is_64 {
+        Some(read_config_unlocked(address, offset + 4).ok_or(BarProgramError::ConfigUnavailable)?)
+    } else {
+        None
+    };
+
+    let restore = |low: u32, high: Option<u32>| -> bool {
+        write_config_unlocked(address, offset, low)
+            && high.is_none_or(|value| write_config_unlocked(address, offset + 4, value))
+            && write_command_unlocked(address, command)
+    };
+
+    if !write_command_unlocked(address, command & !0x3)
+        || !write_config_unlocked(address, offset, encoded_low)
+        || encoded_high.is_some_and(|value| !write_config_unlocked(address, offset + 4, value))
+    {
+        return if restore(original_low, original_high) {
+            Err(BarProgramError::WriteFailed)
+        } else {
+            Err(BarProgramError::RestoreFailed)
+        };
+    }
+
+    let verified = read_config_unlocked(address, offset) == Some(encoded_low)
+        && encoded_high.is_none_or(|value| read_config_unlocked(address, offset + 4) == Some(value));
+    if !verified {
+        return if restore(original_low, original_high) {
+            Err(BarProgramError::VerifyFailed)
+        } else {
+            Err(BarProgramError::RestoreFailed)
+        };
+    }
+    if !write_command_unlocked(address, command) {
+        return if restore(original_low, original_high) {
+            Err(BarProgramError::WriteFailed)
+        } else {
+            Err(BarProgramError::RestoreFailed)
+        };
+    }
+    Ok(())
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RebalanceError {
+    Probe(BarProbeError),
+    Allocation(assignment::Error),
+    Program(BarProgramError),
+    RollbackFailed,
+}
+
+#[expect(dead_code)]
+pub fn rebalance_bars(
+    address: Address,
+    header_type: u8,
+    apertures: &mut assignment::Apertures,
+) -> Result<[Option<assignment::Assignment>; 6], RebalanceError> {
+    let count = match header_type & 0x7f {
+        0x00 => 6usize,
+        0x01 => 2usize,
+        _ => 0usize,
+    };
+    let mut probes = [None; 6];
+    let mut index = 0usize;
+    while index < count {
+        let probe = probe_bar_size(address, header_type, index as u8).map_err(RebalanceError::Probe)?;
+        probes[index] = Some(probe);
+        index += if probe.kind == bar::Kind::Memory64 { 2 } else { 1 };
+    }
+
+    let assignments = {
+        let mut plan = assignment::Plan::new(apertures);
+        let mut slot = 0usize;
+        while slot < count {
+            if let Some(probe) = probes[slot] {
+                plan.reserve(assignment::Request { index: slot as u8, probe: Some(probe) })
+                    .map_err(RebalanceError::Allocation)?;
+                slot += if probe.kind == bar::Kind::Memory64 { 2 } else { 1 };
+            } else {
+                slot += 1;
+            }
+        }
+        plan.commit()
+    };
+
+    // Encode every assignment before touching hardware. Once config-space
+    // programming starts, I/O and memory decoding stay disabled until every BAR
+    // has been written and verified.
+    let mut encoded = [None; 6];
+    for item in assignments.iter().flatten().copied() {
+        let probe = probes[item.index as usize].ok_or(RebalanceError::RollbackFailed)?;
+        let value = match bar::encode(probe, item.reservation.range.base) {
+            Ok(value) => value,
+            Err(error) => {
+                let _ = assignment::release_all(apertures, &assignments);
+                return Err(RebalanceError::Program(BarProgramError::Encode(error)));
+            }
+        };
+        encoded[item.index as usize] = Some(value);
+    }
+
+    let programming = {
+        let _guard = CONFIG_LOCK.lock();
+        let command = read_command_unlocked(address);
+        let mut original = [0u32; 6];
+        let mut raw = 0usize;
+        let mut snapshot_ok = command.is_some();
+        while raw < count {
+            if let Some(value) = read_config_unlocked(address, 0x10 + raw as u16 * 4) {
+                original[raw] = value;
+            } else {
+                snapshot_ok = false;
+                break;
+            }
+            raw += 1;
+        }
+        let command = command.unwrap_or(0);
+
+        let restore = || -> bool {
+            let mut slot = 0usize;
+            let mut ok = true;
+            while slot < count {
+                ok &= write_config_unlocked(address, 0x10 + slot as u16 * 4, original[slot]);
+                slot += 1;
+            }
+            ok && write_command_unlocked(address, command)
+        };
+
+        if !snapshot_ok {
+            Err(RebalanceError::Program(BarProgramError::ConfigUnavailable))
+        } else if !write_command_unlocked(address, command & !0x3) {
+            Err(RebalanceError::Program(BarProgramError::WriteFailed))
+        } else {
+            let mut write_failed = false;
+            for item in assignments.iter().flatten().copied() {
+                let offset = 0x10 + u16::from(item.index) * 4;
+                let Some((low, high)) = encoded[item.index as usize] else {
+                    write_failed = true;
+                    break;
+                };
+                if !write_config_unlocked(address, offset, low)
+                    || high.is_some_and(|value| !write_config_unlocked(address, offset + 4, value))
+                {
+                    write_failed = true;
+                    break;
+                }
+            }
+            if write_failed {
+                if restore() {
+                    Err(RebalanceError::Program(BarProgramError::WriteFailed))
+                } else {
+                    Err(RebalanceError::RollbackFailed)
+                }
+            } else {
+                let mut verified = true;
+                for item in assignments.iter().flatten().copied() {
+                    let offset = 0x10 + u16::from(item.index) * 4;
+                    let Some((low, high)) = encoded[item.index as usize] else {
+                        verified = false;
+                        break;
+                    };
+                    if read_config_unlocked(address, offset) != Some(low)
+                        || high.is_some_and(|value| read_config_unlocked(address, offset + 4) != Some(value))
+                    {
+                        verified = false;
+                        break;
+                    }
+                }
+                if !verified {
+                    if restore() {
+                        Err(RebalanceError::Program(BarProgramError::VerifyFailed))
+                    } else {
+                        Err(RebalanceError::RollbackFailed)
+                    }
+                } else if !write_command_unlocked(address, command) {
+                    if restore() {
+                        Err(RebalanceError::Program(BarProgramError::WriteFailed))
+                    } else {
+                        Err(RebalanceError::RollbackFailed)
+                    }
+                } else {
+                    Ok(())
+                }
+            }
+        }
+    };
+
+    if let Err(error) = programming {
+        if assignment::release_all(apertures, &assignments).is_err() {
+            return Err(RebalanceError::RollbackFailed);
+        }
+        return Err(error);
+    }
+    Ok(assignments)
 }
 
 fn read_bars(address: Address, header_type: u8) -> [Bar; 6] {
@@ -538,6 +1056,73 @@ pub fn self_test() -> bool {
         && ecam_math
         && INVENTORY.lock().summary.recorded as usize <= MAX_DEVICES
         && device(MAX_DEVICES).is_none()
+        && topology_self_test()
+        && routing_self_test()
+}
+
+fn topology_self_test() -> bool {
+    use topology::{BridgeRoute, FunctionAddress, FunctionDescriptor, Topology};
+    let mut topology = Topology::new();
+    let Ok(bridge) = topology.insert(FunctionDescriptor {
+        address: FunctionAddress { segment: 0, bus: 0, device: 1, function: 0 },
+        bridge: Some(BridgeRoute { primary: 0, secondary: 1, subordinate: 8 }),
+    }) else { return false; };
+    let Ok(function) = topology.insert(FunctionDescriptor {
+        address: FunctionAddress { segment: 0, bus: 2, device: 0, function: 0 },
+        bridge: None,
+    }) else { return false; };
+    if topology.snapshot(function).ok().and_then(|node| node.parent) != Some(bridge)
+        || topology.claim(function, 7).is_err() { return false; }
+    let Ok(lease) = topology.lease_mmio(function, 7, 0, 0x8000_0000) else { return false; };
+    if !topology.validate_mmio(lease, 7) || topology.teardown(function, 7).is_err()
+        || topology.validate_mmio(lease, 7) || topology.snapshot(function).is_ok() { return false; }
+    let Ok(reused) = topology.insert(FunctionDescriptor {
+        address: FunctionAddress { segment: 0, bus: 2, device: 0, function: 0 },
+        bridge: None,
+    }) else { return false; };
+    if reused.slot != function.slot || reused.generation == function.generation {
+        return false;
+    }
+
+    // Use count/handle_at through a local topology without mutating the
+    // published inventory topology during boot validation.
+    let _ = topology.count();
+    let _ = topology.handle_at(reused.slot as usize);
+    true
+}
+
+
+fn routing_self_test() -> bool {
+    use bridge::Window;
+    use routing::{Bridge, Demand, Plan};
+
+    let mut plan = Plan::new();
+    if plan.add_bridge(Bridge { id: 1, parent: None }).is_err()
+        || plan.add_bridge(Bridge { id: 2, parent: Some(1) }).is_err()
+        || plan.add_demand(
+            2,
+            Demand {
+                io: Some(Window { base: 0x2800, size: 0x800 }),
+                memory: Some(Window { base: 0x8123_4000, size: 0x2000 }),
+                prefetch: Some(Window { base: 0x2_1234_5000, size: 0x3000 }),
+            },
+        ).is_err()
+        || plan.solve().is_err()
+    {
+        return false;
+    }
+
+    let Ok(child) = plan.windows(2) else { return false; };
+    let Ok(parent) = plan.windows(1) else { return false; };
+    child == parent
+        && child.io == Some(Window { base: 0x2000, size: 0x1000 })
+        && child.memory == Some(Window { base: 0x8120_0000, size: 0x10_0000 })
+        && child.prefetch == Some(Window { base: 0x2_1230_0000, size: 0x10_0000 })
+        && plan.depth(1) == Ok(0)
+        && plan.depth(2) == Ok(1)
+        && plan.bridge_at(0) == Some(Bridge { id: 1, parent: None })
+        && plan.bridge_at(1) == Some(Bridge { id: 2, parent: Some(1) })
+        && plan.bridge_at(routing::MAX_ROUTES).is_none()
 }
 
 fn ecam_address_for(allocation: McfgAllocation, address: Address, offset: u16) -> Option<u64> {

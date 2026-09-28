@@ -20,9 +20,32 @@ jobs:
         run: sudo apt-get update && sudo apt-get install --yes qemu-system-x86 ovmf
       - name: Lint, host regressions, and 1/2/4-core boot matrix
         run: |
-          ovmf=$(find /usr/share/OVMF -name 'OVMF_CODE*.fd' -print -quit)
-          test -n "$ovmf"
-          python3 scripts/test-release.py --qemu /usr/bin/qemu-system-x86_64 --firmware "$ovmf"
+          qemu=/usr/bin/qemu-system-x86_64
+          echo "Installed OVMF firmware files:"
+          find /usr/share/OVMF -maxdepth 1 -type f -name '*.fd' -printf '%f\n' | sort
+          ovmf_code=
+          ovmf_vars=
+          for variant in OVMF_CODE_4M.fd OVMF_CODE.fd; do
+            candidate="/usr/share/OVMF/$variant"
+            [ -f "$candidate" ] || continue
+            vars_name="${variant/CODE/VARS}"
+            vars_candidate="/usr/share/OVMF/$vars_name"
+            if [ -f "$vars_candidate" ]; then
+              ovmf_code="$candidate"
+              ovmf_vars="$vars_candidate"
+              break
+            fi
+          done
+          test -x "$qemu"
+          if [ -z "$ovmf_code" ] || [ -z "$ovmf_vars" ]; then
+            echo "::error::No matched OVMF CODE/VARS pair found"
+            exit 1
+          fi
+          "$qemu" --version
+          echo "OVMF CODE: $ovmf_code"
+          echo "OVMF VARS: $ovmf_vars"
+          sha256sum "$ovmf_code" "$ovmf_vars"
+          python3 scripts/test-release.py --qemu "$qemu" --firmware "$ovmf_code" --firmware-vars "$ovmf_vars"
       - name: Preserve validation evidence
         if: always()
         uses: actions/upload-artifact@v4

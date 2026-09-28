@@ -38,10 +38,7 @@ fn upstream_ax200_image_preserves_all_groups_without_staging_markers() {
         let section = fw.section(i).unwrap();
         assert_eq!(section.image, IntelFirmwareImageKind::Runtime);
         assert!(!section.bytes.is_empty());
-        assert!(!matches!(
-            section.device_offset,
-            INTEL_CPU_SEPARATOR | INTEL_PAGING_SEPARATOR
-        ));
+        assert!(!section.is_separator());
         let group = match fw.section_group(i).unwrap() {
             IntelFirmwareSectionGroup::Lmac => 0,
             IntelFirmwareSectionGroup::Umac => 1,
@@ -49,6 +46,7 @@ fn upstream_ax200_image_preserves_all_groups_without_staging_markers() {
         };
         counts[group] += 1;
     }
+    assert_eq!(fw.sections().count(), fw.section_count());
     assert_eq!(counts, [14, 15, 19]);
     assert_eq!(fw.section(48), None);
     assert_eq!(fw.section_group(usize::MAX), None);

@@ -11,6 +11,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--qemu', default=shutil.which('qemu-system-x86_64') or r'C:\Program Files\qemu\qemu-system-x86_64.exe')
     parser.add_argument('--firmware', type=Path)
+    parser.add_argument('--firmware-vars', type=Path, help='matching writable OVMF VARS template')
     parser.add_argument('--cpus', type=int, choices=(1, 2, 4), default=2)
     parser.add_argument('--timeout', type=float, default=180)
     parser.add_argument('--release', action='store_true')
@@ -18,7 +19,8 @@ def main():
     root = Path(__file__).resolve().parents[1]
     qemu = Path(args.qemu)
     firmware = args.firmware or qemu.parent / 'share' / 'edk2-x86_64-code.fd'
-    if not qemu.is_file() or not firmware.is_file():
+    firmware_vars = args.firmware_vars
+    if not qemu.is_file() or not firmware.is_file() or (firmware_vars is not None and not firmware_vars.is_file()):
         parser.error('Set --qemu and --firmware to existing QEMU and OVMF files.')
     image = subprocess.check_output(
         ['cargo', 'run', '--quiet'] + (['--release'] if args.release else []) + ['--features', 'qemu-test', '--', '--print-image'],
@@ -27,6 +29,10 @@ def main():
     out.mkdir(parents=True, exist_ok=True)
     serial = out / 'serial.log'
     serial.write_text('')
+    vars_copy = None
+    if firmware_vars is not None:
+        vars_copy = out / 'OVMF_VARS.fd'
+        shutil.copyfile(firmware_vars, vars_copy)
     # Fixed, workspace-local disposable path; never use the user's runtime disk.
     disk = out / 'fat32.img'
     if disk.exists():
@@ -35,7 +41,8 @@ def main():
     command = [str(qemu), '-accel', 'tcg,tb-size=128', '-machine', 'pc', '-m', '256M', '-smp', str(args.cpus),
                '-display', 'none', '-serial', f'file:{serial}', '-no-reboot',
                '-device', 'isa-debug-exit,iobase=0xf4,iosize=0x04',
-               '-drive', f'if=pflash,format=raw,readonly=on,file={firmware}',
+               '-drive', f'if=pflash,unit=0,format=raw,readonly=on,file={firmware}',
+               *(['-drive', f'if=pflash,unit=1,format=raw,file={vars_copy}'] if vars_copy is not None else []),
                '-drive', f'if=none,id=boot,format=raw,readonly=on,file={image}',
                '-device', 'virtio-blk-pci,drive=boot,bootindex=1',
                '-drive', f'if=ide,index=0,format=raw,file={disk}']

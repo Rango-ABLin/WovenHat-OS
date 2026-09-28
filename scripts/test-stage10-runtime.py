@@ -79,7 +79,7 @@ def required_markers(stage, cpus):
                   '12.1': '[S12.1] VFS boundary: PASSED', '12.2': '[S12.2] WovenFS: PASSED',
                   '12.3': '[S12.3] encryption: PASSED', '12.4': '[S12.4] snapshots: PASSED',
                   '12.5': '[S12.5] storage management: PASSED', '13.1': '[S13.1] driver framework: PASSED',
-                  '13.2': '[S13.2] PCI/PCIe configuration + inventory: PASSED',
+                  '13.2': '[S13.2] PCIe topology + generation-safe ownership/teardown: PASSED',
                   '13.3': '[S13.3] NVMe controller/queue foundation: PASSED',
                   '13.4': '[S13.4] AHCI/SATA DMA block I/O: PASSED',
                   '13.5': '[S13.5] xHCI USB core: PASSED',
