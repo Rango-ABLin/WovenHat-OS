@@ -93,6 +93,10 @@ impl Plan {
         Ok(())
     }
 
+    pub fn bridge_at(&self, index: usize) -> Option<Bridge> {
+        self.nodes.get(index).filter(|node| node.occupied).map(|node| node.bridge)
+    }
+
     pub fn windows(&self, bridge_id: u8) -> Result<Windows, Error> {
         let node = self.nodes[self.find(bridge_id).ok_or(Error::MissingBridge)?];
         Ok(Windows { io: node.aggregate.io, memory: node.aggregate.memory, prefetch: node.aggregate.prefetch })
