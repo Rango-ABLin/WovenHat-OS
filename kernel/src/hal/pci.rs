@@ -1161,6 +1161,7 @@ pub fn self_test() -> bool {
         && routing_self_test()
         && bridge_transaction_self_test()
         && vector_self_test()
+        && stage13_10aa_msi_self_test()
 }
 
 fn topology_self_test() -> bool {
