@@ -284,3 +284,23 @@ pub fn unbind_pci_resources(name: &'static str) -> Result<(), PciUnbindError> {
     entry.state = State::Registered;
     Ok(())
 }
+
+
+/// Return the bound driver name for one generation-safe PCI function.
+pub fn pci_driver_name(function: crate::hal::pci::topology::FunctionHandle) -> Option<&'static str> {
+    TABLE.lock().iter().flatten()
+        .find(|entry| entry.pci.is_some_and(|binding| binding.function == function))
+        .map(|entry| entry.name)
+}
+
+/// Hot-remove a bound PCI function using the same ordered resource teardown as
+/// explicit driver unbind, then invalidate the topology generation before the
+/// slot can be reused.
+pub fn remove_pci_function(
+    function: crate::hal::pci::topology::FunctionHandle,
+) -> Result<(), PciUnbindError> {
+    let name = pci_driver_name(function).ok_or(PciUnbindError::InvalidBinding)?;
+    unbind_pci_resources(name)?;
+    crate::hal::pci::teardown_function(function, crate::hal::pci::topology::NO_OWNER)
+        .map_err(PciUnbindError::Topology)
+}
