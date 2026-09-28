@@ -16,6 +16,7 @@ pub struct Request {
 pub struct Assignment {
     pub index: u8,
     pub kind: bar::Kind,
+    pub prefetchable: bool,
     pub reservation: resource::Reservation,
 }
 
@@ -61,6 +62,45 @@ pub fn release_all(
     first_error.map_or(Ok(()), Err)
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct BridgeRequirements {
+    pub io: Option<resource::Range>,
+    pub memory: Option<resource::Range>,
+    pub prefetch: Option<resource::Range>,
+}
+
+fn include_range(slot: &mut Option<resource::Range>, range: resource::Range) -> Result<(), resource::Error> {
+    let end = range.base.checked_add(range.size).ok_or(resource::Error::Overflow)?;
+    match slot {
+        None => *slot = Some(range),
+        Some(current) => {
+            let current_end = current.base.checked_add(current.size).ok_or(resource::Error::Overflow)?;
+            let base = core::cmp::min(current.base, range.base);
+            let limit = core::cmp::max(current_end, end);
+            current.base = base;
+            current.size = limit.checked_sub(base).ok_or(resource::Error::Overflow)?;
+        }
+    }
+    Ok(())
+}
+
+pub fn bridge_requirements(
+    assignments: &[Option<Assignment>; 6],
+) -> Result<BridgeRequirements, resource::Error> {
+    let mut requirements = BridgeRequirements::default();
+    for assignment in assignments.iter().flatten().copied() {
+        let target = match assignment.kind {
+            bar::Kind::Io => &mut requirements.io,
+            bar::Kind::Memory32 | bar::Kind::Memory64 if assignment.prefetchable => {
+                &mut requirements.prefetch
+            }
+            bar::Kind::Memory32 | bar::Kind::Memory64 => &mut requirements.memory,
+        };
+        include_range(target, assignment.reservation.range)?;
+    }
+    Ok(requirements)
+}
+
 pub struct Plan<'a> {
     apertures: &'a mut Apertures,
     assignments: [Option<Assignment>; 6],
@@ -85,7 +125,12 @@ impl<'a> Plan<'a> {
             bar::Kind::Memory64 => &mut self.apertures.mmio64,
         };
         let reservation = allocator.reserve(probe.size, probe.size).map_err(Error::Resource)?;
-        let assignment = Assignment { index: request.index, kind: probe.kind, reservation };
+        let assignment = Assignment {
+            index: request.index,
+            kind: probe.kind,
+            prefetchable: probe.prefetchable,
+            reservation,
+        };
         self.assignments[self.count] = Some(assignment);
         self.count += 1;
         Ok(Some(assignment))
