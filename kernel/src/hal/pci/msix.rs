@@ -64,6 +64,9 @@ pub enum Error {
     ConfigRead,
     InvalidBir,
     Overflow,
+    InvalidLease,
+    ConfigWrite,
+    VerifyFailed,
 }
 
 pub fn decode_bir_offset(raw: u32) -> Result<BirOffset, Error> {
@@ -116,6 +119,66 @@ pub fn pba_span(capability: Capability) -> Result<(u64, u64), Error> {
     Ok((u64::from(capability.pba.offset), end))
 }
 
+
+
+fn device_for(function: super::topology::FunctionHandle) -> Option<Device> {
+    let snapshot = super::TOPOLOGY.lock().snapshot(function).ok()?;
+    super::INVENTORY.lock().devices.iter().flatten().find(|device| {
+        device.segment == snapshot.address.segment
+            && device.bus == snapshot.address.bus
+            && device.device == snapshot.address.device
+            && device.function == snapshot.address.function
+    }).copied()
+}
+
+/// Validate that an MSI-X table belongs to the BAR authorized by a
+/// generation-safe MMIO lease. This is the mandatory gate before table MMIO.
+pub fn validate_table_lease(
+    lease: super::topology::MmioLease,
+    owner: u32,
+    capability: Capability,
+) -> Result<u64, Error> {
+    if !super::validate_bar_lease(lease, owner) || lease.bar != capability.table.bir {
+        return Err(Error::InvalidLease);
+    }
+    let (start, _) = table_span(capability)?;
+    lease.base.checked_add(start).ok_or(Error::Overflow)
+}
+
+/// Set Function Mask while preserving the capability ID/next pointer and all
+/// read-only control bits. MSI-X remains disabled until table programming has
+/// completed and been verified.
+pub fn mask_function(device: Device) -> Result<Capability, Error> {
+    let capability = capability(device)?;
+    let address = Address {
+        segment: device.segment, bus: device.bus,
+        device: device.device, function: device.function,
+    };
+    let _guard = super::CONFIG_LOCK.lock();
+    let header = super::read_config_unlocked(address, capability.offset).ok_or(Error::ConfigRead)?;
+    let mut control = (header >> 16) as u16;
+    control |= PCI_MSIX_FUNCTION_MASK;
+    control &= !PCI_MSIX_ENABLE;
+    let updated = (header & 0x0000_ffff) | (u32::from(control) << 16);
+    if !super::write_config_unlocked(address, capability.offset, updated) {
+        return Err(Error::ConfigWrite);
+    }
+    let verify = super::read_config_unlocked(address, capability.offset).ok_or(Error::ConfigRead)?;
+    if (verify >> 16) as u16 != control { return Err(Error::VerifyFailed); }
+    Ok(Capability { control, ..capability })
+}
+
+#[expect(dead_code)]
+pub fn validate_owned_table(
+    function: super::topology::FunctionHandle,
+    lease: super::topology::MmioLease,
+    owner: u32,
+) -> Result<(Capability, u64), Error> {
+    let device = device_for(function).ok_or(Error::InvalidLease)?;
+    let capability = capability(device)?;
+    let base = validate_table_lease(lease, owner, capability)?;
+    Ok((capability, base))
+}
 
 /// Pure Stage 13.2 acceptance coverage for MSI-X capability decoding and
 /// table/PBA bounds. Hardware MMIO programming remains gated on BAR ownership.
