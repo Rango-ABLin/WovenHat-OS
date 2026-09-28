@@ -35,6 +35,7 @@ pub const MAX_PCI_ROOT_RESOURCES: usize = 24;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PciRootResourceKind {
+    #[expect(dead_code, reason = "constructed by the pending ACPI _CRS namespace producer")]
     Io,
     Memory,
 }
