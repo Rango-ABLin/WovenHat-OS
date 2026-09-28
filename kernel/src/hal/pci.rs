@@ -167,6 +167,63 @@ pub fn configure(allocations: &[McfgAllocation]) {
     }
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct HostAperture {
+    pub base: u64,
+    pub size: u64,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct HostApertures {
+    pub io: Option<HostAperture>,
+    pub memory: Option<HostAperture>,
+    pub prefetch: Option<HostAperture>,
+}
+
+static HOST_APERTURES: Mutex<Option<HostApertures>> = Mutex::with_rank(None, 10);
+
+/// Publish firmware-authoritative PCI root-bridge apertures. The caller must
+/// obtain these from platform resource descriptors (for ACPI systems, _CRS);
+/// ECAM/MCFG ranges are configuration space and are intentionally rejected as
+/// an implicit source of BAR allocation space.
+pub fn configure_host_apertures(apertures: HostApertures) -> bool {
+    fn valid(range: HostAperture) -> bool {
+        range.size != 0 && range.base.checked_add(range.size).is_some()
+    }
+    if apertures.io.is_some_and(|range| !valid(range))
+        || apertures.memory.is_some_and(|range| !valid(range))
+        || apertures.prefetch.is_some_and(|range| !valid(range))
+    {
+        return false;
+    }
+    *HOST_APERTURES.lock() = Some(apertures);
+    true
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum HostApertureError {
+    Unavailable,
+    InvalidRange,
+}
+
+fn configured_assignment_apertures() -> Result<assignment::Apertures, HostApertureError> {
+    let configured = HOST_APERTURES.lock().ok_or(HostApertureError::Unavailable)?;
+    fn allocator(range: Option<HostAperture>) -> Result<resource::Allocator, HostApertureError> {
+        let mut result = resource::Allocator::new();
+        if let Some(range) = range {
+            let end = range.base.checked_add(range.size).ok_or(HostApertureError::InvalidRange)?;
+            result.add_range(resource::Range { base: range.base, end })
+                .map_err(|_| HostApertureError::InvalidRange)?;
+        }
+        Ok(result)
+    }
+    Ok(assignment::Apertures {
+        io: allocator(configured.io)?,
+        mmio32: allocator(configured.memory)?,
+        mmio64: allocator(configured.prefetch)?,
+    })
+}
+
 pub fn discover() -> Summary {
     let config = *CONFIG.lock();
     let mut inventory = Inventory::new();
