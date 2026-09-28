@@ -21,6 +21,14 @@ struct Entry {
 struct PciBinding {
     function: crate::hal::pci::topology::FunctionHandle,
     owner: u32,
+    bar: Option<crate::hal::pci::topology::MmioLease>,
+    interrupt: Option<PciInterrupt>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum PciInterrupt {
+    Msi(crate::hal::pci::msi::MsiLease),
+    Msix(crate::hal::pci::msix::MsixLease),
 }
 /// Bounded driver binding table. Device discovery happens before this lock;
 /// rank 10 therefore covers only the local binding transaction.
@@ -102,7 +110,7 @@ pub fn bind_pci(
         table.iter_mut().flatten()
             .find(|entry| entry.name == name && entry.state == State::Registered && entry.pci.is_none())
             .is_some_and(|entry| {
-                entry.pci = Some(PciBinding { function: handle, owner });
+                entry.pci = Some(PciBinding { function: handle, owner, bar: None, interrupt: None });
                 entry.state = State::Bound;
                 true
             })
@@ -124,6 +132,12 @@ pub fn unbind_pci(name: &'static str) -> Result<(), crate::hal::pci::topology::E
             .find(|entry| entry.name == name && entry.state == State::Bound)
             .ok_or(crate::hal::pci::topology::Error::InvalidHandle)?;
         let binding = entry.pci.ok_or(crate::hal::pci::topology::Error::InvalidHandle)?;
+        // Function ownership is the outer authority. It must outlive every
+        // subordinate BAR/interrupt lease; resource-aware teardown detaches
+        // those leases before it can reach this release path.
+        if binding.bar.is_some() || binding.interrupt.is_some() {
+            return Err(crate::hal::pci::topology::Error::AlreadyOwned);
+        }
         entry.state = State::Unbinding;
         binding
     };
@@ -142,5 +156,61 @@ pub fn unbind_pci(name: &'static str) -> Result<(), crate::hal::pci::topology::E
         .ok_or(crate::hal::pci::topology::Error::InvalidHandle)?;
     entry.pci = None;
     entry.state = State::Registered;
+    Ok(())
+}
+
+
+/// Attach one generation-safe MMIO BAR lease to the driver's PCI binding.
+/// A binding may retain only one primary MMIO authority until multi-BAR
+/// ownership is modeled explicitly.
+pub fn attach_pci_bar(
+    name: &'static str,
+    bar: crate::hal::pci::topology::MmioLease,
+) -> Result<(), crate::hal::pci::topology::Error> {
+    let mut table = TABLE.lock();
+    let entry = table.iter_mut().flatten()
+        .find(|entry| entry.name == name && entry.state == State::Bound)
+        .ok_or(crate::hal::pci::topology::Error::InvalidHandle)?;
+    let binding = entry.pci.as_mut().ok_or(crate::hal::pci::topology::Error::InvalidHandle)?;
+    if binding.bar.is_some() || bar.function != binding.function
+        || !crate::hal::pci::validate_bar_lease(bar, binding.owner)
+    {
+        return Err(crate::hal::pci::topology::Error::InvalidBar);
+    }
+    binding.bar = Some(bar);
+    Ok(())
+}
+
+pub fn attach_pci_msi(
+    name: &'static str,
+    lease: crate::hal::pci::msi::MsiLease,
+) -> Result<(), crate::hal::pci::topology::Error> {
+    let mut table = TABLE.lock();
+    let entry = table.iter_mut().flatten()
+        .find(|entry| entry.name == name && entry.state == State::Bound)
+        .ok_or(crate::hal::pci::topology::Error::InvalidHandle)?;
+    let binding = entry.pci.as_mut().ok_or(crate::hal::pci::topology::Error::InvalidHandle)?;
+    if binding.interrupt.is_some() || lease.function != binding.function {
+        return Err(crate::hal::pci::topology::Error::InvalidHandle);
+    }
+    binding.interrupt = Some(PciInterrupt::Msi(lease));
+    Ok(())
+}
+
+pub fn attach_pci_msix(
+    name: &'static str,
+    lease: crate::hal::pci::msix::MsixLease,
+) -> Result<(), crate::hal::pci::topology::Error> {
+    let mut table = TABLE.lock();
+    let entry = table.iter_mut().flatten()
+        .find(|entry| entry.name == name && entry.state == State::Bound)
+        .ok_or(crate::hal::pci::topology::Error::InvalidHandle)?;
+    let binding = entry.pci.as_mut().ok_or(crate::hal::pci::topology::Error::InvalidHandle)?;
+    if binding.interrupt.is_some() || lease.function != binding.function
+        || lease.bar.function != binding.function
+    {
+        return Err(crate::hal::pci::topology::Error::InvalidHandle);
+    }
+    binding.interrupt = Some(PciInterrupt::Msix(lease));
     Ok(())
 }
