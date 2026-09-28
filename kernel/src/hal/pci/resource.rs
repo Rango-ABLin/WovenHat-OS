@@ -108,7 +108,6 @@ impl Allocator {
     }
 
     #[cfg(test)]
-    #[expect(dead_code, reason = "used by allocator-specific tests, not every integration crate importing this module")]
     pub fn contains(&self, reservation: Reservation) -> bool {
         self.slots.get(reservation.slot as usize).is_some_and(|slot| {
             slot.occupied && slot.generation == reservation.generation && slot.range == reservation.range
