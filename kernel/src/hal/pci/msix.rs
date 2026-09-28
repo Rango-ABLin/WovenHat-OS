@@ -215,13 +215,7 @@ pub fn program_masked_entry(
 }
 
 fn device_for(function: super::topology::FunctionHandle) -> Option<Device> {
-    let snapshot = super::TOPOLOGY.lock().snapshot(function).ok()?;
-    super::INVENTORY.lock().devices.iter().flatten().find(|device| {
-        device.segment == snapshot.address.segment
-            && device.bus == snapshot.address.bus
-            && device.device == snapshot.address.device
-            && device.function == snapshot.address.function
-    }).copied()
+    super::function_device(function).map(|(_, device)| device)
 }
 
 /// Validate that an MSI-X table belongs to the BAR authorized by a
