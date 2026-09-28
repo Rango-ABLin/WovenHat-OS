@@ -468,68 +468,169 @@ fn restore_bridge_unlocked(address: Address, saved: BridgeRegisterSnapshot) -> b
         && write_command_unlocked(address, saved.command)
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BridgeChainError {
+    InvalidChain(bridge_transaction::Error),
+    NotBridge,
+    InvalidWindow(bridge::Error),
+    ConfigUnavailable,
+    WriteFailed,
+    VerifyFailed,
+    RestoreFailed,
+}
+
+#[derive(Clone, Copy)]
+struct BridgeChainState {
+    entry: bridge_transaction::Entry,
+    registers: bridge::Registers,
+    saved: BridgeRegisterSnapshot,
+}
+
+fn write_bridge_registers_unlocked(address: Address, registers: bridge::Registers) -> bool {
+    write_config_unlocked(address, 0x1c, registers.io_low & 0xffff)
+        && write_config_unlocked(address, 0x20, registers.memory)
+        && write_config_unlocked(address, 0x24, registers.prefetch_low)
+        && write_config_unlocked(address, 0x28, registers.prefetch_base_upper)
+        && write_config_unlocked(address, 0x2c, registers.prefetch_limit_upper)
+        && write_config_unlocked(address, 0x30, registers.io_upper)
+}
+
+fn verify_bridge_registers_unlocked(address: Address, registers: bridge::Registers) -> bool {
+    read_config_unlocked(address, 0x1c).is_some_and(|value| value & 0xffff == registers.io_low & 0xffff)
+        && read_config_unlocked(address, 0x20) == Some(registers.memory)
+        && read_config_unlocked(address, 0x24) == Some(registers.prefetch_low)
+        && read_config_unlocked(address, 0x28) == Some(registers.prefetch_base_upper)
+        && read_config_unlocked(address, 0x2c) == Some(registers.prefetch_limit_upper)
+        && read_config_unlocked(address, 0x30) == Some(registers.io_upper)
+}
+
+fn bridge_forwarding_command(saved: u16, windows: bridge::Windows) -> u16 {
+    let mut command = saved & !0x3;
+    if windows.io.is_some() { command |= 0x1; }
+    if windows.memory.is_some() || windows.prefetch.is_some() { command |= 0x2; }
+    command
+}
+
+fn restore_bridge_chain_unlocked(
+    states: &[Option<BridgeChainState>; bridge_transaction::MAX_BRIDGES],
+    count: usize,
+) -> bool {
+    let mut restored = true;
+    let mut index = count;
+    while index > 0 {
+        index -= 1;
+        if let Some(state) = states[index] {
+            restored = restore_bridge_unlocked(state.entry.address, state.saved) && restored;
+        }
+    }
+    restored
+}
+
+#[expect(dead_code)]
+pub fn program_bridge_chain(
+    mut chain: bridge_transaction::Chain,
+) -> Result<(), BridgeChainError> {
+    chain.sort_deepest_first();
+    let mut states: [Option<BridgeChainState>; bridge_transaction::MAX_BRIDGES] =
+        [None; bridge_transaction::MAX_BRIDGES];
+
+    // Encode the complete transaction before acquiring CONFIG_LOCK or touching
+    // hardware. Invalid windows therefore cannot leave a partial bridge chain.
+    for index in 0..chain.len() {
+        let entry = chain.get(index).ok_or(BridgeChainError::ConfigUnavailable)?;
+        if entry.header_type & 0x7f != 0x01 { return Err(BridgeChainError::NotBridge); }
+        let registers = bridge::encode_windows(entry.windows).map_err(BridgeChainError::InvalidWindow)?;
+        states[index] = Some(BridgeChainState {
+            entry,
+            registers,
+            saved: BridgeRegisterSnapshot {
+                command: 0, io_low: 0, memory: 0, prefetch_low: 0,
+                prefetch_base_upper: 0, prefetch_limit_upper: 0, io_upper: 0,
+            },
+        });
+    }
+
+    let _guard = CONFIG_LOCK.lock();
+
+    // Snapshot every target before the first mutation. This is the rollback
+    // boundary for the whole bridge chain, not an individual bridge.
+    for index in 0..chain.len() {
+        let mut state = states[index].ok_or(BridgeChainError::ConfigUnavailable)?;
+        state.saved = bridge_snapshot_unlocked(state.entry.address)
+            .ok_or(BridgeChainError::ConfigUnavailable)?;
+        states[index] = Some(state);
+    }
+
+    // Disable forwarding across the whole target set while routing registers
+    // are inconsistent. Preserve bus-master and unrelated command bits.
+    for index in 0..chain.len() {
+        let state = states[index].ok_or(BridgeChainError::ConfigUnavailable)?;
+        if !write_command_unlocked(state.entry.address, state.saved.command & !0x3) {
+            return if restore_bridge_chain_unlocked(&states, chain.len()) {
+                Err(BridgeChainError::WriteFailed)
+            } else {
+                Err(BridgeChainError::RestoreFailed)
+            };
+        }
+    }
+
+    // The chain is sorted leaf-to-root. Program and verify each bridge while
+    // forwarding remains disabled everywhere.
+    for index in 0..chain.len() {
+        let state = states[index].ok_or(BridgeChainError::ConfigUnavailable)?;
+        if !write_bridge_registers_unlocked(state.entry.address, state.registers) {
+            return if restore_bridge_chain_unlocked(&states, chain.len()) {
+                Err(BridgeChainError::WriteFailed)
+            } else {
+                Err(BridgeChainError::RestoreFailed)
+            };
+        }
+        if !verify_bridge_registers_unlocked(state.entry.address, state.registers) {
+            return if restore_bridge_chain_unlocked(&states, chain.len()) {
+                Err(BridgeChainError::VerifyFailed)
+            } else {
+                Err(BridgeChainError::RestoreFailed)
+            };
+        }
+    }
+
+    // Re-enable forwarding root-to-leaf so an upstream path exists before a
+    // child bridge starts forwarding traffic.
+    let mut index = chain.len();
+    while index > 0 {
+        index -= 1;
+        let state = states[index].ok_or(BridgeChainError::ConfigUnavailable)?;
+        let command = bridge_forwarding_command(state.saved.command, state.entry.windows);
+        if !write_command_unlocked(state.entry.address, command) {
+            return if restore_bridge_chain_unlocked(&states, chain.len()) {
+                Err(BridgeChainError::WriteFailed)
+            } else {
+                Err(BridgeChainError::RestoreFailed)
+            };
+        }
+    }
+    Ok(())
+}
+
 #[expect(dead_code)]
 pub fn program_bridge_windows(
     address: Address,
     header_type: u8,
     windows: bridge::Windows,
 ) -> Result<(), BridgeProgramError> {
-    if header_type & 0x7f != 0x01 {
-        return Err(BridgeProgramError::NotBridge);
-    }
+    if header_type & 0x7f != 0x01 { return Err(BridgeProgramError::NotBridge); }
     let registers = bridge::encode_windows(windows).map_err(BridgeProgramError::InvalidWindow)?;
     let _guard = CONFIG_LOCK.lock();
     let saved = bridge_snapshot_unlocked(address).ok_or(BridgeProgramError::ConfigUnavailable)?;
-
-    // Disable bridge I/O and memory forwarding while the routing windows are
-    // internally inconsistent. Bus mastering and unrelated command bits remain.
-    if !write_command_unlocked(address, saved.command & !0x3) {
-        return Err(BridgeProgramError::WriteFailed);
+    if !write_command_unlocked(address, saved.command & !0x3) { return Err(BridgeProgramError::WriteFailed); }
+    if !write_bridge_registers_unlocked(address, registers) {
+        return if restore_bridge_unlocked(address, saved) { Err(BridgeProgramError::WriteFailed) } else { Err(BridgeProgramError::RestoreFailed) };
     }
-
-    let programmed = write_config_unlocked(address, 0x1c, registers.io_low & 0xffff)
-        && write_config_unlocked(address, 0x20, registers.memory)
-        && write_config_unlocked(address, 0x24, registers.prefetch_low)
-        && write_config_unlocked(address, 0x28, registers.prefetch_base_upper)
-        && write_config_unlocked(address, 0x2c, registers.prefetch_limit_upper)
-        && write_config_unlocked(address, 0x30, registers.io_upper);
-    if !programmed {
-        return if restore_bridge_unlocked(address, saved) {
-            Err(BridgeProgramError::WriteFailed)
-        } else {
-            Err(BridgeProgramError::RestoreFailed)
-        };
+    if !verify_bridge_registers_unlocked(address, registers) {
+        return if restore_bridge_unlocked(address, saved) { Err(BridgeProgramError::VerifyFailed) } else { Err(BridgeProgramError::RestoreFailed) };
     }
-
-    let verified = read_config_unlocked(address, 0x1c).is_some_and(|value| value & 0xffff == registers.io_low & 0xffff)
-        && read_config_unlocked(address, 0x20) == Some(registers.memory)
-        && read_config_unlocked(address, 0x24) == Some(registers.prefetch_low)
-        && read_config_unlocked(address, 0x28) == Some(registers.prefetch_base_upper)
-        && read_config_unlocked(address, 0x2c) == Some(registers.prefetch_limit_upper)
-        && read_config_unlocked(address, 0x30) == Some(registers.io_upper);
-    if !verified {
-        return if restore_bridge_unlocked(address, saved) {
-            Err(BridgeProgramError::VerifyFailed)
-        } else {
-            Err(BridgeProgramError::RestoreFailed)
-        };
-    }
-
-    // Re-enable only the forwarding classes for which a valid window exists;
-    // preserve all unrelated command/status bits from the snapshot.
-    let mut command = saved.command & !0x3;
-    if windows.io.is_some() {
-        command |= 0x1;
-    }
-    if windows.memory.is_some() || windows.prefetch.is_some() {
-        command |= 0x2;
-    }
-    if !write_command_unlocked(address, command) {
-        return if restore_bridge_unlocked(address, saved) {
-            Err(BridgeProgramError::WriteFailed)
-        } else {
-            Err(BridgeProgramError::RestoreFailed)
-        };
+    if !write_command_unlocked(address, bridge_forwarding_command(saved.command, windows)) {
+        return if restore_bridge_unlocked(address, saved) { Err(BridgeProgramError::WriteFailed) } else { Err(BridgeProgramError::RestoreFailed) };
     }
     Ok(())
 }
