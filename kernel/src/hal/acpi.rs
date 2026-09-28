@@ -34,8 +34,8 @@ pub struct MemoryAffinity {
 pub const MAX_PCI_ROOT_RESOURCES: usize = 24;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[allow(dead_code, reason = "resource kinds are firmware-produced and construction varies by build feature until ACPI _CRS evaluation lands")]
 pub enum PciRootResourceKind {
-    #[expect(dead_code, reason = "constructed by the pending ACPI _CRS namespace producer")]
     Io,
     Memory,
 }
