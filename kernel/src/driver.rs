@@ -304,3 +304,22 @@ pub fn remove_pci_function(
     crate::hal::pci::teardown_function(function, crate::hal::pci::topology::NO_OWNER)
         .map_err(PciUnbindError::Topology)
 }
+
+
+/// Driver-aware PCI hotplug reconciliation. The HAL only detects removals;
+/// this layer owns driver teardown policy, preserving dependency direction.
+pub fn hotplug_rescan() -> Result<crate::hal::pci::Summary, PciUnbindError> {
+    let mut removed = [None; crate::hal::pci::MAX_DEVICES];
+    let count = crate::hal::pci::rescan_removed(&mut removed);
+    for removal in removed[..count].iter().flatten().copied() {
+        if pci_driver_name(removal.function).is_some() {
+            remove_pci_function(removal.function)?;
+        } else {
+            let owner = crate::hal::pci::topology_owner(removal.function)
+                .map_err(PciUnbindError::Topology)?;
+            crate::hal::pci::teardown_function(removal.function, owner)
+                .map_err(PciUnbindError::Topology)?;
+        }
+    }
+    Ok(crate::hal::pci::discover())
+}
