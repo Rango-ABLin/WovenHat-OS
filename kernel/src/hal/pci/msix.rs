@@ -280,6 +280,9 @@ pub fn validate_owned_table(
     lease: super::topology::MmioLease,
     owner: u32,
 ) -> Result<(Capability, u64), Error> {
+    if lease.function != function {
+        return Err(Error::InvalidLease);
+    }
     let device = device_for(function).ok_or(Error::InvalidLease)?;
     // Validate the BAR lease against the discovered capability before making
     // any configuration-space mutation.
@@ -349,7 +352,7 @@ pub fn enable_owned(
 #[expect(dead_code)]
 pub fn disable_owned(lease: MsixLease, owner: u32) -> Result<(), LifecycleError> {
     super::msi::validate_vector(lease.vector, owner)?;
-    if !super::validate_bar_lease(lease.bar, owner) {
+    if lease.bar.function != lease.function || !super::validate_bar_lease(lease.bar, owner) {
         return Err(Error::InvalidLease.into());
     }
     let device = device_for(lease.function).ok_or(Error::InvalidLease)?;
