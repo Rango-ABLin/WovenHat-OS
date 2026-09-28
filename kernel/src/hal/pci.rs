@@ -8,6 +8,7 @@ pub mod routing;
 pub mod bar;
 pub mod assignment;
 pub mod bridge;
+pub mod bridge_transaction;
 
 const CONFIG_ADDRESS: u16 = 0x0cf8;
 const CONFIG_DATA: u16 = 0x0cfc;
