@@ -214,3 +214,62 @@ pub fn attach_pci_msix(
     binding.interrupt = Some(PciInterrupt::Msix(lease));
     Ok(())
 }
+
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PciUnbindError {
+    InvalidBinding,
+    Msi(crate::hal::pci::msi::MsiLifecycleError),
+    Msix(crate::hal::pci::msix::LifecycleError),
+    Topology(crate::hal::pci::topology::Error),
+}
+
+/// Resource-aware PCI teardown. Interrupt delivery is quiesced before its
+/// vector can be recycled; only after subordinate authority is gone may the
+/// outer function ownership be released.
+pub fn unbind_pci_resources(name: &'static str) -> Result<(), PciUnbindError> {
+    let binding = {
+        let mut table = TABLE.lock();
+        let entry = table.iter_mut().flatten()
+            .find(|entry| entry.name == name && entry.state == State::Bound)
+            .ok_or(PciUnbindError::InvalidBinding)?;
+        let binding = entry.pci.ok_or(PciUnbindError::InvalidBinding)?;
+        entry.state = State::Unbinding;
+        binding
+    };
+
+    let interrupt_result = match binding.interrupt {
+        Some(PciInterrupt::Msi(lease)) =>
+            crate::hal::pci::msi::disable_owned_msi(lease, binding.owner)
+                .map_err(PciUnbindError::Msi),
+        Some(PciInterrupt::Msix(lease)) =>
+            crate::hal::pci::msix::disable_owned(lease, binding.owner)
+                .map_err(PciUnbindError::Msix),
+        None => Ok(()),
+    };
+    if let Err(error) = interrupt_result {
+        let mut table = TABLE.lock();
+        if let Some(entry) = table.iter_mut().flatten().find(|entry| entry.name == name) {
+            entry.state = State::Bound;
+        }
+        return Err(error);
+    }
+
+    // Logical BAR authority is retained by topology until function ownership
+    // ends. No physical unmap primitive exists yet, so do not claim physical
+    // page-table revocation here.
+    if let Err(error) = crate::hal::pci::release_function(binding.function, binding.owner) {
+        // Interrupts are already quiesced and their vector released. Keep the
+        // driver out of Bound state: restoring Bound here would falsely imply
+        // an operational interrupt path.
+        return Err(PciUnbindError::Topology(error));
+    }
+
+    let mut table = TABLE.lock();
+    let entry = table.iter_mut().flatten()
+        .find(|entry| entry.name == name)
+        .ok_or(PciUnbindError::InvalidBinding)?;
+    entry.pci = None;
+    entry.state = State::Registered;
+    Ok(())
+}
