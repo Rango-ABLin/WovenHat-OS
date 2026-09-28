@@ -190,7 +190,10 @@ pub fn validate_table_lease(
     if !super::validate_bar_lease(lease, owner) || lease.bar != capability.table.bir {
         return Err(Error::InvalidLease);
     }
-    let (start, _) = table_span(capability)?;
+    let (start, end) = table_span(capability)?;
+    if end > lease.size {
+        return Err(Error::InvalidLease);
+    }
     lease.base.checked_add(start).ok_or(Error::Overflow)
 }
 
