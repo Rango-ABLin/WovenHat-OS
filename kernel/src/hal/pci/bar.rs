@@ -45,7 +45,6 @@ pub fn decode_probe(original_low: u32, mask_low: u32, mask_high: Option<u32>) ->
     }
 }
 
-#[cfg_attr(test, expect(dead_code, reason = "exercised by pci_bar integration tests, not assignment-only tests"))]
 pub fn encode(probe: Probe, base: u64) -> Result<(u32, Option<u32>), Error> {
     if base & (probe.size - 1) != 0 { return Err(Error::AddressOverflow); }
     match probe.kind {
