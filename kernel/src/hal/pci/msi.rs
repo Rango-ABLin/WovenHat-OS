@@ -1,4 +1,31 @@
 use super::*;
+use crate::irq_lock::IrqMutex;
+
+static VECTOR_ALLOCATOR: IrqMutex<vector::Allocator> =
+    IrqMutex::with_rank(vector::Allocator::new(), 21);
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct MsiLease {
+    pub function: topology::FunctionHandle,
+    pub vector: vector::Lease,
+    pub destination_apic_id: u32,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MsiLifecycleError {
+    InvalidFunction,
+    Vector(vector::Error),
+    Msi(MsiError),
+}
+
+impl From<vector::Error> for MsiLifecycleError {
+    fn from(error: vector::Error) -> Self { Self::Vector(error) }
+}
+
+impl From<MsiError> for MsiLifecycleError {
+    fn from(error: MsiError) -> Self { Self::Msi(error) }
+}
+
 pub const PCI_CAP_ID_MSI: u8 = 0x05;
 pub const PCI_MSI_ENABLE: u16 = 1 << 0;
 pub const PCI_MSI_64BIT_CAPABLE: u16 = 1 << 7;
@@ -166,4 +193,55 @@ pub fn stage13_10aa_msi_self_test() -> bool {
         && message.data == u16::from(crate::interrupts::WIFI_DEVICE_VECTOR)
         && MsiMessage::fixed(0x100, crate::interrupts::WIFI_DEVICE_VECTOR)
             == Err(MsiError::UnsupportedDestination)
+}
+
+
+/// Allocate and program one owner-bound MSI vector. If configuration-space
+/// programming fails, the vector reservation is rolled back before returning.
+#[expect(dead_code)]
+pub fn enable_owned_msi(
+    function: topology::FunctionHandle,
+    owner: u32,
+    destination_apic_id: u32,
+) -> Result<MsiLease, MsiLifecycleError> {
+    let snapshot = TOPOLOGY.lock().snapshot(function)
+        .map_err(|_| MsiLifecycleError::InvalidFunction)?;
+    if snapshot.owner != owner || owner == 0 {
+        return Err(MsiLifecycleError::InvalidFunction);
+    }
+    let device = INVENTORY.lock().devices.iter().flatten().find(|device| {
+        device.segment == snapshot.address.segment
+            && device.bus == snapshot.address.bus
+            && device.device == snapshot.address.device
+            && device.function == snapshot.address.function
+    }).copied().ok_or(MsiLifecycleError::InvalidFunction)?;
+
+    let lease = VECTOR_ALLOCATOR.lock().allocate(owner)?;
+    if let Err(error) = program_msi(device, destination_apic_id, lease.vector) {
+        let _ = VECTOR_ALLOCATOR.lock().release(lease, owner);
+        return Err(MsiLifecycleError::Msi(error));
+    }
+    Ok(MsiLease { function, vector: lease, destination_apic_id })
+}
+
+/// Disable MSI before releasing its vector. A failed disable deliberately
+/// retains the vector lease so a still-live device can never target a reused
+/// interrupt vector.
+#[expect(dead_code)]
+pub fn disable_owned_msi(lease: MsiLease, owner: u32) -> Result<(), MsiLifecycleError> {
+    VECTOR_ALLOCATOR.lock().validate(lease.vector, owner)?;
+    let snapshot = TOPOLOGY.lock().snapshot(lease.function)
+        .map_err(|_| MsiLifecycleError::InvalidFunction)?;
+    if snapshot.owner != owner || owner == 0 {
+        return Err(MsiLifecycleError::InvalidFunction);
+    }
+    let device = INVENTORY.lock().devices.iter().flatten().find(|device| {
+        device.segment == snapshot.address.segment
+            && device.bus == snapshot.address.bus
+            && device.device == snapshot.address.device
+            && device.function == snapshot.address.function
+    }).copied().ok_or(MsiLifecycleError::InvalidFunction)?;
+    disable_msi(device)?;
+    VECTOR_ALLOCATOR.lock().release(lease.vector, owner)?;
+    Ok(())
 }
