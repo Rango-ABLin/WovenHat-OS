@@ -46,6 +46,7 @@ pub fn decode_probe(original_low: u32, mask_low: u32, mask_high: Option<u32>) ->
 }
 
 pub fn encode(probe: Probe, base: u64) -> Result<(u32, Option<u32>), Error> {
+    if probe.size == 0 || !probe.size.is_power_of_two() { return Err(Error::InvalidMask); }
     if base & (probe.size - 1) != 0 { return Err(Error::AddressOverflow); }
     match probe.kind {
         Kind::Io => {
