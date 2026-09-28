@@ -1006,12 +1006,12 @@ pub fn self_test() -> bool {
         && topology.memory_affinities[0].base == 0x20_0000
         && topology.memory_affinities[0].length == 0x10_0000;
 
-    let aml_scope = [0x10, 0x06, b'_', b'S', b'B', b'_'];
+    let aml_scope = [0x10, 0x05, b'_', b'S', b'B', b'_'];
     let aml_scope_walk = aml_namespace_walk(&aml_scope) == Ok(1);
-    let aml_device = [0x5b, 0x82, 0x06, b'P', b'C', b'I', b'0'];
+    let aml_device = [0x5b, 0x82, 0x05, b'P', b'C', b'I', b'0'];
     let aml_device_walk = aml_namespace_walk(&aml_device) == Ok(1);
     let aml_nested = [
-        0x10, 0x0d, b'_', b'S', b'B', b'_', 0x5b, 0x82, 0x06, b'P', b'C', b'I', b'0',
+        0x10, 0x0c, b'_', b'S', b'B', b'_', 0x5b, 0x82, 0x05, b'P', b'C', b'I', b'0',
     ];
     let aml_nested_walk = aml_namespace_walk(&aml_nested) == Ok(2);
 
