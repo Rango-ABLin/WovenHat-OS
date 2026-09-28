@@ -395,5 +395,5 @@ pub fn hotplug_rescan() -> Result<crate::hal::pci::Summary, PciUnbindError> {
                 .map_err(PciUnbindError::Topology)?;
         }
     }
-    Ok(crate::hal::pci::discover())
+    Ok(crate::hal::pci::reconcile_after_teardown())
 }
