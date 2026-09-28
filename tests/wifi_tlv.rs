@@ -1,4 +1,4 @@
-#[path = "../kernel/src/wifi_tlv.rs"]
+#[path = "../kernel/src/wifi_firmware_tlv.rs"]
 pub mod wifi_tlv;
 pub use wifi_tlv as tlv;
 #[path = "../kernel/src/wifi_ax200_image.rs"]
@@ -43,7 +43,7 @@ fn paging_metadata_is_not_downloadable_code() {
 
 #[test]
 fn paging_size_and_duplicate_metadata_fail_closed() {
-    for size in [1, 4095, INTEL_MAX_PAGING_SIZE + 4096, u32::MAX] {
+    for size in [1, 4095, MAX_FIRMWARE_SECTION_SIZE as u32 + 4096, u32::MAX] {
         let mut bytes = image();
         record(&mut bytes, INTEL_TLV_PAGING, &size.to_le_bytes());
         error(&bytes, IntelTlvError::InvalidPagingSize);
@@ -56,7 +56,7 @@ fn paging_size_and_duplicate_metadata_fail_closed() {
     let mut bytes = image();
     record(&mut bytes, INTEL_TLV_PAGING, &4096u32.to_le_bytes());
     record(&mut bytes, INTEL_TLV_PAGING, &4096u32.to_le_bytes());
-    error(&bytes, IntelTlvError::DuplicatePaging);
+    error(&bytes, IntelTlvError::DuplicatePagingSize);
 }
 
 #[test]
