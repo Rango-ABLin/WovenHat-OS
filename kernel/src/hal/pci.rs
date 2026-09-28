@@ -734,22 +734,32 @@ pub fn rebalance_bars(
     let mut encoded = [None; 6];
     for item in assignments.iter().flatten().copied() {
         let probe = probes[item.index as usize].ok_or(RebalanceError::RollbackFailed)?;
-        encoded[item.index as usize] = Some(
-            bar::encode(probe, item.reservation.range.base)
-                .map_err(|error| RebalanceError::Program(BarProgramError::Encode(error)))?,
-        );
+        let value = match bar::encode(probe, item.reservation.range.base) {
+            Ok(value) => value,
+            Err(error) => {
+                let _ = assignment::release_all(apertures, &assignments);
+                return Err(RebalanceError::Program(BarProgramError::Encode(error)));
+            }
+        };
+        encoded[item.index as usize] = Some(value);
     }
 
     let programming = {
         let _guard = CONFIG_LOCK.lock();
-        let command = read_command_unlocked(address).ok_or(RebalanceError::Program(BarProgramError::ConfigUnavailable))?;
+        let command = read_command_unlocked(address);
         let mut original = [0u32; 6];
         let mut raw = 0usize;
+        let mut snapshot_ok = command.is_some();
         while raw < count {
-            original[raw] = read_config_unlocked(address, 0x10 + raw as u16 * 4)
-                .ok_or(RebalanceError::Program(BarProgramError::ConfigUnavailable))?;
+            if let Some(value) = read_config_unlocked(address, 0x10 + raw as u16 * 4) {
+                original[raw] = value;
+            } else {
+                snapshot_ok = false;
+                break;
+            }
             raw += 1;
         }
+        let command = command.unwrap_or(0);
 
         let restore = || -> bool {
             let mut slot = 0usize;
@@ -761,7 +771,9 @@ pub fn rebalance_bars(
             ok && write_command_unlocked(address, command)
         };
 
-        if !write_command_unlocked(address, command & !0x3) {
+        if !snapshot_ok {
+            Err(RebalanceError::Program(BarProgramError::ConfigUnavailable))
+        } else if !write_command_unlocked(address, command & !0x3) {
             Err(RebalanceError::Program(BarProgramError::WriteFailed))
         } else {
             let mut write_failed = false;
