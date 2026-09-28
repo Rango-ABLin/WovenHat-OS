@@ -28,7 +28,7 @@ fn decodes_64_bit_bar_mask() {
 #[test]
 fn rejects_reserved_memory_type_and_non_power_of_two_mask() {
     assert_eq!(decode_probe(0x2, 0xffff_f002, None), Err(Error::UnsupportedMemoryType));
-    assert_eq!(decode_probe(0, 0xffff_e008, None), Err(Error::InvalidMask));
+    assert_eq!(decode_probe(0, 0xffff_d000, None), Err(Error::InvalidMask));
 }
 
 #[test]
