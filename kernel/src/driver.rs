@@ -228,53 +228,68 @@ pub enum PciUnbindError {
 /// vector can be recycled; only after subordinate authority is gone may the
 /// outer function ownership be released.
 pub fn unbind_pci_resources(name: &'static str) -> Result<(), PciUnbindError> {
-    let binding = {
+    {
         let mut table = TABLE.lock();
         let entry = table.iter_mut().flatten()
-            .find(|entry| entry.name == name && entry.state == State::Bound)
+            .find(|entry| entry.name == name
+                && matches!(entry.state, State::Bound | State::Unbinding))
             .ok_or(PciUnbindError::InvalidBinding)?;
-        let binding = entry.pci.ok_or(PciUnbindError::InvalidBinding)?;
+        if entry.pci.is_none() { return Err(PciUnbindError::InvalidBinding); }
         entry.state = State::Unbinding;
-        binding
-    };
+    }
 
-    let interrupt_result = match binding.interrupt {
-        Some(PciInterrupt::Msi(lease)) =>
-            crate::hal::pci::msi::disable_owned_msi(lease, binding.owner)
-                .map_err(PciUnbindError::Msi),
-        Some(PciInterrupt::Msix(lease)) =>
-            crate::hal::pci::msix::disable_owned(lease, binding.owner)
-                .map_err(PciUnbindError::Msix),
-        None => Ok(()),
-    };
-    if let Err(error) = interrupt_result {
+    // Each successful phase is checkpointed in the binding before continuing.
+    // A retry therefore resumes from the first still-owned resource instead of
+    // replaying teardown against a stale vector or BAR generation.
+    let binding = TABLE.lock().iter().flatten()
+        .find(|entry| entry.name == name).and_then(|entry| entry.pci)
+        .ok_or(PciUnbindError::InvalidBinding)?;
+
+    if let Some(interrupt) = binding.interrupt {
+        let result = match interrupt {
+            PciInterrupt::Msi(lease) =>
+                crate::hal::pci::msi::disable_owned_msi(lease, binding.owner)
+                    .map_err(PciUnbindError::Msi),
+            PciInterrupt::Msix(lease) =>
+                crate::hal::pci::msix::disable_owned(lease, binding.owner)
+                    .map_err(PciUnbindError::Msix),
+        };
+        if let Err(error) = result {
+            return Err(error);
+        }
         let mut table = TABLE.lock();
-        if let Some(entry) = table.iter_mut().flatten().find(|entry| entry.name == name) {
-            entry.state = State::Bound;
-        }
-        return Err(error);
+        let entry = table.iter_mut().flatten().find(|entry| entry.name == name)
+            .ok_or(PciUnbindError::InvalidBinding)?;
+        let current = entry.pci.as_mut().ok_or(PciUnbindError::InvalidBinding)?;
+        current.interrupt = None;
     }
 
-    // MSI-X teardown above still needs its BAR authority, so BAR release must
-    // follow interrupt quiescence and precede outer function ownership release.
-    if let Some(bar) = binding.bar {
-        if let Err(error) = crate::hal::pci::release_bar_lease(bar, binding.owner) {
-            return Err(PciUnbindError::Topology(error));
-        }
-    } else if let Some(PciInterrupt::Msix(lease)) = binding.interrupt {
-        // MSI-X can carry its table BAR directly even when it was not also
-        // registered as the driver's primary BAR.
-        if let Err(error) = crate::hal::pci::release_bar_lease(lease.bar, binding.owner) {
-            return Err(PciUnbindError::Topology(error));
-        }
+    // Snapshot the post-interrupt state. Keep the original MSI-X table BAR as
+    // a local teardown obligation even though the interrupt lease is now
+    // checkpointed away from the persistent binding.
+    let primary_bar = binding.bar;
+    let msix_bar = match binding.interrupt {
+        Some(PciInterrupt::Msix(lease)) => Some(lease.bar),
+        _ => None,
+    };
+
+    if let Some(bar) = primary_bar {
+        crate::hal::pci::release_bar_lease(bar, binding.owner)
+            .map_err(PciUnbindError::Topology)?;
+        let mut table = TABLE.lock();
+        let entry = table.iter_mut().flatten().find(|entry| entry.name == name)
+            .ok_or(PciUnbindError::InvalidBinding)?;
+        let current = entry.pci.as_mut().ok_or(PciUnbindError::InvalidBinding)?;
+        current.bar = None;
     }
 
-    if let Err(error) = crate::hal::pci::release_function(binding.function, binding.owner) {
-        // Interrupts are already quiesced and their vector released. Keep the
-        // driver out of Bound state: restoring Bound here would falsely imply
-        // an operational interrupt path.
-        return Err(PciUnbindError::Topology(error));
+    if let Some(bar) = msix_bar.filter(|bar| Some(*bar) != primary_bar) {
+        crate::hal::pci::release_bar_lease(bar, binding.owner)
+            .map_err(PciUnbindError::Topology)?;
     }
+
+    crate::hal::pci::release_function(binding.function, binding.owner)
+        .map_err(PciUnbindError::Topology)?;
 
     let mut table = TABLE.lock();
     let entry = table.iter_mut().flatten()
@@ -284,7 +299,6 @@ pub fn unbind_pci_resources(name: &'static str) -> Result<(), PciUnbindError> {
     entry.state = State::Registered;
     Ok(())
 }
-
 
 /// Return the bound driver name for one generation-safe PCI function.
 pub fn pci_driver_name(function: crate::hal::pci::topology::FunctionHandle) -> Option<&'static str> {
