@@ -330,6 +330,16 @@ pub fn write_config_dword(bus: u8, device: u8, function: u8, offset: u8, value: 
         value,
     );
 }
+fn read_command_unlocked(address: Address) -> Option<u16> {
+    Some((read_config_unlocked(address, 0x04)? & 0xffff) as u16)
+}
+
+fn write_command_unlocked(address: Address, command: u16) -> bool {
+    // PCI Status occupies the high 16 bits and contains write-one-to-clear bits.
+    // Writing zeros there preserves pending status while updating Command only.
+    write_config_unlocked(address, 0x04, u32::from(command))
+}
+
 pub fn enable_io_bus_master(bus: u8, device: u8, function: u8) {
     let address = Address {
         segment: 0,
@@ -338,9 +348,9 @@ pub fn enable_io_bus_master(bus: u8, device: u8, function: u8) {
         function,
     };
     let _guard = CONFIG_LOCK.lock();
-    if let Some(value) = read_config_unlocked(address, 0x04) {
-        // PCI command: bit0 I/O space, bit2 bus master. Preserve status/high bits.
-        let _ = write_config_unlocked(address, 0x04, value | 0x0000_0005);
+    if let Some(command) = read_command_unlocked(address) {
+        // PCI command: bit0 I/O space, bit2 bus master.
+        let _ = write_command_unlocked(address, command | 0x0005);
     }
 }
 
@@ -357,11 +367,11 @@ pub fn enable_io_bus_master(bus: u8, device: u8, function: u8) {
 ))]
 pub fn enable_memory_bus_master(address: Address) -> bool {
     let _guard = CONFIG_LOCK.lock();
-    let Some(value) = read_config_unlocked(address, 0x04) else {
+    let Some(command) = read_command_unlocked(address) else {
         return false;
     };
-    // PCI command: bit1 memory space, bit2 bus master. Preserve all other bits.
-    write_config_unlocked(address, 0x04, value | 0x0000_0006)
+    // PCI command: bit1 memory space, bit2 bus master.
+    write_command_unlocked(address, command | 0x0006)
 }
 
 pub fn bar0_io_base(bus: u8, device: u8, function: u8) -> Option<u16> {
@@ -423,8 +433,8 @@ pub enum BridgeProgramError {
 
 #[derive(Clone, Copy)]
 struct BridgeRegisterSnapshot {
-    command_status: u32,
-    io_low: u32,
+    command: u16,
+    io_low: u16,
     memory: u32,
     prefetch_low: u32,
     prefetch_base_upper: u32,
@@ -434,8 +444,8 @@ struct BridgeRegisterSnapshot {
 
 fn bridge_snapshot_unlocked(address: Address) -> Option<BridgeRegisterSnapshot> {
     Some(BridgeRegisterSnapshot {
-        command_status: read_config_unlocked(address, 0x04)?,
-        io_low: read_config_unlocked(address, 0x1c)?,
+        command: read_command_unlocked(address)?,
+        io_low: (read_config_unlocked(address, 0x1c)? & 0xffff) as u16,
         memory: read_config_unlocked(address, 0x20)?,
         prefetch_low: read_config_unlocked(address, 0x24)?,
         prefetch_base_upper: read_config_unlocked(address, 0x28)?,
@@ -446,14 +456,14 @@ fn bridge_snapshot_unlocked(address: Address) -> Option<BridgeRegisterSnapshot> 
 
 fn restore_bridge_unlocked(address: Address, saved: BridgeRegisterSnapshot) -> bool {
     // Keep forwarding disabled until every original window has been restored.
-    write_config_unlocked(address, 0x04, saved.command_status & !0x3)
-        && write_config_unlocked(address, 0x1c, saved.io_low)
+    write_command_unlocked(address, saved.command & !0x3)
+        && write_config_unlocked(address, 0x1c, u32::from(saved.io_low))
         && write_config_unlocked(address, 0x20, saved.memory)
         && write_config_unlocked(address, 0x24, saved.prefetch_low)
         && write_config_unlocked(address, 0x28, saved.prefetch_base_upper)
         && write_config_unlocked(address, 0x2c, saved.prefetch_limit_upper)
         && write_config_unlocked(address, 0x30, saved.io_upper)
-        && write_config_unlocked(address, 0x04, saved.command_status)
+        && write_command_unlocked(address, saved.command)
 }
 
 #[expect(dead_code)]
@@ -471,11 +481,11 @@ pub fn program_bridge_windows(
 
     // Disable bridge I/O and memory forwarding while the routing windows are
     // internally inconsistent. Bus mastering and unrelated command bits remain.
-    if !write_config_unlocked(address, 0x04, saved.command_status & !0x3) {
+    if !write_command_unlocked(address, saved.command & !0x3) {
         return Err(BridgeProgramError::WriteFailed);
     }
 
-    let programmed = write_config_unlocked(address, 0x1c, registers.io_low)
+    let programmed = write_config_unlocked(address, 0x1c, registers.io_low & 0xffff)
         && write_config_unlocked(address, 0x20, registers.memory)
         && write_config_unlocked(address, 0x24, registers.prefetch_low)
         && write_config_unlocked(address, 0x28, registers.prefetch_base_upper)
@@ -489,7 +499,7 @@ pub fn program_bridge_windows(
         };
     }
 
-    let verified = read_config_unlocked(address, 0x1c) == Some(registers.io_low)
+    let verified = read_config_unlocked(address, 0x1c).is_some_and(|value| value & 0xffff == registers.io_low & 0xffff)
         && read_config_unlocked(address, 0x20) == Some(registers.memory)
         && read_config_unlocked(address, 0x24) == Some(registers.prefetch_low)
         && read_config_unlocked(address, 0x28) == Some(registers.prefetch_base_upper)
@@ -505,14 +515,14 @@ pub fn program_bridge_windows(
 
     // Re-enable only the forwarding classes for which a valid window exists;
     // preserve all unrelated command/status bits from the snapshot.
-    let mut command = saved.command_status & !0x3;
+    let mut command = saved.command & !0x3;
     if windows.io.is_some() {
         command |= 0x1;
     }
     if windows.memory.is_some() || windows.prefetch.is_some() {
         command |= 0x2;
     }
-    if !write_config_unlocked(address, 0x04, command) {
+    if !write_command_unlocked(address, command) {
         return if restore_bridge_unlocked(address, saved) {
             Err(BridgeProgramError::WriteFailed)
         } else {
@@ -554,7 +564,7 @@ pub fn probe_bar_size(address: Address, header_type: u8, bar_index: u8) -> Resul
     }
     let offset = 0x10 + (index as u16 * 4);
     let _guard = CONFIG_LOCK.lock();
-    let command_status = read_config_unlocked(address, 0x04).ok_or(BarProbeError::ConfigUnavailable)?;
+    let command = read_command_unlocked(address).ok_or(BarProbeError::ConfigUnavailable)?;
     let original_low = read_config_unlocked(address, offset).ok_or(BarProbeError::ConfigUnavailable)?;
     if original_low == u32::MAX {
         return Err(BarProbeError::ConfigUnavailable);
@@ -571,8 +581,8 @@ pub fn probe_bar_size(address: Address, header_type: u8, bar_index: u8) -> Resul
 
     // Disable I/O and memory decoding while BARs contain the sizing pattern.
     // Bus mastering is preserved because no DMA address is changed here.
-    let decode_disabled = command_status & !0x3;
-    if !write_config_unlocked(address, 0x04, decode_disabled)
+    let decode_disabled = command & !0x3;
+    if !write_command_unlocked(address, decode_disabled)
         || !write_config_unlocked(address, offset, u32::MAX)
         || (is_64 && !write_config_unlocked(address, offset + 4, u32::MAX))
     {
@@ -580,7 +590,7 @@ pub fn probe_bar_size(address: Address, header_type: u8, bar_index: u8) -> Resul
         if let Some(high) = original_high {
             let _ = write_config_unlocked(address, offset + 4, high);
         }
-        let _ = write_config_unlocked(address, 0x04, command_status);
+        let _ = write_command_unlocked(address, command);
         return Err(BarProbeError::RestoreFailed);
     }
 
@@ -593,7 +603,7 @@ pub fn probe_bar_size(address: Address, header_type: u8, bar_index: u8) -> Resul
 
     let restored = write_config_unlocked(address, offset, original_low)
         && original_high.is_none_or(|high| write_config_unlocked(address, offset + 4, high))
-        && write_config_unlocked(address, 0x04, command_status);
+        && write_command_unlocked(address, command);
     if !restored {
         return Err(BarProbeError::RestoreFailed);
     }
@@ -632,7 +642,7 @@ pub fn program_bar(
     let (encoded_low, encoded_high) = bar::encode(probe, base).map_err(BarProgramError::Encode)?;
     let offset = 0x10 + (index as u16 * 4);
     let _guard = CONFIG_LOCK.lock();
-    let command_status = read_config_unlocked(address, 0x04).ok_or(BarProgramError::ConfigUnavailable)?;
+    let command = read_command_unlocked(address).ok_or(BarProgramError::ConfigUnavailable)?;
     let original_low = read_config_unlocked(address, offset).ok_or(BarProgramError::ConfigUnavailable)?;
     let original_high = if is_64 {
         Some(read_config_unlocked(address, offset + 4).ok_or(BarProgramError::ConfigUnavailable)?)
@@ -643,10 +653,10 @@ pub fn program_bar(
     let restore = |low: u32, high: Option<u32>| -> bool {
         write_config_unlocked(address, offset, low)
             && high.is_none_or(|value| write_config_unlocked(address, offset + 4, value))
-            && write_config_unlocked(address, 0x04, command_status)
+            && write_command_unlocked(address, command)
     };
 
-    if !write_config_unlocked(address, 0x04, command_status & !0x3)
+    if !write_command_unlocked(address, command & !0x3)
         || !write_config_unlocked(address, offset, encoded_low)
         || encoded_high.is_some_and(|value| !write_config_unlocked(address, offset + 4, value))
     {
@@ -666,7 +676,7 @@ pub fn program_bar(
             Err(BarProgramError::RestoreFailed)
         };
     }
-    if !write_config_unlocked(address, 0x04, command_status) {
+    if !write_command_unlocked(address, command) {
         return if restore(original_low, original_high) {
             Err(BarProgramError::WriteFailed)
         } else {
