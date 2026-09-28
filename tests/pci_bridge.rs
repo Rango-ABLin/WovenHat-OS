@@ -32,3 +32,36 @@ fn rejects_bad_granularity_and_width() {
     assert_eq!(encode_memory(Window { base: 0x1_0000_0000, size: 0x100000 }), Err(Error::AddressWidth));
     assert_eq!(encode_prefetch(Window { base: 0, size: 0 }), Err(Error::Empty));
 }
+
+
+#[test]
+fn composes_all_windows_into_one_register_image() {
+    let registers = bridge::encode_windows(bridge::Windows {
+        io: Some(Window { base: 0x4000, size: 0x4000 }),
+        memory: Some(Window { base: 0x9000_0000, size: 0x0100_0000 }),
+        prefetch: Some(Window { base: 0x2_0000_0000, size: 0x0200_0000 }),
+    }).unwrap();
+    assert_ne!(registers.io_low, 0);
+    assert_ne!(registers.memory, 0);
+    assert_ne!(registers.prefetch_low, 0);
+    assert_eq!(registers.prefetch_base_upper, 2);
+    assert_eq!(registers.prefetch_limit_upper, 2);
+}
+
+#[test]
+fn absent_windows_encode_disabled_registers() {
+    let registers = bridge::encode_windows(bridge::Windows::default()).unwrap();
+    assert_eq!(registers, bridge::Registers::default());
+}
+
+#[test]
+fn composite_encoding_fails_before_partial_register_image() {
+    assert_eq!(
+        bridge::encode_windows(bridge::Windows {
+            io: Some(Window { base: 0x1000, size: 0x1000 }),
+            memory: Some(Window { base: 0x8008_0000, size: 0x100000 }),
+            prefetch: None,
+        }),
+        Err(Error::Misaligned)
+    );
+}
