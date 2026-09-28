@@ -66,6 +66,7 @@ impl Allocator {
         Self { apertures, slots: [Slot::empty(); MAX_RANGES] }
     }
 
+    #[cfg_attr(test, expect(dead_code, reason = "standalone resource tests do not compile the production assignment caller"))]
     pub fn from_ranges(ranges: &[Range]) -> Result<Self, Error> {
         if ranges.len() > MAX_APERTURES { return Err(Error::Capacity); }
         let mut allocator = Self::new(0, 0);
