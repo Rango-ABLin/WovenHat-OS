@@ -325,16 +325,16 @@ pub fn enable_owned(
 ) -> Result<MsixLease, LifecycleError> {
     let device = device_for(function).ok_or(Error::InvalidLease)?;
     let (masked_capability, table_base) = validate_owned_table(function, bar, owner)?;
-    let vector = super::VECTOR_ALLOCATOR.lock().allocate(owner)?;
+    let vector = super::msi::allocate_vector(owner)?;
     let entry = match masked_entry(destination_apic_id, vector.vector) {
         Ok(entry) => entry,
         Err(error) => {
-            let _ = super::VECTOR_ALLOCATOR.lock().release(vector, owner);
+            let _ = super::msi::release_vector(vector, owner);
             return Err(error.into());
         }
     };
     if let Err(error) = program_masked_entry(table_base, masked_capability, entry_index, entry) {
-        let _ = super::VECTOR_ALLOCATOR.lock().release(vector, owner);
+        let _ = super::msi::release_vector(vector, owner);
         return Err(error.into());
     }
     // From this point onward the table contains the vector. On any failure,
@@ -348,13 +348,13 @@ pub fn enable_owned(
 /// the lease live and the vector unavailable for reuse.
 #[expect(dead_code)]
 pub fn disable_owned(lease: MsixLease, owner: u32) -> Result<(), LifecycleError> {
-    super::VECTOR_ALLOCATOR.lock().validate(lease.vector, owner)?;
+    super::msi::validate_vector(lease.vector, owner)?;
     if !super::validate_bar_lease(lease.bar, owner) {
         return Err(Error::InvalidLease.into());
     }
     let device = device_for(lease.function).ok_or(Error::InvalidLease)?;
     disable_and_mask_function(device)?;
-    super::VECTOR_ALLOCATOR.lock().release(lease.vector, owner)?;
+    super::msi::release_vector(lease.vector, owner)?;
     Ok(())
 }
 
