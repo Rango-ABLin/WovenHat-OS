@@ -16,6 +16,9 @@ if ($LASTEXITCODE -ne 0) { throw 'Stage 13.2 PCI assignment tests failed' }
 cargo test --test pci_bridge
 if ($LASTEXITCODE -ne 0) { throw 'Stage 13.2 PCI bridge tests failed' }
 
+cargo test --test pci_routing
+if ($LASTEXITCODE -ne 0) { throw 'Stage 13.2 PCI routing tests failed' }
+
 cargo build --features stage13-2-test
 if ($LASTEXITCODE -ne 0) { throw 'Stage 13.2 build failed' }
 
