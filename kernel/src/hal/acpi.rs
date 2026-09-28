@@ -13,6 +13,7 @@ const MAX_SRAT_MEMORY_AFFINITIES: usize = 16;
 const MCFG_HEADER_LENGTH: usize = SDT_HEADER_LENGTH + 8;
 const MCFG_ALLOCATION_LENGTH: usize = 16;
 pub const MAX_MCFG_ALLOCATIONS: usize = 8;
+const MAX_AML_TABLES: usize = 16;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Error {
@@ -70,6 +71,12 @@ pub struct McfgAllocation {
     pub end_bus: u8,
 }
 
+#[derive(Clone, Copy, Default, PartialEq, Eq)]
+struct AmlTable {
+    address: u64,
+    length: usize,
+}
+
 #[derive(Clone, Copy, Default)]
 pub struct Summary {
     pub revision: u8,
@@ -94,6 +101,11 @@ pub struct Summary {
     pub fadt: bool,
     pub dsdt_address: u64,
     pub dsdt_length: usize,
+    // SSDTs extend the DSDT namespace. Retain their validated table bounds so
+    // the bounded AML namespace pass can consume every firmware definition
+    // block without rescanning the XSDT/RSDT or inventing PCI resources.
+    aml_tables: [AmlTable; MAX_AML_TABLES],
+    aml_table_count: usize,
     pub hpet: bool,
     pub mcfg: bool,
     pub mcfg_allocations: [McfgAllocation; MAX_MCFG_ALLOCATIONS],
@@ -202,6 +214,17 @@ pub fn discover(
                     regions,
                     &mut summary,
                 );
+            }
+            b"SSDT" => {
+                if summary.aml_table_count < summary.aml_tables.len() {
+                    summary.aml_tables[summary.aml_table_count] = AmlTable {
+                        address: table_address,
+                        length: table.length,
+                    };
+                    summary.aml_table_count += 1;
+                } else {
+                    summary.truncated = true;
+                }
             }
             b"HPET" => summary.hpet = true,
             b"MCFG" => {
