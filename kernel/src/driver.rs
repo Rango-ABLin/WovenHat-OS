@@ -269,28 +269,36 @@ pub fn unbind_pci_resources(name: &'static str) -> Result<(), PciUnbindError> {
         current.interrupt = None;
     }
 
-    // Snapshot the post-interrupt state. Keep the original MSI-X table BAR as
-    // a local teardown obligation even though the interrupt lease is now
-    // checkpointed away from the persistent binding.
-    let primary_bar = binding.bar;
+    // Snapshot the original MSI-X table BAR before its interrupt lease is
+    // checkpointed away. Release every retained BAR independently and clear
+    // each slot immediately so retries resume at the first remaining lease.
     let msix_bar = match binding.interrupt {
         Some(PciInterrupt::Msix(lease)) => Some(lease.bar),
         _ => None,
     };
-
-    if let Some(bar) = primary_bar {
+    for index in 0..PCI_BAR_COUNT {
+        let bar = {
+            let table = TABLE.lock();
+            table.iter().flatten().find(|entry| entry.name == name)
+                .and_then(|entry| entry.pci)
+                .and_then(|current| current.bars[index])
+        };
+        let Some(bar) = bar else { continue; };
         crate::hal::pci::release_bar_lease(bar, binding.owner)
             .map_err(PciUnbindError::Topology)?;
         let mut table = TABLE.lock();
         let entry = table.iter_mut().flatten().find(|entry| entry.name == name)
             .ok_or(PciUnbindError::InvalidBinding)?;
         let current = entry.pci.as_mut().ok_or(PciUnbindError::InvalidBinding)?;
-        current.bar = None;
+        current.bars[index] = None;
     }
 
-    if let Some(bar) = msix_bar.filter(|bar| Some(*bar) != primary_bar) {
-        crate::hal::pci::release_bar_lease(bar, binding.owner)
-            .map_err(PciUnbindError::Topology)?;
+    if let Some(bar) = msix_bar {
+        let retained = binding.bars.iter().flatten().any(|candidate| *candidate == bar);
+        if !retained {
+            crate::hal::pci::release_bar_lease(bar, binding.owner)
+                .map_err(PciUnbindError::Topology)?;
+        }
     }
 
     crate::hal::pci::release_function(binding.function, binding.owner)
