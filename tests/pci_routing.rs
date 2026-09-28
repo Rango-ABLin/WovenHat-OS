@@ -27,6 +27,8 @@ fn nested_bridge_propagates_child_demand_to_parent() {
     assert_eq!(child.prefetch, Some(Window { base: 0x2_1230_0000, size: 0x10_0000 }));
     assert_eq!(plan.depth(1), Ok(0));
     assert_eq!(plan.depth(2), Ok(1));
+    assert_eq!(plan.bridge_at(0), Some(Bridge { id: 1, parent: None }));
+    assert_eq!(plan.bridge_at(1), Some(Bridge { id: 2, parent: Some(1) }));
 }
 
 #[test]
