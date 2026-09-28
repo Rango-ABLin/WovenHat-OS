@@ -4,6 +4,7 @@ use crate::{hal::acpi::McfgAllocation, irq_lock::IrqMutex as Mutex};
 
 pub mod topology;
 pub mod resource;
+pub mod routing;
 pub mod bar;
 pub mod assignment;
 pub mod bridge;
