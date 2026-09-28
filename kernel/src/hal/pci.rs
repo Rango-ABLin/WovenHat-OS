@@ -1120,6 +1120,9 @@ fn routing_self_test() -> bool {
         && child.prefetch == Some(Window { base: 0x2_1230_0000, size: 0x10_0000 })
         && plan.depth(1) == Ok(0)
         && plan.depth(2) == Ok(1)
+        && plan.bridge_at(0) == Some(Bridge { id: 1, parent: None })
+        && plan.bridge_at(1) == Some(Bridge { id: 2, parent: Some(1) })
+        && plan.bridge_at(routing::MAX_ROUTES).is_none()
 }
 
 fn ecam_address_for(allocation: McfgAllocation, address: Address, offset: u16) -> Option<u64> {
