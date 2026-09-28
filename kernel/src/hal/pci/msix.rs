@@ -91,6 +91,17 @@ pub fn pba_span(capability: Capability) -> Result<(u64, u64), Error> {
 /// Pure Stage 13.2 acceptance coverage for MSI-X capability decoding and
 /// table/PBA bounds. Hardware MMIO programming remains gated on BAR ownership.
 pub fn stage13_2_msix_self_test() -> bool {
+    // Exercise the real device-facing capability path as well as the pure
+    // decoder. A synthetic device with no MSI-X capability must fail closed
+    // before any configuration-space access.
+    let absent = Device {
+        capabilities: super::Capabilities::default(),
+        ..Device::default()
+    };
+    if capability(absent) != Err(Error::NoCapability) {
+        return false;
+    }
+
     let header = u32::from(PCI_CAP_ID_MSIX) | (3_u32 << 16); // four vectors
     let Ok(capability) = decode_capability(0x60, header, 0x0000_2000, 0x0000_3000) else {
         return false;
