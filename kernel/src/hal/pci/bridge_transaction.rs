@@ -7,7 +7,7 @@ use super::{bridge::Windows, Address};
 
 pub const MAX_BRIDGES: usize = 64;
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Default, PartialEq, Eq)]
 pub struct Entry {
     pub address: Address,
     pub header_type: u8,
@@ -21,10 +21,14 @@ pub enum Error {
     Duplicate,
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 pub struct Chain {
     entries: [Option<Entry>; MAX_BRIDGES],
     count: usize,
+}
+
+impl Default for Chain {
+    fn default() -> Self { Self::new() }
 }
 
 impl Chain {
