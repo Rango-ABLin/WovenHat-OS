@@ -2,6 +2,7 @@
 use crate::device::DeviceKind;
 use crate::irq_lock::IrqMutex as Mutex;
 const MAX: usize = 32;
+const PCI_BAR_COUNT: usize = 6;
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum State {
     Registered,
@@ -21,7 +22,7 @@ struct Entry {
 struct PciBinding {
     function: crate::hal::pci::topology::FunctionHandle,
     owner: u32,
-    bar: Option<crate::hal::pci::topology::MmioLease>,
+    bars: [Option<crate::hal::pci::topology::MmioLease>; PCI_BAR_COUNT],
     interrupt: Option<PciInterrupt>,
 }
 
@@ -110,7 +111,7 @@ pub fn bind_pci(
         table.iter_mut().flatten()
             .find(|entry| entry.name == name && entry.state == State::Registered && entry.pci.is_none())
             .is_some_and(|entry| {
-                entry.pci = Some(PciBinding { function: handle, owner, bar: None, interrupt: None });
+                entry.pci = Some(PciBinding { function: handle, owner, bars: [None; PCI_BAR_COUNT], interrupt: None });
                 entry.state = State::Bound;
                 true
             })
@@ -135,7 +136,7 @@ pub fn unbind_pci(name: &'static str) -> Result<(), crate::hal::pci::topology::E
         // Function ownership is the outer authority. It must outlive every
         // subordinate BAR/interrupt lease; resource-aware teardown detaches
         // those leases before it can reach this release path.
-        if binding.bar.is_some() || binding.interrupt.is_some() {
+        if binding.bars.iter().any(Option::is_some) || binding.interrupt.is_some() {
             return Err(crate::hal::pci::topology::Error::AlreadyOwned);
         }
         entry.state = State::Unbinding;
@@ -160,24 +161,28 @@ pub fn unbind_pci(name: &'static str) -> Result<(), crate::hal::pci::topology::E
 }
 
 
-/// Attach one generation-safe MMIO BAR lease to the driver's PCI binding.
-/// A binding may retain only one primary MMIO authority until multi-BAR
-/// ownership is modeled explicitly.
+/// Attach one generation-safe MMIO BAR lease to its architectural BAR slot.
+/// Distinct BARs can be retained concurrently; replacing an existing slot is
+/// rejected so authority cannot be silently lost.
 pub fn attach_pci_bar(
     name: &'static str,
     bar: crate::hal::pci::topology::MmioLease,
 ) -> Result<(), crate::hal::pci::topology::Error> {
+    let index = usize::from(bar.bar);
+    if index >= PCI_BAR_COUNT {
+        return Err(crate::hal::pci::topology::Error::InvalidBar);
+    }
     let mut table = TABLE.lock();
     let entry = table.iter_mut().flatten()
         .find(|entry| entry.name == name && entry.state == State::Bound)
         .ok_or(crate::hal::pci::topology::Error::InvalidHandle)?;
     let binding = entry.pci.as_mut().ok_or(crate::hal::pci::topology::Error::InvalidHandle)?;
-    if binding.bar.is_some() || bar.function != binding.function
+    if binding.bars[index].is_some() || bar.function != binding.function
         || !crate::hal::pci::validate_bar_lease(bar, binding.owner)
     {
         return Err(crate::hal::pci::topology::Error::InvalidBar);
     }
-    binding.bar = Some(bar);
+    binding.bars[index] = Some(bar);
     Ok(())
 }
 
