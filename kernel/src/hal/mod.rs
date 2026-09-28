@@ -30,6 +30,36 @@ pub struct CpuFeatures {
 pub fn init(acpi: Option<&acpi::Summary>) -> HardwareInfo {
     if let Some(summary) = acpi {
         pci::configure(&summary.mcfg_allocations[..summary.mcfg_allocation_count]);
+        let mut apertures = pci::HostApertures::default();
+        let mut valid = true;
+        for resource in &summary.pci_root_resources[..summary.pci_root_resource_count] {
+            // WovenHat currently allocates CPU-visible BAR addresses directly.
+            // Non-zero translation requires host-bridge translation support
+            // before the resource can be admitted safely.
+            if resource.length == 0
+                || resource.base.checked_add(resource.length).is_none()
+                || resource.translation_offset != 0
+                || !matches!(resource.address_width, 16 | 32 | 64)
+            {
+                valid = false;
+                break;
+            }
+            let range = pci::HostAperture { base: resource.base, size: resource.length };
+            let result = match resource.kind {
+                acpi::PciRootResourceKind::Io => apertures.io.push(range),
+                acpi::PciRootResourceKind::Memory if resource.prefetchable => {
+                    apertures.prefetch.push(range)
+                }
+                acpi::PciRootResourceKind::Memory => apertures.memory.push(range),
+            };
+            if result.is_err() {
+                valid = false;
+                break;
+            }
+        }
+        if valid && summary.pci_root_resource_count != 0 {
+            let _ = pci::configure_host_apertures(apertures);
+        }
     } else {
         pci::configure(&[]);
     }
