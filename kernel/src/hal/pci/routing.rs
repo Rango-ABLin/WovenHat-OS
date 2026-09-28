@@ -27,7 +27,6 @@ pub enum Error {
     MissingBridge,
     InvalidParent,
     Overflow,
-    AddressWidth,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -118,13 +117,13 @@ impl Plan {
 }
 
 fn merge_demand(target: &mut Demand, incoming: Demand) -> Result<(), Error> {
-    merge_window(&mut target.io, incoming.io, 0x1000, true)?;
-    merge_window(&mut target.memory, incoming.memory, 0x10_0000, false)?;
-    merge_window(&mut target.prefetch, incoming.prefetch, 0x10_0000, false)?;
+    merge_window(&mut target.io, incoming.io, 0x1000)?;
+    merge_window(&mut target.memory, incoming.memory, 0x10_0000)?;
+    merge_window(&mut target.prefetch, incoming.prefetch, 0x10_0000)?;
     Ok(())
 }
 
-fn merge_window(target: &mut Option<Window>, incoming: Option<Window>, granularity: u64, io: bool) -> Result<(), Error> {
+fn merge_window(target: &mut Option<Window>, incoming: Option<Window>, granularity: u64) -> Result<(), Error> {
     let Some(incoming) = incoming else { return Ok(()); };
     let incoming_end = incoming.base.checked_add(incoming.size).ok_or(Error::Overflow)?;
     let mut base = incoming.base & !(granularity - 1);
@@ -133,10 +132,6 @@ fn merge_window(target: &mut Option<Window>, incoming: Option<Window>, granulari
         let current_end = current.base.checked_add(current.size).ok_or(Error::Overflow)?;
         base = core::cmp::min(base, current.base);
         end = core::cmp::max(end, current_end);
-    }
-    if io && end > u64::from(u32::MAX) + 1 { return Err(Error::AddressWidth); }
-    if !io && target as *const _ == target as *const _ {
-        // Width is validated by bridge encoders; prefetchable windows may be 64-bit.
     }
     *target = Some(Window { base, size: end.checked_sub(base).ok_or(Error::Overflow)? });
     Ok(())
