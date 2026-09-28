@@ -216,6 +216,17 @@ pub fn attach_pci_msix(
     {
         return Err(crate::hal::pci::topology::Error::InvalidHandle);
     }
+    let bar_index = usize::from(lease.bar.bar);
+    if bar_index >= PCI_BAR_COUNT {
+        return Err(crate::hal::pci::topology::Error::InvalidBar);
+    }
+    match binding.bars[bar_index] {
+        Some(retained) if retained != lease.bar => {
+            return Err(crate::hal::pci::topology::Error::InvalidBar);
+        }
+        None => binding.bars[bar_index] = Some(lease.bar),
+        Some(_) => {}
+    }
     binding.interrupt = Some(PciInterrupt::Msix(lease));
     Ok(())
 }
@@ -269,13 +280,8 @@ pub fn unbind_pci_resources(name: &'static str) -> Result<(), PciUnbindError> {
         current.interrupt = None;
     }
 
-    // Snapshot the original MSI-X table BAR before its interrupt lease is
-    // checkpointed away. Release every retained BAR independently and clear
-    // each slot immediately so retries resume at the first remaining lease.
-    let msix_bar = match binding.interrupt {
-        Some(PciInterrupt::Msix(lease)) => Some(lease.bar),
-        _ => None,
-    };
+    // MSI-X attachment makes its table BAR a persistent retained BAR, so after
+    // interrupt quiescence every remaining authority is represented by bars[].
     for index in 0..PCI_BAR_COUNT {
         let bar = {
             let table = TABLE.lock();
@@ -291,14 +297,6 @@ pub fn unbind_pci_resources(name: &'static str) -> Result<(), PciUnbindError> {
             .ok_or(PciUnbindError::InvalidBinding)?;
         let current = entry.pci.as_mut().ok_or(PciUnbindError::InvalidBinding)?;
         current.bars[index] = None;
-    }
-
-    if let Some(bar) = msix_bar {
-        let retained = binding.bars.iter().flatten().any(|candidate| *candidate == bar);
-        if !retained {
-            crate::hal::pci::release_bar_lease(bar, binding.owner)
-                .map_err(PciUnbindError::Topology)?;
-        }
     }
 
     crate::hal::pci::release_function(binding.function, binding.owner)
