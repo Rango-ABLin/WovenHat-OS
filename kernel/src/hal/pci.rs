@@ -376,19 +376,21 @@ pub fn lease_bar(
     owner: u32,
     bar_index: u8,
 ) -> Result<topology::MmioLease, topology::Error> {
-    let snapshot = PUBLISHED.lock().topology.snapshot(handle)?;
-    let inventory = PUBLISHED.lock().inventory;
-    let Some(device) = inventory.devices.iter().flatten().find(|device| {
-        device.segment == snapshot.address.segment && device.bus == snapshot.address.bus
-            && device.device == snapshot.address.device && device.function == snapshot.address.function
-    }).copied() else { return Err(topology::Error::InvalidHandle); };
+    let (snapshot, device) = {
+        let published = PUBLISHED.lock();
+        let snapshot = published.topology.snapshot(handle)?;
+        let Some(device) = published.inventory.devices.iter().flatten().find(|device| {
+            device.segment == snapshot.address.segment && device.bus == snapshot.address.bus
+                && device.device == snapshot.address.device && device.function == snapshot.address.function
+        }).copied() else { return Err(topology::Error::InvalidHandle); };
+        (snapshot, device)
+    };
     let Some(bar) = device.bars.get(bar_index as usize).copied() else {
         return Err(topology::Error::InvalidBar);
     };
     if !bar.valid || bar.kind == BarKind::Io || bar.address == 0 {
         return Err(topology::Error::InvalidBar);
     }
-    drop(inventory);
     let address = Address {
         segment: snapshot.address.segment,
         bus: snapshot.address.bus,
