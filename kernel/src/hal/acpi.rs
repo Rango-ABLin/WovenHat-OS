@@ -635,6 +635,54 @@ fn read_u64(bytes: &[u8], offset: usize) -> u64 {
     u64::from_le_bytes(bytes[offset..offset + 8].try_into().unwrap_or([0; 8]))
 }
 
+fn decode_pci_root_resource_template(
+    bytes: &[u8],
+    output: &mut [PciRootResource; MAX_PCI_ROOT_RESOURCES],
+) -> Result<usize, Error> {
+    let mut offset = 0_usize;
+    let mut count = 0_usize;
+    let mut saw_end_tag = false;
+    while offset < bytes.len() {
+        let tag = bytes[offset];
+        let item_len = if tag & 0x80 != 0 {
+            let header_end = offset.checked_add(3).ok_or(Error::AddressOverflow)?;
+            let header = bytes.get(offset..header_end).ok_or(Error::InvalidLength)?;
+            3_usize
+                .checked_add(usize::from(u16::from_le_bytes([header[1], header[2]])))
+                .ok_or(Error::AddressOverflow)?
+        } else {
+            1_usize
+                .checked_add(usize::from(tag & 0x07))
+                .ok_or(Error::AddressOverflow)?
+        };
+        let end = offset.checked_add(item_len).ok_or(Error::AddressOverflow)?;
+        let item = bytes.get(offset..end).ok_or(Error::InvalidLength)?;
+
+        if tag & 0x80 == 0 && tag >> 3 == 0x0f {
+            if item.len() != 2 || end != bytes.len() {
+                return Err(Error::InvalidLength);
+            }
+            saw_end_tag = true;
+            break;
+        }
+
+        if tag & 0x80 != 0 {
+            if let Some(resource) = decode_address_space_resource(item)? {
+                if count == output.len() {
+                    return Err(Error::InvalidLength);
+                }
+                output[count] = resource;
+                count += 1;
+            }
+        }
+        offset = end;
+    }
+    if !saw_end_tag {
+        return Err(Error::InvalidLength);
+    }
+    Ok(count)
+}
+
 fn decode_address_space_resource(bytes: &[u8]) -> Result<Option<PciRootResource>, Error> {
     if bytes.len() < 3 || bytes[0] & 0x80 == 0 {
         return Err(Error::InvalidLength);
@@ -762,6 +810,33 @@ pub fn self_test() -> bool {
         && topology.memory_affinities[0].base == 0x20_0000
         && topology.memory_affinities[0].length == 0x10_0000;
 
+    let mut template = [0_u8; 44];
+    template[0] = 0x87;
+    template[1..3].copy_from_slice(&23_u16.to_le_bytes());
+    template[3] = 0;
+    template[5] = 0x06;
+    template[10..14].copy_from_slice(&0x8000_0000_u32.to_le_bytes());
+    template[14..18].copy_from_slice(&0x8fff_ffff_u32.to_le_bytes());
+    template[22..26].copy_from_slice(&0x1000_0000_u32.to_le_bytes());
+    template[26] = 0x88;
+    template[27..29].copy_from_slice(&13_u16.to_le_bytes());
+    template[29] = 1;
+    template[34..36].copy_from_slice(&0x1000_u16.to_le_bytes());
+    template[36..38].copy_from_slice(&0x1fff_u16.to_le_bytes());
+    template[40..42].copy_from_slice(&0x1000_u16.to_le_bytes());
+    template[42] = 0x79;
+    template[43] = 0;
+    let mut decoded_resources = [PciRootResource::default(); MAX_PCI_ROOT_RESOURCES];
+    let resource_template_valid =
+        decode_pci_root_resource_template(&template, &mut decoded_resources).is_ok_and(|count| {
+            count == 2
+                && decoded_resources[0].kind == PciRootResourceKind::Memory
+                && decoded_resources[1].kind == PciRootResourceKind::Io
+        });
+    let missing_end_tag_rejected =
+        decode_pci_root_resource_template(&template[..42], &mut decoded_resources)
+            == Err(Error::InvalidLength);
+
     let mut dword_memory = [0_u8; 26];
     dword_memory[0] = 0x87;
     dword_memory[1..3].copy_from_slice(&23_u16.to_le_bytes());
@@ -816,6 +891,8 @@ pub fn self_test() -> bool {
         && malformed_rejected
         && srat_valid
         && memory_affinity_valid
+        && resource_template_valid
+        && missing_end_tag_rejected
         && dword_memory_valid
         && word_io_valid
         && mcfg_valid
