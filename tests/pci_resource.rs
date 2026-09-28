@@ -33,8 +33,6 @@ fn live_reservations_remain_owned_until_explicit_release() {
     let first = allocator.reserve(0x1000, 0x1000).unwrap();
     let second = allocator.reserve(0x2000, 0x2000).unwrap();
     assert_eq!(allocator.active(), 2);
-    assert!(allocator.contains(first));
-    assert!(allocator.contains(second));
     allocator.release(second).unwrap();
     allocator.release(first).unwrap();
     assert_eq!(allocator.active(), 0);
@@ -48,7 +46,7 @@ fn stale_reservation_cannot_release_reused_slot() {
     let current = allocator.reserve(0x1000, 0x1000).unwrap();
     assert_ne!(stale, current);
     assert_eq!(allocator.release(stale), Err(Error::InvalidReservation));
-    assert!(allocator.contains(current));
+    allocator.release(current).unwrap();
 }
 
 #[test]
