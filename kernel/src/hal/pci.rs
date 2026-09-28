@@ -5,6 +5,7 @@ use crate::{hal::acpi::McfgAllocation, irq_lock::IrqMutex as Mutex};
 pub mod topology;
 pub mod resource;
 pub mod bar;
+pub mod assignment;
 
 const CONFIG_ADDRESS: u16 = 0x0cf8;
 const CONFIG_DATA: u16 = 0x0cfc;
@@ -486,6 +487,81 @@ pub fn probe_bar_size(address: Address, header_type: u8, bar_index: u8) -> Resul
     }
     let probe = bar::decode_probe(original_low, mask_low?, mask_high?).map_err(BarProbeError::Probe)?;
     Ok(probe)
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BarProgramError {
+    InvalidIndex,
+    ConfigUnavailable,
+    Encode(bar::Error),
+    WriteFailed,
+    VerifyFailed,
+    RestoreFailed,
+}
+
+#[expect(dead_code)]
+pub fn program_bar(
+    address: Address,
+    header_type: u8,
+    bar_index: u8,
+    probe: bar::Probe,
+    base: u64,
+) -> Result<(), BarProgramError> {
+    let count = match header_type & 0x7f {
+        0x00 => 6usize,
+        0x01 => 2usize,
+        _ => 0usize,
+    };
+    let index = bar_index as usize;
+    let is_64 = probe.kind == bar::Kind::Memory64;
+    if index >= count || (is_64 && index + 1 >= count) {
+        return Err(BarProgramError::InvalidIndex);
+    }
+    let (encoded_low, encoded_high) = bar::encode(probe, base).map_err(BarProgramError::Encode)?;
+    let offset = 0x10 + (index as u16 * 4);
+    let _guard = CONFIG_LOCK.lock();
+    let command_status = read_config_unlocked(address, 0x04).ok_or(BarProgramError::ConfigUnavailable)?;
+    let original_low = read_config_unlocked(address, offset).ok_or(BarProgramError::ConfigUnavailable)?;
+    let original_high = if is_64 {
+        Some(read_config_unlocked(address, offset + 4).ok_or(BarProgramError::ConfigUnavailable)?)
+    } else {
+        None
+    };
+
+    let restore = |low: u32, high: Option<u32>| -> bool {
+        write_config_unlocked(address, offset, low)
+            && high.is_none_or(|value| write_config_unlocked(address, offset + 4, value))
+            && write_config_unlocked(address, 0x04, command_status)
+    };
+
+    if !write_config_unlocked(address, 0x04, command_status & !0x3)
+        || !write_config_unlocked(address, offset, encoded_low)
+        || encoded_high.is_some_and(|value| !write_config_unlocked(address, offset + 4, value))
+    {
+        return if restore(original_low, original_high) {
+            Err(BarProgramError::WriteFailed)
+        } else {
+            Err(BarProgramError::RestoreFailed)
+        };
+    }
+
+    let verified = read_config_unlocked(address, offset) == Some(encoded_low)
+        && encoded_high.is_none_or(|value| read_config_unlocked(address, offset + 4) == Some(value));
+    if !verified {
+        return if restore(original_low, original_high) {
+            Err(BarProgramError::VerifyFailed)
+        } else {
+            Err(BarProgramError::RestoreFailed)
+        };
+    }
+    if !write_config_unlocked(address, 0x04, command_status) {
+        return if restore(original_low, original_high) {
+            Err(BarProgramError::WriteFailed)
+        } else {
+            Err(BarProgramError::RestoreFailed)
+        };
+    }
+    Ok(())
 }
 
 fn read_bars(address: Address, header_type: u8) -> [Bar; 6] {
