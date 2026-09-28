@@ -167,8 +167,12 @@ pub fn configure(allocations: &[McfgAllocation]) {
     unsafe {
         CONFIG.ecam = [None; MAX_ECAM_REGIONS];
         CONFIG.ecam_count = count;
-        for (slot, allocation) in CONFIG.ecam.iter_mut().zip(allocations.iter().copied()) {
-            *slot = Some(allocation);
+        let config = core::ptr::addr_of_mut!(CONFIG);
+        for (index, allocation) in allocations.iter().copied().take(count).enumerate() {
+            // Avoid forming a Rust reference to the mutable static itself.
+            // CONFIG_LOCK provides exclusive access while raw-pointer writes
+            // initialize the bounded ECAM metadata.
+            core::ptr::addr_of_mut!((*config).ecam[index]).write(Some(allocation));
         }
     }
 }
