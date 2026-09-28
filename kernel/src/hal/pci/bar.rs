@@ -15,8 +15,10 @@ pub struct Probe {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg_attr(test, expect(dead_code, reason = "not every integration crate importing BAR types exercises encoding"))]
 pub enum Error { InvalidMask, UnsupportedMemoryType, AddressOverflow }
 
+#[cfg_attr(test, expect(dead_code, reason = "exercised by pci_bar integration tests, not assignment-only tests"))]
 pub fn decode_probe(original_low: u32, mask_low: u32, mask_high: Option<u32>) -> Result<Probe, Error> {
     if original_low & 1 != 0 {
         let mask = u64::from(mask_low & !0x3);
@@ -45,6 +47,7 @@ pub fn decode_probe(original_low: u32, mask_low: u32, mask_high: Option<u32>) ->
     }
 }
 
+#[cfg_attr(test, expect(dead_code, reason = "exercised by pci_bar integration tests, not assignment-only tests"))]
 pub fn encode(probe: Probe, base: u64) -> Result<(u32, Option<u32>), Error> {
     if base & (probe.size - 1) != 0 { return Err(Error::AddressOverflow); }
     match probe.kind {
