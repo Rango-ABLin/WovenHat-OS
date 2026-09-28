@@ -466,18 +466,6 @@ fn restore_bridge_unlocked(address: Address, saved: BridgeRegisterSnapshot) -> b
         && write_command_unlocked(address, saved.command)
 }
 
-#[expect(dead_code, reason = "used by the pending recursive bridge-routing transaction")]
-fn bridge_windows_from_assignments(
-    assignments: &[Option<assignment::Assignment>; 6],
-) -> Result<bridge::Windows, resource::Error> {
-    let requirements = assignment::bridge_requirements(assignments)?;
-    Ok(bridge::Windows {
-        io: requirements.io.map(|range| bridge::Window { base: range.base, size: range.size }),
-        memory: requirements.memory.map(|range| bridge::Window { base: range.base, size: range.size }),
-        prefetch: requirements.prefetch.map(|range| bridge::Window { base: range.base, size: range.size }),
-    })
-}
-
 #[expect(dead_code)]
 pub fn program_bridge_windows(
     address: Address,
