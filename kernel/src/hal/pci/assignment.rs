@@ -15,6 +15,7 @@ pub struct Request {
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Assignment {
     pub index: u8,
+    pub kind: bar::Kind,
     pub reservation: resource::Reservation,
 }
 
@@ -65,7 +66,7 @@ impl<'a> Plan<'a> {
             bar::Kind::Memory64 => &mut self.apertures.mmio64,
         };
         let reservation = allocator.reserve(probe.size, probe.size).map_err(Error::Resource)?;
-        let assignment = Assignment { index: request.index, reservation };
+        let assignment = Assignment { index: request.index, kind: probe.kind, reservation };
         self.assignments[self.count] = Some(assignment);
         self.count += 1;
         Ok(Some(assignment))
@@ -81,21 +82,12 @@ impl Drop for Plan<'_> {
     fn drop(&mut self) {
         if self.committed { return; }
         for assignment in self.assignments[..self.count].iter().rev().flatten().copied() {
-            let allocator = match assignment.reservation.range.base {
-                base if in_aperture(&self.apertures.io, base) => &mut self.apertures.io,
-                base if in_aperture(&self.apertures.mmio32, base) => &mut self.apertures.mmio32,
-                _ => &mut self.apertures.mmio64,
+            let allocator = match assignment.kind {
+                bar::Kind::Io => &mut self.apertures.io,
+                bar::Kind::Memory32 => &mut self.apertures.mmio32,
+                bar::Kind::Memory64 => &mut self.apertures.mmio64,
             };
             let _ = allocator.release(assignment.reservation);
         }
     }
-}
-
-fn in_aperture(allocator: &resource::Allocator, base: u64) -> bool {
-    // A reservation from another allocator cannot validate here even if
-    // apertures accidentally overlap, so contains() remains authoritative.
-    // This helper is only a fast selector for the non-overlapping apertures
-    // required by Stage 13.2.
-    let _ = base;
-    allocator.active() != 0
 }
