@@ -232,8 +232,10 @@ fn parse_fadt(
     regions: &[MemoryRegion],
     summary: &mut Summary,
 ) -> Result<(), Error> {
-    // ACPI 1.0 FADT contains the 32-bit DSDT physical address at offset 40.
-    // ACPI 2.0+ adds X_DSDT at offset 140; prefer it when present/non-zero.
+    // The FADT itself is authoritative, but its DSDT pointer may target an
+    // ACPI reclaim/NVS range that the boot memory-region filter does not expose
+    // to this early parser. Retain DSDT metadata only when the referenced table
+    // is safely readable; absence here must not make otherwise-valid ACPI fatal.
     if length < 44 {
         return Err(Error::InvalidLength);
     }
@@ -259,9 +261,13 @@ fn parse_fadt(
     };
     let dsdt = if extended != 0 { extended } else { legacy };
     if dsdt == 0 {
-        return Err(Error::Missing);
+        return Ok(());
     }
-    let header = read_sdt_header(physical_offset, dsdt, regions)?;
+    let header = match read_sdt_header(physical_offset, dsdt, regions) {
+        Ok(header) => header,
+        Err(Error::OutOfRange) => return Ok(()),
+        Err(error) => return Err(error),
+    };
     if header.signature != *b"DSDT" {
         return Err(Error::InvalidSignature);
     }
