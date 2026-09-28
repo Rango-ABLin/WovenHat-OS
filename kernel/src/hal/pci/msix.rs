@@ -217,6 +217,63 @@ pub fn mask_function(device: Device) -> Result<Capability, Error> {
     Ok(Capability { control, ..capability })
 }
 
+
+/// Enable MSI-X while keeping Function Mask asserted. The selected table
+/// entry is unmasked only after the capability enable write is verified.
+pub fn enable_function_masked(device: Device) -> Result<Capability, Error> {
+    let capability = capability(device)?;
+    let address = Address {
+        segment: device.segment, bus: device.bus,
+        device: device.device, function: device.function,
+    };
+    let _guard = super::CONFIG_LOCK.lock();
+    let header = super::read_config_unlocked(address, capability.offset).ok_or(Error::ConfigRead)?;
+    let mut control = (header >> 16) as u16;
+    control |= PCI_MSIX_ENABLE | PCI_MSIX_FUNCTION_MASK;
+    let updated = (header & 0x0000_ffff) | (u32::from(control) << 16);
+    if !super::write_config_unlocked(address, capability.offset, updated) {
+        return Err(Error::ConfigWrite);
+    }
+    let verify = super::read_config_unlocked(address, capability.offset).ok_or(Error::ConfigRead)?;
+    if (verify >> 16) as u16 != control { return Err(Error::VerifyFailed); }
+    Ok(Capability { control, ..capability })
+}
+
+pub fn unmask_entry(table_base: u64, capability: Capability, index: u16) -> Result<(), Error> {
+    let offset = entry_offset(capability, index)?
+        .checked_sub(u64::from(capability.table.offset)).ok_or(Error::Overflow)?;
+    let pointer = map_table_entry(table_base, offset)?;
+    // SAFETY: same validated mapping and bounded entry contract as
+    // program_masked_entry; only the vector-control dword is changed.
+    unsafe {
+        pointer.add(3).write_volatile(0);
+        if pointer.add(3).read_volatile() & VECTOR_CONTROL_MASKED != 0 {
+            return Err(Error::VerifyFailed);
+        }
+    }
+    Ok(())
+}
+
+pub fn disable_and_mask_function(device: Device) -> Result<(), Error> {
+    let capability = capability(device)?;
+    let address = Address {
+        segment: device.segment, bus: device.bus,
+        device: device.device, function: device.function,
+    };
+    let _guard = super::CONFIG_LOCK.lock();
+    let header = super::read_config_unlocked(address, capability.offset).ok_or(Error::ConfigRead)?;
+    let mut control = (header >> 16) as u16;
+    control |= PCI_MSIX_FUNCTION_MASK;
+    control &= !PCI_MSIX_ENABLE;
+    let updated = (header & 0x0000_ffff) | (u32::from(control) << 16);
+    if !super::write_config_unlocked(address, capability.offset, updated) {
+        return Err(Error::ConfigWrite);
+    }
+    let verify = super::read_config_unlocked(address, capability.offset).ok_or(Error::ConfigRead)?;
+    if (verify >> 16) as u16 != control { return Err(Error::VerifyFailed); }
+    Ok(())
+}
+
 #[expect(dead_code)]
 pub fn validate_owned_table(
     function: super::topology::FunctionHandle,
