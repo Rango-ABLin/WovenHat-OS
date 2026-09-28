@@ -72,3 +72,18 @@ fn capacity_and_duplicate_rejection_preserve_count() {
     assert_eq!(t.insert(endpoint(10, 1)), Err(Error::Capacity));
     assert_eq!(t.count(), MAX_FUNCTIONS);
 }
+
+
+#[test]
+fn explicit_mmio_release_invalidates_stale_lease_before_slot_reuse() {
+    let mut t = Topology::new();
+    let h = t.insert(endpoint(3, 0)).unwrap();
+    t.claim(h, 55).unwrap();
+    let stale = t.lease_mmio(h, 55, 0, 0x9000_0000, 0x2000).unwrap();
+    t.release_mmio(stale, 55).unwrap();
+    assert!(!t.validate_mmio(stale, 55));
+    let fresh = t.lease_mmio(h, 55, 0, 0x9000_0000, 0x2000).unwrap();
+    assert_eq!(fresh.slot, stale.slot);
+    assert_ne!(fresh.generation, stale.generation);
+    assert!(t.validate_mmio(fresh, 55));
+}
