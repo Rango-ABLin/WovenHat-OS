@@ -3,6 +3,7 @@ use core::{arch::asm, ptr};
 use crate::{hal::acpi::McfgAllocation, irq_lock::IrqMutex as Mutex};
 
 pub mod topology;
+pub mod resource;
 
 const CONFIG_ADDRESS: u16 = 0x0cf8;
 const CONFIG_DATA: u16 = 0x0cfc;
