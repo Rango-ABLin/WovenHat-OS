@@ -167,6 +167,8 @@ pub fn configure(allocations: &[McfgAllocation]) {
     }
 }
 
+pub const MAX_HOST_APERTURES: usize = resource::MAX_APERTURES;
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct HostAperture {
     pub base: u64,
@@ -174,55 +176,95 @@ pub struct HostAperture {
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct HostApertureSet {
+    pub ranges: [Option<HostAperture>; MAX_HOST_APERTURES],
+    pub count: usize,
+}
+
+impl HostApertureSet {
+    pub const fn new() -> Self {
+        Self { ranges: [None; MAX_HOST_APERTURES], count: 0 }
+    }
+
+    pub fn push(&mut self, range: HostAperture) -> Result<(), HostApertureError> {
+        if range.size == 0 || range.base.checked_add(range.size).is_none() {
+            return Err(HostApertureError::InvalidRange);
+        }
+        if self.count >= self.ranges.len() {
+            return Err(HostApertureError::Capacity);
+        }
+        let end = range.base.checked_add(range.size).ok_or(HostApertureError::InvalidRange)?;
+        for existing in self.ranges[..self.count].iter().flatten() {
+            let existing_end = existing.base.checked_add(existing.size)
+                .ok_or(HostApertureError::InvalidRange)?;
+            if range.base < existing_end && existing.base < end {
+                return Err(HostApertureError::Overlap);
+            }
+        }
+        self.ranges[self.count] = Some(range);
+        self.count += 1;
+        Ok(())
+    }
+
+    fn resource_ranges(&self) -> Result<([resource::Range; MAX_HOST_APERTURES], usize), HostApertureError> {
+        let mut output = [resource::Range { base: 0, size: 0 }; MAX_HOST_APERTURES];
+        for (index, aperture) in self.ranges[..self.count].iter().enumerate() {
+            let aperture = aperture.ok_or(HostApertureError::InvalidRange)?;
+            output[index] = resource::Range { base: aperture.base, size: aperture.size };
+        }
+        Ok((output, self.count))
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct HostApertures {
-    pub io: Option<HostAperture>,
-    pub memory: Option<HostAperture>,
-    pub prefetch: Option<HostAperture>,
+    pub io: HostApertureSet,
+    pub memory: HostApertureSet,
+    pub prefetch: HostApertureSet,
 }
 
 static HOST_APERTURES: Mutex<Option<HostApertures>> = Mutex::with_rank(None, 10);
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum HostApertureError {
+    Unavailable,
+    InvalidRange,
+    Capacity,
+    Overlap,
+    Allocation(resource::Error),
+}
 
 /// Publish firmware-authoritative PCI root-bridge apertures. The caller must
 /// obtain these from platform resource descriptors (for ACPI systems, _CRS);
 /// ECAM/MCFG ranges are configuration space and are intentionally rejected as
 /// an implicit source of BAR allocation space.
 #[expect(dead_code, reason = "ACPI _CRS producer is the next Stage 13.2 integration step")]
-pub fn configure_host_apertures(apertures: HostApertures) -> bool {
-    fn valid(range: HostAperture) -> bool {
-        range.size != 0 && range.base.checked_add(range.size).is_some()
+pub fn configure_host_apertures(apertures: HostApertures) -> Result<(), HostApertureError> {
+    fn validate(set: &HostApertureSet) -> Result<(), HostApertureError> {
+        if set.count > set.ranges.len() { return Err(HostApertureError::Capacity); }
+        let mut checked = HostApertureSet::new();
+        for range in set.ranges[..set.count].iter().copied() {
+            checked.push(range.ok_or(HostApertureError::InvalidRange)?)?;
+        }
+        Ok(())
     }
-    if apertures.io.is_some_and(|range| !valid(range))
-        || apertures.memory.is_some_and(|range| !valid(range))
-        || apertures.prefetch.is_some_and(|range| !valid(range))
-    {
-        return false;
-    }
+    validate(&apertures.io)?;
+    validate(&apertures.memory)?;
+    validate(&apertures.prefetch)?;
     *HOST_APERTURES.lock() = Some(apertures);
-    true
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum HostApertureError {
-    Unavailable,
-    InvalidRange,
+    Ok(())
 }
 
 fn configured_assignment_apertures() -> Result<assignment::Apertures, HostApertureError> {
     let configured = HOST_APERTURES.lock().ok_or(HostApertureError::Unavailable)?;
-    fn range(value: Option<HostAperture>) -> Result<resource::Range, HostApertureError> {
-        match value {
-            Some(value) if value.size != 0 && value.base.checked_add(value.size).is_some() => {
-                Ok(resource::Range { base: value.base, size: value.size })
-            }
-            Some(_) => Err(HostApertureError::InvalidRange),
-            None => Ok(resource::Range { base: 0, size: 0 }),
-        }
-    }
-    Ok(assignment::Apertures::new(
-        range(configured.io)?,
-        range(configured.memory)?,
-        range(configured.prefetch)?,
-    ))
+    let (io, io_count) = configured.io.resource_ranges()?;
+    let (memory, memory_count) = configured.memory.resource_ranges()?;
+    let (prefetch, prefetch_count) = configured.prefetch.resource_ranges()?;
+    assignment::Apertures::from_ranges(
+        &io[..io_count],
+        &memory[..memory_count],
+        &prefetch[..prefetch_count],
+    ).map_err(HostApertureError::Allocation)
 }
 
 fn scan_inventory() -> Inventory {
