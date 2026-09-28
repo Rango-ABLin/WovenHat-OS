@@ -13,6 +13,35 @@ pub const PCI_MSIX_FUNCTION_MASK: u16 = 1 << 14;
 pub const MAX_MSIX_VECTORS: u16 = 2048;
 pub const TABLE_ENTRY_BYTES: u64 = 16;
 
+pub const VECTOR_CONTROL_MASKED: u32 = 1;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct TableEntry {
+    pub address_low: u32,
+    pub address_high: u32,
+    pub data: u32,
+    pub vector_control: u32,
+}
+
+pub fn entry_offset(capability: Capability, index: u16) -> Result<u64, Error> {
+    if index >= capability.table_size { return Err(Error::MalformedCapability); }
+    u64::from(capability.table.offset)
+        .checked_add(u64::from(index).checked_mul(TABLE_ENTRY_BYTES).ok_or(Error::Overflow)?)
+        .ok_or(Error::Overflow)
+}
+
+pub fn masked_entry(destination_apic_id: u32, vector: u8) -> Result<TableEntry, Error> {
+    let message = super::MsiMessage::fixed(destination_apic_id, vector)
+        .map_err(|_| Error::MalformedCapability)?;
+    Ok(TableEntry {
+        address_low: message.address_low,
+        address_high: message.address_high,
+        data: u32::from(message.data),
+        vector_control: VECTOR_CONTROL_MASKED,
+    })
+}
+
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct BirOffset {
     pub bir: u8,
@@ -122,4 +151,12 @@ pub fn stage13_2_msix_self_test() -> bool {
     decode_bir_offset(0x0000_1006) == Err(Error::InvalidBir)
         && capability.table_size <= MAX_MSIX_VECTORS
         && TABLE_ENTRY_BYTES == 16
+        && entry_offset(capability, 3) == Ok(0x2030)
+        && entry_offset(capability, 4) == Err(Error::MalformedCapability)
+        && masked_entry(0x2a, 0x90) == Ok(TableEntry {
+            address_low: 0xfee2_a000,
+            address_high: 0,
+            data: 0x90,
+            vector_control: VECTOR_CONTROL_MASKED,
+        })
 }
