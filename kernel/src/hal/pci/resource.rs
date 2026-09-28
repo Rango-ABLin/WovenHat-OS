@@ -107,12 +107,6 @@ impl Allocator {
         Ok(())
     }
 
-    #[cfg(test)]
-    pub fn contains(&self, reservation: Reservation) -> bool {
-        self.slots.get(reservation.slot as usize).is_some_and(|slot| {
-            slot.occupied && slot.generation == reservation.generation && slot.range == reservation.range
-        })
-    }
 
     #[cfg(test)]
     pub fn active(&self) -> usize {
