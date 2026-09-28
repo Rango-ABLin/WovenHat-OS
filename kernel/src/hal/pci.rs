@@ -470,7 +470,6 @@ fn restore_bridge_unlocked(address: Address, saved: BridgeRegisterSnapshot) -> b
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum BridgeChainError {
-    InvalidChain(bridge_transaction::Error),
     NotBridge,
     InvalidWindow(bridge::Error),
     ConfigUnavailable,
