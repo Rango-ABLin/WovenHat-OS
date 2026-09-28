@@ -162,6 +162,38 @@ impl Topology {
         Ok(handle)
     }
 
+    /// Reconcile one discovered function without invalidating an unchanged
+    /// generation-safe handle, owner, or MMIO lease. Bridge routing metadata may
+    /// change across rescans, so parent relationships are recomputed in place.
+    pub fn reconcile(&mut self, descriptor: FunctionDescriptor) -> Result<FunctionHandle, Error> {
+        if let Some(index) = self.nodes.iter().position(|node| {
+            node.occupied && node.address == descriptor.address
+        }) {
+            if let Some(route) = descriptor.bridge {
+                if route.secondary == 0 || route.secondary > route.subordinate {
+                    return Err(Error::InvalidBridge);
+                }
+            }
+            self.nodes[index].bridge = descriptor.bridge;
+            let handle = FunctionHandle {
+                slot: index as u8,
+                generation: self.nodes[index].generation,
+            };
+            for node_index in 0..MAX_FUNCTIONS {
+                if self.nodes[node_index].occupied {
+                    let address = self.nodes[node_index].address;
+                    let current = FunctionHandle {
+                        slot: node_index as u8,
+                        generation: self.nodes[node_index].generation,
+                    };
+                    self.nodes[node_index].parent = self.find_parent(address, Some(current));
+                }
+            }
+            return Ok(handle);
+        }
+        self.insert(descriptor)
+    }
+
     pub fn snapshot(&self, handle: FunctionHandle) -> Result<NodeSnapshot, Error> {
         let node = self.node(handle)?;
         Ok(NodeSnapshot {
