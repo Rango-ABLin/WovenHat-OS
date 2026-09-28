@@ -252,17 +252,11 @@ pub fn enable_owned_msi(
     owner: u32,
     destination_apic_id: u32,
 ) -> Result<MsiLease, MsiLifecycleError> {
-    let snapshot = TOPOLOGY.lock().snapshot(function)
-        .map_err(|_| MsiLifecycleError::InvalidFunction)?;
+    let (snapshot, device) = super::function_device(function)
+        .ok_or(MsiLifecycleError::InvalidFunction)?;
     if snapshot.owner != Some(owner) || owner == 0 {
         return Err(MsiLifecycleError::InvalidFunction);
     }
-    let device = INVENTORY.lock().devices.iter().flatten().find(|device| {
-        device.segment == snapshot.address.segment
-            && device.bus == snapshot.address.bus
-            && device.device == snapshot.address.device
-            && device.function == snapshot.address.function
-    }).copied().ok_or(MsiLifecycleError::InvalidFunction)?;
 
     if !claim_interrupt_mode(function, owner, InterruptMode::Msi) {
         return Err(MsiLifecycleError::InvalidFunction);
@@ -288,17 +282,11 @@ pub fn enable_owned_msi(
 #[expect(dead_code)]
 pub fn disable_owned_msi(lease: MsiLease, owner: u32) -> Result<(), MsiLifecycleError> {
     VECTOR_ALLOCATOR.lock().validate(lease.vector, owner)?;
-    let snapshot = TOPOLOGY.lock().snapshot(lease.function)
-        .map_err(|_| MsiLifecycleError::InvalidFunction)?;
+    let (snapshot, device) = super::function_device(lease.function)
+        .ok_or(MsiLifecycleError::InvalidFunction)?;
     if snapshot.owner != Some(owner) || owner == 0 {
         return Err(MsiLifecycleError::InvalidFunction);
     }
-    let device = INVENTORY.lock().devices.iter().flatten().find(|device| {
-        device.segment == snapshot.address.segment
-            && device.bus == snapshot.address.bus
-            && device.device == snapshot.address.device
-            && device.function == snapshot.address.function
-    }).copied().ok_or(MsiLifecycleError::InvalidFunction)?;
     disable_msi(device)?;
     VECTOR_ALLOCATOR.lock().release(lease.vector, owner)?;
     if !release_interrupt_mode(lease.function, owner, InterruptMode::Msi) {
