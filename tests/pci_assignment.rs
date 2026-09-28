@@ -26,7 +26,15 @@ fn separate_domains_allocate_independently() {
         let mut plan = Plan::new(&mut apertures);
         let io = plan.reserve(Request { index: 0, probe: Some(probe(Kind::Io, 0x100)) }).unwrap().unwrap();
         let m32 = plan.reserve(Request { index: 1, probe: Some(probe(Kind::Memory32, 0x1000)) }).unwrap().unwrap();
-        let m64 = plan.reserve(Request { index: 2, probe: Some(probe(Kind::Memory64, 0x20_0000)) }).unwrap().unwrap();
+        let m64 = plan.reserve(Request {
+            index: 2,
+            probe: Some(Probe {
+                kind: Kind::Memory64,
+                size: 0x20_0000,
+                prefetchable: true,
+                low_flags: 0x0c,
+            }),
+        }).unwrap().unwrap();
         assert_eq!(io.reservation.range.base, 0x1000);
         assert_eq!(m32.reservation.range.base, 0x8000_0000);
         assert_eq!(m64.reservation.range.base, 0x1_0000_0000);
@@ -117,4 +125,30 @@ fn bridge_requirements_separate_prefetchable_memory() {
     assert_eq!(requirements.io.unwrap().base, 0x1000);
     assert_eq!(requirements.memory.unwrap().base, 0x8000_0000);
     assert_eq!(requirements.prefetch.unwrap().base, 0x1_0000_0000);
+}
+
+#[test]
+fn non_prefetchable_64_bit_bar_uses_32_bit_routing_aperture() {
+    let mut apertures = Apertures::new(
+        Range { base: 0x1000, size: 0x1000 },
+        Range { base: 0x9000_0000, size: 0x0100_0000 },
+        Range { base: 0x2_0000_0000, size: 0x0100_0000 },
+    );
+    let assignment = {
+        let mut plan = Plan::new(&mut apertures);
+        let item = plan.reserve(Request {
+            index: 0,
+            probe: Some(Probe {
+                kind: Kind::Memory64,
+                size: 0x20_0000,
+                prefetchable: false,
+                low_flags: 0x04,
+            }),
+        }).unwrap().unwrap();
+        let _ = plan.commit();
+        item
+    };
+    assert_eq!(assignment.reservation.range.base, 0x9000_0000);
+    assert_eq!(apertures.mmio32.active(), 1);
+    assert_eq!(apertures.mmio64.active(), 0);
 }
