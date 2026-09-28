@@ -166,6 +166,7 @@ impl Topology {
     /// Reconcile one discovered function without invalidating an unchanged
     /// generation-safe handle, owner, or MMIO lease. Bridge routing metadata may
     /// change across rescans, so parent relationships are recomputed in place.
+    #[expect(dead_code, reason = "used by feature-gated Stage 13 PCI hotplug reconciliation")]
     pub fn reconcile(&mut self, descriptor: FunctionDescriptor) -> Result<FunctionHandle, Error> {
         if let Some(index) = self.nodes.iter().position(|node| {
             node.occupied && node.address == descriptor.address
