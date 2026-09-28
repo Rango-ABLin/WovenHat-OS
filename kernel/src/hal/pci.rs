@@ -246,6 +246,17 @@ pub fn device(index: usize) -> Option<Device> {
     INVENTORY.lock().devices.get(index).copied().flatten()
 }
 
+#[cfg(any(
+    feature = "stage13-1-test",
+    feature = "stage13-2-test",
+    feature = "stage13-3-test",
+    feature = "stage13-4-test",
+    feature = "stage13-5-test",
+    feature = "stage13-6-test",
+    feature = "stage13-7-test",
+    feature = "stage13-8-test",
+    feature = "stage13-9-test"
+))]
 #[derive(Clone, Copy, Default, PartialEq, Eq)]
 pub struct RescanRemoval {
     pub function: topology::FunctionHandle,
@@ -255,6 +266,17 @@ pub struct RescanRemoval {
 /// Detect functions that disappeared from configuration space without
 /// publishing a replacement inventory/topology. Callers must teardown each
 /// returned owner first; only then may a later discover() publish fresh state.
+#[cfg(any(
+    feature = "stage13-1-test",
+    feature = "stage13-2-test",
+    feature = "stage13-3-test",
+    feature = "stage13-4-test",
+    feature = "stage13-5-test",
+    feature = "stage13-6-test",
+    feature = "stage13-7-test",
+    feature = "stage13-8-test",
+    feature = "stage13-9-test"
+))]
 pub fn rescan_removed(
     removed: &mut [Option<RescanRemoval>; MAX_DEVICES],
 ) -> usize {
@@ -302,6 +324,17 @@ pub fn claim_function(handle: topology::FunctionHandle, owner: u32) -> Result<()
     TOPOLOGY.lock().claim(handle, owner)
 }
 
+#[cfg(any(
+    feature = "stage13-1-test",
+    feature = "stage13-2-test",
+    feature = "stage13-3-test",
+    feature = "stage13-4-test",
+    feature = "stage13-5-test",
+    feature = "stage13-6-test",
+    feature = "stage13-7-test",
+    feature = "stage13-8-test",
+    feature = "stage13-9-test"
+))]
 pub fn topology_owner(handle: topology::FunctionHandle) -> Result<u32, topology::Error> {
     Ok(TOPOLOGY.lock().snapshot(handle)?.owner.unwrap_or(topology::NO_OWNER))
 }
