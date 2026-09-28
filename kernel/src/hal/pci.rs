@@ -642,6 +642,116 @@ fn restore_bridge_chain_unlocked(
     restored
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BridgePlanError {
+    Routing(routing::Error),
+    Transaction(bridge_transaction::Error),
+    Probe(BarProbeError),
+    Overflow,
+}
+
+/// Build bridge forwarding windows from the currently published PCI generation.
+/// Existing BAR addresses are treated as demand; host aperture allocation remains
+/// a separate policy input and is never invented here.
+pub fn build_bridge_chain() -> Result<bridge_transaction::Chain, BridgePlanError> {
+    let mut nodes = [None; topology::MAX_FUNCTIONS];
+    let mut devices = [None; MAX_DEVICES];
+    {
+        let published = PUBLISHED.lock();
+        devices = published.inventory.devices;
+        for (slot, node) in nodes.iter_mut().enumerate() {
+            let Some(handle) = published.topology.handle_at(slot) else { continue; };
+            *node = published.topology.snapshot(handle).ok();
+        }
+    }
+
+    let mut plan = routing::Plan::new();
+    for node in nodes.iter().flatten().copied().filter(|node| node.bridge.is_some()) {
+        plan.add_bridge(routing::Bridge {
+            id: node.handle.slot,
+            parent: node.parent.map(|parent| parent.slot),
+        }).map_err(BridgePlanError::Routing)?;
+    }
+
+    // Probe BAR sizes only after dropping PUBLISHED (rank 20), because BAR
+    // sizing performs config-space transactions under rank 10.
+    for node in nodes.iter().flatten().copied() {
+        let Some(parent) = node.parent else { continue; };
+        let Some(device) = devices.iter().flatten().find(|device| {
+            device.segment == node.address.segment && device.bus == node.address.bus
+                && device.device == node.address.device && device.function == node.address.function
+        }).copied() else { continue; };
+
+        let mut demand = routing::Demand::default();
+        let mut index = 0usize;
+        while index < device.bars.len() {
+            let bar = device.bars[index];
+            if !bar.valid || bar.address == 0 {
+                index += 1;
+                continue;
+            }
+            let probe = probe_bar_size(
+                Address {
+                    segment: device.segment, bus: device.bus,
+                    device: device.device, function: device.function,
+                },
+                device.header_type,
+                index as u8,
+            ).map_err(BridgePlanError::Probe)?;
+            let window = bridge::Window { base: bar.address, size: probe.size };
+            match bar.kind {
+                BarKind::Io => merge_route_window(&mut demand.io, window, 0x1000)?,
+                BarKind::Memory32 | BarKind::Memory64 if bar.prefetchable =>
+                    merge_route_window(&mut demand.prefetch, window, 0x10_0000)?,
+                BarKind::Memory32 | BarKind::Memory64 =>
+                    merge_route_window(&mut demand.memory, window, 0x10_0000)?,
+            }
+            index += if bar.kind == BarKind::Memory64 { 2 } else { 1 };
+        }
+        plan.add_demand(parent.slot, demand).map_err(BridgePlanError::Routing)?;
+    }
+
+    plan.solve().map_err(BridgePlanError::Routing)?;
+    let mut chain = bridge_transaction::Chain::new();
+    for node in nodes.iter().flatten().copied().filter(|node| node.bridge.is_some()) {
+        let Some(device) = devices.iter().flatten().find(|device| {
+            device.segment == node.address.segment && device.bus == node.address.bus
+                && device.device == node.address.device && device.function == node.address.function
+        }).copied() else { continue; };
+        chain.push(bridge_transaction::Entry {
+            address: Address {
+                segment: node.address.segment, bus: node.address.bus,
+                device: node.address.device, function: node.address.function,
+            },
+            header_type: device.header_type,
+            depth: plan.depth(node.handle.slot).map_err(BridgePlanError::Routing)?,
+            windows: plan.windows(node.handle.slot).map_err(BridgePlanError::Routing)?,
+        }).map_err(BridgePlanError::Transaction)?;
+    }
+    Ok(chain)
+}
+
+fn merge_route_window(
+    target: &mut Option<bridge::Window>,
+    incoming: bridge::Window,
+    granularity: u64,
+) -> Result<(), BridgePlanError> {
+    let incoming_end = incoming.base.checked_add(incoming.size).ok_or(BridgePlanError::Overflow)?;
+    let mut base = incoming.base & !(granularity - 1);
+    let mut end = incoming_end.checked_add(granularity - 1).ok_or(BridgePlanError::Overflow)?
+        & !(granularity - 1);
+    if let Some(current) = *target {
+        let current_end = current.base.checked_add(current.size).ok_or(BridgePlanError::Overflow)?;
+        base = core::cmp::min(base, current.base);
+        end = core::cmp::max(end, current_end);
+    }
+    *target = Some(bridge::Window {
+        base,
+        size: end.checked_sub(base).ok_or(BridgePlanError::Overflow)?,
+    });
+    Ok(())
+}
+
 #[expect(dead_code)]
 pub fn program_bridge_chain(
     mut chain: bridge_transaction::Chain,
