@@ -331,10 +331,10 @@ pub fn rescan_removed(
 
 #[expect(dead_code)]
 pub fn topology_handle(address: Address) -> Option<topology::FunctionHandle> {
-    let topology = PUBLISHED.lock().topology;
+    let published = PUBLISHED.lock();
     for slot in 0..topology::MAX_FUNCTIONS {
-        let Some(handle) = topology.handle_at(slot) else { continue; };
-        if topology.snapshot(handle).ok().is_some_and(|node| {
+        let Some(handle) = published.topology.handle_at(slot) else { continue; };
+        if published.topology.snapshot(handle).ok().is_some_and(|node| {
             node.address == topology::FunctionAddress {
                 segment: address.segment, bus: address.bus, device: address.device, function: address.function,
             }
@@ -343,6 +343,19 @@ pub fn topology_handle(address: Address) -> Option<topology::FunctionHandle> {
         }
     }
     None
+}
+
+#[expect(dead_code)]
+pub(crate) fn function_device(
+    handle: topology::FunctionHandle,
+) -> Option<(topology::NodeSnapshot, Device)> {
+    let published = PUBLISHED.lock();
+    let snapshot = published.topology.snapshot(handle).ok()?;
+    let device = published.inventory.devices.iter().flatten().find(|device| {
+        device.segment == snapshot.address.segment && device.bus == snapshot.address.bus
+            && device.device == snapshot.address.device && device.function == snapshot.address.function
+    }).copied()?;
+    Some((snapshot, device))
 }
 
 #[expect(dead_code)]
@@ -655,7 +668,7 @@ pub enum BridgePlanError {
 /// a separate policy input and is never invented here.
 pub fn build_bridge_chain() -> Result<bridge_transaction::Chain, BridgePlanError> {
     let mut nodes = [None; topology::MAX_FUNCTIONS];
-    let mut devices = [None; MAX_DEVICES];
+    let devices;
     {
         let published = PUBLISHED.lock();
         devices = published.inventory.devices;
