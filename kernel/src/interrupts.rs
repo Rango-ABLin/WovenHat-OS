@@ -17,6 +17,59 @@ static BREAKPOINT_REACHED: AtomicBool = AtomicBool::new(false);
 
 static IDT: Once<InterruptDescriptorTable> = Once::new();
 
+pub const PCI_VECTOR_FIRST: u8 = 0x90;
+pub const PCI_VECTOR_LAST: u8 = 0xcf;
+const PCI_VECTOR_COUNT: usize = (PCI_VECTOR_LAST - PCI_VECTOR_FIRST + 1) as usize;
+static PCI_DEVICE_IRQS: [core::sync::atomic::AtomicU64; PCI_VECTOR_COUNT] =
+    [const { core::sync::atomic::AtomicU64::new(0) }; PCI_VECTOR_COUNT];
+static PCI_DEVICE_WORK: [AtomicBool; PCI_VECTOR_COUNT] =
+    [const { AtomicBool::new(false) }; PCI_VECTOR_COUNT];
+
+fn dispatch_pci_device_vector(vector: u8) {
+    let index = usize::from(vector - PCI_VECTOR_FIRST);
+    PCI_DEVICE_IRQS[index].fetch_add(1, Ordering::Relaxed);
+    PCI_DEVICE_WORK[index].store(true, Ordering::Release);
+    crate::smp::eoi();
+}
+
+pub fn take_pci_device_work(vector: u8) -> bool {
+    if !(PCI_VECTOR_FIRST..=PCI_VECTOR_LAST).contains(&vector) {
+        return false;
+    }
+    PCI_DEVICE_WORK[usize::from(vector - PCI_VECTOR_FIRST)].swap(false, Ordering::AcqRel)
+}
+
+macro_rules! pci_irq_handlers {
+    ($(($name:ident, $vector:expr)),+ $(,)?) => {
+        $(extern "x86-interrupt" fn $name(_frame: InterruptStackFrame) {
+            dispatch_pci_device_vector($vector);
+        })+
+        fn install_pci_irq_handlers(idt: &mut InterruptDescriptorTable) {
+            $(idt[$vector].set_handler_fn($name);)+
+        }
+    };
+}
+
+pci_irq_handlers!(
+    (pci_irq_90,0x90),(pci_irq_91,0x91),(pci_irq_92,0x92),(pci_irq_93,0x93),
+    (pci_irq_94,0x94),(pci_irq_95,0x95),(pci_irq_96,0x96),(pci_irq_97,0x97),
+    (pci_irq_98,0x98),(pci_irq_99,0x99),(pci_irq_9a,0x9a),(pci_irq_9b,0x9b),
+    (pci_irq_9c,0x9c),(pci_irq_9d,0x9d),(pci_irq_9e,0x9e),(pci_irq_9f,0x9f),
+    (pci_irq_a0,0xa0),(pci_irq_a1,0xa1),(pci_irq_a2,0xa2),(pci_irq_a3,0xa3),
+    (pci_irq_a4,0xa4),(pci_irq_a5,0xa5),(pci_irq_a6,0xa6),(pci_irq_a7,0xa7),
+    (pci_irq_a8,0xa8),(pci_irq_a9,0xa9),(pci_irq_aa,0xaa),(pci_irq_ab,0xab),
+    (pci_irq_ac,0xac),(pci_irq_ad,0xad),(pci_irq_ae,0xae),(pci_irq_af,0xaf),
+    (pci_irq_b0,0xb0),(pci_irq_b1,0xb1),(pci_irq_b2,0xb2),(pci_irq_b3,0xb3),
+    (pci_irq_b4,0xb4),(pci_irq_b5,0xb5),(pci_irq_b6,0xb6),(pci_irq_b7,0xb7),
+    (pci_irq_b8,0xb8),(pci_irq_b9,0xb9),(pci_irq_ba,0xba),(pci_irq_bb,0xbb),
+    (pci_irq_bc,0xbc),(pci_irq_bd,0xbd),(pci_irq_be,0xbe),(pci_irq_bf,0xbf),
+    (pci_irq_c0,0xc0),(pci_irq_c1,0xc1),(pci_irq_c2,0xc2),(pci_irq_c3,0xc3),
+    (pci_irq_c4,0xc4),(pci_irq_c5,0xc5),(pci_irq_c6,0xc6),(pci_irq_c7,0xc7),
+    (pci_irq_c8,0xc8),(pci_irq_c9,0xc9),(pci_irq_ca,0xca),(pci_irq_cb,0xcb),
+    (pci_irq_cc,0xcc),(pci_irq_cd,0xcd),(pci_irq_ce,0xce),(pci_irq_cf,0xcf),
+);
+
+
 /// First WovenHat-owned PCI device vector reserved for WovenWiFi.
 /// Kept below the LAPIC timer/IPI range (0xe0+) and away from syscall 0x80.
 pub const WIFI_DEVICE_VECTOR: u8 = 0xd0;
@@ -57,6 +110,7 @@ pub fn init() {
         idt[crate::smp::RESCHEDULE_VECTOR].set_handler_fn(reschedule_ipi_handler);
         idt[crate::smp::SPURIOUS_VECTOR].set_handler_fn(spurious_handler);
         idt[WIFI_DEVICE_VECTOR].set_handler_fn(wifi_device_interrupt_handler);
+        install_pci_irq_handlers(&mut idt);
         idt.divide_error.set_handler_fn(divide_error_handler);
         idt.invalid_opcode.set_handler_fn(invalid_opcode_handler);
         // SAFETY: The selected IST entry is initialized with a dedicated,
