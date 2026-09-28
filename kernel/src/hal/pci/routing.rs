@@ -37,13 +37,11 @@ struct Node {
     aggregate: Demand,
 }
 
-#[cfg_attr(not(test), expect(dead_code, reason = "pure planner is exercised by host tests before hardware transaction integration"))]
 pub struct Plan {
     nodes: [Node; MAX_ROUTES],
     count: usize,
 }
 
-#[cfg_attr(not(test), expect(dead_code, reason = "pure planner is exercised by host tests before hardware transaction integration"))]
 impl Plan {
     pub const fn new() -> Self {
         Self { nodes: [Node { occupied: false, bridge: Bridge { id: 0, parent: None }, direct: Demand { io: None, memory: None, prefetch: None }, aggregate: Demand { io: None, memory: None, prefetch: None } }; MAX_ROUTES], count: 0 }
