@@ -4,6 +4,18 @@ use crate::irq_lock::IrqMutex;
 static VECTOR_ALLOCATOR: IrqMutex<vector::Allocator> =
     IrqMutex::with_rank(vector::Allocator::new(), 21);
 
+pub(super) fn allocate_vector(owner: u32) -> Result<vector::Lease, vector::Error> {
+    VECTOR_ALLOCATOR.lock().allocate(owner)
+}
+
+pub(super) fn validate_vector(lease: vector::Lease, owner: u32) -> Result<(), vector::Error> {
+    VECTOR_ALLOCATOR.lock().validate(lease, owner)
+}
+
+pub(super) fn release_vector(lease: vector::Lease, owner: u32) -> Result<(), vector::Error> {
+    VECTOR_ALLOCATOR.lock().release(lease, owner)
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct MsiLease {
     pub function: topology::FunctionHandle,
