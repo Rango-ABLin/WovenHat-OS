@@ -255,9 +255,20 @@ pub fn unbind_pci_resources(name: &'static str) -> Result<(), PciUnbindError> {
         return Err(error);
     }
 
-    // Logical BAR authority is retained by topology until function ownership
-    // ends. No physical unmap primitive exists yet, so do not claim physical
-    // page-table revocation here.
+    // MSI-X teardown above still needs its BAR authority, so BAR release must
+    // follow interrupt quiescence and precede outer function ownership release.
+    if let Some(bar) = binding.bar {
+        if let Err(error) = crate::hal::pci::release_bar_lease(bar, binding.owner) {
+            return Err(PciUnbindError::Topology(error));
+        }
+    } else if let Some(PciInterrupt::Msix(lease)) = binding.interrupt {
+        // MSI-X can carry its table BAR directly even when it was not also
+        // registered as the driver's primary BAR.
+        if let Err(error) = crate::hal::pci::release_bar_lease(lease.bar, binding.owner) {
+            return Err(PciUnbindError::Topology(error));
+        }
+    }
+
     if let Err(error) = crate::hal::pci::release_function(binding.function, binding.owner) {
         // Interrupts are already quiesced and their vector released. Keep the
         // driver out of Bound state: restoring Bound here would falsely imply
