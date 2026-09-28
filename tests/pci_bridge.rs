@@ -51,7 +51,14 @@ fn composes_all_windows_into_one_register_image() {
 #[test]
 fn absent_windows_encode_disabled_registers() {
     let registers = bridge::encode_windows(bridge::Windows::default()).unwrap();
-    assert_eq!(registers, bridge::Registers::default());
+    // Each disabled aperture has base > limit rather than an ambiguous
+    // all-zero base/limit pair.
+    assert_eq!(registers.io_low & 0xffff, 0x00f1);
+    assert_eq!(registers.memory, 0x0000_fff0);
+    assert_eq!(registers.prefetch_low, 0x0001_fff1);
+    assert_eq!(registers.io_upper, 0);
+    assert_eq!(registers.prefetch_base_upper, 0);
+    assert_eq!(registers.prefetch_limit_upper, 0);
 }
 
 #[test]
