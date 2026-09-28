@@ -466,6 +466,7 @@ fn restore_bridge_unlocked(address: Address, saved: BridgeRegisterSnapshot) -> b
         && write_command_unlocked(address, saved.command)
 }
 
+#[expect(dead_code, reason = "used by the pending recursive bridge-routing transaction")]
 fn bridge_windows_from_assignments(
     assignments: &[Option<assignment::Assignment>; 6],
 ) -> Result<bridge::Windows, resource::Error> {
