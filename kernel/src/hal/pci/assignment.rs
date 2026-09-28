@@ -52,8 +52,10 @@ pub fn release_all(
     for assignment in assignments.iter().rev().flatten().copied() {
         let allocator = match assignment.kind {
             bar::Kind::Io => &mut apertures.io,
-            bar::Kind::Memory32 => &mut apertures.mmio32,
-            bar::Kind::Memory64 => &mut apertures.mmio64,
+            bar::Kind::Memory32 | bar::Kind::Memory64 if assignment.prefetchable => {
+                &mut apertures.mmio64
+            }
+            bar::Kind::Memory32 | bar::Kind::Memory64 => &mut apertures.mmio32,
         };
         if let Err(error) = allocator.release(assignment.reservation) {
             first_error.get_or_insert(error);
@@ -121,8 +123,10 @@ impl<'a> Plan<'a> {
         }
         let allocator = match probe.kind {
             bar::Kind::Io => &mut self.apertures.io,
-            bar::Kind::Memory32 => &mut self.apertures.mmio32,
-            bar::Kind::Memory64 => &mut self.apertures.mmio64,
+            bar::Kind::Memory32 | bar::Kind::Memory64 if probe.prefetchable => {
+                &mut self.apertures.mmio64
+            }
+            bar::Kind::Memory32 | bar::Kind::Memory64 => &mut self.apertures.mmio32,
         };
         let reservation = allocator.reserve(probe.size, probe.size).map_err(Error::Resource)?;
         let assignment = Assignment {
