@@ -225,7 +225,7 @@ fn configured_assignment_apertures() -> Result<assignment::Apertures, HostApertu
     ))
 }
 
-pub fn discover() -> Summary {
+fn scan_inventory() -> Inventory {
     let config = *CONFIG.lock();
     let mut inventory = Inventory::new();
     inventory.summary.ecam = config.ecam_count != 0;
@@ -253,11 +253,57 @@ pub fn discover() -> Summary {
         inventory.summary.segments = u8::try_from(seen_count).unwrap_or(u8::MAX);
     }
 
-    // Reconcile into a private candidate first. A capacity/descriptor failure
-    // must not partially mutate live handles, ownership, leases, or inventory.
+    inventory
+}
+
+/// Initial PCI discovery. This is only valid before runtime ownership/leases
+/// exist; later refreshes must use the driver-aware hotplug coordinator.
+pub fn discover() -> Summary {
+    let inventory = scan_inventory();
+    let mut topology = topology::Topology::new();
+    for device in inventory.devices.iter().flatten() {
+        if topology.insert(topology::FunctionDescriptor {
+            address: topology::FunctionAddress {
+                segment: device.segment, bus: device.bus, device: device.device, function: device.function,
+            },
+            bridge: device.bridge_buses,
+        }).is_err() {
+            let mut failed = inventory;
+            failed.summary.truncated = true;
+            return failed.summary;
+        }
+    }
+    let summary = inventory.summary;
+    let mut published = PUBLISHED.lock();
+    // Refuse to replace a live topology. Runtime refresh must first coordinate
+    // removals through WovenDriver so generations and subordinate authority are
+    // not silently invalidated.
+    if published.topology.count() != 0 {
+        return published.inventory.summary;
+    }
+    published.topology = topology;
+    published.inventory = inventory;
+    summary
+}
+
+/// Publish a fresh hardware inventory after the caller has already detected
+/// and torn down disappeared functions. Existing handles/owners/leases for
+/// still-present functions are preserved transactionally.
+#[cfg(any(
+    feature = "stage13-1-test",
+    feature = "stage13-2-test",
+    feature = "stage13-3-test",
+    feature = "stage13-4-test",
+    feature = "stage13-5-test",
+    feature = "stage13-6-test",
+    feature = "stage13-7-test",
+    feature = "stage13-8-test",
+    feature = "stage13-9-test"
+))]
+pub(crate) fn reconcile_after_teardown() -> Summary {
+    let mut inventory = scan_inventory();
     let mut published = PUBLISHED.lock();
     let mut candidate = published.topology.clone();
-    let mut topology_ok = true;
     for device in inventory.devices.iter().flatten() {
         if candidate.reconcile(topology::FunctionDescriptor {
             address: topology::FunctionAddress {
@@ -265,15 +311,10 @@ pub fn discover() -> Summary {
             },
             bridge: device.bridge_buses,
         }).is_err() {
-            topology_ok = false;
-            break;
+            inventory.summary.truncated = true;
+            return inventory.summary;
         }
     }
-    if !topology_ok {
-        inventory.summary.truncated = true;
-        return inventory.summary;
-    }
-
     let summary = inventory.summary;
     published.topology = candidate;
     published.inventory = inventory;
