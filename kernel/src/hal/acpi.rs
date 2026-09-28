@@ -692,6 +692,63 @@ fn read_u64(bytes: &[u8], offset: usize) -> u64 {
     u64::from_le_bytes(bytes[offset..offset + 8].try_into().unwrap_or([0; 8]))
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct AmlPackage {
+    body_offset: usize,
+    end_offset: usize,
+}
+
+fn decode_aml_pkg_length(bytes: &[u8], offset: usize) -> Result<(usize, usize), Error> {
+    let lead = *bytes.get(offset).ok_or(Error::InvalidLength)?;
+    let follow = usize::from(lead >> 6);
+    if follow > 3 {
+        return Err(Error::InvalidLength);
+    }
+    let encoded = bytes
+        .get(offset..offset.checked_add(follow + 1).ok_or(Error::AddressOverflow)?)
+        .ok_or(Error::InvalidLength)?;
+    let mut length = if follow == 0 {
+        usize::from(lead & 0x3f)
+    } else {
+        usize::from(lead & 0x0f)
+    };
+    for index in 0..follow {
+        length |= usize::from(encoded[index + 1]) << (4 + index * 8);
+    }
+    if length < follow + 1 {
+        return Err(Error::InvalidLength);
+    }
+    Ok((length, follow + 1))
+}
+
+fn aml_package(bytes: &[u8], pkg_offset: usize) -> Result<AmlPackage, Error> {
+    let (length, length_bytes) = decode_aml_pkg_length(bytes, pkg_offset)?;
+    let end_offset = pkg_offset.checked_add(length).ok_or(Error::AddressOverflow)?;
+    if end_offset > bytes.len() {
+        return Err(Error::InvalidLength);
+    }
+    Ok(AmlPackage {
+        body_offset: pkg_offset.checked_add(length_bytes).ok_or(Error::AddressOverflow)?,
+        end_offset,
+    })
+}
+
+fn aml_name_seg(bytes: &[u8], offset: usize) -> Result<([u8; 4], usize), Error> {
+    let name = bytes
+        .get(offset..offset.checked_add(4).ok_or(Error::AddressOverflow)?)
+        .ok_or(Error::InvalidLength)?;
+    fn valid_lead(byte: u8) -> bool {
+        byte == b'_' || byte.is_ascii_uppercase()
+    }
+    fn valid_tail(byte: u8) -> bool {
+        valid_lead(byte) || byte.is_ascii_digit()
+    }
+    if !valid_lead(name[0]) || !name[1..].iter().copied().all(valid_tail) {
+        return Err(Error::InvalidSignature);
+    }
+    Ok(([name[0], name[1], name[2], name[3]], offset + 4))
+}
+
 fn decode_pci_root_resource_template(
     bytes: &[u8],
     output: &mut [PciRootResource; MAX_PCI_ROOT_RESOURCES],
@@ -867,6 +924,14 @@ pub fn self_test() -> bool {
         && topology.memory_affinities[0].base == 0x20_0000
         && topology.memory_affinities[0].length == 0x10_0000;
 
+    let aml_pkg_short = decode_aml_pkg_length(&[0x05], 0) == Ok((5, 1));
+    let aml_pkg_multi = decode_aml_pkg_length(&[0x41, 0x02], 0) == Ok((33, 2));
+    let aml_pkg_bounds = aml_package(&[0x04, 0xaa, 0xbb, 0xcc], 0)
+        == Ok(AmlPackage { body_offset: 1, end_offset: 4 });
+    let aml_name_valid = aml_name_seg(b"_CRS", 0)
+        == Ok((*b"_CRS", 4));
+    let aml_name_rejects_lower = aml_name_seg(b"_crs", 0) == Err(Error::InvalidSignature);
+
     let mut template = [0_u8; 44];
     template[0] = 0x87;
     template[1..3].copy_from_slice(&23_u16.to_le_bytes());
@@ -948,6 +1013,11 @@ pub fn self_test() -> bool {
         && malformed_rejected
         && srat_valid
         && memory_affinity_valid
+        && aml_pkg_short
+        && aml_pkg_multi
+        && aml_pkg_bounds
+        && aml_name_valid
+        && aml_name_rejects_lower
         && resource_template_valid
         && missing_end_tag_rejected
         && dword_memory_valid
