@@ -1059,6 +1059,7 @@ pub fn self_test() -> bool {
         && device(MAX_DEVICES).is_none()
         && topology_self_test()
         && routing_self_test()
+        && bridge_transaction_self_test()
 }
 
 fn topology_self_test() -> bool {
@@ -1124,6 +1125,27 @@ fn routing_self_test() -> bool {
         && plan.bridge_at(0) == Some(Bridge { id: 1, parent: None })
         && plan.bridge_at(1) == Some(Bridge { id: 2, parent: Some(1) })
         && plan.bridge_at(routing::MAX_ROUTES).is_none()
+}
+
+
+fn bridge_transaction_self_test() -> bool {
+    use bridge_transaction::{Chain, Entry};
+    let mut chain = Chain::new();
+    for (bus, depth) in [(1u8, 0u8), (2, 2), (3, 1)] {
+        if chain.push(Entry {
+            address: Address { segment: 0, bus, device: 0, function: 0 },
+            header_type: 1,
+            depth,
+            windows: bridge::Windows::default(),
+        }).is_err() {
+            return false;
+        }
+    }
+    chain.sort_deepest_first();
+    chain.len() == 3
+        && chain.get(0).is_some_and(|entry| entry.depth == 2)
+        && chain.get(1).is_some_and(|entry| entry.depth == 1)
+        && chain.get(2).is_some_and(|entry| entry.depth == 0)
 }
 
 fn ecam_address_for(allocation: McfgAllocation, address: Address, offset: u16) -> Option<u64> {
