@@ -175,9 +175,14 @@ pub fn validate_owned_table(
     owner: u32,
 ) -> Result<(Capability, u64), Error> {
     let device = device_for(function).ok_or(Error::InvalidLease)?;
-    let capability = capability(device)?;
-    let base = validate_table_lease(lease, owner, capability)?;
-    Ok((capability, base))
+    // Validate the BAR lease against the discovered capability before making
+    // any configuration-space mutation.
+    let discovered = capability(device)?;
+    let base = validate_table_lease(lease, owner, discovered)?;
+    // Once authority and BIR are proven, quiesce MSI-X before any table MMIO.
+    // This makes ConfigWrite/VerifyFailed part of the real preparation path.
+    let masked = mask_function(device)?;
+    Ok((masked, base))
 }
 
 /// Pure Stage 13.2 acceptance coverage for MSI-X capability decoding and
