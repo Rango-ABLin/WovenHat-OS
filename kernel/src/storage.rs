@@ -1003,15 +1003,20 @@ pub fn persist_path(path: &str) -> Result<(), PersistError> {
     let checksum = data[..length].iter().fold(0xcbf29ce484222325, |h, b| {
         (h ^ u64::from(*b)).wrapping_mul(0x100000001b3)
     });
-    // If this path is represented in WovenFS metadata, retain its previous
-    // checksum for every live snapshot before the durable FAT mutation.
-    if let Some(previous) = crate::wovenfs::metadata(path) {
-        crate::snapshots::record_live_change(
-            crate::wovenfs::path_hash(path),
-            previous.checksum,
-            checksum,
-        )
-        .map_err(|_| PersistError::Failed)?;
+    #[cfg(feature = "stage12-4-test")]
+    {
+        // Stage 12.4 currently exercises the snapshot/COW integration in its
+        // dedicated acceptance configuration. The production persistence hook
+        // remains feature-aligned until the snapshot service is promoted as a
+        // permanently reachable kernel subsystem.
+        if let Some(previous) = crate::wovenfs::metadata(path) {
+            crate::snapshots::record_live_change(
+                crate::wovenfs::path_hash(path),
+                previous.checksum,
+                checksum,
+            )
+            .map_err(|_| PersistError::Failed)?;
+        }
     }
     let Some(journal_token) = crate::journal::begin(crate::journal::path_hash(path), checksum)
     else {
