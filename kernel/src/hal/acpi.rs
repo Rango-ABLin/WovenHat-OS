@@ -833,10 +833,6 @@ fn aml_name_string(bytes: &[u8], mut offset: usize) -> Result<(AmlName, usize), 
     Ok((name, next))
 }
 
-fn aml_skip_name_string(bytes: &[u8], offset: usize) -> Result<usize, Error> {
-    aml_name_string(bytes, offset).map(|(_, next)| next)
-}
-
 fn aml_skip_data_ref_object(bytes: &[u8], offset: usize) -> Result<usize, Error> {
     let opcode = *bytes.get(offset).ok_or(Error::InvalidLength)?;
     match opcode {
