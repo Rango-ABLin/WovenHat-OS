@@ -199,6 +199,48 @@ pub fn attach_pci_bar(
     Ok(())
 }
 
+/// Activate MSI for a bound PCI driver and checkpoint the resulting lease.
+/// Hardware programming happens outside the driver-table lock. If the binding
+/// changes before publication, immediately quiesce the just-enabled MSI path
+/// so an unreachable live vector cannot escape driver ownership.
+pub fn enable_pci_msi(
+    name: &'static str,
+    destination_apic_id: u32,
+) -> Result<crate::hal::pci::msi::MsiLease, crate::hal::pci::msi::MsiLifecycleError> {
+    let (function, owner) = {
+        let table = TABLE.lock();
+        let entry = table
+            .iter()
+            .flatten()
+            .find(|entry| entry.name == name && entry.state == State::Bound)
+            .ok_or(crate::hal::pci::msi::MsiLifecycleError::InvalidFunction)?;
+        let binding = entry
+            .pci
+            .ok_or(crate::hal::pci::msi::MsiLifecycleError::InvalidFunction)?;
+        if binding.interrupt.is_some() {
+            return Err(crate::hal::pci::msi::MsiLifecycleError::InvalidFunction);
+        }
+        (binding.function, binding.owner)
+    };
+
+    let lease = crate::hal::pci::msi::enable_owned_msi(
+        function,
+        owner,
+        destination_apic_id,
+    )?;
+    if attach_pci_msi(name, lease).is_ok() {
+        return Ok(lease);
+    }
+
+    // Publication raced with a lifecycle change. The lease is still local to
+    // this call, so ordered disable is the only safe rollback. A failed
+    // disable intentionally retains its vector inside the MSI subsystem.
+    match crate::hal::pci::msi::disable_owned_msi(lease, owner) {
+        Ok(()) => Err(crate::hal::pci::msi::MsiLifecycleError::InvalidFunction),
+        Err(error) => Err(error),
+    }
+}
+
 pub fn attach_pci_msi(
     name: &'static str,
     lease: crate::hal::pci::msi::MsiLease,
