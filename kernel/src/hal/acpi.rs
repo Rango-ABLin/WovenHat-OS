@@ -251,6 +251,21 @@ pub fn discover(
     for (address, length) in srat_tables.into_iter().take(srat_count) {
         parse_srat(physical_offset, address, length, regions, &mut summary)?;
     }
+
+    // Consume the checksum-validated DSDT directly from its validated physical
+    // mapping. Publication remains transactional: the namespace walker stages
+    // every qualified root resource and copies only after complete success.
+    if summary.dsdt_address != 0 && summary.dsdt_length >= SDT_HEADER_LENGTH {
+        let table = AmlTable {
+            address: summary.dsdt_address,
+            length: summary.dsdt_length,
+        };
+        let body = aml_table_body(physical_offset, table, regions)?;
+        let mut resources = [PciRootResource::default(); MAX_PCI_ROOT_RESOURCES];
+        let (_, count) = aml_namespace_walk(body, &mut resources)?;
+        summary.pci_root_resources[..count].copy_from_slice(&resources[..count]);
+        summary.pci_root_resource_count = count;
+    }
     Ok(summary)
 }
 
@@ -1038,7 +1053,7 @@ fn aml_set_resource_template(
 fn aml_namespace_walk(
     bytes: &[u8],
     output: &mut [PciRootResource; MAX_PCI_ROOT_RESOURCES],
-) -> Result<usize, Error> {
+) -> Result<(usize, usize), Error> {
     fn walk(
         bytes: &[u8],
         mut offset: usize,
@@ -1175,7 +1190,33 @@ fn aml_namespace_walk(
         }
     }
     output[..staged_count].copy_from_slice(&staged[..staged_count]);
-    Ok(objects)
+    Ok((objects, staged_count))
+}
+
+fn aml_table_body<'a>(
+    physical_offset: u64,
+    table: AmlTable,
+    regions: &'a [MemoryRegion],
+) -> Result<&'a [u8], Error> {
+    if table.length < SDT_HEADER_LENGTH {
+        return Err(Error::InvalidLength);
+    }
+    let body_length = table.length - SDT_HEADER_LENGTH;
+    if body_length == 0 {
+        return Err(Error::InvalidLength);
+    }
+    let body_address = table
+        .address
+        .checked_add(SDT_HEADER_LENGTH as u64)
+        .ok_or(Error::AddressOverflow)?;
+    validate_range(body_address, body_length, regions)?;
+    let virtual_address = physical_offset
+        .checked_add(body_address)
+        .ok_or(Error::AddressOverflow)?;
+    // ACPI tables are firmware-owned, checksum-validated before retention, and
+    // remain mapped during early HAL discovery. Borrow the validated body
+    // directly instead of copying up to 64 KiB onto the kernel stack.
+    Ok(unsafe { core::slice::from_raw_parts(virtual_address as *const u8, body_length) })
 }
 
 fn decode_pci_root_resource_template(
@@ -1384,13 +1425,13 @@ pub fn self_test() -> bool {
 
     let mut aml_resources = [PciRootResource::default(); MAX_PCI_ROOT_RESOURCES];
     let aml_scope = [0x10, 0x05, b'_', b'S', b'B', b'_'];
-    let aml_scope_walk = aml_namespace_walk(&aml_scope, &mut aml_resources) == Ok(1);
+    let aml_scope_walk = aml_namespace_walk(&aml_scope, &mut aml_resources) == Ok((1, 0));
     let aml_device = [0x5b, 0x82, 0x05, b'P', b'C', b'I', b'0'];
-    let aml_device_walk = aml_namespace_walk(&aml_device, &mut aml_resources) == Ok(1);
+    let aml_device_walk = aml_namespace_walk(&aml_device, &mut aml_resources) == Ok((1, 0));
     let aml_nested = [
         0x10, 0x0c, b'_', b'S', b'B', b'_', 0x5b, 0x82, 0x05, b'P', b'C', b'I', b'0',
     ];
-    let aml_nested_walk = aml_namespace_walk(&aml_nested, &mut aml_resources) == Ok(2);
+    let aml_nested_walk = aml_namespace_walk(&aml_nested, &mut aml_resources) == Ok((2, 0));
 
     let aml_pkg_short = decode_aml_pkg_length(&[0x05], 0) == Ok((5, 1));
     let aml_pkg_multi = decode_aml_pkg_length(&[0x41, 0x02], 0) == Ok((33, 2));
