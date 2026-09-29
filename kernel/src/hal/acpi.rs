@@ -896,6 +896,8 @@ struct AmlNamespaceRecord {
     path: AmlPath,
     kind: AmlNamespaceKind,
     pci_root: bool,
+    segment_group: Option<u16>,
+    base_bus: Option<u8>,
     resource_template: Option<(usize, usize)>,
 }
 
@@ -912,6 +914,8 @@ fn aml_record(
         path,
         kind,
         pci_root: false,
+        segment_group: None,
+        base_bus: None,
         resource_template: None,
     });
     *record_count += 1;
@@ -1026,6 +1030,33 @@ fn aml_mark_pci_root(
     Ok(())
 }
 
+fn aml_set_root_number(
+    records: &mut [Option<AmlNamespaceRecord>; MAX_AML_NAMESPACE_RECORDS],
+    record_count: usize,
+    path: AmlPath,
+    segment: bool,
+    number: u64,
+) -> Result<(), Error> {
+    let record = records
+        .iter_mut()
+        .take(record_count)
+        .flatten()
+        .find(|record| record.kind == AmlNamespaceKind::Device && record.path == path)
+        .ok_or(Error::InvalidSignature)?;
+    if segment {
+        let value = u16::try_from(number).map_err(|_| Error::InvalidLength)?;
+        if record.segment_group.replace(value).is_some() {
+            return Err(Error::InvalidSignature);
+        }
+    } else {
+        let value = u8::try_from(number).map_err(|_| Error::InvalidLength)?;
+        if record.base_bus.replace(value).is_some() {
+            return Err(Error::InvalidSignature);
+        }
+    }
+    Ok(())
+}
+
 fn aml_set_resource_template(
     records: &mut [Option<AmlNamespaceRecord>; MAX_AML_NAMESPACE_RECORDS],
     record_count: usize,
@@ -1131,11 +1162,13 @@ fn aml_namespace_walk(
                             return Err(Error::InvalidSignature);
                         }
                         let number = aml_static_integer(bytes, value).ok_or(Error::InvalidSignature)?;
-                        if (aml_name_is(path, *b"_SEG") && number > u16::MAX.into())
-                            || (aml_name_is(path, *b"_BBN") && number > u8::MAX.into())
-                        {
-                            return Err(Error::InvalidLength);
-                        }
+                        aml_set_root_number(
+                            records,
+                            *record_count,
+                            owner,
+                            aml_name_is(path, *b"_SEG"),
+                            number,
+                        )?;
                     }
                     match aml_skip_data_ref_object(bytes, value) {
                         Ok(next) if next <= end => {
