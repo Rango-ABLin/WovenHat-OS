@@ -984,6 +984,7 @@ pub fn persist_snapshot_restore_intent(
     .map_err(map_persist_err)
 }
 
+#[cfg(feature = "stage12-4-test")]
 pub fn load_snapshot_restore_intent(
 ) -> Result<Option<crate::snapshots::RestoreIntent>, PersistError> {
     if !mnt_mounted() {
@@ -1010,6 +1011,7 @@ pub fn load_snapshot_restore_intent(
         .transpose()
 }
 
+#[cfg(feature = "stage12-4-test")]
 pub fn clear_snapshot_restore_intent() -> Result<(), PersistError> {
     if !mnt_mounted() {
         return Err(unavailable_persist_error());
