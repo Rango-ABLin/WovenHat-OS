@@ -119,6 +119,14 @@ pub fn create(generation: u64, checksum: u64) -> Option<u64> {
     let slot = t.iter_mut().position(|s| s.is_none())?;
     let id = slot as u64 + 1;
     t[slot] = Some(Snapshot { id, generation, checksum });
+    drop(t);
+    if persist_catalog().is_err() {
+        let mut table = TABLE.lock();
+        if table[slot].is_some_and(|entry| entry.id == id) {
+            table[slot] = None;
+        }
+        return None;
+    }
     Some(id)
 }
 
@@ -143,23 +151,29 @@ pub fn record_change(
         return Err(RestoreError::MissingSnapshot);
     }
     let mut changes = CHANGES.lock();
+    let before = *changes;
     if let Some(change) = changes
         .iter_mut()
         .flatten()
         .find(|change| change.snapshot_id == snapshot_id && change.path_hash == path_hash)
     {
         change.new_checksum = new_checksum;
-        return Ok(());
+    } else {
+        let Some(slot) = changes.iter_mut().find(|entry| entry.is_none()) else {
+            return Err(RestoreError::ChangeLogFull);
+        };
+        *slot = Some(CowRecord {
+            snapshot_id,
+            path_hash,
+            old_checksum,
+            new_checksum,
+        });
     }
-    let Some(slot) = changes.iter_mut().find(|entry| entry.is_none()) else {
-        return Err(RestoreError::ChangeLogFull);
-    };
-    *slot = Some(CowRecord {
-        snapshot_id,
-        path_hash,
-        old_checksum,
-        new_checksum,
-    });
+    drop(changes);
+    if persist_catalog().is_err() {
+        *CHANGES.lock() = before;
+        return Err(RestoreError::PersistenceFailed);
+    }
     Ok(())
 }
 
@@ -299,6 +313,8 @@ pub fn restore(id: u64) -> Option<(u64, u64)> {
 }
 
 pub fn remove(id: u64) -> bool {
+    let table_before = *TABLE.lock();
+    let changes_before = *CHANGES.lock();
     let mut t = TABLE.lock();
     let Some(s) = t.iter_mut().find(|s| s.is_some_and(|v| v.id == id)) else {
         return false;
@@ -310,6 +326,12 @@ pub fn remove(id: u64) -> bool {
         if change.is_some_and(|record| record.snapshot_id == id) {
             *change = None;
         }
+    }
+    drop(changes);
+    if persist_catalog().is_err() {
+        *TABLE.lock() = table_before;
+        *CHANGES.lock() = changes_before;
+        return false;
     }
     true
 }
