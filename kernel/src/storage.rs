@@ -406,6 +406,21 @@ fn import_directory(
                 }
             }
         }
+        let mut durable_bytes = [0u8; vfs::NODE_CAPACITY];
+        if let Ok(entry) = fat32::resolve_path(device, volume, &path[5..]) {
+            if let Ok(length) = fat32::read_file(device, volume, entry, &mut durable_bytes) {
+                let mode = vfs::stat(&path).ok().map_or(0, |stat| u32::from(stat.mode));
+                if !crate::wovenfs::record(
+                    &path,
+                    length as u64,
+                    mode,
+                    crate::timer::ticks(),
+                    &durable_bytes[..length],
+                ) {
+                    return Err(fat32::Error::DirectoryFull);
+                }
+            }
+        }
     }
     if recovered_metadata {
         let _ = device.flush();
@@ -1197,6 +1212,10 @@ pub fn persist_path(path: &str) -> Result<(), PersistError> {
     }
     if result.is_ok() {
         let _ = crate::journal::commit(journal_token);
+        let mode = vfs::stat(path).ok().map_or(0, |stat| u32::from(stat.mode));
+        if !crate::wovenfs::record(path, length as u64, mode, crate::timer::ticks(), &data[..length]) {
+            return Err(PersistError::Failed);
+        }
     }
     result
 }
