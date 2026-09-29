@@ -107,7 +107,7 @@ pub fn resume(name: &'static str) -> bool {
 /// Claim a discovered PCI function for a registered WovenDriver. The topology
 /// claim is acquired before the binding is published; publication failure is
 /// rolled back so no owner is stranded.
-pub fn bind_pci(
+fn bind_pci_claim(
     name: &'static str,
     address: crate::hal::pci::Address,
     owner: u32,
@@ -136,6 +136,17 @@ pub fn bind_pci(
     Ok(())
 }
 
+/// Admit a discovered PCI function into WovenDriver ownership.  Public PCI
+/// admission always retains every currently programmed MMIO BAR so a bound
+/// driver cannot exist with untracked subordinate address-space authority.
+pub fn bind_pci(
+    name: &'static str,
+    address: crate::hal::pci::Address,
+    owner: u32,
+) -> Result<(), crate::hal::pci::topology::Error> {
+    bind_pci_with_bars(name, address, owner)
+}
+
 /// Claim a discovered PCI function and retain its currently programmed MMIO
 /// BARs as one driver-admission transaction. If any BAR lease cannot be
 /// retained, ordered teardown rolls the partial binding back before returning.
@@ -144,7 +155,7 @@ pub fn bind_pci_with_bars(
     address: crate::hal::pci::Address,
     owner: u32,
 ) -> Result<(), crate::hal::pci::topology::Error> {
-    bind_pci(name, address, owner)?;
+    bind_pci_claim(name, address, owner)?;
     let binding = {
         let table = TABLE.lock();
         table.iter().flatten()
