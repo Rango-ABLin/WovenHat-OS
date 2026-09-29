@@ -229,11 +229,31 @@ pub fn enable_pci_msix(
         entry_index,
     ) {
         Ok(lease) => {
-            attach_pci_msix(name, lease)
-                .map_err(|_| crate::hal::pci::msix::LifecycleError::Msix(
+            if attach_pci_msix(name, lease).is_ok() {
+                return Ok(lease);
+            }
+            // The hardware activation succeeded but the binding changed before
+            // we could checkpoint the lease.  Never discard that teardown
+            // obligation: quiesce and recycle it immediately.  If cleanup
+            // itself cannot complete, return ActivationRetained so the caller
+            // still owns the live lease and can retry teardown explicitly.
+            match crate::hal::pci::msix::disable_owned(lease, owner) {
+                Ok(()) => Err(crate::hal::pci::msix::LifecycleError::Msix(
                     crate::hal::pci::msix::Error::InvalidLease,
-                ))?;
-            Ok(lease)
+                )),
+                Err(crate::hal::pci::msix::LifecycleError::Msix(error)) => {
+                    Err(crate::hal::pci::msix::LifecycleError::ActivationRetained {
+                        error,
+                        lease,
+                    })
+                }
+                Err(crate::hal::pci::msix::LifecycleError::ActivationRetained { error, .. }) => {
+                    Err(crate::hal::pci::msix::LifecycleError::ActivationRetained {
+                        error,
+                        lease,
+                    })
+                }
+            }
         }
         Err(crate::hal::pci::msix::LifecycleError::ActivationRetained { error, lease }) => {
             // Activation failed only after the device-visible table held the
