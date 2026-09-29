@@ -24,6 +24,7 @@ pub enum RestoreError {
     MissingSnapshot,
     ChecksumMismatch,
     ChangeLogFull,
+    RestoreBusy,
 }
 
 /// Rank 10 protects short snapshot metadata operations only. Filesystem I/O
@@ -31,6 +32,16 @@ pub enum RestoreError {
 static TABLE: Mutex<[Option<Snapshot>; MAX]> = Mutex::with_rank([None; MAX], 10);
 static CHANGES: Mutex<[Option<CowRecord>; MAX_CHANGES]> =
     Mutex::with_rank([None; MAX_CHANGES], 10);
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub struct RestoreIntent {
+    pub snapshot_id: u64,
+    pub generation: u64,
+    pub expected_root: u64,
+    pub applied: usize,
+}
+
+static RESTORE_INTENT: Mutex<Option<RestoreIntent>> = Mutex::with_rank(None, 10);
 
 pub fn create(generation: u64, checksum: u64) -> Option<u64> {
     if generation == 0 || checksum == 0 {
@@ -119,6 +130,56 @@ pub fn begin_restore(id: u64, durable_checksum: u64) -> Result<u64, RestoreError
     Ok(snapshot.generation)
 }
 
+/// Persist the logical rollback intent before replaying any pre-images. A
+/// reboot can query pending_restore() and resume from the applied index.
+pub fn prepare_restore(id: u64, durable_checksum: u64) -> Result<RestoreIntent, RestoreError> {
+    let generation = begin_restore(id, durable_checksum)?;
+    let mut pending = RESTORE_INTENT.lock();
+    if pending.is_some() {
+        return Err(RestoreError::RestoreBusy);
+    }
+    let intent = RestoreIntent {
+        snapshot_id: id,
+        generation,
+        expected_root: durable_checksum,
+        applied: 0,
+    };
+    *pending = Some(intent);
+    Ok(intent)
+}
+
+pub fn mark_restore_applied(id: u64) -> Result<RestoreIntent, RestoreError> {
+    let mut pending = RESTORE_INTENT.lock();
+    let Some(mut intent) = *pending else {
+        return Err(RestoreError::MissingSnapshot);
+    };
+    if intent.snapshot_id != id {
+        return Err(RestoreError::RestoreBusy);
+    }
+    intent.applied = intent.applied.saturating_add(1);
+    *pending = Some(intent);
+    Ok(intent)
+}
+
+pub fn pending_restore() -> Option<RestoreIntent> {
+    *RESTORE_INTENT.lock()
+}
+
+pub fn commit_restore(id: u64, restored_root: u64) -> Result<u64, RestoreError> {
+    let mut pending = RESTORE_INTENT.lock();
+    let Some(intent) = *pending else {
+        return Err(RestoreError::MissingSnapshot);
+    };
+    if intent.snapshot_id != id {
+        return Err(RestoreError::RestoreBusy);
+    }
+    if intent.expected_root != restored_root {
+        return Err(RestoreError::ChecksumMismatch);
+    }
+    *pending = None;
+    Ok(intent.generation)
+}
+
 pub fn change(id: u64, path_hash: u64) -> Option<CowRecord> {
     CHANGES
         .lock()
@@ -166,6 +227,13 @@ pub fn structural_self_test() -> bool {
             })
         || begin_restore(id, 98) != Err(RestoreError::ChecksumMismatch)
         || begin_restore(id, 99) != Ok(4)
+        || prepare_restore(id, 99).is_err()
+        || pending_restore().is_none()
+        || mark_restore_applied(id).map(|intent| intent.applied) != Ok(1)
+        || commit_restore(id, 98) != Err(RestoreError::ChecksumMismatch)
+        || pending_restore().is_none()
+        || commit_restore(id, 99) != Ok(4)
+        || pending_restore().is_some()
         || restore(id) != Some((4, 99))
         || !remove(id)
         || get(id).is_some()
