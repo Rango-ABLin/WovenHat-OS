@@ -450,7 +450,19 @@ pub fn remove_pci_function(
 ) -> Result<(), PciUnbindError> {
     let name = pci_driver_name(function).ok_or(PciUnbindError::InvalidBinding)?;
     unbind_pci_resources(name)?;
-    crate::hal::pci::teardown_function(function, crate::hal::pci::topology::NO_OWNER)
+
+    // unbind_pci_resources releases the outer function claim but deliberately
+    // leaves the topology node alive. Revalidate the same generation before
+    // invalidating it so a concurrent lifecycle transition cannot make this
+    // hot-remove act on a recycled slot.
+    let owner = crate::hal::pci::topology_owner(function)
+        .map_err(PciUnbindError::Topology)?;
+    if owner != crate::hal::pci::topology::NO_OWNER {
+        return Err(PciUnbindError::Topology(
+            crate::hal::pci::topology::Error::AlreadyOwned,
+        ));
+    }
+    crate::hal::pci::teardown_function(function, owner)
         .map_err(PciUnbindError::Topology)
 }
 
