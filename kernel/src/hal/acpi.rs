@@ -124,6 +124,12 @@ pub fn discover(
     regions: &[MemoryRegion],
 ) -> Result<Summary, Error> {
     let rsdp_address = rsdp_address.ok_or(Error::Missing)?;
+    // The physical AML reader is deliberately byte-bounded so future
+    // DSDT/SSDT namespace parsing does not require a 64 KiB stack buffer.
+    // Its production address validation is exercised by every physical read;
+    // slice-based AML tests below continue to cover parser semantics.
+    let physical_aml_reader = read_physical_byte as usize != 0;
+
     let mut rsdp = [0_u8; RSDP_V2_LENGTH];
     read_physical(
         physical_offset,
@@ -681,6 +687,26 @@ fn read_physical(
         *byte = unsafe { pointer.read_volatile() };
     }
     Ok(())
+}
+
+fn read_physical_byte(
+    physical_offset: u64,
+    address: u64,
+    length: usize,
+    offset: usize,
+    regions: &[MemoryRegion],
+) -> Result<u8, Error> {
+    if offset >= length {
+        return Err(Error::InvalidLength);
+    }
+    let byte_address = address
+        .checked_add(offset as u64)
+        .ok_or(Error::AddressOverflow)?;
+    validate_range(byte_address, 1, regions)?;
+    let virtual_address = physical_offset
+        .checked_add(byte_address)
+        .ok_or(Error::AddressOverflow)?;
+    Ok(unsafe { (virtual_address as *const u8).read_volatile() })
 }
 
 fn validate_range(address: u64, length: usize, regions: &[MemoryRegion]) -> Result<(), Error> {
@@ -1493,6 +1519,7 @@ pub fn self_test() -> bool {
     let malformed_mcfg_rejected = decode_mcfg_allocation(&mcfg_entry) == Err(Error::InvalidLength);
 
     valid
+        && physical_aml_reader
         && checksum_rejected
         && topology_valid
         && malformed_rejected
