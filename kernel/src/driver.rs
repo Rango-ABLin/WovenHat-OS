@@ -576,7 +576,8 @@ pub fn hotplug_rescan() -> Result<crate::hal::pci::Summary, PciUnbindError> {
                 .map_err(PciUnbindError::Topology)?;
         }
     }
-    let summary = crate::hal::pci::reconcile_after_teardown();
+    let summary = crate::hal::pci::reconcile_after_teardown()
+        .map_err(|_| PciUnbindError::InvalidBinding)?;
 
     // Reconciliation may add a newly reachable function behind an existing
     // bridge. Recompute and publish the complete forwarding hierarchy only
