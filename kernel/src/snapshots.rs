@@ -44,6 +44,73 @@ pub struct RestoreIntent {
 
 static RESTORE_INTENT: Mutex<Option<RestoreIntent>> = Mutex::with_rank(None, 10);
 
+#[cfg(feature = "stage12-4-test")]
+fn durable_catalog() -> crate::fat32::SnapshotCatalog {
+    let table = TABLE.lock();
+    let changes = CHANGES.lock();
+    let mut catalog = crate::fat32::SnapshotCatalog::empty();
+    for (dst, src) in catalog.snapshots.iter_mut().zip(table.iter()) {
+        *dst = src.map(|entry| crate::fat32::SnapshotCatalogEntry {
+            id: entry.id,
+            generation: entry.generation,
+            checksum: entry.checksum,
+        });
+    }
+    for (dst, src) in catalog.changes.iter_mut().zip(changes.iter()) {
+        *dst = src.map(|entry| crate::fat32::SnapshotCowEntry {
+            snapshot_id: entry.snapshot_id,
+            path_hash: entry.path_hash,
+            old_checksum: entry.old_checksum,
+            new_checksum: entry.new_checksum,
+        });
+    }
+    catalog
+}
+
+#[cfg(feature = "stage12-4-test")]
+fn persist_catalog() -> Result<(), RestoreError> {
+    crate::storage::persist_snapshot_catalog(durable_catalog())
+        .map_err(|_| RestoreError::PersistenceFailed)
+}
+
+#[cfg(feature = "stage12-4-test")]
+pub fn recover_catalog() -> Result<bool, RestoreError> {
+    let Some(catalog) = crate::storage::load_snapshot_catalog()
+        .map_err(|_| RestoreError::PersistenceFailed)?
+    else {
+        return Ok(false);
+    };
+    let mut table_image = [None; MAX];
+    let mut changes_image = [None; MAX_CHANGES];
+    for (dst, src) in table_image.iter_mut().zip(catalog.snapshots.iter()) {
+        *dst = src.map(|entry| Snapshot {
+            id: entry.id,
+            generation: entry.generation,
+            checksum: entry.checksum,
+        });
+    }
+    for (dst, src) in changes_image.iter_mut().zip(catalog.changes.iter()) {
+        *dst = src.map(|entry| CowRecord {
+            snapshot_id: entry.snapshot_id,
+            path_hash: entry.path_hash,
+            old_checksum: entry.old_checksum,
+            new_checksum: entry.new_checksum,
+        });
+    }
+    for change in changes_image.iter().flatten() {
+        if !table_image
+            .iter()
+            .flatten()
+            .any(|snapshot| snapshot.id == change.snapshot_id)
+        {
+            return Err(RestoreError::PersistenceFailed);
+        }
+    }
+    *TABLE.lock() = table_image;
+    *CHANGES.lock() = changes_image;
+    Ok(true)
+}
+
 pub fn create(generation: u64, checksum: u64) -> Option<u64> {
     if generation == 0 || checksum == 0 {
         return None;
