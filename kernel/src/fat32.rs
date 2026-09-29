@@ -3392,6 +3392,107 @@ pub fn self_test() -> bool {
         && directory_extension_rollback_self_test()
 }
 
+#[cfg(feature = "stage12-4-test")]
+struct RestoreTestDisk {
+    sector: [u8; SECTOR_SIZE],
+    flushes: usize,
+}
+
+#[cfg(feature = "stage12-4-test")]
+impl BlockDevice for RestoreTestDisk {
+    fn sector_count(&self) -> u64 {
+        TestDisk::TOTAL_SECTORS
+    }
+
+    fn read_sector(&mut self, lba: u64, sector: &mut [u8]) -> Result<(), BlockError> {
+        if sector.len() != SECTOR_SIZE || lba >= TestDisk::TOTAL_SECTORS {
+            return Err(BlockError::OutOfBounds);
+        }
+        sector.fill(0);
+        if lba == 21 {
+            sector.copy_from_slice(&self.sector);
+        }
+        Ok(())
+    }
+
+    fn write_sector(&mut self, lba: u64, sector: &[u8]) -> Result<(), BlockError> {
+        if sector.len() != SECTOR_SIZE || lba >= TestDisk::TOTAL_SECTORS {
+            return Err(BlockError::OutOfBounds);
+        }
+        if lba != 21 {
+            return Err(BlockError::OutOfBounds);
+        }
+        self.sector.copy_from_slice(sector);
+        Ok(())
+    }
+
+    fn flush(&mut self) -> Result<(), BlockError> {
+        self.flushes = self.flushes.saturating_add(1);
+        Ok(())
+    }
+}
+
+#[cfg(feature = "stage12-4-test")]
+pub fn snapshot_restore_recovery_self_test() -> bool {
+    let volume = Volume {
+        total_sectors: TestDisk::TOTAL_SECTORS as u32,
+        sectors_per_cluster: 1,
+        fat_count: 2,
+        fat_size: 600,
+        root_cluster: 2,
+        first_fat_sector: 32,
+        first_data_sector: TestDisk::ROOT_LBA,
+        fs_info_sector: None,
+        backup_fs_info_sector: None,
+        cluster_count: FAT32_MIN_CLUSTERS,
+    };
+    let mut disk = RestoreTestDisk {
+        sector: [0; SECTOR_SIZE],
+        flushes: 0,
+    };
+    let initial = SnapshotRestoreIntent {
+        snapshot_id: 3,
+        generation: 17,
+        expected_root: 0x1122_3344_5566_7788,
+        applied: 0,
+    };
+    if write_snapshot_restore_intent(&mut disk, volume, initial).is_err() || disk.flushes != 1 {
+        return false;
+    }
+    let mut reopened = RestoreTestDisk {
+        sector: disk.sector,
+        flushes: 0,
+    };
+    if read_snapshot_restore_intent(&mut reopened, volume) != Ok(Some(initial)) {
+        return false;
+    }
+    let progressed = SnapshotRestoreIntent { applied: 7, ..initial };
+    if write_snapshot_restore_intent(&mut reopened, volume, progressed).is_err()
+        || reopened.flushes != 1
+    {
+        return false;
+    }
+    let mut rebooted = RestoreTestDisk {
+        sector: reopened.sector,
+        flushes: 0,
+    };
+    if read_snapshot_restore_intent(&mut rebooted, volume) != Ok(Some(progressed)) {
+        return false;
+    }
+    let mut corrupt = RestoreTestDisk {
+        sector: rebooted.sector,
+        flushes: 0,
+    };
+    corrupt.sector[24] ^= 0x01;
+    if read_snapshot_restore_intent(&mut corrupt, volume) != Err(Error::CorruptDirectory) {
+        return false;
+    }
+    if clear_snapshot_restore_intent(&mut rebooted, volume).is_err() || rebooted.flushes != 1 {
+        return false;
+    }
+    read_snapshot_restore_intent(&mut rebooted, volume) == Ok(None)
+}
+
 fn range_self_test() -> bool {
     let mut disk = TestDisk {
         valid_signature: true,
