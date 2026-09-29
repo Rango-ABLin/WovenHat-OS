@@ -123,6 +123,10 @@ impl<'a> Plan<'a> {
 impl Drop for Plan<'_> {
     fn drop(&mut self) {
         if self.committed { return; }
+        // Rollback is best-effort in Drop because Rust destructors cannot
+        // return an error. Release every provisional reservation in reverse
+        // order; resource::Allocator generation checks prevent a failed
+        // release from accidentally freeing a recycled reservation.
         for assignment in self.assignments[..self.count].iter().rev().flatten().copied() {
             let allocator = match assignment.kind {
                 bar::Kind::Io => &mut self.apertures.io,
@@ -133,5 +137,7 @@ impl Drop for Plan<'_> {
             };
             let _ = allocator.release(assignment.reservation);
         }
+        self.assignments = [None; 6];
+        self.count = 0;
     }
 }
