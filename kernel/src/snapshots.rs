@@ -43,6 +43,11 @@ pub fn create(generation: u64, checksum: u64) -> Option<u64> {
     Some(id)
 }
 
+/// Capture the current WovenFS metadata root as a snapshot generation.
+pub fn capture_wovenfs(generation: u64) -> Option<u64> {
+    create(generation, crate::wovenfs::root_checksum())
+}
+
 pub fn get(id: u64) -> Option<Snapshot> {
     TABLE.lock().iter().flatten().find(|s| s.id == id).copied()
 }
