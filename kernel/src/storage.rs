@@ -962,6 +962,36 @@ fn live_directory_growth_self_test() -> Result<(), &'static str> {
 }
 
 #[cfg(feature = "stage12-4-test")]
+pub fn persist_snapshot_catalog(catalog: fat32::SnapshotCatalog) -> Result<(), PersistError> {
+    if !mnt_mounted() {
+        return Err(unavailable_persist_error());
+    }
+    if !block_io::primary_ata_present() {
+        return Err(PersistError::NoDevice);
+    }
+    let mut disk = block_io::primary_ata();
+    with_mounted_volume(&mut disk, |device, volume| {
+        fat32::write_snapshot_catalog(device, volume, catalog)
+    })
+    .map_err(map_persist_err)
+}
+
+#[cfg(feature = "stage12-4-test")]
+pub fn load_snapshot_catalog() -> Result<Option<fat32::SnapshotCatalog>, PersistError> {
+    if !mnt_mounted() {
+        return Err(unavailable_persist_error());
+    }
+    if !block_io::primary_ata_present() {
+        return Err(PersistError::NoDevice);
+    }
+    let mut disk = block_io::primary_ata();
+    with_mounted_volume(&mut disk, |device, volume| {
+        fat32::read_snapshot_catalog(device, volume)
+    })
+    .map_err(map_persist_err)
+}
+
+#[cfg(feature = "stage12-4-test")]
 pub fn persist_snapshot_restore_intent(
     intent: crate::snapshots::RestoreIntent,
 ) -> Result<(), PersistError> {
