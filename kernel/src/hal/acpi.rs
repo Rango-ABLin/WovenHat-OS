@@ -1195,6 +1195,7 @@ fn decode_address_space_resource(bytes: &[u8]) -> Result<Option<PciRootResource>
         0x88 if payload_len >= 13 => 2_usize,
         0x87 if payload_len >= 23 => 4_usize,
         0x8a if payload_len >= 43 => 8_usize,
+        0x8b if payload_len >= 53 => 8_usize,
         _ => return Ok(None),
     };
     let resource_type = bytes[3];
@@ -1208,6 +1209,12 @@ fn decode_address_space_resource(bytes: &[u8]) -> Result<Option<PciRootResource>
     };
     if bytes[4] & 0xf0 != 0 {
         return Err(Error::InvalidLength);
+    }
+    // ACPI 6.6 defines General Flags bit 0 as Consumer/Producer only
+    // for the Extended Address Space descriptor (0x8B). The legacy
+    // Word/DWord/QWord forms explicitly define that bit as ignored.
+    if bytes[0] == 0x8b && bytes[4] & 0x01 != 0 {
+        return Ok(None);
     }
     let type_flags = bytes[5];
     // Memory-to-I/O and sparse/dense I/O translations require semantics that
