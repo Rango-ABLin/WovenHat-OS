@@ -355,7 +355,7 @@ pub fn discover() -> Summary {
     feature = "stage13-8-test",
     feature = "stage13-9-test"
 ))]
-pub(crate) fn reconcile_after_teardown() -> Summary {
+pub(crate) fn reconcile_after_teardown() -> Result<Summary, Summary> {
     let mut inventory = scan_inventory();
     let mut published = PUBLISHED.lock();
     let mut candidate = published.topology.clone();
@@ -367,7 +367,7 @@ pub(crate) fn reconcile_after_teardown() -> Summary {
             bridge: device.bridge_buses,
         }).is_err() {
             inventory.summary.truncated = true;
-            return inventory.summary;
+            return Err(inventory.summary);
         }
     }
     // Do not publish a refreshed inventory if it omitted any function.  The
@@ -375,12 +375,12 @@ pub(crate) fn reconcile_after_teardown() -> Summary {
     // pairing it with a truncated inventory would make a live function lose
     // its device/config-space description while authority still exists.
     if inventory.summary.truncated {
-        return published.inventory.summary;
+        return Err(inventory.summary);
     }
     let summary = inventory.summary;
     published.topology = candidate;
     published.inventory = inventory;
-    summary
+    Ok(summary)
 }
 
 fn scan_reachable_buses(
