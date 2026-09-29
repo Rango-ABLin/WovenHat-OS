@@ -184,6 +184,15 @@ pub fn record_live_change(
     old_checksum: u64,
     new_checksum: u64,
 ) -> Result<(), RestoreError> {
+    record_live_changes(&[(path_hash, old_checksum, new_checksum)])
+}
+
+/// Atomically stage a logical filesystem mutation against every live snapshot.
+/// All COW records are installed under one lock and persisted as one catalog
+/// image. Capacity or persistence failure restores the complete prior table.
+pub fn record_live_changes(
+    mutations: &[(u64, u64, u64)],
+) -> Result<(), RestoreError> {
     let ids = {
         let table = TABLE.lock();
         let mut ids = [0u64; MAX];
@@ -194,8 +203,38 @@ pub fn record_live_change(
         }
         (ids, count)
     };
+    if ids.1 == 0 || mutations.is_empty() {
+        return Ok(());
+    }
+
+    let mut changes = CHANGES.lock();
+    let before = *changes;
     for id in ids.0.into_iter().take(ids.1) {
-        record_change(id, path_hash, old_checksum, new_checksum)?;
+        for &(path_hash, old_checksum, new_checksum) in mutations {
+            if let Some(change) = changes
+                .iter_mut()
+                .flatten()
+                .find(|change| change.snapshot_id == id && change.path_hash == path_hash)
+            {
+                change.new_checksum = new_checksum;
+                continue;
+            }
+            let Some(slot) = changes.iter_mut().find(|entry| entry.is_none()) else {
+                *changes = before;
+                return Err(RestoreError::ChangeLogFull);
+            };
+            *slot = Some(CowRecord {
+                snapshot_id: id,
+                path_hash,
+                old_checksum,
+                new_checksum,
+            });
+        }
+    }
+    drop(changes);
+    if persist_catalog().is_err() {
+        *CHANGES.lock() = before;
+        return Err(RestoreError::PersistenceFailed);
     }
     Ok(())
 }
