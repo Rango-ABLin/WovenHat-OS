@@ -38,7 +38,9 @@ const JOURNAL_HEADER_SIZE: usize = 8;
 const JOURNAL_RECORD_SIZE: usize = 32;
 const JOURNAL_CAPACITY: usize = (SECTOR_SIZE - JOURNAL_HEADER_SIZE) / JOURNAL_RECORD_SIZE;
 const JOURNAL_SECTOR_COUNT: usize = 2;
+#[cfg(feature = "stage12-4-test")]
 const RESTORE_MAGIC: &[u8; 4] = b"WSR1";
+#[cfg(feature = "stage12-4-test")]
 const RESTORE_VERSION: u16 = 1;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -318,6 +320,7 @@ pub struct JournalIntent {
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
+#[cfg(feature = "stage12-4-test")]
 pub struct SnapshotRestoreIntent {
     pub snapshot_id: u64,
     pub generation: u64,
@@ -325,6 +328,7 @@ pub struct SnapshotRestoreIntent {
     pub applied: u64,
 }
 
+#[cfg(feature = "stage12-4-test")]
 fn restore_sector(volume: Volume) -> Result<u64, Error> {
     volume
         .first_fat_sector
@@ -332,6 +336,7 @@ fn restore_sector(volume: Volume) -> Result<u64, Error> {
         .ok_or(Error::UnsupportedGeometry)
 }
 
+#[cfg(feature = "stage12-4-test")]
 fn restore_checksum(intent: SnapshotRestoreIntent) -> u64 {
     [intent.snapshot_id, intent.generation, intent.expected_root, intent.applied]
         .into_iter()
@@ -340,6 +345,7 @@ fn restore_checksum(intent: SnapshotRestoreIntent) -> u64 {
         })
 }
 
+#[cfg(feature = "stage12-4-test")]
 pub fn write_snapshot_restore_intent(
     device: &mut (impl BlockDevice + ?Sized),
     volume: Volume,
@@ -362,6 +368,7 @@ pub fn write_snapshot_restore_intent(
     device.flush().map_err(Error::Block)
 }
 
+#[cfg(feature = "stage12-4-test")]
 pub fn read_snapshot_restore_intent(
     device: &mut (impl BlockDevice + ?Sized),
     volume: Volume,
@@ -392,6 +399,7 @@ pub fn read_snapshot_restore_intent(
     Ok(Some(intent))
 }
 
+#[cfg(feature = "stage12-4-test")]
 pub fn clear_snapshot_restore_intent(
     device: &mut (impl BlockDevice + ?Sized),
     volume: Volume,
