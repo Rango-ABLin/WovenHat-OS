@@ -333,6 +333,46 @@ pub fn remove(id: u64) -> bool {
     true
 }
 
+/// Production snapshot management boundary. Keeping lifecycle operations behind
+/// one command surface makes the subsystem reachable without exposing its locks.
+pub enum Command {
+    Capture { generation: u64 },
+    PrepareRestore { id: u64, durable_root: u64 },
+    MarkApplied { id: u64 },
+    CommitRestore { id: u64, restored_root: u64 },
+    Remove { id: u64 },
+    Query { id: u64 },
+    QueryChange { id: u64, path_hash: u64 },
+    PendingRestore,
+}
+
+pub enum CommandResult {
+    SnapshotId(Option<u64>),
+    RestoreIntent(Result<RestoreIntent, RestoreError>),
+    Generation(Result<u64, RestoreError>),
+    Removed(bool),
+    Snapshot(Option<Snapshot>),
+    Change(Option<CowRecord>),
+    Pending(Option<RestoreIntent>),
+}
+
+pub fn command(command: Command) -> CommandResult {
+    match command {
+        Command::Capture { generation } => CommandResult::SnapshotId(capture_wovenfs(generation)),
+        Command::PrepareRestore { id, durable_root } => {
+            CommandResult::RestoreIntent(prepare_restore(id, durable_root))
+        }
+        Command::MarkApplied { id } => CommandResult::RestoreIntent(mark_restore_applied(id)),
+        Command::CommitRestore { id, restored_root } => {
+            CommandResult::Generation(commit_restore(id, restored_root))
+        }
+        Command::Remove { id } => CommandResult::Removed(remove(id)),
+        Command::Query { id } => CommandResult::Snapshot(get(id)),
+        Command::QueryChange { id, path_hash } => CommandResult::Change(change(id, path_hash)),
+        Command::PendingRestore => CommandResult::Pending(pending_restore()),
+    }
+}
+
 #[cfg(feature = "stage12-4-test")]
 pub fn structural_self_test() -> bool {
     let Some(id) = create(4, 99) else {
