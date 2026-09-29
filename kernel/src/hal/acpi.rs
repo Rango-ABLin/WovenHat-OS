@@ -260,11 +260,17 @@ pub fn discover(
             address: summary.dsdt_address,
             length: summary.dsdt_length,
         };
-        let body = aml_table_body(physical_offset, table, regions)?;
-        let mut resources = [PciRootResource::default(); MAX_PCI_ROOT_RESOURCES];
-        let (_, count) = aml_namespace_walk(body, &mut resources)?;
-        summary.pci_root_resources[..count].copy_from_slice(&resources[..count]);
-        summary.pci_root_resource_count = count;
+        // PCI-root AML is an optional Stage 13.2 enrichment.  A firmware
+        // namespace construct that the bounded evaluator does not yet support
+        // must fail closed for aperture publication without discarding the
+        // independently validated MADT/APIC topology used to start APs.
+        if let Ok(body) = aml_table_body(physical_offset, table, regions) {
+            let mut resources = [PciRootResource::default(); MAX_PCI_ROOT_RESOURCES];
+            if let Ok((_, count)) = aml_namespace_walk(body, &mut resources) {
+                summary.pci_root_resources[..count].copy_from_slice(&resources[..count]);
+                summary.pci_root_resource_count = count;
+            }
+        }
     }
     Ok(summary)
 }
