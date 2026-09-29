@@ -1168,6 +1168,10 @@ fn decode_pci_root_resource_template(
     bytes: &[u8],
     output: &mut [PciRootResource; MAX_PCI_ROOT_RESOURCES],
 ) -> Result<usize, Error> {
+    // Decode into private staging first. A malformed descriptor, checksum,
+    // missing EndTag, or capacity failure must not expose a partially
+    // validated firmware aperture set to the caller.
+    let mut staged = [PciRootResource::default(); MAX_PCI_ROOT_RESOURCES];
     let mut offset = 0_usize;
     let mut count = 0_usize;
     let mut saw_end_tag = false;
@@ -1204,10 +1208,10 @@ fn decode_pci_root_resource_template(
 
         if tag & 0x80 != 0 {
             if let Some(resource) = decode_address_space_resource(item)? {
-                if count == output.len() {
+                if count == staged.len() {
                     return Err(Error::InvalidLength);
                 }
-                output[count] = resource;
+                staged[count] = resource;
                 count += 1;
             }
         }
@@ -1216,6 +1220,7 @@ fn decode_pci_root_resource_template(
     if !saw_end_tag {
         return Err(Error::InvalidLength);
     }
+    output[..count].copy_from_slice(&staged[..count]);
     Ok(count)
 }
 
@@ -1408,6 +1413,19 @@ pub fn self_test() -> bool {
     let missing_end_tag_rejected =
         decode_pci_root_resource_template(&template[..42], &mut decoded_resources)
             == Err(Error::InvalidLength);
+    let sentinel = PciRootResource {
+        kind: PciRootResourceKind::Io,
+        base: 0x55aa,
+        length: 1,
+        translation_offset: 0,
+        prefetchable: false,
+        address_width: 16,
+    };
+    let mut transactional_output = [sentinel; MAX_PCI_ROOT_RESOURCES];
+    let transactional_decode =
+        decode_pci_root_resource_template(&template[..42], &mut transactional_output)
+            == Err(Error::InvalidLength)
+            && transactional_output.iter().all(|resource| *resource == sentinel);
 
     let mut dword_memory = [0_u8; 26];
     dword_memory[0] = 0x87;
@@ -1475,6 +1493,7 @@ pub fn self_test() -> bool {
         && aml_name_rejects_lower
         && resource_template_valid
         && missing_end_tag_rejected
+        && transactional_decode
         && dword_memory_valid
         && word_io_valid
         && mcfg_valid
