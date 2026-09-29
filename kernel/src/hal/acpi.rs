@@ -943,7 +943,7 @@ fn aml_static_integer(bytes: &[u8], offset: usize) -> Option<u64> {
     }
 }
 
-fn aml_static_buffer<'a>(bytes: &'a [u8], offset: usize) -> Result<Option<&'a [u8]>, Error> {
+fn aml_static_buffer(bytes: &[u8], offset: usize) -> Result<Option<&[u8]>, Error> {
     if bytes.get(offset) != Some(&0x11) {
         return Ok(None);
     }
