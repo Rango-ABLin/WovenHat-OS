@@ -64,6 +64,13 @@ pub enum MsiLifecycleError {
     InvalidFunction,
     Vector(vector::Error),
     Msi(MsiError),
+    /// Hardware quiesce or post-quiesce cleanup failed after activation.
+    /// The caller must retain this lease and retry ordered disable; it must
+    /// never make the vector available for reuse while the obligation exists.
+    ActivationRetained {
+        error: MsiError,
+        lease: MsiLease,
+    },
 }
 
 impl From<vector::Error> for MsiLifecycleError {
@@ -287,7 +294,9 @@ pub fn disable_owned_msi(lease: MsiLease, owner: u32) -> Result<(), MsiLifecycle
     if snapshot.owner != Some(owner) || owner == 0 {
         return Err(MsiLifecycleError::InvalidFunction);
     }
-    disable_msi(device)?;
+    if let Err(error) = disable_msi(device) {
+        return Err(MsiLifecycleError::ActivationRetained { error, lease });
+    }
     VECTOR_ALLOCATOR.lock().release(lease.vector, owner)?;
     if !release_interrupt_mode(lease.function, owner, InterruptMode::Msi) {
         return Err(MsiLifecycleError::InvalidFunction);
