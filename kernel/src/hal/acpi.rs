@@ -931,6 +931,26 @@ fn aml_name_is(path: AmlPath, segment: [u8; 4]) -> bool {
     path.count != 0 && path.segments[path.count - 1] == segment
 }
 
+fn aml_parent_path(mut path: AmlPath) -> Option<AmlPath> {
+    if path.count == 0 {
+        return None;
+    }
+    path.count -= 1;
+    Some(path)
+}
+
+fn aml_has_device(
+    records: &[Option<AmlNamespaceRecord>; MAX_AML_NAMESPACE_RECORDS],
+    record_count: usize,
+    path: AmlPath,
+) -> bool {
+    records
+        .iter()
+        .take(record_count)
+        .flatten()
+        .any(|record| record.kind == AmlNamespaceKind::Device && record.path == path)
+}
+
 fn aml_namespace_walk(bytes: &[u8]) -> Result<usize, Error> {
     fn walk(
         bytes: &[u8],
@@ -974,9 +994,15 @@ fn aml_namespace_walk(bytes: &[u8]) -> Result<usize, Error> {
                     // walking their owning device scope. This is intentionally
                     // read-only: resource apertures are not published until
                     // _CRS is decoded and validated separately.
-                    let _pci_root_identity = (aml_name_is(path, *b"_HID")
+                    let pci_root_identity = (aml_name_is(path, *b"_HID")
                         || aml_name_is(path, *b"_CID"))
                         && aml_eisa_id(bytes, value).is_some_and(aml_is_pci_root_id);
+                    if pci_root_identity {
+                        let owner = aml_parent_path(path).ok_or(Error::InvalidSignature)?;
+                        if owner != scope || !aml_has_device(records, *record_count, owner) {
+                            return Err(Error::InvalidSignature);
+                        }
+                    }
                     match aml_skip_data_ref_object(bytes, value) {
                         Ok(next) if next <= end => {
                             *objects = objects.checked_add(1).ok_or(Error::AddressOverflow)?;
