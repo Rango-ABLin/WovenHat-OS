@@ -527,5 +527,49 @@ pub fn structural_self_test() -> bool {
     {
         return false;
     }
+
+    // Persistent wrapping must authenticate identity as well as ciphertext.
+    let kek = [0x24u8; KEY_SIZE];
+    let identity = KeyGeneration { volume_id: 7, generation: 1 };
+    let Ok(record) = wrap_volume_key(&kek, identity, 77, [0x51; KEY_SIZE]) else {
+        return false;
+    };
+    let untrusted = ProvisioningEvidence { measurement: [0; 32], authenticated: true };
+    if provision_measured_wrapped_for(2000, &kek, untrusted, &record)
+        != Err(WrappedKeyError::UntrustedProvisioning)
+    {
+        return false;
+    }
+    let trusted = ProvisioningEvidence { measurement: [0xa5; 32], authenticated: true };
+    let Ok(persisted) = provision_measured_wrapped_for(2000, &kek, trusted, &record) else {
+        return false;
+    };
+    if !revoke_for(2000, persisted) {
+        return false;
+    }
+    let mut tampered = record;
+    tampered.tag[0] ^= 1;
+    if provision_measured_wrapped_for(2000, &kek, trusted, &tampered)
+        != Err(WrappedKeyError::Authentication)
+    {
+        return false;
+    }
+
+    // Rotation prepares exactly one successor and leaves the old record intact
+    // until storage has durably advanced its authenticated generation pointer.
+    let Ok(rotation) = prepare_rotation(&kek, record, 78, [0x61; KEY_SIZE]) else {
+        return false;
+    };
+    if validate_rotation(&rotation).is_err()
+        || rotation.next.identity.generation != 2
+        || rotation.current != record
+    {
+        return false;
+    }
+    let mut wrong_volume = rotation;
+    wrong_volume.next.identity.volume_id ^= 1;
+    if validate_rotation(&wrong_volume) != Err(RotationError::WrongVolume) {
+        return false;
+    }
     true
 }
