@@ -107,7 +107,9 @@ pub fn recover_catalog() -> Result<bool, RestoreError> {
     *CHANGES.lock() = changes_image;
     Ok(true)
 }
-\n#[cfg(feature = "stage12-4-test")]\npub fn create(generation: u64, checksum: u64) -> Option<u64> {
+
+#[cfg(feature = "stage12-4-test")]
+pub fn create(generation: u64, checksum: u64) -> Option<u64> {
     if generation == 0 || checksum == 0 {
         return None;
     }
@@ -126,7 +128,9 @@ pub fn recover_catalog() -> Result<bool, RestoreError> {
     Some(id)
 }
 
-/// Capture the current WovenFS metadata root as a snapshot generation.\n#[cfg(feature = "stage12-4-test")]\npub fn capture_wovenfs(generation: u64) -> Option<u64> {
+/// Capture the current WovenFS metadata root as a snapshot generation.
+#[cfg(feature = "stage12-4-test")]
+pub fn capture_wovenfs(generation: u64) -> Option<u64> {
     create(generation, crate::wovenfs::root_checksum())
 }
 
@@ -198,7 +202,9 @@ pub fn record_live_change(
 
 /// Begin a rollback only when the caller's durable root still matches the
 /// snapshot root. This prevents restoring a catalog entry against unrelated
-/// filesystem state. Returned generation becomes the rollback target.\n#[cfg(feature = "stage12-4-test")]\npub fn begin_restore(id: u64, durable_checksum: u64) -> Result<u64, RestoreError> {
+/// filesystem state. Returned generation becomes the rollback target.
+#[cfg(feature = "stage12-4-test")]
+pub fn begin_restore(id: u64, durable_checksum: u64) -> Result<u64, RestoreError> {
     let snapshot = get(id).ok_or(RestoreError::MissingSnapshot)?;
     if snapshot.checksum != durable_checksum {
         return Err(RestoreError::ChecksumMismatch);
@@ -207,7 +213,9 @@ pub fn record_live_change(
 }
 
 /// Persist the logical rollback intent before replaying any pre-images. A
-/// reboot can query pending_restore() and resume from the applied index.\n#[cfg(feature = "stage12-4-test")]\npub fn prepare_restore(id: u64, durable_checksum: u64) -> Result<RestoreIntent, RestoreError> {
+/// reboot can query pending_restore() and resume from the applied index.
+#[cfg(feature = "stage12-4-test")]
+pub fn prepare_restore(id: u64, durable_checksum: u64) -> Result<RestoreIntent, RestoreError> {
     let generation = begin_restore(id, durable_checksum)?;
     let pending = RESTORE_INTENT.lock();
     if pending.is_some() {
@@ -229,7 +237,9 @@ pub fn record_live_change(
     *pending = Some(intent);
     Ok(intent)
 }
-\n#[cfg(feature = "stage12-4-test")]\npub fn mark_restore_applied(id: u64) -> Result<RestoreIntent, RestoreError> {
+
+#[cfg(feature = "stage12-4-test")]
+pub fn mark_restore_applied(id: u64) -> Result<RestoreIntent, RestoreError> {
     let pending = RESTORE_INTENT.lock();
     let Some(mut intent) = *pending else {
         return Err(RestoreError::MissingSnapshot);
@@ -259,10 +269,14 @@ pub fn recover_restore() -> Result<Option<RestoreIntent>, RestoreError> {
     *pending = durable;
     Ok(durable)
 }
-\n#[cfg(feature = "stage12-4-test")]\npub fn pending_restore() -> Option<RestoreIntent> {
+
+#[cfg(feature = "stage12-4-test")]
+pub fn pending_restore() -> Option<RestoreIntent> {
     *RESTORE_INTENT.lock()
 }
-\n#[cfg(feature = "stage12-4-test")]\npub fn commit_restore(id: u64, restored_root: u64) -> Result<u64, RestoreError> {
+
+#[cfg(feature = "stage12-4-test")]
+pub fn commit_restore(id: u64, restored_root: u64) -> Result<u64, RestoreError> {
     let pending = RESTORE_INTENT.lock();
     let Some(intent) = *pending else {
         return Err(RestoreError::MissingSnapshot);
@@ -286,7 +300,9 @@ pub fn recover_restore() -> Result<Option<RestoreIntent>, RestoreError> {
     *pending = None;
     Ok(intent.generation)
 }
-\n#[cfg(feature = "stage12-4-test")]\npub fn change(id: u64, path_hash: u64) -> Option<CowRecord> {
+
+#[cfg(feature = "stage12-4-test")]
+pub fn change(id: u64, path_hash: u64) -> Option<CowRecord> {
     CHANGES
         .lock()
         .iter()
@@ -296,10 +312,14 @@ pub fn recover_restore() -> Result<Option<RestoreIntent>, RestoreError> {
 }
 
 /// Compatibility metadata query. Production rollback uses begin_restore plus
-/// the COW records and commits only after durable filesystem replay succeeds.\n#[cfg(feature = "stage12-4-test")]\npub fn restore(id: u64) -> Option<(u64, u64)> {
+/// the COW records and commits only after durable filesystem replay succeeds.
+#[cfg(feature = "stage12-4-test")]
+pub fn restore(id: u64) -> Option<(u64, u64)> {
     get(id).map(|s| (s.generation, s.checksum))
 }
-\n#[cfg(feature = "stage12-4-test")]\npub fn remove(id: u64) -> bool {
+
+#[cfg(feature = "stage12-4-test")]
+pub fn remove(id: u64) -> bool {
     let table_before = *TABLE.lock();
     let changes_before = *CHANGES.lock();
     let mut t = TABLE.lock();
