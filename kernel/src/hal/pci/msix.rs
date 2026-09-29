@@ -467,11 +467,19 @@ pub fn disable_owned(lease: MsixLease, owner: u32) -> Result<(), LifecycleError>
         return Err(Error::InvalidLease.into());
     }
     let device = device_for(lease.function).ok_or(Error::InvalidLease)?;
-    disable_and_mask_function(device)?;
-    super::msi::release_vector(lease.vector, owner)?;
-    if !super::msi::release_interrupt_mode(lease.function, owner, super::msi::InterruptMode::Msix) {
-        return Err(Error::InvalidLease.into());
+    if let Err(error) = disable_and_mask_function(device) {
+        return Err(LifecycleError::ActivationRetained { error, lease });
     }
+    // Keep the vector reserved until the exclusive MSI-X mode claim is gone.
+    // A failed ownership checkpoint must never expose a vector that could
+    // still be associated with this function's retained activation.
+    if !super::msi::release_interrupt_mode(lease.function, owner, super::msi::InterruptMode::Msix) {
+        return Err(LifecycleError::ActivationRetained {
+            error: Error::InvalidLease,
+            lease,
+        });
+    }
+    super::msi::release_vector(lease.vector, owner)?;
     Ok(())
 }
 
