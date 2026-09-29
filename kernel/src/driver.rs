@@ -510,5 +510,15 @@ pub fn hotplug_rescan() -> Result<crate::hal::pci::Summary, PciUnbindError> {
                 .map_err(PciUnbindError::Topology)?;
         }
     }
-    Ok(crate::hal::pci::reconcile_after_teardown())
+    let summary = crate::hal::pci::reconcile_after_teardown();
+
+    // Reconciliation may add a newly reachable function behind an existing
+    // bridge. Recompute and publish the complete forwarding hierarchy only
+    // after all disappeared functions have completed ordered teardown. The
+    // bridge layer performs one rollback-capable config-space transaction, so
+    // a failed route update cannot leave a partially programmed chain.
+    crate::hal::pci::route_discovered_bridges()
+        .map_err(|_| PciUnbindError::InvalidBinding)?;
+
+    Ok(summary)
 }
