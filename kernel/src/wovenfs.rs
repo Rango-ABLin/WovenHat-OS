@@ -28,7 +28,9 @@ static STATE: Mutex<State> = Mutex::with_rank(State::new(), 10);
 pub fn path_hash(path: &str) -> u64 {
     hash(path)
 }
-\n#[cfg(any(feature = "stage12-2-test", feature = "stage12-4-test"))]\npub fn root_checksum() -> u64 {
+
+#[cfg(any(feature = "stage12-2-test", feature = "stage12-4-test"))]
+pub fn root_checksum() -> u64 {
     let s = STATE.lock();
     s.entries.iter().flatten().fold(0xcbf29ce484222325, |acc, entry| {
         acc.wrapping_mul(0x100000001b3)
@@ -43,7 +45,9 @@ fn hash(path: &str) -> u64 {
     path.bytes().fold(1469598103934665603, |h, b| {
         (h ^ u64::from(b)).wrapping_mul(1099511628211)
     })
-}\n#[cfg(any(feature = "stage12-2-test", feature = "stage12-4-test"))]\npub fn record(path: &str, size: u64, mode: u32, now: u64, data: &[u8]) -> bool {
+}
+#[cfg(any(feature = "stage12-2-test", feature = "stage12-4-test"))]
+pub fn record(path: &str, size: u64, mode: u32, now: u64, data: &[u8]) -> bool {
     let key = hash(path);
     let checksum = data.iter().fold(0xcbf29ce484222325, |h, b| {
         (h ^ u64::from(*b)).wrapping_mul(0x100000001b3)
@@ -78,7 +82,9 @@ pub fn metadata(path: &str) -> Option<Metadata> {
         .flatten()
         .find(|e| e.path_hash == hash(path))
         .copied()
-}\n#[cfg(any(feature = "stage12-2-test", feature = "stage12-4-test"))]\npub fn set_xattr(path: &str, index: usize, value: u64) -> bool {
+}
+#[cfg(any(feature = "stage12-2-test", feature = "stage12-4-test"))]
+pub fn set_xattr(path: &str, index: usize, value: u64) -> bool {
     let mut s = STATE.lock();
     let Some(e) = s
         .entries
@@ -93,7 +99,9 @@ pub fn metadata(path: &str) -> Option<Metadata> {
     };
     *x = value;
     true
-}\n#[cfg(any(feature = "stage12-2-test", feature = "stage12-4-test"))]\npub fn xattr(path: &str, index: usize) -> Option<u64> {
+}
+#[cfg(any(feature = "stage12-2-test", feature = "stage12-4-test"))]
+pub fn xattr(path: &str, index: usize) -> Option<u64> {
     STATE
         .lock()
         .entries
