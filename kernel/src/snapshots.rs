@@ -22,8 +22,10 @@ pub struct CowRecord {
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum RestoreError {
     MissingSnapshot,
+    #[cfg(feature = "stage12-4-test")]
     ChecksumMismatch,
     ChangeLogFull,
+    #[cfg(feature = "stage12-4-test")]
     RestoreBusy,
     PersistenceFailed,
 }
