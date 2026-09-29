@@ -21,6 +21,7 @@ pub struct CowRecord {
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum RestoreError {
+    #[cfg(feature = "stage12-4-test")]
     MissingSnapshot,
     #[cfg(feature = "stage12-4-test")]
     ChecksumMismatch,
@@ -134,12 +135,14 @@ pub fn capture_wovenfs(generation: u64) -> Option<u64> {
     create(generation, crate::wovenfs::root_checksum())
 }
 
+#[cfg(feature = "stage12-4-test")]
 pub fn get(id: u64) -> Option<Snapshot> {
     TABLE.lock().iter().flatten().find(|s| s.id == id).copied()
 }
 
 /// Record the first pre-image checksum for a path after a snapshot. Repeated
 /// writes update only the newest checksum, preserving the rollback pre-image.
+#[cfg(feature = "stage12-4-test")]
 pub fn record_change(
     snapshot_id: u64,
     path_hash: u64,
