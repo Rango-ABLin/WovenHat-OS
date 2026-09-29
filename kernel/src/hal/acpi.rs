@@ -266,7 +266,11 @@ pub fn discover(
         // independently validated MADT/APIC topology used to start APs.
         if let Ok(body) = aml_table_body(physical_offset, table, regions) {
             let mut resources = [PciRootResource::default(); MAX_PCI_ROOT_RESOURCES];
-            if let Ok((_, count)) = aml_namespace_walk(body, &mut resources) {
+            if let Ok((_, count)) = aml_namespace_walk(
+                body,
+                &summary.mcfg_allocations[..summary.mcfg_allocation_count],
+                &mut resources,
+            ) {
                 summary.pci_root_resources[..count].copy_from_slice(&resources[..count]);
                 summary.pci_root_resource_count = count;
             }
@@ -1089,6 +1093,7 @@ fn aml_set_resource_template(
 
 fn aml_namespace_walk(
     bytes: &[u8],
+    mcfg_allocations: &[McfgAllocation],
     output: &mut [PciRootResource; MAX_PCI_ROOT_RESOURCES],
 ) -> Result<(usize, usize), Error> {
     fn walk(
@@ -1214,6 +1219,19 @@ fn aml_namespace_walk(
     let mut staged_count = 0_usize;
     for record in records.iter().take(record_count).flatten() {
         if record.kind != AmlNamespaceKind::Device || !record.pci_root {
+            continue;
+        }
+        // ACPI defines an omitted _SEG/_BBN for a PCI root bridge as segment
+        // zero / bus zero.  Publish _CRS apertures only when that root identity
+        // is owned by a validated MCFG allocation.  This prevents resources
+        // from an unrelated AML root from becoming BAR-allocation authority.
+        let segment_group = record.segment_group.unwrap_or(0);
+        let base_bus = record.base_bus.unwrap_or(0);
+        if !mcfg_allocations.iter().any(|allocation| {
+            allocation.segment_group == segment_group
+                && allocation.start_bus <= base_bus
+                && base_bus <= allocation.end_bus
+        }) {
             continue;
         }
         if let Some((start, end)) = record.resource_template {
@@ -1464,13 +1482,13 @@ pub fn self_test() -> bool {
 
     let mut aml_resources = [PciRootResource::default(); MAX_PCI_ROOT_RESOURCES];
     let aml_scope = [0x10, 0x05, b'_', b'S', b'B', b'_'];
-    let aml_scope_walk = aml_namespace_walk(&aml_scope, &mut aml_resources) == Ok((1, 0));
+    let aml_scope_walk = aml_namespace_walk(&aml_scope, &[], &mut aml_resources) == Ok((1, 0));
     let aml_device = [0x5b, 0x82, 0x05, b'P', b'C', b'I', b'0'];
-    let aml_device_walk = aml_namespace_walk(&aml_device, &mut aml_resources) == Ok((1, 0));
+    let aml_device_walk = aml_namespace_walk(&aml_device, &[], &mut aml_resources) == Ok((1, 0));
     let aml_nested = [
         0x10, 0x0c, b'_', b'S', b'B', b'_', 0x5b, 0x82, 0x05, b'P', b'C', b'I', b'0',
     ];
-    let aml_nested_walk = aml_namespace_walk(&aml_nested, &mut aml_resources) == Ok((2, 0));
+    let aml_nested_walk = aml_namespace_walk(&aml_nested, &[], &mut aml_resources) == Ok((2, 0));
 
     let aml_pkg_short = decode_aml_pkg_length(&[0x05], 0) == Ok((5, 1));
     let aml_pkg_multi = decode_aml_pkg_length(&[0x41, 0x02], 0) == Ok((33, 2));
