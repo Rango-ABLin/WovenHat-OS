@@ -913,6 +913,24 @@ fn aml_resolve_name(base: AmlPath, name: AmlName) -> Result<AmlPath, Error> {
     Ok(path)
 }
 
+fn aml_eisa_id(bytes: &[u8], offset: usize) -> Option<u32> {
+    match bytes.get(offset).copied()? {
+        0x0c => bytes.get(offset + 1..offset + 5).map(|raw| {
+            u32::from_le_bytes([raw[0], raw[1], raw[2], raw[3]])
+        }),
+        _ => None,
+    }
+}
+
+fn aml_is_pci_root_id(id: u32) -> bool {
+    // AML EISAID("PNP0A03") / EISAID("PNP0A08") integer encodings.
+    id == 0x030ad041 || id == 0x080ad041
+}
+
+fn aml_name_is(path: AmlPath, segment: [u8; 4]) -> bool {
+    path.count != 0 && path.segments[path.count - 1] == segment
+}
+
 fn aml_namespace_walk(bytes: &[u8]) -> Result<usize, Error> {
     fn walk(
         bytes: &[u8],
@@ -952,6 +970,13 @@ fn aml_namespace_walk(bytes: &[u8]) -> Result<usize, Error> {
                 0x08 => {
                     let (name, value) = aml_name_string(bytes, offset + 1)?;
                     let path = aml_resolve_name(scope, name)?;
+                    // Recognize static PCI-root hardware/compatible IDs while
+                    // walking their owning device scope. This is intentionally
+                    // read-only: resource apertures are not published until
+                    // _CRS is decoded and validated separately.
+                    let _pci_root_identity = (aml_name_is(path, *b"_HID")
+                        || aml_name_is(path, *b"_CID"))
+                        && aml_eisa_id(bytes, value).is_some_and(aml_is_pci_root_id);
                     match aml_skip_data_ref_object(bytes, value) {
                         Ok(next) if next <= end => {
                             *objects = objects.checked_add(1).ok_or(Error::AddressOverflow)?;
