@@ -392,6 +392,11 @@ impl Shell {
                     cmd_sync(console);
                 }
             }
+            "snapshot" => {
+                if authorize(Capability::FileWrite, console) {
+                    cmd_snapshot(arg, console);
+                }
+            }
             _ => {
                 if !cmd_userland_command(verb, arg, console) {
                     console.print("unknown command: ");
@@ -422,12 +427,28 @@ fn print_help(console: &mut Console<'_>) {
     );
     console.println("files:   ls [path]  cat <path>  write <path> <text>");
     console.println("         mkdir <path>  rm <path>  stat <path>");
-    console.println("         rename|mv <old> <new>");
+    console.println("         rename|mv <old> <new>  snapshot create");
     console.println("test:    mmaptest (private/shared mappings, fork, msync), msynctest (disk)");
     console.println("nav:     cd [path]  pwd  echo <text>");
     console.println("process: run <elf>  sh  init  spawn  user|ring3  kill <pid> [sig]");
     console
         .println("runtime: userland udpecho [port] dhcp <on|off>   (Multicore Foundation runtime)");
+}
+
+fn cmd_snapshot(arg: &str, console: &mut Console<'_>) {
+    if arg != "create" {
+        console.println("usage: snapshot create");
+        return;
+    }
+    let generation = crate::timer::ticks().saturating_add(1);
+    match crate::snapshots::capture_wovenfs(generation) {
+        Some(id) => {
+            console.print("snapshot created: ");
+            print_u64(console, id);
+            console.newline();
+        }
+        None => console.println("snapshot: capture failed or snapshot table full"),
+    }
 }
 
 fn cmd_tasks(console: &mut Console<'_>) {
