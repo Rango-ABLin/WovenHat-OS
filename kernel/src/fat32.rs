@@ -38,6 +38,8 @@ const JOURNAL_HEADER_SIZE: usize = 8;
 const JOURNAL_RECORD_SIZE: usize = 32;
 const JOURNAL_CAPACITY: usize = (SECTOR_SIZE - JOURNAL_HEADER_SIZE) / JOURNAL_RECORD_SIZE;
 const JOURNAL_SECTOR_COUNT: usize = 2;
+const RESTORE_MAGIC: &[u8; 4] = b"WSR1";
+const RESTORE_VERSION: u16 = 1;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Error {
@@ -313,6 +315,92 @@ pub struct JournalIntent {
     pub path_tag: u32,
     pub checksum: u64,
     pub metadata: FileMetadata,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub struct SnapshotRestoreIntent {
+    pub snapshot_id: u64,
+    pub generation: u64,
+    pub expected_root: u64,
+    pub applied: u64,
+}
+
+fn restore_sector(volume: Volume) -> Result<u64, Error> {
+    volume
+        .first_fat_sector
+        .checked_sub((METADATA_SECTOR_COUNT + JOURNAL_SECTOR_COUNT + INODE_METADATA_SECTOR_COUNT + 1) as u64)
+        .ok_or(Error::UnsupportedGeometry)
+}
+
+fn restore_checksum(intent: SnapshotRestoreIntent) -> u64 {
+    [intent.snapshot_id, intent.generation, intent.expected_root, intent.applied]
+        .into_iter()
+        .fold(0xcbf2_9ce4_8422_2325, |hash, value| {
+            (hash ^ value).wrapping_mul(0x1000_0000_01b3)
+        })
+}
+
+pub fn write_snapshot_restore_intent(
+    device: &mut impl BlockDevice,
+    volume: Volume,
+    intent: SnapshotRestoreIntent,
+) -> Result<(), Error> {
+    if intent.snapshot_id == 0 || intent.generation == 0 || intent.expected_root == 0 {
+        return Err(Error::WriteFailed);
+    }
+    let mut sector = [0u8; SECTOR_SIZE];
+    sector[..4].copy_from_slice(RESTORE_MAGIC);
+    sector[4..6].copy_from_slice(&RESTORE_VERSION.to_le_bytes());
+    sector[8..16].copy_from_slice(&intent.snapshot_id.to_le_bytes());
+    sector[16..24].copy_from_slice(&intent.generation.to_le_bytes());
+    sector[24..32].copy_from_slice(&intent.expected_root.to_le_bytes());
+    sector[32..40].copy_from_slice(&intent.applied.to_le_bytes());
+    sector[40..48].copy_from_slice(&restore_checksum(intent).to_le_bytes());
+    device
+        .write_sector(restore_sector(volume)?, &sector)
+        .map_err(Error::Block)?;
+    device.flush().map_err(Error::Block)
+}
+
+pub fn read_snapshot_restore_intent(
+    device: &mut impl BlockDevice,
+    volume: Volume,
+) -> Result<Option<SnapshotRestoreIntent>, Error> {
+    let mut sector = [0u8; SECTOR_SIZE];
+    device
+        .read_sector(restore_sector(volume)?, &mut sector)
+        .map_err(Error::Block)?;
+    if &sector[..4] != RESTORE_MAGIC {
+        return Ok(None);
+    }
+    if read_u16(&sector, 4) != RESTORE_VERSION {
+        return Err(Error::CorruptDirectory);
+    }
+    let intent = SnapshotRestoreIntent {
+        snapshot_id: read_u64(&sector, 8),
+        generation: read_u64(&sector, 16),
+        expected_root: read_u64(&sector, 24),
+        applied: read_u64(&sector, 32),
+    };
+    if intent.snapshot_id == 0
+        || intent.generation == 0
+        || intent.expected_root == 0
+        || read_u64(&sector, 40) != restore_checksum(intent)
+    {
+        return Err(Error::CorruptDirectory);
+    }
+    Ok(Some(intent))
+}
+
+pub fn clear_snapshot_restore_intent(
+    device: &mut impl BlockDevice,
+    volume: Volume,
+) -> Result<(), Error> {
+    let sector = [0u8; SECTOR_SIZE];
+    device
+        .write_sector(restore_sector(volume)?, &sector)
+        .map_err(Error::Block)?;
+    device.flush().map_err(Error::Block)
 }
 
 /// Stable path key used by the reserved-area metadata table.

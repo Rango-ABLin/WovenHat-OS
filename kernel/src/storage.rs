@@ -961,6 +961,93 @@ fn live_directory_growth_self_test() -> Result<(), &'static str> {
     remove_live_test_dir(GROW_DIR)
 }
 
+pub fn persist_snapshot_restore_intent(
+    intent: crate::snapshots::RestoreIntent,
+) -> Result<(), PersistError> {
+    if !mnt_mounted() {
+        return Err(unavailable_persist_error());
+    }
+    if !block_io::primary_ata_present() {
+        return Err(PersistError::NoDevice);
+    }
+    let durable = fat32::SnapshotRestoreIntent {
+        snapshot_id: intent.snapshot_id,
+        generation: intent.generation,
+        expected_root: intent.expected_root,
+        applied: intent.applied as u64,
+    };
+    let mut disk = block_io::primary_ata();
+    with_mounted_volume(&mut disk, |device, volume| {
+        fat32::write_snapshot_restore_intent(device, volume, durable)
+    })
+    .map_err(map_persist_err)
+}
+
+pub fn load_snapshot_restore_intent(
+) -> Result<Option<crate::snapshots::RestoreIntent>, PersistError> {
+    if !mnt_mounted() {
+        return Err(unavailable_persist_error());
+    }
+    if !block_io::primary_ata_present() {
+        return Err(PersistError::NoDevice);
+    }
+    let mut disk = block_io::primary_ata();
+    let durable = with_mounted_volume(&mut disk, |device, volume| {
+        fat32::read_snapshot_restore_intent(device, volume)
+    })
+    .map_err(map_persist_err)?;
+    durable
+        .map(|intent| {
+            let applied = usize::try_from(intent.applied).map_err(|_| PersistError::Failed)?;
+            Ok(crate::snapshots::RestoreIntent {
+                snapshot_id: intent.snapshot_id,
+                generation: intent.generation,
+                expected_root: intent.expected_root,
+                applied,
+            })
+        })
+        .transpose()
+}
+
+pub fn clear_snapshot_restore_intent() -> Result<(), PersistError> {
+    if !mnt_mounted() {
+        return Err(unavailable_persist_error());
+    }
+    if !block_io::primary_ata_present() {
+        return Err(PersistError::NoDevice);
+    }
+    let mut disk = block_io::primary_ata();
+    with_mounted_volume(&mut disk, |device, volume| {
+        fat32::clear_snapshot_restore_intent(device, volume)
+    })
+    .map_err(map_persist_err)
+}
+
+fn with_mounted_volume<T>(
+    device: &mut impl crate::block::BlockDevice,
+    operation: impl FnOnce(&mut dyn crate::block::BlockDevice, fat32::Volume) -> Result<T, fat32::Error>,
+) -> Result<T, fat32::Error> {
+    match fat32::mount(device) {
+        Ok(volume) => operation(device, volume),
+        Err(fat32::Error::InvalidBootSector | fat32::Error::UnsupportedGeometry) => {
+            if let Ok(Some(part)) = partition::find_fat32(device) {
+                let mut view = partition::PartitionDevice::new(device, part)
+                    .map_err(|_| fat32::Error::UnsupportedGeometry)?;
+                let volume = fat32::mount(&mut view)?;
+                operation(&mut view, volume)
+            } else if let Ok(Some(part)) = gpt::find_fat_partition(device) {
+                let mut view = partition::PartitionDevice::new(device, part)
+                    .map_err(|_| fat32::Error::UnsupportedGeometry)?;
+                let volume = fat32::mount(&mut view)?;
+                operation(&mut view, volume)
+            } else {
+                Err(fat32::Error::InvalidBootSector)
+            }
+        }
+        Err(error) => Err(error),
+    }
+}
+
 /// Persist a VFS file under `/mnt/` to the live ATA FAT32 volume.
 ///
 /// Multi-component paths are supported. Missing FAT32 directories are created
