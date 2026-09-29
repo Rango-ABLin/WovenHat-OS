@@ -961,6 +961,7 @@ fn live_directory_growth_self_test() -> Result<(), &'static str> {
     remove_live_test_dir(GROW_DIR)
 }
 
+#[cfg(feature = "stage12-4-test")]
 pub fn persist_snapshot_restore_intent(
     intent: crate::snapshots::RestoreIntent,
 ) -> Result<(), PersistError> {
@@ -1023,6 +1024,7 @@ pub fn clear_snapshot_restore_intent() -> Result<(), PersistError> {
     .map_err(map_persist_err)
 }
 
+#[cfg(feature = "stage12-4-test")]
 fn with_mounted_volume<T>(
     device: &mut impl crate::block::BlockDevice,
     operation: impl FnOnce(&mut dyn crate::block::BlockDevice, fat32::Volume) -> Result<T, fat32::Error>,
