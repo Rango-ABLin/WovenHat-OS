@@ -1520,6 +1520,14 @@ pub fn delete_path(path: &str) -> Result<(), MutationError> {
     }
     FILE_PAGES.lock().invalidate();
     let inode = inode_on_device(&mut disk, relative).ok().flatten();
+    if let Some(previous) = crate::wovenfs::metadata(path) {
+        crate::snapshots::record_live_change(
+            crate::wovenfs::path_hash(path),
+            previous.checksum,
+            0,
+        )
+        .map_err(|_| MutationError::Failed)?;
+    }
     let mut result = delete_on_cached_device(&mut disk, relative);
     if result.is_ok() {
         result = remove_metadata_on_device(&mut disk, path);
@@ -1532,6 +1540,7 @@ pub fn delete_path(path: &str) -> Result<(), MutationError> {
     let flushed = disk.flush().map_err(|_| MutationError::Failed);
     let status = result.and(flushed);
     if status.is_ok() {
+        let _ = crate::wovenfs::remove(path);
         mark_mnt_dirty();
     }
     status
@@ -1670,6 +1679,20 @@ pub fn rename_path(old: &str, new: &str) -> Result<(), MutationError> {
         return Err(MutationError::ReadOnly);
     }
     FILE_PAGES.lock().invalidate();
+    if let Some(previous) = crate::wovenfs::metadata(old) {
+        crate::snapshots::record_live_change(
+            crate::wovenfs::path_hash(old),
+            previous.checksum,
+            0,
+        )
+        .map_err(|_| MutationError::Failed)?;
+        crate::snapshots::record_live_change(
+            crate::wovenfs::path_hash(new),
+            0,
+            previous.checksum,
+        )
+        .map_err(|_| MutationError::Failed)?;
+    }
     let mut result = rename_on_cached_device(&mut disk, old_relative, new_relative);
     if result.is_ok() {
         result = move_metadata_on_device(&mut disk, old, new);
@@ -1677,6 +1700,7 @@ pub fn rename_path(old: &str, new: &str) -> Result<(), MutationError> {
     let flushed = disk.flush().map_err(|_| MutationError::Failed);
     let status = result.and(flushed);
     if status.is_ok() {
+        let _ = crate::wovenfs::rename(old, new);
         mark_mnt_dirty();
     }
     status
