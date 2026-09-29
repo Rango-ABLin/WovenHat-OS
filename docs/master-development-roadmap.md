@@ -209,9 +209,18 @@ per-user keys
 secure key handling
 authenticated encryption
 
-The kernel now provides the authenticated-encryption envelope and a bounded,
-generation-safe revocable key vault. Measured key provisioning, persistent key
-storage, rotation policy, and encrypted-volume mount integration remain open.
+The kernel now provides the RFC 8439 authenticated-encryption envelope, a
+bounded generation-safe revocable key vault, authenticated persistent wrapped-key
+records, an explicit fail-closed measured-provisioning boundary, crash-safe
+successor-generation rotation, and encrypted mount-record I/O bound to volume,
+generation, mount, owner, and opaque vault authority.
+
+The production integration gate covers tampered persistent records, untrusted
+measurement evidence, cross-volume/generation rotation rejection, mounted-record
+authentication failure without plaintext mutation, key revocation/stale mount
+authority, and 1/2/4-core release validation. A platform TPM/firmware backend is
+still required to supply real measured-root evidence on physical hardware; the
+kernel does not substitute best-effort entropy for that trust source.
 12.4 — Snapshots
 
 Implement filesystem snapshots.
