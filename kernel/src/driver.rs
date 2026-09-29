@@ -136,6 +136,44 @@ pub fn bind_pci(
     Ok(())
 }
 
+/// Claim a discovered PCI function and retain its currently programmed MMIO
+/// BARs as one driver-admission transaction. If any BAR lease cannot be
+/// retained, ordered teardown rolls the partial binding back before returning.
+pub fn bind_pci_with_bars(
+    name: &'static str,
+    address: crate::hal::pci::Address,
+    owner: u32,
+) -> Result<(), crate::hal::pci::topology::Error> {
+    bind_pci(name, address, owner)?;
+    let binding = {
+        let table = TABLE.lock();
+        table.iter().flatten()
+            .find(|entry| entry.name == name && entry.state == State::Bound)
+            .and_then(|entry| entry.pci)
+            .ok_or(crate::hal::pci::topology::Error::InvalidHandle)?
+    };
+
+    for bar_index in 0..PCI_BAR_COUNT {
+        match crate::hal::pci::lease_bar(binding.function, binding.owner, bar_index as u8) {
+            Ok(lease) => {
+                if attach_pci_bar(name, lease).is_err() {
+                    let _ = crate::hal::pci::release_bar_lease(lease, binding.owner);
+                    let _ = unbind_pci_resources(name);
+                    return Err(crate::hal::pci::topology::Error::InvalidBar);
+                }
+            }
+            // I/O, absent, and unassigned BAR slots are not MMIO authority and
+            // therefore need no driver-table lease.
+            Err(crate::hal::pci::topology::Error::InvalidBar) => {}
+            Err(error) => {
+                let _ = unbind_pci_resources(name);
+                return Err(error);
+            }
+        }
+    }
+    Ok(())
+}
+
 /// Detach a PCI binding after the caller has quiesced device interrupts and
 /// released any MSI/MSI-X and BAR leases. The driver is marked Unbinding
 /// before topology ownership is released so new work cannot observe it Bound.
