@@ -373,6 +373,22 @@ pub fn command(command: Command) -> CommandResult {
     }
 }
 
+/// Boot-time reachability probe for the production management surface. This
+/// does not mutate state; it ensures command variants/results remain linked.
+pub fn production_surface_probe() -> bool {
+    let mut ok = matches!(command(Command::PendingRestore), CommandResult::Pending(_));
+    for id in [u64::MAX] {
+        ok &= matches!(command(Command::Query { id }), CommandResult::Snapshot(None));
+        ok &= matches!(
+            command(Command::QueryChange { id, path_hash: 0 }),
+            CommandResult::Change(None)
+        );
+        ok &= matches!(command(Command::Remove { id }), CommandResult::Removed(false));
+    }
+    ok
+}
+
+
 #[cfg(feature = "stage12-4-test")]
 pub fn structural_self_test() -> bool {
     let Some(id) = create(4, 99) else {
