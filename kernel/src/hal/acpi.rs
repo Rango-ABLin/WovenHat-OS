@@ -922,6 +922,27 @@ fn aml_eisa_id(bytes: &[u8], offset: usize) -> Option<u32> {
     }
 }
 
+fn aml_static_integer(bytes: &[u8], offset: usize) -> Option<u64> {
+    match bytes.get(offset).copied()? {
+        0x00 => Some(0),
+        0x01 => Some(1),
+        0xff => Some(u64::MAX),
+        0x0a => bytes.get(offset + 1).copied().map(u64::from),
+        0x0b => bytes.get(offset + 1..offset + 3).map(|raw| {
+            u64::from(u16::from_le_bytes([raw[0], raw[1]]))
+        }),
+        0x0c => bytes.get(offset + 1..offset + 5).map(|raw| {
+            u64::from(u32::from_le_bytes([raw[0], raw[1], raw[2], raw[3]]))
+        }),
+        0x0e => bytes.get(offset + 1..offset + 9).map(|raw| {
+            u64::from_le_bytes([
+                raw[0], raw[1], raw[2], raw[3], raw[4], raw[5], raw[6], raw[7],
+            ])
+        }),
+        _ => None,
+    }
+}
+
 fn aml_is_pci_root_id(id: u32) -> bool {
     // AML EISAID("PNP0A03") / EISAID("PNP0A08") integer encodings.
     id == 0x030ad041 || id == 0x080ad041
@@ -1001,6 +1022,18 @@ fn aml_namespace_walk(bytes: &[u8]) -> Result<usize, Error> {
                         let owner = aml_parent_path(path).ok_or(Error::InvalidSignature)?;
                         if owner != scope || !aml_has_device(records, *record_count, owner) {
                             return Err(Error::InvalidSignature);
+                        }
+                    }
+                    if aml_name_is(path, *b"_SEG") || aml_name_is(path, *b"_BBN") {
+                        let owner = aml_parent_path(path).ok_or(Error::InvalidSignature)?;
+                        if owner != scope || !aml_has_device(records, *record_count, owner) {
+                            return Err(Error::InvalidSignature);
+                        }
+                        let number = aml_static_integer(bytes, value).ok_or(Error::InvalidSignature)?;
+                        if (aml_name_is(path, *b"_SEG") && number > u16::MAX.into())
+                            || (aml_name_is(path, *b"_BBN") && number > u8::MAX.into())
+                        {
+                            return Err(Error::InvalidLength);
                         }
                     }
                     match aml_skip_data_ref_object(bytes, value) {
