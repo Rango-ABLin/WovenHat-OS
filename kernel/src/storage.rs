@@ -185,6 +185,18 @@ pub fn mount_ata_root() -> MountStatus {
     })
     .unwrap_or(MountStatus::NoDevice);
     record_mount_status(status);
+    if matches!(status, MountStatus::Mounted(_)) {
+        // Reconstruct durable snapshot state only after /mnt is available.
+        // Fail closed: corrupt snapshot metadata makes the mount lifecycle fail
+        // rather than silently discarding rollback authority.
+        if crate::snapshots::recover_catalog().is_err()
+            || crate::snapshots::recover_restore().is_err()
+        {
+            let failed = MountStatus::Failed;
+            record_mount_status(failed);
+            return failed;
+        }
+    }
     status
 }
 
