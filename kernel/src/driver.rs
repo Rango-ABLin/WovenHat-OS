@@ -460,6 +460,16 @@ pub fn remove_pci_function(
 pub fn hotplug_rescan() -> Result<crate::hal::pci::Summary, PciUnbindError> {
     let mut removed = [None; crate::hal::pci::MAX_DEVICES];
     let count = crate::hal::pci::rescan_removed(&mut removed);
+
+    // Validate the complete removal set before mutating ownership.  A stale
+    // generation in the rescan snapshot must abort the batch rather than
+    // tearing down an arbitrary prefix and leaving hotplug reconciliation in
+    // a half-applied state.
+    for removal in removed[..count].iter().flatten().copied() {
+        crate::hal::pci::topology_owner(removal.function)
+            .map_err(PciUnbindError::Topology)?;
+    }
+
     for removal in removed[..count].iter().flatten().copied() {
         if pci_driver_name(removal.function).is_some() {
             remove_pci_function(removal.function)?;
