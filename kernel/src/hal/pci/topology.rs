@@ -216,9 +216,18 @@ impl Topology {
     }
 
     pub fn release(&mut self, handle: FunctionHandle, owner: u32) -> Result<(), Error> {
-        let node = self.node_mut(handle)?;
-        if owner == NO_OWNER || node.owner != owner { return Err(Error::NotOwner); }
-        node.owner = NO_OWNER;
+        {
+            let node = self.node(handle)?;
+            if owner == NO_OWNER || node.owner != owner { return Err(Error::NotOwner); }
+        }
+        // Function ownership is the outer capability. It may not disappear
+        // while any generation-safe BAR lease still depends on it; otherwise
+        // an untracked/failed-cleanup lease could be stranded after admission
+        // or teardown and later confuse slot reuse.
+        if self.leases.iter().any(|lease| lease.occupied && lease.function == handle) {
+            return Err(Error::AlreadyOwned);
+        }
+        self.node_mut(handle)?.owner = NO_OWNER;
         Ok(())
     }
 
