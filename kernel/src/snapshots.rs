@@ -350,6 +350,20 @@ pub fn structural_self_test() -> bool {
                 old_checksum: 11,
                 new_checksum: 13,
             })
+    {
+        return false;
+    }
+    *TABLE.lock() = [None; MAX];
+    *CHANGES.lock() = [None; MAX_CHANGES];
+    if recover_catalog() != Ok(true)
+        || get(id) != Some(Snapshot { id, generation: 4, checksum: 99 })
+        || change(id, 0x10)
+            != Some(CowRecord {
+                snapshot_id: id,
+                path_hash: 0x10,
+                old_checksum: 11,
+                new_checksum: 13,
+            })
         || begin_restore(id, 98) != Err(RestoreError::ChecksumMismatch)
         || begin_restore(id, 99) != Ok(4)
         || prepare_restore(id, 99).is_err()
