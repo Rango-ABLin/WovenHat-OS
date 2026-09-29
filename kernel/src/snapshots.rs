@@ -213,7 +213,7 @@ pub fn begin_restore(id: u64, durable_checksum: u64) -> Result<u64, RestoreError
 /// reboot can query pending_restore() and resume from the applied index.
 pub fn prepare_restore(id: u64, durable_checksum: u64) -> Result<RestoreIntent, RestoreError> {
     let generation = begin_restore(id, durable_checksum)?;
-    let mut pending = RESTORE_INTENT.lock();
+    let pending = RESTORE_INTENT.lock();
     if pending.is_some() {
         return Err(RestoreError::RestoreBusy);
     }
@@ -235,7 +235,7 @@ pub fn prepare_restore(id: u64, durable_checksum: u64) -> Result<RestoreIntent, 
 }
 
 pub fn mark_restore_applied(id: u64) -> Result<RestoreIntent, RestoreError> {
-    let mut pending = RESTORE_INTENT.lock();
+    let pending = RESTORE_INTENT.lock();
     let Some(mut intent) = *pending else {
         return Err(RestoreError::MissingSnapshot);
     };
@@ -270,7 +270,7 @@ pub fn pending_restore() -> Option<RestoreIntent> {
 }
 
 pub fn commit_restore(id: u64, restored_root: u64) -> Result<u64, RestoreError> {
-    let mut pending = RESTORE_INTENT.lock();
+    let pending = RESTORE_INTENT.lock();
     let Some(intent) = *pending else {
         return Err(RestoreError::MissingSnapshot);
     };
