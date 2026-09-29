@@ -16,6 +16,177 @@ const MAX_KEYS: usize = 8;
 
 pub type Tag = [u8; TAG_SIZE];
 
+/// Persistent, non-secret identity for a wrapped volume-key generation.
+/// Raw key bytes are deliberately never part of this metadata boundary.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct KeyGeneration {
+    pub volume_id: u64,
+    pub generation: u32,
+}
+
+/// Authenticated metadata stored beside a wrapped volume key. The actual
+/// persistent-storage backend is intentionally separate: callers must persist
+/// the ciphertext and tag atomically before making a generation current.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct WrappedKeyRecord {
+    pub identity: KeyGeneration,
+    pub nonce: u64,
+    pub ciphertext: [u8; KEY_SIZE],
+    pub tag: Tag,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum WrappedKeyError {
+    InvalidGeneration,
+    Authentication,
+    VaultFull,
+    UntrustedProvisioning,
+}
+
+/// Evidence attached to a key-encryption key by a platform-specific measured
+/// provisioning backend. Stage 12.3 deliberately does not manufacture trust:
+/// callers must establish both a non-zero measurement and an authenticated
+/// hardware/trusted-service result before persistent key material is accepted.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ProvisioningEvidence {
+    pub measurement: [u8; 32],
+    pub authenticated: bool,
+}
+
+impl ProvisioningEvidence {
+    fn trusted(self) -> bool {
+        self.authenticated && self.measurement.iter().any(|byte| *byte != 0)
+    }
+}
+
+fn wrapped_key_aad(identity: KeyGeneration) -> [u8; 12] {
+    let mut aad = [0u8; 12];
+    aad[..8].copy_from_slice(&identity.volume_id.to_le_bytes());
+    aad[8..].copy_from_slice(&identity.generation.to_le_bytes());
+    aad
+}
+
+/// Wrap one volume key under a caller-supplied key-encryption key. This is the
+/// persistence-format boundary only; Stage 12.3 provisioning must obtain the
+/// KEK from a measured/trusted source before calling it.
+pub fn wrap_volume_key(
+    kek: &[u8; KEY_SIZE],
+    identity: KeyGeneration,
+    nonce: u64,
+    volume_key: [u8; KEY_SIZE],
+) -> Result<WrappedKeyRecord, WrappedKeyError> {
+    if identity.generation == 0 {
+        return Err(WrappedKeyError::InvalidGeneration);
+    }
+    let mut ciphertext = volume_key;
+    let aad = wrapped_key_aad(identity);
+    let tag = seal(kek, nonce, &aad, &mut ciphertext)
+        .ok_or(WrappedKeyError::Authentication)?;
+    Ok(WrappedKeyRecord { identity, nonce, ciphertext, tag })
+}
+
+/// Authenticate and unwrap a persisted volume-key generation directly into
+/// the bounded vault. Authentication failure never provisions attacker-
+/// controlled plaintext, and the temporary plaintext is wiped afterwards.
+pub fn provision_wrapped_for(
+    owner: u64,
+    kek: &[u8; KEY_SIZE],
+    record: &WrappedKeyRecord,
+) -> Result<KeyHandle, WrappedKeyError> {
+    // Compatibility/internal path: cryptographic authentication is enforced,
+    // but production encrypted-volume mounting should use the measured form
+    // below so a caller cannot silently substitute an unmeasured KEK.
+    if record.identity.generation == 0 {
+        return Err(WrappedKeyError::InvalidGeneration);
+    }
+    let mut key = record.ciphertext;
+    let aad = wrapped_key_aad(record.identity);
+    if !open(kek, record.nonce, &aad, &mut key, &record.tag) {
+        key.fill(0);
+        return Err(WrappedKeyError::Authentication);
+    }
+    let handle = provision_for(owner, key).ok_or(WrappedKeyError::VaultFull);
+    key.fill(0);
+    handle
+}
+
+/// Provision a persisted volume key only after a platform backend has supplied
+/// explicit measured/authenticated evidence for the KEK. This fail-closed
+/// boundary is usable before a TPM/firmware backend exists without falsely
+/// treating best-effort kernel entropy as a hardware root of trust.
+pub fn provision_measured_wrapped_for(
+    owner: u64,
+    kek: &[u8; KEY_SIZE],
+    evidence: ProvisioningEvidence,
+    record: &WrappedKeyRecord,
+) -> Result<KeyHandle, WrappedKeyError> {
+    if !evidence.trusted() {
+        return Err(WrappedKeyError::UntrustedProvisioning);
+    }
+    provision_wrapped_for(owner, kek, record)
+}
+
+/// Pair of authenticated key records used during crash-safe rotation. The old
+/// generation remains readable until the caller has durably persisted the new
+/// record and atomically advanced its volume metadata to `next.generation`.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct RotationPlan {
+    pub current: WrappedKeyRecord,
+    pub next: WrappedKeyRecord,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum RotationError {
+    WrongVolume,
+    GenerationExhausted,
+    Wrap(WrappedKeyError),
+}
+
+/// Prepare, but do not commit, a volume-key rotation. Keeping both records in
+/// the plan makes power-loss recovery explicit: storage code persists `next`
+/// first, then advances the authenticated generation pointer, and only then
+/// retires `current`.
+pub fn prepare_rotation(
+    kek: &[u8; KEY_SIZE],
+    current: WrappedKeyRecord,
+    nonce: u64,
+    next_key: [u8; KEY_SIZE],
+) -> Result<RotationPlan, RotationError> {
+    if current.identity.generation == 0 {
+        return Err(RotationError::Wrap(WrappedKeyError::InvalidGeneration));
+    }
+    let generation = current
+        .identity
+        .generation
+        .checked_add(1)
+        .ok_or(RotationError::GenerationExhausted)?;
+    let identity = KeyGeneration {
+        volume_id: current.identity.volume_id,
+        generation,
+    };
+    let next = wrap_volume_key(kek, identity, nonce, next_key).map_err(RotationError::Wrap)?;
+    Ok(RotationPlan { current, next })
+}
+
+/// Validate that an on-disk generation advance is exactly the prepared
+/// successor for the same volume. Skips and cross-volume substitution are
+/// rejected so recovery can deterministically choose old-or-new state.
+pub fn validate_rotation(plan: &RotationPlan) -> Result<(), RotationError> {
+    if plan.current.identity.volume_id != plan.next.identity.volume_id {
+        return Err(RotationError::WrongVolume);
+    }
+    let expected = plan
+        .current
+        .identity
+        .generation
+        .checked_add(1)
+        .ok_or(RotationError::GenerationExhausted)?;
+    if plan.next.identity.generation != expected {
+        return Err(RotationError::Wrap(WrappedKeyError::InvalidGeneration));
+    }
+    Ok(())
+}
+
 fn constant_time_eq(left: &[u8], right: &[u8]) -> bool {
     if left.len() != right.len() {
         return false;
@@ -354,6 +525,50 @@ pub fn structural_self_test() -> bool {
     if !revoke_for(1000, handle)
         || open_with_owner(1000, handle, 10, b"header", &mut via_vault, &vault_tag)
     {
+        return false;
+    }
+
+    // Persistent wrapping must authenticate identity as well as ciphertext.
+    let kek = [0x24u8; KEY_SIZE];
+    let identity = KeyGeneration { volume_id: 7, generation: 1 };
+    let Ok(record) = wrap_volume_key(&kek, identity, 77, [0x51; KEY_SIZE]) else {
+        return false;
+    };
+    let untrusted = ProvisioningEvidence { measurement: [0; 32], authenticated: true };
+    if provision_measured_wrapped_for(2000, &kek, untrusted, &record)
+        != Err(WrappedKeyError::UntrustedProvisioning)
+    {
+        return false;
+    }
+    let trusted = ProvisioningEvidence { measurement: [0xa5; 32], authenticated: true };
+    let Ok(persisted) = provision_measured_wrapped_for(2000, &kek, trusted, &record) else {
+        return false;
+    };
+    if !revoke_for(2000, persisted) {
+        return false;
+    }
+    let mut tampered = record;
+    tampered.tag[0] ^= 1;
+    if provision_measured_wrapped_for(2000, &kek, trusted, &tampered)
+        != Err(WrappedKeyError::Authentication)
+    {
+        return false;
+    }
+
+    // Rotation prepares exactly one successor and leaves the old record intact
+    // until storage has durably advanced its authenticated generation pointer.
+    let Ok(rotation) = prepare_rotation(&kek, record, 78, [0x61; KEY_SIZE]) else {
+        return false;
+    };
+    if validate_rotation(&rotation).is_err()
+        || rotation.next.identity.generation != 2
+        || rotation.current != record
+    {
+        return false;
+    }
+    let mut wrong_volume = rotation;
+    wrong_volume.next.identity.volume_id ^= 1;
+    if validate_rotation(&wrong_volume) != Err(RotationError::WrongVolume) {
         return false;
     }
     true

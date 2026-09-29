@@ -2707,7 +2707,7 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     }
     #[cfg(feature = "stage12-3-test")]
     {
-        if !volume_crypto::structural_self_test() {
+        if !volume_crypto::structural_self_test() || !storage_manager::encrypted_mount_self_test() {
             serial::write_line(format_args!("[S12.3] encryption: FAILED"));
             qemu_test_exit_failure();
         }
