@@ -880,6 +880,7 @@ enum AmlNamespaceKind {
 struct AmlNamespaceRecord {
     path: AmlPath,
     kind: AmlNamespaceKind,
+    pci_root: bool,
 }
 
 fn aml_record(
@@ -891,7 +892,11 @@ fn aml_record(
     if *record_count >= records.len() {
         return Err(Error::InvalidLength);
     }
-    records[*record_count] = Some(AmlNamespaceRecord { path, kind });
+    records[*record_count] = Some(AmlNamespaceRecord {
+        path,
+        kind,
+        pci_root: false,
+    });
     *record_count += 1;
     Ok(())
 }
@@ -989,6 +994,35 @@ fn aml_has_device(
         .any(|record| record.kind == AmlNamespaceKind::Device && record.path == path)
 }
 
+fn aml_mark_pci_root(
+    records: &mut [Option<AmlNamespaceRecord>; MAX_AML_NAMESPACE_RECORDS],
+    record_count: usize,
+    path: AmlPath,
+) -> Result<(), Error> {
+    let record = records
+        .iter_mut()
+        .take(record_count)
+        .flatten()
+        .find(|record| record.kind == AmlNamespaceKind::Device && record.path == path)
+        .ok_or(Error::InvalidSignature)?;
+    record.pci_root = true;
+    Ok(())
+}
+
+fn aml_is_pci_root_device(
+    records: &[Option<AmlNamespaceRecord>; MAX_AML_NAMESPACE_RECORDS],
+    record_count: usize,
+    path: AmlPath,
+) -> bool {
+    records
+        .iter()
+        .take(record_count)
+        .flatten()
+        .any(|record| {
+            record.kind == AmlNamespaceKind::Device && record.path == path && record.pci_root
+        })
+}
+
 fn aml_namespace_walk(bytes: &[u8]) -> Result<usize, Error> {
     fn walk(
         bytes: &[u8],
@@ -1040,6 +1074,7 @@ fn aml_namespace_walk(bytes: &[u8]) -> Result<usize, Error> {
                         if owner != scope || !aml_has_device(records, *record_count, owner) {
                             return Err(Error::InvalidSignature);
                         }
+                        aml_mark_pci_root(records, *record_count, owner)?;
                     }
                     if aml_name_is(path, *b"_CRS") {
                         let owner = aml_parent_path(path).ok_or(Error::InvalidSignature)?;
@@ -1050,7 +1085,11 @@ fn aml_namespace_walk(bytes: &[u8]) -> Result<usize, Error> {
                         // Publication is deliberately deferred until the owner
                         // is proven to be a PCI root and every descriptor has
                         // passed producer/window semantic validation.
-                        let _resource_template = aml_static_buffer(bytes, value)?;
+                        let resource_template = aml_static_buffer(bytes, value)?;
+                        let _pci_root_resource_template =
+                            aml_is_pci_root_device(records, *record_count, owner)
+                                .then_some(resource_template)
+                                .flatten();
                     }
                     if aml_name_is(path, *b"_SEG") || aml_name_is(path, *b"_BBN") {
                         let owner = aml_parent_path(path).ok_or(Error::InvalidSignature)?;
