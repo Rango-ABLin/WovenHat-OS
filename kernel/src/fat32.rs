@@ -38,19 +38,12 @@ const JOURNAL_HEADER_SIZE: usize = 8;
 const JOURNAL_RECORD_SIZE: usize = 32;
 const JOURNAL_CAPACITY: usize = (SECTOR_SIZE - JOURNAL_HEADER_SIZE) / JOURNAL_RECORD_SIZE;
 const JOURNAL_SECTOR_COUNT: usize = 2;
-#[cfg(feature = "stage12-4-test")]
 const RESTORE_MAGIC: &[u8; 4] = b"WSR1";
-#[cfg(feature = "stage12-4-test")]
 const RESTORE_VERSION: u16 = 1;
-#[cfg(feature = "stage12-4-test")]
 const SNAPSHOT_CATALOG_MAGIC: &[u8; 4] = b"WSC1";
-#[cfg(feature = "stage12-4-test")]
 const SNAPSHOT_CATALOG_VERSION: u16 = 1;
-#[cfg(feature = "stage12-4-test")]
 const SNAPSHOT_CATALOG_SECTORS: usize = 4;
-#[cfg(feature = "stage12-4-test")]
 const SNAPSHOT_CATALOG_SNAPSHOTS: usize = 8;
-#[cfg(feature = "stage12-4-test")]
 const SNAPSHOT_CATALOG_CHANGES: usize = 32;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -330,7 +323,6 @@ pub struct JournalIntent {
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
-#[cfg(feature = "stage12-4-test")]
 pub struct SnapshotRestoreIntent {
     pub snapshot_id: u64,
     pub generation: u64,
@@ -339,7 +331,6 @@ pub struct SnapshotRestoreIntent {
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
-#[cfg(feature = "stage12-4-test")]
 pub struct SnapshotCatalogEntry {
     pub id: u64,
     pub generation: u64,
@@ -347,7 +338,6 @@ pub struct SnapshotCatalogEntry {
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
-#[cfg(feature = "stage12-4-test")]
 pub struct SnapshotCowEntry {
     pub snapshot_id: u64,
     pub path_hash: u64,
@@ -356,13 +346,11 @@ pub struct SnapshotCowEntry {
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
-#[cfg(feature = "stage12-4-test")]
 pub struct SnapshotCatalog {
     pub snapshots: [Option<SnapshotCatalogEntry>; SNAPSHOT_CATALOG_SNAPSHOTS],
     pub changes: [Option<SnapshotCowEntry>; SNAPSHOT_CATALOG_CHANGES],
 }
 
-#[cfg(feature = "stage12-4-test")]
 impl SnapshotCatalog {
     pub const fn empty() -> Self {
         Self {
@@ -372,7 +360,6 @@ impl SnapshotCatalog {
     }
 }
 
-#[cfg(feature = "stage12-4-test")]
 fn snapshot_reserved_start(volume: Volume) -> Result<u64, Error> {
     let used = METADATA_SECTOR_COUNT
         + JOURNAL_SECTOR_COUNT
@@ -396,14 +383,12 @@ fn snapshot_reserved_start(volume: Volume) -> Result<u64, Error> {
     Ok(start)
 }
 
-#[cfg(feature = "stage12-4-test")]
 fn catalog_checksum(bytes: &[u8]) -> u64 {
     bytes.iter().fold(0xcbf2_9ce4_8422_2325, |hash, byte| {
         (hash ^ u64::from(*byte)).wrapping_mul(0x1000_0000_01b3)
     })
 }
 
-#[cfg(feature = "stage12-4-test")]
 pub fn write_snapshot_catalog(
     device: &mut (impl BlockDevice + ?Sized),
     volume: Volume,
@@ -444,7 +429,6 @@ pub fn write_snapshot_catalog(
     device.flush().map_err(Error::Block)
 }
 
-#[cfg(feature = "stage12-4-test")]
 pub fn read_snapshot_catalog(
     device: &mut (impl BlockDevice + ?Sized),
     volume: Volume,
@@ -499,7 +483,6 @@ pub fn read_snapshot_catalog(
     Ok(Some(catalog))
 }
 
-#[cfg(feature = "stage12-4-test")]
 fn restore_sector(volume: Volume) -> Result<u64, Error> {
     let sector = volume
         .first_fat_sector
@@ -516,7 +499,6 @@ fn restore_sector(volume: Volume) -> Result<u64, Error> {
     Ok(sector)
 }
 
-#[cfg(feature = "stage12-4-test")]
 fn restore_checksum(intent: SnapshotRestoreIntent) -> u64 {
     [intent.snapshot_id, intent.generation, intent.expected_root, intent.applied]
         .into_iter()
@@ -525,7 +507,6 @@ fn restore_checksum(intent: SnapshotRestoreIntent) -> u64 {
         })
 }
 
-#[cfg(feature = "stage12-4-test")]
 pub fn write_snapshot_restore_intent(
     device: &mut (impl BlockDevice + ?Sized),
     volume: Volume,
@@ -548,7 +529,6 @@ pub fn write_snapshot_restore_intent(
     device.flush().map_err(Error::Block)
 }
 
-#[cfg(feature = "stage12-4-test")]
 pub fn read_snapshot_restore_intent(
     device: &mut (impl BlockDevice + ?Sized),
     volume: Volume,
@@ -579,7 +559,6 @@ pub fn read_snapshot_restore_intent(
     Ok(Some(intent))
 }
 
-#[cfg(feature = "stage12-4-test")]
 pub fn clear_snapshot_restore_intent(
     device: &mut (impl BlockDevice + ?Sized),
     volume: Volume,
