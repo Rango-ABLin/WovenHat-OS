@@ -74,7 +74,7 @@ mod pipe;
 mod serial;
 mod shell;
 mod smp;
-#[cfg(any(feature = "stage12-4-test", feature = "storage-test"))]
+#[cfg(feature = "stage12-4-test")]
 mod snapshots;
 mod storage;
 #[cfg(feature = "stage12-5-test")]
@@ -138,8 +138,7 @@ mod woven_input;
     feature = "stage12-2-test",
     feature = "stage12-3-test",
     feature = "stage12-4-test",
-    feature = "stage12-5-test",
-    feature = "storage-test"
+    feature = "stage12-5-test"
 ))]
 mod wovenfs;
 mod wovenguard;
