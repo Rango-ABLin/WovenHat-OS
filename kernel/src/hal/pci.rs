@@ -1239,7 +1239,6 @@ pub enum RebalanceError {
     RollbackFailed,
 }
 
-#[expect(dead_code, reason = "called by device admission once ACPI _CRS apertures are published")]
 pub fn rebalance_bars_from_firmware(
     address: Address,
     header_type: u8,
