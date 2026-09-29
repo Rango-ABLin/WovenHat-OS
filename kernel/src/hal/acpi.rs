@@ -1193,11 +1193,11 @@ fn aml_namespace_walk(
     Ok((objects, staged_count))
 }
 
-fn aml_table_body<'a>(
+fn aml_table_body(
     physical_offset: u64,
     table: AmlTable,
-    regions: &'a [MemoryRegion],
-) -> Result<&'a [u8], Error> {
+    regions: &[MemoryRegion],
+) -> Result<&[u8], Error> {
     if table.length < SDT_HEADER_LENGTH {
         return Err(Error::InvalidLength);
     }
