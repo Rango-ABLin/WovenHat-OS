@@ -105,6 +105,55 @@ pub fn unmount(id: u64) -> bool {
         false
     }
 }
+#[cfg(feature = "stage12-3-test")]
+pub fn encrypted_mount_self_test() -> bool {
+    let owner = 3000;
+    let key = [0x73u8; crate::volume_crypto::KEY_SIZE];
+    let Some(handle) = crate::volume_crypto::provision_for(owner, key) else {
+        return false;
+    };
+    let Some(id) = mount(4096, 8192, false) else {
+        let _ = crate::volume_crypto::revoke_for(owner, handle);
+        return false;
+    };
+    let identity = crate::volume_crypto::KeyGeneration { volume_id: 0x1234, generation: 3 };
+    if !attach_encryption(id, owner, identity, handle) {
+        let _ = unmount(id);
+        let _ = crate::volume_crypto::revoke_for(owner, handle);
+        return false;
+    }
+
+    let original = *b"encrypted mounted volume record";
+    let mut ciphertext = original;
+    let Some(tag) = seal_record(id, 55, &mut ciphertext) else {
+        let _ = unmount(id);
+        let _ = crate::volume_crypto::revoke_for(owner, handle);
+        return false;
+    };
+    if ciphertext == original {
+        return false;
+    }
+
+    // Authentication failure must not mutate ciphertext.
+    let mut tampered_tag = tag;
+    tampered_tag[0] ^= 1;
+    let before = ciphertext;
+    if open_record(id, 55, &mut ciphertext, &tampered_tag) || ciphertext != before {
+        return false;
+    }
+    if !open_record(id, 55, &mut ciphertext, &tag) || ciphertext != original {
+        return false;
+    }
+
+    // Revocation makes the mounted authority stale immediately.
+    if !crate::volume_crypto::revoke_for(owner, handle)
+        || seal_record(id, 56, &mut ciphertext).is_some()
+    {
+        return false;
+    }
+    unmount(id)
+}
+
 #[cfg(feature = "stage12-5-test")]
 pub fn structural_self_test() -> bool {
     let Some(id) = mount(2048, 10000, true) else {
