@@ -501,10 +501,19 @@ pub fn read_snapshot_catalog(
 
 #[cfg(feature = "stage12-4-test")]
 fn restore_sector(volume: Volume) -> Result<u64, Error> {
-    volume
+    let sector = volume
         .first_fat_sector
         .checked_sub((METADATA_SECTOR_COUNT + JOURNAL_SECTOR_COUNT + INODE_METADATA_SECTOR_COUNT + 1) as u64)
-        .ok_or(Error::UnsupportedGeometry)
+        .ok_or(Error::UnsupportedGeometry)?;
+    if [volume.fs_info_sector, volume.backup_fs_info_sector]
+        .into_iter()
+        .flatten()
+        .map(u64::from)
+        .any(|protected| protected == sector)
+    {
+        return Err(Error::UnsupportedGeometry);
+    }
+    Ok(sector)
 }
 
 #[cfg(feature = "stage12-4-test")]
@@ -3561,6 +3570,99 @@ pub fn self_test() -> bool {
         && directory_growth_self_test()
         && overwrite_rollback_self_test()
         && directory_extension_rollback_self_test()
+}
+
+#[cfg(feature = "stage12-4-test")]
+struct CatalogTestDisk {
+    image: [[u8; SECTOR_SIZE]; SNAPSHOT_CATALOG_SECTORS],
+    flushes: usize,
+}
+
+#[cfg(feature = "stage12-4-test")]
+impl BlockDevice for CatalogTestDisk {
+    fn sector_count(&self) -> u64 {
+        TestDisk::TOTAL_SECTORS
+    }
+
+    fn read_sector(&mut self, lba: u64, sector: &mut [u8]) -> Result<(), BlockError> {
+        if sector.len() != SECTOR_SIZE || lba >= TestDisk::TOTAL_SECTORS {
+            return Err(BlockError::OutOfBounds);
+        }
+        sector.fill(0);
+        if (17..21).contains(&lba) {
+            sector.copy_from_slice(&self.image[(lba - 17) as usize]);
+        }
+        Ok(())
+    }
+
+    fn write_sector(&mut self, lba: u64, sector: &[u8]) -> Result<(), BlockError> {
+        if sector.len() != SECTOR_SIZE || !(17..21).contains(&lba) {
+            return Err(BlockError::OutOfBounds);
+        }
+        self.image[(lba - 17) as usize].copy_from_slice(sector);
+        Ok(())
+    }
+
+    fn flush(&mut self) -> Result<(), BlockError> {
+        self.flushes = self.flushes.saturating_add(1);
+        Ok(())
+    }
+}
+
+#[cfg(feature = "stage12-4-test")]
+pub fn snapshot_catalog_recovery_self_test() -> bool {
+    let volume = Volume {
+        total_sectors: TestDisk::TOTAL_SECTORS as u32,
+        sectors_per_cluster: 1,
+        fat_count: 2,
+        fat_size: 600,
+        root_cluster: 2,
+        first_fat_sector: 32,
+        first_data_sector: TestDisk::ROOT_LBA,
+        fs_info_sector: Some(1),
+        backup_fs_info_sector: Some(7),
+        cluster_count: FAT32_MIN_CLUSTERS,
+    };
+    let mut catalog = SnapshotCatalog::empty();
+    catalog.snapshots[0] = Some(SnapshotCatalogEntry {
+        id: 1,
+        generation: 42,
+        checksum: 0x1234_5678,
+    });
+    catalog.changes[0] = Some(SnapshotCowEntry {
+        snapshot_id: 1,
+        path_hash: 0xaabb_ccdd,
+        old_checksum: 11,
+        new_checksum: 22,
+    });
+    let mut disk = CatalogTestDisk {
+        image: [[0; SECTOR_SIZE]; SNAPSHOT_CATALOG_SECTORS],
+        flushes: 0,
+    };
+    if write_snapshot_catalog(&mut disk, volume, catalog).is_err() || disk.flushes != 1 {
+        return false;
+    }
+    let mut reopened = CatalogTestDisk {
+        image: disk.image,
+        flushes: 0,
+    };
+    if read_snapshot_catalog(&mut reopened, volume) != Ok(Some(catalog)) {
+        return false;
+    }
+    let mut corrupt = CatalogTestDisk {
+        image: reopened.image,
+        flushes: 0,
+    };
+    corrupt.image[1][0] ^= 1;
+    if read_snapshot_catalog(&mut corrupt, volume) != Err(Error::CorruptDirectory) {
+        return false;
+    }
+    let unsafe_volume = Volume {
+        fs_info_sector: Some(18),
+        ..volume
+    };
+    write_snapshot_catalog(&mut reopened, unsafe_volume, catalog)
+        == Err(Error::UnsupportedGeometry)
 }
 
 #[cfg(feature = "stage12-4-test")]
