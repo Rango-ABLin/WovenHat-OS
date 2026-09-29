@@ -84,6 +84,30 @@ pub fn record_change(
     Ok(())
 }
 
+/// Record one mutation against every live snapshot. The bounded operation is
+/// fail-closed: if any snapshot cannot retain its pre-image metadata, the
+/// durable filesystem write must not proceed.
+pub fn record_live_change(
+    path_hash: u64,
+    old_checksum: u64,
+    new_checksum: u64,
+) -> Result<(), RestoreError> {
+    let ids = {
+        let table = TABLE.lock();
+        let mut ids = [0u64; MAX];
+        let mut count = 0usize;
+        for snapshot in table.iter().flatten() {
+            ids[count] = snapshot.id;
+            count += 1;
+        }
+        (ids, count)
+    };
+    for id in ids.0.into_iter().take(ids.1) {
+        record_change(id, path_hash, old_checksum, new_checksum)?;
+    }
+    Ok(())
+}
+
 /// Begin a rollback only when the caller's durable root still matches the
 /// snapshot root. This prevents restoring a catalog entry against unrelated
 /// filesystem state. Returned generation becomes the rollback target.
