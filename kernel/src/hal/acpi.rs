@@ -1011,20 +1011,6 @@ fn aml_mark_pci_root(
     Ok(())
 }
 
-fn aml_is_pci_root_device(
-    records: &[Option<AmlNamespaceRecord>; MAX_AML_NAMESPACE_RECORDS],
-    record_count: usize,
-    path: AmlPath,
-) -> bool {
-    records
-        .iter()
-        .take(record_count)
-        .flatten()
-        .any(|record| {
-            record.kind == AmlNamespaceKind::Device && record.path == path && record.pci_root
-        })
-}
-
 fn aml_set_resource_template(
     records: &mut [Option<AmlNamespaceRecord>; MAX_AML_NAMESPACE_RECORDS],
     record_count: usize,
