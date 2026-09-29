@@ -40,6 +40,23 @@ pub enum WrappedKeyError {
     InvalidGeneration,
     Authentication,
     VaultFull,
+    UntrustedProvisioning,
+}
+
+/// Evidence attached to a key-encryption key by a platform-specific measured
+/// provisioning backend. Stage 12.3 deliberately does not manufacture trust:
+/// callers must establish both a non-zero measurement and an authenticated
+/// hardware/trusted-service result before persistent key material is accepted.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ProvisioningEvidence {
+    pub measurement: [u8; 32],
+    pub authenticated: bool,
+}
+
+impl ProvisioningEvidence {
+    fn trusted(self) -> bool {
+        self.authenticated && self.measurement.iter().any(|byte| *byte != 0)
+    }
 }
 
 fn wrapped_key_aad(identity: KeyGeneration) -> [u8; 12] {
@@ -76,6 +93,9 @@ pub fn provision_wrapped_for(
     kek: &[u8; KEY_SIZE],
     record: &WrappedKeyRecord,
 ) -> Result<KeyHandle, WrappedKeyError> {
+    // Compatibility/internal path: cryptographic authentication is enforced,
+    // but production encrypted-volume mounting should use the measured form
+    // below so a caller cannot silently substitute an unmeasured KEK.
     if record.identity.generation == 0 {
         return Err(WrappedKeyError::InvalidGeneration);
     }
@@ -88,6 +108,22 @@ pub fn provision_wrapped_for(
     let handle = provision_for(owner, key).ok_or(WrappedKeyError::VaultFull);
     key.fill(0);
     handle
+}
+
+/// Provision a persisted volume key only after a platform backend has supplied
+/// explicit measured/authenticated evidence for the KEK. This fail-closed
+/// boundary is usable before a TPM/firmware backend exists without falsely
+/// treating best-effort kernel entropy as a hardware root of trust.
+pub fn provision_measured_wrapped_for(
+    owner: u64,
+    kek: &[u8; KEY_SIZE],
+    evidence: ProvisioningEvidence,
+    record: &WrappedKeyRecord,
+) -> Result<KeyHandle, WrappedKeyError> {
+    if !evidence.trusted() {
+        return Err(WrappedKeyError::UntrustedProvisioning);
+    }
+    provision_wrapped_for(owner, kek, record)
 }
 
 fn constant_time_eq(left: &[u8], right: &[u8]) -> bool {
