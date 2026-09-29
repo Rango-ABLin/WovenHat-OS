@@ -13,6 +13,7 @@ const MAX_SRAT_MEMORY_AFFINITIES: usize = 16;
 const MCFG_HEADER_LENGTH: usize = SDT_HEADER_LENGTH + 8;
 const MCFG_ALLOCATION_LENGTH: usize = 16;
 pub const MAX_MCFG_ALLOCATIONS: usize = 8;
+const MAX_AML_TABLES: usize = 16;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Error {
@@ -31,12 +32,49 @@ pub struct MemoryAffinity {
     pub length: u64,
 }
 
+pub const MAX_PCI_ROOT_RESOURCES: usize = 24;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PciRootResourceKind {
+    Io,
+    Memory,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PciRootResource {
+    pub kind: PciRootResourceKind,
+    pub base: u64,
+    pub length: u64,
+    pub translation_offset: u64,
+    pub prefetchable: bool,
+    pub address_width: u8,
+}
+
+impl Default for PciRootResource {
+    fn default() -> Self {
+        Self {
+            kind: PciRootResourceKind::Memory,
+            base: 0,
+            length: 0,
+            translation_offset: 0,
+            prefetchable: false,
+            address_width: 0,
+        }
+    }
+}
+
 #[derive(Clone, Copy, Default, PartialEq, Eq)]
 pub struct McfgAllocation {
     pub base_address: u64,
     pub segment_group: u16,
     pub start_bus: u8,
     pub end_bus: u8,
+}
+
+#[derive(Clone, Copy, Default, PartialEq, Eq)]
+struct AmlTable {
+    address: u64,
+    length: usize,
 }
 
 #[derive(Clone, Copy, Default)]
@@ -61,10 +99,22 @@ pub struct Summary {
     pub interrupt_overrides: u16,
     pub madt_entries: u16,
     pub fadt: bool,
+    pub dsdt_address: u64,
+    pub dsdt_length: usize,
+    // SSDTs extend the DSDT namespace. Retain their validated table bounds so
+    // the bounded AML namespace pass can consume every firmware definition
+    // block without rescanning the XSDT/RSDT or inventing PCI resources.
+    aml_tables: [AmlTable; MAX_AML_TABLES],
+    aml_table_count: usize,
     pub hpet: bool,
     pub mcfg: bool,
     pub mcfg_allocations: [McfgAllocation; MAX_MCFG_ALLOCATIONS],
     pub mcfg_allocation_count: usize,
+    /// PCI root-bridge resource windows supplied by a firmware namespace
+    /// evaluator (ACPI _CRS on ACPI platforms). Raw SDT discovery does not
+    /// synthesize these from MCFG or SRAT.
+    pub pci_root_resources: [PciRootResource; MAX_PCI_ROOT_RESOURCES],
+    pub pci_root_resource_count: usize,
     pub truncated: bool,
 }
 
@@ -149,7 +199,33 @@ pub fn discover(
                 )?;
                 summary.apic = true;
             }
-            b"FACP" => summary.fadt = true,
+            b"FACP" => {
+                // FADT presence is authoritative even when optional DSDT
+                // metadata cannot yet be retained.  DSDT discovery is an
+                // incremental Stage 13.2 capability and must not turn an
+                // otherwise valid ACPI namespace into ACPI-unavailable,
+                // because that would discard MCFG/APIC data and change the
+                // PCI initialization path.
+                summary.fadt = true;
+                let _ = parse_fadt(
+                    physical_offset,
+                    table_address,
+                    table.length,
+                    regions,
+                    &mut summary,
+                );
+            }
+            b"SSDT" => {
+                if summary.aml_table_count < summary.aml_tables.len() {
+                    summary.aml_tables[summary.aml_table_count] = AmlTable {
+                        address: table_address,
+                        length: table.length,
+                    };
+                    summary.aml_table_count += 1;
+                } else {
+                    summary.truncated = true;
+                }
+            }
             b"HPET" => summary.hpet = true,
             b"MCFG" => {
                 parse_mcfg(
@@ -175,7 +251,80 @@ pub fn discover(
     for (address, length) in srat_tables.into_iter().take(srat_count) {
         parse_srat(physical_offset, address, length, regions, &mut summary)?;
     }
+
+    // Consume the checksum-validated DSDT directly from its validated physical
+    // mapping. Publication remains transactional: the namespace walker stages
+    // every qualified root resource and copies only after complete success.
+    if summary.dsdt_address != 0 && summary.dsdt_length >= SDT_HEADER_LENGTH {
+        let table = AmlTable {
+            address: summary.dsdt_address,
+            length: summary.dsdt_length,
+        };
+        // PCI-root AML is an optional Stage 13.2 enrichment.  A firmware
+        // namespace construct that the bounded evaluator does not yet support
+        // must fail closed for aperture publication without discarding the
+        // independently validated MADT/APIC topology used to start APs.
+        if let Ok(body) = aml_table_body(physical_offset, table, regions) {
+            let mut resources = [PciRootResource::default(); MAX_PCI_ROOT_RESOURCES];
+            if let Ok((_, count)) = aml_namespace_walk(body, &mut resources) {
+                summary.pci_root_resources[..count].copy_from_slice(&resources[..count]);
+                summary.pci_root_resource_count = count;
+            }
+        }
+    }
     Ok(summary)
+}
+
+fn parse_fadt(
+    physical_offset: u64,
+    address: u64,
+    length: usize,
+    regions: &[MemoryRegion],
+    summary: &mut Summary,
+) -> Result<(), Error> {
+    // The FADT itself is authoritative, but its DSDT pointer may target an
+    // ACPI reclaim/NVS range that the boot memory-region filter does not expose
+    // to this early parser. Retain DSDT metadata only when the referenced table
+    // is safely readable; absence here must not make otherwise-valid ACPI fatal.
+    if length < 44 {
+        return Err(Error::InvalidLength);
+    }
+    let mut dsdt32 = [0_u8; 4];
+    read_physical(
+        physical_offset,
+        address.checked_add(40).ok_or(Error::AddressOverflow)?,
+        &mut dsdt32,
+        regions,
+    )?;
+    let legacy = u64::from(read_u32(&dsdt32, 0));
+    let extended = if length >= 148 {
+        let mut x_dsdt = [0_u8; 8];
+        read_physical(
+            physical_offset,
+            address.checked_add(140).ok_or(Error::AddressOverflow)?,
+            &mut x_dsdt,
+            regions,
+        )?;
+        read_u64(&x_dsdt, 0)
+    } else {
+        0
+    };
+    let dsdt = if extended != 0 { extended } else { legacy };
+    if dsdt == 0 {
+        return Ok(());
+    }
+    let header = match read_sdt_header(physical_offset, dsdt, regions) {
+        Ok(header) => header,
+        Err(Error::OutOfRange) => return Ok(()),
+        Err(error) => return Err(error),
+    };
+    if header.signature != *b"DSDT" {
+        return Err(Error::InvalidSignature);
+    }
+    validate_sdt_checksum(physical_offset, dsdt, header.length, regions)?;
+    summary.dsdt_address = dsdt;
+    summary.dsdt_length = header.length;
+    Ok(())
 }
 
 fn parse_mcfg(
@@ -599,6 +748,656 @@ fn read_u64(bytes: &[u8], offset: usize) -> u64 {
     u64::from_le_bytes(bytes[offset..offset + 8].try_into().unwrap_or([0; 8]))
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct AmlPackage {
+    body_offset: usize,
+    end_offset: usize,
+}
+
+fn decode_aml_pkg_length(bytes: &[u8], offset: usize) -> Result<(usize, usize), Error> {
+    let lead = *bytes.get(offset).ok_or(Error::InvalidLength)?;
+    let follow = usize::from(lead >> 6);
+    if follow > 3 {
+        return Err(Error::InvalidLength);
+    }
+    let encoded = bytes
+        .get(offset..offset.checked_add(follow + 1).ok_or(Error::AddressOverflow)?)
+        .ok_or(Error::InvalidLength)?;
+    let mut length = if follow == 0 {
+        usize::from(lead & 0x3f)
+    } else {
+        usize::from(lead & 0x0f)
+    };
+    for index in 0..follow {
+        length |= usize::from(encoded[index + 1]) << (4 + index * 8);
+    }
+    if length < follow + 1 {
+        return Err(Error::InvalidLength);
+    }
+    Ok((length, follow + 1))
+}
+
+fn aml_package(bytes: &[u8], pkg_offset: usize) -> Result<AmlPackage, Error> {
+    let (length, length_bytes) = decode_aml_pkg_length(bytes, pkg_offset)?;
+    let end_offset = pkg_offset.checked_add(length).ok_or(Error::AddressOverflow)?;
+    if end_offset > bytes.len() {
+        return Err(Error::InvalidLength);
+    }
+    Ok(AmlPackage {
+        body_offset: pkg_offset.checked_add(length_bytes).ok_or(Error::AddressOverflow)?,
+        end_offset,
+    })
+}
+
+fn aml_name_seg(bytes: &[u8], offset: usize) -> Result<([u8; 4], usize), Error> {
+    let name = bytes
+        .get(offset..offset.checked_add(4).ok_or(Error::AddressOverflow)?)
+        .ok_or(Error::InvalidLength)?;
+    fn valid_lead(byte: u8) -> bool {
+        byte == b'_' || byte.is_ascii_uppercase()
+    }
+    fn valid_tail(byte: u8) -> bool {
+        valid_lead(byte) || byte.is_ascii_digit()
+    }
+    if !valid_lead(name[0]) || !name[1..].iter().copied().all(valid_tail) {
+        return Err(Error::InvalidSignature);
+    }
+    Ok(([name[0], name[1], name[2], name[3]], offset + 4))
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct AmlName {
+    rooted: bool,
+    parents: u8,
+    segments: [[u8; 4]; 8],
+    segment_count: usize,
+}
+
+fn aml_name_string(bytes: &[u8], mut offset: usize) -> Result<(AmlName, usize), Error> {
+    let mut name = AmlName::default();
+    match bytes.get(offset).copied().ok_or(Error::InvalidLength)? {
+        b'\\' => {
+            name.rooted = true;
+            offset += 1;
+        }
+        b'^' => {
+            while bytes.get(offset) == Some(&b'^') {
+                name.parents = name.parents.checked_add(1).ok_or(Error::InvalidLength)?;
+                offset += 1;
+            }
+        }
+        _ => {}
+    }
+
+    let lead = *bytes.get(offset).ok_or(Error::InvalidLength)?;
+    let (count, mut next) = match lead {
+        0x00 => return Ok((name, offset + 1)),
+        0x2e => (2_usize, offset + 1),
+        0x2f => {
+            let count = usize::from(*bytes.get(offset + 1).ok_or(Error::InvalidLength)?);
+            if count == 0 {
+                return Err(Error::InvalidLength);
+            }
+            (count, offset + 2)
+        }
+        _ => (1_usize, offset),
+    };
+    if count > name.segments.len() {
+        return Err(Error::InvalidLength);
+    }
+    for slot in name.segments.iter_mut().take(count) {
+        let (segment, after) = aml_name_seg(bytes, next)?;
+        *slot = segment;
+        next = after;
+    }
+    name.segment_count = count;
+    Ok((name, next))
+}
+
+fn aml_skip_data_ref_object(bytes: &[u8], offset: usize) -> Result<usize, Error> {
+    let opcode = *bytes.get(offset).ok_or(Error::InvalidLength)?;
+    match opcode {
+        // ZeroOp, OneOp, OnesOp.
+        0x00 | 0x01 | 0xff => Ok(offset + 1),
+        // Byte/Word/DWord/QWord integer prefixes.
+        0x0a => offset.checked_add(2).filter(|end| *end <= bytes.len()).ok_or(Error::InvalidLength),
+        0x0b => offset.checked_add(3).filter(|end| *end <= bytes.len()).ok_or(Error::InvalidLength),
+        0x0c => offset.checked_add(5).filter(|end| *end <= bytes.len()).ok_or(Error::InvalidLength),
+        0x0e => offset.checked_add(9).filter(|end| *end <= bytes.len()).ok_or(Error::InvalidLength),
+        // StringPrefix: NUL-terminated AML string.
+        0x0d => {
+            let mut end = offset.checked_add(1).ok_or(Error::AddressOverflow)?;
+            while *bytes.get(end).ok_or(Error::InvalidLength)? != 0 {
+                end = end.checked_add(1).ok_or(Error::AddressOverflow)?;
+            }
+            Ok(end + 1)
+        }
+        // BufferOp and PackageOp carry a bounded PkgLength.  We do not
+        // evaluate their contents here; skipping the complete package is
+        // sufficient for namespace discovery and prevents byte scanning.
+        0x11 | 0x12 => Ok(aml_package(bytes, offset + 1)?.end_offset),
+        // VarPackageOp has the same package envelope.
+        0x13 => Ok(aml_package(bytes, offset + 1)?.end_offset),
+        _ => Err(Error::InvalidSignature),
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct AmlPath {
+    segments: [[u8; 4]; 16],
+    count: usize,
+}
+
+const MAX_AML_NAMESPACE_RECORDS: usize = 128;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum AmlNamespaceKind {
+    Scope,
+    Device,
+    Name,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct AmlNamespaceRecord {
+    path: AmlPath,
+    kind: AmlNamespaceKind,
+    pci_root: bool,
+    segment_group: Option<u16>,
+    base_bus: Option<u8>,
+    resource_template: Option<(usize, usize)>,
+}
+
+fn aml_record(
+    records: &mut [Option<AmlNamespaceRecord>; MAX_AML_NAMESPACE_RECORDS],
+    record_count: &mut usize,
+    path: AmlPath,
+    kind: AmlNamespaceKind,
+) -> Result<(), Error> {
+    if *record_count >= records.len() {
+        return Err(Error::InvalidLength);
+    }
+    records[*record_count] = Some(AmlNamespaceRecord {
+        path,
+        kind,
+        pci_root: false,
+        segment_group: None,
+        base_bus: None,
+        resource_template: None,
+    });
+    *record_count += 1;
+    Ok(())
+}
+
+fn aml_resolve_name(base: AmlPath, name: AmlName) -> Result<AmlPath, Error> {
+    let mut path = if name.rooted { AmlPath::default() } else { base };
+    let parents = usize::from(name.parents);
+    if parents > path.count {
+        return Err(Error::InvalidSignature);
+    }
+    path.count -= parents;
+    if path.count + name.segment_count > path.segments.len() {
+        return Err(Error::InvalidLength);
+    }
+    for segment in name.segments.into_iter().take(name.segment_count) {
+        path.segments[path.count] = segment;
+        path.count += 1;
+    }
+    Ok(path)
+}
+
+fn aml_eisa_id(bytes: &[u8], offset: usize) -> Option<u32> {
+    match bytes.get(offset).copied()? {
+        0x0c => bytes.get(offset + 1..offset + 5).map(|raw| {
+            u32::from_le_bytes([raw[0], raw[1], raw[2], raw[3]])
+        }),
+        _ => None,
+    }
+}
+
+fn aml_static_integer(bytes: &[u8], offset: usize) -> Option<u64> {
+    match bytes.get(offset).copied()? {
+        0x00 => Some(0),
+        0x01 => Some(1),
+        0xff => Some(u64::MAX),
+        0x0a => bytes.get(offset + 1).copied().map(u64::from),
+        0x0b => bytes.get(offset + 1..offset + 3).map(|raw| {
+            u64::from(u16::from_le_bytes([raw[0], raw[1]]))
+        }),
+        0x0c => bytes.get(offset + 1..offset + 5).map(|raw| {
+            u64::from(u32::from_le_bytes([raw[0], raw[1], raw[2], raw[3]]))
+        }),
+        0x0e => bytes.get(offset + 1..offset + 9).map(|raw| {
+            u64::from_le_bytes([
+                raw[0], raw[1], raw[2], raw[3], raw[4], raw[5], raw[6], raw[7],
+            ])
+        }),
+        _ => None,
+    }
+}
+
+fn aml_static_buffer(bytes: &[u8], offset: usize) -> Result<Option<&[u8]>, Error> {
+    if bytes.get(offset) != Some(&0x11) {
+        return Ok(None);
+    }
+    let package = aml_package(bytes, offset + 1)?;
+    let size = aml_static_integer(bytes, package.body_offset).ok_or(Error::InvalidSignature)?;
+    let data_offset = aml_skip_data_ref_object(bytes, package.body_offset)?;
+    if data_offset > package.end_offset {
+        return Err(Error::InvalidLength);
+    }
+    let data = bytes.get(data_offset..package.end_offset).ok_or(Error::InvalidLength)?;
+    if size != data.len() as u64 {
+        return Err(Error::InvalidLength);
+    }
+    Ok(Some(data))
+}
+
+fn aml_is_pci_root_id(id: u32) -> bool {
+    // AML EISAID("PNP0A03") / EISAID("PNP0A08") integer encodings.
+    id == 0x030ad041 || id == 0x080ad041
+}
+
+fn aml_name_is(path: AmlPath, segment: [u8; 4]) -> bool {
+    path.count != 0 && path.segments[path.count - 1] == segment
+}
+
+fn aml_parent_path(mut path: AmlPath) -> Option<AmlPath> {
+    if path.count == 0 {
+        return None;
+    }
+    path.count -= 1;
+    Some(path)
+}
+
+fn aml_has_device(
+    records: &[Option<AmlNamespaceRecord>; MAX_AML_NAMESPACE_RECORDS],
+    record_count: usize,
+    path: AmlPath,
+) -> bool {
+    records
+        .iter()
+        .take(record_count)
+        .flatten()
+        .any(|record| record.kind == AmlNamespaceKind::Device && record.path == path)
+}
+
+fn aml_mark_pci_root(
+    records: &mut [Option<AmlNamespaceRecord>; MAX_AML_NAMESPACE_RECORDS],
+    record_count: usize,
+    path: AmlPath,
+) -> Result<(), Error> {
+    let record = records
+        .iter_mut()
+        .take(record_count)
+        .flatten()
+        .find(|record| record.kind == AmlNamespaceKind::Device && record.path == path)
+        .ok_or(Error::InvalidSignature)?;
+    record.pci_root = true;
+    Ok(())
+}
+
+fn aml_set_root_number(
+    records: &mut [Option<AmlNamespaceRecord>; MAX_AML_NAMESPACE_RECORDS],
+    record_count: usize,
+    path: AmlPath,
+    segment: bool,
+    number: u64,
+) -> Result<(), Error> {
+    let record = records
+        .iter_mut()
+        .take(record_count)
+        .flatten()
+        .find(|record| record.kind == AmlNamespaceKind::Device && record.path == path)
+        .ok_or(Error::InvalidSignature)?;
+    if segment {
+        let value = u16::try_from(number).map_err(|_| Error::InvalidLength)?;
+        if record.segment_group.replace(value).is_some() {
+            return Err(Error::InvalidSignature);
+        }
+    } else {
+        let value = u8::try_from(number).map_err(|_| Error::InvalidLength)?;
+        if record.base_bus.replace(value).is_some() {
+            return Err(Error::InvalidSignature);
+        }
+    }
+    Ok(())
+}
+
+fn aml_set_resource_template(
+    records: &mut [Option<AmlNamespaceRecord>; MAX_AML_NAMESPACE_RECORDS],
+    record_count: usize,
+    path: AmlPath,
+    bytes: &[u8],
+    template: &[u8],
+) -> Result<(), Error> {
+    let start = template.as_ptr() as usize - bytes.as_ptr() as usize;
+    let end = start.checked_add(template.len()).ok_or(Error::AddressOverflow)?;
+    if end > bytes.len() {
+        return Err(Error::InvalidLength);
+    }
+    let record = records
+        .iter_mut()
+        .take(record_count)
+        .flatten()
+        .find(|record| record.kind == AmlNamespaceKind::Device && record.path == path)
+        .ok_or(Error::InvalidSignature)?;
+    if record.resource_template.replace((start, end)).is_some() {
+        return Err(Error::InvalidSignature);
+    }
+    Ok(())
+}
+
+fn aml_namespace_walk(
+    bytes: &[u8],
+    output: &mut [PciRootResource; MAX_PCI_ROOT_RESOURCES],
+) -> Result<(usize, usize), Error> {
+    fn walk(
+        bytes: &[u8],
+        mut offset: usize,
+        end: usize,
+        scope: AmlPath,
+        objects: &mut usize,
+        records: &mut [Option<AmlNamespaceRecord>; MAX_AML_NAMESPACE_RECORDS],
+        record_count: &mut usize,
+    ) -> Result<(), Error> {
+        while offset < end {
+            match bytes.get(offset).copied().ok_or(Error::InvalidLength)? {
+                0x10 => {
+                    let package = aml_package(bytes, offset + 1)?;
+                    if package.end_offset > end {
+                        return Err(Error::InvalidLength);
+                    }
+                    let (name, body) = aml_name_string(bytes, package.body_offset)?;
+                    let child = aml_resolve_name(scope, name)?;
+                    *objects = objects.checked_add(1).ok_or(Error::AddressOverflow)?;
+                    aml_record(records, record_count, child, AmlNamespaceKind::Scope)?;
+                    walk(bytes, body, package.end_offset, child, objects, records, record_count)?;
+                    offset = package.end_offset;
+                }
+                0x5b if bytes.get(offset + 1) == Some(&0x82) => {
+                    let package = aml_package(bytes, offset + 2)?;
+                    if package.end_offset > end {
+                        return Err(Error::InvalidLength);
+                    }
+                    let (name, body) = aml_name_string(bytes, package.body_offset)?;
+                    let child = aml_resolve_name(scope, name)?;
+                    *objects = objects.checked_add(1).ok_or(Error::AddressOverflow)?;
+                    aml_record(records, record_count, child, AmlNamespaceKind::Device)?;
+                    walk(bytes, body, package.end_offset, child, objects, records, record_count)?;
+                    offset = package.end_offset;
+                }
+                0x08 => {
+                    let (name, value) = aml_name_string(bytes, offset + 1)?;
+                    let path = aml_resolve_name(scope, name)?;
+                    // Recognize static PCI-root hardware/compatible IDs while
+                    // walking their owning device scope. This is intentionally
+                    // read-only: resource apertures are not published until
+                    // _CRS is decoded and validated separately.
+                    let pci_root_identity = (aml_name_is(path, *b"_HID")
+                        || aml_name_is(path, *b"_CID"))
+                        && aml_eisa_id(bytes, value).is_some_and(aml_is_pci_root_id);
+                    if pci_root_identity {
+                        let owner = aml_parent_path(path).ok_or(Error::InvalidSignature)?;
+                        if owner != scope || !aml_has_device(records, *record_count, owner) {
+                            return Err(Error::InvalidSignature);
+                        }
+                        aml_mark_pci_root(records, *record_count, owner)?;
+                    }
+                    if aml_name_is(path, *b"_CRS") {
+                        let owner = aml_parent_path(path).ok_or(Error::InvalidSignature)?;
+                        if owner != scope || !aml_has_device(records, *record_count, owner) {
+                            return Err(Error::InvalidSignature);
+                        }
+                        // Retain only the bounded static ResourceTemplate on
+                        // its owning Device. Root identity may legally appear
+                        // later in the same Device, so root qualification and
+                        // descriptor validation happen after the namespace pass.
+                        if let Some(resource_template) = aml_static_buffer(bytes, value)? {
+                            aml_set_resource_template(
+                                records,
+                                *record_count,
+                                owner,
+                                bytes,
+                                resource_template,
+                            )?;
+                        }
+                    }
+                    if aml_name_is(path, *b"_SEG") || aml_name_is(path, *b"_BBN") {
+                        let owner = aml_parent_path(path).ok_or(Error::InvalidSignature)?;
+                        if owner != scope || !aml_has_device(records, *record_count, owner) {
+                            return Err(Error::InvalidSignature);
+                        }
+                        let number = aml_static_integer(bytes, value).ok_or(Error::InvalidSignature)?;
+                        aml_set_root_number(
+                            records,
+                            *record_count,
+                            owner,
+                            aml_name_is(path, *b"_SEG"),
+                            number,
+                        )?;
+                    }
+                    match aml_skip_data_ref_object(bytes, value) {
+                        Ok(next) if next <= end => {
+                            *objects = objects.checked_add(1).ok_or(Error::AddressOverflow)?;
+                            aml_record(records, record_count, path, AmlNamespaceKind::Name)?;
+                            offset = next;
+                        }
+                        Ok(_) => return Err(Error::InvalidLength),
+                        Err(Error::InvalidSignature) => break,
+                        Err(error) => return Err(error),
+                    }
+                }
+                _ => break,
+            }
+        }
+        Ok(())
+    }
+    let mut objects = 0_usize;
+    let mut records = [None; MAX_AML_NAMESPACE_RECORDS];
+    let mut record_count = 0_usize;
+    walk(
+        bytes,
+        0,
+        bytes.len(),
+        AmlPath::default(),
+        &mut objects,
+        &mut records,
+        &mut record_count,
+    )?;
+    debug_assert_eq!(objects, record_count);
+
+    // Qualification is deliberately a second phase. AML declaration order
+    // must not decide whether a root bridge's _CRS is authoritative. Stage
+    // every qualified root window privately so a later malformed root cannot
+    // partially publish resources from an earlier root.
+    let mut staged = [PciRootResource::default(); MAX_PCI_ROOT_RESOURCES];
+    let mut staged_count = 0_usize;
+    for record in records.iter().take(record_count).flatten() {
+        if record.kind != AmlNamespaceKind::Device || !record.pci_root {
+            continue;
+        }
+        if let Some((start, end)) = record.resource_template {
+            let template = bytes.get(start..end).ok_or(Error::InvalidLength)?;
+            let mut resources = [PciRootResource::default(); MAX_PCI_ROOT_RESOURCES];
+            let count = decode_pci_root_resource_template(template, &mut resources)?;
+            let next = staged_count.checked_add(count).ok_or(Error::AddressOverflow)?;
+            if next > staged.len() {
+                return Err(Error::InvalidLength);
+            }
+            staged[staged_count..next].copy_from_slice(&resources[..count]);
+            staged_count = next;
+        }
+    }
+    output[..staged_count].copy_from_slice(&staged[..staged_count]);
+    Ok((objects, staged_count))
+}
+
+fn aml_table_body(
+    physical_offset: u64,
+    table: AmlTable,
+    regions: &[MemoryRegion],
+) -> Result<&[u8], Error> {
+    if table.length < SDT_HEADER_LENGTH {
+        return Err(Error::InvalidLength);
+    }
+    let body_length = table.length - SDT_HEADER_LENGTH;
+    if body_length == 0 {
+        return Err(Error::InvalidLength);
+    }
+    let body_address = table
+        .address
+        .checked_add(SDT_HEADER_LENGTH as u64)
+        .ok_or(Error::AddressOverflow)?;
+    validate_range(body_address, body_length, regions)?;
+    let virtual_address = physical_offset
+        .checked_add(body_address)
+        .ok_or(Error::AddressOverflow)?;
+    // ACPI tables are firmware-owned, checksum-validated before retention, and
+    // remain mapped during early HAL discovery. Borrow the validated body
+    // directly instead of copying up to 64 KiB onto the kernel stack.
+    Ok(unsafe { core::slice::from_raw_parts(virtual_address as *const u8, body_length) })
+}
+
+fn decode_pci_root_resource_template(
+    bytes: &[u8],
+    output: &mut [PciRootResource; MAX_PCI_ROOT_RESOURCES],
+) -> Result<usize, Error> {
+    // Decode into private staging first. A malformed descriptor, checksum,
+    // missing EndTag, or capacity failure must not expose a partially
+    // validated firmware aperture set to the caller.
+    let mut staged = [PciRootResource::default(); MAX_PCI_ROOT_RESOURCES];
+    let mut offset = 0_usize;
+    let mut count = 0_usize;
+    let mut saw_end_tag = false;
+    while offset < bytes.len() {
+        let tag = bytes[offset];
+        let item_len = if tag & 0x80 != 0 {
+            let header_end = offset.checked_add(3).ok_or(Error::AddressOverflow)?;
+            let header = bytes.get(offset..header_end).ok_or(Error::InvalidLength)?;
+            3_usize
+                .checked_add(usize::from(u16::from_le_bytes([header[1], header[2]])))
+                .ok_or(Error::AddressOverflow)?
+        } else {
+            1_usize
+                .checked_add(usize::from(tag & 0x07))
+                .ok_or(Error::AddressOverflow)?
+        };
+        let end = offset.checked_add(item_len).ok_or(Error::AddressOverflow)?;
+        let item = bytes.get(offset..end).ok_or(Error::InvalidLength)?;
+
+        if tag & 0x80 == 0 && tag >> 3 == 0x0f {
+            if item.len() != 2 || end != bytes.len() {
+                return Err(Error::InvalidLength);
+            }
+            // A zero EndTag checksum means the ResourceTemplate checksum is
+            // not used. Otherwise the entire template must sum to zero.
+            if item[1] != 0
+                && bytes.iter().copied().fold(0_u8, u8::wrapping_add) != 0
+            {
+                return Err(Error::InvalidChecksum);
+            }
+            saw_end_tag = true;
+            break;
+        }
+
+        if tag & 0x80 != 0 {
+            if let Some(resource) = decode_address_space_resource(item)? {
+                if count == staged.len() {
+                    return Err(Error::InvalidLength);
+                }
+                staged[count] = resource;
+                count += 1;
+            }
+        }
+        offset = end;
+    }
+    if !saw_end_tag {
+        return Err(Error::InvalidLength);
+    }
+    output[..count].copy_from_slice(&staged[..count]);
+    Ok(count)
+}
+
+fn decode_address_space_resource(bytes: &[u8]) -> Result<Option<PciRootResource>, Error> {
+    if bytes.len() < 3 || bytes[0] & 0x80 == 0 {
+        return Err(Error::InvalidLength);
+    }
+    let payload_len = usize::from(u16::from_le_bytes([bytes[1], bytes[2]]));
+    if bytes.len() != payload_len.checked_add(3).ok_or(Error::AddressOverflow)? {
+        return Err(Error::InvalidLength);
+    }
+    let width = match bytes[0] {
+        0x88 if payload_len >= 13 => 2_usize,
+        0x87 if payload_len >= 23 => 4_usize,
+        0x8a if payload_len >= 43 => 8_usize,
+        0x8b if payload_len >= 53 => 8_usize,
+        _ => return Ok(None),
+    };
+    let resource_type = bytes[3];
+    if resource_type == 2 {
+        return Ok(None);
+    }
+    let kind = match resource_type {
+        0 => PciRootResourceKind::Memory,
+        1 => PciRootResourceKind::Io,
+        _ => return Ok(None),
+    };
+    if bytes[4] & 0xf0 != 0 {
+        return Err(Error::InvalidLength);
+    }
+    // ACPI 6.6 defines General Flags bit 0 as Consumer/Producer only
+    // for the Extended Address Space descriptor (0x8B). The legacy
+    // Word/DWord/QWord forms explicitly define that bit as ignored.
+    if bytes[0] == 0x8b && bytes[4] & 0x01 != 0 {
+        return Ok(None);
+    }
+    let type_flags = bytes[5];
+    // Memory-to-I/O and sparse/dense I/O translations require semantics that
+    // WovenHat's BAR allocator does not yet implement.
+    if type_flags & 0x20 != 0 {
+        return Err(Error::InvalidLength);
+    }
+    fn field(bytes: &[u8], offset: usize, width: usize) -> Result<u64, Error> {
+        let end = offset.checked_add(width).ok_or(Error::AddressOverflow)?;
+        let source = bytes.get(offset..end).ok_or(Error::InvalidLength)?;
+        let mut value = 0_u64;
+        for (shift, byte) in source.iter().copied().enumerate() {
+            value |= u64::from(byte) << (shift * 8);
+        }
+        Ok(value)
+    }
+    let granularity = field(bytes, 6, width)?;
+    let minimum = field(bytes, 6 + width, width)?;
+    let maximum = field(bytes, 6 + width * 2, width)?;
+    let translation_offset = field(bytes, 6 + width * 3, width)?;
+    let length = field(bytes, 6 + width * 4, width)?;
+    if length == 0 || minimum.checked_add(length).is_none() {
+        return Err(Error::InvalidLength);
+    }
+    let inclusive_end = minimum.checked_add(length - 1).ok_or(Error::AddressOverflow)?;
+    // _CRS describes the bridge's current configuration. Only fixed windows
+    // are authoritative enough for BAR allocation, and their alignment must
+    // satisfy the descriptor's granularity mask.
+    let min_fixed = bytes[4] & 0x04 != 0;
+    let max_fixed = bytes[4] & 0x08 != 0;
+    if !min_fixed || !max_fixed
+        || inclusive_end > maximum
+        || minimum & granularity != 0
+        || maximum & granularity != granularity
+    {
+        return Err(Error::InvalidLength);
+    }
+    Ok(Some(PciRootResource {
+        kind,
+        base: minimum,
+        length,
+        translation_offset,
+        prefetchable: matches!(kind, PciRootResourceKind::Memory)
+            && ((type_flags >> 1) & 0x3) == 0x3,
+        address_width: (width * 8) as u8,
+    }))
+}
+
 pub fn self_test() -> bool {
     let mut rsdp = [0_u8; RSDP_V2_LENGTH];
     rsdp[..8].copy_from_slice(b"RSD PTR ");
@@ -663,6 +1462,102 @@ pub fn self_test() -> bool {
         && topology.memory_affinities[0].base == 0x20_0000
         && topology.memory_affinities[0].length == 0x10_0000;
 
+    let mut aml_resources = [PciRootResource::default(); MAX_PCI_ROOT_RESOURCES];
+    let aml_scope = [0x10, 0x05, b'_', b'S', b'B', b'_'];
+    let aml_scope_walk = aml_namespace_walk(&aml_scope, &mut aml_resources) == Ok((1, 0));
+    let aml_device = [0x5b, 0x82, 0x05, b'P', b'C', b'I', b'0'];
+    let aml_device_walk = aml_namespace_walk(&aml_device, &mut aml_resources) == Ok((1, 0));
+    let aml_nested = [
+        0x10, 0x0c, b'_', b'S', b'B', b'_', 0x5b, 0x82, 0x05, b'P', b'C', b'I', b'0',
+    ];
+    let aml_nested_walk = aml_namespace_walk(&aml_nested, &mut aml_resources) == Ok((2, 0));
+
+    let aml_pkg_short = decode_aml_pkg_length(&[0x05], 0) == Ok((5, 1));
+    let aml_pkg_multi = decode_aml_pkg_length(&[0x41, 0x02], 0) == Ok((33, 2));
+    let aml_pkg_bounds = aml_package(&[0x04, 0xaa, 0xbb, 0xcc], 0)
+        == Ok(AmlPackage { body_offset: 1, end_offset: 4 });
+    let aml_name_valid = aml_name_seg(b"_CRS", 0)
+        == Ok((*b"_CRS", 4));
+    let aml_name_rejects_lower = aml_name_seg(b"_crs", 0) == Err(Error::InvalidSignature);
+
+    let mut template = [0_u8; 44];
+    template[0] = 0x87;
+    template[1..3].copy_from_slice(&23_u16.to_le_bytes());
+    template[3] = 0;
+    template[4] = 0x0c;
+    template[5] = 0x06;
+    template[10..14].copy_from_slice(&0x8000_0000_u32.to_le_bytes());
+    template[14..18].copy_from_slice(&0x8fff_ffff_u32.to_le_bytes());
+    template[22..26].copy_from_slice(&0x1000_0000_u32.to_le_bytes());
+    template[26] = 0x88;
+    template[27..29].copy_from_slice(&13_u16.to_le_bytes());
+    template[29] = 1;
+    template[30] = 0x0c;
+    template[34..36].copy_from_slice(&0x1000_u16.to_le_bytes());
+    template[36..38].copy_from_slice(&0x1fff_u16.to_le_bytes());
+    template[40..42].copy_from_slice(&0x1000_u16.to_le_bytes());
+    template[42] = 0x79;
+    template[43] = 0;
+    let mut decoded_resources = [PciRootResource::default(); MAX_PCI_ROOT_RESOURCES];
+    let resource_template_valid =
+        decode_pci_root_resource_template(&template, &mut decoded_resources).is_ok_and(|count| {
+            count == 2
+                && decoded_resources[0].kind == PciRootResourceKind::Memory
+                && decoded_resources[1].kind == PciRootResourceKind::Io
+        });
+    let missing_end_tag_rejected =
+        decode_pci_root_resource_template(&template[..42], &mut decoded_resources)
+            == Err(Error::InvalidLength);
+    let sentinel = PciRootResource {
+        kind: PciRootResourceKind::Io,
+        base: 0x55aa,
+        length: 1,
+        translation_offset: 0,
+        prefetchable: false,
+        address_width: 16,
+    };
+    let mut transactional_output = [sentinel; MAX_PCI_ROOT_RESOURCES];
+    let transactional_decode =
+        decode_pci_root_resource_template(&template[..42], &mut transactional_output)
+            == Err(Error::InvalidLength)
+            && transactional_output.iter().all(|resource| *resource == sentinel);
+
+    let mut dword_memory = [0_u8; 26];
+    dword_memory[0] = 0x87;
+    dword_memory[1..3].copy_from_slice(&23_u16.to_le_bytes());
+    dword_memory[3] = 0;
+    dword_memory[4] = 0x0c;
+    dword_memory[5] = 0x06;
+    dword_memory[10..14].copy_from_slice(&0x8000_0000_u32.to_le_bytes());
+    dword_memory[14..18].copy_from_slice(&0x8fff_ffff_u32.to_le_bytes());
+    dword_memory[22..26].copy_from_slice(&0x1000_0000_u32.to_le_bytes());
+    let dword_memory_valid = decode_address_space_resource(&dword_memory).is_ok_and(|resource| {
+        resource.is_some_and(|resource| {
+            resource.kind == PciRootResourceKind::Memory
+                && resource.base == 0x8000_0000
+                && resource.length == 0x1000_0000
+                && resource.prefetchable
+                && resource.address_width == 32
+        })
+    });
+    let mut word_io = [0_u8; 16];
+    word_io[0] = 0x88;
+    word_io[1..3].copy_from_slice(&13_u16.to_le_bytes());
+    word_io[3] = 1;
+    word_io[4] = 0x0c;
+    word_io[8..10].copy_from_slice(&0x1000_u16.to_le_bytes());
+    word_io[10..12].copy_from_slice(&0x1fff_u16.to_le_bytes());
+    word_io[14..16].copy_from_slice(&0x1000_u16.to_le_bytes());
+    let word_io_valid = decode_address_space_resource(&word_io).is_ok_and(|resource| {
+        resource.is_some_and(|resource| {
+            resource.kind == PciRootResourceKind::Io
+                && resource.base == 0x1000
+                && resource.length == 0x1000
+                && !resource.prefetchable
+                && resource.address_width == 16
+        })
+    });
+
     let mut mcfg_entry = [0_u8; MCFG_ALLOCATION_LENGTH];
     mcfg_entry[..8].copy_from_slice(&0xe000_0000_u64.to_le_bytes());
     mcfg_entry[10] = 0;
@@ -683,6 +1578,19 @@ pub fn self_test() -> bool {
         && malformed_rejected
         && srat_valid
         && memory_affinity_valid
+        && aml_scope_walk
+        && aml_device_walk
+        && aml_nested_walk
+        && aml_pkg_short
+        && aml_pkg_multi
+        && aml_pkg_bounds
+        && aml_name_valid
+        && aml_name_rejects_lower
+        && resource_template_valid
+        && missing_end_tag_rejected
+        && transactional_decode
+        && dword_memory_valid
+        && word_io_valid
         && mcfg_valid
         && malformed_mcfg_rejected
 }

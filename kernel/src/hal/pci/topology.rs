@@ -28,6 +28,7 @@ pub struct MmioLease {
     pub function: FunctionHandle,
     pub bar: u8,
     pub base: u64,
+    pub size: u64,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -94,6 +95,7 @@ struct LeaseSlot {
     function: FunctionHandle,
     bar: u8,
     base: u64,
+    size: u64,
 }
 
 impl LeaseSlot {
@@ -104,10 +106,12 @@ impl LeaseSlot {
             function: FunctionHandle { slot: 0, generation: 0 },
             bar: 0,
             base: 0,
+            size: 0,
         }
     }
 }
 
+#[derive(Clone)]
 pub struct Topology {
     nodes: [Node; MAX_FUNCTIONS],
     leases: [LeaseSlot; MAX_MMIO_LEASES],
@@ -159,6 +163,39 @@ impl Topology {
         Ok(handle)
     }
 
+    /// Reconcile one discovered function without invalidating an unchanged
+    /// generation-safe handle, owner, or MMIO lease. Bridge routing metadata may
+    /// change across rescans, so parent relationships are recomputed in place.
+    #[expect(dead_code, reason = "used by feature-gated Stage 13 PCI hotplug reconciliation")]
+    pub fn reconcile(&mut self, descriptor: FunctionDescriptor) -> Result<FunctionHandle, Error> {
+        if let Some(index) = self.nodes.iter().position(|node| {
+            node.occupied && node.address == descriptor.address
+        }) {
+            if let Some(route) = descriptor.bridge {
+                if route.secondary == 0 || route.secondary > route.subordinate {
+                    return Err(Error::InvalidBridge);
+                }
+            }
+            self.nodes[index].bridge = descriptor.bridge;
+            let handle = FunctionHandle {
+                slot: index as u8,
+                generation: self.nodes[index].generation,
+            };
+            for node_index in 0..MAX_FUNCTIONS {
+                if self.nodes[node_index].occupied {
+                    let address = self.nodes[node_index].address;
+                    let current = FunctionHandle {
+                        slot: node_index as u8,
+                        generation: self.nodes[node_index].generation,
+                    };
+                    self.nodes[node_index].parent = self.find_parent(address, Some(current));
+                }
+            }
+            return Ok(handle);
+        }
+        self.insert(descriptor)
+    }
+
     pub fn snapshot(&self, handle: FunctionHandle) -> Result<NodeSnapshot, Error> {
         let node = self.node(handle)?;
         Ok(NodeSnapshot {
@@ -191,24 +228,39 @@ impl Topology {
         owner: u32,
         bar: u8,
         base: u64,
+        size: u64,
     ) -> Result<MmioLease, Error> {
-        if bar >= 6 || base == 0 { return Err(Error::InvalidBar); }
+        if bar >= 6 || base == 0 || size == 0 { return Err(Error::InvalidBar); }
         let node = self.node(handle)?;
         if owner == NO_OWNER || node.owner != owner { return Err(Error::NotOwner); }
         let slot = self.leases.iter().position(|lease| !lease.occupied).ok_or(Error::Capacity)?;
         let generation = self.leases[slot].generation;
-        self.leases[slot] = LeaseSlot { generation, occupied: true, function: handle, bar, base };
-        Ok(MmioLease { slot: slot as u8, generation, function: handle, bar, base })
+        self.leases[slot] = LeaseSlot { generation, occupied: true, function: handle, bar, base, size };
+        Ok(MmioLease { slot: slot as u8, generation, function: handle, bar, base, size })
     }
 
     pub fn validate_mmio(&self, lease: MmioLease, owner: u32) -> bool {
         let Some(slot) = self.leases.get(lease.slot as usize) else { return false; };
         if !slot.occupied || slot.generation != lease.generation || slot.function != lease.function
-            || slot.bar != lease.bar || slot.base != lease.base {
+            || slot.bar != lease.bar || slot.base != lease.base || slot.size != lease.size {
             return false;
         }
         self.node(lease.function)
             .is_ok_and(|node| owner != NO_OWNER && node.owner == owner)
+    }
+
+    pub fn release_mmio(&mut self, lease: MmioLease, owner: u32) -> Result<(), Error> {
+        if !self.validate_mmio(lease, owner) {
+            return Err(Error::NotOwner);
+        }
+        let slot = &mut self.leases[lease.slot as usize];
+        slot.occupied = false;
+        slot.generation = next_generation(slot.generation);
+        slot.function = FunctionHandle::default();
+        slot.bar = 0;
+        slot.base = 0;
+        slot.size = 0;
+        Ok(())
     }
 
     pub fn teardown(&mut self, handle: FunctionHandle, owner: u32) -> Result<(), Error> {
@@ -224,6 +276,7 @@ impl Topology {
                 lease.function = FunctionHandle::default();
                 lease.bar = 0;
                 lease.base = 0;
+                lease.size = 0;
             }
         }
 

@@ -42,6 +42,19 @@ impl Apertures {
             mmio64: resource::Allocator::new(mmio64.base, mmio64.size),
         }
     }
+
+    #[cfg_attr(test, expect(dead_code, reason = "standalone assignment tests do not compile the production HostApertures caller"))]
+    pub fn from_ranges(
+        io: &[resource::Range],
+        memory: &[resource::Range],
+        prefetch: &[resource::Range],
+    ) -> Result<Self, resource::Error> {
+        Ok(Self {
+            io: resource::Allocator::from_ranges(io)?,
+            mmio32: resource::Allocator::from_ranges(memory)?,
+            mmio64: resource::Allocator::from_ranges(prefetch)?,
+        })
+    }
 }
 
 pub fn release_all(

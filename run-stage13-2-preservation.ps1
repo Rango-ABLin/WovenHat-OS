@@ -19,6 +19,15 @@ if ($LASTEXITCODE -ne 0) { throw 'Stage 13.2 PCI bridge tests failed' }
 cargo test --test pci_routing
 if ($LASTEXITCODE -ne 0) { throw 'Stage 13.2 PCI routing tests failed' }
 
+cargo test --test pci_bridge_transaction
+if ($LASTEXITCODE -ne 0) { throw 'Stage 13.2 PCI bridge transaction tests failed' }
+
+cargo test --test pci_vector
+if ($LASTEXITCODE -ne 0) { throw 'Stage 13.2 PCI vector lifecycle tests failed' }
+
+cargo test --test pci_msix_layout
+if ($LASTEXITCODE -ne 0) { throw 'Stage 13.2 MSI-X layout tests failed' }
+
 cargo build --features stage13-2-test
 if ($LASTEXITCODE -ne 0) { throw 'Stage 13.2 build failed' }
 
