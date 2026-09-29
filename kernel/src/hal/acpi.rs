@@ -784,28 +784,57 @@ fn aml_name_seg(bytes: &[u8], offset: usize) -> Result<([u8; 4], usize), Error> 
     Ok(([name[0], name[1], name[2], name[3]], offset + 4))
 }
 
-fn aml_skip_name_string(bytes: &[u8], mut offset: usize) -> Result<usize, Error> {
-    while matches!(bytes.get(offset), Some(b'\\' | b'^')) {
-        offset += 1;
-    }
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct AmlName {
+    rooted: bool,
+    parents: u8,
+    segments: [[u8; 4]; 8],
+    segment_count: usize,
+}
+
+fn aml_name_string(bytes: &[u8], mut offset: usize) -> Result<(AmlName, usize), Error> {
+    let mut name = AmlName::default();
     match bytes.get(offset).copied().ok_or(Error::InvalidLength)? {
-        0x00 => Ok(offset + 1),
-        0x2e => {
-            let (_, next) = aml_name_seg(bytes, offset + 1)?;
-            let (_, next) = aml_name_seg(bytes, next)?;
-            Ok(next)
+        b'\\' => {
+            name.rooted = true;
+            offset += 1;
         }
+        b'^' => {
+            while bytes.get(offset) == Some(&b'^') {
+                name.parents = name.parents.checked_add(1).ok_or(Error::InvalidLength)?;
+                offset += 1;
+            }
+        }
+        _ => {}
+    }
+
+    let lead = *bytes.get(offset).ok_or(Error::InvalidLength)?;
+    let (count, mut next) = match lead {
+        0x00 => return Ok((name, offset + 1)),
+        0x2e => (2_usize, offset + 1),
         0x2f => {
             let count = usize::from(*bytes.get(offset + 1).ok_or(Error::InvalidLength)?);
-            let mut next = offset + 2;
-            for _ in 0..count {
-                let (_, after) = aml_name_seg(bytes, next)?;
-                next = after;
+            if count == 0 {
+                return Err(Error::InvalidLength);
             }
-            Ok(next)
+            (count, offset + 2)
         }
-        _ => aml_name_seg(bytes, offset).map(|(_, next)| next),
+        _ => (1_usize, offset),
+    };
+    if count > name.segments.len() {
+        return Err(Error::InvalidLength);
     }
+    for slot in name.segments.iter_mut().take(count) {
+        let (segment, after) = aml_name_seg(bytes, next)?;
+        *slot = segment;
+        next = after;
+    }
+    name.segment_count = count;
+    Ok((name, next))
+}
+
+fn aml_skip_name_string(bytes: &[u8], offset: usize) -> Result<usize, Error> {
+    aml_name_string(bytes, offset).map(|(_, next)| next)
 }
 
 fn aml_skip_data_ref_object(bytes: &[u8], offset: usize) -> Result<usize, Error> {
