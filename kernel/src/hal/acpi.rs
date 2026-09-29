@@ -1162,6 +1162,13 @@ fn decode_pci_root_resource_template(
             if item.len() != 2 || end != bytes.len() {
                 return Err(Error::InvalidLength);
             }
+            // A zero EndTag checksum means the ResourceTemplate checksum is
+            // not used. Otherwise the entire template must sum to zero.
+            if item[1] != 0
+                && bytes.iter().copied().fold(0_u8, u8::wrapping_add) != 0
+            {
+                return Err(Error::InvalidChecksum);
+            }
             saw_end_tag = true;
             break;
         }
@@ -1231,6 +1238,7 @@ fn decode_address_space_resource(bytes: &[u8]) -> Result<Option<PciRootResource>
         }
         Ok(value)
     }
+    let granularity = field(bytes, 6, width)?;
     let minimum = field(bytes, 6 + width, width)?;
     let maximum = field(bytes, 6 + width * 2, width)?;
     let translation_offset = field(bytes, 6 + width * 3, width)?;
@@ -1239,7 +1247,16 @@ fn decode_address_space_resource(bytes: &[u8]) -> Result<Option<PciRootResource>
         return Err(Error::InvalidLength);
     }
     let inclusive_end = minimum.checked_add(length - 1).ok_or(Error::AddressOverflow)?;
-    if inclusive_end > maximum {
+    // _CRS describes the bridge's current configuration. Only fixed windows
+    // are authoritative enough for BAR allocation, and their alignment must
+    // satisfy the descriptor's granularity mask.
+    let min_fixed = bytes[4] & 0x04 != 0;
+    let max_fixed = bytes[4] & 0x08 != 0;
+    if !min_fixed || !max_fixed
+        || inclusive_end > maximum
+        || minimum & granularity != 0
+        || maximum & granularity != granularity
+    {
         return Err(Error::InvalidLength);
     }
     Ok(Some(PciRootResource {
