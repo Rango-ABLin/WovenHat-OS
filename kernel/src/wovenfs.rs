@@ -27,6 +27,21 @@ impl State {
 }
 /// Bounded WovenFS metadata registry with IRQ-safe rank tracking.
 static STATE: Mutex<State> = Mutex::with_rank(State::new(), 10);
+pub fn path_hash(path: &str) -> u64 {
+    hash(path)
+}
+
+pub fn root_checksum() -> u64 {
+    let s = STATE.lock();
+    s.entries.iter().flatten().fold(0xcbf29ce484222325, |acc, entry| {
+        acc.wrapping_mul(0x100000001b3)
+            ^ entry.path_hash
+            ^ entry.size
+            ^ u64::from(entry.mode)
+            ^ entry.checksum
+    })
+}
+
 fn hash(path: &str) -> u64 {
     path.bytes().fold(1469598103934665603, |h, b| {
         (h ^ u64::from(b)).wrapping_mul(1099511628211)
