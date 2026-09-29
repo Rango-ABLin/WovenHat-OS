@@ -297,9 +297,12 @@ pub fn disable_owned_msi(lease: MsiLease, owner: u32) -> Result<(), MsiLifecycle
     if let Err(error) = disable_msi(device) {
         return Err(MsiLifecycleError::ActivationRetained { error, lease });
     }
-    VECTOR_ALLOCATOR.lock().release(lease.vector, owner)?;
+    // Release the interrupt-mode claim before recycling the vector. If this
+    // checkpoint fails, the vector must remain reserved so no other device can
+    // receive a vector still associated with unresolved MSI ownership.
     if !release_interrupt_mode(lease.function, owner, InterruptMode::Msi) {
         return Err(MsiLifecycleError::InvalidFunction);
     }
+    VECTOR_ALLOCATOR.lock().release(lease.vector, owner)?;
     Ok(())
 }
