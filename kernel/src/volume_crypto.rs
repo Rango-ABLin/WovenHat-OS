@@ -126,6 +126,67 @@ pub fn provision_measured_wrapped_for(
     provision_wrapped_for(owner, kek, record)
 }
 
+/// Pair of authenticated key records used during crash-safe rotation. The old
+/// generation remains readable until the caller has durably persisted the new
+/// record and atomically advanced its volume metadata to `next.generation`.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct RotationPlan {
+    pub current: WrappedKeyRecord,
+    pub next: WrappedKeyRecord,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum RotationError {
+    WrongVolume,
+    GenerationExhausted,
+    Wrap(WrappedKeyError),
+}
+
+/// Prepare, but do not commit, a volume-key rotation. Keeping both records in
+/// the plan makes power-loss recovery explicit: storage code persists `next`
+/// first, then advances the authenticated generation pointer, and only then
+/// retires `current`.
+pub fn prepare_rotation(
+    kek: &[u8; KEY_SIZE],
+    current: WrappedKeyRecord,
+    nonce: u64,
+    next_key: [u8; KEY_SIZE],
+) -> Result<RotationPlan, RotationError> {
+    if current.identity.generation == 0 {
+        return Err(RotationError::Wrap(WrappedKeyError::InvalidGeneration));
+    }
+    let generation = current
+        .identity
+        .generation
+        .checked_add(1)
+        .ok_or(RotationError::GenerationExhausted)?;
+    let identity = KeyGeneration {
+        volume_id: current.identity.volume_id,
+        generation,
+    };
+    let next = wrap_volume_key(kek, identity, nonce, next_key).map_err(RotationError::Wrap)?;
+    Ok(RotationPlan { current, next })
+}
+
+/// Validate that an on-disk generation advance is exactly the prepared
+/// successor for the same volume. Skips and cross-volume substitution are
+/// rejected so recovery can deterministically choose old-or-new state.
+pub fn validate_rotation(plan: &RotationPlan) -> Result<(), RotationError> {
+    if plan.current.identity.volume_id != plan.next.identity.volume_id {
+        return Err(RotationError::WrongVolume);
+    }
+    let expected = plan
+        .current
+        .identity
+        .generation
+        .checked_add(1)
+        .ok_or(RotationError::GenerationExhausted)?;
+    if plan.next.identity.generation != expected {
+        return Err(RotationError::Wrap(WrappedKeyError::InvalidGeneration));
+    }
+    Ok(())
+}
+
 fn constant_time_eq(left: &[u8], right: &[u8]) -> bool {
     if left.len() != right.len() {
         return false;
