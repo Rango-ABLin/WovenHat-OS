@@ -74,6 +74,13 @@ pub fn suspend(name: &'static str) -> bool {
     else {
         return false;
     };
+    // A PCI driver may not become quiescent while it still owns an interrupt
+    // delivery path.  Requiring resource-aware teardown first prevents a
+    // suspended binding from retaining a live MSI/MSI-X vector that ordinary
+    // resume/unbind paths could otherwise overlook.
+    if d.pci.is_some_and(|binding| binding.interrupt.is_some()) {
+        return false;
+    }
     d.state = State::Suspended;
     true
 }
@@ -86,6 +93,12 @@ pub fn resume(name: &'static str) -> bool {
     else {
         return false;
     };
+    // Suspended PCI bindings are permitted only after interrupt authority has
+    // been removed.  Recheck the invariant before making the binding visible
+    // to new work again.
+    if d.pci.is_some_and(|binding| binding.interrupt.is_some()) {
+        return false;
+    }
     d.state = State::Bound;
     true
 }
