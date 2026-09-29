@@ -320,7 +320,10 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
                 summary.truncated as u8,
             ));
         }
-        Err(_) => console.println("ACPI TABLES: UNAVAILABLE"),
+        Err(error) => {
+            console.println("ACPI TABLES: UNAVAILABLE");
+            serial::write_line(format_args!("[ACPI] discovery error: {error:?}"));
+        }
     }
     let vendor = match hardware.cpu_vendor {
         hal::CpuVendor::Intel => "INTEL",

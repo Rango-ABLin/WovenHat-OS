@@ -15,7 +15,7 @@ const MCFG_ALLOCATION_LENGTH: usize = 16;
 pub const MAX_MCFG_ALLOCATIONS: usize = 8;
 const MAX_AML_TABLES: usize = 16;
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Error {
     Missing,
     OutOfRange,
@@ -23,6 +23,15 @@ pub enum Error {
     InvalidChecksum,
     InvalidLength,
     AddressOverflow,
+    AmlNameError,
+    AmlPathError,
+    AmlHidOwner,
+    AmlHidScope,
+    AmlHidDevice,
+    AmlCrsOwner,
+    AmlCrsBuffer,
+    AmlCrsResource,
+    AmlRootNumber,
 }
 
 #[derive(Clone, Copy, Default)]
@@ -262,7 +271,10 @@ pub fn discover(
         };
         let body = aml_table_body(physical_offset, table, regions)?;
         let mut resources = [PciRootResource::default(); MAX_PCI_ROOT_RESOURCES];
-        let (_, count) = aml_namespace_walk(body, &mut resources)?;
+        let (_, count) = aml_namespace_walk(body, &mut resources).map_err(|error| match error {
+            Error::InvalidSignature => Error::AmlPathError,
+            other => other,
+        })?;
         summary.pci_root_resources[..count].copy_from_slice(&resources[..count]);
         summary.pci_root_resource_count = count;
     }
@@ -1101,8 +1113,9 @@ fn aml_namespace_walk(
                     if package.end_offset > end {
                         return Err(Error::InvalidLength);
                     }
-                    let (name, body) = aml_name_string(bytes, package.body_offset)?;
-                    let child = aml_resolve_name(scope, name)?;
+                    let (name, body) =
+                        aml_name_string(bytes, package.body_offset).map_err(|_| Error::AmlNameError)?;
+                    let child = aml_resolve_name(scope, name).map_err(|_| Error::AmlPathError)?;
                     *objects = objects.checked_add(1).ok_or(Error::AddressOverflow)?;
                     aml_record(records, record_count, child, AmlNamespaceKind::Scope)?;
                     walk(bytes, body, package.end_offset, child, objects, records, record_count)?;
@@ -1113,16 +1126,18 @@ fn aml_namespace_walk(
                     if package.end_offset > end {
                         return Err(Error::InvalidLength);
                     }
-                    let (name, body) = aml_name_string(bytes, package.body_offset)?;
-                    let child = aml_resolve_name(scope, name)?;
+                    let (name, body) =
+                        aml_name_string(bytes, package.body_offset).map_err(|_| Error::AmlNameError)?;
+                    let child = aml_resolve_name(scope, name).map_err(|_| Error::AmlPathError)?;
                     *objects = objects.checked_add(1).ok_or(Error::AddressOverflow)?;
                     aml_record(records, record_count, child, AmlNamespaceKind::Device)?;
                     walk(bytes, body, package.end_offset, child, objects, records, record_count)?;
                     offset = package.end_offset;
                 }
                 0x08 => {
-                    let (name, value) = aml_name_string(bytes, offset + 1)?;
-                    let path = aml_resolve_name(scope, name)?;
+                    let (name, value) =
+                        aml_name_string(bytes, offset + 1).map_err(|_| Error::AmlNameError)?;
+                    let path = aml_resolve_name(scope, name).map_err(|_| Error::AmlPathError)?;
                     // Recognize static PCI-root hardware/compatible IDs while
                     // walking their owning device scope. This is intentionally
                     // read-only: resource apertures are not published until
@@ -1131,44 +1146,50 @@ fn aml_namespace_walk(
                         || aml_name_is(path, *b"_CID"))
                         && aml_eisa_id(bytes, value).is_some_and(aml_is_pci_root_id);
                     if pci_root_identity {
-                        let owner = aml_parent_path(path).ok_or(Error::InvalidSignature)?;
-                        if owner != scope || !aml_has_device(records, *record_count, owner) {
-                            return Err(Error::InvalidSignature);
+                        if let Some(owner) = aml_parent_path(path)
+                            .filter(|owner| aml_has_device(records, *record_count, *owner))
+                        {
+                            aml_mark_pci_root(records, *record_count, owner)
+                                .map_err(|_| Error::AmlHidOwner)?;
                         }
-                        aml_mark_pci_root(records, *record_count, owner)?;
                     }
                     if aml_name_is(path, *b"_CRS") {
-                        let owner = aml_parent_path(path).ok_or(Error::InvalidSignature)?;
-                        if owner != scope || !aml_has_device(records, *record_count, owner) {
-                            return Err(Error::InvalidSignature);
-                        }
-                        // Retain only the bounded static ResourceTemplate on
-                        // its owning Device. Root identity may legally appear
-                        // later in the same Device, so root qualification and
-                        // descriptor validation happen after the namespace pass.
-                        if let Some(resource_template) = aml_static_buffer(bytes, value)? {
-                            aml_set_resource_template(
-                                records,
-                                *record_count,
-                                owner,
-                                bytes,
-                                resource_template,
-                            )?;
+                        if let Some(owner) = aml_parent_path(path)
+                            .filter(|owner| aml_has_device(records, *record_count, *owner))
+                        {
+                            // Retain only the bounded static ResourceTemplate on
+                            // its owning Device. Root identity may legally appear
+                            // later in the same Device, so root qualification and
+                            // descriptor validation happen after the namespace pass.
+                            if let Some(resource_template) =
+                                aml_static_buffer(bytes, value).map_err(|_| Error::AmlCrsBuffer)?
+                            {
+                                aml_set_resource_template(
+                                    records,
+                                    *record_count,
+                                    owner,
+                                    bytes,
+                                    resource_template,
+                                )
+                                .map_err(|_| Error::AmlCrsResource)?;
+                            }
                         }
                     }
                     if aml_name_is(path, *b"_SEG") || aml_name_is(path, *b"_BBN") {
-                        let owner = aml_parent_path(path).ok_or(Error::InvalidSignature)?;
-                        if owner != scope || !aml_has_device(records, *record_count, owner) {
-                            return Err(Error::InvalidSignature);
+                        if let Some(owner) = aml_parent_path(path)
+                            .filter(|owner| aml_has_device(records, *record_count, *owner))
+                        {
+                            let number =
+                                aml_static_integer(bytes, value).ok_or(Error::AmlRootNumber)?;
+                            aml_set_root_number(
+                                records,
+                                *record_count,
+                                owner,
+                                aml_name_is(path, *b"_SEG"),
+                                number,
+                            )
+                            .map_err(|_| Error::AmlRootNumber)?;
                         }
-                        let number = aml_static_integer(bytes, value).ok_or(Error::InvalidSignature)?;
-                        aml_set_root_number(
-                            records,
-                            *record_count,
-                            owner,
-                            aml_name_is(path, *b"_SEG"),
-                            number,
-                        )?;
                     }
                     match aml_skip_data_ref_object(bytes, value) {
                         Ok(next) if next <= end => {
@@ -1465,6 +1486,15 @@ pub fn self_test() -> bool {
         0x10, 0x0c, b'_', b'S', b'B', b'_', 0x5b, 0x82, 0x05, b'P', b'C', b'I', b'0',
     ];
     let aml_nested_walk = aml_namespace_walk(&aml_nested, &mut aml_resources) == Ok((2, 0));
+    let aml_root_device_hid = [
+        0x5b, 0x82, 0x0f, b'P', b'C', b'I', b'0', 0x08, b'_', b'H', b'I', b'D', 0x0c, 0x41,
+        0xd0, 0x0a, 0x03,
+    ];
+    let aml_root_device_hid_walk =
+        aml_namespace_walk(&aml_root_device_hid, &mut aml_resources) == Ok((2, 0));
+    let aml_unowned_root_hid = [0x08, b'_', b'H', b'I', b'D', 0x0c, 0x41, 0xd0, 0x0a, 0x03];
+    let aml_unowned_root_hid_walk =
+        aml_namespace_walk(&aml_unowned_root_hid, &mut aml_resources) == Ok((1, 0));
 
     let aml_pkg_short = decode_aml_pkg_length(&[0x05], 0) == Ok((5, 1));
     let aml_pkg_multi = decode_aml_pkg_length(&[0x41, 0x02], 0) == Ok((33, 2));
@@ -1575,6 +1605,8 @@ pub fn self_test() -> bool {
         && aml_scope_walk
         && aml_device_walk
         && aml_nested_walk
+        && aml_root_device_hid_walk
+        && aml_unowned_root_hid_walk
         && aml_pkg_short
         && aml_pkg_multi
         && aml_pkg_bounds
