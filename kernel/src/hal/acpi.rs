@@ -808,6 +808,34 @@ fn aml_skip_name_string(bytes: &[u8], mut offset: usize) -> Result<usize, Error>
     }
 }
 
+fn aml_skip_data_ref_object(bytes: &[u8], offset: usize) -> Result<usize, Error> {
+    let opcode = *bytes.get(offset).ok_or(Error::InvalidLength)?;
+    match opcode {
+        // ZeroOp, OneOp, OnesOp.
+        0x00 | 0x01 | 0xff => Ok(offset + 1),
+        // Byte/Word/DWord/QWord integer prefixes.
+        0x0a => offset.checked_add(2).filter(|end| *end <= bytes.len()).ok_or(Error::InvalidLength),
+        0x0b => offset.checked_add(3).filter(|end| *end <= bytes.len()).ok_or(Error::InvalidLength),
+        0x0c => offset.checked_add(5).filter(|end| *end <= bytes.len()).ok_or(Error::InvalidLength),
+        0x0e => offset.checked_add(9).filter(|end| *end <= bytes.len()).ok_or(Error::InvalidLength),
+        // StringPrefix: NUL-terminated AML string.
+        0x0d => {
+            let mut end = offset.checked_add(1).ok_or(Error::AddressOverflow)?;
+            while *bytes.get(end).ok_or(Error::InvalidLength)? != 0 {
+                end = end.checked_add(1).ok_or(Error::AddressOverflow)?;
+            }
+            Ok(end + 1)
+        }
+        // BufferOp and PackageOp carry a bounded PkgLength.  We do not
+        // evaluate their contents here; skipping the complete package is
+        // sufficient for namespace discovery and prevents byte scanning.
+        0x11 | 0x12 => Ok(aml_package(bytes, offset + 1)?.end_offset),
+        // VarPackageOp has the same package envelope.
+        0x13 => Ok(aml_package(bytes, offset + 1)?.end_offset),
+        _ => Err(Error::InvalidSignature),
+    }
+}
+
 fn aml_namespace_walk(bytes: &[u8]) -> Result<usize, Error> {
     fn walk(bytes: &[u8], mut offset: usize, end: usize, objects: &mut usize) -> Result<(), Error> {
         while offset < end {
@@ -833,11 +861,19 @@ fn aml_namespace_walk(bytes: &[u8]) -> Result<usize, Error> {
                     offset = package.end_offset;
                 }
                 0x08 => {
-                    let _ = aml_skip_name_string(bytes, offset + 1)?;
-                    // This first walker intentionally recognizes the namespace
-                    // name but does not evaluate the attached DataRefObject.
-                    *objects = objects.checked_add(1).ok_or(Error::AddressOverflow)?;
-                    break;
+                    let value = aml_skip_name_string(bytes, offset + 1)?;
+                    // Advance only across DataRefObject encodings whose bounds
+                    // are explicit. Unsupported expressions stop this package
+                    // fail-closed rather than guessing an AML instruction size.
+                    match aml_skip_data_ref_object(bytes, value) {
+                        Ok(next) if next <= end => {
+                            *objects = objects.checked_add(1).ok_or(Error::AddressOverflow)?;
+                            offset = next;
+                        }
+                        Ok(_) => return Err(Error::InvalidLength),
+                        Err(Error::InvalidSignature) => break,
+                        Err(error) => return Err(error),
+                    }
                 }
                 _ => {
                     // Unknown AML terms cannot be safely skipped without their
