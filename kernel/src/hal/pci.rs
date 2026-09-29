@@ -370,6 +370,13 @@ pub(crate) fn reconcile_after_teardown() -> Summary {
             return inventory.summary;
         }
     }
+    // Do not publish a refreshed inventory if it omitted any function.  The
+    // candidate topology deliberately preserves existing handles/owners, so
+    // pairing it with a truncated inventory would make a live function lose
+    // its device/config-space description while authority still exists.
+    if inventory.summary.truncated {
+        return published.inventory.summary;
+    }
     let summary = inventory.summary;
     published.topology = candidate;
     published.inventory = inventory;
