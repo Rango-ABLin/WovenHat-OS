@@ -881,6 +881,7 @@ struct AmlNamespaceRecord {
     path: AmlPath,
     kind: AmlNamespaceKind,
     pci_root: bool,
+    resource_template: Option<(usize, usize)>,
 }
 
 fn aml_record(
@@ -896,6 +897,7 @@ fn aml_record(
         path,
         kind,
         pci_root: false,
+        resource_template: None,
     });
     *record_count += 1;
     Ok(())
@@ -1023,6 +1025,30 @@ fn aml_is_pci_root_device(
         })
 }
 
+fn aml_set_resource_template(
+    records: &mut [Option<AmlNamespaceRecord>; MAX_AML_NAMESPACE_RECORDS],
+    record_count: usize,
+    path: AmlPath,
+    bytes: &[u8],
+    template: &[u8],
+) -> Result<(), Error> {
+    let start = template.as_ptr() as usize - bytes.as_ptr() as usize;
+    let end = start.checked_add(template.len()).ok_or(Error::AddressOverflow)?;
+    if end > bytes.len() {
+        return Err(Error::InvalidLength);
+    }
+    let record = records
+        .iter_mut()
+        .take(record_count)
+        .flatten()
+        .find(|record| record.kind == AmlNamespaceKind::Device && record.path == path)
+        .ok_or(Error::InvalidSignature)?;
+    if record.resource_template.replace((start, end)).is_some() {
+        return Err(Error::InvalidSignature);
+    }
+    Ok(())
+}
+
 fn aml_namespace_walk(bytes: &[u8]) -> Result<usize, Error> {
     fn walk(
         bytes: &[u8],
@@ -1081,15 +1107,19 @@ fn aml_namespace_walk(bytes: &[u8]) -> Result<usize, Error> {
                         if owner != scope || !aml_has_device(records, *record_count, owner) {
                             return Err(Error::InvalidSignature);
                         }
-                        // Static ResourceTemplate buffers are bounded here.
-                        // Publication is deliberately deferred until the owner
-                        // is proven to be a PCI root and every descriptor has
-                        // passed producer/window semantic validation.
-                        let resource_template = aml_static_buffer(bytes, value)?;
-                        let _pci_root_resource_template =
-                            aml_is_pci_root_device(records, *record_count, owner)
-                                .then_some(resource_template)
-                                .flatten();
+                        // Retain only the bounded static ResourceTemplate on
+                        // its owning Device. Root identity may legally appear
+                        // later in the same Device, so root qualification and
+                        // descriptor validation happen after the namespace pass.
+                        if let Some(resource_template) = aml_static_buffer(bytes, value)? {
+                            aml_set_resource_template(
+                                records,
+                                *record_count,
+                                owner,
+                                bytes,
+                                resource_template,
+                            )?;
+                        }
                     }
                     if aml_name_is(path, *b"_SEG") || aml_name_is(path, *b"_BBN") {
                         let owner = aml_parent_path(path).ok_or(Error::InvalidSignature)?;
@@ -1132,6 +1162,19 @@ fn aml_namespace_walk(bytes: &[u8]) -> Result<usize, Error> {
         &mut record_count,
     )?;
     debug_assert_eq!(objects, record_count);
+
+    // Qualification is deliberately a second phase. AML declaration order
+    // must not decide whether a root bridge's _CRS is authoritative.
+    for record in records.iter().take(record_count).flatten() {
+        if record.kind != AmlNamespaceKind::Device || !record.pci_root {
+            continue;
+        }
+        if let Some((start, end)) = record.resource_template {
+            let template = bytes.get(start..end).ok_or(Error::InvalidLength)?;
+            let mut resources = [PciRootResource::default(); MAX_PCI_ROOT_RESOURCES];
+            let _ = decode_pci_root_resource_template(template, &mut resources)?;
+        }
+    }
     Ok(objects)
 }
 
