@@ -292,10 +292,17 @@ pub fn enable_pci_msi(
     }
 
     // Publication raced with a lifecycle change. The lease is still local to
-    // this call, so ordered disable is the only safe rollback. A failed
-    // disable intentionally retains its vector inside the MSI subsystem.
+    // this call, so ordered disable is the only safe rollback. If hardware
+    // quiesce fails, preserve the concrete lease in ActivationRetained so the
+    // caller can retry teardown instead of losing a live vector obligation.
     match crate::hal::pci::msi::disable_owned_msi(lease, owner) {
         Ok(()) => Err(crate::hal::pci::msi::MsiLifecycleError::InvalidFunction),
+        Err(crate::hal::pci::msi::MsiLifecycleError::ActivationRetained { error, .. }) => {
+            Err(crate::hal::pci::msi::MsiLifecycleError::ActivationRetained {
+                error,
+                lease,
+            })
+        }
         Err(error) => Err(error),
     }
 }
