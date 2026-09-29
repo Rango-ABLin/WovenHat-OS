@@ -16,6 +16,80 @@ const MAX_KEYS: usize = 8;
 
 pub type Tag = [u8; TAG_SIZE];
 
+/// Persistent, non-secret identity for a wrapped volume-key generation.
+/// Raw key bytes are deliberately never part of this metadata boundary.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct KeyGeneration {
+    pub volume_id: u64,
+    pub generation: u32,
+}
+
+/// Authenticated metadata stored beside a wrapped volume key. The actual
+/// persistent-storage backend is intentionally separate: callers must persist
+/// the ciphertext and tag atomically before making a generation current.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct WrappedKeyRecord {
+    pub identity: KeyGeneration,
+    pub nonce: u64,
+    pub ciphertext: [u8; KEY_SIZE],
+    pub tag: Tag,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum WrappedKeyError {
+    InvalidGeneration,
+    Authentication,
+    VaultFull,
+}
+
+fn wrapped_key_aad(identity: KeyGeneration) -> [u8; 12] {
+    let mut aad = [0u8; 12];
+    aad[..8].copy_from_slice(&identity.volume_id.to_le_bytes());
+    aad[8..].copy_from_slice(&identity.generation.to_le_bytes());
+    aad
+}
+
+/// Wrap one volume key under a caller-supplied key-encryption key. This is the
+/// persistence-format boundary only; Stage 12.3 provisioning must obtain the
+/// KEK from a measured/trusted source before calling it.
+pub fn wrap_volume_key(
+    kek: &[u8; KEY_SIZE],
+    identity: KeyGeneration,
+    nonce: u64,
+    volume_key: [u8; KEY_SIZE],
+) -> Result<WrappedKeyRecord, WrappedKeyError> {
+    if identity.generation == 0 {
+        return Err(WrappedKeyError::InvalidGeneration);
+    }
+    let mut ciphertext = volume_key;
+    let aad = wrapped_key_aad(identity);
+    let tag = seal(kek, nonce, &aad, &mut ciphertext)
+        .ok_or(WrappedKeyError::Authentication)?;
+    Ok(WrappedKeyRecord { identity, nonce, ciphertext, tag })
+}
+
+/// Authenticate and unwrap a persisted volume-key generation directly into
+/// the bounded vault. Authentication failure never provisions attacker-
+/// controlled plaintext, and the temporary plaintext is wiped afterwards.
+pub fn provision_wrapped_for(
+    owner: u64,
+    kek: &[u8; KEY_SIZE],
+    record: &WrappedKeyRecord,
+) -> Result<KeyHandle, WrappedKeyError> {
+    if record.identity.generation == 0 {
+        return Err(WrappedKeyError::InvalidGeneration);
+    }
+    let mut key = record.ciphertext;
+    let aad = wrapped_key_aad(record.identity);
+    if !open(kek, record.nonce, &aad, &mut key, &record.tag) {
+        key.fill(0);
+        return Err(WrappedKeyError::Authentication);
+    }
+    let handle = provision_for(owner, key).ok_or(WrappedKeyError::VaultFull);
+    key.fill(0);
+    handle
+}
+
 fn constant_time_eq(left: &[u8], right: &[u8]) -> bool {
     if left.len() != right.len() {
         return false;
