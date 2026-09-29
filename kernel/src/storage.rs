@@ -961,7 +961,6 @@ fn live_directory_growth_self_test() -> Result<(), &'static str> {
     remove_live_test_dir(GROW_DIR)
 }
 
-#[cfg(feature = "stage12-4-test")]
 pub fn persist_snapshot_catalog(catalog: fat32::SnapshotCatalog) -> Result<(), PersistError> {
     if !mnt_mounted() {
         return Err(unavailable_persist_error());
@@ -976,7 +975,6 @@ pub fn persist_snapshot_catalog(catalog: fat32::SnapshotCatalog) -> Result<(), P
     .map_err(map_persist_err)
 }
 
-#[cfg(feature = "stage12-4-test")]
 pub fn load_snapshot_catalog() -> Result<Option<fat32::SnapshotCatalog>, PersistError> {
     if !mnt_mounted() {
         return Err(unavailable_persist_error());
@@ -991,7 +989,6 @@ pub fn load_snapshot_catalog() -> Result<Option<fat32::SnapshotCatalog>, Persist
     .map_err(map_persist_err)
 }
 
-#[cfg(feature = "stage12-4-test")]
 pub fn persist_snapshot_restore_intent(
     intent: crate::snapshots::RestoreIntent,
 ) -> Result<(), PersistError> {
@@ -1014,7 +1011,6 @@ pub fn persist_snapshot_restore_intent(
     .map_err(map_persist_err)
 }
 
-#[cfg(feature = "stage12-4-test")]
 pub fn load_snapshot_restore_intent(
 ) -> Result<Option<crate::snapshots::RestoreIntent>, PersistError> {
     if !mnt_mounted() {
@@ -1041,7 +1037,6 @@ pub fn load_snapshot_restore_intent(
         .transpose()
 }
 
-#[cfg(feature = "stage12-4-test")]
 pub fn clear_snapshot_restore_intent() -> Result<(), PersistError> {
     if !mnt_mounted() {
         return Err(unavailable_persist_error());
@@ -1056,7 +1051,6 @@ pub fn clear_snapshot_restore_intent() -> Result<(), PersistError> {
     .map_err(map_persist_err)
 }
 
-#[cfg(feature = "stage12-4-test")]
 fn with_mounted_volume<T>(
     device: &mut impl crate::block::BlockDevice,
     operation: impl FnOnce(&mut dyn crate::block::BlockDevice, fat32::Volume) -> Result<T, fat32::Error>,
@@ -1124,20 +1118,13 @@ pub fn persist_path(path: &str) -> Result<(), PersistError> {
     let checksum = data[..length].iter().fold(0xcbf29ce484222325, |h, b| {
         (h ^ u64::from(*b)).wrapping_mul(0x100000001b3)
     });
-    #[cfg(feature = "stage12-4-test")]
-    {
-        // Stage 12.4 currently exercises the snapshot/COW integration in its
-        // dedicated acceptance configuration. The production persistence hook
-        // remains feature-aligned until the snapshot service is promoted as a
-        // permanently reachable kernel subsystem.
-        if let Some(previous) = crate::wovenfs::metadata(path) {
-            crate::snapshots::record_live_change(
-                crate::wovenfs::path_hash(path),
-                previous.checksum,
-                checksum,
-            )
-            .map_err(|_| PersistError::Failed)?;
-        }
+    if let Some(previous) = crate::wovenfs::metadata(path) {
+        crate::snapshots::record_live_change(
+            crate::wovenfs::path_hash(path),
+            previous.checksum,
+            checksum,
+        )
+        .map_err(|_| PersistError::Failed)?;
     }
     let Some(journal_token) = crate::journal::begin(crate::journal::path_hash(path), checksum)
     else {
