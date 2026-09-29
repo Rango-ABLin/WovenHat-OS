@@ -1680,17 +1680,10 @@ pub fn rename_path(old: &str, new: &str) -> Result<(), MutationError> {
     }
     FILE_PAGES.lock().invalidate();
     if let Some(previous) = crate::wovenfs::metadata(old) {
-        crate::snapshots::record_live_change(
-            crate::wovenfs::path_hash(old),
-            previous.checksum,
-            0,
-        )
-        .map_err(|_| MutationError::Failed)?;
-        crate::snapshots::record_live_change(
-            crate::wovenfs::path_hash(new),
-            0,
-            previous.checksum,
-        )
+        crate::snapshots::record_live_changes(&[
+            (crate::wovenfs::path_hash(old), previous.checksum, 0),
+            (crate::wovenfs::path_hash(new), 0, previous.checksum),
+        ])
         .map_err(|_| MutationError::Failed)?;
     }
     let mut result = rename_on_cached_device(&mut disk, old_relative, new_relative);
