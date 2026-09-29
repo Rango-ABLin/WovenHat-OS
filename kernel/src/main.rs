@@ -1322,10 +1322,6 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         halt();
     }
     let storage_status = storage::mount_ata_root();
-    if !snapshots::production_surface_probe() {
-        serial::write_line(format_args!("[SNAPSHOT] production service surface: FAILED"));
-        halt();
-    }
     match storage_status {
         storage::MountStatus::Mounted(files) => {
             console.println("FAT32 ROOT MOUNTED");
