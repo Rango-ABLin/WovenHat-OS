@@ -110,7 +110,6 @@ pub fn recover_catalog() -> Result<bool, RestoreError> {
     Ok(true)
 }
 
-#[cfg(feature = "stage12-4-test")]
 pub fn create(generation: u64, checksum: u64) -> Option<u64> {
     if generation == 0 || checksum == 0 {
         return None;
@@ -131,7 +130,6 @@ pub fn create(generation: u64, checksum: u64) -> Option<u64> {
 }
 
 /// Capture the current WovenFS metadata root as a snapshot generation.
-#[cfg(feature = "stage12-4-test")]
 pub fn capture_wovenfs(generation: u64) -> Option<u64> {
     create(generation, crate::wovenfs::root_checksum())
 }
