@@ -25,7 +25,25 @@ Evidence retained on 2026-09-16:
 - Full `python scripts/test-release.py` after this implementation — PASS; all
   lint, host, 1/2/4-CPU, release, and shell/SMP gates passed.
 
-The vault is a kernel boundary, not a complete secure-boot key ceremony. Key
-provisioning from a measured hardware root, secure persistent storage, key
-rotation policy, and encrypted-volume mount integration remain production
-integration work.
+## Production-completion pass — 2026-09-29
+
+Stage 12.3 now adds authenticated persistent wrapped-key records whose associated
+data binds volume identity and generation; an explicit measured/authenticated
+provisioning-evidence gate; successor-only, overflow-checked rotation plans that
+retain the old generation until durable metadata advancement; and encrypted
+mount-record I/O that retains only opaque vault authority and authenticates the
+volume, generation, and mount identity.
+
+The adversarial gate rejects untrusted measurement evidence, tampered wrapped
+records, cross-volume or skipped-generation rotation, tampered mounted-record
+tags, and revoked/stale mount authority. Authentication failure leaves mounted
+ciphertext untouched.
+
+GitHub Actions run 614 (run id 36577792537) passed release validation for commit
+`54c7dd938faad567c97de74fb45ec0d2d64286c5`, including lint, host regressions,
+the 1/2/4-core boot matrix, and validation-evidence preservation.
+
+Stage 12.3 is production-complete at the kernel integration boundary. Physical
+hardware still needs a TPM/firmware measured-root backend to produce the trusted
+evidence consumed by this boundary; best-effort kernel entropy is explicitly not
+accepted as a substitute for that hardware trust source.
