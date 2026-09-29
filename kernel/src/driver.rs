@@ -398,9 +398,15 @@ pub fn unbind_pci_resources(name: &'static str) -> Result<(), PciUnbindError> {
             return Err(error);
         }
         let mut table = TABLE.lock();
-        let entry = table.iter_mut().flatten().find(|entry| entry.name == name)
+        let entry = table.iter_mut().flatten()
+            .find(|entry| entry.name == name && entry.state == State::Unbinding)
             .ok_or(PciUnbindError::InvalidBinding)?;
         let current = entry.pci.as_mut().ok_or(PciUnbindError::InvalidBinding)?;
+        if current.function != binding.function || current.owner != binding.owner
+            || current.interrupt != Some(interrupt)
+        {
+            return Err(PciUnbindError::InvalidBinding);
+        }
         current.interrupt = None;
     }
 
@@ -417,9 +423,15 @@ pub fn unbind_pci_resources(name: &'static str) -> Result<(), PciUnbindError> {
         crate::hal::pci::release_bar_lease(bar, binding.owner)
             .map_err(PciUnbindError::Topology)?;
         let mut table = TABLE.lock();
-        let entry = table.iter_mut().flatten().find(|entry| entry.name == name)
+        let entry = table.iter_mut().flatten()
+            .find(|entry| entry.name == name && entry.state == State::Unbinding)
             .ok_or(PciUnbindError::InvalidBinding)?;
         let current = entry.pci.as_mut().ok_or(PciUnbindError::InvalidBinding)?;
+        if current.function != binding.function || current.owner != binding.owner
+            || current.bars[index] != Some(bar)
+        {
+            return Err(PciUnbindError::InvalidBinding);
+        }
         current.bars[index] = None;
     }
 
@@ -428,8 +440,14 @@ pub fn unbind_pci_resources(name: &'static str) -> Result<(), PciUnbindError> {
 
     let mut table = TABLE.lock();
     let entry = table.iter_mut().flatten()
-        .find(|entry| entry.name == name)
+        .find(|entry| entry.name == name && entry.state == State::Unbinding)
         .ok_or(PciUnbindError::InvalidBinding)?;
+    let current = entry.pci.ok_or(PciUnbindError::InvalidBinding)?;
+    if current.function != binding.function || current.owner != binding.owner
+        || current.interrupt.is_some() || current.bars.iter().any(Option::is_some)
+    {
+        return Err(PciUnbindError::InvalidBinding);
+    }
     entry.pci = None;
     entry.state = State::Registered;
     Ok(())
