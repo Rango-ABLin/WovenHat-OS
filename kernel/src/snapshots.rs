@@ -44,7 +44,6 @@ pub struct RestoreIntent {
 
 static RESTORE_INTENT: Mutex<Option<RestoreIntent>> = Mutex::with_rank(None, 10);
 
-#[cfg(feature = "stage12-4-test")]
 fn durable_catalog() -> crate::fat32::SnapshotCatalog {
     let table = TABLE.lock();
     let changes = CHANGES.lock();
@@ -67,13 +66,11 @@ fn durable_catalog() -> crate::fat32::SnapshotCatalog {
     catalog
 }
 
-#[cfg(feature = "stage12-4-test")]
 fn persist_catalog() -> Result<(), RestoreError> {
     crate::storage::persist_snapshot_catalog(durable_catalog())
         .map_err(|_| RestoreError::PersistenceFailed)
 }
 
-#[cfg(feature = "stage12-4-test")]
 pub fn recover_catalog() -> Result<bool, RestoreError> {
     let Some(catalog) = crate::storage::load_snapshot_catalog()
         .map_err(|_| RestoreError::PersistenceFailed)?
