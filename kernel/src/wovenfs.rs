@@ -29,7 +29,6 @@ pub fn path_hash(path: &str) -> u64 {
     hash(path)
 }
 
-#[cfg(any(feature = "stage12-2-test", feature = "stage12-4-test"))]
 pub fn root_checksum() -> u64 {
     let s = STATE.lock();
     s.entries.iter().flatten().fold(0xcbf29ce484222325, |acc, entry| {
@@ -46,7 +45,6 @@ fn hash(path: &str) -> u64 {
         (h ^ u64::from(b)).wrapping_mul(1099511628211)
     })
 }
-#[cfg(any(feature = "stage12-2-test", feature = "stage12-4-test"))]
 pub fn record(path: &str, size: u64, mode: u32, now: u64, data: &[u8]) -> bool {
     let key = hash(path);
     let checksum = data.iter().fold(0xcbf29ce484222325, |h, b| {
