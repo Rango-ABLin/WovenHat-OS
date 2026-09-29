@@ -943,6 +943,23 @@ fn aml_static_integer(bytes: &[u8], offset: usize) -> Option<u64> {
     }
 }
 
+fn aml_static_buffer<'a>(bytes: &'a [u8], offset: usize) -> Result<Option<&'a [u8]>, Error> {
+    if bytes.get(offset) != Some(&0x11) {
+        return Ok(None);
+    }
+    let package = aml_package(bytes, offset + 1)?;
+    let size = aml_static_integer(bytes, package.body_offset).ok_or(Error::InvalidSignature)?;
+    let data_offset = aml_skip_data_ref_object(bytes, package.body_offset)?;
+    if data_offset > package.end_offset {
+        return Err(Error::InvalidLength);
+    }
+    let data = bytes.get(data_offset..package.end_offset).ok_or(Error::InvalidLength)?;
+    if size != data.len() as u64 {
+        return Err(Error::InvalidLength);
+    }
+    Ok(Some(data))
+}
+
 fn aml_is_pci_root_id(id: u32) -> bool {
     // AML EISAID("PNP0A03") / EISAID("PNP0A08") integer encodings.
     id == 0x030ad041 || id == 0x080ad041
@@ -1023,6 +1040,17 @@ fn aml_namespace_walk(bytes: &[u8]) -> Result<usize, Error> {
                         if owner != scope || !aml_has_device(records, *record_count, owner) {
                             return Err(Error::InvalidSignature);
                         }
+                    }
+                    if aml_name_is(path, *b"_CRS") {
+                        let owner = aml_parent_path(path).ok_or(Error::InvalidSignature)?;
+                        if owner != scope || !aml_has_device(records, *record_count, owner) {
+                            return Err(Error::InvalidSignature);
+                        }
+                        // Static ResourceTemplate buffers are bounded here.
+                        // Publication is deliberately deferred until the owner
+                        // is proven to be a PCI root and every descriptor has
+                        // passed producer/window semantic validation.
+                        let _resource_template = aml_static_buffer(bytes, value)?;
                     }
                     if aml_name_is(path, *b"_SEG") || aml_name_is(path, *b"_BBN") {
                         let owner = aml_parent_path(path).ok_or(Error::InvalidSignature)?;
