@@ -683,26 +683,6 @@ fn read_physical(
     Ok(())
 }
 
-fn read_physical_byte(
-    physical_offset: u64,
-    address: u64,
-    length: usize,
-    offset: usize,
-    regions: &[MemoryRegion],
-) -> Result<u8, Error> {
-    if offset >= length {
-        return Err(Error::InvalidLength);
-    }
-    let byte_address = address
-        .checked_add(offset as u64)
-        .ok_or(Error::AddressOverflow)?;
-    validate_range(byte_address, 1, regions)?;
-    let virtual_address = physical_offset
-        .checked_add(byte_address)
-        .ok_or(Error::AddressOverflow)?;
-    Ok(unsafe { (virtual_address as *const u8).read_volatile() })
-}
-
 fn validate_range(address: u64, length: usize, regions: &[MemoryRegion]) -> Result<(), Error> {
     let end = address
         .checked_add(length as u64)
