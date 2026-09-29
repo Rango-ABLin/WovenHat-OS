@@ -1001,6 +1001,7 @@ pub fn load_snapshot_catalog() -> Result<Option<fat32::SnapshotCatalog>, Persist
     .map_err(map_persist_err)
 }
 
+#[cfg(feature = "stage12-4-test")]
 pub fn persist_snapshot_restore_intent(
     intent: crate::snapshots::RestoreIntent,
 ) -> Result<(), PersistError> {
@@ -1049,6 +1050,7 @@ pub fn load_snapshot_restore_intent(
         .transpose()
 }
 
+#[cfg(feature = "stage12-4-test")]
 pub fn clear_snapshot_restore_intent() -> Result<(), PersistError> {
     if !mnt_mounted() {
         return Err(unavailable_persist_error());
