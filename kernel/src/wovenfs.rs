@@ -72,6 +72,44 @@ pub fn record(path: &str, size: u64, mode: u32, now: u64, data: &[u8]) -> bool {
     });
     true
 }
+pub fn remove(path: &str) -> bool {
+    let key = hash(path);
+    let mut state = STATE.lock();
+    let Some(slot) = state
+        .entries
+        .iter_mut()
+        .find(|entry| entry.is_some_and(|metadata| metadata.path_hash == key))
+    else {
+        return false;
+    };
+    *slot = None;
+    true
+}
+
+pub fn rename(old: &str, new: &str) -> bool {
+    let old_key = hash(old);
+    let new_key = hash(new);
+    let mut state = STATE.lock();
+    if state
+        .entries
+        .iter()
+        .flatten()
+        .any(|metadata| metadata.path_hash == new_key)
+    {
+        return false;
+    }
+    let Some(metadata) = state
+        .entries
+        .iter_mut()
+        .flatten()
+        .find(|metadata| metadata.path_hash == old_key)
+    else {
+        return false;
+    };
+    metadata.path_hash = new_key;
+    true
+}
+
 pub fn metadata(path: &str) -> Option<Metadata> {
     STATE
         .lock()
