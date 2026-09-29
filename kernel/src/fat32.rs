@@ -341,7 +341,7 @@ fn restore_checksum(intent: SnapshotRestoreIntent) -> u64 {
 }
 
 pub fn write_snapshot_restore_intent(
-    device: &mut impl BlockDevice,
+    device: &mut (impl BlockDevice + ?Sized),
     volume: Volume,
     intent: SnapshotRestoreIntent,
 ) -> Result<(), Error> {
@@ -363,7 +363,7 @@ pub fn write_snapshot_restore_intent(
 }
 
 pub fn read_snapshot_restore_intent(
-    device: &mut impl BlockDevice,
+    device: &mut (impl BlockDevice + ?Sized),
     volume: Volume,
 ) -> Result<Option<SnapshotRestoreIntent>, Error> {
     let mut sector = [0u8; SECTOR_SIZE];
@@ -393,7 +393,7 @@ pub fn read_snapshot_restore_intent(
 }
 
 pub fn clear_snapshot_restore_intent(
-    device: &mut impl BlockDevice,
+    device: &mut (impl BlockDevice + ?Sized),
     volume: Volume,
 ) -> Result<(), Error> {
     let sector = [0u8; SECTOR_SIZE];
