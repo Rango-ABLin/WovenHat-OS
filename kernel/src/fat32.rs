@@ -42,6 +42,16 @@ const JOURNAL_SECTOR_COUNT: usize = 2;
 const RESTORE_MAGIC: &[u8; 4] = b"WSR1";
 #[cfg(feature = "stage12-4-test")]
 const RESTORE_VERSION: u16 = 1;
+#[cfg(feature = "stage12-4-test")]
+const SNAPSHOT_CATALOG_MAGIC: &[u8; 4] = b"WSC1";
+#[cfg(feature = "stage12-4-test")]
+const SNAPSHOT_CATALOG_VERSION: u16 = 1;
+#[cfg(feature = "stage12-4-test")]
+const SNAPSHOT_CATALOG_SECTORS: usize = 3;
+#[cfg(feature = "stage12-4-test")]
+const SNAPSHOT_CATALOG_SNAPSHOTS: usize = 8;
+#[cfg(feature = "stage12-4-test")]
+const SNAPSHOT_CATALOG_CHANGES: usize = 32;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Error {
@@ -326,6 +336,167 @@ pub struct SnapshotRestoreIntent {
     pub generation: u64,
     pub expected_root: u64,
     pub applied: u64,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+#[cfg(feature = "stage12-4-test")]
+pub struct SnapshotCatalogEntry {
+    pub id: u64,
+    pub generation: u64,
+    pub checksum: u64,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+#[cfg(feature = "stage12-4-test")]
+pub struct SnapshotCowEntry {
+    pub snapshot_id: u64,
+    pub path_hash: u64,
+    pub old_checksum: u64,
+    pub new_checksum: u64,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+#[cfg(feature = "stage12-4-test")]
+pub struct SnapshotCatalog {
+    pub snapshots: [Option<SnapshotCatalogEntry>; SNAPSHOT_CATALOG_SNAPSHOTS],
+    pub changes: [Option<SnapshotCowEntry>; SNAPSHOT_CATALOG_CHANGES],
+}
+
+#[cfg(feature = "stage12-4-test")]
+impl SnapshotCatalog {
+    pub const fn empty() -> Self {
+        Self {
+            snapshots: [None; SNAPSHOT_CATALOG_SNAPSHOTS],
+            changes: [None; SNAPSHOT_CATALOG_CHANGES],
+        }
+    }
+}
+
+#[cfg(feature = "stage12-4-test")]
+fn snapshot_reserved_start(volume: Volume) -> Result<u64, Error> {
+    let used = METADATA_SECTOR_COUNT
+        + JOURNAL_SECTOR_COUNT
+        + INODE_METADATA_SECTOR_COUNT
+        + 1
+        + SNAPSHOT_CATALOG_SECTORS;
+    let start = volume
+        .first_fat_sector
+        .checked_sub(used as u64)
+        .ok_or(Error::UnsupportedGeometry)?;
+    let end = start + SNAPSHOT_CATALOG_SECTORS as u64;
+    for protected in [volume.fs_info_sector, volume.backup_fs_info_sector]
+        .into_iter()
+        .flatten()
+        .map(u64::from)
+    {
+        if (start..end).contains(&protected) {
+            return Err(Error::UnsupportedGeometry);
+        }
+    }
+    Ok(start)
+}
+
+#[cfg(feature = "stage12-4-test")]
+fn catalog_checksum(bytes: &[u8]) -> u64 {
+    bytes.iter().fold(0xcbf2_9ce4_8422_2325, |hash, byte| {
+        (hash ^ u64::from(*byte)).wrapping_mul(0x1000_0000_01b3)
+    })
+}
+
+#[cfg(feature = "stage12-4-test")]
+pub fn write_snapshot_catalog(
+    device: &mut (impl BlockDevice + ?Sized),
+    volume: Volume,
+    catalog: SnapshotCatalog,
+) -> Result<(), Error> {
+    let start = snapshot_reserved_start(volume)?;
+    let mut image = [0u8; SECTOR_SIZE * SNAPSHOT_CATALOG_SECTORS];
+    image[..4].copy_from_slice(SNAPSHOT_CATALOG_MAGIC);
+    image[4..6].copy_from_slice(&SNAPSHOT_CATALOG_VERSION.to_le_bytes());
+    let mut offset = 16usize;
+    for entry in catalog.snapshots {
+        if let Some(entry) = entry {
+            image[offset] = 1;
+            image[offset + 8..offset + 16].copy_from_slice(&entry.id.to_le_bytes());
+            image[offset + 16..offset + 24].copy_from_slice(&entry.generation.to_le_bytes());
+            image[offset + 24..offset + 32].copy_from_slice(&entry.checksum.to_le_bytes());
+        }
+        offset += 32;
+    }
+    for entry in catalog.changes {
+        if let Some(entry) = entry {
+            image[offset] = 1;
+            image[offset + 8..offset + 16].copy_from_slice(&entry.snapshot_id.to_le_bytes());
+            image[offset + 16..offset + 24].copy_from_slice(&entry.path_hash.to_le_bytes());
+            image[offset + 24..offset + 32].copy_from_slice(&entry.old_checksum.to_le_bytes());
+            image[offset + 32..offset + 40].copy_from_slice(&entry.new_checksum.to_le_bytes());
+        }
+        offset += 40;
+    }
+    let checksum = catalog_checksum(&image[16..]);
+    image[8..16].copy_from_slice(&checksum.to_le_bytes());
+    for index in 0..SNAPSHOT_CATALOG_SECTORS {
+        let from = index * SECTOR_SIZE;
+        device
+            .write_sector(start + index as u64, &image[from..from + SECTOR_SIZE])
+            .map_err(Error::Block)?;
+    }
+    device.flush().map_err(Error::Block)
+}
+
+#[cfg(feature = "stage12-4-test")]
+pub fn read_snapshot_catalog(
+    device: &mut (impl BlockDevice + ?Sized),
+    volume: Volume,
+) -> Result<Option<SnapshotCatalog>, Error> {
+    let start = snapshot_reserved_start(volume)?;
+    let mut image = [0u8; SECTOR_SIZE * SNAPSHOT_CATALOG_SECTORS];
+    for index in 0..SNAPSHOT_CATALOG_SECTORS {
+        let from = index * SECTOR_SIZE;
+        device
+            .read_sector(start + index as u64, &mut image[from..from + SECTOR_SIZE])
+            .map_err(Error::Block)?;
+    }
+    if &image[..4] != SNAPSHOT_CATALOG_MAGIC {
+        return Ok(None);
+    }
+    if read_u16(&image, 4) != SNAPSHOT_CATALOG_VERSION
+        || read_u64(&image, 8) != catalog_checksum(&image[16..])
+    {
+        return Err(Error::CorruptDirectory);
+    }
+    let mut catalog = SnapshotCatalog::empty();
+    let mut offset = 16usize;
+    for slot in &mut catalog.snapshots {
+        if image[offset] != 0 {
+            let entry = SnapshotCatalogEntry {
+                id: read_u64(&image, offset + 8),
+                generation: read_u64(&image, offset + 16),
+                checksum: read_u64(&image, offset + 24),
+            };
+            if entry.id == 0 || entry.generation == 0 || entry.checksum == 0 {
+                return Err(Error::CorruptDirectory);
+            }
+            *slot = Some(entry);
+        }
+        offset += 32;
+    }
+    for slot in &mut catalog.changes {
+        if image[offset] != 0 {
+            let entry = SnapshotCowEntry {
+                snapshot_id: read_u64(&image, offset + 8),
+                path_hash: read_u64(&image, offset + 16),
+                old_checksum: read_u64(&image, offset + 24),
+                new_checksum: read_u64(&image, offset + 32),
+            };
+            if entry.snapshot_id == 0 {
+                return Err(Error::CorruptDirectory);
+            }
+            *slot = Some(entry);
+        }
+        offset += 40;
+    }
+    Ok(Some(catalog))
 }
 
 #[cfg(feature = "stage12-4-test")]
