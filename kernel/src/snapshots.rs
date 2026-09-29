@@ -25,6 +25,7 @@ pub enum RestoreError {
     ChecksumMismatch,
     ChangeLogFull,
     RestoreBusy,
+    PersistenceFailed,
 }
 
 /// Rank 10 protects short snapshot metadata operations only. Filesystem I/O
@@ -144,6 +145,13 @@ pub fn prepare_restore(id: u64, durable_checksum: u64) -> Result<RestoreIntent, 
         expected_root: durable_checksum,
         applied: 0,
     };
+    drop(pending);
+    crate::storage::persist_snapshot_restore_intent(intent)
+        .map_err(|_| RestoreError::PersistenceFailed)?;
+    let mut pending = RESTORE_INTENT.lock();
+    if pending.is_some() {
+        return Err(RestoreError::RestoreBusy);
+    }
     *pending = Some(intent);
     Ok(intent)
 }
@@ -157,8 +165,26 @@ pub fn mark_restore_applied(id: u64) -> Result<RestoreIntent, RestoreError> {
         return Err(RestoreError::RestoreBusy);
     }
     intent.applied = intent.applied.saturating_add(1);
+    drop(pending);
+    crate::storage::persist_snapshot_restore_intent(intent)
+        .map_err(|_| RestoreError::PersistenceFailed)?;
+    let mut pending = RESTORE_INTENT.lock();
+    let Some(current) = *pending else {
+        return Err(RestoreError::MissingSnapshot);
+    };
+    if current.snapshot_id != id {
+        return Err(RestoreError::RestoreBusy);
+    }
     *pending = Some(intent);
     Ok(intent)
+}
+
+pub fn recover_restore() -> Result<Option<RestoreIntent>, RestoreError> {
+    let durable = crate::storage::load_snapshot_restore_intent()
+        .map_err(|_| RestoreError::PersistenceFailed)?;
+    let mut pending = RESTORE_INTENT.lock();
+    *pending = durable;
+    Ok(durable)
 }
 
 pub fn pending_restore() -> Option<RestoreIntent> {
@@ -175,6 +201,16 @@ pub fn commit_restore(id: u64, restored_root: u64) -> Result<u64, RestoreError> 
     }
     if intent.expected_root != restored_root {
         return Err(RestoreError::ChecksumMismatch);
+    }
+    drop(pending);
+    crate::storage::clear_snapshot_restore_intent()
+        .map_err(|_| RestoreError::PersistenceFailed)?;
+    let mut pending = RESTORE_INTENT.lock();
+    let Some(current) = *pending else {
+        return Err(RestoreError::MissingSnapshot);
+    };
+    if current.snapshot_id != id || current.expected_root != restored_root {
+        return Err(RestoreError::RestoreBusy);
     }
     *pending = None;
     Ok(intent.generation)
