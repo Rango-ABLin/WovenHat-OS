@@ -865,8 +865,37 @@ fn aml_skip_data_ref_object(bytes: &[u8], offset: usize) -> Result<usize, Error>
     }
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct AmlPath {
+    segments: [[u8; 4]; 16],
+    count: usize,
+}
+
+fn aml_resolve_name(base: AmlPath, name: AmlName) -> Result<AmlPath, Error> {
+    let mut path = if name.rooted { AmlPath::default() } else { base };
+    let parents = usize::from(name.parents);
+    if parents > path.count {
+        return Err(Error::InvalidSignature);
+    }
+    path.count -= parents;
+    if path.count + name.segment_count > path.segments.len() {
+        return Err(Error::InvalidLength);
+    }
+    for segment in name.segments.into_iter().take(name.segment_count) {
+        path.segments[path.count] = segment;
+        path.count += 1;
+    }
+    Ok(path)
+}
+
 fn aml_namespace_walk(bytes: &[u8]) -> Result<usize, Error> {
-    fn walk(bytes: &[u8], mut offset: usize, end: usize, objects: &mut usize) -> Result<(), Error> {
+    fn walk(
+        bytes: &[u8],
+        mut offset: usize,
+        end: usize,
+        scope: AmlPath,
+        objects: &mut usize,
+    ) -> Result<(), Error> {
         while offset < end {
             match bytes.get(offset).copied().ok_or(Error::InvalidLength)? {
                 0x10 => {
@@ -874,9 +903,10 @@ fn aml_namespace_walk(bytes: &[u8]) -> Result<usize, Error> {
                     if package.end_offset > end {
                         return Err(Error::InvalidLength);
                     }
-                    let body = aml_skip_name_string(bytes, package.body_offset)?;
+                    let (name, body) = aml_name_string(bytes, package.body_offset)?;
+                    let child = aml_resolve_name(scope, name)?;
                     *objects = objects.checked_add(1).ok_or(Error::AddressOverflow)?;
-                    walk(bytes, body, package.end_offset, objects)?;
+                    walk(bytes, body, package.end_offset, child, objects)?;
                     offset = package.end_offset;
                 }
                 0x5b if bytes.get(offset + 1) == Some(&0x82) => {
@@ -884,16 +914,15 @@ fn aml_namespace_walk(bytes: &[u8]) -> Result<usize, Error> {
                     if package.end_offset > end {
                         return Err(Error::InvalidLength);
                     }
-                    let body = aml_skip_name_string(bytes, package.body_offset)?;
+                    let (name, body) = aml_name_string(bytes, package.body_offset)?;
+                    let child = aml_resolve_name(scope, name)?;
                     *objects = objects.checked_add(1).ok_or(Error::AddressOverflow)?;
-                    walk(bytes, body, package.end_offset, objects)?;
+                    walk(bytes, body, package.end_offset, child, objects)?;
                     offset = package.end_offset;
                 }
                 0x08 => {
-                    let value = aml_skip_name_string(bytes, offset + 1)?;
-                    // Advance only across DataRefObject encodings whose bounds
-                    // are explicit. Unsupported expressions stop this package
-                    // fail-closed rather than guessing an AML instruction size.
+                    let (name, value) = aml_name_string(bytes, offset + 1)?;
+                    let _path = aml_resolve_name(scope, name)?;
                     match aml_skip_data_ref_object(bytes, value) {
                         Ok(next) if next <= end => {
                             *objects = objects.checked_add(1).ok_or(Error::AddressOverflow)?;
@@ -904,18 +933,13 @@ fn aml_namespace_walk(bytes: &[u8]) -> Result<usize, Error> {
                         Err(error) => return Err(error),
                     }
                 }
-                _ => {
-                    // Unknown AML terms cannot be safely skipped without their
-                    // opcode grammar. Stop this package rather than guessing a
-                    // length and desynchronizing namespace traversal.
-                    break;
-                }
+                _ => break,
             }
         }
         Ok(())
     }
     let mut objects = 0_usize;
-    walk(bytes, 0, bytes.len(), &mut objects)?;
+    walk(bytes, 0, bytes.len(), AmlPath::default(), &mut objects)?;
     Ok(objects)
 }
 
