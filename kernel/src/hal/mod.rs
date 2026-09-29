@@ -58,7 +58,15 @@ pub fn init(acpi: Option<&acpi::Summary>) -> HardwareInfo {
             }
         }
         if valid && summary.pci_root_resource_count != 0 {
-            let _ = pci::configure_host_apertures(apertures);
+            if let Err(error) = pci::configure_host_apertures(apertures) {
+                crate::serial::write_line(format_args!(
+                    "[PCI] host apertures rejected: {error:?}"
+                ));
+            }
+        } else if summary.pci_root_resource_count != 0 {
+            crate::serial::write_line(format_args!(
+                "[PCI] host apertures rejected: invalid ACPI _CRS resource set"
+            ));
         }
     } else {
         pci::configure(&[]);
