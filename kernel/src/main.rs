@@ -2720,6 +2720,11 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
             serial::write_line(format_args!("[S12.4] snapshots: FAILED"));
             qemu_test_exit_failure();
         }
+        if !fat32::snapshot_restore_recovery_self_test() {
+            serial::write_line(format_args!("[S12.4] durable rollback recovery: FAILED"));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!("[S12.4] durable rollback recovery: PASSED"));
         serial::write_line(format_args!("[S12.4] snapshots: PASSED"));
         qemu_test_exit_success();
     }
