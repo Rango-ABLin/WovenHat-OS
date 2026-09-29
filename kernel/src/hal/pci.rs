@@ -1239,6 +1239,7 @@ pub enum RebalanceError {
     RollbackFailed,
 }
 
+#[expect(dead_code, reason = "Stage 13.2 firmware BAR rebalance is an explicit recovery/admission path, not unconditional normal bind")]
 pub fn rebalance_bars_from_firmware(
     address: Address,
     header_type: u8,
