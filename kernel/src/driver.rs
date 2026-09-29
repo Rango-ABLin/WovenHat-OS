@@ -158,10 +158,20 @@ pub fn bind_pci_with_bars(
     bind_pci_claim(name, address, owner)?;
     let binding = {
         let table = TABLE.lock();
-        table.iter().flatten()
+        match table.iter().flatten()
             .find(|entry| entry.name == name && entry.state == State::Bound)
             .and_then(|entry| entry.pci)
-            .ok_or(crate::hal::pci::topology::Error::InvalidHandle)?
+        {
+            Some(binding) => binding,
+            None => {
+                drop(table);
+                // The outer claim has already been published. Never return
+                // without attempting ordered rollback, otherwise an admission
+                // bookkeeping failure can strand function ownership.
+                let _ = unbind_pci_resources(name);
+                return Err(crate::hal::pci::topology::Error::InvalidHandle);
+            }
+        }
     };
 
     for bar_index in 0..PCI_BAR_COUNT {
