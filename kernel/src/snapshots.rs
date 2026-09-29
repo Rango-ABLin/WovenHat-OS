@@ -135,6 +135,17 @@ pub fn capture_wovenfs(generation: u64) -> Option<u64> {
     create(generation, crate::wovenfs::root_checksum())
 }
 
+pub fn live_snapshot_ids() -> ([u64; MAX], usize) {
+    let table = TABLE.lock();
+    let mut ids = [0u64; MAX];
+    let mut count = 0usize;
+    for snapshot in table.iter().flatten() {
+        ids[count] = snapshot.id;
+        count += 1;
+    }
+    (ids, count)
+}
+
 #[cfg(feature = "stage12-4-test")]
 pub fn get(id: u64) -> Option<Snapshot> {
     TABLE.lock().iter().flatten().find(|s| s.id == id).copied()

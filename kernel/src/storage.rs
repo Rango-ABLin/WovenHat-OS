@@ -311,6 +311,10 @@ fn import_directory(
             return Ok(());
         };
 
+        if depth == 0 && vfs_prefix == "/mnt" && name_str.eq_ignore_ascii_case("WHSNAP") {
+            return Ok(());
+        }
+
         let is_dir = entry.attributes & DIRECTORY_ATTRIBUTE != 0;
         if is_dir {
             match vfs::mkdir(path) {
@@ -1105,6 +1109,137 @@ fn with_mounted_volume<T>(
     }
 }
 
+const SNAPSHOT_PREIMAGE_MAGIC: &[u8; 4] = b"WHP1";
+const SNAPSHOT_PREIMAGE_VERSION: u16 = 1;
+const SNAPSHOT_PREIMAGE_HEADER: usize = 32;
+
+fn read_durable_path_on_device(
+    device: &mut impl crate::block::BlockDevice,
+    relative: &str,
+    buffer: &mut [u8],
+) -> Result<usize, PersistError> {
+    fn read_in_volume(
+        device: &mut impl crate::block::BlockDevice,
+        volume: fat32::Volume,
+        relative: &str,
+        buffer: &mut [u8],
+    ) -> Result<usize, PersistError> {
+        let entry = fat32::resolve_path(device, volume, relative).map_err(map_persist_err)?;
+        if entry.size as usize > buffer.len() {
+            return Err(PersistError::TooLarge);
+        }
+        fat32::read_file(device, volume, entry, buffer).map_err(map_persist_err)
+    }
+
+    match fat32::mount(device) {
+        Ok(volume) => return read_in_volume(device, volume, relative, buffer),
+        Err(fat32::Error::InvalidBootSector | fat32::Error::UnsupportedGeometry) => {}
+        Err(_) => return Err(PersistError::Failed),
+    }
+    if let Ok(Some(part)) = partition::find_fat32(device) {
+        let mut view =
+            partition::PartitionDevice::new(device, part).map_err(|_| PersistError::Failed)?;
+        let volume = fat32::mount(&mut view).map_err(map_persist_err)?;
+        return read_in_volume(&mut view, volume, relative, buffer);
+    }
+    match gpt::find_fat_partition(device) {
+        Ok(Some(part)) => {
+            let mut view =
+                partition::PartitionDevice::new(device, part).map_err(|_| PersistError::Failed)?;
+            let volume = fat32::mount(&mut view).map_err(map_persist_err)?;
+            read_in_volume(&mut view, volume, relative, buffer)
+        }
+        _ => Err(PersistError::Failed),
+    }
+}
+
+fn write_snapshot_preimage_on_device(
+    device: &mut impl crate::block::BlockDevice,
+    snapshot_id: u64,
+    path: &str,
+    checksum: u64,
+    data: &[u8],
+) -> Result<(), PersistError> {
+    if path.len() > u16::MAX as usize || data.len() > u32::MAX as usize {
+        return Err(PersistError::TooLarge);
+    }
+    let path_hash = crate::wovenfs::path_hash(path);
+    let mut image = alloc::vec![0u8; SNAPSHOT_PREIMAGE_HEADER + path.len() + data.len()];
+    image[..4].copy_from_slice(SNAPSHOT_PREIMAGE_MAGIC);
+    image[4..6].copy_from_slice(&SNAPSHOT_PREIMAGE_VERSION.to_le_bytes());
+    image[6..8].copy_from_slice(&(path.len() as u16).to_le_bytes());
+    image[8..16].copy_from_slice(&snapshot_id.to_le_bytes());
+    image[16..24].copy_from_slice(&checksum.to_le_bytes());
+    image[24..28].copy_from_slice(&(data.len() as u32).to_le_bytes());
+    image[SNAPSHOT_PREIMAGE_HEADER..SNAPSHOT_PREIMAGE_HEADER + path.len()]
+        .copy_from_slice(path.as_bytes());
+    image[SNAPSHOT_PREIMAGE_HEADER + path.len()..].copy_from_slice(data);
+    let internal = alloc::format!("WHSNAP/{snapshot_id:016X}-{path_hash:016X}.COW");
+
+    fn write_in_volume(
+        device: &mut impl crate::block::BlockDevice,
+        volume: fat32::Volume,
+        internal: &str,
+        image: &[u8],
+    ) -> Result<(), PersistError> {
+        match fat32::create_path_file(device, volume, internal, image) {
+            Ok(()) | Err(fat32::Error::AlreadyExists) => Ok(()),
+            Err(error) => Err(map_persist_err(error)),
+        }
+    }
+
+    match fat32::mount(device) {
+        Ok(volume) => write_in_volume(device, volume, &internal, &image)?,
+        Err(fat32::Error::InvalidBootSector | fat32::Error::UnsupportedGeometry) => {
+            if let Ok(Some(part)) = partition::find_fat32(device) {
+                let mut view = partition::PartitionDevice::new(device, part)
+                    .map_err(|_| PersistError::Failed)?;
+                let volume = fat32::mount(&mut view).map_err(map_persist_err)?;
+                write_in_volume(&mut view, volume, &internal, &image)?;
+            } else if let Ok(Some(part)) = gpt::find_fat_partition(device) {
+                let mut view = partition::PartitionDevice::new(device, part)
+                    .map_err(|_| PersistError::Failed)?;
+                let volume = fat32::mount(&mut view).map_err(map_persist_err)?;
+                write_in_volume(&mut view, volume, &internal, &image)?;
+            } else {
+                return Err(PersistError::Failed);
+            }
+        }
+        Err(_) => return Err(PersistError::Failed),
+    }
+    device.flush().map_err(|_| PersistError::Failed)
+}
+
+fn retain_snapshot_preimages_on_device(
+    device: &mut impl crate::block::BlockDevice,
+    path: &str,
+    relative: &str,
+    old_checksum: u64,
+) -> Result<(), PersistError> {
+    if old_checksum == 0 {
+        return Ok(());
+    }
+    let (ids, count) = crate::snapshots::live_snapshot_ids();
+    if count == 0 {
+        return Ok(());
+    }
+    let mut bytes = alloc::vec![0u8; vfs::NODE_CAPACITY];
+    let length = read_durable_path_on_device(device, relative, &mut bytes)?;
+    if checksum_bytes(&bytes[..length]) != old_checksum {
+        return Err(PersistError::Failed);
+    }
+    for snapshot_id in ids.into_iter().take(count) {
+        write_snapshot_preimage_on_device(
+            device,
+            snapshot_id,
+            path,
+            old_checksum,
+            &bytes[..length],
+        )?;
+    }
+    Ok(())
+}
+
 /// Persist a VFS file under `/mnt/` to the live ATA FAT32 volume.
 ///
 /// Multi-component paths are supported. Missing FAT32 directories are created
@@ -1148,6 +1283,13 @@ pub fn persist_path(path: &str) -> Result<(), PersistError> {
         (h ^ u64::from(*b)).wrapping_mul(0x100000001b3)
     });
     if let Some(previous) = crate::wovenfs::metadata(path) {
+        {
+            let mut disk = block_io::primary_ata();
+            if disk.is_read_only() {
+                return Err(PersistError::ReadOnly);
+            }
+            retain_snapshot_preimages_on_device(&mut disk, path, relative, previous.checksum)?;
+        }
         crate::snapshots::record_live_change(
             crate::wovenfs::path_hash(path),
             previous.checksum,
@@ -1521,6 +1663,8 @@ pub fn delete_path(path: &str) -> Result<(), MutationError> {
     FILE_PAGES.lock().invalidate();
     let inode = inode_on_device(&mut disk, relative).ok().flatten();
     if let Some(previous) = crate::wovenfs::metadata(path) {
+        retain_snapshot_preimages_on_device(&mut disk, path, relative, previous.checksum)
+            .map_err(|_| MutationError::Failed)?;
         crate::snapshots::record_live_change(
             crate::wovenfs::path_hash(path),
             previous.checksum,
@@ -1680,6 +1824,8 @@ pub fn rename_path(old: &str, new: &str) -> Result<(), MutationError> {
     }
     FILE_PAGES.lock().invalidate();
     if let Some(previous) = crate::wovenfs::metadata(old) {
+        retain_snapshot_preimages_on_device(&mut disk, old, old_relative, previous.checksum)
+            .map_err(|_| MutationError::Failed)?;
         crate::snapshots::record_live_changes(&[
             (crate::wovenfs::path_hash(old), previous.checksum, 0),
             (crate::wovenfs::path_hash(new), 0, previous.checksum),
