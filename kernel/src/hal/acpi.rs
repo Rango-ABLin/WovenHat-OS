@@ -1355,6 +1355,7 @@ pub fn self_test() -> bool {
     template[0] = 0x87;
     template[1..3].copy_from_slice(&23_u16.to_le_bytes());
     template[3] = 0;
+    template[4] = 0x0c;
     template[5] = 0x06;
     template[10..14].copy_from_slice(&0x8000_0000_u32.to_le_bytes());
     template[14..18].copy_from_slice(&0x8fff_ffff_u32.to_le_bytes());
@@ -1362,6 +1363,7 @@ pub fn self_test() -> bool {
     template[26] = 0x88;
     template[27..29].copy_from_slice(&13_u16.to_le_bytes());
     template[29] = 1;
+    template[30] = 0x0c;
     template[34..36].copy_from_slice(&0x1000_u16.to_le_bytes());
     template[36..38].copy_from_slice(&0x1fff_u16.to_le_bytes());
     template[40..42].copy_from_slice(&0x1000_u16.to_le_bytes());
@@ -1382,6 +1384,7 @@ pub fn self_test() -> bool {
     dword_memory[0] = 0x87;
     dword_memory[1..3].copy_from_slice(&23_u16.to_le_bytes());
     dword_memory[3] = 0;
+    dword_memory[4] = 0x0c;
     dword_memory[5] = 0x06;
     dword_memory[10..14].copy_from_slice(&0x8000_0000_u32.to_le_bytes());
     dword_memory[14..18].copy_from_slice(&0x8fff_ffff_u32.to_le_bytes());
@@ -1399,6 +1402,7 @@ pub fn self_test() -> bool {
     word_io[0] = 0x88;
     word_io[1..3].copy_from_slice(&13_u16.to_le_bytes());
     word_io[3] = 1;
+    word_io[4] = 0x0c;
     word_io[8..10].copy_from_slice(&0x1000_u16.to_le_bytes());
     word_io[10..12].copy_from_slice(&0x1fff_u16.to_le_bytes());
     word_io[14..16].copy_from_slice(&0x1000_u16.to_le_bytes());
