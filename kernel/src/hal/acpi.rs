@@ -867,6 +867,35 @@ struct AmlPath {
     count: usize,
 }
 
+const MAX_AML_NAMESPACE_RECORDS: usize = 128;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum AmlNamespaceKind {
+    Scope,
+    Device,
+    Name,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct AmlNamespaceRecord {
+    path: AmlPath,
+    kind: AmlNamespaceKind,
+}
+
+fn aml_record(
+    records: &mut [Option<AmlNamespaceRecord>; MAX_AML_NAMESPACE_RECORDS],
+    record_count: &mut usize,
+    path: AmlPath,
+    kind: AmlNamespaceKind,
+) -> Result<(), Error> {
+    if *record_count >= records.len() {
+        return Err(Error::InvalidLength);
+    }
+    records[*record_count] = Some(AmlNamespaceRecord { path, kind });
+    *record_count += 1;
+    Ok(())
+}
+
 fn aml_resolve_name(base: AmlPath, name: AmlName) -> Result<AmlPath, Error> {
     let mut path = if name.rooted { AmlPath::default() } else { base };
     let parents = usize::from(name.parents);
@@ -891,6 +920,8 @@ fn aml_namespace_walk(bytes: &[u8]) -> Result<usize, Error> {
         end: usize,
         scope: AmlPath,
         objects: &mut usize,
+        records: &mut [Option<AmlNamespaceRecord>; MAX_AML_NAMESPACE_RECORDS],
+        record_count: &mut usize,
     ) -> Result<(), Error> {
         while offset < end {
             match bytes.get(offset).copied().ok_or(Error::InvalidLength)? {
@@ -902,7 +933,8 @@ fn aml_namespace_walk(bytes: &[u8]) -> Result<usize, Error> {
                     let (name, body) = aml_name_string(bytes, package.body_offset)?;
                     let child = aml_resolve_name(scope, name)?;
                     *objects = objects.checked_add(1).ok_or(Error::AddressOverflow)?;
-                    walk(bytes, body, package.end_offset, child, objects)?;
+                    aml_record(records, record_count, child, AmlNamespaceKind::Scope)?;
+                    walk(bytes, body, package.end_offset, child, objects, records, record_count)?;
                     offset = package.end_offset;
                 }
                 0x5b if bytes.get(offset + 1) == Some(&0x82) => {
@@ -913,15 +945,17 @@ fn aml_namespace_walk(bytes: &[u8]) -> Result<usize, Error> {
                     let (name, body) = aml_name_string(bytes, package.body_offset)?;
                     let child = aml_resolve_name(scope, name)?;
                     *objects = objects.checked_add(1).ok_or(Error::AddressOverflow)?;
-                    walk(bytes, body, package.end_offset, child, objects)?;
+                    aml_record(records, record_count, child, AmlNamespaceKind::Device)?;
+                    walk(bytes, body, package.end_offset, child, objects, records, record_count)?;
                     offset = package.end_offset;
                 }
                 0x08 => {
                     let (name, value) = aml_name_string(bytes, offset + 1)?;
-                    let _path = aml_resolve_name(scope, name)?;
+                    let path = aml_resolve_name(scope, name)?;
                     match aml_skip_data_ref_object(bytes, value) {
                         Ok(next) if next <= end => {
                             *objects = objects.checked_add(1).ok_or(Error::AddressOverflow)?;
+                            aml_record(records, record_count, path, AmlNamespaceKind::Name)?;
                             offset = next;
                         }
                         Ok(_) => return Err(Error::InvalidLength),
@@ -935,7 +969,18 @@ fn aml_namespace_walk(bytes: &[u8]) -> Result<usize, Error> {
         Ok(())
     }
     let mut objects = 0_usize;
-    walk(bytes, 0, bytes.len(), AmlPath::default(), &mut objects)?;
+    let mut records = [None; MAX_AML_NAMESPACE_RECORDS];
+    let mut record_count = 0_usize;
+    walk(
+        bytes,
+        0,
+        bytes.len(),
+        AmlPath::default(),
+        &mut objects,
+        &mut records,
+        &mut record_count,
+    )?;
+    debug_assert_eq!(objects, record_count);
     Ok(objects)
 }
 
