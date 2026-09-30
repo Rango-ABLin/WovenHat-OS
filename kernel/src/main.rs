@@ -944,6 +944,15 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         serial::write_line(format_args!(
             "[S13.10H] Bluetooth link-key lifecycle: PASSED"
         ));
+        if !bluetooth_hci::pairing_interaction_self_test() {
+            serial::write_line(format_args!(
+                "[S13.10H] Bluetooth pairing interaction contract: FAILED"
+            ));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!(
+            "[S13.10H] Bluetooth pairing interaction contract: PASSED"
+        ));
     }
 
     if heap::init().is_err() {
