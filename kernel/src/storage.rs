@@ -1109,8 +1109,27 @@ fn with_mounted_volume<T>(
 }
 
 const SNAPSHOT_PREIMAGE_MAGIC: &[u8; 4] = b"WHP1";
-const SNAPSHOT_PREIMAGE_VERSION: u16 = 2;
-const SNAPSHOT_PREIMAGE_HEADER: usize = 32;
+const SNAPSHOT_PREIMAGE_VERSION: u16 = 3;
+const SNAPSHOT_PREIMAGE_HEADER: usize = 48;
+const SNAPSHOT_PREIMAGE_ENVELOPE_OFFSET: usize = 40;
+
+fn snapshot_preimage_envelope_checksum(image: &[u8]) -> Result<u64, PersistError> {
+    if image.len() < SNAPSHOT_PREIMAGE_HEADER {
+        return Err(PersistError::Failed);
+    }
+    let mut hash = 0xcbf2_9ce4_8422_2325u64;
+    for (index, byte) in image.iter().enumerate() {
+        let value = if (SNAPSHOT_PREIMAGE_ENVELOPE_OFFSET..SNAPSHOT_PREIMAGE_ENVELOPE_OFFSET + 8)
+            .contains(&index)
+        {
+            0
+        } else {
+            *byte
+        };
+        hash = (hash ^ u64::from(value)).wrapping_mul(0x1000_0000_01b3);
+    }
+    Ok(hash)
+}
 
 fn read_durable_path_on_device(
     device: &mut impl crate::block::BlockDevice,
@@ -1179,9 +1198,17 @@ fn read_snapshot_preimage_on_device(
     let checksum = u64::from_le_bytes(image[16..24].try_into().map_err(|_| PersistError::Failed)?);
     let data_len = u32::from_le_bytes(image[24..28].try_into().map_err(|_| PersistError::Failed)?) as usize;
     let mode = u32::from_le_bytes(image[28..32].try_into().map_err(|_| PersistError::Failed)?);
+    let stored_path_hash = u64::from_le_bytes(image[32..40].try_into().map_err(|_| PersistError::Failed)?);
+    let stored_envelope = u64::from_le_bytes(image[40..48].try_into().map_err(|_| PersistError::Failed)?);
     let data_start = SNAPSHOT_PREIMAGE_HEADER.checked_add(path_len).ok_or(PersistError::Failed)?;
     let end = data_start.checked_add(data_len).ok_or(PersistError::Failed)?;
-    if stored_snapshot != snapshot_id || path_len == 0 || end != image.len() || data_len > vfs::NODE_CAPACITY {
+    if stored_snapshot != snapshot_id
+        || stored_path_hash != path_hash
+        || path_len == 0
+        || end != image.len()
+        || data_len > vfs::NODE_CAPACITY
+        || snapshot_preimage_envelope_checksum(&image)? != stored_envelope
+    {
         return Err(PersistError::Failed);
     }
     let path = core::str::from_utf8(&image[SNAPSHOT_PREIMAGE_HEADER..data_start])
@@ -1309,9 +1336,12 @@ fn write_snapshot_preimage_on_device(
     image[16..24].copy_from_slice(&checksum.to_le_bytes());
     image[24..28].copy_from_slice(&(data.len() as u32).to_le_bytes());
     image[28..32].copy_from_slice(&mode.to_le_bytes());
+    image[32..40].copy_from_slice(&path_hash.to_le_bytes());
     image[SNAPSHOT_PREIMAGE_HEADER..SNAPSHOT_PREIMAGE_HEADER + path.len()]
         .copy_from_slice(path.as_bytes());
     image[SNAPSHOT_PREIMAGE_HEADER + path.len()..].copy_from_slice(data);
+    let envelope = snapshot_preimage_envelope_checksum(&image)?;
+    image[40..48].copy_from_slice(&envelope.to_le_bytes());
     let internal = alloc::format!("WHSNAP/{snapshot_id:016X}-{path_hash:016X}.COW");
 
     fn write_in_volume(
