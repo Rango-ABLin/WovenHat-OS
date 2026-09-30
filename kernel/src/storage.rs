@@ -1110,7 +1110,7 @@ fn with_mounted_volume<T>(
 }
 
 const SNAPSHOT_PREIMAGE_MAGIC: &[u8; 4] = b"WHP1";
-const SNAPSHOT_PREIMAGE_VERSION: u16 = 1;
+const SNAPSHOT_PREIMAGE_VERSION: u16 = 2;
 const SNAPSHOT_PREIMAGE_HEADER: usize = 32;
 
 fn read_durable_path_on_device(
@@ -1158,6 +1158,7 @@ fn write_snapshot_preimage_on_device(
     snapshot_id: u64,
     path: &str,
     checksum: u64,
+    mode: u32,
     data: &[u8],
 ) -> Result<(), PersistError> {
     if path.len() > u16::MAX as usize || data.len() > u32::MAX as usize {
@@ -1171,6 +1172,7 @@ fn write_snapshot_preimage_on_device(
     image[8..16].copy_from_slice(&snapshot_id.to_le_bytes());
     image[16..24].copy_from_slice(&checksum.to_le_bytes());
     image[24..28].copy_from_slice(&(data.len() as u32).to_le_bytes());
+    image[28..32].copy_from_slice(&mode.to_le_bytes());
     image[SNAPSHOT_PREIMAGE_HEADER..SNAPSHOT_PREIMAGE_HEADER + path.len()]
         .copy_from_slice(path.as_bytes());
     image[SNAPSHOT_PREIMAGE_HEADER + path.len()..].copy_from_slice(data);
@@ -1248,8 +1250,20 @@ fn retain_snapshot_preimages_on_device(
             snapshot_id,
             path,
             old_checksum,
+            crate::wovenfs::metadata(path).map_or(0, |metadata| metadata.mode),
             &bytes[..length],
         )?;
+    }
+    Ok(())
+}
+
+fn retain_snapshot_creation_markers_on_device(
+    device: &mut impl crate::block::BlockDevice,
+    path: &str,
+) -> Result<(), PersistError> {
+    let (ids, count) = crate::snapshots::live_snapshot_ids();
+    for snapshot_id in ids.into_iter().take(count) {
+        write_snapshot_preimage_on_device(device, snapshot_id, path, 0, 0, &[])?;
     }
     Ok(())
 }
@@ -1311,6 +1325,13 @@ pub fn persist_path(path: &str) -> Result<(), PersistError> {
         )
         .map_err(|_| PersistError::Failed)?;
     } else {
+        {
+            let mut disk = block_io::primary_ata();
+            if disk.is_read_only() {
+                return Err(PersistError::Failed);
+            }
+            retain_snapshot_creation_markers_on_device(&mut disk, path)?;
+        }
         crate::snapshots::record_live_change(
             crate::wovenfs::path_hash(path),
             0,
