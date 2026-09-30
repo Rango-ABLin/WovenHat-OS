@@ -1020,7 +1020,6 @@ pub fn load_snapshot_catalog() -> Result<Option<fat32::SnapshotCatalog>, Persist
     .map_err(map_persist_err)
 }
 
-#[cfg(feature = "stage12-4-test")]
 pub fn persist_snapshot_restore_intent(
     intent: crate::snapshots::RestoreIntent,
 ) -> Result<(), PersistError> {
@@ -1069,7 +1068,6 @@ pub fn load_snapshot_restore_intent(
         .transpose()
 }
 
-#[cfg(feature = "stage12-4-test")]
 pub fn clear_snapshot_restore_intent() -> Result<(), PersistError> {
     if !mnt_mounted() {
         return Err(unavailable_persist_error());
@@ -1221,6 +1219,28 @@ pub fn load_snapshot_preimage(
     }
     let mut disk = block_io::primary_ata();
     read_snapshot_preimage_on_device(&mut disk, snapshot_id, path_hash)
+}
+
+pub fn replay_snapshot_preimage(
+    preimage: &SnapshotPreimage,
+) -> Result<(), PersistError> {
+    if !mnt_mounted() || !block_io::primary_ata_present() {
+        return Err(PersistError::NoDevice);
+    }
+    let relative = preimage.path.strip_prefix("/mnt/").ok_or(PersistError::BadName)?;
+    let mut disk = block_io::primary_ata();
+    with_mounted_volume(&mut disk, |device, volume| {
+        if preimage.checksum == 0 {
+            match fat32::delete_path(device, volume, relative) {
+                Ok(()) | Err(fat32::Error::NotFound) => Ok(()),
+                Err(error) => Err(error),
+            }
+        } else {
+            fat32::create_path_file(device, volume, relative, &preimage.data)
+        }
+    })
+    .map_err(map_persist_err)?;
+    disk.flush().map_err(|_| PersistError::Failed)
 }
 
 fn write_snapshot_preimage_on_device(
