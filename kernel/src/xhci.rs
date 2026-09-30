@@ -1099,6 +1099,25 @@ pub fn bluetooth_transport_self_test() -> bool {
         && bluetooth_acl_in_plan(bt).endpoint == 0x82
         && bluetooth_acl_out_plan(bt, 32).map(|plan| plan.endpoint) == Some(0x02)
         && bluetooth_acl_out_plan(bt, 65).is_none()
+        && live_bluetooth_command_contract_self_test(bt)
+}
+
+fn live_bluetooth_command_contract_self_test(bluetooth: BluetoothUsbInterface) -> bool {
+    let command = [0x03_u8, 0x0c, 0x00];
+    let Some(plan) = bluetooth_command_plan(bluetooth, command.len()) else {
+        return false;
+    };
+    plan.kind == BluetoothTransferKind::Command
+        && plan.endpoint == bluetooth.interface
+        && plan.length == 3
+        && bluetooth_command_setup(bluetooth.interface, plan.length)
+            == setup_packet(
+                USB_REQUEST_TYPE_BLUETOOTH_COMMAND,
+                0,
+                0,
+                u16::from(bluetooth.interface),
+                3,
+            )
 }
 
 fn hid_kind(protocol: u8) -> HidKind {
