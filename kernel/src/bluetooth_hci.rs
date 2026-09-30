@@ -1013,6 +1013,192 @@ pub fn link_lifecycle_self_test() -> bool {
         && LinkState::disconnect_command(0x1000, 0x13, &mut bytes).is_err()
 }
 
+
+pub const EVT_AUTHENTICATION_COMPLETE: u8 = 0x06;
+pub const EVT_ENCRYPTION_CHANGE: u8 = 0x08;
+pub const OPCODE_AUTHENTICATION_REQUESTED: u16 = 0x0411;
+pub const OPCODE_SET_CONNECTION_ENCRYPTION: u16 = 0x0413;
+pub const MAX_SECURE_LINKS: usize = MAX_ACL_LINKS;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LinkSecurityPhase {
+    Unauthenticated,
+    Authenticating,
+    Authenticated,
+    EnablingEncryption,
+    Secured,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct SecureLink {
+    pub handle: u16,
+    pub phase: LinkSecurityPhase,
+}
+
+pub struct LinkSecurityState {
+    links: [Option<SecureLink>; MAX_SECURE_LINKS],
+    count: usize,
+}
+
+impl LinkSecurityState {
+    pub const fn new() -> Self {
+        Self { links: [None; MAX_SECURE_LINKS], count: 0 }
+    }
+
+    fn index(&self, handle: u16) -> Option<usize> {
+        self.links[..self.count]
+            .iter()
+            .position(|entry| entry.is_some_and(|entry| entry.handle == handle))
+    }
+
+    fn ensure_link(&mut self, links: &LinkState, handle: u16) -> Result<usize, HciError> {
+        if !links.owns_handle(handle) {
+            return Err(HciError::UnexpectedOpcode);
+        }
+        if let Some(index) = self.index(handle) {
+            return Ok(index);
+        }
+        if self.count == MAX_SECURE_LINKS {
+            return Err(HciError::ControllerFailure(0xff));
+        }
+        let index = self.count;
+        self.links[index] = Some(SecureLink { handle, phase: LinkSecurityPhase::Unauthenticated });
+        self.count += 1;
+        Ok(index)
+    }
+
+    pub fn authentication_command(
+        &mut self,
+        links: &LinkState,
+        handle: u16,
+        out: &mut [u8; 258],
+    ) -> Result<usize, HciError> {
+        let index = self.ensure_link(links, handle)?;
+        let Some(mut secure) = self.links[index] else { return Err(HciError::UnexpectedOpcode); };
+        if secure.phase != LinkSecurityPhase::Unauthenticated {
+            return Err(HciError::UnexpectedOpcode);
+        }
+        secure.phase = LinkSecurityPhase::Authenticating;
+        self.links[index] = Some(secure);
+        HciCommand::new(OPCODE_AUTHENTICATION_REQUESTED, &handle.to_le_bytes())
+            .map(|command| command.encode(out))
+    }
+
+    pub fn authentication_complete(&mut self, event: &[u8]) -> Result<u16, HciError> {
+        if event.len() != 5 || event[0] != EVT_AUTHENTICATION_COMPLETE || event[1] != 3 {
+            return Err(HciError::MalformedEvent);
+        }
+        let handle = u16::from_le_bytes([event[3], event[4]]);
+        let Some(index) = self.index(handle) else { return Err(HciError::UnexpectedOpcode); };
+        let Some(mut secure) = self.links[index] else { return Err(HciError::UnexpectedOpcode); };
+        if secure.phase != LinkSecurityPhase::Authenticating {
+            return Err(HciError::UnexpectedOpcode);
+        }
+        if event[2] != 0 {
+            secure.phase = LinkSecurityPhase::Unauthenticated;
+            self.links[index] = Some(secure);
+            return Err(HciError::ControllerFailure(event[2]));
+        }
+        secure.phase = LinkSecurityPhase::Authenticated;
+        self.links[index] = Some(secure);
+        Ok(handle)
+    }
+
+    pub fn enable_encryption_command(
+        &mut self,
+        links: &LinkState,
+        handle: u16,
+        out: &mut [u8; 258],
+    ) -> Result<usize, HciError> {
+        if !links.owns_handle(handle) {
+            return Err(HciError::UnexpectedOpcode);
+        }
+        let Some(index) = self.index(handle) else { return Err(HciError::UnexpectedOpcode); };
+        let Some(mut secure) = self.links[index] else { return Err(HciError::UnexpectedOpcode); };
+        if secure.phase != LinkSecurityPhase::Authenticated {
+            return Err(HciError::UnexpectedOpcode);
+        }
+        let [lo, hi] = handle.to_le_bytes();
+        secure.phase = LinkSecurityPhase::EnablingEncryption;
+        self.links[index] = Some(secure);
+        HciCommand::new(OPCODE_SET_CONNECTION_ENCRYPTION, &[lo, hi, 1])
+            .map(|command| command.encode(out))
+    }
+
+    pub fn encryption_change(&mut self, event: &[u8]) -> Result<u16, HciError> {
+        if event.len() != 6 || event[0] != EVT_ENCRYPTION_CHANGE || event[1] != 4 {
+            return Err(HciError::MalformedEvent);
+        }
+        let handle = u16::from_le_bytes([event[3], event[4]]);
+        let Some(index) = self.index(handle) else { return Err(HciError::UnexpectedOpcode); };
+        let Some(mut secure) = self.links[index] else { return Err(HciError::UnexpectedOpcode); };
+        if secure.phase != LinkSecurityPhase::EnablingEncryption {
+            return Err(HciError::UnexpectedOpcode);
+        }
+        if event[2] != 0 || event[5] == 0 {
+            secure.phase = LinkSecurityPhase::Authenticated;
+            self.links[index] = Some(secure);
+            return Err(HciError::ControllerFailure(if event[2] != 0 { event[2] } else { 0xff }));
+        }
+        secure.phase = LinkSecurityPhase::Secured;
+        self.links[index] = Some(secure);
+        Ok(handle)
+    }
+
+    pub fn is_secured(&self, links: &LinkState, handle: u16) -> bool {
+        links.owns_handle(handle)
+            && self.index(handle)
+                .and_then(|index| self.links[index])
+                .is_some_and(|secure| secure.phase == LinkSecurityPhase::Secured)
+    }
+
+    pub fn revoke(&mut self, handle: u16) {
+        let Some(index) = self.index(handle) else { return; };
+        self.count -= 1;
+        self.links[index] = self.links[self.count];
+        self.links[self.count] = None;
+    }
+}
+
+pub fn link_security_self_test() -> bool {
+    let mut links = LinkState::new();
+    if links.handle_event(&[
+        EVT_CONNECTION_COMPLETE, 11, 0, 0x42, 0,
+        1, 2, 3, 4, 5, 6, 1, 0,
+    ]).is_err() {
+        return false;
+    }
+
+    let mut security = LinkSecurityState::new();
+    let mut bytes = [0_u8; 258];
+    if security.authentication_command(&links, 0x42, &mut bytes) != Ok(5)
+        || bytes[..5] != [0x11, 0x04, 2, 0x42, 0]
+        || security.is_secured(&links, 0x42)
+    {
+        return false;
+    }
+    if security.authentication_complete(&[EVT_AUTHENTICATION_COMPLETE, 3, 0, 0x42, 0]) != Ok(0x42) {
+        return false;
+    }
+    if security.enable_encryption_command(&links, 0x42, &mut bytes) != Ok(6)
+        || bytes[..6] != [0x13, 0x04, 3, 0x42, 0, 1]
+    {
+        return false;
+    }
+    if security.encryption_change(&[EVT_ENCRYPTION_CHANGE, 4, 0, 0x42, 0, 1]) != Ok(0x42)
+        || !security.is_secured(&links, 0x42)
+    {
+        return false;
+    }
+
+    if links.handle_event(&[EVT_DISCONNECTION_COMPLETE, 4, 0, 0x42, 0, 0x13]).is_err() {
+        return false;
+    }
+    !security.is_secured(&links, 0x42)
+        && security.authentication_command(&links, 0x42, &mut bytes).is_err()
+        && security.encryption_change(&[EVT_ENCRYPTION_CHANGE, 4, 0, 0x43, 0, 1]).is_err()
+}
+
 pub fn transaction_self_test() -> bool {
     let reset = HciCommand::new(OPCODE_RESET, &[]).unwrap();
     let version = HciCommand::new(OPCODE_READ_LOCAL_VERSION, &[]).unwrap();
