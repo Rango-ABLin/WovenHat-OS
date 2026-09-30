@@ -353,7 +353,8 @@ pub fn discover() -> Summary {
     feature = "stage13-6-test",
     feature = "stage13-7-test",
     feature = "stage13-8-test",
-    feature = "stage13-9-test"
+    feature = "stage13-9-test",
+    feature = "stage13-10-test"
 ))]
 pub(crate) fn reconcile_after_teardown() -> Result<Summary, Summary> {
     let mut inventory = scan_inventory();
