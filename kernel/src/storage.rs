@@ -1145,6 +1145,8 @@ const SNAPSHOT_PREIMAGE_MAGIC: &[u8; 4] = b"WHP1";
 const SNAPSHOT_PREIMAGE_VERSION: u16 = 3;
 const SNAPSHOT_PREIMAGE_HEADER: usize = 48;
 const SNAPSHOT_PREIMAGE_ENVELOPE_OFFSET: usize = 40;
+const SNAPSHOT_PREIMAGE_DIRECTORY_FLAG: u32 = 1 << 31;
+const SNAPSHOT_DIRECTORY_CHECKSUM: u64 = 0xcbf2_9ce4_8422_2325;
 
 fn snapshot_preimage_envelope_checksum(image: &[u8]) -> Result<u64, PersistError> {
     if image.len() < SNAPSHOT_PREIMAGE_HEADER {
@@ -1208,6 +1210,7 @@ pub struct SnapshotPreimage {
     pub path: alloc::string::String,
     pub checksum: u64,
     pub mode: u32,
+    pub directory: bool,
     pub data: alloc::vec::Vec<u8>,
 }
 
@@ -1259,17 +1262,24 @@ fn read_snapshot_preimage_on_device(
         return Err(PersistError::Failed);
     }
     let data = &image[data_start..end];
+    let directory = mode & SNAPSHOT_PREIMAGE_DIRECTORY_FLAG != 0;
+    let object_mode = mode & !SNAPSHOT_PREIMAGE_DIRECTORY_FLAG;
     if checksum == 0 {
         if data_len != 0 || mode != 0 {
             return Err(PersistError::Failed);
         }
-    } else if checksum_bytes(data) != checksum || mode == 0 {
+    } else if directory {
+        if checksum != SNAPSHOT_DIRECTORY_CHECKSUM || data_len != 0 || object_mode == 0 {
+            return Err(PersistError::Failed);
+        }
+    } else if checksum_bytes(data) != checksum || object_mode == 0 {
         return Err(PersistError::Failed);
     }
     Ok(SnapshotPreimage {
         path: alloc::string::String::from(path),
         checksum,
-        mode,
+        mode: object_mode,
+        directory,
         data: data.to_vec(),
     })
 }
@@ -1306,6 +1316,11 @@ pub fn replay_snapshot_preimage(
                 Ok(()) | Err(fat32::Error::NotFound) => Ok(()),
                 Err(error) => Err(map_persist_err(error)),
             }
+        } else if preimage.directory {
+            match fat32::mkdir_path(device, volume, relative) {
+                Ok(()) | Err(fat32::Error::AlreadyExists) => Ok(()),
+                Err(error) => Err(map_persist_err(error)),
+            }
         } else {
             fat32::create_path_file(device, volume, relative, &preimage.data)
                 .map_err(map_persist_err)
@@ -1339,6 +1354,16 @@ pub fn replay_snapshot_preimage(
             Err(_) => return Err(PersistError::Failed),
         }
         let _ = crate::wovenfs::remove(&preimage.path);
+    } else if preimage.directory {
+        match vfs::mkdir(&preimage.path) {
+            Ok(()) | Err(vfs::Error::AlreadyExists) => {}
+            Err(_) => return Err(PersistError::Failed),
+        }
+        let mode = u16::try_from(preimage.mode).map_err(|_| PersistError::Failed)?;
+        let (uid, gid) = vfs::stat(&preimage.path)
+            .map(|stat| (stat.uid, stat.gid))
+            .unwrap_or((0, 0));
+        vfs::set_metadata(&preimage.path, uid, gid, mode).map_err(|_| PersistError::Failed)?;
     } else {
         if let Ok(stat) = vfs::stat(&preimage.path) {
             let _ = vfs::set_metadata(&preimage.path, stat.uid, stat.gid, 0o666);
