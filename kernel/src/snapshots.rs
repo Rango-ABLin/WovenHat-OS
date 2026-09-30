@@ -44,6 +44,11 @@ pub struct RestoreIntent {
 
 static RESTORE_INTENT: Mutex<Option<RestoreIntent>> = Mutex::with_rank(None, 10);
 
+/// Serializes catalog state transitions across the in-memory update and the
+/// following durable A/B WSC1 write. Rank 9 is acquired before the rank-10
+/// TABLE/CHANGES locks; filesystem I/O happens while no rank-10 lock is held.
+static CATALOG_TRANSACTION: Mutex<()> = Mutex::with_rank((), 9);
+
 fn durable_catalog() -> crate::fat32::SnapshotCatalog {
     let table = TABLE.lock();
     let changes = CHANGES.lock();
@@ -72,6 +77,7 @@ fn persist_catalog() -> Result<(), RestoreError> {
 }
 
 pub fn recover_catalog() -> Result<bool, RestoreError> {
+    let _transaction = CATALOG_TRANSACTION.lock();
     let Some(catalog) = crate::storage::load_snapshot_catalog()
         .map_err(|_| RestoreError::PersistenceFailed)?
     else {
@@ -112,6 +118,7 @@ pub fn create(generation: u64, checksum: u64) -> Option<u64> {
     if generation == 0 || checksum == 0 {
         return None;
     }
+    let _transaction = CATALOG_TRANSACTION.lock();
     let mut t = TABLE.lock();
     let slot = t.iter_mut().position(|s| s.is_none())?;
     let id = slot as u64 + 1;
@@ -156,6 +163,7 @@ pub fn record_change(
     old_checksum: u64,
     new_checksum: u64,
 ) -> Result<(), RestoreError> {
+    let _transaction = CATALOG_TRANSACTION.lock();
     if get(snapshot_id).is_none() {
         return Err(RestoreError::MissingSnapshot);
     }
@@ -203,6 +211,7 @@ pub fn record_live_change(
 pub fn record_live_changes(
     mutations: &[(u64, u64, u64)],
 ) -> Result<(), RestoreError> {
+    let _transaction = CATALOG_TRANSACTION.lock();
     let ids = {
         let table = TABLE.lock();
         let mut ids = [0u64; MAX];
@@ -415,6 +424,7 @@ pub fn restore(id: u64) -> Option<(u64, u64)> {
 
 #[cfg(feature = "stage12-4-test")]
 pub fn remove(id: u64) -> bool {
+    let _transaction = CATALOG_TRANSACTION.lock();
     let table_before = *TABLE.lock();
     let changes_before = *CHANGES.lock();
     let mut t = TABLE.lock();
