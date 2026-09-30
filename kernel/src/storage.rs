@@ -219,6 +219,8 @@ pub fn mount_ata_root() -> MountStatus {
                 "[S12.4R] recovery: replay FAILED code={}",
                 error as u8
             ));
+            #[cfg(not(feature = "stage12-4-reboot-test"))]
+            let _ = error;
             let failed = MountStatus::Failed;
             record_mount_status(failed);
             return failed;
