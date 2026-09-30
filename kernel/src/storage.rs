@@ -1153,6 +1153,62 @@ fn read_durable_path_on_device(
     }
 }
 
+struct SnapshotPreimage {
+    path: alloc::string::String,
+    checksum: u64,
+    mode: u32,
+    data: alloc::vec::Vec<u8>,
+}
+
+fn read_snapshot_preimage_on_device(
+    device: &mut impl crate::block::BlockDevice,
+    snapshot_id: u64,
+    path_hash: u64,
+) -> Result<SnapshotPreimage, PersistError> {
+    let internal = alloc::format!("WHSNAP/{snapshot_id:016X}-{path_hash:016X}.COW");
+    let mut image = alloc::vec![0u8; SNAPSHOT_PREIMAGE_HEADER + fat32::MAX_LONG_NAME * 8 + vfs::NODE_CAPACITY];
+    let length = read_durable_path_on_device(device, &internal, &mut image)?;
+    image.truncate(length);
+    if image.len() < SNAPSHOT_PREIMAGE_HEADER
+        || &image[..4] != SNAPSHOT_PREIMAGE_MAGIC
+        || u16::from_le_bytes([image[4], image[5]]) != SNAPSHOT_PREIMAGE_VERSION
+    {
+        return Err(PersistError::Failed);
+    }
+    let path_len = u16::from_le_bytes([image[6], image[7]]) as usize;
+    let stored_snapshot = u64::from_le_bytes(image[8..16].try_into().map_err(|_| PersistError::Failed)?);
+    let checksum = u64::from_le_bytes(image[16..24].try_into().map_err(|_| PersistError::Failed)?);
+    let data_len = u32::from_le_bytes(image[24..28].try_into().map_err(|_| PersistError::Failed)?) as usize;
+    let mode = u32::from_le_bytes(image[28..32].try_into().map_err(|_| PersistError::Failed)?);
+    let data_start = SNAPSHOT_PREIMAGE_HEADER.checked_add(path_len).ok_or(PersistError::Failed)?;
+    let end = data_start.checked_add(data_len).ok_or(PersistError::Failed)?;
+    if stored_snapshot != snapshot_id || path_len == 0 || end != image.len() || data_len > vfs::NODE_CAPACITY {
+        return Err(PersistError::Failed);
+    }
+    let path = core::str::from_utf8(&image[SNAPSHOT_PREIMAGE_HEADER..data_start])
+        .map_err(|_| PersistError::Failed)?;
+    if !path.starts_with("/mnt/")
+        || crate::wovenfs::path_hash(path) != path_hash
+        || path[5..].split('/').any(|component| component.is_empty() || component == "." || component == "..")
+    {
+        return Err(PersistError::Failed);
+    }
+    let data = &image[data_start..end];
+    if checksum == 0 {
+        if data_len != 0 || mode != 0 {
+            return Err(PersistError::Failed);
+        }
+    } else if checksum_bytes(data) != checksum || mode == 0 {
+        return Err(PersistError::Failed);
+    }
+    Ok(SnapshotPreimage {
+        path: alloc::string::String::from(path),
+        checksum,
+        mode,
+        data: data.to_vec(),
+    })
+}
+
 fn write_snapshot_preimage_on_device(
     device: &mut impl crate::block::BlockDevice,
     snapshot_id: u64,
