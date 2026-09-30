@@ -315,3 +315,11 @@ The scheduler/pager watchdog and termination lifecycle gate passed in full:
 DHCP/DNS/ICMP plus host-verified UDP/TCP at 1/2/4 CPUs. See
 audit-stage7-1-5-timeout-2026-09-16.md for the bounded lifecycle handoff
 correction and retained serial evidence.
+
+## Roadmap Stage 13.10A — Bluetooth HCI core accepted on 2026-09-30
+
+The hardware-independent Bluetooth HCI foundation is accepted. Bounded command encoding, Command Complete parsing, controller command-credit state, opcode/status validation, and deterministic self-tests passed the dedicated 1/2/4-CPU QEMU gate with exit 33 in GitHub Actions run 36718370038. See [acceptance audit](../AUDIT-STAGE13.10A-BLUETOOTH-HCI-ACCEPTANCE.md).
+
+Historical Wi-Fi labels 13.10A–AC are Stage 13.9 AX200/WovenWiFi extensions; roadmap Stage 13.10 is Bluetooth. Stage 13.10A does not claim USB transport or physical Bluetooth hardware support.
+
+Next: Stage 13.10B Bluetooth USB HCI transport over xHCI.
