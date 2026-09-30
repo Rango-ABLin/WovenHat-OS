@@ -249,6 +249,53 @@ pub fn record_change(
     Ok(())
 }
 
+/// Verify that the current COW table can represent every mutation for the
+/// captured membership before storage writes any WHP1 pre-image. Existing
+/// snapshot/path records consume no additional slot because publication only
+/// advances their newest checksum.
+pub fn preflight_live_changes_for_membership(
+    membership: SnapshotMembership,
+    mutations: &[(u64, u64, u64)],
+) -> Result<(), RestoreError> {
+    let _transaction = CATALOG_TRANSACTION.lock();
+    if snapshot_membership() != membership {
+        return Err(RestoreError::RestoreBusy);
+    }
+    if membership.is_empty() || mutations.is_empty() {
+        return Ok(());
+    }
+
+    let changes = CHANGES.lock();
+    let free = changes.iter().filter(|entry| entry.is_none()).count();
+    let mut required = 0usize;
+    for id in membership.ids() {
+        for &(path_hash, _, _) in mutations {
+            let already_present = changes
+                .iter()
+                .flatten()
+                .any(|change| change.snapshot_id == id && change.path_hash == path_hash);
+            if already_present {
+                continue;
+            }
+            // A repeated path in the same mutation batch needs only one slot
+            // for this snapshot, matching record_live_changes_for_membership.
+            let duplicate_in_batch = mutations
+                .iter()
+                .take_while(|mutation| mutation.0 != path_hash)
+                .any(|mutation| mutation.0 == path_hash);
+            if !duplicate_in_batch {
+                required = required
+                    .checked_add(1)
+                    .ok_or(RestoreError::ChangeLogFull)?;
+            }
+        }
+    }
+    if required > free {
+        return Err(RestoreError::ChangeLogFull);
+    }
+    Ok(())
+}
+
 /// Atomically publish a logical filesystem mutation for the exact snapshot
 /// membership that retained its WHP1 pre-images. Membership changes fail
 /// closed before the underlying FAT mutation can proceed.
