@@ -526,8 +526,97 @@ impl XhciController {
             u16::from(bluetooth.configuration),
             0,
         )?;
+        self.configure_bluetooth_endpoints(bluetooth)?;
         self.bluetooth = Some(bluetooth);
         Ok(bluetooth)
+    }
+
+    fn configure_bluetooth_endpoints(
+        &mut self,
+        bluetooth: BluetoothUsbInterface,
+    ) -> Result<(), InitError> {
+        let event_dci = endpoint_dci(bluetooth.event_endpoint)?;
+        let acl_in_dci = endpoint_dci(bluetooth.acl_in_endpoint)?;
+        let acl_out_dci = endpoint_dci(bluetooth.acl_out_endpoint)?;
+        if event_dci == acl_in_dci || event_dci == acl_out_dci || acl_in_dci == acl_out_dci {
+            return Err(InitError::DescriptorInvalid);
+        }
+
+        let event_ring = Ring::new(DmaPage::allocate_zeroed().ok_or(InitError::DmaUnavailable)?);
+        let acl_in_ring = Ring::new(DmaPage::allocate_zeroed().ok_or(InitError::DmaUnavailable)?);
+        let acl_out_ring = Ring::new(DmaPage::allocate_zeroed().ok_or(InitError::DmaUnavailable)?);
+        let event_buffer = DmaPage::allocate_zeroed().ok_or(InitError::DmaUnavailable)?;
+        let acl_in_buffer = DmaPage::allocate_zeroed().ok_or(InitError::DmaUnavailable)?;
+        let acl_out_buffer = DmaPage::allocate_zeroed().ok_or(InitError::DmaUnavailable)?;
+        let mut input = DmaPage::allocate_zeroed().ok_or(InitError::DmaUnavailable)?;
+        input.bytes_mut().fill(0);
+
+        let output = self.output_context.ok_or(InitError::CommandFailed)?;
+        input.bytes_mut()[self.context_size..self.context_size * 2]
+            .copy_from_slice(&output.bytes()[..self.context_size]);
+        let add_flags = 1_u32
+            | (1_u32 << event_dci)
+            | (1_u32 << acl_in_dci)
+            | (1_u32 << acl_out_dci);
+        write_u32(input.bytes_mut(), 4, add_flags);
+
+        let slot_offset = self.context_size;
+        let mut slot_dword0 = read_u32(input.bytes(), slot_offset);
+        slot_dword0 &= !(0x1f << 27);
+        let context_entries = event_dci.max(acl_in_dci).max(acl_out_dci);
+        slot_dword0 |= u32::from(context_entries) << 27;
+        write_u32(input.bytes_mut(), slot_offset, slot_dword0);
+
+        write_bluetooth_endpoint_context(
+            input.bytes_mut(),
+            self.context_size,
+            event_dci,
+            bluetooth.event_endpoint,
+            bluetooth.event_max_packet,
+            bluetooth.event_interval,
+            self.port_speed()?,
+            event_ring.page.physical,
+            USB_ENDPOINT_INTERRUPT,
+        )?;
+        write_bluetooth_endpoint_context(
+            input.bytes_mut(),
+            self.context_size,
+            acl_in_dci,
+            bluetooth.acl_in_endpoint,
+            bluetooth.acl_in_max_packet,
+            0,
+            self.port_speed()?,
+            acl_in_ring.page.physical,
+            USB_ENDPOINT_BULK,
+        )?;
+        write_bluetooth_endpoint_context(
+            input.bytes_mut(),
+            self.context_size,
+            acl_out_dci,
+            bluetooth.acl_out_endpoint,
+            bluetooth.acl_out_max_packet,
+            0,
+            self.port_speed()?,
+            acl_out_ring.page.physical,
+            USB_ENDPOINT_BULK,
+        )?;
+        fence(Ordering::Release);
+
+        let command_ptr = self.command_ring.push(Trb {
+            parameter: input.physical,
+            status: 0,
+            control: (TRB_TYPE_CONFIGURE_ENDPOINT << 10) | (u32::from(self.slot_id) << 24),
+        });
+        mmio_write32(self.doorbell_base, 0)?;
+        self.wait_command_completion(command_ptr)?;
+
+        self.bt_event_ring = Some(event_ring);
+        self.bt_event_buffer = Some(event_buffer);
+        self.bt_acl_in_ring = Some(acl_in_ring);
+        self.bt_acl_in_buffer = Some(acl_in_buffer);
+        self.bt_acl_out_ring = Some(acl_out_ring);
+        self.bt_acl_out_buffer = Some(acl_out_buffer);
+        Ok(())
     }
 
     fn send_bluetooth_command(&mut self, command: &[u8]) -> Result<(), InitError> {
@@ -876,6 +965,64 @@ fn find_controller() -> Option<pci::Device> {
         }
     }
     None
+}
+
+fn endpoint_dci(endpoint_address: u8) -> Result<u8, InitError> {
+    let number = endpoint_address & 0x0f;
+    if number == 0 {
+        return Err(InitError::DescriptorInvalid);
+    }
+    let direction_in = endpoint_address & 0x80 != 0;
+    let dci = number
+        .saturating_mul(2)
+        .saturating_add(u8::from(direction_in));
+    if dci > 31 {
+        return Err(InitError::DescriptorInvalid);
+    }
+    Ok(dci)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn write_bluetooth_endpoint_context(
+    input: &mut [u8; PAGE_SIZE],
+    context_size: usize,
+    dci: u8,
+    endpoint_address: u8,
+    max_packet: u16,
+    interval: u8,
+    speed: u8,
+    ring_physical: u64,
+    transfer_type: u8,
+) -> Result<(), InitError> {
+    if max_packet == 0 {
+        return Err(InitError::DescriptorInvalid);
+    }
+    let direction_in = endpoint_address & 0x80 != 0;
+    let endpoint_type = match (transfer_type, direction_in) {
+        (USB_ENDPOINT_INTERRUPT, true) => 7_u32,
+        (USB_ENDPOINT_BULK, true) => 6_u32,
+        (USB_ENDPOINT_BULK, false) => 2_u32,
+        _ => return Err(InitError::DescriptorInvalid),
+    };
+    let offset = context_size * (usize::from(dci) + 1);
+    let interval_value = if transfer_type == USB_ENDPOINT_INTERRUPT {
+        xhci_interval(speed, interval)
+    } else {
+        0
+    };
+    write_u32(input, offset, u32::from(interval_value) << 16);
+    write_u32(
+        input,
+        offset + 4,
+        (3 << 1) | (endpoint_type << 3) | (u32::from(max_packet) << 16),
+    );
+    write_u64(input, offset + 8, ring_physical | 1);
+    write_u32(
+        input,
+        offset + 16,
+        u32::from(max_packet) | (u32::from(max_packet) << 16),
+    );
+    Ok(())
 }
 
 fn find_connected_port(op_base: u64, max_ports: u8) -> Result<u8, InitError> {
