@@ -1239,6 +1239,147 @@ impl LinkKeyStore {
     pub fn count(&self) -> usize { self.count }
 }
 
+
+pub const EVT_IO_CAPABILITY_REQUEST: u8 = 0x31;
+pub const EVT_USER_CONFIRMATION_REQUEST: u8 = 0x33;
+pub const EVT_USER_PASSKEY_REQUEST: u8 = 0x34;
+pub const EVT_SIMPLE_PAIRING_COMPLETE: u8 = 0x36;
+pub const OPCODE_IO_CAPABILITY_REQUEST_REPLY: u16 = 0x042b;
+pub const OPCODE_USER_CONFIRMATION_REQUEST_REPLY: u16 = 0x042c;
+pub const OPCODE_USER_CONFIRMATION_REQUEST_NEGATIVE_REPLY: u16 = 0x042d;
+pub const OPCODE_USER_PASSKEY_REQUEST_REPLY: u16 = 0x042e;
+pub const OPCODE_USER_PASSKEY_REQUEST_NEGATIVE_REPLY: u16 = 0x042f;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PairingRequest {
+    pub address: [u8; 6],
+    pub numeric_value: Option<u32>,
+}
+
+pub fn io_capability_reply(
+    event: &[u8],
+    io_capability: u8,
+    oob_present: bool,
+    authentication_requirements: u8,
+    out: &mut [u8; 258],
+) -> Result<usize, HciError> {
+    if event.len() != 8 || event[0] != EVT_IO_CAPABILITY_REQUEST || event[1] != 6 {
+        return Err(HciError::MalformedEvent);
+    }
+    let mut params = [0_u8; 9];
+    params[..6].copy_from_slice(&event[2..8]);
+    params[6] = io_capability;
+    params[7] = u8::from(oob_present);
+    params[8] = authentication_requirements;
+    HciCommand::new(OPCODE_IO_CAPABILITY_REQUEST_REPLY, &params)
+        .map(|command| command.encode(out))
+}
+
+pub fn parse_user_confirmation_request(event: &[u8]) -> Result<PairingRequest, HciError> {
+    if event.len() != 12 || event[0] != EVT_USER_CONFIRMATION_REQUEST || event[1] != 10 {
+        return Err(HciError::MalformedEvent);
+    }
+    let mut address = [0_u8; 6];
+    address.copy_from_slice(&event[2..8]);
+    let numeric_value = u32::from_le_bytes([event[8], event[9], event[10], event[11]]);
+    if numeric_value > 999_999 {
+        return Err(HciError::MalformedEvent);
+    }
+    Ok(PairingRequest { address, numeric_value: Some(numeric_value) })
+}
+
+pub fn user_confirmation_reply(
+    request: PairingRequest,
+    accepted: bool,
+    out: &mut [u8; 258],
+) -> Result<usize, HciError> {
+    let opcode = if accepted {
+        OPCODE_USER_CONFIRMATION_REQUEST_REPLY
+    } else {
+        OPCODE_USER_CONFIRMATION_REQUEST_NEGATIVE_REPLY
+    };
+    HciCommand::new(opcode, &request.address).map(|command| command.encode(out))
+}
+
+pub fn parse_user_passkey_request(event: &[u8]) -> Result<PairingRequest, HciError> {
+    if event.len() != 8 || event[0] != EVT_USER_PASSKEY_REQUEST || event[1] != 6 {
+        return Err(HciError::MalformedEvent);
+    }
+    let mut address = [0_u8; 6];
+    address.copy_from_slice(&event[2..8]);
+    Ok(PairingRequest { address, numeric_value: None })
+}
+
+pub fn user_passkey_reply(
+    request: PairingRequest,
+    passkey: Option<u32>,
+    out: &mut [u8; 258],
+) -> Result<usize, HciError> {
+    match passkey {
+        Some(passkey) if passkey <= 999_999 => {
+            let mut params = [0_u8; 10];
+            params[..6].copy_from_slice(&request.address);
+            params[6..10].copy_from_slice(&passkey.to_le_bytes());
+            HciCommand::new(OPCODE_USER_PASSKEY_REQUEST_REPLY, &params)
+                .map(|command| command.encode(out))
+        }
+        Some(_) => Err(HciError::MalformedEvent),
+        None => HciCommand::new(OPCODE_USER_PASSKEY_REQUEST_NEGATIVE_REPLY, &request.address)
+            .map(|command| command.encode(out)),
+    }
+}
+
+pub fn parse_simple_pairing_complete(event: &[u8]) -> Result<[u8; 6], HciError> {
+    if event.len() != 9 || event[0] != EVT_SIMPLE_PAIRING_COMPLETE || event[1] != 7 {
+        return Err(HciError::MalformedEvent);
+    }
+    if event[2] != 0 {
+        return Err(HciError::ControllerFailure(event[2]));
+    }
+    let mut address = [0_u8; 6];
+    address.copy_from_slice(&event[3..9]);
+    Ok(address)
+}
+
+pub fn pairing_interaction_self_test() -> bool {
+    let address = [1, 2, 3, 4, 5, 6];
+    let mut out = [0_u8; 258];
+    let io = [EVT_IO_CAPABILITY_REQUEST, 6, 1, 2, 3, 4, 5, 6];
+    if io_capability_reply(&io, 0x01, false, 0x03, &mut out) != Ok(12)
+        || out[..12] != [0x2b, 0x04, 9, 1, 2, 3, 4, 5, 6, 1, 0, 3]
+    {
+        return false;
+    }
+
+    let confirm_event = [
+        EVT_USER_CONFIRMATION_REQUEST, 10, 1, 2, 3, 4, 5, 6,
+        0x40, 0xe2, 0x01, 0,
+    ];
+    let Ok(confirm) = parse_user_confirmation_request(&confirm_event) else { return false; };
+    if confirm.address != address || confirm.numeric_value != Some(123_456)
+        || user_confirmation_reply(confirm, false, &mut out) != Ok(9)
+        || out[..3] != [0x2d, 0x04, 6]
+    {
+        return false;
+    }
+
+    let passkey_event = [EVT_USER_PASSKEY_REQUEST, 6, 1, 2, 3, 4, 5, 6];
+    let Ok(passkey) = parse_user_passkey_request(&passkey_event) else { return false; };
+    if user_passkey_reply(passkey, Some(654_321), &mut out) != Ok(13)
+        || out[..3] != [0x2e, 0x04, 10]
+        || user_passkey_reply(passkey, Some(1_000_000), &mut out).is_ok()
+    {
+        return false;
+    }
+
+    parse_simple_pairing_complete(&[
+        EVT_SIMPLE_PAIRING_COMPLETE, 7, 0, 1, 2, 3, 4, 5, 6,
+    ]) == Ok(address)
+        && parse_simple_pairing_complete(&[
+            EVT_SIMPLE_PAIRING_COMPLETE, 7, 5, 1, 2, 3, 4, 5, 6,
+        ]).is_err()
+}
+
 pub fn link_key_self_test() -> bool {
     let address = [1, 2, 3, 4, 5, 6];
     let key = [0xa5_u8; 16];
