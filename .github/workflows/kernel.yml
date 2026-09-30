@@ -68,7 +68,7 @@ jobs:
           cargo build --features stage13-3-test
           cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage13-3-test -- -D warnings
           for cpu in 1 2 4; do
-            python3 scripts/test-stage10-runtime.py --stage 13.3 --cpus "$cpu" --timeout 120 --qemu "$qemu" --firmware "$ovmf_code" --firmware-vars "$ovmf_vars"
+            python3 scripts/test-stage10-runtime.py --stage 13.3 --cpus "$cpu" --timeout 120 --qemu "$qemu" --firmware "$ovmf_code"
           done
       - name: Preserve validation evidence
         if: always()
