@@ -184,17 +184,24 @@ impl SnapshotMembership {
 }
 
 pub fn snapshot_membership() -> SnapshotMembership {
-    let table = TABLE.lock();
-    let mut ids = [0u64; MAX];
-    let mut count = 0usize;
-    for snapshot in table.iter().flatten() {
-        ids[count] = snapshot.id;
-        count += 1;
-    }
+    let (ids, count) = {
+        let table = TABLE.lock();
+        let mut ids = [0u64; MAX];
+        let mut count = 0usize;
+        for snapshot in table.iter().flatten() {
+            ids[count] = snapshot.id;
+            count += 1;
+        }
+        (ids, count)
+    };
+    // TABLE and NEXT_SNAPSHOT_ID share rank 10. Never nest their guards:
+    // callers that require an atomic membership decision revalidate this
+    // token while holding CATALOG_TRANSACTION before publishing COW state.
+    let next_snapshot_id = *NEXT_SNAPSHOT_ID.lock();
     SnapshotMembership {
         ids,
         count,
-        next_snapshot_id: *NEXT_SNAPSHOT_ID.lock(),
+        next_snapshot_id,
     }
 }
 
