@@ -2725,11 +2725,22 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
                 serial::write_line(format_args!("[S12.4R] snapshot: FAILED"));
                 qemu_test_exit_failure();
             };
-            if vfs::write_file(PATH, MUTATED).is_err()
-                || storage::persist_path(PATH).is_err()
-                || snapshots::prepare_restore(snapshot_id).is_err()
-            {
-                serial::write_line(format_args!("[S12.4R] mutation/intent: FAILED"));
+            if vfs::write_file(PATH, MUTATED).is_err() {
+                serial::write_line(format_args!("[S12.4R] VFS mutation: FAILED"));
+                qemu_test_exit_failure();
+            }
+            if let Err(error) = storage::persist_path(PATH) {
+                serial::write_line(format_args!(
+                    "[S12.4R] durable mutation: FAILED code={}",
+                    error as u8
+                ));
+                qemu_test_exit_failure();
+            }
+            if let Err(error) = snapshots::prepare_restore(snapshot_id) {
+                serial::write_line(format_args!(
+                    "[S12.4R] WSR1 prepare: FAILED code={}",
+                    error as u8
+                ));
                 qemu_test_exit_failure();
             }
             let path_hash = wovenfs::path_hash(PATH);
