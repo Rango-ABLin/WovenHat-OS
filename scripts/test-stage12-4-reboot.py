@@ -17,7 +17,10 @@ def main():
         if a.firmware_vars: vc=out/f"boot{n}-OVMF_VARS.fd"; shutil.copyfile(a.firmware_vars,vc)
         cmd=[str(q),"-accel","tcg,tb-size=128","-machine","pc","-m","256M","-smp",str(a.cpus),"-display","none","-serial",f"file:{serial}","-no-reboot","-device","isa-debug-exit,iobase=0xf4,iosize=0x04","-drive",f"if=pflash,unit=0,format=raw,readonly=on,file={fw}",*([] if vc is None else ["-drive",f"if=pflash,unit=1,format=raw,file={vc}"]),"-drive",f"if=none,id=boot,format=raw,readonly=on,file={image}","-device","virtio-blk-pci,drive=boot,bootindex=1","-drive",f"if=ide,index=0,media=disk,format=raw,file={disk}"]
         try: r=subprocess.run(cmd,cwd=root,capture_output=True,text=True,timeout=a.timeout,creationflags=subprocess.CREATE_NO_WINDOW if os.name=="nt" else 0)
-        except subprocess.TimeoutExpired: raise RuntimeError(f"boot {n} timed out")
+        except subprocess.TimeoutExpired:
+            log=serial.read_text(errors="replace")
+            print(log[-12000:],file=sys.stderr)
+            raise RuntimeError(f"boot {n} timed out")
         log=serial.read_text(errors="replace"); (out/f"boot{n}-qemu.log").write_text(r.stdout+r.stderr)
         if r.returncode!=33 or marker not in log: print(log[-12000:],file=sys.stderr); raise RuntimeError(f"boot {n} failed")
     boot(1,"[S12.4R] POWERLOSS AFTER REPLAY BEFORE WSR1 ADVANCE"); boot(2,"[S12.4R] reboot recovery + idempotent replay: PASSED"); print("Stage 12.4 persistent-disk two-boot rollback recovery: PASS"); return 0
