@@ -166,7 +166,24 @@ pub fn capture_wovenfs(generation: u64) -> Option<u64> {
     create(generation, crate::wovenfs::root_checksum())
 }
 
-pub fn live_snapshot_ids() -> ([u64; MAX], usize) {
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub struct SnapshotMembership {
+    ids: [u64; MAX],
+    count: usize,
+    next_snapshot_id: u64,
+}
+
+impl SnapshotMembership {
+    pub fn ids(&self) -> impl Iterator<Item = u64> + '_ {
+        self.ids[..self.count].iter().copied()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.count == 0
+    }
+}
+
+pub fn snapshot_membership() -> SnapshotMembership {
     let table = TABLE.lock();
     let mut ids = [0u64; MAX];
     let mut count = 0usize;
@@ -174,7 +191,16 @@ pub fn live_snapshot_ids() -> ([u64; MAX], usize) {
         ids[count] = snapshot.id;
         count += 1;
     }
-    (ids, count)
+    SnapshotMembership {
+        ids,
+        count,
+        next_snapshot_id: *NEXT_SNAPSHOT_ID.lock(),
+    }
+}
+
+pub fn live_snapshot_ids() -> ([u64; MAX], usize) {
+    let membership = snapshot_membership();
+    (membership.ids, membership.count)
 }
 
 pub fn get(id: u64) -> Option<Snapshot> {
@@ -238,24 +264,26 @@ pub fn record_live_change(
 pub fn record_live_changes(
     mutations: &[(u64, u64, u64)],
 ) -> Result<(), RestoreError> {
+    let membership = snapshot_membership();
+    record_live_changes_for_membership(membership, mutations)
+}
+
+pub fn record_live_changes_for_membership(
+    membership: SnapshotMembership,
+    mutations: &[(u64, u64, u64)],
+) -> Result<(), RestoreError> {
     let _transaction = CATALOG_TRANSACTION.lock();
-    let ids = {
-        let table = TABLE.lock();
-        let mut ids = [0u64; MAX];
-        let mut count = 0usize;
-        for snapshot in table.iter().flatten() {
-            ids[count] = snapshot.id;
-            count += 1;
-        }
-        (ids, count)
-    };
-    if ids.1 == 0 || mutations.is_empty() {
+    let current = snapshot_membership();
+    if current != membership {
+        return Err(RestoreError::RestoreBusy);
+    }
+    if membership.is_empty() || mutations.is_empty() {
         return Ok(());
     }
 
     let mut changes = CHANGES.lock();
     let before = *changes;
-    for id in ids.0.into_iter().take(ids.1) {
+    for id in membership.ids() {
         for &(path_hash, old_checksum, new_checksum) in mutations {
             if let Some(change) = changes
                 .iter_mut()
