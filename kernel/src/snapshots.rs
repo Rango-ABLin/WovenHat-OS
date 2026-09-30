@@ -332,13 +332,22 @@ pub fn replay_pending_restore() -> Result<Option<u64>, RestoreError> {
     if intent.applied > count {
         return Err(RestoreError::PersistenceFailed);
     }
+    // Validate every remaining durable pre-image before mutating the live
+    // filesystem. This prevents a corrupt later WHP1 record from leaving a
+    // newly-started rollback partially applied. On reboot, records below the
+    // durable WSR1 applied index are intentionally skipped and the remainder
+    // is validated again before replay resumes.
+    let mut preimages = alloc::vec::Vec::with_capacity(count.saturating_sub(intent.applied));
     for record in plan.into_iter().flatten().skip(intent.applied) {
         let preimage = crate::storage::load_snapshot_preimage(record.snapshot_id, record.path_hash)
             .map_err(|_| RestoreError::PersistenceFailed)?;
         if preimage.checksum != record.old_checksum {
             return Err(RestoreError::ChecksumMismatch);
         }
-        crate::storage::replay_snapshot_preimage(&preimage)
+        preimages.push(preimage);
+    }
+    for preimage in &preimages {
+        crate::storage::replay_snapshot_preimage(preimage)
             .map_err(|_| RestoreError::PersistenceFailed)?;
         mark_restore_applied(intent.snapshot_id)?;
     }
