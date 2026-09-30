@@ -427,6 +427,149 @@ pub fn discovery_self_test() -> bool {
 }
 
 
+
+pub const EVT_LE_META: u8 = 0x3e;
+pub const LE_SUBEVENT_ADVERTISING_REPORT: u8 = 0x02;
+pub const OPCODE_LE_SET_SCAN_PARAMETERS: u16 = 0x200b;
+pub const OPCODE_LE_SET_SCAN_ENABLE: u16 = 0x200c;
+pub const MAX_LE_DISCOVERED_DEVICES: usize = 16;
+pub const MAX_LE_ADVERTISING_DATA: usize = 31;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct LeDiscoveredDevice {
+    pub event_type: u8,
+    pub address_type: u8,
+    pub address: [u8; 6],
+    pub data_len: u8,
+    data: [u8; MAX_LE_ADVERTISING_DATA],
+    pub rssi: i8,
+}
+
+impl LeDiscoveredDevice {
+    pub fn data(&self) -> &[u8] { &self.data[..self.data_len as usize] }
+}
+
+pub struct LeDiscoveryState {
+    devices: [Option<LeDiscoveredDevice>; MAX_LE_DISCOVERED_DEVICES],
+    count: usize,
+    scanning: bool,
+}
+
+impl LeDiscoveryState {
+    pub const fn new() -> Self {
+        Self { devices: [None; MAX_LE_DISCOVERED_DEVICES], count: 0, scanning: false }
+    }
+
+    pub fn scan_parameters_command(out: &mut [u8; 258]) -> Result<usize, HciError> {
+        let params = [0x01, 0x10, 0x00, 0x10, 0x00, 0x00, 0x00];
+        HciCommand::new(OPCODE_LE_SET_SCAN_PARAMETERS, &params)
+            .map(|command| command.encode(out))
+    }
+
+    pub fn scan_enable_command(&mut self, enable: bool, out: &mut [u8; 258]) -> Result<usize, HciError> {
+        let params = [u8::from(enable), 0x01];
+        let encoded = HciCommand::new(OPCODE_LE_SET_SCAN_ENABLE, &params)
+            .map(|command| command.encode(out))?;
+        self.scanning = enable;
+        Ok(encoded)
+    }
+
+    pub fn handle_advertising_report(&mut self, event: &[u8]) -> Result<usize, HciError> {
+        if event.len() < 4 || event[0] != EVT_LE_META || event[2] != LE_SUBEVENT_ADVERTISING_REPORT {
+            return Err(HciError::MalformedEvent);
+        }
+        let parameter_len = event[1] as usize;
+        if event.len() != parameter_len + 2 || parameter_len < 2 {
+            return Err(HciError::MalformedEvent);
+        }
+        let reports = event[3] as usize;
+        let mut cursor = 4;
+        let mut added = 0;
+        for _ in 0..reports {
+            if cursor + 9 > event.len() {
+                return Err(HciError::MalformedEvent);
+            }
+            let event_type = event[cursor];
+            let address_type = event[cursor + 1];
+            if event_type > 0x04 || address_type > 0x01 {
+                return Err(HciError::MalformedEvent);
+            }
+            let mut address = [0_u8; 6];
+            address.copy_from_slice(&event[cursor + 2..cursor + 8]);
+            let data_len = event[cursor + 8] as usize;
+            if data_len > MAX_LE_ADVERTISING_DATA || cursor + 10 + data_len > event.len() {
+                return Err(HciError::MalformedEvent);
+            }
+            let rssi_index = cursor + 9 + data_len;
+            let rssi = event[rssi_index] as i8;
+            let mut data = [0_u8; MAX_LE_ADVERTISING_DATA];
+            data[..data_len].copy_from_slice(&event[cursor + 9..rssi_index]);
+
+            if let Some(index) = self.devices[..self.count].iter().position(|entry| {
+                entry.is_some_and(|device| device.address_type == address_type && device.address == address)
+            }) {
+                self.devices[index] = Some(LeDiscoveredDevice {
+                    event_type, address_type, address, data_len: data_len as u8, data, rssi,
+                });
+            } else if self.count < MAX_LE_DISCOVERED_DEVICES {
+                self.devices[self.count] = Some(LeDiscoveredDevice {
+                    event_type, address_type, address, data_len: data_len as u8, data, rssi,
+                });
+                self.count += 1;
+                added += 1;
+            }
+            cursor = rssi_index + 1;
+        }
+        if cursor != event.len() {
+            return Err(HciError::MalformedEvent);
+        }
+        Ok(added)
+    }
+
+    pub fn scanning(&self) -> bool { self.scanning }
+    pub fn count(&self) -> usize { self.count }
+    pub fn device(&self, index: usize) -> Option<LeDiscoveredDevice> {
+        if index >= self.count { None } else { self.devices[index] }
+    }
+}
+
+pub fn le_discovery_self_test() -> bool {
+    let mut state = LeDiscoveryState::new();
+    let mut out = [0_u8; 258];
+    if LeDiscoveryState::scan_parameters_command(&mut out) != Ok(10)
+        || out[..10] != [0x0b, 0x20, 7, 1, 0x10, 0, 0x10, 0, 0, 0]
+        || state.scan_enable_command(true, &mut out) != Ok(5)
+        || out[..5] != [0x0c, 0x20, 2, 1, 1]
+        || !state.scanning()
+    {
+        return false;
+    }
+
+    let report = [
+        EVT_LE_META, 15, LE_SUBEVENT_ADVERTISING_REPORT, 1,
+        0, 1, 1, 2, 3, 4, 5, 6,
+        4, 2, 1, 6, 0xaa, 0xd8,
+    ];
+    if state.handle_advertising_report(&report) != Ok(1)
+        || state.count() != 1
+        || state.handle_advertising_report(&report) != Ok(0)
+        || state.count() != 1
+    {
+        return false;
+    }
+    let Some(device) = state.device(0) else { return false; };
+    if device.event_type != 0 || device.address_type != 1
+        || device.address != [1, 2, 3, 4, 5, 6]
+        || device.data() != [2, 1, 6, 0xaa]
+        || device.rssi != -40
+    {
+        return false;
+    }
+    state.scan_enable_command(false, &mut out) == Ok(5)
+        && !state.scanning()
+        && state.handle_advertising_report(&[EVT_LE_META, 2, LE_SUBEVENT_ADVERTISING_REPORT, 1]).is_err()
+}
+
 pub const EVT_CONNECTION_COMPLETE: u8 = 0x03;
 pub const EVT_DISCONNECTION_COMPLETE: u8 = 0x05;
 pub const OPCODE_CREATE_CONNECTION: u16 = 0x0405;
