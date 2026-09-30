@@ -147,7 +147,8 @@ mod bluetooth_hci;
 #[cfg(any(
     feature = "stage13-5-test",
     feature = "stage13-6-test",
-    feature = "stage13-7-test"
+    feature = "stage13-7-test",
+    feature = "stage13-10-test"
 ))]
 mod xhci;
 
@@ -841,6 +842,15 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
             qemu_test_exit_failure();
         }
         serial::write_line(format_args!("[S13.10A] Bluetooth HCI core foundation: PASSED"));
+        if !xhci::bluetooth_transport_self_test() {
+            serial::write_line(format_args!(
+                "[S13.10B] Bluetooth USB HCI transport contract: FAILED"
+            ));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!(
+            "[S13.10B] Bluetooth USB HCI transport contract: PASSED"
+        ));
     }
 
     if heap::init().is_err() {
