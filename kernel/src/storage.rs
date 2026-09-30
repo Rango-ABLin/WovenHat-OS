@@ -1491,8 +1491,8 @@ fn retain_snapshot_preimages_on_device(
     if old_checksum == 0 {
         return Ok(());
     }
-    let (ids, count) = crate::snapshots::live_snapshot_ids();
-    if count == 0 {
+    let membership = crate::snapshots::snapshot_membership();
+    if membership.is_empty() {
         return Ok(());
     }
     let mut bytes = alloc::vec![0u8; vfs::NODE_CAPACITY];
@@ -1500,7 +1500,7 @@ fn retain_snapshot_preimages_on_device(
     if checksum_bytes(&bytes[..length]) != old_checksum {
         return Err(PersistError::Failed);
     }
-    for snapshot_id in ids.into_iter().take(count) {
+    for snapshot_id in membership.ids() {
         write_snapshot_preimage_on_device(
             device,
             snapshot_id,
@@ -1517,8 +1517,8 @@ fn retain_snapshot_creation_markers_on_device(
     device: &mut impl crate::block::BlockDevice,
     path: &str,
 ) -> Result<(), PersistError> {
-    let (ids, count) = crate::snapshots::live_snapshot_ids();
-    for snapshot_id in ids.into_iter().take(count) {
+    let membership = crate::snapshots::snapshot_membership();
+    for snapshot_id in membership.ids() {
         write_snapshot_preimage_on_device(device, snapshot_id, path, 0, 0, &[])?;
     }
     Ok(())
@@ -1959,8 +1959,8 @@ fn retain_snapshot_directory_preimages_on_device(
     if mode == 0 {
         return Err(PersistError::Failed);
     }
-    let (ids, count) = crate::snapshots::live_snapshot_ids();
-    for snapshot_id in ids.into_iter().take(count) {
+    let membership = crate::snapshots::snapshot_membership();
+    for snapshot_id in membership.ids() {
         write_snapshot_preimage_on_device(
             device,
             snapshot_id,
@@ -2515,8 +2515,8 @@ fn retain_snapshot_rename_objects_on_device(
         }
         Err(_) => return Err(MutationError::Failed),
     };
-    let (ids, count) = crate::snapshots::live_snapshot_ids();
-    if count == 0 {
+    let membership = crate::snapshots::snapshot_membership();
+    if membership.is_empty() {
         return Ok(None);
     }
     let mutation_count = objects.len().checked_mul(2).ok_or(MutationError::Failed)?;
@@ -2526,7 +2526,7 @@ fn retain_snapshot_rename_objects_on_device(
     let mut mutations = alloc::vec::Vec::with_capacity(mutation_count);
     for object in &objects {
         if object.directory {
-            for snapshot_id in ids.into_iter().take(count) {
+            for snapshot_id in membership.ids() {
                 write_snapshot_preimage_on_device(
                     device,
                     snapshot_id,
@@ -2542,7 +2542,7 @@ fn retain_snapshot_rename_objects_on_device(
             retain_snapshot_preimages_on_device(device, &object.old_path, relative, object.checksum)
                 .map_err(|_| MutationError::Failed)?;
         }
-        for snapshot_id in ids.into_iter().take(count) {
+        for snapshot_id in membership.ids() {
             write_snapshot_preimage_on_device(device, snapshot_id, &object.new_path, 0, 0, &[])
                 .map_err(|_| MutationError::Failed)?;
         }
