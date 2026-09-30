@@ -2213,13 +2213,11 @@ pub fn rename_path(old: &str, new: &str) -> Result<(), MutationError> {
     }
     FILE_PAGES.lock().invalidate();
     let membership = crate::snapshots::snapshot_membership();
-    if let Some((objects, mutations)) =
-        plan_snapshot_rename_on_device(&mut disk, old, new, membership)?
-    {
-        crate::snapshots::preflight_live_changes_for_membership(membership, &mutations)
+    if let Some(plan) = plan_snapshot_rename_on_device(&mut disk, old, new, membership)? {
+        crate::snapshots::preflight_live_changes_for_membership(membership, &plan.mutations)
             .map_err(|_| MutationError::Failed)?;
-        retain_snapshot_rename_preimages_on_device(&mut disk, &objects, membership)?;
-        crate::snapshots::record_live_changes_for_membership(membership, &mutations)
+        retain_snapshot_rename_preimages_on_device(&mut disk, &plan.objects, membership)?;
+        crate::snapshots::record_live_changes_for_membership(membership, &plan.mutations)
             .map_err(|_| MutationError::Failed)?;
     }
     let mut result = rename_on_cached_device(&mut disk, old_relative, new_relative);
@@ -2420,6 +2418,11 @@ struct SnapshotRenameObject {
     directory: bool,
 }
 
+struct SnapshotRenamePlan {
+    objects: alloc::vec::Vec<SnapshotRenameObject>,
+    mutations: alloc::vec::Vec<SnapshotMutation>,
+}
+
 fn collect_snapshot_rename_objects_in_volume(
     device: &mut impl crate::block::BlockDevice,
     volume: fat32::Volume,
@@ -2486,7 +2489,7 @@ fn plan_snapshot_rename_on_device(
     old: &str,
     new: &str,
     membership: crate::snapshots::SnapshotMembership,
-) -> Result<Option<(alloc::vec::Vec<SnapshotRenameObject>, alloc::vec::Vec<SnapshotMutation>)>, MutationError> {
+) -> Result<Option<SnapshotRenamePlan>, MutationError> {
     fn collect(
         device: &mut impl crate::block::BlockDevice,
         volume: fat32::Volume,
@@ -2551,7 +2554,7 @@ fn plan_snapshot_rename_on_device(
         mutations.push((crate::wovenfs::path_hash(&object.old_path), object.checksum, 0));
         mutations.push((crate::wovenfs::path_hash(&object.new_path), 0, object.checksum));
     }
-    Ok(Some((objects, mutations)))
+    Ok(Some(SnapshotRenamePlan { objects, mutations }))
 }
 
 fn retain_snapshot_rename_preimages_on_device(
