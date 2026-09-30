@@ -837,6 +837,38 @@ impl L2capChannels {
         Ok(())
     }
 
+    pub fn outbound_data(
+        &self,
+        links: &LinkState,
+        channel: L2capChannel,
+        data: &[u8],
+    ) -> Result<AclPacket, HciError> {
+        if !links.owns_handle(channel.handle)
+            || !self.channels[..self.count].iter().flatten().any(|entry| *entry == channel)
+        {
+            return Err(HciError::UnexpectedOpcode);
+        }
+        let frame = L2capFrame::new(channel.remote_cid, data)?;
+        links.outbound_l2cap(channel.handle, &frame)
+    }
+
+    pub fn inbound_data(
+        &self,
+        links: &LinkState,
+        acl_bytes: &[u8],
+    ) -> Result<(L2capChannel, L2capFrame), HciError> {
+        let (handle, frame) = links.inbound_l2cap(acl_bytes)?;
+        let Some(channel) = self.channels[..self.count]
+            .iter()
+            .flatten()
+            .find(|channel| channel.handle == handle && channel.local_cid == frame.cid)
+            .copied()
+        else {
+            return Err(HciError::UnexpectedOpcode);
+        };
+        Ok((channel, frame))
+    }
+
     pub fn count(&self) -> usize { self.count }
 }
 
@@ -863,6 +895,23 @@ pub fn l2cap_channel_self_test() -> bool {
     if channel.remote_cid != 0x0041 || channels.count() != 1 {
         return false;
     }
+    let Ok(data_acl) = channels.outbound_data(&links, channel, &[0xde, 0xad]) else { return false; };
+    let mut data_bytes = [0_u8; MAX_ACL_PAYLOAD + 4];
+    let data_len = data_acl.encode(&mut data_bytes);
+    let Ok(parsed_acl) = AclPacket::parse(&data_bytes[..data_len]) else { return false; };
+    let Ok(outbound_frame) = L2capFrame::parse(parsed_acl.payload()) else { return false; };
+    if outbound_frame.cid != channel.remote_cid || outbound_frame.payload() != [0xde, 0xad] {
+        return false;
+    }
+
+    let Ok(inbound_frame) = L2capFrame::new(channel.local_cid, &[0xbe, 0xef]) else { return false; };
+    let Ok(inbound_acl) = links.outbound_l2cap(channel.handle, &inbound_frame) else { return false; };
+    let inbound_len = inbound_acl.encode(&mut data_bytes);
+    let Ok((owned_channel, owned_frame)) = channels.inbound_data(&links, &data_bytes[..inbound_len]) else { return false; };
+    if owned_channel != channel || owned_frame.payload() != [0xbe, 0xef] {
+        return false;
+    }
+
     let Ok(disconnect) = channels.disconnection_request(channel, 2) else { return false; };
     if disconnect.payload() != [L2CAP_CMD_DISCONNECTION_REQUEST, 2, 4, 0, 0x41, 0, 0x40, 0] {
         return false;
@@ -870,6 +919,8 @@ pub fn l2cap_channel_self_test() -> bool {
     let disconnect_response = [L2CAP_CMD_DISCONNECTION_RESPONSE, 2, 4, 0, 0x41, 0, 0x40, 0];
     channels.accept_disconnection_response(channel, &disconnect_response).is_ok()
         && channels.count() == 0
+        && channels.outbound_data(&links, channel, &[1]).is_err()
+        && channels.inbound_data(&links, &data_bytes[..inbound_len]).is_err()
         && channels.disconnection_request(channel, 3).is_err()
         && channels.connection_request(&links, 0x43, 1, 1).is_err()
 }
