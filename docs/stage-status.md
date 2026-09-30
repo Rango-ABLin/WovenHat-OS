@@ -369,3 +369,14 @@ GitHub Actions run 36753355665 passed at exact source SHA `98020bfbfa71dd68f0fc5
 This remains deterministic software validation; physical Bluetooth-radio scanning is not claimed. BLE advertising reports, remote-name discovery, connection establishment, L2CAP, pairing/security, ATT/GATT, lifecycle/hotplug, and physical interoperability remain later work.
 
 Next: Stage 13.10F Bluetooth connection establishment and bounded link lifecycle above the accepted discovery state.
+
+
+## Roadmap Stage 13.10F — Bluetooth ACL connection and link lifecycle accepted on 2026-09-30
+
+Stage 13.10F consumes bounded discovery records to construct classic BR/EDR Create Connection commands, validates Connection Complete and Disconnection Complete events, and owns up to eight live ACL links by 12-bit controller handle and Bluetooth address. Duplicate identical completion is idempotent; conflicting handle/address reuse fails closed.
+
+The HCI layer now frames and parses bounded ACL packets (1024-byte software ceiling), validates handle/packet-boundary/broadcast fields, and permits inbound/outbound ACL data only for currently owned live handles. Disconnect immediately revokes ACL authority, so stale-handle traffic is rejected.
+
+GitHub Actions run 36761870548 passed at exact source SHA `79cecd7b0e3bab5db4426e2f6fed3eaa451c0a2b`, including Stage 13.10F 1/2/4-core acceptance and evidence preservation. Artifact digest: `sha256:878f9d8866f09fd6e202062dbfa0784073ae7dbed5e196eb223387c26b40410c`.
+
+This remains deterministic software validation. Physical controller timing, ACL flow-control credits, asynchronous transport recovery and real peripheral interoperability remain hardware/production qualification work. Next: Stage 13.10G L2CAP framing and bounded channel lifecycle above owned ACL links.

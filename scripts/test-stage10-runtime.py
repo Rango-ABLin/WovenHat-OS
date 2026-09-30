@@ -87,7 +87,7 @@ def required_markers(stage, cpus):
                   '13.7': '[S13.7] WovenInput unified event framework: PASSED',
                   '13.8': '[S13.8] WovenAudio stream/API integration: PASSED',
                   '13.9': '[S13.9H] GTK + encrypted key data: PASSED',
-                  '13.10': '[S13.10E] Bluetooth controller capability discovery: PASSED',
+                  '13.10': '[S13.10F] Bluetooth ACL owned data path: PASSED',
                   '1-5': '[S1-5] storage journal: PASSED'}[stage])]
     if stage == '13.9':
         required.extend(WIFI_REQUIRED_MARKERS)
