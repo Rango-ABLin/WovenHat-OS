@@ -824,6 +824,60 @@ impl XhciController {
         Ok(report)
     }
 
+    fn receive_bluetooth_event(&mut self) -> Result<[u8; 257], InitError> {
+        let bluetooth = self.bluetooth.ok_or(InitError::BluetoothNotFound)?;
+        let dci = endpoint_dci(bluetooth.event_endpoint)?;
+        let transfer_length = cmp::min(usize::from(bluetooth.event_max_packet), 257);
+        if transfer_length == 0 {
+            return Err(InitError::DescriptorInvalid);
+        }
+        let buffer_physical = {
+            let buffer = self.bt_event_buffer.as_mut().ok_or(InitError::DmaUnavailable)?;
+            buffer.bytes_mut()[..transfer_length].fill(0);
+            buffer.physical
+        };
+        let normal_ptr = {
+            let ring = self.bt_event_ring.as_mut().ok_or(InitError::CommandFailed)?;
+            ring.push(Trb {
+                parameter: buffer_physical,
+                status: transfer_length as u32,
+                control: (TRB_TYPE_NORMAL << 10) | (1 << 5),
+            })
+        };
+        self.ring_endpoint(dci)?;
+        self.wait_transfer_completion(normal_ptr, self.slot_id)?;
+        fence(Ordering::Acquire);
+        let buffer = self.bt_event_buffer.as_ref().ok_or(InitError::DmaUnavailable)?;
+        let mut event = [0_u8; 257];
+        event[..transfer_length].copy_from_slice(&buffer.bytes()[..transfer_length]);
+        Ok(event)
+    }
+
+    fn send_bluetooth_acl(&mut self, data: &[u8]) -> Result<(), InitError> {
+        let bluetooth = self.bluetooth.ok_or(InitError::BluetoothNotFound)?;
+        if data.is_empty() || data.len() > usize::from(bluetooth.acl_out_max_packet) {
+            return Err(InitError::DescriptorInvalid);
+        }
+        let dci = endpoint_dci(bluetooth.acl_out_endpoint)?;
+        let buffer_physical = {
+            let buffer = self.bt_acl_out_buffer.as_mut().ok_or(InitError::DmaUnavailable)?;
+            buffer.bytes_mut()[..data.len()].copy_from_slice(data);
+            buffer.physical
+        };
+        fence(Ordering::Release);
+        let normal_ptr = {
+            let ring = self.bt_acl_out_ring.as_mut().ok_or(InitError::CommandFailed)?;
+            ring.push(Trb {
+                parameter: buffer_physical,
+                status: data.len() as u32,
+                control: (TRB_TYPE_NORMAL << 10) | (1 << 5),
+            })
+        };
+        self.ring_endpoint(dci)?;
+        self.wait_transfer_completion(normal_ptr, self.slot_id)?;
+        Ok(())
+    }
+
     fn ring_endpoint(&self, dci: u8) -> Result<(), InitError> {
         mmio_write32(
             self.doorbell_base + (u64::from(self.slot_id) * 4),
@@ -939,6 +993,22 @@ pub fn send_bluetooth_command(command: &[u8]) -> Result<(), InitError> {
         .as_mut()
         .ok_or(InitError::MissingController)?
         .send_bluetooth_command(command)
+}
+
+pub fn receive_bluetooth_event() -> Result<[u8; 257], InitError> {
+    CONTROLLER
+        .lock()
+        .as_mut()
+        .ok_or(InitError::MissingController)?
+        .receive_bluetooth_event()
+}
+
+pub fn send_bluetooth_acl(data: &[u8]) -> Result<(), InitError> {
+    CONTROLLER
+        .lock()
+        .as_mut()
+        .ok_or(InitError::MissingController)?
+        .send_bluetooth_acl(data)
 }
 
 pub fn poll_hid_report() -> Result<[u8; 8], InitError> {
