@@ -2707,6 +2707,59 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         serial::write_line(format_args!("[S12.3] encryption: PASSED"));
         qemu_test_exit_success();
     }
+    #[cfg(feature = "stage12-4-reboot-test")]
+    {
+        const PATH: &str = "/mnt/s12r.txt";
+        const ORIGINAL: &[u8] = b"wovenhat-stage12.4-original";
+        const MUTATED: &[u8] = b"wovenhat-stage12.4-mutated";
+
+        if vfs::stat(PATH).is_err() {
+            if vfs::create_read_only(PATH, ORIGINAL).is_err()
+                || vfs::set_metadata(PATH, 0, 0, 0o666).is_err()
+                || storage::persist_path(PATH).is_err()
+            {
+                serial::write_line(format_args!("[S12.4R] seed: FAILED"));
+                qemu_test_exit_failure();
+            }
+            let Some(snapshot_id) = snapshots::capture_wovenfs(1) else {
+                serial::write_line(format_args!("[S12.4R] snapshot: FAILED"));
+                qemu_test_exit_failure();
+            };
+            if vfs::write_file(PATH, MUTATED).is_err()
+                || storage::persist_path(PATH).is_err()
+                || snapshots::prepare_restore(snapshot_id).is_err()
+            {
+                serial::write_line(format_args!("[S12.4R] mutation/intent: FAILED"));
+                qemu_test_exit_failure();
+            }
+            let path_hash = wovenfs::path_hash(PATH);
+            let Ok(preimage) = storage::load_snapshot_preimage(snapshot_id, path_hash) else {
+                serial::write_line(format_args!("[S12.4R] WHP1 load: FAILED"));
+                qemu_test_exit_failure();
+            };
+            if storage::replay_snapshot_preimage(&preimage).is_err() {
+                serial::write_line(format_args!("[S12.4R] interrupted replay: FAILED"));
+                qemu_test_exit_failure();
+            }
+            // Deliberately exit after the durable data replay but before the
+            // WSR1 applied counter advances. The next boot must replay this
+            // record idempotently, verify the target root and clear WSR1.
+            serial::write_line(format_args!("[S12.4R] POWERLOSS AFTER REPLAY BEFORE WSR1 ADVANCE"));
+            qemu_test_exit_success();
+        }
+
+        let mut restored = [0u8; 64];
+        let restored_ok = vfs::read_all(PATH, &mut restored)
+            .is_ok_and(|length| &restored[..length] == ORIGINAL);
+        let intent_cleared = snapshots::pending_restore().is_none()
+            && storage::load_snapshot_restore_intent().is_ok_and(|intent| intent.is_none());
+        if !restored_ok || !intent_cleared {
+            serial::write_line(format_args!("[S12.4R] reboot recovery: FAILED"));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!("[S12.4R] reboot recovery + idempotent replay: PASSED"));
+        qemu_test_exit_success();
+    }
     #[cfg(feature = "stage12-4-test")]
     {
         if !snapshots::structural_self_test() {
