@@ -58,6 +58,7 @@ pub enum InitError {
     InvalidRegisters,
     DescriptorInvalid,
     HidNotFound,
+    BluetoothNotFound,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -216,6 +217,13 @@ pub struct XhciController {
     hid_ring: Option<Ring>,
     hid_buffer: Option<DmaPage>,
     hid: Option<HidInterface>,
+    bluetooth: Option<BluetoothUsbInterface>,
+    bt_event_ring: Option<Ring>,
+    bt_event_buffer: Option<DmaPage>,
+    bt_acl_in_ring: Option<Ring>,
+    bt_acl_in_buffer: Option<DmaPage>,
+    bt_acl_out_ring: Option<Ring>,
+    bt_acl_out_buffer: Option<DmaPage>,
 }
 
 impl XhciController {
@@ -306,6 +314,13 @@ impl XhciController {
             hid_ring: None,
             hid_buffer: None,
             hid: None,
+            bluetooth: None,
+            bt_event_ring: None,
+            bt_event_buffer: None,
+            bt_acl_in_ring: None,
+            bt_acl_in_buffer: None,
+            bt_acl_out_ring: None,
+            bt_acl_out_buffer: None,
         };
         controller.reset_port(connected_port)?;
         controller.slot_id = controller.enable_slot()?;
