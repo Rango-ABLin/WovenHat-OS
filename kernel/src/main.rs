@@ -878,6 +878,15 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         serial::write_line(format_args!(
             "[S13.10E] Bluetooth inquiry discovery contract: PASSED"
         ));
+        if !bluetooth_hci::capability_self_test() {
+            serial::write_line(format_args!(
+                "[S13.10E] Bluetooth controller capability discovery: FAILED"
+            ));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!(
+            "[S13.10E] Bluetooth controller capability discovery: PASSED"
+        ));
     }
 
     if heap::init().is_err() {
