@@ -1217,7 +1217,7 @@ pub struct SnapshotPreimage {
 impl SnapshotPreimage {
     /// Replay phase: restore directories before files so parents exist, then
     /// remove post-snapshot creations deepest-first after restoration.
-    #[cfg(any(feature = "stage12-4-test", feature = "stage12-4-reboot-test"))]
+    #[allow(dead_code)]
     pub fn replay_phase(&self) -> u8 {
         if self.checksum == 0 {
             2
@@ -1228,7 +1228,7 @@ impl SnapshotPreimage {
         }
     }
 
-    #[cfg(any(feature = "stage12-4-test", feature = "stage12-4-reboot-test"))]
+    #[allow(dead_code)]
     pub fn path_depth(&self) -> usize {
         self.path.as_bytes().iter().filter(|byte| **byte == b'/').count()
     }
