@@ -504,6 +504,9 @@ impl LinkState {
                     .flatten()
                     .find(|link| link.handle == handle || link.address == address)
                 {
+                    if existing.handle != handle || existing.address != address {
+                        return Err(HciError::UnexpectedOpcode);
+                    }
                     return Ok(LinkEvent::Connected(*existing));
                 }
                 if self.count == MAX_ACL_LINKS {
@@ -681,6 +684,8 @@ pub fn link_lifecycle_self_test() -> bool {
         == Ok(LinkEvent::Disconnected(0x42))
         && links.count() == 0
         && links.link(0).is_none()
+        && links.outbound_acl(0x42, &[1]).is_err()
+        && links.inbound_acl(&[0x42, 0x20, 1, 0, 1]).is_err()
         && links.handle_event(&connected[..12]).is_err()
         && LinkState::disconnect_command(0x1000, 0x13, &mut bytes).is_err()
 }
