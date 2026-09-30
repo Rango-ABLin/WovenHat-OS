@@ -73,7 +73,6 @@ impl ControllerState {
     pub fn ready(&self) -> bool { self.credits != 0 && self.last_opcode.is_none() }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct HciTransaction {
     state: ControllerState,
 }
