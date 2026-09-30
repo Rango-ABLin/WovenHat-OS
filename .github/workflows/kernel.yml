@@ -142,6 +142,30 @@ jobs:
           for cpu in 1 2 4; do
             python3 scripts/test-stage10-runtime.py --stage 13.7 --cpus "$cpu" --timeout 120 --qemu "$qemu" --firmware "$ovmf_code"
           done
+      - name: Stage 13.8 WovenAudio HDA acceptance and hardening
+        shell: bash
+        run: |
+          qemu=/usr/bin/qemu-system-x86_64
+          ovmf_code=
+          for variant in OVMF_CODE_4M.fd OVMF_CODE.fd; do
+            candidate="/usr/share/OVMF/$variant"
+            if [ -f "$candidate" ]; then
+              ovmf_code="$candidate"
+              break
+            fi
+          done
+          test -n "$ovmf_code"
+          cargo build --features stage13-8-test
+          cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage13-8-test -- -D warnings
+          for cpu in 1 2 4; do
+            python3 scripts/test-stage10-runtime.py --stage 13.8 --cpus "$cpu" --timeout 120 --qemu "$qemu" --firmware "$ovmf_code"
+          done
+          for cpu in 1 2 4; do
+            for run in 1 2 3; do
+              echo "Stage 13.8H stress: CPU=$cpu run=$run/3"
+              python3 scripts/test-stage10-runtime.py --stage 13.8 --cpus "$cpu" --timeout 120 --qemu "$qemu" --firmware "$ovmf_code"
+            done
+          done
       - name: Preserve validation evidence
         if: always()
         uses: actions/upload-artifact@v4
@@ -158,3 +182,4 @@ jobs:
             audit-artifacts/stage13.5-*/
             audit-artifacts/stage13.6-*/
             audit-artifacts/stage13.7-*/
+            audit-artifacts/stage13.8-*/
