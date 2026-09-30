@@ -41,7 +41,8 @@ const JOURNAL_SECTOR_COUNT: usize = 2;
 const RESTORE_MAGIC: &[u8; 4] = b"WSR1";
 const RESTORE_VERSION: u16 = 1;
 const SNAPSHOT_CATALOG_MAGIC: &[u8; 4] = b"WSC1";
-const SNAPSHOT_CATALOG_VERSION: u16 = 2;
+const SNAPSHOT_CATALOG_VERSION: u16 = 3;
+const SNAPSHOT_CATALOG_V2_VERSION: u16 = 2;
 const SNAPSHOT_CATALOG_LEGACY_VERSION: u16 = 1;
 const SNAPSHOT_CATALOG_SLOT_SECTORS: usize = 4;
 const SNAPSHOT_CATALOG_SLOTS: usize = 2;
@@ -350,6 +351,7 @@ pub struct SnapshotCowEntry {
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub struct SnapshotCatalog {
+    pub next_snapshot_id: u64,
     pub snapshots: [Option<SnapshotCatalogEntry>; SNAPSHOT_CATALOG_SNAPSHOTS],
     pub changes: [Option<SnapshotCowEntry>; SNAPSHOT_CATALOG_CHANGES],
 }
@@ -357,6 +359,7 @@ pub struct SnapshotCatalog {
 impl SnapshotCatalog {
     pub const fn empty() -> Self {
         Self {
+            next_snapshot_id: 1,
             snapshots: [None; SNAPSHOT_CATALOG_SNAPSHOTS],
             changes: [None; SNAPSHOT_CATALOG_CHANGES],
         }
@@ -406,7 +409,8 @@ fn encode_snapshot_catalog(catalog: SnapshotCatalog, sequence: u64) -> [u8; SECT
     image[..4].copy_from_slice(SNAPSHOT_CATALOG_MAGIC);
     image[4..6].copy_from_slice(&SNAPSHOT_CATALOG_VERSION.to_le_bytes());
     image[16..24].copy_from_slice(&sequence.to_le_bytes());
-    let mut offset = 24usize;
+    image[24..32].copy_from_slice(&catalog.next_snapshot_id.to_le_bytes());
+    let mut offset = 32usize;
     for entry in catalog.snapshots {
         if let Some(entry) = entry {
             image[offset] = 1;
@@ -438,17 +442,24 @@ fn decode_snapshot_catalog(
         return Ok(None);
     }
     let version = read_u16(image, 4);
-    let (sequence, mut offset) = if version == SNAPSHOT_CATALOG_VERSION {
+    let (sequence, mut offset, persisted_next_id) = if version == SNAPSHOT_CATALOG_VERSION {
+        let sequence = read_u64(image, 16);
+        let next_id = read_u64(image, 24);
+        if sequence == 0 || next_id == 0 || read_u64(image, 8) != catalog_checksum(&image[16..]) {
+            return Err(Error::CorruptDirectory);
+        }
+        (sequence, 32usize, Some(next_id))
+    } else if version == SNAPSHOT_CATALOG_V2_VERSION {
         let sequence = read_u64(image, 16);
         if sequence == 0 || read_u64(image, 8) != catalog_checksum(&image[16..]) {
             return Err(Error::CorruptDirectory);
         }
-        (sequence, 24usize)
+        (sequence, 24usize, None)
     } else if version == SNAPSHOT_CATALOG_LEGACY_VERSION {
         if read_u64(image, 8) != catalog_checksum(&image[16..]) {
             return Err(Error::CorruptDirectory);
         }
-        (0, 16usize)
+        (0, 16usize, None)
     } else {
         return Err(Error::CorruptDirectory);
     };
@@ -481,6 +492,12 @@ fn decode_snapshot_catalog(
             *slot = Some(entry);
         }
         offset += 40;
+    }
+    let derived_next_id = catalog.snapshots.iter().flatten().map(|entry| entry.id).max().unwrap_or(0)
+        .checked_add(1).ok_or(Error::CorruptDirectory)?.max(1);
+    catalog.next_snapshot_id = persisted_next_id.unwrap_or(derived_next_id);
+    if catalog.next_snapshot_id < derived_next_id {
+        return Err(Error::CorruptDirectory);
     }
     Ok(Some((sequence, catalog)))
 }
