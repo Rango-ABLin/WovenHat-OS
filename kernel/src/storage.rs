@@ -1913,9 +1913,12 @@ pub fn persist_directory(path: &str) -> Result<(), PersistError> {
     // A directory created after a snapshot must disappear on rollback just
     // like a newly-created file. Retain an empty creation marker for every
     // live snapshot, then durably publish the COW catalog before FAT mkdir.
-    retain_snapshot_creation_markers_on_device(&mut disk, path)?;
-    crate::snapshots::record_live_change(crate::wovenfs::path_hash(path), 0, 0)
-        .map_err(|_| PersistError::Failed)?;
+    retain_snapshot_creation_markers_on_device(&mut disk, path, membership)?;
+    crate::snapshots::record_live_changes_for_membership(
+        membership,
+        &[(crate::wovenfs::path_hash(path), 0, 0)],
+    )
+    .map_err(|_| PersistError::Failed)?;
     let result = mkdir_on_cached_device(&mut disk, relative);
     let flushed = disk.flush().map_err(|_| PersistError::Failed);
     let status = result.and(flushed);
