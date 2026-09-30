@@ -58,6 +58,7 @@ pub enum InitError {
     InvalidRegisters,
     DescriptorInvalid,
     HidNotFound,
+    BluetoothNotFound,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -216,6 +217,13 @@ pub struct XhciController {
     hid_ring: Option<Ring>,
     hid_buffer: Option<DmaPage>,
     hid: Option<HidInterface>,
+    bluetooth: Option<BluetoothUsbInterface>,
+    bt_event_ring: Option<Ring>,
+    bt_event_buffer: Option<DmaPage>,
+    bt_acl_in_ring: Option<Ring>,
+    bt_acl_in_buffer: Option<DmaPage>,
+    bt_acl_out_ring: Option<Ring>,
+    bt_acl_out_buffer: Option<DmaPage>,
 }
 
 impl XhciController {
@@ -306,6 +314,13 @@ impl XhciController {
             hid_ring: None,
             hid_buffer: None,
             hid: None,
+            bluetooth: None,
+            bt_event_ring: None,
+            bt_event_buffer: None,
+            bt_acl_in_ring: None,
+            bt_acl_in_buffer: None,
+            bt_acl_out_ring: None,
+            bt_acl_out_buffer: None,
         };
         controller.reset_port(connected_port)?;
         controller.slot_id = controller.enable_slot()?;
@@ -474,6 +489,150 @@ impl XhciController {
         })
     }
 
+    fn enumerate_bluetooth(&mut self) -> Result<BluetoothUsbInterface, InitError> {
+        self.address_device()?;
+        let mut descriptor = DmaPage::allocate_zeroed().ok_or(InitError::DmaUnavailable)?;
+        self.control_in(
+            0x80,
+            USB_REQUEST_GET_DESCRIPTOR,
+            u16::from(USB_DESCRIPTOR_CONFIGURATION) << 8,
+            0,
+            &mut descriptor,
+            9,
+        )?;
+        let header = descriptor.bytes();
+        if header[0] < 9 || header[1] != USB_DESCRIPTOR_CONFIGURATION {
+            return Err(InitError::DescriptorInvalid);
+        }
+        let total_length = usize::from(u16::from_le_bytes([header[2], header[3]]));
+        if !(9..=PAGE_SIZE).contains(&total_length) {
+            return Err(InitError::DescriptorInvalid);
+        }
+        let configuration = header[5];
+        self.control_in(
+            0x80,
+            USB_REQUEST_GET_DESCRIPTOR,
+            u16::from(USB_DESCRIPTOR_CONFIGURATION) << 8,
+            0,
+            &mut descriptor,
+            total_length,
+        )?;
+        let bluetooth =
+            parse_bluetooth_usb_interface(&descriptor.bytes()[..total_length], configuration)
+                .ok_or(InitError::BluetoothNotFound)?;
+        self.control_no_data(
+            0x00,
+            USB_REQUEST_SET_CONFIGURATION,
+            u16::from(bluetooth.configuration),
+            0,
+        )?;
+        self.configure_bluetooth_endpoints(bluetooth)?;
+        self.bluetooth = Some(bluetooth);
+        Ok(bluetooth)
+    }
+
+    fn configure_bluetooth_endpoints(
+        &mut self,
+        bluetooth: BluetoothUsbInterface,
+    ) -> Result<(), InitError> {
+        let event_dci = endpoint_dci(bluetooth.event_endpoint)?;
+        let acl_in_dci = endpoint_dci(bluetooth.acl_in_endpoint)?;
+        let acl_out_dci = endpoint_dci(bluetooth.acl_out_endpoint)?;
+        if event_dci == acl_in_dci || event_dci == acl_out_dci || acl_in_dci == acl_out_dci {
+            return Err(InitError::DescriptorInvalid);
+        }
+
+        let event_ring = Ring::new(DmaPage::allocate_zeroed().ok_or(InitError::DmaUnavailable)?);
+        let acl_in_ring = Ring::new(DmaPage::allocate_zeroed().ok_or(InitError::DmaUnavailable)?);
+        let acl_out_ring = Ring::new(DmaPage::allocate_zeroed().ok_or(InitError::DmaUnavailable)?);
+        let event_buffer = DmaPage::allocate_zeroed().ok_or(InitError::DmaUnavailable)?;
+        let acl_in_buffer = DmaPage::allocate_zeroed().ok_or(InitError::DmaUnavailable)?;
+        let acl_out_buffer = DmaPage::allocate_zeroed().ok_or(InitError::DmaUnavailable)?;
+        let mut input = DmaPage::allocate_zeroed().ok_or(InitError::DmaUnavailable)?;
+        input.bytes_mut().fill(0);
+
+        let output = self.output_context.ok_or(InitError::CommandFailed)?;
+        input.bytes_mut()[self.context_size..self.context_size * 2]
+            .copy_from_slice(&output.bytes()[..self.context_size]);
+        let add_flags = 1_u32
+            | (1_u32 << event_dci)
+            | (1_u32 << acl_in_dci)
+            | (1_u32 << acl_out_dci);
+        write_u32(input.bytes_mut(), 4, add_flags);
+
+        let slot_offset = self.context_size;
+        let mut slot_dword0 = read_u32(input.bytes(), slot_offset);
+        slot_dword0 &= !(0x1f << 27);
+        let context_entries = event_dci.max(acl_in_dci).max(acl_out_dci);
+        slot_dword0 |= u32::from(context_entries) << 27;
+        write_u32(input.bytes_mut(), slot_offset, slot_dword0);
+
+        write_bluetooth_endpoint_context(
+            input.bytes_mut(),
+            self.context_size,
+            event_dci,
+            bluetooth.event_endpoint,
+            bluetooth.event_max_packet,
+            bluetooth.event_interval,
+            self.port_speed()?,
+            event_ring.page.physical,
+            USB_ENDPOINT_INTERRUPT,
+        )?;
+        write_bluetooth_endpoint_context(
+            input.bytes_mut(),
+            self.context_size,
+            acl_in_dci,
+            bluetooth.acl_in_endpoint,
+            bluetooth.acl_in_max_packet,
+            0,
+            self.port_speed()?,
+            acl_in_ring.page.physical,
+            USB_ENDPOINT_BULK,
+        )?;
+        write_bluetooth_endpoint_context(
+            input.bytes_mut(),
+            self.context_size,
+            acl_out_dci,
+            bluetooth.acl_out_endpoint,
+            bluetooth.acl_out_max_packet,
+            0,
+            self.port_speed()?,
+            acl_out_ring.page.physical,
+            USB_ENDPOINT_BULK,
+        )?;
+        fence(Ordering::Release);
+
+        let command_ptr = self.command_ring.push(Trb {
+            parameter: input.physical,
+            status: 0,
+            control: (TRB_TYPE_CONFIGURE_ENDPOINT << 10) | (u32::from(self.slot_id) << 24),
+        });
+        mmio_write32(self.doorbell_base, 0)?;
+        self.wait_command_completion(command_ptr)?;
+
+        self.bt_event_ring = Some(event_ring);
+        self.bt_event_buffer = Some(event_buffer);
+        self.bt_acl_in_ring = Some(acl_in_ring);
+        self.bt_acl_in_buffer = Some(acl_in_buffer);
+        self.bt_acl_out_ring = Some(acl_out_ring);
+        self.bt_acl_out_buffer = Some(acl_out_buffer);
+        Ok(())
+    }
+
+    fn send_bluetooth_command(&mut self, command: &[u8]) -> Result<(), InitError> {
+        let bluetooth = self.bluetooth.ok_or(InitError::BluetoothNotFound)?;
+        if command.is_empty() || command.len() > 258 {
+            return Err(InitError::DescriptorInvalid);
+        }
+        self.control_out(
+            USB_REQUEST_TYPE_BLUETOOTH_COMMAND,
+            0,
+            0,
+            u16::from(bluetooth.interface),
+            command,
+        )
+    }
+
     fn control_in(
         &mut self,
         request_type: u8,
@@ -508,6 +667,42 @@ impl XhciController {
         self.wait_transfer_completion(status_ptr, self.slot_id)?;
         fence(Ordering::Acquire);
         Ok(length)
+    }
+
+    fn control_out(
+        &mut self,
+        request_type: u8,
+        request: u8,
+        value: u16,
+        index: u16,
+        data: &[u8],
+    ) -> Result<(), InitError> {
+        if data.is_empty() || data.len() > PAGE_SIZE {
+            return Err(InitError::DescriptorInvalid);
+        }
+        let mut buffer = DmaPage::allocate_zeroed().ok_or(InitError::DmaUnavailable)?;
+        buffer.bytes_mut()[..data.len()].copy_from_slice(data);
+        fence(Ordering::Release);
+        let setup = setup_packet(request_type, request, value, index, data.len() as u16);
+        let ring = self.ep0_ring.as_mut().ok_or(InitError::CommandFailed)?;
+        ring.push(Trb {
+            parameter: setup,
+            status: 8,
+            control: (TRB_TYPE_SETUP_STAGE << 10) | (1 << 6) | (2 << 16),
+        });
+        ring.push(Trb {
+            parameter: buffer.physical,
+            status: data.len() as u32,
+            control: TRB_TYPE_DATA_STAGE << 10,
+        });
+        let status_ptr = ring.push(Trb {
+            parameter: 0,
+            status: 0,
+            control: (TRB_TYPE_STATUS_STAGE << 10) | (1 << 16) | (1 << 5),
+        });
+        self.ring_endpoint(1)?;
+        self.wait_transfer_completion(status_ptr, self.slot_id)?;
+        Ok(())
     }
 
     fn control_no_data(
@@ -629,6 +824,89 @@ impl XhciController {
         Ok(report)
     }
 
+    fn receive_bluetooth_event(&mut self) -> Result<[u8; 257], InitError> {
+        let bluetooth = self.bluetooth.ok_or(InitError::BluetoothNotFound)?;
+        let dci = endpoint_dci(bluetooth.event_endpoint)?;
+        let transfer_length = cmp::min(usize::from(bluetooth.event_max_packet), 257);
+        if transfer_length == 0 {
+            return Err(InitError::DescriptorInvalid);
+        }
+        let buffer_physical = {
+            let buffer = self.bt_event_buffer.as_mut().ok_or(InitError::DmaUnavailable)?;
+            buffer.bytes_mut()[..transfer_length].fill(0);
+            buffer.physical
+        };
+        let normal_ptr = {
+            let ring = self.bt_event_ring.as_mut().ok_or(InitError::CommandFailed)?;
+            ring.push(Trb {
+                parameter: buffer_physical,
+                status: transfer_length as u32,
+                control: (TRB_TYPE_NORMAL << 10) | (1 << 5),
+            })
+        };
+        self.ring_endpoint(dci)?;
+        self.wait_transfer_completion(normal_ptr, self.slot_id)?;
+        fence(Ordering::Acquire);
+        let buffer = self.bt_event_buffer.as_ref().ok_or(InitError::DmaUnavailable)?;
+        let mut event = [0_u8; 257];
+        event[..transfer_length].copy_from_slice(&buffer.bytes()[..transfer_length]);
+        Ok(event)
+    }
+
+    fn receive_bluetooth_acl(&mut self) -> Result<[u8; PAGE_SIZE], InitError> {
+        let bluetooth = self.bluetooth.ok_or(InitError::BluetoothNotFound)?;
+        let dci = endpoint_dci(bluetooth.acl_in_endpoint)?;
+        let transfer_length = cmp::min(usize::from(bluetooth.acl_in_max_packet), PAGE_SIZE);
+        if transfer_length == 0 {
+            return Err(InitError::DescriptorInvalid);
+        }
+        let buffer_physical = {
+            let buffer = self.bt_acl_in_buffer.as_mut().ok_or(InitError::DmaUnavailable)?;
+            buffer.bytes_mut()[..transfer_length].fill(0);
+            buffer.physical
+        };
+        let normal_ptr = {
+            let ring = self.bt_acl_in_ring.as_mut().ok_or(InitError::CommandFailed)?;
+            ring.push(Trb {
+                parameter: buffer_physical,
+                status: transfer_length as u32,
+                control: (TRB_TYPE_NORMAL << 10) | (1 << 5),
+            })
+        };
+        self.ring_endpoint(dci)?;
+        self.wait_transfer_completion(normal_ptr, self.slot_id)?;
+        fence(Ordering::Acquire);
+        let buffer = self.bt_acl_in_buffer.as_ref().ok_or(InitError::DmaUnavailable)?;
+        let mut data = [0_u8; PAGE_SIZE];
+        data[..transfer_length].copy_from_slice(&buffer.bytes()[..transfer_length]);
+        Ok(data)
+    }
+
+    fn send_bluetooth_acl(&mut self, data: &[u8]) -> Result<(), InitError> {
+        let bluetooth = self.bluetooth.ok_or(InitError::BluetoothNotFound)?;
+        if data.is_empty() || data.len() > usize::from(bluetooth.acl_out_max_packet) {
+            return Err(InitError::DescriptorInvalid);
+        }
+        let dci = endpoint_dci(bluetooth.acl_out_endpoint)?;
+        let buffer_physical = {
+            let buffer = self.bt_acl_out_buffer.as_mut().ok_or(InitError::DmaUnavailable)?;
+            buffer.bytes_mut()[..data.len()].copy_from_slice(data);
+            buffer.physical
+        };
+        fence(Ordering::Release);
+        let normal_ptr = {
+            let ring = self.bt_acl_out_ring.as_mut().ok_or(InitError::CommandFailed)?;
+            ring.push(Trb {
+                parameter: buffer_physical,
+                status: data.len() as u32,
+                control: (TRB_TYPE_NORMAL << 10) | (1 << 5),
+            })
+        };
+        self.ring_endpoint(dci)?;
+        self.wait_transfer_completion(normal_ptr, self.slot_id)?;
+        Ok(())
+    }
+
     fn ring_endpoint(&self, dci: u8) -> Result<(), InitError> {
         mmio_write32(
             self.doorbell_base + (u64::from(self.slot_id) * 4),
@@ -727,6 +1005,49 @@ pub fn init_hid() -> Result<HidSummary, InitError> {
         .enumerate_hid()
 }
 
+pub fn init_bluetooth() -> Result<BluetoothUsbInterface, InitError> {
+    let mut slot = CONTROLLER.lock();
+    if slot.is_none() {
+        let device = find_controller().ok_or(InitError::MissingController)?;
+        *slot = Some(XhciController::initialize(device)?);
+    }
+    slot.as_mut()
+        .ok_or(InitError::MissingController)?
+        .enumerate_bluetooth()
+}
+
+pub fn send_bluetooth_command(command: &[u8]) -> Result<(), InitError> {
+    CONTROLLER
+        .lock()
+        .as_mut()
+        .ok_or(InitError::MissingController)?
+        .send_bluetooth_command(command)
+}
+
+pub fn receive_bluetooth_event() -> Result<[u8; 257], InitError> {
+    CONTROLLER
+        .lock()
+        .as_mut()
+        .ok_or(InitError::MissingController)?
+        .receive_bluetooth_event()
+}
+
+pub fn receive_bluetooth_acl() -> Result<[u8; PAGE_SIZE], InitError> {
+    CONTROLLER
+        .lock()
+        .as_mut()
+        .ok_or(InitError::MissingController)?
+        .receive_bluetooth_acl()
+}
+
+pub fn send_bluetooth_acl(data: &[u8]) -> Result<(), InitError> {
+    CONTROLLER
+        .lock()
+        .as_mut()
+        .ok_or(InitError::MissingController)?
+        .send_bluetooth_acl(data)
+}
+
 pub fn poll_hid_report() -> Result<[u8; 8], InitError> {
     CONTROLLER
         .lock()
@@ -751,6 +1072,64 @@ fn find_controller() -> Option<pci::Device> {
         }
     }
     None
+}
+
+fn endpoint_dci(endpoint_address: u8) -> Result<u8, InitError> {
+    let number = endpoint_address & 0x0f;
+    if number == 0 {
+        return Err(InitError::DescriptorInvalid);
+    }
+    let direction_in = endpoint_address & 0x80 != 0;
+    let dci = number
+        .saturating_mul(2)
+        .saturating_add(u8::from(direction_in));
+    if dci > 31 {
+        return Err(InitError::DescriptorInvalid);
+    }
+    Ok(dci)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn write_bluetooth_endpoint_context(
+    input: &mut [u8; PAGE_SIZE],
+    context_size: usize,
+    dci: u8,
+    endpoint_address: u8,
+    max_packet: u16,
+    interval: u8,
+    speed: u8,
+    ring_physical: u64,
+    transfer_type: u8,
+) -> Result<(), InitError> {
+    if max_packet == 0 {
+        return Err(InitError::DescriptorInvalid);
+    }
+    let direction_in = endpoint_address & 0x80 != 0;
+    let endpoint_type = match (transfer_type, direction_in) {
+        (USB_ENDPOINT_INTERRUPT, true) => 7_u32,
+        (USB_ENDPOINT_BULK, true) => 6_u32,
+        (USB_ENDPOINT_BULK, false) => 2_u32,
+        _ => return Err(InitError::DescriptorInvalid),
+    };
+    let offset = context_size * (usize::from(dci) + 1);
+    let interval_value = if transfer_type == USB_ENDPOINT_INTERRUPT {
+        xhci_interval(speed, interval)
+    } else {
+        0
+    };
+    write_u32(input, offset, u32::from(interval_value) << 16);
+    write_u32(
+        input,
+        offset + 4,
+        (3 << 1) | (endpoint_type << 3) | (u32::from(max_packet) << 16),
+    );
+    write_u64(input, offset + 8, ring_physical | 1);
+    write_u32(
+        input,
+        offset + 16,
+        u32::from(max_packet) | (u32::from(max_packet) << 16),
+    );
+    Ok(())
 }
 
 fn find_connected_port(op_base: u64, max_ports: u8) -> Result<u8, InitError> {
@@ -974,6 +1353,25 @@ pub fn bluetooth_transport_self_test() -> bool {
         && bluetooth_acl_in_plan(bt).endpoint == 0x82
         && bluetooth_acl_out_plan(bt, 32).map(|plan| plan.endpoint) == Some(0x02)
         && bluetooth_acl_out_plan(bt, 65).is_none()
+        && live_bluetooth_command_contract_self_test(bt)
+}
+
+fn live_bluetooth_command_contract_self_test(bluetooth: BluetoothUsbInterface) -> bool {
+    let command = [0x03_u8, 0x0c, 0x00];
+    let Some(plan) = bluetooth_command_plan(bluetooth, command.len()) else {
+        return false;
+    };
+    plan.kind == BluetoothTransferKind::Command
+        && plan.endpoint == bluetooth.interface
+        && plan.length == 3
+        && bluetooth_command_setup(bluetooth.interface, plan.length)
+            == setup_packet(
+                USB_REQUEST_TYPE_BLUETOOTH_COMMAND,
+                0,
+                0,
+                u16::from(bluetooth.interface),
+                3,
+            )
 }
 
 fn hid_kind(protocol: u8) -> HidKind {

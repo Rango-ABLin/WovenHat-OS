@@ -104,6 +104,79 @@ impl HciTransaction {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum InitializationStep {
+    Reset,
+    ReadLocalVersion,
+    Ready,
+}
+
+pub struct ControllerInitializer {
+    transaction: HciTransaction,
+    step: InitializationStep,
+}
+
+impl ControllerInitializer {
+    pub const fn new() -> Self {
+        Self {
+            transaction: HciTransaction::new(),
+            step: InitializationStep::Reset,
+        }
+    }
+
+    pub fn step(&self) -> InitializationStep {
+        self.step
+    }
+
+    pub fn next_command(&mut self, out: &mut [u8; 258]) -> Result<Option<usize>, HciError> {
+        let opcode = match self.step {
+            InitializationStep::Reset => OPCODE_RESET,
+            InitializationStep::ReadLocalVersion => OPCODE_READ_LOCAL_VERSION,
+            InitializationStep::Ready => return Ok(None),
+        };
+        let command = HciCommand::new(opcode, &[])?;
+        self.transaction.begin_command(&command, out).map(Some)
+    }
+
+    pub fn complete(&mut self, event: &[u8]) -> Result<(), HciError> {
+        self.transaction.complete_event(event)?;
+        self.step = match self.step {
+            InitializationStep::Reset => InitializationStep::ReadLocalVersion,
+            InitializationStep::ReadLocalVersion => InitializationStep::Ready,
+            InitializationStep::Ready => InitializationStep::Ready,
+        };
+        Ok(())
+    }
+
+    pub fn ready(&self) -> bool {
+        self.step == InitializationStep::Ready && self.transaction.ready()
+    }
+}
+
+pub fn initialization_self_test() -> bool {
+    let mut init = ControllerInitializer::new();
+    let mut bytes = [0_u8; 258];
+    if init.step() != InitializationStep::Reset
+        || init.next_command(&mut bytes) != Ok(Some(3))
+        || bytes[..3] != [0x03, 0x0c, 0]
+    {
+        return false;
+    }
+    if init
+        .complete(&[EVT_COMMAND_COMPLETE, 4, 1, 0x03, 0x0c, 0])
+        .is_err()
+        || init.step() != InitializationStep::ReadLocalVersion
+    {
+        return false;
+    }
+    if init.next_command(&mut bytes) != Ok(Some(3)) || bytes[..3] != [0x01, 0x10, 0] {
+        return false;
+    }
+    init.complete(&[EVT_COMMAND_COMPLETE, 4, 1, 0x01, 0x10, 0]).is_ok()
+        && init.ready()
+        && init.next_command(&mut bytes) == Ok(None)
+}
+
 pub fn transaction_self_test() -> bool {
     let reset = HciCommand::new(OPCODE_RESET, &[]).unwrap();
     let version = HciCommand::new(OPCODE_READ_LOCAL_VERSION, &[]).unwrap();
