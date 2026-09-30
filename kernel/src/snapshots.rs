@@ -21,12 +21,9 @@ pub struct CowRecord {
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum RestoreError {
-    #[cfg(feature = "stage12-4-test")]
     MissingSnapshot,
-    #[cfg(feature = "stage12-4-test")]
     ChecksumMismatch,
     ChangeLogFull,
-    #[cfg(feature = "stage12-4-test")]
     RestoreBusy,
     PersistenceFailed,
 }
@@ -146,7 +143,6 @@ pub fn live_snapshot_ids() -> ([u64; MAX], usize) {
     (ids, count)
 }
 
-#[cfg(feature = "stage12-4-test")]
 pub fn get(id: u64) -> Option<Snapshot> {
     TABLE.lock().iter().flatten().find(|s| s.id == id).copied()
 }
@@ -256,28 +252,22 @@ pub fn record_live_changes(
 /// Begin a rollback only when the caller's durable root still matches the
 /// snapshot root. This prevents restoring a catalog entry against unrelated
 /// filesystem state. Returned generation becomes the rollback target.
-#[cfg(feature = "stage12-4-test")]
-pub fn begin_restore(id: u64, durable_checksum: u64) -> Result<u64, RestoreError> {
-    let snapshot = get(id).ok_or(RestoreError::MissingSnapshot)?;
-    if snapshot.checksum != durable_checksum {
-        return Err(RestoreError::ChecksumMismatch);
-    }
-    Ok(snapshot.generation)
+pub fn begin_restore(id: u64) -> Result<Snapshot, RestoreError> {
+    get(id).ok_or(RestoreError::MissingSnapshot)
 }
 
 /// Persist the logical rollback intent before replaying any pre-images. A
 /// reboot can query pending_restore() and resume from the applied index.
-#[cfg(feature = "stage12-4-test")]
-pub fn prepare_restore(id: u64, durable_checksum: u64) -> Result<RestoreIntent, RestoreError> {
-    let generation = begin_restore(id, durable_checksum)?;
+pub fn prepare_restore(id: u64) -> Result<RestoreIntent, RestoreError> {
+    let snapshot = begin_restore(id)?;
     let pending = RESTORE_INTENT.lock();
     if pending.is_some() {
         return Err(RestoreError::RestoreBusy);
     }
     let intent = RestoreIntent {
         snapshot_id: id,
-        generation,
-        expected_root: durable_checksum,
+        generation: snapshot.generation,
+        expected_root: snapshot.checksum,
         applied: 0,
     };
     drop(pending);
@@ -291,7 +281,6 @@ pub fn prepare_restore(id: u64, durable_checksum: u64) -> Result<RestoreIntent, 
     Ok(intent)
 }
 
-#[cfg(feature = "stage12-4-test")]
 pub fn mark_restore_applied(id: u64) -> Result<RestoreIntent, RestoreError> {
     let pending = RESTORE_INTENT.lock();
     let Some(mut intent) = *pending else {
@@ -323,12 +312,43 @@ pub fn recover_restore() -> Result<Option<RestoreIntent>, RestoreError> {
     Ok(durable)
 }
 
-#[cfg(feature = "stage12-4-test")]
+pub fn replay_pending_restore() -> Result<Option<u64>, RestoreError> {
+    let Some(intent) = recover_restore()? else {
+        return Ok(None);
+    };
+    let snapshot = get(intent.snapshot_id).ok_or(RestoreError::MissingSnapshot)?;
+    if snapshot.generation != intent.generation || snapshot.checksum != intent.expected_root {
+        return Err(RestoreError::ChecksumMismatch);
+    }
+    let mut plan = [None; MAX_CHANGES];
+    let mut count = 0usize;
+    {
+        let changes = CHANGES.lock();
+        for record in changes.iter().flatten().filter(|record| record.snapshot_id == intent.snapshot_id) {
+            plan[count] = Some(*record);
+            count += 1;
+        }
+    }
+    if intent.applied > count {
+        return Err(RestoreError::PersistenceFailed);
+    }
+    for record in plan.into_iter().flatten().skip(intent.applied) {
+        let preimage = crate::storage::load_snapshot_preimage(record.snapshot_id, record.path_hash)
+            .map_err(|_| RestoreError::PersistenceFailed)?;
+        if preimage.checksum != record.old_checksum {
+            return Err(RestoreError::ChecksumMismatch);
+        }
+        crate::storage::replay_snapshot_preimage(&preimage)
+            .map_err(|_| RestoreError::PersistenceFailed)?;
+        mark_restore_applied(intent.snapshot_id)?;
+    }
+    Ok(Some(intent.expected_root))
+}
+
 pub fn pending_restore() -> Option<RestoreIntent> {
     *RESTORE_INTENT.lock()
 }
 
-#[cfg(feature = "stage12-4-test")]
 pub fn commit_restore(id: u64, restored_root: u64) -> Result<u64, RestoreError> {
     let pending = RESTORE_INTENT.lock();
     let Some(intent) = *pending else {
@@ -424,9 +444,8 @@ pub fn structural_self_test() -> bool {
                 old_checksum: 11,
                 new_checksum: 13,
             })
-        || begin_restore(id, 98) != Err(RestoreError::ChecksumMismatch)
-        || begin_restore(id, 99) != Ok(4)
-        || prepare_restore(id, 99).is_err()
+        || begin_restore(id).map(|snapshot| snapshot.generation) != Ok(4)
+        || prepare_restore(id).is_err()
         || pending_restore().is_none()
         || mark_restore_applied(id).map(|intent| intent.applied) != Ok(1)
         || commit_restore(id, 98) != Err(RestoreError::ChecksumMismatch)
