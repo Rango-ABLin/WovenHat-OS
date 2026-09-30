@@ -34,6 +34,12 @@ const USB_REQUEST_SET_PROTOCOL: u8 = 11;
 const USB_DESCRIPTOR_DEVICE: u8 = 1;
 const USB_DESCRIPTOR_CONFIGURATION: u8 = 2;
 const USB_CLASS_HID: u8 = 3;
+const USB_CLASS_WIRELESS_CONTROLLER: u8 = 0xe0;
+const USB_SUBCLASS_RF_CONTROLLER: u8 = 0x01;
+const USB_PROTOCOL_BLUETOOTH_PRIMARY: u8 = 0x01;
+const USB_ENDPOINT_BULK: u8 = 0x02;
+const USB_ENDPOINT_INTERRUPT: u8 = 0x03;
+const USB_REQUEST_TYPE_BLUETOOTH_COMMAND: u8 = 0x20;
 const USB_PROTOCOL_KEYBOARD: u8 = 1;
 const USB_PROTOCOL_MOUSE: u8 = 2;
 
@@ -175,6 +181,19 @@ struct HidInterface {
     max_packet: u16,
     interval: u8,
     protocol: u8,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct BluetoothUsbInterface {
+    pub interface: u8,
+    pub configuration: u8,
+    pub event_endpoint: u8,
+    pub event_max_packet: u16,
+    pub event_interval: u8,
+    pub acl_in_endpoint: u8,
+    pub acl_in_max_packet: u16,
+    pub acl_out_endpoint: u8,
+    pub acl_out_max_packet: u16,
 }
 
 pub struct XhciController {
@@ -785,6 +804,110 @@ fn parse_hid_interface(bytes: &[u8], configuration: u8) -> Option<HidInterface> 
         offset += length;
     }
     None
+}
+
+pub fn parse_bluetooth_usb_interface(
+    bytes: &[u8],
+    configuration: u8,
+) -> Option<BluetoothUsbInterface> {
+    let mut offset = 0usize;
+    let mut interface = None;
+    let mut event = None;
+    let mut acl_in = None;
+    let mut acl_out = None;
+
+    while offset + 2 <= bytes.len() {
+        let length = usize::from(bytes[offset]);
+        if length < 2 || offset + length > bytes.len() {
+            return None;
+        }
+        match bytes[offset + 1] {
+            4 if length >= 9 => {
+                let matches_bluetooth = bytes[offset + 5] == USB_CLASS_WIRELESS_CONTROLLER
+                    && bytes[offset + 6] == USB_SUBCLASS_RF_CONTROLLER
+                    && bytes[offset + 7] == USB_PROTOCOL_BLUETOOTH_PRIMARY;
+                if matches_bluetooth {
+                    interface = Some(bytes[offset + 2]);
+                    event = None;
+                    acl_in = None;
+                    acl_out = None;
+                } else {
+                    interface = None;
+                }
+            }
+            5 if length >= 7 && interface.is_some() => {
+                let address = bytes[offset + 2];
+                let transfer_type = bytes[offset + 3] & 0x03;
+                let max_packet =
+                    u16::from_le_bytes([bytes[offset + 4], bytes[offset + 5]]) & 0x07ff;
+                if max_packet != 0 {
+                    match (transfer_type, address & 0x80 != 0) {
+                        (USB_ENDPOINT_INTERRUPT, true) => {
+                            event = Some((address, max_packet, bytes[offset + 6]));
+                        }
+                        (USB_ENDPOINT_BULK, true) => acl_in = Some((address, max_packet)),
+                        (USB_ENDPOINT_BULK, false) => acl_out = Some((address, max_packet)),
+                        _ => {}
+                    }
+                }
+                if let (
+                    Some(interface),
+                    Some((event_endpoint, event_max_packet, event_interval)),
+                    Some((acl_in_endpoint, acl_in_max_packet)),
+                    Some((acl_out_endpoint, acl_out_max_packet)),
+                ) = (interface, event, acl_in, acl_out)
+                {
+                    return Some(BluetoothUsbInterface {
+                        interface,
+                        configuration,
+                        event_endpoint,
+                        event_max_packet,
+                        event_interval,
+                        acl_in_endpoint,
+                        acl_in_max_packet,
+                        acl_out_endpoint,
+                        acl_out_max_packet,
+                    });
+                }
+            }
+            _ => {}
+        }
+        offset += length;
+    }
+    None
+}
+
+pub fn bluetooth_command_setup(interface: u8, command_len: u16) -> u64 {
+    setup_packet(
+        USB_REQUEST_TYPE_BLUETOOTH_COMMAND,
+        0,
+        0,
+        u16::from(interface),
+        command_len,
+    )
+}
+
+pub fn bluetooth_transport_self_test() -> bool {
+    let descriptor = [
+        9, 2, 39, 0, 1, 1, 0, 0x80, 50,
+        9, 4, 0, 0, 3, 0xe0, 0x01, 0x01, 0,
+        7, 5, 0x81, 0x03, 16, 0, 1,
+        7, 5, 0x82, 0x02, 64, 0, 0,
+        7, 5, 0x02, 0x02, 64, 0, 0,
+    ];
+    let Some(bt) = parse_bluetooth_usb_interface(&descriptor, 1) else {
+        return false;
+    };
+    bt.interface == 0
+        && bt.configuration == 1
+        && bt.event_endpoint == 0x81
+        && bt.event_max_packet == 16
+        && bt.event_interval == 1
+        && bt.acl_in_endpoint == 0x82
+        && bt.acl_in_max_packet == 64
+        && bt.acl_out_endpoint == 0x02
+        && bt.acl_out_max_packet == 64
+        && bluetooth_command_setup(0, 3) == setup_packet(0x20, 0, 0, 0, 3)
 }
 
 fn hid_kind(protocol: u8) -> HidKind {

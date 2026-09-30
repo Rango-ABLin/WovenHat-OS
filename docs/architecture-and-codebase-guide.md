@@ -374,3 +374,10 @@ Roadmap Stage 13.10 owns Bluetooth. Historical source/audit labels 13.10A–AC a
 Stage 13.10A introduces `bluetooth_hci.rs` as a hardware-independent HCI protocol boundary. It owns bounded command packet construction, Command Complete parsing, command-credit state, opcode matching, and controller-status validation. The module is feature-gated by `stage13-10-test` and deliberately does not depend on xHCI, allowing the HCI state machine to be validated without pretending a physical transport exists.
 
 The next layer, Stage 13.10B, should place a USB Bluetooth HCI transport beneath this protocol boundary using the existing xHCI core. Transport ownership must keep USB control transfers for HCI commands distinct from interrupt-IN HCI events and bulk ACL traffic. Hardware discovery, endpoint ownership, teardown, and DMA lifetime belong to the transport layer rather than the protocol parser. Later Bluetooth discovery, L2CAP, pairing/security, ATT/GATT and physical qualification remain above or beyond that boundary.
+
+
+### Stage 13.10B USB HCI transport contract
+
+Stage 13.10B extends the xHCI layer with Bluetooth USB descriptor semantics while preserving `bluetooth_hci.rs` as the transport-independent protocol boundary. The transport recognizes interface class/subclass/protocol E0/01/01 and requires three endpoint roles before accepting an interface: interrupt-IN for HCI events, bulk-IN for controller-to-host ACL data, and bulk-OUT for host-to-controller ACL data. HCI commands use the Bluetooth USB class control-request setup contract on endpoint zero.
+
+The accepted 13.10B boundary parses and validates those roles and the command setup contract; it does not yet allocate dedicated Bluetooth transfer rings or claim live controller traffic. The next transport layer must own endpoint contexts, rings, DMA buffers, completion routing, bounded transfer sizes, teardown, and recovery. HCI event bytes should then be delivered upward to the protocol parser rather than interpreted inside xHCI.
