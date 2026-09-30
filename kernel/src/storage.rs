@@ -1487,11 +1487,11 @@ fn retain_snapshot_preimages_on_device(
     path: &str,
     relative: &str,
     old_checksum: u64,
+    membership: crate::snapshots::SnapshotMembership,
 ) -> Result<(), PersistError> {
     if old_checksum == 0 {
         return Ok(());
     }
-    let membership = crate::snapshots::snapshot_membership();
     if membership.is_empty() {
         return Ok(());
     }
@@ -1516,8 +1516,8 @@ fn retain_snapshot_preimages_on_device(
 fn retain_snapshot_creation_markers_on_device(
     device: &mut impl crate::block::BlockDevice,
     path: &str,
+    membership: crate::snapshots::SnapshotMembership,
 ) -> Result<(), PersistError> {
-    let membership = crate::snapshots::snapshot_membership();
     for snapshot_id in membership.ids() {
         write_snapshot_preimage_on_device(device, snapshot_id, path, 0, 0, &[])?;
     }
@@ -1566,18 +1566,18 @@ pub fn persist_path(path: &str) -> Result<(), PersistError> {
     let checksum = data[..length].iter().fold(0xcbf29ce484222325, |h, b| {
         (h ^ u64::from(*b)).wrapping_mul(0x100000001b3)
     });
+    let membership = crate::snapshots::snapshot_membership();
     if let Some(previous) = crate::wovenfs::metadata(path) {
         {
             let mut disk = block_io::primary_ata();
             if disk.is_read_only() {
                 return Err(PersistError::Failed);
             }
-            retain_snapshot_preimages_on_device(&mut disk, path, relative, previous.checksum)?;
+            retain_snapshot_preimages_on_device(&mut disk, path, relative, previous.checksum, membership)?;
         }
-        crate::snapshots::record_live_change(
-            crate::wovenfs::path_hash(path),
-            previous.checksum,
-            checksum,
+        crate::snapshots::record_live_changes_for_membership(
+            membership,
+            &[(crate::wovenfs::path_hash(path), previous.checksum, checksum)],
         )
         .map_err(|_| PersistError::Failed)?;
     } else {
@@ -1586,12 +1586,11 @@ pub fn persist_path(path: &str) -> Result<(), PersistError> {
             if disk.is_read_only() {
                 return Err(PersistError::Failed);
             }
-            retain_snapshot_creation_markers_on_device(&mut disk, path)?;
+            retain_snapshot_creation_markers_on_device(&mut disk, path, membership)?;
         }
-        crate::snapshots::record_live_change(
-            crate::wovenfs::path_hash(path),
-            0,
-            checksum,
+        crate::snapshots::record_live_changes_for_membership(
+            membership,
+            &[(crate::wovenfs::path_hash(path), 0, checksum)],
         )
         .map_err(|_| PersistError::Failed)?;
     }
@@ -1910,6 +1909,7 @@ pub fn persist_directory(path: &str) -> Result<(), PersistError> {
         return Err(PersistError::Failed);
     }
     FILE_PAGES.lock().invalidate();
+    let membership = crate::snapshots::snapshot_membership();
     // A directory created after a snapshot must disappear on rollback just
     // like a newly-created file. Retain an empty creation marker for every
     // live snapshot, then durably publish the COW catalog before FAT mkdir.
@@ -1955,11 +1955,11 @@ fn retain_snapshot_directory_preimages_on_device(
     device: &mut impl crate::block::BlockDevice,
     path: &str,
     mode: u32,
+    membership: crate::snapshots::SnapshotMembership,
 ) -> Result<(), PersistError> {
     if mode == 0 {
         return Err(PersistError::Failed);
     }
-    let membership = crate::snapshots::snapshot_membership();
     for snapshot_id in membership.ids() {
         write_snapshot_preimage_on_device(
             device,
@@ -2024,23 +2024,22 @@ pub fn delete_path(path: &str) -> Result<(), MutationError> {
     }
     FILE_PAGES.lock().invalidate();
     let inode = inode_on_device(&mut disk, relative).ok().flatten();
+    let membership = crate::snapshots::snapshot_membership();
     if path_is_directory_on_device(&mut disk, relative)? {
         let mode = vfs::stat(path).ok().map_or(0o755, |stat| u32::from(stat.mode));
-        retain_snapshot_directory_preimages_on_device(&mut disk, path, mode)
+        retain_snapshot_directory_preimages_on_device(&mut disk, path, mode, membership)
             .map_err(|_| MutationError::Failed)?;
-        crate::snapshots::record_live_change(
-            crate::wovenfs::path_hash(path),
-            SNAPSHOT_DIRECTORY_CHECKSUM,
-            0,
+        crate::snapshots::record_live_changes_for_membership(
+            membership,
+            &[(crate::wovenfs::path_hash(path), SNAPSHOT_DIRECTORY_CHECKSUM, 0)],
         )
         .map_err(|_| MutationError::Failed)?;
     } else if let Some(previous) = crate::wovenfs::metadata(path) {
-        retain_snapshot_preimages_on_device(&mut disk, path, relative, previous.checksum)
+        retain_snapshot_preimages_on_device(&mut disk, path, relative, previous.checksum, membership)
             .map_err(|_| MutationError::Failed)?;
-        crate::snapshots::record_live_change(
-            crate::wovenfs::path_hash(path),
-            previous.checksum,
-            0,
+        crate::snapshots::record_live_changes_for_membership(
+            membership,
+            &[(crate::wovenfs::path_hash(path), previous.checksum, 0)],
         )
         .map_err(|_| MutationError::Failed)?;
     }
@@ -2195,8 +2194,9 @@ pub fn rename_path(old: &str, new: &str) -> Result<(), MutationError> {
         return Err(MutationError::ReadOnly);
     }
     FILE_PAGES.lock().invalidate();
-    if let Some(mutations) = retain_snapshot_rename_objects_on_device(&mut disk, old, new)? {
-        crate::snapshots::record_live_changes(&mutations)
+    let membership = crate::snapshots::snapshot_membership();
+    if let Some(mutations) = retain_snapshot_rename_objects_on_device(&mut disk, old, new, membership)? {
+        crate::snapshots::record_live_changes_for_membership(membership, &mutations)
             .map_err(|_| MutationError::Failed)?;
     }
     let mut result = rename_on_cached_device(&mut disk, old_relative, new_relative);
@@ -2462,6 +2462,7 @@ fn retain_snapshot_rename_objects_on_device(
     device: &mut impl crate::block::BlockDevice,
     old: &str,
     new: &str,
+    membership: crate::snapshots::SnapshotMembership,
 ) -> Result<Option<alloc::vec::Vec<SnapshotMutation>>, MutationError> {
     fn collect(
         device: &mut impl crate::block::BlockDevice,
@@ -2515,7 +2516,6 @@ fn retain_snapshot_rename_objects_on_device(
         }
         Err(_) => return Err(MutationError::Failed),
     };
-    let membership = crate::snapshots::snapshot_membership();
     if membership.is_empty() {
         return Ok(None);
     }
@@ -2539,7 +2539,7 @@ fn retain_snapshot_rename_objects_on_device(
             }
         } else {
             let relative = object.old_path.strip_prefix("/mnt/").ok_or(MutationError::Failed)?;
-            retain_snapshot_preimages_on_device(device, &object.old_path, relative, object.checksum)
+            retain_snapshot_preimages_on_device(device, &object.old_path, relative, object.checksum, membership)
                 .map_err(|_| MutationError::Failed)?;
         }
         for snapshot_id in membership.ids() {
