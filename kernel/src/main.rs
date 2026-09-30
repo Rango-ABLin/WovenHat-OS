@@ -926,6 +926,15 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         serial::write_line(format_args!(
             "[S13.10G] Bluetooth L2CAP owned channel data: PASSED"
         ));
+        if !bluetooth_hci::link_security_self_test() {
+            serial::write_line(format_args!(
+                "[S13.10H] Bluetooth authentication and encryption state: FAILED"
+            ));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!(
+            "[S13.10H] Bluetooth authentication and encryption state: PASSED"
+        ));
     }
 
     if heap::init().is_err() {
