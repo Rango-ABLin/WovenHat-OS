@@ -17,3 +17,24 @@ The stage deliberately preserves ATA and VirtIO storage paths. NVMe is an additi
 ## Safety and production gaps
 
 Unsafe code is restricted to volatile MMIO and exclusive direct-map access to allocator-owned DMA pages. Commands and queues are bounded. This stage uses polling for bounded controller bring-up and synchronous queue completion; MSI/MSI-X, interrupt-driven completion, multi-queue scaling, multiple namespaces/controllers, larger transfers/PRP lists/SGLs, reset recovery, power management, hotplug, and broad physical-hardware qualification remain explicit later production work.
+
+
+## Final acceptance record
+
+Stage 13.3 was accepted on 2026-09-30 from commit `b8bafb3a44c1ae0461304f982ffc970fdc62a92e` by GitHub Actions run `36703337710`.
+
+The release-validation job passed the repository's lint, host regressions, normal debug 1/2/4-core boot/storage/network matrix, release boot/network gates, and the dedicated Stage 13.3 NVMe acceptance gate. The dedicated NVMe runs completed with the standard QEMU debug-exit success code:
+
+- 1 CPU: PASS, exit 33
+- 2 CPUs: PASS, exit 33
+- 4 CPUs: PASS, exit 33
+
+Per-run evidence was preserved under `audit-artifacts/stage13.3-1cpu-*`, `stage13.3-2cpu-*`, and `stage13.3-4cpu-*` by the workflow artifact upload.
+
+## Milestone status
+
+**Stage 13.3 native NVMe: COMPLETE at the QEMU integration boundary.**
+
+The accepted milestone covers native controller discovery, BAR/MMIO access, DMA-backed admin and I/O queues, controller/namespace identification, namespace-backed `BlockDevice` read/write/flush, destructive round-trip verification with restoration of the original sector, and successful 1/2/4-CPU execution.
+
+Physical-hardware qualification and the production extensions listed above remain later work and are not implied by this QEMU acceptance.
