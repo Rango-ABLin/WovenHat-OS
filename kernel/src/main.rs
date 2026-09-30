@@ -142,13 +142,6 @@ mod woven_input;
 ))]
 mod wovenfs;
 mod wovenguard;
-#[cfg(any(
-    feature = "stage13-5-test",
-    feature = "stage13-6-test",
-    feature = "stage13-7-test",
-    feature = "stage13-8-test",
-    feature = "stage13-9-test"
-))]
 #[cfg(feature = "stage13-10-test")]
 mod bluetooth_hci;
 #[cfg(any(
