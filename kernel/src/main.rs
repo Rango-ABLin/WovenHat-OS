@@ -151,6 +151,11 @@ mod wovenguard;
 ))]
 #[cfg(feature = "stage13-10-test")]
 mod bluetooth_hci;
+#[cfg(any(
+    feature = "stage13-5-test",
+    feature = "stage13-6-test",
+    feature = "stage13-7-test"
+))]
 mod xhci;
 
 use bootloader_api::{config::Mapping, entry_point, info::Optional, BootInfo, BootloaderConfig};
