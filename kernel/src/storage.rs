@@ -1153,11 +1153,11 @@ fn read_durable_path_on_device(
     }
 }
 
-struct SnapshotPreimage {
-    path: alloc::string::String,
-    checksum: u64,
-    mode: u32,
-    data: alloc::vec::Vec<u8>,
+pub struct SnapshotPreimage {
+    pub path: alloc::string::String,
+    pub checksum: u64,
+    pub mode: u32,
+    pub data: alloc::vec::Vec<u8>,
 }
 
 fn read_snapshot_preimage_on_device(
@@ -1207,6 +1207,20 @@ fn read_snapshot_preimage_on_device(
         mode,
         data: data.to_vec(),
     })
+}
+
+pub fn load_snapshot_preimage(
+    snapshot_id: u64,
+    path_hash: u64,
+) -> Result<SnapshotPreimage, PersistError> {
+    if !mnt_mounted() {
+        return Err(unavailable_persist_error());
+    }
+    if !block_io::primary_ata_present() {
+        return Err(PersistError::NoDevice);
+    }
+    let mut disk = block_io::primary_ata();
+    read_snapshot_preimage_on_device(&mut disk, snapshot_id, path_hash)
 }
 
 fn write_snapshot_preimage_on_device(
