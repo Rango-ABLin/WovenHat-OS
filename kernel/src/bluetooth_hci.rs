@@ -715,6 +715,165 @@ impl LinkState {
     }
 }
 
+
+pub const L2CAP_CMD_CONNECTION_REQUEST: u8 = 0x02;
+pub const L2CAP_CMD_CONNECTION_RESPONSE: u8 = 0x03;
+pub const L2CAP_CMD_DISCONNECTION_REQUEST: u8 = 0x06;
+pub const L2CAP_CMD_DISCONNECTION_RESPONSE: u8 = 0x07;
+pub const MAX_L2CAP_CHANNELS: usize = 8;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct L2capChannel {
+    pub handle: u16,
+    pub psm: u16,
+    pub local_cid: u16,
+    pub remote_cid: u16,
+}
+
+pub struct L2capChannels {
+    channels: [Option<L2capChannel>; MAX_L2CAP_CHANNELS],
+    count: usize,
+    next_cid: u16,
+}
+
+impl L2capChannels {
+    pub const fn new() -> Self {
+        Self { channels: [None; MAX_L2CAP_CHANNELS], count: 0, next_cid: L2CAP_FIRST_DYNAMIC_CID }
+    }
+
+    fn allocate_cid(&mut self) -> Result<u16, HciError> {
+        for _ in 0..MAX_L2CAP_CHANNELS {
+            let cid = self.next_cid;
+            self.next_cid = self.next_cid.wrapping_add(1);
+            if self.next_cid < L2CAP_FIRST_DYNAMIC_CID {
+                self.next_cid = L2CAP_FIRST_DYNAMIC_CID;
+            }
+            if !self.channels[..self.count].iter().flatten().any(|channel| channel.local_cid == cid) {
+                return Ok(cid);
+            }
+        }
+        Err(HciError::ControllerFailure(0xff))
+    }
+
+    pub fn connection_request(
+        &mut self,
+        links: &LinkState,
+        handle: u16,
+        psm: u16,
+        identifier: u8,
+    ) -> Result<(u16, L2capFrame), HciError> {
+        if identifier == 0 || psm == 0 || !links.owns_handle(handle) || self.count == MAX_L2CAP_CHANNELS {
+            return Err(HciError::UnexpectedOpcode);
+        }
+        let local_cid = self.allocate_cid()?;
+        let mut command = [0_u8; 8];
+        command[0] = L2CAP_CMD_CONNECTION_REQUEST;
+        command[1] = identifier;
+        command[2..4].copy_from_slice(&4_u16.to_le_bytes());
+        command[4..6].copy_from_slice(&psm.to_le_bytes());
+        command[6..8].copy_from_slice(&local_cid.to_le_bytes());
+        Ok((local_cid, L2capFrame::new(L2CAP_CID_SIGNALING, &command)?))
+    }
+
+    pub fn accept_connection_response(
+        &mut self,
+        handle: u16,
+        psm: u16,
+        local_cid: u16,
+        bytes: &[u8],
+    ) -> Result<L2capChannel, HciError> {
+        if bytes.len() != 12 || bytes[0] != L2CAP_CMD_CONNECTION_RESPONSE || bytes[1] == 0
+            || u16::from_le_bytes([bytes[2], bytes[3]]) != 8
+        {
+            return Err(HciError::MalformedEvent);
+        }
+        let remote_cid = u16::from_le_bytes([bytes[4], bytes[5]]);
+        let source_cid = u16::from_le_bytes([bytes[6], bytes[7]]);
+        let result = u16::from_le_bytes([bytes[8], bytes[9]]);
+        let status = u16::from_le_bytes([bytes[10], bytes[11]]);
+        if source_cid != local_cid || remote_cid < L2CAP_FIRST_DYNAMIC_CID || result != 0 || status != 0 {
+            return Err(HciError::ControllerFailure((result & 0xff) as u8));
+        }
+        if self.count == MAX_L2CAP_CHANNELS
+            || self.channels[..self.count].iter().flatten().any(|channel| {
+                channel.handle == handle && (channel.local_cid == local_cid || channel.remote_cid == remote_cid)
+            })
+        {
+            return Err(HciError::UnexpectedOpcode);
+        }
+        let channel = L2capChannel { handle, psm, local_cid, remote_cid };
+        self.channels[self.count] = Some(channel);
+        self.count += 1;
+        Ok(channel)
+    }
+
+    pub fn disconnection_request(&self, channel: L2capChannel, identifier: u8) -> Result<L2capFrame, HciError> {
+        if identifier == 0 || !self.channels[..self.count].iter().flatten().any(|entry| *entry == channel) {
+            return Err(HciError::UnexpectedOpcode);
+        }
+        let mut command = [0_u8; 8];
+        command[0] = L2CAP_CMD_DISCONNECTION_REQUEST;
+        command[1] = identifier;
+        command[2..4].copy_from_slice(&4_u16.to_le_bytes());
+        command[4..6].copy_from_slice(&channel.remote_cid.to_le_bytes());
+        command[6..8].copy_from_slice(&channel.local_cid.to_le_bytes());
+        L2capFrame::new(L2CAP_CID_SIGNALING, &command)
+    }
+
+    pub fn accept_disconnection_response(&mut self, channel: L2capChannel, bytes: &[u8]) -> Result<(), HciError> {
+        if bytes.len() != 8 || bytes[0] != L2CAP_CMD_DISCONNECTION_RESPONSE || bytes[1] == 0
+            || u16::from_le_bytes([bytes[2], bytes[3]]) != 4
+            || u16::from_le_bytes([bytes[4], bytes[5]]) != channel.remote_cid
+            || u16::from_le_bytes([bytes[6], bytes[7]]) != channel.local_cid
+        {
+            return Err(HciError::MalformedEvent);
+        }
+        let Some(index) = self.channels[..self.count].iter().position(|entry| *entry == Some(channel)) else {
+            return Err(HciError::UnexpectedOpcode);
+        };
+        self.count -= 1;
+        self.channels[index] = self.channels[self.count];
+        self.channels[self.count] = None;
+        Ok(())
+    }
+
+    pub fn count(&self) -> usize { self.count }
+}
+
+pub fn l2cap_channel_self_test() -> bool {
+    let mut links = LinkState::new();
+    if links.handle_event(&[
+        EVT_CONNECTION_COMPLETE, 11, 0, 0x42, 0,
+        1, 2, 3, 4, 5, 6, 1, 0,
+    ]).is_err() {
+        return false;
+    }
+    let mut channels = L2capChannels::new();
+    let Ok((local_cid, request)) = channels.connection_request(&links, 0x42, 0x0001, 1) else { return false; };
+    if local_cid != 0x0040
+        || request.payload() != [L2CAP_CMD_CONNECTION_REQUEST, 1, 4, 0, 1, 0, 0x40, 0]
+    {
+        return false;
+    }
+    let response = [
+        L2CAP_CMD_CONNECTION_RESPONSE, 1, 8, 0,
+        0x41, 0, 0x40, 0, 0, 0, 0, 0,
+    ];
+    let Ok(channel) = channels.accept_connection_response(0x42, 0x0001, local_cid, &response) else { return false; };
+    if channel.remote_cid != 0x0041 || channels.count() != 1 {
+        return false;
+    }
+    let Ok(disconnect) = channels.disconnection_request(channel, 2) else { return false; };
+    if disconnect.payload() != [L2CAP_CMD_DISCONNECTION_REQUEST, 2, 4, 0, 0x41, 0, 0x40, 0] {
+        return false;
+    }
+    let disconnect_response = [L2CAP_CMD_DISCONNECTION_RESPONSE, 2, 4, 0, 0x41, 0, 0x40, 0];
+    channels.accept_disconnection_response(channel, &disconnect_response).is_ok()
+        && channels.count() == 0
+        && channels.disconnection_request(channel, 3).is_err()
+        && channels.connection_request(&links, 0x43, 1, 1).is_err()
+}
+
 pub fn l2cap_framing_self_test() -> bool {
     let mut links = LinkState::new();
     let connected = [
