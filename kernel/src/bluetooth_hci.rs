@@ -675,6 +675,22 @@ pub fn link_lifecycle_self_test() -> bool {
     if link.handle != 0x42 || link.address != device.address || link.encrypted || links.count() != 1 {
         return false;
     }
+    let conflicting_handle = [
+        EVT_CONNECTION_COMPLETE, 11, 0, 0x42, 0x00,
+        6, 5, 4, 3, 2, 1,
+        1, 0,
+    ];
+    let conflicting_address = [
+        EVT_CONNECTION_COMPLETE, 11, 0, 0x43, 0x00,
+        1, 2, 3, 4, 5, 6,
+        1, 0,
+    ];
+    if links.handle_event(&conflicting_handle).is_ok()
+        || links.handle_event(&conflicting_address).is_ok()
+        || links.count() != 1
+    {
+        return false;
+    }
     if LinkState::disconnect_command(link.handle, 0x13, &mut bytes) != Ok(6)
         || bytes[..6] != [0x06, 0x04, 3, 0x42, 0, 0x13]
     {
