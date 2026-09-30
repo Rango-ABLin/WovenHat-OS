@@ -540,6 +540,14 @@ impl LinkState {
         }
     }
 
+    pub fn address_for_handle(&self, handle: u16) -> Option<[u8; 6]> {
+        self.links[..self.count]
+            .iter()
+            .flatten()
+            .find(|link| link.handle == handle)
+            .map(|link| link.address)
+    }
+
     pub fn count(&self) -> usize { self.count }
     pub fn link(&self, index: usize) -> Option<AclLink> {
         if index >= self.count { None } else { self.links[index] }
@@ -1152,6 +1160,16 @@ impl LinkSecurityState {
                 .is_some_and(|secure| secure.phase == LinkSecurityPhase::Secured)
     }
 
+    pub fn trusted_secured(
+        &self,
+        links: &LinkState,
+        keys: &LinkKeyStore,
+        handle: u16,
+    ) -> bool {
+        self.is_secured(links, handle)
+            && links.address_for_handle(handle).is_some_and(|address| keys.contains(address))
+    }
+
     pub fn revoke(&mut self, handle: u16) {
         let Some(index) = self.index(handle) else { return; };
         self.count -= 1;
@@ -1227,6 +1245,10 @@ impl LinkKeyStore {
         }
         HciCommand::new(OPCODE_LINK_KEY_REQUEST_NEGATIVE_REPLY, &address)
             .map(|command| command.encode(out))
+    }
+
+    pub fn contains(&self, address: [u8; 6]) -> bool {
+        self.index(address).is_some()
     }
 
     pub fn remove(&mut self, address: [u8; 6]) {
@@ -1415,6 +1437,53 @@ pub fn link_key_self_test() -> bool {
         && store.request_reply(&request, &mut out) == Ok(9)
         && out[..3] == [0x0c, 0x04, 6]
         && store.store_notification(&[EVT_LINK_KEY_NOTIFICATION, 23]).is_err()
+}
+
+
+pub fn trusted_security_self_test() -> bool {
+    let address = [1, 2, 3, 4, 5, 6];
+    let mut links = LinkState::new();
+    if links.handle_event(&[
+        EVT_CONNECTION_COMPLETE, 11, 0, 0x42, 0,
+        1, 2, 3, 4, 5, 6, 1, 0,
+    ]).is_err() {
+        return false;
+    }
+    let mut security = LinkSecurityState::new();
+    let mut keys = LinkKeyStore::new();
+    let mut out = [0_u8; 258];
+    if security.authentication_command(&links, 0x42, &mut out).is_err()
+        || security.authentication_complete(&[EVT_AUTHENTICATION_COMPLETE, 3, 0, 0x42, 0]).is_err()
+        || security.enable_encryption_command(&links, 0x42, &mut out).is_err()
+        || security.encryption_change(&[EVT_ENCRYPTION_CHANGE, 4, 0, 0x42, 0, 1]).is_err()
+        || security.trusted_secured(&links, &keys, 0x42)
+    {
+        return false;
+    }
+
+    let mut notification = [0_u8; 25];
+    notification[0] = EVT_LINK_KEY_NOTIFICATION;
+    notification[1] = 23;
+    notification[2..8].copy_from_slice(&address);
+    notification[8..24].copy_from_slice(&[0x5a_u8; 16]);
+    notification[24] = 0x04;
+    if keys.store_notification(&notification).is_err()
+        || !security.trusted_secured(&links, &keys, 0x42)
+    {
+        return false;
+    }
+
+    keys.remove(address);
+    if security.trusted_secured(&links, &keys, 0x42) {
+        return false;
+    }
+    if keys.store_notification(&notification).is_err() {
+        return false;
+    }
+    if links.handle_event(&[EVT_DISCONNECTION_COMPLETE, 4, 0, 0x42, 0, 0x13]).is_err() {
+        return false;
+    }
+    !security.trusted_secured(&links, &keys, 0x42)
 }
 
 pub fn link_security_self_test() -> bool {
