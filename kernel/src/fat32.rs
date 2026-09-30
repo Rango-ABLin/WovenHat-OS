@@ -507,7 +507,6 @@ fn restore_checksum(intent: SnapshotRestoreIntent) -> u64 {
         })
 }
 
-#[cfg(feature = "stage12-4-test")]
 pub fn write_snapshot_restore_intent(
     device: &mut (impl BlockDevice + ?Sized),
     volume: Volume,
@@ -560,7 +559,6 @@ pub fn read_snapshot_restore_intent(
     Ok(Some(intent))
 }
 
-#[cfg(feature = "stage12-4-test")]
 pub fn clear_snapshot_restore_intent(
     device: &mut (impl BlockDevice + ?Sized),
     volume: Volume,
