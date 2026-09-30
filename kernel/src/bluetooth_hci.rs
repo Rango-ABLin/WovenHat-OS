@@ -1160,6 +1160,122 @@ impl LinkSecurityState {
     }
 }
 
+
+pub const EVT_LINK_KEY_REQUEST: u8 = 0x17;
+pub const EVT_LINK_KEY_NOTIFICATION: u8 = 0x18;
+pub const OPCODE_LINK_KEY_REQUEST_REPLY: u16 = 0x040b;
+pub const OPCODE_LINK_KEY_REQUEST_NEGATIVE_REPLY: u16 = 0x040c;
+pub const MAX_LINK_KEYS: usize = 8;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct LinkKey {
+    pub address: [u8; 6],
+    key: [u8; 16],
+    pub key_type: u8,
+}
+
+pub struct LinkKeyStore {
+    keys: [Option<LinkKey>; MAX_LINK_KEYS],
+    count: usize,
+}
+
+impl LinkKeyStore {
+    pub const fn new() -> Self {
+        Self { keys: [None; MAX_LINK_KEYS], count: 0 }
+    }
+
+    fn index(&self, address: [u8; 6]) -> Option<usize> {
+        self.keys[..self.count]
+            .iter()
+            .position(|entry| entry.is_some_and(|entry| entry.address == address))
+    }
+
+    pub fn store_notification(&mut self, event: &[u8]) -> Result<(), HciError> {
+        if event.len() != 25 || event[0] != EVT_LINK_KEY_NOTIFICATION || event[1] != 23 {
+            return Err(HciError::MalformedEvent);
+        }
+        let mut address = [0_u8; 6];
+        address.copy_from_slice(&event[2..8]);
+        let mut key = [0_u8; 16];
+        key.copy_from_slice(&event[8..24]);
+        let entry = LinkKey { address, key, key_type: event[24] };
+        if let Some(index) = self.index(address) {
+            self.keys[index] = Some(entry);
+            return Ok(());
+        }
+        if self.count == MAX_LINK_KEYS {
+            return Err(HciError::ControllerFailure(0xff));
+        }
+        self.keys[self.count] = Some(entry);
+        self.count += 1;
+        Ok(())
+    }
+
+    pub fn request_reply(&self, event: &[u8], out: &mut [u8; 258]) -> Result<usize, HciError> {
+        if event.len() != 8 || event[0] != EVT_LINK_KEY_REQUEST || event[1] != 6 {
+            return Err(HciError::MalformedEvent);
+        }
+        let mut address = [0_u8; 6];
+        address.copy_from_slice(&event[2..8]);
+        if let Some(index) = self.index(address) {
+            let Some(entry) = self.keys[index] else { return Err(HciError::UnexpectedOpcode); };
+            let mut params = [0_u8; 22];
+            params[..6].copy_from_slice(&address);
+            params[6..].copy_from_slice(&entry.key);
+            return HciCommand::new(OPCODE_LINK_KEY_REQUEST_REPLY, &params)
+                .map(|command| command.encode(out));
+        }
+        HciCommand::new(OPCODE_LINK_KEY_REQUEST_NEGATIVE_REPLY, &address)
+            .map(|command| command.encode(out))
+    }
+
+    pub fn remove(&mut self, address: [u8; 6]) {
+        let Some(index) = self.index(address) else { return; };
+        self.count -= 1;
+        self.keys[index] = self.keys[self.count];
+        self.keys[self.count] = None;
+    }
+
+    pub fn count(&self) -> usize { self.count }
+}
+
+pub fn link_key_self_test() -> bool {
+    let address = [1, 2, 3, 4, 5, 6];
+    let key = [0xa5_u8; 16];
+    let mut store = LinkKeyStore::new();
+    let mut out = [0_u8; 258];
+    let request = [EVT_LINK_KEY_REQUEST, 6, 1, 2, 3, 4, 5, 6];
+
+    if store.request_reply(&request, &mut out) != Ok(9)
+        || out[..9] != [0x0c, 0x04, 6, 1, 2, 3, 4, 5, 6]
+    {
+        return false;
+    }
+
+    let mut notification = [0_u8; 25];
+    notification[0] = EVT_LINK_KEY_NOTIFICATION;
+    notification[1] = 23;
+    notification[2..8].copy_from_slice(&address);
+    notification[8..24].copy_from_slice(&key);
+    notification[24] = 0x04;
+    if store.store_notification(&notification).is_err() || store.count() != 1 {
+        return false;
+    }
+    if store.request_reply(&request, &mut out) != Ok(25)
+        || out[..3] != [0x0b, 0x04, 22]
+        || out[3..9] != address
+        || out[9..25] != key
+    {
+        return false;
+    }
+
+    store.remove(address);
+    store.count() == 0
+        && store.request_reply(&request, &mut out) == Ok(9)
+        && out[..3] == [0x0c, 0x04, 6]
+        && store.store_notification(&[EVT_LINK_KEY_NOTIFICATION, 23]).is_err()
+}
+
 pub fn link_security_self_test() -> bool {
     let mut links = LinkState::new();
     if links.handle_event(&[
