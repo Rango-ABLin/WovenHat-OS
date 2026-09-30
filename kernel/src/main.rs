@@ -959,9 +959,14 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
             storage::MountStatus::NotFat32 => {
                 serial::write_line(format_args!("[FS] ATA disk present but no FAT32 root"))
             }
-            storage::MountStatus::Failed => serial::write_line(format_args!(
-                "[FS] FAT32 mount failed; continuing with RAM VFS"
-            )),
+            storage::MountStatus::Failed => {
+                serial::write_line(format_args!("[FS] FAT32 mount failed; continuing with RAM VFS"));
+                #[cfg(feature = "stage12-4-reboot-test")]
+                {
+                    serial::write_line(format_args!("[S12.4R] boot recovery mount: FAILED"));
+                    qemu_test_exit_failure();
+                }
+            }
         }
 
         for dir in ["/etc", "/var", "/home", "/tmp"] {
