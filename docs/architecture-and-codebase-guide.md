@@ -388,3 +388,12 @@ The accepted 13.10B boundary parses and validates those roles and the command se
 `HciTransaction` is deliberately non-copyable mutable controller state. It owns the one-command-at-a-time credit/opcode contract: command bytes are encoded only after a credit is consumed, a second command is rejected while the transaction is outstanding, and readiness returns only after a matching successful Command Complete event.
 
 The xHCI Bluetooth boundary maps the Stage 13.10B descriptor result into bounded transfer plans for endpoint-zero HCI commands, interrupt-IN HCI events, and bulk ACL input/output. These plans describe ownership and size constraints; they do not themselves claim that a USB transfer was executed. The next implementation slice must materialize the plans as dedicated xHCI endpoint contexts, transfer rings, DMA buffers and completion routing, then feed received HCI event bytes back into `HciTransaction`.
+
+
+### Stage 13.10D live USB HCI mechanics and initialization
+
+Stage 13.10D turns the accepted transfer descriptions into xHCI-owned execution state. The controller owns separate Bluetooth event, ACL-IN and ACL-OUT rings and DMA pages rather than reusing HID ownership. USB endpoint addresses are converted to direction-aware xHCI DCIs, and endpoint contexts distinguish interrupt-IN, bulk-IN and bulk-OUT endpoint types. HCI commands use an endpoint-zero control-OUT-with-data path; HCI events use interrupt-IN; ACL traffic uses the dedicated bulk rings.
+
+The protocol layer remains independent of USB. `ControllerInitializer` composes `HciTransaction` into a bounded startup sequence: Reset is issued first, its matching successful Command Complete advances to Read Local Version, and only the matching successful version completion advances the controller to Ready. Transport bytes therefore cross into HCI state only at the protocol boundary; xHCI does not interpret controller policy.
+
+The Stage 13.10D CI acceptance is deterministic and does not imply physical-radio qualification. A real Bluetooth USB controller must still validate endpoint behavior, timing, teardown/recovery and hardware-specific interoperability. Higher layers should build discovery/scanning and capability parsing above this accepted initialization boundary rather than adding policy to xHCI.
