@@ -360,16 +360,12 @@ pub fn replay_pending_restore() -> Result<Option<u64>, RestoreError> {
             count += 1;
         }
     }
-    if intent.applied > count {
-        return Err(RestoreError::PersistenceFailed);
-    }
-    // Validate every remaining durable pre-image before mutating the live
-    // filesystem. This prevents a corrupt later WHP1 record from leaving a
-    // newly-started rollback partially applied. On reboot, records below the
-    // durable WSR1 applied index are intentionally skipped and the remainder
-    // is validated again before replay resumes.
-    let mut preimages = alloc::vec::Vec::with_capacity(count.saturating_sub(intent.applied));
-    for record in plan.into_iter().flatten().skip(intent.applied) {
+    // Load and validate the complete durable plan before interpreting the
+    // WSR1 applied cursor. The cursor indexes the deterministic replay order,
+    // not the physical/catalog insertion order. Sorting only the remaining
+    // suffix would make a reboot capable of skipping a different object.
+    let mut preimages = alloc::vec::Vec::with_capacity(count);
+    for record in plan.into_iter().flatten() {
         let preimage = crate::storage::load_snapshot_preimage(record.snapshot_id, record.path_hash)
             .map_err(|_| RestoreError::PersistenceFailed)?;
         if preimage.checksum != record.old_checksum {
@@ -389,7 +385,10 @@ pub fn replay_pending_restore() -> Result<Option<u64>, RestoreError> {
             })
             .then_with(|| left.path.cmp(&right.path))
     });
-    for preimage in &preimages {
+    if intent.applied > preimages.len() {
+        return Err(RestoreError::PersistenceFailed);
+    }
+    for preimage in preimages.iter().skip(intent.applied) {
         crate::storage::replay_snapshot_preimage(preimage)
             .map_err(|_| RestoreError::PersistenceFailed)?;
         mark_restore_applied(intent.snapshot_id)?;
