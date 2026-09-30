@@ -683,16 +683,6 @@ pub fn enable_io_bus_master(bus: u8, device: u8, function: u8) {
 
 /// Enable MMIO decoding and DMA bus mastering for a PCI/PCIe function.
 /// Returns false if the configuration transaction cannot be completed.
-#[cfg(any(
-    feature = "stage13-3-test",
-    feature = "stage13-4-test",
-    feature = "stage13-5-test",
-    feature = "stage13-6-test",
-    feature = "stage13-7-test",
-    feature = "stage13-8-test",
-    feature = "stage13-9-test",
-    feature = "stage13-10-test"
-))]
 pub fn enable_memory_bus_master(address: Address) -> bool {
     let _guard = CONFIG_LOCK.lock();
     let Some(command) = read_command_unlocked(address) else {
