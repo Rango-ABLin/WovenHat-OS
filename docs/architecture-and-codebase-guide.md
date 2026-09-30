@@ -424,3 +424,12 @@ L2CAP is layered above the 13.10F ACL authority boundary rather than owning tran
 Signaling establishes and tears down channel authority. Data transmission is permitted only through an established channel and is encoded for its remote CID; receive dispatch requires the same live ACL handle plus the channel's local CID. Removing the channel immediately makes both transmit and receive paths fail closed. This keeps higher Bluetooth protocols from treating CIDs as ambient/global authority.
 
 Stage 13.10H should consume these owned channels when adding authentication/pairing and encryption state. It must not weaken the lower-layer ACL/CID ownership checks.
+
+
+### Stage 13.10H Bluetooth trust authority
+
+Bluetooth security is modeled as authority derived from controller-confirmed state, not inferred from connection existence. `LinkSecurityState` tracks authentication/encryption progression per owned ACL handle. `LinkKeyStore` owns a bounded peer-address-to-link-key association and answers controller Link Key Requests with a stored key or an explicit negative reply.
+
+Secure Simple Pairing events are parsed into policy decisions: IO capability can be declared, but numeric confirmation and passkey acceptance require an explicit caller decision. The kernel does not silently accept a pairing prompt.
+
+The strongest software trust predicate binds four facts: the ACL handle is still live, its peer address owns a stored link key, authentication completed successfully, and encryption was confirmed enabled by the controller. Key removal or ACL teardown therefore revokes trusted authority without relying on stale security state.

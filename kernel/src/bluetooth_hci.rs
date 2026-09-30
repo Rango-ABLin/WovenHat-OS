@@ -540,6 +540,14 @@ impl LinkState {
         }
     }
 
+    pub fn address_for_handle(&self, handle: u16) -> Option<[u8; 6]> {
+        self.links[..self.count]
+            .iter()
+            .flatten()
+            .find(|link| link.handle == handle)
+            .map(|link| link.address)
+    }
+
     pub fn count(&self) -> usize { self.count }
     pub fn link(&self, index: usize) -> Option<AclLink> {
         if index >= self.count { None } else { self.links[index] }
@@ -1011,6 +1019,510 @@ pub fn link_lifecycle_self_test() -> bool {
         && links.inbound_acl(&[0x42, 0x20, 1, 0, 1]).is_err()
         && links.handle_event(&connected[..12]).is_err()
         && LinkState::disconnect_command(0x1000, 0x13, &mut bytes).is_err()
+}
+
+
+pub const EVT_AUTHENTICATION_COMPLETE: u8 = 0x06;
+pub const EVT_ENCRYPTION_CHANGE: u8 = 0x08;
+pub const OPCODE_AUTHENTICATION_REQUESTED: u16 = 0x0411;
+pub const OPCODE_SET_CONNECTION_ENCRYPTION: u16 = 0x0413;
+pub const MAX_SECURE_LINKS: usize = MAX_ACL_LINKS;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LinkSecurityPhase {
+    Unauthenticated,
+    Authenticating,
+    Authenticated,
+    EnablingEncryption,
+    Secured,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct SecureLink {
+    pub handle: u16,
+    pub phase: LinkSecurityPhase,
+}
+
+pub struct LinkSecurityState {
+    links: [Option<SecureLink>; MAX_SECURE_LINKS],
+    count: usize,
+}
+
+impl LinkSecurityState {
+    pub const fn new() -> Self {
+        Self { links: [None; MAX_SECURE_LINKS], count: 0 }
+    }
+
+    fn index(&self, handle: u16) -> Option<usize> {
+        self.links[..self.count]
+            .iter()
+            .position(|entry| entry.is_some_and(|entry| entry.handle == handle))
+    }
+
+    fn ensure_link(&mut self, links: &LinkState, handle: u16) -> Result<usize, HciError> {
+        if !links.owns_handle(handle) {
+            return Err(HciError::UnexpectedOpcode);
+        }
+        if let Some(index) = self.index(handle) {
+            return Ok(index);
+        }
+        if self.count == MAX_SECURE_LINKS {
+            return Err(HciError::ControllerFailure(0xff));
+        }
+        let index = self.count;
+        self.links[index] = Some(SecureLink { handle, phase: LinkSecurityPhase::Unauthenticated });
+        self.count += 1;
+        Ok(index)
+    }
+
+    pub fn authentication_command(
+        &mut self,
+        links: &LinkState,
+        handle: u16,
+        out: &mut [u8; 258],
+    ) -> Result<usize, HciError> {
+        let index = self.ensure_link(links, handle)?;
+        let Some(mut secure) = self.links[index] else { return Err(HciError::UnexpectedOpcode); };
+        if secure.phase != LinkSecurityPhase::Unauthenticated {
+            return Err(HciError::UnexpectedOpcode);
+        }
+        secure.phase = LinkSecurityPhase::Authenticating;
+        self.links[index] = Some(secure);
+        HciCommand::new(OPCODE_AUTHENTICATION_REQUESTED, &handle.to_le_bytes())
+            .map(|command| command.encode(out))
+    }
+
+    pub fn authentication_complete(&mut self, event: &[u8]) -> Result<u16, HciError> {
+        if event.len() != 5 || event[0] != EVT_AUTHENTICATION_COMPLETE || event[1] != 3 {
+            return Err(HciError::MalformedEvent);
+        }
+        let handle = u16::from_le_bytes([event[3], event[4]]);
+        let Some(index) = self.index(handle) else { return Err(HciError::UnexpectedOpcode); };
+        let Some(mut secure) = self.links[index] else { return Err(HciError::UnexpectedOpcode); };
+        if secure.phase != LinkSecurityPhase::Authenticating {
+            return Err(HciError::UnexpectedOpcode);
+        }
+        if event[2] != 0 {
+            secure.phase = LinkSecurityPhase::Unauthenticated;
+            self.links[index] = Some(secure);
+            return Err(HciError::ControllerFailure(event[2]));
+        }
+        secure.phase = LinkSecurityPhase::Authenticated;
+        self.links[index] = Some(secure);
+        Ok(handle)
+    }
+
+    pub fn enable_encryption_command(
+        &mut self,
+        links: &LinkState,
+        handle: u16,
+        out: &mut [u8; 258],
+    ) -> Result<usize, HciError> {
+        if !links.owns_handle(handle) {
+            return Err(HciError::UnexpectedOpcode);
+        }
+        let Some(index) = self.index(handle) else { return Err(HciError::UnexpectedOpcode); };
+        let Some(mut secure) = self.links[index] else { return Err(HciError::UnexpectedOpcode); };
+        if secure.phase != LinkSecurityPhase::Authenticated {
+            return Err(HciError::UnexpectedOpcode);
+        }
+        let [lo, hi] = handle.to_le_bytes();
+        secure.phase = LinkSecurityPhase::EnablingEncryption;
+        self.links[index] = Some(secure);
+        HciCommand::new(OPCODE_SET_CONNECTION_ENCRYPTION, &[lo, hi, 1])
+            .map(|command| command.encode(out))
+    }
+
+    pub fn encryption_change(&mut self, event: &[u8]) -> Result<u16, HciError> {
+        if event.len() != 6 || event[0] != EVT_ENCRYPTION_CHANGE || event[1] != 4 {
+            return Err(HciError::MalformedEvent);
+        }
+        let handle = u16::from_le_bytes([event[3], event[4]]);
+        let Some(index) = self.index(handle) else { return Err(HciError::UnexpectedOpcode); };
+        let Some(mut secure) = self.links[index] else { return Err(HciError::UnexpectedOpcode); };
+        if secure.phase != LinkSecurityPhase::EnablingEncryption {
+            return Err(HciError::UnexpectedOpcode);
+        }
+        if event[2] != 0 || event[5] == 0 {
+            secure.phase = LinkSecurityPhase::Authenticated;
+            self.links[index] = Some(secure);
+            return Err(HciError::ControllerFailure(if event[2] != 0 { event[2] } else { 0xff }));
+        }
+        secure.phase = LinkSecurityPhase::Secured;
+        self.links[index] = Some(secure);
+        Ok(handle)
+    }
+
+    pub fn is_secured(&self, links: &LinkState, handle: u16) -> bool {
+        links.owns_handle(handle)
+            && self.index(handle)
+                .and_then(|index| self.links[index])
+                .is_some_and(|secure| secure.phase == LinkSecurityPhase::Secured)
+    }
+
+    pub fn trusted_secured(
+        &self,
+        links: &LinkState,
+        keys: &LinkKeyStore,
+        handle: u16,
+    ) -> bool {
+        self.is_secured(links, handle)
+            && links.address_for_handle(handle).is_some_and(|address| keys.contains(address))
+    }
+
+    pub fn revoke(&mut self, handle: u16) {
+        let Some(index) = self.index(handle) else { return; };
+        self.count -= 1;
+        self.links[index] = self.links[self.count];
+        self.links[self.count] = None;
+    }
+}
+
+
+pub const EVT_LINK_KEY_REQUEST: u8 = 0x17;
+pub const EVT_LINK_KEY_NOTIFICATION: u8 = 0x18;
+pub const OPCODE_LINK_KEY_REQUEST_REPLY: u16 = 0x040b;
+pub const OPCODE_LINK_KEY_REQUEST_NEGATIVE_REPLY: u16 = 0x040c;
+pub const MAX_LINK_KEYS: usize = 8;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct LinkKey {
+    pub address: [u8; 6],
+    key: [u8; 16],
+    pub key_type: u8,
+}
+
+pub struct LinkKeyStore {
+    keys: [Option<LinkKey>; MAX_LINK_KEYS],
+    count: usize,
+}
+
+impl LinkKeyStore {
+    pub const fn new() -> Self {
+        Self { keys: [None; MAX_LINK_KEYS], count: 0 }
+    }
+
+    fn index(&self, address: [u8; 6]) -> Option<usize> {
+        self.keys[..self.count]
+            .iter()
+            .position(|entry| entry.is_some_and(|entry| entry.address == address))
+    }
+
+    pub fn store_notification(&mut self, event: &[u8]) -> Result<(), HciError> {
+        if event.len() != 25 || event[0] != EVT_LINK_KEY_NOTIFICATION || event[1] != 23 {
+            return Err(HciError::MalformedEvent);
+        }
+        let mut address = [0_u8; 6];
+        address.copy_from_slice(&event[2..8]);
+        let mut key = [0_u8; 16];
+        key.copy_from_slice(&event[8..24]);
+        let entry = LinkKey { address, key, key_type: event[24] };
+        if let Some(index) = self.index(address) {
+            self.keys[index] = Some(entry);
+            return Ok(());
+        }
+        if self.count == MAX_LINK_KEYS {
+            return Err(HciError::ControllerFailure(0xff));
+        }
+        self.keys[self.count] = Some(entry);
+        self.count += 1;
+        Ok(())
+    }
+
+    pub fn request_reply(&self, event: &[u8], out: &mut [u8; 258]) -> Result<usize, HciError> {
+        if event.len() != 8 || event[0] != EVT_LINK_KEY_REQUEST || event[1] != 6 {
+            return Err(HciError::MalformedEvent);
+        }
+        let mut address = [0_u8; 6];
+        address.copy_from_slice(&event[2..8]);
+        if let Some(index) = self.index(address) {
+            let Some(entry) = self.keys[index] else { return Err(HciError::UnexpectedOpcode); };
+            let mut params = [0_u8; 22];
+            params[..6].copy_from_slice(&address);
+            params[6..].copy_from_slice(&entry.key);
+            return HciCommand::new(OPCODE_LINK_KEY_REQUEST_REPLY, &params)
+                .map(|command| command.encode(out));
+        }
+        HciCommand::new(OPCODE_LINK_KEY_REQUEST_NEGATIVE_REPLY, &address)
+            .map(|command| command.encode(out))
+    }
+
+    pub fn contains(&self, address: [u8; 6]) -> bool {
+        self.index(address).is_some()
+    }
+
+    pub fn remove(&mut self, address: [u8; 6]) {
+        let Some(index) = self.index(address) else { return; };
+        self.count -= 1;
+        self.keys[index] = self.keys[self.count];
+        self.keys[self.count] = None;
+    }
+
+    pub fn count(&self) -> usize { self.count }
+}
+
+
+pub const EVT_IO_CAPABILITY_REQUEST: u8 = 0x31;
+pub const EVT_USER_CONFIRMATION_REQUEST: u8 = 0x33;
+pub const EVT_USER_PASSKEY_REQUEST: u8 = 0x34;
+pub const EVT_SIMPLE_PAIRING_COMPLETE: u8 = 0x36;
+pub const OPCODE_IO_CAPABILITY_REQUEST_REPLY: u16 = 0x042b;
+pub const OPCODE_USER_CONFIRMATION_REQUEST_REPLY: u16 = 0x042c;
+pub const OPCODE_USER_CONFIRMATION_REQUEST_NEGATIVE_REPLY: u16 = 0x042d;
+pub const OPCODE_USER_PASSKEY_REQUEST_REPLY: u16 = 0x042e;
+pub const OPCODE_USER_PASSKEY_REQUEST_NEGATIVE_REPLY: u16 = 0x042f;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PairingRequest {
+    pub address: [u8; 6],
+    pub numeric_value: Option<u32>,
+}
+
+pub fn io_capability_reply(
+    event: &[u8],
+    io_capability: u8,
+    oob_present: bool,
+    authentication_requirements: u8,
+    out: &mut [u8; 258],
+) -> Result<usize, HciError> {
+    if event.len() != 8 || event[0] != EVT_IO_CAPABILITY_REQUEST || event[1] != 6 {
+        return Err(HciError::MalformedEvent);
+    }
+    let mut params = [0_u8; 9];
+    params[..6].copy_from_slice(&event[2..8]);
+    params[6] = io_capability;
+    params[7] = u8::from(oob_present);
+    params[8] = authentication_requirements;
+    HciCommand::new(OPCODE_IO_CAPABILITY_REQUEST_REPLY, &params)
+        .map(|command| command.encode(out))
+}
+
+pub fn parse_user_confirmation_request(event: &[u8]) -> Result<PairingRequest, HciError> {
+    if event.len() != 12 || event[0] != EVT_USER_CONFIRMATION_REQUEST || event[1] != 10 {
+        return Err(HciError::MalformedEvent);
+    }
+    let mut address = [0_u8; 6];
+    address.copy_from_slice(&event[2..8]);
+    let numeric_value = u32::from_le_bytes([event[8], event[9], event[10], event[11]]);
+    if numeric_value > 999_999 {
+        return Err(HciError::MalformedEvent);
+    }
+    Ok(PairingRequest { address, numeric_value: Some(numeric_value) })
+}
+
+pub fn user_confirmation_reply(
+    request: PairingRequest,
+    accepted: bool,
+    out: &mut [u8; 258],
+) -> Result<usize, HciError> {
+    let opcode = if accepted {
+        OPCODE_USER_CONFIRMATION_REQUEST_REPLY
+    } else {
+        OPCODE_USER_CONFIRMATION_REQUEST_NEGATIVE_REPLY
+    };
+    HciCommand::new(opcode, &request.address).map(|command| command.encode(out))
+}
+
+pub fn parse_user_passkey_request(event: &[u8]) -> Result<PairingRequest, HciError> {
+    if event.len() != 8 || event[0] != EVT_USER_PASSKEY_REQUEST || event[1] != 6 {
+        return Err(HciError::MalformedEvent);
+    }
+    let mut address = [0_u8; 6];
+    address.copy_from_slice(&event[2..8]);
+    Ok(PairingRequest { address, numeric_value: None })
+}
+
+pub fn user_passkey_reply(
+    request: PairingRequest,
+    passkey: Option<u32>,
+    out: &mut [u8; 258],
+) -> Result<usize, HciError> {
+    match passkey {
+        Some(passkey) if passkey <= 999_999 => {
+            let mut params = [0_u8; 10];
+            params[..6].copy_from_slice(&request.address);
+            params[6..10].copy_from_slice(&passkey.to_le_bytes());
+            HciCommand::new(OPCODE_USER_PASSKEY_REQUEST_REPLY, &params)
+                .map(|command| command.encode(out))
+        }
+        Some(_) => Err(HciError::MalformedEvent),
+        None => HciCommand::new(OPCODE_USER_PASSKEY_REQUEST_NEGATIVE_REPLY, &request.address)
+            .map(|command| command.encode(out)),
+    }
+}
+
+pub fn parse_simple_pairing_complete(event: &[u8]) -> Result<[u8; 6], HciError> {
+    if event.len() != 9 || event[0] != EVT_SIMPLE_PAIRING_COMPLETE || event[1] != 7 {
+        return Err(HciError::MalformedEvent);
+    }
+    if event[2] != 0 {
+        return Err(HciError::ControllerFailure(event[2]));
+    }
+    let mut address = [0_u8; 6];
+    address.copy_from_slice(&event[3..9]);
+    Ok(address)
+}
+
+pub fn pairing_interaction_self_test() -> bool {
+    let address = [1, 2, 3, 4, 5, 6];
+    let mut out = [0_u8; 258];
+    let io = [EVT_IO_CAPABILITY_REQUEST, 6, 1, 2, 3, 4, 5, 6];
+    if io_capability_reply(&io, 0x01, false, 0x03, &mut out) != Ok(12)
+        || out[..12] != [0x2b, 0x04, 9, 1, 2, 3, 4, 5, 6, 1, 0, 3]
+    {
+        return false;
+    }
+
+    let confirm_event = [
+        EVT_USER_CONFIRMATION_REQUEST, 10, 1, 2, 3, 4, 5, 6,
+        0x40, 0xe2, 0x01, 0,
+    ];
+    let Ok(confirm) = parse_user_confirmation_request(&confirm_event) else { return false; };
+    if confirm.address != address || confirm.numeric_value != Some(123_456)
+        || user_confirmation_reply(confirm, false, &mut out) != Ok(9)
+        || out[..3] != [0x2d, 0x04, 6]
+    {
+        return false;
+    }
+
+    let passkey_event = [EVT_USER_PASSKEY_REQUEST, 6, 1, 2, 3, 4, 5, 6];
+    let Ok(passkey) = parse_user_passkey_request(&passkey_event) else { return false; };
+    if user_passkey_reply(passkey, Some(654_321), &mut out) != Ok(13)
+        || out[..3] != [0x2e, 0x04, 10]
+        || user_passkey_reply(passkey, Some(1_000_000), &mut out).is_ok()
+    {
+        return false;
+    }
+
+    parse_simple_pairing_complete(&[
+        EVT_SIMPLE_PAIRING_COMPLETE, 7, 0, 1, 2, 3, 4, 5, 6,
+    ]) == Ok(address)
+        && parse_simple_pairing_complete(&[
+            EVT_SIMPLE_PAIRING_COMPLETE, 7, 5, 1, 2, 3, 4, 5, 6,
+        ]).is_err()
+}
+
+pub fn link_key_self_test() -> bool {
+    let address = [1, 2, 3, 4, 5, 6];
+    let key = [0xa5_u8; 16];
+    let mut store = LinkKeyStore::new();
+    let mut out = [0_u8; 258];
+    let request = [EVT_LINK_KEY_REQUEST, 6, 1, 2, 3, 4, 5, 6];
+
+    if store.request_reply(&request, &mut out) != Ok(9)
+        || out[..9] != [0x0c, 0x04, 6, 1, 2, 3, 4, 5, 6]
+    {
+        return false;
+    }
+
+    let mut notification = [0_u8; 25];
+    notification[0] = EVT_LINK_KEY_NOTIFICATION;
+    notification[1] = 23;
+    notification[2..8].copy_from_slice(&address);
+    notification[8..24].copy_from_slice(&key);
+    notification[24] = 0x04;
+    if store.store_notification(&notification).is_err() || store.count() != 1 {
+        return false;
+    }
+    if store.request_reply(&request, &mut out) != Ok(25)
+        || out[..3] != [0x0b, 0x04, 22]
+        || out[3..9] != address
+        || out[9..25] != key
+    {
+        return false;
+    }
+
+    store.remove(address);
+    store.count() == 0
+        && store.request_reply(&request, &mut out) == Ok(9)
+        && out[..3] == [0x0c, 0x04, 6]
+        && store.store_notification(&[EVT_LINK_KEY_NOTIFICATION, 23]).is_err()
+}
+
+
+pub fn trusted_security_self_test() -> bool {
+    let address = [1, 2, 3, 4, 5, 6];
+    let mut links = LinkState::new();
+    if links.handle_event(&[
+        EVT_CONNECTION_COMPLETE, 11, 0, 0x42, 0,
+        1, 2, 3, 4, 5, 6, 1, 0,
+    ]).is_err() {
+        return false;
+    }
+    let mut security = LinkSecurityState::new();
+    let mut keys = LinkKeyStore::new();
+    let mut out = [0_u8; 258];
+    if security.authentication_command(&links, 0x42, &mut out).is_err()
+        || security.authentication_complete(&[EVT_AUTHENTICATION_COMPLETE, 3, 0, 0x42, 0]).is_err()
+        || security.enable_encryption_command(&links, 0x42, &mut out).is_err()
+        || security.encryption_change(&[EVT_ENCRYPTION_CHANGE, 4, 0, 0x42, 0, 1]).is_err()
+        || security.trusted_secured(&links, &keys, 0x42)
+    {
+        return false;
+    }
+
+    let mut notification = [0_u8; 25];
+    notification[0] = EVT_LINK_KEY_NOTIFICATION;
+    notification[1] = 23;
+    notification[2..8].copy_from_slice(&address);
+    notification[8..24].copy_from_slice(&[0x5a_u8; 16]);
+    notification[24] = 0x04;
+    if keys.store_notification(&notification).is_err()
+        || !security.trusted_secured(&links, &keys, 0x42)
+    {
+        return false;
+    }
+
+    keys.remove(address);
+    if security.trusted_secured(&links, &keys, 0x42) {
+        return false;
+    }
+    if keys.store_notification(&notification).is_err() {
+        return false;
+    }
+    if links.handle_event(&[EVT_DISCONNECTION_COMPLETE, 4, 0, 0x42, 0, 0x13]).is_err() {
+        return false;
+    }
+    !security.trusted_secured(&links, &keys, 0x42)
+}
+
+pub fn link_security_self_test() -> bool {
+    let mut links = LinkState::new();
+    if links.handle_event(&[
+        EVT_CONNECTION_COMPLETE, 11, 0, 0x42, 0,
+        1, 2, 3, 4, 5, 6, 1, 0,
+    ]).is_err() {
+        return false;
+    }
+
+    let mut security = LinkSecurityState::new();
+    let mut bytes = [0_u8; 258];
+    if security.authentication_command(&links, 0x42, &mut bytes) != Ok(5)
+        || bytes[..5] != [0x11, 0x04, 2, 0x42, 0]
+        || security.is_secured(&links, 0x42)
+    {
+        return false;
+    }
+    if security.authentication_complete(&[EVT_AUTHENTICATION_COMPLETE, 3, 0, 0x42, 0]) != Ok(0x42) {
+        return false;
+    }
+    if security.enable_encryption_command(&links, 0x42, &mut bytes) != Ok(6)
+        || bytes[..6] != [0x13, 0x04, 3, 0x42, 0, 1]
+    {
+        return false;
+    }
+    if security.encryption_change(&[EVT_ENCRYPTION_CHANGE, 4, 0, 0x42, 0, 1]) != Ok(0x42)
+        || !security.is_secured(&links, 0x42)
+    {
+        return false;
+    }
+
+    if links.handle_event(&[EVT_DISCONNECTION_COMPLETE, 4, 0, 0x42, 0, 0x13]).is_err() {
+        return false;
+    }
+    !security.is_secured(&links, 0x42)
+        && security.authentication_command(&links, 0x42, &mut bytes).is_err()
+        && security.encryption_change(&[EVT_ENCRYPTION_CHANGE, 4, 0, 0x43, 0, 1]).is_err()
 }
 
 pub fn transaction_self_test() -> bool {

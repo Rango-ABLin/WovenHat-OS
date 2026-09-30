@@ -391,3 +391,16 @@ The signaling layer implements bounded Connection Request/Response and Disconnec
 GitHub Actions run 36785295506 passed at exact source SHA `c2dff3c12c9c9387a10493900b3846489e8539a6`, including the Stage 13.10G 1/2/4-core acceptance and evidence-preservation steps. Artifact digest: `sha256:6ac9ff255444ffa36128cd03d75f3d2c89eff086e308618ed21fed463c4a8eab`.
 
 This is deterministic software acceptance. Configuration negotiation, fragmentation/reassembly, enhanced modes, controller flow control and physical interoperability remain outside this boundary. Next: Stage 13.10H pairing, authentication and encryption/security.
+
+
+## Roadmap Stage 13.10H — Bluetooth pairing/authentication/encryption accepted on 2026-10-01
+
+Stage 13.10H adds a fail-closed BR/EDR security boundary above the accepted ACL/L2CAP ownership layers. A live ACL link progresses explicitly through unauthenticated, authenticating, authenticated, encryption-enabling and secured controller states. Authentication or encryption failure does not grant secured authority.
+
+The stage also adds bounded link-key ownership, Link Key Request positive/negative replies, Link Key Notification ingestion, explicit key revocation, and policy-mediated Secure Simple Pairing interactions for IO capability, numeric confirmation and passkey requests. Pairing confirmation is never silently auto-approved.
+
+Trusted secured authority requires all of: a live owned ACL handle, the same peer address owning a stored link key, successful controller authentication, and controller-confirmed encryption. Removing the key or disconnecting the ACL link makes the trust predicate fail closed.
+
+GitHub Actions run 36791065311 passed at exact source SHA `dda2933eef36026ab70cefbe85898bcd62256f06`, including the Stage 13.10H Bluetooth security 1/2/4-core acceptance and evidence-preservation steps. Artifact digest: `sha256:f731dbd2f52dc7c2743aa052eaa7f801eef99dc0fc6050f13e6fa71518a07405`.
+
+This is deterministic software acceptance. Persistent secure key storage, full controller event orchestration, physical-radio pairing/interoperability and BLE security remain outside this boundary.
