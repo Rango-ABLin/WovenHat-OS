@@ -87,3 +87,22 @@ WovenAudio now acts as the hardware-independent faÃ§ade above HDA. It exposes:
 - an integrated smoke test that initializes the registered audio device and exercises mixer, playback, and capture through the faÃ§ade.
 
 This stage intentionally keeps HDA-specific verbs and DMA implementation inside `hda.rs`. It is a boundary milestone, not yet a general asynchronous userspace audio server or arbitrary-format streaming API.
+
+## Final acceptance and hardening record
+
+Stage 13.8 was accepted on 2026-09-30 from commit `e78a349da6353f0f3d3e4721f787742d6fbeb19f` by GitHub Actions run `36710786817`.
+
+The full release-validation suite and retained Stage 13.3 through Stage 13.7 gates passed. Dedicated WovenAudio/HDA acceptance passed on 1, 2, and 4 CPUs with exit 33.
+
+The Stage 13.8H hardening matrix then completed nine additional successful boots:
+- 1 CPU: 3/3 PASS
+- 2 CPUs: 3/3 PASS
+- 4 CPUs: 3/3 PASS
+
+Each hardening boot exited through the expected debug-exit code 33 and preserved its Stage 13.8 evidence under `audit-artifacts/stage13.8-*`.
+
+## Milestone status
+
+**Stage 13.8 WovenAudio / Intel HDA integration and hardening: COMPLETE at the QEMU integration boundary.**
+
+The accepted milestone covers HDA controller bring-up, codec command transport and topology discovery, PCM DMA playback/capture, and the WovenAudio hardware-independent stream/API boundary. It passed both the standard SMP acceptance matrix and the additional 9-boot hardening matrix. Broader physical-hardware qualification and later asynchronous/userspace audio services remain outside this milestone.
