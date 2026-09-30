@@ -415,3 +415,12 @@ The Bluetooth HCI layer now owns the mapping from a discovered BR/EDR peer to a 
 `AclPacket` owns HCI ACL framing independently of xHCI. It masks the 12-bit connection handle, carries packet-boundary and broadcast flags, applies a bounded 1024-byte software payload ceiling, and validates declared lengths before exposing payload bytes. `LinkState::outbound_acl` and `inbound_acl` require the handle to remain live; Disconnection Complete removes the link before further ACL traffic can be accepted.
 
 This boundary is intentionally below L2CAP. Stage 13.10G should parse/build the L2CAP basic header and add bounded channel identifiers/state while continuing to use the 13.10F ACL handle as the lower-layer authority anchor.
+
+
+### Stage 13.10G L2CAP framing and channel ownership
+
+L2CAP is layered above the 13.10F ACL authority boundary rather than owning transport handles itself. `L2capFrame` validates the Basic Mode length/CID header and uses fixed-capacity payload storage. `L2capChannels` owns at most eight established dynamic channels and records the ACL handle, PSM, local CID and remote CID for each.
+
+Signaling establishes and tears down channel authority. Data transmission is permitted only through an established channel and is encoded for its remote CID; receive dispatch requires the same live ACL handle plus the channel's local CID. Removing the channel immediately makes both transmit and receive paths fail closed. This keeps higher Bluetooth protocols from treating CIDs as ambient/global authority.
+
+Stage 13.10H should consume these owned channels when adding authentication/pairing and encryption state. It must not weaken the lower-layer ACL/CID ownership checks.
