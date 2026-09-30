@@ -56,6 +56,7 @@ fn durable_catalog() -> crate::fat32::SnapshotCatalog {
     let table = TABLE.lock();
     let changes = CHANGES.lock();
     let mut catalog = crate::fat32::SnapshotCatalog::empty();
+    catalog.next_snapshot_id = *NEXT_SNAPSHOT_ID.lock();
     for (dst, src) in catalog.snapshots.iter_mut().zip(table.iter()) {
         *dst = src.map(|entry| crate::fat32::SnapshotCatalogEntry {
             id: entry.id,
@@ -112,17 +113,21 @@ pub fn recover_catalog() -> Result<bool, RestoreError> {
             return Err(RestoreError::PersistenceFailed);
         }
     }
-    let next_id = table_image
+    let derived_next_id = table_image
         .iter()
         .flatten()
         .map(|snapshot| snapshot.id)
         .max()
         .unwrap_or(0)
         .checked_add(1)
-        .ok_or(RestoreError::PersistenceFailed)?;
+        .ok_or(RestoreError::PersistenceFailed)?
+        .max(1);
+    if catalog.next_snapshot_id < derived_next_id {
+        return Err(RestoreError::PersistenceFailed);
+    }
     *TABLE.lock() = table_image;
     *CHANGES.lock() = changes_image;
-    *NEXT_SNAPSHOT_ID.lock() = next_id.max(1);
+    *NEXT_SNAPSHOT_ID.lock() = catalog.next_snapshot_id;
     Ok(true)
 }
 
