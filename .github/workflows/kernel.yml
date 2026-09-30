@@ -185,7 +185,7 @@ jobs:
           for cpu in 1 2 4; do
             python3 scripts/test-stage10-runtime.py --stage 13.9 --cpus "$cpu" --timeout 120 --qemu "$qemu" --firmware "$ovmf_code"
           done
-      - name: Stage 13.10A Bluetooth HCI core 1/2/4-core acceptance
+      - name: Stage 13.10C Bluetooth HCI transfer 1/2/4-core acceptance
         shell: bash
         run: |
           qemu=/usr/bin/qemu-system-x86_64
