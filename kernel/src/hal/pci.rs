@@ -353,8 +353,7 @@ pub fn discover() -> Summary {
     feature = "stage13-6-test",
     feature = "stage13-7-test",
     feature = "stage13-8-test",
-    feature = "stage13-9-test",
-    feature = "stage13-10-test"
+    feature = "stage13-9-test"
 ))]
 pub(crate) fn reconcile_after_teardown() -> Result<Summary, Summary> {
     let mut inventory = scan_inventory();
@@ -691,7 +690,8 @@ pub fn enable_io_bus_master(bus: u8, device: u8, function: u8) {
     feature = "stage13-6-test",
     feature = "stage13-7-test",
     feature = "stage13-8-test",
-    feature = "stage13-9-test"
+    feature = "stage13-9-test",
+    feature = "stage13-10-test"
 ))]
 pub fn enable_memory_bus_master(address: Address) -> bool {
     let _guard = CONFIG_LOCK.lock();
