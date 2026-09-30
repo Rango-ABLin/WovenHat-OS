@@ -1214,6 +1214,24 @@ pub struct SnapshotPreimage {
     pub data: alloc::vec::Vec<u8>,
 }
 
+impl SnapshotPreimage {
+    /// Replay phase: restore directories before files so parents exist, then
+    /// remove post-snapshot creations deepest-first after restoration.
+    pub fn replay_phase(&self) -> u8 {
+        if self.checksum == 0 {
+            2
+        } else if self.directory {
+            0
+        } else {
+            1
+        }
+    }
+
+    pub fn path_depth(&self) -> usize {
+        self.path.as_bytes().iter().filter(|byte| **byte == b'/').count()
+    }
+}
+
 fn read_snapshot_preimage_on_device(
     device: &mut impl crate::block::BlockDevice,
     snapshot_id: u64,
