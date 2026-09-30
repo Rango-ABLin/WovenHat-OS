@@ -198,11 +198,6 @@ pub fn snapshot_membership() -> SnapshotMembership {
     }
 }
 
-pub fn live_snapshot_ids() -> ([u64; MAX], usize) {
-    let membership = snapshot_membership();
-    (membership.ids, membership.count)
-}
-
 pub fn get(id: u64) -> Option<Snapshot> {
     TABLE.lock().iter().flatten().find(|s| s.id == id).copied()
 }
@@ -247,27 +242,9 @@ pub fn record_change(
     Ok(())
 }
 
-/// Record one mutation against every live snapshot. The bounded operation is
-/// fail-closed: if any snapshot cannot retain its pre-image metadata, the
-/// durable filesystem write must not proceed.
-pub fn record_live_change(
-    path_hash: u64,
-    old_checksum: u64,
-    new_checksum: u64,
-) -> Result<(), RestoreError> {
-    record_live_changes(&[(path_hash, old_checksum, new_checksum)])
-}
-
-/// Atomically stage a logical filesystem mutation against every live snapshot.
-/// All COW records are installed under one lock and persisted as one catalog
-/// image. Capacity or persistence failure restores the complete prior table.
-pub fn record_live_changes(
-    mutations: &[(u64, u64, u64)],
-) -> Result<(), RestoreError> {
-    let membership = snapshot_membership();
-    record_live_changes_for_membership(membership, mutations)
-}
-
+/// Atomically publish a logical filesystem mutation for the exact snapshot
+/// membership that retained its WHP1 pre-images. Membership changes fail
+/// closed before the underlying FAT mutation can proceed.
 pub fn record_live_changes_for_membership(
     membership: SnapshotMembership,
     mutations: &[(u64, u64, u64)],
