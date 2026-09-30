@@ -833,6 +833,25 @@ pub fn init_hid() -> Result<HidSummary, InitError> {
         .enumerate_hid()
 }
 
+pub fn init_bluetooth() -> Result<BluetoothUsbInterface, InitError> {
+    let mut slot = CONTROLLER.lock();
+    if slot.is_none() {
+        let device = find_controller().ok_or(InitError::MissingController)?;
+        *slot = Some(XhciController::initialize(device)?);
+    }
+    slot.as_mut()
+        .ok_or(InitError::MissingController)?
+        .enumerate_bluetooth()
+}
+
+pub fn send_bluetooth_command(command: &[u8]) -> Result<(), InitError> {
+    CONTROLLER
+        .lock()
+        .as_mut()
+        .ok_or(InitError::MissingController)?
+        .send_bluetooth_command(command)
+}
+
 pub fn poll_hid_report() -> Result<[u8; 8], InitError> {
     CONTROLLER
         .lock()
