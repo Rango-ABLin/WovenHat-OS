@@ -397,3 +397,12 @@ Stage 13.10D turns the accepted transfer descriptions into xHCI-owned execution 
 The protocol layer remains independent of USB. `ControllerInitializer` composes `HciTransaction` into a bounded startup sequence: Reset is issued first, its matching successful Command Complete advances to Read Local Version, and only the matching successful version completion advances the controller to Ready. Transport bytes therefore cross into HCI state only at the protocol boundary; xHCI does not interpret controller policy.
 
 The Stage 13.10D CI acceptance is deterministic and does not imply physical-radio qualification. A real Bluetooth USB controller must still validate endpoint behavior, timing, teardown/recovery and hardware-specific interoperability. Higher layers should build discovery/scanning and capability parsing above this accepted initialization boundary rather than adding policy to xHCI.
+
+
+### Stage 13.10E discovery and controller capabilities
+
+Stage 13.10E keeps discovery policy in the hardware-independent HCI layer. `DiscoveryState` owns a bounded 16-device BR/EDR Inquiry result set, deduplicated by Bluetooth device address. Inquiry event parsing validates the HCI parameter length before reading response records and stores only the fields needed by later link establishment: address, page-scan repetition mode, class-of-device and clock offset. xHCI remains responsible only for moving event bytes.
+
+Controller capability parsing follows the same boundary. Read Local Version, Read BD_ADDR and Read Local Supported Commands Command Complete events are checked for the expected opcode, successful controller status and complete return payload before typed data is exposed. This prevents later connection/security layers from inferring controller support from transport presence alone.
+
+The accepted 13.10E boundary is classic BR/EDR discovery plus local-controller capability discovery. It deliberately does not fold BLE scanning, connection establishment, pairing, L2CAP, ATT/GATT or policy into the transport. The next link layer should consume `DiscoveredDevice` records and capability data while retaining bounded handle/state ownership.
