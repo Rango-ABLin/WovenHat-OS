@@ -1951,6 +1951,61 @@ fn mkdir_on_cached_device(
     }
 }
 
+fn retain_snapshot_directory_preimages_on_device(
+    device: &mut impl crate::block::BlockDevice,
+    path: &str,
+    mode: u32,
+) -> Result<(), PersistError> {
+    if mode == 0 {
+        return Err(PersistError::Failed);
+    }
+    let (ids, count) = crate::snapshots::live_snapshot_ids();
+    for snapshot_id in ids.into_iter().take(count) {
+        write_snapshot_preimage_on_device(
+            device,
+            snapshot_id,
+            path,
+            SNAPSHOT_DIRECTORY_CHECKSUM,
+            mode | SNAPSHOT_PREIMAGE_DIRECTORY_FLAG,
+            &[],
+        )?;
+    }
+    Ok(())
+}
+
+fn path_is_directory_on_device(
+    device: &mut impl crate::block::BlockDevice,
+    relative: &str,
+) -> Result<bool, MutationError> {
+    fn inspect(
+        device: &mut impl crate::block::BlockDevice,
+        volume: fat32::Volume,
+        relative: &str,
+    ) -> Result<bool, MutationError> {
+        let entry = fat32::resolve_path(device, volume, relative).map_err(map_mutation_err)?;
+        Ok(entry.attributes & 0x10 != 0)
+    }
+    match fat32::mount(device) {
+        Ok(volume) => inspect(device, volume, relative),
+        Err(fat32::Error::InvalidBootSector | fat32::Error::UnsupportedGeometry) => {
+            if let Ok(Some(part)) = partition::find_fat32(device) {
+                let mut view = partition::PartitionDevice::new(device, part)
+                    .map_err(|_| MutationError::Failed)?;
+                let volume = fat32::mount(&mut view).map_err(map_mutation_err)?;
+                inspect(&mut view, volume, relative)
+            } else if let Ok(Some(part)) = gpt::find_fat_partition(device) {
+                let mut view = partition::PartitionDevice::new(device, part)
+                    .map_err(|_| MutationError::Failed)?;
+                let volume = fat32::mount(&mut view).map_err(map_mutation_err)?;
+                inspect(&mut view, volume, relative)
+            } else {
+                Err(MutationError::Failed)
+            }
+        }
+        Err(_) => Err(MutationError::Failed),
+    }
+}
+
 pub fn delete_path(path: &str) -> Result<(), MutationError> {
     if path == "/mnt" || !path.starts_with("/mnt/") {
         return Err(MutationError::NotSupported);
@@ -1969,7 +2024,17 @@ pub fn delete_path(path: &str) -> Result<(), MutationError> {
     }
     FILE_PAGES.lock().invalidate();
     let inode = inode_on_device(&mut disk, relative).ok().flatten();
-    if let Some(previous) = crate::wovenfs::metadata(path) {
+    if path_is_directory_on_device(&mut disk, relative)? {
+        let mode = vfs::stat(path).ok().map_or(0o755, |stat| u32::from(stat.mode));
+        retain_snapshot_directory_preimages_on_device(&mut disk, path, mode)
+            .map_err(|_| MutationError::Failed)?;
+        crate::snapshots::record_live_change(
+            crate::wovenfs::path_hash(path),
+            SNAPSHOT_DIRECTORY_CHECKSUM,
+            0,
+        )
+        .map_err(|_| MutationError::Failed)?;
+    } else if let Some(previous) = crate::wovenfs::metadata(path) {
         retain_snapshot_preimages_on_device(&mut disk, path, relative, previous.checksum)
             .map_err(|_| MutationError::Failed)?;
         crate::snapshots::record_live_change(
