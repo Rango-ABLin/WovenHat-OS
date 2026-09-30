@@ -543,6 +543,110 @@ impl LinkState {
     }
 }
 
+
+pub const HCI_ACL_PACKET: u8 = 0x02;
+pub const MAX_ACL_PAYLOAD: usize = 1024;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct AclPacket {
+    pub handle: u16,
+    pub packet_boundary: u8,
+    pub broadcast: u8,
+    pub len: u16,
+    payload: [u8; MAX_ACL_PAYLOAD],
+}
+
+impl AclPacket {
+    pub fn new(handle: u16, packet_boundary: u8, broadcast: u8, data: &[u8]) -> Result<Self, HciError> {
+        if handle > 0x0fff || packet_boundary > 0x03 || broadcast > 0x03 || data.len() > MAX_ACL_PAYLOAD {
+            return Err(HciError::PayloadTooLarge);
+        }
+        let mut payload = [0_u8; MAX_ACL_PAYLOAD];
+        payload[..data.len()].copy_from_slice(data);
+        Ok(Self { handle, packet_boundary, broadcast, len: data.len() as u16, payload })
+    }
+
+    pub fn payload(&self) -> &[u8] { &self.payload[..self.len as usize] }
+
+    pub fn encode(&self, out: &mut [u8; MAX_ACL_PAYLOAD + 4]) -> usize {
+        let handle_flags = self.handle
+            | ((self.packet_boundary as u16) << 12)
+            | ((self.broadcast as u16) << 14);
+        out[0..2].copy_from_slice(&handle_flags.to_le_bytes());
+        out[2..4].copy_from_slice(&self.len.to_le_bytes());
+        let n = self.len as usize;
+        out[4..4 + n].copy_from_slice(self.payload());
+        4 + n
+    }
+
+    pub fn parse(bytes: &[u8]) -> Result<Self, HciError> {
+        if bytes.len() < 4 {
+            return Err(HciError::MalformedEvent);
+        }
+        let handle_flags = u16::from_le_bytes([bytes[0], bytes[1]]);
+        let len = u16::from_le_bytes([bytes[2], bytes[3]]) as usize;
+        if len > MAX_ACL_PAYLOAD || bytes.len() < 4 + len {
+            return Err(HciError::MalformedEvent);
+        }
+        Self::new(
+            handle_flags & 0x0fff,
+            ((handle_flags >> 12) & 0x03) as u8,
+            ((handle_flags >> 14) & 0x03) as u8,
+            &bytes[4..4 + len],
+        )
+    }
+}
+
+impl LinkState {
+    pub fn owns_handle(&self, handle: u16) -> bool {
+        self.links[..self.count]
+            .iter()
+            .flatten()
+            .any(|link| link.handle == handle)
+    }
+
+    pub fn outbound_acl(&self, handle: u16, data: &[u8]) -> Result<AclPacket, HciError> {
+        if !self.owns_handle(handle) {
+            return Err(HciError::UnexpectedOpcode);
+        }
+        AclPacket::new(handle, 0x02, 0, data)
+    }
+
+    pub fn inbound_acl(&self, bytes: &[u8]) -> Result<AclPacket, HciError> {
+        let packet = AclPacket::parse(bytes)?;
+        if !self.owns_handle(packet.handle) {
+            return Err(HciError::UnexpectedOpcode);
+        }
+        Ok(packet)
+    }
+}
+
+pub fn acl_data_self_test() -> bool {
+    let mut links = LinkState::new();
+    let connected = [
+        EVT_CONNECTION_COMPLETE, 11, 0, 0x42, 0x00,
+        1, 2, 3, 4, 5, 6, 1, 0,
+    ];
+    if links.handle_event(&connected).is_err() {
+        return false;
+    }
+    let Ok(packet) = links.outbound_acl(0x42, &[0xaa, 0xbb, 0xcc]) else { return false; };
+    let mut encoded = [0_u8; MAX_ACL_PAYLOAD + 4];
+    if packet.encode(&mut encoded) != 7
+        || encoded[..7] != [0x42, 0x20, 3, 0, 0xaa, 0xbb, 0xcc]
+    {
+        return false;
+    }
+    let Ok(parsed) = links.inbound_acl(&encoded[..7]) else { return false; };
+    parsed.handle == 0x42
+        && parsed.packet_boundary == 0x02
+        && parsed.broadcast == 0
+        && parsed.payload() == [0xaa, 0xbb, 0xcc]
+        && links.outbound_acl(0x43, &[1]).is_err()
+        && links.inbound_acl(&[0x43, 0x20, 1, 0, 1]).is_err()
+        && AclPacket::parse(&[0x42, 0x20, 4, 0, 1]).is_err()
+}
+
 pub fn link_lifecycle_self_test() -> bool {
     let device = DiscoveredDevice {
         address: [1, 2, 3, 4, 5, 6],
