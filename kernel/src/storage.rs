@@ -213,9 +213,12 @@ pub fn mount_ata_root() -> MountStatus {
         }
         #[cfg(feature = "stage12-4-reboot-test")]
         crate::serial::write_line(format_args!("[S12.4R] recovery: replay"));
-        if crate::snapshots::resume_pending_restore().is_err() {
+        if let Err(error) = crate::snapshots::resume_pending_restore() {
             #[cfg(feature = "stage12-4-reboot-test")]
-            crate::serial::write_line(format_args!("[S12.4R] recovery: replay FAILED"));
+            crate::serial::write_line(format_args!(
+                "[S12.4R] recovery: replay FAILED code={}",
+                error as u8
+            ));
             let failed = MountStatus::Failed;
             record_mount_status(failed);
             return failed;
