@@ -896,6 +896,15 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         serial::write_line(format_args!(
             "[S13.10F] Bluetooth ACL link lifecycle: PASSED"
         ));
+        if !bluetooth_hci::acl_data_self_test() {
+            serial::write_line(format_args!(
+                "[S13.10F] Bluetooth ACL owned data path: FAILED"
+            ));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!(
+            "[S13.10F] Bluetooth ACL owned data path: PASSED"
+        ));
     }
 
     if heap::init().is_err() {
