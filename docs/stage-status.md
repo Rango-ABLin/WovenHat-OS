@@ -380,3 +380,14 @@ The HCI layer now frames and parses bounded ACL packets (1024-byte software ceil
 GitHub Actions run 36761870548 passed at exact source SHA `79cecd7b0e3bab5db4426e2f6fed3eaa451c0a2b`, including Stage 13.10F 1/2/4-core acceptance and evidence preservation. Artifact digest: `sha256:878f9d8866f09fd6e202062dbfa0784073ae7dbed5e196eb223387c26b40410c`.
 
 This remains deterministic software validation. Physical controller timing, ACL flow-control credits, asynchronous transport recovery and real peripheral interoperability remain hardware/production qualification work. Next: Stage 13.10G L2CAP framing and bounded channel lifecycle above owned ACL links.
+
+
+## Roadmap Stage 13.10G — Bluetooth L2CAP accepted on 2026-09-30
+
+Stage 13.10G adds bounded L2CAP Basic Mode framing above the Stage 13.10F owned ACL link. L2CAP length/CID parsing is exact, CID zero is rejected, payload storage is fixed-capacity, and every frame remains anchored to a live ACL handle.
+
+The signaling layer implements bounded Connection Request/Response and Disconnection Request/Response state with dynamic local CIDs beginning at 0x0040 and a fixed eight-channel table. Established channels own the tuple of ACL handle, PSM, local CID and peer CID. Outbound data targets only the peer CID; inbound data is accepted only for the owned local CID on the same live ACL handle. Teardown revokes channel authority immediately.
+
+GitHub Actions run 36785295506 passed at exact source SHA `c2dff3c12c9c9387a10493900b3846489e8539a6`, including the Stage 13.10G 1/2/4-core acceptance and evidence-preservation steps. Artifact digest: `sha256:6ac9ff255444ffa36128cd03d75f3d2c89eff086e308618ed21fed463c4a8eab`.
+
+This is deterministic software acceptance. Configuration negotiation, fragmentation/reassembly, enhanced modes, controller flow control and physical interoperability remain outside this boundary. Next: Stage 13.10H pairing, authentication and encryption/security.
