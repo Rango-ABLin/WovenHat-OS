@@ -1183,7 +1183,13 @@ fn read_snapshot_preimage_on_device(
     snapshot_id: u64,
     path_hash: u64,
 ) -> Result<SnapshotPreimage, PersistError> {
-    let internal = alloc::format!("WHSNAP/{snapshot_id:016X}-{path_hash:016X}.COW");
+    let internal = alloc::format!(
+        "WHSNAP/{:08X}/{:08X}/{:08X}/{:08X}.COW",
+        (snapshot_id >> 32) as u32,
+        snapshot_id as u32,
+        (path_hash >> 32) as u32,
+        path_hash as u32,
+    );
     let mut image = alloc::vec![0u8; SNAPSHOT_PREIMAGE_HEADER + fat32::MAX_LONG_NAME * 8 + vfs::NODE_CAPACITY];
     let length = read_durable_path_on_device(device, &internal, &mut image)?;
     image.truncate(length);
@@ -1342,7 +1348,13 @@ fn write_snapshot_preimage_on_device(
     image[SNAPSHOT_PREIMAGE_HEADER + path.len()..].copy_from_slice(data);
     let envelope = snapshot_preimage_envelope_checksum(&image)?;
     image[40..48].copy_from_slice(&envelope.to_le_bytes());
-    let internal = alloc::format!("WHSNAP/{snapshot_id:016X}-{path_hash:016X}.COW");
+    let internal = alloc::format!(
+        "WHSNAP/{:08X}/{:08X}/{:08X}/{:08X}.COW",
+        (snapshot_id >> 32) as u32,
+        snapshot_id as u32,
+        (path_hash >> 32) as u32,
+        path_hash as u32,
+    );
 
     fn write_in_volume(
         device: &mut impl crate::block::BlockDevice,
