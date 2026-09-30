@@ -28,7 +28,7 @@ struct PciBinding {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum PciInterrupt {
-    Msi(crate::hal::pci::msi::MsiLease),
+    Msi(crate::hal::pci::MsiLease),
     Msix(crate::hal::pci::msix::MsixLease),
 }
 /// Bounded driver binding table. Device discovery happens before this lock;
@@ -265,24 +265,24 @@ pub fn attach_pci_bar(
 pub fn enable_pci_msi(
     name: &'static str,
     destination_apic_id: u32,
-) -> Result<crate::hal::pci::msi::MsiLease, crate::hal::pci::msi::MsiLifecycleError> {
+) -> Result<crate::hal::pci::MsiLease, crate::hal::pci::MsiLifecycleError> {
     let (function, owner) = {
         let table = TABLE.lock();
         let entry = table
             .iter()
             .flatten()
             .find(|entry| entry.name == name && entry.state == State::Bound)
-            .ok_or(crate::hal::pci::msi::MsiLifecycleError::InvalidFunction)?;
+            .ok_or(crate::hal::pci::MsiLifecycleError::InvalidFunction)?;
         let binding = entry
             .pci
-            .ok_or(crate::hal::pci::msi::MsiLifecycleError::InvalidFunction)?;
+            .ok_or(crate::hal::pci::MsiLifecycleError::InvalidFunction)?;
         if binding.interrupt.is_some() {
-            return Err(crate::hal::pci::msi::MsiLifecycleError::InvalidFunction);
+            return Err(crate::hal::pci::MsiLifecycleError::InvalidFunction);
         }
         (binding.function, binding.owner)
     };
 
-    let lease = crate::hal::pci::msi::enable_owned_msi(
+    let lease = crate::hal::pci::enable_owned_msi(
         function,
         owner,
         destination_apic_id,
@@ -295,10 +295,10 @@ pub fn enable_pci_msi(
     // this call, so ordered disable is the only safe rollback. If hardware
     // quiesce fails, preserve the concrete lease in ActivationRetained so the
     // caller can retry teardown instead of losing a live vector obligation.
-    match crate::hal::pci::msi::disable_owned_msi(lease, owner) {
-        Ok(()) => Err(crate::hal::pci::msi::MsiLifecycleError::InvalidFunction),
-        Err(crate::hal::pci::msi::MsiLifecycleError::ActivationRetained { error, .. }) => {
-            Err(crate::hal::pci::msi::MsiLifecycleError::ActivationRetained {
+    match crate::hal::pci::disable_owned_msi(lease, owner) {
+        Ok(()) => Err(crate::hal::pci::MsiLifecycleError::InvalidFunction),
+        Err(crate::hal::pci::MsiLifecycleError::ActivationRetained { error, .. }) => {
+            Err(crate::hal::pci::MsiLifecycleError::ActivationRetained {
                 error,
                 lease,
             })
@@ -309,7 +309,7 @@ pub fn enable_pci_msi(
 
 pub fn attach_pci_msi(
     name: &'static str,
-    lease: crate::hal::pci::msi::MsiLease,
+    lease: crate::hal::pci::MsiLease,
 ) -> Result<(), crate::hal::pci::topology::Error> {
     let mut table = TABLE.lock();
     let entry = table.iter_mut().flatten()
@@ -374,6 +374,9 @@ pub fn enable_pci_msix(
                         lease,
                     })
                 }
+                Err(crate::hal::pci::msix::LifecycleError::Vector(error)) => {
+                    Err(crate::hal::pci::msix::LifecycleError::Vector(error))
+                }
             }
         }
         Err(crate::hal::pci::msix::LifecycleError::ActivationRetained { error, lease }) => {
@@ -425,7 +428,7 @@ pub fn attach_pci_msix(
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PciUnbindError {
     InvalidBinding,
-    Msi(crate::hal::pci::msi::MsiLifecycleError),
+    Msi(crate::hal::pci::MsiLifecycleError),
     Msix(crate::hal::pci::msix::LifecycleError),
     Topology(crate::hal::pci::topology::Error),
 }
@@ -454,15 +457,13 @@ pub fn unbind_pci_resources(name: &'static str) -> Result<(), PciUnbindError> {
     if let Some(interrupt) = binding.interrupt {
         let result = match interrupt {
             PciInterrupt::Msi(lease) =>
-                crate::hal::pci::msi::disable_owned_msi(lease, binding.owner)
+                crate::hal::pci::disable_owned_msi(lease, binding.owner)
                     .map_err(PciUnbindError::Msi),
             PciInterrupt::Msix(lease) =>
                 crate::hal::pci::msix::disable_owned(lease, binding.owner)
                     .map_err(PciUnbindError::Msix),
         };
-        if let Err(error) = result {
-            return Err(error);
-        }
+        result?;
         let mut table = TABLE.lock();
         let entry = table.iter_mut().flatten()
             .find(|entry| entry.name == name && entry.state == State::Unbinding)
@@ -554,7 +555,7 @@ pub fn remove_pci_function(
 /// Driver-aware PCI hotplug reconciliation. The HAL only detects removals;
 /// this layer owns driver teardown policy, preserving dependency direction.
 pub fn hotplug_rescan() -> Result<crate::hal::pci::Summary, PciUnbindError> {
-    let mut removed = [None; crate::hal::pci::MAX_DEVICES];
+    let mut removed = [None; crate::hal::pci::topology::MAX_FUNCTIONS];
     let count = crate::hal::pci::rescan_removed(&mut removed);
 
     // Validate the complete removal set before mutating ownership.  A stale

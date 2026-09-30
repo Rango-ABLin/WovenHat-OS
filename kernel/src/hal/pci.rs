@@ -485,16 +485,17 @@ pub struct RescanRemoval {
     feature = "stage13-9-test"
 ))]
 pub fn rescan_removed(
-    removed: &mut [Option<RescanRemoval>; MAX_DEVICES],
+    removed: &mut [Option<RescanRemoval>; topology::MAX_FUNCTIONS],
 ) -> usize {
-    *removed = [None; MAX_DEVICES];
+    *removed = [None; topology::MAX_FUNCTIONS];
 
     // Snapshot topology identity while holding rank 20, then release it before
     // any configuration-space access (rank 10). This preserves global lock
     // ordering and prevents a topology -> config inversion during hotplug.
     let mut candidates = [None; topology::MAX_FUNCTIONS];
     {
-        let topology = PUBLISHED.lock().topology;
+        let published = PUBLISHED.lock();
+        let topology = &published.topology;
         for (slot, candidate) in candidates.iter_mut().enumerate() {
             let Some(function) = topology.handle_at(slot) else { continue; };
             let Ok(snapshot) = topology.snapshot(function) else { continue; };
