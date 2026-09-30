@@ -191,6 +191,7 @@ pub fn mount_ata_root() -> MountStatus {
         // rather than silently discarding rollback authority.
         if crate::snapshots::recover_catalog().is_err()
             || crate::snapshots::recover_restore().is_err()
+            || crate::snapshots::resume_pending_restore().is_err()
         {
             let failed = MountStatus::Failed;
             record_mount_status(failed);
@@ -1265,7 +1266,27 @@ pub fn replay_snapshot_preimage(
         }
         Err(error) => return Err(map_persist_err(error)),
     }
-    disk.flush().map_err(|_| PersistError::Failed)
+    disk.flush().map_err(|_| PersistError::Failed)?;
+    if preimage.checksum == 0 {
+        match vfs::remove(&preimage.path) {
+            Ok(()) | Err(vfs::Error::NotFound) => {}
+            Err(_) => return Err(PersistError::Failed),
+        }
+        let _ = crate::wovenfs::remove(&preimage.path);
+    } else {
+        if let Ok(stat) = vfs::stat(&preimage.path) {
+            let _ = vfs::set_metadata(&preimage.path, stat.uid, stat.gid, 0o666);
+        }
+        vfs::write_file(&preimage.path, &preimage.data).map_err(|_| PersistError::Failed)?;
+        let mode = u16::try_from(preimage.mode).map_err(|_| PersistError::Failed)?;
+        let (uid, gid) = vfs::stat(&preimage.path).map(|stat| (stat.uid, stat.gid)).unwrap_or((0, 0));
+        vfs::set_metadata(&preimage.path, uid, gid, mode).map_err(|_| PersistError::Failed)?;
+        if !crate::wovenfs::record(&preimage.path, preimage.data.len() as u64, preimage.mode, 0, &preimage.data) {
+            return Err(PersistError::Failed);
+        }
+    }
+    mark_mnt_clean();
+    Ok(())
 }
 
 fn write_snapshot_preimage_on_device(

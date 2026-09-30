@@ -349,6 +349,19 @@ pub fn pending_restore() -> Option<RestoreIntent> {
     *RESTORE_INTENT.lock()
 }
 
+pub fn resume_pending_restore() -> Result<Option<u64>, RestoreError> {
+    let Some(expected_root) = replay_pending_restore()? else { return Ok(None); };
+    let intent = pending_restore().ok_or(RestoreError::MissingSnapshot)?;
+    let restored_root = crate::wovenfs::root_checksum();
+    if restored_root != expected_root { return Err(RestoreError::ChecksumMismatch); }
+    commit_restore(intent.snapshot_id, restored_root).map(Some)
+}
+
+pub fn restore_now(id: u64) -> Result<u64, RestoreError> {
+    prepare_restore(id)?;
+    resume_pending_restore()?.ok_or(RestoreError::PersistenceFailed)
+}
+
 pub fn commit_restore(id: u64, restored_root: u64) -> Result<u64, RestoreError> {
     let pending = RESTORE_INTENT.lock();
     let Some(intent) = *pending else {
