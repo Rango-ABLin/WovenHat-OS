@@ -1343,6 +1343,27 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
             }
         }
     }
+    #[cfg(feature = "stage12-4-reboot-test")]
+    {
+        const PATH: &str = "/mnt/s12r.txt";
+        const ORIGINAL: &[u8] = b"wovenhat-stage12.4-original";
+        if vfs::stat(PATH).is_ok() {
+            let mut restored = [0u8; 64];
+            let restored_ok = vfs::read_all(PATH, &mut restored)
+                .is_ok_and(|length| &restored[..length] == ORIGINAL);
+            let intent_cleared = snapshots::pending_restore().is_none()
+                && storage::load_snapshot_restore_intent().is_ok_and(|intent| intent.is_none());
+            if !restored_ok || !intent_cleared {
+                serial::write_line(format_args!("[S12.4R] reboot recovery: FAILED"));
+                qemu_test_exit_failure();
+            }
+            serial::write_line(format_args!(
+                "[S12.4R] reboot recovery + idempotent replay: PASSED"
+            ));
+            qemu_test_exit_success();
+        }
+    }
+
     if userspace::install_stub_executable() {
         console.println("EXEC IMAGE: INSTALLED");
     } else {
