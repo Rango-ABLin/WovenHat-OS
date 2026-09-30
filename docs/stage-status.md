@@ -356,3 +356,16 @@ GitHub Actions run 36747805657 passed at exact source SHA `41e009543e01afc6a3481
 This acceptance proves the bounded transport/initialization architecture under deterministic CI; it does not claim physical Bluetooth-radio qualification because the QEMU acceptance device is not a Bluetooth controller. Physical USB-controller execution, teardown/recovery, hotplug, and radio qualification remain explicit hardware work.
 
 Next: Stage 13.10E Bluetooth discovery/scanning and controller capability discovery above the accepted HCI initialization boundary.
+
+
+## Roadmap Stage 13.10E — Bluetooth discovery and controller capability contract accepted on 2026-09-30
+
+Stage 13.10E adds bounded BR/EDR GIAC Inquiry discovery above the accepted HCI initialization boundary. It constructs the Inquiry command, parses Inquiry Result and Inquiry Complete events, retains up to 16 unique devices by Bluetooth address, and records page-scan repetition mode, class-of-device, and clock offset. Malformed/truncated events fail closed and duplicate addresses do not consume additional discovery slots.
+
+The HCI layer also parses controller identity/capability responses for Read Local Version, Read BD_ADDR, and Read Local Supported Commands. Opcode, controller status, and response length are validated before exposing HCI/LMP version data, manufacturer/subversion, local Bluetooth address, or the 64-byte supported-command bitmap.
+
+GitHub Actions run 36753355665 passed at exact source SHA `98020bfbfa71dd68f0fc54b234761490947fe346`, including the Stage 13.10E 1/2/4-core acceptance gate and evidence preservation. Release-validation artifact digest: `sha256:dd94f81eed0b3916135051b78c0c27944a33084fba8405c1045dcf49e8196fe2`.
+
+This remains deterministic software validation; physical Bluetooth-radio scanning is not claimed. BLE advertising reports, remote-name discovery, connection establishment, L2CAP, pairing/security, ATT/GATT, lifecycle/hotplug, and physical interoperability remain later work.
+
+Next: Stage 13.10F Bluetooth connection establishment and bounded link lifecycle above the accepted discovery state.
