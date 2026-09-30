@@ -377,6 +377,18 @@ pub fn replay_pending_restore() -> Result<Option<u64>, RestoreError> {
         }
         preimages.push(preimage);
     }
+    preimages.sort_by(|left, right| {
+        left.replay_phase()
+            .cmp(&right.replay_phase())
+            .then_with(|| {
+                if left.replay_phase() == 2 {
+                    right.path_depth().cmp(&left.path_depth())
+                } else {
+                    left.path_depth().cmp(&right.path_depth())
+                }
+            })
+            .then_with(|| left.path.cmp(&right.path))
+    });
     for preimage in &preimages {
         crate::storage::replay_snapshot_preimage(preimage)
             .map_err(|_| RestoreError::PersistenceFailed)?;
