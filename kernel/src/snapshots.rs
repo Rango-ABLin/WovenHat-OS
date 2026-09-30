@@ -48,6 +48,9 @@ static RESTORE_INTENT: Mutex<Option<RestoreIntent>> = Mutex::with_rank(None, 10)
 /// following durable A/B WSC1 write. Rank 9 is acquired before the rank-10
 /// TABLE/CHANGES locks; filesystem I/O happens while no rank-10 lock is held.
 static CATALOG_TRANSACTION: Mutex<()> = Mutex::with_rank((), 9);
+/// Monotonic snapshot identity source. Recovered catalogs advance this floor so
+/// a deleted slot is never reissued the same WHSNAP namespace in one boot.
+static NEXT_SNAPSHOT_ID: Mutex<u64> = Mutex::with_rank(1, 10);
 
 fn durable_catalog() -> crate::fat32::SnapshotCatalog {
     let table = TABLE.lock();
@@ -109,8 +112,17 @@ pub fn recover_catalog() -> Result<bool, RestoreError> {
             return Err(RestoreError::PersistenceFailed);
         }
     }
+    let next_id = table_image
+        .iter()
+        .flatten()
+        .map(|snapshot| snapshot.id)
+        .max()
+        .unwrap_or(0)
+        .checked_add(1)
+        .ok_or(RestoreError::PersistenceFailed)?;
     *TABLE.lock() = table_image;
     *CHANGES.lock() = changes_image;
+    *NEXT_SNAPSHOT_ID.lock() = next_id.max(1);
     Ok(true)
 }
 
@@ -121,7 +133,16 @@ pub fn create(generation: u64, checksum: u64) -> Option<u64> {
     let _transaction = CATALOG_TRANSACTION.lock();
     let mut t = TABLE.lock();
     let slot = t.iter_mut().position(|s| s.is_none())?;
-    let id = slot as u64 + 1;
+    let mut next_id = NEXT_SNAPSHOT_ID.lock();
+    let id = *next_id;
+    if id == 0 || t.iter().flatten().any(|snapshot| snapshot.id == id) {
+        return None;
+    }
+    let Some(successor) = id.checked_add(1) else {
+        return None;
+    };
+    *next_id = successor;
+    drop(next_id);
     t[slot] = Some(Snapshot { id, generation, checksum });
     drop(t);
     if persist_catalog().is_err() {
@@ -129,6 +150,9 @@ pub fn create(generation: u64, checksum: u64) -> Option<u64> {
         if table[slot].is_some_and(|entry| entry.id == id) {
             table[slot] = None;
         }
+        // Safe because the catalog transaction lock excludes another creator:
+        // a failed durable create never publishes this identity.
+        *NEXT_SNAPSHOT_ID.lock() = id;
         return None;
     }
     Some(id)
