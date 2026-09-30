@@ -851,6 +851,15 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         serial::write_line(format_args!(
             "[S13.10B] Bluetooth USB HCI transport contract: PASSED"
         ));
+        if !bluetooth_hci::transaction_self_test() {
+            serial::write_line(format_args!(
+                "[S13.10C] Bluetooth HCI transfer execution contract: FAILED"
+            ));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!(
+            "[S13.10C] Bluetooth HCI transfer execution contract: PASSED"
+        ));
     }
 
     if heap::init().is_err() {

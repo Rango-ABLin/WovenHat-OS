@@ -887,6 +887,62 @@ pub fn bluetooth_command_setup(interface: u8, command_len: u16) -> u64 {
     )
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BluetoothTransferKind {
+    Command,
+    Event,
+    AclIn,
+    AclOut,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct BluetoothTransferPlan {
+    pub kind: BluetoothTransferKind,
+    pub endpoint: u8,
+    pub length: u16,
+}
+
+pub fn bluetooth_command_plan(interface: BluetoothUsbInterface, length: usize) -> Option<BluetoothTransferPlan> {
+    if length == 0 || length > 258 {
+        return None;
+    }
+    Some(BluetoothTransferPlan {
+        kind: BluetoothTransferKind::Command,
+        endpoint: interface.interface,
+        length: length as u16,
+    })
+}
+
+pub fn bluetooth_event_plan(interface: BluetoothUsbInterface) -> BluetoothTransferPlan {
+    BluetoothTransferPlan {
+        kind: BluetoothTransferKind::Event,
+        endpoint: interface.event_endpoint,
+        length: interface.event_max_packet,
+    }
+}
+
+pub fn bluetooth_acl_in_plan(interface: BluetoothUsbInterface) -> BluetoothTransferPlan {
+    BluetoothTransferPlan {
+        kind: BluetoothTransferKind::AclIn,
+        endpoint: interface.acl_in_endpoint,
+        length: interface.acl_in_max_packet,
+    }
+}
+
+pub fn bluetooth_acl_out_plan(
+    interface: BluetoothUsbInterface,
+    length: usize,
+) -> Option<BluetoothTransferPlan> {
+    if length == 0 || length > usize::from(interface.acl_out_max_packet) {
+        return None;
+    }
+    Some(BluetoothTransferPlan {
+        kind: BluetoothTransferKind::AclOut,
+        endpoint: interface.acl_out_endpoint,
+        length: length as u16,
+    })
+}
+
 pub fn bluetooth_transport_self_test() -> bool {
     let descriptor = [
         9, 2, 39, 0, 1, 1, 0, 0x80, 50,
@@ -908,6 +964,16 @@ pub fn bluetooth_transport_self_test() -> bool {
         && bt.acl_out_endpoint == 0x02
         && bt.acl_out_max_packet == 64
         && bluetooth_command_setup(0, 3) == setup_packet(0x20, 0, 0, 0, 3)
+        && bluetooth_command_plan(bt, 3)
+            == Some(BluetoothTransferPlan {
+                kind: BluetoothTransferKind::Command,
+                endpoint: 0,
+                length: 3,
+            })
+        && bluetooth_event_plan(bt).endpoint == 0x81
+        && bluetooth_acl_in_plan(bt).endpoint == 0x82
+        && bluetooth_acl_out_plan(bt, 32).map(|plan| plan.endpoint) == Some(0x02)
+        && bluetooth_acl_out_plan(bt, 65).is_none()
 }
 
 fn hid_kind(protocol: u8) -> HidKind {
