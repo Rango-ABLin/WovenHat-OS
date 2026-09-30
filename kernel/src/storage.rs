@@ -1182,8 +1182,22 @@ fn write_snapshot_preimage_on_device(
         internal: &str,
         image: &[u8],
     ) -> Result<(), PersistError> {
-        match fat32::create_path_file(device, volume, internal, image) {
-            Ok(()) | Err(fat32::Error::AlreadyExists) => Ok(()),
+        match fat32::resolve_path(device, volume, internal) {
+            Ok(existing) => {
+                if existing.size as usize != image.len() {
+                    return Err(PersistError::Failed);
+                }
+                let mut retained = alloc::vec![0u8; image.len()];
+                let length =
+                    fat32::read_file(device, volume, existing, &mut retained).map_err(map_persist_err)?;
+                if length != image.len() || retained != image {
+                    return Err(PersistError::Failed);
+                }
+                Ok(())
+            }
+            Err(fat32::Error::NotFound) => {
+                fat32::create_path_file(device, volume, internal, image).map_err(map_persist_err)
+            }
             Err(error) => Err(map_persist_err(error)),
         }
     }
