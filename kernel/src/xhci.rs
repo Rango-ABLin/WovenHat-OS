@@ -489,6 +489,61 @@ impl XhciController {
         })
     }
 
+    fn enumerate_bluetooth(&mut self) -> Result<BluetoothUsbInterface, InitError> {
+        self.address_device()?;
+        let mut descriptor = DmaPage::allocate_zeroed().ok_or(InitError::DmaUnavailable)?;
+        self.control_in(
+            0x80,
+            USB_REQUEST_GET_DESCRIPTOR,
+            u16::from(USB_DESCRIPTOR_CONFIGURATION) << 8,
+            0,
+            &mut descriptor,
+            9,
+        )?;
+        let header = descriptor.bytes();
+        if header[0] < 9 || header[1] != USB_DESCRIPTOR_CONFIGURATION {
+            return Err(InitError::DescriptorInvalid);
+        }
+        let total_length = usize::from(u16::from_le_bytes([header[2], header[3]]));
+        if !(9..=PAGE_SIZE).contains(&total_length) {
+            return Err(InitError::DescriptorInvalid);
+        }
+        let configuration = header[5];
+        self.control_in(
+            0x80,
+            USB_REQUEST_GET_DESCRIPTOR,
+            u16::from(USB_DESCRIPTOR_CONFIGURATION) << 8,
+            0,
+            &mut descriptor,
+            total_length,
+        )?;
+        let bluetooth =
+            parse_bluetooth_usb_interface(&descriptor.bytes()[..total_length], configuration)
+                .ok_or(InitError::BluetoothNotFound)?;
+        self.control_no_data(
+            0x00,
+            USB_REQUEST_SET_CONFIGURATION,
+            u16::from(bluetooth.configuration),
+            0,
+        )?;
+        self.bluetooth = Some(bluetooth);
+        Ok(bluetooth)
+    }
+
+    fn send_bluetooth_command(&mut self, command: &[u8]) -> Result<(), InitError> {
+        let bluetooth = self.bluetooth.ok_or(InitError::BluetoothNotFound)?;
+        if command.is_empty() || command.len() > 258 {
+            return Err(InitError::DescriptorInvalid);
+        }
+        self.control_out(
+            USB_REQUEST_TYPE_BLUETOOTH_COMMAND,
+            0,
+            0,
+            u16::from(bluetooth.interface),
+            command,
+        )
+    }
+
     fn control_in(
         &mut self,
         request_type: u8,
