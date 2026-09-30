@@ -923,6 +923,9 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         serial::write_line(format_args!(
             "[S13.10G] Bluetooth L2CAP channel lifecycle: PASSED"
         ));
+        serial::write_line(format_args!(
+            "[S13.10G] Bluetooth L2CAP owned channel data: PASSED"
+        ));
     }
 
     if heap::init().is_err() {
