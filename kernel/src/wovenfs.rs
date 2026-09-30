@@ -30,14 +30,30 @@ pub fn path_hash(path: &str) -> u64 {
 }
 
 pub fn root_checksum() -> u64 {
+    // A snapshot root is a filesystem identity, not an allocator/registry
+    // identity. Canonicalize by path hash so reboot reconstruction, deletion
+    // and reinsertion cannot change the root merely by changing slot order.
     let s = STATE.lock();
-    s.entries.iter().flatten().fold(0xcbf29ce484222325, |acc, entry| {
-        acc.wrapping_mul(0x100000001b3)
-            ^ entry.path_hash
-            ^ entry.size
-            ^ u64::from(entry.mode)
-            ^ entry.checksum
-    })
+    let mut entries = [None; MAX];
+    let mut count = 0usize;
+    for entry in s.entries.iter().flatten() {
+        entries[count] = Some(*entry);
+        count += 1;
+    }
+    drop(s);
+    entries[..count].sort_unstable_by_key(|entry| {
+        entry.map_or(u64::MAX, |metadata| metadata.path_hash)
+    });
+    entries[..count]
+        .iter()
+        .flatten()
+        .fold(0xcbf29ce484222325, |acc, entry| {
+            acc.wrapping_mul(0x100000001b3)
+                ^ entry.path_hash
+                ^ entry.size
+                ^ u64::from(entry.mode)
+                ^ entry.checksum
+        })
 }
 
 fn hash(path: &str) -> u64 {
