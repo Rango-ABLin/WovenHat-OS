@@ -853,6 +853,35 @@ impl XhciController {
         Ok(event)
     }
 
+    fn receive_bluetooth_acl(&mut self) -> Result<[u8; PAGE_SIZE], InitError> {
+        let bluetooth = self.bluetooth.ok_or(InitError::BluetoothNotFound)?;
+        let dci = endpoint_dci(bluetooth.acl_in_endpoint)?;
+        let transfer_length = cmp::min(usize::from(bluetooth.acl_in_max_packet), PAGE_SIZE);
+        if transfer_length == 0 {
+            return Err(InitError::DescriptorInvalid);
+        }
+        let buffer_physical = {
+            let buffer = self.bt_acl_in_buffer.as_mut().ok_or(InitError::DmaUnavailable)?;
+            buffer.bytes_mut()[..transfer_length].fill(0);
+            buffer.physical
+        };
+        let normal_ptr = {
+            let ring = self.bt_acl_in_ring.as_mut().ok_or(InitError::CommandFailed)?;
+            ring.push(Trb {
+                parameter: buffer_physical,
+                status: transfer_length as u32,
+                control: (TRB_TYPE_NORMAL << 10) | (1 << 5),
+            })
+        };
+        self.ring_endpoint(dci)?;
+        self.wait_transfer_completion(normal_ptr, self.slot_id)?;
+        fence(Ordering::Acquire);
+        let buffer = self.bt_acl_in_buffer.as_ref().ok_or(InitError::DmaUnavailable)?;
+        let mut data = [0_u8; PAGE_SIZE];
+        data[..transfer_length].copy_from_slice(&buffer.bytes()[..transfer_length]);
+        Ok(data)
+    }
+
     fn send_bluetooth_acl(&mut self, data: &[u8]) -> Result<(), InitError> {
         let bluetooth = self.bluetooth.ok_or(InitError::BluetoothNotFound)?;
         if data.is_empty() || data.len() > usize::from(bluetooth.acl_out_max_packet) {
@@ -1001,6 +1030,14 @@ pub fn receive_bluetooth_event() -> Result<[u8; 257], InitError> {
         .as_mut()
         .ok_or(InitError::MissingController)?
         .receive_bluetooth_event()
+}
+
+pub fn receive_bluetooth_acl() -> Result<[u8; PAGE_SIZE], InitError> {
+    CONTROLLER
+        .lock()
+        .as_mut()
+        .ok_or(InitError::MissingController)?
+        .receive_bluetooth_acl()
 }
 
 pub fn send_bluetooth_acl(data: &[u8]) -> Result<(), InitError> {
