@@ -189,14 +189,35 @@ pub fn mount_ata_root() -> MountStatus {
         // Reconstruct durable snapshot state only after /mnt is available.
         // Fail closed: corrupt snapshot metadata makes the mount lifecycle fail
         // rather than silently discarding rollback authority.
-        if crate::snapshots::recover_catalog().is_err()
-            || crate::snapshots::recover_restore().is_err()
-            || crate::snapshots::resume_pending_restore().is_err()
-        {
+        #[cfg(feature = "stage12-4-reboot-test")]
+        crate::serial::write_line(format_args!("[S12.4R] recovery: catalog"));
+        if crate::snapshots::recover_catalog().is_err() {
+            #[cfg(feature = "stage12-4-reboot-test")]
+            crate::serial::write_line(format_args!("[S12.4R] recovery: catalog FAILED"));
             let failed = MountStatus::Failed;
             record_mount_status(failed);
             return failed;
         }
+        #[cfg(feature = "stage12-4-reboot-test")]
+        crate::serial::write_line(format_args!("[S12.4R] recovery: WSR1"));
+        if crate::snapshots::recover_restore().is_err() {
+            #[cfg(feature = "stage12-4-reboot-test")]
+            crate::serial::write_line(format_args!("[S12.4R] recovery: WSR1 FAILED"));
+            let failed = MountStatus::Failed;
+            record_mount_status(failed);
+            return failed;
+        }
+        #[cfg(feature = "stage12-4-reboot-test")]
+        crate::serial::write_line(format_args!("[S12.4R] recovery: replay"));
+        if crate::snapshots::resume_pending_restore().is_err() {
+            #[cfg(feature = "stage12-4-reboot-test")]
+            crate::serial::write_line(format_args!("[S12.4R] recovery: replay FAILED"));
+            let failed = MountStatus::Failed;
+            record_mount_status(failed);
+            return failed;
+        }
+        #[cfg(feature = "stage12-4-reboot-test")]
+        crate::serial::write_line(format_args!("[S12.4R] recovery: complete"));
     }
     status
 }
