@@ -406,3 +406,12 @@ Stage 13.10E keeps discovery policy in the hardware-independent HCI layer. `Disc
 Controller capability parsing follows the same boundary. Read Local Version, Read BD_ADDR and Read Local Supported Commands Command Complete events are checked for the expected opcode, successful controller status and complete return payload before typed data is exposed. This prevents later connection/security layers from inferring controller support from transport presence alone.
 
 The accepted 13.10E boundary is classic BR/EDR discovery plus local-controller capability discovery. It deliberately does not fold BLE scanning, connection establishment, pairing, L2CAP, ATT/GATT or policy into the transport. The next link layer should consume `DiscoveredDevice` records and capability data while retaining bounded handle/state ownership.
+
+
+### Stage 13.10F ACL connection and ownership lifecycle
+
+The Bluetooth HCI layer now owns the mapping from a discovered BR/EDR peer to a live ACL controller handle. `LinkState` is bounded to eight links and treats the controller handle plus Bluetooth address as an ownership pair. Replayed identical Connection Complete events are harmless, while a handle reused for another address or an address appearing under another live handle is rejected rather than silently aliasing authority.
+
+`AclPacket` owns HCI ACL framing independently of xHCI. It masks the 12-bit connection handle, carries packet-boundary and broadcast flags, applies a bounded 1024-byte software payload ceiling, and validates declared lengths before exposing payload bytes. `LinkState::outbound_acl` and `inbound_acl` require the handle to remain live; Disconnection Complete removes the link before further ACL traffic can be accepted.
+
+This boundary is intentionally below L2CAP. Stage 13.10G should parse/build the L2CAP basic header and add bounded channel identifiers/state while continuing to use the 13.10F ACL handle as the lower-layer authority anchor.
