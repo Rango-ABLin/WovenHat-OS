@@ -1334,7 +1334,14 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         }
         storage::MountStatus::NoDevice => console.println("FAT32 MOUNT: NO BLOCK DEVICE"),
         storage::MountStatus::NotFat32 => console.println("FAT32 MOUNT: NO VOLUME"),
-        storage::MountStatus::Failed => console.println("FAT32 MOUNT: FAILED"),
+        storage::MountStatus::Failed => {
+            console.println("FAT32 MOUNT: FAILED");
+            #[cfg(feature = "stage12-4-reboot-test")]
+            {
+                serial::write_line(format_args!("[S12.4R] boot recovery mount: FAILED"));
+                qemu_test_exit_failure();
+            }
+        }
     }
     if userspace::install_stub_executable() {
         console.println("EXEC IMAGE: INSTALLED");
