@@ -87,6 +87,7 @@ def required_markers(stage, cpus):
                   '13.7': '[S13.7] WovenInput unified event framework: PASSED',
                   '13.8': '[S13.8] WovenAudio stream/API integration: PASSED',
                   '13.9': '[S13.9H] GTK + encrypted key data: PASSED',
+                  '13.10': '[S13.10A] Bluetooth HCI core foundation: PASSED',
                   '1-5': '[S1-5] storage journal: PASSED'}[stage])]
     if stage == '13.9':
         required.extend(WIFI_REQUIRED_MARKERS)
@@ -104,7 +105,7 @@ def validation_errors(returncode, log, required):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--stage', choices=('10.8', '10.9', '11.1', '11.2', '11.3', '11.4', '11.5', '12.1', '12.2', '12.3', '12.4', '12.5', '13.1', '13.2', '13.3', '13.4', '13.5', '13.6', '13.7', '13.8', '13.9', '1-5'), default='10.8')
+    parser.add_argument('--stage', choices=('10.8', '10.9', '11.1', '11.2', '11.3', '11.4', '11.5', '12.1', '12.2', '12.3', '12.4', '12.5', '13.1', '13.2', '13.3', '13.4', '13.5', '13.6', '13.7', '13.8', '13.9', '13.10', '1-5'), default='10.8')
     parser.add_argument('--cpus', type=int, choices=(1, 2, 4), default=1)
     parser.add_argument('--qemu', default=shutil.which('qemu-system-x86_64') or r'C:\Program Files\qemu\qemu-system-x86_64.exe')
     parser.add_argument('--firmware', type=Path)

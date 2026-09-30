@@ -142,12 +142,12 @@ mod woven_input;
 ))]
 mod wovenfs;
 mod wovenguard;
+#[cfg(feature = "stage13-10-test")]
+mod bluetooth_hci;
 #[cfg(any(
     feature = "stage13-5-test",
     feature = "stage13-6-test",
-    feature = "stage13-7-test",
-    feature = "stage13-8-test",
-    feature = "stage13-9-test"
+    feature = "stage13-7-test"
 ))]
 mod xhci;
 
@@ -832,6 +832,15 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
             halt();
         }
         serial::write_line(format_args!("[S13.9C] beacon/probe scan pipeline: PASSED"));
+    }
+
+    #[cfg(feature = "stage13-10-test")]
+    {
+        if !bluetooth_hci::self_test() {
+            serial::write_line(format_args!("[S13.10A] Bluetooth HCI core foundation: FAILED"));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!("[S13.10A] Bluetooth HCI core foundation: PASSED"));
     }
 
     if heap::init().is_err() {

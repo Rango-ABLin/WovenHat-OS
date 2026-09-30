@@ -366,3 +366,11 @@ event-driven worker. Syscalls 87–94 expose create, wait, set, close and
 sleep-until operations; timer and event waits produce the same generic async
 completion records as other operations. Owner teardown cancels outstanding
 waiters and releases every slot.
+
+## Stage 13.10 Bluetooth architecture
+
+Roadmap Stage 13.10 owns Bluetooth. Historical source/audit labels 13.10A–AC associated with AX200 are retained as historical Wi-Fi substage names under roadmap Stage 13.9 and must not be interpreted as Bluetooth milestones.
+
+Stage 13.10A introduces `bluetooth_hci.rs` as a hardware-independent HCI protocol boundary. It owns bounded command packet construction, Command Complete parsing, command-credit state, opcode matching, and controller-status validation. The module is feature-gated by `stage13-10-test` and deliberately does not depend on xHCI, allowing the HCI state machine to be validated without pretending a physical transport exists.
+
+The next layer, Stage 13.10B, should place a USB Bluetooth HCI transport beneath this protocol boundary using the existing xHCI core. Transport ownership must keep USB control transfers for HCI commands distinct from interrupt-IN HCI events and bulk ACL traffic. Hardware discovery, endpoint ownership, teardown, and DMA lifetime belong to the transport layer rather than the protocol parser. Later Bluetooth discovery, L2CAP, pairing/security, ATT/GATT and physical qualification remain above or beyond that boundary.
