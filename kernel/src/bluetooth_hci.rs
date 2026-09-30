@@ -8,6 +8,8 @@ pub const HCI_EVENT_PACKET: u8 = 0x04;
 pub const EVT_COMMAND_COMPLETE: u8 = 0x0e;
 pub const EVT_COMMAND_STATUS: u8 = 0x0f;
 pub const OPCODE_RESET: u16 = 0x0c03;
+pub const OPCODE_READ_LOCAL_VERSION: u16 = 0x1001;
+pub const MAX_HCI_EVENT: usize = 257;
 pub const MAX_HCI_PAYLOAD: usize = 255;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -69,6 +71,65 @@ impl ControllerState {
         Ok(())
     }
     pub fn ready(&self) -> bool { self.credits != 0 && self.last_opcode.is_none() }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct HciTransaction {
+    state: ControllerState,
+}
+
+impl HciTransaction {
+    pub const fn new() -> Self {
+        Self {
+            state: ControllerState::new(),
+        }
+    }
+
+    pub fn begin_command(
+        &mut self,
+        command: &HciCommand,
+        out: &mut [u8; 258],
+    ) -> Result<usize, HciError> {
+        if !self.state.begin(command) {
+            return Err(HciError::ControllerFailure(0xff));
+        }
+        Ok(command.encode(out))
+    }
+
+    pub fn complete_event(&mut self, event: &[u8]) -> Result<(), HciError> {
+        self.state.complete(event)
+    }
+
+    pub fn ready(&self) -> bool {
+        self.state.ready()
+    }
+}
+
+pub fn transaction_self_test() -> bool {
+    let reset = HciCommand::new(OPCODE_RESET, &[]).unwrap();
+    let version = HciCommand::new(OPCODE_READ_LOCAL_VERSION, &[]).unwrap();
+    let mut tx = HciTransaction::new();
+    let mut bytes = [0_u8; 258];
+
+    if tx.begin_command(&reset, &mut bytes) != Ok(3) || bytes[..3] != [0x03, 0x0c, 0] {
+        return false;
+    }
+    if tx.begin_command(&version, &mut bytes).is_ok() {
+        return false;
+    }
+    if tx
+        .complete_event(&[EVT_COMMAND_COMPLETE, 4, 1, 0x03, 0x0c, 0])
+        .is_err()
+        || !tx.ready()
+    {
+        return false;
+    }
+    tx.begin_command(&version, &mut bytes) == Ok(3)
+        && bytes[..3] == [0x01, 0x10, 0]
+        && tx
+            .complete_event(&[EVT_COMMAND_COMPLETE, 4, 1, 0x01, 0x10, 0])
+            .is_ok()
+        && tx.ready()
 }
 
 pub fn self_test() -> bool {
