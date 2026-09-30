@@ -2168,6 +2168,15 @@ fn move_metadata_on_device(
         collect_metadata_moves(device, volume, entry.first_cluster, old, new, 0, &mut moves)?;
         for (old_path, new_path) in moves {
             move_record(device, volume, &old_path, &new_path)?;
+            // Keep the live WovenFS registry aligned with a FAT32 directory
+            // subtree move. WovenFS keys files by full path hash, so renaming
+            // only the directory object leaves stale descendant identities
+            // that poison snapshot roots across reboot reconstruction.
+            if crate::wovenfs::metadata(&old_path).is_some()
+                && !crate::wovenfs::rename(&old_path, &new_path)
+            {
+                return Err(MutationError::Failed);
+            }
         }
         Ok(())
     }
