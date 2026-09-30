@@ -41,8 +41,11 @@ const JOURNAL_SECTOR_COUNT: usize = 2;
 const RESTORE_MAGIC: &[u8; 4] = b"WSR1";
 const RESTORE_VERSION: u16 = 1;
 const SNAPSHOT_CATALOG_MAGIC: &[u8; 4] = b"WSC1";
-const SNAPSHOT_CATALOG_VERSION: u16 = 1;
-const SNAPSHOT_CATALOG_SECTORS: usize = 4;
+const SNAPSHOT_CATALOG_VERSION: u16 = 2;
+const SNAPSHOT_CATALOG_LEGACY_VERSION: u16 = 1;
+const SNAPSHOT_CATALOG_SLOT_SECTORS: usize = 4;
+const SNAPSHOT_CATALOG_SLOTS: usize = 2;
+const SNAPSHOT_CATALOG_SECTORS: usize = SNAPSHOT_CATALOG_SLOT_SECTORS * SNAPSHOT_CATALOG_SLOTS;
 const SNAPSHOT_CATALOG_SNAPSHOTS: usize = 8;
 const SNAPSHOT_CATALOG_CHANGES: usize = 32;
 
@@ -389,16 +392,21 @@ fn catalog_checksum(bytes: &[u8]) -> u64 {
     })
 }
 
-pub fn write_snapshot_catalog(
-    device: &mut (impl BlockDevice + ?Sized),
-    volume: Volume,
-    catalog: SnapshotCatalog,
-) -> Result<(), Error> {
-    let start = snapshot_reserved_start(volume)?;
-    let mut image = [0u8; SECTOR_SIZE * SNAPSHOT_CATALOG_SECTORS];
+fn catalog_slot_start(volume: Volume, slot: usize) -> Result<u64, Error> {
+    if slot >= SNAPSHOT_CATALOG_SLOTS {
+        return Err(Error::UnsupportedGeometry);
+    }
+    snapshot_reserved_start(volume)?
+        .checked_add((slot * SNAPSHOT_CATALOG_SLOT_SECTORS) as u64)
+        .ok_or(Error::UnsupportedGeometry)
+}
+
+fn encode_snapshot_catalog(catalog: SnapshotCatalog, sequence: u64) -> [u8; SECTOR_SIZE * SNAPSHOT_CATALOG_SLOT_SECTORS] {
+    let mut image = [0u8; SECTOR_SIZE * SNAPSHOT_CATALOG_SLOT_SECTORS];
     image[..4].copy_from_slice(SNAPSHOT_CATALOG_MAGIC);
     image[4..6].copy_from_slice(&SNAPSHOT_CATALOG_VERSION.to_le_bytes());
-    let mut offset = 16usize;
+    image[16..24].copy_from_slice(&sequence.to_le_bytes());
+    let mut offset = 24usize;
     for entry in catalog.snapshots {
         if let Some(entry) = entry {
             image[offset] = 1;
@@ -420,7 +428,102 @@ pub fn write_snapshot_catalog(
     }
     let checksum = catalog_checksum(&image[16..]);
     image[8..16].copy_from_slice(&checksum.to_le_bytes());
-    for index in 0..SNAPSHOT_CATALOG_SECTORS {
+    image
+}
+
+fn decode_snapshot_catalog(
+    image: &[u8; SECTOR_SIZE * SNAPSHOT_CATALOG_SLOT_SECTORS],
+) -> Result<Option<(u64, SnapshotCatalog)>, Error> {
+    if &image[..4] != SNAPSHOT_CATALOG_MAGIC {
+        return Ok(None);
+    }
+    let version = read_u16(image, 4);
+    let (sequence, mut offset) = if version == SNAPSHOT_CATALOG_VERSION {
+        let sequence = read_u64(image, 16);
+        if sequence == 0 || read_u64(image, 8) != catalog_checksum(&image[16..]) {
+            return Err(Error::CorruptDirectory);
+        }
+        (sequence, 24usize)
+    } else if version == SNAPSHOT_CATALOG_LEGACY_VERSION {
+        if read_u64(image, 8) != catalog_checksum(&image[16..]) {
+            return Err(Error::CorruptDirectory);
+        }
+        (0, 16usize)
+    } else {
+        return Err(Error::CorruptDirectory);
+    };
+    let mut catalog = SnapshotCatalog::empty();
+    for slot in &mut catalog.snapshots {
+        if image[offset] != 0 {
+            let entry = SnapshotCatalogEntry {
+                id: read_u64(image, offset + 8),
+                generation: read_u64(image, offset + 16),
+                checksum: read_u64(image, offset + 24),
+            };
+            if entry.id == 0 || entry.generation == 0 || entry.checksum == 0 {
+                return Err(Error::CorruptDirectory);
+            }
+            *slot = Some(entry);
+        }
+        offset += 32;
+    }
+    for slot in &mut catalog.changes {
+        if image[offset] != 0 {
+            let entry = SnapshotCowEntry {
+                snapshot_id: read_u64(image, offset + 8),
+                path_hash: read_u64(image, offset + 16),
+                old_checksum: read_u64(image, offset + 24),
+                new_checksum: read_u64(image, offset + 32),
+            };
+            if entry.snapshot_id == 0 {
+                return Err(Error::CorruptDirectory);
+            }
+            *slot = Some(entry);
+        }
+        offset += 40;
+    }
+    Ok(Some((sequence, catalog)))
+}
+
+fn read_catalog_slot(
+    device: &mut (impl BlockDevice + ?Sized),
+    volume: Volume,
+    slot: usize,
+) -> Result<Option<(u64, SnapshotCatalog)>, Error> {
+    let start = catalog_slot_start(volume, slot)?;
+    let mut image = [0u8; SECTOR_SIZE * SNAPSHOT_CATALOG_SLOT_SECTORS];
+    for index in 0..SNAPSHOT_CATALOG_SLOT_SECTORS {
+        let from = index * SECTOR_SIZE;
+        device
+            .read_sector(start + index as u64, &mut image[from..from + SECTOR_SIZE])
+            .map_err(Error::Block)?;
+    }
+    decode_snapshot_catalog(&image)
+}
+
+pub fn write_snapshot_catalog(
+    device: &mut (impl BlockDevice + ?Sized),
+    volume: Volume,
+    catalog: SnapshotCatalog,
+) -> Result<(), Error> {
+    // Never overwrite the newest valid copy. Write the other slot completely,
+    // then flush; after a torn write the previous generation remains usable.
+    let a = read_catalog_slot(device, volume, 0);
+    let b = read_catalog_slot(device, volume, 1);
+    let a_valid = a.as_ref().ok().and_then(|entry| *entry);
+    let b_valid = b.as_ref().ok().and_then(|entry| *entry);
+    let (active_slot, active_sequence) = match (a_valid, b_valid) {
+        (Some((a_seq, _)), Some((b_seq, _))) if b_seq > a_seq => (1usize, b_seq),
+        (Some((a_seq, _)), Some((b_seq, _))) => (0usize, a_seq.max(b_seq)),
+        (Some((a_seq, _)), None) => (0usize, a_seq),
+        (None, Some((b_seq, _))) => (1usize, b_seq),
+        (None, None) => (1usize, 0u64),
+    };
+    let target_slot = 1usize.saturating_sub(active_slot);
+    let sequence = active_sequence.checked_add(1).ok_or(Error::WriteFailed)?;
+    let image = encode_snapshot_catalog(catalog, sequence);
+    let start = catalog_slot_start(volume, target_slot)?;
+    for index in 0..SNAPSHOT_CATALOG_SLOT_SECTORS {
         let from = index * SECTOR_SIZE;
         device
             .write_sector(start + index as u64, &image[from..from + SECTOR_SIZE])
@@ -433,54 +536,23 @@ pub fn read_snapshot_catalog(
     device: &mut (impl BlockDevice + ?Sized),
     volume: Volume,
 ) -> Result<Option<SnapshotCatalog>, Error> {
-    let start = snapshot_reserved_start(volume)?;
-    let mut image = [0u8; SECTOR_SIZE * SNAPSHOT_CATALOG_SECTORS];
-    for index in 0..SNAPSHOT_CATALOG_SECTORS {
-        let from = index * SECTOR_SIZE;
-        device
-            .read_sector(start + index as u64, &mut image[from..from + SECTOR_SIZE])
-            .map_err(Error::Block)?;
-    }
-    if &image[..4] != SNAPSHOT_CATALOG_MAGIC {
-        return Ok(None);
-    }
-    if read_u16(&image, 4) != SNAPSHOT_CATALOG_VERSION
-        || read_u64(&image, 8) != catalog_checksum(&image[16..])
-    {
-        return Err(Error::CorruptDirectory);
-    }
-    let mut catalog = SnapshotCatalog::empty();
-    let mut offset = 16usize;
-    for slot in &mut catalog.snapshots {
-        if image[offset] != 0 {
-            let entry = SnapshotCatalogEntry {
-                id: read_u64(&image, offset + 8),
-                generation: read_u64(&image, offset + 16),
-                checksum: read_u64(&image, offset + 24),
-            };
-            if entry.id == 0 || entry.generation == 0 || entry.checksum == 0 {
-                return Err(Error::CorruptDirectory);
-            }
-            *slot = Some(entry);
+    let a = read_catalog_slot(device, volume, 0);
+    let b = read_catalog_slot(device, volume, 1);
+    let a_valid = a.as_ref().ok().and_then(|entry| *entry);
+    let b_valid = b.as_ref().ok().and_then(|entry| *entry);
+    match (a_valid, b_valid) {
+        (Some((a_seq, a_catalog)), Some((b_seq, b_catalog))) => {
+            Ok(Some(if b_seq > a_seq { b_catalog } else { a_catalog }))
         }
-        offset += 32;
-    }
-    for slot in &mut catalog.changes {
-        if image[offset] != 0 {
-            let entry = SnapshotCowEntry {
-                snapshot_id: read_u64(&image, offset + 8),
-                path_hash: read_u64(&image, offset + 16),
-                old_checksum: read_u64(&image, offset + 24),
-                new_checksum: read_u64(&image, offset + 32),
-            };
-            if entry.snapshot_id == 0 {
-                return Err(Error::CorruptDirectory);
+        (Some((_, catalog)), None) | (None, Some((_, catalog))) => Ok(Some(catalog)),
+        (None, None) => {
+            if matches!(a, Ok(None)) && matches!(b, Ok(None)) {
+                Ok(None)
+            } else {
+                Err(Error::CorruptDirectory)
             }
-            *slot = Some(entry);
         }
-        offset += 40;
     }
-    Ok(Some(catalog))
 }
 
 fn restore_sector(volume: Volume) -> Result<u64, Error> {
@@ -3559,29 +3631,24 @@ struct CatalogTestDisk {
 
 #[cfg(feature = "stage12-4-test")]
 impl BlockDevice for CatalogTestDisk {
-    fn sector_count(&self) -> u64 {
-        TestDisk::TOTAL_SECTORS
-    }
-
+    fn sector_count(&self) -> u64 { TestDisk::TOTAL_SECTORS }
     fn read_sector(&mut self, lba: u64, sector: &mut [u8]) -> Result<(), BlockError> {
         if sector.len() != SECTOR_SIZE || lba >= TestDisk::TOTAL_SECTORS {
             return Err(BlockError::OutOfBounds);
         }
         sector.fill(0);
-        if (17..21).contains(&lba) {
-            sector.copy_from_slice(&self.image[(lba - 17) as usize]);
+        if (13..21).contains(&lba) {
+            sector.copy_from_slice(&self.image[(lba - 13) as usize]);
         }
         Ok(())
     }
-
     fn write_sector(&mut self, lba: u64, sector: &[u8]) -> Result<(), BlockError> {
-        if sector.len() != SECTOR_SIZE || !(17..21).contains(&lba) {
+        if sector.len() != SECTOR_SIZE || !(13..21).contains(&lba) {
             return Err(BlockError::OutOfBounds);
         }
-        self.image[(lba - 17) as usize].copy_from_slice(sector);
+        self.image[(lba - 13) as usize].copy_from_slice(sector);
         Ok(())
     }
-
     fn flush(&mut self) -> Result<(), BlockError> {
         self.flushes = self.flushes.saturating_add(1);
         Ok(())
@@ -3602,46 +3669,43 @@ pub fn snapshot_catalog_recovery_self_test() -> bool {
         backup_fs_info_sector: Some(7),
         cluster_count: FAT32_MIN_CLUSTERS,
     };
-    let mut catalog = SnapshotCatalog::empty();
-    catalog.snapshots[0] = Some(SnapshotCatalogEntry {
-        id: 1,
-        generation: 42,
-        checksum: 0x1234_5678,
-    });
-    catalog.changes[0] = Some(SnapshotCowEntry {
-        snapshot_id: 1,
-        path_hash: 0xaabb_ccdd,
-        old_checksum: 11,
-        new_checksum: 22,
-    });
-    let mut disk = CatalogTestDisk {
-        image: [[0; SECTOR_SIZE]; SNAPSHOT_CATALOG_SECTORS],
-        flushes: 0,
-    };
-    if write_snapshot_catalog(&mut disk, volume, catalog).is_err() || disk.flushes != 1 {
+    let mut first = SnapshotCatalog::empty();
+    first.snapshots[0] = Some(SnapshotCatalogEntry { id: 1, generation: 42, checksum: 0x1234_5678 });
+    first.changes[0] = Some(SnapshotCowEntry { snapshot_id: 1, path_hash: 0xaabb_ccdd, old_checksum: 11, new_checksum: 22 });
+    let mut disk = CatalogTestDisk { image: [[0; SECTOR_SIZE]; SNAPSHOT_CATALOG_SECTORS], flushes: 0 };
+    if write_snapshot_catalog(&mut disk, volume, first).is_err() || disk.flushes != 1 {
         return false;
     }
-    let mut reopened = CatalogTestDisk {
-        image: disk.image,
-        flushes: 0,
-    };
-    if read_snapshot_catalog(&mut reopened, volume) != Ok(Some(catalog)) {
+    if read_snapshot_catalog(&mut disk, volume) != Ok(Some(first)) {
         return false;
     }
-    let mut corrupt = CatalogTestDisk {
-        image: reopened.image,
-        flushes: 0,
-    };
-    corrupt.image[1][0] ^= 1;
-    if read_snapshot_catalog(&mut corrupt, volume) != Err(Error::CorruptDirectory) {
+
+    let mut second = first;
+    second.snapshots[0] = Some(SnapshotCatalogEntry { id: 1, generation: 43, checksum: 0x8765_4321 });
+    if write_snapshot_catalog(&mut disk, volume, second).is_err() || disk.flushes != 2 {
         return false;
     }
-    let unsafe_volume = Volume {
-        fs_info_sector: Some(18),
-        ..volume
-    };
-    write_snapshot_catalog(&mut reopened, unsafe_volume, catalog)
-        == Err(Error::UnsupportedGeometry)
+    if read_snapshot_catalog(&mut disk, volume) != Ok(Some(second)) {
+        return false;
+    }
+
+    // Corrupt one sector of the newest A slot. Recovery must fall back to the
+    // older, fully committed B slot rather than losing the catalog.
+    let mut torn = CatalogTestDisk { image: disk.image, flushes: 0 };
+    torn.image[1][0] ^= 1;
+    if read_snapshot_catalog(&mut torn, volume) != Ok(Some(first)) {
+        return false;
+    }
+
+    // If both copies are damaged, fail closed rather than treating corruption
+    // as a fresh disk with no snapshot catalog.
+    torn.image[5][0] ^= 1;
+    if read_snapshot_catalog(&mut torn, volume) != Err(Error::CorruptDirectory) {
+        return false;
+    }
+
+    let unsafe_volume = Volume { fs_info_sector: Some(14), ..volume };
+    write_snapshot_catalog(&mut disk, unsafe_volume, second) == Err(Error::UnsupportedGeometry)
 }
 
 #[cfg(feature = "stage12-4-test")]
