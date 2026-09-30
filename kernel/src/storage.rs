@@ -153,6 +153,10 @@ fn unavailable_space_error() -> SpaceError {
     }
 }
 pub fn mount_ata_root() -> MountStatus {
+    // Keep the raw ATA lock strictly scoped to discovery/import. Snapshot
+    // recovery below uses block_io::PrimaryAta, whose I/O path acquires the
+    // same ATA lock. Running recovery inside with_primary_master would
+    // recursively acquire that lock and deadlock during reboot rollback.
     let status = ata::with_primary_master(|disk| {
         let direct = mount_device(disk);
         if direct != MountStatus::NotFat32 {
@@ -184,11 +188,11 @@ pub fn mount_ata_root() -> MountStatus {
         }
     })
     .unwrap_or(MountStatus::NoDevice);
+
+    // Publish the mounted lifecycle only after the raw ATA guard above has
+    // been released. Recovery helpers intentionally require mnt_mounted().
     record_mount_status(status);
     if matches!(status, MountStatus::Mounted(_)) {
-        // Reconstruct durable snapshot state only after /mnt is available.
-        // Fail closed: corrupt snapshot metadata makes the mount lifecycle fail
-        // rather than silently discarding rollback authority.
         #[cfg(feature = "stage12-4-reboot-test")]
         crate::serial::write_line(format_args!("[S12.4R] recovery: catalog"));
         if crate::snapshots::recover_catalog().is_err() {
