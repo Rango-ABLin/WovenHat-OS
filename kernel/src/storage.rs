@@ -1310,6 +1310,13 @@ pub fn persist_path(path: &str) -> Result<(), PersistError> {
             checksum,
         )
         .map_err(|_| PersistError::Failed)?;
+    } else {
+        crate::snapshots::record_live_change(
+            crate::wovenfs::path_hash(path),
+            0,
+            checksum,
+        )
+        .map_err(|_| PersistError::Failed)?;
     }
     let Some(journal_token) = crate::journal::begin(crate::journal::path_hash(path), checksum)
     else {
