@@ -525,6 +525,42 @@ impl XhciController {
         Ok(length)
     }
 
+    fn control_out(
+        &mut self,
+        request_type: u8,
+        request: u8,
+        value: u16,
+        index: u16,
+        data: &[u8],
+    ) -> Result<(), InitError> {
+        if data.is_empty() || data.len() > PAGE_SIZE {
+            return Err(InitError::DescriptorInvalid);
+        }
+        let mut buffer = DmaPage::allocate_zeroed().ok_or(InitError::DmaUnavailable)?;
+        buffer.bytes_mut()[..data.len()].copy_from_slice(data);
+        fence(Ordering::Release);
+        let setup = setup_packet(request_type, request, value, index, data.len() as u16);
+        let ring = self.ep0_ring.as_mut().ok_or(InitError::CommandFailed)?;
+        ring.push(Trb {
+            parameter: setup,
+            status: 8,
+            control: (TRB_TYPE_SETUP_STAGE << 10) | (1 << 6) | (2 << 16),
+        });
+        ring.push(Trb {
+            parameter: buffer.physical,
+            status: data.len() as u32,
+            control: TRB_TYPE_DATA_STAGE << 10,
+        });
+        let status_ptr = ring.push(Trb {
+            parameter: 0,
+            status: 0,
+            control: (TRB_TYPE_STATUS_STAGE << 10) | (1 << 16) | (1 << 5),
+        });
+        self.ring_endpoint(1)?;
+        self.wait_transfer_completion(status_ptr, self.slot_id)?;
+        Ok(())
+    }
+
     fn control_no_data(
         &mut self,
         request_type: u8,
