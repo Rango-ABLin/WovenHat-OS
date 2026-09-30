@@ -9,6 +9,8 @@ pub const EVT_COMMAND_COMPLETE: u8 = 0x0e;
 pub const EVT_COMMAND_STATUS: u8 = 0x0f;
 pub const OPCODE_RESET: u16 = 0x0c03;
 pub const OPCODE_READ_LOCAL_VERSION: u16 = 0x1001;
+pub const OPCODE_READ_LOCAL_SUPPORTED_COMMANDS: u16 = 0x1002;
+pub const OPCODE_READ_BD_ADDR: u16 = 0x1009;
 pub const MAX_HCI_EVENT: usize = 257;
 pub const MAX_HCI_PAYLOAD: usize = 255;
 
@@ -177,6 +179,107 @@ pub fn initialization_self_test() -> bool {
         && init.next_command(&mut bytes) == Ok(None)
 }
 
+
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct LocalVersion {
+    pub hci_version: u8,
+    pub hci_revision: u16,
+    pub lmp_version: u8,
+    pub manufacturer: u16,
+    pub lmp_subversion: u16,
+}
+
+pub fn parse_local_version_complete(event: &[u8]) -> Result<LocalVersion, HciError> {
+    let done = parse_command_complete(event)?;
+    if done.opcode != OPCODE_READ_LOCAL_VERSION {
+        return Err(HciError::UnexpectedOpcode);
+    }
+    if done.status != 0 {
+        return Err(HciError::ControllerFailure(done.status));
+    }
+    if event.len() < 14 || event[1] < 12 {
+        return Err(HciError::MalformedEvent);
+    }
+    Ok(LocalVersion {
+        hci_version: event[6],
+        hci_revision: u16::from_le_bytes([event[7], event[8]]),
+        lmp_version: event[9],
+        manufacturer: u16::from_le_bytes([event[10], event[11]]),
+        lmp_subversion: u16::from_le_bytes([event[12], event[13]]),
+    })
+}
+
+pub fn parse_bd_addr_complete(event: &[u8]) -> Result<[u8; 6], HciError> {
+    let done = parse_command_complete(event)?;
+    if done.opcode != OPCODE_READ_BD_ADDR {
+        return Err(HciError::UnexpectedOpcode);
+    }
+    if done.status != 0 {
+        return Err(HciError::ControllerFailure(done.status));
+    }
+    if event.len() < 12 || event[1] < 10 {
+        return Err(HciError::MalformedEvent);
+    }
+    let mut address = [0_u8; 6];
+    address.copy_from_slice(&event[6..12]);
+    Ok(address)
+}
+
+pub fn parse_supported_commands_complete(event: &[u8]) -> Result<[u8; 64], HciError> {
+    let done = parse_command_complete(event)?;
+    if done.opcode != OPCODE_READ_LOCAL_SUPPORTED_COMMANDS {
+        return Err(HciError::UnexpectedOpcode);
+    }
+    if done.status != 0 {
+        return Err(HciError::ControllerFailure(done.status));
+    }
+    if event.len() < 70 || event[1] < 68 {
+        return Err(HciError::MalformedEvent);
+    }
+    let mut commands = [0_u8; 64];
+    commands.copy_from_slice(&event[6..70]);
+    Ok(commands)
+}
+
+pub fn capability_self_test() -> bool {
+    let version = [
+        EVT_COMMAND_COMPLETE, 12, 1, 0x01, 0x10, 0,
+        0x0c, 0x34, 0x12, 0x0c, 0x4c, 0x00, 0x78, 0x56,
+    ];
+    let Ok(info) = parse_local_version_complete(&version) else { return false; };
+    if info.hci_version != 0x0c
+        || info.hci_revision != 0x1234
+        || info.lmp_version != 0x0c
+        || info.manufacturer != 0x004c
+        || info.lmp_subversion != 0x5678
+    {
+        return false;
+    }
+
+    let address_event = [
+        EVT_COMMAND_COMPLETE, 10, 1, 0x09, 0x10, 0,
+        1, 2, 3, 4, 5, 6,
+    ];
+    if parse_bd_addr_complete(&address_event) != Ok([1, 2, 3, 4, 5, 6]) {
+        return false;
+    }
+
+    let mut supported = [0_u8; 70];
+    supported[0] = EVT_COMMAND_COMPLETE;
+    supported[1] = 68;
+    supported[2] = 1;
+    supported[3..5].copy_from_slice(&OPCODE_READ_LOCAL_SUPPORTED_COMMANDS.to_le_bytes());
+    supported[5] = 0;
+    for (index, byte) in supported[6..70].iter_mut().enumerate() {
+        *byte = index as u8;
+    }
+    let Ok(commands) = parse_supported_commands_complete(&supported) else { return false; };
+    commands[0] == 0
+        && commands[63] == 63
+        && parse_bd_addr_complete(&version).is_err()
+        && parse_supported_commands_complete(&supported[..69]).is_err()
+}
 
 pub const EVT_INQUIRY_COMPLETE: u8 = 0x01;
 pub const EVT_INQUIRY_RESULT: u8 = 0x02;
