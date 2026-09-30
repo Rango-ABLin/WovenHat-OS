@@ -953,6 +953,15 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         serial::write_line(format_args!(
             "[S13.10H] Bluetooth pairing interaction contract: PASSED"
         ));
+        if !bluetooth_hci::trusted_security_self_test() {
+            serial::write_line(format_args!(
+                "[S13.10H] Bluetooth paired encrypted trust binding: FAILED"
+            ));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!(
+            "[S13.10H] Bluetooth paired encrypted trust binding: PASSED"
+        ));
     }
 
     if heap::init().is_err() {
