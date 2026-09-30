@@ -138,9 +138,7 @@ pub fn create(generation: u64, checksum: u64) -> Option<u64> {
     if id == 0 || t.iter().flatten().any(|snapshot| snapshot.id == id) {
         return None;
     }
-    let Some(successor) = id.checked_add(1) else {
-        return None;
-    };
+    let successor = id.checked_add(1)?;
     *next_id = successor;
     drop(next_id);
     t[slot] = Some(Snapshot { id, generation, checksum });
