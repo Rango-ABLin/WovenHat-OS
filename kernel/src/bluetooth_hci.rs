@@ -426,6 +426,161 @@ pub fn discovery_self_test() -> bool {
         && discovery.handle_event(&[EVT_INQUIRY_RESULT, 1, 1]).is_err()
 }
 
+
+pub const EVT_CONNECTION_COMPLETE: u8 = 0x03;
+pub const EVT_DISCONNECTION_COMPLETE: u8 = 0x05;
+pub const OPCODE_CREATE_CONNECTION: u16 = 0x0405;
+pub const OPCODE_DISCONNECT: u16 = 0x0406;
+pub const MAX_ACL_LINKS: usize = 8;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct AclLink {
+    pub handle: u16,
+    pub address: [u8; 6],
+    pub encrypted: bool,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LinkEvent {
+    Connected(AclLink),
+    Disconnected(u16),
+}
+
+pub struct LinkState {
+    links: [Option<AclLink>; MAX_ACL_LINKS],
+    count: usize,
+}
+
+impl LinkState {
+    pub const fn new() -> Self {
+        Self { links: [None; MAX_ACL_LINKS], count: 0 }
+    }
+
+    pub fn create_connection_command(
+        device: DiscoveredDevice,
+        out: &mut [u8; 258],
+    ) -> Result<usize, HciError> {
+        let mut params = [0_u8; 13];
+        params[0..6].copy_from_slice(&device.address);
+        params[6..8].copy_from_slice(&0xcc18_u16.to_le_bytes());
+        params[8] = device.page_scan_repetition_mode;
+        params[9] = 0;
+        params[10..12].copy_from_slice(&device.clock_offset.to_le_bytes());
+        params[12] = 1;
+        HciCommand::new(OPCODE_CREATE_CONNECTION, &params).map(|command| command.encode(out))
+    }
+
+    pub fn disconnect_command(handle: u16, reason: u8, out: &mut [u8; 258]) -> Result<usize, HciError> {
+        if handle > 0x0fff {
+            return Err(HciError::MalformedEvent);
+        }
+        let [lo, hi] = handle.to_le_bytes();
+        HciCommand::new(OPCODE_DISCONNECT, &[lo, hi, reason]).map(|command| command.encode(out))
+    }
+
+    pub fn handle_event(&mut self, event: &[u8]) -> Result<LinkEvent, HciError> {
+        if event.len() < 2 || event.len() < 2 + event[1] as usize {
+            return Err(HciError::MalformedEvent);
+        }
+        match event[0] {
+            EVT_CONNECTION_COMPLETE => {
+                if event[1] != 11 {
+                    return Err(HciError::MalformedEvent);
+                }
+                if event[2] != 0 {
+                    return Err(HciError::ControllerFailure(event[2]));
+                }
+                let handle = u16::from_le_bytes([event[3], event[4]]);
+                if handle > 0x0fff {
+                    return Err(HciError::MalformedEvent);
+                }
+                let mut address = [0_u8; 6];
+                address.copy_from_slice(&event[5..11]);
+                if event[11] != 1 {
+                    return Err(HciError::MalformedEvent);
+                }
+                if let Some(existing) = self.links[..self.count]
+                    .iter()
+                    .flatten()
+                    .find(|link| link.handle == handle || link.address == address)
+                {
+                    return Ok(LinkEvent::Connected(*existing));
+                }
+                if self.count == MAX_ACL_LINKS {
+                    return Err(HciError::ControllerFailure(0xff));
+                }
+                let link = AclLink { handle, address, encrypted: event[12] != 0 };
+                self.links[self.count] = Some(link);
+                self.count += 1;
+                Ok(LinkEvent::Connected(link))
+            }
+            EVT_DISCONNECTION_COMPLETE => {
+                if event[1] != 4 {
+                    return Err(HciError::MalformedEvent);
+                }
+                if event[2] != 0 {
+                    return Err(HciError::ControllerFailure(event[2]));
+                }
+                let handle = u16::from_le_bytes([event[3], event[4]]);
+                let Some(index) = self.links[..self.count]
+                    .iter()
+                    .position(|link| link.is_some_and(|link| link.handle == handle))
+                else {
+                    return Err(HciError::UnexpectedOpcode);
+                };
+                self.count -= 1;
+                self.links[index] = self.links[self.count];
+                self.links[self.count] = None;
+                Ok(LinkEvent::Disconnected(handle))
+            }
+            _ => Err(HciError::MalformedEvent),
+        }
+    }
+
+    pub fn count(&self) -> usize { self.count }
+    pub fn link(&self, index: usize) -> Option<AclLink> {
+        if index >= self.count { None } else { self.links[index] }
+    }
+}
+
+pub fn link_lifecycle_self_test() -> bool {
+    let device = DiscoveredDevice {
+        address: [1, 2, 3, 4, 5, 6],
+        page_scan_repetition_mode: 1,
+        class_of_device: [0x04, 0x02, 0x0c],
+        clock_offset: 0x1234,
+    };
+    let mut bytes = [0_u8; 258];
+    if LinkState::create_connection_command(device, &mut bytes) != Ok(16)
+        || bytes[..3] != [0x05, 0x04, 13]
+        || bytes[3..9] != device.address
+    {
+        return false;
+    }
+
+    let mut links = LinkState::new();
+    let connected = [
+        EVT_CONNECTION_COMPLETE, 11, 0, 0x42, 0x00,
+        1, 2, 3, 4, 5, 6,
+        1, 0,
+    ];
+    let Ok(LinkEvent::Connected(link)) = links.handle_event(&connected) else { return false; };
+    if link.handle != 0x42 || link.address != device.address || link.encrypted || links.count() != 1 {
+        return false;
+    }
+    if LinkState::disconnect_command(link.handle, 0x13, &mut bytes) != Ok(6)
+        || bytes[..6] != [0x06, 0x04, 3, 0x42, 0, 0x13]
+    {
+        return false;
+    }
+    links.handle_event(&[EVT_DISCONNECTION_COMPLETE, 4, 0, 0x42, 0, 0x13])
+        == Ok(LinkEvent::Disconnected(0x42))
+        && links.count() == 0
+        && links.link(0).is_none()
+        && links.handle_event(&connected[..12]).is_err()
+        && LinkState::disconnect_command(0x1000, 0x13, &mut bytes).is_err()
+}
+
 pub fn transaction_self_test() -> bool {
     let reset = HciCommand::new(OPCODE_RESET, &[]).unwrap();
     let version = HciCommand::new(OPCODE_READ_LOCAL_VERSION, &[]).unwrap();
