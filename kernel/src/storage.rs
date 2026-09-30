@@ -2321,6 +2321,8 @@ fn collect_metadata_moves(
 }
 
 
+type SnapshotMutation = (u64, u64, u64);
+
 #[derive(Clone)]
 struct SnapshotRenameObject {
     old_path: alloc::string::String,
@@ -2395,7 +2397,7 @@ fn retain_snapshot_rename_objects_on_device(
     device: &mut impl crate::block::BlockDevice,
     old: &str,
     new: &str,
-) -> Result<Option<alloc::vec::Vec<(u64, u64, u64)>>, MutationError> {
+) -> Result<Option<alloc::vec::Vec<SnapshotMutation>>, MutationError> {
     fn collect(
         device: &mut impl crate::block::BlockDevice,
         volume: fat32::Volume,
