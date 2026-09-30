@@ -2130,14 +2130,9 @@ pub fn rename_path(old: &str, new: &str) -> Result<(), MutationError> {
         return Err(MutationError::ReadOnly);
     }
     FILE_PAGES.lock().invalidate();
-    if let Some(previous) = crate::wovenfs::metadata(old) {
-        retain_snapshot_preimages_on_device(&mut disk, old, old_relative, previous.checksum)
+    if let Some(mutations) = retain_snapshot_rename_objects_on_device(&mut disk, old, new)? {
+        crate::snapshots::record_live_changes(&mutations)
             .map_err(|_| MutationError::Failed)?;
-        crate::snapshots::record_live_changes(&[
-            (crate::wovenfs::path_hash(old), previous.checksum, 0),
-            (crate::wovenfs::path_hash(new), 0, previous.checksum),
-        ])
-        .map_err(|_| MutationError::Failed)?;
     }
     let mut result = rename_on_cached_device(&mut disk, old_relative, new_relative);
     if result.is_ok() {
@@ -2323,6 +2318,171 @@ fn collect_metadata_moves(
         )?;
     }
     Ok(())
+}
+
+
+#[derive(Clone)]
+struct SnapshotRenameObject {
+    old_path: alloc::string::String,
+    new_path: alloc::string::String,
+    checksum: u64,
+    mode: u32,
+    directory: bool,
+}
+
+fn collect_snapshot_rename_objects_in_volume(
+    device: &mut impl crate::block::BlockDevice,
+    volume: fat32::Volume,
+    dir_cluster: u32,
+    old_prefix: &str,
+    new_prefix: &str,
+    depth: usize,
+    objects: &mut alloc::vec::Vec<SnapshotRenameObject>,
+) -> Result<(), MutationError> {
+    if depth >= MAX_BOOT_IMPORT_DEPTH || objects.len() >= crate::config::MAX_VFS_NODES {
+        return Err(MutationError::Failed);
+    }
+    let mut children = alloc::vec::Vec::new();
+    fat32::for_each_directory_entry_named(device, volume, dir_cluster, |entry, long_name| {
+        if entry.attributes & 0x08 != 0 || entry.short_name[0] == b'.' {
+            return Ok(());
+        }
+        let mut short = [0u8; 12];
+        let name = if let Some(long_name) = long_name {
+            alloc::string::String::from(long_name)
+        } else {
+            let Some(length) = short_name_to_str(&entry.short_name, &mut short) else {
+                return Err(fat32::Error::InvalidPath);
+            };
+            let name = core::str::from_utf8(&short[..length]).map_err(|_| fat32::Error::InvalidPath)?;
+            alloc::string::String::from(name)
+        };
+        let old_path = append_metadata_path(old_prefix, &name).ok_or(fat32::Error::InvalidPath)?;
+        let new_path = append_metadata_path(new_prefix, &name).ok_or(fat32::Error::InvalidPath)?;
+        if entry.attributes & 0x10 != 0 {
+            objects.push(SnapshotRenameObject {
+                old_path: old_path.clone(),
+                new_path: new_path.clone(),
+                checksum: SNAPSHOT_DIRECTORY_CHECKSUM,
+                mode: 0o755,
+                directory: true,
+            });
+            if entry.first_cluster >= 2 {
+                children.push((entry.first_cluster, old_path, new_path));
+            }
+        } else {
+            let metadata = crate::wovenfs::metadata(&old_path).ok_or(fat32::Error::InvalidPath)?;
+            objects.push(SnapshotRenameObject {
+                old_path,
+                new_path,
+                checksum: metadata.checksum,
+                mode: metadata.mode,
+                directory: false,
+            });
+        }
+        Ok(())
+    })
+    .map_err(map_mutation_err)?;
+    for (cluster, old_path, new_path) in children {
+        collect_snapshot_rename_objects_in_volume(
+            device, volume, cluster, &old_path, &new_path, depth + 1, objects,
+        )?;
+    }
+    Ok(())
+}
+
+fn retain_snapshot_rename_objects_on_device(
+    device: &mut impl crate::block::BlockDevice,
+    old: &str,
+    new: &str,
+) -> Result<Option<alloc::vec::Vec<(u64, u64, u64)>>, MutationError> {
+    fn collect(
+        device: &mut impl crate::block::BlockDevice,
+        volume: fat32::Volume,
+        old: &str,
+        new: &str,
+    ) -> Result<alloc::vec::Vec<SnapshotRenameObject>, MutationError> {
+        let relative = old.strip_prefix("/mnt/").ok_or(MutationError::NotSupported)?;
+        let entry = fat32::resolve_path(device, volume, relative).map_err(map_mutation_err)?;
+        let mut objects = alloc::vec::Vec::new();
+        if entry.attributes & 0x10 != 0 {
+            objects.push(SnapshotRenameObject {
+                old_path: alloc::string::String::from(old),
+                new_path: alloc::string::String::from(new),
+                checksum: SNAPSHOT_DIRECTORY_CHECKSUM,
+                mode: 0o755,
+                directory: true,
+            });
+            collect_snapshot_rename_objects_in_volume(
+                device, volume, entry.first_cluster, old, new, 0, &mut objects,
+            )?;
+        } else {
+            let metadata = crate::wovenfs::metadata(old).ok_or(MutationError::Failed)?;
+            objects.push(SnapshotRenameObject {
+                old_path: alloc::string::String::from(old),
+                new_path: alloc::string::String::from(new),
+                checksum: metadata.checksum,
+                mode: metadata.mode,
+                directory: false,
+            });
+        }
+        Ok(objects)
+    }
+
+    let objects = match fat32::mount(device) {
+        Ok(volume) => collect(device, volume, old, new)?,
+        Err(fat32::Error::InvalidBootSector | fat32::Error::UnsupportedGeometry) => {
+            if let Ok(Some(part)) = partition::find_fat32(device) {
+                let mut view = partition::PartitionDevice::new(device, part)
+                    .map_err(|_| MutationError::Failed)?;
+                let volume = fat32::mount(&mut view).map_err(map_mutation_err)?;
+                collect(&mut view, volume, old, new)?
+            } else if let Ok(Some(part)) = gpt::find_fat_partition(device) {
+                let mut view = partition::PartitionDevice::new(device, part)
+                    .map_err(|_| MutationError::Failed)?;
+                let volume = fat32::mount(&mut view).map_err(map_mutation_err)?;
+                collect(&mut view, volume, old, new)?
+            } else {
+                return Err(MutationError::Failed);
+            }
+        }
+        Err(_) => return Err(MutationError::Failed),
+    };
+    let (ids, count) = crate::snapshots::live_snapshot_ids();
+    if count == 0 {
+        return Ok(None);
+    }
+    let mutation_count = objects.len().checked_mul(2).ok_or(MutationError::Failed)?;
+    if mutation_count > 32 {
+        return Err(MutationError::Failed);
+    }
+    let mut mutations = alloc::vec::Vec::with_capacity(mutation_count);
+    for object in &objects {
+        if object.directory {
+            for snapshot_id in ids.into_iter().take(count) {
+                write_snapshot_preimage_on_device(
+                    device,
+                    snapshot_id,
+                    &object.old_path,
+                    object.checksum,
+                    object.mode | SNAPSHOT_PREIMAGE_DIRECTORY_FLAG,
+                    &[],
+                )
+                .map_err(|_| MutationError::Failed)?;
+            }
+        } else {
+            let relative = object.old_path.strip_prefix("/mnt/").ok_or(MutationError::Failed)?;
+            retain_snapshot_preimages_on_device(device, &object.old_path, relative, object.checksum)
+                .map_err(|_| MutationError::Failed)?;
+        }
+        for snapshot_id in ids.into_iter().take(count) {
+            write_snapshot_preimage_on_device(device, snapshot_id, &object.new_path, 0, 0, &[])
+                .map_err(|_| MutationError::Failed)?;
+        }
+        mutations.push((crate::wovenfs::path_hash(&object.old_path), object.checksum, 0));
+        mutations.push((crate::wovenfs::path_hash(&object.new_path), 0, object.checksum));
+    }
+    Ok(Some(mutations))
 }
 
 fn validate_fat_relative(relative: &str) -> Result<(), MutationError> {
