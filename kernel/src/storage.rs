@@ -1228,18 +1228,43 @@ pub fn replay_snapshot_preimage(
         return Err(PersistError::NoDevice);
     }
     let relative = preimage.path.strip_prefix("/mnt/").ok_or(PersistError::BadName)?;
-    let mut disk = block_io::primary_ata();
-    with_mounted_volume(&mut disk, |device, volume| {
+    fn replay_in_volume(
+        device: &mut impl crate::block::BlockDevice,
+        volume: fat32::Volume,
+        relative: &str,
+        preimage: &SnapshotPreimage,
+    ) -> Result<(), PersistError> {
         if preimage.checksum == 0 {
             match fat32::delete_path(device, volume, relative) {
                 Ok(()) | Err(fat32::Error::NotFound) => Ok(()),
-                Err(error) => Err(error),
+                Err(error) => Err(map_persist_err(error)),
             }
         } else {
             fat32::create_path_file(device, volume, relative, &preimage.data)
+                .map_err(map_persist_err)
         }
-    })
-    .map_err(map_persist_err)?;
+    }
+
+    let mut disk = block_io::primary_ata();
+    match fat32::mount(&mut disk) {
+        Ok(volume) => replay_in_volume(&mut disk, volume, relative, preimage)?,
+        Err(fat32::Error::InvalidBootSector | fat32::Error::UnsupportedGeometry) => {
+            if let Ok(Some(part)) = partition::find_fat32(&mut disk) {
+                let mut view = partition::PartitionDevice::new(&mut disk, part)
+                    .map_err(|_| PersistError::Failed)?;
+                let volume = fat32::mount(&mut view).map_err(map_persist_err)?;
+                replay_in_volume(&mut view, volume, relative, preimage)?;
+            } else if let Ok(Some(part)) = gpt::find_fat_partition(&mut disk) {
+                let mut view = partition::PartitionDevice::new(&mut disk, part)
+                    .map_err(|_| PersistError::Failed)?;
+                let volume = fat32::mount(&mut view).map_err(map_persist_err)?;
+                replay_in_volume(&mut view, volume, relative, preimage)?;
+            } else {
+                return Err(PersistError::Failed);
+            }
+        }
+        Err(error) => return Err(map_persist_err(error)),
+    }
     disk.flush().map_err(|_| PersistError::Failed)
 }
 
