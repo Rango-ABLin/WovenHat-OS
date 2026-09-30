@@ -1286,7 +1286,7 @@ pub fn persist_path(path: &str) -> Result<(), PersistError> {
         {
             let mut disk = block_io::primary_ata();
             if disk.is_read_only() {
-                return Err(PersistError::ReadOnly);
+                return Err(PersistError::Failed);
             }
             retain_snapshot_preimages_on_device(&mut disk, path, relative, previous.checksum)?;
         }
