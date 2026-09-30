@@ -463,9 +463,7 @@ pub fn unbind_pci_resources(name: &'static str) -> Result<(), PciUnbindError> {
                 crate::hal::pci::msix::disable_owned(lease, binding.owner)
                     .map_err(PciUnbindError::Msix),
         };
-        if let Err(error) = result {
-            return Err(error);
-        }
+        result?;
         let mut table = TABLE.lock();
         let entry = table.iter_mut().flatten()
             .find(|entry| entry.name == name && entry.state == State::Unbinding)
