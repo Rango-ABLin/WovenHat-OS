@@ -74,7 +74,6 @@ mod pipe;
 mod serial;
 mod shell;
 mod smp;
-#[cfg(feature = "stage12-4-test")]
 mod snapshots;
 mod storage;
 #[cfg(feature = "stage12-5-test")]
@@ -134,12 +133,6 @@ mod wifi_wpa2;
 #[cfg(feature = "stage13-8-test")]
 mod woven_audio;
 mod woven_input;
-#[cfg(any(
-    feature = "stage12-2-test",
-    feature = "stage12-3-test",
-    feature = "stage12-4-test",
-    feature = "stage12-5-test"
-))]
 mod wovenfs;
 mod wovenguard;
 #[cfg(any(
@@ -966,9 +959,14 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
             storage::MountStatus::NotFat32 => {
                 serial::write_line(format_args!("[FS] ATA disk present but no FAT32 root"))
             }
-            storage::MountStatus::Failed => serial::write_line(format_args!(
-                "[FS] FAT32 mount failed; continuing with RAM VFS"
-            )),
+            storage::MountStatus::Failed => {
+                serial::write_line(format_args!("[FS] FAT32 mount failed; continuing with RAM VFS"));
+                #[cfg(feature = "stage12-4-reboot-test")]
+                {
+                    serial::write_line(format_args!("[S12.4R] boot recovery mount: FAILED"));
+                    qemu_test_exit_failure();
+                }
+            }
         }
 
         for dir in ["/etc", "/var", "/home", "/tmp"] {
@@ -1336,8 +1334,36 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         }
         storage::MountStatus::NoDevice => console.println("FAT32 MOUNT: NO BLOCK DEVICE"),
         storage::MountStatus::NotFat32 => console.println("FAT32 MOUNT: NO VOLUME"),
-        storage::MountStatus::Failed => console.println("FAT32 MOUNT: FAILED"),
+        storage::MountStatus::Failed => {
+            console.println("FAT32 MOUNT: FAILED");
+            #[cfg(feature = "stage12-4-reboot-test")]
+            {
+                serial::write_line(format_args!("[S12.4R] boot recovery mount: FAILED"));
+                qemu_test_exit_failure();
+            }
+        }
     }
+    #[cfg(feature = "stage12-4-reboot-test")]
+    {
+        const PATH: &str = "/mnt/s12r.txt";
+        const ORIGINAL: &[u8] = b"wovenhat-stage12.4-original";
+        if vfs::stat(PATH).is_ok() {
+            let mut restored = [0u8; 64];
+            let restored_ok = vfs::read_all(PATH, &mut restored)
+                .is_ok_and(|length| &restored[..length] == ORIGINAL);
+            let intent_cleared = snapshots::pending_restore().is_none()
+                && storage::load_snapshot_restore_intent().is_ok_and(|intent| intent.is_none());
+            if !restored_ok || !intent_cleared {
+                serial::write_line(format_args!("[S12.4R] reboot recovery: FAILED"));
+                qemu_test_exit_failure();
+            }
+            serial::write_line(format_args!(
+                "[S12.4R] reboot recovery + idempotent replay: PASSED"
+            ));
+            qemu_test_exit_success();
+        }
+    }
+
     if userspace::install_stub_executable() {
         console.println("EXEC IMAGE: INSTALLED");
     } else {
@@ -2714,12 +2740,86 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         serial::write_line(format_args!("[S12.3] encryption: PASSED"));
         qemu_test_exit_success();
     }
+    #[cfg(feature = "stage12-4-reboot-test")]
+    {
+        const PATH: &str = "/mnt/s12r.txt";
+        const ORIGINAL: &[u8] = b"wovenhat-stage12.4-original";
+        const MUTATED: &[u8] = b"wovenhat-stage12.4-mutated";
+
+        if vfs::stat(PATH).is_err() {
+            if vfs::create_read_only(PATH, ORIGINAL).is_err()
+                || vfs::set_metadata(PATH, 0, 0, 0o666).is_err()
+                || storage::persist_path(PATH).is_err()
+            {
+                serial::write_line(format_args!("[S12.4R] seed: FAILED"));
+                qemu_test_exit_failure();
+            }
+            let Some(snapshot_id) = snapshots::capture_wovenfs(1) else {
+                serial::write_line(format_args!("[S12.4R] snapshot: FAILED"));
+                qemu_test_exit_failure();
+            };
+            if vfs::write_file(PATH, MUTATED).is_err() {
+                serial::write_line(format_args!("[S12.4R] VFS mutation: FAILED"));
+                qemu_test_exit_failure();
+            }
+            if let Err(error) = storage::persist_path(PATH) {
+                serial::write_line(format_args!(
+                    "[S12.4R] durable mutation: FAILED code={}",
+                    error as u8
+                ));
+                qemu_test_exit_failure();
+            }
+            if let Err(error) = snapshots::prepare_restore(snapshot_id) {
+                serial::write_line(format_args!(
+                    "[S12.4R] WSR1 prepare: FAILED code={}",
+                    error as u8
+                ));
+                qemu_test_exit_failure();
+            }
+            let path_hash = wovenfs::path_hash(PATH);
+            let Ok(preimage) = storage::load_snapshot_preimage(snapshot_id, path_hash) else {
+                serial::write_line(format_args!("[S12.4R] WHP1 load: FAILED"));
+                qemu_test_exit_failure();
+            };
+            if storage::replay_snapshot_preimage(&preimage).is_err() {
+                serial::write_line(format_args!("[S12.4R] interrupted replay: FAILED"));
+                qemu_test_exit_failure();
+            }
+            // Deliberately exit after the durable data replay but before the
+            // WSR1 applied counter advances. The next boot must replay this
+            // record idempotently, verify the target root and clear WSR1.
+            serial::write_line(format_args!("[S12.4R] POWERLOSS AFTER REPLAY BEFORE WSR1 ADVANCE"));
+            qemu_test_exit_success();
+        }
+
+        let mut restored = [0u8; 64];
+        let restored_ok = vfs::read_all(PATH, &mut restored)
+            .is_ok_and(|length| &restored[..length] == ORIGINAL);
+        let intent_cleared = snapshots::pending_restore().is_none()
+            && storage::load_snapshot_restore_intent().is_ok_and(|intent| intent.is_none());
+        if !restored_ok || !intent_cleared {
+            serial::write_line(format_args!("[S12.4R] reboot recovery: FAILED"));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!("[S12.4R] reboot recovery + idempotent replay: PASSED"));
+        qemu_test_exit_success();
+    }
     #[cfg(feature = "stage12-4-test")]
     {
         if !snapshots::structural_self_test() {
             serial::write_line(format_args!("[S12.4] snapshots: FAILED"));
             qemu_test_exit_failure();
         }
+        if !fat32::snapshot_catalog_recovery_self_test() {
+            serial::write_line(format_args!("[S12.4] durable snapshot catalog: FAILED"));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!("[S12.4] durable snapshot catalog: PASSED"));
+        if !fat32::snapshot_restore_recovery_self_test() {
+            serial::write_line(format_args!("[S12.4] durable rollback recovery: FAILED"));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!("[S12.4] durable rollback recovery: PASSED"));
         serial::write_line(format_args!("[S12.4] snapshots: PASSED"));
         qemu_test_exit_success();
     }

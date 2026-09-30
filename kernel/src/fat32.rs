@@ -38,6 +38,17 @@ const JOURNAL_HEADER_SIZE: usize = 8;
 const JOURNAL_RECORD_SIZE: usize = 32;
 const JOURNAL_CAPACITY: usize = (SECTOR_SIZE - JOURNAL_HEADER_SIZE) / JOURNAL_RECORD_SIZE;
 const JOURNAL_SECTOR_COUNT: usize = 2;
+const RESTORE_MAGIC: &[u8; 4] = b"WSR1";
+const RESTORE_VERSION: u16 = 1;
+const SNAPSHOT_CATALOG_MAGIC: &[u8; 4] = b"WSC1";
+const SNAPSHOT_CATALOG_VERSION: u16 = 3;
+const SNAPSHOT_CATALOG_V2_VERSION: u16 = 2;
+const SNAPSHOT_CATALOG_LEGACY_VERSION: u16 = 1;
+const SNAPSHOT_CATALOG_SLOT_SECTORS: usize = 4;
+const SNAPSHOT_CATALOG_SLOTS: usize = 2;
+const SNAPSHOT_CATALOG_SECTORS: usize = SNAPSHOT_CATALOG_SLOT_SECTORS * SNAPSHOT_CATALOG_SLOTS;
+const SNAPSHOT_CATALOG_SNAPSHOTS: usize = 8;
+const SNAPSHOT_CATALOG_CHANGES: usize = 32;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Error {
@@ -313,6 +324,339 @@ pub struct JournalIntent {
     pub path_tag: u32,
     pub checksum: u64,
     pub metadata: FileMetadata,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub struct SnapshotRestoreIntent {
+    pub snapshot_id: u64,
+    pub generation: u64,
+    pub expected_root: u64,
+    pub applied: u64,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub struct SnapshotCatalogEntry {
+    pub id: u64,
+    pub generation: u64,
+    pub checksum: u64,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub struct SnapshotCowEntry {
+    pub snapshot_id: u64,
+    pub path_hash: u64,
+    pub old_checksum: u64,
+    pub new_checksum: u64,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub struct SnapshotCatalog {
+    pub next_snapshot_id: u64,
+    pub snapshots: [Option<SnapshotCatalogEntry>; SNAPSHOT_CATALOG_SNAPSHOTS],
+    pub changes: [Option<SnapshotCowEntry>; SNAPSHOT_CATALOG_CHANGES],
+}
+
+impl SnapshotCatalog {
+    pub const fn empty() -> Self {
+        Self {
+            next_snapshot_id: 1,
+            snapshots: [None; SNAPSHOT_CATALOG_SNAPSHOTS],
+            changes: [None; SNAPSHOT_CATALOG_CHANGES],
+        }
+    }
+}
+
+fn snapshot_reserved_start(volume: Volume) -> Result<u64, Error> {
+    let used = METADATA_SECTOR_COUNT
+        + JOURNAL_SECTOR_COUNT
+        + INODE_METADATA_SECTOR_COUNT
+        + 1
+        + SNAPSHOT_CATALOG_SECTORS;
+    let start = volume
+        .first_fat_sector
+        .checked_sub(used as u64)
+        .ok_or(Error::UnsupportedGeometry)?;
+    let end = start + SNAPSHOT_CATALOG_SECTORS as u64;
+    for protected in [volume.fs_info_sector, volume.backup_fs_info_sector]
+        .into_iter()
+        .flatten()
+        .map(u64::from)
+    {
+        if (start..end).contains(&protected) {
+            return Err(Error::UnsupportedGeometry);
+        }
+    }
+    Ok(start)
+}
+
+fn catalog_checksum(bytes: &[u8]) -> u64 {
+    bytes.iter().fold(0xcbf2_9ce4_8422_2325, |hash, byte| {
+        (hash ^ u64::from(*byte)).wrapping_mul(0x1000_0000_01b3)
+    })
+}
+
+fn catalog_slot_start(volume: Volume, slot: usize) -> Result<u64, Error> {
+    if slot >= SNAPSHOT_CATALOG_SLOTS {
+        return Err(Error::UnsupportedGeometry);
+    }
+    snapshot_reserved_start(volume)?
+        .checked_add((slot * SNAPSHOT_CATALOG_SLOT_SECTORS) as u64)
+        .ok_or(Error::UnsupportedGeometry)
+}
+
+fn encode_snapshot_catalog(catalog: SnapshotCatalog, sequence: u64) -> [u8; SECTOR_SIZE * SNAPSHOT_CATALOG_SLOT_SECTORS] {
+    let mut image = [0u8; SECTOR_SIZE * SNAPSHOT_CATALOG_SLOT_SECTORS];
+    image[..4].copy_from_slice(SNAPSHOT_CATALOG_MAGIC);
+    image[4..6].copy_from_slice(&SNAPSHOT_CATALOG_VERSION.to_le_bytes());
+    image[16..24].copy_from_slice(&sequence.to_le_bytes());
+    image[24..32].copy_from_slice(&catalog.next_snapshot_id.to_le_bytes());
+    let mut offset = 32usize;
+    for entry in catalog.snapshots {
+        if let Some(entry) = entry {
+            image[offset] = 1;
+            image[offset + 8..offset + 16].copy_from_slice(&entry.id.to_le_bytes());
+            image[offset + 16..offset + 24].copy_from_slice(&entry.generation.to_le_bytes());
+            image[offset + 24..offset + 32].copy_from_slice(&entry.checksum.to_le_bytes());
+        }
+        offset += 32;
+    }
+    for entry in catalog.changes {
+        if let Some(entry) = entry {
+            image[offset] = 1;
+            image[offset + 8..offset + 16].copy_from_slice(&entry.snapshot_id.to_le_bytes());
+            image[offset + 16..offset + 24].copy_from_slice(&entry.path_hash.to_le_bytes());
+            image[offset + 24..offset + 32].copy_from_slice(&entry.old_checksum.to_le_bytes());
+            image[offset + 32..offset + 40].copy_from_slice(&entry.new_checksum.to_le_bytes());
+        }
+        offset += 40;
+    }
+    let checksum = catalog_checksum(&image[16..]);
+    image[8..16].copy_from_slice(&checksum.to_le_bytes());
+    image
+}
+
+fn decode_snapshot_catalog(
+    image: &[u8; SECTOR_SIZE * SNAPSHOT_CATALOG_SLOT_SECTORS],
+) -> Result<Option<(u64, SnapshotCatalog)>, Error> {
+    if &image[..4] != SNAPSHOT_CATALOG_MAGIC {
+        return Ok(None);
+    }
+    let version = read_u16(image, 4);
+    let (sequence, mut offset, persisted_next_id) = if version == SNAPSHOT_CATALOG_VERSION {
+        let sequence = read_u64(image, 16);
+        let next_id = read_u64(image, 24);
+        if sequence == 0 || next_id == 0 || read_u64(image, 8) != catalog_checksum(&image[16..]) {
+            return Err(Error::CorruptDirectory);
+        }
+        (sequence, 32usize, Some(next_id))
+    } else if version == SNAPSHOT_CATALOG_V2_VERSION {
+        let sequence = read_u64(image, 16);
+        if sequence == 0 || read_u64(image, 8) != catalog_checksum(&image[16..]) {
+            return Err(Error::CorruptDirectory);
+        }
+        (sequence, 24usize, None)
+    } else if version == SNAPSHOT_CATALOG_LEGACY_VERSION {
+        if read_u64(image, 8) != catalog_checksum(&image[16..]) {
+            return Err(Error::CorruptDirectory);
+        }
+        (0, 16usize, None)
+    } else {
+        return Err(Error::CorruptDirectory);
+    };
+    let mut catalog = SnapshotCatalog::empty();
+    for slot in &mut catalog.snapshots {
+        if image[offset] != 0 {
+            let entry = SnapshotCatalogEntry {
+                id: read_u64(image, offset + 8),
+                generation: read_u64(image, offset + 16),
+                checksum: read_u64(image, offset + 24),
+            };
+            if entry.id == 0 || entry.generation == 0 || entry.checksum == 0 {
+                return Err(Error::CorruptDirectory);
+            }
+            *slot = Some(entry);
+        }
+        offset += 32;
+    }
+    for slot in &mut catalog.changes {
+        if image[offset] != 0 {
+            let entry = SnapshotCowEntry {
+                snapshot_id: read_u64(image, offset + 8),
+                path_hash: read_u64(image, offset + 16),
+                old_checksum: read_u64(image, offset + 24),
+                new_checksum: read_u64(image, offset + 32),
+            };
+            if entry.snapshot_id == 0 {
+                return Err(Error::CorruptDirectory);
+            }
+            *slot = Some(entry);
+        }
+        offset += 40;
+    }
+    let derived_next_id = catalog.snapshots.iter().flatten().map(|entry| entry.id).max().unwrap_or(0)
+        .checked_add(1).ok_or(Error::CorruptDirectory)?.max(1);
+    catalog.next_snapshot_id = persisted_next_id.unwrap_or(derived_next_id);
+    if catalog.next_snapshot_id < derived_next_id {
+        return Err(Error::CorruptDirectory);
+    }
+    Ok(Some((sequence, catalog)))
+}
+
+fn read_catalog_slot(
+    device: &mut (impl BlockDevice + ?Sized),
+    volume: Volume,
+    slot: usize,
+) -> Result<Option<(u64, SnapshotCatalog)>, Error> {
+    let start = catalog_slot_start(volume, slot)?;
+    let mut image = [0u8; SECTOR_SIZE * SNAPSHOT_CATALOG_SLOT_SECTORS];
+    for index in 0..SNAPSHOT_CATALOG_SLOT_SECTORS {
+        let from = index * SECTOR_SIZE;
+        device
+            .read_sector(start + index as u64, &mut image[from..from + SECTOR_SIZE])
+            .map_err(Error::Block)?;
+    }
+    decode_snapshot_catalog(&image)
+}
+
+pub fn write_snapshot_catalog(
+    device: &mut (impl BlockDevice + ?Sized),
+    volume: Volume,
+    catalog: SnapshotCatalog,
+) -> Result<(), Error> {
+    // Never overwrite the newest valid copy. Write the other slot completely,
+    // then flush; after a torn write the previous generation remains usable.
+    let a = read_catalog_slot(device, volume, 0);
+    let b = read_catalog_slot(device, volume, 1);
+    let a_valid = a.as_ref().ok().and_then(|entry| *entry);
+    let b_valid = b.as_ref().ok().and_then(|entry| *entry);
+    let (active_slot, active_sequence) = match (a_valid, b_valid) {
+        (Some((a_seq, _)), Some((b_seq, _))) if b_seq > a_seq => (1usize, b_seq),
+        (Some((a_seq, _)), Some((b_seq, _))) => (0usize, a_seq.max(b_seq)),
+        (Some((a_seq, _)), None) => (0usize, a_seq),
+        (None, Some((b_seq, _))) => (1usize, b_seq),
+        (None, None) => (1usize, 0u64),
+    };
+    let target_slot = 1usize.saturating_sub(active_slot);
+    let sequence = active_sequence.checked_add(1).ok_or(Error::WriteFailed)?;
+    let image = encode_snapshot_catalog(catalog, sequence);
+    let start = catalog_slot_start(volume, target_slot)?;
+    for index in 0..SNAPSHOT_CATALOG_SLOT_SECTORS {
+        let from = index * SECTOR_SIZE;
+        device
+            .write_sector(start + index as u64, &image[from..from + SECTOR_SIZE])
+            .map_err(Error::Block)?;
+    }
+    device.flush().map_err(Error::Block)
+}
+
+pub fn read_snapshot_catalog(
+    device: &mut (impl BlockDevice + ?Sized),
+    volume: Volume,
+) -> Result<Option<SnapshotCatalog>, Error> {
+    let a = read_catalog_slot(device, volume, 0);
+    let b = read_catalog_slot(device, volume, 1);
+    let a_valid = a.as_ref().ok().and_then(|entry| *entry);
+    let b_valid = b.as_ref().ok().and_then(|entry| *entry);
+    match (a_valid, b_valid) {
+        (Some((a_seq, a_catalog)), Some((b_seq, b_catalog))) => {
+            Ok(Some(if b_seq > a_seq { b_catalog } else { a_catalog }))
+        }
+        (Some((_, catalog)), None) | (None, Some((_, catalog))) => Ok(Some(catalog)),
+        (None, None) => {
+            if matches!(a, Ok(None)) && matches!(b, Ok(None)) {
+                Ok(None)
+            } else {
+                Err(Error::CorruptDirectory)
+            }
+        }
+    }
+}
+
+fn restore_sector(volume: Volume) -> Result<u64, Error> {
+    let sector = volume
+        .first_fat_sector
+        .checked_sub((METADATA_SECTOR_COUNT + JOURNAL_SECTOR_COUNT + INODE_METADATA_SECTOR_COUNT + 1) as u64)
+        .ok_or(Error::UnsupportedGeometry)?;
+    if [volume.fs_info_sector, volume.backup_fs_info_sector]
+        .into_iter()
+        .flatten()
+        .map(u64::from)
+        .any(|protected| protected == sector)
+    {
+        return Err(Error::UnsupportedGeometry);
+    }
+    Ok(sector)
+}
+
+fn restore_checksum(intent: SnapshotRestoreIntent) -> u64 {
+    [intent.snapshot_id, intent.generation, intent.expected_root, intent.applied]
+        .into_iter()
+        .fold(0xcbf2_9ce4_8422_2325, |hash, value| {
+            (hash ^ value).wrapping_mul(0x1000_0000_01b3)
+        })
+}
+
+pub fn write_snapshot_restore_intent(
+    device: &mut (impl BlockDevice + ?Sized),
+    volume: Volume,
+    intent: SnapshotRestoreIntent,
+) -> Result<(), Error> {
+    if intent.snapshot_id == 0 || intent.generation == 0 || intent.expected_root == 0 {
+        return Err(Error::WriteFailed);
+    }
+    let mut sector = [0u8; SECTOR_SIZE];
+    sector[..4].copy_from_slice(RESTORE_MAGIC);
+    sector[4..6].copy_from_slice(&RESTORE_VERSION.to_le_bytes());
+    sector[8..16].copy_from_slice(&intent.snapshot_id.to_le_bytes());
+    sector[16..24].copy_from_slice(&intent.generation.to_le_bytes());
+    sector[24..32].copy_from_slice(&intent.expected_root.to_le_bytes());
+    sector[32..40].copy_from_slice(&intent.applied.to_le_bytes());
+    sector[40..48].copy_from_slice(&restore_checksum(intent).to_le_bytes());
+    device
+        .write_sector(restore_sector(volume)?, &sector)
+        .map_err(Error::Block)?;
+    device.flush().map_err(Error::Block)
+}
+
+pub fn read_snapshot_restore_intent(
+    device: &mut (impl BlockDevice + ?Sized),
+    volume: Volume,
+) -> Result<Option<SnapshotRestoreIntent>, Error> {
+    let mut sector = [0u8; SECTOR_SIZE];
+    device
+        .read_sector(restore_sector(volume)?, &mut sector)
+        .map_err(Error::Block)?;
+    if &sector[..4] != RESTORE_MAGIC {
+        return Ok(None);
+    }
+    if read_u16(&sector, 4) != RESTORE_VERSION {
+        return Err(Error::CorruptDirectory);
+    }
+    let intent = SnapshotRestoreIntent {
+        snapshot_id: read_u64(&sector, 8),
+        generation: read_u64(&sector, 16),
+        expected_root: read_u64(&sector, 24),
+        applied: read_u64(&sector, 32),
+    };
+    if intent.snapshot_id == 0
+        || intent.generation == 0
+        || intent.expected_root == 0
+        || read_u64(&sector, 40) != restore_checksum(intent)
+    {
+        return Err(Error::CorruptDirectory);
+    }
+    Ok(Some(intent))
+}
+
+pub fn clear_snapshot_restore_intent(
+    device: &mut (impl BlockDevice + ?Sized),
+    volume: Volume,
+) -> Result<(), Error> {
+    let sector = [0u8; SECTOR_SIZE];
+    device
+        .write_sector(restore_sector(volume)?, &sector)
+        .map_err(Error::Block)?;
+    device.flush().map_err(Error::Block)
 }
 
 /// Stable path key used by the reserved-area metadata table.
@@ -3294,6 +3638,192 @@ pub fn self_test() -> bool {
         && directory_growth_self_test()
         && overwrite_rollback_self_test()
         && directory_extension_rollback_self_test()
+}
+
+#[cfg(feature = "stage12-4-test")]
+struct CatalogTestDisk {
+    image: [[u8; SECTOR_SIZE]; SNAPSHOT_CATALOG_SECTORS],
+    flushes: usize,
+}
+
+#[cfg(feature = "stage12-4-test")]
+impl BlockDevice for CatalogTestDisk {
+    fn sector_count(&self) -> u64 { TestDisk::TOTAL_SECTORS }
+    fn read_sector(&mut self, lba: u64, sector: &mut [u8]) -> Result<(), BlockError> {
+        if sector.len() != SECTOR_SIZE || lba >= TestDisk::TOTAL_SECTORS {
+            return Err(BlockError::OutOfBounds);
+        }
+        sector.fill(0);
+        if (13..21).contains(&lba) {
+            sector.copy_from_slice(&self.image[(lba - 13) as usize]);
+        }
+        Ok(())
+    }
+    fn write_sector(&mut self, lba: u64, sector: &[u8]) -> Result<(), BlockError> {
+        if sector.len() != SECTOR_SIZE || !(13..21).contains(&lba) {
+            return Err(BlockError::OutOfBounds);
+        }
+        self.image[(lba - 13) as usize].copy_from_slice(sector);
+        Ok(())
+    }
+    fn flush(&mut self) -> Result<(), BlockError> {
+        self.flushes = self.flushes.saturating_add(1);
+        Ok(())
+    }
+}
+
+#[cfg(feature = "stage12-4-test")]
+pub fn snapshot_catalog_recovery_self_test() -> bool {
+    let volume = Volume {
+        total_sectors: TestDisk::TOTAL_SECTORS as u32,
+        sectors_per_cluster: 1,
+        fat_count: 2,
+        fat_size: 600,
+        root_cluster: 2,
+        first_fat_sector: 32,
+        first_data_sector: TestDisk::ROOT_LBA,
+        fs_info_sector: Some(1),
+        backup_fs_info_sector: Some(7),
+        cluster_count: FAT32_MIN_CLUSTERS,
+    };
+    let mut first = SnapshotCatalog::empty();
+    first.snapshots[0] = Some(SnapshotCatalogEntry { id: 1, generation: 42, checksum: 0x1234_5678 });
+    first.changes[0] = Some(SnapshotCowEntry { snapshot_id: 1, path_hash: 0xaabb_ccdd, old_checksum: 11, new_checksum: 22 });
+    let mut disk = CatalogTestDisk { image: [[0; SECTOR_SIZE]; SNAPSHOT_CATALOG_SECTORS], flushes: 0 };
+    if write_snapshot_catalog(&mut disk, volume, first).is_err() || disk.flushes != 1 {
+        return false;
+    }
+    if read_snapshot_catalog(&mut disk, volume) != Ok(Some(first)) {
+        return false;
+    }
+
+    let mut second = first;
+    second.snapshots[0] = Some(SnapshotCatalogEntry { id: 1, generation: 43, checksum: 0x8765_4321 });
+    if write_snapshot_catalog(&mut disk, volume, second).is_err() || disk.flushes != 2 {
+        return false;
+    }
+    if read_snapshot_catalog(&mut disk, volume) != Ok(Some(second)) {
+        return false;
+    }
+
+    // Corrupt one sector of the newest A slot. Recovery must fall back to the
+    // older, fully committed B slot rather than losing the catalog.
+    let mut torn = CatalogTestDisk { image: disk.image, flushes: 0 };
+    torn.image[1][0] ^= 1;
+    if read_snapshot_catalog(&mut torn, volume) != Ok(Some(first)) {
+        return false;
+    }
+
+    // If both copies are damaged, fail closed rather than treating corruption
+    // as a fresh disk with no snapshot catalog.
+    torn.image[5][0] ^= 1;
+    if read_snapshot_catalog(&mut torn, volume) != Err(Error::CorruptDirectory) {
+        return false;
+    }
+
+    let unsafe_volume = Volume { fs_info_sector: Some(14), ..volume };
+    write_snapshot_catalog(&mut disk, unsafe_volume, second) == Err(Error::UnsupportedGeometry)
+}
+
+#[cfg(feature = "stage12-4-test")]
+struct RestoreTestDisk {
+    sector: [u8; SECTOR_SIZE],
+    flushes: usize,
+}
+
+#[cfg(feature = "stage12-4-test")]
+impl BlockDevice for RestoreTestDisk {
+    fn sector_count(&self) -> u64 {
+        TestDisk::TOTAL_SECTORS
+    }
+
+    fn read_sector(&mut self, lba: u64, sector: &mut [u8]) -> Result<(), BlockError> {
+        if sector.len() != SECTOR_SIZE || lba >= TestDisk::TOTAL_SECTORS {
+            return Err(BlockError::OutOfBounds);
+        }
+        sector.fill(0);
+        if lba == 21 {
+            sector.copy_from_slice(&self.sector);
+        }
+        Ok(())
+    }
+
+    fn write_sector(&mut self, lba: u64, sector: &[u8]) -> Result<(), BlockError> {
+        if sector.len() != SECTOR_SIZE || lba >= TestDisk::TOTAL_SECTORS {
+            return Err(BlockError::OutOfBounds);
+        }
+        if lba != 21 {
+            return Err(BlockError::OutOfBounds);
+        }
+        self.sector.copy_from_slice(sector);
+        Ok(())
+    }
+
+    fn flush(&mut self) -> Result<(), BlockError> {
+        self.flushes = self.flushes.saturating_add(1);
+        Ok(())
+    }
+}
+
+#[cfg(feature = "stage12-4-test")]
+pub fn snapshot_restore_recovery_self_test() -> bool {
+    let volume = Volume {
+        total_sectors: TestDisk::TOTAL_SECTORS as u32,
+        sectors_per_cluster: 1,
+        fat_count: 2,
+        fat_size: 600,
+        root_cluster: 2,
+        first_fat_sector: 32,
+        first_data_sector: TestDisk::ROOT_LBA,
+        fs_info_sector: None,
+        backup_fs_info_sector: None,
+        cluster_count: FAT32_MIN_CLUSTERS,
+    };
+    let mut disk = RestoreTestDisk {
+        sector: [0; SECTOR_SIZE],
+        flushes: 0,
+    };
+    let initial = SnapshotRestoreIntent {
+        snapshot_id: 3,
+        generation: 17,
+        expected_root: 0x1122_3344_5566_7788,
+        applied: 0,
+    };
+    if write_snapshot_restore_intent(&mut disk, volume, initial).is_err() || disk.flushes != 1 {
+        return false;
+    }
+    let mut reopened = RestoreTestDisk {
+        sector: disk.sector,
+        flushes: 0,
+    };
+    if read_snapshot_restore_intent(&mut reopened, volume) != Ok(Some(initial)) {
+        return false;
+    }
+    let progressed = SnapshotRestoreIntent { applied: 7, ..initial };
+    if write_snapshot_restore_intent(&mut reopened, volume, progressed).is_err()
+        || reopened.flushes != 1
+    {
+        return false;
+    }
+    let mut rebooted = RestoreTestDisk {
+        sector: reopened.sector,
+        flushes: 0,
+    };
+    if read_snapshot_restore_intent(&mut rebooted, volume) != Ok(Some(progressed)) {
+        return false;
+    }
+    let mut corrupt = RestoreTestDisk {
+        sector: rebooted.sector,
+        flushes: 0,
+    };
+    corrupt.sector[24] ^= 0x01;
+    if read_snapshot_restore_intent(&mut corrupt, volume) != Err(Error::CorruptDirectory) {
+        return false;
+    }
+    if clear_snapshot_restore_intent(&mut rebooted, volume).is_err() || rebooted.flushes != 1 {
+        return false;
+    }
+    read_snapshot_restore_intent(&mut rebooted, volume) == Ok(None)
 }
 
 fn range_self_test() -> bool {

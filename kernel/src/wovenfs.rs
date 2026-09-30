@@ -15,18 +15,47 @@ pub struct Metadata {
 #[derive(Clone, Copy)]
 struct State {
     entries: [Option<Metadata>; MAX],
-    len: usize,
 }
 impl State {
     const fn new() -> Self {
         Self {
             entries: [None; MAX],
-            len: 0,
         }
     }
 }
 /// Bounded WovenFS metadata registry with IRQ-safe rank tracking.
 static STATE: Mutex<State> = Mutex::with_rank(State::new(), 10);
+pub fn path_hash(path: &str) -> u64 {
+    hash(path)
+}
+
+pub fn root_checksum() -> u64 {
+    // A snapshot root is a filesystem identity, not an allocator/registry
+    // identity. Canonicalize by path hash so reboot reconstruction, deletion
+    // and reinsertion cannot change the root merely by changing slot order.
+    let s = STATE.lock();
+    let mut entries = [None; MAX];
+    let mut count = 0usize;
+    for entry in s.entries.iter().flatten() {
+        entries[count] = Some(*entry);
+        count += 1;
+    }
+    drop(s);
+    entries[..count].sort_unstable_by_key(|entry| {
+        entry.map_or(u64::MAX, |metadata| metadata.path_hash)
+    });
+    entries[..count]
+        .iter()
+        .flatten()
+        .fold(0xcbf29ce484222325, |acc, entry| {
+            acc.wrapping_mul(0x100000001b3)
+                ^ entry.path_hash
+                ^ entry.size
+                ^ u64::from(entry.mode)
+                ^ entry.checksum
+        })
+}
+
 fn hash(path: &str) -> u64 {
     path.bytes().fold(1469598103934665603, |h, b| {
         (h ^ u64::from(b)).wrapping_mul(1099511628211)
@@ -57,9 +86,46 @@ pub fn record(path: &str, size: u64, mode: u32, now: u64, data: &[u8]) -> bool {
         checksum,
         xattrs: [0; 4],
     });
-    s.len += 1;
     true
 }
+pub fn remove(path: &str) -> bool {
+    let key = hash(path);
+    let mut state = STATE.lock();
+    let Some(slot) = state
+        .entries
+        .iter_mut()
+        .find(|entry| entry.is_some_and(|metadata| metadata.path_hash == key))
+    else {
+        return false;
+    };
+    *slot = None;
+    true
+}
+
+pub fn rename(old: &str, new: &str) -> bool {
+    let old_key = hash(old);
+    let new_key = hash(new);
+    let mut state = STATE.lock();
+    if state
+        .entries
+        .iter()
+        .flatten()
+        .any(|metadata| metadata.path_hash == new_key)
+    {
+        return false;
+    }
+    let Some(metadata) = state
+        .entries
+        .iter_mut()
+        .flatten()
+        .find(|metadata| metadata.path_hash == old_key)
+    else {
+        return false;
+    };
+    metadata.path_hash = new_key;
+    true
+}
+
 pub fn metadata(path: &str) -> Option<Metadata> {
     STATE
         .lock()
@@ -69,6 +135,7 @@ pub fn metadata(path: &str) -> Option<Metadata> {
         .find(|e| e.path_hash == hash(path))
         .copied()
 }
+#[cfg(any(feature = "stage12-2-test", feature = "stage12-4-test"))]
 pub fn set_xattr(path: &str, index: usize, value: u64) -> bool {
     let mut s = STATE.lock();
     let Some(e) = s
@@ -85,6 +152,7 @@ pub fn set_xattr(path: &str, index: usize, value: u64) -> bool {
     *x = value;
     true
 }
+#[cfg(any(feature = "stage12-2-test", feature = "stage12-4-test"))]
 pub fn xattr(path: &str, index: usize) -> Option<u64> {
     STATE
         .lock()

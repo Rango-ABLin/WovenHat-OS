@@ -46,6 +46,13 @@ jobs:
           echo "OVMF VARS: $ovmf_vars"
           sha256sum "$ovmf_code" "$ovmf_vars"
           python3 scripts/test-release.py --qemu "$qemu" --firmware "$ovmf_code" --firmware-vars "$ovmf_vars"
+      - name: Stage 12.4 persistent rollback reboot recovery
+        run: |
+          python3 scripts/test-stage12-4-reboot.py \
+            --qemu /usr/bin/qemu-system-x86_64 \
+            --firmware /usr/share/OVMF/OVMF_CODE_4M.fd \
+            --firmware-vars /usr/share/OVMF/OVMF_VARS_4M.fd \
+            --cpus 2
       - name: Preserve validation evidence
         if: always()
         uses: actions/upload-artifact@v4
@@ -57,3 +64,4 @@ jobs:
             target/storage-regression-*/serial.log
             target/network-regression-*/serial.log
             target/network-regression-*/qemu.log
+            target/stage12-4-reboot-*/
