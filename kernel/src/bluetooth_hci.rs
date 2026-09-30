@@ -650,6 +650,313 @@ pub fn acl_data_self_test() -> bool {
         && AclPacket::parse(&[0x42, 0x20, 4, 0, 1]).is_err()
 }
 
+
+pub const L2CAP_CID_SIGNALING: u16 = 0x0001;
+pub const L2CAP_FIRST_DYNAMIC_CID: u16 = 0x0040;
+pub const MAX_L2CAP_PAYLOAD: usize = 1000;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct L2capFrame {
+    pub cid: u16,
+    pub len: u16,
+    payload: [u8; MAX_L2CAP_PAYLOAD],
+}
+
+impl L2capFrame {
+    pub fn new(cid: u16, data: &[u8]) -> Result<Self, HciError> {
+        if cid == 0 || data.len() > MAX_L2CAP_PAYLOAD {
+            return Err(HciError::PayloadTooLarge);
+        }
+        let mut payload = [0_u8; MAX_L2CAP_PAYLOAD];
+        payload[..data.len()].copy_from_slice(data);
+        Ok(Self { cid, len: data.len() as u16, payload })
+    }
+
+    pub fn payload(&self) -> &[u8] { &self.payload[..self.len as usize] }
+
+    pub fn encode(&self, out: &mut [u8; MAX_L2CAP_PAYLOAD + 4]) -> usize {
+        out[0..2].copy_from_slice(&self.len.to_le_bytes());
+        out[2..4].copy_from_slice(&self.cid.to_le_bytes());
+        let n = self.len as usize;
+        out[4..4 + n].copy_from_slice(self.payload());
+        4 + n
+    }
+
+    pub fn parse(bytes: &[u8]) -> Result<Self, HciError> {
+        if bytes.len() < 4 {
+            return Err(HciError::MalformedEvent);
+        }
+        let len = u16::from_le_bytes([bytes[0], bytes[1]]) as usize;
+        let cid = u16::from_le_bytes([bytes[2], bytes[3]]);
+        if cid == 0 || len > MAX_L2CAP_PAYLOAD || bytes.len() != 4 + len {
+            return Err(HciError::MalformedEvent);
+        }
+        Self::new(cid, &bytes[4..])
+    }
+}
+
+impl LinkState {
+    pub fn outbound_l2cap(&self, handle: u16, frame: &L2capFrame) -> Result<AclPacket, HciError> {
+        if !self.owns_handle(handle) {
+            return Err(HciError::UnexpectedOpcode);
+        }
+        let mut bytes = [0_u8; MAX_L2CAP_PAYLOAD + 4];
+        let n = frame.encode(&mut bytes);
+        self.outbound_acl(handle, &bytes[..n])
+    }
+
+    pub fn inbound_l2cap(&self, acl_bytes: &[u8]) -> Result<(u16, L2capFrame), HciError> {
+        let packet = self.inbound_acl(acl_bytes)?;
+        if packet.packet_boundary != 0x02 {
+            return Err(HciError::MalformedEvent);
+        }
+        let frame = L2capFrame::parse(packet.payload())?;
+        Ok((packet.handle, frame))
+    }
+}
+
+
+pub const L2CAP_CMD_CONNECTION_REQUEST: u8 = 0x02;
+pub const L2CAP_CMD_CONNECTION_RESPONSE: u8 = 0x03;
+pub const L2CAP_CMD_DISCONNECTION_REQUEST: u8 = 0x06;
+pub const L2CAP_CMD_DISCONNECTION_RESPONSE: u8 = 0x07;
+pub const MAX_L2CAP_CHANNELS: usize = 8;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct L2capChannel {
+    pub handle: u16,
+    pub psm: u16,
+    pub local_cid: u16,
+    pub remote_cid: u16,
+}
+
+pub struct L2capChannels {
+    channels: [Option<L2capChannel>; MAX_L2CAP_CHANNELS],
+    count: usize,
+    next_cid: u16,
+}
+
+impl L2capChannels {
+    pub const fn new() -> Self {
+        Self { channels: [None; MAX_L2CAP_CHANNELS], count: 0, next_cid: L2CAP_FIRST_DYNAMIC_CID }
+    }
+
+    fn allocate_cid(&mut self) -> Result<u16, HciError> {
+        for _ in 0..MAX_L2CAP_CHANNELS {
+            let cid = self.next_cid;
+            self.next_cid = self.next_cid.wrapping_add(1);
+            if self.next_cid < L2CAP_FIRST_DYNAMIC_CID {
+                self.next_cid = L2CAP_FIRST_DYNAMIC_CID;
+            }
+            if !self.channels[..self.count].iter().flatten().any(|channel| channel.local_cid == cid) {
+                return Ok(cid);
+            }
+        }
+        Err(HciError::ControllerFailure(0xff))
+    }
+
+    pub fn connection_request(
+        &mut self,
+        links: &LinkState,
+        handle: u16,
+        psm: u16,
+        identifier: u8,
+    ) -> Result<(u16, L2capFrame), HciError> {
+        if identifier == 0 || psm == 0 || !links.owns_handle(handle) || self.count == MAX_L2CAP_CHANNELS {
+            return Err(HciError::UnexpectedOpcode);
+        }
+        let local_cid = self.allocate_cid()?;
+        let mut command = [0_u8; 8];
+        command[0] = L2CAP_CMD_CONNECTION_REQUEST;
+        command[1] = identifier;
+        command[2..4].copy_from_slice(&4_u16.to_le_bytes());
+        command[4..6].copy_from_slice(&psm.to_le_bytes());
+        command[6..8].copy_from_slice(&local_cid.to_le_bytes());
+        Ok((local_cid, L2capFrame::new(L2CAP_CID_SIGNALING, &command)?))
+    }
+
+    pub fn accept_connection_response(
+        &mut self,
+        handle: u16,
+        psm: u16,
+        local_cid: u16,
+        bytes: &[u8],
+    ) -> Result<L2capChannel, HciError> {
+        if bytes.len() != 12 || bytes[0] != L2CAP_CMD_CONNECTION_RESPONSE || bytes[1] == 0
+            || u16::from_le_bytes([bytes[2], bytes[3]]) != 8
+        {
+            return Err(HciError::MalformedEvent);
+        }
+        let remote_cid = u16::from_le_bytes([bytes[4], bytes[5]]);
+        let source_cid = u16::from_le_bytes([bytes[6], bytes[7]]);
+        let result = u16::from_le_bytes([bytes[8], bytes[9]]);
+        let status = u16::from_le_bytes([bytes[10], bytes[11]]);
+        if source_cid != local_cid || remote_cid < L2CAP_FIRST_DYNAMIC_CID || result != 0 || status != 0 {
+            return Err(HciError::ControllerFailure((result & 0xff) as u8));
+        }
+        if self.count == MAX_L2CAP_CHANNELS
+            || self.channels[..self.count].iter().flatten().any(|channel| {
+                channel.handle == handle && (channel.local_cid == local_cid || channel.remote_cid == remote_cid)
+            })
+        {
+            return Err(HciError::UnexpectedOpcode);
+        }
+        let channel = L2capChannel { handle, psm, local_cid, remote_cid };
+        self.channels[self.count] = Some(channel);
+        self.count += 1;
+        Ok(channel)
+    }
+
+    pub fn disconnection_request(&self, channel: L2capChannel, identifier: u8) -> Result<L2capFrame, HciError> {
+        if identifier == 0 || !self.channels[..self.count].iter().flatten().any(|entry| *entry == channel) {
+            return Err(HciError::UnexpectedOpcode);
+        }
+        let mut command = [0_u8; 8];
+        command[0] = L2CAP_CMD_DISCONNECTION_REQUEST;
+        command[1] = identifier;
+        command[2..4].copy_from_slice(&4_u16.to_le_bytes());
+        command[4..6].copy_from_slice(&channel.remote_cid.to_le_bytes());
+        command[6..8].copy_from_slice(&channel.local_cid.to_le_bytes());
+        L2capFrame::new(L2CAP_CID_SIGNALING, &command)
+    }
+
+    pub fn accept_disconnection_response(&mut self, channel: L2capChannel, bytes: &[u8]) -> Result<(), HciError> {
+        if bytes.len() != 8 || bytes[0] != L2CAP_CMD_DISCONNECTION_RESPONSE || bytes[1] == 0
+            || u16::from_le_bytes([bytes[2], bytes[3]]) != 4
+            || u16::from_le_bytes([bytes[4], bytes[5]]) != channel.remote_cid
+            || u16::from_le_bytes([bytes[6], bytes[7]]) != channel.local_cid
+        {
+            return Err(HciError::MalformedEvent);
+        }
+        let Some(index) = self.channels[..self.count].iter().position(|entry| *entry == Some(channel)) else {
+            return Err(HciError::UnexpectedOpcode);
+        };
+        self.count -= 1;
+        self.channels[index] = self.channels[self.count];
+        self.channels[self.count] = None;
+        Ok(())
+    }
+
+    pub fn outbound_data(
+        &self,
+        links: &LinkState,
+        channel: L2capChannel,
+        data: &[u8],
+    ) -> Result<AclPacket, HciError> {
+        if !links.owns_handle(channel.handle)
+            || !self.channels[..self.count].iter().flatten().any(|entry| *entry == channel)
+        {
+            return Err(HciError::UnexpectedOpcode);
+        }
+        let frame = L2capFrame::new(channel.remote_cid, data)?;
+        links.outbound_l2cap(channel.handle, &frame)
+    }
+
+    pub fn inbound_data(
+        &self,
+        links: &LinkState,
+        acl_bytes: &[u8],
+    ) -> Result<(L2capChannel, L2capFrame), HciError> {
+        let (handle, frame) = links.inbound_l2cap(acl_bytes)?;
+        let Some(channel) = self.channels[..self.count]
+            .iter()
+            .flatten()
+            .find(|channel| channel.handle == handle && channel.local_cid == frame.cid)
+            .copied()
+        else {
+            return Err(HciError::UnexpectedOpcode);
+        };
+        Ok((channel, frame))
+    }
+
+    pub fn count(&self) -> usize { self.count }
+}
+
+pub fn l2cap_channel_self_test() -> bool {
+    let mut links = LinkState::new();
+    if links.handle_event(&[
+        EVT_CONNECTION_COMPLETE, 11, 0, 0x42, 0,
+        1, 2, 3, 4, 5, 6, 1, 0,
+    ]).is_err() {
+        return false;
+    }
+    let mut channels = L2capChannels::new();
+    let Ok((local_cid, request)) = channels.connection_request(&links, 0x42, 0x0001, 1) else { return false; };
+    if local_cid != 0x0040
+        || request.payload() != [L2CAP_CMD_CONNECTION_REQUEST, 1, 4, 0, 1, 0, 0x40, 0]
+    {
+        return false;
+    }
+    let response = [
+        L2CAP_CMD_CONNECTION_RESPONSE, 1, 8, 0,
+        0x41, 0, 0x40, 0, 0, 0, 0, 0,
+    ];
+    let Ok(channel) = channels.accept_connection_response(0x42, 0x0001, local_cid, &response) else { return false; };
+    if channel.remote_cid != 0x0041 || channels.count() != 1 {
+        return false;
+    }
+    let Ok(data_acl) = channels.outbound_data(&links, channel, &[0xde, 0xad]) else { return false; };
+    let mut data_bytes = [0_u8; MAX_ACL_PAYLOAD + 4];
+    let data_len = data_acl.encode(&mut data_bytes);
+    let Ok(parsed_acl) = AclPacket::parse(&data_bytes[..data_len]) else { return false; };
+    let Ok(outbound_frame) = L2capFrame::parse(parsed_acl.payload()) else { return false; };
+    if outbound_frame.cid != channel.remote_cid || outbound_frame.payload() != [0xde, 0xad] {
+        return false;
+    }
+
+    let Ok(inbound_frame) = L2capFrame::new(channel.local_cid, &[0xbe, 0xef]) else { return false; };
+    let Ok(inbound_acl) = links.outbound_l2cap(channel.handle, &inbound_frame) else { return false; };
+    let inbound_len = inbound_acl.encode(&mut data_bytes);
+    let Ok((owned_channel, owned_frame)) = channels.inbound_data(&links, &data_bytes[..inbound_len]) else { return false; };
+    if owned_channel != channel || owned_frame.payload() != [0xbe, 0xef] {
+        return false;
+    }
+
+    let Ok(disconnect) = channels.disconnection_request(channel, 2) else { return false; };
+    if disconnect.payload() != [L2CAP_CMD_DISCONNECTION_REQUEST, 2, 4, 0, 0x41, 0, 0x40, 0] {
+        return false;
+    }
+    let disconnect_response = [L2CAP_CMD_DISCONNECTION_RESPONSE, 2, 4, 0, 0x41, 0, 0x40, 0];
+    channels.accept_disconnection_response(channel, &disconnect_response).is_ok()
+        && channels.count() == 0
+        && channels.outbound_data(&links, channel, &[1]).is_err()
+        && channels.inbound_data(&links, &data_bytes[..inbound_len]).is_err()
+        && channels.disconnection_request(channel, 3).is_err()
+        && channels.connection_request(&links, 0x43, 1, 1).is_err()
+}
+
+pub fn l2cap_framing_self_test() -> bool {
+    let mut links = LinkState::new();
+    let connected = [
+        EVT_CONNECTION_COMPLETE, 11, 0, 0x42, 0x00,
+        1, 2, 3, 4, 5, 6, 1, 0,
+    ];
+    if links.handle_event(&connected).is_err() {
+        return false;
+    }
+
+    let Ok(frame) = L2capFrame::new(L2CAP_CID_SIGNALING, &[0x02, 0x01, 0x00, 0x00]) else {
+        return false;
+    };
+    let mut l2cap = [0_u8; MAX_L2CAP_PAYLOAD + 4];
+    if frame.encode(&mut l2cap) != 8
+        || l2cap[..8] != [4, 0, 1, 0, 0x02, 0x01, 0, 0]
+    {
+        return false;
+    }
+
+    let Ok(acl) = links.outbound_l2cap(0x42, &frame) else { return false; };
+    let mut acl_bytes = [0_u8; MAX_ACL_PAYLOAD + 4];
+    let acl_len = acl.encode(&mut acl_bytes);
+    let Ok((handle, parsed)) = links.inbound_l2cap(&acl_bytes[..acl_len]) else { return false; };
+    handle == 0x42
+        && parsed.cid == L2CAP_CID_SIGNALING
+        && parsed.payload() == [0x02, 0x01, 0, 0]
+        && L2capFrame::new(0, &[]).is_err()
+        && L2capFrame::parse(&[1, 0, 1, 0]).is_err()
+        && links.outbound_l2cap(0x43, &frame).is_err()
+}
+
 pub fn link_lifecycle_self_test() -> bool {
     let device = DiscoveredDevice {
         address: [1, 2, 3, 4, 5, 6],
