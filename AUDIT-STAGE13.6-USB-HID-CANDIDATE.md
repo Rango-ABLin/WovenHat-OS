@@ -16,3 +16,22 @@ The QEMU acceptance harness attaches `qemu-xhci` plus `usb-kbd`. The kernel must
 
 ## Deliberate production gaps
 This focused stage does not claim hub support, arbitrary HID report-descriptor parsing, hot-unplug recovery, multiple simultaneous HID devices, interrupt-driven xHCI completion, or a unified input event service. Mouse/touchpad protocol classification is represented, but this acceptance specifically proves the QEMU USB boot keyboard path.
+
+
+## Final acceptance record
+
+Stage 13.6 was accepted on 2026-09-30 from commit `36ead75ccad4323867ba9e25526c64ae6695fe85` by GitHub Actions run `36707350992`.
+
+The full release-validation suite and retained Stage 13.3 NVMe, Stage 13.4 AHCI/SATA, and Stage 13.5 xHCI-core gates passed. Dedicated USB HID results were:
+
+- 1 CPU: PASS, exit 33
+- 2 CPUs: PASS, exit 33
+- 4 CPUs: PASS, exit 33
+
+Evidence was preserved under `audit-artifacts/stage13.6-1cpu-*`, `stage13.6-2cpu-*`, and `stage13.6-4cpu-*`.
+
+## Milestone status
+
+**Stage 13.6 USB HID: COMPLETE at the QEMU integration boundary.**
+
+The accepted milestone covers xHCI device addressing, EP0 control transfers, USB descriptor enumeration, HID boot-protocol setup, interrupt-IN endpoint configuration, and a real HID report transfer from the QEMU USB keyboard on 1/2/4 CPUs. Unified input delivery remains Stage 13.7.
