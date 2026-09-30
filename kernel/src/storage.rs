@@ -446,8 +446,11 @@ fn import_directory(
 }
 
 fn checksum_bytes(bytes: &[u8]) -> u64 {
+    // This checksum is part of the WovenFS live-file contract. Keep it
+    // byte-for-byte identical to wovenfs::record(); the snapshot envelope
+    // and catalog have separate integrity domains below.
     bytes.iter().fold(0xcbf2_9ce4_8422_2325, |hash, byte| {
-        (hash ^ u64::from(*byte)).wrapping_mul(0x1000_0000_01b3)
+        (hash ^ u64::from(*byte)).wrapping_mul(0x100000001b3)
     })
 }
 fn join_path(prefix: &str, name: &str, out: &mut [u8]) -> Option<usize> {
