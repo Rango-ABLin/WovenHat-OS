@@ -40,6 +40,15 @@ Production completion is tracked separately from bounded foundation acceptance
 in [the Stage 1–12 gap audit](stage1-12-production-gap-audit.md). No stage is
 fully complete while a roadmap requirement remains open.
 
+## Physical qualification tooling — 2026-10-01
+
+The read-only physical-probe image now records CPU features, ACPI/ECAM state,
+PCI class information, and every retained PCI function before stopping ahead
+of driver activation. Its 1/2/4-CPU QEMU inventory smoke passed. This improves
+lab evidence collection but does not close physical storage, DMA, interrupt,
+radio, or unclean-shutdown qualification. See the
+[physical inventory audit](audit-physical-inventory-2026-10-01.md).
+
 Authoritative development sequence: [supplied Stage 10.7–36 roadmap](master-development-roadmap.md).
 
 ## TCP close/drain preservation repair - 2026-09-24

@@ -34,13 +34,37 @@ pub fn run(console: &mut Console<'_>, acpi: Option<&hal::acpi::Summary>) -> ! {
         format_args!("[PHYSICAL] MODE=READ-ONLY PCI INVENTORY"),
     );
     let hardware = hal::init(acpi);
+    let vendor = match hardware.cpu_vendor {
+        hal::CpuVendor::Intel => "INTEL",
+        hal::CpuVendor::Amd => "AMD",
+        hal::CpuVendor::Unknown => "UNKNOWN",
+    };
     line(
         console,
         format_args!(
-            "ACPI={} PCI={} RECORDED={} TRUNCATED={}",
+            "CPU VENDOR={} LOGICAL={} TSC={} RDRAND={} AES_NI={} AVX={} PAE={} SSE4.2={}",
+            vendor,
+            hardware.logical_cpus,
+            hardware.cpu_features.has_tsc as u8,
+            hardware.cpu_features.has_rdrand as u8,
+            hardware.cpu_features.has_aes_ni as u8,
+            hardware.cpu_features.has_avx as u8,
+            hardware.cpu_features.has_pae as u8,
+            hardware.cpu_features.has_sse4_2 as u8,
+        ),
+    );
+    line(
+        console,
+        format_args!(
+            "ACPI={} PCI={} RECORDED={} STORAGE={} NETWORK={} DISPLAY={} BRIDGES={} ECAM={} TRUNCATED={}",
             acpi.is_some() as u8,
             hardware.pci.discovered,
             hardware.pci.recorded,
+            hardware.pci.storage,
+            hardware.pci.network,
+            hardware.pci.display,
+            hardware.pci.bridges,
+            hardware.pci.ecam as u8,
             hardware.pci.truncated as u8
         ),
     );
@@ -49,20 +73,36 @@ pub fn run(console: &mut Console<'_>, acpi: Option<&hal::acpi::Summary>) -> ! {
         let Some(device) = hal::pci::device(index) else {
             continue;
         };
-        if device.class != 2 {
-            continue;
-        }
         line(
             console,
             format_args!(
-                "NET {:04X}:{:02X}:{:02X}.{} {:04X}:{:04X} REV={:02X}",
+                "PCI {:04X}:{:02X}:{:02X}.{} {:04X}:{:04X} CLASS={:02X}:{:02X}:{:02X} REV={:02X} CMD={:04X}",
                 device.segment,
                 device.bus,
                 device.device,
                 device.function,
                 device.vendor_id,
                 device.device_id,
-                device.revision
+                device.class,
+                device.subclass,
+                device.prog_if,
+                device.revision,
+                device.command
+            ),
+        );
+        if device.class != 2 {
+            continue;
+        }
+        line(
+            console,
+            format_args!(
+                "NET {:04X}:{:02X}:{:02X}.{} {:04X}:{:04X}",
+                device.segment,
+                device.bus,
+                device.device,
+                device.function,
+                device.vendor_id,
+                device.device_id
             ),
         );
         if device.vendor_id == 0x8086 && device.device_id == 0xa0f0 && device.subclass == 0x80 {
