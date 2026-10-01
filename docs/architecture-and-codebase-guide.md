@@ -453,3 +453,14 @@ ATT/GATT consumes `LeLinkState` as its lower-layer authority rather than treatin
 `GattSubscriptions` records notification/indication authority as the tuple of LE connection handle and characteristic value handle. CCCD-style enable/disable state is bounded, invalid bit combinations are rejected, and every emitted Handle Value Notification or Indication rechecks both subscription mode and live LE ownership. Disconnect therefore makes retained subscription state unusable even before later cleanup/hardening.
 
 This stage is a deterministic kernel protocol foundation, not a claim of complete physical BLE GATT interoperability. Stage 13.10K should build standard/custom BLE profile services on this authority boundary. BLE SMP, bonding/LTK state and persistent key protection remain separate security work and must not reuse BR/EDR link-key authority.
+
+
+### Stage 13.10K BLE profile/service layer
+
+The profile layer composes services from Stage 13.10J GATT primitives instead of bypassing ATT. Device Information and Battery Service attributes therefore inherit live `LeLinkState` checks and ATT read/write permissions. Battery level is bounded to 0..=100 and its notification path uses `GattSubscriptions` scoped to the exact LE handle and Battery Level value handle; state is committed only after notification authorization succeeds.
+
+The WovenHat OS BLE service demonstrates the custom-service boundary with separate status and command characteristics. Status is readable but not writable; command is writable but not readable. A disconnected LE peer cannot continue using either path because ATT transactions recheck link ownership.
+
+GATT characteristic creation preflights capacity for both declaration and value attributes before mutation. This preserves database consistency under fixed-capacity exhaustion and prevents partially-created characteristic state.
+
+Stage 13.10L should harden controller/link/service lifecycle, teardown, malformed-event handling and recovery while retaining these ownership and permission boundaries.
