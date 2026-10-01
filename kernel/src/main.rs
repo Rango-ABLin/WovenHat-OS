@@ -1079,6 +1079,15 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         serial::write_line(format_args!(
             "[S13.11] BLE SMP bond authority foundation: PASSED"
         ));
+        if !bluetooth_hci::ble_smp_pairing_state_self_test() {
+            serial::write_line(format_args!(
+                "[S13.11] BLE SMP pairing negotiation: FAILED"
+            ));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!(
+            "[S13.11] BLE SMP pairing negotiation: PASSED"
+        ));
     }
 
     if heap::init().is_err() {
