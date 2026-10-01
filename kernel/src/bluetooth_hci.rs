@@ -573,6 +573,10 @@ pub fn le_discovery_self_test() -> bool {
 
 pub const LE_SUBEVENT_CONNECTION_COMPLETE: u8 = 0x01;
 pub const OPCODE_LE_CREATE_CONNECTION: u16 = 0x200d;
+pub const LE_SUBEVENT_LONG_TERM_KEY_REQUEST: u8 = 0x05;
+pub const OPCODE_LE_LONG_TERM_KEY_REQUEST_REPLY: u16 = 0x201a;
+pub const OPCODE_LE_LONG_TERM_KEY_REQUEST_NEGATIVE_REPLY: u16 = 0x201b;
+pub const EVT_ENCRYPTION_KEY_REFRESH_COMPLETE: u8 = 0x30;
 pub const MAX_LE_LINKS: usize = 8;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1379,6 +1383,12 @@ impl BleBondStore {
         self.count = 0;
     }
 
+    fn ltk_for_handle(&self, links: &LeLinkState, handle: u16) -> Option<&[u8; 16]> {
+        let link = links.links[..links.count].iter().flatten().find(|link| link.handle == handle)?;
+        let index = self.index(link.address_type, link.address)?;
+        self.bonds[index].as_ref().map(|bond| &bond.ltk)
+    }
+
     pub fn count(&self) -> usize { self.count }
 }
 
@@ -1509,6 +1519,84 @@ pub fn ble_smp_key_distribution_self_test() -> bool {
     { return false; }
     bonds.clear();
     bonds.count()==0
+}
+
+pub struct BleControllerSecurity;
+
+impl BleControllerSecurity {
+    pub fn handle_ltk_request(
+        links: &LeLinkState,
+        bonds: &BleBondStore,
+        event: &[u8],
+        out: &mut [u8; 258],
+    ) -> Result<usize, HciError> {
+        if event.len() != 15
+            || event[0] != EVT_LE_META
+            || event[1] != 13
+            || event[2] != LE_SUBEVENT_LONG_TERM_KEY_REQUEST
+        { return Err(HciError::MalformedEvent); }
+        let handle = u16::from_le_bytes([event[3], event[4]]);
+        if !links.contains_handle(handle) { return Err(HciError::UnexpectedOpcode); }
+        let ediv = u16::from_le_bytes([event[13], event[14]]);
+        let rand = u64::from_le_bytes(event[5..13].try_into().map_err(|_| HciError::MalformedEvent)?);
+        let mut params = [0_u8; 18];
+        params[..2].copy_from_slice(&handle.to_le_bytes());
+        if let Some(ltk) = bonds.ltk_for_handle(links, handle) {
+            if ediv != 0 || rand != 0 { return Err(HciError::UnexpectedOpcode); }
+            params[2..18].copy_from_slice(ltk);
+            HciCommand::new(OPCODE_LE_LONG_TERM_KEY_REQUEST_REPLY, &params).map(|command| command.encode(out))
+        } else {
+            HciCommand::new(OPCODE_LE_LONG_TERM_KEY_REQUEST_NEGATIVE_REPLY, &params[..2]).map(|command| command.encode(out))
+        }
+    }
+
+    pub fn handle_encryption_event(
+        links: &LeLinkState,
+        encryption: &mut BleEncryptionState,
+        event: &[u8],
+    ) -> Result<u16, HciError> {
+        if event.len() != 6 || (event[0] != EVT_ENCRYPTION_CHANGE && event[0] != EVT_ENCRYPTION_KEY_REFRESH_COMPLETE) {
+            return Err(HciError::MalformedEvent);
+        }
+        let expected_len = if event[0] == EVT_ENCRYPTION_CHANGE { 4 } else { 3 };
+        if event[1] != expected_len { return Err(HciError::MalformedEvent); }
+        let status = event[2];
+        let handle = u16::from_le_bytes([event[3], event[4]]);
+        if !links.contains_handle(handle) { return Err(HciError::UnexpectedOpcode); }
+        if status != 0 {
+            encryption.revoke(handle);
+            return Err(HciError::ControllerFailure(status));
+        }
+        if event[0] == EVT_ENCRYPTION_CHANGE {
+            if event[5] == 0 { encryption.revoke(handle); return Ok(handle); }
+            if event[5] > 2 { return Err(HciError::MalformedEvent); }
+        }
+        encryption.set(links, handle, true)?;
+        Ok(handle)
+    }
+}
+
+pub fn ble_controller_encryption_authority_self_test() -> bool {
+    let mut links = LeLinkState::new();
+    let connected = [EVT_LE_META,19,LE_SUBEVENT_CONNECTION_COMPLETE,0,0x42,0,0,1,1,2,3,4,5,6,0x18,0,0,0,0xf4,1,0];
+    if links.handle_connection_complete(&connected).is_err() { return false; }
+    let mut bonds = BleBondStore::new();
+    let mut encryption = BleEncryptionState::new();
+    let mut out = [0_u8;258];
+    let ltk_request = [EVT_LE_META,13,LE_SUBEVENT_LONG_TERM_KEY_REQUEST,0x42,0,0,0,0,0,0,0,0,0,0,0];
+    if BleControllerSecurity::handle_ltk_request(&links,&bonds,&ltk_request,&mut out) != Ok(5)
+        || u16::from_le_bytes([out[0],out[1]]) != OPCODE_LE_LONG_TERM_KEY_REQUEST_NEGATIVE_REPLY
+        || bonds.store(&links,0x42,[0x5a;16],true).is_err()
+        || BleControllerSecurity::handle_ltk_request(&links,&bonds,&ltk_request,&mut out) != Ok(21)
+        || u16::from_le_bytes([out[0],out[1]]) != OPCODE_LE_LONG_TERM_KEY_REQUEST_REPLY
+        || bonds.trusted(&links,&encryption,0x42)
+        || BleControllerSecurity::handle_encryption_event(&links,&mut encryption,&[EVT_ENCRYPTION_CHANGE,4,0,0x42,0,1]).is_err()
+        || !bonds.trusted(&links,&encryption,0x42)
+        || BleControllerSecurity::handle_encryption_event(&links,&mut encryption,&[EVT_ENCRYPTION_CHANGE,4,0,0x42,0,0]).is_err()
+        || bonds.trusted(&links,&encryption,0x42)
+    { return false; }
+    BleControllerSecurity::handle_encryption_event(&links,&mut encryption,&[EVT_ENCRYPTION_KEY_REFRESH_COMPLETE,3,0,0x42,0,0]).is_err()
+        && !bonds.trusted(&links,&encryption,0x42)
 }
 
 pub fn ble_smp_teardown_rekey_stress_self_test() -> bool {
