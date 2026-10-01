@@ -1555,11 +1555,13 @@ impl BleControllerSecurity {
         encryption: &mut BleEncryptionState,
         event: &[u8],
     ) -> Result<u16, HciError> {
-        if event.len() != 6 || (event[0] != EVT_ENCRYPTION_CHANGE && event[0] != EVT_ENCRYPTION_KEY_REFRESH_COMPLETE) {
+        if event.len() < 2 || (event[0] != EVT_ENCRYPTION_CHANGE && event[0] != EVT_ENCRYPTION_KEY_REFRESH_COMPLETE) {
             return Err(HciError::MalformedEvent);
         }
         let expected_len = if event[0] == EVT_ENCRYPTION_CHANGE { 4 } else { 3 };
-        if event[1] != expected_len { return Err(HciError::MalformedEvent); }
+        if event[1] != expected_len || event.len() != expected_len as usize + 2 {
+            return Err(HciError::MalformedEvent);
+        }
         let status = event[2];
         let handle = u16::from_le_bytes([event[3], event[4]]);
         if !links.contains_handle(handle) { return Err(HciError::UnexpectedOpcode); }
@@ -1595,8 +1597,8 @@ pub fn ble_controller_encryption_authority_self_test() -> bool {
         || BleControllerSecurity::handle_encryption_event(&links,&mut encryption,&[EVT_ENCRYPTION_CHANGE,4,0,0x42,0,0]).is_err()
         || bonds.trusted(&links,&encryption,0x42)
     { return false; }
-    BleControllerSecurity::handle_encryption_event(&links,&mut encryption,&[EVT_ENCRYPTION_KEY_REFRESH_COMPLETE,3,0,0x42,0,0]).is_err()
-        && !bonds.trusted(&links,&encryption,0x42)
+    BleControllerSecurity::handle_encryption_event(&links,&mut encryption,&[EVT_ENCRYPTION_KEY_REFRESH_COMPLETE,3,0,0x42,0]).is_ok()
+        && bonds.trusted(&links,&encryption,0x42)
 }
 
 pub fn ble_smp_teardown_rekey_stress_self_test() -> bool {
