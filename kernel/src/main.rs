@@ -1106,6 +1106,15 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         serial::write_line(format_args!(
             "[S13.11] BLE SMP key distribution hardening: PASSED"
         ));
+        if !bluetooth_hci::ble_smp_teardown_rekey_stress_self_test() {
+            serial::write_line(format_args!(
+                "[S13.11] BLE SMP teardown/rekey stress: FAILED"
+            ));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!(
+            "[S13.11] BLE SMP teardown/rekey stress: PASSED"
+        ));
     }
 
     if heap::init().is_err() {
