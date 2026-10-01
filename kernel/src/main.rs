@@ -1133,6 +1133,15 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         serial::write_line(format_args!(
             "[S13.11] BLE SMP fixed L2CAP channel: PASSED"
         ));
+        if !bluetooth_hci::ble_bond_reconnection_metadata_self_test() {
+            serial::write_line(format_args!(
+                "[S13.11] BLE bond reconnection metadata: FAILED"
+            ));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!(
+            "[S13.11] BLE bond reconnection metadata: PASSED"
+        ));
     }
 
     if heap::init().is_err() {
