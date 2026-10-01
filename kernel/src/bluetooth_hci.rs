@@ -1094,6 +1094,51 @@ pub fn bluetooth_le_lifecycle_hardening_self_test() -> bool {
         && lifecycle.generation() == 2
 }
 
+pub fn bluetooth_le_recovery_self_test() -> bool {
+    let mut lifecycle = BluetoothLeLifecycle::new();
+    let connected = [
+        EVT_LE_META, 19, LE_SUBEVENT_CONNECTION_COMPLETE, 0,
+        0x42, 0x00, 0, 1, 1, 2, 3, 4, 5, 6,
+        0x18, 0x00, 0, 0, 0xf4, 0x01, 0,
+    ];
+    if lifecycle.links.handle_connection_complete(&connected).is_err()
+        || lifecycle.subscriptions.configure(&lifecycle.links, 0x42, 8, 0x0001).is_err()
+    { return false; }
+    let malformed = [EVT_DISCONNECTION_COMPLETE, 3, 0, 0x42, 0];
+    let unknown = [EVT_DISCONNECTION_COMPLETE, 4, 0, 0x43, 0, 0x13];
+    if lifecycle.disconnect(&malformed).is_ok()
+        || lifecycle.disconnect(&unknown).is_ok()
+        || lifecycle.links.count() != 1
+        || !lifecycle.links.contains_handle(0x42)
+        || lifecycle.subscriptions.count() != 1
+        || lifecycle.generation() != 0
+    { return false; }
+
+    let disconnected = [EVT_DISCONNECTION_COMPLETE, 4, 0, 0x42, 0, 0x13];
+    if lifecycle.disconnect(&disconnected) != Ok(0x42)
+        || lifecycle.links.count() != 0
+        || lifecycle.subscriptions.count() != 0
+        || lifecycle.generation() != 1
+    { return false; }
+
+    if lifecycle.links.handle_connection_complete(&connected).is_err()
+        || lifecycle.subscriptions.count() != 0
+    { return false; }
+    let mut out = [0_u8; MAX_ATT_PDU];
+    if lifecycle.subscriptions.emit(&lifecycle.links, 0x42, 8, false, &[75], &mut out).is_ok()
+        || lifecycle.subscriptions.configure(&lifecycle.links, 0x42, 8, 0x0001).is_err()
+        || lifecycle.subscriptions.emit(&lifecycle.links, 0x42, 8, false, &[75], &mut out) != Ok(4)
+        || out[..4] != [ATT_OP_HANDLE_VALUE_NOTIFICATION, 8, 0, 75]
+    { return false; }
+
+    lifecycle.controller_reset();
+    lifecycle.links.count() == 0
+        && lifecycle.subscriptions.count() == 0
+        && lifecycle.generation() == 2
+        && lifecycle.disconnect(&disconnected).is_err()
+        && lifecycle.generation() == 2
+}
+
 pub struct GattDatabase {
     att: AttDatabase,
     next_handle: u16,
