@@ -426,3 +426,16 @@ The GATT layer represents 16-bit Primary Service and Characteristic Declaration/
 GitHub Actions run 36815325948 passed at exact implementation SHA `48bdd085e8d8918bb058a59de06d42ce8ad7108a`, including the Stage 13.10J 1/2/4-core acceptance and evidence-preservation steps. Artifact digest: `sha256:9247004a999b8470e5431a2396d1d1237bd1cd278f43abdf9ebf9460ed0a3dca`.
 
 This is deterministic software acceptance. Physical BLE ATT/GATT interoperability, ATT MTU negotiation, 128-bit UUIDs, full wire-level discovery procedures, indication confirmations, BLE SMP/bonding and protected persistent keys remain outside this boundary. Next: Stage 13.10K BLE profiles and services above the accepted ATT/GATT authority model.
+
+
+## Roadmap Stage 13.10K — BLE profiles and services acceptance candidate on 2026-10-01
+
+Stage 13.10K builds bounded BLE services above the accepted Stage 13.10J ATT/GATT authority model. Standard profile support includes Device Information with read-only Manufacturer Name and Model Number characteristics plus Battery Service with a range-checked read-only Battery Level.
+
+Battery updates can emit Handle Value Notifications only through an existing per-link, per-value-handle GATT subscription. Failed authorization, invalid levels, wrong handles or stale LE links leave the prior battery state unchanged. The stage also adds a bounded WovenHat OS service with a read-only status characteristic and write-only command characteristic, preserving ATT permission checks and live-link authority.
+
+The accepted profile checkpoint run 36819330823 passed at exact source SHA `c5f3c6194c58ad16e75c0f44cf90c6d336393c40`. Preserved evidence digest: `sha256:677f88e58b878de73553225ec533f76c4d1b0e74864b1a69aaa30367caef50db`.
+
+Closure hardening makes characteristic creation transactional with respect to ATT table capacity: two slots are preflighted before declaration/value insertion, preventing a capacity failure from leaving an orphan declaration.
+
+This remains deterministic software validation. Physical BLE profile interoperability, standardized conformance testing, BLE SMP/bonding, persistent protected keys and production controller recovery remain outside this boundary. Next after final exact-head acceptance: Stage 13.10L Bluetooth lifecycle and hardening.
