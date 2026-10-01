@@ -1660,6 +1660,21 @@ impl BleControllerSecurity {
     }
 }
 
+pub fn ble_bond_reconnection_metadata_self_test() -> bool {
+    let mut links = LeLinkState::new();
+    let connected=[EVT_LE_META,19,LE_SUBEVENT_CONNECTION_COMPLETE,0,0x42,0,0,1,1,2,3,4,5,6,0x18,0,0,0,0xf4,1,0];
+    if links.handle_connection_complete(&connected).is_err() { return false; }
+    let mut bonds=BleBondStore::new();
+    if bonds.store_with_metadata(&links,0x42,[0x33;16],0x1234,0x1122334455667788,12,true).is_err() { return false; }
+    let Some(bond)=bonds.bond_for_handle(&links,0x42) else { return false; };
+    bond.ediv==0x1234
+        && bond.rand==0x1122334455667788
+        && bond.key_size==12
+        && bond.authenticated
+        && bonds.ltk_for_request(&links,0x42,0x1234,0x1122334455667788).is_some()
+        && bonds.ltk_for_request(&links,0x42,0x1235,0x1122334455667788).is_none()
+}
+
 pub fn ble_controller_encryption_authority_self_test() -> bool {
     let mut links = LeLinkState::new();
     let connected = [EVT_LE_META,19,LE_SUBEVENT_CONNECTION_COMPLETE,0,0x42,0,0,1,1,2,3,4,5,6,0x18,0,0,0,0xf4,1,0];
