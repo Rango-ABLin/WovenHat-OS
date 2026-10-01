@@ -649,12 +649,12 @@ fn read_metadata_region_sector(
     index: usize,
     sector: &mut [u8; SECTOR_SIZE],
 ) -> Result<(), Error> {
-    let lba = if extension {
-        metadata_extension_sector(volume, index)?
+    if extension {
+        let lba = metadata_extension_sector(volume, index)?;
+        device.read_sector(lba, sector).map_err(Error::Block)
     } else {
-        metadata_sector(volume, index)?
-    };
-    device.read_sector(lba, sector).map_err(Error::Block)
+        read_metadata_sector(device, volume, index, sector)
+    }
 }
 
 fn metadata_region_magic(extension: bool) -> &'static [u8; 4] {
