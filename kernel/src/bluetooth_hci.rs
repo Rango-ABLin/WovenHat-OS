@@ -1139,6 +1139,40 @@ pub fn bluetooth_le_recovery_self_test() -> bool {
         && lifecycle.generation() == 2
 }
 
+pub fn bluetooth_le_lifecycle_stress_self_test() -> bool {
+    let mut lifecycle = BluetoothLeLifecycle::new();
+    let mut out = [0_u8; MAX_ATT_PDU];
+    for cycle in 0_u8..32 {
+        let handle = 0x40_u16 + u16::from(cycle & 0x0f);
+        let [handle_lo, handle_hi] = handle.to_le_bytes();
+        let connected = [
+            EVT_LE_META, 19, LE_SUBEVENT_CONNECTION_COMPLETE, 0,
+            handle_lo, handle_hi, 0, 1, 1, 2, 3, 4, 5, cycle,
+            0x18, 0x00, 0, 0, 0xf4, 0x01, 0,
+        ];
+        if lifecycle.links.handle_connection_complete(&connected).is_err()
+            || lifecycle.links.count() != 1
+            || lifecycle.subscriptions.configure(&lifecycle.links, handle, 8, 0x0001).is_err()
+            || lifecycle.subscriptions.count() != 1
+            || lifecycle.subscriptions.emit(&lifecycle.links, handle, 8, false, &[cycle], &mut out) != Ok(4)
+        { return false; }
+
+        if cycle % 4 == 3 {
+            lifecycle.controller_reset();
+        } else {
+            let disconnected = [EVT_DISCONNECTION_COMPLETE, 4, 0, handle_lo, handle_hi, 0x13];
+            if lifecycle.disconnect(&disconnected) != Ok(handle) { return false; }
+        }
+
+        if lifecycle.links.count() != 0
+            || lifecycle.subscriptions.count() != 0
+            || lifecycle.links.contains_handle(handle)
+            || lifecycle.subscriptions.emit(&lifecycle.links, handle, 8, false, &[cycle], &mut out).is_ok()
+        { return false; }
+    }
+    lifecycle.generation() == 32
+}
+
 pub struct GattDatabase {
     att: AttDatabase,
     next_handle: u16,
