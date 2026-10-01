@@ -16,6 +16,12 @@ For every open item we will add implementation, focused host tests, 1/2/4 CPU
 QEMU tests, and an audit entry. A stage is production-complete only when every
 roadmap requirement has passing evidence or an explicitly accepted design.
 
+Stage 1–5 metadata capacity has since been extended with the compatible WMD3
+eight-sector region; the former fixed four-sector ABI ceiling is closed as a
+bounded software increment. The remaining Stage 1–5 gaps are still the
+hardware/DMA qualification, full multi-operation data rollback/replay, and
+unclean-shutdown hardware qualification listed above.
+
 Stage 6 lock follow-up: terminal rendering now uses a ranked, IRQ-live local
 preemption guard; shell cwd state uses a short ranked IRQ mutex. The remaining
 lock and priority-inheritance items in the table refer to broader cross-layer

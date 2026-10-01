@@ -24,6 +24,18 @@ See [the data-journal audit](audit-stage1-5-data-journal-2026-10-01.md).
 Multi-file atomicity, larger-than-VFS files, and physical power-loss testing
 remain open.
 
+## Stage 1–5 metadata capacity extension — 2026-10-01
+
+The ownership sidecar preserves the WMD1 four-sector ABI and now uses a
+versioned WMD3 extension in eight additional reserved sectors when the volume
+geometry permits it. Capacity increases from 84 to 252 records without
+relocating or rewriting legacy metadata. The strengthened self-test and
+1/2/4-CPU QEMU gate passed with exit 33. See the
+[metadata-capacity audit](audit-stage1-5-metadata-capacity-2026-10-01.md).
+
+The table remains intentionally bounded; a dynamically growing metadata
+format and full multi-operation transaction log are still future work.
+
 Production completion is tracked separately from bounded foundation acceptance
 in [the Stage 1–12 gap audit](stage1-12-production-gap-audit.md). No stage is
 fully complete while a roadmap requirement remains open.

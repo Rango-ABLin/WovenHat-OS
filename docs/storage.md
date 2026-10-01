@@ -99,9 +99,12 @@ and directory counts, and flags FSInfo free-count mismatches.
 
 Current FAT32 mutation limits are deliberate: long names are created through
 validated bounded LFN records. Single-file persistence is protected by a
-bounded on-volume prepared/committed rollback journal, while the metadata
-sidecar and intent table remain fixed-capacity and are not a replacement for a
-full multi-operation filesystem transaction log. Full directories grow by
+bounded on-volume prepared/committed rollback journal. Ownership metadata keeps
+the legacy WMD1 four-sector region and, when the volume has enough reserved
+sectors, adds a WMD3 eight-sector extension region for a total of 252 records;
+this removes the original fixed four-sector ABI ceiling but remains a bounded
+table, not a replacement for a full multi-operation filesystem transaction
+log. Full directories grow by
 linking a zeroed cluster, and valid FSInfo sectors are maintained as free-space
 hints. Flushes make completed operations visible to the device, but physical
 power-loss behavior still requires qualification.

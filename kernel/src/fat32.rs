@@ -29,6 +29,10 @@ const METADATA_HEADER_SIZE: usize = 8;
 const METADATA_RECORD_SIZE: usize = 24;
 const METADATA_CAPACITY: usize = (SECTOR_SIZE - METADATA_HEADER_SIZE) / METADATA_RECORD_SIZE;
 const METADATA_SECTOR_COUNT: usize = 4;
+// WMD3 extends the legacy WMD1 table into otherwise-unused reserved sectors.
+// The legacy region remains at the end of the reserved area for compatibility.
+const METADATA_EXTENSION_MAGIC: &[u8; 4] = b"WMD3";
+const METADATA_EXTENSION_SECTOR_COUNT: usize = 8;
 const METADATA_STATE_PENDING: u8 = 1;
 const METADATA_STATE_COMMITTED: u8 = 2;
 const INODE_METADATA_MAGIC: &[u8; 4] = b"WMD2";
@@ -341,6 +345,30 @@ fn metadata_sector(volume: Volume, index: usize) -> Result<u64, Error> {
         .ok_or(Error::UnsupportedGeometry)
 }
 
+fn metadata_extension_sector(volume: Volume, index: usize) -> Result<u64, Error> {
+    if index >= METADATA_EXTENSION_SECTOR_COUNT {
+        return Err(Error::UnsupportedGeometry);
+    }
+    volume
+        .first_fat_sector
+        .checked_sub(
+            (METADATA_SECTOR_COUNT
+                + JOURNAL_SECTOR_COUNT
+                + INODE_METADATA_SECTOR_COUNT
+                + METADATA_EXTENSION_SECTOR_COUNT
+                - index) as u64,
+        )
+        .ok_or(Error::UnsupportedGeometry)
+}
+
+fn metadata_extension_available(volume: Volume) -> bool {
+    volume.first_fat_sector
+        >= (METADATA_SECTOR_COUNT
+            + JOURNAL_SECTOR_COUNT
+            + INODE_METADATA_SECTOR_COUNT
+            + METADATA_EXTENSION_SECTOR_COUNT) as u64
+}
+
 fn journal_sector(volume: Volume, index: usize) -> Result<u64, Error> {
     if index >= JOURNAL_SECTOR_COUNT {
         return Err(Error::UnsupportedGeometry);
@@ -614,6 +642,37 @@ fn read_metadata_sector(
         .map_err(Error::Block)
 }
 
+fn read_metadata_region_sector(
+    device: &mut impl BlockDevice,
+    volume: Volume,
+    extension: bool,
+    index: usize,
+    sector: &mut [u8; SECTOR_SIZE],
+) -> Result<(), Error> {
+    let lba = if extension {
+        metadata_extension_sector(volume, index)?
+    } else {
+        metadata_sector(volume, index)?
+    };
+    device.read_sector(lba, sector).map_err(Error::Block)
+}
+
+fn metadata_region_magic(extension: bool) -> &'static [u8; 4] {
+    if extension {
+        METADATA_EXTENSION_MAGIC
+    } else {
+        METADATA_MAGIC
+    }
+}
+
+fn metadata_region_count(extension: bool) -> usize {
+    if extension {
+        METADATA_EXTENSION_SECTOR_COUNT
+    } else {
+        METADATA_SECTOR_COUNT
+    }
+}
+
 /// Look up persisted ownership metadata by its canonical path key.
 pub fn read_file_metadata(
     device: &mut impl BlockDevice,
@@ -621,26 +680,31 @@ pub fn read_file_metadata(
     path_hash: u64,
     path_tag: u32,
 ) -> Result<Option<FileMetadata>, Error> {
-    for sector_index in 0..METADATA_SECTOR_COUNT {
-        let mut sector = [0u8; SECTOR_SIZE];
-        read_metadata_sector(device, volume, sector_index, &mut sector)?;
-        if &sector[..4] != METADATA_MAGIC {
+    for extension in [false, true] {
+        if extension && !metadata_extension_available(volume) {
             continue;
         }
-        for index in 0..METADATA_CAPACITY {
-            let offset = METADATA_HEADER_SIZE + index * METADATA_RECORD_SIZE;
-            if sector[offset + 18] == 0
-                || read_u64(&sector, offset) != path_hash
-                || (read_u32(&sector, offset + 20) != 0
-                    && read_u32(&sector, offset + 20) != path_tag)
-            {
+        for sector_index in 0..metadata_region_count(extension) {
+            let mut sector = [0u8; SECTOR_SIZE];
+            read_metadata_region_sector(device, volume, extension, sector_index, &mut sector)?;
+            if &sector[..4] != metadata_region_magic(extension) {
                 continue;
             }
-            return Ok(Some(FileMetadata {
-                uid: read_u32(&sector, offset + 8),
-                gid: read_u32(&sector, offset + 12),
-                mode: read_u16(&sector, offset + 16),
-            }));
+            for index in 0..METADATA_CAPACITY {
+                let offset = METADATA_HEADER_SIZE + index * METADATA_RECORD_SIZE;
+                if sector[offset + 18] == 0
+                    || read_u64(&sector, offset) != path_hash
+                    || (read_u32(&sector, offset + 20) != 0
+                        && read_u32(&sector, offset + 20) != path_tag)
+                {
+                    continue;
+                }
+                return Ok(Some(FileMetadata {
+                    uid: read_u32(&sector, offset + 8),
+                    gid: read_u32(&sector, offset + 12),
+                    mode: read_u16(&sector, offset + 16),
+                }));
+            }
         }
     }
     Ok(None)
@@ -690,46 +754,52 @@ fn write_file_metadata_state(
     metadata: FileMetadata,
     state: u8,
 ) -> Result<(), Error> {
-    let mut selected = None;
-    let mut sector = [0u8; SECTOR_SIZE];
-    for sector_index in 0..METADATA_SECTOR_COUNT {
-        read_metadata_sector(device, volume, sector_index, &mut sector)?;
-        if &sector[..4] != METADATA_MAGIC {
-            sector.fill(0);
-            sector[..4].copy_from_slice(METADATA_MAGIC);
-            sector[4..6].copy_from_slice(&(1u16).to_le_bytes());
+    for extension in [false, true] {
+        if extension && !metadata_extension_available(volume) {
+            continue;
         }
-        let mut free = None;
-        let mut target = None;
-        for index in 0..METADATA_CAPACITY {
-            let offset = METADATA_HEADER_SIZE + index * METADATA_RECORD_SIZE;
-            if sector[offset + 18] == 0 {
-                free.get_or_insert(offset);
-            } else if read_u64(&sector, offset) == path_hash
-                && (read_u32(&sector, offset + 20) == 0
-                    || read_u32(&sector, offset + 20) == path_tag)
-            {
-                target = Some(offset);
-                break;
+        let mut sector = [0u8; SECTOR_SIZE];
+        for sector_index in 0..metadata_region_count(extension) {
+            read_metadata_region_sector(device, volume, extension, sector_index, &mut sector)?;
+            if &sector[..4] != metadata_region_magic(extension) {
+                sector.fill(0);
+                sector[..4].copy_from_slice(metadata_region_magic(extension));
+                sector[4..6].copy_from_slice(&(if extension { 3u16 } else { 1u16 }).to_le_bytes());
             }
-        }
-        if let Some(offset) = target.or(free) {
-            selected = Some((sector_index, offset));
-            break;
+            let mut free = None;
+            let mut target = None;
+            for index in 0..METADATA_CAPACITY {
+                let offset = METADATA_HEADER_SIZE + index * METADATA_RECORD_SIZE;
+                if sector[offset + 18] == 0 {
+                    free.get_or_insert(offset);
+                } else if read_u64(&sector, offset) == path_hash
+                    && (read_u32(&sector, offset + 20) == 0
+                        || read_u32(&sector, offset + 20) == path_tag)
+                {
+                    target = Some(offset);
+                    break;
+                }
+            }
+            let Some(offset) = target.or(free) else {
+                continue;
+            };
+            sector[offset..offset + METADATA_RECORD_SIZE].fill(0);
+            sector[offset..offset + 8].copy_from_slice(&path_hash.to_le_bytes());
+            sector[offset + 8..offset + 12].copy_from_slice(&metadata.uid.to_le_bytes());
+            sector[offset + 12..offset + 16].copy_from_slice(&metadata.gid.to_le_bytes());
+            sector[offset + 16..offset + 18].copy_from_slice(&metadata.mode.to_le_bytes());
+            sector[offset + 18] = 1;
+            sector[offset + 19] = state;
+            sector[offset + 20..offset + 24].copy_from_slice(&path_tag.to_le_bytes());
+            let lba = if extension {
+                metadata_extension_sector(volume, sector_index)?
+            } else {
+                metadata_sector(volume, sector_index)?
+            };
+            return device.write_sector(lba, &sector).map_err(Error::Block);
         }
     }
-    let (sector_index, offset) = selected.ok_or(Error::DirectoryFull)?;
-    sector[offset..offset + METADATA_RECORD_SIZE].fill(0);
-    sector[offset..offset + 8].copy_from_slice(&path_hash.to_le_bytes());
-    sector[offset + 8..offset + 12].copy_from_slice(&metadata.uid.to_le_bytes());
-    sector[offset + 12..offset + 16].copy_from_slice(&metadata.gid.to_le_bytes());
-    sector[offset + 16..offset + 18].copy_from_slice(&metadata.mode.to_le_bytes());
-    sector[offset + 18] = 1;
-    sector[offset + 19] = state;
-    sector[offset + 20..offset + 24].copy_from_slice(&path_tag.to_le_bytes());
-    device
-        .write_sector(metadata_sector(volume, sector_index)?, &sector)
-        .map_err(Error::Block)
+    Err(Error::DirectoryFull)
 }
 
 /// Promote a pending metadata intent after file data is durable.
@@ -739,26 +809,38 @@ pub fn finalize_file_metadata(
     path_hash: u64,
     path_tag: u32,
 ) -> Result<bool, Error> {
-    for sector_index in 0..METADATA_SECTOR_COUNT {
-        let mut sector = [0u8; SECTOR_SIZE];
-        read_metadata_sector(device, volume, sector_index, &mut sector)?;
-        if &sector[..4] != METADATA_MAGIC {
+    for extension in [false, true] {
+        if extension && !metadata_extension_available(volume) {
             continue;
         }
-        for index in 0..METADATA_CAPACITY {
-            let offset = METADATA_HEADER_SIZE + index * METADATA_RECORD_SIZE;
-            if sector[offset + 18] != 0
-                && read_u64(&sector, offset) == path_hash
-                && (read_u32(&sector, offset + 20) == 0
-                    || read_u32(&sector, offset + 20) == path_tag)
-            {
-                if sector[offset + 19] == METADATA_STATE_PENDING {
-                    sector[offset + 19] = METADATA_STATE_COMMITTED;
-                    device
-                        .write_sector(metadata_sector(volume, sector_index)?, &sector)
-                        .map_err(Error::Block)?;
+        for sector_index in 0..metadata_region_count(extension) {
+            let mut sector = [0u8; SECTOR_SIZE];
+            read_metadata_region_sector(device, volume, extension, sector_index, &mut sector)?;
+            if &sector[..4] != metadata_region_magic(extension) {
+                continue;
+            }
+            for index in 0..METADATA_CAPACITY {
+                let offset = METADATA_HEADER_SIZE + index * METADATA_RECORD_SIZE;
+                if sector[offset + 18] != 0
+                    && read_u64(&sector, offset) == path_hash
+                    && (read_u32(&sector, offset + 20) == 0
+                        || read_u32(&sector, offset + 20) == path_tag)
+                {
+                    if sector[offset + 19] == METADATA_STATE_PENDING {
+                        sector[offset + 19] = METADATA_STATE_COMMITTED;
+                        device
+                            .write_sector(
+                                if extension {
+                                    metadata_extension_sector(volume, sector_index)?
+                                } else {
+                                    metadata_sector(volume, sector_index)?
+                                },
+                                &sector,
+                            )
+                            .map_err(Error::Block)?;
+                    }
+                    return Ok(true);
                 }
-                return Ok(true);
             }
         }
     }
@@ -772,23 +854,35 @@ pub fn remove_file_metadata(
     path_hash: u64,
     path_tag: u32,
 ) -> Result<(), Error> {
-    for sector_index in 0..METADATA_SECTOR_COUNT {
-        let mut sector = [0u8; SECTOR_SIZE];
-        read_metadata_sector(device, volume, sector_index, &mut sector)?;
-        if &sector[..4] != METADATA_MAGIC {
+    for extension in [false, true] {
+        if extension && !metadata_extension_available(volume) {
             continue;
         }
-        for index in 0..METADATA_CAPACITY {
-            let offset = METADATA_HEADER_SIZE + index * METADATA_RECORD_SIZE;
-            if sector[offset + 18] != 0
-                && read_u64(&sector, offset) == path_hash
-                && (read_u32(&sector, offset + 20) == 0
-                    || read_u32(&sector, offset + 20) == path_tag)
-            {
-                sector[offset + 18] = 0;
-                return device
-                    .write_sector(metadata_sector(volume, sector_index)?, &sector)
-                    .map_err(Error::Block);
+        for sector_index in 0..metadata_region_count(extension) {
+            let mut sector = [0u8; SECTOR_SIZE];
+            read_metadata_region_sector(device, volume, extension, sector_index, &mut sector)?;
+            if &sector[..4] != metadata_region_magic(extension) {
+                continue;
+            }
+            for index in 0..METADATA_CAPACITY {
+                let offset = METADATA_HEADER_SIZE + index * METADATA_RECORD_SIZE;
+                if sector[offset + 18] != 0
+                    && read_u64(&sector, offset) == path_hash
+                    && (read_u32(&sector, offset + 20) == 0
+                        || read_u32(&sector, offset + 20) == path_tag)
+                {
+                    sector[offset + 18] = 0;
+                    return device
+                        .write_sector(
+                            if extension {
+                                metadata_extension_sector(volume, sector_index)?
+                            } else {
+                                metadata_sector(volume, sector_index)?
+                            },
+                            &sector,
+                        )
+                        .map_err(Error::Block);
+                }
             }
         }
     }
@@ -3466,6 +3560,7 @@ struct MutableFatDisk {
     inode_metadata: [[u8; SECTOR_SIZE]; INODE_METADATA_SECTOR_COUNT],
     journal: [[u8; SECTOR_SIZE]; JOURNAL_SECTOR_COUNT],
     metadata: [[u8; SECTOR_SIZE]; METADATA_SECTOR_COUNT],
+    metadata_extension: [[u8; SECTOR_SIZE]; METADATA_EXTENSION_SECTOR_COUNT],
     fs_info: [u8; SECTOR_SIZE],
     backup_fs_info: [u8; SECTOR_SIZE],
     fat0: [u8; SECTOR_SIZE],
@@ -3481,6 +3576,7 @@ impl MutableFatDisk {
             inode_metadata: [[0; SECTOR_SIZE]; INODE_METADATA_SECTOR_COUNT],
             journal: [[0; SECTOR_SIZE]; JOURNAL_SECTOR_COUNT],
             metadata: [[0; SECTOR_SIZE]; METADATA_SECTOR_COUNT],
+            metadata_extension: [[0; SECTOR_SIZE]; METADATA_EXTENSION_SECTOR_COUNT],
             fs_info: [0; SECTOR_SIZE],
             backup_fs_info: [0; SECTOR_SIZE],
             fat0: [0; SECTOR_SIZE],
@@ -3537,6 +3633,25 @@ impl BlockDevice for MutableFatDisk {
         if lba == 0 {
             sector.copy_from_slice(&self.boot);
         } else if (TestDisk::FAT_LBA
+            - (METADATA_SECTOR_COUNT
+                + JOURNAL_SECTOR_COUNT
+                + INODE_METADATA_SECTOR_COUNT
+                + METADATA_EXTENSION_SECTOR_COUNT) as u64
+            ..TestDisk::FAT_LBA
+                - (METADATA_SECTOR_COUNT + JOURNAL_SECTOR_COUNT + INODE_METADATA_SECTOR_COUNT)
+                    as u64)
+            .contains(&lba)
+        {
+            sector.copy_from_slice(
+                &self.metadata_extension[(lba
+                    - (TestDisk::FAT_LBA
+                        - (METADATA_SECTOR_COUNT
+                            + JOURNAL_SECTOR_COUNT
+                            + INODE_METADATA_SECTOR_COUNT
+                            + METADATA_EXTENSION_SECTOR_COUNT) as u64))
+                    as usize],
+            );
+        } else if (TestDisk::FAT_LBA
             - (METADATA_SECTOR_COUNT + JOURNAL_SECTOR_COUNT + INODE_METADATA_SECTOR_COUNT) as u64
             ..TestDisk::FAT_LBA - (METADATA_SECTOR_COUNT + JOURNAL_SECTOR_COUNT) as u64)
             .contains(&lba)
@@ -3586,6 +3701,24 @@ impl BlockDevice for MutableFatDisk {
         }
         if lba == 0 {
             self.boot.copy_from_slice(sector);
+        } else if (TestDisk::FAT_LBA
+            - (METADATA_SECTOR_COUNT
+                + JOURNAL_SECTOR_COUNT
+                + INODE_METADATA_SECTOR_COUNT
+                + METADATA_EXTENSION_SECTOR_COUNT) as u64
+            ..TestDisk::FAT_LBA
+                - (METADATA_SECTOR_COUNT + JOURNAL_SECTOR_COUNT + INODE_METADATA_SECTOR_COUNT)
+                    as u64)
+            .contains(&lba)
+        {
+            self.metadata_extension[(lba
+                - (TestDisk::FAT_LBA
+                    - (METADATA_SECTOR_COUNT
+                        + JOURNAL_SECTOR_COUNT
+                        + INODE_METADATA_SECTOR_COUNT
+                        + METADATA_EXTENSION_SECTOR_COUNT) as u64))
+                as usize]
+                .copy_from_slice(sector);
         } else if (TestDisk::FAT_LBA
             - (METADATA_SECTOR_COUNT + JOURNAL_SECTOR_COUNT + INODE_METADATA_SECTOR_COUNT) as u64
             ..TestDisk::FAT_LBA - (METADATA_SECTOR_COUNT + JOURNAL_SECTOR_COUNT) as u64)
@@ -3775,6 +3908,17 @@ fn long_filename_self_test() -> bool {
                 == Ok(Some(intent2))
             && remove_journal_intent(&mut disk, volume, intent2.path_hash, intent2.path_tag)
                 .is_ok();
+    let mut metadata_capacity_ok = true;
+    for index in 0..100_u64 {
+        let hash = metadata_hash.wrapping_add(index + 1);
+        let tag = metadata_tag.wrapping_add(index as u32 + 1);
+        if write_file_metadata(&mut disk, volume, hash, tag, metadata).is_err()
+            || read_file_metadata(&mut disk, volume, hash, tag) != Ok(Some(metadata))
+        {
+            metadata_capacity_ok = false;
+            break;
+        }
+    }
     let mut bytes = [0u8; 4];
     if create_path_file(&mut disk, volume, name, b"lfn").is_err()
         || create_path_file(&mut disk, volume, name, b"new").is_err()
@@ -3845,6 +3989,7 @@ fn long_filename_self_test() -> bool {
             && resolve_path(&mut growth_disk, growth_volume, long).is_ok()
     });
     metadata_ok
+        && metadata_capacity_ok
         && inode_ok
         && read_ok
         && listing_ok
