@@ -404,3 +404,14 @@ Trusted secured authority requires all of: a live owned ACL handle, the same pee
 GitHub Actions run 36791065311 passed at exact source SHA `dda2933eef36026ab70cefbe85898bcd62256f06`, including the Stage 13.10H Bluetooth security 1/2/4-core acceptance and evidence-preservation steps. Artifact digest: `sha256:f731dbd2f52dc7c2743aa052eaa7f801eef99dc0fc6050f13e6fa71518a07405`.
 
 This is deterministic software acceptance. Persistent secure key storage, full controller event orchestration, physical-radio pairing/interoperability and BLE security remain outside this boundary.
+
+
+## Roadmap Stage 13.10I — Bluetooth LE foundation accepted on 2026-10-01
+
+Stage 13.10I establishes a bounded Bluetooth Low Energy controller/discovery and connection-lifecycle foundation without conflating LE identity or security with the accepted BR/EDR link-key model. The HCI layer can configure scanning, enable or disable scanning, parse LE Meta Advertising Reports, retain public/random peer address type, capture bounded legacy advertising data and RSSI, and deduplicate repeated reports by address type plus address.
+
+The connection layer consumes an LE discovery record to build LE Create Connection, accepts exact LE Connection Complete events into a fixed eight-link ownership table, rejects malformed, conflicting or out-of-range handle/address state, and removes ownership on Disconnection Complete. A disconnected LE handle is immediately stale and cannot retain authority.
+
+GitHub Actions run 36810460362 passed at exact source SHA `edcfe31b5cd1406c4feb2d001dbc0e2d2f6d7a9f`, including the Stage 13.10I Bluetooth LE foundation 1/2/4-core acceptance and evidence-preservation steps. Artifact digest: `sha256:f14abafba66e1a599c2410e7e458c3cd2447ca783780deb688afffbfb26b5251`.
+
+This is deterministic software acceptance. Physical LE controller/radio interoperability, extended advertising, LE privacy/resolving lists, connection-update orchestration, ATT/GATT and BLE SMP/bonding remain outside this boundary. Next: Stage 13.10J ATT/GATT foundation above owned LE ACL links.
