@@ -3447,20 +3447,24 @@ pub fn le_gatt_security_policy_self_test() -> bool {
 
 
 // Stage 13.10Q: enforce ATT security policy on outbound notifications/indications.
+pub struct GattSecuredEmission<'a> {
+    pub connection_handle: u16,
+    pub value_handle: u16,
+    pub indication: bool,
+    pub value: &'a [u8],
+}
+
 impl GattSubscriptions {
     pub fn emit_secured(
         &self,
         links: &LeLinkState,
         sessions: &LeSecuritySessions,
         policies: &AttSecurityPolicies,
-        connection_handle: u16,
-        value_handle: u16,
-        indication: bool,
-        value: &[u8],
+        emission: GattSecuredEmission<'_>,
         out: &mut [u8; MAX_ATT_PDU],
     ) -> Result<usize, HciError> {
-        if let Some(requirement) = policies.requirement(value_handle) {
-            let Some(session) = sessions.session(connection_handle) else {
+        if let Some(requirement) = policies.requirement(emission.value_handle) {
+            let Some(session) = sessions.session(emission.connection_handle) else {
                 return Err(HciError::UnexpectedOpcode);
             };
             if requirement == AttSecurityRequirement::Authenticated && !session.authenticated {
@@ -3469,10 +3473,10 @@ impl GattSubscriptions {
         }
         self.emit(
             links,
-            connection_handle,
-            value_handle,
-            indication,
-            value,
+            emission.connection_handle,
+            emission.value_handle,
+            emission.indication,
+            emission.value,
             out,
         )
     }
@@ -3502,15 +3506,17 @@ pub fn le_gatt_secure_notification_self_test() -> bool {
     let mut sessions = LeSecuritySessions::new();
     let mut out = [0_u8; MAX_ATT_PDU];
     if subscriptions.emit_secured(
-        &links,
-        &sessions,
-        &policies,
-        0x42,
-        value_handle,
-        false,
-        &[87],
-        &mut out,
-    ).is_ok() {
+            &links,
+            &sessions,
+            &policies,
+            GattSecuredEmission {
+                connection_handle: 0x42,
+                value_handle,
+                indication: false,
+                value: &[87],
+            },
+            &mut out,
+        ).is_ok() {
         return false;
     }
 
@@ -3532,10 +3538,12 @@ pub fn le_gatt_secure_notification_self_test() -> bool {
             &links,
             &sessions,
             &policies,
-            0x42,
-            value_handle,
-            false,
-            &[86],
+            GattSecuredEmission {
+                connection_handle: 0x42,
+                value_handle,
+                indication: false,
+                value: &[86],
+            },
             &mut out,
         ).is_ok()
     {
@@ -3553,10 +3561,12 @@ pub fn le_gatt_secure_notification_self_test() -> bool {
             &links,
             &sessions,
             &policies,
-            0x42,
-            value_handle,
-            false,
-            &[85],
+            GattSecuredEmission {
+                connection_handle: 0x42,
+                value_handle,
+                indication: false,
+                value: &[85],
+            },
             &mut out,
         ) != Ok(4)
         || out[..4] != [ATT_OP_HANDLE_VALUE_NOTIFICATION, 8, 0, 85]
@@ -3564,10 +3574,12 @@ pub fn le_gatt_secure_notification_self_test() -> bool {
             &links,
             &sessions,
             &policies,
-            0x42,
-            value_handle,
-            true,
-            &[84],
+            GattSecuredEmission {
+                connection_handle: 0x42,
+                value_handle,
+                indication: true,
+                value: &[84],
+            },
             &mut out,
         ) != Ok(4)
         || out[..4] != [ATT_OP_HANDLE_VALUE_INDICATION, 8, 0, 84]
@@ -3581,10 +3593,12 @@ pub fn le_gatt_secure_notification_self_test() -> bool {
             &links,
             &sessions,
             &policies,
-            0x42,
-            value_handle,
-            false,
-            &[83],
+            GattSecuredEmission {
+                connection_handle: 0x42,
+                value_handle,
+                indication: false,
+                value: &[83],
+            },
             &mut out,
         ).is_err()
         && subscriptions.emit(
