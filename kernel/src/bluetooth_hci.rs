@@ -1314,6 +1314,14 @@ pub fn ble_smp_pairing_state_self_test() -> bool {
     pairing.phase() == SmpPairingPhase::Failed
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct BleBondSecurity {
+    pub ediv: u16,
+    pub rand: u64,
+    pub key_size: u8,
+    pub authenticated: bool,
+}
+
 #[derive(Debug, PartialEq, Eq)]
 pub struct BleBond {
     pub address_type: u8,
@@ -1348,15 +1356,15 @@ impl BleBondStore {
     }
 
     pub fn store(&mut self, links: &LeLinkState, handle: u16, ltk: [u8; 16], authenticated: bool) -> Result<(), HciError> {
-        self.store_with_metadata(links, handle, ltk, 0, 0, 16, authenticated)
+        self.store_with_metadata(links, handle, ltk, BleBondSecurity { ediv: 0, rand: 0, key_size: 16, authenticated })
     }
 
-    pub fn store_with_metadata(&mut self, links: &LeLinkState, handle: u16, ltk: [u8; 16], ediv: u16, rand: u64, key_size: u8, authenticated: bool) -> Result<(), HciError> {
-        if !(7..=16).contains(&key_size) { return Err(HciError::MalformedEvent); }
+    pub fn store_with_metadata(&mut self, links: &LeLinkState, handle: u16, ltk: [u8; 16], security: BleBondSecurity) -> Result<(), HciError> {
+        if !(7..=16).contains(&security.key_size) { return Err(HciError::MalformedEvent); }
         let Some(link) = links.links[..links.count].iter().flatten().find(|link| link.handle == handle) else {
             return Err(HciError::UnexpectedOpcode);
         };
-        let bond = BleBond { address_type: link.address_type, address: link.address, ltk, ediv, rand, key_size, authenticated };
+        let bond = BleBond { address_type: link.address_type, address: link.address, ltk, ediv: security.ediv, rand: security.rand, key_size: security.key_size, authenticated: security.authenticated };
         if let Some(index) = self.index(link.address_type, link.address) {
             if let Some(existing) = self.bonds[index].as_mut() { existing.wipe(); }
             self.bonds[index] = Some(bond);
@@ -1489,7 +1497,7 @@ impl SmpKeyDistribution {
         let ediv = u16::from_le_bytes([pdu[1], pdu[2]]);
         let rand = u64::from_le_bytes(pdu[3..11].try_into().map_err(|_| HciError::MalformedEvent)?);
         let key_size = pairing.negotiated_key_size().ok_or(HciError::UnexpectedOpcode)?;
-        if bonds.store_with_metadata(links, handle, ltk, ediv, rand, key_size, false).is_err() {
+        if bonds.store_with_metadata(links, handle, ltk, BleBondSecurity { ediv, rand, key_size, authenticated: false }).is_err() {
             ltk.fill(0);
             return Err(HciError::ControllerFailure(0xff));
         }
@@ -1665,7 +1673,7 @@ pub fn ble_bond_reconnection_metadata_self_test() -> bool {
     let connected=[EVT_LE_META,19,LE_SUBEVENT_CONNECTION_COMPLETE,0,0x42,0,0,1,1,2,3,4,5,6,0x18,0,0,0,0xf4,1,0];
     if links.handle_connection_complete(&connected).is_err() { return false; }
     let mut bonds=BleBondStore::new();
-    if bonds.store_with_metadata(&links,0x42,[0x33;16],0x1234,0x1122334455667788,12,true).is_err() { return false; }
+    if bonds.store_with_metadata(&links,0x42,[0x33;16],BleBondSecurity { ediv: 0x1234, rand: 0x1122334455667788, key_size: 12, authenticated: true }).is_err() { return false; }
     let Some(bond)=bonds.bond_for_handle(&links,0x42) else { return false; };
     bond.ediv==0x1234
         && bond.rand==0x1122334455667788
@@ -1685,7 +1693,7 @@ pub fn ble_controller_encryption_authority_self_test() -> bool {
     let ltk_request = [EVT_LE_META,13,LE_SUBEVENT_LONG_TERM_KEY_REQUEST,0x42,0,9,0,0,0,0,0,0,0,7,0];
     if BleControllerSecurity::handle_ltk_request(&links,&bonds,&ltk_request,&mut out) != Ok(5)
         || u16::from_le_bytes([out[0],out[1]]) != OPCODE_LE_LONG_TERM_KEY_REQUEST_NEGATIVE_REPLY
-        || bonds.store_with_metadata(&links,0x42,[0x5a;16],7,9,16,true).is_err()
+        || bonds.store_with_metadata(&links,0x42,[0x5a;16],BleBondSecurity { ediv: 7, rand: 9, key_size: 16, authenticated: true }).is_err()
         || BleControllerSecurity::handle_ltk_request(&links,&bonds,&ltk_request,&mut out) != Ok(21)
         || u16::from_le_bytes([out[0],out[1]]) != OPCODE_LE_LONG_TERM_KEY_REQUEST_REPLY
         || bonds.trusted(&links,&encryption,0x42)
