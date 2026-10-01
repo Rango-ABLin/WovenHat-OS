@@ -3444,3 +3444,155 @@ pub fn le_gatt_security_policy_self_test() -> bool {
             &mut out,
         ).is_err()
 }
+
+
+// Stage 13.10Q: enforce ATT security policy on outbound notifications/indications.
+impl GattSubscriptions {
+    pub fn emit_secured(
+        &self,
+        links: &LeLinkState,
+        sessions: &LeSecuritySessions,
+        policies: &AttSecurityPolicies,
+        connection_handle: u16,
+        value_handle: u16,
+        indication: bool,
+        value: &[u8],
+        out: &mut [u8; MAX_ATT_PDU],
+    ) -> Result<usize, HciError> {
+        if let Some(requirement) = policies.requirement(value_handle) {
+            let Some(session) = sessions.session(connection_handle) else {
+                return Err(HciError::UnexpectedOpcode);
+            };
+            if requirement == AttSecurityRequirement::Authenticated && !session.authenticated {
+                return Err(HciError::UnexpectedOpcode);
+            }
+        }
+        self.emit(
+            links,
+            connection_handle,
+            value_handle,
+            indication,
+            value,
+            out,
+        )
+    }
+}
+
+pub fn le_gatt_secure_notification_self_test() -> bool {
+    let mut links = LeLinkState::new();
+    let connected = [
+        EVT_LE_META, 19, LE_SUBEVENT_CONNECTION_COMPLETE, 0,
+        0x42, 0x00, 0, 1, 1, 2, 3, 4, 5, 6,
+        0x18, 0x00, 0, 0, 0xf4, 0x01, 0,
+    ];
+    if links.handle_connection_complete(&connected).is_err() {
+        return false;
+    }
+
+    let value_handle = 8;
+    let mut subscriptions = GattSubscriptions::new();
+    if subscriptions.configure(&links, 0x42, value_handle, 0x0003).is_err() {
+        return false;
+    }
+    let mut policies = AttSecurityPolicies::new();
+    if policies.require(value_handle, AttSecurityRequirement::Authenticated).is_err() {
+        return false;
+    }
+
+    let mut sessions = LeSecuritySessions::new();
+    let mut out = [0_u8; MAX_ATT_PDU];
+    if subscriptions.emit_secured(
+        &links,
+        &sessions,
+        &policies,
+        0x42,
+        value_handle,
+        false,
+        &[87],
+        &mut out,
+    ).is_ok() {
+        return false;
+    }
+
+    let mut bonds = LeBondStore::new();
+    let unauthenticated = LeBondMaterial {
+        ltk: [0x44; 16],
+        ediv: 1,
+        rand: 2,
+        key_size: 16,
+        authenticated: false,
+    };
+    if bonds.store(&links, 0x42, unauthenticated).is_err()
+        || sessions.encryption_change(
+            &links,
+            &bonds,
+            &[EVT_ENCRYPTION_CHANGE, 4, 0, 0x42, 0, 1],
+        ).is_err()
+        || subscriptions.emit_secured(
+            &links,
+            &sessions,
+            &policies,
+            0x42,
+            value_handle,
+            false,
+            &[86],
+            &mut out,
+        ).is_ok()
+    {
+        return false;
+    }
+
+    let authenticated = LeBondMaterial { authenticated: true, ..unauthenticated };
+    if bonds.store(&links, 0x42, authenticated).is_err()
+        || sessions.encryption_change(
+            &links,
+            &bonds,
+            &[EVT_ENCRYPTION_CHANGE, 4, 0, 0x42, 0, 1],
+        ).is_err()
+        || subscriptions.emit_secured(
+            &links,
+            &sessions,
+            &policies,
+            0x42,
+            value_handle,
+            false,
+            &[85],
+            &mut out,
+        ) != Ok(4)
+        || out[..4] != [ATT_OP_HANDLE_VALUE_NOTIFICATION, 8, 0, 85]
+        || subscriptions.emit_secured(
+            &links,
+            &sessions,
+            &policies,
+            0x42,
+            value_handle,
+            true,
+            &[84],
+            &mut out,
+        ) != Ok(4)
+        || out[..4] != [ATT_OP_HANDLE_VALUE_INDICATION, 8, 0, 84]
+    {
+        return false;
+    }
+
+    let disabled = [EVT_ENCRYPTION_CHANGE, 4, 0, 0x42, 0, 0];
+    sessions.encryption_change(&links, &bonds, &disabled) == Ok(0x42)
+        && subscriptions.emit_secured(
+            &links,
+            &sessions,
+            &policies,
+            0x42,
+            value_handle,
+            false,
+            &[83],
+            &mut out,
+        ).is_err()
+        && subscriptions.emit(
+            &links,
+            0x42,
+            value_handle,
+            false,
+            &[82],
+            &mut out,
+        ) == Ok(4)
+}
