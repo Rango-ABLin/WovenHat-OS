@@ -3205,3 +3205,242 @@ pub fn le_encrypted_session_self_test() -> bool {
         && bonds.count() == 1
         && sessions.encryption_change(&links, &bonds, &reencrypted).is_err()
 }
+
+
+// Stage 13.10P: ATT/GATT authorization bound to LE encrypted-session state.
+pub const ATT_ERR_INSUFFICIENT_AUTHENTICATION: u8 = 0x05;
+pub const ATT_ERR_INSUFFICIENT_ENCRYPTION: u8 = 0x0f;
+pub const MAX_ATT_SECURITY_POLICIES: usize = MAX_ATT_ATTRIBUTES;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AttSecurityRequirement {
+    Encrypted,
+    Authenticated,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct AttSecurityPolicy {
+    pub attribute_handle: u16,
+    pub requirement: AttSecurityRequirement,
+}
+
+pub struct AttSecurityPolicies {
+    entries: [Option<AttSecurityPolicy>; MAX_ATT_SECURITY_POLICIES],
+    count: usize,
+}
+
+impl AttSecurityPolicies {
+    pub const fn new() -> Self {
+        Self { entries: [None; MAX_ATT_SECURITY_POLICIES], count: 0 }
+    }
+
+    pub fn require(
+        &mut self,
+        attribute_handle: u16,
+        requirement: AttSecurityRequirement,
+    ) -> Result<(), HciError> {
+        if attribute_handle == 0 {
+            return Err(HciError::MalformedEvent);
+        }
+        if let Some(index) = self.entries[..self.count].iter().position(|entry| {
+            entry.is_some_and(|policy| policy.attribute_handle == attribute_handle)
+        }) {
+            self.entries[index] = Some(AttSecurityPolicy { attribute_handle, requirement });
+            return Ok(());
+        }
+        if self.count == MAX_ATT_SECURITY_POLICIES {
+            return Err(HciError::ControllerFailure(0xff));
+        }
+        self.entries[self.count] = Some(AttSecurityPolicy { attribute_handle, requirement });
+        self.count += 1;
+        Ok(())
+    }
+
+    fn requirement(&self, attribute_handle: u16) -> Option<AttSecurityRequirement> {
+        self.entries[..self.count]
+            .iter()
+            .flatten()
+            .find(|policy| policy.attribute_handle == attribute_handle)
+            .map(|policy| policy.requirement)
+    }
+
+    pub fn count(&self) -> usize { self.count }
+}
+
+impl AttDatabase {
+    pub fn transact_secured(
+        &mut self,
+        links: &LeLinkState,
+        sessions: &LeSecuritySessions,
+        policies: &AttSecurityPolicies,
+        connection_handle: u16,
+        request: &[u8],
+        out: &mut [u8; MAX_ATT_PDU],
+    ) -> Result<usize, HciError> {
+        if !links.contains_handle(connection_handle) {
+            return Err(HciError::UnexpectedOpcode);
+        }
+        let Some(&opcode) = request.first() else {
+            return Err(HciError::MalformedEvent);
+        };
+        let handle = match opcode {
+            ATT_OP_READ_REQUEST if request.len() == 3 => u16::from_le_bytes([request[1], request[2]]),
+            ATT_OP_WRITE_REQUEST if request.len() >= 3 => u16::from_le_bytes([request[1], request[2]]),
+            _ => return self.transact(links, connection_handle, request, out),
+        };
+
+        if let Some(requirement) = policies.requirement(handle) {
+            let Some(session) = sessions.session(connection_handle) else {
+                return Ok(Self::error_response(
+                    opcode,
+                    handle,
+                    ATT_ERR_INSUFFICIENT_ENCRYPTION,
+                    out,
+                ));
+            };
+            if requirement == AttSecurityRequirement::Authenticated && !session.authenticated {
+                return Ok(Self::error_response(
+                    opcode,
+                    handle,
+                    ATT_ERR_INSUFFICIENT_AUTHENTICATION,
+                    out,
+                ));
+            }
+        }
+        self.transact(links, connection_handle, request, out)
+    }
+}
+
+impl GattDatabase {
+    pub fn transact_secured(
+        &mut self,
+        links: &LeLinkState,
+        sessions: &LeSecuritySessions,
+        policies: &AttSecurityPolicies,
+        connection_handle: u16,
+        request: &[u8],
+        out: &mut [u8; MAX_ATT_PDU],
+    ) -> Result<usize, HciError> {
+        self.att.transact_secured(
+            links,
+            sessions,
+            policies,
+            connection_handle,
+            request,
+            out,
+        )
+    }
+}
+
+pub fn le_gatt_security_policy_self_test() -> bool {
+    let mut links = LeLinkState::new();
+    let connected = [
+        EVT_LE_META, 19, LE_SUBEVENT_CONNECTION_COMPLETE, 0,
+        0x42, 0x00, 0, 1, 1, 2, 3, 4, 5, 6,
+        0x18, 0x00, 0, 0, 0xf4, 0x01, 0,
+    ];
+    if links.handle_connection_complete(&connected).is_err() {
+        return false;
+    }
+
+    let mut gatt = GattDatabase::new();
+    let Ok(handles) = gatt.add_wovenhat_os_service(b"ready") else { return false; };
+    let mut policies = AttSecurityPolicies::new();
+    if policies.require(handles.status_value, AttSecurityRequirement::Encrypted).is_err()
+        || policies.require(handles.command_value, AttSecurityRequirement::Authenticated).is_err()
+        || policies.count() != 2
+    {
+        return false;
+    }
+
+    let mut sessions = LeSecuritySessions::new();
+    let mut out = [0_u8; MAX_ATT_PDU];
+    if gatt.transact_secured(
+        &links,
+        &sessions,
+        &policies,
+        0x42,
+        &[ATT_OP_READ_REQUEST, handles.status_value as u8, (handles.status_value >> 8) as u8],
+        &mut out,
+    ) != Ok(5)
+        || out[4] != ATT_ERR_INSUFFICIENT_ENCRYPTION
+    {
+        return false;
+    }
+
+    let unauthenticated = LeBondMaterial {
+        ltk: [0x33; 16],
+        ediv: 7,
+        rand: 9,
+        key_size: 16,
+        authenticated: false,
+    };
+    let mut bonds = LeBondStore::new();
+    if bonds.store(&links, 0x42, unauthenticated).is_err()
+        || sessions.encryption_change(
+            &links,
+            &bonds,
+            &[EVT_ENCRYPTION_CHANGE, 4, 0, 0x42, 0, 1],
+        ).is_err()
+    {
+        return false;
+    }
+    if gatt.transact_secured(
+        &links,
+        &sessions,
+        &policies,
+        0x42,
+        &[ATT_OP_READ_REQUEST, handles.status_value as u8, (handles.status_value >> 8) as u8],
+        &mut out,
+    ) != Ok(6)
+        || out[..6] != [ATT_OP_READ_RESPONSE, b'r', b'e', b'a', b'd', b'y']
+    {
+        return false;
+    }
+    if gatt.transact_secured(
+        &links,
+        &sessions,
+        &policies,
+        0x42,
+        &[ATT_OP_WRITE_REQUEST, handles.command_value as u8, (handles.command_value >> 8) as u8, b'x'],
+        &mut out,
+    ) != Ok(5)
+        || out[4] != ATT_ERR_INSUFFICIENT_AUTHENTICATION
+    {
+        return false;
+    }
+
+    let authenticated = LeBondMaterial { authenticated: true, ..unauthenticated };
+    if bonds.store(&links, 0x42, authenticated).is_err()
+        || sessions.encryption_change(
+            &links,
+            &bonds,
+            &[EVT_ENCRYPTION_CHANGE, 4, 0, 0x42, 0, 1],
+        ).is_err()
+    {
+        return false;
+    }
+    if gatt.transact_secured(
+        &links,
+        &sessions,
+        &policies,
+        0x42,
+        &[ATT_OP_WRITE_REQUEST, handles.command_value as u8, (handles.command_value >> 8) as u8, b'p', b'i', b'n', b'g'],
+        &mut out,
+    ) != Ok(1)
+        || out[0] != ATT_OP_WRITE_RESPONSE
+    {
+        return false;
+    }
+
+    let disconnected = [EVT_DISCONNECTION_COMPLETE, 4, 0, 0x42, 0, 0x13];
+    sessions.disconnect(&mut links, &disconnected).is_ok()
+        && gatt.transact_secured(
+            &links,
+            &sessions,
+            &policies,
+            0x42,
+            &[ATT_OP_READ_REQUEST, handles.status_value as u8, (handles.status_value >> 8) as u8],
+            &mut out,
+        ).is_err()
+}
