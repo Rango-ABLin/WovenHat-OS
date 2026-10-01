@@ -2699,3 +2699,168 @@ pub fn self_test() -> bool {
     parse_command_complete(&[EVT_COMMAND_COMPLETE, 3, 1, 3, 12]).is_err()
         && HciCommand::new(0x0001, &[0u8; MAX_HCI_PAYLOAD]).is_ok()
 }
+
+
+// Stage 13.10M: bounded LE bond persistence and reconnect restoration.
+pub const MAX_LE_BONDS: usize = 8;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct LeBondMaterial {
+    pub ltk: [u8; 16],
+    pub ediv: u16,
+    pub rand: u64,
+    pub key_size: u8,
+    pub authenticated: bool,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct LeBond {
+    pub address_type: u8,
+    pub address: [u8; 6],
+    pub material: LeBondMaterial,
+}
+
+pub struct LeBondStore {
+    bonds: [Option<LeBond>; MAX_LE_BONDS],
+    count: usize,
+}
+
+impl LeBondStore {
+    pub const fn new() -> Self {
+        Self { bonds: [None; MAX_LE_BONDS], count: 0 }
+    }
+
+    fn live_link(links: &LeLinkState, handle: u16) -> Option<LeLink> {
+        (0..links.count())
+            .filter_map(|index| links.link(index))
+            .find(|link| link.handle == handle)
+    }
+
+    pub fn store(
+        &mut self,
+        links: &LeLinkState,
+        handle: u16,
+        material: LeBondMaterial,
+    ) -> Result<(), HciError> {
+        let Some(link) = Self::live_link(links, handle) else {
+            return Err(HciError::UnexpectedOpcode);
+        };
+        if !(7..=16).contains(&material.key_size) {
+            return Err(HciError::MalformedEvent);
+        }
+        let bond = LeBond {
+            address_type: link.address_type,
+            address: link.address,
+            material,
+        };
+        if let Some(index) = self.bonds[..self.count].iter().position(|entry| {
+            entry.is_some_and(|stored| {
+                stored.address_type == bond.address_type && stored.address == bond.address
+            })
+        }) {
+            self.bonds[index] = Some(bond);
+            return Ok(());
+        }
+        if self.count == MAX_LE_BONDS {
+            return Err(HciError::ControllerFailure(0xff));
+        }
+        self.bonds[self.count] = Some(bond);
+        self.count += 1;
+        Ok(())
+    }
+
+    pub fn restore(&self, links: &LeLinkState, handle: u16) -> Result<LeBondMaterial, HciError> {
+        let Some(link) = Self::live_link(links, handle) else {
+            return Err(HciError::UnexpectedOpcode);
+        };
+        self.bonds[..self.count]
+            .iter()
+            .flatten()
+            .find(|bond| bond.address_type == link.address_type && bond.address == link.address)
+            .map(|bond| bond.material)
+            .ok_or(HciError::UnexpectedOpcode)
+    }
+
+    pub fn remove(&mut self, address_type: u8, address: [u8; 6]) -> bool {
+        let Some(index) = self.bonds[..self.count].iter().position(|entry| {
+            entry.is_some_and(|bond| bond.address_type == address_type && bond.address == address)
+        }) else {
+            return false;
+        };
+        for slot in index..self.count - 1 {
+            self.bonds[slot] = self.bonds[slot + 1];
+        }
+        self.count -= 1;
+        self.bonds[self.count] = None;
+        true
+    }
+
+    pub fn count(&self) -> usize { self.count }
+}
+
+pub fn le_bond_persistence_self_test() -> bool {
+    let mut links = LeLinkState::new();
+    let connected = [
+        EVT_LE_META, 19, LE_SUBEVENT_CONNECTION_COMPLETE, 0,
+        0x42, 0x00, 0, 1, 1, 2, 3, 4, 5, 6,
+        0x18, 0x00, 0, 0, 0xf4, 0x01, 0,
+    ];
+    if links.handle_connection_complete(&connected).is_err() {
+        return false;
+    }
+
+    let material = LeBondMaterial {
+        ltk: [0xa5; 16],
+        ediv: 0x1234,
+        rand: 0x1122_3344_5566_7788,
+        key_size: 16,
+        authenticated: true,
+    };
+    let mut bonds = LeBondStore::new();
+    if bonds.store(&links, 0x42, material).is_err()
+        || bonds.count() != 1
+        || bonds.restore(&links, 0x42) != Ok(material)
+        || bonds.store(&links, 0x43, material).is_ok()
+    {
+        return false;
+    }
+
+    let invalid = LeBondMaterial { key_size: 6, ..material };
+    if bonds.store(&links, 0x42, invalid).is_ok() || bonds.count() != 1 {
+        return false;
+    }
+
+    let disconnected = [EVT_DISCONNECTION_COMPLETE, 4, 0, 0x42, 0, 0x13];
+    if links.handle_disconnection_complete(&disconnected).is_err()
+        || bonds.restore(&links, 0x42).is_ok()
+        || bonds.count() != 1
+    {
+        return false;
+    }
+
+    let reconnected = [
+        EVT_LE_META, 19, LE_SUBEVENT_CONNECTION_COMPLETE, 0,
+        0x55, 0x00, 0, 1, 1, 2, 3, 4, 5, 6,
+        0x18, 0x00, 0, 0, 0xf4, 0x01, 0,
+    ];
+    if links.handle_connection_complete(&reconnected).is_err()
+        || bonds.restore(&links, 0x55) != Ok(material)
+    {
+        return false;
+    }
+
+    let disconnected_again = [EVT_DISCONNECTION_COMPLETE, 4, 0, 0x55, 0, 0x13];
+    if links.handle_disconnection_complete(&disconnected_again).is_err() {
+        return false;
+    }
+    let wrong_peer = [
+        EVT_LE_META, 19, LE_SUBEVENT_CONNECTION_COMPLETE, 0,
+        0x56, 0x00, 0, 1, 6, 5, 4, 3, 2, 1,
+        0x18, 0x00, 0, 0, 0xf4, 0x01, 0,
+    ];
+    links.handle_connection_complete(&wrong_peer).is_ok()
+        && bonds.restore(&links, 0x56).is_err()
+        && bonds.remove(1, [1, 2, 3, 4, 5, 6])
+        && bonds.count() == 0
+        && !bonds.remove(1, [1, 2, 3, 4, 5, 6])
+}
