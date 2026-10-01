@@ -1433,7 +1433,7 @@ pub fn ble_smp_foundation_self_test() -> bool {
     { return false; }
     let disconnected = [EVT_DISCONNECTION_COMPLETE, 4, 0, 0x42, 0, 0x13];
     links.handle_disconnection_complete(&disconnected).is_ok()
-        && !bonds.trusted(&links, 0x42)
+        && !bonds.bonded(&links, 0x42)
         && bonds.count() == 1
 }
 
