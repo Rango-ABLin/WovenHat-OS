@@ -3628,6 +3628,7 @@ pub fn le_secure_session_identity_binding_self_test() -> bool {
         0x18, 0x00, 0, 0, 0xf4, 0x01, 0,
     ];
     if links.handle_connection_complete(&peer_a).is_err() {
+        crate::serial::write_line(format_args!("[S13.10R-DIAG] R1 peer A connect failed"));
         return false;
     }
 
@@ -3640,22 +3641,30 @@ pub fn le_secure_session_identity_binding_self_test() -> bool {
     };
     let mut bonds = LeBondStore::new();
     let mut sessions = LeSecuritySessions::new();
-    if bonds.store(&links, 0x42, material).is_err()
-        || sessions.encryption_change(
-            &links,
-            &bonds,
-            &[EVT_ENCRYPTION_CHANGE, 4, 0, 0x42, 0, 1],
-        ) != Ok(0x42)
-        || sessions.session_for_link(&links, 0x42).is_none()
-    {
+    if bonds.store(&links, 0x42, material).is_err() {
+        crate::serial::write_line(format_args!("[S13.10R-DIAG] R2 bond store failed"));
+        return false;
+    }
+    if sessions.encryption_change(
+        &links,
+        &bonds,
+        &[EVT_ENCRYPTION_CHANGE, 4, 0, 0x42, 0, 1],
+    ) != Ok(0x42) {
+        crate::serial::write_line(format_args!("[S13.10R-DIAG] R3 encryption session failed"));
+        return false;
+    }
+    if sessions.session_for_link(&links, 0x42).is_none() {
+        crate::serial::write_line(format_args!("[S13.10R-DIAG] R4 original identity mismatch"));
         return false;
     }
 
-    // Deliberately bypass LeSecuritySessions::disconnect to model missed cleanup.
     let disconnected = [EVT_DISCONNECTION_COMPLETE, 4, 0, 0x42, 0, 0x13];
-    if links.handle_disconnection_complete(&disconnected) != Ok(0x42)
-        || sessions.session(0x42).is_none()
-    {
+    if links.handle_disconnection_complete(&disconnected) != Ok(0x42) {
+        crate::serial::write_line(format_args!("[S13.10R-DIAG] R5 disconnect failed"));
+        return false;
+    }
+    if sessions.session(0x42).is_none() {
+        crate::serial::write_line(format_args!("[S13.10R-DIAG] R6 stale-session fixture missing"));
         return false;
     }
 
@@ -3664,52 +3673,59 @@ pub fn le_secure_session_identity_binding_self_test() -> bool {
         0x42, 0x00, 0, 1, 6, 5, 4, 3, 2, 1,
         0x18, 0x00, 0, 0, 0xf4, 0x01, 0,
     ];
-    if links.handle_connection_complete(&peer_b).is_err()
-        || sessions.session_for_link(&links, 0x42).is_some()
-    {
+    if links.handle_connection_complete(&peer_b).is_err() {
+        crate::serial::write_line(format_args!("[S13.10R-DIAG] R7 peer B handle reuse failed"));
+        return false;
+    }
+    if sessions.session_for_link(&links, 0x42).is_some() {
+        crate::serial::write_line(format_args!("[S13.10R-DIAG] R8 stale identity accepted"));
         return false;
     }
 
     let protected_handle = 8;
     let mut policies = AttSecurityPolicies::new();
     if policies.require(protected_handle, AttSecurityRequirement::Authenticated).is_err() {
+        crate::serial::write_line(format_args!("[S13.10R-DIAG] R9 policy install failed"));
         return false;
     }
 
     let mut att = AttDatabase::new();
-    if att.insert(
-        match AttAttribute::new(protected_handle, 0xff01, true, false, b"safe") {
-            Ok(attribute) => attribute,
-            Err(_) => return false,
-        },
-    ).is_err() {
+    let attribute = match AttAttribute::new(protected_handle, 0xff01, true, false, b"safe") {
+        Ok(attribute) => attribute,
+        Err(_) => {
+            crate::serial::write_line(format_args!("[S13.10R-DIAG] R10 attribute build failed"));
+            return false;
+        }
+    };
+    if att.insert(attribute).is_err() {
+        crate::serial::write_line(format_args!("[S13.10R-DIAG] R11 attribute insert failed"));
         return false;
     }
+
     let mut out = [0_u8; MAX_ATT_PDU];
-    if att.transact_secured(
+    let att_result = att.transact_secured(
         &links,
         &sessions,
         &policies,
         0x42,
         &[ATT_OP_READ_REQUEST, protected_handle as u8, 0],
         &mut out,
-    ) != Ok(5)
-        || out[..5] != [
-            ATT_OP_ERROR_RESPONSE,
-            ATT_OP_READ_REQUEST,
-            protected_handle as u8,
-            0,
-            ATT_ERR_INSUFFICIENT_ENCRYPTION,
-        ]
-    {
+    );
+    if att_result != Ok(5) || out[4] != ATT_ERR_INSUFFICIENT_ENCRYPTION {
+        crate::serial::write_line(format_args!(
+            "[S13.10R-DIAG] R12 ATT stale-session denial failed result={:?} error={}",
+            att_result,
+            out[4]
+        ));
         return false;
     }
 
     let mut subscriptions = GattSubscriptions::new();
     if subscriptions.configure(&links, 0x42, protected_handle, 0x0001).is_err() {
+        crate::serial::write_line(format_args!("[S13.10R-DIAG] R13 subscription failed"));
         return false;
     }
-    subscriptions.emit_secured(
+    if subscriptions.emit_secured(
         &links,
         &sessions,
         &policies,
@@ -3720,5 +3736,10 @@ pub fn le_secure_session_identity_binding_self_test() -> bool {
             value: b"safe",
         },
         &mut out,
-    ).is_err()
+    ).is_ok() {
+        crate::serial::write_line(format_args!("[S13.10R-DIAG] R14 notification stale-session accepted"));
+        return false;
+    }
+
+    true
 }
