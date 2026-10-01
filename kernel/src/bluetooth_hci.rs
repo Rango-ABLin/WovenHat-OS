@@ -546,7 +546,7 @@ pub fn le_discovery_self_test() -> bool {
     }
 
     let report = [
-        EVT_LE_META, 15, LE_SUBEVENT_ADVERTISING_REPORT, 1,
+        EVT_LE_META, 16, LE_SUBEVENT_ADVERTISING_REPORT, 1,
         0, 1, 1, 2, 3, 4, 5, 6,
         4, 2, 1, 6, 0xaa, 0xd8,
     ];
