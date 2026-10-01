@@ -1007,6 +1007,15 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         serial::write_line(format_args!(
             "[S13.10J] Bluetooth GATT discovery: PASSED"
         ));
+        if !bluetooth_hci::gatt_subscription_self_test() {
+            serial::write_line(format_args!(
+                "[S13.10J] Bluetooth GATT subscriptions: FAILED"
+            ));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!(
+            "[S13.10J] Bluetooth GATT subscriptions: PASSED"
+        ));
     }
 
     if heap::init().is_err() {
