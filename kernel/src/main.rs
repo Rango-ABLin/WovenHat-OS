@@ -1088,6 +1088,15 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         serial::write_line(format_args!(
             "[S13.10N] Bluetooth LE bonded encryption restoration: PASSED"
         ));
+        if !bluetooth_hci::le_encrypted_session_self_test() {
+            serial::write_line(format_args!(
+                "[S13.10O] Bluetooth LE encrypted session state: FAILED"
+            ));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!(
+            "[S13.10O] Bluetooth LE encrypted session state: PASSED"
+        ));
     }
 
     if heap::init().is_err() {
