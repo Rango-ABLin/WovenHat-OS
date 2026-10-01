@@ -980,6 +980,15 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         serial::write_line(format_args!(
             "[S13.10I] Bluetooth LE connection lifecycle: PASSED"
         ));
+        if !bluetooth_hci::att_foundation_self_test() {
+            serial::write_line(format_args!(
+                "[S13.10J] Bluetooth ATT foundation: FAILED"
+            ));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!(
+            "[S13.10J] Bluetooth ATT foundation: PASSED"
+        ));
     }
 
     if heap::init().is_err() {
