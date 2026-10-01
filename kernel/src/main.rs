@@ -1115,6 +1115,15 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         serial::write_line(format_args!(
             "[S13.11] BLE SMP teardown/rekey stress: PASSED"
         ));
+        if !bluetooth_hci::ble_controller_encryption_authority_self_test() {
+            serial::write_line(format_args!(
+                "[S13.11] BLE controller encryption authority: FAILED"
+            ));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!(
+            "[S13.11] BLE controller encryption authority: PASSED"
+        ));
     }
 
     if heap::init().is_err() {
