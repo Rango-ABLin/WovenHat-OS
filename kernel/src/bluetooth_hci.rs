@@ -688,6 +688,11 @@ impl LeLinkState {
         self.links[..self.count].iter().flatten().any(|link| link.handle == handle)
     }
 
+    pub fn clear(&mut self) {
+        self.links = [None; MAX_LE_LINKS];
+        self.count = 0;
+    }
+
     pub fn count(&self) -> usize { self.count }
     pub fn link(&self, index: usize) -> Option<LeLink> {
         if index >= self.count { None } else { self.links[index] }
@@ -990,6 +995,27 @@ impl GattSubscriptions {
         Ok(())
     }
 
+    pub fn revoke_connection(&mut self, connection_handle: u16) {
+        let mut write = 0;
+        for read in 0..self.count {
+            if let Some(entry) = self.entries[read] {
+                if entry.connection_handle != connection_handle {
+                    self.entries[write] = Some(entry);
+                    write += 1;
+                }
+            }
+        }
+        for slot in write..self.count { self.entries[slot] = None; }
+        self.count = write;
+    }
+
+    pub fn clear(&mut self) {
+        self.entries = [None; MAX_GATT_SUBSCRIPTIONS];
+        self.count = 0;
+    }
+
+    pub fn count(&self) -> usize { self.count }
+
     pub fn emit(
         &self,
         links: &LeLinkState,
@@ -1013,6 +1039,59 @@ impl GattSubscriptions {
         out[3..3 + value.len()].copy_from_slice(value);
         Ok(3 + value.len())
     }
+}
+
+pub struct BluetoothLeLifecycle {
+    pub links: LeLinkState,
+    pub subscriptions: GattSubscriptions,
+    generation: u32,
+}
+
+impl BluetoothLeLifecycle {
+    pub const fn new() -> Self {
+        Self { links: LeLinkState::new(), subscriptions: GattSubscriptions::new(), generation: 0 }
+    }
+
+    pub fn generation(&self) -> u32 { self.generation }
+
+    pub fn disconnect(&mut self, event: &[u8]) -> Result<u16, HciError> {
+        let handle = self.links.handle_disconnection_complete(event)?;
+        self.subscriptions.revoke_connection(handle);
+        self.generation = self.generation.wrapping_add(1);
+        Ok(handle)
+    }
+
+    pub fn controller_reset(&mut self) {
+        self.links.clear();
+        self.subscriptions.clear();
+        self.generation = self.generation.wrapping_add(1);
+    }
+}
+
+pub fn bluetooth_le_lifecycle_hardening_self_test() -> bool {
+    let mut lifecycle = BluetoothLeLifecycle::new();
+    let connected = [
+        EVT_LE_META, 19, LE_SUBEVENT_CONNECTION_COMPLETE, 0,
+        0x42, 0x00, 0, 1, 1, 2, 3, 4, 5, 6,
+        0x18, 0x00, 0, 0, 0xf4, 0x01, 0,
+    ];
+    if lifecycle.links.handle_connection_complete(&connected).is_err()
+        || lifecycle.subscriptions.configure(&lifecycle.links, 0x42, 8, 0x0001).is_err()
+        || lifecycle.subscriptions.count() != 1
+    { return false; }
+    let disconnected = [EVT_DISCONNECTION_COMPLETE, 4, 0, 0x42, 0, 0x13];
+    if lifecycle.disconnect(&disconnected) != Ok(0x42)
+        || lifecycle.links.contains_handle(0x42)
+        || lifecycle.subscriptions.count() != 0
+        || lifecycle.generation() != 1
+    { return false; }
+    if lifecycle.links.handle_connection_complete(&connected).is_err()
+        || lifecycle.subscriptions.configure(&lifecycle.links, 0x42, 8, 0x0001).is_err()
+    { return false; }
+    lifecycle.controller_reset();
+    lifecycle.links.count() == 0
+        && lifecycle.subscriptions.count() == 0
+        && lifecycle.generation() == 2
 }
 
 pub struct GattDatabase {
