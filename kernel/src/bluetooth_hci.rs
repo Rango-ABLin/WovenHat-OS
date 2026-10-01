@@ -1213,6 +1213,58 @@ pub fn ble_battery_notification_self_test() -> bool {
         && battery.level() == 86
 }
 
+pub const WOVENHAT_BLE_SERVICE_UUID: u16 = 0xff00;
+pub const WOVENHAT_BLE_STATUS_UUID: u16 = 0xff01;
+pub const WOVENHAT_BLE_COMMAND_UUID: u16 = 0xff02;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct WovenHatBleServiceHandles {
+    pub service: u16,
+    pub status_value: u16,
+    pub command_value: u16,
+}
+
+impl GattDatabase {
+    pub fn add_wovenhat_os_service(
+        &mut self,
+        status: &[u8],
+    ) -> Result<WovenHatBleServiceHandles, HciError> {
+        let service = self.add_primary_service(WOVENHAT_BLE_SERVICE_UUID)?;
+        let (_, status_value) =
+            self.add_characteristic(WOVENHAT_BLE_STATUS_UUID, true, false, status)?;
+        let (_, command_value) =
+            self.add_characteristic(WOVENHAT_BLE_COMMAND_UUID, false, true, &[])?;
+        Ok(WovenHatBleServiceHandles { service, status_value, command_value })
+    }
+}
+
+pub fn wovenhat_ble_service_self_test() -> bool {
+    let mut links = LeLinkState::new();
+    let connected = [
+        EVT_LE_META, 19, LE_SUBEVENT_CONNECTION_COMPLETE, 0,
+        0x42, 0x00, 0, 1, 1, 2, 3, 4, 5, 6,
+        0x18, 0x00, 0, 0, 0xf4, 0x01, 0,
+    ];
+    if links.handle_connection_complete(&connected).is_err() { return false; }
+    let mut gatt = GattDatabase::new();
+    let Ok(handles) = gatt.add_wovenhat_os_service(b"ready") else { return false; };
+    if handles != (WovenHatBleServiceHandles { service: 1, status_value: 3, command_value: 5 }) {
+        return false;
+    }
+    let mut out = [0_u8; MAX_ATT_PDU];
+    if gatt.transact(&links, 0x42, &[ATT_OP_READ_REQUEST, 3, 0], &mut out) != Ok(6)
+        || out[..6] != [ATT_OP_READ_RESPONSE, b'r', b'e', b'a', b'd', b'y']
+        || gatt.transact(&links, 0x42, &[ATT_OP_WRITE_REQUEST, 3, 0, b'x'], &mut out) != Ok(5)
+        || out[..5] != [ATT_OP_ERROR_RESPONSE, ATT_OP_WRITE_REQUEST, 3, 0, ATT_ERR_WRITE_NOT_PERMITTED]
+        || gatt.transact(&links, 0x42, &[ATT_OP_READ_REQUEST, 5, 0], &mut out) != Ok(5)
+        || out[..5] != [ATT_OP_ERROR_RESPONSE, ATT_OP_READ_REQUEST, 5, 0, ATT_ERR_READ_NOT_PERMITTED]
+        || gatt.transact(&links, 0x42, &[ATT_OP_WRITE_REQUEST, 5, 0, b'p', b'i', b'n', b'g'], &mut out) != Ok(1)
+    { return false; }
+    let disconnected = [EVT_DISCONNECTION_COMPLETE, 4, 0, 0x42, 0, 0x13];
+    links.handle_disconnection_complete(&disconnected).is_ok()
+        && gatt.transact(&links, 0x42, &[ATT_OP_WRITE_REQUEST, 5, 0, b'x'], &mut out).is_err()
+}
+
 pub fn ble_standard_profiles_self_test() -> bool {
     let mut links = LeLinkState::new();
     let connected = [
