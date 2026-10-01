@@ -1173,6 +1173,80 @@ pub fn bluetooth_le_lifecycle_stress_self_test() -> bool {
     lifecycle.generation() == 32
 }
 
+pub const BLE_SMP_CID: u16 = 0x0006;
+pub const BLE_SMP_PAIRING_REQUEST: u8 = 0x01;
+pub const BLE_SMP_PAIRING_RESPONSE: u8 = 0x02;
+pub const BLE_SMP_PAIRING_FAILED: u8 = 0x05;
+pub const MAX_BLE_BONDS: usize = 8;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct BleBond {
+    pub address_type: u8,
+    pub address: [u8; 6],
+    pub ltk: [u8; 16],
+    pub authenticated: bool,
+}
+
+pub struct BleBondStore {
+    bonds: [Option<BleBond>; MAX_BLE_BONDS],
+    count: usize,
+}
+
+impl BleBondStore {
+    pub const fn new() -> Self {
+        Self { bonds: [None; MAX_BLE_BONDS], count: 0 }
+    }
+
+    fn index(&self, address_type: u8, address: [u8; 6]) -> Option<usize> {
+        self.bonds[..self.count].iter().position(|entry| {
+            entry.is_some_and(|bond| bond.address_type == address_type && bond.address == address)
+        })
+    }
+
+    pub fn store(&mut self, links: &LeLinkState, handle: u16, ltk: [u8; 16], authenticated: bool) -> Result<(), HciError> {
+        let Some(link) = links.links[..links.count].iter().flatten().find(|link| link.handle == handle) else {
+            return Err(HciError::UnexpectedOpcode);
+        };
+        let bond = BleBond { address_type: link.address_type, address: link.address, ltk, authenticated };
+        if let Some(index) = self.index(link.address_type, link.address) {
+            self.bonds[index] = Some(bond);
+            return Ok(());
+        }
+        if self.count == MAX_BLE_BONDS { return Err(HciError::ControllerFailure(0xff)); }
+        self.bonds[self.count] = Some(bond);
+        self.count += 1;
+        Ok(())
+    }
+
+    pub fn trusted(&self, links: &LeLinkState, handle: u16) -> bool {
+        links.links[..links.count].iter().flatten().find(|link| link.handle == handle)
+            .is_some_and(|link| self.index(link.address_type, link.address).is_some())
+    }
+
+    pub fn count(&self) -> usize { self.count }
+}
+
+pub fn ble_smp_foundation_self_test() -> bool {
+    let mut links = LeLinkState::new();
+    let connected = [
+        EVT_LE_META, 19, LE_SUBEVENT_CONNECTION_COMPLETE, 0,
+        0x42, 0x00, 0, 1, 1, 2, 3, 4, 5, 6,
+        0x18, 0x00, 0, 0, 0xf4, 0x01, 0,
+    ];
+    if links.handle_connection_complete(&connected).is_err() { return false; }
+    let mut bonds = BleBondStore::new();
+    if bonds.trusted(&links, 0x42)
+        || bonds.store(&links, 0x43, [7; 16], true).is_ok()
+        || bonds.store(&links, 0x42, [7; 16], true).is_err()
+        || bonds.count() != 1
+        || !bonds.trusted(&links, 0x42)
+    { return false; }
+    let disconnected = [EVT_DISCONNECTION_COMPLETE, 4, 0, 0x42, 0, 0x13];
+    links.handle_disconnection_complete(&disconnected).is_ok()
+        && !bonds.trusted(&links, 0x42)
+        && bonds.count() == 1
+}
+
 pub struct GattDatabase {
     att: AttDatabase,
     next_handle: u16,
