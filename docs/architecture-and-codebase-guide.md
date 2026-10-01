@@ -464,3 +464,14 @@ The WovenHat OS BLE service demonstrates the custom-service boundary with separa
 GATT characteristic creation preflights capacity for both declaration and value attributes before mutation. This preserves database consistency under fixed-capacity exhaustion and prevents partially-created characteristic state.
 
 Stage 13.10L should harden controller/link/service lifecycle, teardown, malformed-event handling and recovery while retaining these ownership and permission boundaries.
+
+
+### Stage 13.10L Bluetooth lifecycle authority
+
+`BluetoothLeLifecycle` is the coordination boundary for LE link ownership and GATT subscription authority. Teardown is ordered: the live link is removed only after a structurally valid successful Disconnection Complete event identifies an owned handle; subscriptions for that exact handle are then revoked. Failed parsing or stale ownership returns an error before subscription or generation mutation.
+
+Controller reset is a stronger invalidation boundary and clears all live LE links and all GATT subscriptions. The lifecycle generation advances on each successful disconnect or reset, providing a bounded epoch signal for later controller/service recovery work.
+
+Reconnect deliberately creates no implicit subscription continuity. A re-established link must explicitly configure its GATT subscription again. This prevents stale CCCD-style authority from crossing disconnect/reset generations.
+
+The Stage 13.10L stress contract repeats these invariants across 32 cycles and alternates disconnect and reset paths. It is a software-state hardening boundary, not evidence of physical radio/controller recovery or interoperability.
