@@ -2864,3 +2864,129 @@ pub fn le_bond_persistence_self_test() -> bool {
         && bonds.count() == 0
         && !bonds.remove(1, [1, 2, 3, 4, 5, 6])
 }
+
+
+// Stage 13.10N: restore LE controller encryption from a persisted bond.
+pub const LE_SUBEVENT_LONG_TERM_KEY_REQUEST: u8 = 0x05;
+pub const OPCODE_LE_LONG_TERM_KEY_REQUEST_REPLY: u16 = 0x201a;
+pub const OPCODE_LE_LONG_TERM_KEY_REQUEST_NEGATIVE_REPLY: u16 = 0x201b;
+
+impl LeBondStore {
+    pub fn long_term_key_request_reply(
+        &self,
+        links: &LeLinkState,
+        event: &[u8],
+        out: &mut [u8; 258],
+    ) -> Result<usize, HciError> {
+        if event.len() != 15
+            || event[0] != EVT_LE_META
+            || event[1] != 13
+            || event[2] != LE_SUBEVENT_LONG_TERM_KEY_REQUEST
+        {
+            return Err(HciError::MalformedEvent);
+        }
+
+        let handle = u16::from_le_bytes([event[3], event[4]]);
+        let rand = u64::from_le_bytes([
+            event[5], event[6], event[7], event[8],
+            event[9], event[10], event[11], event[12],
+        ]);
+        let ediv = u16::from_le_bytes([event[13], event[14]]);
+        let material = self.restore(links, handle);
+
+        match material {
+            Ok(material) if material.rand == rand && material.ediv == ediv => {
+                let mut params = [0_u8; 18];
+                params[..2].copy_from_slice(&handle.to_le_bytes());
+                params[2..].copy_from_slice(&material.ltk);
+                HciCommand::new(OPCODE_LE_LONG_TERM_KEY_REQUEST_REPLY, &params)
+                    .map(|command| command.encode(out))
+            }
+            Ok(_) | Err(HciError::UnexpectedOpcode) => {
+                HciCommand::new(
+                    OPCODE_LE_LONG_TERM_KEY_REQUEST_NEGATIVE_REPLY,
+                    &handle.to_le_bytes(),
+                )
+                .map(|command| command.encode(out))
+            }
+            Err(error) => Err(error),
+        }
+    }
+}
+
+pub fn le_bond_encryption_restore_self_test() -> bool {
+    let mut links = LeLinkState::new();
+    let connected = [
+        EVT_LE_META, 19, LE_SUBEVENT_CONNECTION_COMPLETE, 0,
+        0x55, 0x00, 0, 1, 1, 2, 3, 4, 5, 6,
+        0x18, 0x00, 0, 0, 0xf4, 0x01, 0,
+    ];
+    if links.handle_connection_complete(&connected).is_err() {
+        return false;
+    }
+
+    let material = LeBondMaterial {
+        ltk: [0x5a; 16],
+        ediv: 0x1234,
+        rand: 0x1122_3344_5566_7788,
+        key_size: 16,
+        authenticated: true,
+    };
+    let mut bonds = LeBondStore::new();
+    if bonds.store(&links, 0x55, material).is_err() {
+        return false;
+    }
+
+    let mut request = [0_u8; 15];
+    request[0] = EVT_LE_META;
+    request[1] = 13;
+    request[2] = LE_SUBEVENT_LONG_TERM_KEY_REQUEST;
+    request[3..5].copy_from_slice(&0x55_u16.to_le_bytes());
+    request[5..13].copy_from_slice(&material.rand.to_le_bytes());
+    request[13..15].copy_from_slice(&material.ediv.to_le_bytes());
+
+    let mut out = [0_u8; 258];
+    if bonds.long_term_key_request_reply(&links, &request, &mut out) != Ok(21)
+        || u16::from_le_bytes([out[0], out[1]]) != OPCODE_LE_LONG_TERM_KEY_REQUEST_REPLY
+        || out[2] != 18
+        || out[3..5] != 0x55_u16.to_le_bytes()
+        || out[5..21] != material.ltk
+    {
+        return false;
+    }
+
+    let mut stale = request;
+    stale[5..13].copy_from_slice(&0x8877_6655_4433_2211_u64.to_le_bytes());
+    if bonds.long_term_key_request_reply(&links, &stale, &mut out) != Ok(5)
+        || u16::from_le_bytes([out[0], out[1]]) != OPCODE_LE_LONG_TERM_KEY_REQUEST_NEGATIVE_REPLY
+        || out[2] != 2
+        || out[3..5] != 0x55_u16.to_le_bytes()
+    {
+        return false;
+    }
+
+    let disconnected = [EVT_DISCONNECTION_COMPLETE, 4, 0, 0x55, 0, 0x13];
+    if links.handle_disconnection_complete(&disconnected).is_err() {
+        return false;
+    }
+    if bonds.long_term_key_request_reply(&links, &request, &mut out) != Ok(5)
+        || u16::from_le_bytes([out[0], out[1]]) != OPCODE_LE_LONG_TERM_KEY_REQUEST_NEGATIVE_REPLY
+    {
+        return false;
+    }
+
+    let reconnected = [
+        EVT_LE_META, 19, LE_SUBEVENT_CONNECTION_COMPLETE, 0,
+        0x66, 0x00, 0, 1, 1, 2, 3, 4, 5, 6,
+        0x18, 0x00, 0, 0, 0xf4, 0x01, 0,
+    ];
+    if links.handle_connection_complete(&reconnected).is_err() {
+        return false;
+    }
+    request[3..5].copy_from_slice(&0x66_u16.to_le_bytes());
+    bonds.long_term_key_request_reply(&links, &request, &mut out) == Ok(21)
+        && u16::from_le_bytes([out[0], out[1]]) == OPCODE_LE_LONG_TERM_KEY_REQUEST_REPLY
+        && out[3..5] == 0x66_u16.to_le_bytes()
+        && out[5..21] == material.ltk
+        && bonds.long_term_key_request_reply(&links, &request[..14], &mut out).is_err()
+}
