@@ -442,3 +442,14 @@ Bluetooth LE is modeled with state distinct from the BR/EDR discovery and link-k
 `LeLinkState` is the LE controller-handle authority boundary. LE Create Connection consumes an owned discovery record, carrying its peer address type and address into the controller command. A successful LE Connection Complete establishes a bounded handle/role/address/connection-parameter record. Conflicting handle or peer ownership is rejected rather than aliased. Disconnection Complete removes the record and makes the handle stale immediately.
 
 This layer intentionally does not reuse BR/EDR `LinkKeyStore` as BLE bonding state. Stage 13.10J ATT/GATT should consume live `LeLinkState` ownership and add bounded ATT transaction and attribute/service state. BLE SMP, long-term keys, privacy and bonding require a separate security model in a later slice.
+
+
+### Stage 13.10J Bluetooth ATT/GATT authority and service model
+
+ATT/GATT consumes `LeLinkState` as its lower-layer authority rather than treating an ATT attribute handle as global authority. `AttDatabase` is fixed-capacity, uses nonzero handles and bounded values, and rechecks the live LE controller handle on each transaction or discovery operation. Read/write permission checks remain in ATT so a higher GATT abstraction cannot bypass them.
+
+`GattDatabase` maps Primary Service declarations and Characteristic Declaration/value pairs into the ATT attribute space. Characteristic declarations carry a value handle and bounded properties; characteristic values retain their own ATT permissions. Service and characteristic discovery are handle-range bounded and remain tied to the requesting live LE link.
+
+`GattSubscriptions` records notification/indication authority as the tuple of LE connection handle and characteristic value handle. CCCD-style enable/disable state is bounded, invalid bit combinations are rejected, and every emitted Handle Value Notification or Indication rechecks both subscription mode and live LE ownership. Disconnect therefore makes retained subscription state unusable even before later cleanup/hardening.
+
+This stage is a deterministic kernel protocol foundation, not a claim of complete physical BLE GATT interoperability. Stage 13.10K should build standard/custom BLE profile services on this authority boundary. BLE SMP, bonding/LTK state and persistent key protection remain separate security work and must not reuse BR/EDR link-key authority.

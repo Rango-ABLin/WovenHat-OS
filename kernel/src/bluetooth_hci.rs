@@ -737,6 +737,466 @@ pub fn le_link_lifecycle_self_test() -> bool {
         && links.handle_disconnection_complete(&disconnected).is_err()
 }
 
+
+pub const ATT_OP_ERROR_RESPONSE: u8 = 0x01;
+pub const ATT_OP_READ_REQUEST: u8 = 0x0a;
+pub const ATT_OP_READ_RESPONSE: u8 = 0x0b;
+pub const ATT_OP_WRITE_REQUEST: u8 = 0x12;
+pub const ATT_OP_WRITE_RESPONSE: u8 = 0x13;
+pub const ATT_ERR_INVALID_HANDLE: u8 = 0x01;
+pub const ATT_ERR_READ_NOT_PERMITTED: u8 = 0x02;
+pub const ATT_ERR_WRITE_NOT_PERMITTED: u8 = 0x03;
+pub const ATT_ERR_INVALID_PDU: u8 = 0x04;
+pub const MAX_ATT_VALUE: usize = 64;
+pub const MAX_ATT_ATTRIBUTES: usize = 16;
+pub const MAX_ATT_PDU: usize = 67;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct AttAttribute {
+    pub handle: u16,
+    pub uuid16: u16,
+    pub readable: bool,
+    pub writable: bool,
+    value_len: u8,
+    value: [u8; MAX_ATT_VALUE],
+}
+
+impl AttAttribute {
+    pub fn new(handle: u16, uuid16: u16, readable: bool, writable: bool, value: &[u8]) -> Result<Self, HciError> {
+        if handle == 0 || value.len() > MAX_ATT_VALUE {
+            return Err(HciError::MalformedEvent);
+        }
+        let mut stored = [0_u8; MAX_ATT_VALUE];
+        stored[..value.len()].copy_from_slice(value);
+        Ok(Self { handle, uuid16, readable, writable, value_len: value.len() as u8, value: stored })
+    }
+    pub fn value(&self) -> &[u8] { &self.value[..self.value_len as usize] }
+}
+
+pub struct AttDatabase {
+    attributes: [Option<AttAttribute>; MAX_ATT_ATTRIBUTES],
+    count: usize,
+}
+
+impl AttDatabase {
+    pub const fn new() -> Self {
+        Self { attributes: [None; MAX_ATT_ATTRIBUTES], count: 0 }
+    }
+
+    pub fn insert(&mut self, attribute: AttAttribute) -> Result<(), HciError> {
+        if self.attributes[..self.count].iter().flatten().any(|entry| entry.handle == attribute.handle) {
+            return Err(HciError::UnexpectedOpcode);
+        }
+        if self.count == MAX_ATT_ATTRIBUTES {
+            return Err(HciError::ControllerFailure(0xff));
+        }
+        self.attributes[self.count] = Some(attribute);
+        self.count += 1;
+        Ok(())
+    }
+
+    fn find(&self, handle: u16) -> Option<&AttAttribute> {
+        self.attributes[..self.count].iter().flatten().find(|entry| entry.handle == handle)
+    }
+
+    fn find_mut(&mut self, handle: u16) -> Option<&mut AttAttribute> {
+        self.attributes[..self.count].iter_mut().flatten().find(|entry| entry.handle == handle)
+    }
+
+    fn error_response(request: u8, handle: u16, error: u8, out: &mut [u8; MAX_ATT_PDU]) -> usize {
+        out[0] = ATT_OP_ERROR_RESPONSE;
+        out[1] = request;
+        out[2..4].copy_from_slice(&handle.to_le_bytes());
+        out[4] = error;
+        5
+    }
+
+    pub fn discover_uuid16(
+        &self,
+        links: &LeLinkState,
+        connection_handle: u16,
+        start_handle: u16,
+        end_handle: u16,
+        uuid16: u16,
+        out: &mut [u16; MAX_ATT_ATTRIBUTES],
+    ) -> Result<usize, HciError> {
+        if !links.contains_handle(connection_handle) || start_handle == 0 || start_handle > end_handle {
+            return Err(HciError::UnexpectedOpcode);
+        }
+        let mut count = 0;
+        for attribute in self.attributes[..self.count].iter().flatten() {
+            if attribute.handle >= start_handle && attribute.handle <= end_handle && attribute.uuid16 == uuid16 {
+                out[count] = attribute.handle;
+                count += 1;
+            }
+        }
+        Ok(count)
+    }
+
+    pub fn transact(
+        &mut self,
+        links: &LeLinkState,
+        connection_handle: u16,
+        request: &[u8],
+        out: &mut [u8; MAX_ATT_PDU],
+    ) -> Result<usize, HciError> {
+        if !links.contains_handle(connection_handle) {
+            return Err(HciError::UnexpectedOpcode);
+        }
+        let Some(&opcode) = request.first() else {
+            return Err(HciError::MalformedEvent);
+        };
+        match opcode {
+            ATT_OP_READ_REQUEST => {
+                if request.len() != 3 {
+                    return Ok(Self::error_response(opcode, 0, ATT_ERR_INVALID_PDU, out));
+                }
+                let handle = u16::from_le_bytes([request[1], request[2]]);
+                let Some(attribute) = self.find(handle) else {
+                    return Ok(Self::error_response(opcode, handle, ATT_ERR_INVALID_HANDLE, out));
+                };
+                if !attribute.readable {
+                    return Ok(Self::error_response(opcode, handle, ATT_ERR_READ_NOT_PERMITTED, out));
+                }
+                out[0] = ATT_OP_READ_RESPONSE;
+                let value = attribute.value();
+                out[1..1 + value.len()].copy_from_slice(value);
+                Ok(1 + value.len())
+            }
+            ATT_OP_WRITE_REQUEST => {
+                if request.len() < 3 || request.len() - 3 > MAX_ATT_VALUE {
+                    return Ok(Self::error_response(opcode, 0, ATT_ERR_INVALID_PDU, out));
+                }
+                let handle = u16::from_le_bytes([request[1], request[2]]);
+                let Some(attribute) = self.find_mut(handle) else {
+                    return Ok(Self::error_response(opcode, handle, ATT_ERR_INVALID_HANDLE, out));
+                };
+                if !attribute.writable {
+                    return Ok(Self::error_response(opcode, handle, ATT_ERR_WRITE_NOT_PERMITTED, out));
+                }
+                let value = &request[3..];
+                attribute.value.fill(0);
+                attribute.value[..value.len()].copy_from_slice(value);
+                attribute.value_len = value.len() as u8;
+                out[0] = ATT_OP_WRITE_RESPONSE;
+                Ok(1)
+            }
+            _ => Ok(Self::error_response(opcode, 0, ATT_ERR_INVALID_PDU, out)),
+        }
+    }
+}
+
+pub fn att_foundation_self_test() -> bool {
+    let mut links = LeLinkState::new();
+    let connected = [
+        EVT_LE_META, 19, LE_SUBEVENT_CONNECTION_COMPLETE, 0,
+        0x42, 0x00, 0, 1, 1, 2, 3, 4, 5, 6,
+        0x18, 0x00, 0, 0, 0xf4, 0x01, 0,
+    ];
+    if links.handle_connection_complete(&connected).is_err() {
+        return false;
+    }
+    let mut db = AttDatabase::new();
+    let Ok(read_write) = AttAttribute::new(1, 0x2a00, true, true, b"WovenHat") else { return false; };
+    let Ok(read_only) = AttAttribute::new(2, 0x2a01, true, false, &[0, 0]) else { return false; };
+    if db.insert(read_write).is_err() || db.insert(read_only).is_err() {
+        return false;
+    }
+    let mut out = [0_u8; MAX_ATT_PDU];
+    if db.transact(&links, 0x42, &[ATT_OP_READ_REQUEST, 1, 0], &mut out) != Ok(9)
+        || out[..9] != [ATT_OP_READ_RESPONSE, b'W', b'o', b'v', b'e', b'n', b'H', b'a', b't']
+        || db.transact(&links, 0x42, &[ATT_OP_WRITE_REQUEST, 1, 0, b'O', b'S'], &mut out) != Ok(1)
+        || out[0] != ATT_OP_WRITE_RESPONSE
+        || db.transact(&links, 0x42, &[ATT_OP_READ_REQUEST, 1, 0], &mut out) != Ok(3)
+        || out[..3] != [ATT_OP_READ_RESPONSE, b'O', b'S']
+        || db.transact(&links, 0x42, &[ATT_OP_WRITE_REQUEST, 2, 0, 1], &mut out) != Ok(5)
+        || out[..5] != [ATT_OP_ERROR_RESPONSE, ATT_OP_WRITE_REQUEST, 2, 0, ATT_ERR_WRITE_NOT_PERMITTED]
+    {
+        return false;
+    }
+    let disconnected = [EVT_DISCONNECTION_COMPLETE, 4, 0, 0x42, 0, 0x13];
+    links.handle_disconnection_complete(&disconnected).is_ok()
+        && db.transact(&links, 0x42, &[ATT_OP_READ_REQUEST, 1, 0], &mut out).is_err()
+}
+
+
+pub const GATT_UUID_PRIMARY_SERVICE: u16 = 0x2800;
+pub const GATT_UUID_CHARACTERISTIC: u16 = 0x2803;
+pub const GATT_PROP_READ: u8 = 0x02;
+pub const GATT_PROP_WRITE: u8 = 0x08;
+pub const GATT_PROP_NOTIFY: u8 = 0x10;
+pub const GATT_PROP_INDICATE: u8 = 0x20;
+pub const GATT_UUID_CCCD: u16 = 0x2902;
+pub const ATT_OP_HANDLE_VALUE_NOTIFICATION: u8 = 0x1b;
+pub const ATT_OP_HANDLE_VALUE_INDICATION: u8 = 0x1d;
+pub const MAX_GATT_SUBSCRIPTIONS: usize = 8;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct GattSubscription {
+    pub connection_handle: u16,
+    pub value_handle: u16,
+    pub notify: bool,
+    pub indicate: bool,
+}
+
+pub struct GattSubscriptions {
+    entries: [Option<GattSubscription>; MAX_GATT_SUBSCRIPTIONS],
+    count: usize,
+}
+
+impl GattSubscriptions {
+    pub const fn new() -> Self {
+        Self { entries: [None; MAX_GATT_SUBSCRIPTIONS], count: 0 }
+    }
+
+    pub fn configure(
+        &mut self,
+        links: &LeLinkState,
+        connection_handle: u16,
+        value_handle: u16,
+        cccd: u16,
+    ) -> Result<(), HciError> {
+        if !links.contains_handle(connection_handle) || value_handle == 0 || cccd & !0x0003 != 0 {
+            return Err(HciError::UnexpectedOpcode);
+        }
+        if let Some(index) = self.entries[..self.count].iter().position(|entry| {
+            entry.is_some_and(|item| item.connection_handle == connection_handle && item.value_handle == value_handle)
+        }) {
+            if cccd == 0 {
+                for slot in index..self.count - 1 { self.entries[slot] = self.entries[slot + 1]; }
+                self.count -= 1;
+                self.entries[self.count] = None;
+            } else {
+                self.entries[index] = Some(GattSubscription {
+                    connection_handle,
+                    value_handle,
+                    notify: cccd & 0x0001 != 0,
+                    indicate: cccd & 0x0002 != 0,
+                });
+            }
+            return Ok(());
+        }
+        if cccd == 0 { return Ok(()); }
+        if self.count == MAX_GATT_SUBSCRIPTIONS { return Err(HciError::ControllerFailure(0xff)); }
+        self.entries[self.count] = Some(GattSubscription {
+            connection_handle,
+            value_handle,
+            notify: cccd & 0x0001 != 0,
+            indicate: cccd & 0x0002 != 0,
+        });
+        self.count += 1;
+        Ok(())
+    }
+
+    pub fn emit(
+        &self,
+        links: &LeLinkState,
+        connection_handle: u16,
+        value_handle: u16,
+        indication: bool,
+        value: &[u8],
+        out: &mut [u8; MAX_ATT_PDU],
+    ) -> Result<usize, HciError> {
+        if !links.contains_handle(connection_handle) || value_handle == 0 || value.len() + 3 > MAX_ATT_PDU {
+            return Err(HciError::UnexpectedOpcode);
+        }
+        let Some(subscription) = self.entries[..self.count].iter().flatten().find(|item| {
+            item.connection_handle == connection_handle && item.value_handle == value_handle
+        }) else { return Err(HciError::UnexpectedOpcode); };
+        if (indication && !subscription.indicate) || (!indication && !subscription.notify) {
+            return Err(HciError::UnexpectedOpcode);
+        }
+        out[0] = if indication { ATT_OP_HANDLE_VALUE_INDICATION } else { ATT_OP_HANDLE_VALUE_NOTIFICATION };
+        out[1..3].copy_from_slice(&value_handle.to_le_bytes());
+        out[3..3 + value.len()].copy_from_slice(value);
+        Ok(3 + value.len())
+    }
+}
+
+pub struct GattDatabase {
+    att: AttDatabase,
+    next_handle: u16,
+}
+
+impl GattDatabase {
+    pub const fn new() -> Self {
+        Self { att: AttDatabase::new(), next_handle: 1 }
+    }
+
+    pub fn add_primary_service(&mut self, uuid16: u16) -> Result<u16, HciError> {
+        let handle = self.next_handle;
+        let attribute = AttAttribute::new(
+            handle,
+            GATT_UUID_PRIMARY_SERVICE,
+            true,
+            false,
+            &uuid16.to_le_bytes(),
+        )?;
+        self.att.insert(attribute)?;
+        self.next_handle = self.next_handle.checked_add(1).ok_or(HciError::PayloadTooLarge)?;
+        Ok(handle)
+    }
+
+    pub fn add_characteristic(
+        &mut self,
+        uuid16: u16,
+        readable: bool,
+        writable: bool,
+        value: &[u8],
+    ) -> Result<(u16, u16), HciError> {
+        let declaration_handle = self.next_handle;
+        let value_handle = declaration_handle.checked_add(1).ok_or(HciError::PayloadTooLarge)?;
+        let mut declaration = [0_u8; 5];
+        declaration[0] = (if readable { GATT_PROP_READ } else { 0 })
+            | (if writable { GATT_PROP_WRITE } else { 0 });
+        declaration[1..3].copy_from_slice(&value_handle.to_le_bytes());
+        declaration[3..5].copy_from_slice(&uuid16.to_le_bytes());
+        self.att.insert(AttAttribute::new(
+            declaration_handle,
+            GATT_UUID_CHARACTERISTIC,
+            true,
+            false,
+            &declaration,
+        )?)?;
+        self.att.insert(AttAttribute::new(
+            value_handle,
+            uuid16,
+            readable,
+            writable,
+            value,
+        )?)?;
+        self.next_handle = value_handle.checked_add(1).ok_or(HciError::PayloadTooLarge)?;
+        Ok((declaration_handle, value_handle))
+    }
+
+    pub fn discover_primary_services(
+        &self,
+        links: &LeLinkState,
+        connection_handle: u16,
+        out: &mut [u16; MAX_ATT_ATTRIBUTES],
+    ) -> Result<usize, HciError> {
+        self.att.discover_uuid16(links, connection_handle, 1, u16::MAX, GATT_UUID_PRIMARY_SERVICE, out)
+    }
+
+    pub fn discover_characteristics(
+        &self,
+        links: &LeLinkState,
+        connection_handle: u16,
+        start_handle: u16,
+        end_handle: u16,
+        out: &mut [u16; MAX_ATT_ATTRIBUTES],
+    ) -> Result<usize, HciError> {
+        self.att.discover_uuid16(links, connection_handle, start_handle, end_handle, GATT_UUID_CHARACTERISTIC, out)
+    }
+
+    pub fn transact(
+        &mut self,
+        links: &LeLinkState,
+        connection_handle: u16,
+        request: &[u8],
+        out: &mut [u8; MAX_ATT_PDU],
+    ) -> Result<usize, HciError> {
+        self.att.transact(links, connection_handle, request, out)
+    }
+}
+
+pub fn gatt_foundation_self_test() -> bool {
+    let mut links = LeLinkState::new();
+    let connected = [
+        EVT_LE_META, 19, LE_SUBEVENT_CONNECTION_COMPLETE, 0,
+        0x42, 0x00, 0, 1, 1, 2, 3, 4, 5, 6,
+        0x18, 0x00, 0, 0, 0xf4, 0x01, 0,
+    ];
+    if links.handle_connection_complete(&connected).is_err() {
+        return false;
+    }
+
+    let mut gatt = GattDatabase::new();
+    if gatt.add_primary_service(0x1800) != Ok(1)
+        || gatt.add_characteristic(0x2a00, true, true, b"WovenHat") != Ok((2, 3))
+    {
+        return false;
+    }
+
+    let mut out = [0_u8; MAX_ATT_PDU];
+    if gatt.transact(&links, 0x42, &[ATT_OP_READ_REQUEST, 1, 0], &mut out) != Ok(3)
+        || out[..3] != [ATT_OP_READ_RESPONSE, 0x00, 0x18]
+        || gatt.transact(&links, 0x42, &[ATT_OP_READ_REQUEST, 2, 0], &mut out) != Ok(6)
+        || out[..6] != [ATT_OP_READ_RESPONSE, GATT_PROP_READ | GATT_PROP_WRITE, 3, 0, 0x00, 0x2a]
+        || gatt.transact(&links, 0x42, &[ATT_OP_READ_REQUEST, 3, 0], &mut out) != Ok(9)
+        || out[..9] != [ATT_OP_READ_RESPONSE, b'W', b'o', b'v', b'e', b'n', b'H', b'a', b't']
+        || gatt.transact(&links, 0x42, &[ATT_OP_WRITE_REQUEST, 2, 0, 1], &mut out) != Ok(5)
+        || out[..5] != [ATT_OP_ERROR_RESPONSE, ATT_OP_WRITE_REQUEST, 2, 0, ATT_ERR_WRITE_NOT_PERMITTED]
+        || gatt.transact(&links, 0x42, &[ATT_OP_WRITE_REQUEST, 3, 0, b'O', b'S'], &mut out) != Ok(1)
+        || gatt.transact(&links, 0x42, &[ATT_OP_READ_REQUEST, 3, 0], &mut out) != Ok(3)
+        || out[..3] != [ATT_OP_READ_RESPONSE, b'O', b'S']
+    {
+        return false;
+    }
+
+    let disconnected = [EVT_DISCONNECTION_COMPLETE, 4, 0, 0x42, 0, 0x13];
+    links.handle_disconnection_complete(&disconnected).is_ok()
+        && gatt.transact(&links, 0x42, &[ATT_OP_READ_REQUEST, 3, 0], &mut out).is_err()
+}
+
+
+pub fn gatt_discovery_self_test() -> bool {
+    let mut links = LeLinkState::new();
+    let connected = [
+        EVT_LE_META, 19, LE_SUBEVENT_CONNECTION_COMPLETE, 0,
+        0x42, 0x00, 0, 1, 1, 2, 3, 4, 5, 6,
+        0x18, 0x00, 0, 0, 0xf4, 0x01, 0,
+    ];
+    if links.handle_connection_complete(&connected).is_err() { return false; }
+    let mut gatt = GattDatabase::new();
+    if gatt.add_primary_service(0x1800) != Ok(1)
+        || gatt.add_characteristic(0x2a00, true, true, b"WovenHat") != Ok((2, 3))
+        || gatt.add_primary_service(0x180f) != Ok(4)
+        || gatt.add_characteristic(0x2a19, true, false, &[100]) != Ok((5, 6))
+    { return false; }
+
+    let mut found = [0_u16; MAX_ATT_ATTRIBUTES];
+    if gatt.discover_primary_services(&links, 0x42, &mut found) != Ok(2)
+        || found[..2] != [1, 4]
+        || gatt.discover_characteristics(&links, 0x42, 1, 3, &mut found) != Ok(1)
+        || found[0] != 2
+        || gatt.discover_characteristics(&links, 0x42, 4, 6, &mut found) != Ok(1)
+        || found[0] != 5
+    { return false; }
+
+    let disconnected = [EVT_DISCONNECTION_COMPLETE, 4, 0, 0x42, 0, 0x13];
+    links.handle_disconnection_complete(&disconnected).is_ok()
+        && gatt.discover_primary_services(&links, 0x42, &mut found).is_err()
+}
+
+
+pub fn gatt_subscription_self_test() -> bool {
+    let mut links = LeLinkState::new();
+    let connected = [
+        EVT_LE_META, 19, LE_SUBEVENT_CONNECTION_COMPLETE, 0,
+        0x42, 0x00, 0, 1, 1, 2, 3, 4, 5, 6,
+        0x18, 0x00, 0, 0, 0xf4, 0x01, 0,
+    ];
+    if links.handle_connection_complete(&connected).is_err() { return false; }
+    let mut subscriptions = GattSubscriptions::new();
+    let mut out = [0_u8; MAX_ATT_PDU];
+    if subscriptions.configure(&links, 0x42, 3, 0x0001).is_err()
+        || subscriptions.emit(&links, 0x42, 3, false, b"ready", &mut out) != Ok(8)
+        || out[..8] != [ATT_OP_HANDLE_VALUE_NOTIFICATION, 3, 0, b'r', b'e', b'a', b'd', b'y']
+        || subscriptions.emit(&links, 0x42, 3, true, b"ready", &mut out).is_ok()
+        || subscriptions.configure(&links, 0x42, 3, 0x0002).is_err()
+        || subscriptions.emit(&links, 0x42, 3, true, b"go", &mut out) != Ok(5)
+        || out[..5] != [ATT_OP_HANDLE_VALUE_INDICATION, 3, 0, b'g', b'o']
+        || subscriptions.configure(&links, 0x42, 3, 0).is_err()
+        || subscriptions.emit(&links, 0x42, 3, false, b"x", &mut out).is_ok()
+    { return false; }
+    if subscriptions.configure(&links, 0x42, 3, 0x0003).is_err() { return false; }
+    let disconnected = [EVT_DISCONNECTION_COMPLETE, 4, 0, 0x42, 0, 0x13];
+    links.handle_disconnection_complete(&disconnected).is_ok()
+        && subscriptions.emit(&links, 0x42, 3, false, b"x", &mut out).is_err()
+        && subscriptions.configure(&links, 0x42, 3, 0x0001).is_err()
+}
+
 pub const EVT_CONNECTION_COMPLETE: u8 = 0x03;
 pub const EVT_DISCONNECTION_COMPLETE: u8 = 0x05;
 pub const OPCODE_CREATE_CONNECTION: u16 = 0x0405;
