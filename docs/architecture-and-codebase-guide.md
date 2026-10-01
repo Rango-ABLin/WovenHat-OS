@@ -475,3 +475,16 @@ Controller reset is a stronger invalidation boundary and clears all live LE link
 Reconnect deliberately creates no implicit subscription continuity. A re-established link must explicitly configure its GATT subscription again. This prevents stale CCCD-style authority from crossing disconnect/reset generations.
 
 The Stage 13.10L stress contract repeats these invariants across 32 cycles and alternates disconnect and reset paths. It is a software-state hardening boundary, not evidence of physical radio/controller recovery or interoperability.
+
+
+### Stage 13.11 BLE SMP security foundation
+
+Stage 13.11 establishes a fail-closed BLE security authority separate from BR/EDR link-key state. SmpPairingState validates Pairing Request/Response framing and security parameters against a live LeLinkState handle before advancing negotiation. The negotiated encryption key size is the minimum accepted size, and encryption-key distribution is permitted only when both sides negotiated that distribution bit.
+
+SmpKeyDistribution treats Encryption Information followed by Master Identification as a transaction. An LTK is held only as pending secret material until the expected second PDU arrives on the same live handle. Wrong handles, malformed ordering, duplicate key information, invalid key-size padding and disconnected links fail closed. Abort/reset explicitly overwrites pending LTK bytes before releasing state.
+
+BleBondStore keys BLE bond authority by address type plus peer address. LTK bytes are private and the secret-bearing bond type is intentionally non-Copy. Replacing, removing or clearing a bond overwrites the old LTK before releasing the slot. Bond presence is not session trust: trusted() additionally requires current encrypted-link authority for the exact live LE handle. Disconnect/revocation therefore removes session authorization while allowing the bounded bond record to remain for a later authenticated reconnection flow.
+
+The deterministic stress contract executes 32 pairing/rekey lifecycle cycles covering abort-before-commit, disconnect-before-commit, stale-handle encryption rejection, successful encrypted authorization, disconnect revocation and repeated same-identity bond replacement. CI acceptance requires build, Clippy with warnings denied and 1/2/4 CPU QEMU runtime gates.
+
+This stage is a production-oriented software security foundation, not a claim of production-qualified BLE security. Remaining work before that claim includes wiring SMP to live LE ACL/L2CAP fixed CID 0x0006, consuming real controller Long Term Key Request and Encryption Change/Key Refresh events rather than synthetic encryption state, protecting persistent bond records with the Stage 12.3 storage/WovenGuard authority boundary, completing required SMP cryptographic procedures without ad-hoc cryptography, and qualifying teardown/recovery/interoperability on physical Bluetooth controllers. These requirements remain explicit acceptance gates.
