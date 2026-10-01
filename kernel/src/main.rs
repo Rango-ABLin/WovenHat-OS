@@ -1043,6 +1043,33 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         serial::write_line(format_args!(
             "[S13.10K] WovenHat BLE service API: PASSED"
         ));
+        if !bluetooth_hci::bluetooth_le_lifecycle_hardening_self_test() {
+            serial::write_line(format_args!(
+                "[S13.10L] Bluetooth LE lifecycle cleanup: FAILED"
+            ));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!(
+            "[S13.10L] Bluetooth LE lifecycle cleanup: PASSED"
+        ));
+        if !bluetooth_hci::bluetooth_le_recovery_self_test() {
+            serial::write_line(format_args!(
+                "[S13.10L] Bluetooth malformed teardown/reconnect recovery: FAILED"
+            ));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!(
+            "[S13.10L] Bluetooth malformed teardown/reconnect recovery: PASSED"
+        ));
+        if !bluetooth_hci::bluetooth_le_lifecycle_stress_self_test() {
+            serial::write_line(format_args!(
+                "[S13.10L] Bluetooth lifecycle stress: FAILED"
+            ));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!(
+            "[S13.10L] Bluetooth lifecycle stress: PASSED"
+        ));
     }
 
     if heap::init().is_err() {
