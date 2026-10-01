@@ -3113,6 +3113,13 @@ impl LeSecuritySessions {
             .copied()
     }
 
+    pub fn session_for_link(&self, links: &LeLinkState, handle: u16) -> Option<LeSecureSession> {
+        let link = Self::live_link(links, handle)?;
+        self.session(handle).filter(|session| {
+            session.address_type == link.address_type && session.address == link.address
+        })
+    }
+
     pub fn count(&self) -> usize { self.count }
 }
 
@@ -3290,7 +3297,7 @@ impl AttDatabase {
         };
 
         if let Some(requirement) = policies.requirement(handle) {
-            let Some(session) = sessions.session(connection_handle) else {
+            let Some(session) = sessions.session_for_link(links, connection_handle) else {
                 return Ok(Self::error_response(
                     opcode,
                     handle,
@@ -3609,4 +3616,98 @@ pub fn le_gatt_secure_notification_self_test() -> bool {
             &[82],
             &mut out,
         ) == Ok(4)
+}
+
+
+// Stage 13.10R: reject stale secure sessions after LE connection-handle reuse.
+pub fn le_secure_session_identity_binding_self_test() -> bool {
+    let mut links = LeLinkState::new();
+    let peer_a = [
+        EVT_LE_META, 19, LE_SUBEVENT_CONNECTION_COMPLETE, 0,
+        0x42, 0x00, 0, 1, 1, 2, 3, 4, 5, 6,
+        0x18, 0x00, 0, 0, 0xf4, 0x01, 0,
+    ];
+    if links.handle_connection_complete(&peer_a).is_err() {
+        return false;
+    }
+
+    let material = LeBondMaterial {
+        ltk: [0x52; 16],
+        ediv: 0x52,
+        rand: 0x5252,
+        key_size: 16,
+        authenticated: true,
+    };
+    let mut bonds = LeBondStore::new();
+    let mut sessions = LeSecuritySessions::new();
+    if bonds.store(&links, 0x42, material).is_err()
+        || sessions.encryption_change(
+            &links,
+            &bonds,
+            &[EVT_ENCRYPTION_CHANGE, 4, 0, 0x42, 0, 1],
+        ) != Ok(0x42)
+        || sessions.session_for_link(&links, 0x42).is_none()
+    {
+        return false;
+    }
+
+    // Simulate a missed security-session cleanup: the link layer drops peer A,
+    // but the transient secure-session table still contains handle 0x42.
+    let disconnected = [EVT_DISCONNECTION_COMPLETE, 4, 0, 0x42, 0, 0x13];
+    if links.handle_disconnection_complete(&disconnected) != Ok(0x42)
+        || sessions.session(0x42).is_none()
+    {
+        return false;
+    }
+
+    let peer_b = [
+        EVT_LE_META, 19, LE_SUBEVENT_CONNECTION_COMPLETE, 0,
+        0x42, 0x00, 0, 1, 6, 5, 4, 3, 2, 1,
+        0x18, 0x00, 0, 0, 0xf4, 0x01, 0,
+    ];
+    if links.handle_connection_complete(&peer_b).is_err()
+        || sessions.session_for_link(&links, 0x42).is_some()
+    {
+        return false;
+    }
+
+    let mut gatt = GattDatabase::new();
+    let Ok(handles) = gatt.add_wovenhat_os_service(b"safe") else { return false; };
+    let mut policies = AttSecurityPolicies::new();
+    if policies.require(handles.status_value, AttSecurityRequirement::Authenticated).is_err() {
+        return false;
+    }
+    let mut out = [0_u8; MAX_ATT_PDU];
+    let read = [
+        ATT_OP_READ_REQUEST,
+        handles.status_value as u8,
+        (handles.status_value >> 8) as u8,
+    ];
+    if gatt.transact_secured(
+        &links,
+        &sessions,
+        &policies,
+        0x42,
+        &read,
+        &mut out,
+    ) != Ok(5)
+        || out[4] != ATT_ERR_INSUFFICIENT_ENCRYPTION
+    {
+        return false;
+    }
+
+    let mut subscriptions = GattSubscriptions::new();
+    subscriptions.configure(&links, 0x42, handles.status_value, 0x0001).is_ok()
+        && subscriptions.emit_secured(
+            &links,
+            &sessions,
+            &policies,
+            GattSecuredEmission {
+                connection_handle: 0x42,
+                value_handle: handles.status_value,
+                indication: false,
+                value: b"safe",
+            },
+            &mut out,
+        ).is_err()
 }
