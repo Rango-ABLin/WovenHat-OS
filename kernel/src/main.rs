@@ -1115,15 +1115,18 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         serial::write_line(format_args!(
             "[S13.10Q] Bluetooth LE secure notifications/indications: PASSED"
         ));
-        if !bluetooth_hci::le_secure_session_identity_binding_self_test() {
-            serial::write_line(format_args!(
-                "[S13.10R] Bluetooth LE secure-session identity binding: FAILED"
-            ));
-            qemu_test_exit_failure();
+        match bluetooth_hci::le_secure_session_identity_binding_self_test() {
+            Ok(()) => serial::write_line(format_args!(
+                "[S13.10R] Bluetooth LE secure-session identity binding: PASSED"
+            )),
+            Err(checkpoint) => {
+                serial::write_line(format_args!(
+                    "[S13.10R] Bluetooth LE secure-session identity binding: FAILED checkpoint=R{}",
+                    checkpoint
+                ));
+                qemu_test_exit_failure();
+            }
         }
-        serial::write_line(format_args!(
-            "[S13.10R] Bluetooth LE secure-session identity binding: PASSED"
-        ));
     }
 
     if heap::init().is_err() {
