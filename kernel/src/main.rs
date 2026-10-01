@@ -1016,6 +1016,15 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         serial::write_line(format_args!(
             "[S13.10J] Bluetooth GATT subscriptions: PASSED"
         ));
+        if !bluetooth_hci::ble_standard_profiles_self_test() {
+            serial::write_line(format_args!(
+                "[S13.10K] Bluetooth BLE standard profiles: FAILED"
+            ));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!(
+            "[S13.10K] Bluetooth BLE standard profiles: PASSED"
+        ));
     }
 
     if heap::init().is_err() {
