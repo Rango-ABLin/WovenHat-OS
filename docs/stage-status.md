@@ -501,3 +501,18 @@ Malformed disconnect events and unknown/stale handles fail closed without changi
 The bounded stress gate executes 32 connect/subscribe/notify/teardown cycles, alternating normal disconnect with controller reset. Every cycle must end with zero live links, zero subscriptions and stale notification rejection. The accepted stress checkpoint run 36825376710 passed at exact SHA `4c0b0e5e0c8d3b9e00b47dc58868a154c9c970ef`; preserved evidence digest `sha256:67cc6f35203061ef8a79dfba3a8fef739db667bf7fb907b1eb989659c104f9e0`.
 
 This acceptance remains deterministic software validation. Physical Bluetooth controller/radio recovery, transport fault injection, BLE SMP/bonding/LTK security, persistent protected keys, radio interoperability and conformance certification remain outside this boundary.
+
+
+## Roadmap Stage 13.10R — BLE secure-session identity binding accepted on 2026-10-01
+
+Protected LE ATT/GATT operations now require the transient secure session to
+match the live link's peer address type and address as well as its connection
+handle. This rejects stale authorization when a controller reuses a handle for
+a different peer, including outbound notifications and indications. The exact
+tip passed host tests, warning-denying kernel Clippy, and the Stage 13.10
+1/2/4-CPU QEMU gate with the identity-binding marker.
+
+This remains deterministic software validation. Physical BLE controller/radio
+interoperability, transport fault injection, BLE SMP/bonding/LTK security,
+persistent protected keys, radio interoperability and conformance
+certification remain outside this boundary.

@@ -475,3 +475,17 @@ Controller reset is a stronger invalidation boundary and clears all live LE link
 Reconnect deliberately creates no implicit subscription continuity. A re-established link must explicitly configure its GATT subscription again. This prevents stale CCCD-style authority from crossing disconnect/reset generations.
 
 The Stage 13.10L stress contract repeats these invariants across 32 cycles and alternates disconnect and reset paths. It is a software-state hardening boundary, not evidence of physical radio/controller recovery or interoperability.
+
+
+### Stage 13.10R Bluetooth secure-session identity authority
+
+`LeSecuritySessions` stores the LE peer address type and address alongside the
+controller handle. `session_for_link` is the security boundary used by both
+ATT/GATT transactions and secured notification/indication emission: a session
+is valid only while the live `LeLinkState` entry has the same handle and peer
+identity. Handle reuse therefore cannot inherit the previous peer's protected
+authority even if transient teardown cleanup was missed.
+
+This remains bounded deterministic software state. It does not claim physical
+BLE controller recovery, SMP/LTK provisioning, radio interoperability or
+hardware qualification.
