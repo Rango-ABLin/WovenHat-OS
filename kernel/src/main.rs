@@ -1016,6 +1016,33 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         serial::write_line(format_args!(
             "[S13.10J] Bluetooth GATT subscriptions: PASSED"
         ));
+        if !bluetooth_hci::ble_standard_profiles_self_test() {
+            serial::write_line(format_args!(
+                "[S13.10K] Bluetooth BLE standard profiles: FAILED"
+            ));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!(
+            "[S13.10K] Bluetooth BLE standard profiles: PASSED"
+        ));
+        if !bluetooth_hci::ble_battery_notification_self_test() {
+            serial::write_line(format_args!(
+                "[S13.10K] Bluetooth Battery Service notifications: FAILED"
+            ));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!(
+            "[S13.10K] Bluetooth Battery Service notifications: PASSED"
+        ));
+        if !bluetooth_hci::wovenhat_ble_service_self_test() {
+            serial::write_line(format_args!(
+                "[S13.10K] WovenHat BLE service API: FAILED"
+            ));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!(
+            "[S13.10K] WovenHat BLE service API: PASSED"
+        ));
     }
 
     if heap::init().is_err() {

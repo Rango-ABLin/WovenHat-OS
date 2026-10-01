@@ -783,6 +783,8 @@ impl AttDatabase {
         Self { attributes: [None; MAX_ATT_ATTRIBUTES], count: 0 }
     }
 
+    pub fn remaining_capacity(&self) -> usize { MAX_ATT_ATTRIBUTES - self.count }
+
     pub fn insert(&mut self, attribute: AttAttribute) -> Result<(), HciError> {
         if self.attributes[..self.count].iter().flatten().any(|entry| entry.handle == attribute.handle) {
             return Err(HciError::UnexpectedOpcode);
@@ -1044,6 +1046,9 @@ impl GattDatabase {
         writable: bool,
         value: &[u8],
     ) -> Result<(u16, u16), HciError> {
+        if self.att.remaining_capacity() < 2 {
+            return Err(HciError::ControllerFailure(0xff));
+        }
         let declaration_handle = self.next_handle;
         let value_handle = declaration_handle.checked_add(1).ok_or(HciError::PayloadTooLarge)?;
         let mut declaration = [0_u8; 5];
@@ -1098,6 +1103,207 @@ impl GattDatabase {
     ) -> Result<usize, HciError> {
         self.att.transact(links, connection_handle, request, out)
     }
+}
+
+pub const BLE_SERVICE_DEVICE_INFORMATION: u16 = 0x180a;
+pub const BLE_SERVICE_BATTERY: u16 = 0x180f;
+pub const BLE_CHAR_MANUFACTURER_NAME: u16 = 0x2a29;
+pub const BLE_CHAR_MODEL_NUMBER: u16 = 0x2a24;
+pub const BLE_CHAR_BATTERY_LEVEL: u16 = 0x2a19;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct BleStandardProfileHandles {
+    pub device_information_service: u16,
+    pub manufacturer_name_value: u16,
+    pub model_number_value: u16,
+    pub battery_service: u16,
+    pub battery_level_value: u16,
+}
+
+impl GattDatabase {
+    pub fn add_wovenhat_standard_profiles(
+        &mut self,
+        manufacturer: &[u8],
+        model: &[u8],
+        battery_level: u8,
+    ) -> Result<BleStandardProfileHandles, HciError> {
+        if battery_level > 100 { return Err(HciError::PayloadTooLarge); }
+        let device_information_service = self.add_primary_service(BLE_SERVICE_DEVICE_INFORMATION)?;
+        let (_, manufacturer_name_value) =
+            self.add_characteristic(BLE_CHAR_MANUFACTURER_NAME, true, false, manufacturer)?;
+        let (_, model_number_value) =
+            self.add_characteristic(BLE_CHAR_MODEL_NUMBER, true, false, model)?;
+        let battery_service = self.add_primary_service(BLE_SERVICE_BATTERY)?;
+        let (_, battery_level_value) =
+            self.add_characteristic(BLE_CHAR_BATTERY_LEVEL, true, false, &[battery_level])?;
+        Ok(BleStandardProfileHandles {
+            device_information_service,
+            manufacturer_name_value,
+            model_number_value,
+            battery_service,
+            battery_level_value,
+        })
+    }
+}
+
+pub struct BleBatteryService {
+    pub value_handle: u16,
+    level: u8,
+}
+
+impl BleBatteryService {
+    pub const fn new(value_handle: u16, level: u8) -> Result<Self, HciError> {
+        if value_handle == 0 || level > 100 { return Err(HciError::PayloadTooLarge); }
+        Ok(Self { value_handle, level })
+    }
+
+    pub fn level(&self) -> u8 { self.level }
+
+    pub fn update_and_notify(
+        &mut self,
+        links: &LeLinkState,
+        subscriptions: &GattSubscriptions,
+        connection_handle: u16,
+        level: u8,
+        out: &mut [u8; MAX_ATT_PDU],
+    ) -> Result<usize, HciError> {
+        if level > 100 { return Err(HciError::PayloadTooLarge); }
+        let len = subscriptions.emit(
+            links,
+            connection_handle,
+            self.value_handle,
+            false,
+            &[level],
+            out,
+        )?;
+        self.level = level;
+        Ok(len)
+    }
+}
+
+pub fn ble_battery_notification_self_test() -> bool {
+    let mut links = LeLinkState::new();
+    let connected = [
+        EVT_LE_META, 19, LE_SUBEVENT_CONNECTION_COMPLETE, 0,
+        0x42, 0x00, 0, 1, 1, 2, 3, 4, 5, 6,
+        0x18, 0x00, 0, 0, 0xf4, 0x01, 0,
+    ];
+    if links.handle_connection_complete(&connected).is_err() { return false; }
+    let mut subscriptions = GattSubscriptions::new();
+    let mut battery = match BleBatteryService::new(8, 87) {
+        Ok(service) => service,
+        Err(_) => return false,
+    };
+    let mut out = [0_u8; MAX_ATT_PDU];
+    if battery.update_and_notify(&links, &subscriptions, 0x42, 86, &mut out).is_ok()
+        || battery.level() != 87
+        || subscriptions.configure(&links, 0x42, 8, 0x0001).is_err()
+        || battery.update_and_notify(&links, &subscriptions, 0x42, 86, &mut out) != Ok(4)
+        || out[..4] != [ATT_OP_HANDLE_VALUE_NOTIFICATION, 8, 0, 86]
+        || battery.level() != 86
+        || battery.update_and_notify(&links, &subscriptions, 0x42, 101, &mut out).is_ok()
+        || battery.level() != 86
+        || subscriptions.configure(&links, 0x42, 7, 0x0001).is_err()
+    { return false; }
+    let mut other = match BleBatteryService::new(9, 50) {
+        Ok(service) => service,
+        Err(_) => return false,
+    };
+    if other.update_and_notify(&links, &subscriptions, 0x42, 49, &mut out).is_ok()
+        || other.level() != 50
+    { return false; }
+    let disconnected = [EVT_DISCONNECTION_COMPLETE, 4, 0, 0x42, 0, 0x13];
+    links.handle_disconnection_complete(&disconnected).is_ok()
+        && battery.update_and_notify(&links, &subscriptions, 0x42, 85, &mut out).is_err()
+        && battery.level() == 86
+}
+
+pub const WOVENHAT_BLE_SERVICE_UUID: u16 = 0xff00;
+pub const WOVENHAT_BLE_STATUS_UUID: u16 = 0xff01;
+pub const WOVENHAT_BLE_COMMAND_UUID: u16 = 0xff02;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct WovenHatBleServiceHandles {
+    pub service: u16,
+    pub status_value: u16,
+    pub command_value: u16,
+}
+
+impl GattDatabase {
+    pub fn add_wovenhat_os_service(
+        &mut self,
+        status: &[u8],
+    ) -> Result<WovenHatBleServiceHandles, HciError> {
+        let service = self.add_primary_service(WOVENHAT_BLE_SERVICE_UUID)?;
+        let (_, status_value) =
+            self.add_characteristic(WOVENHAT_BLE_STATUS_UUID, true, false, status)?;
+        let (_, command_value) =
+            self.add_characteristic(WOVENHAT_BLE_COMMAND_UUID, false, true, &[])?;
+        Ok(WovenHatBleServiceHandles { service, status_value, command_value })
+    }
+}
+
+pub fn wovenhat_ble_service_self_test() -> bool {
+    let mut links = LeLinkState::new();
+    let connected = [
+        EVT_LE_META, 19, LE_SUBEVENT_CONNECTION_COMPLETE, 0,
+        0x42, 0x00, 0, 1, 1, 2, 3, 4, 5, 6,
+        0x18, 0x00, 0, 0, 0xf4, 0x01, 0,
+    ];
+    if links.handle_connection_complete(&connected).is_err() { return false; }
+    let mut gatt = GattDatabase::new();
+    let Ok(handles) = gatt.add_wovenhat_os_service(b"ready") else { return false; };
+    if handles != (WovenHatBleServiceHandles { service: 1, status_value: 3, command_value: 5 }) {
+        return false;
+    }
+    let mut out = [0_u8; MAX_ATT_PDU];
+    if gatt.transact(&links, 0x42, &[ATT_OP_READ_REQUEST, 3, 0], &mut out) != Ok(6)
+        || out[..6] != [ATT_OP_READ_RESPONSE, b'r', b'e', b'a', b'd', b'y']
+        || gatt.transact(&links, 0x42, &[ATT_OP_WRITE_REQUEST, 3, 0, b'x'], &mut out) != Ok(5)
+        || out[..5] != [ATT_OP_ERROR_RESPONSE, ATT_OP_WRITE_REQUEST, 3, 0, ATT_ERR_WRITE_NOT_PERMITTED]
+        || gatt.transact(&links, 0x42, &[ATT_OP_READ_REQUEST, 5, 0], &mut out) != Ok(5)
+        || out[..5] != [ATT_OP_ERROR_RESPONSE, ATT_OP_READ_REQUEST, 5, 0, ATT_ERR_READ_NOT_PERMITTED]
+        || gatt.transact(&links, 0x42, &[ATT_OP_WRITE_REQUEST, 5, 0, b'p', b'i', b'n', b'g'], &mut out) != Ok(1)
+    { return false; }
+    let disconnected = [EVT_DISCONNECTION_COMPLETE, 4, 0, 0x42, 0, 0x13];
+    links.handle_disconnection_complete(&disconnected).is_ok()
+        && gatt.transact(&links, 0x42, &[ATT_OP_WRITE_REQUEST, 5, 0, b'x'], &mut out).is_err()
+}
+
+pub fn ble_standard_profiles_self_test() -> bool {
+    let mut links = LeLinkState::new();
+    let connected = [
+        EVT_LE_META, 19, LE_SUBEVENT_CONNECTION_COMPLETE, 0,
+        0x42, 0x00, 0, 1, 1, 2, 3, 4, 5, 6,
+        0x18, 0x00, 0, 0, 0xf4, 0x01, 0,
+    ];
+    if links.handle_connection_complete(&connected).is_err() { return false; }
+    let mut gatt = GattDatabase::new();
+    let Ok(handles) = gatt.add_wovenhat_standard_profiles(b"WovenHat", b"OS", 87) else {
+        return false;
+    };
+    if handles != (BleStandardProfileHandles {
+        device_information_service: 1,
+        manufacturer_name_value: 3,
+        model_number_value: 5,
+        battery_service: 6,
+        battery_level_value: 8,
+    }) || gatt.add_wovenhat_standard_profiles(b"WovenHat", b"OS", 101).is_ok() {
+        return false;
+    }
+    let mut out = [0_u8; MAX_ATT_PDU];
+    if gatt.transact(&links, 0x42, &[ATT_OP_READ_REQUEST, 3, 0], &mut out) != Ok(9)
+        || out[..9] != [ATT_OP_READ_RESPONSE, b'W', b'o', b'v', b'e', b'n', b'H', b'a', b't']
+        || gatt.transact(&links, 0x42, &[ATT_OP_READ_REQUEST, 5, 0], &mut out) != Ok(3)
+        || out[..3] != [ATT_OP_READ_RESPONSE, b'O', b'S']
+        || gatt.transact(&links, 0x42, &[ATT_OP_READ_REQUEST, 8, 0], &mut out) != Ok(2)
+        || out[..2] != [ATT_OP_READ_RESPONSE, 87]
+        || gatt.transact(&links, 0x42, &[ATT_OP_WRITE_REQUEST, 8, 0, 50], &mut out) != Ok(5)
+        || out[..5] != [ATT_OP_ERROR_RESPONSE, ATT_OP_WRITE_REQUEST, 8, 0, ATT_ERR_WRITE_NOT_PERMITTED]
+    { return false; }
+    let disconnected = [EVT_DISCONNECTION_COMPLETE, 4, 0, 0x42, 0, 0x13];
+    links.handle_disconnection_complete(&disconnected).is_ok()
+        && gatt.transact(&links, 0x42, &[ATT_OP_READ_REQUEST, 8, 0], &mut out).is_err()
 }
 
 pub fn gatt_foundation_self_test() -> bool {
