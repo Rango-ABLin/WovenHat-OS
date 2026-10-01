@@ -1329,7 +1329,7 @@ pub struct BleBondStore {
 
 impl BleBondStore {
     pub const fn new() -> Self {
-        Self { bonds: [None; MAX_BLE_BONDS], count: 0 }
+        Self { bonds: [const { None }; MAX_BLE_BONDS], count: 0 }
     }
 
     fn index(&self, address_type: u8, address: [u8; 6]) -> Option<usize> {
