@@ -1521,6 +1521,73 @@ pub fn ble_smp_key_distribution_self_test() -> bool {
     bonds.count()==0
 }
 
+pub struct BleSmpFixedChannel;
+
+impl BleSmpFixedChannel {
+    pub fn inbound(
+        links: &LeLinkState,
+        pairing: &mut SmpPairingState,
+        distribution: &mut SmpKeyDistribution,
+        bonds: &mut BleBondStore,
+        handle: u16,
+        frame: &L2capFrame,
+    ) -> Result<(), HciError> {
+        if !links.contains_handle(handle) || frame.cid != BLE_SMP_CID {
+            return Err(HciError::UnexpectedOpcode);
+        }
+        let pdu = frame.payload();
+        let Some(opcode) = pdu.first().copied() else { return Err(HciError::MalformedEvent); };
+        match opcode {
+            BLE_SMP_PAIRING_REQUEST => pairing.begin(links, handle, pdu),
+            BLE_SMP_PAIRING_RESPONSE => pairing.accept_response(links, handle, pdu),
+            BLE_SMP_ENCRYPTION_INFORMATION => distribution.encryption_information(links, pairing, handle, pdu),
+            BLE_SMP_MASTER_IDENTIFICATION => distribution.master_identification(links, pairing, handle, pdu, bonds),
+            BLE_SMP_PAIRING_FAILED => {
+                distribution.abort();
+                pairing.fail();
+                Ok(())
+            }
+            _ => Err(HciError::UnexpectedOpcode),
+        }
+    }
+
+    pub fn outbound(links: &LeLinkState, handle: u16, pdu: &[u8]) -> Result<L2capFrame, HciError> {
+        if !links.contains_handle(handle) || pdu.is_empty() { return Err(HciError::UnexpectedOpcode); }
+        L2capFrame::new(BLE_SMP_CID, pdu)
+    }
+}
+
+pub fn ble_smp_fixed_channel_self_test() -> bool {
+    let mut links = LeLinkState::new();
+    let connected = [EVT_LE_META,19,LE_SUBEVENT_CONNECTION_COMPLETE,0,0x42,0,0,1,1,2,3,4,5,6,0x18,0,0,0,0xf4,1,0];
+    if links.handle_connection_complete(&connected).is_err() { return false; }
+    let mut pairing = SmpPairingState::new();
+    let mut distribution = SmpKeyDistribution::new();
+    let mut bonds = BleBondStore::new();
+    let request = [BLE_SMP_PAIRING_REQUEST,3,0,0x01,16,0x01,0x01];
+    let response = [BLE_SMP_PAIRING_RESPONSE,3,0,0x01,16,0x01,0x01];
+    let mut info = [0_u8;17]; info[0]=BLE_SMP_ENCRYPTION_INFORMATION; info[1..17].fill(0xa5);
+    let mut master = [0_u8;11]; master[0]=BLE_SMP_MASTER_IDENTIFICATION;
+    let frames = [
+        L2capFrame::new(BLE_SMP_CID,&request),
+        L2capFrame::new(BLE_SMP_CID,&response),
+        L2capFrame::new(BLE_SMP_CID,&info),
+        L2capFrame::new(BLE_SMP_CID,&master),
+    ];
+    let [Ok(request_frame),Ok(response_frame),Ok(info_frame),Ok(master_frame)] = frames else { return false; };
+    if BleSmpFixedChannel::inbound(&links,&mut pairing,&mut distribution,&mut bonds,0x42,&request_frame).is_err()
+        || BleSmpFixedChannel::inbound(&links,&mut pairing,&mut distribution,&mut bonds,0x42,&response_frame).is_err()
+        || BleSmpFixedChannel::inbound(&links,&mut pairing,&mut distribution,&mut bonds,0x42,&info_frame).is_err()
+        || BleSmpFixedChannel::inbound(&links,&mut pairing,&mut distribution,&mut bonds,0x42,&master_frame).is_err()
+        || bonds.count()!=1
+        || BleSmpFixedChannel::outbound(&links,0x42,&request).is_err()
+        || L2capFrame::new(L2CAP_CID_SIGNALING,&request).is_ok_and(|wrong| BleSmpFixedChannel::inbound(&links,&mut pairing,&mut distribution,&mut bonds,0x42,&wrong).is_ok())
+    { return false; }
+    let disconnected=[EVT_DISCONNECTION_COMPLETE,4,0,0x42,0,0x13];
+    links.handle_disconnection_complete(&disconnected).is_ok()
+        && BleSmpFixedChannel::outbound(&links,0x42,&request).is_err()
+}
+
 pub struct BleControllerSecurity;
 
 impl BleControllerSecurity {
