@@ -924,6 +924,94 @@ pub const GATT_UUID_PRIMARY_SERVICE: u16 = 0x2800;
 pub const GATT_UUID_CHARACTERISTIC: u16 = 0x2803;
 pub const GATT_PROP_READ: u8 = 0x02;
 pub const GATT_PROP_WRITE: u8 = 0x08;
+pub const GATT_PROP_NOTIFY: u8 = 0x10;
+pub const GATT_PROP_INDICATE: u8 = 0x20;
+pub const GATT_UUID_CCCD: u16 = 0x2902;
+pub const ATT_OP_HANDLE_VALUE_NOTIFICATION: u8 = 0x1b;
+pub const ATT_OP_HANDLE_VALUE_INDICATION: u8 = 0x1d;
+pub const MAX_GATT_SUBSCRIPTIONS: usize = 8;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct GattSubscription {
+    pub connection_handle: u16,
+    pub value_handle: u16,
+    pub notify: bool,
+    pub indicate: bool,
+}
+
+pub struct GattSubscriptions {
+    entries: [Option<GattSubscription>; MAX_GATT_SUBSCRIPTIONS],
+    count: usize,
+}
+
+impl GattSubscriptions {
+    pub const fn new() -> Self {
+        Self { entries: [None; MAX_GATT_SUBSCRIPTIONS], count: 0 }
+    }
+
+    pub fn configure(
+        &mut self,
+        links: &LeLinkState,
+        connection_handle: u16,
+        value_handle: u16,
+        cccd: u16,
+    ) -> Result<(), HciError> {
+        if !links.contains_handle(connection_handle) || value_handle == 0 || cccd & !0x0003 != 0 {
+            return Err(HciError::UnexpectedOpcode);
+        }
+        if let Some(index) = self.entries[..self.count].iter().position(|entry| {
+            entry.is_some_and(|item| item.connection_handle == connection_handle && item.value_handle == value_handle)
+        }) {
+            if cccd == 0 {
+                for slot in index..self.count - 1 { self.entries[slot] = self.entries[slot + 1]; }
+                self.count -= 1;
+                self.entries[self.count] = None;
+            } else {
+                self.entries[index] = Some(GattSubscription {
+                    connection_handle,
+                    value_handle,
+                    notify: cccd & 0x0001 != 0,
+                    indicate: cccd & 0x0002 != 0,
+                });
+            }
+            return Ok(());
+        }
+        if cccd == 0 { return Ok(()); }
+        if self.count == MAX_GATT_SUBSCRIPTIONS { return Err(HciError::ControllerFailure(0xff)); }
+        self.entries[self.count] = Some(GattSubscription {
+            connection_handle,
+            value_handle,
+            notify: cccd & 0x0001 != 0,
+            indicate: cccd & 0x0002 != 0,
+        });
+        self.count += 1;
+        Ok(())
+    }
+
+    pub fn emit(
+        &self,
+        links: &LeLinkState,
+        connection_handle: u16,
+        value_handle: u16,
+        indication: bool,
+        value: &[u8],
+        out: &mut [u8; MAX_ATT_PDU],
+    ) -> Result<usize, HciError> {
+        if !links.contains_handle(connection_handle) || value_handle == 0 || value.len() + 3 > MAX_ATT_PDU {
+            return Err(HciError::UnexpectedOpcode);
+        }
+        let Some(subscription) = self.entries[..self.count].iter().flatten().find(|item| {
+            item.connection_handle == connection_handle && item.value_handle == value_handle
+        }) else { return Err(HciError::UnexpectedOpcode); };
+        if (indication && !subscription.indicate) || (!indication && !subscription.notify) {
+            return Err(HciError::UnexpectedOpcode);
+        }
+        out[0] = if indication { ATT_OP_HANDLE_VALUE_INDICATION } else { ATT_OP_HANDLE_VALUE_NOTIFICATION };
+        out[1..3].copy_from_slice(&value_handle.to_le_bytes());
+        out[3..3 + value.len()].copy_from_slice(value);
+        Ok(3 + value.len())
+    }
+}
 
 pub struct GattDatabase {
     att: AttDatabase,
@@ -1079,6 +1167,34 @@ pub fn gatt_discovery_self_test() -> bool {
     let disconnected = [EVT_DISCONNECTION_COMPLETE, 4, 0, 0x42, 0, 0x13];
     links.handle_disconnection_complete(&disconnected).is_ok()
         && gatt.discover_primary_services(&links, 0x42, &mut found).is_err()
+}
+
+
+pub fn gatt_subscription_self_test() -> bool {
+    let mut links = LeLinkState::new();
+    let connected = [
+        EVT_LE_META, 19, LE_SUBEVENT_CONNECTION_COMPLETE, 0,
+        0x42, 0x00, 0, 1, 1, 2, 3, 4, 5, 6,
+        0x18, 0x00, 0, 0, 0xf4, 0x01, 0,
+    ];
+    if links.handle_connection_complete(&connected).is_err() { return false; }
+    let mut subscriptions = GattSubscriptions::new();
+    let mut out = [0_u8; MAX_ATT_PDU];
+    if subscriptions.configure(&links, 0x42, 3, 0x0001).is_err()
+        || subscriptions.emit(&links, 0x42, 3, false, b"ready", &mut out) != Ok(8)
+        || out[..8] != [ATT_OP_HANDLE_VALUE_NOTIFICATION, 3, 0, b'r', b'e', b'a', b'd', b'y']
+        || subscriptions.emit(&links, 0x42, 3, true, b"ready", &mut out).is_ok()
+        || subscriptions.configure(&links, 0x42, 3, 0x0002).is_err()
+        || subscriptions.emit(&links, 0x42, 3, true, b"go", &mut out) != Ok(5)
+        || out[..5] != [ATT_OP_HANDLE_VALUE_INDICATION, 3, 0, b'g', b'o']
+        || subscriptions.configure(&links, 0x42, 3, 0).is_err()
+        || subscriptions.emit(&links, 0x42, 3, false, b"x", &mut out).is_ok()
+    { return false; }
+    if subscriptions.configure(&links, 0x42, 3, 0x0003).is_err() { return false; }
+    let disconnected = [EVT_DISCONNECTION_COMPLETE, 4, 0, 0x42, 0, 0x13];
+    links.handle_disconnection_complete(&disconnected).is_ok()
+        && subscriptions.emit(&links, 0x42, 3, false, b"x", &mut out).is_err()
+        && subscriptions.configure(&links, 0x42, 3, 0x0001).is_err()
 }
 
 pub const EVT_CONNECTION_COMPLETE: u8 = 0x03;
