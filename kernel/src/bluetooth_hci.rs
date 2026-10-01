@@ -3651,8 +3651,7 @@ pub fn le_secure_session_identity_binding_self_test() -> bool {
         return false;
     }
 
-    // Simulate a missed security-session cleanup: the link layer drops peer A,
-    // but the transient secure-session table still contains handle 0x42.
+    // Deliberately bypass LeSecuritySessions::disconnect to model missed cleanup.
     let disconnected = [EVT_DISCONNECTION_COMPLETE, 4, 0, 0x42, 0, 0x13];
     if links.handle_disconnection_complete(&disconnected) != Ok(0x42)
         || sessions.session(0x42).is_none()
@@ -3671,43 +3670,55 @@ pub fn le_secure_session_identity_binding_self_test() -> bool {
         return false;
     }
 
-    let mut gatt = GattDatabase::new();
-    let Ok(handles) = gatt.add_wovenhat_os_service(b"safe") else { return false; };
+    let protected_handle = 8;
     let mut policies = AttSecurityPolicies::new();
-    if policies.require(handles.status_value, AttSecurityRequirement::Authenticated).is_err() {
+    if policies.require(protected_handle, AttSecurityRequirement::Authenticated).is_err() {
+        return false;
+    }
+
+    let mut att = AttDatabase::new();
+    if att.insert(
+        match AttAttribute::new(protected_handle, 0xff01, true, false, b"safe") {
+            Ok(attribute) => attribute,
+            Err(_) => return false,
+        },
+    ).is_err() {
         return false;
     }
     let mut out = [0_u8; MAX_ATT_PDU];
-    let read = [
-        ATT_OP_READ_REQUEST,
-        handles.status_value as u8,
-        (handles.status_value >> 8) as u8,
-    ];
-    if gatt.transact_secured(
+    if att.transact_secured(
         &links,
         &sessions,
         &policies,
         0x42,
-        &read,
+        &[ATT_OP_READ_REQUEST, protected_handle as u8, 0],
         &mut out,
     ) != Ok(5)
-        || out[4] != ATT_ERR_INSUFFICIENT_ENCRYPTION
+        || out[..5] != [
+            ATT_OP_ERROR_RESPONSE,
+            ATT_OP_READ_REQUEST,
+            protected_handle as u8,
+            0,
+            ATT_ERR_INSUFFICIENT_ENCRYPTION,
+        ]
     {
         return false;
     }
 
     let mut subscriptions = GattSubscriptions::new();
-    subscriptions.configure(&links, 0x42, handles.status_value, 0x0001).is_ok()
-        && subscriptions.emit_secured(
-            &links,
-            &sessions,
-            &policies,
-            GattSecuredEmission {
-                connection_handle: 0x42,
-                value_handle: handles.status_value,
-                indication: false,
-                value: b"safe",
-            },
-            &mut out,
-        ).is_err()
+    if subscriptions.configure(&links, 0x42, protected_handle, 0x0001).is_err() {
+        return false;
+    }
+    subscriptions.emit_secured(
+        &links,
+        &sessions,
+        &policies,
+        GattSecuredEmission {
+            connection_handle: 0x42,
+            value_handle: protected_handle,
+            indication: false,
+            value: b"safe",
+        },
+        &mut out,
+    ).is_err()
 }
