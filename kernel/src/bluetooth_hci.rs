@@ -1141,6 +1141,78 @@ impl GattDatabase {
     }
 }
 
+pub struct BleBatteryService {
+    pub value_handle: u16,
+    level: u8,
+}
+
+impl BleBatteryService {
+    pub const fn new(value_handle: u16, level: u8) -> Result<Self, HciError> {
+        if value_handle == 0 || level > 100 { return Err(HciError::PayloadTooLarge); }
+        Ok(Self { value_handle, level })
+    }
+
+    pub fn level(&self) -> u8 { self.level }
+
+    pub fn update_and_notify(
+        &mut self,
+        links: &LeLinkState,
+        subscriptions: &GattSubscriptions,
+        connection_handle: u16,
+        level: u8,
+        out: &mut [u8; MAX_ATT_PDU],
+    ) -> Result<usize, HciError> {
+        if level > 100 { return Err(HciError::PayloadTooLarge); }
+        let len = subscriptions.emit(
+            links,
+            connection_handle,
+            self.value_handle,
+            false,
+            &[level],
+            out,
+        )?;
+        self.level = level;
+        Ok(len)
+    }
+}
+
+pub fn ble_battery_notification_self_test() -> bool {
+    let mut links = LeLinkState::new();
+    let connected = [
+        EVT_LE_META, 19, LE_SUBEVENT_CONNECTION_COMPLETE, 0,
+        0x42, 0x00, 0, 1, 1, 2, 3, 4, 5, 6,
+        0x18, 0x00, 0, 0, 0xf4, 0x01, 0,
+    ];
+    if links.handle_connection_complete(&connected).is_err() { return false; }
+    let mut subscriptions = GattSubscriptions::new();
+    let mut battery = match BleBatteryService::new(8, 87) {
+        Ok(service) => service,
+        Err(_) => return false,
+    };
+    let mut out = [0_u8; MAX_ATT_PDU];
+    if battery.update_and_notify(&links, &subscriptions, 0x42, 86, &mut out).is_ok()
+        || battery.level() != 87
+        || subscriptions.configure(&links, 0x42, 8, 0x0001).is_err()
+        || battery.update_and_notify(&links, &subscriptions, 0x42, 86, &mut out) != Ok(4)
+        || out[..4] != [ATT_OP_HANDLE_VALUE_NOTIFICATION, 8, 0, 86]
+        || battery.level() != 86
+        || battery.update_and_notify(&links, &subscriptions, 0x42, 101, &mut out).is_ok()
+        || battery.level() != 86
+        || subscriptions.configure(&links, 0x42, 7, 0x0001).is_err()
+    { return false; }
+    let mut other = match BleBatteryService::new(9, 50) {
+        Ok(service) => service,
+        Err(_) => return false,
+    };
+    if other.update_and_notify(&links, &subscriptions, 0x42, 49, &mut out).is_ok()
+        || other.level() != 50
+    { return false; }
+    let disconnected = [EVT_DISCONNECTION_COMPLETE, 4, 0, 0x42, 0, 0x13];
+    links.handle_disconnection_complete(&disconnected).is_ok()
+        && battery.update_and_notify(&links, &subscriptions, 0x42, 85, &mut out).is_err()
+        && battery.level() == 86
+}
+
 pub fn ble_standard_profiles_self_test() -> bool {
     let mut links = LeLinkState::new();
     let connected = [
