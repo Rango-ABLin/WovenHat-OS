@@ -1079,6 +1079,15 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         serial::write_line(format_args!(
             "[S13.10M] Bluetooth LE bond persistence/reconnect: PASSED"
         ));
+        if !bluetooth_hci::le_security_authority_self_test() {
+            serial::write_line(format_args!(
+                "[S13.10N] Bluetooth LE bonded encryption authority: FAILED"
+            ));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!(
+            "[S13.10N] Bluetooth LE bonded encryption authority: PASSED"
+        ));
     }
 
     if heap::init().is_err() {
