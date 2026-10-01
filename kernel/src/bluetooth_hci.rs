@@ -811,6 +811,28 @@ impl AttDatabase {
         5
     }
 
+    pub fn discover_uuid16(
+        &self,
+        links: &LeLinkState,
+        connection_handle: u16,
+        start_handle: u16,
+        end_handle: u16,
+        uuid16: u16,
+        out: &mut [u16; MAX_ATT_ATTRIBUTES],
+    ) -> Result<usize, HciError> {
+        if !links.contains_handle(connection_handle) || start_handle == 0 || start_handle > end_handle {
+            return Err(HciError::UnexpectedOpcode);
+        }
+        let mut count = 0;
+        for attribute in self.attributes[..self.count].iter().flatten() {
+            if attribute.handle >= start_handle && attribute.handle <= end_handle && attribute.uuid16 == uuid16 {
+                out[count] = attribute.handle;
+                count += 1;
+            }
+        }
+        Ok(count)
+    }
+
     pub fn transact(
         &mut self,
         links: &LeLinkState,
@@ -959,6 +981,26 @@ impl GattDatabase {
         Ok((declaration_handle, value_handle))
     }
 
+    pub fn discover_primary_services(
+        &self,
+        links: &LeLinkState,
+        connection_handle: u16,
+        out: &mut [u16; MAX_ATT_ATTRIBUTES],
+    ) -> Result<usize, HciError> {
+        self.att.discover_uuid16(links, connection_handle, 1, u16::MAX, GATT_UUID_PRIMARY_SERVICE, out)
+    }
+
+    pub fn discover_characteristics(
+        &self,
+        links: &LeLinkState,
+        connection_handle: u16,
+        start_handle: u16,
+        end_handle: u16,
+        out: &mut [u16; MAX_ATT_ATTRIBUTES],
+    ) -> Result<usize, HciError> {
+        self.att.discover_uuid16(links, connection_handle, start_handle, end_handle, GATT_UUID_CHARACTERISTIC, out)
+    }
+
     pub fn transact(
         &mut self,
         links: &LeLinkState,
@@ -1007,6 +1049,36 @@ pub fn gatt_foundation_self_test() -> bool {
     let disconnected = [EVT_DISCONNECTION_COMPLETE, 4, 0, 0x42, 0, 0x13];
     links.handle_disconnection_complete(&disconnected).is_ok()
         && gatt.transact(&links, 0x42, &[ATT_OP_READ_REQUEST, 3, 0], &mut out).is_err()
+}
+
+
+pub fn gatt_discovery_self_test() -> bool {
+    let mut links = LeLinkState::new();
+    let connected = [
+        EVT_LE_META, 19, LE_SUBEVENT_CONNECTION_COMPLETE, 0,
+        0x42, 0x00, 0, 1, 1, 2, 3, 4, 5, 6,
+        0x18, 0x00, 0, 0, 0xf4, 0x01, 0,
+    ];
+    if links.handle_connection_complete(&connected).is_err() { return false; }
+    let mut gatt = GattDatabase::new();
+    if gatt.add_primary_service(0x1800) != Ok(1)
+        || gatt.add_characteristic(0x2a00, true, true, b"WovenHat") != Ok((2, 3))
+        || gatt.add_primary_service(0x180f) != Ok(4)
+        || gatt.add_characteristic(0x2a19, true, false, &[100]) != Ok((5, 6))
+    { return false; }
+
+    let mut found = [0_u16; MAX_ATT_ATTRIBUTES];
+    if gatt.discover_primary_services(&links, 0x42, &mut found) != Ok(2)
+        || found[..2] != [1, 4]
+        || gatt.discover_characteristics(&links, 0x42, 1, 3, &mut found) != Ok(1)
+        || found[0] != 2
+        || gatt.discover_characteristics(&links, 0x42, 4, 6, &mut found) != Ok(1)
+        || found[0] != 5
+    { return false; }
+
+    let disconnected = [EVT_DISCONNECTION_COMPLETE, 4, 0, 0x42, 0, 0x13];
+    links.handle_disconnection_complete(&disconnected).is_ok()
+        && gatt.discover_primary_services(&links, 0x42, &mut found).is_err()
 }
 
 pub const EVT_CONNECTION_COMPLETE: u8 = 0x03;
