@@ -97,19 +97,20 @@ free clusters by scanning the FAT and compares them with FSInfo hints.
 `fscheck /mnt` validates the root and bounded directory tree chains, reports file
 and directory counts, and flags FSInfo free-count mismatches.
 
-Current FAT32 mutation limits are deliberate: only short 8.3 names are created,
-long-filename entries are skipped rather than generated, and there is no journal
-or power-loss-atomic metadata transaction. Full directories now grow by linking a
-zeroed cluster, and valid FSInfo sectors are maintained as free-space hints.
-Flushes make completed operations visible to the device, but they are not a
-crash-consistency guarantee.
+Current FAT32 mutation limits are deliberate: long names are created through
+validated bounded LFN records, but the metadata sidecar and durable intent
+journal remain fixed-capacity and are not a replacement for a full filesystem
+transaction log. Full directories grow by linking a zeroed cluster, and valid
+FSInfo sectors are maintained as free-space hints. Flushes make completed
+operations visible to the device, but they are not a full power-loss rollback
+guarantee.
 
 Next storage increments:
 
 1. Backup-GPT validation and extended/logical MBR partitions.
 2. Secondary-channel and slave-device ATA discovery.
 3. Hardware interrupt/DMA-backed completion for AHCI, NVMe, or virtio-blk.
-4. FAT32 long filename creation and crash-safe metadata
+4. Full FAT32 multi-operation journal replay and power-loss-atomic metadata/data
    ordering.
 5. Deeper than 2-level import / on-demand path resolution into VFS.
 

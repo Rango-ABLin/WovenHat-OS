@@ -2365,6 +2365,22 @@ fn create_long_file_in_directory(
     if data.len() > u32::MAX as usize {
         return Err(Error::NoSpace);
     }
+
+    // The short alias is an implementation detail of a long-name entry.  A
+    // caller must not be able to create a second file with the same displayed
+    // name merely because the alias generator selected a different alias.
+    // Preserve create/overwrite semantics by reusing the existing short slot
+    // when the long name already resolves to a regular file.
+    match find_existing_directory_slot_name(device, volume, dir_cluster, name) {
+        Ok(existing) => {
+            if existing.entry.attributes & DIRECTORY_ATTRIBUTE != 0 {
+                return Err(Error::WriteFailed);
+            }
+            return overwrite_existing_file(device, volume, existing, data);
+        }
+        Err(Error::NotFound) => {}
+        Err(error) => return Err(error),
+    }
     let short = generate_short_alias(device, volume, dir_cluster, name)?;
     let mut records = [[0u8; DIRECTORY_ENTRY_SIZE]; MAX_LFN_ENTRIES];
     let record_count = encode_long_name(name, &short, &mut records).ok_or(Error::NameTooLong)?;
@@ -2416,6 +2432,51 @@ fn create_long_file_in_directory(
             let _ = free_cluster_chain(device, volume, first_cluster);
         }
         return Err(error);
+    }
+    Ok(())
+}
+
+fn overwrite_existing_file(
+    device: &mut impl BlockDevice,
+    volume: Volume,
+    slot: DirectorySlot,
+    data: &[u8],
+) -> Result<(), Error> {
+    if data.len() > u32::MAX as usize {
+        return Err(Error::NoSpace);
+    }
+    if slot.entry.first_cluster >= 2 {
+        validate_cluster_chain(device, volume, slot.entry.first_cluster)?;
+    }
+    let bytes_per_cluster = volume.sectors_per_cluster as usize * SECTOR_SIZE;
+    let needed_clusters = if data.is_empty() {
+        0
+    } else {
+        data.len().div_ceil(bytes_per_cluster)
+    };
+    let first_cluster = allocate_file_chain(device, volume, needed_clusters)?;
+    if let Err(error) = write_file_data_chain(device, volume, first_cluster, data) {
+        if first_cluster >= 2 {
+            let _ = free_cluster_chain(device, volume, first_cluster);
+        }
+        return Err(error);
+    }
+    if let Err(error) = write_directory_entry(
+        device,
+        slot.lba,
+        slot.offset,
+        &slot.entry.short_name,
+        slot.entry.attributes,
+        first_cluster,
+        data.len() as u32,
+    ) {
+        if first_cluster >= 2 {
+            let _ = free_cluster_chain(device, volume, first_cluster);
+        }
+        return Err(error);
+    }
+    if slot.entry.first_cluster >= 2 {
+        free_cluster_chain(device, volume, slot.entry.first_cluster)?;
     }
     Ok(())
 }
@@ -2995,6 +3056,15 @@ pub fn rename_path(
         core::str::from_utf8(&new_leaf[..new_leaf_len]).map_err(|_| Error::NameTooLong)?;
     if old_parent == new_parent && old_leaf.eq_ignore_ascii_case(new_leaf) {
         return Ok(());
+    }
+
+    // Check the user-visible name before generating an alias.  Otherwise an
+    // existing long name can be missed when its alias differs from the alias
+    // that would be generated for this rename.
+    match find_existing_directory_slot_name(device, volume, new_parent, new_leaf) {
+        Ok(_) => return Err(Error::AlreadyExists),
+        Err(Error::NotFound) => {}
+        Err(err) => return Err(err),
     }
     let short_name = encode_short_name(new_leaf);
     let new_short = match short_name {
@@ -3705,7 +3775,12 @@ fn long_filename_self_test() -> bool {
                 == Ok(Some(intent2))
             && remove_journal_intent(&mut disk, volume, intent2.path_hash, intent2.path_tag)
                 .is_ok();
-    if create_path_file(&mut disk, volume, name, b"lfn").is_err() {
+    let mut bytes = [0u8; 4];
+    if create_path_file(&mut disk, volume, name, b"lfn").is_err()
+        || create_path_file(&mut disk, volume, name, b"new").is_err()
+        || read_path_bytes(&mut disk, volume, name, &mut bytes) != Ok(3)
+        || &bytes[..3] != b"new"
+    {
         return false;
     }
     let inode_ok = resolve_path(&mut disk, volume, name).is_ok_and(|entry| {
@@ -3715,9 +3790,8 @@ fn long_filename_self_test() -> bool {
             && remove_inode_metadata(&mut disk, volume, entry.first_cluster).is_ok()
             && read_inode_metadata(&mut disk, volume, entry.first_cluster) == Ok(None)
     });
-    let mut bytes = [0u8; 4];
     let read_ok =
-        read_path_bytes(&mut disk, volume, name, &mut bytes) == Ok(3) && &bytes[..3] == b"lfn";
+        read_path_bytes(&mut disk, volume, name, &mut bytes) == Ok(3) && &bytes[..3] == b"new";
     let mut listed = false;
     let listing_ok = for_each_directory_entry_named(
         &mut disk,
@@ -3743,6 +3817,9 @@ fn long_filename_self_test() -> bool {
         && resolve_path(&mut disk, volume, unicode_name).is_ok()
         && resolve_path(&mut disk, volume, unicode_decomposed).is_ok();
     let renamed_name = "Renamed long filename.txt";
+    let collision_name = "Another long filename.txt";
+    let long_collision_ok = create_path_file(&mut disk, volume, collision_name, b"c").is_ok()
+        && rename_path(&mut disk, volume, name, collision_name) == Err(Error::AlreadyExists);
     let rename_ok = rename_path(&mut disk, volume, name, renamed_name).is_ok()
         && resolve_path(&mut disk, volume, name).is_err_and(|error| error == Error::NotFound)
         && resolve_path(&mut disk, volume, renamed_name).is_ok();
@@ -3773,6 +3850,7 @@ fn long_filename_self_test() -> bool {
         && listing_ok
         && named_listing_ok
         && unicode_ok
+        && long_collision_ok
         && rename_ok
         && delete_ok
         && growth_ok

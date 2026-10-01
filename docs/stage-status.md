@@ -1,5 +1,18 @@
 # Stage status
 
+## Stage 1–5 long-name mutation hardening — 2026-10-01
+
+The FAT32 create/overwrite and rename paths now compare the user-visible long
+name before selecting an 8.3 alias. Existing long-name files are overwritten
+through their existing directory entry, and attempts to create a directory or
+rename another file onto that name fail closed. The strengthened FAT32
+self-test and complete Stage 1–5 QEMU gate passed on 1/2/4 CPUs with exit 33.
+See [the hardening audit](audit-stage1-5-long-name-collision-2026-10-01.md).
+
+This is a bounded software hardening increment, not a claim that the remaining
+hardware qualification, DMA storage completion, or full data rollback gaps are
+closed.
+
 Production completion is tracked separately from bounded foundation acceptance
 in [the Stage 1–12 gap audit](stage1-12-production-gap-audit.md). No stage is
 fully complete while a roadmap requirement remains open.

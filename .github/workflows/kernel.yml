@@ -46,6 +46,24 @@ jobs:
           echo "OVMF VARS: $ovmf_vars"
           sha256sum "$ovmf_code" "$ovmf_vars"
           python3 scripts/test-release.py --qemu "$qemu" --firmware "$ovmf_code" --firmware-vars "$ovmf_vars"
+      - name: Stage 1-5 production software gate 1/2/4-core acceptance
+        shell: bash
+        run: |
+          qemu=/usr/bin/qemu-system-x86_64
+          ovmf_code=
+          for variant in OVMF_CODE_4M.fd OVMF_CODE.fd; do
+            candidate="/usr/share/OVMF/$variant"
+            if [ -f "$candidate" ]; then
+              ovmf_code="$candidate"
+              break
+            fi
+          done
+          test -n "$ovmf_code"
+          cargo check -p wovenhat-kernel --target x86_64-unknown-none --features stage1-5-test
+          cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage1-5-test -- -D warnings
+          for cpu in 1 2 4; do
+            python3 scripts/test-stage10-runtime.py --stage 1-5 --cpus "$cpu" --timeout 180 --qemu "$qemu" --firmware "$ovmf_code"
+          done
       - name: Stage 13.3 NVMe 1/2/4-core acceptance
         shell: bash
         run: |
