@@ -1127,6 +1127,15 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
                 qemu_test_exit_failure();
             }
         }
+        if !bluetooth_hci::le_gatt_minimum_key_size_self_test() {
+            serial::write_line(format_args!(
+                "[S13.10S] Bluetooth LE minimum encryption key size: FAILED"
+            ));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!(
+            "[S13.10S] Bluetooth LE minimum encryption key size: PASSED"
+        ));
     }
 
     if heap::init().is_err() {
