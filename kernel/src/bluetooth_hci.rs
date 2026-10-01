@@ -1481,6 +1481,12 @@ impl SmpKeyDistribution {
         self.ediv = None;
         self.rand = None;
     }
+
+    pub fn reset(&mut self) { self.abort(); }
+
+    pub fn idle(&self) -> bool {
+        self.handle.is_none() && self.pending_ltk.is_none() && self.ediv.is_none() && self.rand.is_none()
+    }
 }
 
 pub fn ble_smp_key_distribution_self_test() -> bool {
@@ -1503,6 +1509,72 @@ pub fn ble_smp_key_distribution_self_test() -> bool {
     { return false; }
     bonds.clear();
     bonds.count()==0
+}
+
+pub fn ble_smp_teardown_rekey_stress_self_test() -> bool {
+    let mut bonds = BleBondStore::new();
+    let mut encryption = BleEncryptionState::new();
+
+    for cycle in 0_u8..32 {
+        let mut links = LeLinkState::new();
+        let handle = 0x40_u16 + u16::from(cycle & 0x0f);
+        let connected = [
+            EVT_LE_META,19,LE_SUBEVENT_CONNECTION_COMPLETE,0,
+            handle as u8,(handle >> 8) as u8,0,1,1,2,3,4,5,6,
+            0x18,0,0,0,0xf4,1,0,
+        ];
+        if links.handle_connection_complete(&connected).is_err() { return false; }
+
+        let mut pairing = SmpPairingState::new();
+        let request = [BLE_SMP_PAIRING_REQUEST,3,0,0x01,16,0x01,0x01];
+        let response = [BLE_SMP_PAIRING_RESPONSE,3,0,0x01,16,0x01,0x01];
+        if pairing.begin(&links,handle,&request).is_err()
+            || pairing.accept_response(&links,handle,&response).is_err()
+        { return false; }
+
+        let mut distribution = SmpKeyDistribution::new();
+        let mut info = [0_u8;17];
+        info[0] = BLE_SMP_ENCRYPTION_INFORMATION;
+        info[1..17].fill(cycle.wrapping_add(1));
+        let mut master = [0_u8;11];
+        master[0] = BLE_SMP_MASTER_IDENTIFICATION;
+        master[1..3].copy_from_slice(&u16::from(cycle).to_le_bytes());
+        master[3..11].copy_from_slice(&u64::from(cycle).to_le_bytes());
+
+        if distribution.encryption_information(&links,&pairing,handle,&info).is_err() { return false; }
+
+        if cycle % 4 == 0 {
+            distribution.abort();
+            if !distribution.idle()
+                || distribution.master_identification(&links,&pairing,handle,&master,&mut bonds).is_ok()
+            { return false; }
+            continue;
+        }
+
+        if cycle % 4 == 1 {
+            let disconnected = [EVT_DISCONNECTION_COMPLETE,4,0,handle as u8,(handle >> 8) as u8,0x13];
+            if links.handle_disconnection_complete(&disconnected).is_err() { return false; }
+            distribution.abort();
+            if !distribution.idle()
+                || distribution.master_identification(&links,&pairing,handle,&master,&mut bonds).is_ok()
+                || encryption.set(&links,handle,true).is_ok()
+            { return false; }
+            continue;
+        }
+
+        if distribution.master_identification(&links,&pairing,handle,&master,&mut bonds).is_err()
+            || encryption.set(&links,handle,true).is_err()
+            || !bonds.trusted(&links,&encryption,handle)
+        { return false; }
+
+        let disconnected = [EVT_DISCONNECTION_COMPLETE,4,0,handle as u8,(handle >> 8) as u8,0x13];
+        if links.handle_disconnection_complete(&disconnected).is_err() { return false; }
+        encryption.revoke(handle);
+        distribution.reset();
+        if !distribution.idle() || bonds.trusted(&links,&encryption,handle) { return false; }
+    }
+
+    bonds.count() == 1
 }
 
 pub fn ble_smp_ltk_encryption_authority_self_test() -> bool {
