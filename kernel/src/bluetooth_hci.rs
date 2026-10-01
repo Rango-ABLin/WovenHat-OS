@@ -1267,6 +1267,21 @@ impl SmpPairingState {
         self.response = None;
     }
 
+    pub fn negotiated_key_size(&self) -> Option<u8> {
+        let request = self.request?;
+        let response = self.response?;
+        (self.phase == SmpPairingPhase::Negotiated).then_some(core::cmp::min(request.max_key_size, response.max_key_size))
+    }
+
+    pub fn encryption_key_distribution_negotiated(&self) -> bool {
+        let Some(request) = self.request else { return false; };
+        let Some(response) = self.response else { return false; };
+        self.phase == SmpPairingPhase::Negotiated
+            && request.initiator_key_distribution & response.initiator_key_distribution & 0x01 != 0
+    }
+
+    pub fn handle(&self) -> Option<u16> { self.handle }
+
     pub fn phase(&self) -> SmpPairingPhase { self.phase }
 }
 
@@ -1295,12 +1310,16 @@ pub fn ble_smp_pairing_state_self_test() -> bool {
     pairing.phase() == SmpPairingPhase::Failed
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct BleBond {
     pub address_type: u8,
     pub address: [u8; 6],
-    pub ltk: [u8; 16],
+    ltk: [u8; 16],
     pub authenticated: bool,
+}
+
+impl BleBond {
+    fn wipe(&mut self) { self.ltk.fill(0); }
 }
 
 pub struct BleBondStore {
@@ -1315,7 +1334,7 @@ impl BleBondStore {
 
     fn index(&self, address_type: u8, address: [u8; 6]) -> Option<usize> {
         self.bonds[..self.count].iter().position(|entry| {
-            entry.is_some_and(|bond| bond.address_type == address_type && bond.address == address)
+            entry.as_ref().is_some_and(|bond| bond.address_type == address_type && bond.address == address)
         })
     }
 
@@ -1325,6 +1344,7 @@ impl BleBondStore {
         };
         let bond = BleBond { address_type: link.address_type, address: link.address, ltk, authenticated };
         if let Some(index) = self.index(link.address_type, link.address) {
+            if let Some(existing) = self.bonds[index].as_mut() { existing.wipe(); }
             self.bonds[index] = Some(bond);
             return Ok(());
         }
@@ -1341,6 +1361,22 @@ impl BleBondStore {
 
     pub fn trusted(&self, links: &LeLinkState, encryption: &BleEncryptionState, handle: u16) -> bool {
         self.bonded(links, handle) && encryption.encrypted(handle)
+    }
+
+    pub fn remove(&mut self, address_type: u8, address: [u8; 6]) -> bool {
+        let Some(index) = self.index(address_type, address) else { return false; };
+        if let Some(bond) = self.bonds[index].as_mut() { bond.wipe(); }
+        for cursor in index..self.count.saturating_sub(1) { self.bonds[cursor] = self.bonds[cursor + 1].take(); }
+        if self.count != 0 { self.count -= 1; self.bonds[self.count] = None; }
+        true
+    }
+
+    pub fn clear(&mut self) {
+        for entry in self.bonds[..self.count].iter_mut() {
+            if let Some(bond) = entry.as_mut() { bond.wipe(); }
+            *entry = None;
+        }
+        self.count = 0;
     }
 
     pub fn count(&self) -> usize { self.count }
@@ -1385,6 +1421,88 @@ impl BleEncryptionState {
         for cursor in index..self.count.saturating_sub(1) { self.links[cursor] = self.links[cursor + 1]; }
         if self.count != 0 { self.count -= 1; self.links[self.count] = None; }
     }
+}
+
+pub struct SmpKeyDistribution {
+    handle: Option<u16>,
+    pending_ltk: Option<[u8; 16]>,
+    ediv: Option<u16>,
+    rand: Option<u64>,
+}
+
+impl SmpKeyDistribution {
+    pub const fn new() -> Self { Self { handle: None, pending_ltk: None, ediv: None, rand: None } }
+
+    pub fn encryption_information(&mut self, links: &LeLinkState, pairing: &SmpPairingState, handle: u16, pdu: &[u8]) -> Result<(), HciError> {
+        if !links.contains_handle(handle)
+            || pairing.handle() != Some(handle)
+            || !pairing.encryption_key_distribution_negotiated()
+            || pdu.len() != 17
+            || pdu[0] != BLE_SMP_ENCRYPTION_INFORMATION
+            || self.pending_ltk.is_some()
+        { return Err(HciError::UnexpectedOpcode); }
+        let mut ltk = [0_u8; 16];
+        ltk.copy_from_slice(&pdu[1..17]);
+        let key_size = pairing.negotiated_key_size().ok_or(HciError::UnexpectedOpcode)? as usize;
+        if ltk[key_size..].iter().any(|byte| *byte != 0) {
+            ltk.fill(0);
+            return Err(HciError::MalformedEvent);
+        }
+        self.handle = Some(handle);
+        self.pending_ltk = Some(ltk);
+        Ok(())
+    }
+
+    pub fn master_identification(&mut self, links: &LeLinkState, pairing: &SmpPairingState, handle: u16, pdu: &[u8], bonds: &mut BleBondStore) -> Result<(), HciError> {
+        if !links.contains_handle(handle)
+            || pairing.handle() != Some(handle)
+            || self.handle != Some(handle)
+            || pdu.len() != 11
+            || pdu[0] != BLE_SMP_MASTER_IDENTIFICATION
+        { return Err(HciError::UnexpectedOpcode); }
+        let Some(mut ltk) = self.pending_ltk.take() else { return Err(HciError::UnexpectedOpcode); };
+        let ediv = u16::from_le_bytes([pdu[1], pdu[2]]);
+        let rand = u64::from_le_bytes(pdu[3..11].try_into().map_err(|_| HciError::MalformedEvent)?);
+        if bonds.store(links, handle, ltk, false).is_err() {
+            ltk.fill(0);
+            return Err(HciError::ControllerFailure(0xff));
+        }
+        ltk.fill(0);
+        self.ediv = Some(ediv);
+        self.rand = Some(rand);
+        self.handle = None;
+        Ok(())
+    }
+
+    pub fn abort(&mut self) {
+        if let Some(ltk) = self.pending_ltk.as_mut() { ltk.fill(0); }
+        self.pending_ltk = None;
+        self.handle = None;
+        self.ediv = None;
+        self.rand = None;
+    }
+}
+
+pub fn ble_smp_key_distribution_self_test() -> bool {
+    let mut links = LeLinkState::new();
+    let connected = [EVT_LE_META,19,LE_SUBEVENT_CONNECTION_COMPLETE,0,0x42,0,0,1,1,2,3,4,5,6,0x18,0,0,0,0xf4,1,0];
+    if links.handle_connection_complete(&connected).is_err() { return false; }
+    let mut pairing = SmpPairingState::new();
+    let request = [BLE_SMP_PAIRING_REQUEST,3,0,0x01,16,0x01,0x01];
+    let response = [BLE_SMP_PAIRING_RESPONSE,3,0,0x01,16,0x01,0x01];
+    if pairing.begin(&links,0x42,&request).is_err() || pairing.accept_response(&links,0x42,&response).is_err() { return false; }
+    let mut distribution = SmpKeyDistribution::new();
+    let mut info = [0_u8;17]; info[0]=BLE_SMP_ENCRYPTION_INFORMATION; info[1..17].fill(0xa5);
+    let mut master = [0_u8;11]; master[0]=BLE_SMP_MASTER_IDENTIFICATION; master[1..3].copy_from_slice(&7_u16.to_le_bytes()); master[3..11].copy_from_slice(&9_u64.to_le_bytes());
+    let mut bonds = BleBondStore::new();
+    if distribution.master_identification(&links,&pairing,0x42,&master,&mut bonds).is_ok()
+        || distribution.encryption_information(&links,&pairing,0x43,&info).is_ok()
+        || distribution.encryption_information(&links,&pairing,0x42,&info).is_err()
+        || distribution.master_identification(&links,&pairing,0x42,&master,&mut bonds).is_err()
+        || bonds.count()!=1
+    { return false; }
+    bonds.clear();
+    bonds.count()==0
 }
 
 pub fn ble_smp_ltk_encryption_authority_self_test() -> bool {
