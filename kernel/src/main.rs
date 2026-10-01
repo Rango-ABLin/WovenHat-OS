@@ -989,6 +989,15 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         serial::write_line(format_args!(
             "[S13.10J] Bluetooth ATT foundation: PASSED"
         ));
+        if !bluetooth_hci::gatt_foundation_self_test() {
+            serial::write_line(format_args!(
+                "[S13.10J] Bluetooth GATT service model: FAILED"
+            ));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!(
+            "[S13.10J] Bluetooth GATT service model: PASSED"
+        ));
     }
 
     if heap::init().is_err() {
