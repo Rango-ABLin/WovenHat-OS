@@ -783,6 +783,8 @@ impl AttDatabase {
         Self { attributes: [None; MAX_ATT_ATTRIBUTES], count: 0 }
     }
 
+    pub fn remaining_capacity(&self) -> usize { MAX_ATT_ATTRIBUTES - self.count }
+
     pub fn insert(&mut self, attribute: AttAttribute) -> Result<(), HciError> {
         if self.attributes[..self.count].iter().flatten().any(|entry| entry.handle == attribute.handle) {
             return Err(HciError::UnexpectedOpcode);
@@ -1044,6 +1046,9 @@ impl GattDatabase {
         writable: bool,
         value: &[u8],
     ) -> Result<(u16, u16), HciError> {
+        if self.att.remaining_capacity() < 2 {
+            return Err(HciError::ControllerFailure(0xff));
+        }
         let declaration_handle = self.next_handle;
         let value_handle = declaration_handle.checked_add(1).ok_or(HciError::PayloadTooLarge)?;
         let mut declaration = [0_u8; 5];
