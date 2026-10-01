@@ -1180,6 +1180,120 @@ pub const BLE_SMP_PAIRING_FAILED: u8 = 0x05;
 pub const MAX_BLE_BONDS: usize = 8;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct SmpPairingParameters {
+    pub io_capability: u8,
+    pub oob_data_flag: u8,
+    pub auth_req: u8,
+    pub max_key_size: u8,
+    pub initiator_key_distribution: u8,
+    pub responder_key_distribution: u8,
+}
+
+impl SmpPairingParameters {
+    pub fn parse(pdu: &[u8], expected_code: u8) -> Result<Self, HciError> {
+        if pdu.len() != 7 || pdu[0] != expected_code {
+            return Err(HciError::MalformedEvent);
+        }
+        let params = Self {
+            io_capability: pdu[1],
+            oob_data_flag: pdu[2],
+            auth_req: pdu[3],
+            max_key_size: pdu[4],
+            initiator_key_distribution: pdu[5],
+            responder_key_distribution: pdu[6],
+        };
+        if params.io_capability > 0x04
+            || params.oob_data_flag > 0x01
+            || params.auth_req & !0x3d != 0
+            || !(7..=16).contains(&params.max_key_size)
+            || params.initiator_key_distribution & !0x07 != 0
+            || params.responder_key_distribution & !0x07 != 0
+        {
+            return Err(HciError::MalformedEvent);
+        }
+        Ok(params)
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SmpPairingPhase {
+    Idle,
+    RequestValidated,
+    Negotiated,
+    Failed,
+}
+
+pub struct SmpPairingState {
+    handle: Option<u16>,
+    phase: SmpPairingPhase,
+    request: Option<SmpPairingParameters>,
+    response: Option<SmpPairingParameters>,
+}
+
+impl SmpPairingState {
+    pub const fn new() -> Self {
+        Self { handle: None, phase: SmpPairingPhase::Idle, request: None, response: None }
+    }
+
+    pub fn begin(&mut self, links: &LeLinkState, handle: u16, pdu: &[u8]) -> Result<(), HciError> {
+        if self.phase != SmpPairingPhase::Idle || !links.contains_handle(handle) {
+            return Err(HciError::UnexpectedOpcode);
+        }
+        let request = SmpPairingParameters::parse(pdu, BLE_SMP_PAIRING_REQUEST)?;
+        self.handle = Some(handle);
+        self.request = Some(request);
+        self.phase = SmpPairingPhase::RequestValidated;
+        Ok(())
+    }
+
+    pub fn accept_response(&mut self, links: &LeLinkState, handle: u16, pdu: &[u8]) -> Result<(), HciError> {
+        if self.phase != SmpPairingPhase::RequestValidated
+            || self.handle != Some(handle)
+            || !links.contains_handle(handle)
+        {
+            return Err(HciError::UnexpectedOpcode);
+        }
+        let response = SmpPairingParameters::parse(pdu, BLE_SMP_PAIRING_RESPONSE)?;
+        self.response = Some(response);
+        self.phase = SmpPairingPhase::Negotiated;
+        Ok(())
+    }
+
+    pub fn fail(&mut self) {
+        self.phase = SmpPairingPhase::Failed;
+        self.request = None;
+        self.response = None;
+    }
+
+    pub fn phase(&self) -> SmpPairingPhase { self.phase }
+}
+
+pub fn ble_smp_pairing_state_self_test() -> bool {
+    let mut links = LeLinkState::new();
+    let connected = [
+        EVT_LE_META, 19, LE_SUBEVENT_CONNECTION_COMPLETE, 0,
+        0x42, 0x00, 0, 1, 1, 2, 3, 4, 5, 6,
+        0x18, 0x00, 0, 0, 0xf4, 0x01, 0,
+    ];
+    if links.handle_connection_complete(&connected).is_err() { return false; }
+    let request = [BLE_SMP_PAIRING_REQUEST, 3, 0, 0x01, 16, 0x01, 0x01];
+    let response = [BLE_SMP_PAIRING_RESPONSE, 3, 0, 0x01, 16, 0x01, 0x01];
+    let malformed = [BLE_SMP_PAIRING_REQUEST, 3, 0, 0x01, 6, 0x01, 0x01];
+    let mut pairing = SmpPairingState::new();
+    if pairing.begin(&links, 0x43, &request).is_ok()
+        || pairing.begin(&links, 0x42, &malformed).is_ok()
+        || pairing.phase() != SmpPairingPhase::Idle
+        || pairing.begin(&links, 0x42, &request).is_err()
+        || pairing.phase() != SmpPairingPhase::RequestValidated
+        || pairing.accept_response(&links, 0x43, &response).is_ok()
+        || pairing.accept_response(&links, 0x42, &response).is_err()
+        || pairing.phase() != SmpPairingPhase::Negotiated
+    { return false; }
+    pairing.fail();
+    pairing.phase() == SmpPairingPhase::Failed
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct BleBond {
     pub address_type: u8,
     pub address: [u8; 6],
