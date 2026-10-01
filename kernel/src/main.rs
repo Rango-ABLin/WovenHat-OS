@@ -2927,7 +2927,7 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     }
     #[cfg(feature = "stage1-5-test")]
     {
-        if !journal::structural_self_test() {
+        if !journal::structural_self_test() || !storage::self_test() {
             serial::write_line(format_args!("[S1-5] storage journal: FAILED"));
             qemu_test_exit_failure();
         }

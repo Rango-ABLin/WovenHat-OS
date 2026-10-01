@@ -13,6 +13,17 @@ This is a bounded software hardening increment, not a claim that the remaining
 hardware qualification, DMA storage completion, or full data rollback gaps are
 closed.
 
+## Stage 1–5 durable data journal — 2026-10-01
+
+FAT32 persistence now uses a bounded on-volume prepared/committed data journal
+to recover interrupted single-file replacements, including restoration of the
+previous bytes or removal of a newly-created target. Payload tampering fails
+checksum validation. The journal self-test and 1/2/4-CPU QEMU gate passed.
+See [the data-journal audit](audit-stage1-5-data-journal-2026-10-01.md).
+
+Multi-file atomicity, larger-than-VFS files, and physical power-loss testing
+remain open.
+
 Production completion is tracked separately from bounded foundation acceptance
 in [the Stage 1–12 gap audit](stage1-12-production-gap-audit.md). No stage is
 fully complete while a roadmap requirement remains open.

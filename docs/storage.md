@@ -98,12 +98,13 @@ free clusters by scanning the FAT and compares them with FSInfo hints.
 and directory counts, and flags FSInfo free-count mismatches.
 
 Current FAT32 mutation limits are deliberate: long names are created through
-validated bounded LFN records, but the metadata sidecar and durable intent
-journal remain fixed-capacity and are not a replacement for a full filesystem
-transaction log. Full directories grow by linking a zeroed cluster, and valid
-FSInfo sectors are maintained as free-space hints. Flushes make completed
-operations visible to the device, but they are not a full power-loss rollback
-guarantee.
+validated bounded LFN records. Single-file persistence is protected by a
+bounded on-volume prepared/committed rollback journal, while the metadata
+sidecar and intent table remain fixed-capacity and are not a replacement for a
+full multi-operation filesystem transaction log. Full directories grow by
+linking a zeroed cluster, and valid FSInfo sectors are maintained as free-space
+hints. Flushes make completed operations visible to the device, but physical
+power-loss behavior still requires qualification.
 
 Next storage increments:
 

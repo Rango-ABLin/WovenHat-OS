@@ -6,6 +6,14 @@ use crate::{ata, block_io, fat32, gpt, partition, swap, vfs};
 const READ_ONLY_ATTRIBUTE: u8 = 0x01;
 const DIRECTORY_ATTRIBUTE: u8 = 0x10;
 const MAX_BOOT_IMPORT_DEPTH: usize = 2;
+const DATA_JOURNAL_NAME: &str = "WOVENJR.BIN";
+const DATA_JOURNAL_MAGIC: &[u8; 4] = b"WDJ1";
+const DATA_JOURNAL_HEADER_SIZE: usize = 26;
+const DATA_JOURNAL_PATH_SIZE: usize = crate::config::MAX_PATH_SIZE;
+const DATA_JOURNAL_RECORD_SIZE: usize =
+    DATA_JOURNAL_HEADER_SIZE + DATA_JOURNAL_PATH_SIZE + vfs::NODE_CAPACITY;
+const DATA_JOURNAL_PREPARED: u8 = 1;
+const DATA_JOURNAL_COMMITTED: u8 = 2;
 
 const MOUNT_UNKNOWN: u8 = 0;
 const MOUNT_NO_DEVICE: u8 = 1;
@@ -244,6 +252,10 @@ fn mount_device(device: &mut impl crate::block::BlockDevice) -> MountStatus {
 
     let writable_import = !device.is_read_only();
 
+    if writable_import && recover_data_journal(device, volume).is_err() {
+        return MountStatus::Failed;
+    }
+
     match import_directory(
         device,
         volume,
@@ -271,6 +283,9 @@ fn import_directory(
 
     fat32::for_each_directory_entry_named(device, volume, dir_cluster, |entry, long_name| {
         if entry.attributes & 0x08 != 0 {
+            return Ok(());
+        }
+        if entry.short_name == *b"WOVENJR BIN" {
             return Ok(());
         }
         // Skip . and ..
@@ -418,6 +433,202 @@ fn checksum_bytes(bytes: &[u8]) -> u64 {
         (hash ^ u64::from(*byte)).wrapping_mul(0x1000_0000_01b3)
     })
 }
+
+fn read_u32(bytes: &[u8], offset: usize) -> u32 {
+    u32::from_le_bytes(bytes[offset..offset + 4].try_into().unwrap())
+}
+
+fn read_u64(bytes: &[u8], offset: usize) -> u64 {
+    u64::from_le_bytes(bytes[offset..offset + 8].try_into().unwrap())
+}
+
+fn data_journal_checksum(record: &[u8], data_len: usize) -> u64 {
+    let mut hash = 0xcbf2_9ce4_8422_2325;
+    for (index, byte) in record[..DATA_JOURNAL_HEADER_SIZE + DATA_JOURNAL_PATH_SIZE]
+        .iter()
+        .enumerate()
+    {
+        if (18..26).contains(&index) {
+            continue;
+        }
+        hash = (hash ^ u64::from(*byte)).wrapping_mul(0x1000_0000_01b3);
+    }
+    for byte in &record[DATA_JOURNAL_HEADER_SIZE + DATA_JOURNAL_PATH_SIZE
+        ..DATA_JOURNAL_HEADER_SIZE + DATA_JOURNAL_PATH_SIZE + data_len]
+    {
+        hash = (hash ^ u64::from(*byte)).wrapping_mul(0x1000_0000_01b3);
+    }
+    hash
+}
+
+fn encode_data_journal(
+    path: &str,
+    old_exists: bool,
+    old_data: &[u8],
+    state: u8,
+) -> Option<alloc::vec::Vec<u8>> {
+    if path.len() > DATA_JOURNAL_PATH_SIZE || old_data.len() > vfs::NODE_CAPACITY {
+        return None;
+    }
+    let mut record = alloc::vec![0u8; DATA_JOURNAL_RECORD_SIZE];
+    record[..4].copy_from_slice(DATA_JOURNAL_MAGIC);
+    record[4..6].copy_from_slice(&1u16.to_le_bytes());
+    record[6] = state;
+    record[7] = u8::from(old_exists);
+    record[8..10].copy_from_slice(&(path.len() as u16).to_le_bytes());
+    record[10..14].copy_from_slice(&(old_data.len() as u32).to_le_bytes());
+    record[DATA_JOURNAL_HEADER_SIZE..DATA_JOURNAL_HEADER_SIZE + path.len()]
+        .copy_from_slice(path.as_bytes());
+    let data_start = DATA_JOURNAL_HEADER_SIZE + DATA_JOURNAL_PATH_SIZE;
+    record[data_start..data_start + old_data.len()].copy_from_slice(old_data);
+    let checksum = data_journal_checksum(&record, old_data.len());
+    record[18..26].copy_from_slice(&checksum.to_le_bytes());
+    Some(record)
+}
+
+fn read_data_journal_record(
+    device: &mut impl crate::block::BlockDevice,
+    volume: fat32::Volume,
+) -> Result<Option<alloc::vec::Vec<u8>>, fat32::Error> {
+    let Ok(entry) = fat32::resolve_path(device, volume, DATA_JOURNAL_NAME) else {
+        return Ok(None);
+    };
+    if entry.attributes & DIRECTORY_ATTRIBUTE != 0 || entry.size as usize > DATA_JOURNAL_RECORD_SIZE
+    {
+        return Err(fat32::Error::CorruptDirectory);
+    }
+    let mut record = alloc::vec![0u8; entry.size as usize];
+    let length = fat32::read_file(device, volume, entry, &mut record)?;
+    if length != record.len()
+        || record.len() < DATA_JOURNAL_HEADER_SIZE + DATA_JOURNAL_PATH_SIZE
+        || &record[..4] != DATA_JOURNAL_MAGIC
+        || u16::from_le_bytes([record[4], record[5]]) != 1
+        || !matches!(record[6], DATA_JOURNAL_PREPARED | DATA_JOURNAL_COMMITTED)
+    {
+        return Err(fat32::Error::CorruptDirectory);
+    }
+    let path_len = u16::from_le_bytes([record[8], record[9]]) as usize;
+    let data_len = read_u32(&record, 10) as usize;
+    let expected_size = DATA_JOURNAL_HEADER_SIZE
+        .checked_add(DATA_JOURNAL_PATH_SIZE)
+        .and_then(|size| size.checked_add(data_len))
+        .ok_or(fat32::Error::CorruptDirectory)?;
+    if path_len == 0
+        || path_len > DATA_JOURNAL_PATH_SIZE
+        || data_len > vfs::NODE_CAPACITY
+        || expected_size != record.len()
+        || read_u64(&record, 18) != data_journal_checksum(&record, data_len)
+    {
+        return Err(fat32::Error::CorruptDirectory);
+    }
+    Ok(Some(record))
+}
+
+fn update_data_journal_on_volume(
+    device: &mut impl crate::block::BlockDevice,
+    volume: fat32::Volume,
+    record: &[u8],
+) -> Result<(), PersistError> {
+    fat32::create_path_file(device, volume, DATA_JOURNAL_NAME, record).map_err(map_persist_err)?;
+    device.flush().map_err(|_| PersistError::Failed)
+}
+
+fn remove_data_journal_on_volume(
+    device: &mut impl crate::block::BlockDevice,
+    volume: fat32::Volume,
+) -> Result<(), PersistError> {
+    match fat32::delete_path(device, volume, DATA_JOURNAL_NAME) {
+        Ok(()) | Err(fat32::Error::NotFound) => {}
+        Err(error) => return Err(map_persist_err(error)),
+    }
+    device.flush().map_err(|_| PersistError::Failed)
+}
+
+fn update_data_journal_on_device(
+    device: &mut impl crate::block::BlockDevice,
+    record: &[u8],
+) -> Result<(), PersistError> {
+    match fat32::mount(device) {
+        Ok(volume) => update_data_journal_on_volume(device, volume, record),
+        Err(fat32::Error::InvalidBootSector | fat32::Error::UnsupportedGeometry) => {
+            if let Ok(Some(part)) = partition::find_fat32(device) {
+                let mut view = partition::PartitionDevice::new(device, part)
+                    .map_err(|_| PersistError::Failed)?;
+                let volume = fat32::mount(&mut view).map_err(map_persist_err)?;
+                update_data_journal_on_volume(&mut view, volume, record)
+            } else if let Ok(Some(part)) = gpt::find_fat_partition(device) {
+                let mut view = partition::PartitionDevice::new(device, part)
+                    .map_err(|_| PersistError::Failed)?;
+                let volume = fat32::mount(&mut view).map_err(map_persist_err)?;
+                update_data_journal_on_volume(&mut view, volume, record)
+            } else {
+                Err(PersistError::Failed)
+            }
+        }
+        Err(_) => Err(PersistError::Failed),
+    }
+}
+
+fn remove_data_journal_on_device(
+    device: &mut impl crate::block::BlockDevice,
+) -> Result<(), PersistError> {
+    match fat32::mount(device) {
+        Ok(volume) => remove_data_journal_on_volume(device, volume),
+        Err(fat32::Error::InvalidBootSector | fat32::Error::UnsupportedGeometry) => {
+            if let Ok(Some(part)) = partition::find_fat32(device) {
+                let mut view = partition::PartitionDevice::new(device, part)
+                    .map_err(|_| PersistError::Failed)?;
+                let volume = fat32::mount(&mut view).map_err(map_persist_err)?;
+                remove_data_journal_on_volume(&mut view, volume)
+            } else if let Ok(Some(part)) = gpt::find_fat_partition(device) {
+                let mut view = partition::PartitionDevice::new(device, part)
+                    .map_err(|_| PersistError::Failed)?;
+                let volume = fat32::mount(&mut view).map_err(map_persist_err)?;
+                remove_data_journal_on_volume(&mut view, volume)
+            } else {
+                Err(PersistError::Failed)
+            }
+        }
+        Err(_) => Err(PersistError::Failed),
+    }
+}
+
+fn recover_data_journal(
+    device: &mut impl crate::block::BlockDevice,
+    volume: fat32::Volume,
+) -> Result<(), fat32::Error> {
+    let Some(record) = read_data_journal_record(device, volume)? else {
+        return Ok(());
+    };
+    if record[6] == DATA_JOURNAL_COMMITTED {
+        return fat32::delete_path(device, volume, DATA_JOURNAL_NAME);
+    }
+    let path_len = u16::from_le_bytes([record[8], record[9]]) as usize;
+    let data_len = read_u32(&record, 10) as usize;
+    let path_start = DATA_JOURNAL_HEADER_SIZE;
+    let path = core::str::from_utf8(&record[path_start..path_start + path_len])
+        .map_err(|_| fat32::Error::CorruptDirectory)?;
+    if !path.starts_with("/mnt/") {
+        return Err(fat32::Error::CorruptDirectory);
+    }
+    let relative = &path[5..];
+    let old_exists = record[7] != 0;
+    let data_start = DATA_JOURNAL_HEADER_SIZE + DATA_JOURNAL_PATH_SIZE;
+    if old_exists {
+        fat32::create_path_file(
+            device,
+            volume,
+            relative,
+            &record[data_start..data_start + data_len],
+        )?;
+    } else if !matches!(
+        fat32::delete_path(device, volume, relative),
+        Ok(()) | Err(fat32::Error::NotFound)
+    ) {
+        return Err(fat32::Error::WriteFailed);
+    }
+    fat32::delete_path(device, volume, DATA_JOURNAL_NAME)
+}
 fn join_path(prefix: &str, name: &str, out: &mut [u8]) -> Option<usize> {
     let slash = !prefix.ends_with('/');
     let need = prefix.len() + usize::from(slash) + name.len();
@@ -471,7 +682,30 @@ pub fn self_test() -> bool {
     let bad_ok = short_name_to_str(b"BAD?    TXT", &mut name).is_none();
     let encode_ok = fat32::encode_short_name("kernel.bin") == Some(*b"KERNEL  BIN")
         && fat32::encode_short_name("readme") == Some(*b"README     ");
-    kernel_ok && readme_ok && bad_ok && encode_ok
+    kernel_ok && readme_ok && bad_ok && encode_ok && data_journal_self_test()
+}
+
+fn data_journal_self_test() -> bool {
+    let old = [0x11_u8, 0x22, 0x33, 0x44];
+    let Some(prepared) =
+        encode_data_journal("/mnt/rollback.txt", true, &old, DATA_JOURNAL_PREPARED)
+    else {
+        return false;
+    };
+    let Some(committed) =
+        encode_data_journal("/mnt/rollback.txt", true, &old, DATA_JOURNAL_COMMITTED)
+    else {
+        return false;
+    };
+    let data_start = DATA_JOURNAL_HEADER_SIZE + DATA_JOURNAL_PATH_SIZE;
+    let valid = prepared.len() == DATA_JOURNAL_RECORD_SIZE
+        && committed[6] == DATA_JOURNAL_COMMITTED
+        && prepared[6] == DATA_JOURNAL_PREPARED
+        && read_u64(&prepared, 18) == data_journal_checksum(&prepared, old.len())
+        && prepared[data_start..data_start + old.len()] == old;
+    let mut tampered = prepared;
+    tampered[data_start] ^= 1;
+    valid && read_u64(&tampered, 18) != data_journal_checksum(&tampered, old.len())
 }
 
 /// Ensure a path under `/mnt` exists in the VFS by resolving it on the live ATA volume.
@@ -1013,20 +1247,34 @@ pub fn persist_path(path: &str) -> Result<(), PersistError> {
         mode: stat.mode,
     });
     let mut disk = block_io::primary_ata();
-    let mut result = if let Some(metadata) = metadata {
-        let intent = fat32::JournalIntent {
-            path_hash: fat32::metadata_path_hash(path),
-            path_tag: fat32::metadata_path_tag(path),
-            checksum,
-            metadata,
+    let mut old_data = [0u8; vfs::NODE_CAPACITY];
+    let old_exists = read_existing_file_on_device(&mut disk, relative, &mut old_data)
+        .map_err(|_| PersistError::Failed)?;
+    let old_length = old_exists.unwrap_or(0);
+    let data_record = encode_data_journal(
+        path,
+        old_exists.is_some(),
+        &old_data[..old_length],
+        DATA_JOURNAL_PREPARED,
+    )
+    .ok_or(PersistError::TooLarge)?;
+    let mut result = update_data_journal_on_device(&mut disk, &data_record);
+    if result.is_ok() {
+        result = if let Some(metadata) = metadata {
+            let intent = fat32::JournalIntent {
+                path_hash: fat32::metadata_path_hash(path),
+                path_tag: fat32::metadata_path_tag(path),
+                checksum,
+                metadata,
+            };
+            // Write and flush the intent before FAT data so a reboot can finish
+            // the ownership update during the next mounted import.
+            persist_journal_on_device(&mut disk, intent, false)
+                .and_then(|_| persist_metadata_on_device(&mut disk, path, metadata, true))
+        } else {
+            Ok(())
         };
-        // Write and flush the intent before FAT data so a reboot can finish
-        // the ownership update during the next mounted import.
-        persist_journal_on_device(&mut disk, intent, false)
-            .and_then(|_| persist_metadata_on_device(&mut disk, path, metadata, true))
-    } else {
-        Ok(())
-    };
+    }
     if result.is_ok() {
         result = persist_on_device(&mut disk, relative, &data[..length]);
     }
@@ -1059,9 +1307,66 @@ pub fn persist_path(path: &str) -> Result<(), PersistError> {
         }
     }
     if result.is_ok() {
+        let committed = encode_data_journal(
+            path,
+            old_exists.is_some(),
+            &old_data[..old_length],
+            DATA_JOURNAL_COMMITTED,
+        )
+        .ok_or(PersistError::TooLarge)
+        .and_then(|record| update_data_journal_on_device(&mut disk, &record));
+        result = committed;
+    }
+    if result.is_ok() {
+        result = remove_data_journal_on_device(&mut disk);
+    }
+    if result.is_ok() {
         let _ = crate::journal::commit(journal_token);
     }
     result
+}
+
+fn read_existing_file_on_device(
+    device: &mut impl crate::block::BlockDevice,
+    relative: &str,
+    output: &mut [u8; vfs::NODE_CAPACITY],
+) -> Result<Option<usize>, PersistError> {
+    fn read_from_volume(
+        device: &mut impl crate::block::BlockDevice,
+        volume: fat32::Volume,
+        relative: &str,
+        output: &mut [u8; vfs::NODE_CAPACITY],
+    ) -> Result<Option<usize>, PersistError> {
+        let entry = match fat32::resolve_path(device, volume, relative) {
+            Ok(entry) => entry,
+            Err(fat32::Error::NotFound) => return Ok(None),
+            Err(error) => return Err(map_persist_err(error)),
+        };
+        if entry.attributes & DIRECTORY_ATTRIBUTE != 0 {
+            return Err(PersistError::Failed);
+        }
+        let length = fat32::read_file(device, volume, entry, output).map_err(map_persist_err)?;
+        Ok(Some(length))
+    }
+    match fat32::mount(device) {
+        Ok(volume) => read_from_volume(device, volume, relative, output),
+        Err(fat32::Error::InvalidBootSector | fat32::Error::UnsupportedGeometry) => {
+            if let Ok(Some(part)) = partition::find_fat32(device) {
+                let mut view = partition::PartitionDevice::new(device, part)
+                    .map_err(|_| PersistError::Failed)?;
+                let volume = fat32::mount(&mut view).map_err(map_persist_err)?;
+                read_from_volume(&mut view, volume, relative, output)
+            } else if let Ok(Some(part)) = gpt::find_fat_partition(device) {
+                let mut view = partition::PartitionDevice::new(device, part)
+                    .map_err(|_| PersistError::Failed)?;
+                let volume = fat32::mount(&mut view).map_err(map_persist_err)?;
+                read_from_volume(&mut view, volume, relative, output)
+            } else {
+                Err(PersistError::Failed)
+            }
+        }
+        Err(_) => Err(PersistError::Failed),
+    }
 }
 
 fn persist_metadata_on_device(
