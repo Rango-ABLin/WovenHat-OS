@@ -433,3 +433,12 @@ Bluetooth security is modeled as authority derived from controller-confirmed sta
 Secure Simple Pairing events are parsed into policy decisions: IO capability can be declared, but numeric confirmation and passkey acceptance require an explicit caller decision. The kernel does not silently accept a pairing prompt.
 
 The strongest software trust predicate binds four facts: the ACL handle is still live, its peer address owns a stored link key, authentication completed successfully, and encryption was confirmed enabled by the controller. Key removal or ACL teardown therefore revokes trusted authority without relying on stale security state.
+
+
+### Stage 13.10I Bluetooth LE discovery and link authority
+
+Bluetooth LE is modeled with state distinct from the BR/EDR discovery and link-key trust paths. `LeDiscoveryState` owns a fixed-capacity table keyed by address type plus device address, because an LE peer identity cannot safely be reduced to the six address bytes alone. Advertising reports are accepted only when the LE Meta Event framing, subevent, declared lengths, address type and legacy advertising-data bounds are internally consistent.
+
+`LeLinkState` is the LE controller-handle authority boundary. LE Create Connection consumes an owned discovery record, carrying its peer address type and address into the controller command. A successful LE Connection Complete establishes a bounded handle/role/address/connection-parameter record. Conflicting handle or peer ownership is rejected rather than aliased. Disconnection Complete removes the record and makes the handle stale immediately.
+
+This layer intentionally does not reuse BR/EDR `LinkKeyStore` as BLE bonding state. Stage 13.10J ATT/GATT should consume live `LeLinkState` ownership and add bounded ATT transaction and attribute/service state. BLE SMP, long-term keys, privacy and bonding require a separate security model in a later slice.
