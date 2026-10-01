@@ -971,6 +971,15 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         serial::write_line(format_args!(
             "[S13.10I] Bluetooth LE advertising discovery: PASSED"
         ));
+        if !bluetooth_hci::le_link_lifecycle_self_test() {
+            serial::write_line(format_args!(
+                "[S13.10I] Bluetooth LE connection lifecycle: FAILED"
+            ));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!(
+            "[S13.10I] Bluetooth LE connection lifecycle: PASSED"
+        ));
     }
 
     if heap::init().is_err() {
