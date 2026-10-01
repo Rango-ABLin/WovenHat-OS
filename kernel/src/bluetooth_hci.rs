@@ -3216,6 +3216,7 @@ pub fn le_encrypted_session_self_test() -> bool {
 
 // Stage 13.10P: ATT/GATT authorization bound to LE encrypted-session state.
 pub const ATT_ERR_INSUFFICIENT_AUTHENTICATION: u8 = 0x05;
+pub const ATT_ERR_INSUFFICIENT_ENCRYPTION_KEY_SIZE: u8 = 0x0c;
 pub const ATT_ERR_INSUFFICIENT_ENCRYPTION: u8 = 0x0f;
 pub const MAX_ATT_SECURITY_POLICIES: usize = MAX_ATT_ATTRIBUTES;
 
@@ -3229,6 +3230,7 @@ pub enum AttSecurityRequirement {
 pub struct AttSecurityPolicy {
     pub attribute_handle: u16,
     pub requirement: AttSecurityRequirement,
+    pub min_key_size: u8,
 }
 
 pub struct AttSecurityPolicies {
@@ -3252,13 +3254,13 @@ impl AttSecurityPolicies {
         if let Some(index) = self.entries[..self.count].iter().position(|entry| {
             entry.is_some_and(|policy| policy.attribute_handle == attribute_handle)
         }) {
-            self.entries[index] = Some(AttSecurityPolicy { attribute_handle, requirement });
+            self.entries[index] = Some(AttSecurityPolicy { attribute_handle, requirement, min_key_size: 0 });
             return Ok(());
         }
         if self.count == MAX_ATT_SECURITY_POLICIES {
             return Err(HciError::ControllerFailure(0xff));
         }
-        self.entries[self.count] = Some(AttSecurityPolicy { attribute_handle, requirement });
+        self.entries[self.count] = Some(AttSecurityPolicy { attribute_handle, requirement, min_key_size: 0 });
         self.count += 1;
         Ok(())
     }
@@ -3269,6 +3271,33 @@ impl AttSecurityPolicies {
             .flatten()
             .find(|policy| policy.attribute_handle == attribute_handle)
             .map(|policy| policy.requirement)
+    }
+
+    pub fn require_min_key_size(
+        &mut self,
+        attribute_handle: u16,
+        min_key_size: u8,
+    ) -> Result<(), HciError> {
+        if attribute_handle == 0 || !(7..=16).contains(&min_key_size) {
+            return Err(HciError::MalformedEvent);
+        }
+        let Some(policy) = self.entries[..self.count]
+            .iter_mut()
+            .flatten()
+            .find(|policy| policy.attribute_handle == attribute_handle)
+        else {
+            return Err(HciError::UnexpectedOpcode);
+        };
+        policy.min_key_size = min_key_size;
+        Ok(())
+    }
+
+    fn policy(&self, attribute_handle: u16) -> Option<AttSecurityPolicy> {
+        self.entries[..self.count]
+            .iter()
+            .flatten()
+            .find(|policy| policy.attribute_handle == attribute_handle)
+            .copied()
     }
 
     pub fn count(&self) -> usize { self.count }
@@ -3296,7 +3325,7 @@ impl AttDatabase {
             _ => return self.transact(links, connection_handle, request, out),
         };
 
-        if let Some(requirement) = policies.requirement(handle) {
+        if let Some(policy) = policies.policy(handle) {
             let Some(session) = sessions.session_for_link(links, connection_handle) else {
                 return Ok(Self::error_response(
                     opcode,
@@ -3305,11 +3334,19 @@ impl AttDatabase {
                     out,
                 ));
             };
-            if requirement == AttSecurityRequirement::Authenticated && !session.authenticated {
+            if policy.requirement == AttSecurityRequirement::Authenticated && !session.authenticated {
                 return Ok(Self::error_response(
                     opcode,
                     handle,
                     ATT_ERR_INSUFFICIENT_AUTHENTICATION,
+                    out,
+                ));
+            }
+            if policy.min_key_size != 0 && session.key_size < policy.min_key_size {
+                return Ok(Self::error_response(
+                    opcode,
+                    handle,
+                    ATT_ERR_INSUFFICIENT_ENCRYPTION_KEY_SIZE,
                     out,
                 ));
             }
@@ -3742,4 +3779,80 @@ pub fn le_secure_session_identity_binding_self_test() -> Result<(), u8> {
     }
 
     Ok(())
+}
+
+
+// Stage 13.10S: enforce minimum BLE encryption key size on protected ATT/GATT access.
+pub fn le_gatt_minimum_key_size_self_test() -> bool {
+    let mut links = LeLinkState::new();
+    let connected = [
+        EVT_LE_META, 19, LE_SUBEVENT_CONNECTION_COMPLETE, 0,
+        0x52, 0x00, 0, 1, 2, 4, 6, 8, 10, 12,
+        0x18, 0x00, 0, 0, 0xf4, 0x01, 0,
+    ];
+    if links.handle_connection_complete(&connected).is_err() {
+        return false;
+    }
+
+    let handle = 8;
+    let mut att = AttDatabase::new();
+    let Ok(attribute) = AttAttribute::new(handle, 0xff01, true, false, b"strong") else {
+        return false;
+    };
+    if att.insert(attribute).is_err() {
+        return false;
+    }
+
+    let mut policies = AttSecurityPolicies::new();
+    if policies.require(handle, AttSecurityRequirement::Authenticated).is_err()
+        || policies.require_min_key_size(handle, 16).is_err()
+        || policies.require_min_key_size(handle, 6).is_ok()
+        || policies.require_min_key_size(handle, 17).is_ok()
+    {
+        return false;
+    }
+
+    let weak = LeBondMaterial {
+        ltk: [0x53; 16],
+        ediv: 0x53,
+        rand: 0x5353,
+        key_size: 12,
+        authenticated: true,
+    };
+    let mut bonds = LeBondStore::new();
+    let mut sessions = LeSecuritySessions::new();
+    if bonds.store(&links, 0x52, weak).is_err()
+        || sessions.encryption_change(
+            &links,
+            &bonds,
+            &[EVT_ENCRYPTION_CHANGE, 4, 0, 0x52, 0, 1],
+        ).is_err()
+    {
+        return false;
+    }
+
+    let request = [ATT_OP_READ_REQUEST, handle as u8, 0];
+    let mut out = [0_u8; MAX_ATT_PDU];
+    if att.transact_secured(&links, &sessions, &policies, 0x52, &request, &mut out) != Ok(5)
+        || out[4] != ATT_ERR_INSUFFICIENT_ENCRYPTION_KEY_SIZE
+    {
+        return false;
+    }
+
+    let strong = LeBondMaterial { key_size: 16, ..weak };
+    bonds.store(&links, 0x52, strong).is_ok()
+        && sessions.encryption_change(
+            &links,
+            &bonds,
+            &[EVT_ENCRYPTION_CHANGE, 4, 0, 0x52, 0, 1],
+        ).is_ok()
+        && att.transact_secured(
+            &links,
+            &sessions,
+            &policies,
+            0x52,
+            &request,
+            &mut out,
+        ) == Ok(7)
+        && out[..7] == [ATT_OP_READ_RESPONSE, b's', b't', b'r', b'o', b'n', b'g']
 }
