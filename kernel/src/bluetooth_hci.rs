@@ -570,6 +570,173 @@ pub fn le_discovery_self_test() -> bool {
         && state.handle_advertising_report(&[EVT_LE_META, 2, LE_SUBEVENT_ADVERTISING_REPORT, 1]).is_err()
 }
 
+
+pub const LE_SUBEVENT_CONNECTION_COMPLETE: u8 = 0x01;
+pub const OPCODE_LE_CREATE_CONNECTION: u16 = 0x200d;
+pub const MAX_LE_LINKS: usize = 8;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct LeLink {
+    pub handle: u16,
+    pub role: u8,
+    pub address_type: u8,
+    pub address: [u8; 6],
+    pub interval: u16,
+    pub latency: u16,
+    pub supervision_timeout: u16,
+}
+
+pub struct LeLinkState {
+    links: [Option<LeLink>; MAX_LE_LINKS],
+    count: usize,
+}
+
+impl LeLinkState {
+    pub const fn new() -> Self {
+        Self { links: [None; MAX_LE_LINKS], count: 0 }
+    }
+
+    pub fn create_connection_command(
+        device: LeDiscoveredDevice,
+        out: &mut [u8; 258],
+    ) -> Result<usize, HciError> {
+        let mut params = [0_u8; 25];
+        params[0..2].copy_from_slice(&0x0010_u16.to_le_bytes());
+        params[2..4].copy_from_slice(&0x0010_u16.to_le_bytes());
+        params[4] = 0;
+        params[5] = device.address_type;
+        params[6..12].copy_from_slice(&device.address);
+        params[12] = 0;
+        params[13..15].copy_from_slice(&0x0018_u16.to_le_bytes());
+        params[15..17].copy_from_slice(&0x0028_u16.to_le_bytes());
+        params[17..19].copy_from_slice(&0_u16.to_le_bytes());
+        params[19..21].copy_from_slice(&0x01f4_u16.to_le_bytes());
+        params[21..23].copy_from_slice(&0_u16.to_le_bytes());
+        params[23..25].copy_from_slice(&0_u16.to_le_bytes());
+        HciCommand::new(OPCODE_LE_CREATE_CONNECTION, &params)
+            .map(|command| command.encode(out))
+    }
+
+    pub fn handle_connection_complete(&mut self, event: &[u8]) -> Result<LeLink, HciError> {
+        if event.len() != 21
+            || event[0] != EVT_LE_META
+            || event[1] != 19
+            || event[2] != LE_SUBEVENT_CONNECTION_COMPLETE
+        {
+            return Err(HciError::MalformedEvent);
+        }
+        if event[3] != 0 {
+            return Err(HciError::ControllerFailure(event[3]));
+        }
+        let handle = u16::from_le_bytes([event[4], event[5]]);
+        let role = event[6];
+        let address_type = event[7];
+        if handle > 0x0fff || role > 1 || address_type > 1 {
+            return Err(HciError::MalformedEvent);
+        }
+        let mut address = [0_u8; 6];
+        address.copy_from_slice(&event[8..14]);
+        let link = LeLink {
+            handle,
+            role,
+            address_type,
+            address,
+            interval: u16::from_le_bytes([event[14], event[15]]),
+            latency: u16::from_le_bytes([event[16], event[17]]),
+            supervision_timeout: u16::from_le_bytes([event[18], event[19]]),
+        };
+        if let Some(existing) = self.links[..self.count].iter().flatten().find(|entry| {
+            entry.handle == handle
+                || (entry.address_type == address_type && entry.address == address)
+        }) {
+            if *existing == link {
+                return Ok(link);
+            }
+            return Err(HciError::UnexpectedOpcode);
+        }
+        if self.count == MAX_LE_LINKS {
+            return Err(HciError::ControllerFailure(0xff));
+        }
+        self.links[self.count] = Some(link);
+        self.count += 1;
+        Ok(link)
+    }
+
+    pub fn handle_disconnection_complete(&mut self, event: &[u8]) -> Result<u16, HciError> {
+        if event.len() != 6 || event[0] != EVT_DISCONNECTION_COMPLETE || event[1] != 4 {
+            return Err(HciError::MalformedEvent);
+        }
+        if event[2] != 0 {
+            return Err(HciError::ControllerFailure(event[2]));
+        }
+        let handle = u16::from_le_bytes([event[3], event[4]]);
+        let Some(index) = self.links[..self.count]
+            .iter()
+            .position(|entry| entry.is_some_and(|link| link.handle == handle))
+        else {
+            return Err(HciError::UnexpectedOpcode);
+        };
+        for slot in index..self.count - 1 {
+            self.links[slot] = self.links[slot + 1];
+        }
+        self.count -= 1;
+        self.links[self.count] = None;
+        Ok(handle)
+    }
+
+    pub fn contains_handle(&self, handle: u16) -> bool {
+        self.links[..self.count].iter().flatten().any(|link| link.handle == handle)
+    }
+
+    pub fn count(&self) -> usize { self.count }
+    pub fn link(&self, index: usize) -> Option<LeLink> {
+        if index >= self.count { None } else { self.links[index] }
+    }
+}
+
+pub fn le_link_lifecycle_self_test() -> bool {
+    let device = LeDiscoveredDevice {
+        event_type: 0,
+        address_type: 1,
+        address: [1, 2, 3, 4, 5, 6],
+        data_len: 0,
+        data: [0; MAX_LE_ADVERTISING_DATA],
+        rssi: -40,
+    };
+    let mut out = [0_u8; 258];
+    if LeLinkState::create_connection_command(device, &mut out) != Ok(28)
+        || u16::from_le_bytes([out[0], out[1]]) != OPCODE_LE_CREATE_CONNECTION
+        || out[2] != 25
+        || out[8] != 1
+        || out[9..15] != [1, 2, 3, 4, 5, 6]
+    {
+        return false;
+    }
+
+    let mut links = LeLinkState::new();
+    let connected = [
+        EVT_LE_META, 19, LE_SUBEVENT_CONNECTION_COMPLETE, 0,
+        0x42, 0x00, 0, 1, 1, 2, 3, 4, 5, 6,
+        0x18, 0x00, 0, 0, 0xf4, 0x01, 0,
+    ];
+    let Ok(link) = links.handle_connection_complete(&connected) else { return false; };
+    if link.handle != 0x42
+        || link.address != [1, 2, 3, 4, 5, 6]
+        || link.address_type != 1
+        || links.count() != 1
+        || !links.contains_handle(0x42)
+        || links.handle_connection_complete(&connected) != Ok(link)
+    {
+        return false;
+    }
+
+    let disconnected = [EVT_DISCONNECTION_COMPLETE, 4, 0, 0x42, 0, 0x13];
+    links.handle_disconnection_complete(&disconnected) == Ok(0x42)
+        && links.count() == 0
+        && !links.contains_handle(0x42)
+        && links.handle_disconnection_complete(&disconnected).is_err()
+}
+
 pub const EVT_CONNECTION_COMPLETE: u8 = 0x03;
 pub const EVT_DISCONNECTION_COMPLETE: u8 = 0x05;
 pub const OPCODE_CREATE_CONNECTION: u16 = 0x0405;
