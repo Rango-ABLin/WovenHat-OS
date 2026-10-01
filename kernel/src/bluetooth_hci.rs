@@ -2990,3 +2990,218 @@ pub fn le_bond_encryption_restore_self_test() -> bool {
         && out[5..21] == material.ltk
         && bonds.long_term_key_request_reply(&links, &request[..14], &mut out).is_err()
 }
+
+
+// Stage 13.10O: transient LE encrypted-session state bound to a restored bond.
+pub const MAX_LE_SECURE_SESSIONS: usize = MAX_LE_LINKS;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct LeSecureSession {
+    pub handle: u16,
+    pub address_type: u8,
+    pub address: [u8; 6],
+    pub authenticated: bool,
+    pub key_size: u8,
+}
+
+pub struct LeSecuritySessions {
+    sessions: [Option<LeSecureSession>; MAX_LE_SECURE_SESSIONS],
+    count: usize,
+}
+
+impl LeSecuritySessions {
+    pub const fn new() -> Self {
+        Self { sessions: [None; MAX_LE_SECURE_SESSIONS], count: 0 }
+    }
+
+    fn live_link(links: &LeLinkState, handle: u16) -> Option<LeLink> {
+        (0..links.count())
+            .filter_map(|index| links.link(index))
+            .find(|link| link.handle == handle)
+    }
+
+    pub fn encryption_change(
+        &mut self,
+        links: &LeLinkState,
+        bonds: &LeBondStore,
+        event: &[u8],
+    ) -> Result<u16, HciError> {
+        if event.len() != 6 || event[0] != EVT_ENCRYPTION_CHANGE || event[1] != 4 {
+            return Err(HciError::MalformedEvent);
+        }
+        let status = event[2];
+        let handle = u16::from_le_bytes([event[3], event[4]]);
+        let enabled = event[5];
+        if status != 0 {
+            self.revoke(handle);
+            return Err(HciError::ControllerFailure(status));
+        }
+        if enabled == 0 {
+            self.revoke(handle);
+            return Ok(handle);
+        }
+        if enabled > 1 {
+            return Err(HciError::MalformedEvent);
+        }
+
+        let Some(link) = Self::live_link(links, handle) else {
+            return Err(HciError::UnexpectedOpcode);
+        };
+        let material = bonds.restore(links, handle)?;
+        let session = LeSecureSession {
+            handle,
+            address_type: link.address_type,
+            address: link.address,
+            authenticated: material.authenticated,
+            key_size: material.key_size,
+        };
+
+        if let Some(index) = self.sessions[..self.count]
+            .iter()
+            .position(|entry| entry.is_some_and(|stored| stored.handle == handle))
+        {
+            self.sessions[index] = Some(session);
+            return Ok(handle);
+        }
+        if self.count == MAX_LE_SECURE_SESSIONS {
+            return Err(HciError::ControllerFailure(0xff));
+        }
+        self.sessions[self.count] = Some(session);
+        self.count += 1;
+        Ok(handle)
+    }
+
+    pub fn revoke(&mut self, handle: u16) -> bool {
+        let Some(index) = self.sessions[..self.count]
+            .iter()
+            .position(|entry| entry.is_some_and(|session| session.handle == handle))
+        else {
+            return false;
+        };
+        for slot in index..self.count - 1 {
+            self.sessions[slot] = self.sessions[slot + 1];
+        }
+        self.count -= 1;
+        self.sessions[self.count] = None;
+        true
+    }
+
+    pub fn disconnect(&mut self, links: &mut LeLinkState, event: &[u8]) -> Result<u16, HciError> {
+        let handle = links.handle_disconnection_complete(event)?;
+        self.revoke(handle);
+        Ok(handle)
+    }
+
+    pub fn controller_reset(&mut self, links: &mut LeLinkState) {
+        links.clear();
+        self.sessions = [None; MAX_LE_SECURE_SESSIONS];
+        self.count = 0;
+    }
+
+    pub fn secured(&self, handle: u16) -> bool {
+        self.sessions[..self.count]
+            .iter()
+            .flatten()
+            .any(|session| session.handle == handle)
+    }
+
+    pub fn session(&self, handle: u16) -> Option<LeSecureSession> {
+        self.sessions[..self.count]
+            .iter()
+            .flatten()
+            .find(|session| session.handle == handle)
+            .copied()
+    }
+
+    pub fn count(&self) -> usize { self.count }
+}
+
+pub fn le_encrypted_session_self_test() -> bool {
+    let mut links = LeLinkState::new();
+    let connected = [
+        EVT_LE_META, 19, LE_SUBEVENT_CONNECTION_COMPLETE, 0,
+        0x66, 0x00, 0, 1, 1, 2, 3, 4, 5, 6,
+        0x18, 0x00, 0, 0, 0xf4, 0x01, 0,
+    ];
+    if links.handle_connection_complete(&connected).is_err() {
+        return false;
+    }
+
+    let material = LeBondMaterial {
+        ltk: [0x5a; 16],
+        ediv: 0x1234,
+        rand: 0x1122_3344_5566_7788,
+        key_size: 16,
+        authenticated: true,
+    };
+    let mut bonds = LeBondStore::new();
+    if bonds.store(&links, 0x66, material).is_err() {
+        return false;
+    }
+
+    let mut sessions = LeSecuritySessions::new();
+    let encrypted = [EVT_ENCRYPTION_CHANGE, 4, 0, 0x66, 0, 1];
+    if sessions.encryption_change(&links, &bonds, &encrypted) != Ok(0x66)
+        || !sessions.secured(0x66)
+        || sessions.count() != 1
+        || sessions.session(0x66) != Some(LeSecureSession {
+            handle: 0x66,
+            address_type: 1,
+            address: [1, 2, 3, 4, 5, 6],
+            authenticated: true,
+            key_size: 16,
+        })
+    {
+        return false;
+    }
+
+    let disabled = [EVT_ENCRYPTION_CHANGE, 4, 0, 0x66, 0, 0];
+    if sessions.encryption_change(&links, &bonds, &disabled) != Ok(0x66)
+        || sessions.secured(0x66)
+        || sessions.count() != 0
+        || sessions.encryption_change(&links, &bonds, &encrypted).is_err()
+    {
+        return false;
+    }
+
+    let failed = [EVT_ENCRYPTION_CHANGE, 4, 5, 0x66, 0, 0];
+    if sessions.encryption_change(&links, &bonds, &failed).is_ok()
+        || sessions.secured(0x66)
+    {
+        return false;
+    }
+    if sessions.encryption_change(&links, &bonds, &encrypted).is_err() {
+        return false;
+    }
+
+    let disconnected = [EVT_DISCONNECTION_COMPLETE, 4, 0, 0x66, 0, 0x13];
+    if sessions.disconnect(&mut links, &disconnected) != Ok(0x66)
+        || sessions.secured(0x66)
+        || sessions.count() != 0
+        || bonds.count() != 1
+    {
+        return false;
+    }
+
+    let reconnected = [
+        EVT_LE_META, 19, LE_SUBEVENT_CONNECTION_COMPLETE, 0,
+        0x77, 0x00, 0, 1, 1, 2, 3, 4, 5, 6,
+        0x18, 0x00, 0, 0, 0xf4, 0x01, 0,
+    ];
+    if links.handle_connection_complete(&reconnected).is_err() {
+        return false;
+    }
+    let reencrypted = [EVT_ENCRYPTION_CHANGE, 4, 0, 0x77, 0, 1];
+    if sessions.encryption_change(&links, &bonds, &reencrypted) != Ok(0x77)
+        || !sessions.secured(0x77)
+    {
+        return false;
+    }
+
+    sessions.controller_reset(&mut links);
+    links.count() == 0
+        && sessions.count() == 0
+        && !sessions.secured(0x77)
+        && bonds.count() == 1
+        && sessions.encryption_change(&links, &bonds, &reencrypted).is_err()
+}
