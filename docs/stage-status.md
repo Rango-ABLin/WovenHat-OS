@@ -24,6 +24,12 @@ See [the data-journal audit](audit-stage1-5-data-journal-2026-10-01.md).
 Multi-file atomicity, larger-than-VFS files, and physical power-loss testing
 remain open.
 
+The journal now writes version 2 records with the intended replacement length
+and checksum. Mount recovery validates committed records before retiring them
+and restores the previous bytes if the committed target does not match.
+Version 1 records remain readable for compatibility. Multi-file atomicity and
+physical power-loss testing remain open.
+
 ## Stage 1–5 metadata capacity extension — 2026-10-01
 
 The ownership sidecar preserves the WMD1 four-sector ABI and now uses a

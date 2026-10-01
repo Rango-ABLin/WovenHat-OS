@@ -8,10 +8,13 @@ const DIRECTORY_ATTRIBUTE: u8 = 0x10;
 const MAX_BOOT_IMPORT_DEPTH: usize = 2;
 const DATA_JOURNAL_NAME: &str = "WOVENJR.BIN";
 const DATA_JOURNAL_MAGIC: &[u8; 4] = b"WDJ1";
-const DATA_JOURNAL_HEADER_SIZE: usize = 26;
+const DATA_JOURNAL_V1_HEADER_SIZE: usize = 26;
+const DATA_JOURNAL_HEADER_SIZE: usize = 34;
 const DATA_JOURNAL_PATH_SIZE: usize = crate::config::MAX_PATH_SIZE;
 const DATA_JOURNAL_RECORD_SIZE: usize =
     DATA_JOURNAL_HEADER_SIZE + DATA_JOURNAL_PATH_SIZE + vfs::NODE_CAPACITY;
+const DATA_JOURNAL_V1_VERSION: u16 = 1;
+const DATA_JOURNAL_VERSION: u16 = 2;
 const DATA_JOURNAL_PREPARED: u8 = 1;
 const DATA_JOURNAL_COMMITTED: u8 = 2;
 
@@ -442,19 +445,21 @@ fn read_u64(bytes: &[u8], offset: usize) -> u64 {
     u64::from_le_bytes(bytes[offset..offset + 8].try_into().unwrap())
 }
 
-fn data_journal_checksum(record: &[u8], data_len: usize) -> u64 {
+fn data_journal_checksum(record: &[u8], header_size: usize, data_len: usize) -> u64 {
     let mut hash = 0xcbf2_9ce4_8422_2325;
-    for (index, byte) in record[..DATA_JOURNAL_HEADER_SIZE + DATA_JOURNAL_PATH_SIZE]
+    for (index, byte) in record[..header_size + DATA_JOURNAL_PATH_SIZE]
         .iter()
         .enumerate()
     {
-        if (18..26).contains(&index) {
+        if (18..26).contains(&index)
+            || (header_size >= DATA_JOURNAL_HEADER_SIZE && (26..34).contains(&index))
+        {
             continue;
         }
         hash = (hash ^ u64::from(*byte)).wrapping_mul(0x1000_0000_01b3);
     }
-    for byte in &record[DATA_JOURNAL_HEADER_SIZE + DATA_JOURNAL_PATH_SIZE
-        ..DATA_JOURNAL_HEADER_SIZE + DATA_JOURNAL_PATH_SIZE + data_len]
+    for byte in &record
+        [header_size + DATA_JOURNAL_PATH_SIZE..header_size + DATA_JOURNAL_PATH_SIZE + data_len]
     {
         hash = (hash ^ u64::from(*byte)).wrapping_mul(0x1000_0000_01b3);
     }
@@ -465,25 +470,40 @@ fn encode_data_journal(
     path: &str,
     old_exists: bool,
     old_data: &[u8],
+    new_data: &[u8],
     state: u8,
 ) -> Option<alloc::vec::Vec<u8>> {
-    if path.len() > DATA_JOURNAL_PATH_SIZE || old_data.len() > vfs::NODE_CAPACITY {
+    if path.len() > DATA_JOURNAL_PATH_SIZE
+        || old_data.len() > vfs::NODE_CAPACITY
+        || new_data.len() > vfs::NODE_CAPACITY
+    {
         return None;
     }
     let mut record = alloc::vec![0u8; DATA_JOURNAL_RECORD_SIZE];
     record[..4].copy_from_slice(DATA_JOURNAL_MAGIC);
-    record[4..6].copy_from_slice(&1u16.to_le_bytes());
+    record[4..6].copy_from_slice(&DATA_JOURNAL_VERSION.to_le_bytes());
     record[6] = state;
     record[7] = u8::from(old_exists);
     record[8..10].copy_from_slice(&(path.len() as u16).to_le_bytes());
     record[10..14].copy_from_slice(&(old_data.len() as u32).to_le_bytes());
+    record[14..18].copy_from_slice(&(new_data.len() as u32).to_le_bytes());
     record[DATA_JOURNAL_HEADER_SIZE..DATA_JOURNAL_HEADER_SIZE + path.len()]
         .copy_from_slice(path.as_bytes());
     let data_start = DATA_JOURNAL_HEADER_SIZE + DATA_JOURNAL_PATH_SIZE;
     record[data_start..data_start + old_data.len()].copy_from_slice(old_data);
-    let checksum = data_journal_checksum(&record, old_data.len());
-    record[18..26].copy_from_slice(&checksum.to_le_bytes());
+    let old_checksum = data_journal_checksum(&record, DATA_JOURNAL_HEADER_SIZE, old_data.len());
+    record[18..26].copy_from_slice(&old_checksum.to_le_bytes());
+    record[26..34].copy_from_slice(&checksum_bytes(new_data).to_le_bytes());
     Some(record)
+}
+
+fn committed_data_matches(
+    expected_len: usize,
+    expected_checksum: u64,
+    current: Option<&[u8]>,
+) -> bool {
+    current
+        .is_some_and(|data| data.len() == expected_len && checksum_bytes(data) == expected_checksum)
 }
 
 fn read_data_journal_record(
@@ -500,16 +520,28 @@ fn read_data_journal_record(
     let mut record = alloc::vec![0u8; entry.size as usize];
     let length = fat32::read_file(device, volume, entry, &mut record)?;
     if length != record.len()
-        || record.len() < DATA_JOURNAL_HEADER_SIZE + DATA_JOURNAL_PATH_SIZE
+        || record.len() < DATA_JOURNAL_V1_HEADER_SIZE + DATA_JOURNAL_PATH_SIZE
         || &record[..4] != DATA_JOURNAL_MAGIC
-        || u16::from_le_bytes([record[4], record[5]]) != 1
+        || !matches!(
+            u16::from_le_bytes([record[4], record[5]]),
+            DATA_JOURNAL_V1_VERSION | DATA_JOURNAL_VERSION
+        )
         || !matches!(record[6], DATA_JOURNAL_PREPARED | DATA_JOURNAL_COMMITTED)
     {
         return Err(fat32::Error::CorruptDirectory);
     }
+    let version = u16::from_le_bytes([record[4], record[5]]);
+    let header_size = if version == DATA_JOURNAL_VERSION {
+        DATA_JOURNAL_HEADER_SIZE
+    } else {
+        DATA_JOURNAL_V1_HEADER_SIZE
+    };
+    if record.len() < header_size + DATA_JOURNAL_PATH_SIZE {
+        return Err(fat32::Error::CorruptDirectory);
+    }
     let path_len = u16::from_le_bytes([record[8], record[9]]) as usize;
     let data_len = read_u32(&record, 10) as usize;
-    let expected_size = DATA_JOURNAL_HEADER_SIZE
+    let expected_size = header_size
         .checked_add(DATA_JOURNAL_PATH_SIZE)
         .and_then(|size| size.checked_add(data_len))
         .ok_or(fat32::Error::CorruptDirectory)?;
@@ -517,8 +549,11 @@ fn read_data_journal_record(
         || path_len > DATA_JOURNAL_PATH_SIZE
         || data_len > vfs::NODE_CAPACITY
         || expected_size != record.len()
-        || read_u64(&record, 18) != data_journal_checksum(&record, data_len)
+        || read_u64(&record, 18) != data_journal_checksum(&record, header_size, data_len)
     {
+        return Err(fat32::Error::CorruptDirectory);
+    }
+    if version == DATA_JOURNAL_VERSION && read_u32(&record, 14) as usize > vfs::NODE_CAPACITY {
         return Err(fat32::Error::CorruptDirectory);
     }
     Ok(Some(record))
@@ -600,20 +635,45 @@ fn recover_data_journal(
     let Some(record) = read_data_journal_record(device, volume)? else {
         return Ok(());
     };
-    if record[6] == DATA_JOURNAL_COMMITTED {
-        return fat32::delete_path(device, volume, DATA_JOURNAL_NAME);
-    }
+    let version = u16::from_le_bytes([record[4], record[5]]);
+    let header_size = if version == DATA_JOURNAL_VERSION {
+        DATA_JOURNAL_HEADER_SIZE
+    } else {
+        DATA_JOURNAL_V1_HEADER_SIZE
+    };
     let path_len = u16::from_le_bytes([record[8], record[9]]) as usize;
     let data_len = read_u32(&record, 10) as usize;
-    let path_start = DATA_JOURNAL_HEADER_SIZE;
+    let path_start = header_size;
     let path = core::str::from_utf8(&record[path_start..path_start + path_len])
         .map_err(|_| fat32::Error::CorruptDirectory)?;
     if !path.starts_with("/mnt/") {
         return Err(fat32::Error::CorruptDirectory);
     }
     let relative = &path[5..];
+    if record[6] == DATA_JOURNAL_COMMITTED {
+        if version == DATA_JOURNAL_VERSION {
+            let expected_len = read_u32(&record, 14) as usize;
+            let expected_checksum = read_u64(&record, 26);
+            let mut current = [0u8; vfs::NODE_CAPACITY];
+            let current_len = match fat32::resolve_path(device, volume, relative) {
+                Ok(entry) if entry.attributes & DIRECTORY_ATTRIBUTE == 0 => {
+                    Some(fat32::read_file(device, volume, entry, &mut current)?)
+                }
+                _ => None,
+            };
+            if committed_data_matches(
+                expected_len,
+                expected_checksum,
+                current_len.map(|length| &current[..length]),
+            ) {
+                return fat32::delete_path(device, volume, DATA_JOURNAL_NAME);
+            }
+        } else {
+            return fat32::delete_path(device, volume, DATA_JOURNAL_NAME);
+        }
+    }
     let old_exists = record[7] != 0;
-    let data_start = DATA_JOURNAL_HEADER_SIZE + DATA_JOURNAL_PATH_SIZE;
+    let data_start = header_size + DATA_JOURNAL_PATH_SIZE;
     if old_exists {
         fat32::create_path_file(
             device,
@@ -687,25 +747,36 @@ pub fn self_test() -> bool {
 
 fn data_journal_self_test() -> bool {
     let old = [0x11_u8, 0x22, 0x33, 0x44];
+    let new = [0xaa_u8, 0xbb, 0xcc];
     let Some(prepared) =
-        encode_data_journal("/mnt/rollback.txt", true, &old, DATA_JOURNAL_PREPARED)
+        encode_data_journal("/mnt/rollback.txt", true, &old, &new, DATA_JOURNAL_PREPARED)
     else {
         return false;
     };
-    let Some(committed) =
-        encode_data_journal("/mnt/rollback.txt", true, &old, DATA_JOURNAL_COMMITTED)
-    else {
+    let Some(committed) = encode_data_journal(
+        "/mnt/rollback.txt",
+        true,
+        &old,
+        &new,
+        DATA_JOURNAL_COMMITTED,
+    ) else {
         return false;
     };
     let data_start = DATA_JOURNAL_HEADER_SIZE + DATA_JOURNAL_PATH_SIZE;
     let valid = prepared.len() == DATA_JOURNAL_RECORD_SIZE
         && committed[6] == DATA_JOURNAL_COMMITTED
         && prepared[6] == DATA_JOURNAL_PREPARED
-        && read_u64(&prepared, 18) == data_journal_checksum(&prepared, old.len())
+        && read_u64(&prepared, 18)
+            == data_journal_checksum(&prepared, DATA_JOURNAL_HEADER_SIZE, old.len())
+        && read_u64(&prepared, 26) == checksum_bytes(&new)
         && prepared[data_start..data_start + old.len()] == old;
     let mut tampered = prepared;
     tampered[data_start] ^= 1;
-    valid && read_u64(&tampered, 18) != data_journal_checksum(&tampered, old.len())
+    valid
+        && read_u64(&tampered, 18)
+            != data_journal_checksum(&tampered, DATA_JOURNAL_HEADER_SIZE, old.len())
+        && committed_data_matches(new.len(), checksum_bytes(&new), Some(&new))
+        && !committed_data_matches(new.len(), checksum_bytes(&new), Some(&old))
 }
 
 /// Ensure a path under `/mnt` exists in the VFS by resolving it on the live ATA volume.
@@ -1255,6 +1326,7 @@ pub fn persist_path(path: &str) -> Result<(), PersistError> {
         path,
         old_exists.is_some(),
         &old_data[..old_length],
+        &data[..length],
         DATA_JOURNAL_PREPARED,
     )
     .ok_or(PersistError::TooLarge)?;
@@ -1311,6 +1383,7 @@ pub fn persist_path(path: &str) -> Result<(), PersistError> {
             path,
             old_exists.is_some(),
             &old_data[..old_length],
+            &data[..length],
             DATA_JOURNAL_COMMITTED,
         )
         .ok_or(PersistError::TooLarge)
