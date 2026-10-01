@@ -1177,6 +1177,8 @@ pub const BLE_SMP_CID: u16 = 0x0006;
 pub const BLE_SMP_PAIRING_REQUEST: u8 = 0x01;
 pub const BLE_SMP_PAIRING_RESPONSE: u8 = 0x02;
 pub const BLE_SMP_PAIRING_FAILED: u8 = 0x05;
+pub const BLE_SMP_ENCRYPTION_INFORMATION: u8 = 0x06;
+pub const BLE_SMP_MASTER_IDENTIFICATION: u8 = 0x07;
 pub const MAX_BLE_BONDS: usize = 8;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1332,12 +1334,86 @@ impl BleBondStore {
         Ok(())
     }
 
-    pub fn trusted(&self, links: &LeLinkState, handle: u16) -> bool {
+    pub fn bonded(&self, links: &LeLinkState, handle: u16) -> bool {
         links.links[..links.count].iter().flatten().find(|link| link.handle == handle)
             .is_some_and(|link| self.index(link.address_type, link.address).is_some())
     }
 
+    pub fn trusted(&self, links: &LeLinkState, encryption: &BleEncryptionState, handle: u16) -> bool {
+        self.bonded(links, handle) && encryption.encrypted(handle)
+    }
+
     pub fn count(&self) -> usize { self.count }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct BleEncryptedLink {
+    pub handle: u16,
+    pub encrypted: bool,
+}
+
+pub struct BleEncryptionState {
+    links: [Option<BleEncryptedLink>; MAX_LE_LINKS],
+    count: usize,
+}
+
+impl BleEncryptionState {
+    pub const fn new() -> Self { Self { links: [None; MAX_LE_LINKS], count: 0 } }
+
+    fn index(&self, handle: u16) -> Option<usize> {
+        self.links[..self.count].iter().position(|entry| entry.is_some_and(|entry| entry.handle == handle))
+    }
+
+    pub fn set(&mut self, links: &LeLinkState, handle: u16, encrypted: bool) -> Result<(), HciError> {
+        if !links.contains_handle(handle) { return Err(HciError::UnexpectedOpcode); }
+        if let Some(index) = self.index(handle) {
+            self.links[index] = Some(BleEncryptedLink { handle, encrypted });
+            return Ok(());
+        }
+        if self.count == MAX_LE_LINKS { return Err(HciError::ControllerFailure(0xff)); }
+        self.links[self.count] = Some(BleEncryptedLink { handle, encrypted });
+        self.count += 1;
+        Ok(())
+    }
+
+    pub fn encrypted(&self, handle: u16) -> bool {
+        self.index(handle).is_some_and(|index| self.links[index].is_some_and(|entry| entry.encrypted))
+    }
+
+    pub fn revoke(&mut self, handle: u16) {
+        let Some(index) = self.index(handle) else { return; };
+        for cursor in index..self.count.saturating_sub(1) { self.links[cursor] = self.links[cursor + 1]; }
+        if self.count != 0 { self.count -= 1; self.links[self.count] = None; }
+    }
+}
+
+pub fn ble_smp_ltk_encryption_authority_self_test() -> bool {
+    let mut links = LeLinkState::new();
+    let connected = [
+        EVT_LE_META, 19, LE_SUBEVENT_CONNECTION_COMPLETE, 0,
+        0x42, 0x00, 0, 1, 1, 2, 3, 4, 5, 6,
+        0x18, 0x00, 0, 0, 0xf4, 0x01, 0,
+    ];
+    if links.handle_connection_complete(&connected).is_err() { return false; }
+    let mut pairing = SmpPairingState::new();
+    let request = [BLE_SMP_PAIRING_REQUEST, 3, 0, 0x01, 16, 0x01, 0x01];
+    let response = [BLE_SMP_PAIRING_RESPONSE, 3, 0, 0x01, 16, 0x01, 0x01];
+    if pairing.begin(&links, 0x42, &request).is_err()
+        || pairing.accept_response(&links, 0x42, &response).is_err()
+    { return false; }
+    let mut bonds = BleBondStore::new();
+    let mut encryption = BleEncryptionState::new();
+    if bonds.store(&links, 0x42, [0xa5; 16], true).is_err()
+        || !bonds.bonded(&links, 0x42)
+        || bonds.trusted(&links, &encryption, 0x42)
+        || encryption.set(&links, 0x43, true).is_ok()
+        || encryption.set(&links, 0x42, true).is_err()
+        || !bonds.trusted(&links, &encryption, 0x42)
+    { return false; }
+    let disconnected = [EVT_DISCONNECTION_COMPLETE, 4, 0, 0x42, 0, 0x13];
+    if links.handle_disconnection_complete(&disconnected).is_err() { return false; }
+    encryption.revoke(0x42);
+    !bonds.trusted(&links, &encryption, 0x42) && bonds.count() == 1
 }
 
 pub fn ble_smp_foundation_self_test() -> bool {
@@ -1349,11 +1425,11 @@ pub fn ble_smp_foundation_self_test() -> bool {
     ];
     if links.handle_connection_complete(&connected).is_err() { return false; }
     let mut bonds = BleBondStore::new();
-    if bonds.trusted(&links, 0x42)
+    if bonds.bonded(&links, 0x42)
         || bonds.store(&links, 0x43, [7; 16], true).is_ok()
         || bonds.store(&links, 0x42, [7; 16], true).is_err()
         || bonds.count() != 1
-        || !bonds.trusted(&links, 0x42)
+        || !bonds.bonded(&links, 0x42)
     { return false; }
     let disconnected = [EVT_DISCONNECTION_COMPLETE, 4, 0, 0x42, 0, 0x13];
     links.handle_disconnection_complete(&disconnected).is_ok()
