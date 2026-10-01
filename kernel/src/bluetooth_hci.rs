@@ -897,6 +897,118 @@ pub fn att_foundation_self_test() -> bool {
         && db.transact(&links, 0x42, &[ATT_OP_READ_REQUEST, 1, 0], &mut out).is_err()
 }
 
+
+pub const GATT_UUID_PRIMARY_SERVICE: u16 = 0x2800;
+pub const GATT_UUID_CHARACTERISTIC: u16 = 0x2803;
+pub const GATT_PROP_READ: u8 = 0x02;
+pub const GATT_PROP_WRITE: u8 = 0x08;
+
+pub struct GattDatabase {
+    att: AttDatabase,
+    next_handle: u16,
+}
+
+impl GattDatabase {
+    pub const fn new() -> Self {
+        Self { att: AttDatabase::new(), next_handle: 1 }
+    }
+
+    pub fn add_primary_service(&mut self, uuid16: u16) -> Result<u16, HciError> {
+        let handle = self.next_handle;
+        let attribute = AttAttribute::new(
+            handle,
+            GATT_UUID_PRIMARY_SERVICE,
+            true,
+            false,
+            &uuid16.to_le_bytes(),
+        )?;
+        self.att.insert(attribute)?;
+        self.next_handle = self.next_handle.checked_add(1).ok_or(HciError::PayloadTooLarge)?;
+        Ok(handle)
+    }
+
+    pub fn add_characteristic(
+        &mut self,
+        uuid16: u16,
+        readable: bool,
+        writable: bool,
+        value: &[u8],
+    ) -> Result<(u16, u16), HciError> {
+        let declaration_handle = self.next_handle;
+        let value_handle = declaration_handle.checked_add(1).ok_or(HciError::PayloadTooLarge)?;
+        let mut declaration = [0_u8; 5];
+        declaration[0] = (if readable { GATT_PROP_READ } else { 0 })
+            | (if writable { GATT_PROP_WRITE } else { 0 });
+        declaration[1..3].copy_from_slice(&value_handle.to_le_bytes());
+        declaration[3..5].copy_from_slice(&uuid16.to_le_bytes());
+        self.att.insert(AttAttribute::new(
+            declaration_handle,
+            GATT_UUID_CHARACTERISTIC,
+            true,
+            false,
+            &declaration,
+        )?)?;
+        self.att.insert(AttAttribute::new(
+            value_handle,
+            uuid16,
+            readable,
+            writable,
+            value,
+        )?)?;
+        self.next_handle = value_handle.checked_add(1).ok_or(HciError::PayloadTooLarge)?;
+        Ok((declaration_handle, value_handle))
+    }
+
+    pub fn transact(
+        &mut self,
+        links: &LeLinkState,
+        connection_handle: u16,
+        request: &[u8],
+        out: &mut [u8; MAX_ATT_PDU],
+    ) -> Result<usize, HciError> {
+        self.att.transact(links, connection_handle, request, out)
+    }
+}
+
+pub fn gatt_foundation_self_test() -> bool {
+    let mut links = LeLinkState::new();
+    let connected = [
+        EVT_LE_META, 19, LE_SUBEVENT_CONNECTION_COMPLETE, 0,
+        0x42, 0x00, 0, 1, 1, 2, 3, 4, 5, 6,
+        0x18, 0x00, 0, 0, 0xf4, 0x01, 0,
+    ];
+    if links.handle_connection_complete(&connected).is_err() {
+        return false;
+    }
+
+    let mut gatt = GattDatabase::new();
+    if gatt.add_primary_service(0x1800) != Ok(1)
+        || gatt.add_characteristic(0x2a00, true, true, b"WovenHat") != Ok((2, 3))
+    {
+        return false;
+    }
+
+    let mut out = [0_u8; MAX_ATT_PDU];
+    if gatt.transact(&links, 0x42, &[ATT_OP_READ_REQUEST, 1, 0], &mut out) != Ok(3)
+        || out[..3] != [ATT_OP_READ_RESPONSE, 0x00, 0x18]
+        || gatt.transact(&links, 0x42, &[ATT_OP_READ_REQUEST, 2, 0], &mut out) != Ok(6)
+        || out[..6] != [ATT_OP_READ_RESPONSE, GATT_PROP_READ | GATT_PROP_WRITE, 3, 0, 0x00, 0x2a]
+        || gatt.transact(&links, 0x42, &[ATT_OP_READ_REQUEST, 3, 0], &mut out) != Ok(9)
+        || out[..9] != [ATT_OP_READ_RESPONSE, b'W', b'o', b'v', b'e', b'n', b'H', b'a', b't']
+        || gatt.transact(&links, 0x42, &[ATT_OP_WRITE_REQUEST, 2, 0, 1], &mut out) != Ok(5)
+        || out[..5] != [ATT_OP_ERROR_RESPONSE, ATT_OP_WRITE_REQUEST, 2, 0, ATT_ERR_WRITE_NOT_PERMITTED]
+        || gatt.transact(&links, 0x42, &[ATT_OP_WRITE_REQUEST, 3, 0, b'O', b'S'], &mut out) != Ok(1)
+        || gatt.transact(&links, 0x42, &[ATT_OP_READ_REQUEST, 3, 0], &mut out) != Ok(3)
+        || out[..3] != [ATT_OP_READ_RESPONSE, b'O', b'S']
+    {
+        return false;
+    }
+
+    let disconnected = [EVT_DISCONNECTION_COMPLETE, 4, 0, 0x42, 0, 0x13];
+    links.handle_disconnection_complete(&disconnected).is_ok()
+        && gatt.transact(&links, 0x42, &[ATT_OP_READ_REQUEST, 3, 0], &mut out).is_err()
+}
+
 pub const EVT_CONNECTION_COMPLETE: u8 = 0x03;
 pub const EVT_DISCONNECTION_COMPLETE: u8 = 0x05;
 pub const OPCODE_CREATE_CONNECTION: u16 = 0x0405;
