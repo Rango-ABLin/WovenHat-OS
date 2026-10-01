@@ -3471,7 +3471,7 @@ impl GattSubscriptions {
         out: &mut [u8; MAX_ATT_PDU],
     ) -> Result<usize, HciError> {
         if let Some(requirement) = policies.requirement(emission.value_handle) {
-            let Some(session) = sessions.session(emission.connection_handle) else {
+            let Some(session) = sessions.session_for_link(links, emission.connection_handle) else {
                 return Err(HciError::UnexpectedOpcode);
             };
             if requirement == AttSecurityRequirement::Authenticated && !session.authenticated {
