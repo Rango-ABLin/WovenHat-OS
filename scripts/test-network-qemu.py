@@ -216,7 +216,10 @@ def main():
         '[BOOT] ALL VALIDATIONS PASSED',
     ]
     if args.feature == 'stage14-1-test':
-        required.append('[S14.1] WovenNet IPv4 core: PASSED')
+        required.extend([
+            '[S14.1H] WovenNet resource/lifecycle hardening: PASSED',
+            '[S14.1] WovenNet IPv4 core: PASSED',
+        ])
     if result != 33 or any(marker not in log for marker in required):
         print(log[-12000:], file=sys.stderr)
         print(qemu_log.read_text(errors='replace')[-4000:], file=sys.stderr)
