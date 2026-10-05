@@ -2078,6 +2078,9 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
                         }
                         if network::stage14_1_lifecycle_self_test() {
                             serial::write_line(format_args!(
+                                "[S14.1G] WovenNet DNS generation tokens: PASSED"
+                            ));
+                            serial::write_line(format_args!(
                                 "[S14.1H] WovenNet resource/lifecycle hardening: PASSED"
                             ));
                             serial::write_line(format_args!("[S14.1] WovenNet IPv4 core: PASSED"));
