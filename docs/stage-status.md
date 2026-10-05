@@ -518,6 +518,20 @@ persistent protected keys, radio interoperability and conformance
 certification remain outside this boundary.
 
 
+## Stage 13.11A — BLE SMP pairing/fixed-channel foundation — 2026-10-05
+
+The BLE Security Manager Protocol foundation validates bounded Pairing Request
+and Response parameters, enforces supported key-size and distribution flags,
+and accepts SMP frames only on fixed L2CAP CID `0x0006` for a live LE link.
+Pairing negotiation is handle-bound and fail-closed on malformed or stale
+traffic. The dedicated 1/2/4-CPU QEMU gate passes locally; GitHub acceptance
+for the pushed tip remains required.
+
+Cryptographic key derivation, user interaction, passkey/numeric comparison,
+bonding persistence, controller transport and physical BLE qualification remain
+outside this foundation.
+
+
 ## Stage 13.10S closure hardening — 2026-10-05
 
 Minimum BLE encryption-key-size policy is enforced for both protected ATT/GATT

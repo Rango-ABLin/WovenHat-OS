@@ -509,3 +509,13 @@ addition to the inbound ATT/GATT checks. Its self-test exercises the full
 subscription path: weak authenticated sessions are denied before packet
 encoding, and a strong identity-bound session produces the expected
 notification.
+
+
+### Stage 13.11A BLE SMP foundation
+
+`BleSmpFixedChannel` is the bounded protocol boundary above a live
+`LeLinkState` and L2CAP fixed CID `0x0006`. It parses and validates pairing
+parameters before advancing `SmpPairingState`; malformed fields, unsupported
+authentication/key-distribution bits, stale handles and non-SMP CIDs fail
+closed. This layer does not claim cryptographic derivation, user interaction,
+bond persistence or physical-controller qualification.
