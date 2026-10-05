@@ -1172,6 +1172,15 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         serial::write_line(format_args!(
             "[S13.11C] BLE SMP confirm/random crypto boundary: PASSED"
         ));
+        if !bluetooth_hci::ble_smp_aes128_13_11d_self_test() {
+            serial::write_line(format_args!(
+                "[S13.11D] BLE SMP production AES-128 backend: FAILED"
+            ));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!(
+            "[S13.11D] BLE SMP production AES-128 backend: PASSED"
+        ));
     }
 
     if heap::init().is_err() {
