@@ -1349,13 +1349,16 @@ pub fn stage14_1_dhcp_transition_self_test() -> bool {
         Some(handle) => handle,
         None => return false,
     };
-    let query = match runtime
-        .sockets
-        .get_mut::<dns::Socket>(handle)
-        .start_query(runtime.iface.context(), "stage14-1-transition.invalid", dns::Type::A)
-    {
-        Ok(query) => query,
-        Err(_) => return false,
+    let query = {
+        let Runtime { iface, sockets, .. } = &mut *runtime;
+        match sockets.get_mut::<dns::Socket>(handle).start_query(
+            iface.context(),
+            "stage14-1-transition.invalid",
+            smoltcp::wire::DnsQueryType::A,
+        ) {
+            Ok(query) => query,
+            Err(_) => return false,
+        }
     };
     runtime.dns_queries[0] = Some(query);
 
