@@ -58,7 +58,7 @@ stack. Programs are ELF images loaded by the kernel (`load_elf` /
 | 43 | net_info | network status/config |
 | 44 | dns_start | hostname query |
 | 45 | dns_poll | query completion |
-| 50 | dns_cancel | cancel/reclaim pending DNS query |
+| 84 | dns_cancel | cancel/reclaim pending DNS query |
 | 46 | net_peer | socket peer endpoint |
 | 47 | dhcp | static/DHCP mode |
 | 48 | ping_start | packed IPv4 |
