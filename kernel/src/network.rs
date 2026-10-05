@@ -481,23 +481,7 @@ pub fn poll() {
 
             match update {
                 Some(Some((address, router, dns))) => {
-                    runtime.iface.update_ip_addrs(|addrs| {
-                        addrs.clear();
-                        let _ = addrs.push(IpCidr::Ipv4(address));
-                    });
-                    runtime.iface.routes_mut().remove_default_ipv4_route();
-                    let _ = runtime.iface.routes_mut().add_default_ipv4_route(router);
-                    runtime.ipv4 = address.address();
-                    runtime.prefix = address.prefix_len();
-                    runtime.gateway = router;
-                    runtime.dns_server = dns;
-                    runtime.using_dhcp = true;
-                    if let Some(dns_handle) = runtime.dns_handle {
-                        runtime
-                            .sockets
-                            .get_mut::<dns::Socket>(dns_handle)
-                            .update_servers(&[IpAddress::Ipv4(dns)]);
-                    }
+                    apply_dhcp_locked(&mut runtime, address, router, dns);
                 }
                 Some(None) if runtime.using_dhcp => {
                     apply_static_locked(&mut runtime);
@@ -576,7 +560,57 @@ fn retire_closed_socket(runtime: &mut Runtime, index: usize) {
     runtime.user[index] = None;
 }
 
+fn cancel_dns_queries_locked(runtime: &mut Runtime) {
+    let Some(handle) = runtime.dns_handle else {
+        runtime.dns_queries.fill(None);
+        return;
+    };
+    for slot in &mut runtime.dns_queries {
+        if let Some(query) = slot.take() {
+            runtime
+                .sockets
+                .get_mut::<dns::Socket>(handle)
+                .cancel_query(query);
+        }
+    }
+}
+
+fn apply_dhcp_locked(
+    runtime: &mut Runtime,
+    address: Ipv4Cidr,
+    router: Ipv4Address,
+    dns: Ipv4Address,
+) {
+    let resolver_changed = runtime.dns_server != dns;
+    if resolver_changed {
+        cancel_dns_queries_locked(runtime);
+    }
+    runtime.iface.update_ip_addrs(|addrs| {
+        addrs.clear();
+        let _ = addrs.push(IpCidr::Ipv4(address));
+    });
+    runtime.iface.routes_mut().remove_default_ipv4_route();
+    let _ = runtime.iface.routes_mut().add_default_ipv4_route(router);
+    runtime.ipv4 = address.address();
+    runtime.prefix = address.prefix_len();
+    runtime.gateway = router;
+    runtime.dns_server = dns;
+    runtime.using_dhcp = true;
+    if resolver_changed {
+        if let Some(handle) = runtime.dns_handle {
+            runtime
+                .sockets
+                .get_mut::<dns::Socket>(handle)
+                .update_servers(&[IpAddress::Ipv4(dns)]);
+        }
+    }
+}
+
 fn apply_static_locked(runtime: &mut Runtime) {
+    let resolver_changed = runtime.dns_server != DEFAULT_DNS;
+    if resolver_changed {
+        cancel_dns_queries_locked(runtime);
+    }
     runtime.iface.update_ip_addrs(|addrs| {
         addrs.clear();
         let _ = addrs.push(default_cidr());
@@ -591,11 +625,13 @@ fn apply_static_locked(runtime: &mut Runtime) {
     runtime.gateway = DEFAULT_GATEWAY;
     runtime.dns_server = DEFAULT_DNS;
     runtime.using_dhcp = false;
-    if let Some(handle) = runtime.dns_handle {
-        runtime
-            .sockets
-            .get_mut::<dns::Socket>(handle)
-            .update_servers(&[IpAddress::Ipv4(DEFAULT_DNS)]);
+    if resolver_changed {
+        if let Some(handle) = runtime.dns_handle {
+            runtime
+                .sockets
+                .get_mut::<dns::Socket>(handle)
+                .update_servers(&[IpAddress::Ipv4(DEFAULT_DNS)]);
+        }
     }
 }
 
