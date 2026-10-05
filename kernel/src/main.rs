@@ -1163,6 +1163,15 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         serial::write_line(format_args!(
             "[S13.11B] BLE SMP LTK/key distribution: PASSED"
         ));
+        if !bluetooth_hci::ble_smp_confirm_random_13_11c_self_test() {
+            serial::write_line(format_args!(
+                "[S13.11C] BLE SMP confirm/random crypto boundary: FAILED"
+            ));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!(
+            "[S13.11C] BLE SMP confirm/random crypto boundary: PASSED"
+        ));
     }
 
     if heap::init().is_err() {
