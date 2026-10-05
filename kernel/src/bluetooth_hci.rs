@@ -4320,3 +4320,265 @@ pub fn ble_smp_key_distribution_13_11b_self_test() -> bool {
         })
         && bonds.count() == 1
 }
+
+
+// Stage 13.11C: SMP legacy Pairing Confirm/Random verification boundary.
+pub const BLE_SMP_PAIRING_CONFIRM: u8 = 0x03;
+pub const BLE_SMP_PAIRING_RANDOM: u8 = 0x04;
+
+pub trait SmpAes128 {
+    fn encrypt_block(&self, key: [u8; 16], plaintext: [u8; 16]) -> [u8; 16];
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SmpConfirmPhase {
+    AwaitingConfirm,
+    AwaitingRandom,
+    Verified,
+    Failed,
+}
+
+pub struct SmpConfirmState {
+    handle: u16,
+    peer_confirm: Option<[u8; 16]>,
+    phase: SmpConfirmPhase,
+}
+
+impl SmpConfirmState {
+    pub fn new(pairing: &SmpPairingState) -> Result<Self, HciError> {
+        if pairing.phase() != SmpPairingPhase::Negotiated {
+            return Err(HciError::UnexpectedOpcode);
+        }
+        let handle = pairing.handle.ok_or(HciError::UnexpectedOpcode)?;
+        Ok(Self {
+            handle,
+            peer_confirm: None,
+            phase: SmpConfirmPhase::AwaitingConfirm,
+        })
+    }
+
+    pub fn receive_confirm(
+        &mut self,
+        links: &LeLinkState,
+        handle: u16,
+        pdu: &[u8],
+    ) -> Result<(), HciError> {
+        if self.phase != SmpConfirmPhase::AwaitingConfirm
+            || self.handle != handle
+            || !links.contains_handle(handle)
+            || pdu.len() != 17
+            || pdu[0] != BLE_SMP_PAIRING_CONFIRM
+        {
+            return Err(HciError::UnexpectedOpcode);
+        }
+        let mut confirm = [0_u8; 16];
+        confirm.copy_from_slice(&pdu[1..]);
+        self.peer_confirm = Some(confirm);
+        self.phase = SmpConfirmPhase::AwaitingRandom;
+        Ok(())
+    }
+
+    pub fn verify_random<C: SmpAes128>(
+        &mut self,
+        links: &LeLinkState,
+        pairing: &SmpPairingState,
+        crypto: &C,
+        temporary_key: [u8; 16],
+        initiator_address_type: u8,
+        initiator_address: [u8; 6],
+        responder_address_type: u8,
+        responder_address: [u8; 6],
+        pdu: &[u8],
+    ) -> Result<(), HciError> {
+        if self.phase != SmpConfirmPhase::AwaitingRandom
+            || pairing.phase() != SmpPairingPhase::Negotiated
+            || pairing.handle != Some(self.handle)
+            || !links.contains_handle(self.handle)
+            || pdu.len() != 17
+            || pdu[0] != BLE_SMP_PAIRING_RANDOM
+        {
+            return Err(HciError::UnexpectedOpcode);
+        }
+        let mut random = [0_u8; 16];
+        random.copy_from_slice(&pdu[1..]);
+        let expected = smp_c1(
+            crypto,
+            temporary_key,
+            random,
+            pairing,
+            initiator_address_type,
+            initiator_address,
+            responder_address_type,
+            responder_address,
+        )?;
+        if self.peer_confirm != Some(expected) {
+            self.phase = SmpConfirmPhase::Failed;
+            return Err(HciError::ControllerFailure(0x04));
+        }
+        self.phase = SmpConfirmPhase::Verified;
+        Ok(())
+    }
+
+    pub fn phase(&self) -> SmpConfirmPhase {
+        self.phase
+    }
+}
+
+pub fn smp_c1<C: SmpAes128>(
+    crypto: &C,
+    temporary_key: [u8; 16],
+    random: [u8; 16],
+    pairing: &SmpPairingState,
+    initiator_address_type: u8,
+    initiator_address: [u8; 6],
+    responder_address_type: u8,
+    responder_address: [u8; 6],
+) -> Result<[u8; 16], HciError> {
+    let request = pairing.request.ok_or(HciError::UnexpectedOpcode)?;
+    let response = pairing.response.ok_or(HciError::UnexpectedOpcode)?;
+    if pairing.phase() != SmpPairingPhase::Negotiated {
+        return Err(HciError::UnexpectedOpcode);
+    }
+
+    let preq = [
+        BLE_SMP_PAIRING_REQUEST,
+        request.io_capability,
+        request.oob_data_flag,
+        request.auth_req,
+        request.max_key_size,
+        request.initiator_key_distribution,
+        request.responder_key_distribution,
+    ];
+    let pres = [
+        BLE_SMP_PAIRING_RESPONSE,
+        response.io_capability,
+        response.oob_data_flag,
+        response.auth_req,
+        response.max_key_size,
+        response.initiator_key_distribution,
+        response.responder_key_distribution,
+    ];
+
+    let mut p1 = [0_u8; 16];
+    p1[..7].copy_from_slice(&pres);
+    p1[7..14].copy_from_slice(&preq);
+    p1[14] = responder_address_type;
+    p1[15] = initiator_address_type;
+
+    let mut first = random;
+    for (byte, mask) in first.iter_mut().zip(p1) {
+        *byte ^= mask;
+    }
+    let encrypted = crypto.encrypt_block(temporary_key, first);
+
+    let mut p2 = [0_u8; 16];
+    p2[4..10].copy_from_slice(&initiator_address);
+    p2[10..16].copy_from_slice(&responder_address);
+    let mut second = encrypted;
+    for (byte, mask) in second.iter_mut().zip(p2) {
+        *byte ^= mask;
+    }
+    Ok(crypto.encrypt_block(temporary_key, second))
+}
+
+pub fn smp_s1<C: SmpAes128>(
+    crypto: &C,
+    temporary_key: [u8; 16],
+    initiator_random: [u8; 16],
+    responder_random: [u8; 16],
+) -> [u8; 16] {
+    let mut plaintext = [0_u8; 16];
+    plaintext[..8].copy_from_slice(&responder_random[..8]);
+    plaintext[8..].copy_from_slice(&initiator_random[..8]);
+    crypto.encrypt_block(temporary_key, plaintext)
+}
+
+pub fn ble_smp_confirm_random_13_11c_self_test() -> bool {
+    struct TestAes;
+    impl SmpAes128 for TestAes {
+        fn encrypt_block(&self, key: [u8; 16], mut plaintext: [u8; 16]) -> [u8; 16] {
+            for (index, byte) in plaintext.iter_mut().enumerate() {
+                *byte ^= key[index].rotate_left((index & 7) as u32);
+                *byte = byte.wrapping_add((index as u8).wrapping_mul(17));
+            }
+            plaintext
+        }
+    }
+
+    let mut links = LeLinkState::new();
+    let connected = [
+        EVT_LE_META, 19, LE_SUBEVENT_CONNECTION_COMPLETE, 0,
+        0x42, 0, 0, 1, 1, 2, 3, 4, 5, 6,
+        0x18, 0, 0, 0, 0xf4, 1, 0,
+    ];
+    if links.handle_connection_complete(&connected).is_err() {
+        return false;
+    }
+    let request = [BLE_SMP_PAIRING_REQUEST, 3, 0, 0x01, 16, 0x01, 0x01];
+    let response = [BLE_SMP_PAIRING_RESPONSE, 3, 0, 0x01, 16, 0x01, 0x01];
+    let mut pairing = SmpPairingState::new();
+    if pairing.begin(&links, 0x42, &request).is_err()
+        || pairing.accept_response(&links, 0x42, &response).is_err()
+    {
+        return false;
+    }
+
+    let crypto = TestAes;
+    let tk = [0_u8; 16];
+    let random = [0x5a; 16];
+    let initiator = [1, 2, 3, 4, 5, 6];
+    let responder = [6, 5, 4, 3, 2, 1];
+    let Ok(confirm) = smp_c1(&crypto, tk, random, &pairing, 0, initiator, 1, responder) else {
+        return false;
+    };
+    let mut confirm_pdu = [0_u8; 17];
+    confirm_pdu[0] = BLE_SMP_PAIRING_CONFIRM;
+    confirm_pdu[1..].copy_from_slice(&confirm);
+    let mut random_pdu = [0_u8; 17];
+    random_pdu[0] = BLE_SMP_PAIRING_RANDOM;
+    random_pdu[1..].copy_from_slice(&random);
+
+    let Ok(mut state) = SmpConfirmState::new(&pairing) else {
+        return false;
+    };
+    if state.receive_confirm(&links, 0x42, &confirm_pdu).is_err()
+        || state.verify_random(
+            &links,
+            &pairing,
+            &crypto,
+            tk,
+            0,
+            initiator,
+            1,
+            responder,
+            &random_pdu,
+        ).is_err()
+        || state.phase() != SmpConfirmPhase::Verified
+    {
+        return false;
+    }
+
+    let stk = smp_s1(&crypto, tk, [0x11; 16], [0x22; 16]);
+    if stk == [0_u8; 16] {
+        return false;
+    }
+
+    let Ok(mut rejected) = SmpConfirmState::new(&pairing) else {
+        return false;
+    };
+    let mut wrong_confirm = confirm_pdu;
+    wrong_confirm[1] ^= 1;
+    rejected.receive_confirm(&links, 0x42, &wrong_confirm).is_ok()
+        && rejected.verify_random(
+            &links,
+            &pairing,
+            &crypto,
+            tk,
+            0,
+            initiator,
+            1,
+            responder,
+            &random_pdu,
+        ).is_err()
+        && rejected.phase() == SmpConfirmPhase::Failed
+}
