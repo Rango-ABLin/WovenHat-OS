@@ -1190,6 +1190,15 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         serial::write_line(format_args!(
             "[S13.11E] BLE SMP authenticated pairing/MITM policy: PASSED"
         ));
+        if !bluetooth_hci::ble_smp_encryption_authority_13_11f_self_test() {
+            serial::write_line(format_args!(
+                "[S13.11F] BLE SMP controller encryption/session authority: FAILED"
+            ));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!(
+            "[S13.11F] BLE SMP controller encryption/session authority: PASSED"
+        ));
     }
 
     if heap::init().is_err() {
