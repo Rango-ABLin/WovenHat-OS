@@ -4169,3 +4169,154 @@ pub fn ble_smp_foundation_13_11a_self_test() -> bool {
     links.handle_disconnection_complete(&disconnected).is_ok()
         && BleSmpFixedChannel::outbound(&links, 0x42, &request).is_err()
 }
+
+
+// Stage 13.11B: SMP legacy LTK distribution into the canonical LE bond store.
+pub const BLE_SMP_ENCRYPTION_INFORMATION: u8 = 0x06;
+pub const BLE_SMP_MASTER_IDENTIFICATION: u8 = 0x07;
+
+pub struct SmpKeyDistribution {
+    handle: Option<u16>,
+    ltk: Option<[u8; 16]>,
+}
+
+impl SmpKeyDistribution {
+    pub const fn new() -> Self {
+        Self {
+            handle: None,
+            ltk: None,
+        }
+    }
+
+    pub fn encryption_information(
+        &mut self,
+        links: &LeLinkState,
+        pairing: &SmpPairingState,
+        handle: u16,
+        pdu: &[u8],
+    ) -> Result<(), HciError> {
+        if !links.contains_handle(handle)
+            || pairing.phase() != SmpPairingPhase::Negotiated
+            || pairing.handle != Some(handle)
+            || pdu.len() != 17
+            || pdu[0] != BLE_SMP_ENCRYPTION_INFORMATION
+        {
+            return Err(HciError::UnexpectedOpcode);
+        }
+        let mut ltk = [0_u8; 16];
+        ltk.copy_from_slice(&pdu[1..17]);
+        self.handle = Some(handle);
+        self.ltk = Some(ltk);
+        Ok(())
+    }
+
+    pub fn master_identification(
+        &mut self,
+        links: &LeLinkState,
+        pairing: &SmpPairingState,
+        bonds: &mut LeBondStore,
+        handle: u16,
+        pdu: &[u8],
+    ) -> Result<(), HciError> {
+        if !links.contains_handle(handle)
+            || pairing.phase() != SmpPairingPhase::Negotiated
+            || pairing.handle != Some(handle)
+            || self.handle != Some(handle)
+            || pdu.len() != 11
+            || pdu[0] != BLE_SMP_MASTER_IDENTIFICATION
+        {
+            return Err(HciError::UnexpectedOpcode);
+        }
+        let Some(ltk) = self.ltk else {
+            return Err(HciError::UnexpectedOpcode);
+        };
+        let ediv = u16::from_le_bytes([pdu[1], pdu[2]]);
+        let rand = u64::from_le_bytes(
+            pdu[3..11]
+                .try_into()
+                .map_err(|_| HciError::MalformedEvent)?,
+        );
+        let key_size = pairing
+            .negotiated_key_size()
+            .ok_or(HciError::UnexpectedOpcode)?;
+        bonds.store(
+            links,
+            handle,
+            LeBondMaterial {
+                ltk,
+                ediv,
+                rand,
+                key_size,
+                authenticated: false,
+            },
+        )?;
+        self.abort();
+        Ok(())
+    }
+
+    pub fn abort(&mut self) {
+        if let Some(mut ltk) = self.ltk.take() {
+            for byte in &mut ltk {
+                unsafe { core::ptr::write_volatile(byte, 0); }
+            }
+        }
+        self.handle = None;
+    }
+}
+
+pub fn ble_smp_key_distribution_13_11b_self_test() -> bool {
+    let mut links = LeLinkState::new();
+    let connected = [
+        EVT_LE_META, 19, LE_SUBEVENT_CONNECTION_COMPLETE, 0,
+        0x42, 0, 0, 1, 1, 2, 3, 4, 5, 6,
+        0x18, 0, 0, 0, 0xf4, 1, 0,
+    ];
+    if links.handle_connection_complete(&connected).is_err() {
+        return false;
+    }
+
+    let request = [BLE_SMP_PAIRING_REQUEST, 3, 0, 0x01, 16, 0x01, 0x01];
+    let response = [BLE_SMP_PAIRING_RESPONSE, 3, 0, 0x01, 12, 0x01, 0x01];
+    let mut pairing = SmpPairingState::new();
+    if pairing.begin(&links, 0x42, &request).is_err()
+        || pairing.accept_response(&links, 0x42, &response).is_err()
+    {
+        return false;
+    }
+
+    let mut information = [0_u8; 17];
+    information[0] = BLE_SMP_ENCRYPTION_INFORMATION;
+    information[1..].fill(0xa5);
+    let mut identification = [0_u8; 11];
+    identification[0] = BLE_SMP_MASTER_IDENTIFICATION;
+    identification[1..3].copy_from_slice(&0x1234_u16.to_le_bytes());
+    identification[3..11].copy_from_slice(&0x1122_3344_5566_7788_u64.to_le_bytes());
+
+    let mut distribution = SmpKeyDistribution::new();
+    let mut bonds = LeBondStore::new();
+    if distribution
+        .master_identification(&links, &pairing, &mut bonds, 0x42, &identification)
+        .is_ok()
+        || distribution
+            .encryption_information(&links, &pairing, 0x43, &information)
+            .is_ok()
+        || distribution
+            .encryption_information(&links, &pairing, 0x42, &information)
+            .is_err()
+        || distribution
+            .master_identification(&links, &pairing, &mut bonds, 0x42, &identification)
+            .is_err()
+    {
+        return false;
+    }
+
+    bonds.restore(&links, 0x42)
+        == Ok(LeBondMaterial {
+            ltk: [0xa5; 16],
+            ediv: 0x1234,
+            rand: 0x1122_3344_5566_7788,
+            key_size: 12,
+            authenticated: false,
+        })
+        && bonds.count() == 1
+}
