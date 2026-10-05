@@ -218,6 +218,7 @@ def main():
     if args.feature == 'stage14-1-test':
         required.extend([
             '[S14.1D] WovenNet DHCP transition/recovery: PASSED',
+            '[S14.1S] WovenNet socket/ephemeral stress: PASSED',
             '[S14.1G] WovenNet DNS generation tokens: PASSED',
             '[S14.1H] WovenNet resource/lifecycle hardening: PASSED',
             '[S14.1] WovenNet IPv4 core: PASSED',
