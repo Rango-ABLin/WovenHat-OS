@@ -573,6 +573,18 @@ Physical controller transport, SMP interoperability, bond persistence and
 hardware qualification remain outside this deterministic software boundary.
 
 
+## Stage 13.11G — BLE identity/privacy foundation — 2026-10-05
+
+The SMP layer now validates identity distribution, stores bounded IRK-backed
+peer identities, and resolves private addresses only against retained identity
+material. Duplicate, malformed and stale inputs fail closed, while pending LTK
+distribution remains bound to the live peer identity. The dedicated 1/2/4-CPU
+gate passes locally; GitHub acceptance for the pushed tip remains required.
+
+Physical privacy-list behavior, SMP interoperability, persistent protected keys
+and hardware qualification remain outside this deterministic foundation.
+
+
 ## Stage 13.10S closure hardening — 2026-10-05
 
 Minimum BLE encryption-key-size policy is enforced for both protected ATT/GATT

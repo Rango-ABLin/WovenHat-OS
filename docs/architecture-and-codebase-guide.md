@@ -552,3 +552,12 @@ live peer identity, negotiated key size and authentication result.
 `LeSecuritySessions::encryption_change_from_pairing` accepts only a matching
 controller completion event and live link; failure, disabled state, stale
 handles or identity mismatch revoke authority.
+
+
+### Stage 13.11G BLE identity/privacy foundation
+
+The bounded identity store accepts SMP Identity Information and Identity Address
+Information only for the live pairing handle. IRK-backed private-address
+resolution is deterministic and fail-closed, with duplicate identity replacement
+remaining bounded. This identity layer complements, but does not replace, the
+peer-bound LTK distribution and controller encryption authority checks.
