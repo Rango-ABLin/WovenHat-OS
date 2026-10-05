@@ -4750,7 +4750,7 @@ impl SmpConfirmState {
         let mut params = [0_u8; 28];
         params[..2].copy_from_slice(&self.handle.to_le_bytes());
         params[18..].copy_from_slice(&stk);
-        let len = HciCommand::new(OPCODE_LE_START_ENCRYPTION, &params)?.encode(out)?;
+        let len = HciCommand::new(OPCODE_LE_START_ENCRYPTION, &params)?.encode(out);
         for byte in &mut stk {
             unsafe { core::ptr::write_volatile(byte, 0); }
         }
