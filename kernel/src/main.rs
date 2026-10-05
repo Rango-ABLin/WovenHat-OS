@@ -2065,7 +2065,19 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
                 if network::qemu_runtime_self_test() {
                     serial::write_line(format_args!("[NETTEST] DHCP/DNS/ICMP/UDP/TCP: PASSED"));
                     #[cfg(feature = "stage14-1-test")]
-                    serial::write_line(format_args!("[S14.1] WovenNet IPv4 core: PASSED"));
+                    {
+                        if network::stage14_1_lifecycle_self_test() {
+                            serial::write_line(format_args!(
+                                "[S14.1H] WovenNet resource/lifecycle hardening: PASSED"
+                            ));
+                            serial::write_line(format_args!("[S14.1] WovenNet IPv4 core: PASSED"));
+                        } else {
+                            serial::write_line(format_args!(
+                                "[S14.1H] WovenNet resource/lifecycle hardening: FAILED"
+                            ));
+                            halt();
+                        }
+                    }
                 } else {
                     serial::write_line(format_args!("[NETTEST] runtime regression: FAILED"));
                     halt();
