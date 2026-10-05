@@ -281,6 +281,25 @@ pub struct SocketToken {
     owner: u64,
 }
 
+#[derive(Clone, Copy)]
+struct DnsQuerySlot {
+    handle: dns::QueryHandle,
+    generation: u32,
+}
+
+fn dns_token(slot: usize, generation: u32) -> u64 {
+    (u64::from(generation) << 32) | slot as u64
+}
+
+fn decode_dns_token(token: u64) -> Result<(usize, u32), SocketError> {
+    let slot = (token & 0xffff_ffff) as usize;
+    let generation = (token >> 32) as u32;
+    if slot >= 4 || generation == 0 {
+        return Err(SocketError::Invalid);
+    }
+    Ok((slot, generation))
+}
+
 struct Runtime {
     iface: Interface,
     device: NetTransport,
@@ -293,7 +312,7 @@ struct Runtime {
     echo_packets: u64,
     dhcp_handle: Option<SocketHandle>,
     dns_handle: Option<SocketHandle>,
-    dns_queries: [Option<dns::QueryHandle>; 4],
+    dns_queries: [Option<DnsQuerySlot>; 4],
     dhcp_enabled: bool,
     using_dhcp: bool,
     ipv4: Ipv4Address,
@@ -302,6 +321,7 @@ struct Runtime {
     dns_server: Ipv4Address,
     next_ephemeral: u16,
     next_socket_generation: u32,
+    next_dns_generation: u32,
     ping_handle: Option<SocketHandle>,
     ping_pending: Option<(Ipv4Address, u16, u64)>,
     ping_sequence: u16,
@@ -414,6 +434,7 @@ pub fn init() -> Result<(), InitError> {
                 dns_server: DEFAULT_DNS,
                 next_ephemeral: 49152,
                 next_socket_generation: 1,
+                next_dns_generation: 1,
                 ping_handle: Some(ping_handle),
                 ping_pending: None,
                 ping_sequence: 0,
@@ -570,7 +591,7 @@ fn cancel_dns_queries_locked(runtime: &mut Runtime) {
             runtime
                 .sockets
                 .get_mut::<dns::Socket>(handle)
-                .cancel_query(query);
+                .cancel_query(query.handle);
         }
     }
 }
@@ -1158,8 +1179,13 @@ pub fn dns_start(name: &str) -> Result<u64, SocketError> {
             .start_query(iface.context(), name, smoltcp::wire::DnsQueryType::A)
             .map_err(|_| SocketError::BufferFull)?
     };
-    runtime.dns_queries[slot] = Some(query);
-    Ok(slot as u64)
+    let generation = runtime.next_dns_generation.max(1);
+    runtime.next_dns_generation = generation.wrapping_add(1).max(1);
+    runtime.dns_queries[slot] = Some(DnsQuerySlot {
+        handle: query,
+        generation,
+    });
+    Ok(dns_token(slot, generation))
 }
 
 pub fn dns_cancel(id: u64) -> Result<(), SocketError> {
@@ -1167,17 +1193,19 @@ pub fn dns_cancel(id: u64) -> Result<(), SocketError> {
         return Err(SocketError::Offline);
     };
     let mut runtime = runtime.lock();
-    let index = usize::try_from(id).map_err(|_| SocketError::Invalid)?;
+    let (index, generation) = decode_dns_token(id)?;
     let query = runtime
         .dns_queries
-        .get_mut(index)
-        .and_then(Option::take)
+        .get(index)
+        .and_then(|slot| *slot)
+        .filter(|slot| slot.generation == generation)
         .ok_or(SocketError::Invalid)?;
+    runtime.dns_queries[index] = None;
     let handle = runtime.dns_handle.ok_or(SocketError::Offline)?;
     runtime
         .sockets
         .get_mut::<dns::Socket>(handle)
-        .cancel_query(query);
+        .cancel_query(query.handle);
     Ok(())
 }
 
@@ -1186,17 +1214,18 @@ pub fn dns_poll(id: u64) -> Result<Option<Ipv4Address>, SocketError> {
         return Err(SocketError::Offline);
     };
     let mut runtime = runtime.lock();
-    let index = usize::try_from(id).map_err(|_| SocketError::Invalid)?;
+    let (index, generation) = decode_dns_token(id)?;
     let query = runtime
         .dns_queries
         .get(index)
-        .and_then(|q| *q)
+        .and_then(|slot| *slot)
+        .filter(|slot| slot.generation == generation)
         .ok_or(SocketError::Invalid)?;
     let handle = runtime.dns_handle.ok_or(SocketError::Offline)?;
     match runtime
         .sockets
         .get_mut::<dns::Socket>(handle)
-        .get_query_result(query)
+        .get_query_result(query.handle)
     {
         Ok(addrs) => {
             runtime.dns_queries[index] = None;
@@ -1360,7 +1389,12 @@ pub fn stage14_1_dhcp_transition_self_test() -> bool {
             Err(_) => return false,
         }
     };
-    runtime.dns_queries[0] = Some(query);
+    let generation = runtime.next_dns_generation.max(1);
+    runtime.next_dns_generation = generation.wrapping_add(1).max(1);
+    runtime.dns_queries[0] = Some(DnsQuerySlot {
+        handle: query,
+        generation,
+    });
 
     let lease_address = smoltcp::wire::Ipv4Cidr::new(Ipv4Address::new(10, 0, 2, 42), 24);
     let lease_router = Ipv4Address::new(10, 0, 2, 1);
@@ -1403,6 +1437,13 @@ pub fn stage14_1_lifecycle_self_test() -> bool {
     let Ok(reused_query) = dns_start("stage14-1-reuse.invalid") else {
         return false;
     };
+    if reused_query == query
+        || dns_poll(query) != Err(SocketError::Invalid)
+        || dns_cancel(query) != Err(SocketError::Invalid)
+    {
+        let _ = dns_cancel(reused_query);
+        return false;
+    }
     if dns_cancel(reused_query).is_err() {
         return false;
     }
