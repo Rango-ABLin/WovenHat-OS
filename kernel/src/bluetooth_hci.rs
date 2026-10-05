@@ -4858,6 +4858,13 @@ pub struct SmpConfirmInputs {
     pub initiator: SmpAddress,
     pub responder: SmpAddress,
 }
+#[derive(Clone, Copy)]
+pub struct SmpProofVerificationInputs {
+    pub proof: SmpAuthenticationProof,
+    pub initiator: SmpAddress,
+    pub responder: SmpAddress,
+}
+
 
 pub struct SmpConfirmState {
     handle: u16,
@@ -4949,25 +4956,27 @@ impl SmpConfirmState {
         links: &LeLinkState,
         pairing: &SmpPairingState,
         crypto: &C,
-        proof: SmpAuthenticationProof,
-        initiator: SmpAddress,
-        responder: SmpAddress,
+        inputs: SmpProofVerificationInputs,
         pdu: &[u8],
     ) -> Result<(), HciError> {
         let negotiated = pairing.authentication()?;
-        if negotiated.method != proof.method {
+        if negotiated.method != inputs.proof.method {
             return Err(HciError::UnexpectedOpcode);
         }
         self.verify_random(
             links,
             pairing,
             crypto,
-            SmpConfirmInputs { temporary_key: proof.temporary_key(), initiator, responder },
+            SmpConfirmInputs {
+                temporary_key: inputs.proof.temporary_key(),
+                initiator: inputs.initiator,
+                responder: inputs.responder,
+            },
             pdu,
         )?;
         self.verified_authentication = Some(SmpAuthentication {
-            method: proof.method,
-            authenticated: proof.authenticated,
+            method: inputs.proof.method,
+            authenticated: inputs.proof.authenticated,
         });
         Ok(())
     }
@@ -5216,9 +5225,11 @@ pub fn ble_smp_encryption_authority_13_11f_self_test() -> bool {
             &links,
             &pairing,
             &crypto,
-            proof,
-            inputs.initiator,
-            inputs.responder,
+            SmpProofVerificationInputs {
+                proof,
+                initiator: inputs.initiator,
+                responder: inputs.responder,
+            },
             &random_pdu,
         ).is_err()
     {
