@@ -188,68 +188,70 @@ pub enum Number {
     PingStart = 48,
     /// 0 pending, otherwise RTT ticks + 1
     PingPoll = 49,
+    /// query id -> cancel/reclaim pending DNS query
+    DnsCancel = 50,
     /// command-line pointer + byte length; parses argv and resolves bare names via /bin
-    ExecCommand = 50,
+    ExecCommand = 51,
     /// key ptr, key len, value buffer ptr (MAX_ENV_ENTRY bytes) -> value length
-    EnvGet = 51,
+    EnvGet = 52,
     /// key ptr, packed key/value lengths, value ptr -> 0
-    EnvSet = 52,
+    EnvSet = 53,
     /// number of environment entries
-    EnvCount = 53,
+    EnvCount = 54,
     /// index, output ptr, capacity -> entry length (KEY=VALUE)
-    EnvEntry = 54,
+    EnvEntry = 55,
     /// number of live/zombie process-table entries
-    ProcessCount = 55,
+    ProcessCount = 56,
     /// index, user ProcessInfo pointer -> 0
-    ProcessInfo = 56,
+    ProcessInfo = 57,
     /// command-line pointer + byte length -> spawn child, return pid
-    SpawnCommand = 57,
+    SpawnCommand = 58,
     /// fd, byte length, page-aligned file offset: read-only private snapshot.
-    MmapFile = 58,
+    MmapFile = 59,
     /// fd, byte length, page-aligned file offset: writable private snapshot.
-    MmapFileWritable = 59,
-    MmapFileLazy = 60,
-    MmapFileLazyWritable = 61,
-    MmapFileShared = 62,
-    Msync = 63,
+    MmapFileWritable = 60,
+    MmapFileLazy = 61,
+    MmapFileLazyWritable = 62,
+    MmapFileShared = 63,
+    Msync = 64,
     /// class -> generation-tagged owner-bound async handle
-    AsyncCreate = 64,
+    AsyncCreate = 65,
     /// handle, user Completion* -> 0 pending, 1 completed/consumed
-    AsyncPoll = 65,
+    AsyncPoll = 66,
     /// handle, user Completion* -> blocks event-driven, returns 1 on copyout
-    AsyncWait = 66,
+    AsyncWait = 67,
     /// handle -> release pending/completed operation without waiting
-    AsyncCancel = 67,
+    AsyncCancel = 68,
     /// service handle, status, value -> complete an owner-managed service event
-    AsyncComplete = 68,
+    AsyncComplete = 69,
     /// LBA -> generation-tagged Block handle backed by the real block worker
-    AsyncBlockRead = 69,
+    AsyncBlockRead = 70,
     /// LBA, userspace 512-byte sector -> generation-tagged Block handle
-    AsyncBlockWrite = 70,
+    AsyncBlockWrite = 71,
     /// Block handle, user BlockCompletion* -> 0 pending, 1 copied/consumed
-    AsyncBlockPoll = 71,
+    AsyncBlockPoll = 72,
     /// Block handle, user BlockCompletion* -> blocks event-driven, 1 copied/consumed
-    AsyncBlockWait = 72,
+    AsyncBlockWait = 73,
     /// fd, user AsyncFileRequest* -> positional read handle
-    AsyncFileRead = 73,
+    AsyncFileRead = 74,
     /// fd, user AsyncFileRequest* -> positional write handle; payload copied at submit
-    AsyncFileWrite = 74,
+    AsyncFileWrite = 75,
     /// File handle, user Completion*, user data* -> 0 pending, 1 copied/consumed
-    AsyncFilePoll = 75,
+    AsyncFilePoll = 76,
     /// File handle, user Completion*, user data* -> event wait, 1 copied/consumed
-    AsyncFileWait = 76,
+    AsyncFileWait = 77,
     /// socket, user buffer, length -> generation-tagged Network send handle
-    AsyncNetSend = 77,
+    AsyncNetSend = 78,
     /// socket, capacity -> generation-tagged Network receive handle
-    AsyncNetRecv = 78,
+    AsyncNetRecv = 79,
     /// Network handle, user Completion*, user data* -> 0 pending, 1 copied/consumed
-    AsyncNetPoll = 79,
+    AsyncNetPoll = 80,
     /// Network handle, user Completion*, user data* -> event wait, 1 copied/consumed
-    AsyncNetWait = 80,
+    AsyncNetWait = 81,
     /// TCP socket, packed IPv4 endpoint -> generation-tagged Network connect handle
-    AsyncTcpConnect = 81,
-    CompletionPortCreate = 82,
-    CompletionPortClose = 83,
+    AsyncTcpConnect = 82,
+    CompletionPortCreate = 83,
+    CompletionPortClose = 84,
     CompletionPortAssociate = 84,
     CompletionPortPoll = 85,
     CompletionPortWait = 86,
@@ -1335,6 +1337,13 @@ fn sys_dns_poll(query: u64, user_ipv4: u64) -> u64 {
     }
 }
 
+fn sys_dns_cancel(query: u64) -> u64 {
+    if !crate::task::authorize_current_device(crate::wovenguard::DeviceClass::Network) {
+        return SYSCALL_ERROR;
+    }
+    crate::network::dns_cancel(query).map_or(SYSCALL_ERROR, |()| 0)
+}
+
 fn sys_net_peer(socket: u64) -> u64 {
     if !crate::task::authorize_current_device(crate::wovenguard::DeviceClass::Network) {
         return SYSCALL_ERROR;
@@ -2122,6 +2131,7 @@ pub extern "C" fn wovenhat_syscall_dispatch(
         value if value == Number::NetInfo as u64 => sys_net_info(arg0),
         value if value == Number::DnsStart as u64 => sys_dns_start(arg0, arg1),
         value if value == Number::DnsPoll as u64 => sys_dns_poll(arg0, arg1),
+        value if value == Number::DnsCancel as u64 => sys_dns_cancel(arg0),
         value if value == Number::NetPeer as u64 => sys_net_peer(arg0),
         value if value == Number::Dhcp as u64 => sys_dhcp(arg0),
         value if value == Number::PingStart as u64 => sys_ping_start(arg0),
