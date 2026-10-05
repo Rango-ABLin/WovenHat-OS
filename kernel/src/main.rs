@@ -2076,6 +2076,16 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
                             ));
                             halt();
                         }
+                        if network::stage14_1_socket_stress_self_test() {
+                            serial::write_line(format_args!(
+                                "[S14.1S] WovenNet socket/ephemeral stress: PASSED"
+                            ));
+                        } else {
+                            serial::write_line(format_args!(
+                                "[S14.1S] WovenNet socket/ephemeral stress: FAILED"
+                            ));
+                            halt();
+                        }
                         if network::stage14_1_lifecycle_self_test() {
                             serial::write_line(format_args!(
                                 "[S14.1G] WovenNet DNS generation tokens: PASSED"
