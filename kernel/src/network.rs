@@ -1422,6 +1422,68 @@ pub fn stage14_1_dhcp_transition_self_test() -> bool {
 }
 
 #[cfg(feature = "stage14-1-test")]
+pub fn stage14_1_socket_stress_self_test() -> bool {
+    const OWNER: u64 = 0x0001_401C;
+    let mut ids = [0u64; MAX_USER_SOCKETS];
+
+    for id in &mut ids {
+        match socket_open(OWNER, SocketKind::Udp) {
+            Ok(opened) => *id = opened,
+            Err(_) => {
+                close_process_sockets(OWNER);
+                return false;
+            }
+        }
+    }
+    if socket_open(OWNER, SocketKind::Udp) != Err(SocketError::NoSlot) {
+        close_process_sockets(OWNER);
+        return false;
+    }
+
+    for id in ids {
+        if socket_close(OWNER, id).is_err() {
+            close_process_sockets(OWNER);
+            return false;
+        }
+    }
+    if stats().user_sockets != 0 {
+        close_process_sockets(OWNER);
+        return false;
+    }
+
+    // A full retirement cycle must make every bounded descriptor reusable.
+    for expected in 0..MAX_USER_SOCKETS {
+        let Ok(id) = socket_open(OWNER, SocketKind::Udp) else {
+            close_process_sockets(OWNER);
+            return false;
+        };
+        if id != expected as u64 {
+            close_process_sockets(OWNER);
+            return false;
+        }
+    }
+    close_process_sockets(OWNER);
+    if stats().user_sockets != 0 {
+        return false;
+    }
+
+    // Exercise both ends of the IANA dynamic/private range and its wrap.
+    let Some(runtime) = RUNTIME.get() else {
+        return false;
+    };
+    let mut runtime = runtime.lock();
+    let saved = runtime.next_ephemeral;
+    runtime.next_ephemeral = 65533;
+    let first = next_ephemeral(&mut runtime);
+    let second = next_ephemeral(&mut runtime);
+    let wrapped = next_ephemeral(&mut runtime);
+    let after_wrap = next_ephemeral(&mut runtime);
+    runtime.next_ephemeral = saved;
+
+    first == 65533 && second == 65534 && wrapped == 49152 && after_wrap == 49153
+}
+
+#[cfg(feature = "stage14-1-test")]
 pub fn stage14_1_lifecycle_self_test() -> bool {
     const OWNER_A: u64 = 0x0001_401A;
     const OWNER_B: u64 = 0x0001_401B;
