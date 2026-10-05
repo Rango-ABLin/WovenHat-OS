@@ -1304,8 +1304,8 @@ pub fn self_test() -> bool {
 
 #[cfg(feature = "stage14-1-test")]
 pub fn stage14_1_lifecycle_self_test() -> bool {
-    const OWNER_A: u64 = 0x1401_A;
-    const OWNER_B: u64 = 0x1401_B;
+    const OWNER_A: u64 = 0x0001_401A;
+    const OWNER_B: u64 = 0x0001_401B;
 
     // Bounded DNS slots must be explicitly reclaimable even when a caller
     // abandons a pending lookup.
