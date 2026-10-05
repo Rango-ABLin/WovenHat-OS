@@ -4556,7 +4556,10 @@ impl SmpKeyDistribution {
                 ediv,
                 rand,
                 key_size,
-                authenticated: pairing.authentication()?.authenticated,
+                // Pairing feature negotiation selects an association model but does not
+                // itself prove possession of its TK. Persistent bonds remain unauthenticated
+                // until a verified authentication proof is explicitly carried into storage.
+                authenticated: false,
             },
         )?;
         self.abort();
@@ -4573,6 +4576,52 @@ impl SmpKeyDistribution {
         self.address_type = 0;
         self.address = [0; 6];
     }
+}
+
+pub fn ble_smp_persistent_authentication_audit_self_test() -> bool {
+    let mut links = LeLinkState::new();
+    let connected = [
+        EVT_LE_META, 19, LE_SUBEVENT_CONNECTION_COMPLETE, 0,
+        0x42, 0, 0, 1, 1, 2, 3, 4, 5, 6,
+        0x18, 0, 0, 0, 0xf4, 1, 0,
+    ];
+    if links.handle_connection_complete(&connected).is_err() {
+        return false;
+    }
+
+    // Negotiate a MITM-capable Passkey association, but deliberately do not
+    // provide a Confirm/Random proof. Feature exchange alone must never mint
+    // an authenticated persistent bond.
+    let request = [BLE_SMP_PAIRING_REQUEST, 0, 0, 0x05, 16, 0x01, 0x01];
+    let response = [BLE_SMP_PAIRING_RESPONSE, 2, 0, 0x05, 16, 0x01, 0x01];
+    let mut pairing = SmpPairingState::new();
+    if pairing.begin(&links, 0x42, &request).is_err()
+        || pairing.accept_response(&links, 0x42, &response).is_err()
+        || pairing.authentication().is_err()
+    {
+        return false;
+    }
+
+    let mut information = [0_u8; 17];
+    information[0] = BLE_SMP_ENCRYPTION_INFORMATION;
+    information[1..].fill(0xa5);
+    let mut identification = [0_u8; 11];
+    identification[0] = BLE_SMP_MASTER_IDENTIFICATION;
+    identification[1..3].copy_from_slice(&0x1234_u16.to_le_bytes());
+    identification[3..11].copy_from_slice(&0x1122_3344_5566_7788_u64.to_le_bytes());
+
+    let mut distribution = SmpKeyDistribution::new();
+    let mut bonds = LeBondStore::new();
+    if distribution
+        .encryption_information(&links, &pairing, 0x42, &information)
+        .is_err()
+        || distribution
+            .master_identification(&links, &pairing, &mut bonds, 0x42, &identification)
+            .is_err()
+    {
+        return false;
+    }
+    bonds.restore(&links, 0x42).is_ok_and(|material| !material.authenticated)
 }
 
 pub fn ble_smp_key_distribution_13_11b_self_test() -> bool {
