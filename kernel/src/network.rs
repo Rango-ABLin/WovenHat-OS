@@ -1453,16 +1453,16 @@ pub fn stage14_1_socket_stress_self_test() -> bool {
 
     // A full retirement cycle must make all bounded descriptors reusable.
     let mut reopened = [u64::MAX; MAX_USER_SOCKETS];
-    for id in &mut reopened {
+    for index in 0..MAX_USER_SOCKETS {
         let Ok(opened) = socket_open(OWNER, SocketKind::Udp) else {
             close_process_sockets(OWNER);
             return false;
         };
-        if opened as usize >= MAX_USER_SOCKETS || reopened.contains(&opened) {
+        if opened as usize >= MAX_USER_SOCKETS || reopened[..index].contains(&opened) {
             close_process_sockets(OWNER);
             return false;
         }
-        *id = opened;
+        reopened[index] = opened;
     }
     if socket_open(OWNER, SocketKind::Udp) != Err(SocketError::NoSlot) {
         close_process_sockets(OWNER);
