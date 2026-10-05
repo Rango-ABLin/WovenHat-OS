@@ -527,3 +527,13 @@ sessions meeting the configured threshold remain bound to the live peer
 identity. The exact 1/2/4-CPU Stage 13.10 gate, host tests and warning-denying
 kernel Clippy passed locally. GitHub acceptance for the source tip is required
 before this closure is considered complete.
+
+
+## Stage 13.10T — outbound BLE key-size acceptance contract — 2026-10-05
+
+The Stage 13.10 runtime harness now requires a dedicated marker for outbound
+notification authorization by minimum encryption key size. A weak authenticated
+session is rejected before notification encoding, while a session meeting the
+16-byte policy is accepted. The local 1/2/4-CPU gate, host tests and
+warning-denying kernel Clippy pass; GitHub acceptance for the pushed tip is
+still required.

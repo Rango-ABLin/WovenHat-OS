@@ -500,3 +500,12 @@ whose negotiated key is below that bound. The policy is checked after the
 identity-bound session lookup and before either an ATT response or an outbound
 notification/indication is produced, keeping inbound and outbound authority
 consistent.
+
+
+### Stage 13.10T BLE outbound authorization acceptance
+
+The Stage 13.10 runtime gate requires a dedicated outbound key-size marker in
+addition to the inbound ATT/GATT checks. Its self-test exercises the full
+subscription path: weak authenticated sessions are denied before packet
+encoding, and a strong identity-bound session produces the expected
+notification.

@@ -3882,3 +3882,83 @@ pub fn le_gatt_minimum_key_size_self_test() -> bool {
         ) == Ok(9)
         && out[..9] == [ATT_OP_HANDLE_VALUE_NOTIFICATION, 8, 0, b's', b't', b'r', b'o', b'n', b'g']
 }
+
+// Stage 13.10T: enforce minimum BLE encryption key size on outbound GATT values.
+pub fn le_gatt_minimum_key_size_notification_self_test() -> bool {
+    let mut links = LeLinkState::new();
+    let connected = [
+        EVT_LE_META, 19, LE_SUBEVENT_CONNECTION_COMPLETE, 0,
+        0x53, 0x00, 0, 1, 3, 5, 7, 9, 11, 13,
+        0x18, 0x00, 0, 0, 0xf4, 0x01, 0,
+    ];
+    if links.handle_connection_complete(&connected).is_err() {
+        return false;
+    }
+
+    let handle = 8;
+    let mut policies = AttSecurityPolicies::new();
+    if policies.require(handle, AttSecurityRequirement::Authenticated).is_err()
+        || policies.require_min_key_size(handle, 16).is_err()
+    {
+        return false;
+    }
+
+    let weak = LeBondMaterial {
+        ltk: [0x54; 16],
+        ediv: 0x54,
+        rand: 0x5454,
+        key_size: 12,
+        authenticated: true,
+    };
+    let mut bonds = LeBondStore::new();
+    let mut sessions = LeSecuritySessions::new();
+    if bonds.store(&links, 0x53, weak).is_err()
+        || sessions.encryption_change(
+            &links,
+            &bonds,
+            &[EVT_ENCRYPTION_CHANGE, 4, 0, 0x53, 0, 1],
+        ).is_err()
+    {
+        return false;
+    }
+
+    let mut subscriptions = GattSubscriptions::new();
+    let mut out = [0_u8; MAX_ATT_PDU];
+    if subscriptions.configure(&links, 0x53, handle, 0x0001).is_err()
+        || subscriptions.emit_secured(
+            &links,
+            &sessions,
+            &policies,
+            GattSecuredEmission {
+                connection_handle: 0x53,
+                value_handle: handle,
+                indication: false,
+                value: b"weak",
+            },
+            &mut out,
+        ).is_ok()
+    {
+        return false;
+    }
+
+    let strong = LeBondMaterial { key_size: 16, ..weak };
+    bonds.store(&links, 0x53, strong).is_ok()
+        && sessions.encryption_change(
+            &links,
+            &bonds,
+            &[EVT_ENCRYPTION_CHANGE, 4, 0, 0x53, 0, 1],
+        ).is_ok()
+        && subscriptions.emit_secured(
+            &links,
+            &sessions,
+            &policies,
+            GattSecuredEmission {
+                connection_handle: 0x53,
+                value_handle: handle,
+                indication: false,
+                value: b"strong",
+            },
+            &mut out,
+        ) == Ok(9)
+        && out[..9] == [ATT_OP_HANDLE_VALUE_NOTIFICATION, 8, 0, b's', b't', b'r', b'o', b'n', b'g']
+}
