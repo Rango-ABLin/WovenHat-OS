@@ -1424,6 +1424,12 @@ pub fn stage14_1_dhcp_transition_self_test() -> bool {
 #[cfg(feature = "stage14-1-test")]
 pub fn stage14_1_socket_stress_self_test() -> bool {
     const OWNER: u64 = 0x0001_401C;
+    let fail = |checkpoint: &str| {
+        crate::serial::write_line(format_args!(
+            "[S14.1S-DIAG] FAILED checkpoint={checkpoint}"
+        ));
+        false
+    };
     let mut ids = [0u64; MAX_USER_SOCKETS];
 
     for id in &mut ids {
@@ -1431,51 +1437,49 @@ pub fn stage14_1_socket_stress_self_test() -> bool {
             Ok(opened) => *id = opened,
             Err(_) => {
                 close_process_sockets(OWNER);
-                return false;
+                return fail("S1-open-exhaustion");
             }
         }
     }
     if socket_open(OWNER, SocketKind::Udp) != Err(SocketError::NoSlot) {
         close_process_sockets(OWNER);
-        return false;
+        return fail("S2-noslot-boundary");
     }
 
     for id in ids {
         if socket_close(OWNER, id).is_err() {
             close_process_sockets(OWNER);
-            return false;
+            return fail("S3-close");
         }
     }
     if stats().user_sockets != 0 {
         close_process_sockets(OWNER);
-        return false;
+        return fail("S4-first-retirement");
     }
 
-    // A full retirement cycle must make all bounded descriptors reusable.
     let mut reopened = [u64::MAX; MAX_USER_SOCKETS];
     for index in 0..MAX_USER_SOCKETS {
         let Ok(opened) = socket_open(OWNER, SocketKind::Udp) else {
             close_process_sockets(OWNER);
-            return false;
+            return fail("S5-reopen-capacity");
         };
         if opened as usize >= MAX_USER_SOCKETS || reopened[..index].contains(&opened) {
             close_process_sockets(OWNER);
-            return false;
+            return fail("S6-reopen-identity");
         }
         reopened[index] = opened;
     }
     if socket_open(OWNER, SocketKind::Udp) != Err(SocketError::NoSlot) {
         close_process_sockets(OWNER);
-        return false;
+        return fail("S7-reopen-noslot");
     }
     close_process_sockets(OWNER);
     if stats().user_sockets != 0 {
-        return false;
+        return fail("S8-second-retirement");
     }
 
-    // Exercise both ends of the IANA dynamic/private range and its wrap.
     let Some(runtime) = RUNTIME.get() else {
-        return false;
+        return fail("S9-runtime");
     };
     let mut runtime = runtime.lock();
     let saved = runtime.next_ephemeral;
@@ -1486,7 +1490,10 @@ pub fn stage14_1_socket_stress_self_test() -> bool {
     let after_wrap = next_ephemeral(&mut runtime);
     runtime.next_ephemeral = saved;
 
-    first == 65533 && second == 65534 && wrapped == 49152 && after_wrap == 49153
+    if first != 65533 || second != 65534 || wrapped != 49152 || after_wrap != 49153 {
+        return fail("S10-ephemeral-wrap");
+    }
+    true
 }
 
 #[cfg(feature = "stage14-1-test")]
