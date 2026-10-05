@@ -2066,6 +2066,16 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
                     serial::write_line(format_args!("[NETTEST] DHCP/DNS/ICMP/UDP/TCP: PASSED"));
                     #[cfg(feature = "stage14-1-test")]
                     {
+                        if network::stage14_1_dhcp_transition_self_test() {
+                            serial::write_line(format_args!(
+                                "[S14.1D] WovenNet DHCP transition/recovery: PASSED"
+                            ));
+                        } else {
+                            serial::write_line(format_args!(
+                                "[S14.1D] WovenNet DHCP transition/recovery: FAILED"
+                            ));
+                            halt();
+                        }
                         if network::stage14_1_lifecycle_self_test() {
                             serial::write_line(format_args!(
                                 "[S14.1H] WovenNet resource/lifecycle hardening: PASSED"
