@@ -532,6 +532,18 @@ bonding persistence, controller transport and physical BLE qualification remain
 outside this foundation.
 
 
+## Stage 13.11B — BLE SMP LTK/key distribution — 2026-10-05
+
+Legacy Encryption Information and Master Identification PDUs are now validated
+and integrated with the canonical LE bond store. Distribution is bound to the
+live pairing handle, negotiated key size and peer identity; malformed, stale,
+duplicate and mismatched inputs fail closed. The dedicated 1/2/4-CPU QEMU
+gate passes locally; GitHub acceptance for the pushed tip remains required.
+
+Cryptographic derivation, user-confirmed pairing, controller transport and
+physical BLE qualification remain outside this bounded distribution stage.
+
+
 ## Stage 13.10S closure hardening — 2026-10-05
 
 Minimum BLE encryption-key-size policy is enforced for both protected ATT/GATT

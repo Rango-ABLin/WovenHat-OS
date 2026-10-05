@@ -519,3 +519,12 @@ parameters before advancing `SmpPairingState`; malformed fields, unsupported
 authentication/key-distribution bits, stale handles and non-SMP CIDs fail
 closed. This layer does not claim cryptographic derivation, user interaction,
 bond persistence or physical-controller qualification.
+
+
+### Stage 13.11B BLE SMP LTK distribution
+
+The SMP distribution boundary accepts legacy Encryption Information and Master
+Identification only for the live negotiated pairing handle. It validates key
+length, identity and negotiated-size consistency before storing material in
+`LeBondStore`, preserving the existing address/type ownership model and
+fail-closed teardown semantics.
