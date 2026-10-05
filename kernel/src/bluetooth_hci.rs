@@ -4330,6 +4330,39 @@ pub trait SmpAes128 {
     fn encrypt_block(&self, key: [u8; 16], plaintext: [u8; 16]) -> [u8; 16];
 }
 
+pub struct ProductionSmpAes128;
+
+impl SmpAes128 for ProductionSmpAes128 {
+    fn encrypt_block(&self, key: [u8; 16], plaintext: [u8; 16]) -> [u8; 16] {
+        use aes::cipher::{BlockEncrypt, KeyInit};
+
+        let cipher = aes::Aes128::new_from_slice(&key)
+            .expect("AES-128 requires an exact 16-byte key");
+        let mut block = aes::cipher::Block::<aes::Aes128>::clone_from_slice(&plaintext);
+        cipher.encrypt_block(&mut block);
+        let mut output = [0_u8; 16];
+        output.copy_from_slice(&block);
+        output
+    }
+}
+
+pub fn ble_smp_aes128_13_11d_self_test() -> bool {
+    // FIPS-197 Appendix B / AES-128 known-answer vector.
+    let key = [
+        0x2b, 0x7e, 0x15, 0x16, 0x28, 0xae, 0xd2, 0xa6,
+        0xab, 0xf7, 0x15, 0x88, 0x09, 0xcf, 0x4f, 0x3c,
+    ];
+    let plaintext = [
+        0x32, 0x43, 0xf6, 0xa8, 0x88, 0x5a, 0x30, 0x8d,
+        0x31, 0x31, 0x98, 0xa2, 0xe0, 0x37, 0x07, 0x34,
+    ];
+    let expected = [
+        0x39, 0x25, 0x84, 0x1d, 0x02, 0xdc, 0x09, 0xfb,
+        0xdc, 0x11, 0x85, 0x97, 0x19, 0x6a, 0x0b, 0x32,
+    ];
+    ProductionSmpAes128.encrypt_block(key, plaintext) == expected
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SmpConfirmPhase {
     AwaitingConfirm,
