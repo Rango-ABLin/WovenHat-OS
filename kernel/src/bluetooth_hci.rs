@@ -5189,7 +5189,10 @@ pub fn ble_smp_encryption_authority_13_11f_self_test() -> bool {
     }
 
     let crypto = ProductionSmpAes128;
-    let tk = [0x31; 16];
+    let Ok(proof) = SmpAuthenticationProof::passkey(&pairing, 123_456) else {
+        return false;
+    };
+    let tk = proof.temporary_key();
     let random = [0x44; 16];
     let inputs = SmpConfirmInputs {
         temporary_key: tk,
@@ -5209,7 +5212,26 @@ pub fn ble_smp_encryption_authority_13_11f_self_test() -> bool {
         return false;
     };
     if confirm.receive_confirm(&links, 0x42, &confirm_pdu).is_err()
-        || confirm.verify_random(&links, &pairing, &crypto, inputs, &random_pdu).is_err()
+        || confirm.verify_random_with_proof(
+            &links,
+            &pairing,
+            &crypto,
+            proof,
+            inputs.initiator,
+            inputs.responder,
+            &random_pdu,
+        ).is_err()
+    {
+        return false;
+    }
+
+    // A raw TK can verify c1, but it must never acquire MITM authority.
+    let Ok(mut raw_confirm) = SmpConfirmState::new(&pairing) else {
+        return false;
+    };
+    if raw_confirm.receive_confirm(&links, 0x42, &confirm_pdu).is_err()
+        || raw_confirm.verify_random(&links, &pairing, &crypto, inputs, &random_pdu).is_err()
+        || raw_confirm.verified_authentication().is_ok_and(|auth| auth.authenticated)
     {
         return false;
     }
