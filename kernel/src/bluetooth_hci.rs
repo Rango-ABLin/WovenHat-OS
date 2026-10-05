@@ -4167,7 +4167,7 @@ impl SmpLifecycle {
         }
         let pdu = frame.payload();
         let opcode = pdu.first().copied().ok_or(HciError::MalformedEvent)?;
-        let result = match opcode {
+        match opcode {
             BLE_SMP_PAIRING_REQUEST => {
                 if self.phase != SmpLifecyclePhase::Idle {
                     return Err(HciError::UnexpectedOpcode);
@@ -4211,8 +4211,7 @@ impl SmpLifecycle {
                 Ok(())
             }
             _ => Err(HciError::UnexpectedOpcode),
-        };
-        result
+        }
     }
 
     pub fn disconnect(&mut self, handle: u16) {
