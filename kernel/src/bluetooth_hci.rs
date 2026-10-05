@@ -4709,6 +4709,13 @@ pub fn smp_s1<C: SmpAes128>(
 
 pub const OPCODE_LE_START_ENCRYPTION: u16 = 0x2019;
 
+#[derive(Clone, Copy)]
+pub struct SmpEncryptionInputs {
+    pub temporary_key: [u8; 16],
+    pub initiator_random: [u8; 16],
+    pub responder_random: [u8; 16],
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct SmpPendingEncryption {
     pub handle: u16,
@@ -4724,9 +4731,7 @@ impl SmpConfirmState {
         links: &LeLinkState,
         pairing: &SmpPairingState,
         crypto: &C,
-        temporary_key: [u8; 16],
-        initiator_random: [u8; 16],
-        responder_random: [u8; 16],
+        inputs: SmpEncryptionInputs,
         out: &mut [u8; 258],
     ) -> Result<(usize, SmpPendingEncryption), HciError> {
         if self.phase != SmpConfirmPhase::Verified
@@ -4741,7 +4746,12 @@ impl SmpConfirmState {
             .ok_or(HciError::UnexpectedOpcode)?;
         let authentication = pairing.authentication()?;
         let key_size = pairing.negotiated_key_size().ok_or(HciError::UnexpectedOpcode)?;
-        let mut stk = smp_s1(crypto, temporary_key, initiator_random, responder_random);
+        let mut stk = smp_s1(
+            crypto,
+            inputs.temporary_key,
+            inputs.initiator_random,
+            inputs.responder_random,
+        );
         for byte in &mut stk[key_size as usize..] {
             *byte = 0;
         }
@@ -4867,7 +4877,15 @@ pub fn ble_smp_encryption_authority_13_11f_self_test() -> bool {
 
     let mut out = [0_u8; 258];
     let Ok((len, pending)) = confirm.start_encryption_command(
-        &links, &pairing, &crypto, tk, [0x11; 16], [0x22; 16], &mut out,
+        &links,
+        &pairing,
+        &crypto,
+        SmpEncryptionInputs {
+            temporary_key: tk,
+            initiator_random: [0x11; 16],
+            responder_random: [0x22; 16],
+        },
+        &mut out,
     ) else {
         return false;
     };
