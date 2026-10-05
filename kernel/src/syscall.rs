@@ -188,70 +188,70 @@ pub enum Number {
     PingStart = 48,
     /// 0 pending, otherwise RTT ticks + 1
     PingPoll = 49,
-    /// query id -> cancel/reclaim pending DNS query
-    DnsCancel = 50,
     /// command-line pointer + byte length; parses argv and resolves bare names via /bin
-    ExecCommand = 51,
+    ExecCommand = 50,
     /// key ptr, key len, value buffer ptr (MAX_ENV_ENTRY bytes) -> value length
-    EnvGet = 52,
+    EnvGet = 51,
     /// key ptr, packed key/value lengths, value ptr -> 0
-    EnvSet = 53,
+    EnvSet = 52,
     /// number of environment entries
-    EnvCount = 54,
+    EnvCount = 53,
     /// index, output ptr, capacity -> entry length (KEY=VALUE)
-    EnvEntry = 55,
+    EnvEntry = 54,
     /// number of live/zombie process-table entries
-    ProcessCount = 56,
+    ProcessCount = 55,
     /// index, user ProcessInfo pointer -> 0
-    ProcessInfo = 57,
+    ProcessInfo = 56,
     /// command-line pointer + byte length -> spawn child, return pid
-    SpawnCommand = 58,
+    SpawnCommand = 57,
     /// fd, byte length, page-aligned file offset: read-only private snapshot.
-    MmapFile = 59,
+    MmapFile = 58,
     /// fd, byte length, page-aligned file offset: writable private snapshot.
-    MmapFileWritable = 60,
-    MmapFileLazy = 61,
-    MmapFileLazyWritable = 62,
-    MmapFileShared = 63,
-    Msync = 64,
+    MmapFileWritable = 59,
+    MmapFileLazy = 60,
+    MmapFileLazyWritable = 61,
+    MmapFileShared = 62,
+    Msync = 63,
     /// class -> generation-tagged owner-bound async handle
-    AsyncCreate = 65,
+    AsyncCreate = 64,
     /// handle, user Completion* -> 0 pending, 1 completed/consumed
-    AsyncPoll = 66,
+    AsyncPoll = 65,
     /// handle, user Completion* -> blocks event-driven, returns 1 on copyout
-    AsyncWait = 67,
+    AsyncWait = 66,
     /// handle -> release pending/completed operation without waiting
-    AsyncCancel = 68,
+    AsyncCancel = 67,
     /// service handle, status, value -> complete an owner-managed service event
-    AsyncComplete = 69,
+    AsyncComplete = 68,
     /// LBA -> generation-tagged Block handle backed by the real block worker
-    AsyncBlockRead = 70,
+    AsyncBlockRead = 69,
     /// LBA, userspace 512-byte sector -> generation-tagged Block handle
-    AsyncBlockWrite = 71,
+    AsyncBlockWrite = 70,
     /// Block handle, user BlockCompletion* -> 0 pending, 1 copied/consumed
-    AsyncBlockPoll = 72,
+    AsyncBlockPoll = 71,
     /// Block handle, user BlockCompletion* -> blocks event-driven, 1 copied/consumed
-    AsyncBlockWait = 73,
+    AsyncBlockWait = 72,
     /// fd, user AsyncFileRequest* -> positional read handle
-    AsyncFileRead = 74,
+    AsyncFileRead = 73,
     /// fd, user AsyncFileRequest* -> positional write handle; payload copied at submit
-    AsyncFileWrite = 75,
+    AsyncFileWrite = 74,
     /// File handle, user Completion*, user data* -> 0 pending, 1 copied/consumed
-    AsyncFilePoll = 76,
+    AsyncFilePoll = 75,
     /// File handle, user Completion*, user data* -> event wait, 1 copied/consumed
-    AsyncFileWait = 77,
+    AsyncFileWait = 76,
     /// socket, user buffer, length -> generation-tagged Network send handle
-    AsyncNetSend = 78,
+    AsyncNetSend = 77,
     /// socket, capacity -> generation-tagged Network receive handle
-    AsyncNetRecv = 79,
+    AsyncNetRecv = 78,
     /// Network handle, user Completion*, user data* -> 0 pending, 1 copied/consumed
-    AsyncNetPoll = 80,
+    AsyncNetPoll = 79,
     /// Network handle, user Completion*, user data* -> event wait, 1 copied/consumed
-    AsyncNetWait = 81,
+    AsyncNetWait = 80,
     /// TCP socket, packed IPv4 endpoint -> generation-tagged Network connect handle
-    AsyncTcpConnect = 82,
-    CompletionPortCreate = 83,
-    CompletionPortClose = 84,
+    AsyncTcpConnect = 81,
+    CompletionPortCreate = 82,
+    CompletionPortClose = 83,
+    /// query id -> cancel/reclaim pending DNS query
+    DnsCancel = 84,
     CompletionPortAssociate = 84,
     CompletionPortPoll = 85,
     CompletionPortWait = 86,
