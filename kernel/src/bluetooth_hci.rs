@@ -4123,6 +4123,177 @@ impl BleSmpFixedChannel {
     }
 }
 
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SmpLifecyclePhase {
+    Idle,
+    Pairing,
+    Negotiated,
+    Failed,
+}
+
+pub struct SmpLifecycle {
+    pairing: SmpPairingState,
+    key_distribution: SmpKeyDistribution,
+    identity_distribution: SmpIdentityDistribution,
+    active_handle: Option<u16>,
+    phase: SmpLifecyclePhase,
+}
+
+impl SmpLifecycle {
+    pub const fn new() -> Self {
+        Self {
+            pairing: SmpPairingState::new(),
+            key_distribution: SmpKeyDistribution::new(),
+            identity_distribution: SmpIdentityDistribution::new(),
+            active_handle: None,
+            phase: SmpLifecyclePhase::Idle,
+        }
+    }
+
+    pub fn inbound(
+        &mut self,
+        links: &LeLinkState,
+        bonds: &mut LeBondStore,
+        identities: &mut LeIdentityStore,
+        handle: u16,
+        frame: &L2capFrame,
+    ) -> Result<(), HciError> {
+        if !links.contains_handle(handle) || frame.cid != BLE_SMP_CID {
+            return Err(HciError::UnexpectedOpcode);
+        }
+        if self.active_handle.is_some_and(|active| active != handle) {
+            return Err(HciError::UnexpectedOpcode);
+        }
+        let pdu = frame.payload();
+        let opcode = pdu.first().copied().ok_or(HciError::MalformedEvent)?;
+        let result = match opcode {
+            BLE_SMP_PAIRING_REQUEST => {
+                if self.phase != SmpLifecyclePhase::Idle {
+                    return Err(HciError::UnexpectedOpcode);
+                }
+                self.pairing.begin(links, handle, pdu)?;
+                self.active_handle = Some(handle);
+                self.phase = SmpLifecyclePhase::Pairing;
+                Ok(())
+            }
+            BLE_SMP_PAIRING_RESPONSE => {
+                if self.phase != SmpLifecyclePhase::Pairing {
+                    return Err(HciError::UnexpectedOpcode);
+                }
+                self.pairing.accept_response(links, handle, pdu)?;
+                self.phase = SmpLifecyclePhase::Negotiated;
+                Ok(())
+            }
+            BLE_SMP_ENCRYPTION_INFORMATION if self.phase == SmpLifecyclePhase::Negotiated => {
+                self.key_distribution.encryption_information(links, &self.pairing, handle, pdu)
+            }
+            BLE_SMP_MASTER_IDENTIFICATION if self.phase == SmpLifecyclePhase::Negotiated => {
+                self.key_distribution.master_identification(
+                    links, &self.pairing, bonds, handle, pdu,
+                )
+            }
+            BLE_SMP_IDENTITY_INFORMATION if self.phase == SmpLifecyclePhase::Negotiated => {
+                self.identity_distribution.identity_information(
+                    links, &self.pairing, handle, pdu,
+                )
+            }
+            BLE_SMP_IDENTITY_ADDRESS_INFORMATION if self.phase == SmpLifecyclePhase::Negotiated => {
+                self.identity_distribution.identity_address_information(
+                    links, &self.pairing, identities, handle, pdu,
+                )
+            }
+            BLE_SMP_PAIRING_FAILED if pdu.len() == 2 && self.active_handle == Some(handle) => {
+                self.pairing.fail(handle)?;
+                self.key_distribution.abort();
+                self.identity_distribution.abort();
+                self.phase = SmpLifecyclePhase::Failed;
+                Ok(())
+            }
+            _ => Err(HciError::UnexpectedOpcode),
+        };
+        result
+    }
+
+    pub fn disconnect(&mut self, handle: u16) {
+        if self.active_handle == Some(handle) {
+            self.reset();
+        }
+    }
+
+    pub fn reset(&mut self) {
+        self.key_distribution.abort();
+        self.identity_distribution.abort();
+        self.pairing = SmpPairingState::new();
+        self.active_handle = None;
+        self.phase = SmpLifecyclePhase::Idle;
+    }
+
+    pub fn phase(&self) -> SmpLifecyclePhase {
+        self.phase
+    }
+}
+
+pub fn ble_smp_lifecycle_hardening_13_11h_self_test() -> bool {
+    let mut links = LeLinkState::new();
+    let connected = [
+        EVT_LE_META, 19, LE_SUBEVENT_CONNECTION_COMPLETE, 0,
+        0x42, 0, 0, 1, 1, 2, 3, 4, 5, 6,
+        0x18, 0, 0, 0, 0xf4, 1, 0,
+    ];
+    if links.handle_connection_complete(&connected).is_err() {
+        return false;
+    }
+    let request = [BLE_SMP_PAIRING_REQUEST, 3, 0, 0x01, 16, 0x03, 0x03];
+    let response = [BLE_SMP_PAIRING_RESPONSE, 3, 0, 0x01, 16, 0x03, 0x03];
+    let failed = [BLE_SMP_PAIRING_FAILED, 0x08];
+    let Ok(request_frame) = L2capFrame::new(BLE_SMP_CID, &request) else { return false; };
+    let Ok(response_frame) = L2capFrame::new(BLE_SMP_CID, &response) else { return false; };
+    let Ok(failed_frame) = L2capFrame::new(BLE_SMP_CID, &failed) else { return false; };
+
+    let mut lifecycle = SmpLifecycle::new();
+    let mut bonds = LeBondStore::new();
+    let mut identities = LeIdentityStore::new();
+    if lifecycle.inbound(&links, &mut bonds, &mut identities, 0x42, &response_frame).is_ok()
+        || lifecycle.inbound(&links, &mut bonds, &mut identities, 0x42, &request_frame).is_err()
+        || lifecycle.phase() != SmpLifecyclePhase::Pairing
+        || lifecycle.inbound(&links, &mut bonds, &mut identities, 0x42, &request_frame).is_ok()
+        || lifecycle.inbound(&links, &mut bonds, &mut identities, 0x42, &response_frame).is_err()
+        || lifecycle.phase() != SmpLifecyclePhase::Negotiated
+        || lifecycle.inbound(&links, &mut bonds, &mut identities, 0x42, &failed_frame).is_err()
+        || lifecycle.phase() != SmpLifecyclePhase::Failed
+    {
+        return false;
+    }
+
+    lifecycle.reset();
+    if lifecycle.phase() != SmpLifecyclePhase::Idle
+        || lifecycle.inbound(&links, &mut bonds, &mut identities, 0x42, &request_frame).is_err()
+    {
+        return false;
+    }
+    lifecycle.disconnect(0x42);
+    if lifecycle.phase() != SmpLifecyclePhase::Idle {
+        return false;
+    }
+
+    let disconnected = [EVT_DISCONNECTION_COMPLETE, 4, 0, 0x42, 0, 0x13];
+    if links.handle_disconnection_complete(&disconnected).is_err() {
+        return false;
+    }
+    let reconnected = [
+        EVT_LE_META, 19, LE_SUBEVENT_CONNECTION_COMPLETE, 0,
+        0x55, 0, 0, 1, 1, 2, 3, 4, 5, 6,
+        0x18, 0, 0, 0, 0xf4, 1, 0,
+    ];
+    if links.handle_connection_complete(&reconnected).is_err() {
+        return false;
+    }
+    lifecycle.inbound(&links, &mut bonds, &mut identities, 0x55, &request_frame).is_ok()
+        && lifecycle.phase() == SmpLifecyclePhase::Pairing
+}
+
+
 pub fn ble_smp_foundation_13_11a_self_test() -> bool {
     let mut links = LeLinkState::new();
     let connected = [
