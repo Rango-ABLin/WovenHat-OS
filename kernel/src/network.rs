@@ -577,7 +577,7 @@ fn cancel_dns_queries_locked(runtime: &mut Runtime) {
 
 fn apply_dhcp_locked(
     runtime: &mut Runtime,
-    address: Ipv4Cidr,
+    address: smoltcp::wire::Ipv4Cidr,
     router: Ipv4Address,
     dns: Ipv4Address,
 ) {
@@ -1345,21 +1345,21 @@ pub fn stage14_1_dhcp_transition_self_test() -> bool {
     };
     let mut runtime = runtime.lock();
 
-    let Ok(query) = {
-        let handle = match runtime.dns_handle {
-            Some(handle) => handle,
-            None => return false,
-        };
-        runtime
-            .sockets
-            .get_mut::<dns::Socket>(handle)
-            .start_query(runtime.iface.context(), "stage14-1-transition.invalid", dns::Type::A)
-    } else {
-        return false;
+    let handle = match runtime.dns_handle {
+        Some(handle) => handle,
+        None => return false,
+    };
+    let query = match runtime
+        .sockets
+        .get_mut::<dns::Socket>(handle)
+        .start_query(runtime.iface.context(), "stage14-1-transition.invalid", dns::Type::A)
+    {
+        Ok(query) => query,
+        Err(_) => return false,
     };
     runtime.dns_queries[0] = Some(query);
 
-    let lease_address = Ipv4Cidr::new(Ipv4Address::new(10, 0, 2, 42), 24);
+    let lease_address = smoltcp::wire::Ipv4Cidr::new(Ipv4Address::new(10, 0, 2, 42), 24);
     let lease_router = Ipv4Address::new(10, 0, 2, 1);
     let lease_dns = Ipv4Address::new(10, 0, 2, 53);
     apply_dhcp_locked(&mut runtime, lease_address, lease_router, lease_dns);
