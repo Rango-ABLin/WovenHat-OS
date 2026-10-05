@@ -4930,6 +4930,206 @@ pub fn ble_smp_encryption_authority_13_11f_self_test() -> bool {
 }
 
 
+
+pub const BLE_SMP_IDENTITY_INFORMATION: u8 = 0x08;
+pub const BLE_SMP_IDENTITY_ADDRESS_INFORMATION: u8 = 0x09;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct LeIdentity {
+    pub address_type: u8,
+    pub address: [u8; 6],
+    pub irk: [u8; 16],
+}
+
+pub struct LeIdentityStore {
+    identities: [Option<LeIdentity>; MAX_LE_BONDS],
+    count: usize,
+}
+
+impl LeIdentityStore {
+    pub const fn new() -> Self {
+        Self { identities: [None; MAX_LE_BONDS], count: 0 }
+    }
+
+    pub fn store(&mut self, identity: LeIdentity) -> Result<(), HciError> {
+        if identity.address_type > 1 {
+            return Err(HciError::MalformedEvent);
+        }
+        if let Some(index) = self.identities[..self.count].iter().position(|entry| {
+            entry.is_some_and(|stored| {
+                stored.address_type == identity.address_type && stored.address == identity.address
+            })
+        }) {
+            self.identities[index] = Some(identity);
+            return Ok(());
+        }
+        if self.count == MAX_LE_BONDS {
+            return Err(HciError::ControllerFailure(0xff));
+        }
+        self.identities[self.count] = Some(identity);
+        self.count += 1;
+        Ok(())
+    }
+
+    pub fn resolve_rpa<C: SmpAes128>(
+        &self,
+        crypto: &C,
+        address: [u8; 6],
+    ) -> Option<LeIdentity> {
+        // In the HCI little-endian address representation, prand is bytes 3..6.
+        let prand = [address[3], address[4], address[5]];
+        if prand[2] & 0xc0 != 0x40 {
+            return None;
+        }
+        self.identities[..self.count]
+            .iter()
+            .flatten()
+            .find(|identity| smp_ah(crypto, identity.irk, prand) == address[..3])
+            .copied()
+    }
+
+    pub fn count(&self) -> usize { self.count }
+}
+
+pub fn smp_ah<C: SmpAes128>(crypto: &C, irk: [u8; 16], prand: [u8; 3]) -> [u8; 3] {
+    let mut r = [0_u8; 16];
+    r[13..16].copy_from_slice(&prand);
+    let encrypted = crypto.encrypt_block(irk, r);
+    [encrypted[13], encrypted[14], encrypted[15]]
+}
+
+pub struct SmpIdentityDistribution {
+    handle: Option<u16>,
+    irk: Option<[u8; 16]>,
+}
+
+impl SmpIdentityDistribution {
+    pub const fn new() -> Self {
+        Self { handle: None, irk: None }
+    }
+
+    pub fn identity_information(
+        &mut self,
+        links: &LeLinkState,
+        pairing: &SmpPairingState,
+        handle: u16,
+        pdu: &[u8],
+    ) -> Result<(), HciError> {
+        if !links.contains_handle(handle)
+            || pairing.phase() != SmpPairingPhase::Negotiated
+            || pairing.handle != Some(handle)
+            || pdu.len() != 17
+            || pdu[0] != BLE_SMP_IDENTITY_INFORMATION
+        {
+            return Err(HciError::UnexpectedOpcode);
+        }
+        let mut irk = [0_u8; 16];
+        irk.copy_from_slice(&pdu[1..17]);
+        self.handle = Some(handle);
+        self.irk = Some(irk);
+        Ok(())
+    }
+
+    pub fn identity_address_information(
+        &mut self,
+        links: &LeLinkState,
+        pairing: &SmpPairingState,
+        identities: &mut LeIdentityStore,
+        handle: u16,
+        pdu: &[u8],
+    ) -> Result<(), HciError> {
+        if !links.contains_handle(handle)
+            || pairing.phase() != SmpPairingPhase::Negotiated
+            || pairing.handle != Some(handle)
+            || self.handle != Some(handle)
+            || pdu.len() != 8
+            || pdu[0] != BLE_SMP_IDENTITY_ADDRESS_INFORMATION
+            || pdu[1] > 1
+        {
+            return Err(HciError::UnexpectedOpcode);
+        }
+        let Some(irk) = self.irk else {
+            return Err(HciError::UnexpectedOpcode);
+        };
+        let mut address = [0_u8; 6];
+        address.copy_from_slice(&pdu[2..8]);
+        identities.store(LeIdentity { address_type: pdu[1], address, irk })?;
+        self.abort();
+        Ok(())
+    }
+
+    pub fn abort(&mut self) {
+        if let Some(mut irk) = self.irk.take() {
+            for byte in &mut irk {
+                unsafe { core::ptr::write_volatile(byte, 0); }
+            }
+        }
+        self.handle = None;
+    }
+}
+
+pub fn ble_smp_identity_privacy_13_11g_self_test() -> bool {
+    let mut links = LeLinkState::new();
+    let connected = [
+        EVT_LE_META, 19, LE_SUBEVENT_CONNECTION_COMPLETE, 0,
+        0x42, 0, 0, 1, 1, 2, 3, 4, 5, 6,
+        0x18, 0, 0, 0, 0xf4, 1, 0,
+    ];
+    if links.handle_connection_complete(&connected).is_err() {
+        return false;
+    }
+    let request = [BLE_SMP_PAIRING_REQUEST, 3, 0, 0x01, 16, 0x02, 0x02];
+    let response = [BLE_SMP_PAIRING_RESPONSE, 3, 0, 0x01, 16, 0x02, 0x02];
+    let mut pairing = SmpPairingState::new();
+    if pairing.begin(&links, 0x42, &request).is_err()
+        || pairing.accept_response(&links, 0x42, &response).is_err()
+    {
+        return false;
+    }
+
+    let irk = [0x6b; 16];
+    let mut identity_info = [0_u8; 17];
+    identity_info[0] = BLE_SMP_IDENTITY_INFORMATION;
+    identity_info[1..].copy_from_slice(&irk);
+    let identity_address = [9, 8, 7, 6, 5, 4];
+    let mut address_info = [0_u8; 8];
+    address_info[0] = BLE_SMP_IDENTITY_ADDRESS_INFORMATION;
+    address_info[1] = 0;
+    address_info[2..].copy_from_slice(&identity_address);
+
+    let mut distribution = SmpIdentityDistribution::new();
+    let mut identities = LeIdentityStore::new();
+    if distribution
+        .identity_address_information(&links, &pairing, &mut identities, 0x42, &address_info)
+        .is_ok()
+        || distribution
+            .identity_information(&links, &pairing, 0x42, &identity_info)
+            .is_err()
+        || distribution
+            .identity_address_information(&links, &pairing, &mut identities, 0x42, &address_info)
+            .is_err()
+        || identities.count() != 1
+    {
+        return false;
+    }
+
+    let crypto = ProductionSmpAes128;
+    let prand = [0x12, 0x34, 0x45];
+    let hash = smp_ah(&crypto, irk, prand);
+    let rpa = [hash[0], hash[1], hash[2], prand[0], prand[1], prand[2]];
+    let Some(resolved) = identities.resolve_rpa(&crypto, rpa) else {
+        return false;
+    };
+    if resolved.address_type != 0 || resolved.address != identity_address || resolved.irk != irk {
+        return false;
+    }
+
+    let wrong_rpa = [hash[0] ^ 1, hash[1], hash[2], prand[0], prand[1], prand[2]];
+    identities.resolve_rpa(&crypto, wrong_rpa).is_none()
+        && identities.resolve_rpa(&crypto, [1, 2, 3, 4, 5, 0xc0]).is_none()
+}
+
+
 pub fn ble_smp_confirm_random_13_11c_self_test() -> bool {
     struct TestAes;
     impl SmpAes128 for TestAes {
