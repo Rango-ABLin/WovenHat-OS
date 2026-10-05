@@ -1181,6 +1181,15 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         serial::write_line(format_args!(
             "[S13.11D] BLE SMP production AES-128 backend: PASSED"
         ));
+        if !bluetooth_hci::ble_smp_authentication_policy_13_11e_self_test() {
+            serial::write_line(format_args!(
+                "[S13.11E] BLE SMP authenticated pairing/MITM policy: FAILED"
+            ));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!(
+            "[S13.11E] BLE SMP authenticated pairing/MITM policy: PASSED"
+        ));
     }
 
     if heap::init().is_err() {
