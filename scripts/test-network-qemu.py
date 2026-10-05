@@ -79,6 +79,7 @@ def main():
     parser.add_argument('--cpus', type=int, choices=(1, 2, 4), default=4)
     parser.add_argument('--timeout', type=float, default=240)
     parser.add_argument('--release', action='store_true')
+    parser.add_argument('--feature', default='network-test')
     args = parser.parse_args()
 
     root = Path(__file__).resolve().parents[1]
@@ -91,7 +92,7 @@ def main():
     build = ['cargo', 'run', '--quiet']
     if args.release:
         build.append('--release')
-    build += ['--features', 'network-test', '--', '--print-image']
+    build += ['--features', args.feature, '--', '--print-image']
     print(f"[1/6] Building WovenHat network-test image ({'release' if args.release else 'debug'})...", flush=True)
     image = subprocess.check_output(build, cwd=root, text=True).strip()
     print(f"      image: {image}", flush=True)
@@ -214,6 +215,8 @@ def main():
         '[SMP] acknowledged TLB shootdowns: PASSED',
         '[BOOT] ALL VALIDATIONS PASSED',
     ]
+    if args.feature == 'stage14-1-test':
+        required.append('[S14.1] WovenNet IPv4 core: PASSED')
     if result != 33 or any(marker not in log for marker in required):
         print(log[-12000:], file=sys.stderr)
         print(qemu_log.read_text(errors='replace')[-4000:], file=sys.stderr)
