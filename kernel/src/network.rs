@@ -1126,6 +1126,25 @@ pub fn dns_start(name: &str) -> Result<u64, SocketError> {
     Ok(slot as u64)
 }
 
+pub fn dns_cancel(id: u64) -> Result<(), SocketError> {
+    let Some(runtime) = RUNTIME.get() else {
+        return Err(SocketError::Offline);
+    };
+    let mut runtime = runtime.lock();
+    let index = usize::try_from(id).map_err(|_| SocketError::Invalid)?;
+    let query = runtime
+        .dns_queries
+        .get_mut(index)
+        .and_then(Option::take)
+        .ok_or(SocketError::Invalid)?;
+    let handle = runtime.dns_handle.ok_or(SocketError::Offline)?;
+    runtime
+        .sockets
+        .get_mut::<dns::Socket>(handle)
+        .cancel_query(query);
+    Ok(())
+}
+
 pub fn dns_poll(id: u64) -> Result<Option<Ipv4Address>, SocketError> {
     let Some(runtime) = RUNTIME.get() else {
         return Err(SocketError::Offline);
@@ -1281,6 +1300,61 @@ pub fn self_test() -> bool {
         && DEFAULT_GATEWAY == Ipv4Address::new(10, 0, 2, 2)
         && DEFAULT_DNS == Ipv4Address::new(10, 0, 2, 3)
         && virtio_net::self_test()
+}
+
+#[cfg(feature = "stage14-1-test")]
+pub fn stage14_1_lifecycle_self_test() -> bool {
+    const OWNER_A: u64 = 0x1401_A;
+    const OWNER_B: u64 = 0x1401_B;
+
+    // Bounded DNS slots must be explicitly reclaimable even when a caller
+    // abandons a pending lookup.
+    let Ok(query) = dns_start("stage14-1.invalid") else {
+        return false;
+    };
+    if dns_cancel(query).is_err() || dns_poll(query) != Err(SocketError::Invalid) {
+        return false;
+    }
+    let Ok(reused_query) = dns_start("stage14-1-reuse.invalid") else {
+        return false;
+    };
+    if dns_cancel(reused_query).is_err() {
+        return false;
+    }
+
+    // Descriptor ownership is immediate, while pinned async authority is tied
+    // to the slot generation so a later occupant cannot inherit stale access.
+    let Ok(id) = socket_open(OWNER_A, SocketKind::Udp) else {
+        return false;
+    };
+    if socket_peer(OWNER_B, id) != Err(SocketError::WrongOwner) {
+        let _ = socket_close(OWNER_A, id);
+        return false;
+    }
+    let Ok(token) = pin_socket(OWNER_A, id) else {
+        let _ = socket_close(OWNER_A, id);
+        return false;
+    };
+    if socket_close(OWNER_A, id).is_err() {
+        unpin_socket(token);
+        return false;
+    }
+    if socket_peer(OWNER_A, id) != Err(SocketError::Invalid) {
+        unpin_socket(token);
+        return false;
+    }
+    unpin_socket(token);
+
+    let Ok(reused_id) = socket_open(OWNER_A, SocketKind::Udp) else {
+        return false;
+    };
+    if reused_id != id {
+        let _ = socket_close(OWNER_A, reused_id);
+        return false;
+    }
+    let stale_rejected = socket_send_pinned(token, b"x") == Err(SocketError::Invalid);
+    let _ = socket_close(OWNER_A, reused_id);
+    stale_rejected
 }
 
 fn now() -> Instant {
