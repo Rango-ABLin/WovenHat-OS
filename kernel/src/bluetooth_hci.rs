@@ -4338,6 +4338,19 @@ pub enum SmpConfirmPhase {
     Failed,
 }
 
+#[derive(Clone, Copy)]
+pub struct SmpAddress {
+    pub address_type: u8,
+    pub address: [u8; 6],
+}
+
+#[derive(Clone, Copy)]
+pub struct SmpConfirmInputs {
+    pub temporary_key: [u8; 16],
+    pub initiator: SmpAddress,
+    pub responder: SmpAddress,
+}
+
 pub struct SmpConfirmState {
     handle: u16,
     peer_confirm: Option<[u8; 16]>,
@@ -4383,11 +4396,7 @@ impl SmpConfirmState {
         links: &LeLinkState,
         pairing: &SmpPairingState,
         crypto: &C,
-        temporary_key: [u8; 16],
-        initiator_address_type: u8,
-        initiator_address: [u8; 6],
-        responder_address_type: u8,
-        responder_address: [u8; 6],
+        inputs: SmpConfirmInputs,
         pdu: &[u8],
     ) -> Result<(), HciError> {
         if self.phase != SmpConfirmPhase::AwaitingRandom
@@ -4403,13 +4412,9 @@ impl SmpConfirmState {
         random.copy_from_slice(&pdu[1..]);
         let expected = smp_c1(
             crypto,
-            temporary_key,
             random,
             pairing,
-            initiator_address_type,
-            initiator_address,
-            responder_address_type,
-            responder_address,
+            inputs,
         )?;
         if self.peer_confirm != Some(expected) {
             self.phase = SmpConfirmPhase::Failed;
@@ -4426,13 +4431,9 @@ impl SmpConfirmState {
 
 pub fn smp_c1<C: SmpAes128>(
     crypto: &C,
-    temporary_key: [u8; 16],
     random: [u8; 16],
     pairing: &SmpPairingState,
-    initiator_address_type: u8,
-    initiator_address: [u8; 6],
-    responder_address_type: u8,
-    responder_address: [u8; 6],
+    inputs: SmpConfirmInputs,
 ) -> Result<[u8; 16], HciError> {
     let request = pairing.request.ok_or(HciError::UnexpectedOpcode)?;
     let response = pairing.response.ok_or(HciError::UnexpectedOpcode)?;
@@ -4462,23 +4463,23 @@ pub fn smp_c1<C: SmpAes128>(
     let mut p1 = [0_u8; 16];
     p1[..7].copy_from_slice(&pres);
     p1[7..14].copy_from_slice(&preq);
-    p1[14] = responder_address_type;
-    p1[15] = initiator_address_type;
+    p1[14] = inputs.responder.address_type;
+    p1[15] = inputs.initiator.address_type;
 
     let mut first = random;
     for (byte, mask) in first.iter_mut().zip(p1) {
         *byte ^= mask;
     }
-    let encrypted = crypto.encrypt_block(temporary_key, first);
+    let encrypted = crypto.encrypt_block(inputs.temporary_key, first);
 
     let mut p2 = [0_u8; 16];
-    p2[4..10].copy_from_slice(&initiator_address);
-    p2[10..16].copy_from_slice(&responder_address);
+    p2[4..10].copy_from_slice(&inputs.initiator.address);
+    p2[10..16].copy_from_slice(&inputs.responder.address);
     let mut second = encrypted;
     for (byte, mask) in second.iter_mut().zip(p2) {
         *byte ^= mask;
     }
-    Ok(crypto.encrypt_block(temporary_key, second))
+    Ok(crypto.encrypt_block(inputs.temporary_key, second))
 }
 
 pub fn smp_s1<C: SmpAes128>(
@@ -4526,9 +4527,12 @@ pub fn ble_smp_confirm_random_13_11c_self_test() -> bool {
     let crypto = TestAes;
     let tk = [0_u8; 16];
     let random = [0x5a; 16];
-    let initiator = [1, 2, 3, 4, 5, 6];
-    let responder = [6, 5, 4, 3, 2, 1];
-    let Ok(confirm) = smp_c1(&crypto, tk, random, &pairing, 0, initiator, 1, responder) else {
+    let inputs = SmpConfirmInputs {
+        temporary_key: tk,
+        initiator: SmpAddress { address_type: 0, address: [1, 2, 3, 4, 5, 6] },
+        responder: SmpAddress { address_type: 1, address: [6, 5, 4, 3, 2, 1] },
+    };
+    let Ok(confirm) = smp_c1(&crypto, random, &pairing, inputs) else {
         return false;
     };
     let mut confirm_pdu = [0_u8; 17];
@@ -4546,11 +4550,7 @@ pub fn ble_smp_confirm_random_13_11c_self_test() -> bool {
             &links,
             &pairing,
             &crypto,
-            tk,
-            0,
-            initiator,
-            1,
-            responder,
+            inputs,
             &random_pdu,
         ).is_err()
         || state.phase() != SmpConfirmPhase::Verified
@@ -4573,11 +4573,7 @@ pub fn ble_smp_confirm_random_13_11c_self_test() -> bool {
             &links,
             &pairing,
             &crypto,
-            tk,
-            0,
-            initiator,
-            1,
-            responder,
+            inputs,
             &random_pdu,
         ).is_err()
         && rejected.phase() == SmpConfirmPhase::Failed

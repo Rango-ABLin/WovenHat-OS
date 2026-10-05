@@ -544,6 +544,19 @@ Cryptographic derivation, user-confirmed pairing, controller transport and
 physical BLE qualification remain outside this bounded distribution stage.
 
 
+## Stage 13.11C — BLE SMP confirm/random verification — 2026-10-05
+
+Pairing Confirm and Pairing Random verification is now handle-bound and tied to
+the negotiated pairing parameters and peer address context. Confirm mismatches
+transition the bounded state to failure; malformed or out-of-order messages
+fail closed. The dedicated 1/2/4-CPU QEMU gate passes locally; GitHub
+acceptance for the pushed tip remains required.
+
+This is a protocol/crypto boundary, not complete production pairing. User
+confirmation UX, authenticated key-derivation integration, bonding
+persistence, controller transport and physical BLE qualification remain open.
+
+
 ## Stage 13.10S closure hardening — 2026-10-05
 
 Minimum BLE encryption-key-size policy is enforced for both protected ATT/GATT

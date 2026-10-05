@@ -88,7 +88,7 @@ def required_markers(stage, cpus):
                   '13.8': '[S13.8] WovenAudio stream/API integration: PASSED',
                   '13.9': '[S13.9H] GTK + encrypted key data: PASSED',
                   '13.10': '[S13.10T] Bluetooth LE notification minimum key size: PASSED',
-                  '13.11': '[S13.11B] BLE SMP LTK/key distribution: PASSED',
+                  '13.11': '[S13.11C] BLE SMP confirm/random crypto boundary: PASSED',
                   '1-5': '[S1-5] storage journal: PASSED'}[stage])]
     if stage == '13.9':
         required.extend(WIFI_REQUIRED_MARKERS)

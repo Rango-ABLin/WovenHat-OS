@@ -528,3 +528,12 @@ Identification only for the live negotiated pairing handle. It validates key
 length, identity and negotiated-size consistency before storing material in
 `LeBondStore`, preserving the existing address/type ownership model and
 fail-closed teardown semantics.
+
+
+### Stage 13.11C BLE SMP confirm/random verification
+
+`SmpConfirmState` binds Pairing Confirm and Pairing Random processing to the
+negotiated `SmpPairingState`, live handle and address-aware confirm inputs. The
+`c1` and `s1` boundaries are explicit and bounded; a confirm mismatch enters
+the failed state for that pairing attempt. This does not claim complete
+production pairing UX or key-derivation integration.
