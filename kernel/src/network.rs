@@ -1716,6 +1716,20 @@ pub fn qemu_runtime_self_test() -> bool {
         crate::task::yield_now();
     }
     let _ = socket_close(OWNER, tcp_id);
+    close_process_sockets(OWNER);
+    // The live acceptance owner must not leak a bounded userspace descriptor
+    // into the Stage 14.1 resource-stress tests that run immediately after it.
+    // TCP may need polling to complete its graceful close; bound that cleanup
+    // by the same I/O window used by the live round-trip.
+    let cleanup_deadline = timer::ticks().saturating_add(io_timeout);
+    while stats().user_sockets != 0 {
+        poll();
+        if timer::ticks() >= cleanup_deadline {
+            crate::serial::write_line(format_args!("[NETTEST] TCP: CLEANUP TIMEOUT"));
+            return false;
+        }
+        crate::task::yield_now();
+    }
     crate::serial::write_line(format_args!("[NETTEST] TCP: PASSED"));
     true
 }
