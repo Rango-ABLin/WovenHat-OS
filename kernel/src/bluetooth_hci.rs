@@ -3962,3 +3962,210 @@ pub fn le_gatt_minimum_key_size_notification_self_test() -> bool {
         ) == Ok(9)
         && out[..9] == [ATT_OP_HANDLE_VALUE_NOTIFICATION, 8, 0, b's', b't', b'r', b'o', b'n', b'g']
 }
+
+
+// Stage 13.11A: BLE Security Manager Protocol pairing negotiation and fixed channel.
+pub const BLE_SMP_CID: u16 = 0x0006;
+pub const BLE_SMP_PAIRING_REQUEST: u8 = 0x01;
+pub const BLE_SMP_PAIRING_RESPONSE: u8 = 0x02;
+pub const BLE_SMP_PAIRING_FAILED: u8 = 0x05;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct SmpPairingParameters {
+    pub io_capability: u8,
+    pub oob_data_flag: u8,
+    pub auth_req: u8,
+    pub max_key_size: u8,
+    pub initiator_key_distribution: u8,
+    pub responder_key_distribution: u8,
+}
+
+impl SmpPairingParameters {
+    pub fn parse(pdu: &[u8], expected_code: u8) -> Result<Self, HciError> {
+        if pdu.len() != 7 || pdu[0] != expected_code {
+            return Err(HciError::MalformedEvent);
+        }
+        let parameters = Self {
+            io_capability: pdu[1],
+            oob_data_flag: pdu[2],
+            auth_req: pdu[3],
+            max_key_size: pdu[4],
+            initiator_key_distribution: pdu[5],
+            responder_key_distribution: pdu[6],
+        };
+        if parameters.io_capability > 0x04
+            || parameters.oob_data_flag > 0x01
+            || parameters.auth_req & !0x3d != 0
+            || !(7..=16).contains(&parameters.max_key_size)
+            || parameters.initiator_key_distribution & !0x07 != 0
+            || parameters.responder_key_distribution & !0x07 != 0
+        {
+            return Err(HciError::MalformedEvent);
+        }
+        Ok(parameters)
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SmpPairingPhase {
+    Idle,
+    RequestValidated,
+    Negotiated,
+    Failed,
+}
+
+pub struct SmpPairingState {
+    handle: Option<u16>,
+    phase: SmpPairingPhase,
+    request: Option<SmpPairingParameters>,
+    response: Option<SmpPairingParameters>,
+}
+
+impl SmpPairingState {
+    pub const fn new() -> Self {
+        Self {
+            handle: None,
+            phase: SmpPairingPhase::Idle,
+            request: None,
+            response: None,
+        }
+    }
+
+    pub fn begin(
+        &mut self,
+        links: &LeLinkState,
+        handle: u16,
+        pdu: &[u8],
+    ) -> Result<(), HciError> {
+        if self.phase != SmpPairingPhase::Idle || !links.contains_handle(handle) {
+            return Err(HciError::UnexpectedOpcode);
+        }
+        let request = SmpPairingParameters::parse(pdu, BLE_SMP_PAIRING_REQUEST)?;
+        self.handle = Some(handle);
+        self.request = Some(request);
+        self.phase = SmpPairingPhase::RequestValidated;
+        Ok(())
+    }
+
+    pub fn accept_response(
+        &mut self,
+        links: &LeLinkState,
+        handle: u16,
+        pdu: &[u8],
+    ) -> Result<(), HciError> {
+        if self.phase != SmpPairingPhase::RequestValidated
+            || self.handle != Some(handle)
+            || !links.contains_handle(handle)
+        {
+            return Err(HciError::UnexpectedOpcode);
+        }
+        self.response = Some(SmpPairingParameters::parse(
+            pdu,
+            BLE_SMP_PAIRING_RESPONSE,
+        )?);
+        self.phase = SmpPairingPhase::Negotiated;
+        Ok(())
+    }
+
+    pub fn fail(&mut self, handle: u16) -> Result<(), HciError> {
+        if self.handle != Some(handle) {
+            return Err(HciError::UnexpectedOpcode);
+        }
+        self.phase = SmpPairingPhase::Failed;
+        self.request = None;
+        self.response = None;
+        Ok(())
+    }
+
+    pub fn negotiated_key_size(&self) -> Option<u8> {
+        let request = self.request?;
+        let response = self.response?;
+        (self.phase == SmpPairingPhase::Negotiated)
+            .then_some(core::cmp::min(request.max_key_size, response.max_key_size))
+    }
+
+    pub fn phase(&self) -> SmpPairingPhase {
+        self.phase
+    }
+}
+
+pub struct BleSmpFixedChannel;
+
+impl BleSmpFixedChannel {
+    pub fn inbound(
+        links: &LeLinkState,
+        pairing: &mut SmpPairingState,
+        handle: u16,
+        frame: &L2capFrame,
+    ) -> Result<(), HciError> {
+        if !links.contains_handle(handle) || frame.cid != BLE_SMP_CID {
+            return Err(HciError::UnexpectedOpcode);
+        }
+        let pdu = frame.payload();
+        match pdu.first().copied() {
+            Some(BLE_SMP_PAIRING_REQUEST) => pairing.begin(links, handle, pdu),
+            Some(BLE_SMP_PAIRING_RESPONSE) => pairing.accept_response(links, handle, pdu),
+            Some(BLE_SMP_PAIRING_FAILED) if pdu.len() == 2 => pairing.fail(handle),
+            Some(_) => Err(HciError::UnexpectedOpcode),
+            None => Err(HciError::MalformedEvent),
+        }
+    }
+
+    pub fn outbound(
+        links: &LeLinkState,
+        handle: u16,
+        pdu: &[u8],
+    ) -> Result<L2capFrame, HciError> {
+        if !links.contains_handle(handle) || pdu.is_empty() {
+            return Err(HciError::UnexpectedOpcode);
+        }
+        L2capFrame::new(BLE_SMP_CID, pdu)
+    }
+}
+
+pub fn ble_smp_foundation_13_11a_self_test() -> bool {
+    let mut links = LeLinkState::new();
+    let connected = [
+        EVT_LE_META, 19, LE_SUBEVENT_CONNECTION_COMPLETE, 0,
+        0x42, 0, 0, 1, 1, 2, 3, 4, 5, 6,
+        0x18, 0, 0, 0, 0xf4, 1, 0,
+    ];
+    if links.handle_connection_complete(&connected).is_err() {
+        return false;
+    }
+
+    let request = [BLE_SMP_PAIRING_REQUEST, 3, 0, 0x01, 16, 0x01, 0x01];
+    let response = [BLE_SMP_PAIRING_RESPONSE, 3, 0, 0x01, 12, 0x01, 0x01];
+    let invalid_key = [BLE_SMP_PAIRING_REQUEST, 3, 0, 0x01, 6, 0x01, 0x01];
+    if SmpPairingParameters::parse(&invalid_key, BLE_SMP_PAIRING_REQUEST).is_ok() {
+        return false;
+    }
+
+    let Ok(request_frame) = L2capFrame::new(BLE_SMP_CID, &request) else {
+        return false;
+    };
+    let Ok(response_frame) = L2capFrame::new(BLE_SMP_CID, &response) else {
+        return false;
+    };
+    let mut pairing = SmpPairingState::new();
+    if BleSmpFixedChannel::inbound(&links, &mut pairing, 0x42, &request_frame).is_err()
+        || pairing.phase() != SmpPairingPhase::RequestValidated
+        || BleSmpFixedChannel::inbound(&links, &mut pairing, 0x42, &response_frame).is_err()
+        || pairing.phase() != SmpPairingPhase::Negotiated
+        || pairing.negotiated_key_size() != Some(12)
+        || BleSmpFixedChannel::outbound(&links, 0x42, &request).is_err()
+    {
+        return false;
+    }
+
+    let Ok(wrong_channel) = L2capFrame::new(L2CAP_CID_SIGNALING, &request) else {
+        return false;
+    };
+    if BleSmpFixedChannel::inbound(&links, &mut pairing, 0x42, &wrong_channel).is_ok() {
+        return false;
+    }
+
+    let disconnected = [EVT_DISCONNECTION_COMPLETE, 4, 0, 0x42, 0, 0x13];
+    links.handle_disconnection_complete(&disconnected).is_ok()
+        && BleSmpFixedChannel::outbound(&links, 0x42, &request).is_err()
+}
