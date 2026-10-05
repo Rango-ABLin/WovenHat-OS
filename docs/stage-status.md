@@ -557,6 +557,18 @@ confirmation UX, authenticated key-derivation integration, bonding
 persistence, controller transport and physical BLE qualification remain open.
 
 
+## Stage 13.11F — BLE controller encryption/session authority — 2026-10-05
+
+The SMP flow now owns the LE Start Encryption command boundary and binds
+Encryption Change completion to the pending handle, peer identity, key size and
+authentication state. Failed, disabled, stale or mismatched events fail closed
+and revoke authority. The dedicated 1/2/4-CPU gate passes locally; GitHub
+acceptance for the pushed tip remains required.
+
+Physical controller transport, SMP interoperability, bond persistence and
+hardware qualification remain outside this deterministic software boundary.
+
+
 ## Stage 13.10S closure hardening — 2026-10-05
 
 Minimum BLE encryption-key-size policy is enforced for both protected ATT/GATT

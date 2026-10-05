@@ -537,3 +537,13 @@ negotiated `SmpPairingState`, live handle and address-aware confirm inputs. The
 `c1` and `s1` boundaries are explicit and bounded; a confirm mismatch enters
 the failed state for that pairing attempt. This does not claim complete
 production pairing UX or key-derivation integration.
+
+
+### Stage 13.11F BLE controller encryption authority
+
+`SmpConfirmState::start_encryption_command` owns the bounded LE Start
+Encryption command layout and returns a pending authority record containing the
+live peer identity, negotiated key size and authentication result.
+`LeSecuritySessions::encryption_change_from_pairing` accepts only a matching
+controller completion event and live link; failure, disabled state, stale
+handles or identity mismatch revoke authority.
