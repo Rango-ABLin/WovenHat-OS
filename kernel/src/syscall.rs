@@ -251,7 +251,7 @@ pub enum Number {
     CompletionPortCreate = 82,
     CompletionPortClose = 83,
     /// query id -> cancel/reclaim pending DNS query
-    DnsCancel = 84,
+    DnsCancel = 97,
     CompletionPortAssociate = 84,
     CompletionPortPoll = 85,
     CompletionPortWait = 86,
