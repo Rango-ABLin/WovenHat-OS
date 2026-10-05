@@ -4171,6 +4171,124 @@ pub fn ble_smp_foundation_13_11a_self_test() -> bool {
 }
 
 
+
+// Stage 13.11E: legacy SMP pairing-method selection and MITM authentication policy.
+const SMP_AUTHREQ_MITM: u8 = 0x04;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SmpPairingMethod {
+    JustWorks,
+    PasskeyEntry,
+    OutOfBand,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct SmpAuthentication {
+    pub method: SmpPairingMethod,
+    pub authenticated: bool,
+}
+
+impl SmpPairingState {
+    pub fn authentication(&self) -> Result<SmpAuthentication, HciError> {
+        if self.phase != SmpPairingPhase::Negotiated {
+            return Err(HciError::UnexpectedOpcode);
+        }
+        let request = self.request.ok_or(HciError::UnexpectedOpcode)?;
+        let response = self.response.ok_or(HciError::UnexpectedOpcode)?;
+        let mitm_required = (request.auth_req | response.auth_req) & SMP_AUTHREQ_MITM != 0;
+
+        if request.oob_data_flag == 1 && response.oob_data_flag == 1 {
+            return Ok(SmpAuthentication {
+                method: SmpPairingMethod::OutOfBand,
+                authenticated: true,
+            });
+        }
+
+        // Legacy LE SMP IO capabilities:
+        // 0 DisplayOnly, 1 DisplayYesNo, 2 KeyboardOnly, 3 NoInputNoOutput, 4 KeyboardDisplay.
+        // Passkey Entry requires one side able to display a value and the other able to enter it.
+        let initiator_displays = matches!(request.io_capability, 0 | 1 | 4);
+        let responder_displays = matches!(response.io_capability, 0 | 1 | 4);
+        let initiator_inputs = matches!(request.io_capability, 2 | 4);
+        let responder_inputs = matches!(response.io_capability, 2 | 4);
+        let passkey_capable =
+            (initiator_displays && responder_inputs) || (responder_displays && initiator_inputs);
+
+        if passkey_capable {
+            return Ok(SmpAuthentication {
+                method: SmpPairingMethod::PasskeyEntry,
+                authenticated: true,
+            });
+        }
+        if mitm_required {
+            return Err(HciError::ControllerFailure(0x03));
+        }
+        Ok(SmpAuthentication {
+            method: SmpPairingMethod::JustWorks,
+            authenticated: false,
+        })
+    }
+}
+
+pub fn ble_smp_authentication_policy_13_11e_self_test() -> bool {
+    let mut links = LeLinkState::new();
+    let connected = [
+        EVT_LE_META, 19, LE_SUBEVENT_CONNECTION_COMPLETE, 0,
+        0x42, 0, 0, 1, 1, 2, 3, 4, 5, 6,
+        0x18, 0, 0, 0, 0xf4, 1, 0,
+    ];
+    if links.handle_connection_complete(&connected).is_err() {
+        return false;
+    }
+
+    let mut just_works = SmpPairingState::new();
+    let jw_request = [BLE_SMP_PAIRING_REQUEST, 3, 0, 0x01, 16, 0x01, 0x01];
+    let jw_response = [BLE_SMP_PAIRING_RESPONSE, 3, 0, 0x01, 16, 0x01, 0x01];
+    if just_works.begin(&links, 0x42, &jw_request).is_err()
+        || just_works.accept_response(&links, 0x42, &jw_response).is_err()
+        || just_works.authentication() != Ok(SmpAuthentication {
+            method: SmpPairingMethod::JustWorks,
+            authenticated: false,
+        })
+    {
+        return false;
+    }
+
+    let mut passkey = SmpPairingState::new();
+    let pk_request = [BLE_SMP_PAIRING_REQUEST, 0, 0, 0x05, 16, 0x01, 0x01];
+    let pk_response = [BLE_SMP_PAIRING_RESPONSE, 2, 0, 0x05, 16, 0x01, 0x01];
+    if passkey.begin(&links, 0x42, &pk_request).is_err()
+        || passkey.accept_response(&links, 0x42, &pk_response).is_err()
+        || passkey.authentication() != Ok(SmpAuthentication {
+            method: SmpPairingMethod::PasskeyEntry,
+            authenticated: true,
+        })
+    {
+        return false;
+    }
+
+    let mut impossible_mitm = SmpPairingState::new();
+    let mitm_request = [BLE_SMP_PAIRING_REQUEST, 3, 0, 0x05, 16, 0x01, 0x01];
+    let mitm_response = [BLE_SMP_PAIRING_RESPONSE, 3, 0, 0x05, 16, 0x01, 0x01];
+    if impossible_mitm.begin(&links, 0x42, &mitm_request).is_err()
+        || impossible_mitm.accept_response(&links, 0x42, &mitm_response).is_err()
+        || impossible_mitm.authentication().is_ok()
+    {
+        return false;
+    }
+
+    let mut oob = SmpPairingState::new();
+    let oob_request = [BLE_SMP_PAIRING_REQUEST, 3, 1, 0x05, 16, 0x01, 0x01];
+    let oob_response = [BLE_SMP_PAIRING_RESPONSE, 3, 1, 0x05, 16, 0x01, 0x01];
+    oob.begin(&links, 0x42, &oob_request).is_ok()
+        && oob.accept_response(&links, 0x42, &oob_response).is_ok()
+        && oob.authentication() == Ok(SmpAuthentication {
+            method: SmpPairingMethod::OutOfBand,
+            authenticated: true,
+        })
+}
+
+
 // Stage 13.11B: SMP legacy LTK distribution into the canonical LE bond store.
 pub const BLE_SMP_ENCRYPTION_INFORMATION: u8 = 0x06;
 pub const BLE_SMP_MASTER_IDENTIFICATION: u8 = 0x07;
@@ -4247,7 +4365,7 @@ impl SmpKeyDistribution {
                 ediv,
                 rand,
                 key_size,
-                authenticated: false,
+                authenticated: pairing.authentication()?.authenticated,
             },
         )?;
         self.abort();
