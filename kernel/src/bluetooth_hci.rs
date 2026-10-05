@@ -4706,6 +4706,212 @@ pub fn smp_s1<C: SmpAes128>(
     crypto.encrypt_block(temporary_key, plaintext)
 }
 
+
+pub const OPCODE_LE_START_ENCRYPTION: u16 = 0x2019;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct SmpPendingEncryption {
+    pub handle: u16,
+    pub address_type: u8,
+    pub address: [u8; 6],
+    pub key_size: u8,
+    pub authenticated: bool,
+}
+
+impl SmpConfirmState {
+    pub fn start_encryption_command<C: SmpAes128>(
+        &self,
+        links: &LeLinkState,
+        pairing: &SmpPairingState,
+        crypto: &C,
+        temporary_key: [u8; 16],
+        initiator_random: [u8; 16],
+        responder_random: [u8; 16],
+        out: &mut [u8; 258],
+    ) -> Result<(usize, SmpPendingEncryption), HciError> {
+        if self.phase != SmpConfirmPhase::Verified
+            || pairing.phase() != SmpPairingPhase::Negotiated
+            || pairing.handle != Some(self.handle)
+        {
+            return Err(HciError::UnexpectedOpcode);
+        }
+        let link = (0..links.count())
+            .filter_map(|index| links.link(index))
+            .find(|link| link.handle == self.handle)
+            .ok_or(HciError::UnexpectedOpcode)?;
+        let authentication = pairing.authentication()?;
+        let key_size = pairing.negotiated_key_size().ok_or(HciError::UnexpectedOpcode)?;
+        let mut stk = smp_s1(crypto, temporary_key, initiator_random, responder_random);
+        for byte in &mut stk[key_size as usize..] {
+            *byte = 0;
+        }
+
+        // Legacy LE Start Encryption uses RAND=0 and EDIV=0 with the STK.
+        let mut params = [0_u8; 28];
+        params[..2].copy_from_slice(&self.handle.to_le_bytes());
+        params[18..].copy_from_slice(&stk);
+        let len = HciCommand::new(OPCODE_LE_START_ENCRYPTION, &params)?.encode(out)?;
+        for byte in &mut stk {
+            unsafe { core::ptr::write_volatile(byte, 0); }
+        }
+        Ok((len, SmpPendingEncryption {
+            handle: self.handle,
+            address_type: link.address_type,
+            address: link.address,
+            key_size,
+            authenticated: authentication.authenticated,
+        }))
+    }
+}
+
+impl LeSecuritySessions {
+    pub fn encryption_change_from_pairing(
+        &mut self,
+        links: &LeLinkState,
+        pending: SmpPendingEncryption,
+        event: &[u8],
+    ) -> Result<u16, HciError> {
+        if event.len() != 6 || event[0] != EVT_ENCRYPTION_CHANGE || event[1] != 4 {
+            return Err(HciError::MalformedEvent);
+        }
+        let status = event[2];
+        let handle = u16::from_le_bytes([event[3], event[4]]);
+        let enabled = event[5];
+        if handle != pending.handle {
+            return Err(HciError::UnexpectedOpcode);
+        }
+        if status != 0 {
+            self.revoke(handle);
+            return Err(HciError::ControllerFailure(status));
+        }
+        if enabled != 1 {
+            self.revoke(handle);
+            return if enabled == 0 {
+                Err(HciError::UnexpectedOpcode)
+            } else {
+                Err(HciError::MalformedEvent)
+            };
+        }
+        let link = Self::live_link(links, handle).ok_or(HciError::UnexpectedOpcode)?;
+        if link.address_type != pending.address_type || link.address != pending.address {
+            self.revoke(handle);
+            return Err(HciError::UnexpectedOpcode);
+        }
+        let session = LeSecureSession {
+            handle,
+            address_type: pending.address_type,
+            address: pending.address,
+            authenticated: pending.authenticated,
+            key_size: pending.key_size,
+        };
+        if let Some(index) = self.sessions[..self.count]
+            .iter()
+            .position(|entry| entry.is_some_and(|stored| stored.handle == handle))
+        {
+            self.sessions[index] = Some(session);
+            return Ok(handle);
+        }
+        if self.count == MAX_LE_SECURE_SESSIONS {
+            return Err(HciError::ControllerFailure(0xff));
+        }
+        self.sessions[self.count] = Some(session);
+        self.count += 1;
+        Ok(handle)
+    }
+}
+
+pub fn ble_smp_encryption_authority_13_11f_self_test() -> bool {
+    let mut links = LeLinkState::new();
+    let connected = [
+        EVT_LE_META, 19, LE_SUBEVENT_CONNECTION_COMPLETE, 0,
+        0x42, 0, 0, 1, 1, 2, 3, 4, 5, 6,
+        0x18, 0, 0, 0, 0xf4, 1, 0,
+    ];
+    if links.handle_connection_complete(&connected).is_err() {
+        return false;
+    }
+    let request = [BLE_SMP_PAIRING_REQUEST, 0, 0, 0x05, 12, 0x01, 0x01];
+    let response = [BLE_SMP_PAIRING_RESPONSE, 2, 0, 0x05, 12, 0x01, 0x01];
+    let mut pairing = SmpPairingState::new();
+    if pairing.begin(&links, 0x42, &request).is_err()
+        || pairing.accept_response(&links, 0x42, &response).is_err()
+    {
+        return false;
+    }
+
+    let crypto = ProductionSmpAes128;
+    let tk = [0x31; 16];
+    let random = [0x44; 16];
+    let inputs = SmpConfirmInputs {
+        temporary_key: tk,
+        initiator: SmpAddress { address_type: 0, address: [9, 8, 7, 6, 5, 4] },
+        responder: SmpAddress { address_type: 1, address: [1, 2, 3, 4, 5, 6] },
+    };
+    let Ok(expected) = smp_c1(&crypto, random, &pairing, inputs) else {
+        return false;
+    };
+    let mut confirm_pdu = [0_u8; 17];
+    confirm_pdu[0] = BLE_SMP_PAIRING_CONFIRM;
+    confirm_pdu[1..].copy_from_slice(&expected);
+    let mut random_pdu = [0_u8; 17];
+    random_pdu[0] = BLE_SMP_PAIRING_RANDOM;
+    random_pdu[1..].copy_from_slice(&random);
+    let Ok(mut confirm) = SmpConfirmState::new(&pairing) else {
+        return false;
+    };
+    if confirm.receive_confirm(&links, 0x42, &confirm_pdu).is_err()
+        || confirm.verify_random(&links, &pairing, &crypto, inputs, &random_pdu).is_err()
+    {
+        return false;
+    }
+
+    let mut out = [0_u8; 258];
+    let Ok((len, pending)) = confirm.start_encryption_command(
+        &links, &pairing, &crypto, tk, [0x11; 16], [0x22; 16], &mut out,
+    ) else {
+        return false;
+    };
+    if len != 31
+        || u16::from_le_bytes([out[0], out[1]]) != OPCODE_LE_START_ENCRYPTION
+        || out[2] != 28
+        || out[3..5] != 0x42_u16.to_le_bytes()
+        || out[5..15] != [0_u8; 10]
+        || !pending.authenticated
+        || pending.key_size != 12
+    {
+        return false;
+    }
+    // The negotiated 12-byte key must be zero-padded before it reaches the controller.
+    if out[27..31] != [0_u8; 4] {
+        return false;
+    }
+
+    let enabled = [EVT_ENCRYPTION_CHANGE, 4, 0, 0x42, 0, 1];
+    let mut sessions = LeSecuritySessions::new();
+    if sessions.encryption_change_from_pairing(&links, pending, &enabled) != Ok(0x42) {
+        return false;
+    }
+    let Some(session) = sessions.session_for_link(&links, 0x42) else {
+        return false;
+    };
+    if !session.authenticated || session.key_size != 12 {
+        return false;
+    }
+
+    let wrong_peer = [
+        EVT_LE_META, 19, LE_SUBEVENT_CONNECTION_COMPLETE, 0,
+        0x43, 0, 0, 1, 6, 5, 4, 3, 2, 1,
+        0x18, 0, 0, 0, 0xf4, 1, 0,
+    ];
+    links.handle_connection_complete(&wrong_peer).is_ok()
+        && sessions.encryption_change_from_pairing(
+            &links,
+            SmpPendingEncryption { handle: 0x43, ..pending },
+            &[EVT_ENCRYPTION_CHANGE, 4, 0, 0x43, 0, 1],
+        ).is_err()
+}
+
+
 pub fn ble_smp_confirm_random_13_11c_self_test() -> bool {
     struct TestAes;
     impl SmpAes128 for TestAes {
