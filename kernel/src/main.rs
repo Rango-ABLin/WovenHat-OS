@@ -1145,6 +1145,15 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         serial::write_line(format_args!(
             "[S13.10T] Bluetooth LE notification minimum key size: PASSED"
         ));
+        if !bluetooth_hci::ble_smp_foundation_13_11a_self_test() {
+            serial::write_line(format_args!(
+                "[S13.11A] BLE SMP pairing/fixed-channel foundation: FAILED"
+            ));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!(
+            "[S13.11A] BLE SMP pairing/fixed-channel foundation: PASSED"
+        ));
     }
 
     if heap::init().is_err() {
