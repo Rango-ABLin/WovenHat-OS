@@ -1339,6 +1339,52 @@ pub fn self_test() -> bool {
 }
 
 #[cfg(feature = "stage14-1-test")]
+pub fn stage14_1_dhcp_transition_self_test() -> bool {
+    let Some(runtime) = RUNTIME.get() else {
+        return false;
+    };
+    let mut runtime = runtime.lock();
+
+    let Ok(query) = {
+        let handle = match runtime.dns_handle {
+            Some(handle) => handle,
+            None => return false,
+        };
+        runtime
+            .sockets
+            .get_mut::<dns::Socket>(handle)
+            .start_query(runtime.iface.context(), "stage14-1-transition.invalid", dns::Type::A)
+    } else {
+        return false;
+    };
+    runtime.dns_queries[0] = Some(query);
+
+    let lease_address = Ipv4Cidr::new(Ipv4Address::new(10, 0, 2, 42), 24);
+    let lease_router = Ipv4Address::new(10, 0, 2, 1);
+    let lease_dns = Ipv4Address::new(10, 0, 2, 53);
+    apply_dhcp_locked(&mut runtime, lease_address, lease_router, lease_dns);
+
+    if !runtime.using_dhcp
+        || runtime.ipv4 != lease_address.address()
+        || runtime.prefix != lease_address.prefix_len()
+        || runtime.gateway != lease_router
+        || runtime.dns_server != lease_dns
+        || runtime.dns_queries.iter().any(Option::is_some)
+    {
+        apply_static_locked(&mut runtime);
+        return false;
+    }
+
+    apply_static_locked(&mut runtime);
+    !runtime.using_dhcp
+        && runtime.ipv4 == DEFAULT_IPV4
+        && runtime.prefix == DEFAULT_PREFIX
+        && runtime.gateway == DEFAULT_GATEWAY
+        && runtime.dns_server == DEFAULT_DNS
+        && runtime.dns_queries.iter().all(Option::is_none)
+}
+
+#[cfg(feature = "stage14-1-test")]
 pub fn stage14_1_lifecycle_self_test() -> bool {
     const OWNER_A: u64 = 0x0001_401A;
     const OWNER_B: u64 = 0x0001_401B;
