@@ -2064,6 +2064,8 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
                 serial::write_line(format_args!("[NETTEST] virtio-net + smoltcp initialized"));
                 if network::qemu_runtime_self_test() {
                     serial::write_line(format_args!("[NETTEST] DHCP/DNS/ICMP/UDP/TCP: PASSED"));
+                    #[cfg(feature = "stage14-1-test")]
+                    serial::write_line(format_args!("[S14.1] WovenNet IPv4 core: PASSED"));
                 } else {
                     serial::write_line(format_args!("[NETTEST] runtime regression: FAILED"));
                     halt();
