@@ -52,6 +52,7 @@ sentinel. The assembly entry preserves general registers and returns with iretq.
 | 43 | net_info | user NetInfo pointer |
 | 44 | dns_start | hostname pointer, length |
 | 45 | dns_poll | query id, user IPv4[4] buffer |
+| 50 | dns_cancel | query id; cancel and reclaim a pending DNS slot |
 | 46 | net_peer | socket |
 | 47 | dhcp | 0 static fallback, nonzero DHCP |
 | 48 | ping_start | packed IPv4 |
