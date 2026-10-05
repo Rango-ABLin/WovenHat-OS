@@ -1217,6 +1217,15 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         serial::write_line(format_args!(
             "[S13.11H] BLE SMP lifecycle/hardening closure: PASSED"
         ));
+        if !bluetooth_hci::ble_smp_persistent_authentication_audit_self_test() {
+            serial::write_line(format_args!(
+                "[S13.11-AUDIT] BLE SMP persistent authentication authority: FAILED"
+            ));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!(
+            "[S13.11-AUDIT] BLE SMP persistent authentication authority: PASSED"
+        ));
     }
 
     if heap::init().is_err() {
