@@ -516,3 +516,14 @@ This remains deterministic software validation. Physical BLE controller/radio
 interoperability, transport fault injection, BLE SMP/bonding/LTK security,
 persistent protected keys, radio interoperability and conformance
 certification remain outside this boundary.
+
+
+## Stage 13.10S closure hardening — 2026-10-05
+
+Minimum BLE encryption-key-size policy is enforced for both protected ATT/GATT
+requests and outbound notifications/indications. Weak authenticated sessions
+are rejected before either inbound data access or outbound value encoding;
+sessions meeting the configured threshold remain bound to the live peer
+identity. The exact 1/2/4-CPU Stage 13.10 gate, host tests and warning-denying
+kernel Clippy passed locally. GitHub acceptance for the source tip is required
+before this closure is considered complete.

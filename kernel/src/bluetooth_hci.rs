@@ -3265,14 +3265,6 @@ impl AttSecurityPolicies {
         Ok(())
     }
 
-    fn requirement(&self, attribute_handle: u16) -> Option<AttSecurityRequirement> {
-        self.entries[..self.count]
-            .iter()
-            .flatten()
-            .find(|policy| policy.attribute_handle == attribute_handle)
-            .map(|policy| policy.requirement)
-    }
-
     pub fn require_min_key_size(
         &mut self,
         attribute_handle: u16,
@@ -3507,11 +3499,14 @@ impl GattSubscriptions {
         emission: GattSecuredEmission<'_>,
         out: &mut [u8; MAX_ATT_PDU],
     ) -> Result<usize, HciError> {
-        if let Some(requirement) = policies.requirement(emission.value_handle) {
+        if let Some(policy) = policies.policy(emission.value_handle) {
             let Some(session) = sessions.session_for_link(links, emission.connection_handle) else {
                 return Err(HciError::UnexpectedOpcode);
             };
-            if requirement == AttSecurityRequirement::Authenticated && !session.authenticated {
+            if policy.requirement == AttSecurityRequirement::Authenticated && !session.authenticated {
+                return Err(HciError::UnexpectedOpcode);
+            }
+            if policy.min_key_size != 0 && session.key_size < policy.min_key_size {
                 return Err(HciError::UnexpectedOpcode);
             }
         }
@@ -3839,6 +3834,24 @@ pub fn le_gatt_minimum_key_size_self_test() -> bool {
         return false;
     }
 
+    let mut subscriptions = GattSubscriptions::new();
+    if subscriptions.configure(&links, 0x52, handle, 0x0001).is_err()
+        || subscriptions.emit_secured(
+            &links,
+            &sessions,
+            &policies,
+            GattSecuredEmission {
+                connection_handle: 0x52,
+                value_handle: handle,
+                indication: false,
+                value: b"weak",
+            },
+            &mut out,
+        ).is_ok()
+    {
+        return false;
+    }
+
     let strong = LeBondMaterial { key_size: 16, ..weak };
     bonds.store(&links, 0x52, strong).is_ok()
         && sessions.encryption_change(
@@ -3855,4 +3868,17 @@ pub fn le_gatt_minimum_key_size_self_test() -> bool {
             &mut out,
         ) == Ok(7)
         && out[..7] == [ATT_OP_READ_RESPONSE, b's', b't', b'r', b'o', b'n', b'g']
+        && subscriptions.emit_secured(
+            &links,
+            &sessions,
+            &policies,
+            GattSecuredEmission {
+                connection_handle: 0x52,
+                value_handle: handle,
+                indication: false,
+                value: b"strong",
+            },
+            &mut out,
+        ) == Ok(9)
+        && out[..9] == [ATT_OP_HANDLE_VALUE_NOTIFICATION, 8, 0, b's', b't', b'r', b'o', b'n', b'g']
 }

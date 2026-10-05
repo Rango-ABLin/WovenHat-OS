@@ -489,3 +489,14 @@ authority even if transient teardown cleanup was missed.
 This remains bounded deterministic software state. It does not claim physical
 BLE controller recovery, SMP/LTK provisioning, radio interoperability or
 hardware qualification.
+
+
+### Stage 13.10S BLE minimum key-size authority
+
+`AttSecurityPolicy` carries an optional minimum encryption key size in addition
+to its authentication requirement. `AttDatabase::transact_secured` and
+`GattSubscriptions::emit_secured` both reject a live authenticated session
+whose negotiated key is below that bound. The policy is checked after the
+identity-bound session lookup and before either an ATT response or an outbound
+notification/indication is produced, keeping inbound and outbound authority
+consistent.
