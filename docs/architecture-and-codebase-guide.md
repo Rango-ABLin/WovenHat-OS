@@ -561,3 +561,35 @@ Information only for the live pairing handle. IRK-backed private-address
 resolution is deterministic and fail-closed, with duplicate identity replacement
 remaining bounded. This identity layer complements, but does not replace, the
 peer-bound LTK distribution and controller encryption authority checks.
+
+
+### Stage 13.11H BLE SMP lifecycle and authentication closure
+
+`SmpLifecycle` is the bounded orchestration boundary for legacy BLE SMP state.
+It serializes Pairing Request/Response and key/identity distribution against one
+live LE handle, rejects duplicate, out-of-order and wrong-handle traffic, and
+clears transient distribution state on Pairing Failed, disconnect and reset.
+Handle reuse therefore cannot silently inherit the previous pairing lifecycle.
+
+Authentication authority is deliberately separated from association-model
+negotiation. `SmpPairingState::authentication` selects Just Works, Passkey
+Entry or OOB policy, but feature exchange alone does not mint persistent
+authenticated authority. `SmpAuthenticationProof` supplies the method-specific
+temporary key boundary: Just Works uses the zero TK and remains unauthenticated,
+Passkey Entry accepts only 0..=999999 and encodes that value into the legacy TK,
+and OOB requires an explicit 128-bit TK. Only
+`SmpConfirmState::verify_random_with_proof` may promote a verified Passkey/OOB
+attempt to authenticated session authority after Confirm/Random succeeds.
+
+The compatibility raw-TK `verify_random` path may prove confirm consistency but
+cannot mint MITM-authenticated authority. Likewise, legacy key distribution no
+longer marks a persistent bond authenticated merely from negotiated pairing
+capabilities. The Stage 13.11 runtime harness requires the G identity/privacy
+marker, H lifecycle marker, and the persistent-authentication audit marker on
+the 1/2/4-core acceptance matrix.
+
+This closes the deterministic software authority model for Stage 13.11. It does
+not claim Bluetooth qualification, physical-radio interoperability, side-channel
+resistance, formal cryptographic verification, or an external security audit.
+Those require separate hardware/specification validation before production
+security claims.
