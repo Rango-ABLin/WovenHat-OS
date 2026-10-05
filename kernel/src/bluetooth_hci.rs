@@ -4816,6 +4816,42 @@ pub struct SmpAddress {
     pub address: [u8; 6],
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct SmpAuthenticationProof {
+    pub method: SmpPairingMethod,
+    pub authenticated: bool,
+    temporary_key: [u8; 16],
+}
+
+impl SmpAuthenticationProof {
+    pub fn just_works(pairing: &SmpPairingState) -> Result<Self, HciError> {
+        if pairing.authentication()?.method != SmpPairingMethod::JustWorks {
+            return Err(HciError::UnexpectedOpcode);
+        }
+        Ok(Self { method: SmpPairingMethod::JustWorks, authenticated: false, temporary_key: [0; 16] })
+    }
+
+    pub fn passkey(pairing: &SmpPairingState, passkey: u32) -> Result<Self, HciError> {
+        if pairing.authentication()?.method != SmpPairingMethod::PasskeyEntry || passkey > 999_999 {
+            return Err(HciError::UnexpectedOpcode);
+        }
+        let mut temporary_key = [0_u8; 16];
+        temporary_key[..4].copy_from_slice(&passkey.to_le_bytes());
+        Ok(Self { method: SmpPairingMethod::PasskeyEntry, authenticated: true, temporary_key })
+    }
+
+    pub fn out_of_band(pairing: &SmpPairingState, temporary_key: [u8; 16]) -> Result<Self, HciError> {
+        if pairing.authentication()?.method != SmpPairingMethod::OutOfBand {
+            return Err(HciError::UnexpectedOpcode);
+        }
+        Ok(Self { method: SmpPairingMethod::OutOfBand, authenticated: true, temporary_key })
+    }
+
+    pub fn temporary_key(&self) -> [u8; 16] {
+        self.temporary_key
+    }
+}
+
 #[derive(Clone, Copy)]
 pub struct SmpConfirmInputs {
     pub temporary_key: [u8; 16],
@@ -4827,6 +4863,7 @@ pub struct SmpConfirmState {
     handle: u16,
     peer_confirm: Option<[u8; 16]>,
     phase: SmpConfirmPhase,
+    verified_authentication: Option<SmpAuthentication>,
 }
 
 impl SmpConfirmState {
@@ -4839,6 +4876,7 @@ impl SmpConfirmState {
             handle,
             peer_confirm: None,
             phase: SmpConfirmPhase::AwaitingConfirm,
+            verified_authentication: None,
         })
     }
 
@@ -4893,11 +4931,52 @@ impl SmpConfirmState {
             return Err(HciError::ControllerFailure(0x04));
         }
         self.phase = SmpConfirmPhase::Verified;
+        // The legacy raw-TK API remains compatible, but cannot mint MITM
+        // authentication authority. Typed proof verification below is required.
+        self.verified_authentication = Some(SmpAuthentication {
+            method: pairing.authentication()?.method,
+            authenticated: false,
+        });
         Ok(())
     }
 
     pub fn phase(&self) -> SmpConfirmPhase {
         self.phase
+    }
+
+    pub fn verify_random_with_proof<C: SmpAes128>(
+        &mut self,
+        links: &LeLinkState,
+        pairing: &SmpPairingState,
+        crypto: &C,
+        proof: SmpAuthenticationProof,
+        initiator: SmpAddress,
+        responder: SmpAddress,
+        pdu: &[u8],
+    ) -> Result<(), HciError> {
+        let negotiated = pairing.authentication()?;
+        if negotiated.method != proof.method {
+            return Err(HciError::UnexpectedOpcode);
+        }
+        self.verify_random(
+            links,
+            pairing,
+            crypto,
+            SmpConfirmInputs { temporary_key: proof.temporary_key(), initiator, responder },
+            pdu,
+        )?;
+        self.verified_authentication = Some(SmpAuthentication {
+            method: proof.method,
+            authenticated: proof.authenticated,
+        });
+        Ok(())
+    }
+
+    pub fn verified_authentication(&self) -> Result<SmpAuthentication, HciError> {
+        if self.phase != SmpConfirmPhase::Verified {
+            return Err(HciError::UnexpectedOpcode);
+        }
+        self.verified_authentication.ok_or(HciError::UnexpectedOpcode)
     }
 }
 
@@ -5004,7 +5083,7 @@ impl SmpConfirmState {
             .filter_map(|index| links.link(index))
             .find(|link| link.handle == self.handle)
             .ok_or(HciError::UnexpectedOpcode)?;
-        let authentication = pairing.authentication()?;
+        let authentication = self.verified_authentication()?;
         let key_size = pairing.negotiated_key_size().ok_or(HciError::UnexpectedOpcode)?;
         let mut stk = smp_s1(
             crypto,
