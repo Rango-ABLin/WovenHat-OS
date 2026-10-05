@@ -4295,6 +4295,8 @@ pub const BLE_SMP_MASTER_IDENTIFICATION: u8 = 0x07;
 
 pub struct SmpKeyDistribution {
     handle: Option<u16>,
+    address_type: u8,
+    address: [u8; 6],
     ltk: Option<[u8; 16]>,
 }
 
@@ -4302,6 +4304,8 @@ impl SmpKeyDistribution {
     pub const fn new() -> Self {
         Self {
             handle: None,
+            address_type: 0,
+            address: [0; 6],
             ltk: None,
         }
     }
@@ -4321,9 +4325,18 @@ impl SmpKeyDistribution {
         {
             return Err(HciError::UnexpectedOpcode);
         }
+        let link = (0..links.count())
+            .filter_map(|index| links.link(index))
+            .find(|link| link.handle == handle)
+            .ok_or(HciError::UnexpectedOpcode)?;
+        if self.handle.is_some() || self.ltk.is_some() {
+            return Err(HciError::UnexpectedOpcode);
+        }
         let mut ltk = [0_u8; 16];
         ltk.copy_from_slice(&pdu[1..17]);
         self.handle = Some(handle);
+        self.address_type = link.address_type;
+        self.address = link.address;
         self.ltk = Some(ltk);
         Ok(())
     }
@@ -4343,6 +4356,14 @@ impl SmpKeyDistribution {
             || pdu.len() != 11
             || pdu[0] != BLE_SMP_MASTER_IDENTIFICATION
         {
+            return Err(HciError::UnexpectedOpcode);
+        }
+        let link = (0..links.count())
+            .filter_map(|index| links.link(index))
+            .find(|link| link.handle == handle)
+            .ok_or(HciError::UnexpectedOpcode)?;
+        if link.address_type != self.address_type || link.address != self.address {
+            self.abort();
             return Err(HciError::UnexpectedOpcode);
         }
         let Some(ltk) = self.ltk else {
@@ -4379,6 +4400,8 @@ impl SmpKeyDistribution {
             }
         }
         self.handle = None;
+        self.address_type = 0;
+        self.address = [0; 6];
     }
 }
 
@@ -4428,14 +4451,32 @@ pub fn ble_smp_key_distribution_13_11b_self_test() -> bool {
         return false;
     }
 
-    bonds.restore(&links, 0x42)
-        == Ok(LeBondMaterial {
+    if bonds.restore(&links, 0x42)
+        != Ok(LeBondMaterial {
             ltk: [0xa5; 16],
             ediv: 0x1234,
             rand: 0x1122_3344_5566_7788,
             key_size: 12,
             authenticated: false,
         })
+        || bonds.count() != 1
+    {
+        return false;
+    }
+
+    let mut stale = SmpKeyDistribution::new();
+    if stale.encryption_information(&links, &pairing, 0x42, &information).is_err() {
+        return false;
+    }
+    let disconnected = [EVT_DISCONNECTION_COMPLETE, 4, 0, 0x42, 0, 0x13];
+    let replacement = [
+        EVT_LE_META, 19, LE_SUBEVENT_CONNECTION_COMPLETE, 0,
+        0x42, 0, 0, 1, 6, 5, 4, 3, 2, 1,
+        0x18, 0, 0, 0, 0xf4, 1, 0,
+    ];
+    links.handle_disconnection_complete(&disconnected).is_ok()
+        && links.handle_connection_complete(&replacement).is_ok()
+        && stale.master_identification(&links, &pairing, &mut bonds, 0x42, &identification).is_err()
         && bonds.count() == 1
 }
 

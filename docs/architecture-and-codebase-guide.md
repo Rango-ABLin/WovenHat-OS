@@ -529,6 +529,11 @@ length, identity and negotiated-size consistency before storing material in
 `LeBondStore`, preserving the existing address/type ownership model and
 fail-closed teardown semantics.
 
+Pending distribution retains the peer address identity captured with the
+Encryption Information PDU. Master Identification is accepted only while the
+same identity remains live, preventing handle reuse from importing stale LTK
+material into another peer's bond.
+
 
 ### Stage 13.11C BLE SMP confirm/random verification
 

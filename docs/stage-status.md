@@ -543,6 +543,10 @@ gate passes locally; GitHub acceptance for the pushed tip remains required.
 Cryptographic derivation, user-confirmed pairing, controller transport and
 physical BLE qualification remain outside this bounded distribution stage.
 
+The distribution closure additionally binds pending LTK material to peer
+identity, rejects duplicate pending material, and rejects completion after
+connection-handle reuse.
+
 
 ## Stage 13.11C — BLE SMP confirm/random verification — 2026-10-05
 
