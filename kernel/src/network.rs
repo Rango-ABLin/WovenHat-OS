@@ -2436,6 +2436,20 @@ pub fn socket_bind(owner: u64, id: u64, port: u16) -> Result<(), SocketError> {
     }
 }
 
+#[cfg(any(feature = "stage14-3-test", feature = "stage14-4-test"))]
+pub fn socket_connect_v1(
+    owner: u64,
+    id: u64,
+    endpoint: SocketEndpointV1,
+) -> Result<(), SocketError> {
+    socket_connect(owner, id, endpoint.to_endpoint()?)
+}
+
+#[cfg(any(feature = "stage14-3-test", feature = "stage14-4-test"))]
+pub fn socket_peer_v1(owner: u64, id: u64) -> Result<Option<SocketEndpointV1>, SocketError> {
+    socket_peer(owner, id).map(|peer| peer.map(SocketEndpointV1::from_endpoint))
+}
+
 pub fn socket_connect(owner: u64, id: u64, endpoint: IpEndpoint) -> Result<(), SocketError> {
     if !valid_socket_endpoint(endpoint) {
         return Err(SocketError::Address);
@@ -2989,7 +3003,7 @@ fn valid_socket_endpoint(endpoint: IpEndpoint) -> bool {
             let octets = address.octets();
             octets != [0; 4] && !(224..=239).contains(&octets[0])
         }
-        IpAddress::Ipv6(_) => false,
+        IpAddress::Ipv6(address) => !address.is_unspecified() && !address.is_multicast(),
     }
 }
 
@@ -3087,6 +3101,7 @@ pub fn stage14_3_socket_api_self_test() -> bool {
         && ipv6_v1.to_endpoint() == Ok(ipv6)
         && malformed_ipv4.to_endpoint() == Err(SocketError::Address)
         && multicast_ipv6.to_endpoint() == Err(SocketError::Address)
+        && valid_socket_endpoint(ipv6)
 }
 
 
