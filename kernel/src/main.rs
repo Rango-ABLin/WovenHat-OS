@@ -2196,6 +2196,16 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
                                     ));
                                     halt();
                                 }
+                                if network::stage14_2_runtime_ipv6_self_test() {
+                                    serial::write_line(format_args!(
+                                        "[S14.2K] WovenNet runtime IPv6 integration: PASSED"
+                                    ));
+                                } else {
+                                    serial::write_line(format_args!(
+                                        "[S14.2K] WovenNet runtime IPv6 integration: FAILED"
+                                    ));
+                                    halt();
+                                }
                                 #[cfg(feature = "stage14-3-test")]
                                 if network::stage14_3_socket_api_self_test() {
                                     serial::write_line(format_args!(
