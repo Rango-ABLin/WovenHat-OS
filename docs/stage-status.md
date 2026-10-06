@@ -36,8 +36,17 @@ IPv6 sockets, and physical IPv6 qualification remain open.
 
 See the [Stage 14.2E audit](audit-stage14-2e-icmpv6-checksum-2026-10-06.md).
 
-Next: stateful Neighbor Solicitation/Advertisement processing and Duplicate
-Address Detection above the checked parser.
+## Stage 14.2F — Neighbor cache and DAD state (2026-10-06)
+
+The bounded state layer now accepts only checksum-validated Neighbor
+Advertisements, stores up to eight expiring link-layer records, and exposes
+explicit Duplicate Address Detection pending/unique/duplicate outcomes. It
+does not yet transmit probes or integrate live interface state. DHCPv6, live
+IPv6 sockets, and physical IPv6 qualification remain open.
+
+See the [Stage 14.2F audit](audit-stage14-2f-neighbor-state-2026-10-06.md).
+
+Next: connect Neighbor Discovery state to bounded live IPv6 interface traffic.
 
 ## Stage 1–5 long-name mutation hardening — 2026-10-01
 
