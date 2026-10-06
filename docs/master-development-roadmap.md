@@ -386,9 +386,26 @@ is inherited by downstream networking tests. A complete POSIX/BSD API,
 listening/accept ergonomics beyond the current kernel primitives, and
 physical-network IPv6 interoperability remain later platform hardening.
 
-14.4
+14.4 — ACCEPTED
 
 Routing tables.
+
+Acceptance status: complete in the bounded WovenNet routing-policy scope. The
+accepted route table is dual-stack for IPv4 and IPv6, normalizes prefixes,
+performs longest-prefix selection with metric/generation tie-breaking, and
+uses owner-scoped, generation-tagged route authority. Cross-owner removal is
+rejected and owner teardown can revoke all owned routes deterministically.
+
+The policy boundary is connected to the live smoltcp route set through
+controlled installation and exact removal. Acceptance proves idempotent live
+installation and stale second-removal rejection for both IPv4 and IPv6 while
+preserving the existing network configuration. The Stage 14.4 QEMU gate runs
+on the inherited networking acceptance matrix.
+
+This acceptance does not claim a userspace route-management service,
+dynamic routing protocols, policy routing across multiple interfaces, or
+physical-network interoperability across all NIC families. Those remain
+later Network Manager/platform hardening concerns.
 
 14.5
 
