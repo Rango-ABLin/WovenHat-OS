@@ -2126,6 +2126,16 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
                                     ));
                                     halt();
                                 }
+                                if network::stage14_2_router_advertisement_state_self_test() {
+                                    serial::write_line(format_args!(
+                                        "[S14.2D] WovenNet Router Advertisement state: PASSED"
+                                    ));
+                                } else {
+                                    serial::write_line(format_args!(
+                                        "[S14.2D] WovenNet Router Advertisement state: FAILED"
+                                    ));
+                                    halt();
+                                }
                             }
                         } else {
                             serial::write_line(format_args!(
