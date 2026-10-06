@@ -3053,6 +3053,169 @@ pub fn stage14_4_routing_table_self_test() -> bool {
         && table.remove(specific) == Err(RouteTableError::InvalidHandle)
 }
 
+#[cfg(feature = "stage14-5-test")]
+const MAX_WOVEN_FIREWALL_RULES: usize = 16;
+
+#[cfg(feature = "stage14-5-test")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FirewallDirection {
+    Ingress,
+    Egress,
+}
+
+#[cfg(feature = "stage14-5-test")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FirewallProtocol {
+    Any,
+    Icmp,
+    Tcp,
+    Udp,
+}
+
+#[cfg(feature = "stage14-5-test")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FirewallAction {
+    Allow,
+    Deny,
+}
+
+#[cfg(feature = "stage14-5-test")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct WovenFirewallRule {
+    pub direction: FirewallDirection,
+    pub protocol: FirewallProtocol,
+    pub remote: Ipv4Address,
+    pub local: Ipv4Address,
+    pub remote_port: u16,
+    pub local_port: u16,
+    pub action: FirewallAction,
+    pub generation: u32,
+}
+
+#[cfg(feature = "stage14-5-test")]
+#[derive(Clone, Copy)]
+struct FirewallSlot {
+    rule: Option<WovenFirewallRule>,
+}
+
+#[cfg(feature = "stage14-5-test")]
+pub struct WovenFirewall {
+    slots: [FirewallSlot; MAX_WOVEN_FIREWALL_RULES],
+    next_generation: u32,
+}
+
+#[cfg(feature = "stage14-5-test")]
+impl WovenFirewall {
+    pub const fn new() -> Self {
+        Self {
+            slots: [FirewallSlot { rule: None }; MAX_WOVEN_FIREWALL_RULES],
+            next_generation: 1,
+        }
+    }
+
+    pub fn add(&mut self, mut rule: WovenFirewallRule) -> Result<WovenFirewallRule, FirewallError> {
+        if rule.remote_port == 0
+            && rule.local_port == 0
+            && !matches!(rule.protocol, FirewallProtocol::Any | FirewallProtocol::Icmp)
+        {
+            // A zero port is the only wildcard representation; it is valid for Any
+            // and ICMP, but a typed rule must name at least one endpoint port.
+            return Err(FirewallError::InvalidSelector);
+        }
+        let slot = self
+            .slots
+            .iter()
+            .position(|slot| slot.rule.is_none())
+            .ok_or(FirewallError::Capacity)?;
+        rule.generation = self.next_generation;
+        self.next_generation = self.next_generation.wrapping_add(1).max(1);
+        self.slots[slot].rule = Some(rule);
+        Ok(rule)
+    }
+
+    pub fn remove(&mut self, rule: WovenFirewallRule) -> Result<(), FirewallError> {
+        let Some(slot) = self.slots.iter_mut().find(|slot| slot.rule == Some(rule)) else {
+            return Err(FirewallError::InvalidHandle);
+        };
+        slot.rule = None;
+        Ok(())
+    }
+
+    /// Evaluate one packet. Rules are first-match and the implicit policy is deny.
+    pub fn authorize(
+        &self,
+        direction: FirewallDirection,
+        protocol: FirewallProtocol,
+        remote: Ipv4Address,
+        local: Ipv4Address,
+        remote_port: u16,
+        local_port: u16,
+    ) -> bool {
+        self.slots
+            .iter()
+            .filter_map(|slot| slot.rule)
+            .find(|rule| {
+                rule.direction == direction
+                    && (rule.protocol == FirewallProtocol::Any || rule.protocol == protocol)
+                    && (rule.remote == Ipv4Address::new(0, 0, 0, 0) || rule.remote == remote)
+                    && (rule.local == Ipv4Address::new(0, 0, 0, 0) || rule.local == local)
+                    && (rule.remote_port == 0 || rule.remote_port == remote_port)
+                    && (rule.local_port == 0 || rule.local_port == local_port)
+            })
+            .is_some_and(|rule| rule.action == FirewallAction::Allow)
+    }
+}
+
+#[cfg(feature = "stage14-5-test")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FirewallError {
+    Capacity,
+    InvalidSelector,
+    InvalidHandle,
+}
+
+#[cfg(feature = "stage14-5-test")]
+pub fn stage14_5_firewall_self_test() -> bool {
+    let mut firewall = WovenFirewall::new();
+    let allow_dns = firewall
+        .add(WovenFirewallRule {
+            direction: FirewallDirection::Egress,
+            protocol: FirewallProtocol::Udp,
+            remote: Ipv4Address::new(10, 0, 2, 3),
+            local: Ipv4Address::new(10, 0, 2, 15),
+            remote_port: 53,
+            local_port: 0,
+            action: FirewallAction::Allow,
+            generation: 0,
+        })
+        .ok();
+    let Some(allow_dns) = allow_dns else { return false; };
+    firewall.authorize(
+        FirewallDirection::Egress,
+        FirewallProtocol::Udp,
+        Ipv4Address::new(10, 0, 2, 3),
+        Ipv4Address::new(10, 0, 2, 15),
+        53,
+        40000,
+    ) && !firewall.authorize(
+        FirewallDirection::Ingress,
+        FirewallProtocol::Udp,
+        Ipv4Address::new(10, 0, 2, 3),
+        Ipv4Address::new(10, 0, 2, 15),
+        53,
+        40000,
+    ) && firewall.remove(allow_dns).is_ok()
+        && !firewall.authorize(
+            FirewallDirection::Egress,
+            FirewallProtocol::Udp,
+            Ipv4Address::new(10, 0, 2, 3),
+            Ipv4Address::new(10, 0, 2, 15),
+            53,
+            40000,
+        )
+        && firewall.remove(allow_dns) == Err(FirewallError::InvalidHandle)
+}
+
 pub fn endpoint_to_packed(endpoint: IpEndpoint) -> u64 {
     match endpoint.addr {
         IpAddress::Ipv4(ip) => {

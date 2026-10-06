@@ -2228,6 +2228,16 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
                                     ));
                                     halt();
                                 }
+                                if network::stage14_5_firewall_self_test() {
+                                    serial::write_line(format_args!(
+                                        "[S14.5] WovenGuard firewall policy: PASSED"
+                                    ));
+                                } else {
+                                    serial::write_line(format_args!(
+                                        "[S14.5] WovenGuard firewall policy: FAILED"
+                                    ));
+                                    halt();
+                                }
                             }
                         } else {
                             serial::write_line(format_args!(

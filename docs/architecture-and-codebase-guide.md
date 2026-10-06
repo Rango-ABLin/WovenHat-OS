@@ -684,3 +684,14 @@ longest-prefix matches with metric/generation tie-breaking, and requires an
 exact route value for removal. It is intentionally separate from the live
 smoltcp route set until route installation and policy ownership receive their
 own acceptance boundary.
+
+### Stage 14.5 WovenGuard firewall policy foundation
+
+`WovenFirewall` is a fixed sixteen-slot IPv4 policy table. A rule selects
+direction, protocol, remote/local address, and remote/local port; zero address
+and port fields are bounded wildcards. Rules are generation-tagged and can be
+removed only by their exact returned value. Evaluation is first-match and
+defaults to deny, so an empty or stale policy cannot accidentally authorize
+traffic. The evaluator is allocation-free and does not retain packet data.
+This foundation is not yet wired into live socket admission and does not
+claim connection tracking, NAT, IPv6 policy, or physical-NIC enforcement.

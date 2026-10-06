@@ -119,6 +119,25 @@ network interface and physical NIC qualification remain open.
 
 See the [Stage 14.4 audit](audit-stage14-4-routing-table-2026-10-06.md).
 
+## Stage 14.5 — WovenGuard firewall policy foundation — 2026-10-06
+
+The network layer now has a bounded, fixed-capacity IPv4 firewall policy table
+with direction, protocol, address, and port selectors. Rules receive
+generation-tagged handles; removal requires the exact handle, and packet
+authorization is first-match with an implicit deny. The policy evaluator does
+not retain packet memory and is independent of the live NIC transport.
+
+The dedicated self-test covers positive egress authorization, direction
+isolation, revocation, stale-handle rejection, and fail-closed behavior. The
+warning-denying kernel Clippy check and Stage 14.5 QEMU network gate passed on
+1/2/4 CPUs, with the existing live DHCP/DNS/ICMP/UDP/TCP regressions and all
+prior Stage 14 markers preserved. Physical firewall
+enforcement, connection tracking, NAT, IPv6 policy, and userspace policy
+management remain outside this bounded foundation.
+
+Next: bind the accepted policy evaluator to live socket ingress/egress
+admission without bypassing socket ownership or route validation.
+
 ## Stage 1–5 long-name mutation hardening — 2026-10-01
 
 The FAT32 create/overwrite and rename paths now compare the user-visible long

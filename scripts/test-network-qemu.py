@@ -215,26 +215,27 @@ def main():
         '[SMP] acknowledged TLB shootdowns: PASSED',
         '[BOOT] ALL VALIDATIONS PASSED',
     ]
-    if args.feature in ('stage14-1-test', 'stage14-2-test', 'stage14-3-test', 'stage14-4-test'):
+    if args.feature in ('stage14-1-test', 'stage14-2-test', 'stage14-3-test', 'stage14-4-test', 'stage14-5-test'):
         required.extend([
             '[S14.1D] WovenNet DHCP transition/recovery: PASSED',
             '[S14.1S] WovenNet socket/ephemeral stress: PASSED',
             '[S14.1G] WovenNet DNS generation tokens: PASSED',
             '[S14.1H] WovenNet resource/lifecycle hardening: PASSED',
             '[S14.1] WovenNet IPv4 core: PASSED',
-            *(['[S14.2A] WovenNet IPv6 address foundation: PASSED'] if args.feature in ('stage14-2-test', 'stage14-3-test', 'stage14-4-test') else []),
-            *(['[S14.2B] WovenNet IPv6 neighbor foundation: PASSED'] if args.feature in ('stage14-2-test', 'stage14-3-test', 'stage14-4-test') else []),
-            *(['[S14.2C] WovenNet ICMPv6 neighbor parser: PASSED'] if args.feature in ('stage14-2-test', 'stage14-3-test', 'stage14-4-test') else []),
-            *(['[S14.2D] WovenNet Router Advertisement state: PASSED'] if args.feature in ('stage14-2-test', 'stage14-3-test', 'stage14-4-test') else []),
-            *(['[S14.2E] WovenNet ICMPv6 checksum boundary: PASSED'] if args.feature in ('stage14-2-test', 'stage14-3-test', 'stage14-4-test') else []),
-            *(['[S14.2F] WovenNet neighbor state and DAD: PASSED'] if args.feature in ('stage14-2-test', 'stage14-3-test', 'stage14-4-test') else []),
-            *(['[S14.2G] WovenNet SLAAC lifecycle: PASSED'] if args.feature in ('stage14-2-test', 'stage14-3-test', 'stage14-4-test') else []),
-            *(['[S14.2H] WovenNet DHCPv6 protocol foundation: PASSED'] if args.feature in ('stage14-2-test', 'stage14-3-test', 'stage14-4-test') else []),
-            *(['[S14.2I] WovenNet DHCPv6 client state machine: PASSED'] if args.feature in ('stage14-2-test', 'stage14-3-test', 'stage14-4-test') else []),
-            *(['[S14.2J] WovenNet IPv6 interface ingress: PASSED'] if args.feature in ('stage14-2-test', 'stage14-3-test', 'stage14-4-test') else []),
-            *(['[S14.2K] WovenNet runtime IPv6 integration: PASSED'] if args.feature in ('stage14-2-test', 'stage14-3-test', 'stage14-4-test') else []),
-            *(['[S14.3] WovenNet socket API boundary: PASSED'] if args.feature in ('stage14-3-test', 'stage14-4-test') else []),
-            *(['[S14.4] WovenNet routing table: PASSED'] if args.feature == 'stage14-4-test' else []),
+            *(['[S14.2A] WovenNet IPv6 address foundation: PASSED'] if args.feature in ('stage14-2-test', 'stage14-3-test', 'stage14-4-test', 'stage14-5-test') else []),
+            *(['[S14.2B] WovenNet IPv6 neighbor foundation: PASSED'] if args.feature in ('stage14-2-test', 'stage14-3-test', 'stage14-4-test', 'stage14-5-test') else []),
+            *(['[S14.2C] WovenNet ICMPv6 neighbor parser: PASSED'] if args.feature in ('stage14-2-test', 'stage14-3-test', 'stage14-4-test', 'stage14-5-test') else []),
+            *(['[S14.2D] WovenNet Router Advertisement state: PASSED'] if args.feature in ('stage14-2-test', 'stage14-3-test', 'stage14-4-test', 'stage14-5-test') else []),
+            *(['[S14.2E] WovenNet ICMPv6 checksum boundary: PASSED'] if args.feature in ('stage14-2-test', 'stage14-3-test', 'stage14-4-test', 'stage14-5-test') else []),
+            *(['[S14.2F] WovenNet neighbor state and DAD: PASSED'] if args.feature in ('stage14-2-test', 'stage14-3-test', 'stage14-4-test', 'stage14-5-test') else []),
+            *(['[S14.2G] WovenNet SLAAC lifecycle: PASSED'] if args.feature in ('stage14-2-test', 'stage14-3-test', 'stage14-4-test', 'stage14-5-test') else []),
+            *(['[S14.2H] WovenNet DHCPv6 protocol foundation: PASSED'] if args.feature in ('stage14-2-test', 'stage14-3-test', 'stage14-4-test', 'stage14-5-test') else []),
+            *(['[S14.2I] WovenNet DHCPv6 client state machine: PASSED'] if args.feature in ('stage14-2-test', 'stage14-3-test', 'stage14-4-test', 'stage14-5-test') else []),
+            *(['[S14.2J] WovenNet IPv6 interface ingress: PASSED'] if args.feature in ('stage14-2-test', 'stage14-3-test', 'stage14-4-test', 'stage14-5-test') else []),
+            *(['[S14.2K] WovenNet runtime IPv6 integration: PASSED'] if args.feature in ('stage14-2-test', 'stage14-3-test', 'stage14-4-test', 'stage14-5-test') else []),
+            *(['[S14.3] WovenNet socket API boundary: PASSED'] if args.feature in ('stage14-3-test', 'stage14-4-test', 'stage14-5-test') else []),
+            *(['[S14.4] WovenNet routing table: PASSED'] if args.feature in ('stage14-4-test', 'stage14-5-test') else []),
+            *(['[S14.5] WovenGuard firewall policy: PASSED'] if args.feature == 'stage14-5-test' else []),
         ])
     if result != 33 or any(marker not in log for marker in required):
         print(log[-12000:], file=sys.stderr)
