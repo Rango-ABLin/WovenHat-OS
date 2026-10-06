@@ -235,6 +235,7 @@ def main():
             *(['[S14.2K] WovenNet runtime IPv6 integration: PASSED'] if args.feature in ('stage14-2-test', 'stage14-3-test', 'stage14-4-test') else []),
             *(['[S14.2L] WovenNet NDP ingress hardening: PASSED'] if args.feature in ('stage14-2-test', 'stage14-3-test', 'stage14-4-test') else []),
             *(['[S14.3] WovenNet socket API boundary: PASSED'] if args.feature in ('stage14-3-test', 'stage14-4-test') else []),
+            *(['[S14.3A] WovenNet socket authority lifecycle: PASSED'] if args.feature in ('stage14-3-test', 'stage14-4-test') else []),
             *(['[S14.4] WovenNet routing table: PASSED'] if args.feature == 'stage14-4-test' else []),
         ])
     if result != 33 or any(marker not in log for marker in required):
