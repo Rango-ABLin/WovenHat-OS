@@ -811,6 +811,180 @@ pub fn stage14_2_slaac_self_test() -> bool {
         && SlaacAddress::from_prefix(prefix, interface_id, 21, 20).is_none()
 }
 
+#[cfg(feature = "stage14-2-test")]
+pub const DHCPV6_CLIENT_PORT: u16 = 546;
+#[cfg(feature = "stage14-2-test")]
+pub const DHCPV6_SERVER_PORT: u16 = 547;
+#[cfg(feature = "stage14-2-test")]
+const DHCPV6_MAX_MESSAGE: usize = 1232;
+
+#[cfg(feature = "stage14-2-test")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(u8)]
+pub enum Dhcpv6MessageType {
+    Solicit = 1,
+    Advertise = 2,
+    Request = 3,
+    Confirm = 4,
+    Renew = 5,
+    Rebind = 6,
+    Reply = 7,
+    Release = 8,
+    Decline = 9,
+    Reconfigure = 10,
+    InformationRequest = 11,
+}
+
+#[cfg(feature = "stage14-2-test")]
+impl Dhcpv6MessageType {
+    pub const fn from_u8(value: u8) -> Option<Self> {
+        match value {
+            1 => Some(Self::Solicit),
+            2 => Some(Self::Advertise),
+            3 => Some(Self::Request),
+            4 => Some(Self::Confirm),
+            5 => Some(Self::Renew),
+            6 => Some(Self::Rebind),
+            7 => Some(Self::Reply),
+            8 => Some(Self::Release),
+            9 => Some(Self::Decline),
+            10 => Some(Self::Reconfigure),
+            11 => Some(Self::InformationRequest),
+            _ => None,
+        }
+    }
+}
+
+#[cfg(feature = "stage14-2-test")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Dhcpv6Message<'a> {
+    pub message_type: Dhcpv6MessageType,
+    pub transaction_id: u32,
+    pub options: &'a [u8],
+}
+
+#[cfg(feature = "stage14-2-test")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Dhcpv6Option<'a> {
+    pub code: u16,
+    pub value: &'a [u8],
+}
+
+#[cfg(feature = "stage14-2-test")]
+fn valid_dhcpv6_options(mut bytes: &[u8]) -> bool {
+    while !bytes.is_empty() {
+        if bytes.len() < 4 {
+            return false;
+        }
+        let length = u16::from_be_bytes([bytes[2], bytes[3]]) as usize;
+        let Some(total) = 4usize.checked_add(length) else {
+            return false;
+        };
+        if total > bytes.len() {
+            return false;
+        }
+        bytes = &bytes[total..];
+    }
+    true
+}
+
+#[cfg(feature = "stage14-2-test")]
+pub fn parse_dhcpv6_message(packet: &[u8]) -> Option<Dhcpv6Message<'_>> {
+    if packet.len() < 4 || packet.len() > DHCPV6_MAX_MESSAGE {
+        return None;
+    }
+    let message_type = Dhcpv6MessageType::from_u8(packet[0])?;
+    let transaction_id =
+        (u32::from(packet[1]) << 16) | (u32::from(packet[2]) << 8) | u32::from(packet[3]);
+    let options = &packet[4..];
+    valid_dhcpv6_options(options).then_some(Dhcpv6Message {
+        message_type,
+        transaction_id,
+        options,
+    })
+}
+
+#[cfg(feature = "stage14-2-test")]
+pub fn dhcpv6_find_option<'a>(message: &'a Dhcpv6Message<'a>, code: u16) -> Option<Dhcpv6Option<'a>> {
+    let mut bytes = message.options;
+    while !bytes.is_empty() {
+        let option_code = u16::from_be_bytes([bytes[0], bytes[1]]);
+        let length = u16::from_be_bytes([bytes[2], bytes[3]]) as usize;
+        let total = 4 + length;
+        if option_code == code {
+            return Some(Dhcpv6Option {
+                code: option_code,
+                value: &bytes[4..total],
+            });
+        }
+        bytes = &bytes[total..];
+    }
+    None
+}
+
+#[cfg(feature = "stage14-2-test")]
+pub fn write_dhcpv6_message(
+    output: &mut [u8],
+    message_type: Dhcpv6MessageType,
+    transaction_id: u32,
+    options: &[u8],
+) -> Option<usize> {
+    if transaction_id > 0x00ff_ffff
+        || !valid_dhcpv6_options(options)
+        || options.len() + 4 > DHCPV6_MAX_MESSAGE
+        || output.len() < options.len() + 4
+    {
+        return None;
+    }
+    output[0] = message_type as u8;
+    output[1] = ((transaction_id >> 16) & 0xff) as u8;
+    output[2] = ((transaction_id >> 8) & 0xff) as u8;
+    output[3] = (transaction_id & 0xff) as u8;
+    output[4..4 + options.len()].copy_from_slice(options);
+    Some(4 + options.len())
+}
+
+#[cfg(feature = "stage14-2-test")]
+pub fn stage14_2_dhcpv6_protocol_self_test() -> bool {
+    let options = [
+        0x00, 0x01, 0x00, 0x04, 0xde, 0xad, 0xbe, 0xef,
+        0x00, 0x06, 0x00, 0x02, 0x00, 0x17,
+    ];
+    let mut packet = [0u8; 32];
+    let Some(length) = write_dhcpv6_message(
+        &mut packet,
+        Dhcpv6MessageType::Solicit,
+        0x00a1_b2c3,
+        &options,
+    ) else {
+        return false;
+    };
+    let Some(message) = parse_dhcpv6_message(&packet[..length]) else {
+        return false;
+    };
+    if message.message_type != Dhcpv6MessageType::Solicit
+        || message.transaction_id != 0x00a1_b2c3
+        || dhcpv6_find_option(&message, 1).map(|option| option.value) != Some(&[0xde, 0xad, 0xbe, 0xef][..])
+        || dhcpv6_find_option(&message, 6).map(|option| option.value) != Some(&[0x00, 0x17][..])
+        || DHCPV6_CLIENT_PORT != 546
+        || DHCPV6_SERVER_PORT != 547
+    {
+        return false;
+    }
+
+    let truncated = [1, 0, 0, 1, 0, 1, 0, 4, 0xaa];
+    let unsupported = [12, 0, 0, 1];
+    parse_dhcpv6_message(&truncated).is_none()
+        && parse_dhcpv6_message(&unsupported).is_none()
+        && write_dhcpv6_message(
+            &mut packet,
+            Dhcpv6MessageType::Request,
+            0x0100_0000,
+            &[],
+        )
+        .is_none()
+}
+
 pub struct VirtioSmolDevice {
     rx: [u8; MAX_FRAME],
 }
