@@ -2227,6 +2227,17 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
                                     ));
                                     halt();
                                 }
+                                #[cfg(feature = "stage14-3-test")]
+                                if network::stage14_3_socket_authority_self_test() {
+                                    serial::write_line(format_args!(
+                                        "[S14.3A] WovenNet socket authority lifecycle: PASSED"
+                                    ));
+                                } else {
+                                    serial::write_line(format_args!(
+                                        "[S14.3A] WovenNet socket authority lifecycle: FAILED"
+                                    ));
+                                    halt();
+                                }
                                 #[cfg(feature = "stage14-4-test")]
                                 if network::stage14_4_routing_table_self_test() {
                                     serial::write_line(format_args!(
