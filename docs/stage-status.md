@@ -1,5 +1,18 @@
 # Stage status
 
+## Stage 14.2B — IPv6 neighbor foundation (2026-10-06)
+
+The IPv6 foundation now has production-reusable address and prefix primitives:
+prefix containment, link-local/multicast classification, and RFC 4291
+solicited-node multicast derivation. The 1/2/4-CPU Stage 14.2 QEMU gate
+exercises these exact operations and requires `[S14.2A]` and `[S14.2B]`
+markers. This remains a deterministic foundation boundary: ICMPv6 Neighbor
+Discovery packets, Duplicate Address Detection, router discovery, DHCPv6,
+live IPv6 sockets, and physical IPv6 qualification remain open. See the
+[Stage 14.2B audit](audit-stage14-2b-ipv6-neighbor-foundation-2026-10-06.md).
+
+Next: bounded owned-buffer ICMPv6 Neighbor Discovery parsing and validation.
+
 ## Stage 1–5 long-name mutation hardening — 2026-10-01
 
 The FAT32 create/overwrite and rename paths now compare the user-visible long

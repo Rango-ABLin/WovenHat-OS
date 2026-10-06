@@ -73,6 +73,57 @@ impl Ipv6Prefix {
     pub const fn is_multicast(&self) -> bool {
         self.address[0] == 0xff
     }
+
+    pub const fn contains(&self, address: [u8; 16]) -> bool {
+        let full_bytes = (self.prefix_len / 8) as usize;
+        let remaining_bits = self.prefix_len % 8;
+        let mut index = 0;
+        while index < full_bytes {
+            if self.address[index] != address[index] {
+                return false;
+            }
+            index += 1;
+        }
+        if remaining_bits == 0 {
+            return true;
+        }
+        let mask = 0xff << (8 - remaining_bits);
+        (self.address[full_bytes] & mask) == (address[full_bytes] & mask)
+    }
+}
+
+#[cfg(feature = "stage14-2-test")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Ipv6Address(pub [u8; 16]);
+
+#[cfg(feature = "stage14-2-test")]
+impl Ipv6Address {
+    pub const fn is_unspecified(self) -> bool {
+        let mut index = 0;
+        while index < self.0.len() {
+            if self.0[index] != 0 {
+                return false;
+            }
+            index += 1;
+        }
+        true
+    }
+
+    pub const fn is_link_local(self) -> bool {
+        self.0[0] == 0xfe && (self.0[1] & 0xc0) == 0x80
+    }
+
+    pub const fn is_multicast(self) -> bool {
+        self.0[0] == 0xff
+    }
+
+    /// RFC 4291 solicited-node multicast address for Neighbor Discovery.
+    pub const fn solicited_node_multicast(self) -> Self {
+        Self([
+            0xff, 0x02, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0xff, self.0[13], self.0[14],
+            self.0[15],
+        ])
+    }
 }
 
 #[cfg(feature = "stage14-2-test")]
@@ -91,6 +142,24 @@ pub fn stage14_2_ipv6_foundation_self_test() -> bool {
         && matches!(unspecified, Some(prefix) if prefix.is_unspecified() && !prefix.is_link_local())
         && matches!(multicast, Some(prefix) if prefix.is_multicast() && !prefix.is_unspecified())
         && Ipv6Prefix::new([0; 16], 129).is_none()
+}
+
+#[cfg(feature = "stage14-2-test")]
+pub fn stage14_2_ipv6_neighbor_foundation_self_test() -> bool {
+    let address = Ipv6Address([
+        0xfe, 0x80, 0, 0, 0, 0, 0, 0, 0x02, 0, 0, 0xff, 0xfe, 0, 0, 1,
+    ]);
+    let link_local = Ipv6Prefix::new(
+        [0xfe, 0x80, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        64,
+    );
+    let solicited = address.solicited_node_multicast();
+    address.is_link_local()
+        && !address.is_multicast()
+        && link_local.is_some_and(|prefix| prefix.contains(address.0))
+        && solicited
+            == Ipv6Address([0xff, 0x02, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0xff, 0, 0, 1])
+        && solicited.is_multicast()
 }
 
 pub struct VirtioSmolDevice {

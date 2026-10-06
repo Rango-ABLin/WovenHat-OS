@@ -2106,6 +2106,16 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
                                     ));
                                     halt();
                                 }
+                                if network::stage14_2_ipv6_neighbor_foundation_self_test() {
+                                    serial::write_line(format_args!(
+                                        "[S14.2B] WovenNet IPv6 neighbor foundation: PASSED"
+                                    ));
+                                } else {
+                                    serial::write_line(format_args!(
+                                        "[S14.2B] WovenNet IPv6 neighbor foundation: FAILED"
+                                    ));
+                                    halt();
+                                }
                             }
                         } else {
                             serial::write_line(format_args!(
