@@ -2249,6 +2249,17 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
                                     ));
                                     halt();
                                 }
+                                #[cfg(feature = "stage14-4-test")]
+                                if network::stage14_4_live_route_self_test() {
+                                    serial::write_line(format_args!(
+                                        "[S14.4A] WovenNet live route integration: PASSED"
+                                    ));
+                                } else {
+                                    serial::write_line(format_args!(
+                                        "[S14.4A] WovenNet live route integration: FAILED"
+                                    ));
+                                    halt();
+                                }
                             }
                         } else {
                             serial::write_line(format_args!(
