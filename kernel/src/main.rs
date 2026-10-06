@@ -2146,6 +2146,16 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
                                     ));
                                     halt();
                                 }
+                                if network::stage14_2_neighbor_state_dad_self_test() {
+                                    serial::write_line(format_args!(
+                                        "[S14.2F] WovenNet neighbor state and DAD: PASSED"
+                                    ));
+                                } else {
+                                    serial::write_line(format_args!(
+                                        "[S14.2F] WovenNet neighbor state and DAD: FAILED"
+                                    ));
+                                    halt();
+                                }
                             }
                         } else {
                             serial::write_line(format_args!(
