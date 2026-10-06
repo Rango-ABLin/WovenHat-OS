@@ -250,8 +250,6 @@ pub enum Number {
     AsyncTcpConnect = 81,
     CompletionPortCreate = 82,
     CompletionPortClose = 83,
-    /// query id -> cancel/reclaim pending DNS query
-    DnsCancel = 97,
     CompletionPortAssociate = 84,
     CompletionPortPoll = 85,
     CompletionPortWait = 86,
@@ -267,6 +265,8 @@ pub enum Number {
     NotificationPoll = 95,
     /// kind, payload -> posts a user notification to the current process
     NotificationPost = 96,
+    /// query id -> cancel/reclaim pending DNS query
+    DnsCancel = 97,
 }
 
 pub fn entry_address() -> u64 {

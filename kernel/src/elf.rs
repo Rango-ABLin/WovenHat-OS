@@ -3,6 +3,10 @@ use crate::config::MAX_ELF_SEGMENTS as MAX_LOAD_SEGMENTS;
 const ELF_HEADER_SIZE: usize = 64;
 const PROGRAM_HEADER_SIZE: usize = 56;
 const PT_LOAD: u32 = 1;
+const PT_DYNAMIC: u32 = 2;
+const PT_INTERP: u32 = 3;
+const PT_TLS: u32 = 7;
+const PT_GNU_RELRO: u32 = 0x6474_e552;
 const PF_EXECUTE: u32 = 1;
 const PF_WRITE: u32 = 2;
 const ELF_MACHINE_X86_64: u16 = 0x3e;
@@ -133,7 +137,11 @@ pub fn parse(bytes: &[u8]) -> Result<Image, Error> {
 
     for index in 0..program_count {
         let offset = program_offset + index * program_entry_size;
-        if read_u32(bytes, offset)? != PT_LOAD {
+        let program_type = read_u32(bytes, offset)?;
+        if matches!(program_type, PT_DYNAMIC | PT_INTERP | PT_TLS | PT_GNU_RELRO) {
+            return Err(Error::Unsupported);
+        }
+        if program_type != PT_LOAD {
             continue;
         }
         if image.segment_count == MAX_LOAD_SEGMENTS {

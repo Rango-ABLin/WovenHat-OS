@@ -53,3 +53,10 @@ gates. Failed scheduler evacuation is now atomic with respect to task moves.
 Deterministic AP rejection and unclaimed-timeout recovery now pass the 2/4-CPU
 QEMU hotplug gate; claimed-transition hardware-fault and concurrent workload
 stress remain open.
+
+Stage 11 loader boundary follow-up: ELF program headers that require loader
+semantics not yet implemented (`PT_INTERP`, `PT_DYNAMIC`, `PT_TLS`, and
+`PT_GNU_RELRO`) now fail closed instead of being ignored. This is a production
+safety boundary for dynamic linking/TLS/RELRO work, not completion of those
+features; dynamic relocations, shared libraries, TLS image allocation, and RELRO
+permission transitions remain open.

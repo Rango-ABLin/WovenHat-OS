@@ -4388,6 +4388,13 @@ pub struct UserProgram {
 }
 
 pub fn elf_loader_self_test() -> bool {
+    const PROGRAM_HEADER_OFFSET: usize = 64;
+    const PROGRAM_HEADER_SIZE: usize = 56;
+    const PT_DYNAMIC: u32 = 2;
+    const PT_INTERP: u32 = 3;
+    const PT_TLS: u32 = 7;
+    const PT_GNU_RELRO: u32 = 0x6474_e552;
+
     let stub = unsafe {
         let start = &wovenhat_user_program_start as *const u8;
         let end = &wovenhat_user_program_end as *const u8;
@@ -4410,9 +4417,29 @@ pub fn elf_loader_self_test() -> bool {
     bad_magic[0] = 0;
     let mut writable_executable = valid;
     writable_executable[68] = 7;
+
+    let unsupported_program_header_rejected = [PT_INTERP, PT_DYNAMIC, PT_TLS, PT_GNU_RELRO]
+        .into_iter()
+        .all(|program_type| {
+            let Some(mut elf) = build_stub_elf(stub) else {
+                return false;
+            };
+            let second_header = PROGRAM_HEADER_OFFSET + PROGRAM_HEADER_SIZE;
+            if write_u16(&mut elf, 56, 2).is_none()
+                || write_u32(&mut elf, second_header, program_type).is_none()
+            {
+                return false;
+            }
+            matches!(
+                crate::elf::parse(&elf),
+                Err(crate::elf::Error::Unsupported)
+            )
+        });
+
     valid_segment
         && crate::elf::parse(&bad_magic).is_err()
         && crate::elf::parse(&writable_executable).is_err()
+        && unsupported_program_header_rejected
 }
 /// Regression test for the mmap W^X invariant.
 ///
