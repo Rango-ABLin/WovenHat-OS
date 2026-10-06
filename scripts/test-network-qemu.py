@@ -237,6 +237,7 @@ def main():
             *(['[S14.3] WovenNet socket API boundary: PASSED'] if args.feature in ('stage14-3-test', 'stage14-4-test') else []),
             *(['[S14.3A] WovenNet socket authority lifecycle: PASSED'] if args.feature in ('stage14-3-test', 'stage14-4-test') else []),
             *(['[S14.4] WovenNet routing table: PASSED'] if args.feature == 'stage14-4-test' else []),
+            *(['[S14.4A] WovenNet live route integration: PASSED'] if args.feature == 'stage14-4-test' else []),
         ])
     if result != 33 or any(marker not in log for marker in required):
         print(log[-12000:], file=sys.stderr)
