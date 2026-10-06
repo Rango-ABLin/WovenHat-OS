@@ -593,3 +593,64 @@ not claim Bluetooth qualification, physical-radio interoperability, side-channel
 resistance, formal cryptographic verification, or an external security audit.
 Those require separate hardware/specification validation before production
 security claims.
+
+
+## Stage 14.1 WovenNet IPv4 core closure (2026-10-06)
+
+Stage 14.1 is the accepted IPv4 production-networking foundation above the
+VirtIO-net/smoltcp runtime. The live QEMU/slirp gate exercises DHCP lease
+acquisition, DNS A-record resolution, ICMP reachability, host-to-guest UDP
+traffic and a bidirectional TCP round trip on the same runtime used by normal
+boots. The release workflow runs this contract on the 1/2/4-core matrix with
+the `stage14-1-test` feature and requires the aggregate
+`[S14.1] WovenNet IPv4 core: PASSED` marker.
+
+DHCP transition authority is centralized in `apply_dhcp_locked` and
+`apply_static_locked`. A resolver change cancels every outstanding bounded
+DNS query before the DNS server is replaced, so a response issued under an old
+resolver cannot be mistaken for work belonging to the new lease. The
+`[S14.1D]` acceptance test drives DHCP-to-lease and lease-to-static recovery
+and verifies address, prefix, gateway, resolver and query cleanup.
+
+DNS query IDs are generation-tagged capabilities rather than reusable raw slot
+numbers. `dns_start` records a non-zero generation with the smoltcp query
+handle; `dns_poll` and `dns_cancel` require the same slot/generation pair.
+After cancellation or slot reuse, an old token therefore fails with
+`SocketError::Invalid` and cannot poll or cancel the replacement query. This
+is covered by the `[S14.1G]` and `[S14.1H]` lifecycle gates.
+
+Userspace sockets remain bounded to `MAX_USER_SOCKETS = 16`. Ownership is
+checked on descriptor operations, while asynchronous operations use
+`SocketToken { slot, generation, owner }` so stale pinned authority cannot
+cross descriptor reuse. Close revokes descriptor access immediately; UDP can
+retire immediately when unpinned, while TCP retains transport state only for a
+bounded graceful-drain interval. The live network test now explicitly retires
+its TCP owner and waits for `user_sockets == 0` before the resource-stress
+gate begins, preventing acceptance-test resources from leaking into the next
+authority domain.
+
+The `[S14.1S]` stress gate fills all 16 userspace socket slots, requires the
+17th open to return `SocketError::NoSlot`, retires the full set, fills the
+table again with unique in-range descriptors, verifies exhaustion again, and
+requires the table to return to zero. It also verifies dynamic/private
+ephemeral allocator wraparound across `65533 -> 65534 -> 49152 -> 49153`.
+Failure checkpoints remain in the test so future regressions identify the
+broken phase rather than collapsing into a generic marker failure.
+
+Stage 14.1 closure was accepted by GitHub Actions release-validation run #1199
+(run 37337619836) at commit
+`c1cce4da89ab7527290b1616207139a1b038b05a`. The full release-validation job
+was green, including the live Stage 14.1 1/2/4-core acceptance matrix and all
+earlier mandatory release gates.
+
+### Stage 14.1 boundary and follow-up hardening
+
+This closure establishes the bounded IPv4 core and its current lifecycle
+invariants; it is not a claim of a complete POSIX/BSD socket stack, IPv6,
+production firewall/NAT policy, TLS, physical-NIC interoperability across
+hardware families, or exhaustive network fault injection. The current
+ephemeral-port stress proves range/wrap behavior and bounded socket recovery;
+it does not yet exhaustively prove collision avoidance across every concurrent
+TCP/UDP local-endpoint combination. Future networking work should add explicit
+live-endpoint collision selection/retry semantics before making that stronger
+claim.
