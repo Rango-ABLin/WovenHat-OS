@@ -2993,6 +2993,67 @@ fn valid_socket_endpoint(endpoint: IpEndpoint) -> bool {
     }
 }
 
+#[cfg(any(feature = "stage14-3-test", feature = "stage14-4-test"))]
+#[repr(C)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct SocketEndpointV1 {
+    pub family: u8,
+    pub _reserved: u8,
+    pub port: u16,
+    pub address: [u8; 16],
+}
+
+#[cfg(any(feature = "stage14-3-test", feature = "stage14-4-test"))]
+impl SocketEndpointV1 {
+    pub const FAMILY_IPV4: u8 = 4;
+    pub const FAMILY_IPV6: u8 = 6;
+
+    pub fn from_endpoint(endpoint: IpEndpoint) -> Self {
+        let mut address = [0u8; 16];
+        let family = match endpoint.addr {
+            IpAddress::Ipv4(ip) => {
+                address[..4].copy_from_slice(&ip.octets());
+                Self::FAMILY_IPV4
+            }
+            IpAddress::Ipv6(ip) => {
+                address.copy_from_slice(&ip.octets());
+                Self::FAMILY_IPV6
+            }
+        };
+        Self {
+            family,
+            _reserved: 0,
+            port: endpoint.port,
+            address,
+        }
+    }
+
+    pub fn to_endpoint(self) -> Result<IpEndpoint, SocketError> {
+        if self.port == 0 || self._reserved != 0 {
+            return Err(SocketError::Address);
+        }
+        let addr = match self.family {
+            Self::FAMILY_IPV4 if self.address[4..].iter().all(|byte| *byte == 0) => {
+                IpAddress::Ipv4(Ipv4Address::new(
+                    self.address[0],
+                    self.address[1],
+                    self.address[2],
+                    self.address[3],
+                ))
+            }
+            Self::FAMILY_IPV6 => {
+                let ip = SmolIpv6Address::from_octets(self.address);
+                if ip.is_unspecified() || ip.is_multicast() {
+                    return Err(SocketError::Address);
+                }
+                IpAddress::Ipv6(ip)
+            }
+            _ => return Err(SocketError::Address),
+        };
+        Ok(IpEndpoint::new(addr, self.port))
+    }
+}
+
 #[cfg(feature = "stage14-3-test")]
 pub fn stage14_3_socket_api_self_test() -> bool {
     let valid = IpEndpoint::new(
@@ -3002,13 +3063,32 @@ pub fn stage14_3_socket_api_self_test() -> bool {
     let packed = u64::from(u32::from_be_bytes([10, 0, 2, 2])) | (443u64 << 32);
     let unspecified = IpEndpoint::new(IpAddress::Ipv4(Ipv4Address::new(0, 0, 0, 0)), 443);
     let multicast = IpEndpoint::new(IpAddress::Ipv4(Ipv4Address::new(224, 0, 0, 1)), 443);
+
+    let ipv4_v1 = SocketEndpointV1::from_endpoint(valid);
+    let ipv6 = IpEndpoint::new(
+        IpAddress::Ipv6(SmolIpv6Address::from_octets([
+            0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1,
+        ])),
+        443,
+    );
+    let ipv6_v1 = SocketEndpointV1::from_endpoint(ipv6);
+    let mut malformed_ipv4 = ipv4_v1;
+    malformed_ipv4.address[15] = 1;
+    let mut multicast_ipv6 = ipv6_v1;
+    multicast_ipv6.address[0] = 0xff;
+
     valid_socket_endpoint(valid)
         && endpoint_from_packed(packed) == Ok(valid)
         && endpoint_to_packed(valid) == packed
         && !valid_socket_endpoint(unspecified)
         && !valid_socket_endpoint(multicast)
         && endpoint_from_packed(packed & 0xffff_ffff).is_err()
+        && ipv4_v1.to_endpoint() == Ok(valid)
+        && ipv6_v1.to_endpoint() == Ok(ipv6)
+        && malformed_ipv4.to_endpoint() == Err(SocketError::Address)
+        && multicast_ipv6.to_endpoint() == Err(SocketError::Address)
 }
+
 
 #[cfg(feature = "stage14-4-test")]
 const MAX_WOVEN_ROUTES: usize = 8;
