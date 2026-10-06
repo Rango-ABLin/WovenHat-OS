@@ -1,6 +1,13 @@
 # Stage status
 
-## Stage 14.2C — ICMPv6 Neighbor Discovery parser (2026-10-06)
+## Stage 14.2D — Router Advertisement state (2026-10-06)
+
+Router Advertisement state now tracks a link-local router, bounded lifetimes,
+and one validated prefix with expiration and withdrawal. It rejects invalid
+preferred/valid lifetimes and global router sources. Check the remote D audit
+for its exact acceptance evidence.
+
+## Stage 14.2E — ICMPv6 checksum boundary (2026-10-06)
 
 The IPv6 foundation now has production-reusable address and prefix primitives:
 prefix containment, link-local/multicast classification, and RFC 4291
@@ -21,7 +28,16 @@ qualification remain open.
 
 See the [Stage 14.2C audit](audit-stage14-2c-icmpv6-neighbor-parser-2026-10-06.md).
 
-Next: checksum-bound ICMPv6 Neighbor Discovery processing above the parser.
+The parser now has a checked entry point that authenticates the ICMPv6
+pseudo-header using the IPv6 source/destination, payload length, next-header
+value, and packet checksum. Tampered packets are rejected before Neighbor
+Discovery parsing. Router state, Duplicate Address Detection, DHCPv6, live
+IPv6 sockets, and physical IPv6 qualification remain open.
+
+See the [Stage 14.2E audit](audit-stage14-2e-icmpv6-checksum-2026-10-06.md).
+
+Next: stateful Neighbor Solicitation/Advertisement processing and Duplicate
+Address Detection above the checked parser.
 
 ## Stage 1–5 long-name mutation hardening — 2026-10-01
 

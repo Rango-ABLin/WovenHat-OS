@@ -226,6 +226,7 @@ def main():
             *(['[S14.2B] WovenNet IPv6 neighbor foundation: PASSED'] if args.feature == 'stage14-2-test' else []),
             *(['[S14.2C] WovenNet ICMPv6 neighbor parser: PASSED'] if args.feature == 'stage14-2-test' else []),
             *(['[S14.2D] WovenNet Router Advertisement state: PASSED'] if args.feature == 'stage14-2-test' else []),
+            *(['[S14.2E] WovenNet ICMPv6 checksum boundary: PASSED'] if args.feature == 'stage14-2-test' else []),
         ])
     if result != 33 or any(marker not in log for marker in required):
         print(log[-12000:], file=sys.stderr)

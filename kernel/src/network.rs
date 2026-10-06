@@ -440,6 +440,92 @@ pub fn stage14_2_icmpv6_neighbor_parser_self_test() -> bool {
         && parse_icmpv6_neighbor_discovery(&[135, 1, 0, 0]).is_none()
 }
 
+#[cfg(feature = "stage14-2-test")]
+fn checksum_add(mut sum: u32, value: u16) -> u32 {
+    sum += value as u32;
+    (sum & 0xffff) + (sum >> 16)
+}
+
+#[cfg(feature = "stage14-2-test")]
+fn checksum_bytes(mut sum: u32, bytes: &[u8]) -> u32 {
+    let mut index = 0;
+    while index + 1 < bytes.len() {
+        sum = checksum_add(sum, u16::from_be_bytes([bytes[index], bytes[index + 1]]));
+        index += 2;
+    }
+    if index < bytes.len() {
+        sum = checksum_add(sum, u16::from_be_bytes([bytes[index], 0]));
+    }
+    sum
+}
+
+/// Calculate the ICMPv6 checksum over the IPv6 pseudo-header and packet.
+/// The packet checksum field (bytes 2..4) is treated as zero.
+#[cfg(feature = "stage14-2-test")]
+pub fn icmpv6_checksum(source: Ipv6Address, destination: Ipv6Address, packet: &[u8]) -> u16 {
+    if packet.len() < 4 || packet.len() > 1024 {
+        return 0;
+    }
+    let mut sum = checksum_bytes(0, &source.0);
+    sum = checksum_bytes(sum, &destination.0);
+    sum = checksum_add(sum, (packet.len() >> 16) as u16);
+    sum = checksum_add(sum, packet.len() as u16);
+    sum = checksum_add(sum, 58);
+    sum = checksum_add(sum, 0);
+    sum = checksum_add(sum, u16::from_be_bytes([packet[0], packet[1]]));
+    sum = checksum_add(sum, 0);
+    sum = checksum_bytes(sum, &packet[4..]);
+    let folded = (sum & 0xffff) + (sum >> 16);
+    !(folded as u16)
+}
+
+#[cfg(feature = "stage14-2-test")]
+pub fn verify_icmpv6_checksum(
+    source: Ipv6Address,
+    destination: Ipv6Address,
+    packet: &[u8],
+) -> bool {
+    packet.len() >= 4
+        && packet.len() <= 1024
+        && u16::from_be_bytes([packet[2], packet[3]]) == icmpv6_checksum(source, destination, packet)
+}
+
+#[cfg(feature = "stage14-2-test")]
+pub fn parse_checked_icmpv6_neighbor_discovery(
+    source: Ipv6Address,
+    destination: Ipv6Address,
+    packet: &[u8],
+) -> Option<NeighborDiscoveryMessage<'_>> {
+    verify_icmpv6_checksum(source, destination, packet)
+        .then(|| parse_icmpv6_neighbor_discovery(packet))
+        .flatten()
+}
+
+#[cfg(feature = "stage14-2-test")]
+pub fn stage14_2_icmpv6_checksum_self_test() -> bool {
+    let source = Ipv6Address([
+        0xfe, 0x80, 0, 0, 0, 0, 0, 0, 0x02, 0, 0, 0xff, 0xfe, 0, 0, 1,
+    ]);
+    let destination = source.solicited_node_multicast();
+    let mut packet = [0u8; 8];
+    packet[0] = 133;
+    let checksum = icmpv6_checksum(source, destination, &packet);
+    packet[2..4].copy_from_slice(&checksum.to_be_bytes());
+    let valid = verify_icmpv6_checksum(source, destination, &packet)
+        && matches!(
+            parse_checked_icmpv6_neighbor_discovery(source, destination, &packet),
+            Some(NeighborDiscoveryMessage {
+                kind: NeighborDiscoveryKind::RouterSolicitation,
+                target: None,
+                option_bytes,
+            }) if option_bytes.is_empty()
+        );
+    packet[7] = 1;
+    valid
+        && !verify_icmpv6_checksum(source, destination, &packet)
+        && parse_checked_icmpv6_neighbor_discovery(source, destination, &packet).is_none()
+}
+
 pub struct VirtioSmolDevice {
     rx: [u8; MAX_FRAME],
 }

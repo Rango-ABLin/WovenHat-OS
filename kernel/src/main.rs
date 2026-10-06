@@ -2136,6 +2136,16 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
                                     ));
                                     halt();
                                 }
+                                if network::stage14_2_icmpv6_checksum_self_test() {
+                                    serial::write_line(format_args!(
+                                        "[S14.2E] WovenNet ICMPv6 checksum boundary: PASSED"
+                                    ));
+                                } else {
+                                    serial::write_line(format_args!(
+                                        "[S14.2E] WovenNet ICMPv6 checksum boundary: FAILED"
+                                    ));
+                                    halt();
+                                }
                             }
                         } else {
                             serial::write_line(format_args!(
