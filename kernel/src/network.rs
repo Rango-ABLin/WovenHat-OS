@@ -8,7 +8,7 @@
 use crate::irq_lock::IrqMutex as Mutex;
 use alloc::{vec, vec::Vec};
 use smoltcp::{
-    iface::{Config, Interface, SocketHandle, SocketSet},
+    iface::{Config, Interface, Route, SocketHandle, SocketSet},
     phy::{ChecksumCapabilities, Device, DeviceCapabilities, Medium, RxToken, TxToken},
     socket::{dhcpv4, dns, icmp, tcp, udp},
     time::Instant,
@@ -3365,6 +3365,74 @@ pub fn stage14_4_routing_table_self_test() -> bool {
         && table.remove_owner_routes(OWNER_A) == 3
         && table.lookup(IpAddress::Ipv4(Ipv4Address::new(192, 0, 2, 1))).is_none()
         && table.lookup(ipv6_destination).is_none()
+}
+
+#[cfg(feature = "stage14-4-test")]
+fn install_woven_route(iface: &mut Interface, route: WovenRoute) -> Result<(), RouteTableError> {
+    let cidr = IpCidr::new(route.network, route.prefix_len);
+    let live = Route {
+        cidr,
+        via_router: route.gateway,
+        preferred_until: None,
+        expires_at: None,
+    };
+    let mut installed = false;
+    iface.routes_mut().update(|routes| {
+        if routes.iter().any(|existing| {
+            existing.cidr == live.cidr && existing.via_router == live.via_router
+        }) {
+            installed = true;
+            return;
+        }
+        installed = routes.push(live).is_ok();
+    });
+    installed.then_some(()).ok_or(RouteTableError::Capacity)
+}
+
+#[cfg(feature = "stage14-4-test")]
+fn remove_woven_route(iface: &mut Interface, route: WovenRoute) -> Result<(), RouteTableError> {
+    let cidr = IpCidr::new(route.network, route.prefix_len);
+    let mut removed = false;
+    iface.routes_mut().update(|routes| {
+        if let Some(index) = routes.iter().position(|existing| {
+            existing.cidr == cidr && existing.via_router == route.gateway
+        }) {
+            routes.remove(index);
+            removed = true;
+        }
+    });
+    removed.then_some(()).ok_or(RouteTableError::InvalidHandle)
+}
+
+#[cfg(feature = "stage14-4-test")]
+pub fn stage14_4_live_route_self_test() -> bool {
+    let Some(runtime) = RUNTIME.get() else {
+        return false;
+    };
+    let mut runtime = runtime.lock();
+    const OWNER: u64 = 0x144C;
+    let mut policy = WovenRouteTable::new();
+    let Ok(route) = policy.add(
+        OWNER,
+        IpAddress::Ipv4(Ipv4Address::new(198, 51, 100, 99)),
+        24,
+        IpAddress::Ipv4(DEFAULT_GATEWAY),
+        10,
+    ) else {
+        return false;
+    };
+
+    if install_woven_route(&mut runtime.iface, route).is_err() {
+        return false;
+    }
+    if install_woven_route(&mut runtime.iface, route).is_err() {
+        let _ = remove_woven_route(&mut runtime.iface, route);
+        return false;
+    }
+    if remove_woven_route(&mut runtime.iface, route).is_err() {
+        return false;
+    }
+    remove_woven_route(&mut runtime.iface, route) == Err(RouteTableError::InvalidHandle)
 }
 
 pub fn endpoint_to_packed(endpoint: IpEndpoint) -> u64 {
