@@ -526,6 +526,165 @@ pub fn stage14_2_icmpv6_checksum_self_test() -> bool {
         && parse_checked_icmpv6_neighbor_discovery(source, destination, &packet).is_none()
 }
 
+#[cfg(feature = "stage14-2-test")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Ipv6NeighborState {
+    Incomplete,
+    Reachable,
+    Stale,
+}
+
+#[cfg(feature = "stage14-2-test")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Ipv6NeighborEntry {
+    pub address: Ipv6Address,
+    pub state: Ipv6NeighborState,
+    pub reachable_until: u64,
+}
+
+#[cfg(feature = "stage14-2-test")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct DuplicateAddressDetection {
+    pub tentative: Ipv6Address,
+    pub conflict: bool,
+}
+
+#[cfg(feature = "stage14-2-test")]
+impl DuplicateAddressDetection {
+    pub const fn new(tentative: Ipv6Address) -> Self {
+        Self {
+            tentative,
+            conflict: false,
+        }
+    }
+
+    pub fn observe_checked(
+        &mut self,
+        source: Ipv6Address,
+        destination: Ipv6Address,
+        packet: &[u8],
+    ) -> bool {
+        let Some(message) =
+            parse_checked_icmpv6_neighbor_discovery(source, destination, packet)
+        else {
+            return false;
+        };
+        if matches!(
+            message.kind,
+            NeighborDiscoveryKind::NeighborSolicitation
+                | NeighborDiscoveryKind::NeighborAdvertisement
+        ) && message.target == Some(self.tentative)
+        {
+            self.conflict = true;
+        }
+        true
+    }
+}
+
+#[cfg(feature = "stage14-2-test")]
+impl Ipv6NeighborEntry {
+    pub const fn new(address: Ipv6Address) -> Self {
+        Self {
+            address,
+            state: Ipv6NeighborState::Incomplete,
+            reachable_until: 0,
+        }
+    }
+
+    pub fn observe_checked(
+        &mut self,
+        source: Ipv6Address,
+        destination: Ipv6Address,
+        packet: &[u8],
+        now: u64,
+        reachable_lifetime: u64,
+    ) -> bool {
+        let Some(message) =
+            parse_checked_icmpv6_neighbor_discovery(source, destination, packet)
+        else {
+            return false;
+        };
+        match message.kind {
+            NeighborDiscoveryKind::NeighborAdvertisement
+                if message.target == Some(self.address) =>
+            {
+                self.state = Ipv6NeighborState::Reachable;
+                self.reachable_until = now.saturating_add(reachable_lifetime);
+            }
+            NeighborDiscoveryKind::NeighborSolicitation if source == self.address => {
+                self.state = Ipv6NeighborState::Stale;
+                self.reachable_until = 0;
+            }
+            _ => {}
+        }
+        true
+    }
+
+    pub fn expire(&mut self, now: u64) {
+        if self.state == Ipv6NeighborState::Reachable && now >= self.reachable_until {
+            self.state = Ipv6NeighborState::Stale;
+            self.reachable_until = 0;
+        }
+    }
+}
+
+#[cfg(feature = "stage14-2-test")]
+fn finish_icmpv6_checksum(
+    source: Ipv6Address,
+    destination: Ipv6Address,
+    packet: &mut [u8],
+) {
+    packet[2] = 0;
+    packet[3] = 0;
+    let checksum = icmpv6_checksum(source, destination, packet);
+    packet[2..4].copy_from_slice(&checksum.to_be_bytes());
+}
+
+#[cfg(feature = "stage14-2-test")]
+pub fn stage14_2_neighbor_state_dad_self_test() -> bool {
+    let local = Ipv6Address([
+        0xfe, 0x80, 0, 0, 0, 0, 0, 0, 0x02, 0, 0xff, 0xfe, 0, 0, 1,
+    ]);
+    let peer = Ipv6Address([
+        0xfe, 0x80, 0, 0, 0, 0, 0, 0, 0x02, 0, 0xff, 0xfe, 0, 0, 2,
+    ]);
+    let all_nodes = Ipv6Address([0xff, 0x02, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1]);
+
+    let mut advertisement = [0u8; 24];
+    advertisement[0] = 136;
+    advertisement[8..24].copy_from_slice(&peer.0);
+    finish_icmpv6_checksum(peer, all_nodes, &mut advertisement);
+
+    let mut entry = Ipv6NeighborEntry::new(peer);
+    if !entry.observe_checked(peer, all_nodes, &advertisement, 100, 30)
+        || entry.state != Ipv6NeighborState::Reachable
+        || entry.reachable_until != 130
+    {
+        return false;
+    }
+    entry.expire(130);
+    if entry.state != Ipv6NeighborState::Stale {
+        return false;
+    }
+
+    let unspecified = Ipv6Address([0; 16]);
+    let solicited = local.solicited_node_multicast();
+    let mut solicitation = [0u8; 24];
+    solicitation[0] = 135;
+    solicitation[8..24].copy_from_slice(&local.0);
+    finish_icmpv6_checksum(unspecified, solicited, &mut solicitation);
+
+    let mut dad = DuplicateAddressDetection::new(local);
+    if !dad.observe_checked(unspecified, solicited, &solicitation) || !dad.conflict {
+        return false;
+    }
+
+    let mut tampered = solicitation;
+    tampered[7] ^= 1;
+    let mut clean_dad = DuplicateAddressDetection::new(local);
+    !clean_dad.observe_checked(unspecified, solicited, &tampered) && !clean_dad.conflict
+}
+
 pub struct VirtioSmolDevice {
     rx: [u8; MAX_FRAME],
 }
