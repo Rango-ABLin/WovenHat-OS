@@ -1,5 +1,20 @@
 ﻿# Stage status
 
+## Stage 1–5 bounded batch data journal — 2026-10-06
+
+FAT32 persistence now exposes a separate versioned `WDJ2` journal for bounded
+four-file data batches. Prepared batches roll every partially-written file
+back to its prior bytes and remove stale WMD1/WMD2 metadata intents; committed
+batches are retired only after all intended checksums match. The legacy `WDJ1`
+single-file format and metadata ABIs remain readable. Kernel
+build/check, warning-denying kernel Clippy, and the existing storage gate
+passed on 1/2/4 CPUs, including two-file commit/readback and prepared,
+partial-commit, and complete-commit recovery exercises. See the
+[batch-journal audit](audit-stage1-5-batch-journal-2026-10-06.md).
+
+Physical storage/DMA qualification, unclean-shutdown hardware testing,
+metadata transactions, and arbitrary-size transactions remain open.
+
 ## Stage 14.2D — Router Advertisement state (2026-10-06)
 
 Router Advertisement state now tracks a link-local router, bounded lifetimes,
