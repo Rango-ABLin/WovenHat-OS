@@ -2156,6 +2156,16 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
                                     ));
                                     halt();
                                 }
+                                if network::stage14_2_slaac_self_test() {
+                                    serial::write_line(format_args!(
+                                        "[S14.2G] WovenNet SLAAC lifecycle: PASSED"
+                                    ));
+                                } else {
+                                    serial::write_line(format_args!(
+                                        "[S14.2G] WovenNet SLAAC lifecycle: FAILED"
+                                    ));
+                                    halt();
+                                }
                             }
                         } else {
                             serial::write_line(format_args!(
