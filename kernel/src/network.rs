@@ -12,11 +12,12 @@ use smoltcp::{
     phy::{ChecksumCapabilities, Device, DeviceCapabilities, Medium, RxToken, TxToken},
     socket::{dhcpv4, dns, icmp, tcp, udp},
     time::Instant,
-    wire::{EthernetAddress, IpAddress, IpCidr, IpEndpoint, Ipv4Address,
-        #[cfg(feature = "stage14-2-test")]
-        Ipv6Address as SmolIpv6Address},
+    wire::{EthernetAddress, IpAddress, IpCidr, IpEndpoint, Ipv4Address},
 };
 use spin::Once;
+
+#[cfg(feature = "stage14-2-test")]
+use smoltcp::wire::Ipv6Address as SmolIpv6Address;
 
 use crate::{
     timer,
