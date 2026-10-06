@@ -985,6 +985,241 @@ pub fn stage14_2_dhcpv6_protocol_self_test() -> bool {
         .is_none()
 }
 
+#[cfg(feature = "stage14-2-test")]
+const DHCPV6_OPTION_CLIENT_ID: u16 = 1;
+#[cfg(feature = "stage14-2-test")]
+const DHCPV6_OPTION_SERVER_ID: u16 = 2;
+#[cfg(feature = "stage14-2-test")]
+const DHCPV6_MAX_DUID: usize = 32;
+
+#[cfg(feature = "stage14-2-test")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Dhcpv6ClientState {
+    Init,
+    Soliciting,
+    Requesting,
+    Bound,
+}
+
+#[cfg(feature = "stage14-2-test")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Dhcpv6Duid {
+    bytes: [u8; DHCPV6_MAX_DUID],
+    len: u8,
+}
+
+#[cfg(feature = "stage14-2-test")]
+impl Dhcpv6Duid {
+    pub fn new(value: &[u8]) -> Option<Self> {
+        if value.is_empty() || value.len() > DHCPV6_MAX_DUID {
+            return None;
+        }
+        let mut bytes = [0u8; DHCPV6_MAX_DUID];
+        bytes[..value.len()].copy_from_slice(value);
+        Some(Self {
+            bytes,
+            len: value.len() as u8,
+        })
+    }
+
+    pub fn as_slice(&self) -> &[u8] {
+        &self.bytes[..self.len as usize]
+    }
+}
+
+#[cfg(feature = "stage14-2-test")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Dhcpv6Client {
+    pub state: Dhcpv6ClientState,
+    pub transaction_id: u32,
+    client_id: Dhcpv6Duid,
+    server_id: Option<Dhcpv6Duid>,
+    pub retry_count: u8,
+    pub next_retry_at: u64,
+}
+
+#[cfg(feature = "stage14-2-test")]
+impl Dhcpv6Client {
+    pub fn new(transaction_id: u32, client_id: &[u8]) -> Option<Self> {
+        if transaction_id > 0x00ff_ffff {
+            return None;
+        }
+        Some(Self {
+            state: Dhcpv6ClientState::Init,
+            transaction_id,
+            client_id: Dhcpv6Duid::new(client_id)?,
+            server_id: None,
+            retry_count: 0,
+            next_retry_at: 0,
+        })
+    }
+
+    pub fn start(&mut self, now: u64, retry_after: u64) -> bool {
+        if self.state != Dhcpv6ClientState::Init {
+            return false;
+        }
+        self.state = Dhcpv6ClientState::Soliciting;
+        self.retry_count = 0;
+        self.next_retry_at = now.saturating_add(retry_after);
+        true
+    }
+
+    pub fn retry_due(&mut self, now: u64, retry_after: u64) -> bool {
+        if !matches!(
+            self.state,
+            Dhcpv6ClientState::Soliciting | Dhcpv6ClientState::Requesting
+        ) || now < self.next_retry_at
+        {
+            return false;
+        }
+        self.retry_count = self.retry_count.saturating_add(1);
+        self.next_retry_at = now.saturating_add(retry_after);
+        true
+    }
+
+    fn identifiers_match(&self, message: &Dhcpv6Message<'_>) -> bool {
+        dhcpv6_find_option(message, DHCPV6_OPTION_CLIENT_ID)
+            .is_some_and(|option| option.value == self.client_id.as_slice())
+    }
+
+    pub fn observe(&mut self, packet: &[u8], now: u64, retry_after: u64) -> bool {
+        let Some(message) = parse_dhcpv6_message(packet) else {
+            return false;
+        };
+        if message.transaction_id != self.transaction_id || !self.identifiers_match(&message) {
+            return false;
+        }
+
+        match (self.state, message.message_type) {
+            (Dhcpv6ClientState::Soliciting, Dhcpv6MessageType::Advertise) => {
+                let Some(server) = dhcpv6_find_option(&message, DHCPV6_OPTION_SERVER_ID)
+                    .and_then(|option| Dhcpv6Duid::new(option.value))
+                else {
+                    return false;
+                };
+                self.server_id = Some(server);
+                self.state = Dhcpv6ClientState::Requesting;
+                self.retry_count = 0;
+                self.next_retry_at = now.saturating_add(retry_after);
+                true
+            }
+            (Dhcpv6ClientState::Requesting, Dhcpv6MessageType::Reply) => {
+                let Some(server) = dhcpv6_find_option(&message, DHCPV6_OPTION_SERVER_ID) else {
+                    return false;
+                };
+                if self.server_id.is_none_or(|expected| expected.as_slice() != server.value) {
+                    return false;
+                }
+                self.state = Dhcpv6ClientState::Bound;
+                self.retry_count = 0;
+                self.next_retry_at = 0;
+                true
+            }
+            _ => false,
+        }
+    }
+}
+
+#[cfg(feature = "stage14-2-test")]
+fn write_dhcpv6_option(output: &mut [u8], code: u16, value: &[u8]) -> Option<usize> {
+    if value.len() > u16::MAX as usize || output.len() < 4 + value.len() {
+        return None;
+    }
+    output[..2].copy_from_slice(&code.to_be_bytes());
+    output[2..4].copy_from_slice(&(value.len() as u16).to_be_bytes());
+    output[4..4 + value.len()].copy_from_slice(value);
+    Some(4 + value.len())
+}
+
+#[cfg(feature = "stage14-2-test")]
+pub fn stage14_2_dhcpv6_client_self_test() -> bool {
+    let client_id = [0, 3, 0, 1, 0x02, 0, 0, 0, 0, 1];
+    let server_id = [0, 3, 0, 1, 0x02, 0, 0, 0, 0, 2];
+    let transaction_id = 0x0012_3456;
+    let Some(mut client) = Dhcpv6Client::new(transaction_id, &client_id) else {
+        return false;
+    };
+    if !client.start(100, 10)
+        || client.state != Dhcpv6ClientState::Soliciting
+        || client.retry_due(109, 10)
+        || !client.retry_due(110, 20)
+        || client.retry_count != 1
+        || client.next_retry_at != 130
+    {
+        return false;
+    }
+
+    let mut options = [0u8; 64];
+    let Some(client_len) = write_dhcpv6_option(&mut options, DHCPV6_OPTION_CLIENT_ID, &client_id) else {
+        return false;
+    };
+    let Some(server_len) = write_dhcpv6_option(
+        &mut options[client_len..],
+        DHCPV6_OPTION_SERVER_ID,
+        &server_id,
+    ) else {
+        return false;
+    };
+    let options_len = client_len + server_len;
+    let mut packet = [0u8; 96];
+    let Some(advertise_len) = write_dhcpv6_message(
+        &mut packet,
+        Dhcpv6MessageType::Advertise,
+        transaction_id,
+        &options[..options_len],
+    ) else {
+        return false;
+    };
+    if !client.observe(&packet[..advertise_len], 120, 15)
+        || client.state != Dhcpv6ClientState::Requesting
+        || client.retry_count != 0
+        || client.next_retry_at != 135
+    {
+        return false;
+    }
+
+    let Some(reply_len) = write_dhcpv6_message(
+        &mut packet,
+        Dhcpv6MessageType::Reply,
+        transaction_id,
+        &options[..options_len],
+    ) else {
+        return false;
+    };
+    if !client.observe(&packet[..reply_len], 125, 15)
+        || client.state != Dhcpv6ClientState::Bound
+        || client.next_retry_at != 0
+    {
+        return false;
+    }
+
+    let Some(mut wrong_order) = Dhcpv6Client::new(transaction_id, &client_id) else {
+        return false;
+    };
+    if !wrong_order.start(0, 10) || wrong_order.observe(&packet[..reply_len], 1, 10) {
+        return false;
+    }
+
+    let mut wrong_server_options = options;
+    wrong_server_options[client_len + 4 + server_id.len() - 1] ^= 1;
+    let Some(wrong_reply_len) = write_dhcpv6_message(
+        &mut packet,
+        Dhcpv6MessageType::Reply,
+        transaction_id,
+        &wrong_server_options[..options_len],
+    ) else {
+        return false;
+    };
+    let Some(mut mismatch) = Dhcpv6Client::new(transaction_id, &client_id) else {
+        return false;
+    };
+    mismatch.state = Dhcpv6ClientState::Requesting;
+    mismatch.server_id = Dhcpv6Duid::new(&server_id);
+    !mismatch.observe(&packet[..wrong_reply_len], 1, 10)
+        && Dhcpv6Client::new(0x0100_0000, &client_id).is_none()
+        && Dhcpv6Client::new(transaction_id, &[]).is_none()
+}
+
 pub struct VirtioSmolDevice {
     rx: [u8; MAX_FRAME],
 }
