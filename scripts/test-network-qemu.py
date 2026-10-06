@@ -233,6 +233,7 @@ def main():
             *(['[S14.2I] WovenNet DHCPv6 client state machine: PASSED'] if args.feature in ('stage14-2-test', 'stage14-3-test', 'stage14-4-test') else []),
             *(['[S14.2J] WovenNet IPv6 interface ingress: PASSED'] if args.feature in ('stage14-2-test', 'stage14-3-test', 'stage14-4-test') else []),
             *(['[S14.2K] WovenNet runtime IPv6 integration: PASSED'] if args.feature in ('stage14-2-test', 'stage14-3-test', 'stage14-4-test') else []),
+            *(['[S14.2L] WovenNet NDP ingress hardening: PASSED'] if args.feature in ('stage14-2-test', 'stage14-3-test', 'stage14-4-test') else []),
             *(['[S14.3] WovenNet socket API boundary: PASSED'] if args.feature in ('stage14-3-test', 'stage14-4-test') else []),
             *(['[S14.4] WovenNet routing table: PASSED'] if args.feature == 'stage14-4-test' else []),
         ])
