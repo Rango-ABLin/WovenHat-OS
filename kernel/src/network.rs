@@ -209,7 +209,6 @@ pub fn parse_icmpv6_neighbor_discovery(
 }
 
 #[cfg(feature = "stage14-2-test")]
-#[cfg(feature = "stage14-2-test")]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct RouterAdvertisementState {
     pub router: Option<Ipv6Address>,
@@ -365,6 +364,7 @@ pub fn stage14_2_router_advertisement_state_self_test() -> bool {
         && state.prefix.is_none()
 }
 
+#[cfg(feature = "stage14-2-test")]
 pub fn stage14_2_ipv6_foundation_self_test() -> bool {
     let link_local = Ipv6Prefix::new(
         [0xfe, 0x80, 0, 0, 0, 0, 0, 0, 0x02, 0, 0xff, 0xfe, 0, 0, 0, 1],
