@@ -3156,12 +3156,14 @@ pub enum RouteTableError {
     InvalidPrefix,
     InvalidGateway,
     InvalidHandle,
+    WrongOwner,
     AddressFamily,
 }
 
 #[cfg(feature = "stage14-4-test")]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct WovenRoute {
+    pub owner: u64,
     pub network: IpAddress,
     pub prefix_len: u8,
     pub gateway: IpAddress,
@@ -3192,6 +3194,7 @@ impl WovenRouteTable {
 
     pub fn add(
         &mut self,
+        owner: u64,
         network: IpAddress,
         prefix_len: u8,
         gateway: IpAddress,
@@ -3217,6 +3220,7 @@ impl WovenRouteTable {
             .position(|slot| slot.route.is_none())
             .ok_or(RouteTableError::Capacity)?;
         let route = WovenRoute {
+            owner,
             network,
             prefix_len,
             gateway,
@@ -3228,12 +3232,26 @@ impl WovenRouteTable {
         Ok(route)
     }
 
-    pub fn remove(&mut self, route: WovenRoute) -> Result<(), RouteTableError> {
+    pub fn remove(&mut self, owner: u64, route: WovenRoute) -> Result<(), RouteTableError> {
         let Some(slot) = self.slots.iter_mut().find(|slot| slot.route == Some(route)) else {
             return Err(RouteTableError::InvalidHandle);
         };
+        if route.owner != owner {
+            return Err(RouteTableError::WrongOwner);
+        }
         slot.route = None;
         Ok(())
+    }
+
+    pub fn remove_owner_routes(&mut self, owner: u64) -> usize {
+        let mut removed = 0;
+        for slot in &mut self.slots {
+            if slot.route.is_some_and(|route| route.owner == owner) {
+                slot.route = None;
+                removed += 1;
+            }
+        }
+        removed
     }
 
     pub fn lookup(&self, destination: IpAddress) -> Option<WovenRoute> {
@@ -3302,15 +3320,17 @@ fn route_matches(route: WovenRoute, destination: IpAddress) -> bool {
 
 #[cfg(feature = "stage14-4-test")]
 pub fn stage14_4_routing_table_self_test() -> bool {
+    const OWNER_A: u64 = 0x144A;
+    const OWNER_B: u64 = 0x144B;
     let mut table = WovenRouteTable::new();
     let gateway4 = IpAddress::Ipv4(DEFAULT_GATEWAY);
-    let default = table.add(IpAddress::Ipv4(Ipv4Address::UNSPECIFIED), 0, gateway4, 100).ok();
-    let broad = table.add(IpAddress::Ipv4(Ipv4Address::new(10, 0, 0, 0)), 16, gateway4, 100).ok();
-    let specific = table.add(IpAddress::Ipv4(Ipv4Address::new(10, 0, 2, 99)), 24, gateway4, 50).ok();
+    let default = table.add(OWNER_A, IpAddress::Ipv4(Ipv4Address::UNSPECIFIED), 0, gateway4, 100).ok();
+    let broad = table.add(OWNER_A, IpAddress::Ipv4(Ipv4Address::new(10, 0, 0, 0)), 16, gateway4, 100).ok();
+    let specific = table.add(OWNER_A, IpAddress::Ipv4(Ipv4Address::new(10, 0, 2, 99)), 24, gateway4, 50).ok();
     let gateway6 = IpAddress::Ipv6(SmolIpv6Address::from_octets([
         0xfe, 0x80, 0, 0, 0, 0, 0, 0, 0x50, 0x54, 0, 0xff, 0xfe, 0x12, 0x34, 0x56,
     ]));
-    let ipv6 = table.add(
+    let ipv6 = table.add(OWNER_A, 
         IpAddress::Ipv6(SmolIpv6Address::from_octets([
             0x20, 0x01, 0x0d, 0xb8, 0x12, 0x34, 0x56, 0x78, 0xaa, 0xbb, 0xcc, 0xdd, 0, 0, 0, 1,
         ])),
@@ -3332,15 +3352,19 @@ pub fn stage14_4_routing_table_self_test() -> bool {
         && table.lookup(IpAddress::Ipv4(Ipv4Address::new(192, 0, 2, 1))) == Some(default)
         && table.lookup(ipv6_destination) == Some(ipv6)
         && ipv6.network == normalize_route_network(ipv6_destination, 64).ok().unwrap()
-        && table.add(IpAddress::Ipv4(Ipv4Address::new(10, 0, 0, 0)), 33, gateway4, 1)
+        && table.add(OWNER_A, IpAddress::Ipv4(Ipv4Address::new(10, 0, 0, 0)), 33, gateway4, 1)
             == Err(RouteTableError::InvalidPrefix)
-        && table.add(IpAddress::Ipv6(SmolIpv6Address::UNSPECIFIED), 129, gateway6, 1)
+        && table.add(OWNER_A, IpAddress::Ipv6(SmolIpv6Address::UNSPECIFIED), 129, gateway6, 1)
             == Err(RouteTableError::InvalidPrefix)
-        && table.add(IpAddress::Ipv4(Ipv4Address::new(10, 0, 0, 0)), 8, gateway6, 1)
+        && table.add(OWNER_A, IpAddress::Ipv4(Ipv4Address::new(10, 0, 0, 0)), 8, gateway6, 1)
             == Err(RouteTableError::AddressFamily)
-        && table.remove(specific).is_ok()
+        && table.remove(OWNER_B, specific) == Err(RouteTableError::WrongOwner)
+        && table.remove(OWNER_A, specific).is_ok()
         && table.lookup(IpAddress::Ipv4(Ipv4Address::new(10, 0, 2, 15))) == Some(broad)
-        && table.remove(specific) == Err(RouteTableError::InvalidHandle)
+        && table.remove(OWNER_A, specific) == Err(RouteTableError::InvalidHandle)
+        && table.remove_owner_routes(OWNER_A) == 3
+        && table.lookup(IpAddress::Ipv4(Ipv4Address::new(192, 0, 2, 1))).is_none()
+        && table.lookup(ipv6_destination).is_none()
 }
 
 pub fn endpoint_to_packed(endpoint: IpEndpoint) -> u64 {
