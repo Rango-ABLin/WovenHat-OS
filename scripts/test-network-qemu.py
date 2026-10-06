@@ -215,13 +215,14 @@ def main():
         '[SMP] acknowledged TLB shootdowns: PASSED',
         '[BOOT] ALL VALIDATIONS PASSED',
     ]
-    if args.feature == 'stage14-1-test':
+    if args.feature in ('stage14-1-test', 'stage14-2-test'):
         required.extend([
             '[S14.1D] WovenNet DHCP transition/recovery: PASSED',
             '[S14.1S] WovenNet socket/ephemeral stress: PASSED',
             '[S14.1G] WovenNet DNS generation tokens: PASSED',
             '[S14.1H] WovenNet resource/lifecycle hardening: PASSED',
             '[S14.1] WovenNet IPv4 core: PASSED',
+            *(['[S14.2A] WovenNet IPv6 address foundation: PASSED'] if args.feature == 'stage14-2-test' else []),
         ])
     if result != 33 or any(marker not in log for marker in required):
         print(log[-12000:], file=sys.stderr)
