@@ -371,6 +371,30 @@ jobs:
           for cpu in 1 2 4; do
             python3 scripts/test-network-qemu.py --feature stage14-1-test --cpus "$cpu" --timeout 240 --qemu "$qemu" --firmware "$ovmf_code" --firmware-vars "$ovmf_vars"
           done
+      - name: Stage 14.2A WovenNet IPv6 foundation 1/2/4-core acceptance
+        shell: bash
+        run: |
+          qemu=/usr/bin/qemu-system-x86_64
+          ovmf_code=
+          ovmf_vars=
+          for variant in OVMF_CODE_4M.fd OVMF_CODE.fd; do
+            candidate="/usr/share/OVMF/$variant"
+            [ -f "$candidate" ] || continue
+            vars_name="${variant/CODE/VARS}"
+            vars_candidate="/usr/share/OVMF/$vars_name"
+            if [ -f "$vars_candidate" ]; then
+              ovmf_code="$candidate"
+              ovmf_vars="$vars_candidate"
+              break
+            fi
+          done
+          test -n "$ovmf_code"
+          test -n "$ovmf_vars"
+          cargo build --features stage14-2-test
+          cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage14-2-test -- -D warnings
+          for cpu in 1 2 4; do
+            python3 scripts/test-network-qemu.py --feature stage14-2-test --cpus "$cpu" --timeout 240 --qemu "$qemu" --firmware "$ovmf_code" --firmware-vars "$ovmf_vars"
+          done
       - name: Preserve validation evidence
         if: always()
         uses: actions/upload-artifact@v4
