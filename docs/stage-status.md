@@ -1,4 +1,4 @@
-# Stage status
+﻿# Stage status
 
 ## Stage 14.2D — Router Advertisement state (2026-10-06)
 
@@ -47,6 +47,39 @@ IPv6 sockets, and physical IPv6 qualification remain open.
 See the [Stage 14.2F audit](audit-stage14-2f-neighbor-state-2026-10-06.md).
 
 Next: connect Neighbor Discovery state to bounded live IPv6 interface traffic.
+
+## Stage 14.2G — SLAAC lifecycle (2026-10-06)
+
+The bounded SLAAC lifecycle now derives an address from an accepted /64
+prefix, tracks tentative/preferred/deprecated/expired/duplicate states, and
+applies DAD completion plus valid/preferred lifetimes. Live router egress,
+DHCPv6, sockets, and physical qualification remain open.
+
+## Stage 14.2H — DHCPv6 protocol foundation (2026-10-06)
+
+The bounded DHCPv6 foundation validates supported message types, 24-bit
+transaction identifiers, complete non-zero-length options, and bounded
+serialization. It is protocol framing only: live lease exchange, retransmit
+timers, address installation, and persistent lease state remain open.
+
+## Stage 14.2I — DHCPv6 client state machine (2026-10-06)
+
+The bounded DHCPv6 client state machine validates Solicit/Advertise/Request/
+Reply progression, binds replies to the transaction and server DUID, and
+applies bounded retry timing. It does not perform live lease installation or
+persistent configuration.
+
+## Stage 14.2J — IPv6 interface ingress boundary (2026-10-06)
+
+The ingress coordinator verifies ICMPv6 checksums before dispatching Router
+Advertisement, Neighbor Advertisement, and Neighbor Solicitation packets into
+bounded interface state. It emits explicit events for accepted traffic, DAD
+conflicts, and rejected packets. No packet slice is retained and no physical
+NIC activation is claimed.
+
+See the [Stage 14.2J audit](audit-stage14-2j-ipv6-interface-ingress-2026-10-06.md).
+
+Next: bounded IPv6 interface address configuration and controlled egress.
 
 ## Stage 1–5 long-name mutation hardening — 2026-10-01
 
@@ -659,3 +692,6 @@ session is rejected before notification encoding, while a session meeting the
 16-byte policy is accepted. The local 1/2/4-CPU gate, host tests and
 warning-denying kernel Clippy pass; GitHub acceptance for the pushed tip is
 still required.
+
+
+

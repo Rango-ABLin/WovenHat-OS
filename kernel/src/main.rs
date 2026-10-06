@@ -2186,6 +2186,16 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
                                     ));
                                     halt();
                                 }
+                                if network::stage14_2_ipv6_interface_ingress_self_test() {
+                                    serial::write_line(format_args!(
+                                        "[S14.2J] WovenNet IPv6 interface ingress: PASSED"
+                                    ));
+                                } else {
+                                    serial::write_line(format_args!(
+                                        "[S14.2J] WovenNet IPv6 interface ingress: FAILED"
+                                    ));
+                                    halt();
+                                }
                             }
                         } else {
                             serial::write_line(format_args!(

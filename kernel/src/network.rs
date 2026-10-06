@@ -547,6 +547,7 @@ pub struct Ipv6NeighborEntry {
 pub struct DuplicateAddressDetection {
     pub tentative: Ipv6Address,
     pub conflict: bool,
+    active: bool,
 }
 
 #[cfg(feature = "stage14-2-test")]
@@ -555,7 +556,13 @@ impl DuplicateAddressDetection {
         Self {
             tentative,
             conflict: false,
+            active: false,
         }
+    }
+
+    pub fn arm(&mut self) {
+        self.active = true;
+        self.conflict = false;
     }
 
     pub fn observe_checked(
@@ -569,13 +576,14 @@ impl DuplicateAddressDetection {
         else {
             return false;
         };
-        if matches!(
+        if self.active && matches!(
             message.kind,
             NeighborDiscoveryKind::NeighborSolicitation
                 | NeighborDiscoveryKind::NeighborAdvertisement
         ) && message.target == Some(self.tentative)
         {
             self.conflict = true;
+            self.active = false;
         }
         true
     }
@@ -675,6 +683,7 @@ pub fn stage14_2_neighbor_state_dad_self_test() -> bool {
     finish_icmpv6_checksum(unspecified, solicited, &mut solicitation);
 
     let mut dad = DuplicateAddressDetection::new(local);
+    dad.arm();
     if !dad.observe_checked(unspecified, solicited, &solicitation) || !dad.conflict {
         return false;
     }
@@ -1218,6 +1227,110 @@ pub fn stage14_2_dhcpv6_client_self_test() -> bool {
     !mismatch.observe(&packet[..wrong_reply_len], 1, 10)
         && Dhcpv6Client::new(0x0100_0000, &client_id).is_none()
         && Dhcpv6Client::new(transaction_id, &[]).is_none()
+}
+
+#[cfg(feature = "stage14-2-test")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Ipv6IngressEvent {
+    Ignored,
+    RouterAdvertisement,
+    NeighborAdvertisement,
+    NeighborSolicitation,
+    DuplicateAddress,
+}
+
+#[cfg(feature = "stage14-2-test")]
+pub struct Ipv6InterfaceState {
+    pub local: Ipv6Address,
+    pub router: RouterAdvertisementState,
+    pub neighbor: Ipv6NeighborEntry,
+    pub dad: DuplicateAddressDetection,
+}
+
+#[cfg(feature = "stage14-2-test")]
+impl Ipv6InterfaceState {
+    pub fn new(local: Ipv6Address) -> Self {
+        Self {
+            local,
+            router: RouterAdvertisementState::new(),
+            neighbor: Ipv6NeighborEntry::new(local),
+            dad: DuplicateAddressDetection::new(local),
+        }
+    }
+
+    pub fn receive_icmpv6(
+        &mut self,
+        source: Ipv6Address,
+        destination: Ipv6Address,
+        packet: &[u8],
+        now: u64,
+    ) -> Ipv6IngressEvent {
+        if !verify_icmpv6_checksum(source, destination, packet) {
+            return Ipv6IngressEvent::Ignored;
+        }
+        let Some(message) = parse_checked_icmpv6_neighbor_discovery(source, destination, packet) else {
+            return Ipv6IngressEvent::Ignored;
+        };
+        match message.kind {
+            NeighborDiscoveryKind::RouterAdvertisement => {
+                if self.router.apply(source, packet, now) {
+                    Ipv6IngressEvent::RouterAdvertisement
+                } else {
+                    Ipv6IngressEvent::Ignored
+                }
+            }
+            NeighborDiscoveryKind::NeighborAdvertisement => {
+                if !self.neighbor.observe_checked(source, destination, packet, now, 30) {
+                    return Ipv6IngressEvent::Ignored;
+                }
+                let _ = self.dad.observe_checked(source, destination, packet);
+                if self.dad.conflict { Ipv6IngressEvent::DuplicateAddress } else {
+                    Ipv6IngressEvent::NeighborAdvertisement
+                }
+            }
+            NeighborDiscoveryKind::NeighborSolicitation => {
+                if !self.dad.observe_checked(source, destination, packet) {
+                    return Ipv6IngressEvent::Ignored;
+                }
+                if self.dad.conflict { Ipv6IngressEvent::DuplicateAddress } else {
+                    Ipv6IngressEvent::NeighborSolicitation
+                }
+            }
+            NeighborDiscoveryKind::RouterSolicitation => Ipv6IngressEvent::Ignored,
+        }
+    }
+}
+
+#[cfg(feature = "stage14-2-test")]
+pub fn stage14_2_ipv6_interface_ingress_self_test() -> bool {
+    let peer = Ipv6Address([
+        0xfe, 0x80, 0, 0, 0, 0, 0, 0, 0x02, 0, 0, 0xff, 0xfe, 0, 0, 2,
+    ]);
+    let destination = peer.solicited_node_multicast();
+    let mut advertisement = [0u8; 24];
+    advertisement[0] = 136;
+    advertisement[8..24].copy_from_slice(&peer.0);
+    finish_icmpv6_checksum(peer, destination, &mut advertisement);
+    let mut state = Ipv6InterfaceState::new(peer);
+    if state.receive_icmpv6(peer, destination, &advertisement, 100)
+        != Ipv6IngressEvent::NeighborAdvertisement
+        || state.neighbor.state != Ipv6NeighborState::Reachable
+    { return false; }
+    let mut tampered = advertisement;
+    tampered[7] ^= 1;
+    if state.receive_icmpv6(peer, destination, &tampered, 101) != Ipv6IngressEvent::Ignored {
+        return false;
+    }
+    let unspecified = Ipv6Address([0; 16]);
+    let mut solicitation = [0u8; 24];
+    solicitation[0] = 135;
+    solicitation[8..24].copy_from_slice(&peer.0);
+    finish_icmpv6_checksum(unspecified, destination, &mut solicitation);
+    if state.receive_icmpv6(unspecified, destination, &solicitation, 102)
+        != Ipv6IngressEvent::NeighborSolicitation { return false; }
+    state.dad.arm();
+    state.receive_icmpv6(unspecified, destination, &solicitation, 103)
+        == Ipv6IngressEvent::DuplicateAddress
 }
 
 pub struct VirtioSmolDevice {
