@@ -3156,14 +3156,15 @@ pub enum RouteTableError {
     InvalidPrefix,
     InvalidGateway,
     InvalidHandle,
+    AddressFamily,
 }
 
 #[cfg(feature = "stage14-4-test")]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct WovenRoute {
-    pub network: Ipv4Address,
+    pub network: IpAddress,
     pub prefix_len: u8,
-    pub gateway: Ipv4Address,
+    pub gateway: IpAddress,
     pub metric: u16,
     pub generation: u32,
 }
@@ -3191,25 +3192,32 @@ impl WovenRouteTable {
 
     pub fn add(
         &mut self,
-        network: Ipv4Address,
+        network: IpAddress,
         prefix_len: u8,
-        gateway: Ipv4Address,
+        gateway: IpAddress,
         metric: u16,
     ) -> Result<WovenRoute, RouteTableError> {
-        if prefix_len > 32 {
-            return Err(RouteTableError::InvalidPrefix);
+        let network = normalize_route_network(network, prefix_len)?;
+        match gateway {
+            IpAddress::Ipv4(address) if address.octets() == [0; 4] => {
+                return Err(RouteTableError::InvalidGateway);
+            }
+            IpAddress::Ipv6(address) if address.is_unspecified() || address.is_multicast() => {
+                return Err(RouteTableError::InvalidGateway);
+            }
+            _ => {}
         }
-        if gateway.octets() == [0; 4] {
-            return Err(RouteTableError::InvalidGateway);
+        if core::mem::discriminant(&network) != core::mem::discriminant(&gateway) {
+            return Err(RouteTableError::AddressFamily);
         }
+
         let index = self
             .slots
             .iter()
             .position(|slot| slot.route.is_none())
             .ok_or(RouteTableError::Capacity)?;
-        let network_value = u32::from_be_bytes(network.octets()) & prefix_mask(prefix_len);
         let route = WovenRoute {
-            network: Ipv4Address::from_octets(network_value.to_be_bytes()),
+            network,
             prefix_len,
             gateway,
             metric,
@@ -3228,41 +3236,110 @@ impl WovenRouteTable {
         Ok(())
     }
 
-    pub fn lookup(&self, destination: Ipv4Address) -> Option<WovenRoute> {
+    pub fn lookup(&self, destination: IpAddress) -> Option<WovenRoute> {
         self.slots
             .iter()
             .filter_map(|slot| slot.route)
-            .filter(|route| ipv4_matches(route.network, destination, route.prefix_len))
+            .filter(|route| route_matches(*route, destination))
             .min_by_key(|route| (u8::MAX - route.prefix_len, route.metric, route.generation))
     }
 }
 
 #[cfg(feature = "stage14-4-test")]
-fn prefix_mask(prefix_len: u8) -> u32 {
+fn normalize_route_network(
+    network: IpAddress,
+    prefix_len: u8,
+) -> Result<IpAddress, RouteTableError> {
+    match network {
+        IpAddress::Ipv4(address) => {
+            if prefix_len > 32 {
+                return Err(RouteTableError::InvalidPrefix);
+            }
+            let value = u32::from_be_bytes(address.octets()) & prefix_mask_v4(prefix_len);
+            Ok(IpAddress::Ipv4(Ipv4Address::from_octets(value.to_be_bytes())))
+        }
+        IpAddress::Ipv6(address) => {
+            if prefix_len > 128 {
+                return Err(RouteTableError::InvalidPrefix);
+            }
+            let mut octets = address.octets();
+            let whole = usize::from(prefix_len / 8);
+            let rem = prefix_len % 8;
+            if rem != 0 && whole < octets.len() {
+                octets[whole] &= u8::MAX << (8 - rem);
+            }
+            let clear_from = whole + usize::from(rem != 0);
+            octets[clear_from..].fill(0);
+            Ok(IpAddress::Ipv6(SmolIpv6Address::from_octets(octets)))
+        }
+    }
+}
+
+#[cfg(feature = "stage14-4-test")]
+fn prefix_mask_v4(prefix_len: u8) -> u32 {
     if prefix_len == 0 { 0 } else { u32::MAX << (32 - prefix_len) }
 }
 
 #[cfg(feature = "stage14-4-test")]
-fn ipv4_matches(network: Ipv4Address, destination: Ipv4Address, prefix_len: u8) -> bool {
-    let mask = prefix_mask(prefix_len);
-    (u32::from_be_bytes(network.octets()) & mask)
-        == (u32::from_be_bytes(destination.octets()) & mask)
+fn route_matches(route: WovenRoute, destination: IpAddress) -> bool {
+    match (route.network, destination) {
+        (IpAddress::Ipv4(network), IpAddress::Ipv4(destination)) => {
+            let mask = prefix_mask_v4(route.prefix_len);
+            (u32::from_be_bytes(network.octets()) & mask)
+                == (u32::from_be_bytes(destination.octets()) & mask)
+        }
+        (IpAddress::Ipv6(network), IpAddress::Ipv6(destination)) => {
+            let Ok(normalized) =
+                normalize_route_network(IpAddress::Ipv6(destination), route.prefix_len)
+            else {
+                return false;
+            };
+            normalized == IpAddress::Ipv6(network)
+        }
+        _ => false,
+    }
 }
 
 #[cfg(feature = "stage14-4-test")]
 pub fn stage14_4_routing_table_self_test() -> bool {
     let mut table = WovenRouteTable::new();
-    let default = table.add(Ipv4Address::new(0, 0, 0, 0), 0, DEFAULT_GATEWAY, 100).ok();
-    let broad = table.add(Ipv4Address::new(10, 0, 0, 0), 16, DEFAULT_GATEWAY, 100).ok();
-    let specific = table.add(Ipv4Address::new(10, 0, 2, 0), 24, DEFAULT_GATEWAY, 50).ok();
+    let gateway4 = IpAddress::Ipv4(DEFAULT_GATEWAY);
+    let default = table.add(IpAddress::Ipv4(Ipv4Address::UNSPECIFIED), 0, gateway4, 100).ok();
+    let broad = table.add(IpAddress::Ipv4(Ipv4Address::new(10, 0, 0, 0)), 16, gateway4, 100).ok();
+    let specific = table.add(IpAddress::Ipv4(Ipv4Address::new(10, 0, 2, 99)), 24, gateway4, 50).ok();
+    let gateway6 = IpAddress::Ipv6(SmolIpv6Address::from_octets([
+        0xfe, 0x80, 0, 0, 0, 0, 0, 0, 0x50, 0x54, 0, 0xff, 0xfe, 0x12, 0x34, 0x56,
+    ]));
+    let ipv6 = table.add(
+        IpAddress::Ipv6(SmolIpv6Address::from_octets([
+            0x20, 0x01, 0x0d, 0xb8, 0x12, 0x34, 0x56, 0x78, 0xaa, 0xbb, 0xcc, 0xdd, 0, 0, 0, 1,
+        ])),
+        64,
+        gateway6,
+        25,
+    ).ok();
+
     let Some(default) = default else { return false; };
     let Some(broad) = broad else { return false; };
     let Some(specific) = specific else { return false; };
-    table.lookup(Ipv4Address::new(10, 0, 2, 15)) == Some(specific)
-        && table.lookup(Ipv4Address::new(10, 0, 9, 15)) == Some(broad)
-        && table.lookup(Ipv4Address::new(192, 0, 2, 1)) == Some(default)
+    let Some(ipv6) = ipv6 else { return false; };
+    let ipv6_destination = IpAddress::Ipv6(SmolIpv6Address::from_octets([
+        0x20, 0x01, 0x0d, 0xb8, 0x12, 0x34, 0x56, 0x78, 0, 0, 0, 0, 0, 0, 0, 0x42,
+    ]));
+
+    table.lookup(IpAddress::Ipv4(Ipv4Address::new(10, 0, 2, 15))) == Some(specific)
+        && table.lookup(IpAddress::Ipv4(Ipv4Address::new(10, 0, 9, 15))) == Some(broad)
+        && table.lookup(IpAddress::Ipv4(Ipv4Address::new(192, 0, 2, 1))) == Some(default)
+        && table.lookup(ipv6_destination) == Some(ipv6)
+        && ipv6.network == normalize_route_network(ipv6_destination, 64).ok().unwrap()
+        && table.add(IpAddress::Ipv4(Ipv4Address::new(10, 0, 0, 0)), 33, gateway4, 1)
+            == Err(RouteTableError::InvalidPrefix)
+        && table.add(IpAddress::Ipv6(SmolIpv6Address::UNSPECIFIED), 129, gateway6, 1)
+            == Err(RouteTableError::InvalidPrefix)
+        && table.add(IpAddress::Ipv4(Ipv4Address::new(10, 0, 0, 0)), 8, gateway6, 1)
+            == Err(RouteTableError::AddressFamily)
         && table.remove(specific).is_ok()
-        && table.lookup(Ipv4Address::new(10, 0, 2, 15)) == Some(broad)
+        && table.lookup(IpAddress::Ipv4(Ipv4Address::new(10, 0, 2, 15))) == Some(broad)
         && table.remove(specific) == Err(RouteTableError::InvalidHandle)
 }
 
