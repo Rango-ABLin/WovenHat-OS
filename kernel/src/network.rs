@@ -209,6 +209,162 @@ pub fn parse_icmpv6_neighbor_discovery(
 }
 
 #[cfg(feature = "stage14-2-test")]
+#[cfg(feature = "stage14-2-test")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct RouterAdvertisementState {
+    pub router: Option<Ipv6Address>,
+    pub router_expires_at: u64,
+    pub prefix: Option<Ipv6Prefix>,
+    pub prefix_valid_until: u64,
+    pub prefix_preferred_until: u64,
+}
+
+#[cfg(feature = "stage14-2-test")]
+impl RouterAdvertisementState {
+    pub const fn new() -> Self {
+        Self {
+            router: None,
+            router_expires_at: 0,
+            prefix: None,
+            prefix_valid_until: 0,
+            prefix_preferred_until: 0,
+        }
+    }
+
+    pub fn expire(&mut self, now: u64) {
+        if self.router.is_some() && now >= self.router_expires_at {
+            self.router = None;
+            self.router_expires_at = 0;
+        }
+        if self.prefix.is_some() && now >= self.prefix_valid_until {
+            self.prefix = None;
+            self.prefix_valid_until = 0;
+            self.prefix_preferred_until = 0;
+        } else if self.prefix.is_some() && now >= self.prefix_preferred_until {
+            self.prefix_preferred_until = now;
+        }
+    }
+
+    pub fn apply(
+        &mut self,
+        router: Ipv6Address,
+        packet: &[u8],
+        now: u64,
+    ) -> bool {
+        let Some(message) = parse_icmpv6_neighbor_discovery(packet) else {
+            return false;
+        };
+        if message.kind != NeighborDiscoveryKind::RouterAdvertisement || !router.is_link_local() {
+            return false;
+        }
+
+        let router_lifetime = u16::from_be_bytes([packet[6], packet[7]]) as u64;
+        if router_lifetime == 0 {
+            if self.router == Some(router) {
+                self.router = None;
+                self.router_expires_at = 0;
+            }
+        } else {
+            self.router = Some(router);
+            self.router_expires_at = now.saturating_add(router_lifetime);
+        }
+
+        let mut options = message.option_bytes;
+        while !options.is_empty() {
+            let option_len = options[1] as usize * 8;
+            if options[0] == 3 && option_len == 32 {
+                let prefix_len = options[2];
+                let valid = u32::from_be_bytes([options[4], options[5], options[6], options[7]]) as u64;
+                let preferred =
+                    u32::from_be_bytes([options[8], options[9], options[10], options[11]]) as u64;
+                if preferred > valid {
+                    return false;
+                }
+                let mut bytes = [0u8; 16];
+                bytes.copy_from_slice(&options[16..32]);
+                let Some(prefix) = Ipv6Prefix::new(bytes, prefix_len) else {
+                    return false;
+                };
+                if valid == 0 {
+                    if self.prefix == Some(prefix) {
+                        self.prefix = None;
+                        self.prefix_valid_until = 0;
+                        self.prefix_preferred_until = 0;
+                    }
+                } else {
+                    self.prefix = Some(prefix);
+                    self.prefix_valid_until = now.saturating_add(valid);
+                    self.prefix_preferred_until = now.saturating_add(preferred);
+                }
+            }
+            options = &options[option_len..];
+        }
+        true
+    }
+}
+
+#[cfg(feature = "stage14-2-test")]
+pub fn stage14_2_router_advertisement_state_self_test() -> bool {
+    let router = Ipv6Address([0xfe, 0x80, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1]);
+    let mut packet = [0u8; 48];
+    packet[0] = 134;
+    packet[6..8].copy_from_slice(&30u16.to_be_bytes());
+    packet[16] = 3;
+    packet[17] = 4;
+    packet[18] = 64;
+    packet[19] = 0xc0;
+    packet[20..24].copy_from_slice(&120u32.to_be_bytes());
+    packet[24..28].copy_from_slice(&60u32.to_be_bytes());
+    packet[32..48].copy_from_slice(&[
+        0x20, 0x01, 0x0d, 0xb8, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    ]);
+
+    let mut state = RouterAdvertisementState::new();
+    if !state.apply(router, &packet, 100)
+        || state.router != Some(router)
+        || state.router_expires_at != 130
+        || state.prefix.is_none()
+        || state.prefix_valid_until != 220
+        || state.prefix_preferred_until != 160
+    {
+        return false;
+    }
+    state.expire(160);
+    if state.prefix.is_none() || state.prefix_preferred_until != 160 {
+        return false;
+    }
+    state.expire(130);
+    if state.router.is_some() || state.prefix.is_none() {
+        return false;
+    }
+    state.expire(220);
+    if state.prefix.is_some() {
+        return false;
+    }
+
+    let mut invalid = packet;
+    invalid[20..24].copy_from_slice(&10u32.to_be_bytes());
+    invalid[24..28].copy_from_slice(&11u32.to_be_bytes());
+    if state.apply(router, &invalid, 300) {
+        return false;
+    }
+
+    let global_router =
+        Ipv6Address([0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1]);
+    if state.apply(global_router, &packet, 300) {
+        return false;
+    }
+
+    let mut withdraw = packet;
+    withdraw[6..8].copy_from_slice(&0u16.to_be_bytes());
+    withdraw[20..24].copy_from_slice(&0u32.to_be_bytes());
+    withdraw[24..28].copy_from_slice(&0u32.to_be_bytes());
+    state.apply(router, &packet, 400)
+        && state.apply(router, &withdraw, 401)
+        && state.router.is_none()
+        && state.prefix.is_none()
+}
+
 pub fn stage14_2_ipv6_foundation_self_test() -> bool {
     let link_local = Ipv6Prefix::new(
         [0xfe, 0x80, 0, 0, 0, 0, 0, 0, 0x02, 0, 0xff, 0xfe, 0, 0, 0, 1],
