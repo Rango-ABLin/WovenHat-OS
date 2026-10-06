@@ -655,6 +655,41 @@ TCP/UDP local-endpoint combination. Future networking work should add explicit
 live-endpoint collision selection/retry semantics before making that stronger
 claim.
 
+### Stage 14.2 IPv6 closure
+
+Stage 14.2 is accepted for the bounded WovenNet IPv6 scope defined by the
+master roadmap: IPv6, DHCPv6, and IPv6 Neighbor Discovery.
+
+The implementation includes bounded IPv6 address/prefix types and
+solicited-node multicast derivation; ICMPv6 Neighbor Discovery parsing for
+RS/RA/NS/NA; IPv6 pseudo-header checksum generation/verification; router and
+prefix lifetime state; neighbor reachability and Duplicate Address Detection;
+SLAAC address lifecycle; DHCPv6 message parsing/serialization, client
+Solicit/Advertise/Request/Reply state, and IA_NA/IAADDR lease lifetimes; an
+interface-level ICMPv6 ingress state boundary; and runtime installation of a
+MAC-derived IPv6 link-local /64 alongside the existing IPv4 address.
+
+The closure hardening gate rejects NDP traffic whose IPv6 Hop Limit is not
+255. It also requires link-local Router Advertisement sources, rejects
+Neighbor Advertisements from the unspecified source, and constrains DAD
+Neighbor Solicitations from the unspecified source to the tentative address's
+solicited-node multicast destination. Existing ICMPv6 checksum validation
+remains mandatory before state mutation.
+
+The accepted serial closure markers include
+`[S14.2J] WovenNet IPv6 interface ingress: PASSED`,
+`[S14.2K] WovenNet runtime IPv6 integration: PASSED`, and
+`[S14.2L] WovenNet NDP ingress hardening: PASSED`. The network QEMU harness
+carries these requirements forward into the Stage 14.3 and Stage 14.4 feature
+gates so later networking work cannot silently regress the accepted IPv6
+boundary.
+
+This acceptance is intentionally scoped. It does not claim physical-NIC IPv6
+interoperability across hardware families, a complete POSIX/BSD IPv6 socket
+surface, production route ownership/policy, or exhaustive RFC 4861/8415
+interoperability. Those concerns remain appropriate follow-up hardening or
+belong to Stage 14.3+.
+
 ### Stage 14.3 socket API boundary
 
 Socket connect admission uses one fail-closed endpoint validator before either
