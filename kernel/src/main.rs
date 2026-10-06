@@ -2166,6 +2166,16 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
                                     ));
                                     halt();
                                 }
+                                if network::stage14_2_dhcpv6_protocol_self_test() {
+                                    serial::write_line(format_args!(
+                                        "[S14.2H] WovenNet DHCPv6 protocol foundation: PASSED"
+                                    ));
+                                } else {
+                                    serial::write_line(format_args!(
+                                        "[S14.2H] WovenNet DHCPv6 protocol foundation: FAILED"
+                                    ));
+                                    halt();
+                                }
                             }
                         } else {
                             serial::write_line(format_args!(
