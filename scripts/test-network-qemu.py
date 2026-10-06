@@ -232,6 +232,7 @@ def main():
             *(['[S14.2H] WovenNet DHCPv6 protocol foundation: PASSED'] if args.feature in ('stage14-2-test', 'stage14-3-test') else []),
             *(['[S14.2I] WovenNet DHCPv6 client state machine: PASSED'] if args.feature in ('stage14-2-test', 'stage14-3-test') else []),
             *(['[S14.2J] WovenNet IPv6 interface ingress: PASSED'] if args.feature in ('stage14-2-test', 'stage14-3-test') else []),
+            *(['[S14.2K] WovenNet runtime IPv6 integration: PASSED'] if args.feature in ('stage14-2-test', 'stage14-3-test') else []),
             *(['[S14.3] WovenNet socket API boundary: PASSED'] if args.feature == 'stage14-3-test' else []),
         ])
     if result != 33 or any(marker not in log for marker in required):
