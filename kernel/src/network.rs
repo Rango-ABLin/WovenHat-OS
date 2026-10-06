@@ -8,13 +8,16 @@
 use crate::irq_lock::IrqMutex as Mutex;
 use alloc::{vec, vec::Vec};
 use smoltcp::{
-    iface::{Config, Interface, Route, SocketHandle, SocketSet},
+    iface::{Config, Interface, SocketHandle, SocketSet},
     phy::{ChecksumCapabilities, Device, DeviceCapabilities, Medium, RxToken, TxToken},
     socket::{dhcpv4, dns, icmp, tcp, udp},
     time::Instant,
     wire::{EthernetAddress, IpAddress, IpCidr, IpEndpoint, Ipv4Address},
 };
 use spin::Once;
+
+#[cfg(feature = "stage14-4-test")]
+use smoltcp::iface::Route;
 
 #[cfg(feature = "stage14-2-test")]
 use smoltcp::wire::Ipv6Address as SmolIpv6Address;
