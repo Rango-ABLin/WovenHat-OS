@@ -3105,6 +3105,47 @@ pub fn stage14_3_socket_api_self_test() -> bool {
 }
 
 
+#[cfg(feature = "stage14-3-test")]
+pub fn stage14_3_socket_authority_self_test() -> bool {
+    const OWNER_A: u64 = 0x143A;
+    const OWNER_B: u64 = 0x143B;
+
+    let Ok(id) = socket_open(OWNER_A, SocketKind::Udp) else {
+        return false;
+    };
+    if socket_peer_v1(OWNER_B, id) != Err(SocketError::WrongOwner) {
+        let _ = socket_close(OWNER_A, id);
+        return false;
+    }
+
+    let Ok(token) = pin_socket(OWNER_A, id) else {
+        let _ = socket_close(OWNER_A, id);
+        return false;
+    };
+    if socket_close(OWNER_A, id).is_err()
+        || socket_peer_v1(OWNER_A, id) != Err(SocketError::Invalid)
+    {
+        unpin_socket(token);
+        return false;
+    }
+
+    // Closing a descriptor revokes descriptor authority immediately. The
+    // pinned generation remains valid only until the outstanding async
+    // reference is released; after slot reuse the old token must be rejected.
+    unpin_socket(token);
+    let Ok(reused) = socket_open(OWNER_A, SocketKind::Udp) else {
+        return false;
+    };
+    if reused != id || socket_send_pinned(token, b"stale") != Err(SocketError::Invalid) {
+        let _ = socket_close(OWNER_A, reused);
+        return false;
+    }
+
+    let result = socket_peer_v1(OWNER_B, reused) == Err(SocketError::WrongOwner);
+    let _ = socket_close(OWNER_A, reused);
+    result && stats().user_sockets == 0
+}
+
 #[cfg(feature = "stage14-4-test")]
 const MAX_WOVEN_ROUTES: usize = 8;
 
