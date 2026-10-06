@@ -531,6 +531,73 @@ pub fn parse_checked_icmpv6_neighbor_discovery(
 }
 
 #[cfg(feature = "stage14-2-test")]
+fn parse_validated_icmpv6_neighbor_discovery(
+    source: Ipv6Address,
+    destination: Ipv6Address,
+    hop_limit: u8,
+    packet: &[u8],
+) -> Option<NeighborDiscoveryMessage<'_>> {
+    if hop_limit != 255 {
+        return None;
+    }
+    let message = parse_checked_icmpv6_neighbor_discovery(source, destination, packet)?;
+    match message.kind {
+        NeighborDiscoveryKind::RouterAdvertisement
+            if !source.is_link_local() || destination.is_unspecified() =>
+        {
+            None
+        }
+        NeighborDiscoveryKind::NeighborAdvertisement
+            if source.is_unspecified() || destination.is_unspecified() =>
+        {
+            None
+        }
+        NeighborDiscoveryKind::NeighborSolicitation
+            if source.is_unspecified() && destination != message.target?.solicited_node_multicast() =>
+        {
+            None
+        }
+        _ => Some(message),
+    }
+}
+
+#[cfg(feature = "stage14-2-test")]
+pub fn stage14_2_ndp_ingress_hardening_self_test() -> bool {
+    let peer = Ipv6Address([
+        0xfe, 0x80, 0, 0, 0, 0, 0, 0, 0x02, 0, 0, 0xff, 0xfe, 0, 0, 2,
+    ]);
+    let destination = peer.solicited_node_multicast();
+    let mut advertisement = [0u8; 24];
+    advertisement[0] = 136;
+    advertisement[8..24].copy_from_slice(&peer.0);
+    finish_icmpv6_checksum(peer, destination, &mut advertisement);
+    if parse_validated_icmpv6_neighbor_discovery(peer, destination, 255, &advertisement).is_none()
+        || parse_validated_icmpv6_neighbor_discovery(peer, destination, 64, &advertisement).is_some()
+    {
+        return false;
+    }
+
+    let unspecified = Ipv6Address([0; 16]);
+    let mut solicitation = [0u8; 24];
+    solicitation[0] = 135;
+    solicitation[8..24].copy_from_slice(&peer.0);
+    finish_icmpv6_checksum(unspecified, destination, &mut solicitation);
+    if parse_validated_icmpv6_neighbor_discovery(
+        unspecified,
+        destination,
+        255,
+        &solicitation,
+    )
+    .is_none()
+    {
+        return false;
+    }
+    let all_nodes = Ipv6Address([0xff, 0x02, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1]);
+    finish_icmpv6_checksum(unspecified, all_nodes, &mut solicitation);
+    parse_validated_icmpv6_neighbor_discovery(unspecified, all_nodes, 255, &solicitation).is_none()
+}
+
+#[cfg(feature = "stage14-2-test")]
 pub fn stage14_2_icmpv6_checksum_self_test() -> bool {
     let source = Ipv6Address([
         0xfe, 0x80, 0, 0, 0, 0, 0, 0, 0x02, 0, 0, 0xff, 0xfe, 0, 0, 1,
@@ -1294,10 +1361,20 @@ impl Ipv6InterfaceState {
         packet: &[u8],
         now: u64,
     ) -> Ipv6IngressEvent {
-        if !verify_icmpv6_checksum(source, destination, packet) {
-            return Ipv6IngressEvent::Ignored;
-        }
-        let Some(message) = parse_checked_icmpv6_neighbor_discovery(source, destination, packet) else {
+        self.receive_icmpv6_with_hop_limit(source, destination, 255, packet, now)
+    }
+
+    pub fn receive_icmpv6_with_hop_limit(
+        &mut self,
+        source: Ipv6Address,
+        destination: Ipv6Address,
+        hop_limit: u8,
+        packet: &[u8],
+        now: u64,
+    ) -> Ipv6IngressEvent {
+        let Some(message) =
+            parse_validated_icmpv6_neighbor_discovery(source, destination, hop_limit, packet)
+        else {
             return Ipv6IngressEvent::Ignored;
         };
         match message.kind {
