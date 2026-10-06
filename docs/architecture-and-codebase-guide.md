@@ -690,13 +690,35 @@ surface, production route ownership/policy, or exhaustive RFC 4861/8415
 interoperability. Those concerns remain appropriate follow-up hardening or
 belong to Stage 14.3+.
 
-### Stage 14.3 socket API boundary
+### Stage 14.3 socket API closure
 
-Socket connect admission uses one fail-closed endpoint validator before either
-the legacy packed IPv4 ABI or smoltcp socket state is touched. It rejects zero
-ports, unspecified IPv4 addresses, and IPv4 multicast destinations. Descriptor
-ownership, generation checks, and async pinning remain the authority model;
-Stage 14.3 does not add live IPv6 sockets or routing-table mutation.
+Stage 14.3 is accepted for the bounded WovenNet Socket API scope.
+
+The existing owner-scoped socket table remains the authority root for UDP and
+TCP open, bind/listen, connect, send, receive, peer inspection, close, and
+process cleanup. Descriptors are checked against their owning process, while
+asynchronous work uses `SocketToken` values containing the slot, owner, and
+generation. Closing a descriptor revokes descriptor authority immediately;
+after outstanding pins are released and the slot is reused, an old token
+cannot operate on the new socket generation.
+
+The endpoint boundary preserves the legacy packed IPv4 representation for
+compatibility and adds `SocketEndpointV1`, a fixed-layout versioned endpoint
+representation for IPv4 and IPv6. It rejects zero ports, malformed IPv4
+encodings, unspecified or multicast destinations, unknown address families,
+and non-zero reserved ABI fields. The versioned representation is wired into
+real socket connect and peer inspection operations rather than existing only
+as a serialization helper.
+
+The accepted serial gates are
+`[S14.3] WovenNet socket API boundary: PASSED` and
+`[S14.3A] WovenNet socket authority lifecycle: PASSED`. The QEMU networking
+harness requires both markers for Stage 14.3 and carries them forward into
+Stage 14.4, preventing routing work from silently weakening socket authority.
+
+This acceptance does not claim a complete POSIX/BSD socket surface,
+exhaustive physical-NIC IPv6 interoperability, or production routing-policy
+ownership. Those remain later platform hardening or Stage 14.4+ concerns.
 
 ### Stage 14.4 routing-table foundation
 
