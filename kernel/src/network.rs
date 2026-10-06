@@ -3432,10 +3432,36 @@ pub fn stage14_4_live_route_self_test() -> bool {
         let _ = remove_woven_route(&mut runtime.iface, route);
         return false;
     }
-    if remove_woven_route(&mut runtime.iface, route).is_err() {
+    if remove_woven_route(&mut runtime.iface, route).is_err()
+        || remove_woven_route(&mut runtime.iface, route) != Err(RouteTableError::InvalidHandle)
+    {
         return false;
     }
-    remove_woven_route(&mut runtime.iface, route) == Err(RouteTableError::InvalidHandle)
+
+    let gateway6 = IpAddress::Ipv6(SmolIpv6Address::from_octets([
+        0xfe, 0x80, 0, 0, 0, 0, 0, 0, 0x50, 0x54, 0, 0xff, 0xfe, 0x12, 0x34, 0x56,
+    ]));
+    let Ok(route6) = policy.add(
+        OWNER,
+        IpAddress::Ipv6(SmolIpv6Address::from_octets([
+            0x20, 0x01, 0x0d, 0xb8, 0x14, 0x04, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1,
+        ])),
+        64,
+        gateway6,
+        10,
+    ) else {
+        return false;
+    };
+    if install_woven_route(&mut runtime.iface, route6).is_err()
+        || install_woven_route(&mut runtime.iface, route6).is_err()
+    {
+        let _ = remove_woven_route(&mut runtime.iface, route6);
+        return false;
+    }
+    if remove_woven_route(&mut runtime.iface, route6).is_err() {
+        return false;
+    }
+    remove_woven_route(&mut runtime.iface, route6) == Err(RouteTableError::InvalidHandle)
 }
 
 pub fn endpoint_to_packed(endpoint: IpEndpoint) -> u64 {
