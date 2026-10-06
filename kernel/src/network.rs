@@ -685,6 +685,132 @@ pub fn stage14_2_neighbor_state_dad_self_test() -> bool {
     !clean_dad.observe_checked(unspecified, solicited, &tampered) && !clean_dad.conflict
 }
 
+#[cfg(feature = "stage14-2-test")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SlaacAddressState {
+    Tentative,
+    Preferred,
+    Deprecated,
+    Duplicate,
+    Expired,
+}
+
+#[cfg(feature = "stage14-2-test")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct SlaacAddress {
+    pub address: Ipv6Address,
+    pub state: SlaacAddressState,
+    pub preferred_until: u64,
+    pub valid_until: u64,
+}
+
+#[cfg(feature = "stage14-2-test")]
+impl SlaacAddress {
+    pub fn from_prefix(
+        prefix: Ipv6Prefix,
+        interface_id: [u8; 8],
+        preferred_until: u64,
+        valid_until: u64,
+    ) -> Option<Self> {
+        if prefix.prefix_len != 64
+            || prefix.is_multicast()
+            || prefix.is_link_local()
+            || preferred_until > valid_until
+        {
+            return None;
+        }
+        let mut bytes = prefix.address;
+        bytes[8..16].copy_from_slice(&interface_id);
+        Some(Self {
+            address: Ipv6Address(bytes),
+            state: SlaacAddressState::Tentative,
+            preferred_until,
+            valid_until,
+        })
+    }
+
+    pub fn complete_dad(&mut self, dad: DuplicateAddressDetection, now: u64) -> bool {
+        if dad.tentative != self.address || self.state != SlaacAddressState::Tentative {
+            return false;
+        }
+        self.state = if dad.conflict {
+            SlaacAddressState::Duplicate
+        } else if now >= self.valid_until {
+            SlaacAddressState::Expired
+        } else if now >= self.preferred_until {
+            SlaacAddressState::Deprecated
+        } else {
+            SlaacAddressState::Preferred
+        };
+        true
+    }
+
+    pub fn expire(&mut self, now: u64) {
+        if matches!(
+            self.state,
+            SlaacAddressState::Duplicate | SlaacAddressState::Expired
+        ) {
+            return;
+        }
+        if now >= self.valid_until {
+            self.state = SlaacAddressState::Expired;
+        } else if now >= self.preferred_until
+            && self.state != SlaacAddressState::Tentative
+        {
+            self.state = SlaacAddressState::Deprecated;
+        }
+    }
+}
+
+#[cfg(feature = "stage14-2-test")]
+pub fn stage14_2_slaac_self_test() -> bool {
+    let prefix = Ipv6Prefix::new(
+        [0x20, 0x01, 0x0d, 0xb8, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        64,
+    )
+    .expect("valid SLAAC prefix");
+    let interface_id = [0x02, 0, 0xff, 0xfe, 0, 0, 0, 1];
+    let Some(mut address) = SlaacAddress::from_prefix(prefix, interface_id, 160, 220) else {
+        return false;
+    };
+    if address.address.0
+        != [0x20, 0x01, 0x0d, 0xb8, 0, 1, 0, 0, 0x02, 0, 0xff, 0xfe, 0, 0, 0, 1]
+        || address.state != SlaacAddressState::Tentative
+    {
+        return false;
+    }
+
+    let clean_dad = DuplicateAddressDetection::new(address.address);
+    if !address.complete_dad(clean_dad, 120)
+        || address.state != SlaacAddressState::Preferred
+    {
+        return false;
+    }
+    address.expire(160);
+    if address.state != SlaacAddressState::Deprecated {
+        return false;
+    }
+    address.expire(220);
+    if address.state != SlaacAddressState::Expired {
+        return false;
+    }
+
+    let Some(mut duplicate) = SlaacAddress::from_prefix(prefix, interface_id, 360, 420) else {
+        return false;
+    };
+    let mut conflict = DuplicateAddressDetection::new(duplicate.address);
+    conflict.conflict = true;
+    if !duplicate.complete_dad(conflict, 320)
+        || duplicate.state != SlaacAddressState::Duplicate
+    {
+        return false;
+    }
+
+    let non_64 = Ipv6Prefix::new(prefix.address, 56).expect("valid IPv6 prefix");
+    SlaacAddress::from_prefix(non_64, interface_id, 10, 20).is_none()
+        && SlaacAddress::from_prefix(prefix, interface_id, 21, 20).is_none()
+}
+
 pub struct VirtioSmolDevice {
     rx: [u8; MAX_FRAME],
 }
