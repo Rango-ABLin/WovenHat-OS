@@ -1950,7 +1950,7 @@ pub fn init() -> Result<(), InitError> {
         {
             let link_local = stage14_2_link_local_from_mac(mac_bytes);
             let _ = addrs.push(IpCidr::new(
-                IpAddress::Ipv6(SmolIpv6Address::from_bytes(&link_local.0)),
+                IpAddress::Ipv6(SmolIpv6Address::from_octets(link_local.0)),
                 64,
             ));
         }
@@ -2798,8 +2798,9 @@ pub fn dns_poll(id: u64) -> Result<Option<Ipv4Address>, SocketError> {
     {
         Ok(addrs) => {
             runtime.dns_queries[index] = None;
-            Ok(addrs.into_iter().next().map(|addr| match addr {
-                IpAddress::Ipv4(v4) => v4,
+            Ok(addrs.into_iter().next().and_then(|addr| match addr {
+                IpAddress::Ipv4(v4) => Some(v4),
+                IpAddress::Ipv6(_) => None,
             }))
         }
         Err(dns::GetQueryResultError::Pending) => Ok(None),
@@ -2906,9 +2907,13 @@ fn valid_socket_endpoint(endpoint: IpEndpoint) -> bool {
     if endpoint.port == 0 {
         return false;
     }
-    let IpAddress::Ipv4(address) = endpoint.addr;
-    let octets = address.octets();
-    octets != [0; 4] && !(224..=239).contains(&octets[0])
+    match endpoint.addr {
+        IpAddress::Ipv4(address) => {
+            let octets = address.octets();
+            octets != [0; 4] && !(224..=239).contains(&octets[0])
+        }
+        IpAddress::Ipv6(_) => false,
+    }
 }
 
 #[cfg(feature = "stage14-3-test")]
@@ -3049,8 +3054,12 @@ pub fn stage14_4_routing_table_self_test() -> bool {
 }
 
 pub fn endpoint_to_packed(endpoint: IpEndpoint) -> u64 {
-    let IpAddress::Ipv4(ip) = endpoint.addr;
-    u64::from(u32::from_be_bytes(ip.octets())) | ((endpoint.port as u64) << 32)
+    match endpoint.addr {
+        IpAddress::Ipv4(ip) => {
+            u64::from(u32::from_be_bytes(ip.octets())) | ((endpoint.port as u64) << 32)
+        }
+        IpAddress::Ipv6(_) => 0,
+    }
 }
 
 pub fn stats() -> NetStats {
