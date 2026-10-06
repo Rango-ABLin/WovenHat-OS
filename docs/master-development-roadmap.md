@@ -372,9 +372,19 @@ including Hop Limit 255 and source-address validation. Physical-NIC IPv6
 qualification, broader live IPv6 socket policy, and routing ownership remain
 separate follow-up/Stage 14.3+ concerns.
 
-14.3
+14.3 — ACCEPTED
 
 Socket API.
+
+Acceptance status: complete in the bounded WovenNet socket-API scope. The
+accepted boundary preserves the legacy packed IPv4 ABI while adding a
+versioned IPv4/IPv6 endpoint representation, routes that representation
+through real connect/peer operations, and retains owner-scoped descriptors,
+generation-bound async pinning, stale-token rejection, bounded slot reuse,
+and process socket cleanup. The mandatory Stage 14.3 authority/lifecycle gate
+is inherited by downstream networking tests. A complete POSIX/BSD API,
+listening/accept ergonomics beyond the current kernel primitives, and
+physical-network IPv6 interoperability remain later platform hardening.
 
 14.4
 
