@@ -14,3 +14,9 @@ foundation but live lease exchange is not.
 Verification requires feature build and warning-denying Clippy, the complete
 release matrix, and focused Stage 14.2 QEMU acceptance on 1/2/4 CPUs with
 markers A–J.
+
+Verification on the exact source tip:
+
+- `cargo build --features stage14-2-test` — PASS.
+- `cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage14-2-test -- -D warnings` — PASS.
+- The focused QEMU gate passed on 1, 2, and 4 CPUs.
