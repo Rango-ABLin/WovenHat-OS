@@ -78,7 +78,7 @@ impl Ipv6Prefix {
 #[cfg(feature = "stage14-2-test")]
 pub fn stage14_2_ipv6_foundation_self_test() -> bool {
     let link_local = Ipv6Prefix::new(
-        [0xfe, 0x80, 0, 0, 0, 0, 0, 0, 0x02, 0, 0, 0xff, 0xfe, 0, 0, 0, 1],
+        [0xfe, 0x80, 0, 0, 0, 0, 0, 0, 0x02, 0, 0xff, 0xfe, 0, 0, 0, 1],
         64,
     );
     let unspecified = Ipv6Prefix::new([0; 16], 128);
