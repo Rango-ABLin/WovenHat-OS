@@ -17,6 +17,20 @@ const DATA_JOURNAL_V1_VERSION: u16 = 1;
 const DATA_JOURNAL_VERSION: u16 = 2;
 const DATA_JOURNAL_PREPARED: u8 = 1;
 const DATA_JOURNAL_COMMITTED: u8 = 2;
+// WDJ1 is retained for compatibility with existing single-file records.
+// WDJ2 is a separate bounded batch format so a recovery reader never has to
+// reinterpret an already-persisted WDJ1 record.
+const BATCH_JOURNAL_NAME: &str = "WOVENJ2.BIN";
+const BATCH_JOURNAL_MAGIC: &[u8; 4] = b"WDJ2";
+const BATCH_JOURNAL_VERSION: u16 = 1;
+const BATCH_JOURNAL_HEADER_SIZE: usize = 16;
+const BATCH_JOURNAL_ENTRY_HEADER_SIZE: usize = 27;
+const BATCH_JOURNAL_MAX_ENTRIES: usize = 4;
+const BATCH_JOURNAL_MAX_RECORD_SIZE: usize = BATCH_JOURNAL_HEADER_SIZE
+    + BATCH_JOURNAL_MAX_ENTRIES * (BATCH_JOURNAL_ENTRY_HEADER_SIZE + DATA_JOURNAL_PATH_SIZE)
+    + BATCH_JOURNAL_MAX_ENTRIES * vfs::NODE_CAPACITY;
+const BATCH_JOURNAL_PREPARED: u8 = 1;
+const BATCH_JOURNAL_COMMITTED: u8 = 2;
 
 const MOUNT_UNKNOWN: u8 = 0;
 const MOUNT_NO_DEVICE: u8 = 1;
@@ -255,7 +269,10 @@ fn mount_device(device: &mut impl crate::block::BlockDevice) -> MountStatus {
 
     let writable_import = !device.is_read_only();
 
-    if writable_import && recover_data_journal(device, volume).is_err() {
+    if writable_import
+        && (recover_batch_journal(device, volume).is_err()
+            || recover_data_journal(device, volume).is_err())
+    {
         return MountStatus::Failed;
     }
 
@@ -628,6 +645,155 @@ fn remove_data_journal_on_device(
     }
 }
 
+fn read_batch_journal_record(
+    device: &mut impl crate::block::BlockDevice,
+    volume: fat32::Volume,
+) -> Result<Option<alloc::vec::Vec<u8>>, fat32::Error> {
+    let Ok(entry) = fat32::resolve_path(device, volume, BATCH_JOURNAL_NAME) else {
+        return Ok(None);
+    };
+    if entry.attributes & DIRECTORY_ATTRIBUTE != 0
+        || entry.size as usize > BATCH_JOURNAL_MAX_RECORD_SIZE
+    {
+        return Err(fat32::Error::CorruptDirectory);
+    }
+    let mut record = alloc::vec![0u8; entry.size as usize];
+    let length = fat32::read_file(device, volume, entry, &mut record)?;
+    if length != record.len() || parse_batch_journal(&record).is_none() {
+        return Err(fat32::Error::CorruptDirectory);
+    }
+    Ok(Some(record))
+}
+
+fn batch_current_matches(
+    device: &mut impl crate::block::BlockDevice,
+    volume: fat32::Volume,
+    entry: &BatchJournalEntry,
+) -> Result<bool, fat32::Error> {
+    let relative = &entry.path[5..];
+    let Ok(file) = fat32::resolve_path(device, volume, relative) else {
+        return Ok(false);
+    };
+    if file.attributes & DIRECTORY_ATTRIBUTE != 0 {
+        return Ok(false);
+    }
+    let mut current = alloc::vec![0u8; vfs::NODE_CAPACITY];
+    let length = fat32::read_file(device, volume, file, &mut current)?;
+    Ok(length == entry.new_len && checksum_bytes(&current[..length]) == entry.new_checksum)
+}
+
+fn rollback_batch_entry(
+    device: &mut impl crate::block::BlockDevice,
+    volume: fat32::Volume,
+    entry: &BatchJournalEntry,
+) -> Result<(), fat32::Error> {
+    let relative = &entry.path[5..];
+    if entry.old_exists {
+        fat32::create_path_file(device, volume, relative, &entry.old_data)
+    } else {
+        match fat32::delete_path(device, volume, relative) {
+            Ok(()) | Err(fat32::Error::NotFound) => Ok(()),
+            Err(error) => Err(error),
+        }
+    }
+}
+
+fn recover_batch_journal(
+    device: &mut impl crate::block::BlockDevice,
+    volume: fat32::Volume,
+) -> Result<(), fat32::Error> {
+    let Some(record) = read_batch_journal_record(device, volume)? else {
+        return Ok(());
+    };
+    let entries = parse_batch_journal(&record).ok_or(fat32::Error::CorruptDirectory)?;
+    let committed = record[6] == BATCH_JOURNAL_COMMITTED;
+    let complete = committed
+        && entries
+            .iter()
+            .all(|entry| batch_current_matches(device, volume, entry).unwrap_or(false));
+    if !complete {
+        for entry in &entries {
+            rollback_batch_entry(device, volume, entry)?;
+            fat32::remove_journal_intent(
+                device,
+                volume,
+                fat32::metadata_path_hash(&entry.path),
+                fat32::metadata_path_tag(&entry.path),
+            )?;
+            fat32::remove_file_metadata(
+                device,
+                volume,
+                fat32::metadata_path_hash(&entry.path),
+                fat32::metadata_path_tag(&entry.path),
+            )?;
+        }
+    }
+    fat32::delete_path(device, volume, BATCH_JOURNAL_NAME)
+}
+
+fn update_batch_journal_on_device(
+    device: &mut impl crate::block::BlockDevice,
+    record: &[u8],
+) -> Result<(), PersistError> {
+    match fat32::mount(device) {
+        Ok(volume) => fat32::create_path_file(device, volume, BATCH_JOURNAL_NAME, record)
+            .map_err(map_persist_err)?,
+        Err(fat32::Error::InvalidBootSector | fat32::Error::UnsupportedGeometry) => {
+            if let Ok(Some(part)) = partition::find_fat32(device) {
+                let mut view = partition::PartitionDevice::new(device, part)
+                    .map_err(|_| PersistError::Failed)?;
+                let volume = fat32::mount(&mut view).map_err(map_persist_err)?;
+                fat32::create_path_file(&mut view, volume, BATCH_JOURNAL_NAME, record)
+                    .map_err(map_persist_err)?;
+            } else if let Ok(Some(part)) = gpt::find_fat_partition(device) {
+                let mut view = partition::PartitionDevice::new(device, part)
+                    .map_err(|_| PersistError::Failed)?;
+                let volume = fat32::mount(&mut view).map_err(map_persist_err)?;
+                fat32::create_path_file(&mut view, volume, BATCH_JOURNAL_NAME, record)
+                    .map_err(map_persist_err)?;
+            } else {
+                return Err(PersistError::Failed);
+            }
+        }
+        Err(_) => return Err(PersistError::Failed),
+    }
+    device.flush().map_err(|_| PersistError::Failed)
+}
+
+fn remove_batch_journal_on_device(
+    device: &mut impl crate::block::BlockDevice,
+) -> Result<(), PersistError> {
+    fn remove<T: crate::block::BlockDevice>(
+        target: &mut T,
+        volume: fat32::Volume,
+    ) -> Result<(), PersistError> {
+        match fat32::delete_path(target, volume, BATCH_JOURNAL_NAME) {
+            Ok(()) | Err(fat32::Error::NotFound) => Ok(()),
+            Err(error) => Err(map_persist_err(error)),
+        }
+    }
+    match fat32::mount(device) {
+        Ok(volume) => remove(device, volume)?,
+        Err(fat32::Error::InvalidBootSector | fat32::Error::UnsupportedGeometry) => {
+            if let Ok(Some(part)) = partition::find_fat32(device) {
+                let mut view = partition::PartitionDevice::new(device, part)
+                    .map_err(|_| PersistError::Failed)?;
+                let volume = fat32::mount(&mut view).map_err(map_persist_err)?;
+                remove(&mut view, volume)?;
+            } else if let Ok(Some(part)) = gpt::find_fat_partition(device) {
+                let mut view = partition::PartitionDevice::new(device, part)
+                    .map_err(|_| PersistError::Failed)?;
+                let volume = fat32::mount(&mut view).map_err(map_persist_err)?;
+                remove(&mut view, volume)?;
+            } else {
+                return Err(PersistError::Failed);
+            }
+        }
+        Err(_) => return Err(PersistError::Failed),
+    }
+    device.flush().map_err(|_| PersistError::Failed)
+}
+
 fn recover_data_journal(
     device: &mut impl crate::block::BlockDevice,
     volume: fat32::Volume,
@@ -734,6 +900,7 @@ fn to_lower(byte: u8) -> Option<u8> {
 }
 
 pub fn self_test() -> bool {
+    let _batch_api = persist_paths_atomic;
     let mut name = [0u8; 12];
     let nlen = short_name_to_str(b"KERNEL  BIN", &mut name).unwrap_or(0);
     let kernel_ok = &name[..nlen] == b"kernel.bin";
@@ -772,11 +939,159 @@ fn data_journal_self_test() -> bool {
         && prepared[data_start..data_start + old.len()] == old;
     let mut tampered = prepared;
     tampered[data_start] ^= 1;
+    let batch_entries = [
+        BatchJournalEntry {
+            path: alloc::string::String::from("/mnt/a.txt"),
+            old_exists: true,
+            old_data: alloc::vec![1, 2, 3],
+            new_len: 2,
+            new_checksum: checksum_bytes(&[9, 8]),
+            metadata: None,
+        },
+        BatchJournalEntry {
+            path: alloc::string::String::from("/mnt/b.txt"),
+            old_exists: false,
+            old_data: alloc::vec::Vec::new(),
+            new_len: 1,
+            new_checksum: checksum_bytes(&[7]),
+            metadata: None,
+        },
+    ];
+    let Some(batch) = encode_batch_journal(&batch_entries, BATCH_JOURNAL_PREPARED) else {
+        return false;
+    };
+    let batch_ok = parse_batch_journal(&batch).is_some_and(|decoded| {
+        decoded.len() == 2
+            && decoded[0].path == "/mnt/a.txt"
+            && decoded[0].old_data == [1, 2, 3]
+            && !decoded[1].old_exists
+    });
+    let mut bad_batch = batch;
+    bad_batch[BATCH_JOURNAL_HEADER_SIZE + BATCH_JOURNAL_ENTRY_HEADER_SIZE] ^= 1;
     valid
+        && batch_ok
+        && parse_batch_journal(&bad_batch).is_none()
         && read_u64(&tampered, 18)
             != data_journal_checksum(&tampered, DATA_JOURNAL_HEADER_SIZE, old.len())
         && committed_data_matches(new.len(), checksum_bytes(&new), Some(&new))
         && !committed_data_matches(new.len(), checksum_bytes(&new), Some(&old))
+}
+
+#[derive(Clone)]
+struct BatchJournalEntry {
+    path: alloc::string::String,
+    old_exists: bool,
+    old_data: alloc::vec::Vec<u8>,
+    new_len: usize,
+    new_checksum: u64,
+    metadata: Option<fat32::FileMetadata>,
+}
+
+fn batch_journal_checksum(record: &[u8]) -> u64 {
+    let mut hash = 0xcbf2_9ce4_8422_2325;
+    for (index, byte) in record.iter().copied().enumerate() {
+        if (8..16).contains(&index) {
+            continue;
+        }
+        hash = (hash ^ u64::from(byte)).wrapping_mul(0x1000_0000_01b3);
+    }
+    hash
+}
+
+fn encode_batch_journal(entries: &[BatchJournalEntry], state: u8) -> Option<alloc::vec::Vec<u8>> {
+    if entries.is_empty() || entries.len() > BATCH_JOURNAL_MAX_ENTRIES {
+        return None;
+    }
+    let mut size = BATCH_JOURNAL_HEADER_SIZE;
+    for entry in entries {
+        if entry.path.is_empty()
+            || entry.path.len() > DATA_JOURNAL_PATH_SIZE
+            || entry.old_data.len() > vfs::NODE_CAPACITY
+            || entry.new_len > vfs::NODE_CAPACITY
+        {
+            return None;
+        }
+        size = size.checked_add(BATCH_JOURNAL_ENTRY_HEADER_SIZE + DATA_JOURNAL_PATH_SIZE)?;
+        size = size.checked_add(entry.old_data.len())?;
+    }
+    let mut record = alloc::vec![0u8; size];
+    record[..4].copy_from_slice(BATCH_JOURNAL_MAGIC);
+    record[4..6].copy_from_slice(&BATCH_JOURNAL_VERSION.to_le_bytes());
+    record[6] = state;
+    record[7] = entries.len() as u8;
+    let mut offset = BATCH_JOURNAL_HEADER_SIZE;
+    for entry in entries {
+        record[offset..offset + 2].copy_from_slice(&(entry.path.len() as u16).to_le_bytes());
+        record[offset + 2] = u8::from(entry.old_exists);
+        record[offset + 3..offset + 7].copy_from_slice(&(entry.old_data.len() as u32).to_le_bytes());
+        record[offset + 7..offset + 11].copy_from_slice(&(entry.new_len as u32).to_le_bytes());
+        record[offset + 11..offset + 19]
+            .copy_from_slice(&checksum_bytes(&entry.old_data).to_le_bytes());
+        record[offset + 19..offset + 27].copy_from_slice(&entry.new_checksum.to_le_bytes());
+        let path_start = offset + BATCH_JOURNAL_ENTRY_HEADER_SIZE;
+        record[path_start..path_start + entry.path.len()].copy_from_slice(entry.path.as_bytes());
+        let data_start = path_start + DATA_JOURNAL_PATH_SIZE;
+        record[data_start..data_start + entry.old_data.len()].copy_from_slice(&entry.old_data);
+        offset = data_start + entry.old_data.len();
+    }
+    let checksum = batch_journal_checksum(&record);
+    record[8..16].copy_from_slice(&checksum.to_le_bytes());
+    Some(record)
+}
+
+fn parse_batch_journal(record: &[u8]) -> Option<alloc::vec::Vec<BatchJournalEntry>> {
+    if record.len() < BATCH_JOURNAL_HEADER_SIZE
+        || &record[..4] != BATCH_JOURNAL_MAGIC
+        || u16::from_le_bytes([record[4], record[5]]) != BATCH_JOURNAL_VERSION
+        || !matches!(record[6], BATCH_JOURNAL_PREPARED | BATCH_JOURNAL_COMMITTED)
+        || record[7] == 0
+        || usize::from(record[7]) > BATCH_JOURNAL_MAX_ENTRIES
+        || u64::from_le_bytes(record[8..16].try_into().ok()?) != batch_journal_checksum(record)
+    {
+        return None;
+    }
+    let mut entries = alloc::vec::Vec::with_capacity(usize::from(record[7]));
+    let mut offset = BATCH_JOURNAL_HEADER_SIZE;
+    for _ in 0..usize::from(record[7]) {
+        let end_header = offset.checked_add(BATCH_JOURNAL_ENTRY_HEADER_SIZE)?;
+        if end_header > record.len() {
+            return None;
+        }
+        let path_len = u16::from_le_bytes([record[offset], record[offset + 1]]) as usize;
+        let old_len = read_u32(record, offset + 3) as usize;
+        let new_len = read_u32(record, offset + 7) as usize;
+        if path_len == 0
+            || path_len > DATA_JOURNAL_PATH_SIZE
+            || old_len > vfs::NODE_CAPACITY
+            || new_len > vfs::NODE_CAPACITY
+        {
+            return None;
+        }
+        let path_start = end_header;
+        let data_start = path_start.checked_add(DATA_JOURNAL_PATH_SIZE)?;
+        let data_end = data_start.checked_add(old_len)?;
+        if data_end > record.len() {
+            return None;
+        }
+        let path = core::str::from_utf8(&record[path_start..path_start + path_len]).ok()?;
+        if !path.starts_with("/mnt/") {
+            return None;
+        }
+        let old_data = record[data_start..data_end].to_vec();
+        if checksum_bytes(&old_data) != read_u64(record, offset + 11) {
+            return None;
+        }
+        entries.push(BatchJournalEntry {
+            path: alloc::string::String::from(path),
+            old_exists: record[offset + 2] != 0,
+            old_data,
+            new_len,
+            new_checksum: read_u64(record, offset + 19),
+            metadata: None,
+        });
+        offset = data_end;
+    }
+    (offset == record.len()).then_some(entries)
 }
 
 /// Ensure a path under `/mnt` exists in the VFS by resolving it on the live ATA volume.
@@ -1039,10 +1354,65 @@ pub fn live_mutation_self_test() -> LiveMutationTestStatus {
     const NEW_DIR: &str = "/mnt/tmuta";
     const OLD_FILE: &str = "/mnt/tmutd/a.txt";
     const NEW_FILE: &str = "/mnt/tmuta/a.txt";
+    const BATCH_A: &str = "/mnt/tmut-b1.txt";
+    const BATCH_B: &str = "/mnt/tmut-b2.txt";
     const CONTENT: &[u8] = b"hello";
+    const BATCH_A_CONTENT: &[u8] = b"batch-a";
+    const BATCH_B_CONTENT: &[u8] = b"batch-b";
 
-    if vfs::stat(OLD_DIR).is_ok() || vfs::stat(NEW_DIR).is_ok() {
+    if vfs::stat(OLD_DIR).is_ok()
+        || vfs::stat(NEW_DIR).is_ok()
+        || vfs::stat(BATCH_A).is_ok()
+        || vfs::stat(BATCH_B).is_ok()
+    {
         return LiveMutationTestStatus::Failed("fixture exists");
+    }
+    if vfs::write_file(BATCH_A, BATCH_A_CONTENT).is_err()
+        || vfs::write_file(BATCH_B, BATCH_B_CONTENT).is_err()
+        || vfs::set_metadata(BATCH_A, 1001, 1002, 0o640).is_err()
+        || persist_paths_atomic(&[
+            (BATCH_A, BATCH_A_CONTENT),
+            (BATCH_B, BATCH_B_CONTENT),
+        ])
+        .is_err()
+    {
+        return LiveMutationTestStatus::Failed("batch persist");
+    }
+    let mut batch_bytes = [0u8; 8];
+    if ensure_path(BATCH_A).is_err()
+        || ensure_path(BATCH_B).is_err()
+        || vfs::read_all(BATCH_A, &mut batch_bytes) != Ok(BATCH_A_CONTENT.len())
+        || &batch_bytes[..BATCH_A_CONTENT.len()] != BATCH_A_CONTENT
+    {
+        return LiveMutationTestStatus::Failed("batch readback");
+    }
+    let mut metadata_disk = block_io::primary_ata();
+    let metadata_volume = match fat32::mount(&mut metadata_disk) {
+        Ok(volume) => volume,
+        Err(_) => return LiveMutationTestStatus::Failed("batch metadata mount"),
+    };
+    let metadata_entry = match fat32::resolve_path(&mut metadata_disk, metadata_volume, &BATCH_A[5..]) {
+        Ok(entry) => entry,
+        Err(_) => return LiveMutationTestStatus::Failed("batch metadata lookup"),
+    };
+    if fat32::read_inode_metadata(&mut metadata_disk, metadata_volume, metadata_entry.first_cluster)
+        != Ok(Some(fat32::FileMetadata { uid: 1001, gid: 1002, mode: 0o640 }))
+    {
+        return LiveMutationTestStatus::Failed("batch metadata readback");
+    }
+    if delete_path(BATCH_A).is_err()
+        || delete_path(BATCH_B).is_err()
+        || vfs::remove(BATCH_A).is_err()
+        || vfs::remove(BATCH_B).is_err()
+    {
+        return LiveMutationTestStatus::Failed("batch cleanup");
+    }
+    if let Err(stage) = live_batch_recovery_self_test() {
+        crate::serial::write_line(format_args!(
+            "[STORAGE MUTATION] batch recovery error: {}",
+            stage
+        ));
+        return LiveMutationTestStatus::Failed("batch recovery");
     }
     if vfs::mkdir(OLD_DIR).is_err() {
         return LiveMutationTestStatus::Failed("vfs mkdir");
@@ -1122,6 +1492,135 @@ pub fn live_mutation_self_test() -> LiveMutationTestStatus {
     }
 
     LiveMutationTestStatus::Passed
+}
+
+fn live_batch_recovery_self_test() -> Result<(), &'static str> {
+    const A: &str = "/mnt/tmut-b1.txt";
+    const B: &str = "/mnt/tmut-b2.txt";
+    const OLD_A: &[u8] = b"old-a";
+    const OLD_B: &[u8] = b"old-b";
+    const NEW_A: &[u8] = b"new-a";
+    const NEW_B: &[u8] = b"new-b";
+    if vfs::write_file(A, OLD_A).is_err()
+        || vfs::write_file(B, OLD_B).is_err()
+        || persist_path(A).is_err()
+        || persist_path(B).is_err()
+    {
+        return Err("batch recovery fixture");
+    }
+    let entries = [
+        BatchJournalEntry {
+            path: alloc::string::String::from(A),
+            old_exists: true,
+            old_data: OLD_A.to_vec(),
+            new_len: NEW_A.len(),
+            new_checksum: checksum_bytes(NEW_A),
+            metadata: None,
+        },
+        BatchJournalEntry {
+            path: alloc::string::String::from(B),
+            old_exists: true,
+            old_data: OLD_B.to_vec(),
+            new_len: NEW_B.len(),
+            new_checksum: checksum_bytes(NEW_B),
+            metadata: None,
+        },
+    ];
+    let check_disk = |expected_a: &[u8], expected_b: &[u8]| -> Result<(), &'static str> {
+        let mut disk = block_io::primary_ata();
+        let mut a = [0u8; vfs::NODE_CAPACITY];
+        let mut b = [0u8; vfs::NODE_CAPACITY];
+        let a_len = read_existing_file_on_device(&mut disk, &A[5..], &mut a)
+            .map_err(|_| "batch recovery read a")?
+            .ok_or("batch recovery missing a")?;
+        let b_len = read_existing_file_on_device(&mut disk, &B[5..], &mut b)
+            .map_err(|_| "batch recovery read b")?
+            .ok_or("batch recovery missing b")?;
+        if &a[..a_len] != expected_a || &b[..b_len] != expected_b {
+            return Err("batch recovery bytes");
+        }
+        Ok(())
+    };
+    let install_pending_metadata = |disk: &mut crate::block_io::PrimaryAta| {
+        let metadata = fat32::FileMetadata {
+            uid: 2001,
+            gid: 2002,
+            mode: 0o600,
+        };
+        for path in [A, B] {
+            let intent = fat32::JournalIntent {
+                path_hash: fat32::metadata_path_hash(path),
+                path_tag: fat32::metadata_path_tag(path),
+                checksum: checksum_bytes(if path == A { NEW_A } else { NEW_B }),
+                metadata,
+            };
+            persist_journal_on_device(disk, intent, false)?;
+            persist_metadata_on_device(disk, path, metadata, true)?;
+        }
+        Ok::<(), PersistError>(())
+    };
+    let check_no_pending_metadata = || -> Result<(), &'static str> {
+        let mut metadata_disk = block_io::primary_ata();
+        let volume = fat32::mount(&mut metadata_disk).map_err(|_| "batch metadata mount")?;
+        for path in [A, B] {
+            if fat32::read_file_metadata(
+                &mut metadata_disk,
+                volume,
+                fat32::metadata_path_hash(path),
+                fat32::metadata_path_tag(path),
+            )
+            .map_err(|_| "batch metadata read")?
+            .is_some()
+            {
+                return Err("batch metadata intent survived rollback");
+            }
+        }
+        Ok(())
+    };
+    let prepared = encode_batch_journal(&entries, BATCH_JOURNAL_PREPARED)
+        .ok_or("batch recovery encode prepared")?;
+    let mut disk = block_io::primary_ata();
+    update_batch_journal_on_device(&mut disk, &prepared)
+        .map_err(|_| "batch recovery write prepared")?;
+    install_pending_metadata(&mut disk).map_err(|_| "batch recovery metadata prepared")?;
+    persist_on_cached_device(&mut disk, &A[5..], NEW_A)
+        .and_then(|_| disk.flush().map_err(|_| PersistError::Failed))
+        .map_err(|_| "batch recovery partial prepared")?;
+    let volume = fat32::mount(&mut disk).map_err(|_| "batch recovery mount prepared")?;
+    recover_batch_journal(&mut disk, volume).map_err(|_| "batch recovery prepared replay")?;
+    disk.flush().map_err(|_| "batch recovery flush prepared")?;
+    check_disk(OLD_A, OLD_B)?;
+    check_no_pending_metadata()?;
+
+    let committed = encode_batch_journal(&entries, BATCH_JOURNAL_COMMITTED)
+        .ok_or("batch recovery encode committed")?;
+    update_batch_journal_on_device(&mut disk, &committed)
+        .map_err(|_| "batch recovery write committed")?;
+    install_pending_metadata(&mut disk).map_err(|_| "batch recovery metadata committed")?;
+    persist_on_cached_device(&mut disk, &A[5..], NEW_A)
+        .and_then(|_| disk.flush().map_err(|_| PersistError::Failed))
+        .map_err(|_| "batch recovery partial committed")?;
+    let volume = fat32::mount(&mut disk).map_err(|_| "batch recovery remount committed")?;
+    recover_batch_journal(&mut disk, volume).map_err(|_| "batch recovery committed replay")?;
+    disk.flush().map_err(|_| "batch recovery flush committed")?;
+    check_disk(OLD_A, OLD_B)?;
+    check_no_pending_metadata()?;
+
+    update_batch_journal_on_device(&mut disk, &committed)
+        .map_err(|_| "batch recovery write complete")?;
+    persist_on_cached_device(&mut disk, &A[5..], NEW_A)
+        .and_then(|_| persist_on_cached_device(&mut disk, &B[5..], NEW_B))
+        .and_then(|_| disk.flush().map_err(|_| PersistError::Failed))
+        .map_err(|_| "batch recovery complete writes")?;
+    let volume = fat32::mount(&mut disk).map_err(|_| "batch recovery remount complete")?;
+    recover_batch_journal(&mut disk, volume).map_err(|_| "batch recovery complete replay")?;
+    disk.flush().map_err(|_| "batch recovery flush complete")?;
+    check_disk(NEW_A, NEW_B)?;
+    delete_path(A).map_err(|_| "batch recovery delete a")?;
+    delete_path(B).map_err(|_| "batch recovery delete b")?;
+    vfs::remove(A).map_err(|_| "batch recovery remove a")?;
+    vfs::remove(B).map_err(|_| "batch recovery remove b")?;
+    Ok(())
 }
 
 fn live_numbered_child_path<'a>(
@@ -1264,6 +1763,99 @@ fn live_directory_growth_self_test() -> Result<(), &'static str> {
         remove_live_test_file(path)?;
     }
     remove_live_test_dir(GROW_DIR)
+}
+
+/// Persist several `/mnt` files as one bounded crash-recoverable data batch.
+///
+/// The existing `persist_path` WDJ1 transaction remains unchanged. This API
+/// adds a distinct WDJ2 record with a maximum of four entries; a prepared
+/// record rolls every already-written entry back to its old bytes, while a
+/// committed record is retained until every new checksum is observed.
+pub fn persist_paths_atomic(paths: &[(&str, &[u8])]) -> Result<(), PersistError> {
+    if paths.is_empty() || paths.len() > BATCH_JOURNAL_MAX_ENTRIES {
+        return Err(PersistError::Failed);
+    }
+    if !mnt_mounted() {
+        return Err(unavailable_persist_error());
+    }
+    if !block_io::primary_ata_present() {
+        return Err(PersistError::NoDevice);
+    }
+    let mut entries = alloc::vec::Vec::with_capacity(paths.len());
+    for (path, data) in paths {
+        if !path.starts_with("/mnt/")
+            || path[5..].is_empty()
+            || path.len() > DATA_JOURNAL_PATH_SIZE
+            || data.len() > vfs::NODE_CAPACITY
+            || path[5..].split('/').any(|component| {
+                component.is_empty() || component == "." || component == ".."
+            })
+            || entries.iter().any(|entry: &BatchJournalEntry| entry.path == *path)
+        {
+            return Err(PersistError::BadName);
+        }
+        let mut old = [0u8; vfs::NODE_CAPACITY];
+        let mut disk = block_io::primary_ata();
+        let old_length = read_existing_file_on_device(&mut disk, &path[5..], &mut old)
+            .map_err(|_| PersistError::Failed)?;
+        entries.push(BatchJournalEntry {
+            path: alloc::string::String::from(*path),
+            old_exists: old_length.is_some(),
+            old_data: old[..old_length.unwrap_or(0)].to_vec(),
+            new_len: data.len(),
+            new_checksum: checksum_bytes(data),
+            metadata: vfs::stat(path).ok().map(|stat| fat32::FileMetadata {
+                uid: stat.uid,
+                gid: stat.gid,
+                mode: stat.mode,
+            }),
+        });
+    }
+
+    let mut disk = block_io::primary_ata();
+    let prepared = encode_batch_journal(&entries, BATCH_JOURNAL_PREPARED)
+        .ok_or(PersistError::TooLarge)?;
+    update_batch_journal_on_device(&mut disk, &prepared)?;
+    for entry in &entries {
+        if let Some(metadata) = entry.metadata {
+            let intent = fat32::JournalIntent {
+                path_hash: fat32::metadata_path_hash(&entry.path),
+                path_tag: fat32::metadata_path_tag(&entry.path),
+                checksum: entry.new_checksum,
+                metadata,
+            };
+            persist_journal_on_device(&mut disk, intent, false)?;
+            persist_metadata_on_device(&mut disk, &entry.path, metadata, true)?;
+        }
+    }
+    for (path, data) in paths {
+        persist_on_cached_device(&mut disk, &path[5..], data)
+            .and_then(|_| disk.flush().map_err(|_| PersistError::Failed))?;
+    }
+    for entry in &entries {
+        if let Some(metadata) = entry.metadata {
+            persist_metadata_on_device(&mut disk, &entry.path, metadata, false)?;
+            if persist_inode_metadata_on_device(&mut disk, &entry.path, metadata)? {
+                clear_path_metadata_on_device(&mut disk, &entry.path)?;
+            }
+            persist_journal_on_device(
+                &mut disk,
+                fat32::JournalIntent {
+                    path_hash: fat32::metadata_path_hash(&entry.path),
+                    path_tag: fat32::metadata_path_tag(&entry.path),
+                    checksum: entry.new_checksum,
+                    metadata,
+                },
+                true,
+            )?;
+        }
+    }
+    let committed = encode_batch_journal(&entries, BATCH_JOURNAL_COMMITTED)
+        .ok_or(PersistError::TooLarge)?;
+    update_batch_journal_on_device(&mut disk, &committed)?;
+    remove_batch_journal_on_device(&mut disk)?;
+    mark_mnt_dirty();
+    Ok(())
 }
 
 /// Persist a VFS file under `/mnt/` to the live ATA FAT32 volume.
