@@ -662,3 +662,12 @@ the legacy packed IPv4 ABI or smoltcp socket state is touched. It rejects zero
 ports, unspecified IPv4 addresses, and IPv4 multicast destinations. Descriptor
 ownership, generation checks, and async pinning remain the authority model;
 Stage 14.3 does not add live IPv6 sockets or routing-table mutation.
+
+### Stage 14.4 routing-table foundation
+
+`WovenRouteTable` is a fixed eight-slot, generation-tagged policy table. It
+normalizes route networks, rejects invalid prefixes and zero gateways, selects
+longest-prefix matches with metric/generation tie-breaking, and requires an
+exact route value for removal. It is intentionally separate from the live
+smoltcp route set until route installation and policy ownership receive their
+own acceptance boundary.

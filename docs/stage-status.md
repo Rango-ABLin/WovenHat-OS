@@ -94,6 +94,16 @@ See the [Stage 14.3 audit](audit-stage14-3-socket-api-2026-10-06.md).
 
 Next: bounded routing-table ownership above the accepted socket API.
 
+## Stage 14.4 — WovenNet routing-table foundation (2026-10-06)
+
+The bounded routing table now supports eight generation-tagged routes, rejects
+invalid prefixes and zero gateways, performs longest-prefix matching, and uses
+metric then generation tie-breaking. Removal requires the exact route handle,
+so stale removal cannot delete a replacement. Live route installation into the
+network interface and physical NIC qualification remain open.
+
+See the [Stage 14.4 audit](audit-stage14-4-routing-table-2026-10-06.md).
+
 ## Stage 1–5 long-name mutation hardening — 2026-10-01
 
 The FAT32 create/overwrite and rename paths now compare the user-visible long

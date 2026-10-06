@@ -2928,6 +2928,126 @@ pub fn stage14_3_socket_api_self_test() -> bool {
         && endpoint_from_packed(packed & 0xffff_ffff).is_err()
 }
 
+#[cfg(feature = "stage14-4-test")]
+const MAX_WOVEN_ROUTES: usize = 8;
+
+#[cfg(feature = "stage14-4-test")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RouteTableError {
+    Capacity,
+    InvalidPrefix,
+    InvalidGateway,
+    InvalidHandle,
+}
+
+#[cfg(feature = "stage14-4-test")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct WovenRoute {
+    pub network: Ipv4Address,
+    pub prefix_len: u8,
+    pub gateway: Ipv4Address,
+    pub metric: u16,
+    pub generation: u32,
+}
+
+#[cfg(feature = "stage14-4-test")]
+#[derive(Clone, Copy)]
+struct RouteSlot {
+    route: Option<WovenRoute>,
+}
+
+#[cfg(feature = "stage14-4-test")]
+pub struct WovenRouteTable {
+    slots: [RouteSlot; MAX_WOVEN_ROUTES],
+    next_generation: u32,
+}
+
+#[cfg(feature = "stage14-4-test")]
+impl WovenRouteTable {
+    pub const fn new() -> Self {
+        Self {
+            slots: [RouteSlot { route: None }; MAX_WOVEN_ROUTES],
+            next_generation: 1,
+        }
+    }
+
+    pub fn add(
+        &mut self,
+        network: Ipv4Address,
+        prefix_len: u8,
+        gateway: Ipv4Address,
+        metric: u16,
+    ) -> Result<WovenRoute, RouteTableError> {
+        if prefix_len > 32 {
+            return Err(RouteTableError::InvalidPrefix);
+        }
+        if gateway.octets() == [0; 4] {
+            return Err(RouteTableError::InvalidGateway);
+        }
+        let index = self
+            .slots
+            .iter()
+            .position(|slot| slot.route.is_none())
+            .ok_or(RouteTableError::Capacity)?;
+        let network_value = u32::from_be_bytes(network.octets()) & prefix_mask(prefix_len);
+        let route = WovenRoute {
+            network: Ipv4Address::from_octets(network_value.to_be_bytes()),
+            prefix_len,
+            gateway,
+            metric,
+            generation: self.next_generation,
+        };
+        self.next_generation = self.next_generation.wrapping_add(1).max(1);
+        self.slots[index].route = Some(route);
+        Ok(route)
+    }
+
+    pub fn remove(&mut self, route: WovenRoute) -> Result<(), RouteTableError> {
+        let Some(slot) = self.slots.iter_mut().find(|slot| slot.route == Some(route)) else {
+            return Err(RouteTableError::InvalidHandle);
+        };
+        slot.route = None;
+        Ok(())
+    }
+
+    pub fn lookup(&self, destination: Ipv4Address) -> Option<WovenRoute> {
+        self.slots
+            .iter()
+            .filter_map(|slot| slot.route)
+            .filter(|route| ipv4_matches(route.network, destination, route.prefix_len))
+            .min_by_key(|route| (u8::MAX - route.prefix_len, route.metric, route.generation))
+    }
+}
+
+#[cfg(feature = "stage14-4-test")]
+fn prefix_mask(prefix_len: u8) -> u32 {
+    if prefix_len == 0 { 0 } else { u32::MAX << (32 - prefix_len) }
+}
+
+#[cfg(feature = "stage14-4-test")]
+fn ipv4_matches(network: Ipv4Address, destination: Ipv4Address, prefix_len: u8) -> bool {
+    let mask = prefix_mask(prefix_len);
+    (u32::from_be_bytes(network.octets()) & mask)
+        == (u32::from_be_bytes(destination.octets()) & mask)
+}
+
+#[cfg(feature = "stage14-4-test")]
+pub fn stage14_4_routing_table_self_test() -> bool {
+    let mut table = WovenRouteTable::new();
+    let default = table.add(Ipv4Address::new(0, 0, 0, 0), 0, DEFAULT_GATEWAY, 100).ok();
+    let broad = table.add(Ipv4Address::new(10, 0, 0, 0), 16, DEFAULT_GATEWAY, 100).ok();
+    let specific = table.add(Ipv4Address::new(10, 0, 2, 0), 24, DEFAULT_GATEWAY, 50).ok();
+    let Some(default) = default else { return false; };
+    let Some(broad) = broad else { return false; };
+    let Some(specific) = specific else { return false; };
+    table.lookup(Ipv4Address::new(10, 0, 2, 15)) == Some(specific)
+        && table.lookup(Ipv4Address::new(10, 0, 9, 15)) == Some(broad)
+        && table.lookup(Ipv4Address::new(192, 0, 2, 1)) == Some(default)
+        && table.remove(specific).is_ok()
+        && table.lookup(Ipv4Address::new(10, 0, 2, 15)) == Some(broad)
+        && table.remove(specific) == Err(RouteTableError::InvalidHandle)
+}
+
 pub fn endpoint_to_packed(endpoint: IpEndpoint) -> u64 {
     let IpAddress::Ipv4(ip) = endpoint.addr;
     u64::from(u32::from_be_bytes(ip.octets())) | ((endpoint.port as u64) << 32)
