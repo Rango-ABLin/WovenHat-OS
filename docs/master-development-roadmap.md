@@ -355,13 +355,23 @@ TCP
 DNS
 DHCP
 ICMP
-14.2
+14.2 — ACCEPTED
 
 Add:
 
 IPv6
 DHCPv6
 IPv6 neighbor discovery
+
+Acceptance status: complete in the Stage 14.2 bounded kernel/networking scope.
+The accepted gate covers IPv6 address/prefix foundations, ICMPv6/NDP parsing
+and checksum validation, router-advertisement state, neighbor/DAD state,
+SLAAC lifecycle, DHCPv6 protocol/client/lease state, IPv6 interface ingress,
+runtime link-local interface installation, and hardened NDP ingress rules
+including Hop Limit 255 and source-address validation. Physical-NIC IPv6
+qualification, broader live IPv6 socket policy, and routing ownership remain
+separate follow-up/Stage 14.3+ concerns.
+
 14.3
 
 Socket API.
