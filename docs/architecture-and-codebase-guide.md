@@ -720,11 +720,40 @@ This acceptance does not claim a complete POSIX/BSD socket surface,
 exhaustive physical-NIC IPv6 interoperability, or production routing-policy
 ownership. Those remain later platform hardening or Stage 14.4+ concerns.
 
-### Stage 14.4 routing-table foundation
+### Stage 14.4 routing-table closure
 
-`WovenRouteTable` is a fixed eight-slot, generation-tagged policy table. It
-normalizes route networks, rejects invalid prefixes and zero gateways, selects
-longest-prefix matches with metric/generation tie-breaking, and requires an
-exact route value for removal. It is intentionally separate from the live
-smoltcp route set until route installation and policy ownership receive their
-own acceptance boundary.
+Stage 14.4 is accepted for the bounded WovenNet routing-policy scope.
+
+`WovenRouteTable` is a fixed eight-slot, generation-tagged, owner-scoped
+dual-stack policy table. IPv4 prefixes from /0 through /32 and IPv6 prefixes
+from /0 through /128 are normalized before storage. Route lookup rejects
+address-family mismatches and selects the longest matching prefix, then the
+lowest metric and oldest generation as deterministic tie-breakers. Invalid
+prefixes, unusable gateways, and mixed network/gateway address families are
+rejected at insertion.
+
+Each `WovenRoute` records its owner and generation. Exact route handles are
+required for removal, cross-owner removal returns `WrongOwner`, and
+`remove_owner_routes` provides bounded deterministic teardown when an
+authority domain exits. This gives later WovenGuard and Network Manager work
+an explicit routing authority boundary instead of a globally mutable table.
+
+The policy table is now connected to the real smoltcp route set through
+controlled `install_woven_route` and `remove_woven_route` boundaries.
+Installation is idempotent for an identical CIDR/gateway pair and reports
+bounded-capacity failure rather than silently dropping a route. Removal is
+exact and a stale second removal is rejected. The live acceptance gate proves
+this lifecycle for both an IPv4 route and an IPv6 /64 route without replacing
+the existing DHCP/static default route.
+
+The accepted serial gates are
+`[S14.4] WovenNet routing table: PASSED` and
+`[S14.4A] WovenNet live route integration: PASSED`. The Stage 14.4 QEMU
+harness requires the live marker in addition to the inherited Stage 14.2 and
+14.3 networking gates.
+
+This acceptance does not claim a userspace route-management service, dynamic
+routing protocols, multi-interface policy routing, or exhaustive physical-NIC
+interoperability. Those remain appropriate Network Manager and platform
+hardening work. Stage 14.5 can now build WovenGuard firewall policy on the
+accepted socket, IPv6, and routing authority foundations.
