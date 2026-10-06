@@ -2094,6 +2094,19 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
                                 "[S14.1H] WovenNet resource/lifecycle hardening: PASSED"
                             ));
                             serial::write_line(format_args!("[S14.1] WovenNet IPv4 core: PASSED"));
+                            #[cfg(feature = "stage14-2-test")]
+                            {
+                                if network::stage14_2_ipv6_foundation_self_test() {
+                                    serial::write_line(format_args!(
+                                        "[S14.2A] WovenNet IPv6 address foundation: PASSED"
+                                    ));
+                                } else {
+                                    serial::write_line(format_args!(
+                                        "[S14.2A] WovenNet IPv6 address foundation: FAILED"
+                                    ));
+                                    halt();
+                                }
+                            }
                         } else {
                             serial::write_line(format_args!(
                                 "[S14.1H] WovenNet resource/lifecycle hardening: FAILED"
