@@ -1333,6 +1333,243 @@ pub fn stage14_2_ipv6_interface_ingress_self_test() -> bool {
         == Ipv6IngressEvent::DuplicateAddress
 }
 
+#[cfg(feature = "stage14-2-test")]
+const DHCPV6_OPTION_IA_NA: u16 = 3;
+#[cfg(feature = "stage14-2-test")]
+const DHCPV6_OPTION_IAADDR: u16 = 5;
+
+#[cfg(feature = "stage14-2-test")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Dhcpv6Lease {
+    pub iaid: u32,
+    pub address: Ipv6Address,
+    pub preferred_until: u64,
+    pub valid_until: u64,
+    pub renew_at: u64,
+    pub rebind_at: u64,
+}
+
+#[cfg(feature = "stage14-2-test")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Dhcpv6LeaseState {
+    Bound,
+    Renewing,
+    Rebinding,
+    Expired,
+}
+
+#[cfg(feature = "stage14-2-test")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Dhcpv6LeaseBinding {
+    pub lease: Dhcpv6Lease,
+    pub state: Dhcpv6LeaseState,
+}
+
+#[cfg(feature = "stage14-2-test")]
+impl Dhcpv6LeaseBinding {
+    pub fn advance(&mut self, now: u64) {
+        self.state = if now >= self.lease.valid_until {
+            Dhcpv6LeaseState::Expired
+        } else if now >= self.lease.rebind_at {
+            Dhcpv6LeaseState::Rebinding
+        } else if now >= self.lease.renew_at {
+            Dhcpv6LeaseState::Renewing
+        } else {
+            Dhcpv6LeaseState::Bound
+        };
+    }
+}
+
+#[cfg(feature = "stage14-2-test")]
+fn parse_dhcpv6_lease(message: &Dhcpv6Message<'_>, now: u64) -> Option<Dhcpv6Lease> {
+    let ia_na = dhcpv6_find_option(message, DHCPV6_OPTION_IA_NA)?;
+    if ia_na.value.len() < 12 {
+        return None;
+    }
+    let iaid = u32::from_be_bytes(ia_na.value[0..4].try_into().ok()?);
+    let t1 = u32::from_be_bytes(ia_na.value[4..8].try_into().ok()?) as u64;
+    let t2 = u32::from_be_bytes(ia_na.value[8..12].try_into().ok()?) as u64;
+    if t1 == 0 || t2 == 0 || t1 > t2 {
+        return None;
+    }
+
+    let mut nested = &ia_na.value[12..];
+    while !nested.is_empty() {
+        if nested.len() < 4 {
+            return None;
+        }
+        let code = u16::from_be_bytes([nested[0], nested[1]]);
+        let length = u16::from_be_bytes([nested[2], nested[3]]) as usize;
+        let total = 4usize.checked_add(length)?;
+        if total > nested.len() {
+            return None;
+        }
+        if code == DHCPV6_OPTION_IAADDR {
+            if length < 24 {
+                return None;
+            }
+            let mut address = [0u8; 16];
+            address.copy_from_slice(&nested[4..20]);
+            let address = Ipv6Address(address);
+            let preferred = u32::from_be_bytes(nested[20..24].try_into().ok()?) as u64;
+            let valid = u32::from_be_bytes(nested[24..28].try_into().ok()?) as u64;
+            if preferred > valid
+                || valid == 0
+                || address.is_multicast()
+                || address.is_unspecified()
+                || t2 > valid
+            {
+                return None;
+            }
+            return Some(Dhcpv6Lease {
+                iaid,
+                address,
+                preferred_until: now.saturating_add(preferred),
+                valid_until: now.saturating_add(valid),
+                renew_at: now.saturating_add(t1),
+                rebind_at: now.saturating_add(t2),
+            });
+        }
+        nested = &nested[total..];
+    }
+    None
+}
+
+#[cfg(feature = "stage14-2-test")]
+impl Dhcpv6Client {
+    pub fn accept_reply_lease(
+        &mut self,
+        packet: &[u8],
+        now: u64,
+    ) -> Option<Dhcpv6LeaseBinding> {
+        if self.state != Dhcpv6ClientState::Requesting {
+            return None;
+        }
+        let message = parse_dhcpv6_message(packet)?;
+        if message.message_type != Dhcpv6MessageType::Reply
+            || message.transaction_id != self.transaction_id
+            || !self.identifiers_match(&message)
+        {
+            return None;
+        }
+        let server = dhcpv6_find_option(&message, DHCPV6_OPTION_SERVER_ID)?;
+        if self.server_id.is_none_or(|expected| expected.as_slice() != server.value) {
+            return None;
+        }
+        let lease = parse_dhcpv6_lease(&message, now)?;
+        self.state = Dhcpv6ClientState::Bound;
+        self.retry_count = 0;
+        self.next_retry_at = 0;
+        Some(Dhcpv6LeaseBinding {
+            lease,
+            state: Dhcpv6LeaseState::Bound,
+        })
+    }
+}
+
+#[cfg(feature = "stage14-2-test")]
+pub fn stage14_2_dhcpv6_lease_self_test() -> bool {
+    let client_id = [0, 3, 0, 1, 0x02, 0, 0, 0, 0, 1];
+    let server_id = [0, 3, 0, 1, 0x02, 0, 0, 0, 0, 2];
+    let address = [0x20, 0x01, 0x0d, 0xb8, 0, 2, 0, 0, 0x02, 0, 0xff, 0xfe, 0, 0, 0, 9];
+    let transaction_id = 0x0065_4321;
+
+    let mut iaaddr = [0u8; 28];
+    iaaddr[..2].copy_from_slice(&DHCPV6_OPTION_IAADDR.to_be_bytes());
+    iaaddr[2..4].copy_from_slice(&24u16.to_be_bytes());
+    iaaddr[4..20].copy_from_slice(&address);
+    iaaddr[20..24].copy_from_slice(&60u32.to_be_bytes());
+    iaaddr[24..28].copy_from_slice(&120u32.to_be_bytes());
+
+    let mut ia_na_value = [0u8; 40];
+    ia_na_value[..4].copy_from_slice(&7u32.to_be_bytes());
+    ia_na_value[4..8].copy_from_slice(&30u32.to_be_bytes());
+    ia_na_value[8..12].copy_from_slice(&90u32.to_be_bytes());
+    ia_na_value[12..40].copy_from_slice(&iaaddr);
+
+    let mut options = [0u8; 96];
+    let Some(client_len) = write_dhcpv6_option(&mut options, DHCPV6_OPTION_CLIENT_ID, &client_id) else {
+        return false;
+    };
+    let Some(server_len) = write_dhcpv6_option(
+        &mut options[client_len..],
+        DHCPV6_OPTION_SERVER_ID,
+        &server_id,
+    ) else {
+        return false;
+    };
+    let Some(ia_len) = write_dhcpv6_option(
+        &mut options[client_len + server_len..],
+        DHCPV6_OPTION_IA_NA,
+        &ia_na_value,
+    ) else {
+        return false;
+    };
+    let options_len = client_len + server_len + ia_len;
+
+    let mut packet = [0u8; 128];
+    let Some(reply_len) = write_dhcpv6_message(
+        &mut packet,
+        Dhcpv6MessageType::Reply,
+        transaction_id,
+        &options[..options_len],
+    ) else {
+        return false;
+    };
+
+    let Some(mut client) = Dhcpv6Client::new(transaction_id, &client_id) else {
+        return false;
+    };
+    client.state = Dhcpv6ClientState::Requesting;
+    client.server_id = Dhcpv6Duid::new(&server_id);
+    let Some(mut binding) = client.accept_reply_lease(&packet[..reply_len], 100) else {
+        return false;
+    };
+    if binding.lease.iaid != 7
+        || binding.lease.address != Ipv6Address(address)
+        || binding.lease.renew_at != 130
+        || binding.lease.rebind_at != 190
+        || binding.lease.preferred_until != 160
+        || binding.lease.valid_until != 220
+        || binding.state != Dhcpv6LeaseState::Bound
+    {
+        return false;
+    }
+    binding.advance(130);
+    if binding.state != Dhcpv6LeaseState::Renewing {
+        return false;
+    }
+    binding.advance(190);
+    if binding.state != Dhcpv6LeaseState::Rebinding {
+        return false;
+    }
+    binding.advance(220);
+    if binding.state != Dhcpv6LeaseState::Expired {
+        return false;
+    }
+
+    let mut invalid_ia = ia_na_value;
+    invalid_ia[4..8].copy_from_slice(&100u32.to_be_bytes());
+    invalid_ia[8..12].copy_from_slice(&90u32.to_be_bytes());
+    let mut invalid_options = options;
+    let ia_start = client_len + server_len;
+    invalid_options[ia_start + 4..ia_start + 44].copy_from_slice(&invalid_ia);
+    let Some(invalid_len) = write_dhcpv6_message(
+        &mut packet,
+        Dhcpv6MessageType::Reply,
+        transaction_id,
+        &invalid_options[..options_len],
+    ) else {
+        return false;
+    };
+    let Some(mut invalid_client) = Dhcpv6Client::new(transaction_id, &client_id) else {
+        return false;
+    };
+    invalid_client.state = Dhcpv6ClientState::Requesting;
+    invalid_client.server_id = Dhcpv6Duid::new(&server_id);
+    invalid_client.accept_reply_lease(&packet[..invalid_len], 100).is_none()
+}
+
 pub struct VirtioSmolDevice {
     rx: [u8; MAX_FRAME],
 }
