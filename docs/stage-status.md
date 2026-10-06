@@ -81,6 +81,19 @@ See the [Stage 14.2J audit](audit-stage14-2j-ipv6-interface-ingress-2026-10-06.m
 
 Next: bounded IPv6 interface address configuration and controlled egress.
 
+## Stage 14.3 — WovenNet socket API boundary (2026-10-06)
+
+Socket endpoint admission now rejects zero-port, unspecified, and IPv4
+multicast destinations before smoltcp state mutation. Packed IPv4 endpoint
+decoding and encoding have a deterministic round-trip contract, while the
+existing owner/generation socket lifecycle remains unchanged. This is an API
+boundary; live IPv6 sockets, routing policy, and physical NIC qualification
+remain open.
+
+See the [Stage 14.3 audit](audit-stage14-3-socket-api-2026-10-06.md).
+
+Next: bounded routing-table ownership above the accepted socket API.
+
 ## Stage 1–5 long-name mutation hardening — 2026-10-01
 
 The FAT32 create/overwrite and rename paths now compare the user-visible long

@@ -2322,7 +2322,7 @@ pub fn socket_bind(owner: u64, id: u64, port: u16) -> Result<(), SocketError> {
 }
 
 pub fn socket_connect(owner: u64, id: u64, endpoint: IpEndpoint) -> Result<(), SocketError> {
-    if endpoint.port == 0 {
+    if !valid_socket_endpoint(endpoint) {
         return Err(SocketError::Address);
     }
     let Some(runtime) = RUNTIME.get() else {
@@ -2540,7 +2540,7 @@ pub fn queued_close_verified() -> bool {
 }
 
 pub fn socket_connect_pinned(token: SocketToken, endpoint: IpEndpoint) -> Result<(), SocketError> {
-    if endpoint.port == 0 {
+    if !valid_socket_endpoint(endpoint) {
         return Err(SocketError::Address);
     }
     let Some(runtime) = RUNTIME.get() else {
@@ -2857,13 +2857,37 @@ fn internet_checksum(data: &[u8]) -> u16 {
 pub fn endpoint_from_packed(value: u64) -> Result<IpEndpoint, SocketError> {
     let ip = (value & 0xffff_ffff) as u32;
     let port = ((value >> 32) & 0xffff) as u16;
-    if port == 0 {
-        return Err(SocketError::Address);
-    }
-    Ok(IpEndpoint::new(
+    let endpoint = IpEndpoint::new(
         IpAddress::Ipv4(Ipv4Address::from_octets(ip.to_be_bytes())),
         port,
-    ))
+    );
+    valid_socket_endpoint(endpoint).then_some(endpoint).ok_or(SocketError::Address)
+}
+
+fn valid_socket_endpoint(endpoint: IpEndpoint) -> bool {
+    if endpoint.port == 0 {
+        return false;
+    }
+    let IpAddress::Ipv4(address) = endpoint.addr;
+    let octets = address.octets();
+    octets != [0; 4] && !(224..=239).contains(&octets[0])
+}
+
+#[cfg(feature = "stage14-3-test")]
+pub fn stage14_3_socket_api_self_test() -> bool {
+    let valid = IpEndpoint::new(
+        IpAddress::Ipv4(Ipv4Address::new(10, 0, 2, 2)),
+        443,
+    );
+    let packed = u64::from(u32::from_be_bytes([10, 0, 2, 2])) | (443u64 << 32);
+    let unspecified = IpEndpoint::new(IpAddress::Ipv4(Ipv4Address::new(0, 0, 0, 0)), 443);
+    let multicast = IpEndpoint::new(IpAddress::Ipv4(Ipv4Address::new(224, 0, 0, 1)), 443);
+    valid_socket_endpoint(valid)
+        && endpoint_from_packed(packed) == Ok(valid)
+        && endpoint_to_packed(valid) == packed
+        && !valid_socket_endpoint(unspecified)
+        && !valid_socket_endpoint(multicast)
+        && endpoint_from_packed(packed & 0xffff_ffff).is_err()
 }
 
 pub fn endpoint_to_packed(endpoint: IpEndpoint) -> u64 {

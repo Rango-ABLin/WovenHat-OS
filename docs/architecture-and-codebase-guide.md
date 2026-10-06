@@ -654,3 +654,11 @@ it does not yet exhaustively prove collision avoidance across every concurrent
 TCP/UDP local-endpoint combination. Future networking work should add explicit
 live-endpoint collision selection/retry semantics before making that stronger
 claim.
+
+### Stage 14.3 socket API boundary
+
+Socket connect admission uses one fail-closed endpoint validator before either
+the legacy packed IPv4 ABI or smoltcp socket state is touched. It rejects zero
+ports, unspecified IPv4 addresses, and IPv4 multicast destinations. Descriptor
+ownership, generation checks, and async pinning remain the authority model;
+Stage 14.3 does not add live IPv6 sockets or routing-table mutation.

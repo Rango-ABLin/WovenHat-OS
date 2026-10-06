@@ -2196,6 +2196,17 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
                                     ));
                                     halt();
                                 }
+                                #[cfg(feature = "stage14-3-test")]
+                                if network::stage14_3_socket_api_self_test() {
+                                    serial::write_line(format_args!(
+                                        "[S14.3] WovenNet socket API boundary: PASSED"
+                                    ));
+                                } else {
+                                    serial::write_line(format_args!(
+                                        "[S14.3] WovenNet socket API boundary: FAILED"
+                                    ));
+                                    halt();
+                                }
                             }
                         } else {
                             serial::write_line(format_args!(
