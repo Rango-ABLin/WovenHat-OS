@@ -1,6 +1,6 @@
 # Stage status
 
-## Stage 14.2B — IPv6 neighbor foundation (2026-10-06)
+## Stage 14.2C — ICMPv6 Neighbor Discovery parser (2026-10-06)
 
 The IPv6 foundation now has production-reusable address and prefix primitives:
 prefix containment, link-local/multicast classification, and RFC 4291
@@ -11,7 +11,17 @@ Discovery packets, Duplicate Address Detection, router discovery, DHCPv6,
 live IPv6 sockets, and physical IPv6 qualification remain open. See the
 [Stage 14.2B audit](audit-stage14-2b-ipv6-neighbor-foundation-2026-10-06.md).
 
-Next: bounded owned-buffer ICMPv6 Neighbor Discovery parsing and validation.
+The bounded parser now accepts only ICMPv6 Router/Neighbor Solicitation and
+Advertisement envelopes with code zero, valid fixed bodies, non-multicast
+targets, and complete non-zero-length options. It caps input at 1 KiB and does
+not retain packet ownership. The 1/2/4-CPU gate exercises valid and malformed
+messages. IPv6 pseudo-header checksum verification, Duplicate Address
+Detection, router state, DHCPv6, live IPv6 sockets, and physical IPv6
+qualification remain open.
+
+See the [Stage 14.2C audit](audit-stage14-2c-icmpv6-neighbor-parser-2026-10-06.md).
+
+Next: checksum-bound ICMPv6 Neighbor Discovery processing above the parser.
 
 ## Stage 1–5 long-name mutation hardening — 2026-10-01
 

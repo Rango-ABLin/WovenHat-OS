@@ -2116,6 +2116,16 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
                                     ));
                                     halt();
                                 }
+                                if network::stage14_2_icmpv6_neighbor_parser_self_test() {
+                                    serial::write_line(format_args!(
+                                        "[S14.2C] WovenNet ICMPv6 neighbor parser: PASSED"
+                                    ));
+                                } else {
+                                    serial::write_line(format_args!(
+                                        "[S14.2C] WovenNet ICMPv6 neighbor parser: FAILED"
+                                    ));
+                                    halt();
+                                }
                             }
                         } else {
                             serial::write_line(format_args!(

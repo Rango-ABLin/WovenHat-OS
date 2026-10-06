@@ -127,6 +127,88 @@ impl Ipv6Address {
 }
 
 #[cfg(feature = "stage14-2-test")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum NeighborDiscoveryKind {
+    RouterSolicitation,
+    RouterAdvertisement,
+    NeighborSolicitation,
+    NeighborAdvertisement,
+}
+
+#[cfg(feature = "stage14-2-test")]
+#[derive(Debug, PartialEq, Eq)]
+pub struct NeighborDiscoveryMessage<'a> {
+    pub kind: NeighborDiscoveryKind,
+    pub target: Option<Ipv6Address>,
+    pub option_bytes: &'a [u8],
+}
+
+#[cfg(feature = "stage14-2-test")]
+fn valid_neighbor_options(mut bytes: &[u8]) -> bool {
+    while !bytes.is_empty() {
+        if bytes.len() < 2 {
+            return false;
+        }
+        let length_units = bytes[1] as usize;
+        if length_units == 0 {
+            return false;
+        }
+        let option_len = length_units * 8;
+        if option_len > bytes.len() {
+            return false;
+        }
+        bytes = &bytes[option_len..];
+    }
+    true
+}
+
+/// Parse the bounded ICMPv6 Neighbor Discovery message envelope.
+///
+/// The caller owns the packet and remains responsible for validating the
+/// IPv6 pseudo-header checksum before acting on the returned message. This
+/// parser only accepts types 133–136, code zero, fixed-body lengths, and
+/// complete non-zero-length options.
+#[cfg(feature = "stage14-2-test")]
+pub fn parse_icmpv6_neighbor_discovery(
+    packet: &[u8],
+) -> Option<NeighborDiscoveryMessage<'_>> {
+    if packet.len() > 1024 || packet.len() < 2 {
+        return None;
+    }
+    let kind = match (packet[0], packet[1]) {
+        (133, 0) if packet.len() >= 8 => NeighborDiscoveryKind::RouterSolicitation,
+        (134, 0) if packet.len() >= 16 => NeighborDiscoveryKind::RouterAdvertisement,
+        (135, 0) if packet.len() >= 24 => NeighborDiscoveryKind::NeighborSolicitation,
+        (136, 0) if packet.len() >= 24 => NeighborDiscoveryKind::NeighborAdvertisement,
+        _ => return None,
+    };
+
+    let fixed_len = match kind {
+        NeighborDiscoveryKind::RouterSolicitation => 8,
+        NeighborDiscoveryKind::RouterAdvertisement => 16,
+        NeighborDiscoveryKind::NeighborSolicitation
+        | NeighborDiscoveryKind::NeighborAdvertisement => 24,
+    };
+    let target = if fixed_len == 24 {
+        let mut bytes = [0; 16];
+        bytes.copy_from_slice(&packet[8..24]);
+        let address = Ipv6Address(bytes);
+        if address.is_multicast() {
+            return None;
+        }
+        Some(address)
+    } else {
+        None
+    };
+    let option_bytes = &packet[fixed_len..];
+    valid_neighbor_options(option_bytes).then_some(NeighborDiscoveryMessage {
+        kind,
+        target,
+        option_bytes,
+    })
+}
+
+#[cfg(feature = "stage14-2-test")]
 pub fn stage14_2_ipv6_foundation_self_test() -> bool {
     let link_local = Ipv6Prefix::new(
         [0xfe, 0x80, 0, 0, 0, 0, 0, 0, 0x02, 0, 0xff, 0xfe, 0, 0, 0, 1],
@@ -160,6 +242,46 @@ pub fn stage14_2_ipv6_neighbor_foundation_self_test() -> bool {
         && solicited
             == Ipv6Address([0xff, 0x02, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0xff, 0, 0, 1])
         && solicited.is_multicast()
+}
+
+#[cfg(feature = "stage14-2-test")]
+pub fn stage14_2_icmpv6_neighbor_parser_self_test() -> bool {
+    let mut solicitation = [0u8; 32];
+    solicitation[0] = 135;
+    solicitation[1] = 0;
+    solicitation[8..24].copy_from_slice(&[
+        0xfe, 0x80, 0, 0, 0, 0, 0, 0, 0x02, 0, 0, 0xff, 0xfe, 0, 0, 1,
+    ]);
+    solicitation[24] = 1;
+    solicitation[25] = 1;
+
+    let mut truncated_option = solicitation;
+    truncated_option[25] = 2;
+    let mut zero_length_option = solicitation;
+    zero_length_option[25] = 0;
+    let mut multicast_target = solicitation;
+    multicast_target[8] = 0xff;
+    let router_advertisement = [134, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+
+    matches!(
+        parse_icmpv6_neighbor_discovery(&solicitation),
+        Some(NeighborDiscoveryMessage {
+            kind: NeighborDiscoveryKind::NeighborSolicitation,
+            target: Some(_),
+            option_bytes,
+        }) if option_bytes.len() == 8
+    ) && parse_icmpv6_neighbor_discovery(&truncated_option).is_none()
+        && parse_icmpv6_neighbor_discovery(&zero_length_option).is_none()
+        && parse_icmpv6_neighbor_discovery(&multicast_target).is_none()
+        && matches!(
+            parse_icmpv6_neighbor_discovery(&router_advertisement),
+            Some(NeighborDiscoveryMessage {
+                kind: NeighborDiscoveryKind::RouterAdvertisement,
+                target: None,
+                option_bytes,
+            }) if option_bytes.is_empty()
+        )
+        && parse_icmpv6_neighbor_discovery(&[135, 1, 0, 0]).is_none()
 }
 
 pub struct VirtioSmolDevice {
