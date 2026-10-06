@@ -2206,6 +2206,16 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
                                     ));
                                     halt();
                                 }
+                                if network::stage14_2_ndp_ingress_hardening_self_test() {
+                                    serial::write_line(format_args!(
+                                        "[S14.2L] WovenNet NDP ingress hardening: PASSED"
+                                    ));
+                                } else {
+                                    serial::write_line(format_args!(
+                                        "[S14.2L] WovenNet NDP ingress hardening: FAILED"
+                                    ));
+                                    halt();
+                                }
                                 #[cfg(feature = "stage14-3-test")]
                                 if network::stage14_3_socket_api_self_test() {
                                     serial::write_line(format_args!(
