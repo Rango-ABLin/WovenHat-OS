@@ -643,10 +643,10 @@ fn finish_icmpv6_checksum(
 #[cfg(feature = "stage14-2-test")]
 pub fn stage14_2_neighbor_state_dad_self_test() -> bool {
     let local = Ipv6Address([
-        0xfe, 0x80, 0, 0, 0, 0, 0, 0, 0x02, 0, 0xff, 0xfe, 0, 0, 1,
+        0xfe, 0x80, 0, 0, 0, 0, 0, 0, 0x02, 0, 0, 0xff, 0xfe, 0, 0, 1,
     ]);
     let peer = Ipv6Address([
-        0xfe, 0x80, 0, 0, 0, 0, 0, 0, 0x02, 0, 0xff, 0xfe, 0, 0, 2,
+        0xfe, 0x80, 0, 0, 0, 0, 0, 0, 0x02, 0, 0, 0xff, 0xfe, 0, 0, 2,
     ]);
     let all_nodes = Ipv6Address([0xff, 0x02, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1]);
 
