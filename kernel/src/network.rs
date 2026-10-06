@@ -12,7 +12,9 @@ use smoltcp::{
     phy::{ChecksumCapabilities, Device, DeviceCapabilities, Medium, RxToken, TxToken},
     socket::{dhcpv4, dns, icmp, tcp, udp},
     time::Instant,
-    wire::{EthernetAddress, IpAddress, IpCidr, IpEndpoint, Ipv4Address},
+    wire::{EthernetAddress, IpAddress, IpCidr, IpEndpoint, Ipv4Address,
+        #[cfg(feature = "stage14-2-test")]
+        Ipv6Address as SmolIpv6Address},
 };
 use spin::Once;
 
@@ -38,6 +40,32 @@ const TCP_CLOSE_GRACE_TICKS: u64 = timer::FREQUENCY_HZ as u64 * 30;
 pub fn default_cidr() -> IpCidr {
     IpCidr::new(IpAddress::Ipv4(DEFAULT_IPV4), DEFAULT_PREFIX)
 }
+
+#[cfg(feature = "stage14-2-test")]
+fn stage14_2_link_local_from_mac(mac: [u8; 6]) -> Ipv6Address {
+    let mut bytes = [0u8; 16];
+    bytes[0] = 0xfe;
+    bytes[1] = 0x80;
+    bytes[8] = mac[0] ^ 0x02;
+    bytes[9] = mac[1];
+    bytes[10] = mac[2];
+    bytes[11] = 0xff;
+    bytes[12] = 0xfe;
+    bytes[13] = mac[3];
+    bytes[14] = mac[4];
+    bytes[15] = mac[5];
+    Ipv6Address(bytes)
+}
+
+#[cfg(feature = "stage14-2-test")]
+pub fn stage14_2_runtime_ipv6_self_test() -> bool {
+    let mac = [0x52, 0x54, 0x00, 0x12, 0x34, 0x56];
+    stage14_2_link_local_from_mac(mac)
+        == Ipv6Address([
+            0xfe, 0x80, 0, 0, 0, 0, 0, 0, 0x50, 0x54, 0x00, 0xff, 0xfe, 0x12, 0x34, 0x56,
+        ])
+}
+
 
 #[cfg(feature = "stage14-2-test")]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1903,7 +1931,8 @@ pub fn init() -> Result<(), InitError> {
     }
     virtio_net::init().map_err(InitError::Transport)?;
 
-    let mac = EthernetAddress(virtio_net::mac_address());
+    let mac_bytes = virtio_net::mac_address();
+    let mac = EthernetAddress(mac_bytes);
     #[cfg(feature = "stage13-9-test")]
     let mut device = NetTransport::Virtio(VirtioSmolDevice::new());
     #[cfg(not(feature = "stage13-9-test"))]
@@ -1916,6 +1945,14 @@ pub fn init() -> Result<(), InitError> {
     let mut iface = Interface::new(config, &mut device, now());
     iface.update_ip_addrs(|addrs| {
         let _ = addrs.push(default_cidr());
+        #[cfg(feature = "stage14-2-test")]
+        {
+            let link_local = stage14_2_link_local_from_mac(mac_bytes);
+            let _ = addrs.push(IpCidr::new(
+                IpAddress::Ipv6(SmolIpv6Address::from_bytes(&link_local.0)),
+                64,
+            ));
+        }
     });
     iface
         .routes_mut()
