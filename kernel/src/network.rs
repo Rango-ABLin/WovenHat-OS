@@ -39,6 +39,60 @@ pub fn default_cidr() -> IpCidr {
     IpCidr::new(IpAddress::Ipv4(DEFAULT_IPV4), DEFAULT_PREFIX)
 }
 
+#[cfg(feature = "stage14-2-test")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Ipv6Prefix {
+    pub address: [u8; 16],
+    pub prefix_len: u8,
+}
+
+#[cfg(feature = "stage14-2-test")]
+impl Ipv6Prefix {
+    pub const fn new(address: [u8; 16], prefix_len: u8) -> Option<Self> {
+        if prefix_len > 128 {
+            return None;
+        }
+        Some(Self { address, prefix_len })
+    }
+
+    pub const fn is_unspecified(&self) -> bool {
+        let mut index = 0;
+        while index < self.address.len() {
+            if self.address[index] != 0 {
+                return false;
+            }
+            index += 1;
+        }
+        true
+    }
+
+    pub const fn is_link_local(&self) -> bool {
+        self.address[0] == 0xfe && (self.address[1] & 0xc0) == 0x80
+    }
+
+    pub const fn is_multicast(&self) -> bool {
+        self.address[0] == 0xff
+    }
+}
+
+#[cfg(feature = "stage14-2-test")]
+pub fn stage14_2_ipv6_foundation_self_test() -> bool {
+    let link_local = Ipv6Prefix::new(
+        [0xfe, 0x80, 0, 0, 0, 0, 0, 0, 0x02, 0, 0, 0xff, 0xfe, 0, 0, 0, 1],
+        64,
+    );
+    let unspecified = Ipv6Prefix::new([0; 16], 128);
+    let multicast = Ipv6Prefix::new(
+        [0xff, 0x02, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1],
+        128,
+    );
+
+    matches!(link_local, Some(prefix) if prefix.is_link_local() && !prefix.is_multicast())
+        && matches!(unspecified, Some(prefix) if prefix.is_unspecified() && !prefix.is_link_local())
+        && matches!(multicast, Some(prefix) if prefix.is_multicast() && !prefix.is_unspecified())
+        && Ipv6Prefix::new([0; 16], 129).is_none()
+}
+
 pub struct VirtioSmolDevice {
     rx: [u8; MAX_FRAME],
 }
