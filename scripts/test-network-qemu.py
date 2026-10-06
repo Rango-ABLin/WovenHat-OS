@@ -230,6 +230,7 @@ def main():
             *(['[S14.2F] WovenNet neighbor state and DAD: PASSED'] if args.feature == 'stage14-2-test' else []),
             *(['[S14.2G] WovenNet SLAAC lifecycle: PASSED'] if args.feature == 'stage14-2-test' else []),
             *(['[S14.2H] WovenNet DHCPv6 protocol foundation: PASSED'] if args.feature == 'stage14-2-test' else []),
+            *(['[S14.2I] WovenNet DHCPv6 client state machine: PASSED'] if args.feature == 'stage14-2-test' else []),
         ])
     if result != 33 or any(marker not in log for marker in required):
         print(log[-12000:], file=sys.stderr)
