@@ -2176,6 +2176,16 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
                                     ));
                                     halt();
                                 }
+                                if network::stage14_2_dhcpv6_client_self_test() {
+                                    serial::write_line(format_args!(
+                                        "[S14.2I] WovenNet DHCPv6 client state machine: PASSED"
+                                    ));
+                                } else {
+                                    serial::write_line(format_args!(
+                                        "[S14.2I] WovenNet DHCPv6 client state machine: FAILED"
+                                    ));
+                                    halt();
+                                }
                             }
                         } else {
                             serial::write_line(format_args!(
