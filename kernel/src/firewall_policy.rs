@@ -1,6 +1,8 @@
 use crate::irq_lock::IrqMutex as Mutex;
 use smoltcp::wire::{IpAddress, Ipv4Address, Ipv6Address};
 use spin::Once;
+#[cfg(feature = "stage14-5b-test")]
+use core::sync::atomic::{AtomicBool, Ordering};
 
 const MAX_FIREWALL_RULES: usize = 32;
 
@@ -148,6 +150,8 @@ fn rule_matches(rule: FirewallRule, packet: PacketMeta) -> bool {
 }
 
 static POLICY: Once<Mutex<FirewallPolicy>> = Once::new();
+#[cfg(feature = "stage14-5b-test")]
+static LIVE_ENFORCEMENT: AtomicBool = AtomicBool::new(false);
 
 fn global_policy() -> &'static Mutex<FirewallPolicy> {
     POLICY.call_once(|| Mutex::with_rank(FirewallPolicy::new(FirewallAction::Deny), 0))
@@ -289,6 +293,9 @@ fn transport_meta(next: u8, payload: &[u8], ipv6: bool) -> Option<(FirewallProto
 
 #[cfg(feature = "stage14-5b-test")]
 pub fn evaluate_ethernet_frame(frame: &[u8], direction: FirewallDirection) -> FrameDecision {
+    if !LIVE_ENFORCEMENT.load(Ordering::Acquire) {
+        return FrameDecision::Allow;
+    }
     let Some(meta) = packet_meta_from_ethernet(frame, direction) else {
         // Stage 14.5B filters understood IP traffic only. ARP and other L2
         // control traffic remain available to the network stack.
@@ -335,6 +342,7 @@ pub fn stage14_5b_self_test() -> bool {
     outbound.destination_port = Some(PortRange::new(7001,7001));
     let installed = policy.add(inbound).is_ok() && policy.add(outbound).is_ok();
     drop(policy);
+    LIVE_ENFORCEMENT.store(true, Ordering::Release);
 
     let inbound_allow = evaluate_ethernet_frame(&ipv4, FirewallDirection::Inbound) == FrameDecision::Allow;
     ipv4[36..38].copy_from_slice(&7002u16.to_be_bytes());
@@ -348,8 +356,7 @@ pub fn stage14_5b_self_test() -> bool {
     crate::serial::write_line(format_args!("[S14.5B] live egress allow/drop {}", if outbound_allow && outbound_deny {"PASS"} else {"FAIL"}));
     crate::serial::write_line(format_args!("[S14.5B] L2 control preservation {}", if control_allow {"PASS"} else {"FAIL"}));
 
-    // Restore a permissive test policy before the inherited live network suite
-    // continues so Stage 14.1-14.4 behavior remains a regression gate.
-    *global_policy().lock() = FirewallPolicy::new(FirewallAction::Allow);
+    LIVE_ENFORCEMENT.store(false, Ordering::Release);
+    *global_policy().lock() = FirewallPolicy::new(FirewallAction::Deny);
     installed && inbound_allow && inbound_deny && outbound_allow && outbound_deny && control_allow
 }
