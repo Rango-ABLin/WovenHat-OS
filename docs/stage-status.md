@@ -121,6 +121,30 @@ networking gates retained. GitHub Actions run #1267 passed on commit
 Next: Stage 14.5B live packet-path enforcement without weakening the accepted
 DHCP, IPv4/IPv6, socket, or routing behavior.
 
+## Stage 14.5B — WovenGuard live packet enforcement (2026-10-07)
+
+Stage 14.5B is accepted. WovenGuard now evaluates real Ethernet-frame traffic
+at the virtio network boundary: inbound denial occurs before an RX token is
+returned to smoltcp, and outbound denial occurs after frame construction but
+before hardware submission. The shared parser derives IPv4/IPv6 TCP, UDP,
+ICMP, and ICMPv6 policy metadata while preserving non-IP Layer-2 control
+traffic.
+
+Live enforcement has an explicit activation lifecycle. It remains disabled
+during network bootstrap, is enabled for controlled policy enforcement, and
+does not replace the policy's default-deny semantics with a permissive default.
+This prevents DHCP/bootstrap deadlock while keeping firewall activation an
+intentional security transition.
+
+The Stage 14.5B acceptance marker is
+`[S14.5B] live packet enforcement PASSED`. GitHub Actions run #1277 passed
+the dedicated build, Clippy `-D warnings`, inherited Stage 14.1-14.5A network
+regressions, and QEMU 1/2/4-core acceptance on commit `1d1ce646`.
+
+Next: extend WovenGuard beyond the accepted virtio live boundary with explicit
+policy-management authority and transport coverage before claiming a
+production firewall.
+
 ## Stage 1–5 long-name mutation hardening — 2026-10-01
 
 The FAT32 create/overwrite and rename paths now compare the user-visible long
