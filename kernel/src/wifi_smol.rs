@@ -62,6 +62,13 @@ impl TxToken for WifiTxToken<'_> {
         let mut frame = [0u8; ETHERNET_MTU];
         let usable = core::cmp::min(len, ETHERNET_MTU);
         let result = f(&mut frame[..usable]);
+        #[cfg(feature = "stage14-5d-test")]
+        if crate::firewall_policy::evaluate_ethernet_frame(
+            &frame[..usable],
+            crate::firewall_policy::FirewallDirection::Outbound,
+        ) == crate::firewall_policy::FrameDecision::Deny {
+            return result;
+        }
         let _ = self.session.transmit_ethernet(self.epoch, &frame[..usable]);
         result
     }
@@ -82,6 +89,13 @@ impl Device for WifiSmolDevice<'_> {
             Ok(Some(n)) => n,
             Ok(None) | Err(_) => return None,
         };
+        #[cfg(feature = "stage14-5d-test")]
+        if crate::firewall_policy::evaluate_ethernet_frame(
+            &self.rx[..len],
+            crate::firewall_policy::FirewallDirection::Inbound,
+        ) == crate::firewall_policy::FrameDecision::Deny {
+            return None;
+        }
         Some((
             WifiRxToken {
                 data: &mut self.rx[..len],
