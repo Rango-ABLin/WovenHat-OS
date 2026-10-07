@@ -22,10 +22,10 @@ impl IpPrefix {
     fn matches(self, candidate: IpAddress) -> bool {
         match (self.address, candidate) {
             (IpAddress::Ipv4(network), IpAddress::Ipv4(address)) if self.prefix_len <= 32 => {
-                prefix_matches(&network.0, &address.0, self.prefix_len)
+                prefix_matches(&network.octets(), &address.octets(), self.prefix_len)
             }
             (IpAddress::Ipv6(network), IpAddress::Ipv6(address)) if self.prefix_len <= 128 => {
-                prefix_matches(&network.0, &address.0, self.prefix_len)
+                prefix_matches(&network.octets(), &address.octets(), self.prefix_len)
             }
             _ => false,
         }
@@ -150,7 +150,7 @@ fn rule_matches(rule: FirewallRule, packet: PacketMeta) -> bool {
 static POLICY: Once<Mutex<FirewallPolicy>> = Once::new();
 
 fn global_policy() -> &'static Mutex<FirewallPolicy> {
-    POLICY.call_once(|| Mutex::new(FirewallPolicy::new(FirewallAction::Deny)))
+    POLICY.call_once(|| Mutex::with_rank(FirewallPolicy::new(FirewallAction::Deny), 0))
 }
 
 fn base_rule(id: u64, priority: u32, action: FirewallAction) -> FirewallRule {
@@ -161,10 +161,10 @@ fn base_rule(id: u64, priority: u32, action: FirewallAction) -> FirewallRule {
 }
 
 pub fn stage14_5a_self_test() -> bool {
-    let v4a = IpAddress::Ipv4(Ipv4Address([10, 1, 2, 3]));
-    let v4b = IpAddress::Ipv4(Ipv4Address([10, 1, 9, 9]));
-    let v6a = IpAddress::Ipv6(Ipv6Address([0x20,1,0x0d,0xb8,0,1,0,0,0,0,0,0,0,0,0,1]));
-    let v6b = IpAddress::Ipv6(Ipv6Address([0x20,1,0x0d,0xb8,0,2,0,0,0,0,0,0,0,0,0,1]));
+    let v4a = IpAddress::Ipv4(Ipv4Address::new(10, 1, 2, 3));
+    let v4b = IpAddress::Ipv4(Ipv4Address::new(10, 1, 9, 9));
+    let v6a = IpAddress::Ipv6(Ipv6Address::new(0x2001, 0x0db8, 0x0001, 0, 0, 0, 0, 1));
+    let v6b = IpAddress::Ipv6(Ipv6Address::new(0x2001, 0x0db8, 0x0002, 0, 0, 0, 0, 1));
     let packet = PacketMeta { direction: FirewallDirection::Inbound, protocol: FirewallProtocol::Tcp,
         source: v4a, destination: v4b, source_port: Some(50000), destination_port: Some(443) };
 
@@ -182,15 +182,15 @@ pub fn stage14_5a_self_test() -> bool {
     };
     crate::serial::write_line(format_args!("[S14.5A] protocol matching {}", if protocol_ok {"PASS"} else {"FAIL"}));
 
-    let ipv4_ok = IpPrefix::new(IpAddress::Ipv4(Ipv4Address([10,1,0,0])), 16).matches(v4a)
-        && !IpPrefix::new(IpAddress::Ipv4(Ipv4Address([10,2,0,0])), 16).matches(v4a)
-        && IpPrefix::new(IpAddress::Ipv4(Ipv4Address([0,0,0,0])), 0).matches(v4a)
+    let ipv4_ok = IpPrefix::new(IpAddress::Ipv4(Ipv4Address::new(10, 1, 0, 0)), 16).matches(v4a)
+        && !IpPrefix::new(IpAddress::Ipv4(Ipv4Address::new(10, 2, 0, 0)), 16).matches(v4a)
+        && IpPrefix::new(IpAddress::Ipv4(Ipv4Address::UNSPECIFIED), 0).matches(v4a)
         && IpPrefix::new(v4a, 32).matches(v4a);
     crate::serial::write_line(format_args!("[S14.5A] IPv4 CIDR matching {}", if ipv4_ok {"PASS"} else {"FAIL"}));
 
-    let ipv6_ok = IpPrefix::new(IpAddress::Ipv6(Ipv6Address([0x20,1,0x0d,0xb8,0,0,0,0,0,0,0,0,0,0,0,0])), 64).matches(v6a)
+    let ipv6_ok = IpPrefix::new(IpAddress::Ipv6(Ipv6Address::new(0x2001, 0x0db8, 0, 0, 0, 0, 0, 0)), 64).matches(v6a)
         && !IpPrefix::new(IpAddress::Ipv6(Ipv6Address([0x20,1,0x0d,0xb8,0,2,0,0,0,0,0,0,0,0,0,0])), 80).matches(v6a)
-        && IpPrefix::new(IpAddress::Ipv6(Ipv6Address([0;16])), 0).matches(v6b)
+        && IpPrefix::new(IpAddress::Ipv6(Ipv6Address::UNSPECIFIED), 0).matches(v6b)
         && IpPrefix::new(v6a, 128).matches(v6a);
     crate::serial::write_line(format_args!("[S14.5A] IPv6 CIDR matching {}", if ipv6_ok {"PASS"} else {"FAIL"}));
 
@@ -219,15 +219,14 @@ pub fn stage14_5a_self_test() -> bool {
     };
     crate::serial::write_line(format_args!("[S14.5A] bounded rule storage {}", if bounded_ok {"PASS"} else {"FAIL"}));
 
-    let concurrent_ok = {
-        {
-            let mut policy = global_policy().lock();
-            let _ = policy.remove(500);
-            policy.add(base_rule(500, 1, FirewallAction::Allow)).is_ok()
-        } && {
-            let policy = global_policy().lock();
-            policy.evaluate(packet) == FirewallAction::Allow
-        }
+    let installed = {
+        let mut policy = global_policy().lock();
+        let _ = policy.remove(500);
+        policy.add(base_rule(500, 1, FirewallAction::Allow)).is_ok()
+    };
+    let concurrent_ok = installed && {
+        let policy = global_policy().lock();
+        policy.evaluate(packet) == FirewallAction::Allow
     };
     crate::serial::write_line(format_args!("[S14.5A] concurrent policy access {}", if concurrent_ok {"PASS"} else {"FAIL"}));
 
