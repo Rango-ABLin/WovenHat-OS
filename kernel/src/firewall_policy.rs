@@ -1,4 +1,6 @@
 use crate::irq_lock::IrqMutex as Mutex;
+#[cfg(feature = "stage14-5c-test")]
+use crate::capability::{Capability, CapabilitySet};
 use smoltcp::wire::{IpAddress, Ipv4Address, Ipv6Address};
 use spin::Once;
 #[cfg(feature = "stage14-5b-test")]
@@ -359,4 +361,99 @@ pub fn stage14_5b_self_test() -> bool {
     LIVE_ENFORCEMENT.store(false, Ordering::Release);
     *global_policy().lock() = FirewallPolicy::new(FirewallAction::Deny);
     installed && inbound_allow && inbound_deny && outbound_allow && outbound_deny && control_allow
+}
+
+
+#[cfg(feature = "stage14-5c-test")]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum FirewallAdminError {
+    Unauthorized,
+    Policy(PolicyError),
+}
+
+#[cfg(feature = "stage14-5c-test")]
+fn require_admin(authority: CapabilitySet) -> Result<(), FirewallAdminError> {
+    if authority.contains(Capability::NetworkAdmin) {
+        Ok(())
+    } else {
+        Err(FirewallAdminError::Unauthorized)
+    }
+}
+
+#[cfg(feature = "stage14-5c-test")]
+pub fn admin_add(authority: CapabilitySet, rule: FirewallRule) -> Result<(), FirewallAdminError> {
+    require_admin(authority)?;
+    global_policy().lock().add(rule).map_err(FirewallAdminError::Policy)
+}
+
+#[cfg(feature = "stage14-5c-test")]
+pub fn admin_remove(authority: CapabilitySet, id: u64) -> Result<(), FirewallAdminError> {
+    require_admin(authority)?;
+    global_policy().lock().remove(id).map_err(FirewallAdminError::Policy)
+}
+
+#[cfg(feature = "stage14-5c-test")]
+pub fn admin_replace(authority: CapabilitySet, rule: FirewallRule) -> Result<(), FirewallAdminError> {
+    require_admin(authority)?;
+    global_policy().lock().replace(rule).map_err(FirewallAdminError::Policy)
+}
+
+#[cfg(feature = "stage14-5c-test")]
+pub fn admin_set_default(authority: CapabilitySet, action: FirewallAction) -> Result<(), FirewallAdminError> {
+    require_admin(authority)?;
+    global_policy().lock().default_action = action;
+    Ok(())
+}
+
+#[cfg(feature = "stage14-5c-test")]
+pub fn admin_set_enforcement(authority: CapabilitySet, enabled: bool) -> Result<(), FirewallAdminError> {
+    require_admin(authority)?;
+    LIVE_ENFORCEMENT.store(enabled, Ordering::Release);
+    Ok(())
+}
+
+#[cfg(feature = "stage14-5c-test")]
+pub fn stage14_5c_self_test() -> bool {
+    let user = CapabilitySet::userspace();
+    let admin = CapabilitySet::only(Capability::NetworkAdmin);
+    let rule = base_rule(0x145c01, 1, FirewallAction::Allow);
+
+    *global_policy().lock() = FirewallPolicy::new(FirewallAction::Deny);
+    LIVE_ENFORCEMENT.store(false, Ordering::Release);
+
+    let denied = admin_add(user, rule) == Err(FirewallAdminError::Unauthorized)
+        && admin_set_default(user, FirewallAction::Allow) == Err(FirewallAdminError::Unauthorized)
+        && admin_set_enforcement(user, true) == Err(FirewallAdminError::Unauthorized);
+
+    let authorized = admin_add(admin, rule).is_ok()
+        && admin_replace(admin, FirewallRule { action: FirewallAction::Deny, ..rule }).is_ok()
+        && admin_set_default(admin, FirewallAction::Allow).is_ok()
+        && admin_set_enforcement(admin, true).is_ok()
+        && LIVE_ENFORCEMENT.load(Ordering::Acquire)
+        && admin_remove(admin, rule.id).is_ok();
+
+    let domain_boundary = crate::wovenguard::domain_allows(
+        crate::wovenguard::SecurityDomain::SystemService,
+        Capability::NetworkAdmin,
+    ) && !crate::wovenguard::domain_allows(
+        crate::wovenguard::SecurityDomain::User,
+        Capability::NetworkAdmin,
+    );
+
+    crate::serial::write_line(format_args!(
+        "[S14.5C] unauthorized policy mutation {}",
+        if denied {"PASS"} else {"FAIL"}
+    ));
+    crate::serial::write_line(format_args!(
+        "[S14.5C] NetworkAdmin mutation authority {}",
+        if authorized {"PASS"} else {"FAIL"}
+    ));
+    crate::serial::write_line(format_args!(
+        "[S14.5C] domain authority boundary {}",
+        if domain_boundary {"PASS"} else {"FAIL"}
+    ));
+
+    LIVE_ENFORCEMENT.store(false, Ordering::Release);
+    *global_policy().lock() = FirewallPolicy::new(FirewallAction::Deny);
+    denied && authorized && domain_boundary
 }
