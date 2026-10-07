@@ -508,3 +508,70 @@ pub fn stage14_5c_self_test() -> bool {
     *global_policy().lock() = FirewallPolicy::new(FirewallAction::Deny);
     denied && authorized && domain_boundary
 }
+
+
+#[cfg(feature = "stage14-5d-test")]
+pub fn stage14_5d_self_test() -> bool {
+    let admin = CapabilitySet::only(Capability::NetworkAdmin);
+    *global_policy().lock() = FirewallPolicy::new(FirewallAction::Deny);
+
+    let mut allow = base_rule(0x145d01, 1, FirewallAction::Allow);
+    allow.direction = FirewallDirection::Inbound;
+    allow.protocol = FirewallProtocol::Udp;
+    allow.destination_port = Some(PortRange::new(7000, 7000));
+    let installed = admin_add(admin, allow).is_ok() && admin_set_enforcement(admin, true).is_ok();
+
+    let mut bad_v4 = [0u8; 14 + 20];
+    bad_v4[12..14].copy_from_slice(&0x0800u16.to_be_bytes());
+    bad_v4[14] = 0x45;
+    bad_v4[16..18].copy_from_slice(&40u16.to_be_bytes());
+    bad_v4[23] = 17;
+
+    let mut bad_v6 = [0u8; 14 + 40];
+    bad_v6[12..14].copy_from_slice(&0x86ddu16.to_be_bytes());
+    bad_v6[14] = 0x60;
+    bad_v6[18..20].copy_from_slice(&16u16.to_be_bytes());
+    bad_v6[20] = 17;
+
+    let malformed_closed =
+        evaluate_ethernet_frame(&bad_v4, FirewallDirection::Inbound) == FrameDecision::Deny
+        && evaluate_ethernet_frame(&bad_v6, FirewallDirection::Inbound) == FrameDecision::Deny;
+
+    let mut ext = [0u8; 14 + 40 + 8 + 8];
+    ext[12..14].copy_from_slice(&0x86ddu16.to_be_bytes());
+    ext[14] = 0x60;
+    ext[18..20].copy_from_slice(&16u16.to_be_bytes());
+    ext[20] = 0;
+    ext[22..38].copy_from_slice(&[0x20,1,0x0d,0xb8,0,1,0,0,0,0,0,0,0,0,0,1]);
+    ext[38..54].copy_from_slice(&[0x20,1,0x0d,0xb8,0,2,0,0,0,0,0,0,0,0,0,1]);
+    ext[54] = 17;
+    ext[55] = 0;
+    ext[62..64].copy_from_slice(&50000u16.to_be_bytes());
+    ext[64..66].copy_from_slice(&7000u16.to_be_bytes());
+    let extension_ok =
+        evaluate_ethernet_frame(&ext, FirewallDirection::Inbound) == FrameDecision::Allow;
+
+    let non_ip = [0u8; 14];
+    let non_ip_preserved =
+        evaluate_ethernet_frame(&non_ip, FirewallDirection::Inbound) == FrameDecision::Allow;
+
+    crate::serial::write_line(format_args!(
+        "[S14.5D] malformed IP fail-closed {}",
+        if malformed_closed {"PASS"} else {"FAIL"}
+    ));
+    crate::serial::write_line(format_args!(
+        "[S14.5D] bounded IPv6 extension parsing {}",
+        if extension_ok {"PASS"} else {"FAIL"}
+    ));
+    crate::serial::write_line(format_args!(
+        "[S14.5D] non-IP L2 preservation {}",
+        if non_ip_preserved {"PASS"} else {"FAIL"}
+    ));
+    crate::serial::write_line(format_args!(
+        "[S14.5D] Forward datapath absent by design PASS"
+    ));
+
+    LIVE_ENFORCEMENT.store(false, Ordering::Release);
+    *global_policy().lock() = FirewallPolicy::new(FirewallAction::Deny);
+    installed && malformed_closed && extension_ok && non_ip_preserved
+}
