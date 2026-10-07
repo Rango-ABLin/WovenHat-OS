@@ -189,7 +189,7 @@ pub fn stage14_5a_self_test() -> bool {
     crate::serial::write_line(format_args!("[S14.5A] IPv4 CIDR matching {}", if ipv4_ok {"PASS"} else {"FAIL"}));
 
     let ipv6_ok = IpPrefix::new(IpAddress::Ipv6(Ipv6Address::new(0x2001, 0x0db8, 0, 0, 0, 0, 0, 0)), 64).matches(v6a)
-        && !IpPrefix::new(IpAddress::Ipv6(Ipv6Address::new(0x2001, 0x0db8, 0x0002, 0, 0, 0, 0, 0)), 80).matches(v6a)
+        && !IpPrefix::new(IpAddress::Ipv6(Ipv6Address::new(0x2001, 0x0db8, 0x0001, 0, 1, 0, 0, 0)), 80).matches(v6a)
         && IpPrefix::new(IpAddress::Ipv6(Ipv6Address::UNSPECIFIED), 0).matches(v6b)
         && IpPrefix::new(v6a, 128).matches(v6a);
     crate::serial::write_line(format_args!("[S14.5A] IPv6 CIDR matching {}", if ipv6_ok {"PASS"} else {"FAIL"}));
