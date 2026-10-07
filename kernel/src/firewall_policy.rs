@@ -232,3 +232,124 @@ pub fn stage14_5a_self_test() -> bool {
 
     direction_ok && protocol_ok && ipv4_ok && ipv6_ok && port_ok && ordering_ok && default_ok && bounded_ok && concurrent_ok
 }
+
+
+#[cfg(feature = "stage14-5b-test")]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum FrameDecision { Allow, Deny }
+
+#[cfg(feature = "stage14-5b-test")]
+fn packet_meta_from_ethernet(frame: &[u8], direction: FirewallDirection) -> Option<PacketMeta> {
+    if frame.len() < 14 { return None; }
+    match u16::from_be_bytes([frame[12], frame[13]]) {
+        0x0800 => {
+            let ip = &frame[14..];
+            if ip.len() < 20 || ip[0] >> 4 != 4 { return None; }
+            let header_len = usize::from(ip[0] & 0x0f) * 4;
+            if header_len < 20 || ip.len() < header_len { return None; }
+            let source = IpAddress::Ipv4(Ipv4Address::new(ip[12], ip[13], ip[14], ip[15]));
+            let destination = IpAddress::Ipv4(Ipv4Address::new(ip[16], ip[17], ip[18], ip[19]));
+            let (protocol, ports) = transport_meta(ip[9], &ip[header_len..], false)?;
+            Some(PacketMeta {
+                direction, protocol, source, destination,
+                source_port: ports.map(|p| p.0), destination_port: ports.map(|p| p.1),
+            })
+        }
+        0x86dd => {
+            let ip = &frame[14..];
+            if ip.len() < 40 || ip[0] >> 4 != 6 { return None; }
+            let mut src = [0u8; 16]; src.copy_from_slice(&ip[8..24]);
+            let mut dst = [0u8; 16]; dst.copy_from_slice(&ip[24..40]);
+            let (protocol, ports) = transport_meta(ip[6], &ip[40..], true)?;
+            Some(PacketMeta {
+                direction,
+                protocol,
+                source: IpAddress::Ipv6(Ipv6Address::from_octets(src)),
+                destination: IpAddress::Ipv6(Ipv6Address::from_octets(dst)),
+                source_port: ports.map(|p| p.0), destination_port: ports.map(|p| p.1),
+            })
+        }
+        _ => None,
+    }
+}
+
+#[cfg(feature = "stage14-5b-test")]
+fn transport_meta(next: u8, payload: &[u8], ipv6: bool) -> Option<(FirewallProtocol, Option<(u16,u16)>)> {
+    match next {
+        6 | 17 => {
+            if payload.len() < 4 { return None; }
+            let ports = (u16::from_be_bytes([payload[0],payload[1]]), u16::from_be_bytes([payload[2],payload[3]]));
+            Some((if next == 6 { FirewallProtocol::Tcp } else { FirewallProtocol::Udp }, Some(ports)))
+        }
+        1 if !ipv6 => Some((FirewallProtocol::Icmp, None)),
+        58 if ipv6 => Some((FirewallProtocol::Icmpv6, None)),
+        _ => None,
+    }
+}
+
+#[cfg(feature = "stage14-5b-test")]
+pub fn evaluate_ethernet_frame(frame: &[u8], direction: FirewallDirection) -> FrameDecision {
+    let Some(meta) = packet_meta_from_ethernet(frame, direction) else {
+        // Stage 14.5B filters understood IP traffic only. ARP and other L2
+        // control traffic remain available to the network stack.
+        return FrameDecision::Allow;
+    };
+    let policy = global_policy().lock();
+    match policy.evaluate(meta) {
+        FirewallAction::Allow => FrameDecision::Allow,
+        FirewallAction::Deny => FrameDecision::Deny,
+    }
+}
+
+#[cfg(feature = "stage14-5b-test")]
+pub fn stage14_5b_self_test() -> bool {
+    let mut ipv4 = [0u8; 14 + 20 + 8];
+    ipv4[12..14].copy_from_slice(&0x0800u16.to_be_bytes());
+    ipv4[14] = 0x45;
+    ipv4[23] = 17;
+    ipv4[26..30].copy_from_slice(&[10,1,2,3]);
+    ipv4[30..34].copy_from_slice(&[10,1,9,9]);
+    ipv4[34..36].copy_from_slice(&50000u16.to_be_bytes());
+    ipv4[36..38].copy_from_slice(&7000u16.to_be_bytes());
+
+    let mut ipv6 = [0u8; 14 + 40 + 8];
+    ipv6[12..14].copy_from_slice(&0x86ddu16.to_be_bytes());
+    ipv6[14] = 0x60;
+    ipv6[20] = 17;
+    ipv6[22..38].copy_from_slice(&Ipv6Address::new(0x2001,0xdb8,1,0,0,0,0,1).octets());
+    ipv6[38..54].copy_from_slice(&Ipv6Address::new(0x2001,0xdb8,2,0,0,0,0,1).octets());
+    ipv6[54..56].copy_from_slice(&50001u16.to_be_bytes());
+    ipv6[56..58].copy_from_slice(&7001u16.to_be_bytes());
+
+    let mut arp = [0u8; 42];
+    arp[12..14].copy_from_slice(&0x0806u16.to_be_bytes());
+
+    let mut policy = global_policy().lock();
+    *policy = FirewallPolicy::new(FirewallAction::Deny);
+    let mut inbound = base_rule(0x145b01, 10, FirewallAction::Allow);
+    inbound.protocol = FirewallProtocol::Udp;
+    inbound.destination_port = Some(PortRange::new(7000,7000));
+    let mut outbound = base_rule(0x145b02, 10, FirewallAction::Allow);
+    outbound.direction = FirewallDirection::Outbound;
+    outbound.protocol = FirewallProtocol::Udp;
+    outbound.destination_port = Some(PortRange::new(7001,7001));
+    let installed = policy.add(inbound).is_ok() && policy.add(outbound).is_ok();
+    drop(policy);
+
+    let inbound_allow = evaluate_ethernet_frame(&ipv4, FirewallDirection::Inbound) == FrameDecision::Allow;
+    ipv4[36..38].copy_from_slice(&7002u16.to_be_bytes());
+    let inbound_deny = evaluate_ethernet_frame(&ipv4, FirewallDirection::Inbound) == FrameDecision::Deny;
+    let outbound_allow = evaluate_ethernet_frame(&ipv6, FirewallDirection::Outbound) == FrameDecision::Allow;
+    ipv6[56..58].copy_from_slice(&7002u16.to_be_bytes());
+    let outbound_deny = evaluate_ethernet_frame(&ipv6, FirewallDirection::Outbound) == FrameDecision::Deny;
+    let control_allow = evaluate_ethernet_frame(&arp, FirewallDirection::Inbound) == FrameDecision::Allow;
+
+    crate::serial::write_line(format_args!("[S14.5B] live ingress allow/drop {}", if inbound_allow && inbound_deny {"PASS"} else {"FAIL"}));
+    crate::serial::write_line(format_args!("[S14.5B] live egress allow/drop {}", if outbound_allow && outbound_deny {"PASS"} else {"FAIL"}));
+    crate::serial::write_line(format_args!("[S14.5B] L2 control preservation {}", if control_allow {"PASS"} else {"FAIL"}));
+
+    // Restore a permissive test policy before the inherited live network suite
+    // continues so Stage 14.1-14.4 behavior remains a regression gate.
+    *global_policy().lock() = FirewallPolicy::new(FirewallAction::Allow);
+    installed && inbound_allow && inbound_deny && outbound_allow && outbound_deny && control_allow
+}
