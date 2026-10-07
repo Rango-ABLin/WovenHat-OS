@@ -104,6 +104,23 @@ network interface and physical NIC qualification remain open.
 
 See the [Stage 14.4 audit](audit-stage14-4-routing-table-2026-10-06.md).
 
+## Stage 14.5A — WovenGuard firewall policy foundation (2026-10-07)
+
+The bounded WovenGuard firewall policy foundation is accepted. It supports
+inbound, outbound, and forward directions; allow/deny actions; protocol,
+dual-stack CIDR, and port matching; deterministic priority/ID ordering; a
+default policy; bounded rule storage; and synchronized global policy access.
+This foundation is policy-only: live packet-path enforcement remains Stage
+14.5B work.
+
+The Stage 14.5A acceptance marker is
+`[S14.5A] firewall policy foundation PASSED`, with the inherited WovenNet
+networking gates retained. GitHub Actions run #1267 passed on commit
+`f8b79ac7`.
+
+Next: Stage 14.5B live packet-path enforcement without weakening the accepted
+DHCP, IPv4/IPv6, socket, or routing behavior.
+
 ## Stage 1–5 long-name mutation hardening — 2026-10-01
 
 The FAT32 create/overwrite and rename paths now compare the user-visible long
