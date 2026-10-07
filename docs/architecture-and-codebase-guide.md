@@ -785,3 +785,42 @@ This closure deliberately does not claim live filtering. Stage 14.5B must
 connect policy evaluation to real ingress and egress packet paths while
 preserving DHCP, NDP/RA/SLAAC, socket authority, and routing behavior. A
 forwarding hook should be added only where an actual forwarding path exists.
+
+
+### Stage 14.5B WovenGuard live packet enforcement closure
+
+Stage 14.5B is accepted for the live virtio ingress/egress enforcement scope.
+The firewall now has a packet-path bridge from Ethernet frames to the Stage
+14.5A policy model. IPv4 and IPv6 headers are decoded into source/destination
+addresses and TCP/UDP ports or ICMP/ICMPv6 protocol identity before policy
+evaluation.
+
+The enforcement points match the smoltcp device contract. Inbound denied
+frames are discarded in `VirtioSmolDevice::receive` before an RX token is
+exposed to smoltcp. Outbound frames are evaluated in `WovenTxToken::consume`
+after smoltcp has constructed the Ethernet frame and before
+`virtio_net::transmit` submits it. This avoids pretending that an
+`RxToken::consume` callback can cancel delivery after a token has already
+been returned.
+
+Non-IP Layer-2 frames are preserved at this stage so ARP and other link-control
+traffic are not accidentally removed by an IP firewall parser. IPv6
+ICMPv6 policy metadata supports the NDP/RA/SLAAC control plane inherited from
+Stage 14.2.
+
+Live enforcement uses an explicit atomic activation state. The policy itself
+retains default-deny semantics, but enforcement remains inactive during
+bootstrap and becomes active only through the firewall lifecycle boundary.
+This separation was required after the first Stage 14.5B gate correctly
+exposed a DHCP bootstrap deadlock when default-deny enforcement was active
+from boot.
+
+Acceptance requires `[S14.5B] live packet enforcement PASSED` plus all
+inherited WovenNet markers. GitHub Actions run #1277 on commit `1d1ce646`
+passed build, Clippy with `-D warnings`, live DHCP/DNS/ICMP/UDP/TCP
+regressions, and the dedicated Stage 14.5B QEMU matrix on 1, 2, and 4 CPUs.
+
+This closure does not claim a userspace firewall administration API, persistent
+rule configuration, logging/counters, stateful connection tracking, NAT, an
+actual routed forwarding hook, or completed Wi-Fi enforcement parity. Those
+remain later WovenGuard/network-management work.
