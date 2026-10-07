@@ -757,3 +757,31 @@ routing protocols, multi-interface policy routing, or exhaustive physical-NIC
 interoperability. Those remain appropriate Network Manager and platform
 hardening work. Stage 14.5 can now build WovenGuard firewall policy on the
 accepted socket, IPv6, and routing authority foundations.
+
+### Stage 14.5A WovenGuard firewall policy foundation closure
+
+Stage 14.5A is accepted for the bounded policy foundation scope.
+
+`FirewallPolicy` stores at most 32 rules and fails closed on capacity,
+duplicate identifiers, invalid IPv4/IPv6 prefix lengths, and reversed port
+ranges. Rules match inbound, outbound, or forward traffic by protocol,
+optional source/destination CIDR, and optional source/destination port range.
+Evaluation is deterministic: the lowest numeric priority wins and the rule ID
+is the stable tie-breaker. Traffic with no matching rule receives the
+configured default action.
+
+IPv4 and IPv6 prefix matching covers /0 through /32 and /0 through /128,
+including non-octet prefix lengths. Global policy access is serialized through
+the IRQ-aware mutex boundary so later live enforcement does not introduce an
+unsynchronized mutable policy table.
+
+The accepted serial gate is
+`[S14.5A] firewall policy foundation PASSED`. The Stage 14.5 feature inherits
+the accepted Stage 14.1-14.4 networking gates and is exercised by the QEMU
+network harness on 1, 2, and 4 CPUs. Acceptance was recorded by GitHub Actions
+run #1267 on commit `f8b79ac7`.
+
+This closure deliberately does not claim live filtering. Stage 14.5B must
+connect policy evaluation to real ingress and egress packet paths while
+preserving DHCP, NDP/RA/SLAAC, socket authority, and routing behavior. A
+forwarding hook should be added only where an actual forwarding path exists.
