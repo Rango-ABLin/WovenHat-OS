@@ -145,6 +145,23 @@ Next: extend WovenGuard beyond the accepted virtio live boundary with explicit
 policy-management authority and transport coverage before claiming a
 production firewall.
 
+## Stage 14.5C — WovenGuard firewall policy authority (2026-10-07)
+
+Stage 14.5C is accepted. Firewall administration is separated from ordinary
+network use through the dedicated `NetworkAdmin` capability. Normal users keep
+`NetworkIo` for socket traffic but cannot add, remove, replace, or otherwise
+change global firewall policy, the default action, or live-enforcement state.
+`NetworkAdmin` is available only within the Kernel/SystemService domain
+ceiling.
+
+The acceptance marker is `[S14.5C] firewall policy authority PASSED`.
+GitHub Actions run #1287 passed the dedicated build, Clippy `-D warnings`,
+inherited Stage 14.1-14.5B regressions, and QEMU 1/2/4-core acceptance on
+commit `b81b3a76`.
+
+Next: complete firewall transport/path coverage and parser hardening before
+adding stateful connection tracking.
+
 ## Stage 1–5 long-name mutation hardening — 2026-10-01
 
 The FAT32 create/overwrite and rename paths now compare the user-visible long
