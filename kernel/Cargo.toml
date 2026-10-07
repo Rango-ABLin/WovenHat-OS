@@ -42,6 +42,7 @@ stage14-4-test = ["network-test", "stage14-3-test"]
 stage14-5-test = ["network-test", "stage14-4-test"]
 stage14-5b-test = ["stage14-5-test"]
 stage14-5c-test = ["stage14-5b-test"]
+stage14-5d-test = ["stage14-5c-test", "stage13-9-test"]
 stage1-5-test = ["qemu-test"]
 
 [dependencies]
