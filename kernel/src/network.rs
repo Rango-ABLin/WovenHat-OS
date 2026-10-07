@@ -1709,6 +1709,13 @@ impl TxToken for WovenTxToken {
         let mut frame = [0u8; MAX_FRAME];
         let usable = core::cmp::min(len, MAX_FRAME);
         let result = f(&mut frame[..usable]);
+        #[cfg(feature = "stage14-5b-test")]
+        if crate::firewall_policy::evaluate_ethernet_frame(
+            &frame[..usable],
+            crate::firewall_policy::FirewallDirection::Outbound,
+        ) == crate::firewall_policy::FrameDecision::Deny {
+            return result;
+        }
         let _ = virtio_net::transmit(&frame[..usable]);
         result
     }
@@ -1726,6 +1733,13 @@ impl Device for VirtioSmolDevice {
 
     fn receive(&mut self, _timestamp: Instant) -> Option<(Self::RxToken<'_>, Self::TxToken<'_>)> {
         let len = virtio_net::receive_into(&mut self.rx)?;
+        #[cfg(feature = "stage14-5b-test")]
+        if crate::firewall_policy::evaluate_ethernet_frame(
+            &self.rx[..len],
+            crate::firewall_policy::FirewallDirection::Inbound,
+        ) == crate::firewall_policy::FrameDecision::Deny {
+            return None;
+        }
         Some((
             WovenRxToken {
                 data: &mut self.rx[..len],
