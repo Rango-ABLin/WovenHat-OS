@@ -245,38 +245,89 @@ pub fn stage14_5a_self_test() -> bool {
 pub enum FrameDecision { Allow, Deny }
 
 #[cfg(feature = "stage14-5b-test")]
-fn packet_meta_from_ethernet(frame: &[u8], direction: FirewallDirection) -> Option<PacketMeta> {
-    if frame.len() < 14 { return None; }
+enum FrameClassification {
+    NonIp,
+    ValidIp(PacketMeta),
+    InvalidIp,
+}
+
+#[cfg(feature = "stage14-5b-test")]
+fn packet_meta_from_ethernet(frame: &[u8], direction: FirewallDirection) -> FrameClassification {
+    if frame.len() < 14 { return FrameClassification::NonIp; }
     match u16::from_be_bytes([frame[12], frame[13]]) {
         0x0800 => {
             let ip = &frame[14..];
-            if ip.len() < 20 || ip[0] >> 4 != 4 { return None; }
+            if ip.len() < 20 || ip[0] >> 4 != 4 { return FrameClassification::InvalidIp; }
             let header_len = usize::from(ip[0] & 0x0f) * 4;
-            if header_len < 20 || ip.len() < header_len { return None; }
+            let total_len = usize::from(u16::from_be_bytes([ip[2], ip[3]]));
+            if header_len < 20 || total_len < header_len || ip.len() < total_len {
+                return FrameClassification::InvalidIp;
+            }
             let source = IpAddress::Ipv4(Ipv4Address::new(ip[12], ip[13], ip[14], ip[15]));
             let destination = IpAddress::Ipv4(Ipv4Address::new(ip[16], ip[17], ip[18], ip[19]));
-            let (protocol, ports) = transport_meta(ip[9], &ip[header_len..], false)?;
-            Some(PacketMeta {
+            let Some((protocol, ports)) = transport_meta(ip[9], &ip[header_len..total_len], false) else {
+                return FrameClassification::InvalidIp;
+            };
+            FrameClassification::ValidIp(PacketMeta {
                 direction, protocol, source, destination,
                 source_port: ports.map(|p| p.0), destination_port: ports.map(|p| p.1),
             })
         }
         0x86dd => {
             let ip = &frame[14..];
-            if ip.len() < 40 || ip[0] >> 4 != 6 { return None; }
+            if ip.len() < 40 || ip[0] >> 4 != 6 { return FrameClassification::InvalidIp; }
+            let payload_len = usize::from(u16::from_be_bytes([ip[4], ip[5]]));
+            let packet_len = 40usize.saturating_add(payload_len);
+            if ip.len() < packet_len { return FrameClassification::InvalidIp; }
             let mut src = [0u8; 16]; src.copy_from_slice(&ip[8..24]);
             let mut dst = [0u8; 16]; dst.copy_from_slice(&ip[24..40]);
-            let (protocol, ports) = transport_meta(ip[6], &ip[40..], true)?;
-            Some(PacketMeta {
-                direction,
-                protocol,
+            let Some((next, payload)) = ipv6_transport(ip[6], &ip[40..packet_len]) else {
+                return FrameClassification::InvalidIp;
+            };
+            let Some((protocol, ports)) = transport_meta(next, payload, true) else {
+                return FrameClassification::InvalidIp;
+            };
+            FrameClassification::ValidIp(PacketMeta {
+                direction, protocol,
                 source: IpAddress::Ipv6(Ipv6Address::from_octets(src)),
                 destination: IpAddress::Ipv6(Ipv6Address::from_octets(dst)),
                 source_port: ports.map(|p| p.0), destination_port: ports.map(|p| p.1),
             })
         }
-        _ => None,
+        _ => FrameClassification::NonIp,
     }
+}
+
+#[cfg(feature = "stage14-5b-test")]
+fn ipv6_transport(mut next: u8, mut payload: &[u8]) -> Option<(u8, &[u8])> {
+    for _ in 0..8 {
+        match next {
+            0 | 43 | 60 => {
+                if payload.len() < 8 { return None; }
+                let len = (usize::from(payload[1]) + 1) * 8;
+                if len > payload.len() { return None; }
+                next = payload[0];
+                payload = &payload[len..];
+            }
+            44 => {
+                if payload.len() < 8 { return None; }
+                let fragment = u16::from_be_bytes([payload[2], payload[3]]);
+                if fragment & 0xfff8 != 0 { return None; }
+                next = payload[0];
+                payload = &payload[8..];
+            }
+            51 => {
+                if payload.len() < 8 { return None; }
+                let len = (usize::from(payload[1]) + 2) * 4;
+                if len > payload.len() { return None; }
+                next = payload[0];
+                payload = &payload[len..];
+            }
+            50 | 59 => return None,
+            _ => return Some((next, payload)),
+        }
+    }
+    None
 }
 
 #[cfg(feature = "stage14-5b-test")]
@@ -298,10 +349,10 @@ pub fn evaluate_ethernet_frame(frame: &[u8], direction: FirewallDirection) -> Fr
     if !LIVE_ENFORCEMENT.load(Ordering::Acquire) {
         return FrameDecision::Allow;
     }
-    let Some(meta) = packet_meta_from_ethernet(frame, direction) else {
-        // Stage 14.5B filters understood IP traffic only. ARP and other L2
-        // control traffic remain available to the network stack.
-        return FrameDecision::Allow;
+    let meta = match packet_meta_from_ethernet(frame, direction) {
+        FrameClassification::NonIp => return FrameDecision::Allow,
+        FrameClassification::InvalidIp => return FrameDecision::Deny,
+        FrameClassification::ValidIp(meta) => meta,
     };
     let policy = global_policy().lock();
     match policy.evaluate(meta) {
