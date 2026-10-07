@@ -824,3 +824,35 @@ This closure does not claim a userspace firewall administration API, persistent
 rule configuration, logging/counters, stateful connection tracking, NAT, an
 actual routed forwarding hook, or completed Wi-Fi enforcement parity. Those
 remain later WovenGuard/network-management work.
+
+
+### Stage 14.5C WovenGuard firewall policy authority closure
+
+Stage 14.5C is accepted for privileged firewall policy management. The
+capability model now distinguishes ordinary `NetworkIo` authority from the
+new `NetworkAdmin` authority. `NetworkIo` remains available to normal
+userspace for sockets; it is deliberately insufficient to mutate global
+firewall state.
+
+`NetworkAdmin` is included in the Kernel and SystemService domain ceilings
+but excluded from the User and Restricted ceilings. Administrative wrappers
+require that capability before rule add, remove, or replace operations,
+default-action changes, or live-enforcement activation/deactivation reach the
+global policy object. Unauthorized calls return an explicit authority error
+without changing policy state.
+
+The Stage 14.5C self-test proves both sides of the boundary: userspace
+authority is rejected for policy mutation and enforcement activation, while
+`NetworkAdmin` can perform the bounded mutation lifecycle. It also verifies
+the WovenGuard domain ceiling itself so future capability refactors cannot
+silently grant firewall administration to ordinary users.
+
+Acceptance requires `[S14.5C] firewall policy authority PASSED` plus all
+inherited WovenNet/WovenGuard network markers. GitHub Actions run #1287 on
+commit `b81b3a76` passed build, Clippy with `-D warnings`, and the QEMU
+1/2/4-core matrix.
+
+This closure does not yet claim complete transport parity, malformed-IP
+fail-closed parsing, IPv6 extension-header inspection, a live routed Forward
+hook, persistent rules, logging/counters, stateful connection tracking, or
+NAT. Those are subsequent firewall/network-management hardening work.
