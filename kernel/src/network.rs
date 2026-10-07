@@ -1861,6 +1861,13 @@ mod wifi_transport {
                         Ok(Some(n)) => n,
                         Ok(None) | Err(_) => return None,
                     };
+                    #[cfg(feature = "stage14-5d-test")]
+                    if crate::firewall_policy::evaluate_ethernet_frame(
+                        &d.rx[..len],
+                        crate::firewall_policy::FirewallDirection::Inbound,
+                    ) == crate::firewall_policy::FrameDecision::Deny {
+                        return None;
+                    }
                     Some((
                         NetRxToken::Wifi(wifi_smol::WifiRxToken::new(&mut d.rx[..len])),
                         NetTxToken::Wifi(wifi_smol::WifiTxToken::new(&mut d.session, d.epoch)),
