@@ -62,7 +62,7 @@ mod journal;
 mod keyboard;
 mod memory;
 mod network;
-#[cfg(any(feature = "stage14-5-test", feature = "stage14-5b-test"))]
+#[cfg(any(feature = "stage14-5-test", feature = "stage14-5b-test", feature = "stage14-5c-test"))]
 mod firewall_policy;
 mod notifications;
 #[cfg(feature = "stage13-3-test")]
@@ -2281,6 +2281,17 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
                                 } else {
                                     serial::write_line(format_args!(
                                         "[S14.5B] live packet enforcement FAILED"
+                                    ));
+                                    halt();
+                                }
+                                #[cfg(feature = "stage14-5c-test")]
+                                if firewall_policy::stage14_5c_self_test() {
+                                    serial::write_line(format_args!(
+                                        "[S14.5C] firewall policy authority PASSED"
+                                    ));
+                                } else {
+                                    serial::write_line(format_args!(
+                                        "[S14.5C] firewall policy authority FAILED"
                                     ));
                                     halt();
                                 }
