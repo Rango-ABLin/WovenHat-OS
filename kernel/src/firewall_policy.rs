@@ -363,23 +363,33 @@ pub fn evaluate_ethernet_frame(frame: &[u8], direction: FirewallDirection) -> Fr
 
 #[cfg(feature = "stage14-5b-test")]
 pub fn stage14_5b_self_test() -> bool {
+    // These frames must be well-formed, not merely long enough. The Stage
+    // 14.5D parser authenticates the IPv4 total-length and IPv6 payload-length
+    // header fields, so a frame that leaves them zero is correctly classified
+    // as malformed and denied regardless of policy.
     let mut ipv4 = [0u8; 14 + 20 + 8];
     ipv4[12..14].copy_from_slice(&0x0800u16.to_be_bytes());
     ipv4[14] = 0x45;
+    // IPv4 total length: 20-byte header plus the 8-byte UDP header.
+    ipv4[16..18].copy_from_slice(&28u16.to_be_bytes());
     ipv4[23] = 17;
     ipv4[26..30].copy_from_slice(&[10,1,2,3]);
     ipv4[30..34].copy_from_slice(&[10,1,9,9]);
     ipv4[34..36].copy_from_slice(&50000u16.to_be_bytes());
     ipv4[36..38].copy_from_slice(&7000u16.to_be_bytes());
+    ipv4[38..40].copy_from_slice(&8u16.to_be_bytes());
 
     let mut ipv6 = [0u8; 14 + 40 + 8];
     ipv6[12..14].copy_from_slice(&0x86ddu16.to_be_bytes());
     ipv6[14] = 0x60;
+    // IPv6 payload length counts only the 8-byte UDP header.
+    ipv6[18..20].copy_from_slice(&8u16.to_be_bytes());
     ipv6[20] = 17;
     ipv6[22..38].copy_from_slice(&Ipv6Address::new(0x2001,0xdb8,1,0,0,0,0,1).octets());
     ipv6[38..54].copy_from_slice(&Ipv6Address::new(0x2001,0xdb8,2,0,0,0,0,1).octets());
     ipv6[54..56].copy_from_slice(&50001u16.to_be_bytes());
     ipv6[56..58].copy_from_slice(&7001u16.to_be_bytes());
+    ipv6[58..60].copy_from_slice(&8u16.to_be_bytes());
 
     let mut arp = [0u8; 42];
     arp[12..14].copy_from_slice(&0x0806u16.to_be_bytes());
