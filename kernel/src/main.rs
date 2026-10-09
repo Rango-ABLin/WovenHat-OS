@@ -149,6 +149,8 @@ mod woven_input;
     feature = "stage12-5-test"
 ))]
 mod wovenfs;
+#[cfg(feature = "stage15-1-test")]
+mod wfs;
 mod wovenguard;
 #[cfg(feature = "stage13-10-test")]
 mod bluetooth_hci;
@@ -3344,6 +3346,15 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
             qemu_test_exit_failure();
         }
         serial::write_line(format_args!("[S1-5] storage journal: PASSED"));
+        qemu_test_exit_success();
+    }
+    #[cfg(feature = "stage15-1-test")]
+    {
+        if !wfs::stage15_1_self_test() {
+            serial::write_line(format_args!("[S15.1] WovenFS native filesystem: FAILED"));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!("[S15.1] WovenFS native filesystem: PASSED"));
         qemu_test_exit_success();
     }
     #[cfg(feature = "stage12-2-test")]
