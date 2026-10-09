@@ -2245,6 +2245,17 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
                                     ));
                                     halt();
                                 }
+                                #[cfg(feature = "stage14-6-test")]
+                                if network::stage14_6_socket_firewall_self_test() {
+                                    serial::write_line(format_args!(
+                                        "[S14.6] live socket firewall admission: PASSED"
+                                    ));
+                                } else {
+                                    serial::write_line(format_args!(
+                                        "[S14.6] live socket firewall admission: FAILED"
+                                    ));
+                                    halt();
+                                }
                             }
                         } else {
                             serial::write_line(format_args!(

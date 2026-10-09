@@ -138,6 +138,66 @@ management remain outside this bounded foundation.
 Next: bind the accepted policy evaluator to live socket ingress/egress
 admission without bypassing socket ownership or route validation.
 
+## Stage 14.6 — live socket firewall admission candidate — 2026-10-07
+
+The shared network runtime now owns the firewall policy table. Synchronous
+connect/send/receive operations and the pinned async TCP connect/send/receive
+paths check IPv4 remote/local endpoints and protocol under the existing runtime
+lock. Connect checks use the selected local port before smoltcp state changes;
+UDP receive checks the datagram source, while TCP receive uses the live
+connection endpoints. Rules are generation-safe and newly added rules take
+priority over older ones. The runtime's explicit allow fallback preserves
+existing system behavior until a kernel-managed policy is installed; the
+standalone policy table still defaults to deny.
+
+Every refused socket operation now commits one `WovenGuardDeny` record to the
+Stage 9.3 security ledger, carrying the owning task, the packed refused
+endpoint, and the packed direction/protocol/local port. The ledger lock is
+rank 40 against the rank-20 network runtime lock, so recording cannot invert
+lock order. Only denials are recorded, and a refused UDP connect that evaluates
+sixteen ephemeral candidates records exactly one.
+
+A denied ingress on an established TCP connection now aborts that connection
+and returns the terminal `SocketError::Address`. The previous `WouldBlock`
+return left the bytes queued, held the peer's connection open, and made the
+asynchronous worker re-queue the request against a condition that could never
+clear. UDP ingress intentionally still drains the denied datagram and returns
+`WouldBlock`, because a datagram socket must stay usable for permitted peers.
+
+Non-IPv4 endpoints take the policy table's configured default action instead of
+an unconditional deny, so the runtime's documented "no installed policy
+preserves existing behavior" contract also holds for IPv6, and an administrator
+can still fail IPv6 closed by choosing a deny default.
+
+Warning-denying kernel Clippy passed for all 39 kernel configurations (default
+plus every declared feature), host Clippy with `--all-targets` passed, all host
+unit and harness tests passed, and the Stage 14.6 QEMU network gate passed on
+1/2/4 CPUs with exit 33, including live DHCP/DNS/ICMP/UDP/TCP and all 20
+Stage 14 markers. Preserved serial logs are under
+`target/network-regression-{1,2,4}-debug/serial.log`.
+The exact acceptance audit is [Stage 14.6](audit-stage14-6-live-firewall-2026-10-07.md).
+
+This change also repaired five prior-stage gates that could not compile at
+commit `c53d597`: `stage14-2/3/4-test` (a missing `#[cfg]` guard on the
+Stage 14.5 self-test call) and `stage12-3/12-5-test` (a circular
+`storage_manager`/`volume_crypto` module gate, now resolved by gating both
+modules on either feature). All five now lint clean and pass their QEMU gates
+on 1/2/4 CPUs, and the full Stage 12.1–12.5 chain was re-run on 1/2/4 CPUs.
+
+Note for future Stage 12 work: these features must not chain prerequisites the
+way the Stage 14 features do, because each Stage 12 self-test block ends the
+boot with `qemu_test_exit_success()`. Chaining makes the earlier stage's block
+exit before the later one runs, which is a silently passing boot with the wrong
+marker. Shared module dependencies belong on the module's `cfg`.
+
+Packet-level TCP handshake filtering, ICMP/IPv6 and kernel-owned traffic,
+policy-management authority/ABI, connection tracking, NAT, and physical NIC
+qualification remain open. A live denied-TCP-ingress boot, as opposed to the
+reviewed terminal-error contract, also remains open.
+
+Next: add explicit WovenGuard authority and a bounded userspace/service
+interface for installing and revoking network policy rules.
+
 ## Stage 1–5 long-name mutation hardening — 2026-10-01
 
 The FAT32 create/overwrite and rename paths now compare the user-visible long

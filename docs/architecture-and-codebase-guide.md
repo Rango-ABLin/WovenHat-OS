@@ -691,7 +691,52 @@ own acceptance boundary.
 direction, protocol, remote/local address, and remote/local port; zero address
 and port fields are bounded wildcards. Rules are generation-tagged and can be
 removed only by their exact returned value. Evaluation is first-match and
-defaults to deny, so an empty or stale policy cannot accidentally authorize
-traffic. The evaluator is allocation-free and does not retain packet data.
-This foundation is not yet wired into live socket admission and does not
-claim connection tracking, NAT, IPv6 policy, or physical-NIC enforcement.
+defaults to deny in the standalone policy object. The live network runtime
+uses an explicit allow fallback to preserve existing network behavior until a
+system policy is installed. New rules are placed ahead of older rules, so a
+narrow deny can take precedence over that fallback. Policy changes are exposed
+only through kernel management functions; user socket calls cannot mutate
+rules.
+
+### Stage 14.6 live socket firewall admission
+
+The shared `Runtime` owns the firewall table, so synchronous socket calls and
+the async pinned-socket paths use the same policy. Outbound connect checks the
+remote address, protocol, and selected local port before smoltcp connection
+state changes. UDP sends and receives use their actual endpoints; TCP send and
+receive use smoltcp's remote/local endpoint, including accepted listener
+connections. Existing WovenGuard `NetworkIo` capability checks remain at
+syscall admission, and socket owner/generation checks remain under the network
+runtime lock.
+
+Selectors are derived once per operation by `firewall_selectors` from live
+socket state; `firewall_allows` decides, `firewall_record_denial` logs, and
+`firewall_admit` composes them. All six socket entry points share these, so a
+selector or protocol change has a single place to be correct.
+
+Denial handling differs by transport, deliberately. A denied UDP datagram is
+consumed from the bounded socket queue and reported as `WouldBlock`: a datagram
+socket may receive from many peers, so one refused sender must not disable it,
+and consuming the datagram first stops a denied sender wedging the queue. A
+denied ingress on an established TCP connection instead aborts the connection
+and returns the terminal `SocketError::Address`. A policy denial is permanent
+for that connection's life, and reporting it as `WouldBlock` would pin the
+receive buffer, hold the peer's connection open, and spin the asynchronous
+worker, which re-queues `WouldBlock` while `can_recv()` stays true.
+
+Every denial commits one `audit::Action::WovenGuardDeny` record to the Stage
+9.3 security ledger — owning task, packed refused endpoint, and packed
+direction/protocol/local port. The ledger lock is rank 40 above the rank-20
+runtime lock, so recording under the runtime guard raises rank and cannot
+invert lock order. Only denials are recorded, to keep the bounded 128-entry
+ring useful.
+
+Rule selectors are IPv4-only. A non-IPv4 endpoint therefore matches no rule and
+takes the table's configured default action rather than an unconditional deny,
+which keeps the runtime's allow-fallback contract true for IPv6 while still
+allowing an administrator to fail IPv6 closed with a deny default.
+
+This is socket API enforcement, not a packet-level ingress filter before TCP
+handshake processing. ICMP, IPv6 selectors, kernel-owned DHCP/DNS/echo traffic,
+firewall policy management authority/ABI, connection tracking, NAT, and
+physical NIC qualification remain future work.
