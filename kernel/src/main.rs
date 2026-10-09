@@ -62,6 +62,8 @@ mod journal;
 mod keyboard;
 mod memory;
 mod network;
+#[cfg(any(feature = "stage14-5-test", feature = "stage14-5b-test", feature = "stage14-5c-test", feature = "stage14-5d-test"))]
+mod firewall_policy;
 mod notifications;
 #[cfg(feature = "stage13-3-test")]
 mod nvme;
@@ -2212,6 +2214,16 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
                                     ));
                                     halt();
                                 }
+                                if network::stage14_2_ndp_ingress_hardening_self_test() {
+                                    serial::write_line(format_args!(
+                                        "[S14.2L] WovenNet NDP ingress hardening: PASSED"
+                                    ));
+                                } else {
+                                    serial::write_line(format_args!(
+                                        "[S14.2L] WovenNet NDP ingress hardening: FAILED"
+                                    ));
+                                    halt();
+                                }
                                 #[cfg(feature = "stage14-3-test")]
                                 if network::stage14_3_socket_api_self_test() {
                                     serial::write_line(format_args!(
@@ -2220,6 +2232,17 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
                                 } else {
                                     serial::write_line(format_args!(
                                         "[S14.3] WovenNet socket API boundary: FAILED"
+                                    ));
+                                    halt();
+                                }
+                                #[cfg(feature = "stage14-3-test")]
+                                if network::stage14_3_socket_authority_self_test() {
+                                    serial::write_line(format_args!(
+                                        "[S14.3A] WovenNet socket authority lifecycle: PASSED"
+                                    ));
+                                } else {
+                                    serial::write_line(format_args!(
+                                        "[S14.3A] WovenNet socket authority lifecycle: FAILED"
                                     ));
                                     halt();
                                 }
@@ -2234,6 +2257,17 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
                                     ));
                                     halt();
                                 }
+                                #[cfg(feature = "stage14-4-test")]
+                                if network::stage14_4_live_route_self_test() {
+                                    serial::write_line(format_args!(
+                                        "[S14.4A] WovenNet live route integration: PASSED"
+                                    ));
+                                } else {
+                                    serial::write_line(format_args!(
+                                        "[S14.4A] WovenNet live route integration: FAILED"
+                                    ));
+                                    halt();
+                                }
                                 #[cfg(feature = "stage14-5-test")]
                                 if network::stage14_5_firewall_self_test() {
                                     serial::write_line(format_args!(
@@ -2242,6 +2276,50 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
                                 } else {
                                     serial::write_line(format_args!(
                                         "[S14.5] WovenGuard firewall policy: FAILED"
+                                    ));
+                                    halt();
+                                }
+                                #[cfg(feature = "stage14-5-test")]
+                                if firewall_policy::stage14_5a_self_test() {
+                                    serial::write_line(format_args!(
+                                        "[S14.5A] firewall policy foundation PASSED"
+                                    ));
+                                } else {
+                                    serial::write_line(format_args!(
+                                        "[S14.5A] firewall policy foundation FAILED"
+                                    ));
+                                    halt();
+                                }
+                                #[cfg(feature = "stage14-5b-test")]
+                                if firewall_policy::stage14_5b_self_test() {
+                                    serial::write_line(format_args!(
+                                        "[S14.5B] live packet enforcement PASSED"
+                                    ));
+                                } else {
+                                    serial::write_line(format_args!(
+                                        "[S14.5B] live packet enforcement FAILED"
+                                    ));
+                                    halt();
+                                }
+                                #[cfg(feature = "stage14-5c-test")]
+                                if firewall_policy::stage14_5c_self_test() {
+                                    serial::write_line(format_args!(
+                                        "[S14.5C] firewall policy authority PASSED"
+                                    ));
+                                } else {
+                                    serial::write_line(format_args!(
+                                        "[S14.5C] firewall policy authority FAILED"
+                                    ));
+                                    halt();
+                                }
+                                #[cfg(feature = "stage14-5d-test")]
+                                if firewall_policy::stage14_5d_self_test() {
+                                    serial::write_line(format_args!(
+                                        "[S14.5D] firewall parser/transport hardening PASSED"
+                                    ));
+                                } else {
+                                    serial::write_line(format_args!(
+                                        "[S14.5D] firewall parser/transport hardening FAILED"
                                     ));
                                     halt();
                                 }

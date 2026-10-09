@@ -79,7 +79,8 @@ pub const fn domain_ceiling(domain: SecurityDomain) -> CapabilitySet {
             .with(Capability::NetworkIo)
             .with(Capability::StorageIo)
             .with(Capability::DisplayIo)
-            .with(Capability::InputIo),
+            .with(Capability::InputIo)
+            .with(Capability::NetworkAdmin),
         SecurityDomain::User => CapabilitySet::userspace(),
         SecurityDomain::Restricted => CapabilitySet::only(Capability::TimerRead),
     }

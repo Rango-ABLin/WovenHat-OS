@@ -119,55 +119,89 @@ network interface and physical NIC qualification remain open.
 
 See the [Stage 14.4 audit](audit-stage14-4-routing-table-2026-10-06.md).
 
-## Stage 14.5 — WovenGuard firewall policy foundation — 2026-10-06
+## Stage 14.5A — WovenGuard firewall policy foundation (2026-10-07)
 
-The network layer now has a bounded, fixed-capacity IPv4 firewall policy table
-with direction, protocol, address, and port selectors. Rules receive
-generation-tagged handles; removal requires the exact handle, and packet
-authorization is first-match with an implicit deny. The policy evaluator does
-not retain packet memory and is independent of the live NIC transport.
+The bounded WovenGuard firewall policy foundation is accepted. It supports
+inbound, outbound, and forward directions; allow/deny actions; protocol,
+dual-stack CIDR, and port matching; deterministic priority/ID ordering; a
+default policy; bounded rule storage; and synchronized global policy access.
+This foundation is policy-only: live packet-path enforcement remains Stage
+14.5B work.
 
-The dedicated self-test covers positive egress authorization, direction
-isolation, revocation, stale-handle rejection, and fail-closed behavior. The
-warning-denying kernel Clippy check and Stage 14.5 QEMU network gate passed on
-1/2/4 CPUs, with the existing live DHCP/DNS/ICMP/UDP/TCP regressions and all
-prior Stage 14 markers preserved. Physical firewall
-enforcement, connection tracking, NAT, IPv6 policy, and userspace policy
-management remain outside this bounded foundation.
+The Stage 14.5A acceptance marker is
+`[S14.5A] firewall policy foundation PASSED`, with the inherited WovenNet
+networking gates retained. GitHub Actions run #1267 passed on commit
+`f8b79ac7`.
 
-Next: bind the accepted policy evaluator to live socket ingress/egress
-admission without bypassing socket ownership or route validation.
+Next: Stage 14.5B live packet-path enforcement without weakening the accepted
+DHCP, IPv4/IPv6, socket, or routing behavior.
+
+## Stage 14.5B — WovenGuard live packet enforcement (2026-10-07)
+
+Stage 14.5B is accepted. WovenGuard now evaluates real Ethernet-frame traffic
+at the virtio network boundary: inbound denial occurs before an RX token is
+returned to smoltcp, and outbound denial occurs after frame construction but
+before hardware submission. The shared parser derives IPv4/IPv6 TCP, UDP,
+ICMP, and ICMPv6 policy metadata while preserving non-IP Layer-2 control
+traffic.
+
+Live enforcement has an explicit activation lifecycle. It remains disabled
+during network bootstrap, is enabled for controlled policy enforcement, and
+does not replace the policy's default-deny semantics with a permissive default.
+This prevents DHCP/bootstrap deadlock while keeping firewall activation an
+intentional security transition.
+
+The Stage 14.5B acceptance marker is
+`[S14.5B] live packet enforcement PASSED`. GitHub Actions run #1277 passed
+the dedicated build, Clippy `-D warnings`, inherited Stage 14.1-14.5A network
+regressions, and QEMU 1/2/4-core acceptance on commit `1d1ce646`.
+
+Next: extend WovenGuard beyond the accepted virtio live boundary with explicit
+policy-management authority and transport coverage before claiming a
+production firewall.
+
+## Stage 14.5C — WovenGuard firewall policy authority (2026-10-07)
+
+Stage 14.5C is accepted. Firewall administration is separated from ordinary
+network use through the dedicated `NetworkAdmin` capability. Normal users keep
+`NetworkIo` for socket traffic but cannot add, remove, replace, or otherwise
+change global firewall policy, the default action, or live-enforcement state.
+`NetworkAdmin` is available only within the Kernel/SystemService domain
+ceiling.
+
+The acceptance marker is `[S14.5C] firewall policy authority PASSED`.
+GitHub Actions run #1287 passed the dedicated build, Clippy `-D warnings`,
+inherited Stage 14.1-14.5B regressions, and QEMU 1/2/4-core acceptance on
+commit `b81b3a76`.
+
+Next: complete firewall transport/path coverage and parser hardening before
+adding stateful connection tracking.
 
 ## Stage 14.6 — live socket firewall admission candidate — 2026-10-07
 
-The shared network runtime now owns the firewall policy table. Synchronous
-connect/send/receive operations and the pinned async TCP connect/send/receive
-paths check IPv4 remote/local endpoints and protocol under the existing runtime
-lock. Connect checks use the selected local port before smoltcp state changes;
-UDP receive checks the datagram source, while TCP receive uses the live
-connection endpoints. Rules are generation-safe and newly added rules take
-priority over older ones. The runtime's explicit allow fallback preserves
-existing system behavior until a kernel-managed policy is installed; the
-standalone policy table still defaults to deny.
+The shared network runtime owns a socket firewall policy table. Synchronous
+connect/send/receive operations and pinned async TCP connect/send/receive paths
+check IPv4 remote/local endpoints and protocol under the existing runtime lock.
+Connect checks use the selected local port before smoltcp state changes; UDP
+receive checks the datagram source, while TCP receive uses live connection
+endpoints. Rules are generation-safe, and newly added rules take priority over
+older ones. The runtime's explicit allow fallback preserves existing system
+behavior until a kernel-managed policy is installed; the standalone policy
+table still defaults to deny.
 
-Every refused socket operation now commits one `WovenGuardDeny` record to the
-Stage 9.3 security ledger, carrying the owning task, the packed refused
-endpoint, and the packed direction/protocol/local port. The ledger lock is
-rank 40 against the rank-20 network runtime lock, so recording cannot invert
-lock order. Only denials are recorded, and a refused UDP connect that evaluates
-sixteen ephemeral candidates records exactly one.
+Every refused socket operation commits one `WovenGuardDeny` record to the
+Stage 9.3 security ledger, carrying the owning task, packed refused endpoint,
+and packed direction/protocol/local port. The ledger lock is rank 40 against
+the rank-20 network runtime lock, so recording cannot invert lock order. Only
+denials are recorded, and a refused UDP connect that evaluates sixteen
+ephemeral candidates records exactly one.
 
-A denied ingress on an established TCP connection now aborts that connection
-and returns the terminal `SocketError::Address`. The previous `WouldBlock`
-return left the bytes queued, held the peer's connection open, and made the
-asynchronous worker re-queue the request against a condition that could never
-clear. UDP ingress intentionally still drains the denied datagram and returns
-`WouldBlock`, because a datagram socket must stay usable for permitted peers.
-
-Non-IPv4 endpoints take the policy table's configured default action instead of
-an unconditional deny, so the runtime's documented "no installed policy
-preserves existing behavior" contract also holds for IPv6, and an administrator
-can still fail IPv6 closed by choosing a deny default.
+A denied ingress on an established TCP connection aborts that connection and
+returns the terminal `SocketError::Address`. UDP ingress intentionally drains
+the denied datagram and returns `WouldBlock`, because a datagram socket must
+stay usable for permitted peers. Non-IPv4 endpoints take the policy table's
+configured default action, preserving the runtime's allow-fallback contract
+for IPv6 while allowing an administrator to choose a deny default.
 
 Warning-denying kernel Clippy passed for all 39 kernel configurations (default
 plus every declared feature), host Clippy with `--all-targets` passed, all host
@@ -184,19 +218,17 @@ Stage 14.5 self-test call) and `stage12-3/12-5-test` (a circular
 modules on either feature). All five now lint clean and pass their QEMU gates
 on 1/2/4 CPUs, and the full Stage 12.1–12.5 chain was re-run on 1/2/4 CPUs.
 
-Note for future Stage 12 work: these features must not chain prerequisites the
-way the Stage 14 features do, because each Stage 12 self-test block ends the
-boot with `qemu_test_exit_success()`. Chaining makes the earlier stage's block
-exit before the later one runs, which is a silently passing boot with the wrong
-marker. Shared module dependencies belong on the module's `cfg`.
+Note for future Stage 12 work: these features must not chain prerequisites
+because each Stage 12 self-test block ends the boot with
+`qemu_test_exit_success()`. Shared module dependencies belong on the module's
+`cfg`.
 
 Packet-level TCP handshake filtering, ICMP/IPv6 and kernel-owned traffic,
-policy-management authority/ABI, connection tracking, NAT, and physical NIC
-qualification remain open. A live denied-TCP-ingress boot, as opposed to the
-reviewed terminal-error contract, also remains open.
-
-Next: add explicit WovenGuard authority and a bounded userspace/service
-interface for installing and revoking network policy rules.
+connection tracking, NAT, and physical NIC qualification remain open. A live
+denied-TCP-ingress boot, as opposed to the reviewed terminal-error contract,
+also remains open. Stage 14.5C now covers the kernel-side authority boundary;
+a bounded userspace/service interface for installing and revoking policy rules
+remains future work.
 
 ## Stage 1–5 long-name mutation hardening — 2026-10-01
 
@@ -809,6 +841,5 @@ session is rejected before notification encoding, while a session meeting the
 16-byte policy is accepted. The local 1/2/4-CPU gate, host tests and
 warning-denying kernel Clippy pass; GitHub acceptance for the pushed tip is
 still required.
-
 
 

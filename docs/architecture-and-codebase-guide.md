@@ -668,41 +668,213 @@ TCP/UDP local-endpoint combination. Future networking work should add explicit
 live-endpoint collision selection/retry semantics before making that stronger
 claim.
 
-### Stage 14.3 socket API boundary
+### Stage 14.2 IPv6 closure
 
-Socket connect admission uses one fail-closed endpoint validator before either
-the legacy packed IPv4 ABI or smoltcp socket state is touched. It rejects zero
-ports, unspecified IPv4 addresses, and IPv4 multicast destinations. Descriptor
-ownership, generation checks, and async pinning remain the authority model;
-Stage 14.3 does not add live IPv6 sockets or routing-table mutation.
+Stage 14.2 is accepted for the bounded WovenNet IPv6 scope defined by the
+master roadmap: IPv6, DHCPv6, and IPv6 Neighbor Discovery.
 
-### Stage 14.4 routing-table foundation
+The implementation includes bounded IPv6 address/prefix types and
+solicited-node multicast derivation; ICMPv6 Neighbor Discovery parsing for
+RS/RA/NS/NA; IPv6 pseudo-header checksum generation/verification; router and
+prefix lifetime state; neighbor reachability and Duplicate Address Detection;
+SLAAC address lifecycle; DHCPv6 message parsing/serialization, client
+Solicit/Advertise/Request/Reply state, and IA_NA/IAADDR lease lifetimes; an
+interface-level ICMPv6 ingress state boundary; and runtime installation of a
+MAC-derived IPv6 link-local /64 alongside the existing IPv4 address.
 
-`WovenRouteTable` is a fixed eight-slot, generation-tagged policy table. It
-normalizes route networks, rejects invalid prefixes and zero gateways, selects
-longest-prefix matches with metric/generation tie-breaking, and requires an
-exact route value for removal. It is intentionally separate from the live
-smoltcp route set until route installation and policy ownership receive their
-own acceptance boundary.
+The closure hardening gate rejects NDP traffic whose IPv6 Hop Limit is not
+255. It also requires link-local Router Advertisement sources, rejects
+Neighbor Advertisements from the unspecified source, and constrains DAD
+Neighbor Solicitations from the unspecified source to the tentative address's
+solicited-node multicast destination. Existing ICMPv6 checksum validation
+remains mandatory before state mutation.
 
-### Stage 14.5 WovenGuard firewall policy foundation
+The accepted serial closure markers include
+`[S14.2J] WovenNet IPv6 interface ingress: PASSED`,
+`[S14.2K] WovenNet runtime IPv6 integration: PASSED`, and
+`[S14.2L] WovenNet NDP ingress hardening: PASSED`. The network QEMU harness
+carries these requirements forward into the Stage 14.3 and Stage 14.4 feature
+gates so later networking work cannot silently regress the accepted IPv6
+boundary.
 
-`WovenFirewall` is a fixed sixteen-slot IPv4 policy table. A rule selects
-direction, protocol, remote/local address, and remote/local port; zero address
-and port fields are bounded wildcards. Rules are generation-tagged and can be
-removed only by their exact returned value. Evaluation is first-match and
-defaults to deny in the standalone policy object. The live network runtime
-uses an explicit allow fallback to preserve existing network behavior until a
-system policy is installed. New rules are placed ahead of older rules, so a
-narrow deny can take precedence over that fallback. Policy changes are exposed
-only through kernel management functions; user socket calls cannot mutate
-rules.
+This acceptance is intentionally scoped. It does not claim physical-NIC IPv6
+interoperability across hardware families, a complete POSIX/BSD IPv6 socket
+surface, production route ownership/policy, or exhaustive RFC 4861/8415
+interoperability. Those concerns remain appropriate follow-up hardening or
+belong to Stage 14.3+.
+
+### Stage 14.3 socket API closure
+
+Stage 14.3 is accepted for the bounded WovenNet Socket API scope.
+
+The existing owner-scoped socket table remains the authority root for UDP and
+TCP open, bind/listen, connect, send, receive, peer inspection, close, and
+process cleanup. Descriptors are checked against their owning process, while
+asynchronous work uses `SocketToken` values containing the slot, owner, and
+generation. Closing a descriptor revokes descriptor authority immediately;
+after outstanding pins are released and the slot is reused, an old token
+cannot operate on the new socket generation.
+
+The endpoint boundary preserves the legacy packed IPv4 representation for
+compatibility and adds `SocketEndpointV1`, a fixed-layout versioned endpoint
+representation for IPv4 and IPv6. It rejects zero ports, malformed IPv4
+encodings, unspecified or multicast destinations, unknown address families,
+and non-zero reserved ABI fields. The versioned representation is wired into
+real socket connect and peer inspection operations rather than existing only
+as a serialization helper.
+
+The accepted serial gates are
+`[S14.3] WovenNet socket API boundary: PASSED` and
+`[S14.3A] WovenNet socket authority lifecycle: PASSED`. The QEMU networking
+harness requires both markers for Stage 14.3 and carries them forward into
+Stage 14.4, preventing routing work from silently weakening socket authority.
+
+This acceptance does not claim a complete POSIX/BSD socket surface,
+exhaustive physical-NIC IPv6 interoperability, or production routing-policy
+ownership. Those remain later platform hardening or Stage 14.4+ concerns.
+
+### Stage 14.4 routing-table closure
+
+Stage 14.4 is accepted for the bounded WovenNet routing-policy scope.
+
+`WovenRouteTable` is a fixed eight-slot, generation-tagged, owner-scoped
+dual-stack policy table. IPv4 prefixes from /0 through /32 and IPv6 prefixes
+from /0 through /128 are normalized before storage. Route lookup rejects
+address-family mismatches and selects the longest matching prefix, then the
+lowest metric and oldest generation as deterministic tie-breakers. Invalid
+prefixes, unusable gateways, and mixed network/gateway address families are
+rejected at insertion.
+
+Each `WovenRoute` records its owner and generation. Exact route handles are
+required for removal, cross-owner removal returns `WrongOwner`, and
+`remove_owner_routes` provides bounded deterministic teardown when an
+authority domain exits. This gives later WovenGuard and Network Manager work
+an explicit routing authority boundary instead of a globally mutable table.
+
+The policy table is now connected to the real smoltcp route set through
+controlled `install_woven_route` and `remove_woven_route` boundaries.
+Installation is idempotent for an identical CIDR/gateway pair and reports
+bounded-capacity failure rather than silently dropping a route. Removal is
+exact and a stale second removal is rejected. The live acceptance gate proves
+this lifecycle for both an IPv4 route and an IPv6 /64 route without replacing
+the existing DHCP/static default route.
+
+The accepted serial gates are
+`[S14.4] WovenNet routing table: PASSED` and
+`[S14.4A] WovenNet live route integration: PASSED`. The Stage 14.4 QEMU
+harness requires the live marker in addition to the inherited Stage 14.2 and
+14.3 networking gates.
+
+This acceptance does not claim a userspace route-management service, dynamic
+routing protocols, multi-interface policy routing, or exhaustive physical-NIC
+interoperability. Those remain appropriate Network Manager and platform
+hardening work. Stage 14.5 can now build WovenGuard firewall policy on the
+accepted socket, IPv6, and routing authority foundations.
+
+### Stage 14.5A WovenGuard firewall policy foundation closure
+
+Stage 14.5A is accepted for the bounded policy foundation scope.
+
+`FirewallPolicy` stores at most 32 rules and fails closed on capacity,
+duplicate identifiers, invalid IPv4/IPv6 prefix lengths, and reversed port
+ranges. Rules match inbound, outbound, or forward traffic by protocol,
+optional source/destination CIDR, and optional source/destination port range.
+Evaluation is deterministic: the lowest numeric priority wins and the rule ID
+is the stable tie-breaker. Traffic with no matching rule receives the
+configured default action.
+
+IPv4 and IPv6 prefix matching covers /0 through /32 and /0 through /128,
+including non-octet prefix lengths. Global policy access is serialized through
+the IRQ-aware mutex boundary so later live enforcement does not introduce an
+unsynchronized mutable policy table.
+
+The accepted serial gate is
+`[S14.5A] firewall policy foundation PASSED`. The Stage 14.5 feature inherits
+the accepted Stage 14.1-14.4 networking gates and is exercised by the QEMU
+network harness on 1, 2, and 4 CPUs. Acceptance was recorded by GitHub Actions
+run #1267 on commit `f8b79ac7`.
+
+This closure deliberately does not claim live filtering. Stage 14.5B must
+connect policy evaluation to real ingress and egress packet paths while
+preserving DHCP, NDP/RA/SLAAC, socket authority, and routing behavior. A
+forwarding hook should be added only where an actual forwarding path exists.
+
+
+### Stage 14.5B WovenGuard live packet enforcement closure
+
+Stage 14.5B is accepted for the live virtio ingress/egress enforcement scope.
+The firewall now has a packet-path bridge from Ethernet frames to the Stage
+14.5A policy model. IPv4 and IPv6 headers are decoded into source/destination
+addresses and TCP/UDP ports or ICMP/ICMPv6 protocol identity before policy
+evaluation.
+
+The enforcement points match the smoltcp device contract. Inbound denied
+frames are discarded in `VirtioSmolDevice::receive` before an RX token is
+exposed to smoltcp. Outbound frames are evaluated in `WovenTxToken::consume`
+after smoltcp has constructed the Ethernet frame and before
+`virtio_net::transmit` submits it. This avoids pretending that an
+`RxToken::consume` callback can cancel delivery after a token has already
+been returned.
+
+Non-IP Layer-2 frames are preserved at this stage so ARP and other link-control
+traffic are not accidentally removed by an IP firewall parser. IPv6
+ICMPv6 policy metadata supports the NDP/RA/SLAAC control plane inherited from
+Stage 14.2.
+
+Live enforcement uses an explicit atomic activation state. The policy itself
+retains default-deny semantics, but enforcement remains inactive during
+bootstrap and becomes active only through the firewall lifecycle boundary.
+This separation was required after the first Stage 14.5B gate correctly
+exposed a DHCP bootstrap deadlock when default-deny enforcement was active
+from boot.
+
+Acceptance requires `[S14.5B] live packet enforcement PASSED` plus all
+inherited WovenNet markers. GitHub Actions run #1277 on commit `1d1ce646`
+passed build, Clippy with `-D warnings`, live DHCP/DNS/ICMP/UDP/TCP
+regressions, and the dedicated Stage 14.5B QEMU matrix on 1, 2, and 4 CPUs.
+
+This closure does not claim a userspace firewall administration API, persistent
+rule configuration, logging/counters, stateful connection tracking, NAT, an
+actual routed forwarding hook, or completed Wi-Fi enforcement parity. Those
+remain later WovenGuard/network-management work.
+
+
+### Stage 14.5C WovenGuard firewall policy authority closure
+
+Stage 14.5C is accepted for privileged firewall policy management. The
+capability model now distinguishes ordinary `NetworkIo` authority from the
+new `NetworkAdmin` authority. `NetworkIo` remains available to normal
+userspace for sockets; it is deliberately insufficient to mutate global
+firewall state.
+
+`NetworkAdmin` is included in the Kernel and SystemService domain ceilings
+but excluded from the User and Restricted ceilings. Administrative wrappers
+require that capability before rule add, remove, or replace operations,
+default-action changes, or live-enforcement activation/deactivation reach the
+global policy object. Unauthorized calls return an explicit authority error
+without changing policy state.
+
+The Stage 14.5C self-test proves both sides of the boundary: userspace
+authority is rejected for policy mutation and enforcement activation, while
+`NetworkAdmin` can perform the bounded mutation lifecycle. It also verifies
+the WovenGuard domain ceiling itself so future capability refactors cannot
+silently grant firewall administration to ordinary users.
+
+Acceptance requires `[S14.5C] firewall policy authority PASSED` plus all
+inherited WovenNet/WovenGuard network markers. GitHub Actions run #1287 on
+commit `b81b3a76` passed build, Clippy with `-D warnings`, and the QEMU
+1/2/4-core matrix.
+
+This closure does not yet claim complete transport parity, malformed-IP
+fail-closed parsing, IPv6 extension-header inspection, a live routed Forward
+hook, persistent rules, logging/counters, stateful connection tracking, or
+NAT. Those are subsequent firewall/network-management hardening work.
 
 ### Stage 14.6 live socket firewall admission
 
-The shared `Runtime` owns the firewall table, so synchronous socket calls and
-the async pinned-socket paths use the same policy. Outbound connect checks the
-remote address, protocol, and selected local port before smoltcp connection
+The shared `Runtime` owns the socket firewall table, so synchronous socket calls
+and the async pinned-socket paths use the same policy. Outbound connect checks
+the remote address, protocol, and selected local port before smoltcp connection
 state changes. UDP sends and receives use their actual endpoints; TCP send and
 receive use smoltcp's remote/local endpoint, including accepted listener
 connections. Existing WovenGuard `NetworkIo` capability checks remain at
@@ -738,5 +910,4 @@ allowing an administrator to fail IPv6 closed with a deny default.
 
 This is socket API enforcement, not a packet-level ingress filter before TCP
 handshake processing. ICMP, IPv6 selectors, kernel-owned DHCP/DNS/echo traffic,
-firewall policy management authority/ABI, connection tracking, NAT, and
-physical NIC qualification remain future work.
+connection tracking, NAT, and physical NIC qualification remain future work.

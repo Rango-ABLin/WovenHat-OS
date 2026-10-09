@@ -16,6 +16,9 @@ use smoltcp::{
 };
 use spin::Once;
 
+#[cfg(feature = "stage14-4-test")]
+use smoltcp::iface::Route;
+
 #[cfg(feature = "stage14-2-test")]
 use smoltcp::wire::Ipv6Address as SmolIpv6Address;
 
@@ -528,6 +531,73 @@ pub fn parse_checked_icmpv6_neighbor_discovery(
     verify_icmpv6_checksum(source, destination, packet)
         .then(|| parse_icmpv6_neighbor_discovery(packet))
         .flatten()
+}
+
+#[cfg(feature = "stage14-2-test")]
+fn parse_validated_icmpv6_neighbor_discovery(
+    source: Ipv6Address,
+    destination: Ipv6Address,
+    hop_limit: u8,
+    packet: &[u8],
+) -> Option<NeighborDiscoveryMessage<'_>> {
+    if hop_limit != 255 {
+        return None;
+    }
+    let message = parse_checked_icmpv6_neighbor_discovery(source, destination, packet)?;
+    match message.kind {
+        NeighborDiscoveryKind::RouterAdvertisement
+            if !source.is_link_local() || destination.is_unspecified() =>
+        {
+            None
+        }
+        NeighborDiscoveryKind::NeighborAdvertisement
+            if source.is_unspecified() || destination.is_unspecified() =>
+        {
+            None
+        }
+        NeighborDiscoveryKind::NeighborSolicitation
+            if source.is_unspecified() && destination != message.target?.solicited_node_multicast() =>
+        {
+            None
+        }
+        _ => Some(message),
+    }
+}
+
+#[cfg(feature = "stage14-2-test")]
+pub fn stage14_2_ndp_ingress_hardening_self_test() -> bool {
+    let peer = Ipv6Address([
+        0xfe, 0x80, 0, 0, 0, 0, 0, 0, 0x02, 0, 0, 0xff, 0xfe, 0, 0, 2,
+    ]);
+    let destination = peer.solicited_node_multicast();
+    let mut advertisement = [0u8; 24];
+    advertisement[0] = 136;
+    advertisement[8..24].copy_from_slice(&peer.0);
+    finish_icmpv6_checksum(peer, destination, &mut advertisement);
+    if parse_validated_icmpv6_neighbor_discovery(peer, destination, 255, &advertisement).is_none()
+        || parse_validated_icmpv6_neighbor_discovery(peer, destination, 64, &advertisement).is_some()
+    {
+        return false;
+    }
+
+    let unspecified = Ipv6Address([0; 16]);
+    let mut solicitation = [0u8; 24];
+    solicitation[0] = 135;
+    solicitation[8..24].copy_from_slice(&peer.0);
+    finish_icmpv6_checksum(unspecified, destination, &mut solicitation);
+    if parse_validated_icmpv6_neighbor_discovery(
+        unspecified,
+        destination,
+        255,
+        &solicitation,
+    )
+    .is_none()
+    {
+        return false;
+    }
+    let all_nodes = Ipv6Address([0xff, 0x02, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1]);
+    finish_icmpv6_checksum(unspecified, all_nodes, &mut solicitation);
+    parse_validated_icmpv6_neighbor_discovery(unspecified, all_nodes, 255, &solicitation).is_none()
 }
 
 #[cfg(feature = "stage14-2-test")]
@@ -1294,10 +1364,20 @@ impl Ipv6InterfaceState {
         packet: &[u8],
         now: u64,
     ) -> Ipv6IngressEvent {
-        if !verify_icmpv6_checksum(source, destination, packet) {
-            return Ipv6IngressEvent::Ignored;
-        }
-        let Some(message) = parse_checked_icmpv6_neighbor_discovery(source, destination, packet) else {
+        self.receive_icmpv6_with_hop_limit(source, destination, 255, packet, now)
+    }
+
+    pub fn receive_icmpv6_with_hop_limit(
+        &mut self,
+        source: Ipv6Address,
+        destination: Ipv6Address,
+        hop_limit: u8,
+        packet: &[u8],
+        now: u64,
+    ) -> Ipv6IngressEvent {
+        let Some(message) =
+            parse_validated_icmpv6_neighbor_discovery(source, destination, hop_limit, packet)
+        else {
             return Ipv6IngressEvent::Ignored;
         };
         match message.kind {
@@ -1629,6 +1709,13 @@ impl TxToken for WovenTxToken {
         let mut frame = [0u8; MAX_FRAME];
         let usable = core::cmp::min(len, MAX_FRAME);
         let result = f(&mut frame[..usable]);
+        #[cfg(feature = "stage14-5b-test")]
+        if crate::firewall_policy::evaluate_ethernet_frame(
+            &frame[..usable],
+            crate::firewall_policy::FirewallDirection::Outbound,
+        ) == crate::firewall_policy::FrameDecision::Deny {
+            return result;
+        }
         let _ = virtio_net::transmit(&frame[..usable]);
         result
     }
@@ -1646,6 +1733,13 @@ impl Device for VirtioSmolDevice {
 
     fn receive(&mut self, _timestamp: Instant) -> Option<(Self::RxToken<'_>, Self::TxToken<'_>)> {
         let len = virtio_net::receive_into(&mut self.rx)?;
+        #[cfg(feature = "stage14-5b-test")]
+        if crate::firewall_policy::evaluate_ethernet_frame(
+            &self.rx[..len],
+            crate::firewall_policy::FirewallDirection::Inbound,
+        ) == crate::firewall_policy::FrameDecision::Deny {
+            return None;
+        }
         Some((
             WovenRxToken {
                 data: &mut self.rx[..len],
@@ -1767,6 +1861,13 @@ mod wifi_transport {
                         Ok(Some(n)) => n,
                         Ok(None) | Err(_) => return None,
                     };
+                    #[cfg(feature = "stage14-5d-test")]
+                    if crate::firewall_policy::evaluate_ethernet_frame(
+                        &d.rx[..len],
+                        crate::firewall_policy::FirewallDirection::Inbound,
+                    ) == crate::firewall_policy::FrameDecision::Deny {
+                        return None;
+                    }
                     Some((
                         NetRxToken::Wifi(wifi_smol::WifiRxToken::new(&mut d.rx[..len])),
                         NetTxToken::Wifi(wifi_smol::WifiTxToken::new(&mut d.session, d.epoch)),
@@ -2359,6 +2460,20 @@ pub fn socket_bind(owner: u64, id: u64, port: u16) -> Result<(), SocketError> {
             .listen(port)
             .map_err(|_| SocketError::Address),
     }
+}
+
+#[cfg(any(feature = "stage14-3-test", feature = "stage14-4-test"))]
+pub fn socket_connect_v1(
+    owner: u64,
+    id: u64,
+    endpoint: SocketEndpointV1,
+) -> Result<(), SocketError> {
+    socket_connect(owner, id, endpoint.to_endpoint()?)
+}
+
+#[cfg(any(feature = "stage14-3-test", feature = "stage14-4-test"))]
+pub fn socket_peer_v1(owner: u64, id: u64) -> Result<Option<SocketEndpointV1>, SocketError> {
+    socket_peer(owner, id).map(|peer| peer.map(SocketEndpointV1::from_endpoint))
 }
 
 pub fn socket_connect(owner: u64, id: u64, endpoint: IpEndpoint) -> Result<(), SocketError> {
@@ -3075,7 +3190,68 @@ fn valid_socket_endpoint(endpoint: IpEndpoint) -> bool {
             let octets = address.octets();
             octets != [0; 4] && !(224..=239).contains(&octets[0])
         }
-        IpAddress::Ipv6(_) => false,
+        IpAddress::Ipv6(address) => !address.is_unspecified() && !address.is_multicast(),
+    }
+}
+
+#[cfg(any(feature = "stage14-3-test", feature = "stage14-4-test"))]
+#[repr(C)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct SocketEndpointV1 {
+    pub family: u8,
+    pub _reserved: u8,
+    pub port: u16,
+    pub address: [u8; 16],
+}
+
+#[cfg(any(feature = "stage14-3-test", feature = "stage14-4-test"))]
+impl SocketEndpointV1 {
+    pub const FAMILY_IPV4: u8 = 4;
+    pub const FAMILY_IPV6: u8 = 6;
+
+    pub fn from_endpoint(endpoint: IpEndpoint) -> Self {
+        let mut address = [0u8; 16];
+        let family = match endpoint.addr {
+            IpAddress::Ipv4(ip) => {
+                address[..4].copy_from_slice(&ip.octets());
+                Self::FAMILY_IPV4
+            }
+            IpAddress::Ipv6(ip) => {
+                address.copy_from_slice(&ip.octets());
+                Self::FAMILY_IPV6
+            }
+        };
+        Self {
+            family,
+            _reserved: 0,
+            port: endpoint.port,
+            address,
+        }
+    }
+
+    pub fn to_endpoint(self) -> Result<IpEndpoint, SocketError> {
+        if self.port == 0 || self._reserved != 0 {
+            return Err(SocketError::Address);
+        }
+        let addr = match self.family {
+            Self::FAMILY_IPV4 if self.address[4..].iter().all(|byte| *byte == 0) => {
+                IpAddress::Ipv4(Ipv4Address::new(
+                    self.address[0],
+                    self.address[1],
+                    self.address[2],
+                    self.address[3],
+                ))
+            }
+            Self::FAMILY_IPV6 => {
+                let ip = SmolIpv6Address::from_octets(self.address);
+                if ip.is_unspecified() || ip.is_multicast() {
+                    return Err(SocketError::Address);
+                }
+                IpAddress::Ipv6(ip)
+            }
+            _ => return Err(SocketError::Address),
+        };
+        Ok(IpEndpoint::new(addr, self.port))
     }
 }
 
@@ -3088,12 +3264,73 @@ pub fn stage14_3_socket_api_self_test() -> bool {
     let packed = u64::from(u32::from_be_bytes([10, 0, 2, 2])) | (443u64 << 32);
     let unspecified = IpEndpoint::new(IpAddress::Ipv4(Ipv4Address::new(0, 0, 0, 0)), 443);
     let multicast = IpEndpoint::new(IpAddress::Ipv4(Ipv4Address::new(224, 0, 0, 1)), 443);
+
+    let ipv4_v1 = SocketEndpointV1::from_endpoint(valid);
+    let ipv6 = IpEndpoint::new(
+        IpAddress::Ipv6(SmolIpv6Address::from_octets([
+            0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1,
+        ])),
+        443,
+    );
+    let ipv6_v1 = SocketEndpointV1::from_endpoint(ipv6);
+    let mut malformed_ipv4 = ipv4_v1;
+    malformed_ipv4.address[15] = 1;
+    let mut multicast_ipv6 = ipv6_v1;
+    multicast_ipv6.address[0] = 0xff;
+
     valid_socket_endpoint(valid)
         && endpoint_from_packed(packed) == Ok(valid)
         && endpoint_to_packed(valid) == packed
         && !valid_socket_endpoint(unspecified)
         && !valid_socket_endpoint(multicast)
         && endpoint_from_packed(packed & 0xffff_ffff).is_err()
+        && ipv4_v1.to_endpoint() == Ok(valid)
+        && ipv6_v1.to_endpoint() == Ok(ipv6)
+        && malformed_ipv4.to_endpoint() == Err(SocketError::Address)
+        && multicast_ipv6.to_endpoint() == Err(SocketError::Address)
+        && valid_socket_endpoint(ipv6)
+}
+
+
+#[cfg(feature = "stage14-3-test")]
+pub fn stage14_3_socket_authority_self_test() -> bool {
+    const OWNER_A: u64 = 0x143A;
+    const OWNER_B: u64 = 0x143B;
+
+    let Ok(id) = socket_open(OWNER_A, SocketKind::Udp) else {
+        return false;
+    };
+    if socket_peer_v1(OWNER_B, id) != Err(SocketError::WrongOwner) {
+        let _ = socket_close(OWNER_A, id);
+        return false;
+    }
+
+    let Ok(token) = pin_socket(OWNER_A, id) else {
+        let _ = socket_close(OWNER_A, id);
+        return false;
+    };
+    if socket_close(OWNER_A, id).is_err()
+        || socket_peer_v1(OWNER_A, id) != Err(SocketError::Invalid)
+    {
+        unpin_socket(token);
+        return false;
+    }
+
+    // Closing a descriptor revokes descriptor authority immediately. The
+    // pinned generation remains valid only until the outstanding async
+    // reference is released; after slot reuse the old token must be rejected.
+    unpin_socket(token);
+    let Ok(reused) = socket_open(OWNER_A, SocketKind::Udp) else {
+        return false;
+    };
+    if reused != id || socket_send_pinned(token, b"stale") != Err(SocketError::Invalid) {
+        let _ = socket_close(OWNER_A, reused);
+        return false;
+    }
+
+    let result = socket_peer_v1(OWNER_B, reused) == Err(SocketError::WrongOwner);
+    let _ = socket_close(OWNER_A, reused);
+    result && stats().user_sockets == 0
 }
 
 #[cfg(feature = "stage14-4-test")]
@@ -3106,14 +3343,17 @@ pub enum RouteTableError {
     InvalidPrefix,
     InvalidGateway,
     InvalidHandle,
+    WrongOwner,
+    AddressFamily,
 }
 
 #[cfg(feature = "stage14-4-test")]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct WovenRoute {
-    pub network: Ipv4Address,
+    pub owner: u64,
+    pub network: IpAddress,
     pub prefix_len: u8,
-    pub gateway: Ipv4Address,
+    pub gateway: IpAddress,
     pub metric: u16,
     pub generation: u32,
 }
@@ -3141,25 +3381,34 @@ impl WovenRouteTable {
 
     pub fn add(
         &mut self,
-        network: Ipv4Address,
+        owner: u64,
+        network: IpAddress,
         prefix_len: u8,
-        gateway: Ipv4Address,
+        gateway: IpAddress,
         metric: u16,
     ) -> Result<WovenRoute, RouteTableError> {
-        if prefix_len > 32 {
-            return Err(RouteTableError::InvalidPrefix);
+        let network = normalize_route_network(network, prefix_len)?;
+        match gateway {
+            IpAddress::Ipv4(address) if address.octets() == [0; 4] => {
+                return Err(RouteTableError::InvalidGateway);
+            }
+            IpAddress::Ipv6(address) if address.is_unspecified() || address.is_multicast() => {
+                return Err(RouteTableError::InvalidGateway);
+            }
+            _ => {}
         }
-        if gateway.octets() == [0; 4] {
-            return Err(RouteTableError::InvalidGateway);
+        if core::mem::discriminant(&network) != core::mem::discriminant(&gateway) {
+            return Err(RouteTableError::AddressFamily);
         }
+
         let index = self
             .slots
             .iter()
             .position(|slot| slot.route.is_none())
             .ok_or(RouteTableError::Capacity)?;
-        let network_value = u32::from_be_bytes(network.octets()) & prefix_mask(prefix_len);
         let route = WovenRoute {
-            network: Ipv4Address::from_octets(network_value.to_be_bytes()),
+            owner,
+            network,
             prefix_len,
             gateway,
             metric,
@@ -3170,50 +3419,233 @@ impl WovenRouteTable {
         Ok(route)
     }
 
-    pub fn remove(&mut self, route: WovenRoute) -> Result<(), RouteTableError> {
+    pub fn remove(&mut self, owner: u64, route: WovenRoute) -> Result<(), RouteTableError> {
         let Some(slot) = self.slots.iter_mut().find(|slot| slot.route == Some(route)) else {
             return Err(RouteTableError::InvalidHandle);
         };
+        if route.owner != owner {
+            return Err(RouteTableError::WrongOwner);
+        }
         slot.route = None;
         Ok(())
     }
 
-    pub fn lookup(&self, destination: Ipv4Address) -> Option<WovenRoute> {
+    pub fn remove_owner_routes(&mut self, owner: u64) -> usize {
+        let mut removed = 0;
+        for slot in &mut self.slots {
+            if slot.route.is_some_and(|route| route.owner == owner) {
+                slot.route = None;
+                removed += 1;
+            }
+        }
+        removed
+    }
+
+    pub fn lookup(&self, destination: IpAddress) -> Option<WovenRoute> {
         self.slots
             .iter()
             .filter_map(|slot| slot.route)
-            .filter(|route| ipv4_matches(route.network, destination, route.prefix_len))
+            .filter(|route| route_matches(*route, destination))
             .min_by_key(|route| (u8::MAX - route.prefix_len, route.metric, route.generation))
     }
 }
 
 #[cfg(feature = "stage14-4-test")]
-fn prefix_mask(prefix_len: u8) -> u32 {
+fn normalize_route_network(
+    network: IpAddress,
+    prefix_len: u8,
+) -> Result<IpAddress, RouteTableError> {
+    match network {
+        IpAddress::Ipv4(address) => {
+            if prefix_len > 32 {
+                return Err(RouteTableError::InvalidPrefix);
+            }
+            let value = u32::from_be_bytes(address.octets()) & prefix_mask_v4(prefix_len);
+            Ok(IpAddress::Ipv4(Ipv4Address::from_octets(value.to_be_bytes())))
+        }
+        IpAddress::Ipv6(address) => {
+            if prefix_len > 128 {
+                return Err(RouteTableError::InvalidPrefix);
+            }
+            let mut octets = address.octets();
+            let whole = usize::from(prefix_len / 8);
+            let rem = prefix_len % 8;
+            if rem != 0 && whole < octets.len() {
+                octets[whole] &= u8::MAX << (8 - rem);
+            }
+            let clear_from = whole + usize::from(rem != 0);
+            octets[clear_from..].fill(0);
+            Ok(IpAddress::Ipv6(SmolIpv6Address::from_octets(octets)))
+        }
+    }
+}
+
+#[cfg(feature = "stage14-4-test")]
+fn prefix_mask_v4(prefix_len: u8) -> u32 {
     if prefix_len == 0 { 0 } else { u32::MAX << (32 - prefix_len) }
 }
 
 #[cfg(feature = "stage14-4-test")]
-fn ipv4_matches(network: Ipv4Address, destination: Ipv4Address, prefix_len: u8) -> bool {
-    let mask = prefix_mask(prefix_len);
-    (u32::from_be_bytes(network.octets()) & mask)
-        == (u32::from_be_bytes(destination.octets()) & mask)
+fn route_matches(route: WovenRoute, destination: IpAddress) -> bool {
+    match (route.network, destination) {
+        (IpAddress::Ipv4(network), IpAddress::Ipv4(destination)) => {
+            let mask = prefix_mask_v4(route.prefix_len);
+            (u32::from_be_bytes(network.octets()) & mask)
+                == (u32::from_be_bytes(destination.octets()) & mask)
+        }
+        (IpAddress::Ipv6(network), IpAddress::Ipv6(destination)) => {
+            let Ok(normalized) =
+                normalize_route_network(IpAddress::Ipv6(destination), route.prefix_len)
+            else {
+                return false;
+            };
+            normalized == IpAddress::Ipv6(network)
+        }
+        _ => false,
+    }
 }
 
 #[cfg(feature = "stage14-4-test")]
 pub fn stage14_4_routing_table_self_test() -> bool {
+    const OWNER_A: u64 = 0x144A;
+    const OWNER_B: u64 = 0x144B;
     let mut table = WovenRouteTable::new();
-    let default = table.add(Ipv4Address::new(0, 0, 0, 0), 0, DEFAULT_GATEWAY, 100).ok();
-    let broad = table.add(Ipv4Address::new(10, 0, 0, 0), 16, DEFAULT_GATEWAY, 100).ok();
-    let specific = table.add(Ipv4Address::new(10, 0, 2, 0), 24, DEFAULT_GATEWAY, 50).ok();
+    let gateway4 = IpAddress::Ipv4(DEFAULT_GATEWAY);
+    let default = table.add(OWNER_A, IpAddress::Ipv4(Ipv4Address::UNSPECIFIED), 0, gateway4, 100).ok();
+    let broad = table.add(OWNER_A, IpAddress::Ipv4(Ipv4Address::new(10, 0, 0, 0)), 16, gateway4, 100).ok();
+    let specific = table.add(OWNER_A, IpAddress::Ipv4(Ipv4Address::new(10, 0, 2, 99)), 24, gateway4, 50).ok();
+    let gateway6 = IpAddress::Ipv6(SmolIpv6Address::from_octets([
+        0xfe, 0x80, 0, 0, 0, 0, 0, 0, 0x50, 0x54, 0, 0xff, 0xfe, 0x12, 0x34, 0x56,
+    ]));
+    let ipv6 = table.add(OWNER_A,
+        IpAddress::Ipv6(SmolIpv6Address::from_octets([
+            0x20, 0x01, 0x0d, 0xb8, 0x12, 0x34, 0x56, 0x78, 0xaa, 0xbb, 0xcc, 0xdd, 0, 0, 0, 1,
+        ])),
+        64,
+        gateway6,
+        25,
+    ).ok();
+
     let Some(default) = default else { return false; };
     let Some(broad) = broad else { return false; };
     let Some(specific) = specific else { return false; };
-    table.lookup(Ipv4Address::new(10, 0, 2, 15)) == Some(specific)
-        && table.lookup(Ipv4Address::new(10, 0, 9, 15)) == Some(broad)
-        && table.lookup(Ipv4Address::new(192, 0, 2, 1)) == Some(default)
-        && table.remove(specific).is_ok()
-        && table.lookup(Ipv4Address::new(10, 0, 2, 15)) == Some(broad)
-        && table.remove(specific) == Err(RouteTableError::InvalidHandle)
+    let Some(ipv6) = ipv6 else { return false; };
+    let ipv6_destination = IpAddress::Ipv6(SmolIpv6Address::from_octets([
+        0x20, 0x01, 0x0d, 0xb8, 0x12, 0x34, 0x56, 0x78, 0, 0, 0, 0, 0, 0, 0, 0x42,
+    ]));
+
+    table.lookup(IpAddress::Ipv4(Ipv4Address::new(10, 0, 2, 15))) == Some(specific)
+        && table.lookup(IpAddress::Ipv4(Ipv4Address::new(10, 0, 9, 15))) == Some(broad)
+        && table.lookup(IpAddress::Ipv4(Ipv4Address::new(192, 0, 2, 1))) == Some(default)
+        && table.lookup(ipv6_destination) == Some(ipv6)
+        && ipv6.network == normalize_route_network(ipv6_destination, 64).ok().unwrap()
+        && table.add(OWNER_A, IpAddress::Ipv4(Ipv4Address::new(10, 0, 0, 0)), 33, gateway4, 1)
+            == Err(RouteTableError::InvalidPrefix)
+        && table.add(OWNER_A, IpAddress::Ipv6(SmolIpv6Address::UNSPECIFIED), 129, gateway6, 1)
+            == Err(RouteTableError::InvalidPrefix)
+        && table.add(OWNER_A, IpAddress::Ipv4(Ipv4Address::new(10, 0, 0, 0)), 8, gateway6, 1)
+            == Err(RouteTableError::AddressFamily)
+        && table.remove(OWNER_B, specific) == Err(RouteTableError::WrongOwner)
+        && table.remove(OWNER_A, specific).is_ok()
+        && table.lookup(IpAddress::Ipv4(Ipv4Address::new(10, 0, 2, 15))) == Some(broad)
+        && table.remove(OWNER_A, specific) == Err(RouteTableError::InvalidHandle)
+        && table.remove_owner_routes(OWNER_A) == 3
+        && table.lookup(IpAddress::Ipv4(Ipv4Address::new(192, 0, 2, 1))).is_none()
+        && table.lookup(ipv6_destination).is_none()
+}
+
+#[cfg(feature = "stage14-4-test")]
+fn install_woven_route(iface: &mut Interface, route: WovenRoute) -> Result<(), RouteTableError> {
+    let cidr = IpCidr::new(route.network, route.prefix_len);
+    let live = Route {
+        cidr,
+        via_router: route.gateway,
+        preferred_until: None,
+        expires_at: None,
+    };
+    let mut installed = false;
+    iface.routes_mut().update(|routes| {
+        if routes.iter().any(|existing| {
+            existing.cidr == live.cidr && existing.via_router == live.via_router
+        }) {
+            installed = true;
+            return;
+        }
+        installed = routes.push(live).is_ok();
+    });
+    installed.then_some(()).ok_or(RouteTableError::Capacity)
+}
+
+#[cfg(feature = "stage14-4-test")]
+fn remove_woven_route(iface: &mut Interface, route: WovenRoute) -> Result<(), RouteTableError> {
+    let cidr = IpCidr::new(route.network, route.prefix_len);
+    let mut removed = false;
+    iface.routes_mut().update(|routes| {
+        if let Some(index) = routes.iter().position(|existing| {
+            existing.cidr == cidr && existing.via_router == route.gateway
+        }) {
+            routes.remove(index);
+            removed = true;
+        }
+    });
+    removed.then_some(()).ok_or(RouteTableError::InvalidHandle)
+}
+
+#[cfg(feature = "stage14-4-test")]
+pub fn stage14_4_live_route_self_test() -> bool {
+    let Some(runtime) = RUNTIME.get() else {
+        return false;
+    };
+    let mut runtime = runtime.lock();
+    const OWNER: u64 = 0x144C;
+    let mut policy = WovenRouteTable::new();
+    let Ok(route) = policy.add(
+        OWNER,
+        IpAddress::Ipv4(Ipv4Address::new(198, 51, 100, 99)),
+        24,
+        IpAddress::Ipv4(DEFAULT_GATEWAY),
+        10,
+    ) else {
+        return false;
+    };
+
+    if install_woven_route(&mut runtime.iface, route).is_err() {
+        return false;
+    }
+    if install_woven_route(&mut runtime.iface, route).is_err() {
+        let _ = remove_woven_route(&mut runtime.iface, route);
+        return false;
+    }
+    if remove_woven_route(&mut runtime.iface, route).is_err()
+        || remove_woven_route(&mut runtime.iface, route) != Err(RouteTableError::InvalidHandle)
+    {
+        return false;
+    }
+
+    let gateway6 = IpAddress::Ipv6(SmolIpv6Address::from_octets([
+        0xfe, 0x80, 0, 0, 0, 0, 0, 0, 0x50, 0x54, 0, 0xff, 0xfe, 0x12, 0x34, 0x56,
+    ]));
+    let Ok(route6) = policy.add(
+        OWNER,
+        IpAddress::Ipv6(SmolIpv6Address::from_octets([
+            0x20, 0x01, 0x0d, 0xb8, 0x14, 0x04, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1,
+        ])),
+        64,
+        gateway6,
+        10,
+    ) else {
+        return false;
+    };
+    if install_woven_route(&mut runtime.iface, route6).is_err()
+        || install_woven_route(&mut runtime.iface, route6).is_err()
+    {
+        let _ = remove_woven_route(&mut runtime.iface, route6);
+        return false;
+    }
+    if remove_woven_route(&mut runtime.iface, route6).is_err() {
+        return false;
+    }
+    remove_woven_route(&mut runtime.iface, route6) == Err(RouteTableError::InvalidHandle)
 }
 
 const MAX_WOVEN_FIREWALL_RULES: usize = 16;

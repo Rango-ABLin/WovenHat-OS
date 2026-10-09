@@ -355,20 +355,57 @@ TCP
 DNS
 DHCP
 ICMP
-14.2
+14.2 — ACCEPTED
 
 Add:
 
 IPv6
 DHCPv6
 IPv6 neighbor discovery
-14.3
+
+Acceptance status: complete in the Stage 14.2 bounded kernel/networking scope.
+The accepted gate covers IPv6 address/prefix foundations, ICMPv6/NDP parsing
+and checksum validation, router-advertisement state, neighbor/DAD state,
+SLAAC lifecycle, DHCPv6 protocol/client/lease state, IPv6 interface ingress,
+runtime link-local interface installation, and hardened NDP ingress rules
+including Hop Limit 255 and source-address validation. Physical-NIC IPv6
+qualification, broader live IPv6 socket policy, and routing ownership remain
+separate follow-up/Stage 14.3+ concerns.
+
+14.3 — ACCEPTED
 
 Socket API.
 
-14.4
+Acceptance status: complete in the bounded WovenNet socket-API scope. The
+accepted boundary preserves the legacy packed IPv4 ABI while adding a
+versioned IPv4/IPv6 endpoint representation, routes that representation
+through real connect/peer operations, and retains owner-scoped descriptors,
+generation-bound async pinning, stale-token rejection, bounded slot reuse,
+and process socket cleanup. The mandatory Stage 14.3 authority/lifecycle gate
+is inherited by downstream networking tests. A complete POSIX/BSD API,
+listening/accept ergonomics beyond the current kernel primitives, and
+physical-network IPv6 interoperability remain later platform hardening.
+
+14.4 — ACCEPTED
 
 Routing tables.
+
+Acceptance status: complete in the bounded WovenNet routing-policy scope. The
+accepted route table is dual-stack for IPv4 and IPv6, normalizes prefixes,
+performs longest-prefix selection with metric/generation tie-breaking, and
+uses owner-scoped, generation-tagged route authority. Cross-owner removal is
+rejected and owner teardown can revoke all owned routes deterministically.
+
+The policy boundary is connected to the live smoltcp route set through
+controlled installation and exact removal. Acceptance proves idempotent live
+installation and stale second-removal rejection for both IPv4 and IPv6 while
+preserving the existing network configuration. The Stage 14.4 QEMU gate runs
+on the inherited networking acceptance matrix.
+
+This acceptance does not claim a userspace route-management service,
+dynamic routing protocols, policy routing across multiple interfaces, or
+physical-network interoperability across all NIC families. Those remain
+later Network Manager/platform hardening concerns.
 
 14.5
 

@@ -16,6 +16,7 @@ pub enum Capability {
     StorageIo = 12,
     DisplayIo = 13,
     InputIo = 14,
+    NetworkAdmin = 15,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -50,6 +51,7 @@ impl CapabilitySet {
             .with(Capability::StorageIo)
             .with(Capability::DisplayIo)
             .with(Capability::InputIo)
+            .with(Capability::NetworkAdmin)
     }
 
     pub const fn userspace() -> Self {
@@ -92,7 +94,7 @@ impl CapabilitySet {
 }
 
 impl Capability {
-    pub const COUNT: usize = 15;
+    pub const COUNT: usize = 16;
     pub const ALL: [Capability; Self::COUNT] = [
         Capability::Console,
         Capability::TimerRead,
@@ -109,6 +111,7 @@ impl Capability {
         Capability::StorageIo,
         Capability::DisplayIo,
         Capability::InputIo,
+        Capability::NetworkAdmin,
     ];
 
     pub const fn index(self) -> usize {
