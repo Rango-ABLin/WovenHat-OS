@@ -1271,7 +1271,11 @@ fn live_directory_growth_self_test() -> Result<(), &'static str> {
 /// Multi-component paths are supported. Missing FAT32 directories are created
 /// automatically; components use the bounded FAT32 long-name rules.
 pub fn persist_path(path: &str) -> Result<(), PersistError> {
-    let _replayed_intents = crate::journal::recover();
+    // Retire any same-boot intents left by an abandoned persist. The count is
+    // advisory: this tracker lives in RAM, so it says nothing about a previous
+    // boot. Crash recovery is the on-volume WDJ journal, replayed during mount
+    // by `recover_data_journal`.
+    let _abandoned_this_boot = crate::journal::recover();
     if !path.starts_with("/mnt/") {
         return Err(PersistError::NotSupported);
     }
@@ -1308,7 +1312,7 @@ pub fn persist_path(path: &str) -> Result<(), PersistError> {
     let checksum = data[..length].iter().fold(0xcbf29ce484222325, |h, b| {
         (h ^ u64::from(*b)).wrapping_mul(0x100000001b3)
     });
-    let Some(journal_token) = crate::journal::begin(crate::journal::path_hash(path), checksum)
+    let Some(journal_token) = crate::journal::begin(path, checksum)
     else {
         return Err(PersistError::Failed);
     };
@@ -1394,7 +1398,9 @@ pub fn persist_path(path: &str) -> Result<(), PersistError> {
         result = remove_data_journal_on_device(&mut disk);
     }
     if result.is_ok() {
-        let _ = crate::journal::commit(journal_token);
+        // Durability was already established by the on-volume WDJ journal above;
+        // this only closes the same-boot intent so it is not reported abandoned.
+        let _ = crate::journal::commit(journal_token, checksum);
     }
     result
 }
