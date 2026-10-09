@@ -9,6 +9,9 @@ target/
 
 /wovenhat-disk.img
 /.cargo-build/
+# Project-local CARGO_HOME used by the acceptance launchers. This is a registry
+# and toolchain cache (hundreds of megabytes); it must never enter history.
+/.cargo-home/
 /stage*-artifacts/
 /stage*-logs/
 /audit-artifacts/
