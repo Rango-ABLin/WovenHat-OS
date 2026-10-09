@@ -366,6 +366,7 @@ pub fn stage14_5b_self_test() -> bool {
     let mut ipv4 = [0u8; 14 + 20 + 8];
     ipv4[12..14].copy_from_slice(&0x0800u16.to_be_bytes());
     ipv4[14] = 0x45;
+    ipv4[16..18].copy_from_slice(&28u16.to_be_bytes());
     ipv4[23] = 17;
     ipv4[26..30].copy_from_slice(&[10,1,2,3]);
     ipv4[30..34].copy_from_slice(&[10,1,9,9]);
@@ -375,6 +376,7 @@ pub fn stage14_5b_self_test() -> bool {
     let mut ipv6 = [0u8; 14 + 40 + 8];
     ipv6[12..14].copy_from_slice(&0x86ddu16.to_be_bytes());
     ipv6[14] = 0x60;
+    ipv6[18..20].copy_from_slice(&8u16.to_be_bytes());
     ipv6[20] = 17;
     ipv6[22..38].copy_from_slice(&Ipv6Address::new(0x2001,0xdb8,1,0,0,0,0,1).octets());
     ipv6[38..54].copy_from_slice(&Ipv6Address::new(0x2001,0xdb8,2,0,0,0,0,1).octets());
