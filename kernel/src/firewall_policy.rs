@@ -247,8 +247,8 @@ pub enum FrameDecision { Allow, Deny }
 #[cfg(feature = "stage14-5b-test")]
 enum FrameClassification {
     NonIp,
-    ValidIp(PacketMeta),
-    InvalidIp,
+    Valid(PacketMeta),
+    Invalid,
 }
 
 #[cfg(feature = "stage14-5b-test")]
@@ -257,37 +257,37 @@ fn packet_meta_from_ethernet(frame: &[u8], direction: FirewallDirection) -> Fram
     match u16::from_be_bytes([frame[12], frame[13]]) {
         0x0800 => {
             let ip = &frame[14..];
-            if ip.len() < 20 || ip[0] >> 4 != 4 { return FrameClassification::InvalidIp; }
+            if ip.len() < 20 || ip[0] >> 4 != 4 { return FrameClassification::Invalid; }
             let header_len = usize::from(ip[0] & 0x0f) * 4;
             let total_len = usize::from(u16::from_be_bytes([ip[2], ip[3]]));
             if header_len < 20 || total_len < header_len || ip.len() < total_len {
-                return FrameClassification::InvalidIp;
+                return FrameClassification::Invalid;
             }
             let source = IpAddress::Ipv4(Ipv4Address::new(ip[12], ip[13], ip[14], ip[15]));
             let destination = IpAddress::Ipv4(Ipv4Address::new(ip[16], ip[17], ip[18], ip[19]));
             let Some((protocol, ports)) = transport_meta(ip[9], &ip[header_len..total_len], false) else {
-                return FrameClassification::InvalidIp;
+                return FrameClassification::Invalid;
             };
-            FrameClassification::ValidIp(PacketMeta {
+            FrameClassification::Valid(PacketMeta {
                 direction, protocol, source, destination,
                 source_port: ports.map(|p| p.0), destination_port: ports.map(|p| p.1),
             })
         }
         0x86dd => {
             let ip = &frame[14..];
-            if ip.len() < 40 || ip[0] >> 4 != 6 { return FrameClassification::InvalidIp; }
+            if ip.len() < 40 || ip[0] >> 4 != 6 { return FrameClassification::Invalid; }
             let payload_len = usize::from(u16::from_be_bytes([ip[4], ip[5]]));
             let packet_len = 40usize.saturating_add(payload_len);
-            if ip.len() < packet_len { return FrameClassification::InvalidIp; }
+            if ip.len() < packet_len { return FrameClassification::Invalid; }
             let mut src = [0u8; 16]; src.copy_from_slice(&ip[8..24]);
             let mut dst = [0u8; 16]; dst.copy_from_slice(&ip[24..40]);
             let Some((next, payload)) = ipv6_transport(ip[6], &ip[40..packet_len]) else {
-                return FrameClassification::InvalidIp;
+                return FrameClassification::Invalid;
             };
             let Some((protocol, ports)) = transport_meta(next, payload, true) else {
-                return FrameClassification::InvalidIp;
+                return FrameClassification::Invalid;
             };
-            FrameClassification::ValidIp(PacketMeta {
+            FrameClassification::Valid(PacketMeta {
                 direction, protocol,
                 source: IpAddress::Ipv6(Ipv6Address::from_octets(src)),
                 destination: IpAddress::Ipv6(Ipv6Address::from_octets(dst)),
@@ -351,8 +351,8 @@ pub fn evaluate_ethernet_frame(frame: &[u8], direction: FirewallDirection) -> Fr
     }
     let meta = match packet_meta_from_ethernet(frame, direction) {
         FrameClassification::NonIp => return FrameDecision::Allow,
-        FrameClassification::InvalidIp => return FrameDecision::Deny,
-        FrameClassification::ValidIp(meta) => meta,
+        FrameClassification::Invalid => return FrameDecision::Deny,
+        FrameClassification::Valid(meta) => meta,
     };
     let policy = global_policy().lock();
     match policy.evaluate(meta) {
