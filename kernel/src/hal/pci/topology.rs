@@ -38,6 +38,16 @@ pub struct BridgeRoute {
     pub subordinate: u8,
 }
 
+/// A bridge route must name a non-zero secondary bus that does not run past
+/// its subordinate bus. A function with no bridge route is trivially valid.
+///
+/// This is a free function rather than a nested `if let` so it reads the same
+/// in the edition-2021 kernel crate and in the edition-2024 host test target,
+/// which compiles this file directly.
+fn valid_bridge(bridge: Option<BridgeRoute>) -> bool {
+    bridge.is_none_or(|route| route.secondary != 0 && route.secondary <= route.subordinate)
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct FunctionDescriptor {
     pub address: FunctionAddress,
@@ -138,10 +148,8 @@ impl Topology {
         if descriptor.address.device >= 32 || descriptor.address.function >= 8 {
             return Err(Error::InvalidHandle);
         }
-        if let Some(route) = descriptor.bridge {
-            if route.secondary == 0 || route.secondary > route.subordinate {
-                return Err(Error::InvalidBridge);
-            }
+        if !valid_bridge(descriptor.bridge) {
+            return Err(Error::InvalidBridge);
         }
         if self.nodes.iter().any(|node| node.occupied && node.address == descriptor.address) {
             return Err(Error::Duplicate);
@@ -171,10 +179,8 @@ impl Topology {
         if let Some(index) = self.nodes.iter().position(|node| {
             node.occupied && node.address == descriptor.address
         }) {
-            if let Some(route) = descriptor.bridge {
-                if route.secondary == 0 || route.secondary > route.subordinate {
-                    return Err(Error::InvalidBridge);
-                }
+            if !valid_bridge(descriptor.bridge) {
+                return Err(Error::InvalidBridge);
             }
             self.nodes[index].bridge = descriptor.bridge;
             let handle = FunctionHandle {

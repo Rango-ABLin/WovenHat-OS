@@ -79,7 +79,11 @@ mod smp;
 #[cfg(feature = "stage12-4-test")]
 mod snapshots;
 mod storage;
-#[cfg(feature = "stage12-5-test")]
+// Stage 12.3 acceptance exercises the encrypted-mount path that lives here, so
+// this module is required by both the 12.3 and 12.5 gates. The features
+// themselves must not chain: each Stage 12 self-test block ends the boot, so
+// enabling 12.3 from 12.5 would exit before the 12.5 block ran.
+#[cfg(any(feature = "stage12-3-test", feature = "stage12-5-test"))]
 mod storage_manager;
 mod swap;
 mod syscall;
@@ -93,7 +97,9 @@ mod vfs;
 #[cfg(feature = "stage12-1-test")]
 mod vfs_api;
 mod virtio_net;
-#[cfg(feature = "stage12-3-test")]
+// `storage_manager` seals records through this key vault, so the Stage 12.5
+// gate needs the module even though it does not run the Stage 12.3 self-test.
+#[cfg(any(feature = "stage12-3-test", feature = "stage12-5-test"))]
 mod volume_crypto;
 #[cfg(feature = "stage13-9-test")]
 mod wifi;
@@ -2263,6 +2269,17 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
                                     halt();
                                 }
                                 #[cfg(feature = "stage14-5-test")]
+                                if network::stage14_5_firewall_self_test() {
+                                    serial::write_line(format_args!(
+                                        "[S14.5] WovenGuard firewall policy: PASSED"
+                                    ));
+                                } else {
+                                    serial::write_line(format_args!(
+                                        "[S14.5] WovenGuard firewall policy: FAILED"
+                                    ));
+                                    halt();
+                                }
+                                #[cfg(feature = "stage14-5-test")]
                                 if firewall_policy::stage14_5a_self_test() {
                                     serial::write_line(format_args!(
                                         "[S14.5A] firewall policy foundation PASSED"
@@ -2303,6 +2320,17 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
                                 } else {
                                     serial::write_line(format_args!(
                                         "[S14.5D] firewall parser/transport hardening FAILED"
+                                    ));
+                                    halt();
+                                }
+                                #[cfg(feature = "stage14-6-test")]
+                                if network::stage14_6_socket_firewall_self_test() {
+                                    serial::write_line(format_args!(
+                                        "[S14.6] live socket firewall admission: PASSED"
+                                    ));
+                                } else {
+                                    serial::write_line(format_args!(
+                                        "[S14.6] live socket firewall admission: FAILED"
                                     ));
                                     halt();
                                 }

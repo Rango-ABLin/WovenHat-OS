@@ -1,5 +1,20 @@
 ﻿# Stage status
 
+## Stage 1–5 bounded batch data journal — 2026-10-06
+
+FAT32 persistence now exposes a separate versioned `WDJ2` journal for bounded
+four-file data batches. Prepared batches roll every partially-written file
+back to its prior bytes and remove stale WMD1/WMD2 metadata intents; committed
+batches are retired only after all intended checksums match. The legacy `WDJ1`
+single-file format and metadata ABIs remain readable. Kernel
+build/check, warning-denying kernel Clippy, and the existing storage gate
+passed on 1/2/4 CPUs, including two-file commit/readback and prepared,
+partial-commit, and complete-commit recovery exercises. See the
+[batch-journal audit](audit-stage1-5-batch-journal-2026-10-06.md).
+
+Physical storage/DMA qualification, unclean-shutdown hardware testing,
+metadata transactions, and arbitrary-size transactions remain open.
+
 ## Stage 14.2D — Router Advertisement state (2026-10-06)
 
 Router Advertisement state now tracks a link-local router, bounded lifetimes,
@@ -161,6 +176,59 @@ commit `b81b3a76`.
 
 Next: complete firewall transport/path coverage and parser hardening before
 adding stateful connection tracking.
+
+## Stage 14.6 — live socket firewall admission candidate — 2026-10-07
+
+The shared network runtime owns a socket firewall policy table. Synchronous
+connect/send/receive operations and pinned async TCP connect/send/receive paths
+check IPv4 remote/local endpoints and protocol under the existing runtime lock.
+Connect checks use the selected local port before smoltcp state changes; UDP
+receive checks the datagram source, while TCP receive uses live connection
+endpoints. Rules are generation-safe, and newly added rules take priority over
+older ones. The runtime's explicit allow fallback preserves existing system
+behavior until a kernel-managed policy is installed; the standalone policy
+table still defaults to deny.
+
+Every refused socket operation commits one `WovenGuardDeny` record to the
+Stage 9.3 security ledger, carrying the owning task, packed refused endpoint,
+and packed direction/protocol/local port. The ledger lock is rank 40 against
+the rank-20 network runtime lock, so recording cannot invert lock order. Only
+denials are recorded, and a refused UDP connect that evaluates sixteen
+ephemeral candidates records exactly one.
+
+A denied ingress on an established TCP connection aborts that connection and
+returns the terminal `SocketError::Address`. UDP ingress intentionally drains
+the denied datagram and returns `WouldBlock`, because a datagram socket must
+stay usable for permitted peers. Non-IPv4 endpoints take the policy table's
+configured default action, preserving the runtime's allow-fallback contract
+for IPv6 while allowing an administrator to choose a deny default.
+
+Warning-denying kernel Clippy passed for all 39 kernel configurations (default
+plus every declared feature), host Clippy with `--all-targets` passed, all host
+unit and harness tests passed, and the Stage 14.6 QEMU network gate passed on
+1/2/4 CPUs with exit 33, including live DHCP/DNS/ICMP/UDP/TCP and all 20
+Stage 14 markers. Preserved serial logs are under
+`target/network-regression-{1,2,4}-debug/serial.log`.
+The exact acceptance audit is [Stage 14.6](audit-stage14-6-live-firewall-2026-10-07.md).
+
+This change also repaired five prior-stage gates that could not compile at
+commit `c53d597`: `stage14-2/3/4-test` (a missing `#[cfg]` guard on the
+Stage 14.5 self-test call) and `stage12-3/12-5-test` (a circular
+`storage_manager`/`volume_crypto` module gate, now resolved by gating both
+modules on either feature). All five now lint clean and pass their QEMU gates
+on 1/2/4 CPUs, and the full Stage 12.1–12.5 chain was re-run on 1/2/4 CPUs.
+
+Note for future Stage 12 work: these features must not chain prerequisites
+because each Stage 12 self-test block ends the boot with
+`qemu_test_exit_success()`. Shared module dependencies belong on the module's
+`cfg`.
+
+Packet-level TCP handshake filtering, ICMP/IPv6 and kernel-owned traffic,
+connection tracking, NAT, and physical NIC qualification remain open. A live
+denied-TCP-ingress boot, as opposed to the reviewed terminal-error contract,
+also remains open. Stage 14.5C now covers the kernel-side authority boundary;
+a bounded userspace/service interface for installing and revoking policy rules
+remains future work.
 
 ## Stage 1–5 long-name mutation hardening — 2026-10-01
 
@@ -773,6 +841,5 @@ session is rejected before notification encoding, while a session meeting the
 16-byte policy is accepted. The local 1/2/4-CPU gate, host tests and
 warning-denying kernel Clippy pass; GitHub acceptance for the pushed tip is
 still required.
-
 
 

@@ -1966,6 +1966,7 @@ struct Runtime {
     device: NetTransport,
     sockets: SocketSet<'static>,
     user: [Option<UserSocket>; MAX_USER_SOCKETS],
+    firewall: WovenFirewall,
     #[cfg(feature = "stage10-7-test")]
     queued_close_verified: bool,
     echo_handle: Option<SocketHandle>,
@@ -2088,6 +2089,7 @@ pub fn init() -> Result<(), InitError> {
                 device,
                 sockets,
                 user: [None; MAX_USER_SOCKETS],
+                firewall: WovenFirewall::with_default(FirewallAction::Allow),
                 #[cfg(feature = "stage10-7-test")]
                 queued_close_verified: false,
                 echo_handle: None,
@@ -2494,8 +2496,23 @@ pub fn socket_connect(owner: u64, id: u64, endpoint: IpEndpoint) -> Result<(), S
             let needs_bind = !runtime.sockets.get::<udp::Socket>(entry.handle).is_open();
             if needs_bind {
                 let mut bound = false;
+                let mut denied_port = None;
                 for _ in 0..16 {
                     let local_port = next_ephemeral(&mut runtime);
+                    // A local-port selector can deny one candidate while
+                    // allowing the next, so policy is evaluated per candidate.
+                    // The refusal is recorded once after the loop so a single
+                    // denied connect cannot flood the bounded security ledger.
+                    if !firewall_allows(
+                        &runtime,
+                        FirewallDirection::Egress,
+                        FirewallProtocol::Udp,
+                        endpoint,
+                        local_port,
+                    ) {
+                        denied_port = Some(local_port);
+                        continue;
+                    }
                     if runtime
                         .sockets
                         .get_mut::<udp::Socket>(entry.handle)
@@ -2507,6 +2524,31 @@ pub fn socket_connect(owner: u64, id: u64, endpoint: IpEndpoint) -> Result<(), S
                     }
                 }
                 if !bound {
+                    if let Some(local_port) = denied_port {
+                        firewall_record_denial(
+                            entry.owner,
+                            FirewallDirection::Egress,
+                            FirewallProtocol::Udp,
+                            endpoint,
+                            local_port,
+                        );
+                    }
+                    return Err(SocketError::Address);
+                }
+            } else {
+                let local_port = runtime
+                    .sockets
+                    .get::<udp::Socket>(entry.handle)
+                    .endpoint()
+                    .port;
+                if !firewall_admit(
+                    &runtime,
+                    entry.owner,
+                    FirewallDirection::Egress,
+                    FirewallProtocol::Udp,
+                    endpoint,
+                    local_port,
+                ) {
                     return Err(SocketError::Address);
                 }
             }
@@ -2515,6 +2557,16 @@ pub fn socket_connect(owner: u64, id: u64, endpoint: IpEndpoint) -> Result<(), S
         }
         SocketKind::Tcp => {
             let local_port = next_ephemeral(&mut runtime);
+            if !firewall_admit(
+                &runtime,
+                entry.owner,
+                FirewallDirection::Egress,
+                FirewallProtocol::Tcp,
+                endpoint,
+                local_port,
+            ) {
+                return Err(SocketError::Address);
+            }
             let Runtime { iface, sockets, .. } = &mut *runtime;
             sockets
                 .get_mut::<tcp::Socket>(entry.handle)
@@ -2532,6 +2584,11 @@ pub fn socket_send(owner: u64, id: u64, data: &[u8]) -> Result<usize, SocketErro
     };
     let mut runtime = runtime.lock();
     let entry = find_slot(&runtime, owner, id)?;
+    match firewall_admit_socket(&runtime, &entry, FirewallDirection::Egress) {
+        None => return Err(SocketError::NotConnected),
+        Some(false) => return Err(SocketError::Address),
+        Some(true) => {}
+    }
     match entry.kind {
         SocketKind::Udp => {
             let peer = entry.peer.ok_or(SocketError::NotConnected)?;
@@ -2561,19 +2618,89 @@ pub fn socket_recv(
     let mut runtime = runtime.lock();
     let entry = find_slot(&runtime, owner, id)?;
     match entry.kind {
-        SocketKind::Udp => runtime
-            .sockets
-            .get_mut::<udp::Socket>(entry.handle)
-            .recv_slice(out)
-            .map(|(len, meta)| (len, Some(meta.endpoint)))
-            .map_err(|_| SocketError::WouldBlock),
-        SocketKind::Tcp => runtime
-            .sockets
-            .get_mut::<tcp::Socket>(entry.handle)
-            .recv_slice(out)
-            .map(|len| (len, entry.peer))
-            .map_err(|_| SocketError::WouldBlock),
+        SocketKind::Udp => {
+            let local_port = udp_ingress_port(&runtime, &entry);
+            let received = runtime
+                .sockets
+                .get_mut::<udp::Socket>(entry.handle)
+                .recv_slice(out);
+            match received {
+                Ok((len, metadata)) => {
+                    if firewall_admit(
+                        &runtime,
+                        entry.owner,
+                        FirewallDirection::Ingress,
+                        FirewallProtocol::Udp,
+                        metadata.endpoint,
+                        local_port,
+                    ) {
+                        Ok((len, Some(metadata.endpoint)))
+                    } else {
+                        // The datagram is already drained, so a denial discards
+                        // exactly one packet and leaves the socket usable for
+                        // permitted peers. `WouldBlock` is correct here because
+                        // the next datagram may well be authorized.
+                        Err(SocketError::WouldBlock)
+                    }
+                }
+                Err(_) => Err(SocketError::WouldBlock),
+            }
+        }
+        SocketKind::Tcp => {
+            if !tcp_ingress_admitted(&mut runtime, &entry) {
+                return Err(SocketError::Address);
+            }
+            runtime
+                .sockets
+                .get_mut::<tcp::Socket>(entry.handle)
+                .recv_slice(out)
+                .map(|len| (len, entry.peer))
+                .map_err(|_| SocketError::WouldBlock)
+        }
     }
+}
+
+/// The bound local port a datagram socket receives on.
+fn udp_ingress_port(runtime: &Runtime, entry: &UserSocket) -> u16 {
+    runtime
+        .sockets
+        .get::<udp::Socket>(entry.handle)
+        .endpoint()
+        .port
+}
+
+/// Authorize inbound data on a connected TCP socket, aborting the connection
+/// when policy denies it.
+///
+/// A denial is permanent for the life of the connection, so the flow is
+/// revoked rather than merely hidden from the reader. Leaving the bytes queued
+/// would pin the receive buffer, keep the peer's connection open, and — because
+/// `WouldBlock` makes the asynchronous worker re-queue the request while
+/// `can_recv()` stays true — spin that worker against a condition that can
+/// never clear. Callers report the terminal `Address` error instead.
+fn tcp_ingress_admitted(runtime: &mut Runtime, entry: &UserSocket) -> bool {
+    let endpoints = {
+        let socket = runtime.sockets.get::<tcp::Socket>(entry.handle);
+        (socket.remote_endpoint(), socket.local_endpoint())
+    };
+    let Some(remote) = endpoints.0 else {
+        return true;
+    };
+    if firewall_admit(
+        runtime,
+        entry.owner,
+        FirewallDirection::Ingress,
+        FirewallProtocol::Tcp,
+        remote,
+        endpoints.1.map_or(0, |endpoint| endpoint.port),
+    ) {
+        return true;
+    }
+    runtime
+        .sockets
+        .get_mut::<tcp::Socket>(entry.handle)
+        .abort();
+    false
 }
 
 pub fn socket_close(owner: u64, id: u64) -> Result<(), SocketError> {
@@ -2704,13 +2831,28 @@ pub fn socket_connect_pinned(token: SocketToken, endpoint: IpEndpoint) -> Result
     if entry.kind != SocketKind::Tcp {
         return Err(SocketError::WrongKind);
     }
-
     if let Some(peer) = entry.peer {
         if peer != endpoint {
             return Err(SocketError::Address);
         }
+        if matches!(
+            firewall_admit_socket(&runtime, &entry, FirewallDirection::Egress),
+            Some(false)
+        ) {
+            return Err(SocketError::Address);
+        }
     } else {
         let local_port = next_ephemeral(&mut runtime);
+        if !firewall_admit(
+            &runtime,
+            entry.owner,
+            FirewallDirection::Egress,
+            FirewallProtocol::Tcp,
+            endpoint,
+            local_port,
+        ) {
+            return Err(SocketError::Address);
+        }
         let Runtime {
             iface,
             sockets,
@@ -2742,6 +2884,11 @@ pub fn socket_send_pinned(token: SocketToken, data: &[u8]) -> Result<usize, Sock
     };
     let mut runtime = runtime.lock();
     let entry = find_token(&runtime, token)?;
+    match firewall_admit_socket(&runtime, &entry, FirewallDirection::Egress) {
+        None => return Err(SocketError::NotConnected),
+        Some(false) => return Err(SocketError::Address),
+        Some(true) => {}
+    }
     match entry.kind {
         SocketKind::Udp => {
             let peer = entry.peer.ok_or(SocketError::NotConnected)?;
@@ -2781,18 +2928,34 @@ pub fn socket_recv_pinned(
     let entry = find_token(&runtime, token)?;
     match entry.kind {
         SocketKind::Udp => {
+            let local_port = udp_ingress_port(&runtime, &entry);
             let (len, endpoint) = runtime
                 .sockets
                 .get_mut::<udp::Socket>(entry.handle)
                 .recv_slice(out)
                 .map(|(len, meta)| (len, meta.endpoint))
                 .map_err(|_| SocketError::WouldBlock)?;
+            // The denied datagram is already drained; the socket stays usable
+            // for permitted peers, so this remains a retryable condition.
+            if !firewall_admit(
+                &runtime,
+                entry.owner,
+                FirewallDirection::Ingress,
+                FirewallProtocol::Udp,
+                endpoint,
+                local_port,
+            ) {
+                return Err(SocketError::WouldBlock);
+            }
             if let Some(socket) = runtime.user[token.slot as usize].as_mut() {
                 socket.peer = Some(endpoint);
             }
             Ok((len, Some(endpoint)))
         }
         SocketKind::Tcp => {
+            if !tcp_ingress_admitted(&mut runtime, &entry) {
+                return Err(SocketError::Address);
+            }
             let socket = runtime.sockets.get_mut::<tcp::Socket>(entry.handle);
             if socket.can_recv() {
                 return socket
@@ -3354,7 +3517,7 @@ pub fn stage14_4_routing_table_self_test() -> bool {
     let gateway6 = IpAddress::Ipv6(SmolIpv6Address::from_octets([
         0xfe, 0x80, 0, 0, 0, 0, 0, 0, 0x50, 0x54, 0, 0xff, 0xfe, 0x12, 0x34, 0x56,
     ]));
-    let ipv6 = table.add(OWNER_A, 
+    let ipv6 = table.add(OWNER_A,
         IpAddress::Ipv6(SmolIpv6Address::from_octets([
             0x20, 0x01, 0x0d, 0xb8, 0x12, 0x34, 0x56, 0x78, 0xaa, 0xbb, 0xcc, 0xdd, 0, 0, 0, 1,
         ])),
@@ -3483,6 +3646,517 @@ pub fn stage14_4_live_route_self_test() -> bool {
         return false;
     }
     remove_woven_route(&mut runtime.iface, route6) == Err(RouteTableError::InvalidHandle)
+}
+
+const MAX_WOVEN_FIREWALL_RULES: usize = 16;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FirewallDirection {
+    Ingress,
+    Egress,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FirewallProtocol {
+    Any,
+    Tcp,
+    Udp,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FirewallAction {
+    Allow,
+    Deny,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct WovenFirewallRule {
+    pub direction: FirewallDirection,
+    pub protocol: FirewallProtocol,
+    pub remote: Ipv4Address,
+    pub local: Ipv4Address,
+    pub remote_port: u16,
+    pub local_port: u16,
+    pub action: FirewallAction,
+    pub generation: u32,
+}
+
+#[derive(Clone, Copy)]
+struct FirewallSlot {
+    rule: Option<WovenFirewallRule>,
+}
+
+pub struct WovenFirewall {
+    slots: [FirewallSlot; MAX_WOVEN_FIREWALL_RULES],
+    next_generation: u32,
+    default_action: FirewallAction,
+}
+
+impl WovenFirewall {
+    #[expect(dead_code, reason = "deny-by-default standalone policy is used by protocol acceptance tests")]
+    pub const fn new() -> Self {
+        Self::with_default(FirewallAction::Deny)
+    }
+
+    const fn with_default(default_action: FirewallAction) -> Self {
+        Self {
+            slots: [FirewallSlot { rule: None }; MAX_WOVEN_FIREWALL_RULES],
+            next_generation: 1,
+            default_action,
+        }
+    }
+
+    #[expect(dead_code, reason = "kernel policy management consumes this bounded rule API")]
+    pub fn add(&mut self, mut rule: WovenFirewallRule) -> Result<WovenFirewallRule, FirewallError> {
+        if rule.remote_port == 0 && rule.local_port == 0 && rule.protocol != FirewallProtocol::Any
+        {
+            // A zero port is the only wildcard representation. `Any` may use it
+            // because it also covers port-less protocols, but a rule naming TCP
+            // or UDP must name at least one endpoint port. A port-less protocol
+            // selector arrives with the later ICMP enforcement stage.
+            return Err(FirewallError::InvalidSelector);
+        }
+        let active_count = self.slots.iter().filter(|slot| slot.rule.is_some()).count();
+        if active_count == MAX_WOVEN_FIREWALL_RULES {
+            return Err(FirewallError::Capacity);
+        }
+        rule.generation = self.next_generation;
+        self.next_generation = self.next_generation.wrapping_add(1).max(1);
+        // New rules have higher priority than older rules, so an administrator
+        // can add a narrow deny above a compatibility default allow.
+        let mut compacted = 0;
+        for index in 0..MAX_WOVEN_FIREWALL_RULES {
+            if let Some(existing) = self.slots[index].rule {
+                self.slots[compacted].rule = Some(existing);
+                compacted += 1;
+            }
+        }
+        for index in compacted..MAX_WOVEN_FIREWALL_RULES {
+            self.slots[index].rule = None;
+        }
+        for index in (0..compacted).rev() {
+            self.slots[index + 1].rule = self.slots[index].rule;
+        }
+        self.slots[0].rule = Some(rule);
+        Ok(rule)
+    }
+
+    #[expect(dead_code, reason = "kernel policy management consumes this bounded revocation API")]
+    pub fn remove(&mut self, rule: WovenFirewallRule) -> Result<(), FirewallError> {
+        let Some(slot) = self.slots.iter_mut().find(|slot| slot.rule == Some(rule)) else {
+            return Err(FirewallError::InvalidHandle);
+        };
+        slot.rule = None;
+        Ok(())
+    }
+
+    /// The action applied when no rule selector matches.
+    const fn default_allows(&self) -> bool {
+        matches!(self.default_action, FirewallAction::Allow)
+    }
+
+    /// Evaluate one packet. Rules are first-match and the implicit policy is deny.
+    pub fn authorize(
+        &self,
+        direction: FirewallDirection,
+        protocol: FirewallProtocol,
+        remote: Ipv4Address,
+        local: Ipv4Address,
+        remote_port: u16,
+        local_port: u16,
+    ) -> bool {
+        self.slots
+            .iter()
+            .filter_map(|slot| slot.rule)
+            .find(|rule| {
+                rule.direction == direction
+                    && (rule.protocol == FirewallProtocol::Any || rule.protocol == protocol)
+                    && (rule.remote == Ipv4Address::new(0, 0, 0, 0) || rule.remote == remote)
+                    && (rule.local == Ipv4Address::new(0, 0, 0, 0) || rule.local == local)
+                    && (rule.remote_port == 0 || rule.remote_port == remote_port)
+                    && (rule.local_port == 0 || rule.local_port == local_port)
+            })
+            .map_or(self.default_action == FirewallAction::Allow, |rule| match rule.action {
+                FirewallAction::Allow => true,
+                FirewallAction::Deny => false,
+            })
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FirewallError {
+    Capacity,
+    InvalidSelector,
+    InvalidHandle,
+}
+
+/// Policy selectors derived from one live socket slot.
+struct FirewallSelectors {
+    protocol: FirewallProtocol,
+    remote: IpEndpoint,
+    local_port: u16,
+}
+
+/// Derive the policy selectors for `entry` from live socket state.
+///
+/// Returns `None` when the socket has no resolvable remote endpoint. Callers
+/// report that as `NotConnected` instead of consulting policy, because there is
+/// no peer to authorize.
+fn firewall_selectors(runtime: &Runtime, entry: &UserSocket) -> Option<FirewallSelectors> {
+    match entry.kind {
+        SocketKind::Udp => Some(FirewallSelectors {
+            protocol: FirewallProtocol::Udp,
+            remote: entry.peer?,
+            local_port: runtime
+                .sockets
+                .get::<udp::Socket>(entry.handle)
+                .endpoint()
+                .port,
+        }),
+        SocketKind::Tcp => {
+            let socket = runtime.sockets.get::<tcp::Socket>(entry.handle);
+            Some(FirewallSelectors {
+                protocol: FirewallProtocol::Tcp,
+                remote: socket.remote_endpoint().or(entry.peer)?,
+                local_port: socket.local_endpoint().map_or(0, |endpoint| endpoint.port),
+            })
+        }
+    }
+}
+
+/// Pack a denial's direction, protocol and local port into one ledger detail
+/// word so a security record identifies the decision without allocating.
+const fn firewall_detail(
+    direction: FirewallDirection,
+    protocol: FirewallProtocol,
+    local_port: u16,
+) -> u64 {
+    let direction_bits: u64 = match direction {
+        FirewallDirection::Ingress => 0,
+        FirewallDirection::Egress => 1,
+    };
+    let protocol_bits: u64 = match protocol {
+        FirewallProtocol::Any => 0,
+        FirewallProtocol::Tcp => 2,
+        FirewallProtocol::Udp => 3,
+    };
+    (direction_bits << 40) | (protocol_bits << 32) | local_port as u64
+}
+
+/// Decide one socket operation against the runtime policy table.
+///
+/// Rule selectors are IPv4-only, so a non-IPv4 endpoint cannot match any rule.
+/// Such an endpoint takes the table's configured default action rather than an
+/// unconditional deny. That keeps the runtime's documented "no installed policy
+/// preserves existing behavior" contract true for IPv6, while still letting an
+/// administrator fail IPv6 closed by choosing a deny default. IPv6 selectors
+/// are a later stage.
+fn firewall_allows(
+    runtime: &Runtime,
+    direction: FirewallDirection,
+    protocol: FirewallProtocol,
+    remote: IpEndpoint,
+    local_port: u16,
+) -> bool {
+    match remote.addr {
+        IpAddress::Ipv4(remote_address) => runtime.firewall.authorize(
+            direction,
+            protocol,
+            remote_address,
+            runtime.ipv4,
+            remote.port,
+            local_port,
+        ),
+        IpAddress::Ipv6(_) => runtime.firewall.default_allows(),
+    }
+}
+
+/// Commit one refused socket operation to the WovenGuard security ledger.
+///
+/// The ledger lock outranks the network runtime lock, so recording from inside
+/// a runtime-guarded path cannot reverse lock order. Only denials are recorded:
+/// the ledger is a bounded ring, and logging every authorized packet would
+/// evict the denial history that makes the record useful.
+fn firewall_record_denial(
+    actor: u64,
+    direction: FirewallDirection,
+    protocol: FirewallProtocol,
+    remote: IpEndpoint,
+    local_port: u16,
+) {
+    crate::audit::record_detail(
+        actor,
+        crate::audit::Action::WovenGuardDeny,
+        endpoint_to_packed(remote),
+        firewall_detail(direction, protocol, local_port),
+        false,
+    );
+}
+
+/// Authorize one socket operation and record it if policy refuses.
+fn firewall_admit(
+    runtime: &Runtime,
+    actor: u64,
+    direction: FirewallDirection,
+    protocol: FirewallProtocol,
+    remote: IpEndpoint,
+    local_port: u16,
+) -> bool {
+    if firewall_allows(runtime, direction, protocol, remote, local_port) {
+        return true;
+    }
+    firewall_record_denial(actor, direction, protocol, remote, local_port);
+    false
+}
+
+/// Authorize a socket operation whose selectors come from live socket state.
+///
+/// `None` means the socket has no resolvable peer; `Some(false)` is a policy
+/// denial.
+fn firewall_admit_socket(
+    runtime: &Runtime,
+    entry: &UserSocket,
+    direction: FirewallDirection,
+) -> Option<bool> {
+    let selectors = firewall_selectors(runtime, entry)?;
+    Some(firewall_admit(
+        runtime,
+        entry.owner,
+        direction,
+        selectors.protocol,
+        selectors.remote,
+        selectors.local_port,
+    ))
+}
+
+/// Install a kernel-managed policy rule. Callers must already hold the network
+/// management authority; user socket operations cannot add rules themselves.
+#[expect(dead_code, reason = "policy management syscall/service integration is a later stage")]
+pub fn firewall_add_rule(rule: WovenFirewallRule) -> Result<WovenFirewallRule, FirewallError> {
+    let Some(runtime) = RUNTIME.get() else {
+        return Err(FirewallError::Capacity);
+    };
+    runtime.lock().firewall.add(rule)
+}
+
+#[expect(dead_code, reason = "policy management syscall/service integration is a later stage")]
+pub fn firewall_remove_rule(rule: WovenFirewallRule) -> Result<(), FirewallError> {
+    let Some(runtime) = RUNTIME.get() else {
+        return Err(FirewallError::InvalidHandle);
+    };
+    runtime.lock().firewall.remove(rule)
+}
+
+#[cfg(feature = "stage14-5-test")]
+pub fn stage14_5_firewall_self_test() -> bool {
+    let mut firewall = WovenFirewall::new();
+
+    // Selector validation: a zero remote and local port is the wildcard form,
+    // which only `Any` may use. A rule naming TCP or UDP must name at least one
+    // endpoint port, and the wildcard rule must not consume a slot when it is
+    // rejected.
+    let wildcard_any = firewall.add(WovenFirewallRule {
+        direction: FirewallDirection::Egress,
+        protocol: FirewallProtocol::Any,
+        remote: Ipv4Address::new(10, 0, 2, 2),
+        local: Ipv4Address::new(0, 0, 0, 0),
+        remote_port: 0,
+        local_port: 0,
+        action: FirewallAction::Allow,
+        generation: 0,
+    });
+    let Ok(wildcard_any) = wildcard_any else {
+        return false;
+    };
+    let typed_without_port = firewall.add(WovenFirewallRule {
+        direction: FirewallDirection::Egress,
+        protocol: FirewallProtocol::Tcp,
+        remote: Ipv4Address::new(10, 0, 2, 2),
+        local: Ipv4Address::new(0, 0, 0, 0),
+        remote_port: 0,
+        local_port: 0,
+        action: FirewallAction::Allow,
+        generation: 0,
+    });
+    if typed_without_port != Err(FirewallError::InvalidSelector)
+        || firewall.remove(wildcard_any).is_err()
+    {
+        return false;
+    }
+
+    let allow_dns = firewall
+        .add(WovenFirewallRule {
+            direction: FirewallDirection::Egress,
+            protocol: FirewallProtocol::Udp,
+            remote: Ipv4Address::new(10, 0, 2, 3),
+            local: Ipv4Address::new(10, 0, 2, 15),
+            remote_port: 53,
+            local_port: 0,
+            action: FirewallAction::Allow,
+            generation: 0,
+        })
+        .ok();
+    let Some(allow_dns) = allow_dns else { return false; };
+    let middle = firewall
+        .add(WovenFirewallRule {
+            direction: FirewallDirection::Egress,
+            protocol: FirewallProtocol::Tcp,
+            remote: Ipv4Address::new(203, 0, 113, 8),
+            local: Ipv4Address::new(0, 0, 0, 0),
+            remote_port: 443,
+            local_port: 0,
+            action: FirewallAction::Allow,
+            generation: 0,
+        })
+        .ok();
+    let Some(middle) = middle else { return false; };
+    let top = firewall
+        .add(WovenFirewallRule {
+            direction: FirewallDirection::Ingress,
+            protocol: FirewallProtocol::Any,
+            remote: Ipv4Address::new(203, 0, 113, 9),
+            local: Ipv4Address::new(0, 0, 0, 0),
+            remote_port: 0,
+            local_port: 0,
+            action: FirewallAction::Deny,
+            generation: 0,
+        })
+        .ok();
+    let Some(top) = top else { return false; };
+    if firewall.remove(middle).is_err()
+        || firewall
+            .add(WovenFirewallRule {
+                direction: FirewallDirection::Egress,
+                protocol: FirewallProtocol::Any,
+                remote: Ipv4Address::new(203, 0, 113, 10),
+                local: Ipv4Address::new(0, 0, 0, 0),
+                remote_port: 0,
+                local_port: 0,
+                action: FirewallAction::Deny,
+                generation: 0,
+            })
+            .is_err()
+    {
+        return false;
+    }
+    firewall.authorize(
+        FirewallDirection::Egress,
+        FirewallProtocol::Udp,
+        Ipv4Address::new(10, 0, 2, 3),
+        Ipv4Address::new(10, 0, 2, 15),
+        53,
+        40000,
+    ) && !firewall.authorize(
+        FirewallDirection::Ingress,
+        FirewallProtocol::Udp,
+        Ipv4Address::new(10, 0, 2, 3),
+        Ipv4Address::new(10, 0, 2, 15),
+        53,
+        40000,
+    ) && firewall.remove(allow_dns).is_ok()
+        && !firewall.authorize(
+            FirewallDirection::Egress,
+            FirewallProtocol::Udp,
+            Ipv4Address::new(10, 0, 2, 3),
+            Ipv4Address::new(10, 0, 2, 15),
+            53,
+            40000,
+        )
+        && firewall.remove(allow_dns) == Err(FirewallError::InvalidHandle)
+        && firewall.remove(top).is_ok()
+}
+
+#[cfg(feature = "stage14-6-test")]
+pub fn stage14_6_socket_firewall_self_test() -> bool {
+    const OWNER: u64 = u64::MAX - 0x146;
+    let remote = IpEndpoint::new(
+        IpAddress::Ipv4(Ipv4Address::new(198, 51, 100, 7)),
+        5353,
+    );
+    let Ok(rule) = firewall_add_rule(WovenFirewallRule {
+        direction: FirewallDirection::Egress,
+        protocol: FirewallProtocol::Udp,
+        remote: Ipv4Address::new(198, 51, 100, 7),
+        local: Ipv4Address::new(0, 0, 0, 0),
+        remote_port: 5353,
+        local_port: 0,
+        action: FirewallAction::Deny,
+        generation: 0,
+    }) else {
+        return false;
+    };
+    let Ok(ingress_rule) = firewall_add_rule(WovenFirewallRule {
+        direction: FirewallDirection::Ingress,
+        protocol: FirewallProtocol::Udp,
+        remote: Ipv4Address::new(198, 51, 100, 7),
+        local: Ipv4Address::new(0, 0, 0, 0),
+        remote_port: 5353,
+        local_port: 53,
+        action: FirewallAction::Deny,
+        generation: 0,
+    }) else {
+        let _ = firewall_remove_rule(rule);
+        return false;
+    };
+
+    let result = (|| {
+        let before = crate::audit::status();
+        let id = socket_open(OWNER, SocketKind::Udp).ok()?;
+        let denied = socket_connect(OWNER, id, remote) == Err(SocketError::Address);
+
+        // A refused connect must leave exactly one auditable WovenGuard record
+        // naming the owning task, the refused endpoint, and the egress/UDP
+        // decision. Sixteen ephemeral candidates are evaluated, so the single
+        // record also proves denial logging is not per-candidate.
+        let after = crate::audit::status();
+        let logged_once = after.next_sequence == before.next_sequence.wrapping_add(1);
+        let recorded = crate::audit::latest().is_some_and(|event| {
+            event.action == crate::audit::Action::WovenGuardDeny
+                && !event.allowed
+                && event.actor == OWNER
+                && event.target == endpoint_to_packed(remote)
+                && (event.detail >> 40) == 1
+                && ((event.detail >> 32) & 0xff) == 3
+        });
+
+        let (ingress_denied, ipv6_uses_default) = RUNTIME
+            .get()
+            .map(|runtime| {
+                let runtime = runtime.lock();
+                let ingress = !firewall_allows(
+                    &runtime,
+                    FirewallDirection::Ingress,
+                    FirewallProtocol::Udp,
+                    remote,
+                    53,
+                );
+                // An IPv4-only selector table cannot match an IPv6 endpoint, so
+                // the configured default decides instead of a hard deny.
+                let v6 = IpEndpoint::new(
+                    IpAddress::Ipv6(smoltcp::wire::Ipv6Address::new(
+                        0x2001, 0x0db8, 0, 0, 0, 0, 0, 1,
+                    )),
+                    5353,
+                );
+                let ipv6 = firewall_allows(
+                    &runtime,
+                    FirewallDirection::Egress,
+                    FirewallProtocol::Udp,
+                    v6,
+                    53,
+                ) == runtime.firewall.default_allows();
+                (ingress, ipv6)
+            })
+            .unwrap_or((false, false));
+
+        let closed = socket_close(OWNER, id).is_ok();
+        Some(denied && logged_once && recorded && ingress_denied && ipv6_uses_default && closed)
+    })()
+    .unwrap_or(false);
+    let removed = firewall_remove_rule(rule).is_ok();
+    let ingress_removed = firewall_remove_rule(ingress_rule).is_ok();
+    let stale_rejected = firewall_remove_rule(rule) == Err(FirewallError::InvalidHandle);
+    result && removed && ingress_removed && stale_rejected
 }
 
 pub fn endpoint_to_packed(endpoint: IpEndpoint) -> u64 {

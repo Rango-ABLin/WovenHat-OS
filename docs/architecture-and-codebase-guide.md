@@ -119,6 +119,19 @@ This guide describes the Stage 10.7 source, not the proposed 1.0 system. WovenHa
 currently has a monolithic Rust kernel, a UEFI boot image builder, embedded Ring-3
 programs, and host/QEMU acceptance harnesses. The supplied
 [master development roadmap](master-development-roadmap.md) defines future stages.
+
+## Stage 1–5 data journal boundary
+
+FAT32 persistence retains the original single-file `WDJ1` journal and adds a
+separate bounded `WDJ2` batch journal. A batch contains at most four file data
+replacements. Prepared records carry the old bytes and committed records carry
+the intended lengths/checksums; WMD1/WMD2 metadata intents are published before
+data and removed or finalized with the batch. Mount recovery rolls back
+incomplete or partially matching batches, removes stale metadata intents, and
+retires only a fully matching commit. The batch API is
+`storage::persist_paths_atomic`. This is bounded data-plus-sidecar recovery,
+not a general multi-operation metadata transaction or physical power-loss
+qualification.
 [Stage status](stage-status.md) records which gates have actually passed.
 
 ## Repository map
@@ -856,3 +869,45 @@ This closure does not yet claim complete transport parity, malformed-IP
 fail-closed parsing, IPv6 extension-header inspection, a live routed Forward
 hook, persistent rules, logging/counters, stateful connection tracking, or
 NAT. Those are subsequent firewall/network-management hardening work.
+
+### Stage 14.6 live socket firewall admission
+
+The shared `Runtime` owns the socket firewall table, so synchronous socket calls
+and the async pinned-socket paths use the same policy. Outbound connect checks
+the remote address, protocol, and selected local port before smoltcp connection
+state changes. UDP sends and receives use their actual endpoints; TCP send and
+receive use smoltcp's remote/local endpoint, including accepted listener
+connections. Existing WovenGuard `NetworkIo` capability checks remain at
+syscall admission, and socket owner/generation checks remain under the network
+runtime lock.
+
+Selectors are derived once per operation by `firewall_selectors` from live
+socket state; `firewall_allows` decides, `firewall_record_denial` logs, and
+`firewall_admit` composes them. All six socket entry points share these, so a
+selector or protocol change has a single place to be correct.
+
+Denial handling differs by transport, deliberately. A denied UDP datagram is
+consumed from the bounded socket queue and reported as `WouldBlock`: a datagram
+socket may receive from many peers, so one refused sender must not disable it,
+and consuming the datagram first stops a denied sender wedging the queue. A
+denied ingress on an established TCP connection instead aborts the connection
+and returns the terminal `SocketError::Address`. A policy denial is permanent
+for that connection's life, and reporting it as `WouldBlock` would pin the
+receive buffer, hold the peer's connection open, and spin the asynchronous
+worker, which re-queues `WouldBlock` while `can_recv()` stays true.
+
+Every denial commits one `audit::Action::WovenGuardDeny` record to the Stage
+9.3 security ledger — owning task, packed refused endpoint, and packed
+direction/protocol/local port. The ledger lock is rank 40 above the rank-20
+runtime lock, so recording under the runtime guard raises rank and cannot
+invert lock order. Only denials are recorded, to keep the bounded 128-entry
+ring useful.
+
+Rule selectors are IPv4-only. A non-IPv4 endpoint therefore matches no rule and
+takes the table's configured default action rather than an unconditional deny,
+which keeps the runtime's allow-fallback contract true for IPv6 while still
+allowing an administrator to fail IPv6 closed with a deny default.
+
+This is socket API enforcement, not a packet-level ingress filter before TCP
+handshake processing. ICMP, IPv6 selectors, kernel-owned DHCP/DNS/echo traffic,
+connection tracking, NAT, and physical NIC qualification remain future work.
