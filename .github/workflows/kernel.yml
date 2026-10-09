@@ -539,6 +539,97 @@ jobs:
           for cpu in 1 2 4; do
             python3 scripts/test-network-qemu.py --feature stage14-5d-test --cpus "$cpu" --timeout 240 --qemu "$qemu" --firmware "$ovmf_code" --firmware-vars "$ovmf_vars"
           done
+      # Stages 6 through 13.2 previously had no CI gate of any kind. That is
+      # where decay was found: `stage12-3-test` and `stage12-5-test` could not
+      # compile at all, so neither gate had been runnable, with nothing watching.
+      # A gate that cannot compile is a gate nobody is running, so each step
+      # below lints its exact feature before booting it.
+      - name: Stage 10.8-11.5 runtime 1/2/4-core acceptance
+        shell: bash
+        run: |
+          qemu=/usr/bin/qemu-system-x86_64
+          ovmf_code=
+          for variant in OVMF_CODE_4M.fd OVMF_CODE.fd; do
+            candidate="/usr/share/OVMF/$variant"
+            if [ -f "$candidate" ]; then
+              ovmf_code="$candidate"
+              break
+            fi
+          done
+          test -n "$ovmf_code"
+          for stage in 10.8 10.9 11.1 11.2 11.3 11.4 11.5; do
+            feature="stage${stage/./-}-test"
+            cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features "$feature" -- -D warnings
+            for cpu in 1 2 4; do
+              python3 scripts/test-stage10-runtime.py --stage "$stage" --cpus "$cpu" --timeout 180 --qemu "$qemu" --firmware "$ovmf_code"
+            done
+          done
+      - name: Stage 12.1-12.5 storage and filesystem 1/2/4-core acceptance
+        shell: bash
+        run: |
+          qemu=/usr/bin/qemu-system-x86_64
+          ovmf_code=
+          for variant in OVMF_CODE_4M.fd OVMF_CODE.fd; do
+            candidate="/usr/share/OVMF/$variant"
+            if [ -f "$candidate" ]; then
+              ovmf_code="$candidate"
+              break
+            fi
+          done
+          test -n "$ovmf_code"
+          for stage in 12.1 12.2 12.3 12.4 12.5; do
+            feature="stage${stage/./-}-test"
+            cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features "$feature" -- -D warnings
+            for cpu in 1 2 4; do
+              python3 scripts/test-stage10-runtime.py --stage "$stage" --cpus "$cpu" --timeout 180 --qemu "$qemu" --firmware "$ovmf_code"
+            done
+          done
+      - name: Stage 13.1-13.2 driver and PCIe 1/2/4-core acceptance
+        shell: bash
+        run: |
+          qemu=/usr/bin/qemu-system-x86_64
+          ovmf_code=
+          for variant in OVMF_CODE_4M.fd OVMF_CODE.fd; do
+            candidate="/usr/share/OVMF/$variant"
+            if [ -f "$candidate" ]; then
+              ovmf_code="$candidate"
+              break
+            fi
+          done
+          test -n "$ovmf_code"
+          for stage in 13.1 13.2; do
+            feature="stage${stage/./-}-test"
+            cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features "$feature" -- -D warnings
+            for cpu in 1 2 4; do
+              python3 scripts/test-stage10-runtime.py --stage "$stage" --cpus "$cpu" --timeout 180 --qemu "$qemu" --firmware "$ovmf_code"
+            done
+          done
+      - name: Stage 6 SMP hotplug and legacy IRQ acceptance
+        shell: bash
+        run: |
+          qemu=/usr/bin/qemu-system-x86_64
+          ovmf_code=
+          for variant in OVMF_CODE_4M.fd OVMF_CODE.fd; do
+            candidate="/usr/share/OVMF/$variant"
+            if [ -f "$candidate" ]; then
+              ovmf_code="$candidate"
+              break
+            fi
+          done
+          test -n "$ovmf_code"
+          cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage6-hotplug-test -- -D warnings
+          cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features legacy-pic-test -- -D warnings
+          for cpu in 2 4; do
+            python3 scripts/test-stage6-hotplug.py --cpus "$cpu" --timeout 180 --qemu "$qemu" --firmware "$ovmf_code"
+          done
+          python3 scripts/test-memory-qemu.py --cpus 1 --legacy-irq --timeout 180 --qemu "$qemu" --firmware "$ovmf_code"
+      - name: Default and physical-probe configuration lint
+        shell: bash
+        run: |
+          cargo clippy -p wovenhat-kernel --target x86_64-unknown-none -- -D warnings
+          cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features physical-probe -- -D warnings
+          cargo clippy -p libwoven --target x86_64-unknown-none -- -D warnings
+          cargo clippy --all-targets -- -D warnings
       - name: Preserve validation evidence
         if: always()
         uses: actions/upload-artifact@v4
@@ -558,3 +649,19 @@ jobs:
             audit-artifacts/stage13.8-*/
             audit-artifacts/stage13.9-*/
             audit-artifacts/stage13.10-*/
+            audit-artifacts/stage13.11-*/
+            audit-artifacts/stage13.1-*/
+            audit-artifacts/stage13.2-*/
+            audit-artifacts/stage12.1-*/
+            audit-artifacts/stage12.2-*/
+            audit-artifacts/stage12.3-*/
+            audit-artifacts/stage12.4-*/
+            audit-artifacts/stage12.5-*/
+            audit-artifacts/stage11.1-*/
+            audit-artifacts/stage11.2-*/
+            audit-artifacts/stage11.3-*/
+            audit-artifacts/stage11.4-*/
+            audit-artifacts/stage11.5-*/
+            audit-artifacts/stage10.8-*/
+            audit-artifacts/stage10.9-*/
+            audit-artifacts/stage1-5-*/
