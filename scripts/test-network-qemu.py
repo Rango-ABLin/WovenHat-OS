@@ -241,6 +241,7 @@ def main():
             *(['[S14.5A] firewall policy foundation PASSED'] if args.feature in ('stage14-5-test', 'stage14-5b-test', 'stage14-5c-test', 'stage14-5d-test') else []),
             *(['[S14.5B] live packet enforcement PASSED'] if args.feature in ('stage14-5b-test', 'stage14-5c-test', 'stage14-5d-test') else []),
             *(['[S14.5C] firewall policy authority PASSED'] if args.feature in ('stage14-5c-test', 'stage14-5d-test') else []),
+            *(['[S14.5C] refused mutation auditing PASS'] if args.feature in ('stage14-5c-test', 'stage14-5d-test') else []),
             *(['[S14.5D] firewall parser/transport hardening PASSED'] if args.feature == 'stage14-5d-test' else []),
         ])
     if result != 33 or any(marker not in log for marker in required):

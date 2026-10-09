@@ -155,8 +155,24 @@ static POLICY: Once<Mutex<FirewallPolicy>> = Once::new();
 #[cfg(feature = "stage14-5b-test")]
 static LIVE_ENFORCEMENT: AtomicBool = AtomicBool::new(false);
 
+/// Rank 35 places the policy table above the VirtIO transport (rank 30) and the
+/// network runtime (rank 20), which is the live nesting: `evaluate_ethernet_frame`
+/// runs inside the transport's send/receive paths. It stays below the rank-40
+/// security ledger so a policy decision can be recorded without reversing order.
+///
+/// This lock must not be rank 0. A zero rank is skipped by the lock-order
+/// checker in `irq_lock::lock_order::enter`, so an inversion against any other
+/// kernel lock would go undetected here instead of panicking at the point of
+/// error.
+const FIREWALL_POLICY_RANK: u8 = 35;
+
 fn global_policy() -> &'static Mutex<FirewallPolicy> {
-    POLICY.call_once(|| Mutex::with_rank(FirewallPolicy::new(FirewallAction::Deny), 0))
+    POLICY.call_once(|| {
+        Mutex::with_rank(
+            FirewallPolicy::new(FirewallAction::Deny),
+            FIREWALL_POLICY_RANK,
+        )
+    })
 }
 
 fn base_rule(id: u64, priority: u32, action: FirewallAction) -> FirewallRule {
@@ -432,6 +448,51 @@ pub enum FirewallAdminError {
     Policy(PolicyError),
 }
 
+/// Which administrative operation a ledger record describes.
+///
+/// The discriminant is recorded in the event's `detail` word so a reviewer can
+/// tell an attempt to disable enforcement from an ordinary rule edit.
+#[cfg(feature = "stage14-5c-test")]
+#[derive(Clone, Copy)]
+enum AdminOperation {
+    Add = 1,
+    Remove = 2,
+    Replace = 3,
+    SetDefault = 4,
+    SetEnforcement = 5,
+}
+
+/// Commit one firewall administration decision to the WovenGuard ledger.
+///
+/// Every authority check and every accepted mutation is recorded, matching the
+/// discipline `wovenguard.rs` already applies to capability and lineage
+/// operations. These events are rare and operator-driven, so they cannot be
+/// used to flood the bounded ring.
+///
+/// Packet-path decisions are deliberately **not** recorded here. The ledger
+/// holds 128 entries, so recording per denied frame would let any peer that can
+/// reach the interface evict the entire security history — turning the audit
+/// trail into an anti-forensics tool. Frame-level accounting belongs in
+/// counters, not the ledger.
+///
+/// The actor is resolved before the policy lock is taken: the process table is
+/// rank 20 and the policy table rank 35, so reading it afterwards would invert
+/// lock order.
+#[cfg(feature = "stage14-5c-test")]
+fn record_admin(actor: u64, operation: AdminOperation, target: u64, allowed: bool) {
+    crate::audit::record_detail(
+        actor,
+        if allowed {
+            crate::audit::Action::WovenGuardAllow
+        } else {
+            crate::audit::Action::WovenGuardDeny
+        },
+        target,
+        operation as u64,
+        allowed,
+    );
+}
+
 #[cfg(feature = "stage14-5c-test")]
 fn require_admin(authority: CapabilitySet) -> Result<(), FirewallAdminError> {
     if authority.contains(Capability::NetworkAdmin) {
@@ -441,35 +502,81 @@ fn require_admin(authority: CapabilitySet) -> Result<(), FirewallAdminError> {
     }
 }
 
+/// Identify the acting task without risking a panic.
+///
+/// `task::current_process_id` asserts that the scheduler is initialized, and
+/// the kernel aborts on panic, so resolving an actor must never be the thing
+/// that kills the kernel. A decision committed before the scheduler exists is
+/// attributed to actor zero; the record is worth more than its attribution.
+/// `task_count` only ever grows, so a positive observation cannot go stale
+/// before the second call.
+#[cfg(feature = "stage14-5c-test")]
+fn admin_actor() -> u64 {
+    if crate::task::current_task_id_if_running().is_some() {
+        crate::task::current_process_id()
+    } else {
+        0
+    }
+}
+
+/// Check administrative authority and record the decision.
+///
+/// A refusal is a security event in its own right: it is how an unauthorized
+/// task probing for the ability to weaken or disable the firewall becomes
+/// visible.
+#[cfg(feature = "stage14-5c-test")]
+fn authorize_admin(
+    authority: CapabilitySet,
+    operation: AdminOperation,
+    target: u64,
+) -> Result<u64, FirewallAdminError> {
+    let actor = admin_actor();
+    if let Err(error) = require_admin(authority) {
+        record_admin(actor, operation, target, false);
+        return Err(error);
+    }
+    Ok(actor)
+}
+
 #[cfg(feature = "stage14-5c-test")]
 pub fn admin_add(authority: CapabilitySet, rule: FirewallRule) -> Result<(), FirewallAdminError> {
-    require_admin(authority)?;
-    global_policy().lock().add(rule).map_err(FirewallAdminError::Policy)
+    let actor = authorize_admin(authority, AdminOperation::Add, rule.id)?;
+    let result = global_policy().lock().add(rule).map_err(FirewallAdminError::Policy);
+    record_admin(actor, AdminOperation::Add, rule.id, result.is_ok());
+    result
 }
 
 #[cfg(feature = "stage14-5c-test")]
 pub fn admin_remove(authority: CapabilitySet, id: u64) -> Result<(), FirewallAdminError> {
-    require_admin(authority)?;
-    global_policy().lock().remove(id).map_err(FirewallAdminError::Policy)
+    let actor = authorize_admin(authority, AdminOperation::Remove, id)?;
+    let result = global_policy().lock().remove(id).map_err(FirewallAdminError::Policy);
+    record_admin(actor, AdminOperation::Remove, id, result.is_ok());
+    result
 }
 
 #[cfg(feature = "stage14-5c-test")]
 pub fn admin_replace(authority: CapabilitySet, rule: FirewallRule) -> Result<(), FirewallAdminError> {
-    require_admin(authority)?;
-    global_policy().lock().replace(rule).map_err(FirewallAdminError::Policy)
+    let actor = authorize_admin(authority, AdminOperation::Replace, rule.id)?;
+    let result = global_policy().lock().replace(rule).map_err(FirewallAdminError::Policy);
+    record_admin(actor, AdminOperation::Replace, rule.id, result.is_ok());
+    result
 }
 
 #[cfg(feature = "stage14-5c-test")]
 pub fn admin_set_default(authority: CapabilitySet, action: FirewallAction) -> Result<(), FirewallAdminError> {
-    require_admin(authority)?;
+    let target = u64::from(matches!(action, FirewallAction::Allow));
+    let actor = authorize_admin(authority, AdminOperation::SetDefault, target)?;
     global_policy().lock().default_action = action;
+    record_admin(actor, AdminOperation::SetDefault, target, true);
     Ok(())
 }
 
 #[cfg(feature = "stage14-5c-test")]
 pub fn admin_set_enforcement(authority: CapabilitySet, enabled: bool) -> Result<(), FirewallAdminError> {
-    require_admin(authority)?;
+    let target = u64::from(enabled);
+    let actor = authorize_admin(authority, AdminOperation::SetEnforcement, target)?;
     LIVE_ENFORCEMENT.store(enabled, Ordering::Release);
+    record_admin(actor, AdminOperation::SetEnforcement, target, true);
     Ok(())
 }
 
@@ -485,6 +592,22 @@ pub fn stage14_5c_self_test() -> bool {
     let denied = admin_add(user, rule) == Err(FirewallAdminError::Unauthorized)
         && admin_set_default(user, FirewallAction::Allow) == Err(FirewallAdminError::Unauthorized)
         && admin_set_enforcement(user, true) == Err(FirewallAdminError::Unauthorized);
+
+    // A refused attempt to disable live enforcement must leave an auditable
+    // record. Without one, an unauthorized task can probe for firewall-disable
+    // authority invisibly.
+    let ledger_before = crate::audit::status();
+    let disable_refused =
+        admin_set_enforcement(user, false) == Err(FirewallAdminError::Unauthorized);
+    let ledger_after = crate::audit::status();
+    let disable_recorded = ledger_after.next_sequence == ledger_before.next_sequence.wrapping_add(1)
+        && crate::audit::latest().is_some_and(|event| {
+            event.action == crate::audit::Action::WovenGuardDeny
+                && !event.allowed
+                && event.detail == AdminOperation::SetEnforcement as u64
+                && event.target == 0
+        });
+    let audited = disable_refused && disable_recorded;
 
     let authorized = admin_add(admin, rule).is_ok()
         && admin_replace(admin, FirewallRule { action: FirewallAction::Deny, ..rule }).is_ok()
@@ -513,10 +636,14 @@ pub fn stage14_5c_self_test() -> bool {
         "[S14.5C] domain authority boundary {}",
         if domain_boundary {"PASS"} else {"FAIL"}
     ));
+    crate::serial::write_line(format_args!(
+        "[S14.5C] refused mutation auditing {}",
+        if audited {"PASS"} else {"FAIL"}
+    ));
 
     LIVE_ENFORCEMENT.store(false, Ordering::Release);
     *global_policy().lock() = FirewallPolicy::new(FirewallAction::Deny);
-    denied && authorized && domain_boundary
+    denied && authorized && domain_boundary && audited
 }
 
 
