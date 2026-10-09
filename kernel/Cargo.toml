@@ -24,6 +24,10 @@ stage12-1-test = ["qemu-test"]
 stage12-2-test = ["qemu-test"]
 stage12-3-test = ["qemu-test"]
 stage12-4-test = ["qemu-test"]
+# Stage 12 gates must not chain: each stage's self-test block ends the boot with
+# `qemu_test_exit_success()`, so enabling an earlier stage's feature would exit
+# before the later block runs. Shared module dependencies are expressed with
+# `cfg(any(..))` on the module instead.
 stage12-5-test = ["qemu-test"]
 stage13-1-test = ["qemu-test"]
 stage13-2-test = ["qemu-test"]
@@ -40,6 +44,7 @@ stage14-2-test = ["network-test", "stage14-1-test"]
 stage14-3-test = ["network-test", "stage14-2-test"]
 stage14-4-test = ["network-test", "stage14-3-test"]
 stage14-5-test = ["network-test", "stage14-4-test"]
+stage14-6-test = ["network-test", "stage14-5-test"]
 stage1-5-test = ["qemu-test"]
 
 [dependencies]
