@@ -253,16 +253,29 @@ enum FrameClassification {
 
 #[cfg(feature = "stage14-5b-test")]
 fn packet_meta_from_ethernet(frame: &[u8], direction: FirewallDirection) -> FrameClassification {
-    if frame.len() < 14 { return FrameClassification::NonIp; }
-    match u16::from_be_bytes([frame[12], frame[13]]) {
+    if frame.len() < 14 { return FrameClassification::Invalid; }
+    let mut ether_type = u16::from_be_bytes([frame[12], frame[13]]);
+    let mut ip_offset = 14;
+    let mut vlan_depth = 0;
+    while matches!(ether_type, 0x8100 | 0x88a8 | 0x9100) {
+        if vlan_depth == 2 || frame.len() < ip_offset + 4 {
+            return FrameClassification::Invalid;
+        }
+        ether_type = u16::from_be_bytes([frame[ip_offset + 2], frame[ip_offset + 3]]);
+        ip_offset += 4;
+        vlan_depth += 1;
+    }
+    match ether_type {
         0x0800 => {
-            let ip = &frame[14..];
+            let ip = &frame[ip_offset..];
             if ip.len() < 20 || ip[0] >> 4 != 4 { return FrameClassification::Invalid; }
             let header_len = usize::from(ip[0] & 0x0f) * 4;
             let total_len = usize::from(u16::from_be_bytes([ip[2], ip[3]]));
             if header_len < 20 || total_len < header_len || ip.len() < total_len {
                 return FrameClassification::Invalid;
             }
+            let fragmentation = u16::from_be_bytes([ip[6], ip[7]]);
+            if fragmentation & 0xbfff != 0 { return FrameClassification::Invalid; }
             let source = IpAddress::Ipv4(Ipv4Address::new(ip[12], ip[13], ip[14], ip[15]));
             let destination = IpAddress::Ipv4(Ipv4Address::new(ip[16], ip[17], ip[18], ip[19]));
             let Some((protocol, ports)) = transport_meta(ip[9], &ip[header_len..total_len], false) else {
@@ -274,7 +287,7 @@ fn packet_meta_from_ethernet(frame: &[u8], direction: FirewallDirection) -> Fram
             })
         }
         0x86dd => {
-            let ip = &frame[14..];
+            let ip = &frame[ip_offset..];
             if ip.len() < 40 || ip[0] >> 4 != 6 { return FrameClassification::Invalid; }
             let payload_len = usize::from(u16::from_be_bytes([ip[4], ip[5]]));
             let packet_len = 40usize.saturating_add(payload_len);
@@ -312,7 +325,7 @@ fn ipv6_transport(mut next: u8, mut payload: &[u8]) -> Option<(u8, &[u8])> {
             44 => {
                 if payload.len() < 8 { return None; }
                 let fragment = u16::from_be_bytes([payload[2], payload[3]]);
-                if fragment & 0xfff8 != 0 { return None; }
+                if fragment != 0 { return None; }
                 next = payload[0];
                 payload = &payload[8..];
             }
@@ -333,13 +346,22 @@ fn ipv6_transport(mut next: u8, mut payload: &[u8]) -> Option<(u8, &[u8])> {
 #[cfg(feature = "stage14-5b-test")]
 fn transport_meta(next: u8, payload: &[u8], ipv6: bool) -> Option<(FirewallProtocol, Option<(u16,u16)>)> {
     match next {
-        6 | 17 => {
-            if payload.len() < 4 { return None; }
+        6 => {
+            if payload.len() < 20 { return None; }
+            let header_len = usize::from(payload[12] >> 4) * 4;
+            if header_len < 20 || header_len > payload.len() { return None; }
             let ports = (u16::from_be_bytes([payload[0],payload[1]]), u16::from_be_bytes([payload[2],payload[3]]));
-            Some((if next == 6 { FirewallProtocol::Tcp } else { FirewallProtocol::Udp }, Some(ports)))
+            Some((FirewallProtocol::Tcp, Some(ports)))
         }
-        1 if !ipv6 => Some((FirewallProtocol::Icmp, None)),
-        58 if ipv6 => Some((FirewallProtocol::Icmpv6, None)),
+        17 => {
+            if payload.len() < 8 { return None; }
+            let udp_len = usize::from(u16::from_be_bytes([payload[4], payload[5]]));
+            if udp_len < 8 || udp_len > payload.len() { return None; }
+            let ports = (u16::from_be_bytes([payload[0],payload[1]]), u16::from_be_bytes([payload[2],payload[3]]));
+            Some((FirewallProtocol::Udp, Some(ports)))
+        }
+        1 if !ipv6 && payload.len() >= 8 => Some((FirewallProtocol::Icmp, None)),
+        58 if ipv6 && payload.len() >= 8 => Some((FirewallProtocol::Icmpv6, None)),
         _ => None,
     }
 }
@@ -366,20 +388,24 @@ pub fn stage14_5b_self_test() -> bool {
     let mut ipv4 = [0u8; 14 + 20 + 8];
     ipv4[12..14].copy_from_slice(&0x0800u16.to_be_bytes());
     ipv4[14] = 0x45;
+    ipv4[16..18].copy_from_slice(&28u16.to_be_bytes());
     ipv4[23] = 17;
     ipv4[26..30].copy_from_slice(&[10,1,2,3]);
     ipv4[30..34].copy_from_slice(&[10,1,9,9]);
     ipv4[34..36].copy_from_slice(&50000u16.to_be_bytes());
     ipv4[36..38].copy_from_slice(&7000u16.to_be_bytes());
+    ipv4[38..40].copy_from_slice(&8u16.to_be_bytes());
 
     let mut ipv6 = [0u8; 14 + 40 + 8];
     ipv6[12..14].copy_from_slice(&0x86ddu16.to_be_bytes());
     ipv6[14] = 0x60;
+    ipv6[18..20].copy_from_slice(&8u16.to_be_bytes());
     ipv6[20] = 17;
     ipv6[22..38].copy_from_slice(&Ipv6Address::new(0x2001,0xdb8,1,0,0,0,0,1).octets());
     ipv6[38..54].copy_from_slice(&Ipv6Address::new(0x2001,0xdb8,2,0,0,0,0,1).octets());
     ipv6[54..56].copy_from_slice(&50001u16.to_be_bytes());
     ipv6[56..58].copy_from_slice(&7001u16.to_be_bytes());
+    ipv6[58..60].copy_from_slice(&8u16.to_be_bytes());
 
     let mut arp = [0u8; 42];
     arp[12..14].copy_from_slice(&0x0806u16.to_be_bytes());
@@ -548,12 +574,38 @@ pub fn stage14_5d_self_test() -> bool {
     ext[55] = 0;
     ext[62..64].copy_from_slice(&50000u16.to_be_bytes());
     ext[64..66].copy_from_slice(&7000u16.to_be_bytes());
+    ext[66..68].copy_from_slice(&8u16.to_be_bytes());
     let extension_ok =
         evaluate_ethernet_frame(&ext, FirewallDirection::Inbound) == FrameDecision::Allow;
+
+    let mut vlan = [0u8; 14 + 4 + 20 + 8];
+    vlan[12..14].copy_from_slice(&0x8100u16.to_be_bytes());
+    vlan[16..18].copy_from_slice(&0x0800u16.to_be_bytes());
+    vlan[18] = 0x45;
+    vlan[20..22].copy_from_slice(&28u16.to_be_bytes());
+    vlan[27] = 17;
+    vlan[38..40].copy_from_slice(&50000u16.to_be_bytes());
+    vlan[40..42].copy_from_slice(&7000u16.to_be_bytes());
+    vlan[42..44].copy_from_slice(&8u16.to_be_bytes());
+    let vlan_allow = evaluate_ethernet_frame(&vlan, FirewallDirection::Inbound) == FrameDecision::Allow;
+    vlan[40..42].copy_from_slice(&7001u16.to_be_bytes());
+    let vlan_deny = evaluate_ethernet_frame(&vlan, FirewallDirection::Inbound) == FrameDecision::Deny;
+    let vlan_ok = vlan_allow && vlan_deny;
+
+    let mut bad_udp = vlan;
+    bad_udp[40..42].copy_from_slice(&7000u16.to_be_bytes());
+    bad_udp[42..44].copy_from_slice(&0u16.to_be_bytes());
+    let malformed_udp = evaluate_ethernet_frame(&bad_udp, FirewallDirection::Inbound) == FrameDecision::Deny;
+
+    let mut fragmented = vlan;
+    fragmented[24..26].copy_from_slice(&0x2000u16.to_be_bytes());
+    let fragment_denied =
+        evaluate_ethernet_frame(&fragmented, FirewallDirection::Inbound) == FrameDecision::Deny;
 
     let non_ip = [0u8; 14];
     let non_ip_preserved =
         evaluate_ethernet_frame(&non_ip, FirewallDirection::Inbound) == FrameDecision::Allow;
+    let truncated = evaluate_ethernet_frame(&non_ip[..13], FirewallDirection::Inbound) == FrameDecision::Deny;
 
     crate::serial::write_line(format_args!(
         "[S14.5D] malformed IP fail-closed {}",
@@ -568,10 +620,19 @@ pub fn stage14_5d_self_test() -> bool {
         if non_ip_preserved {"PASS"} else {"FAIL"}
     ));
     crate::serial::write_line(format_args!(
+        "[S14.5D] VLAN policy enforcement {}",
+        if vlan_ok {"PASS"} else {"FAIL"}
+    ));
+    crate::serial::write_line(format_args!(
+        "[S14.5D] transport and fragment validation {}",
+        if malformed_udp && fragment_denied && truncated {"PASS"} else {"FAIL"}
+    ));
+    crate::serial::write_line(format_args!(
         "[S14.5D] Forward datapath absent by design PASS"
     ));
 
     LIVE_ENFORCEMENT.store(false, Ordering::Release);
     *global_policy().lock() = FirewallPolicy::new(FirewallAction::Deny);
-    installed && malformed_closed && extension_ok && non_ip_preserved
+    installed && malformed_closed && extension_ok && vlan_ok && malformed_udp
+        && fragment_denied && non_ip_preserved && truncated
 }
