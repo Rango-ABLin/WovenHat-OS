@@ -115,11 +115,12 @@ results and physical-driver limits are recorded in the continuation audit.
 
 ## Scope and source of truth
 
-This guide describes the Stage 10.7 source, not the proposed 1.0 system. WovenHat
-currently has a monolithic Rust kernel, a UEFI boot image builder, embedded Ring-3
-programs, and host/QEMU acceptance harnesses. The supplied
-[master development roadmap](master-development-roadmap.md) defines future stages.
-[Stage status](stage-status.md) records which gates have actually passed.
+This guide describes the repository's architecture and known implementation
+boundaries; it is not a specification of a finished 1.0 system. WovenHat has a
+monolithic Rust kernel, a UEFI boot image builder, embedded Ring-3 programs, and
+host/QEMU acceptance harnesses. The [master development roadmap](master-development-roadmap.md)
+defines the development sequence, while [stage status](stage-status.md) records
+the acceptance evidence and remaining limitations.
 
 ## Repository map
 

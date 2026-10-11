@@ -2,7 +2,11 @@ WovenHat OS — Stage 10.7 → Version 1.0 Master Roadmap
 Phase I — Finish the asynchronous kernel foundation
 Stage 10.7 — Asynchronous TCP
 
-Current stage
+Historical starting point — Stage 10.7 was accepted on 2026-09-16; see
+[stage status](stage-status.md). This roadmap defines the development sequence,
+not live acceptance status. The latest recorded milestone and remaining gate
+are summarized in [stage status](stage-status.md); bounded stage acceptance
+does not mean the full roadmap or production release is complete.
 
 Complete:
 
@@ -410,6 +414,10 @@ later Network Manager/platform hardening concerns.
 14.5
 
 WovenGuard firewall.
+
+Stages 14.5A–14.5C have bounded acceptance recorded in
+[stage status](stage-status.md). Stage 14.5 is not complete: transport/path
+coverage and parser hardening remain before stateful connection tracking.
 
 14.6
 

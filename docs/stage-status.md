@@ -1,11 +1,26 @@
 ﻿# Stage status
 
+## Status snapshot — 2026-10-07 (latest recorded)
+
+The latest recorded accepted increment is Stage 14.5C. The next recorded work
+is broader WovenGuard transport/path coverage and parser hardening; stateful
+connection tracking is downstream. This snapshot reflects the evidence recorded
+in this document, not an audit of changes made after 2026-10-07.
+
+Accepted bounded-stage gates do not establish production readiness or completion
+of the Stage 10.7–36 roadmap. Physical hardware qualification remains incomplete,
+and the Stage 13.11 entries stated that GitHub acceptance was still required
+when recorded. Consult the [master roadmap](master-development-roadmap.md) for
+remaining release scope and the [production gap audit](stage1-12-production-gap-audit.md)
+for its stated Stage 1–12 coverage.
+
 ## Stage 14.2D — Router Advertisement state (2026-10-06)
 
 Router Advertisement state now tracks a link-local router, bounded lifetimes,
 and one validated prefix with expiration and withdrawal. It rejects invalid
-preferred/valid lifetimes and global router sources. Check the remote D audit
-for its exact acceptance evidence.
+preferred/valid lifetimes and global router sources. This entry does not include
+an acceptance marker, test matrix, or linked audit, so it is not sufficient by
+itself to establish acceptance.
 
 ## Stage 14.2E — ICMPv6 checksum boundary (2026-10-06)
 
@@ -773,6 +788,4 @@ session is rejected before notification encoding, while a session meeting the
 16-byte policy is accepted. The local 1/2/4-CPU gate, host tests and
 warning-denying kernel Clippy pass; GitHub acceptance for the pushed tip is
 still required.
-
-
 
