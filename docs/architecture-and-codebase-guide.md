@@ -873,11 +873,12 @@ The feature-gated self-test covers VLAN allow/deny, malformed UDP, fragment
 rejection, TCP data-offset validation, minimum ICMP sizes, bounded stacked IPv6
 extension parsing, generic IP protocol rules, and truncated-frame rejection in
 addition to inherited checks. Well-formed protocols without port fields use
-separate `Other` metadata, preserving `Any` as a rule wildcard. Local feature
-build and warning-denying kernel Clippy passed. The release host gates passed,
-but the release chain could not start its first QEMU boot because this
-environment has no QEMU/OVMF installation; no 1/2/4-CPU or GitHub acceptance is
-claimed. See the [Stage 14.5D audit](audit-stage14-5d-wovenguard-parser-2026-10-11.md).
+separate `Other` metadata, preserving `Any` as a rule wildcard. It runs before
+the external DNS-dependent network round trip so parser behavior is independently
+visible. Its QEMU marker passed at 1, 2, and 4 CPUs. The complete network gate
+then failed at DNS after DHCP succeeded on all three; host DNS lookup failed in
+this environment as well. No end-to-end or GitHub acceptance is claimed. See
+the [Stage 14.5D audit](audit-stage14-5d-wovenguard-parser-2026-10-11.md).
 
 This remains a test-feature candidate, not default-build production firewall
 coverage. The parser does not validate IP or transport checksums, IPv6 jumbograms

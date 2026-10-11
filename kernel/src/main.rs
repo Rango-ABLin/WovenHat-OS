@@ -2064,6 +2064,17 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         match network::init() {
             Ok(()) => {
                 serial::write_line(format_args!("[NETTEST] virtio-net + smoltcp initialized"));
+                #[cfg(feature = "stage14-5d-test")]
+                if firewall_policy::stage14_5d_self_test() {
+                    serial::write_line(format_args!(
+                        "[S14.5D] firewall parser/transport hardening PASSED"
+                    ));
+                } else {
+                    serial::write_line(format_args!(
+                        "[S14.5D] firewall parser/transport hardening FAILED"
+                    ));
+                    halt();
+                }
                 if network::qemu_runtime_self_test() {
                     serial::write_line(format_args!("[NETTEST] DHCP/DNS/ICMP/UDP/TCP: PASSED"));
                     #[cfg(feature = "stage14-1-test")]
@@ -2292,17 +2303,6 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
                                 } else {
                                     serial::write_line(format_args!(
                                         "[S14.5C] firewall policy authority FAILED"
-                                    ));
-                                    halt();
-                                }
-                                #[cfg(feature = "stage14-5d-test")]
-                                if firewall_policy::stage14_5d_self_test() {
-                                    serial::write_line(format_args!(
-                                        "[S14.5D] firewall parser/transport hardening PASSED"
-                                    ));
-                                } else {
-                                    serial::write_line(format_args!(
-                                        "[S14.5D] firewall parser/transport hardening FAILED"
                                     ));
                                     halt();
                                 }

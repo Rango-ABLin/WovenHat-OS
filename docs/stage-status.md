@@ -4,11 +4,12 @@
 
 The latest recorded accepted increment remains Stage 14.5C. A Stage 14.5D
 firewall-parser candidate is now implemented, but its acceptance gate has not
-passed. Local feature build and warning-denying kernel Clippy passed; the
-release-validation host lint and all 20 integration targets (79 tests) passed.
-The prescribed release chain then stopped at the 1-CPU QEMU check because QEMU
-and OVMF are unavailable here. The Stage 14.5D 1/2/4-CPU gate and GitHub
-acceptance therefore remain open. See the
+passed. The feature build and warning-denying kernel Clippy passed. Its
+deterministic Stage 14.5D parser marker passed in QEMU on 1, 2, and 4 CPUs.
+However, each full network run then failed at external DNS (`example.com`)
+after DHCP succeeded; the dedicated end-to-end gate did not pass. Host DNS
+lookup also fails in this environment. The release host lint and all 20
+integration targets (79 tests) passed. GitHub acceptance remains open. See the
 [Stage 14.5D audit](audit-stage14-5d-wovenguard-parser-2026-10-11.md).
 
 Accepted bounded-stage gates do not establish production readiness or completion
@@ -195,10 +196,13 @@ well-formed IP protocols are classified separately from malformed packets, so
 protocol-specific and wildcard rules can match them without port metadata.
 
 Local feature build, warning-denying kernel Clippy, and release host lint/tests
-passed. The host suite covered 20 integration targets and 79 tests. QEMU/OVMF
-were unavailable, so the dedicated 1/2/4-CPU Stage 14.5D gate has not run and
-this candidate is not accepted. The parser and Wi-Fi enforcement additions are
-compiled only by test features; this is not a default-build production firewall.
+passed. The host suite covered 20 integration targets and 79 tests. The
+deterministic parser marker passed in QEMU on 1/2/4 CPUs, but each full
+networking run then failed at DNS after DHCP succeeded; the 1/2/4-CPU
+end-to-end Stage 14.5D gate has not passed, so this candidate is not accepted.
+Host DNS lookup also failed in this environment. The parser and Wi-Fi
+enforcement additions are compiled only by test features; this is not a
+default-build production firewall.
 See the [Stage 14.5D audit](audit-stage14-5d-wovenguard-parser-2026-10-11.md).
 
 ## Stage 1–5 long-name mutation hardening — 2026-10-01
