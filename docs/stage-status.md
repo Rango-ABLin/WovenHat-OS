@@ -8,8 +8,10 @@ passed. The feature build and warning-denying kernel Clippy passed. Its
 deterministic Stage 14.5D parser marker passed in QEMU on 1, 2, and 4 CPUs.
 However, each full network run then failed at external DNS (`example.com`)
 after DHCP succeeded; the dedicated end-to-end gate did not pass. Host DNS
-lookup also fails in this environment. The release host lint and all 20
-integration targets (79 tests) passed. GitHub acceptance remains open. See the
+lookup also fails in this environment, and direct DNS probes returned `REFUSED`
+(RCODE 5). The release host lint and all 20 integration targets (79 tests)
+passed. GitHub Actions run #1316 for commit `1c171be` is `action_required` with
+no jobs; GitHub acceptance remains open. See the
 [Stage 14.5D audit](audit-stage14-5d-wovenguard-parser-2026-10-11.md).
 
 Accepted bounded-stage gates do not establish production readiness or completion
