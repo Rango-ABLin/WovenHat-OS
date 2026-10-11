@@ -6,8 +6,16 @@ The `stage14-5d-test` firewall candidate now classifies IPv4/IPv6 through up to
 two VLAN tags, rejects truncated Ethernet/VLAN frames and excessive tag
 nesting, rejects fragmented IPv4 and non-atomic IPv6 fragments, and validates
 TCP data offsets, UDP lengths, and minimum ICMP/ICMPv6 sizes before extracting
-policy metadata. Non-IP Layer-2 traffic remains preserved. Existing Stage
-14.5B synthetic UDP fixtures now include consistent IPv4/IPv6 and UDP lengths.
+policy metadata. Other structurally valid IP protocols are represented as
+portless `Other` traffic, allowing explicit protocol-specific rules and the
+`Any` wildcard to work without conflating a valid unsupported protocol with
+malformed input. Non-IP Layer-2 traffic remains preserved. Existing Stage 14.5B
+synthetic UDP fixtures now include consistent IPv4/IPv6 and UDP lengths.
+
+The feature self-test covers one/two VLAN tags and rejects deeper/truncated
+tags; rejects IPv4 and IPv6 fragments; checks TCP data offsets, UDP lengths and
+ICMP message minima; walks multiple IPv6 extension headers; and verifies
+protocol-specific and wildcard matching for GRE.
 
 ## Validation performed
 

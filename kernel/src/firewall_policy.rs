@@ -15,7 +15,7 @@ pub enum FirewallDirection { Inbound, Outbound, Forward }
 pub enum FirewallAction { Allow, Deny }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum FirewallProtocol { Any, Tcp, Udp, Icmp, Icmpv6 }
+pub enum FirewallProtocol { Any, Tcp, Udp, Icmp, Icmpv6, Other }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct IpPrefix { address: IpAddress, prefix_len: u8 }
@@ -336,7 +336,10 @@ fn ipv6_transport(mut next: u8, mut payload: &[u8]) -> Option<(u8, &[u8])> {
                 next = payload[0];
                 payload = &payload[len..];
             }
-            50 | 59 => return None,
+            50 if payload.len() >= 8 => return Some((next, payload)),
+            50 => return None,
+            59 if payload.is_empty() => return Some((next, payload)),
+            59 => return None,
             _ => return Some((next, payload)),
         }
     }
@@ -361,8 +364,10 @@ fn transport_meta(next: u8, payload: &[u8], ipv6: bool) -> Option<(FirewallProto
             Some((FirewallProtocol::Udp, Some(ports)))
         }
         1 if !ipv6 && payload.len() >= 8 => Some((FirewallProtocol::Icmp, None)),
+        1 if !ipv6 => None,
         58 if ipv6 && payload.len() >= 8 => Some((FirewallProtocol::Icmpv6, None)),
-        _ => None,
+        58 if ipv6 => None,
+        _ => Some((FirewallProtocol::Other, None)),
     }
 }
 
@@ -546,6 +551,19 @@ pub fn stage14_5d_self_test() -> bool {
     allow.protocol = FirewallProtocol::Udp;
     allow.destination_port = Some(PortRange::new(7000, 7000));
     let installed = admin_add(admin, allow).is_ok() && admin_set_enforcement(admin, true).is_ok();
+    let mut other_allow = base_rule(0x145d02, 2, FirewallAction::Allow);
+    other_allow.protocol = FirewallProtocol::Other;
+    let mut tcp_allow = base_rule(0x145d03, 3, FirewallAction::Allow);
+    tcp_allow.protocol = FirewallProtocol::Tcp;
+    let mut icmp_allow = base_rule(0x145d04, 4, FirewallAction::Allow);
+    icmp_allow.protocol = FirewallProtocol::Icmp;
+    let mut icmpv6_allow = base_rule(0x145d05, 5, FirewallAction::Allow);
+    icmpv6_allow.protocol = FirewallProtocol::Icmpv6;
+    let installed = installed
+        && admin_add(admin, other_allow).is_ok()
+        && admin_add(admin, tcp_allow).is_ok()
+        && admin_add(admin, icmp_allow).is_ok()
+        && admin_add(admin, icmpv6_allow).is_ok();
 
     let mut bad_v4 = [0u8; 14 + 20];
     bad_v4[12..14].copy_from_slice(&0x0800u16.to_be_bytes());
@@ -563,20 +581,34 @@ pub fn stage14_5d_self_test() -> bool {
         evaluate_ethernet_frame(&bad_v4, FirewallDirection::Inbound) == FrameDecision::Deny
         && evaluate_ethernet_frame(&bad_v6, FirewallDirection::Inbound) == FrameDecision::Deny;
 
-    let mut ext = [0u8; 14 + 40 + 8 + 8];
+    let mut ext = [0u8; 14 + 40 + 8 + 8 + 8];
     ext[12..14].copy_from_slice(&0x86ddu16.to_be_bytes());
     ext[14] = 0x60;
-    ext[18..20].copy_from_slice(&16u16.to_be_bytes());
+    ext[18..20].copy_from_slice(&24u16.to_be_bytes());
     ext[20] = 0;
     ext[22..38].copy_from_slice(&[0x20,1,0x0d,0xb8,0,1,0,0,0,0,0,0,0,0,0,1]);
     ext[38..54].copy_from_slice(&[0x20,1,0x0d,0xb8,0,2,0,0,0,0,0,0,0,0,0,1]);
-    ext[54] = 17;
+    ext[54] = 60;
     ext[55] = 0;
-    ext[62..64].copy_from_slice(&50000u16.to_be_bytes());
-    ext[64..66].copy_from_slice(&7000u16.to_be_bytes());
-    ext[66..68].copy_from_slice(&8u16.to_be_bytes());
+    ext[62] = 17;
+    ext[63] = 0;
+    ext[70..72].copy_from_slice(&50000u16.to_be_bytes());
+    ext[72..74].copy_from_slice(&7000u16.to_be_bytes());
+    ext[74..76].copy_from_slice(&8u16.to_be_bytes());
     let extension_ok =
         evaluate_ethernet_frame(&ext, FirewallDirection::Inbound) == FrameDecision::Allow;
+
+    let mut fragmented_v6 = ext;
+    fragmented_v6[20] = 44;
+    fragmented_v6[54] = 17;
+    fragmented_v6[55] = 0;
+    fragmented_v6[56..58].copy_from_slice(&1u16.to_be_bytes());
+    fragmented_v6[62..64].copy_from_slice(&50000u16.to_be_bytes());
+    fragmented_v6[64..66].copy_from_slice(&7000u16.to_be_bytes());
+    fragmented_v6[66..68].copy_from_slice(&8u16.to_be_bytes());
+    fragmented_v6[18..20].copy_from_slice(&16u16.to_be_bytes());
+    let fragment_v6_denied =
+        evaluate_ethernet_frame(&fragmented_v6, FirewallDirection::Inbound) == FrameDecision::Deny;
 
     let mut vlan = [0u8; 14 + 4 + 20 + 8];
     vlan[12..14].copy_from_slice(&0x8100u16.to_be_bytes());
@@ -588,6 +620,44 @@ pub fn stage14_5d_self_test() -> bool {
     vlan[40..42].copy_from_slice(&7000u16.to_be_bytes());
     vlan[42..44].copy_from_slice(&8u16.to_be_bytes());
     let vlan_allow = evaluate_ethernet_frame(&vlan, FirewallDirection::Inbound) == FrameDecision::Allow;
+
+    let mut tcp = [0u8; 14 + 4 + 20 + 20];
+    tcp[12..14].copy_from_slice(&0x8100u16.to_be_bytes());
+    tcp[16..18].copy_from_slice(&0x0800u16.to_be_bytes());
+    tcp[18] = 0x45;
+    tcp[20..22].copy_from_slice(&40u16.to_be_bytes());
+    tcp[27] = 6;
+    tcp[38..40].copy_from_slice(&50000u16.to_be_bytes());
+    tcp[40..42].copy_from_slice(&7000u16.to_be_bytes());
+    tcp[50] = 0x50;
+    let tcp_allow = evaluate_ethernet_frame(&tcp, FirewallDirection::Inbound) == FrameDecision::Allow;
+    tcp[50] = 0x40;
+    let tcp_short_header_denied =
+        evaluate_ethernet_frame(&tcp, FirewallDirection::Inbound) == FrameDecision::Deny;
+    tcp[50] = 0x60;
+    let tcp_long_header_denied =
+        evaluate_ethernet_frame(&tcp, FirewallDirection::Inbound) == FrameDecision::Deny;
+    let tcp_length_validation = tcp_allow && tcp_short_header_denied && tcp_long_header_denied;
+
+    let mut icmp = vlan;
+    icmp[27] = 1;
+    let icmp_allow = evaluate_ethernet_frame(&icmp, FirewallDirection::Inbound) == FrameDecision::Allow;
+    icmp[20..22].copy_from_slice(&24u16.to_be_bytes());
+    let icmp_short_denied =
+        evaluate_ethernet_frame(&icmp, FirewallDirection::Inbound) == FrameDecision::Deny;
+    let icmp_length_validation = icmp_allow && icmp_short_denied;
+
+    let mut icmpv6 = [0u8; 14 + 40 + 8];
+    icmpv6[12..14].copy_from_slice(&0x86ddu16.to_be_bytes());
+    icmpv6[14] = 0x60;
+    icmpv6[18..20].copy_from_slice(&8u16.to_be_bytes());
+    icmpv6[20] = 58;
+    let icmpv6_allow = evaluate_ethernet_frame(&icmpv6, FirewallDirection::Inbound) == FrameDecision::Allow;
+    icmpv6[18..20].copy_from_slice(&4u16.to_be_bytes());
+    let icmpv6_short_denied =
+        evaluate_ethernet_frame(&icmpv6, FirewallDirection::Inbound) == FrameDecision::Deny;
+    let icmpv6_length_validation = icmpv6_allow && icmpv6_short_denied;
+
     vlan[40..42].copy_from_slice(&7001u16.to_be_bytes());
     let vlan_deny = evaluate_ethernet_frame(&vlan, FirewallDirection::Inbound) == FrameDecision::Deny;
 
@@ -620,6 +690,24 @@ pub fn stage14_5d_self_test() -> bool {
         && stacked_vlan_allow
         && nested_vlan_denied
         && truncated_vlan_denied;
+
+    let mut gre = vlan;
+    gre[27] = 47;
+    gre[20..22].copy_from_slice(&24u16.to_be_bytes());
+    gre[38..42].copy_from_slice(&[0, 0, 8, 0]);
+    let gre_meta = match packet_meta_from_ethernet(&gre, FirewallDirection::Inbound) {
+        FrameClassification::Valid(meta) => Some(meta),
+        FrameClassification::NonIp | FrameClassification::Invalid => None,
+    };
+    let other_protocol_allowed = evaluate_ethernet_frame(&gre, FirewallDirection::Inbound)
+        == FrameDecision::Allow;
+    let wildcard_policy = FirewallPolicy::new(FirewallAction::Deny);
+    let mut wildcard_rule = base_rule(0x145d03, 1, FirewallAction::Allow);
+    wildcard_rule.protocol = FirewallProtocol::Any;
+    let wildcard_matches_other = gre_meta.is_some_and(|meta| {
+        let mut policy = wildcard_policy;
+        policy.add(wildcard_rule).is_ok() && policy.evaluate(meta) == FirewallAction::Allow
+    });
 
     let mut bad_udp = vlan;
     bad_udp[40..42].copy_from_slice(&7000u16.to_be_bytes());
@@ -657,11 +745,21 @@ pub fn stage14_5d_self_test() -> bool {
         if malformed_udp && fragment_denied && truncated {"PASS"} else {"FAIL"}
     ));
     crate::serial::write_line(format_args!(
+        "[S14.5D] generic IP protocol policy {}",
+        if other_protocol_allowed && wildcard_matches_other {"PASS"} else {"FAIL"}
+    ));
+    crate::serial::write_line(format_args!(
+        "[S14.5D] TCP/ICMP length validation {}",
+        if tcp_length_validation && icmp_length_validation && icmpv6_length_validation {"PASS"} else {"FAIL"}
+    ));
+    crate::serial::write_line(format_args!(
         "[S14.5D] Forward datapath absent by design PASS"
     ));
 
     LIVE_ENFORCEMENT.store(false, Ordering::Release);
     *global_policy().lock() = FirewallPolicy::new(FirewallAction::Deny);
     installed && malformed_closed && extension_ok && vlan_ok && malformed_udp
-        && fragment_denied && non_ip_preserved && truncated
+        && fragment_denied && non_ip_preserved && truncated && other_protocol_allowed
+        && wildcard_matches_other && fragment_v6_denied && tcp_length_validation
+        && icmp_length_validation && icmpv6_length_validation
 }

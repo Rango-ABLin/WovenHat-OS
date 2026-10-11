@@ -190,7 +190,9 @@ Fragmented IPv4 and non-atomic IPv6 fragments are rejected rather than matching
 transport ports without complete datagrams. TCP header lengths, UDP lengths,
 and minimum ICMP message sizes are checked before policy evaluation. The
 Stage 14.5B synthetic UDP frames were corrected to carry valid IP and UDP
-lengths so those inherited checks exercise actual well-formed packets.
+lengths so those inherited checks exercise actual well-formed packets. Other
+well-formed IP protocols are classified separately from malformed packets, so
+protocol-specific and wildcard rules can match them without port metadata.
 
 Local feature build, warning-denying kernel Clippy, and release host lint/tests
 passed. The host suite covered 20 integration targets and 79 tests. QEMU/OVMF

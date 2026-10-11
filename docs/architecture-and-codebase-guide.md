@@ -870,9 +870,12 @@ bounded IPv6 extension-header walk remains limited to eight headers. Non-IP
 Layer-2 frames remain outside IP policy matching.
 
 The feature-gated self-test covers VLAN allow/deny, malformed UDP, fragment
-rejection and truncated-frame rejection in addition to inherited checks. Local
-feature build and warning-denying kernel Clippy passed. The release host gates
-passed, but the release chain could not start its first QEMU boot because this
+rejection, TCP data-offset validation, minimum ICMP sizes, bounded stacked IPv6
+extension parsing, generic IP protocol rules, and truncated-frame rejection in
+addition to inherited checks. Well-formed protocols without port fields use
+separate `Other` metadata, preserving `Any` as a rule wildcard. Local feature
+build and warning-denying kernel Clippy passed. The release host gates passed,
+but the release chain could not start its first QEMU boot because this
 environment has no QEMU/OVMF installation; no 1/2/4-CPU or GitHub acceptance is
 claimed. See the [Stage 14.5D audit](audit-stage14-5d-wovenguard-parser-2026-10-11.md).
 
