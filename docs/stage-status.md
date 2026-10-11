@@ -1,11 +1,15 @@
 ﻿# Stage status
 
-## Status snapshot — 2026-10-07 (latest recorded)
+## Status snapshot — 2026-10-11
 
-The latest recorded accepted increment is Stage 14.5C. The next recorded work
-is broader WovenGuard transport/path coverage and parser hardening; stateful
-connection tracking is downstream. This snapshot reflects the evidence recorded
-in this document, not an audit of changes made after 2026-10-07.
+The latest recorded accepted increment remains Stage 14.5C. A Stage 14.5D
+firewall-parser candidate is now implemented, but its acceptance gate has not
+passed. Local feature build and warning-denying kernel Clippy passed; the
+release-validation host lint and all 20 integration targets (79 tests) passed.
+The prescribed release chain then stopped at the 1-CPU QEMU check because QEMU
+and OVMF are unavailable here. The Stage 14.5D 1/2/4-CPU gate and GitHub
+acceptance therefore remain open. See the
+[Stage 14.5D audit](audit-stage14-5d-wovenguard-parser-2026-10-11.md).
 
 Accepted bounded-stage gates do not establish production readiness or completion
 of the Stage 10.7–36 roadmap. Physical hardware qualification remains incomplete,
@@ -176,6 +180,24 @@ commit `b81b3a76`.
 
 Next: complete firewall transport/path coverage and parser hardening before
 adding stateful connection tracking.
+
+## Stage 14.5D — WovenGuard parser/transport hardening candidate (2026-10-11)
+
+The feature-gated candidate now inspects up to two 802.1Q/802.1ad-style VLAN
+tags before classifying IPv4/IPv6. Truncated Ethernet/VLAN frames and excessive
+tag nesting fail closed; non-IP Layer-2 control traffic remains allowed.
+Fragmented IPv4 and non-atomic IPv6 fragments are rejected rather than matching
+transport ports without complete datagrams. TCP header lengths, UDP lengths,
+and minimum ICMP message sizes are checked before policy evaluation. The
+Stage 14.5B synthetic UDP frames were corrected to carry valid IP and UDP
+lengths so those inherited checks exercise actual well-formed packets.
+
+Local feature build, warning-denying kernel Clippy, and release host lint/tests
+passed. The host suite covered 20 integration targets and 79 tests. QEMU/OVMF
+were unavailable, so the dedicated 1/2/4-CPU Stage 14.5D gate has not run and
+this candidate is not accepted. The parser and Wi-Fi enforcement additions are
+compiled only by test features; this is not a default-build production firewall.
+See the [Stage 14.5D audit](audit-stage14-5d-wovenguard-parser-2026-10-11.md).
 
 ## Stage 1–5 long-name mutation hardening — 2026-10-01
 
@@ -788,4 +810,3 @@ session is rejected before notification encoding, while a session meeting the
 16-byte policy is accepted. The local 1/2/4-CPU gate, host tests and
 warning-denying kernel Clippy pass; GitHub acceptance for the pushed tip is
 still required.
-

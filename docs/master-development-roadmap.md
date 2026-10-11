@@ -418,6 +418,8 @@ WovenGuard firewall.
 Stages 14.5A–14.5C have bounded acceptance recorded in
 [stage status](stage-status.md). Stage 14.5 is not complete: transport/path
 coverage and parser hardening remain before stateful connection tracking.
+Stage 14.5D parser/transport hardening is an unaccepted candidate; its dedicated
+1/2/4-CPU gate remains outstanding.
 
 14.6
 

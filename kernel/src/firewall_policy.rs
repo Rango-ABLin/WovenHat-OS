@@ -590,7 +590,36 @@ pub fn stage14_5d_self_test() -> bool {
     let vlan_allow = evaluate_ethernet_frame(&vlan, FirewallDirection::Inbound) == FrameDecision::Allow;
     vlan[40..42].copy_from_slice(&7001u16.to_be_bytes());
     let vlan_deny = evaluate_ethernet_frame(&vlan, FirewallDirection::Inbound) == FrameDecision::Deny;
-    let vlan_ok = vlan_allow && vlan_deny;
+
+    let mut stacked_vlan = [0u8; 14 + 8 + 20 + 8];
+    stacked_vlan[12..14].copy_from_slice(&0x88a8u16.to_be_bytes());
+    stacked_vlan[16..18].copy_from_slice(&0x8100u16.to_be_bytes());
+    stacked_vlan[20..22].copy_from_slice(&0x0800u16.to_be_bytes());
+    stacked_vlan[22] = 0x45;
+    stacked_vlan[24..26].copy_from_slice(&28u16.to_be_bytes());
+    stacked_vlan[31] = 17;
+    stacked_vlan[42..44].copy_from_slice(&50000u16.to_be_bytes());
+    stacked_vlan[44..46].copy_from_slice(&7000u16.to_be_bytes());
+    stacked_vlan[46..48].copy_from_slice(&8u16.to_be_bytes());
+    let stacked_vlan_allow =
+        evaluate_ethernet_frame(&stacked_vlan, FirewallDirection::Inbound) == FrameDecision::Allow;
+
+    let mut too_many_vlans = [0u8; 14 + 12 + 28];
+    too_many_vlans[12..14].copy_from_slice(&0x88a8u16.to_be_bytes());
+    too_many_vlans[16..18].copy_from_slice(&0x8100u16.to_be_bytes());
+    too_many_vlans[20..22].copy_from_slice(&0x9100u16.to_be_bytes());
+    let nested_vlan_denied =
+        evaluate_ethernet_frame(&too_many_vlans, FirewallDirection::Inbound) == FrameDecision::Deny;
+
+    let mut truncated_vlan = [0u8; 16];
+    truncated_vlan[12..14].copy_from_slice(&0x8100u16.to_be_bytes());
+    let truncated_vlan_denied =
+        evaluate_ethernet_frame(&truncated_vlan, FirewallDirection::Inbound) == FrameDecision::Deny;
+    let vlan_ok = vlan_allow
+        && vlan_deny
+        && stacked_vlan_allow
+        && nested_vlan_denied
+        && truncated_vlan_denied;
 
     let mut bad_udp = vlan;
     bad_udp[40..42].copy_from_slice(&7000u16.to_be_bytes());

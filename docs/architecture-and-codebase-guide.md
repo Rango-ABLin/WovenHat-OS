@@ -857,3 +857,26 @@ This closure does not yet claim complete transport parity, malformed-IP
 fail-closed parsing, IPv6 extension-header inspection, a live routed Forward
 hook, persistent rules, logging/counters, stateful connection tracking, or
 NAT. Those are subsequent firewall/network-management hardening work.
+
+### Stage 14.5D WovenGuard parser/transport hardening candidate
+
+The `stage14-5d-test` candidate extends the frame classifier to inspect up to
+two VLAN tags and to fail closed on truncated Ethernet/VLAN frames or deeper
+tag nesting. IPv4 fragments and non-atomic IPv6 fragments are rejected because
+the stateless rule model cannot reliably match transport ports across
+fragments. Before extracting ports, the parser validates minimum TCP header
+size and data offset, UDP length, and minimum ICMP/ICMPv6 message size. The
+bounded IPv6 extension-header walk remains limited to eight headers. Non-IP
+Layer-2 frames remain outside IP policy matching.
+
+The feature-gated self-test covers VLAN allow/deny, malformed UDP, fragment
+rejection and truncated-frame rejection in addition to inherited checks. Local
+feature build and warning-denying kernel Clippy passed. The release host gates
+passed, but the release chain could not start its first QEMU boot because this
+environment has no QEMU/OVMF installation; no 1/2/4-CPU or GitHub acceptance is
+claimed. See the [Stage 14.5D audit](audit-stage14-5d-wovenguard-parser-2026-10-11.md).
+
+This remains a test-feature candidate, not default-build production firewall
+coverage. The parser does not validate IP or transport checksums, IPv6 jumbograms
+are unsupported, a routed Forward datapath is absent, and hardware qualification
+remains open.
