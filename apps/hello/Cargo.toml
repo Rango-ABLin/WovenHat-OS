@@ -1,0 +1,20 @@
+# Its own workspace root: this crate links as a Ring-3 program, not a host
+# binary, and must not inherit the kernel workspace build settings.
+[workspace]
+
+[package]
+name = "wovenhat-hello"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+libwoven = { path = "../../libwoven" }
+
+[profile.release]
+panic = "abort"
+opt-level = "s"
+lto = true
+
+[profile.dev]
+panic = "abort"

@@ -1,5 +1,84 @@
 ﻿# Stage status
 
+## Stage 16.1 — applications built outside the kernel (2026-10-12)
+
+WovenHat runs a program produced by the ordinary Rust toolchain. Before this,
+every userspace program was one of 32 `global_asm!` blocks in
+`kernel/src/userspace.rs`, wrapped in a synthetic ELF by `build_stub_elf` at
+runtime, so a program could not exist without editing the kernel. That was the
+binding constraint on a userspace platform, and therefore on any desktop.
+
+`apps/hello` is a separate crate, excluded from the kernel workspace, with its
+own linker script and link flags. It compiles to a static ET_EXEC image that the
+kernel installs into the filesystem, reads back, and loads through the same ELF
+loader every other executable uses. The self-test loads the bytes read from the
+filesystem rather than the embedded constant, so the gate proves that path
+rather than assuming it.
+
+`libwoven` grew from two bound syscalls to the process, I/O, filesystem, time
+and environment core, in two layers: one `unsafe` wrapper per kernel entry point
+returning the kernel's value unchanged, and a safe surface returning
+`Result<_, libwoven::Error>` where the unsafety can be discharged. The kernel
+implements 98 syscalls; the remainder are reachable through
+`libwoven::syscall::invoke` and should grow typed wrappers as they are used.
+
+Three build settings follow from the loader's rules and the user address space,
+each documented in [the application guide](writing-wovenhat-applications.md):
+`code-model=large`, because `USER_REGION_START` is far outside the small code
+model's ±2 GB; `build-std = ["core"]`, because the precompiled `core` uses the
+small model and conflicts; and an explicit `PHDRS` linker script with
+`-z norelro`, because the loader rejects `PT_GNU_RELRO` and any
+writable-executable segment.
+
+The marker is `[S16.1] out-of-kernel application: PASSED`, with per-step markers
+for loader acceptance, filesystem install, read-back, load, spawn, completion
+and exit status. Passed on 1, 2 and 4 CPUs.
+
+Open: one application per acceptance build, since `WOVENHAT_APP_IMAGE` names a
+single image; no FAT32 round trip, because the gate installs into the VFS at
+`/bin` where `exec` resolves names; no shared libraries or thread-locals, both
+rejected by the loader by design; and no stack-size negotiation.
+
+## Stage 15 — WovenFS native filesystem (2026-10-12)
+
+WovenFS is WovenHat's own on-disk filesystem, specified in
+[the format document](wovenfs-on-disk-format.md). Its design constraint is that
+no operation depends on more than one sector being written atomically: the
+superblock alternates between two checkpoint slots rather than being overwritten
+in place, and every multi-sector change is staged in a write-ahead journal whose
+completion is decided by a single commit sector.
+
+Stage 15.1 covers the filesystem itself — format, mount, create, write, read,
+unlink, lookup, read_dir and a consistency check, with checksummed inodes and
+file contents. Crash recovery is proven rather than asserted:
+`tests/wovenfs_crash.rs` counts the writes each of format, create, write and
+unlink performs, replays the operation once per write boundary against a fresh
+image with the device refusing every later write, and at each point requires the
+volume to mount, the consistency check to pass, and the operation to be entirely
+absent or entirely present. Replay idempotence, checkpoint-slot fallback and
+torn journal payloads are covered too.
+
+Stage 15.2 covers WovenFS on a real block device through the ATA driver, with
+its root published into the VFS at `/wfs`. It passed on 1/2/4 CPUs against a
+scratch image and on an 8 GB USB device, verified independently from the host:
+LBA 0 reads `WOVENFS1` with the checkpoint sequence in the slot the alternation
+scheme predicts.
+
+Physical qualification exposed an ATA defect invisible to emulation. The drive
+wait was bounded by iteration count rather than time, and real flash stalls for
+tens of milliseconds once its write buffer fills, so the driver read a normal
+programming cycle as a fault and format failed at the 320th sector write. The
+wait is now wall-clock bounded. This affected every ATA read and write in the
+kernel, not only WovenFS.
+
+Open: WovenFS is not the mounted system filesystem — FAT32 still holds `/mnt`
+and the boot volume — and whether to make it one or to keep FAT32 and reclassify
+Stage 12.2/12.4 is an open product decision. Files import read-only; write-back
+from the VFS into WovenFS is a later stage. Crash recovery is proven by fault
+injection, not by actual power loss on a device, and physical qualification
+covers one device on one host through QEMU's IDE emulation rather than a native
+driver stack.
+
 ## Stage 1–5 bounded batch data journal — 2026-10-06
 
 FAT32 persistence now exposes a separate versioned `WDJ2` journal for bounded

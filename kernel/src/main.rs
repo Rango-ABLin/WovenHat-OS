@@ -3354,6 +3354,17 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         serial::write_line(format_args!("[S1-5] storage journal: PASSED"));
         qemu_test_exit_success();
     }
+    #[cfg(feature = "stage16-1-test")]
+    {
+        if !stage16_1_self_test() {
+            serial::write_line(format_args!(
+                "[S16.1] out-of-kernel application: FAILED"
+            ));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!("[S16.1] out-of-kernel application: PASSED"));
+        qemu_test_exit_success();
+    }
     #[cfg(feature = "stage15-2-test")]
     {
         if !wfs::stage15_2_self_test() {
@@ -4193,6 +4204,115 @@ fn preemption_probe_task() -> ! {
     task::block_current();
     PREEMPTION_PROBE_COMPLETED.store(true, Ordering::Release);
     task::exit_current_task()
+}
+
+
+// ------------------------------- out-of-kernel application execution
+
+/// An application image built by the ordinary Rust toolchain, outside the
+/// kernel.
+///
+/// Every userspace program before this one was `global_asm!` inside this crate,
+/// wrapped in a synthetic ELF by `build_stub_elf` at runtime. There was no way
+/// to produce a program without editing the kernel, which is what made an
+/// application platform impossible. This image is a separate crate compiled to
+/// a static ET_EXEC file and handed to the same loader that serves every other
+/// executable.
+///
+/// The path arrives through the environment so the kernel does not hard-code a
+/// build layout; the Stage 16.1 harness builds the application first and sets
+/// it.
+#[cfg(feature = "stage16-1-test")]
+const EXTERNAL_APPLICATION: &[u8] = include_bytes!(env!("WOVENHAT_APP_IMAGE"));
+
+/// Stage 16.1 acceptance: an application built outside the kernel is installed
+/// into the filesystem, loaded by the ELF loader, and runs in Ring 3.
+#[cfg(feature = "stage16-1-test")]
+fn stage16_1_self_test() -> bool {
+    fn step(name: &str, ok: bool) -> bool {
+        serial::write_line(format_args!(
+            "[S16.1] {} {}",
+            name,
+            if ok { "PASS" } else { "FAIL" }
+        ));
+        ok
+    }
+
+    serial::write_line(format_args!(
+        "[S16.1] external image bytes {}",
+        EXTERNAL_APPLICATION.len()
+    ));
+
+    // The loader must accept the toolchain's output as-is. This is the claim
+    // that matters: no synthetic ELF, no in-kernel assembly.
+    let parsed = match elf::parse(EXTERNAL_APPLICATION) {
+        Ok(image) => image,
+        Err(_) => {
+            // elf::Error carries no Debug impl, and the loader's acceptance
+            // rules are what matter here rather than the variant.
+            serial::write_line(format_args!("[S16.1] elf rejected by the loader"));
+            return false;
+        }
+    };
+    serial::write_line(format_args!(
+        "[S16.1] elf entry {:#x} segments {}",
+        parsed.entry, parsed.segment_count()
+    ));
+    if !step("loader accepts the external image", parsed.segment_count() > 0) {
+        return false;
+    }
+
+    // Install it where exec resolves programs, exactly as `/bin/init` is
+    // installed, so this uses the ordinary lookup path rather than a private
+    // one.
+    if !step(
+        "install into the filesystem",
+        vfs::create_read_only("/bin/hello", EXTERNAL_APPLICATION).is_ok(),
+    ) {
+        return false;
+    }
+
+    // Read it back through the VFS and confirm the bytes survived, so a later
+    // load failure cannot be blamed on storage.
+    let mut readback = alloc::vec![0u8; EXTERNAL_APPLICATION.len()];
+    let round_trip = vfs::read_all("/bin/hello", &mut readback)
+        == Ok(EXTERNAL_APPLICATION.len())
+        && readback[..] == EXTERNAL_APPLICATION[..];
+    if !step("read the image back from the filesystem", round_trip) {
+        return false;
+    }
+
+    // Load from those filesystem bytes, not from the embedded constant.
+    let Some(program) = userspace::load_elf_with_argv(&readback, &["/bin/hello"]) else {
+        return step("load from filesystem bytes", false);
+    };
+    if !step("load from filesystem bytes", true) {
+        return false;
+    }
+
+    let pid = match task::spawn_user_process("hello", program) {
+        Ok((pid, _context)) => pid,
+        Err(_) => return step("spawn in Ring 3", false),
+    };
+    if !step("spawn in Ring 3", true) {
+        return false;
+    }
+
+    let start = timer::ticks();
+    while !task::process_exited(pid) {
+        if timer::ticks().wrapping_sub(start) > 500 {
+            return step("application runs to completion", false);
+        }
+        task::yield_now();
+    }
+    if !step("application runs to completion", true) {
+        return false;
+    }
+
+    step(
+        "application exits zero",
+        task::wait_process(pid.as_u64()) == Ok(0),
+    )
 }
 
 /// Stop the machine after an unrecoverable boot or validation error.

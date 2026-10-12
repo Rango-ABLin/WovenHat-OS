@@ -51,6 +51,8 @@ stage14-5d-test = ["stage14-5c-test", "stage13-9-test"]
 stage15-1-test = ["qemu-test"]
 # WovenFS on a real block device through the ATA driver, visible in the VFS.
 stage15-2-test = ["qemu-test"]
+# An application built outside the kernel, loaded from the filesystem.
+stage16-1-test = ["qemu-test"]
 stage1-5-test = ["qemu-test"]
 
 [dependencies]

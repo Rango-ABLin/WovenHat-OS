@@ -623,6 +623,48 @@ jobs:
             python3 scripts/test-stage6-hotplug.py --cpus "$cpu" --timeout 180 --qemu "$qemu" --firmware "$ovmf_code"
           done
           python3 scripts/test-memory-qemu.py --cpus 1 --legacy-irq --timeout 180 --qemu "$qemu" --firmware "$ovmf_code"
+      - name: Stage 16.1 out-of-kernel application 1/2/4-core acceptance
+        shell: bash
+        run: |
+          qemu=/usr/bin/qemu-system-x86_64
+          ovmf_code=
+          for variant in OVMF_CODE_4M.fd OVMF_CODE.fd; do
+            candidate="/usr/share/OVMF/$variant"
+            if [ -f "$candidate" ]; then
+              ovmf_code="$candidate"
+              break
+            fi
+          done
+          test -n "$ovmf_code"
+          # The application is a separate crate with its own workspace root,
+          # linker script and code model, so it is linted on its own.
+          (cd apps/hello && cargo clippy --release -- -D warnings)
+          for cpu in 1 2 4; do
+            python3 scripts/test-application-qemu.py --cpus "$cpu" --timeout 300 --qemu "$qemu" --firmware "$ovmf_code"
+          done
+      - name: Stage 15 WovenFS acceptance
+        shell: bash
+        run: |
+          qemu=/usr/bin/qemu-system-x86_64
+          ovmf_code=
+          for variant in OVMF_CODE_4M.fd OVMF_CODE.fd; do
+            candidate="/usr/share/OVMF/$variant"
+            if [ -f "$candidate" ]; then
+              ovmf_code="$candidate"
+              break
+            fi
+          done
+          test -n "$ovmf_code"
+          cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage15-1-test -- -D warnings
+          cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage15-2-test -- -D warnings
+          for cpu in 1 2 4; do
+            python3 scripts/test-stage10-runtime.py --stage 15.1 --cpus "$cpu" --timeout 240 --qemu "$qemu" --firmware "$ovmf_code"
+          done
+          # WovenFS on a block device needs the legacy ATA channel, which the
+          # q35 machine the other runtime gates use does not expose.
+          for cpu in 1 2 4; do
+            python3 scripts/test-wovenfs-device.py --cpus "$cpu" --timeout 300 --qemu "$qemu" --firmware "$ovmf_code"
+          done
       - name: Default and physical-probe configuration lint
         shell: bash
         run: |
