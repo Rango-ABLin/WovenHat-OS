@@ -75,6 +75,8 @@ stage19-6-test = ["qemu-test"]
 stage19-7-test = ["qemu-test"]
 # One sleep over input and IPC.
 stage19-8-test = ["qemu-test"]
+# Client damage notification and damage-only compositing.
+stage19-9-test = ["qemu-test"]
 stage1-5-test = ["qemu-test"]
 
 [dependencies]

@@ -103,6 +103,10 @@ struct Slot {
     /// surface it names. Process ids are never reused, so a grant naming an
     /// exited process is inert.
     shared_with: Option<u64>,
+    /// Region the owner has changed since the grantee last composited it,
+    /// clipped to the surface. Kept as one bounding rectangle so the state
+    /// per slot stays fixed-size.
+    damage: Option<Rect>,
 }
 
 impl Slot {
@@ -112,18 +116,27 @@ impl Slot {
             generation: 1,
             surface: None,
             shared_with: None,
+            damage: None,
         }
     }
 
     fn free(&mut self) {
         self.surface = None;
         self.shared_with = None;
+        self.damage = None;
         self.generation = self.generation.wrapping_add(1).max(1);
     }
 }
 
+/// Grantees that may sleep waiting for damage at once. A grantee is a
+/// compositor; there is normally one.
+const MAX_DAMAGE_WAITERS: usize = 4;
+
 struct Registry {
     slots: Vec<Slot>,
+    /// (grantee pid, task) pairs sleeping until a surface shared with that
+    /// grantee is damaged. Woken after REGISTRY is released.
+    damage_waiters: [Option<(u64, crate::task::TaskId)>; MAX_DAMAGE_WAITERS],
 }
 
 impl Registry {
@@ -132,7 +145,10 @@ impl Registry {
         for _ in 0..MAX_SURFACES {
             slots.push(Slot::empty());
         }
-        Self { slots }
+        Self {
+            slots,
+            damage_waiters: [None; MAX_DAMAGE_WAITERS],
+        }
     }
 
     fn count_for(&self, owner: u64) -> usize {
@@ -184,6 +200,7 @@ pub fn create(owner: u64, width: u32, height: u32) -> Result<Handle, Error> {
         let slot = &mut registry.slots[index];
         slot.owner = owner;
         slot.shared_with = None;
+        slot.damage = None;
         slot.surface = Some(Surface::new(width as usize, height as usize));
         Ok(Handle::pack(index, slot.generation, owner))
     })
@@ -271,6 +288,115 @@ pub fn snapshot_shared(handle: Handle, grantee: u64) -> Result<Surface, Error> {
     })
 }
 
+/// Record that the owner changed `rect` of the surface named by `handle`, and
+/// wake the grantee's damage waiter if the surface is shared. The caller must
+/// have bound `handle` to its owner.
+pub fn mark_damage(handle: Handle, rect: Rect) -> Result<(), Error> {
+    let wake = with_registry(|registry| {
+        let bounds = registry.resolve_mut(handle)?.bounds();
+        let clipped = rect.intersect(bounds);
+        if clipped.is_empty() {
+            return Ok(None);
+        }
+        let slot = &mut registry.slots[handle.slot()];
+        slot.damage = Some(slot.damage.map_or(clipped, |damage| damage.union(clipped)));
+        let Some(grantee) = slot.shared_with else {
+            return Ok(None);
+        };
+        Ok(registry
+            .damage_waiters
+            .iter_mut()
+            .find(|entry| entry.is_some_and(|(pid, _)| pid == grantee))
+            .and_then(|entry| entry.take())
+            .map(|(_, task)| task))
+    })?;
+    // Woken with REGISTRY released, so the scheduler lock is never taken
+    // under it.
+    if let Some(task) = wake {
+        crate::task::signal_event(task);
+    }
+    Ok(())
+}
+
+/// Take the pending damage of a surface shared with `grantee`, with a copy of
+/// just that region. `Ok(None)` when nothing is pending. Same grant rules as
+/// [`snapshot_shared`].
+pub fn take_damage_shared(handle: Handle, grantee: u64) -> Result<Option<(Rect, Surface)>, Error> {
+    with_registry(|registry| {
+        let shared = registry
+            .slots
+            .get(handle.slot())
+            .is_some_and(|slot| slot.shared_with == Some(grantee));
+        if !shared {
+            return Err(Error::InvalidHandle);
+        }
+        registry.resolve_mut(handle)?;
+        let Some(region) = registry.slots[handle.slot()].damage.take() else {
+            return Ok(None);
+        };
+        let source = registry.slots[handle.slot()]
+            .surface
+            .as_ref()
+            .expect("resolved above");
+        let mut copy = Surface::new(region.width, region.height);
+        for row in 0..region.height as i32 {
+            for column in 0..region.width as i32 {
+                if let Some(color) = source.pixel(region.x + column, region.y + row) {
+                    copy.set_pixel(column, row, color);
+                }
+            }
+        }
+        Ok(Some((region, copy)))
+    })
+}
+
+/// Whether any surface shared with `grantee` has pending damage.
+pub fn damage_pending_for(grantee: u64) -> bool {
+    with_registry(|registry| {
+        registry
+            .slots
+            .iter()
+            .any(|slot| slot.surface.is_some() && slot.shared_with == Some(grantee) && slot.damage.is_some())
+    })
+}
+
+/// Register `task` to be woken when a surface shared with `grantee` is
+/// damaged. Returns the other task already registered for `grantee`, without
+/// replacing it.
+pub fn register_damage_waiter(
+    grantee: u64,
+    task: crate::task::TaskId,
+) -> Result<Option<crate::task::TaskId>, Error> {
+    with_registry(|registry| {
+        if let Some((_, other)) = registry
+            .damage_waiters
+            .iter()
+            .flatten()
+            .find(|(pid, _)| *pid == grantee)
+        {
+            return Ok((*other != task).then_some(*other));
+        }
+        let free = registry
+            .damage_waiters
+            .iter_mut()
+            .find(|entry| entry.is_none())
+            .ok_or(Error::SystemFull)?;
+        *free = Some((grantee, task));
+        Ok(None)
+    })
+}
+
+/// Drop `task`'s registration for `grantee`, if it is the one registered.
+pub fn clear_damage_waiter(grantee: u64, task: crate::task::TaskId) {
+    with_registry(|registry| {
+        for entry in registry.damage_waiters.iter_mut() {
+            if *entry == Some((grantee, task)) {
+                *entry = None;
+            }
+        }
+    });
+}
+
 /// Read one pixel back, so a client can verify what it drew.
 pub fn pixel(handle: Handle, x: i32, y: i32) -> Result<u32, Error> {
     with_registry(|registry| {
@@ -307,6 +433,13 @@ pub fn destroy(handle: Handle) -> Result<(), Error> {
 pub fn release_owner(owner: u64) -> usize {
     with_registry(|registry| {
         let mut released = 0usize;
+        // A grantee that exits leaves no waiter behind. Not woken: this runs
+        // under the scheduler lock on the exit path.
+        for entry in registry.damage_waiters.iter_mut() {
+            if entry.is_some_and(|(pid, _)| pid == owner) {
+                *entry = None;
+            }
+        }
         for slot in registry.slots.iter_mut() {
             if slot.surface.is_some() && slot.owner == owner {
                 slot.free();
@@ -458,4 +591,35 @@ pub fn sharing_self_test() -> bool {
     let ok = next.slot() != surface.slot() || snapshot_shared(next, grantee).is_err();
     release_owner(owner);
     ok && count_for(owner) == 0
+}
+
+/// Damage rules for the Stage 19.9 gate.
+#[cfg(feature = "stage19-9-test")]
+pub fn damage_self_test() -> bool {
+    use crate::display::rgb;
+    let (owner, grantee) = (601u64, 602u64);
+    let Ok(surface) = create(owner, 10, 10) else {
+        return false;
+    };
+    let _ = fill_rect(surface, Rect::new(0, 0, 10, 10), rgb(1, 1, 1));
+    // Damage is clipped to the surface, unioned, and readable only through a
+    // grant; taking it clears it.
+    let ok_unshared = mark_damage(surface, Rect::new(8, 8, 5, 5)).is_ok()
+        && take_damage_shared(surface, grantee).is_err();
+    let _ = share(surface, Some(grantee));
+    let _ = mark_damage(surface, Rect::new(1, 1, 2, 2));
+    let pending = damage_pending_for(grantee) && !damage_pending_for(owner);
+    let taken = take_damage_shared(surface, grantee);
+    let region_ok = matches!(&taken, Ok(Some((rect, copy)))
+        if *rect == Rect::new(1, 1, 9, 9) && copy.width() == 9 && copy.height() == 9);
+    let cleared = matches!(take_damage_shared(surface, grantee), Ok(None))
+        && !damage_pending_for(grantee);
+    // An empty or wholly outside rectangle records nothing.
+    let _ = mark_damage(surface, Rect::new(20, 20, 3, 3));
+    let ignored = matches!(take_damage_shared(surface, grantee), Ok(None));
+    // Damage dies with the slot.
+    let _ = mark_damage(surface, Rect::new(0, 0, 1, 1));
+    release_owner(owner);
+    let gone = !damage_pending_for(grantee);
+    ok_unshared && pending && region_ok && cleared && ignored && gone
 }

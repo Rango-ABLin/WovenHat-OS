@@ -23,6 +23,11 @@
 //! input and IPC: it must be woken by a message from `<peer>`, then by a key,
 //! then time out.
 //!
+//! With `--damage-compositor` and `--damage-client <pid> <peer>` the pair
+//! check damage-only compositing: the compositor sleeps on damage and must
+//! copy exactly the region the client declared, and nothing it changed
+//! without declaring.
+//!
 //! With `--probe <handle>` it runs as an ordinary process and checks that the
 //! kernel refuses it everything it has no authority for: every compositor
 //! operation, and every operation on the surface `<handle>`, which belongs to
@@ -64,6 +69,8 @@ fn main(args: Args) -> ! {
         Some(b"--compositor") => compositor(),
         Some(b"--client") => client(args.get(2)),
         Some(b"--multiplex") => multiplex(args.get(2)),
+        Some(b"--damage-compositor") => damage_compositor(),
+        Some(b"--damage-client") => damage_client(args.get(2), args.get(3)),
         Some(_) => fail(250),
         None => run(Input::None),
     }
@@ -404,6 +411,112 @@ fn multiplex(peer: Option<&[u8]>) -> ! {
     libwoven::exit(0)
 }
 
+const DAMAGED_COLOR: u32 = rgb(20, 200, 60);
+const UNDECLARED_COLOR: u32 = rgb(250, 250, 0);
+
+/// Composites a client from its declared damage only.
+fn damage_compositor() -> ! {
+    use libwoven::{wait, Region};
+    if libwoven::compositor_claim().is_err() {
+        fail(100);
+    }
+    let _ = libwoven::print("hello-gui damage compositor: lease held\n");
+    let mut message = [0u8; 8];
+    let (length, client) = receive_bounded(&mut message, 101);
+    if length != 8 {
+        fail(102);
+    }
+    let token = u64::from_le_bytes(message);
+
+    // The client declared the whole window before sending its token.
+    match libwoven::compositor_blit_damage(token, CLIENT_X, CLIENT_Y) {
+        Ok(Some(Region { x: 0, y: 0, width: 40, height: 30 })) => {}
+        _ => fail(103),
+    }
+    if libwoven::screen_pixel(CLIENT_X + 10, CLIENT_Y + 5) != Ok(CLIENT_COLOR) {
+        fail(104);
+    }
+    // Nothing more is pending.
+    if libwoven::compositor_blit_damage(token, CLIENT_X, CLIENT_Y) != Ok(None) {
+        fail(105);
+    }
+    let _ = libwoven::print("hello-gui damage compositor: window composited\n");
+
+    // Sleep until the client damages its window. The gate lets the client
+    // act only once this process is blocked here. The wait is level-checked,
+    // so at its deadline it would still report damage that arrived without a
+    // wakeup; timing it is what proves the damage itself woke this process.
+    const WAKE_DEADLINE_TICKS: u64 = 500;
+    let slept_at = libwoven::ticks();
+    match libwoven::wait_any(wait::DAMAGE, Some(slept_at + WAKE_DEADLINE_TICKS)) {
+        Ok(ready) if ready == wait::DAMAGE => {}
+        Ok(_) => fail(106),
+        Err(_) => fail(107),
+    }
+    if libwoven::ticks().wrapping_sub(slept_at) >= WAKE_DEADLINE_TICKS {
+        fail(111);
+    }
+    match libwoven::compositor_blit_damage(token, CLIENT_X, CLIENT_Y) {
+        Ok(Some(Region { x: 10, y: 5, width: 4, height: 3 })) => {}
+        _ => fail(108),
+    }
+    // The declared region shows the new colour; the region the client
+    // changed without declaring still shows the old one.
+    if libwoven::screen_pixel(CLIENT_X + 10, CLIENT_Y + 5) != Ok(DAMAGED_COLOR)
+        || libwoven::screen_pixel(CLIENT_X + 13, CLIENT_Y + 7) != Ok(DAMAGED_COLOR)
+        || libwoven::screen_pixel(CLIENT_X + 30, CLIENT_Y + 20) != Ok(CLIENT_COLOR)
+    {
+        fail(109);
+    }
+    let _ = libwoven::print("hello-gui damage compositor: only the damage was copied\n");
+    if libwoven::message_send(client, b"done").is_err() {
+        fail(110);
+    }
+    libwoven::exit(0)
+}
+
+/// Declares the damage it makes, except for one deliberate omission.
+fn damage_client(compositor: Option<&[u8]>, peer: Option<&[u8]>) -> ! {
+    let (Some(compositor), Some(peer)) = (
+        compositor.and_then(parse_u64).map(libwoven::process::Id),
+        peer.and_then(parse_u64).map(libwoven::process::Id),
+    ) else {
+        fail(120)
+    };
+    let window = match GraphicsSurface::create(40, 30) {
+        Ok(surface) => surface,
+        Err(_) => fail(121),
+    };
+    if window.fill_rect(0, 0, 40, 30, CLIENT_COLOR).is_err()
+        || window.share_with(compositor).is_err()
+        || window.damage(0, 0, 40, 30).is_err()
+    {
+        fail(122);
+    }
+    if libwoven::message_send(compositor, &window.handle().to_le_bytes()).is_err() {
+        fail(123);
+    }
+    // Wait for the gate's go-ahead, sent once the compositor is asleep.
+    let mut go = [0u8; 4];
+    let (length, sender) = receive_bounded(&mut go, 124);
+    if sender != peer || &go[..length] != b"go" {
+        fail(125);
+    }
+    if window.fill_rect(10, 5, 4, 3, DAMAGED_COLOR).is_err()
+        || window.fill_rect(30, 20, 2, 2, UNDECLARED_COLOR).is_err()
+        || window.damage(10, 5, 4, 3).is_err()
+    {
+        fail(126);
+    }
+    let _ = libwoven::print("hello-gui damage client: damage declared\n");
+    let mut reply = [0u8; 8];
+    let (length, sender) = receive_bounded(&mut reply, 127);
+    if sender != compositor || &reply[..length] != b"done" {
+        fail(128);
+    }
+    libwoven::exit(0)
+}
+
 fn parse_u64(text: &[u8]) -> Option<u64> {
     if text.is_empty() {
         return None;
@@ -461,6 +574,20 @@ fn probe(victim: Option<&[u8]>) -> ! {
     }
     if libwoven::wait_any(0, soon).is_ok() || libwoven::wait_any(1 << 7, soon).is_ok() {
         fail(218);
+    }
+    // Damage waits need DisplayIo; damage on a foreign surface is refused, as
+    // is damage-only compositing without the lease.
+    if libwoven::wait_any(libwoven::wait::DAMAGE, soon).is_ok() {
+        fail(219);
+    }
+    // SAFETY: integer-only calls; the kernel validates every token.
+    unsafe {
+        if syscall::graphics_surface_damage(victim, 0, 0, 1, 1) != libwoven::syscall::ERROR {
+            fail(220);
+        }
+    }
+    if libwoven::compositor_blit_damage(victim, 0, 0).is_ok() {
+        fail(221);
     }
     let _ = libwoven::print("hello-gui probe: compositor refused\n");
 

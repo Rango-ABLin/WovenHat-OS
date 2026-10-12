@@ -205,6 +205,8 @@ pub mod syscall {
     pub const GRAPHICS_SURFACE_SHARE: u64 = 109;
     pub const GRAPHICS_COMPOSITOR_BLIT_SHARED: u64 = 110;
     pub const WAIT_ANY: u64 = 111;
+    pub const GRAPHICS_SURFACE_DAMAGE: u64 = 112;
+    pub const GRAPHICS_COMPOSITOR_BLIT_DAMAGE: u64 = 113;
     pub const MESSAGE_SEND: u64 = 11;
     pub const MESSAGE_RECEIVE: u64 = 12;
 
@@ -460,6 +462,26 @@ pub mod syscall {
     }
 
     /// # Safety
+    /// Must be called from WovenHat userspace.
+    pub unsafe fn graphics_surface_damage(
+        handle: u64,
+        x: u16, y: u16, width: u16, height: u16,
+    ) -> u64 {
+        let packed = u64::from(x)
+            | (u64::from(y) << 16)
+            | (u64::from(width) << 32)
+            | (u64::from(height) << 48);
+        unsafe { invoke(GRAPHICS_SURFACE_DAMAGE, handle, packed, 0) }
+    }
+
+    /// # Safety
+    /// Must be called from WovenHat userspace.
+    pub unsafe fn graphics_compositor_blit_damage(handle: u64, x: i32, y: i32) -> u64 {
+        let packed = (x as u32 as u64) | ((y as u32 as u64) << 32);
+        unsafe { invoke(GRAPHICS_COMPOSITOR_BLIT_DAMAGE, handle, packed, 0) }
+    }
+
+    /// # Safety
     /// `buffer` must be readable for `length` bytes.
     pub unsafe fn message_send(receiver: u64, buffer: *const u8, length: usize) -> u64 {
         unsafe { invoke(MESSAGE_SEND, receiver, buffer as u64, length as u64) }
@@ -562,6 +584,16 @@ impl GraphicsSurface {
         check(result).map(|_| ())
     }
 
+    /// Tell the compositor that `(x, y, width, height)` of this surface
+    /// changed. If the surface is shared, the grantee is woken from
+    /// [`wait_any`] with [`wait::DAMAGE`].
+    pub fn damage(&self, x: u16, y: u16, width: u16, height: u16) -> Result<(), Error> {
+        // SAFETY: integer-only call carrying the surface's own handle.
+        let result =
+            unsafe { syscall::graphics_surface_damage(self.handle, x, y, width, height) };
+        check(result).map(|_| ())
+    }
+
     /// Withdraw any grant made with [`share_with`](Self::share_with).
     pub fn unshare(&self) -> Result<(), Error> {
         // SAFETY: integer-only call carrying the surface's own handle.
@@ -597,6 +629,8 @@ pub mod wait {
     pub const INPUT: u64 = 1 << 0;
     /// A message in this process's mailbox (`Ipc`).
     pub const MESSAGE: u64 = 1 << 1;
+    /// Damage on a surface shared with this process (`DisplayIo`).
+    pub const DAMAGE: u64 = 1 << 2;
 }
 
 /// Sleep until any source in `mask` is ready, or until the timer reaches
@@ -606,6 +640,32 @@ pub mod wait {
 pub fn wait_any(mask: u64, deadline: Option<time::Ticks>) -> Result<u64, Error> {
     // SAFETY: integer-only call.
     check(unsafe { syscall::wait_any(deadline.unwrap_or(u64::MAX), mask) })
+}
+
+/// A rectangle reported by [`compositor_blit_damage`].
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct Region {
+    pub x: u16,
+    pub y: u16,
+    pub width: u16,
+    pub height: u16,
+}
+
+/// Composite only what a client changed: blit the pending damage of a shared
+/// surface into a window placed at `(x, y)`. Returns the region copied, in
+/// surface coordinates, or `None` when nothing was pending. Lease holder only.
+pub fn compositor_blit_damage(handle: u64, x: i32, y: i32) -> Result<Option<Region>, Error> {
+    // SAFETY: integer-only call.
+    let value = check(unsafe { syscall::graphics_compositor_blit_damage(handle, x, y) })?;
+    if value == 0 {
+        return Ok(None);
+    }
+    Ok(Some(Region {
+        x: value as u16,
+        y: (value >> 16) as u16,
+        width: (value >> 32) as u16,
+        height: (value >> 48) as u16,
+    }))
 }
 
 /// Send `bytes` to process `receiver`. Requires the `Ipc` capability.

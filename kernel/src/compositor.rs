@@ -280,6 +280,34 @@ pub fn blit_shared_for(
     Ok(touched)
 }
 
+/// Composite only what changed: take the pending damage of a surface shared
+/// with the lease holder `pid` and blit just that region, at its position
+/// within a window placed at `(x, y)`. Returns the source region, or `None`
+/// when nothing was pending.
+pub fn blit_damage_for(
+    pid: u64,
+    handle: user_graphics::Handle,
+    x: i32,
+    y: i32,
+) -> Result<Option<Rect>, Error> {
+    require_holder(pid)?;
+    let Some((region, copy)) =
+        user_graphics::take_damage_shared(handle, pid).map_err(|_| Error::InvalidClient)?
+    else {
+        return Ok(None);
+    };
+    let mut guard = STATE.lock();
+    let state = guard.as_mut().ok_or(Error::NotReady)?;
+    if state.holder != Some(pid) {
+        return Err(Error::NotHolder);
+    }
+    let touched = state
+        .surface
+        .blit(&copy, x.saturating_add(region.x), y.saturating_add(region.y));
+    state.damage.add(touched);
+    Ok(Some(region))
+}
+
 /// [`pixel`] on behalf of a userspace lease holder. Reading the screen exposes
 /// every client's pixels, so it carries the same authority as drawing on it.
 pub fn pixel_for(pid: u64, x: i32, y: i32) -> Result<u32, Error> {

@@ -294,9 +294,16 @@ pub enum Number {
     GraphicsSurfaceShare = 109,
     /// owner's handle, packed (x | y<<32) -> 0 or ERROR
     GraphicsCompositorBlitShared = 110,
-    /// deadline tick (u64::MAX = none), source mask (1 input, 2 message)
-    /// -> mask of ready sources, 0 on timeout, or ERROR
+    /// deadline tick (u64::MAX = none), source mask (1 input, 2 message,
+    /// 4 shared-surface damage) -> mask of ready sources, 0 on timeout, or
+    /// ERROR
     WaitAny = 111,
+    /// own handle, packed rect (x | y<<16 | w<<32 | h<<48) -> 0 or ERROR
+    GraphicsSurfaceDamage = 112,
+    /// owner's handle, packed window origin (x | y<<32) -> packed source
+    /// rect blitted (x | y<<16 | w<<32 | h<<48), 0 when nothing was pending,
+    /// or ERROR
+    GraphicsCompositorBlitDamage = 113,
 }
 
 pub fn entry_address() -> u64 {
@@ -2244,6 +2251,12 @@ pub extern "C" fn wovenhat_syscall_dispatch(
             sys_compositor_blit_shared(arg0, arg1)
         }
         value if value == Number::WaitAny as u64 => sys_wait_any(arg0, arg1),
+        value if value == Number::GraphicsSurfaceDamage as u64 => {
+            sys_graphics_damage(arg0, arg1)
+        }
+        value if value == Number::GraphicsCompositorBlitDamage as u64 => {
+            sys_compositor_blit_damage(arg0, arg1)
+        }
         _ => u64::MAX,
     };
 
@@ -2453,6 +2466,46 @@ fn sys_input_wait(deadline: u64) -> u64 {
 
 const WAIT_INPUT: u64 = 1 << 0;
 const WAIT_MESSAGE: u64 = 1 << 1;
+const WAIT_DAMAGE: u64 = 1 << 2;
+
+/// Mark a region of one of the caller's own surfaces as changed. If the
+/// surface is shared, its grantee is woken. No capability: it concerns only
+/// the caller's pixels.
+fn sys_graphics_damage(handle: u64, packed: u64) -> u64 {
+    let Some(handle) = caller_surface(handle) else {
+        return SYSCALL_ERROR;
+    };
+    let rect = crate::display::Rect::new(
+        (packed & 0xffff) as u16 as i32,
+        ((packed >> 16) & 0xffff) as u16 as i32,
+        ((packed >> 32) & 0xffff) as usize,
+        ((packed >> 48) & 0xffff) as usize,
+    );
+    crate::user_graphics::mark_damage(handle, rect).map_or(SYSCALL_ERROR, |()| 0)
+}
+
+/// Blit only the pending damage of a surface shared with the caller.
+/// Requires `DisplayIo` and the lease; authorised by the slot's grant.
+fn sys_compositor_blit_damage(handle: u64, packed: u64) -> u64 {
+    let x = (packed & 0xffff_ffff) as i32;
+    let y = ((packed >> 32) & 0xffff_ffff) as i32;
+    if !display_authorized() {
+        return SYSCALL_ERROR;
+    }
+    let pid = crate::task::current_process_id();
+    let handle = crate::user_graphics::Handle::from_u64(handle);
+    match crate::compositor::blit_damage_for(pid, handle, x, y) {
+        Err(_) => SYSCALL_ERROR,
+        Ok(None) => 0,
+        // Surface caps keep every field within u16.
+        Ok(Some(region)) => {
+            (region.x as u64 & 0xffff)
+                | ((region.y as u64 & 0xffff) << 16)
+                | ((region.width as u64 & 0xffff) << 32)
+                | ((region.height as u64 & 0xffff) << 48)
+        }
+    }
+}
 
 /// Sleep until any requested source is ready or the timer reaches `deadline`.
 ///
@@ -2466,13 +2519,15 @@ const WAIT_MESSAGE: u64 = 1 << 1;
 /// scheduler's pending permit, so it is not lost. Each source wakes with its
 /// own lock released. Registrations are dropped before returning.
 fn sys_wait_any(deadline: u64, mask: u64) -> u64 {
-    if mask == 0 || mask & !(WAIT_INPUT | WAIT_MESSAGE) != 0 {
+    if mask == 0 || mask & !(WAIT_INPUT | WAIT_MESSAGE | WAIT_DAMAGE) != 0 {
         return SYSCALL_ERROR;
     }
     let want_input = mask & WAIT_INPUT != 0;
     let want_message = mask & WAIT_MESSAGE != 0;
+    let want_damage = mask & WAIT_DAMAGE != 0;
     if (want_input && !crate::task::current_has(crate::capability::Capability::InputIo))
         || (want_message && !crate::task::current_has(crate::capability::Capability::Ipc))
+        || (want_damage && !display_authorized())
     {
         return SYSCALL_ERROR;
     }
@@ -2494,7 +2549,7 @@ fn sys_wait_any(deadline: u64, mask: u64) -> u64 {
                     crate::woven_input::clear_waiter(other);
                     continue;
                 }
-                Err(_) if !want_message => break 'wait SYSCALL_ERROR,
+                Err(_) if !want_message && !want_damage => break 'wait SYSCALL_ERROR,
                 Err(_) => {}
             }
         }
@@ -2511,7 +2566,23 @@ fn sys_wait_any(deadline: u64, mask: u64) -> u64 {
                 Err(_) => break 'wait SYSCALL_ERROR,
             }
         }
+        if want_damage {
+            match crate::user_graphics::register_damage_waiter(owner, task) {
+                Ok(None) => {}
+                Ok(Some(other)) => {
+                    if crate::task::task_live(other) {
+                        break 'wait SYSCALL_ERROR;
+                    }
+                    crate::user_graphics::clear_damage_waiter(owner, other);
+                    continue;
+                }
+                Err(_) => break 'wait SYSCALL_ERROR,
+            }
+        }
         let mut ready = 0;
+        if want_damage && crate::user_graphics::damage_pending_for(owner) {
+            ready |= WAIT_DAMAGE;
+        }
         if input_live && crate::woven_input::pending(owner) {
             ready |= WAIT_INPUT;
         }
@@ -2531,6 +2602,9 @@ fn sys_wait_any(deadline: u64, mask: u64) -> u64 {
     }
     if want_message {
         crate::ipc::clear_message_waiter(owner, task);
+    }
+    if want_damage {
+        crate::user_graphics::clear_damage_waiter(owner, task);
     }
     result
 }

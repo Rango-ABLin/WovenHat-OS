@@ -1,5 +1,68 @@
 # Stage status
 
+## Stage 19.9 — client damage notification and damage-only compositing (2026-10-12)
+
+A client now tells the compositor what changed, and the compositor copies only
+that.
+
+- **Declaring damage:** syscall 112 (`GraphicsSurfaceDamage(handle, rect)`)
+  lets the owner record a changed rectangle. The token is bound to the
+  caller, and no capability is needed, since only the caller's own pixels are
+  involved. Damage is clipped to the surface and unioned into one bounding
+  rectangle per slot, so per-slot state stays fixed-size. It is cleared when
+  the slot is freed. If the surface is shared, the grantee's damage waiter is
+  woken after the registry lock is released.
+- **Compositing damage:** syscall 113 (`GraphicsCompositorBlitDamage(token,
+  origin)`) lets the lease holder take the pending damage of a surface shared
+  with it, copy just that region, and blit it at its offset within a window
+  placed at `origin`. It returns the region, or 0 when nothing was pending.
+  The grant rules are the same as for the whole-surface shared blit.
+- **Waiting on damage:** `WaitAny` gains source bit 2, damage on any surface
+  shared with the caller, which requires `DisplayIo`. Waiters live in a
+  bounded four-entry table in the registry. A grantee's exit drops its entry
+  without waking, since that path holds the scheduler lock. The usual rules
+  apply: one registration per grantee, live-holder refusal, and take-over
+  from a dead holder.
+- **libwoven:** `GraphicsSurface::damage`, `compositor_blit_damage ->
+  Option<Region>`, and `wait::DAMAGE`.
+
+Gate `[S19.9] damage compositing: PASSED`:
+- The kernel first checks the damage rules: clipping, union, reads only
+  through a grant, cleared on take, rectangles outside the surface ignored,
+  damage dies with the slot.
+- The probe is refused damage waits, damage on a foreign surface, and
+  damage-only compositing.
+- hello-gui `--damage-compositor` takes the lease and composites the client's
+  declared full-window damage, (0,0,40,30); a second take finds nothing. It
+  then sleeps in `WaitAny(DAMAGE)`.
+- Once the kernel sees it `Blocked`, it tells `--damage-client` to go. The
+  client recolours (10,5,4,3) and declares it, and recolours (30,20,2,2)
+  without declaring it.
+- The compositor must be woken before its 500-tick deadline and copy exactly
+  (10,5,4,3). The screen must show the new colour there and the old colour
+  where the undeclared change was. The kernel re-reads both pixels after
+  both processes exit.
+
+Negative controls (evidence in `audit-artifacts/stage19.9-negative-control*`):
+- With the wakeup removed from `mark_damage`, the first version of the gate
+  still failed, but only through the kernel's wait for the client timing out.
+  The compositor itself passed: `WaitAny` is level-checked, so at its
+  deadline it correctly reported damage that had arrived without a wakeup.
+- The compositor now times its wait and fails if only the deadline woke it.
+  The same control then fails crisply at that step (exit 111).
+
+Open:
+- One bounding rectangle per surface: two small distant changes copy the
+  span between them.
+- Damage is not tied to a particular blit position; the compositor supplies
+  the window origin each time.
+- No per-client damage queue: `WaitAny` says some shared surface has damage,
+  and the compositor asks each of its clients.
+
+Next prerequisites: the compositor surface following real framebuffer
+geometry instead of a fixed 640×480, and boot-time activation once the early
+boot console writes through the terminal lock.
+
 ## Stage 19.8 — one sleep over input and IPC (2026-10-12)
 
 A process can now sleep until any of several sources is ready. Syscall 111

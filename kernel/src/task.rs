@@ -1386,7 +1386,8 @@ pub fn spawn_user_process(
     feature = "stage19-5-test",
     feature = "stage19-6-test",
     feature = "stage19-7-test",
-    feature = "stage19-8-test"
+    feature = "stage19-8-test",
+    feature = "stage19-9-test"
 ))]
 pub fn spawn_user_system_service(
     name: &'static str,
@@ -1715,7 +1716,11 @@ pub fn task_live(id: TaskId) -> bool {
 
 /// Whether the main task of process `id` is blocked waiting for an event, as
 /// opposed to runnable. Lets a gate prove a client sleeps rather than polls.
-#[cfg(any(feature = "stage19-6-test", feature = "stage19-8-test"))]
+#[cfg(any(
+    feature = "stage19-6-test",
+    feature = "stage19-8-test",
+    feature = "stage19-9-test"
+))]
 pub fn process_task_blocked(id: ProcessId) -> bool {
     // Process table first, released before the scheduler lock is taken.
     let Some(task_id) = process_table_lock()

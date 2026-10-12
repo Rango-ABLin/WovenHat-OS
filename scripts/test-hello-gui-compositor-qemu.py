@@ -17,6 +17,7 @@ STAGES={
     '19.6': ('stage19-6-test', '[S19.6] blocking input wait: PASSED', 'hello-gui-wait', 'blocking input wait'),
     '19.7': ('stage19-7-test', '[S19.7] surface delegation: PASSED', 'hello-gui-delegation', 'surface delegation'),
     '19.8': ('stage19-8-test', '[S19.8] combined wait: PASSED', 'hello-gui-multiplex', 'combined wait'),
+    '19.9': ('stage19-9-test', '[S19.9] damage compositing: PASSED', 'hello-gui-damage', 'damage compositing'),
 }
 
 def app_build_env(app_dir):

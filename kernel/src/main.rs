@@ -3363,6 +3363,15 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         serial::write_line(format_args!("[S1-5] storage journal: PASSED"));
         qemu_test_exit_success();
     }
+    #[cfg(feature = "stage19-9-test")]
+    {
+        if !stage19_9_self_test() {
+            serial::write_line(format_args!("[S19.9] damage compositing: FAILED"));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!("[S19.9] damage compositing: PASSED"));
+        qemu_test_exit_success();
+    }
     #[cfg(feature = "stage19-8-test")]
     {
         if !stage19_8_self_test() {
@@ -4433,7 +4442,8 @@ fn stage16_1_self_test() -> bool {
     feature = "stage19-5-test",
     feature = "stage19-6-test",
     feature = "stage19-7-test",
-    feature = "stage19-8-test"
+    feature = "stage19-8-test",
+    feature = "stage19-9-test"
 ))]
 const HELLO_GUI_IMAGE: &[u8] = include_bytes!(env!("WOVENHAT_HELLO_GUI_IMAGE"));
 
@@ -4447,7 +4457,8 @@ const HELLO_GUI_IMAGE: &[u8] = include_bytes!(env!("WOVENHAT_HELLO_GUI_IMAGE"));
     feature = "stage19-5-test",
     feature = "stage19-6-test",
     feature = "stage19-7-test",
-    feature = "stage19-8-test"
+    feature = "stage19-8-test",
+    feature = "stage19-9-test"
 ))]
 fn display_client_capabilities() -> capability::CapabilitySet {
     capability::CapabilitySet::only(capability::Capability::Console)
@@ -4463,7 +4474,8 @@ fn display_client_capabilities() -> capability::CapabilitySet {
     feature = "stage19-5-test",
     feature = "stage19-6-test",
     feature = "stage19-7-test",
-    feature = "stage19-8-test"
+    feature = "stage19-8-test",
+    feature = "stage19-9-test"
 ))]
 fn run_hello_gui(
     image: &[u8],
@@ -4483,7 +4495,8 @@ fn run_hello_gui(
     feature = "stage19-5-test",
     feature = "stage19-6-test",
     feature = "stage19-7-test",
-    feature = "stage19-8-test"
+    feature = "stage19-8-test",
+    feature = "stage19-9-test"
 ))]
 fn spawn_hello_gui(
     image: &[u8],
@@ -4508,7 +4521,8 @@ fn spawn_hello_gui(
     feature = "stage19-5-test",
     feature = "stage19-6-test",
     feature = "stage19-7-test",
-    feature = "stage19-8-test"
+    feature = "stage19-8-test",
+    feature = "stage19-9-test"
 ))]
 fn wait_hello_gui(pid: task::ProcessId) -> Option<(task::ProcessId, Result<i32, task::WaitError>)> {
     let start = timer::ticks();
@@ -4519,6 +4533,137 @@ fn wait_hello_gui(pid: task::ProcessId) -> Option<(task::ProcessId, Result<i32, 
         task::yield_now();
     }
     Some((pid, task::wait_process(pid.as_u64())))
+}
+
+/// Stage 19.9 acceptance: clients notify the compositor of damage, and the
+/// compositor copies only that.
+///
+/// hello-gui `--damage-compositor` takes the lease and composites a client
+/// window from its declared damage. Once the kernel sees it Blocked in
+/// `WaitAny(DAMAGE)`, it tells the client to go; the client recolours one
+/// region and declares it, and recolours another without declaring it. The
+/// compositor must be woken, copy exactly the declared region, and leave the
+/// undeclared change off screen.
+#[cfg(feature = "stage19-9-test")]
+fn stage19_9_self_test() -> bool {
+    fn step(name: &str, ok: bool) -> bool {
+        serial::write_line(format_args!(
+            "[S19.9] {} {}",
+            name,
+            if ok { "PASS" } else { "FAIL" }
+        ));
+        ok
+    }
+
+    if !step("damage rules", user_graphics::damage_self_test()) {
+        return false;
+    }
+    if !step(
+        "install into the filesystem",
+        vfs::create_read_only("/bin/hello-gui", HELLO_GUI_IMAGE).is_ok(),
+    ) {
+        return false;
+    }
+    let mut image = alloc::vec![0u8; HELLO_GUI_IMAGE.len()];
+    if vfs::read_all("/bin/hello-gui", &mut image) != Ok(HELLO_GUI_IMAGE.len()) {
+        return step("filesystem round-trip", false);
+    }
+
+    const VICTIM_OWNER: u64 = 4246;
+    let Ok(victim) = user_graphics::create(VICTIM_OWNER, 8, 8) else {
+        return step("victim surface created", false);
+    };
+    let victim_arg = alloc::format!("{}", victim.to_u64());
+    let probe = run_hello_gui(&image, &["/bin/hello-gui", "--probe", &victim_arg], false);
+    user_graphics::release_owner(VICTIM_OWNER);
+    if !step(
+        "unprivileged probe refused damage operations",
+        matches!(probe, Some((_, Ok(0)))),
+    ) {
+        return false;
+    }
+
+    const PEER: u64 = 9_000_002;
+    if !step("peer mailbox registered", ipc::register(PEER).is_ok()) {
+        return false;
+    }
+    let capabilities = display_client_capabilities().with(capability::Capability::Ipc);
+    let Some(compositor_pid) = spawn_hello_gui(
+        &image,
+        &["/bin/hello-gui", "--damage-compositor"],
+        Some(capabilities),
+    ) else {
+        let _ = ipc::unregister(PEER);
+        return step("compositor process spawned", false);
+    };
+    let start = timer::ticks();
+    while compositor::holder() != Some(compositor_pid.as_u64()) {
+        if task::process_exited(compositor_pid) || timer::ticks().wrapping_sub(start) > 1000 {
+            let _ = ipc::unregister(PEER);
+            return step("compositor process holds the lease", false);
+        }
+        task::yield_now();
+    }
+    step("compositor process holds the lease", true);
+
+    let compositor_arg = alloc::format!("{}", compositor_pid.as_u64());
+    let peer_arg = alloc::format!("{}", PEER);
+    let Some(client_pid) = spawn_hello_gui(
+        &image,
+        &["/bin/hello-gui", "--damage-client", &compositor_arg, &peer_arg],
+        None,
+    ) else {
+        let _ = ipc::unregister(PEER);
+        return step("client process spawned", false);
+    };
+
+    // The compositor's only blocking call is its damage wait; everything
+    // before it polls. Blocked therefore means asleep on damage.
+    let start = timer::ticks();
+    let mut asleep = false;
+    while !asleep {
+        asleep = task::process_task_blocked(compositor_pid);
+        if !asleep
+            && (task::process_exited(compositor_pid) || timer::ticks().wrapping_sub(start) > 2000)
+        {
+            break;
+        }
+        task::yield_now();
+    }
+    if !step("compositor asleep on damage", asleep)
+        || !step("client told to go", ipc::send(PEER, client_pid.as_u64(), b"go").is_ok())
+    {
+        let _ = ipc::unregister(PEER);
+        return false;
+    }
+
+    let client_status = wait_hello_gui(client_pid).map(|(_, status)| status);
+    let compositor_status = wait_hello_gui(compositor_pid).map(|(_, status)| status);
+    let _ = ipc::unregister(PEER);
+    let code = |status: Option<Result<i32, task::WaitError>>| match status {
+        Some(Ok(code)) => code as i64,
+        _ => -1,
+    };
+    serial::write_line(format_args!(
+        "[S19.9] client exit status {} compositor exit status {}",
+        code(client_status),
+        code(compositor_status)
+    ));
+    if !step("client exits zero", client_status == Some(Ok(0)))
+        || !step("compositor exits zero", compositor_status == Some(Ok(0)))
+    {
+        return false;
+    }
+    const CLIENT_COLOR: u32 = crate::display::rgb(180, 40, 90);
+    const DAMAGED_COLOR: u32 = crate::display::rgb(20, 200, 60);
+    if !step(
+        "kernel sees the declared region updated and the undeclared one not",
+        compositor::pixel(310, 205) == Ok(DAMAGED_COLOR)
+            && compositor::pixel(330, 220) == Ok(CLIENT_COLOR),
+    ) {
+        return false;
+    }
+    step("lease released on exit", compositor::holder().is_none())
 }
 
 /// Stage 19.8 acceptance: one sleep over input and IPC.
