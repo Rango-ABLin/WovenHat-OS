@@ -281,6 +281,10 @@ pub enum Number {
     GraphicsCompositorPixel = 103,
     /// handle, packed (x | y<<16 | w<<32 | h<<48), packed colour -> 0 or ERROR
     GraphicsSurfaceStroke = 104,
+    /// -> 0 when the caller holds the compositor lease, or ERROR
+    GraphicsCompositorClaim = 105,
+    /// -> pixels written to the framebuffer, or ERROR
+    GraphicsCompositorPresent = 106,
 }
 
 pub fn entry_address() -> u64 {
@@ -2217,6 +2221,8 @@ pub extern "C" fn wovenhat_syscall_dispatch(
         value if value == Number::GraphicsSurfaceStroke as u64 => {
             sys_graphics_stroke(arg0, arg1, arg2)
         }
+        value if value == Number::GraphicsCompositorClaim as u64 => sys_compositor_claim(),
+        value if value == Number::GraphicsCompositorPresent as u64 => sys_compositor_present(),
         _ => u64::MAX,
     };
 
@@ -2257,7 +2263,9 @@ fn sys_graphics_fill(handle: u64, packed: u64, color: u64) -> u64 {
     let y = ((packed >> 16) & 0xffff) as u16 as i32;
     let width = ((packed >> 32) & 0xffff) as usize;
     let height = ((packed >> 48) & 0xffff) as usize;
-    let handle = crate::user_graphics::Handle::from_u64(handle);
+    let Some(handle) = caller_surface(handle) else {
+        return SYSCALL_ERROR;
+    };
     crate::user_graphics::fill_rect(
         handle,
         crate::display::Rect::new(x, y, width, height),
@@ -2273,7 +2281,9 @@ fn sys_graphics_fill(handle: u64, packed: u64, color: u64) -> u64 {
 fn sys_graphics_pixel(handle: u64, packed: u64) -> u64 {
     let x = (packed & 0xffff_ffff) as i32;
     let y = ((packed >> 32) & 0xffff_ffff) as i32;
-    let handle = crate::user_graphics::Handle::from_u64(handle);
+    let Some(handle) = caller_surface(handle) else {
+        return SYSCALL_ERROR;
+    };
     crate::user_graphics::pixel(handle, x, y)
         .map(u64::from)
         .unwrap_or(SYSCALL_ERROR)
@@ -2281,31 +2291,79 @@ fn sys_graphics_pixel(handle: u64, packed: u64) -> u64 {
 
 /// Release a client surface.
 fn sys_graphics_destroy(handle: u64) -> u64 {
-    let handle = crate::user_graphics::Handle::from_u64(handle);
+    let Some(handle) = caller_surface(handle) else {
+        return SYSCALL_ERROR;
+    };
     crate::user_graphics::destroy(handle).map_or(SYSCALL_ERROR, |()| 0)
+}
+
+/// Resolve a client surface token for the calling process.
+///
+/// The token's owner field comes from userspace, so it must name the caller;
+/// otherwise a process could forge a token naming another process as owner.
+fn caller_surface(raw: u64) -> Option<crate::user_graphics::Handle> {
+    let handle = crate::user_graphics::Handle::from_u64(raw);
+    handle
+        .is_owned_by(crate::task::current_process_id())
+        .then_some(handle)
+}
+
+/// Whether the caller may use the compositor at all. The lease checked inside
+/// the compositor narrows this to a single holder.
+fn display_authorized() -> bool {
+    crate::task::current_has(crate::capability::Capability::DisplayIo)
 }
 
 /// Blit a client surface onto the compositor at `packed = x | (y << 32)`.
 ///
-/// A real compositor process will eventually mediate this; today the kernel
-/// honours the request directly, so the primitive is exercised while that
-/// policy layer is built. Ownership is enforced through the client-surface
-/// registry.
+/// Requires `DisplayIo` and the compositor lease, and the surface must belong
+/// to the caller.
 fn sys_compositor_blit(handle: u64, packed: u64) -> u64 {
     let x = (packed & 0xffff_ffff) as i32;
     let y = ((packed >> 32) & 0xffff_ffff) as i32;
-    let handle = crate::user_graphics::Handle::from_u64(handle);
-    crate::compositor::blit(handle, x, y).map_or(SYSCALL_ERROR, |_| 0)
+    if !display_authorized() {
+        return SYSCALL_ERROR;
+    }
+    let Some(handle) = caller_surface(handle) else {
+        return SYSCALL_ERROR;
+    };
+    let pid = crate::task::current_process_id();
+    crate::compositor::blit_for(pid, handle, x, y).map_or(SYSCALL_ERROR, |_| 0)
+}
+
+/// Take the compositor lease. Requires `DisplayIo`.
+fn sys_compositor_claim() -> u64 {
+    if !display_authorized() {
+        return SYSCALL_ERROR;
+    }
+    crate::compositor::claim(crate::task::current_process_id()).map_or(SYSCALL_ERROR, |()| 0)
+}
+
+/// Present compositor damage to the framebuffer. Requires `DisplayIo` and the
+/// lease; the first call takes the display from the text terminal, and the
+/// holder's exit gives it back.
+fn sys_compositor_present() -> u64 {
+    if !display_authorized() {
+        return SYSCALL_ERROR;
+    }
+    crate::compositor::present_for(crate::task::current_process_id())
+        .map_or(SYSCALL_ERROR, |written| written as u64)
 }
 
 /// Read one pixel of the compositor surface at `packed = x | (y << 32)`.
 ///
-/// Returns the packed colour or SYSCALL_ERROR. Used by acceptance tests to
-/// verify a client's blit without a framebuffer accessor.
+/// Returns the packed colour or SYSCALL_ERROR. The screen carries every
+/// client's pixels, so reading it requires the same authority as drawing:
+/// `DisplayIo` and the lease.
 fn sys_compositor_pixel(packed: u64) -> u64 {
     let x = (packed & 0xffff_ffff) as i32;
     let y = ((packed >> 32) & 0xffff_ffff) as i32;
-    crate::compositor::pixel(x, y).map(u64::from).unwrap_or(SYSCALL_ERROR)
+    if !display_authorized() {
+        return SYSCALL_ERROR;
+    }
+    crate::compositor::pixel_for(crate::task::current_process_id(), x, y)
+        .map(u64::from)
+        .unwrap_or(SYSCALL_ERROR)
 }
 
 /// Stroke a rectangle outline into a client surface.
@@ -2317,7 +2375,9 @@ fn sys_graphics_stroke(handle: u64, packed: u64, color: u64) -> u64 {
     let y = ((packed >> 16) & 0xffff) as u16 as i32;
     let width = ((packed >> 32) & 0xffff) as usize;
     let height = ((packed >> 48) & 0xffff) as usize;
-    let handle = crate::user_graphics::Handle::from_u64(handle);
+    let Some(handle) = caller_surface(handle) else {
+        return SYSCALL_ERROR;
+    };
     crate::user_graphics::stroke_rect(
         handle,
         crate::display::Rect::new(x, y, width, height),

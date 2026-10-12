@@ -65,6 +65,8 @@ stage19-1-test = ["qemu-test"]
 stage19-2-test = ["qemu-test"]
 # Compositor presentation to the framebuffer and display ownership.
 stage19-3-test = ["qemu-test"]
+# Compositor authority: DisplayIo, the exclusive lease and handle binding.
+stage19-4-test = ["qemu-test"]
 stage1-5-test = ["qemu-test"]
 
 [dependencies]

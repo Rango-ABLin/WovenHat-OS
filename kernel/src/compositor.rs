@@ -41,6 +41,10 @@ pub enum Error {
     NoDisplay,
     /// The compositor does not currently own the display.
     NotPresenting,
+    /// Another process holds the compositor lease.
+    Busy,
+    /// The caller does not hold the compositor lease.
+    NotHolder,
 }
 
 struct State {
@@ -49,6 +53,8 @@ struct State {
     /// Whether the compositor owns the display. While false, damage keeps
     /// accumulating but nothing reaches the framebuffer.
     presenting: bool,
+    /// The one process allowed to drive the compositor from userspace.
+    holder: Option<u64>,
 }
 
 impl State {
@@ -57,6 +63,7 @@ impl State {
             surface: Surface::new(width, height),
             damage: Damage::new(),
             presenting: false,
+            holder: None,
         };
         // A compositor without an initial fill reads as transparent-looking
         // zeros, which the test cannot distinguish from "a client blitted
@@ -92,6 +99,17 @@ pub fn init(width: u32, height: u32) {
 /// The lookup is performed through `user_graphics` so the ownership and
 /// generation rules the registry enforces also apply here: a client cannot
 /// blit another client's surface.
+///
+/// Kernel-side blit with no lease check, for the kernel's own use; userspace
+/// goes through [`blit_for`].
+#[cfg_attr(
+    not(any(
+        feature = "stage19-1-test",
+        feature = "stage19-2-test",
+        feature = "stage19-3-test"
+    )),
+    allow(dead_code)
+)]
 pub fn blit(handle: user_graphics::Handle, x: i32, y: i32) -> Result<Rect, Error> {
     // Snapshot the client surface's pixels under the registry lock, then
     // release that lock before taking the compositor's. Holding both would
@@ -163,7 +181,128 @@ pub fn present() -> Result<usize, Error> {
     Ok(written)
 }
 
+/// Take the compositor lease for `pid`.
+///
+/// The lease is exclusive: one process at a time may blit onto, read from and
+/// present the compositor surface on behalf of userspace. Claiming again as the
+/// current holder succeeds. The syscall layer requires `DisplayIo` before
+/// calling this; the lease is what makes that authority single-holder.
+pub fn claim(pid: u64) -> Result<(), Error> {
+    let mut guard = STATE.lock();
+    let state = guard.as_mut().ok_or(Error::NotReady)?;
+    match state.holder {
+        Some(holder) if holder != pid => Err(Error::Busy),
+        _ => {
+            state.holder = Some(pid);
+            Ok(())
+        }
+    }
+}
+
+/// Current lease holder, if any.
+#[cfg_attr(not(feature = "stage19-4-test"), allow(dead_code))]
+pub fn holder() -> Option<u64> {
+    STATE.lock().as_ref().and_then(|state| state.holder)
+}
+
+/// Whether the compositor currently owns the display.
+#[cfg_attr(not(feature = "stage19-4-test"), allow(dead_code))]
+pub fn is_presenting() -> bool {
+    STATE.lock().as_ref().is_some_and(|state| state.presenting)
+}
+
+/// Drop `pid`'s lease, if it holds one, and hand the display back to the
+/// terminal. Called from the task-exit path so a crashed holder cannot keep
+/// the screen.
+pub fn release_owner(pid: u64) {
+    let mut guard = STATE.lock();
+    let Some(state) = guard.as_mut() else {
+        return;
+    };
+    if state.holder != Some(pid) {
+        return;
+    }
+    state.holder = None;
+    if state.presenting {
+        state.presenting = false;
+        crate::terminal::set_display_owned(false);
+    }
+}
+
+fn require_holder(pid: u64) -> Result<(), Error> {
+    let guard = STATE.lock();
+    let state = guard.as_ref().ok_or(Error::NotReady)?;
+    if state.holder == Some(pid) {
+        Ok(())
+    } else {
+        Err(Error::NotHolder)
+    }
+}
+
+/// [`blit`] on behalf of a userspace lease holder.
+///
+/// The holder check is repeated after the snapshot because the lease can be
+/// released by the holder's exit between the two; a blit for a process that
+/// no longer holds the lease is refused rather than landing late.
+pub fn blit_for(pid: u64, handle: user_graphics::Handle, x: i32, y: i32) -> Result<Rect, Error> {
+    require_holder(pid)?;
+    let snapshot = user_graphics::snapshot(handle).map_err(|_| Error::InvalidClient)?;
+    let mut guard = STATE.lock();
+    let state = guard.as_mut().ok_or(Error::NotReady)?;
+    if state.holder != Some(pid) {
+        return Err(Error::NotHolder);
+    }
+    let touched = state.surface.blit(&snapshot, x, y);
+    state.damage.add(touched);
+    Ok(touched)
+}
+
+/// [`pixel`] on behalf of a userspace lease holder. Reading the screen exposes
+/// every client's pixels, so it carries the same authority as drawing on it.
+pub fn pixel_for(pid: u64, x: i32, y: i32) -> Result<u32, Error> {
+    let guard = STATE.lock();
+    let state = guard.as_ref().ok_or(Error::NotReady)?;
+    if state.holder != Some(pid) {
+        return Err(Error::NotHolder);
+    }
+    state.surface.pixel(x, y).ok_or(Error::OutOfRange)
+}
+
+/// Present on behalf of the lease holder, taking the display from the terminal
+/// on first use. Returns the number of pixels written.
+pub fn present_for(pid: u64) -> Result<usize, Error> {
+    let mut guard = STATE.lock();
+    let state = guard.as_mut().ok_or(Error::NotReady)?;
+    if state.holder != Some(pid) {
+        return Err(Error::NotHolder);
+    }
+    if !state.presenting {
+        if !crate::terminal::set_display_owned(true) {
+            return Err(Error::NoDisplay);
+        }
+        state.presenting = true;
+        let bounds = state.surface.bounds();
+        state.damage.add(bounds);
+    }
+    let written = crate::terminal::with_framebuffer(|buffer, info| {
+        crate::display::present(&state.surface, &state.damage, buffer, info)
+    })
+    .ok_or(Error::NoDisplay)?;
+    state.damage.clear();
+    Ok(written)
+}
+
 /// Read one pixel from the compositor surface.
+///
+/// Kernel-side read with no lease check; userspace goes through [`pixel_for`].
+#[cfg_attr(
+    not(any(
+        feature = "stage19-1-test",
+        feature = "stage19-2-test",
+        feature = "stage19-3-test"
+    )),
+    allow(dead_code)
+)]
 pub fn pixel(x: i32, y: i32) -> Result<u32, Error> {
     let guard = STATE.lock();
     let state = guard.as_ref().ok_or(Error::NotReady)?;
@@ -195,6 +334,8 @@ pub fn dimensions() -> Option<(u32, u32)> {
     allow(dead_code)
 )]
 pub fn reset() {
+    // Dropping the state also drops any lease; the display goes back to the
+    // terminal below if the compositor held it.
     let mut guard = STATE.lock();
     if guard.as_ref().is_some_and(|state| state.presenting) {
         crate::terminal::set_display_owned(false);
@@ -422,4 +563,44 @@ pub fn presentation_self_test() -> bool {
     user_graphics::release_owner(owner);
     reset();
     true
+}
+
+/// Kernel-level checks of the lease rules. The Stage 19.4 gate pairs this with
+/// a userspace probe that exercises the same rules through the syscalls.
+#[cfg(feature = "stage19-4-test")]
+pub fn lease_self_test() -> bool {
+    use crate::display::rgb;
+
+    let (first, second) = (1001u64, 1002u64);
+    if holder().is_some() {
+        return false;
+    }
+    if claim(first).is_err() || claim(first).is_err() || holder() != Some(first) {
+        return false;
+    }
+    if claim(second) != Err(Error::Busy) {
+        return false;
+    }
+    let Ok(client) = user_graphics::create(second, 4, 4) else {
+        return false;
+    };
+    let _ = user_graphics::fill_rect(client, Rect::new(0, 0, 4, 4), rgb(1, 2, 3));
+    if blit_for(second, client, 0, 0) != Err(Error::NotHolder)
+        || pixel_for(second, 0, 0) != Err(Error::NotHolder)
+        || present_for(second) != Err(Error::NotHolder)
+    {
+        return false;
+    }
+    // A process that is not the holder releasing has no effect.
+    release_owner(second);
+    if holder() != Some(first) {
+        return false;
+    }
+    release_owner(first);
+    if holder().is_some() || claim(second).is_err() || pixel_for(second, 0, 0).is_err() {
+        return false;
+    }
+    release_owner(second);
+    user_graphics::release_owner(second);
+    holder().is_none()
 }

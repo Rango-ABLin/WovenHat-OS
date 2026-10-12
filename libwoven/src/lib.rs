@@ -18,6 +18,92 @@ pub mod process {
     #[derive(Clone, Copy, PartialEq, Eq, Debug)]
     pub struct Id(pub u64);
 }
+
+/// Process arguments as the kernel lays them out on the initial stack: `argc`,
+/// then `argc` pointers to NUL-terminated strings, then a NULL.
+///
+/// Obtained through [`entry!`], which captures the initial stack pointer
+/// before any Rust code can move it.
+#[derive(Clone, Copy)]
+pub struct Args {
+    argc: usize,
+    argv: *const *const u8,
+}
+
+impl Args {
+    /// The kernel rejects argument strings of 256 bytes or more, so a scan
+    /// that runs this far has found a malformed stack.
+    const MAX_ARG_BYTES: usize = 256;
+
+    /// # Safety
+    /// `stack` must be the process's initial stack pointer, as captured by
+    /// [`entry!`], with the kernel's argument layout still intact.
+    pub unsafe fn from_initial_stack(stack: *const u64) -> Self {
+        // SAFETY: the caller guarantees the kernel's layout at `stack`.
+        let argc = unsafe { stack.read() } as usize;
+        Self {
+            argc,
+            argv: unsafe { stack.add(1) } as *const *const u8,
+        }
+    }
+
+    pub const fn len(&self) -> usize {
+        self.argc
+    }
+
+    pub const fn is_empty(&self) -> bool {
+        self.argc == 0
+    }
+
+    /// Argument `index` without its terminator, or `None` past the end.
+    pub fn get(&self, index: usize) -> Option<&'static [u8]> {
+        if index >= self.argc {
+            return None;
+        }
+        // SAFETY: `index < argc`, and the kernel wrote `argc` valid pointers
+        // to strings that live on the stack for the life of the process.
+        let start = unsafe { self.argv.add(index).read() };
+        let mut length = 0;
+        while length < Self::MAX_ARG_BYTES {
+            // SAFETY: bounded by the kernel's own argument size limit.
+            if unsafe { start.add(length).read() } == 0 {
+                // SAFETY: `length` bytes from `start` were just read.
+                return Some(unsafe { core::slice::from_raw_parts(start, length) });
+            }
+            length += 1;
+        }
+        None
+    }
+}
+
+/// Define the process entry point and hand `main` the process arguments.
+///
+/// `main` must have the signature `fn(libwoven::Args) -> !`. The stub is
+/// assembly because the arguments are found relative to the entry stack
+/// pointer, which Rust code cannot observe reliably: it passes `rsp` as the
+/// first argument, keeps the stack 16-byte aligned for the call, and traps if
+/// `main` ever returns.
+#[macro_export]
+macro_rules! entry {
+    ($main:path) => {
+        core::arch::global_asm!(
+            ".globl _start",
+            "_start:",
+            "mov rdi, rsp",
+            "and rsp, -16",
+            "call {start}",
+            "ud2",
+            start = sym __libwoven_start,
+        );
+
+        #[doc(hidden)]
+        unsafe extern "C" fn __libwoven_start(stack: *const u64) -> ! {
+            // SAFETY: `stack` is the untouched entry stack pointer.
+            let args = unsafe { $crate::Args::from_initial_stack(stack) };
+            $main(args)
+        }
+    };
+}
 pub mod thread {
     #[derive(Clone, Copy, PartialEq, Eq, Debug)]
     pub struct Id(pub u64);
@@ -112,6 +198,8 @@ pub mod syscall {
     pub const GRAPHICS_COMPOSITOR_BLIT: u64 = 102;
     pub const GRAPHICS_COMPOSITOR_PIXEL: u64 = 103;
     pub const GRAPHICS_SURFACE_STROKE: u64 = 104;
+    pub const GRAPHICS_COMPOSITOR_CLAIM: u64 = 105;
+    pub const GRAPHICS_COMPOSITOR_PRESENT: u64 = 106;
 
     /// Invoke the WovenHat Ring-3 ABI.
     ///
@@ -323,6 +411,18 @@ pub mod syscall {
 
     /// # Safety
     /// Must be called from WovenHat userspace.
+    pub unsafe fn graphics_compositor_claim() -> u64 {
+        unsafe { invoke(GRAPHICS_COMPOSITOR_CLAIM, 0, 0, 0) }
+    }
+
+    /// # Safety
+    /// Must be called from WovenHat userspace.
+    pub unsafe fn graphics_compositor_present() -> u64 {
+        unsafe { invoke(GRAPHICS_COMPOSITOR_PRESENT, 0, 0, 0) }
+    }
+
+    /// # Safety
+    /// Must be called from WovenHat userspace.
     pub unsafe fn graphics_surface_stroke(
         handle: u64,
         x: u16, y: u16, width: u16, height: u16,
@@ -414,7 +514,28 @@ impl GraphicsSurface {
     }
 }
 
-/// Read one pixel from the compositor surface, for test verification.
+/// Take the compositor lease.
+///
+/// Requires the `DisplayIo` capability, and only one process holds the lease
+/// at a time. Blitting with [`GraphicsSurface::present`], reading the screen
+/// with [`screen_pixel`] and presenting with [`compositor_present`] all
+/// require it. The kernel releases the lease when the holder exits.
+pub fn compositor_claim() -> Result<(), Error> {
+    // SAFETY: argument-free call.
+    let result = unsafe { syscall::graphics_compositor_claim() };
+    check(result).map(|_| ())
+}
+
+/// Copy compositor damage to the framebuffer, taking the display from the text
+/// terminal on first use. Returns the number of pixels written.
+pub fn compositor_present() -> Result<u64, Error> {
+    // SAFETY: argument-free call.
+    let result = unsafe { syscall::graphics_compositor_present() };
+    check(result)
+}
+
+/// Read one pixel from the compositor surface. Requires the lease, because the
+/// screen carries every client's pixels.
 pub fn screen_pixel(x: i32, y: i32) -> Result<u32, Error> {
     // SAFETY: integer-only call.
     let result = unsafe { syscall::graphics_compositor_pixel(x, y) };

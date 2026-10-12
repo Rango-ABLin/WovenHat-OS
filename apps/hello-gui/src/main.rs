@@ -1,18 +1,23 @@
 //! A graphical WovenHat application.
 //!
-//! Allocates a client surface through the kernel, draws a small window into
-//! it, and reads individual pixels back so the kernel's acceptance gate can
-//! verify the whole user → kernel → surface path worked.
+//! In its normal mode it allocates a client surface, draws a small window,
+//! verifies it by reading pixels back, takes the compositor lease, places the
+//! window on the compositor, verifies the screen and presents it to the
+//! framebuffer. That needs the `DisplayIo` capability.
 //!
-//! Composition onto the framebuffer is Phase 5's work; this program's purpose
-//! is to prove that a userspace process can own a drawing surface, fill it
-//! correctly, and that the kernel is honouring the ownership rules.
+//! With `--probe <handle>` it runs as an ordinary process and checks that the
+//! kernel refuses it everything it has no authority for: every compositor
+//! operation, and every operation on the surface `<handle>`, which belongs to
+//! another process, including through a token forged to name this process.
+//! Each failed check exits with its own status so the gate can tell which one.
 #![no_std]
 #![no_main]
 
 use core::panic::PanicInfo;
 
-use libwoven::{rgb, GraphicsSurface};
+use libwoven::{rgb, syscall, Args, GraphicsSurface};
+
+libwoven::entry!(main);
 
 const BACKGROUND: u32 = rgb(4, 12, 28);
 const TITLE_BAR: u32 = rgb(40, 220, 230);
@@ -33,8 +38,15 @@ fn fail(code: u64) -> ! {
     libwoven::exit(code)
 }
 
-#[unsafe(no_mangle)]
-pub extern "C" fn _start() -> ! {
+fn main(args: Args) -> ! {
+    match args.get(1) {
+        Some(b"--probe") => probe(args.get(2)),
+        Some(_) => fail(250),
+        None => run(),
+    }
+}
+
+fn run() -> ! {
     // 1. Allocate the surface.
     let surface = match GraphicsSurface::create(WIDTH, HEIGHT) {
         Ok(surface) => surface,
@@ -85,11 +97,13 @@ pub extern "C" fn _start() -> ! {
     }
     let _ = libwoven::print("hello-gui: window rendered and verified\n");
 
-    // 5. Place the window on the screen through the compositor, then verify
-    //    by reading pixels back from the compositor surface. If the screen
-    //    pixel at a known offset is the content colour, every step from
-    //    syscall dispatch through client surface through compositor blit
-    //    worked.
+    // 5. Take the compositor lease, place the window on the screen, and
+    //    verify by reading the compositor surface back. If the screen pixel
+    //    at a known offset is the content colour, every step from syscall
+    //    dispatch through client surface through compositor blit worked.
+    if libwoven::compositor_claim().is_err() {
+        fail(11);
+    }
     const SCREEN_X: i32 = 60;
     const SCREEN_Y: i32 = 40;
     if surface.present(SCREEN_X, SCREEN_Y).is_err() {
@@ -114,12 +128,106 @@ pub extern "C" fn _start() -> ! {
     }
     let _ = libwoven::print("hello-gui: screen verified\n");
 
-    // 6. Dropping the surface releases the client slot. The compositor keeps
+    // 6. Show it: copy the compositor's damage to the framebuffer.
+    match libwoven::compositor_present() {
+        Ok(written) if written > 0 => {}
+        Ok(_) => fail(12),
+        Err(_) => fail(13),
+    }
+    let _ = libwoven::print("hello-gui: framebuffer presented\n");
+
+    // 7. Dropping the surface releases the client slot. The compositor keeps
     //    the pixels it was handed, which is the correct semantics for a
-    //    once-presented window.
+    //    once-presented window; the lease is released when the process exits.
     drop(surface);
     let _ = libwoven::print("hello-gui: surface released\n");
 
+    libwoven::exit(0)
+}
+
+fn parse_u64(text: &[u8]) -> Option<u64> {
+    if text.is_empty() {
+        return None;
+    }
+    let mut value = 0u64;
+    for digit in text {
+        if !digit.is_ascii_digit() {
+            return None;
+        }
+        value = value.checked_mul(10)?.checked_add(u64::from(digit - b'0'))?;
+    }
+    Some(value)
+}
+
+/// Every call here must be refused. Exit 0 means the kernel refused them all.
+fn probe(victim: Option<&[u8]>) -> ! {
+    let Some(victim) = victim.and_then(parse_u64) else {
+        fail(200)
+    };
+
+    // Client surfaces need no authority: the probe can still draw for itself.
+    let own = match GraphicsSurface::create(16, 16) {
+        Ok(surface) => surface,
+        Err(_) => fail(201),
+    };
+    if own.fill_rect(0, 0, 16, 16, CONTENT).is_err() {
+        fail(202);
+    }
+
+    // Without DisplayIo, the compositor is off limits.
+    if libwoven::compositor_claim().is_ok() {
+        fail(203);
+    }
+    if own.present(0, 0).is_ok() {
+        fail(204);
+    }
+    if libwoven::screen_pixel(0, 0).is_ok() {
+        fail(205);
+    }
+    if libwoven::compositor_present().is_ok() {
+        fail(206);
+    }
+    let _ = libwoven::print("hello-gui probe: compositor refused\n");
+
+    // Another process's surface, through its genuine token...
+    // SAFETY: integer-only calls; the kernel validates every token.
+    unsafe {
+        if syscall::graphics_surface_pixel(victim, 0, 0) != libwoven::syscall::ERROR {
+            fail(207);
+        }
+        if syscall::graphics_surface_fill(victim, 0, 0, 8, 8, BORDER) != libwoven::syscall::ERROR {
+            fail(208);
+        }
+        if syscall::graphics_surface_stroke(victim, 0, 0, 8, 8, BORDER) != libwoven::syscall::ERROR
+        {
+            fail(209);
+        }
+        if syscall::graphics_compositor_blit(victim, 0, 0) != libwoven::syscall::ERROR {
+            fail(210);
+        }
+        if syscall::graphics_surface_destroy(victim) != libwoven::syscall::ERROR {
+            fail(211);
+        }
+    }
+
+    // ...and through a token forged to name this process as the owner, with
+    // the victim's slot and generation. The registry must still refuse it.
+    let forged = (victim & 0xffff_ffff) | (libwoven::current_pid().0 << 32);
+    // SAFETY: integer-only calls; the kernel validates every token.
+    unsafe {
+        if syscall::graphics_surface_pixel(forged, 0, 0) != libwoven::syscall::ERROR {
+            fail(212);
+        }
+        if syscall::graphics_surface_fill(forged, 0, 0, 8, 8, BORDER) != libwoven::syscall::ERROR {
+            fail(213);
+        }
+        if syscall::graphics_surface_destroy(forged) != libwoven::syscall::ERROR {
+            fail(214);
+        }
+    }
+    let _ = libwoven::print("hello-gui probe: foreign surface refused\n");
+
+    drop(own);
     libwoven::exit(0)
 }
 

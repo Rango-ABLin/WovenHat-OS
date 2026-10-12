@@ -1377,7 +1377,13 @@ pub fn spawn_user_process(
 /// Ordinary applications remain in `SecurityDomain::User` and cannot acquire
 /// raw storage/device authority. Stage 10.4 uses this path for the storage ABI
 /// acceptance probe, and later service-manager work can reuse the same boundary.
-#[cfg(any(feature = "stage10-4-test", feature = "stage10-9-test"))]
+#[cfg(any(
+    feature = "stage10-4-test",
+    feature = "stage10-9-test",
+    feature = "stage18-2-test",
+    feature = "stage19-2-test",
+    feature = "stage19-4-test"
+))]
 pub fn spawn_user_system_service(
     name: &'static str,
     program: userspace::UserProgram,
@@ -2351,6 +2357,8 @@ pub fn exit_current_process(exit_code: i32) -> ! {
         // Client surface slots are owned by the process id, matching the
         // network and completion-port registries above.
         crate::user_graphics::release_owner(exiting_pid);
+        // A compositor lease holder that exits hands the display back.
+        crate::compositor::release_owner(exiting_pid);
         // Reclaim all registry records before the process becomes a zombie;
         // generation advancement invalidates handles held by the exiting task.
         crate::thread::reap_owner(exiting_pid);

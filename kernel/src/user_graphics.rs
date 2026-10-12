@@ -47,8 +47,12 @@ pub enum Error {
 
 /// A handle packing slot, generation and owner.
 ///
-/// The owner is stored in the token so an impostor process cannot drive
-/// another process's surface by guessing a slot and generation.
+/// The token's owner field is supplied by userspace and therefore proves
+/// nothing on its own: the registry compares it with the slot's owner, and the
+/// syscall layer must also bind it to the calling process with
+/// [`Handle::is_owned_by`]. Without that second check a process can forge a
+/// handle naming another process as owner and drive that process's surface.
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Handle(u64);
 
@@ -81,6 +85,12 @@ impl Handle {
 
     const fn owner(self) -> u64 {
         (self.0 >> (Self::SLOT_BITS + Self::GENERATION_BITS)) & 0xffff_ffff
+    }
+
+    /// Whether this token names `pid` as its owner. The syscall layer calls
+    /// this with the caller's own process id before any registry operation.
+    pub const fn is_owned_by(self, pid: u64) -> bool {
+        self.owner() == pid & 0xffff_ffff
     }
 }
 

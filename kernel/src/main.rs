@@ -3363,6 +3363,15 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         serial::write_line(format_args!("[S1-5] storage journal: PASSED"));
         qemu_test_exit_success();
     }
+    #[cfg(feature = "stage19-4-test")]
+    {
+        if !stage19_4_self_test() {
+            serial::write_line(format_args!("[S19.4] compositor authority: FAILED"));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!("[S19.4] compositor authority: PASSED"));
+        qemu_test_exit_success();
+    }
     #[cfg(feature = "stage19-3-test")]
     {
         if !compositor::presentation_self_test() {
@@ -4381,8 +4390,169 @@ fn stage16_1_self_test() -> bool {
 
 // ------------------------------- end-to-end client surface via a real app
 
-#[cfg(any(feature = "stage18-2-test", feature = "stage19-2-test"))]
+#[cfg(any(
+    feature = "stage18-2-test",
+    feature = "stage19-2-test",
+    feature = "stage19-4-test"
+))]
 const HELLO_GUI_IMAGE: &[u8] = include_bytes!(env!("WOVENHAT_HELLO_GUI_IMAGE"));
+
+/// Authority a graphical client needs: console output for its progress lines
+/// and `DisplayIo` for the compositor. Ordinary user processes do not carry
+/// `DisplayIo`, so the app is started through the system-service path.
+#[cfg(any(
+    feature = "stage18-2-test",
+    feature = "stage19-2-test",
+    feature = "stage19-4-test"
+))]
+fn display_client_capabilities() -> capability::CapabilitySet {
+    capability::CapabilitySet::only(capability::Capability::Console)
+        .with(capability::Capability::DisplayIo)
+}
+
+/// Spawn hello-gui from `image` with `argv`, either as an ordinary user process
+/// or with display authority, and wait for it. Returns the pid and exit status.
+#[cfg(any(
+    feature = "stage18-2-test",
+    feature = "stage19-2-test",
+    feature = "stage19-4-test"
+))]
+fn run_hello_gui(
+    image: &[u8],
+    argv: &[&str],
+    display_authority: bool,
+) -> Option<(task::ProcessId, Result<i32, task::WaitError>)> {
+    let program = userspace::load_elf_with_argv(image, argv)?;
+    let pid = if display_authority {
+        task::spawn_user_system_service("hello-gui", program, display_client_capabilities())
+            .ok()?
+            .0
+    } else {
+        task::spawn_user_process("hello-gui", program).ok()?.0
+    };
+    let start = timer::ticks();
+    while !task::process_exited(pid) {
+        if timer::ticks().wrapping_sub(start) > 1000 {
+            return None;
+        }
+        task::yield_now();
+    }
+    Some((pid, task::wait_process(pid.as_u64())))
+}
+
+/// Stage 19.4 acceptance: compositor authority.
+///
+/// The kernel checks the lease rules directly, then runs hello-gui twice. As
+/// an ordinary user process in `--probe` mode it must be refused every
+/// compositor operation and every operation on a surface it does not own,
+/// including one whose token it forged. With `DisplayIo` it claims the lease,
+/// presents to the framebuffer and exits; the kernel then confirms that the
+/// lease was released and the display returned to the terminal.
+#[cfg(feature = "stage19-4-test")]
+fn stage19_4_self_test() -> bool {
+    use alloc::format;
+
+    fn step(name: &str, ok: bool) -> bool {
+        serial::write_line(format_args!(
+            "[S19.4] {} {}",
+            name,
+            if ok { "PASS" } else { "FAIL" }
+        ));
+        ok
+    }
+
+    if !step("lease rules", compositor::lease_self_test()) {
+        return false;
+    }
+
+    if !step(
+        "install into the filesystem",
+        vfs::create_read_only("/bin/hello-gui", HELLO_GUI_IMAGE).is_ok(),
+    ) {
+        return false;
+    }
+    let mut image = alloc::vec![0u8; HELLO_GUI_IMAGE.len()];
+    if !step(
+        "filesystem round-trip",
+        vfs::read_all("/bin/hello-gui", &mut image) == Ok(HELLO_GUI_IMAGE.len())
+            && image[..] == HELLO_GUI_IMAGE[..],
+    ) {
+        return false;
+    }
+
+    // A surface belonging to some other process, for the probe to attack.
+    const VICTIM_OWNER: u64 = 4242;
+    const VICTIM_COLOR: u32 = crate::display::rgb(12, 34, 56);
+    let Ok(victim) = user_graphics::create(VICTIM_OWNER, 8, 8) else {
+        return step("victim surface created", false);
+    };
+    if user_graphics::fill_rect(victim, crate::display::Rect::new(0, 0, 8, 8), VICTIM_COLOR)
+        .is_err()
+    {
+        return step("victim surface filled", false);
+    }
+    let victim_arg = format!("{}", victim.to_u64());
+
+    let probe = run_hello_gui(&image, &["/bin/hello-gui", "--probe", &victim_arg], false);
+    let probe_status = match probe {
+        Some((_, Ok(code))) => code as i64,
+        _ => -1,
+    };
+    serial::write_line(format_args!("[S19.4] probe exit status {}", probe_status));
+    if !step("unprivileged probe refused everywhere", probe_status == 0) {
+        return false;
+    }
+    let intact = user_graphics::pixel(victim, 0, 0) == Ok(VICTIM_COLOR)
+        && user_graphics::pixel(victim, 7, 7) == Ok(VICTIM_COLOR)
+        && user_graphics::count_for(VICTIM_OWNER) == 1;
+    if !step("victim surface untouched", intact) {
+        return false;
+    }
+    if !step("probe never held the lease", compositor::holder().is_none()) {
+        return false;
+    }
+    user_graphics::release_owner(VICTIM_OWNER);
+
+    let Some((pid, status)) = run_hello_gui(&image, &["/bin/hello-gui"], true) else {
+        return step("display client runs to completion", false);
+    };
+    serial::write_line(format_args!(
+        "[S19.4] display client exit status {}",
+        match status {
+            Ok(code) => code as i64,
+            Err(_) => -1,
+        }
+    ));
+    if !step("display client exits zero", status == Ok(0)) {
+        return false;
+    }
+    const CONTENT: u32 = crate::display::rgb(230, 230, 240);
+    let screen = terminal::with_framebuffer(|buffer, info| {
+        // The holder presented before exiting, so the framebuffer itself
+        // carries the content colour at the window's screen position.
+        let offset = (100 * info.stride + 160) * info.bytes_per_pixel;
+        buffer.get(offset..offset + 3).map(|bytes| match info.pixel_format {
+            bootloader_api::info::PixelFormat::Bgr => {
+                crate::display::rgb(bytes[2], bytes[1], bytes[0])
+            }
+            _ => crate::display::rgb(bytes[0], bytes[1], bytes[2]),
+        })
+    })
+    .flatten();
+    if !step("holder's present reached the framebuffer", screen == Some(CONTENT)) {
+        return false;
+    }
+    if !step("lease released on exit", compositor::holder().is_none()) {
+        return false;
+    }
+    if !step("display returned to the terminal", !compositor::is_presenting()) {
+        return false;
+    }
+    step(
+        "owner slots released on exit",
+        user_graphics::count_for(pid.as_u64()) == 0,
+    )
+}
 
 /// Stage 19.2 acceptance: a userspace program presents its surface onto the
 /// compositor and the kernel's compositor surface carries the expected pixels.
@@ -4420,21 +4590,9 @@ fn stage19_2_self_test() -> bool {
     ) {
         return false;
     }
-    let Some(program) = userspace::load_elf_with_argv(&readback, &["/bin/hello-gui"]) else {
-        return step("load from filesystem bytes", false);
+    let Some((pid, exit_status)) = run_hello_gui(&readback, &["/bin/hello-gui"], true) else {
+        return step("load, spawn with display authority, run to completion", false);
     };
-    let pid = match task::spawn_user_process("hello-gui", program) {
-        Ok((pid, _)) => pid,
-        Err(_) => return step("spawn in Ring 3", false),
-    };
-    let start = timer::ticks();
-    while !task::process_exited(pid) {
-        if timer::ticks().wrapping_sub(start) > 1000 {
-            return step("application runs to completion", false);
-        }
-        task::yield_now();
-    }
-    let exit_status = task::wait_process(pid.as_u64());
     let status = match exit_status {
         Ok(code) => code as i64,
         Err(_) => -1,
@@ -4496,24 +4654,9 @@ fn stage18_2_self_test() -> bool {
         return false;
     }
 
-    let Some(program) = userspace::load_elf_with_argv(&readback, &["/bin/hello-gui"]) else {
-        return step("load from filesystem bytes", false);
+    let Some((pid, exit_status)) = run_hello_gui(&readback, &["/bin/hello-gui"], true) else {
+        return step("load, spawn with display authority, run to completion", false);
     };
-
-    let pid = match task::spawn_user_process("hello-gui", program) {
-        Ok((pid, _context)) => pid,
-        Err(_) => return step("spawn in Ring 3", false),
-    };
-
-    let start = timer::ticks();
-    while !task::process_exited(pid) {
-        if timer::ticks().wrapping_sub(start) > 1000 {
-            return step("application runs to completion", false);
-        }
-        task::yield_now();
-    }
-
-    let exit_status = task::wait_process(pid.as_u64());
     let status_text = match exit_status {
         Ok(code) => code as i64,
         Err(_) => -1,

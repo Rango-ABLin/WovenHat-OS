@@ -1,5 +1,67 @@
 # Stage status
 
+## Stage 19.4 — compositor authority and client handle binding (2026-10-12)
+
+**Defect fixed from Stage 18.** The client surface registry compared a slot's
+owner with the owner field inside the handle, but userspace supplies that
+handle. Any process could forge a token naming another process as owner, and
+the slot index (0–15), generation (low after boot) and pid are all small and
+guessable. With that token it could read, fill, stroke, destroy or blit the
+other process's surface. The Stage 18.1 impostor test only swapped the owner
+field of a genuine token, so it never exercised a forgery. Every graphics
+syscall now resolves its token through `caller_surface`, which requires the
+token to name the calling process; the registry then checks slot, generation
+and owner as before.
+
+**Compositor authority.** Blitting onto the compositor, reading screen pixels
+and presenting to the framebuffer now require the `DisplayIo` capability. They
+also require the compositor lease, which exactly one process holds at a time:
+`compositor::claim` (syscall 105) takes it, and claiming again as the holder
+succeeds. Reading the screen carries the same authority as drawing on it,
+because the screen holds every client's pixels. Syscall 106 presents
+compositor damage to the framebuffer, taking the display from the terminal on
+first use. The task-exit path calls `compositor::release_owner`, which drops
+the lease and gives the display back, so a crashed holder cannot keep the
+screen. Ordinary user processes do not carry `DisplayIo`; client surfaces
+(syscalls 98–101, 104) still need no capability, since a process can only
+reach its own.
+
+**libwoven.** `libwoven::entry!(main)` defines `_start` as a three-instruction
+assembly stub that passes the entry stack pointer to `main(Args)`. Rust code
+cannot observe that pointer reliably, which is the only reason the stub is
+assembly. `Args::get` bounds each string scan by the kernel's 256-byte argument
+limit. Also new: `compositor_claim()` and `compositor_present()`.
+
+**Gate.** `[S19.4] compositor authority: PASSED`. The kernel first checks the
+lease rules directly: exclusivity, idempotent re-claim, non-holders refused
+blit, read and present, and a release by a non-holder ignored. It then creates
+a surface owned by another pid and runs hello-gui twice:
+- `--probe <token>` as an ordinary user process. Claim, blit, screen read and
+  present must all fail. Every operation on the foreign surface must fail,
+  both with its genuine token and with a token forged to name the probe. The
+  kernel then checks that the foreign surface still holds its colour and that
+  the probe never held the lease.
+- Normal mode with `Console | DisplayIo`. The app claims, blits, verifies the
+  screen and presents. The kernel then reads the framebuffer itself and finds
+  the window's content colour, and checks that the lease was released, the
+  display returned to the terminal, and the app's surfaces were reclaimed.
+
+A negative control was run: with `caller_surface` removed from the pixel
+syscall alone, the probe's forged read succeeds, it exits 207 and the gate
+fails. The evidence is in `audit-artifacts/stage19.4-negative-control-*`.
+
+Stages 18.2 and 19.2 now start hello-gui through the system-service spawn path
+with `Console | DisplayIo`, because the app needs display authority. Their
+assertions are unchanged.
+
+Open: `DisplayIo` is granted at spawn by the kernel; there is no service
+manager or user-facing grant flow. The lease has no revocation other than the
+holder's exit, and no hand-over to a successor compositor. The holder still
+blits clients' surfaces itself, so there is no way yet for one process to
+composite another's surface by capability. Next prerequisites: input events
+routed to the lease holder, then delegating client surfaces to the holder by
+capability so a separate compositor process can draw them.
+
 ## Stage 19.3 — compositor presentation and display ownership (2026-10-12)
 
 The compositor surface now reaches the real framebuffer.
