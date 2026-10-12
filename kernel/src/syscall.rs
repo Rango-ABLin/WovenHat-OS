@@ -287,6 +287,9 @@ pub enum Number {
     GraphicsCompositorPresent = 106,
     /// -> packed event (kind << 56 | value), WOULD_BLOCK when none, or ERROR
     InputPoll = 107,
+    /// deadline tick (u64::MAX = none) -> packed event, WOULD_BLOCK on
+    /// timeout, or ERROR
+    InputWait = 108,
 }
 
 pub fn entry_address() -> u64 {
@@ -2226,6 +2229,7 @@ pub extern "C" fn wovenhat_syscall_dispatch(
         value if value == Number::GraphicsCompositorClaim as u64 => sys_compositor_claim(),
         value if value == Number::GraphicsCompositorPresent as u64 => sys_compositor_present(),
         value if value == Number::InputPoll as u64 => sys_input_poll(),
+        value if value == Number::InputWait as u64 => sys_input_wait(arg0),
         _ => u64::MAX,
     };
 
@@ -2376,6 +2380,28 @@ fn sys_input_poll() -> u64 {
     let owner = crate::task::current_process_id();
     loop {
         match crate::woven_input::poll_for(owner) {
+            Err(_) => return SYSCALL_ERROR,
+            Ok(None) => return WOULD_BLOCK,
+            Ok(Some(event)) => {
+                if let Some(encoded) = encode_input(event) {
+                    return encoded;
+                }
+            }
+        }
+    }
+}
+
+/// Sleep until the next input event for the caller or until `deadline`.
+/// Same authority as `InputPoll`; returns WOULD_BLOCK on timeout.
+fn sys_input_wait(deadline: u64) -> u64 {
+    const WOULD_BLOCK: u64 = u64::MAX - 1;
+    if !crate::task::current_has(crate::capability::Capability::InputIo) {
+        return SYSCALL_ERROR;
+    }
+    let owner = crate::task::current_process_id();
+    let task = crate::task::current_task_id();
+    loop {
+        match crate::woven_input::wait_for(owner, task, deadline) {
             Err(_) => return SYSCALL_ERROR,
             Ok(None) => return WOULD_BLOCK,
             Ok(Some(event)) => {

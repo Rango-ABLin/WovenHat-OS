@@ -1,5 +1,58 @@
 # Stage status
 
+## Stage 19.6 — event-driven input wait (2026-10-12)
+
+The focus holder can now sleep until input arrives instead of polling.
+Syscall 108 (`InputWait(deadline)`) returns the next event, or `WOULD_BLOCK`
+when the timer reaches `deadline` (`u64::MAX` waits indefinitely). It has the
+same authority as `InputPoll`: `InputIo` plus focus. libwoven wraps it as
+`input_wait(Option<Ticks>)`.
+
+`woven_input::wait_for` registers the calling task as the focus waiter under
+`FOCUS`, releases the lock, and sleeps with
+`task::wait_for_event_until(deadline)`. `publish` takes the waiter out under
+`FOCUS` and calls `task::signal_event` after releasing it. No wakeup is lost:
+a publish between registration and sleep latches the scheduler's pending
+permit, and the sleep consumes it. Unrelated wakeups simply re-check.
+
+Lock order:
+- The task-exit path takes the scheduler lock, then the compositor lock, then
+  `FOCUS`. So `FOCUS` is never held while the scheduler lock is taken: waking
+  and liveness checks happen with it released.
+- Focus withdrawal forgets the waiter rather than waking it. It runs under the
+  scheduler lock on the exit path, and only the owner's exit withdraws focus,
+  which takes every task that could be waiting with it.
+
+Waiter rules:
+- One task per process may wait. A second concurrent waiter is refused, unless
+  the registered one has died, in which case `task::task_live` (checked after
+  releasing `FOCUS`) lets the newcomer take over by compare-and-set. Task ids
+  are never reused, so a dead answer is final.
+- A timed-out wait unregisters itself and returns any event that raced in
+  after its last check.
+
+Gate `[S19.6] blocking input wait: PASSED`:
+- An unprivileged probe must be refused `InputWait`, with a bounded deadline
+  so a broken check cannot hang the gate.
+- hello-gui `--wait` gains focus and reads `o`, `k`, Enter through
+  `input_wait(None)`. Before publishing each key, the kernel waits until the
+  client's task is `Blocked`. A polling client is only ever `Ready`, so this
+  proves it sleeps in the kernel and is woken by the publish itself.
+- The app then makes a 20-tick timed wait with nothing pending. It must return
+  `None`, and no earlier than the deadline.
+- Focus returns on exit.
+
+Negative control: with the sleep in `wait_for` replaced by `yield_now` (a
+spinning wait), the gate fails at "client sleeps while waiting". Evidence is in
+`audit-artifacts/stage19.6-negative-control-*`.
+
+Open: the waiter slot is per process, not per thread, so a multi-threaded
+client must funnel input through one thread. There is no combined wait on
+input plus other events: `InputWait` is separate from the event objects, so a
+client cannot yet sleep on "input or timer or IPC" in one call. Next
+prerequisite: delegating client surfaces to the holder by capability, so a
+separate compositor process can draw other clients' windows.
+
 ## Stage 19.5 — input focus follows the compositor lease holder (2026-10-12)
 
 When the compositor lease holder takes the display (its first present), it

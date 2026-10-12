@@ -1383,7 +1383,8 @@ pub fn spawn_user_process(
     feature = "stage18-2-test",
     feature = "stage19-2-test",
     feature = "stage19-4-test",
-    feature = "stage19-5-test"
+    feature = "stage19-5-test",
+    feature = "stage19-6-test"
 ))]
 pub fn spawn_user_system_service(
     name: &'static str,
@@ -1698,6 +1699,36 @@ pub fn process_exited(id: ProcessId) -> bool {
         .flatten()
         .find(|process| process.id == id)
         .is_some_and(|process| process.state == ProcessState::Exited)
+}
+
+/// Whether `id` names a task that still exists and has not died. Task ids are
+/// never reused, so a false answer is final.
+pub fn task_live(id: TaskId) -> bool {
+    SCHEDULER
+        .lock()
+        .tasks
+        .iter()
+        .any(|task| task.id == id && !matches!(task.state, TaskState::Empty | TaskState::Dead))
+}
+
+/// Whether the main task of process `id` is blocked waiting for an event, as
+/// opposed to runnable. Lets a gate prove a client sleeps rather than polls.
+#[cfg(feature = "stage19-6-test")]
+pub fn process_task_blocked(id: ProcessId) -> bool {
+    // Process table first, released before the scheduler lock is taken.
+    let Some(task_id) = process_table_lock()
+        .iter()
+        .flatten()
+        .find(|process| process.id == id)
+        .map(|process| process.task_id)
+    else {
+        return false;
+    };
+    SCHEDULER
+        .lock()
+        .tasks
+        .iter()
+        .any(|task| task.id == task_id && task.state == TaskState::Blocked)
 }
 
 pub fn current_process_id() -> u64 {

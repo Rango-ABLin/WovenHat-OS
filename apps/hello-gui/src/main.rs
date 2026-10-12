@@ -9,6 +9,10 @@
 //! publishes once this process holds input focus, and checks it received
 //! exactly those, in order.
 //!
+//! With `--wait` it does the same through the blocking `input_wait`, sleeping
+//! between keys, then checks that a timed wait with no input returns on
+//! schedule.
+//!
 //! With `--probe <handle>` it runs as an ordinary process and checks that the
 //! kernel refuses it everything it has no authority for: every compositor
 //! operation, and every operation on the surface `<handle>`, which belongs to
@@ -45,13 +49,21 @@ fn fail(code: u64) -> ! {
 fn main(args: Args) -> ! {
     match args.get(1) {
         Some(b"--probe") => probe(args.get(2)),
-        Some(b"--input") => run(true),
+        Some(b"--input") => run(Input::Poll),
+        Some(b"--wait") => run(Input::Wait),
         Some(_) => fail(250),
-        None => run(false),
+        None => run(Input::None),
     }
 }
 
-fn run(input: bool) -> ! {
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Input {
+    None,
+    Poll,
+    Wait,
+}
+
+fn run(input: Input) -> ! {
     // 1. Allocate the surface.
     let surface = match GraphicsSurface::create(WIDTH, HEIGHT) {
         Ok(surface) => surface,
@@ -141,8 +153,10 @@ fn run(input: bool) -> ! {
     }
     let _ = libwoven::print("hello-gui: framebuffer presented\n");
 
-    if input {
-        await_keys();
+    match input {
+        Input::None => {}
+        Input::Poll => await_keys(),
+        Input::Wait => await_keys_blocking(),
     }
 
     // 7. Dropping the surface releases the client slot. The compositor keeps
@@ -180,6 +194,36 @@ fn await_keys() {
         fail(33);
     }
     let _ = libwoven::print("hello-gui: input received\n");
+}
+
+/// The `await_keys` contract through the blocking call: no polling loop, the
+/// process sleeps in the kernel between keys. Then a timed wait with nothing
+/// pending must time out, and not before its deadline.
+fn await_keys_blocking() {
+    use libwoven::Key;
+    const EXPECTED: [Key; 3] = [Key::Char('o'), Key::Char('k'), Key::Enter];
+    const TIMEOUT_TICKS: u64 = 20;
+
+    for (index, expected) in EXPECTED.iter().enumerate() {
+        match libwoven::input_wait(None) {
+            Ok(Some(key)) if key == *expected => {}
+            Ok(Some(_)) => fail(40 + index as u64),
+            Ok(None) => fail(44),
+            Err(_) => fail(45),
+        }
+    }
+    let _ = libwoven::print("hello-gui: blocking input received\n");
+
+    let start = libwoven::ticks();
+    match libwoven::input_wait(Some(start + TIMEOUT_TICKS)) {
+        Ok(None) => {}
+        Ok(Some(_)) => fail(46),
+        Err(_) => fail(47),
+    }
+    if libwoven::ticks().wrapping_sub(start) < TIMEOUT_TICKS {
+        fail(48);
+    }
+    let _ = libwoven::print("hello-gui: wait timed out on schedule\n");
 }
 
 fn parse_u64(text: &[u8]) -> Option<u64> {
@@ -227,6 +271,10 @@ fn probe(victim: Option<&[u8]>) -> ! {
     // Without InputIo and focus, input is off limits too.
     if libwoven::input_poll().is_ok() {
         fail(215);
+    }
+    // Bounded deadline, so a broken check cannot hang the gate.
+    if libwoven::input_wait(Some(libwoven::ticks() + 1)).is_ok() {
+        fail(216);
     }
     let _ = libwoven::print("hello-gui probe: compositor refused\n");
 

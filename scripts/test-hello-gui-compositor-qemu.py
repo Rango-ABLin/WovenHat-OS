@@ -2,7 +2,8 @@
 
 With --stage 19.4 the same image runs the compositor authority gate: an
 unprivileged --probe run that must be refused, then a run with DisplayIo.
-With --stage 19.5 it runs the input focus gate with hello-gui --input.
+With --stage 19.5 it runs the input focus gate with hello-gui --input, and
+with --stage 19.6 the blocking input wait gate with hello-gui --wait.
 """
 import argparse, os, shutil, subprocess, sys
 from pathlib import Path
@@ -11,6 +12,7 @@ STAGES={
     '19.2': ('stage19-2-test', '[S19.2] hello-gui through the compositor: PASSED', 'hello-gui-compositor', 'hello-gui compositor'),
     '19.4': ('stage19-4-test', '[S19.4] compositor authority: PASSED', 'hello-gui-authority', 'compositor authority'),
     '19.5': ('stage19-5-test', '[S19.5] input focus: PASSED', 'hello-gui-input', 'input focus'),
+    '19.6': ('stage19-6-test', '[S19.6] blocking input wait: PASSED', 'hello-gui-wait', 'blocking input wait'),
 }
 def main():
     p=argparse.ArgumentParser(description=__doc__)

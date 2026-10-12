@@ -201,6 +201,7 @@ pub mod syscall {
     pub const GRAPHICS_COMPOSITOR_CLAIM: u64 = 105;
     pub const GRAPHICS_COMPOSITOR_PRESENT: u64 = 106;
     pub const INPUT_POLL: u64 = 107;
+    pub const INPUT_WAIT: u64 = 108;
 
     /// Invoke the WovenHat Ring-3 ABI.
     ///
@@ -430,6 +431,12 @@ pub mod syscall {
 
     /// # Safety
     /// Must be called from WovenHat userspace.
+    pub unsafe fn input_wait(deadline: u64) -> u64 {
+        unsafe { invoke(INPUT_WAIT, deadline, 0, 0) }
+    }
+
+    /// # Safety
+    /// Must be called from WovenHat userspace.
     pub unsafe fn graphics_surface_stroke(
         handle: u64,
         x: u16, y: u16, width: u16, height: u16,
@@ -558,7 +565,20 @@ pub enum Key {
 /// `Ok(None)` when no event is pending; the call never blocks.
 pub fn input_poll() -> Result<Option<Key>, Error> {
     // SAFETY: argument-free call.
-    let result = unsafe { syscall::input_poll() };
+    decode_input(unsafe { syscall::input_poll() })
+}
+
+/// Sleep until the next input event, or until the timer reaches `deadline`
+/// (`None` waits indefinitely). Returns `Ok(None)` on timeout.
+///
+/// Same authority as [`input_poll`]. Only one task of a process may wait at a
+/// time; a second concurrent waiter is refused.
+pub fn input_wait(deadline: Option<time::Ticks>) -> Result<Option<Key>, Error> {
+    // SAFETY: integer-only call.
+    decode_input(unsafe { syscall::input_wait(deadline.unwrap_or(u64::MAX)) })
+}
+
+fn decode_input(result: u64) -> Result<Option<Key>, Error> {
     if result == syscall::WOULD_BLOCK {
         return Ok(None);
     }
