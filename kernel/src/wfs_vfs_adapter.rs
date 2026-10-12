@@ -45,6 +45,7 @@ impl<'a, D: BlockDevice> DirectoryAdapter<'a, D> {
     pub fn lookup(&mut self, name: &str) -> Result<u64, vfs::Error> {
         self.volume
             .lookup(self.directory, validate_component(name)?)
+            .map(|entry| entry.inode)
             .map_err(translate_error)
     }
 
