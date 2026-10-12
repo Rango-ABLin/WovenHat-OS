@@ -258,6 +258,28 @@ pub fn blit_for(pid: u64, handle: user_graphics::Handle, x: i32, y: i32) -> Resu
     Ok(touched)
 }
 
+/// Blit another process's surface that its owner has shared with the lease
+/// holder `pid`. This is what lets a separate compositor process draw its
+/// clients' windows: the client grants, the holder composites.
+pub fn blit_shared_for(
+    pid: u64,
+    handle: user_graphics::Handle,
+    x: i32,
+    y: i32,
+) -> Result<Rect, Error> {
+    require_holder(pid)?;
+    let snapshot =
+        user_graphics::snapshot_shared(handle, pid).map_err(|_| Error::InvalidClient)?;
+    let mut guard = STATE.lock();
+    let state = guard.as_mut().ok_or(Error::NotReady)?;
+    if state.holder != Some(pid) {
+        return Err(Error::NotHolder);
+    }
+    let touched = state.surface.blit(&snapshot, x, y);
+    state.damage.add(touched);
+    Ok(touched)
+}
+
 /// [`pixel`] on behalf of a userspace lease holder. Reading the screen exposes
 /// every client's pixels, so it carries the same authority as drawing on it.
 pub fn pixel_for(pid: u64, x: i32, y: i32) -> Result<u32, Error> {

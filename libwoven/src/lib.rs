@@ -202,6 +202,10 @@ pub mod syscall {
     pub const GRAPHICS_COMPOSITOR_PRESENT: u64 = 106;
     pub const INPUT_POLL: u64 = 107;
     pub const INPUT_WAIT: u64 = 108;
+    pub const GRAPHICS_SURFACE_SHARE: u64 = 109;
+    pub const GRAPHICS_COMPOSITOR_BLIT_SHARED: u64 = 110;
+    pub const MESSAGE_SEND: u64 = 11;
+    pub const MESSAGE_RECEIVE: u64 = 12;
 
     /// Invoke the WovenHat Ring-3 ABI.
     ///
@@ -437,6 +441,31 @@ pub mod syscall {
 
     /// # Safety
     /// Must be called from WovenHat userspace.
+    pub unsafe fn graphics_surface_share(handle: u64, grantee: u64) -> u64 {
+        unsafe { invoke(GRAPHICS_SURFACE_SHARE, handle, grantee, 0) }
+    }
+
+    /// # Safety
+    /// Must be called from WovenHat userspace.
+    pub unsafe fn graphics_compositor_blit_shared(handle: u64, x: i32, y: i32) -> u64 {
+        let packed = (x as u32 as u64) | ((y as u32 as u64) << 32);
+        unsafe { invoke(GRAPHICS_COMPOSITOR_BLIT_SHARED, handle, packed, 0) }
+    }
+
+    /// # Safety
+    /// `buffer` must be readable for `length` bytes.
+    pub unsafe fn message_send(receiver: u64, buffer: *const u8, length: usize) -> u64 {
+        unsafe { invoke(MESSAGE_SEND, receiver, buffer as u64, length as u64) }
+    }
+
+    /// # Safety
+    /// `buffer` must be writable for `capacity` bytes and `sender` for 8.
+    pub unsafe fn message_receive(buffer: *mut u8, capacity: usize, sender: *mut u64) -> u64 {
+        unsafe { invoke(MESSAGE_RECEIVE, buffer as u64, capacity as u64, sender as u64) }
+    }
+
+    /// # Safety
+    /// Must be called from WovenHat userspace.
     pub unsafe fn graphics_surface_stroke(
         handle: u64,
         x: u16, y: u16, width: u16, height: u16,
@@ -517,6 +546,22 @@ impl GraphicsSurface {
         check(result).map(|_| ())
     }
 
+    /// Allow process `grantee` to read this surface, so a compositor process
+    /// can draw it with [`compositor_blit_shared`]. Replaces any earlier
+    /// grant; the grant ends when the surface is destroyed.
+    pub fn share_with(&self, grantee: process::Id) -> Result<(), Error> {
+        // SAFETY: integer-only call carrying the surface's own handle.
+        let result = unsafe { syscall::graphics_surface_share(self.handle, grantee.0) };
+        check(result).map(|_| ())
+    }
+
+    /// Withdraw any grant made with [`share_with`](Self::share_with).
+    pub fn unshare(&self) -> Result<(), Error> {
+        // SAFETY: integer-only call carrying the surface's own handle.
+        let result = unsafe { syscall::graphics_surface_share(self.handle, 0) };
+        check(result).map(|_| ())
+    }
+
     /// Blit this surface onto the compositor at `(x, y)`.
     ///
     /// Policy is up to the compositor: today it draws exactly where asked,
@@ -526,6 +571,34 @@ impl GraphicsSurface {
         let result = unsafe { syscall::graphics_compositor_blit(self.handle, x, y) };
         check(result).map(|_| ())
     }
+}
+
+/// Blit another process's surface onto the compositor at `(x, y)`.
+///
+/// `handle` is the owner's token, received out of band (for example over
+/// IPC). It works only for the lease holder, and only if the owner shared the
+/// surface with this process.
+pub fn compositor_blit_shared(handle: u64, x: i32, y: i32) -> Result<(), Error> {
+    // SAFETY: integer-only call.
+    let result = unsafe { syscall::graphics_compositor_blit_shared(handle, x, y) };
+    check(result).map(|_| ())
+}
+
+/// Send `bytes` to process `receiver`. Requires the `Ipc` capability.
+pub fn message_send(receiver: process::Id, bytes: &[u8]) -> Result<(), Error> {
+    // SAFETY: the pointer and length describe `bytes`.
+    let result = unsafe { syscall::message_send(receiver.0, bytes.as_ptr(), bytes.len()) };
+    check(result).map(|_| ())
+}
+
+/// Take the next message, returning its length and sender. Fails when no
+/// message is queued, or when it does not fit in `buffer`.
+pub fn message_receive(buffer: &mut [u8]) -> Result<(usize, process::Id), Error> {
+    let mut sender = 0u64;
+    // SAFETY: the pointers describe `buffer` and `sender`, both writable.
+    let result =
+        unsafe { syscall::message_receive(buffer.as_mut_ptr(), buffer.len(), &mut sender) };
+    check(result).map(|length| (length as usize, process::Id(sender)))
 }
 
 /// Take the compositor lease.

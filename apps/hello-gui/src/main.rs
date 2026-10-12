@@ -13,6 +13,12 @@
 //! between keys, then checks that a timed wait with no input returns on
 //! schedule.
 //!
+//! With `--compositor` it acts as a separate compositor process: it takes the
+//! lease, receives two surface tokens from a client over IPC, draws the one
+//! the client shared, and must be refused the one it did not. With
+//! `--client <pid>` it is that client: it shares one surface with `<pid>`,
+//! sends both tokens, and waits for the compositor's reply.
+//!
 //! With `--probe <handle>` it runs as an ordinary process and checks that the
 //! kernel refuses it everything it has no authority for: every compositor
 //! operation, and every operation on the surface `<handle>`, which belongs to
@@ -51,6 +57,8 @@ fn main(args: Args) -> ! {
         Some(b"--probe") => probe(args.get(2)),
         Some(b"--input") => run(Input::Poll),
         Some(b"--wait") => run(Input::Wait),
+        Some(b"--compositor") => compositor(),
+        Some(b"--client") => client(args.get(2)),
         Some(_) => fail(250),
         None => run(Input::None),
     }
@@ -224,6 +232,114 @@ fn await_keys_blocking() {
         fail(48);
     }
     let _ = libwoven::print("hello-gui: wait timed out on schedule\n");
+}
+
+const CLIENT_COLOR: u32 = rgb(180, 40, 90);
+const PRIVATE_COLOR: u32 = rgb(9, 9, 9);
+const CLIENT_X: i32 = 300;
+const CLIENT_Y: i32 = 200;
+const IPC_DEADLINE_TICKS: u64 = 2000;
+
+/// Wait for a message, bounded so a missing peer fails the gate instead of
+/// hanging it.
+fn receive_bounded(buffer: &mut [u8], code: u64) -> (usize, libwoven::process::Id) {
+    let start = libwoven::ticks();
+    loop {
+        if let Ok(received) = libwoven::message_receive(buffer) {
+            return received;
+        }
+        if libwoven::ticks().wrapping_sub(start) > IPC_DEADLINE_TICKS {
+            fail(code);
+        }
+        libwoven::yield_now();
+    }
+}
+
+/// A compositor process: draws a client's window from a shared surface.
+fn compositor() -> ! {
+    if libwoven::compositor_claim().is_err() {
+        fail(60);
+    }
+    let _ = libwoven::print("hello-gui compositor: lease held\n");
+
+    let mut message = [0u8; 16];
+    let (length, client) = receive_bounded(&mut message, 61);
+    if length != 16 {
+        fail(62);
+    }
+    let shared = u64::from_le_bytes(message[..8].try_into().unwrap_or([0; 8]));
+    let private = u64::from_le_bytes(message[8..].try_into().unwrap_or([0; 8]));
+
+    // The shared surface is drawable, and lands with the client's pixels.
+    if libwoven::compositor_blit_shared(shared, CLIENT_X, CLIENT_Y).is_err() {
+        fail(63);
+    }
+    match libwoven::screen_pixel(CLIENT_X, CLIENT_Y) {
+        Ok(color) if color == CLIENT_COLOR => {}
+        _ => fail(64),
+    }
+    // The surface the client kept private is refused, even with its genuine
+    // token, and so is the shared one through the owner-only blit path.
+    if libwoven::compositor_blit_shared(private, 0, 0).is_ok() {
+        fail(65);
+    }
+    // SAFETY: integer-only call; the kernel validates the token.
+    if unsafe { syscall::graphics_compositor_blit(shared, 0, 0) } != libwoven::syscall::ERROR {
+        fail(66);
+    }
+    let _ = libwoven::print("hello-gui compositor: client window composited\n");
+
+    match libwoven::compositor_present() {
+        Ok(written) if written > 0 => {}
+        _ => fail(67),
+    }
+    if libwoven::message_send(client, b"done").is_err() {
+        fail(68);
+    }
+    libwoven::exit(0)
+}
+
+/// A client of a compositor process.
+fn client(compositor: Option<&[u8]>) -> ! {
+    let Some(compositor) = compositor.and_then(parse_u64).map(libwoven::process::Id) else {
+        fail(70)
+    };
+    let window = match GraphicsSurface::create(40, 30) {
+        Ok(surface) => surface,
+        Err(_) => fail(71),
+    };
+    let private = match GraphicsSurface::create(8, 8) {
+        Ok(surface) => surface,
+        Err(_) => fail(72),
+    };
+    if window.fill_rect(0, 0, 40, 30, CLIENT_COLOR).is_err()
+        || private.fill_rect(0, 0, 8, 8, PRIVATE_COLOR).is_err()
+    {
+        fail(73);
+    }
+    if window.share_with(compositor).is_err() {
+        fail(74);
+    }
+    // A client has no display authority of its own.
+    if libwoven::compositor_blit_shared(window.handle(), 0, 0).is_ok() {
+        fail(75);
+    }
+    let mut message = [0u8; 16];
+    message[..8].copy_from_slice(&window.handle().to_le_bytes());
+    message[8..].copy_from_slice(&private.handle().to_le_bytes());
+    if libwoven::message_send(compositor, &message).is_err() {
+        fail(76);
+    }
+    let _ = libwoven::print("hello-gui client: window shared\n");
+
+    // Keep the surfaces alive until the compositor has drawn them.
+    let mut reply = [0u8; 8];
+    let (length, sender) = receive_bounded(&mut reply, 77);
+    if sender != compositor || &reply[..length] != b"done" {
+        fail(78);
+    }
+    let _ = libwoven::print("hello-gui client: compositor confirmed\n");
+    libwoven::exit(0)
 }
 
 fn parse_u64(text: &[u8]) -> Option<u64> {

@@ -290,6 +290,10 @@ pub enum Number {
     /// deadline tick (u64::MAX = none) -> packed event, WOULD_BLOCK on
     /// timeout, or ERROR
     InputWait = 108,
+    /// own handle, grantee pid (0 revokes) -> 0 or ERROR
+    GraphicsSurfaceShare = 109,
+    /// owner's handle, packed (x | y<<32) -> 0 or ERROR
+    GraphicsCompositorBlitShared = 110,
 }
 
 pub fn entry_address() -> u64 {
@@ -2230,6 +2234,12 @@ pub extern "C" fn wovenhat_syscall_dispatch(
         value if value == Number::GraphicsCompositorPresent as u64 => sys_compositor_present(),
         value if value == Number::InputPoll as u64 => sys_input_poll(),
         value if value == Number::InputWait as u64 => sys_input_wait(arg0),
+        value if value == Number::GraphicsSurfaceShare as u64 => {
+            sys_graphics_share(arg0, arg1)
+        }
+        value if value == Number::GraphicsCompositorBlitShared as u64 => {
+            sys_compositor_blit_shared(arg0, arg1)
+        }
         _ => u64::MAX,
     };
 
@@ -2336,6 +2346,30 @@ fn sys_compositor_blit(handle: u64, packed: u64) -> u64 {
     };
     let pid = crate::task::current_process_id();
     crate::compositor::blit_for(pid, handle, x, y).map_or(SYSCALL_ERROR, |_| 0)
+}
+
+/// Share one of the caller's own surfaces with process `grantee`, or revoke
+/// with 0. No capability: a process may always decide who reads its pixels.
+fn sys_graphics_share(handle: u64, grantee: u64) -> u64 {
+    let Some(handle) = caller_surface(handle) else {
+        return SYSCALL_ERROR;
+    };
+    let grantee = (grantee != 0).then_some(grantee);
+    crate::user_graphics::share(handle, grantee).map_or(SYSCALL_ERROR, |()| 0)
+}
+
+/// Blit a surface another process shared with the caller. Requires
+/// `DisplayIo` and the lease. The handle is the owner's token, so it is not
+/// bound to the caller; the registry's grant is what authorises the read.
+fn sys_compositor_blit_shared(handle: u64, packed: u64) -> u64 {
+    let x = (packed & 0xffff_ffff) as i32;
+    let y = ((packed >> 32) & 0xffff_ffff) as i32;
+    if !display_authorized() {
+        return SYSCALL_ERROR;
+    }
+    let pid = crate::task::current_process_id();
+    let handle = crate::user_graphics::Handle::from_u64(handle);
+    crate::compositor::blit_shared_for(pid, handle, x, y).map_or(SYSCALL_ERROR, |_| 0)
 }
 
 /// Take the compositor lease. Requires `DisplayIo`.

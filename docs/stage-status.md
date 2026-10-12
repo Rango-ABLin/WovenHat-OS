@@ -1,5 +1,67 @@
 # Stage status
 
+## Stage 19.7 — client surfaces delegated to a compositor process (2026-10-12)
+
+A separate compositor process can now draw other clients' windows, with each
+client's consent.
+
+**Sharing:** a client grants one process read access to one of its own
+surfaces with syscall 109 (`GraphicsSurfaceShare(handle, grantee)`; grantee 0
+revokes). Sharing needs no capability: a process may always decide who reads
+its pixels. The token still goes through `caller_surface`, so only the owner
+can share. Each surface carries at most one grant, in the slot. The grant is
+cleared whenever the slot is freed, by destroy or by the owner's exit, so it
+never outlives the surface or carries over to the slot's next occupant. Pids
+are never reused, so a grant naming an exited process is inert.
+
+**Compositing:** the lease holder draws a shared surface with syscall 110
+(`GraphicsCompositorBlitShared(token, x | y << 32)`). It requires `DisplayIo`
+and the lease. The token is the owner's, passed out of band, so it is
+deliberately not bound to the caller. Instead
+`user_graphics::snapshot_shared` requires slot, generation and owner to match
+and the slot's grant to name the caller: a token alone confers nothing. The
+snapshot-then-blit lock pattern is the same as `blit_for`.
+
+**libwoven:** `GraphicsSurface::share_with` / `unshare`,
+`compositor_blit_shared`, and typed IPC: `message_send` /
+`message_receive` over the existing syscalls 11 and 12.
+
+Gate `[S19.7] surface delegation: PASSED`:
+- The kernel first checks the grant rules: nothing is shared by default; the
+  grantee is allowed while a stranger and the owner itself are not; stale and
+  forged tokens are refused even for the grantee; revocation works; a grant
+  dies with its surface.
+- hello-gui `--compositor` (`Console | DisplayIo | Ipc`) takes the lease.
+  hello-gui `--client <pid>` runs as an ordinary process: it shares one
+  surface with the compositor, keeps a second private, checks it cannot blit
+  anything itself, and sends both tokens over IPC.
+- The compositor must draw the shared surface and see the client's colour on
+  the screen. It must be refused the private surface even with its genuine
+  token, and refused the shared one through the owner-only blit path. It then
+  presents and replies; the client waits for that reply so its surfaces stay
+  alive until drawn.
+- After both exit, the kernel reads the client's colour at two corners of the
+  composited window, and checks that the client's surfaces and grants and the
+  lease are gone.
+
+Negative control: with the grant check bypassed in `snapshot_shared`, the gate
+fails at the grant-rules check. Evidence is in
+`audit-artifacts/stage19.7-negative-control-*`.
+
+Open:
+- A shared surface is copied whole at each blit, and there is no damage
+  notification from client to compositor: the compositor redraws when it
+  chooses.
+- One grantee per surface.
+- Token transfer is by plain IPC bytes. It cannot be forged into access,
+  because the grant is the authority, but it is not a kernel-transferred
+  handle.
+- IPC receive is still non-blocking, so both test processes poll with a
+  bounded deadline.
+
+Next prerequisites: a blocking IPC receive (or a combined wait with input),
+and client-to-compositor damage notification.
+
 ## Stage 19.6 — event-driven input wait (2026-10-12)
 
 The focus holder can now sleep until input arrives instead of polling.

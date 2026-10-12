@@ -98,6 +98,11 @@ struct Slot {
     owner: u64,
     generation: u32,
     surface: Option<Surface>,
+    /// The one process the owner has allowed to read this surface, if any.
+    /// Cleared whenever the slot is freed, so a grant never outlives the
+    /// surface it names. Process ids are never reused, so a grant naming an
+    /// exited process is inert.
+    shared_with: Option<u64>,
 }
 
 impl Slot {
@@ -106,7 +111,14 @@ impl Slot {
             owner: 0,
             generation: 1,
             surface: None,
+            shared_with: None,
         }
+    }
+
+    fn free(&mut self) {
+        self.surface = None;
+        self.shared_with = None;
+        self.generation = self.generation.wrapping_add(1).max(1);
     }
 }
 
@@ -171,6 +183,7 @@ pub fn create(owner: u64, width: u32, height: u32) -> Result<Handle, Error> {
             .ok_or(Error::SystemFull)?;
         let slot = &mut registry.slots[index];
         slot.owner = owner;
+        slot.shared_with = None;
         slot.surface = Some(Surface::new(width as usize, height as usize));
         Ok(Handle::pack(index, slot.generation, owner))
     })
@@ -225,6 +238,39 @@ pub fn snapshot(handle: Handle) -> Result<Surface, Error> {
     })
 }
 
+/// Allow `grantee` to read the surface named by `handle`, replacing any earlier
+/// grant; `None` revokes. The caller must already have bound `handle` to its
+/// owner, which is the only process allowed to share it.
+pub fn share(handle: Handle, grantee: Option<u64>) -> Result<(), Error> {
+    with_registry(|registry| {
+        registry.resolve_mut(handle)?;
+        registry.slots[handle.slot()].shared_with = grantee;
+        Ok(())
+    })
+}
+
+/// Copy a surface that its owner has shared with `grantee`.
+///
+/// `handle` is the owner's token, passed to the grantee out of band, so its
+/// owner field names the owner rather than the caller. The slot, generation
+/// and owner must still match, and the slot's grant must name `grantee`: a
+/// token alone confers nothing.
+pub fn snapshot_shared(handle: Handle, grantee: u64) -> Result<Surface, Error> {
+    with_registry(|registry| {
+        let shared = registry
+            .slots
+            .get(handle.slot())
+            .is_some_and(|slot| slot.shared_with == Some(grantee));
+        if !shared {
+            return Err(Error::InvalidHandle);
+        }
+        let surface = registry.resolve_mut(handle)?;
+        let mut copy = Surface::new(surface.width(), surface.height());
+        copy.blit(surface, 0, 0);
+        Ok(copy)
+    })
+}
+
 /// Read one pixel back, so a client can verify what it drew.
 pub fn pixel(handle: Handle, x: i32, y: i32) -> Result<u32, Error> {
     with_registry(|registry| {
@@ -250,8 +296,7 @@ pub fn destroy(handle: Handle) -> Result<(), Error> {
         {
             return Err(Error::InvalidHandle);
         }
-        slot.surface = None;
-        slot.generation = slot.generation.wrapping_add(1).max(1);
+        slot.free();
         Ok(())
     })
 }
@@ -264,8 +309,7 @@ pub fn release_owner(owner: u64) -> usize {
         let mut released = 0usize;
         for slot in registry.slots.iter_mut() {
             if slot.surface.is_some() && slot.owner == owner {
-                slot.surface = None;
-                slot.generation = slot.generation.wrapping_add(1).max(1);
+                slot.free();
                 released += 1;
             }
         }
@@ -373,4 +417,45 @@ pub fn structural_self_test() -> bool {
     }
     release_owner(2);
     true
+}
+
+/// Grant rules for the Stage 19.7 gate.
+#[cfg(feature = "stage19-7-test")]
+pub fn sharing_self_test() -> bool {
+    let (owner, grantee, stranger) = (501u64, 502u64, 503u64);
+    let Ok(surface) = create(owner, 4, 4) else {
+        return false;
+    };
+    // Nothing is shared until the owner says so.
+    if snapshot_shared(surface, grantee).is_ok() {
+        return false;
+    }
+    if share(surface, Some(grantee)).is_err()
+        || snapshot_shared(surface, grantee).is_err()
+        || snapshot_shared(surface, stranger).is_ok()
+        || snapshot_shared(surface, owner).is_ok()
+    {
+        return false;
+    }
+    // A token with the right slot but the wrong generation or owner is still
+    // refused even for the grantee.
+    let stale = Handle::pack(surface.slot(), surface.generation().wrapping_add(1), owner);
+    let forged = Handle::pack(surface.slot(), surface.generation(), stranger);
+    if snapshot_shared(stale, grantee).is_ok() || snapshot_shared(forged, grantee).is_ok() {
+        return false;
+    }
+    // Revocation, then re-grant, then the grant dies with the surface and does
+    // not carry over to the slot's next occupant.
+    if share(surface, None).is_err() || snapshot_shared(surface, grantee).is_ok() {
+        return false;
+    }
+    if share(surface, Some(grantee)).is_err() || destroy(surface).is_err() {
+        return false;
+    }
+    let Ok(next) = create(owner, 4, 4) else {
+        return false;
+    };
+    let ok = next.slot() != surface.slot() || snapshot_shared(next, grantee).is_err();
+    release_owner(owner);
+    ok && count_for(owner) == 0
 }

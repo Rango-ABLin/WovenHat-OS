@@ -3363,6 +3363,15 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         serial::write_line(format_args!("[S1-5] storage journal: PASSED"));
         qemu_test_exit_success();
     }
+    #[cfg(feature = "stage19-7-test")]
+    {
+        if !stage19_7_self_test() {
+            serial::write_line(format_args!("[S19.7] surface delegation: FAILED"));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!("[S19.7] surface delegation: PASSED"));
+        qemu_test_exit_success();
+    }
     #[cfg(feature = "stage19-6-test")]
     {
         if !stage19_6_self_test() {
@@ -4413,7 +4422,8 @@ fn stage16_1_self_test() -> bool {
     feature = "stage19-2-test",
     feature = "stage19-4-test",
     feature = "stage19-5-test",
-    feature = "stage19-6-test"
+    feature = "stage19-6-test",
+    feature = "stage19-7-test"
 ))]
 const HELLO_GUI_IMAGE: &[u8] = include_bytes!(env!("WOVENHAT_HELLO_GUI_IMAGE"));
 
@@ -4425,7 +4435,8 @@ const HELLO_GUI_IMAGE: &[u8] = include_bytes!(env!("WOVENHAT_HELLO_GUI_IMAGE"));
     feature = "stage19-2-test",
     feature = "stage19-4-test",
     feature = "stage19-5-test",
-    feature = "stage19-6-test"
+    feature = "stage19-6-test",
+    feature = "stage19-7-test"
 ))]
 fn display_client_capabilities() -> capability::CapabilitySet {
     capability::CapabilitySet::only(capability::Capability::Console)
@@ -4439,7 +4450,8 @@ fn display_client_capabilities() -> capability::CapabilitySet {
     feature = "stage19-2-test",
     feature = "stage19-4-test",
     feature = "stage19-5-test",
-    feature = "stage19-6-test"
+    feature = "stage19-6-test",
+    feature = "stage19-7-test"
 ))]
 fn run_hello_gui(
     image: &[u8],
@@ -4457,7 +4469,8 @@ fn run_hello_gui(
     feature = "stage19-2-test",
     feature = "stage19-4-test",
     feature = "stage19-5-test",
-    feature = "stage19-6-test"
+    feature = "stage19-6-test",
+    feature = "stage19-7-test"
 ))]
 fn spawn_hello_gui(
     image: &[u8],
@@ -4480,7 +4493,8 @@ fn spawn_hello_gui(
     feature = "stage19-2-test",
     feature = "stage19-4-test",
     feature = "stage19-5-test",
-    feature = "stage19-6-test"
+    feature = "stage19-6-test",
+    feature = "stage19-7-test"
 ))]
 fn wait_hello_gui(pid: task::ProcessId) -> Option<(task::ProcessId, Result<i32, task::WaitError>)> {
     let start = timer::ticks();
@@ -4491,6 +4505,94 @@ fn wait_hello_gui(pid: task::ProcessId) -> Option<(task::ProcessId, Result<i32, 
         task::yield_now();
     }
     Some((pid, task::wait_process(pid.as_u64())))
+}
+
+/// Stage 19.7 acceptance: a separate compositor process draws a client's
+/// window from a surface the client shared with it.
+///
+/// hello-gui `--compositor` takes the lease with `Console | DisplayIo | Ipc`;
+/// hello-gui `--client <pid>` runs as an ordinary process, shares one surface
+/// with the compositor, keeps another private, and sends both tokens over IPC.
+/// The compositor must draw the shared one and be refused the private one.
+/// The kernel then reads the composited pixel itself and checks the grant died
+/// with the client's surfaces.
+#[cfg(feature = "stage19-7-test")]
+fn stage19_7_self_test() -> bool {
+    fn step(name: &str, ok: bool) -> bool {
+        serial::write_line(format_args!(
+            "[S19.7] {} {}",
+            name,
+            if ok { "PASS" } else { "FAIL" }
+        ));
+        ok
+    }
+
+    if !step("grant rules", user_graphics::sharing_self_test()) {
+        return false;
+    }
+    if !step(
+        "install into the filesystem",
+        vfs::create_read_only("/bin/hello-gui", HELLO_GUI_IMAGE).is_ok(),
+    ) {
+        return false;
+    }
+    let mut image = alloc::vec![0u8; HELLO_GUI_IMAGE.len()];
+    if vfs::read_all("/bin/hello-gui", &mut image) != Ok(HELLO_GUI_IMAGE.len()) {
+        return step("filesystem round-trip", false);
+    }
+
+    let capabilities = display_client_capabilities().with(capability::Capability::Ipc);
+    let Some(compositor_pid) =
+        spawn_hello_gui(&image, &["/bin/hello-gui", "--compositor"], Some(capabilities))
+    else {
+        return step("compositor process spawned", false);
+    };
+    let start = timer::ticks();
+    while compositor::holder() != Some(compositor_pid.as_u64()) {
+        if task::process_exited(compositor_pid) || timer::ticks().wrapping_sub(start) > 1000 {
+            return step("compositor process holds the lease", false);
+        }
+        task::yield_now();
+    }
+    step("compositor process holds the lease", true);
+
+    let compositor_arg = alloc::format!("{}", compositor_pid.as_u64());
+    let Some(client_pid) =
+        spawn_hello_gui(&image, &["/bin/hello-gui", "--client", &compositor_arg], None)
+    else {
+        return step("client process spawned", false);
+    };
+
+    let client_status = wait_hello_gui(client_pid).map(|(_, status)| status);
+    let compositor_status = wait_hello_gui(compositor_pid).map(|(_, status)| status);
+    let code = |status: Option<Result<i32, task::WaitError>>| match status {
+        Some(Ok(code)) => code as i64,
+        _ => -1,
+    };
+    serial::write_line(format_args!(
+        "[S19.7] client exit status {} compositor exit status {}",
+        code(client_status),
+        code(compositor_status)
+    ));
+    if !step("client exits zero", client_status == Some(Ok(0)))
+        || !step("compositor exits zero", compositor_status == Some(Ok(0)))
+    {
+        return false;
+    }
+    const CLIENT_COLOR: u32 = crate::display::rgb(180, 40, 90);
+    if !step(
+        "kernel reads the client's window on the compositor",
+        compositor::pixel(300, 200) == Ok(CLIENT_COLOR) && compositor::pixel(339, 229) == Ok(CLIENT_COLOR),
+    ) {
+        return false;
+    }
+    if !step(
+        "client surfaces and grants released on exit",
+        user_graphics::count_for(client_pid.as_u64()) == 0,
+    ) {
+        return false;
+    }
+    step("lease released on exit", compositor::holder().is_none())
 }
 
 /// Stage 19.6 acceptance: the focus holder sleeps for input instead of polling.
