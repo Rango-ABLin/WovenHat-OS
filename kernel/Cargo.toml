@@ -63,6 +63,8 @@ stage18-2-test = ["qemu-test"]
 stage19-1-test = ["qemu-test"]
 # A userspace app that paints its window onto the compositor.
 stage19-2-test = ["qemu-test"]
+# Compositor presentation to the framebuffer and display ownership.
+stage19-3-test = ["qemu-test"]
 stage1-5-test = ["qemu-test"]
 
 [dependencies]

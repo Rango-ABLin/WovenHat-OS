@@ -1,5 +1,48 @@
 # Stage status
 
+## Stage 19.3 — compositor presentation and display ownership (2026-10-12)
+
+The compositor surface now reaches the real framebuffer.
+`compositor::activate_display()` takes the display from the text terminal and
+marks the whole surface damaged. `compositor::present()` copies only the damaged
+regions through `display::present` and clears the damage after a successful
+copy, so a failed presentation loses nothing. `deactivate_display()` returns the
+display to the terminal.
+
+There is exactly one path to the framebuffer after boot.
+`terminal::with_framebuffer` lends the buffer under the terminal's lock, so the
+compositor keeps no pointer of its own and its writes cannot interleave with
+terminal text. While the compositor owns the display, terminal rendering is
+suppressed; when it releases the display, terminal rendering resumes. The
+compositor lock changed from an IRQ mutex to a preemption mutex: copying a
+1280×800 frame with interrupts disabled would stall device interrupts, and
+nothing takes the lock from interrupt context. Lock order is compositor, then
+terminal, both at rank 10. The terminal never calls the compositor.
+`with_framebuffer` deliberately avoids `file_fault_io`, which takes the
+scheduler lock: the framebuffer mapping is resident and cannot fault.
+
+The self-test reads framebuffer bytes back itself, converting by the reported
+pixel format, rather than trusting the compositor's state. It checks:
+presentation is refused before takeover; takeover repaints exactly the visible
+area (640×480 on QEMU's 1280×800 framebuffer); the screen shows the compositor's
+black background where the terminal's background was dark blue; a second
+present writes nothing; one 32×16 client blit presents exactly 512 pixels, with
+the client colour at its offset and background next to it; terminal output
+leaves the framebuffer checksum unchanged while the compositor owns the display;
+presentation is refused after release; and terminal output changes the
+framebuffer again afterwards. Marker: `[S19.3] compositor presentation: PASSED`.
+Passed on 1, 2 and 4 CPUs.
+
+Open: nothing in the production boot activates the compositor yet. The early
+boot `Console` still writes the framebuffer directly, outside the terminal lock.
+That is safe only while it runs single-threaded before the scheduler starts, and
+it must move behind `with_framebuffer` before the compositor is activated at
+boot. Userspace cannot present: activation and presentation are kernel calls,
+pending a compositor capability. Terminal output while compositing is not shown
+anywhere on screen; a terminal client of the compositor would replace that.
+Next prerequisites: the compositor capability (a single holder may present),
+then input events routed to the focused client.
+
 ## Stages 18–19 — client surfaces and the compositor primitive (2026-10-12)
 
 A userspace process can now own a drawing surface, draw into it through

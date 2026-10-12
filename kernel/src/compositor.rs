@@ -18,7 +18,7 @@
 //! screen without depending on real display geometry.
 
 use crate::display::{Damage, Rect, Surface};
-use crate::irq_lock::IrqMutex as Mutex;
+use crate::irq_lock::PreemptMutex as Mutex;
 use crate::user_graphics;
 
 /// Compositor surface width used by the acceptance tests. A real compositor
@@ -37,11 +37,18 @@ pub enum Error {
     InvalidClient,
     /// The requested pixel is outside the compositor surface.
     OutOfRange,
+    /// There is no framebuffer to present to.
+    NoDisplay,
+    /// The compositor does not currently own the display.
+    NotPresenting,
 }
 
 struct State {
     surface: Surface,
     damage: Damage,
+    /// Whether the compositor owns the display. While false, damage keeps
+    /// accumulating but nothing reaches the framebuffer.
+    presenting: bool,
 }
 
 impl State {
@@ -49,6 +56,7 @@ impl State {
         let mut state = Self {
             surface: Surface::new(width, height),
             damage: Damage::new(),
+            presenting: false,
         };
         // A compositor without an initial fill reads as transparent-looking
         // zeros, which the test cannot distinguish from "a client blitted
@@ -61,7 +69,11 @@ impl State {
     }
 }
 
-/// Rank 10, matching the user-graphics registry it reads from.
+/// Rank 10, matching the user-graphics registry it reads from. A preemption
+/// mutex rather than an IRQ mutex: presentation copies up to a full frame, and
+/// device interrupts must stay live while it does. Nothing takes this lock
+/// from interrupt context. Lock order: STATE, then the terminal's lock inside
+/// [`present`]; the terminal never calls back into this module.
 static STATE: Mutex<Option<State>> = Mutex::with_rank(None, 10);
 
 /// Initialise the compositor surface. Idempotent — the second call is a no-op.
@@ -102,6 +114,55 @@ pub fn blit(handle: user_graphics::Handle, x: i32, y: i32) -> Result<Rect, Error
     Ok(touched)
 }
 
+/// Take the display from the text terminal and repaint it from the
+/// compositor surface on the next [`present`].
+#[cfg_attr(not(feature = "stage19-3-test"), allow(dead_code))]
+pub fn activate_display() -> Result<(), Error> {
+    let mut guard = STATE.lock();
+    let state = guard.as_mut().ok_or(Error::NotReady)?;
+    if !crate::terminal::set_display_owned(true) {
+        return Err(Error::NoDisplay);
+    }
+    state.presenting = true;
+    // Whatever the terminal drew is now stale; the whole surface is damage.
+    let bounds = state.surface.bounds();
+    state.damage.add(bounds);
+    Ok(())
+}
+
+/// Return the display to the text terminal. Damage keeps accumulating so a
+/// later [`activate_display`] repaints correctly.
+#[cfg_attr(not(feature = "stage19-3-test"), allow(dead_code))]
+pub fn deactivate_display() {
+    let mut guard = STATE.lock();
+    if let Some(state) = guard.as_mut() {
+        if state.presenting {
+            state.presenting = false;
+            crate::terminal::set_display_owned(false);
+        }
+    }
+}
+
+/// Copy the damaged regions of the compositor surface to the framebuffer and
+/// clear the damage. Returns the number of pixels written.
+///
+/// Damage is cleared only after a successful copy, so a failed presentation
+/// loses nothing.
+#[cfg_attr(not(feature = "stage19-3-test"), allow(dead_code))]
+pub fn present() -> Result<usize, Error> {
+    let mut guard = STATE.lock();
+    let state = guard.as_mut().ok_or(Error::NotReady)?;
+    if !state.presenting {
+        return Err(Error::NotPresenting);
+    }
+    let written = crate::terminal::with_framebuffer(|buffer, info| {
+        crate::display::present(&state.surface, &state.damage, buffer, info)
+    })
+    .ok_or(Error::NoDisplay)?;
+    state.damage.clear();
+    Ok(written)
+}
+
 /// Read one pixel from the compositor surface.
 pub fn pixel(x: i32, y: i32) -> Result<u32, Error> {
     let guard = STATE.lock();
@@ -114,7 +175,10 @@ pub fn pixel(x: i32, y: i32) -> Result<u32, Error> {
 /// Currently used only by the Stage 19.1 self-test; a userspace compositor
 /// will reach the same values through its own idempotent `init` call once that
 /// process exists.
-#[cfg_attr(not(feature = "stage19-1-test"), allow(dead_code))]
+#[cfg_attr(
+    not(any(feature = "stage19-1-test", feature = "stage19-3-test")),
+    allow(dead_code)
+)]
 pub fn dimensions() -> Option<(u32, u32)> {
     let guard = STATE.lock();
     guard
@@ -126,9 +190,16 @@ pub fn dimensions() -> Option<(u32, u32)> {
 ///
 /// Dropping and re-initialising is the only way to shrink the surface or clear
 /// damage between acceptance runs; a production kernel would never call this.
-#[cfg_attr(not(feature = "stage19-1-test"), allow(dead_code))]
+#[cfg_attr(
+    not(any(feature = "stage19-1-test", feature = "stage19-3-test")),
+    allow(dead_code)
+)]
 pub fn reset() {
-    *STATE.lock() = None;
+    let mut guard = STATE.lock();
+    if guard.as_ref().is_some_and(|state| state.presenting) {
+        crate::terminal::set_display_owned(false);
+    }
+    *guard = None;
 }
 
 #[cfg(feature = "stage19-1-test")]
@@ -209,6 +280,146 @@ pub fn structural_self_test() -> bool {
         return false;
     }
 
+    reset();
+    true
+}
+
+#[cfg(feature = "stage19-3-test")]
+pub fn presentation_self_test() -> bool {
+    use crate::display::rgb;
+    use bootloader_api::info::PixelFormat;
+
+    fn step(name: &str, ok: bool) -> bool {
+        crate::serial::write_line(format_args!(
+            "[S19.3] {} {}",
+            name,
+            if ok { "PASS" } else { "FAIL" }
+        ));
+        ok
+    }
+
+    /// Read a framebuffer pixel back as 0x00RRGGBB, independently of the
+    /// compositor's own state.
+    fn screen_pixel(x: usize, y: usize) -> Option<u32> {
+        crate::terminal::with_framebuffer(|buffer, info| {
+            if x >= info.width || y >= info.height || info.bytes_per_pixel < 3 {
+                return None;
+            }
+            let offset = (y * info.stride + x) * info.bytes_per_pixel;
+            let bytes = buffer.get(offset..offset + 3)?;
+            match info.pixel_format {
+                PixelFormat::Rgb => Some(rgb(bytes[0], bytes[1], bytes[2])),
+                PixelFormat::Bgr => Some(rgb(bytes[2], bytes[1], bytes[0])),
+                _ => None,
+            }
+        })
+        .flatten()
+    }
+
+    /// FNV-1a over the whole framebuffer, to detect any write at all.
+    fn screen_checksum() -> Option<u64> {
+        crate::terminal::with_framebuffer(|buffer, _| {
+            buffer.iter().fold(0xcbf2_9ce4_8422_2325u64, |hash, byte| {
+                (hash ^ u64::from(*byte)).wrapping_mul(0x0000_0100_0000_01b3)
+            })
+        })
+    }
+
+    reset();
+    init(DEFAULT_WIDTH, DEFAULT_HEIGHT);
+
+    let Some((screen_width, screen_height)) =
+        crate::terminal::with_framebuffer(|_, info| (info.width, info.height))
+    else {
+        return step("framebuffer available", false);
+    };
+    crate::serial::write_line(format_args!(
+        "[S19.3] framebuffer {}x{}",
+        screen_width, screen_height
+    ));
+    let visible =
+        screen_width.min(DEFAULT_WIDTH as usize) * screen_height.min(DEFAULT_HEIGHT as usize);
+
+    if !step(
+        "present refused before taking the display",
+        present() == Err(Error::NotPresenting),
+    ) {
+        return false;
+    }
+    if !step(
+        "display taken from the terminal",
+        activate_display().is_ok(),
+    ) {
+        return false;
+    }
+    // Taking the display repaints everything the compositor covers. The
+    // terminal's background is not black, so reading black proves the
+    // compositor wrote it.
+    if !step(
+        "takeover repaints the visible surface",
+        present() == Ok(visible),
+    ) || !step(
+        "framebuffer shows the compositor background",
+        screen_pixel(10, 10) == Some(0),
+    ) {
+        return false;
+    }
+    if !step("damage cleared after present", present() == Ok(0)) {
+        return false;
+    }
+
+    let owner = 77u64;
+    let color = rgb(200, 100, 50);
+    let Ok(client) = user_graphics::create(owner, 32, 16) else {
+        return step("client surface created", false);
+    };
+    let drawn = user_graphics::fill_rect(client, Rect::new(0, 0, 32, 16), color).is_ok()
+        && blit(client, 100, 50) == Ok(Rect::new(100, 50, 32, 16));
+    if !step("client blitted", drawn) {
+        return false;
+    }
+    if !step(
+        "only the damaged region is presented",
+        present() == Ok(32 * 16),
+    ) {
+        return false;
+    }
+    let on_screen = screen_pixel(100, 50) == Some(color)
+        && screen_pixel(131, 65) == Some(color)
+        && screen_pixel(99, 50) == Some(0)
+        && screen_pixel(132, 65) == Some(0);
+    if !step("framebuffer carries the client at its offset", on_screen) {
+        return false;
+    }
+
+    // While the compositor owns the display, terminal output must not reach
+    // the framebuffer.
+    let before = screen_checksum();
+    crate::terminal::write_bytes(b"terminal text while compositing\n");
+    if !step(
+        "terminal suppressed while compositing",
+        before.is_some() && screen_checksum() == before,
+    ) {
+        return false;
+    }
+
+    deactivate_display();
+    if !step(
+        "present refused after returning the display",
+        present() == Err(Error::NotPresenting),
+    ) {
+        return false;
+    }
+    let before = screen_checksum();
+    crate::terminal::write_bytes(b"XXXX");
+    if !step(
+        "terminal draws again after release",
+        before.is_some() && screen_checksum() != before,
+    ) {
+        return false;
+    }
+
+    user_graphics::release_owner(owner);
     reset();
     true
 }

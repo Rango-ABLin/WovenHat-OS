@@ -3363,6 +3363,15 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         serial::write_line(format_args!("[S1-5] storage journal: PASSED"));
         qemu_test_exit_success();
     }
+    #[cfg(feature = "stage19-3-test")]
+    {
+        if !compositor::presentation_self_test() {
+            serial::write_line(format_args!("[S19.3] compositor presentation: FAILED"));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!("[S19.3] compositor presentation: PASSED"));
+        qemu_test_exit_success();
+    }
     #[cfg(feature = "stage19-2-test")]
     {
         if !stage19_2_self_test() {

@@ -658,7 +658,7 @@ jobs:
           (cd apps/hello-gui && cargo clippy --release -- -D warnings)
           (cd apps/hello-gui && cargo build --release)
           export WOVENHAT_HELLO_GUI_IMAGE="$PWD/apps/hello-gui/target/x86_64-unknown-none/release/wovenhat-hello-gui"
-          for stage in 17.1 18.1 19.1; do
+          for stage in 17.1 18.1 19.1 19.3; do
             feature="stage${stage/./-}-test"
             cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features "$feature" -- -D warnings
             for cpu in 1 2 4; do
@@ -715,6 +715,7 @@ jobs:
             audit-artifacts/stage17.1-*/
             audit-artifacts/stage18.1-*/
             audit-artifacts/stage19.1-*/
+            audit-artifacts/stage19.3-*/
             target/hello-gui-*/serial.log
             audit-artifacts/stage13.3-*/
             audit-artifacts/stage13.4-*/

@@ -41,6 +41,10 @@ struct State {
     start_x: usize,
     scale: usize,
     initialized: bool,
+    info: Option<FrameBufferInfo>,
+    /// The compositor owns the display; text rendering is suppressed so the
+    /// two never draw over each other.
+    display_owned: bool,
 }
 
 impl State {
@@ -58,6 +62,8 @@ impl State {
             start_x: 40,
             scale: 2,
             initialized: false,
+            info: None,
+            display_owned: false,
         }
     }
 
@@ -77,11 +83,12 @@ impl State {
         self.cursor_y = 40;
         self.start_x = 40;
         self.scale = 2;
+        self.info = Some(info);
         self.initialized = true;
     }
 
     fn clear(&mut self) {
-        if !self.initialized {
+        if !self.initialized || self.display_owned {
             return;
         }
         for y in 0..self.height {
@@ -94,7 +101,7 @@ impl State {
     }
 
     fn write(&mut self, bytes: &[u8]) {
-        if !self.initialized {
+        if !self.initialized || self.display_owned {
             return;
         }
         let mut i = 0usize;
@@ -253,6 +260,40 @@ pub fn init(buffer: &mut [u8], info: FrameBufferInfo) {
 
 pub fn write_bytes(bytes: &[u8]) {
     crate::task::file_fault_io(|| TERMINAL.lock().write(bytes));
+}
+
+/// Run `operation` with exclusive access to the framebuffer.
+///
+/// Every framebuffer writer outside early boot goes through this module's
+/// lock, so the compositor borrows the buffer here rather than keeping its own
+/// pointer. Returns `None` before [`init`].
+///
+/// Lock order: a caller may hold the compositor lock (same rank) when calling
+/// this; this module never calls back into the compositor.
+pub fn with_framebuffer<R>(operation: impl FnOnce(&mut [u8], FrameBufferInfo) -> R) -> Option<R> {
+    // Not wrapped in `file_fault_io`: that takes the scheduler lock, which a
+    // caller holding the compositor lock must not acquire, and the
+    // framebuffer mapping is resident so no fault can occur here.
+    let terminal = TERMINAL.lock();
+    let info = terminal.info?;
+    // SAFETY: `ptr`/`len` describe the bootloader's framebuffer mapping,
+    // which stays mapped for the kernel's lifetime. Holding TERMINAL excludes
+    // this module's own writers for the slice's lifetime, and the slice does
+    // not escape the closure.
+    let buffer = unsafe { core::slice::from_raw_parts_mut(terminal.ptr as *mut u8, terminal.len) };
+    Some(operation(buffer, info))
+}
+
+/// Hand the display to the compositor (`true`) or return it to the terminal.
+///
+/// Returns `false` if there is no framebuffer to hand over.
+pub fn set_display_owned(owned: bool) -> bool {
+    let mut terminal = TERMINAL.lock();
+    if !terminal.initialized {
+        return false;
+    }
+    terminal.display_owned = owned;
+    true
 }
 
 pub fn set_cursor_position(x: usize, y: usize) {
