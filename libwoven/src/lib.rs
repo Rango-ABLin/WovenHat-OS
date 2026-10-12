@@ -204,6 +204,7 @@ pub mod syscall {
     pub const INPUT_WAIT: u64 = 108;
     pub const GRAPHICS_SURFACE_SHARE: u64 = 109;
     pub const GRAPHICS_COMPOSITOR_BLIT_SHARED: u64 = 110;
+    pub const WAIT_ANY: u64 = 111;
     pub const MESSAGE_SEND: u64 = 11;
     pub const MESSAGE_RECEIVE: u64 = 12;
 
@@ -453,6 +454,12 @@ pub mod syscall {
     }
 
     /// # Safety
+    /// Must be called from WovenHat userspace.
+    pub unsafe fn wait_any(deadline: u64, mask: u64) -> u64 {
+        unsafe { invoke(WAIT_ANY, deadline, mask, 0) }
+    }
+
+    /// # Safety
     /// `buffer` must be readable for `length` bytes.
     pub unsafe fn message_send(receiver: u64, buffer: *const u8, length: usize) -> u64 {
         unsafe { invoke(MESSAGE_SEND, receiver, buffer as u64, length as u64) }
@@ -582,6 +589,23 @@ pub fn compositor_blit_shared(handle: u64, x: i32, y: i32) -> Result<(), Error> 
     // SAFETY: integer-only call.
     let result = unsafe { syscall::graphics_compositor_blit_shared(handle, x, y) };
     check(result).map(|_| ())
+}
+
+/// Sources for [`wait_any`].
+pub mod wait {
+    /// Input for the focused process (`InputIo`).
+    pub const INPUT: u64 = 1 << 0;
+    /// A message in this process's mailbox (`Ipc`).
+    pub const MESSAGE: u64 = 1 << 1;
+}
+
+/// Sleep until any source in `mask` is ready, or until the timer reaches
+/// `deadline` (`None` waits indefinitely). Returns the ready sources, or 0 on
+/// timeout. Nothing is consumed: follow up with [`input_poll`] or
+/// [`message_receive`].
+pub fn wait_any(mask: u64, deadline: Option<time::Ticks>) -> Result<u64, Error> {
+    // SAFETY: integer-only call.
+    check(unsafe { syscall::wait_any(deadline.unwrap_or(u64::MAX), mask) })
 }
 
 /// Send `bytes` to process `receiver`. Requires the `Ipc` capability.

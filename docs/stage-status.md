@@ -1,5 +1,68 @@
 # Stage status
 
+## Stage 19.8 — one sleep over input and IPC (2026-10-12)
+
+A process can now sleep until any of several sources is ready. Syscall 111
+(`WaitAny(deadline, mask)`) takes a mask: bit 0 is input (`InputIo`, live only
+while the caller holds focus), bit 1 is the caller's pid mailbox (`Ipc`). It
+returns the mask of ready sources, or 0 when the timer reaches `deadline`.
+Nothing is consumed: the caller follows up with `InputPoll` or
+`MessageReceive`. Empty or unknown masks are refused, and so is waiting on
+input alone without focus, which could never complete.
+
+The pid mailbox gained a waiter. `LegacyEndpoint` holds one optional `TaskId`;
+`ipc::send` takes it under the IPC lock and calls `signal_event` after
+releasing it. Endpoint teardown drops the waiter without waking, as focus
+withdrawal does. `woven_input` gained `register_waiter`, `clear_waiter` and
+`pending`, so the same focus waiter slot serves both `InputWait` and
+`WaitAny`.
+
+The wait registers with every requested source, then re-checks readiness, then
+sleeps. An event between registration and sleep latches the scheduler's
+pending permit, so it cannot be lost. A slot held by another live task of the
+same process is refused; a slot held by a dead task is taken over, with
+liveness checked outside the source's lock. All registrations are dropped
+before returning.
+
+Gate `[S19.8] combined wait: PASSED`:
+- An unprivileged probe is refused `WaitAny` on input, and refused empty and
+  unknown masks.
+- hello-gui `--multiplex <peer>` takes focus and sleeps over both sources.
+- The kernel registers a stand-in peer mailbox. Once it sees the client
+  `Blocked`, it sends a message; the client must report exactly `MESSAGE` and
+  receive `ping` from the peer.
+- Once the client is `Blocked` again, the kernel publishes a key; the client
+  must report exactly `INPUT` and read `z`.
+- A 20-tick timed wait then returns 0, no earlier than its deadline, and focus
+  returns on exit.
+
+Negative control: with the wakeup removed from `ipc::send`, the client sleeps
+through the message and wakes on the key with both sources ready (exit 83), so
+the gate fails. Evidence is in `audit-artifacts/stage19.8-negative-control-*`.
+
+Two problems found while bringing this up:
+- The first design had the client reply to the stand-in peer. `may_ipc_with`
+  refused it, correctly: the peer is a bare mailbox with no process
+  credentials. The reply step was removed instead of relaxing the policy.
+  Evidence is in `audit-artifacts/stage19.8-reply-refused-1cpu-*`.
+- **Harness defect.** The three app harnesses built the app with
+  `cargo build`, inheriting `CARGO_TARGET_DIR` from the caller's shell. With
+  the project's documented environment, the fresh binary went to the kernel's
+  target tree, while the kernel embedded the stale binary in
+  `apps/*/target`. Earlier gates were unaffected only because the app had
+  been built by hand from the same source before each run. All three
+  harnesses now build with the app's own target directory pinned and the
+  kernel's build-directory override removed.
+
+Open:
+- The pid mailbox has one waiter; handle-based endpoints keep their existing
+  multi-waiter queues and are not yet `WaitAny` sources.
+- Timers and event objects are not `WaitAny` sources either; the deadline
+  covers the common timeout case.
+
+Next prerequisite: client-to-compositor damage notification, so a compositor
+sleeping in `WaitAny` redraws only what a client changed.
+
 ## Stage 19.7 — client surfaces delegated to a compositor process (2026-10-12)
 
 A separate compositor process can now draw other clients' windows, with each

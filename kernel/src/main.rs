@@ -3363,6 +3363,15 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         serial::write_line(format_args!("[S1-5] storage journal: PASSED"));
         qemu_test_exit_success();
     }
+    #[cfg(feature = "stage19-8-test")]
+    {
+        if !stage19_8_self_test() {
+            serial::write_line(format_args!("[S19.8] combined wait: FAILED"));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!("[S19.8] combined wait: PASSED"));
+        qemu_test_exit_success();
+    }
     #[cfg(feature = "stage19-7-test")]
     {
         if !stage19_7_self_test() {
@@ -4423,7 +4432,8 @@ fn stage16_1_self_test() -> bool {
     feature = "stage19-4-test",
     feature = "stage19-5-test",
     feature = "stage19-6-test",
-    feature = "stage19-7-test"
+    feature = "stage19-7-test",
+    feature = "stage19-8-test"
 ))]
 const HELLO_GUI_IMAGE: &[u8] = include_bytes!(env!("WOVENHAT_HELLO_GUI_IMAGE"));
 
@@ -4436,7 +4446,8 @@ const HELLO_GUI_IMAGE: &[u8] = include_bytes!(env!("WOVENHAT_HELLO_GUI_IMAGE"));
     feature = "stage19-4-test",
     feature = "stage19-5-test",
     feature = "stage19-6-test",
-    feature = "stage19-7-test"
+    feature = "stage19-7-test",
+    feature = "stage19-8-test"
 ))]
 fn display_client_capabilities() -> capability::CapabilitySet {
     capability::CapabilitySet::only(capability::Capability::Console)
@@ -4451,7 +4462,8 @@ fn display_client_capabilities() -> capability::CapabilitySet {
     feature = "stage19-4-test",
     feature = "stage19-5-test",
     feature = "stage19-6-test",
-    feature = "stage19-7-test"
+    feature = "stage19-7-test",
+    feature = "stage19-8-test"
 ))]
 fn run_hello_gui(
     image: &[u8],
@@ -4470,7 +4482,8 @@ fn run_hello_gui(
     feature = "stage19-4-test",
     feature = "stage19-5-test",
     feature = "stage19-6-test",
-    feature = "stage19-7-test"
+    feature = "stage19-7-test",
+    feature = "stage19-8-test"
 ))]
 fn spawn_hello_gui(
     image: &[u8],
@@ -4494,7 +4507,8 @@ fn spawn_hello_gui(
     feature = "stage19-4-test",
     feature = "stage19-5-test",
     feature = "stage19-6-test",
-    feature = "stage19-7-test"
+    feature = "stage19-7-test",
+    feature = "stage19-8-test"
 ))]
 fn wait_hello_gui(pid: task::ProcessId) -> Option<(task::ProcessId, Result<i32, task::WaitError>)> {
     let start = timer::ticks();
@@ -4505,6 +4519,123 @@ fn wait_hello_gui(pid: task::ProcessId) -> Option<(task::ProcessId, Result<i32, 
         task::yield_now();
     }
     Some((pid, task::wait_process(pid.as_u64())))
+}
+
+/// Stage 19.8 acceptance: one sleep over input and IPC.
+///
+/// hello-gui `--multiplex <peer>` takes focus and sleeps in `WaitAny` over
+/// both sources. The kernel registers a stand-in peer mailbox, and only once
+/// it sees the client Blocked does it send a message; then, once Blocked
+/// again, it publishes a key. The client must report exactly the source that
+/// woke it each time, consume each event, then time out. The stand-in peer is
+/// a bare mailbox, not a process, so IPC policy (rightly) refuses replies to
+/// it; the client does not reply.
+#[cfg(feature = "stage19-8-test")]
+fn stage19_8_self_test() -> bool {
+    fn step(name: &str, ok: bool) -> bool {
+        serial::write_line(format_args!(
+            "[S19.8] {} {}",
+            name,
+            if ok { "PASS" } else { "FAIL" }
+        ));
+        ok
+    }
+    fn until_blocked(pid: task::ProcessId) -> bool {
+        let start = timer::ticks();
+        while !task::process_task_blocked(pid) {
+            if task::process_exited(pid) || timer::ticks().wrapping_sub(start) > 1000 {
+                return false;
+            }
+            task::yield_now();
+        }
+        true
+    }
+
+    if !step(
+        "install into the filesystem",
+        vfs::create_read_only("/bin/hello-gui", HELLO_GUI_IMAGE).is_ok(),
+    ) {
+        return false;
+    }
+    let mut image = alloc::vec![0u8; HELLO_GUI_IMAGE.len()];
+    if vfs::read_all("/bin/hello-gui", &mut image) != Ok(HELLO_GUI_IMAGE.len()) {
+        return step("filesystem round-trip", false);
+    }
+
+    const VICTIM_OWNER: u64 = 4245;
+    let Ok(victim) = user_graphics::create(VICTIM_OWNER, 8, 8) else {
+        return step("victim surface created", false);
+    };
+    let victim_arg = alloc::format!("{}", victim.to_u64());
+    let probe = run_hello_gui(&image, &["/bin/hello-gui", "--probe", &victim_arg], false);
+    user_graphics::release_owner(VICTIM_OWNER);
+    if !step(
+        "unprivileged probe refused the combined wait",
+        matches!(probe, Some((_, Ok(0)))),
+    ) {
+        return false;
+    }
+
+    // A stand-in peer: a registered mailbox the kernel sends from and reads.
+    const PEER: u64 = 9_000_001;
+    if !step("peer mailbox registered", ipc::register(PEER).is_ok()) {
+        return false;
+    }
+    let capabilities = display_client_capabilities()
+        .with(capability::Capability::InputIo)
+        .with(capability::Capability::Ipc);
+    let peer_arg = alloc::format!("{}", PEER);
+    let Some(pid) = spawn_hello_gui(
+        &image,
+        &["/bin/hello-gui", "--multiplex", &peer_arg],
+        Some(capabilities),
+    ) else {
+        return step("multiplexing client spawned", false);
+    };
+    let start = timer::ticks();
+    while woven_input::focus() != Some(pid.as_u64()) {
+        if task::process_exited(pid) || timer::ticks().wrapping_sub(start) > 1000 {
+            return step("client holds focus", false);
+        }
+        task::yield_now();
+    }
+    step("client holds focus", true);
+
+    if !step("client asleep before the message", until_blocked(pid))
+        || !step(
+            "message sent",
+            ipc::send(PEER, pid.as_u64(), b"ping").is_ok(),
+        )
+    {
+        return false;
+    }
+    if !step("client asleep before the key", until_blocked(pid))
+        || !step(
+            "key published",
+            woven_input::publish_key(woven_input::Key::Char('z')),
+        )
+    {
+        return false;
+    }
+
+    let Some((_, status)) = wait_hello_gui(pid) else {
+        return step("multiplexing client runs to completion", false);
+    };
+    serial::write_line(format_args!(
+        "[S19.8] multiplexing client exit status {}",
+        match status {
+            Ok(code) => code as i64,
+            Err(_) => -1,
+        }
+    ));
+    let _ = ipc::unregister(PEER);
+    if !step(
+        "woken by each source in turn, then timed out",
+        status == Ok(0),
+    ) {
+        return false;
+    }
+    step("focus returned on exit", woven_input::focus().is_none())
 }
 
 /// Stage 19.7 acceptance: a separate compositor process draws a client's

@@ -16,6 +16,19 @@ from pathlib import Path
 APP = 'wovenhat-hello-gui'
 MARKER = '[S18.2] client surface end-to-end: PASSED'
 
+def app_build_env(app_dir):
+    """Build environment for an application crate.
+
+    The kernel's Cargo directory overrides are dropped and the app's own
+    target directory pinned, so the binary lands where this harness reads it.
+    Inheriting CARGO_TARGET_DIR would build into the kernel's tree and leave a
+    stale image to be embedded.
+    """
+    env = dict(os.environ)
+    env.pop('CARGO_BUILD_BUILD_DIR', None)
+    env['CARGO_TARGET_DIR'] = str(app_dir / 'target')
+    return env
+
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
@@ -35,7 +48,7 @@ def main():
 
     app_dir = root / 'apps' / 'hello-gui'
     print('[1/4] Building hello-gui outside the kernel...')
-    build = subprocess.run(['cargo', 'build', '--release'], cwd=app_dir)
+    build = subprocess.run(['cargo', 'build', '--release'], cwd=app_dir, env=app_build_env(app_dir))
     if build.returncode != 0:
         return 1
     image = app_dir / 'target' / 'x86_64-unknown-none' / 'release' / APP

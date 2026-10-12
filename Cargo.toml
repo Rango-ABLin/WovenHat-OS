@@ -62,6 +62,7 @@ stage19-4-test = ["qemu-test", "kernel/stage19-4-test"]
 stage19-5-test = ["qemu-test", "kernel/stage19-5-test"]
 stage19-6-test = ["qemu-test", "kernel/stage19-6-test"]
 stage19-7-test = ["qemu-test", "kernel/stage19-7-test"]
+stage19-8-test = ["qemu-test", "kernel/stage19-8-test"]
 stage1-5-test = ["qemu-test", "kernel/stage1-5-test"]
 
 [profile.dev]

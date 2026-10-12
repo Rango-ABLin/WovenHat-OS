@@ -4,7 +4,8 @@ With --stage 19.4 the same image runs the compositor authority gate: an
 unprivileged --probe run that must be refused, then a run with DisplayIo.
 With --stage 19.5 it runs the input focus gate with hello-gui --input, and
 with --stage 19.6 the blocking input wait gate with hello-gui --wait. With
---stage 19.7 it runs hello-gui as a compositor process and as its client.
+--stage 19.7 it runs hello-gui as a compositor process and as its client, and
+with --stage 19.8 the combined input/IPC wait gate with hello-gui --multiplex.
 """
 import argparse, os, shutil, subprocess, sys
 from pathlib import Path
@@ -15,7 +16,23 @@ STAGES={
     '19.5': ('stage19-5-test', '[S19.5] input focus: PASSED', 'hello-gui-input', 'input focus'),
     '19.6': ('stage19-6-test', '[S19.6] blocking input wait: PASSED', 'hello-gui-wait', 'blocking input wait'),
     '19.7': ('stage19-7-test', '[S19.7] surface delegation: PASSED', 'hello-gui-delegation', 'surface delegation'),
+    '19.8': ('stage19-8-test', '[S19.8] combined wait: PASSED', 'hello-gui-multiplex', 'combined wait'),
 }
+
+def app_build_env(app_dir):
+    """Build environment for an application crate.
+
+    The kernel's Cargo directory overrides are dropped and the app's own
+    target directory pinned, so the binary lands where this harness reads it.
+    Inheriting CARGO_TARGET_DIR would build into the kernel's tree and leave a
+    stale image to be embedded.
+    """
+    env = dict(os.environ)
+    env.pop('CARGO_BUILD_BUILD_DIR', None)
+    env['CARGO_TARGET_DIR'] = str(app_dir / 'target')
+    return env
+
+
 def main():
     p=argparse.ArgumentParser(description=__doc__)
     p.add_argument('--qemu',default=shutil.which('qemu-system-x86_64') or r'C:\Program Files\qemu\qemu-system-x86_64.exe')
@@ -30,7 +47,7 @@ def main():
     qemu=Path(a.qemu); fw=a.firmware or qemu.parent/'share'/'edk2-x86_64-code.fd'
     if not qemu.is_file() or not fw.is_file(): p.error('qemu or firmware missing')
     app_dir=root/'apps'/'hello-gui'
-    if subprocess.run(['cargo','build','--release'],cwd=app_dir).returncode: return 1
+    if subprocess.run(['cargo','build','--release'],cwd=app_dir,env=app_build_env(app_dir)).returncode: return 1
     image=app_dir/'target'/'x86_64-unknown-none'/'release'/APP
     env=dict(os.environ)
     env['WOVENHAT_HELLO_GUI_IMAGE']=str(image)

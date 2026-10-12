@@ -73,6 +73,8 @@ stage19-5-test = ["qemu-test"]
 stage19-6-test = ["qemu-test"]
 # Client surfaces delegated to a separate compositor process.
 stage19-7-test = ["qemu-test"]
+# One sleep over input and IPC.
+stage19-8-test = ["qemu-test"]
 stage1-5-test = ["qemu-test"]
 
 [dependencies]

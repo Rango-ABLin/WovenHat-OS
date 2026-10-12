@@ -19,6 +19,10 @@
 //! `--client <pid>` it is that client: it shares one surface with `<pid>`,
 //! sends both tokens, and waits for the compositor's reply.
 //!
+//! With `--multiplex <peer>` it holds focus and sleeps in one `wait_any` over
+//! input and IPC: it must be woken by a message from `<peer>`, then by a key,
+//! then time out.
+//!
 //! With `--probe <handle>` it runs as an ordinary process and checks that the
 //! kernel refuses it everything it has no authority for: every compositor
 //! operation, and every operation on the surface `<handle>`, which belongs to
@@ -59,6 +63,7 @@ fn main(args: Args) -> ! {
         Some(b"--wait") => run(Input::Wait),
         Some(b"--compositor") => compositor(),
         Some(b"--client") => client(args.get(2)),
+        Some(b"--multiplex") => multiplex(args.get(2)),
         Some(_) => fail(250),
         None => run(Input::None),
     }
@@ -342,6 +347,63 @@ fn client(compositor: Option<&[u8]>) -> ! {
     libwoven::exit(0)
 }
 
+/// One sleep over input and messages.
+fn multiplex(peer: Option<&[u8]>) -> ! {
+    use libwoven::{wait, Key};
+    let Some(peer) = peer.and_then(parse_u64).map(libwoven::process::Id) else {
+        fail(80)
+    };
+    // Take the display, and with it focus.
+    let surface = match GraphicsSurface::create(16, 16) {
+        Ok(surface) => surface,
+        Err(_) => fail(81),
+    };
+    if surface.fill_rect(0, 0, 16, 16, CONTENT).is_err()
+        || libwoven::compositor_claim().is_err()
+        || surface.present(0, 0).is_err()
+        || libwoven::compositor_present().is_err()
+    {
+        fail(82);
+    }
+    let _ = libwoven::print("hello-gui multiplex: focus held\n");
+
+    let both = wait::INPUT | wait::MESSAGE;
+    // The gate sends a message first: only the message source is ready.
+    match libwoven::wait_any(both, None) {
+        Ok(ready) if ready == wait::MESSAGE => {}
+        Ok(_) => fail(83),
+        Err(_) => fail(84),
+    }
+    let mut message = [0u8; 8];
+    match libwoven::message_receive(&mut message) {
+        Ok((4, sender)) if sender == peer && &message[..4] == b"ping" => {}
+        _ => fail(85),
+    }
+    // Then a key: only input is ready.
+    match libwoven::wait_any(both, None) {
+        Ok(ready) if ready == wait::INPUT => {}
+        Ok(_) => fail(86),
+        Err(_) => fail(87),
+    }
+    if libwoven::input_poll() != Ok(Some(Key::Char('z'))) {
+        fail(88);
+    }
+    let _ = libwoven::print("hello-gui multiplex: woken by message, then by key\n");
+
+    // Nothing else is coming: a timed wait returns 0, not before its deadline.
+    const TIMEOUT_TICKS: u64 = 20;
+    let start = libwoven::ticks();
+    if libwoven::wait_any(both, Some(start + TIMEOUT_TICKS)) != Ok(0) {
+        fail(89);
+    }
+    if libwoven::ticks().wrapping_sub(start) < TIMEOUT_TICKS {
+        fail(90);
+    }
+    let _ = libwoven::print("hello-gui multiplex: timed out on schedule\n");
+    drop(surface);
+    libwoven::exit(0)
+}
+
 fn parse_u64(text: &[u8]) -> Option<u64> {
     if text.is_empty() {
         return None;
@@ -391,6 +453,14 @@ fn probe(victim: Option<&[u8]>) -> ! {
     // Bounded deadline, so a broken check cannot hang the gate.
     if libwoven::input_wait(Some(libwoven::ticks() + 1)).is_ok() {
         fail(216);
+    }
+    // The combined wait: input needs InputIo, and malformed masks are refused.
+    let soon = Some(libwoven::ticks() + 1);
+    if libwoven::wait_any(libwoven::wait::INPUT, soon).is_ok() {
+        fail(217);
+    }
+    if libwoven::wait_any(0, soon).is_ok() || libwoven::wait_any(1 << 7, soon).is_ok() {
+        fail(218);
     }
     let _ = libwoven::print("hello-gui probe: compositor refused\n");
 

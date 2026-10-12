@@ -294,6 +294,9 @@ pub enum Number {
     GraphicsSurfaceShare = 109,
     /// owner's handle, packed (x | y<<32) -> 0 or ERROR
     GraphicsCompositorBlitShared = 110,
+    /// deadline tick (u64::MAX = none), source mask (1 input, 2 message)
+    /// -> mask of ready sources, 0 on timeout, or ERROR
+    WaitAny = 111,
 }
 
 pub fn entry_address() -> u64 {
@@ -2240,6 +2243,7 @@ pub extern "C" fn wovenhat_syscall_dispatch(
         value if value == Number::GraphicsCompositorBlitShared as u64 => {
             sys_compositor_blit_shared(arg0, arg1)
         }
+        value if value == Number::WaitAny as u64 => sys_wait_any(arg0, arg1),
         _ => u64::MAX,
     };
 
@@ -2445,6 +2449,90 @@ fn sys_input_wait(deadline: u64) -> u64 {
             }
         }
     }
+}
+
+const WAIT_INPUT: u64 = 1 << 0;
+const WAIT_MESSAGE: u64 = 1 << 1;
+
+/// Sleep until any requested source is ready or the timer reaches `deadline`.
+///
+/// Sources: input (`InputIo`, and only while the caller holds focus) and the
+/// caller's pid mailbox (`Ipc`). Nothing is consumed; the caller follows up
+/// with `InputPoll` or `MessageReceive`. Returns the ready mask, or 0 on
+/// timeout.
+///
+/// The task registers with every requested source, then re-checks readiness,
+/// then sleeps: an event between registration and sleep latches the
+/// scheduler's pending permit, so it is not lost. Each source wakes with its
+/// own lock released. Registrations are dropped before returning.
+fn sys_wait_any(deadline: u64, mask: u64) -> u64 {
+    if mask == 0 || mask & !(WAIT_INPUT | WAIT_MESSAGE) != 0 {
+        return SYSCALL_ERROR;
+    }
+    let want_input = mask & WAIT_INPUT != 0;
+    let want_message = mask & WAIT_MESSAGE != 0;
+    if (want_input && !crate::task::current_has(crate::capability::Capability::InputIo))
+        || (want_message && !crate::task::current_has(crate::capability::Capability::Ipc))
+    {
+        return SYSCALL_ERROR;
+    }
+    let owner = crate::task::current_process_id();
+    let task = crate::task::current_task_id();
+
+    let result = 'wait: loop {
+        // Input is a source only while the caller holds focus; waiting on
+        // input alone without focus could never complete, so it is refused.
+        let mut input_live = false;
+        if want_input {
+            match crate::woven_input::register_waiter(owner, task) {
+                Ok(None) => input_live = true,
+                Ok(Some(other)) => {
+                    // Liveness is checked with FOCUS released.
+                    if crate::task::task_live(other) {
+                        break 'wait SYSCALL_ERROR;
+                    }
+                    crate::woven_input::clear_waiter(other);
+                    continue;
+                }
+                Err(_) if !want_message => break 'wait SYSCALL_ERROR,
+                Err(_) => {}
+            }
+        }
+        if want_message {
+            match crate::ipc::register_message_waiter(owner, task) {
+                Ok(None) => {}
+                Ok(Some(other)) => {
+                    if crate::task::task_live(other) {
+                        break 'wait SYSCALL_ERROR;
+                    }
+                    crate::ipc::clear_message_waiter(owner, other);
+                    continue;
+                }
+                Err(_) => break 'wait SYSCALL_ERROR,
+            }
+        }
+        let mut ready = 0;
+        if input_live && crate::woven_input::pending(owner) {
+            ready |= WAIT_INPUT;
+        }
+        if want_message && crate::ipc::message_pending(owner) {
+            ready |= WAIT_MESSAGE;
+        }
+        if ready != 0 {
+            break 'wait ready;
+        }
+        if deadline != u64::MAX && crate::timer::ticks() >= deadline {
+            break 'wait 0;
+        }
+        crate::task::wait_for_event_until(deadline);
+    };
+    if want_input {
+        crate::woven_input::clear_waiter(task);
+    }
+    if want_message {
+        crate::ipc::clear_message_waiter(owner, task);
+    }
+    result
 }
 
 /// Present compositor damage to the framebuffer. Requires `DisplayIo` and the

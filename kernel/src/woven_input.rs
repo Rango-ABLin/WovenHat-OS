@@ -182,6 +182,40 @@ pub fn release_focus(owner: u64) {
     }
 }
 
+/// Register `task` as `owner`'s focus waiter without sleeping, for a combined
+/// wait over several sources. Returns the other task already registered, if
+/// any, without replacing it.
+pub fn register_waiter(
+    owner: u64,
+    task: crate::task::TaskId,
+) -> Result<Option<crate::task::TaskId>, NotFocused> {
+    let mut focus = FOCUS.lock();
+    if focus.owner != Some(owner) {
+        return Err(NotFocused);
+    }
+    match focus.waiter {
+        Some(other) if other != task => Ok(Some(other)),
+        _ => {
+            focus.waiter = Some(task);
+            Ok(None)
+        }
+    }
+}
+
+/// Drop `task`'s waiter registration if it is the one registered.
+pub fn clear_waiter(task: crate::task::TaskId) {
+    let mut focus = FOCUS.lock();
+    if focus.waiter == Some(task) {
+        focus.waiter = None;
+    }
+}
+
+/// Whether `owner` holds focus and has an event queued.
+pub fn pending(owner: u64) -> bool {
+    let focus = FOCUS.lock();
+    focus.owner == Some(owner) && focus.queue.count != 0
+}
+
 /// Block task `task` of process `owner` until an event arrives or the timer
 /// reaches `deadline` (`u64::MAX` waits indefinitely). Returns `Ok(None)` on
 /// timeout.
