@@ -22,7 +22,7 @@ pub fn mount(start_lba: u64, sectors: u64, removable: bool) -> Option<u64> {
         return None;
     }
     let mut m = MOUNTS.lock();
-    let i = m.iter_mut().position(|x| x.is_none())?;
+    // A volume must not be writable through two mount records at once.\n    // Reject all overlapping ranges, including exact duplicates.\n    let end = start_lba.checked_add(sectors)?;\n    if m.iter().flatten().any(|existing| {\n        let Some(existing_end) = existing.start_lba.checked_add(existing.sectors) else {\n            return true;\n        };\n        start_lba < existing_end && existing.start_lba < end\n    }) {\n        return None;\n    }\n    let i = m.iter_mut().position(|x| x.is_none())?;
     let id = i as u64 + 1;
     m[i] = Some(Mount {
         id,
