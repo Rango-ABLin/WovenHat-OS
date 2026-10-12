@@ -90,7 +90,8 @@ def required_markers(stage, cpus):
                   '13.10': '[S13.10T] Bluetooth LE notification minimum key size: PASSED',
                   '13.11': '[S13.11-AUDIT] BLE SMP persistent authentication authority: PASSED',
                   '1-5': '[S1-5] storage journal: PASSED',
-                  '15.1': '[S15.1] WovenFS native filesystem: PASSED'}[stage])]
+                  '15.1': '[S15.1] WovenFS native filesystem: PASSED',
+                  '17.1': '[S17.1] WovenHat font coverage: PASSED'}[stage])]
     if stage == '13.11':
         required.extend([
             '[S13.11G] BLE SMP identity/privacy foundation: PASSED',
@@ -112,7 +113,7 @@ def validation_errors(returncode, log, required):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--stage', choices=('10.8', '10.9', '11.1', '11.2', '11.3', '11.4', '11.5', '12.1', '12.2', '12.3', '12.4', '12.5', '13.1', '13.2', '13.3', '13.4', '13.5', '13.6', '13.7', '13.8', '13.9', '13.10', '13.11', '1-5', '15.1'), default='10.8')
+    parser.add_argument('--stage', choices=('10.8', '10.9', '11.1', '11.2', '11.3', '11.4', '11.5', '12.1', '12.2', '12.3', '12.4', '12.5', '13.1', '13.2', '13.3', '13.4', '13.5', '13.6', '13.7', '13.8', '13.9', '13.10', '13.11', '1-5', '15.1', '17.1'), default='10.8')
     parser.add_argument('--cpus', type=int, choices=(1, 2, 4), default=1)
     parser.add_argument('--qemu', default=shutil.which('qemu-system-x86_64') or r'C:\Program Files\qemu\qemu-system-x86_64.exe')
     parser.add_argument('--firmware', type=Path)

@@ -1080,6 +1080,7 @@ name = "wovenhat-os"
 version = "0.8.0"
 dependencies = [
  "bootloader",
+ "bootloader_api",
  "ovmf-prebuilt",
  "unicode-normalization",
  "wovenhat-kernel",

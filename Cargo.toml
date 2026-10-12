@@ -52,6 +52,7 @@ stage14-5d-test = ["network-test", "kernel/stage14-5d-test"]
 stage15-1-test = ["qemu-test", "kernel/stage15-1-test"]
 stage15-2-test = ["qemu-test", "kernel/stage15-2-test"]
 stage16-1-test = ["qemu-test", "kernel/stage16-1-test"]
+stage17-1-test = ["qemu-test", "kernel/stage17-1-test"]
 stage1-5-test = ["qemu-test", "kernel/stage1-5-test"]
 
 [profile.dev]
@@ -71,5 +72,9 @@ bootloader = { version = "0.11.17", default-features = false, features = ["uefi"
 
 [dev-dependencies]
 unicode-normalization = { version = "0.1.25", default-features = false }
+# The display stack's presentation path takes the bootloader's framebuffer
+# description, so host tests of compositing need the same type the kernel sees
+# rather than a stand-in that could drift from it.
+bootloader_api = "0.11.17"
 [lints.rust]
 warnings = "deny"

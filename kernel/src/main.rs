@@ -30,6 +30,7 @@ mod config;
 mod console;
 mod deadline;
 mod device;
+mod display;
 #[cfg(any(
     feature = "stage13-1-test",
     feature = "stage13-2-test",
@@ -47,6 +48,7 @@ mod entropy;
 mod fat32;
 mod file_frames;
 mod file_mapping;
+mod font;
 mod gdt;
 mod gpt;
 mod graphics;
@@ -3352,6 +3354,15 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
             qemu_test_exit_failure();
         }
         serial::write_line(format_args!("[S1-5] storage journal: PASSED"));
+        qemu_test_exit_success();
+    }
+    #[cfg(feature = "stage17-1-test")]
+    {
+        if !font::structural_self_test() {
+            serial::write_line(format_args!("[S17.1] WovenHat font coverage: FAILED"));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!("[S17.1] WovenHat font coverage: PASSED"));
         qemu_test_exit_success();
     }
     #[cfg(feature = "stage16-1-test")]
