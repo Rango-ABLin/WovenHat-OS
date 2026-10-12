@@ -1614,7 +1614,7 @@ fn balanced_probe() -> ! {
     BALANCED_DONE.store(true, Ordering::Release);
     task::exit_current_task();
 }
-pub fn diagnostic(console: &mut crate::console::Console<'_>) {
+pub fn diagnostic(console: &mut crate::console::Console) {
     console.print("Online CPUs: ");
     // Console itself remains BSP-owned; diagnostic output never runs in IRQ/NMI.
     let count = online_count();

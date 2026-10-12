@@ -94,7 +94,8 @@ def required_markers(stage, cpus):
                   '17.1': '[S17.1] WovenHat font coverage: PASSED',
                   '18.1': '[S18.1] client surface registry: PASSED',
                   '19.1': '[S19.1] compositor surface: PASSED',
-                  '19.3': '[S19.3] compositor presentation: PASSED'}[stage])]
+                  '19.3': '[S19.3] compositor presentation: PASSED',
+                  '19.10': '[S19.10] display geometry and single writer: PASSED'}[stage])]
     if stage == '13.11':
         required.extend([
             '[S13.11G] BLE SMP identity/privacy foundation: PASSED',
@@ -116,7 +117,7 @@ def validation_errors(returncode, log, required):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--stage', choices=('10.8', '10.9', '11.1', '11.2', '11.3', '11.4', '11.5', '12.1', '12.2', '12.3', '12.4', '12.5', '13.1', '13.2', '13.3', '13.4', '13.5', '13.6', '13.7', '13.8', '13.9', '13.10', '13.11', '1-5', '15.1', '17.1', '18.1', '19.1', '19.3'), default='10.8')
+    parser.add_argument('--stage', choices=('10.8', '10.9', '11.1', '11.2', '11.3', '11.4', '11.5', '12.1', '12.2', '12.3', '12.4', '12.5', '13.1', '13.2', '13.3', '13.4', '13.5', '13.6', '13.7', '13.8', '13.9', '13.10', '13.11', '1-5', '15.1', '17.1', '18.1', '19.1', '19.3', '19.10'), default='10.8')
     parser.add_argument('--cpus', type=int, choices=(1, 2, 4), default=1)
     parser.add_argument('--qemu', default=shutil.which('qemu-system-x86_64') or r'C:\Program Files\qemu\qemu-system-x86_64.exe')
     parser.add_argument('--firmware', type=Path)

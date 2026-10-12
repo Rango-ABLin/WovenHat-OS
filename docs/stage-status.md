@@ -1,5 +1,50 @@
 # Stage status
 
+## Stage 19.10 — compositor follows the framebuffer; one framebuffer writer (2026-10-12)
+
+**Geometry.** The boot compositor is now sized to the framebuffer instead of
+a fixed 640×480. `compositor::init_for_display` reads
+`terminal::framebuffer_info` after the heap self-test and clamps to
+1920×1200. A 4K display would otherwise cost a 33 MB kernel allocation; the
+clamp bounds it near 9 MB, and a larger display shows the compositor in its
+top-left corner. The self-tests that reset and re-initialise the compositor
+still use the fixed default, so their expectations are unchanged.
+
+**Single writer.** The early-boot `Console` no longer holds the framebuffer
+slice. It keeps only the geometry, and each operation (character, clear,
+scroll, backspace, desktop present) borrows the buffer once through
+`terminal::with_text_framebuffer`. That accessor refuses while the
+compositor owns the display. Every framebuffer write after `terminal::init`
+now goes through the terminal lock: console, userspace terminal and
+compositor. This closes the Stage 19.3 open item, which noted that the boot
+console wrote outside the lock and had to move behind it before the
+compositor could be activated at boot. `Console` lost its lifetime parameter;
+its users in `shell.rs`, `smp.rs` and `physical_probe.rs` changed
+accordingly.
+
+Gate `[S19.10] display geometry and single writer: PASSED`:
+- The boot compositor's dimensions equal the clamped framebuffer size
+  (1280×800 on QEMU).
+- Taking the display repaints exactly that many pixels, and the far corner of
+  the framebuffer shows the compositor background, where before it was
+  outside the compositor.
+- Boot-console output leaves the framebuffer checksum unchanged while the
+  compositor owns the display, and changes it after release.
+
+Negative control: with `with_text_framebuffer` ignoring display ownership,
+the gate fails at "boot console suppressed while compositing". The evidence
+is labelled in `audit-artifacts/stage19.10-1cpu-1791825577739619200`.
+
+Open:
+- The production boot still does not activate the compositor. That is now a
+  policy decision (when a desktop process starts) rather than a safety
+  prerequisite.
+- The kernel shell's desktop renderer keeps its own retained surface,
+  presented through the same lock; it is not a compositor client.
+
+Next prerequisite: a desktop/shell process that takes the lease at startup
+and composites client windows, which is the Phase 5 desktop itself.
+
 ## Stage 19.9 — client damage notification and damage-only compositing (2026-10-12)
 
 A client now tells the compositor what changed, and the compositor copies only

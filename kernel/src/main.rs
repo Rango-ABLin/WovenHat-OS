@@ -233,7 +233,7 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     let stack_probe = &info as *const _ as u64;
 
     terminal::init(buffer, info);
-    let mut console = Console::new(buffer, info, 40, 40, 2);
+    let mut console = Console::new(info, 40, 40, 2);
 
     console.clear();
 
@@ -1251,10 +1251,9 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         console.println("KERNEL HEAP: CAPACITY/FRAGMENTATION OK");
         serial::write_line(format_args!("[HEAP] mapped={} bytes", heap::stats().size));
         // The compositor surface is a kernel-held primitive the client-surface
-        // registry blits onto. Deferred to here because its allocation needs a
-        // mapped heap; a userspace compositor process will take over this role
-        // once that lands.
-        compositor::init(compositor::DEFAULT_WIDTH, compositor::DEFAULT_HEIGHT);
+        // registry blits onto, sized to the framebuffer. Deferred to here
+        // because its allocation needs a mapped heap.
+        compositor::init_for_display();
     } else {
         console.println("KERNEL HEAP: SELF TEST FAILED");
         halt();
@@ -3361,6 +3360,15 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
             qemu_test_exit_failure();
         }
         serial::write_line(format_args!("[S1-5] storage journal: PASSED"));
+        qemu_test_exit_success();
+    }
+    #[cfg(feature = "stage19-10-test")]
+    {
+        if !compositor::geometry_self_test(&mut console) {
+            serial::write_line(format_args!("[S19.10] display geometry and single writer: FAILED"));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!("[S19.10] display geometry and single writer: PASSED"));
         qemu_test_exit_success();
     }
     #[cfg(feature = "stage19-9-test")]

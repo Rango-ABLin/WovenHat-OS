@@ -21,11 +21,17 @@ use crate::display::{Damage, Rect, Surface};
 use crate::irq_lock::PreemptMutex as Mutex;
 use crate::user_graphics;
 
-/// Compositor surface width used by the acceptance tests. A real compositor
-/// will have this follow the framebuffer; today the kernel does not expose a
-/// framebuffer accessor to this module, so it is fixed.
+/// Fixed geometry used by the self-tests that reset and re-initialise the
+/// compositor, and as the fallback when no framebuffer exists.
 pub const DEFAULT_WIDTH: u32 = 640;
 pub const DEFAULT_HEIGHT: u32 = 480;
+
+/// Upper bound on the boot-time surface. The compositor follows the
+/// framebuffer, but a 4K display would otherwise cost a 33 MB kernel
+/// allocation; 1920×1200 bounds it near 9 MB. A larger display shows the
+/// compositor in its top-left corner.
+pub const MAX_WIDTH: u32 = 1920;
+pub const MAX_HEIGHT: u32 = 1200;
 
 /// Error returned by compositor operations.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -94,6 +100,21 @@ pub fn init(width: u32, height: u32) {
     }
 }
 
+/// Initialise the compositor at the framebuffer's size, clamped to
+/// [`MAX_WIDTH`]×[`MAX_HEIGHT`], or at the default size without a framebuffer.
+/// Idempotent, like [`init`].
+pub fn init_for_display() {
+    let (width, height) = crate::terminal::framebuffer_info()
+        .map(|info| {
+            (
+                (info.width as u32).clamp(1, MAX_WIDTH),
+                (info.height as u32).clamp(1, MAX_HEIGHT),
+            )
+        })
+        .unwrap_or((DEFAULT_WIDTH, DEFAULT_HEIGHT));
+    init(width, height);
+}
+
 /// Blit the client surface named by `handle` onto the compositor at `(x, y)`.
 ///
 /// The lookup is performed through `user_graphics` so the ownership and
@@ -134,7 +155,10 @@ pub fn blit(handle: user_graphics::Handle, x: i32, y: i32) -> Result<Rect, Error
 
 /// Take the display from the text terminal and repaint it from the
 /// compositor surface on the next [`present`].
-#[cfg_attr(not(feature = "stage19-3-test"), allow(dead_code))]
+#[cfg_attr(
+    not(any(feature = "stage19-3-test", feature = "stage19-10-test")),
+    allow(dead_code)
+)]
 pub fn activate_display() -> Result<(), Error> {
     let mut guard = STATE.lock();
     let state = guard.as_mut().ok_or(Error::NotReady)?;
@@ -150,7 +174,10 @@ pub fn activate_display() -> Result<(), Error> {
 
 /// Return the display to the text terminal. Damage keeps accumulating so a
 /// later [`activate_display`] repaints correctly.
-#[cfg_attr(not(feature = "stage19-3-test"), allow(dead_code))]
+#[cfg_attr(
+    not(any(feature = "stage19-3-test", feature = "stage19-10-test")),
+    allow(dead_code)
+)]
 pub fn deactivate_display() {
     let mut guard = STATE.lock();
     if let Some(state) = guard.as_mut() {
@@ -166,7 +193,10 @@ pub fn deactivate_display() {
 ///
 /// Damage is cleared only after a successful copy, so a failed presentation
 /// loses nothing.
-#[cfg_attr(not(feature = "stage19-3-test"), allow(dead_code))]
+#[cfg_attr(
+    not(any(feature = "stage19-3-test", feature = "stage19-10-test")),
+    allow(dead_code)
+)]
 pub fn present() -> Result<usize, Error> {
     let mut guard = STATE.lock();
     let state = guard.as_mut().ok_or(Error::NotReady)?;
@@ -369,7 +399,11 @@ pub fn pixel(x: i32, y: i32) -> Result<u32, Error> {
 /// will reach the same values through its own idempotent `init` call once that
 /// process exists.
 #[cfg_attr(
-    not(any(feature = "stage19-1-test", feature = "stage19-3-test")),
+    not(any(
+        feature = "stage19-1-test",
+        feature = "stage19-3-test",
+        feature = "stage19-10-test"
+    )),
     allow(dead_code)
 )]
 pub fn dimensions() -> Option<(u32, u32)> {
@@ -660,4 +694,83 @@ pub fn lease_self_test() -> bool {
     release_owner(second);
     user_graphics::release_owner(second);
     holder().is_none()
+}
+
+/// Stage 19.10: the boot compositor follows the framebuffer, and with every
+/// writer behind the terminal lock, taking the display silences the boot
+/// console as well as the userspace terminal.
+#[cfg(feature = "stage19-10-test")]
+pub fn geometry_self_test(console: &mut crate::console::Console) -> bool {
+    fn step(name: &str, ok: bool) -> bool {
+        crate::serial::write_line(format_args!(
+            "[S19.10] {} {}",
+            name,
+            if ok { "PASS" } else { "FAIL" }
+        ));
+        ok
+    }
+    fn screen_checksum() -> Option<u64> {
+        crate::terminal::with_framebuffer(|buffer, _| {
+            buffer.iter().fold(0xcbf2_9ce4_8422_2325u64, |hash, byte| {
+                (hash ^ u64::from(*byte)).wrapping_mul(0x0000_0100_0000_01b3)
+            })
+        })
+    }
+    fn screen_pixel(x: usize, y: usize) -> Option<[u8; 3]> {
+        crate::terminal::with_framebuffer(|buffer, info| {
+            let offset = (y * info.stride + x) * info.bytes_per_pixel;
+            buffer.get(offset..offset + 3).map(|bytes| [bytes[0], bytes[1], bytes[2]])
+        })
+        .flatten()
+    }
+
+    let Some(info) = crate::terminal::framebuffer_info() else {
+        return step("framebuffer available", false);
+    };
+    let expected = (
+        (info.width as u32).min(MAX_WIDTH),
+        (info.height as u32).min(MAX_HEIGHT),
+    );
+    crate::serial::write_line(format_args!(
+        "[S19.10] framebuffer {}x{}, compositor {:?}",
+        info.width,
+        info.height,
+        dimensions()
+    ));
+    if !step("boot compositor matches the framebuffer", dimensions() == Some(expected)) {
+        return false;
+    }
+
+    // Taking the display repaints the whole screen, corner to corner, rather
+    // than a fixed 640x480 window in its top-left.
+    if !step("display taken", activate_display().is_ok()) {
+        return false;
+    }
+    let covered = (expected.0 as usize) * (expected.1 as usize);
+    if !step("takeover repaints the whole framebuffer", present() == Ok(covered))
+        || !step(
+            "far corner shows the compositor background",
+            screen_pixel(expected.0 as usize - 1, expected.1 as usize - 1) == Some([0, 0, 0]),
+        )
+    {
+        deactivate_display();
+        return false;
+    }
+
+    // The boot console now draws through the terminal lock, so while the
+    // compositor owns the display its output is suppressed too.
+    let before = screen_checksum();
+    console.println("boot console text while compositing");
+    let silent = before.is_some() && screen_checksum() == before;
+    if !step("boot console suppressed while compositing", silent) {
+        deactivate_display();
+        return false;
+    }
+    deactivate_display();
+    let before = screen_checksum();
+    console.println("boot console text after release");
+    step(
+        "boot console draws again after release",
+        before.is_some() && screen_checksum() != before,
+    )
 }

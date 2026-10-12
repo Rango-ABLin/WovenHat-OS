@@ -284,6 +284,28 @@ pub fn with_framebuffer<R>(operation: impl FnOnce(&mut [u8], FrameBufferInfo) ->
     Some(operation(buffer, info))
 }
 
+/// [`with_framebuffer`] for text output: `None` while the compositor owns the
+/// display, so console text never draws over the compositor's frame.
+pub fn with_text_framebuffer<R>(
+    operation: impl FnOnce(&mut [u8], FrameBufferInfo) -> R,
+) -> Option<R> {
+    let terminal = TERMINAL.lock();
+    if terminal.display_owned {
+        return None;
+    }
+    let info = terminal.info?;
+    // SAFETY: as in `with_framebuffer`: the mapping lives for the kernel's
+    // lifetime, TERMINAL excludes every other writer, and the slice does not
+    // escape the closure.
+    let buffer = unsafe { core::slice::from_raw_parts_mut(terminal.ptr as *mut u8, terminal.len) };
+    Some(operation(buffer, info))
+}
+
+/// The framebuffer's geometry, once [`init`] has run.
+pub fn framebuffer_info() -> Option<FrameBufferInfo> {
+    TERMINAL.lock().info
+}
+
 /// Hand the display to the compositor (`true`) or return it to the terminal.
 ///
 /// Returns `false` if there is no framebuffer to hand over.
