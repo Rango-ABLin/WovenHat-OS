@@ -200,6 +200,7 @@ pub mod syscall {
     pub const GRAPHICS_SURFACE_STROKE: u64 = 104;
     pub const GRAPHICS_COMPOSITOR_CLAIM: u64 = 105;
     pub const GRAPHICS_COMPOSITOR_PRESENT: u64 = 106;
+    pub const INPUT_POLL: u64 = 107;
 
     /// Invoke the WovenHat Ring-3 ABI.
     ///
@@ -423,6 +424,12 @@ pub mod syscall {
 
     /// # Safety
     /// Must be called from WovenHat userspace.
+    pub unsafe fn input_poll() -> u64 {
+        unsafe { invoke(INPUT_POLL, 0, 0, 0) }
+    }
+
+    /// # Safety
+    /// Must be called from WovenHat userspace.
     pub unsafe fn graphics_surface_stroke(
         handle: u64,
         x: u16, y: u16, width: u16, height: u16,
@@ -532,6 +539,39 @@ pub fn compositor_present() -> Result<u64, Error> {
     // SAFETY: argument-free call.
     let result = unsafe { syscall::graphics_compositor_present() };
     check(result)
+}
+
+/// A keyboard event delivered to the focused process.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Key {
+    Char(char),
+    Enter,
+    Backspace,
+    Tab,
+    F1,
+}
+
+/// Take the next input event, if any.
+///
+/// Requires the `InputIo` capability and input focus, which the kernel grants
+/// to the compositor lease holder while it owns the display. Returns
+/// `Ok(None)` when no event is pending; the call never blocks.
+pub fn input_poll() -> Result<Option<Key>, Error> {
+    // SAFETY: argument-free call.
+    let result = unsafe { syscall::input_poll() };
+    if result == syscall::WOULD_BLOCK {
+        return Ok(None);
+    }
+    let value = check(result)?;
+    let payload = value & 0x00ff_ffff_ffff_ffff;
+    Ok(Some(match value >> 56 {
+        1 => Key::Char(char::from_u32(payload as u32).ok_or(Error::Failed)?),
+        2 => Key::Enter,
+        3 => Key::Backspace,
+        4 => Key::Tab,
+        5 => Key::F1,
+        _ => return Err(Error::Failed),
+    }))
 }
 
 /// Read one pixel from the compositor surface. Requires the lease, because the

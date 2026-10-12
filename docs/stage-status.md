@@ -1,5 +1,65 @@
 # Stage status
 
+## Stage 19.5 — input focus follows the compositor lease holder (2026-10-12)
+
+When the compositor lease holder takes the display (its first present), it
+also takes input focus. From then on, `woven_input::publish` delivers every
+event into a bounded 128-entry focus queue that only that process can read.
+The terminal's queue gets nothing, because the user is looking at the
+holder's screen, not the hidden terminal. When the holder exits,
+`compositor::release_owner` withdraws focus and the terminal receives input
+again. Every focus change discards the focus queue, so keys typed for one
+owner never reach the next owner or leak to the shell. `compositor::reset`
+also releases a holder's focus.
+
+The focus state is an IRQ mutex, because the keyboard interrupt path
+publishes through it. Lock order: compositor or keyboard decoder (rank 10),
+then `FOCUS`, then the terminal `QUEUE`. `FOCUS` is held across the fallback
+push so focus cannot change between the check and the push.
+
+Syscall 107 (`InputPoll`) returns the next event as `kind << 56 | value`
+(character, Enter, Backspace, Tab, F1), `WOULD_BLOCK` when the queue is empty,
+or `ERROR`. It requires `InputIo`, and the caller must hold focus. libwoven
+wraps it as `input_poll() -> Result<Option<Key>, Error>`. Pointer events exist
+only in the Stage 13.7 probe build and have no userspace encoding yet.
+
+Gate `[S19.5] input focus: PASSED`:
+- The kernel first checks the focus rules: no focus routes to the terminal;
+  focus routes only to the owner; non-owners are refused; the queue is bounded
+  and overflow is refused; a release by a non-owner is ignored; a focus change
+  discards pending events.
+- An ordinary-process probe must be refused `InputPoll`, along with all the
+  Stage 19.4 refusals, against a genuinely foreign surface.
+- hello-gui `--input` runs with `Console | DisplayIo | InputIo`. Once it holds
+  focus, the kernel publishes `o`, `k`, Enter through the keyboard interrupt's
+  own path. The terminal queue must stay empty, and the app must receive
+  exactly those keys in order with nothing extra. After exit, focus is gone
+  and a keystroke reaches the terminal again.
+
+Negative control: with `publish` changed to ignore focus, the gate fails at
+the focus-rules check. Evidence is in
+`audit-artifacts/stage19.5-negative-control-*`.
+
+Two defects were found while bringing this up:
+- The first `publish` returned `QUEUE.lock().push(event)` as its tail
+  expression. Rust drops tail-expression temporaries after locals, so the
+  `FOCUS` guard was released before `QUEUE`, out of nesting order. The
+  lock-order tracker panicked on the first unfocused keystroke, which the boot
+  sequence produces in every build. The push result is now bound and `FOCUS`
+  dropped explicitly.
+- `kernel_panic` parked forever, so under `qemu-test` that panic surfaced as a
+  300-second host timeout. It now exits QEMU with the failure status after
+  printing the panic report, as `halt()` already did. Every harness already
+  treats `KERNEL PANIC` as a failure. The timeout evidence is in
+  `audit-artifacts/stage19.5-timeout-1cpu-*`.
+
+Open: `InputPoll` is non-blocking, so clients poll with `yield_now`. A
+blocking wait belongs on the existing event objects, so a client sleeps until
+input arrives. Focus is all-or-nothing per holder, with no per-window focus
+yet; that is the holder's job once it composites several clients. Next
+prerequisites: an event-driven input wait, then delegating client surfaces to
+the holder by capability.
+
 ## Stage 19.4 — compositor authority and client handle binding (2026-10-12)
 
 **Defect fixed from Stage 18.** The client surface registry compared a slot's

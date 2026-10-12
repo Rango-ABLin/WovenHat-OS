@@ -285,6 +285,8 @@ pub enum Number {
     GraphicsCompositorClaim = 105,
     /// -> pixels written to the framebuffer, or ERROR
     GraphicsCompositorPresent = 106,
+    /// -> packed event (kind << 56 | value), WOULD_BLOCK when none, or ERROR
+    InputPoll = 107,
 }
 
 pub fn entry_address() -> u64 {
@@ -2223,6 +2225,7 @@ pub extern "C" fn wovenhat_syscall_dispatch(
         }
         value if value == Number::GraphicsCompositorClaim as u64 => sys_compositor_claim(),
         value if value == Number::GraphicsCompositorPresent as u64 => sys_compositor_present(),
+        value if value == Number::InputPoll as u64 => sys_input_poll(),
         _ => u64::MAX,
     };
 
@@ -2337,6 +2340,51 @@ fn sys_compositor_claim() -> u64 {
         return SYSCALL_ERROR;
     }
     crate::compositor::claim(crate::task::current_process_id()).map_or(SYSCALL_ERROR, |()| 0)
+}
+
+/// Event kinds in the top byte of an `InputPoll` result.
+const INPUT_KIND_CHAR: u64 = 1;
+const INPUT_KIND_ENTER: u64 = 2;
+const INPUT_KIND_BACKSPACE: u64 = 3;
+const INPUT_KIND_TAB: u64 = 4;
+const INPUT_KIND_F1: u64 = 5;
+
+fn encode_input(event: crate::woven_input::Event) -> Option<u64> {
+    use crate::woven_input::{Event, Key};
+    let packed = |kind: u64, value: u64| (kind << 56) | value;
+    match event {
+        Event::Key(Key::Char(character)) => Some(packed(INPUT_KIND_CHAR, u64::from(u32::from(character)))),
+        Event::Key(Key::Enter) => Some(packed(INPUT_KIND_ENTER, 0)),
+        Event::Key(Key::Backspace) => Some(packed(INPUT_KIND_BACKSPACE, 0)),
+        Event::Key(Key::Tab) => Some(packed(INPUT_KIND_TAB, 0)),
+        Event::Key(Key::F1) => Some(packed(INPUT_KIND_F1, 0)),
+        // Pointer and other device events exist only in the Stage 13.7 probe
+        // build and have no userspace encoding yet.
+        #[cfg(feature = "stage13-7-test")]
+        _ => None,
+    }
+}
+
+/// Take the next input event for the caller. Requires `InputIo`, and the
+/// caller must hold input focus, which the compositor grants to its lease
+/// holder while it owns the display. Non-blocking: WOULD_BLOCK when empty.
+fn sys_input_poll() -> u64 {
+    const WOULD_BLOCK: u64 = u64::MAX - 1;
+    if !crate::task::current_has(crate::capability::Capability::InputIo) {
+        return SYSCALL_ERROR;
+    }
+    let owner = crate::task::current_process_id();
+    loop {
+        match crate::woven_input::poll_for(owner) {
+            Err(_) => return SYSCALL_ERROR,
+            Ok(None) => return WOULD_BLOCK,
+            Ok(Some(event)) => {
+                if let Some(encoded) = encode_input(event) {
+                    return encoded;
+                }
+            }
+        }
+    }
 }
 
 /// Present compositor damage to the framebuffer. Requires `DisplayIo` and the

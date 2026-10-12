@@ -3363,6 +3363,15 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         serial::write_line(format_args!("[S1-5] storage journal: PASSED"));
         qemu_test_exit_success();
     }
+    #[cfg(feature = "stage19-5-test")]
+    {
+        if !stage19_5_self_test() {
+            serial::write_line(format_args!("[S19.5] input focus: FAILED"));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!("[S19.5] input focus: PASSED"));
+        qemu_test_exit_success();
+    }
     #[cfg(feature = "stage19-4-test")]
     {
         if !stage19_4_self_test() {
@@ -4393,7 +4402,8 @@ fn stage16_1_self_test() -> bool {
 #[cfg(any(
     feature = "stage18-2-test",
     feature = "stage19-2-test",
-    feature = "stage19-4-test"
+    feature = "stage19-4-test",
+    feature = "stage19-5-test"
 ))]
 const HELLO_GUI_IMAGE: &[u8] = include_bytes!(env!("WOVENHAT_HELLO_GUI_IMAGE"));
 
@@ -4403,7 +4413,8 @@ const HELLO_GUI_IMAGE: &[u8] = include_bytes!(env!("WOVENHAT_HELLO_GUI_IMAGE"));
 #[cfg(any(
     feature = "stage18-2-test",
     feature = "stage19-2-test",
-    feature = "stage19-4-test"
+    feature = "stage19-4-test",
+    feature = "stage19-5-test"
 ))]
 fn display_client_capabilities() -> capability::CapabilitySet {
     capability::CapabilitySet::only(capability::Capability::Console)
@@ -4415,21 +4426,49 @@ fn display_client_capabilities() -> capability::CapabilitySet {
 #[cfg(any(
     feature = "stage18-2-test",
     feature = "stage19-2-test",
-    feature = "stage19-4-test"
+    feature = "stage19-4-test",
+    feature = "stage19-5-test"
 ))]
 fn run_hello_gui(
     image: &[u8],
     argv: &[&str],
     display_authority: bool,
 ) -> Option<(task::ProcessId, Result<i32, task::WaitError>)> {
+    let pid = spawn_hello_gui(image, argv, display_authority.then(display_client_capabilities))?;
+    wait_hello_gui(pid)
+}
+
+/// Spawn hello-gui as an ordinary user process (`None`) or as a service with
+/// exactly `capabilities`.
+#[cfg(any(
+    feature = "stage18-2-test",
+    feature = "stage19-2-test",
+    feature = "stage19-4-test",
+    feature = "stage19-5-test"
+))]
+fn spawn_hello_gui(
+    image: &[u8],
+    argv: &[&str],
+    capabilities: Option<capability::CapabilitySet>,
+) -> Option<task::ProcessId> {
     let program = userspace::load_elf_with_argv(image, argv)?;
-    let pid = if display_authority {
-        task::spawn_user_system_service("hello-gui", program, display_client_capabilities())
-            .ok()?
-            .0
-    } else {
-        task::spawn_user_process("hello-gui", program).ok()?.0
-    };
+    Some(match capabilities {
+        Some(capabilities) => {
+            task::spawn_user_system_service("hello-gui", program, capabilities)
+                .ok()?
+                .0
+        }
+        None => task::spawn_user_process("hello-gui", program).ok()?.0,
+    })
+}
+
+#[cfg(any(
+    feature = "stage18-2-test",
+    feature = "stage19-2-test",
+    feature = "stage19-4-test",
+    feature = "stage19-5-test"
+))]
+fn wait_hello_gui(pid: task::ProcessId) -> Option<(task::ProcessId, Result<i32, task::WaitError>)> {
     let start = timer::ticks();
     while !task::process_exited(pid) {
         if timer::ticks().wrapping_sub(start) > 1000 {
@@ -4438,6 +4477,104 @@ fn run_hello_gui(
         task::yield_now();
     }
     Some((pid, task::wait_process(pid.as_u64())))
+}
+
+/// Stage 19.5 acceptance: input focus follows the compositor lease holder.
+///
+/// The kernel checks the focus rules directly. hello-gui `--input` then runs
+/// with `Console | DisplayIo | InputIo`; once it has taken the display, and
+/// therefore focus, the kernel publishes keystrokes through the same path the
+/// keyboard interrupt uses. The app must receive exactly those keys, in order,
+/// and the terminal must receive none of them. After the app exits, focus
+/// returns to the terminal.
+#[cfg(feature = "stage19-5-test")]
+fn stage19_5_self_test() -> bool {
+    use woven_input::Key;
+
+    fn step(name: &str, ok: bool) -> bool {
+        serial::write_line(format_args!(
+            "[S19.5] {} {}",
+            name,
+            if ok { "PASS" } else { "FAIL" }
+        ));
+        ok
+    }
+
+    if !step("focus rules", woven_input::focus_self_test()) {
+        return false;
+    }
+    if !step(
+        "install into the filesystem",
+        vfs::create_read_only("/bin/hello-gui", HELLO_GUI_IMAGE).is_ok(),
+    ) {
+        return false;
+    }
+    let mut image = alloc::vec![0u8; HELLO_GUI_IMAGE.len()];
+    if vfs::read_all("/bin/hello-gui", &mut image) != Ok(HELLO_GUI_IMAGE.len()) {
+        return step("filesystem round-trip", false);
+    }
+
+    // An ordinary process cannot read input at all; the probe checks that,
+    // along with the Stage 19.4 refusals, against a genuinely foreign surface.
+    const VICTIM_OWNER: u64 = 4243;
+    let Ok(victim) = user_graphics::create(VICTIM_OWNER, 8, 8) else {
+        return step("victim surface created", false);
+    };
+    let victim_arg = alloc::format!("{}", victim.to_u64());
+    let probe = run_hello_gui(&image, &["/bin/hello-gui", "--probe", &victim_arg], false);
+    user_graphics::release_owner(VICTIM_OWNER);
+    if !step(
+        "unprivileged probe refused input",
+        matches!(probe, Some((_, Ok(0)))),
+    ) {
+        return false;
+    }
+
+    let capabilities = display_client_capabilities().with(capability::Capability::InputIo);
+    let Some(pid) = spawn_hello_gui(&image, &["/bin/hello-gui", "--input"], Some(capabilities))
+    else {
+        return step("input client spawned", false);
+    };
+    let start = timer::ticks();
+    while woven_input::focus() != Some(pid.as_u64()) {
+        if task::process_exited(pid) || timer::ticks().wrapping_sub(start) > 1000 {
+            return step("presenting holder gains focus", false);
+        }
+        task::yield_now();
+    }
+    step("presenting holder gains focus", true);
+
+    let keys = [Key::Char('o'), Key::Char('k'), Key::Enter];
+    for key in keys {
+        if !woven_input::publish_key(key) {
+            return step("keys published", false);
+        }
+    }
+    let leaked = woven_input::poll().is_some();
+    if !step("terminal received none of the keys", !leaked) {
+        return false;
+    }
+
+    let Some((_, status)) = wait_hello_gui(pid) else {
+        return step("input client runs to completion", false);
+    };
+    serial::write_line(format_args!(
+        "[S19.5] input client exit status {}",
+        match status {
+            Ok(code) => code as i64,
+            Err(_) => -1,
+        }
+    ));
+    if !step("holder received exactly the keys, in order", status == Ok(0)) {
+        return false;
+    }
+    if !step("focus returned on exit", woven_input::focus().is_none()) {
+        return false;
+    }
+    // With focus back, a keystroke reaches the terminal again.
+    let restored = woven_input::publish_key(Key::Char('t'))
+        && woven_input::poll() == Some(woven_input::Event::Key(Key::Char('t')));
+    step("terminal receives input again", restored)
 }
 
 /// Stage 19.4 acceptance: compositor authority.

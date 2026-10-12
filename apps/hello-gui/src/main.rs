@@ -5,6 +5,10 @@
 //! window on the compositor, verifies the screen and presents it to the
 //! framebuffer. That needs the `DisplayIo` capability.
 //!
+//! With `--input` it then waits for the keys `o`, `k`, Enter, which the gate
+//! publishes once this process holds input focus, and checks it received
+//! exactly those, in order.
+//!
 //! With `--probe <handle>` it runs as an ordinary process and checks that the
 //! kernel refuses it everything it has no authority for: every compositor
 //! operation, and every operation on the surface `<handle>`, which belongs to
@@ -41,12 +45,13 @@ fn fail(code: u64) -> ! {
 fn main(args: Args) -> ! {
     match args.get(1) {
         Some(b"--probe") => probe(args.get(2)),
+        Some(b"--input") => run(true),
         Some(_) => fail(250),
-        None => run(),
+        None => run(false),
     }
 }
 
-fn run() -> ! {
+fn run(input: bool) -> ! {
     // 1. Allocate the surface.
     let surface = match GraphicsSurface::create(WIDTH, HEIGHT) {
         Ok(surface) => surface,
@@ -136,6 +141,10 @@ fn run() -> ! {
     }
     let _ = libwoven::print("hello-gui: framebuffer presented\n");
 
+    if input {
+        await_keys();
+    }
+
     // 7. Dropping the surface releases the client slot. The compositor keeps
     //    the pixels it was handed, which is the correct semantics for a
     //    once-presented window; the lease is released when the process exits.
@@ -143,6 +152,34 @@ fn run() -> ! {
     let _ = libwoven::print("hello-gui: surface released\n");
 
     libwoven::exit(0)
+}
+
+/// Wait for exactly `o`, `k`, Enter. The kernel publishes them once this
+/// process holds focus, so a wrong, missing or extra key is a routing defect.
+fn await_keys() {
+    use libwoven::Key;
+    const EXPECTED: [Key; 3] = [Key::Char('o'), Key::Char('k'), Key::Enter];
+    const DEADLINE_TICKS: u64 = 2000;
+
+    let start = libwoven::ticks();
+    let mut received = 0;
+    while received < EXPECTED.len() {
+        match libwoven::input_poll() {
+            Ok(Some(key)) if key == EXPECTED[received] => received += 1,
+            Ok(Some(_)) => fail(30 + received as u64),
+            Ok(None) => {
+                if libwoven::ticks().wrapping_sub(start) > DEADLINE_TICKS {
+                    fail(34);
+                }
+                libwoven::yield_now();
+            }
+            Err(_) => fail(29),
+        }
+    }
+    if !matches!(libwoven::input_poll(), Ok(None)) {
+        fail(33);
+    }
+    let _ = libwoven::print("hello-gui: input received\n");
 }
 
 fn parse_u64(text: &[u8]) -> Option<u64> {
@@ -186,6 +223,10 @@ fn probe(victim: Option<&[u8]>) -> ! {
     }
     if libwoven::compositor_present().is_ok() {
         fail(206);
+    }
+    // Without InputIo and focus, input is off limits too.
+    if libwoven::input_poll().is_ok() {
+        fail(215);
     }
     let _ = libwoven::print("hello-gui probe: compositor refused\n");
 

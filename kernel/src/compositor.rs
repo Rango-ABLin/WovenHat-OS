@@ -223,6 +223,7 @@ pub fn release_owner(pid: u64) {
         return;
     }
     state.holder = None;
+    crate::woven_input::release_focus(pid);
     if state.presenting {
         state.presenting = false;
         crate::terminal::set_display_owned(false);
@@ -283,6 +284,9 @@ pub fn present_for(pid: u64) -> Result<usize, Error> {
         state.presenting = true;
         let bounds = state.surface.bounds();
         state.damage.add(bounds);
+        // The user is now looking at the holder's screen, so keystrokes are
+        // meant for it rather than for the hidden terminal.
+        crate::woven_input::set_focus(Some(pid));
     }
     let written = crate::terminal::with_framebuffer(|buffer, info| {
         crate::display::present(&state.surface, &state.damage, buffer, info)
@@ -337,6 +341,9 @@ pub fn reset() {
     // Dropping the state also drops any lease; the display goes back to the
     // terminal below if the compositor held it.
     let mut guard = STATE.lock();
+    if let Some(holder) = guard.as_ref().and_then(|state| state.holder) {
+        crate::woven_input::release_focus(holder);
+    }
     if guard.as_ref().is_some_and(|state| state.presenting) {
         crate::terminal::set_display_owned(false);
     }
