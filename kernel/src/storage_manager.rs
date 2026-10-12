@@ -154,6 +154,24 @@ pub fn encrypted_mount_self_test() -> bool {
     unmount(id)
 }
 
+/// Verify exclusive mount ranges and overflow refusal without touching disks.
+#[cfg(feature = "stage12-5-test")]
+pub fn mount_exclusivity_self_test() -> bool {
+    let Some(first) = mount(50_000, 100, false) else {
+        return false;
+    };
+    let rejected = mount(50_000, 100, false).is_none()
+        && mount(50_050, 100, false).is_none()
+        && mount(49_950, 100, false).is_none()
+        && mount(u64::MAX - 1, 10, false).is_none();
+    let adjacent = mount(50_100, 100, false);
+    let cleaned = unmount(first);
+    let adjacent_cleaned = adjacent.is_some_and(unmount);
+    let remount = mount(50_000, 100, false);
+    let remount_cleaned = remount.is_some_and(unmount);
+    rejected && cleaned && adjacent_cleaned && remount_cleaned
+}
+
 #[cfg(feature = "stage12-5-test")]
 pub fn structural_self_test() -> bool {
     let Some(id) = mount(2048, 10000, true) else {
