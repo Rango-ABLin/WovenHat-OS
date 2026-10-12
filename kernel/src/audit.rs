@@ -147,7 +147,13 @@ pub fn record_detail(actor: u64, action: Action, target: u64, detail: u64, allow
     let event = Event {
         sequence: 0,
         tick: crate::timer::ticks(),
-        cpu: crate::smp::cpu_index() as u16,
+        // `smp::cpu_index` panics on an unregistered APIC identity, and the
+        // kernel aborts on panic. Committing a security record must never be
+        // the thing that kills the kernel, so this uses the conservative
+        // accessor that falls back to CPU 0 during the pre-SMP bootstrap and on
+        // any context whose identity is not registered yet. Attribution for a
+        // record emitted that early is worth less than the record itself.
+        cpu: crate::smp::lock_cpu_index() as u16,
         actor,
         action,
         target,

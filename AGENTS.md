@@ -33,3 +33,20 @@ The launcher sets project-local Cargo build/target directories. Reuse those
 environment settings for focused tests to avoid duplicate build trees. Run only
 one acceptance chain at a time; the harnesses use fixed host ports and output
 paths. Audit artifacts and generated build output are intentionally Git-ignored.
+
+Stage feature gates:
+
+- Every stage self-test call site needs its own `#[cfg(feature = "...")]`
+  guard. An unguarded call compiles only for the configurations that happen to
+  enable its feature and silently breaks every lower stage gate.
+- Lint each stage feature you affect, not just the one you are adding. A
+  feature whose gate cannot compile is a gate nobody is running:
+  `cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features <stage> -- -D warnings`
+  Also run `cargo clippy --all-targets -- -D warnings`, which compiles kernel
+  sources into host test targets under a different edition.
+- Express a shared module dependency with `cfg(any(feature = "a", feature =
+  "b"))` on the module. Only add a prerequisite to the feature graph when that
+  stage family is designed for it. The Stage 14 features chain deliberately;
+  the Stage 12 features must not, because each Stage 12 self-test block ends
+  the boot with `qemu_test_exit_success()`, so an earlier block would exit
+  before the later one ran — a boot that passes with the wrong marker.

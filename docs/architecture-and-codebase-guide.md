@@ -119,6 +119,19 @@ This guide describes the Stage 10.7 source, not the proposed 1.0 system. WovenHa
 currently has a monolithic Rust kernel, a UEFI boot image builder, embedded Ring-3
 programs, and host/QEMU acceptance harnesses. The supplied
 [master development roadmap](master-development-roadmap.md) defines future stages.
+
+## Stage 1–5 data journal boundary
+
+FAT32 persistence retains the original single-file `WDJ1` journal and adds a
+separate bounded `WDJ2` batch journal. A batch contains at most four file data
+replacements. Prepared records carry the old bytes and committed records carry
+the intended lengths/checksums; WMD1/WMD2 metadata intents are published before
+data and removed or finalized with the batch. Mount recovery rolls back
+incomplete or partially matching batches, removes stale metadata intents, and
+retires only a fully matching commit. The batch API is
+`storage::persist_paths_atomic`. This is bounded data-plus-sidecar recovery,
+not a general multi-operation metadata transaction or physical power-loss
+qualification.
 [Stage status](stage-status.md) records which gates have actually passed.
 
 ## Repository map

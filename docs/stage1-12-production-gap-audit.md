@@ -5,7 +5,7 @@ mistaken for full production completion.
 
 | Area | Foundation present | Production gaps still open |
 | --- | --- | --- |
-| Stages 1–5 | Boot, memory, paging, scheduler, VFS, userspace, storage; 1/2/4-CPU acceptance; bounded Unicode long-filename create/lookup/delete/rename, NFC name normalization, named listing, mounted import listing, directory growth, bounded VFS uid/gid/mode enforcement, WMD1/WMD2 ownership metadata persistence/import and durable file-intent recovery | Non-QEMU hardware qualification/drivers, DMA storage completion, metadata-table capacity beyond the fixed ABI, full data rollback/checksum replay, unclean-shutdown hardware qualification |
+| Stages 1–5 | Boot, memory, paging, scheduler, VFS, userspace, storage; 1/2/4-CPU acceptance; bounded Unicode long-filename create/lookup/delete/rename, NFC name normalization, named listing, mounted import listing, directory growth, bounded VFS uid/gid/mode enforcement, WMD1/WMD2 ownership metadata persistence/import, durable file-intent recovery, and bounded four-file WDJ2 data rollback/replay | Non-QEMU hardware qualification/drivers, DMA storage completion, metadata transactions beyond the bounded sidecars, arbitrary-size/full-volume rollback, and unclean-shutdown hardware qualification |
 | Stage 6 | Bounded SMP, TLB shootdowns, 1–4 CPU tests, ACPI SRAT CPU/memory-domain discovery, domain-local placement/rebalancing/allocation, x2APIC MSR path, migratable audited I/O workers, QEMU-qualified non-contiguous AP offline/re-online control, ranked interrupt-safe locks for scheduler/process/paging/COW/frame-allocation/file-frame cache/VFS/heap/swap/FAT32 clean-page cache, async/completion/worker, pipe, IPC, WovenGuard lineage, device/keyboard, journal, mount-record and key-vault domains, generation-tagged VFS/pipe handles, unlocked/revalidated disk-backed VFS reads and materialization, allocator-reserved contiguous VirtIO DMA arena, in-place heap metadata and runtime chunk growth | General multicore userspace, unrestricted concurrent I/O/DMA throughput, multi-node NUMA qualification, non-contiguous hotplug hardware qualification, APIC-ID-above-255 hardware coverage, cross-layer FAT32 mutation transactions and stress qualification, guarded-allocation headroom/low-memory and multicore heap stress, broader cross-layer lock stress/priority inheritance |
 | Stages 7–9 | Isolation, IPC, capability delegation/revocation, WovenGuard, ELF W^X, formal threat model | Dynamic libc/linking, complete signals, scheduler-backed threads |
 | Stage 10 | TCP, completion ports, timer/event foundations, Ring-3 timer/event gate, unified completion path | Broader production driver and hardware qualification |
@@ -18,9 +18,10 @@ roadmap requirement has passing evidence or an explicitly accepted design.
 
 Stage 1–5 metadata capacity has since been extended with the compatible WMD3
 eight-sector region; the former fixed four-sector ABI ceiling is closed as a
-bounded software increment. The remaining Stage 1–5 gaps are still the
-hardware/DMA qualification, full multi-operation data rollback/replay, and
-unclean-shutdown hardware qualification listed above.
+bounded software increment. WDJ2 now covers bounded four-file data rollback
+and replay with 1/2/4-CPU recovery evidence. The remaining Stage 1–5 gaps are
+hardware/DMA qualification, metadata transactions beyond the bounded sidecars,
+arbitrary-size/full-volume rollback, and unclean-shutdown qualification.
 
 Stage 6 lock follow-up: terminal rendering now uses a ranked, IRQ-live local
 preemption guard; shell cwd state uses a short ranked IRQ mutex. The remaining

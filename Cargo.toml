@@ -46,6 +46,8 @@ stage14-5-test = ["network-test", "kernel/stage14-5-test"]
 stage14-5b-test = ["network-test", "kernel/stage14-5b-test"]
 stage14-5c-test = ["network-test", "kernel/stage14-5c-test"]
 stage14-5d-test = ["network-test", "kernel/stage14-5d-test"]
+stage15-1-test = ["qemu-test", "kernel/stage15-1-test"]
+stage15-2-test = ["qemu-test", "kernel/stage15-2-test"]
 stage1-5-test = ["qemu-test", "kernel/stage1-5-test"]
 
 [profile.dev]
