@@ -267,6 +267,20 @@ pub enum Number {
     NotificationPost = 96,
     /// query id -> cancel/reclaim pending DNS query
     DnsCancel = 97,
+    /// width, height -> packed handle, or ERROR
+    GraphicsSurfaceCreate = 98,
+    /// handle, packed (x | y<<16 | w<<32 | h<<48), packed colour -> 0 or ERROR
+    GraphicsSurfaceFill = 99,
+    /// handle, packed (x | y<<32) -> packed colour, or ERROR
+    GraphicsSurfacePixel = 100,
+    /// handle -> 0 or ERROR
+    GraphicsSurfaceDestroy = 101,
+    /// handle, packed (x | y<<32) -> 0 or ERROR
+    GraphicsCompositorBlit = 102,
+    /// packed (x | y<<32) -> packed colour, or ERROR
+    GraphicsCompositorPixel = 103,
+    /// handle, packed (x | y<<16 | w<<32 | h<<48), packed colour -> 0 or ERROR
+    GraphicsSurfaceStroke = 104,
 }
 
 pub fn entry_address() -> u64 {
@@ -2182,6 +2196,27 @@ pub extern "C" fn wovenhat_syscall_dispatch(
         value if value == Number::TimerClose as u64 => sys_timer_close(arg0),
         value if value == Number::EventClose as u64 => sys_event_close(arg0),
         value if value == Number::SleepUntil as u64 => sys_sleep_until(arg0),
+        value if value == Number::GraphicsSurfaceCreate as u64 => {
+            sys_graphics_create(arg0, arg1)
+        }
+        value if value == Number::GraphicsSurfaceFill as u64 => {
+            sys_graphics_fill(arg0, arg1, arg2)
+        }
+        value if value == Number::GraphicsSurfacePixel as u64 => {
+            sys_graphics_pixel(arg0, arg1)
+        }
+        value if value == Number::GraphicsSurfaceDestroy as u64 => {
+            sys_graphics_destroy(arg0)
+        }
+        value if value == Number::GraphicsCompositorBlit as u64 => {
+            sys_compositor_blit(arg0, arg1)
+        }
+        value if value == Number::GraphicsCompositorPixel as u64 => {
+            sys_compositor_pixel(arg0)
+        }
+        value if value == Number::GraphicsSurfaceStroke as u64 => {
+            sys_graphics_stroke(arg0, arg1, arg2)
+        }
         _ => u64::MAX,
     };
 
@@ -2193,4 +2228,100 @@ pub extern "C" fn wovenhat_syscall_dispatch(
     LAST_COMPLETED.store(number, Ordering::Release);
     COMPLETIONS.fetch_add(1, Ordering::Release);
     result
+}
+
+// -------------------------------------------------------------- graphics
+
+/// Allocate a client surface for the current process.
+///
+/// `arg0`/`arg1` carry width and height as u32. The returned token packs the
+/// slot, generation and owner, so an impostor process holding a leaked value
+/// cannot drive the surface. Caps are enforced in `user_graphics`.
+fn sys_graphics_create(width: u64, height: u64) -> u64 {
+    let (Ok(width), Ok(height)) = (u32::try_from(width), u32::try_from(height)) else {
+        return SYSCALL_ERROR;
+    };
+    let owner = crate::task::current_process_id();
+    crate::user_graphics::create(owner, width, height)
+        .map(|handle| handle.to_u64())
+        .unwrap_or(SYSCALL_ERROR)
+}
+
+/// Fill a rectangle in a client surface.
+///
+/// `arg1` packs `x | (y << 16) | (w << 32) | (h << 48)` as four u16 fields.
+/// Clients that need larger coordinates will reach a differently packed
+/// successor; the surface caps keep every value well within u16.
+fn sys_graphics_fill(handle: u64, packed: u64, color: u64) -> u64 {
+    let x = (packed & 0xffff) as u16 as i32;
+    let y = ((packed >> 16) & 0xffff) as u16 as i32;
+    let width = ((packed >> 32) & 0xffff) as usize;
+    let height = ((packed >> 48) & 0xffff) as usize;
+    let handle = crate::user_graphics::Handle::from_u64(handle);
+    crate::user_graphics::fill_rect(
+        handle,
+        crate::display::Rect::new(x, y, width, height),
+        color as u32,
+    )
+    .map_or(SYSCALL_ERROR, |()| 0)
+}
+
+/// Read one pixel from a client surface, returning its packed colour.
+///
+/// `arg1` packs `x | (y << 32)` as two u32s. Returning the colour directly
+/// means a client can verify what it drew without a buffer copy.
+fn sys_graphics_pixel(handle: u64, packed: u64) -> u64 {
+    let x = (packed & 0xffff_ffff) as i32;
+    let y = ((packed >> 32) & 0xffff_ffff) as i32;
+    let handle = crate::user_graphics::Handle::from_u64(handle);
+    crate::user_graphics::pixel(handle, x, y)
+        .map(u64::from)
+        .unwrap_or(SYSCALL_ERROR)
+}
+
+/// Release a client surface.
+fn sys_graphics_destroy(handle: u64) -> u64 {
+    let handle = crate::user_graphics::Handle::from_u64(handle);
+    crate::user_graphics::destroy(handle).map_or(SYSCALL_ERROR, |()| 0)
+}
+
+/// Blit a client surface onto the compositor at `packed = x | (y << 32)`.
+///
+/// A real compositor process will eventually mediate this; today the kernel
+/// honours the request directly, so the primitive is exercised while that
+/// policy layer is built. Ownership is enforced through the client-surface
+/// registry.
+fn sys_compositor_blit(handle: u64, packed: u64) -> u64 {
+    let x = (packed & 0xffff_ffff) as i32;
+    let y = ((packed >> 32) & 0xffff_ffff) as i32;
+    let handle = crate::user_graphics::Handle::from_u64(handle);
+    crate::compositor::blit(handle, x, y).map_or(SYSCALL_ERROR, |_| 0)
+}
+
+/// Read one pixel of the compositor surface at `packed = x | (y << 32)`.
+///
+/// Returns the packed colour or SYSCALL_ERROR. Used by acceptance tests to
+/// verify a client's blit without a framebuffer accessor.
+fn sys_compositor_pixel(packed: u64) -> u64 {
+    let x = (packed & 0xffff_ffff) as i32;
+    let y = ((packed >> 32) & 0xffff_ffff) as i32;
+    crate::compositor::pixel(x, y).map(u64::from).unwrap_or(SYSCALL_ERROR)
+}
+
+/// Stroke a rectangle outline into a client surface.
+///
+/// Shares the fill encoding so the client has one packing convention: four
+/// u16 fields in `packed`.
+fn sys_graphics_stroke(handle: u64, packed: u64, color: u64) -> u64 {
+    let x = (packed & 0xffff) as u16 as i32;
+    let y = ((packed >> 16) & 0xffff) as u16 as i32;
+    let width = ((packed >> 32) & 0xffff) as usize;
+    let height = ((packed >> 48) & 0xffff) as usize;
+    let handle = crate::user_graphics::Handle::from_u64(handle);
+    crate::user_graphics::stroke_rect(
+        handle,
+        crate::display::Rect::new(x, y, width, height),
+        color as u32,
+    )
+    .map_or(SYSCALL_ERROR, |()| 0)
 }

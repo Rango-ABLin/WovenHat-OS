@@ -1,0 +1,214 @@
+//! Kernel-held compositor surface for client surfaces.
+//!
+//! Phase 5 of the recovery plan calls for a compositor that places client
+//! surfaces on the screen. The honest shape of that compositor is a userspace
+//! process whose authority is the one capability that can hand drawing to the
+//! real framebuffer, with per-client surfaces delivered as capabilities. This
+//! module is the kernel-side primitive that makes such a process possible: a
+//! single screen-sized compositor surface, blit and pixel-read operations, and
+//! damage tracking the display stack can honour at presentation time.
+//!
+//! No stacking policy is in here. A client that calls [`blit`] places its
+//! surface exactly where it asked, so this is not a window manager; it is the
+//! primitive the window manager will drive. A policy layer belongs above this,
+//! in userspace, once there is a compositor process that owns it.
+//!
+//! The compositor surface's dimensions are fixed at [`init`] time rather than
+//! derived from the framebuffer, so acceptance tests can target a known
+//! screen without depending on real display geometry.
+
+use crate::display::{Damage, Rect, Surface};
+use crate::irq_lock::IrqMutex as Mutex;
+use crate::user_graphics;
+
+/// Compositor surface width used by the acceptance tests. A real compositor
+/// will have this follow the framebuffer; today the kernel does not expose a
+/// framebuffer accessor to this module, so it is fixed.
+pub const DEFAULT_WIDTH: u32 = 640;
+pub const DEFAULT_HEIGHT: u32 = 480;
+
+/// Error returned by compositor operations.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Error {
+    /// Compositor has not been initialised yet.
+    NotReady,
+    /// The named client surface does not exist, is stale, or is owned by a
+    /// different process.
+    InvalidClient,
+    /// The requested pixel is outside the compositor surface.
+    OutOfRange,
+}
+
+struct State {
+    surface: Surface,
+    damage: Damage,
+}
+
+impl State {
+    fn new(width: usize, height: usize) -> Self {
+        let mut state = Self {
+            surface: Surface::new(width, height),
+            damage: Damage::new(),
+        };
+        // A compositor without an initial fill reads as transparent-looking
+        // zeros, which the test cannot distinguish from "a client blitted
+        // zeros". Fill once at construction so subsequent reads reflect a
+        // deliberate state.
+        let bounds = state.surface.bounds();
+        state.surface.fill_rect(bounds, 0);
+        state.damage.add(bounds);
+        state
+    }
+}
+
+/// Rank 10, matching the user-graphics registry it reads from.
+static STATE: Mutex<Option<State>> = Mutex::with_rank(None, 10);
+
+/// Initialise the compositor surface. Idempotent — the second call is a no-op.
+///
+/// The acceptance tests call this; a production boot would call it with the
+/// framebuffer's own dimensions once a global framebuffer accessor exists.
+pub fn init(width: u32, height: u32) {
+    let mut guard = STATE.lock();
+    if guard.is_none() {
+        *guard = Some(State::new(width as usize, height as usize));
+    }
+}
+
+/// Blit the client surface named by `handle` onto the compositor at `(x, y)`.
+///
+/// The lookup is performed through `user_graphics` so the ownership and
+/// generation rules the registry enforces also apply here: a client cannot
+/// blit another client's surface.
+pub fn blit(handle: user_graphics::Handle, x: i32, y: i32) -> Result<Rect, Error> {
+    // Snapshot the client surface's pixels under the registry lock, then
+    // release that lock before taking the compositor's. Holding both would
+    // require a ranking rule for user_graphics vs compositor and open the door
+    // to inversions; copying out costs one allocation and keeps the lock
+    // dependency single.
+    //
+    // Readiness is checked first so an uninitialised compositor reports
+    // NotReady regardless of the handle, and no snapshot is copied for a blit
+    // that has nowhere to land. The check is repeated under the lock below
+    // because the state may be reset (tests only) between the two.
+    if STATE.lock().is_none() {
+        return Err(Error::NotReady);
+    }
+    let snapshot = user_graphics::snapshot(handle).map_err(|_| Error::InvalidClient)?;
+    let mut guard = STATE.lock();
+    let state = guard.as_mut().ok_or(Error::NotReady)?;
+    let touched = state.surface.blit(&snapshot, x, y);
+    state.damage.add(touched);
+    Ok(touched)
+}
+
+/// Read one pixel from the compositor surface.
+pub fn pixel(x: i32, y: i32) -> Result<u32, Error> {
+    let guard = STATE.lock();
+    let state = guard.as_ref().ok_or(Error::NotReady)?;
+    state.surface.pixel(x, y).ok_or(Error::OutOfRange)
+}
+
+/// Dimensions of the compositor surface, or `None` before [`init`].
+///
+/// Currently used only by the Stage 19.1 self-test; a userspace compositor
+/// will reach the same values through its own idempotent `init` call once that
+/// process exists.
+#[cfg_attr(not(feature = "stage19-1-test"), allow(dead_code))]
+pub fn dimensions() -> Option<(u32, u32)> {
+    let guard = STATE.lock();
+    guard
+        .as_ref()
+        .map(|state| (state.surface.width() as u32, state.surface.height() as u32))
+}
+
+/// Reset the compositor state. Intended for tests only.
+///
+/// Dropping and re-initialising is the only way to shrink the surface or clear
+/// damage between acceptance runs; a production kernel would never call this.
+#[cfg_attr(not(feature = "stage19-1-test"), allow(dead_code))]
+pub fn reset() {
+    *STATE.lock() = None;
+}
+
+#[cfg(feature = "stage19-1-test")]
+pub fn structural_self_test() -> bool {
+    use crate::display::rgb;
+
+    reset();
+
+    // Operations before init must refuse rather than silently create state.
+    let fake = user_graphics::Handle::from_u64(0);
+    if blit(fake, 0, 0) != Err(Error::NotReady) || pixel(0, 0) != Err(Error::NotReady) {
+        return false;
+    }
+
+    init(DEFAULT_WIDTH, DEFAULT_HEIGHT);
+    // A second init is a no-op; dimensions do not shift under the caller.
+    init(100, 100);
+    if dimensions() != Some((DEFAULT_WIDTH, DEFAULT_HEIGHT)) {
+        return false;
+    }
+
+    // After init the compositor reads as its background fill (0), not as the
+    // zeroed heap it just allocated.
+    if pixel(0, 0) != Ok(0) || pixel(100, 100) != Ok(0) {
+        return false;
+    }
+    if pixel(DEFAULT_WIDTH as i32, 0) != Err(Error::OutOfRange)
+        || pixel(-1, 0) != Err(Error::OutOfRange)
+    {
+        return false;
+    }
+
+    // A real client surface, filled and blitted onto the compositor.
+    let owner = 42u64;
+    let Ok(client) = user_graphics::create(owner, 32, 16) else {
+        return false;
+    };
+    if user_graphics::fill_rect(client, Rect::new(0, 0, 32, 16), rgb(10, 20, 30)).is_err() {
+        return false;
+    }
+    let touched = match blit(client, 100, 50) {
+        Ok(rect) => rect,
+        Err(_) => return false,
+    };
+    if touched != Rect::new(100, 50, 32, 16) {
+        return false;
+    }
+    // The compositor must carry the colour the client wrote, exactly, at the
+    // right offset.
+    if pixel(100, 50) != Ok(rgb(10, 20, 30))
+        || pixel(131, 65) != Ok(rgb(10, 20, 30))
+        || pixel(99, 50) != Ok(0)
+        || pixel(132, 65) != Ok(0)
+    {
+        return false;
+    }
+
+    // Blit clipped by the compositor's edges: the reported touched region is
+    // the on-screen part only.
+    let touched = match blit(client, DEFAULT_WIDTH as i32 - 10, DEFAULT_HEIGHT as i32 - 5) {
+        Ok(rect) => rect,
+        Err(_) => return false,
+    };
+    if touched.width != 10 || touched.height != 5 {
+        return false;
+    }
+
+    // A handle that does not belong to any client is refused with
+    // InvalidClient rather than being treated as a wildcard.
+    if blit(fake, 0, 0) != Err(Error::InvalidClient) {
+        return false;
+    }
+
+    // After the owning process goes away, the client's handle is stale and
+    // another blit must be refused rather than drawing from a reused slot.
+    user_graphics::release_owner(owner);
+    if blit(client, 0, 0) != Err(Error::InvalidClient) {
+        return false;
+    }
+
+    reset();
+    true
+}

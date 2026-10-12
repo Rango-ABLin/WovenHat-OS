@@ -95,6 +95,8 @@ mod terminal;
 mod thread;
 mod timer;
 mod userspace;
+mod compositor;
+mod user_graphics;
 mod vfs;
 #[cfg(feature = "stage12-1-test")]
 mod vfs_api;
@@ -1248,6 +1250,11 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     if heap::self_test() {
         console.println("KERNEL HEAP: CAPACITY/FRAGMENTATION OK");
         serial::write_line(format_args!("[HEAP] mapped={} bytes", heap::stats().size));
+        // The compositor surface is a kernel-held primitive the client-surface
+        // registry blits onto. Deferred to here because its allocation needs a
+        // mapped heap; a userspace compositor process will take over this role
+        // once that lands.
+        compositor::init(compositor::DEFAULT_WIDTH, compositor::DEFAULT_HEIGHT);
     } else {
         console.println("KERNEL HEAP: SELF TEST FAILED");
         halt();
@@ -3356,6 +3363,42 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         serial::write_line(format_args!("[S1-5] storage journal: PASSED"));
         qemu_test_exit_success();
     }
+    #[cfg(feature = "stage19-2-test")]
+    {
+        if !stage19_2_self_test() {
+            serial::write_line(format_args!("[S19.2] hello-gui through the compositor: FAILED"));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!("[S19.2] hello-gui through the compositor: PASSED"));
+        qemu_test_exit_success();
+    }
+    #[cfg(feature = "stage18-2-test")]
+    {
+        if !stage18_2_self_test() {
+            serial::write_line(format_args!("[S18.2] client surface end-to-end: FAILED"));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!("[S18.2] client surface end-to-end: PASSED"));
+        qemu_test_exit_success();
+    }
+    #[cfg(feature = "stage19-1-test")]
+    {
+        if !compositor::structural_self_test() {
+            serial::write_line(format_args!("[S19.1] compositor surface: FAILED"));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!("[S19.1] compositor surface: PASSED"));
+        qemu_test_exit_success();
+    }
+    #[cfg(feature = "stage18-1-test")]
+    {
+        if !user_graphics::structural_self_test() {
+            serial::write_line(format_args!("[S18.1] client surface registry: FAILED"));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!("[S18.1] client surface registry: PASSED"));
+        qemu_test_exit_success();
+    }
     #[cfg(feature = "stage17-1-test")]
     {
         if !font::structural_self_test() {
@@ -4323,6 +4366,159 @@ fn stage16_1_self_test() -> bool {
     step(
         "application exits zero",
         task::wait_process(pid.as_u64()) == Ok(0),
+    )
+}
+
+
+// ------------------------------- end-to-end client surface via a real app
+
+#[cfg(any(feature = "stage18-2-test", feature = "stage19-2-test"))]
+const HELLO_GUI_IMAGE: &[u8] = include_bytes!(env!("WOVENHAT_HELLO_GUI_IMAGE"));
+
+/// Stage 19.2 acceptance: a userspace program presents its surface onto the
+/// compositor and the kernel's compositor surface carries the expected pixels.
+///
+/// The hello-gui binary itself verifies its blit through `screen_pixel`, so
+/// exit zero already proves the compositor is honouring the request. This
+/// self-test additionally re-reads the compositor from kernel space to confirm
+/// nothing has unwound between the app exit and the gate check.
+#[cfg(feature = "stage19-2-test")]
+fn stage19_2_self_test() -> bool {
+    fn step(name: &str, ok: bool) -> bool {
+        serial::write_line(format_args!(
+            "[S19.2] {} {}",
+            name,
+            if ok { "PASS" } else { "FAIL" }
+        ));
+        ok
+    }
+
+    if elf::parse(HELLO_GUI_IMAGE).is_err() {
+        return step("elf accepted by the loader", false);
+    }
+    if !step(
+        "install into the filesystem",
+        vfs::create_read_only("/bin/hello-gui", HELLO_GUI_IMAGE).is_ok(),
+    ) {
+        return false;
+    }
+    let mut readback = alloc::vec![0u8; HELLO_GUI_IMAGE.len()];
+    if !step(
+        "filesystem round-trip",
+        vfs::read_all("/bin/hello-gui", &mut readback)
+            == Ok(HELLO_GUI_IMAGE.len())
+            && readback[..] == HELLO_GUI_IMAGE[..],
+    ) {
+        return false;
+    }
+    let Some(program) = userspace::load_elf_with_argv(&readback, &["/bin/hello-gui"]) else {
+        return step("load from filesystem bytes", false);
+    };
+    let pid = match task::spawn_user_process("hello-gui", program) {
+        Ok((pid, _)) => pid,
+        Err(_) => return step("spawn in Ring 3", false),
+    };
+    let start = timer::ticks();
+    while !task::process_exited(pid) {
+        if timer::ticks().wrapping_sub(start) > 1000 {
+            return step("application runs to completion", false);
+        }
+        task::yield_now();
+    }
+    let exit_status = task::wait_process(pid.as_u64());
+    let status = match exit_status {
+        Ok(code) => code as i64,
+        Err(_) => -1,
+    };
+    serial::write_line(format_args!("[S19.2] exit status {}", status));
+    if !step("application exits zero", exit_status == Ok(0)) {
+        return false;
+    }
+
+    // The compositor must still show the content pixel the app placed; the
+    // self-test re-reads it from kernel space to confirm no cleanup wiped it.
+    const CONTENT: u32 = crate::display::rgb(230, 230, 240);
+    if !step(
+        "compositor retained the window after app exit",
+        crate::compositor::pixel(160, 100) == Ok(CONTENT),
+    ) {
+        return false;
+    }
+    step(
+        "owner slots released on exit",
+        crate::user_graphics::count_for(pid.as_u64()) == 0,
+    )
+}
+
+/// Stage 18.2 acceptance: a userspace program allocates a surface, draws into
+/// it through the graphics syscalls, reads pixels back for verification, and
+/// exits zero. End-to-end proof of the client surface primitive.
+#[cfg(feature = "stage18-2-test")]
+fn stage18_2_self_test() -> bool {
+    fn step(name: &str, ok: bool) -> bool {
+        serial::write_line(format_args!(
+            "[S18.2] {} {}",
+            name,
+            if ok { "PASS" } else { "FAIL" }
+        ));
+        ok
+    }
+
+    serial::write_line(format_args!(
+        "[S18.2] hello-gui image bytes {}",
+        HELLO_GUI_IMAGE.len()
+    ));
+
+    if elf::parse(HELLO_GUI_IMAGE).is_err() {
+        return step("elf accepted by the loader", false);
+    }
+    if !step(
+        "install into the filesystem",
+        vfs::create_read_only("/bin/hello-gui", HELLO_GUI_IMAGE).is_ok(),
+    ) {
+        return false;
+    }
+
+    let mut readback = alloc::vec![0u8; HELLO_GUI_IMAGE.len()];
+    let round_trip = vfs::read_all("/bin/hello-gui", &mut readback)
+        == Ok(HELLO_GUI_IMAGE.len())
+        && readback[..] == HELLO_GUI_IMAGE[..];
+    if !step("filesystem round-trip", round_trip) {
+        return false;
+    }
+
+    let Some(program) = userspace::load_elf_with_argv(&readback, &["/bin/hello-gui"]) else {
+        return step("load from filesystem bytes", false);
+    };
+
+    let pid = match task::spawn_user_process("hello-gui", program) {
+        Ok((pid, _context)) => pid,
+        Err(_) => return step("spawn in Ring 3", false),
+    };
+
+    let start = timer::ticks();
+    while !task::process_exited(pid) {
+        if timer::ticks().wrapping_sub(start) > 1000 {
+            return step("application runs to completion", false);
+        }
+        task::yield_now();
+    }
+
+    let exit_status = task::wait_process(pid.as_u64());
+    let status_text = match exit_status {
+        Ok(code) => code as i64,
+        Err(_) => -1,
+    };
+    serial::write_line(format_args!("[S18.2] exit status {}", status_text));
+    if !step("application exits zero", exit_status == Ok(0)) {
+        return false;
+    }
+
+    // All of the app's surfaces must have been reclaimed when it exited; a
+    // leak here would mean release_owner is not wired on the task-exit path.
+    step(
+        "owner slots released on exit",
+        crate::user_graphics::count_for(pid.as_u64()) == 0,
     )
 }
 

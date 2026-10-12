@@ -4,7 +4,7 @@ members = ["kernel", "libwoven"]
 # Applications are excluded deliberately. They are freestanding Ring-3 ELF
 # images with their own linker script and link flags, so a host-targeted
 # workspace build must not try to compile them.
-exclude = ["vendor/bootloader", "apps/hello"]
+exclude = ["vendor/bootloader", "apps/hello", "apps/hello-gui"]
 
 [patch.crates-io]
 bootloader = { path = "vendor/bootloader" }
@@ -53,6 +53,10 @@ stage15-1-test = ["qemu-test", "kernel/stage15-1-test"]
 stage15-2-test = ["qemu-test", "kernel/stage15-2-test"]
 stage16-1-test = ["qemu-test", "kernel/stage16-1-test"]
 stage17-1-test = ["qemu-test", "kernel/stage17-1-test"]
+stage18-1-test = ["qemu-test", "kernel/stage18-1-test"]
+stage18-2-test = ["qemu-test", "kernel/stage18-2-test"]
+stage19-1-test = ["qemu-test", "kernel/stage19-1-test"]
+stage19-2-test = ["qemu-test", "kernel/stage19-2-test"]
 stage1-5-test = ["qemu-test", "kernel/stage1-5-test"]
 
 [profile.dev]

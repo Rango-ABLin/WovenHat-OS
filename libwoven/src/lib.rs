@@ -105,6 +105,13 @@ pub mod syscall {
     pub const SPAWN_COMMAND: u64 = 57;
     pub const NOTIFICATION_POLL: u64 = 95;
     pub const NOTIFICATION_POST: u64 = 96;
+    pub const GRAPHICS_SURFACE_CREATE: u64 = 98;
+    pub const GRAPHICS_SURFACE_FILL: u64 = 99;
+    pub const GRAPHICS_SURFACE_PIXEL: u64 = 100;
+    pub const GRAPHICS_SURFACE_DESTROY: u64 = 101;
+    pub const GRAPHICS_COMPOSITOR_BLIT: u64 = 102;
+    pub const GRAPHICS_COMPOSITOR_PIXEL: u64 = 103;
+    pub const GRAPHICS_SURFACE_STROKE: u64 = 104;
 
     /// Invoke the WovenHat Ring-3 ABI.
     ///
@@ -265,6 +272,162 @@ pub mod syscall {
     /// Must be called from WovenHat userspace.
     pub unsafe fn notification_post(kind: u64, payload: u64) -> u64 {
         unsafe { invoke(NOTIFICATION_POST, kind, payload, 0) }
+    }
+
+    /// # Safety
+    /// Must be called from WovenHat userspace.
+    pub unsafe fn graphics_surface_create(width: u32, height: u32) -> u64 {
+        unsafe { invoke(GRAPHICS_SURFACE_CREATE, u64::from(width), u64::from(height), 0) }
+    }
+
+    /// # Safety
+    /// Must be called from WovenHat userspace.
+    pub unsafe fn graphics_surface_fill(
+        handle: u64,
+        x: u16, y: u16, width: u16, height: u16,
+        color: u32,
+    ) -> u64 {
+        let packed = u64::from(x)
+            | (u64::from(y) << 16)
+            | (u64::from(width) << 32)
+            | (u64::from(height) << 48);
+        unsafe { invoke(GRAPHICS_SURFACE_FILL, handle, packed, u64::from(color)) }
+    }
+
+    /// # Safety
+    /// Must be called from WovenHat userspace.
+    pub unsafe fn graphics_surface_pixel(handle: u64, x: u32, y: u32) -> u64 {
+        let packed = u64::from(x) | (u64::from(y) << 32);
+        unsafe { invoke(GRAPHICS_SURFACE_PIXEL, handle, packed, 0) }
+    }
+
+    /// # Safety
+    /// Must be called from WovenHat userspace.
+    pub unsafe fn graphics_surface_destroy(handle: u64) -> u64 {
+        unsafe { invoke(GRAPHICS_SURFACE_DESTROY, handle, 0, 0) }
+    }
+
+    /// # Safety
+    /// Must be called from WovenHat userspace.
+    pub unsafe fn graphics_compositor_blit(handle: u64, x: i32, y: i32) -> u64 {
+        let packed = (x as u32 as u64) | ((y as u32 as u64) << 32);
+        unsafe { invoke(GRAPHICS_COMPOSITOR_BLIT, handle, packed, 0) }
+    }
+
+    /// # Safety
+    /// Must be called from WovenHat userspace.
+    pub unsafe fn graphics_compositor_pixel(x: i32, y: i32) -> u64 {
+        let packed = (x as u32 as u64) | ((y as u32 as u64) << 32);
+        unsafe { invoke(GRAPHICS_COMPOSITOR_PIXEL, packed, 0, 0) }
+    }
+
+    /// # Safety
+    /// Must be called from WovenHat userspace.
+    pub unsafe fn graphics_surface_stroke(
+        handle: u64,
+        x: u16, y: u16, width: u16, height: u16,
+        color: u32,
+    ) -> u64 {
+        let packed = u64::from(x)
+            | (u64::from(y) << 16)
+            | (u64::from(width) << 32)
+            | (u64::from(height) << 48);
+        unsafe { invoke(GRAPHICS_SURFACE_STROKE, handle, packed, u64::from(color)) }
+    }
+}
+
+/// Pack a colour into the kernel's `0x00RRGGBB` representation.
+pub const fn rgb(red: u8, green: u8, blue: u8) -> u32 {
+    ((red as u32) << 16) | ((green as u32) << 8) | blue as u32
+}
+
+/// Typed wrapper for a client-owned drawing surface.
+///
+/// The underlying token packs a slot, a generation and the owning process, so
+/// a `GraphicsSurface` held across a destroy is refused by the kernel rather
+/// than driving a reused slot. Dropping a `GraphicsSurface` releases it.
+pub struct GraphicsSurface {
+    handle: u64,
+    width: u32,
+    height: u32,
+}
+
+impl GraphicsSurface {
+    /// Allocate a surface. Caps enforced by the kernel.
+    pub fn create(width: u32, height: u32) -> Result<Self, Error> {
+        // SAFETY: both arguments are plain integers.
+        let result = unsafe { syscall::graphics_surface_create(width, height) };
+        check(result).map(|handle| Self { handle, width, height })
+    }
+
+    pub const fn handle(&self) -> u64 {
+        self.handle
+    }
+
+    pub const fn width(&self) -> u32 {
+        self.width
+    }
+
+    pub const fn height(&self) -> u32 {
+        self.height
+    }
+
+    /// Fill `(x, y)` through `(x + w - 1, y + h - 1)` with `color`.
+    pub fn fill_rect(
+        &self,
+        x: u16, y: u16, width: u16, height: u16, color: u32,
+    ) -> Result<(), Error> {
+        // SAFETY: integer-only call carrying the surface's own handle.
+        let result = unsafe {
+            syscall::graphics_surface_fill(self.handle, x, y, width, height, color)
+        };
+        check(result).map(|_| ())
+    }
+
+    /// Read one pixel back for verification.
+    pub fn pixel(&self, x: u32, y: u32) -> Result<u32, Error> {
+        // SAFETY: integer-only call carrying the surface's own handle.
+        let result = unsafe { syscall::graphics_surface_pixel(self.handle, x, y) };
+        check(result).map(|value| value as u32)
+    }
+
+    /// Stroke a one-pixel outline of a rectangle inside this surface.
+    pub fn stroke_rect(
+        &self,
+        x: u16, y: u16, width: u16, height: u16, color: u32,
+    ) -> Result<(), Error> {
+        // SAFETY: integer-only call carrying the surface's own handle.
+        let result = unsafe {
+            syscall::graphics_surface_stroke(self.handle, x, y, width, height, color)
+        };
+        check(result).map(|_| ())
+    }
+
+    /// Blit this surface onto the compositor at `(x, y)`.
+    ///
+    /// Policy is up to the compositor: today it draws exactly where asked,
+    /// which is the primitive a future window manager will drive.
+    pub fn present(&self, x: i32, y: i32) -> Result<(), Error> {
+        // SAFETY: integer-only call carrying the surface's own handle.
+        let result = unsafe { syscall::graphics_compositor_blit(self.handle, x, y) };
+        check(result).map(|_| ())
+    }
+}
+
+/// Read one pixel from the compositor surface, for test verification.
+pub fn screen_pixel(x: i32, y: i32) -> Result<u32, Error> {
+    // SAFETY: integer-only call.
+    let result = unsafe { syscall::graphics_compositor_pixel(x, y) };
+    check(result).map(|value| value as u32)
+}
+
+impl Drop for GraphicsSurface {
+    fn drop(&mut self) {
+        // SAFETY: destroying a surface the current process owns is always safe;
+        // the kernel ignores a stale handle rather than hitting another slot.
+        unsafe {
+            let _ = syscall::graphics_surface_destroy(self.handle);
+        }
     }
 }
 

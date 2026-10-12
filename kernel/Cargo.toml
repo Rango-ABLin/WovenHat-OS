@@ -55,6 +55,14 @@ stage15-2-test = ["qemu-test"]
 stage16-1-test = ["qemu-test"]
 # Full printable-ASCII font and text layout.
 stage17-1-test = ["qemu-test"]
+# Owner-bound client surface registry for userspace graphics.
+stage18-1-test = ["qemu-test"]
+# A userspace app that drives the graphics syscalls end-to-end.
+stage18-2-test = ["qemu-test"]
+# Kernel-held compositor surface and screen blit syscalls.
+stage19-1-test = ["qemu-test"]
+# A userspace app that paints its window onto the compositor.
+stage19-2-test = ["qemu-test"]
 stage1-5-test = ["qemu-test"]
 
 [dependencies]

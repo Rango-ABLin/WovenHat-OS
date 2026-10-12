@@ -1,0 +1,26 @@
+[unstable]
+# `core` ships compiled with the small code model, which conflicts with the
+# large model this image needs. Rebuilding it from source (rust-src is pinned
+# in rust-toolchain.toml) makes both agree.
+build-std = ["core"]
+
+[build]
+target = "x86_64-unknown-none"
+
+[target.x86_64-unknown-none]
+rustflags = [
+    # A static non-PIE image: the loader accepts ET_EXEC only.
+    "-C", "relocation-model=static",
+    # USER_REGION_START is 0x4000_0000_0000, which is far outside the +/-2 GB
+    # the default small code model assumes, so every reference to a static
+    # would fail to relocate as R_X86_64_32S. The large model uses 64-bit
+    # absolute addressing.
+    "-C", "code-model=large",
+    "-C", "link-arg=--script=link.x",
+    # PT_GNU_RELRO is rejected by the loader, so do not emit it.
+    "-C", "link-arg=-z",
+    "-C", "link-arg=norelro",
+    "-C", "link-arg=--no-pie",
+    # Keep the image to the segments the linker script declares.
+    "-C", "link-arg=--gc-sections",
+]

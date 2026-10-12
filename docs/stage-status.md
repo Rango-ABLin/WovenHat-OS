@@ -1,4 +1,78 @@
-﻿# Stage status
+# Stage status
+
+## Stages 18–19 — client surfaces and the compositor primitive (2026-10-12)
+
+A userspace process can now own a drawing surface, draw into it through
+syscalls, and place it on a kernel-held compositor surface that outlives the
+process.
+
+**Stage 18.1 — client surface registry.** `kernel/src/user_graphics.rs` is a
+bounded, owner-tagged registry of `display::Surface` objects: 16 surfaces
+system-wide, 4 per process, at most 320×240 each. A handle packs slot (8 bits),
+generation (24) and owner pid (32). Every operation checks all three, so a stale
+handle or another process's handle is refused rather than resolving to a reused
+slot. `release_owner(pid)` runs on the task-exit path in `task.rs`, next to the
+other per-process registries. Syscalls 98–101 cover create, fill, pixel
+readback and destroy, and 104 covers stroke. Fill and stroke pack x/y/w/h as four
+u16 values in one register, because the ABI carries three arguments. A text
+syscall was tried and removed: handle, origin, pointer, length and colour do not
+fit in three arguments. Text drawing stays kernel-internal until the syscall ABI
+gains an argument block. Marker: `[S18.1] client surface registry: PASSED`.
+
+**Stage 18.2 — end to end through a real application.** `apps/hello-gui`
+builds outside the kernel, like `apps/hello`. It allocates a surface, draws a
+window (background, title bar, content, one-pixel border) and reads back seven
+pixels, one in each region and edge, through the pixel syscall. Each mismatch
+exits with its own status. The kernel then checks the app's exit status and that
+`count_for(pid) == 0` after exit. Marker:
+`[S18.2] client surface end-to-end: PASSED`.
+
+**Stage 19.1 — compositor surface.** `kernel/src/compositor.rs` holds one
+640×480 `Surface` plus a `Damage` list. It is initialised lazily after the heap
+self-test, because a 1.2 MB allocation earlier in boot fails. `blit` takes a
+snapshot of the client surface under the `user_graphics` lock, releases that
+lock, and then takes the compositor's. Both locks are rank 10, so the two
+subsystems never nest and need no ordering rule between them. The self-test
+covers: refusal before init (NotReady regardless of the handle), idempotent
+init, exact colour at the blitted offset and untouched pixels next to it,
+edge-clipped touched rectangles, refusal of a bogus handle, and refusal of a
+handle whose owner has exited. Syscalls 102 (blit, `x | y << 32` as i32) and
+103 (screen pixel). Marker: `[S19.1] compositor surface: PASSED`.
+
+**Stage 19.2 — application through the compositor.** `hello-gui` presents its
+window at (60, 40), reads screen pixels back from userspace, and exits. The
+kernel then reads `compositor::pixel(160, 100)` itself, after the process has
+gone. A userspace check that only claimed success cannot pass this gate, and the
+read also shows that composed pixels do not depend on the client's lifetime.
+Marker: `[S19.2] hello-gui through the compositor: PASSED`.
+
+Validation: Stages 17.1, 18.1, 18.2, 19.1 and 19.2 passed on 1, 2 and 4 CPUs.
+The kernel Clippy matrix (49 feature configurations) is clean with
+`-D warnings`, as are libwoven and host Clippy (`--all-targets`). The first
+Stage 19.1 run failed on all CPU counts because `blit` snapshotted the client
+before checking readiness. It returned `InvalidClient` where `NotReady` was
+specified, and the fix checks readiness first.
+
+Open: the compositor surface is not yet presented to the real framebuffer. It is
+a fixed 640×480 off-screen surface, because no global framebuffer accessor
+exists for it. There is no stacking, focus or input routing: a blit lands where
+the client asks, so this is the primitive a userspace window manager will drive,
+not a window manager. Any process may blit its own surfaces anywhere. Before a
+second graphical client is admitted, that authority must become a capability.
+Blits copy the whole client surface (at most 300 KB) per call. Text drawing
+from userspace needs the argument-block ABI. Next prerequisites: framebuffer
+presentation of compositor damage, a compositor capability, and keyboard and
+pointer events delivered to the focused client.
+
+## Stage 17.1 — WovenHat font and software compositing (2026-10-12)
+
+`kernel/src/font.rs` covers all 95 printable ASCII glyphs at 5×7. The old table
+had 14, so "WOVENHAT DESKTOP" could not render. `kernel/src/display.rs` adds
+`Surface`, bounded `Damage` (16 rectangles, then a bounding box) and a single
+`present` path that resolves the pixel format once per run. Host tests in
+`tests/display_compositing.rs` cover clipping, stride and damage coalescing.
+Marker: `[S17.1] WovenHat font coverage: PASSED`. Passed on 1, 2 and
+4 CPUs in the Stage 18–19 validation.
 
 ## Stage 16.1 — applications built outside the kernel (2026-10-12)
 

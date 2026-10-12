@@ -152,6 +152,8 @@ qualification.
 | `ipc.rs`, `pipe.rs` | IPC objects, endpoint/message operations and byte pipes |
 | `device.rs`, `keyboard.rs`, `serial.rs`, `console.rs`, `terminal.rs`, `shell.rs` | Device registry, input, diagnostics and command interfaces |
 | `graphics.rs`, `gui.rs` | Existing framebuffer/GUI support; not the future compositor |
+| `font.rs`, `display.rs` | 5×7 ASCII font; `Surface`, bounded `Damage` and the single format-resolving `present` path |
+| `user_graphics.rs`, `compositor.rs` | Owner-tagged, generation-checked client surfaces (syscalls 98–101, 104) and the kernel-held compositor surface they are blitted onto (102–103); `blit` snapshots under the registry lock and releases it before taking the compositor lock, so the two rank-10 locks never nest |
 | `panic.rs`, `benchmark.rs` | Failure reporting and existing benchmark support |
 | `tests/`, `scripts/`, `run-stage*-acceptance.ps1` | Host regressions, QEMU orchestration and stage preservation gates |
 
