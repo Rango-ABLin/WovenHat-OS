@@ -21,10 +21,27 @@ const STATUS_ERR: u8 = 1;
 const STATUS_DRQ: u8 = 1 << 3;
 const STATUS_DF: u8 = 1 << 5;
 const STATUS_BSY: u8 = 1 << 7;
-const POLL_LIMIT: usize = 100_000;
+/// Spin bound used only before the PIT is running, during drive
+/// identification. Once the timer ticks, `poll_until` switches to the
+/// wall-clock deadline below.
+const POLL_LIMIT: usize = 50_000_000;
+/// Wall-clock bound for one ATA command, in timer ticks.
+///
+/// An iteration count is not a time bound. QEMU's file-backed disks complete a
+/// write before a handful of status reads, but real media does not: a USB flash
+/// device buffers the first few hundred sectors and then stalls for tens of
+/// milliseconds per write while it programs. A 100_000-iteration wait mistook
+/// that for a device fault, which only physical hardware revealed -- format of
+/// an 8 GB USB stick failed at the 320th sector write while the same code
+/// passed against an emulated image.
+const POLL_DEADLINE_TICKS: u64 = 5 * crate::timer::FREQUENCY_HZ as u64;
 const LBA28_SECTORS: u64 = 1 << 28;
 
-type BufferedAta = crate::block_cache::CachedDevice<AtaPio, 64>;
+/// The cached ATA device handed to `with_primary_master` callers.
+///
+/// Public because it appears in that function's callback signature, so any
+/// caller naming the parameter type needs to see it.
+pub type BufferedAta = crate::block_cache::CachedDevice<AtaPio, 64>;
 
 /// The primary PIO device is serialized for each complete command sequence.
 /// Rank 10 lets block workers own the device while higher-ranked cache or
@@ -190,32 +207,46 @@ pub fn self_test() -> bool {
     valid && requires_lba && identify_sector_count(&words).is_none()
 }
 
-unsafe fn poll_not_busy() -> bool {
-    for _ in 0..POLL_LIMIT {
-        let status = inb(STATUS_COMMAND);
+/// Poll the status register until `ready`, an error bit, or the deadline.
+///
+/// The wall clock is the real bound: whenever the timer has advanced past
+/// `POLL_DEADLINE_TICKS` the command is abandoned. The spin count only governs
+/// when the PIT is not yet running, which is the case while the drive is first
+/// identified.
+///
+/// # Safety
+/// Caller must hold the channel and be permitted to read its status port.
+unsafe fn poll_until(ready: impl Fn(u8) -> bool) -> bool {
+    let start = crate::timer::ticks();
+    let mut spins: usize = 0;
+    loop {
+        let status = unsafe { inb(STATUS_COMMAND) };
         if status & (STATUS_ERR | STATUS_DF) != 0 {
             return false;
         }
-        if status & STATUS_BSY == 0 {
+        if ready(status) {
             return true;
+        }
+        let elapsed = crate::timer::ticks().wrapping_sub(start);
+        if elapsed >= POLL_DEADLINE_TICKS {
+            return false;
+        }
+        if elapsed == 0 {
+            spins = spins.saturating_add(1);
+            if spins >= POLL_LIMIT {
+                return false;
+            }
         }
         core::hint::spin_loop();
     }
-    false
+}
+
+unsafe fn poll_not_busy() -> bool {
+    unsafe { poll_until(|status| status & STATUS_BSY == 0) }
 }
 
 unsafe fn poll_data_ready() -> bool {
-    for _ in 0..POLL_LIMIT {
-        let status = inb(STATUS_COMMAND);
-        if status & (STATUS_ERR | STATUS_DF) != 0 {
-            return false;
-        }
-        if status & STATUS_BSY == 0 && status & STATUS_DRQ != 0 {
-            return true;
-        }
-        core::hint::spin_loop();
-    }
-    false
+    unsafe { poll_until(|status| status & STATUS_BSY == 0 && status & STATUS_DRQ != 0) }
 }
 
 unsafe fn io_delay() {

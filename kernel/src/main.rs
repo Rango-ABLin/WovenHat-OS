@@ -149,7 +149,7 @@ mod woven_input;
     feature = "stage12-5-test"
 ))]
 mod wovenfs;
-#[cfg(feature = "stage15-1-test")]
+#[cfg(any(feature = "stage15-1-test", feature = "stage15-2-test"))]
 mod wfs;
 mod wovenguard;
 #[cfg(feature = "stage13-10-test")]
@@ -2383,6 +2383,12 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         console.println("PAGER: START FAILED");
         halt();
     }
+    // The Stage 15.2 boot hands the ATA primary master to WovenFS, so the disk
+    // is deliberately not a FAT32 volume. Running the FAT32 mutation test
+    // against it would fail on a disk it was never given. Every other
+    // configuration, including the storage gate that owns this assertion, still
+    // runs it unchanged.
+    #[cfg(not(feature = "stage15-2-test"))]
     match storage::live_mutation_self_test() {
         storage::LiveMutationTestStatus::Passed => {
             serial::write_line(format_args!(
@@ -3348,6 +3354,15 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         serial::write_line(format_args!("[S1-5] storage journal: PASSED"));
         qemu_test_exit_success();
     }
+    #[cfg(feature = "stage15-2-test")]
+    {
+        if !wfs::stage15_2_self_test() {
+            serial::write_line(format_args!("[S15.2] WovenFS physical device: FAILED"));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!("[S15.2] WovenFS physical device: PASSED"));
+        qemu_test_exit_success();
+    }
     #[cfg(feature = "stage15-1-test")]
     {
         if !wfs::stage15_1_self_test() {
@@ -4180,10 +4195,30 @@ fn preemption_probe_task() -> ! {
     task::exit_current_task()
 }
 
+/// Stop the machine after an unrecoverable boot or validation error.
+///
+/// Every call site is an error path: a failed initialization, a failed
+/// validation, or the allocation error handler. The success path ends in
+/// `qemu_test_exit_success` instead, so this never runs after a passing boot.
+///
+/// In an acceptance build this exits with the failure status rather than
+/// parking in `hlt`. Parking turns a definite failure into a host-side
+/// timeout, which is both slow and ambiguous -- a hang and a failure become
+/// indistinguishable, and the harness waits out its whole budget before
+/// reporting something it already knew. `qemu_test_exit_failure` carries the
+/// same reasoning for the sites that already call it directly.
+///
+/// Builds without `qemu-test`, including `physical-probe` boots on real
+/// hardware, keep the halt so the serial log stays readable on screen.
 fn halt() -> ! {
-    x86_64::instructions::interrupts::disable();
-    loop {
-        x86_64::instructions::hlt();
+    #[cfg(feature = "qemu-test")]
+    qemu_test_exit_failure();
+    #[cfg(not(feature = "qemu-test"))]
+    {
+        x86_64::instructions::interrupts::disable();
+        loop {
+            x86_64::instructions::hlt();
+        }
     }
 }
 

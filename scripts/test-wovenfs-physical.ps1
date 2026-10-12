@@ -10,7 +10,11 @@
 # Requires an Administrator shell: raw \\.\PhysicalDriveN access is privileged.
 
 param(
-    [int]$DiskNumber = 2,
+    # Omit -DiskNumber to locate the target by identity. Removable devices are
+    # renumbered between plug events -- this disk moved from 2 to 1 when another
+    # USB device was removed -- so a number is not an identity and must never be
+    # the only thing standing between a test and the wrong disk.
+    [int]$DiskNumber = -1,
     [string]$ExpectedModel = 'VendorCo ProductCode USB Device',
     [long]$ExpectedSize = 8052549120,
     [string]$ExpectedSerial = '5474001281346643368',
@@ -33,8 +37,23 @@ if (-not ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdenti
 # removable devices are renumbered between plug events, and the system disk
 # must never be reachable by an off-by-one.
 
-$disk = Get-CimInstance Win32_DiskDrive | Where-Object { $_.Index -eq $DiskNumber }
-if (-not $disk) { throw "PhysicalDrive$DiskNumber was not found." }
+$candidates = @(Get-CimInstance Win32_DiskDrive | Where-Object {
+    $_.Model -eq $ExpectedModel -and
+    [long]$_.Size -eq $ExpectedSize -and
+    $_.SerialNumber.Trim() -eq $ExpectedSerial
+})
+if ($candidates.Count -eq 0) {
+    throw "No disk matches the expected identity (model '$ExpectedModel', $ExpectedSize bytes, serial $ExpectedSerial). Is it plugged in?"
+}
+if ($candidates.Count -gt 1) {
+    throw "Refusing: $($candidates.Count) disks share that identity, so the target is ambiguous."
+}
+$disk = $candidates[0]
+if ($DiskNumber -ge 0 -and $disk.Index -ne $DiskNumber) {
+    throw "Refusing: the matching disk is index $($disk.Index), but -DiskNumber $DiskNumber was requested."
+}
+$DiskNumber = $disk.Index
+Write-Host "Located target by identity at PhysicalDrive$DiskNumber."
 
 $actualSerial = ($disk.SerialNumber | ForEach-Object { $_.Trim() })
 if ($disk.Model -ne $ExpectedModel) {
@@ -76,6 +95,26 @@ if ($Inspect) {
 # ---- dismount only this disk's volumes ----------------------------------
 # Drive letters are derived from the verified target, never hardcoded, so this
 # cannot dismount a volume belonging to another disk.
+
+# Remove every volume on the target before handing it to QEMU.
+#
+# Windows refuses raw sector writes that land inside a mounted volume's extent,
+# and `fsutil volume dismount` only unmounts until the next access -- the volume
+# comes straight back, so QEMU's writes are rejected with no error of its own
+# and the guest simply sees I/O failures. Clearing the partition table leaves
+# nothing for Windows to mount or defend, which is what makes raw access work.
+#
+# This is the destructive step. The identity gate above is what stands between
+# it and the wrong disk.
+Write-Host 'Removing existing volumes so Windows cannot block raw writes...'
+try {
+    Clear-Disk -Number $DiskNumber -RemoveData -RemoveOEM -Confirm:$false -ErrorAction Stop
+    Write-Host 'Partition table cleared; the disk is now raw.'
+}
+catch {
+    Write-Host "Clear-Disk reported: $($_.Exception.Message)"
+    Write-Host 'Continuing: the disk may already be raw.'
+}
 
 $letters = Get-Partition -DiskNumber $DiskNumber -ErrorAction SilentlyContinue |
     Where-Object { $_.DriveLetter } |
@@ -122,23 +161,50 @@ try {
     $serial = Join-Path $out 'serial.log'
 
     Write-Host "Booting with \\.\PhysicalDrive$DiskNumber attached as the ATA primary master..."
+    # `pc`, not `q35`: the kernel's ATA PIO driver probes the legacy primary
+    # channel ports. On q35 an `if=ide` drive is routed through the ICH9 AHCI
+    # controller instead, where those ports are absent, so the disk would be
+    # invisible to the filesystem.
     $arguments = @(
-        '-accel', 'tcg,tb-size=128', '-machine', 'q35', '-m', '256M', '-smp', "$Cpus",
+        '-accel', 'tcg,tb-size=128', '-machine', 'pc', '-m', '256M', '-smp', "$Cpus",
         '-display', 'none', '-serial', "file:$serial", '-no-reboot',
         '-device', 'isa-debug-exit,iobase=0xf4,iosize=0x04',
-        '-drive', "if=pflash,format=raw,readonly=on,file=$firmware",
+        '-drive', "if=pflash,unit=0,format=raw,readonly=on,file=$firmware",
         '-drive', "if=none,id=boot,format=raw,readonly=on,file=$image",
         '-device', 'virtio-blk-pci,drive=boot,bootindex=1',
         '-drive', "if=ide,index=0,format=raw,cache=none,file=\\.\PhysicalDrive$DiskNumber"
     )
-    $process = Start-Process -FilePath $Qemu -ArgumentList $arguments -PassThru -NoNewWindow `
-        -RedirectStandardOutput (Join-Path $out 'qemu.log') `
-        -RedirectStandardError (Join-Path $out 'qemu.err')
+    # Start-Process joins ArgumentList with spaces and the child re-splits it, so
+    # any argument containing a space -- such as the OVMF path under
+    # "C:\Program Files" -- must carry its own quotes or QEMU receives a
+    # truncated filename.
+    $quoted = $arguments | ForEach-Object {
+        if ($_ -match '\s') { '"' + $_ + '"' } else { $_ }
+    }
+    # Launched through System.Diagnostics.Process rather than Start-Process.
+    # Start-Process with -PassThru and stream redirection does not reliably
+    # surface ExitCode on Windows PowerShell 5.1: it came back empty, which made
+    # a passing run look like a failure. The exit code is not optional here --
+    # the serial marker says the self-test passed, while the code independently
+    # proves the kernel reached its success exit path rather than stopping
+    # afterwards.
+    $info = New-Object System.Diagnostics.ProcessStartInfo
+    $info.FileName = $Qemu
+    $info.Arguments = ($quoted -join ' ')
+    $info.UseShellExecute = $false
+    $info.RedirectStandardOutput = $true
+    $info.RedirectStandardError = $true
+    $process = [System.Diagnostics.Process]::Start($info)
+    # Drain both pipes concurrently; a full pipe would otherwise block QEMU.
+    $stdout = $process.StandardOutput.ReadToEndAsync()
+    $stderr = $process.StandardError.ReadToEndAsync()
     if (-not $process.WaitForExit($TimeoutSeconds * 1000)) {
         $process.Kill()
         throw "QEMU timed out after $TimeoutSeconds s. Evidence: $out"
     }
     $code = $process.ExitCode
+    Set-Content -Path (Join-Path $out 'qemu.log') -Value $stdout.Result -Encoding utf8
+    Set-Content -Path (Join-Path $out 'qemu.err') -Value $stderr.Result -Encoding utf8
 
     $log = if (Test-Path $serial) { Get-Content $serial -Raw } else { '' }
     $marker = '[S15.1] WovenFS native filesystem: PASSED'

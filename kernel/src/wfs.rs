@@ -450,17 +450,62 @@ impl<D: BlockDevice> Volume<D> {
         let sb = plan(total, inode_count)?;
         let zero = [0u8; SECTOR_SIZE];
 
-        device.write_sector(0, &zero)?;
-        device.write_sector(1, &zero)?;
-        for lba in sb.journal_start..sb.data_start {
-            device.write_sector(lba, &zero)?;
+        // Report the LBA a failure happened at. On a real device "Device" alone
+        // is not actionable: a format touches thousands of sectors and the
+        // serial log is the only evidence available.
+        fn at(lba: u64, phase: &str, result: Result<(), BlockError>) -> Result<(), Error> {
+            match result {
+                Ok(()) => Ok(()),
+                Err(_) => {
+                    #[cfg(feature = "stage15-2-test")]
+                    crate::serial::write_line(format_args!(
+                        "[S15.2] format io error: phase {} lba {}",
+                        phase, lba
+                    ));
+                    let _ = (lba, phase);
+                    Err(Error::Device)
+                }
+            }
         }
 
-        let root_block = sb.data_start;
-        for block in 0..=root_block {
-            set_bitmap_raw(&mut device, &sb, block, true)?;
+        at(0, "super-a", device.write_sector(0, &zero))?;
+        at(1, "super-b", device.write_sector(1, &zero))?;
+
+        // Journal region only. The bitmap and inode regions are written with
+        // their real contents below, so zeroing them separately would be a
+        // second full pass over the same sectors.
+        for lba in sb.journal_start..sb.bitmap_start {
+            at(lba, "journal", device.write_sector(lba, &zero))?;
         }
-        device.write_sector(root_block, &zero)?;
+
+        // Build each bitmap sector in memory and write it exactly once.
+        //
+        // The previous form set one bit per call through a read-modify-write of
+        // the containing sector. Every metadata block maps into the first few
+        // bitmap sectors, so on a large volume that re-read and re-wrote the
+        // same sector thousands of times: 7770 operations on an 8 GB device
+        // against 3840 sectors of actual bitmap.
+        let root_block = sb.data_start;
+        let bits_per_sector = (SECTOR_SIZE * 8) as u64;
+        for index in 0..u64::from(sb.bitmap_blocks) {
+            let mut sector = [0u8; SECTOR_SIZE];
+            let first = index * bits_per_sector;
+            if first <= root_block {
+                let last = (first + bits_per_sector - 1).min(root_block);
+                for block in first..=last {
+                    let within = (block - first) as usize;
+                    sector[within / 8] |= 1u8 << (within % 8);
+                }
+            }
+            let lba = sb.bitmap_start + index;
+            at(lba, "bitmap", device.write_sector(lba, &sector))?;
+        }
+
+        // Inode table, then the root directory's first block.
+        for lba in sb.inode_start..sb.data_start {
+            at(lba, "inodes", device.write_sector(lba, &zero))?;
+        }
+        at(root_block, "root-dir", device.write_sector(root_block, &zero))?;
 
         let mut root = Inode::empty();
         root.mode = 0o040_755;
@@ -468,12 +513,22 @@ impl<D: BlockDevice> Volume<D> {
         root.kind = KIND_DIR;
         root.size = SECTOR_SIZE as u64;
         root.direct[0] = root_block;
-        write_inode_raw(&mut device, &sb, sb.root_inode, &root)?;
+        let (inode_lba, inode_offset) = inode_location(&sb, sb.root_inode);
+        let mut inode_sector = [0u8; SECTOR_SIZE];
+        root.encode(&mut inode_sector[inode_offset..inode_offset + INODE_SIZE]);
+        at(
+            inode_lba,
+            "root-inode",
+            device.write_sector(inode_lba, &inode_sector),
+        )?;
 
+        // The superblock lands last. Before this write there is no filesystem,
+        // so a crash at any earlier point leaves the volume unformatted rather
+        // than half-built.
         let mut sector = [0u8; SECTOR_SIZE];
         sb.encode(&mut sector);
-        device.write_sector(0, &sector)?;
-        device.flush()?;
+        at(0, "superblock", device.write_sector(0, &sector))?;
+        at(0, "flush", device.flush())?;
         Ok(Self {
             device,
             super_block: sb,
@@ -1226,4 +1281,311 @@ pub fn stage15_1_self_test() -> bool {
         return false;
     };
     survivor.check().is_ok()
+}
+
+// ------------------------------------------------------- real device mount
+
+/// VFS mount point for the native filesystem.
+#[cfg(feature = "stage15-2-test")]
+pub const MOUNT_POINT: &str = "/wfs";
+
+/// Outcome of probing and mounting the ATA primary master as WovenFS.
+#[cfg(feature = "stage15-2-test")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MountOutcome {
+    /// No ATA primary master is present.
+    NoDevice,
+    /// The device carries no valid WovenFS superblock.
+    NotWovenFs,
+    /// Mounted; the value is how many files were imported into the VFS.
+    Mounted(usize),
+    /// A device or consistency error prevented mounting.
+    Failed,
+}
+
+/// Run `operation` against the ATA primary master mounted as WovenFS.
+///
+/// The volume is mounted for the duration of the call and dropped afterwards,
+/// so no stale in-memory filesystem state outlives the operation. Mounting
+/// replays any committed journal transaction, which is why every entry point
+/// goes through here rather than caching a volume.
+#[cfg(feature = "stage15-2-test")]
+pub fn with_ata_volume<R>(
+    operation: impl FnOnce(&mut Volume<&mut crate::ata::BufferedAta>) -> R,
+) -> Option<R> {
+    crate::ata::with_primary_master(|disk| {
+        let mut volume = Volume::mount(disk).ok()?;
+        Some(operation(&mut volume))
+    })
+    .flatten()
+}
+
+/// Format the ATA primary master as WovenFS.
+///
+/// Destructive, and gated behind the Stage 15.2 acceptance feature so it can
+/// only run in a test boot against a scratch disk.
+#[cfg(feature = "stage15-2-test")]
+pub fn format_ata(inode_count: u32) -> bool {
+    crate::ata::with_primary_master(|disk| match Volume::format(disk, inode_count) {
+        Ok(_) => true,
+        Err(error) => {
+            // Name the error. On real hardware a bare false is not diagnosable,
+            // and the serial log is the only evidence available.
+            crate::serial::write_line(format_args!("[S15.2] format error: {:?}", error));
+            false
+        }
+    })
+    .unwrap_or(false)
+}
+
+/// Probe the ATA primary master, and on success publish its root directory
+/// into the VFS under [`MOUNT_POINT`].
+///
+/// Files are imported read-only. Write-back from the VFS into WovenFS is a
+/// later stage; until it exists, presenting these as writable would imply a
+/// durability path that is not there.
+#[cfg(feature = "stage15-2-test")]
+pub fn mount_ata_into_vfs() -> MountOutcome {
+    let Some(result) = crate::ata::with_primary_master(|disk| {
+        let mut volume = match Volume::mount(disk) {
+            Ok(volume) => volume,
+            Err(Error::Corrupt) => return MountOutcome::NotWovenFs,
+            Err(_) => return MountOutcome::Failed,
+        };
+        if volume.check().is_err() {
+            return MountOutcome::Failed;
+        }
+        let root = volume.super_block().root_inode;
+        let view = match volume.read_dir(root) {
+            Ok(view) => view,
+            Err(_) => return MountOutcome::Failed,
+        };
+
+        let _ = crate::vfs::mkdir(MOUNT_POINT);
+        let mut imported = 0usize;
+        let mut buffer = [0u8; MAX_FILE_SIZE];
+        for entry in view.entries.iter().filter(|entry| entry.inode != 0) {
+            let name = entry.name_str();
+            if name.is_empty() || name.len() > MAX_NAME {
+                continue;
+            }
+            let mut path = [0u8; crate::config::MAX_PATH_SIZE];
+            let prefix = MOUNT_POINT.as_bytes();
+            let needed = prefix.len() + 1 + name.len();
+            if needed > path.len() {
+                continue;
+            }
+            path[..prefix.len()].copy_from_slice(prefix);
+            path[prefix.len()] = b'/';
+            path[prefix.len() + 1..needed].copy_from_slice(name.as_bytes());
+            let Ok(path) = core::str::from_utf8(&path[..needed]) else {
+                continue;
+            };
+
+            let Ok(length) = volume.read_file(entry.inode, &mut buffer) else {
+                // A content checksum failure must not be imported as if the
+                // bytes were good.
+                continue;
+            };
+            if length > crate::vfs::NODE_CAPACITY {
+                continue;
+            }
+            match crate::vfs::create_read_only(path, &buffer[..length]) {
+                Ok(()) => imported += 1,
+                Err(crate::vfs::Error::AlreadyExists) => imported += 1,
+                Err(_) => {}
+            }
+        }
+        MountOutcome::Mounted(imported)
+    }) else {
+        return MountOutcome::NoDevice;
+    };
+    result
+}
+
+/// Stage 15.2 acceptance: WovenFS on a real block device, through the ATA
+/// driver, visible in the VFS.
+#[cfg(feature = "stage15-2-test")]
+/// Stage 15.2 acceptance: WovenFS on a real block device, through the ATA
+/// driver, visible in the VFS.
+///
+/// Each step reports its own marker. A bare pass/fail is not diagnosable on
+/// real hardware, where a failure can come from the device rather than the
+/// filesystem, and the serial log is the only evidence available.
+#[cfg(feature = "stage15-2-test")]
+pub fn stage15_2_self_test() -> bool {
+    const INODES: u32 = 32;
+    let alpha = b"wovenfs-alpha-contents";
+    let beta: [u8; 700] = {
+        let mut bytes = [0u8; 700];
+        for (index, byte) in bytes.iter_mut().enumerate() {
+            *byte = (index % 97) as u8;
+        }
+        bytes
+    };
+
+    fn step(name: &str, ok: bool) -> bool {
+        crate::serial::write_line(format_args!(
+            "[S15.2] {} {}",
+            name,
+            if ok { "PASS" } else { "FAIL" }
+        ));
+        ok
+    }
+
+    // Report the geometry first: on an unfamiliar device this is what explains
+    // every later decision.
+    let Some(sectors) = crate::ata::with_primary_master(|disk| {
+        use crate::block::BlockDevice;
+        disk.sector_count()
+    }) else {
+        crate::serial::write_line(format_args!("[S15.2] ata primary master absent FAIL"));
+        return false;
+    };
+    crate::serial::write_line(format_args!("[S15.2] device sectors {}", sectors));
+
+    // Before judging `format`, establish that the device accepts a write at
+    // all. On real hardware a format failure is ambiguous: it could be the
+    // filesystem or a device that silently refuses writes, and the two need
+    // different fixes. LBA 1 is the alternate superblock slot, which `format`
+    // zeroes anyway, so using it as scratch destroys nothing.
+    let writable = crate::ata::with_primary_master(|disk| {
+        use crate::block::BlockDevice;
+        let mut probe = [0u8; SECTOR_SIZE];
+        probe[..8].copy_from_slice(b"WFSPROBE");
+        if let Err(error) = disk.write_sector(1, &probe) {
+            crate::serial::write_line(format_args!(
+                "[S15.2] sector write rejected: {}",
+                match error {
+                    BlockError::OutOfBounds => "OutOfBounds",
+                    BlockError::InvalidBuffer => "InvalidBuffer",
+                    BlockError::ReadOnly => "ReadOnly",
+                    BlockError::DeviceFault => "DeviceFault",
+                }
+            ));
+            return false;
+        }
+        if disk.flush().is_err() {
+            crate::serial::write_line(format_args!("[S15.2] device flush rejected"));
+            return false;
+        }
+        let mut back = [0u8; SECTOR_SIZE];
+        if disk.read_sector(1, &mut back).is_err() {
+            crate::serial::write_line(format_args!("[S15.2] sector read rejected"));
+            return false;
+        }
+        if back[..8] != *b"WFSPROBE" {
+            crate::serial::write_line(format_args!(
+                "[S15.2] readback mismatch: {:02x} {:02x} {:02x} {:02x}",
+                back[0], back[1], back[2], back[3]
+            ));
+            return false;
+        }
+        true
+    });
+    if !step("device accepts a sector write", writable == Some(true)) {
+        return false;
+    }
+
+    // A device that carries no WovenFS superblock must not present itself as a
+    // filesystem. Distinguish the outcomes so a device fault is not mistaken
+    // for a clean "not WovenFS".
+    let probe = mount_ata_into_vfs();
+    let probe_ok = probe == MountOutcome::NotWovenFs;
+    if !probe_ok {
+        crate::serial::write_line(format_args!(
+            "[S15.2] unformatted probe returned {}",
+            match probe {
+                MountOutcome::NoDevice => "NoDevice",
+                MountOutcome::NotWovenFs => "NotWovenFs",
+                MountOutcome::Mounted(_) => "Mounted",
+                MountOutcome::Failed => "Failed",
+            }
+        ));
+    }
+    if !step("unformatted disk is not a filesystem", probe_ok) {
+        return false;
+    }
+
+    if !step("format device", format_ata(INODES)) {
+        return false;
+    }
+
+    let created = with_ata_volume(|volume| {
+        let Ok(a) = volume.create(1, "alpha.txt", 0o644, 1) else {
+            return false;
+        };
+        if volume.write_file(a, alpha, 2).is_err() {
+            return false;
+        }
+        let Ok(b) = volume.create(1, "beta.bin", 0o644, 3) else {
+            return false;
+        };
+        volume.write_file(b, &beta, 4).is_ok()
+    });
+    if !step("create and write two files", created == Some(true)) {
+        return false;
+    }
+
+    let verified = with_ata_volume(|volume| {
+        if volume.check().is_err() {
+            return false;
+        }
+        let Ok(a) = volume.lookup(1, "alpha.txt") else {
+            return false;
+        };
+        let Ok(b) = volume.lookup(1, "beta.bin") else {
+            return false;
+        };
+        let mut out = [0u8; MAX_FILE_SIZE];
+        if volume.read_file(a.inode, &mut out) != Ok(alpha.len()) || out[..alpha.len()] != *alpha {
+            return false;
+        }
+        if volume.read_file(b.inode, &mut out) != Ok(beta.len()) || out[..beta.len()] != beta {
+            return false;
+        }
+        volume.read_dir(1).map(|view| view.count()) == Ok(2)
+    });
+    if !step("remount and verify contents", verified == Some(true)) {
+        return false;
+    }
+
+    let mounted = mount_ata_into_vfs();
+    if !step(
+        "mount into the VFS",
+        mounted == MountOutcome::Mounted(2),
+    ) {
+        crate::serial::write_line(format_args!(
+            "[S15.2] vfs mount imported {}",
+            match mounted {
+                MountOutcome::Mounted(count) => count,
+                _ => 0,
+            }
+        ));
+        return false;
+    }
+
+    let mut vfs_buffer = [0u8; MAX_FILE_SIZE];
+    let vfs_read = crate::vfs::read_all("/wfs/alpha.txt", &mut vfs_buffer) == Ok(alpha.len())
+        && vfs_buffer[..alpha.len()] == *alpha
+        && crate::vfs::read_all("/wfs/beta.bin", &mut vfs_buffer) == Ok(beta.len())
+        && vfs_buffer[..beta.len()] == beta;
+    if !step("read both files through the VFS", vfs_read) {
+        return false;
+    }
+
+    let removed = with_ata_volume(|volume| {
+        volume.unlink(1, "alpha.txt", 5).is_ok()
+            && volume.lookup(1, "alpha.txt") == Err(Error::NotFound)
+            && volume.check().is_ok()
+    });
+    if !step("unlink on the device", removed == Some(true)) {
+        return false;
+    }
+
+    let persisted = with_ata_volume(|volume| {
+        volume.lookup(1, "alpha.txt") == Err(Error::NotFound)
+            && volume.lookup(1, "beta.bin").is_ok()
+    });
+    step("unlink survives a remount", persisted == Some(true))
 }

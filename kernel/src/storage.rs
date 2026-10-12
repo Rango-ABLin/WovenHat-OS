@@ -1528,8 +1528,13 @@ fn live_batch_recovery_self_test() -> Result<(), &'static str> {
     ];
     let check_disk = |expected_a: &[u8], expected_b: &[u8]| -> Result<(), &'static str> {
         let mut disk = block_io::primary_ata();
-        let mut a = [0u8; vfs::NODE_CAPACITY];
-        let mut b = [0u8; vfs::NODE_CAPACITY];
+        // Heap, not stack. TASK_STACK_SIZE is 128 KiB and vfs::NODE_CAPACITY is
+        // 64 KiB, so two of these as locals would consume the entire task stack
+        // before this frame's own overhead or the callee's. The journal record
+        // buffer in read_data_journal_record is heap-allocated for the same
+        // reason.
+        let mut a = alloc::vec![0u8; vfs::NODE_CAPACITY];
+        let mut b = alloc::vec![0u8; vfs::NODE_CAPACITY];
         let a_len = read_existing_file_on_device(&mut disk, &A[5..], &mut a)
             .map_err(|_| "batch recovery read a")?
             .ok_or("batch recovery missing a")?;
@@ -1888,7 +1893,11 @@ pub fn persist_path(path: &str) -> Result<(), PersistError> {
         }
     }
 
-    let mut data = [0_u8; vfs::NODE_CAPACITY];
+    // Heap, not stack. This function needs two NODE_CAPACITY buffers live at
+    // once, and NODE_CAPACITY is 64 KiB against a 128 KiB TASK_STACK_SIZE, so
+    // as locals they would occupy the entire task stack with no margin for this
+    // frame or any callee.
+    let mut data = alloc::vec![0_u8; vfs::NODE_CAPACITY];
     let length = match vfs::read_all(path, &mut data) {
         Ok(n) => n,
         Err(vfs::Error::NotFound) => return Err(PersistError::NotFound),
@@ -1914,7 +1923,7 @@ pub fn persist_path(path: &str) -> Result<(), PersistError> {
         mode: stat.mode,
     });
     let mut disk = block_io::primary_ata();
-    let mut old_data = [0u8; vfs::NODE_CAPACITY];
+    let mut old_data = alloc::vec![0u8; vfs::NODE_CAPACITY];
     let old_exists = read_existing_file_on_device(&mut disk, relative, &mut old_data)
         .map_err(|_| PersistError::Failed)?;
     let old_length = old_exists.unwrap_or(0);
@@ -1997,16 +2006,21 @@ pub fn persist_path(path: &str) -> Result<(), PersistError> {
     result
 }
 
+/// Read an existing file's bytes into `output`.
+///
+/// Takes a slice rather than a fixed-size array so callers can supply a
+/// heap buffer; two NODE_CAPACITY arrays live at once would exhaust the
+/// 128 KiB task stack.
 fn read_existing_file_on_device(
     device: &mut impl crate::block::BlockDevice,
     relative: &str,
-    output: &mut [u8; vfs::NODE_CAPACITY],
+    output: &mut [u8],
 ) -> Result<Option<usize>, PersistError> {
     fn read_from_volume(
         device: &mut impl crate::block::BlockDevice,
         volume: fat32::Volume,
         relative: &str,
-        output: &mut [u8; vfs::NODE_CAPACITY],
+        output: &mut [u8],
     ) -> Result<Option<usize>, PersistError> {
         let entry = match fat32::resolve_path(device, volume, relative) {
             Ok(entry) => entry,
