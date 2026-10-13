@@ -1703,6 +1703,20 @@ pub fn stage15_2_self_test() -> bool {
         return false;
     }
 
+    // The VFS-path boundary must not accept sibling prefixes or traversal.
+    let authority = AuthorizedWfsWriter::after_capability_check();
+    let mut path_bytes = [0u8; 32];
+    let vfs_adapter_ok = vfs_write_through(&authority, "/wfs/vfs-test.txt", b"vfs-durable", 25).is_ok()
+        && vfs_read_through("/wfs/vfs-test.txt", &mut path_bytes) == Ok(11)
+        && &path_bytes[..11] == b"vfs-durable"
+        && vfs_write_through(&authority, "/wfs2/escape", b"bad", 26) == Err(Error::InvalidName)
+        && vfs_write_through(&authority, "/wfs/../escape", b"bad", 26) == Err(Error::InvalidName)
+        && vfs_unlink_through(&authority, "/wfs/vfs-test.txt", 27).is_ok()
+        && vfs_read_through("/wfs/vfs-test.txt", &mut path_bytes) == Err(Error::NotFound);
+    if !step("VFS path write-through and namespace isolation", vfs_adapter_ok) {
+        return false;
+    }
+
     let verified = with_ata_volume(|volume| {
         if volume.check().is_err() {
             return false;
