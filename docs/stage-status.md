@@ -1,5 +1,74 @@
 # Stage status
 
+## Stage 20.6 — translucent overlays over windows (2026-10-13)
+
+Roadmap Stage 18.3, Window Experience: subtle translucency.
+
+**Kernel: keyed blit.** Syscall 124, `GraphicsCompositorBlitKeyed`, is the
+region blit of one of the caller's own surfaces, except that source pixels
+equal to `display::TRANSPARENT_KEY` (magenta, `0x00FF00FF`, which no
+WovenHat chrome uses) leave the destination as it was.
+- It uses the same region snapshot and authority as the other region
+  blits.
+- `display::Surface::blit_region_keyed` does the work, with two new host
+  tests: key skipped and everything else copied; without keyed pixels,
+  exactly the region blit, clipping included.
+- libwoven adds `TRANSPARENT` and `GraphicsSurface::present_region_keyed`.
+
+**Shell.**
+- The launcher panel and the toast are translucent, 216/255, over whatever
+  lies beneath, windows and shadows included. Their background is
+  region-blended. Their border, title row, selection, and text are an
+  overlay drawn on the transparent key and copied with a keyed blit.
+- The pointer is now an overlay too. It no longer reads the screen back
+  pixel by pixel through `screen_pixel`, which cost about 70 system calls
+  per pointer repaint.
+
+**Gate changes.** The Stage 20.2 and 20.3 gates now expect the toast's and
+the panel's backgrounds blended over the wallpaper. This is an intended
+change of appearance; both pass.
+
+Gate `[S20.6] translucent overlays: PASSED`. The kernel recomputes each
+pixel: what lies beneath (wallpaper, the focused window's shadow bands, or
+the window), the background blended over it, and the overlay rendered with
+its own font and outline.
+- A's toast is translucent over the wallpaper.
+- A is dragged onto the taskbar's edge. The pointer rests over A's client
+  area: its outline and fill are exact, and its transparent cells show A.
+- F1 opens the empty launcher over A. The panel is translucent over A's
+  client area, A's shadow and the wallpaper, every pixel except the
+  pointer's cells, and the pointer stays above it.
+- The panel closes, A takes its key and exits, and killing the shell
+  returns the display.
+
+Negative controls, with evidence in the worktree's
+`audit-artifacts/stage20.6-negative-control-*`:
+- With overlays copied without the key, the gate fails at "the toast is
+  translucent over the wallpaper", because the key colour lands.
+- With an opaque panel background, it fails at "the launcher panel is
+  translucent over a window and its shadow".
+
+**Physical hardware check.** On 2026-10-13 the Stage 15.2 physical WovenFS
+qualification ran again on the USB flash drive. The drive is identified by
+model `VendorCo ProductCode USB Device`, 8,052,549,120 bytes, and serial
+5474001281346643368; the system NVMe disk was never addressed. The run
+used the Stage 20.5 commit, in an isolated worktree, with the device
+passed raw to the kernel's ATA driver.
+- Formatting, writing, remounting, VFS mount, reading, unlink, and unlink
+  surviving a remount passed on 1, 2 and 4 CPUs, each with exit code 33.
+- Windows then read `WOVENFS1` at LBA 0 with checkpoint sequence 5.
+- Evidence is in the worktree's `audit-artifacts/wovenfs-physical-*`.
+- This shows the storage stack still works on real flash with the desktop
+  stages in place. It is not a native boot of the desktop on physical
+  hardware.
+
+Open:
+- Translucency is uniform per layer. There is no blur behind translucent
+  surfaces.
+- Adaptive surfaces (chrome tinted from the wallpaper) were not done in
+  this stage. They wait for selectable wallpapers, since there is
+  currently one fixed wallpaper.
+
 ## Stage 20.5 — depth: window shadows and elevation (2026-10-13)
 
 Roadmap Stage 18.3, Window Experience: dynamic depth.

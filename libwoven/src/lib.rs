@@ -224,6 +224,7 @@ pub mod syscall {
     pub const GRAPHICS_COMPOSITOR_BLIT_REGION_SHARED: u64 = 121;
     pub const GRAPHICS_COMPOSITOR_BLEND_REGION: u64 = 122;
     pub const GRAPHICS_COMPOSITOR_BLEND_REGION_SHARED: u64 = 123;
+    pub const GRAPHICS_COMPOSITOR_BLIT_KEYED: u64 = 124;
     pub const MESSAGE_SEND: u64 = 11;
     pub const MESSAGE_RECEIVE: u64 = 12;
 
@@ -570,6 +571,13 @@ pub mod syscall {
 
     /// # Safety
     /// Must be called from WovenHat userspace.
+    pub unsafe fn graphics_compositor_blit_keyed(handle: u64, x: i32, y: i32, region: u64) -> u64 {
+        let destination = (x as u32 as u64) | ((y as u32 as u64) << 32);
+        unsafe { invoke(GRAPHICS_COMPOSITOR_BLIT_KEYED, handle, destination, region) }
+    }
+
+    /// # Safety
+    /// Must be called from WovenHat userspace.
     pub unsafe fn clock_read() -> u64 {
         unsafe { invoke(CLOCK_READ, 0, 0, 0) }
     }
@@ -753,6 +761,15 @@ impl GraphicsSurface {
         check(result).map(|_| ())
     }
 
+    /// Blit only `region` of this surface to `(x, y)`, skipping pixels equal
+    /// to [`TRANSPARENT`]: draw an overlay on a surface filled with it, and
+    /// only the overlay lands. Lease holder only.
+    pub fn present_region_keyed(&self, region: Region, x: i32, y: i32) -> Result<(), Error> {
+        // SAFETY: integer-only call carrying the surface's own handle.
+        let result = unsafe { syscall::graphics_compositor_blit_keyed(self.handle, x, y, region.pack()) };
+        check(result).map(|_| ())
+    }
+
     /// Upload a whole canvas to the top-left of this surface.
     pub fn write_canvas(&self, canvas: &Canvas<'_>) -> Result<(), Error> {
         let (Ok(width), Ok(height)) = (u16::try_from(canvas.width), u16::try_from(canvas.height))
@@ -933,6 +950,10 @@ pub fn compositor_present() -> Result<u64, Error> {
     let result = unsafe { syscall::graphics_compositor_present() };
     check(result)
 }
+
+/// The colour [`GraphicsSurface::present_region_keyed`] treats as
+/// transparent: magenta, matching the kernel's key.
+pub const TRANSPARENT: u32 = rgb(255, 0, 255);
 
 /// Blend `over` onto `under` with `opacity` (0 keeps `under`, 255 gives
 /// `over`), per channel, rounding to nearest: the same formula the kernel

@@ -330,6 +330,9 @@ pub enum Number {
     /// owner's handle, packed destination and opacity, packed source region
     /// -> 0 or ERROR
     GraphicsCompositorBlendRegionShared = 123,
+    /// own handle, packed destination (x | y<<32), packed source region ->
+    /// 0 or ERROR; source pixels equal to the transparent key are skipped
+    GraphicsCompositorBlitKeyed = 124,
 }
 
 pub fn entry_address() -> u64 {
@@ -2301,6 +2304,9 @@ pub extern "C" fn wovenhat_syscall_dispatch(
         value if value == Number::GraphicsCompositorBlitRegionShared as u64 => {
             sys_compositor_blit_region(arg0, arg1, arg2, true)
         }
+        value if value == Number::GraphicsCompositorBlitKeyed as u64 => {
+            sys_compositor_blit_keyed(arg0, arg1, arg2)
+        }
         value if value == Number::GraphicsCompositorBlendRegion as u64 => {
             sys_compositor_blend_region(arg0, arg1, arg2, false)
         }
@@ -2502,6 +2508,29 @@ fn sys_compositor_blit_region(handle: u64, destination: u64, region: u64, shared
         handle
     };
     crate::compositor::blit_region_for(pid, handle, region, x, y, shared)
+        .map_or(SYSCALL_ERROR, |_| 0)
+}
+
+/// Region blit of one of the caller's own surfaces that skips pixels equal
+/// to the transparent key (`display::TRANSPARENT_KEY`): an overlay of text,
+/// borders or a pointer drawn over what is already composed. Same authority
+/// as the region blit.
+fn sys_compositor_blit_keyed(handle: u64, destination: u64, region: u64) -> u64 {
+    let x = (destination & 0xffff_ffff) as i32;
+    let y = ((destination >> 32) & 0xffff_ffff) as i32;
+    let region = crate::display::Rect::new(
+        (region & 0xffff) as i32,
+        ((region >> 16) & 0xffff) as i32,
+        ((region >> 32) & 0xffff) as usize,
+        ((region >> 48) & 0xffff) as usize,
+    );
+    if !display_authorized() {
+        return SYSCALL_ERROR;
+    }
+    let Some(handle) = caller_surface(handle) else {
+        return SYSCALL_ERROR;
+    };
+    crate::compositor::blit_region_keyed_for(crate::task::current_process_id(), handle, region, x, y)
         .map_or(SYSCALL_ERROR, |_| 0)
 }
 
