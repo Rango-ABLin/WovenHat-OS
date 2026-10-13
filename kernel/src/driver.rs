@@ -593,6 +593,44 @@ pub fn stage13_2_lifecycle_self_test() -> bool {
     if stage13_2_entry_valid(&invalid) {
         return false;
     }
+    // Exercise the real generation-safe topology state machine in isolation:
+    // a retained BAR blocks outer-owner release, stale leases fail after
+    // release, and a reused function slot cannot honor its old handle.
+    let mut topology = crate::hal::pci::topology::Topology::new();
+    let descriptor = crate::hal::pci::topology::FunctionDescriptor {
+        address: crate::hal::pci::topology::FunctionAddress {
+            segment: 0, bus: 0, device: 1, function: 0,
+        },
+        bridge: None,
+    };
+    let Ok(handle) = topology.insert(descriptor) else { return false; };
+    const OWNER: u32 = 0x132;
+    if topology.claim(handle, OWNER).is_err()
+        || topology.claim(handle, OWNER) != Err(crate::hal::pci::topology::Error::AlreadyOwned)
+    {
+        return false;
+    }
+    let Ok(lease) = topology.lease_mmio(handle, OWNER, 0, 0x1000, 0x1000) else {
+        return false;
+    };
+    if !topology.validate_mmio(lease, OWNER)
+        || topology.release(handle, OWNER) != Err(crate::hal::pci::topology::Error::AlreadyOwned)
+        || topology.release_mmio(lease, OWNER + 1).is_ok()
+        || topology.release_mmio(lease, OWNER).is_err()
+        || topology.validate_mmio(lease, OWNER)
+        || topology.release_mmio(lease, OWNER).is_ok()
+        || topology.release(handle, OWNER).is_err()
+        || topology.teardown(handle, crate::hal::pci::topology::NO_OWNER).is_err()
+        || topology.snapshot(handle).is_ok()
+    {
+        return false;
+    }
+    let Ok(reused) = topology.insert(descriptor) else { return false; };
+    if reused == handle || topology.claim(handle, OWNER).is_ok()
+        || topology.claim(reused, OWNER).is_err()
+    {
+        return false;
+    }
     TABLE.lock().iter().flatten().all(stage13_2_entry_valid)
 }
 
