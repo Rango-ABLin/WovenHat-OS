@@ -46,6 +46,21 @@ jobs:
           echo "OVMF VARS: $ovmf_vars"
           sha256sum "$ovmf_code" "$ovmf_vars"
           python3 scripts/test-release.py --qemu "$qemu" --firmware "$ovmf_code" --firmware-vars "$ovmf_vars"
+      - name: Stage 1–19 closure baseline and source-integrity preflight
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "Closure baseline: $(git rev-parse HEAD)"
+          test -f docs/stage1-19-closure-gate.md
+          git diff --exit-code -- kernel/src/storage_manager.rs
+          python3 - <<'PY'
+          from pathlib import Path
+          source = Path("kernel/src/storage_manager.rs").read_text()
+          required = "let i = m.iter_mut().position(|x| x.is_none())?;"
+          if required not in source:
+              raise SystemExit("::error::Storage mount slot declaration missing before acceptance")
+          print("Storage mount source-integrity preflight passed")
+          PY
       - name: Stage 1-5 production software gate 1/2/4-core acceptance
         shell: bash
         run: |
