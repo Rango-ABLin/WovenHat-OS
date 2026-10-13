@@ -1,4 +1,4 @@
-#![no_std]
+#![cfg_attr(not(test), no_std)]
 //! The WovenHat userspace API.
 //!
 //! This is the boundary an application links against instead of issuing `int
@@ -1399,4 +1399,130 @@ pub fn format_u64(mut value: u64, buffer: &mut [u8]) -> &[u8] {
     }
     buffer[..digits].reverse();
     &buffer[..digits]
+}
+
+// Host unit tests for the parts of the API that are pure computation. The
+// crate is freestanding everywhere else; under `cargo test` it links std so
+// these run on the build machine.
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn blend_is_exact_at_both_ends_and_rounds_to_nearest() {
+        let (over, under) = (rgb(200, 100, 0), rgb(0, 50, 255));
+        assert_eq!(blend(over, under, 0), under);
+        assert_eq!(blend(over, under, 255), over);
+        // Per channel: (over * a + under * (255 - a) + 127) / 255.
+        let mid = blend(over, under, 128);
+        assert_eq!(mid >> 16, (200 * 128 + 127) / 255);
+        assert_eq!(mid >> 8 & 0xff, (100 * 128 + 50 * 127 + 127) / 255);
+        assert_eq!(mid & 0xff, (255 * 127 + 127) / 255);
+        for opacity in [1, 77, 128, 254] {
+            assert_eq!(blend(over, over, opacity), over, "a colour over itself");
+        }
+    }
+
+    #[test]
+    fn canvas_needs_a_buffer_large_enough_for_its_rectangle() {
+        let mut pixels = [0u32; 12];
+        assert!(Canvas::new(&mut pixels, 0, 0, 4, 3).is_some());
+        assert!(Canvas::new(&mut pixels, 0, 0, 4, 4).is_none());
+        assert!(Canvas::new(&mut pixels, 0, 0, usize::MAX, 2).is_none(), "overflow refused");
+        let canvas = Canvas::new(&mut pixels, 0, 0, 2, 2).unwrap();
+        assert_eq!(canvas.pixels().len(), 4, "only the rectangle is exposed");
+    }
+
+    #[test]
+    fn canvas_uses_caller_coordinates_and_clips_to_its_rectangle() {
+        let mut pixels = [0u32; 16];
+        let mut canvas = Canvas::new(&mut pixels, 100, 50, 4, 4).unwrap();
+        canvas.set(101, 52, 0xffab_cdef);
+        assert_eq!(canvas.get(101, 52), Some(0x00ab_cdef), "high byte cleared");
+        // Outside the rectangle: ignored on write, absent on read.
+        for (x, y) in [(99, 50), (104, 50), (100, 49), (100, 54), (i32::MIN, i32::MAX)] {
+            canvas.set(x, y, 1);
+            assert_eq!(canvas.get(x, y), None);
+        }
+        assert_eq!(canvas.pixels().iter().filter(|pixel| **pixel != 0).count(), 1);
+        assert_eq!(pixels[2 * 4 + 1], 0x00ab_cdef, "row-major from the top-left");
+    }
+
+    #[test]
+    fn fill_and_blend_rect_touch_only_the_overlap() {
+        let mut pixels = [0u32; 16];
+        let mut canvas = Canvas::new(&mut pixels, 10, 10, 4, 4).unwrap();
+        canvas.fill_rect(0, 0, 100, 100, rgb(9, 9, 9));
+        assert!(canvas.pixels().iter().all(|pixel| *pixel == rgb(9, 9, 9)));
+        // Hanging off the bottom-right corner: a 2x2 overlap.
+        canvas.fill_rect(12, 12, 10, 10, rgb(1, 2, 3));
+        let changed = canvas.pixels().iter().filter(|pixel| **pixel == rgb(1, 2, 3)).count();
+        assert_eq!(changed, 4);
+        assert_eq!(canvas.get(11, 11), Some(rgb(9, 9, 9)));
+        // Entirely outside, or empty: nothing.
+        canvas.fill_rect(20, 20, 5, 5, 0);
+        canvas.fill_rect(10, 10, 0, 5, 0);
+        assert!(canvas.pixels().iter().all(|pixel| *pixel != 0));
+        // Blending is the formula over what is there.
+        canvas.blend_rect(10, 10, 1, 1, rgb(255, 255, 255), 100);
+        assert_eq!(canvas.get(10, 10), Some(blend(rgb(255, 255, 255), rgb(9, 9, 9), 100)));
+        assert_eq!(canvas.get(11, 10), Some(rgb(9, 9, 9)));
+    }
+
+    #[test]
+    fn shade_passes_caller_coordinates() {
+        let mut pixels = [0u32; 6];
+        let mut canvas = Canvas::new(&mut pixels, -1, 7, 3, 2).unwrap();
+        canvas.shade(|x, y| ((x + 1) as u32) << 8 | y as u32);
+        assert_eq!(canvas.get(-1, 7), Some(7));
+        assert_eq!(canvas.get(1, 8), Some(2 << 8 | 8));
+    }
+
+    #[test]
+    fn draw_text_renders_the_kernel_font_and_honours_newlines() {
+        let (width, height) = (16usize, 20usize);
+        let mut pixels = vec![0u32; width * height];
+        let mut canvas = Canvas::new(&mut pixels, 0, 0, width, height).unwrap();
+        canvas.draw_text(1, 2, "Ab\nc", 7);
+        let lit = |canvas: &Canvas<'_>, x: i32, y: i32| canvas.get(x, y) == Some(7);
+        for (character, x0, y0) in [('A', 1, 2), ('b', 1 + font::ADVANCE, 2), ('c', 1, 2 + font::LINE_HEIGHT)] {
+            for (row, bits) in font::glyph(character).iter().enumerate() {
+                for column in 0..font::WIDTH as i32 {
+                    let set = bits & (1 << (font::WIDTH as i32 - 1 - column)) != 0;
+                    assert_eq!(lit(&canvas, x0 + column, y0 + row as i32), set, "{character} ({column}, {row})");
+                }
+            }
+        }
+        // The blank column between glyphs stays clear.
+        assert!((2..2 + font::HEIGHT as i32).all(|y| !lit(&canvas, 1 + font::WIDTH as i32, y)));
+    }
+
+    #[test]
+    fn region_packing_matches_the_kernel_rectangle_layout() {
+        let region = Region { x: 0x0102, y: 0x0304, width: 0x0506, height: 0x0708 };
+        assert_eq!(region.pack(), 0x0708_0506_0304_0102);
+    }
+
+    #[test]
+    fn compositor_info_unpacks_the_kernel_packing() {
+        // The kernel packs width | height << 24 | scale << 48.
+        let packed = 640 | (400 << 24) | (2 << 48);
+        assert_eq!(
+            CompositorInfo::unpack(packed),
+            CompositorInfo { width: 640, height: 400, scale: 2 }
+        );
+        let largest = 1920 | (1200 << 24) | (4 << 48);
+        assert_eq!(
+            CompositorInfo::unpack(largest),
+            CompositorInfo { width: 1920, height: 1200, scale: 4 }
+        );
+    }
+
+    #[test]
+    fn surface_owner_reads_the_high_half_of_a_token() {
+        // slot | generation << 8 | owner << 32, as the kernel packs it.
+        let token = 3 | (0x00ab_cdef << 8) | (4242u64 << 32);
+        assert_eq!(surface_owner(token), process::Id(4242));
+        assert_eq!(surface_owner(0xffff_ffff), process::Id(0));
+    }
 }
