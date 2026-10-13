@@ -39,6 +39,10 @@
 //! translucently over both, then checks every region against the blend
 //! formula.
 //!
+//! With `--scaled-compositor` it switches the display to scale 2, checks the
+//! geometry the kernel reports, and animates a square paced by a
+//! `FrameClock`, checking that no frame came early.
+//!
 //! With `--probe <handle>` it runs as an ordinary process and checks that the
 //! kernel refuses it everything it has no authority for: every compositor
 //! operation, and every operation on the surface `<handle>`, which belongs to
@@ -84,6 +88,7 @@ fn main(args: Args) -> ! {
         Some(b"--damage-client") => damage_client(args.get(2), args.get(3)),
         Some(b"--wm") => window_manager(),
         Some(b"--alpha-compositor") => alpha_compositor(),
+        Some(b"--scaled-compositor") => scaled_compositor(),
         Some(b"--wm-client") => wm_client(&args),
         Some(_) => fail(250),
         None => run(Input::None),
@@ -826,6 +831,141 @@ fn alpha_compositor() -> ! {
     libwoven::exit(0)
 }
 
+const SQUARE: u32 = rgb(250, 210, 40);
+const ANIMATION_FRAMES: u64 = 12;
+const FRAME_PERIOD: u64 = 2;
+const FRAME_STEP: i32 = 8;
+const SQUARE_Y: i32 = 60;
+const SQUARE_START: i32 = 10;
+
+/// Display scale 2 and a paced animation.
+fn scaled_compositor() -> ! {
+    // The geometry belongs to the lease holder.
+    if libwoven::compositor_info().is_ok() || libwoven::compositor_claim().is_err() {
+        fail(171);
+    }
+    let full = match libwoven::compositor_info() {
+        Ok(info) if info.scale == 1 => info,
+        _ => fail(172),
+    };
+    // Out-of-range scales are refused and leave the geometry alone.
+    if libwoven::compositor_set_scale(0).is_ok()
+        || libwoven::compositor_set_scale(libwoven::MAX_DISPLAY_SCALE + 1).is_ok()
+        || libwoven::compositor_info() != Ok(full)
+    {
+        fail(173);
+    }
+    let half = match libwoven::compositor_set_scale(2) {
+        Ok(info) => info,
+        Err(_) => fail(174),
+    };
+    // Unclamped, the surface is exactly half the framebuffer each way; the
+    // kernel checks the exact geometry against the framebuffer itself.
+    let exact = full.width < 1920 && full.height < 1200;
+    if half.scale != 2
+        || libwoven::compositor_info() != Ok(half)
+        || (exact && (half.width != full.width / 2 || half.height != full.height / 2))
+        || libwoven::screen_pixel(half.width as i32 - 1, half.height as i32 - 1) != Ok(0)
+        || libwoven::screen_pixel(half.width as i32, 0).is_ok()
+    {
+        fail(174);
+    }
+    let _ = libwoven::print("hello-gui scaled: display at scale 2\n");
+
+    let backdrop = match GraphicsSurface::create(200, 150) {
+        Ok(surface) => surface,
+        Err(_) => fail(175),
+    };
+    let square = match GraphicsSurface::create(16, 16) {
+        Ok(surface) => surface,
+        Err(_) => fail(175),
+    };
+    if backdrop.fill_rect(0, 0, 200, 150, BACKDROP).is_err()
+        || square.fill_rect(0, 0, 16, 16, SQUARE).is_err()
+        || backdrop.present(0, 0).is_err()
+        || square.present(SQUARE_START, SQUARE_Y).is_err()
+    {
+        fail(175);
+    }
+    // The first present repaints the whole surface, each logical pixel as a
+    // 2x2 block.
+    let whole = u64::from(half.width * 2) * u64::from(half.height * 2);
+    if libwoven::compositor_present() != Ok(whole) {
+        fail(175);
+    }
+
+    // Animate: redraw the backdrop over the old square, draw the square at
+    // its new position, present. Frames are paced by the clock; frames the
+    // app is late for are skipped rather than delaying the rest.
+    let mut clock = libwoven::FrameClock::new(FRAME_PERIOD);
+    let start = clock.deadline() - FRAME_PERIOD;
+    let mut frame = 0u64;
+    let mut presented = 0u64;
+    while frame < ANIMATION_FRAMES {
+        let skipped = match clock.wait(0) {
+            Ok(libwoven::FrameEvent::Frame { skipped }) => skipped,
+            _ => fail(176),
+        };
+        frame = (frame + skipped + 1).min(ANIMATION_FRAMES);
+        // No frame may be early: frame n is due at start + n * period.
+        if libwoven::ticks() < start + frame * FRAME_PERIOD {
+            fail(176);
+        }
+        let x = SQUARE_START + FRAME_STEP * frame as i32;
+        if backdrop.present(0, 0).is_err() || square.present(x, SQUARE_Y).is_err() {
+            fail(177);
+        }
+        // Only the backdrop's region is damaged: 200x150 at scale 2.
+        if libwoven::compositor_present() != Ok(200 * 150 * 4) {
+            fail(177);
+        }
+        presented += 1;
+    }
+    let elapsed = libwoven::ticks() - start;
+    if elapsed < ANIMATION_FRAMES * FRAME_PERIOD || presented == 0 {
+        fail(178);
+    }
+    let end = SQUARE_START + FRAME_STEP * ANIMATION_FRAMES as i32;
+    if libwoven::screen_pixel(end + 8, SQUARE_Y + 8) != Ok(SQUARE)
+        || libwoven::screen_pixel(SQUARE_START + 8, SQUARE_Y + 8) != Ok(BACKDROP)
+        || libwoven::screen_pixel(300, 200) != Ok(0)
+    {
+        fail(179);
+    }
+    let mut line = [0u8; 80];
+    let mut length = 0;
+    let mut presented_digits = [0u8; 20];
+    let mut elapsed_digits = [0u8; 20];
+    for part in [
+        &b"hello-gui scaled: "[..],
+        format_u64(presented, &mut presented_digits),
+        b" frames presented over ",
+        format_u64(elapsed, &mut elapsed_digits),
+        b" ticks\n",
+    ] {
+        line[length..length + part.len()].copy_from_slice(part);
+        length += part.len();
+    }
+    let _ = libwoven::write(libwoven::syscall::STDOUT, &line[..length]);
+    drop(backdrop);
+    drop(square);
+    libwoven::exit(0)
+}
+
+/// Decimal digits of `value`, written into the end of `buffer`.
+fn format_u64(mut value: u64, buffer: &mut [u8; 20]) -> &[u8] {
+    let mut index = buffer.len();
+    loop {
+        index -= 1;
+        buffer[index] = b'0' + (value % 10) as u8;
+        value /= 10;
+        if value == 0 {
+            break;
+        }
+    }
+    &buffer[index..]
+}
+
 fn parse_u64(text: &[u8]) -> Option<u64> {
     if text.is_empty() {
         return None;
@@ -903,6 +1043,10 @@ fn probe(victim: Option<&[u8]>) -> ! {
         || libwoven::compositor_blend_shared(victim, 0, 0, 128).is_ok()
     {
         fail(222);
+    }
+    // So does the display geometry, read or changed.
+    if libwoven::compositor_info().is_ok() || libwoven::compositor_set_scale(2).is_ok() {
+        fail(223);
     }
     let _ = libwoven::print("hello-gui probe: compositor refused\n");
 

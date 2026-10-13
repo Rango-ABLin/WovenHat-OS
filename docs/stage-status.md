@@ -1,5 +1,90 @@
 # Stage status
 
+## Stage 19.14 — integer display scaling and paced animation (2026-10-13)
+
+Roadmap Stage 17's DPI-scaling and animation items. This closes the
+compositor stage except multiple monitors, which is deferred (see Open).
+
+**Scaling.** The compositor keeps an integer display scale, 1 to
+`MAX_SCALE` (4).
+- The surface is the framebuffer divided by the scale, clamped to the
+  existing 1920×1200 bound. `display::present_scaled` draws each surface
+  pixel as a scale×scale block, and scales the damage with it. `present`
+  is now `present_scaled` at scale 1, so every earlier presentation path
+  is unchanged. Three new host tests in `tests/display_compositing.rs`
+  cover:
+  - block expansion;
+  - damage scaling;
+  - screen clipping, plus scale 1 matching `present` byte for byte.
+- Changing the scale reallocates the surface, cleared to black and wholly
+  damaged; the holder redraws at the new geometry. The allocation and the
+  free happen with the compositor lock released, and the lease is
+  re-checked afterwards because the holder can exit in between.
+- A new lease holder always starts at scale 1, whatever the previous holder
+  chose. The reset happens in `claim`, not in `release_owner`, because the
+  exit path holds the scheduler lock and must not allocate.
+
+Two syscalls, both requiring `DisplayIo` and the lease:
+- 116, `GraphicsCompositorInfo`: returns `width | height << 24 |
+  scale << 48`.
+- 117, `GraphicsCompositorScale(scale)`: returns the new geometry in the
+  same packing, or ERROR for a scale outside 1–4.
+
+libwoven adds `CompositorInfo`, `compositor_info` and
+`compositor_set_scale`. Pointer motion stays relative; the window manager
+tracks the pointer in surface coordinates.
+
+**Frame pacing.** libwoven `FrameClock` paces at a fixed period on the
+kernel timer, with no new kernel interface.
+- Frame boundaries are absolute (`start + n * period`), so one late frame
+  does not push back the rest.
+- A late caller is told how many frames it skipped, so an animation stays
+  on time rather than slowing down.
+- `wait(mask)` uses the existing `WaitAny` deadline, so a window manager
+  can sleep on input, messages or damage until the next frame. A mask of 0
+  sleeps for the frame alone.
+
+Gate `[S19.14] display scaling and frame pacing: PASSED`, on QEMU's
+1280×800 framebuffer:
+- The kernel checks that the boot compositor is at scale 1 and that scales
+  0 and 5 are refused.
+- It takes the display, sets scale 2 (640×400), and checks that the
+  repaint writes all 1280×800 pixels. It blits an 8×8 surface at (10, 10)
+  and reads the physical framebuffer back: the 16×16 block at (20, 20) has
+  the colour, and its neighbours do not.
+- The unprivileged probe is refused info and scale (exit 223 otherwise).
+- hello-gui `--scaled-compositor`:
+  - checks that info is refused before claiming and reads scale 1 after;
+  - checks that out-of-range scales leave the geometry alone;
+  - sets scale 2 and checks the exact half geometry, black corners, and an
+    out-of-range read refused;
+  - checks the first present writes the whole physical screen;
+  - animates a square for 12 frames at 2 ticks per frame. No frame may
+    arrive before its due tick, each frame writes exactly the 200×150
+    backdrop region at 2×2, and the whole run takes at least 24 ticks.
+    Observed: 12 frames in 25 ticks.
+- The kernel then re-reads the final frame at scale 2 and checks that the
+  next holder starts at scale 1.
+
+Negative controls, with evidence in
+`audit-artifacts/stage19.14-negative-control-*`:
+- With presentation ignoring the scale, the gate fails at "rescale repaints
+  the whole screen".
+- With a `FrameClock` that never sleeps, hello-gui fails at step 176 (a
+  frame arrived early).
+
+Open:
+- **Multiple monitors (deferred).** The firmware framebuffer is one
+  output, and there is no GPU or virtio-gpu driver to enumerate more. The
+  roadmap says native GPU support must not block the first GUI release, so
+  this waits for a display-driver stage.
+- Scale is whole-number only, and is not detected from the display: there
+  is no EDID or physical-size source.
+- No vsync. Frames follow the 100 Hz timer, so the shortest period is
+  10 ms and frames are not aligned to the display's refresh.
+- Rescaling transiently holds two surfaces (up to about 18 MB). This is
+  bounded because only the holder can rescale.
+
 ## Stage 19.13 — translucent windows and shadows (2026-10-13)
 
 Roadmap Stage 17's transparency and shadow items.

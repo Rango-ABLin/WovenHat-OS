@@ -85,6 +85,8 @@ stage19-11-test = ["qemu-test"]
 stage19-12-test = ["qemu-test"]
 # Translucent windows and shadows.
 stage19-13-test = ["qemu-test"]
+# Integer display scaling and paced animation.
+stage19-14-test = ["qemu-test"]
 stage1-5-test = ["qemu-test"]
 
 [dependencies]

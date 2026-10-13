@@ -21,6 +21,7 @@ STAGES={
     '19.11': ('stage19-11-test', '[S19.11] window stacking and focus: PASSED', 'hello-gui-wm', 'window stacking and focus'),
     '19.12': ('stage19-12-test', '[S19.12] pointer input: PASSED', 'hello-gui-pointer', 'pointer input'),
     '19.13': ('stage19-13-test', '[S19.13] translucency and shadows: PASSED', 'hello-gui-alpha', 'translucency and shadows'),
+    '19.14': ('stage19-14-test', '[S19.14] display scaling and frame pacing: PASSED', 'hello-gui-scaled', 'display scaling and frame pacing'),
 }
 
 def app_build_env(app_dir):

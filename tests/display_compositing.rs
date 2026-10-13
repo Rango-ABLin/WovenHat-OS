@@ -15,7 +15,7 @@ mod font;
 mod display;
 
 use bootloader_api::info::{FrameBufferInfo, PixelFormat};
-use display::{blend_pixel, present, rgb, Damage, Rect, Surface, MAX_DAMAGE_RECTS};
+use display::{blend_pixel, present, present_scaled, rgb, Damage, Rect, Surface, MAX_DAMAGE_RECTS};
 
 const WHITE: u32 = rgb(255, 255, 255);
 const RED: u32 = rgb(255, 0, 0);
@@ -353,4 +353,75 @@ fn blend_clips_like_blit_and_mixes_only_the_overlap() {
     assert_eq!(target.pixel(2, 2), Some(rgb(200, 200, 200)));
     // Entirely outside: nothing touched.
     assert_eq!(target.blend(&source, 10, 10, 128), Rect::EMPTY);
+}
+
+// ------------------------------------------------------------- display scale
+
+/// Read a framebuffer pixel back as `0x00RRGGBB` from a 4-byte BGR buffer.
+fn bgr_at(framebuffer: &[u8], descriptor: FrameBufferInfo, x: usize, y: usize) -> u32 {
+    let offset = (y * descriptor.stride + x) * descriptor.bytes_per_pixel;
+    rgb(framebuffer[offset + 2], framebuffer[offset + 1], framebuffer[offset])
+}
+
+#[test]
+fn scaled_presentation_turns_each_pixel_into_a_block() {
+    let mut surface = Surface::new(4, 3);
+    surface.fill_rect(surface.bounds(), WHITE);
+    surface.set_pixel(1, 2, RED);
+    let mut damage = Damage::new();
+    damage.add(surface.bounds());
+
+    let descriptor = info(8, 6, PixelFormat::Bgr, 4);
+    let mut framebuffer = vec![0u8; descriptor.byte_len];
+    let written = present_scaled(&surface, &damage, &mut framebuffer, descriptor, 2);
+    assert_eq!(written, 8 * 6, "a 4x3 surface at scale 2 covers an 8x6 screen");
+    // Surface pixel (1, 2) is the 2x2 block at (2..4, 4..6), and only it.
+    for (x, y) in [(2, 4), (3, 4), (2, 5), (3, 5)] {
+        assert_eq!(bgr_at(&framebuffer, descriptor, x, y), RED, "block pixel ({x}, {y})");
+    }
+    for (x, y) in [(1, 4), (4, 4), (2, 3), (0, 0), (7, 5)] {
+        assert_eq!(bgr_at(&framebuffer, descriptor, x, y), WHITE, "outside pixel ({x}, {y})");
+    }
+}
+
+#[test]
+fn scaled_presentation_scales_the_damage_too() {
+    let mut surface = Surface::new(8, 8);
+    surface.fill_rect(surface.bounds(), BLUE);
+    let mut damage = Damage::new();
+    damage.add(Rect::new(2, 1, 2, 1));
+
+    let descriptor = info(24, 24, PixelFormat::Bgr, 4);
+    let mut framebuffer = vec![0u8; descriptor.byte_len];
+    let written = present_scaled(&surface, &damage, &mut framebuffer, descriptor, 3);
+    assert_eq!(written, 2 * 3 * 3, "a 2x1 region at scale 3 is a 6x3 block");
+    assert_eq!(bgr_at(&framebuffer, descriptor, 6, 3), BLUE);
+    assert_eq!(bgr_at(&framebuffer, descriptor, 11, 5), BLUE);
+    assert_eq!(bgr_at(&framebuffer, descriptor, 5, 3), 0, "left of the block untouched");
+    assert_eq!(bgr_at(&framebuffer, descriptor, 12, 3), 0, "right of the block untouched");
+    assert_eq!(bgr_at(&framebuffer, descriptor, 6, 6), 0, "below the block untouched");
+}
+
+#[test]
+fn scaled_presentation_clips_to_the_screen_and_scale_one_matches_present() {
+    let mut surface = Surface::new(5, 5);
+    surface.fill_rect(surface.bounds(), WHITE);
+    surface.set_pixel(2, 2, RED);
+    let mut damage = Damage::new();
+    damage.add(surface.bounds());
+
+    // A 5x5 surface at scale 2 is 10x10; a 7x9 screen takes only 7x9 of it.
+    let descriptor = info(7, 9, PixelFormat::Bgr, 4);
+    let mut framebuffer = vec![0u8; descriptor.byte_len];
+    assert_eq!(present_scaled(&surface, &damage, &mut framebuffer, descriptor, 2), 7 * 9);
+    assert_eq!(bgr_at(&framebuffer, descriptor, 5, 5), RED);
+
+    let mut scaled = vec![0u8; descriptor.byte_len];
+    let mut plain = vec![0u8; descriptor.byte_len];
+    assert_eq!(
+        present_scaled(&surface, &damage, &mut scaled, descriptor, 1),
+        present(&surface, &damage, &mut plain, descriptor)
+    );
+    assert_eq!(scaled, plain);
+    assert_eq!(present_scaled(&surface, &damage, &mut scaled, descriptor, 0), 0);
 }

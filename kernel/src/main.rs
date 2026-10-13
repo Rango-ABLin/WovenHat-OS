@@ -3377,6 +3377,15 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         serial::write_line(format_args!("[S1-5] storage journal: PASSED"));
         qemu_test_exit_success();
     }
+    #[cfg(feature = "stage19-14-test")]
+    {
+        if !stage19_14_self_test() {
+            serial::write_line(format_args!("[S19.14] display scaling and frame pacing: FAILED"));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!("[S19.14] display scaling and frame pacing: PASSED"));
+        qemu_test_exit_success();
+    }
     #[cfg(feature = "stage19-13-test")]
     {
         if !stage19_13_self_test() {
@@ -4496,7 +4505,8 @@ fn stage16_1_self_test() -> bool {
     feature = "stage19-9-test",
     feature = "stage19-11-test",
     feature = "stage19-12-test",
-    feature = "stage19-13-test"
+    feature = "stage19-13-test",
+    feature = "stage19-14-test"
 ))]
 const HELLO_GUI_IMAGE: &[u8] = include_bytes!(env!("WOVENHAT_HELLO_GUI_IMAGE"));
 
@@ -4514,7 +4524,8 @@ const HELLO_GUI_IMAGE: &[u8] = include_bytes!(env!("WOVENHAT_HELLO_GUI_IMAGE"));
     feature = "stage19-9-test",
     feature = "stage19-11-test",
     feature = "stage19-12-test",
-    feature = "stage19-13-test"
+    feature = "stage19-13-test",
+    feature = "stage19-14-test"
 ))]
 fn display_client_capabilities() -> capability::CapabilitySet {
     capability::CapabilitySet::only(capability::Capability::Console)
@@ -4534,7 +4545,8 @@ fn display_client_capabilities() -> capability::CapabilitySet {
     feature = "stage19-9-test",
     feature = "stage19-11-test",
     feature = "stage19-12-test",
-    feature = "stage19-13-test"
+    feature = "stage19-13-test",
+    feature = "stage19-14-test"
 ))]
 fn run_hello_gui(
     image: &[u8],
@@ -4558,7 +4570,8 @@ fn run_hello_gui(
     feature = "stage19-9-test",
     feature = "stage19-11-test",
     feature = "stage19-12-test",
-    feature = "stage19-13-test"
+    feature = "stage19-13-test",
+    feature = "stage19-14-test"
 ))]
 fn spawn_hello_gui(
     image: &[u8],
@@ -4587,7 +4600,8 @@ fn spawn_hello_gui(
     feature = "stage19-9-test",
     feature = "stage19-11-test",
     feature = "stage19-12-test",
-    feature = "stage19-13-test"
+    feature = "stage19-13-test",
+    feature = "stage19-14-test"
 ))]
 fn wait_hello_gui(pid: task::ProcessId) -> Option<(task::ProcessId, Result<i32, task::WaitError>)> {
     let start = timer::ticks();
@@ -4598,6 +4612,170 @@ fn wait_hello_gui(pid: task::ProcessId) -> Option<(task::ProcessId, Result<i32, 
         task::yield_now();
     }
     Some((pid, task::wait_process(pid.as_u64())))
+}
+
+/// Stage 19.14 acceptance: integer display scaling and paced animation.
+///
+/// The kernel first drives a scaled presentation itself and reads the
+/// physical framebuffer back: one surface pixel must be a 2x2 block. Then
+/// hello-gui `--scaled-compositor` switches to scale 2 through the syscall,
+/// checks the geometry, and animates a square under a `FrameClock`. The
+/// kernel re-reads the final frame after it exits, and checks that the next
+/// holder starts at scale 1.
+#[cfg(feature = "stage19-14-test")]
+fn stage19_14_self_test() -> bool {
+    use crate::display::{rgb, Rect};
+    use bootloader_api::info::PixelFormat;
+
+    fn step(name: &str, ok: bool) -> bool {
+        serial::write_line(format_args!(
+            "[S19.14] {} {}",
+            name,
+            if ok { "PASS" } else { "FAIL" }
+        ));
+        ok
+    }
+    /// A physical framebuffer pixel as 0x00RRGGBB, read independently of the
+    /// compositor.
+    fn screen_pixel(x: usize, y: usize) -> Option<u32> {
+        terminal::with_framebuffer(|buffer, info| {
+            if x >= info.width || y >= info.height || info.bytes_per_pixel < 3 {
+                return None;
+            }
+            let offset = (y * info.stride + x) * info.bytes_per_pixel;
+            let bytes = buffer.get(offset..offset + 3)?;
+            match info.pixel_format {
+                PixelFormat::Rgb => Some(rgb(bytes[0], bytes[1], bytes[2])),
+                PixelFormat::Bgr => Some(rgb(bytes[2], bytes[1], bytes[0])),
+                _ => None,
+            }
+        })
+        .flatten()
+    }
+
+    let Some(info) = terminal::framebuffer_info() else {
+        return step("framebuffer available", false);
+    };
+    let full = (
+        (info.width as u32).min(compositor::MAX_WIDTH),
+        (info.height as u32).min(compositor::MAX_HEIGHT),
+    );
+    let half = (
+        (info.width as u32 / 2).min(compositor::MAX_WIDTH),
+        (info.height as u32 / 2).min(compositor::MAX_HEIGHT),
+    );
+    serial::write_line(format_args!(
+        "[S19.14] framebuffer {}x{}, scale 2 surface {}x{}",
+        info.width, info.height, half.0, half.1
+    ));
+    if !step(
+        "boot compositor at scale 1",
+        compositor::scale() == Some(1) && compositor::dimensions() == Some(full),
+    ) {
+        return false;
+    }
+    let refused = compositor::set_scale(0) == Err(compositor::Error::InvalidScale)
+        && compositor::set_scale(compositor::MAX_SCALE + 1)
+            == Err(compositor::Error::InvalidScale)
+        && compositor::scale() == Some(1)
+        && compositor::dimensions() == Some(full);
+    if !step("out-of-range scales refused", refused) {
+        return false;
+    }
+
+    // Kernel-driven scaled presentation, read back from the framebuffer.
+    if !step("display taken", compositor::activate_display().is_ok()) {
+        return false;
+    }
+    let scaled = compositor::set_scale(2) == Ok(half)
+        && compositor::dimensions() == Some(half)
+        && compositor::scale() == Some(2);
+    if !step("scale 2 halves the surface", scaled) {
+        compositor::deactivate_display();
+        return false;
+    }
+    let whole = (half.0 as usize * 2) * (half.1 as usize * 2);
+    if !step("rescale repaints the whole screen", compositor::present() == Ok(whole)) {
+        compositor::deactivate_display();
+        return false;
+    }
+    const OWNER: u64 = 4248;
+    const COLOR: u32 = rgb(30, 160, 220);
+    let blitted = user_graphics::create(OWNER, 8, 8).is_ok_and(|client| {
+        user_graphics::fill_rect(client, Rect::new(0, 0, 8, 8), COLOR).is_ok()
+            && compositor::blit(client, 10, 10) == Ok(Rect::new(10, 10, 8, 8))
+    });
+    user_graphics::release_owner(OWNER);
+    // An 8x8 blit is a 16x16 block of framebuffer pixels at (20, 20).
+    let presented = blitted && compositor::present() == Ok(16 * 16);
+    let blocks = screen_pixel(20, 20) == Some(COLOR)
+        && screen_pixel(35, 35) == Some(COLOR)
+        && screen_pixel(19, 20) == Some(0)
+        && screen_pixel(36, 35) == Some(0)
+        && screen_pixel(20, 36) == Some(0);
+    let restored = compositor::set_scale(1) == Ok(full);
+    compositor::deactivate_display();
+    if !step("8x8 blit presented as a 16x16 block", presented && blocks)
+        || !step("scale 1 restored", restored)
+    {
+        return false;
+    }
+
+    if !step(
+        "install into the filesystem",
+        vfs::create_read_only("/bin/hello-gui", HELLO_GUI_IMAGE).is_ok(),
+    ) {
+        return false;
+    }
+    let mut image = alloc::vec![0u8; HELLO_GUI_IMAGE.len()];
+    if vfs::read_all("/bin/hello-gui", &mut image) != Ok(HELLO_GUI_IMAGE.len()) {
+        return step("filesystem round-trip", false);
+    }
+    const VICTIM_OWNER: u64 = 4249;
+    let Ok(victim) = user_graphics::create(VICTIM_OWNER, 8, 8) else {
+        return step("victim surface created", false);
+    };
+    let victim_arg = alloc::format!("{}", victim.to_u64());
+    let probe = run_hello_gui(&image, &["/bin/hello-gui", "--probe", &victim_arg], false);
+    user_graphics::release_owner(VICTIM_OWNER);
+    if !step(
+        "unprivileged probe refused the display geometry",
+        matches!(probe, Some((_, Ok(0)))),
+    ) {
+        return false;
+    }
+
+    let scaled = run_hello_gui(&image, &["/bin/hello-gui", "--scaled-compositor"], true);
+    let code = match scaled {
+        Some((_, Ok(code))) => code as i64,
+        _ => -1,
+    };
+    serial::write_line(format_args!("[S19.14] compositor exit status {}", code));
+    if !step(
+        "compositor scaled the display and paced its animation",
+        matches!(scaled, Some((_, Ok(0)))),
+    ) {
+        return false;
+    }
+
+    // The final frame, re-read in surface coordinates after the holder left.
+    const BACKDROP: u32 = rgb(200, 200, 200);
+    const SQUARE: u32 = rgb(250, 210, 40);
+    let final_frame = compositor::scale() == Some(2)
+        && compositor::dimensions() == Some(half)
+        && compositor::pixel(10 + 8 * 12 + 8, 68) == Ok(SQUARE)
+        && compositor::pixel(18, 68) == Ok(BACKDROP);
+    if !step("kernel reads the final frame at scale 2", final_frame)
+        || !step("lease released on exit", compositor::holder().is_none())
+    {
+        return false;
+    }
+    const NEXT: u64 = 4250;
+    let reset = compositor::claim(NEXT).is_ok()
+        && compositor::scale() == Some(1)
+        && compositor::dimensions() == Some(full);
+    compositor::release_owner(NEXT);
+    step("the next holder starts at scale 1", reset)
 }
 
 /// Stage 19.13 acceptance: translucent windows and shadows.

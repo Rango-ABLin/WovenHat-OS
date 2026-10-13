@@ -28,10 +28,14 @@ pub const DEFAULT_HEIGHT: u32 = 480;
 
 /// Upper bound on the boot-time surface. The compositor follows the
 /// framebuffer, but a 4K display would otherwise cost a 33 MB kernel
-/// allocation; 1920×1200 bounds it near 9 MB. A larger display shows the
+/// allocation; 1920Ã—1200 bounds it near 9 MB. A larger display shows the
 /// compositor in its top-left corner.
 pub const MAX_WIDTH: u32 = 1920;
 pub const MAX_HEIGHT: u32 = 1200;
+
+/// Largest integer display scale. At 4 a 1920Ã—1200 framebuffer gives a
+/// 480Ã—300 surface, about as coarse as a usable desktop gets.
+pub const MAX_SCALE: u32 = 4;
 
 /// Error returned by compositor operations.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -51,6 +55,8 @@ pub enum Error {
     Busy,
     /// The caller does not hold the compositor lease.
     NotHolder,
+    /// The display scale is outside `1..=MAX_SCALE`.
+    InvalidScale,
 }
 
 struct State {
@@ -61,6 +67,9 @@ struct State {
     presenting: bool,
     /// The one process allowed to drive the compositor from userspace.
     holder: Option<u64>,
+    /// Integer display scale: each surface pixel is presented as a
+    /// `scale`Ã—`scale` block. The surface is the framebuffer divided by this.
+    scale: u32,
 }
 
 impl State {
@@ -70,6 +79,7 @@ impl State {
             damage: Damage::new(),
             presenting: false,
             holder: None,
+            scale: 1,
         };
         // A compositor without an initial fill reads as transparent-looking
         // zeros, which the test cannot distinguish from "a client blitted
@@ -89,7 +99,7 @@ impl State {
 /// [`present`]; the terminal never calls back into this module.
 static STATE: Mutex<Option<State>> = Mutex::with_rank(None, 10);
 
-/// Initialise the compositor surface. Idempotent — the second call is a no-op.
+/// Initialise the compositor surface. Idempotent â€” the second call is a no-op.
 ///
 /// The acceptance tests call this; a production boot would call it with the
 /// framebuffer's own dimensions once a global framebuffer accessor exists.
@@ -101,7 +111,7 @@ pub fn init(width: u32, height: u32) {
 }
 
 /// Initialise the compositor at the framebuffer's size, clamped to
-/// [`MAX_WIDTH`]×[`MAX_HEIGHT`], or at the default size without a framebuffer.
+/// [`MAX_WIDTH`]Ã—[`MAX_HEIGHT`], or at the default size without a framebuffer.
 /// Idempotent, like [`init`].
 pub fn init_for_display() {
     let (width, height) = crate::terminal::framebuffer_info()
@@ -203,12 +213,23 @@ pub fn present() -> Result<usize, Error> {
     if !state.presenting {
         return Err(Error::NotPresenting);
     }
-    let written = crate::terminal::with_framebuffer(|buffer, info| {
-        crate::display::present(&state.surface, &state.damage, buffer, info)
-    })
-    .ok_or(Error::NoDisplay)?;
+    let written = present_state(state)?;
     state.damage.clear();
     Ok(written)
+}
+
+/// Copy `state`'s damage to the framebuffer at its scale.
+fn present_state(state: &State) -> Result<usize, Error> {
+    crate::terminal::with_framebuffer(|buffer, info| {
+        crate::display::present_scaled(
+            &state.surface,
+            &state.damage,
+            buffer,
+            info,
+            state.scale as usize,
+        )
+    })
+    .ok_or(Error::NoDisplay)
 }
 
 /// Take the compositor lease for `pid`.
@@ -217,16 +238,105 @@ pub fn present() -> Result<usize, Error> {
 /// present the compositor surface on behalf of userspace. Claiming again as the
 /// current holder succeeds. The syscall layer requires `DisplayIo` before
 /// calling this; the lease is what makes that authority single-holder.
+///
+/// A new holder starts at scale 1, whatever the previous holder chose, so
+/// every holder begins from the framebuffer's own geometry.
 pub fn claim(pid: u64) -> Result<(), Error> {
-    let mut guard = STATE.lock();
-    let state = guard.as_mut().ok_or(Error::NotReady)?;
-    match state.holder {
-        Some(holder) if holder != pid => Err(Error::Busy),
-        _ => {
-            state.holder = Some(pid);
-            Ok(())
+    let rescale = {
+        let mut guard = STATE.lock();
+        let state = guard.as_mut().ok_or(Error::NotReady)?;
+        match state.holder {
+            Some(holder) if holder != pid => return Err(Error::Busy),
+            Some(_) => return Ok(()),
+            None => {
+                state.holder = Some(pid);
+                state.scale != 1
+            }
+        }
+    };
+    if rescale {
+        // The surface is reallocated with STATE released (see `rescale`).
+        // Should that fail, the claim is undone rather than leaving the
+        // holder with a geometry it did not ask for.
+        if let Err(error) = rescale_to(1, Some(pid)) {
+            let mut guard = STATE.lock();
+            if let Some(state) = guard.as_mut() {
+                if state.holder == Some(pid) {
+                    state.holder = None;
+                }
+            }
+            return Err(error);
         }
     }
+    Ok(())
+}
+
+/// Replace the surface with one sized for `scale`, cleared to black and
+/// wholly damaged. With `holder`, only while that process holds the lease.
+/// Returns the new surface dimensions.
+///
+/// The new surface is allocated, and the old one freed, with STATE released:
+/// a surface is up to 9 MB, and the allocator is not something to hold the
+/// compositor lock across. The lease is re-checked after allocation, since
+/// the holder can exit in between.
+fn rescale_to(scale: u32, holder: Option<u64>) -> Result<(u32, u32), Error> {
+    if !(1..=MAX_SCALE).contains(&scale) {
+        return Err(Error::InvalidScale);
+    }
+    let info = crate::terminal::framebuffer_info().ok_or(Error::NoDisplay)?;
+    let width = (info.width as u32 / scale).clamp(1, MAX_WIDTH);
+    let height = (info.height as u32 / scale).clamp(1, MAX_HEIGHT);
+    let mut surface = Surface::new(width as usize, height as usize);
+    let previous = {
+        let mut guard = STATE.lock();
+        let state = guard.as_mut().ok_or(Error::NotReady)?;
+        if holder.is_some() && state.holder != holder {
+            return Err(Error::NotHolder);
+        }
+        core::mem::swap(&mut state.surface, &mut surface);
+        state.scale = scale;
+        state.damage.clear();
+        let bounds = state.surface.bounds();
+        state.damage.add(bounds);
+        surface
+    };
+    drop(previous);
+    Ok((width, height))
+}
+
+/// Set the display scale for the kernel's own use; userspace goes through
+/// [`set_scale_for`].
+#[cfg_attr(not(feature = "stage19-14-test"), allow(dead_code))]
+pub fn set_scale(scale: u32) -> Result<(u32, u32), Error> {
+    rescale_to(scale, None)
+}
+
+/// Set the display scale on behalf of the lease holder. The surface becomes
+/// the framebuffer's size divided by `scale` (clamped to the maximum), and
+/// starts black: the holder redraws at the new geometry.
+pub fn set_scale_for(pid: u64, scale: u32) -> Result<(u32, u32), Error> {
+    require_holder(pid)?;
+    rescale_to(scale, Some(pid))
+}
+
+/// Surface width, height and display scale, for the lease holder.
+pub fn info_for(pid: u64) -> Result<(u32, u32, u32), Error> {
+    let guard = STATE.lock();
+    let state = guard.as_ref().ok_or(Error::NotReady)?;
+    if state.holder != Some(pid) {
+        return Err(Error::NotHolder);
+    }
+    Ok((
+        state.surface.width() as u32,
+        state.surface.height() as u32,
+        state.scale,
+    ))
+}
+
+/// Current display scale, or `None` before [`init`].
+#[cfg_attr(not(feature = "stage19-14-test"), allow(dead_code))]
+pub fn scale() -> Option<u32> {
+    STATE.lock().as_ref().map(|state| state.scale)
 }
 
 /// Current lease holder, if any.
@@ -411,10 +521,7 @@ pub fn present_for(pid: u64) -> Result<usize, Error> {
         // meant for it rather than for the hidden terminal.
         crate::woven_input::set_focus(Some(pid));
     }
-    let written = crate::terminal::with_framebuffer(|buffer, info| {
-        crate::display::present(&state.surface, &state.damage, buffer, info)
-    })
-    .ok_or(Error::NoDisplay)?;
+    let written = present_state(state)?;
     state.damage.clear();
     Ok(written)
 }
@@ -445,7 +552,8 @@ pub fn pixel(x: i32, y: i32) -> Result<u32, Error> {
     not(any(
         feature = "stage19-1-test",
         feature = "stage19-3-test",
-        feature = "stage19-10-test"
+        feature = "stage19-10-test",
+        feature = "stage19-14-test"
     )),
     allow(dead_code)
 )]

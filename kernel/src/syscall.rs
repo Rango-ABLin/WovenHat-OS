@@ -308,6 +308,10 @@ pub enum Number {
     GraphicsCompositorBlend = 114,
     /// owner's handle, packed (x | y<<32), opacity 0..=255 -> 0 or ERROR
     GraphicsCompositorBlendShared = 115,
+    /// () -> packed (width | height<<24 | scale<<48) or ERROR
+    GraphicsCompositorInfo = 116,
+    /// scale 1..=4 -> packed (width | height<<24 | scale<<48) or ERROR
+    GraphicsCompositorScale = 117,
 }
 
 pub fn entry_address() -> u64 {
@@ -2267,6 +2271,8 @@ pub extern "C" fn wovenhat_syscall_dispatch(
         value if value == Number::GraphicsCompositorBlendShared as u64 => {
             sys_compositor_blend(arg0, arg1, arg2, true)
         }
+        value if value == Number::GraphicsCompositorInfo as u64 => sys_compositor_info(),
+        value if value == Number::GraphicsCompositorScale as u64 => sys_compositor_scale(arg0),
         _ => u64::MAX,
     };
 
@@ -2428,6 +2434,40 @@ fn sys_compositor_blend(handle: u64, packed: u64, opacity: u64, shared: bool) ->
         crate::compositor::blend_for(pid, handle, x, y, opacity)
     };
     result.map_or(SYSCALL_ERROR, |_| 0)
+}
+
+/// Pack surface geometry and scale as `width | height << 24 | scale << 48`.
+/// The surface is at most `MAX_WIDTH`×`MAX_HEIGHT`, well inside 24 bits.
+fn pack_compositor_info(width: u32, height: u32, scale: u32) -> u64 {
+    u64::from(width) | (u64::from(height) << 24) | (u64::from(scale) << 48)
+}
+
+/// The compositor surface's size and display scale. Requires `DisplayIo` and
+/// the lease: the geometry is the holder's to draw on.
+fn sys_compositor_info() -> u64 {
+    if !display_authorized() {
+        return SYSCALL_ERROR;
+    }
+    crate::compositor::info_for(crate::task::current_process_id())
+        .map_or(SYSCALL_ERROR, |(width, height, scale)| {
+            pack_compositor_info(width, height, scale)
+        })
+}
+
+/// Set the integer display scale (1..=`MAX_SCALE`). The surface is
+/// reallocated at the framebuffer's size divided by the scale and starts
+/// black. Requires `DisplayIo` and the lease. Returns the new geometry.
+fn sys_compositor_scale(scale: u64) -> u64 {
+    if !display_authorized() {
+        return SYSCALL_ERROR;
+    }
+    let Ok(scale) = u32::try_from(scale) else {
+        return SYSCALL_ERROR;
+    };
+    crate::compositor::set_scale_for(crate::task::current_process_id(), scale)
+        .map_or(SYSCALL_ERROR, |(width, height)| {
+            pack_compositor_info(width, height, scale)
+        })
 }
 
 /// Take the compositor lease. Requires `DisplayIo`.

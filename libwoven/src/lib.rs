@@ -209,6 +209,8 @@ pub mod syscall {
     pub const GRAPHICS_COMPOSITOR_BLIT_DAMAGE: u64 = 113;
     pub const GRAPHICS_COMPOSITOR_BLEND: u64 = 114;
     pub const GRAPHICS_COMPOSITOR_BLEND_SHARED: u64 = 115;
+    pub const GRAPHICS_COMPOSITOR_INFO: u64 = 116;
+    pub const GRAPHICS_COMPOSITOR_SCALE: u64 = 117;
     pub const MESSAGE_SEND: u64 = 11;
     pub const MESSAGE_RECEIVE: u64 = 12;
 
@@ -497,6 +499,18 @@ pub mod syscall {
 
     /// # Safety
     /// Must be called from WovenHat userspace.
+    pub unsafe fn graphics_compositor_info() -> u64 {
+        unsafe { invoke(GRAPHICS_COMPOSITOR_INFO, 0, 0, 0) }
+    }
+
+    /// # Safety
+    /// Must be called from WovenHat userspace.
+    pub unsafe fn graphics_compositor_scale(scale: u64) -> u64 {
+        unsafe { invoke(GRAPHICS_COMPOSITOR_SCALE, scale, 0, 0) }
+    }
+
+    /// # Safety
+    /// Must be called from WovenHat userspace.
     pub unsafe fn graphics_compositor_blit_damage(handle: u64, x: i32, y: i32) -> u64 {
         let packed = (x as u32 as u64) | ((y as u32 as u64) << 32);
         unsafe { invoke(GRAPHICS_COMPOSITOR_BLIT_DAMAGE, handle, packed, 0) }
@@ -743,6 +757,115 @@ pub fn compositor_present() -> Result<u64, Error> {
     // SAFETY: argument-free call.
     let result = unsafe { syscall::graphics_compositor_present() };
     check(result)
+}
+
+/// The compositor surface's geometry and the display scale.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct CompositorInfo {
+    /// Surface width in logical pixels: the framebuffer width over `scale`.
+    pub width: u32,
+    /// Surface height in logical pixels.
+    pub height: u32,
+    /// Each logical pixel is shown as a `scale`Ã—`scale` block.
+    pub scale: u32,
+}
+
+impl CompositorInfo {
+    const fn unpack(value: u64) -> Self {
+        Self {
+            width: (value & 0xff_ffff) as u32,
+            height: ((value >> 24) & 0xff_ffff) as u32,
+            scale: ((value >> 48) & 0xffff) as u32,
+        }
+    }
+}
+
+/// Largest display scale the kernel accepts.
+pub const MAX_DISPLAY_SCALE: u32 = 4;
+
+/// The compositor's current geometry. Lease holder only.
+pub fn compositor_info() -> Result<CompositorInfo, Error> {
+    // SAFETY: argument-free call.
+    check(unsafe { syscall::graphics_compositor_info() }).map(CompositorInfo::unpack)
+}
+
+/// Set the integer display scale (1 to [`MAX_DISPLAY_SCALE`]). The surface
+/// becomes the framebuffer divided by `scale` and starts black, so redraw
+/// everything at the returned geometry. Lease holder only; a new holder
+/// always starts at scale 1.
+pub fn compositor_set_scale(scale: u32) -> Result<CompositorInfo, Error> {
+    // SAFETY: integer-only call.
+    check(unsafe { syscall::graphics_compositor_scale(u64::from(scale)) })
+        .map(CompositorInfo::unpack)
+}
+
+/// What ended a [`FrameClock::wait`].
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum FrameEvent {
+    /// The next frame is due. `skipped` counts whole frames that went by
+    /// unrendered because the caller ran late; an animation advances by
+    /// `skipped + 1` steps to stay on time.
+    Frame { skipped: u64 },
+    /// A [`wait_any`] source became ready before the frame was due.
+    Ready(u64),
+}
+
+/// Paces an animation at a fixed period on the kernel timer.
+///
+/// Frame boundaries are absolute (`start + n * period`), so lateness in one
+/// frame does not push back every later one, and no frame is ever early.
+/// There is no vertical-sync source yet, so frames are not aligned to the
+/// display's refresh; at the 100 Hz timer the shortest period is 10 ms.
+pub struct FrameClock {
+    period: time::Ticks,
+    next: time::Ticks,
+}
+
+impl FrameClock {
+    /// Start a clock whose first frame is due one `period` from now. A
+    /// period of 0 is treated as 1 tick.
+    pub fn new(period: time::Ticks) -> Self {
+        let period = period.max(1);
+        Self {
+            period,
+            next: ticks().saturating_add(period),
+        }
+    }
+
+    pub const fn period(&self) -> time::Ticks {
+        self.period
+    }
+
+    /// Tick at which the next frame is due.
+    pub const fn deadline(&self) -> time::Ticks {
+        self.next
+    }
+
+    /// Sleep until the next frame is due, or until a source in `mask` is
+    /// ready (`mask` 0 waits for the frame alone). A ready source does not
+    /// consume the frame: call again to keep waiting for it.
+    pub fn wait(&mut self, mask: u64) -> Result<FrameEvent, Error> {
+        loop {
+            let now = ticks();
+            if now >= self.next {
+                let skipped = (now - self.next) / self.period;
+                self.next = self
+                    .next
+                    .saturating_add(self.period.saturating_mul(skipped + 1));
+                return Ok(FrameEvent::Frame { skipped });
+            }
+            if mask == 0 {
+                // Relative sleep from a tick read earlier can only overshoot,
+                // never wake before the deadline.
+                sleep(self.next - now)?;
+            } else {
+                let ready = wait_any(mask, Some(self.next))?;
+                if ready != 0 {
+                    return Ok(FrameEvent::Ready(ready));
+                }
+            }
+        }
+    }
 }
 
 /// A keyboard event delivered to the focused process.

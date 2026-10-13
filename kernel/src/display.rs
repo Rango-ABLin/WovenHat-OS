@@ -415,14 +415,30 @@ const fn blend_channel(over: u32, under: u32, opacity: u8, shift: u32) -> u32 {
 /// Copy the damaged regions of `surface` into a framebuffer.
 ///
 /// The pixel format is resolved once per run of pixels instead of once per
-/// pixel, and only damaged rows are touched.
+/// pixel, and only damaged rows are touched. Returns framebuffer pixels
+/// written.
 pub fn present(
     surface: &Surface,
     damage: &Damage,
     framebuffer: &mut [u8],
     info: FrameBufferInfo,
 ) -> usize {
-    if damage.is_empty() {
+    present_scaled(surface, damage, framebuffer, info, 1)
+}
+
+/// [`present`] with an integer display scale: each surface pixel becomes a
+/// `scale`×`scale` block of framebuffer pixels, so a surface drawn at
+/// 640×400 fills a 1280×800 screen at scale 2. Damage is in surface
+/// coordinates and is scaled with it. Returns framebuffer pixels written.
+/// A scale of 0 writes nothing.
+pub fn present_scaled(
+    surface: &Surface,
+    damage: &Damage,
+    framebuffer: &mut [u8],
+    info: FrameBufferInfo,
+    scale: usize,
+) -> usize {
+    if damage.is_empty() || scale == 0 {
         return 0;
     }
     let screen = Rect::new(0, 0, info.width, info.height);
@@ -430,18 +446,30 @@ pub fn present(
     let mut written = 0usize;
 
     for region in damage.regions() {
-        let clipped = region.intersect(screen).intersect(surface.bounds());
-        if clipped.is_empty() {
+        let logical = region.intersect(surface.bounds());
+        if logical.is_empty() {
             continue;
         }
-        for y in clipped.y as usize..clipped.bottom() as usize {
-            let row = y * surface.width();
-            let mut offset = (y * info.stride + clipped.x as usize) * bytes;
-            for x in clipped.x as usize..clipped.right() as usize {
-                let color = surface.pixels[row + x];
+        // Surface coordinates are non-negative after clipping, and the
+        // surface is at most a few thousand pixels wide, so the products fit.
+        let physical = Rect::new(
+            logical.x * scale as i32,
+            logical.y * scale as i32,
+            logical.width * scale,
+            logical.height * scale,
+        )
+        .intersect(screen);
+        if physical.is_empty() {
+            continue;
+        }
+        for y in physical.y as usize..physical.bottom() as usize {
+            let row = (y / scale) * surface.width();
+            let mut offset = (y * info.stride + physical.x as usize) * bytes;
+            for x in physical.x as usize..physical.right() as usize {
                 if offset + bytes > framebuffer.len() {
                     break;
                 }
+                let color = surface.pixels[row + x / scale];
                 let (red, green, blue) = (
                     (color >> 16) as u8,
                     (color >> 8) as u8,
