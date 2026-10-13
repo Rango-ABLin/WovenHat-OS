@@ -3362,6 +3362,15 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         serial::write_line(format_args!("[S1-5] storage journal: PASSED"));
         qemu_test_exit_success();
     }
+    #[cfg(feature = "stage19-11-test")]
+    {
+        if !stage19_11_self_test() {
+            serial::write_line(format_args!("[S19.11] window stacking and focus: FAILED"));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!("[S19.11] window stacking and focus: PASSED"));
+        qemu_test_exit_success();
+    }
     #[cfg(feature = "stage19-10-test")]
     {
         if !compositor::geometry_self_test(&mut console) {
@@ -4451,7 +4460,8 @@ fn stage16_1_self_test() -> bool {
     feature = "stage19-6-test",
     feature = "stage19-7-test",
     feature = "stage19-8-test",
-    feature = "stage19-9-test"
+    feature = "stage19-9-test",
+    feature = "stage19-11-test"
 ))]
 const HELLO_GUI_IMAGE: &[u8] = include_bytes!(env!("WOVENHAT_HELLO_GUI_IMAGE"));
 
@@ -4466,7 +4476,8 @@ const HELLO_GUI_IMAGE: &[u8] = include_bytes!(env!("WOVENHAT_HELLO_GUI_IMAGE"));
     feature = "stage19-6-test",
     feature = "stage19-7-test",
     feature = "stage19-8-test",
-    feature = "stage19-9-test"
+    feature = "stage19-9-test",
+    feature = "stage19-11-test"
 ))]
 fn display_client_capabilities() -> capability::CapabilitySet {
     capability::CapabilitySet::only(capability::Capability::Console)
@@ -4483,7 +4494,8 @@ fn display_client_capabilities() -> capability::CapabilitySet {
     feature = "stage19-6-test",
     feature = "stage19-7-test",
     feature = "stage19-8-test",
-    feature = "stage19-9-test"
+    feature = "stage19-9-test",
+    feature = "stage19-11-test"
 ))]
 fn run_hello_gui(
     image: &[u8],
@@ -4504,7 +4516,8 @@ fn run_hello_gui(
     feature = "stage19-6-test",
     feature = "stage19-7-test",
     feature = "stage19-8-test",
-    feature = "stage19-9-test"
+    feature = "stage19-9-test",
+    feature = "stage19-11-test"
 ))]
 fn spawn_hello_gui(
     image: &[u8],
@@ -4530,7 +4543,8 @@ fn spawn_hello_gui(
     feature = "stage19-6-test",
     feature = "stage19-7-test",
     feature = "stage19-8-test",
-    feature = "stage19-9-test"
+    feature = "stage19-9-test",
+    feature = "stage19-11-test"
 ))]
 fn wait_hello_gui(pid: task::ProcessId) -> Option<(task::ProcessId, Result<i32, task::WaitError>)> {
     let start = timer::ticks();
@@ -4541,6 +4555,125 @@ fn wait_hello_gui(pid: task::ProcessId) -> Option<(task::ProcessId, Result<i32, 
         task::yield_now();
     }
     Some((pid, task::wait_process(pid.as_u64())))
+}
+
+/// Stage 19.11 acceptance: a userspace window manager stacks windows and
+/// routes input to the focused one.
+///
+/// hello-gui `--wm` takes the display and focus; two `--wm-client` processes
+/// share overlapping windows with it. Whenever it is asleep for input, the
+/// kernel publishes the next of Tab, `x`, Tab, `y` through the keyboard path.
+/// The window manager checks after every redraw that the overlap shows the
+/// top window; each client must receive exactly its own key (A: `x` once
+/// raised, B: `y` once raised back). The kernel then reads the overlap and
+/// each window's private area from the compositor itself.
+#[cfg(feature = "stage19-11-test")]
+fn stage19_11_self_test() -> bool {
+    use woven_input::Key;
+
+    fn step(name: &str, ok: bool) -> bool {
+        serial::write_line(format_args!(
+            "[S19.11] {} {}",
+            name,
+            if ok { "PASS" } else { "FAIL" }
+        ));
+        ok
+    }
+    fn until_blocked(pid: task::ProcessId) -> bool {
+        let start = timer::ticks();
+        while !task::process_task_blocked(pid) {
+            if task::process_exited(pid) || timer::ticks().wrapping_sub(start) > 2000 {
+                return false;
+            }
+            task::yield_now();
+        }
+        true
+    }
+
+    if !step(
+        "install into the filesystem",
+        vfs::create_read_only("/bin/hello-gui", HELLO_GUI_IMAGE).is_ok(),
+    ) {
+        return false;
+    }
+    let mut image = alloc::vec![0u8; HELLO_GUI_IMAGE.len()];
+    if vfs::read_all("/bin/hello-gui", &mut image) != Ok(HELLO_GUI_IMAGE.len()) {
+        return step("filesystem round-trip", false);
+    }
+
+    let capabilities = display_client_capabilities()
+        .with(capability::Capability::InputIo)
+        .with(capability::Capability::Ipc);
+    let Some(wm) = spawn_hello_gui(&image, &["/bin/hello-gui", "--wm"], Some(capabilities)) else {
+        return step("window manager spawned", false);
+    };
+    let start = timer::ticks();
+    while woven_input::focus() != Some(wm.as_u64()) {
+        if task::process_exited(wm) || timer::ticks().wrapping_sub(start) > 1000 {
+            return step("window manager holds display and focus", false);
+        }
+        task::yield_now();
+    }
+    step("window manager holds display and focus", true);
+
+    // A at (200,150) spawned first, so stacked at the bottom; B at (260,190)
+    // on top. Their 120x80 windows overlap in (260..320, 190..230).
+    let wm_arg = alloc::format!("{}", wm.as_u64());
+    let Some(client_a) = spawn_hello_gui(
+        &image,
+        &["/bin/hello-gui", "--wm-client", &wm_arg, "200", "150", "a", "x"],
+        None,
+    ) else {
+        return step("client A spawned", false);
+    };
+    let Some(client_b) = spawn_hello_gui(
+        &image,
+        &["/bin/hello-gui", "--wm-client", &wm_arg, "260", "190", "b", "y"],
+        None,
+    ) else {
+        return step("client B spawned", false);
+    };
+
+    for key in [Key::Tab, Key::Char('x'), Key::Tab, Key::Char('y')] {
+        if !until_blocked(wm) {
+            return step("window manager asleep for input", false);
+        }
+        if !woven_input::publish_key(key) {
+            return step("key published", false);
+        }
+    }
+    step("window manager woken for every key", true);
+
+    let code = |status: Option<Result<i32, task::WaitError>>| match status {
+        Some(Ok(code)) => code as i64,
+        _ => -1,
+    };
+    let a = wait_hello_gui(client_a).map(|(_, status)| status);
+    let b = wait_hello_gui(client_b).map(|(_, status)| status);
+    let w = wait_hello_gui(wm).map(|(_, status)| status);
+    serial::write_line(format_args!(
+        "[S19.11] exit status client A {} client B {} window manager {}",
+        code(a),
+        code(b),
+        code(w)
+    ));
+    if !step("each client received exactly its own key", a == Some(Ok(0)) && b == Some(Ok(0)))
+        || !step("window manager exits zero", w == Some(Ok(0)))
+    {
+        return false;
+    }
+    const A: u32 = crate::display::rgb(200, 60, 60);
+    const B: u32 = crate::display::rgb(60, 60, 200);
+    let stacked = compositor::pixel(280, 200) == Ok(B)
+        && compositor::pixel(205, 155) == Ok(A)
+        && compositor::pixel(370, 260) == Ok(B);
+    if !step("kernel reads B on top after the second raise", stacked) {
+        return false;
+    }
+    step(
+        "lease and focus released on exit",
+        compositor::holder().is_none() && woven_input::focus().is_none(),
+    )
 }
 
 /// Stage 19.9 acceptance: clients notify the compositor of damage, and the

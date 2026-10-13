@@ -1,5 +1,67 @@
 # Stage status
 
+## Stage 19.11 — userspace window manager: stacking, raise, focus, input routing (2026-10-12)
+
+**Roadmap mapping.** This repository's Stage 18–19 numbering has drifted
+from `docs/master-development-roadmap.md`: the work from Stage 18.1 onward is
+the roadmap's **Stage 17, WovenCompositor**. That stage lists windows,
+surfaces, compositing, damage tracking, z-order, transparency, shadows,
+animations, input routing, focus, multiple monitors and DPI scaling. Its
+security rule is that applications must never directly control another
+application's surface. The desktop shell is roadmap Stage 18 and follows it.
+This increment covers z-order, focus and input routing.
+
+**What it shows.** A complete userspace window manager runs on the existing
+primitives, with no new kernel interface:
+- the compositor lease and display (19.4, 19.3);
+- input focus and `WaitAny` (19.5, 19.8);
+- shared client surfaces (19.7);
+- IPC.
+
+hello-gui `--wm` takes the display, and with it focus. It receives each
+client's shared-surface token, position and colour over IPC, and stacks the
+windows, the older client at the bottom. It draws them bottom to top and, after
+every redraw, checks its own screen: a pixel inside both windows must show the
+top window, and an uncovered corner of the bottom window must show the bottom
+window. Tab raises and focuses the other window. A typed character is forwarded
+over IPC to the focused (topmost) window's client only. Clients never touch
+each other's windows; the window manager reads them only through their grants.
+
+Gate `[S19.11] window stacking and focus: PASSED`:
+- `--wm` runs with `Console | DisplayIo | InputIo | Ipc`. Two ordinary
+  `--wm-client` processes share overlapping 120×80 windows: A at (200,150),
+  red; B at (260,190), blue.
+- Whenever the window manager is asleep for input, the kernel publishes the
+  next of Tab, `x`, Tab, `y` through the keyboard path.
+- A must receive exactly `x` (it is on top after the first Tab), and B
+  exactly `y` (on top again after the second Tab). Each client then waits a
+  quiet period for stray keys. A misrouted key that arrives later still fails
+  the gate: the window manager's send to an exited client fails, and the
+  intended client never gets its key.
+- The kernel reads the overlap (blue, B on top) and each window's private
+  area from the compositor, and confirms lease and focus are released.
+
+Negative control: with the window manager forwarding to the bottom window,
+the wrong client receives the key (exit 156) and the gate fails. Evidence is
+in `audit-artifacts/stage19.11-negative-control-*`.
+
+The first run failed the window manager's own check (step 144): its "bottom
+window still visible" probe used a corner the raised window covers in the
+swapped layout. That was a test defect. The probe now picks an uncovered
+corner. Evidence is in `audit-artifacts/stage19.11-probe-point-1cpu-*`.
+
+Open (remaining roadmap Stage 17 items):
+- A window move or lower redraws all windows: the window manager tracks no
+  exposed regions, and the kernel compositor has no z-order of its own,
+  because stacking is policy, held in userspace.
+- No transparency, shadows or animations: blits are opaque copies.
+- Single monitor; no DPI scaling.
+- Keys only: pointer events have no userspace encoding yet, so there is no
+  click-to-focus.
+
+Next prerequisite: pointer input (PS/2 or USB HID mouse) delivered through
+focus, so focus and stacking can follow the pointer.
+
 ## Stage 19.10 — compositor follows the framebuffer; one framebuffer writer (2026-10-12)
 
 **Geometry.** The boot compositor is now sized to the framebuffer instead of

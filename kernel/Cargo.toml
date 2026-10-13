@@ -79,6 +79,8 @@ stage19-8-test = ["qemu-test"]
 stage19-9-test = ["qemu-test"]
 # Compositor follows the framebuffer; every framebuffer writer behind one lock.
 stage19-10-test = ["qemu-test"]
+# A userspace window manager: stacking, raise, focus and input routing.
+stage19-11-test = ["qemu-test"]
 stage1-5-test = ["qemu-test"]
 
 [dependencies]

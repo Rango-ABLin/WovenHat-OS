@@ -28,6 +28,11 @@
 //! copy exactly the region the client declared, and nothing it changed
 //! without declaring.
 //!
+//! With `--wm` it is a small window manager: it stacks two clients' shared
+//! windows, raises and focuses the next one on Tab, and forwards each typed
+//! character to the focused client only. `--wm-client <wm> <x> <y> <a|b>
+//! <key>` is one such client: it places a window and expects exactly `<key>`.
+//!
 //! With `--probe <handle>` it runs as an ordinary process and checks that the
 //! kernel refuses it everything it has no authority for: every compositor
 //! operation, and every operation on the surface `<handle>`, which belongs to
@@ -71,6 +76,8 @@ fn main(args: Args) -> ! {
         Some(b"--multiplex") => multiplex(args.get(2)),
         Some(b"--damage-compositor") => damage_compositor(),
         Some(b"--damage-client") => damage_client(args.get(2), args.get(3)),
+        Some(b"--wm") => window_manager(),
+        Some(b"--wm-client") => wm_client(&args),
         Some(_) => fail(250),
         None => run(Input::None),
     }
@@ -514,6 +521,194 @@ fn damage_client(compositor: Option<&[u8]>, peer: Option<&[u8]>) -> ! {
     if sender != compositor || &reply[..length] != b"done" {
         fail(128);
     }
+    libwoven::exit(0)
+}
+
+const WM_WIDTH: u16 = 120;
+const WM_HEIGHT: u16 = 80;
+
+#[derive(Clone, Copy)]
+struct Window {
+    client: libwoven::process::Id,
+    token: u64,
+    x: i32,
+    y: i32,
+    color: u32,
+}
+
+impl Window {
+    fn contains(&self, x: i32, y: i32) -> bool {
+        x >= self.x
+            && y >= self.y
+            && x < self.x + i32::from(WM_WIDTH)
+            && y < self.y + i32::from(WM_HEIGHT)
+    }
+}
+
+/// Draw the windows bottom to top, present, and check that every window's
+/// visible pixels show its own colour: the stacking order is what the screen
+/// shows. Topmost is last.
+fn composite(stack: &[Window; 2]) {
+    for window in stack {
+        if libwoven::compositor_blit_shared(window.token, window.x, window.y).is_err() {
+            fail(140);
+        }
+    }
+    if libwoven::compositor_present().is_err() {
+        fail(141);
+    }
+    // A pixel inside both windows must belong to the top one; a pixel inside
+    // only the bottom one must still show the bottom one.
+    let (bottom, top) = (stack[0], stack[1]);
+    let (shared_x, shared_y) = (top.x.max(bottom.x) + 2, top.y.max(bottom.y) + 2);
+    if !(top.contains(shared_x, shared_y) && bottom.contains(shared_x, shared_y)) {
+        fail(142);
+    }
+    if libwoven::screen_pixel(shared_x, shared_y) != Ok(top.color) {
+        fail(143);
+    }
+    // Any corner of the bottom window that the top one does not cover.
+    let (right, lower) = (
+        bottom.x + i32::from(WM_WIDTH) - 2,
+        bottom.y + i32::from(WM_HEIGHT) - 2,
+    );
+    let corners = [
+        (bottom.x + 1, bottom.y + 1),
+        (right, bottom.y + 1),
+        (bottom.x + 1, lower),
+        (right, lower),
+    ];
+    let Some(&(only_x, only_y)) = corners.iter().find(|&&(x, y)| !top.contains(x, y)) else {
+        fail(145)
+    };
+    if libwoven::screen_pixel(only_x, only_y) != Ok(bottom.color) {
+        fail(144);
+    }
+}
+
+/// A window manager over two clients.
+fn window_manager() -> ! {
+    use libwoven::{wait, Key};
+    if libwoven::compositor_claim().is_err() {
+        fail(130);
+    }
+    // Taking the display also takes input focus.
+    if libwoven::compositor_present().is_err() {
+        fail(131);
+    }
+    let _ = libwoven::print("hello-gui wm: display and focus held\n");
+
+    let mut windows = [None::<Window>; 2];
+    for slot in windows.iter_mut() {
+        let mut message = [0u8; 24];
+        let (length, client) = receive_bounded(&mut message, 132);
+        if length != 24 {
+            fail(133);
+        }
+        let field = |index: usize| {
+            u64::from_le_bytes(message[index * 8..index * 8 + 8].try_into().unwrap_or([0; 8]))
+        };
+        let origin = field(1);
+        *slot = Some(Window {
+            client,
+            token: field(0),
+            x: origin as u32 as i32,
+            y: (origin >> 32) as u32 as i32,
+            color: field(2) as u32,
+        });
+    }
+    let (Some(first), Some(second)) = (windows[0], windows[1]) else {
+        fail(134)
+    };
+    // Deterministic initial stack: the older client (lower pid) at the bottom.
+    let mut stack = if first.client.0 < second.client.0 {
+        [first, second]
+    } else {
+        [second, first]
+    };
+    composite(&stack);
+    let _ = libwoven::print("hello-gui wm: windows stacked\n");
+
+    // Tab raises and focuses the bottom window; characters go to the focused
+    // (topmost) window's client and to no one else.
+    let mut forwarded = 0;
+    while forwarded < 2 {
+        match libwoven::wait_any(wait::INPUT, Some(libwoven::ticks() + IPC_DEADLINE_TICKS)) {
+            Ok(ready) if ready == wait::INPUT => {}
+            _ => fail(135),
+        }
+        match libwoven::input_poll() {
+            Ok(Some(Key::Tab)) => {
+                stack.swap(0, 1);
+                composite(&stack);
+                let _ = libwoven::print("hello-gui wm: raised and focused the other window\n");
+            }
+            Ok(Some(Key::Char(character))) => {
+                let focused = stack[1].client;
+                if libwoven::message_send(focused, &[character as u8]).is_err() {
+                    fail(136);
+                }
+                forwarded += 1;
+            }
+            _ => fail(137),
+        }
+    }
+    let _ = libwoven::print("hello-gui wm: keys routed to the focused windows\n");
+    libwoven::exit(0)
+}
+
+/// One window under the window manager; expects exactly one key.
+fn wm_client(args: &Args) -> ! {
+    let number = |index| args.get(index).and_then(parse_u64);
+    let (Some(wm), Some(x), Some(y), Some(tag), Some(expected)) = (
+        number(2).map(libwoven::process::Id),
+        number(3),
+        number(4),
+        args.get(5),
+        args.get(6),
+    ) else {
+        fail(150)
+    };
+    let color = match tag {
+        b"a" => rgb(200, 60, 60),
+        b"b" => rgb(60, 60, 200),
+        _ => fail(151),
+    };
+    let window = match GraphicsSurface::create(u32::from(WM_WIDTH), u32::from(WM_HEIGHT)) {
+        Ok(surface) => surface,
+        Err(_) => fail(152),
+    };
+    if window.fill_rect(0, 0, WM_WIDTH, WM_HEIGHT, color).is_err()
+        || window.share_with(wm).is_err()
+    {
+        fail(153);
+    }
+    let mut message = [0u8; 24];
+    message[..8].copy_from_slice(&window.handle().to_le_bytes());
+    message[8..16].copy_from_slice(&(x | (y << 32)).to_le_bytes());
+    message[16..].copy_from_slice(&u64::from(color).to_le_bytes());
+    if libwoven::message_send(wm, &message).is_err() {
+        fail(154);
+    }
+
+    // Exactly one message from the window manager, carrying exactly our key.
+    let mut key = [0u8; 4];
+    let (length, sender) = receive_bounded(&mut key, 155);
+    if sender != wm || length != 1 || key[0] != expected.first().copied().unwrap_or(0) {
+        fail(156);
+    }
+    // And nothing more for a short quiet period. A misrouted key that comes
+    // later still fails the gate: the window manager's send to this exited
+    // client fails, and the client the key was meant for never receives it.
+    let start = libwoven::ticks();
+    while libwoven::ticks().wrapping_sub(start) < 50 {
+        if libwoven::message_receive(&mut key).is_ok() {
+            fail(157);
+        }
+        libwoven::yield_now();
+    }
+    let _ = libwoven::print("hello-gui wm client: received exactly its key\n");
+    drop(window);
     libwoven::exit(0)
 }
 
