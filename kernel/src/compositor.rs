@@ -435,18 +435,20 @@ pub fn blit_region_for(
     shared: bool,
 ) -> Result<Rect, Error> {
     require_holder(pid)?;
-    let snapshot = if shared {
-        user_graphics::snapshot_shared(handle, pid)
-    } else {
-        user_graphics::snapshot(handle)
-    }
-    .map_err(|_| Error::InvalidClient)?;
+    // Only the region is copied out of the registry, however large the
+    // surface; its clipped origin shifts the destination to match.
+    let (clipped, part) = user_graphics::snapshot_region(handle, region, shared.then_some(pid))
+        .map_err(|_| Error::InvalidClient)?;
     let mut guard = STATE.lock();
     let state = guard.as_mut().ok_or(Error::NotReady)?;
     if state.holder != Some(pid) {
         return Err(Error::NotHolder);
     }
-    let touched = state.surface.blit_region(&snapshot, region, x, y);
+    let touched = state.surface.blit(
+        &part,
+        x.saturating_add(clipped.x - region.x),
+        y.saturating_add(clipped.y - region.y),
+    );
     state.damage.add(touched);
     Ok(touched)
 }
