@@ -1548,7 +1548,10 @@ pub fn mount_ata_into_vfs() -> MountOutcome {
             }
             match crate::vfs::create_read_only(path, &buffer[..length]) {
                 Ok(()) => imported += 1,
-                Err(crate::vfs::Error::AlreadyExists) => imported += 1,
+                // A pre-existing VFS node may contain stale bytes from an
+                // earlier mount. Do not count it as freshly imported: the
+                // namespace needs explicit invalidation before remount.
+                Err(crate::vfs::Error::AlreadyExists) => {},
                 Err(_) => {}
             }
         }
