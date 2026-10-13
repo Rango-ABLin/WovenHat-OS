@@ -1268,6 +1268,35 @@ pub fn stage15_1_self_test() -> bool {
         }
     }
 
+    // Verify overwrite persistence through a fresh mount, with checksum checks.
+    let Ok(mut before_overwrite) = Volume::mount(base.fork(None)) else {
+        return false;
+    };
+    let Ok(file_id) = before_overwrite.create(1, "overwrite.bin", 0o600, 50) else {
+        return false;
+    };
+    if before_overwrite.write_file(file_id, b"old version", 51).is_err() {
+        return false;
+    }
+    let disk_before = before_overwrite.into_device();
+    let Ok(mut overwriter) = Volume::mount(disk_before.fork(None)) else {
+        return false;
+    };
+    if overwriter.write_file(file_id, b"new version", 52).is_err() {
+        return false;
+    }
+    let disk_after = overwriter.into_device();
+    let Ok(mut recovered_overwrite) = Volume::mount(disk_after.fork(None)) else {
+        return false;
+    };
+    let mut overwritten = [0u8; 32];
+    if recovered_overwrite.read_file(file_id, &mut overwritten) != Ok(11)
+        || &overwritten[..11] != b"new version"
+        || recovered_overwrite.check().is_err()
+    {
+        return false;
+    }
+
     // A destroyed checkpoint slot must fall back to the other one.
     let Ok(mut volume) = Volume::mount(base.fork(None)) else {
         return false;
