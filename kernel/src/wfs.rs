@@ -1455,12 +1455,7 @@ pub fn unlink_ata_file(
 #[cfg(feature = "stage15-2-test")]
 fn checked_vfs_name(path: &str) -> Result<&str, Error> {
     let name = path.strip_prefix("/wfs/").ok_or(Error::InvalidName)?;
-    if name.is_empty() || name.len() > MAX_NAME || name == "." || name == ".."
-        || name.contains('/') || name.contains('\\') || name.as_bytes().contains(&0)
-    {
-        return Err(Error::InvalidName);
-    }
-    Ok(name)
+    checked_native_name(name)
 }
 
 /// Explicit VFS-path adapter: commits to the native journal before reporting
