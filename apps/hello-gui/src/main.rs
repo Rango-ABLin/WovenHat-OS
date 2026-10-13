@@ -34,6 +34,11 @@
 //! character to the focused client only. `--wm-client <wm> <x> <y> <a|b>
 //! <key>` is one such client: it places a window and expects exactly `<key>`.
 //!
+//! With `--alpha-compositor` it draws an opaque backdrop, a translucent
+//! shadow from its own surface, and a `--client`'s shared window
+//! translucently over both, then checks every region against the blend
+//! formula.
+//!
 //! With `--probe <handle>` it runs as an ordinary process and checks that the
 //! kernel refuses it everything it has no authority for: every compositor
 //! operation, and every operation on the surface `<handle>`, which belongs to
@@ -78,6 +83,7 @@ fn main(args: Args) -> ! {
         Some(b"--damage-compositor") => damage_compositor(),
         Some(b"--damage-client") => damage_client(args.get(2), args.get(3)),
         Some(b"--wm") => window_manager(),
+        Some(b"--alpha-compositor") => alpha_compositor(),
         Some(b"--wm-client") => wm_client(&args),
         Some(_) => fail(250),
         None => run(Input::None),
@@ -730,6 +736,96 @@ fn wm_client(args: &Args) -> ! {
     libwoven::exit(0)
 }
 
+/// The kernel's blend formula, restated independently: per channel,
+/// `(over * a + under * (255 - a) + 127) / 255`.
+const fn blend(over: u32, under: u32, opacity: u8) -> u32 {
+    let a = opacity as u32;
+    let mut result = 0;
+    let mut shift = 0;
+    while shift <= 16 {
+        let top = (over >> shift) & 0xff;
+        let bottom = (under >> shift) & 0xff;
+        result |= ((top * a + bottom * (255 - a) + 127) / 255) << shift;
+        shift += 8;
+    }
+    result
+}
+
+const BACKDROP: u32 = rgb(200, 200, 200);
+const SHADOW_OPACITY: u8 = 96;
+const WINDOW_OPACITY: u8 = 160;
+
+/// Translucent window with a shadow, over an opaque backdrop.
+fn alpha_compositor() -> ! {
+    if libwoven::compositor_claim().is_err() {
+        fail(160);
+    }
+    let backdrop = match GraphicsSurface::create(200, 150) {
+        Ok(surface) => surface,
+        Err(_) => fail(161),
+    };
+    let shadow = match GraphicsSurface::create(40, 30) {
+        Ok(surface) => surface,
+        Err(_) => fail(162),
+    };
+    if backdrop.fill_rect(0, 0, 200, 150, BACKDROP).is_err()
+        || shadow.fill_rect(0, 0, 40, 30, rgb(0, 0, 0)).is_err()
+        || backdrop.present(100, 100).is_err()
+    {
+        fail(163);
+    }
+    let _ = libwoven::print("hello-gui alpha: backdrop drawn\n");
+
+    let mut message = [0u8; 16];
+    let (length, client) = receive_bounded(&mut message, 164);
+    if length != 16 {
+        fail(165);
+    }
+    let window = u64::from_le_bytes(message[..8].try_into().unwrap_or([0; 8]));
+    let private = u64::from_le_bytes(message[8..].try_into().unwrap_or([0; 8]));
+
+    // Shadow offset down-right of the window, then the window over it.
+    if shadow.present_blended(136, 136, SHADOW_OPACITY).is_err()
+        || libwoven::compositor_blend_shared(window, 130, 130, WINDOW_OPACITY).is_err()
+    {
+        fail(166);
+    }
+    let shaded = blend(rgb(0, 0, 0), BACKDROP, SHADOW_OPACITY);
+    let expected = [
+        ((105, 105), BACKDROP),                                   // backdrop only
+        ((172, 163), shaded),                                     // shadow only
+        ((131, 131), blend(CLIENT_COLOR, BACKDROP, WINDOW_OPACITY)), // window on backdrop
+        ((150, 150), blend(CLIENT_COLOR, shaded, WINDOW_OPACITY)),   // window on shadow
+    ];
+    for ((x, y), color) in expected {
+        if libwoven::screen_pixel(x, y) != Ok(color) {
+            fail(167);
+        }
+    }
+    let _ = libwoven::print("hello-gui alpha: shadow and translucent window blended\n");
+
+    // Opacity 0 changes nothing; the private surface is refused even
+    // translucently; an opacity above 255 is refused rather than truncated.
+    if libwoven::compositor_blend_shared(window, 400, 300, 0).is_err()
+        || libwoven::screen_pixel(400, 300) != Ok(0)
+        || libwoven::compositor_blend_shared(private, 0, 0, 128).is_ok()
+    {
+        fail(168);
+    }
+    // SAFETY: integer-only call; the kernel validates the opacity.
+    if unsafe { syscall::graphics_compositor_blend_shared(window, 0, 0, 256) }
+        != libwoven::syscall::ERROR
+    {
+        fail(169);
+    }
+    if libwoven::compositor_present().is_err() || libwoven::message_send(client, b"done").is_err() {
+        fail(170);
+    }
+    drop(backdrop);
+    drop(shadow);
+    libwoven::exit(0)
+}
+
 fn parse_u64(text: &[u8]) -> Option<u64> {
     if text.is_empty() {
         return None;
@@ -801,6 +897,12 @@ fn probe(victim: Option<&[u8]>) -> ! {
     }
     if libwoven::compositor_blit_damage(victim, 0, 0).is_ok() {
         fail(221);
+    }
+    // Blending carries the same authority as blitting.
+    if own.present_blended(0, 0, 128).is_ok()
+        || libwoven::compositor_blend_shared(victim, 0, 0, 128).is_ok()
+    {
+        fail(222);
     }
     let _ = libwoven::print("hello-gui probe: compositor refused\n");
 

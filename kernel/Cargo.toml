@@ -83,6 +83,8 @@ stage19-10-test = ["qemu-test"]
 stage19-11-test = ["qemu-test"]
 # PS/2 pointer input and IRQ-time keystroke delivery.
 stage19-12-test = ["qemu-test"]
+# Translucent windows and shadows.
+stage19-13-test = ["qemu-test"]
 stage1-5-test = ["qemu-test"]
 
 [dependencies]

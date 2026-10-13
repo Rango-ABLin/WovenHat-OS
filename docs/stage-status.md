@@ -1,5 +1,57 @@
 # Stage status
 
+## Stage 19.13 — translucent windows and shadows (2026-10-13)
+
+Roadmap Stage 17's transparency and shadow items.
+
+Pixels carry no alpha channel (`0x00RRGGBB`), and per-pixel alpha would have
+made every existing surface, whose high byte is zero, transparent. So
+translucency is a property of the blit. `display::Surface::blend` draws a
+source with uniform opacity, using `display::blend_pixel`: per channel,
+`(over * a + under * (255 - a) + 127) / 255`. That is exact at both ends:
+opacity 0 changes nothing and reports no damage, and 255 is a plain blit.
+Clipping matches `blit`. Three new host tests in
+`tests/display_compositing.rs` cover:
+- endpoints, rounding at the midpoint, and colour-over-itself identity;
+- opacity 255 matching `blit` pixel for pixel, and opacity 0 touching
+  nothing;
+- clipping off the corner, so only the overlap is mixed.
+
+Two syscalls carry the opacity in their third argument. The existing blits
+(102, 110) ignore that argument, so it could not be repurposed without
+breaking their ABI:
+- 114, `GraphicsCompositorBlend`: one of the caller's own surfaces. This is
+  how a window manager draws shadows and translucent chrome.
+- 115, `GraphicsCompositorBlendShared`: a shared client window.
+
+The authority is the same as the corresponding blits: `DisplayIo` plus the
+lease, and the caller's own token for 114 or a grant naming the caller for
+115. An opacity above 255 is refused rather than truncated. libwoven adds
+`GraphicsSurface::present_blended` and `compositor_blend_shared`.
+
+Gate `[S19.13] translucency and shadows: PASSED`:
+- The probe is refused both blends.
+- hello-gui `--alpha-compositor` draws an opaque backdrop, a black shadow
+  from its own surface at 96/255 offset under the window, and the Stage 19.7
+  `--client`'s shared window at 160/255 over both.
+- It checks four regions against the formula, restated independently in the
+  app: backdrop only, shadow only, window over the backdrop, and window over
+  the shadow.
+- It checks that opacity 0 leaves the screen unchanged, that the private
+  surface is refused, and that opacity 256 is refused.
+- The kernel recomputes the four regions with its own `blend_pixel` after
+  both processes exit.
+
+Negative control: with `blend` copying opaquely, the compositor fails its
+region check (exit 167) and the gate fails. Evidence is in
+`audit-artifacts/stage19.13-negative-control-*`.
+
+Open:
+- No per-pixel alpha, so no anti-aliased edges or soft shadows; a soft
+  shadow needs several stacked blends.
+- No animation: frame timing belongs to the window manager, and there is no
+  vsync source.
+
 ## Stage 19.12 — PS/2 pointer input; keystrokes delivered at IRQ time (2026-10-13)
 
 **Defect fixed (Stages 19.5/19.6).** The keyboard IRQ handler only queued raw

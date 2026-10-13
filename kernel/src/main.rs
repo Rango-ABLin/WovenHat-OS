@@ -3377,6 +3377,15 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         serial::write_line(format_args!("[S1-5] storage journal: PASSED"));
         qemu_test_exit_success();
     }
+    #[cfg(feature = "stage19-13-test")]
+    {
+        if !stage19_13_self_test() {
+            serial::write_line(format_args!("[S19.13] translucency and shadows: FAILED"));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!("[S19.13] translucency and shadows: PASSED"));
+        qemu_test_exit_success();
+    }
     #[cfg(feature = "stage19-12-test")]
     {
         if !stage19_12_self_test() {
@@ -4486,7 +4495,8 @@ fn stage16_1_self_test() -> bool {
     feature = "stage19-8-test",
     feature = "stage19-9-test",
     feature = "stage19-11-test",
-    feature = "stage19-12-test"
+    feature = "stage19-12-test",
+    feature = "stage19-13-test"
 ))]
 const HELLO_GUI_IMAGE: &[u8] = include_bytes!(env!("WOVENHAT_HELLO_GUI_IMAGE"));
 
@@ -4503,7 +4513,8 @@ const HELLO_GUI_IMAGE: &[u8] = include_bytes!(env!("WOVENHAT_HELLO_GUI_IMAGE"));
     feature = "stage19-8-test",
     feature = "stage19-9-test",
     feature = "stage19-11-test",
-    feature = "stage19-12-test"
+    feature = "stage19-12-test",
+    feature = "stage19-13-test"
 ))]
 fn display_client_capabilities() -> capability::CapabilitySet {
     capability::CapabilitySet::only(capability::Capability::Console)
@@ -4522,7 +4533,8 @@ fn display_client_capabilities() -> capability::CapabilitySet {
     feature = "stage19-8-test",
     feature = "stage19-9-test",
     feature = "stage19-11-test",
-    feature = "stage19-12-test"
+    feature = "stage19-12-test",
+    feature = "stage19-13-test"
 ))]
 fn run_hello_gui(
     image: &[u8],
@@ -4545,7 +4557,8 @@ fn run_hello_gui(
     feature = "stage19-8-test",
     feature = "stage19-9-test",
     feature = "stage19-11-test",
-    feature = "stage19-12-test"
+    feature = "stage19-12-test",
+    feature = "stage19-13-test"
 ))]
 fn spawn_hello_gui(
     image: &[u8],
@@ -4573,7 +4586,8 @@ fn spawn_hello_gui(
     feature = "stage19-8-test",
     feature = "stage19-9-test",
     feature = "stage19-11-test",
-    feature = "stage19-12-test"
+    feature = "stage19-12-test",
+    feature = "stage19-13-test"
 ))]
 fn wait_hello_gui(pid: task::ProcessId) -> Option<(task::ProcessId, Result<i32, task::WaitError>)> {
     let start = timer::ticks();
@@ -4584,6 +4598,104 @@ fn wait_hello_gui(pid: task::ProcessId) -> Option<(task::ProcessId, Result<i32, 
         task::yield_now();
     }
     Some((pid, task::wait_process(pid.as_u64())))
+}
+
+/// Stage 19.13 acceptance: translucent windows and shadows.
+///
+/// hello-gui `--alpha-compositor` draws an opaque backdrop, a shadow from its
+/// own surface at 96/255, and a `--client`'s shared window at 160/255 over
+/// both, checking each region against the blend formula. The kernel re-reads
+/// the same regions after both exit, computing expectations with its own
+/// `display::blend_pixel`.
+#[cfg(feature = "stage19-13-test")]
+fn stage19_13_self_test() -> bool {
+    use crate::display::{blend_pixel, rgb};
+
+    fn step(name: &str, ok: bool) -> bool {
+        serial::write_line(format_args!(
+            "[S19.13] {} {}",
+            name,
+            if ok { "PASS" } else { "FAIL" }
+        ));
+        ok
+    }
+
+    if !step(
+        "install into the filesystem",
+        vfs::create_read_only("/bin/hello-gui", HELLO_GUI_IMAGE).is_ok(),
+    ) {
+        return false;
+    }
+    let mut image = alloc::vec![0u8; HELLO_GUI_IMAGE.len()];
+    if vfs::read_all("/bin/hello-gui", &mut image) != Ok(HELLO_GUI_IMAGE.len()) {
+        return step("filesystem round-trip", false);
+    }
+
+    const VICTIM_OWNER: u64 = 4247;
+    let Ok(victim) = user_graphics::create(VICTIM_OWNER, 8, 8) else {
+        return step("victim surface created", false);
+    };
+    let victim_arg = alloc::format!("{}", victim.to_u64());
+    let probe = run_hello_gui(&image, &["/bin/hello-gui", "--probe", &victim_arg], false);
+    user_graphics::release_owner(VICTIM_OWNER);
+    if !step(
+        "unprivileged probe refused blending",
+        matches!(probe, Some((_, Ok(0)))),
+    ) {
+        return false;
+    }
+
+    let capabilities = display_client_capabilities().with(capability::Capability::Ipc);
+    let Some(compositor_pid) = spawn_hello_gui(
+        &image,
+        &["/bin/hello-gui", "--alpha-compositor"],
+        Some(capabilities),
+    ) else {
+        return step("compositor process spawned", false);
+    };
+    let start = timer::ticks();
+    while compositor::holder() != Some(compositor_pid.as_u64()) {
+        if task::process_exited(compositor_pid) || timer::ticks().wrapping_sub(start) > 1000 {
+            return step("compositor process holds the lease", false);
+        }
+        task::yield_now();
+    }
+    step("compositor process holds the lease", true);
+    let compositor_arg = alloc::format!("{}", compositor_pid.as_u64());
+    let Some(client_pid) =
+        spawn_hello_gui(&image, &["/bin/hello-gui", "--client", &compositor_arg], None)
+    else {
+        return step("client process spawned", false);
+    };
+
+    let code = |status: Option<Result<i32, task::WaitError>>| match status {
+        Some(Ok(code)) => code as i64,
+        _ => -1,
+    };
+    let client = wait_hello_gui(client_pid).map(|(_, status)| status);
+    let composited = wait_hello_gui(compositor_pid).map(|(_, status)| status);
+    serial::write_line(format_args!(
+        "[S19.13] client exit status {} compositor exit status {}",
+        code(client),
+        code(composited)
+    ));
+    if !step("client exits zero", client == Some(Ok(0)))
+        || !step("compositor verified every blended region", composited == Some(Ok(0)))
+    {
+        return false;
+    }
+
+    const BACKDROP: u32 = rgb(200, 200, 200);
+    const CLIENT: u32 = rgb(180, 40, 90);
+    let shaded = blend_pixel(rgb(0, 0, 0), BACKDROP, 96);
+    let regions = compositor::pixel(105, 105) == Ok(BACKDROP)
+        && compositor::pixel(172, 163) == Ok(shaded)
+        && compositor::pixel(131, 131) == Ok(blend_pixel(CLIENT, BACKDROP, 160))
+        && compositor::pixel(150, 150) == Ok(blend_pixel(CLIENT, shaded, 160));
+    if !step("kernel recomputes every region independently", regions) {
+        return false;
+    }
+    step("lease released on exit", compositor::holder().is_none())
 }
 
 /// Stage 19.12 acceptance: pointer input, and keystrokes delivered at IRQ time.

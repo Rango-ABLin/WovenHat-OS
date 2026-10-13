@@ -207,6 +207,8 @@ pub mod syscall {
     pub const WAIT_ANY: u64 = 111;
     pub const GRAPHICS_SURFACE_DAMAGE: u64 = 112;
     pub const GRAPHICS_COMPOSITOR_BLIT_DAMAGE: u64 = 113;
+    pub const GRAPHICS_COMPOSITOR_BLEND: u64 = 114;
+    pub const GRAPHICS_COMPOSITOR_BLEND_SHARED: u64 = 115;
     pub const MESSAGE_SEND: u64 = 11;
     pub const MESSAGE_RECEIVE: u64 = 12;
 
@@ -476,6 +478,25 @@ pub mod syscall {
 
     /// # Safety
     /// Must be called from WovenHat userspace.
+    pub unsafe fn graphics_compositor_blend(handle: u64, x: i32, y: i32, opacity: u64) -> u64 {
+        let packed = (x as u32 as u64) | ((y as u32 as u64) << 32);
+        unsafe { invoke(GRAPHICS_COMPOSITOR_BLEND, handle, packed, opacity) }
+    }
+
+    /// # Safety
+    /// Must be called from WovenHat userspace.
+    pub unsafe fn graphics_compositor_blend_shared(
+        handle: u64,
+        x: i32,
+        y: i32,
+        opacity: u64,
+    ) -> u64 {
+        let packed = (x as u32 as u64) | ((y as u32 as u64) << 32);
+        unsafe { invoke(GRAPHICS_COMPOSITOR_BLEND_SHARED, handle, packed, opacity) }
+    }
+
+    /// # Safety
+    /// Must be called from WovenHat userspace.
     pub unsafe fn graphics_compositor_blit_damage(handle: u64, x: i32, y: i32) -> u64 {
         let packed = (x as u32 as u64) | ((y as u32 as u64) << 32);
         unsafe { invoke(GRAPHICS_COMPOSITOR_BLIT_DAMAGE, handle, packed, 0) }
@@ -601,6 +622,16 @@ impl GraphicsSurface {
         check(result).map(|_| ())
     }
 
+    /// Blend this surface onto the compositor at `(x, y)` with uniform
+    /// `opacity` (0 invisible, 255 opaque). Lease holder only; this is how a
+    /// window manager draws shadows and translucent chrome.
+    pub fn present_blended(&self, x: i32, y: i32, opacity: u8) -> Result<(), Error> {
+        // SAFETY: integer-only call carrying the surface's own handle.
+        let result =
+            unsafe { syscall::graphics_compositor_blend(self.handle, x, y, u64::from(opacity)) };
+        check(result).map(|_| ())
+    }
+
     /// Blit this surface onto the compositor at `(x, y)`.
     ///
     /// Policy is up to the compositor: today it draws exactly where asked,
@@ -666,6 +697,15 @@ pub fn compositor_blit_damage(handle: u64, x: i32, y: i32) -> Result<Option<Regi
         width: (value >> 32) as u16,
         height: (value >> 48) as u16,
     }))
+}
+
+/// Blend another process's shared surface onto the compositor with uniform
+/// `opacity`. Same rules as [`compositor_blit_shared`].
+pub fn compositor_blend_shared(handle: u64, x: i32, y: i32, opacity: u8) -> Result<(), Error> {
+    // SAFETY: integer-only call.
+    let result =
+        unsafe { syscall::graphics_compositor_blend_shared(handle, x, y, u64::from(opacity)) };
+    check(result).map(|_| ())
 }
 
 /// Send `bytes` to process `receiver`. Requires the `Ipc` capability.

@@ -310,6 +310,49 @@ pub fn blit_shared_for(
     Ok(touched)
 }
 
+/// [`blit_for`] with uniform `opacity`, for translucent windows and shadows
+/// drawn from the holder's own surfaces.
+pub fn blend_for(
+    pid: u64,
+    handle: user_graphics::Handle,
+    x: i32,
+    y: i32,
+    opacity: u8,
+) -> Result<Rect, Error> {
+    require_holder(pid)?;
+    let snapshot = user_graphics::snapshot(handle).map_err(|_| Error::InvalidClient)?;
+    let mut guard = STATE.lock();
+    let state = guard.as_mut().ok_or(Error::NotReady)?;
+    if state.holder != Some(pid) {
+        return Err(Error::NotHolder);
+    }
+    let touched = state.surface.blend(&snapshot, x, y, opacity);
+    state.damage.add(touched);
+    Ok(touched)
+}
+
+/// [`blit_shared_for`] with uniform `opacity`: a client's window drawn
+/// translucently by the compositor process.
+pub fn blend_shared_for(
+    pid: u64,
+    handle: user_graphics::Handle,
+    x: i32,
+    y: i32,
+    opacity: u8,
+) -> Result<Rect, Error> {
+    require_holder(pid)?;
+    let snapshot =
+        user_graphics::snapshot_shared(handle, pid).map_err(|_| Error::InvalidClient)?;
+    let mut guard = STATE.lock();
+    let state = guard.as_mut().ok_or(Error::NotReady)?;
+    if state.holder != Some(pid) {
+        return Err(Error::NotHolder);
+    }
+    let touched = state.surface.blend(&snapshot, x, y, opacity);
+    state.damage.add(touched);
+    Ok(touched)
+}
+
 /// Composite only what changed: take the pending damage of a surface shared
 /// with the lease holder `pid` and blit just that region, at its position
 /// within a window placed at `(x, y)`. Returns the source region, or `None`

@@ -675,6 +675,7 @@ jobs:
           cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage19-9-test -- -D warnings
           cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage19-11-test -- -D warnings
           cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage19-12-test -- -D warnings
+          cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage19-13-test -- -D warnings
           for cpu in 1 2 4; do
             python3 scripts/test-hello-gui-qemu.py --cpus "$cpu" --timeout 300 --qemu "$qemu" --firmware "$ovmf_code"
             python3 scripts/test-hello-gui-compositor-qemu.py --cpus "$cpu" --timeout 300 --qemu "$qemu" --firmware "$ovmf_code"
@@ -686,6 +687,7 @@ jobs:
             python3 scripts/test-hello-gui-compositor-qemu.py --stage 19.9 --cpus "$cpu" --timeout 300 --qemu "$qemu" --firmware "$ovmf_code"
             python3 scripts/test-hello-gui-compositor-qemu.py --stage 19.11 --cpus "$cpu" --timeout 300 --qemu "$qemu" --firmware "$ovmf_code"
             python3 scripts/test-hello-gui-compositor-qemu.py --stage 19.12 --cpus "$cpu" --timeout 300 --qemu "$qemu" --firmware "$ovmf_code"
+            python3 scripts/test-hello-gui-compositor-qemu.py --stage 19.13 --cpus "$cpu" --timeout 300 --qemu "$qemu" --firmware "$ovmf_code"
           done
       - name: Stage 15 WovenFS acceptance
         shell: bash

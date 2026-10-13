@@ -15,7 +15,7 @@ mod font;
 mod display;
 
 use bootloader_api::info::{FrameBufferInfo, PixelFormat};
-use display::{present, rgb, Damage, Rect, Surface, MAX_DAMAGE_RECTS};
+use display::{blend_pixel, present, rgb, Damage, Rect, Surface, MAX_DAMAGE_RECTS};
 
 const WHITE: u32 = rgb(255, 255, 255);
 const RED: u32 = rgb(255, 0, 0);
@@ -304,4 +304,53 @@ fn presentation_respects_a_stride_wider_than_the_visible_width() {
         framebuffer[2 * descriptor.bytes_per_pixel], 0,
         "padding past the visible width must stay untouched"
     );
+}
+
+#[test]
+fn blend_pixel_is_exact_at_both_ends_and_rounds_between() {
+    let (over, under) = (rgb(200, 100, 0), rgb(0, 50, 255));
+    assert_eq!(blend_pixel(over, under, 0), under);
+    assert_eq!(blend_pixel(over, under, 255), over);
+    // Midpoint: (200*128 + 0*127 + 127) / 255 = 100.89 -> 100 per the formula.
+    let mid = blend_pixel(over, under, 128);
+    assert_eq!(mid >> 16 & 0xff, (200 * 128 + 127) / 255);
+    assert_eq!(mid >> 8 & 0xff, (100 * 128 + 50 * 127 + 127) / 255);
+    assert_eq!(mid & 0xff, (255 * 127 + 127) / 255);
+    // Blending a colour over itself returns it at any opacity.
+    for opacity in [1u8, 64, 127, 200, 254] {
+        assert_eq!(blend_pixel(over, over, opacity), over);
+    }
+}
+
+#[test]
+fn blend_full_opacity_equals_blit_and_zero_changes_nothing() {
+    let mut source = Surface::new(4, 3);
+    source.fill_rect(Rect::new(0, 0, 4, 3), rgb(9, 99, 199));
+    let mut blitted = Surface::new(10, 10);
+    let mut blended = Surface::new(10, 10);
+    blitted.fill_rect(blitted.bounds(), WHITE);
+    blended.fill_rect(blended.bounds(), WHITE);
+    assert_eq!(blitted.blit(&source, 2, 2), blended.blend(&source, 2, 2, 255));
+    for y in 0..10 {
+        for x in 0..10 {
+            assert_eq!(blitted.pixel(x, y), blended.pixel(x, y));
+        }
+    }
+    assert_eq!(blended.blend(&source, 0, 0, 0), Rect::EMPTY);
+    assert_eq!(blended.pixel(0, 0), Some(WHITE));
+}
+
+#[test]
+fn blend_clips_like_blit_and_mixes_only_the_overlap() {
+    let mut source = Surface::new(4, 4);
+    source.fill_rect(source.bounds(), rgb(0, 0, 0));
+    let mut target = Surface::new(6, 6);
+    target.fill_rect(target.bounds(), rgb(200, 200, 200));
+    // Hanging off the top-left corner: only the 2x2 overlap is touched.
+    assert_eq!(target.blend(&source, -2, -2, 128), Rect::new(0, 0, 2, 2));
+    let mixed = blend_pixel(rgb(0, 0, 0), rgb(200, 200, 200), 128);
+    assert_eq!(target.pixel(1, 1), Some(mixed));
+    assert_eq!(target.pixel(2, 2), Some(rgb(200, 200, 200)));
+    // Entirely outside: nothing touched.
+    assert_eq!(target.blend(&source, 10, 10, 128), Rect::EMPTY);
 }

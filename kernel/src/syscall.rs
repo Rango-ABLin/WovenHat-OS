@@ -304,6 +304,10 @@ pub enum Number {
     /// rect blitted (x | y<<16 | w<<32 | h<<48), 0 when nothing was pending,
     /// or ERROR
     GraphicsCompositorBlitDamage = 113,
+    /// own handle, packed (x | y<<32), opacity 0..=255 -> 0 or ERROR
+    GraphicsCompositorBlend = 114,
+    /// owner's handle, packed (x | y<<32), opacity 0..=255 -> 0 or ERROR
+    GraphicsCompositorBlendShared = 115,
 }
 
 pub fn entry_address() -> u64 {
@@ -2257,6 +2261,12 @@ pub extern "C" fn wovenhat_syscall_dispatch(
         value if value == Number::GraphicsCompositorBlitDamage as u64 => {
             sys_compositor_blit_damage(arg0, arg1)
         }
+        value if value == Number::GraphicsCompositorBlend as u64 => {
+            sys_compositor_blend(arg0, arg1, arg2, false)
+        }
+        value if value == Number::GraphicsCompositorBlendShared as u64 => {
+            sys_compositor_blend(arg0, arg1, arg2, true)
+        }
         _ => u64::MAX,
     };
 
@@ -2387,6 +2397,37 @@ fn sys_compositor_blit_shared(handle: u64, packed: u64) -> u64 {
     let pid = crate::task::current_process_id();
     let handle = crate::user_graphics::Handle::from_u64(handle);
     crate::compositor::blit_shared_for(pid, handle, x, y).map_or(SYSCALL_ERROR, |_| 0)
+}
+
+/// Blend a surface onto the compositor with uniform opacity. Same authority
+/// as the corresponding blit: `DisplayIo` and the lease; an own surface must
+/// be the caller's, a shared one must carry a grant naming the caller. An
+/// opacity above 255 is refused rather than truncated.
+fn sys_compositor_blend(handle: u64, packed: u64, opacity: u64, shared: bool) -> u64 {
+    let x = (packed & 0xffff_ffff) as i32;
+    let y = ((packed >> 32) & 0xffff_ffff) as i32;
+    let Ok(opacity) = u8::try_from(opacity) else {
+        return SYSCALL_ERROR;
+    };
+    if !display_authorized() {
+        return SYSCALL_ERROR;
+    }
+    let pid = crate::task::current_process_id();
+    let result = if shared {
+        crate::compositor::blend_shared_for(
+            pid,
+            crate::user_graphics::Handle::from_u64(handle),
+            x,
+            y,
+            opacity,
+        )
+    } else {
+        let Some(handle) = caller_surface(handle) else {
+            return SYSCALL_ERROR;
+        };
+        crate::compositor::blend_for(pid, handle, x, y, opacity)
+    };
+    result.map_or(SYSCALL_ERROR, |_| 0)
 }
 
 /// Take the compositor lease. Requires `DisplayIo`.

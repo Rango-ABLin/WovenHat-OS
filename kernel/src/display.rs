@@ -213,6 +213,35 @@ impl Surface {
         target
     }
 
+    /// Blend `source` over this surface at `(x, y)` with uniform `opacity`:
+    /// 0 leaves the surface unchanged, 255 is exactly [`blit`](Self::blit).
+    /// Returns the region touched, which is empty when nothing changed.
+    ///
+    /// Pixels carry no alpha channel (`0x00RRGGBB`), so translucency is a
+    /// property of the blit rather than of the pixels. That keeps every
+    /// existing opaque surface opaque.
+    pub fn blend(&mut self, source: &Surface, x: i32, y: i32, opacity: u8) -> Rect {
+        if opacity == u8::MAX {
+            return self.blit(source, x, y);
+        }
+        let target = Rect::new(x, y, source.width, source.height).intersect(self.bounds());
+        if target.is_empty() || opacity == 0 {
+            return Rect::EMPTY;
+        }
+        for row in 0..target.height {
+            let destination_row = target.y as usize + row;
+            let source_row = (target.y - y) as usize + row;
+            let destination = destination_row * self.width + target.x as usize;
+            let origin = source_row * source.width + (target.x - x) as usize;
+            for column in 0..target.width {
+                let under = self.pixels[destination + column];
+                self.pixels[destination + column] =
+                    blend_pixel(source.pixels[origin + column], under, opacity);
+            }
+        }
+        target
+    }
+
     /// Draw a one-pixel outline of `rect`, returning the region touched.
     pub fn stroke_rect(&mut self, rect: Rect, color: u32) -> Rect {
         if rect.is_empty() {
@@ -365,6 +394,22 @@ impl Damage {
             .map(|rect| rect.width * rect.height)
             .sum()
     }
+}
+
+/// Blend `over` onto `under` with `opacity`, per channel, rounding to
+/// nearest: `(over * a + under * (255 - a) + 127) / 255`. Exact at both ends:
+/// opacity 0 yields `under`, 255 yields `over`.
+pub const fn blend_pixel(over: u32, under: u32, opacity: u8) -> u32 {
+    blend_channel(over, under, opacity, 16)
+        | blend_channel(over, under, opacity, 8)
+        | blend_channel(over, under, opacity, 0)
+}
+
+const fn blend_channel(over: u32, under: u32, opacity: u8, shift: u32) -> u32 {
+    let a = opacity as u32;
+    let top = (over >> shift) & 0xff;
+    let bottom = (under >> shift) & 0xff;
+    ((top * a + bottom * (255 - a) + 127) / 255) << shift
 }
 
 /// Copy the damaged regions of `surface` into a framebuffer.

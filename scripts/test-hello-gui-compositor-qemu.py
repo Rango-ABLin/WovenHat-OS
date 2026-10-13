@@ -20,6 +20,7 @@ STAGES={
     '19.9': ('stage19-9-test', '[S19.9] damage compositing: PASSED', 'hello-gui-damage', 'damage compositing'),
     '19.11': ('stage19-11-test', '[S19.11] window stacking and focus: PASSED', 'hello-gui-wm', 'window stacking and focus'),
     '19.12': ('stage19-12-test', '[S19.12] pointer input: PASSED', 'hello-gui-pointer', 'pointer input'),
+    '19.13': ('stage19-13-test', '[S19.13] translucency and shadows: PASSED', 'hello-gui-alpha', 'translucency and shadows'),
 }
 
 def app_build_env(app_dir):
