@@ -1731,6 +1731,18 @@ pub fn stage15_2_self_test() -> bool {
         return false;
     }
 
+    // Invalid native names must fail before device access, regardless of
+    // whether the caller reaches the filesystem through a VFS path.
+    let invalid_native_names = ["", ".", "..", "nested/file", "nested\\\\file", "nul\\0file"];
+    let native_boundary_ok = invalid_native_names.iter().all(|name| {
+        write_ata_file(&authority, name, b"no", 28) == Err(Error::InvalidName)
+            && read_ata_file(name, &mut path_bytes) == Err(Error::InvalidName)
+            && unlink_ata_file(&authority, name, 28) == Err(Error::InvalidName)
+    });
+    if !step("native WovenFS filename validation", native_boundary_ok) {
+        return false;
+    }
+
     let verified = with_ata_volume(|volume| {
         if volume.check().is_err() {
             return false;
