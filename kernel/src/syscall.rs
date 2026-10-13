@@ -318,6 +318,11 @@ pub enum Number {
     /// () -> packed UTC date-time (second | minute<<8 | hour<<16 | day<<24 |
     /// month<<32 | year<<40) or ERROR
     ClockRead = 119,
+    /// own handle, packed destination (x | y<<32), packed source region
+    /// (x | y<<16 | w<<32 | h<<48) -> 0 or ERROR
+    GraphicsCompositorBlitRegion = 120,
+    /// owner's handle, packed destination, packed source region -> 0 or ERROR
+    GraphicsCompositorBlitRegionShared = 121,
 }
 
 pub fn entry_address() -> u64 {
@@ -2283,6 +2288,12 @@ pub extern "C" fn wovenhat_syscall_dispatch(
             sys_graphics_write(arg0, arg1, arg2)
         }
         value if value == Number::ClockRead as u64 => sys_clock_read(),
+        value if value == Number::GraphicsCompositorBlitRegion as u64 => {
+            sys_compositor_blit_region(arg0, arg1, arg2, false)
+        }
+        value if value == Number::GraphicsCompositorBlitRegionShared as u64 => {
+            sys_compositor_blit_region(arg0, arg1, arg2, true)
+        }
         _ => u64::MAX,
     };
 
@@ -2450,6 +2461,35 @@ fn sys_compositor_blit_shared(handle: u64, packed: u64) -> u64 {
     let pid = crate::task::current_process_id();
     let handle = crate::user_graphics::Handle::from_u64(handle);
     crate::compositor::blit_shared_for(pid, handle, x, y).map_or(SYSCALL_ERROR, |_| 0)
+}
+
+/// Blit only a region of a surface onto the compositor. Same authority as the
+/// corresponding whole-surface blit: `DisplayIo` and the lease, and an own
+/// surface must be the caller's, a shared one must carry a grant naming the
+/// caller.
+fn sys_compositor_blit_region(handle: u64, destination: u64, region: u64, shared: bool) -> u64 {
+    let x = (destination & 0xffff_ffff) as i32;
+    let y = ((destination >> 32) & 0xffff_ffff) as i32;
+    let region = crate::display::Rect::new(
+        (region & 0xffff) as i32,
+        ((region >> 16) & 0xffff) as i32,
+        ((region >> 32) & 0xffff) as usize,
+        ((region >> 48) & 0xffff) as usize,
+    );
+    if !display_authorized() {
+        return SYSCALL_ERROR;
+    }
+    let pid = crate::task::current_process_id();
+    let handle = if shared {
+        crate::user_graphics::Handle::from_u64(handle)
+    } else {
+        let Some(handle) = caller_surface(handle) else {
+            return SYSCALL_ERROR;
+        };
+        handle
+    };
+    crate::compositor::blit_region_for(pid, handle, region, x, y, shared)
+        .map_or(SYSCALL_ERROR, |_| 0)
 }
 
 /// Blend a surface onto the compositor with uniform opacity. Same authority

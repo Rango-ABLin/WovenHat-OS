@@ -1,5 +1,100 @@
 # Stage status
 
+## Stage 20.2 — desktop applications: windows, taskbar entries, tray, notifications (2026-10-13)
+
+Roadmap Stage 18.1, Desktop, completed.
+
+**Protocol.** Applications talk to woven-shell over IPC. Each message
+starts with a four-byte tag:
+- `WOPN`, token, width, height, title: open a window showing a surface the
+  sender shared with the shell.
+- `TRAY`, token: show a 16×16 surface in the system tray.
+- `NOTE`, text: show a notification toast for 4 s.
+
+A surface is accepted only if the sender owns it. `libwoven::surface_owner`
+reads the owner from the token, and the kernel enforces that name on every
+operation. A window or icon disappears when its surface does, normally
+because its owner exited; the shell's per-frame damage check detects this.
+Keystrokes go to the focused window's owner as one-byte messages.
+
+**Shell.**
+- Windows cascade from (40, 40) with a title bar above the client area,
+  focused or unfocused, and never overlap the taskbar.
+- The taskbar has one entry per window, highlighted when focused. Clicking
+  an entry, or a window, raises and focuses it.
+- Tray icons sit right to left from the clock.
+- The toast is drawn top-right.
+- The pointer is a two-tone arrow, hidden until the mouse first moves.
+- The shell waits on input, messages and damage together, with a 250 ms
+  frame clock.
+- Without the `Ipc` capability it runs the desktop with applications
+  disabled, rather than failing; this keeps Stage 20.1's minimal
+  capability set working.
+
+**Exposed-region redraw.** Every change becomes a repaint of one
+rectangle, recomposed completely, bottom to top:
+1. the desktop;
+2. tray icons;
+3. each window: its title bar, then its client surface;
+4. the toast;
+5. the pointer, drawn over what is already on screen.
+
+Each layer contributes only its part inside the rectangle. This needs
+syscalls 120, `GraphicsCompositorBlitRegion` (own surface), and 121,
+`GraphicsCompositorBlitRegionShared`. They carry the same authority as the
+whole-surface blits and are backed by `display::Surface::blit_region`, with
+two new host tests. A whole-surface blit would paint over windows stacked
+above outside the rectangle.
+
+Client damage still goes through `GraphicsCompositorBlitDamage`. That blit
+can land over a higher window, so the shell repaints the damaged rectangle
+before presenting, and the overdraw never reaches the screen.
+
+**Test-only change.** The i8042 loopback helpers (`mouse::loopback`,
+`keyboard_loopback`) are now compiled for this gate too.
+
+Gate `[S20.2] desktop applications: PASSED`. The shell runs with two
+hello-gui `--desktop-client` applications, driven by real i8042 pointer
+packets and keyboard scancodes.
+- Application A opens a window. The kernel checks against its own
+  rendering:
+  - the window's frame, and the focused title bar with the kernel font;
+  - A's taskbar entry;
+  - the green tray icon;
+  - the toast, with its border.
+- A redraws a patch and reports damage, and the patch appears.
+- B opens on top and focused: B covers A at the overlap, A's title bar
+  turns unfocused, and both entries show the right state.
+- The toast expires and the wallpaper shows through.
+- The pointer moves onto A's entry and clicks: A is raised. The pointer is
+  drawn at its position.
+- `x` is typed: A receives exactly its key and exits 0. Its window, entry
+  and tray icon disappear, and B is focused.
+- A click in B, then `y`: B receives its key and exits, leaving the desktop
+  empty.
+- Killing the shell returns the display to the terminal.
+
+The Stage 20.1 gate still passes with the extended shell.
+
+Negative controls, with evidence in
+`audit-artifacts/stage20.2-negative-control-*`:
+- With keys sent to the bottom window instead of the focused one, the gate
+  fails at "key x routed to focused window A".
+- With taskbar entries ignoring clicks, it fails at "taskbar click raises
+  window A".
+
+Open:
+- **Discovery.** Applications learn the shell's process id from their
+  arguments; there is no name service yet.
+- **Window controls.** No move, resize, close button or minimise. Windows
+  are limited to the 320×240 surface cap, and the shell takes four windows
+  and four tray icons.
+- **Notifications** are one toast at a time; there is no history. The
+  Notification Center is 18.4.
+- **Input routing.** Only printable ASCII keys are forwarded. Pointer
+  events are not forwarded to applications yet.
+- **Not started at boot yet** (see Stage 20.1).
+
 ## Stage 20.1 — WovenShell desktop: wallpaper, taskbar, clock (2026-10-13)
 
 Roadmap Stage 18.1, Desktop, first part. Repo stage 20 is roadmap Stage 18,

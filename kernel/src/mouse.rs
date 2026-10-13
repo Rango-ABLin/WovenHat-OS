@@ -147,19 +147,19 @@ pub fn handle_interrupt() {
 /// Have the controller present `byte` as if the mouse had sent it (i8042
 /// command 0xD3). The byte travels the real hardware path: auxiliary output
 /// buffer, IRQ12, this driver. Waits, bounded, until it has been consumed.
-#[cfg(feature = "stage19-12-test")]
+#[cfg(any(feature = "stage19-12-test", feature = "stage20-2-test"))]
 pub fn loopback(byte: u8) -> bool {
     loopback_through(0xd3, byte)
 }
 
 /// Same, through the keyboard side (i8042 command 0xD2): IRQ1, the keyboard
 /// driver.
-#[cfg(feature = "stage19-12-test")]
+#[cfg(any(feature = "stage19-12-test", feature = "stage20-2-test"))]
 pub fn keyboard_loopback(byte: u8) -> bool {
     loopback_through(0xd2, byte)
 }
 
-#[cfg(feature = "stage19-12-test")]
+#[cfg(any(feature = "stage19-12-test", feature = "stage20-2-test"))]
 fn loopback_through(command_byte: u8, byte: u8) -> bool {
     // The output buffer holds one byte: wait for the previous one to be taken
     // by its IRQ handler, write, then wait for this one to be taken too.

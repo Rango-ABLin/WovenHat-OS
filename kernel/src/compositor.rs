@@ -420,6 +420,37 @@ pub fn blit_shared_for(
     Ok(touched)
 }
 
+/// Copy only `region` (in surface coordinates) of a surface to `(x, y)` on
+/// behalf of the lease holder `pid`: one of its own surfaces, or with
+/// `shared`, a surface shared with it. This is the exposed-region redraw
+/// primitive: a window manager repaints a damaged rectangle by copying just
+/// the part of each window inside it, bottom to top, so nothing stacked above
+/// is overdrawn outside the rectangle.
+pub fn blit_region_for(
+    pid: u64,
+    handle: user_graphics::Handle,
+    region: Rect,
+    x: i32,
+    y: i32,
+    shared: bool,
+) -> Result<Rect, Error> {
+    require_holder(pid)?;
+    let snapshot = if shared {
+        user_graphics::snapshot_shared(handle, pid)
+    } else {
+        user_graphics::snapshot(handle)
+    }
+    .map_err(|_| Error::InvalidClient)?;
+    let mut guard = STATE.lock();
+    let state = guard.as_mut().ok_or(Error::NotReady)?;
+    if state.holder != Some(pid) {
+        return Err(Error::NotHolder);
+    }
+    let touched = state.surface.blit_region(&snapshot, region, x, y);
+    state.damage.add(touched);
+    Ok(touched)
+}
+
 /// [`blit_for`] with uniform `opacity`, for translucent windows and shadows
 /// drawn from the holder's own surfaces.
 pub fn blend_for(

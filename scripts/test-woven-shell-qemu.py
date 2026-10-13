@@ -1,13 +1,19 @@
-"""Stage 20.1: the WovenShell desktop.
+"""Stage 20.1 and 20.2: the WovenShell desktop.
 
 Builds apps/woven-shell, embeds it in a stage20-1-test kernel and boots it in
 QEMU. The kernel starts the shell, checks every part of the desktop against
 its own independent computation, then kills the shell and checks the display
-returns to the text terminal.
+returns to the text terminal. With --stage 20.2 hello-gui is embedded too and
+runs as desktop applications: windows, taskbar entries, the tray and
+notifications, driven by real pointer and keyboard input.
 """
 import argparse, os, shutil, subprocess, sys
 from pathlib import Path
 APP='wovenhat-woven-shell'
+STAGES={
+    '20.1': ('stage20-1-test', '[S20.1] woven-shell desktop: PASSED', 'woven-shell', 'woven-shell desktop'),
+    '20.2': ('stage20-2-test', '[S20.2] desktop applications: PASSED', 'woven-shell-apps', 'desktop applications'),
+}
 
 def app_build_env(app_dir):
     """Build environment for an application crate.
@@ -29,9 +35,10 @@ def main():
     p.add_argument('--firmware',type=Path)
     p.add_argument('--firmware-vars',type=Path)
     p.add_argument('--cpus',type=int,choices=(1,2,4),default=1)
+    p.add_argument('--stage',choices=tuple(STAGES),default='20.1')
     p.add_argument('--timeout',type=float,default=300)
     a=p.parse_args()
-    feature,marker,out_name,label='stage20-1-test','[S20.1] woven-shell desktop: PASSED','woven-shell','woven-shell desktop'
+    feature,marker,out_name,label=STAGES[a.stage]
     root=Path(__file__).resolve().parents[1]
     qemu=Path(a.qemu); fw=a.firmware or qemu.parent/'share'/'edk2-x86_64-code.fd'
     if not qemu.is_file() or not fw.is_file(): p.error('qemu or firmware missing')
@@ -40,6 +47,10 @@ def main():
     image=app_dir/'target'/'x86_64-unknown-none'/'release'/APP
     env=dict(os.environ)
     env['WOVENHAT_SHELL_IMAGE']=str(image)
+    if a.stage=='20.2':
+        gui_dir=root/'apps'/'hello-gui'
+        if subprocess.run(['cargo','build','--release'],cwd=gui_dir,env=app_build_env(gui_dir)).returncode: return 1
+        env['WOVENHAT_HELLO_GUI_IMAGE']=str(gui_dir/'target'/'x86_64-unknown-none'/'release'/'wovenhat-hello-gui')
     env.setdefault('CARGO_BUILD_BUILD_DIR',str(root/'.cargo-build'))
     env.setdefault('CARGO_TARGET_DIR',str(root/'target'))
     boot=subprocess.run(['cargo','run','--quiet','--features',feature,'--','--print-image'],
@@ -66,7 +77,7 @@ def main():
             print(f'QEMU timeout. Evidence: {out}',file=sys.stderr); return 1
     text=serial.read_text(errors='replace') if serial.exists() else ''
     for line in text.splitlines():
-        if '[S20.' in line or 'woven-shell' in line: print('  '+line.strip())
+        if '[S20.' in line or 'woven-shell' in line or 'hello-gui' in line: print('  '+line.strip())
     if code != 33 or marker not in text:
         print(f'FAILED (exit {code}). Evidence: {out}',file=sys.stderr)
         print(text[-3000:],file=sys.stderr); return 1

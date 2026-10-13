@@ -1,28 +1,49 @@
 //! WovenShell: the WovenHat desktop.
 //!
-//! A userspace program that takes the compositor lease and draws the desktop:
-//! a procedural wallpaper, a translucent taskbar with the WovenStart button
-//! and a clock read from the hardware clock.
+//! A userspace program that takes the compositor lease and runs the desktop:
+//! a procedural wallpaper, a translucent taskbar with the WovenStart button,
+//! one entry per window and a clock, a system tray, notification toasts,
+//! client windows with title bars, and a pointer.
 //!
-//! Everything is rendered in software into a [`Canvas`] one tile at a time
-//! and uploaded into a single staging surface, which is blitted into place.
-//! Client surfaces are capped at 320Ã—240, far smaller than a screen, so the
-//! desktop is never one surface: any region is repainted by rendering just
-//! the tiles that cover it. The scene is a pure function of position and
-//! state, so a tile renders the same whatever order tiles are drawn in.
+//! # Drawing
+//!
+//! Client surfaces are capped at 320Ã—240, so the desktop is never one
+//! surface. The shell's own layers (desktop, title bars, toast, pointer) are
+//! rendered in software into a [`Canvas`] in chunks of at most 320Ã—40,
+//! uploaded into one staging surface and blitted with a region blit.
+//!
+//! Every change becomes a repaint of an exposed rectangle, which recomposes
+//! that rectangle completely, bottom to top: desktop, tray icons, each window
+//! (title bar, then the client's shared surface copied with a region blit),
+//! the toast, and the pointer. Region blits copy only the part of each layer
+//! inside the rectangle, so nothing stacked above is overdrawn outside it.
+//!
+//! # Protocol
+//!
+//! Applications talk to the shell over IPC. Every message starts with a
+//! four-byte tag:
+//! - `WOPN`, token (u64), width (u16), height (u16), title (up to 24 bytes):
+//!   open a window showing a surface the sender shared with the shell.
+//! - `TRAY`, token (u64): show a 16Ã—16 surface in the system tray.
+//! - `NOTE`, text: show a notification toast for four seconds.
+//!
+//! A surface is accepted only if the sender owns it: the token names its
+//! owner, and the kernel enforces that name on every operation. A window or
+//! icon goes away when its surface does, normally because its owner exited.
+//! Keystrokes go to the focused window's owner as one-byte messages.
 //!
 //! On a display at least 1280Ã—800 the shell switches to display scale 2, so
-//! the 5Ã—7 font stays legible.
-//!
-//! With `--seconds` the clock shows seconds, which lets the acceptance gate
-//! watch it advance without waiting for a minute.
+//! the 5Ã—7 font stays legible. With `--seconds` the clock shows seconds.
 #![no_std]
 #![no_main]
 
 use core::cell::UnsafeCell;
 use core::panic::PanicInfo;
 
-use libwoven::{blend, font, rgb, Args, Canvas, DateTime, FrameEvent, GraphicsSurface};
+use libwoven::{
+    blend, font, process, rgb, wait, Args, Canvas, DateTime, FrameEvent, GraphicsSurface,
+    InputEvent, Key, Region,
+};
 
 libwoven::entry!(main);
 
@@ -46,14 +67,63 @@ const START_LABEL: &str = "Woven";
 const TEXT: u32 = rgb(255, 255, 255);
 /// Clock text is right-aligned this far from the right edge.
 const CLOCK_MARGIN: i32 = 6;
+/// Room for the widest clock reading, `HH:MM:SS`, plus its margin.
+const CLOCK_WIDTH: i32 = 8 * font::ADVANCE + CLOCK_MARGIN;
+
+/// Taskbar window entries, left to right after the start button.
+const ENTRY_X: i32 = START_X + START_WIDTH as i32 + 8;
+const ENTRY_WIDTH: i32 = 80;
+const ENTRY_GAP: i32 = 4;
+const ENTRY_ACTIVE: u32 = rgb(70, 120, 210);
+const ENTRY_INACTIVE: u32 = rgb(44, 52, 68);
+/// Characters of a title that fit in an entry.
+const ENTRY_CHARS: usize = ((ENTRY_WIDTH - 8) / font::ADVANCE) as usize;
+
+/// Tray icons, right to left from the clock.
+const TRAY_ICON: i32 = 16;
+const TRAY_GAP: i32 = 4;
+const MAX_TRAY: usize = 4;
+
+const TITLE_HEIGHT: i32 = 14;
+const TITLE_ACTIVE: u32 = rgb(70, 120, 210);
+const TITLE_INACTIVE: u32 = rgb(60, 66, 80);
+const MAX_TITLE: usize = 24;
+const MAX_WINDOWS: usize = 4;
+/// New windows cascade from here, this far apart.
+const CASCADE_ORIGIN: i32 = 40;
+const CASCADE_STEP: i32 = 24;
+
+const TOAST_WIDTH: i32 = 180;
+const TOAST_HEIGHT: i32 = 22;
+const TOAST_MARGIN: i32 = 8;
+const TOAST_FILL: u32 = rgb(30, 34, 46);
+const TOAST_CHARS: usize = ((TOAST_WIDTH - 12) / font::ADVANCE) as usize;
+const TOAST_TICKS: u64 = 4 * libwoven::time::TICKS_PER_SECOND;
+
+/// The pointer: `B` black outline, `W` white fill, `.` transparent. The tip
+/// is the top-left pixel.
+const CURSOR: [&[u8; 7]; 10] = [
+    b"B......",
+    b"BB.....",
+    b"BWB....",
+    b"BWWB...",
+    b"BWWWB..",
+    b"BWWWWB.",
+    b"BWWWWWB",
+    b"BWWBBBB",
+    b"BWB....",
+    b"BB.....",
+];
+const CURSOR_WIDTH: i32 = 7;
+const CURSOR_HEIGHT: i32 = 10;
 
 const TILE_WIDTH: usize = 320;
 const TILE_HEIGHT: usize = 40;
 const TILE_PIXELS: usize = TILE_WIDTH * TILE_HEIGHT;
 
-/// The clock is checked four times a second, so a new second shows within
-/// a quarter of one.
-const CLOCK_PERIOD: u64 = libwoven::time::TICKS_PER_SECOND / 4;
+/// The shell wakes at least four times a second for the clock, the toast
+/// timer and window liveness.
+const FRAME_PERIOD: u64 = libwoven::time::TICKS_PER_SECOND / 4;
 
 /// The one tile buffer, in .bss rather than on the stack.
 struct TileBuffer(UnsafeCell<[u32; TILE_PIXELS]>);
@@ -70,6 +140,13 @@ fn fail(code: u64) -> ! {
     let _ = libwoven::write(libwoven::syscall::STDOUT, libwoven::format_u64(code, &mut digits));
     let _ = libwoven::print("\n");
     libwoven::exit(code)
+}
+
+fn log(parts: &[&[u8]]) {
+    for part in parts {
+        let _ = libwoven::write(libwoven::syscall::STDOUT, part);
+    }
+    let _ = libwoven::print("\n");
 }
 
 /// Wallpaper colour at `(x, y)` on a screen `height` pixels tall: a vertical
@@ -101,13 +178,147 @@ fn clock_text(time: Option<DateTime>, seconds: bool) -> ([u8; 8], usize) {
     (text, if seconds { 8 } else { 5 })
 }
 
+/// `bytes` as text, cut to `limit` characters; anything not printable ASCII
+/// is shown as `?`, so the font's replacement box never appears.
+fn label(bytes: &[u8], limit: usize, buffer: &mut [u8; 32]) -> usize {
+    let length = bytes.len().min(limit).min(buffer.len());
+    for (slot, byte) in buffer.iter_mut().zip(&bytes[..length]) {
+        *slot = if (b' '..=b'~').contains(byte) { *byte } else { b'?' };
+    }
+    length
+}
+
 /// A rectangle in screen coordinates.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 struct Area {
     x: i32,
     y: i32,
     width: i32,
     height: i32,
+}
+
+impl Area {
+    const fn new(x: i32, y: i32, width: i32, height: i32) -> Self {
+        Self { x, y, width, height }
+    }
+
+    const fn is_empty(self) -> bool {
+        self.width <= 0 || self.height <= 0
+    }
+
+    fn contains(self, x: i32, y: i32) -> bool {
+        x >= self.x && y >= self.y && x < self.x + self.width && y < self.y + self.height
+    }
+
+    fn intersect(self, other: Self) -> Self {
+        let x = self.x.max(other.x);
+        let y = self.y.max(other.y);
+        let right = (self.x + self.width).min(other.x + other.width);
+        let bottom = (self.y + self.height).min(other.y + other.height);
+        Self::new(x, y, right - x, bottom - y)
+    }
+
+    fn union(self, other: Self) -> Self {
+        if self.is_empty() {
+            return other;
+        }
+        if other.is_empty() {
+            return self;
+        }
+        let x = self.x.min(other.x);
+        let y = self.y.min(other.y);
+        let right = (self.x + self.width).max(other.x + other.width);
+        let bottom = (self.y + self.height).max(other.y + other.height);
+        Self::new(x, y, right - x, bottom - y)
+    }
+
+    /// This area as a region of a layer whose top-left is `(x, y)`.
+    fn relative_to(self, x: i32, y: i32) -> Region {
+        Region {
+            x: (self.x - x) as u16,
+            y: (self.y - y) as u16,
+            width: self.width as u16,
+            height: self.height as u16,
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+struct Window {
+    owner: process::Id,
+    token: u64,
+    /// Top-left of the client area; the title bar sits above it.
+    x: i32,
+    y: i32,
+    width: i32,
+    height: i32,
+    title: [u8; MAX_TITLE],
+    title_length: usize,
+}
+
+impl Window {
+    fn title_area(&self) -> Area {
+        Area::new(self.x, self.y - TITLE_HEIGHT, self.width, TITLE_HEIGHT)
+    }
+
+    fn body(&self) -> Area {
+        Area::new(self.x, self.y, self.width, self.height)
+    }
+
+    fn frame(&self) -> Area {
+        self.title_area().union(self.body())
+    }
+}
+
+#[derive(Clone, Copy)]
+struct TrayIcon {
+    token: u64,
+}
+
+struct Toast {
+    text: [u8; 32],
+    length: usize,
+    until: libwoven::time::Ticks,
+}
+
+/// The staging surface and the tile buffer the shell renders into.
+struct Painter<'a> {
+    staging: GraphicsSurface,
+    tile: &'a mut [u32],
+}
+
+impl Painter<'_> {
+    /// Render `area` with `render` in chunks no larger than the staging
+    /// surface, uploading and blitting each.
+    fn draw(&mut self, area: Area, render: impl Fn(&mut Canvas<'_>)) {
+        let mut y = area.y;
+        while y < area.y + area.height {
+            let height = (area.y + area.height - y).min(TILE_HEIGHT as i32);
+            let mut x = area.x;
+            while x < area.x + area.width {
+                let width = (area.x + area.width - x).min(TILE_WIDTH as i32);
+                let Some(mut canvas) =
+                    Canvas::new(self.tile, x, y, width as usize, height as usize)
+                else {
+                    fail(10);
+                };
+                render(&mut canvas);
+                let region = Region {
+                    x: 0,
+                    y: 0,
+                    width: width as u16,
+                    height: height as u16,
+                };
+                if self.staging.write_canvas(&canvas).is_err()
+                    || self.staging.present_region(region, x, y).is_err()
+                {
+                    fail(11);
+                }
+                x += width;
+            }
+            y += height;
+        }
+    }
 }
 
 struct Desktop {
@@ -116,33 +327,77 @@ struct Desktop {
     seconds: bool,
     /// The time on screen, `None` if the clock could not be read.
     time: Option<DateTime>,
+    windows: [Option<Window>; MAX_WINDOWS],
+    /// Window slots bottom to top; the last is focused.
+    stack: [usize; MAX_WINDOWS],
+    stacked: usize,
+    /// Windows opened so far, for the cascade.
+    opened: i32,
+    tray: [Option<TrayIcon>; MAX_TRAY],
+    toast: Option<Toast>,
+    pointer: (i32, i32),
+    pointer_visible: bool,
 }
 
 impl Desktop {
+    fn screen(&self) -> Area {
+        Area::new(0, 0, self.width, self.height)
+    }
+
     fn taskbar_top(&self) -> i32 {
         self.height - TASKBAR_HEIGHT
     }
 
-    /// Baseline row for taskbar text: seven glyph rows centred in the bar
-    /// below its one-pixel accent line.
+    fn taskbar(&self) -> Area {
+        Area::new(0, self.taskbar_top(), self.width, TASKBAR_HEIGHT)
+    }
+
+    /// Row for taskbar text: seven glyph rows centred in the bar below its
+    /// one-pixel accent line.
     fn text_y(&self) -> i32 {
         self.taskbar_top() + 9
     }
 
-
-    /// The region the clock occupies, with a margin for a wider reading.
     fn clock_area(&self) -> Area {
-        let width = 8 * font::ADVANCE + CLOCK_MARGIN;
-        Area {
-            x: self.width - width,
-            y: self.taskbar_top(),
-            width,
-            height: TASKBAR_HEIGHT,
-        }
+        Area::new(self.width - CLOCK_WIDTH, self.taskbar_top(), CLOCK_WIDTH, TASKBAR_HEIGHT)
     }
 
-    /// Render the part of the desktop the canvas covers.
-    fn render(&self, canvas: &mut Canvas<'_>) {
+    fn entry_area(&self, index: usize) -> Area {
+        let x = ENTRY_X + index as i32 * (ENTRY_WIDTH + ENTRY_GAP);
+        Area::new(x, self.taskbar_top() + 4, ENTRY_WIDTH, START_HEIGHT as i32)
+    }
+
+    fn tray_area(&self, index: usize) -> Area {
+        let x = self.width - CLOCK_WIDTH - (index as i32 + 1) * (TRAY_ICON + TRAY_GAP);
+        Area::new(x, self.taskbar_top() + 4, TRAY_ICON, TRAY_ICON)
+    }
+
+    fn toast_area(&self) -> Area {
+        Area::new(self.width - TOAST_WIDTH - TOAST_MARGIN, TOAST_MARGIN, TOAST_WIDTH, TOAST_HEIGHT)
+    }
+
+    fn cursor_area(&self) -> Area {
+        if !self.pointer_visible {
+            return Area::new(0, 0, 0, 0);
+        }
+        Area::new(self.pointer.0, self.pointer.1, CURSOR_WIDTH, CURSOR_HEIGHT)
+    }
+
+    fn focused(&self) -> Option<usize> {
+        self.stacked.checked_sub(1).map(|top| self.stack[top])
+    }
+
+    /// Open windows in slot order: the taskbar's entries.
+    fn entries(&self) -> impl Iterator<Item = (usize, &Window)> {
+        self.windows
+            .iter()
+            .enumerate()
+            .filter_map(|(slot, window)| window.as_ref().map(|window| (slot, window)))
+    }
+
+    /// The desktop layer: wallpaper and taskbar, with its start button,
+    /// window entries and clock.
+    fn render_desktop(&self, canvas: &mut Canvas<'_>) {
         let height = self.height;
         canvas.shade(|x, y| wallpaper(x, y, height));
 
@@ -155,33 +410,296 @@ impl Desktop {
         let label_x = START_X + (START_WIDTH - font::text_width(START_LABEL)) as i32 / 2;
         canvas.draw_text(label_x, self.text_y(), START_LABEL, TEXT);
 
+        let focused = self.focused();
+        for (index, (slot, window)) in self.entries().enumerate() {
+            let area = self.entry_area(index);
+            let fill = if Some(slot) == focused { ENTRY_ACTIVE } else { ENTRY_INACTIVE };
+            canvas.fill_rect(area.x, area.y, area.width as usize, area.height as usize, fill);
+            let mut buffer = [0u8; 32];
+            let length = label(&window.title[..window.title_length], ENTRY_CHARS, &mut buffer);
+            let text = core::str::from_utf8(&buffer[..length]).unwrap_or("");
+            canvas.draw_text(area.x + 4, self.text_y(), text, TEXT);
+        }
+
         let (bytes, length) = clock_text(self.time, self.seconds);
         let text = core::str::from_utf8(&bytes[..length]).unwrap_or("");
         let clock_x = self.width - CLOCK_MARGIN - font::text_width(text) as i32;
         canvas.draw_text(clock_x, self.text_y(), text, TEXT);
     }
 
-    /// Repaint `area` by rendering and blitting every tile that covers it.
-    /// Tiles sit on a fixed grid, so a tile hanging off the screen's right
-    /// or bottom edge is clipped by the compositor.
-    fn paint(&self, staging: &GraphicsSurface, tile: &mut [u32], area: Area) {
-        let (tile_width, tile_height) = (TILE_WIDTH as i32, TILE_HEIGHT as i32);
-        let first_column = area.x.max(0) / tile_width;
-        let first_row = area.y.max(0) / tile_height;
-        let last_column = (area.x + area.width - 1).min(self.width - 1) / tile_width;
-        let last_row = (area.y + area.height - 1).min(self.height - 1) / tile_height;
-        for row in first_row..=last_row {
-            for column in first_column..=last_column {
-                let (x, y) = (column * tile_width, row * tile_height);
-                let Some(mut canvas) = Canvas::new(tile, x, y, TILE_WIDTH, TILE_HEIGHT) else {
-                    fail(10);
+    fn render_title(window: &Window, focused: bool, canvas: &mut Canvas<'_>) {
+        let area = window.title_area();
+        let fill = if focused { TITLE_ACTIVE } else { TITLE_INACTIVE };
+        canvas.fill_rect(area.x, area.y, area.width as usize, area.height as usize, fill);
+        let mut buffer = [0u8; 32];
+        let chars = ((window.width - 8) / font::ADVANCE).max(0) as usize;
+        let length = label(&window.title[..window.title_length], chars, &mut buffer);
+        let text = core::str::from_utf8(&buffer[..length]).unwrap_or("");
+        canvas.draw_text(area.x + 4, area.y + 4, text, TEXT);
+    }
+
+    fn render_toast(&self, toast: &Toast, canvas: &mut Canvas<'_>) {
+        let area = self.toast_area();
+        let (width, height) = (area.width as usize, area.height as usize);
+        canvas.fill_rect(area.x, area.y, width, height, ACCENT);
+        canvas.fill_rect(area.x + 1, area.y + 1, width - 2, height - 2, TOAST_FILL);
+        let text = core::str::from_utf8(&toast.text[..toast.length]).unwrap_or("");
+        canvas.draw_text(area.x + 6, area.y + 8, text, TEXT);
+    }
+
+    /// The pointer over whatever is already on screen beneath it.
+    fn render_cursor(&self, canvas: &mut Canvas<'_>) {
+        canvas.shade(|x, y| libwoven::screen_pixel(x, y).unwrap_or(0));
+        let (left, top) = self.pointer;
+        for (row, line) in CURSOR.iter().enumerate() {
+            for (column, cell) in line.iter().enumerate() {
+                let color = match cell {
+                    b'B' => rgb(0, 0, 0),
+                    b'W' => TEXT,
+                    _ => continue,
                 };
-                self.render(&mut canvas);
-                if staging.write_canvas(&canvas).is_err() || staging.present(x, y).is_err() {
-                    fail(11);
+                canvas.set(left + column as i32, top + row as i32, color);
+            }
+        }
+    }
+
+    /// Recompose `area` completely, bottom to top.
+    fn repaint(&self, painter: &mut Painter<'_>, area: Area) {
+        let area = area.intersect(self.screen());
+        if area.is_empty() {
+            return;
+        }
+        painter.draw(area, |canvas| self.render_desktop(canvas));
+
+        for (index, icon) in self.tray.iter().enumerate() {
+            let Some(icon) = icon else { continue };
+            let place = self.tray_area(index);
+            let part = place.intersect(area);
+            if !part.is_empty() {
+                // A failure means the icon's surface is gone; the next
+                // liveness check removes it.
+                let region = part.relative_to(place.x, place.y);
+                let _ = libwoven::compositor_blit_region_shared(icon.token, region, part.x, part.y);
+            }
+        }
+
+        let focused = self.focused();
+        for &slot in &self.stack[..self.stacked] {
+            let Some(window) = &self.windows[slot] else { continue };
+            let title = window.title_area().intersect(area);
+            if !title.is_empty() {
+                let active = Some(slot) == focused;
+                painter.draw(title, |canvas| Self::render_title(window, active, canvas));
+            }
+            let body = window.body().intersect(area);
+            if !body.is_empty() {
+                let region = body.relative_to(window.x, window.y);
+                let _ = libwoven::compositor_blit_region_shared(window.token, region, body.x, body.y);
+            }
+        }
+
+        if let Some(toast) = &self.toast {
+            let part = self.toast_area().intersect(area);
+            if !part.is_empty() {
+                painter.draw(part, |canvas| self.render_toast(toast, canvas));
+            }
+        }
+
+        let cursor = self.cursor_area().intersect(area);
+        if !cursor.is_empty() {
+            painter.draw(cursor, |canvas| self.render_cursor(canvas));
+        }
+    }
+
+    fn raise(&mut self, slot: usize) {
+        let Some(position) = self.stack[..self.stacked].iter().position(|&s| s == slot) else {
+            return;
+        };
+        self.stack[position..self.stacked].rotate_left(1);
+    }
+
+    /// Focus window `slot`, raising it. Returns the area to repaint.
+    fn focus(&mut self, slot: usize) -> Area {
+        if self.focused() == Some(slot) {
+            return Area::new(0, 0, 0, 0);
+        }
+        let previous = self.focused().and_then(|old| self.windows[old]).map(|w| w.frame());
+        self.raise(slot);
+        let current = self.windows[slot].map(|w| w.frame()).unwrap_or(Area::new(0, 0, 0, 0));
+        current.union(previous.unwrap_or(Area::new(0, 0, 0, 0))).union(self.taskbar())
+    }
+
+    /// Open a window for `owner`. Returns the area to repaint.
+    fn open(&mut self, owner: process::Id, message: &[u8]) -> Area {
+        let empty = Area::new(0, 0, 0, 0);
+        if message.len() < 16 {
+            return empty;
+        }
+        let token = u64::from_le_bytes(message[4..12].try_into().unwrap_or([0; 8]));
+        let width = i32::from(u16::from_le_bytes([message[12], message[13]]));
+        let height = i32::from(u16::from_le_bytes([message[14], message[15]]));
+        if libwoven::surface_owner(token) != owner
+            || !(1..=320).contains(&width)
+            || !(1..=240).contains(&height)
+        {
+            return empty;
+        }
+        let Some(slot) = self.windows.iter().position(Option::is_none) else {
+            return empty;
+        };
+        let offset = CASCADE_ORIGIN + (self.opened % 6) * CASCADE_STEP;
+        self.opened += 1;
+        // Keep the whole frame above the taskbar and on screen.
+        let x = offset.min((self.width - width).max(0));
+        let y = offset.min((self.taskbar_top() - height).max(TITLE_HEIGHT));
+        let mut title = [0u8; MAX_TITLE];
+        let title_length = (message.len() - 16).min(MAX_TITLE);
+        title[..title_length].copy_from_slice(&message[16..16 + title_length]);
+        let window = Window { owner, token, x, y, width, height, title, title_length };
+        self.windows[slot] = Some(window);
+        let previous = self.focused().and_then(|old| self.windows[old]).map(|w| w.frame());
+        self.stack[self.stacked] = slot;
+        self.stacked += 1;
+        log(&[b"woven-shell: window opened: ", &title[..title_length]]);
+        window.frame().union(previous.unwrap_or(empty)).union(self.taskbar())
+    }
+
+    /// Remove window `slot`. Returns the area to repaint.
+    fn close(&mut self, slot: usize) -> Area {
+        let Some(window) = self.windows[slot].take() else {
+            return Area::new(0, 0, 0, 0);
+        };
+        if let Some(position) = self.stack[..self.stacked].iter().position(|&s| s == slot) {
+            self.stack[position..self.stacked].rotate_left(1);
+            self.stacked -= 1;
+        }
+        log(&[b"woven-shell: window closed: ", &window.title[..window.title_length]]);
+        // The newly focused window's title changes colour too.
+        let next = self.focused().and_then(|top| self.windows[top]).map(|w| w.title_area());
+        window.frame().union(next.unwrap_or(Area::new(0, 0, 0, 0))).union(self.taskbar())
+    }
+
+    fn handle_message(&mut self, sender: process::Id, message: &[u8]) -> Area {
+        let empty = Area::new(0, 0, 0, 0);
+        match message.get(..4) {
+            Some(b"WOPN") => self.open(sender, message),
+            Some(b"TRAY") if message.len() == 12 => {
+                let token = u64::from_le_bytes(message[4..12].try_into().unwrap_or([0; 8]));
+                if libwoven::surface_owner(token) != sender {
+                    return empty;
+                }
+                let Some(index) = self.tray.iter().position(Option::is_none) else {
+                    return empty;
+                };
+                self.tray[index] = Some(TrayIcon { token });
+                log(&[b"woven-shell: tray icon added"]);
+                self.tray_area(index)
+            }
+            Some(b"NOTE") => {
+                let mut text = [0u8; 32];
+                let length = label(&message[4..], TOAST_CHARS, &mut text);
+                self.toast = Some(Toast {
+                    text,
+                    length,
+                    until: libwoven::ticks() + TOAST_TICKS,
+                });
+                log(&[b"woven-shell: notification: ", &text[..length]]);
+                self.toast_area()
+            }
+            _ => empty,
+        }
+    }
+
+    fn handle_input(&mut self, event: InputEvent) -> Area {
+        let empty = Area::new(0, 0, 0, 0);
+        match event {
+            InputEvent::PointerMove { dx, dy } => {
+                let before = self.cursor_area();
+                self.pointer = (
+                    (self.pointer.0 + i32::from(dx)).clamp(0, self.width - 1),
+                    (self.pointer.1 + i32::from(dy)).clamp(0, self.height - 1),
+                );
+                self.pointer_visible = true;
+                before.union(self.cursor_area())
+            }
+            InputEvent::PointerButton { button: 0, pressed: true } => {
+                let (x, y) = self.pointer;
+                // A taskbar entry focuses its window.
+                let entry = self
+                    .entries()
+                    .enumerate()
+                    .find(|(index, _)| self.entry_area(*index).contains(x, y))
+                    .map(|(_, (slot, _))| slot);
+                if let Some(slot) = entry {
+                    return self.focus(slot);
+                }
+                // Otherwise the topmost window under the pointer.
+                let hit = self.stack[..self.stacked].iter().rev().copied().find(|&slot| {
+                    self.windows[slot].is_some_and(|window| window.frame().contains(x, y))
+                });
+                hit.map_or(empty, |slot| self.focus(slot))
+            }
+            InputEvent::Key(Key::Char(character)) if character.is_ascii() => {
+                if let Some(window) = self.focused().and_then(|slot| self.windows[slot]) {
+                    let _ = libwoven::message_send(window.owner, &[character as u8]);
+                }
+                empty
+            }
+            _ => empty,
+        }
+    }
+
+    /// Composite client damage, and drop windows and icons whose surface is
+    /// gone. Returns the area to repaint.
+    fn check_clients(&mut self) -> Area {
+        let mut dirty = Area::new(0, 0, 0, 0);
+        for slot in 0..MAX_WINDOWS {
+            let Some(window) = self.windows[slot] else { continue };
+            // A damage blit may draw over windows stacked above; repainting
+            // the region afterwards, before presenting, puts them back.
+            match libwoven::compositor_blit_damage(window.token, window.x, window.y) {
+                Ok(Some(region)) => {
+                    let changed = Area::new(
+                        window.x + i32::from(region.x),
+                        window.y + i32::from(region.y),
+                        i32::from(region.width),
+                        i32::from(region.height),
+                    );
+                    dirty = dirty.union(changed);
+                }
+                Ok(None) => {}
+                Err(_) => dirty = dirty.union(self.close(slot)),
+            }
+        }
+        for index in 0..MAX_TRAY {
+            let Some(icon) = self.tray[index] else { continue };
+            let place = self.tray_area(index);
+            match libwoven::compositor_blit_damage(icon.token, place.x, place.y) {
+                Ok(Some(_)) => dirty = dirty.union(place),
+                Ok(None) => {}
+                Err(_) => {
+                    self.tray[index] = None;
+                    log(&[b"woven-shell: tray icon removed"]);
+                    dirty = dirty.union(place);
                 }
             }
         }
+        dirty
+    }
+
+    /// Advance the clock and the toast timer. Returns the area to repaint.
+    fn tick(&mut self) -> Area {
+        let mut dirty = Area::new(0, 0, 0, 0);
+        let time = libwoven::clock().ok();
+        if clock_text(time, self.seconds) != clock_text(self.time, self.seconds) {
+            self.time = time;
+            dirty = dirty.union(self.clock_area());
+        }
+        if self.toast.as_ref().is_some_and(|toast| libwoven::ticks() >= toast.until) {
+            self.toast = None;
+            dirty = dirty.union(self.toast_area());
+        }
+        dirty
     }
 }
 
@@ -211,44 +729,66 @@ fn main(args: Args) -> ! {
         Ok(surface) => surface,
         Err(_) => fail(5),
     };
+    let mut painter = Painter { staging, tile };
 
+    let (width, height) = (info.width as i32, info.height as i32);
     let mut desktop = Desktop {
-        width: info.width as i32,
-        height: info.height as i32,
+        width,
+        height,
         seconds,
         time: libwoven::clock().ok(),
+        windows: [None; MAX_WINDOWS],
+        stack: [0; MAX_WINDOWS],
+        stacked: 0,
+        opened: 0,
+        tray: [None; MAX_TRAY],
+        toast: None,
+        pointer: (width / 2, height / 2),
+        pointer_visible: false,
     };
-    let screen = Area {
-        x: 0,
-        y: 0,
-        width: desktop.width,
-        height: desktop.height,
-    };
-    desktop.paint(&staging, tile, screen);
+    desktop.repaint(&mut painter, desktop.screen());
     // The first present takes the display from the text terminal.
     if libwoven::compositor_present().is_err() {
         fail(6);
     }
     let _ = libwoven::print("woven-shell: desktop ready\n");
 
-    let mut clock = libwoven::FrameClock::new(CLOCK_PERIOD);
+    let mut clock = libwoven::FrameClock::new(FRAME_PERIOD);
+    // Applications reach the shell over IPC. Without the Ipc capability the
+    // kernel refuses a wait on messages; the desktop then runs without
+    // applications rather than not at all.
+    let mut sources = wait::INPUT | wait::MESSAGE | wait::DAMAGE;
+    // Large enough for any message: one that did not fit would stay queued
+    // and keep the mailbox ready forever.
+    let mut message = [0u8; 256];
     loop {
-        match clock.wait(libwoven::wait::INPUT) {
-            Ok(FrameEvent::Frame { .. }) => {
-                // Repaint only when the text on screen would change.
-                let time = libwoven::clock().ok();
-                if clock_text(time, seconds) != clock_text(desktop.time, seconds) {
-                    desktop.time = time;
-                    desktop.paint(&staging, tile, desktop.clock_area());
-                    if libwoven::compositor_present().is_err() {
-                        fail(7);
-                    }
-                }
+        let mut dirty = match clock.wait(sources) {
+            Ok(FrameEvent::Frame { .. }) => desktop.tick(),
+            Ok(FrameEvent::Ready(_)) => Area::new(0, 0, 0, 0),
+            Err(_) if sources & wait::MESSAGE != 0 => {
+                sources &= !wait::MESSAGE;
+                let _ = libwoven::print("woven-shell: no Ipc capability; applications disabled\n");
+                continue;
             }
-            // Input belongs to the focused desktop, but nothing on it takes
-            // input yet; drain it so the queue does not fill.
-            Ok(FrameEvent::Ready(_)) => while let Ok(Some(_)) = libwoven::input_poll_event() {},
             Err(_) => fail(8),
+        };
+        while let Ok((length, sender)) = libwoven::message_receive(&mut message) {
+            dirty = dirty.union(desktop.handle_message(sender, &message[..length]));
+        }
+        while let Ok(Some(event)) = libwoven::input_poll_event() {
+            let area = desktop.handle_input(event);
+            if !area.is_empty() {
+                // Repainted per event, so pointer motion over several
+                // events never leaves a trail.
+                desktop.repaint(&mut painter, area);
+            }
+        }
+        dirty = dirty.union(desktop.check_clients());
+        if !dirty.is_empty() {
+            desktop.repaint(&mut painter, dirty);
+        }
+        if libwoven::compositor_present().is_err() {
+            fail(7);
         }
     }
 }

@@ -219,6 +219,8 @@ pub mod syscall {
     pub const GRAPHICS_COMPOSITOR_SCALE: u64 = 117;
     pub const GRAPHICS_SURFACE_WRITE: u64 = 118;
     pub const CLOCK_READ: u64 = 119;
+    pub const GRAPHICS_COMPOSITOR_BLIT_REGION: u64 = 120;
+    pub const GRAPHICS_COMPOSITOR_BLIT_REGION_SHARED: u64 = 121;
     pub const MESSAGE_SEND: u64 = 11;
     pub const MESSAGE_RECEIVE: u64 = 12;
 
@@ -521,6 +523,24 @@ pub mod syscall {
 
     /// # Safety
     /// Must be called from WovenHat userspace.
+    pub unsafe fn graphics_compositor_blit_region(
+        handle: u64,
+        x: i32,
+        y: i32,
+        region: u64,
+        shared: bool,
+    ) -> u64 {
+        let destination = (x as u32 as u64) | ((y as u32 as u64) << 32);
+        let number = if shared {
+            GRAPHICS_COMPOSITOR_BLIT_REGION_SHARED
+        } else {
+            GRAPHICS_COMPOSITOR_BLIT_REGION
+        };
+        unsafe { invoke(number, handle, destination, region) }
+    }
+
+    /// # Safety
+    /// Must be called from WovenHat userspace.
     pub unsafe fn clock_read() -> u64 {
         unsafe { invoke(CLOCK_READ, 0, 0, 0) }
     }
@@ -683,6 +703,16 @@ impl GraphicsSurface {
         check(result).map(|_| ())
     }
 
+    /// Blit only `region` of this surface (in surface coordinates) so its
+    /// top-left lands at `(x, y)` on the compositor. Lease holder only.
+    pub fn present_region(&self, region: Region, x: i32, y: i32) -> Result<(), Error> {
+        // SAFETY: integer-only call carrying the surface's own handle.
+        let result = unsafe {
+            syscall::graphics_compositor_blit_region(self.handle, x, y, region.pack(), false)
+        };
+        check(result).map(|_| ())
+    }
+
     /// Upload a whole canvas to the top-left of this surface.
     pub fn write_canvas(&self, canvas: &Canvas<'_>) -> Result<(), Error> {
         let (Ok(width), Ok(height)) = (u16::try_from(canvas.width), u16::try_from(canvas.height))
@@ -750,6 +780,34 @@ pub struct Region {
     pub y: u16,
     pub width: u16,
     pub height: u16,
+}
+
+impl Region {
+    /// `x | y << 16 | width << 32 | height << 48`, the kernel's rectangle
+    /// packing.
+    pub const fn pack(self) -> u64 {
+        self.x as u64 | (self.y as u64) << 16 | (self.width as u64) << 32 | (self.height as u64) << 48
+    }
+}
+
+/// The process that owns the surface `token` names. A token packs its
+/// owner's id in its high 32 bits, and the kernel checks that name against
+/// the real owner on every operation, so a token naming process P can only
+/// ever reach a surface P owns. A compositor uses this to accept a surface
+/// only from its owner.
+pub const fn surface_owner(token: u64) -> process::Id {
+    process::Id(token >> 32)
+}
+
+/// Blit only `region` of another process's shared surface so its top-left
+/// lands at `(x, y)`. Same rules as [`compositor_blit_shared`]; this is how a
+/// window manager repaints an exposed rectangle without overdrawing windows
+/// stacked above it.
+pub fn compositor_blit_region_shared(handle: u64, region: Region, x: i32, y: i32) -> Result<(), Error> {
+    // SAFETY: integer-only call.
+    let result =
+        unsafe { syscall::graphics_compositor_blit_region(handle, x, y, region.pack(), true) };
+    check(result).map(|_| ())
 }
 
 /// Composite only what a client changed: blit the pending damage of a shared

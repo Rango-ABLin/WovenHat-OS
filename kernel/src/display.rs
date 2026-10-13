@@ -213,6 +213,38 @@ impl Surface {
         target
     }
 
+    /// Copy the `region` of `source` (in source coordinates) so its top-left
+    /// lands at `(x, y)`, clipped to both surfaces. Returns the region
+    /// touched here.
+    ///
+    /// This is what lets a compositor redraw exactly an exposed rectangle: it
+    /// copies only the part of a window inside the rectangle, rather than the
+    /// whole window, which would paint over anything stacked above it
+    /// outside the rectangle.
+    pub fn blit_region(&mut self, source: &Surface, region: Rect, x: i32, y: i32) -> Rect {
+        let clipped = region.intersect(source.bounds());
+        if clipped.is_empty() {
+            return Rect::EMPTY;
+        }
+        // Where the clipped region's top-left lands.
+        let origin_x = x.saturating_add(clipped.x - region.x);
+        let origin_y = y.saturating_add(clipped.y - region.y);
+        let target = Rect::new(origin_x, origin_y, clipped.width, clipped.height)
+            .intersect(self.bounds());
+        if target.is_empty() {
+            return Rect::EMPTY;
+        }
+        for row in 0..target.height {
+            let source_row = clipped.y as usize + (target.y - origin_y) as usize + row;
+            let source_column = clipped.x as usize + (target.x - origin_x) as usize;
+            let destination = (target.y as usize + row) * self.width + target.x as usize;
+            let origin = source_row * source.width + source_column;
+            self.pixels[destination..destination + target.width]
+                .copy_from_slice(&source.pixels[origin..origin + target.width]);
+        }
+        target
+    }
+
     /// Overwrite `rect` with pixels decoded from `bytes`: little-endian
     /// `u32`s, row by row, exactly `rect.width * rect.height` of them. The
     /// unused high byte is cleared so every stored pixel stays `0x00RRGGBB`.

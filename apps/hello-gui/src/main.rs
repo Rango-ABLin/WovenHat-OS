@@ -43,6 +43,11 @@
 //! geometry the kernel reports, and animates a square paced by a
 //! `FrameClock`, checking that no frame came early.
 //!
+//! With `--desktop-client <shell> <a|b>` it is an application on the
+//! WovenShell desktop: it opens a window through the shell's protocol (and,
+//! as `a`, a tray icon and a notification, then redraws part of its window),
+//! and exits once the shell forwards it its key.
+//!
 //! With `--probe <handle>` it runs as an ordinary process and checks that the
 //! kernel refuses it everything it has no authority for: every compositor
 //! operation, and every operation on the surface `<handle>`, which belongs to
@@ -89,6 +94,7 @@ fn main(args: Args) -> ! {
         Some(b"--wm") => window_manager(),
         Some(b"--alpha-compositor") => alpha_compositor(),
         Some(b"--scaled-compositor") => scaled_compositor(),
+        Some(b"--desktop-client") => desktop_client(&args),
         Some(b"--wm-client") => wm_client(&args),
         Some(_) => fail(250),
         None => run(Input::None),
@@ -828,6 +834,86 @@ fn alpha_compositor() -> ! {
     }
     drop(backdrop);
     drop(shadow);
+    libwoven::exit(0)
+}
+
+/// An application on the WovenShell desktop.
+fn desktop_client(args: &Args) -> ! {
+    let Some(shell) = args.get(2).and_then(parse_u64).map(libwoven::process::Id) else {
+        fail(180)
+    };
+    let (title, width, height, color, expected, extras): (&[u8], u16, u16, u32, u8, bool) =
+        match args.get(3) {
+            Some(b"a") => (b"Alpha", 120, 80, rgb(200, 60, 60), b'x', true),
+            Some(b"b") => (b"Beta", 100, 60, rgb(60, 60, 200), b'y', false),
+            _ => fail(181),
+        };
+    let window = match GraphicsSurface::create(u32::from(width), u32::from(height)) {
+        Ok(surface) => surface,
+        Err(_) => fail(182),
+    };
+    if window.fill_rect(0, 0, width, height, color).is_err() || window.share_with(shell).is_err() {
+        fail(183);
+    }
+    let mut open = [0u8; 40];
+    open[..4].copy_from_slice(b"WOPN");
+    open[4..12].copy_from_slice(&window.handle().to_le_bytes());
+    open[12..14].copy_from_slice(&width.to_le_bytes());
+    open[14..16].copy_from_slice(&height.to_le_bytes());
+    open[16..16 + title.len()].copy_from_slice(title);
+    if libwoven::message_send(shell, &open[..16 + title.len()]).is_err() {
+        fail(184);
+    }
+
+    // Client A also shows a tray icon and a notification, then redraws part
+    // of its window, which reaches the screen only through damage.
+    let icon = if extras {
+        let icon = match GraphicsSurface::create(16, 16) {
+            Ok(surface) => surface,
+            Err(_) => fail(185),
+        };
+        let mut tray = [0u8; 12];
+        tray[..4].copy_from_slice(b"TRAY");
+        tray[4..].copy_from_slice(&icon.handle().to_le_bytes());
+        if icon.fill_rect(0, 0, 16, 16, rgb(40, 200, 90)).is_err()
+            || icon.share_with(shell).is_err()
+            || libwoven::message_send(shell, &tray).is_err()
+            || libwoven::message_send(shell, b"NOTEAlpha ready").is_err()
+        {
+            fail(185);
+        }
+        let start = libwoven::ticks();
+        while libwoven::ticks().wrapping_sub(start) < 100 {
+            libwoven::yield_now();
+        }
+        if window.fill_rect(10, 10, 20, 10, rgb(255, 255, 255)).is_err()
+            || window.damage(10, 10, 20, 10).is_err()
+        {
+            fail(186);
+        }
+        Some(icon)
+    } else {
+        None
+    };
+
+    // Exactly our key, from the shell.
+    let deadline = libwoven::ticks() + 6000;
+    let mut key = [0u8; 8];
+    loop {
+        match libwoven::wait_any(libwoven::wait::MESSAGE, Some(deadline)) {
+            Ok(0) | Err(_) => fail(188),
+            Ok(_) => {}
+        }
+        if let Ok((length, sender)) = libwoven::message_receive(&mut key) {
+            if sender != shell || length != 1 || key[0] != expected {
+                fail(187);
+            }
+            break;
+        }
+    }
+    let _ = libwoven::print("hello-gui desktop client: received its key\n");
+    drop(icon);
+    drop(window);
     libwoven::exit(0)
 }
 

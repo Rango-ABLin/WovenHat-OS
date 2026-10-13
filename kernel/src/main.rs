@@ -3378,6 +3378,15 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         serial::write_line(format_args!("[S1-5] storage journal: PASSED"));
         qemu_test_exit_success();
     }
+    #[cfg(feature = "stage20-2-test")]
+    {
+        if !stage20_2_self_test() {
+            serial::write_line(format_args!("[S20.2] desktop applications: FAILED"));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!("[S20.2] desktop applications: PASSED"));
+        qemu_test_exit_success();
+    }
     #[cfg(feature = "stage20-1-test")]
     {
         if !stage20_1_self_test() {
@@ -4516,7 +4525,8 @@ fn stage16_1_self_test() -> bool {
     feature = "stage19-11-test",
     feature = "stage19-12-test",
     feature = "stage19-13-test",
-    feature = "stage19-14-test"
+    feature = "stage19-14-test",
+    feature = "stage20-2-test"
 ))]
 const HELLO_GUI_IMAGE: &[u8] = include_bytes!(env!("WOVENHAT_HELLO_GUI_IMAGE"));
 
@@ -4535,7 +4545,8 @@ const HELLO_GUI_IMAGE: &[u8] = include_bytes!(env!("WOVENHAT_HELLO_GUI_IMAGE"));
     feature = "stage19-11-test",
     feature = "stage19-12-test",
     feature = "stage19-13-test",
-    feature = "stage19-14-test"
+    feature = "stage19-14-test",
+    feature = "stage20-2-test"
 ))]
 fn display_client_capabilities() -> capability::CapabilitySet {
     capability::CapabilitySet::only(capability::Capability::Console)
@@ -4556,7 +4567,8 @@ fn display_client_capabilities() -> capability::CapabilitySet {
     feature = "stage19-11-test",
     feature = "stage19-12-test",
     feature = "stage19-13-test",
-    feature = "stage19-14-test"
+    feature = "stage19-14-test",
+    feature = "stage20-2-test"
 ))]
 fn run_hello_gui(
     image: &[u8],
@@ -4581,7 +4593,8 @@ fn run_hello_gui(
     feature = "stage19-11-test",
     feature = "stage19-12-test",
     feature = "stage19-13-test",
-    feature = "stage19-14-test"
+    feature = "stage19-14-test",
+    feature = "stage20-2-test"
 ))]
 fn spawn_hello_gui(
     image: &[u8],
@@ -4611,7 +4624,8 @@ fn spawn_hello_gui(
     feature = "stage19-11-test",
     feature = "stage19-12-test",
     feature = "stage19-13-test",
-    feature = "stage19-14-test"
+    feature = "stage19-14-test",
+    feature = "stage20-2-test"
 ))]
 fn wait_hello_gui(pid: task::ProcessId) -> Option<(task::ProcessId, Result<i32, task::WaitError>)> {
     let start = timer::ticks();
@@ -4624,9 +4638,301 @@ fn wait_hello_gui(pid: task::ProcessId) -> Option<(task::ProcessId, Result<i32, 
     Some((pid, task::wait_process(pid.as_u64())))
 }
 
-/// WovenShell image for the Stage 20.1 gate, built by its harness.
-#[cfg(feature = "stage20-1-test")]
+/// WovenShell image for the Stage 20 gates, built by their harness.
+#[cfg(any(feature = "stage20-1-test", feature = "stage20-2-test"))]
 const WOVEN_SHELL_IMAGE: &[u8] = include_bytes!(env!("WOVENHAT_SHELL_IMAGE"));
+
+/// Stage 20.2 acceptance: applications on the WovenShell desktop.
+///
+/// The shell runs with two hello-gui `--desktop-client` applications. Real
+/// i8042 pointer and keyboard input (the Stage 19.12 loopback) drives it.
+/// Every check reads the compositor surface and compares it with the
+/// kernel's own rendering: window frames and title bars, taskbar entries,
+/// the tray icon, the notification toast and its expiry, client damage,
+/// raising by taskbar click, the pointer, key routing to the focused
+/// window, and windows, entries and icons disappearing when their
+/// application exits.
+#[cfg(feature = "stage20-2-test")]
+fn stage20_2_self_test() -> bool {
+    use crate::display::{blend_pixel, rgb, Surface};
+
+    const WALLPAPER_TOP: u32 = rgb(18, 42, 74);
+    const WALLPAPER_BOTTOM: u32 = rgb(64, 28, 88);
+    const WHITE: u32 = rgb(255, 255, 255);
+    const BLACK: u32 = rgb(0, 0, 0);
+    const TASKBAR: u32 = rgb(20, 24, 32);
+    const ACCENT: u32 = rgb(90, 140, 220);
+    const ACTIVE: u32 = rgb(70, 120, 210);
+    const ENTRY_INACTIVE: u32 = rgb(44, 52, 68);
+    const TITLE_INACTIVE: u32 = rgb(60, 66, 80);
+    const TOAST_FILL: u32 = rgb(30, 34, 46);
+    const RED: u32 = rgb(200, 60, 60);
+    const BLUE: u32 = rgb(60, 60, 200);
+    const GREEN: u32 = rgb(40, 200, 90);
+    const UNSET: u32 = 0x0100_0000;
+
+    fn step(name: &str, ok: bool) -> bool {
+        serial::write_line(format_args!(
+            "[S20.2] {} {}",
+            name,
+            if ok { "PASS" } else { "FAIL" }
+        ));
+        ok
+    }
+    /// Poll `condition` until it holds, for at most `limit` ticks. The shell
+    /// repaints concurrently, so a check may first see a frame in progress.
+    fn until(limit: u64, condition: impl Fn() -> bool) -> bool {
+        let start = timer::ticks();
+        loop {
+            if condition() {
+                return true;
+            }
+            if timer::ticks().wrapping_sub(start) > limit {
+                return false;
+            }
+            task::yield_now();
+        }
+    }
+    fn wallpaper(x: i32, y: i32, height: i32) -> u32 {
+        let span = (height - 1).max(1);
+        let t = (y.clamp(0, span) * 255 / span) as u8;
+        let base = blend_pixel(WALLPAPER_BOTTOM, WALLPAPER_TOP, t);
+        if x % 32 == 0 || y % 32 == 0 {
+            blend_pixel(WHITE, base, 28)
+        } else {
+            base
+        }
+    }
+    fn region(x0: i32, y0: i32, width: i32, height: i32, expected: impl Fn(i32, i32) -> u32) -> bool {
+        (y0..y0 + height).all(|y| (x0..x0 + width).all(|x| compositor::pixel(x, y) == Ok(expected(x, y))))
+    }
+    /// A `width`×`height` box filled with `fill`, with `text` in white at
+    /// `(dx, dy)` inside it, as the kernel renders it, compared with the
+    /// screen at `(x, y)`.
+    fn labelled(origin: (i32, i32), size: (i32, i32), offset: (i32, i32), text: &str, fill: u32) -> bool {
+        let ((x, y), (width, height), (dx, dy)) = (origin, size, offset);
+        let mut mask = Surface::new(width as usize, height as usize);
+        let bounds = mask.bounds();
+        mask.fill_rect(bounds, UNSET);
+        mask.draw_text(dx, dy, text, WHITE);
+        region(x, y, width, height, |px, py| match mask.pixel(px - x, py - y) {
+            Some(WHITE) => WHITE,
+            _ => fill,
+        })
+    }
+    /// One PS/2 packet through the real auxiliary path.
+    fn packet(dx: i16, screen_dy: i16, left: bool) -> bool {
+        let dy = -screen_dy;
+        let flags = 0x08
+            | u8::from(left)
+            | if dx < 0 { 0x10 } else { 0 }
+            | if dy < 0 { 0x20 } else { 0 };
+        [flags, dx as u8, dy as u8].into_iter().all(mouse::loopback)
+    }
+    /// Relative motion in packets of at most 100 per axis.
+    fn move_by(mut dx: i32, mut dy: i32) -> bool {
+        while dx != 0 || dy != 0 {
+            let (sx, sy) = (dx.clamp(-100, 100), dy.clamp(-100, 100));
+            if !packet(sx as i16, sy as i16, false) {
+                return false;
+            }
+            dx -= sx;
+            dy -= sy;
+        }
+        true
+    }
+    fn click() -> bool {
+        packet(0, 0, true) && packet(0, 0, false)
+    }
+
+    let install = |path: &str, image: &[u8]| {
+        vfs::create_read_only(path, image).is_ok() && {
+            let mut copy = alloc::vec![0u8; image.len()];
+            vfs::read_all(path, &mut copy) == Ok(image.len())
+        }
+    };
+    if !step(
+        "install shell and application",
+        install("/bin/woven-shell", WOVEN_SHELL_IMAGE) && install("/bin/hello-gui", HELLO_GUI_IMAGE),
+    ) {
+        return false;
+    }
+    let shell_capabilities = capability::CapabilitySet::only(capability::Capability::Console)
+        .with(capability::Capability::DisplayIo)
+        .with(capability::Capability::InputIo)
+        .with(capability::Capability::Ipc);
+    let Some(program) = userspace::load_elf_with_argv(WOVEN_SHELL_IMAGE, &["/bin/woven-shell"]) else {
+        return step("shell image loads", false);
+    };
+    let Ok((shell, _, _)) = task::spawn_user_system_service("woven-shell", program, shell_capabilities)
+    else {
+        return step("shell spawned", false);
+    };
+    if !step(
+        "shell took the display",
+        until(3000, || compositor::holder() == Some(shell.as_u64()) && compositor::is_presenting()),
+    ) {
+        return false;
+    }
+    let Some((width, height)) = compositor::dimensions() else {
+        return step("desktop geometry", false);
+    };
+    let (width, height) = (width as i32, height as i32);
+    let top = height - 24;
+    let taskbar = move |x: i32, y: i32| blend_pixel(TASKBAR, wallpaper(x, y, height), 216);
+    let entry = |index: i32| (56 + index * 84, top + 4);
+    let (tray_x, tray_y) = (width - 54 - 20, top + 4);
+    let (toast_x, toast_y) = (width - 188, 8);
+    serial::write_line(format_args!("[S20.2] desktop {}x{}", width, height));
+
+    let client_capabilities =
+        capability::CapabilitySet::only(capability::Capability::Console).with(capability::Capability::Ipc);
+    let shell_arg = alloc::format!("{}", shell.as_u64());
+    let Some(alpha) = spawn_hello_gui(
+        HELLO_GUI_IMAGE,
+        &["/bin/hello-gui", "--desktop-client", &shell_arg, "a"],
+        Some(client_capabilities),
+    ) else {
+        return step("application A spawned", false);
+    };
+    // A's window cascades to (40, 40), 120x80, its title bar above.
+    if !step("window A opened", until(2000, || compositor::pixel(45, 45) == Ok(RED))) {
+        return false;
+    }
+    let frame_a = until(500, || {
+        labelled((40, 26), (120, 14), (4, 4), "Alpha", ACTIVE) && region(40, 40, 120, 80, |x, y| {
+            if (50..70).contains(&x) && (50..60).contains(&y) {
+                compositor::pixel(x, y).unwrap_or(UNSET)
+            } else {
+                RED
+            }
+        })
+    });
+    let entry_a = until(500, || labelled(entry(0), (80, 16), (4, 5), "Alpha", ACTIVE));
+    let tray = until(500, || region(tray_x, tray_y, 16, 16, |_, _| GREEN));
+    let toast = until(500, || {
+        let mut mask = Surface::new(180, 22);
+        let bounds = mask.bounds();
+        mask.fill_rect(bounds, UNSET);
+        mask.draw_text(6, 8, "Alpha ready", WHITE);
+        region(toast_x, toast_y, 180, 22, |x, y| {
+            let (cx, cy) = (x - toast_x, y - toast_y);
+            if cx == 0 || cy == 0 || cx == 179 || cy == 21 {
+                ACCENT
+            } else if mask.pixel(cx, cy) == Some(WHITE) {
+                WHITE
+            } else {
+                TOAST_FILL
+            }
+        })
+    });
+    if !step("window A framed with a focused title bar", frame_a)
+        || !step("taskbar entry for A, focused", entry_a)
+        || !step("tray icon shown", tray)
+        || !step("notification toast shown", toast)
+    {
+        return false;
+    }
+    // A redraws a 20x10 patch at (10, 10) and reports damage; only the
+    // shell's damage path brings it to the screen.
+    if !step(
+        "client damage composited",
+        until(1500, || region(50, 50, 20, 10, |_, _| WHITE)),
+    ) {
+        return false;
+    }
+
+    let Some(beta) = spawn_hello_gui(
+        HELLO_GUI_IMAGE,
+        &["/bin/hello-gui", "--desktop-client", &shell_arg, "b"],
+        Some(client_capabilities),
+    ) else {
+        return step("application B spawned", false);
+    };
+    // B cascades to (64, 64), 100x60, and opens on top, focused.
+    let stacked = until(2000, || compositor::pixel(150, 100) == Ok(BLUE))
+        && until(500, || {
+            compositor::pixel(45, 45) == Ok(RED)
+                && labelled((64, 50), (100, 14), (4, 4), "Beta", ACTIVE)
+                && labelled((40, 26), (120, 14), (4, 4), "Alpha", TITLE_INACTIVE)
+                && labelled(entry(0), (80, 16), (4, 5), "Alpha", ENTRY_INACTIVE)
+                && labelled(entry(1), (80, 16), (4, 5), "Beta", ACTIVE)
+        });
+    if !step("window B opens on top and takes focus", stacked) {
+        return false;
+    }
+    if !step(
+        "toast expires and the desktop shows through",
+        until(1000, || region(toast_x, toast_y, 180, 22, |x, y| wallpaper(x, y, height))),
+    ) {
+        return false;
+    }
+
+    // The pointer starts hidden at the centre. Move it onto A's taskbar
+    // entry and click: A is raised and focused.
+    let (mut px, mut py) = (width / 2, height / 2);
+    let (target_x, target_y) = (entry(0).0 + 40, entry(0).1 + 8);
+    let raised = move_by(target_x - px, target_y - py)
+        && click()
+        && until(1000, || compositor::pixel(150, 100) == Ok(RED));
+    (px, py) = (target_x, target_y);
+    if !step("taskbar click raises window A", raised) {
+        return false;
+    }
+    let pointer = until(500, || {
+        compositor::pixel(px, py) == Ok(BLACK) && compositor::pixel(px + 1, py + 2) == Ok(WHITE)
+    });
+    if !step("pointer drawn at its position", pointer) {
+        return false;
+    }
+    // Park the pointer on empty desktop, then type: the key goes to A, the
+    // focused window, and A exits once it has it.
+    let parked = move_by(300 - px, 300 - py);
+    (px, py) = (300, 300);
+    let typed = parked
+        && until(500, || compositor::pixel(px, py) == Ok(BLACK))
+        && mouse::keyboard_loopback(0x2d);
+    let alpha_status = wait_hello_gui(alpha).map(|(_, status)| status);
+    if !step("key x routed to focused window A", typed && alpha_status == Some(Ok(0))) {
+        return false;
+    }
+    let gone = until(1000, || compositor::pixel(45, 45) == Ok(wallpaper(45, 45, height)))
+        && until(500, || {
+            region(tray_x, tray_y, 16, 16, taskbar)
+                && labelled(entry(0), (80, 16), (4, 5), "Beta", ACTIVE)
+                && region(entry(1).0, entry(1).1, 80, 16, taskbar)
+                && labelled((64, 50), (100, 14), (4, 4), "Beta", ACTIVE)
+                && compositor::pixel(150, 100) == Ok(BLUE)
+        });
+    if !step("A's window, entry and tray icon removed on exit; B focused", gone) {
+        return false;
+    }
+
+    // Click inside B and type: B gets its key and exits.
+    let typed = move_by(100 - px, 100 - py) && click() && mouse::keyboard_loopback(0x15);
+    let beta_status = wait_hello_gui(beta).map(|(_, status)| status);
+    if !step("key y routed to window B", typed && beta_status == Some(Ok(0))) {
+        return false;
+    }
+    let empty = until(1000, || {
+        compositor::pixel(150, 100) == Ok(wallpaper(150, 100, height))
+            && region(entry(0).0, entry(0).1, 80, 16, taskbar)
+    });
+    if !step("desktop empty again", empty) {
+        return false;
+    }
+
+    if task::kill_process(shell.as_u64(), 9).is_err()
+        || !until(1000, || task::process_exited(shell))
+    {
+        return step("shell killed", false);
+    }
+    let _ = task::wait_process(shell.as_u64());
+    step(
+        "display returned to the terminal",
+        compositor::holder().is_none() && !compositor::is_presenting(),
+    )
+}
 
 /// Stage 20.1 acceptance: the WovenShell desktop.
 ///

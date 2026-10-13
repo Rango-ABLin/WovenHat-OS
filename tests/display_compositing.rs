@@ -465,3 +465,47 @@ fn write_pixels_refuses_partial_rectangles_and_wrong_lengths() {
         }
     }
 }
+
+// ------------------------------------------------------------- region blit
+
+#[test]
+fn blit_region_copies_only_the_region_to_the_destination() {
+    let mut source = Surface::new(6, 4);
+    for y in 0..4 {
+        for x in 0..6 {
+            source.set_pixel(x, y, rgb(x as u8, y as u8, 7));
+        }
+    }
+    let mut target = Surface::new(10, 10);
+    target.fill_rect(target.bounds(), WHITE);
+    // Source region (2, 1) 3x2 lands at (5, 6).
+    assert_eq!(target.blit_region(&source, Rect::new(2, 1, 3, 2), 5, 6), Rect::new(5, 6, 3, 2));
+    assert_eq!(target.pixel(5, 6), Some(rgb(2, 1, 7)));
+    assert_eq!(target.pixel(7, 7), Some(rgb(4, 2, 7)));
+    for (x, y) in [(4, 6), (8, 6), (5, 5), (5, 8)] {
+        assert_eq!(target.pixel(x, y), Some(WHITE), "outside ({x}, {y}) untouched");
+    }
+}
+
+#[test]
+fn blit_region_clips_to_both_surfaces() {
+    let mut source = Surface::new(4, 4);
+    for y in 0..4 {
+        for x in 0..4 {
+            source.set_pixel(x, y, rgb(x as u8, y as u8, 1));
+        }
+    }
+    let mut target = Surface::new(5, 5);
+    target.fill_rect(target.bounds(), WHITE);
+    // A region hanging off the source's top-left keeps its offset: source
+    // (0, 0) lands one pixel in from the requested origin.
+    assert_eq!(target.blit_region(&source, Rect::new(-1, -1, 3, 3), 0, 0), Rect::new(1, 1, 2, 2));
+    assert_eq!(target.pixel(1, 1), Some(rgb(0, 0, 1)));
+    assert_eq!(target.pixel(0, 0), Some(WHITE));
+    // Off the target's bottom-right: only the overlap is written.
+    assert_eq!(target.blit_region(&source, Rect::new(0, 0, 4, 4), 3, 3), Rect::new(3, 3, 2, 2));
+    assert_eq!(target.pixel(4, 4), Some(rgb(1, 1, 1)));
+    // Entirely outside either surface: nothing.
+    assert_eq!(target.blit_region(&source, Rect::new(4, 0, 2, 2), 0, 0), Rect::EMPTY);
+    assert_eq!(target.blit_region(&source, Rect::new(0, 0, 2, 2), 9, 9), Rect::EMPTY);
+}
