@@ -1574,6 +1574,26 @@ pub fn stage15_2_self_test() -> bool {
         return false;
     }
 
+    // Exercise the authorized adapter across distinct mount lifetimes.
+    // The same ATA device is reopened for each operation, so the read must
+    // observe committed disk state rather than a retained Volume instance.
+    let authority = AuthorizedWfsWriter::after_capability_check();
+    let write_through = write_ata_file(&authority, "adapter.txt", b"persistent-v1", 20).is_ok();
+    let mut adapter_buf = [0u8; 64];
+    let read_through = read_ata_file("adapter.txt", &mut adapter_buf)
+        .map(|n| &adapter_buf[..n] == b"persistent-v1")
+        .unwrap_or(false);
+    let overwritten = write_ata_file(&authority, "adapter.txt", b"v2", 21).is_ok();
+    let mut overwritten_buf = [0u8; 64];
+    let reread = read_ata_file("adapter.txt", &mut overwritten_buf)
+        .map(|n| &overwritten_buf[..n] == b"v2")
+        .unwrap_or(false);
+    let removed = unlink_ata_file(&authority, "adapter.txt", 22).is_ok()
+        && read_ata_file("adapter.txt", &mut overwritten_buf) == Err(Error::NotFound);
+    if !step("authorized write-through across remounts", write_through && read_through && overwritten && reread && removed) {
+        return false;
+    }
+
     let verified = with_ata_volume(|volume| {
         if volume.check().is_err() {
             return false;
