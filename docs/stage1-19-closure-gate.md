@@ -65,3 +65,19 @@ Decision: BLOCKED | VERIFIED | CLOSED
 ```
 
 **Stage 20 unlock condition:** every Stage 1–19 entry is CLOSED on the same reconciled source baseline, all inherited CI gates are green, and independent security/release reviewers approve the closure ledger. Production-ready is a separate, stronger signoff.
+
+## Stage 12 evidence review — CI run 38373420895 (2026-10-13)
+- **Source SHA:** `de9ee133a023aae6ced38733d7d58c5b6c64b71e` on the closure branch.
+- **Job:** `release-validation`, job `115215724350`, **success**.
+- **Stage 12.1–12.5:** each passed QEMU **1, 2 and 4 CPU** acceptance with expected exit **33** (15/15 executions).
+- **Clippy:** `cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage12-{1..5}-test -- -D warnings` executed successfully for each stage (feature strings expanded separately).
+- **Source integrity:** per-stage `storage_manager.rs` SHA checks passed; the earlier undefined `i` error did not recur. This is evidence of reproducibility in this run, not proof of the earlier failure's root cause.
+- **Disposition:** Stage 12 **software gate VERIFIED** on this SHA; Stage 12 **closure BLOCKED**. Hardware qualification, durable snapshots, and native filesystem/VFS integration remain unproven.
+- **Artifacts:** GitHub Actions run https://github.com/Rango-ABLin/WovenHat-OS/actions/runs/38373420895 ; retained job artifact `release-validation` and per-CPU Stage 12 audit directories.
+
+## Stage 15.2 native WovenFS integration findings
+- `kernel/src/wfs.rs` implements a genuine journaled on-disk `Volume` with format, mount, create, read, write and unlink primitives.
+- `mount_ata_into_vfs()` imports root-directory entries into `/wfs` using `vfs::create_read_only`. It is gated by `stage15-2-test` and explicitly documents that VFS write-back is a later stage.
+- Existing import treats `AlreadyExists` as imported without refreshing contents; a remount must not silently retain stale cached data. Define mount namespace ownership and unmount/refresh semantics before enabling write-back.
+- `with_ata_volume()` mounts for the duration of a closure, but this is not an end-to-end VFS-backed writable mount.
+- **Required next patch:** implement an authorized VFS backend adapter with create/read/write/unlink, explicit mount ownership and teardown; exercise reboot/remount, stale handles, failure injection and crash recovery in the normal VFS path. Do not claim this functionality exists yet.
