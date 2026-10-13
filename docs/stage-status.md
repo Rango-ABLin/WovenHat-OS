@@ -1,5 +1,111 @@
 # Stage status
 
+## Stage 20.1 — WovenShell desktop: wallpaper, taskbar, clock (2026-10-13)
+
+Roadmap Stage 18.1, Desktop, first part. Repo stage 20 is roadmap Stage 18,
+WovenShell. Stages 18–19 of this repo were roadmap Stage 17, WovenCompositor.
+
+**Desktop program.** `apps/woven-shell` is a new userspace program, a
+separate crate built like hello-gui.
+- It takes the compositor lease, and switches to display scale 2 on a
+  screen of at least 1280×800 so the 5×7 font stays legible.
+- It draws:
+  - a procedural wallpaper: a vertical gradient with a faint woven grid;
+  - a translucent taskbar with an accent line;
+  - the WovenStart button, a placeholder until 18.2;
+  - a clock (`HH:MM`, or `HH:MM:SS` with `--seconds`).
+- It wakes four times a second through `FrameClock` and repaints only the
+  clock's tiles when the text changes. It drains input, since nothing on
+  the desktop takes input yet.
+
+Client surfaces are capped at 320×240, so the desktop is never one surface.
+The scene is a pure function of position and state. The shell renders it
+in software into a `libwoven::Canvas`, one 320×40 tile at a time, uploads
+each tile into one staging surface and blits it into place. Any region is
+repainted by rendering the tiles that cover it.
+
+**Kernel.**
+- `kernel/src/rtc.rs`: CMOS real-time clock.
+  - Readings are taken only while update-in-progress is clear, and accepted
+    when two consecutive readings agree.
+  - BCD and binary, and 12- and 24-hour forms, are decoded. Invalid digits
+    and out-of-range fields are refused.
+  - It is serialised by its own lock, with bounded polling. Times are UTC,
+    the clock's own zone.
+- Syscall 119, `ClockRead`: returns the packed date-time. It needs no
+  capability, like `Getticks`.
+- Syscall 118, `GraphicsSurfaceWrite(handle, rect, pixels)`: uploads
+  little-endian pixels into one of the caller's surfaces.
+  - The rectangle is checked against the surface before anything is copied,
+    which bounds the copy by the surface caps.
+  - Pixels are copied from user memory with no lock held, and the handle is
+    re-resolved for the write, so a surface destroyed in between is refused.
+  - The unused high byte is cleared.
+  - `display::Surface::write_pixels` does the write, with two new host
+    tests.
+
+**libwoven.** `GraphicsSurface::write` and `write_canvas`, `Canvas`
+(clipped fill, blend, shade and text), `blend`, `clock` / `DateTime`, and
+`font`. The font is the kernel's own source file, so client text matches
+kernel text pixel for pixel.
+
+**Defects found and fixed.**
+- **Kill path skipped display teardown (since Stage 18).** A process
+  killed from outside is torn down by `complete_process_termination`, not
+  `exit_current_process`. That path never released the process's client
+  surfaces or its compositor lease, so a killed compositor or desktop kept
+  the screen forever. Both are now released there, under the same
+  scheduler lock as on the exit path.
+- **App linker script missed large-model sections.** The large code model
+  emits `.ltext`, `.lrodata`, `.ldata` and `.lbss`, which `link.x` did not
+  match. The linker placed them as orphans in the first, read-execute
+  segment, so the shell's first write to a static faulted. No earlier app
+  had a writable static. The fix is in all three apps.
+- **Stale images.** Each app now has a `build.rs` that reruns when
+  `link.x` changes, because Cargo does not track files named only in link
+  arguments.
+
+Gate `[S20.1] woven-shell desktop: PASSED`. QEMU's 1280×800 framebuffer
+gives a 640×400 desktop at scale 2.
+- The kernel checks the clock decoder against fixed vectors, then reads the
+  hardware clock.
+- It starts the shell as a system service (`Console`, `DisplayIo`,
+  `InputIo`) and waits for it to take the display.
+- It checks the geometry against the framebuffer and the scale rule.
+- It checks three 40×40 wallpaper blocks against the formula restated in
+  the kernel.
+- It checks the accent line and the translucent taskbar body.
+- It checks the start button against the label rendered with the kernel's
+  own font.
+- It checks the clock region against the kernel's own reading of the
+  hardware clock, allowing up to 2 s of lag, then waits for a later
+  reading, so the clock is seen to advance.
+- It reads the physical framebuffer back at scale 2.
+- It kills the shell, then checks that the lease is gone, presentation has
+  stopped, and terminal text reaches the framebuffer again.
+
+Negative controls, with evidence in
+`audit-artifacts/stage20.1-negative-control-*`:
+- With the kill-path teardown removed (the pre-fix behaviour), the killed
+  shell keeps the display and the gate fails at "display returned to the
+  terminal".
+- With the shell's clock never repainting, it fails at "clock advances
+  with the hardware clock".
+
+Open:
+- **Not yet started at boot.** The desktop runs under its acceptance gate.
+  Starting it at boot belongs with session start: the login manager (18.7),
+  or a boot option before that.
+- **18.1 items still to come:** client windows on the desktop with a
+  taskbar window list, the system tray, and notification toasts.
+- **WovenStart** is a placeholder button; the launcher is 18.2.
+- **Clock** shows UTC: there is no time-zone configuration.
+- **Kill-path gaps outside this stage.** The kill path still skips
+  `thread::reap_owner`, `notifications::discard_recipient`,
+  `terminal::release_foreground` and `network::close_process_sockets`,
+  which `exit_current_process` performs. This was found during this review
+  and not changed here.
+
 ## Stage 19.14 — integer display scaling and paced animation (2026-10-13)
 
 Roadmap Stage 17's DPI-scaling and animation items. This closes the

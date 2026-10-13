@@ -425,3 +425,43 @@ fn scaled_presentation_clips_to_the_screen_and_scale_one_matches_present() {
     assert_eq!(scaled, plain);
     assert_eq!(present_scaled(&surface, &damage, &mut scaled, descriptor, 0), 0);
 }
+
+// ------------------------------------------------------------- pixel upload
+
+fn le_bytes(pixels: &[u32]) -> Vec<u8> {
+    pixels.iter().flat_map(|pixel| pixel.to_le_bytes()).collect()
+}
+
+#[test]
+fn write_pixels_fills_exactly_the_rectangle_and_clears_the_high_byte() {
+    let mut surface = Surface::new(6, 5);
+    surface.fill_rect(surface.bounds(), WHITE);
+    // A 3x2 block, one pixel carrying junk in its unused high byte.
+    let block = [RED, BLUE, 0xff00_ff00, BLUE, RED, rgb(1, 2, 3)];
+    assert_eq!(surface.write_pixels(Rect::new(2, 1, 3, 2), &le_bytes(&block)), Rect::new(2, 1, 3, 2));
+    assert_eq!(surface.pixel(2, 1), Some(RED));
+    assert_eq!(surface.pixel(4, 1), Some(0x0000_ff00), "high byte cleared");
+    assert_eq!(surface.pixel(4, 2), Some(rgb(1, 2, 3)));
+    for (x, y) in [(1, 1), (5, 1), (2, 0), (2, 3)] {
+        assert_eq!(surface.pixel(x, y), Some(WHITE), "outside ({x}, {y}) untouched");
+    }
+}
+
+#[test]
+fn write_pixels_refuses_partial_rectangles_and_wrong_lengths() {
+    let mut surface = Surface::new(4, 4);
+    surface.fill_rect(surface.bounds(), WHITE);
+    let four = le_bytes(&[RED; 4]);
+    // Hanging off the edge, negative, empty, or a buffer of the wrong size:
+    // nothing is written.
+    assert_eq!(surface.write_pixels(Rect::new(3, 0, 2, 2), &four), Rect::EMPTY);
+    assert_eq!(surface.write_pixels(Rect::new(-1, 0, 2, 2), &four), Rect::EMPTY);
+    assert_eq!(surface.write_pixels(Rect::new(0, 0, 0, 2), &[]), Rect::EMPTY);
+    assert_eq!(surface.write_pixels(Rect::new(0, 0, 2, 2), &four[..12]), Rect::EMPTY);
+    assert_eq!(surface.write_pixels(Rect::new(0, 0, 1, 1), &four), Rect::EMPTY);
+    for y in 0..4 {
+        for x in 0..4 {
+            assert_eq!(surface.pixel(x, y), Some(WHITE));
+        }
+    }
+}

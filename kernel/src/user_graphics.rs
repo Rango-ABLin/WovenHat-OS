@@ -397,6 +397,28 @@ pub fn clear_damage_waiter(grantee: u64, task: crate::task::TaskId) {
     });
 }
 
+/// Width and height of the surface named by `handle`.
+pub fn dimensions(handle: Handle) -> Result<(usize, usize), Error> {
+    with_registry(|registry| {
+        let surface = registry.resolve_mut(handle)?;
+        Ok((surface.width(), surface.height()))
+    })
+}
+
+/// Overwrite `rect` of the surface named by `handle` with `bytes`, which the
+/// caller has already copied out of user memory: little-endian `0x00RRGGBB`
+/// pixels, row by row. The rectangle must lie inside the surface and the
+/// buffer must match it exactly.
+pub fn write_pixels(handle: Handle, rect: Rect, bytes: &[u8]) -> Result<(), Error> {
+    with_registry(|registry| {
+        let surface = registry.resolve_mut(handle)?;
+        if surface.write_pixels(rect, bytes).is_empty() {
+            return Err(Error::OutOfRange);
+        }
+        Ok(())
+    })
+}
+
 /// Read one pixel back, so a client can verify what it drew.
 pub fn pixel(handle: Handle, x: i32, y: i32) -> Result<u32, Error> {
     with_registry(|registry| {

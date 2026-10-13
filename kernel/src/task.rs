@@ -1391,7 +1391,8 @@ pub fn spawn_user_process(
     feature = "stage19-11-test",
     feature = "stage19-12-test",
     feature = "stage19-13-test",
-    feature = "stage19-14-test"
+    feature = "stage19-14-test",
+    feature = "stage20-1-test"
 ))]
 pub fn spawn_user_system_service(
     name: &'static str,
@@ -4754,6 +4755,12 @@ fn complete_process_termination(task_id: TaskId, signal: u8) {
     // keeping them outside PROCESS_TABLE makes the global lock order explicit.
     crate::completion_port::release_owner(process_id.as_u64());
     crate::async_events::release_owner(process_id.as_u64());
+    // Client surfaces and the compositor lease, as exit_current_process
+    // releases them: a killed lease holder must hand the display back rather
+    // than keep it forever. Both run under SCHEDULER on that path too, and
+    // neither signals or wakes a task.
+    crate::user_graphics::release_owner(process_id.as_u64());
+    crate::compositor::release_owner(process_id.as_u64());
     let _ = crate::notifications::publish(crate::notifications::Notification {
         recipient: parent_id.as_u64(),
         kind: crate::notifications::Kind::ChildExit,

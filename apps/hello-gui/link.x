@@ -6,6 +6,11 @@
  * executable. Code and data are therefore placed in separate page-aligned
  * segments so W^X holds by construction.
  *
+ * The large code model (see .cargo/config.toml) names its sections .ltext,
+ * .lrodata, .ldata and .lbss. They must be placed explicitly: an unmatched
+ * section is an orphan the linker puts in the first segment, which is R_X,
+ * so a writable static there faults on its first write.
+ *
  * The region above 0x4000_0000_0e_0000 belongs to the mmap arena and the stack,
  * so an image must stay below it.
  */
@@ -24,21 +29,25 @@ SECTIONS
     .text : ALIGN(4096) {
         *(.text.start)
         *(.text .text.*)
+        *(.ltext .ltext.*)
     } :text
 
     .rodata : ALIGN(4096) {
         *(.rodata .rodata.*)
+        *(.lrodata .lrodata.*)
     } :text
 
     . = ALIGN(4096);
 
     .data : ALIGN(4096) {
         *(.data .data.*)
+        *(.ldata .ldata.*)
         *(.got .got.plt)
     } :data
 
     .bss : ALIGN(4096) {
         *(.bss .bss.*)
+        *(.lbss .lbss.*)
         *(COMMON)
     } :data
 

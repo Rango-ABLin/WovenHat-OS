@@ -691,6 +691,26 @@ jobs:
             python3 scripts/test-hello-gui-compositor-qemu.py --stage 19.13 --cpus "$cpu" --timeout 300 --qemu "$qemu" --firmware "$ovmf_code"
             python3 scripts/test-hello-gui-compositor-qemu.py --stage 19.14 --cpus "$cpu" --timeout 300 --qemu "$qemu" --firmware "$ovmf_code"
           done
+      - name: Stage 20 WovenShell desktop acceptance
+        shell: bash
+        run: |
+          qemu=/usr/bin/qemu-system-x86_64
+          ovmf_code=
+          for variant in OVMF_CODE_4M.fd OVMF_CODE.fd; do
+            candidate="/usr/share/OVMF/$variant"
+            if [ -f "$candidate" ]; then
+              ovmf_code="$candidate"
+              break
+            fi
+          done
+          test -n "$ovmf_code"
+          (cd apps/woven-shell && cargo clippy --release -- -D warnings)
+          (cd apps/woven-shell && cargo build --release)
+          export WOVENHAT_SHELL_IMAGE="$PWD/apps/woven-shell/target/x86_64-unknown-none/release/wovenhat-woven-shell"
+          cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage20-1-test -- -D warnings
+          for cpu in 1 2 4; do
+            python3 scripts/test-woven-shell-qemu.py --cpus "$cpu" --timeout 300 --qemu "$qemu" --firmware "$ovmf_code"
+          done
       - name: Stage 15 WovenFS acceptance
         shell: bash
         run: |

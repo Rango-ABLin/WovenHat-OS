@@ -312,6 +312,12 @@ pub enum Number {
     GraphicsCompositorInfo = 116,
     /// scale 1..=4 -> packed (width | height<<24 | scale<<48) or ERROR
     GraphicsCompositorScale = 117,
+    /// own handle, packed rect (x | y<<16 | w<<32 | h<<48), user pointer to
+    /// w*h little-endian 0x00RRGGBB pixels -> 0 or ERROR
+    GraphicsSurfaceWrite = 118,
+    /// () -> packed UTC date-time (second | minute<<8 | hour<<16 | day<<24 |
+    /// month<<32 | year<<40) or ERROR
+    ClockRead = 119,
 }
 
 pub fn entry_address() -> u64 {
@@ -2273,6 +2279,10 @@ pub extern "C" fn wovenhat_syscall_dispatch(
         }
         value if value == Number::GraphicsCompositorInfo as u64 => sys_compositor_info(),
         value if value == Number::GraphicsCompositorScale as u64 => sys_compositor_scale(arg0),
+        value if value == Number::GraphicsSurfaceWrite as u64 => {
+            sys_graphics_write(arg0, arg1, arg2)
+        }
+        value if value == Number::ClockRead as u64 => sys_clock_read(),
         _ => u64::MAX,
     };
 
@@ -2322,6 +2332,43 @@ fn sys_graphics_fill(handle: u64, packed: u64, color: u64) -> u64 {
         color as u32,
     )
     .map_or(SYSCALL_ERROR, |()| 0)
+}
+
+/// Upload pixels into a rectangle of one of the caller's surfaces. This is
+/// how a client draws anything fill and stroke cannot express: text,
+/// gradients, icons, rendered in its own memory and copied in.
+///
+/// The rectangle is checked against the surface before anything is copied,
+/// which also bounds the copy by the surface caps. The pixels are copied out
+/// of user memory with no lock held (the copy can fault), and the registry
+/// re-resolves the handle when writing, so a surface destroyed meanwhile is
+/// refused rather than written.
+fn sys_graphics_write(handle: u64, packed: u64, user_pixels: u64) -> u64 {
+    let x = (packed & 0xffff) as usize;
+    let y = ((packed >> 16) & 0xffff) as usize;
+    let width = ((packed >> 32) & 0xffff) as usize;
+    let height = ((packed >> 48) & 0xffff) as usize;
+    let Some(handle) = caller_surface(handle) else {
+        return SYSCALL_ERROR;
+    };
+    let Ok((surface_width, surface_height)) = crate::user_graphics::dimensions(handle) else {
+        return SYSCALL_ERROR;
+    };
+    if width == 0 || height == 0 || x + width > surface_width || y + height > surface_height {
+        return SYSCALL_ERROR;
+    }
+    let mut bytes = alloc::vec![0u8; width * height * 4];
+    if crate::paging::copy_from_current_user(user_pixels, &mut bytes).is_err() {
+        return SYSCALL_ERROR;
+    }
+    let rect = crate::display::Rect::new(x as i32, y as i32, width, height);
+    crate::user_graphics::write_pixels(handle, rect, &bytes).map_or(SYSCALL_ERROR, |()| 0)
+}
+
+/// The wall-clock date and time from the CMOS clock, UTC. Needs no
+/// capability, like `Getticks`: the time of day is not a secret.
+fn sys_clock_read() -> u64 {
+    crate::rtc::read().map_or(SYSCALL_ERROR, crate::rtc::DateTime::pack)
 }
 
 /// Read one pixel from a client surface, returning its packed colour.

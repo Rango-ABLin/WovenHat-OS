@@ -213,6 +213,32 @@ impl Surface {
         target
     }
 
+    /// Overwrite `rect` with pixels decoded from `bytes`: little-endian
+    /// `u32`s, row by row, exactly `rect.width * rect.height` of them. The
+    /// unused high byte is cleared so every stored pixel stays `0x00RRGGBB`.
+    ///
+    /// `rect` must lie wholly inside the surface; anything else, or a buffer
+    /// of the wrong length, changes nothing and returns [`Rect::EMPTY`].
+    /// Returns the region written.
+    pub fn write_pixels(&mut self, rect: Rect, bytes: &[u8]) -> Rect {
+        if rect.is_empty()
+            || rect.intersect(self.bounds()) != rect
+            || bytes.len() != rect.width.saturating_mul(rect.height).saturating_mul(4)
+        {
+            return Rect::EMPTY;
+        }
+        for (row, source) in bytes.chunks_exact(rect.width * 4).enumerate() {
+            let start = (rect.y as usize + row) * self.width + rect.x as usize;
+            for (slot, pixel) in self.pixels[start..start + rect.width]
+                .iter_mut()
+                .zip(source.as_chunks::<4>().0)
+            {
+                *slot = u32::from_le_bytes([pixel[0], pixel[1], pixel[2], 0]);
+            }
+        }
+        rect
+    }
+
     /// Blend `source` over this surface at `(x, y)` with uniform `opacity`:
     /// 0 leaves the surface unchanged, 255 is exactly [`blit`](Self::blit).
     /// Returns the region touched, which is empty when nothing changed.

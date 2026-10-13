@@ -87,6 +87,8 @@ stage19-12-test = ["qemu-test"]
 stage19-13-test = ["qemu-test"]
 # Integer display scaling and paced animation.
 stage19-14-test = ["qemu-test"]
+# WovenShell desktop: wallpaper, taskbar and clock.
+stage20-1-test = ["qemu-test"]
 stage1-5-test = ["qemu-test"]
 
 [dependencies]

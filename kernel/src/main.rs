@@ -68,6 +68,7 @@ mod network;
 #[cfg(any(feature = "stage14-5-test", feature = "stage14-5b-test", feature = "stage14-5c-test", feature = "stage14-5d-test"))]
 mod firewall_policy;
 mod notifications;
+mod rtc;
 #[cfg(feature = "stage13-3-test")]
 mod nvme;
 mod page_cache;
@@ -3377,6 +3378,15 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         serial::write_line(format_args!("[S1-5] storage journal: PASSED"));
         qemu_test_exit_success();
     }
+    #[cfg(feature = "stage20-1-test")]
+    {
+        if !stage20_1_self_test() {
+            serial::write_line(format_args!("[S20.1] woven-shell desktop: FAILED"));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!("[S20.1] woven-shell desktop: PASSED"));
+        qemu_test_exit_success();
+    }
     #[cfg(feature = "stage19-14-test")]
     {
         if !stage19_14_self_test() {
@@ -4612,6 +4622,289 @@ fn wait_hello_gui(pid: task::ProcessId) -> Option<(task::ProcessId, Result<i32, 
         task::yield_now();
     }
     Some((pid, task::wait_process(pid.as_u64())))
+}
+
+/// WovenShell image for the Stage 20.1 gate, built by its harness.
+#[cfg(feature = "stage20-1-test")]
+const WOVEN_SHELL_IMAGE: &[u8] = include_bytes!(env!("WOVENHAT_SHELL_IMAGE"));
+
+/// Stage 20.1 acceptance: the WovenShell desktop.
+///
+/// The kernel checks the clock decoder and reads the hardware clock, then
+/// starts woven-shell as a system service and waits for it to take the
+/// display. Every check reads the compositor surface and recomputes what
+/// should be there independently: the wallpaper formula, the translucent
+/// taskbar, the start button rendered with the kernel's own font, and the
+/// clock text against the kernel's own reading of the hardware clock, twice,
+/// so the clock is seen to advance. Killing the shell must hand the display
+/// back to the text terminal.
+#[cfg(feature = "stage20-1-test")]
+fn stage20_1_self_test() -> bool {
+    use crate::display::{blend_pixel, rgb, Surface};
+    use bootloader_api::info::PixelFormat;
+
+    const WALLPAPER_TOP: u32 = rgb(18, 42, 74);
+    const WALLPAPER_BOTTOM: u32 = rgb(64, 28, 88);
+    const WHITE: u32 = rgb(255, 255, 255);
+    const TASKBAR: u32 = rgb(20, 24, 32);
+    const ACCENT: u32 = rgb(90, 140, 220);
+    const START_FILL: u32 = rgb(52, 96, 180);
+    const TASKBAR_HEIGHT: i32 = 24;
+    /// Not a valid 0x00RRGGBB pixel, so it never matches a screen pixel.
+    const UNSET: u32 = 0x0100_0000;
+
+    fn step(name: &str, ok: bool) -> bool {
+        serial::write_line(format_args!(
+            "[S20.1] {} {}",
+            name,
+            if ok { "PASS" } else { "FAIL" }
+        ));
+        ok
+    }
+    fn wallpaper(x: i32, y: i32, height: i32) -> u32 {
+        let span = (height - 1).max(1);
+        let t = (y.clamp(0, span) * 255 / span) as u8;
+        let base = blend_pixel(WALLPAPER_BOTTOM, WALLPAPER_TOP, t);
+        if x % 32 == 0 || y % 32 == 0 {
+            blend_pixel(WHITE, base, 28)
+        } else {
+            base
+        }
+    }
+    fn taskbar(x: i32, y: i32, height: i32) -> u32 {
+        blend_pixel(TASKBAR, wallpaper(x, y, height), 216)
+    }
+    /// Text rendered with the kernel's font into a `width`×`height` mask at
+    /// offset `(dx, dy)`: white where a glyph pixel is set, UNSET elsewhere.
+    fn text_mask(width: usize, height: usize, dx: i32, dy: i32, text: &str) -> Surface {
+        let mut mask = Surface::new(width, height);
+        let bounds = mask.bounds();
+        mask.fill_rect(bounds, UNSET);
+        mask.draw_text(dx, dy, text, WHITE);
+        mask
+    }
+    /// Whether every compositor pixel in the rectangle is `expected(x, y)`.
+    fn region(x0: i32, y0: i32, width: i32, height: i32, expected: impl Fn(i32, i32) -> u32) -> bool {
+        (y0..y0 + height).all(|y| (x0..x0 + width).all(|x| compositor::pixel(x, y) == Ok(expected(x, y))))
+    }
+    fn screen_pixel(x: usize, y: usize) -> Option<u32> {
+        terminal::with_framebuffer(|buffer, info| {
+            if x >= info.width || y >= info.height || info.bytes_per_pixel < 3 {
+                return None;
+            }
+            let offset = (y * info.stride + x) * info.bytes_per_pixel;
+            let bytes = buffer.get(offset..offset + 3)?;
+            match info.pixel_format {
+                PixelFormat::Rgb => Some(rgb(bytes[0], bytes[1], bytes[2])),
+                PixelFormat::Bgr => Some(rgb(bytes[2], bytes[1], bytes[0])),
+                _ => None,
+            }
+        })
+        .flatten()
+    }
+    fn screen_checksum() -> Option<u64> {
+        terminal::with_framebuffer(|buffer, _| {
+            buffer.iter().fold(0xcbf2_9ce4_8422_2325u64, |hash, byte| {
+                (hash ^ u64::from(*byte)).wrapping_mul(0x0000_0100_0000_01b3)
+            })
+        })
+    }
+    /// `HH:MM:SS` for a second of the day.
+    fn clock_text(second_of_day: u32) -> [u8; 8] {
+        let (hour, minute, second) = (second_of_day / 3600, second_of_day / 60 % 60, second_of_day % 60);
+        let digit = |value: u32| b'0' + (value % 10) as u8;
+        [
+            digit(hour / 10), digit(hour), b':',
+            digit(minute / 10), digit(minute), b':',
+            digit(second / 10), digit(second),
+        ]
+    }
+
+    if !step("clock decoder handles BCD, binary and 12-hour forms", rtc::decode_self_test()) {
+        return false;
+    }
+    let now = rtc::read();
+    if let Some(time) = now {
+        serial::write_line(format_args!(
+            "[S20.1] hardware clock {:04}-{:02}-{:02} {:02}:{:02}:{:02} UTC",
+            time.year, time.month, time.day, time.hour, time.minute, time.second
+        ));
+    }
+    if !step("hardware clock read", now.is_some_and(|time| time.year >= 2024)) {
+        return false;
+    }
+
+    if !step(
+        "install into the filesystem",
+        vfs::create_read_only("/bin/woven-shell", WOVEN_SHELL_IMAGE).is_ok(),
+    ) {
+        return false;
+    }
+    let mut image = alloc::vec![0u8; WOVEN_SHELL_IMAGE.len()];
+    if vfs::read_all("/bin/woven-shell", &mut image) != Ok(WOVEN_SHELL_IMAGE.len()) {
+        return step("filesystem round-trip", false);
+    }
+    let capabilities = capability::CapabilitySet::only(capability::Capability::Console)
+        .with(capability::Capability::DisplayIo)
+        .with(capability::Capability::InputIo);
+    let Some(program) = userspace::load_elf_with_argv(&image, &["/bin/woven-shell", "--seconds"]) else {
+        return step("shell image loads", false);
+    };
+    let Ok((pid, _, _)) = task::spawn_user_system_service("woven-shell", program, capabilities) else {
+        return step("shell spawned", false);
+    };
+    let start = timer::ticks();
+    while !(compositor::holder() == Some(pid.as_u64()) && compositor::is_presenting()) {
+        if task::process_exited(pid) || timer::ticks().wrapping_sub(start) > 3000 {
+            let status = if task::process_exited(pid) {
+                task::wait_process(pid.as_u64()).map_or(-1, i64::from)
+            } else {
+                -2
+            };
+            serial::write_line(format_args!("[S20.1] shell status {}", status));
+            return step("shell took the display", false);
+        }
+        task::yield_now();
+    }
+    step("shell took the display", true);
+
+    // A framebuffer of at least 1280x800 is shown at scale 2.
+    let Some(info) = terminal::framebuffer_info() else {
+        return step("framebuffer available", false);
+    };
+    let scale = if info.width >= 1280 && info.height >= 800 { 2 } else { 1 };
+    let Some((width, height)) = compositor::dimensions() else {
+        return step("compositor geometry", false);
+    };
+    serial::write_line(format_args!(
+        "[S20.1] framebuffer {}x{}, desktop {}x{} at scale {}",
+        info.width, info.height, width, height, scale
+    ));
+    let (width, height) = (width as i32, height as i32);
+    if !step(
+        "desktop geometry follows the display scale",
+        compositor::scale() == Some(scale)
+            && width == (info.width as u32 / scale).min(compositor::MAX_WIDTH) as i32
+            && height == (info.height as u32 / scale).min(compositor::MAX_HEIGHT) as i32,
+    ) {
+        return false;
+    }
+
+    let top = height - TASKBAR_HEIGHT;
+    // Wallpaper: corner, centre, both weave lines, and the last row above
+    // the taskbar, each a block wide enough to straddle a grid line.
+    let wall = region(0, 0, 40, 40, |x, y| wallpaper(x, y, height))
+        && region(width / 2 - 20, height / 2 - 20, 40, 40, |x, y| wallpaper(x, y, height))
+        && region(width - 40, top - 40, 40, 40, |x, y| wallpaper(x, y, height));
+    if !step("wallpaper matches its formula", wall) {
+        return false;
+    }
+    let bar = region(0, top, width, 1, |_, _| ACCENT)
+        && region(60, top + 1, width - 140, TASKBAR_HEIGHT - 1, |x, y| taskbar(x, y, height));
+    if !step("taskbar is translucent over the wallpaper", bar) {
+        return false;
+    }
+    // The start button, rendered here with the kernel's own font.
+    let label_x = 4 + (44 - crate::font::text_width("Woven") as i32) / 2;
+    let button_mask = text_mask(44, 16, label_x - 4, 5, "Woven");
+    let button = region(4, top + 4, 44, 16, |x, y| {
+        match button_mask.pixel(x - 4, y - (top + 4)) {
+            Some(WHITE) => WHITE,
+            _ => START_FILL,
+        }
+    });
+    if !step("start button and its label", button) {
+        return false;
+    }
+
+    // The clock: the region must match the kernel's own reading of the
+    // hardware clock, allowing up to two seconds of display lag, and must
+    // then advance to a later reading.
+    let clock_width = 8 * crate::font::ADVANCE + 6;
+    let clock_x = width - clock_width;
+    let clock_matches = |text: &[u8; 8]| {
+        let text = core::str::from_utf8(text).unwrap_or("");
+        let text_x = width - 6 - crate::font::text_width(text) as i32;
+        let mask = text_mask(clock_width as usize, 23, text_x - clock_x, 8, text);
+        region(clock_x, top + 1, clock_width, TASKBAR_HEIGHT - 1, |x, y| {
+            match mask.pixel(x - clock_x, y - (top + 1)) {
+                Some(WHITE) => WHITE,
+                _ => taskbar(x, y, height),
+            }
+        })
+    };
+    let mut first: Option<[u8; 8]> = None;
+    let mut advanced = false;
+    let start = timer::ticks();
+    while timer::ticks().wrapping_sub(start) < 600 && !advanced {
+        let Some(time) = rtc::read() else {
+            break;
+        };
+        let second = u32::from(time.hour) * 3600 + u32::from(time.minute) * 60 + u32::from(time.second);
+        for lag in 0..3 {
+            let text = clock_text((second + 86_400 - lag) % 86_400);
+            if clock_matches(&text) {
+                match first {
+                    None => first = Some(text),
+                    Some(shown) if shown != text => advanced = true,
+                    Some(_) => {}
+                }
+                break;
+            }
+        }
+        task::yield_now();
+    }
+    if let Some(text) = first {
+        serial::write_line(format_args!(
+            "[S20.1] clock shows {}",
+            core::str::from_utf8(&text).unwrap_or("?")
+        ));
+    }
+    if !step("clock shows the hardware time", first.is_some())
+        || !step("clock advances with the hardware clock", advanced)
+    {
+        return false;
+    }
+
+    // The physical framebuffer carries the desktop at its scale.
+    let s = scale as usize;
+    let physical = [(5, 5), (300, top), (6, top + 6), (width / 2, height / 2)]
+        .into_iter()
+        .all(|(x, y)| {
+            let expected = compositor::pixel(x, y).ok();
+            let (px, py) = (x as usize * s, y as usize * s);
+            expected.is_some()
+                && screen_pixel(px, py) == expected
+                && screen_pixel(px + s - 1, py + s - 1) == expected
+        });
+    if !step("framebuffer shows the desktop at its scale", physical) {
+        return false;
+    }
+
+    // Killing the shell hands the display back to the terminal.
+    if task::kill_process(pid.as_u64(), 9).is_err() {
+        return step("shell killed", false);
+    }
+    let start = timer::ticks();
+    while !task::process_exited(pid) {
+        if timer::ticks().wrapping_sub(start) > 1000 {
+            return step("shell killed", false);
+        }
+        task::yield_now();
+    }
+    let _ = task::wait_process(pid.as_u64());
+    step("shell killed", true);
+    let released = compositor::holder().is_none() && !compositor::is_presenting();
+    let before = screen_checksum();
+    terminal::write_bytes(b"terminal after the desktop\n");
+    let terminal_back = before.is_some() && screen_checksum() != before;
+    serial::write_line(format_args!(
+        "[S20.1] holder {:?}, presenting {}, terminal draws {}",
+        compositor::holder(),
+        compositor::is_presenting(),
+        terminal_back
+    ));
+    step("display returned to the terminal", released && terminal_back)
 }
 
 /// Stage 19.14 acceptance: integer display scaling and paced animation.

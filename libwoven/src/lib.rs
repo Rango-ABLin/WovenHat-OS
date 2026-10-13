@@ -19,6 +19,12 @@ pub mod process {
     pub struct Id(pub u64);
 }
 
+/// The kernel's 5x7 bitmap font, shared source rather than a copy, so text
+/// a client renders matches text the kernel renders pixel for pixel.
+#[allow(unexpected_cfgs)]
+#[path = "../../kernel/src/font.rs"]
+pub mod font;
+
 /// Process arguments as the kernel lays them out on the initial stack: `argc`,
 /// then `argc` pointers to NUL-terminated strings, then a NULL.
 ///
@@ -211,6 +217,8 @@ pub mod syscall {
     pub const GRAPHICS_COMPOSITOR_BLEND_SHARED: u64 = 115;
     pub const GRAPHICS_COMPOSITOR_INFO: u64 = 116;
     pub const GRAPHICS_COMPOSITOR_SCALE: u64 = 117;
+    pub const GRAPHICS_SURFACE_WRITE: u64 = 118;
+    pub const CLOCK_READ: u64 = 119;
     pub const MESSAGE_SEND: u64 = 11;
     pub const MESSAGE_RECEIVE: u64 = 12;
 
@@ -498,6 +506,26 @@ pub mod syscall {
     }
 
     /// # Safety
+    /// `pixels` must be readable for `width * height` `u32`s.
+    pub unsafe fn graphics_surface_write(
+        handle: u64,
+        x: u16, y: u16, width: u16, height: u16,
+        pixels: *const u32,
+    ) -> u64 {
+        let packed = u64::from(x)
+            | (u64::from(y) << 16)
+            | (u64::from(width) << 32)
+            | (u64::from(height) << 48);
+        unsafe { invoke(GRAPHICS_SURFACE_WRITE, handle, packed, pixels as u64) }
+    }
+
+    /// # Safety
+    /// Must be called from WovenHat userspace.
+    pub unsafe fn clock_read() -> u64 {
+        unsafe { invoke(CLOCK_READ, 0, 0, 0) }
+    }
+
+    /// # Safety
     /// Must be called from WovenHat userspace.
     pub unsafe fn graphics_compositor_info() -> u64 {
         unsafe { invoke(GRAPHICS_COMPOSITOR_INFO, 0, 0, 0) }
@@ -636,6 +664,34 @@ impl GraphicsSurface {
         check(result).map(|_| ())
     }
 
+    /// Upload `pixels` (`0x00RRGGBB`, row by row) into the rectangle at
+    /// `(x, y)`. The rectangle must lie inside the surface and `pixels` must
+    /// hold exactly `width * height` values. This is how anything fill and
+    /// stroke cannot express reaches a surface: render into a [`Canvas`],
+    /// then upload it.
+    pub fn write(
+        &self,
+        x: u16, y: u16, width: u16, height: u16, pixels: &[u32],
+    ) -> Result<(), Error> {
+        if pixels.len() != usize::from(width) * usize::from(height) {
+            return Err(Error::Failed);
+        }
+        // SAFETY: `pixels` is readable for exactly `width * height` values.
+        let result = unsafe {
+            syscall::graphics_surface_write(self.handle, x, y, width, height, pixels.as_ptr())
+        };
+        check(result).map(|_| ())
+    }
+
+    /// Upload a whole canvas to the top-left of this surface.
+    pub fn write_canvas(&self, canvas: &Canvas<'_>) -> Result<(), Error> {
+        let (Ok(width), Ok(height)) = (u16::try_from(canvas.width), u16::try_from(canvas.height))
+        else {
+            return Err(Error::Failed);
+        };
+        self.write(0, 0, width, height, canvas.pixels())
+    }
+
     /// Blend this surface onto the compositor at `(x, y)` with uniform
     /// `opacity` (0 invisible, 255 opaque). Lease holder only; this is how a
     /// window manager draws shadows and translucent chrome.
@@ -757,6 +813,173 @@ pub fn compositor_present() -> Result<u64, Error> {
     // SAFETY: argument-free call.
     let result = unsafe { syscall::graphics_compositor_present() };
     check(result)
+}
+
+/// Blend `over` onto `under` with `opacity` (0 keeps `under`, 255 gives
+/// `over`), per channel, rounding to nearest: the same formula the kernel
+/// uses for translucent blits.
+pub const fn blend(over: u32, under: u32, opacity: u8) -> u32 {
+    let a = opacity as u32;
+    let mut result = 0;
+    let mut shift = 0;
+    while shift <= 16 {
+        let top = (over >> shift) & 0xff;
+        let bottom = (under >> shift) & 0xff;
+        result |= ((top * a + bottom * (255 - a) + 127) / 255) << shift;
+        shift += 8;
+    }
+    result
+}
+
+/// A software render target: a caller-owned pixel buffer covering a
+/// `width`×`height` rectangle whose top-left is `(x, y)` in the caller's
+/// coordinates. Every drawing call takes those coordinates and clips to the
+/// rectangle, so a scene can be drawn once per tile without offset
+/// arithmetic in the scene code.
+pub struct Canvas<'a> {
+    pixels: &'a mut [u32],
+    x: i32,
+    y: i32,
+    width: usize,
+    height: usize,
+}
+
+impl<'a> Canvas<'a> {
+    /// `None` if `pixels` is shorter than `width * height`.
+    pub fn new(pixels: &'a mut [u32], x: i32, y: i32, width: usize, height: usize) -> Option<Self> {
+        let length = width.checked_mul(height)?;
+        let pixels = pixels.get_mut(..length)?;
+        Some(Self { pixels, x, y, width, height })
+    }
+
+    pub const fn x(&self) -> i32 {
+        self.x
+    }
+
+    pub const fn y(&self) -> i32 {
+        self.y
+    }
+
+    pub const fn width(&self) -> usize {
+        self.width
+    }
+
+    pub const fn height(&self) -> usize {
+        self.height
+    }
+
+    /// The rendered pixels, row by row: what [`GraphicsSurface::write`]
+    /// uploads.
+    pub fn pixels(&self) -> &[u32] {
+        self.pixels
+    }
+
+    fn index(&self, x: i32, y: i32) -> Option<usize> {
+        let column = usize::try_from(x.checked_sub(self.x)?).ok()?;
+        let row = usize::try_from(y.checked_sub(self.y)?).ok()?;
+        (column < self.width && row < self.height).then_some(row * self.width + column)
+    }
+
+    pub fn get(&self, x: i32, y: i32) -> Option<u32> {
+        self.index(x, y).map(|index| self.pixels[index])
+    }
+
+    pub fn set(&mut self, x: i32, y: i32, color: u32) {
+        if let Some(index) = self.index(x, y) {
+            self.pixels[index] = color & 0x00ff_ffff;
+        }
+    }
+
+    /// Set every pixel from `shader(x, y)`, in caller coordinates.
+    pub fn shade(&mut self, mut shader: impl FnMut(i32, i32) -> u32) {
+        for row in 0..self.height {
+            let y = self.y + row as i32;
+            for column in 0..self.width {
+                self.pixels[row * self.width + column] =
+                    shader(self.x + column as i32, y) & 0x00ff_ffff;
+            }
+        }
+    }
+
+    /// The part of `(x, y, width, height)` inside the canvas, as buffer
+    /// rows and columns.
+    fn clip(&self, x: i32, y: i32, width: usize, height: usize) -> Option<(usize, usize, usize, usize)> {
+        let left = i64::from(x).max(i64::from(self.x));
+        let top = i64::from(y).max(i64::from(self.y));
+        let right = (i64::from(x) + width as i64).min(i64::from(self.x) + self.width as i64);
+        let bottom = (i64::from(y) + height as i64).min(i64::from(self.y) + self.height as i64);
+        if right <= left || bottom <= top {
+            return None;
+        }
+        Some((
+            (left - i64::from(self.x)) as usize,
+            (top - i64::from(self.y)) as usize,
+            (right - left) as usize,
+            (bottom - top) as usize,
+        ))
+    }
+
+    pub fn fill_rect(&mut self, x: i32, y: i32, width: usize, height: usize, color: u32) {
+        self.blend_rect(x, y, width, height, color, u8::MAX);
+    }
+
+    /// Blend `color` over a rectangle with uniform `opacity`.
+    pub fn blend_rect(&mut self, x: i32, y: i32, width: usize, height: usize, color: u32, opacity: u8) {
+        let Some((column, row, columns, rows)) = self.clip(x, y, width, height) else {
+            return;
+        };
+        for r in row..row + rows {
+            for pixel in &mut self.pixels[r * self.width + column..r * self.width + column + columns] {
+                *pixel = blend(color, *pixel, opacity) & 0x00ff_ffff;
+            }
+        }
+    }
+
+    /// Draw `text` with the kernel's font, top-left at `(x, y)`. Newlines
+    /// start a new line at `x`.
+    pub fn draw_text(&mut self, x: i32, y: i32, text: &str, color: u32) {
+        let (mut cursor_x, mut cursor_y) = (x, y);
+        for character in text.chars() {
+            if character == '\n' {
+                cursor_x = x;
+                cursor_y += font::LINE_HEIGHT;
+                continue;
+            }
+            for (row, bits) in font::glyph(character).iter().enumerate() {
+                for column in 0..font::WIDTH as i32 {
+                    if bits & (1 << (font::WIDTH as i32 - 1 - column)) != 0 {
+                        self.set(cursor_x + column, cursor_y + row as i32, color);
+                    }
+                }
+            }
+            cursor_x += font::ADVANCE;
+        }
+    }
+}
+
+/// A calendar date and time of day from the hardware clock, UTC.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct DateTime {
+    pub year: u16,
+    pub month: u8,
+    pub day: u8,
+    pub hour: u8,
+    pub minute: u8,
+    pub second: u8,
+}
+
+/// Read the wall clock. The hardware clock keeps UTC and carries no time
+/// zone.
+pub fn clock() -> Result<DateTime, Error> {
+    // SAFETY: argument-free call.
+    check(unsafe { syscall::clock_read() }).map(|value| DateTime {
+        second: value as u8,
+        minute: (value >> 8) as u8,
+        hour: (value >> 16) as u8,
+        day: (value >> 24) as u8,
+        month: (value >> 32) as u8,
+        year: (value >> 40) as u16,
+    })
 }
 
 /// The compositor surface's geometry and the display scale.
