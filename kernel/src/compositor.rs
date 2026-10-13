@@ -453,6 +453,37 @@ pub fn blit_region_for(
     Ok(touched)
 }
 
+/// [`blit_region_for`] with uniform `opacity`: only `region` of the surface is
+/// blended. A window manager draws shadows and translucent layers with it,
+/// clipped to the rectangle it is recomposing.
+#[allow(clippy::too_many_arguments)]
+pub fn blend_region_for(
+    pid: u64,
+    handle: user_graphics::Handle,
+    region: Rect,
+    x: i32,
+    y: i32,
+    opacity: u8,
+    shared: bool,
+) -> Result<Rect, Error> {
+    require_holder(pid)?;
+    let (clipped, part) = user_graphics::snapshot_region(handle, region, shared.then_some(pid))
+        .map_err(|_| Error::InvalidClient)?;
+    let mut guard = STATE.lock();
+    let state = guard.as_mut().ok_or(Error::NotReady)?;
+    if state.holder != Some(pid) {
+        return Err(Error::NotHolder);
+    }
+    let touched = state.surface.blend(
+        &part,
+        x.saturating_add(clipped.x - region.x),
+        y.saturating_add(clipped.y - region.y),
+        opacity,
+    );
+    state.damage.add(touched);
+    Ok(touched)
+}
+
 /// [`blit_for`] with uniform `opacity`, for translucent windows and shadows
 /// drawn from the holder's own surfaces.
 pub fn blend_for(

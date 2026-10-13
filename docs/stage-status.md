@@ -1,5 +1,66 @@
 # Stage status
 
+## Stage 20.5 — depth: window shadows and elevation (2026-10-13)
+
+Roadmap Stage 18.3, Window Experience: dynamic depth.
+
+**Kernel: region blend.** Syscalls 122 and 123,
+`GraphicsCompositorBlendRegion` and its shared variant, are the region blit
+(120/121) with a uniform opacity in place of the copy. They use the same
+region snapshot, so only the exposed part is copied, and the same authority
+rules.
+- Four values have to fit in three registers. The destination word packs x
+  and y as 24-bit signed fields, ample for a compositor bounded at
+  1920×1200, with the opacity in the top byte.
+- The byte between them is reserved and must be zero; anything else is
+  refused.
+- libwoven adds `GraphicsSurface::present_region_blended`,
+  `compositor_blend_region_shared` and `pack_blend_destination`, with a
+  host test of the packing.
+
+**Shell.**
+- Every window casts a soft shadow: two bands of black blended over what
+  lies beneath, offset down and right, outer band lighter.
+- The focused window sits higher: bands at (8 px, 24/255) and
+  (4 px, 48/255), against (4, 20) and (2, 40) for the others. Focus changes
+  repaint both windows' shadows.
+- Shadows are clipped at the taskbar.
+- Repaint areas follow a window's footprint (its frame plus its deepest
+  shadow), not just its frame, so opening, closing, moving and refocusing
+  leave no stale shadow.
+- Shadow bands are rendered as solid chunks in the staging surface and
+  region-blended into the exposed rectangle.
+
+Gate `[S20.5] window depth: PASSED`. Every shadow pixel checked is
+recomputed by the kernel: the wallpaper, then each window's bands, bottom
+to top, with `display::blend_pixel`.
+- With B focused, B's right and bottom strips carry the deep bands, and
+  A's exposed strips carry the shallow ones.
+- A shadow pixel really differs from the bare wallpaper.
+- Clicking A's title bar swaps the shadows, including where both windows'
+  bands overlap.
+- Dragging A onto the taskbar's edge: its shadow beside it stops at the
+  taskbar, and the accent line and taskbar rows below it are untouched.
+- Both applications exit, taking their windows and shadows with them.
+- Killing the shell returns the display.
+- The first run showed the gate typing to B before the shell had seen A
+  go. A key there goes to the still-focused, exited A, so the gate now
+  waits for A's window to disappear first, as the Stage 20.2 gate does.
+
+Negative controls, with evidence in the worktree's
+`audit-artifacts/stage20.5-negative-control-*`:
+- With the focused window given the shallow shadow, the gate fails at
+  "focused window B casts the deeper shadow".
+- With shadows allowed onto the taskbar, it fails at "shadows stop at the
+  taskbar".
+
+Open:
+- Shadows are rectangular bands, without blur or rounded corners.
+- No dimming of unfocused windows yet.
+- A key typed in the instant between an application exiting and the shell
+  noticing, within one 250 ms frame, goes to the exited application and is
+  lost.
+
 ## Stage 20.4 — windows that move and close; budgeted client surfaces (2026-10-13)
 
 Roadmap Stage 18.3, Window Experience, first step: the prerequisite in
