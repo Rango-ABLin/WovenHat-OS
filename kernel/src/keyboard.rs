@@ -78,7 +78,8 @@ impl Keyboard {
 
     pub fn poll_legacy(&mut self) -> Option<Key> {
         let status = unsafe { inb(STATUS_PORT) };
-        if status & 1 == 0 {
+        // An auxiliary (mouse) byte is left for the mouse IRQ.
+        if status & 1 == 0 || status & 0x20 != 0 {
             return None;
         }
         let scancode = unsafe { inb(DATA_PORT) };
@@ -159,6 +160,11 @@ pub fn handle_interrupt() {
     }
     let scancode = unsafe { inb(DATA_PORT) };
     SCANCODES.push(scancode);
+    // Decode and publish now. Waiting for a consumer to call `service` left
+    // keystrokes undelivered to a focus holder asleep in `InputWait`, which
+    // polls nothing. Every lock on this path is an IRQ mutex at rank 10, so
+    // the interrupted code cannot hold one on this CPU.
+    drain_scancodes(false);
 }
 
 unsafe fn inb(port: u16) -> u8 {

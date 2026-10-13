@@ -29,7 +29,8 @@
 //! without declaring.
 //!
 //! With `--wm` it is a small window manager: it stacks two clients' shared
-//! windows, raises and focuses the next one on Tab, and forwards each typed
+//! windows, raises and focuses the next one on Tab or on a left click inside
+//! it (it tracks the pointer from relative motion), and forwards each typed
 //! character to the focused client only. `--wm-client <wm> <x> <y> <a|b>
 //! <key>` is one such client: it places a window and expects exactly `<key>`.
 //!
@@ -588,7 +589,7 @@ fn composite(stack: &[Window; 2]) {
 
 /// A window manager over two clients.
 fn window_manager() -> ! {
-    use libwoven::{wait, Key};
+    use libwoven::{wait, InputEvent, Key};
     if libwoven::compositor_claim().is_err() {
         fail(130);
     }
@@ -629,27 +630,44 @@ fn window_manager() -> ! {
     composite(&stack);
     let _ = libwoven::print("hello-gui wm: windows stacked\n");
 
-    // Tab raises and focuses the bottom window; characters go to the focused
-    // (topmost) window's client and to no one else.
+    // Tab, or a left click on the bottom window, raises and focuses it;
+    // characters go to the focused (topmost) window's client and to no one
+    // else. The pointer starts at the screen origin and follows relative
+    // motion, clamped at zero.
+    let (mut pointer_x, mut pointer_y) = (0i32, 0i32);
     let mut forwarded = 0;
     while forwarded < 2 {
         match libwoven::wait_any(wait::INPUT, Some(libwoven::ticks() + IPC_DEADLINE_TICKS)) {
             Ok(ready) if ready == wait::INPUT => {}
             _ => fail(135),
         }
-        match libwoven::input_poll() {
-            Ok(Some(Key::Tab)) => {
+        match libwoven::input_poll_event() {
+            Ok(Some(InputEvent::Key(Key::Tab))) => {
                 stack.swap(0, 1);
                 composite(&stack);
                 let _ = libwoven::print("hello-gui wm: raised and focused the other window\n");
             }
-            Ok(Some(Key::Char(character))) => {
+            Ok(Some(InputEvent::Key(Key::Char(character)))) => {
                 let focused = stack[1].client;
                 if libwoven::message_send(focused, &[character as u8]).is_err() {
                     fail(136);
                 }
                 forwarded += 1;
             }
+            Ok(Some(InputEvent::PointerMove { dx, dy })) => {
+                pointer_x = (pointer_x + i32::from(dx)).max(0);
+                pointer_y = (pointer_y + i32::from(dy)).max(0);
+            }
+            Ok(Some(InputEvent::PointerButton { button: 0, pressed: true })) => {
+                // Raise the topmost window under the pointer, if it is not
+                // already on top. A click on empty desktop changes nothing.
+                if !stack[1].contains(pointer_x, pointer_y) && stack[0].contains(pointer_x, pointer_y) {
+                    stack.swap(0, 1);
+                }
+                composite(&stack);
+                let _ = libwoven::print("hello-gui wm: click focused the window under the pointer\n");
+            }
+            Ok(Some(InputEvent::PointerButton { .. })) => {}
             _ => fail(137),
         }
     }

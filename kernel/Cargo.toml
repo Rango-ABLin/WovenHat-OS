@@ -81,6 +81,8 @@ stage19-9-test = ["qemu-test"]
 stage19-10-test = ["qemu-test"]
 # A userspace window manager: stacking, raise, focus and input routing.
 stage19-11-test = ["qemu-test"]
+# PS/2 pointer input and IRQ-time keystroke delivery.
+stage19-12-test = ["qemu-test"]
 stage1-5-test = ["qemu-test"]
 
 [dependencies]

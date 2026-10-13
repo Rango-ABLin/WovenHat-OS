@@ -1,4 +1,5 @@
-// Keyboard input is production; other event producers belong to the Stage 13.7 probe.
+// Keyboard and pointer input are production; other event producers belong to
+// the Stage 13.7 probe.
 use crate::irq_lock::IrqMutex as Mutex;
 
 const INPUT_QUEUE_CAPACITY: usize = 128;
@@ -26,12 +27,12 @@ pub enum Key {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Event {
     Key(Key),
-    #[cfg(feature = "stage13-7-test")]
+    /// Relative pointer motion in screen orientation (Y grows downwards).
     PointerMove {
         dx: i16,
         dy: i16,
     },
-    #[cfg(feature = "stage13-7-test")]
+    /// Button 0 is left, 1 right, 2 middle.
     PointerButton {
         button: u8,
         pressed: bool,
@@ -297,25 +298,14 @@ pub fn poll() -> Option<Event> {
     QUEUE.lock().pop()
 }
 
-#[cfg(feature = "stage13-7-test")]
+/// Next key for the terminal, skipping pointer and other events, which only a
+/// focus holder consumes.
 pub fn poll_key() -> Option<Key> {
-    #[cfg(not(feature = "stage13-7-test"))]
-    {
-        let Event::Key(key) = poll()?;
-        Some(key)
-    }
-    #[cfg(feature = "stage13-7-test")]
     loop {
         if let Event::Key(key) = poll()? {
             return Some(key);
         }
     }
-}
-
-#[cfg(not(feature = "stage13-7-test"))]
-pub fn poll_key() -> Option<Key> {
-    let Event::Key(key) = poll()?;
-    Some(key)
 }
 
 pub fn read_bytes(buffer: &mut [u8]) -> usize {

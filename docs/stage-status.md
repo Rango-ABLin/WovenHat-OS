@@ -1,5 +1,64 @@
 # Stage status
 
+## Stage 19.12 — PS/2 pointer input; keystrokes delivered at IRQ time (2026-10-13)
+
+**Defect fixed (Stages 19.5/19.6).** The keyboard IRQ handler only queued raw
+scancodes. They became WovenInput events only when a consumer called
+`keyboard::poll` or `read_bytes`, which in practice meant the kernel shell
+loop or a userspace `read`. A focus holder asleep in `InputWait` or `WaitAny`
+polls nothing, so real keystrokes reached it only if something else happened
+to be polling. The 19.5 and 19.6 gates published keys directly into WovenInput
+and never exercised the hardware path. The handler now decodes and publishes
+at IRQ time. Every lock on that path is an IRQ mutex at rank 10, and the two
+`PreemptMutex`es an IRQ can interrupt are also rank 10, so neither inversion
+nor recursion is possible. The polled fallback (`poll_legacy`) now leaves
+auxiliary bytes for the mouse.
+
+**Mouse.** `kernel/src/mouse.rs` drives the i8042 auxiliary port.
+- Initialisation runs with interrupts off and polls with bounds: enable the
+  port, set defaults, enable reporting (each acknowledged), then set the
+  auxiliary IRQ bit and clear the auxiliary clock-disable bit in the
+  controller configuration.
+- IRQ12 is routed through the IOAPIC beside the keyboard. Unlike the keyboard,
+  the mouse is optional: an unusable GSI leaves it unrouted rather than
+  failing boot. Under the legacy PIC it is unmasked only if a mouse answered.
+  Boot logs `[BOOT] ps2 mouse present=`.
+- The handler takes only bytes flagged auxiliary and decodes three-byte
+  packets: bit-3 resynchronisation, 9-bit signed deltas, Y flipped to screen
+  orientation, overflow packets dropped whole, and button edges. It publishes
+  `PointerMove` / `PointerButton`, which are now production WovenInput
+  events rather than Stage 13.7 probe-only.
+
+**Userspace.** `InputPoll` and `InputWait` encode pointer motion as kind 6
+(two's-complement dx/dy halves) and buttons as kind 7. libwoven adds
+`InputEvent` and `input_poll_event`; `input_poll` and `input_wait` keep
+returning keys only, skipping pointer events. The window manager tracks the
+pointer from relative motion; a left click on an uncovered part of the bottom
+window raises and focuses it (click-to-focus).
+
+Gate `[S19.12] pointer input: PASSED`. Every input travels the real i8042
+path: command 0xD3 presents a byte as if the mouse sent it (IRQ12, the mouse
+driver), and 0xD2 as if the keyboard did (IRQ1, the keyboard driver).
+- The kernel checks the packet decoder, then the raw paths into a focus
+  queue: a mouse packet arrives as motion plus press, then release; a
+  keyboard make code arrives as a decoded key with no one polling.
+- hello-gui `--wm` with two clients: the kernel moves the pointer into A
+  only, clicks, and types `x`; then moves into B only, clicks, and types `y`.
+- Each client must receive exactly its own key, and the kernel reads B on top
+  at the overlap.
+
+Negative control: with the IRQ-time decode removed, which was the pre-19.12
+behaviour, the gate fails at "keyboard bytes through IRQ1 are decoded at IRQ
+time". Evidence is in `audit-artifacts/stage19.12-negative-control-*`.
+
+Open:
+- PS/2 only. The USB HID mouse protocol is recognised by the xHCI driver but
+  not yet decoded into pointer events.
+- No scroll wheel (IntelliMouse) and no acceleration.
+- The pointer position lives in the window manager. There is no cursor
+  image: drawing one is the window manager's job, and there is no hardware
+  cursor.
+
 ## Stage 19.11 — userspace window manager: stacking, raise, focus, input routing (2026-10-12)
 
 **Roadmap mapping.** This repository's Stage 18–19 numbering has drifted

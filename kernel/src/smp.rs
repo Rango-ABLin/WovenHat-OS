@@ -798,6 +798,25 @@ pub fn start(topology: Option<crate::hal::acpi::Summary>, offset: u64) {
         33 | if flags & 3 == 3 { 1 << 13 } else { 0 }
             | if (flags >> 2) & 3 == 3 { 1 << 15 } else { 0 },
     );
+    // The PS/2 auxiliary port (mouse) on ISA IRQ 12, same vector numbering as
+    // the PIC path. Unlike the keyboard it is optional: an unusable GSI leaves
+    // it unrouted rather than failing boot.
+    let (mouse_gsi, mouse_flags) = topology.isa_gsi[12].unwrap_or((12, 0));
+    if mouse_gsi >= topology.io_apic_gsi_base
+        && mouse_gsi - topology.io_apic_gsi_base <= max
+        && mouse_flags & 3 != 2
+        && (mouse_flags >> 2) & 3 != 2
+    {
+        let pin = mouse_gsi - topology.io_apic_gsi_base;
+        io_write(io, 0x11 + pin * 2, IDS[0].load(Ordering::Relaxed) << 24);
+        io_write(
+            io,
+            0x10 + pin * 2,
+            u32::from(crate::pic::MASTER_OFFSET + crate::mouse::IRQ)
+                | if mouse_flags & 3 == 3 { 1 << 13 } else { 0 }
+                | if (mouse_flags >> 2) & 3 == 3 { 1 << 15 } else { 0 },
+        );
+    }
     IOAPIC.store(io, Ordering::Release);
     if let Some(index) = topology.processor_ids[..topology.processor_count]
         .iter()

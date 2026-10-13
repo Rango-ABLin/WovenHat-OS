@@ -1388,7 +1388,8 @@ pub fn spawn_user_process(
     feature = "stage19-7-test",
     feature = "stage19-8-test",
     feature = "stage19-9-test",
-    feature = "stage19-11-test"
+    feature = "stage19-11-test",
+    feature = "stage19-12-test"
 ))]
 pub fn spawn_user_system_service(
     name: &'static str,
@@ -1721,7 +1722,8 @@ pub fn task_live(id: TaskId) -> bool {
     feature = "stage19-6-test",
     feature = "stage19-8-test",
     feature = "stage19-9-test",
-    feature = "stage19-11-test"
+    feature = "stage19-11-test",
+    feature = "stage19-12-test"
 ))]
 pub fn process_task_blocked(id: ProcessId) -> bool {
     // Process table first, released before the scheduler lock is taken.

@@ -715,14 +715,36 @@ pub enum Key {
     F1,
 }
 
-/// Take the next input event, if any.
+/// An input event delivered to the focused process.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum InputEvent {
+    Key(Key),
+    /// Relative motion; Y grows downwards.
+    PointerMove { dx: i16, dy: i16 },
+    /// Button 0 is left, 1 right, 2 middle.
+    PointerButton { button: u8, pressed: bool },
+}
+
+/// Take the next input event of any kind, if any. Same authority as
+/// [`input_poll`].
+pub fn input_poll_event() -> Result<Option<InputEvent>, Error> {
+    // SAFETY: argument-free call.
+    decode_event(unsafe { syscall::input_poll() })
+}
+
+/// Take the next key, if any, discarding pointer events ahead of it.
 ///
 /// Requires the `InputIo` capability and input focus, which the kernel grants
 /// to the compositor lease holder while it owns the display. Returns
-/// `Ok(None)` when no event is pending; the call never blocks.
+/// `Ok(None)` when no key is pending; the call never blocks.
 pub fn input_poll() -> Result<Option<Key>, Error> {
-    // SAFETY: argument-free call.
-    decode_input(unsafe { syscall::input_poll() })
+    loop {
+        match input_poll_event()? {
+            None => return Ok(None),
+            Some(InputEvent::Key(key)) => return Ok(Some(key)),
+            Some(_) => {}
+        }
+    }
 }
 
 /// Sleep until the next input event, or until the timer reaches `deadline`
@@ -731,22 +753,36 @@ pub fn input_poll() -> Result<Option<Key>, Error> {
 /// Same authority as [`input_poll`]. Only one task of a process may wait at a
 /// time; a second concurrent waiter is refused.
 pub fn input_wait(deadline: Option<time::Ticks>) -> Result<Option<Key>, Error> {
-    // SAFETY: integer-only call.
-    decode_input(unsafe { syscall::input_wait(deadline.unwrap_or(u64::MAX)) })
+    loop {
+        // SAFETY: integer-only call.
+        match decode_event(unsafe { syscall::input_wait(deadline.unwrap_or(u64::MAX)) })? {
+            None => return Ok(None),
+            Some(InputEvent::Key(key)) => return Ok(Some(key)),
+            Some(_) => {}
+        }
+    }
 }
 
-fn decode_input(result: u64) -> Result<Option<Key>, Error> {
+fn decode_event(result: u64) -> Result<Option<InputEvent>, Error> {
     if result == syscall::WOULD_BLOCK {
         return Ok(None);
     }
     let value = check(result)?;
     let payload = value & 0x00ff_ffff_ffff_ffff;
     Ok(Some(match value >> 56 {
-        1 => Key::Char(char::from_u32(payload as u32).ok_or(Error::Failed)?),
-        2 => Key::Enter,
-        3 => Key::Backspace,
-        4 => Key::Tab,
-        5 => Key::F1,
+        1 => InputEvent::Key(Key::Char(char::from_u32(payload as u32).ok_or(Error::Failed)?)),
+        2 => InputEvent::Key(Key::Enter),
+        3 => InputEvent::Key(Key::Backspace),
+        4 => InputEvent::Key(Key::Tab),
+        5 => InputEvent::Key(Key::F1),
+        6 => InputEvent::PointerMove {
+            dx: payload as u16 as i16,
+            dy: (payload >> 16) as u16 as i16,
+        },
+        7 => InputEvent::PointerButton {
+            button: payload as u8,
+            pressed: (payload >> 8) & 1 != 0,
+        },
         _ => return Err(Error::Failed),
     }))
 }

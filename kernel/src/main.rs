@@ -62,6 +62,7 @@ mod ipc;
 mod irq_lock;
 mod journal;
 mod keyboard;
+mod mouse;
 mod memory;
 mod network;
 #[cfg(any(feature = "stage14-5-test", feature = "stage14-5b-test", feature = "stage14-5c-test", feature = "stage14-5d-test"))]
@@ -1321,9 +1322,16 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         }
 
         smp::start(acpi.ok(), physical_memory_offset.unwrap());
+        // Interrupts are still off: the mouse's command responses must not be
+        // taken by an IRQ handler.
+        let mouse_present = mouse::init();
+        serial::write_line(format_args!("[BOOT] ps2 mouse present={}", mouse_present));
         if !smp::routed_irq() {
             pic::unmask(timer::IRQ);
             pic::unmask(keyboard::IRQ);
+            if mouse_present {
+                pic::unmask(mouse::IRQ);
+            }
         }
         x86_64::instructions::interrupts::enable();
         if !block_io::start_worker() {
@@ -1840,9 +1848,16 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         halt();
     }
     smp::start(acpi.ok(), physical_memory_offset.unwrap());
+    // Interrupts are still off: the mouse's command responses must not be
+    // taken by an IRQ handler.
+    let mouse_present = mouse::init();
+    serial::write_line(format_args!("[BOOT] ps2 mouse present={}", mouse_present));
     if !smp::routed_irq() {
         pic::unmask(timer::IRQ);
         pic::unmask(keyboard::IRQ);
+        if mouse_present {
+            pic::unmask(mouse::IRQ);
+        }
     }
     x86_64::instructions::interrupts::enable();
     #[cfg(feature = "qemu-test")]
@@ -3362,6 +3377,15 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         serial::write_line(format_args!("[S1-5] storage journal: PASSED"));
         qemu_test_exit_success();
     }
+    #[cfg(feature = "stage19-12-test")]
+    {
+        if !stage19_12_self_test() {
+            serial::write_line(format_args!("[S19.12] pointer input: FAILED"));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!("[S19.12] pointer input: PASSED"));
+        qemu_test_exit_success();
+    }
     #[cfg(feature = "stage19-11-test")]
     {
         if !stage19_11_self_test() {
@@ -4461,7 +4485,8 @@ fn stage16_1_self_test() -> bool {
     feature = "stage19-7-test",
     feature = "stage19-8-test",
     feature = "stage19-9-test",
-    feature = "stage19-11-test"
+    feature = "stage19-11-test",
+    feature = "stage19-12-test"
 ))]
 const HELLO_GUI_IMAGE: &[u8] = include_bytes!(env!("WOVENHAT_HELLO_GUI_IMAGE"));
 
@@ -4477,7 +4502,8 @@ const HELLO_GUI_IMAGE: &[u8] = include_bytes!(env!("WOVENHAT_HELLO_GUI_IMAGE"));
     feature = "stage19-7-test",
     feature = "stage19-8-test",
     feature = "stage19-9-test",
-    feature = "stage19-11-test"
+    feature = "stage19-11-test",
+    feature = "stage19-12-test"
 ))]
 fn display_client_capabilities() -> capability::CapabilitySet {
     capability::CapabilitySet::only(capability::Capability::Console)
@@ -4495,7 +4521,8 @@ fn display_client_capabilities() -> capability::CapabilitySet {
     feature = "stage19-7-test",
     feature = "stage19-8-test",
     feature = "stage19-9-test",
-    feature = "stage19-11-test"
+    feature = "stage19-11-test",
+    feature = "stage19-12-test"
 ))]
 fn run_hello_gui(
     image: &[u8],
@@ -4517,7 +4544,8 @@ fn run_hello_gui(
     feature = "stage19-7-test",
     feature = "stage19-8-test",
     feature = "stage19-9-test",
-    feature = "stage19-11-test"
+    feature = "stage19-11-test",
+    feature = "stage19-12-test"
 ))]
 fn spawn_hello_gui(
     image: &[u8],
@@ -4544,7 +4572,8 @@ fn spawn_hello_gui(
     feature = "stage19-7-test",
     feature = "stage19-8-test",
     feature = "stage19-9-test",
-    feature = "stage19-11-test"
+    feature = "stage19-11-test",
+    feature = "stage19-12-test"
 ))]
 fn wait_hello_gui(pid: task::ProcessId) -> Option<(task::ProcessId, Result<i32, task::WaitError>)> {
     let start = timer::ticks();
@@ -4555,6 +4584,171 @@ fn wait_hello_gui(pid: task::ProcessId) -> Option<(task::ProcessId, Result<i32, 
         task::yield_now();
     }
     Some((pid, task::wait_process(pid.as_u64())))
+}
+
+/// Stage 19.12 acceptance: pointer input, and keystrokes delivered at IRQ time.
+///
+/// Everything here goes through the real i8042: command 0xD3 presents a byte
+/// as if the mouse sent it (IRQ12, the mouse driver), 0xD2 as if the keyboard
+/// did (IRQ1, the keyboard driver). The kernel first checks the packet decoder
+/// and the raw paths into a focus queue, then drives hello-gui `--wm` with a
+/// pointer move, a click on the bottom window, and a typed key, twice. Each
+/// client must receive exactly its own key: click-to-focus works, and keys
+/// reach a window manager asleep in `WaitAny` without anyone polling.
+#[cfg(feature = "stage19-12-test")]
+fn stage19_12_self_test() -> bool {
+    use woven_input::{Event, Key};
+
+    fn step(name: &str, ok: bool) -> bool {
+        serial::write_line(format_args!(
+            "[S19.12] {} {}",
+            name,
+            if ok { "PASS" } else { "FAIL" }
+        ));
+        ok
+    }
+    fn until_blocked(pid: task::ProcessId) -> bool {
+        let start = timer::ticks();
+        while !task::process_task_blocked(pid) {
+            if task::process_exited(pid) || timer::ticks().wrapping_sub(start) > 2000 {
+                return false;
+            }
+            task::yield_now();
+        }
+        true
+    }
+    /// One PS/2 packet: buttons, then 9-bit signed deltas with PS/2's upward Y.
+    fn packet(dx: i16, screen_dy: i16, left: bool) -> bool {
+        let dy = -screen_dy;
+        let flags = 0x08
+            | u8::from(left)
+            | if dx < 0 { 0x10 } else { 0 }
+            | if dy < 0 { 0x20 } else { 0 };
+        [flags, dx as u8, dy as u8].into_iter().all(mouse::loopback)
+    }
+    /// A key press (make code only; the decoder ignores break codes).
+    fn key(scancode: u8) -> bool {
+        mouse::keyboard_loopback(scancode)
+    }
+    fn next_event(owner: u64) -> Option<Event> {
+        let start = timer::ticks();
+        loop {
+            if let Ok(Some(event)) = woven_input::poll_for(owner) {
+                return Some(event);
+            }
+            if timer::ticks().wrapping_sub(start) > 200 {
+                return None;
+            }
+            task::yield_now();
+        }
+    }
+
+    if !step("packet decoder", mouse::decoder_self_test()) {
+        return false;
+    }
+
+    // Raw hardware paths into a focus queue.
+    const PROBE: u64 = 77;
+    woven_input::set_focus(Some(PROBE));
+    let mouse_path = packet(12, 7, true)
+        && next_event(PROBE) == Some(Event::PointerMove { dx: 12, dy: 7 })
+        && next_event(PROBE) == Some(Event::PointerButton { button: 0, pressed: true })
+        && packet(0, 0, false)
+        && next_event(PROBE) == Some(Event::PointerButton { button: 0, pressed: false });
+    let keyboard_path = key(0x1e) && next_event(PROBE) == Some(Event::Key(Key::Char('a')));
+    woven_input::set_focus(None);
+    if !step("mouse bytes through IRQ12 reach the focus queue", mouse_path)
+        || !step("keyboard bytes through IRQ1 are decoded at IRQ time", keyboard_path)
+    {
+        return false;
+    }
+
+    if !step(
+        "install into the filesystem",
+        vfs::create_read_only("/bin/hello-gui", HELLO_GUI_IMAGE).is_ok(),
+    ) {
+        return false;
+    }
+    let mut image = alloc::vec![0u8; HELLO_GUI_IMAGE.len()];
+    if vfs::read_all("/bin/hello-gui", &mut image) != Ok(HELLO_GUI_IMAGE.len()) {
+        return step("filesystem round-trip", false);
+    }
+    let capabilities = display_client_capabilities()
+        .with(capability::Capability::InputIo)
+        .with(capability::Capability::Ipc);
+    let Some(wm) = spawn_hello_gui(&image, &["/bin/hello-gui", "--wm"], Some(capabilities)) else {
+        return step("window manager spawned", false);
+    };
+    let start = timer::ticks();
+    while woven_input::focus() != Some(wm.as_u64()) {
+        if task::process_exited(wm) || timer::ticks().wrapping_sub(start) > 1000 {
+            return step("window manager holds display and focus", false);
+        }
+        task::yield_now();
+    }
+    step("window manager holds display and focus", true);
+
+    let wm_arg = alloc::format!("{}", wm.as_u64());
+    let Some(client_a) = spawn_hello_gui(
+        &image,
+        &["/bin/hello-gui", "--wm-client", &wm_arg, "200", "150", "a", "x"],
+        None,
+    ) else {
+        return step("client A spawned", false);
+    };
+    let Some(client_b) = spawn_hello_gui(
+        &image,
+        &["/bin/hello-gui", "--wm-client", &wm_arg, "260", "190", "b", "y"],
+        None,
+    ) else {
+        return step("client B spawned", false);
+    };
+    if !step("window manager asleep for input", until_blocked(wm)) {
+        return false;
+    }
+
+    // Pointer from (0,0) to (205,155), inside A only; click; type x. Then to
+    // (370,260), inside B only; click; type y. Scancodes 0x2D and 0x15.
+    let driven = packet(205, 155, false)
+        && packet(0, 0, true)
+        && packet(0, 0, false)
+        && key(0x2d)
+        && packet(165, 105, false)
+        && packet(0, 0, true)
+        && packet(0, 0, false)
+        && key(0x15);
+    if !step("pointer and keys driven through the i8042", driven) {
+        return false;
+    }
+
+    let code = |status: Option<Result<i32, task::WaitError>>| match status {
+        Some(Ok(code)) => code as i64,
+        _ => -1,
+    };
+    let a = wait_hello_gui(client_a).map(|(_, status)| status);
+    let b = wait_hello_gui(client_b).map(|(_, status)| status);
+    let w = wait_hello_gui(wm).map(|(_, status)| status);
+    serial::write_line(format_args!(
+        "[S19.12] exit status client A {} client B {} window manager {}",
+        code(a),
+        code(b),
+        code(w)
+    ));
+    if !step("click focused each window for its key", a == Some(Ok(0)) && b == Some(Ok(0)))
+        || !step("window manager exits zero", w == Some(Ok(0)))
+    {
+        return false;
+    }
+    const A: u32 = crate::display::rgb(200, 60, 60);
+    const B: u32 = crate::display::rgb(60, 60, 200);
+    let stacked = compositor::pixel(280, 200) == Ok(B) && compositor::pixel(205, 155) == Ok(A);
+    if !step("kernel reads B on top after the second click", stacked) {
+        return false;
+    }
+    step(
+        "lease and focus released on exit",
+        compositor::holder().is_none() && woven_input::focus().is_none(),
+    )
 }
 
 /// Stage 19.11 acceptance: a userspace window manager stacks windows and

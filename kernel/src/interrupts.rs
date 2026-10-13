@@ -133,6 +133,7 @@ pub fn init() {
         }
         idt[pic::MASTER_OFFSET + timer::IRQ].set_handler_fn(timer_interrupt_handler);
         idt[pic::MASTER_OFFSET + keyboard::IRQ].set_handler_fn(keyboard_interrupt_handler);
+        idt[pic::MASTER_OFFSET + crate::mouse::IRQ].set_handler_fn(mouse_interrupt_handler);
 
         idt
     });
@@ -319,6 +320,15 @@ extern "x86-interrupt" fn timer_interrupt_handler(_stack_frame: InterruptStackFr
     task::tick();
     pic::notify_end_of_interrupt(timer::IRQ);
     task::preempt_from_interrupt();
+}
+
+extern "x86-interrupt" fn mouse_interrupt_handler(_stack_frame: InterruptStackFrame) {
+    crate::mouse::handle_interrupt();
+    if crate::smp::routed_irq() {
+        crate::smp::eoi();
+    } else {
+        pic::notify_end_of_interrupt(crate::mouse::IRQ);
+    }
 }
 
 extern "x86-interrupt" fn keyboard_interrupt_handler(_stack_frame: InterruptStackFrame) {
