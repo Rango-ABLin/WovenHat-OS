@@ -1733,7 +1733,7 @@ pub fn stage15_2_self_test() -> bool {
 
     // Invalid native names must fail before device access, regardless of
     // whether the caller reaches the filesystem through a VFS path.
-    let invalid_native_names = ["", ".", "..", "nested/file", "nested\\\\file", "nul\\0file"];
+    let invalid_native_names = ["", ".", "..", "nested/file", "nested\\file", "nul\0file"];
     let native_boundary_ok = invalid_native_names.iter().all(|name| {
         write_ata_file(&authority, name, b"no", 28) == Err(Error::InvalidName)
             && read_ata_file(name, &mut path_bytes) == Err(Error::InvalidName)
@@ -1742,6 +1742,16 @@ pub fn stage15_2_self_test() -> bool {
     if !step("native WovenFS filename validation", native_boundary_ok) {
         return false;
     }
+    let invalid_vfs_paths = ["/wfs", "/wfs/", "/wfs2/file", "/wfs/../file", "/wfs/sub/file", "/wfs/nul\0file"];
+    let vfs_boundary_ok = invalid_vfs_paths.iter().all(|path| {
+        vfs_write_through(&authority, path, b"no", 29) == Err(Error::InvalidName)
+            && vfs_read_through(path, &mut path_bytes) == Err(Error::InvalidName)
+            && vfs_unlink_through(&authority, path, 29) == Err(Error::InvalidName)
+    });
+    if !step("VFS adapter rejects invalid paths for every operation", vfs_boundary_ok) {
+        return false;
+    }
+
 
     let verified = with_ata_volume(|volume| {
         if volume.check().is_err() {
