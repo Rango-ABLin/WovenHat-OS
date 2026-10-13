@@ -552,6 +552,36 @@ pub fn remove_pci_function(
 }
 
 
+/// Stage 13.2 driver lifecycle audit. A PCI binding must never be
+/// published without its owner or with a broken BAR/interrupt relationship.
+/// Hardware topology generation/teardown is separately tested by the HAL.
+#[cfg(feature = "stage13-2-test")]
+pub fn stage13_2_lifecycle_self_test() -> bool {
+    let table = TABLE.lock();
+    table.iter().flatten().all(|entry| {
+        match (entry.state, entry.pci) {
+            (State::Registered | State::Suspended, None) => true,
+            (State::Bound, Some(binding)) => {
+                binding.owner != crate::hal::pci::topology::NO_OWNER
+                    && binding.bars.iter().enumerate().all(|(index, lease)| {
+                        lease.is_none_or(|bar| {
+                            usize::from(bar.bar) == index
+                                && bar.function == binding.function
+                        })
+                    })
+                    && binding.interrupt.is_none_or(|interrupt| match interrupt {
+                        PciInterrupt::Msi(lease) => lease.function == binding.function,
+                        PciInterrupt::Msix(lease) => lease.function == binding.function,
+                    })
+            }
+            (State::Bound, None) => true, // Non-PCI driver.
+            // Quiescing must be completed before a Stage 13.2 acceptance
+            // snapshot is considered stable.
+            (State::Unbinding, _) | (State::Registered | State::Suspended, Some(_)) => false,
+        }
+    })
+}
+
 /// Driver-aware PCI hotplug reconciliation. The HAL only detects removals;
 /// this layer owns driver teardown policy, preserving dependency direction.
 pub fn hotplug_rescan() -> Result<crate::hal::pci::Summary, PciUnbindError> {
