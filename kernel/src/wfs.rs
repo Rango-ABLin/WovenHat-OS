@@ -1297,6 +1297,48 @@ pub fn stage15_1_self_test() -> bool {
         return false;
     }
 
+    // Exercise every interrupted sector write of an overwrite transaction.
+    // After journal replay, a file must contain either the entire old payload
+    // or the entire new payload, never a partially overwritten mixture.
+    let Ok(mut prepared) = Volume::mount(base.fork(None)) else {
+        return false;
+    };
+    let Ok(target) = prepared.create(1, "atomic-write.bin", 0o600, 60) else {
+        return false;
+    };
+    let old_bytes = [0x11u8; 700];
+    let new_bytes = [0x22u8; 700];
+    if prepared.write_file(target, &old_bytes, 61).is_err() {
+        return false;
+    }
+    let old_disk = prepared.into_device();
+    let writes = {
+        let Ok(mut measured) = Volume::mount(old_disk.fork(None)) else {
+            return false;
+        };
+        if measured.write_file(target, &new_bytes, 62).is_err() {
+            return false;
+        }
+        measured.into_device().accepted()
+    };
+    for boundary in 0..=writes {
+        let Ok(mut interrupted) = Volume::mount(old_disk.fork(Some(boundary))) else {
+            return false;
+        };
+        let _ = interrupted.write_file(target, &new_bytes, 62);
+        let interrupted_disk = interrupted.into_device();
+        let Ok(mut recovered) = Volume::mount(interrupted_disk.fork(None)) else {
+            return false;
+        };
+        let mut bytes = [0u8; 700];
+        if recovered.check().is_err()
+            || recovered.read_file(target, &mut bytes) != Ok(bytes.len())
+            || (bytes != old_bytes && bytes != new_bytes)
+        {
+            return false;
+        }
+    }
+
     // A destroyed checkpoint slot must fall back to the other one.
     let Ok(mut volume) = Volume::mount(base.fork(None)) else {
         return false;
