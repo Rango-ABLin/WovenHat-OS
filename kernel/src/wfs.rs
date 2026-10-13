@@ -1320,6 +1320,53 @@ pub fn with_ata_volume<R>(
     .flatten()
 }
 
+/// Explicit authority for native WovenFS mutations. Must be issued only after
+/// a WovenGuard capability check by the kernel-side caller.
+#[cfg(feature = "stage15-2-test")]
+pub struct AuthorizedWfsWriter { _private: () }
+
+#[cfg(feature = "stage15-2-test")]
+impl AuthorizedWfsWriter {
+    pub(crate) const fn after_capability_check() -> Self { Self { _private: () } }
+}
+
+/// Native write-through adapter. It remounts and replays the journal for each
+/// operation; VFS namespace invalidation remains a separate integration gate.
+#[cfg(feature = "stage15-2-test")]
+pub fn write_ata_file(
+    _authority: &AuthorizedWfsWriter, name: &str, bytes: &[u8], now: u64,
+) -> Result<(), Error> {
+    if name.is_empty() || name.len() > MAX_NAME || name.contains('/') || name == "." || name == ".." {
+        return Err(Error::InvalidName);
+    }
+    if bytes.len() > MAX_FILE_SIZE { return Err(Error::TooLarge); }
+    with_ata_volume(|volume| {
+        let inode = match volume.lookup(1, name) {
+            Ok(entry) => entry.inode,
+            Err(Error::NotFound) => volume.create(1, name, 0o600, now)?,
+            Err(error) => return Err(error),
+        };
+        volume.write_file(inode, bytes, now)
+    }).unwrap_or(Err(Error::Device))
+}
+
+/// Reads newly mounted, checksum-verified disk content, not cached VFS bytes.
+#[cfg(feature = "stage15-2-test")]
+pub fn read_ata_file(name: &str, out: &mut [u8]) -> Result<usize, Error> {
+    with_ata_volume(|volume| {
+        let inode = volume.lookup(1, name)?.inode;
+        volume.read_file(inode, out)
+    }).unwrap_or(Err(Error::Device))
+}
+
+/// Authorized native unlink. Callers must invalidate VFS cached entries.
+#[cfg(feature = "stage15-2-test")]
+pub fn unlink_ata_file(
+    _authority: &AuthorizedWfsWriter, name: &str, now: u64,
+) -> Result<(), Error> {
+    with_ata_volume(|volume| volume.unlink(1, name, now)).unwrap_or(Err(Error::Device))
+}
+
 /// Format the ATA primary master as WovenFS.
 ///
 /// Destructive, and gated behind the Stage 15.2 acceptance feature so it can
