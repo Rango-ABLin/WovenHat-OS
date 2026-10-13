@@ -28,13 +28,13 @@ pub const DEFAULT_HEIGHT: u32 = 480;
 
 /// Upper bound on the boot-time surface. The compositor follows the
 /// framebuffer, but a 4K display would otherwise cost a 33 MB kernel
-/// allocation; 1920Ã—1200 bounds it near 9 MB. A larger display shows the
+/// allocation; 1920×1200 bounds it near 9 MB. A larger display shows the
 /// compositor in its top-left corner.
 pub const MAX_WIDTH: u32 = 1920;
 pub const MAX_HEIGHT: u32 = 1200;
 
-/// Largest integer display scale. At 4 a 1920Ã—1200 framebuffer gives a
-/// 480Ã—300 surface, about as coarse as a usable desktop gets.
+/// Largest integer display scale. At 4 a 1920×1200 framebuffer gives a
+/// 480×300 surface, about as coarse as a usable desktop gets.
 pub const MAX_SCALE: u32 = 4;
 
 /// Error returned by compositor operations.
@@ -68,7 +68,7 @@ struct State {
     /// The one process allowed to drive the compositor from userspace.
     holder: Option<u64>,
     /// Integer display scale: each surface pixel is presented as a
-    /// `scale`Ã—`scale` block. The surface is the framebuffer divided by this.
+    /// `scale`×`scale` block. The surface is the framebuffer divided by this.
     scale: u32,
 }
 
@@ -99,7 +99,7 @@ impl State {
 /// [`present`]; the terminal never calls back into this module.
 static STATE: Mutex<Option<State>> = Mutex::with_rank(None, 10);
 
-/// Initialise the compositor surface. Idempotent â€” the second call is a no-op.
+/// Initialise the compositor surface. Idempotent — the second call is a no-op.
 ///
 /// The acceptance tests call this; a production boot would call it with the
 /// framebuffer's own dimensions once a global framebuffer accessor exists.
@@ -111,7 +111,7 @@ pub fn init(width: u32, height: u32) {
 }
 
 /// Initialise the compositor at the framebuffer's size, clamped to
-/// [`MAX_WIDTH`]Ã—[`MAX_HEIGHT`], or at the default size without a framebuffer.
+/// [`MAX_WIDTH`]×[`MAX_HEIGHT`], or at the default size without a framebuffer.
 /// Idempotent, like [`init`].
 pub fn init_for_display() {
     let (width, height) = crate::terminal::framebuffer_info()

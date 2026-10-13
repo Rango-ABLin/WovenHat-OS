@@ -195,6 +195,7 @@ pub mod syscall {
     pub const ENV_GET: u64 = 51;
     pub const ENV_COUNT: u64 = 53;
     pub const SPAWN_COMMAND: u64 = 57;
+    pub const READDIR: u64 = 18;
     pub const NOTIFICATION_POLL: u64 = 95;
     pub const NOTIFICATION_POST: u64 = 96;
     pub const GRAPHICS_SURFACE_CREATE: u64 = 98;
@@ -537,6 +538,14 @@ pub mod syscall {
             GRAPHICS_COMPOSITOR_BLIT_REGION
         };
         unsafe { invoke(number, handle, destination, region) }
+    }
+
+    /// # Safety
+    /// `path` must be readable for `path_len` bytes and `name` writable for
+    /// 255 bytes, the longest name a directory entry can carry.
+    pub unsafe fn readdir(path: *const u8, path_len: usize, index: usize, name: *mut u8) -> u64 {
+        let packed = (path_len as u64 & 0xffff) | ((index as u64) << 16);
+        unsafe { invoke(READDIR, path as u64, packed, name as u64) }
     }
 
     /// # Safety
@@ -1047,7 +1056,7 @@ pub struct CompositorInfo {
     pub width: u32,
     /// Surface height in logical pixels.
     pub height: u32,
-    /// Each logical pixel is shown as a `scale`Ã—`scale` block.
+    /// Each logical pixel is shown as a `scale`×`scale` block.
     pub scale: u32,
 }
 
@@ -1303,6 +1312,31 @@ pub fn current_pid() -> process::Id {
 pub fn parent_pid() -> process::Id {
     // SAFETY: getppid takes no pointers.
     process::Id(unsafe { syscall::getppid() })
+}
+
+/// Open a file, returning its descriptor. Requires `FileRead`.
+pub fn open(path: &str) -> Result<u64, Error> {
+    // SAFETY: a str is readable for its own length.
+    check(unsafe { syscall::open(path.as_ptr(), path.len(), 0) })
+}
+
+/// Close a descriptor.
+pub fn close(descriptor: u64) -> Result<(), Error> {
+    // SAFETY: integer-only call.
+    check(unsafe { syscall::close(descriptor) }).map(|_| ())
+}
+
+/// The longest name a directory entry can carry.
+pub const MAX_NAME: usize = 255;
+
+/// Entry `index` of directory `path`: its name, copied into `name`, and
+/// whether it is itself a directory. Fails past the last entry. Requires
+/// `FileRead`.
+pub fn read_dir(path: &str, index: usize, name: &mut [u8; MAX_NAME]) -> Result<(usize, bool), Error> {
+    // SAFETY: the path is readable for its length, and `name` is writable
+    // for the longest name the kernel copies.
+    let value = check(unsafe { syscall::readdir(path.as_ptr(), path.len(), index, name.as_mut_ptr()) })?;
+    Ok(((value & 0xff) as usize, (value >> 8) & 0xff == 1))
 }
 
 /// Timer ticks since boot.

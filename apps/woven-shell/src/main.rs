@@ -7,9 +7,9 @@
 //!
 //! # Drawing
 //!
-//! Client surfaces are capped at 320Ã—240, so the desktop is never one
+//! Client surfaces are capped at 320×240, so the desktop is never one
 //! surface. The shell's own layers (desktop, title bars, toast, pointer) are
-//! rendered in software into a [`Canvas`] in chunks of at most 320Ã—40,
+//! rendered in software into a [`Canvas`] in chunks of at most 320×40,
 //! uploaded into one staging surface and blitted with a region blit.
 //!
 //! Every change becomes a repaint of an exposed rectangle, which recomposes
@@ -24,7 +24,7 @@
 //! four-byte tag:
 //! - `WOPN`, token (u64), width (u16), height (u16), title (up to 24 bytes):
 //!   open a window showing a surface the sender shared with the shell.
-//! - `TRAY`, token (u64): show a 16Ã—16 surface in the system tray.
+//! - `TRAY`, token (u64): show a 16×16 surface in the system tray.
 //! - `NOTE`, text: show a notification toast for four seconds.
 //!
 //! A surface is accepted only if the sender owns it: the token names its
@@ -32,8 +32,17 @@
 //! icon goes away when its surface does, normally because its owner exited.
 //! Keystrokes go to the focused window's owner as one-byte messages.
 //!
-//! On a display at least 1280Ã—800 the shell switches to display scale 2, so
-//! the 5Ã—7 font stays legible. With `--seconds` the clock shows seconds.
+//! # WovenStart
+//!
+//! The start button, or F1, opens the launcher: the applications listed in
+//! `/share/applications`, filtered as you type. Enter or a click launches
+//! one. Each catalog entry is a small file of `Name=` and `Exec=` lines;
+//! `%p` in the command becomes the shell's process id, which is how a
+//! launched application finds the shell. Launched applications are the
+//! shell's children, and it reaps them as they exit.
+//!
+//! On a display at least 1280×800 the shell switches to display scale 2, so
+//! the 5×7 font stays legible. With `--seconds` the clock shows seconds.
 #![no_std]
 #![no_main]
 
@@ -116,6 +125,20 @@ const CURSOR: [&[u8; 7]; 10] = [
 ];
 const CURSOR_WIDTH: i32 = 7;
 const CURSOR_HEIGHT: i32 = 10;
+
+/// The application catalog: one `*.app` file per application.
+const CATALOG: &str = "/share/applications";
+const MAX_APPS: usize = 8;
+const MAX_APP_NAME: usize = 20;
+const MAX_EXEC: usize = 96;
+const MAX_QUERY: usize = 16;
+const MAX_CHILDREN: usize = 8;
+
+const PANEL_X: i32 = 4;
+const PANEL_WIDTH: i32 = 160;
+const PANEL_ROW: i32 = 14;
+const PANEL_FILL: u32 = rgb(28, 32, 44);
+const PANEL_TITLE: &str = "WovenStart";
 
 const TILE_WIDTH: usize = 320;
 const TILE_HEIGHT: usize = 40;
@@ -275,6 +298,126 @@ struct TrayIcon {
     token: u64,
 }
 
+#[derive(Clone, Copy)]
+struct App {
+    name: [u8; MAX_APP_NAME],
+    name_length: usize,
+    exec: [u8; MAX_EXEC],
+    exec_length: usize,
+}
+
+impl App {
+    fn name(&self) -> &[u8] {
+        &self.name[..self.name_length]
+    }
+
+    /// Parse a catalog entry: `Name=` and `Exec=` lines, both required.
+    fn parse(text: &[u8]) -> Option<Self> {
+        let mut app = Self {
+            name: [0; MAX_APP_NAME],
+            name_length: 0,
+            exec: [0; MAX_EXEC],
+            exec_length: 0,
+        };
+        for line in text.split(|byte| *byte == b'\n') {
+            let line = line.strip_suffix(b"\r").unwrap_or(line);
+            if let Some(name) = line.strip_prefix(b"Name=") {
+                if name.is_empty() || name.len() > MAX_APP_NAME {
+                    return None;
+                }
+                app.name[..name.len()].copy_from_slice(name);
+                app.name_length = name.len();
+            } else if let Some(exec) = line.strip_prefix(b"Exec=") {
+                if exec.is_empty() || exec.len() > MAX_EXEC {
+                    return None;
+                }
+                app.exec[..exec.len()].copy_from_slice(exec);
+                app.exec_length = exec.len();
+            }
+        }
+        (app.name_length > 0 && app.exec_length > 0).then_some(app)
+    }
+
+    /// The command line, with `%p` replaced by the shell's process id.
+    fn command<'a>(&self, shell: process::Id, buffer: &'a mut [u8; 128]) -> Option<&'a str> {
+        let mut digits = [0u8; 20];
+        let pid = libwoven::format_u64(shell.0, &mut digits);
+        let exec = &self.exec[..self.exec_length];
+        let mut length = 0;
+        let mut index = 0;
+        while index < exec.len() {
+            let part: &[u8] = if exec[index..].starts_with(b"%p") {
+                index += 2;
+                pid
+            } else {
+                index += 1;
+                &exec[index - 1..index]
+            };
+            buffer.get_mut(length..length + part.len())?.copy_from_slice(part);
+            length += part.len();
+        }
+        core::str::from_utf8(&buffer[..length]).ok()
+    }
+}
+
+/// Load the catalog, sorted by name. A missing catalog, or no `FileRead`,
+/// leaves the launcher empty rather than stopping the shell.
+fn load_catalog() -> ([Option<App>; MAX_APPS], usize) {
+    let mut apps = [None; MAX_APPS];
+    let mut count = 0;
+    let mut name = [0u8; libwoven::MAX_NAME];
+    let mut index = 0;
+    while count < MAX_APPS {
+        let Ok((length, is_directory)) = libwoven::read_dir(CATALOG, index, &mut name) else {
+            break;
+        };
+        index += 1;
+        if is_directory || !name[..length].ends_with(b".app") {
+            continue;
+        }
+        let mut path = [0u8; 128];
+        let prefix = CATALOG.as_bytes();
+        let total = prefix.len() + 1 + length;
+        if total > path.len() {
+            continue;
+        }
+        path[..prefix.len()].copy_from_slice(prefix);
+        path[prefix.len()] = b'/';
+        path[prefix.len() + 1..total].copy_from_slice(&name[..length]);
+        let Ok(path) = core::str::from_utf8(&path[..total]) else { continue };
+        let Ok(descriptor) = libwoven::open(path) else { continue };
+        let mut text = [0u8; 256];
+        let read = libwoven::read(descriptor, &mut text);
+        let _ = libwoven::close(descriptor);
+        let Some(app) = read.ok().and_then(|length| App::parse(&text[..length])) else {
+            continue;
+        };
+        // Insertion sort by name, so the list reads alphabetically.
+        let mut position = count;
+        while position > 0 && apps[position - 1].is_some_and(|other: App| other.name() > app.name()) {
+            apps[position] = apps[position - 1];
+            position -= 1;
+        }
+        apps[position] = Some(app);
+        count += 1;
+    }
+    (apps, count)
+}
+
+/// Whether `name` contains `query`, ignoring ASCII case.
+fn matches(name: &[u8], query: &[u8]) -> bool {
+    query.is_empty()
+        || name
+            .windows(query.len())
+            .any(|window| window.eq_ignore_ascii_case(query))
+}
+
+#[derive(Clone, Copy)]
+struct Child {
+    pid: process::Id,
+    app: usize,
+}
+
 struct Toast {
     text: [u8; 32],
     length: usize,
@@ -337,6 +480,13 @@ struct Desktop {
     toast: Option<Toast>,
     pointer: (i32, i32),
     pointer_visible: bool,
+    apps: [Option<App>; MAX_APPS],
+    app_count: usize,
+    launcher_open: bool,
+    query: [u8; MAX_QUERY],
+    query_length: usize,
+    selected: usize,
+    children: [Option<Child>; MAX_CHILDREN],
 }
 
 impl Desktop {
@@ -381,6 +531,163 @@ impl Desktop {
             return Area::new(0, 0, 0, 0);
         }
         Area::new(self.pointer.0, self.pointer.1, CURSOR_WIDTH, CURSOR_HEIGHT)
+    }
+
+    /// Catalog indices matching the query, in catalog order.
+    fn filtered(&self) -> ([usize; MAX_APPS], usize) {
+        let mut found = [0; MAX_APPS];
+        let mut count = 0;
+        let query = &self.query[..self.query_length];
+        for (index, app) in self.apps[..self.app_count].iter().enumerate() {
+            if app.is_some_and(|app| matches(app.name(), query)) {
+                found[count] = index;
+                count += 1;
+            }
+        }
+        (found, count)
+    }
+
+    fn start_area(&self) -> Area {
+        Area::new(START_X, self.taskbar_top() + 4, START_WIDTH as i32, START_HEIGHT as i32)
+    }
+
+    /// The launcher panel, sized to its rows, above the start button; empty
+    /// while closed.
+    fn panel_area(&self) -> Area {
+        if !self.launcher_open {
+            return Area::new(0, 0, 0, 0);
+        }
+        let rows = 2 + self.filtered().1.max(1) as i32;
+        let height = rows * PANEL_ROW + 2;
+        Area::new(PANEL_X, self.taskbar_top() - 2 - height, PANEL_WIDTH, height)
+    }
+
+    fn render_panel(&self, canvas: &mut Canvas<'_>) {
+        let area = self.panel_area();
+        let (x, y) = (area.x, area.y);
+        let inner = (area.width - 2) as usize;
+        canvas.fill_rect(x, y, area.width as usize, area.height as usize, ACCENT);
+        canvas.fill_rect(x + 1, y + 1, inner, (area.height - 2) as usize, PANEL_FILL);
+        canvas.fill_rect(x + 1, y + 1, inner, PANEL_ROW as usize, START_FILL);
+        canvas.draw_text(x + 6, y + 5, PANEL_TITLE, TEXT);
+
+        let mut search = [0u8; MAX_QUERY + 3];
+        search[..2].copy_from_slice(b"> ");
+        search[2..2 + self.query_length].copy_from_slice(&self.query[..self.query_length]);
+        search[2 + self.query_length] = b'_';
+        let text = core::str::from_utf8(&search[..3 + self.query_length]).unwrap_or("");
+        canvas.draw_text(x + 6, y + 1 + PANEL_ROW + 4, text, TEXT);
+
+        let (found, count) = self.filtered();
+        if count == 0 {
+            canvas.draw_text(x + 6, y + 1 + 2 * PANEL_ROW + 4, "No matches", TEXT);
+        }
+        for (row, &index) in found[..count].iter().enumerate() {
+            let Some(app) = &self.apps[index] else { continue };
+            let row_y = y + 1 + (2 + row as i32) * PANEL_ROW;
+            if row == self.selected {
+                canvas.fill_rect(x + 1, row_y, inner, PANEL_ROW as usize, ENTRY_ACTIVE);
+            }
+            let text = core::str::from_utf8(app.name()).unwrap_or("?");
+            canvas.draw_text(x + 6, row_y + 4, text, TEXT);
+        }
+    }
+
+    /// Open or close the launcher. Returns the area to repaint.
+    fn toggle_launcher(&mut self) -> Area {
+        let before = self.panel_area();
+        self.launcher_open = !self.launcher_open;
+        self.query_length = 0;
+        self.selected = 0;
+        before.union(self.panel_area())
+    }
+
+    /// Launch catalog entry `index` and close the launcher. A failure is
+    /// reported in a toast. Returns the area to repaint.
+    fn launch(&mut self, index: usize) -> Area {
+        let mut dirty = self.toggle_launcher();
+        let Some(app) = self.apps[index] else { return dirty };
+        let slot = self.children.iter().position(Option::is_none);
+        let mut buffer = [0u8; 128];
+        let started = match (slot, app.command(libwoven::current_pid(), &mut buffer)) {
+            (Some(slot), Some(command)) => match libwoven::spawn(command) {
+                Ok(pid) => {
+                    self.children[slot] = Some(Child { pid, app: index });
+                    log(&[b"woven-shell: launched ", app.name()]);
+                    true
+                }
+                Err(_) => false,
+            },
+            _ => false,
+        };
+        if !started {
+            let mut message = [0u8; 64];
+            let prefix = b"Could not start ";
+            let length = (prefix.len() + app.name_length).min(message.len());
+            message[..prefix.len()].copy_from_slice(prefix);
+            message[prefix.len()..length].copy_from_slice(&app.name()[..length - prefix.len()]);
+            let mut text = [0u8; 32];
+            let shown = label(&message[..length], TOAST_CHARS, &mut text);
+            self.toast = Some(Toast {
+                text,
+                length: shown,
+                until: libwoven::ticks() + TOAST_TICKS,
+            });
+            log(&[b"woven-shell: could not start ", app.name()]);
+            dirty = dirty.union(self.toast_area());
+        }
+        dirty
+    }
+
+    /// Keys while the launcher is open edit the search and choose.
+    fn launcher_key(&mut self, key: Key) -> Area {
+        let before = self.panel_area();
+        match key {
+            Key::Char(character) if (' '..='~').contains(&character) => {
+                if self.query_length < MAX_QUERY {
+                    self.query[self.query_length] = character as u8;
+                    self.query_length += 1;
+                }
+                self.selected = 0;
+            }
+            Key::Backspace => {
+                self.query_length = self.query_length.saturating_sub(1);
+                self.selected = 0;
+            }
+            Key::Tab => {
+                let count = self.filtered().1;
+                if count > 0 {
+                    self.selected = (self.selected + 1) % count;
+                }
+            }
+            Key::Enter => {
+                let (found, count) = self.filtered();
+                if self.selected < count {
+                    return before.union(self.launch(found[self.selected]));
+                }
+            }
+            Key::F1 => return self.toggle_launcher(),
+            Key::Char(_) => {}
+        }
+        before.union(self.panel_area())
+    }
+
+    /// Reap launched applications that have exited.
+    fn reap(&mut self) {
+        for child in self.children.iter_mut() {
+            let Some(running) = *child else { continue };
+            match libwoven::wait(running.pid) {
+                Err(libwoven::Error::WouldBlock) => {}
+                result => {
+                    let app = self.apps[running.app];
+                    let name = app.as_ref().map_or(&b"?"[..], |app| app.name());
+                    if result.is_ok() {
+                        log(&[b"woven-shell: reaped ", name]);
+                    }
+                    *child = None;
+                }
+            }
+        }
     }
 
     fn focused(&self) -> Option<usize> {
@@ -505,6 +812,11 @@ impl Desktop {
             }
         }
 
+        let panel = self.panel_area().intersect(area);
+        if !panel.is_empty() {
+            painter.draw(panel, |canvas| self.render_panel(canvas));
+        }
+
         let cursor = self.cursor_area().intersect(area);
         if !cursor.is_empty() {
             painter.draw(cursor, |canvas| self.render_cursor(canvas));
@@ -624,6 +936,23 @@ impl Desktop {
             }
             InputEvent::PointerButton { button: 0, pressed: true } => {
                 let (x, y) = self.pointer;
+                if self.start_area().contains(x, y) {
+                    return self.toggle_launcher();
+                }
+                if self.launcher_open {
+                    // A click on an application launches it; anywhere else
+                    // outside the panel closes the launcher.
+                    let panel = self.panel_area();
+                    if !panel.contains(x, y) {
+                        return self.toggle_launcher();
+                    }
+                    let row = (y - panel.y - 1) / PANEL_ROW - 2;
+                    let (found, count) = self.filtered();
+                    if row >= 0 && (row as usize) < count {
+                        return self.launch(found[row as usize]);
+                    }
+                    return empty;
+                }
                 // A taskbar entry focuses its window.
                 let entry = self
                     .entries()
@@ -639,6 +968,8 @@ impl Desktop {
                 });
                 hit.map_or(empty, |slot| self.focus(slot))
             }
+            InputEvent::Key(key) if self.launcher_open => self.launcher_key(key),
+            InputEvent::Key(Key::F1) => self.toggle_launcher(),
             InputEvent::Key(Key::Char(character)) if character.is_ascii() => {
                 if let Some(window) = self.focused().and_then(|slot| self.windows[slot]) {
                     let _ = libwoven::message_send(window.owner, &[character as u8]);
@@ -687,8 +1018,10 @@ impl Desktop {
         dirty
     }
 
-    /// Advance the clock and the toast timer. Returns the area to repaint.
+    /// Advance the clock and the toast timer, and reap exited
+    /// applications. Returns the area to repaint.
     fn tick(&mut self) -> Area {
+        self.reap();
         let mut dirty = Area::new(0, 0, 0, 0);
         let time = libwoven::clock().ok();
         if clock_text(time, self.seconds) != clock_text(self.time, self.seconds) {
@@ -732,6 +1065,7 @@ fn main(args: Args) -> ! {
     let mut painter = Painter { staging, tile };
 
     let (width, height) = (info.width as i32, info.height as i32);
+    let (apps, app_count) = load_catalog();
     let mut desktop = Desktop {
         width,
         height,
@@ -745,6 +1079,13 @@ fn main(args: Args) -> ! {
         toast: None,
         pointer: (width / 2, height / 2),
         pointer_visible: false,
+        apps,
+        app_count,
+        launcher_open: false,
+        query: [0; MAX_QUERY],
+        query_length: 0,
+        selected: 0,
+        children: [None; MAX_CHILDREN],
     };
     desktop.repaint(&mut painter, desktop.screen());
     // The first present takes the display from the text terminal.

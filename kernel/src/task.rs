@@ -1393,7 +1393,8 @@ pub fn spawn_user_process(
     feature = "stage19-13-test",
     feature = "stage19-14-test",
     feature = "stage20-1-test",
-    feature = "stage20-2-test"
+    feature = "stage20-2-test",
+    feature = "stage20-3-test"
 ))]
 pub fn spawn_user_system_service(
     name: &'static str,
@@ -4786,6 +4787,17 @@ pub fn honor_current_termination_request() {
     if signal != 0 {
         exit_current_process(128 + i32::from(signal));
     }
+}
+
+/// Processes whose parent is `parent`, live or exited but not yet reaped.
+/// The Stage 20.3 gate uses it to see that the shell reaps what it launches.
+#[cfg(feature = "stage20-3-test")]
+pub fn child_count(parent: ProcessId) -> usize {
+    process_table_lock()
+        .iter()
+        .flatten()
+        .filter(|process| process.parent == parent)
+        .count()
 }
 
 pub fn kill_process(pid: u64, sig: u64) -> Result<(), FileError> {

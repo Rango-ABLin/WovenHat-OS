@@ -91,6 +91,8 @@ stage19-14-test = ["qemu-test"]
 stage20-1-test = ["qemu-test"]
 # WovenShell desktop: windows, taskbar entries, tray and notifications.
 stage20-2-test = ["qemu-test"]
+# WovenStart: the application launcher.
+stage20-3-test = ["qemu-test"]
 stage1-5-test = ["qemu-test"]
 
 [dependencies]

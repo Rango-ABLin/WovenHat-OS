@@ -1,5 +1,81 @@
 # Stage status
 
+## Stage 20.3 — WovenStart application launcher (2026-10-13)
+
+Roadmap Stage 18.2, WovenStart: application launcher and search.
+
+**Catalog.** `/share/applications/*.app` holds one small text file per
+application, with a `Name=` line and an `Exec=` line. In the command, `%p`
+becomes the shell's process id; that is how a launched application finds
+the shell, which closes the discovery gap for launched applications. The
+shell loads up to eight entries at startup and sorts them by name.
+Directories, non-`.app` files and malformed entries are skipped. A missing
+catalog, or no `FileRead`, leaves the launcher empty rather than stopping
+the shell.
+
+**Launcher.** The start button, or F1, opens a panel above the taskbar. It
+has a title row, a search row showing the query, and one row per matching
+application, the first highlighted.
+- Typing filters by case-insensitive substring. Backspace edits, Tab moves
+  the selection, Enter launches the selection, and F1 closes.
+- A click on a row launches it; a click outside the panel closes it.
+- While the panel is open, keys go to it rather than to the focused window.
+- With no match, the panel says "No matches".
+- The panel is a layer of its own in the exposed-region repaint, between
+  the toast and the pointer.
+
+**Launching and reaping.** The shell starts an application with
+`SpawnCommand`, which needs `FileRead` and `ProcessCreate`. The application
+is an ordinary user process with the default user capabilities, including
+`Ipc` but not `DisplayIo`, and it is the shell's child.
+- If the program cannot be started, the shell shows a "Could not start …"
+  toast.
+- `waitpid` does not block (it returns would-block while the child runs),
+  so the shell polls its children every frame and reaps each as it exits.
+  Without that, exited applications would stay zombies until the shell
+  exited.
+- libwoven adds `open`, `close` and `read_dir`. `read_dir` requires a
+  255-byte name buffer, because the kernel copies the whole name.
+- The kernel adds `task::child_count`, test-only, so the gate can see
+  reaping.
+
+**Fixed: double-encoded UTF-8 (since Stage 19.14).** The negative-control
+runs for 19.14, 20.1 and 20.2 restored source files through Windows
+PowerShell 5.1 `Get-Content`. It decoded UTF-8 as Latin-1 and wrote the
+result back as UTF-8, so every `×` and `—` in doc comments in
+`compositor.rs`, `libwoven/src/lib.rs` and `woven-shell` became mojibake,
+and some was committed. No code was affected. The runs were repaired here.
+Negative controls now edit and restore files byte for byte through Python.
+
+Gate `[S20.3] application launcher: PASSED`. The catalog is Alpha, Beta and
+Gamma, where Gamma names a missing program, plus a stray `notes.txt`. The
+shell runs with `FileRead` and `ProcessCreate`, driven by real i8042 input.
+Every panel state is compared with the kernel's own rendering.
+- F1 opens the sorted catalog, without `notes.txt`. Tab moves the
+  selection. Typing `be` filters to Beta.
+- Enter launches Beta: its window opens, the panel closes, and the shell
+  has one child. Beta takes `y` and exits, and the shell reaps it (child
+  count 0).
+- The start button opens the panel, and clicking Alpha's row launches it.
+  Alpha takes `x` and exits, and is reaped.
+- `g` then Enter shows "Could not start Gamma", with no child.
+- `zz` shows "No matches", Enter does nothing, and F1 closes.
+- Killing the shell returns the display.
+
+Negative controls, with evidence in
+`audit-artifacts/stage20.3-negative-control-*`:
+- With reaping disabled, the gate fails at "Beta takes its key, exits, and
+  is reaped".
+- With the search ignoring the query, it fails at "typing filters the
+  list".
+
+Open:
+- The catalog is read once at startup, with no reload, and up to 8 entries.
+- No icons, no categories, and no search beyond names.
+- Launched applications get the default user capabilities; there is no
+  per-application manifest of capabilities.
+- Not started at boot yet (see Stage 20.1).
+
 ## Stage 20.2 — desktop applications: windows, taskbar entries, tray, notifications (2026-10-13)
 
 Roadmap Stage 18.1, Desktop, completed.
@@ -1063,6 +1139,11 @@ injection, not by actual power loss on a device, and physical qualification
 covers one device on one host through QEMU's IDE emulation rather than a native
 driver stack.
 
+The complete Stage 12 acceptance chain was revalidated on 2026-10-13: all
+Stages 12.1–12.5 passed on 1/2/4 CPUs with exit 33. See the
+[revalidation audit](audit-stage12-acceptance-2026-10-13.md). This confirms the
+bounded gates only; the integration and physical limits above remain open.
+
 ## Stage 1–5 bounded batch data journal — 2026-10-06
 
 FAT32 persistence now exposes a separate versioned `WDJ2` journal for bounded
@@ -1077,6 +1158,23 @@ partial-commit, and complete-commit recovery exercises. See the
 
 Physical storage/DMA qualification, unclean-shutdown hardware testing,
 metadata transactions, and arbitrary-size transactions remain open.
+
+## Stage 1–5 immediate batch rollback — 2026-10-13
+
+The bounded WDJ2 data-batch API now invokes durable recovery immediately when a
+post-journal write, metadata, commit-record, or journal-retirement operation
+fails. It invalidates file-page cache state before recovery, preventing a
+transient runtime error from leaving partially committed data on disk or stale
+pages available to the current boot's VFS; the original error is preserved and
+a failed rollback remains recoverable from the durable journal. Direct FAT32
+and MBR/GPT-partitioned paths are covered. The 1/2/4-CPU disposable storage
+gates, host crash tests, and warning-denying Clippy passed. See the
+[immediate-rollback audit](audit-stage1-5-immediate-rollback-2026-10-13.md).
+
+This is a bounded hardening increment, not full Stage 1–5 completion. Metadata
+transactions beyond the sidecars, arbitrary-size/full-volume rollback,
+physical storage/DMA qualification, and unclean-shutdown hardware evidence
+remain open.
 
 ## Stage 14.2D — Router Advertisement state (2026-10-06)
 
@@ -1588,11 +1686,26 @@ kernel Clippy, runtime-harness regressions, and 1/2/4-CPU QEMU evidence.
 
 Full Stage 13.2 acceptance remains blocked on BAR size probing/allocation and
 rebalance, bridge I/O/MMIO/prefetchable resource routing, generic MSI/MSI-X
-vector allocation/programming/teardown, PCIe hotplug, and WovenDriver
-binding/unbinding integrated with generation ownership. The current paging
-layer also lacks a physical MMIO unmap/revoke primitive; topology teardown
-therefore revokes logical lease authority but must not be described as page
-table mapping revocation.
+vector allocation/programming/teardown, PCIe hotplug, and valid-BAR physical
+qualification. Raw legacy MMIO mappings remain shared and non-revocable;
+owner-scoped mappings are covered by the follow-up below.
+
+The WovenDriver integration item now has a bounded acceptance probe. The
+Stage 13.2 gate claims one discovered function for a synthetic feature-gated
+owner, retains its programmed MMIO BAR leases, and releases subordinate
+resources before function ownership. The 1/2/4-CPU preservation gate passed;
+see [the lifecycle audit](audit-stage13-2-driver-lifecycle-2026-10-13.md).
+This does not close the remaining physical rebalance, generic interrupt,
+hotplug, or MMIO mapping-revoke requirements.
+
+The follow-up adds owner-scoped page mappings: raw legacy MMIO mappings remain
+shared and non-revocable, while PCI driver mappings carry an owner token and
+are revoked after interrupt quiescence and before BAR/function release. The
+1/2/4-CPU gate passes and proves same-page remap after teardown. QEMU's only
+candidate firmware BAR is outside the direct-map range and is rejected
+fail-closed, so this is not physical device-BAR qualification. Remaining work
+is live BAR rebalance/admission, generic physical MSI/MSI-X, PCIe hotplug, and
+valid-BAR hardware qualification.
 
 Stage 13.3 NVMe is intentionally not advanced by this work.
 
