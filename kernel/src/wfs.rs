@@ -1401,15 +1401,24 @@ impl AuthorizedWfsWriter {
     pub(crate) const fn after_capability_check() -> Self { Self { _private: () } }
 }
 
+/// Validate the native root-directory filename before any ATA I/O.
+#[cfg(feature = "stage15-2-test")]
+fn checked_native_name(name: &str) -> Result<&str, Error> {
+    if name.is_empty() || name.len() > MAX_NAME || name == "." || name == ".."
+        || name.contains('/') || name.contains('\\') || name.as_bytes().contains(&0)
+    {
+        return Err(Error::InvalidName);
+    }
+    Ok(name)
+}
+
 /// Native write-through adapter. It remounts and replays the journal for each
 /// operation; VFS namespace invalidation remains a separate integration gate.
 #[cfg(feature = "stage15-2-test")]
 pub fn write_ata_file(
     _authority: &AuthorizedWfsWriter, name: &str, bytes: &[u8], now: u64,
 ) -> Result<(), Error> {
-    if name.is_empty() || name.len() > MAX_NAME || name.contains('/') || name == "." || name == ".." {
-        return Err(Error::InvalidName);
-    }
+    checked_native_name(name)?;
     if bytes.len() > MAX_FILE_SIZE { return Err(Error::TooLarge); }
     with_ata_volume(|volume| {
         let inode = match volume.lookup(1, name) {
@@ -1424,6 +1433,7 @@ pub fn write_ata_file(
 /// Reads newly mounted, checksum-verified disk content, not cached VFS bytes.
 #[cfg(feature = "stage15-2-test")]
 pub fn read_ata_file(name: &str, out: &mut [u8]) -> Result<usize, Error> {
+    checked_native_name(name)?;
     with_ata_volume(|volume| {
         let inode = volume.lookup(1, name)?.inode;
         volume.read_file(inode, out)
@@ -1435,6 +1445,7 @@ pub fn read_ata_file(name: &str, out: &mut [u8]) -> Result<usize, Error> {
 pub fn unlink_ata_file(
     _authority: &AuthorizedWfsWriter, name: &str, now: u64,
 ) -> Result<(), Error> {
+    checked_native_name(name)?;
     with_ata_volume(|volume| volume.unlink(1, name, now)).unwrap_or(Err(Error::Device))
 }
 
