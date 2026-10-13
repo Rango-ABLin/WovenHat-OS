@@ -552,34 +552,48 @@ pub fn remove_pci_function(
 }
 
 
-/// Stage 13.2 driver lifecycle audit. A PCI binding must never be
-/// published without its owner or with a broken BAR/interrupt relationship.
-/// Hardware topology generation/teardown is separately tested by the HAL.
+/// Validate the driver-table state without touching PCI hardware.
+#[cfg(feature = "stage13-2-test")]
+fn stage13_2_entry_valid(entry: &Entry) -> bool {
+    match (entry.state, entry.pci) {
+        (State::Registered | State::Suspended, None) => true,
+        (State::Bound, Some(binding)) => {
+            binding.owner != crate::hal::pci::topology::NO_OWNER
+                && binding.bars.iter().enumerate().all(|(index, lease)| {
+                    lease.is_none_or(|bar| {
+                        usize::from(bar.bar) == index
+                            && bar.function == binding.function
+                    })
+                })
+                && binding.interrupt.is_none_or(|interrupt| match interrupt {
+                    PciInterrupt::Msi(lease) => lease.function == binding.function,
+                    PciInterrupt::Msix(lease) => lease.function == binding.function,
+                })
+        }
+        (State::Bound, None) => true, // Non-PCI driver.
+        (State::Unbinding, _) | (State::Registered | State::Suspended, Some(_)) => false,
+    }
+}
+
+/// Stage 13.2 driver lifecycle snapshot and negative-state regression.
+/// The synthetic cases verify that unfinished teardown is rejected; real
+/// ownership release, hotplug and interrupt quiescence require separate tests.
 #[cfg(feature = "stage13-2-test")]
 pub fn stage13_2_lifecycle_self_test() -> bool {
-    let table = TABLE.lock();
-    table.iter().flatten().all(|entry| {
-        match (entry.state, entry.pci) {
-            (State::Registered | State::Suspended, None) => true,
-            (State::Bound, Some(binding)) => {
-                binding.owner != crate::hal::pci::topology::NO_OWNER
-                    && binding.bars.iter().enumerate().all(|(index, lease)| {
-                        lease.is_none_or(|bar| {
-                            usize::from(bar.bar) == index
-                                && bar.function == binding.function
-                        })
-                    })
-                    && binding.interrupt.is_none_or(|interrupt| match interrupt {
-                        PciInterrupt::Msi(lease) => lease.function == binding.function,
-                        PciInterrupt::Msix(lease) => lease.function == binding.function,
-                    })
-            }
-            (State::Bound, None) => true, // Non-PCI driver.
-            // Quiescing must be completed before a Stage 13.2 acceptance
-            // snapshot is considered stable.
-            (State::Unbinding, _) | (State::Registered | State::Suspended, Some(_)) => false,
-        }
-    })
+    let synthetic = Entry {
+        name: "stage13-2-audit",
+        kind: DeviceKind::Timer,
+        state: State::Registered,
+        pci: None,
+    };
+    if !stage13_2_entry_valid(&synthetic) {
+        return false;
+    }
+    let invalid = Entry { state: State::Unbinding, ..synthetic };
+    if stage13_2_entry_valid(&invalid) {
+        return false;
+    }
+    TABLE.lock().iter().flatten().all(stage13_2_entry_valid)
 }
 
 /// Driver-aware PCI hotplug reconciliation. The HAL only detects removals;
