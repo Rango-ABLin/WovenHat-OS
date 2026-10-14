@@ -6,8 +6,11 @@ The first Stage 19 system application, WovenCalculator, now builds outside the
 kernel, signs into WAPP, and executes in Ring 3 through the existing verified
 application boundary. Its bounded parser and signed 1/2/4-CPU acceptance are
 recorded in the [WovenCalculator audit](audit-stage19-calculator-2026-10-14.md).
-The remaining roadmap application suite and catalog/boot-image installation
-are not yet claimed complete.
+WovenTerminal now provides bounded `help`, `ls`, `cat`, `calc`, and `exit`
+commands through the same ABI and passes its signed 1/2/4-CPU acceptance; see
+the [WovenTerminal audit](audit-stage19-terminal-2026-10-14.md). The remaining
+roadmap application suite and catalog/boot-image installation are not yet
+claimed complete.
 
 The full `scripts/test-release.py` chain passed on the current tree. It covered
 warning-denying kernel/host Clippy, all host integration tests, 1/2/4-CPU debug

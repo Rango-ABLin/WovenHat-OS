@@ -9,6 +9,12 @@ application. Its 1/2/4-CPU signed QEMU evidence is recorded in the Stage 19
 calculator audit. This is the first system application increment; the rest of
 the roadmap application suite and catalog/boot-image installation remain open.
 
+`apps/woven-terminal` is the second application increment. It provides bounded
+console commands over `libwoven` file descriptors, delegates arithmetic to the
+calculator core, and passes signed 1/2/4-CPU Ring-3 execution. Its listing and
+file-output caps are documented in the Stage 19 terminal audit; interactive
+stdin and boot-catalog installation remain open.
+
 ## Release validation (2026-10-14)
 
 The repository release chain passed on the current tree, including warning-
