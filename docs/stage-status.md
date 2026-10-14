@@ -7,7 +7,9 @@ and all passed with exit 33. See the
 [Stage 13.4–13.7 validation audit](audit-stage13-4-7-validation-2026-10-14.md).
 These QEMU gates validate software and protocol contracts, not native-device
 interoperability. The Stage 13.6 fixture exercises USB HID keyboard support;
-USB mouse report decoding remains open.
+The bounded boot-mouse report decoder is now self-tested, but live xHCI mouse
+polling/publication and physical USB mouse interoperability remain open. See
+the [USB mouse decoder audit](audit-stage13-6-usb-mouse-decoder-2026-10-14.md).
 
 Stage 16.1, 17.1, 18.1, 19.1, 19.3, and 19.10 were rerun on 1/2/4 CPUs
 after the remote-termination cleanup change; all emitted their required pass

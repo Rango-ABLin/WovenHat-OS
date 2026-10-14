@@ -7,6 +7,7 @@ use crate::{
     hal::pci::{self, Address, BarKind},
     irq_lock::IrqMutex as Mutex,
     memory, paging,
+    woven_input::Event,
 };
 
 const USB_CLASS: u8 = 0x0c;
@@ -1431,11 +1432,52 @@ pub fn decode_boot_keyboard(report: [u8; 8]) -> Option<u8> {
     report[2..8].iter().copied().find(|key| *key != 0)
 }
 
+/// Decode the fixed boot-protocol mouse report without retaining a pointer to
+/// controller/DMA memory. The caller owns the previous button state and must
+/// publish the returned events after releasing any controller lock.
+pub fn decode_boot_mouse(report: [u8; 8], previous_buttons: u8) -> ([Option<Event>; 4], u8) {
+    let mut events = [None; 4];
+    let buttons = report[0] & 0x07;
+    let dx = i16::from(report[1] as i8);
+    let dy = -i16::from(report[2] as i8);
+    let mut count = 0;
+    if dx != 0 || dy != 0 {
+        events[count] = Some(Event::PointerMove { dx, dy });
+        count += 1;
+    }
+    for button in 0..3u8 {
+        let mask = 1 << button;
+        if (buttons ^ previous_buttons) & mask != 0 {
+            events[count] = Some(Event::PointerButton {
+                button,
+                pressed: buttons & mask != 0,
+            });
+            count += 1;
+        }
+    }
+    (events, buttons)
+}
+
 pub fn self_test() -> bool {
     let descriptor = [
         9, 2, 25, 0, 1, 1, 0, 0x80, 50, 9, 4, 0, 0, 1, 3, 1, 1, 0, 7, 5, 0x81, 3, 8, 0, 10,
     ];
     let hid = parse_hid_interface(&descriptor, 1);
+    let (mouse_events, mouse_buttons) = decode_boot_mouse([0x01, 5, 0xfd, 0, 0, 0, 0, 0], 0);
+    let mouse_path = mouse_events[0] == Some(Event::PointerMove { dx: 5, dy: 3 })
+        && mouse_events[1]
+            == Some(Event::PointerButton {
+                button: 0,
+                pressed: true,
+            })
+        && mouse_buttons == 1;
+    let (release_events, release_buttons) = decode_boot_mouse([0, 0, 0, 0, 0, 0, 0, 0], 1);
+    let mouse_release = release_events[0]
+        == Some(Event::PointerButton {
+            button: 0,
+            pressed: false,
+        })
+        && release_buttons == 0;
     trb_type(TRB_TYPE_ENABLE_SLOT << 10) == TRB_TYPE_ENABLE_SLOT
         && completion_code(1 << 24) == 1
         && trb_type(TRB_TYPE_PORT_STATUS_CHANGE << 10) == TRB_TYPE_PORT_STATUS_CHANGE
@@ -1443,6 +1485,8 @@ pub fn self_test() -> bool {
             .map(|entry| entry.protocol == USB_PROTOCOL_KEYBOARD && entry.endpoint_address == 0x81)
             == Some(true)
         && decode_boot_keyboard([0, 0, 4, 0, 0, 0, 0, 0]) == Some(4)
+        && mouse_path
+        && mouse_release
 }
 
 fn read_u32(bytes: &[u8], offset: usize) -> u32 {

@@ -9,6 +9,12 @@ The QEMU fixtures validate bounded ownership and protocol contracts; they do
 not substitute for native-controller or physical USB interoperability. USB
 mouse report decoding is still outside the accepted keyboard-only fixture.
 
+The bounded USB boot-mouse decoder now exists in `xhci.rs`; it emits WovenInput
+motion and button-edge events from copied report bytes and carries button state
+explicitly between reports. It is self-tested and does not yet claim a live
+xHCI mouse polling worker or physical-device qualification. See the Stage 13.6
+USB mouse decoder audit.
+
 ## Stage 15 bounded WovenFS VFS write-through (2026-10-14)
 
 The `/wfs/<name>` namespace has one production mutation authority:
