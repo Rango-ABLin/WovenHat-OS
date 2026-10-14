@@ -32,6 +32,11 @@
 //! icon goes away when its surface does, normally because its owner exited.
 //! Keystrokes go to the focused window's owner as one-byte messages.
 //!
+//! The launcher panel and the toast are translucent over whatever lies
+//! beneath, windows included: their background is region-blended, and their
+//! border and text are an overlay drawn on the transparent key and copied with
+//! a keyed blit, as is the pointer. Nothing is read back from the screen.
+//!
 //! Every window casts a soft shadow of two translucent bands, offset down and
 //! right; the focused window sits higher, so its shadow falls further and
 //! darker. Shadows stay off the taskbar.
@@ -59,7 +64,7 @@ use core::panic::PanicInfo;
 
 use libwoven::{
     blend, font, process, rgb, wait, Args, Canvas, DateTime, FrameEvent, GraphicsSurface,
-    InputEvent, Key, Region,
+    InputEvent, Key, Region, TRANSPARENT,
 };
 
 libwoven::entry!(main);
@@ -125,6 +130,7 @@ const TOAST_WIDTH: i32 = 180;
 const TOAST_HEIGHT: i32 = 22;
 const TOAST_MARGIN: i32 = 8;
 const TOAST_FILL: u32 = rgb(30, 34, 46);
+const TOAST_OPACITY: u8 = 216;
 const TOAST_CHARS: usize = ((TOAST_WIDTH - 12) / font::ADVANCE) as usize;
 const TOAST_TICKS: u64 = 4 * libwoven::time::TICKS_PER_SECOND;
 
@@ -157,6 +163,7 @@ const PANEL_X: i32 = 4;
 const PANEL_WIDTH: i32 = 160;
 const PANEL_ROW: i32 = 14;
 const PANEL_FILL: u32 = rgb(28, 32, 44);
+const PANEL_OPACITY: u8 = 216;
 const PANEL_TITLE: &str = "WovenStart";
 
 const TILE_WIDTH: usize = 320;
@@ -228,6 +235,15 @@ fn label(bytes: &[u8], limit: usize, buffer: &mut [u8; 32]) -> usize {
         *slot = if (b' '..=b'~').contains(byte) { *byte } else { b'?' };
     }
     length
+}
+
+/// A one-pixel outline of `area` in `color`.
+fn outline(canvas: &mut Canvas<'_>, area: Area, color: u32) {
+    let (width, height) = (area.width as usize, area.height as usize);
+    canvas.fill_rect(area.x, area.y, width, 1, color);
+    canvas.fill_rect(area.x, area.y + area.height - 1, width, 1, color);
+    canvas.fill_rect(area.x, area.y, 1, height, color);
+    canvas.fill_rect(area.x + area.width - 1, area.y, 1, height, color);
 }
 
 /// A rectangle in screen coordinates.
@@ -465,6 +481,40 @@ struct Painter<'a> {
 }
 
 impl Painter<'_> {
+    /// Render an overlay over `area` with `render`, on a canvas pre-filled
+    /// with the transparent key, and copy it with a keyed blit: only what
+    /// `render` drew lands, over what is already composed.
+    fn overlay(&mut self, area: Area, render: impl Fn(&mut Canvas<'_>)) {
+        let mut y = area.y;
+        while y < area.y + area.height {
+            let height = (area.y + area.height - y).min(TILE_HEIGHT as i32);
+            let mut x = area.x;
+            while x < area.x + area.width {
+                let width = (area.x + area.width - x).min(TILE_WIDTH as i32);
+                let Some(mut canvas) =
+                    Canvas::new(self.tile, x, y, width as usize, height as usize)
+                else {
+                    fail(14);
+                };
+                canvas.fill_rect(x, y, width as usize, height as usize, TRANSPARENT);
+                render(&mut canvas);
+                let region = Region {
+                    x: 0,
+                    y: 0,
+                    width: width as u16,
+                    height: height as u16,
+                };
+                if self.staging.write_canvas(&canvas).is_err()
+                    || self.staging.present_region_keyed(region, x, y).is_err()
+                {
+                    fail(15);
+                }
+                x += width;
+            }
+            y += height;
+        }
+    }
+
     /// Blend `color` over `area` with uniform `opacity`, in chunks no larger
     /// than the staging surface.
     fn blend(&mut self, area: Area, color: u32, opacity: u8) {
@@ -630,12 +680,13 @@ impl Desktop {
         Area::new(PANEL_X, self.taskbar_top() - 2 - height, PANEL_WIDTH, height)
     }
 
+    /// The panel's overlay: border, title row, selection and text. Its
+    /// background is blended separately, so what lies beneath shows through.
     fn render_panel(&self, canvas: &mut Canvas<'_>) {
         let area = self.panel_area();
         let (x, y) = (area.x, area.y);
         let inner = (area.width - 2) as usize;
-        canvas.fill_rect(x, y, area.width as usize, area.height as usize, ACCENT);
-        canvas.fill_rect(x + 1, y + 1, inner, (area.height - 2) as usize, PANEL_FILL);
+        outline(canvas, area, ACCENT);
         canvas.fill_rect(x + 1, y + 1, inner, PANEL_ROW as usize, START_FILL);
         canvas.draw_text(x + 6, y + 5, PANEL_TITLE, TEXT);
 
@@ -819,18 +870,16 @@ impl Desktop {
         canvas.draw_text(area.x + 4, area.y + 4, text, TEXT);
     }
 
+    /// The toast's overlay: border and text over its blended background.
     fn render_toast(&self, toast: &Toast, canvas: &mut Canvas<'_>) {
         let area = self.toast_area();
-        let (width, height) = (area.width as usize, area.height as usize);
-        canvas.fill_rect(area.x, area.y, width, height, ACCENT);
-        canvas.fill_rect(area.x + 1, area.y + 1, width - 2, height - 2, TOAST_FILL);
+        outline(canvas, area, ACCENT);
         let text = core::str::from_utf8(&toast.text[..toast.length]).unwrap_or("");
         canvas.draw_text(area.x + 6, area.y + 8, text, TEXT);
     }
 
-    /// The pointer over whatever is already on screen beneath it.
+    /// The pointer, as an overlay: its transparent cells stay on the key.
     fn render_cursor(&self, canvas: &mut Canvas<'_>) {
-        canvas.shade(|x, y| libwoven::screen_pixel(x, y).unwrap_or(0));
         let (left, top) = self.pointer;
         for (row, line) in CURSOR.iter().enumerate() {
             for (column, cell) in line.iter().enumerate() {
@@ -892,18 +941,20 @@ impl Desktop {
         if let Some(toast) = &self.toast {
             let part = self.toast_area().intersect(area);
             if !part.is_empty() {
-                painter.draw(part, |canvas| self.render_toast(toast, canvas));
+                painter.blend(part, TOAST_FILL, TOAST_OPACITY);
+                painter.overlay(part, |canvas| self.render_toast(toast, canvas));
             }
         }
 
         let panel = self.panel_area().intersect(area);
         if !panel.is_empty() {
-            painter.draw(panel, |canvas| self.render_panel(canvas));
+            painter.blend(panel, PANEL_FILL, PANEL_OPACITY);
+            painter.overlay(panel, |canvas| self.render_panel(canvas));
         }
 
         let cursor = self.cursor_area().intersect(area);
         if !cursor.is_empty() {
-            painter.draw(cursor, |canvas| self.render_cursor(canvas));
+            painter.overlay(cursor, |canvas| self.render_cursor(canvas));
         }
     }
 
