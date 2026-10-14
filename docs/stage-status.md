@@ -1218,10 +1218,11 @@ acceptance, filesystem install, read-back, load, spawn, completion and exit
 status. The dedicated application harness now passes on 1, 2 and 4 CPUs; see
 the [Stage 16.1 audit](audit-stage16-1-out-of-kernel-application-2026-10-14.md).
 
-Open: one application per acceptance build, since `WOVENHAT_APP_IMAGE` names a
-single signed package; no FAT32 round trip, because the gate installs into the VFS at
-`/bin` where `exec` resolves names; no shared libraries or thread-locals, both
-rejected by the loader by design; and no stack-size negotiation.
+The original Stage 16.1 boundary remains intentionally single-package and
+VFS-backed; the release-level Stage 19 catalog/production-image gates now cover
+the ten-package install plan and are recorded above. Shared libraries and
+stack-size negotiation remain outside the bounded loader contract; static
+initial-exec TLS and self-contained dynamic relocation are now supported.
 
 The accepted Stage 19 applications now have a reproducible packaging boundary:
 `scripts/package-system-apps.py` builds all ten applications, signs each WAPP
@@ -1311,8 +1312,9 @@ Release builds now require `WOVENHAT_APP_TRUSTED_PUBLIC_KEY_HEX`; the RFC
 self-test remains pinned to the development vector. Signed package
 installation now has a real external-application path through
 `tools/wapp-packager`, and Stage 16.1 verifies that package before and after its
-VFS round trip. Multi-application catalogs, rollback protection, key
-rotation/revocation, and firmware/installer-owned key slots remain open. User
+VFS round trip. Multi-application catalogs and rollback-safe RAM publication
+are now covered by the ten-app release gates. Deployment-key
+rotation/revocation and firmware/installer-owned key slots remain open. User
 `exec`/`spawn` now reject raw external ELF; only the finite kernel-owned system
 image allowlist retains the explicit internal-image path.
 Stage 15.5 software signed-kernel handoff is accepted with the exact 1/2/4-CPU
@@ -1331,7 +1333,8 @@ warning-denying freestanding kernel Clippy pass. See the
 The Stage 15.6 software measurement audit records the separate 1/2/4-CPU
 kernel measurement gate; TPM PCR extension, event logs, and firmware Secure
 Boot state remain hardware-dependent.
-Persistent encrypted records, rotation, TPM/firmware provisioning, and a
+Persistent encrypted records and crash-safe successor rotation now pass at the
+kernel boundary; TPM/firmware provisioning, deployment-key custody, and a
 secrets UI remain open.
 
 ## Stage 15.8 — security-ledger read ABI (2026-10-13)
@@ -2136,9 +2139,11 @@ WovenFS metadata/integrity, volume-integrity envelope boundaries, snapshots,
 and storage-management inventory each passed their 1/2/4-CPU gates. See
 [audit](audit-stage12-2-5-2026-09-16.md). Production AEAD now passes the
 isolated 1/2/4-CPU gate with a bounded revocable key vault; see
-[audit](audit-volume-crypto-2026-09-16.md). Measured key provisioning,
-persistent key storage, rotation policy, and encrypted-volume mount integration
-remain open before encrypted volumes are security-complete.
+[audit](audit-volume-crypto-2026-09-16.md). The follow-up integration now
+covers measured provisioning, authenticated persistent wrapped keys,
+successor-generation rotation, and encrypted mount-record I/O. A TPM/firmware
+measured-root backend, physical power-loss evidence, and deployment key-slot
+policy remain open.
 
 ## Stage 7.1.5 - accepted on 2026-09-16
 
