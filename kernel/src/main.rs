@@ -7558,11 +7558,29 @@ fn stage20_1_self_test() -> bool {
     if !step("wallpaper matches its formula", wall) {
         return false;
     }
+    // The Quick Settings button (Stage 20.10) sits left of the tray's four
+    // icon slots, which are empty here, and the clock.
+    const QS_FILL: u32 = rgb(44, 52, 68);
+    let clock_width = 8 * crate::font::ADVANCE + 6;
+    let qs_x = width - clock_width - 5 * (16 + 4);
     let bar = region(0, top, width, 1, |_, _| ACCENT)
-        && region(60, top + 1, width - 140, TASKBAR_HEIGHT - 1, |x, y| {
+        && region(60, top + 1, qs_x - 60, TASKBAR_HEIGHT - 1, |x, y| {
             taskbar(x, y, height)
-        });
+        })
+        && region(qs_x + 16, top + 1, width - 80 - (qs_x + 16), TASKBAR_HEIGHT - 1, |x, y| {
+            taskbar(x, y, height)
+        })
+        && region(qs_x, top + 1, 16, 3, |x, y| taskbar(x, y, height))
+        && region(qs_x, top + 20, 16, TASKBAR_HEIGHT - 20, |x, y| taskbar(x, y, height));
     if !step("taskbar is translucent over the wallpaper", bar) {
+        return false;
+    }
+    let qs_mask = text_mask(16, 16, 5, 5, "Q");
+    let qs = region(qs_x, top + 4, 16, 16, |x, y| match qs_mask.pixel(x - qs_x, y - (top + 4)) {
+        Some(WHITE) => WHITE,
+        _ => QS_FILL,
+    });
+    if !step("Quick Settings button and its label", qs) {
         return false;
     }
     // The start button, rendered here with the kernel's own font.
@@ -7581,7 +7599,6 @@ fn stage20_1_self_test() -> bool {
     // The clock: the region must match the kernel's own reading of the
     // hardware clock, allowing up to two seconds of display lag, and must
     // then advance to a later reading.
-    let clock_width = 8 * crate::font::ADVANCE + 6;
     let clock_x = width - clock_width;
     let clock_matches = |text: &[u8; 8]| {
         let text = core::str::from_utf8(text).unwrap_or("");
