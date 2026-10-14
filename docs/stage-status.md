@@ -31,6 +31,9 @@ signed 1/2/4-CPU execution; see the
 WovenUpdate adds bounded read-only update preflight and passes signed 1/2/4-CPU
 execution; see the
 [WovenUpdate audit](audit-stage19-update-2026-10-14.md).
+WovenStore adds bounded read-only installed-catalog browsing and passes signed
+1/2/4-CPU execution; see the
+[WovenStore audit](audit-stage19-store-2026-10-14.md).
 
 The full `scripts/test-release.py` chain passed on the current tree. It covered
 warning-denying kernel/host Clippy, all host integration tests, 1/2/4-CPU debug
@@ -42,13 +45,13 @@ This is software/QEMU qualification only; native hardware and destructive USB
 media limits remain open.
 
 The authoritative release chain now includes app-specific Clippy, the signed
-nine-application catalog gate on 1/2/4 CPUs, and release packaging of WAPP
+ten-application catalog gate on 1/2/4 CPUs, and release packaging of WAPP
 payloads, catalog descriptors, and per-artifact hashes. See the
 [system-app release audit](audit-release-system-apps-2026-10-14.md). The
 feature-gated release image now claims multi-package RAM installation; physical
 media qualification remains open.
 
-The `system-apps` production-image feature now installs the nine signed
+The `system-apps` production-image feature now installs the ten signed
 packages during normal boot, with pre-mutation signature/ELF validation,
 collision checks, and rollback of newly created VFS entries on publication
 failure. It requires an explicitly provisioned application trust key; the
