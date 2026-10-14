@@ -28,6 +28,7 @@ pub enum Permission {
     Input = 13,
     Ai = 14,
     Secrets = 15,
+    Audio = 16,
 }
 
 impl Permission {
@@ -49,6 +50,7 @@ impl Permission {
             13 => Self::Input,
             14 => Self::Ai,
             15 => Self::Secrets,
+            16 => Self::Audio,
             _ => return None,
         })
     }
@@ -71,6 +73,7 @@ impl Permission {
             Self::Input => Capability::InputIo,
             Self::Ai => Capability::Ai,
             Self::Secrets => Capability::Secrets,
+            Self::Audio => Capability::AudioPlayback,
         }
     }
 }

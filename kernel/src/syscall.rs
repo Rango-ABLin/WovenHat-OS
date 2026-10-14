@@ -357,6 +357,15 @@ pub enum Number {
     /// own handle, packed destination (x | y<<32), packed source region ->
     /// 0 or ERROR; source pixels equal to the transparent key are skipped
     GraphicsCompositorBlitKeyed = 202,
+    /// out *AudioInfo (sample_rate u32, max_bytes u32, playback u8, capture
+    /// u8, channels u8, bits u8) -> 1, or ERROR if there is no audio output
+    AudioInfo = 203,
+    /// pcm, length (48 kHz 16-bit stereo, whole frames, <= max_bytes) ->
+    /// bytes played once playback has finished; needs AudioPlayback
+    AudioPlay = 204,
+    /// volume percent (0 mutes) -> the amplifier gain set; needs
+    /// AudioPlayback
+    AudioSetVolume = 205,
 }
 
 pub fn entry_address() -> u64 {
@@ -2146,6 +2155,71 @@ fn sys_audit_read(offset: u64, user_event: u64) -> u64 {
     1
 }
 
+#[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
+fn sys_audio_info(user_info: u64) -> u64 {
+    let Some(info) = crate::hda::audio_info() else {
+        return SYSCALL_ERROR;
+    };
+    let mut bytes = [0u8; 12];
+    bytes[0..4].copy_from_slice(&info.sample_rate.to_le_bytes());
+    bytes[4..8].copy_from_slice(&info.max_bytes.to_le_bytes());
+    bytes[8] = info.playback_streams;
+    bytes[9] = info.capture_streams;
+    bytes[10] = info.channels;
+    bytes[11] = info.bits;
+    if crate::paging::copy_to_current_user(user_info, &bytes).is_err() {
+        return SYSCALL_ERROR;
+    }
+    1
+}
+
+#[cfg(not(any(not(feature = "qemu-test"), feature = "stage13-12-test")))]
+fn sys_audio_info(_user_info: u64) -> u64 {
+    SYSCALL_ERROR
+}
+
+/// The PCM is copied into kernel memory first: user pages may fault, and the
+/// HDA controller lock must not be held across that.
+#[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
+fn sys_audio_play(user_pcm: u64, length: u64) -> u64 {
+    let actor = crate::task::current_task_id().as_u64();
+    if !crate::task::current_has(crate::capability::Capability::AudioPlayback) {
+        crate::audit::record(actor, crate::audit::Action::AudioPlay, 0, false);
+        return SYSCALL_ERROR;
+    }
+    let Ok(length) = usize::try_from(length) else {
+        return SYSCALL_ERROR;
+    };
+    if length == 0 || length > crate::hda::MAX_PLAY_BYTES {
+        return SYSCALL_ERROR;
+    }
+    let mut pcm = alloc::vec![0u8; length];
+    if crate::paging::copy_from_current_user(user_pcm, &mut pcm).is_err() {
+        return SYSCALL_ERROR;
+    }
+    let result = crate::hda::play(&pcm);
+    crate::audit::record(actor, crate::audit::Action::AudioPlay, length as u64, result.is_ok());
+    result.map_or(SYSCALL_ERROR, |played| played as u64)
+}
+
+#[cfg(not(any(not(feature = "qemu-test"), feature = "stage13-12-test")))]
+fn sys_audio_play(_user_pcm: u64, _length: u64) -> u64 {
+    SYSCALL_ERROR
+}
+
+#[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
+fn sys_audio_set_volume(percent: u64) -> u64 {
+    if !crate::task::current_has(crate::capability::Capability::AudioPlayback) || percent > 100 {
+        return SYSCALL_ERROR;
+    }
+    crate::hda::set_volume(percent as u8).map_or(SYSCALL_ERROR, u64::from)
+}
+
+#[cfg(not(any(not(feature = "qemu-test"), feature = "stage13-12-test")))]
+fn sys_audio_set_volume(_percent: u64) -> u64 {
+    SYSCALL_ERROR
+}
+
 fn sys_secret_store(user_secret: u64, length: u64) -> u64 {
     if !crate::task::current_has(crate::capability::Capability::Secrets) {
         return SYSCALL_ERROR;
@@ -2499,6 +2573,9 @@ pub extern "C" fn wovenhat_syscall_dispatch(
         value if value == Number::GraphicsCompositorBlendRegionShared as u64 => {
             sys_compositor_blend_region(arg0, arg1, arg2, true)
         }
+        value if value == Number::AudioInfo as u64 => sys_audio_info(arg0),
+        value if value == Number::AudioPlay as u64 => sys_audio_play(arg0, arg1),
+        value if value == Number::AudioSetVolume as u64 => sys_audio_set_volume(arg0),
         _ => u64::MAX,
     };
 

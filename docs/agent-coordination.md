@@ -52,11 +52,13 @@ you start or finish something.
   device (`RootDevice`, `with_root`). Code that needs the primary disk
   should go through `block_io`, not `ata::with_primary_master`.
 
+- Stage 13.15, WovenAudio playback: `AudioPlayback` capability 24 and
+  `Permission::Audio` 16; syscalls 203–205 (206 is reserved for
+  recording); `Action::AudioPlay` in the ledger.
+
 **In progress, Stage 13 closure** (do not start these without
 coordinating here):
-1. **13.15:** WovenAudio for userspace (new `AudioPlayback` capability;
-   syscalls 203–206 reserved).
-2. **13.16:** touchpad, touchscreen, pen and game-controller events out of
+1. **13.16:** touchpad, touchscreen, pen and game-controller events out of
    the 13.7 probe.
 
 **Next after that:** roadmap 18.8 Workspaces and 18.9 Multi-monitor.

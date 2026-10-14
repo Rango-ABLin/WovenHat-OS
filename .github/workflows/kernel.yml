@@ -287,6 +287,22 @@ jobs:
               python3 scripts/test-stage13-14-storage.py --mode "$mode" --cpus "$cpu" --timeout 300 --qemu "$qemu" --firmware "$ovmf_code"
             done
           done
+      - name: Stage 13.15 WovenAudio playback 1/2/4-core acceptance
+        shell: bash
+        run: |
+          qemu=/usr/bin/qemu-system-x86_64
+          ovmf_code=
+          for variant in OVMF_CODE_4M.fd OVMF_CODE.fd; do
+            candidate="/usr/share/OVMF/$variant"
+            if [ -f "$candidate" ]; then
+              ovmf_code="$candidate"
+              break
+            fi
+          done
+          test -n "$ovmf_code"
+          for cpu in 1 2 4; do
+            python3 scripts/test-stage13-15-audio.py --cpus "$cpu" --timeout 300 --qemu "$qemu" --firmware "$ovmf_code"
+          done
       - name: Stage 13.9 WovenWiFi full-contract 1/2/4-core acceptance
         shell: bash
         run: |

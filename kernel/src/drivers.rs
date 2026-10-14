@@ -106,9 +106,17 @@ const SPECS: [Spec; COUNT] = [
         kind: DeviceKind::Audio,
         matcher: class(0x04, 0x03, None),
         init: |device| {
-            crate::hda::init_at(device)
-                .map(|summary| u64::from(summary.output_streams))
-                .map_err(|_| ())
+            let summary = crate::hda::init_at(device).map_err(|_| ())?;
+            // WovenAudio playback. Optional: a controller whose output path
+            // cannot start is still bound.
+            match crate::hda::start_output("hda0") {
+                Ok(info) => crate::serial::write_line(format_args!(
+                    "[DRIVERS] hda0 audio: playback streams={} vector={:#x}",
+                    info.playback_streams, info.vector
+                )),
+                Err(error) => crate::serial::write_line(format_args!("[DRIVERS] hda0 audio unavailable: {:?}", error)),
+            }
+            Ok(u64::from(summary.output_streams))
         },
     },
 ];

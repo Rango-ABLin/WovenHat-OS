@@ -56,6 +56,9 @@ stage13-12-test = ["qemu-test"]
 stage13-13-test = ["qemu-test", "stage13-12-test"]
 # Storage mounted from NVMe or AHCI through the selectable root block device.
 stage13-14-test = ["qemu-test", "stage13-12-test"]
+# WovenAudio playback for userspace: AudioPlayback capability, syscalls
+# 203-205, interrupt-driven HDA completion.
+stage13-15-test = ["qemu-test", "stage13-12-test"]
 stage14-1-test = ["network-test"]
 stage14-2-test = ["network-test", "stage14-1-test"]
 stage14-3-test = ["network-test", "stage14-2-test"]

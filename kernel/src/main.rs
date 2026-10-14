@@ -3453,6 +3453,15 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     }
     // Before the 13.12 block: 13.13 and 13.14 builds also enable
     // stage13-12-test, and each block ends the boot.
+    #[cfg(feature = "stage13-15-test")]
+    {
+        if !stage13_15_self_test() {
+            serial::write_line(format_args!("[S13.15] WovenAudio playback: FAILED"));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!("[S13.15] WovenAudio playback: PASSED"));
+        qemu_test_exit_success();
+    }
     #[cfg(feature = "stage13-14-test")]
     {
         if !drivers::storage_self_test() {
@@ -5204,7 +5213,8 @@ fn stage16_1_self_test() -> bool {
     feature = "stage20-9-test",
     feature = "stage20-10-test",
     feature = "stage20-11-test",
-    feature = "stage20-12-test"
+    feature = "stage20-12-test",
+    feature = "stage13-15-test"
 ))]
 const HELLO_GUI_IMAGE: &[u8] = include_bytes!(env!("WOVENHAT_HELLO_GUI_IMAGE"));
 
@@ -5283,6 +5293,76 @@ fn run_hello_gui(
 
 /// Spawn hello-gui as an ordinary user process (`None`) or as a service with
 /// exactly `capabilities`.
+/// Stage 13.15 acceptance: WovenAudio playback from Ring 3. hello-gui
+/// --audio plays a quarter second of a known square wave through syscalls
+/// 203-205. It must finish through the controller's completion interrupt,
+/// and a client without AudioPlayback must be refused. The harness records
+/// QEMU's audio output and checks the waveform.
+#[cfg(feature = "stage13-15-test")]
+fn stage13_15_self_test() -> bool {
+    fn step(name: &str, ok: bool) -> bool {
+        serial::write_line(format_args!("[S13.15] {} {}", name, if ok { "PASS" } else { "FAIL" }));
+        ok
+    }
+    let report = drivers::bring_up();
+    if !step("hda0 bound and ready", matches!(report.drivers[3].outcome, drivers::Outcome::Ready(_))) {
+        return false;
+    }
+    let Some(info) = hda::audio_info() else {
+        return step("audio output started", false);
+    };
+    if !step(
+        "audio output on a device interrupt vector",
+        info.playback_streams > 0
+            && (interrupts::PCI_VECTOR_FIRST..=interrupts::PCI_VECTOR_LAST).contains(&info.vector),
+    ) {
+        return false;
+    }
+    let installed = (vfs::stat("/bin").is_ok() || vfs::mkdir("/bin").is_ok())
+        && (vfs::stat("/bin/hello-gui").is_ok() || vfs::create_read_only("/bin/hello-gui", HELLO_GUI_IMAGE).is_ok());
+    if !step("hello-gui installed", installed) {
+        return false;
+    }
+    let player = capability::CapabilitySet::only(capability::Capability::Console)
+        .with(capability::Capability::AudioPlayback);
+    let irqs_before = interrupts::pci_device_irq_count(info.vector);
+    let plays_before = hda::audio_plays();
+    let on_time_before = hda::audio_on_time();
+    let played = spawn_hello_gui(HELLO_GUI_IMAGE, &["/bin/hello-gui", "--audio"], Some(player))
+        .and_then(wait_hello_gui)
+        .map(|(_, status)| status);
+    let irqs = interrupts::pci_device_irq_count(info.vector) - irqs_before;
+    serial::write_line(format_args!(
+        "[S13.15] player exit={:?} completion interrupts={} plays={}",
+        played.map(Result::ok),
+        irqs,
+        hda::audio_plays() - plays_before
+    ));
+    let ok_play = step(
+        "a client with AudioPlayback plays the wave to completion",
+        played == Some(Ok(0)) && hda::audio_plays() - plays_before == 1,
+    );
+    // The caller sleeps until the completion interrupt wakes it; without
+    // that wakeup it would only notice at its deadline.
+    let ok_irq = step(
+        "completion arrives as a device interrupt and wakes the player before its deadline",
+        irqs >= 1 && hda::audio_on_time() - on_time_before == 1,
+    );
+    // Same program, without the capability: refused before any playback.
+    let denied = spawn_hello_gui(
+        HELLO_GUI_IMAGE,
+        &["/bin/hello-gui", "--audio"],
+        Some(capability::CapabilitySet::only(capability::Capability::Console)),
+    )
+    .and_then(wait_hello_gui)
+    .map(|(_, status)| status);
+    let ok_denied = step(
+        "a client without AudioPlayback is refused",
+        denied == Some(Ok(3)) && hda::audio_plays() - plays_before == 1,
+    );
+    ok_play && ok_irq && ok_denied
+}
+
 #[cfg(any(
     feature = "stage18-2-test",
     feature = "stage19-2-test",
@@ -5306,7 +5386,8 @@ fn run_hello_gui(
     feature = "stage20-9-test",
     feature = "stage20-10-test",
     feature = "stage20-11-test",
-    feature = "stage20-12-test"
+    feature = "stage20-12-test",
+    feature = "stage13-15-test"
 ))]
 fn spawn_hello_gui(
     image: &[u8],
@@ -5347,7 +5428,8 @@ fn spawn_hello_gui(
     feature = "stage20-9-test",
     feature = "stage20-10-test",
     feature = "stage20-11-test",
-    feature = "stage20-12-test"
+    feature = "stage20-12-test",
+    feature = "stage13-15-test"
 ))]
 fn wait_hello_gui(pid: task::ProcessId) -> Option<(task::ProcessId, Result<i32, task::WaitError>)> {
     let start = timer::ticks();

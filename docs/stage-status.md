@@ -1,5 +1,28 @@
 # Stage status
 
+## Stage 13.15 — WovenAudio playback for userspace (2026-10-14)
+
+Applications can now play sound.
+- **New capability.** `AudioPlayback` (24), which the permission broker
+  can grant as `Permission::Audio`.
+- **Syscalls.** 203 `AudioInfo`, 204 `AudioPlay` and 205
+  `AudioSetVolume`, with libwoven wrappers.
+- **Interrupt-driven HDA output.** The player sleeps until the stream's
+  completion interrupt wakes it.
+- **Ledger.** Every play attempt is recorded in the security ledger.
+
+**Evidence.**
+- **Gate `[S13.15] WovenAudio playback: PASSED`:** passes on 1/2/4 CPUs.
+  QEMU's recording of the output holds the exact square wave the Ring-3
+  client played, and a client without the capability is refused.
+- **Negative controls:** all five failed the gate as intended.
+- **Regression:** 13.8, 15.3, 15.4 and 15.8 pass on 1/2/4 CPUs.
+
+See the [Stage 13.15 audit](audit-stage13-15-audio-2026-10-14.md).
+
+**Open.** Streaming and mixing, other sample formats, recording through
+`Microphone`, and physical codecs.
+
 ## Stage 13.14 — storage on NVMe and AHCI (2026-10-14)
 
 A machine with no ATA disk now mounts its NVMe or AHCI disk at `/mnt`.

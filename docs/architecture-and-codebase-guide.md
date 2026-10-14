@@ -96,6 +96,41 @@ evidence is recorded in the [Stage 14.5D revalidation audit](audit-stage14-5d-re
 It qualifies the QEMU virtio boundary only; native NIC/radio and physical-link
 behavior remain hardware work.
 
+## Stage 13.15 WovenAudio playback for userspace (2026-10-14)
+
+When bring-up starts `hda0`, it calls `hda::start_output("hda0")`.
+1. **Output setup.** `prepare_output` finds the output route (converter,
+   pin, amplifier), enables the pin, sets the amplifier to 75%, and
+   allocates the playback stream's memory once: a buffer descriptor list
+   and 16 DMA pages, 64 KiB in all.
+2. **Interrupt.** The controller's MSI-X or MSI vector is bound through the
+   driver manager.
+
+**Syscalls.**
+- **203 `AudioInfo`:** the output format, 48 kHz 16-bit stereo, and the
+  largest buffer one play accepts.
+- **204 `AudioPlay`:** needs the new `AudioPlayback` capability.
+  1. It copies the PCM into kernel memory, because user pages may fault and
+     the controller's IRQ lock must not be held across a fault.
+  2. Only one playback runs at a time. The calling task registers as the
+     vector's waiter.
+  3. `begin_playback` fills the pages and the descriptor list, with
+     interrupt-on-completion on the last entry only, and starts the stream
+     with IOCE set. The caller then sleeps in `wait_for_event_until`.
+  4. The stream's completion interrupt wakes it. It checks BCIS, stops the
+     stream and clears its waiter registration.
+  5. Every attempt is recorded in the security ledger (`Action::AudioPlay`).
+- **205 `AudioSetVolume`:** needs `AudioPlayback`; sets the output
+  amplifier gain, and 0 mutes.
+
+libwoven exposes `audio_info`, `audio_play` and `audio_set_volume`.
+
+**Capability.** `AudioPlayback` is capability 24 and permission 16
+(`Permission::Audio`). It is in the system-service ceiling and in the user
+ceiling, so the permission broker can grant it. Recording is not
+implemented yet; it will use the existing broker-gated `Microphone`
+capability.
+
 ## Stage 13.14 storage on NVMe and AHCI (2026-10-14)
 
 The storage layer reaches its disk only through `block_io`:

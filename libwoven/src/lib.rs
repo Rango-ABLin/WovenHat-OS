@@ -290,6 +290,9 @@ pub mod syscall {
     pub const GRAPHICS_COMPOSITOR_BLEND_REGION: u64 = 200;
     pub const GRAPHICS_COMPOSITOR_BLEND_REGION_SHARED: u64 = 201;
     pub const GRAPHICS_COMPOSITOR_BLIT_KEYED: u64 = 202;
+    pub const AUDIO_INFO: u64 = 203;
+    pub const AUDIO_PLAY: u64 = 204;
+    pub const AUDIO_SET_VOLUME: u64 = 205;
     pub const MESSAGE_SEND: u64 = 11;
     pub const MESSAGE_RECEIVE: u64 = 12;
 
@@ -1790,6 +1793,44 @@ pub fn permission_revoke(handle: u64) -> Result<(), Error> {
 
 /// Store a bounded secret in the caller-owned volatile WovenVault and return a
 /// generation-tagged handle. The input is copied before the syscall returns.
+/// What WovenAudio plays: 48 kHz 16-bit stereo today.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct AudioInfo {
+    pub sample_rate: u32,
+    /// The most PCM bytes one `audio_play` accepts.
+    pub max_bytes: u32,
+    pub playback_streams: u8,
+    pub capture_streams: u8,
+    pub channels: u8,
+    pub bits: u8,
+}
+
+/// The audio output, if the system has one.
+pub fn audio_info() -> Result<AudioInfo, Error> {
+    let mut bytes = [0u8; 12];
+    check(unsafe { syscall::invoke(syscall::AUDIO_INFO, bytes.as_mut_ptr() as u64, 0, 0) })?;
+    Ok(AudioInfo {
+        sample_rate: u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]),
+        max_bytes: u32::from_le_bytes([bytes[4], bytes[5], bytes[6], bytes[7]]),
+        playback_streams: bytes[8],
+        capture_streams: bytes[9],
+        channels: bytes[10],
+        bits: bytes[11],
+    })
+}
+
+/// Play interleaved 16-bit little-endian stereo PCM at the output's sample
+/// rate; returns once it has finished. Needs the AudioPlayback capability.
+pub fn audio_play(pcm: &[u8]) -> Result<usize, Error> {
+    check(unsafe { syscall::invoke(syscall::AUDIO_PLAY, pcm.as_ptr() as u64, pcm.len() as u64, 0) })
+        .map(|played| played as usize)
+}
+
+/// Set the output volume, 0-100 (0 mutes); returns the amplifier gain set.
+pub fn audio_set_volume(percent: u8) -> Result<u8, Error> {
+    check(unsafe { syscall::invoke(syscall::AUDIO_SET_VOLUME, u64::from(percent), 0, 0) }).map(|gain| gain as u8)
+}
+
 pub fn secret_store(secret: &[u8]) -> Result<u64, Error> {
     check(unsafe {
         syscall::invoke(
