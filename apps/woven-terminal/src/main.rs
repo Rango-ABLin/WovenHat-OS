@@ -13,12 +13,52 @@ const MAX_LIST_ENTRIES: usize = 128;
 const MAX_CAT_CHUNKS: usize = 16;
 
 fn main(args: Args) -> ! {
+    if args.get(1) == Some(b"--interactive") {
+        interactive()
+    }
     let command = match args.get(1) {
         Some(b"--help") | None => Command::Help,
         Some(argument) => parse(argument),
     };
     let status = run(command);
     libwoven::exit(status)
+}
+
+fn interactive() -> ! {
+    let _ = libwoven::print("WovenTerminal\n");
+    let _ = libwoven::print("> ");
+    let mut line = [0u8; 128];
+    let mut length = 0usize;
+    loop {
+        let mut byte = [0u8; 1];
+        match libwoven::read(libwoven::syscall::STDIN, &mut byte) {
+            Ok(0) => libwoven::exit(0),
+            Ok(_) if byte[0] == b'\n' || byte[0] == b'\r' => {
+                let status = run(parse(&line[..length]));
+                if status != 0 {
+                    let _ = libwoven::print("status=");
+                    let mut digits = [0u8; 20];
+                    let text = libwoven::format_u64(status, &mut digits);
+                    let _ = libwoven::write(libwoven::syscall::STDOUT, text);
+                    let _ = libwoven::print("\n");
+                }
+                if parse(&line[..length]) == Command::Quit {
+                    libwoven::exit(0);
+                }
+                length = 0;
+                let _ = libwoven::print("> ");
+            }
+            Ok(_) if length < line.len() => {
+                line[length] = byte[0];
+                length += 1;
+            }
+            Ok(_) => {
+                let _ = libwoven::print("WovenTerminal: command too long\n> ");
+                length = 0;
+            }
+            Err(_) => libwoven::exit(2),
+        }
+    }
 }
 
 fn run(command: Command<'_>) -> u64 {

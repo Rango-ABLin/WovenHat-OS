@@ -12,6 +12,9 @@ it does not add kernel privileges or an alternate ABI.
   512 bytes, closes its descriptor on every path, and reports open/read
   failures instead of panicking.
 - `calc` delegates checked arithmetic to the bounded WovenCalculator core.
+- `--interactive` reads stdin one byte at a time through the existing file
+  descriptor ABI, buffers at most 128 bytes per line, and terminates cleanly
+  on EOF or read failure.
 - The application is a static ET_EXEC image with W^X-compatible segments and
   is signed by the existing WAPP packager.
 
@@ -25,6 +28,6 @@ it does not add kernel privileges or an alternate ABI.
   `audit-artifacts/woven-terminal-4cpu`.
 
 The QEMU acceptance proves package verification, filesystem round-trip, ELF
-loading, and clean zero-exit execution. Interactive stdin driving and a boot
-catalog entry remain integration work; the current app accepts command
-arguments deterministically for the acceptance boundary.
+loading, and clean zero-exit execution. The acceptance invokes the
+deterministic argv path; interactive hardware/console input and boot-catalog
+installation remain separate integration evidence.
