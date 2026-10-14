@@ -1096,7 +1096,12 @@ impl Scheduler {
             self.tasks[outgoing].name = "terminated";
             self.tasks[outgoing].termination_signal = 0;
             self.task_count = self.task_count.saturating_sub(1);
-            complete_process_termination(process_id, task_id, signal);
+            complete_process_termination(self, process_id, task_id, signal);
+            // A process-wide termination invalidates any join handle owned by
+            // this task. Once the hand-off is complete its TCB can be
+            // recycled like the process leader, even if it used to be a
+            // scheduler-backed thread.
+            self.tasks[outgoing].thread_id = None;
         } else {
             self.tasks[outgoing].state = TaskState::Ready;
         }
@@ -1122,7 +1127,8 @@ impl Scheduler {
                 self.task_count = self.task_count.saturating_sub(1);
             if !(self.tasks[slot].thread_id.is_some() && signal == u8::MAX) {
                 let process_id = self.tasks[slot].process_id;
-                complete_process_termination(process_id, id, signal);
+                complete_process_termination(self, process_id, id, signal);
+                self.tasks[slot].thread_id = None;
             }
             }
             TaskState::Running | TaskState::Switching => {
@@ -5176,16 +5182,15 @@ unsafe fn push_stack_value(cursor: &mut usize, value: u64) {
 /// the global SCHEDULER -> PROCESS_TABLE lock order. Address-space destruction
 /// is deferred to `wait_process`; this keeps teardown out of the scheduler
 /// critical section while making the zombie state truthful.
-fn complete_process_termination(process_id: ProcessId, task_id: TaskId, signal: u8) {
+fn complete_process_termination(
+    scheduler: &mut Scheduler,
+    process_id: ProcessId,
+    task_id: TaskId,
+    signal: u8,
+) {
     // Remote/scheduler-driven termination bypasses exit_current_process(), so
     // it needs the same Stage 10.3 async-owner reclamation guarantee.
-    #[cfg(feature = "stage13-9-test")]
-    crate::wifi_runtime::release_owner(task_id);
-    crate::secret_vault::release_owner(task_id.as_u64());
-    crate::async_network::release_owner(task_id);
-    crate::async_file::release_owner(task_id);
-    crate::block_io::release_owner(task_id);
-    crate::async_op::release_owner(task_id);
+    release_task_runtime_resources(task_id);
     // Mutate process-visible state and take ownership of the file table while
     // PROCESS_TABLE is held.  Every operation below can acquire another
     // subsystem lock, so it must run after this guard is dropped; otherwise a
@@ -5213,6 +5218,41 @@ fn complete_process_termination(process_id: ProcessId, task_id: TaskId, signal: 
         )
     };
 
+    // A process owns all of its scheduler-backed threads. Stop siblings as a
+    // single process-teardown transaction: tasks that are not physically
+    // executing can be retired immediately; tasks on another CPU receive a
+    // scheduler-owned termination request and are retired at hand-off. The
+    // address space remains alive until wait_process reaps the process, so a
+    // sibling that is still switching out cannot observe a freed page table.
+    let mut immediate_sibling_releases = [TaskId::from_u64(0); MAX_TASKS];
+    let mut immediate_count = 0;
+    let mut retired_siblings = 0usize;
+    for task in &mut scheduler.tasks {
+        if task.id == task_id || task.process_id != process_id {
+            continue;
+        }
+        match task.state {
+            TaskState::Ready | TaskState::Blocked | TaskState::Sleeping => {
+                task.state = TaskState::Dead;
+                task.termination_signal = 0;
+                task.thread_id = None;
+                retired_siblings += 1;
+                if immediate_count < immediate_sibling_releases.len() {
+                    immediate_sibling_releases[immediate_count] = task.id;
+                    immediate_count += 1;
+                }
+            }
+            TaskState::Running | TaskState::Switching => {
+                task.termination_signal = signal.max(1);
+            }
+            TaskState::Dead | TaskState::Empty => {}
+        }
+    }
+    scheduler.task_count = scheduler.task_count.saturating_sub(retired_siblings);
+    for sibling in immediate_sibling_releases.into_iter().take(immediate_count) {
+        release_task_runtime_resources(sibling);
+    }
+
     // These releases may take completion-port, event, VFS, or pipe locks;
     // keeping them outside PROCESS_TABLE makes the global lock order explicit.
     crate::terminal::release_foreground(process_id.as_u64());
@@ -5234,6 +5274,16 @@ fn complete_process_termination(process_id: ProcessId, task_id: TaskId, signal: 
         payload: exit_code as u64,
     });
     release_file_table(&mut files);
+}
+
+fn release_task_runtime_resources(task_id: TaskId) {
+    #[cfg(feature = "stage13-9-test")]
+    crate::wifi_runtime::release_owner(task_id);
+    crate::secret_vault::release_owner(task_id.as_u64());
+    crate::async_network::release_owner(task_id);
+    crate::async_file::release_owner(task_id);
+    crate::block_io::release_owner(task_id);
+    crate::async_op::release_owner(task_id);
 }
 
 /// If this process requested its own termination (for example `kill(getpid(),

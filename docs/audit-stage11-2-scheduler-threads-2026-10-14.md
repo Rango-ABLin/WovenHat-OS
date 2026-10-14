@@ -27,6 +27,10 @@ qualification remain open.
   wakes that task through the scheduler's latched event path after safe
   hand-off, eliminating userspace polling and closing the registration/exit
   race.
+- Process-wide termination now retires ready/blocked siblings immediately,
+  requests scheduler-safe termination for siblings executing on another CPU,
+  releases per-task async ownership, and permits all resulting TCBs to be
+  reclaimed after the address space remains alive through parent reaping.
 
 ## Validation
 
@@ -54,6 +58,15 @@ serial artifacts:
 audit-artifacts/stage11.2-1cpu-1791975427938656800
 audit-artifacts/stage11.2-2cpu-1791975491088108800
 audit-artifacts/stage11.2-4cpu-1791975537755343700
+
+The process-teardown follow-up reran the same gate and retained these newer
+serial artifacts:
+
+```text
+audit-artifacts/stage11.2-1cpu-1791975759656374100
+audit-artifacts/stage11.2-2cpu-1791975829411200100
+audit-artifacts/stage11.2-4cpu-1791975876876280500
+```
 ```
 ```
 
