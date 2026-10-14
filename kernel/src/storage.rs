@@ -2083,10 +2083,10 @@ fn live_directory_growth_self_test() -> Result<(), &'static str> {
 /// Persist several `/mnt` files as one bounded crash-recoverable data batch.
 ///
 /// The existing `persist_path` WDJ1 transaction remains unchanged. This API
-/// adds a distinct WDJ2 record with a maximum of sixteen entries; a prepared
+/// adds a distinct WDJ2 record with a maximum of 255 entries; a prepared
 /// record rolls every already-written entry back to its old bytes and metadata,
 /// while a committed record is retained until every new checksum and metadata
-/// snapshot is observed.
+/// snapshot is observed. Requests beyond that bound fail before device access.
 pub fn persist_paths_atomic(paths: &[(&str, &[u8])]) -> Result<(), PersistError> {
     if paths.is_empty() {
         return Err(PersistError::Failed);
