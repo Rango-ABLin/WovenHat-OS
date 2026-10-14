@@ -1,5 +1,29 @@
 # Stage status
 
+## Stage 13.14 — storage on NVMe and AHCI (2026-10-14)
+
+A machine with no ATA disk now mounts its NVMe or AHCI disk at `/mnt`.
+- `block_io` routes all primary storage I/O, the FAT32 mount, persistence,
+  journals and swap to a selectable root device.
+- A normal boot selects the first ready `nvme0` or `ahci0` after
+  bring-up.
+- ATA stays the default, so existing configurations are unchanged.
+
+**Evidence.**
+- **Gate `[S13.14] NVMe/AHCI storage: PASSED`:** passes for NVMe and for
+  AHCI on 1/2/4 CPUs. A persisted file survives a remount and is found in
+  the disk image on the host.
+- **Production:** a production boot mounts the NVMe volume and reaches
+  the shell, on 1/2/4 CPUs.
+- **Negative controls:** all four failed the gate as intended.
+- **Regression:** the ATA storage regression, the WovenFS device gate, and
+  1-5, 10.8, 12.1, 13.3 and 13.4 pass on 1/2/4 CPUs.
+
+See the [Stage 13.14 audit](audit-stage13-14-storage-2026-10-14.md).
+
+**Open.** WovenFS on NVMe or AHCI, multiple volumes, interrupt-driven
+NVMe and AHCI I/O, and physical-device qualification.
+
 ## Stage 13.13 — USB keyboards and mice into WovenInput (2026-10-14)
 
 USB keyboards and mice now work in every normal boot.

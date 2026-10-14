@@ -1468,7 +1468,23 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
 
         // Storage, USB and audio controllers: bound through the driver
         // manager; a missing or failing device never stops the boot.
-        let _ = drivers::bring_up();
+        let driver_report = drivers::bring_up();
+        // Without an ATA disk, mount the first ready NVMe or AHCI disk.
+        if !storage::mnt_mounted() {
+            if let Some((root, name)) = drivers::storage_root(&driver_report) {
+                block_io::select_root(root);
+                match storage::mount_ata_root() {
+                    storage::MountStatus::Mounted(count) => serial::write_line(format_args!(
+                        "[FS] FAT32 mounted at /mnt from {}; imported {} entries",
+                        name, count
+                    )),
+                    status => serial::write_line(format_args!(
+                        "[FS] {} has no mountable FAT32 volume: {:?}",
+                        name, status
+                    )),
+                }
+            }
+        }
 
         serial::write_line(format_args!(
             "[BOOT] shell-first runtime ready; entering diagnostic shell"
@@ -3435,8 +3451,17 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         ));
         qemu_test_exit_success();
     }
-    // Before the 13.12 block: a 13.13 build also enables stage13-12-test,
-    // and each block ends the boot.
+    // Before the 13.12 block: 13.13 and 13.14 builds also enable
+    // stage13-12-test, and each block ends the boot.
+    #[cfg(feature = "stage13-14-test")]
+    {
+        if !drivers::storage_self_test() {
+            serial::write_line(format_args!("[S13.14] NVMe/AHCI storage: FAILED"));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!("[S13.14] NVMe/AHCI storage: PASSED"));
+        qemu_test_exit_success();
+    }
     #[cfg(feature = "stage13-13-test")]
     {
         if !xhci::input_self_test() {

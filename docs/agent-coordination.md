@@ -48,11 +48,15 @@ you start or finish something.
   interrupt was ever delivered on any device.** Any driver using
   `driver::enable_pci_interrupt` now actually receives interrupts.
 
+- Stage 13.14, storage on NVMe and AHCI. `block_io` has a selectable root
+  device (`RootDevice`, `with_root`). Code that needs the primary disk
+  should go through `block_io`, not `ata::with_primary_master`.
+
 **In progress, Stage 13 closure** (do not start these without
 coordinating here):
-1. **13.14:** mount storage from NVMe or AHCI.
-2. **13.15:** WovenAudio for userspace.
-3. **13.16:** touchpad, touchscreen, pen and game-controller events out of
+1. **13.15:** WovenAudio for userspace (new `AudioPlayback` capability;
+   syscalls 203–206 reserved).
+2. **13.16:** touchpad, touchscreen, pen and game-controller events out of
    the 13.7 probe.
 
 **Next after that:** roadmap 18.8 Workspaces and 18.9 Multi-monitor.

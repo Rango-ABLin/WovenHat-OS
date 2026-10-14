@@ -182,6 +182,16 @@ fn bring_up_one(spec: &Spec) -> Driver {
     result
 }
 
+/// The first ready storage driver, as the primary block device to mount
+/// when the boot has no ATA disk (Stage 13.14).
+pub fn storage_root(report: &Report) -> Option<(crate::block_io::RootDevice, &'static str)> {
+    report.drivers.iter().find_map(|driver| match (driver.name, driver.outcome) {
+        ("nvme0", Outcome::Ready(_)) => Some((crate::block_io::RootDevice::Nvme, driver.name)),
+        ("ahci0", Outcome::Ready(_)) => Some((crate::block_io::RootDevice::Ahci, driver.name)),
+        _ => None,
+    })
+}
+
 /// Bind and initialize every known driver once. Call after PCI discovery.
 pub fn bring_up() -> Report {
     let mut report = Report {
@@ -281,4 +291,43 @@ pub fn self_test() -> bool {
     });
     ok &= step("a second bring-up binds nothing twice", idempotent);
     ok
+}
+
+/// Stage 13.14 acceptance: storage on NVMe or AHCI. The machine has no ATA
+/// disk; its only data disk is a blank FAT32 image on NVMe or on the chipset
+/// AHCI controller. The volume must mount at /mnt, take a persisted file,
+/// and still hold it, read straight from the disk, after a remount. The
+/// harness then finds the file's bytes in the image on the host.
+#[cfg(feature = "stage13-14-test")]
+pub fn storage_self_test() -> bool {
+    fn step(name: &str, ok: bool) -> bool {
+        crate::serial::write_line(format_args!("[S13.14] {} {}", name, if ok { "PASS" } else { "FAIL" }));
+        ok
+    }
+    const PATH: &str = "/mnt/WOVEN.TXT";
+    const MARKER: &[u8] = b"WovenHat 13.14: persisted through the bound storage driver\n";
+
+    if !step("no ATA disk", crate::ata::with_primary_master(|_| ()).is_none()) {
+        return false;
+    }
+    let report = bring_up();
+    let Some((root, name)) = storage_root(&report) else {
+        return step("a storage driver is ready", false);
+    };
+    crate::serial::write_line(format_args!("[S13.14] root device {} ({:?})", name, root));
+    crate::block_io::select_root(root);
+    let mounted = matches!(crate::storage::mount_ata_root(), crate::storage::MountStatus::Mounted(_))
+        && crate::storage::mnt_mounted();
+    if !step("the FAT32 volume mounts at /mnt from the selected device", mounted) {
+        return false;
+    }
+    let persisted = crate::vfs::write_file(PATH, MARKER).is_ok() && crate::storage::persist_path(PATH).is_ok();
+    if !step("a file is written and persisted", persisted) {
+        return false;
+    }
+    let remounted = matches!(crate::storage::remount_mnt(), crate::storage::MountStatus::Mounted(_));
+    let mut back = [0u8; 128];
+    let read = crate::storage::read_disk_file(PATH, 0, &mut back[..MARKER.len()]);
+    let durable = remounted && read == Ok(MARKER.len()) && &back[..MARKER.len()] == MARKER;
+    step("after a remount the file reads back from the disk", durable)
 }

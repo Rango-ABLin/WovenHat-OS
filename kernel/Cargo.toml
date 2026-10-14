@@ -54,6 +54,8 @@ stage13-12-test = ["qemu-test"]
 # USB keyboards and mice into WovenInput through an interrupt-driven xHCI
 # worker. Builds on 13.12 bring-up; its gate block runs before 13.12's.
 stage13-13-test = ["qemu-test", "stage13-12-test"]
+# Storage mounted from NVMe or AHCI through the selectable root block device.
+stage13-14-test = ["qemu-test", "stage13-12-test"]
 stage14-1-test = ["network-test"]
 stage14-2-test = ["network-test", "stage14-1-test"]
 stage14-3-test = ["network-test", "stage14-2-test"]

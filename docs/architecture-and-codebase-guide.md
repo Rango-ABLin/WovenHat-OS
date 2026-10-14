@@ -96,6 +96,28 @@ evidence is recorded in the [Stage 14.5D revalidation audit](audit-stage14-5d-re
 It qualifies the QEMU virtio boundary only; native NIC/radio and physical-link
 behavior remain hardware work.
 
+## Stage 13.14 storage on NVMe and AHCI (2026-10-14)
+
+The storage layer reaches its disk only through `block_io`:
+- the block-I/O worker's `direct_primary`;
+- the `PrimaryAta` handle, which storage uses for persistence, journals and
+  swap;
+- the FAT32 mount in `storage::mount_ata_root`.
+
+`block_io` now has a selectable root device, `RootDevice::{Ata, Nvme,
+Ahci}`, and every one of those paths goes through `block_io::with_root`.
+The default stays ATA, so every existing configuration behaves as before.
+
+A normal boot with no ATA volume mounted does this after driver bring-up:
+1. `drivers::storage_root` picks the first ready `nvme0` or `ahci0`.
+2. `block_io::select_root` makes it the root device.
+3. The volume is mounted at `/mnt` through the same storage code, so
+   persistence, the data journal and swap all run on the NVMe or AHCI disk.
+
+`storage.rs` no longer refers to the ATA driver directly.
+
+**Still ATA-only.** WovenFS (`wfs.rs`) remains on the ATA primary master.
+
 ## Stage 13.13 USB keyboards and mice (2026-10-14)
 
 When bring-up starts `xhci0`, it calls `xhci::start_input("xhci0")`.
