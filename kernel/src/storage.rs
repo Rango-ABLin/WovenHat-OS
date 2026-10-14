@@ -31,11 +31,11 @@ const BATCH_JOURNAL_V1_ENTRY_HEADER_SIZE: usize = 27;
 const BATCH_JOURNAL_METADATA_SIZE: usize = 12;
 const BATCH_JOURNAL_ENTRY_HEADER_SIZE: usize =
     BATCH_JOURNAL_V1_ENTRY_HEADER_SIZE + 2 * BATCH_JOURNAL_METADATA_SIZE;
-// WDJ2 records remain bounded and version-compatible with the original
-// four-entry implementation. The larger capacity keeps one transaction
-// useful for directory/package updates without pretending to support
-// arbitrary-size volume transactions.
-const BATCH_JOURNAL_MAX_ENTRIES: usize = 16;
+// WDJ2 retains its version-compatible one-byte entry-count field. The full
+// 255-entry bound is large enough for package and directory transactions while
+// keeping recovery allocation explicit; it does not claim arbitrary-size or
+// full-volume transactions.
+const BATCH_JOURNAL_MAX_ENTRIES: usize = u8::MAX as usize;
 const BATCH_JOURNAL_MAX_RECORD_SIZE: usize = BATCH_JOURNAL_HEADER_SIZE
     + BATCH_JOURNAL_MAX_ENTRIES * (BATCH_JOURNAL_ENTRY_HEADER_SIZE + DATA_JOURNAL_PATH_SIZE)
     + BATCH_JOURNAL_MAX_ENTRIES * vfs::NODE_CAPACITY;
@@ -987,7 +987,32 @@ pub fn self_test() -> bool {
     let bad_ok = short_name_to_str(b"BAD?    TXT", &mut name).is_none();
     let encode_ok = fat32::encode_short_name("kernel.bin") == Some(*b"KERNEL  BIN")
         && fat32::encode_short_name("readme") == Some(*b"README     ");
-    kernel_ok && readme_ok && bad_ok && encode_ok && data_journal_self_test()
+    kernel_ok
+        && readme_ok
+        && bad_ok
+        && encode_ok
+        && batch_capacity_self_test()
+        && data_journal_self_test()
+}
+
+fn batch_capacity_self_test() -> bool {
+    let mut entries = alloc::vec::Vec::with_capacity(BATCH_JOURNAL_MAX_ENTRIES);
+    for index in 0..BATCH_JOURNAL_MAX_ENTRIES {
+        entries.push(BatchJournalEntry {
+            path: alloc::format!("/mnt/batch-{index:03}.bin"),
+            old_exists: false,
+            old_data: alloc::vec::Vec::new(),
+            old_metadata: None,
+            metadata_snapshot: true,
+            new_len: 0,
+            new_checksum: checksum_bytes(&[]),
+            metadata: None,
+        });
+    }
+    let Some(record) = encode_batch_journal(&entries, BATCH_JOURNAL_PREPARED) else {
+        return false;
+    };
+    parse_batch_journal(&record).is_some_and(|decoded| decoded.len() == BATCH_JOURNAL_MAX_ENTRIES)
 }
 
 fn data_journal_self_test() -> bool {

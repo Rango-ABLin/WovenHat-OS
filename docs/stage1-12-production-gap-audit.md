@@ -16,9 +16,14 @@ For every open item we will add implementation, focused host tests, 1/2/4 CPU
 QEMU tests, and an audit entry. A stage is production-complete only when every
 roadmap requirement has passing evidence or an explicitly accepted design.
 
+WDJ2 now uses the full 255-entry range available in its compatible record
+header and has a maximum-capacity round-trip self-test; see the [WDJ2 capacity
+audit](audit-stage1-5-wdj2-capacity-2026-10-14.md). This is a larger bounded
+transaction window, not arbitrary-size/full-volume rollback.
+
 Stage 1–5 metadata capacity has since been extended with the compatible WMD3
 eight-sector region; the former fixed four-sector ABI ceiling is closed as a
-bounded software increment. WDJ2 now covers bounded sixteen-file data-plus-
+bounded software increment. WDJ2 now covers bounded 255-entry data-plus-
 metadata rollback
 and replay with 1/2/4-CPU recovery evidence. The remaining Stage 1–5 gaps are
 hardware/DMA qualification,

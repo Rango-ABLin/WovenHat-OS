@@ -2211,5 +2211,15 @@ session is rejected before notification encoding, while a session meeting the
 warning-denying kernel Clippy pass; GitHub acceptance for the pushed tip is
 still required.
 
+## Stage 1–5 WDJ2 capacity extension — 2026-10-14
+
+The compatible WDJ2 batch journal now accepts the full 255-entry range
+representable by its existing one-byte count field, with a host round-trip
+self-test at the maximum. This removes the former sixteen-file implementation
+ceiling for package/directory transactions without changing the on-disk
+version or production block-device ABI. Recovery allocation remains explicitly
+bounded; arbitrary-size/full-volume rollback, physical storage/DMA, torn-write
+and reboot qualification remain open.
+
 
 
