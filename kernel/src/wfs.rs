@@ -1580,6 +1580,13 @@ pub fn stage15_2_self_test() -> bool {
         return false;
     }
 
+    // VFS imports are read-only until an authorized durable backend is installed.
+    // Rejecting mutation prevents memory-only writes from masquerading as durable IO.
+    let denied = crate::vfs::write_file("/wfs/alpha.txt", b"unauthorized-change").is_err();
+    if !step("imported VFS file rejects write-through", denied) {
+        return false;
+    }
+
     let removed = with_ata_volume(|volume| {
         volume.unlink(1, "alpha.txt", 5).is_ok()
             && volume.lookup(1, "alpha.txt") == Err(Error::NotFound)
