@@ -1195,6 +1195,14 @@ WovenFiles, signs each WAPP payload, and emits hashed `/bin` install paths plus
 release artifact, not a claim that the current one-package acceptance boot can
 install all packages. The multi-package image/installer consumer remains open.
 
+The feature-gated multi-application catalog gate now passes on 1/2/4 CPUs.
+It consumes the signed calculator, terminal, and files packages, rejects a
+tampered copy of each, verifies VFS byte-for-byte read-back and normal ELF
+loading, and publishes their matching catalog descriptors. See the
+[Stage 19 system-app catalog audit](audit-stage19-system-app-catalog-2026-10-14.md).
+This closes the acceptance boundary only; rollback, trusted catalog
+publication, and normal-boot image installation remain open.
+
 ## Stage 15 — WovenFS native filesystem (2026-10-12)
 
 WovenFS is WovenHat's own on-disk filesystem, specified in

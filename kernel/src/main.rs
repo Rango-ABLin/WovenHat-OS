@@ -3657,6 +3657,13 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         serial::write_line(format_args!("[S16.1] out-of-kernel application: PASSED"));
         qemu_test_exit_success();
     }
+    #[cfg(feature = "stage19-app-catalog-test")]
+    {
+        if !stage19_app_catalog_self_test() {
+            qemu_test_exit_failure();
+        }
+        qemu_test_exit_success();
+    }
     #[cfg(feature = "stage15-2-test")]
     {
         if !wfs::stage15_2_self_test() {
@@ -4580,6 +4587,117 @@ fn preemption_probe_task() -> ! {
 /// it.
 #[cfg(feature = "stage16-1-test")]
 const EXTERNAL_APPLICATION: &[u8] = include_bytes!(env!("WOVENHAT_APP_IMAGE"));
+
+#[cfg(feature = "stage19-app-catalog-test")]
+const SYSTEM_APP_CALCULATOR: &[u8] = include_bytes!(env!("WOVENHAT_CALCULATOR_IMAGE"));
+#[cfg(feature = "stage19-app-catalog-test")]
+const SYSTEM_APP_TERMINAL: &[u8] = include_bytes!(env!("WOVENHAT_TERMINAL_IMAGE"));
+#[cfg(feature = "stage19-app-catalog-test")]
+const SYSTEM_APP_FILES: &[u8] = include_bytes!(env!("WOVENHAT_FILES_IMAGE"));
+
+/// Stage 19 system-app acceptance: verify and install one bounded catalog plan.
+///
+/// This deliberately remains a test feature. Normal boot does not install
+/// packages merely because build-time paths exist; a future image installer
+/// must provide the same verification, ownership, and publication ordering.
+#[cfg(feature = "stage19-app-catalog-test")]
+fn stage19_app_catalog_self_test() -> bool {
+    struct App {
+        name: &'static str,
+        image: &'static [u8],
+        binary_path: &'static str,
+        catalog_path: &'static str,
+        catalog: &'static [u8],
+    }
+    let apps = [
+        App {
+            name: "woven-calculator",
+            image: SYSTEM_APP_CALCULATOR,
+            binary_path: "/bin/wovenhat-calculator",
+            catalog_path: "/share/applications/woven-calculator.app",
+            catalog: b"Name=WovenCalculator\nExec=/bin/wovenhat-calculator\n",
+        },
+        App {
+            name: "woven-terminal",
+            image: SYSTEM_APP_TERMINAL,
+            binary_path: "/bin/wovenhat-terminal",
+            catalog_path: "/share/applications/woven-terminal.app",
+            catalog: b"Name=WovenTerminal\nExec=/bin/wovenhat-terminal --interactive\n",
+        },
+        App {
+            name: "woven-files",
+            image: SYSTEM_APP_FILES,
+            binary_path: "/bin/wovenhat-files",
+            catalog_path: "/share/applications/woven-files.app",
+            catalog: b"Name=WovenFiles\nExec=/bin/wovenhat-files\n",
+        },
+    ];
+    fn step(name: &str, ok: bool) -> bool {
+        serial::write_line(format_args!(
+            "[S19-APP] {} {}",
+            name,
+            if ok { "PASS" } else { "FAIL" }
+        ));
+        ok
+    }
+
+    if !step(
+        "application directories created",
+        vfs::mkdir("/share").is_ok() && vfs::mkdir("/share/applications").is_ok(),
+    ) {
+        return false;
+    }
+    for app in apps {
+        let verified = match signed_app::verify_package(app.image) {
+            Ok(package) => package,
+            Err(_) => return step(app.name, false),
+        };
+        if !step("signed package verifies", true) {
+            return false;
+        }
+        let mut tampered = alloc::vec::Vec::from(app.image);
+        let last = tampered.len().saturating_sub(1);
+        tampered[last] ^= 1;
+        if !step(
+            "tampered package refused",
+            signed_app::verify_package(&tampered).is_err(),
+        ) {
+            return false;
+        }
+        let image = verified.bytes();
+        let Some(parsed) = elf::parse(image).ok() else {
+            return step("ELF payload parses", false);
+        };
+        if !step("ELF payload parses", parsed.segment_count() > 0) {
+            return false;
+        }
+        if !step(
+            "package installed at declared path",
+            vfs::create_read_only(app.binary_path, app.image).is_ok(),
+        ) {
+            return false;
+        }
+        let mut readback = alloc::vec![0u8; app.image.len()];
+        let round_trip = vfs::read_all(app.binary_path, &mut readback) == Ok(app.image.len())
+            && readback == app.image;
+        if !step("package read-back is byte-identical", round_trip) {
+            return false;
+        }
+        if !step(
+            "read-back loads through verified loader",
+            userspace::load_elf_with_argv_verified(&readback, &[app.binary_path]).is_some(),
+        ) {
+            return false;
+        }
+        if !step(
+            "catalog descriptor published",
+            vfs::create_read_only(app.catalog_path, app.catalog).is_ok(),
+        ) {
+            return false;
+        }
+    }
+    step("three signed applications installed", true)
+}
 
 /// Stage 16.1 acceptance: an application built outside the kernel is installed
 /// into the filesystem, loaded by the ELF loader, and runs in Ring 3.

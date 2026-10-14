@@ -29,6 +29,15 @@ kernel acceptance path still embeds one package through `WOVENHAT_APP_IMAGE`.
 An atomic multi-package image/installer consumer remains a Stage 19
 prerequisite, as do the remaining applications and full GUI integration.
 
+The feature-gated `stage19-app-catalog-test` now exercises the install-plan
+boundary for all three accepted packages together. It verifies each WAPP,
+rejects a mutation, installs and reads each package back through the VFS,
+passes the bytes through the verified ELF loader, and publishes the matching
+catalog descriptor only after those checks. The 1/2/4-CPU evidence is in the
+Stage 19 system-app catalog audit. This is not ordinary-boot installation:
+rollback, trusted catalog publication, and image/installer ownership remain
+required for production deployment.
+
 ## Release validation (2026-10-14)
 
 The repository release chain passed on the current tree, including warning-

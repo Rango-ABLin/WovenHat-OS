@@ -71,6 +71,8 @@ stage15-8-test = ["qemu-test"]
 stage15-9-test = ["qemu-test"]
 # An application built outside the kernel, loaded from the filesystem.
 stage16-1-test = ["qemu-test"]
+# Three signed system applications installed through one bounded catalog plan.
+stage19-app-catalog-test = ["qemu-test"]
 # Full printable-ASCII font and text layout.
 stage17-1-test = ["qemu-test"]
 # Owner-bound client surface registry for userspace graphics.
