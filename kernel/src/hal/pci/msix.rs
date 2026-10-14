@@ -644,7 +644,7 @@ pub fn enable_owned(
 
 /// Quiesce the function before recycling its interrupt vector. Failure keeps
 /// the lease live and the vector unavailable for reuse.
-#[expect(dead_code)]
+#[cfg_attr(not(any(not(feature = "qemu-test"), feature = "stage13-12-test")), expect(dead_code))]
 pub fn disable_owned(lease: MsixLease, owner: u32) -> Result<(), LifecycleError> {
     super::msi::validate_vector(lease.vector, owner)?;
     if lease.bar.function != lease.function || !super::validate_bar_lease(lease.bar, owner) {

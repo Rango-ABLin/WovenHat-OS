@@ -470,6 +470,9 @@ fn cmd_devices(console: &mut Console) {
         "pit",
         "ps2-keyboard",
         "ata0",
+        "nvme0",
+        "ahci0",
+        "xhci0",
         "hda0",
     ] {
         if let Some(dev) = device::find(name) {
@@ -482,8 +485,10 @@ fn cmd_devices(console: &mut Console) {
                 device::DeviceKind::Timer => "timer",
                 device::DeviceKind::Keyboard => "keyboard",
                 device::DeviceKind::Block => "block",
-                #[cfg(feature = "stage13-8-test")]
+                #[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test", feature = "stage13-8-test"))]
                 device::DeviceKind::Audio => "audio",
+                #[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
+                device::DeviceKind::UsbHost => "usb-host",
             });
             if let Some(irq) = dev.irq {
                 console.print(" irq=");

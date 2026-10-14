@@ -10,7 +10,7 @@ extern crate alloc;
 #[cfg(feature = "physical-probe")]
 mod physical_probe;
 
-#[cfg(feature = "stage13-4-test")]
+#[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test", feature = "stage13-4-test"))]
 mod ahci;
 #[cfg(feature = "stage10-8-test")]
 mod async_acceptance;
@@ -34,6 +34,8 @@ mod deadline;
 mod device;
 mod display;
 #[cfg(any(
+    not(feature = "qemu-test"),
+    feature = "stage13-12-test",
     feature = "stage13-1-test",
     feature = "stage13-2-test",
     feature = "stage13-3-test",
@@ -45,6 +47,8 @@ mod display;
     feature = "stage13-9-test"
 ))]
 mod driver;
+#[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
+mod drivers;
 mod elf;
 mod entropy;
 mod fat32;
@@ -63,7 +67,7 @@ mod gpt;
 mod graphics;
 mod gui;
 mod hal;
-#[cfg(feature = "stage13-8-test")]
+#[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test", feature = "stage13-8-test"))]
 mod hda;
 mod heap;
 mod interrupts;
@@ -75,7 +79,7 @@ mod memory;
 mod mouse;
 mod network;
 mod notifications;
-#[cfg(feature = "stage13-3-test")]
+#[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test", feature = "stage13-3-test"))]
 mod nvme;
 mod page_cache;
 mod paging;
@@ -172,6 +176,8 @@ mod woven_input;
 mod wovenfs;
 mod wovenguard;
 #[cfg(any(
+    not(feature = "qemu-test"),
+    feature = "stage13-12-test",
     feature = "stage13-5-test",
     feature = "stage13-6-test",
     feature = "stage13-7-test",
@@ -1459,6 +1465,10 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
                 error
             )),
         }
+
+        // Storage, USB and audio controllers: bound through the driver
+        // manager; a missing or failing device never stops the boot.
+        let _ = drivers::bring_up();
 
         serial::write_line(format_args!(
             "[BOOT] shell-first runtime ready; entering diagnostic shell"
@@ -3423,6 +3433,15 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
             "[S13.7] WovenInput unified event framework: PASSED dropped={}",
             woven_input::dropped_events()
         ));
+        qemu_test_exit_success();
+    }
+    #[cfg(feature = "stage13-12-test")]
+    {
+        if !drivers::self_test() {
+            serial::write_line(format_args!("[S13.12] driver bring-up: FAILED"));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!("[S13.12] driver bring-up: PASSED"));
         qemu_test_exit_success();
     }
     #[cfg(feature = "stage13-6-test")]

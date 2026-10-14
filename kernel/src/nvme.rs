@@ -1,3 +1,10 @@
+#![cfg_attr(
+    any(not(feature = "qemu-test"), feature = "stage13-12-test"),
+    expect(
+        dead_code,
+        reason = "production initializes the bound controller (init_at); self-tests and probing are exercised by the Stage 13.3 gate"
+    )
+)]
 use core::{
     ptr,
     sync::atomic::{fence, Ordering},
@@ -366,11 +373,19 @@ impl BlockDevice for NvmeController {
 }
 
 pub fn init() -> Result<u64, InitError> {
+    if let Some(sectors) = CONTROLLER.lock().as_ref().map(|controller| controller.sectors) {
+        return Ok(sectors);
+    }
+    init_at(find_controller().ok_or(InitError::MissingController)?)
+}
+
+/// Initialize the controller at `device`, the function its driver is bound
+/// to. An already initialized controller is kept.
+pub fn init_at(device: pci::Device) -> Result<u64, InitError> {
     let mut slot = CONTROLLER.lock();
     if let Some(controller) = slot.as_ref() {
         return Ok(controller.sectors);
     }
-    let device = find_controller().ok_or(InitError::MissingController)?;
     let controller = NvmeController::initialize(device)?;
     let sectors = controller.sectors;
     *slot = Some(controller);
