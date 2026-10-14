@@ -1,5 +1,19 @@
 # WovenHat OS Architecture & Codebase Guide
 
+## Stage 11.2 scheduler-backed thread ownership (2026-10-14)
+
+`TaskControlBlock` carries both the stable process owner and an optional
+generation-safe thread ID. User-thread creation maps a private NX stack and a
+private copy of the process's bounded initial-exec TLS image into the existing
+address space; it never retains an unchecked userspace pointer. Thread exit
+publishes registry termination only after the scheduler completes the stack
+hand-off, so join can safely reclaim those mappings. Join waiters use the
+scheduler's latched event path, and process termination retires ready/blocked
+siblings immediately while running siblings receive a safe-point termination
+request. The address space remains owned by the process until its parent
+reaps the process. Shared libraries, symbol resolution, dynamic TLS, and
+physical qualification remain outside this bounded increment.
+
 ## Stage 13.2 PCI power-state ownership (2026-10-13)
 
 `hal::pci::suspend_owned` and `resume_owned` operate only on a validated,
