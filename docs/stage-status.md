@@ -1302,6 +1302,20 @@ prepared record before recovery can interpret it. This strengthens software
 journal-boundary evidence; it does not prove physical torn-sector atomicity or
 power-loss recovery.
 
+## Stage 1–5 DMA allocation cleanup — 2026-10-14
+
+The existing AHCI and NVMe DMA-page owners now return allocator frames when
+direct-map setup fails. AHCI also drops all pages on failed controller
+initialization; successful controller ownership remains process-lifetime and
+is held under the controller lock until no hardware command can reference the
+pages. The `BlockDevice` ABI is unchanged.
+
+The Stage 13.3/13.4 freestanding Clippy gates, host Clippy, and the complete
+host test suite passed after this change. See the [DMA allocation audit](audit-stage1-5-dma-allocation-2026-10-14.md).
+This closes a software allocation-leak path only. Physical AHCI/NVMe and USB
+flash qualification, IOMMU isolation, interrupt completion, torn-sector and
+power-loss evidence, and arbitrary-size rollback remain open.
+
 ## Stage 14.2D — Router Advertisement state (2026-10-06)
 
 Router Advertisement state now tracks a link-local router, bounded lifetimes,
