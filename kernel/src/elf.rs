@@ -25,11 +25,20 @@ pub struct LoadSegment {
     pub executable: bool,
 }
 
+#[derive(Clone, Copy)]
+pub struct TlsImage {
+    pub file_offset: usize,
+    pub file_size: usize,
+    pub memory_size: usize,
+    pub alignment: u64,
+}
+
 pub struct Image {
     pub entry: u64,
     segments: [Option<LoadSegment>; MAX_LOAD_SEGMENTS],
     segment_count: usize,
     relro: Option<(u64, usize)>,
+    tls: Option<TlsImage>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -57,6 +66,10 @@ impl Image {
     /// Page-aligned GNU RELRO range, if the image declares one.
     pub const fn relro(&self) -> Option<(u64, usize)> {
         self.relro
+    }
+
+    pub const fn tls(&self) -> Option<TlsImage> {
+        self.tls
     }
 
     /// Relocate every load segment and the entry by one page-aligned delta.
@@ -146,14 +159,45 @@ pub fn parse(bytes: &[u8]) -> Result<Image, Error> {
         segments: [None; MAX_LOAD_SEGMENTS],
         segment_count: 0,
         relro: None,
+        tls: None,
     };
     let mut entry_is_executable = false;
 
     for index in 0..program_count {
         let offset = program_offset + index * program_entry_size;
         let program_type = read_u32(bytes, offset)?;
-        if matches!(program_type, PT_DYNAMIC | PT_INTERP | PT_TLS) {
+        if matches!(program_type, PT_DYNAMIC | PT_INTERP) {
             return Err(Error::Unsupported);
+        }
+        if program_type == PT_TLS {
+            if image.tls.is_some() {
+                return Err(Error::Unsupported);
+            }
+            let file_offset =
+                usize::try_from(read_u64(bytes, offset + 8)?).map_err(|_| Error::InvalidSegment)?;
+            let file_size =
+                usize::try_from(read_u64(bytes, offset + 32)?).map_err(|_| Error::InvalidSegment)?;
+            let memory_size =
+                usize::try_from(read_u64(bytes, offset + 40)?).map_err(|_| Error::InvalidSegment)?;
+            let alignment = read_u64(bytes, offset + 48)?;
+            if memory_size == 0
+                || file_size > memory_size
+                || !alignment.is_power_of_two()
+                || alignment > PAGE_SIZE
+                || file_offset
+                    .checked_add(file_size)
+                    .filter(|end| *end <= bytes.len())
+                    .is_none()
+            {
+                return Err(Error::InvalidSegment);
+            }
+            image.tls = Some(TlsImage {
+                file_offset,
+                file_size,
+                memory_size,
+                alignment,
+            });
+            continue;
         }
         if program_type == PT_GNU_RELRO {
             if image.relro.is_some() {

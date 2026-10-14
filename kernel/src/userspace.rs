@@ -4272,6 +4272,10 @@ pub fn setup_argv_stack(
 const USER_MMAP_START: u64 = USER_REGION_START + 0x0e_0000;
 const USER_MMAP_STRIDE: u64 = 0x10_000;
 const USER_MMAP_MAX_SIZE: usize = USER_MMAP_STRIDE as usize;
+
+fn page_align_up(value: u64) -> Option<u64> {
+    value.checked_add(4095).map(|value| value & !4095)
+}
 const USER_MMAP_PAGES: usize = USER_MMAP_MAX_SIZE / 4096;
 const _: () = assert!(
     USER_MMAP_START + MAX_ANONYMOUS_MAPPINGS as u64 * USER_MMAP_STRIDE
@@ -4340,6 +4344,7 @@ pub struct AddressSpace {
     mappings: [UserMapping; MAX_ELF_SEGMENTS],
     mapping_count: usize,
     relro: Option<(u64, usize)>,
+    tls: Option<(u64, usize)>,
 }
 
 impl AddressSpace {
@@ -4375,6 +4380,12 @@ impl AddressSpace {
                 return true;
             }
         }
+        if self
+            .tls
+            .is_some_and(|(start, size)| address >= start && address < start + size as u64)
+        {
+            return true;
+        }
         for mapping in anonymous.iter().flatten() {
             if mapping.writable
                 && address >= mapping.address
@@ -4392,6 +4403,7 @@ pub struct UserProgram {
     pub image: UserImage,
     pub stack: UserStack,
     pub address_space: AddressSpace,
+    pub tls_base: u64,
 }
 
 pub fn elf_loader_self_test() -> bool {
@@ -4425,7 +4437,7 @@ pub fn elf_loader_self_test() -> bool {
     let mut writable_executable = valid;
     writable_executable[68] = 7;
 
-    let unsupported_program_header_rejected = [PT_INTERP, PT_DYNAMIC, PT_TLS]
+    let unsupported_program_header_rejected = [PT_INTERP, PT_DYNAMIC]
         .into_iter()
         .all(|program_type| {
             let Some(mut elf) = build_stub_elf(stub) else {
@@ -4439,6 +4451,15 @@ pub fn elf_loader_self_test() -> bool {
             }
             matches!(crate::elf::parse(&elf), Err(crate::elf::Error::Unsupported))
         });
+
+    let invalid_tls_rejected = build_stub_elf(stub).is_some_and(|mut elf| {
+        let second_header = PROGRAM_HEADER_OFFSET + PROGRAM_HEADER_SIZE;
+        write_u16(&mut elf, 56, 2).is_some()
+            && write_u32(&mut elf, second_header, PT_TLS).is_some()
+            && write_u64(&mut elf, second_header + 32, 8).is_some()
+            && write_u64(&mut elf, second_header + 40, 4).is_some()
+            && matches!(crate::elf::parse(&elf), Err(crate::elf::Error::InvalidSegment))
+    });
 
     let relro_requires_writable_data = build_stub_elf(stub).is_some_and(|mut elf| {
         let second_header = PROGRAM_HEADER_OFFSET + PROGRAM_HEADER_SIZE;
@@ -4470,12 +4491,37 @@ pub fn elf_loader_self_test() -> bool {
     .and_then(|elf| crate::elf::parse(&elf).ok())
     .is_some_and(|image| image.relro() == Some((USER_REGION_START + USER_CODE_SIZE as u64, 4096)));
 
+    let valid_tls = build_stub_elf(stub).and_then(|mut elf| {
+        let tls_header = PROGRAM_HEADER_OFFSET + PROGRAM_HEADER_SIZE;
+        if write_u16(&mut elf, 56, 2).is_none()
+            || write_u32(&mut elf, tls_header, PT_TLS).is_none()
+            || write_u64(&mut elf, tls_header + 8, 4096).is_none()
+            || write_u64(&mut elf, tls_header + 32, 4).is_none()
+            || write_u64(&mut elf, tls_header + 40, 4096).is_none()
+            || write_u64(&mut elf, tls_header + 48, 4096).is_none()
+        {
+            return None;
+        }
+        Some(elf)
+    })
+    .and_then(|elf| crate::elf::parse(&elf).ok())
+    .is_some_and(|image| {
+        image.tls().is_some_and(|tls| {
+            tls.file_offset == 4096
+                && tls.file_size == 4
+                && tls.memory_size == 4096
+                && tls.alignment == 4096
+        })
+    });
+
     valid_segment
         && crate::elf::parse(&bad_magic).is_err()
         && crate::elf::parse(&writable_executable).is_err()
         && unsupported_program_header_rejected
+        && invalid_tls_rejected
         && relro_requires_writable_data
         && valid_relro
+        && valid_tls
 }
 /// Regression test for the mmap W^X invariant.
 ///
@@ -4830,6 +4876,7 @@ pub fn load_elf(bytes: &[u8]) -> Option<UserProgram> {
 
     let stack_base = aslr_stack_base()?;
     let relro = image.relro();
+    let tls_image = image.tls();
     let stack = UserStack::new(stack_base);
     let mmap_end = mmap_base.checked_add(MAX_ANONYMOUS_MAPPINGS as u64 * USER_MMAP_STRIDE)?;
     for segment in image.segments() {
@@ -4909,21 +4956,76 @@ pub fn load_elf(bytes: &[u8]) -> Option<UserProgram> {
         }
     }
 
+    // Static TLS is placed below the stack guard.  The initial-exec ABI uses
+    // the end of this block as FS, so keeping the block page aligned makes
+    // fork's existing COW address-space clone sufficient for the initial
+    // thread image. Dynamic TLS/shared libraries remain intentionally outside
+    // this loader's contract.
+    let (tls, tls_base) = if let Some(tls_image) = tls_image {
+        let Some(tls_size) = page_align_up(tls_image.memory_size as u64)
+            .and_then(|size| usize::try_from(size).ok())
+        else {
+            release_partial(page_table, &mappings[..mapping_count]);
+            return None;
+        };
+        let Some(tls_start) = stack.guard_base.checked_sub(tls_size as u64) else {
+            release_partial(page_table, &mappings[..mapping_count]);
+            return None;
+        };
+        let Some(tls_file_end) = tls_image.file_offset.checked_add(tls_image.file_size) else {
+            release_partial(page_table, &mappings[..mapping_count]);
+            return None;
+        };
+        if tls_start < mmap_end
+            || mappings[..mapping_count].iter().any(|mapping| {
+                tls_start < mapping.start + mapping.size as u64
+                    && mapping.start < stack.guard_base
+            })
+        {
+            release_partial(page_table, &mappings[..mapping_count]);
+            return None;
+        }
+        let Some(tls_bytes) = bytes.get(tls_image.file_offset..tls_file_end) else {
+            release_partial(page_table, &mappings[..mapping_count]);
+            return None;
+        };
+        if paging::map_user_range_in_inactive(page_table, tls_start, tls_size, true, false)
+            .is_err()
+            || paging::zero_user_range_in(page_table, tls_start, tls_size).is_err()
+            || paging::write_user_bytes(
+                page_table,
+                tls_start,
+                tls_bytes,
+            )
+            .is_err()
+        {
+            release_partial_with_tls(page_table, &mappings[..mapping_count], (tls_start, tls_size));
+            return None;
+        }
+        let Some(tls_base) = tls_start.checked_add(tls_size as u64) else {
+            release_partial_with_tls(page_table, &mappings[..mapping_count], (tls_start, tls_size));
+            return None;
+        };
+        (Some((tls_start, tls_size)), tls_base)
+    } else {
+        (None, 0)
+    };
+
     if paging::map_user_range_in_inactive(page_table, stack_base, UserStack::SIZE, true, false)
         .is_err()
     {
-        release_partial(page_table, &mappings[..mapping_count]);
+        release_with_stack(page_table, stack_base, tls, &mappings[..mapping_count]);
         return None;
     }
     if paging::zero_user_range_in(page_table, stack_base, UserStack::SIZE).is_err() {
-        release_with_stack(page_table, stack_base, &mappings[..mapping_count]);
+        release_with_stack(page_table, stack_base, tls, &mappings[..mapping_count]);
         return None;
     }
 
     if !paging::user_range_is_unmapped_in(page_table, stack.guard_base, UserStack::GUARD_SIZE)
         || !paging::user_range_has_protection_in(page_table, stack.base, stack.size, true, false)
     {
-        release_with_stack(page_table, stack_base, &mappings[..mapping_count]);
+        release_with_stack(page_table, stack_base, tls, &mappings[..mapping_count]);
         return None;
     }
 
@@ -4945,7 +5047,9 @@ pub fn load_elf(bytes: &[u8]) -> Option<UserProgram> {
             mappings,
             mapping_count,
             relro,
+            tls,
         },
+        tls_base,
     })
 }
 
@@ -4958,13 +5062,23 @@ pub fn load_elf_with_argv(bytes: &[u8], args: &[&str]) -> Option<UserProgram> {
     Some(program)
 }
 
-fn release_with_stack(page_table: paging::AddressSpace, stack_base: u64, mappings: &[UserMapping]) {
-    let mut ranges = [(0, 0); MAX_ELF_SEGMENTS + 1];
+fn release_with_stack(
+    page_table: paging::AddressSpace,
+    stack_base: u64,
+    tls: Option<(u64, usize)>,
+    mappings: &[UserMapping],
+) {
+    let mut ranges = [(0, 0); MAX_ELF_SEGMENTS + 2];
     ranges[0] = (stack_base, UserStack::SIZE);
     for (range, mapping) in ranges[1..].iter_mut().zip(mappings) {
         *range = (mapping.start, mapping.size);
     }
-    let _ = paging::destroy_user_address_space(page_table, &ranges[..mappings.len() + 1]);
+    let mut count = mappings.len() + 1;
+    if let Some(tls) = tls {
+        ranges[count] = tls;
+        count += 1;
+    }
+    let _ = paging::destroy_user_address_space(page_table, &ranges[..count]);
 }
 fn release_partial(page_table: paging::AddressSpace, mappings: &[UserMapping]) {
     if mappings.is_empty() {
@@ -4976,6 +5090,19 @@ fn release_partial(page_table: paging::AddressSpace, mappings: &[UserMapping]) {
         *range = (mapping.start, mapping.size);
     }
     let _ = paging::destroy_user_address_space(page_table, &ranges[..mappings.len()]);
+}
+
+fn release_partial_with_tls(
+    page_table: paging::AddressSpace,
+    mappings: &[UserMapping],
+    tls: (u64, usize),
+) {
+    let mut ranges = [(0, 0); MAX_ELF_SEGMENTS + 1];
+    for (range, mapping) in ranges[..mappings.len()].iter_mut().zip(mappings) {
+        *range = (mapping.start, mapping.size);
+    }
+    ranges[mappings.len()] = tls;
+    let _ = paging::destroy_user_address_space(page_table, &ranges[..mappings.len() + 1]);
 }
 
 pub fn map_anonymous(
@@ -5308,7 +5435,7 @@ pub fn destroy_process_address_space(
     destroy(address_space)
 }
 pub fn destroy(address_space: AddressSpace) -> bool {
-    let mut ranges = [(0, 0); MAX_ELF_SEGMENTS + 1];
+    let mut ranges = [(0, 0); MAX_ELF_SEGMENTS + 2];
     ranges[0] = (address_space.stack_base, UserStack::SIZE);
     for (range, mapping) in ranges[1..]
         .iter_mut()
@@ -5316,10 +5443,12 @@ pub fn destroy(address_space: AddressSpace) -> bool {
     {
         *range = (mapping.start, mapping.size);
     }
-    paging::destroy_user_address_space(
-        address_space.paging,
-        &ranges[..address_space.mapping_count + 1],
-    )
+    let mut count = address_space.mapping_count + 1;
+    if let Some(tls) = address_space.tls {
+        ranges[count] = tls;
+        count += 1;
+    }
+    paging::destroy_user_address_space(address_space.paging, &ranges[..count])
     .is_ok()
 }
 
@@ -5335,8 +5464,9 @@ pub fn clone_address_space(
         mappings: source.mappings,
         mapping_count: source.mapping_count,
         relro: source.relro,
+        tls: source.tls,
     };
-    let mut completed = [(0_u64, 0_usize); MAX_ELF_SEGMENTS + 1 + MAX_ANONYMOUS_MAPPINGS * 16];
+    let mut completed = [(0_u64, 0_usize); MAX_ELF_SEGMENTS + 2 + MAX_ANONYMOUS_MAPPINGS * 16];
     let mut completed_count = 0;
 
     // Copy-on-write: share physical frames and mark writable ranges read-only.
@@ -5372,6 +5502,24 @@ pub fn clone_address_space(
     }
     completed[completed_count] = (source.stack_base, UserStack::SIZE);
     completed_count += 1;
+
+    if let Some((tls_start, tls_size)) = source.tls {
+        if paging::share_user_range_in(
+            source.paging,
+            destination.paging,
+            tls_start,
+            tls_size,
+            true,
+            false,
+        )
+        .is_err()
+        {
+            release_clone(destination.paging, &completed[..completed_count]);
+            return None;
+        }
+        completed[completed_count] = (tls_start, tls_size);
+        completed_count += 1;
+    }
 
     for mapping in anonymous.iter().flatten() {
         for index in 0..mapping.size / 4096 {
@@ -5642,6 +5790,7 @@ pub fn shared_disk_mmap_self_test() -> bool {
             mappings: [UserMapping::EMPTY; MAX_ELF_SEGMENTS],
             mapping_count: 0,
             relro: None,
+            tls: None,
         };
         let anchor = USER_MMAP_START + 15 * USER_MMAP_STRIDE;
         if paging::map_user_range_in(root, anchor, 4096, false, false).is_err() {
@@ -5696,6 +5845,7 @@ pub fn disk_unlink_mmap_self_test() -> bool {
             mappings: [UserMapping::EMPTY; MAX_ELF_SEGMENTS],
             mapping_count: 0,
             relro: None,
+            tls: None,
         };
         let anchor = USER_MMAP_START + 15 * USER_MMAP_STRIDE;
         if paging::map_user_range_in(root, anchor, 4096, false, false).is_err() {
@@ -5741,6 +5891,7 @@ pub fn shared_file_mmap_self_test() -> bool {
         mappings: [UserMapping::EMPTY; MAX_ELF_SEGMENTS],
         mapping_count: 0,
         relro: None,
+        tls: None,
     };
     let anchor = USER_MMAP_START + 15 * USER_MMAP_STRIDE;
     if paging::map_user_range_in(root, anchor, 4096, false, false).is_err() {
@@ -5826,6 +5977,7 @@ pub fn lazy_file_mmap_self_test() -> bool {
         mappings: [UserMapping::EMPTY; MAX_ELF_SEGMENTS],
         mapping_count: 0,
         relro: None,
+        tls: None,
     };
     // Keep a teardown anchor while sparse mapping pages are removed individually.
     let anchor = USER_MMAP_START + 15 * USER_MMAP_STRIDE;
@@ -5912,6 +6064,7 @@ pub fn private_lazy_swap_self_test() -> bool {
         mappings: [UserMapping::EMPTY; MAX_ELF_SEGMENTS],
         mapping_count: 0,
         relro: None,
+        tls: None,
     };
     let anchor = USER_MMAP_START + 15 * USER_MMAP_STRIDE;
     if paging::map_user_range_in(root, anchor, 4096, false, false).is_err() {
@@ -5982,6 +6135,7 @@ pub fn file_mmap_self_test() -> bool {
         mappings: [UserMapping::EMPTY; MAX_ELF_SEGMENTS],
         mapping_count: 0,
         relro: None,
+        tls: None,
     };
     let _ = crate::vfs::seek(file, 3);
     let Some(mapping) = map_file_private(space, 0, file, 0, DATA.len(), false) else {

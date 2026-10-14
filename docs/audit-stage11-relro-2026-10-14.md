@@ -9,10 +9,11 @@ read-only. Address-space write-fault bookkeeping carries the same range, so a
 fork/COW fault cannot re-enable writes to RELRO pages. Relocation by the
 production ASLR delta updates the RELRO range with the load segments.
 
-`PT_DYNAMIC`, `PT_INTERP`, and `PT_TLS` remain rejected. This is intentional:
-the kernel does not yet provide dynamic symbol resolution, shared-library
-ownership, TLS-image allocation, or RELRO relocation sequencing. Accepting
-those headers without those semantics would be unsafe.
+`PT_DYNAMIC` and `PT_INTERP` remain rejected. Static `PT_TLS` is now supported
+by the separate initial-exec TLS path documented in the
+[static TLS audit](audit-stage11-static-tls-2026-10-14.md). Dynamic symbol
+resolution, shared-library ownership, TLS module IDs, and RELRO relocation
+sequencing remain outside the loader contract.
 
 ## Validation
 
@@ -29,5 +30,5 @@ those headers without those semantics would be unsafe.
 ## Limits
 
 The acceptance image uses the existing static ELF fixtures; it does not claim
-dynamic linking, TLS, shared libraries, or physical hardware enforcement of
-page permissions. Those remain explicit follow-up requirements.
+dynamic linking, shared libraries, or physical hardware enforcement of page
+permissions. Those remain explicit follow-up requirements.

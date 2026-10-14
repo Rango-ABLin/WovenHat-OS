@@ -1797,20 +1797,27 @@ freestanding Clippy, and host tests. See [audit](audit-stage11-3-5-2026-09-16.md
 The follow-up ASLR pass now randomizes production ELF, stack and mmap bases
 with a deterministic `qemu-test` switch; see [audit](audit-aslr-2026-09-16.md).
 
-The 2026-10-05 loader-boundary follow-up rejects `PT_INTERP`, `PT_DYNAMIC`,
+The 2026-10-05 loader-boundary follow-up rejected `PT_INTERP`, `PT_DYNAMIC`,
 `PT_TLS`, and `PT_GNU_RELRO` program headers instead of silently accepting
-binaries whose dynamic-linking, TLS, or RELRO semantics are not yet implemented.
-This is a fail-closed production-safety boundary; dynamic relocations, shared
-libraries, TLS image allocation, and RELRO permission transitions remain open.
+binaries whose dynamic-linking, TLS, or RELRO semantics were not implemented
+at that point. This was a fail-closed production-safety boundary; later
+follow-ups narrow the remaining unsupported surface.
 See [audit](audit-stage11-loader-boundary-2026-10-05.md).
 
 The 2026-10-14 RELRO follow-up closes the static RELRO permission transition:
 a single validated `PT_GNU_RELRO` range is protected read-only after loading,
 ASLR relocation carries the range, and COW write-fault bookkeeping refuses to
 reattach write authority to it. Valid/invalid parser cases and the complete
-Stage 11.5 1/2/4-CPU gate passed. Dynamic relocations, shared libraries, TLS
-image allocation, and their physical/hardware qualification remain open. See
+Stage 11.5 1/2/4-CPU gate passed. Dynamic relocations, shared libraries, and
+physical/hardware qualification remain open. See
 the [RELRO audit](audit-stage11-relro-2026-10-14.md).
+
+The 2026-10-14 static TLS follow-up adds a bounded initial-exec `PT_TLS`
+contract: the loader validates and maps one initial TLS image, task context
+switches install its FS base, and fork/exec preserve the ownership and COW
+rules. Dynamic relocations, shared-library TLS, TLS module IDs, multi-thread
+TLS semantics, and physical/hardware qualification remain open. See the
+[static TLS audit](audit-stage11-static-tls-2026-10-14.md).
 
 ## Stage 12.1 — accepted on 2026-09-16
 

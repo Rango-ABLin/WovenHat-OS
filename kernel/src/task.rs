@@ -320,6 +320,7 @@ struct TaskControlBlock {
     entry: Option<fn() -> !>,
     wake_tick: u64,
     user_context: Option<UserTaskContext>,
+    fs_base: u64,
     address_space: Option<paging::AddressSpace>,
     remaining_ticks: u8,
     cpu: usize,
@@ -369,6 +370,7 @@ impl TaskControlBlock {
             entry: None,
             wake_tick: 0,
             user_context: None,
+            fs_base: 0,
             address_space: None,
             remaining_ticks: 0,
             cpu: 0,
@@ -399,6 +401,7 @@ impl TaskControlBlock {
         self.capabilities = CapabilitySet::empty();
         self.capability_lineages = [None; Capability::COUNT];
         self.user_context = None;
+        self.fs_base = 0;
         self.address_space = paging::kernel_address_space();
         self.remaining_ticks = priority.quantum();
         self.migratable = false;
@@ -446,6 +449,7 @@ impl TaskControlBlock {
         self.entry = None;
         self.wake_tick = 0;
         self.user_context = Some(context);
+        self.fs_base = context.fs_base;
         self.address_space = Some(address_space);
         self.remaining_ticks = TaskPriority::NORMAL.quantum();
         self.capabilities = CapabilitySet::userspace();
@@ -484,6 +488,7 @@ impl TaskControlBlock {
         frame: crate::syscall::UserForkFrame,
         address_space: paging::AddressSpace,
         security: ForkSecurityContext,
+        fs_base: u64,
     ) {
         TASK_STACKS[slot].reset_canary();
         self.id = id;
@@ -493,6 +498,7 @@ impl TaskControlBlock {
         self.entry = None;
         self.wake_tick = 0;
         self.user_context = None;
+        self.fs_base = fs_base;
         self.address_space = Some(address_space);
         self.remaining_ticks = TaskPriority::NORMAL.quantum();
         self.capabilities = security.capabilities;
@@ -776,6 +782,7 @@ struct ContextSwitch {
     previous_rsp: *mut u64,
     next_rsp: u64,
     next_address_space: paging::AddressSpace,
+    next_fs_base: u64,
 }
 #[derive(Clone, Copy)]
 struct PagerRequest {
@@ -991,6 +998,7 @@ impl Scheduler {
             previous_rsp,
             next_rsp,
             next_address_space,
+            next_fs_base: self.tasks[next_slot].fs_base,
         })
     }
     fn finalize_switch(&mut self) {
@@ -1225,6 +1233,11 @@ impl Scheduler {
 
 unsafe fn switch_stacks(context_switch: ContextSwitch) {
     gdt::set_privilege_stack(context_switch.next_privilege_stack);
+    // FS is task state, just like the address space.  The scheduler lock is
+    // not held here and interrupts remain disabled across the hand-off.
+    x86_64::registers::model_specific::FsBase::write(x86_64::VirtAddr::new(
+        context_switch.next_fs_base,
+    ));
     paging::switch_to(context_switch.next_address_space);
     unsafe {
         wovenhat_context_switch(context_switch.previous_rsp, context_switch.next_rsp);
@@ -1378,9 +1391,10 @@ pub fn spawn_user_process(
     }
 
     let parent = ProcessId(current_process_id());
-    let context = prepare_user_context(
+    let context = prepare_user_context_with_tls(
         program.image.entry as usize,
         program.image.stack_top as usize,
+        program.tls_base,
     );
     let mut scheduler = SCHEDULER.lock();
     scheduler.reap_dead();
@@ -1466,9 +1480,10 @@ pub fn spawn_user_system_service(
     }
 
     let parent = ProcessId(current_process_id());
-    let context = prepare_user_context(
+    let context = prepare_user_context_with_tls(
         program.image.entry as usize,
         program.image.stack_top as usize,
+        program.tls_base,
     );
     let mut scheduler = SCHEDULER.lock();
     scheduler.reap_dead();
@@ -1538,9 +1553,10 @@ pub fn spawn_multicore_user_process(
     }
 
     let parent = ProcessId(current_process_id());
-    let context = prepare_user_context(
+    let context = prepare_user_context_with_tls(
         program.image.entry as usize,
         program.image.stack_top as usize,
+        program.tls_base,
     );
 
     let result = {
@@ -1630,9 +1646,10 @@ pub fn spawn_pinned_user_process_on(
     }
 
     let parent = ProcessId(current_process_id());
-    let context = prepare_user_context(
+    let context = prepare_user_context_with_tls(
         program.image.entry as usize,
         program.image.stack_top as usize,
+        program.tls_base,
     );
 
     let result = {
@@ -1709,9 +1726,10 @@ pub fn spawn_migratable_user_probe(
     }
 
     let parent = ProcessId(current_process_id());
-    let context = prepare_user_context(
+    let context = prepare_user_context_with_tls(
         program.image.entry as usize,
         program.image.stack_top as usize,
+        program.tls_base,
     );
 
     let mut scheduler = SCHEDULER.lock();
@@ -2242,6 +2260,7 @@ pub fn fork_current(frame: crate::syscall::UserForkFrame) -> Result<ProcessId, P
         parent_cpu,
         parent_migratable,
         parent_affinity,
+        parent_fs_base,
     ) = {
         let scheduler = SCHEDULER.lock();
         let parent_task = &scheduler.tasks[scheduler.current_slot[crate::smp::cpu_index()]];
@@ -2252,6 +2271,7 @@ pub fn fork_current(frame: crate::syscall::UserForkFrame) -> Result<ProcessId, P
         let parent_cpu = parent_task.cpu;
         let parent_migratable = parent_task.migratable;
         let parent_affinity = parent_task.affinity_mask;
+        let parent_fs_base = parent_task.fs_base;
         let processes = process_table_lock();
         let parent = processes
             .iter()
@@ -2268,6 +2288,7 @@ pub fn fork_current(frame: crate::syscall::UserForkFrame) -> Result<ProcessId, P
             parent_cpu,
             parent_migratable,
             parent_affinity,
+            parent_fs_base,
         )
     };
     let source_address_space = parent.address_space.ok_or(ProcessError::Full)?;
@@ -2352,6 +2373,7 @@ pub fn fork_current(frame: crate::syscall::UserForkFrame) -> Result<ProcessId, P
             security_domain,
             sandbox_profile,
         },
+        parent_fs_base,
     );
     // Fork preserves the parent's CPU-placement contract. This keeps pinned
     // service workloads pinned and lets Stage 7.6 multicore processes keep
@@ -2387,9 +2409,10 @@ pub fn fork_current(frame: crate::syscall::UserForkFrame) -> Result<ProcessId, P
 pub fn exec_current(program: userspace::UserProgram) -> ! {
     assert!(program.image.is_valid(), "exec received an invalid image");
     x86_64::instructions::interrupts::disable();
-    let context = prepare_user_context(
+    let context = prepare_user_context_with_tls(
         program.image.entry as usize,
         program.image.stack_top as usize,
+        program.tls_base,
     );
     let new_address_space = program.address_space;
     let task_id = current_task_id();
@@ -2414,6 +2437,7 @@ pub fn exec_current(program: userspace::UserProgram) -> ! {
         );
 
         scheduler.tasks[slot].user_context = Some(context);
+        scheduler.tasks[slot].fs_base = context.fs_base;
         scheduler.tasks[slot].address_space = Some(new_address_space.paging());
         (old_address_space, old_mappings)
     };
@@ -3436,6 +3460,7 @@ pub struct UserTaskContext {
     pub stack_top: u64,
     pub code_segment: u16,
     pub data_segment: u16,
+    pub fs_base: u64,
 }
 
 pub fn prepare_user_context(entry: usize, stack_top: usize) -> UserTaskContext {
@@ -3449,10 +3474,22 @@ pub fn prepare_user_context(entry: usize, stack_top: usize) -> UserTaskContext {
         stack_top: stack_top as u64,
         code_segment: code_segment.0 | 3,
         data_segment: data_segment.0 | 3,
+        fs_base: 0,
     }
 }
 
+pub fn prepare_user_context_with_tls(
+    entry: usize,
+    stack_top: usize,
+    fs_base: u64,
+) -> UserTaskContext {
+    let mut context = prepare_user_context(entry, stack_top);
+    context.fs_base = fs_base;
+    context
+}
+
 fn enter_user_context(context: UserTaskContext) -> ! {
+    x86_64::registers::model_specific::FsBase::write(x86_64::VirtAddr::new(context.fs_base));
     unsafe {
         wovenhat_enter_user_mode(
             context.entry,
