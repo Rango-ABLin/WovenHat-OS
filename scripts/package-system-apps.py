@@ -51,6 +51,14 @@ APPS = (
         "install_path": "/bin/wovenhat-settings",
         "exec": "/bin/wovenhat-settings",
     },
+    {
+        "id": "woven-security",
+        "directory": "woven-security",
+        "binary": "wovenhat-security",
+        "display_name": "WovenSecurity",
+        "install_path": "/bin/wovenhat-security",
+        "exec": "/bin/wovenhat-security",
+    },
 )
 
 

@@ -30,15 +30,20 @@ identity, UTC clock, and compositor display policy without mutating settings or
 requesting privileged authority. Its signed 1/2/4-CPU execution evidence is
 recorded in the Stage 19 WovenSettings audit.
 
+`apps/woven-security` is the sixth increment. It reports bounded process
+identity and security-ledger entries when the existing inspect authority is
+available, without granting or revoking policy. Its signed 1/2/4-CPU execution
+evidence is recorded in the Stage 19 WovenSecurity audit.
+
 `scripts/package-system-apps.py` is the release packaging boundary for these
-five accepted apps. It builds each app in its own workspace, signs the ELF
+six accepted apps. It builds each app in its own workspace, signs the ELF
 with WAPP v1, checks the envelope before publication, and emits hashed package
 and `/share/applications` catalog artifacts in one install-plan manifest. The
 manifest is consumed by the feature-gated multi-package RAM installer; the
 remaining roadmap applications and full GUI integration remain open.
 
 The feature-gated `stage19-app-catalog-test` now exercises the install-plan
-boundary for all five accepted packages together. It verifies each WAPP,
+boundary for all six accepted packages together. It verifies each WAPP,
 rejects a mutation, installs and reads each package back through the VFS,
 passes the bytes through the verified ELF loader, and publishes the matching
 catalog descriptor only after those checks. The 1/2/4-CPU evidence is in the
