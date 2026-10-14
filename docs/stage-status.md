@@ -7,6 +7,24 @@ after the remote-termination cleanup change; all emitted their required pass
 markers and exit 33. See
 [the revalidation audit](audit-stage17-19-revalidation-2026-10-14.md).
 
+The complete Stage 12 acceptance chain was independently rerun on the current
+accepted tree. Stages 12.1 through 12.5 all passed on 1/2/4 CPUs with exit 33;
+the retained evidence directories are `stage12.1-1cpu-1791977944719919100`,
+`stage12.1-2cpu-1791978000197697900`,
+`stage12.1-4cpu-1791978038096642600`,
+`stage12.2-1cpu-1791978076763178400`,
+`stage12.2-2cpu-1791978128405584500`,
+`stage12.2-4cpu-1791978166570188900`,
+`stage12.3-1cpu-1791978204787637600`,
+`stage12.3-2cpu-1791978254549661600`,
+`stage12.3-4cpu-1791978294758980400`,
+`stage12.4-1cpu-1791978335142454100`,
+`stage12.4-2cpu-1791978387714722500`,
+`stage12.4-4cpu-1791978427671708800`,
+`stage12.5-1cpu-1791978468908251500`,
+`stage12.5-2cpu-1791978521938978000`, and
+`stage12.5-4cpu-1791978563395332900`.
+
 ## Host-test boundary repair — 2026-10-14
 
 The freestanding kernel now has an explicit host-test boundary: test builds no
