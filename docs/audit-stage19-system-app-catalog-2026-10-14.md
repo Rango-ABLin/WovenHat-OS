@@ -3,16 +3,17 @@
 ## Scope
 
 The feature-gated `stage19-app-catalog-test` acceptance consumes the output of
-`scripts/package-system-apps.py` and exercises the three accepted external
+`scripts/package-system-apps.py` and exercises the four accepted external
 applications as one install plan:
 
 - WovenCalculator at `/bin/wovenhat-calculator`;
 - WovenTerminal at `/bin/wovenhat-terminal`; and
-- WovenFiles at `/bin/wovenhat-files`.
+- WovenFiles at `/bin/wovenhat-files`; and
+- WovenMonitor at `/bin/wovenhat-monitor`.
 
 Each package is verified as WAPP v1, mutated-package refusal is checked, the
 package is written to and read back from the VFS byte-for-byte, and the
-read-back payload is passed through the normal verified ELF loader. The three
+read-back payload is passed through the normal verified ELF loader. The four
 generated `/share/applications/*.app` descriptors are published only after the
 corresponding package has passed those checks.
 
@@ -20,7 +21,7 @@ corresponding package has passed those checks.
 
 `scripts/test-system-app-catalog-qemu.py` passed sequentially on 1, 2, and 4
 virtual CPUs, each with exit 33 and the marker
-`[S19-APP] three signed applications installed PASS`. Serial and QEMU logs are
+`[S19-APP] four signed applications installed PASS`. Serial and QEMU logs are
 preserved in `audit-artifacts/system-app-catalog-1cpu`,
 `audit-artifacts/system-app-catalog-2cpu`, and
 `audit-artifacts/system-app-catalog-4cpu`.
@@ -37,7 +38,9 @@ unchanged.
 
 ## Limits
 
-This is an explicit integration gate, not normal-boot enablement. The current
-boot image still has no atomic multi-package installer, rollback journal, or
-trusted catalog publication policy. Those are required before system apps can
-be installed in production images. No removable media was modified.
+This catalog gate is separate from the feature-gated production-image boot
+installer. That installer now performs bounded pre-verification, package-first
+publication, and rollback of entries and directories created by the current
+RAM-backed transaction. Persistent-media installation, power-loss recovery,
+key rotation/revocation, and native hardware qualification remain open
+requirements. No removable media was modified.

@@ -26,7 +26,7 @@ current_sources += list((root / 'kernel' / 'src').rglob('*.rs')) + list((root / 
 current_sources += list((root / 'src').rglob('*.rs'))
 current_sources += list((root / 'libwoven' / 'src').rglob('*.rs'))
 current_sources += list((root / 'tools' / 'wapp-packager').rglob('*.rs'))
-for app in ('woven-calculator', 'woven-terminal', 'woven-files'):
+for app in ('woven-calculator', 'woven-terminal', 'woven-files', 'woven-monitor'):
     app_root = root / 'apps' / app
     current_sources += [path for path in app_root.rglob('*') if path.is_file() and path.suffix in {'.rs', '.toml', '.x', '.S'}]
 current_sources += list((root / 'scripts').glob('*.py'))

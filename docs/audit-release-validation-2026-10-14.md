@@ -11,10 +11,10 @@ release compilation, and the release shell smoke test. QEMU runs exited via
 the expected success marker; network runs additionally verified host-forwarded
 UDP and TCP payloads.
 
-The current release chain also passed warning-denying Clippy for all three
+The current release chain also passed warning-denying Clippy for all four
 external system applications, signed catalog acceptance on 1/2/4 CPUs, and
 the normal-boot `system-apps-boot` gate. The packaged release includes the
-three WAPP payloads, catalog descriptors, and complete artifact hashes. The
+four WAPP payloads, catalog descriptors, and complete artifact hashes. The
 final image was built with `system-apps` and an explicit application trust
 public key; its release manifest records `working_tree_dirty=false`.
 

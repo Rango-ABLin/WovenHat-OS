@@ -19,10 +19,10 @@ The default output is `target/system-apps/0.8.0`. Build directories and output
 are ignored artifacts; the manifest is the release evidence that binds the
 source applications to their signed package and catalog bytes.
 
-This does not claim multi-application boot installation. The current kernel
-acceptance ABI embeds one `WOVENHAT_APP_IMAGE` package per Stage 16.1 boot and
-installs it at a test path. A later installer/image integration must consume
-this manifest, install each package at its declared path, verify each WAPP
-signature before publication, and atomically publish the catalog. Until that
-consumer exists, the system-app packaging boundary is production-tested but
-the desktop distribution path remains open.
+The current release image consumes this manifest through the feature-gated
+`system-apps` boot path, which installs accepted packages in RAM after
+signature and loader validation and rolls back entries created by a failed
+transaction. Persistent-media installation, power-loss recovery, key
+rotation/revocation, and update policy remain separate requirements; the Stage
+16.1 acceptance still exercises one package at a time through
+`WOVENHAT_APP_IMAGE`.

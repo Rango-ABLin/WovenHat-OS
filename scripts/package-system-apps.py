@@ -42,6 +42,14 @@ APPS = (
         "install_path": "/bin/wovenhat-files",
         "exec": "/bin/wovenhat-files",
     },
+    {
+        "id": "woven-monitor",
+        "directory": "woven-monitor",
+        "binary": "wovenhat-monitor",
+        "display_name": "WovenMonitor",
+        "install_path": "/bin/wovenhat-monitor",
+        "exec": "/bin/wovenhat-monitor",
+    },
 )
 
 

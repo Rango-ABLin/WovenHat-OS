@@ -49,6 +49,7 @@ def main():
         build_env['WOVENHAT_CALCULATOR_IMAGE'] = str(packages['woven-calculator'])
         build_env['WOVENHAT_TERMINAL_IMAGE'] = str(packages['woven-terminal'])
         build_env['WOVENHAT_FILES_IMAGE'] = str(packages['woven-files'])
+        build_env['WOVENHAT_MONITOR_IMAGE'] = str(packages['woven-monitor'])
         build_env.setdefault('WOVENHAT_APP_TRUSTED_PUBLIC_KEY_HEX', test_public_key)
         feature_arguments = ['--features', 'system-apps']
     cargo_command = ['cargo']
@@ -94,7 +95,7 @@ def main():
                 if process.poll() is not None or time.monotonic() > deadline:
                     raise RuntimeError('Normal boot failed; inspect shell-regression logs')
                 time.sleep(0.1)
-            if args.system_apps and '[APPS] 3 signed applications installed' not in serial.read_text(errors='replace'):
+            if args.system_apps and '[APPS] 4 signed applications installed' not in serial.read_text(errors='replace'):
                 raise RuntimeError('Production system-app catalog was not installed; inspect shell-regression logs')
             time.sleep(1)
             with socket.create_connection(('127.0.0.1', port), timeout=5) as connection:
