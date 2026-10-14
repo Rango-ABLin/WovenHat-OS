@@ -1429,6 +1429,9 @@ fn usage_key(usage: u8, shift: bool) -> Option<Key> {
             if shift { SHIFTED_PUNCTUATION[index] } else { PUNCTUATION[index] }
         }
         0x3a => return Some(Key::F1),
+        0x3b => return Some(Key::F2),
+        0x3c => return Some(Key::F3),
+        0x3d => return Some(Key::F4),
         _ => return None,
     };
     Some(Key::Char(char::from(character)))

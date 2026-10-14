@@ -1856,7 +1856,8 @@ pub fn exit_current_thread(exit_code: i32) -> ! {
     feature = "stage20-10-test",
     feature = "stage20-11-test",
     feature = "stage20-12-test",
-    feature = "stage13-15-test"
+    feature = "stage13-15-test",
+    feature = "stage20-13-test"
 ))]
 pub fn spawn_user_system_service(
     name: &'static str,

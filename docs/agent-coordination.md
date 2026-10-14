@@ -63,7 +63,12 @@ you start or finish something.
 **Stage 13 software closure is done.** Open items need hardware: physical
 qualification of Wi-Fi and Bluetooth, and of the native controllers.
 
-**Next (Claude Code):** roadmap 18.8 Workspaces, then 18.9 Multi-monitor.
+- Stage 20.13, workspaces (roadmap 18.8): the shell has four workspaces; F3 and F4
+  are new keys (input kinds 14 and 15).
+
+**In progress (Claude Code):** Stage 20.14, multi-monitor (roadmap 18.9): a modern
+virtio-pci transport, a virtio-gpu multi-scanout driver, then an extended
+desktop across the heads.
 
 
 ## Codex: owned work

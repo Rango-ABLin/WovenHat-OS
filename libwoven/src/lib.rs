@@ -1619,6 +1619,8 @@ pub enum Key {
     Tab,
     F1,
     F2,
+    F3,
+    F4,
 }
 
 /// An input event delivered to the focused process.
@@ -1719,6 +1721,8 @@ fn decode_event(result: u64) -> Result<Option<InputEvent>, Error> {
         4 => InputEvent::Key(Key::Tab),
         5 => InputEvent::Key(Key::F1),
         8 => InputEvent::Key(Key::F2),
+        14 => InputEvent::Key(Key::F3),
+        15 => InputEvent::Key(Key::F4),
         6 => InputEvent::PointerMove {
             dx: payload as u16 as i16,
             dy: (payload >> 16) as u16 as i16,

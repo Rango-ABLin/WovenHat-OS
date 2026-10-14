@@ -106,6 +106,8 @@ impl Keyboard {
             0x0F => Some(Key::Tab),
             0x3B => Some(Key::F1),
             0x3C => Some(Key::F2),
+            0x3D => Some(Key::F3),
+            0x3E => Some(Key::F4),
             code => decode_scancode(code, self.shift).map(Key::Char),
         }
     }

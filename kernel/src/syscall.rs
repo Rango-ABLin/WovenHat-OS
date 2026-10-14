@@ -2922,6 +2922,8 @@ const INPUT_KIND_BACKSPACE: u64 = 3;
 const INPUT_KIND_TAB: u64 = 4;
 const INPUT_KIND_F1: u64 = 5;
 const INPUT_KIND_F2: u64 = 8;
+const INPUT_KIND_F3: u64 = 14;
+const INPUT_KIND_F4: u64 = 15;
 const INPUT_KIND_POINTER_MOVE: u64 = 6;
 const INPUT_KIND_POINTER_BUTTON: u64 = 7;
 const INPUT_KIND_SCROLL: u64 = 9;
@@ -2942,6 +2944,8 @@ fn encode_input(event: crate::woven_input::Event) -> Option<u64> {
         Event::Key(Key::Tab) => Some(packed(INPUT_KIND_TAB, 0)),
         Event::Key(Key::F1) => Some(packed(INPUT_KIND_F1, 0)),
         Event::Key(Key::F2) => Some(packed(INPUT_KIND_F2, 0)),
+        Event::Key(Key::F3) => Some(packed(INPUT_KIND_F3, 0)),
+        Event::Key(Key::F4) => Some(packed(INPUT_KIND_F4, 0)),
         // dx and dy as two's-complement u16 halves.
         Event::PointerMove { dx, dy } => Some(packed(
             INPUT_KIND_POINTER_MOVE,

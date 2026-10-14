@@ -145,6 +145,8 @@ stage20-10-test = ["qemu-test"]
 stage20-11-test = ["qemu-test"]
 # Login: local accounts with salted SHA-256 PIN hashes, sign-in screen.
 stage20-12-test = ["qemu-test"]
+# Workspaces: switcher, F3/F4, per-workspace windows.
+stage20-13-test = ["qemu-test"]
 stage1-5-test = ["qemu-test"]
 
 [dependencies]

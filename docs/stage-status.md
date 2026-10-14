@@ -1,5 +1,71 @@
 # Stage status
 
+## Stage 20.13 — workspaces (2026-10-15)
+
+Roadmap Stage 18.8, Multiple Workspaces.
+
+**Shell.** There are four workspaces, each with its own windows and
+stacking order.
+- **The switcher.** Four numbered boxes left of the Quick Settings button
+  show them, with the current workspace highlighted.
+- **Switching.** Clicking a box, or pressing F3, switches workspace. F4
+  moves the focused window to the next workspace and follows it.
+- **Per-workspace behaviour.** New windows open on the current workspace.
+  The taskbar's window entries and tiling cover only the current workspace.
+- **Implementation.**
+  - The shell's stack holds only the current workspace's windows.
+  - Switching saves that stack and restores the target's.
+  - A window that closes, or whose owner exits, on a hidden workspace is
+    removed from that workspace's saved stack.
+
+**Keys.** F3 and F4 are new keys through WovenInput: PS/2 scancodes
+0x3D/0x3E and USB usages 0x3C/0x3D. They reach userspace as input kinds 14
+and 15 and libwoven's `Key::F3`/`Key::F4`. The kernel's own consumers
+ignore them.
+
+**USB F2 fix.** The USB keyboard map, from Stage 13.13, also lacked F2,
+which is added.
+
+**Gate changes.**
+- The Stage 20.1 gate now checks the switcher, each box and digit exactly,
+  and keeps checking the bare taskbar on both sides.
+- The Stage 20.12 gate expects the signed-in name left of the switcher.
+
+Gate `[S20.13] workspaces: PASSED`, driven by real i8042 input and checked
+against the kernel's own rendering:
+- Four workspaces, with the first current, and window A opens on it.
+- F3 moves to workspace 2, and A and its taskbar entry disappear.
+- Window B opens on workspace 2.
+- Clicking box 1 brings A back and hides B.
+- F4 moves A to workspace 2 and follows it, with A on top and both listed.
+- F3 moves to workspace 3, which shows neither window.
+- B is killed while hidden; back on workspace 2, only A remains.
+- Killing the shell returns the display.
+
+B lies inside A's shadowed footprint, so the gate judges "B hidden" by
+B's colour being absent and the taskbar listing one window.
+
+**Validation**, in the first worktree on `stage20-13`:
+- **Lint and host tests:** kernel Clippy for production, every Stage 20
+  feature, `stage13-13-test`, `stage13-16-test` and `stage19-12-test`, plus
+  woven-shell and host Clippy, all with warnings denied, pass; the libwoven
+  tests pass.
+- **Gates:** 20.1–20.13 pass on 1/2/4 CPUs, and 13.13 and 13.6 pass on
+  1/2/4 CPUs.
+
+Negative controls, each on 1 CPU with the source restored byte for byte
+afterwards. Each failed the gate as intended:
+- Taskbar entries not filtered by workspace.
+- Saved stack not restored on switching.
+- F4 doing nothing.
+- Switcher clicks ignored.
+- Windows always opening on workspace 1.
+
+Open:
+- **No transition animation.** Workspace transitions are not animated yet.
+- **No overview.** There is no workspace overview.
+- **Fixed count.** There are always four workspaces.
+
 ## Stage 13.16 — tablets, pens, touch and game controllers (2026-10-14)
 
 HID devices that describe their own reports now work.

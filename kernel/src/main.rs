@@ -1549,8 +1549,8 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
             // userspace read(0, ...) syscall and make the shell appear hung.
             if !userspace_foreground {
                 if let Some(key) = keyboard::poll() {
-                    if matches!(key, keyboard::Key::F2) {
-                        // F2 has no use in the kernel's own desktop.
+                    if matches!(key, keyboard::Key::F2 | keyboard::Key::F3 | keyboard::Key::F4) {
+                        // F2-F4 have no use in the kernel's own desktop.
                     } else if matches!(key, keyboard::Key::F1) {
                         desktop_active = !desktop_active;
                         if desktop_active {
@@ -1566,7 +1566,9 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
                             keyboard::Key::Enter => gui::InputEvent::Key('\n'),
                             keyboard::Key::Backspace => gui::InputEvent::Key('\u{8}'),
                             keyboard::Key::Tab => gui::InputEvent::Key('\t'),
-                            keyboard::Key::F1 | keyboard::Key::F2 => unreachable!(),
+                            keyboard::Key::F1 | keyboard::Key::F2 | keyboard::Key::F3 | keyboard::Key::F4 => {
+                                unreachable!()
+                            }
                         };
                         desktop.handle(&event);
                         console.render_desktop(&desktop);
@@ -3539,6 +3541,15 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         serial::write_line(format_args!("[S1-5] storage journal: PASSED"));
         qemu_test_exit_success();
     }
+    #[cfg(feature = "stage20-13-test")]
+    {
+        if !stage20_13_self_test() {
+            serial::write_line(format_args!("[S20.13] workspaces: FAILED"));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!("[S20.13] workspaces: PASSED"));
+        qemu_test_exit_success();
+    }
     #[cfg(feature = "stage20-12-test")]
     {
         if !stage20_12_self_test() {
@@ -5225,7 +5236,8 @@ fn stage16_1_self_test() -> bool {
     feature = "stage20-10-test",
     feature = "stage20-11-test",
     feature = "stage20-12-test",
-    feature = "stage13-15-test"
+    feature = "stage13-15-test",
+    feature = "stage20-13-test"
 ))]
 const HELLO_GUI_IMAGE: &[u8] = include_bytes!(env!("WOVENHAT_HELLO_GUI_IMAGE"));
 
@@ -5398,7 +5410,8 @@ fn stage13_15_self_test() -> bool {
     feature = "stage20-10-test",
     feature = "stage20-11-test",
     feature = "stage20-12-test",
-    feature = "stage13-15-test"
+    feature = "stage13-15-test",
+    feature = "stage20-13-test"
 ))]
 fn spawn_hello_gui(
     image: &[u8],
@@ -5440,7 +5453,8 @@ fn spawn_hello_gui(
     feature = "stage20-10-test",
     feature = "stage20-11-test",
     feature = "stage20-12-test",
-    feature = "stage13-15-test"
+    feature = "stage13-15-test",
+    feature = "stage20-13-test"
 ))]
 fn wait_hello_gui(pid: task::ProcessId) -> Option<(task::ProcessId, Result<i32, task::WaitError>)> {
     let start = timer::ticks();
@@ -5466,9 +5480,186 @@ fn wait_hello_gui(pid: task::ProcessId) -> Option<(task::ProcessId, Result<i32, 
     feature = "stage20-9-test",
     feature = "stage20-10-test",
     feature = "stage20-11-test",
-    feature = "stage20-12-test"
+    feature = "stage20-12-test",
+    feature = "stage20-13-test"
 ))]
 const WOVEN_SHELL_IMAGE: &[u8] = include_bytes!(env!("WOVENHAT_SHELL_IMAGE"));
+
+/// Stage 20.13 acceptance: workspaces. With real i8042 input the kernel
+/// checks, against its own computation of every pixel it samples:
+/// - the switcher shows four workspaces with the first current, and window A
+///   opens there;
+/// - F3 switches to workspace 2: A and its taskbar entry disappear;
+/// - window B opens on workspace 2;
+/// - clicking switcher box 1 brings A back and hides B;
+/// - F4 moves A to workspace 2 and follows it: A and B both show;
+/// - F3 to workspace 3 hides both; B is killed there, and back on workspace
+///   2 only A remains.
+#[cfg(feature = "stage20-13-test")]
+fn stage20_13_self_test() -> bool {
+    use crate::display::{blend_pixel, rgb};
+
+    const WALLPAPER_TOP: u32 = rgb(18, 42, 74);
+    const WALLPAPER_BOTTOM: u32 = rgb(64, 28, 88);
+    const WHITE: u32 = rgb(255, 255, 255);
+    const RED: u32 = rgb(200, 60, 60);
+    const BLUE: u32 = rgb(60, 60, 200);
+    const TASKBAR: u32 = rgb(20, 24, 32);
+    const ENTRY_ACTIVE: u32 = rgb(70, 120, 210);
+    const ENTRY_INACTIVE: u32 = rgb(44, 52, 68);
+    const F3: u8 = 0x3d;
+    const F4: u8 = 0x3e;
+
+    fn step(name: &str, ok: bool) -> bool {
+        serial::write_line(format_args!("[S20.13] {} {}", name, if ok { "PASS" } else { "FAIL" }));
+        ok
+    }
+    fn until(limit: u64, condition: impl Fn() -> bool) -> bool {
+        let start = timer::ticks();
+        loop {
+            if condition() {
+                return true;
+            }
+            if timer::ticks().wrapping_sub(start) > limit {
+                return false;
+            }
+            task::yield_now();
+        }
+    }
+    fn wallpaper(x: i32, y: i32, height: i32) -> u32 {
+        let span = (height - 1).max(1);
+        let t = (y.clamp(0, span) * 255 / span) as u8;
+        let base = blend_pixel(WALLPAPER_BOTTOM, WALLPAPER_TOP, t);
+        if x % 32 == 0 || y % 32 == 0 {
+            blend_pixel(WHITE, base, 28)
+        } else {
+            base
+        }
+    }
+    fn packet(dx: i16, screen_dy: i16, left: bool) -> bool {
+        let dy = -screen_dy;
+        let flags = 0x08 | u8::from(left) | if dx < 0 { 0x10 } else { 0 } | if dy < 0 { 0x20 } else { 0 };
+        [flags, dx as u8, dy as u8].into_iter().all(mouse::loopback)
+    }
+    fn move_by(mut dx: i32, mut dy: i32) -> bool {
+        while dx != 0 || dy != 0 {
+            let (sx, sy) = (dx.clamp(-100, 100), dy.clamp(-100, 100));
+            if !packet(sx as i16, sy as i16, false) {
+                return false;
+            }
+            dx -= sx;
+            dy -= sy;
+        }
+        true
+    }
+    fn click() -> bool {
+        packet(0, 0, true) && packet(0, 0, false)
+    }
+    fn keys(codes: &[u8]) -> bool {
+        codes.iter().all(|&code| mouse::keyboard_loopback(code))
+    }
+
+    let installed = vfs::create_read_only("/bin/hello-gui", HELLO_GUI_IMAGE).is_ok();
+    let capabilities = capability::CapabilitySet::only(capability::Capability::Console)
+        .with(capability::Capability::DisplayIo)
+        .with(capability::Capability::InputIo)
+        .with(capability::Capability::Ipc);
+    let Some(program) = userspace::load_elf_with_argv(WOVEN_SHELL_IMAGE, &["/bin/woven-shell"]) else {
+        return step("shell image loads", false);
+    };
+    let Ok((shell, _, _)) = task::spawn_user_system_service("woven-shell", program, capabilities) else {
+        return step("shell spawned", false);
+    };
+    if !step(
+        "shell took the display",
+        installed && until(3000, || compositor::holder() == Some(shell.as_u64()) && compositor::is_presenting()),
+    ) {
+        return false;
+    }
+    let Some((width, height)) = compositor::dimensions() else {
+        return step("desktop geometry", false);
+    };
+    let (width, height) = (width as i32, height as i32);
+    let top = height - 24;
+    // Switcher boxes, left of the Quick Settings button.
+    let qs_x = width - (8 * crate::font::ADVANCE + 6) - 5 * (16 + 4);
+    let box_x = |index: i32| qs_x - 6 - (4 * 14 - 2) + index * 14;
+    let current = move |index: i32| {
+        (0..4).all(|other| {
+            let expected = if other == index { ENTRY_ACTIVE } else { ENTRY_INACTIVE };
+            compositor::pixel(box_x(other) + 1, top + 5) == Ok(expected)
+        })
+    };
+    let wall = move |x: i32, y: i32| compositor::pixel(x, y) == Ok(wallpaper(x, y, height));
+    // The first window entry's left edge: an entry, or bare taskbar.
+    let taskbar = move |x: i32, y: i32| blend_pixel(TASKBAR, wallpaper(x, y, height), 216);
+    let no_entry = move || compositor::pixel(57, top + 5) == Ok(taskbar(57, top + 5));
+    // The second entry slot (80 wide, 4 apart): only one window listed.
+    let one_entry = move || !no_entry() && compositor::pixel(141, top + 5) == Ok(taskbar(141, top + 5));
+    // B lies inside A's shadowed footprint, so with A showing a hidden B is
+    // judged by its colour being gone and by the taskbar listing one window.
+    let (a_x, a_y, b_x, b_y) = (45, 45, 162, 122);
+    let b_hidden = move || compositor::pixel(b_x, b_y) != Ok(BLUE) && one_entry();
+    // Both windows listed on the current workspace.
+    let two_entries = move || {
+        matches!(compositor::pixel(141, top + 5), Ok(ENTRY_ACTIVE | ENTRY_INACTIVE)) && !no_entry()
+    };
+
+    if !step("four workspaces, the first current", until(1000, || current(0))) {
+        return false;
+    }
+    let client = capability::CapabilitySet::only(capability::Capability::Console).with(capability::Capability::Ipc);
+    let shell_arg = alloc::format!("{}", shell.as_u64());
+    let Some(_alpha) = spawn_hello_gui(HELLO_GUI_IMAGE, &["/bin/hello-gui", "--desktop-client", &shell_arg, "a"], Some(client)) else {
+        return step("application A spawned", false);
+    };
+    if !step("window A opens on workspace 1", until(2000, || compositor::pixel(a_x, a_y) == Ok(RED) && !no_entry())) {
+        return false;
+    }
+    let switched = keys(&[F3]) && until(1000, || current(1) && wall(a_x, a_y) && no_entry());
+    if !step("F3: workspace 2 is current; A and its entry are gone", switched) {
+        return false;
+    }
+    let Some(beta) = spawn_hello_gui(HELLO_GUI_IMAGE, &["/bin/hello-gui", "--desktop-client", &shell_arg, "b"], Some(client)) else {
+        return step("application B spawned", false);
+    };
+    if !step(
+        "window B opens on workspace 2, A stays hidden",
+        until(2000, || compositor::pixel(b_x, b_y) == Ok(BLUE) && wall(a_x, a_y)),
+    ) {
+        return false;
+    }
+    let (px, py) = (width / 2, height / 2);
+    let clicked = move_by(box_x(0) + 2 - px, top + 8 - py)
+        && click()
+        && until(1000, || current(0) && compositor::pixel(a_x, a_y) == Ok(RED) && b_hidden());
+    if !step("clicking box 1 brings A back and hides B", clicked) {
+        return false;
+    }
+    let moved = keys(&[F4])
+        && until(1000, || current(1) && compositor::pixel(a_x, a_y) == Ok(RED) && two_entries());
+    if !step("F4 moves A to workspace 2 and follows: A on top, both listed", moved) {
+        return false;
+    }
+    let away = keys(&[F3]) && until(1000, || current(2) && wall(a_x, a_y) && wall(b_x, b_y) && no_entry());
+    if !step("F3: workspace 3 shows neither", away) {
+        return false;
+    }
+    let killed = task::kill_process(beta.as_u64(), 9).is_ok() && until(1000, || task::process_exited(beta));
+    let _ = task::wait_process(beta.as_u64());
+    // Workspace 3 -> 4 -> 1 -> 2.
+    let back = killed
+        && keys(&[F3, F3, F3])
+        && until(1000, || current(1) && compositor::pixel(a_x, a_y) == Ok(RED) && b_hidden());
+    if !step("B closed while hidden; back on workspace 2 only A remains", back) {
+        return false;
+    }
+    if task::kill_process(shell.as_u64(), 9).is_err() || !until(1000, || task::process_exited(shell)) {
+        return step("shell killed", false);
+    }
+    let _ = task::wait_process(shell.as_u64());
+    step("display returned to the terminal", compositor::holder().is_none() && !compositor::is_presenting())
+}
 
 /// Stage 20.12 acceptance: signing in.
 ///
@@ -5640,7 +5831,9 @@ fn stage20_12_self_test() -> bool {
     }
     // lin's name sits left of the Quick Settings button, on the taskbar.
     let button = (width - 54 - 5 * 20, top + 4);
-    let name_x = button.0 - 6 - crate::font::text_width("lin") as i32;
+    // Left of the workspace switcher (Stage 20.13), itself 6 left of the
+    // Quick Settings button.
+    let name_x = button.0 - 6 - (4 * 14 - 2) - 6 - crate::font::text_width("lin") as i32;
     let taskbar = move |x: i32, y: i32| blend_pixel(TASKBAR, wallpaper(x, y, height), 216);
     let name_shown = || {
         let mut mask = Surface::new(18, 7);
@@ -8284,10 +8477,15 @@ fn stage20_1_self_test() -> bool {
     const QS_FILL: u32 = rgb(44, 52, 68);
     let clock_width = 8 * crate::font::ADVANCE + 6;
     let qs_x = width - clock_width - 5 * (16 + 4);
+    // The workspace switcher (Stage 20.13): four 12-pixel boxes, 2 apart,
+    // ending 6 left of the Quick Settings button.
+    let ws_x = qs_x - 6 - (4 * 14 - 2);
     let bar = region(0, top, width, 1, |_, _| ACCENT)
-        && region(60, top + 1, qs_x - 60, TASKBAR_HEIGHT - 1, |x, y| {
+        && region(60, top + 1, ws_x - 60, TASKBAR_HEIGHT - 1, |x, y| {
             taskbar(x, y, height)
         })
+        && region(ws_x, top + 1, qs_x - ws_x, 3, |x, y| taskbar(x, y, height))
+        && region(ws_x, top + 20, qs_x - ws_x, TASKBAR_HEIGHT - 20, |x, y| taskbar(x, y, height))
         && region(qs_x + 16, top + 1, width - 80 - (qs_x + 16), TASKBAR_HEIGHT - 1, |x, y| {
             taskbar(x, y, height)
         })
@@ -8302,6 +8500,22 @@ fn stage20_1_self_test() -> bool {
         _ => QS_FILL,
     });
     if !step("Quick Settings button and its label", qs) {
+        return false;
+    }
+    // Workspace boxes: the first current (active fill), digits 1-4, the
+    // gaps and the space before the button bare taskbar.
+    const WS_ACTIVE: u32 = rgb(70, 120, 210);
+    let switcher = (0..4).all(|index: i32| {
+        let box_x = ws_x + index * 14;
+        let digit = [b'1' + index as u8];
+        let mask = text_mask(12, 16, 3, 5, core::str::from_utf8(&digit).unwrap_or("?"));
+        let fill = if index == 0 { WS_ACTIVE } else { QS_FILL };
+        region(box_x, top + 4, 12, 16, |x, y| match mask.pixel(x - box_x, y - (top + 4)) {
+            Some(WHITE) => WHITE,
+            _ => fill,
+        }) && (index == 3 || region(box_x + 12, top + 4, 2, 16, |x, y| taskbar(x, y, height)))
+    }) && region(ws_x + 54, top + 4, qs_x - (ws_x + 54), 16, |x, y| taskbar(x, y, height));
+    if !step("workspace switcher, workspace 1 current", switcher) {
         return false;
     }
     // The start button, rendered here with the kernel's own font.

@@ -99,6 +99,14 @@
 //! account's PIN. Every process still runs with the same kernel credentials:
 //! per-user sessions need the kernel to start processes as another user.
 //!
+//! # Workspaces
+//!
+//! Four workspaces, each with its own windows and stacking order. The
+//! switcher left of the Quick Settings button shows them, the current one
+//! highlighted; clicking one, or F3, switches. F4 moves the focused window
+//! to the next workspace and follows it. Windows open on the current
+//! workspace; tiling and the taskbar's window entries cover only it.
+//!
 //! # WovenStart
 //!
 //! The start button, or F1, opens the launcher: the applications listed in
@@ -177,6 +185,10 @@ const SHADOW: u32 = rgb(0, 0, 0);
 const CLOSE_SIZE: i32 = 10;
 const CLOSE_FILL: u32 = rgb(170, 60, 60);
 const MAX_WINDOWS: usize = 4;
+/// Workspaces, and the switcher boxes that show them.
+const WORKSPACES: usize = 4;
+const WORKSPACE_BOX: i32 = 12;
+const WORKSPACE_GAP: i32 = 2;
 /// New windows cascade from here, this far apart.
 const CASCADE_ORIGIN: i32 = 40;
 const CASCADE_STEP: i32 = 24;
@@ -418,6 +430,8 @@ struct Window {
     title_length: usize,
     /// Opacity, 0 to 255: animated from 0 as the window opens.
     fade: Spring,
+    /// The workspace the window belongs to.
+    workspace: usize,
     /// Until this tick, a resize has been requested and the owner may be
     /// swapping surfaces: a failed blit of the old one does not mean it
     /// exited.
@@ -740,9 +754,13 @@ struct Desktop {
     /// The time on screen, `None` if the clock could not be read.
     time: Option<DateTime>,
     windows: [Option<Window>; MAX_WINDOWS],
-    /// Window slots bottom to top; the last is focused.
+    /// The current workspace's window slots bottom to top; the last is
+    /// focused.
     stack: [usize; MAX_WINDOWS],
     stacked: usize,
+    /// The current workspace, and every other workspace's saved stack.
+    workspace: usize,
+    saved: [([usize; MAX_WINDOWS], usize); WORKSPACES],
     /// Windows opened so far, for the cascade.
     opened: i32,
     tray: [Option<TrayIcon>; MAX_TRAY],
@@ -798,6 +816,8 @@ impl Desktop {
         windows: [None; MAX_WINDOWS],
         stack: [0; MAX_WINDOWS],
         stacked: 0,
+        workspace: 0,
+        saved: [([0; MAX_WINDOWS], 0); WORKSPACES],
         opened: 0,
         tray: [None; MAX_TRAY],
         toast: None,
@@ -1016,7 +1036,7 @@ impl Desktop {
             }
             Key::F1 => return self.toggle_launcher(),
             // Tiling waits until the launcher closes.
-            Key::Char(_) | Key::F2 => {}
+            Key::Char(_) | Key::F2 | Key::F3 | Key::F4 => {}
         }
         before.union(self.panel_area())
     }
@@ -1044,11 +1064,56 @@ impl Desktop {
     }
 
     /// Open windows in slot order: the taskbar's entries.
+    /// The current workspace's windows, by slot.
     fn entries(&self) -> impl Iterator<Item = (usize, &Window)> {
+        let workspace = self.workspace;
         self.windows
             .iter()
             .enumerate()
             .filter_map(|(slot, window)| window.as_ref().map(|window| (slot, window)))
+            .filter(move |(_, window)| window.workspace == workspace)
+    }
+
+    /// The switcher box for workspace `index`, left of the Quick Settings
+    /// button.
+    fn workspace_area(&self, index: usize) -> Area {
+        let span = WORKSPACES as i32 * (WORKSPACE_BOX + WORKSPACE_GAP) - WORKSPACE_GAP;
+        let x = self.qs_button().x - 6 - span + index as i32 * (WORKSPACE_BOX + WORKSPACE_GAP);
+        Area::new(x, self.taskbar_top() + 4, WORKSPACE_BOX, START_HEIGHT as i32)
+    }
+
+    /// Show workspace `target`: save the current stack, restore the target's.
+    fn switch_workspace(&mut self, target: usize) -> Area {
+        if target >= WORKSPACES || target == self.workspace {
+            return Area::new(0, 0, 0, 0);
+        }
+        let _ = self.close_panels();
+        self.drag = None;
+        self.saved[self.workspace] = (self.stack, self.stacked);
+        (self.stack, self.stacked) = self.saved[target];
+        self.workspace = target;
+        let digit = [b'1' + target as u8];
+        log(&[b"woven-shell: workspace ", &digit]);
+        let _ = self.retile();
+        self.screen()
+    }
+
+    /// Move the focused window to the next workspace and follow it.
+    fn move_focused_to_next_workspace(&mut self) -> Area {
+        let Some(slot) = self.focused() else { return Area::new(0, 0, 0, 0) };
+        let target = (self.workspace + 1) % WORKSPACES;
+        // Off this workspace's stack, onto the top of the target's.
+        self.stacked -= 1;
+        let (stack, count) = &mut self.saved[target];
+        if *count < MAX_WINDOWS {
+            stack[*count] = slot;
+            *count += 1;
+        }
+        if let Some(window) = self.windows[slot].as_mut() {
+            window.workspace = target;
+        }
+        let _ = self.retile();
+        self.switch_workspace(target)
     }
 
     /// The desktop layer: wallpaper and taskbar, with its start button,
@@ -1082,10 +1147,19 @@ impl Desktop {
         let clock_x = self.width - CLOCK_MARGIN - font::text_width(text) as i32;
         canvas.draw_text(clock_x, self.text_y(), text, TEXT);
 
-        // The signed-in account's name, left of the Quick Settings button.
+        // The workspace switcher, left of the Quick Settings button.
+        for index in 0..WORKSPACES {
+            let area = self.workspace_area(index);
+            let fill = if index == self.workspace { ENTRY_ACTIVE } else { ENTRY_INACTIVE };
+            canvas.fill_rect(area.x, area.y, area.width as usize, area.height as usize, fill);
+            let digit = [b'1' + index as u8];
+            canvas.draw_text(area.x + 3, self.text_y(), core::str::from_utf8(&digit).unwrap_or("?"), TEXT);
+        }
+
+        // The signed-in account's name, left of the workspace switcher.
         if let Some(account) = self.session.and_then(|index| self.accounts[index]) {
             let name = core::str::from_utf8(account.name()).unwrap_or("?");
-            let x = self.qs_button().x - 6 - font::text_width(name) as i32;
+            let x = self.workspace_area(0).x - 6 - font::text_width(name) as i32;
             canvas.draw_text(x, self.text_y(), name, TEXT);
         }
 
@@ -1605,6 +1679,7 @@ impl Desktop {
             title,
             title_length,
             fade,
+            workspace: self.workspace,
             resizing_until: 0,
         };
         self.windows[slot] = Some(window);
@@ -1700,9 +1775,17 @@ impl Desktop {
         let Some(window) = self.windows[slot].take() else {
             return Area::new(0, 0, 0, 0);
         };
-        if let Some(position) = self.stack[..self.stacked].iter().position(|&s| s == slot) {
-            self.stack[position..self.stacked].rotate_left(1);
-            self.stacked -= 1;
+        if window.workspace == self.workspace {
+            if let Some(position) = self.stack[..self.stacked].iter().position(|&s| s == slot) {
+                self.stack[position..self.stacked].rotate_left(1);
+                self.stacked -= 1;
+            }
+        } else {
+            let (stack, count) = &mut self.saved[window.workspace];
+            if let Some(position) = stack[..*count].iter().position(|&s| s == slot) {
+                stack[position..*count].rotate_left(1);
+                *count -= 1;
+            }
         }
         if self.drag.is_some_and(|(dragged, _, _)| dragged == slot) {
             self.drag = None;
@@ -1796,6 +1879,9 @@ impl Desktop {
             }
             InputEvent::PointerButton { button: 0, pressed: true } => {
                 let (x, y) = self.pointer;
+                if let Some(index) = (0..WORKSPACES).find(|&index| self.workspace_area(index).contains(x, y)) {
+                    return self.switch_workspace(index);
+                }
                 if self.start_area().contains(x, y) {
                     return self.toggle_launcher();
                 }
@@ -1879,6 +1965,8 @@ impl Desktop {
             InputEvent::Key(key) if self.launcher_open => self.launcher_key(key),
             InputEvent::Key(Key::F1) => self.toggle_launcher(),
             InputEvent::Key(Key::F2) => self.toggle_tiling(),
+            InputEvent::Key(Key::F3) => self.switch_workspace((self.workspace + 1) % WORKSPACES),
+            InputEvent::Key(Key::F4) => self.move_focused_to_next_workspace(),
             InputEvent::Key(Key::Char(character)) if character.is_ascii() => {
                 if let Some(window) = self.focused().and_then(|slot| self.windows[slot]) {
                     let _ = libwoven::message_send(window.owner, &[character as u8]);
