@@ -1635,6 +1635,35 @@ pub enum InputEvent {
         button: u8,
         pressed: bool,
     },
+    /// Wheel motion; positive is away from the user.
+    Scroll {
+        vertical: i16,
+    },
+    /// An absolute pointer position (tablets): each axis 0..=32767.
+    PointerAbsolute {
+        x: u16,
+        y: u16,
+    },
+    /// A touch contact at 0..=32767; `active` false is its lift.
+    Touch {
+        contact: u8,
+        x: u16,
+        y: u16,
+        active: bool,
+    },
+    /// Pen position 0..=32767 and pressure 0..=1023.
+    Pen {
+        x: u16,
+        y: u16,
+        pressure: u16,
+        touching: bool,
+    },
+    /// A game-controller button (its number; 0 or 1), axis (0x100 + axis;
+    /// -32768..=32767) or hat (0x200; position or -1).
+    GameController {
+        control: u16,
+        value: i16,
+    },
 }
 
 /// Take the next input event of any kind, if any. Same authority as
@@ -1698,6 +1727,21 @@ fn decode_event(result: u64) -> Result<Option<InputEvent>, Error> {
             button: payload as u8,
             pressed: (payload >> 8) & 1 != 0,
         },
+        9 => InputEvent::Scroll { vertical: payload as u16 as i16 },
+        10 => InputEvent::PointerAbsolute { x: payload as u16, y: (payload >> 16) as u16 },
+        11 => InputEvent::Touch {
+            contact: payload as u8,
+            active: (payload >> 8) & 1 != 0,
+            x: (payload >> 16) as u16,
+            y: (payload >> 32) as u16,
+        },
+        12 => InputEvent::Pen {
+            x: payload as u16,
+            y: (payload >> 16) as u16,
+            pressure: ((payload >> 32) & 0x3ff) as u16,
+            touching: (payload >> 48) & 1 != 0,
+        },
+        13 => InputEvent::GameController { control: payload as u16, value: (payload >> 16) as u16 as i16 },
         _ => return Err(Error::Failed),
     }))
 }

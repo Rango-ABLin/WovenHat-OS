@@ -147,7 +147,14 @@ def main():
                 if not injected and READY in log:
                     injected = True
                     if not args.no_input:
-                        inject(qmp)
+                        try:
+                            inject(qmp)
+                        except OSError:
+                            # The guest may finish, and QEMU exit, before the
+                            # last event is sent; anything else is an error.
+                            time.sleep(1)
+                            if process.poll() is None:
+                                raise
                 time.sleep(0.2)
         except Exception as error:  # noqa: BLE001 - recorded as a failure
             errors.append(f'QMP: {error}')

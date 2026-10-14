@@ -1,5 +1,6 @@
-// Keyboard and pointer input are production; other event producers belong to
-// the Stage 13.7 probe.
+// Keyboard, pointer, scroll, touch, pen and game-controller events are
+// production (Stage 13.16); the device-kind table belongs to the Stage 13.7
+// probe.
 use crate::irq_lock::IrqMutex as Mutex;
 
 const INPUT_QUEUE_CAPACITY: usize = 128;
@@ -38,25 +39,32 @@ pub enum Event {
         button: u8,
         pressed: bool,
     },
-    #[cfg(feature = "stage13-7-test")]
+    /// An absolute pointer position (tablets), each axis 0..=32767 across
+    /// the device's range.
+    PointerAbsolute {
+        x: u16,
+        y: u16,
+    },
+    /// Wheel motion; positive is away from the user.
     Scroll {
         vertical: i16,
     },
-    #[cfg(feature = "stage13-7-test")]
+    /// A touch contact, positions 0..=32767; `active` false is its lift.
     Touch {
         contact: u8,
         x: u16,
         y: u16,
         active: bool,
     },
-    #[cfg(feature = "stage13-7-test")]
+    /// Pen position 0..=32767 and pressure 0..=1023.
     Pen {
         x: u16,
         y: u16,
         pressure: u16,
         touching: bool,
     },
-    #[cfg(feature = "stage13-7-test")]
+    /// A game-controller button (its number, value 0 or 1), axis
+    /// (0x100 + axis, value -32768..=32767) or hat (0x200, position or -1).
     GameController {
         control: u16,
         value: i16,

@@ -56,12 +56,15 @@ you start or finish something.
   `Permission::Audio` 16; syscalls 203–205 (206 is reserved for
   recording); `Action::AudioPlay` in the ledger.
 
-**In progress, Stage 13 closure** (do not start these without
-coordinating here):
-1. **13.16:** touchpad, touchscreen, pen and game-controller events out of
-   the 13.7 probe.
+- Stage 13.16, report-protocol HID (`kernel/src/hid.rs`): tablets, pens,
+  touch screens and game controllers. Input kinds 9–13 were added to the
+  input ABI.
 
-**Next after that:** roadmap 18.8 Workspaces and 18.9 Multi-monitor.
+**Stage 13 software closure is done.** Open items need hardware: physical
+qualification of Wi-Fi and Bluetooth, and of the native controllers.
+
+**Next (Claude Code):** roadmap 18.8 Workspaces, then 18.9 Multi-monitor.
+
 
 ## Codex: owned work
 

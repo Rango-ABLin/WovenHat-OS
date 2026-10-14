@@ -1,5 +1,30 @@
 # Stage status
 
+## Stage 13.16 — tablets, pens, touch and game controllers (2026-10-14)
+
+HID devices that describe their own reports now work.
+- **Parser and decoder.** A pure report-descriptor parser and decoder
+  (`kernel/src/hid.rs`) covers pointers, tablets, pens, touch screens and
+  game controllers.
+- **xHCI.** It fetches and parses each such device's descriptor.
+- **Userspace.** Scroll, absolute-pointer, touch, pen and game-controller
+  events reach userspace as input kinds 9–13.
+
+**Evidence.**
+- **Host tests:** pass against real descriptors for a tablet, a game pad,
+  a pen and a touch screen. They caught a lost-axis bug.
+- **Gate `[S13.16] report-protocol HID input: PASSED`:** QEMU's USB tablet
+  delivers exact absolute positions, a click and wheel steps on 1/2/4
+  CPUs.
+- **Negative controls:** all four failed the gate as intended, one after a
+  harness gap was closed.
+- **Regression:** 13.5, 13.6, 13.7, 13.13 and 19.12 pass on 1/2/4 CPUs.
+
+See the [Stage 13.16 audit](audit-stage13-16-hid-reports-2026-10-14.md).
+
+**Open.** Multi-application devices, a virtio-input driver, and physical
+qualification of digitizers and controllers.
+
 ## Stage 13.15 — WovenAudio playback for userspace (2026-10-14)
 
 Applications can now play sound.

@@ -2924,6 +2924,11 @@ const INPUT_KIND_F1: u64 = 5;
 const INPUT_KIND_F2: u64 = 8;
 const INPUT_KIND_POINTER_MOVE: u64 = 6;
 const INPUT_KIND_POINTER_BUTTON: u64 = 7;
+const INPUT_KIND_SCROLL: u64 = 9;
+const INPUT_KIND_POINTER_ABSOLUTE: u64 = 10;
+const INPUT_KIND_TOUCH: u64 = 11;
+const INPUT_KIND_PEN: u64 = 12;
+const INPUT_KIND_GAME_CONTROLLER: u64 = 13;
 
 fn encode_input(event: crate::woven_input::Event) -> Option<u64> {
     use crate::woven_input::{Event, Key};
@@ -2946,10 +2951,25 @@ fn encode_input(event: crate::woven_input::Event) -> Option<u64> {
             INPUT_KIND_POINTER_BUTTON,
             u64::from(button) | (u64::from(pressed) << 8),
         )),
-        // Other device events exist only in the Stage 13.7 probe build and
-        // have no userspace encoding yet.
-        #[cfg(feature = "stage13-7-test")]
-        _ => None,
+        Event::Scroll { vertical } => Some(packed(INPUT_KIND_SCROLL, u64::from(vertical as u16))),
+        Event::PointerAbsolute { x, y } => Some(packed(
+            INPUT_KIND_POINTER_ABSOLUTE,
+            u64::from(x) | (u64::from(y) << 16),
+        )),
+        // contact | active << 8 | x << 16 | y << 32
+        Event::Touch { contact, x, y, active } => Some(packed(
+            INPUT_KIND_TOUCH,
+            u64::from(contact) | (u64::from(active) << 8) | (u64::from(x) << 16) | (u64::from(y) << 32),
+        )),
+        // x | y << 16 | pressure (10 bits) << 32 | touching << 48
+        Event::Pen { x, y, pressure, touching } => Some(packed(
+            INPUT_KIND_PEN,
+            u64::from(x) | (u64::from(y) << 16) | (u64::from(pressure & 0x3ff) << 32) | (u64::from(touching) << 48),
+        )),
+        Event::GameController { control, value } => Some(packed(
+            INPUT_KIND_GAME_CONTROLLER,
+            u64::from(control) | (u64::from(value as u16) << 16),
+        )),
     }
 }
 

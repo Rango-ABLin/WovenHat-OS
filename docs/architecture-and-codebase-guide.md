@@ -96,6 +96,48 @@ evidence is recorded in the [Stage 14.5D revalidation audit](audit-stage14-5d-re
 It qualifies the QEMU virtio boundary only; native NIC/radio and physical-link
 behavior remain hardware work.
 
+## Stage 13.16 report-protocol HID: tablets, pens, touch, game controllers (2026-10-14)
+
+`kernel/src/hid.rs` is a pure module (no allocation, no kernel state) that
+host tests compile directly (`tests/hid_reports.rs`).
+
+**`parse`.** It reads a HID report descriptor into a bounded `Layout`:
+- the top-level application: mouse, pointer, pen, touch screen, touchpad,
+  joystick or game pad;
+- up to 48 input fields, each with its usage, report ID, bit offset and
+  size, logical range, and whether it is relative.
+
+It handles report IDs, usage ranges, push and pop, padding, and long
+items. A malformed descriptor, or one with an application it doesn't
+decode, is refused.
+
+**`Decoder`.** It turns reports into `Input` events and keeps the state it
+needs to report only changes:
+- relative and absolute pointer motion;
+- wheel;
+- button edges;
+- pen position, pressure and contact;
+- per-contact touch, with each contact's lift;
+- game-controller buttons, axes and hat.
+
+Positions are scaled to 0..=32767 and pressure to 0..=1023.
+
+**xHCI.**
+- `parse_hid_interface` reads the report descriptor's length from the HID
+  class descriptor.
+- A HID interface that isn't a boot keyboard or mouse has its report
+  descriptor fetched (GET_DESCRIPTOR, report type, addressed to the
+  interface) and parsed. It is kept as an input device only if the layout
+  decodes.
+- Reports up to 64 bytes are copied.
+- The `usb-input` worker builds one `Decoder` per report device when it
+  starts, and maps decoded inputs to WovenInput events, still outside the
+  controller lock.
+
+**WovenInput and userspace.** `Scroll`, `PointerAbsolute`, `Touch`, `Pen`
+and `GameController` are production events, encoded to userspace as input
+kinds 9–13 and decoded by libwoven's `InputEvent`.
+
 ## Stage 13.15 WovenAudio playback for userspace (2026-10-14)
 
 When bring-up starts `hda0`, it calls `hda::start_output("hda0")`.

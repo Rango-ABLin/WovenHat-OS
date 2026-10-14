@@ -67,6 +67,8 @@ mod gpt;
 mod graphics;
 mod gui;
 mod hal;
+#[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
+mod hid;
 #[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test", feature = "stage13-8-test"))]
 mod hda;
 mod heap;
@@ -3453,6 +3455,15 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     }
     // Before the 13.12 block: 13.13 and 13.14 builds also enable
     // stage13-12-test, and each block ends the boot.
+    #[cfg(feature = "stage13-16-test")]
+    {
+        if !xhci::report_device_self_test() {
+            serial::write_line(format_args!("[S13.16] report-protocol HID input: FAILED"));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!("[S13.16] report-protocol HID input: PASSED"));
+        qemu_test_exit_success();
+    }
     #[cfg(feature = "stage13-15-test")]
     {
         if !stage13_15_self_test() {
