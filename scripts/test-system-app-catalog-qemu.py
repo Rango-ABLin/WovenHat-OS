@@ -39,6 +39,7 @@ def main() -> int:
     env["WOVENHAT_SETTINGS_IMAGE"] = str(output / by_id["woven-settings"]["package"])
     env["WOVENHAT_SECURITY_IMAGE"] = str(output / by_id["woven-security"]["package"])
     env["WOVENHAT_EDITOR_IMAGE"] = str(output / by_id["woven-editor"]["package"])
+    env["WOVENHAT_IMAGES_IMAGE"] = str(output / by_id["woven-images"]["package"])
     env.setdefault("CARGO_BUILD_BUILD_DIR", str(root / ".cargo-build"))
     env.setdefault("CARGO_TARGET_DIR", str(root / "target"))
     boot = subprocess.run(
@@ -71,7 +72,7 @@ def main() -> int:
         print(f"QEMU timeout; evidence: {out}")
         return 1
     text = serial.read_text(errors="replace") if serial.exists() else ""
-    if code != 33 or "[S19-APP] seven signed applications installed PASS" not in text:
+    if code != 33 or "[S19-APP] eight signed applications installed PASS" not in text:
         print(f"system app catalog failed (exit {code}); evidence: {out}")
         return 1
     print(f"system app catalog: PASS ({args.cpus} CPU, exit 33). Evidence: {out}")
