@@ -20,11 +20,11 @@ def main():
     out.mkdir(parents=True, exist_ok=True)
     report = []
 
-    def run(name, command):
+    def run(name, command, run_cwd=root):
         print(f'[{name}]', flush=True)
         start = time.monotonic()
         flags = subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
-        result = subprocess.run(command, cwd=root, text=True, stdout=subprocess.PIPE,
+        result = subprocess.run(command, cwd=run_cwd, text=True, stdout=subprocess.PIPE,
                                 stderr=subprocess.STDOUT, creationflags=flags)
         (out / f'{name}.log').write_text(result.stdout, encoding='utf-8')
         print(result.stdout, flush=True)
@@ -54,12 +54,29 @@ def main():
         run(f'{suite}-4-release', [sys.executable, f'scripts/test-{suite}-qemu.py', '--cpus', '4', '--release'] + options)
     run('build-release', ['cargo', 'build', '--release'])
     run('shell-smoke', [sys.executable, 'scripts/test-shell-qemu.py'] + options)
+    app_directories = ('woven-calculator', 'woven-terminal', 'woven-files')
+    for app in app_directories:
+        run(
+            f'lint-app-{app}',
+            ['cargo', 'clippy', '--release', '--target', 'x86_64-unknown-none', '--', '-D', 'warnings'],
+            root / 'apps' / app,
+        )
+    for cpus in (1, 2, 4):
+        run(
+            f'system-app-catalog-{cpus}',
+            [sys.executable, 'scripts/test-system-app-catalog-qemu.py', '--cpus', str(cpus)] + options,
+        )
     image = Path(subprocess.check_output(['cargo', 'run', '--quiet', '--release', '--', '--print-image'], cwd=root, text=True).strip())
     sources = [root / name for name in ('Cargo.toml', 'Cargo.lock', 'kernel/Cargo.toml', 'build.rs', 'rust-toolchain.toml', '.cargo/config.toml')]
     sources += sorted((root / 'kernel' / 'src').rglob('*.rs'))
     sources += sorted((root / 'kernel' / 'src').rglob('*.S'))
     sources += sorted((root / 'src').rglob('*.rs'))
-    sources += sorted((root / 'scripts').glob('test-*.py'))
+    sources += sorted((root / 'libwoven' / 'src').rglob('*.rs'))
+    sources += sorted((root / 'tools' / 'wapp-packager').rglob('*.rs'))
+    for app in app_directories:
+        app_root = root / 'apps' / app
+        sources += sorted(path for path in app_root.rglob('*') if path.is_file() and path.suffix in {'.rs', '.toml', '.x', '.S'})
+    sources += sorted((root / 'scripts').glob('*.py'))
     manifest = dict(image=str(image), image_sha256=hashlib.sha256(image.read_bytes()).hexdigest(),
                     checks_sha256=hashlib.sha256((out / 'results.json').read_bytes()).hexdigest(),
                     sources={str(path.relative_to(root)): hashlib.sha256(path.read_bytes()).hexdigest() for path in sources})

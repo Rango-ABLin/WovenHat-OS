@@ -43,8 +43,12 @@ required for production deployment.
 The repository release chain passed on the current tree, including warning-
 denying kernel/host Clippy, all host integration tests, 1/2/4-CPU debug
 memory/storage/network gates, legacy PIC, 4-CPU release gates, release build,
-and shell smoke. The durable report and image manifest are recorded by the
-[release validation audit](audit-release-validation-2026-10-14.md). This is
+and shell smoke. It now also runs app-specific warning-denying Clippy and the
+signed three-application catalog gate on 1/2/4 CPUs. The release ZIP includes
+the signed WAPP packages, catalog descriptors, and complete SHA-256 inventory.
+The durable report and image manifest are recorded by the
+[release validation audit](audit-release-validation-2026-10-14.md) and the
+[system-app release audit](audit-release-system-apps-2026-10-14.md). This is
 software/QEMU qualification only; native hardware and destructive media limits
 remain explicit.
 

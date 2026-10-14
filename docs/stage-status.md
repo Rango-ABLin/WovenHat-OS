@@ -23,6 +23,13 @@ release compilation, and shell smoke. See the
 This is software/QEMU qualification only; native hardware and destructive USB
 media limits remain open.
 
+The authoritative release chain now includes app-specific Clippy, the signed
+three-application catalog gate on 1/2/4 CPUs, and release packaging of WAPP
+payloads, catalog descriptors, and per-artifact hashes. See the
+[system-app release audit](audit-release-system-apps-2026-10-14.md). The
+release image still does not claim ordinary-boot multi-package installation or
+physical-media qualification.
+
 Stage 14.5D was rerun on 1/2/4 CPUs. DHCP, DNS, ICMP, host-verified UDP/TCP,
 SMP/TLB, and firewall transport/path checks passed with exit 33. See the
 [Stage 14.5D revalidation audit](audit-stage14-5d-revalidation-2026-10-14.md).

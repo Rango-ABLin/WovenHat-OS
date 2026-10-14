@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 import shutil
 import subprocess
+import sys
 import zipfile
 
 root = Path(__file__).resolve().parents[1]
@@ -22,7 +23,13 @@ if sha(report) != manifest['checks_sha256']:
     raise SystemExit('Validation report changed; rerun the release gate.')
 current_sources = [root / name for name in ('Cargo.toml', 'Cargo.lock', 'kernel/Cargo.toml', 'build.rs', 'rust-toolchain.toml', '.cargo/config.toml')]
 current_sources += list((root / 'kernel' / 'src').rglob('*.rs')) + list((root / 'kernel' / 'src').rglob('*.S'))
-current_sources += list((root / 'src').rglob('*.rs')) + list((root / 'scripts').glob('test-*.py'))
+current_sources += list((root / 'src').rglob('*.rs'))
+current_sources += list((root / 'libwoven' / 'src').rglob('*.rs'))
+current_sources += list((root / 'tools' / 'wapp-packager').rglob('*.rs'))
+for app in ('woven-calculator', 'woven-terminal', 'woven-files'):
+    app_root = root / 'apps' / app
+    current_sources += [path for path in app_root.rglob('*') if path.is_file() and path.suffix in {'.rs', '.toml', '.x', '.S'}]
+current_sources += list((root / 'scripts').glob('*.py'))
 if {str(path.relative_to(root)) for path in current_sources} != set(manifest['sources']):
     raise SystemExit('Source file inventory changed; rerun the release gate.')
 for name, digest in manifest['sources'].items():
@@ -37,15 +44,29 @@ packaged = out / 'wovenhat-os-0.8.0-uefi.img'
 shutil.copyfile(image, packaged)
 shutil.copyfile(root / 'docs' / 'release-0.8.0.md', out / 'RELEASE-NOTES.md')
 shutil.copyfile(report, out / 'results.json')
+system_apps = root / 'target' / 'system-apps' / '0.8.0'
+if not (system_apps / 'manifest.json').is_file():
+    subprocess.run([sys.executable, str(root / 'scripts' / 'package-system-apps.py'), '--version', '0.8.0'], cwd=root, check=True)
+release_apps = out / 'system-apps'
+if release_apps.exists():
+    shutil.rmtree(release_apps)
+shutil.copytree(system_apps, release_apps)
 manifest['image'] = packaged.name
 manifest['base_commit'] = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=root, text=True).strip()
 manifest['working_tree_dirty'] = bool(subprocess.check_output(['git', 'status', '--porcelain'], cwd=root, text=True).strip())
+manifest['system_apps_manifest'] = 'system-apps/manifest.json'
+manifest['system_apps_manifest_sha256'] = sha(release_apps / 'manifest.json')
 (out / 'manifest.json').write_text(json.dumps(manifest, indent=2), encoding='utf-8')
-(out / 'SHA256SUMS').write_text(f"{sha(packaged)}  {packaged.name}\n", encoding='utf-8')
+release_files = [packaged, out / 'RELEASE-NOTES.md', out / 'results.json', out / 'manifest.json']
+release_files += sorted(path for path in release_apps.rglob('*') if path.is_file())
+(out / 'SHA256SUMS').write_text(
+    ''.join(f"{sha(path)}  {path.relative_to(out).as_posix()}\n" for path in release_files),
+    encoding='utf-8',
+)
 archive = out / 'wovenhat-os-0.8.0.zip'
 with zipfile.ZipFile(archive, 'w', zipfile.ZIP_DEFLATED) as bundle:
-    for name in (packaged.name, 'RELEASE-NOTES.md', 'results.json', 'manifest.json', 'SHA256SUMS'):
-        bundle.write(out / name, name)
+    for path in release_files + [out / 'SHA256SUMS']:
+        bundle.write(path, path.relative_to(out).as_posix())
     for log in sorted(validation.glob('*.log')):
         bundle.write(log, 'validation/' + log.name)
 print('Packaged validated release:', archive)
