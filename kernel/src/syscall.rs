@@ -335,6 +335,13 @@ pub enum Number {
     SecretRead = 128,
     /// secret handle -> 0 or ERROR
     SecretRevoke = 129,
+    /// own handle, packed destination and opacity (x | y<<24 | opacity<<56,
+    /// x and y 24-bit signed, bits 48..56 zero), packed source region -> 0 or
+    /// ERROR
+    GraphicsCompositorBlendRegion = 130,
+    /// owner's handle, packed destination and opacity, packed source region
+    /// -> 0 or ERROR
+    GraphicsCompositorBlendRegionShared = 131,
 }
 
 pub fn entry_address() -> u64 {
@@ -2436,6 +2443,12 @@ pub extern "C" fn wovenhat_syscall_dispatch(
         value if value == Number::SecretStore as u64 => sys_secret_store(arg0, arg1),
         value if value == Number::SecretRead as u64 => sys_secret_read(arg0, arg1, arg2),
         value if value == Number::SecretRevoke as u64 => sys_secret_revoke(arg0),
+        value if value == Number::GraphicsCompositorBlendRegion as u64 => {
+            sys_compositor_blend_region(arg0, arg1, arg2, false)
+        }
+        value if value == Number::GraphicsCompositorBlendRegionShared as u64 => {
+            sys_compositor_blend_region(arg0, arg1, arg2, true)
+        }
         _ => u64::MAX,
     };
 
@@ -2631,6 +2644,45 @@ fn sys_compositor_blit_region(handle: u64, destination: u64, region: u64, shared
         handle
     };
     crate::compositor::blit_region_for(pid, handle, region, x, y, shared)
+        .map_or(SYSCALL_ERROR, |_| 0)
+}
+
+/// Sign-extend the low 24 bits of `value`.
+const fn signed_24(value: u64) -> i32 {
+    ((value as u32) << 8) as i32 >> 8
+}
+
+/// Blend only a region of a surface onto the compositor with uniform
+/// opacity. Three registers carry four values, so the destination word packs
+/// x and y as 24-bit signed fields (ample for a compositor bounded at
+/// 1920x1200) with the opacity in its top byte. The byte between them is
+/// reserved and must be zero. Same authority as the region blit.
+fn sys_compositor_blend_region(handle: u64, destination: u64, region: u64, shared: bool) -> u64 {
+    if (destination >> 48) & 0xff != 0 {
+        return SYSCALL_ERROR;
+    }
+    let x = signed_24(destination);
+    let y = signed_24(destination >> 24);
+    let opacity = (destination >> 56) as u8;
+    let region = crate::display::Rect::new(
+        (region & 0xffff) as i32,
+        ((region >> 16) & 0xffff) as i32,
+        ((region >> 32) & 0xffff) as usize,
+        ((region >> 48) & 0xffff) as usize,
+    );
+    if !display_authorized() {
+        return SYSCALL_ERROR;
+    }
+    let pid = crate::task::current_process_id();
+    let handle = if shared {
+        crate::user_graphics::Handle::from_u64(handle)
+    } else {
+        let Some(handle) = caller_surface(handle) else {
+            return SYSCALL_ERROR;
+        };
+        handle
+    };
+    crate::compositor::blend_region_for(pid, handle, region, x, y, opacity, shared)
         .map_or(SYSCALL_ERROR, |_| 0)
 }
 

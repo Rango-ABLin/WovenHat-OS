@@ -32,6 +32,10 @@
 //! icon goes away when its surface does, normally because its owner exited.
 //! Keystrokes go to the focused window's owner as one-byte messages.
 //!
+//! Every window casts a soft shadow of two translucent bands, offset down and
+//! right; the focused window sits higher, so its shadow falls further and
+//! darker. Shadows stay off the taskbar.
+//!
 //! A window is moved by dragging its title bar. Its close control sends the
 //! owner `WCLS`, a request: the window goes when the owner releases its
 //! surface, so an application can finish first, or decline.
@@ -101,6 +105,14 @@ const TITLE_HEIGHT: i32 = 14;
 const TITLE_ACTIVE: u32 = rgb(70, 120, 210);
 const TITLE_INACTIVE: u32 = rgb(60, 66, 80);
 const MAX_TITLE: usize = 24;
+/// Shadow bands, outermost first, as (offset, opacity) of black over what
+/// lies beneath. The focused window's shadow is deeper: its elevation.
+const FOCUSED_SHADOW: [(i32, u8); 2] = [(8, 24), (4, 48)];
+const UNFOCUSED_SHADOW: [(i32, u8); 2] = [(4, 20), (2, 40)];
+/// The furthest any shadow band reaches beyond its window.
+const SHADOW_REACH: i32 = 8;
+const SHADOW: u32 = rgb(0, 0, 0);
+
 /// The close control: a square at the right of the title bar.
 const CLOSE_SIZE: i32 = 10;
 const CLOSE_FILL: u32 = rgb(170, 60, 60);
@@ -299,6 +311,13 @@ impl Window {
         self.title_area().union(self.body())
     }
 
+    /// Everything the window and its deepest shadow can cover: what to
+    /// repaint when it opens, closes, moves or changes elevation.
+    fn footprint(&self) -> Area {
+        let frame = self.frame();
+        frame.union(Area::new(frame.x + SHADOW_REACH, frame.y + SHADOW_REACH, frame.width, frame.height))
+    }
+
     /// The close control, or nothing on a window too narrow to carry one.
     fn close_area(&self) -> Area {
         if self.width < 4 * CLOSE_SIZE {
@@ -446,6 +465,38 @@ struct Painter<'a> {
 }
 
 impl Painter<'_> {
+    /// Blend `color` over `area` with uniform `opacity`, in chunks no larger
+    /// than the staging surface.
+    fn blend(&mut self, area: Area, color: u32, opacity: u8) {
+        let mut y = area.y;
+        while y < area.y + area.height {
+            let height = (area.y + area.height - y).min(TILE_HEIGHT as i32);
+            let mut x = area.x;
+            while x < area.x + area.width {
+                let width = (area.x + area.width - x).min(TILE_WIDTH as i32);
+                let Some(mut canvas) =
+                    Canvas::new(self.tile, x, y, width as usize, height as usize)
+                else {
+                    fail(12);
+                };
+                canvas.fill_rect(x, y, width as usize, height as usize, color);
+                let region = Region {
+                    x: 0,
+                    y: 0,
+                    width: width as u16,
+                    height: height as u16,
+                };
+                if self.staging.write_canvas(&canvas).is_err()
+                    || self.staging.present_region_blended(region, x, y, opacity).is_err()
+                {
+                    fail(13);
+                }
+                x += width;
+            }
+            y += height;
+        }
+    }
+
     /// Render `area` with `render` in chunks no larger than the staging
     /// surface, uploading and blitting each.
     fn draw(&mut self, area: Area, render: impl Fn(&mut Canvas<'_>)) {
@@ -814,8 +865,18 @@ impl Desktop {
         }
 
         let focused = self.focused();
+        let above_taskbar = Area::new(0, 0, self.width, self.taskbar_top());
         for &slot in &self.stack[..self.stacked] {
             let Some(window) = &self.windows[slot] else { continue };
+            let bands = if Some(slot) == focused { FOCUSED_SHADOW } else { UNFOCUSED_SHADOW };
+            let frame = window.frame();
+            for (offset, opacity) in bands {
+                let band = Area::new(frame.x + offset, frame.y + offset, frame.width, frame.height);
+                let part = band.intersect(area).intersect(above_taskbar);
+                if !part.is_empty() {
+                    painter.blend(part, SHADOW, opacity);
+                }
+            }
             let title = window.title_area().intersect(area);
             if !title.is_empty() {
                 let active = Some(slot) == focused;
@@ -858,9 +919,9 @@ impl Desktop {
         if self.focused() == Some(slot) {
             return Area::new(0, 0, 0, 0);
         }
-        let previous = self.focused().and_then(|old| self.windows[old]).map(|w| w.frame());
+        let previous = self.focused().and_then(|old| self.windows[old]).map(|w| w.footprint());
         self.raise(slot);
-        let current = self.windows[slot].map(|w| w.frame()).unwrap_or(Area::new(0, 0, 0, 0));
+        let current = self.windows[slot].map(|w| w.footprint()).unwrap_or(Area::new(0, 0, 0, 0));
         current.union(previous.unwrap_or(Area::new(0, 0, 0, 0))).union(self.taskbar())
     }
 
@@ -892,11 +953,11 @@ impl Desktop {
         title[..title_length].copy_from_slice(&message[16..16 + title_length]);
         let window = Window { owner, token, x, y, width, height, title, title_length };
         self.windows[slot] = Some(window);
-        let previous = self.focused().and_then(|old| self.windows[old]).map(|w| w.frame());
+        let previous = self.focused().and_then(|old| self.windows[old]).map(|w| w.footprint());
         self.stack[self.stacked] = slot;
         self.stacked += 1;
         log(&[b"woven-shell: window opened: ", &title[..title_length]]);
-        window.frame().union(previous.unwrap_or(empty)).union(self.taskbar())
+        window.footprint().union(previous.unwrap_or(empty)).union(self.taskbar())
     }
 
     /// Remove window `slot`. Returns the area to repaint.
@@ -912,9 +973,9 @@ impl Desktop {
             self.drag = None;
         }
         log(&[b"woven-shell: window closed: ", &window.title[..window.title_length]]);
-        // The newly focused window's title changes colour too.
-        let next = self.focused().and_then(|top| self.windows[top]).map(|w| w.title_area());
-        window.frame().union(next.unwrap_or(Area::new(0, 0, 0, 0))).union(self.taskbar())
+        // The newly focused window's title and shadow change too.
+        let next = self.focused().and_then(|top| self.windows[top]).map(|w| w.footprint());
+        window.footprint().union(next.unwrap_or(Area::new(0, 0, 0, 0))).union(self.taskbar())
     }
 
     fn handle_message(&mut self, sender: process::Id, message: &[u8]) -> Area {
@@ -1029,11 +1090,11 @@ impl Desktop {
         let empty = Area::new(0, 0, 0, 0);
         let Some((slot, grab_x, grab_y)) = self.drag else { return empty };
         let Some(window) = self.windows[slot].as_mut() else { return empty };
-        let before = window.frame();
+        let before = window.footprint();
         let top = self.height - TASKBAR_HEIGHT;
         window.x = (self.pointer.0 - grab_x).clamp(0, (self.width - window.width).max(0));
         window.y = (self.pointer.1 - grab_y).clamp(TITLE_HEIGHT, (top - window.height).max(TITLE_HEIGHT));
-        let after = window.frame();
+        let after = window.footprint();
         if after == before { empty } else { before.union(after) }
     }
 

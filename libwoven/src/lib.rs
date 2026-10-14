@@ -273,6 +273,8 @@ pub mod syscall {
     pub const SECRET_STORE: u64 = 127;
     pub const SECRET_READ: u64 = 128;
     pub const SECRET_REVOKE: u64 = 129;
+    pub const GRAPHICS_COMPOSITOR_BLEND_REGION: u64 = 130;
+    pub const GRAPHICS_COMPOSITOR_BLEND_REGION_SHARED: u64 = 131;
     pub const MESSAGE_SEND: u64 = 11;
     pub const MESSAGE_RECEIVE: u64 = 12;
 
@@ -617,6 +619,31 @@ pub mod syscall {
 
     /// # Safety
     /// Must be called from WovenHat userspace.
+    pub unsafe fn graphics_compositor_blend_region(
+        handle: u64,
+        x: i32,
+        y: i32,
+        opacity: u8,
+        region: u64,
+        shared: bool,
+    ) -> u64 {
+        let number = if shared {
+            GRAPHICS_COMPOSITOR_BLEND_REGION_SHARED
+        } else {
+            GRAPHICS_COMPOSITOR_BLEND_REGION
+        };
+        unsafe {
+            invoke(
+                number,
+                handle,
+                super::pack_blend_destination(x, y, opacity),
+                region,
+            )
+        }
+    }
+
+    /// # Safety
+    /// Must be called from WovenHat userspace.
     pub unsafe fn clock_read() -> u64 {
         unsafe { invoke(CLOCK_READ, 0, 0, 0) }
     }
@@ -812,6 +839,30 @@ impl GraphicsSurface {
         check(result).map(|_| ())
     }
 
+    /// Blend only `region` of this surface onto the compositor with uniform
+    /// `opacity`, its top-left at `(x, y)`. Lease holder only. `x` and `y`
+    /// travel as 24-bit signed values, far beyond any screen.
+    pub fn present_region_blended(
+        &self,
+        region: Region,
+        x: i32,
+        y: i32,
+        opacity: u8,
+    ) -> Result<(), Error> {
+        // SAFETY: integer-only call carrying the surface's own handle.
+        let result = unsafe {
+            syscall::graphics_compositor_blend_region(
+                self.handle,
+                x,
+                y,
+                opacity,
+                region.pack(),
+                false,
+            )
+        };
+        check(result).map(|_| ())
+    }
+
     /// Upload a whole canvas to the top-left of this surface.
     pub fn write_canvas(&self, canvas: &Canvas<'_>) -> Result<(), Error> {
         let (Ok(width), Ok(height)) = (u16::try_from(canvas.width), u16::try_from(canvas.height))
@@ -890,6 +941,28 @@ impl Region {
             | (self.width as u64) << 32
             | (self.height as u64) << 48
     }
+}
+
+/// The region blend's destination word: `x` and `y` as 24-bit two's
+/// complement fields, the opacity in the top byte, the byte between zero.
+pub const fn pack_blend_destination(x: i32, y: i32, opacity: u8) -> u64 {
+    (x as u32 as u64 & 0xff_ffff) | ((y as u32 as u64 & 0xff_ffff) << 24) | ((opacity as u64) << 56)
+}
+
+/// Blend only `region` of another process's shared surface with uniform
+/// `opacity`. Same rules as [`compositor_blit_region_shared`].
+pub fn compositor_blend_region_shared(
+    handle: u64,
+    region: Region,
+    x: i32,
+    y: i32,
+    opacity: u8,
+) -> Result<(), Error> {
+    // SAFETY: integer-only call.
+    let result = unsafe {
+        syscall::graphics_compositor_blend_region(handle, x, y, opacity, region.pack(), true)
+    };
+    check(result).map(|_| ())
 }
 
 /// The process that owns the surface `token` names. A token packs its
@@ -1840,6 +1913,21 @@ mod tests {
                 scale: 4
             }
         );
+    }
+
+    #[test]
+    fn blend_destination_packs_signed_coordinates_and_opacity() {
+        assert_eq!(
+            pack_blend_destination(5, 7, 0x80),
+            5 | (7 << 24) | (0x80 << 56)
+        );
+        // Negative coordinates are 24-bit two's complement; the reserved
+        // byte stays zero.
+        let packed = pack_blend_destination(-1, -2, 255);
+        assert_eq!(packed & 0xff_ffff, 0xff_ffff);
+        assert_eq!((packed >> 24) & 0xff_ffff, 0xff_fffe);
+        assert_eq!((packed >> 48) & 0xff, 0);
+        assert_eq!(packed >> 56, 255);
     }
 
     #[test]
