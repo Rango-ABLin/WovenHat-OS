@@ -1,5 +1,24 @@
 # Stage status
 
+## Stage 20.14a — two monitors through virtio-gpu (2026-10-15)
+
+Roadmap Stage 18.9, first part.
+- **Transport.** A modern virtio 1.x PCI transport, `virtio_pci.rs`.
+- **Driver.** A virtio-gpu 2D driver with several scanouts,
+  `virtio_gpu.rs`. It creates, backs, binds, transfers and flushes one
+  resource per head.
+
+**Evidence.**
+- **Gate `[S20.14] two monitors: PASSED`:** two heads show exact kernel
+  patterns, and host captures of both heads match pixel for pixel on
+  1/2/4 CPUs.
+- **Negative controls:** all four failed the gate as intended.
+
+See the [Stage 20.14a audit](audit-stage20-14a-monitors-2026-10-15.md).
+
+**Next: 20.14b.** The compositor will present the desktop across the
+heads, and the shell will use the second monitor.
+
 ## Stage 20.13 — workspaces (2026-10-15)
 
 Roadmap Stage 18.8, Multiple Workspaces.

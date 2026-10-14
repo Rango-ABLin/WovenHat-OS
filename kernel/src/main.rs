@@ -121,6 +121,10 @@ mod vfs;
 #[cfg(feature = "stage12-1-test")]
 mod vfs_api;
 mod virtio_net;
+#[cfg(feature = "stage20-14-test")]
+mod virtio_pci;
+#[cfg(feature = "stage20-14-test")]
+mod virtio_gpu;
 // `storage_manager` seals records through this key vault, so the Stage 12.5
 // gate needs the module even though it does not run the Stage 12.3 self-test.
 #[cfg(feature = "stage13-10-test")]
@@ -3539,6 +3543,15 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
             qemu_test_exit_failure();
         }
         serial::write_line(format_args!("[S1-5] storage journal: PASSED"));
+        qemu_test_exit_success();
+    }
+    #[cfg(feature = "stage20-14-test")]
+    {
+        if !virtio_gpu::self_test() {
+            serial::write_line(format_args!("[S20.14] two monitors: FAILED"));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!("[S20.14] two monitors: PASSED"));
         qemu_test_exit_success();
     }
     #[cfg(feature = "stage20-13-test")]

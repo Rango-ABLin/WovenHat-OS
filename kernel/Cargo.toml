@@ -147,6 +147,8 @@ stage20-11-test = ["qemu-test"]
 stage20-12-test = ["qemu-test"]
 # Workspaces: switcher, F3/F4, per-workspace windows.
 stage20-13-test = ["qemu-test"]
+# Two monitors: modern virtio-pci transport and a multi-scanout virtio-gpu.
+stage20-14-test = ["qemu-test"]
 stage1-5-test = ["qemu-test"]
 
 [dependencies]
