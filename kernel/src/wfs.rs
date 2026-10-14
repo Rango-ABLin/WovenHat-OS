@@ -1738,6 +1738,108 @@ pub fn rename_vfs_path(_old: &str, _new: &str, _now: u64) -> Result<(), Error> {
     Err(Error::Device)
 }
 
+#[cfg(feature = "stage15-2-test")]
+const MAX_WFS_IMPORT_DEPTH: usize = 16;
+
+#[cfg(feature = "stage15-2-test")]
+const MAX_WFS_IMPORT_INODES: usize = 256;
+
+#[cfg(feature = "stage15-2-test")]
+fn append_import_path<'a>(
+    parent: &str,
+    name: &str,
+    output: &'a mut [u8; crate::config::MAX_PATH_SIZE],
+) -> Result<&'a str, ()> {
+    let needed = parent
+        .len()
+        .checked_add(1)
+        .and_then(|length| length.checked_add(name.len()))
+        .ok_or(())?;
+    if needed > output.len() {
+        return Err(());
+    }
+    output[..parent.len()].copy_from_slice(parent.as_bytes());
+    output[parent.len()] = b'/';
+    output[parent.len() + 1..needed].copy_from_slice(name.as_bytes());
+    core::str::from_utf8(&output[..needed]).map_err(|_| ())
+}
+
+#[cfg(feature = "stage15-2-test")]
+fn import_wfs_directory<D: crate::block::BlockDevice>(
+    volume: &mut Volume<D>,
+    inode: u64,
+    mount_path: &str,
+    depth: usize,
+    visited: &mut [u64; MAX_WFS_IMPORT_INODES],
+    visited_len: &mut usize,
+    buffer: &mut [u8; MAX_FILE_SIZE],
+) -> Result<usize, ()> {
+    if depth > MAX_WFS_IMPORT_DEPTH
+        || visited[..*visited_len].contains(&inode)
+        || *visited_len == visited.len()
+    {
+        return Err(());
+    }
+    visited[*visited_len] = inode;
+    *visited_len += 1;
+    let node = volume.inode(inode).map_err(|_| ())?;
+    if node.kind != KIND_DIR {
+        return Err(());
+    }
+    let view = volume.read_dir(inode).map_err(|_| ())?;
+    let mut imported = 0usize;
+    for entry in view.entries.iter().filter(|entry| entry.inode != 0) {
+        let name = entry.name_str();
+        if name.is_empty()
+            || name.len() > MAX_NAME
+            || name == "."
+            || name == ".."
+            || name.contains('/')
+            || name.contains('\\')
+        {
+            return Err(());
+        }
+        let mut path = [0u8; crate::config::MAX_PATH_SIZE];
+        let path = append_import_path(mount_path, name, &mut path)?;
+        let child = volume.inode(entry.inode).map_err(|_| ())?;
+        match child.kind {
+            KIND_DIR => {
+                match crate::vfs::mkdir(path) {
+                    Ok(()) | Err(crate::vfs::Error::AlreadyExists) => {
+                        if crate::vfs::stat(path).map(|stat| stat.kind)
+                            != Ok(crate::vfs::NodeKind::Directory)
+                        {
+                            return Err(());
+                        }
+                    }
+                    Err(_) => return Err(()),
+                }
+                imported += import_wfs_directory(
+                    volume,
+                    entry.inode,
+                    path,
+                    depth + 1,
+                    visited,
+                    visited_len,
+                    buffer,
+                )?;
+            }
+            KIND_FILE => {
+                let length = volume.read_file(entry.inode, buffer).map_err(|_| ())?;
+                if length > crate::vfs::NODE_CAPACITY {
+                    continue;
+                }
+                match crate::vfs::create_read_only(path, &buffer[..length]) {
+                    Ok(()) | Err(crate::vfs::Error::AlreadyExists) => imported += 1,
+                    Err(_) => return Err(()),
+                }
+            }
+            _ => return Err(()),
+        }
+    }
+    Ok(imported)
+}
+
 /// Format the ATA primary master as WovenFS.
 ///
 /// Destructive, and gated behind the Stage 15.2 acceptance feature so it can
@@ -1774,45 +1876,27 @@ pub fn mount_ata_into_vfs() -> MountOutcome {
             return MountOutcome::Failed;
         }
         let root = volume.super_block().root_inode;
-        let view = match volume.read_dir(root) {
-            Ok(view) => view,
+        match crate::vfs::mkdir(MOUNT_POINT) {
+            Ok(()) | Err(crate::vfs::Error::AlreadyExists) => {}
             Err(_) => return MountOutcome::Failed,
-        };
-
-        let _ = crate::vfs::mkdir(MOUNT_POINT);
+        }
         let mut imported = 0usize;
         let mut buffer = [0u8; MAX_FILE_SIZE];
-        for entry in view.entries.iter().filter(|entry| entry.inode != 0) {
-            let name = entry.name_str();
-            if name.is_empty() || name.len() > MAX_NAME {
-                continue;
-            }
-            let mut path = [0u8; crate::config::MAX_PATH_SIZE];
-            let prefix = MOUNT_POINT.as_bytes();
-            let needed = prefix.len() + 1 + name.len();
-            if needed > path.len() {
-                continue;
-            }
-            path[..prefix.len()].copy_from_slice(prefix);
-            path[prefix.len()] = b'/';
-            path[prefix.len() + 1..needed].copy_from_slice(name.as_bytes());
-            let Ok(path) = core::str::from_utf8(&path[..needed]) else {
-                continue;
-            };
-
-            let Ok(length) = volume.read_file(entry.inode, &mut buffer) else {
-                // A content checksum failure must not be imported as if the
-                // bytes were good.
-                continue;
-            };
-            if length > crate::vfs::NODE_CAPACITY {
-                continue;
-            }
-            match crate::vfs::create_read_only(path, &buffer[..length]) {
-                Ok(()) => imported += 1,
-                Err(crate::vfs::Error::AlreadyExists) => imported += 1,
-                Err(_) => {}
-            }
+        let mut visited = [0u64; MAX_WFS_IMPORT_INODES];
+        let mut visited_len = 0usize;
+        if import_wfs_directory(
+            &mut volume,
+            root,
+            MOUNT_POINT,
+            0,
+            &mut visited,
+            &mut visited_len,
+            &mut buffer,
+        )
+        .map(|count| imported = count)
+        .is_err()
+        {
+            return MountOutcome::Failed;
         }
         MountOutcome::Mounted(imported)
     }) else {
@@ -1834,6 +1918,7 @@ pub fn mount_ata_into_vfs() -> MountOutcome {
 pub fn stage15_2_self_test() -> bool {
     const INODES: u32 = 32;
     let alpha = b"wovenfs-alpha-contents";
+    let nested = b"wovenfs-nested-contents";
     let beta: [u8; 700] = {
         let mut bytes = [0u8; 700];
         for (index, byte) in bytes.iter_mut().enumerate() {
@@ -1939,7 +2024,16 @@ pub fn stage15_2_self_test() -> bool {
         let Ok(b) = volume.create(1, "beta.bin", 0o644, 3) else {
             return false;
         };
-        volume.write_file(b, &beta, 4).is_ok()
+        if volume.write_file(b, &beta, 4).is_err() {
+            return false;
+        }
+        let Ok(docs) = volume.mkdir(1, "docs", 0o755, 5) else {
+            return false;
+        };
+        let Ok(note) = volume.create(docs, "note.txt", 0o644, 6) else {
+            return false;
+        };
+        volume.write_file(note, nested, 7).is_ok()
     });
     if !step("create and write two files", created == Some(true)) {
         return false;
@@ -1962,14 +2056,22 @@ pub fn stage15_2_self_test() -> bool {
         if volume.read_file(b.inode, &mut out) != Ok(beta.len()) || out[..beta.len()] != beta {
             return false;
         }
-        volume.read_dir(1).map(|view| view.count()) == Ok(2)
+        let Ok(docs) = volume.lookup(1, "docs") else {
+            return false;
+        };
+        let Ok(note) = volume.lookup(docs.inode, "note.txt") else {
+            return false;
+        };
+        volume.read_file(note.inode, &mut out) == Ok(nested.len())
+            && out[..nested.len()] == *nested
+            && volume.read_dir(1).map(|view| view.count()) == Ok(3)
     });
     if !step("remount and verify contents", verified == Some(true)) {
         return false;
     }
 
     let mounted = mount_ata_into_vfs();
-    if !step("mount into the VFS", mounted == MountOutcome::Mounted(2)) {
+    if !step("mount into the VFS", mounted == MountOutcome::Mounted(3)) {
         crate::serial::write_line(format_args!(
             "[S15.2] vfs mount imported {}",
             match mounted {
@@ -1984,7 +2086,9 @@ pub fn stage15_2_self_test() -> bool {
     let vfs_read = crate::vfs::read_all("/wfs/alpha.txt", &mut vfs_buffer) == Ok(alpha.len())
         && vfs_buffer[..alpha.len()] == *alpha
         && crate::vfs::read_all("/wfs/beta.bin", &mut vfs_buffer) == Ok(beta.len())
-        && vfs_buffer[..beta.len()] == beta;
+        && vfs_buffer[..beta.len()] == beta
+        && crate::vfs::read_all("/wfs/docs/note.txt", &mut vfs_buffer) == Ok(nested.len())
+        && vfs_buffer[..nested.len()] == *nested;
     if !step("read both files through the VFS", vfs_read) {
         return false;
     }
@@ -2013,7 +2117,7 @@ pub fn stage15_2_self_test() -> bool {
     }
 
     let removed = with_ata_volume(|volume| {
-        volume.unlink(1, "alpha.txt", 5).is_ok()
+        volume.unlink(1, "alpha.txt", 8).is_ok()
             && volume.lookup(1, "alpha.txt") == Err(Error::NotFound)
             && volume.check().is_ok()
     });

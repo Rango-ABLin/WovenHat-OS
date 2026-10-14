@@ -130,8 +130,10 @@ NULs, and prefix confusion.
 Native mutations serialize their complete read-modify-write operation with a
 rank-5 `PreemptMutex`, below the ATA device lock at rank 10. No IRQ-disabled
 guard spans device I/O. Directory creation, empty-directory removal, and
-rename update parent entries transactionally; recursive VFS import, mounted
-system policy, and physical flash qualification remain open. See the Stage 15
+rename update parent entries transactionally; ATA publication recursively
+imports validated nested directories with bounded depth and visited-inode
+tracking, while mounted system policy and physical flash qualification remain
+open. See the Stage 15
 write-through audit.
 
 ## Stage 11.2 scheduler-backed thread ownership (2026-10-14)

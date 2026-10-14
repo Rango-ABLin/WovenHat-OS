@@ -1280,7 +1280,9 @@ serialize their complete read-modify-write transactions. The adapter remains a
 Nested native paths, directory creation, empty-directory removal, and rename
 are now transactional; directory rename rejects descendant cycles with a
 bounded fail-closed walk. Recursive import into the VFS mount and mounted-system
-policy remain open. See the [Stage 15
+publication now walks validated nested directories with bounded depth and
+visited-inode tracking; oversized files fail closed at the VFS capacity
+boundary. Mounted-system policy remains open. See the [Stage 15
 VFS write-through audit](audit-stage15-wfs-vfs-write-through-2026-10-14.md).
 
 Crash recovery is proven by fault injection, not actual power loss on a device.
