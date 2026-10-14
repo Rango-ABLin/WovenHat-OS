@@ -43,10 +43,11 @@
 //! geometry the kernel reports, and animates a square paced by a
 //! `FrameClock`, checking that no frame came early.
 //!
-//! With `--desktop-client <shell> <a|b>` it is an application on the
+//! With `--desktop-client <shell> <a|b|c>` it is an application on the
 //! WovenShell desktop: it opens a window through the shell's protocol (and,
 //! as `a`, a tray icon and a notification, then redraws part of its window),
-//! and exits once the shell forwards it its key.
+//! and exits once the shell forwards it its key, or asks it to close. `c`
+//! opens a window larger than the old 320×240 surface cap.
 //!
 //! With `--probe <handle>` it runs as an ordinary process and checks that the
 //! kernel refuses it everything it has no authority for: every compositor
@@ -846,9 +847,12 @@ fn desktop_client(args: &Args) -> ! {
         match args.get(3) {
             Some(b"a") => (b"Alpha", 120, 80, rgb(200, 60, 60), b'x', true),
             Some(b"b") => (b"Beta", 100, 60, rgb(60, 60, 200), b'y', false),
+            Some(b"c") => (b"Wide", 400, 260, rgb(60, 160, 90), b'z', false),
+            Some(b"n") => (b"Notes", 100, 60, rgb(150, 120, 40), b'n', false),
+            Some(b"q") => (b"Quiet", 100, 60, rgb(90, 170, 170), b'q', false),
             _ => fail(181),
         };
-    let window = match GraphicsSurface::create(u32::from(width), u32::from(height)) {
+    let mut window = match GraphicsSurface::create(u32::from(width), u32::from(height)) {
         Ok(surface) => surface,
         Err(_) => fail(182),
     };
@@ -896,6 +900,20 @@ fn desktop_client(args: &Args) -> ! {
         None
     };
 
+    // Client N posts three notifications, a little apart so the shell sees
+    // them in order.
+    if args.get(3) == Some(b"n") {
+        for note in [&b"NOTEBuild done"[..], b"NOTEMail: 3 new", b"NOTEBattery 80%"] {
+            if libwoven::message_send(shell, note).is_err() {
+                fail(189);
+            }
+            let start = libwoven::ticks();
+            while libwoven::ticks().wrapping_sub(start) < 10 {
+                libwoven::yield_now();
+            }
+        }
+    }
+
     // Exactly our key, from the shell.
     let deadline = libwoven::ticks() + 6000;
     let mut key = [0u8; 8];
@@ -905,6 +923,40 @@ fn desktop_client(args: &Args) -> ! {
             Ok(_) => {}
         }
         if let Ok((length, sender)) = libwoven::message_receive(&mut key) {
+            // A resize request: answer with a new surface of that size,
+            // then release the old one.
+            if sender == shell && length == 8 && &key[..4] == b"WSIZ" {
+                let w = u16::from_le_bytes([key[4], key[5]]);
+                let h = u16::from_le_bytes([key[6], key[7]]);
+                if let Ok(resized) = GraphicsSurface::create(u32::from(w), u32::from(h)) {
+                    let mut reply = [0u8; 16];
+                    reply[..4].copy_from_slice(b"WRSZ");
+                    reply[4..12].copy_from_slice(&resized.handle().to_le_bytes());
+                    reply[12..14].copy_from_slice(&w.to_le_bytes());
+                    reply[14..].copy_from_slice(&h.to_le_bytes());
+                    if resized.fill_rect(0, 0, w, h, color).is_ok()
+                        && resized.share_with(shell).is_ok()
+                        && libwoven::message_send(shell, &reply).is_ok()
+                    {
+                        window = resized;
+                        let _ = libwoven::print("hello-gui desktop client: resized\n");
+                    }
+                }
+                continue;
+            }
+            if sender == shell && &key[..length] == b"WCLS" {
+                let _ = libwoven::print("hello-gui desktop client: closed by the shell\n");
+                drop(icon);
+                drop(window);
+                libwoven::exit(0);
+            }
+            // Client Q posts a notification each time it is sent 'p'.
+            if sender == shell && length == 1 && key[0] == b'p' && args.get(3) == Some(b"q") {
+                if libwoven::message_send(shell, b"NOTEPing").is_err() {
+                    fail(189);
+                }
+                continue;
+            }
             if sender != shell || length != 1 || key[0] != expected {
                 fail(187);
             }

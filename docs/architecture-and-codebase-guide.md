@@ -20,13 +20,71 @@ directory lister and file previewer using the same verified external-image
 path. It passes signed 1/2/4-CPU execution; GUI, boot catalog, and mutation
 workflows remain open. See the Stage 19 WovenFiles audit.
 
+`apps/woven-monitor` is the fourth increment. It reports bounded UTC clock,
+authorized compositor geometry, and `/mnt` entry-count diagnostics without
+write or privilege authority. Its signed 1/2/4-CPU execution evidence is
+recorded in the Stage 19 WovenMonitor audit.
+
+`apps/woven-settings` is the fifth increment. It reports bounded process
+identity, UTC clock, and compositor display policy without mutating settings or
+requesting privileged authority. Its signed 1/2/4-CPU execution evidence is
+recorded in the Stage 19 WovenSettings audit.
+
+`apps/woven-security` is the sixth increment. It reports bounded process
+identity and security-ledger entries when the existing inspect authority is
+available, without granting or revoking policy. Its signed 1/2/4-CPU execution
+evidence is recorded in the Stage 19 WovenSecurity audit.
+
+`apps/woven-editor` is the seventh increment. It provides bounded text preview
+and capability-enforced file writing through the safe `libwoven` file-write
+wrapper. Its signed 1/2/4-CPU execution evidence is recorded in the Stage 19
+WovenEditor audit.
+
+`apps/woven-images` is the eighth increment. It provides bounded image
+inventory and common-header inspection without decoding untrusted pixel data.
+Its signed 1/2/4-CPU execution evidence is recorded in the Stage 19 WovenImages
+audit.
+
+`apps/woven-update` is the ninth increment. It provides bounded read-only
+update preflight and leaves installation, activation, and rollback to a future
+privileged update service. Its signed 1/2/4-CPU execution evidence is recorded
+in the Stage 19 WovenUpdate audit.
+
+`scripts/package-system-apps.py` is the release packaging boundary for these
+nine accepted apps. It builds each app in its own workspace, signs the ELF
+with WAPP v1, checks the envelope before publication, and emits hashed package
+and `/share/applications` catalog artifacts in one install-plan manifest. The
+manifest is consumed by the feature-gated multi-package RAM installer; the
+remaining roadmap applications and full GUI integration remain open.
+
+The feature-gated `stage19-app-catalog-test` now exercises the install-plan
+boundary for all nine accepted packages together. It verifies each WAPP,
+rejects a mutation, installs and reads each package back through the VFS,
+passes the bytes through the verified ELF loader, and publishes the matching
+catalog descriptor only after those checks. The 1/2/4-CPU evidence is in the
+Stage 19 system-app catalog audit. This is not ordinary-boot installation:
+rollback, trusted catalog publication, and image/installer ownership remain
+required for production deployment.
+
+The `system-apps` image feature is the first production-image consumer. It
+requires a compile-time provisioned application public key, validates every
+WAPP and normal ELF load before VFS mutation, checks path collisions, and
+rolls back entries created by a failed publication. Acceptance harnesses pass
+the deterministic test key explicitly; production provisioning must replace
+it. The current publication is RAM-backed at boot, so persistent update,
+power-loss rollback, and key lifecycle policy remain open.
+
 ## Release validation (2026-10-14)
 
 The repository release chain passed on the current tree, including warning-
 denying kernel/host Clippy, all host integration tests, 1/2/4-CPU debug
 memory/storage/network gates, legacy PIC, 4-CPU release gates, release build,
-and shell smoke. The durable report and image manifest are recorded by the
-[release validation audit](audit-release-validation-2026-10-14.md). This is
+and shell smoke. It now also runs app-specific warning-denying Clippy and the
+signed five-application catalog gate on 1/2/4 CPUs. The release ZIP includes
+the signed WAPP packages, catalog descriptors, and complete SHA-256 inventory.
+The durable report and image manifest are recorded by the
+[release validation audit](audit-release-validation-2026-10-14.md) and the
+[system-app release audit](audit-release-system-apps-2026-10-14.md). This is
 software/QEMU qualification only; native hardware and destructive media limits
 remain explicit.
 
@@ -414,9 +472,9 @@ qualification.
 | `graphics.rs`, `gui.rs` | Existing framebuffer/GUI support; not the future compositor |
 | `rtc.rs` | CMOS real-time clock (UTC), behind the `ClockRead` syscall |
 | `font.rs`, `display.rs` | 5×7 ASCII font (also compiled into libwoven); `Surface` (opaque `blit`, `blit_region` for exposed-region redraw, uniform-opacity `blend`, `write_pixels` for client uploads), bounded `Damage` and the single format-resolving presentation path (`present_scaled`, integer display scale; `present` is scale 1) |
-| `user_graphics.rs`, `compositor.rs` | Owner-tagged, generation-checked client surfaces (syscalls 98–101, 104) and the kernel-held compositor surface they are blitted onto (102–103); `blit` snapshots under the registry lock and releases it before taking the compositor lock, so the two rank-10 locks never nest. Presentation borrows the framebuffer through `terminal::with_framebuffer` (lock order compositor → terminal), and display ownership suppresses terminal rendering while the compositor presents. Userspace reaches the compositor only with `DisplayIo` and the single-holder lease (syscalls 105–106), released on exit; every client token is bound to the calling process before the registry sees it. A presenting holder also takes input focus: `woven_input` routes events to its private bounded queue (syscall 107, `InputIo`) until it exits; syscall 108 sleeps for the next event with a single registered waiter woken by `publish` after `FOCUS` is released (lock order scheduler → compositor → FOCUS). A client may share one of its surfaces with one process (syscall 109); the lease holder composites it with syscall 110, authorised by the slot's grant rather than the token. Syscall 111 sleeps over input and the pid mailbox at once; `ipc::send` wakes the mailbox's single waiter after releasing the IPC lock. Clients declare damage on their surfaces (syscall 112); the holder sleeps on it via `WaitAny` and copies only the damaged region (syscall 113). The boot compositor is sized to the framebuffer (clamped to 1920×1200), and every framebuffer writer, including the boot `Console`, goes through the terminal lock. Stacking, raise and per-window focus are window-manager policy in userspace (Stage 19.11), built on the lease, focus, `WaitAny`, shared surfaces and IPC |
+| `user_graphics.rs`, `compositor.rs` | Owner-tagged, generation-checked client surfaces (syscalls 98–101, 104), up to 1920×1200 within a 4 MB per-process and 16 MB system pixel budget, behind a preemption lock (not interrupts-off) with allocation and freeing outside it and the kernel-held compositor surface they are blitted onto (102–103); `blit` snapshots under the registry lock and releases it before taking the compositor lock, so the two rank-10 locks never nest. Presentation borrows the framebuffer through `terminal::with_framebuffer` (lock order compositor → terminal), and display ownership suppresses terminal rendering while the compositor presents. Userspace reaches the compositor only with `DisplayIo` and the single-holder lease (syscalls 105–106), released on exit; every client token is bound to the calling process before the registry sees it. A presenting holder also takes input focus: `woven_input` routes events to its private bounded queue (syscall 107, `InputIo`) until it exits; syscall 108 sleeps for the next event with a single registered waiter woken by `publish` after `FOCUS` is released (lock order scheduler → compositor → FOCUS). A client may share one of its surfaces with one process (syscall 109); the lease holder composites it with syscall 110, authorised by the slot's grant rather than the token. Syscall 111 sleeps over input and the pid mailbox at once; `ipc::send` wakes the mailbox's single waiter after releasing the IPC lock. Clients declare damage on their surfaces (syscall 112); the holder sleeps on it via `WaitAny` and copies only the damaged region (syscall 113). The boot compositor is sized to the framebuffer (clamped to 1920×1200), and every framebuffer writer, including the boot `Console`, goes through the terminal lock. Stacking, raise and per-window focus are window-manager policy in userspace (Stage 19.11), built on the lease, focus, `WaitAny`, shared surfaces and IPC |
 | `panic.rs`, `benchmark.rs` | Failure reporting and existing benchmark support |
-| `libwoven/`, `apps/hello`, `apps/hello-gui`, `apps/woven-shell` | The userspace API (one thin wrapper per syscall, plus `Canvas` software rendering and the shared kernel font) and the Ring-3 programs. Each app is its own crate with a large-code-model `link.x` (whose `.l*` sections must be placed explicitly) and a `build.rs` that relinks when it changes. `woven-shell` is the desktop: it holds the compositor lease and recomposes exposed rectangles from its own software layers and clients' shared surfaces (region blits, syscalls 120–121), hosting applications over an IPC protocol (`WOPN`, `TRAY`, `NOTE`) |
+| `libwoven/`, `apps/hello`, `apps/hello-gui`, `apps/woven-shell` | The userspace API (one thin wrapper per syscall, plus `Canvas` software rendering, the shared kernel font, and a fixed-point `Spring` for animation, and `accounts`, local accounts held as a salt and `SHA-256(salt || PIN)`) and the Ring-3 programs. Each app is its own crate with a large-code-model `link.x` (whose `.l*` sections must be placed explicitly) and a `build.rs` that relinks when it changes. `woven-shell` is the desktop: it holds the compositor lease and recomposes exposed rectangles from its own software layers and clients' shared surfaces (region blits, syscalls 120–121), hosting applications over an IPC protocol (`WOPN`, `TRAY`, `NOTE`, `WCLS`, and `WSIZ`/`WRSZ` for resizing; `libwoven::layout` tiles them); shadows and other translucent layers use region blends (syscalls 200–201), and text, borders and the pointer are overlays copied with a keyed blit that skips the transparent key (syscall 202), so nothing is read back from the screen. With `--accounts` it starts at a sign-in screen, and its lock screen asks for the signed-in account's PIN. A user stack is 8 KiB (`UserStack::SIZE`), so the shell keeps its tile buffer and desktop state in statics (.bss), never in `main`'s frame |
 | `tests/`, `scripts/`, `run-stage*-acceptance.ps1` | Host regressions, QEMU orchestration and stage preservation gates |
 
 ## Stage 6 filesystem concurrency boundary

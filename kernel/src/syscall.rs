@@ -347,6 +347,16 @@ pub enum Number {
     ThreadSetTls = 134,
     /// -> TLS base value or ERROR
     ThreadGetTls = 135,
+    /// own handle, packed destination and opacity (x | y<<24 | opacity<<56,
+    /// x and y 24-bit signed, bits 48..56 zero), packed source region -> 0 or
+    /// ERROR
+    GraphicsCompositorBlendRegion = 200,
+    /// owner's handle, packed destination and opacity, packed source region
+    /// -> 0 or ERROR
+    GraphicsCompositorBlendRegionShared = 201,
+    /// own handle, packed destination (x | y<<32), packed source region ->
+    /// 0 or ERROR; source pixels equal to the transparent key are skipped
+    GraphicsCompositorBlitKeyed = 202,
 }
 
 pub fn entry_address() -> u64 {
@@ -2480,6 +2490,15 @@ pub extern "C" fn wovenhat_syscall_dispatch(
         value if value == Number::SecretStore as u64 => sys_secret_store(arg0, arg1),
         value if value == Number::SecretRead as u64 => sys_secret_read(arg0, arg1, arg2),
         value if value == Number::SecretRevoke as u64 => sys_secret_revoke(arg0),
+        value if value == Number::GraphicsCompositorBlitKeyed as u64 => {
+            sys_compositor_blit_keyed(arg0, arg1, arg2)
+        }
+        value if value == Number::GraphicsCompositorBlendRegion as u64 => {
+            sys_compositor_blend_region(arg0, arg1, arg2, false)
+        }
+        value if value == Number::GraphicsCompositorBlendRegionShared as u64 => {
+            sys_compositor_blend_region(arg0, arg1, arg2, true)
+        }
         _ => u64::MAX,
     };
 
@@ -2678,6 +2697,74 @@ fn sys_compositor_blit_region(handle: u64, destination: u64, region: u64, shared
         .map_or(SYSCALL_ERROR, |_| 0)
 }
 
+/// Region blit of one of the caller's own surfaces that skips pixels equal
+/// to the transparent key (`display::TRANSPARENT_KEY`): an overlay of text,
+/// borders or a pointer drawn over what is already composed. Same authority
+/// as the region blit.
+fn sys_compositor_blit_keyed(handle: u64, destination: u64, region: u64) -> u64 {
+    let x = (destination & 0xffff_ffff) as i32;
+    let y = ((destination >> 32) & 0xffff_ffff) as i32;
+    let region = crate::display::Rect::new(
+        (region & 0xffff) as i32,
+        ((region >> 16) & 0xffff) as i32,
+        ((region >> 32) & 0xffff) as usize,
+        ((region >> 48) & 0xffff) as usize,
+    );
+    if !display_authorized() {
+        return SYSCALL_ERROR;
+    }
+    let Some(handle) = caller_surface(handle) else {
+        return SYSCALL_ERROR;
+    };
+    crate::compositor::blit_region_keyed_for(
+        crate::task::current_process_id(),
+        handle,
+        region,
+        x,
+        y,
+    )
+    .map_or(SYSCALL_ERROR, |_| 0)
+}
+
+/// Sign-extend the low 24 bits of `value`.
+const fn signed_24(value: u64) -> i32 {
+    ((value as u32) << 8) as i32 >> 8
+}
+
+/// Blend only a region of a surface onto the compositor with uniform
+/// opacity. Three registers carry four values, so the destination word packs
+/// x and y as 24-bit signed fields (ample for a compositor bounded at
+/// 1920x1200) with the opacity in its top byte. The byte between them is
+/// reserved and must be zero. Same authority as the region blit.
+fn sys_compositor_blend_region(handle: u64, destination: u64, region: u64, shared: bool) -> u64 {
+    if (destination >> 48) & 0xff != 0 {
+        return SYSCALL_ERROR;
+    }
+    let x = signed_24(destination);
+    let y = signed_24(destination >> 24);
+    let opacity = (destination >> 56) as u8;
+    let region = crate::display::Rect::new(
+        (region & 0xffff) as i32,
+        ((region >> 16) & 0xffff) as i32,
+        ((region >> 32) & 0xffff) as usize,
+        ((region >> 48) & 0xffff) as usize,
+    );
+    if !display_authorized() {
+        return SYSCALL_ERROR;
+    }
+    let pid = crate::task::current_process_id();
+    let handle = if shared {
+        crate::user_graphics::Handle::from_u64(handle)
+    } else {
+        let Some(handle) = caller_surface(handle) else {
+            return SYSCALL_ERROR;
+        };
+        handle
+    };
+    crate::compositor::blend_region_for(pid, handle, region, x, y, opacity, shared)
+        .map_or(SYSCALL_ERROR, |_| 0)
+}
+
 /// Blend a surface onto the compositor with uniform opacity. Same authority
 /// as the corresponding blit: `DisplayIo` and the lease; an own surface must
 /// be the caller's, a shared one must carry a grant naming the caller. An
@@ -2757,6 +2844,7 @@ const INPUT_KIND_ENTER: u64 = 2;
 const INPUT_KIND_BACKSPACE: u64 = 3;
 const INPUT_KIND_TAB: u64 = 4;
 const INPUT_KIND_F1: u64 = 5;
+const INPUT_KIND_F2: u64 = 8;
 const INPUT_KIND_POINTER_MOVE: u64 = 6;
 const INPUT_KIND_POINTER_BUTTON: u64 = 7;
 
@@ -2771,6 +2859,7 @@ fn encode_input(event: crate::woven_input::Event) -> Option<u64> {
         Event::Key(Key::Backspace) => Some(packed(INPUT_KIND_BACKSPACE, 0)),
         Event::Key(Key::Tab) => Some(packed(INPUT_KIND_TAB, 0)),
         Event::Key(Key::F1) => Some(packed(INPUT_KIND_F1, 0)),
+        Event::Key(Key::F2) => Some(packed(INPUT_KIND_F2, 0)),
         // dx and dy as two's-complement u16 halves.
         Event::PointerMove { dx, dy } => Some(packed(
             INPUT_KIND_POINTER_MOVE,
