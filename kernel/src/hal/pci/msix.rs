@@ -5,7 +5,7 @@
 //! programming so configuration-space discovery can never dereference an
 //! unowned device BAR.
 
-use super::{Address, Device, read_config};
+use super::{read_config, Address, Device};
 
 pub const PCI_CAP_ID_MSIX: u8 = 0x11;
 pub const PCI_MSIX_ENABLE: u16 = 1 << 15;
@@ -24,9 +24,15 @@ pub struct TableEntry {
 }
 
 pub fn entry_offset(capability: Capability, index: u16) -> Result<u64, Error> {
-    if index >= capability.table_size { return Err(Error::MalformedCapability); }
+    if index >= capability.table_size {
+        return Err(Error::MalformedCapability);
+    }
     u64::from(capability.table.offset)
-        .checked_add(u64::from(index).checked_mul(TABLE_ENTRY_BYTES).ok_or(Error::Overflow)?)
+        .checked_add(
+            u64::from(index)
+                .checked_mul(TABLE_ENTRY_BYTES)
+                .ok_or(Error::Overflow)?,
+        )
         .ok_or(Error::Overflow)
 }
 
@@ -40,7 +46,6 @@ pub fn masked_entry(destination_apic_id: u32, vector: u8) -> Result<TableEntry, 
         vector_control: VECTOR_CONTROL_MASKED,
     })
 }
-
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct BirOffset {
@@ -68,19 +73,34 @@ pub enum Error {
     ConfigWrite,
     VerifyFailed,
     MmioMap,
+    RestoreFailed,
 }
 
 pub fn decode_bir_offset(raw: u32) -> Result<BirOffset, Error> {
     let bir = (raw & 0x7) as u8;
-    if bir > 5 { return Err(Error::InvalidBir); }
-    Ok(BirOffset { bir, offset: raw & !0x7 })
+    if bir > 5 {
+        return Err(Error::InvalidBir);
+    }
+    Ok(BirOffset {
+        bir,
+        offset: raw & !0x7,
+    })
 }
 
-pub fn decode_capability(offset: u16, header: u32, table: u32, pba: u32) -> Result<Capability, Error> {
-    if header as u8 != PCI_CAP_ID_MSIX { return Err(Error::MalformedCapability); }
+pub fn decode_capability(
+    offset: u16,
+    header: u32,
+    table: u32,
+    pba: u32,
+) -> Result<Capability, Error> {
+    if header as u8 != PCI_CAP_ID_MSIX {
+        return Err(Error::MalformedCapability);
+    }
     let control = (header >> 16) as u16;
     let table_size = (control & 0x07ff) + 1;
-    if table_size == 0 || table_size > MAX_MSIX_VECTORS { return Err(Error::MalformedCapability); }
+    if table_size == 0 || table_size > MAX_MSIX_VECTORS {
+        return Err(Error::MalformedCapability);
+    }
     Ok(Capability {
         offset,
         control,
@@ -95,8 +115,10 @@ pub fn capability(device: Device) -> Result<Capability, Error> {
         return Err(Error::NoCapability);
     }
     let address = Address {
-        segment: device.segment, bus: device.bus,
-        device: device.device, function: device.function,
+        segment: device.segment,
+        bus: device.bus,
+        device: device.device,
+        function: device.function,
     };
     let base = device.capabilities.msix_offset;
     let header = read_config(address, base).ok_or(Error::ConfigRead)?;
@@ -107,46 +129,73 @@ pub fn capability(device: Device) -> Result<Capability, Error> {
 
 pub fn table_span(capability: Capability) -> Result<(u64, u64), Error> {
     let bytes = u64::from(capability.table_size)
-        .checked_mul(TABLE_ENTRY_BYTES).ok_or(Error::Overflow)?;
+        .checked_mul(TABLE_ENTRY_BYTES)
+        .ok_or(Error::Overflow)?;
     let end = u64::from(capability.table.offset)
-        .checked_add(bytes).ok_or(Error::Overflow)?;
+        .checked_add(bytes)
+        .ok_or(Error::Overflow)?;
     Ok((u64::from(capability.table.offset), end))
 }
 
 pub fn pba_span(capability: Capability) -> Result<(u64, u64), Error> {
     let qwords = u64::from(capability.table_size).div_ceil(64);
     let bytes = qwords.checked_mul(8).ok_or(Error::Overflow)?;
-    let end = u64::from(capability.pba.offset).checked_add(bytes).ok_or(Error::Overflow)?;
+    let end = u64::from(capability.pba.offset)
+        .checked_add(bytes)
+        .ok_or(Error::Overflow)?;
     Ok((u64::from(capability.pba.offset), end))
 }
 
+type TableMappings = [Option<crate::paging::OwnedMmioMapping>; 2];
 
+fn release_table_mappings(mappings: TableMappings) -> Result<(), Error> {
+    for mapping in mappings.into_iter().flatten() {
+        crate::paging::release_mmio_owned(mapping).map_err(|_| Error::MmioMap)?;
+    }
+    Ok(())
+}
 
-
-fn read_table_entry(table_base: u64, capability: Capability, index: u16) -> Result<TableEntry, Error> {
+fn read_table_entry(
+    table_base: u64,
+    capability: Capability,
+    index: u16,
+    owner: u32,
+) -> Result<TableEntry, Error> {
     let offset = entry_offset(capability, index)?
-        .checked_sub(u64::from(capability.table.offset)).ok_or(Error::Overflow)?;
-    let pointer = map_table_entry(table_base, offset)?;
+        .checked_sub(u64::from(capability.table.offset))
+        .ok_or(Error::Overflow)?;
+    let (pointer, mappings) = map_table_entry(table_base, offset, owner)?;
     // SAFETY: caller has already validated the owner-bound BAR and bounded
     // entry; volatile reads snapshot device-visible MSI-X state.
-    unsafe {
-        Ok(TableEntry {
+    let result = unsafe {
+        TableEntry {
             address_low: pointer.read_volatile(),
             address_high: pointer.add(1).read_volatile(),
             data: pointer.add(2).read_volatile(),
             vector_control: pointer.add(3).read_volatile(),
-        })
-    }
+        }
+    };
+    release_table_mappings(mappings)?;
+    Ok(result)
 }
 
-fn restore_table_entry(table_base: u64, capability: Capability, index: u16, entry: TableEntry) -> Result<(), Error> {
+fn restore_table_entry(
+    table_base: u64,
+    capability: Capability,
+    index: u16,
+    entry: TableEntry,
+    owner: u32,
+) -> Result<(), Error> {
     let offset = entry_offset(capability, index)?
-        .checked_sub(u64::from(capability.table.offset)).ok_or(Error::Overflow)?;
-    let pointer = map_table_entry(table_base, offset)?;
+        .checked_sub(u64::from(capability.table.offset))
+        .ok_or(Error::Overflow)?;
+    let (pointer, mappings) = map_table_entry(table_base, offset, owner)?;
     // Keep the entry masked while restoring message fields, then restore its
     // original vector-control value last.
-    unsafe {
-        pointer.add(3).write_volatile(entry.vector_control | VECTOR_CONTROL_MASKED);
+    let result = unsafe {
+        pointer
+            .add(3)
+            .write_volatile(entry.vector_control | VECTOR_CONTROL_MASKED);
         pointer.write_volatile(entry.address_low);
         pointer.add(1).write_volatile(entry.address_high);
         pointer.add(2).write_volatile(entry.data);
@@ -156,37 +205,65 @@ fn restore_table_entry(table_base: u64, capability: Capability, index: u16, entr
             || pointer.add(2).read_volatile() != entry.data
             || pointer.add(3).read_volatile() != entry.vector_control
         {
-            return Err(Error::VerifyFailed);
+            Err(Error::VerifyFailed)
+        } else {
+            Ok(())
         }
-    }
-    Ok(())
+    };
+    let released = release_table_mappings(mappings);
+    result.and(released)
 }
 
 fn restore_control(device: Device, original: u16) -> Result<(), Error> {
     let capability = capability(device)?;
-    let address = Address { segment: device.segment, bus: device.bus, device: device.device, function: device.function };
+    let address = Address {
+        segment: device.segment,
+        bus: device.bus,
+        device: device.device,
+        function: device.function,
+    };
     let _guard = super::CONFIG_LOCK.lock();
-    let header = super::read_config_unlocked(address, capability.offset).ok_or(Error::ConfigRead)?;
+    let header =
+        super::read_config_unlocked(address, capability.offset).ok_or(Error::ConfigRead)?;
     let restored = (header & 0x0000_ffff) | (u32::from(original) << 16);
-    if !super::write_config_unlocked(address, capability.offset, restored) { return Err(Error::ConfigWrite); }
-    let verify = super::read_config_unlocked(address, capability.offset).ok_or(Error::ConfigRead)?;
-    if (verify >> 16) as u16 != original { return Err(Error::VerifyFailed); }
+    if !super::write_config_unlocked(address, capability.offset, restored) {
+        return Err(Error::ConfigWrite);
+    }
+    let verify =
+        super::read_config_unlocked(address, capability.offset).ok_or(Error::ConfigRead)?;
+    if (verify >> 16) as u16 != original {
+        return Err(Error::VerifyFailed);
+    }
     Ok(())
 }
 
-fn map_table_entry(table_base: u64, offset: u64) -> Result<*mut u32, Error> {
+fn map_table_entry(
+    table_base: u64,
+    offset: u64,
+    owner: u32,
+) -> Result<(*mut u32, TableMappings), Error> {
     let physical = table_base.checked_add(offset).ok_or(Error::Overflow)?;
     let page = physical & !0xfff;
     let within = physical & 0xfff;
     // A 16-byte MSI-X entry may straddle a 4 KiB boundary. Map both pages
     // before returning a pointer into WovenHat's fixed MMIO virtual window.
-    let first = crate::paging::map_mmio(page).map_err(|_| Error::MmioMap)?;
+    let first = crate::paging::map_mmio_owned(page, owner).map_err(|_| Error::MmioMap)?;
+    let mut mappings = [Some(first), None];
     if within > 0xff0 {
-        crate::paging::map_mmio(page.checked_add(0x1000).ok_or(Error::Overflow)?)
-            .map_err(|_| Error::MmioMap)?;
+        let next = page.checked_add(0x1000).ok_or(Error::Overflow)?;
+        match crate::paging::map_mmio_owned(next, owner) {
+            Ok(mapping) => mappings[1] = Some(mapping),
+            Err(_) => {
+                let _ = crate::paging::release_mmio_owned(first);
+                return Err(Error::MmioMap);
+            }
+        }
     }
-    let virtual_address = first.checked_add(within).ok_or(Error::Overflow)?;
-    Ok(virtual_address as *mut u32)
+    let Some(virtual_address) = first.virtual_address().checked_add(within) else {
+        let _ = release_table_mappings(mappings);
+        return Err(Error::Overflow);
+    };
+    Ok((virtual_address as *mut u32, mappings))
 }
 
 /// Program one MSI-X table entry while it remains masked, then verify every
@@ -197,15 +274,16 @@ pub fn program_masked_entry(
     capability: Capability,
     index: u16,
     entry: TableEntry,
+    owner: u32,
 ) -> Result<(), Error> {
     let offset = entry_offset(capability, index)?
         .checked_sub(u64::from(capability.table.offset))
         .ok_or(Error::Overflow)?;
-    let pointer = map_table_entry(table_base, offset)?;
+    let (pointer, mappings) = map_table_entry(table_base, offset, owner)?;
     // SAFETY: table_base came from a current owner-bound BAR lease; the entry
-    // is bounds-checked against the MSI-X capability; map_mmio created
-    // uncached writable NX mappings for all bytes in this 16-byte record.
-    unsafe {
+    // is bounds-checked against the MSI-X capability; owner-scoped mappings
+    // cover all bytes in this 16-byte record and are released after access.
+    let result = unsafe {
         pointer.add(3).write_volatile(VECTOR_CONTROL_MASKED);
         pointer.write_volatile(entry.address_low);
         pointer.add(1).write_volatile(entry.address_high);
@@ -215,10 +293,13 @@ pub fn program_masked_entry(
             || pointer.add(2).read_volatile() != entry.data
             || pointer.add(3).read_volatile() & VECTOR_CONTROL_MASKED == 0
         {
-            return Err(Error::VerifyFailed);
+            Err(Error::VerifyFailed)
+        } else {
+            Ok(())
         }
-    }
-    Ok(())
+    };
+    let released = release_table_mappings(mappings);
+    result.and(released)
 }
 
 fn device_for(function: super::topology::FunctionHandle) -> Option<Device> {
@@ -248,11 +329,14 @@ pub fn validate_table_lease(
 pub fn mask_function(device: Device) -> Result<Capability, Error> {
     let capability = capability(device)?;
     let address = Address {
-        segment: device.segment, bus: device.bus,
-        device: device.device, function: device.function,
+        segment: device.segment,
+        bus: device.bus,
+        device: device.device,
+        function: device.function,
     };
     let _guard = super::CONFIG_LOCK.lock();
-    let header = super::read_config_unlocked(address, capability.offset).ok_or(Error::ConfigRead)?;
+    let header =
+        super::read_config_unlocked(address, capability.offset).ok_or(Error::ConfigRead)?;
     let mut control = (header >> 16) as u16;
     control |= PCI_MSIX_FUNCTION_MASK;
     control &= !PCI_MSIX_ENABLE;
@@ -260,56 +344,91 @@ pub fn mask_function(device: Device) -> Result<Capability, Error> {
     if !super::write_config_unlocked(address, capability.offset, updated) {
         return Err(Error::ConfigWrite);
     }
-    let verify = super::read_config_unlocked(address, capability.offset).ok_or(Error::ConfigRead)?;
-    if (verify >> 16) as u16 != control { return Err(Error::VerifyFailed); }
-    Ok(Capability { control, ..capability })
+    let Some(verify) = super::read_config_unlocked(address, capability.offset) else {
+        return if restore_control(device, capability.control).is_ok() {
+            Err(Error::ConfigRead)
+        } else {
+            Err(Error::RestoreFailed)
+        };
+    };
+    if (verify >> 16) as u16 != control {
+        return if restore_control(device, capability.control).is_ok() {
+            Err(Error::VerifyFailed)
+        } else {
+            Err(Error::RestoreFailed)
+        };
+    }
+    Ok(Capability {
+        control,
+        ..capability
+    })
 }
-
 
 /// Enable MSI-X while keeping Function Mask asserted. The selected table
 /// entry is unmasked only after the capability enable write is verified.
 pub fn enable_function_masked(device: Device) -> Result<Capability, Error> {
     let capability = capability(device)?;
     let address = Address {
-        segment: device.segment, bus: device.bus,
-        device: device.device, function: device.function,
+        segment: device.segment,
+        bus: device.bus,
+        device: device.device,
+        function: device.function,
     };
     let _guard = super::CONFIG_LOCK.lock();
-    let header = super::read_config_unlocked(address, capability.offset).ok_or(Error::ConfigRead)?;
+    let header =
+        super::read_config_unlocked(address, capability.offset).ok_or(Error::ConfigRead)?;
     let mut control = (header >> 16) as u16;
     control |= PCI_MSIX_ENABLE | PCI_MSIX_FUNCTION_MASK;
     let updated = (header & 0x0000_ffff) | (u32::from(control) << 16);
     if !super::write_config_unlocked(address, capability.offset, updated) {
         return Err(Error::ConfigWrite);
     }
-    let verify = super::read_config_unlocked(address, capability.offset).ok_or(Error::ConfigRead)?;
-    if (verify >> 16) as u16 != control { return Err(Error::VerifyFailed); }
-    Ok(Capability { control, ..capability })
+    let verify =
+        super::read_config_unlocked(address, capability.offset).ok_or(Error::ConfigRead)?;
+    if (verify >> 16) as u16 != control {
+        return Err(Error::VerifyFailed);
+    }
+    Ok(Capability {
+        control,
+        ..capability
+    })
 }
 
-pub fn unmask_entry(table_base: u64, capability: Capability, index: u16) -> Result<(), Error> {
+pub fn unmask_entry(
+    table_base: u64,
+    capability: Capability,
+    index: u16,
+    owner: u32,
+) -> Result<(), Error> {
     let offset = entry_offset(capability, index)?
-        .checked_sub(u64::from(capability.table.offset)).ok_or(Error::Overflow)?;
-    let pointer = map_table_entry(table_base, offset)?;
+        .checked_sub(u64::from(capability.table.offset))
+        .ok_or(Error::Overflow)?;
+    let (pointer, mappings) = map_table_entry(table_base, offset, owner)?;
     // SAFETY: same validated mapping and bounded entry contract as
     // program_masked_entry; only the vector-control dword is changed.
-    unsafe {
+    let result = unsafe {
         pointer.add(3).write_volatile(0);
         if pointer.add(3).read_volatile() & VECTOR_CONTROL_MASKED != 0 {
-            return Err(Error::VerifyFailed);
+            Err(Error::VerifyFailed)
+        } else {
+            Ok(())
         }
-    }
-    Ok(())
+    };
+    let released = release_table_mappings(mappings);
+    result.and(released)
 }
 
 pub fn disable_and_mask_function(device: Device) -> Result<(), Error> {
     let capability = capability(device)?;
     let address = Address {
-        segment: device.segment, bus: device.bus,
-        device: device.device, function: device.function,
+        segment: device.segment,
+        bus: device.bus,
+        device: device.device,
+        function: device.function,
     };
     let _guard = super::CONFIG_LOCK.lock();
-    let header = super::read_config_unlocked(address, capability.offset).ok_or(Error::ConfigRead)?;
+    let header =
+        super::read_config_unlocked(address, capability.offset).ok_or(Error::ConfigRead)?;
     let mut control = (header >> 16) as u16;
     control |= PCI_MSIX_FUNCTION_MASK;
     control &= !PCI_MSIX_ENABLE;
@@ -317,8 +436,11 @@ pub fn disable_and_mask_function(device: Device) -> Result<(), Error> {
     if !super::write_config_unlocked(address, capability.offset, updated) {
         return Err(Error::ConfigWrite);
     }
-    let verify = super::read_config_unlocked(address, capability.offset).ok_or(Error::ConfigRead)?;
-    if (verify >> 16) as u16 != control { return Err(Error::VerifyFailed); }
+    let verify =
+        super::read_config_unlocked(address, capability.offset).ok_or(Error::ConfigRead)?;
+    if (verify >> 16) as u16 != control {
+        return Err(Error::VerifyFailed);
+    }
     Ok(())
 }
 
@@ -342,7 +464,6 @@ pub fn validate_owned_table(
     Ok((masked, base))
 }
 
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct MsixLease {
     pub function: super::topology::FunctionHandle,
@@ -365,10 +486,14 @@ pub enum LifecycleError {
 }
 
 impl From<Error> for LifecycleError {
-    fn from(error: Error) -> Self { Self::Msix(error) }
+    fn from(error: Error) -> Self {
+        Self::Msix(error)
+    }
 }
 impl From<super::vector::Error> for LifecycleError {
-    fn from(error: super::vector::Error) -> Self { Self::Vector(error) }
+    fn from(error: super::vector::Error) -> Self {
+        Self::Vector(error)
+    }
 }
 
 /// Complete one-vector MSI-X activation transaction. Vector ownership is
@@ -388,33 +513,57 @@ pub fn enable_owned(
     let discovered = match capability(device) {
         Ok(value) => value,
         Err(error) => {
-            let _ = super::msi::release_interrupt_mode(function, owner, super::msi::InterruptMode::Msix);
+            let _ = super::msi::release_interrupt_mode(
+                function,
+                owner,
+                super::msi::InterruptMode::Msix,
+            );
             return Err(error.into());
         }
     };
     let table_base = match validate_table_lease(bar, owner, discovered) {
         Ok(value) if bar.function == function => value,
         Ok(_) => {
-            let _ = super::msi::release_interrupt_mode(function, owner, super::msi::InterruptMode::Msix);
+            let _ = super::msi::release_interrupt_mode(
+                function,
+                owner,
+                super::msi::InterruptMode::Msix,
+            );
             return Err(Error::InvalidLease.into());
         }
         Err(error) => {
-            let _ = super::msi::release_interrupt_mode(function, owner, super::msi::InterruptMode::Msix);
+            let _ = super::msi::release_interrupt_mode(
+                function,
+                owner,
+                super::msi::InterruptMode::Msix,
+            );
             return Err(error.into());
         }
     };
-    let original_entry = match read_table_entry(table_base, discovered, entry_index) {
-        Ok(value) => value,
-        Err(error) => {
-            let _ = super::msi::release_interrupt_mode(function, owner, super::msi::InterruptMode::Msix);
-            return Err(error.into());
-        }
-    };
+    // Assert Function Mask and keep MSI-X disabled before reading or writing
+    // any table entry. A table read is device-visible state and must not race
+    // an already active interrupt stream.
     let original_control = discovered.control;
     let masked_capability = match mask_function(device) {
         Ok(value) => value,
         Err(error) => {
-            let _ = super::msi::release_interrupt_mode(function, owner, super::msi::InterruptMode::Msix);
+            let _ = super::msi::release_interrupt_mode(
+                function,
+                owner,
+                super::msi::InterruptMode::Msix,
+            );
+            return Err(error.into());
+        }
+    };
+    let original_entry = match read_table_entry(table_base, discovered, entry_index, owner) {
+        Ok(value) => value,
+        Err(error) => {
+            let _ = restore_control(device, original_control);
+            let _ = super::msi::release_interrupt_mode(
+                function,
+                owner,
+                super::msi::InterruptMode::Msix,
+            );
             return Err(error.into());
         }
     };
@@ -422,7 +571,11 @@ pub fn enable_owned(
         Ok(vector) => vector,
         Err(error) => {
             let _ = restore_control(device, original_control);
-            let _ = super::msi::release_interrupt_mode(function, owner, super::msi::InterruptMode::Msix);
+            let _ = super::msi::release_interrupt_mode(
+                function,
+                owner,
+                super::msi::InterruptMode::Msix,
+            );
             return Err(error.into());
         }
     };
@@ -431,28 +584,59 @@ pub fn enable_owned(
         Err(error) => {
             let _ = super::msi::release_vector(vector, owner);
             let _ = restore_control(device, original_control);
-            let _ = super::msi::release_interrupt_mode(function, owner, super::msi::InterruptMode::Msix);
+            let _ = super::msi::release_interrupt_mode(
+                function,
+                owner,
+                super::msi::InterruptMode::Msix,
+            );
             return Err(error.into());
         }
     };
-    if let Err(error) = program_masked_entry(table_base, masked_capability, entry_index, entry) {
-        let restored = restore_table_entry(table_base, masked_capability, entry_index, original_entry)
-            .and_then(|_| restore_control(device, original_control));
+    if let Err(error) =
+        program_masked_entry(table_base, masked_capability, entry_index, entry, owner)
+    {
+        let lease = MsixLease {
+            function,
+            bar,
+            vector,
+            entry: entry_index,
+        };
+        let restored = restore_table_entry(
+            table_base,
+            masked_capability,
+            entry_index,
+            original_entry,
+            owner,
+        )
+        .and_then(|_| restore_control(device, original_control));
         if restored.is_ok() {
             let _ = super::msi::release_vector(vector, owner);
-            let _ = super::msi::release_interrupt_mode(function, owner, super::msi::InterruptMode::Msix);
+            let _ = super::msi::release_interrupt_mode(
+                function,
+                owner,
+                super::msi::InterruptMode::Msix,
+            );
+            return Err(error.into());
         }
-        return Err(error.into());
+        return Err(LifecycleError::ActivationRetained {
+            error: restored.err().unwrap_or(error),
+            lease,
+        });
     }
     // Once the table contains the new vector, later failures fail closed.
     // Return the retained lease with the error so the driver can persist the
     // teardown obligation instead of leaking an unreachable vector/mode.
-    let lease = MsixLease { function, bar, vector, entry: entry_index };
+    let lease = MsixLease {
+        function,
+        bar,
+        vector,
+        entry: entry_index,
+    };
     let enabled = match enable_function_masked(device) {
         Ok(value) => value,
         Err(error) => return Err(LifecycleError::ActivationRetained { error, lease }),
     };
-    if let Err(error) = unmask_entry(table_base, enabled, entry_index) {
+    if let Err(error) = unmask_entry(table_base, enabled, entry_index, owner) {
         return Err(LifecycleError::ActivationRetained { error, lease });
     }
     Ok(lease)
@@ -519,10 +703,11 @@ pub fn stage13_2_msix_self_test() -> bool {
         && TABLE_ENTRY_BYTES == 16
         && entry_offset(capability, 3) == Ok(0x2030)
         && entry_offset(capability, 4) == Err(Error::MalformedCapability)
-        && masked_entry(0x2a, 0x90) == Ok(TableEntry {
-            address_low: 0xfee2_a000,
-            address_high: 0,
-            data: 0x90,
-            vector_control: VECTOR_CONTROL_MASKED,
-        })
+        && masked_entry(0x2a, 0x90)
+            == Ok(TableEntry {
+                address_low: 0xfee2_a000,
+                address_high: 0,
+                data: 0x90,
+                vector_control: VECTOR_CONTROL_MASKED,
+            })
 }

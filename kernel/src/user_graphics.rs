@@ -64,7 +64,10 @@ impl Handle {
         let slot = (slot as u64) & ((1 << Self::SLOT_BITS) - 1);
         let generation = u64::from(generation) & ((1u64 << Self::GENERATION_BITS) - 1);
         let owner = owner & 0xffff_ffff;
-        Self(slot | (generation << Self::SLOT_BITS) | (owner << (Self::SLOT_BITS + Self::GENERATION_BITS)))
+        Self(
+            slot | (generation << Self::SLOT_BITS)
+                | (owner << (Self::SLOT_BITS + Self::GENERATION_BITS)),
+        )
     }
 
     pub const fn to_u64(self) -> u64 {
@@ -160,10 +163,7 @@ impl Registry {
 
     fn resolve_mut(&mut self, handle: Handle) -> Result<&mut Surface, Error> {
         let slot_index = handle.slot();
-        let slot = self
-            .slots
-            .get_mut(slot_index)
-            .ok_or(Error::InvalidHandle)?;
+        let slot = self.slots.get_mut(slot_index).ok_or(Error::InvalidHandle)?;
         if slot.surface.is_none()
             || slot.generation != handle.generation()
             || slot.owner != handle.owner()
@@ -353,10 +353,9 @@ pub fn take_damage_shared(handle: Handle, grantee: u64) -> Result<Option<(Rect, 
 /// Whether any surface shared with `grantee` has pending damage.
 pub fn damage_pending_for(grantee: u64) -> bool {
     with_registry(|registry| {
-        registry
-            .slots
-            .iter()
-            .any(|slot| slot.surface.is_some() && slot.shared_with == Some(grantee) && slot.damage.is_some())
+        registry.slots.iter().any(|slot| {
+            slot.surface.is_some() && slot.shared_with == Some(grantee) && slot.damage.is_some()
+        })
     })
 }
 
@@ -634,8 +633,8 @@ pub fn damage_self_test() -> bool {
     let taken = take_damage_shared(surface, grantee);
     let region_ok = matches!(&taken, Ok(Some((rect, copy)))
         if *rect == Rect::new(1, 1, 9, 9) && copy.width() == 9 && copy.height() == 9);
-    let cleared = matches!(take_damage_shared(surface, grantee), Ok(None))
-        && !damage_pending_for(grantee);
+    let cleared =
+        matches!(take_damage_shared(surface, grantee), Ok(None)) && !damage_pending_for(grantee);
     // An empty or wholly outside rectangle records nothing.
     let _ = mark_damage(surface, Rect::new(20, 20, 3, 3));
     let ignored = matches!(take_damage_shared(surface, grantee), Ok(None));

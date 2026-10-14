@@ -64,16 +64,30 @@ pub fn attach_encryption(
 /// Encrypt one mounted-volume record in place. The mount identity and key
 /// generation are authenticated as associated data, preventing ciphertext
 /// relocation between volumes or across key rotations.
-pub fn seal_record(id: u64, record_nonce: u64, data: &mut [u8]) -> Option<crate::volume_crypto::Tag> {
+pub fn seal_record(
+    id: u64,
+    record_nonce: u64,
+    data: &mut [u8],
+) -> Option<crate::volume_crypto::Tag> {
     let encryption = {
         let mounts = MOUNTS.lock();
-        mounts.iter().flatten().find(|mount| mount.id == id)?.encryption?
+        mounts
+            .iter()
+            .flatten()
+            .find(|mount| mount.id == id)?
+            .encryption?
     };
     let mut aad = [0u8; 20];
     aad[..8].copy_from_slice(&encryption.volume_id.to_le_bytes());
     aad[8..12].copy_from_slice(&encryption.key_generation.to_le_bytes());
     aad[12..].copy_from_slice(&id.to_le_bytes());
-    crate::volume_crypto::seal_with_owner(encryption.owner, encryption.key, record_nonce, &aad, data)
+    crate::volume_crypto::seal_with_owner(
+        encryption.owner,
+        encryption.key,
+        record_nonce,
+        &aad,
+        data,
+    )
 }
 
 /// Authenticate and decrypt one mounted-volume record. Failed authentication
@@ -87,13 +101,26 @@ pub fn open_record(
 ) -> bool {
     let Some(encryption) = ({
         let mounts = MOUNTS.lock();
-        mounts.iter().flatten().find(|mount| mount.id == id).and_then(|mount| mount.encryption)
-    }) else { return false; };
+        mounts
+            .iter()
+            .flatten()
+            .find(|mount| mount.id == id)
+            .and_then(|mount| mount.encryption)
+    }) else {
+        return false;
+    };
     let mut aad = [0u8; 20];
     aad[..8].copy_from_slice(&encryption.volume_id.to_le_bytes());
     aad[8..12].copy_from_slice(&encryption.key_generation.to_le_bytes());
     aad[12..].copy_from_slice(&id.to_le_bytes());
-    crate::volume_crypto::open_with_owner(encryption.owner, encryption.key, record_nonce, &aad, data, tag)
+    crate::volume_crypto::open_with_owner(
+        encryption.owner,
+        encryption.key,
+        record_nonce,
+        &aad,
+        data,
+        tag,
+    )
 }
 
 pub fn unmount(id: u64) -> bool {
@@ -116,7 +143,10 @@ pub fn encrypted_mount_self_test() -> bool {
         let _ = crate::volume_crypto::revoke_for(owner, handle);
         return false;
     };
-    let identity = crate::volume_crypto::KeyGeneration { volume_id: 0x1234, generation: 3 };
+    let identity = crate::volume_crypto::KeyGeneration {
+        volume_id: 0x1234,
+        generation: 3,
+    };
     if !attach_encryption(id, owner, identity, handle) {
         let _ = unmount(id);
         let _ = crate::volume_crypto::revoke_for(owner, handle);

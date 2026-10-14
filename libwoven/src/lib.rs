@@ -133,6 +133,49 @@ pub mod async_io {
 pub mod security {
     #[derive(Clone, Copy, PartialEq, Eq, Debug)]
     pub struct Capability(pub u64);
+
+    #[derive(Clone, Copy, PartialEq, Eq, Debug)]
+    #[repr(u8)]
+    pub enum AuditAction {
+        CapabilityGrant = 0,
+        CapabilityRevoke = 1,
+        IpcSend = 2,
+        FileWrite = 3,
+        ProcessFault = 4,
+        ProcessExec = 5,
+        ProcessFork = 6,
+        WovenGuardAllow = 7,
+        WovenGuardDeny = 8,
+        CapabilityLineageIssue = 9,
+        CapabilityDerived = 10,
+        CapabilityLineageRelease = 11,
+        CapabilityLineageRevoke = 12,
+        PermissionRequest = 13,
+        PermissionDecision = 14,
+        PermissionRevoke = 15,
+        SandboxProfileBind = 16,
+        SandboxProfileDeny = 17,
+        SandboxServicePublish = 18,
+        SandboxServiceDiscover = 19,
+        SandboxServiceUse = 20,
+        SandboxFileRead = 21,
+        SandboxFileWrite = 22,
+        SandboxDeviceAccess = 23,
+        SecretStore = 24,
+        SecretRevoke = 25,
+    }
+
+    #[derive(Clone, Copy, PartialEq, Eq, Debug)]
+    pub struct AuditEvent {
+        pub sequence: u64,
+        pub tick: u64,
+        pub cpu: u16,
+        pub action: AuditAction,
+        pub actor: u64,
+        pub target: u64,
+        pub detail: u64,
+        pub allowed: bool,
+    }
 }
 pub mod time {
     pub type Ticks = u64;
@@ -222,6 +265,14 @@ pub mod syscall {
     pub const CLOCK_READ: u64 = 119;
     pub const GRAPHICS_COMPOSITOR_BLIT_REGION: u64 = 120;
     pub const GRAPHICS_COMPOSITOR_BLIT_REGION_SHARED: u64 = 121;
+    pub const PERMISSION_REQUEST: u64 = 122;
+    pub const PERMISSION_POLL: u64 = 123;
+    pub const PERMISSION_DECIDE: u64 = 124;
+    pub const PERMISSION_REVOKE: u64 = 125;
+    pub const AUDIT_READ: u64 = 126;
+    pub const SECRET_STORE: u64 = 127;
+    pub const SECRET_READ: u64 = 128;
+    pub const SECRET_REVOKE: u64 = 129;
     pub const MESSAGE_SEND: u64 = 11;
     pub const MESSAGE_RECEIVE: u64 = 12;
 
@@ -389,14 +440,24 @@ pub mod syscall {
     /// # Safety
     /// Must be called from WovenHat userspace.
     pub unsafe fn graphics_surface_create(width: u32, height: u32) -> u64 {
-        unsafe { invoke(GRAPHICS_SURFACE_CREATE, u64::from(width), u64::from(height), 0) }
+        unsafe {
+            invoke(
+                GRAPHICS_SURFACE_CREATE,
+                u64::from(width),
+                u64::from(height),
+                0,
+            )
+        }
     }
 
     /// # Safety
     /// Must be called from WovenHat userspace.
     pub unsafe fn graphics_surface_fill(
         handle: u64,
-        x: u16, y: u16, width: u16, height: u16,
+        x: u16,
+        y: u16,
+        width: u16,
+        height: u16,
         color: u32,
     ) -> u64 {
         let packed = u64::from(x)
@@ -480,7 +541,10 @@ pub mod syscall {
     /// Must be called from WovenHat userspace.
     pub unsafe fn graphics_surface_damage(
         handle: u64,
-        x: u16, y: u16, width: u16, height: u16,
+        x: u16,
+        y: u16,
+        width: u16,
+        height: u16,
     ) -> u64 {
         let packed = u64::from(x)
             | (u64::from(y) << 16)
@@ -512,7 +576,10 @@ pub mod syscall {
     /// `pixels` must be readable for `width * height` `u32`s.
     pub unsafe fn graphics_surface_write(
         handle: u64,
-        x: u16, y: u16, width: u16, height: u16,
+        x: u16,
+        y: u16,
+        width: u16,
+        height: u16,
         pixels: *const u32,
     ) -> u64 {
         let packed = u64::from(x)
@@ -582,14 +649,24 @@ pub mod syscall {
     /// # Safety
     /// `buffer` must be writable for `capacity` bytes and `sender` for 8.
     pub unsafe fn message_receive(buffer: *mut u8, capacity: usize, sender: *mut u64) -> u64 {
-        unsafe { invoke(MESSAGE_RECEIVE, buffer as u64, capacity as u64, sender as u64) }
+        unsafe {
+            invoke(
+                MESSAGE_RECEIVE,
+                buffer as u64,
+                capacity as u64,
+                sender as u64,
+            )
+        }
     }
 
     /// # Safety
     /// Must be called from WovenHat userspace.
     pub unsafe fn graphics_surface_stroke(
         handle: u64,
-        x: u16, y: u16, width: u16, height: u16,
+        x: u16,
+        y: u16,
+        width: u16,
+        height: u16,
         color: u32,
     ) -> u64 {
         let packed = u64::from(x)
@@ -621,7 +698,11 @@ impl GraphicsSurface {
     pub fn create(width: u32, height: u32) -> Result<Self, Error> {
         // SAFETY: both arguments are plain integers.
         let result = unsafe { syscall::graphics_surface_create(width, height) };
-        check(result).map(|handle| Self { handle, width, height })
+        check(result).map(|handle| Self {
+            handle,
+            width,
+            height,
+        })
     }
 
     pub const fn handle(&self) -> u64 {
@@ -639,12 +720,15 @@ impl GraphicsSurface {
     /// Fill `(x, y)` through `(x + w - 1, y + h - 1)` with `color`.
     pub fn fill_rect(
         &self,
-        x: u16, y: u16, width: u16, height: u16, color: u32,
+        x: u16,
+        y: u16,
+        width: u16,
+        height: u16,
+        color: u32,
     ) -> Result<(), Error> {
         // SAFETY: integer-only call carrying the surface's own handle.
-        let result = unsafe {
-            syscall::graphics_surface_fill(self.handle, x, y, width, height, color)
-        };
+        let result =
+            unsafe { syscall::graphics_surface_fill(self.handle, x, y, width, height, color) };
         check(result).map(|_| ())
     }
 
@@ -658,12 +742,15 @@ impl GraphicsSurface {
     /// Stroke a one-pixel outline of a rectangle inside this surface.
     pub fn stroke_rect(
         &self,
-        x: u16, y: u16, width: u16, height: u16, color: u32,
+        x: u16,
+        y: u16,
+        width: u16,
+        height: u16,
+        color: u32,
     ) -> Result<(), Error> {
         // SAFETY: integer-only call carrying the surface's own handle.
-        let result = unsafe {
-            syscall::graphics_surface_stroke(self.handle, x, y, width, height, color)
-        };
+        let result =
+            unsafe { syscall::graphics_surface_stroke(self.handle, x, y, width, height, color) };
         check(result).map(|_| ())
     }
 
@@ -681,8 +768,7 @@ impl GraphicsSurface {
     /// [`wait_any`] with [`wait::DAMAGE`].
     pub fn damage(&self, x: u16, y: u16, width: u16, height: u16) -> Result<(), Error> {
         // SAFETY: integer-only call carrying the surface's own handle.
-        let result =
-            unsafe { syscall::graphics_surface_damage(self.handle, x, y, width, height) };
+        let result = unsafe { syscall::graphics_surface_damage(self.handle, x, y, width, height) };
         check(result).map(|_| ())
     }
 
@@ -700,7 +786,11 @@ impl GraphicsSurface {
     /// then upload it.
     pub fn write(
         &self,
-        x: u16, y: u16, width: u16, height: u16, pixels: &[u32],
+        x: u16,
+        y: u16,
+        width: u16,
+        height: u16,
+        pixels: &[u32],
     ) -> Result<(), Error> {
         if pixels.len() != usize::from(width) * usize::from(height) {
             return Err(Error::Failed);
@@ -795,7 +885,10 @@ impl Region {
     /// `x | y << 16 | width << 32 | height << 48`, the kernel's rectangle
     /// packing.
     pub const fn pack(self) -> u64 {
-        self.x as u64 | (self.y as u64) << 16 | (self.width as u64) << 32 | (self.height as u64) << 48
+        self.x as u64
+            | (self.y as u64) << 16
+            | (self.width as u64) << 32
+            | (self.height as u64) << 48
     }
 }
 
@@ -812,7 +905,12 @@ pub const fn surface_owner(token: u64) -> process::Id {
 /// lands at `(x, y)`. Same rules as [`compositor_blit_shared`]; this is how a
 /// window manager repaints an exposed rectangle without overdrawing windows
 /// stacked above it.
-pub fn compositor_blit_region_shared(handle: u64, region: Region, x: i32, y: i32) -> Result<(), Error> {
+pub fn compositor_blit_region_shared(
+    handle: u64,
+    region: Region,
+    x: i32,
+    y: i32,
+) -> Result<(), Error> {
     // SAFETY: integer-only call.
     let result =
         unsafe { syscall::graphics_compositor_blit_region(handle, x, y, region.pack(), true) };
@@ -916,7 +1014,13 @@ impl<'a> Canvas<'a> {
     pub fn new(pixels: &'a mut [u32], x: i32, y: i32, width: usize, height: usize) -> Option<Self> {
         let length = width.checked_mul(height)?;
         let pixels = pixels.get_mut(..length)?;
-        Some(Self { pixels, x, y, width, height })
+        Some(Self {
+            pixels,
+            x,
+            y,
+            width,
+            height,
+        })
     }
 
     pub const fn x(&self) -> i32 {
@@ -970,7 +1074,13 @@ impl<'a> Canvas<'a> {
 
     /// The part of `(x, y, width, height)` inside the canvas, as buffer
     /// rows and columns.
-    fn clip(&self, x: i32, y: i32, width: usize, height: usize) -> Option<(usize, usize, usize, usize)> {
+    fn clip(
+        &self,
+        x: i32,
+        y: i32,
+        width: usize,
+        height: usize,
+    ) -> Option<(usize, usize, usize, usize)> {
         let left = i64::from(x).max(i64::from(self.x));
         let top = i64::from(y).max(i64::from(self.y));
         let right = (i64::from(x) + width as i64).min(i64::from(self.x) + self.width as i64);
@@ -991,12 +1101,22 @@ impl<'a> Canvas<'a> {
     }
 
     /// Blend `color` over a rectangle with uniform `opacity`.
-    pub fn blend_rect(&mut self, x: i32, y: i32, width: usize, height: usize, color: u32, opacity: u8) {
+    pub fn blend_rect(
+        &mut self,
+        x: i32,
+        y: i32,
+        width: usize,
+        height: usize,
+        color: u32,
+        opacity: u8,
+    ) {
         let Some((column, row, columns, rows)) = self.clip(x, y, width, height) else {
             return;
         };
         for r in row..row + rows {
-            for pixel in &mut self.pixels[r * self.width + column..r * self.width + column + columns] {
+            for pixel in
+                &mut self.pixels[r * self.width + column..r * self.width + column + columns]
+            {
                 *pixel = blend(color, *pixel, opacity) & 0x00ff_ffff;
             }
         }
@@ -1173,9 +1293,15 @@ pub enum Key {
 pub enum InputEvent {
     Key(Key),
     /// Relative motion; Y grows downwards.
-    PointerMove { dx: i16, dy: i16 },
+    PointerMove {
+        dx: i16,
+        dy: i16,
+    },
     /// Button 0 is left, 1 right, 2 middle.
-    PointerButton { button: u8, pressed: bool },
+    PointerButton {
+        button: u8,
+        pressed: bool,
+    },
 }
 
 /// Take the next input event of any kind, if any. Same authority as
@@ -1223,7 +1349,9 @@ fn decode_event(result: u64) -> Result<Option<InputEvent>, Error> {
     let value = check(result)?;
     let payload = value & 0x00ff_ffff_ffff_ffff;
     Ok(Some(match value >> 56 {
-        1 => InputEvent::Key(Key::Char(char::from_u32(payload as u32).ok_or(Error::Failed)?)),
+        1 => InputEvent::Key(Key::Char(
+            char::from_u32(payload as u32).ok_or(Error::Failed)?,
+        )),
         2 => InputEvent::Key(Key::Enter),
         3 => InputEvent::Key(Key::Backspace),
         4 => InputEvent::Key(Key::Tab),
@@ -1270,12 +1398,159 @@ pub enum Error {
     WouldBlock,
 }
 
+/// Runtime authorities that may be requested from the permission broker.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(u64)]
+pub enum Permission {
+    Camera = 0,
+    Microphone = 1,
+    Network = 2,
+    FilesystemRead = 3,
+    FilesystemWrite = 4,
+    Gpu = 5,
+    Usb = 6,
+    Clipboard = 7,
+    Location = 8,
+    Processes = 9,
+    Ipc = 10,
+    Storage = 11,
+    Display = 12,
+    Input = 13,
+    Ai = 14,
+    Secrets = 15,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PermissionState {
+    Pending,
+    Resolving,
+    Granted,
+    Denied,
+    Revoked,
+}
+
+/// Ask the broker for one authority. `reason` is an application-defined
+/// stable digest; user-facing brokers can resolve it to localized text.
+pub fn permission_request(permission: Permission, reason: u64) -> Result<u64, Error> {
+    check(unsafe { syscall::invoke(syscall::PERMISSION_REQUEST, permission as u64, reason, 0) })
+}
+
+pub fn permission_poll(handle: u64) -> Result<PermissionState, Error> {
+    match check(unsafe { syscall::invoke(syscall::PERMISSION_POLL, handle, 0, 0) })? {
+        0 => Ok(PermissionState::Pending),
+        1 => Ok(PermissionState::Resolving),
+        2 => Ok(PermissionState::Granted),
+        3 => Ok(PermissionState::Denied),
+        4 => Ok(PermissionState::Revoked),
+        _ => Err(Error::Failed),
+    }
+}
+
+/// Resolve a request. The kernel accepts this only from an authorized policy
+/// service holding `TaskControl`.
+pub fn permission_decide(handle: u64, allow: bool) -> Result<(), Error> {
+    check(unsafe { syscall::invoke(syscall::PERMISSION_DECIDE, handle, u64::from(allow), 0) })
+        .map(|_| ())
+}
+
+pub fn permission_revoke(handle: u64) -> Result<(), Error> {
+    check(unsafe { syscall::invoke(syscall::PERMISSION_REVOKE, handle, 0, 0) }).map(|_| ())
+}
+
+/// Store a bounded secret in the caller-owned volatile WovenVault and return a
+/// generation-tagged handle. The input is copied before the syscall returns.
+pub fn secret_store(secret: &[u8]) -> Result<u64, Error> {
+    check(unsafe {
+        syscall::invoke(
+            syscall::SECRET_STORE,
+            secret.as_ptr() as u64,
+            secret.len() as u64,
+            0,
+        )
+    })
+}
+
+/// Copy a secret into a caller-owned buffer. The handle never exposes a kernel
+/// pointer and is invalidated when the owner exits or revokes it.
+pub fn secret_read(handle: u64, output: &mut [u8]) -> Result<usize, Error> {
+    let length = check(unsafe {
+        syscall::invoke(
+            syscall::SECRET_READ,
+            handle,
+            output.as_mut_ptr() as u64,
+            output.len() as u64,
+        )
+    })? as usize;
+    if length > output.len() {
+        return Err(Error::Failed);
+    }
+    Ok(length)
+}
+
+pub fn secret_revoke(handle: u64) -> Result<(), Error> {
+    check(unsafe { syscall::invoke(syscall::SECRET_REVOKE, handle, 0, 0) }).map(|_| ())
+}
+
 fn check(value: u64) -> Result<u64, Error> {
     match value {
         syscall::ERROR => Err(Error::Failed),
         syscall::WOULD_BLOCK => Err(Error::WouldBlock),
         other => Ok(other),
     }
+}
+
+/// Read one retained security-ledger record, newest first. The caller needs
+/// the kernel's `TaskInspect` authority; no user pointer is retained.
+pub fn audit_read(offset: u64) -> Result<Option<security::AuditEvent>, Error> {
+    let mut bytes = [0_u8; 48];
+    let result = check(unsafe {
+        syscall::invoke(syscall::AUDIT_READ, offset, bytes.as_mut_ptr() as u64, 0)
+    })?;
+    if result == 0 {
+        return Ok(None);
+    }
+    if result != 1 {
+        return Err(Error::Failed);
+    }
+    let action = match bytes[18] {
+        0 => security::AuditAction::CapabilityGrant,
+        1 => security::AuditAction::CapabilityRevoke,
+        2 => security::AuditAction::IpcSend,
+        3 => security::AuditAction::FileWrite,
+        4 => security::AuditAction::ProcessFault,
+        5 => security::AuditAction::ProcessExec,
+        6 => security::AuditAction::ProcessFork,
+        7 => security::AuditAction::WovenGuardAllow,
+        8 => security::AuditAction::WovenGuardDeny,
+        9 => security::AuditAction::CapabilityLineageIssue,
+        10 => security::AuditAction::CapabilityDerived,
+        11 => security::AuditAction::CapabilityLineageRelease,
+        12 => security::AuditAction::CapabilityLineageRevoke,
+        13 => security::AuditAction::PermissionRequest,
+        14 => security::AuditAction::PermissionDecision,
+        15 => security::AuditAction::PermissionRevoke,
+        16 => security::AuditAction::SandboxProfileBind,
+        17 => security::AuditAction::SandboxProfileDeny,
+        18 => security::AuditAction::SandboxServicePublish,
+        19 => security::AuditAction::SandboxServiceDiscover,
+        20 => security::AuditAction::SandboxServiceUse,
+        21 => security::AuditAction::SandboxFileRead,
+        22 => security::AuditAction::SandboxFileWrite,
+        23 => security::AuditAction::SandboxDeviceAccess,
+        24 => security::AuditAction::SecretStore,
+        25 => security::AuditAction::SecretRevoke,
+        _ => return Err(Error::Failed),
+    };
+    Ok(Some(security::AuditEvent {
+        sequence: u64::from_le_bytes(bytes[0..8].try_into().unwrap_or([0; 8])),
+        tick: u64::from_le_bytes(bytes[8..16].try_into().unwrap_or([0; 8])),
+        cpu: u16::from_le_bytes(bytes[16..18].try_into().unwrap_or([0; 2])),
+        action,
+        actor: u64::from_le_bytes(bytes[20..28].try_into().unwrap_or([0; 8])),
+        target: u64::from_le_bytes(bytes[28..36].try_into().unwrap_or([0; 8])),
+        detail: u64::from_le_bytes(bytes[36..44].try_into().unwrap_or([0; 8])),
+        allowed: bytes[19] != 0,
+    }))
 }
 
 /// Write a byte slice to a descriptor, returning the count accepted.
@@ -1332,10 +1607,15 @@ pub const MAX_NAME: usize = 255;
 /// Entry `index` of directory `path`: its name, copied into `name`, and
 /// whether it is itself a directory. Fails past the last entry. Requires
 /// `FileRead`.
-pub fn read_dir(path: &str, index: usize, name: &mut [u8; MAX_NAME]) -> Result<(usize, bool), Error> {
+pub fn read_dir(
+    path: &str,
+    index: usize,
+    name: &mut [u8; MAX_NAME],
+) -> Result<(usize, bool), Error> {
     // SAFETY: the path is readable for its length, and `name` is writable
     // for the longest name the kernel copies.
-    let value = check(unsafe { syscall::readdir(path.as_ptr(), path.len(), index, name.as_mut_ptr()) })?;
+    let value =
+        check(unsafe { syscall::readdir(path.as_ptr(), path.len(), index, name.as_mut_ptr()) })?;
     Ok(((value & 0xff) as usize, (value >> 8) & 0xff == 1))
 }
 
@@ -1428,7 +1708,10 @@ mod tests {
         let mut pixels = [0u32; 12];
         assert!(Canvas::new(&mut pixels, 0, 0, 4, 3).is_some());
         assert!(Canvas::new(&mut pixels, 0, 0, 4, 4).is_none());
-        assert!(Canvas::new(&mut pixels, 0, 0, usize::MAX, 2).is_none(), "overflow refused");
+        assert!(
+            Canvas::new(&mut pixels, 0, 0, usize::MAX, 2).is_none(),
+            "overflow refused"
+        );
         let canvas = Canvas::new(&mut pixels, 0, 0, 2, 2).unwrap();
         assert_eq!(canvas.pixels().len(), 4, "only the rectangle is exposed");
     }
@@ -1440,12 +1723,25 @@ mod tests {
         canvas.set(101, 52, 0xffab_cdef);
         assert_eq!(canvas.get(101, 52), Some(0x00ab_cdef), "high byte cleared");
         // Outside the rectangle: ignored on write, absent on read.
-        for (x, y) in [(99, 50), (104, 50), (100, 49), (100, 54), (i32::MIN, i32::MAX)] {
+        for (x, y) in [
+            (99, 50),
+            (104, 50),
+            (100, 49),
+            (100, 54),
+            (i32::MIN, i32::MAX),
+        ] {
             canvas.set(x, y, 1);
             assert_eq!(canvas.get(x, y), None);
         }
-        assert_eq!(canvas.pixels().iter().filter(|pixel| **pixel != 0).count(), 1);
-        assert_eq!(pixels[2 * 4 + 1], 0x00ab_cdef, "row-major from the top-left");
+        assert_eq!(
+            canvas.pixels().iter().filter(|pixel| **pixel != 0).count(),
+            1
+        );
+        assert_eq!(
+            pixels[2 * 4 + 1],
+            0x00ab_cdef,
+            "row-major from the top-left"
+        );
     }
 
     #[test]
@@ -1456,7 +1752,11 @@ mod tests {
         assert!(canvas.pixels().iter().all(|pixel| *pixel == rgb(9, 9, 9)));
         // Hanging off the bottom-right corner: a 2x2 overlap.
         canvas.fill_rect(12, 12, 10, 10, rgb(1, 2, 3));
-        let changed = canvas.pixels().iter().filter(|pixel| **pixel == rgb(1, 2, 3)).count();
+        let changed = canvas
+            .pixels()
+            .iter()
+            .filter(|pixel| **pixel == rgb(1, 2, 3))
+            .count();
         assert_eq!(changed, 4);
         assert_eq!(canvas.get(11, 11), Some(rgb(9, 9, 9)));
         // Entirely outside, or empty: nothing.
@@ -1465,7 +1765,10 @@ mod tests {
         assert!(canvas.pixels().iter().all(|pixel| *pixel != 0));
         // Blending is the formula over what is there.
         canvas.blend_rect(10, 10, 1, 1, rgb(255, 255, 255), 100);
-        assert_eq!(canvas.get(10, 10), Some(blend(rgb(255, 255, 255), rgb(9, 9, 9), 100)));
+        assert_eq!(
+            canvas.get(10, 10),
+            Some(blend(rgb(255, 255, 255), rgb(9, 9, 9), 100))
+        );
         assert_eq!(canvas.get(11, 10), Some(rgb(9, 9, 9)));
     }
 
@@ -1485,11 +1788,19 @@ mod tests {
         let mut canvas = Canvas::new(&mut pixels, 0, 0, width, height).unwrap();
         canvas.draw_text(1, 2, "Ab\nc", 7);
         let lit = |canvas: &Canvas<'_>, x: i32, y: i32| canvas.get(x, y) == Some(7);
-        for (character, x0, y0) in [('A', 1, 2), ('b', 1 + font::ADVANCE, 2), ('c', 1, 2 + font::LINE_HEIGHT)] {
+        for (character, x0, y0) in [
+            ('A', 1, 2),
+            ('b', 1 + font::ADVANCE, 2),
+            ('c', 1, 2 + font::LINE_HEIGHT),
+        ] {
             for (row, bits) in font::glyph(character).iter().enumerate() {
                 for column in 0..font::WIDTH as i32 {
                     let set = bits & (1 << (font::WIDTH as i32 - 1 - column)) != 0;
-                    assert_eq!(lit(&canvas, x0 + column, y0 + row as i32), set, "{character} ({column}, {row})");
+                    assert_eq!(
+                        lit(&canvas, x0 + column, y0 + row as i32),
+                        set,
+                        "{character} ({column}, {row})"
+                    );
                 }
             }
         }
@@ -1499,7 +1810,12 @@ mod tests {
 
     #[test]
     fn region_packing_matches_the_kernel_rectangle_layout() {
-        let region = Region { x: 0x0102, y: 0x0304, width: 0x0506, height: 0x0708 };
+        let region = Region {
+            x: 0x0102,
+            y: 0x0304,
+            width: 0x0506,
+            height: 0x0708,
+        };
         assert_eq!(region.pack(), 0x0708_0506_0304_0102);
     }
 
@@ -1509,12 +1825,20 @@ mod tests {
         let packed = 640 | (400 << 24) | (2 << 48);
         assert_eq!(
             CompositorInfo::unpack(packed),
-            CompositorInfo { width: 640, height: 400, scale: 2 }
+            CompositorInfo {
+                width: 640,
+                height: 400,
+                scale: 2
+            }
         );
         let largest = 1920 | (1200 << 24) | (4 << 48);
         assert_eq!(
             CompositorInfo::unpack(largest),
-            CompositorInfo { width: 1920, height: 1200, scale: 4 }
+            CompositorInfo {
+                width: 1920,
+                height: 1200,
+                scale: 4
+            }
         );
     }
 

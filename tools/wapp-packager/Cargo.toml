@@ -1,0 +1,9 @@
+[package]
+name = "wovenhat-wapp-packager"
+version = "0.1.0"
+edition = "2021"
+
+[workspace]
+
+[dependencies]
+ed25519-compact = { version = "2.6", default-features = false }

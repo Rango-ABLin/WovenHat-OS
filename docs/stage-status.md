@@ -1,5 +1,22 @@
 # Stage status
 
+## 2026-10-14 revalidation
+
+Stage 16.1, 17.1, 18.1, 19.1, 19.3, and 19.10 were rerun on 1/2/4 CPUs
+after the remote-termination cleanup change; all emitted their required pass
+markers and exit 33. See
+[the revalidation audit](audit-stage17-19-revalidation-2026-10-14.md).
+
+## Host-test boundary repair — 2026-10-14
+
+The freestanding kernel now has an explicit host-test boundary: test builds no
+longer hide mutex/heap symbols needed by compiled production modules, and they
+do not install a second panic or allocator handler. Warning-denying kernel
+Clippy, all-targets Clippy, and the complete `wovenhat-os` integration-test
+gate pass. The unsupported `cargo test --workspace --all-targets` command is
+documented as a host-assembler mismatch rather than treated as a production
+failure. See the [host-test audit](audit-host-test-boundary-2026-10-14.md).
+
 ## Stage 20.3 — WovenStart application launcher (2026-10-13)
 
 Roadmap Stage 18.2, WovenStart: application launcher and search.
@@ -271,13 +288,13 @@ Open:
   taskbar window list, the system tray, and notification toasts.
 - **WovenStart** is a placeholder button; the launcher is 18.2.
 - **Clock** shows UTC: there is no time-zone configuration.
-- **Kill-path gaps outside this stage.** The kill path still skips
-  `thread::reap_owner`, `notifications::discard_recipient`,
-  `terminal::release_foreground` and `network::close_process_sockets`,
-  which `exit_current_process` performs. This was found during this review
-  and not changed here.
+- **Kill-path cleanup now matches explicit exit.** Scheduler-driven remote
+  termination releases thread handles, queued notifications, terminal
+  foreground ownership, and process sockets before publishing the zombie.
+  Host Clippy and the complete host test suite pass after this fix; physical
+  USB and multi-monitor qualification remain outside the QEMU gate.
 
-## Stage 19.14 — integer display scaling and paced animation (2026-10-13)
+## Stage 19.14 — integer display scaling and paced animation (2026-10-14)
 
 Roadmap Stage 17's DPI-scaling and animation items. This closes the
 compositor stage except multiple monitors, which is deferred (see Open).
@@ -362,7 +379,7 @@ Open:
 - Rescaling transiently holds two surfaces (up to about 18 MB). This is
   bounded because only the holder can rescale.
 
-## Stage 19.13 — translucent windows and shadows (2026-10-13)
+## Stage 19.13 — translucent windows and shadows (2026-10-14)
 
 Roadmap Stage 17's transparency and shadow items.
 
@@ -404,6 +421,9 @@ Gate `[S19.13] translucency and shadows: PASSED`:
 - The kernel recomputes the four regions with its own `blend_pixel` after
   both processes exit.
 
+Local 1/2/4-CPU evidence is recorded in the
+[Stage 19.13 transparency audit](audit-stage19-13-transparency-2026-10-13.md).
+
 Negative control: with `blend` copying opaquely, the compositor fails its
 region check (exit 167) and the gate fails. Evidence is in
 `audit-artifacts/stage19.13-negative-control-*`.
@@ -414,7 +434,7 @@ Open:
 - No animation: frame timing belongs to the window manager, and there is no
   vsync source.
 
-## Stage 19.12 — PS/2 pointer input; keystrokes delivered at IRQ time (2026-10-13)
+## Stage 19.12 — PS/2 pointer input; keystrokes delivered at IRQ time (2026-10-14)
 
 **Defect fixed (Stages 19.5/19.6).** The keyboard IRQ handler only queued raw
 scancodes. They became WovenInput events only when a consumer called
@@ -473,7 +493,7 @@ Open:
   image: drawing one is the window manager's job, and there is no hardware
   cursor.
 
-## Stage 19.11 — userspace window manager: stacking, raise, focus, input routing (2026-10-12)
+## Stage 19.11 — userspace window manager: stacking, raise, focus, input routing (2026-10-14)
 
 **Roadmap mapping.** This repository's Stage 18–19 numbering has drifted
 from `docs/master-development-roadmap.md`: the work from Stage 18.1 onward is
@@ -523,17 +543,18 @@ window still visible" probe used a corner the raised window covers in the
 swapped layout. That was a test defect. The probe now picks an uncovered
 corner. Evidence is in `audit-artifacts/stage19.11-probe-point-1cpu-*`.
 
-Open (remaining roadmap Stage 17 items):
+Open (remaining roadmap Stage 17 items after the accepted Stage 19 gates):
 - A window move or lower redraws all windows: the window manager tracks no
   exposed regions, and the kernel compositor has no z-order of its own,
   because stacking is policy, held in userspace.
-- No transparency, shadows or animations: blits are opaque copies.
-- Single monitor; no DPI scaling.
-- Keys only: pointer events have no userspace encoding yet, so there is no
-  click-to-focus.
+- Multi-monitor output and per-display policy are not implemented.
+- Scaling is integer-only and animation pacing is bounded software timing;
+  fractional DPI and hardware GPU acceleration remain outside this gate.
 
-Next prerequisite: pointer input (PS/2 or USB HID mouse) delivered through
-focus, so focus and stacking can follow the pointer.
+Pointer-driven focus is closed by Stage 19.12: IRQ12 mouse packets and
+IRQ1 keyboard input reach the event-driven window manager, clicks raise and
+focus the selected window, and keys route only to that client. See the
+[Stage 19.12 pointer audit](audit-stage19-12-pointer-2026-10-13.md).
 
 ## Stage 19.10 — compositor follows the framebuffer; one framebuffer writer (2026-10-12)
 
@@ -1039,6 +1060,9 @@ Stage 19.1 run failed on all CPU counts because `blit` snapshotted the client
 before checking readiness. It returned `InvalidClient` where `NotReady` was
 specified, and the fix checks readiness first.
 
+Historical note: the following paragraph describes the pre-19.3 baseline; the
+later Stage 19 gates supersede those limitations.
+
 Open: the compositor surface is not yet presented to the real framebuffer. It is
 a fixed 640×480 off-screen surface, because no global framebuffer accessor
 exists for it. There is no stacking, focus or input routing: a blit lands where
@@ -1060,7 +1084,7 @@ had 14, so "WOVENHAT DESKTOP" could not render. `kernel/src/display.rs` adds
 Marker: `[S17.1] WovenHat font coverage: PASSED`. Passed on 1, 2 and
 4 CPUs in the Stage 18–19 validation.
 
-## Stage 16.1 — applications built outside the kernel (2026-10-12)
+## Stage 16.1 — applications built outside the kernel (2026-10-14)
 
 WovenHat runs a program produced by the ordinary Rust toolchain. Before this,
 every userspace program was one of 32 `global_asm!` blocks in
@@ -1069,11 +1093,13 @@ runtime, so a program could not exist without editing the kernel. That was the
 binding constraint on a userspace platform, and therefore on any desktop.
 
 `apps/hello` is a separate crate, excluded from the kernel workspace, with its
-own linker script and link flags. It compiles to a static ET_EXEC image that the
-kernel installs into the filesystem, reads back, and loads through the same ELF
-loader every other executable uses. The self-test loads the bytes read from the
-filesystem rather than the embedded constant, so the gate proves that path
-rather than assuming it.
+own linker script and link flags. It compiles to a static ET_EXEC image; the
+dedicated harness signs that image into a WAPP package before the kernel build.
+The kernel verifies the package, installs it into the filesystem, reads it back,
+and loads the verified payload through the same ELF loader every other
+executable uses. The self-test loads the bytes read from the filesystem rather
+than the embedded constant, so the gate proves signature enforcement and that
+path rather than assuming either.
 
 `libwoven` grew from two bound syscalls to the process, I/O, filesystem, time
 and environment core, in two layers: one `unsafe` wrapper per kernel entry point
@@ -1091,11 +1117,13 @@ small model and conflicts; and an explicit `PHDRS` linker script with
 writable-executable segment.
 
 The marker is `[S16.1] out-of-kernel application: PASSED`, with per-step markers
-for loader acceptance, filesystem install, read-back, load, spawn, completion
-and exit status. Passed on 1, 2 and 4 CPUs.
+for WAPP verification, tamper refusal, unsigned-external-image refusal, loader
+acceptance, filesystem install, read-back, load, spawn, completion and exit
+status. The dedicated application harness now passes on 1, 2 and 4 CPUs; see
+the [Stage 16.1 audit](audit-stage16-1-out-of-kernel-application-2026-10-14.md).
 
 Open: one application per acceptance build, since `WOVENHAT_APP_IMAGE` names a
-single image; no FAT32 round trip, because the gate installs into the VFS at
+single signed package; no FAT32 round trip, because the gate installs into the VFS at
 `/bin` where `exec` resolves names; no shared libraries or thread-locals, both
 rejected by the loader by design; and no stack-size negotiation.
 
@@ -1144,10 +1172,75 @@ Stages 12.1–12.5 passed on 1/2/4 CPUs with exit 33. See the
 [revalidation audit](audit-stage12-acceptance-2026-10-13.md). This confirms the
 bounded gates only; the integration and physical limits above remain open.
 
+## Stage 15.3 — runtime permission broker (2026-10-13)
+
+The bounded permission broker now exposes generation-safe request/poll/decide/
+revoke operations through the userspace ABI. Decisions require `TaskControl`
+and successful changes pass through WovenGuard grant/revoke lineage checks;
+security-ledger events record each request and decision. The 1/2/4-CPU gate,
+freestanding Clippy, and all-target Clippy pass. See the
+[Stage 15.3 permission-broker audit](audit-stage15-3-permission-broker-2026-10-13.md).
+Graphical prompts, signed application identity, persistent consent, secure or
+measured boot, and WovenVault remain open Stage 15 work.
+
+## Stage 15.4 — signed application cryptographic boundary (2026-10-13)
+
+The pure-Rust `no_std` Ed25519 verifier and bounded versioned WAPP envelope
+now reject malformed and tampered payloads. The exact 1/2/4-CPU gate and
+warning-denying freestanding Clippy pass; see the
+[Stage 15.4 audit](audit-stage15-4-signed-applications-2026-10-13.md).
+Release builds now require `WOVENHAT_APP_TRUSTED_PUBLIC_KEY_HEX`; the RFC
+self-test remains pinned to the development vector. Signed package
+installation now has a real external-application path through
+`tools/wapp-packager`, and Stage 16.1 verifies that package before and after its
+VFS round trip. Multi-application catalogs, rollback protection, key
+rotation/revocation, and firmware/installer-owned key slots remain open. User
+`exec`/`spawn` now reject raw external ELF; only the finite kernel-owned system
+image allowlist retains the explicit internal-image path.
+Stage 15.5 software signed-kernel handoff is accepted with the exact 1/2/4-CPU
+gate; see the [secure-boot audit](audit-stage15-5-secure-boot-2026-10-13.md).
+Firmware UEFI Secure Boot state, TPM/event logs, release-key provisioning,
+rollback/revocation, and signed-initrd enforcement remain hardware/platform
+work and are not claimed complete.
+
+## Stage 15.7 — WovenVault volatile secret handles (2026-10-13)
+
+WovenVault now provides generation-safe per-owner secret handles with bounded
+storage, validated copy-in/copy-out, zeroizing revoke, and owner teardown.
+The `Secrets` capability is not granted by default. The 1/2/4-CPU gate and
+warning-denying freestanding kernel Clippy pass. See the
+[Stage 15.7 WovenVault audit](audit-stage15-7-wovenvault-handles-2026-10-13.md).
+The Stage 15.6 software measurement audit records the separate 1/2/4-CPU
+kernel measurement gate; TPM PCR extension, event logs, and firmware Secure
+Boot state remain hardware-dependent.
+Persistent encrypted records, rotation, TPM/firmware provisioning, and a
+secrets UI remain open.
+
+## Stage 15.8 — security-ledger read ABI (2026-10-13)
+
+The security ledger now has a bounded newest-relative read syscall authorized
+by `TaskInspect`, with validated userspace copies and a fixed 48-byte record
+decoded by typed `libwoven` wrappers. The 1/2/4-CPU gate, build, and
+warning-denying freestanding kernel Clippy pass. See the
+[Stage 15.8 security-ledger audit](audit-stage15-8-security-ledger-2026-10-13.md).
+This is an ABI boundary, not a complete security-center product: durable
+retention/export, signed identity, graphical review, and secure/measured boot
+remain open.
+
+## Stage 15.9 — exploit-mitigation hardening (2026-10-13)
+
+The existing ASLR, W^X, and user-stack guard-page checks are now joined by a
+scheduler-validated canary on each static kernel task stack. The dedicated
+1/2/4-CPU gate and warning-denying freestanding kernel Clippy pass. See the
+[Stage 15.9 exploit-mitigation audit](audit-stage15-9-exploit-mitigations-2026-10-13.md).
+This closes the verified software-hardening subset only: true unmapped kernel
+stack guards, SMEP/SMAP enablement and hardware qualification, and dynamic
+RELRO/TLS support remain open.
+
 ## Stage 1–5 bounded batch data journal — 2026-10-06
 
 FAT32 persistence now exposes a separate versioned `WDJ2` journal for bounded
-four-file data batches. Prepared batches roll every partially-written file
+sixteen-file data batches. Prepared batches roll every partially-written file
 back to its prior bytes and remove stale WMD1/WMD2 metadata intents; committed
 batches are retired only after all intended checksums match. The legacy `WDJ1`
 single-file format and metadata ABIs remain readable. Kernel
@@ -1175,6 +1268,9 @@ This is a bounded hardening increment, not full Stage 1–5 completion. Metadata
 transactions beyond the sidecars, arbitrary-size/full-volume rollback,
 physical storage/DMA qualification, and unclean-shutdown hardware evidence
 remain open.
+
+The WDJ2 capacity extension was revalidated on 1/2/4 CPUs after increasing the
+bounded batch maximum from four to sixteen entries; see the [capacity audit](audit-stage1-5-wdj2-capacity-2026-10-14.md).
 
 ## Stage 14.2D — Router Advertisement state (2026-10-06)
 
@@ -1684,19 +1780,22 @@ leases, teardown-before-reuse invalidation, and bridge bus-window parentage.
 The dedicated preservation gate requires focused host tests, warning-denying
 kernel Clippy, runtime-harness regressions, and 1/2/4-CPU QEMU evidence.
 
-Full Stage 13.2 acceptance remains blocked on BAR size probing/allocation and
-rebalance, bridge I/O/MMIO/prefetchable resource routing, generic MSI/MSI-X
-vector allocation/programming/teardown, PCIe hotplug, and valid-BAR physical
-qualification. Raw legacy MMIO mappings remain shared and non-revocable;
-owner-scoped mappings are covered by the follow-up below.
+Full Stage 13.2 acceptance remains open for physical BAR qualification,
+bridge interoperability beyond the QEMU fixture, MSI qualification beyond the
+QEMU SATA path, MSI-X delivery, PCIe link/power hotplug, and device-specific
+reset/recovery. The software BAR probe, bounded
+allocation/rebalance, bridge routing transaction, interrupt ownership paths,
+and hotplug reconciliation are covered by the follow-ups below. Raw legacy
+MMIO mappings remain shared and non-revocable; owner-scoped mappings are
+covered by the follow-up below.
 
 The WovenDriver integration item now has a bounded acceptance probe. The
 Stage 13.2 gate claims one discovered function for a synthetic feature-gated
 owner, retains its programmed MMIO BAR leases, and releases subordinate
 resources before function ownership. The 1/2/4-CPU preservation gate passed;
 see [the lifecycle audit](audit-stage13-2-driver-lifecycle-2026-10-13.md).
-This does not close the remaining physical rebalance, generic interrupt,
-hotplug, or MMIO mapping-revoke requirements.
+This does not close the remaining physical rebalance, hardware interrupt
+qualification, hotplug, or MMIO mapping-revoke requirements.
 
 The follow-up adds owner-scoped page mappings: raw legacy MMIO mappings remain
 shared and non-revocable, while PCI driver mappings carry an owner token and
@@ -1704,10 +1803,132 @@ are revoked after interrupt quiescence and before BAR/function release. The
 1/2/4-CPU gate passes and proves same-page remap after teardown. QEMU's only
 candidate firmware BAR is outside the direct-map range and is rejected
 fail-closed, so this is not physical device-BAR qualification. Remaining work
-is live BAR rebalance/admission, generic physical MSI/MSI-X, PCIe hotplug, and
-valid-BAR hardware qualification.
+is MSI-X/physical interrupt qualification, PCIe link/power hotplug, and
+valid-BAR hardware qualification beyond the QEMU fixture.
 
-Stage 13.3 NVMe is intentionally not advanced by this work.
+The acceptance probe now also runs the driver-aware no-removal rescan after
+teardown and recomputes bridge routing before it finishes. The 1/2/4-CPU
+matrix passed; this validates coordinator ordering but does not substitute for
+physical PCIe insertion/removal qualification.
+
+Initial PCI discovery now has the same admission boundary: `hal::init` uses
+discover-and-route, bridge-bearing generations are not driver-admissible until
+the rollback-capable bridge transaction succeeds, and routing/discovery failure
+rejects later driver claims fail-closed. The 1/2/4-CPU preservation gate passed;
+see the [admission-routing audit](audit-stage13-2-admission-routing-2026-10-13.md).
+This validates ordering and failure policy, not physical bridge-window
+interoperability on hardware absent from QEMU.
+
+The ECAM configuration path now applies the mapped page offset for both reads
+and writes. Before this repair, live ECAM discovery repeated the vendor/device
+dword at every offset, masking real class, BAR, and capability behavior. The
+corrected path is covered by the 1/2/4-CPU gate and the
+[ECAM offset audit](audit-stage13-2-ecam-offset-2026-10-13.md).
+
+The reconciliation boundary also clears admission before publishing a
+refreshed inventory, eliminating the interval where a concurrent bind could
+observe new topology before bridge programming completed. The updated 1/2/4
+CPU matrix passed with warning-denying Clippy.
+
+The firmware BAR rebalance path now retains successful reservations in bounded
+persistent PCI resource state, rejects duplicate function admission, clears
+and verifies BAR registers before releasing reservations, and refreshes the
+published device state. The focused freestanding check and warning-denying
+Clippy pass; see the [persistent BAR audit](audit-stage13-2-bar-resources-2026-10-13.md).
+
+Persistent BAR teardown now verifies PCI command-space decoding is disabled,
+clears the assigned BARs, refreshes inventory, and reroutes bridge windows
+before releasing address reservations; failed verification retains the
+allocation for retry. This prevents allocator reuse while a device could
+still decode its old BAR assignment.
+
+Normal PCI driver admission now invokes the BAR allocator for the safe
+all-unassigned case, refreshes the published BAR view before leasing, rejects
+mixed layouts fail-closed, and checkpoints persistent ownership through
+unbind. Successful rebalance also reroutes the bridge hierarchy before any
+MMIO lease is published. See the [automatic BAR admission audit](audit-stage13-2-bar-admission-2026-10-13.md).
+QEMU still lacks a valid physical unassigned-BAR fixture, so the positive
+hardware allocation path remains unqualified.
+
+PCI rescans now report newly inserted functions through a bounded
+`hotplug_rescan_report` while preserving the existing summary-only API. Full
+driver-relevant identity changes at a BDF are detected; if replacement occurs
+before old-owner quiescence, the entire batch fails closed before any teardown
+configuration write. Persistent BAR reservations are released before unbound
+generations are invalidated, and new functions are verified after topology
+publication and bridge routing before being returned to driver matching;
+unknown hardware is never auto-bound. See the [hotplug insertion audit](audit-stage13-2-hotplug-insertion-2026-10-13.md).
+Physical PCIe link/power hotplug remains hardware-dependent.
+
+The driver manager now provides bounded PCI identity matching and an explicit
+match-then-bind API for insertion reports. Empty matchers are rejected and
+unknown hardware remains unclaimed. See the [driver-matching audit](audit-stage13-driver-matching-2026-10-13.md).
+Device-specific drivers, initialization policies, and physical PCIe
+interoperability remain later qualification work.
+
+The driver layer now exposes generic interrupt selection: MSI-X is attempted
+when capability and retained BAR authority permit it, clean failures fall back
+to MSI, and activation-retained leases never fall back or lose ownership. See
+the [interrupt-selection audit](audit-stage13-2-interrupt-selection-2026-10-13.md).
+Physical vector delivery remains unqualified on QEMU.
+
+PCI driver suspend/resume now owner-checks the function, disables and verifies
+command decoding, and, when the PCI Power Management capability is present,
+checkpoints PMCSR, enters D3hot, restores D0, and restores the exact command
+checkpoint before resuming. Missing checkpoints and failed transitions fail
+closed. See the [PCI suspend/resume audit](audit-stage13-2-suspend-resume-2026-10-13.md).
+Device-specific reset, D3cold, wake signaling, and physical power-management
+qualification remain open.
+
+The generic MSI programming path now snapshots and restores the original
+capability/message state on every configuration failure, including a failed
+initial disabled-header write. Every header, address, and data write is
+read-back verified; `RestoreFailed` is returned when repair itself cannot be
+verified. Vector and interrupt-mode ownership remain retained until successful
+quiescence. Corrected ECAM offset handling now decodes live PCI classes and
+capabilities correctly; the QEMU SATA fixture exercised generic MSI activation
+and ordered teardown on the 1/2/4-CPU preservation matrix. See the
+[MSI rollback audit](audit-stage13-2-msi-rollback-2026-10-13.md). Physical
+MSI qualification beyond this QEMU fixture and MSI-X table/vector delivery
+remain hardware-dependent.
+
+MSI-X activation now asserts Function Mask and keeps MSI-X disabled before any
+table MMIO. Table reads and programming use owner-scoped MMIO mappings and
+release those mappings after each bounded volatile operation. If programming
+has made a table entry device-visible but cleanup fails, the `MsixLease` is
+retained for ordered teardown rather than losing the vector obligation. The
+Stage 13.2 probe now also scans disposable QEMU PCI fixtures, activates a real
+MSI-X lease when its table BAR is admissible, and verifies the bounded
+high-MMIO fallback mapping; the 1/2/4-CPU preservation matrix passed with
+those fixtures present. See the
+[MSI-X mapping audit](audit-stage13-2-msix-mapping-2026-10-13.md). Physical
+MSI-X delivery, PCIe hotplug, and physical device lifecycle remain
+unqualified because QEMU does not provide those physical conditions.
+
+High 64-bit BAR pages no longer depend on the low fixed virtual alias. The
+bounded high-MMIO window retains each mapping's virtual address and uses that
+address for revocation/release; see the
+[high-MMIO audit](audit-stage13-2-high-mmio-2026-10-13.md).
+
+Stage 13.3 NVMe now passes its ordered 1/2/4-CPU QEMU acceptance gate. The
+driver identifies a namespace, creates admin and I/O queues, performs
+write/read/flush against a disposable image, returns owned DMA pages on failed
+initialization, and restores the original PCI command after bounded controller
+quiescence. See the [Stage 13.3 NVMe audit](audit-stage13-3-nvme-2026-10-13.md).
+This closes the emulated synchronous foundation only; interrupt-backed
+completion, reset/recovery, hotplug removal, multi-namespace policy, and
+physical NVMe qualification remain open.
+
+Stage 13.8 HDA/WovenAudio now passes its ordered 1/2/4-CPU QEMU gate after
+correcting register page-offset handling in all HDA MMIO helpers. The gate
+covers codec discovery, topology, playback/capture streams, mixer state, and
+the WovenAudio API boundary. See the [HDA MMIO audit](audit-stage13-8-hda-mmio-2026-10-13.md).
+Physical codec interoperability and interrupt/DMA fault recovery remain open.
+
+The local Stage 14.1–14.5D feature gates now pass build/lint and live network
+acceptance on 1/2/4 CPUs. A shared PCI `expect(dead_code)` guard was extended
+through the later feature family after Stage 14.1 exposed that it could not
+compile cleanly under warning denial. See the [Stage 14 feature-gate audit](audit-stage14-feature-gates-2026-10-13.md).
 
 ## Stages 12.2–12.5 — accepted on 2026-09-16
 

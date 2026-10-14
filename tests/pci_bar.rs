@@ -1,7 +1,7 @@
 #[path = "../kernel/src/hal/pci/bar.rs"]
 mod bar;
 
-use bar::{decode_probe, encode, Error, Kind};
+use bar::{Error, Kind, decode_probe, encode};
 
 #[test]
 fn decodes_io_and_memory32_masks() {
@@ -27,7 +27,10 @@ fn decodes_64_bit_bar_mask() {
 
 #[test]
 fn rejects_reserved_memory_type_and_non_power_of_two_mask() {
-    assert_eq!(decode_probe(0x2, 0xffff_f002, None), Err(Error::UnsupportedMemoryType));
+    assert_eq!(
+        decode_probe(0x2, 0xffff_f002, None),
+        Err(Error::UnsupportedMemoryType)
+    );
     assert_eq!(decode_probe(0, 0xffff_d000, None), Err(Error::InvalidMask));
 }
 
@@ -40,8 +43,18 @@ fn encoding_rejects_misalignment_and_32_bit_overflow() {
 
 #[test]
 fn encoding_rejects_zero_and_non_power_of_two_probe_sizes() {
-    let zero = bar::Probe { kind: Kind::Memory32, size: 0, prefetchable: false, low_flags: 0 };
-    let malformed = bar::Probe { kind: Kind::Memory32, size: 0x3000, prefetchable: false, low_flags: 0 };
+    let zero = bar::Probe {
+        kind: Kind::Memory32,
+        size: 0,
+        prefetchable: false,
+        low_flags: 0,
+    };
+    let malformed = bar::Probe {
+        kind: Kind::Memory32,
+        size: 0x3000,
+        prefetchable: false,
+        low_flags: 0,
+    };
     assert_eq!(encode(zero, 0), Err(Error::InvalidMask));
     assert_eq!(encode(malformed, 0), Err(Error::InvalidMask));
 }

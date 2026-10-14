@@ -765,7 +765,12 @@ fn decode_aml_pkg_length(bytes: &[u8], offset: usize) -> Result<(usize, usize), 
         return Err(Error::InvalidLength);
     }
     let encoded = bytes
-        .get(offset..offset.checked_add(follow + 1).ok_or(Error::AddressOverflow)?)
+        .get(
+            offset
+                ..offset
+                    .checked_add(follow + 1)
+                    .ok_or(Error::AddressOverflow)?,
+        )
         .ok_or(Error::InvalidLength)?;
     let mut length = if follow == 0 {
         usize::from(lead & 0x3f)
@@ -783,12 +788,16 @@ fn decode_aml_pkg_length(bytes: &[u8], offset: usize) -> Result<(usize, usize), 
 
 fn aml_package(bytes: &[u8], pkg_offset: usize) -> Result<AmlPackage, Error> {
     let (length, length_bytes) = decode_aml_pkg_length(bytes, pkg_offset)?;
-    let end_offset = pkg_offset.checked_add(length).ok_or(Error::AddressOverflow)?;
+    let end_offset = pkg_offset
+        .checked_add(length)
+        .ok_or(Error::AddressOverflow)?;
     if end_offset > bytes.len() {
         return Err(Error::InvalidLength);
     }
     Ok(AmlPackage {
-        body_offset: pkg_offset.checked_add(length_bytes).ok_or(Error::AddressOverflow)?,
+        body_offset: pkg_offset
+            .checked_add(length_bytes)
+            .ok_or(Error::AddressOverflow)?,
         end_offset,
     })
 }
@@ -864,10 +873,22 @@ fn aml_skip_data_ref_object(bytes: &[u8], offset: usize) -> Result<usize, Error>
         // ZeroOp, OneOp, OnesOp.
         0x00 | 0x01 | 0xff => Ok(offset + 1),
         // Byte/Word/DWord/QWord integer prefixes.
-        0x0a => offset.checked_add(2).filter(|end| *end <= bytes.len()).ok_or(Error::InvalidLength),
-        0x0b => offset.checked_add(3).filter(|end| *end <= bytes.len()).ok_or(Error::InvalidLength),
-        0x0c => offset.checked_add(5).filter(|end| *end <= bytes.len()).ok_or(Error::InvalidLength),
-        0x0e => offset.checked_add(9).filter(|end| *end <= bytes.len()).ok_or(Error::InvalidLength),
+        0x0a => offset
+            .checked_add(2)
+            .filter(|end| *end <= bytes.len())
+            .ok_or(Error::InvalidLength),
+        0x0b => offset
+            .checked_add(3)
+            .filter(|end| *end <= bytes.len())
+            .ok_or(Error::InvalidLength),
+        0x0c => offset
+            .checked_add(5)
+            .filter(|end| *end <= bytes.len())
+            .ok_or(Error::InvalidLength),
+        0x0e => offset
+            .checked_add(9)
+            .filter(|end| *end <= bytes.len())
+            .ok_or(Error::InvalidLength),
         // StringPrefix: NUL-terminated AML string.
         0x0d => {
             let mut end = offset.checked_add(1).ok_or(Error::AddressOverflow)?;
@@ -933,7 +954,11 @@ fn aml_record(
 }
 
 fn aml_resolve_name(base: AmlPath, name: AmlName) -> Result<AmlPath, Error> {
-    let mut path = if name.rooted { AmlPath::default() } else { base };
+    let mut path = if name.rooted {
+        AmlPath::default()
+    } else {
+        base
+    };
     let parents = usize::from(name.parents);
     if parents > path.count {
         return Err(Error::InvalidSignature);
@@ -951,9 +976,9 @@ fn aml_resolve_name(base: AmlPath, name: AmlName) -> Result<AmlPath, Error> {
 
 fn aml_eisa_id(bytes: &[u8], offset: usize) -> Option<u32> {
     match bytes.get(offset).copied()? {
-        0x0c => bytes.get(offset + 1..offset + 5).map(|raw| {
-            u32::from_le_bytes([raw[0], raw[1], raw[2], raw[3]])
-        }),
+        0x0c => bytes
+            .get(offset + 1..offset + 5)
+            .map(|raw| u32::from_le_bytes([raw[0], raw[1], raw[2], raw[3]])),
         _ => None,
     }
 }
@@ -964,12 +989,12 @@ fn aml_static_integer(bytes: &[u8], offset: usize) -> Option<u64> {
         0x01 => Some(1),
         0xff => Some(u64::MAX),
         0x0a => bytes.get(offset + 1).copied().map(u64::from),
-        0x0b => bytes.get(offset + 1..offset + 3).map(|raw| {
-            u64::from(u16::from_le_bytes([raw[0], raw[1]]))
-        }),
-        0x0c => bytes.get(offset + 1..offset + 5).map(|raw| {
-            u64::from(u32::from_le_bytes([raw[0], raw[1], raw[2], raw[3]]))
-        }),
+        0x0b => bytes
+            .get(offset + 1..offset + 3)
+            .map(|raw| u64::from(u16::from_le_bytes([raw[0], raw[1]]))),
+        0x0c => bytes
+            .get(offset + 1..offset + 5)
+            .map(|raw| u64::from(u32::from_le_bytes([raw[0], raw[1], raw[2], raw[3]]))),
         0x0e => bytes.get(offset + 1..offset + 9).map(|raw| {
             u64::from_le_bytes([
                 raw[0], raw[1], raw[2], raw[3], raw[4], raw[5], raw[6], raw[7],
@@ -989,7 +1014,9 @@ fn aml_static_buffer(bytes: &[u8], offset: usize) -> Result<Option<&[u8]>, Error
     if data_offset > package.end_offset {
         return Err(Error::InvalidLength);
     }
-    let data = bytes.get(data_offset..package.end_offset).ok_or(Error::InvalidLength)?;
+    let data = bytes
+        .get(data_offset..package.end_offset)
+        .ok_or(Error::InvalidLength)?;
     if size != data.len() as u64 {
         return Err(Error::InvalidLength);
     }
@@ -1075,7 +1102,9 @@ fn aml_set_resource_template(
     template: &[u8],
 ) -> Result<(), Error> {
     let start = template.as_ptr() as usize - bytes.as_ptr() as usize;
-    let end = start.checked_add(template.len()).ok_or(Error::AddressOverflow)?;
+    let end = start
+        .checked_add(template.len())
+        .ok_or(Error::AddressOverflow)?;
     if end > bytes.len() {
         return Err(Error::InvalidLength);
     }
@@ -1116,7 +1145,15 @@ fn aml_namespace_walk(
                     let child = aml_resolve_name(scope, name)?;
                     *objects = objects.checked_add(1).ok_or(Error::AddressOverflow)?;
                     aml_record(records, record_count, child, AmlNamespaceKind::Scope)?;
-                    walk(bytes, body, package.end_offset, child, objects, records, record_count)?;
+                    walk(
+                        bytes,
+                        body,
+                        package.end_offset,
+                        child,
+                        objects,
+                        records,
+                        record_count,
+                    )?;
                     offset = package.end_offset;
                 }
                 0x5b if bytes.get(offset + 1) == Some(&0x82) => {
@@ -1128,7 +1165,15 @@ fn aml_namespace_walk(
                     let child = aml_resolve_name(scope, name)?;
                     *objects = objects.checked_add(1).ok_or(Error::AddressOverflow)?;
                     aml_record(records, record_count, child, AmlNamespaceKind::Device)?;
-                    walk(bytes, body, package.end_offset, child, objects, records, record_count)?;
+                    walk(
+                        bytes,
+                        body,
+                        package.end_offset,
+                        child,
+                        objects,
+                        records,
+                        record_count,
+                    )?;
                     offset = package.end_offset;
                 }
                 0x08 => {
@@ -1172,7 +1217,8 @@ fn aml_namespace_walk(
                         if owner != scope || !aml_has_device(records, *record_count, owner) {
                             return Err(Error::InvalidSignature);
                         }
-                        let number = aml_static_integer(bytes, value).ok_or(Error::InvalidSignature)?;
+                        let number =
+                            aml_static_integer(bytes, value).ok_or(Error::InvalidSignature)?;
                         aml_set_root_number(
                             records,
                             *record_count,
@@ -1238,7 +1284,9 @@ fn aml_namespace_walk(
             let template = bytes.get(start..end).ok_or(Error::InvalidLength)?;
             let mut resources = [PciRootResource::default(); MAX_PCI_ROOT_RESOURCES];
             let count = decode_pci_root_resource_template(template, &mut resources)?;
-            let next = staged_count.checked_add(count).ok_or(Error::AddressOverflow)?;
+            let next = staged_count
+                .checked_add(count)
+                .ok_or(Error::AddressOverflow)?;
             if next > staged.len() {
                 return Err(Error::InvalidLength);
             }
@@ -1309,9 +1357,7 @@ fn decode_pci_root_resource_template(
             }
             // A zero EndTag checksum means the ResourceTemplate checksum is
             // not used. Otherwise the entire template must sum to zero.
-            if item[1] != 0
-                && bytes.iter().copied().fold(0_u8, u8::wrapping_add) != 0
-            {
+            if item[1] != 0 && bytes.iter().copied().fold(0_u8, u8::wrapping_add) != 0 {
                 return Err(Error::InvalidChecksum);
             }
             saw_end_tag = true;
@@ -1392,13 +1438,16 @@ fn decode_address_space_resource(bytes: &[u8]) -> Result<Option<PciRootResource>
     if length == 0 || minimum.checked_add(length).is_none() {
         return Err(Error::InvalidLength);
     }
-    let inclusive_end = minimum.checked_add(length - 1).ok_or(Error::AddressOverflow)?;
+    let inclusive_end = minimum
+        .checked_add(length - 1)
+        .ok_or(Error::AddressOverflow)?;
     // _CRS describes the bridge's current configuration. Only fixed windows
     // are authoritative enough for BAR allocation, and their alignment must
     // satisfy the descriptor's granularity mask.
     let min_fixed = bytes[4] & 0x04 != 0;
     let max_fixed = bytes[4] & 0x08 != 0;
-    if !min_fixed || !max_fixed
+    if !min_fixed
+        || !max_fixed
         || inclusive_end > maximum
         || minimum & granularity != 0
         || maximum & granularity != granularity
@@ -1493,9 +1542,11 @@ pub fn self_test() -> bool {
     let aml_pkg_short = decode_aml_pkg_length(&[0x05], 0) == Ok((5, 1));
     let aml_pkg_multi = decode_aml_pkg_length(&[0x41, 0x02], 0) == Ok((33, 2));
     let aml_pkg_bounds = aml_package(&[0x04, 0xaa, 0xbb, 0xcc], 0)
-        == Ok(AmlPackage { body_offset: 1, end_offset: 4 });
-    let aml_name_valid = aml_name_seg(b"_CRS", 0)
-        == Ok((*b"_CRS", 4));
+        == Ok(AmlPackage {
+            body_offset: 1,
+            end_offset: 4,
+        });
+    let aml_name_valid = aml_name_seg(b"_CRS", 0) == Ok((*b"_CRS", 4));
     let aml_name_rejects_lower = aml_name_seg(b"_crs", 0) == Err(Error::InvalidSignature);
 
     let mut template = [0_u8; 44];
@@ -1538,7 +1589,9 @@ pub fn self_test() -> bool {
     let transactional_decode =
         decode_pci_root_resource_template(&template[..42], &mut transactional_output)
             == Err(Error::InvalidLength)
-            && transactional_output.iter().all(|resource| *resource == sentinel);
+            && transactional_output
+                .iter()
+                .all(|resource| *resource == sentinel);
 
     let mut dword_memory = [0_u8; 26];
     dword_memory[0] = 0x87;

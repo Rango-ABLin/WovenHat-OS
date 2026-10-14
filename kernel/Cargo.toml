@@ -3,6 +3,16 @@ name = "wovenhat-kernel"
 version = "0.8.0"
 edition = "2021"
 
+[[bin]]
+name = "wovenhat-kernel"
+path = "src/main.rs"
+# The kernel is a freestanding no_std image. Cargo's host test harness cannot
+# link it: it would provide a second panic/allocator implementation and apply
+# `cfg(test)` to only part of the image. Keep host tests in the explicit
+# integration crates and compile the kernel image through its normal target.
+test = false
+bench = false
+
 [features]
 physical-probe = []
 qemu-test = []
@@ -51,6 +61,14 @@ stage14-5d-test = ["stage14-5c-test", "stage13-9-test"]
 stage15-1-test = ["qemu-test"]
 # WovenFS on a real block device through the ATA driver, visible in the VFS.
 stage15-2-test = ["qemu-test"]
+stage15-3-test = ["qemu-test"]
+stage15-4-test = ["qemu-test"]
+secure-boot = []
+stage15-5-test = ["qemu-test", "secure-boot"]
+stage15-6-test = ["qemu-test"]
+stage15-7-test = ["qemu-test"]
+stage15-8-test = ["qemu-test"]
+stage15-9-test = ["qemu-test"]
 # An application built outside the kernel, loaded from the filesystem.
 stage16-1-test = ["qemu-test"]
 # Full printable-ASCII font and text layout.
@@ -118,5 +136,7 @@ sha1 = { version = "0.10", default-features = false, features = ["force-soft"] }
 pbkdf2 = { version = "0.12", default-features = false, features = ["hmac"] }
 subtle = { version = "2.6", default-features = false }
 zeroize = { version = "1.8", default-features = false }
+ed25519-compact = { version = "2.6", default-features = false }
+sha2 = { version = "0.10.9", default-features = false, features = ["force-soft"] }
 [lints.rust]
 warnings = "deny"

@@ -113,8 +113,7 @@ impl SuperBlock {
         sector[64..72].copy_from_slice(&self.data_start.to_le_bytes());
         sector[72..80].copy_from_slice(&self.root_inode.to_le_bytes());
         let checksum = fnv1a(&sector[..SUPER_CHECKSUM_AT]);
-        sector[SUPER_CHECKSUM_AT..SUPER_CHECKSUM_AT + 8]
-            .copy_from_slice(&checksum.to_le_bytes());
+        sector[SUPER_CHECKSUM_AT..SUPER_CHECKSUM_AT + 8].copy_from_slice(&checksum.to_le_bytes());
     }
 
     fn decode(sector: &[u8; SECTOR_SIZE]) -> Option<Self> {
@@ -505,7 +504,11 @@ impl<D: BlockDevice> Volume<D> {
         for lba in sb.inode_start..sb.data_start {
             at(lba, "inodes", device.write_sector(lba, &zero))?;
         }
-        at(root_block, "root-dir", device.write_sector(root_block, &zero))?;
+        at(
+            root_block,
+            "root-dir",
+            device.write_sector(root_block, &zero),
+        )?;
 
         let mut root = Inode::empty();
         root.mode = 0o040_755;
@@ -846,7 +849,13 @@ impl<D: BlockDevice> Volume<D> {
     // ------------------------------------------------------------ mutation
 
     /// Create an empty file in `dir_inode`, as one transaction.
-    pub fn create(&mut self, dir_inode: u64, name: &str, mode: u32, now: u64) -> Result<u64, Error> {
+    pub fn create(
+        &mut self,
+        dir_inode: u64,
+        name: &str,
+        mode: u32,
+        now: u64,
+    ) -> Result<u64, Error> {
         if name.is_empty() || name.len() > MAX_NAME || name.contains('/') {
             return Err(Error::InvalidName);
         }
@@ -1551,10 +1560,7 @@ pub fn stage15_2_self_test() -> bool {
     }
 
     let mounted = mount_ata_into_vfs();
-    if !step(
-        "mount into the VFS",
-        mounted == MountOutcome::Mounted(2),
-    ) {
+    if !step("mount into the VFS", mounted == MountOutcome::Mounted(2)) {
         crate::serial::write_line(format_args!(
             "[S15.2] vfs mount imported {}",
             match mounted {

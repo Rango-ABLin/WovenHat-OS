@@ -47,8 +47,7 @@ impl Button {
         // fixed offset left long labels overflowing the button and short ones
         // hugging its left edge.
         let label_width = crate::font::text_width(self.label) as i32;
-        let label_height = (crate::font::line_count(self.label) as i32
-            * crate::font::LINE_HEIGHT)
+        let label_height = (crate::font::line_count(self.label) as i32 * crate::font::LINE_HEIGHT)
             - (crate::font::LINE_HEIGHT - crate::font::HEIGHT as i32);
         touched = touched.union(surface.draw_text(
             self.bounds.x + (self.bounds.width as i32 - label_width).max(0) / 2,
@@ -132,8 +131,7 @@ impl Window {
         let title_width = crate::font::text_width(self.title) as i32;
         touched = touched.union(surface.draw_text(
             self.bounds.x + (self.bounds.width as i32 - title_width).max(0) / 2,
-            self.bounds.y
-                + (self.title_bar_height as i32 - crate::font::HEIGHT as i32).max(0) / 2,
+            self.bounds.y + (self.title_bar_height as i32 - crate::font::HEIGHT as i32).max(0) / 2,
             self.title,
             Color::DARK_BLUE.packed(),
         ));

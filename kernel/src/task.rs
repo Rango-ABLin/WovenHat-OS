@@ -155,7 +155,7 @@ unsafe extern "C" {
     fn wovenhat_enter_user_mode(entry: u64, stack_top: u64, user_cs: u16, user_ss: u16) -> !;
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct TaskId(u64);
 
 impl TaskId {
@@ -263,6 +263,8 @@ struct Context {
 #[repr(align(16))]
 struct TaskStack(UnsafeCell<[u8; TASK_STACK_SIZE]>);
 
+const TASK_STACK_CANARY: u64 = 0x574f_5645_4e48_4154;
+
 // SAFETY: Each stack belongs to exactly one task. A running task is owned by
 // one CPU; Stage-6 migration changes CPU ownership only while the task is Ready
 // and while the global scheduler lock is held, so stack/context access never
@@ -272,6 +274,33 @@ unsafe impl Sync for TaskStack {}
 impl TaskStack {
     const fn new() -> Self {
         Self(UnsafeCell::new([0; TASK_STACK_SIZE]))
+    }
+
+    /// Install the underflow sentinel at the low end of the downward-growing
+    /// kernel stack. These legacy static stacks do not yet have per-stack
+    /// virtual guard pages, so this is a bounded corruption detector rather
+    /// than a substitute claim for an unmapped guard page.
+    fn reset_canary(&self) {
+        // SAFETY: The scheduler owns the slot while it is initialized or
+        // recycled, and the two words are reserved outside the usable stack.
+        unsafe {
+            let base = self.0.get().cast::<u8>();
+            core::ptr::write_unaligned(base.cast::<u64>(), TASK_STACK_CANARY);
+            core::ptr::write_unaligned(
+                base.add(core::mem::size_of::<u64>()).cast::<u64>(),
+                TASK_STACK_CANARY,
+            );
+        }
+    }
+
+    fn canary_intact(&self) -> bool {
+        // SAFETY: The sentinel words are within the static stack allocation.
+        unsafe {
+            let base = self.0.get().cast::<u8>();
+            core::ptr::read_unaligned(base.cast::<u64>()) == TASK_STACK_CANARY
+                && core::ptr::read_unaligned(base.add(core::mem::size_of::<u64>()).cast::<u64>())
+                    == TASK_STACK_CANARY
+        }
     }
 }
 
@@ -360,6 +389,7 @@ impl TaskControlBlock {
         entry: fn() -> !,
         priority: TaskPriority,
     ) {
+        TASK_STACKS[slot].reset_canary();
         self.id = id;
         self.name = name;
         self.state = TaskState::Ready;
@@ -408,6 +438,7 @@ impl TaskControlBlock {
         context: UserTaskContext,
         address_space: paging::AddressSpace,
     ) {
+        TASK_STACKS[slot].reset_canary();
         self.id = id;
         self.name = name;
         self.state = TaskState::Ready;
@@ -454,6 +485,7 @@ impl TaskControlBlock {
         address_space: paging::AddressSpace,
         security: ForkSecurityContext,
     ) {
+        TASK_STACKS[slot].reset_canary();
         self.id = id;
         self.name = "fork-child";
         self.state = TaskState::Ready;
@@ -830,6 +862,7 @@ impl Scheduler {
     fn initialize(&mut self) {
         assert!(self.task_count == 0, "scheduler initialized more than once");
 
+        TASK_STACKS[0].reset_canary();
         self.tasks[0].id = KERNEL_TASK_ID;
         self.tasks[0].name = "kernel";
         self.tasks[0].state = TaskState::Running;
@@ -923,6 +956,10 @@ impl Scheduler {
 
         let cpu = crate::smp::cpu_index();
         let previous_slot = self.current_slot[cpu];
+        assert!(
+            TASK_STACKS[previous_slot].canary_intact(),
+            "kernel task stack canary corrupted"
+        );
         if self.tasks[previous_slot].state == TaskState::Running {
             // Do NOT publish the outgoing task as Ready yet. The Rust guard is
             // dropped before the assembly stack switch, so another CPU could
@@ -1196,6 +1233,24 @@ unsafe fn switch_stacks(context_switch: ContextSwitch) {
     // We are now executing on the incoming task's stack. Only at this point
     // is it safe to expose the outgoing runnable task as Ready/migratable.
     SCHEDULER.lock().finalize_switch();
+}
+
+/// Validate the stack corruption detector without touching a live task stack.
+/// The final slot is reserved for this boot-time self-test.
+#[cfg(feature = "qemu-test")]
+pub fn stack_canary_self_test() -> bool {
+    let stack = &TASK_STACKS[MAX_TASKS - 1];
+    stack.reset_canary();
+    if !stack.canary_intact() {
+        return false;
+    }
+    // SAFETY: This is the reserved self-test slot, not a running task stack.
+    unsafe {
+        core::ptr::write_unaligned(stack.0.get().cast::<u64>(), 0);
+    }
+    let detects_corruption = !stack.canary_intact();
+    stack.reset_canary();
+    detects_corruption && stack.canary_intact()
 }
 pub fn init() {
     SCHEDULER.lock().initialize();
@@ -2396,6 +2451,7 @@ pub fn exit_current_process(exit_code: i32) -> ! {
         // a late completion sees a stale generation-tagged handle.
         #[cfg(feature = "stage13-9-test")]
         crate::wifi_runtime::release_owner(task_id);
+        crate::secret_vault::release_owner(task_id.as_u64());
         crate::async_network::release_owner(task_id);
         crate::async_events::release_owner(exiting_pid);
         crate::async_file::release_owner(task_id);
@@ -3766,6 +3822,7 @@ pub fn sleep_current(ticks: u64) {
 
 pub fn exit_current_task() -> ! {
     x86_64::instructions::interrupts::disable();
+    crate::secret_vault::release_owner(current_task_id().as_u64());
     #[cfg(feature = "stage13-9-test")]
     crate::wifi_runtime::release_owner(current_task_id());
     let switch = {
@@ -4722,6 +4779,7 @@ fn complete_process_termination(task_id: TaskId, signal: u8) {
     // it needs the same Stage 10.3 async-owner reclamation guarantee.
     #[cfg(feature = "stage13-9-test")]
     crate::wifi_runtime::release_owner(task_id);
+    crate::secret_vault::release_owner(task_id.as_u64());
     crate::async_network::release_owner(task_id);
     crate::async_file::release_owner(task_id);
     crate::block_io::release_owner(task_id);
@@ -4755,6 +4813,10 @@ fn complete_process_termination(task_id: TaskId, signal: u8) {
 
     // These releases may take completion-port, event, VFS, or pipe locks;
     // keeping them outside PROCESS_TABLE makes the global lock order explicit.
+    crate::terminal::release_foreground(process_id.as_u64());
+    crate::network::close_process_sockets(process_id.as_u64());
+    crate::thread::reap_owner(process_id.as_u64());
+    crate::notifications::discard_recipient(process_id.as_u64());
     crate::completion_port::release_owner(process_id.as_u64());
     crate::async_events::release_owner(process_id.as_u64());
     // Client surfaces and the compositor lease, as exit_current_process

@@ -1,5 +1,91 @@
 # WovenHat OS Architecture & Codebase Guide
 
+## Stage 13.2 PCI power-state ownership (2026-10-13)
+
+`hal::pci::suspend_owned` and `resume_owned` operate only on a validated,
+generation-owned function. Suspend first disables and verifies I/O, memory,
+and bus-master decoding. If the discovered PCI capability list contains Power
+Management, the exact low-half PMCSR value is checkpointed and the function is
+transitioned to D3hot; resume transitions the same capability to D0 before
+restoring the command checkpoint. PMCSR writes preserve the upper half of the
+containing configuration dword, preventing adjacent PM capability fields from
+being clobbered. A failed transition attempts the safe rollback state and
+returns an error, while the driver manager retains the checkpoint until the
+binding state publication succeeds. Interrupt-active bindings cannot suspend.
+
+This is a software ownership and configuration-state boundary. Device reset,
+D3cold, platform wake signaling, and physical device suspend/resume still
+require device-specific drivers and hardware qualification. See the
+[Stage 13.2 suspend/resume audit](audit-stage13-2-suspend-resume-2026-10-13.md).
+
+The PCI hotplug coordinator compares both BDF and the full driver-relevant
+identity (vendor/device, revision, class, subclass, and programming
+interface). A same-slot replacement detected before old-owner quiescence fails
+closed before any teardown configuration write; a platform hotplug boundary
+must establish ordering before the replacement can be processed. Unbound
+persistent BAR reservations are released before topology invalidation;
+release failures leave the removal retryable. See the [hotplug insertion audit](audit-stage13-2-hotplug-insertion-2026-10-13.md).
+
+## Stage 13.2 PCI BAR admission lifetime (2026-10-13)
+
+Persistent BAR reservation state is released only after BAR clear/read-back,
+published-inventory refresh, and bridge-window rerouting succeed. The binding
+remains in `Unbinding` when any phase fails, so no allocator range can be reused
+while hardware or forwarding state is uncertain. See the [automatic BAR
+admission audit](audit-stage13-2-bar-admission-2026-10-13.md).
+
+## Stage 13.2 verified MSI activation (2026-10-13)
+
+Owner-bound MSI activation keeps the vector and interrupt-mode claims private
+until the capability header, message address/data, and final enable state all
+read back as expected. The original capability image is retained with MSI
+disabled during recovery; if restoration cannot be verified, the concrete
+lease remains retained for ordered teardown. Disablement likewise verifies the
+final disabled header before releasing mode and vector ownership. Physical
+APIC delivery still requires hardware qualification. MSI-X activation follows
+the same ownership boundary, asserting Function Mask before table MMIO and
+retaining the lease if cleanup fails. See the [MSI rollback audit](audit-stage13-2-msi-rollback-2026-10-13.md).
+
+The Stage 13.2 preservation probe keeps hardware qualification conditional:
+it scans the discovered QEMU fixtures without creating shared mappings, and
+only attempts generic interrupt activation when a capability and the required
+BAR are admissible. Its disposable NVMe/e1000 fixtures exercise inventory and
+fail-closed admission; the QEMU virtio fixture now qualifies MSI-X activation
+and teardown, including the high-MMIO fallback mapping. Physical vector
+delivery and PCIe hardware lifecycle qualification remain open.
+
+## Stage 13.3 NVMe queue and failure lifecycle (2026-10-13)
+
+The NVMe driver owns each queue, identify buffer, and transfer buffer through
+an owning `DmaPage`; dropping any partially initialized controller therefore
+returns its physical frames to the allocator. Initialization also snapshots the
+PCI command register and uses a rollback guard that disables the controller
+with bounded readiness polling before restoring the exact command value. This
+keeps failed discovery from leaking DMA memory or leaving bus mastering active.
+
+The accepted gate is limited to the disposable QEMU controller and synchronous
+polling I/O. Interrupt completion, controller reset/recovery, hotplug removal,
+multi-namespace policy, and physical NVMe qualification remain open. See the
+[Stage 13.3 NVMe audit](audit-stage13-3-nvme-2026-10-13.md).
+
+## Stage 13.8 HDA register addressing (2026-10-13)
+
+HDA MMIO access splits each register address into its containing page and
+offset before performing the volatile access. This is required for the reset,
+command-ring, codec, stream, and mixer registers; mapping a page without
+adding the offset silently aliases every register to the BAR base. The QEMU
+HDA codec/topology/stream gate now passes on 1/2/4 CPUs. Physical codec and
+interrupt/DMA recovery qualification remain open. See the
+[HDA MMIO audit](audit-stage13-8-hda-mmio-2026-10-13.md).
+
+## Stage 14 later-feature lint coverage (2026-10-13)
+
+PCI persistent BAR admission diagnostics are guarded across the complete later
+feature family, not only the Stage 13 feature set. This keeps `-D warnings`
+meaningful when Stage 14–20 code compiles the shared PCI module. The live
+Stage 14.1–14.5D network matrices pass on 1/2/4 CPUs; hardware NIC and radio
+qualification remains separate. See the [Stage 14 feature-gate audit](audit-stage14-feature-gates-2026-10-13.md).
+
 ## TCP close/drain repair (2026-09-24)
 
 A closed TCP descriptor retains its transport after the final async reference
@@ -123,7 +209,7 @@ programs, and host/QEMU acceptance harnesses. The supplied
 ## Stage 1–5 data journal boundary
 
 FAT32 persistence retains the original single-file `WDJ1` journal and adds a
-separate bounded `WDJ2` batch journal. A batch contains at most four file data
+separate bounded `WDJ2` batch journal. A batch contains at most sixteen file data
 replacements. Prepared records carry the old bytes and committed records carry
 the intended lengths/checksums; WMD1/WMD2 metadata intents are published before
 data and removed or finalized with the batch. Mount recovery rolls back
@@ -142,13 +228,13 @@ qualification.
 | `build.rs`, `src/main.rs` | Package the kernel with the UEFI bootloader; expose the generated image path to harnesses |
 | `kernel/src/main.rs`, `config.rs` | Initialization order, subsystem wiring, configuration bounds and boot acceptance orchestration |
 | `hal/`, `ap_start.S`, `smp.rs`, `gdt.rs`, `interrupts.rs`, `pic.rs`, `timer.rs` | CPU/platform discovery, AP startup, descriptor tables, interrupts and timekeeping |
-| `task.rs`, `userspace.rs`, `elf.rs`, `syscall.rs` | Scheduling, process lifecycle, Ring-3 images, ELF validation and syscall dispatch |
+| `task.rs`, `userspace.rs`, `elf.rs`, `syscall.rs` | Scheduling, process lifecycle, Ring-3 images, ELF validation, scheduler-checked static kernel-stack canaries, and syscall dispatch |
 | `memory.rs`, `paging.rs`, `heap.rs`, `swap.rs`, `file_frames.rs`, `file_mapping.rs`, `page_cache.rs` | Physical/virtual memory, allocation, backing storage and file mappings |
 | `block.rs`, `block_cache.rs`, `block_io.rs`, `ata.rs`, `partition.rs`, `gpt.rs`, `storage.rs` | Block devices, request execution, caching, partitions and storage initialization |
 | `vfs.rs`, `fat32.rs`, `async_file.rs` | Filesystem operations and positional asynchronous file requests |
 | `async_op.rs`, `async_network.rs`, `irq_lock.rs` | Completion ownership, asynchronous sockets and interrupt-safe network/completion locks |
 | `network.rs`, `virtio_net.rs` | smoltcp IPv4 sockets and the transitional VirtIO-net transport |
-| `capability.rs`, `wovenguard.rs`, `audit.rs`, `entropy.rs` | Authority, domains, resource policy, security ledger and entropy support |
+| `capability.rs`, `wovenguard.rs`, `audit.rs`, `permission.rs`, `secret_vault.rs`, `signed_app.rs`, `secure_boot.rs`, `boot_measurement.rs`, `entropy.rs` | Authority, domains, resource policy, runtime permission decisions, volatile WovenVault handles, signed applications, software signed-kernel handoff, boot measurement, security-ledger recording/read ABI, and entropy support |
 | `ipc.rs`, `pipe.rs` | IPC objects, endpoint/message operations and byte pipes |
 | `device.rs`, `keyboard.rs`, `mouse.rs`, `serial.rs`, `console.rs`, `terminal.rs`, `shell.rs` | Device registry, input (keyboard and PS/2 mouse both decode and publish at IRQ time), diagnostics and command interfaces |
 | `graphics.rs`, `gui.rs` | Existing framebuffer/GUI support; not the future compositor |

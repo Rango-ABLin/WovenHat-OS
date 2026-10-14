@@ -408,8 +408,7 @@ pub fn blit_shared_for(
     y: i32,
 ) -> Result<Rect, Error> {
     require_holder(pid)?;
-    let snapshot =
-        user_graphics::snapshot_shared(handle, pid).map_err(|_| Error::InvalidClient)?;
+    let snapshot = user_graphics::snapshot_shared(handle, pid).map_err(|_| Error::InvalidClient)?;
     let mut guard = STATE.lock();
     let state = guard.as_mut().ok_or(Error::NotReady)?;
     if state.holder != Some(pid) {
@@ -482,8 +481,7 @@ pub fn blend_shared_for(
     opacity: u8,
 ) -> Result<Rect, Error> {
     require_holder(pid)?;
-    let snapshot =
-        user_graphics::snapshot_shared(handle, pid).map_err(|_| Error::InvalidClient)?;
+    let snapshot = user_graphics::snapshot_shared(handle, pid).map_err(|_| Error::InvalidClient)?;
     let mut guard = STATE.lock();
     let state = guard.as_mut().ok_or(Error::NotReady)?;
     if state.holder != Some(pid) {
@@ -515,9 +513,11 @@ pub fn blit_damage_for(
     if state.holder != Some(pid) {
         return Err(Error::NotHolder);
     }
-    let touched = state
-        .surface
-        .blit(&copy, x.saturating_add(region.x), y.saturating_add(region.y));
+    let touched = state.surface.blit(
+        &copy,
+        x.saturating_add(region.x),
+        y.saturating_add(region.y),
+    );
     state.damage.add(touched);
     Ok(Some(region))
 }
@@ -901,7 +901,9 @@ pub fn geometry_self_test(console: &mut crate::console::Console) -> bool {
     fn screen_pixel(x: usize, y: usize) -> Option<[u8; 3]> {
         crate::terminal::with_framebuffer(|buffer, info| {
             let offset = (y * info.stride + x) * info.bytes_per_pixel;
-            buffer.get(offset..offset + 3).map(|bytes| [bytes[0], bytes[1], bytes[2]])
+            buffer
+                .get(offset..offset + 3)
+                .map(|bytes| [bytes[0], bytes[1], bytes[2]])
         })
         .flatten()
     }
@@ -919,7 +921,10 @@ pub fn geometry_self_test(console: &mut crate::console::Console) -> bool {
         info.height,
         dimensions()
     ));
-    if !step("boot compositor matches the framebuffer", dimensions() == Some(expected)) {
+    if !step(
+        "boot compositor matches the framebuffer",
+        dimensions() == Some(expected),
+    ) {
         return false;
     }
 
@@ -929,12 +934,13 @@ pub fn geometry_self_test(console: &mut crate::console::Console) -> bool {
         return false;
     }
     let covered = (expected.0 as usize) * (expected.1 as usize);
-    if !step("takeover repaints the whole framebuffer", present() == Ok(covered))
-        || !step(
-            "far corner shows the compositor background",
-            screen_pixel(expected.0 as usize - 1, expected.1 as usize - 1) == Some([0, 0, 0]),
-        )
-    {
+    if !step(
+        "takeover repaints the whole framebuffer",
+        present() == Ok(covered),
+    ) || !step(
+        "far corner shows the compositor background",
+        screen_pixel(expected.0 as usize - 1, expected.1 as usize - 1) == Some([0, 0, 0]),
+    ) {
         deactivate_display();
         return false;
     }

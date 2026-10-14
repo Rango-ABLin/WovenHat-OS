@@ -236,6 +236,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "ed25519-compact"
+version = "2.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1454db4f2edb7f0e8fe0c5b375b0c978fc63244cc9f010d160e417eb10139aa8"
+
+[[package]]
 name = "errno"
 version = "0.3.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -418,9 +424,9 @@ dependencies = [
 
 [[package]]
 name = "libc"
-version = "0.2.189"
+version = "0.2.185"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3eaf3ede3fee6db1a4c2ee091bf8a8b4dccdc6d17f656fb07896ee72867612f2"
+checksum = "52ff2c0fe9bc6cb6b14a0592c2ff4fa9ceb83eea9db979b0487cd054946a2b8f"
 
 [[package]]
 name = "libwoven"
@@ -496,7 +502,7 @@ dependencies = [
  "base16ct",
  "log",
  "lzma-rs",
- "sha2",
+ "sha2 0.11.0",
  "tar",
  "ureq",
 ]
@@ -680,6 +686,17 @@ name = "sha1"
 version = "0.10.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a978451301f4db1d02937a4ab3ccce137717b81826e79b7d49ffe3244a13c3b8"
+dependencies = [
+ "cfg-if",
+ "cpufeatures 0.2.17",
+ "digest 0.10.7",
+]
+
+[[package]]
+name = "sha2"
+version = "0.10.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a7507d819769d01a365ab707794a4084392c824f54a7a6a7862f8c3d0892b283"
 dependencies = [
  "cfg-if",
  "cpufeatures 0.2.17",
@@ -1063,10 +1080,12 @@ name = "wovenhat-kernel"
 version = "0.8.0"
 dependencies = [
  "bootloader_api",
+ "ed25519-compact",
  "hmac",
  "pbkdf2",
  "poly1305",
  "sha1",
+ "sha2 0.10.9",
  "smoltcp",
  "spin",
  "subtle",
@@ -1081,7 +1100,9 @@ version = "0.8.0"
 dependencies = [
  "bootloader",
  "bootloader_api",
+ "ed25519-compact",
  "ovmf-prebuilt",
+ "sha2 0.10.9",
  "unicode-normalization",
  "wovenhat-kernel",
 ]

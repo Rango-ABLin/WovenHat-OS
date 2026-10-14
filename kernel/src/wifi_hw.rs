@@ -416,7 +416,11 @@ pub fn stage13_10ac_deferred_self_test() -> bool {
         return false;
     };
 
-    if !empty.work_was_pending || empty.rx_pending || empty.acknowledged != 0 || empty.raw_status != 0 {
+    if !empty.work_was_pending
+        || empty.rx_pending
+        || empty.acknowledged != 0
+        || empty.raw_status != 0
+    {
         return false;
     }
 
@@ -451,8 +455,14 @@ pub fn stage13_10ac_deferred_self_test() -> bool {
     // CSR delivery masked, and consume the claimed publication. A separately
     // published event must still be observed by a subsequent claim.
     for (cause, error) in [
-        (INTEL_CSR_INT_BIT_HW_ERR, IntelRxInterruptError::FatalHardware),
-        (INTEL_CSR_INT_BIT_SW_ERR, IntelRxInterruptError::FatalFirmware),
+        (
+            INTEL_CSR_INT_BIT_HW_ERR,
+            IntelRxInterruptError::FatalHardware,
+        ),
+        (
+            INTEL_CSR_INT_BIT_SW_ERR,
+            IntelRxInterruptError::FatalFirmware,
+        ),
     ] {
         if page.write_u32(IntelCsr::Int.offset(), cause).is_err() {
             return false;

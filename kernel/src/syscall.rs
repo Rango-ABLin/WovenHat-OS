@@ -323,6 +323,18 @@ pub enum Number {
     GraphicsCompositorBlitRegion = 120,
     /// owner's handle, packed destination, packed source region -> 0 or ERROR
     GraphicsCompositorBlitRegionShared = 121,
+    PermissionRequest = 122,
+    PermissionPoll = 123,
+    PermissionDecide = 124,
+    PermissionRevoke = 125,
+    /// newest-relative ledger offset, user AuditEvent buffer -> 1, 0, or ERROR
+    AuditRead = 126,
+    /// user secret pointer, byte length -> generation-tagged secret handle
+    SecretStore = 127,
+    /// secret handle, output pointer, output capacity -> secret length or ERROR
+    SecretRead = 128,
+    /// secret handle -> 0 or ERROR
+    SecretRevoke = 129,
 }
 
 pub fn entry_address() -> u64 {
@@ -941,7 +953,8 @@ fn sys_exec(user_path: u64, length: u64) -> u64 {
         );
         return SYSCALL_ERROR;
     };
-    let Some(program) = crate::userspace::load_elf_with_argv(&image[..image_length], &[path])
+    let Some(program) =
+        crate::userspace::load_elf_with_argv_verified(&image[..image_length], &[path])
     else {
         crate::audit::record(
             actor,
@@ -1049,7 +1062,8 @@ fn sys_exec_command(user_line: u64, length: u64) -> u64 {
         );
         return SYSCALL_ERROR;
     };
-    let Some(program) = crate::userspace::load_elf_with_argv(&image[..image_length], &argv[..argc])
+    let Some(program) =
+        crate::userspace::load_elf_with_argv_verified(&image[..image_length], &argv[..argc])
     else {
         crate::audit::record(
             actor,
@@ -1147,7 +1161,8 @@ fn sys_spawn_command(user_line: u64, length: u64) -> u64 {
         );
         return SYSCALL_ERROR;
     };
-    let Some(program) = crate::userspace::load_elf_with_argv(&image[..image_length], &argv[..argc])
+    let Some(program) =
+        crate::userspace::load_elf_with_argv_verified(&image[..image_length], &argv[..argc])
     else {
         crate::audit::record(
             actor,
@@ -2084,6 +2099,119 @@ fn sys_async_net_wait(raw_handle: u64, user_completion: u64, user_data: u64) -> 
     finish_async_net(handle, user_completion, user_data, true)
 }
 
+fn sys_audit_read(offset: u64, user_event: u64) -> u64 {
+    if !crate::task::current_has(crate::capability::Capability::TaskInspect) {
+        return SYSCALL_ERROR;
+    }
+    let Ok(offset) = usize::try_from(offset) else {
+        return SYSCALL_ERROR;
+    };
+    let Some(event) = crate::audit::from_latest(offset) else {
+        return 0;
+    };
+    let mut bytes = [0_u8; 48];
+    bytes[0..8].copy_from_slice(&event.sequence.to_le_bytes());
+    bytes[8..16].copy_from_slice(&event.tick.to_le_bytes());
+    bytes[16..18].copy_from_slice(&event.cpu.to_le_bytes());
+    bytes[18] = event.action as u8;
+    bytes[19] = u8::from(event.allowed);
+    bytes[20..28].copy_from_slice(&event.actor.to_le_bytes());
+    bytes[28..36].copy_from_slice(&event.target.to_le_bytes());
+    bytes[36..44].copy_from_slice(&event.detail.to_le_bytes());
+    if crate::paging::copy_to_current_user(user_event, &bytes).is_err() {
+        return SYSCALL_ERROR;
+    }
+    1
+}
+
+fn sys_secret_store(user_secret: u64, length: u64) -> u64 {
+    if !crate::task::current_has(crate::capability::Capability::Secrets) {
+        return SYSCALL_ERROR;
+    }
+    let Ok(length) = usize::try_from(length) else {
+        return SYSCALL_ERROR;
+    };
+    if length == 0 || length > crate::secret_vault::MAX_SECRET_BYTES {
+        return SYSCALL_ERROR;
+    }
+    let mut secret = [0_u8; crate::secret_vault::MAX_SECRET_BYTES];
+    if crate::paging::copy_from_current_user(user_secret, &mut secret[..length]).is_err() {
+        return SYSCALL_ERROR;
+    }
+    let actor = crate::task::current_task_id().as_u64();
+    let result = crate::secret_vault::store(actor, &secret[..length]);
+    for byte in &mut secret {
+        unsafe { core::ptr::write_volatile(byte, 0) };
+    }
+    match result {
+        Ok(handle) => {
+            crate::audit::record(actor, crate::audit::Action::SecretStore, handle.0, true);
+            handle.0
+        }
+        Err(_) => {
+            crate::audit::record(actor, crate::audit::Action::SecretStore, 0, false);
+            SYSCALL_ERROR
+        }
+    }
+}
+
+fn sys_secret_read(raw_handle: u64, user_output: u64, capacity: u64) -> u64 {
+    if !crate::task::current_has(crate::capability::Capability::Secrets) {
+        return SYSCALL_ERROR;
+    }
+    let Ok(capacity) = usize::try_from(capacity) else {
+        return SYSCALL_ERROR;
+    };
+    if capacity > crate::secret_vault::MAX_SECRET_BYTES {
+        return SYSCALL_ERROR;
+    }
+    let mut secret = [0_u8; crate::secret_vault::MAX_SECRET_BYTES];
+    let result = crate::secret_vault::read(
+        crate::task::current_task_id().as_u64(),
+        crate::secret_vault::SecretHandle(raw_handle),
+        &mut secret,
+    );
+    let Ok(length) = result else {
+        for byte in &mut secret {
+            unsafe { core::ptr::write_volatile(byte, 0) };
+        }
+        return SYSCALL_ERROR;
+    };
+    if length > capacity {
+        for byte in &mut secret {
+            unsafe { core::ptr::write_volatile(byte, 0) };
+        }
+        return SYSCALL_ERROR;
+    }
+    if crate::paging::copy_to_current_user(user_output, &secret[..length]).is_err() {
+        for byte in &mut secret {
+            unsafe { core::ptr::write_volatile(byte, 0) };
+        }
+        return SYSCALL_ERROR;
+    }
+    for byte in &mut secret {
+        unsafe { core::ptr::write_volatile(byte, 0) };
+    }
+    length as u64
+}
+
+fn sys_secret_revoke(raw_handle: u64) -> u64 {
+    if !crate::task::current_has(crate::capability::Capability::Secrets) {
+        return SYSCALL_ERROR;
+    }
+    let actor = crate::task::current_task_id().as_u64();
+    match crate::secret_vault::revoke(actor, crate::secret_vault::SecretHandle(raw_handle)) {
+        Ok(()) => {
+            crate::audit::record(actor, crate::audit::Action::SecretRevoke, raw_handle, true);
+            0
+        }
+        Err(_) => {
+            crate::audit::record(actor, crate::audit::Action::SecretRevoke, raw_handle, false);
+            SYSCALL_ERROR
+        }
+    }
+}
+
 #[unsafe(no_mangle)]
 pub extern "C" fn wovenhat_syscall_dispatch(
     number: u64,
@@ -2238,24 +2366,12 @@ pub extern "C" fn wovenhat_syscall_dispatch(
         value if value == Number::TimerClose as u64 => sys_timer_close(arg0),
         value if value == Number::EventClose as u64 => sys_event_close(arg0),
         value if value == Number::SleepUntil as u64 => sys_sleep_until(arg0),
-        value if value == Number::GraphicsSurfaceCreate as u64 => {
-            sys_graphics_create(arg0, arg1)
-        }
-        value if value == Number::GraphicsSurfaceFill as u64 => {
-            sys_graphics_fill(arg0, arg1, arg2)
-        }
-        value if value == Number::GraphicsSurfacePixel as u64 => {
-            sys_graphics_pixel(arg0, arg1)
-        }
-        value if value == Number::GraphicsSurfaceDestroy as u64 => {
-            sys_graphics_destroy(arg0)
-        }
-        value if value == Number::GraphicsCompositorBlit as u64 => {
-            sys_compositor_blit(arg0, arg1)
-        }
-        value if value == Number::GraphicsCompositorPixel as u64 => {
-            sys_compositor_pixel(arg0)
-        }
+        value if value == Number::GraphicsSurfaceCreate as u64 => sys_graphics_create(arg0, arg1),
+        value if value == Number::GraphicsSurfaceFill as u64 => sys_graphics_fill(arg0, arg1, arg2),
+        value if value == Number::GraphicsSurfacePixel as u64 => sys_graphics_pixel(arg0, arg1),
+        value if value == Number::GraphicsSurfaceDestroy as u64 => sys_graphics_destroy(arg0),
+        value if value == Number::GraphicsCompositorBlit as u64 => sys_compositor_blit(arg0, arg1),
+        value if value == Number::GraphicsCompositorPixel as u64 => sys_compositor_pixel(arg0),
         value if value == Number::GraphicsSurfaceStroke as u64 => {
             sys_graphics_stroke(arg0, arg1, arg2)
         }
@@ -2263,16 +2379,12 @@ pub extern "C" fn wovenhat_syscall_dispatch(
         value if value == Number::GraphicsCompositorPresent as u64 => sys_compositor_present(),
         value if value == Number::InputPoll as u64 => sys_input_poll(),
         value if value == Number::InputWait as u64 => sys_input_wait(arg0),
-        value if value == Number::GraphicsSurfaceShare as u64 => {
-            sys_graphics_share(arg0, arg1)
-        }
+        value if value == Number::GraphicsSurfaceShare as u64 => sys_graphics_share(arg0, arg1),
         value if value == Number::GraphicsCompositorBlitShared as u64 => {
             sys_compositor_blit_shared(arg0, arg1)
         }
         value if value == Number::WaitAny as u64 => sys_wait_any(arg0, arg1),
-        value if value == Number::GraphicsSurfaceDamage as u64 => {
-            sys_graphics_damage(arg0, arg1)
-        }
+        value if value == Number::GraphicsSurfaceDamage as u64 => sys_graphics_damage(arg0, arg1),
         value if value == Number::GraphicsCompositorBlitDamage as u64 => {
             sys_compositor_blit_damage(arg0, arg1)
         }
@@ -2294,6 +2406,36 @@ pub extern "C" fn wovenhat_syscall_dispatch(
         value if value == Number::GraphicsCompositorBlitRegionShared as u64 => {
             sys_compositor_blit_region(arg0, arg1, arg2, true)
         }
+        value if value == Number::PermissionRequest as u64 => {
+            match crate::permission::Permission::from_u64(arg0) {
+                Some(permission) => {
+                    crate::permission::request_current(permission, arg1).unwrap_or(SYSCALL_ERROR)
+                }
+                None => SYSCALL_ERROR,
+            }
+        }
+        value if value == Number::PermissionPoll as u64 => {
+            match crate::permission::state_current(arg0) {
+                Ok(crate::permission::State::Pending) => 0,
+                Ok(crate::permission::State::Resolving) => 1,
+                Ok(crate::permission::State::Granted) => 2,
+                Ok(crate::permission::State::Denied) => 3,
+                Ok(crate::permission::State::Revoked) => 4,
+                Err(_) => SYSCALL_ERROR,
+            }
+        }
+        value if value == Number::PermissionDecide as u64 => {
+            crate::permission::decide(arg0, arg1 != 0)
+                .map(|_| 0)
+                .unwrap_or(SYSCALL_ERROR)
+        }
+        value if value == Number::PermissionRevoke as u64 => crate::permission::revoke(arg0)
+            .map(|_| 0)
+            .unwrap_or(SYSCALL_ERROR),
+        value if value == Number::AuditRead as u64 => sys_audit_read(arg0, arg1),
+        value if value == Number::SecretStore as u64 => sys_secret_store(arg0, arg1),
+        value if value == Number::SecretRead as u64 => sys_secret_read(arg0, arg1, arg2),
+        value if value == Number::SecretRevoke as u64 => sys_secret_revoke(arg0),
         _ => u64::MAX,
     };
 
@@ -2578,7 +2720,9 @@ fn encode_input(event: crate::woven_input::Event) -> Option<u64> {
     use crate::woven_input::{Event, Key};
     let packed = |kind: u64, value: u64| (kind << 56) | value;
     match event {
-        Event::Key(Key::Char(character)) => Some(packed(INPUT_KIND_CHAR, u64::from(u32::from(character)))),
+        Event::Key(Key::Char(character)) => {
+            Some(packed(INPUT_KIND_CHAR, u64::from(u32::from(character))))
+        }
         Event::Key(Key::Enter) => Some(packed(INPUT_KIND_ENTER, 0)),
         Event::Key(Key::Backspace) => Some(packed(INPUT_KIND_BACKSPACE, 0)),
         Event::Key(Key::Tab) => Some(packed(INPUT_KIND_TAB, 0)),

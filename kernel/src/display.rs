@@ -159,7 +159,9 @@ impl Surface {
         if !self.bounds().contains(x, y) {
             return None;
         }
-        self.pixels.get(y as usize * self.width + x as usize).copied()
+        self.pixels
+            .get(y as usize * self.width + x as usize)
+            .copied()
     }
 
     pub fn set_pixel(&mut self, x: i32, y: i32, color: u32) {
@@ -229,8 +231,8 @@ impl Surface {
         // Where the clipped region's top-left lands.
         let origin_x = x.saturating_add(clipped.x - region.x);
         let origin_y = y.saturating_add(clipped.y - region.y);
-        let target = Rect::new(origin_x, origin_y, clipped.width, clipped.height)
-            .intersect(self.bounds());
+        let target =
+            Rect::new(origin_x, origin_y, clipped.width, clipped.height).intersect(self.bounds());
         if target.is_empty() {
             return Rect::EMPTY;
         }
@@ -308,18 +310,9 @@ impl Surface {
         let bottom = rect.bottom() - 1;
         let right = rect.right() - 1;
         let mut touched = self.fill_rect(Rect::new(rect.x, rect.y, rect.width, 1), color);
-        touched = touched.union(self.fill_rect(
-            Rect::new(rect.x, bottom, rect.width, 1),
-            color,
-        ));
-        touched = touched.union(self.fill_rect(
-            Rect::new(rect.x, rect.y, 1, rect.height),
-            color,
-        ));
-        touched.union(self.fill_rect(
-            Rect::new(right, rect.y, 1, rect.height),
-            color,
-        ))
+        touched = touched.union(self.fill_rect(Rect::new(rect.x, bottom, rect.width, 1), color));
+        touched = touched.union(self.fill_rect(Rect::new(rect.x, rect.y, 1, rect.height), color));
+        touched.union(self.fill_rect(Rect::new(right, rect.y, 1, rect.height), color))
     }
 
     /// Draw `text` with its top-left at `x`, `y`, returning the region touched.
@@ -342,13 +335,8 @@ impl Surface {
                 }
             }
             touched = touched.union(
-                Rect::new(
-                    cursor_x,
-                    cursor_y,
-                    crate::font::WIDTH,
-                    crate::font::HEIGHT,
-                )
-                .intersect(self.bounds()),
+                Rect::new(cursor_x, cursor_y, crate::font::WIDTH, crate::font::HEIGHT)
+                    .intersect(self.bounds()),
             );
             cursor_x += crate::font::ADVANCE;
         }
@@ -528,11 +516,7 @@ pub fn present_scaled(
                     break;
                 }
                 let color = surface.pixels[row + x / scale];
-                let (red, green, blue) = (
-                    (color >> 16) as u8,
-                    (color >> 8) as u8,
-                    color as u8,
-                );
+                let (red, green, blue) = ((color >> 16) as u8, (color >> 8) as u8, color as u8);
                 match info.pixel_format {
                     PixelFormat::Rgb => {
                         framebuffer[offset] = red;

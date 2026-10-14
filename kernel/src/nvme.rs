@@ -39,10 +39,22 @@ pub enum InitError {
     IoQueueFailed,
 }
 
-#[derive(Clone, Copy)]
 struct DmaPage {
     physical: u64,
     virtual_address: u64,
+}
+
+impl Drop for DmaPage {
+    fn drop(&mut self) {
+        if let Ok(frame) = x86_64::structures::paging::PhysFrame::from_start_address(
+            x86_64::PhysAddr::new(self.physical),
+        ) {
+            // The page is no longer exposed to the controller when its owner
+            // is dropped.  Releasing it here makes every failed initialization
+            // path bounded and recoverable instead of leaking DMA memory.
+            let _ = memory::deallocate_frame(frame);
+        }
+    }
 }
 
 impl DmaPage {
@@ -170,9 +182,16 @@ impl NvmeController {
             device: device.device,
             function: device.function,
         };
+        let original_command = device.command;
         if !pci::enable_memory_bus_master(address) {
             return Err(InitError::MissingController);
         }
+        let mut rollback = ControllerRollback {
+            address,
+            registers: bar.address,
+            original_command,
+            enabled: true,
+        };
         let registers = bar.address;
         let cap = mmio_read64(registers)?;
         let mqes = ((cap & 0xffff) as u16).saturating_add(1);
@@ -254,6 +273,7 @@ impl NvmeController {
             registers + 0x1000 + 3 * stride,
         );
         let transfer = DmaPage::allocate_zeroed().ok_or(InitError::DmaUnavailable)?;
+        rollback.enabled = false;
         Ok(Self {
             namespace_id: 1,
             sectors: namespace_size,
@@ -288,6 +308,29 @@ impl NvmeController {
             sector.copy_from_slice(&self.transfer.bytes_mut()[..SECTOR_SIZE]);
         }
         Ok(())
+    }
+}
+
+struct ControllerRollback {
+    address: Address,
+    registers: u64,
+    original_command: u16,
+    enabled: bool,
+}
+
+impl Drop for ControllerRollback {
+    fn drop(&mut self) {
+        if !self.enabled {
+            return;
+        }
+        // Best-effort bounded quiescence.  If the controller never became
+        // ready, the volatile access may fail; PCI command restoration still
+        // prevents further bus mastering on every path.
+        if let Ok(cc) = mmio_read32(self.registers + 0x14) {
+            let _ = mmio_write32(self.registers + 0x14, cc & !1);
+            let _ = wait_ready(self.registers, false);
+        }
+        let _ = pci::restore_command(self.address, self.original_command);
     }
 }
 

@@ -91,6 +91,13 @@ def required_markers(stage, cpus):
                   '13.11': '[S13.11-AUDIT] BLE SMP persistent authentication authority: PASSED',
                   '1-5': '[S1-5] storage journal: PASSED',
                   '15.1': '[S15.1] WovenFS native filesystem: PASSED',
+                  '15.3': '[S15.3] permission broker: PASSED',
+                  '15.4': '[S15.4] signed application verification: PASSED',
+                  '15.5': '[S15.5] secure boot handoff: PASSED',
+                  '15.6': '[S15.6] software measurement: PASSED',
+                  '15.7': '[S15.7] WovenVault handles: PASSED',
+                  '15.8': '[S15.8] security ledger ABI: PASSED',
+                  '15.9': '[S15.9] exploit mitigations: PASSED',
                   '17.1': '[S17.1] WovenHat font coverage: PASSED',
                   '18.1': '[S18.1] client surface registry: PASSED',
                   '19.1': '[S19.1] compositor surface: PASSED',
@@ -117,7 +124,7 @@ def validation_errors(returncode, log, required):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--stage', choices=('10.8', '10.9', '11.1', '11.2', '11.3', '11.4', '11.5', '12.1', '12.2', '12.3', '12.4', '12.5', '13.1', '13.2', '13.3', '13.4', '13.5', '13.6', '13.7', '13.8', '13.9', '13.10', '13.11', '1-5', '15.1', '17.1', '18.1', '19.1', '19.3', '19.10'), default='10.8')
+    parser.add_argument('--stage', choices=('10.8', '10.9', '11.1', '11.2', '11.3', '11.4', '11.5', '12.1', '12.2', '12.3', '12.4', '12.5', '13.1', '13.2', '13.3', '13.4', '13.5', '13.6', '13.7', '13.8', '13.9', '13.10', '13.11', '1-5', '15.1', '15.3', '15.4', '15.5', '15.6', '15.7', '15.8', '15.9', '17.1', '18.1', '19.1', '19.3', '19.10'), default='10.8')
     parser.add_argument('--cpus', type=int, choices=(1, 2, 4), default=1)
     parser.add_argument('--qemu', default=shutil.which('qemu-system-x86_64') or r'C:\Program Files\qemu\qemu-system-x86_64.exe')
     parser.add_argument('--firmware', type=Path)
@@ -156,12 +163,15 @@ def main():
         command.extend(['-drive', f'if=none,id=sata0,format=raw,file={ahci_image}',
                         '-device', 'ich9-ahci,id=ahci',
                         '-device', 'ide-hd,drive=sata0,bus=ahci.0'])
-    if args.stage == '13.3':
+    if args.stage in ('13.2', '13.3'):
         nvme_image = out / 'nvme.img'
         with nvme_image.open('wb') as image:
             image.truncate(16 * 1024 * 1024)
         command.extend(['-drive', f'if=none,id=nvme0,format=raw,file={nvme_image}',
                         '-device', 'nvme,drive=nvme0,serial=WOVENHAT133'])
+    if args.stage == '13.2':
+        command.extend(['-netdev', 'user,id=stage132net',
+                        '-device', 'e1000,netdev=stage132net'])
     flags = subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
     with (out / 'qemu.log').open('w') as output:
         try:

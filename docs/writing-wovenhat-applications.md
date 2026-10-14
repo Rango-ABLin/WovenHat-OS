@@ -128,10 +128,11 @@ python .\scripts\test-application-qemu.py --cpus 1
 ```
 
 That builds the application, passes its path to the kernel build through
-`WOVENHAT_APP_IMAGE`, boots, and requires the Stage 16.1 markers. The kernel
-installs the image into the filesystem, reads it back, and loads **the bytes it
-read from the filesystem** rather than the embedded constant, so the gate
-proves the filesystem path rather than assuming it.
+`WOVENHAT_APP_IMAGE`, wraps it in a signed WAPP package, boots, and requires
+the Stage 16.1 markers. The kernel verifies the package, installs it into the
+filesystem, reads it back, and loads **the bytes it read from the filesystem**
+rather than the embedded constant, so the gate proves signature enforcement and
+the filesystem path rather than assuming either.
 
 ## Adding a new application
 
@@ -142,7 +143,8 @@ proves the filesystem path rather than assuming it.
 ## Known limits
 
 - **One application per acceptance build.** `WOVENHAT_APP_IMAGE` names a single
-  image. Installing several, and a packaging format for them, is open work.
+  source ELF and the build produces one signed WAPP package. A multi-application
+  package/catalog format is still open work.
 - **No FAT32 round trip yet.** The gate installs into the VFS at `/bin`, which
   is where `exec` resolves bare names. Persisting an application onto a FAT32
   volume and executing it across a reboot is a separate increment.

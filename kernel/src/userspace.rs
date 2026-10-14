@@ -4430,10 +4430,7 @@ pub fn elf_loader_self_test() -> bool {
             {
                 return false;
             }
-            matches!(
-                crate::elf::parse(&elf),
-                Err(crate::elf::Error::Unsupported)
-            )
+            matches!(crate::elf::parse(&elf), Err(crate::elf::Error::Unsupported))
         });
 
     valid_segment
@@ -4727,6 +4724,62 @@ pub fn install_shell_executable() -> bool {
     };
     build_stub_elf(stub).is_some_and(|elf| crate::vfs::create_read_only("/bin/sh", &elf).is_ok())
 }
+
+pub fn load_signed_elf_with_argv(package: &[u8], args: &[&str]) -> Option<UserProgram> {
+    let verified = crate::signed_app::verify_package(package).ok()?;
+    load_elf_with_argv(verified.bytes(), args)
+}
+
+fn is_kernel_trusted_executable(path: &str) -> bool {
+    matches!(
+        path,
+        "/bin/init"
+            | "/bin/sh"
+            | "/bin/woven-shell"
+            | "/bin/hello-gui"
+            | "/bin/true"
+            | "/bin/false"
+            | "/bin/ls"
+            | "/bin/sleep"
+            | "/bin/cat"
+            | "/bin/echo"
+            | "/bin/pwd"
+            | "/bin/mkdir"
+            | "/bin/rm"
+            | "/bin/selftest"
+            | "/bin/ip"
+            | "/bin/netstat"
+            | "/bin/dns"
+            | "/bin/udp"
+            | "/bin/nc"
+            | "/bin/ping"
+            | "/bin/bin"
+            | "/bin/en"
+            | "/bin/env"
+            | "/bin/ps"
+            | "/bin/uptime"
+            | "/bin/tcpd"
+            | "/bin/mmaptest"
+    )
+}
+
+/// Preserve the established in-kernel image ABI while routing WAPP packages
+/// through signature verification before ELF parsing. Raw ELF remains accepted
+/// only for the fixed kernel-owned system image paths; user-controlled paths
+/// must carry a WAPP envelope.
+pub fn load_elf_with_argv_verified(bytes: &[u8], args: &[&str]) -> Option<UserProgram> {
+    if bytes.starts_with(&crate::signed_app::PACKAGE_MAGIC) {
+        load_signed_elf_with_argv(bytes, args)
+    } else if args
+        .first()
+        .is_some_and(|path| is_kernel_trusted_executable(path))
+    {
+        load_elf_with_argv(bytes, args)
+    } else {
+        None
+    }
+}
+
 pub fn load_elf(bytes: &[u8]) -> Option<UserProgram> {
     let image = crate::elf::parse(bytes)
         .ok()?

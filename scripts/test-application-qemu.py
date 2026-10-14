@@ -66,9 +66,24 @@ def main():
         return 1
     print(f'      image: {image} ({image.stat().st_size} bytes)')
 
-    print('[2/4] Building the kernel with that image embedded...')
+    package = app_dir / 'target' / 'x86_64-unknown-none' / 'release' / f'{APP}.wapp'
+    print('[2/5] Signing the application into a WAPP package...')
+    package_env = dict(os.environ)
+    package_env.pop('CARGO_BUILD_BUILD_DIR', None)
+    package_env['CARGO_TARGET_DIR'] = str(root / 'target' / 'wapp-packager')
+    packaged = subprocess.run([
+        'cargo', 'run', '--quiet', '--manifest-path',
+        str(root / 'tools' / 'wapp-packager' / 'Cargo.toml'), '--',
+        str(image), str(package),
+    ], cwd=root, env=package_env)
+    if packaged.returncode != 0 or not package.is_file():
+        print('Application packaging failed.', file=sys.stderr)
+        return 1
+    print(f'      package: {package} ({package.stat().st_size} bytes)')
+
+    print('[3/5] Building the kernel with the signed package embedded...')
     env = dict(os.environ)
-    env['WOVENHAT_APP_IMAGE'] = str(image)
+    env['WOVENHAT_APP_IMAGE'] = str(package)
     env.setdefault('CARGO_BUILD_BUILD_DIR', str(root / '.cargo-build'))
     env.setdefault('CARGO_TARGET_DIR', str(root / 'target'))
     boot = subprocess.run(
@@ -88,7 +103,7 @@ def main():
         vars_copy = out / 'OVMF_VARS.fd'
         shutil.copyfile(args.firmware_vars, vars_copy)
 
-    print(f'[3/4] Booting on {args.cpus} CPU(s)...')
+    print(f'[4/5] Booting on {args.cpus} CPU(s)...')
     command = [
         str(qemu), '-accel', 'tcg,tb-size=128', '-machine', 'q35',
         '-m', '256M', '-smp', str(args.cpus), '-display', 'none',
@@ -110,7 +125,7 @@ def main():
             print(f'QEMU timed out. Evidence: {out}', file=sys.stderr)
             return 1
 
-    print('[4/4] Checking the acceptance markers...')
+    print('[5/5] Checking the acceptance markers...')
     text = serial.read_text(errors='replace') if serial.exists() else ''
     for line in text.splitlines():
         if '[S16.1]' in line or '[USER]' in line or 'hello from wovenhat' in line:

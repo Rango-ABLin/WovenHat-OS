@@ -1,8 +1,9 @@
 #![cfg_attr(feature = "qemu-test", allow(dead_code, unused_imports))]
-#![no_std]
-#![no_main]
+#![cfg_attr(not(test), no_std)]
+#![cfg_attr(not(test), no_main)]
+#![cfg_attr(test, allow(dead_code, unused_imports, unused_variables, unfulfilled_lint_expectations))]
 #![feature(abi_x86_interrupt)]
-#![feature(alloc_error_handler)]
+#![cfg_attr(not(test), feature(alloc_error_handler))]
 
 extern crate alloc;
 
@@ -23,6 +24,7 @@ mod benchmark;
 mod block;
 mod block_cache;
 mod block_io;
+mod boot_measurement;
 mod capability;
 mod completion_port;
 mod completion_queue;
@@ -48,6 +50,13 @@ mod entropy;
 mod fat32;
 mod file_frames;
 mod file_mapping;
+#[cfg(any(
+    feature = "stage14-5-test",
+    feature = "stage14-5b-test",
+    feature = "stage14-5c-test",
+    feature = "stage14-5d-test"
+))]
+mod firewall_policy;
 mod font;
 mod gdt;
 mod gpt;
@@ -62,23 +71,26 @@ mod ipc;
 mod irq_lock;
 mod journal;
 mod keyboard;
-mod mouse;
 mod memory;
+mod mouse;
 mod network;
-#[cfg(any(feature = "stage14-5-test", feature = "stage14-5b-test", feature = "stage14-5c-test", feature = "stage14-5d-test"))]
-mod firewall_policy;
 mod notifications;
-mod rtc;
 #[cfg(feature = "stage13-3-test")]
 mod nvme;
 mod page_cache;
 mod paging;
 mod panic;
 mod partition;
+mod permission;
 mod pic;
 mod pipe;
+mod rtc;
+mod secret_vault;
+#[cfg(feature = "secure-boot")]
+mod secure_boot;
 mod serial;
 mod shell;
+mod signed_app;
 mod smp;
 #[cfg(feature = "stage12-4-test")]
 mod snapshots;
@@ -87,6 +99,7 @@ mod storage;
 // this module is required by both the 12.3 and 12.5 gates. The features
 // themselves must not chain: each Stage 12 self-test block ends the boot, so
 // enabling 12.3 from 12.5 would exit before the 12.5 block ran.
+mod compositor;
 #[cfg(any(feature = "stage12-3-test", feature = "stage12-5-test"))]
 mod storage_manager;
 mod swap;
@@ -96,17 +109,22 @@ mod terminal;
 #[allow(dead_code)]
 mod thread;
 mod timer;
-mod userspace;
-mod compositor;
 mod user_graphics;
+mod userspace;
 mod vfs;
 #[cfg(feature = "stage12-1-test")]
 mod vfs_api;
 mod virtio_net;
 // `storage_manager` seals records through this key vault, so the Stage 12.5
 // gate needs the module even though it does not run the Stage 12.3 self-test.
+#[cfg(feature = "stage13-10-test")]
+mod bluetooth_hci;
+#[cfg(feature = "stage13-9-test")]
+mod irq_mailbox;
 #[cfg(any(feature = "stage12-3-test", feature = "stage12-5-test"))]
 mod volume_crypto;
+#[cfg(any(feature = "stage15-1-test", feature = "stage15-2-test"))]
+mod wfs;
 #[cfg(feature = "stage13-9-test")]
 mod wifi;
 #[cfg(feature = "stage13-9-test")]
@@ -124,10 +142,6 @@ mod wifi_gtk;
 #[cfg(feature = "stage13-9-test")]
 mod wifi_hw;
 #[cfg(feature = "stage13-9-test")]
-mod irq_mailbox;
-#[cfg(feature = "stage13-9-test")]
-mod wifi_runtime;
-#[cfg(feature = "stage13-9-test")]
 mod wifi_link;
 #[cfg(feature = "stage13-9-test")]
 mod wifi_net;
@@ -135,6 +149,8 @@ mod wifi_net;
 mod wifi_recovery;
 #[cfg(feature = "stage13-9-test")]
 mod wifi_rsn;
+#[cfg(feature = "stage13-9-test")]
+mod wifi_runtime;
 #[cfg(feature = "stage13-9-test")]
 mod wifi_scan;
 #[cfg(feature = "stage13-9-test")]
@@ -155,11 +171,7 @@ mod woven_input;
     feature = "stage12-5-test"
 ))]
 mod wovenfs;
-#[cfg(any(feature = "stage15-1-test", feature = "stage15-2-test"))]
-mod wfs;
 mod wovenguard;
-#[cfg(feature = "stage13-10-test")]
-mod bluetooth_hci;
 #[cfg(any(
     feature = "stage13-5-test",
     feature = "stage13-6-test",
@@ -172,6 +184,7 @@ use bootloader_api::{config::Mapping, entry_point, info::Optional, BootInfo, Boo
 
 use console::Console;
 use core::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+#[cfg(not(test))]
 use core::{alloc::Layout, panic::PanicInfo};
 use shell::Shell;
 
@@ -180,6 +193,9 @@ use x86_64::instructions::interrupts::int3;
 static BOOTLOADER_CONFIG: BootloaderConfig = {
     let mut config = BootloaderConfig::new_default();
     config.mappings.physical_memory = Some(Mapping::Dynamic);
+    // Keep the PIE relocation base stable so the signed boot image has a
+    // deterministic relocation result across firmware boots.
+    config.mappings.kernel_base = Mapping::FixedAddress(0x1000_0000_0000);
     // The default boot stack is intentionally small. WovenHat performs
     // substantial early initialization, so give the bootstrap task a 1 MiB
     // stack while retaining the bootloader's guard-page protection.
@@ -197,6 +213,10 @@ static FAIR_TASKS_COMPLETED: AtomicU64 = AtomicU64::new(0);
 
 #[allow(unreachable_code)]
 fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
+    // Verify the immutable bootloader image before allocator, paging, and
+    // runtime initialization can modify writable PT_LOAD bytes.
+    #[cfg(feature = "secure-boot")]
+    let secure_boot_verified = secure_boot::verify_manifest(boot_info);
     smp::prepare(&boot_info.memory_regions);
     let physical_memory_offset = match &boot_info.physical_memory_offset {
         Optional::Some(offset) => Some(*offset),
@@ -295,6 +315,47 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     }
 
     serial::init();
+    #[cfg(feature = "secure-boot")]
+    if !secure_boot_verified {
+        serial::write_line(format_args!("[S15.5] signed kernel handoff: FAILED"));
+        #[cfg(feature = "qemu-test")]
+        qemu_test_exit_failure();
+        halt();
+    }
+    #[cfg(feature = "secure-boot")]
+    serial::write_line(format_args!("[S15.5] signed kernel handoff: PASSED"));
+    #[cfg(feature = "qemu-test")]
+    if !boot_measurement::self_test() {
+        serial::write_line(format_args!(
+            "[S15.6] software measurement primitive: FAILED"
+        ));
+        qemu_test_exit_failure();
+    }
+    #[cfg(feature = "qemu-test")]
+    serial::write_line(format_args!(
+        "[S15.6] software measurement primitive: PASSED"
+    ));
+    let _kernel_measurement = physical_memory_offset.and_then(|offset| {
+        let measurement = boot_measurement::measure_kernel(boot_info, offset);
+        if let Some(measurement) = measurement {
+            let prefix = u64::from_le_bytes([
+                measurement[0],
+                measurement[1],
+                measurement[2],
+                measurement[3],
+                measurement[4],
+                measurement[5],
+                measurement[6],
+                measurement[7],
+            ]);
+            serial::write_line(format_args!(
+                "[BOOT] kernel measurement prefix={prefix:016x}"
+            ));
+        } else {
+            serial::write_line(format_args!("[BOOT] kernel measurement unavailable"));
+        }
+        measurement
+    });
     // The physical inventory image stops after RAM/paging checks, before
     // driver activation, disk/network I/O, AP startup or QEMU acceptance.
     #[cfg(feature = "physical-probe")]
@@ -854,10 +915,14 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     #[cfg(feature = "stage13-10-test")]
     {
         if !bluetooth_hci::self_test() {
-            serial::write_line(format_args!("[S13.10A] Bluetooth HCI core foundation: FAILED"));
+            serial::write_line(format_args!(
+                "[S13.10A] Bluetooth HCI core foundation: FAILED"
+            ));
             qemu_test_exit_failure();
         }
-        serial::write_line(format_args!("[S13.10A] Bluetooth HCI core foundation: PASSED"));
+        serial::write_line(format_args!(
+            "[S13.10A] Bluetooth HCI core foundation: PASSED"
+        ));
         if !xhci::bluetooth_transport_self_test() {
             serial::write_line(format_args!(
                 "[S13.10B] Bluetooth USB HCI transport contract: FAILED"
@@ -997,14 +1062,10 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
             "[S13.10I] Bluetooth LE connection lifecycle: PASSED"
         ));
         if !bluetooth_hci::att_foundation_self_test() {
-            serial::write_line(format_args!(
-                "[S13.10J] Bluetooth ATT foundation: FAILED"
-            ));
+            serial::write_line(format_args!("[S13.10J] Bluetooth ATT foundation: FAILED"));
             qemu_test_exit_failure();
         }
-        serial::write_line(format_args!(
-            "[S13.10J] Bluetooth ATT foundation: PASSED"
-        ));
+        serial::write_line(format_args!("[S13.10J] Bluetooth ATT foundation: PASSED"));
         if !bluetooth_hci::gatt_foundation_self_test() {
             serial::write_line(format_args!(
                 "[S13.10J] Bluetooth GATT service model: FAILED"
@@ -1015,14 +1076,10 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
             "[S13.10J] Bluetooth GATT service model: PASSED"
         ));
         if !bluetooth_hci::gatt_discovery_self_test() {
-            serial::write_line(format_args!(
-                "[S13.10J] Bluetooth GATT discovery: FAILED"
-            ));
+            serial::write_line(format_args!("[S13.10J] Bluetooth GATT discovery: FAILED"));
             qemu_test_exit_failure();
         }
-        serial::write_line(format_args!(
-            "[S13.10J] Bluetooth GATT discovery: PASSED"
-        ));
+        serial::write_line(format_args!("[S13.10J] Bluetooth GATT discovery: PASSED"));
         if !bluetooth_hci::gatt_subscription_self_test() {
             serial::write_line(format_args!(
                 "[S13.10J] Bluetooth GATT subscriptions: FAILED"
@@ -1051,14 +1108,10 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
             "[S13.10K] Bluetooth Battery Service notifications: PASSED"
         ));
         if !bluetooth_hci::wovenhat_ble_service_self_test() {
-            serial::write_line(format_args!(
-                "[S13.10K] WovenHat BLE service API: FAILED"
-            ));
+            serial::write_line(format_args!("[S13.10K] WovenHat BLE service API: FAILED"));
             qemu_test_exit_failure();
         }
-        serial::write_line(format_args!(
-            "[S13.10K] WovenHat BLE service API: PASSED"
-        ));
+        serial::write_line(format_args!("[S13.10K] WovenHat BLE service API: PASSED"));
         if !bluetooth_hci::bluetooth_le_lifecycle_hardening_self_test() {
             serial::write_line(format_args!(
                 "[S13.10L] Bluetooth LE lifecycle cleanup: FAILED"
@@ -1078,14 +1131,10 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
             "[S13.10L] Bluetooth malformed teardown/reconnect recovery: PASSED"
         ));
         if !bluetooth_hci::bluetooth_le_lifecycle_stress_self_test() {
-            serial::write_line(format_args!(
-                "[S13.10L] Bluetooth lifecycle stress: FAILED"
-            ));
+            serial::write_line(format_args!("[S13.10L] Bluetooth lifecycle stress: FAILED"));
             qemu_test_exit_failure();
         }
-        serial::write_line(format_args!(
-            "[S13.10L] Bluetooth lifecycle stress: PASSED"
-        ));
+        serial::write_line(format_args!("[S13.10L] Bluetooth lifecycle stress: PASSED"));
         if !bluetooth_hci::le_bond_persistence_self_test() {
             serial::write_line(format_args!(
                 "[S13.10M] Bluetooth LE bond persistence/reconnect: FAILED"
@@ -3409,10 +3458,14 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     #[cfg(feature = "stage19-14-test")]
     {
         if !stage19_14_self_test() {
-            serial::write_line(format_args!("[S19.14] display scaling and frame pacing: FAILED"));
+            serial::write_line(format_args!(
+                "[S19.14] display scaling and frame pacing: FAILED"
+            ));
             qemu_test_exit_failure();
         }
-        serial::write_line(format_args!("[S19.14] display scaling and frame pacing: PASSED"));
+        serial::write_line(format_args!(
+            "[S19.14] display scaling and frame pacing: PASSED"
+        ));
         qemu_test_exit_success();
     }
     #[cfg(feature = "stage19-13-test")]
@@ -3445,10 +3498,14 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     #[cfg(feature = "stage19-10-test")]
     {
         if !compositor::geometry_self_test(&mut console) {
-            serial::write_line(format_args!("[S19.10] display geometry and single writer: FAILED"));
+            serial::write_line(format_args!(
+                "[S19.10] display geometry and single writer: FAILED"
+            ));
             qemu_test_exit_failure();
         }
-        serial::write_line(format_args!("[S19.10] display geometry and single writer: PASSED"));
+        serial::write_line(format_args!(
+            "[S19.10] display geometry and single writer: PASSED"
+        ));
         qemu_test_exit_success();
     }
     #[cfg(feature = "stage19-9-test")]
@@ -3517,10 +3574,14 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     #[cfg(feature = "stage19-2-test")]
     {
         if !stage19_2_self_test() {
-            serial::write_line(format_args!("[S19.2] hello-gui through the compositor: FAILED"));
+            serial::write_line(format_args!(
+                "[S19.2] hello-gui through the compositor: FAILED"
+            ));
             qemu_test_exit_failure();
         }
-        serial::write_line(format_args!("[S19.2] hello-gui through the compositor: PASSED"));
+        serial::write_line(format_args!(
+            "[S19.2] hello-gui through the compositor: PASSED"
+        ));
         qemu_test_exit_success();
     }
     #[cfg(feature = "stage18-2-test")]
@@ -3562,9 +3623,7 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     #[cfg(feature = "stage16-1-test")]
     {
         if !stage16_1_self_test() {
-            serial::write_line(format_args!(
-                "[S16.1] out-of-kernel application: FAILED"
-            ));
+            serial::write_line(format_args!("[S16.1] out-of-kernel application: FAILED"));
             qemu_test_exit_failure();
         }
         serial::write_line(format_args!("[S16.1] out-of-kernel application: PASSED"));
@@ -3577,6 +3636,69 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
             qemu_test_exit_failure();
         }
         serial::write_line(format_args!("[S15.2] WovenFS physical device: PASSED"));
+        qemu_test_exit_success();
+    }
+    #[cfg(feature = "stage15-3-test")]
+    {
+        if !permission::self_test() {
+            serial::write_line(format_args!("[S15.3] permission broker: FAILED"));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!("[S15.3] permission broker: PASSED"));
+        qemu_test_exit_success();
+    }
+    #[cfg(feature = "stage15-4-test")]
+    {
+        if !signed_app::self_test() {
+            serial::write_line(format_args!(
+                "[S15.4] signed application verification: FAILED"
+            ));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!(
+            "[S15.4] signed application verification: PASSED"
+        ));
+        qemu_test_exit_success();
+    }
+    #[cfg(feature = "stage15-5-test")]
+    {
+        serial::write_line(format_args!("[S15.5] secure boot handoff: PASSED"));
+        qemu_test_exit_success();
+    }
+    #[cfg(feature = "stage15-6-test")]
+    {
+        if !boot_measurement::self_test() {
+            serial::write_line(format_args!("[S15.6] software measurement: FAILED"));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!("[S15.6] software measurement: PASSED"));
+        qemu_test_exit_success();
+    }
+    #[cfg(feature = "stage15-7-test")]
+    {
+        if !secret_vault::self_test() {
+            serial::write_line(format_args!("[S15.7] WovenVault handles: FAILED"));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!("[S15.7] WovenVault handles: PASSED"));
+        qemu_test_exit_success();
+    }
+    #[cfg(feature = "stage15-8-test")]
+    {
+        if !audit::stage15_8_self_test() {
+            serial::write_line(format_args!("[S15.8] security ledger ABI: FAILED"));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!("[S15.8] security ledger ABI: PASSED"));
+        qemu_test_exit_success();
+    }
+    #[cfg(feature = "stage15-9-test")]
+    {
+        if !task::stack_canary_self_test() || !userspace::elf_loader_self_test() {
+            serial::write_line(format_args!("[S15.9] exploit mitigations: FAILED"));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!("[S15.9] exploit mitigations: PASSED"));
         qemu_test_exit_success();
     }
     #[cfg(feature = "stage15-1-test")]
@@ -3875,8 +3997,7 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
             qemu_test_exit_failure();
         }
         let cleanup_start = timer::ticks();
-        while async_network::stats().active != 0
-            || network::stats().user_sockets != sockets_before
+        while async_network::stats().active != 0 || network::stats().user_sockets != sockets_before
         {
             network::poll();
             if timer::ticks().wrapping_sub(cleanup_start) > 200 {
@@ -3961,8 +4082,7 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
             qemu_test_exit_failure();
         }
         let cleanup_start = timer::ticks();
-        while async_network::stats().active != 0
-            || network::stats().user_sockets != sockets_before
+        while async_network::stats().active != 0 || network::stats().user_sockets != sockets_before
         {
             network::poll();
             if timer::ticks().wrapping_sub(cleanup_start) > 200 {
@@ -4336,10 +4456,14 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     #[cfg(feature = "stage13-9-test")]
     {
         if !wifi_runtime::self_test() {
-            serial::write_line(format_args!("[S13.10AC] IRQ worker/wakeup/teardown: FAILED"));
+            serial::write_line(format_args!(
+                "[S13.10AC] IRQ worker/wakeup/teardown: FAILED"
+            ));
             qemu_test_exit_failure();
         }
-        serial::write_line(format_args!("[S13.10AC] IRQ worker/wakeup/teardown: PASSED"));
+        serial::write_line(format_args!(
+            "[S13.10AC] IRQ worker/wakeup/teardown: PASSED"
+        ));
     }
     smp::self_test();
     serial::write_line(format_args!("[BOOT] ALL VALIDATIONS PASSED"));
@@ -4411,7 +4535,6 @@ fn preemption_probe_task() -> ! {
     task::exit_current_task()
 }
 
-
 // ------------------------------- out-of-kernel application execution
 
 /// An application image built by the ordinary Rust toolchain, outside the
@@ -4444,13 +4567,38 @@ fn stage16_1_self_test() -> bool {
     }
 
     serial::write_line(format_args!(
-        "[S16.1] external image bytes {}",
+        "[S16.1] signed application package bytes {}",
         EXTERNAL_APPLICATION.len()
     ));
 
-    // The loader must accept the toolchain's output as-is. This is the claim
-    // that matters: no synthetic ELF, no in-kernel assembly.
-    let parsed = match elf::parse(EXTERNAL_APPLICATION) {
+    let Some(verified) = signed_app::verify_package(EXTERNAL_APPLICATION).ok() else {
+        return step("signed WAPP package verifies", false);
+    };
+    if !step("signed WAPP package verifies", true) {
+        return false;
+    }
+    let mut tampered = alloc::vec::Vec::from(EXTERNAL_APPLICATION);
+    if let Some(last) = tampered.last_mut() {
+        *last ^= 1;
+    }
+    if !step(
+        "tampered WAPP package is refused",
+        signed_app::verify_package(&tampered).is_err(),
+    ) {
+        return false;
+    }
+    let image = verified.bytes();
+    if !step(
+        "unsigned external image is refused",
+        userspace::load_elf_with_argv_verified(image, &["/bin/unsigned"]).is_none(),
+    ) {
+        return false;
+    }
+
+    // The loader must accept the toolchain's signed output. This is the claim
+    // that matters: no synthetic ELF, no in-kernel assembly, and no unsigned
+    // external image bypass.
+    let parsed = match elf::parse(image) {
         Ok(image) => image,
         Err(_) => {
             // elf::Error carries no Debug impl, and the loader's acceptance
@@ -4461,9 +4609,13 @@ fn stage16_1_self_test() -> bool {
     };
     serial::write_line(format_args!(
         "[S16.1] elf entry {:#x} segments {}",
-        parsed.entry, parsed.segment_count()
+        parsed.entry,
+        parsed.segment_count()
     ));
-    if !step("loader accepts the external image", parsed.segment_count() > 0) {
+    if !step(
+        "loader accepts the external image",
+        parsed.segment_count() > 0,
+    ) {
         return false;
     }
 
@@ -4480,15 +4632,14 @@ fn stage16_1_self_test() -> bool {
     // Read it back through the VFS and confirm the bytes survived, so a later
     // load failure cannot be blamed on storage.
     let mut readback = alloc::vec![0u8; EXTERNAL_APPLICATION.len()];
-    let round_trip = vfs::read_all("/bin/hello", &mut readback)
-        == Ok(EXTERNAL_APPLICATION.len())
+    let round_trip = vfs::read_all("/bin/hello", &mut readback) == Ok(EXTERNAL_APPLICATION.len())
         && readback[..] == EXTERNAL_APPLICATION[..];
     if !step("read the image back from the filesystem", round_trip) {
         return false;
     }
 
     // Load from those filesystem bytes, not from the embedded constant.
-    let Some(program) = userspace::load_elf_with_argv(&readback, &["/bin/hello"]) else {
+    let Some(program) = userspace::load_elf_with_argv_verified(&readback, &["/bin/hello"]) else {
         return step("load from filesystem bytes", false);
     };
     if !step("load from filesystem bytes", true) {
@@ -4519,7 +4670,6 @@ fn stage16_1_self_test() -> bool {
         task::wait_process(pid.as_u64()) == Ok(0),
     )
 }
-
 
 // ------------------------------- end-to-end client surface via a real app
 
@@ -4588,7 +4738,11 @@ fn run_hello_gui(
     argv: &[&str],
     display_authority: bool,
 ) -> Option<(task::ProcessId, Result<i32, task::WaitError>)> {
-    let pid = spawn_hello_gui(image, argv, display_authority.then(display_client_capabilities))?;
+    let pid = spawn_hello_gui(
+        image,
+        argv,
+        display_authority.then(display_client_capabilities),
+    )?;
     wait_hello_gui(pid)
 }
 
@@ -4722,15 +4876,20 @@ fn stage20_3_self_test() -> bool {
             base
         }
     }
-    fn region(x0: i32, y0: i32, width: i32, height: i32, expected: impl Fn(i32, i32) -> u32) -> bool {
-        (y0..y0 + height).all(|y| (x0..x0 + width).all(|x| compositor::pixel(x, y) == Ok(expected(x, y))))
+    fn region(
+        x0: i32,
+        y0: i32,
+        width: i32,
+        height: i32,
+        expected: impl Fn(i32, i32) -> u32,
+    ) -> bool {
+        (y0..y0 + height)
+            .all(|y| (x0..x0 + width).all(|x| compositor::pixel(x, y) == Ok(expected(x, y))))
     }
     fn packet(dx: i16, screen_dy: i16, left: bool) -> bool {
         let dy = -screen_dy;
-        let flags = 0x08
-            | u8::from(left)
-            | if dx < 0 { 0x10 } else { 0 }
-            | if dy < 0 { 0x20 } else { 0 };
+        let flags =
+            0x08 | u8::from(left) | if dx < 0 { 0x10 } else { 0 } | if dy < 0 { 0x20 } else { 0 };
         [flags, dx as u8, dy as u8].into_iter().all(mouse::loopback)
     }
     fn move_by(mut dx: i32, mut dy: i32) -> bool {
@@ -4781,15 +4940,19 @@ fn stage20_3_self_test() -> bool {
         .with(capability::Capability::Ipc)
         .with(capability::Capability::FileRead)
         .with(capability::Capability::ProcessCreate);
-    let Some(program) = userspace::load_elf_with_argv(WOVEN_SHELL_IMAGE, &["/bin/woven-shell"]) else {
+    let Some(program) = userspace::load_elf_with_argv(WOVEN_SHELL_IMAGE, &["/bin/woven-shell"])
+    else {
         return step("shell image loads", false);
     };
-    let Ok((shell, _, _)) = task::spawn_user_system_service("woven-shell", program, capabilities) else {
+    let Ok((shell, _, _)) = task::spawn_user_system_service("woven-shell", program, capabilities)
+    else {
         return step("shell spawned", false);
     };
     if !step(
         "shell took the display",
-        until(3000, || compositor::holder() == Some(shell.as_u64()) && compositor::is_presenting()),
+        until(3000, || {
+            compositor::holder() == Some(shell.as_u64()) && compositor::is_presenting()
+        }),
     ) {
         return false;
     }
@@ -4822,20 +4985,32 @@ fn stage20_3_self_test() -> bool {
             }
             expected.draw_text(6, row_y + 4, name, WHITE);
         }
-        until(500, || region(4, y, 160, h, |x, py| expected.pixel(x - 4, py - y).unwrap_or(UNSET)))
+        until(500, || {
+            region(4, y, 160, h, |x, py| {
+                expected.pixel(x - 4, py - y).unwrap_or(UNSET)
+            })
+        })
     };
     let closed = || {
         let h = panel_height(3);
-        until(500, || region(4, top - 2 - h, 160, h, |x, y| wallpaper(x, y, height)))
+        until(500, || {
+            region(4, top - 2 - h, 160, h, |x, y| wallpaper(x, y, height))
+        })
     };
     let children = || task::child_count(shell);
 
     // Keyboard: F1 opens the launcher with the whole catalog, sorted, and
     // the non-.app file left out; Tab moves the selection; typing filters.
-    if !step("F1 opens the launcher with the catalog", keys(&[0x3b]) && panel(&["Alpha", "Beta", "Gamma"], "", 0))
-        || !step("Tab moves the selection", keys(&[0x0f]) && panel(&["Alpha", "Beta", "Gamma"], "", 1))
-        || !step("typing filters the list", keys(&[0x30, 0x12]) && panel(&["Beta"], "be", 0))
-    {
+    if !step(
+        "F1 opens the launcher with the catalog",
+        keys(&[0x3b]) && panel(&["Alpha", "Beta", "Gamma"], "", 0),
+    ) || !step(
+        "Tab moves the selection",
+        keys(&[0x0f]) && panel(&["Alpha", "Beta", "Gamma"], "", 1),
+    ) || !step(
+        "typing filters the list",
+        keys(&[0x30, 0x12]) && panel(&["Beta"], "be", 0),
+    ) {
         return false;
     }
     // Enter launches Beta: its window opens (the first window, at 40, 40),
@@ -4848,7 +5023,9 @@ fn stage20_3_self_test() -> bool {
         return false;
     }
     let reaped = keys(&[0x15])
-        && until(2000, || compositor::pixel(45, 45) == Ok(wallpaper(45, 45, height)))
+        && until(2000, || {
+            compositor::pixel(45, 45) == Ok(wallpaper(45, 45, height))
+        })
         && until(1000, || children() == 0);
     if !step("Beta takes its key, exits, and is reaped", reaped) {
         return false;
@@ -4856,7 +5033,8 @@ fn stage20_3_self_test() -> bool {
 
     // Pointer: the start button opens the launcher; clicking a row launches.
     let (mut px, mut py) = (width / 2, height / 2);
-    let opened = move_by(26 - px, top + 12 - py) && click() && panel(&["Alpha", "Beta", "Gamma"], "", 0);
+    let opened =
+        move_by(26 - px, top + 12 - py) && click() && panel(&["Alpha", "Beta", "Gamma"], "", 0);
     (px, py) = (26, top + 12);
     if !step("start button opens the launcher", opened) {
         return false;
@@ -4876,7 +5054,9 @@ fn stage20_3_self_test() -> bool {
         && closed()
         && children() == 1
         && keys(&[0x2d])
-        && until(2000, || compositor::pixel(70, 70) == Ok(wallpaper(70, 70, height)))
+        && until(2000, || {
+            compositor::pixel(70, 70) == Ok(wallpaper(70, 70, height))
+        })
         && until(1000, || children() == 0);
     if !step("Alpha takes its key, exits, and is reaped", reaped) {
         return false;
@@ -4922,7 +5102,9 @@ fn stage20_3_self_test() -> bool {
         return false;
     }
 
-    if task::kill_process(shell.as_u64(), 9).is_err() || !until(1000, || task::process_exited(shell)) {
+    if task::kill_process(shell.as_u64(), 9).is_err()
+        || !until(1000, || task::process_exited(shell))
+    {
         return step("shell killed", false);
     }
     let _ = task::wait_process(shell.as_u64());
@@ -4993,30 +5175,43 @@ fn stage20_2_self_test() -> bool {
             base
         }
     }
-    fn region(x0: i32, y0: i32, width: i32, height: i32, expected: impl Fn(i32, i32) -> u32) -> bool {
-        (y0..y0 + height).all(|y| (x0..x0 + width).all(|x| compositor::pixel(x, y) == Ok(expected(x, y))))
+    fn region(
+        x0: i32,
+        y0: i32,
+        width: i32,
+        height: i32,
+        expected: impl Fn(i32, i32) -> u32,
+    ) -> bool {
+        (y0..y0 + height)
+            .all(|y| (x0..x0 + width).all(|x| compositor::pixel(x, y) == Ok(expected(x, y))))
     }
     /// A `width`×`height` box filled with `fill`, with `text` in white at
     /// `(dx, dy)` inside it, as the kernel renders it, compared with the
     /// screen at `(x, y)`.
-    fn labelled(origin: (i32, i32), size: (i32, i32), offset: (i32, i32), text: &str, fill: u32) -> bool {
+    fn labelled(
+        origin: (i32, i32),
+        size: (i32, i32),
+        offset: (i32, i32),
+        text: &str,
+        fill: u32,
+    ) -> bool {
         let ((x, y), (width, height), (dx, dy)) = (origin, size, offset);
         let mut mask = Surface::new(width as usize, height as usize);
         let bounds = mask.bounds();
         mask.fill_rect(bounds, UNSET);
         mask.draw_text(dx, dy, text, WHITE);
-        region(x, y, width, height, |px, py| match mask.pixel(px - x, py - y) {
-            Some(WHITE) => WHITE,
-            _ => fill,
+        region(x, y, width, height, |px, py| {
+            match mask.pixel(px - x, py - y) {
+                Some(WHITE) => WHITE,
+                _ => fill,
+            }
         })
     }
     /// One PS/2 packet through the real auxiliary path.
     fn packet(dx: i16, screen_dy: i16, left: bool) -> bool {
         let dy = -screen_dy;
-        let flags = 0x08
-            | u8::from(left)
-            | if dx < 0 { 0x10 } else { 0 }
-            | if dy < 0 { 0x20 } else { 0 };
+        let flags =
+            0x08 | u8::from(left) | if dx < 0 { 0x10 } else { 0 } | if dy < 0 { 0x20 } else { 0 };
         [flags, dx as u8, dy as u8].into_iter().all(mouse::loopback)
     }
     /// Relative motion in packets of at most 100 per axis.
@@ -5043,7 +5238,8 @@ fn stage20_2_self_test() -> bool {
     };
     if !step(
         "install shell and application",
-        install("/bin/woven-shell", WOVEN_SHELL_IMAGE) && install("/bin/hello-gui", HELLO_GUI_IMAGE),
+        install("/bin/woven-shell", WOVEN_SHELL_IMAGE)
+            && install("/bin/hello-gui", HELLO_GUI_IMAGE),
     ) {
         return false;
     }
@@ -5051,16 +5247,20 @@ fn stage20_2_self_test() -> bool {
         .with(capability::Capability::DisplayIo)
         .with(capability::Capability::InputIo)
         .with(capability::Capability::Ipc);
-    let Some(program) = userspace::load_elf_with_argv(WOVEN_SHELL_IMAGE, &["/bin/woven-shell"]) else {
+    let Some(program) = userspace::load_elf_with_argv(WOVEN_SHELL_IMAGE, &["/bin/woven-shell"])
+    else {
         return step("shell image loads", false);
     };
-    let Ok((shell, _, _)) = task::spawn_user_system_service("woven-shell", program, shell_capabilities)
+    let Ok((shell, _, _)) =
+        task::spawn_user_system_service("woven-shell", program, shell_capabilities)
     else {
         return step("shell spawned", false);
     };
     if !step(
         "shell took the display",
-        until(3000, || compositor::holder() == Some(shell.as_u64()) && compositor::is_presenting()),
+        until(3000, || {
+            compositor::holder() == Some(shell.as_u64()) && compositor::is_presenting()
+        }),
     ) {
         return false;
     }
@@ -5075,8 +5275,8 @@ fn stage20_2_self_test() -> bool {
     let (toast_x, toast_y) = (width - 188, 8);
     serial::write_line(format_args!("[S20.2] desktop {}x{}", width, height));
 
-    let client_capabilities =
-        capability::CapabilitySet::only(capability::Capability::Console).with(capability::Capability::Ipc);
+    let client_capabilities = capability::CapabilitySet::only(capability::Capability::Console)
+        .with(capability::Capability::Ipc);
     let shell_arg = alloc::format!("{}", shell.as_u64());
     let Some(alpha) = spawn_hello_gui(
         HELLO_GUI_IMAGE,
@@ -5086,19 +5286,25 @@ fn stage20_2_self_test() -> bool {
         return step("application A spawned", false);
     };
     // A's window cascades to (40, 40), 120x80, its title bar above.
-    if !step("window A opened", until(2000, || compositor::pixel(45, 45) == Ok(RED))) {
+    if !step(
+        "window A opened",
+        until(2000, || compositor::pixel(45, 45) == Ok(RED)),
+    ) {
         return false;
     }
     let frame_a = until(500, || {
-        labelled((40, 26), (120, 14), (4, 4), "Alpha", ACTIVE) && region(40, 40, 120, 80, |x, y| {
-            if (50..70).contains(&x) && (50..60).contains(&y) {
-                compositor::pixel(x, y).unwrap_or(UNSET)
-            } else {
-                RED
-            }
-        })
+        labelled((40, 26), (120, 14), (4, 4), "Alpha", ACTIVE)
+            && region(40, 40, 120, 80, |x, y| {
+                if (50..70).contains(&x) && (50..60).contains(&y) {
+                    compositor::pixel(x, y).unwrap_or(UNSET)
+                } else {
+                    RED
+                }
+            })
     });
-    let entry_a = until(500, || labelled(entry(0), (80, 16), (4, 5), "Alpha", ACTIVE));
+    let entry_a = until(500, || {
+        labelled(entry(0), (80, 16), (4, 5), "Alpha", ACTIVE)
+    });
     let tray = until(500, || region(tray_x, tray_y, 16, 16, |_, _| GREEN));
     let toast = until(500, || {
         let mut mask = Surface::new(180, 22);
@@ -5153,7 +5359,9 @@ fn stage20_2_self_test() -> bool {
     }
     if !step(
         "toast expires and the desktop shows through",
-        until(1000, || region(toast_x, toast_y, 180, 22, |x, y| wallpaper(x, y, height))),
+        until(1000, || {
+            region(toast_x, toast_y, 180, 22, |x, y| wallpaper(x, y, height))
+        }),
     ) {
         return false;
     }
@@ -5183,25 +5391,35 @@ fn stage20_2_self_test() -> bool {
         && until(500, || compositor::pixel(px, py) == Ok(BLACK))
         && mouse::keyboard_loopback(0x2d);
     let alpha_status = wait_hello_gui(alpha).map(|(_, status)| status);
-    if !step("key x routed to focused window A", typed && alpha_status == Some(Ok(0))) {
+    if !step(
+        "key x routed to focused window A",
+        typed && alpha_status == Some(Ok(0)),
+    ) {
         return false;
     }
-    let gone = until(1000, || compositor::pixel(45, 45) == Ok(wallpaper(45, 45, height)))
-        && until(500, || {
-            region(tray_x, tray_y, 16, 16, taskbar)
-                && labelled(entry(0), (80, 16), (4, 5), "Beta", ACTIVE)
-                && region(entry(1).0, entry(1).1, 80, 16, taskbar)
-                && labelled((64, 50), (100, 14), (4, 4), "Beta", ACTIVE)
-                && compositor::pixel(150, 100) == Ok(BLUE)
-        });
-    if !step("A's window, entry and tray icon removed on exit; B focused", gone) {
+    let gone = until(1000, || {
+        compositor::pixel(45, 45) == Ok(wallpaper(45, 45, height))
+    }) && until(500, || {
+        region(tray_x, tray_y, 16, 16, taskbar)
+            && labelled(entry(0), (80, 16), (4, 5), "Beta", ACTIVE)
+            && region(entry(1).0, entry(1).1, 80, 16, taskbar)
+            && labelled((64, 50), (100, 14), (4, 4), "Beta", ACTIVE)
+            && compositor::pixel(150, 100) == Ok(BLUE)
+    });
+    if !step(
+        "A's window, entry and tray icon removed on exit; B focused",
+        gone,
+    ) {
         return false;
     }
 
     // Click inside B and type: B gets its key and exits.
     let typed = move_by(100 - px, 100 - py) && click() && mouse::keyboard_loopback(0x15);
     let beta_status = wait_hello_gui(beta).map(|(_, status)| status);
-    if !step("key y routed to window B", typed && beta_status == Some(Ok(0))) {
+    if !step(
+        "key y routed to window B",
+        typed && beta_status == Some(Ok(0)),
+    ) {
         return false;
     }
     let empty = until(1000, || {
@@ -5280,8 +5498,15 @@ fn stage20_1_self_test() -> bool {
         mask
     }
     /// Whether every compositor pixel in the rectangle is `expected(x, y)`.
-    fn region(x0: i32, y0: i32, width: i32, height: i32, expected: impl Fn(i32, i32) -> u32) -> bool {
-        (y0..y0 + height).all(|y| (x0..x0 + width).all(|x| compositor::pixel(x, y) == Ok(expected(x, y))))
+    fn region(
+        x0: i32,
+        y0: i32,
+        width: i32,
+        height: i32,
+        expected: impl Fn(i32, i32) -> u32,
+    ) -> bool {
+        (y0..y0 + height)
+            .all(|y| (x0..x0 + width).all(|x| compositor::pixel(x, y) == Ok(expected(x, y))))
     }
     fn screen_pixel(x: usize, y: usize) -> Option<u32> {
         terminal::with_framebuffer(|buffer, info| {
@@ -5307,16 +5532,28 @@ fn stage20_1_self_test() -> bool {
     }
     /// `HH:MM:SS` for a second of the day.
     fn clock_text(second_of_day: u32) -> [u8; 8] {
-        let (hour, minute, second) = (second_of_day / 3600, second_of_day / 60 % 60, second_of_day % 60);
+        let (hour, minute, second) = (
+            second_of_day / 3600,
+            second_of_day / 60 % 60,
+            second_of_day % 60,
+        );
         let digit = |value: u32| b'0' + (value % 10) as u8;
         [
-            digit(hour / 10), digit(hour), b':',
-            digit(minute / 10), digit(minute), b':',
-            digit(second / 10), digit(second),
+            digit(hour / 10),
+            digit(hour),
+            b':',
+            digit(minute / 10),
+            digit(minute),
+            b':',
+            digit(second / 10),
+            digit(second),
         ]
     }
 
-    if !step("clock decoder handles BCD, binary and 12-hour forms", rtc::decode_self_test()) {
+    if !step(
+        "clock decoder handles BCD, binary and 12-hour forms",
+        rtc::decode_self_test(),
+    ) {
         return false;
     }
     let now = rtc::read();
@@ -5326,7 +5563,10 @@ fn stage20_1_self_test() -> bool {
             time.year, time.month, time.day, time.hour, time.minute, time.second
         ));
     }
-    if !step("hardware clock read", now.is_some_and(|time| time.year >= 2024)) {
+    if !step(
+        "hardware clock read",
+        now.is_some_and(|time| time.year >= 2024),
+    ) {
         return false;
     }
 
@@ -5343,10 +5583,12 @@ fn stage20_1_self_test() -> bool {
     let capabilities = capability::CapabilitySet::only(capability::Capability::Console)
         .with(capability::Capability::DisplayIo)
         .with(capability::Capability::InputIo);
-    let Some(program) = userspace::load_elf_with_argv(&image, &["/bin/woven-shell", "--seconds"]) else {
+    let Some(program) = userspace::load_elf_with_argv(&image, &["/bin/woven-shell", "--seconds"])
+    else {
         return step("shell image loads", false);
     };
-    let Ok((pid, _, _)) = task::spawn_user_system_service("woven-shell", program, capabilities) else {
+    let Ok((pid, _, _)) = task::spawn_user_system_service("woven-shell", program, capabilities)
+    else {
         return step("shell spawned", false);
     };
     let start = timer::ticks();
@@ -5368,7 +5610,11 @@ fn stage20_1_self_test() -> bool {
     let Some(info) = terminal::framebuffer_info() else {
         return step("framebuffer available", false);
     };
-    let scale = if info.width >= 1280 && info.height >= 800 { 2 } else { 1 };
+    let scale = if info.width >= 1280 && info.height >= 800 {
+        2
+    } else {
+        1
+    };
     let Some((width, height)) = compositor::dimensions() else {
         return step("compositor geometry", false);
     };
@@ -5390,13 +5636,17 @@ fn stage20_1_self_test() -> bool {
     // Wallpaper: corner, centre, both weave lines, and the last row above
     // the taskbar, each a block wide enough to straddle a grid line.
     let wall = region(0, 0, 40, 40, |x, y| wallpaper(x, y, height))
-        && region(width / 2 - 20, height / 2 - 20, 40, 40, |x, y| wallpaper(x, y, height))
+        && region(width / 2 - 20, height / 2 - 20, 40, 40, |x, y| {
+            wallpaper(x, y, height)
+        })
         && region(width - 40, top - 40, 40, 40, |x, y| wallpaper(x, y, height));
     if !step("wallpaper matches its formula", wall) {
         return false;
     }
     let bar = region(0, top, width, 1, |_, _| ACCENT)
-        && region(60, top + 1, width - 140, TASKBAR_HEIGHT - 1, |x, y| taskbar(x, y, height));
+        && region(60, top + 1, width - 140, TASKBAR_HEIGHT - 1, |x, y| {
+            taskbar(x, y, height)
+        });
     if !step("taskbar is translucent over the wallpaper", bar) {
         return false;
     }
@@ -5422,12 +5672,16 @@ fn stage20_1_self_test() -> bool {
         let text = core::str::from_utf8(text).unwrap_or("");
         let text_x = width - 6 - crate::font::text_width(text) as i32;
         let mask = text_mask(clock_width as usize, 23, text_x - clock_x, 8, text);
-        region(clock_x, top + 1, clock_width, TASKBAR_HEIGHT - 1, |x, y| {
-            match mask.pixel(x - clock_x, y - (top + 1)) {
+        region(
+            clock_x,
+            top + 1,
+            clock_width,
+            TASKBAR_HEIGHT - 1,
+            |x, y| match mask.pixel(x - clock_x, y - (top + 1)) {
                 Some(WHITE) => WHITE,
                 _ => taskbar(x, y, height),
-            }
-        })
+            },
+        )
     };
     let mut first: Option<[u8; 8]> = None;
     let mut advanced = false;
@@ -5436,7 +5690,8 @@ fn stage20_1_self_test() -> bool {
         let Some(time) = rtc::read() else {
             break;
         };
-        let second = u32::from(time.hour) * 3600 + u32::from(time.minute) * 60 + u32::from(time.second);
+        let second =
+            u32::from(time.hour) * 3600 + u32::from(time.minute) * 60 + u32::from(time.second);
         for lag in 0..3 {
             let text = clock_text((second + 86_400 - lag) % 86_400);
             if clock_matches(&text) {
@@ -5500,7 +5755,10 @@ fn stage20_1_self_test() -> bool {
         compositor::is_presenting(),
         terminal_back
     ));
-    step("display returned to the terminal", released && terminal_back)
+    step(
+        "display returned to the terminal",
+        released && terminal_back,
+    )
 }
 
 /// Stage 19.14 acceptance: integer display scaling and paced animation.
@@ -5564,8 +5822,7 @@ fn stage19_14_self_test() -> bool {
         return false;
     }
     let refused = compositor::set_scale(0) == Err(compositor::Error::InvalidScale)
-        && compositor::set_scale(compositor::MAX_SCALE + 1)
-            == Err(compositor::Error::InvalidScale)
+        && compositor::set_scale(compositor::MAX_SCALE + 1) == Err(compositor::Error::InvalidScale)
         && compositor::scale() == Some(1)
         && compositor::dimensions() == Some(full);
     if !step("out-of-range scales refused", refused) {
@@ -5584,7 +5841,10 @@ fn stage19_14_self_test() -> bool {
         return false;
     }
     let whole = (half.0 as usize * 2) * (half.1 as usize * 2);
-    if !step("rescale repaints the whole screen", compositor::present() == Ok(whole)) {
+    if !step(
+        "rescale repaints the whole screen",
+        compositor::present() == Ok(whole),
+    ) {
         compositor::deactivate_display();
         return false;
     }
@@ -5729,9 +5989,11 @@ fn stage19_13_self_test() -> bool {
     }
     step("compositor process holds the lease", true);
     let compositor_arg = alloc::format!("{}", compositor_pid.as_u64());
-    let Some(client_pid) =
-        spawn_hello_gui(&image, &["/bin/hello-gui", "--client", &compositor_arg], None)
-    else {
+    let Some(client_pid) = spawn_hello_gui(
+        &image,
+        &["/bin/hello-gui", "--client", &compositor_arg],
+        None,
+    ) else {
         return step("client process spawned", false);
     };
 
@@ -5747,7 +6009,10 @@ fn stage19_13_self_test() -> bool {
         code(composited)
     ));
     if !step("client exits zero", client == Some(Ok(0)))
-        || !step("compositor verified every blended region", composited == Some(Ok(0)))
+        || !step(
+            "compositor verified every blended region",
+            composited == Some(Ok(0)),
+        )
     {
         return false;
     }
@@ -5799,10 +6064,8 @@ fn stage19_12_self_test() -> bool {
     /// One PS/2 packet: buttons, then 9-bit signed deltas with PS/2's upward Y.
     fn packet(dx: i16, screen_dy: i16, left: bool) -> bool {
         let dy = -screen_dy;
-        let flags = 0x08
-            | u8::from(left)
-            | if dx < 0 { 0x10 } else { 0 }
-            | if dy < 0 { 0x20 } else { 0 };
+        let flags =
+            0x08 | u8::from(left) | if dx < 0 { 0x10 } else { 0 } | if dy < 0 { 0x20 } else { 0 };
         [flags, dx as u8, dy as u8].into_iter().all(mouse::loopback)
     }
     /// A key press (make code only; the decoder ignores break codes).
@@ -5831,14 +6094,26 @@ fn stage19_12_self_test() -> bool {
     woven_input::set_focus(Some(PROBE));
     let mouse_path = packet(12, 7, true)
         && next_event(PROBE) == Some(Event::PointerMove { dx: 12, dy: 7 })
-        && next_event(PROBE) == Some(Event::PointerButton { button: 0, pressed: true })
+        && next_event(PROBE)
+            == Some(Event::PointerButton {
+                button: 0,
+                pressed: true,
+            })
         && packet(0, 0, false)
-        && next_event(PROBE) == Some(Event::PointerButton { button: 0, pressed: false });
+        && next_event(PROBE)
+            == Some(Event::PointerButton {
+                button: 0,
+                pressed: false,
+            });
     let keyboard_path = key(0x1e) && next_event(PROBE) == Some(Event::Key(Key::Char('a')));
     woven_input::set_focus(None);
-    if !step("mouse bytes through IRQ12 reach the focus queue", mouse_path)
-        || !step("keyboard bytes through IRQ1 are decoded at IRQ time", keyboard_path)
-    {
+    if !step(
+        "mouse bytes through IRQ12 reach the focus queue",
+        mouse_path,
+    ) || !step(
+        "keyboard bytes through IRQ1 are decoded at IRQ time",
+        keyboard_path,
+    ) {
         return false;
     }
 
@@ -5870,14 +6145,30 @@ fn stage19_12_self_test() -> bool {
     let wm_arg = alloc::format!("{}", wm.as_u64());
     let Some(client_a) = spawn_hello_gui(
         &image,
-        &["/bin/hello-gui", "--wm-client", &wm_arg, "200", "150", "a", "x"],
+        &[
+            "/bin/hello-gui",
+            "--wm-client",
+            &wm_arg,
+            "200",
+            "150",
+            "a",
+            "x",
+        ],
         None,
     ) else {
         return step("client A spawned", false);
     };
     let Some(client_b) = spawn_hello_gui(
         &image,
-        &["/bin/hello-gui", "--wm-client", &wm_arg, "260", "190", "b", "y"],
+        &[
+            "/bin/hello-gui",
+            "--wm-client",
+            &wm_arg,
+            "260",
+            "190",
+            "b",
+            "y",
+        ],
         None,
     ) else {
         return step("client B spawned", false);
@@ -5913,8 +6204,10 @@ fn stage19_12_self_test() -> bool {
         code(b),
         code(w)
     ));
-    if !step("click focused each window for its key", a == Some(Ok(0)) && b == Some(Ok(0)))
-        || !step("window manager exits zero", w == Some(Ok(0)))
+    if !step(
+        "click focused each window for its key",
+        a == Some(Ok(0)) && b == Some(Ok(0)),
+    ) || !step("window manager exits zero", w == Some(Ok(0)))
     {
         return false;
     }
@@ -5994,14 +6287,30 @@ fn stage19_11_self_test() -> bool {
     let wm_arg = alloc::format!("{}", wm.as_u64());
     let Some(client_a) = spawn_hello_gui(
         &image,
-        &["/bin/hello-gui", "--wm-client", &wm_arg, "200", "150", "a", "x"],
+        &[
+            "/bin/hello-gui",
+            "--wm-client",
+            &wm_arg,
+            "200",
+            "150",
+            "a",
+            "x",
+        ],
         None,
     ) else {
         return step("client A spawned", false);
     };
     let Some(client_b) = spawn_hello_gui(
         &image,
-        &["/bin/hello-gui", "--wm-client", &wm_arg, "260", "190", "b", "y"],
+        &[
+            "/bin/hello-gui",
+            "--wm-client",
+            &wm_arg,
+            "260",
+            "190",
+            "b",
+            "y",
+        ],
         None,
     ) else {
         return step("client B spawned", false);
@@ -6030,8 +6339,10 @@ fn stage19_11_self_test() -> bool {
         code(b),
         code(w)
     ));
-    if !step("each client received exactly its own key", a == Some(Ok(0)) && b == Some(Ok(0)))
-        || !step("window manager exits zero", w == Some(Ok(0)))
+    if !step(
+        "each client received exactly its own key",
+        a == Some(Ok(0)) && b == Some(Ok(0)),
+    ) || !step("window manager exits zero", w == Some(Ok(0)))
     {
         return false;
     }
@@ -6124,7 +6435,12 @@ fn stage19_9_self_test() -> bool {
     let peer_arg = alloc::format!("{}", PEER);
     let Some(client_pid) = spawn_hello_gui(
         &image,
-        &["/bin/hello-gui", "--damage-client", &compositor_arg, &peer_arg],
+        &[
+            "/bin/hello-gui",
+            "--damage-client",
+            &compositor_arg,
+            &peer_arg,
+        ],
         None,
     ) else {
         let _ = ipc::unregister(PEER);
@@ -6145,7 +6461,10 @@ fn stage19_9_self_test() -> bool {
         task::yield_now();
     }
     if !step("compositor asleep on damage", asleep)
-        || !step("client told to go", ipc::send(PEER, client_pid.as_u64(), b"go").is_ok())
+        || !step(
+            "client told to go",
+            ipc::send(PEER, client_pid.as_u64(), b"go").is_ok(),
+        )
     {
         let _ = ipc::unregister(PEER);
         return false;
@@ -6332,9 +6651,11 @@ fn stage19_7_self_test() -> bool {
     }
 
     let capabilities = display_client_capabilities().with(capability::Capability::Ipc);
-    let Some(compositor_pid) =
-        spawn_hello_gui(&image, &["/bin/hello-gui", "--compositor"], Some(capabilities))
-    else {
+    let Some(compositor_pid) = spawn_hello_gui(
+        &image,
+        &["/bin/hello-gui", "--compositor"],
+        Some(capabilities),
+    ) else {
         return step("compositor process spawned", false);
     };
     let start = timer::ticks();
@@ -6347,9 +6668,11 @@ fn stage19_7_self_test() -> bool {
     step("compositor process holds the lease", true);
 
     let compositor_arg = alloc::format!("{}", compositor_pid.as_u64());
-    let Some(client_pid) =
-        spawn_hello_gui(&image, &["/bin/hello-gui", "--client", &compositor_arg], None)
-    else {
+    let Some(client_pid) = spawn_hello_gui(
+        &image,
+        &["/bin/hello-gui", "--client", &compositor_arg],
+        None,
+    ) else {
         return step("client process spawned", false);
     };
 
@@ -6372,7 +6695,8 @@ fn stage19_7_self_test() -> bool {
     const CLIENT_COLOR: u32 = crate::display::rgb(180, 40, 90);
     if !step(
         "kernel reads the client's window on the compositor",
-        compositor::pixel(300, 200) == Ok(CLIENT_COLOR) && compositor::pixel(339, 229) == Ok(CLIENT_COLOR),
+        compositor::pixel(300, 200) == Ok(CLIENT_COLOR)
+            && compositor::pixel(339, 229) == Ok(CLIENT_COLOR),
     ) {
         return false;
     }
@@ -6563,7 +6887,10 @@ fn stage19_5_self_test() -> bool {
             Err(_) => -1,
         }
     ));
-    if !step("holder received exactly the keys, in order", status == Ok(0)) {
+    if !step(
+        "holder received exactly the keys, in order",
+        status == Ok(0),
+    ) {
         return false;
     }
     if !step("focus returned on exit", woven_input::focus().is_none()) {
@@ -6666,21 +6993,29 @@ fn stage19_4_self_test() -> bool {
         // The holder presented before exiting, so the framebuffer itself
         // carries the content colour at the window's screen position.
         let offset = (100 * info.stride + 160) * info.bytes_per_pixel;
-        buffer.get(offset..offset + 3).map(|bytes| match info.pixel_format {
-            bootloader_api::info::PixelFormat::Bgr => {
-                crate::display::rgb(bytes[2], bytes[1], bytes[0])
-            }
-            _ => crate::display::rgb(bytes[0], bytes[1], bytes[2]),
-        })
+        buffer
+            .get(offset..offset + 3)
+            .map(|bytes| match info.pixel_format {
+                bootloader_api::info::PixelFormat::Bgr => {
+                    crate::display::rgb(bytes[2], bytes[1], bytes[0])
+                }
+                _ => crate::display::rgb(bytes[0], bytes[1], bytes[2]),
+            })
     })
     .flatten();
-    if !step("holder's present reached the framebuffer", screen == Some(CONTENT)) {
+    if !step(
+        "holder's present reached the framebuffer",
+        screen == Some(CONTENT),
+    ) {
         return false;
     }
     if !step("lease released on exit", compositor::holder().is_none()) {
         return false;
     }
-    if !step("display returned to the terminal", !compositor::is_presenting()) {
+    if !step(
+        "display returned to the terminal",
+        !compositor::is_presenting(),
+    ) {
         return false;
     }
     step(
@@ -6719,14 +7054,16 @@ fn stage19_2_self_test() -> bool {
     let mut readback = alloc::vec![0u8; HELLO_GUI_IMAGE.len()];
     if !step(
         "filesystem round-trip",
-        vfs::read_all("/bin/hello-gui", &mut readback)
-            == Ok(HELLO_GUI_IMAGE.len())
+        vfs::read_all("/bin/hello-gui", &mut readback) == Ok(HELLO_GUI_IMAGE.len())
             && readback[..] == HELLO_GUI_IMAGE[..],
     ) {
         return false;
     }
     let Some((pid, exit_status)) = run_hello_gui(&readback, &["/bin/hello-gui"], true) else {
-        return step("load, spawn with display authority, run to completion", false);
+        return step(
+            "load, spawn with display authority, run to completion",
+            false,
+        );
     };
     let status = match exit_status {
         Ok(code) => code as i64,
@@ -6782,15 +7119,17 @@ fn stage18_2_self_test() -> bool {
     }
 
     let mut readback = alloc::vec![0u8; HELLO_GUI_IMAGE.len()];
-    let round_trip = vfs::read_all("/bin/hello-gui", &mut readback)
-        == Ok(HELLO_GUI_IMAGE.len())
+    let round_trip = vfs::read_all("/bin/hello-gui", &mut readback) == Ok(HELLO_GUI_IMAGE.len())
         && readback[..] == HELLO_GUI_IMAGE[..];
     if !step("filesystem round-trip", round_trip) {
         return false;
     }
 
     let Some((pid, exit_status)) = run_hello_gui(&readback, &["/bin/hello-gui"], true) else {
-        return step("load, spawn with display authority, run to completion", false);
+        return step(
+            "load, spawn with display authority, run to completion",
+            false,
+        );
     };
     let status_text = match exit_status {
         Ok(code) => code as i64,
@@ -6836,6 +7175,7 @@ fn halt() -> ! {
     }
 }
 
+#[cfg(not(test))]
 #[alloc_error_handler]
 fn alloc_error_handler(layout: Layout) -> ! {
     serial::write_fmt(format_args!(
@@ -6846,6 +7186,7 @@ fn alloc_error_handler(layout: Layout) -> ! {
     halt()
 }
 
+#[cfg(not(test))]
 #[panic_handler]
 fn panic(info: &PanicInfo) -> ! {
     panic::kernel_panic(info)

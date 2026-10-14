@@ -114,7 +114,8 @@ pub fn init() -> bool {
             return false;
         }
         for request in [MOUSE_SET_DEFAULTS, MOUSE_ENABLE_REPORTING] {
-            if !command(COMMAND_WRITE_AUX) || !write_data(request) || read_aux() != Some(MOUSE_ACK) {
+            if !command(COMMAND_WRITE_AUX) || !write_data(request) || read_aux() != Some(MOUSE_ACK)
+            {
                 return false;
             }
         }
@@ -210,27 +211,52 @@ pub fn decoder_self_test() -> bool {
     // +5 right, PS/2 +3 up = screen -3, left button pressed.
     let moved = feed(&mut decoder, [0x09, 5, 3]);
     let first = moved[0] == Some(Event::PointerMove { dx: 5, dy: -3 })
-        && moved[1] == Some(Event::PointerButton { button: 0, pressed: true })
+        && moved[1]
+            == Some(Event::PointerButton {
+                button: 0,
+                pressed: true,
+            })
         && moved[2].is_none();
     // Negative deltas through the sign bits: -2 left, PS/2 -4 = screen +4;
     // left released.
     let signed = feed(&mut decoder, [0x08 | 0x10 | 0x20, 0xfe, 0xfc]);
     let second = signed[0] == Some(Event::PointerMove { dx: -2, dy: 4 })
-        && signed[1] == Some(Event::PointerButton { button: 0, pressed: false });
+        && signed[1]
+            == Some(Event::PointerButton {
+                button: 0,
+                pressed: false,
+            });
     // Overflow drops the packet whole, including its button change.
-    let overflow = feed(&mut decoder, [0x08 | 0x40 | 0x02, 1, 1]).iter().all(Option::is_none);
+    let overflow = feed(&mut decoder, [0x08 | 0x40 | 0x02, 1, 1])
+        .iter()
+        .all(Option::is_none);
     // Right button alone, no motion: one event.
     let right = feed(&mut decoder, [0x08 | 0x02, 0, 0]);
-    let third = right[0] == Some(Event::PointerButton { button: 1, pressed: true }) && right[1].is_none();
+    let third = right[0]
+        == Some(Event::PointerButton {
+            button: 1,
+            pressed: true,
+        })
+        && right[1].is_none();
     resync && first && second && overflow && third
 }
 
 unsafe fn command(byte: u8) -> bool {
-    unsafe { wait_input_empty() && { outb(STATUS_PORT, byte); true } }
+    unsafe {
+        wait_input_empty() && {
+            outb(STATUS_PORT, byte);
+            true
+        }
+    }
 }
 
 unsafe fn write_data(byte: u8) -> bool {
-    unsafe { wait_input_empty() && { outb(DATA_PORT, byte); true } }
+    unsafe {
+        wait_input_empty() && {
+            outb(DATA_PORT, byte);
+            true
+        }
+    }
 }
 
 unsafe fn wait_input_empty() -> bool {

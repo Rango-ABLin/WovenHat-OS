@@ -18,6 +18,13 @@ const TEST_TABLE_FAILURE_ADDRESS: u64 = 0x5555_0000_0000;
 
 /// Maximum number of physical frames currently participating in COW sharing.
 const MAX_COW_FRAMES: usize = 1024;
+const MAX_MMIO_MAPPINGS: usize = 256;
+const MMIO_FIXED_VIRTUAL_BASE: u64 = 0xffff_fe00_0000_0000;
+// The fixed alias above can represent only a bounded low physical range. Use
+// a separate bounded virtual window for high 64-bit BAR pages instead of
+// deriving a virtual address by overflowing the physical address.
+const MMIO_HIGH_VIRTUAL_BASE: u64 = 0xffff_fd00_0000_0000;
+const PAGE_BYTES: u64 = Size4KiB::SIZE;
 
 // Lock order: PAGING (10) -> COW_TABLE (30) -> ALLOCATOR (40).
 static PAGING: IrqMutex<PagingState> = IrqMutex::with_rank(PagingState::empty(), 10);
@@ -126,7 +133,7 @@ pub enum InitError {
     AddressOverflow,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum MapRangeError {
     NotInitialized,
     InvalidRange,
@@ -134,6 +141,59 @@ pub enum MapRangeError {
     OutOfFrames,
     MappingFailed,
     NotMapped,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct MmioEntry {
+    physical: u64,
+    virtual_address: u64,
+    owner: u32,
+    generation: u32,
+    occupied: bool,
+}
+
+impl MmioEntry {
+    const fn empty() -> Self {
+        Self {
+            physical: 0,
+            virtual_address: 0,
+            owner: 0,
+            generation: 0,
+            occupied: false,
+        }
+    }
+}
+
+/// An owner-scoped device-register mapping. Raw [`map_mmio`] mappings are
+/// intentionally not represented by this token and are never revoked.
+#[expect(
+    dead_code,
+    reason = "host kernel targets do not instantiate PCI driver lifecycle"
+)]
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub struct OwnedMmioMapping {
+    slot: u16,
+    generation: u32,
+    physical: u64,
+    virtual_address: u64,
+    owner: u32,
+}
+
+impl OwnedMmioMapping {
+    #[expect(
+        dead_code,
+        reason = "used by PCI driver lifecycle on freestanding target"
+    )]
+    pub const fn physical_address(self) -> u64 {
+        self.physical
+    }
+    #[expect(
+        dead_code,
+        reason = "used by PCI driver lifecycle on freestanding target"
+    )]
+    pub const fn virtual_address(self) -> u64 {
+        self.virtual_address
+    }
 }
 
 /// The x86_64 mapper can allocate a P3, P2, and P1 table before reporting a
@@ -252,6 +312,7 @@ struct PagingState {
     successful_translations: usize,
     tested_translations: usize,
     mapping_test_passed: bool,
+    mmio: [MmioEntry; MAX_MMIO_MAPPINGS],
 }
 
 impl PagingState {
@@ -263,6 +324,7 @@ impl PagingState {
             successful_translations: 0,
             tested_translations: 0,
             mapping_test_passed: false,
+            mmio: [MmioEntry::empty(); MAX_MMIO_MAPPINGS],
         }
     }
 
@@ -1613,32 +1675,220 @@ pub fn frame_ownership_self_test() -> bool {
         && memory::stats().allocated_frames == baseline
 }
 
-/// Map a device register page through the direct-map offset, uncached and NX.
+/// Map a device-register page through a bounded kernel MMIO window, uncached
+/// and NX. Low physical pages retain the historical fixed alias; high BAR
+/// pages use a separately bounded virtual slot.
+///
+/// This legacy API creates a shared, non-revocable mapping. New PCI drivers
+/// must use [`map_mmio_owned`] so teardown can revoke authority safely.
 pub fn map_mmio(physical: u64) -> Result<u64, MapRangeError> {
     let mut state = PAGING.lock();
-    let virtual_address = 0xffff_fe00_0000_0000u64
-        .checked_add(physical)
+    let physical_page = physical & !(Size4KiB::SIZE - 1);
+    let frame = PhysFrame::containing_address(x86_64::PhysAddr::new(physical_page));
+    if let Some(entry) = state
+        .mmio
+        .iter_mut()
+        .find(|entry| entry.occupied && entry.physical == physical_page)
+    {
+        // A raw user of an owned page makes that page permanently shared. The
+        // owner token is invalidated rather than allowing teardown to unmap a
+        // translation that another subsystem may still use.
+        entry.owner = 0;
+        return Ok(entry.virtual_address);
+    }
+    let slot = state
+        .mmio
+        .iter()
+        .position(|entry| !entry.occupied)
+        .ok_or(MapRangeError::OutOfFrames)?;
+    let virtual_address = mmio_virtual_address(physical_page, slot)?;
+    let page = Page::<Size4KiB>::containing_address(VirtAddr::new(virtual_address));
+    let mapper = state.mapper.as_mut().ok_or(MapRangeError::NotInitialized)?;
+    if mapper.translate_addr(page.start_address()).is_some() {
+        return Err(MapRangeError::AlreadyMapped);
+    }
+    let mut allocator = memory::allocator();
+    unsafe {
+        mapper.map_to(
+            page,
+            frame,
+            PageTableFlags::PRESENT
+                | PageTableFlags::WRITABLE
+                | PageTableFlags::NO_CACHE
+                | PageTableFlags::NO_EXECUTE,
+            &mut *allocator,
+        )
+    }
+    .map_err(|_| MapRangeError::MappingFailed)?
+    .flush();
+    let generation = state.mmio[slot].generation.wrapping_add(1).max(1);
+    state.mmio[slot] = MmioEntry {
+        physical: physical_page,
+        virtual_address,
+        owner: 0,
+        generation,
+        occupied: true,
+    };
+    Ok(virtual_address)
+}
+
+fn mmio_virtual_address(physical_page: u64, slot: usize) -> Result<u64, MapRangeError> {
+    if let Some(virtual_address) = MMIO_FIXED_VIRTUAL_BASE.checked_add(physical_page) {
+        return Ok(virtual_address);
+    }
+    let slot_offset = u64::try_from(slot)
+        .ok()
+        .and_then(|slot| slot.checked_mul(PAGE_BYTES))
         .ok_or(MapRangeError::InvalidRange)?;
+    MMIO_HIGH_VIRTUAL_BASE
+        .checked_add(slot_offset)
+        .ok_or(MapRangeError::InvalidRange)
+}
+
+/// Create a revocable mapping for one device-register page.
+///
+/// A page already mapped through the legacy shared API is rejected. This
+/// conservative rule prevents an owner from later unmapping a translation
+/// whose users are not represented by the owner token.
+#[expect(
+    dead_code,
+    reason = "used by PCI driver lifecycle on freestanding target"
+)]
+pub fn map_mmio_owned(physical: u64, owner: u32) -> Result<OwnedMmioMapping, MapRangeError> {
+    if owner == 0 {
+        return Err(MapRangeError::InvalidRange);
+    }
+    let mut state = PAGING.lock();
+    let physical_page = physical & !(Size4KiB::SIZE - 1);
+    if state
+        .mmio
+        .iter()
+        .any(|entry| entry.occupied && entry.physical == physical_page)
+    {
+        return Err(MapRangeError::AlreadyMapped);
+    }
+    let slot = state
+        .mmio
+        .iter()
+        .position(|entry| !entry.occupied)
+        .ok_or(MapRangeError::OutOfFrames)?;
+    let virtual_address = mmio_virtual_address(physical_page, slot)?;
     let mapper = state.mapper.as_mut().ok_or(MapRangeError::NotInitialized)?;
     let page = Page::<Size4KiB>::containing_address(VirtAddr::new(virtual_address));
-    let frame = PhysFrame::containing_address(x86_64::PhysAddr::new(physical));
-    if mapper.translate_addr(page.start_address()).is_none() {
-        let mut allocator = memory::allocator();
-        unsafe {
-            mapper.map_to(
-                page,
-                frame,
-                PageTableFlags::PRESENT
-                    | PageTableFlags::WRITABLE
-                    | PageTableFlags::NO_CACHE
-                    | PageTableFlags::NO_EXECUTE,
-                &mut *allocator,
-            )
-        }
-        .map_err(|_| MapRangeError::MappingFailed)?
-        .flush();
+    if mapper.translate_addr(page.start_address()).is_some() {
+        return Err(MapRangeError::AlreadyMapped);
     }
-    Ok(virtual_address)
+    let frame = PhysFrame::containing_address(x86_64::PhysAddr::new(physical_page));
+    unsafe {
+        mapper.map_to(
+            page,
+            frame,
+            PageTableFlags::PRESENT
+                | PageTableFlags::WRITABLE
+                | PageTableFlags::NO_CACHE
+                | PageTableFlags::NO_EXECUTE,
+            &mut *memory::allocator(),
+        )
+    }
+    .map_err(|_| MapRangeError::MappingFailed)?
+    .flush();
+    let generation = state.mmio[slot].generation.wrapping_add(1).max(1);
+    state.mmio[slot] = MmioEntry {
+        physical: physical_page,
+        virtual_address,
+        owner,
+        generation,
+        occupied: true,
+    };
+    Ok(OwnedMmioMapping {
+        slot: slot as u16,
+        generation,
+        physical: physical_page,
+        virtual_address,
+        owner,
+    })
+}
+
+/// Release one owner-scoped device-register mapping after device quiescence.
+#[expect(
+    dead_code,
+    reason = "used by PCI driver lifecycle on freestanding target"
+)]
+pub fn release_mmio_owned(mapping: OwnedMmioMapping) -> Result<(), MapRangeError> {
+    let mut state = PAGING.lock();
+    let entry = state
+        .mmio
+        .get(usize::from(mapping.slot))
+        .copied()
+        .ok_or(MapRangeError::InvalidRange)?;
+    if !entry.occupied
+        || entry.owner != mapping.owner
+        || entry.generation != mapping.generation
+        || entry.physical != mapping.physical
+    {
+        return Err(MapRangeError::InvalidRange);
+    }
+    let mapper = state.mapper.as_mut().ok_or(MapRangeError::NotInitialized)?;
+    let page = Page::<Size4KiB>::containing_address(VirtAddr::new(mapping.virtual_address));
+    let expected = PhysFrame::containing_address(x86_64::PhysAddr::new(mapping.physical));
+    if mapper
+        .translate_addr(page.start_address())
+        .map(PhysFrame::<Size4KiB>::containing_address)
+        != Some(expected)
+    {
+        return Err(MapRangeError::NotMapped);
+    }
+    let (removed, flush) = mapper.unmap(page).map_err(|_| MapRangeError::NotMapped)?;
+    if removed != expected {
+        return Err(MapRangeError::InvalidRange);
+    }
+    flush.flush();
+    state.mmio[usize::from(mapping.slot)].occupied = false;
+    drop(state);
+    crate::smp::shootdown();
+    Ok(())
+}
+
+/// Revoke every owner-scoped MMIO page before releasing a PCI function.
+#[expect(
+    dead_code,
+    reason = "used by PCI driver lifecycle on freestanding target"
+)]
+pub fn revoke_mmio_owner(owner: u32) -> Result<(), MapRangeError> {
+    if owner == 0 {
+        return Err(MapRangeError::InvalidRange);
+    }
+    let mut state = PAGING.lock();
+    let mut changed = false;
+    for index in 0..MAX_MMIO_MAPPINGS {
+        let entry = state.mmio[index];
+        if !entry.occupied || entry.owner != owner {
+            continue;
+        }
+        let mapper = state.mapper.as_mut().ok_or(MapRangeError::NotInitialized)?;
+        let virtual_address = entry.virtual_address;
+        let page = Page::<Size4KiB>::containing_address(VirtAddr::new(virtual_address));
+        let expected = PhysFrame::containing_address(x86_64::PhysAddr::new(entry.physical));
+        if mapper
+            .translate_addr(page.start_address())
+            .map(PhysFrame::<Size4KiB>::containing_address)
+            != Some(expected)
+        {
+            return Err(MapRangeError::NotMapped);
+        }
+        let (removed, flush) = mapper.unmap(page).map_err(|_| MapRangeError::NotMapped)?;
+        if removed != expected {
+            return Err(MapRangeError::InvalidRange);
+        }
+        flush.flush();
+        state.mmio[index].occupied = false;
+        changed = true;
+    }
+    drop(state);
+    if changed {
+        crate::smp::shootdown();
+    }
+    Ok(())
 }
 
 /// Replace a shared kernel test mapping, retiring its old frame only after all

@@ -750,9 +750,7 @@ pub fn start(topology: Option<crate::hal::acpi::Summary>, offset: u64) {
         Ordering::Release,
     );
     LAPIC.store(
-        paging::map_mmio(topology.local_apic_address)
-            .ok()
-            .expect("LAPIC mapping"),
+        paging::map_mmio(topology.local_apic_address).expect("LAPIC mapping"),
         Ordering::Relaxed,
     );
     enable_local();
@@ -774,9 +772,7 @@ pub fn start(topology: Option<crate::hal::acpi::Summary>, offset: u64) {
     );
     // Route only keyboard input through IOAPIC; each CPU has its own LAPIC timer.
     assert_eq!(topology.io_apics, 1, "one IOAPIC required");
-    let io = paging::map_mmio(u64::from(topology.io_apic_address))
-        .ok()
-        .expect("IOAPIC mapping");
+    let io = paging::map_mmio(u64::from(topology.io_apic_address)).expect("IOAPIC mapping");
     let max = (io_read(io, 1) >> 16) & 0xff;
     for pin in 0..=max {
         io_write(io, 0x10 + pin * 2, 1 << 16);
@@ -814,7 +810,11 @@ pub fn start(topology: Option<crate::hal::acpi::Summary>, offset: u64) {
             0x10 + pin * 2,
             u32::from(crate::pic::MASTER_OFFSET + crate::mouse::IRQ)
                 | if mouse_flags & 3 == 3 { 1 << 13 } else { 0 }
-                | if (mouse_flags >> 2) & 3 == 3 { 1 << 15 } else { 0 },
+                | if (mouse_flags >> 2) & 3 == 3 {
+                    1 << 15
+                } else {
+                    0
+                },
         );
     }
     IOAPIC.store(io, Ordering::Release);
@@ -1097,9 +1097,7 @@ fn translation_reader() -> ! {
     task::exit_current_task();
 }
 fn stale_translation_test() {
-    paging::map_range(TEST_PAGE, 4096)
-        .ok()
-        .expect("SMP test mapping");
+    paging::map_range(TEST_PAGE, 4096).expect("SMP test mapping");
     for cpu in 1..online_count() {
         unsafe { task::spawn_on(cpu, "tlb-reader", translation_reader) }
             .ok()

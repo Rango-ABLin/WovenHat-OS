@@ -66,7 +66,8 @@ impl TxToken for WifiTxToken<'_> {
         if crate::firewall_policy::evaluate_ethernet_frame(
             &frame[..usable],
             crate::firewall_policy::FirewallDirection::Outbound,
-        ) == crate::firewall_policy::FrameDecision::Deny {
+        ) == crate::firewall_policy::FrameDecision::Deny
+        {
             return result;
         }
         let _ = self.session.transmit_ethernet(self.epoch, &frame[..usable]);
@@ -93,7 +94,8 @@ impl Device for WifiSmolDevice<'_> {
         if crate::firewall_policy::evaluate_ethernet_frame(
             &self.rx[..len],
             crate::firewall_policy::FirewallDirection::Inbound,
-        ) == crate::firewall_policy::FrameDecision::Deny {
+        ) == crate::firewall_policy::FrameDecision::Deny
+        {
             return None;
         }
         Some((
