@@ -3429,6 +3429,15 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         serial::write_line(format_args!("[S1-5] storage journal: PASSED"));
         qemu_test_exit_success();
     }
+    #[cfg(feature = "stage20-7-test")]
+    {
+        if !stage20_7_self_test() {
+            serial::write_line(format_args!("[S20.7] spring animation: FAILED"));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!("[S20.7] spring animation: PASSED"));
+        qemu_test_exit_success();
+    }
     #[cfg(feature = "stage20-6-test")]
     {
         if !stage20_6_self_test() {
@@ -4718,7 +4727,8 @@ fn stage16_1_self_test() -> bool {
     feature = "stage20-3-test",
     feature = "stage20-4-test",
     feature = "stage20-5-test",
-    feature = "stage20-6-test"
+    feature = "stage20-6-test",
+    feature = "stage20-7-test"
 ))]
 const HELLO_GUI_IMAGE: &[u8] = include_bytes!(env!("WOVENHAT_HELLO_GUI_IMAGE"));
 
@@ -4742,7 +4752,8 @@ const HELLO_GUI_IMAGE: &[u8] = include_bytes!(env!("WOVENHAT_HELLO_GUI_IMAGE"));
     feature = "stage20-3-test",
     feature = "stage20-4-test",
     feature = "stage20-5-test",
-    feature = "stage20-6-test"
+    feature = "stage20-6-test",
+    feature = "stage20-7-test"
 ))]
 fn display_client_capabilities() -> capability::CapabilitySet {
     capability::CapabilitySet::only(capability::Capability::Console)
@@ -4768,7 +4779,8 @@ fn display_client_capabilities() -> capability::CapabilitySet {
     feature = "stage20-3-test",
     feature = "stage20-4-test",
     feature = "stage20-5-test",
-    feature = "stage20-6-test"
+    feature = "stage20-6-test",
+    feature = "stage20-7-test"
 ))]
 fn run_hello_gui(
     image: &[u8],
@@ -4802,7 +4814,8 @@ fn run_hello_gui(
     feature = "stage20-3-test",
     feature = "stage20-4-test",
     feature = "stage20-5-test",
-    feature = "stage20-6-test"
+    feature = "stage20-6-test",
+    feature = "stage20-7-test"
 ))]
 fn spawn_hello_gui(
     image: &[u8],
@@ -4837,7 +4850,8 @@ fn spawn_hello_gui(
     feature = "stage20-3-test",
     feature = "stage20-4-test",
     feature = "stage20-5-test",
-    feature = "stage20-6-test"
+    feature = "stage20-6-test",
+    feature = "stage20-7-test"
 ))]
 fn wait_hello_gui(pid: task::ProcessId) -> Option<(task::ProcessId, Result<i32, task::WaitError>)> {
     let start = timer::ticks();
@@ -4857,9 +4871,186 @@ fn wait_hello_gui(pid: task::ProcessId) -> Option<(task::ProcessId, Result<i32, 
     feature = "stage20-3-test",
     feature = "stage20-4-test",
     feature = "stage20-5-test",
-    feature = "stage20-6-test"
+    feature = "stage20-6-test",
+    feature = "stage20-7-test"
 ))]
 const WOVEN_SHELL_IMAGE: &[u8] = include_bytes!(env!("WOVENHAT_SHELL_IMAGE"));
+
+/// Stage 20.7 acceptance: physics-based animation.
+///
+/// A new window fades in, its opacity following the shell's spring from 0
+/// to 255, with its shadow scaled to match. The kernel samples one pixel of
+/// the window's client area as fast as it can while the window appears. It
+/// reads the physical framebuffer, which changes only when a fully composed
+/// frame is presented; the compositor surface is updated layer by layer and
+/// would show frames half-built.
+/// For every opacity `a` it computes what that pixel must read: the
+/// wallpaper, the window's own shadow band at `48 * a / 255`, then the
+/// client colour blended at `a`. Each sample must be one of those values;
+/// the opacities they imply must never decrease; at least three distinct
+/// intermediate opacities must be seen; and the pixel must end fully
+/// opaque. A jump from nothing to opaque fails all but the last of these.
+#[cfg(feature = "stage20-7-test")]
+fn stage20_7_self_test() -> bool {
+    use crate::display::{blend_pixel, rgb};
+    use bootloader_api::info::PixelFormat;
+
+    const WALLPAPER_TOP: u32 = rgb(18, 42, 74);
+    const WALLPAPER_BOTTOM: u32 = rgb(64, 28, 88);
+    const WHITE: u32 = rgb(255, 255, 255);
+    const BLACK: u32 = rgb(0, 0, 0);
+    const RED: u32 = rgb(200, 60, 60);
+
+    /// A presented pixel, as 0x00RRGGBB, from the physical framebuffer.
+    fn screen_pixel(x: usize, y: usize) -> Option<u32> {
+        terminal::with_framebuffer(|buffer, info| {
+            if x >= info.width || y >= info.height || info.bytes_per_pixel < 3 {
+                return None;
+            }
+            let offset = (y * info.stride + x) * info.bytes_per_pixel;
+            let bytes = buffer.get(offset..offset + 3)?;
+            match info.pixel_format {
+                PixelFormat::Rgb => Some(rgb(bytes[0], bytes[1], bytes[2])),
+                PixelFormat::Bgr => Some(rgb(bytes[2], bytes[1], bytes[0])),
+                _ => None,
+            }
+        })
+        .flatten()
+    }
+    fn step(name: &str, ok: bool) -> bool {
+        serial::write_line(format_args!(
+            "[S20.7] {} {}",
+            name,
+            if ok { "PASS" } else { "FAIL" }
+        ));
+        ok
+    }
+    fn until(limit: u64, condition: impl Fn() -> bool) -> bool {
+        let start = timer::ticks();
+        loop {
+            if condition() {
+                return true;
+            }
+            if timer::ticks().wrapping_sub(start) > limit {
+                return false;
+            }
+            task::yield_now();
+        }
+    }
+    fn wallpaper(x: i32, y: i32, height: i32) -> u32 {
+        let span = (height - 1).max(1);
+        let t = (y.clamp(0, span) * 255 / span) as u8;
+        let base = blend_pixel(WALLPAPER_BOTTOM, WALLPAPER_TOP, t);
+        if x % 32 == 0 || y % 32 == 0 {
+            blend_pixel(WHITE, base, 28)
+        } else {
+            base
+        }
+    }
+
+    let installed = vfs::create_read_only("/bin/hello-gui", HELLO_GUI_IMAGE).is_ok();
+    let capabilities = capability::CapabilitySet::only(capability::Capability::Console)
+        .with(capability::Capability::DisplayIo)
+        .with(capability::Capability::InputIo)
+        .with(capability::Capability::Ipc);
+    let Some(program) = userspace::load_elf_with_argv(WOVEN_SHELL_IMAGE, &["/bin/woven-shell"]) else {
+        return step("shell image loads", false);
+    };
+    let Ok((shell, _, _)) = task::spawn_user_system_service("woven-shell", program, capabilities) else {
+        return step("shell spawned", false);
+    };
+    if !step(
+        "shell took the display",
+        installed && until(3000, || compositor::holder() == Some(shell.as_u64()) && compositor::is_presenting()),
+    ) {
+        return false;
+    }
+    let Some((_, height)) = compositor::dimensions() else {
+        return step("desktop geometry", false);
+    };
+    let height = height as i32;
+
+    // The pixel watched: (45, 45), inside A's client area at (40, 40). Of
+    // A's (focused) shadow bands, only the one offset by 4 covers it.
+    let (x, y) = (45, 45);
+    let expected: alloc::vec::Vec<u32> = (0..=255u32)
+        .map(|a| {
+            let shadow = (48 * a / 255) as u8;
+            let under = blend_pixel(BLACK, wallpaper(x, y, height), shadow);
+            blend_pixel(RED, under, a as u8)
+        })
+        .collect();
+    let scale = compositor::scale().unwrap_or(1) as usize;
+    let (sx, sy) = (x as usize * scale, y as usize * scale);
+    let start_value = screen_pixel(sx, sy);
+    let client = capability::CapabilitySet::only(capability::Capability::Console).with(capability::Capability::Ipc);
+    let shell_arg = alloc::format!("{}", shell.as_u64());
+    let Some(alpha) = spawn_hello_gui(HELLO_GUI_IMAGE, &["/bin/hello-gui", "--desktop-client", &shell_arg, "a"], Some(client)) else {
+        return step("application A spawned", false);
+    };
+
+    // Sample until the pixel is fully opaque, recording each new value.
+    let mut samples: alloc::vec::Vec<u32> = alloc::vec::Vec::new();
+    let started = timer::ticks();
+    loop {
+        let Some(value) = screen_pixel(sx, sy) else {
+            return step("pixel readable", false);
+        };
+        if samples.last() != Some(&value) {
+            samples.push(value);
+        }
+        if value == RED || timer::ticks().wrapping_sub(started) > 3000 {
+            break;
+        }
+        task::yield_now();
+    }
+    let duration = timer::ticks().wrapping_sub(started);
+
+    // Map each sample to the smallest opacity at or above the previous one
+    // that explains it; a sample nothing explains, or that would need the
+    // opacity to fall, fails.
+    let mut previous = 0usize;
+    let mut opacities: alloc::vec::Vec<usize> = alloc::vec::Vec::new();
+    let mut consistent = start_value == Some(expected[0]);
+    for value in &samples {
+        match (previous..=255).find(|&a| expected[a] == *value) {
+            Some(a) => {
+                opacities.push(a);
+                previous = a;
+            }
+            None => consistent = false,
+        }
+    }
+    let intermediate = opacities.iter().filter(|&&a| a > 0 && a < 255).count();
+    serial::write_line(format_args!(
+        "[S20.7] {} distinct samples over {} ticks; opacities {:?}",
+        samples.len(),
+        duration,
+        opacities
+    ));
+    if !step("every sample is the window blended at some opacity, never decreasing", consistent)
+        || !step("the window passes through at least three intermediate opacities", intermediate >= 3)
+        || !step("the window ends fully opaque", samples.last() == Some(&RED))
+    {
+        return false;
+    }
+    // Settled: the shell is back at its idle frame rate and the window stays
+    // put.
+    let settled = until(500, || screen_pixel(sx, sy) == Some(RED) && compositor::pixel(x, y) == Ok(RED));
+    let exited = mouse::keyboard_loopback(0x2d) && wait_hello_gui(alpha).map(|(_, status)| status) == Some(Ok(0));
+    if !step("the window stays opaque once settled; A takes its key and exits", settled && exited) {
+        return false;
+    }
+
+    if task::kill_process(shell.as_u64(), 9).is_err() || !until(1000, || task::process_exited(shell)) {
+        return step("shell killed", false);
+    }
+    let _ = task::wait_process(shell.as_u64());
+    step(
+        "display returned to the terminal",
+        compositor::holder().is_none() && !compositor::is_presenting(),
+    )
+}
 
 /// Stage 20.6 acceptance: translucent overlays over windows.
 ///

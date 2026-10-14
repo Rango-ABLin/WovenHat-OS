@@ -17,6 +17,69 @@ gate pass. The unsupported `cargo test --workspace --all-targets` command is
 documented as a host-assembler mismatch rather than treated as a production
 failure. See the [host-test audit](audit-host-test-boundary-2026-10-14.md).
 
+## Stage 20.7 — physics-based animation: windows fade in on a spring (2026-10-13)
+
+Roadmap Stage 18.3, Window Experience: smooth physics-based animation.
+
+**libwoven `Spring`.** The spring eases a value toward a target, stepped
+once per frame.
+- It is fixed-point (16 fractional bits): no floating point, and every run
+  is identical.
+- Stepping is semi-implicit Euler with stiffness 0.08 and damping 0.5 per
+  frame. That keeps both roots of the discrete system real and positive:
+  the value approaches its target monotonically, with no overshoot, and
+  settles within about 30 frames of a 255-step move.
+- `step(skipped + 1)` keeps motion on time when frames are dropped.
+- Host tests cover:
+  - monotone approach with no overshoot, for three moves including
+    negative values, settling within 60 frames, with at least 10
+    intermediate values (a motion, not a jump);
+  - stepping 7 frames at once equals 7 single steps;
+  - determinism;
+  - rest staying at rest, and retargeting starting from the current value.
+- An integer Python model of the same arithmetic agreed before the first
+  build: 28–30 frames, monotone.
+
+**Shell.** A new window fades in: its opacity follows the spring from 0 to
+255.
+- Its title bar is drawn into the staging surface and region-blended at
+  that opacity.
+- Its client area is region-blended with the shared-surface blend (123).
+- Its shadow bands are scaled to `opacity * alpha / 255`.
+- While anything animates, the frame clock runs at 20 ms (2 ticks); at
+  rest, at 250 ms.
+
+Gate `[S20.7] spring animation: PASSED`. The kernel samples one pixel of
+the appearing window as fast as it can.
+- It samples the **physical framebuffer**, which changes only when a fully
+  composed frame is presented. The compositor surface is updated layer by
+  layer, and sampling it could catch a frame half built.
+- For every opacity `a` it computes what that pixel must read: the
+  wallpaper, the window's own shadow band at `48a/255`, then the client
+  colour blended at `a`.
+- Every sample must be one of those values, the opacities they imply must
+  never decrease, at least three intermediate opacities must be seen, and
+  the pixel must end fully opaque.
+- Then A takes its key and exits, and killing the shell returns the
+  display.
+
+The first run sampled 11 distinct frames over 69 ticks, at opacities
+0, 20, 80, 135, 178, 217, 244, 248, 251, 253 and 255: the spring's curve.
+
+Negative controls, with evidence in the worktree's
+`audit-artifacts/stage20.7-negative-control-*`:
+- With windows appearing at full opacity, only opacities 0 and 255 are
+  seen, and the gate fails at "the window passes through at least three
+  intermediate opacities".
+- With the shadow not scaled by the fade, the samples are no longer
+  explained, and it fails at "every sample is the window blended at some
+  opacity, never decreasing".
+
+Open:
+- Only window opening is animated. Closing cannot fade, because the
+  surface is gone when the owner exits. Minimise does not exist yet.
+- The spring constants are fixed.
+
 ## Stage 20.6 — translucent overlays over windows (2026-10-13)
 
 Roadmap Stage 18.3, Window Experience: subtle translucency.
