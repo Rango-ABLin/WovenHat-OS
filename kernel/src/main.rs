@@ -1516,7 +1516,9 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
             // userspace read(0, ...) syscall and make the shell appear hung.
             if !userspace_foreground {
                 if let Some(key) = keyboard::poll() {
-                    if matches!(key, keyboard::Key::F1) {
+                    if matches!(key, keyboard::Key::F2) {
+                        // F2 has no use in the kernel's own desktop.
+                    } else if matches!(key, keyboard::Key::F1) {
                         desktop_active = !desktop_active;
                         if desktop_active {
                             console.render_desktop(&desktop);
@@ -1531,7 +1533,7 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
                             keyboard::Key::Enter => gui::InputEvent::Key('\n'),
                             keyboard::Key::Backspace => gui::InputEvent::Key('\u{8}'),
                             keyboard::Key::Tab => gui::InputEvent::Key('\t'),
-                            keyboard::Key::F1 => unreachable!(),
+                            keyboard::Key::F1 | keyboard::Key::F2 => unreachable!(),
                         };
                         desktop.handle(&event);
                         console.render_desktop(&desktop);
@@ -3428,6 +3430,15 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         serial::write_line(format_args!("[S1-5] storage journal: PASSED"));
         qemu_test_exit_success();
     }
+    #[cfg(feature = "stage20-8-test")]
+    {
+        if !stage20_8_self_test() {
+            serial::write_line(format_args!("[S20.8] tiling: FAILED"));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!("[S20.8] tiling: PASSED"));
+        qemu_test_exit_success();
+    }
     #[cfg(feature = "stage20-7-test")]
     {
         if !stage20_7_self_test() {
@@ -4727,7 +4738,8 @@ fn stage16_1_self_test() -> bool {
     feature = "stage20-4-test",
     feature = "stage20-5-test",
     feature = "stage20-6-test",
-    feature = "stage20-7-test"
+    feature = "stage20-7-test",
+    feature = "stage20-8-test"
 ))]
 const HELLO_GUI_IMAGE: &[u8] = include_bytes!(env!("WOVENHAT_HELLO_GUI_IMAGE"));
 
@@ -4752,7 +4764,8 @@ const HELLO_GUI_IMAGE: &[u8] = include_bytes!(env!("WOVENHAT_HELLO_GUI_IMAGE"));
     feature = "stage20-4-test",
     feature = "stage20-5-test",
     feature = "stage20-6-test",
-    feature = "stage20-7-test"
+    feature = "stage20-7-test",
+    feature = "stage20-8-test"
 ))]
 fn display_client_capabilities() -> capability::CapabilitySet {
     capability::CapabilitySet::only(capability::Capability::Console)
@@ -4779,7 +4792,8 @@ fn display_client_capabilities() -> capability::CapabilitySet {
     feature = "stage20-4-test",
     feature = "stage20-5-test",
     feature = "stage20-6-test",
-    feature = "stage20-7-test"
+    feature = "stage20-7-test",
+    feature = "stage20-8-test"
 ))]
 fn run_hello_gui(
     image: &[u8],
@@ -4814,7 +4828,8 @@ fn run_hello_gui(
     feature = "stage20-4-test",
     feature = "stage20-5-test",
     feature = "stage20-6-test",
-    feature = "stage20-7-test"
+    feature = "stage20-7-test",
+    feature = "stage20-8-test"
 ))]
 fn spawn_hello_gui(
     image: &[u8],
@@ -4850,7 +4865,8 @@ fn spawn_hello_gui(
     feature = "stage20-4-test",
     feature = "stage20-5-test",
     feature = "stage20-6-test",
-    feature = "stage20-7-test"
+    feature = "stage20-7-test",
+    feature = "stage20-8-test"
 ))]
 fn wait_hello_gui(pid: task::ProcessId) -> Option<(task::ProcessId, Result<i32, task::WaitError>)> {
     let start = timer::ticks();
@@ -4871,9 +4887,205 @@ fn wait_hello_gui(pid: task::ProcessId) -> Option<(task::ProcessId, Result<i32, 
     feature = "stage20-4-test",
     feature = "stage20-5-test",
     feature = "stage20-6-test",
-    feature = "stage20-7-test"
+    feature = "stage20-7-test",
+    feature = "stage20-8-test"
 ))]
 const WOVEN_SHELL_IMAGE: &[u8] = include_bytes!(env!("WOVENHAT_SHELL_IMAGE"));
+
+/// Stage 20.8 acceptance: tiling.
+///
+/// Windows change size through the shell's resize protocol: `WSIZ` to the
+/// owner, `WRSZ` back with a new surface.
+/// - Dropping window A on the screen's left edge snaps it to the left half:
+///   it moves and the owner resizes it to 320x362.
+/// - F2 turns tiling on: master and stack, so A keeps the left half and B
+///   takes the right half, resized too.
+/// - Then both applications exit.
+///
+/// Every frame is compared exactly: the client areas, and the title bars
+/// rendered with the kernel's font. F2 travels the real keyboard path.
+#[cfg(feature = "stage20-8-test")]
+fn stage20_8_self_test() -> bool {
+    use crate::display::{blend_pixel, rgb, Surface};
+
+    const WALLPAPER_TOP: u32 = rgb(18, 42, 74);
+    const WALLPAPER_BOTTOM: u32 = rgb(64, 28, 88);
+    const WHITE: u32 = rgb(255, 255, 255);
+    const ACTIVE: u32 = rgb(70, 120, 210);
+    const INACTIVE: u32 = rgb(60, 66, 80);
+    const CLOSE_FILL: u32 = rgb(170, 60, 60);
+    const RED: u32 = rgb(200, 60, 60);
+    const BLUE: u32 = rgb(60, 60, 200);
+    const UNSET: u32 = 0x0100_0000;
+    const BLACK: u32 = rgb(0, 0, 0);
+
+    fn step(name: &str, ok: bool) -> bool {
+        serial::write_line(format_args!(
+            "[S20.8] {} {}",
+            name,
+            if ok { "PASS" } else { "FAIL" }
+        ));
+        ok
+    }
+    fn until(limit: u64, condition: impl Fn() -> bool) -> bool {
+        let start = timer::ticks();
+        loop {
+            if condition() {
+                return true;
+            }
+            if timer::ticks().wrapping_sub(start) > limit {
+                return false;
+            }
+            task::yield_now();
+        }
+    }
+    fn wallpaper(x: i32, y: i32, height: i32) -> u32 {
+        let span = (height - 1).max(1);
+        let t = (y.clamp(0, span) * 255 / span) as u8;
+        let base = blend_pixel(WALLPAPER_BOTTOM, WALLPAPER_TOP, t);
+        if x % 32 == 0 || y % 32 == 0 {
+            blend_pixel(WHITE, base, 28)
+        } else {
+            base
+        }
+    }
+    fn region(x0: i32, y0: i32, width: i32, height: i32, expected: impl Fn(i32, i32) -> u32) -> bool {
+        (y0..y0 + height).all(|y| (x0..x0 + width).all(|x| compositor::pixel(x, y) == Ok(expected(x, y))))
+    }
+    /// A title bar, with `shade` applied to each expected pixel (for a
+    /// shadow falling across it).
+    fn title_bar(x: i32, y: i32, width: i32, text: &str, fill: u32, shade: impl Fn(i32, i32, u32) -> u32) -> bool {
+        let mut expected = Surface::new(width as usize, 14);
+        let bounds = expected.bounds();
+        expected.fill_rect(bounds, fill);
+        expected.draw_text(4, 4, text, WHITE);
+        expected.fill_rect(crate::display::Rect::new(width - 12, 2, 10, 10), CLOSE_FILL);
+        expected.draw_text(width - 12 + 3, 4, "x", WHITE);
+        region(x, y, width, 14, |px, py| shade(px, py, expected.pixel(px - x, py - y).unwrap_or(UNSET)))
+    }
+    fn packet(dx: i16, screen_dy: i16, left: bool) -> bool {
+        let dy = -screen_dy;
+        let flags = 0x08
+            | u8::from(left)
+            | if dx < 0 { 0x10 } else { 0 }
+            | if dy < 0 { 0x20 } else { 0 };
+        [flags, dx as u8, dy as u8].into_iter().all(mouse::loopback)
+    }
+    fn move_by(mut dx: i32, mut dy: i32, held: bool) -> bool {
+        while dx != 0 || dy != 0 {
+            let (sx, sy) = (dx.clamp(-100, 100), dy.clamp(-100, 100));
+            if !packet(sx as i16, sy as i16, held) {
+                return false;
+            }
+            dx -= sx;
+            dy -= sy;
+        }
+        true
+    }
+
+    let installed = vfs::create_read_only("/bin/hello-gui", HELLO_GUI_IMAGE).is_ok();
+    let capabilities = capability::CapabilitySet::only(capability::Capability::Console)
+        .with(capability::Capability::DisplayIo)
+        .with(capability::Capability::InputIo)
+        .with(capability::Capability::Ipc);
+    let Some(program) = userspace::load_elf_with_argv(WOVEN_SHELL_IMAGE, &["/bin/woven-shell"]) else {
+        return step("shell image loads", false);
+    };
+    let Ok((shell, _, _)) = task::spawn_user_system_service("woven-shell", program, capabilities) else {
+        return step("shell spawned", false);
+    };
+    if !step(
+        "shell took the display",
+        installed && until(3000, || compositor::holder() == Some(shell.as_u64()) && compositor::is_presenting()),
+    ) {
+        return false;
+    }
+    let Some((width, height)) = compositor::dimensions() else {
+        return step("desktop geometry", false);
+    };
+    let (width, height) = (width as i32, height as i32);
+    let top = height - 24;
+    let client = capability::CapabilitySet::only(capability::Capability::Console).with(capability::Capability::Ipc);
+    let shell_arg = alloc::format!("{}", shell.as_u64());
+    let Some(alpha) = spawn_hello_gui(HELLO_GUI_IMAGE, &["/bin/hello-gui", "--desktop-client", &shell_arg, "a"], Some(client)) else {
+        return step("application A spawned", false);
+    };
+    if !until(2000, || compositor::pixel(45, 45) == Ok(RED)) {
+        return step("window A opened", false);
+    }
+    let Some(beta) = spawn_hello_gui(HELLO_GUI_IMAGE, &["/bin/hello-gui", "--desktop-client", &shell_arg, "b"], Some(client)) else {
+        return step("application B spawned", false);
+    };
+    if !step("windows A and B opened", until(2000, || compositor::pixel(150, 100) == Ok(BLUE))) {
+        return false;
+    }
+
+    // The halves of the work area above the taskbar, as client areas under
+    // 14-pixel title bars.
+    let half = width / 2;
+    let client_height = top - 14;
+    let plain = |_: i32, _: i32, pixel: u32| pixel;
+    // Once A fills the left half and is focused, its deep shadow (bands at
+    // 8 and 4 pixels) falls across the edge of whatever lies to its right.
+    let a_shadow = move |x: i32, y: i32, mut pixel: u32| {
+        for (offset, opacity) in [(8, 24u8), (4, 48u8)] {
+            if x >= offset && x < offset + half && y >= offset && y < offset + top && y < top {
+                pixel = blend_pixel(BLACK, pixel, opacity);
+            }
+        }
+        pixel
+    };
+
+    // Drag A by its title bar onto the left edge and drop it there. Then
+    // park the pointer on the taskbar, clear of every window.
+    let (px, py) = (width / 2, height / 2);
+    let snapped = move_by(80 - px, 32 - py, false)
+        && packet(0, 0, true)
+        && move_by(-80, 0, true)
+        && packet(0, 0, false)
+        && move_by(600, top + 14 - 32, false)
+        && until(2000, || {
+            region(0, 14, half, client_height, |_, _| RED) && title_bar(0, 0, half, "Alpha", ACTIVE, plain)
+        });
+    if !step("dropping A on the left edge snaps it to the left half, resized", snapped) {
+        return false;
+    }
+
+    // F2: tiling on. A, first, keeps the left half; B takes the right half,
+    // resized, under the edge of A's shadow; A remains focused.
+    let tiled = mouse::keyboard_loopback(0x3c)
+        && until(2000, || {
+            region(half, 14, width - half, client_height, |x, y| a_shadow(x, y, BLUE))
+                && title_bar(half, 0, width - half, "Beta", INACTIVE, a_shadow)
+                && region(0, 14, half, client_height, |_, _| RED)
+                && title_bar(0, 0, half, "Alpha", ACTIVE, plain)
+        });
+    if !step("F2 tiles the windows: master on the left, stack on the right", tiled) {
+        return false;
+    }
+
+    // Tiling off; A, focused, takes x and exits, and once its window is gone
+    // B takes y and exits.
+    let exited = mouse::keyboard_loopback(0x3c)
+        && mouse::keyboard_loopback(0x2d)
+        && wait_hello_gui(alpha).map(|(_, status)| status) == Some(Ok(0))
+        && until(1000, || compositor::pixel(5, 300) == Ok(wallpaper(5, 300, height)))
+        && mouse::keyboard_loopback(0x15)
+        && wait_hello_gui(beta).map(|(_, status)| status) == Some(Ok(0))
+        && until(1000, || compositor::pixel(half + 10, 300) == Ok(wallpaper(half + 10, 300, height)));
+    if !step("both applications take their keys and exit", exited) {
+        return false;
+    }
+
+    if task::kill_process(shell.as_u64(), 9).is_err() || !until(1000, || task::process_exited(shell)) {
+        return step("shell killed", false);
+    }
+    let _ = task::wait_process(shell.as_u64());
+    step(
+        "display returned to the terminal",
+        compositor::holder().is_none() && !compositor::is_presenting(),
+    )
+}
 
 /// Stage 20.7 acceptance: physics-based animation.
 ///
