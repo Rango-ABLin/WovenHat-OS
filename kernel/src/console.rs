@@ -1,6 +1,10 @@
 use bootloader_api::info::{FrameBufferInfo, PixelFormat};
 
-use crate::{graphics::Graphics, gui::Desktop};
+use crate::{
+    display::{self, Damage, Surface},
+    gui::Desktop,
+    terminal,
+};
 
 const BG_R: u8 = 4;
 const BG_G: u8 = 12;
@@ -10,8 +14,14 @@ const FG_R: u8 = 40;
 const FG_G: u8 = 220;
 const FG_B: u8 = 230;
 
-pub struct Console<'a> {
-    buffer: &'a mut [u8],
+/// The boot and kernel-shell console.
+///
+/// It keeps only the framebuffer's geometry. Every drawing operation borrows
+/// the buffer through `terminal::with_text_framebuffer`, so the console, the
+/// userspace terminal and the compositor never write the framebuffer
+/// concurrently, and console text is suppressed while the compositor owns the
+/// display. Each operation takes the lock once, not once per pixel.
+pub struct Console {
     info: FrameBufferInfo,
 
     cursor_x: usize,
@@ -19,32 +29,34 @@ pub struct Console<'a> {
 
     start_x: usize,
     scale: usize,
+
+    /// Retained compositing surface for the desktop.
+    ///
+    /// Allocated on first use rather than at construction, because the console
+    /// is created during early boot before the heap can satisfy a
+    /// screen-sized buffer. Retaining it across calls is what lets an
+    /// unchanged region go uncopied.
+    desktop_surface: Option<Surface>,
 }
 
-impl<'a> Console<'a> {
-    pub fn new(
-        buffer: &'a mut [u8],
-        info: FrameBufferInfo,
-        x: usize,
-        y: usize,
-        scale: usize,
-    ) -> Self {
+impl Console {
+    /// Create the console. `terminal::init` must already have been given the
+    /// framebuffer; until then every drawing operation is a no-op.
+    pub fn new(info: FrameBufferInfo, x: usize, y: usize, scale: usize) -> Self {
         Self {
-            buffer,
             info,
             cursor_x: x,
             cursor_y: y,
             start_x: x,
             scale,
+            desktop_surface: None,
         }
     }
 
     pub fn clear(&mut self) {
-        for y in 0..self.info.height {
-            for x in 0..self.info.width {
-                self.pixel(x, y, BG_R, BG_G, BG_B);
-            }
-        }
+        terminal::with_text_framebuffer(|buffer, info| {
+            fill(buffer, info, 0, 0, info.width, info.height);
+        });
 
         self.cursor_x = self.start_x;
         self.cursor_y = 40;
@@ -64,24 +76,16 @@ impl<'a> Console<'a> {
             self.clear();
             return;
         }
-        let row_bytes = self.info.stride.saturating_mul(self.info.bytes_per_pixel);
-        let move_bytes = (self.info.height - rows).saturating_mul(row_bytes);
-        let src_offset = rows.saturating_mul(row_bytes);
-        if src_offset + move_bytes > self.buffer.len() {
-            return;
-        }
-        unsafe {
-            core::ptr::copy(
-                self.buffer[src_offset..].as_ptr(),
-                self.buffer[..move_bytes].as_mut_ptr(),
-                move_bytes,
-            );
-        }
-        for y in self.info.height - rows..self.info.height {
-            for x in 0..self.info.width {
-                self.pixel(x, y, BG_R, BG_G, BG_B);
+        terminal::with_text_framebuffer(|buffer, info| {
+            let row_bytes = info.stride.saturating_mul(info.bytes_per_pixel);
+            let move_bytes = (info.height - rows).saturating_mul(row_bytes);
+            let src_offset = rows.saturating_mul(row_bytes);
+            if src_offset + move_bytes > buffer.len() {
+                return;
             }
-        }
+            buffer.copy_within(src_offset..src_offset + move_bytes, 0);
+            fill(buffer, info, 0, info.height - rows, info.width, rows);
+        });
     }
 
     pub fn print(&mut self, text: &str) {
@@ -102,7 +106,10 @@ impl<'a> Console<'a> {
         }
         self.ensure_room();
 
-        self.draw_char(self.cursor_x, self.cursor_y, character);
+        let (x, y, scale) = (self.cursor_x, self.cursor_y, self.scale);
+        terminal::with_text_framebuffer(|buffer, info| {
+            draw_char(buffer, info, x, y, scale, character);
+        });
 
         self.cursor_x += 6 * self.scale;
 
@@ -135,142 +142,123 @@ impl<'a> Console<'a> {
 
         self.cursor_x -= char_width;
 
-        let width = char_width;
-        let height = 8 * self.scale;
-
-        for y in self.cursor_y..self.cursor_y + height {
-            for x in self.cursor_x..self.cursor_x + width {
-                self.pixel(x, y, BG_R, BG_G, BG_B);
-            }
-        }
+        let (x, y, height) = (self.cursor_x, self.cursor_y, 8 * self.scale);
+        terminal::with_text_framebuffer(|buffer, info| {
+            fill(buffer, info, x, y, char_width, height);
+        });
     }
 
+    /// Composite the desktop off-screen, then copy only what changed.
+    ///
+    /// Rendering straight to the framebuffer modified a frame the display was
+    /// scanning, so every redraw could tear, and it repainted the whole screen
+    /// however little moved. The surface is retained between calls so an
+    /// unchanged region is never recopied.
     pub fn render_desktop(&mut self, desktop: &Desktop) {
-        let mut graphics = Graphics::new(self.buffer, self.info);
-        desktop.render(&mut graphics);
+        let width = self.info.width;
+        let height = self.info.height;
+        let surface = self
+            .desktop_surface
+            .get_or_insert_with(|| Surface::new(width, height));
+        let mut damage = Damage::new();
+        desktop.render(surface, &mut damage);
+        let surface = &*surface;
+        terminal::with_text_framebuffer(|buffer, info| {
+            display::present(surface, &damage, buffer, info);
+        });
     }
+}
 
-    fn draw_char(&mut self, x: usize, y: usize, character: char) {
-        let glyph = glyph(character);
+fn draw_char(
+    buffer: &mut [u8],
+    info: FrameBufferInfo,
+    x: usize,
+    y: usize,
+    scale: usize,
+    character: char,
+) {
+    let glyph = glyph(character);
 
-        for (row, bits) in glyph.iter().enumerate() {
-            for col in 0..5 {
-                if bits & (1 << (4 - col)) != 0 {
-                    for sy in 0..self.scale {
-                        for sx in 0..self.scale {
-                            self.pixel(
-                                x + col * self.scale + sx,
-                                y + row * self.scale + sy,
-                                FG_R,
-                                FG_G,
-                                FG_B,
-                            );
-                        }
+    for (row, bits) in glyph.iter().enumerate() {
+        for col in 0..5 {
+            if bits & (1 << (4 - col)) != 0 {
+                for sy in 0..scale {
+                    for sx in 0..scale {
+                        pixel(
+                            buffer,
+                            info,
+                            x + col * scale + sx,
+                            y + row * scale + sy,
+                            FG_R,
+                            FG_G,
+                            FG_B,
+                        );
                     }
                 }
             }
         }
     }
+}
 
-    fn pixel(&mut self, x: usize, y: usize, r: u8, g: u8, b: u8) {
-        if x >= self.info.width || y >= self.info.height {
-            return;
-        }
-
-        let offset = y
-            .checked_mul(self.info.stride)
-            .and_then(|v| v.checked_add(x))
-            .and_then(|v| v.checked_mul(self.info.bytes_per_pixel))
-            .unwrap_or(usize::MAX);
-
-        if offset + self.info.bytes_per_pixel > self.buffer.len() {
-            return;
-        }
-
-        match self.info.pixel_format {
-            PixelFormat::Rgb => {
-                self.buffer[offset] = r;
-
-                if self.info.bytes_per_pixel > 1 {
-                    self.buffer[offset + 1] = g;
-                }
-
-                if self.info.bytes_per_pixel > 2 {
-                    self.buffer[offset + 2] = b;
-                }
-            }
-
-            PixelFormat::Bgr => {
-                self.buffer[offset] = b;
-
-                if self.info.bytes_per_pixel > 1 {
-                    self.buffer[offset + 1] = g;
-                }
-
-                if self.info.bytes_per_pixel > 2 {
-                    self.buffer[offset + 2] = r;
-                }
-            }
-
-            _ => {}
+/// Paint a rectangle in the console background colour.
+fn fill(buffer: &mut [u8], info: FrameBufferInfo, x: usize, y: usize, width: usize, height: usize) {
+    for row in y..y.saturating_add(height) {
+        for column in x..x.saturating_add(width) {
+            pixel(buffer, info, column, row, BG_R, BG_G, BG_B);
         }
     }
 }
 
-pub(crate) fn glyph(c: char) -> [u8; 7] {
-    match c.to_ascii_uppercase() {
-        'A' => [0x0E, 0x11, 0x11, 0x1F, 0x11, 0x11, 0x11],
-        'B' => [0x1E, 0x11, 0x11, 0x1E, 0x11, 0x11, 0x1E],
-        'C' => [0x0F, 0x10, 0x10, 0x10, 0x10, 0x10, 0x0F],
-        'D' => [0x1E, 0x11, 0x11, 0x11, 0x11, 0x11, 0x1E],
-        'E' => [0x1F, 0x10, 0x10, 0x1E, 0x10, 0x10, 0x1F],
-        'F' => [0x1F, 0x10, 0x10, 0x1E, 0x10, 0x10, 0x10],
-        'G' => [0x0F, 0x10, 0x10, 0x17, 0x11, 0x11, 0x0F],
-        'H' => [0x11, 0x11, 0x11, 0x1F, 0x11, 0x11, 0x11],
-        'I' => [0x1F, 0x04, 0x04, 0x04, 0x04, 0x04, 0x1F],
-        'J' => [0x07, 0x02, 0x02, 0x02, 0x12, 0x12, 0x0C],
-        'K' => [0x11, 0x12, 0x14, 0x18, 0x14, 0x12, 0x11],
-        'L' => [0x10, 0x10, 0x10, 0x10, 0x10, 0x10, 0x1F],
-        'M' => [0x11, 0x1B, 0x15, 0x15, 0x11, 0x11, 0x11],
-        'N' => [0x11, 0x19, 0x15, 0x13, 0x11, 0x11, 0x11],
-        'O' => [0x0E, 0x11, 0x11, 0x11, 0x11, 0x11, 0x0E],
-        'P' => [0x1E, 0x11, 0x11, 0x1E, 0x10, 0x10, 0x10],
-        'Q' => [0x0E, 0x11, 0x11, 0x11, 0x15, 0x12, 0x0D],
-        'R' => [0x1E, 0x11, 0x11, 0x1E, 0x14, 0x12, 0x11],
-        'S' => [0x0F, 0x10, 0x10, 0x0E, 0x01, 0x01, 0x1E],
-        'T' => [0x1F, 0x04, 0x04, 0x04, 0x04, 0x04, 0x04],
-        'U' => [0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x0E],
-        'V' => [0x11, 0x11, 0x11, 0x11, 0x11, 0x0A, 0x04],
-        'W' => [0x11, 0x11, 0x11, 0x15, 0x15, 0x15, 0x0A],
-        'X' => [0x11, 0x11, 0x0A, 0x04, 0x0A, 0x11, 0x11],
-        'Y' => [0x11, 0x11, 0x0A, 0x04, 0x04, 0x04, 0x04],
-        'Z' => [0x1F, 0x01, 0x02, 0x04, 0x08, 0x10, 0x1F],
-
-        '0' => [0x0E, 0x11, 0x13, 0x15, 0x19, 0x11, 0x0E],
-        '1' => [0x04, 0x0C, 0x04, 0x04, 0x04, 0x04, 0x0E],
-        '2' => [0x0E, 0x11, 0x01, 0x02, 0x04, 0x08, 0x1F],
-        '3' => [0x1E, 0x01, 0x01, 0x0E, 0x01, 0x01, 0x1E],
-        '4' => [0x02, 0x06, 0x0A, 0x12, 0x1F, 0x02, 0x02],
-        '5' => [0x1F, 0x10, 0x10, 0x1E, 0x01, 0x01, 0x1E],
-        '6' => [0x0E, 0x10, 0x10, 0x1E, 0x11, 0x11, 0x0E],
-        '7' => [0x1F, 0x01, 0x02, 0x04, 0x08, 0x08, 0x08],
-        '8' => [0x0E, 0x11, 0x11, 0x0E, 0x11, 0x11, 0x0E],
-        '9' => [0x0E, 0x11, 0x11, 0x0F, 0x01, 0x01, 0x0E],
-
-        ':' => [0x00, 0x04, 0x04, 0x00, 0x04, 0x04, 0x00],
-        '.' => [0x00, 0x00, 0x00, 0x00, 0x00, 0x0C, 0x0C],
-        '>' => [0x10, 0x08, 0x04, 0x02, 0x04, 0x08, 0x10],
-        '<' => [0x01, 0x02, 0x04, 0x08, 0x04, 0x02, 0x01],
-        '-' => [0x00, 0x00, 0x00, 0x1F, 0x00, 0x00, 0x00],
-        '_' => [0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x1F],
-        '!' => [0x04, 0x04, 0x04, 0x04, 0x04, 0x00, 0x04],
-        '?' => [0x0E, 0x11, 0x01, 0x02, 0x04, 0x00, 0x04],
-        '/' => [0x01, 0x02, 0x02, 0x04, 0x08, 0x08, 0x10],
-        '=' => [0x00, 0x1F, 0x00, 0x1F, 0x00, 0x00, 0x00],
-        '+' => [0x00, 0x04, 0x04, 0x1F, 0x04, 0x04, 0x00],
-        ',' => [0x00, 0x00, 0x00, 0x00, 0x04, 0x04, 0x08],
-        ' ' => [0; 7],
-
-        _ => [0x1F, 0x11, 0x02, 0x04, 0x04, 0x00, 0x04],
+fn pixel(buffer: &mut [u8], info: FrameBufferInfo, x: usize, y: usize, r: u8, g: u8, b: u8) {
+    if x >= info.width || y >= info.height {
+        return;
     }
+
+    let offset = y
+        .checked_mul(info.stride)
+        .and_then(|v| v.checked_add(x))
+        .and_then(|v| v.checked_mul(info.bytes_per_pixel))
+        .unwrap_or(usize::MAX);
+
+    if offset.saturating_add(info.bytes_per_pixel) > buffer.len() {
+        return;
+    }
+
+    match info.pixel_format {
+        PixelFormat::Rgb => {
+            buffer[offset] = r;
+
+            if info.bytes_per_pixel > 1 {
+                buffer[offset + 1] = g;
+            }
+
+            if info.bytes_per_pixel > 2 {
+                buffer[offset + 2] = b;
+            }
+        }
+
+        PixelFormat::Bgr => {
+            buffer[offset] = b;
+
+            if info.bytes_per_pixel > 1 {
+                buffer[offset + 1] = g;
+            }
+
+            if info.bytes_per_pixel > 2 {
+                buffer[offset + 2] = r;
+            }
+        }
+
+        _ => {}
+    }
+}
+
+/// Console glyphs come from the shared font.
+///
+/// The console previously carried its own 49-entry table and folded every
+/// character to uppercase, so all console output was capitalised regardless of
+/// what was written. The shared table covers all 95 printable characters with
+/// real lowercase forms.
+pub(crate) fn glyph(c: char) -> [u8; crate::font::HEIGHT] {
+    crate::font::glyph(c)
 }

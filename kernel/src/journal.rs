@@ -42,16 +42,12 @@ struct PathKey {
 impl PathKey {
     fn new(path: &str) -> Self {
         Self {
-            primary: path
-                .bytes()
-                .fold(0xcbf2_9ce4_8422_2325, |hash, byte| {
-                    (hash ^ u64::from(byte)).wrapping_mul(0x0000_0100_0000_01b3)
-                }),
-            secondary: path
-                .bytes()
-                .fold(0x9e37_79b9_7f4a_7c15, |hash, byte| {
-                    (hash ^ u64::from(byte)).wrapping_mul(0x0000_0000_0100_0193)
-                }),
+            primary: path.bytes().fold(0xcbf2_9ce4_8422_2325, |hash, byte| {
+                (hash ^ u64::from(byte)).wrapping_mul(0x0000_0100_0000_01b3)
+            }),
+            secondary: path.bytes().fold(0x9e37_79b9_7f4a_7c15, |hash, byte| {
+                (hash ^ u64::from(byte)).wrapping_mul(0x0000_0000_0100_0193)
+            }),
             length: path.len() as u32,
         }
     }

@@ -528,6 +528,9 @@ pub fn maintain_capacity() {
     }
 }
 
+#[cfg(test)]
+pub fn maintain_capacity() {}
+
 pub fn self_test() -> bool {
     let boxed = Box::new(0x574F_5645_4E48_4154_u64);
     let value = *boxed;

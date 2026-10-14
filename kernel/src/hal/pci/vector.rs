@@ -31,7 +31,10 @@ struct Slot {
 }
 
 impl Slot {
-    const EMPTY: Self = Self { generation: 1, owner: NO_OWNER };
+    const EMPTY: Self = Self {
+        generation: 1,
+        owner: NO_OWNER,
+    };
 }
 
 pub struct Allocator {
@@ -39,10 +42,16 @@ pub struct Allocator {
 }
 
 impl Allocator {
-    pub const fn new() -> Self { Self { slots: [Slot::EMPTY; VECTOR_COUNT] } }
+    pub const fn new() -> Self {
+        Self {
+            slots: [Slot::EMPTY; VECTOR_COUNT],
+        }
+    }
 
     pub fn allocate(&mut self, owner: u32) -> Result<Lease, Error> {
-        if owner == NO_OWNER { return Err(Error::InvalidOwner); }
+        if owner == NO_OWNER {
+            return Err(Error::InvalidOwner);
+        }
         for (index, slot) in self.slots.iter_mut().enumerate() {
             if slot.owner == NO_OWNER {
                 slot.owner = owner;
@@ -57,14 +66,22 @@ impl Allocator {
     }
 
     pub fn validate(&self, lease: Lease, owner: u32) -> Result<(), Error> {
-        if owner == NO_OWNER { return Err(Error::InvalidOwner); }
-        let index = lease.vector.checked_sub(FIRST_VECTOR).map(usize::from)
-            .filter(|index| *index < VECTOR_COUNT).ok_or(Error::InvalidLease)?;
+        if owner == NO_OWNER {
+            return Err(Error::InvalidOwner);
+        }
+        let index = lease
+            .vector
+            .checked_sub(FIRST_VECTOR)
+            .map(usize::from)
+            .filter(|index| *index < VECTOR_COUNT)
+            .ok_or(Error::InvalidLease)?;
         let slot = self.slots[index];
         if slot.generation != lease.generation || slot.owner == NO_OWNER {
             return Err(Error::InvalidLease);
         }
-        if slot.owner != owner || lease.owner != owner { return Err(Error::NotOwner); }
+        if slot.owner != owner || lease.owner != owner {
+            return Err(Error::NotOwner);
+        }
         Ok(())
     }
 
@@ -74,7 +91,9 @@ impl Allocator {
         let slot = &mut self.slots[index];
         slot.owner = NO_OWNER;
         slot.generation = slot.generation.wrapping_add(1);
-        if slot.generation == 0 { slot.generation = 1; }
+        if slot.generation == 0 {
+            slot.generation = 1;
+        }
         Ok(())
     }
 }

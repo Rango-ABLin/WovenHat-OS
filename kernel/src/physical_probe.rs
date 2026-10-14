@@ -1,11 +1,11 @@
-//! Read-only PCI inventory boot mode for the selected physical machine.
+﻿//! Read-only PCI inventory boot mode for the selected physical machine.
 //! Reports to framebuffer and serial, then halts before device activation.
 
 use crate::{console::Console, hal, serial};
 use core::fmt::{self, Write};
 
-struct Screen<'a, 'b>(&'a mut Console<'b>);
-impl Write for Screen<'_, '_> {
+struct Screen<'a>(&'a mut Console);
+impl Write for Screen<'_> {
     fn write_str(&mut self, text: &str) -> fmt::Result {
         // The console font lacks square brackets. Keep serial markers exact
         // while displaying the same labels without unsupported glyphs.
@@ -16,13 +16,13 @@ impl Write for Screen<'_, '_> {
     }
 }
 
-fn line(console: &mut Console<'_>, args: fmt::Arguments<'_>) {
+fn line(console: &mut Console, args: fmt::Arguments<'_>) {
     serial::write_line(args);
     let _ = Screen(console).write_fmt(args);
     console.println("");
 }
 
-pub fn run(console: &mut Console<'_>, acpi: Option<&hal::acpi::Summary>) -> ! {
+pub fn run(console: &mut Console, acpi: Option<&hal::acpi::Summary>) -> ! {
     serial::init();
     console.clear();
     line(

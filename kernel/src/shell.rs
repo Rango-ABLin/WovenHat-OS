@@ -74,14 +74,14 @@ impl Shell {
         }
     }
 
-    pub fn print_prompt(&self, console: &mut Console<'_>) {
+    pub fn print_prompt(&self, console: &mut Console) {
         console.print(PROMPT_PREFIX);
         let cwd = cwd_owned();
         console.print(&cwd);
         console.print("> ");
     }
 
-    pub fn handle_key(&mut self, key: Key, console: &mut Console<'_>) {
+    pub fn handle_key(&mut self, key: Key, console: &mut Console) {
         match key {
             Key::Char(character) => self.push_character(character, console),
             Key::Backspace => self.backspace(console),
@@ -90,7 +90,7 @@ impl Shell {
         }
     }
 
-    fn push_character(&mut self, character: char, console: &mut Console<'_>) {
+    fn push_character(&mut self, character: char, console: &mut Console) {
         if !character.is_ascii() || character.is_ascii_control() {
             return;
         }
@@ -102,7 +102,7 @@ impl Shell {
         console.put_char(character);
     }
 
-    fn backspace(&mut self, console: &mut Console<'_>) {
+    fn backspace(&mut self, console: &mut Console) {
         if self.length == 0 {
             return;
         }
@@ -110,7 +110,7 @@ impl Shell {
         console.backspace();
     }
 
-    fn submit(&mut self, console: &mut Console<'_>) {
+    fn submit(&mut self, console: &mut Console) {
         console.newline();
 
         let line = core::str::from_utf8(&self.command[..self.length])
@@ -404,7 +404,7 @@ impl Shell {
         self.finish(console);
     }
 
-    fn finish(&mut self, console: &mut Console<'_>) {
+    fn finish(&mut self, console: &mut Console) {
         self.length = 0;
         if !terminal::foreground_active() {
             self.print_prompt(console);
@@ -412,7 +412,7 @@ impl Shell {
     }
 }
 
-fn print_help(console: &mut Console<'_>) {
+fn print_help(console: &mut Console) {
     console.println("WovenHat kernel shell 0.8.0 Multicore Foundation");
     console.println(
         "system:  help clear version ticks|uptime tasks|ps smp smptest caps devices net netstat",
@@ -430,7 +430,7 @@ fn print_help(console: &mut Console<'_>) {
         .println("runtime: userland udpecho [port] dhcp <on|off>   (Multicore Foundation runtime)");
 }
 
-fn cmd_tasks(console: &mut Console<'_>) {
+fn cmd_tasks(console: &mut Console) {
     let summary = task::summary();
     console.print("tasks: ");
     print_u64(console, summary.task_count as u64);
@@ -459,7 +459,7 @@ fn cmd_tasks(console: &mut Console<'_>) {
     console.newline();
 }
 
-fn cmd_devices(console: &mut Console<'_>) {
+fn cmd_devices(console: &mut Console) {
     console.print("devices: ");
     print_u64(console, device::count() as u64);
     console.newline();
@@ -494,7 +494,7 @@ fn cmd_devices(console: &mut Console<'_>) {
     }
 }
 
-fn cmd_net(console: &mut Console<'_>) {
+fn cmd_net(console: &mut Console) {
     match virtio_net::probe() {
         virtio_net::ProbeStatus::Found(loc) => {
             console.print("virtio-net pci: ");
@@ -556,7 +556,7 @@ fn cmd_net(console: &mut Console<'_>) {
     console.newline();
 }
 
-fn cmd_netstat(console: &mut Console<'_>) {
+fn cmd_netstat(console: &mut Console) {
     let stats = network::stats();
     console.print("network: ");
     console.println(if stats.online { "online" } else { "offline" });
@@ -585,7 +585,7 @@ fn cmd_netstat(console: &mut Console<'_>) {
     }
 }
 
-fn cmd_udpecho(arg: &str, console: &mut Console<'_>) {
+fn cmd_udpecho(arg: &str, console: &mut Console) {
     let port = if arg.trim().is_empty() {
         7
     } else {
@@ -611,7 +611,7 @@ fn cmd_udpecho(arg: &str, console: &mut Console<'_>) {
     }
 }
 
-fn cmd_dhcp(arg: &str, console: &mut Console<'_>) {
+fn cmd_dhcp(arg: &str, console: &mut Console) {
     match arg.trim() {
         "on" | "enable" | "1" => match network::set_dhcp(true) {
             Ok(()) => console
@@ -626,7 +626,7 @@ fn cmd_dhcp(arg: &str, console: &mut Console<'_>) {
     }
 }
 
-fn print_ipv4(console: &mut Console<'_>, ip: [u8; 4]) {
+fn print_ipv4(console: &mut Console, ip: [u8; 4]) {
     print_u64(console, ip[0] as u64);
     console.print(".");
     print_u64(console, ip[1] as u64);
@@ -636,7 +636,7 @@ fn print_ipv4(console: &mut Console<'_>, ip: [u8; 4]) {
     print_u64(console, ip[3] as u64);
 }
 
-fn cmd_persist(arg: &str, console: &mut Console<'_>) {
+fn cmd_persist(arg: &str, console: &mut Console) {
     let arg = arg.trim();
     if arg.is_empty() {
         console.println("usage: persist </mnt/path>");
@@ -673,7 +673,7 @@ fn cmd_persist(arg: &str, console: &mut Console<'_>) {
     }
 }
 
-fn cmd_sync(console: &mut Console<'_>) {
+fn cmd_sync(console: &mut Console) {
     match storage::sync_all_mounted() {
         Ok(count) => {
             console.print("sync: persisted ");
@@ -685,7 +685,7 @@ fn cmd_sync(console: &mut Console<'_>) {
         Err(_) => console.println("sync: failed; dirty buffers retained for retry"),
     }
 }
-fn cmd_block_io(console: &mut Console<'_>) {
+fn cmd_block_io(console: &mut Console) {
     let stats = block_io::stats();
     console.print("block io: queued=");
     print_u64(console, stats.queued);
@@ -755,7 +755,7 @@ fn install_userland() -> u64 {
     installed
 }
 
-fn cmd_userland(console: &mut Console<'_>) {
+fn cmd_userland(console: &mut Console) {
     let installed = install_userland();
     console.print("userland: ");
     print_u64(console, installed);
@@ -799,7 +799,7 @@ fn cmd_userland(console: &mut Console<'_>) {
     }
 }
 
-fn cmd_kill(arg: &str, console: &mut Console<'_>) {
+fn cmd_kill(arg: &str, console: &mut Console) {
     let (pid_text, signal_text) = split_command(arg);
     if pid_text.is_empty() {
         console.println("usage: kill <pid> [signal]");
@@ -826,7 +826,7 @@ fn cmd_kill(arg: &str, console: &mut Console<'_>) {
     }
 }
 
-fn cmd_caps(console: &mut Console<'_>) {
+fn cmd_caps(console: &mut Console) {
     console.print("caps:");
     print_capability(console, Capability::Console, " console");
     print_capability(console, Capability::TimerRead, " timer");
@@ -846,7 +846,7 @@ fn cmd_caps(console: &mut Console<'_>) {
     console.newline();
 }
 
-fn cmd_memory(console: &mut Console<'_>) {
+fn cmd_memory(console: &mut Console) {
     let stats = memory::stats();
     console.print("memory regions: ");
     print_u64(console, stats.usable_regions as u64);
@@ -861,7 +861,7 @@ fn cmd_memory(console: &mut Console<'_>) {
     console.newline();
 }
 
-fn cmd_heap(console: &mut Console<'_>) {
+fn cmd_heap(console: &mut Console) {
     let stats = heap::stats();
     console.print("heap start: ");
     print_hex_u64(console, stats.start);
@@ -876,7 +876,7 @@ fn cmd_heap(console: &mut Console<'_>) {
     console.newline();
 }
 
-fn cmd_paging(console: &mut Console<'_>) {
+fn cmd_paging(console: &mut Console) {
     let stats = paging::stats();
     console.print("paging: ");
     print_u64(console, stats.successful_translations as u64);
@@ -894,7 +894,7 @@ fn cmd_paging(console: &mut Console<'_>) {
     });
 }
 
-fn cmd_bench(console: &mut Console<'_>) {
+fn cmd_bench(console: &mut Console) {
     let delta = benchmark::sample();
     if !delta.baseline_ready {
         console.println("benchmark baseline captured");
@@ -917,7 +917,7 @@ fn cmd_bench(console: &mut Console<'_>) {
     console.newline();
 }
 
-fn cmd_fs(console: &mut Console<'_>) {
+fn cmd_fs(console: &mut Console) {
     print_mount_info(console);
     if let Some(stats) = crate::ata::with_primary_master(|disk| disk.stats()) {
         console.print("buffer cache: hits=");
@@ -960,7 +960,7 @@ fn cmd_fs(console: &mut Console<'_>) {
     console.newline();
 }
 
-fn cmd_mount(arg: &str, console: &mut Console<'_>) {
+fn cmd_mount(arg: &str, console: &mut Console) {
     let target = arg.trim();
     if target.is_empty() {
         print_mount_info(console);
@@ -983,7 +983,7 @@ fn cmd_mount(arg: &str, console: &mut Console<'_>) {
     print_mount_info(console);
 }
 
-fn cmd_umount(arg: &str, console: &mut Console<'_>) {
+fn cmd_umount(arg: &str, console: &mut Console) {
     let target = arg.trim();
     if !target.is_empty() && target != "/mnt" {
         console.println("usage: umount /mnt");
@@ -1002,7 +1002,7 @@ fn cmd_umount(arg: &str, console: &mut Console<'_>) {
     }
 }
 
-fn cmd_df(arg: &str, console: &mut Console<'_>) {
+fn cmd_df(arg: &str, console: &mut Console) {
     let target = arg.trim();
     if !target.is_empty() && target != "/mnt" {
         console.println("usage: df /mnt");
@@ -1050,7 +1050,7 @@ fn cmd_df(arg: &str, console: &mut Console<'_>) {
     }
 }
 
-fn cmd_fscheck(arg: &str, console: &mut Console<'_>) {
+fn cmd_fscheck(arg: &str, console: &mut Console) {
     let target = arg.trim();
     if !target.is_empty() && target != "/mnt" {
         console.println("usage: fscheck /mnt");
@@ -1077,7 +1077,7 @@ fn cmd_fscheck(arg: &str, console: &mut Console<'_>) {
     }
 }
 
-fn print_mount_info(console: &mut Console<'_>) {
+fn print_mount_info(console: &mut Console) {
     let info = storage::mount_info();
     console.print("/mnt: ");
     console.print(match info.status {
@@ -1097,7 +1097,7 @@ fn print_mount_info(console: &mut Console<'_>) {
     console.newline();
 }
 
-fn print_space_error(command: &str, err: storage::SpaceError, console: &mut Console<'_>) {
+fn print_space_error(command: &str, err: storage::SpaceError, console: &mut Console) {
     console.print(command);
     console.println(match err {
         storage::SpaceError::Unmounted => ": /mnt is not mounted",
@@ -1106,7 +1106,7 @@ fn print_space_error(command: &str, err: storage::SpaceError, console: &mut Cons
         storage::SpaceError::Failed => ": failed",
     });
 }
-fn cmd_ls(path: &str, console: &mut Console<'_>) {
+fn cmd_ls(path: &str, console: &mut Console) {
     let Some(path) = shell_resolve(path) else {
         console.println("ls: bad path");
         return;
@@ -1151,7 +1151,7 @@ fn cmd_ls(path: &str, console: &mut Console<'_>) {
         console.println("(empty)");
     }
 }
-fn cmd_cat(path: &str, console: &mut Console<'_>) {
+fn cmd_cat(path: &str, console: &mut Console) {
     let Some(path) = shell_resolve(path) else {
         console.println("cat: bad path");
         return;
@@ -1196,7 +1196,7 @@ fn cmd_cat(path: &str, console: &mut Console<'_>) {
     }
     let _ = vfs::close_open_file(file);
 }
-fn cmd_write(arg: &str, console: &mut Console<'_>) {
+fn cmd_write(arg: &str, console: &mut Console) {
     // write <path> <text...>
     let arg = arg.trim();
     if arg.is_empty() {
@@ -1242,7 +1242,7 @@ fn cmd_write(arg: &str, console: &mut Console<'_>) {
         Err(_) => console.println("write: failed"),
     }
 }
-fn cmd_rename(args: &str, console: &mut Console<'_>) {
+fn cmd_rename(args: &str, console: &mut Console) {
     let mut args = args.split_whitespace();
     let (Some(old), Some(new), None) = (args.next(), args.next(), args.next()) else {
         console.println("usage: rename <old> <new>");
@@ -1296,7 +1296,7 @@ fn cmd_rename(args: &str, console: &mut Console<'_>) {
     }
 }
 
-fn cmd_rm(path: &str, console: &mut Console<'_>) {
+fn cmd_rm(path: &str, console: &mut Console) {
     let Some(path) = shell_resolve(path) else {
         console.println("rm: bad path");
         return;
@@ -1340,7 +1340,7 @@ fn cmd_rm(path: &str, console: &mut Console<'_>) {
         Err(err) => print_rm_vfs_error(err, console),
     }
 }
-fn cmd_mkdir(path: &str, console: &mut Console<'_>) {
+fn cmd_mkdir(path: &str, console: &mut Console) {
     let Some(path) = shell_resolve(path) else {
         console.println("mkdir: bad path");
         return;
@@ -1391,7 +1391,7 @@ fn cmd_mkdir(path: &str, console: &mut Console<'_>) {
         Err(_) => console.println("mkdir: failed"),
     }
 }
-fn cmd_stat(path: &str, console: &mut Console<'_>) {
+fn cmd_stat(path: &str, console: &mut Console) {
     let Some(path) = shell_resolve(path) else {
         console.println("stat: bad path");
         return;
@@ -1420,7 +1420,7 @@ fn cmd_stat(path: &str, console: &mut Console<'_>) {
         Err(_) => console.println("stat: not found"),
     }
 }
-fn cmd_userland_command(verb: &str, arg: &str, console: &mut Console<'_>) -> bool {
+fn cmd_userland_command(verb: &str, arg: &str, console: &mut Console) -> bool {
     if verb.is_empty() || verb.len() > 64 {
         return false;
     }
@@ -1464,7 +1464,7 @@ fn cmd_userland_command(verb: &str, arg: &str, console: &mut Console<'_>) -> boo
     true
 }
 
-fn cmd_run(path: &str, console: &mut Console<'_>, foreground: bool) {
+fn cmd_run(path: &str, console: &mut Console, foreground: bool) {
     let Some(path) = shell_resolve(path) else {
         console.println("run: bad path");
         return;
@@ -1509,7 +1509,7 @@ fn cmd_run(path: &str, console: &mut Console<'_>, foreground: bool) {
         Err(_) => console.println("run: spawn failed"),
     }
 }
-fn cmd_sh(console: &mut Console<'_>) {
+fn cmd_sh(console: &mut Console) {
     let installed = install_userland();
     if installed != 24 {
         console.print("sh: userland incomplete (");
@@ -1565,7 +1565,7 @@ fn serial_user_shell_start(pid: u64, entry: u64) {
     ));
 }
 
-fn cmd_init(console: &mut Console<'_>) {
+fn cmd_init(console: &mut Console) {
     let Some(program) = userspace::create_init_process() else {
         console.println("init: image failed");
         return;
@@ -1584,7 +1584,7 @@ fn cmd_init(console: &mut Console<'_>) {
     }
 }
 
-fn cmd_user(console: &mut Console<'_>) {
+fn cmd_user(console: &mut Console) {
     let Some(program) = userspace::create_stub_process() else {
         console.println("user: image mapping failed");
         return;
@@ -1623,7 +1623,7 @@ fn shell_parent_path(path: &str) -> Option<alloc::string::String> {
     }
 }
 
-fn print_mount_lookup_error(command: &str, err: storage::EnsureError, console: &mut Console<'_>) {
+fn print_mount_lookup_error(command: &str, err: storage::EnsureError, console: &mut Console) {
     console.print(command);
     console.println(match err {
         storage::EnsureError::Unmounted => ": /mnt is not mounted",
@@ -1635,7 +1635,7 @@ fn print_mount_lookup_error(command: &str, err: storage::EnsureError, console: &
         _ => ": mount lookup failed",
     });
 }
-fn print_rename_vfs_error(err: vfs::Error, console: &mut Console<'_>) {
+fn print_rename_vfs_error(err: vfs::Error, console: &mut Console) {
     match err {
         vfs::Error::NotFound => console.println("rename: source or destination parent missing"),
         vfs::Error::AlreadyExists => console.println("rename: destination exists"),
@@ -1645,7 +1645,7 @@ fn print_rename_vfs_error(err: vfs::Error, console: &mut Console<'_>) {
     }
 }
 
-fn print_rename_storage_error(err: storage::MutationError, console: &mut Console<'_>) {
+fn print_rename_storage_error(err: storage::MutationError, console: &mut Console) {
     match err {
         storage::MutationError::Unmounted => console.println("rename: /mnt is not mounted"),
         storage::MutationError::NotSupported => {
@@ -1663,7 +1663,7 @@ fn print_rename_storage_error(err: storage::MutationError, console: &mut Console
     }
 }
 
-fn print_rm_vfs_error(err: vfs::Error, console: &mut Console<'_>) {
+fn print_rm_vfs_error(err: vfs::Error, console: &mut Console) {
     match err {
         vfs::Error::NotFound => console.println("rm: not found"),
         vfs::Error::ReadOnly => console.println("rm: refused"),
@@ -1672,7 +1672,7 @@ fn print_rm_vfs_error(err: vfs::Error, console: &mut Console<'_>) {
     }
 }
 
-fn print_rm_storage_error(err: storage::MutationError, console: &mut Console<'_>) {
+fn print_rm_storage_error(err: storage::MutationError, console: &mut Console) {
     match err {
         storage::MutationError::Unmounted => console.println("rm: /mnt is not mounted"),
         storage::MutationError::NotSupported => console.println("rm: refused"),
@@ -1770,7 +1770,7 @@ fn demo_task() -> ! {
     }
 }
 
-fn authorize(capability: Capability, console: &mut Console<'_>) -> bool {
+fn authorize(capability: Capability, console: &mut Console) -> bool {
     if task::current_has(capability) {
         return true;
     }
@@ -1778,13 +1778,13 @@ fn authorize(capability: Capability, console: &mut Console<'_>) -> bool {
     false
 }
 
-fn print_capability(console: &mut Console<'_>, capability: Capability, name: &str) {
+fn print_capability(console: &mut Console, capability: Capability, name: &str) {
     if task::current_has(capability) {
         console.print(name);
     }
 }
 
-fn print_u64(console: &mut Console<'_>, mut value: u64) {
+fn print_u64(console: &mut Console, mut value: u64) {
     if value == 0 {
         console.print("0");
         return;
@@ -1802,7 +1802,7 @@ fn print_u64(console: &mut Console<'_>, mut value: u64) {
     }
 }
 
-fn print_i64(console: &mut Console<'_>, value: i64) {
+fn print_i64(console: &mut Console, value: i64) {
     if value < 0 {
         console.print("-");
         print_u64(console, value.unsigned_abs());
@@ -1811,7 +1811,7 @@ fn print_i64(console: &mut Console<'_>, value: i64) {
     }
 }
 
-fn print_hex_u64(console: &mut Console<'_>, value: u64) {
+fn print_hex_u64(console: &mut Console, value: u64) {
     console.print("0x");
     let mut started = false;
     for shift in (0..64).step_by(4).rev() {

@@ -40,6 +40,8 @@ pub enum InitError {
     PciEnableFailed,
     InvalidCapabilities,
     ResetTimeout,
+    ResetAssertTimeout,
+    ResetEnableTimeout,
     DmaUnavailable,
     UnsupportedRingSize,
     CorbResetTimeout,
@@ -196,9 +198,9 @@ impl HdaController {
         let gctl = self.mmio + REG_GCTL;
         let current = mmio_read32(gctl)?;
         mmio_write32(gctl, current & !1)?;
-        wait_for_bit(gctl, 1, false)?;
+        wait_for_bit(gctl, 1, false, InitError::ResetAssertTimeout)?;
         mmio_write32(gctl, current | 1)?;
-        wait_for_bit(gctl, 1, true)
+        wait_for_bit(gctl, 1, true, InitError::ResetEnableTimeout)
     }
     fn setup_command_rings(&mut self) -> Result<(), InitError> {
         mmio_write8(self.mmio + REG_CORBCTL, 0)?;
@@ -924,7 +926,7 @@ fn find_controller() -> Option<pci::Device> {
     }
     None
 }
-fn wait_for_bit(a: u64, m: u32, s: bool) -> Result<(), InitError> {
+fn wait_for_bit(a: u64, m: u32, s: bool, timeout: InitError) -> Result<(), InitError> {
     for _ in 0..POLL_LIMIT {
         let v = mmio_read32(a)?;
         if (v & m != 0) == s {
@@ -932,33 +934,45 @@ fn wait_for_bit(a: u64, m: u32, s: bool) -> Result<(), InitError> {
         }
         core::hint::spin_loop();
     }
-    Err(InitError::ResetTimeout)
+    Err(timeout)
 }
 fn mmio_read8(p: u64) -> Result<u8, InitError> {
-    let v = paging::map_mmio(p).map_err(|_| InitError::MmioUnavailable)?;
-    Ok(unsafe { ptr::read_volatile(v as *const u8) })
+    let page = p & !0xfff;
+    let offset = p & 0xfff;
+    let v = paging::map_mmio(page).map_err(|_| InitError::MmioUnavailable)?;
+    Ok(unsafe { ptr::read_volatile((v + offset) as *const u8) })
 }
 fn mmio_read16(p: u64) -> Result<u16, InitError> {
-    let v = paging::map_mmio(p).map_err(|_| InitError::MmioUnavailable)?;
-    Ok(unsafe { ptr::read_volatile(v as *const u16) })
+    let page = p & !0xfff;
+    let offset = p & 0xfff;
+    let v = paging::map_mmio(page).map_err(|_| InitError::MmioUnavailable)?;
+    Ok(unsafe { ptr::read_volatile((v + offset) as *const u16) })
 }
 fn mmio_read32(p: u64) -> Result<u32, InitError> {
-    let v = paging::map_mmio(p).map_err(|_| InitError::MmioUnavailable)?;
-    Ok(unsafe { ptr::read_volatile(v as *const u32) })
+    let page = p & !0xfff;
+    let offset = p & 0xfff;
+    let v = paging::map_mmio(page).map_err(|_| InitError::MmioUnavailable)?;
+    Ok(unsafe { ptr::read_volatile((v + offset) as *const u32) })
 }
 fn mmio_write8(p: u64, x: u8) -> Result<(), InitError> {
-    let v = paging::map_mmio(p).map_err(|_| InitError::MmioUnavailable)?;
-    unsafe { ptr::write_volatile(v as *mut u8, x) };
+    let page = p & !0xfff;
+    let offset = p & 0xfff;
+    let v = paging::map_mmio(page).map_err(|_| InitError::MmioUnavailable)?;
+    unsafe { ptr::write_volatile((v + offset) as *mut u8, x) };
     Ok(())
 }
 fn mmio_write16(p: u64, x: u16) -> Result<(), InitError> {
-    let v = paging::map_mmio(p).map_err(|_| InitError::MmioUnavailable)?;
-    unsafe { ptr::write_volatile(v as *mut u16, x) };
+    let page = p & !0xfff;
+    let offset = p & 0xfff;
+    let v = paging::map_mmio(page).map_err(|_| InitError::MmioUnavailable)?;
+    unsafe { ptr::write_volatile((v + offset) as *mut u16, x) };
     Ok(())
 }
 fn mmio_write32(p: u64, x: u32) -> Result<(), InitError> {
-    let v = paging::map_mmio(p).map_err(|_| InitError::MmioUnavailable)?;
-    unsafe { ptr::write_volatile(v as *mut u32, x) };
+    let page = p & !0xfff;
+    let offset = p & 0xfff;
+    let v = paging::map_mmio(page).map_err(|_| InitError::MmioUnavailable)?;
+    unsafe { ptr::write_volatile((v + offset) as *mut u32, x) };
     Ok(())
 }
 pub fn self_test() -> bool {

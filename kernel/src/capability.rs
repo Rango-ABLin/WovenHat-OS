@@ -17,6 +17,14 @@ pub enum Capability {
     DisplayIo = 13,
     InputIo = 14,
     NetworkAdmin = 15,
+    Camera = 16,
+    Microphone = 17,
+    Gpu = 18,
+    Usb = 19,
+    Clipboard = 20,
+    Location = 21,
+    Ai = 22,
+    Secrets = 23,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -52,6 +60,14 @@ impl CapabilitySet {
             .with(Capability::DisplayIo)
             .with(Capability::InputIo)
             .with(Capability::NetworkAdmin)
+            .with(Capability::Camera)
+            .with(Capability::Microphone)
+            .with(Capability::Gpu)
+            .with(Capability::Usb)
+            .with(Capability::Clipboard)
+            .with(Capability::Location)
+            .with(Capability::Ai)
+            .with(Capability::Secrets)
     }
 
     pub const fn userspace() -> Self {
@@ -62,6 +78,20 @@ impl CapabilitySet {
             .with(Capability::Ipc)
             .with(Capability::ProcessCreate)
             .with(Capability::NetworkIo)
+    }
+
+    /// User applications start without these sensitive authorities, but their
+    /// sandbox ceiling permits an authorized permission broker to grant them.
+    pub const fn userspace_ceiling() -> Self {
+        Self::userspace()
+            .with(Capability::Camera)
+            .with(Capability::Microphone)
+            .with(Capability::Gpu)
+            .with(Capability::Usb)
+            .with(Capability::Clipboard)
+            .with(Capability::Location)
+            .with(Capability::Ai)
+            .with(Capability::Secrets)
     }
 
     pub const fn with(self, capability: Capability) -> Self {
@@ -94,7 +124,7 @@ impl CapabilitySet {
 }
 
 impl Capability {
-    pub const COUNT: usize = 16;
+    pub const COUNT: usize = 24;
     pub const ALL: [Capability; Self::COUNT] = [
         Capability::Console,
         Capability::TimerRead,
@@ -112,6 +142,14 @@ impl Capability {
         Capability::DisplayIo,
         Capability::InputIo,
         Capability::NetworkAdmin,
+        Capability::Camera,
+        Capability::Microphone,
+        Capability::Gpu,
+        Capability::Usb,
+        Capability::Clipboard,
+        Capability::Location,
+        Capability::Ai,
+        Capability::Secrets,
     ];
 
     pub const fn index(self) -> usize {

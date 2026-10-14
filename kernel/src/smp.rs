@@ -750,9 +750,7 @@ pub fn start(topology: Option<crate::hal::acpi::Summary>, offset: u64) {
         Ordering::Release,
     );
     LAPIC.store(
-        paging::map_mmio(topology.local_apic_address)
-            .ok()
-            .expect("LAPIC mapping"),
+        paging::map_mmio(topology.local_apic_address).expect("LAPIC mapping"),
         Ordering::Relaxed,
     );
     enable_local();
@@ -774,9 +772,7 @@ pub fn start(topology: Option<crate::hal::acpi::Summary>, offset: u64) {
     );
     // Route only keyboard input through IOAPIC; each CPU has its own LAPIC timer.
     assert_eq!(topology.io_apics, 1, "one IOAPIC required");
-    let io = paging::map_mmio(u64::from(topology.io_apic_address))
-        .ok()
-        .expect("IOAPIC mapping");
+    let io = paging::map_mmio(u64::from(topology.io_apic_address)).expect("IOAPIC mapping");
     let max = (io_read(io, 1) >> 16) & 0xff;
     for pin in 0..=max {
         io_write(io, 0x10 + pin * 2, 1 << 16);
@@ -798,6 +794,29 @@ pub fn start(topology: Option<crate::hal::acpi::Summary>, offset: u64) {
         33 | if flags & 3 == 3 { 1 << 13 } else { 0 }
             | if (flags >> 2) & 3 == 3 { 1 << 15 } else { 0 },
     );
+    // The PS/2 auxiliary port (mouse) on ISA IRQ 12, same vector numbering as
+    // the PIC path. Unlike the keyboard it is optional: an unusable GSI leaves
+    // it unrouted rather than failing boot.
+    let (mouse_gsi, mouse_flags) = topology.isa_gsi[12].unwrap_or((12, 0));
+    if mouse_gsi >= topology.io_apic_gsi_base
+        && mouse_gsi - topology.io_apic_gsi_base <= max
+        && mouse_flags & 3 != 2
+        && (mouse_flags >> 2) & 3 != 2
+    {
+        let pin = mouse_gsi - topology.io_apic_gsi_base;
+        io_write(io, 0x11 + pin * 2, IDS[0].load(Ordering::Relaxed) << 24);
+        io_write(
+            io,
+            0x10 + pin * 2,
+            u32::from(crate::pic::MASTER_OFFSET + crate::mouse::IRQ)
+                | if mouse_flags & 3 == 3 { 1 << 13 } else { 0 }
+                | if (mouse_flags >> 2) & 3 == 3 {
+                    1 << 15
+                } else {
+                    0
+                },
+        );
+    }
     IOAPIC.store(io, Ordering::Release);
     if let Some(index) = topology.processor_ids[..topology.processor_count]
         .iter()
@@ -1078,9 +1097,7 @@ fn translation_reader() -> ! {
     task::exit_current_task();
 }
 fn stale_translation_test() {
-    paging::map_range(TEST_PAGE, 4096)
-        .ok()
-        .expect("SMP test mapping");
+    paging::map_range(TEST_PAGE, 4096).expect("SMP test mapping");
     for cpu in 1..online_count() {
         unsafe { task::spawn_on(cpu, "tlb-reader", translation_reader) }
             .ok()
@@ -1614,7 +1631,7 @@ fn balanced_probe() -> ! {
     BALANCED_DONE.store(true, Ordering::Release);
     task::exit_current_task();
 }
-pub fn diagnostic(console: &mut crate::console::Console<'_>) {
+pub fn diagnostic(console: &mut crate::console::Console) {
     console.print("Online CPUs: ");
     // Console itself remains BSP-owned; diagnostic output never runs in IRQ/NMI.
     let count = online_count();

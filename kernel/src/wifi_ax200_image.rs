@@ -2,9 +2,7 @@
 //! Section ordering follows the 22000 context-info format (Linux v6.12
 //! iwlwifi/pcie/ctxt-info.c). This is layout validation, not authentication.
 
-use super::tlv::{
-    IntelFirmwareImageKind, IntelFirmwareSectionGroup, IntelTlvFirmware,
-};
+use super::tlv::{IntelFirmwareImageKind, IntelFirmwareSectionGroup, IntelTlvFirmware};
 
 pub const AX200_MAX_IMAGE_BUFFERS: usize = 64;
 pub const AX200_MAX_IMAGE_CHUNK: usize = 32 * 1024;

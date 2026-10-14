@@ -1,15 +1,19 @@
-use core::{arch::asm, ptr};
+use core::{
+    arch::asm,
+    ptr,
+    sync::atomic::{AtomicBool, Ordering},
+};
 
 use crate::{hal::acpi::McfgAllocation, irq_lock::IrqMutex as Mutex};
 
-pub mod topology;
-pub mod vector;
-pub mod resource;
-pub mod routing;
-pub mod bar;
 pub mod assignment;
+pub mod bar;
 pub mod bridge;
 pub mod bridge_transaction;
+pub mod resource;
+pub mod routing;
+pub mod topology;
+pub mod vector;
 
 const CONFIG_ADDRESS: u16 = 0x0cf8;
 const CONFIG_DATA: u16 = 0x0cfc;
@@ -44,6 +48,7 @@ pub struct Bar {
 #[derive(Clone, Copy, Default, PartialEq, Eq)]
 pub struct Capabilities {
     pub power_management: bool,
+    pub power_management_offset: u16,
     pub msi: bool,
     pub msix: bool,
     pub pcie: bool,
@@ -149,7 +154,10 @@ struct PublishedState {
 
 impl PublishedState {
     const fn new() -> Self {
-        Self { inventory: Inventory::new(), topology: topology::Topology::new() }
+        Self {
+            inventory: Inventory::new(),
+            topology: topology::Topology::new(),
+        }
     }
 }
 
@@ -157,6 +165,21 @@ impl PublishedState {
 // published under one rank-20 lock. PCI configuration locks (rank 10) are
 // never acquired while this lock is held.
 static PUBLISHED: Mutex<PublishedState> = Mutex::with_rank(PublishedState::new(), 20);
+static ADMISSION_READY: AtomicBool = AtomicBool::new(false);
+
+/// Driver admission is enabled only after the current discovery generation
+/// has a validated bridge-forwarding configuration. Bridge-free systems are
+/// admitted after discovery; a routing failure leaves admission fail-closed.
+#[cfg_attr(
+    not(any(feature = "stage13-1-test", feature = "stage13-2-test")),
+    expect(
+        dead_code,
+        reason = "used by production driver admission and stage feature gates"
+    )
+)]
+pub fn admission_ready() -> bool {
+    ADMISSION_READY.load(Ordering::Acquire)
+}
 
 pub fn configure(allocations: &[McfgAllocation]) {
     let _guard = CONFIG_LOCK.lock();
@@ -193,7 +216,10 @@ pub struct HostApertureSet {
 
 impl HostApertureSet {
     pub const fn new() -> Self {
-        Self { ranges: [None; MAX_HOST_APERTURES], count: 0 }
+        Self {
+            ranges: [None; MAX_HOST_APERTURES],
+            count: 0,
+        }
     }
 
     pub fn push(&mut self, range: HostAperture) -> Result<(), HostApertureError> {
@@ -203,9 +229,14 @@ impl HostApertureSet {
         if self.count >= self.ranges.len() {
             return Err(HostApertureError::Capacity);
         }
-        let end = range.base.checked_add(range.size).ok_or(HostApertureError::InvalidRange)?;
+        let end = range
+            .base
+            .checked_add(range.size)
+            .ok_or(HostApertureError::InvalidRange)?;
         for existing in self.ranges[..self.count].iter().flatten() {
-            let existing_end = existing.base.checked_add(existing.size)
+            let existing_end = existing
+                .base
+                .checked_add(existing.size)
                 .ok_or(HostApertureError::InvalidRange)?;
             if range.base < existing_end && existing.base < end {
                 return Err(HostApertureError::Overlap);
@@ -216,11 +247,16 @@ impl HostApertureSet {
         Ok(())
     }
 
-    fn resource_ranges(&self) -> Result<([resource::Range; MAX_HOST_APERTURES], usize), HostApertureError> {
+    fn resource_ranges(
+        &self,
+    ) -> Result<([resource::Range; MAX_HOST_APERTURES], usize), HostApertureError> {
         let mut output = [resource::Range { base: 0, size: 0 }; MAX_HOST_APERTURES];
         for (index, aperture) in self.ranges[..self.count].iter().enumerate() {
             let aperture = aperture.ok_or(HostApertureError::InvalidRange)?;
-            output[index] = resource::Range { base: aperture.base, size: aperture.size };
+            output[index] = resource::Range {
+                base: aperture.base,
+                size: aperture.size,
+            };
         }
         Ok((output, self.count))
     }
@@ -233,11 +269,88 @@ pub struct HostApertures {
     pub prefetch: HostApertureSet,
 }
 
-static HOST_APERTURES: Mutex<Option<HostApertures>> = Mutex::with_rank(None, 10);
+const MAX_PERSISTENT_BAR_ALLOCATIONS: usize = MAX_DEVICES;
+
+#[derive(Clone, Copy)]
+struct PersistentBarAllocation {
+    address: Address,
+    #[cfg_attr(
+        not(any(
+            feature = "qemu-test",
+            feature = "stage1-5-test",
+            feature = "stage13-1-test",
+            feature = "stage13-2-test",
+            feature = "stage13-3-test",
+            feature = "stage13-4-test",
+            feature = "stage13-5-test",
+            feature = "stage13-6-test",
+            feature = "stage13-7-test",
+            feature = "stage13-8-test",
+            feature = "stage13-9-test",
+            feature = "stage14-1-test",
+            feature = "stage14-2-test",
+            feature = "stage14-3-test",
+            feature = "stage14-4-test",
+            feature = "stage14-5-test",
+            feature = "stage14-5b-test",
+            feature = "stage14-5c-test",
+            feature = "stage14-5d-test",
+            feature = "stage15-1-test",
+            feature = "stage15-2-test",
+            feature = "stage15-3-test",
+            feature = "stage15-6-test",
+            feature = "stage15-4-test",
+            feature = "stage15-5-test",
+            feature = "stage15-7-test",
+            feature = "stage15-8-test",
+            feature = "stage15-9-test",
+            feature = "stage16-1-test",
+            feature = "stage17-1-test",
+            feature = "stage18-1-test",
+            feature = "stage18-2-test",
+            feature = "stage19-1-test",
+            feature = "stage19-2-test",
+            feature = "stage19-3-test",
+            feature = "stage19-4-test",
+            feature = "stage19-5-test",
+            feature = "stage19-6-test",
+            feature = "stage19-7-test",
+            feature = "stage19-8-test",
+            feature = "stage19-9-test",
+            feature = "stage19-10-test",
+            feature = "stage19-11-test",
+            feature = "stage19-12-test",
+            feature = "stage19-13-test",
+            feature = "stage19-14-test",
+            feature = "stage20-1-test",
+            feature = "stage20-2-test",
+            feature = "stage20-3-test"
+        )),
+        expect(dead_code, reason = "consumed by the explicit BAR release path")
+    )]
+    assignments: [Option<assignment::Assignment>; 6],
+}
+
+struct BarResourceState {
+    apertures: Option<assignment::Apertures>,
+    allocations: [Option<PersistentBarAllocation>; MAX_PERSISTENT_BAR_ALLOCATIONS],
+}
+
+impl BarResourceState {
+    const fn empty() -> Self {
+        Self {
+            apertures: None,
+            allocations: [None; MAX_PERSISTENT_BAR_ALLOCATIONS],
+        }
+    }
+}
+
+// Owns reservations made by the explicit firmware BAR rebalance/admission path.
+static BAR_RESOURCES: Mutex<BarResourceState> = Mutex::with_rank(BarResourceState::empty(), 10);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum HostApertureError {
-    Unavailable,
+    Busy,
     InvalidRange,
     Capacity,
     Overlap,
@@ -250,7 +363,9 @@ pub enum HostApertureError {
 /// an implicit source of BAR allocation space.
 pub fn configure_host_apertures(apertures: HostApertures) -> Result<(), HostApertureError> {
     fn validate(set: &HostApertureSet) -> Result<(), HostApertureError> {
-        if set.count > set.ranges.len() { return Err(HostApertureError::Capacity); }
+        if set.count > set.ranges.len() {
+            return Err(HostApertureError::Capacity);
+        }
         let mut checked = HostApertureSet::new();
         for range in set.ranges[..set.count].iter().copied() {
             checked.push(range.ok_or(HostApertureError::InvalidRange)?)?;
@@ -260,12 +375,18 @@ pub fn configure_host_apertures(apertures: HostApertures) -> Result<(), HostAper
     validate(&apertures.io)?;
     validate(&apertures.memory)?;
     validate(&apertures.prefetch)?;
-    *HOST_APERTURES.lock() = Some(apertures);
+    let assignment_apertures = configured_assignment_apertures_from(apertures)?;
+    let mut resources = BAR_RESOURCES.lock();
+    if resources.apertures.is_some() || resources.allocations.iter().any(Option::is_some) {
+        return Err(HostApertureError::Busy);
+    }
+    resources.apertures = Some(assignment_apertures);
     Ok(())
 }
 
-fn configured_assignment_apertures() -> Result<assignment::Apertures, HostApertureError> {
-    let configured = HOST_APERTURES.lock().ok_or(HostApertureError::Unavailable)?;
+fn configured_assignment_apertures_from(
+    configured: HostApertures,
+) -> Result<assignment::Apertures, HostApertureError> {
     let (io, io_count) = configured.io.resource_ranges()?;
     let (memory, memory_count) = configured.memory.resource_ranges()?;
     let (prefetch, prefetch_count) = configured.prefetch.resource_ranges()?;
@@ -273,7 +394,292 @@ fn configured_assignment_apertures() -> Result<assignment::Apertures, HostApertu
         &io[..io_count],
         &memory[..memory_count],
         &prefetch[..prefetch_count],
-    ).map_err(HostApertureError::Allocation)
+    )
+    .map_err(HostApertureError::Allocation)
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PersistentBarError {
+    Unavailable,
+    AlreadyAllocated,
+    Capacity,
+    #[cfg_attr(
+        not(any(
+            feature = "qemu-test",
+            feature = "stage1-5-test",
+            feature = "stage13-1-test",
+            feature = "stage13-2-test",
+            feature = "stage13-3-test",
+            feature = "stage13-4-test",
+            feature = "stage13-5-test",
+            feature = "stage13-6-test",
+            feature = "stage13-7-test",
+            feature = "stage13-8-test",
+            feature = "stage13-9-test",
+            feature = "stage14-1-test",
+            feature = "stage14-2-test",
+            feature = "stage14-3-test",
+            feature = "stage14-4-test",
+            feature = "stage14-5-test",
+            feature = "stage14-5b-test",
+            feature = "stage14-5c-test",
+            feature = "stage14-5d-test",
+            feature = "stage15-1-test",
+            feature = "stage15-2-test",
+            feature = "stage15-3-test",
+            feature = "stage15-6-test",
+            feature = "stage15-4-test",
+            feature = "stage15-5-test",
+            feature = "stage15-7-test",
+            feature = "stage15-8-test",
+            feature = "stage15-9-test",
+            feature = "stage16-1-test",
+            feature = "stage17-1-test",
+            feature = "stage18-1-test",
+            feature = "stage18-2-test",
+            feature = "stage19-1-test",
+            feature = "stage19-2-test",
+            feature = "stage19-3-test",
+            feature = "stage19-4-test",
+            feature = "stage19-5-test",
+            feature = "stage19-6-test",
+            feature = "stage19-7-test",
+            feature = "stage19-8-test",
+            feature = "stage19-9-test",
+            feature = "stage19-10-test",
+            feature = "stage19-11-test",
+            feature = "stage19-12-test",
+            feature = "stage19-13-test",
+            feature = "stage19-14-test",
+            feature = "stage20-1-test",
+            feature = "stage20-2-test",
+            feature = "stage20-3-test"
+        )),
+        expect(dead_code, reason = "reported by live PCI admission paths")
+    )]
+    MixedAssignment,
+    Rebalance(RebalanceError),
+    #[cfg_attr(
+        not(any(
+            feature = "qemu-test",
+            feature = "stage1-5-test",
+            feature = "stage13-1-test",
+            feature = "stage13-2-test",
+            feature = "stage13-3-test",
+            feature = "stage13-4-test",
+            feature = "stage13-5-test",
+            feature = "stage13-6-test",
+            feature = "stage13-7-test",
+            feature = "stage13-8-test",
+            feature = "stage13-9-test",
+            feature = "stage14-1-test",
+            feature = "stage14-2-test",
+            feature = "stage14-3-test",
+            feature = "stage14-4-test",
+            feature = "stage14-5-test",
+            feature = "stage14-5b-test",
+            feature = "stage14-5c-test",
+            feature = "stage14-5d-test",
+            feature = "stage15-1-test",
+            feature = "stage15-2-test",
+            feature = "stage15-3-test",
+            feature = "stage15-6-test",
+            feature = "stage15-4-test",
+            feature = "stage15-5-test",
+            feature = "stage15-7-test",
+            feature = "stage15-8-test",
+            feature = "stage15-9-test",
+            feature = "stage16-1-test",
+            feature = "stage17-1-test",
+            feature = "stage18-1-test",
+            feature = "stage18-2-test",
+            feature = "stage19-1-test",
+            feature = "stage19-2-test",
+            feature = "stage19-3-test",
+            feature = "stage19-4-test",
+            feature = "stage19-5-test",
+            feature = "stage19-6-test",
+            feature = "stage19-7-test",
+            feature = "stage19-8-test",
+            feature = "stage19-9-test",
+            feature = "stage19-10-test",
+            feature = "stage19-11-test",
+            feature = "stage19-12-test",
+            feature = "stage19-13-test",
+            feature = "stage19-14-test",
+            feature = "stage20-1-test",
+            feature = "stage20-2-test",
+            feature = "stage20-3-test"
+        )),
+        expect(dead_code, reason = "reported by live PCI admission paths")
+    )]
+    RefreshFailed,
+    Disable(BarProgramError),
+    #[cfg_attr(
+        not(any(
+            feature = "qemu-test",
+            feature = "stage1-5-test",
+            feature = "stage13-1-test",
+            feature = "stage13-2-test",
+            feature = "stage13-3-test",
+            feature = "stage13-4-test",
+            feature = "stage13-5-test",
+            feature = "stage13-6-test",
+            feature = "stage13-7-test",
+            feature = "stage13-8-test",
+            feature = "stage13-9-test",
+            feature = "stage14-1-test",
+            feature = "stage14-2-test",
+            feature = "stage14-3-test",
+            feature = "stage14-4-test",
+            feature = "stage14-5-test",
+            feature = "stage14-5b-test",
+            feature = "stage14-5c-test",
+            feature = "stage14-5d-test",
+            feature = "stage15-1-test",
+            feature = "stage15-2-test",
+            feature = "stage15-3-test",
+            feature = "stage15-6-test",
+            feature = "stage15-4-test",
+            feature = "stage15-5-test",
+            feature = "stage15-7-test",
+            feature = "stage15-8-test",
+            feature = "stage15-9-test",
+            feature = "stage16-1-test",
+            feature = "stage17-1-test",
+            feature = "stage18-1-test",
+            feature = "stage18-2-test",
+            feature = "stage19-1-test",
+            feature = "stage19-2-test",
+            feature = "stage19-3-test",
+            feature = "stage19-4-test",
+            feature = "stage19-5-test",
+            feature = "stage19-6-test",
+            feature = "stage19-7-test",
+            feature = "stage19-8-test",
+            feature = "stage19-9-test",
+            feature = "stage19-10-test",
+            feature = "stage19-11-test",
+            feature = "stage19-12-test",
+            feature = "stage19-13-test",
+            feature = "stage19-14-test",
+            feature = "stage20-1-test",
+            feature = "stage20-2-test",
+            feature = "stage20-3-test"
+        )),
+        expect(
+            dead_code,
+            reason = "returned when a persistent BAR release cannot complete"
+        )
+    )]
+    Release(resource::Error),
+}
+
+#[cfg_attr(
+    not(any(
+        feature = "stage13-1-test",
+        feature = "stage13-2-test",
+        feature = "stage13-3-test",
+        feature = "stage13-4-test",
+        feature = "stage13-5-test",
+        feature = "stage13-6-test",
+        feature = "stage13-7-test",
+        feature = "stage13-8-test",
+        feature = "stage13-9-test"
+    )),
+    expect(dead_code, reason = "used by live PCI admission paths")
+)]
+fn refresh_published_bars(address: Address) -> bool {
+    let Some(refreshed) = probe(address) else {
+        return false;
+    };
+    let mut published = PUBLISHED.lock();
+    let Some(device) = published
+        .inventory
+        .devices
+        .iter_mut()
+        .flatten()
+        .find(|device| {
+            device.segment == address.segment
+                && device.bus == address.bus
+                && device.device == address.device
+                && device.function == address.function
+        })
+    else {
+        return false;
+    };
+    if device.vendor_id != refreshed.vendor_id || device.device_id != refreshed.device_id {
+        return false;
+    }
+    device.bars = refreshed.bars;
+    device.command = refreshed.command;
+    device.status = refreshed.status;
+    true
+}
+
+/// Assign BARs during admission only when the complete BAR set is unassigned.
+/// A mixed live/unassigned layout is rejected because moving only part of a
+/// function's BAR set would require a device-specific quiescence protocol.
+#[cfg_attr(
+    not(any(
+        feature = "stage13-1-test",
+        feature = "stage13-2-test",
+        feature = "stage13-3-test",
+        feature = "stage13-4-test",
+        feature = "stage13-5-test",
+        feature = "stage13-6-test",
+        feature = "stage13-7-test",
+        feature = "stage13-8-test",
+        feature = "stage13-9-test"
+    )),
+    expect(dead_code, reason = "used by live PCI admission paths")
+)]
+pub fn prepare_pci_admission(address: Address) -> Result<bool, PersistentBarError> {
+    let (header_type, bars) = {
+        let published = PUBLISHED.lock();
+        let device = published
+            .inventory
+            .devices
+            .iter()
+            .flatten()
+            .find(|device| {
+                device.segment == address.segment
+                    && device.bus == address.bus
+                    && device.device == address.device
+                    && device.function == address.function
+            })
+            .ok_or(PersistentBarError::RefreshFailed)?;
+        (device.header_type, device.bars)
+    };
+    let count = match header_type & 0x7f {
+        0x00 => 6usize,
+        0x01 => 2usize,
+        _ => 0usize,
+    };
+    let mut assigned = false;
+    let mut unassigned = false;
+    let mut index = 0usize;
+    while index < count {
+        let bar = bars[index];
+        if bar.valid && bar.address != 0 {
+            assigned = true;
+        } else if probe_bar_size(address, header_type, index as u8).is_ok() {
+            unassigned = true;
+        }
+        index += if bar.kind == BarKind::Memory64 { 2 } else { 1 };
+    }
+    if assigned && unassigned {
+        return Err(PersistentBarError::MixedAssignment);
+    }
+    if !unassigned {
+        return Ok(false);
+    }
+    rebalance_bars_from_firmware(address, header_type)?;
+    if !refresh_published_bars(address) {
+        let _ = release_bars_from_firmware(address);
+        return Err(PersistentBarError::RefreshFailed);
+    }
+    Ok(true)
 }
 
 fn scan_inventory() -> Inventory {
@@ -317,12 +723,18 @@ pub fn discover() -> Summary {
     let inventory = scan_inventory();
     let mut topology = topology::Topology::new();
     for device in inventory.devices.iter().flatten() {
-        if topology.insert(topology::FunctionDescriptor {
-            address: topology::FunctionAddress {
-                segment: device.segment, bus: device.bus, device: device.device, function: device.function,
-            },
-            bridge: device.bridge_buses,
-        }).is_err() {
+        if topology
+            .insert(topology::FunctionDescriptor {
+                address: topology::FunctionAddress {
+                    segment: device.segment,
+                    bus: device.bus,
+                    device: device.device,
+                    function: device.function,
+                },
+                bridge: device.bridge_buses,
+            })
+            .is_err()
+        {
             let mut failed = inventory;
             failed.summary.truncated = true;
             return failed.summary;
@@ -341,6 +753,26 @@ pub fn discover() -> Summary {
     summary
 }
 
+/// Discover one generation and complete bridge routing before exposing it to
+/// driver admission. A failed route is reflected as a truncated summary and
+/// leaves [`admission_ready`] false; no driver can claim the generation.
+pub fn discover_and_route() -> Summary {
+    ADMISSION_READY.store(false, Ordering::Release);
+    let mut summary = discover();
+    if summary.truncated || summary.bridges == 0 {
+        if !summary.truncated {
+            ADMISSION_READY.store(true, Ordering::Release);
+        }
+        return summary;
+    }
+    if route_discovered_bridges().is_ok() {
+        ADMISSION_READY.store(true, Ordering::Release);
+    } else {
+        summary.truncated = true;
+    }
+    summary
+}
+
 /// Publish a fresh hardware inventory after the caller has already detected
 /// and torn down disappeared functions. Existing handles/owners/leases for
 /// still-present functions are preserved transactionally.
@@ -356,16 +788,25 @@ pub fn discover() -> Summary {
     feature = "stage13-9-test"
 ))]
 pub(crate) fn reconcile_after_teardown() -> Result<Summary, Summary> {
+    // The refreshed inventory is not driver-admissible until the caller has
+    // completed the bridge-forwarding transaction for this generation.
+    ADMISSION_READY.store(false, Ordering::Release);
     let mut inventory = scan_inventory();
     let mut published = PUBLISHED.lock();
     let mut candidate = published.topology.clone();
     for device in inventory.devices.iter().flatten() {
-        if candidate.reconcile(topology::FunctionDescriptor {
-            address: topology::FunctionAddress {
-                segment: device.segment, bus: device.bus, device: device.device, function: device.function,
-            },
-            bridge: device.bridge_buses,
-        }).is_err() {
+        if candidate
+            .reconcile(topology::FunctionDescriptor {
+                address: topology::FunctionAddress {
+                    segment: device.segment,
+                    bus: device.bus,
+                    device: device.device,
+                    function: device.function,
+                },
+                bridge: device.bridge_buses,
+            })
+            .is_err()
+        {
             inventory.summary.truncated = true;
             return Err(inventory.summary);
         }
@@ -383,12 +824,7 @@ pub(crate) fn reconcile_after_teardown() -> Result<Summary, Summary> {
     Ok(summary)
 }
 
-fn scan_reachable_buses(
-    inventory: &mut Inventory,
-    segment: u16,
-    start_bus: u8,
-    end_bus: u8,
-) {
+fn scan_reachable_buses(inventory: &mut Inventory, segment: u16, start_bus: u8, end_bus: u8) {
     // MCFG commonly describes the entire 0..=255 ECAM aperture. Mapping and
     // probing every possible function would touch up to 65,536 4-KiB ECAM
     // pages even when only a handful of buses are reachable. Start at the
@@ -422,9 +858,16 @@ fn scan_reachable_buses(
                 continue;
             }
             let header = read_config(address, 0x0c).unwrap_or(u32::MAX);
-            let functions = if ((header >> 16) as u8) & 0x80 != 0 { 8 } else { 1 };
+            let functions = if ((header >> 16) as u8) & 0x80 != 0 {
+                8
+            } else {
+                1
+            };
             for function in 0..functions {
-                let address = Address { function, ..address };
+                let address = Address {
+                    function,
+                    ..address
+                };
                 let Some(found) = probe(address) else {
                     continue;
                 };
@@ -450,7 +893,13 @@ fn scan_reachable_buses(
 }
 
 pub fn device(index: usize) -> Option<Device> {
-    PUBLISHED.lock().inventory.devices.get(index).copied().flatten()
+    PUBLISHED
+        .lock()
+        .inventory
+        .devices
+        .get(index)
+        .copied()
+        .flatten()
 }
 
 #[cfg(any(
@@ -470,9 +919,6 @@ pub struct RescanRemoval {
     pub address: Address,
 }
 
-/// Detect functions that disappeared from configuration space without
-/// publishing a replacement inventory/topology. Callers must teardown each
-/// returned owner first; only then may a later discover() publish fresh state.
 #[cfg(any(
     feature = "stage13-1-test",
     feature = "stage13-2-test",
@@ -484,21 +930,103 @@ pub struct RescanRemoval {
     feature = "stage13-8-test",
     feature = "stage13-9-test"
 ))]
-pub fn rescan_removed(
-    removed: &mut [Option<RescanRemoval>; topology::MAX_FUNCTIONS],
-) -> usize {
+#[derive(Clone, Copy, Default, PartialEq, Eq)]
+pub struct RescanAddition {
+    pub address: Address,
+    pub device: Device,
+}
+
+#[cfg(any(
+    feature = "stage13-1-test",
+    feature = "stage13-2-test",
+    feature = "stage13-3-test",
+    feature = "stage13-4-test",
+    feature = "stage13-5-test",
+    feature = "stage13-6-test",
+    feature = "stage13-7-test",
+    feature = "stage13-8-test",
+    feature = "stage13-9-test"
+))]
+fn rescan_identity(device: Device) -> (u16, u16, u8, u8, u8, u8) {
+    (
+        device.vendor_id,
+        device.device_id,
+        device.revision,
+        device.prog_if,
+        device.class,
+        device.subclass,
+    )
+}
+
+#[cfg(any(
+    feature = "stage13-1-test",
+    feature = "stage13-2-test",
+    feature = "stage13-3-test",
+    feature = "stage13-4-test",
+    feature = "stage13-5-test",
+    feature = "stage13-6-test",
+    feature = "stage13-7-test",
+    feature = "stage13-8-test",
+    feature = "stage13-9-test"
+))]
+fn read_rescan_identity(address: Address) -> Option<(u16, u16, u8, u8, u8, u8)> {
+    let vendor_device = read_config(address, 0)?;
+    if vendor_device as u16 == 0xffff {
+        return None;
+    }
+    let class_revision = read_config(address, 0x08)?;
+    Some((
+        vendor_device as u16,
+        (vendor_device >> 16) as u16,
+        class_revision as u8,
+        (class_revision >> 8) as u8,
+        (class_revision >> 24) as u8,
+        (class_revision >> 16) as u8,
+    ))
+}
+
+/// Detect functions that disappeared or changed identity in configuration space
+/// without publishing a replacement inventory/topology. Callers must teardown
+/// each returned owner first; only then may a later discover() publish fresh
+/// state.
+#[cfg(any(
+    feature = "stage13-1-test",
+    feature = "stage13-2-test",
+    feature = "stage13-3-test",
+    feature = "stage13-4-test",
+    feature = "stage13-5-test",
+    feature = "stage13-6-test",
+    feature = "stage13-7-test",
+    feature = "stage13-8-test",
+    feature = "stage13-9-test"
+))]
+pub fn rescan_removed(removed: &mut [Option<RescanRemoval>; topology::MAX_FUNCTIONS]) -> usize {
     *removed = [None; topology::MAX_FUNCTIONS];
 
     // Snapshot topology identity while holding rank 20, then release it before
     // any configuration-space access (rank 10). This preserves global lock
     // ordering and prevents a topology -> config inversion during hotplug.
     let mut candidates = [None; topology::MAX_FUNCTIONS];
+    let mut known_identity = [None; topology::MAX_FUNCTIONS];
     {
         let published = PUBLISHED.lock();
         let topology = &published.topology;
         for (slot, candidate) in candidates.iter_mut().enumerate() {
-            let Some(function) = topology.handle_at(slot) else { continue; };
-            let Ok(snapshot) = topology.snapshot(function) else { continue; };
+            let Some(function) = topology.handle_at(slot) else {
+                continue;
+            };
+            let Ok(snapshot) = topology.snapshot(function) else {
+                continue;
+            };
+            let Some(device) = published.inventory.devices.iter().flatten().find(|device| {
+                device.segment == snapshot.address.segment
+                    && device.bus == snapshot.address.bus
+                    && device.device == snapshot.address.device
+                    && device.function == snapshot.address.function
+            }) else {
+                continue;
+            };
+            known_identity[slot] = Some(rescan_identity(*device));
             *candidate = Some(RescanRemoval {
                 function,
                 address: Address {
@@ -512,10 +1040,13 @@ pub fn rescan_removed(
     }
 
     let mut count = 0usize;
-    for candidate in candidates.iter().flatten().copied() {
-        let present = read_config(candidate.address, 0)
-            .is_some_and(|identity| identity as u16 != 0xffff);
-        if !present && count < removed.len() {
+    for (slot, candidate) in candidates
+        .iter()
+        .enumerate()
+        .filter_map(|(slot, candidate)| candidate.map(|candidate| (slot, candidate)))
+    {
+        let current_identity = read_rescan_identity(candidate.address);
+        if current_identity != known_identity[slot] && count < removed.len() {
             removed[count] = Some(candidate);
             count += 1;
         }
@@ -523,17 +1054,101 @@ pub fn rescan_removed(
     count
 }
 
+/// Detect newly present functions without publishing them. The caller must
+/// reconcile and route the generation before exposing the returned additions
+/// to a driver matcher.
+#[cfg(any(
+    feature = "stage13-1-test",
+    feature = "stage13-2-test",
+    feature = "stage13-3-test",
+    feature = "stage13-4-test",
+    feature = "stage13-5-test",
+    feature = "stage13-6-test",
+    feature = "stage13-7-test",
+    feature = "stage13-8-test",
+    feature = "stage13-9-test"
+))]
+pub fn rescan_added(
+    added: &mut [Option<RescanAddition>; topology::MAX_FUNCTIONS],
+) -> Result<usize, Summary> {
+    *added = [None; topology::MAX_FUNCTIONS];
+    let inventory = scan_inventory();
+    if inventory.summary.truncated {
+        return Err(inventory.summary);
+    }
+    let mut known = [None; topology::MAX_FUNCTIONS];
+    let mut known_identity = [None; topology::MAX_FUNCTIONS];
+    let mut known_count = 0usize;
+    {
+        let published = PUBLISHED.lock();
+        for slot in 0..topology::MAX_FUNCTIONS {
+            let Some(handle) = published.topology.handle_at(slot) else {
+                continue;
+            };
+            let Ok(snapshot) = published.topology.snapshot(handle) else {
+                continue;
+            };
+            let Some(device) = published.inventory.devices.iter().flatten().find(|device| {
+                device.segment == snapshot.address.segment
+                    && device.bus == snapshot.address.bus
+                    && device.device == snapshot.address.device
+                    && device.function == snapshot.address.function
+            }) else {
+                continue;
+            };
+            known[known_count] = Some(Address {
+                segment: snapshot.address.segment,
+                bus: snapshot.address.bus,
+                device: snapshot.address.device,
+                function: snapshot.address.function,
+            });
+            known_identity[known_count] = Some(rescan_identity(*device));
+            known_count += 1;
+        }
+    }
+    let mut count = 0usize;
+    for device in inventory.devices.iter().flatten().copied() {
+        let address = Address {
+            segment: device.segment,
+            bus: device.bus,
+            device: device.device,
+            function: device.function,
+        };
+        let known_slot = known[..known_count]
+            .iter()
+            .position(|known_address| *known_address == Some(address));
+        let unchanged =
+            known_slot.is_some_and(|slot| known_identity[slot] == Some(rescan_identity(device)));
+        if unchanged || count >= added.len() {
+            continue;
+        }
+        added[count] = Some(RescanAddition { address, device });
+        count += 1;
+    }
+    Ok(count)
+}
 
 #[expect(dead_code)]
 pub fn topology_handle(address: Address) -> Option<topology::FunctionHandle> {
     let published = PUBLISHED.lock();
     for slot in 0..topology::MAX_FUNCTIONS {
-        let Some(handle) = published.topology.handle_at(slot) else { continue; };
-        if published.topology.snapshot(handle).ok().is_some_and(|node| {
-            node.address == topology::FunctionAddress {
-                segment: address.segment, bus: address.bus, device: address.device, function: address.function,
-            }
-        }) {
+        let Some(handle) = published.topology.handle_at(slot) else {
+            continue;
+        };
+        if published
+            .topology
+            .snapshot(handle)
+            .ok()
+            .is_some_and(|node| {
+                node.address
+                    == topology::FunctionAddress {
+                        segment: address.segment,
+                        bus: address.bus,
+                        device: address.device,
+                        function: address.function,
+                    }
+            })
+        {
             return Some(handle);
         }
     }
@@ -546,10 +1161,18 @@ pub(crate) fn function_device(
 ) -> Option<(topology::NodeSnapshot, Device)> {
     let published = PUBLISHED.lock();
     let snapshot = published.topology.snapshot(handle).ok()?;
-    let device = published.inventory.devices.iter().flatten().find(|device| {
-        device.segment == snapshot.address.segment && device.bus == snapshot.address.bus
-            && device.device == snapshot.address.device && device.function == snapshot.address.function
-    }).copied()?;
+    let device = published
+        .inventory
+        .devices
+        .iter()
+        .flatten()
+        .find(|device| {
+            device.segment == snapshot.address.segment
+                && device.bus == snapshot.address.bus
+                && device.device == snapshot.address.device
+                && device.function == snapshot.address.function
+        })
+        .copied()?;
     Some((snapshot, device))
 }
 
@@ -570,11 +1193,19 @@ pub fn claim_function(handle: topology::FunctionHandle, owner: u32) -> Result<()
     feature = "stage13-9-test"
 ))]
 pub fn topology_owner(handle: topology::FunctionHandle) -> Result<u32, topology::Error> {
-    Ok(PUBLISHED.lock().topology.snapshot(handle)?.owner.unwrap_or(topology::NO_OWNER))
+    Ok(PUBLISHED
+        .lock()
+        .topology
+        .snapshot(handle)?
+        .owner
+        .unwrap_or(topology::NO_OWNER))
 }
 
 #[expect(dead_code)]
-pub fn release_function(handle: topology::FunctionHandle, owner: u32) -> Result<(), topology::Error> {
+pub fn release_function(
+    handle: topology::FunctionHandle,
+    owner: u32,
+) -> Result<(), topology::Error> {
     PUBLISHED.lock().topology.release(handle, owner)
 }
 
@@ -587,10 +1218,21 @@ pub fn lease_bar(
     let (snapshot, device) = {
         let published = PUBLISHED.lock();
         let snapshot = published.topology.snapshot(handle)?;
-        let Some(device) = published.inventory.devices.iter().flatten().find(|device| {
-            device.segment == snapshot.address.segment && device.bus == snapshot.address.bus
-                && device.device == snapshot.address.device && device.function == snapshot.address.function
-        }).copied() else { return Err(topology::Error::InvalidHandle); };
+        let Some(device) = published
+            .inventory
+            .devices
+            .iter()
+            .flatten()
+            .find(|device| {
+                device.segment == snapshot.address.segment
+                    && device.bus == snapshot.address.bus
+                    && device.device == snapshot.address.device
+                    && device.function == snapshot.address.function
+            })
+            .copied()
+        else {
+            return Err(topology::Error::InvalidHandle);
+        };
         (snapshot, device)
     };
     let Some(bar) = device.bars.get(bar_index as usize).copied() else {
@@ -607,7 +1249,10 @@ pub fn lease_bar(
     };
     let probe = probe_bar_size(address, device.header_type, bar_index)
         .map_err(|_| topology::Error::InvalidBar)?;
-    PUBLISHED.lock().topology.lease_mmio(handle, owner, bar_index, bar.address, probe.size)
+    PUBLISHED
+        .lock()
+        .topology
+        .lease_mmio(handle, owner, bar_index, bar.address, probe.size)
 }
 
 #[expect(dead_code)]
@@ -616,17 +1261,17 @@ pub fn validate_bar_lease(lease: topology::MmioLease, owner: u32) -> bool {
 }
 
 #[expect(dead_code)]
-pub fn release_bar_lease(
-    lease: topology::MmioLease,
-    owner: u32,
-) -> Result<(), topology::Error> {
+pub fn release_bar_lease(lease: topology::MmioLease, owner: u32) -> Result<(), topology::Error> {
     PUBLISHED.lock().topology.release_mmio(lease, owner)
 }
 
 // Wired by the Stage 13.2 hotplug/unbind increment; keep the lifecycle entry
 // point explicit until removal events have a real caller.
 #[expect(dead_code)]
-pub fn teardown_function(handle: topology::FunctionHandle, owner: u32) -> Result<(), topology::Error> {
+pub fn teardown_function(
+    handle: topology::FunctionHandle,
+    owner: u32,
+) -> Result<(), topology::Error> {
     PUBLISHED.lock().topology.teardown(handle, owner)
 }
 
@@ -667,6 +1312,148 @@ fn write_command_unlocked(address: Address, command: u16) -> bool {
     write_config_unlocked(address, 0x04, u32::from(command))
 }
 
+/// Write only the PMCSR half-word while preserving the adjacent PM capability
+/// fields in the same configuration dword. Configuration access is serialized
+/// by the caller's `CONFIG_LOCK` guard.
+fn write_pmcsr_unlocked(address: Address, offset: u16, pmcsr: u16) -> bool {
+    let Some(original) = read_config_unlocked(address, offset) else {
+        return false;
+    };
+    let value = (original & 0xffff_0000) | u32::from(pmcsr);
+    write_config_unlocked(address, offset, value)
+        && read_config_unlocked(address, offset)
+            .is_some_and(|readback| (readback & 0xffff) == u32::from(pmcsr))
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PowerError {
+    InvalidFunction,
+    NotOwner,
+    ConfigUnavailable,
+    WriteFailed,
+    VerifyFailed,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PowerCheckpoint {
+    pub command: u16,
+    pub pmcsr: Option<u16>,
+}
+
+/// Disable I/O, memory, and bus-master decoding for an owned function and
+/// return the exact command value for resume. Configuration access is kept
+/// outside the topology lock to preserve lock order.
+#[cfg_attr(
+    not(any(
+        feature = "stage13-1-test",
+        feature = "stage13-2-test",
+        feature = "stage13-3-test",
+        feature = "stage13-4-test",
+        feature = "stage13-5-test",
+        feature = "stage13-6-test",
+        feature = "stage13-7-test",
+        feature = "stage13-8-test",
+        feature = "stage13-9-test"
+    )),
+    expect(dead_code, reason = "used by production PCI suspend/resume")
+)]
+pub fn suspend_owned(
+    function: topology::FunctionHandle,
+    owner: u32,
+) -> Result<PowerCheckpoint, PowerError> {
+    let (snapshot, device) = function_device(function).ok_or(PowerError::InvalidFunction)?;
+    if snapshot.owner != Some(owner) {
+        return Err(PowerError::NotOwner);
+    }
+    let address = Address {
+        segment: snapshot.address.segment,
+        bus: snapshot.address.bus,
+        device: snapshot.address.device,
+        function: snapshot.address.function,
+    };
+    let _guard = CONFIG_LOCK.lock();
+    let original = read_command_unlocked(address).ok_or(PowerError::ConfigUnavailable)?;
+    let pmcsr = if device.capabilities.power_management_offset != 0 {
+        let offset = device.capabilities.power_management_offset;
+        Some(
+            (read_config_unlocked(address, offset + 4).ok_or(PowerError::ConfigUnavailable)?
+                & 0xffff) as u16,
+        )
+    } else {
+        None
+    };
+    let disabled = original & !0x7;
+    if !write_command_unlocked(address, disabled) {
+        return Err(PowerError::WriteFailed);
+    }
+    if read_command_unlocked(address) != Some(disabled) {
+        let _ = write_command_unlocked(address, original);
+        return Err(PowerError::VerifyFailed);
+    }
+    if let Some(saved_pmcsr) = pmcsr {
+        let offset = device.capabilities.power_management_offset;
+        let d3 = (saved_pmcsr & !0x3) | 0x3;
+        if !write_pmcsr_unlocked(address, offset + 4, d3) {
+            let _ = write_pmcsr_unlocked(address, offset + 4, saved_pmcsr);
+            let _ = write_command_unlocked(address, original);
+            return Err(PowerError::VerifyFailed);
+        }
+    }
+    Ok(PowerCheckpoint {
+        command: original,
+        pmcsr,
+    })
+}
+
+/// Restore a previously checkpointed PCI command value for an owned function.
+#[cfg_attr(
+    not(any(
+        feature = "stage13-1-test",
+        feature = "stage13-2-test",
+        feature = "stage13-3-test",
+        feature = "stage13-4-test",
+        feature = "stage13-5-test",
+        feature = "stage13-6-test",
+        feature = "stage13-7-test",
+        feature = "stage13-8-test",
+        feature = "stage13-9-test"
+    )),
+    expect(dead_code, reason = "used by production PCI suspend/resume")
+)]
+pub fn resume_owned(
+    function: topology::FunctionHandle,
+    owner: u32,
+    checkpoint: PowerCheckpoint,
+) -> Result<(), PowerError> {
+    let (snapshot, device) = function_device(function).ok_or(PowerError::InvalidFunction)?;
+    if snapshot.owner != Some(owner) {
+        return Err(PowerError::NotOwner);
+    }
+    let address = Address {
+        segment: snapshot.address.segment,
+        bus: snapshot.address.bus,
+        device: snapshot.address.device,
+        function: snapshot.address.function,
+    };
+    let _guard = CONFIG_LOCK.lock();
+    if let Some(pmcsr) = checkpoint.pmcsr {
+        let offset = device.capabilities.power_management_offset;
+        let d0 = pmcsr & !0x3;
+        if !write_pmcsr_unlocked(address, offset + 4, d0) {
+            let _ = write_pmcsr_unlocked(address, offset + 4, 0x3);
+            return Err(PowerError::VerifyFailed);
+        }
+    }
+    if !write_command_unlocked(address, checkpoint.command) {
+        return Err(PowerError::WriteFailed);
+    }
+    if read_command_unlocked(address) != Some(checkpoint.command) {
+        let _ = write_command_unlocked(address, checkpoint.command & !0x7);
+        return Err(PowerError::VerifyFailed);
+    }
+    Ok(())
+}
+
 pub fn enable_io_bus_master(bus: u8, device: u8, function: u8) {
     let address = Address {
         segment: 0,
@@ -700,6 +1487,24 @@ pub fn enable_memory_bus_master(address: Address) -> bool {
     };
     // PCI command: bit1 memory space, bit2 bus master.
     write_command_unlocked(address, command | 0x0006)
+}
+
+/// Restore a PCI command register saved by the driver before it enabled a
+/// device.  This is deliberately narrow: callers must own the function and
+/// must have quiesced all DMA before restoring bus mastering.
+#[cfg(any(
+    feature = "stage13-3-test",
+    feature = "stage13-4-test",
+    feature = "stage13-5-test",
+    feature = "stage13-6-test",
+    feature = "stage13-7-test",
+    feature = "stage13-8-test",
+    feature = "stage13-9-test",
+    feature = "stage13-10-test"
+))]
+pub fn restore_command(address: Address, command: u16) -> bool {
+    let _guard = CONFIG_LOCK.lock();
+    write_command_unlocked(address, command) && read_command_unlocked(address) == Some(command)
 }
 
 pub fn bar0_io_base(bus: u8, device: u8, function: u8) -> Option<u16> {
@@ -795,7 +1600,6 @@ fn restore_bridge_unlocked(address: Address, saved: BridgeRegisterSnapshot) -> b
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[expect(dead_code, reason = "Stage 13.2 bridge routing becomes live at device admission/hotplug integration")]
 pub enum BridgeChainError {
     NotBridge,
     InvalidWindow(bridge::Error),
@@ -806,7 +1610,6 @@ pub enum BridgeChainError {
 }
 
 #[derive(Clone, Copy)]
-#[expect(dead_code, reason = "Stage 13.2 bridge routing becomes live at device admission/hotplug integration")]
 struct BridgeChainState {
     entry: bridge_transaction::Entry,
     registers: bridge::Registers,
@@ -823,7 +1626,8 @@ fn write_bridge_registers_unlocked(address: Address, registers: bridge::Register
 }
 
 fn verify_bridge_registers_unlocked(address: Address, registers: bridge::Registers) -> bool {
-    read_config_unlocked(address, 0x1c).is_some_and(|value| value & 0xffff == registers.io_low & 0xffff)
+    read_config_unlocked(address, 0x1c)
+        .is_some_and(|value| value & 0xffff == registers.io_low & 0xffff)
         && read_config_unlocked(address, 0x20) == Some(registers.memory)
         && read_config_unlocked(address, 0x24) == Some(registers.prefetch_low)
         && read_config_unlocked(address, 0x28) == Some(registers.prefetch_base_upper)
@@ -833,12 +1637,15 @@ fn verify_bridge_registers_unlocked(address: Address, registers: bridge::Registe
 
 fn bridge_forwarding_command(saved: u16, windows: bridge::Windows) -> u16 {
     let mut command = saved & !0x3;
-    if windows.io.is_some() { command |= 0x1; }
-    if windows.memory.is_some() || windows.prefetch.is_some() { command |= 0x2; }
+    if windows.io.is_some() {
+        command |= 0x1;
+    }
+    if windows.memory.is_some() || windows.prefetch.is_some() {
+        command |= 0x2;
+    }
     command
 }
 
-#[expect(dead_code, reason = "Stage 13.2 bridge routing becomes live at device admission/hotplug integration")]
 fn restore_bridge_chain_unlocked(
     states: &[Option<BridgeChainState>; bridge_transaction::MAX_BRIDGES],
     count: usize,
@@ -855,7 +1662,6 @@ fn restore_bridge_chain_unlocked(
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[expect(dead_code, reason = "Stage 13.2 bridge routing becomes live at device admission/hotplug integration")]
 pub enum BridgePlanError {
     Routing(routing::Error),
     Transaction(bridge_transaction::Error),
@@ -867,7 +1673,6 @@ pub enum BridgePlanError {
 /// Build bridge forwarding windows from the currently published PCI generation.
 /// Existing BAR addresses are treated as demand; host aperture allocation remains
 /// a separate policy input and is never invented here.
-#[expect(dead_code, reason = "Stage 13.2 bridge routing becomes live at device admission/hotplug integration")]
 pub fn build_bridge_chain() -> Result<bridge_transaction::Chain, BridgePlanError> {
     let mut nodes = [None; topology::MAX_FUNCTIONS];
     let devices;
@@ -875,27 +1680,46 @@ pub fn build_bridge_chain() -> Result<bridge_transaction::Chain, BridgePlanError
         let published = PUBLISHED.lock();
         devices = published.inventory.devices;
         for (slot, node) in nodes.iter_mut().enumerate() {
-            let Some(handle) = published.topology.handle_at(slot) else { continue; };
+            let Some(handle) = published.topology.handle_at(slot) else {
+                continue;
+            };
             *node = published.topology.snapshot(handle).ok();
         }
     }
 
     let mut plan = routing::Plan::new();
-    for node in nodes.iter().flatten().copied().filter(|node| node.bridge.is_some()) {
+    for node in nodes
+        .iter()
+        .flatten()
+        .copied()
+        .filter(|node| node.bridge.is_some())
+    {
         plan.add_bridge(routing::Bridge {
             id: node.handle.slot,
             parent: node.parent.map(|parent| parent.slot),
-        }).map_err(BridgePlanError::Routing)?;
+        })
+        .map_err(BridgePlanError::Routing)?;
     }
 
     // Probe BAR sizes only after dropping PUBLISHED (rank 20), because BAR
     // sizing performs config-space transactions under rank 10.
     for node in nodes.iter().flatten().copied() {
-        let Some(parent) = node.parent else { continue; };
-        let Some(device) = devices.iter().flatten().find(|device| {
-            device.segment == node.address.segment && device.bus == node.address.bus
-                && device.device == node.address.device && device.function == node.address.function
-        }).copied() else { continue; };
+        let Some(parent) = node.parent else {
+            continue;
+        };
+        let Some(device) = devices
+            .iter()
+            .flatten()
+            .find(|device| {
+                device.segment == node.address.segment
+                    && device.bus == node.address.bus
+                    && device.device == node.address.device
+                    && device.function == node.address.function
+            })
+            .copied()
+        else {
+            continue;
+        };
 
         let mut demand = routing::Demand::default();
         let mut index = 0usize;
@@ -907,41 +1731,72 @@ pub fn build_bridge_chain() -> Result<bridge_transaction::Chain, BridgePlanError
             }
             let probe = probe_bar_size(
                 Address {
-                    segment: device.segment, bus: device.bus,
-                    device: device.device, function: device.function,
+                    segment: device.segment,
+                    bus: device.bus,
+                    device: device.device,
+                    function: device.function,
                 },
                 device.header_type,
                 index as u8,
-            ).map_err(BridgePlanError::Probe)?;
-            let window = bridge::Window { base: bar.address, size: probe.size };
+            )
+            .map_err(BridgePlanError::Probe)?;
+            let window = bridge::Window {
+                base: bar.address,
+                size: probe.size,
+            };
             match bar.kind {
                 BarKind::Io => merge_route_window(&mut demand.io, window, 0x1000)?,
-                BarKind::Memory32 | BarKind::Memory64 if bar.prefetchable =>
-                    merge_route_window(&mut demand.prefetch, window, 0x10_0000)?,
-                BarKind::Memory32 | BarKind::Memory64 =>
-                    merge_route_window(&mut demand.memory, window, 0x10_0000)?,
+                BarKind::Memory32 | BarKind::Memory64 if bar.prefetchable => {
+                    merge_route_window(&mut demand.prefetch, window, 0x10_0000)?
+                }
+                BarKind::Memory32 | BarKind::Memory64 => {
+                    merge_route_window(&mut demand.memory, window, 0x10_0000)?
+                }
             }
             index += if bar.kind == BarKind::Memory64 { 2 } else { 1 };
         }
-        plan.add_demand(parent.slot, demand).map_err(BridgePlanError::Routing)?;
+        plan.add_demand(parent.slot, demand)
+            .map_err(BridgePlanError::Routing)?;
     }
 
     plan.solve().map_err(BridgePlanError::Routing)?;
     let mut chain = bridge_transaction::Chain::new();
-    for node in nodes.iter().flatten().copied().filter(|node| node.bridge.is_some()) {
-        let Some(device) = devices.iter().flatten().find(|device| {
-            device.segment == node.address.segment && device.bus == node.address.bus
-                && device.device == node.address.device && device.function == node.address.function
-        }).copied() else { continue; };
-        chain.push(bridge_transaction::Entry {
-            address: Address {
-                segment: node.address.segment, bus: node.address.bus,
-                device: node.address.device, function: node.address.function,
-            },
-            header_type: device.header_type,
-            depth: plan.depth(node.handle.slot).map_err(BridgePlanError::Routing)?,
-            windows: plan.windows(node.handle.slot).map_err(BridgePlanError::Routing)?,
-        }).map_err(BridgePlanError::Transaction)?;
+    for node in nodes
+        .iter()
+        .flatten()
+        .copied()
+        .filter(|node| node.bridge.is_some())
+    {
+        let Some(device) = devices
+            .iter()
+            .flatten()
+            .find(|device| {
+                device.segment == node.address.segment
+                    && device.bus == node.address.bus
+                    && device.device == node.address.device
+                    && device.function == node.address.function
+            })
+            .copied()
+        else {
+            continue;
+        };
+        chain
+            .push(bridge_transaction::Entry {
+                address: Address {
+                    segment: node.address.segment,
+                    bus: node.address.bus,
+                    device: node.address.device,
+                    function: node.address.function,
+                },
+                header_type: device.header_type,
+                depth: plan
+                    .depth(node.handle.slot)
+                    .map_err(BridgePlanError::Routing)?,
+                windows: plan
+                    .windows(node.handle.slot)
+                    .map_err(BridgePlanError::Routing)?,
+            })
+            .map_err(BridgePlanError::Transaction)?;
     }
     Ok(chain)
 }
@@ -949,24 +1804,30 @@ pub fn build_bridge_chain() -> Result<bridge_transaction::Chain, BridgePlanError
 /// Plan the complete forwarding hierarchy first, then apply it as one
 /// rollback-capable hardware transaction. No bridge register is touched unless
 /// topology discovery, BAR probing, demand aggregation, and encoding all pass.
-#[expect(dead_code, reason = "Stage 13.2 bridge routing becomes live at device admission/hotplug integration")]
 pub fn route_discovered_bridges() -> Result<(), BridgePlanError> {
     let chain = build_bridge_chain()?;
     program_bridge_chain(chain).map_err(BridgePlanError::Program)
 }
 
-#[expect(dead_code, reason = "Stage 13.2 bridge routing becomes live at device admission/hotplug integration")]
 fn merge_route_window(
     target: &mut Option<bridge::Window>,
     incoming: bridge::Window,
     granularity: u64,
 ) -> Result<(), BridgePlanError> {
-    let incoming_end = incoming.base.checked_add(incoming.size).ok_or(BridgePlanError::Overflow)?;
+    let incoming_end = incoming
+        .base
+        .checked_add(incoming.size)
+        .ok_or(BridgePlanError::Overflow)?;
     let mut base = incoming.base & !(granularity - 1);
-    let mut end = incoming_end.checked_add(granularity - 1).ok_or(BridgePlanError::Overflow)?
+    let mut end = incoming_end
+        .checked_add(granularity - 1)
+        .ok_or(BridgePlanError::Overflow)?
         & !(granularity - 1);
     if let Some(current) = *target {
-        let current_end = current.base.checked_add(current.size).ok_or(BridgePlanError::Overflow)?;
+        let current_end = current
+            .base
+            .checked_add(current.size)
+            .ok_or(BridgePlanError::Overflow)?;
         base = core::cmp::min(base, current.base);
         end = core::cmp::max(end, current_end);
     }
@@ -977,10 +1838,7 @@ fn merge_route_window(
     Ok(())
 }
 
-#[expect(dead_code, reason = "Stage 13.2 bridge routing becomes live at device admission/hotplug integration")]
-pub fn program_bridge_chain(
-    mut chain: bridge_transaction::Chain,
-) -> Result<(), BridgeChainError> {
+pub fn program_bridge_chain(mut chain: bridge_transaction::Chain) -> Result<(), BridgeChainError> {
     chain.sort_deepest_first();
     let mut states: [Option<BridgeChainState>; bridge_transaction::MAX_BRIDGES] =
         [None; bridge_transaction::MAX_BRIDGES];
@@ -988,15 +1846,25 @@ pub fn program_bridge_chain(
     // Encode the complete transaction before acquiring CONFIG_LOCK or touching
     // hardware. Invalid windows therefore cannot leave a partial bridge chain.
     for (index, slot) in states.iter_mut().enumerate().take(chain.len()) {
-        let entry = chain.get(index).ok_or(BridgeChainError::ConfigUnavailable)?;
-        if entry.header_type & 0x7f != 0x01 { return Err(BridgeChainError::NotBridge); }
-        let registers = bridge::encode_windows(entry.windows).map_err(BridgeChainError::InvalidWindow)?;
+        let entry = chain
+            .get(index)
+            .ok_or(BridgeChainError::ConfigUnavailable)?;
+        if entry.header_type & 0x7f != 0x01 {
+            return Err(BridgeChainError::NotBridge);
+        }
+        let registers =
+            bridge::encode_windows(entry.windows).map_err(BridgeChainError::InvalidWindow)?;
         *slot = Some(BridgeChainState {
             entry,
             registers,
             saved: BridgeRegisterSnapshot {
-                command: 0, io_low: 0, memory: 0, prefetch_low: 0,
-                prefetch_base_upper: 0, prefetch_limit_upper: 0, io_upper: 0,
+                command: 0,
+                io_low: 0,
+                memory: 0,
+                prefetch_low: 0,
+                prefetch_base_upper: 0,
+                prefetch_limit_upper: 0,
+                io_upper: 0,
             },
         });
     }
@@ -1069,25 +1937,43 @@ pub fn program_bridge_windows(
     header_type: u8,
     windows: bridge::Windows,
 ) -> Result<(), BridgeProgramError> {
-    if header_type & 0x7f != 0x01 { return Err(BridgeProgramError::NotBridge); }
+    if header_type & 0x7f != 0x01 {
+        return Err(BridgeProgramError::NotBridge);
+    }
     let registers = bridge::encode_windows(windows).map_err(BridgeProgramError::InvalidWindow)?;
     let _guard = CONFIG_LOCK.lock();
     let saved = bridge_snapshot_unlocked(address).ok_or(BridgeProgramError::ConfigUnavailable)?;
-    if !write_command_unlocked(address, saved.command & !0x3) { return Err(BridgeProgramError::WriteFailed); }
+    if !write_command_unlocked(address, saved.command & !0x3) {
+        return Err(BridgeProgramError::WriteFailed);
+    }
     if !write_bridge_registers_unlocked(address, registers) {
-        return if restore_bridge_unlocked(address, saved) { Err(BridgeProgramError::WriteFailed) } else { Err(BridgeProgramError::RestoreFailed) };
+        return if restore_bridge_unlocked(address, saved) {
+            Err(BridgeProgramError::WriteFailed)
+        } else {
+            Err(BridgeProgramError::RestoreFailed)
+        };
     }
     if !verify_bridge_registers_unlocked(address, registers) {
-        return if restore_bridge_unlocked(address, saved) { Err(BridgeProgramError::VerifyFailed) } else { Err(BridgeProgramError::RestoreFailed) };
+        return if restore_bridge_unlocked(address, saved) {
+            Err(BridgeProgramError::VerifyFailed)
+        } else {
+            Err(BridgeProgramError::RestoreFailed)
+        };
     }
     if !write_command_unlocked(address, bridge_forwarding_command(saved.command, windows)) {
-        return if restore_bridge_unlocked(address, saved) { Err(BridgeProgramError::WriteFailed) } else { Err(BridgeProgramError::RestoreFailed) };
+        return if restore_bridge_unlocked(address, saved) {
+            Err(BridgeProgramError::WriteFailed)
+        } else {
+            Err(BridgeProgramError::RestoreFailed)
+        };
     }
     Ok(())
 }
 
 fn read_bridge_route(address: Address, header_type: u8) -> Option<topology::BridgeRoute> {
-    if header_type & 0x7f != 0x01 { return None; }
+    if header_type & 0x7f != 0x01 {
+        return None;
+    }
     let buses = read_config(address, 0x18)?;
     let route = topology::BridgeRoute {
         primary: buses as u8,
@@ -1105,8 +1991,11 @@ pub enum BarProbeError {
     RestoreFailed,
 }
 
-#[expect(dead_code)]
-pub fn probe_bar_size(address: Address, header_type: u8, bar_index: u8) -> Result<bar::Probe, BarProbeError> {
+pub fn probe_bar_size(
+    address: Address,
+    header_type: u8,
+    bar_index: u8,
+) -> Result<bar::Probe, BarProbeError> {
     let count = match header_type & 0x7f {
         0x00 => 6usize,
         0x01 => 2usize,
@@ -1119,7 +2008,8 @@ pub fn probe_bar_size(address: Address, header_type: u8, bar_index: u8) -> Resul
     let offset = 0x10 + (index as u16 * 4);
     let _guard = CONFIG_LOCK.lock();
     let command = read_command_unlocked(address).ok_or(BarProbeError::ConfigUnavailable)?;
-    let original_low = read_config_unlocked(address, offset).ok_or(BarProbeError::ConfigUnavailable)?;
+    let original_low =
+        read_config_unlocked(address, offset).ok_or(BarProbeError::ConfigUnavailable)?;
     if original_low == u32::MAX {
         return Err(BarProbeError::ConfigUnavailable);
     }
@@ -1150,7 +2040,9 @@ pub fn probe_bar_size(address: Address, header_type: u8, bar_index: u8) -> Resul
 
     let mask_low = read_config_unlocked(address, offset).ok_or(BarProbeError::ConfigUnavailable);
     let mask_high = if is_64 {
-        read_config_unlocked(address, offset + 4).ok_or(BarProbeError::ConfigUnavailable).map(Some)
+        read_config_unlocked(address, offset + 4)
+            .ok_or(BarProbeError::ConfigUnavailable)
+            .map(Some)
     } else {
         Ok(None)
     };
@@ -1161,7 +2053,8 @@ pub fn probe_bar_size(address: Address, header_type: u8, bar_index: u8) -> Resul
     if !restored {
         return Err(BarProbeError::RestoreFailed);
     }
-    let probe = bar::decode_probe(original_low, mask_low?, mask_high?).map_err(BarProbeError::Probe)?;
+    let probe =
+        bar::decode_probe(original_low, mask_low?, mask_high?).map_err(BarProbeError::Probe)?;
     Ok(probe)
 }
 
@@ -1197,7 +2090,8 @@ pub fn program_bar(
     let offset = 0x10 + (index as u16 * 4);
     let _guard = CONFIG_LOCK.lock();
     let command = read_command_unlocked(address).ok_or(BarProgramError::ConfigUnavailable)?;
-    let original_low = read_config_unlocked(address, offset).ok_or(BarProgramError::ConfigUnavailable)?;
+    let original_low =
+        read_config_unlocked(address, offset).ok_or(BarProgramError::ConfigUnavailable)?;
     let original_high = if is_64 {
         Some(read_config_unlocked(address, offset + 4).ok_or(BarProgramError::ConfigUnavailable)?)
     } else {
@@ -1222,7 +2116,8 @@ pub fn program_bar(
     }
 
     let verified = read_config_unlocked(address, offset) == Some(encoded_low)
-        && encoded_high.is_none_or(|value| read_config_unlocked(address, offset + 4) == Some(value));
+        && encoded_high
+            .is_none_or(|value| read_config_unlocked(address, offset + 4) == Some(value));
     if !verified {
         return if restore(original_low, original_high) {
             Err(BarProgramError::VerifyFailed)
@@ -1248,14 +2143,157 @@ pub enum RebalanceError {
     RollbackFailed,
 }
 
-#[expect(dead_code, reason = "Stage 13.2 firmware BAR rebalance is an explicit recovery/admission path, not unconditional normal bind")]
+#[expect(
+    dead_code,
+    reason = "Stage 13.2 firmware BAR rebalance is an explicit recovery/admission path, not unconditional normal bind"
+)]
 pub fn rebalance_bars_from_firmware(
     address: Address,
     header_type: u8,
-) -> Result<[Option<assignment::Assignment>; 6], RebalanceError> {
-    let mut apertures = configured_assignment_apertures()
-        .map_err(|_| RebalanceError::Allocation(assignment::Error::Resource(resource::Error::InvalidRange)))?;
-    rebalance_bars(address, header_type, &mut apertures)
+) -> Result<[Option<assignment::Assignment>; 6], PersistentBarError> {
+    let mut resources = BAR_RESOURCES.lock();
+    if resources.apertures.is_none() {
+        return Err(PersistentBarError::Unavailable);
+    }
+    if resources
+        .allocations
+        .iter()
+        .flatten()
+        .any(|allocation| allocation.address == address)
+    {
+        return Err(PersistentBarError::AlreadyAllocated);
+    }
+    let slot = resources
+        .allocations
+        .iter()
+        .position(Option::is_none)
+        .ok_or(PersistentBarError::Capacity)?;
+    let apertures = resources
+        .apertures
+        .as_mut()
+        .ok_or(PersistentBarError::Unavailable)?;
+    let assignments =
+        rebalance_bars(address, header_type, apertures).map_err(PersistentBarError::Rebalance)?;
+    resources.allocations[slot] = Some(PersistentBarAllocation {
+        address,
+        assignments,
+    });
+    Ok(assignments)
+}
+
+/// Disable device decoding and release a successful firmware BAR rebalance
+/// after device quiescence. If command-space repair cannot be verified, the
+/// allocation remains authoritative so its address cannot be reused while the
+/// device may still decode it.
+#[cfg_attr(
+    not(feature = "stage13-2-test"),
+    expect(
+        dead_code,
+        reason = "explicit hot-remove/admission teardown API is dormant until live BAR admission is wired"
+    )
+)]
+pub fn release_bars_from_firmware(address: Address) -> Result<(), PersistentBarError> {
+    let allocation = {
+        let resources = BAR_RESOURCES.lock();
+        resources
+            .allocations
+            .iter()
+            .flatten()
+            .find(|allocation| allocation.address == address)
+            .copied()
+            .ok_or(PersistentBarError::Unavailable)?
+    };
+    {
+        let _guard = CONFIG_LOCK.lock();
+        let Some(command) = read_command_unlocked(address) else {
+            return Err(PersistentBarError::Disable(
+                BarProgramError::ConfigUnavailable,
+            ));
+        };
+        let disabled_command = command & !0x3;
+        if !write_command_unlocked(address, disabled_command)
+            || read_command_unlocked(address) != Some(disabled_command)
+        {
+            return Err(PersistentBarError::Disable(BarProgramError::WriteFailed));
+        }
+
+        let mut saved = [None; 6];
+        for item in allocation.assignments.iter().flatten().copied() {
+            let offset = 0x10 + u16::from(item.index) * 4;
+            let Some(low) = read_config_unlocked(address, offset) else {
+                let _ = write_command_unlocked(address, command);
+                return Err(PersistentBarError::Disable(
+                    BarProgramError::ConfigUnavailable,
+                ));
+            };
+            let high = if item.kind == bar::Kind::Memory64 {
+                match read_config_unlocked(address, offset + 4) {
+                    Some(high) => Some(high),
+                    None => {
+                        let _ = write_command_unlocked(address, command);
+                        return Err(PersistentBarError::Disable(
+                            BarProgramError::ConfigUnavailable,
+                        ));
+                    }
+                }
+            } else {
+                None
+            };
+            saved[usize::from(item.index)] = Some((low, high));
+        }
+
+        let mut clear_ok = true;
+        for item in allocation.assignments.iter().flatten().copied() {
+            let offset = 0x10 + u16::from(item.index) * 4;
+            if !write_config_unlocked(address, offset, 0)
+                || (item.kind == bar::Kind::Memory64
+                    && !write_config_unlocked(address, offset + 4, 0))
+                || read_config_unlocked(address, offset) != Some(0)
+                || (item.kind == bar::Kind::Memory64
+                    && read_config_unlocked(address, offset + 4) != Some(0))
+            {
+                clear_ok = false;
+                break;
+            }
+        }
+        if !clear_ok {
+            let mut restored = write_command_unlocked(address, disabled_command);
+            for item in allocation.assignments.iter().flatten().copied() {
+                let offset = 0x10 + u16::from(item.index) * 4;
+                if let Some((low, high)) = saved[usize::from(item.index)] {
+                    restored &= write_config_unlocked(address, offset, low);
+                    if let Some(high) = high {
+                        restored &= write_config_unlocked(address, offset + 4, high);
+                    }
+                }
+            }
+            restored &= write_command_unlocked(address, command);
+            return Err(PersistentBarError::Disable(if restored {
+                BarProgramError::WriteFailed
+            } else {
+                BarProgramError::RestoreFailed
+            }));
+        }
+    }
+
+    if !refresh_published_bars(address) {
+        return Err(PersistentBarError::RefreshFailed);
+    }
+
+    let mut resources = BAR_RESOURCES.lock();
+    let slot = resources
+        .allocations
+        .iter()
+        .position(|entry| entry.is_some_and(|entry| entry.address == address))
+        .ok_or(PersistentBarError::Unavailable)?;
+    let apertures = resources
+        .apertures
+        .as_mut()
+        .ok_or(PersistentBarError::Unavailable)?;
+    assignment::release_all(apertures, &allocation.assignments)
+        .map_err(PersistentBarError::Release)?;
+    resources.allocations[slot] = None;
+    Ok(())
 }
 
 #[expect(dead_code)]
@@ -1272,9 +2310,14 @@ pub fn rebalance_bars(
     let mut probes = [None; 6];
     let mut index = 0usize;
     while index < count {
-        let probe = probe_bar_size(address, header_type, index as u8).map_err(RebalanceError::Probe)?;
+        let probe =
+            probe_bar_size(address, header_type, index as u8).map_err(RebalanceError::Probe)?;
         probes[index] = Some(probe);
-        index += if probe.kind == bar::Kind::Memory64 { 2 } else { 1 };
+        index += if probe.kind == bar::Kind::Memory64 {
+            2
+        } else {
+            1
+        };
     }
 
     let assignments = {
@@ -1282,9 +2325,16 @@ pub fn rebalance_bars(
         let mut slot = 0usize;
         while slot < count {
             if let Some(probe) = probes[slot] {
-                plan.reserve(assignment::Request { index: slot as u8, probe: Some(probe) })
-                    .map_err(RebalanceError::Allocation)?;
-                slot += if probe.kind == bar::Kind::Memory64 { 2 } else { 1 };
+                plan.reserve(assignment::Request {
+                    index: slot as u8,
+                    probe: Some(probe),
+                })
+                .map_err(RebalanceError::Allocation)?;
+                slot += if probe.kind == bar::Kind::Memory64 {
+                    2
+                } else {
+                    1
+                };
             } else {
                 slot += 1;
             }
@@ -1369,7 +2419,9 @@ pub fn rebalance_bars(
                         break;
                     };
                     if read_config_unlocked(address, offset) != Some(low)
-                        || high.is_some_and(|value| read_config_unlocked(address, offset + 4) != Some(value))
+                        || high.is_some_and(|value| {
+                            read_config_unlocked(address, offset + 4) != Some(value)
+                        })
                     {
                         verified = false;
                         break;
@@ -1496,7 +2548,10 @@ fn read_capabilities(address: Address, status: u16, header_type: u8) -> Capabili
             break;
         };
         match value as u8 {
-            0x01 => capabilities.power_management = true,
+            0x01 => {
+                capabilities.power_management = true;
+                capabilities.power_management_offset = pointer;
+            }
             0x05 => {
                 capabilities.msi = true;
                 capabilities.msi_offset = pointer;
@@ -1533,7 +2588,10 @@ fn read_config_unlocked(address: Address, offset: u16) -> Option<u32> {
         return None;
     }
     if let Some(physical) = ecam_physical(address, offset) {
-        let virtual_address = crate::paging::map_mmio(physical).ok()?;
+        let page_offset = physical & 0xfff;
+        let virtual_address = crate::paging::map_mmio(physical)
+            .ok()?
+            .checked_add(page_offset)?;
         return Some(unsafe { ptr::read_volatile(virtual_address as *const u32) });
     }
     if address.segment != 0 || offset > 0xfc {
@@ -1553,7 +2611,11 @@ fn write_config_unlocked(address: Address, offset: u16, value: u32) -> bool {
         return false;
     }
     if let Some(physical) = ecam_physical(address, offset) {
-        let Ok(virtual_address) = crate::paging::map_mmio(physical) else {
+        let page_offset = physical & 0xfff;
+        let Some(virtual_address) = crate::paging::map_mmio(physical)
+            .ok()
+            .and_then(|base| base.checked_add(page_offset))
+        else {
             return false;
         };
         unsafe { ptr::write_volatile(virtual_address as *mut u32, value) };
@@ -1634,22 +2696,61 @@ fn topology_self_test() -> bool {
     use topology::{BridgeRoute, FunctionAddress, FunctionDescriptor, Topology};
     let mut topology = Topology::new();
     let Ok(bridge) = topology.insert(FunctionDescriptor {
-        address: FunctionAddress { segment: 0, bus: 0, device: 1, function: 0 },
-        bridge: Some(BridgeRoute { primary: 0, secondary: 1, subordinate: 8 }),
-    }) else { return false; };
+        address: FunctionAddress {
+            segment: 0,
+            bus: 0,
+            device: 1,
+            function: 0,
+        },
+        bridge: Some(BridgeRoute {
+            primary: 0,
+            secondary: 1,
+            subordinate: 8,
+        }),
+    }) else {
+        return false;
+    };
     let Ok(function) = topology.insert(FunctionDescriptor {
-        address: FunctionAddress { segment: 0, bus: 2, device: 0, function: 0 },
+        address: FunctionAddress {
+            segment: 0,
+            bus: 2,
+            device: 0,
+            function: 0,
+        },
         bridge: None,
-    }) else { return false; };
-    if topology.snapshot(function).ok().and_then(|node| node.parent) != Some(bridge)
-        || topology.claim(function, 7).is_err() { return false; }
-    let Ok(lease) = topology.lease_mmio(function, 7, 0, 0x8000_0000, 0x4000) else { return false; };
-    if !topology.validate_mmio(lease, 7) || topology.teardown(function, 7).is_err()
-        || topology.validate_mmio(lease, 7) || topology.snapshot(function).is_ok() { return false; }
+    }) else {
+        return false;
+    };
+    if topology
+        .snapshot(function)
+        .ok()
+        .and_then(|node| node.parent)
+        != Some(bridge)
+        || topology.claim(function, 7).is_err()
+    {
+        return false;
+    }
+    let Ok(lease) = topology.lease_mmio(function, 7, 0, 0x8000_0000, 0x4000) else {
+        return false;
+    };
+    if !topology.validate_mmio(lease, 7)
+        || topology.teardown(function, 7).is_err()
+        || topology.validate_mmio(lease, 7)
+        || topology.snapshot(function).is_ok()
+    {
+        return false;
+    }
     let Ok(reused) = topology.insert(FunctionDescriptor {
-        address: FunctionAddress { segment: 0, bus: 2, device: 0, function: 0 },
+        address: FunctionAddress {
+            segment: 0,
+            bus: 2,
+            device: 0,
+            function: 0,
+        },
         bridge: None,
-    }) else { return false; };
+    }) else {
+        return false;
+    };
     if reused.slot != function.slot || reused.generation == function.generation {
         return false;
     }
@@ -1661,51 +2762,102 @@ fn topology_self_test() -> bool {
     true
 }
 
-
 fn routing_self_test() -> bool {
     use bridge::Window;
     use routing::{Bridge, Demand, Plan};
 
     let mut plan = Plan::new();
-    if plan.add_bridge(Bridge { id: 1, parent: None }).is_err()
-        || plan.add_bridge(Bridge { id: 2, parent: Some(1) }).is_err()
-        || plan.add_demand(
-            2,
-            Demand {
-                io: Some(Window { base: 0x2800, size: 0x800 }),
-                memory: Some(Window { base: 0x8123_4000, size: 0x2000 }),
-                prefetch: Some(Window { base: 0x2_1234_5000, size: 0x3000 }),
-            },
-        ).is_err()
+    if plan
+        .add_bridge(Bridge {
+            id: 1,
+            parent: None,
+        })
+        .is_err()
+        || plan
+            .add_bridge(Bridge {
+                id: 2,
+                parent: Some(1),
+            })
+            .is_err()
+        || plan
+            .add_demand(
+                2,
+                Demand {
+                    io: Some(Window {
+                        base: 0x2800,
+                        size: 0x800,
+                    }),
+                    memory: Some(Window {
+                        base: 0x8123_4000,
+                        size: 0x2000,
+                    }),
+                    prefetch: Some(Window {
+                        base: 0x2_1234_5000,
+                        size: 0x3000,
+                    }),
+                },
+            )
+            .is_err()
         || plan.solve().is_err()
     {
         return false;
     }
 
-    let Ok(child) = plan.windows(2) else { return false; };
-    let Ok(parent) = plan.windows(1) else { return false; };
+    let Ok(child) = plan.windows(2) else {
+        return false;
+    };
+    let Ok(parent) = plan.windows(1) else {
+        return false;
+    };
     child == parent
-        && child.io == Some(Window { base: 0x2000, size: 0x1000 })
-        && child.memory == Some(Window { base: 0x8120_0000, size: 0x10_0000 })
-        && child.prefetch == Some(Window { base: 0x2_1230_0000, size: 0x10_0000 })
+        && child.io
+            == Some(Window {
+                base: 0x2000,
+                size: 0x1000,
+            })
+        && child.memory
+            == Some(Window {
+                base: 0x8120_0000,
+                size: 0x10_0000,
+            })
+        && child.prefetch
+            == Some(Window {
+                base: 0x2_1230_0000,
+                size: 0x10_0000,
+            })
         && plan.depth(1) == Ok(0)
         && plan.depth(2) == Ok(1)
-        && plan.bridge_at(0) == Some(Bridge { id: 1, parent: None })
-        && plan.bridge_at(1) == Some(Bridge { id: 2, parent: Some(1) })
+        && plan.bridge_at(0)
+            == Some(Bridge {
+                id: 1,
+                parent: None,
+            })
+        && plan.bridge_at(1)
+            == Some(Bridge {
+                id: 2,
+                parent: Some(1),
+            })
         && plan.bridge_at(routing::MAX_ROUTES).is_none()
 }
-
 
 fn bridge_transaction_self_test() -> bool {
     use bridge_transaction::{Chain, Entry};
     let mut chain = Chain::new();
     for (bus, depth) in [(1u8, 0u8), (2, 2), (3, 1)] {
-        if chain.push(Entry {
-            address: Address { segment: 0, bus, device: 0, function: 0 },
-            header_type: 1,
-            depth,
-            windows: bridge::Windows::default(),
-        }).is_err() {
+        if chain
+            .push(Entry {
+                address: Address {
+                    segment: 0,
+                    bus,
+                    device: 0,
+                    function: 0,
+                },
+                header_type: 1,
+                depth,
+                windows: bridge::Windows::default(),
+            })
+            .is_err()
+        {
             return false;
         }
     }
@@ -1718,14 +2870,18 @@ fn bridge_transaction_self_test() -> bool {
 
 fn vector_self_test() -> bool {
     let mut allocator = vector::Allocator::new();
-    let Ok(first) = allocator.allocate(1) else { return false; };
+    let Ok(first) = allocator.allocate(1) else {
+        return false;
+    };
     if first.vector != vector::FIRST_VECTOR || allocator.validate(first, 1).is_err() {
         return false;
     }
     if allocator.release(first, 1).is_err() || allocator.validate(first, 1).is_ok() {
         return false;
     }
-    let Ok(reused) = allocator.allocate(2) else { return false; };
+    let Ok(reused) = allocator.allocate(2) else {
+        return false;
+    };
     reused.vector == first.vector && allocator.validate(reused, 2).is_ok()
 }
 

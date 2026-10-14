@@ -81,7 +81,7 @@ pub const fn domain_ceiling(domain: SecurityDomain) -> CapabilitySet {
             .with(Capability::DisplayIo)
             .with(Capability::InputIo)
             .with(Capability::NetworkAdmin),
-        SecurityDomain::User => CapabilitySet::userspace(),
+        SecurityDomain::User => CapabilitySet::userspace_ceiling(),
         SecurityDomain::Restricted => CapabilitySet::only(Capability::TimerRead),
     }
 }
@@ -311,7 +311,7 @@ pub struct SandboxProfile {
 impl SandboxProfile {
     pub const KERNEL_TRUSTED: Self = Self::new(1, CapabilitySet::kernel_bootstrap());
     pub const SYSTEM_SERVICE: Self = Self::new(2, domain_ceiling(SecurityDomain::SystemService));
-    pub const USER_DEFAULT: Self = Self::new(3, CapabilitySet::userspace());
+    pub const USER_DEFAULT: Self = Self::new(3, CapabilitySet::userspace_ceiling());
     pub const RESTRICTED: Self = Self::new(4, CapabilitySet::only(Capability::TimerRead));
 
     pub const fn new(id: u32, ceiling: CapabilitySet) -> Self {

@@ -1,14 +1,20 @@
 name: kernel
 
+permissions:
+  contents: read
+
 on:
   push:
   pull_request:
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
-  release-validation:
+  core-foundation:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@master
@@ -79,6 +85,50 @@ jobs:
           for cpu in 1 2 4; do
             python3 scripts/test-stage10-runtime.py --stage 1-5 --cpus "$cpu" --timeout 180 --qemu "$qemu" --firmware "$ovmf_code"
           done
+      - name: Stage 6 SMP hotplug and legacy IRQ acceptance
+        shell: bash
+        run: |
+          qemu=/usr/bin/qemu-system-x86_64
+          ovmf_code=
+          for variant in OVMF_CODE_4M.fd OVMF_CODE.fd; do
+            candidate="/usr/share/OVMF/$variant"
+            if [ -f "$candidate" ]; then
+              ovmf_code="$candidate"
+              break
+            fi
+          done
+          test -n "$ovmf_code"
+          cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage6-hotplug-test -- -D warnings
+          cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features legacy-pic-test -- -D warnings
+          for cpu in 2 4; do
+            python3 scripts/test-stage6-hotplug.py --cpus "$cpu" --timeout 180 --qemu "$qemu" --firmware "$ovmf_code"
+          done
+          python3 scripts/test-memory-qemu.py --cpus 1 --legacy-irq --timeout 180 --qemu "$qemu" --firmware "$ovmf_code"
+      - name: Preserve core-foundation evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: core-foundation-evidence
+          if-no-files-found: ignore
+          path: |
+            target/release-validation/
+            audit-artifacts/
+            target/*regression-*/serial.log
+            target/*regression-*/qemu.log
+            target/hello-gui-*/serial.log
+
+  drivers-radio:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: nightly-2026-07-10
+          targets: x86_64-unknown-none,x86_64-unknown-uefi
+          components: clippy,rust-src,llvm-tools-preview
+      - name: Install QEMU and OVMF
+        run: sudo apt-get update && sudo apt-get install --yes qemu-system-x86 ovmf
       - name: Stage 13.3 NVMe 1/2/4-core acceptance
         shell: bash
         run: |
@@ -362,6 +412,31 @@ jobs:
           for cpu in 1 2 4; do
             python3 scripts/test-stage10-runtime.py --stage 13.11 --cpus "$cpu" --timeout 120 --qemu "$qemu" --firmware "$ovmf_code"
           done
+      - name: Preserve drivers-radio evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: drivers-radio-evidence
+          if-no-files-found: ignore
+          path: |
+            target/release-validation/
+            audit-artifacts/
+            target/*regression-*/serial.log
+            target/*regression-*/qemu.log
+            target/hello-gui-*/serial.log
+
+  network-security:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: nightly-2026-07-10
+          targets: x86_64-unknown-none,x86_64-unknown-uefi
+          components: clippy,rust-src,llvm-tools-preview
+      - name: Install QEMU and OVMF
+        run: sudo apt-get update && sudo apt-get install --yes qemu-system-x86 ovmf
       - name: Stage 14.1 WovenNet IPv4 live 1/2/4-core acceptance
         shell: bash
         run: |
@@ -559,6 +634,31 @@ jobs:
       # compile at all, so neither gate had been runnable, with nothing watching.
       # A gate that cannot compile is a gate nobody is running, so each step
       # below lints its exact feature before booting it.
+      - name: Preserve network-security evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: network-security-evidence
+          if-no-files-found: ignore
+          path: |
+            target/release-validation/
+            audit-artifacts/
+            target/*regression-*/serial.log
+            target/*regression-*/qemu.log
+            target/hello-gui-*/serial.log
+
+  runtime-storage-pcie:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: nightly-2026-07-10
+          targets: x86_64-unknown-none,x86_64-unknown-uefi
+          components: clippy,rust-src,llvm-tools-preview
+      - name: Install QEMU and OVMF
+        run: sudo apt-get update && sudo apt-get install --yes qemu-system-x86 ovmf
       - name: Stage 10.8-11.5 runtime 1/2/4-core acceptance
         shell: bash
         run: |
@@ -629,7 +729,32 @@ jobs:
               python3 scripts/test-stage10-runtime.py --stage "$stage" --cpus "$cpu" --timeout 180 --qemu "$qemu" --firmware "$ovmf_code"
             done
           done
-      - name: Stage 6 SMP hotplug and legacy IRQ acceptance
+      - name: Preserve runtime-storage-pcie evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: runtime-storage-pcie-evidence
+          if-no-files-found: ignore
+          path: |
+            target/release-validation/
+            audit-artifacts/
+            target/*regression-*/serial.log
+            target/*regression-*/qemu.log
+            target/hello-gui-*/serial.log
+
+  desktop-userspace:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: nightly-2026-07-10
+          targets: x86_64-unknown-none,x86_64-unknown-uefi
+          components: clippy,rust-src,llvm-tools-preview
+      - name: Install QEMU and OVMF
+        run: sudo apt-get update && sudo apt-get install --yes qemu-system-x86 ovmf
+      - name: Stage 16.1 out-of-kernel application 1/2/4-core acceptance
         shell: bash
         run: |
           qemu=/usr/bin/qemu-system-x86_64
@@ -642,12 +767,135 @@ jobs:
             fi
           done
           test -n "$ovmf_code"
-          cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage6-hotplug-test -- -D warnings
-          cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features legacy-pic-test -- -D warnings
-          for cpu in 2 4; do
-            python3 scripts/test-stage6-hotplug.py --cpus "$cpu" --timeout 180 --qemu "$qemu" --firmware "$ovmf_code"
+          # The application is a separate crate with its own workspace root,
+          # linker script and code model, so it is linted on its own.
+          (cd apps/hello && cargo clippy --release -- -D warnings)
+          for cpu in 1 2 4; do
+            python3 scripts/test-application-qemu.py --cpus "$cpu" --timeout 300 --qemu "$qemu" --firmware "$ovmf_code"
           done
-          python3 scripts/test-memory-qemu.py --cpus 1 --legacy-irq --timeout 180 --qemu "$qemu" --firmware "$ovmf_code"
+      - name: Stage 17-19 display, client surface and compositor acceptance
+        shell: bash
+        run: |
+          qemu=/usr/bin/qemu-system-x86_64
+          ovmf_code=
+          for variant in OVMF_CODE_4M.fd OVMF_CODE.fd; do
+            candidate="/usr/share/OVMF/$variant"
+            if [ -f "$candidate" ]; then
+              ovmf_code="$candidate"
+              break
+            fi
+          done
+          test -n "$ovmf_code"
+          (cd apps/hello-gui && cargo clippy --release -- -D warnings)
+          (cd apps/hello-gui && cargo build --release)
+          export WOVENHAT_HELLO_GUI_IMAGE="$PWD/apps/hello-gui/target/x86_64-unknown-none/release/wovenhat-hello-gui"
+          for stage in 17.1 18.1 19.1 19.3 19.10; do
+            feature="stage${stage/./-}-test"
+            cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features "$feature" -- -D warnings
+            for cpu in 1 2 4; do
+              python3 scripts/test-stage10-runtime.py --stage "$stage" --cpus "$cpu" --timeout 180 --qemu "$qemu" --firmware "$ovmf_code"
+            done
+          done
+          cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage18-2-test -- -D warnings
+          cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage19-2-test -- -D warnings
+          cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage19-4-test -- -D warnings
+          cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage19-5-test -- -D warnings
+          cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage19-6-test -- -D warnings
+          cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage19-7-test -- -D warnings
+          cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage19-8-test -- -D warnings
+          cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage19-9-test -- -D warnings
+          cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage19-11-test -- -D warnings
+          cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage19-12-test -- -D warnings
+          cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage19-13-test -- -D warnings
+          cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage19-14-test -- -D warnings
+          for cpu in 1 2 4; do
+            python3 scripts/test-hello-gui-qemu.py --cpus "$cpu" --timeout 300 --qemu "$qemu" --firmware "$ovmf_code"
+            python3 scripts/test-hello-gui-compositor-qemu.py --cpus "$cpu" --timeout 300 --qemu "$qemu" --firmware "$ovmf_code"
+            python3 scripts/test-hello-gui-compositor-qemu.py --stage 19.4 --cpus "$cpu" --timeout 300 --qemu "$qemu" --firmware "$ovmf_code"
+            python3 scripts/test-hello-gui-compositor-qemu.py --stage 19.5 --cpus "$cpu" --timeout 300 --qemu "$qemu" --firmware "$ovmf_code"
+            python3 scripts/test-hello-gui-compositor-qemu.py --stage 19.6 --cpus "$cpu" --timeout 300 --qemu "$qemu" --firmware "$ovmf_code"
+            python3 scripts/test-hello-gui-compositor-qemu.py --stage 19.7 --cpus "$cpu" --timeout 300 --qemu "$qemu" --firmware "$ovmf_code"
+            python3 scripts/test-hello-gui-compositor-qemu.py --stage 19.8 --cpus "$cpu" --timeout 300 --qemu "$qemu" --firmware "$ovmf_code"
+            python3 scripts/test-hello-gui-compositor-qemu.py --stage 19.9 --cpus "$cpu" --timeout 300 --qemu "$qemu" --firmware "$ovmf_code"
+            python3 scripts/test-hello-gui-compositor-qemu.py --stage 19.11 --cpus "$cpu" --timeout 300 --qemu "$qemu" --firmware "$ovmf_code"
+            python3 scripts/test-hello-gui-compositor-qemu.py --stage 19.12 --cpus "$cpu" --timeout 300 --qemu "$qemu" --firmware "$ovmf_code"
+            python3 scripts/test-hello-gui-compositor-qemu.py --stage 19.13 --cpus "$cpu" --timeout 300 --qemu "$qemu" --firmware "$ovmf_code"
+            python3 scripts/test-hello-gui-compositor-qemu.py --stage 19.14 --cpus "$cpu" --timeout 300 --qemu "$qemu" --firmware "$ovmf_code"
+          done
+      - name: Stage 20 WovenShell desktop acceptance
+        shell: bash
+        run: |
+          qemu=/usr/bin/qemu-system-x86_64
+          ovmf_code=
+          for variant in OVMF_CODE_4M.fd OVMF_CODE.fd; do
+            candidate="/usr/share/OVMF/$variant"
+            if [ -f "$candidate" ]; then
+              ovmf_code="$candidate"
+              break
+            fi
+          done
+          test -n "$ovmf_code"
+          (cd apps/woven-shell && cargo clippy --release -- -D warnings)
+          (cd apps/woven-shell && cargo build --release)
+          export WOVENHAT_SHELL_IMAGE="$PWD/apps/woven-shell/target/x86_64-unknown-none/release/wovenhat-woven-shell"
+          (cd apps/hello-gui && cargo build --release)
+          export WOVENHAT_HELLO_GUI_IMAGE="$PWD/apps/hello-gui/target/x86_64-unknown-none/release/wovenhat-hello-gui"
+          cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage20-1-test -- -D warnings
+          cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage20-2-test -- -D warnings
+          cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage20-3-test -- -D warnings
+          for cpu in 1 2 4; do
+            python3 scripts/test-woven-shell-qemu.py --stage 20.1 --cpus "$cpu" --timeout 300 --qemu "$qemu" --firmware "$ovmf_code"
+            python3 scripts/test-woven-shell-qemu.py --stage 20.2 --cpus "$cpu" --timeout 300 --qemu "$qemu" --firmware "$ovmf_code"
+            python3 scripts/test-woven-shell-qemu.py --stage 20.3 --cpus "$cpu" --timeout 300 --qemu "$qemu" --firmware "$ovmf_code"
+          done
+      - name: Preserve desktop-userspace evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop-userspace-evidence
+          if-no-files-found: ignore
+          path: |
+            target/release-validation/
+            audit-artifacts/
+            target/*regression-*/serial.log
+            target/*regression-*/qemu.log
+            target/hello-gui-*/serial.log
+
+  wovenfs-lint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: nightly-2026-07-10
+          targets: x86_64-unknown-none,x86_64-unknown-uefi
+          components: clippy,rust-src,llvm-tools-preview
+      - name: Install QEMU and OVMF
+        run: sudo apt-get update && sudo apt-get install --yes qemu-system-x86 ovmf
+      - name: Stage 15 WovenFS acceptance
+        shell: bash
+        run: |
+          qemu=/usr/bin/qemu-system-x86_64
+          ovmf_code=
+          for variant in OVMF_CODE_4M.fd OVMF_CODE.fd; do
+            candidate="/usr/share/OVMF/$variant"
+            if [ -f "$candidate" ]; then
+              ovmf_code="$candidate"
+              break
+            fi
+          done
+          test -n "$ovmf_code"
+          cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage15-1-test -- -D warnings
+          cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage15-2-test -- -D warnings
+          for cpu in 1 2 4; do
+            python3 scripts/test-stage10-runtime.py --stage 15.1 --cpus "$cpu" --timeout 240 --qemu "$qemu" --firmware "$ovmf_code"
+          done
+          # WovenFS on a block device needs the legacy ATA channel, which the
+          # q35 machine the other runtime gates use does not expose.
+          for cpu in 1 2 4; do
+            python3 scripts/test-wovenfs-device.py --cpus "$cpu" --timeout 300 --qemu "$qemu" --firmware "$ovmf_code"
+          done
       - name: Default and physical-probe configuration lint
         shell: bash
         run: |
@@ -655,38 +903,15 @@ jobs:
           cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features physical-probe -- -D warnings
           cargo clippy -p libwoven --target x86_64-unknown-none -- -D warnings
           cargo clippy --all-targets -- -D warnings
-      - name: Preserve validation evidence
+      - name: Preserve wovenfs-lint evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: release-validation
+          name: wovenfs-lint-evidence
+          if-no-files-found: ignore
           path: |
             target/release-validation/
-            target/memory-regression-*/serial.log
-            target/storage-regression-*/serial.log
-            target/network-regression-*/serial.log
-            target/network-regression-*/qemu.log
-            audit-artifacts/stage13.3-*/
-            audit-artifacts/stage13.4-*/
-            audit-artifacts/stage13.5-*/
-            audit-artifacts/stage13.6-*/
-            audit-artifacts/stage13.7-*/
-            audit-artifacts/stage13.8-*/
-            audit-artifacts/stage13.9-*/
-            audit-artifacts/stage13.10-*/
-            audit-artifacts/stage13.11-*/
-            audit-artifacts/stage13.1-*/
-            audit-artifacts/stage13.2-*/
-            audit-artifacts/stage12.1-*/
-            audit-artifacts/stage12.2-*/
-            audit-artifacts/stage12.3-*/
-            audit-artifacts/stage12.4-*/
-            audit-artifacts/stage12.5-*/
-            audit-artifacts/stage11.1-*/
-            audit-artifacts/stage11.2-*/
-            audit-artifacts/stage11.3-*/
-            audit-artifacts/stage11.4-*/
-            audit-artifacts/stage11.5-*/
-            audit-artifacts/stage10.8-*/
-            audit-artifacts/stage10.9-*/
-            audit-artifacts/stage1-5-*/
+            audit-artifacts/
+            target/*regression-*/serial.log
+            target/*regression-*/qemu.log
+            target/hello-gui-*/serial.log

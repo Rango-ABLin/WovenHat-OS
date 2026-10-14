@@ -250,7 +250,7 @@ fn spawn_worker() -> Result<TaskId, task::SpawnError> {
 
 #[cfg(test)]
 fn spawn_worker() -> Result<TaskId, ()> {
-    task::spawn_with_priority("async-net", worker_task, TaskPriority::NORMAL)
+    task::spawn_with_priority("async-net", worker_task, TaskPriority::NORMAL).map_err(|_| ())
 }
 
 fn submit(

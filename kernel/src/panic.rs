@@ -133,6 +133,13 @@ pub fn kernel_panic(message: &dyn fmt::Display) -> ! {
     let context = PanicContext::capture();
     context.print(message);
 
+    // Under test, a panic is a definite failure: report it to the host now
+    // instead of parking until the harness timeout. The report above is
+    // already on the serial log.
+    #[cfg(feature = "qemu-test")]
+    crate::qemu_test_exit_failure();
+
+    #[allow(unreachable_code)]
     loop {
         x86_64::instructions::hlt();
     }

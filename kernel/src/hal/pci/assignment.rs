@@ -34,8 +34,18 @@ pub struct Apertures {
 }
 
 impl Apertures {
-    #[cfg_attr(not(test), expect(dead_code, reason = "caller-supplied apertures stay explicit until ACPI host bridge resources are available"))]
-    pub const fn new(io: resource::Range, mmio32: resource::Range, mmio64: resource::Range) -> Self {
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "caller-supplied apertures stay explicit until ACPI host bridge resources are available"
+        )
+    )]
+    pub const fn new(
+        io: resource::Range,
+        mmio32: resource::Range,
+        mmio64: resource::Range,
+    ) -> Self {
         Self {
             io: resource::Allocator::new(io.base, io.size),
             mmio32: resource::Allocator::new(mmio32.base, mmio32.size),
@@ -43,7 +53,13 @@ impl Apertures {
         }
     }
 
-    #[cfg_attr(test, expect(dead_code, reason = "standalone assignment tests do not compile the production HostApertures caller"))]
+    #[cfg_attr(
+        test,
+        expect(
+            dead_code,
+            reason = "standalone assignment tests do not compile the production HostApertures caller"
+        )
+    )]
     pub fn from_ranges(
         io: &[resource::Range],
         memory: &[resource::Range],
@@ -86,13 +102,26 @@ pub struct Plan<'a> {
 
 impl<'a> Plan<'a> {
     pub fn new(apertures: &'a mut Apertures) -> Self {
-        Self { apertures, assignments: [None; 6], count: 0, committed: false }
+        Self {
+            apertures,
+            assignments: [None; 6],
+            count: 0,
+            committed: false,
+        }
     }
 
     pub fn reserve(&mut self, request: Request) -> Result<Option<Assignment>, Error> {
-        let Some(probe) = request.probe else { return Ok(None); };
-        if request.index >= 6 { return Err(Error::InvalidIndex); }
-        if self.assignments[..self.count].iter().flatten().any(|item| item.index == request.index) {
+        let Some(probe) = request.probe else {
+            return Ok(None);
+        };
+        if request.index >= 6 {
+            return Err(Error::InvalidIndex);
+        }
+        if self.assignments[..self.count]
+            .iter()
+            .flatten()
+            .any(|item| item.index == request.index)
+        {
             return Err(Error::DuplicateIndex);
         }
         let allocator = match probe.kind {
@@ -102,7 +131,9 @@ impl<'a> Plan<'a> {
             }
             bar::Kind::Memory32 | bar::Kind::Memory64 => &mut self.apertures.mmio32,
         };
-        let reservation = allocator.reserve(probe.size, probe.size).map_err(Error::Resource)?;
+        let reservation = allocator
+            .reserve(probe.size, probe.size)
+            .map_err(Error::Resource)?;
         let assignment = Assignment {
             index: request.index,
             kind: probe.kind,
@@ -122,12 +153,19 @@ impl<'a> Plan<'a> {
 
 impl Drop for Plan<'_> {
     fn drop(&mut self) {
-        if self.committed { return; }
+        if self.committed {
+            return;
+        }
         // Rollback is best-effort in Drop because Rust destructors cannot
         // return an error. Release every provisional reservation in reverse
         // order; resource::Allocator generation checks prevent a failed
         // release from accidentally freeing a recycled reservation.
-        for assignment in self.assignments[..self.count].iter().rev().flatten().copied() {
+        for assignment in self.assignments[..self.count]
+            .iter()
+            .rev()
+            .flatten()
+            .copied()
+        {
             let allocator = match assignment.kind {
                 bar::Kind::Io => &mut self.apertures.io,
                 bar::Kind::Memory32 | bar::Kind::Memory64 if assignment.prefetchable => {

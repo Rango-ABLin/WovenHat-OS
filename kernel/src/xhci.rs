@@ -554,10 +554,8 @@ impl XhciController {
         let output = self.output_context.ok_or(InitError::CommandFailed)?;
         input.bytes_mut()[self.context_size..self.context_size * 2]
             .copy_from_slice(&output.bytes()[..self.context_size]);
-        let add_flags = 1_u32
-            | (1_u32 << event_dci)
-            | (1_u32 << acl_in_dci)
-            | (1_u32 << acl_out_dci);
+        let add_flags =
+            1_u32 | (1_u32 << event_dci) | (1_u32 << acl_in_dci) | (1_u32 << acl_out_dci);
         write_u32(input.bytes_mut(), 4, add_flags);
 
         let slot_offset = self.context_size;
@@ -832,12 +830,18 @@ impl XhciController {
             return Err(InitError::DescriptorInvalid);
         }
         let buffer_physical = {
-            let buffer = self.bt_event_buffer.as_mut().ok_or(InitError::DmaUnavailable)?;
+            let buffer = self
+                .bt_event_buffer
+                .as_mut()
+                .ok_or(InitError::DmaUnavailable)?;
             buffer.bytes_mut()[..transfer_length].fill(0);
             buffer.physical
         };
         let normal_ptr = {
-            let ring = self.bt_event_ring.as_mut().ok_or(InitError::CommandFailed)?;
+            let ring = self
+                .bt_event_ring
+                .as_mut()
+                .ok_or(InitError::CommandFailed)?;
             ring.push(Trb {
                 parameter: buffer_physical,
                 status: transfer_length as u32,
@@ -847,7 +851,10 @@ impl XhciController {
         self.ring_endpoint(dci)?;
         self.wait_transfer_completion(normal_ptr, self.slot_id)?;
         fence(Ordering::Acquire);
-        let buffer = self.bt_event_buffer.as_ref().ok_or(InitError::DmaUnavailable)?;
+        let buffer = self
+            .bt_event_buffer
+            .as_ref()
+            .ok_or(InitError::DmaUnavailable)?;
         let mut event = [0_u8; 257];
         event[..transfer_length].copy_from_slice(&buffer.bytes()[..transfer_length]);
         Ok(event)
@@ -861,12 +868,18 @@ impl XhciController {
             return Err(InitError::DescriptorInvalid);
         }
         let buffer_physical = {
-            let buffer = self.bt_acl_in_buffer.as_mut().ok_or(InitError::DmaUnavailable)?;
+            let buffer = self
+                .bt_acl_in_buffer
+                .as_mut()
+                .ok_or(InitError::DmaUnavailable)?;
             buffer.bytes_mut()[..transfer_length].fill(0);
             buffer.physical
         };
         let normal_ptr = {
-            let ring = self.bt_acl_in_ring.as_mut().ok_or(InitError::CommandFailed)?;
+            let ring = self
+                .bt_acl_in_ring
+                .as_mut()
+                .ok_or(InitError::CommandFailed)?;
             ring.push(Trb {
                 parameter: buffer_physical,
                 status: transfer_length as u32,
@@ -876,7 +889,10 @@ impl XhciController {
         self.ring_endpoint(dci)?;
         self.wait_transfer_completion(normal_ptr, self.slot_id)?;
         fence(Ordering::Acquire);
-        let buffer = self.bt_acl_in_buffer.as_ref().ok_or(InitError::DmaUnavailable)?;
+        let buffer = self
+            .bt_acl_in_buffer
+            .as_ref()
+            .ok_or(InitError::DmaUnavailable)?;
         let mut data = [0_u8; PAGE_SIZE];
         data[..transfer_length].copy_from_slice(&buffer.bytes()[..transfer_length]);
         Ok(data)
@@ -889,13 +905,19 @@ impl XhciController {
         }
         let dci = endpoint_dci(bluetooth.acl_out_endpoint)?;
         let buffer_physical = {
-            let buffer = self.bt_acl_out_buffer.as_mut().ok_or(InitError::DmaUnavailable)?;
+            let buffer = self
+                .bt_acl_out_buffer
+                .as_mut()
+                .ok_or(InitError::DmaUnavailable)?;
             buffer.bytes_mut()[..data.len()].copy_from_slice(data);
             buffer.physical
         };
         fence(Ordering::Release);
         let normal_ptr = {
-            let ring = self.bt_acl_out_ring.as_mut().ok_or(InitError::CommandFailed)?;
+            let ring = self
+                .bt_acl_out_ring
+                .as_mut()
+                .ok_or(InitError::CommandFailed)?;
             ring.push(Trb {
                 parameter: buffer_physical,
                 status: data.len() as u32,
@@ -1281,7 +1303,10 @@ pub struct BluetoothTransferPlan {
     pub length: u16,
 }
 
-pub fn bluetooth_command_plan(interface: BluetoothUsbInterface, length: usize) -> Option<BluetoothTransferPlan> {
+pub fn bluetooth_command_plan(
+    interface: BluetoothUsbInterface,
+    length: usize,
+) -> Option<BluetoothTransferPlan> {
     if length == 0 || length > 258 {
         return None;
     }
@@ -1324,11 +1349,8 @@ pub fn bluetooth_acl_out_plan(
 
 pub fn bluetooth_transport_self_test() -> bool {
     let descriptor = [
-        9, 2, 39, 0, 1, 1, 0, 0x80, 50,
-        9, 4, 0, 0, 3, 0xe0, 0x01, 0x01, 0,
-        7, 5, 0x81, 0x03, 16, 0, 1,
-        7, 5, 0x82, 0x02, 64, 0, 0,
-        7, 5, 0x02, 0x02, 64, 0, 0,
+        9, 2, 39, 0, 1, 1, 0, 0x80, 50, 9, 4, 0, 0, 3, 0xe0, 0x01, 0x01, 0, 7, 5, 0x81, 0x03, 16,
+        0, 1, 7, 5, 0x82, 0x02, 64, 0, 0, 7, 5, 0x02, 0x02, 64, 0, 0,
     ];
     let Some(bt) = parse_bluetooth_usb_interface(&descriptor, 1) else {
         return false;

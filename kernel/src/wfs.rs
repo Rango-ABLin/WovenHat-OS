@@ -21,6 +21,7 @@ pub const FORMAT_VERSION: u16 = 1;
 /// LBA per block and must fit in a single sector alongside its header.
 pub const MAX_TXN_BLOCKS: usize = 32;
 /// Descriptor sector + staged data sectors + commit sector.
+#[cfg(any(test, feature = "stage15-1-test", feature = "stage15-2-test"))]
 pub const JOURNAL_BLOCKS: u32 = MAX_TXN_BLOCKS as u32 + 2;
 
 pub const INODE_SIZE: usize = 128;
@@ -46,6 +47,7 @@ pub enum Error {
     InvalidName,
     TooLarge,
     NotADirectory,
+    #[cfg(any(test, feature = "stage15-1-test", feature = "stage15-2-test"))]
     NotEmpty,
 }
 
@@ -113,8 +115,7 @@ impl SuperBlock {
         sector[64..72].copy_from_slice(&self.data_start.to_le_bytes());
         sector[72..80].copy_from_slice(&self.root_inode.to_le_bytes());
         let checksum = fnv1a(&sector[..SUPER_CHECKSUM_AT]);
-        sector[SUPER_CHECKSUM_AT..SUPER_CHECKSUM_AT + 8]
-            .copy_from_slice(&checksum.to_le_bytes());
+        sector[SUPER_CHECKSUM_AT..SUPER_CHECKSUM_AT + 8].copy_from_slice(&checksum.to_le_bytes());
     }
 
     fn decode(sector: &[u8; SECTOR_SIZE]) -> Option<Self> {
@@ -243,6 +244,7 @@ impl DirEntry {
             && &self.name[..name.len()] == name.as_bytes()
     }
 
+    #[cfg(any(test, feature = "stage15-1-test", feature = "stage15-2-test"))]
     pub fn name_str(&self) -> &str {
         let len = usize::from(self.name_len).min(MAX_NAME);
         core::str::from_utf8(&self.name[..len]).unwrap_or("")
@@ -303,6 +305,7 @@ impl Transaction {
         }
     }
 
+    #[cfg(any(test, feature = "stage15-1-test", feature = "stage15-2-test"))]
     pub const fn len(&self) -> usize {
         self.len
     }
@@ -362,6 +365,7 @@ pub struct Volume<D: BlockDevice> {
 }
 
 /// Derive geometry from a device size.
+#[cfg(any(test, feature = "stage15-1-test", feature = "stage15-2-test"))]
 fn plan(total_blocks: u64, inode_count: u32) -> Result<SuperBlock, Error> {
     let journal_start = 2;
     let journal_blocks = JOURNAL_BLOCKS;
@@ -403,6 +407,7 @@ fn inode_location(sb: &SuperBlock, inode: u64) -> (u64, usize) {
 
 /// Direct, unjournalled metadata write. Only `format` may use this, before any
 /// superblock exists to make the volume mountable.
+#[cfg(any(test, feature = "stage15-1-test", feature = "stage15-2-test"))]
 fn write_inode_raw<D: BlockDevice>(
     device: &mut D,
     sb: &SuperBlock,
@@ -417,6 +422,7 @@ fn write_inode_raw<D: BlockDevice>(
     Ok(())
 }
 
+#[cfg(any(test, feature = "stage15-1-test", feature = "stage15-2-test"))]
 fn set_bitmap_raw<D: BlockDevice>(
     device: &mut D,
     sb: &SuperBlock,
@@ -442,6 +448,7 @@ impl<D: BlockDevice> Volume<D> {
     /// written last, so a crash part-way through leaves no valid superblock and
     /// the volume reads as unformatted rather than as a filesystem with garbage
     /// metadata.
+    #[cfg(any(test, feature = "stage15-1-test", feature = "stage15-2-test"))]
     pub fn format(mut device: D, inode_count: u32) -> Result<Self, Error> {
         let total = device.sector_count();
         if total < 16 || inode_count == 0 {
@@ -505,7 +512,11 @@ impl<D: BlockDevice> Volume<D> {
         for lba in sb.inode_start..sb.data_start {
             at(lba, "inodes", device.write_sector(lba, &zero))?;
         }
-        at(root_block, "root-dir", device.write_sector(root_block, &zero))?;
+        at(
+            root_block,
+            "root-dir",
+            device.write_sector(root_block, &zero),
+        )?;
 
         let mut root = Inode::empty();
         root.mode = 0o040_755;
@@ -566,10 +577,12 @@ impl<D: BlockDevice> Volume<D> {
         Ok(volume)
     }
 
+    #[cfg(any(test, feature = "stage15-1-test", feature = "stage15-2-test"))]
     pub const fn super_block(&self) -> &SuperBlock {
         &self.super_block
     }
 
+    #[cfg(any(test, feature = "stage15-1-test", feature = "stage15-2-test"))]
     pub fn into_device(self) -> D {
         self.device
     }
@@ -815,6 +828,7 @@ impl<D: BlockDevice> Volume<D> {
     }
 
     /// Entries of a directory, free slots included as `inode == 0`.
+    #[cfg(any(test, feature = "stage15-1-test", feature = "stage15-2-test"))]
     pub fn read_dir(&mut self, dir_inode: u64) -> Result<DirectoryView, Error> {
         let txn = Transaction::new();
         let dir = self.inode(dir_inode)?;
@@ -846,7 +860,13 @@ impl<D: BlockDevice> Volume<D> {
     // ------------------------------------------------------------ mutation
 
     /// Create an empty file in `dir_inode`, as one transaction.
-    pub fn create(&mut self, dir_inode: u64, name: &str, mode: u32, now: u64) -> Result<u64, Error> {
+    pub fn create(
+        &mut self,
+        dir_inode: u64,
+        name: &str,
+        mode: u32,
+        now: u64,
+    ) -> Result<u64, Error> {
         if name.is_empty() || name.len() > MAX_NAME || name.contains('/') {
             return Err(Error::InvalidName);
         }
@@ -1002,6 +1022,7 @@ impl<D: BlockDevice> Volume<D> {
     /// Verify internal consistency: every block referenced by a live inode is
     /// marked allocated, every directory entry names a live inode, and no two
     /// inodes claim the same block.
+    #[cfg(any(test, feature = "stage15-1-test", feature = "stage15-2-test"))]
     pub fn check(&mut self) -> Result<(), Error> {
         let sb = self.super_block;
         let txn = Transaction::new();
@@ -1064,10 +1085,12 @@ impl DirectoryView {
         }
     }
 
+    #[cfg(any(test, feature = "stage15-1-test", feature = "stage15-2-test"))]
     pub fn live(&self) -> impl Iterator<Item = &DirEntry> {
         self.entries.iter().filter(|entry| entry.inode != 0)
     }
 
+    #[cfg(any(test, feature = "stage15-1-test", feature = "stage15-2-test"))]
     pub fn count(&self) -> usize {
         self.live().count()
     }
@@ -1374,13 +1397,20 @@ pub enum MountOutcome {
     Failed,
 }
 
+// WovenFS mutations are read-modify-write transactions. Serialize the whole
+// mounted operation so concurrent tasks cannot commit lost updates. Rank 5
+// remains below the ATA device lock (rank 10).
+#[cfg(not(test))]
+static MUTATION: crate::irq_lock::PreemptMutex<()> =
+    crate::irq_lock::PreemptMutex::with_rank((), 5);
+
 /// Run `operation` against the ATA primary master mounted as WovenFS.
 ///
 /// The volume is mounted for the duration of the call and dropped afterwards,
 /// so no stale in-memory filesystem state outlives the operation. Mounting
 /// replays any committed journal transaction, which is why every entry point
 /// goes through here rather than caching a volume.
-#[cfg(feature = "stage15-2-test")]
+#[cfg(not(test))]
 pub fn with_ata_volume<R>(
     operation: impl FnOnce(&mut Volume<&mut crate::ata::BufferedAta>) -> R,
 ) -> Option<R> {
@@ -1389,6 +1419,101 @@ pub fn with_ata_volume<R>(
         Some(operation(&mut volume))
     })
     .flatten()
+}
+
+/// Translate the mounted VFS namespace into one native WovenFS root name.
+/// The adapter intentionally does not accept nested paths, traversal, or
+/// prefix-confusion paths such as `/wfs2/...`.
+#[cfg(not(test))]
+fn checked_vfs_name(path: &str) -> Result<&str, Error> {
+    let name = path.strip_prefix("/wfs/").ok_or(Error::InvalidName)?;
+    checked_native_name(name)
+}
+
+/// Ensure a VFS-visible file exists durably before publishing its VFS node.
+#[cfg(not(test))]
+pub fn ensure_vfs_path(path: &str, now: u64) -> Result<(), Error> {
+    let _mutation = MUTATION.lock();
+    let name = checked_vfs_name(path)?;
+    with_ata_volume(|volume| match volume.lookup(1, name) {
+        Ok(entry) if entry.kind == KIND_FILE => Ok(()),
+        Ok(_) => Err(Error::NotADirectory),
+        Err(Error::NotFound) => volume.create(1, name, 0o600, now).map(|_| ()),
+        Err(error) => Err(error),
+    })
+    .unwrap_or(Err(Error::Device))
+}
+
+/// Commit a VFS write directly to native WovenFS and return the new complete
+/// file image in `out`. The caller must refresh its VFS node only after this
+/// returns success; no RAM-only write is reported as durable.
+#[cfg(not(test))]
+pub fn write_vfs_path_at(
+    path: &str,
+    offset: usize,
+    bytes: &[u8],
+    out: &mut [u8; MAX_FILE_SIZE],
+    now: u64,
+) -> Result<(usize, usize), Error> {
+    let _mutation = MUTATION.lock();
+    let name = checked_vfs_name(path)?;
+    if bytes.len() > MAX_FILE_SIZE {
+        return Err(Error::TooLarge);
+    }
+    with_ata_volume(|volume| {
+        let inode = match volume.lookup(1, name) {
+            Ok(entry) => entry.inode,
+            Err(Error::NotFound) => volume.create(1, name, 0o600, now)?,
+            Err(error) => return Err(error),
+        };
+        let mut length = volume.read_file(inode, out)?;
+        if offset > length || bytes.len() > MAX_FILE_SIZE.saturating_sub(offset) {
+            return Err(Error::TooLarge);
+        }
+        let end = offset + bytes.len();
+        out[offset..end].copy_from_slice(bytes);
+        length = length.max(end);
+        volume.write_file(inode, &out[..length], now)?;
+        Ok((bytes.len(), length))
+    })
+    .unwrap_or(Err(Error::Device))
+}
+
+/// Remove a single native root file. The VFS entry is removed by the caller
+/// only after this durable transaction succeeds.
+#[cfg(not(test))]
+pub fn unlink_vfs_path(path: &str, now: u64) -> Result<(), Error> {
+    let _mutation = MUTATION.lock();
+    let name = checked_vfs_name(path)?;
+    with_ata_volume(|volume| {
+        let entry = volume.lookup(1, name)?;
+        if entry.kind != KIND_FILE {
+            return Err(Error::NotADirectory);
+        }
+        volume.unlink(1, name, now)
+    })
+    .unwrap_or(Err(Error::Device))
+}
+
+#[cfg(test)]
+pub fn write_vfs_path_at(
+    _path: &str,
+    _offset: usize,
+    _bytes: &[u8],
+    _out: &mut [u8; MAX_FILE_SIZE],
+    _now: u64,
+) -> Result<(usize, usize), Error> {
+    Err(Error::Device)
+}
+
+#[cfg(test)]
+pub fn ensure_vfs_path(_path: &str, _now: u64) -> Result<(), Error> {
+    Err(Error::Device)
+}
+
+#[cfg(test)]
+pub fn unlink_vfs_path(_path: &str, _now: u64) -> Result<(), Error> {
+    Err(Error::Device)
 }
 
 /// Explicit authority for native WovenFS mutations. Must be issued only after
@@ -1401,8 +1526,9 @@ impl AuthorizedWfsWriter {
     pub(crate) const fn after_capability_check() -> Self { Self { _private: () } }
 }
 
-/// Validate the native root-directory filename before any ATA I/O.
-#[cfg(feature = "stage15-2-test")]
+/// Validate the native root-directory filename before any ATA I/O. Shared
+/// by the native and VFS-path adapters, so both refuse the same names.
+#[cfg(not(test))]
 fn checked_native_name(name: &str) -> Result<&str, Error> {
     if name.is_empty() || name.len() > MAX_NAME || name == "." || name == ".."
         || name.contains('/') || name.contains('\\') || name.as_bytes().contains(&0)
@@ -1447,15 +1573,6 @@ pub fn unlink_ata_file(
 ) -> Result<(), Error> {
     checked_native_name(name)?;
     with_ata_volume(|volume| volume.unlink(1, name, now)).unwrap_or(Err(Error::Device))
-}
-
-/// Translate a VFS path into a single root-directory WovenFS filename.
-/// Reject prefix confusion (/wfs2), traversal, and nested paths rather than
-/// accidentally granting access to a different namespace.
-#[cfg(feature = "stage15-2-test")]
-fn checked_vfs_name(path: &str) -> Result<&str, Error> {
-    let name = path.strip_prefix("/wfs/").ok_or(Error::InvalidName)?;
-    checked_native_name(name)
 }
 
 /// Explicit VFS-path adapter: commits to the native journal before reporting
@@ -1748,6 +1865,28 @@ pub fn stage15_2_self_test() -> bool {
     }
 
 
+    // Reject oversized mutations and overlong names before touching ATA.
+    // A rejected overwrite must preserve the previously committed bytes.
+    let too_large = [0u8; MAX_FILE_SIZE + 1];
+    let oversized_rejected = vfs_write_through(
+        &authority, "/wfs/alpha.txt", &too_large, 30,
+    ) == Err(Error::TooLarge);
+    let long_name = "x".repeat(MAX_NAME + 1);
+    let long_path = alloc::format!("/wfs/{long_name}");
+    let overlong_rejected = vfs_write_through(
+        &authority, &long_path, b"no", 31,
+    ) == Err(Error::InvalidName);
+    let mut durable_after_rejection = [0u8; 64];
+    let original_preserved = vfs_read_through(
+        "/wfs/alpha.txt", &mut durable_after_rejection,
+    ).map(|n| &durable_after_rejection[..n] == alpha).unwrap_or(false);
+    if !step(
+        "oversized and overlong mutations preserve durable data",
+        oversized_rejected && overlong_rejected && original_preserved,
+    ) {
+        return false;
+    }
+
     let verified = with_ata_volume(|volume| {
         if volume.check().is_err() {
             return false;
@@ -1772,10 +1911,7 @@ pub fn stage15_2_self_test() -> bool {
     }
 
     let mounted = mount_ata_into_vfs();
-    if !step(
-        "mount into the VFS",
-        mounted == MountOutcome::Mounted(2),
-    ) {
+    if !step("mount into the VFS", mounted == MountOutcome::Mounted(2)) {
         crate::serial::write_line(format_args!(
             "[S15.2] vfs mount imported {}",
             match mounted {
@@ -1792,6 +1928,26 @@ pub fn stage15_2_self_test() -> bool {
         && crate::vfs::read_all("/wfs/beta.bin", &mut vfs_buffer) == Ok(beta.len())
         && vfs_buffer[..beta.len()] == beta;
     if !step("read both files through the VFS", vfs_read) {
+        return false;
+    }
+
+    // VFS imports are read-only until an authorized durable backend is installed.
+    // Rejecting mutation prevents memory-only writes from masquerading as durable IO.
+    let denied = crate::vfs::write_file("/wfs/alpha.txt", b"unauthorized-change").is_err();
+    if !step("imported VFS file rejects write-through", denied) {
+        return false;
+    }
+
+    // A denied VFS write must not alter the durable device contents.
+    let unchanged = with_ata_volume(|volume| {
+        let Ok(entry) = volume.lookup(1, "alpha.txt") else {
+            return false;
+        };
+        let mut persisted = [0u8; MAX_FILE_SIZE];
+        volume.read_file(entry.inode, &mut persisted) == Ok(alpha.len())
+            && persisted[..alpha.len()] == *alpha
+    });
+    if !step("denied VFS write preserves durable contents", unchanged == Some(true)) {
         return false;
     }
 

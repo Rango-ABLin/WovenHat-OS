@@ -1,7 +1,10 @@
 [workspace]
 resolver = "3"
 members = ["kernel", "libwoven"]
-exclude = ["vendor/bootloader"]
+# Applications are excluded deliberately. They are freestanding Ring-3 ELF
+# images with their own linker script and link flags, so a host-targeted
+# workspace build must not try to compile them.
+exclude = ["vendor/bootloader", "apps/hello", "apps/hello-gui", "apps/woven-shell"]
 
 [patch.crates-io]
 bootloader = { path = "vendor/bootloader" }
@@ -48,6 +51,35 @@ stage14-5c-test = ["network-test", "kernel/stage14-5c-test"]
 stage14-5d-test = ["network-test", "kernel/stage14-5d-test"]
 stage15-1-test = ["qemu-test", "kernel/stage15-1-test"]
 stage15-2-test = ["qemu-test", "kernel/stage15-2-test"]
+stage15-3-test = ["qemu-test", "kernel/stage15-3-test"]
+stage15-4-test = ["qemu-test", "kernel/stage15-4-test"]
+secure-boot = ["kernel/secure-boot"]
+stage15-5-test = ["qemu-test", "secure-boot", "kernel/stage15-5-test"]
+stage15-6-test = ["qemu-test", "kernel/stage15-6-test"]
+stage15-7-test = ["qemu-test", "kernel/stage15-7-test"]
+stage15-8-test = ["qemu-test", "kernel/stage15-8-test"]
+stage15-9-test = ["qemu-test", "kernel/stage15-9-test"]
+stage16-1-test = ["qemu-test", "kernel/stage16-1-test"]
+stage17-1-test = ["qemu-test", "kernel/stage17-1-test"]
+stage18-1-test = ["qemu-test", "kernel/stage18-1-test"]
+stage18-2-test = ["qemu-test", "kernel/stage18-2-test"]
+stage19-1-test = ["qemu-test", "kernel/stage19-1-test"]
+stage19-2-test = ["qemu-test", "kernel/stage19-2-test"]
+stage19-3-test = ["qemu-test", "kernel/stage19-3-test"]
+stage19-4-test = ["qemu-test", "kernel/stage19-4-test"]
+stage19-5-test = ["qemu-test", "kernel/stage19-5-test"]
+stage19-6-test = ["qemu-test", "kernel/stage19-6-test"]
+stage19-7-test = ["qemu-test", "kernel/stage19-7-test"]
+stage19-8-test = ["qemu-test", "kernel/stage19-8-test"]
+stage19-9-test = ["qemu-test", "kernel/stage19-9-test"]
+stage19-10-test = ["qemu-test", "kernel/stage19-10-test"]
+stage19-11-test = ["qemu-test", "kernel/stage19-11-test"]
+stage19-12-test = ["qemu-test", "kernel/stage19-12-test"]
+stage19-13-test = ["qemu-test", "kernel/stage19-13-test"]
+stage19-14-test = ["qemu-test", "kernel/stage19-14-test"]
+stage20-1-test = ["qemu-test", "kernel/stage20-1-test"]
+stage20-2-test = ["qemu-test", "kernel/stage20-2-test"]
+stage20-3-test = ["qemu-test", "kernel/stage20-3-test"]
 stage1-5-test = ["qemu-test", "kernel/stage1-5-test"]
 
 [profile.dev]
@@ -64,8 +96,14 @@ ovmf-prebuilt = "0.2.4"
 [build-dependencies]
 kernel = { package = "wovenhat-kernel", path = "kernel", artifact = "bin", target = "x86_64-unknown-none" }
 bootloader = { version = "0.11.17", default-features = false, features = ["uefi"] }
+ed25519-compact = { version = "2.6", default-features = false }
+sha2 = { version = "0.10.9", default-features = false, features = ["force-soft"] }
 
 [dev-dependencies]
 unicode-normalization = { version = "0.1.25", default-features = false }
+# The display stack's presentation path takes the bootloader's framebuffer
+# description, so host tests of compositing need the same type the kernel sees
+# rather than a stand-in that could drift from it.
+bootloader_api = "0.11.17"
 [lints.rust]
 warnings = "deny"
