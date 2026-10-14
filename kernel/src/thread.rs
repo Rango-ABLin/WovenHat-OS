@@ -1,5 +1,6 @@
 //! Bounded process-thread registry used by the Stage 11.2 runtime boundary.
 use crate::irq_lock::IrqMutex as Mutex;
+use crate::userspace::AnonymousMapping;
 
 pub const MAX_THREADS: usize = 64;
 
@@ -7,12 +8,22 @@ pub const MAX_THREADS: usize = 64;
 pub struct ThreadId(u64);
 
 impl ThreadId {
+    pub const fn from_raw(raw: u64) -> Self {
+        Self(raw)
+    }
+
     pub const fn raw(self) -> u64 {
         self.0
     }
     const fn new(slot: usize, generation: u32) -> Self {
         Self(((generation as u64) << 32) | slot as u64)
     }
+}
+
+#[derive(Clone, Copy)]
+pub struct Resources {
+    pub stack: AnonymousMapping,
+    pub tls: Option<AnonymousMapping>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -30,6 +41,8 @@ struct Record {
     exit: i32,
     errno: i32,
     tls: u64,
+    resources: Option<Resources>,
+    waiter: Option<u64>,
 }
 
 impl Record {
@@ -40,6 +53,8 @@ impl Record {
         exit: 0,
         errno: 0,
         tls: 0,
+        resources: None,
+        waiter: None,
     };
 }
 
@@ -74,6 +89,8 @@ pub fn create(owner: u64) -> Option<ThreadId> {
     record.exit = 0;
     record.errno = 0;
     record.tls = 0;
+    record.resources = None;
+    record.waiter = None;
     Some(ThreadId::new(slot, record.generation))
 }
 
@@ -90,7 +107,42 @@ pub fn terminate(id: ThreadId, exit: i32) -> bool {
     true
 }
 
+/// Register the current task as the sole join waiter. The boolean is true
+/// when termination won the race before registration, so the caller can retry
+/// the join without blocking.
+pub fn register_waiter(owner: u64, id: ThreadId, waiter: u64) -> Result<bool, JoinError> {
+    let mut table = TABLE.lock();
+    let record = lookup(&mut table, id).ok_or(JoinError::Invalid)?;
+    if record.owner != owner {
+        return Err(JoinError::NotOwner);
+    }
+    if record.state == State::Exited {
+        return Ok(true);
+    }
+    if record.waiter.is_some() {
+        return Err(JoinError::Invalid);
+    }
+    record.waiter = Some(waiter);
+    Ok(false)
+}
+
+/// Consume a waiter after the exiting task is no longer physically running.
+pub fn take_waiter(id: ThreadId) -> Option<u64> {
+    let mut table = TABLE.lock();
+    lookup(&mut table, id)?.waiter.take()
+}
+
 pub fn join(owner: u64, id: ThreadId) -> Result<i32, JoinError> {
+    join_with_resources(owner, id).map(|(exit, _)| exit)
+}
+
+/// Join a terminated thread and return the mappings owned by that thread.
+/// The caller must unmap them from the shared process address space before it
+/// exposes the slots to a subsequent thread.
+pub fn join_with_resources(
+    owner: u64,
+    id: ThreadId,
+) -> Result<(i32, Option<Resources>), JoinError> {
     let mut table = TABLE.lock();
     let Some(record) = lookup(&mut table, id) else {
         return Err(JoinError::Invalid);
@@ -102,13 +154,60 @@ pub fn join(owner: u64, id: ThreadId) -> Result<i32, JoinError> {
         return Err(JoinError::Running);
     }
     let exit = record.exit;
+    let resources = record.resources.take();
     record.state = State::Free;
     record.generation = record
         .generation
         .checked_add(1)
         .filter(|g| *g != 0)
         .unwrap_or(u32::MAX);
-    Ok(exit)
+    Ok((exit, resources))
+}
+
+pub fn attach_resources(id: ThreadId, resources: Resources) -> bool {
+    let mut table = TABLE.lock();
+    let Some(record) = lookup(&mut table, id) else {
+        return false;
+    };
+    if record.resources.is_some() {
+        return false;
+    }
+    record.resources = Some(resources);
+    true
+}
+
+pub fn resources(owner: u64, id: ThreadId) -> Option<Resources> {
+    let mut table = TABLE.lock();
+    let record = lookup(&mut table, id)?;
+    if record.owner != owner {
+        return None;
+    }
+    record.resources
+}
+
+pub fn joinable(owner: u64, id: ThreadId) -> Result<bool, JoinError> {
+    let mut table = TABLE.lock();
+    let record = lookup(&mut table, id).ok_or(JoinError::Invalid)?;
+    if record.owner != owner {
+        return Err(JoinError::NotOwner);
+    }
+    Ok(record.state == State::Exited)
+}
+
+pub fn abort(id: ThreadId) -> bool {
+    let mut table = TABLE.lock();
+    let Some(record) = lookup(&mut table, id) else {
+        return false;
+    };
+    record.state = State::Free;
+    record.owner = 0;
+    record.resources = None;
+    record.generation = record
+        .generation
+        .checked_add(1)
+        .filter(|generation| *generation != 0)
+        .unwrap_or(u32::MAX);
+    true
 }
 
 /// Reclaim every thread record owned by a process that is terminating.
@@ -125,6 +224,8 @@ pub fn reap_owner(owner: u64) -> usize {
             record.exit = 0;
             record.errno = 0;
             record.tls = 0;
+            record.resources = None;
+            record.waiter = None;
             record.generation = record
                 .generation
                 .checked_add(1)
@@ -171,6 +272,13 @@ pub fn structural_self_test() -> bool {
         && terminate(id, 23)
         && join(1, id) == Ok(23)
         && tls(id).is_none()
+        && {
+            let Some(waited) = create(1) else { return false };
+            register_waiter(1, waited, 99) == Ok(false)
+                && terminate(waited, 41)
+                && take_waiter(waited) == Some(99)
+                && join(1, waited) == Ok(41)
+        }
         && {
             let Some(stale) = create(9) else { return false };
             set_tls(stale, 0x1234)

@@ -335,6 +335,18 @@ pub enum Number {
     SecretRead = 128,
     /// secret handle -> 0 or ERROR
     SecretRevoke = 129,
+    /// entry address, stack size -> generation-tagged thread handle
+    ThreadCreate = 130,
+    /// exit status; never returns for a non-leader thread
+    ThreadExit = 131,
+    /// thread handle -> exit status, WOULD_BLOCK while live, or ERROR
+    ThreadJoin = 132,
+    /// -> current thread handle
+    ThreadSelf = 133,
+    /// TLS base value -> 0 or ERROR
+    ThreadSetTls = 134,
+    /// -> TLS base value or ERROR
+    ThreadGetTls = 135,
     /// own handle, packed destination and opacity (x | y<<24 | opacity<<56,
     /// x and y 24-bit signed, bits 48..56 zero), packed source region -> 0 or
     /// ERROR
@@ -2290,6 +2302,38 @@ pub extern "C" fn wovenhat_syscall_dispatch(
             0
         }
         value if value == Number::Exit as u64 => crate::task::exit_current_process(arg0 as i32),
+        value if value == Number::ThreadCreate as u64 => crate::task::create_user_thread(arg0, arg1)
+            .map(|id| id.raw())
+            .unwrap_or(SYSCALL_ERROR),
+        value if value == Number::ThreadExit as u64 => crate::task::exit_current_thread(arg0 as i32),
+        value if value == Number::ThreadJoin as u64 => loop {
+            match crate::task::join_user_thread(arg0) {
+                Ok(exit) => break exit as u64,
+                Err(crate::task::ThreadJoinError::Running) => {
+                    let owner = crate::task::current_process_id();
+                    let waiter = crate::task::current_task_id().as_u64();
+                    match crate::thread::register_waiter(
+                        owner,
+                        crate::thread::ThreadId::from_raw(arg0),
+                        waiter,
+                    ) {
+                        Ok(true) => continue,
+                        Ok(false) => crate::task::wait_for_event(),
+                        Err(_) => break SYSCALL_ERROR,
+                    }
+                }
+                Err(_) => break SYSCALL_ERROR,
+            }
+        },
+        value if value == Number::ThreadSelf as u64 => crate::task::current_thread_id()
+            .map(|id| id.raw())
+            .unwrap_or(SYSCALL_ERROR),
+        value if value == Number::ThreadSetTls as u64 => crate::task::current_thread_id()
+            .filter(|id| crate::thread::set_tls(*id, arg0))
+            .map_or(SYSCALL_ERROR, |_| 0),
+        value if value == Number::ThreadGetTls as u64 => crate::task::current_thread_id()
+            .and_then(crate::thread::tls)
+            .unwrap_or(SYSCALL_ERROR),
         value if value == Number::Getpid as u64 => crate::task::current_process_id(),
         value if value == Number::Waitpid as u64 => match crate::task::wait_process(arg0) {
             Ok(exit_code) => exit_code as u64,
