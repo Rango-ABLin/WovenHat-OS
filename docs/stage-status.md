@@ -17,6 +17,26 @@ gate pass. The unsupported `cargo test --workspace --all-targets` command is
 documented as a host-assembler mismatch rather than treated as a production
 failure. See the [host-test audit](audit-host-test-boundary-2026-10-14.md).
 
+## Syscall numbering for the desktop (2026-10-14)
+
+Twice, the desktop's compositor syscalls took numbers that work on
+`phase2` took at the same time, and merging conflicted:
+- region blend and keyed blit at 122–124 collided with permissions, the
+  audit ledger and secrets (122–129);
+- the same calls renumbered to 130–132 collided with threads (130–135).
+
+They now live at **200–202**:
+
+| Number | Syscall |
+|---|---|
+| 200 | `GraphicsCompositorBlendRegion` |
+| 201 | `GraphicsCompositorBlendRegionShared` |
+| 202 | `GraphicsCompositorBlitKeyed` |
+
+New desktop and compositor syscalls take numbers from the 200 block, so
+the two lines of work cannot collide. The syscalls the desktop added
+earlier, 116–121, were never contested and keep their numbers.
+
 ## Stages 20.4–20.8 — validation after rebasing onto phase2 (2026-10-14)
 
 The Stage 20.4–20.8 commits were rebased onto `phase2` at `c5b13392`,
@@ -32,7 +52,8 @@ merge. They were then validated as one stack in an isolated worktree.
   - the kernel runtime stages back to 1–5;
   - the legacy-IRQ memory suite;
   - Stage 6 hotplug on 2 and 4 CPUs.
-- In the rebase, syscalls 122–124 were renumbered to 130–132; see Stages
+- In the rebase, syscalls 122–124 were renumbered to 130–132, and later
+  to 200–202 (see "Syscall numbering for the desktop" above); see Stages
   20.5 and 20.6.
 
 ## Stage 20.8 — tiling: resize protocol, snap to edges, master and stack (2026-10-13)
@@ -168,7 +189,7 @@ Open:
 
 Roadmap Stage 18.3, Window Experience: subtle translucency.
 
-**Kernel: keyed blit.** Syscall 132 (first numbered 124, renumbered on
+**Kernel: keyed blit.** Syscall 202 (first numbered 124, then 132; renumbered on
 rebasing onto the Stage 1–19 hardening), `GraphicsCompositorBlitKeyed`, is the
 region blit of one of the caller's own surfaces, except that source pixels
 equal to `display::TRANSPARENT_KEY` (magenta, `0x00FF00FF`, which no
@@ -238,7 +259,7 @@ Open:
 
 Roadmap Stage 18.3, Window Experience: dynamic depth.
 
-**Kernel: region blend.** Syscalls 130 and 131 (first numbered 122/123,
+**Kernel: region blend.** Syscalls 200 and 201 (first numbered 122/123, then 130/131;
 renumbered on rebasing onto the Stage 1–19 hardening, which took 122–129),
 `GraphicsCompositorBlendRegion` and its shared variant, are the region blit
 (120/121) with a uniform opacity in place of the copy. They use the same

@@ -273,9 +273,9 @@ pub mod syscall {
     pub const SECRET_STORE: u64 = 127;
     pub const SECRET_READ: u64 = 128;
     pub const SECRET_REVOKE: u64 = 129;
-    pub const GRAPHICS_COMPOSITOR_BLEND_REGION: u64 = 130;
-    pub const GRAPHICS_COMPOSITOR_BLEND_REGION_SHARED: u64 = 131;
-    pub const GRAPHICS_COMPOSITOR_BLIT_KEYED: u64 = 132;
+    pub const GRAPHICS_COMPOSITOR_BLEND_REGION: u64 = 200;
+    pub const GRAPHICS_COMPOSITOR_BLEND_REGION_SHARED: u64 = 201;
+    pub const GRAPHICS_COMPOSITOR_BLIT_KEYED: u64 = 202;
     pub const MESSAGE_SEND: u64 = 11;
     pub const MESSAGE_RECEIVE: u64 = 12;
 

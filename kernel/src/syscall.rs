@@ -338,13 +338,13 @@ pub enum Number {
     /// own handle, packed destination and opacity (x | y<<24 | opacity<<56,
     /// x and y 24-bit signed, bits 48..56 zero), packed source region -> 0 or
     /// ERROR
-    GraphicsCompositorBlendRegion = 130,
+    GraphicsCompositorBlendRegion = 200,
     /// owner's handle, packed destination and opacity, packed source region
     /// -> 0 or ERROR
-    GraphicsCompositorBlendRegionShared = 131,
+    GraphicsCompositorBlendRegionShared = 201,
     /// own handle, packed destination (x | y<<32), packed source region ->
     /// 0 or ERROR; source pixels equal to the transparent key are skipped
-    GraphicsCompositorBlitKeyed = 132,
+    GraphicsCompositorBlitKeyed = 202,
 }
 
 pub fn entry_address() -> u64 {
