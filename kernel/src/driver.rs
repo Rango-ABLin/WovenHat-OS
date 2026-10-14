@@ -1000,6 +1000,109 @@ pub struct PciHotplugReport {
 
 /// Preserve the established summary-only ABI while exposing verified
 /// insertion events to a future driver matcher.
+/// Validate the driver-table state without touching PCI hardware.
+#[cfg(feature = "stage13-2-test")]
+fn stage13_2_entry_valid(entry: &Entry) -> bool {
+    match (entry.state, entry.pci) {
+        (State::Registered | State::Suspended, None) => true,
+        (State::Bound, Some(binding)) => {
+            binding.owner != crate::hal::pci::topology::NO_OWNER
+                && binding.bars.iter().enumerate().all(|(index, lease)| {
+                    lease.is_none_or(|bar| {
+                        usize::from(bar.bar) == index && bar.function == binding.function
+                    })
+                })
+                && binding.interrupt.is_none_or(|interrupt| match interrupt {
+                    PciInterrupt::Msi(lease) => lease.function == binding.function,
+                    PciInterrupt::Msix(lease) => {
+                        let index = usize::from(lease.bar.bar);
+                        lease.function == binding.function
+                            && lease.bar.function == binding.function
+                            && index < PCI_BAR_COUNT
+                            && binding.bars[index] == Some(lease.bar)
+                    }
+                })
+        }
+        (State::Bound, None) => true, // Non-PCI driver.
+        (State::Unbinding, _) | (State::Registered | State::Suspended, Some(_)) => false,
+    }
+}
+
+/// Stage 13.2 driver lifecycle snapshot and negative-state regression.
+/// The synthetic cases verify that unfinished teardown is rejected; real
+/// ownership release, hotplug and interrupt quiescence require separate tests.
+#[cfg(feature = "stage13-2-test")]
+pub fn stage13_2_legacy_lifecycle_self_test() -> bool {
+    let synthetic = Entry {
+        name: "stage13-2-audit",
+        kind: DeviceKind::Timer,
+        state: State::Registered,
+        pci: None,
+        pci_match: None,
+    };
+    if !stage13_2_entry_valid(&synthetic) {
+        return false;
+    }
+    let invalid = Entry {
+        state: State::Unbinding,
+        ..synthetic
+    };
+    if stage13_2_entry_valid(&invalid) {
+        return false;
+    }
+    // Exercise the real generation-safe topology state machine in isolation:
+    // a retained BAR blocks outer-owner release, stale leases fail after
+    // release, and a reused function slot cannot honor its old handle.
+    let mut topology = crate::hal::pci::topology::Topology::new();
+    let descriptor = crate::hal::pci::topology::FunctionDescriptor {
+        address: crate::hal::pci::topology::FunctionAddress {
+            segment: 0,
+            bus: 0,
+            device: 1,
+            function: 0,
+        },
+        bridge: None,
+    };
+    let Ok(handle) = topology.insert(descriptor) else {
+        return false;
+    };
+    const OWNER: u32 = 0x132;
+    if topology.claim(handle, OWNER).is_err()
+        || topology.claim(handle, OWNER) != Err(crate::hal::pci::topology::Error::AlreadyOwned)
+    {
+        return false;
+    }
+    let Ok(lease) = topology.lease_mmio(handle, OWNER, 0, 0x1000, 0x1000) else {
+        return false;
+    };
+    if !topology.validate_mmio(lease, OWNER)
+        || topology.release(handle, OWNER) != Err(crate::hal::pci::topology::Error::AlreadyOwned)
+        || topology.release_mmio(lease, OWNER + 1).is_ok()
+        || topology.release_mmio(lease, OWNER).is_err()
+        || topology.validate_mmio(lease, OWNER)
+        || topology.release_mmio(lease, OWNER).is_ok()
+        || topology.release(handle, OWNER).is_err()
+        || topology
+            .teardown(handle, crate::hal::pci::topology::NO_OWNER)
+            .is_err()
+        || topology.snapshot(handle).is_ok()
+    {
+        return false;
+    }
+    let Ok(reused) = topology.insert(descriptor) else {
+        return false;
+    };
+    if reused == handle
+        || topology.claim(handle, OWNER).is_ok()
+        || topology.claim(reused, OWNER).is_err()
+    {
+        return false;
+    }
+    TABLE.lock().iter().flatten().all(stage13_2_entry_valid)
+}
+
+/// Driver-aware PCI hotplug reconciliation. The HAL only detects removals;
+/// this layer owns driver teardown policy, preserving dependency direction.
 pub fn hotplug_rescan() -> Result<crate::hal::pci::Summary, PciUnbindError> {
     Ok(hotplug_rescan_report()?.summary)
 }

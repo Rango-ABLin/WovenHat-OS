@@ -3169,6 +3169,7 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         let pci_ok = hal::pci::self_test()
             && hardware.pci.discovered >= u16::from(hardware.pci.recorded)
             && hardware.pci.recorded != 0
+            && driver::stage13_2_legacy_lifecycle_self_test()
             && driver::stage13_2_lifecycle_self_test();
         if !pci_ok {
             serial::write_line(format_args!(
