@@ -6,10 +6,8 @@ warning-denying Clippy for WovenCalculator, WovenTerminal, WovenFiles, and
 WovenMonitor, WovenSettings, WovenSecurity, WovenEditor, WovenImages,
 WovenUpdate, and WovenStore; runs all ten through signed Ring-3 harnesses on 1,
 2, and 4 CPUs; and runs `scripts/test-system-app-catalog-qemu.py` on 1, 2,
-and 4 CPUs. The ten-application focused checks passed. A subsequent full
-release-chain attempt reached the first memory QEMU gate and emitted its
-complete pass marker, but timed out before QEMU returned exit 33; that overall
-release gate is therefore not accepted on this tree yet.
+and 4 CPUs. The ten-application checks and the complete release chain passed;
+the debug QEMU exit-width correction was exercised by the release matrix.
 
 `scripts/package-release.py` now includes the validated system-app manifest,
 ten WAPP packages, ten bounded catalog descriptors, and SHA-256 entries for

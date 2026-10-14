@@ -35,12 +35,11 @@ WovenStore adds bounded read-only installed-catalog browsing and passes signed
 1/2/4-CPU execution; see the
 [WovenStore audit](audit-stage19-store-2026-10-14.md).
 
-The ten-application focused gates passed on the current tree. A fresh
-`scripts/test-release.py` attempt passed lint and host tests, then stopped at
-`memory-1-debug`: the serial log emitted `[BOOT] ALL VALIDATIONS PASSED`, but
-the harness timed out waiting for QEMU to return exit 33. Therefore this tree
-is not marked as a fully accepted release until that harness/QEMU exit issue is
-resolved. See the [release validation audit](audit-release-validation-2026-10-14.md).
+The complete `scripts/test-release.py` chain now passes on the current tree.
+The debug QEMU exit path was corrected to issue the `isa-debug-exit` byte-width
+write explicitly; the full chain then passed lint, host tests, 1/2/4-CPU debug
+and release gates, all ten applications, catalog acceptance, and production
+system-app boot. See the [release validation audit](audit-release-validation-2026-10-14.md).
 
 This is software/QEMU qualification only; native hardware and destructive USB
 media limits remain open.

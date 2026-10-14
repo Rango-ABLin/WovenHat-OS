@@ -22,9 +22,9 @@ Warning-denying freestanding Clippy passes for `system-apps`. The normal-boot
 shell/QMP acceptance passed on 4 CPUs, with serial markers showing ten
 signed applications installed before shell startup and the existing SMP/PS2
 smoke markers. The focused 1/2/4-CPU catalog matrix and the
-`system-apps-boot` check passed. The subsequent full release chain stopped
-earlier at `memory-1-debug` and is not claimed as accepted. The production
-image was built with the feature and an explicit trusted public key.
+`system-apps-boot` check passed. The subsequent full release chain also passed,
+including the 1/2/4-CPU catalog matrix. The production image was built with
+the feature and an explicit trusted public key.
 
 ## Limits
 

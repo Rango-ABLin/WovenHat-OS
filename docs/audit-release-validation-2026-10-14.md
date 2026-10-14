@@ -1,8 +1,8 @@
 # Release validation audit — 2026-10-14
 
-`python scripts/test-release.py` was rerun on the current tree. The durable
-report is `target/release-validation/results.json`; it records the passing
-lint/host checks and the first failing gate, `memory-1-debug`.
+`python scripts/test-release.py` passed on the current tree. The durable
+report is `target/release-validation/results.json`, with preserved serial and
+QEMU evidence for every gate.
 
 The chain passed warning-denying freestanding kernel Clippy, host Clippy, all
 host integration-test compile/run pairs, memory/storage/network QEMU gates on
@@ -13,10 +13,8 @@ UDP and TCP payloads.
 
 The ten external system applications each passed warning-denying Clippy,
 signed 1/2/4-CPU Ring-3 acceptance, ten-package catalog acceptance, and the
-normal-boot `system-apps-boot` gate. The full release chain did not reach those
-later checks because `memory-1-debug` emitted all validation markers but timed
-out waiting for exit 33. No final release manifest is claimed from this
-failed chain.
+normal-boot `system-apps-boot` gate. The debug QEMU exit-width correction was
+validated by the complete chain; every QEMU run returned the expected exit 33.
 
 This is a reproducible software/release qualification. It does not replace
 native hardware qualification, destructive USB media testing, firmware Secure
