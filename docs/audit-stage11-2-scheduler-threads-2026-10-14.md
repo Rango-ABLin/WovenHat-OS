@@ -66,6 +66,15 @@ serial artifacts:
 audit-artifacts/stage11.2-1cpu-1791975759656374100
 audit-artifacts/stage11.2-2cpu-1791975829411200100
 audit-artifacts/stage11.2-4cpu-1791975876876280500
+
+The registry self-test now directly covers waiter registration, termination,
+waiter hand-off, and join status. The resulting regression gate retained:
+
+```text
+audit-artifacts/stage11.2-1cpu-1791976051779252200
+audit-artifacts/stage11.2-2cpu-1791976117458262700
+audit-artifacts/stage11.2-4cpu-1791976165640693800
+```
 ```
 ```
 ```
