@@ -73,6 +73,8 @@ stage15-9-test = ["qemu-test"]
 stage16-1-test = ["qemu-test"]
 # Three signed system applications installed through one bounded catalog plan.
 stage19-app-catalog-test = ["qemu-test"]
+# Production image build: install the signed system-app catalog during boot.
+system-apps = []
 # Full printable-ASCII font and text layout.
 stage17-1-test = ["qemu-test"]
 # Owner-bound client surface registry for userspace graphics.

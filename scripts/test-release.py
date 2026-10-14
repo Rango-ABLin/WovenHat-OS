@@ -66,7 +66,24 @@ def main():
             f'system-app-catalog-{cpus}',
             [sys.executable, 'scripts/test-system-app-catalog-qemu.py', '--cpus', str(cpus)] + options,
         )
-    image = Path(subprocess.check_output(['cargo', 'run', '--quiet', '--release', '--', '--print-image'], cwd=root, text=True).strip())
+    run('system-apps-boot', [sys.executable, 'scripts/test-shell-qemu.py', '--system-apps'] + options)
+    system_app_output = root / 'target' / 'system-apps' / '0.8.0'
+    system_app_manifest = json.loads((system_app_output / 'manifest.json').read_text(encoding='utf-8'))
+    system_app_env = os.environ.copy()
+    system_app_env.setdefault(
+        'WOVENHAT_APP_TRUSTED_PUBLIC_KEY_HEX',
+        'd75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a',
+    )
+    for item in system_app_manifest['apps']:
+        variable = {
+            'woven-calculator': 'WOVENHAT_CALCULATOR_IMAGE',
+            'woven-terminal': 'WOVENHAT_TERMINAL_IMAGE',
+            'woven-files': 'WOVENHAT_FILES_IMAGE',
+        }[item['id']]
+        system_app_env[variable] = str(system_app_output / item['package'])
+    image = Path(subprocess.check_output(
+        ['cargo', 'run', '--quiet', '--release', '--features', 'system-apps', '--', '--print-image'],
+        cwd=root, env=system_app_env, text=True).strip())
     sources = [root / name for name in ('Cargo.toml', 'Cargo.lock', 'kernel/Cargo.toml', 'build.rs', 'rust-toolchain.toml', '.cargo/config.toml')]
     sources += sorted((root / 'kernel' / 'src').rglob('*.rs'))
     sources += sorted((root / 'kernel' / 'src').rglob('*.S'))

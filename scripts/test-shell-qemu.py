@@ -16,6 +16,8 @@ def main():
     parser.add_argument('--firmware', type=Path)
     parser.add_argument('--firmware-vars', type=Path, help='matching writable OVMF VARS template')
     parser.add_argument('--cpus', type=int, choices=(1, 2, 4), default=4)
+    parser.add_argument('--system-apps', action='store_true',
+                        help='build the production system-app image and verify normal-boot installation')
     args = parser.parse_args()
     root = Path(__file__).resolve().parents[1]
     qemu = Path(args.qemu)
@@ -28,6 +30,27 @@ def main():
     # Keep the main build in the launcher-selected directories; only the nested
     # installer inherits dedicated project-local subdirectories.
     build_env = os.environ.copy()
+    feature_arguments = []
+    if args.system_apps:
+        # Acceptance only: production images must replace this deterministic
+        # root with a provisioned release public key.
+        test_public_key = 'd75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a'
+        package_env = os.environ.copy()
+        package_env.setdefault('WOVENHAT_APP_TRUSTED_PUBLIC_KEY_HEX', test_public_key)
+        subprocess.run(
+            [sys.executable, str(root / 'scripts' / 'package-system-apps.py'), '--version', '0.8.0'],
+            cwd=root,
+            env=package_env,
+            check=True,
+        )
+        output = root / 'target' / 'system-apps' / '0.8.0'
+        manifest = json.loads((output / 'manifest.json').read_text(encoding='utf-8'))
+        packages = {item['id']: output / item['package'] for item in manifest['apps']}
+        build_env['WOVENHAT_CALCULATOR_IMAGE'] = str(packages['woven-calculator'])
+        build_env['WOVENHAT_TERMINAL_IMAGE'] = str(packages['woven-terminal'])
+        build_env['WOVENHAT_FILES_IMAGE'] = str(packages['woven-files'])
+        build_env.setdefault('WOVENHAT_APP_TRUSTED_PUBLIC_KEY_HEX', test_public_key)
+        feature_arguments = ['--features', 'system-apps']
     cargo_command = ['cargo']
     target_arguments = []
     for variable, setting, default in (
@@ -42,7 +65,7 @@ def main():
             cargo_command.extend(['--config', setting + '=' + json.dumps(str(directory))])
         build_env[variable] = str(directory / 'bootloader')
     image = subprocess.check_output(
-        cargo_command + ['run', '--quiet', '--release'] + target_arguments + ['--', '--print-image'],
+        cargo_command + ['run', '--quiet', '--release'] + feature_arguments + target_arguments + ['--', '--print-image'],
         cwd=root, env=build_env, text=True).strip()
     out = root / 'target' / 'shell-regression'
     out.mkdir(parents=True, exist_ok=True)
@@ -71,6 +94,8 @@ def main():
                 if process.poll() is not None or time.monotonic() > deadline:
                     raise RuntimeError('Normal boot failed; inspect shell-regression logs')
                 time.sleep(0.1)
+            if args.system_apps and '[APPS] 3 signed applications installed' not in serial.read_text(errors='replace'):
+                raise RuntimeError('Production system-app catalog was not installed; inspect shell-regression logs')
             time.sleep(1)
             with socket.create_connection(('127.0.0.1', port), timeout=5) as connection:
                 stream = connection.makefile('rwb')

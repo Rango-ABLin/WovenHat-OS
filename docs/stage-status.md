@@ -30,6 +30,16 @@ payloads, catalog descriptors, and per-artifact hashes. See the
 release image still does not claim ordinary-boot multi-package installation or
 physical-media qualification.
 
+The `system-apps` production-image feature now installs the three signed
+packages during normal boot, with pre-mutation signature/ELF validation,
+collision checks, and rollback of newly created VFS entries on publication
+failure. It requires an explicitly provisioned application trust key; the
+acceptance harness supplies the test key only for QEMU. The 4-CPU shell gate
+confirmed installation before shell startup. Persistent media updates,
+power-loss rollback, key rotation/revocation, and the remaining applications
+are still open. See the
+[production system-app boot audit](audit-stage19-production-system-app-boot-2026-10-14.md).
+
 Stage 14.5D was rerun on 1/2/4 CPUs. DHCP, DNS, ICMP, host-verified UDP/TCP,
 SMP/TLB, and firewall transport/path checks passed with exit 33. See the
 [Stage 14.5D revalidation audit](audit-stage14-5d-revalidation-2026-10-14.md).

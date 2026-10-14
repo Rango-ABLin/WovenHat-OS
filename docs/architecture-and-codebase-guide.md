@@ -38,6 +38,14 @@ Stage 19 system-app catalog audit. This is not ordinary-boot installation:
 rollback, trusted catalog publication, and image/installer ownership remain
 required for production deployment.
 
+The `system-apps` image feature is the first production-image consumer. It
+requires a compile-time provisioned application public key, validates every
+WAPP and normal ELF load before VFS mutation, checks path collisions, and
+rolls back entries created by a failed publication. Acceptance harnesses pass
+the deterministic test key explicitly; production provisioning must replace
+it. The current publication is RAM-backed at boot, so persistent update,
+power-loss rollback, and key lifecycle policy remain open.
+
 ## Release validation (2026-10-14)
 
 The repository release chain passed on the current tree, including warning-

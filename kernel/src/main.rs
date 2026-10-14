@@ -1444,6 +1444,12 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
             let _ = vfs::mkdir(dir);
         }
 
+        #[cfg(feature = "system-apps")]
+        if !install_production_system_apps() {
+            serial::write_line(format_args!("[APPS] production catalog install failed"));
+            halt();
+        }
+
         match network::init() {
             Ok(()) => serial::write_line(format_args!(
                 "[NET] virtio-net + smoltcp online at 10.0.2.15/24"
@@ -4588,12 +4594,134 @@ fn preemption_probe_task() -> ! {
 #[cfg(feature = "stage16-1-test")]
 const EXTERNAL_APPLICATION: &[u8] = include_bytes!(env!("WOVENHAT_APP_IMAGE"));
 
-#[cfg(feature = "stage19-app-catalog-test")]
+#[cfg(any(feature = "stage19-app-catalog-test", feature = "system-apps"))]
 const SYSTEM_APP_CALCULATOR: &[u8] = include_bytes!(env!("WOVENHAT_CALCULATOR_IMAGE"));
-#[cfg(feature = "stage19-app-catalog-test")]
+#[cfg(any(feature = "stage19-app-catalog-test", feature = "system-apps"))]
 const SYSTEM_APP_TERMINAL: &[u8] = include_bytes!(env!("WOVENHAT_TERMINAL_IMAGE"));
-#[cfg(feature = "stage19-app-catalog-test")]
+#[cfg(any(feature = "stage19-app-catalog-test", feature = "system-apps"))]
 const SYSTEM_APP_FILES: &[u8] = include_bytes!(env!("WOVENHAT_FILES_IMAGE"));
+
+#[cfg(feature = "system-apps")]
+fn install_production_system_apps() -> bool {
+    #[derive(Clone, Copy)]
+    struct App {
+        name: &'static str,
+        image: &'static [u8],
+        binary_path: &'static str,
+        catalog_path: &'static str,
+        catalog: &'static [u8],
+    }
+    let apps = [
+        App {
+            name: "woven-calculator",
+            image: SYSTEM_APP_CALCULATOR,
+            binary_path: "/bin/wovenhat-calculator",
+            catalog_path: "/share/applications/woven-calculator.app",
+            catalog: b"Name=WovenCalculator\nExec=/bin/wovenhat-calculator\n",
+        },
+        App {
+            name: "woven-terminal",
+            image: SYSTEM_APP_TERMINAL,
+            binary_path: "/bin/wovenhat-terminal",
+            catalog_path: "/share/applications/woven-terminal.app",
+            catalog: b"Name=WovenTerminal\nExec=/bin/wovenhat-terminal --interactive\n",
+        },
+        App {
+            name: "woven-files",
+            image: SYSTEM_APP_FILES,
+            binary_path: "/bin/wovenhat-files",
+            catalog_path: "/share/applications/woven-files.app",
+            catalog: b"Name=WovenFiles\nExec=/bin/wovenhat-files\n",
+        },
+    ];
+    // Verify and parse all packages before changing the VFS. A malformed or
+    // untrusted package therefore cannot leave a partially published catalog.
+    for app in apps {
+        let Ok(verified) = signed_app::verify_package(app.image) else {
+            serial::write_line(format_args!("[APPS] {} signature rejected", app.name));
+            return false;
+        };
+        if elf::parse(verified.bytes()).is_err() {
+            serial::write_line(format_args!("[APPS] {} ELF rejected", app.name));
+            return false;
+        }
+        let Some(program) = userspace::load_elf_with_argv_verified(app.image, &[app.binary_path])
+        else {
+            serial::write_line(format_args!("[APPS] {} loader rejected", app.name));
+            return false;
+        };
+        if !userspace::destroy(program.address_space) {
+            serial::write_line(format_args!("[APPS] {} loader cleanup failed", app.name));
+            return false;
+        }
+        if vfs::stat(app.binary_path).is_ok() || vfs::stat(app.catalog_path).is_ok() {
+            serial::write_line(format_args!("[APPS] {} path collision", app.name));
+            return false;
+        }
+    }
+    let share_created = if vfs::stat("/share").is_err() {
+        if vfs::mkdir("/share").is_err() {
+            return false;
+        }
+        true
+    } else {
+        false
+    };
+    let applications_created = if vfs::stat("/share/applications").is_err() {
+        if vfs::mkdir("/share/applications").is_err() {
+            if share_created {
+                let _ = vfs::remove("/share");
+            }
+            return false;
+        }
+        true
+    } else {
+        false
+    };
+    if vfs::stat("/share").is_err() {
+        return false;
+    }
+    let mut installed = 0usize;
+    for app in apps {
+        if vfs::create_read_only(app.binary_path, app.image).is_err() {
+            for rollback in apps.into_iter().take(installed) {
+                let _ = vfs::remove(rollback.binary_path);
+            }
+            if applications_created {
+                let _ = vfs::remove("/share/applications");
+            }
+            if share_created {
+                let _ = vfs::remove("/share");
+            }
+            return false;
+        }
+        installed += 1;
+    }
+    let mut catalogs = 0usize;
+    for app in apps {
+        if vfs::create_read_only(app.catalog_path, app.catalog).is_err() {
+            for rollback in apps {
+                if catalogs > 0 {
+                    let _ = vfs::remove(rollback.catalog_path);
+                    catalogs -= 1;
+                }
+            }
+            for rollback in apps.into_iter().take(installed) {
+                let _ = vfs::remove(rollback.binary_path);
+            }
+            if applications_created {
+                let _ = vfs::remove("/share/applications");
+            }
+            if share_created {
+                let _ = vfs::remove("/share");
+            }
+            return false;
+        }
+        catalogs += 1;
+    }
+    serial::write_line(format_args!("[APPS] {} signed applications installed", installed));
+    true
+}
 
 /// Stage 19 system-app acceptance: verify and install one bounded catalog plan.
 ///
