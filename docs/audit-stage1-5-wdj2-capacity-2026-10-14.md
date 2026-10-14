@@ -11,6 +11,8 @@ The kernel self-test now constructs and round-trips a maximum-capacity
 prepared record, including the metadata-snapshot fields, before any live-device
 work. Warning-denying freestanding Clippy for `stage1-5-test`, the full host
 test suite, and the release build pass.
+The same self-test verifies that a 256-entry request is rejected before record
+encoding, preserving the fail-closed boundary beyond the 255-entry limit.
 
 Fresh QEMU acceptance passed with exit 33 and the required Stage 1–5 marker:
 

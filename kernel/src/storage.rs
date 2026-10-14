@@ -1012,7 +1012,20 @@ fn batch_capacity_self_test() -> bool {
     let Some(record) = encode_batch_journal(&entries, BATCH_JOURNAL_PREPARED) else {
         return false;
     };
-    parse_batch_journal(&record).is_some_and(|decoded| decoded.len() == BATCH_JOURNAL_MAX_ENTRIES)
+    let maximum_round_trip = parse_batch_journal(&record)
+        .is_some_and(|decoded| decoded.len() == BATCH_JOURNAL_MAX_ENTRIES);
+    let mut oversized = entries;
+    oversized.push(BatchJournalEntry {
+        path: alloc::string::String::from("/mnt/over-capacity.bin"),
+        old_exists: false,
+        old_data: alloc::vec::Vec::new(),
+        old_metadata: None,
+        metadata_snapshot: true,
+        new_len: 0,
+        new_checksum: checksum_bytes(&[]),
+        metadata: None,
+    });
+    maximum_round_trip && encode_batch_journal(&oversized, BATCH_JOURNAL_PREPARED).is_none()
 }
 
 fn data_journal_self_test() -> bool {
