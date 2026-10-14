@@ -1,5 +1,14 @@
 # WovenHat OS Architecture & Codebase Guide
 
+## Stage 19 WovenCalculator (2026-10-14)
+
+`apps/woven-calculator` is a separate Ring-3 crate with a bounded checked
+arithmetic core, a console mode, and an optional GUI mode. It uses the same
+static ET_EXEC linker contract and WAPP signing path as the existing external
+application. Its 1/2/4-CPU signed QEMU evidence is recorded in the Stage 19
+calculator audit. This is the first system application increment; the rest of
+the roadmap application suite and catalog/boot-image installation remain open.
+
 ## Release validation (2026-10-14)
 
 The repository release chain passed on the current tree, including warning-
