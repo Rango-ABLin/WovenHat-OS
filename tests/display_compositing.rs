@@ -509,3 +509,53 @@ fn blit_region_clips_to_both_surfaces() {
     assert_eq!(target.blit_region(&source, Rect::new(4, 0, 2, 2), 0, 0), Rect::EMPTY);
     assert_eq!(target.blit_region(&source, Rect::new(0, 0, 2, 2), 9, 9), Rect::EMPTY);
 }
+
+// ------------------------------------------------------------- keyed blit
+
+#[test]
+fn keyed_blit_skips_the_key_and_copies_everything_else() {
+    use display::TRANSPARENT_KEY;
+    let mut overlay = Surface::new(4, 2);
+    overlay.fill_rect(overlay.bounds(), TRANSPARENT_KEY);
+    overlay.set_pixel(1, 0, WHITE);
+    overlay.set_pixel(3, 1, RED);
+    let mut target = Surface::new(6, 4);
+    target.fill_rect(target.bounds(), BLUE);
+    assert_eq!(
+        target.blit_region_keyed(&overlay, overlay.bounds(), 2, 1, TRANSPARENT_KEY),
+        Rect::new(2, 1, 4, 2),
+        "the covered region is reported"
+    );
+    assert_eq!(target.pixel(3, 1), Some(WHITE));
+    assert_eq!(target.pixel(5, 2), Some(RED));
+    // Keyed pixels leave the destination untouched, and nothing outside the
+    // region changes.
+    for (x, y) in [(2, 1), (4, 1), (2, 2), (4, 2), (1, 1), (3, 3)] {
+        assert_eq!(target.pixel(x, y), Some(BLUE), "({x}, {y})");
+    }
+    for y in 0..4 {
+        for x in 0..6 {
+            assert_ne!(target.pixel(x, y), Some(TRANSPARENT_KEY), "the key itself never lands");
+        }
+    }
+}
+
+#[test]
+fn keyed_blit_clips_like_the_region_blit() {
+    use display::TRANSPARENT_KEY;
+    let mut overlay = Surface::new(3, 3);
+    overlay.fill_rect(overlay.bounds(), WHITE);
+    let mut keyed = Surface::new(4, 4);
+    let mut plain = Surface::new(4, 4);
+    // With no keyed pixels it is exactly the region blit, clipping included.
+    assert_eq!(
+        keyed.blit_region_keyed(&overlay, Rect::new(-1, 0, 3, 3), 2, 2, TRANSPARENT_KEY),
+        plain.blit_region(&overlay, Rect::new(-1, 0, 3, 3), 2, 2)
+    );
+    for y in 0..4 {
+        for x in 0..4 {
+            assert_eq!(keyed.pixel(x, y), plain.pixel(x, y));
+        }
+    }
+    assert_eq!(keyed.blit_region_keyed(&overlay, overlay.bounds(), 9, 9, TRANSPARENT_KEY), Rect::EMPTY);
+}

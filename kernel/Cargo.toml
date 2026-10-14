@@ -97,6 +97,12 @@ stage20-3-test = ["qemu-test"]
 stage20-4-test = ["qemu-test"]
 # Depth: window shadows and elevation through region blends.
 stage20-5-test = ["qemu-test"]
+# Translucent panel, toast and pointer overlays over windows.
+stage20-6-test = ["qemu-test"]
+# Physics-based animation: windows fade in on a spring.
+stage20-7-test = ["qemu-test"]
+# Tiling: resize protocol, snap to edges, master-and-stack layout.
+stage20-8-test = ["qemu-test"]
 stage1-5-test = ["qemu-test"]
 
 [dependencies]

@@ -32,9 +32,26 @@
 //! icon goes away when its surface does, normally because its owner exited.
 //! Keystrokes go to the focused window's owner as one-byte messages.
 //!
+//! A new window fades in: its opacity follows a [`Spring`] from 0 to 255,
+//! and its title bar, client area and shadow are composed at that opacity.
+//! While anything animates the shell runs a 20 ms frame clock; otherwise
+//! 250 ms.
+//!
+//! The launcher panel and the toast are translucent over whatever lies
+//! beneath, windows included: their background is region-blended, and their
+//! border and text are an overlay drawn on the transparent key and copied with
+//! a keyed blit, as is the pointer. Nothing is read back from the screen.
+//!
 //! Every window casts a soft shadow of two translucent bands, offset down and
 //! right; the focused window sits higher, so its shadow falls further and
 //! darker. Shadows stay off the taskbar.
+//!
+//! Windows change size by request: the shell sends the owner `WSIZ` with a
+//! client size, and the owner answers `WRSZ` with a new surface of that size
+//! (token, width, height), releasing the old one. Dropping a window on the
+//! left or right edge snaps it to that half of the screen. F2 toggles
+//! tiling: master and stack, the first window on the left half and the rest
+//! sharing the right, re-tiled as windows open and close.
 //!
 //! A window is moved by dragging its title bar. Its close control sends the
 //! owner `WCLS`, a request: the window goes when the owner releases its
@@ -57,9 +74,10 @@
 use core::cell::UnsafeCell;
 use core::panic::PanicInfo;
 
+use libwoven::layout::{self, Frame};
 use libwoven::{
     blend, font, process, rgb, wait, Args, Canvas, DateTime, FrameEvent, GraphicsSurface,
-    InputEvent, Key, Region,
+    InputEvent, Key, Region, Spring, TRANSPARENT,
 };
 
 libwoven::entry!(main);
@@ -125,6 +143,7 @@ const TOAST_WIDTH: i32 = 180;
 const TOAST_HEIGHT: i32 = 22;
 const TOAST_MARGIN: i32 = 8;
 const TOAST_FILL: u32 = rgb(30, 34, 46);
+const TOAST_OPACITY: u8 = 216;
 const TOAST_CHARS: usize = ((TOAST_WIDTH - 12) / font::ADVANCE) as usize;
 const TOAST_TICKS: u64 = 4 * libwoven::time::TICKS_PER_SECOND;
 
@@ -157,6 +176,7 @@ const PANEL_X: i32 = 4;
 const PANEL_WIDTH: i32 = 160;
 const PANEL_ROW: i32 = 14;
 const PANEL_FILL: u32 = rgb(28, 32, 44);
+const PANEL_OPACITY: u8 = 216;
 const PANEL_TITLE: &str = "WovenStart";
 
 const TILE_WIDTH: usize = 320;
@@ -166,6 +186,10 @@ const TILE_PIXELS: usize = TILE_WIDTH * TILE_HEIGHT;
 /// The shell wakes at least four times a second for the clock, the toast
 /// timer and window liveness.
 const FRAME_PERIOD: u64 = libwoven::time::TICKS_PER_SECOND / 4;
+/// How long a resize may take before a vanished surface counts as an exit.
+const RESIZE_GRACE: u64 = libwoven::time::TICKS_PER_SECOND;
+/// The frame clock while something animates: 20 ms.
+const ANIMATION_PERIOD: u64 = 2;
 
 /// The one tile buffer, in .bss rather than on the stack.
 struct TileBuffer(UnsafeCell<[u32; TILE_PIXELS]>);
@@ -228,6 +252,15 @@ fn label(bytes: &[u8], limit: usize, buffer: &mut [u8; 32]) -> usize {
         *slot = if (b' '..=b'~').contains(byte) { *byte } else { b'?' };
     }
     length
+}
+
+/// A one-pixel outline of `area` in `color`.
+fn outline(canvas: &mut Canvas<'_>, area: Area, color: u32) {
+    let (width, height) = (area.width as usize, area.height as usize);
+    canvas.fill_rect(area.x, area.y, width, 1, color);
+    canvas.fill_rect(area.x, area.y + area.height - 1, width, 1, color);
+    canvas.fill_rect(area.x, area.y, 1, height, color);
+    canvas.fill_rect(area.x + area.width - 1, area.y, 1, height, color);
 }
 
 /// A rectangle in screen coordinates.
@@ -296,9 +329,19 @@ struct Window {
     height: i32,
     title: [u8; MAX_TITLE],
     title_length: usize,
+    /// Opacity, 0 to 255: animated from 0 as the window opens.
+    fade: Spring,
+    /// Until this tick, a resize has been requested and the owner may be
+    /// swapping surfaces: a failed blit of the old one does not mean it
+    /// exited.
+    resizing_until: libwoven::time::Ticks,
 }
 
 impl Window {
+    fn alpha(&self) -> u8 {
+        self.fade.value().clamp(0, 255) as u8
+    }
+
     fn title_area(&self) -> Area {
         Area::new(self.x, self.y - TITLE_HEIGHT, self.width, TITLE_HEIGHT)
     }
@@ -465,6 +508,71 @@ struct Painter<'a> {
 }
 
 impl Painter<'_> {
+    /// [`draw`](Self::draw), blended at `opacity` over what is composed.
+    fn draw_blended(&mut self, area: Area, opacity: u8, render: impl Fn(&mut Canvas<'_>)) {
+        let mut y = area.y;
+        while y < area.y + area.height {
+            let height = (area.y + area.height - y).min(TILE_HEIGHT as i32);
+            let mut x = area.x;
+            while x < area.x + area.width {
+                let width = (area.x + area.width - x).min(TILE_WIDTH as i32);
+                let Some(mut canvas) =
+                    Canvas::new(self.tile, x, y, width as usize, height as usize)
+                else {
+                    fail(16);
+                };
+                render(&mut canvas);
+                let region = Region {
+                    x: 0,
+                    y: 0,
+                    width: width as u16,
+                    height: height as u16,
+                };
+                if self.staging.write_canvas(&canvas).is_err()
+                    || self.staging.present_region_blended(region, x, y, opacity).is_err()
+                {
+                    fail(17);
+                }
+                x += width;
+            }
+            y += height;
+        }
+    }
+
+    /// Render an overlay over `area` with `render`, on a canvas pre-filled
+    /// with the transparent key, and copy it with a keyed blit: only what
+    /// `render` drew lands, over what is already composed.
+    fn overlay(&mut self, area: Area, render: impl Fn(&mut Canvas<'_>)) {
+        let mut y = area.y;
+        while y < area.y + area.height {
+            let height = (area.y + area.height - y).min(TILE_HEIGHT as i32);
+            let mut x = area.x;
+            while x < area.x + area.width {
+                let width = (area.x + area.width - x).min(TILE_WIDTH as i32);
+                let Some(mut canvas) =
+                    Canvas::new(self.tile, x, y, width as usize, height as usize)
+                else {
+                    fail(14);
+                };
+                canvas.fill_rect(x, y, width as usize, height as usize, TRANSPARENT);
+                render(&mut canvas);
+                let region = Region {
+                    x: 0,
+                    y: 0,
+                    width: width as u16,
+                    height: height as u16,
+                };
+                if self.staging.write_canvas(&canvas).is_err()
+                    || self.staging.present_region_keyed(region, x, y).is_err()
+                {
+                    fail(15);
+                }
+                x += width;
+            }
+            y += height;
+        }
+    }
+
     /// Blend `color` over `area` with uniform `opacity`, in chunks no larger
     /// than the staging surface.
     fn blend(&mut self, area: Area, color: u32, opacity: u8) {
@@ -548,6 +656,8 @@ struct Desktop {
     pointer_visible: bool,
     /// The window being dragged, and where in it the pointer took hold.
     drag: Option<(usize, i32, i32)>,
+    /// Whether windows are tiled.
+    tiled: bool,
     apps: [Option<App>; MAX_APPS],
     app_count: usize,
     launcher_open: bool,
@@ -630,12 +740,13 @@ impl Desktop {
         Area::new(PANEL_X, self.taskbar_top() - 2 - height, PANEL_WIDTH, height)
     }
 
+    /// The panel's overlay: border, title row, selection and text. Its
+    /// background is blended separately, so what lies beneath shows through.
     fn render_panel(&self, canvas: &mut Canvas<'_>) {
         let area = self.panel_area();
         let (x, y) = (area.x, area.y);
         let inner = (area.width - 2) as usize;
-        canvas.fill_rect(x, y, area.width as usize, area.height as usize, ACCENT);
-        canvas.fill_rect(x + 1, y + 1, inner, (area.height - 2) as usize, PANEL_FILL);
+        outline(canvas, area, ACCENT);
         canvas.fill_rect(x + 1, y + 1, inner, PANEL_ROW as usize, START_FILL);
         canvas.draw_text(x + 6, y + 5, PANEL_TITLE, TEXT);
 
@@ -819,18 +930,16 @@ impl Desktop {
         canvas.draw_text(area.x + 4, area.y + 4, text, TEXT);
     }
 
+    /// The toast's overlay: border and text over its blended background.
     fn render_toast(&self, toast: &Toast, canvas: &mut Canvas<'_>) {
         let area = self.toast_area();
-        let (width, height) = (area.width as usize, area.height as usize);
-        canvas.fill_rect(area.x, area.y, width, height, ACCENT);
-        canvas.fill_rect(area.x + 1, area.y + 1, width - 2, height - 2, TOAST_FILL);
+        outline(canvas, area, ACCENT);
         let text = core::str::from_utf8(&toast.text[..toast.length]).unwrap_or("");
         canvas.draw_text(area.x + 6, area.y + 8, text, TEXT);
     }
 
-    /// The pointer over whatever is already on screen beneath it.
+    /// The pointer, as an overlay: its transparent cells stay on the key.
     fn render_cursor(&self, canvas: &mut Canvas<'_>) {
-        canvas.shade(|x, y| libwoven::screen_pixel(x, y).unwrap_or(0));
         let (left, top) = self.pointer;
         for (row, line) in CURSOR.iter().enumerate() {
             for (column, cell) in line.iter().enumerate() {
@@ -870,40 +979,57 @@ impl Desktop {
             let Some(window) = &self.windows[slot] else { continue };
             let bands = if Some(slot) == focused { FOCUSED_SHADOW } else { UNFOCUSED_SHADOW };
             let frame = window.frame();
+            // Everything about a fading window, its shadow included, is
+            // composed at its current opacity.
+            let alpha = window.alpha();
+            if alpha == 0 {
+                continue;
+            }
             for (offset, opacity) in bands {
                 let band = Area::new(frame.x + offset, frame.y + offset, frame.width, frame.height);
                 let part = band.intersect(area).intersect(above_taskbar);
-                if !part.is_empty() {
+                let opacity = (u32::from(opacity) * u32::from(alpha) / 255) as u8;
+                if !part.is_empty() && opacity != 0 {
                     painter.blend(part, SHADOW, opacity);
                 }
             }
             let title = window.title_area().intersect(area);
             if !title.is_empty() {
                 let active = Some(slot) == focused;
-                painter.draw(title, |canvas| Self::render_title(window, active, canvas));
+                if alpha == u8::MAX {
+                    painter.draw(title, |canvas| Self::render_title(window, active, canvas));
+                } else {
+                    painter.draw_blended(title, alpha, |canvas| Self::render_title(window, active, canvas));
+                }
             }
             let body = window.body().intersect(area);
             if !body.is_empty() {
                 let region = body.relative_to(window.x, window.y);
-                let _ = libwoven::compositor_blit_region_shared(window.token, region, body.x, body.y);
+                let _ = if alpha == u8::MAX {
+                    libwoven::compositor_blit_region_shared(window.token, region, body.x, body.y)
+                } else {
+                    libwoven::compositor_blend_region_shared(window.token, region, body.x, body.y, alpha)
+                };
             }
         }
 
         if let Some(toast) = &self.toast {
             let part = self.toast_area().intersect(area);
             if !part.is_empty() {
-                painter.draw(part, |canvas| self.render_toast(toast, canvas));
+                painter.blend(part, TOAST_FILL, TOAST_OPACITY);
+                painter.overlay(part, |canvas| self.render_toast(toast, canvas));
             }
         }
 
         let panel = self.panel_area().intersect(area);
         if !panel.is_empty() {
-            painter.draw(panel, |canvas| self.render_panel(canvas));
+            painter.blend(panel, PANEL_FILL, PANEL_OPACITY);
+            painter.overlay(panel, |canvas| self.render_panel(canvas));
         }
 
         let cursor = self.cursor_area().intersect(area);
         if !cursor.is_empty() {
-            painter.draw(cursor, |canvas| self.render_cursor(canvas));
+            painter.overlay(cursor, |canvas| self.render_cursor(canvas));
         }
     }
 
@@ -951,13 +1077,106 @@ impl Desktop {
         let mut title = [0u8; MAX_TITLE];
         let title_length = (message.len() - 16).min(MAX_TITLE);
         title[..title_length].copy_from_slice(&message[16..16 + title_length]);
-        let window = Window { owner, token, x, y, width, height, title, title_length };
+        let mut fade = Spring::new(0);
+        fade.set_target(i32::from(u8::MAX));
+        let window = Window {
+            owner,
+            token,
+            x,
+            y,
+            width,
+            height,
+            title,
+            title_length,
+            fade,
+            resizing_until: 0,
+        };
         self.windows[slot] = Some(window);
         let previous = self.focused().and_then(|old| self.windows[old]).map(|w| w.footprint());
         self.stack[self.stacked] = slot;
         self.stacked += 1;
         log(&[b"woven-shell: window opened: ", &title[..title_length]]);
-        window.footprint().union(previous.unwrap_or(empty)).union(self.taskbar())
+        window
+            .footprint()
+            .union(previous.unwrap_or(empty))
+            .union(self.taskbar())
+            .union(self.retile())
+    }
+
+    /// Where windows may go: the screen above the taskbar.
+    fn work_area(&self) -> Frame {
+        Frame::new(0, 0, self.width, self.taskbar_top())
+    }
+
+    /// Put window `slot` in `frame`, title bar included: move it now, and if
+    /// its client area changes size, ask the owner for a surface of the new
+    /// size. Returns the area to repaint.
+    fn place(&mut self, slot: usize, frame: Frame) -> Area {
+        let Some(window) = self.windows[slot].as_mut() else {
+            return Area::new(0, 0, 0, 0);
+        };
+        let before = window.footprint();
+        let client = frame.client(TITLE_HEIGHT);
+        window.x = client.x;
+        window.y = client.y;
+        if (client.width, client.height) != (window.width, window.height) {
+            let mut request = [0u8; 8];
+            request[..4].copy_from_slice(b"WSIZ");
+            request[4..6].copy_from_slice(&(client.width as u16).to_le_bytes());
+            request[6..].copy_from_slice(&(client.height as u16).to_le_bytes());
+            window.resizing_until = libwoven::ticks() + RESIZE_GRACE;
+            let _ = libwoven::message_send(window.owner, &request);
+        }
+        before.union(window.footprint())
+    }
+
+    /// Lay every window out again, if tiling is on. Returns the area to
+    /// repaint.
+    fn retile(&mut self) -> Area {
+        let mut dirty = Area::new(0, 0, 0, 0);
+        if !self.tiled {
+            return dirty;
+        }
+        let mut slots = [0usize; MAX_WINDOWS];
+        let mut count = 0;
+        for (slot, _) in self.entries() {
+            slots[count] = slot;
+            count += 1;
+        }
+        let (frames, placed) = layout::tile(count, self.work_area());
+        for index in 0..placed {
+            dirty = dirty.union(self.place(slots[index], frames[index]));
+        }
+        dirty
+    }
+
+    /// `WRSZ`: the owner replaced a window's surface with one of a new size.
+    /// Returns the area to repaint.
+    fn resized(&mut self, owner: process::Id, message: &[u8]) -> Area {
+        let empty = Area::new(0, 0, 0, 0);
+        if message.len() != 16 {
+            return empty;
+        }
+        let token = u64::from_le_bytes(message[4..12].try_into().unwrap_or([0; 8]));
+        let width = i32::from(u16::from_le_bytes([message[12], message[13]]));
+        let height = i32::from(u16::from_le_bytes([message[14], message[15]]));
+        let top = self.taskbar_top();
+        if libwoven::surface_owner(token) != owner
+            || !(1..=self.width).contains(&width)
+            || !(1..=top - TITLE_HEIGHT).contains(&height)
+        {
+            return empty;
+        }
+        let Some(window) = self.windows.iter_mut().flatten().find(|window| window.owner == owner) else {
+            return empty;
+        };
+        let before = window.footprint();
+        window.token = token;
+        window.width = width;
+        window.height = height;
+        window.resizing_until = 0;
+        log(&[b"woven-shell: window resized: ", &window.title[..window.title_length]]);
+        before.union(window.footprint())
     }
 
     /// Remove window `slot`. Returns the area to repaint.
@@ -975,13 +1194,18 @@ impl Desktop {
         log(&[b"woven-shell: window closed: ", &window.title[..window.title_length]]);
         // The newly focused window's title and shadow change too.
         let next = self.focused().and_then(|top| self.windows[top]).map(|w| w.footprint());
-        window.footprint().union(next.unwrap_or(Area::new(0, 0, 0, 0))).union(self.taskbar())
+        window
+            .footprint()
+            .union(next.unwrap_or(Area::new(0, 0, 0, 0)))
+            .union(self.taskbar())
+            .union(self.retile())
     }
 
     fn handle_message(&mut self, sender: process::Id, message: &[u8]) -> Area {
         let empty = Area::new(0, 0, 0, 0);
         match message.get(..4) {
             Some(b"WOPN") => self.open(sender, message),
+            Some(b"WRSZ") => self.resized(sender, message),
             Some(b"TRAY") if message.len() == 12 => {
                 let token = u64::from_le_bytes(message[4..12].try_into().unwrap_or([0; 8]));
                 if libwoven::surface_owner(token) != sender {
@@ -1023,7 +1247,14 @@ impl Desktop {
                 before.union(self.cursor_area()).union(moved)
             }
             InputEvent::PointerButton { button: 0, pressed: false } => {
-                self.drag = None;
+                // Dropped on the left or right edge: snap to that half.
+                let Some((slot, _, _)) = self.drag.take() else { return empty };
+                let (x, _) = self.pointer;
+                if x <= 0 || x >= self.width - 1 {
+                    let half = layout::half(self.work_area(), x > 0);
+                    log(&[b"woven-shell: window snapped"]);
+                    return self.place(slot, half);
+                }
                 empty
             }
             InputEvent::PointerButton { button: 0, pressed: true } => {
@@ -1074,6 +1305,11 @@ impl Desktop {
             }
             InputEvent::Key(key) if self.launcher_open => self.launcher_key(key),
             InputEvent::Key(Key::F1) => self.toggle_launcher(),
+            InputEvent::Key(Key::F2) => {
+                self.tiled = !self.tiled;
+                log(if self.tiled { &[b"woven-shell: tiling on"] } else { &[b"woven-shell: tiling off"] });
+                self.retile()
+            }
             InputEvent::Key(Key::Char(character)) if character.is_ascii() => {
                 if let Some(window) = self.focused().and_then(|slot| self.windows[slot]) {
                     let _ = libwoven::message_send(window.owner, &[character as u8]);
@@ -1117,6 +1353,9 @@ impl Desktop {
                     dirty = dirty.union(changed);
                 }
                 Ok(None) => {}
+                // While a resize is outstanding the owner may have released
+                // the old surface before its new one arrives.
+                Err(_) if libwoven::ticks() < window.resizing_until => {}
                 Err(_) => dirty = dirty.union(self.close(slot)),
             }
         }
@@ -1131,6 +1370,23 @@ impl Desktop {
                     log(&[b"woven-shell: tray icon removed"]);
                     dirty = dirty.union(place);
                 }
+            }
+        }
+        dirty
+    }
+
+    /// Whether any window is still fading.
+    fn animating(&self) -> bool {
+        self.windows.iter().flatten().any(|window| !window.fade.is_settled())
+    }
+
+    /// Advance every animation by `frames`. Returns the area to repaint.
+    fn animate(&mut self, frames: u64) -> Area {
+        let mut dirty = Area::new(0, 0, 0, 0);
+        for window in self.windows.iter_mut().flatten() {
+            if !window.fade.is_settled() {
+                window.fade.step(frames);
+                dirty = dirty.union(window.footprint());
             }
         }
         dirty
@@ -1198,6 +1454,7 @@ fn main(args: Args) -> ! {
         pointer: (width / 2, height / 2),
         pointer_visible: false,
         drag: None,
+        tiled: false,
         apps,
         app_count,
         launcher_open: false,
@@ -1221,9 +1478,16 @@ fn main(args: Args) -> ! {
     // Large enough for any message: one that did not fit would stay queued
     // and keep the mailbox ready forever.
     let mut message = [0u8; 256];
+    // Whether the clock is running at the animation rate.
+    let mut fast = false;
     loop {
+        // Switch frame rate as animations start and finish.
+        if desktop.animating() != fast {
+            fast = !fast;
+            clock = libwoven::FrameClock::new(if fast { ANIMATION_PERIOD } else { FRAME_PERIOD });
+        }
         let mut dirty = match clock.wait(sources) {
-            Ok(FrameEvent::Frame { .. }) => desktop.tick(),
+            Ok(FrameEvent::Frame { skipped }) => desktop.animate(skipped + 1).union(desktop.tick()),
             Ok(FrameEvent::Ready(_)) => Area::new(0, 0, 0, 0),
             Err(_) if sources & wait::MESSAGE != 0 => {
                 sources &= !wait::MESSAGE;

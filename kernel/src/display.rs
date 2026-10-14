@@ -113,6 +113,11 @@ impl Rect {
     }
 }
 
+/// The colour a keyed blit treats as transparent: magenta, which no WovenHat
+/// chrome uses. A client draws an overlay (text, borders, a pointer) on a
+/// surface filled with it, and a keyed blit copies everything else.
+pub const TRANSPARENT_KEY: u32 = 0x00ff_00ff;
+
 /// Pack a colour into the surface's `0x00RRGGBB` representation.
 pub const fn rgb(red: u8, green: u8, blue: u8) -> u32 {
     ((red as u32) << 16) | ((green as u32) << 8) | blue as u32
@@ -241,6 +246,36 @@ impl Surface {
             let origin = source_row * source.width + source_column;
             self.pixels[destination..destination + target.width]
                 .copy_from_slice(&source.pixels[origin..origin + target.width]);
+        }
+        target
+    }
+
+    /// [`blit_region`](Self::blit_region), skipping every source pixel equal
+    /// to `key`: those leave the destination as it was. Returns the region
+    /// the copy covered, whether or not each pixel in it changed.
+    pub fn blit_region_keyed(&mut self, source: &Surface, region: Rect, x: i32, y: i32, key: u32) -> Rect {
+        let clipped = region.intersect(source.bounds());
+        if clipped.is_empty() {
+            return Rect::EMPTY;
+        }
+        let origin_x = x.saturating_add(clipped.x - region.x);
+        let origin_y = y.saturating_add(clipped.y - region.y);
+        let target = Rect::new(origin_x, origin_y, clipped.width, clipped.height)
+            .intersect(self.bounds());
+        if target.is_empty() {
+            return Rect::EMPTY;
+        }
+        for row in 0..target.height {
+            let source_row = clipped.y as usize + (target.y - origin_y) as usize + row;
+            let source_column = clipped.x as usize + (target.x - origin_x) as usize;
+            let destination = (target.y as usize + row) * self.width + target.x as usize;
+            let origin = source_row * source.width + source_column;
+            for column in 0..target.width {
+                let pixel = source.pixels[origin + column];
+                if pixel != key {
+                    self.pixels[destination + column] = pixel;
+                }
+            }
         }
         target
     }

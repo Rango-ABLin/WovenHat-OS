@@ -22,6 +22,7 @@ pub enum Key {
     Backspace,
     Tab,
     F1,
+    F2,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -317,7 +318,7 @@ pub fn read_bytes(buffer: &mut [u8]) -> usize {
             Key::Enter => b'\n',
             Key::Backspace => 8,
             Key::Tab => b'\t',
-            Key::F1 | Key::Char(_) => continue,
+            Key::F1 | Key::F2 | Key::Char(_) => continue,
         };
         buffer[count] = byte;
         count += 1;

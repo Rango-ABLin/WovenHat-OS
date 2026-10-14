@@ -1467,7 +1467,9 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
             // userspace read(0, ...) syscall and make the shell appear hung.
             if !userspace_foreground {
                 if let Some(key) = keyboard::poll() {
-                    if matches!(key, keyboard::Key::F1) {
+                    if matches!(key, keyboard::Key::F2) {
+                        // F2 has no use in the kernel's own desktop.
+                    } else if matches!(key, keyboard::Key::F1) {
                         desktop_active = !desktop_active;
                         if desktop_active {
                             console.render_desktop(&desktop);
@@ -1482,7 +1484,7 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
                             keyboard::Key::Enter => gui::InputEvent::Key('\n'),
                             keyboard::Key::Backspace => gui::InputEvent::Key('\u{8}'),
                             keyboard::Key::Tab => gui::InputEvent::Key('\t'),
-                            keyboard::Key::F1 => unreachable!(),
+                            keyboard::Key::F1 | keyboard::Key::F2 => unreachable!(),
                         };
                         desktop.handle(&event);
                         console.render_desktop(&desktop);
@@ -3379,6 +3381,33 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         serial::write_line(format_args!("[S1-5] storage journal: PASSED"));
         qemu_test_exit_success();
     }
+    #[cfg(feature = "stage20-8-test")]
+    {
+        if !stage20_8_self_test() {
+            serial::write_line(format_args!("[S20.8] tiling: FAILED"));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!("[S20.8] tiling: PASSED"));
+        qemu_test_exit_success();
+    }
+    #[cfg(feature = "stage20-7-test")]
+    {
+        if !stage20_7_self_test() {
+            serial::write_line(format_args!("[S20.7] spring animation: FAILED"));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!("[S20.7] spring animation: PASSED"));
+        qemu_test_exit_success();
+    }
+    #[cfg(feature = "stage20-6-test")]
+    {
+        if !stage20_6_self_test() {
+            serial::write_line(format_args!("[S20.6] translucent overlays: FAILED"));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!("[S20.6] translucent overlays: PASSED"));
+        qemu_test_exit_success();
+    }
     #[cfg(feature = "stage20-5-test")]
     {
         if !stage20_5_self_test() {
@@ -4557,7 +4586,10 @@ fn stage16_1_self_test() -> bool {
     feature = "stage20-2-test",
     feature = "stage20-3-test",
     feature = "stage20-4-test",
-    feature = "stage20-5-test"
+    feature = "stage20-5-test",
+    feature = "stage20-6-test",
+    feature = "stage20-7-test",
+    feature = "stage20-8-test"
 ))]
 const HELLO_GUI_IMAGE: &[u8] = include_bytes!(env!("WOVENHAT_HELLO_GUI_IMAGE"));
 
@@ -4580,7 +4612,10 @@ const HELLO_GUI_IMAGE: &[u8] = include_bytes!(env!("WOVENHAT_HELLO_GUI_IMAGE"));
     feature = "stage20-2-test",
     feature = "stage20-3-test",
     feature = "stage20-4-test",
-    feature = "stage20-5-test"
+    feature = "stage20-5-test",
+    feature = "stage20-6-test",
+    feature = "stage20-7-test",
+    feature = "stage20-8-test"
 ))]
 fn display_client_capabilities() -> capability::CapabilitySet {
     capability::CapabilitySet::only(capability::Capability::Console)
@@ -4605,7 +4640,10 @@ fn display_client_capabilities() -> capability::CapabilitySet {
     feature = "stage20-2-test",
     feature = "stage20-3-test",
     feature = "stage20-4-test",
-    feature = "stage20-5-test"
+    feature = "stage20-5-test",
+    feature = "stage20-6-test",
+    feature = "stage20-7-test",
+    feature = "stage20-8-test"
 ))]
 fn run_hello_gui(
     image: &[u8],
@@ -4634,7 +4672,10 @@ fn run_hello_gui(
     feature = "stage20-2-test",
     feature = "stage20-3-test",
     feature = "stage20-4-test",
-    feature = "stage20-5-test"
+    feature = "stage20-5-test",
+    feature = "stage20-6-test",
+    feature = "stage20-7-test",
+    feature = "stage20-8-test"
 ))]
 fn spawn_hello_gui(
     image: &[u8],
@@ -4668,7 +4709,10 @@ fn spawn_hello_gui(
     feature = "stage20-2-test",
     feature = "stage20-3-test",
     feature = "stage20-4-test",
-    feature = "stage20-5-test"
+    feature = "stage20-5-test",
+    feature = "stage20-6-test",
+    feature = "stage20-7-test",
+    feature = "stage20-8-test"
 ))]
 fn wait_hello_gui(pid: task::ProcessId) -> Option<(task::ProcessId, Result<i32, task::WaitError>)> {
     let start = timer::ticks();
@@ -4687,9 +4731,601 @@ fn wait_hello_gui(pid: task::ProcessId) -> Option<(task::ProcessId, Result<i32, 
     feature = "stage20-2-test",
     feature = "stage20-3-test",
     feature = "stage20-4-test",
-    feature = "stage20-5-test"
+    feature = "stage20-5-test",
+    feature = "stage20-6-test",
+    feature = "stage20-7-test",
+    feature = "stage20-8-test"
 ))]
 const WOVEN_SHELL_IMAGE: &[u8] = include_bytes!(env!("WOVENHAT_SHELL_IMAGE"));
+
+/// Stage 20.8 acceptance: tiling.
+///
+/// Windows change size through the shell's resize protocol: `WSIZ` to the
+/// owner, `WRSZ` back with a new surface.
+/// - Dropping window A on the screen's left edge snaps it to the left half:
+///   it moves and the owner resizes it to 320x362.
+/// - F2 turns tiling on: master and stack, so A keeps the left half and B
+///   takes the right half, resized too.
+/// - Then both applications exit.
+///
+/// Every frame is compared exactly: the client areas, and the title bars
+/// rendered with the kernel's font. F2 travels the real keyboard path.
+#[cfg(feature = "stage20-8-test")]
+fn stage20_8_self_test() -> bool {
+    use crate::display::{blend_pixel, rgb, Surface};
+
+    const WALLPAPER_TOP: u32 = rgb(18, 42, 74);
+    const WALLPAPER_BOTTOM: u32 = rgb(64, 28, 88);
+    const WHITE: u32 = rgb(255, 255, 255);
+    const ACTIVE: u32 = rgb(70, 120, 210);
+    const INACTIVE: u32 = rgb(60, 66, 80);
+    const CLOSE_FILL: u32 = rgb(170, 60, 60);
+    const RED: u32 = rgb(200, 60, 60);
+    const BLUE: u32 = rgb(60, 60, 200);
+    const UNSET: u32 = 0x0100_0000;
+
+    fn step(name: &str, ok: bool) -> bool {
+        serial::write_line(format_args!(
+            "[S20.8] {} {}",
+            name,
+            if ok { "PASS" } else { "FAIL" }
+        ));
+        ok
+    }
+    fn until(limit: u64, condition: impl Fn() -> bool) -> bool {
+        let start = timer::ticks();
+        loop {
+            if condition() {
+                return true;
+            }
+            if timer::ticks().wrapping_sub(start) > limit {
+                return false;
+            }
+            task::yield_now();
+        }
+    }
+    fn wallpaper(x: i32, y: i32, height: i32) -> u32 {
+        let span = (height - 1).max(1);
+        let t = (y.clamp(0, span) * 255 / span) as u8;
+        let base = blend_pixel(WALLPAPER_BOTTOM, WALLPAPER_TOP, t);
+        if x % 32 == 0 || y % 32 == 0 {
+            blend_pixel(WHITE, base, 28)
+        } else {
+            base
+        }
+    }
+    fn region(x0: i32, y0: i32, width: i32, height: i32, expected: impl Fn(i32, i32) -> u32) -> bool {
+        (y0..y0 + height).all(|y| (x0..x0 + width).all(|x| compositor::pixel(x, y) == Ok(expected(x, y))))
+    }
+    fn title_bar(x: i32, y: i32, width: i32, text: &str, fill: u32) -> bool {
+        let mut expected = Surface::new(width as usize, 14);
+        let bounds = expected.bounds();
+        expected.fill_rect(bounds, fill);
+        expected.draw_text(4, 4, text, WHITE);
+        expected.fill_rect(crate::display::Rect::new(width - 12, 2, 10, 10), CLOSE_FILL);
+        expected.draw_text(width - 12 + 3, 4, "x", WHITE);
+        region(x, y, width, 14, |px, py| expected.pixel(px - x, py - y).unwrap_or(UNSET))
+    }
+    fn packet(dx: i16, screen_dy: i16, left: bool) -> bool {
+        let dy = -screen_dy;
+        let flags = 0x08
+            | u8::from(left)
+            | if dx < 0 { 0x10 } else { 0 }
+            | if dy < 0 { 0x20 } else { 0 };
+        [flags, dx as u8, dy as u8].into_iter().all(mouse::loopback)
+    }
+    fn move_by(mut dx: i32, mut dy: i32, held: bool) -> bool {
+        while dx != 0 || dy != 0 {
+            let (sx, sy) = (dx.clamp(-100, 100), dy.clamp(-100, 100));
+            if !packet(sx as i16, sy as i16, held) {
+                return false;
+            }
+            dx -= sx;
+            dy -= sy;
+        }
+        true
+    }
+
+    let installed = vfs::create_read_only("/bin/hello-gui", HELLO_GUI_IMAGE).is_ok();
+    let capabilities = capability::CapabilitySet::only(capability::Capability::Console)
+        .with(capability::Capability::DisplayIo)
+        .with(capability::Capability::InputIo)
+        .with(capability::Capability::Ipc);
+    let Some(program) = userspace::load_elf_with_argv(WOVEN_SHELL_IMAGE, &["/bin/woven-shell"]) else {
+        return step("shell image loads", false);
+    };
+    let Ok((shell, _, _)) = task::spawn_user_system_service("woven-shell", program, capabilities) else {
+        return step("shell spawned", false);
+    };
+    if !step(
+        "shell took the display",
+        installed && until(3000, || compositor::holder() == Some(shell.as_u64()) && compositor::is_presenting()),
+    ) {
+        return false;
+    }
+    let Some((width, height)) = compositor::dimensions() else {
+        return step("desktop geometry", false);
+    };
+    let (width, height) = (width as i32, height as i32);
+    let top = height - 24;
+    let client = capability::CapabilitySet::only(capability::Capability::Console).with(capability::Capability::Ipc);
+    let shell_arg = alloc::format!("{}", shell.as_u64());
+    let Some(alpha) = spawn_hello_gui(HELLO_GUI_IMAGE, &["/bin/hello-gui", "--desktop-client", &shell_arg, "a"], Some(client)) else {
+        return step("application A spawned", false);
+    };
+    if !until(2000, || compositor::pixel(45, 45) == Ok(RED)) {
+        return step("window A opened", false);
+    }
+    let Some(beta) = spawn_hello_gui(HELLO_GUI_IMAGE, &["/bin/hello-gui", "--desktop-client", &shell_arg, "b"], Some(client)) else {
+        return step("application B spawned", false);
+    };
+    if !step("windows A and B opened", until(2000, || compositor::pixel(150, 100) == Ok(BLUE))) {
+        return false;
+    }
+
+    // The halves of the work area above the taskbar, as client areas under
+    // 14-pixel title bars.
+    let half = width / 2;
+    let client_height = top - 14;
+
+    // Drag A by its title bar onto the left edge and drop it there. Then
+    // park the pointer on the taskbar, clear of every window.
+    let (px, py) = (width / 2, height / 2);
+    let snapped = move_by(80 - px, 32 - py, false)
+        && packet(0, 0, true)
+        && move_by(-80, 0, true)
+        && packet(0, 0, false)
+        && move_by(600, top + 14 - 32, false)
+        && until(2000, || {
+            region(0, 14, half, client_height, |_, _| RED) && title_bar(0, 0, half, "Alpha", ACTIVE)
+        });
+    if !step("dropping A on the left edge snaps it to the left half, resized", snapped) {
+        return false;
+    }
+
+    // F2: tiling on. A, first, keeps the left half; B takes the right half,
+    // resized; A remains focused.
+    let tiled = mouse::keyboard_loopback(0x3c)
+        && until(2000, || {
+            region(half, 14, width - half, client_height, |_, _| BLUE)
+                && title_bar(half, 0, width - half, "Beta", INACTIVE)
+                && region(0, 14, half, client_height, |_, _| RED)
+                && title_bar(0, 0, half, "Alpha", ACTIVE)
+        });
+    if !step("F2 tiles the windows: master on the left, stack on the right", tiled) {
+        return false;
+    }
+
+    // Tiling off; A, focused, takes x and exits, and once its window is gone
+    // B takes y and exits.
+    let exited = mouse::keyboard_loopback(0x3c)
+        && mouse::keyboard_loopback(0x2d)
+        && wait_hello_gui(alpha).map(|(_, status)| status) == Some(Ok(0))
+        && until(1000, || compositor::pixel(5, 300) == Ok(wallpaper(5, 300, height)))
+        && mouse::keyboard_loopback(0x15)
+        && wait_hello_gui(beta).map(|(_, status)| status) == Some(Ok(0))
+        && until(1000, || compositor::pixel(half + 10, 300) == Ok(wallpaper(half + 10, 300, height)));
+    if !step("both applications take their keys and exit", exited) {
+        return false;
+    }
+
+    if task::kill_process(shell.as_u64(), 9).is_err() || !until(1000, || task::process_exited(shell)) {
+        return step("shell killed", false);
+    }
+    let _ = task::wait_process(shell.as_u64());
+    step(
+        "display returned to the terminal",
+        compositor::holder().is_none() && !compositor::is_presenting(),
+    )
+}
+
+/// Stage 20.7 acceptance: physics-based animation.
+///
+/// A new window fades in, its opacity following the shell's spring from 0
+/// to 255, with its shadow scaled to match. The kernel samples one pixel of
+/// the window's client area as fast as it can while the window appears. It
+/// reads the physical framebuffer, which changes only when a fully composed
+/// frame is presented; the compositor surface is updated layer by layer and
+/// would show frames half-built.
+/// For every opacity `a` it computes what that pixel must read: the
+/// wallpaper, the window's own shadow band at `48 * a / 255`, then the
+/// client colour blended at `a`. Each sample must be one of those values;
+/// the opacities they imply must never decrease; at least three distinct
+/// intermediate opacities must be seen; and the pixel must end fully
+/// opaque. A jump from nothing to opaque fails all but the last of these.
+#[cfg(feature = "stage20-7-test")]
+fn stage20_7_self_test() -> bool {
+    use crate::display::{blend_pixel, rgb};
+    use bootloader_api::info::PixelFormat;
+
+    const WALLPAPER_TOP: u32 = rgb(18, 42, 74);
+    const WALLPAPER_BOTTOM: u32 = rgb(64, 28, 88);
+    const WHITE: u32 = rgb(255, 255, 255);
+    const BLACK: u32 = rgb(0, 0, 0);
+    const RED: u32 = rgb(200, 60, 60);
+
+    /// A presented pixel, as 0x00RRGGBB, from the physical framebuffer.
+    fn screen_pixel(x: usize, y: usize) -> Option<u32> {
+        terminal::with_framebuffer(|buffer, info| {
+            if x >= info.width || y >= info.height || info.bytes_per_pixel < 3 {
+                return None;
+            }
+            let offset = (y * info.stride + x) * info.bytes_per_pixel;
+            let bytes = buffer.get(offset..offset + 3)?;
+            match info.pixel_format {
+                PixelFormat::Rgb => Some(rgb(bytes[0], bytes[1], bytes[2])),
+                PixelFormat::Bgr => Some(rgb(bytes[2], bytes[1], bytes[0])),
+                _ => None,
+            }
+        })
+        .flatten()
+    }
+    fn step(name: &str, ok: bool) -> bool {
+        serial::write_line(format_args!(
+            "[S20.7] {} {}",
+            name,
+            if ok { "PASS" } else { "FAIL" }
+        ));
+        ok
+    }
+    fn until(limit: u64, condition: impl Fn() -> bool) -> bool {
+        let start = timer::ticks();
+        loop {
+            if condition() {
+                return true;
+            }
+            if timer::ticks().wrapping_sub(start) > limit {
+                return false;
+            }
+            task::yield_now();
+        }
+    }
+    fn wallpaper(x: i32, y: i32, height: i32) -> u32 {
+        let span = (height - 1).max(1);
+        let t = (y.clamp(0, span) * 255 / span) as u8;
+        let base = blend_pixel(WALLPAPER_BOTTOM, WALLPAPER_TOP, t);
+        if x % 32 == 0 || y % 32 == 0 {
+            blend_pixel(WHITE, base, 28)
+        } else {
+            base
+        }
+    }
+
+    let installed = vfs::create_read_only("/bin/hello-gui", HELLO_GUI_IMAGE).is_ok();
+    let capabilities = capability::CapabilitySet::only(capability::Capability::Console)
+        .with(capability::Capability::DisplayIo)
+        .with(capability::Capability::InputIo)
+        .with(capability::Capability::Ipc);
+    let Some(program) = userspace::load_elf_with_argv(WOVEN_SHELL_IMAGE, &["/bin/woven-shell"]) else {
+        return step("shell image loads", false);
+    };
+    let Ok((shell, _, _)) = task::spawn_user_system_service("woven-shell", program, capabilities) else {
+        return step("shell spawned", false);
+    };
+    if !step(
+        "shell took the display",
+        installed && until(3000, || compositor::holder() == Some(shell.as_u64()) && compositor::is_presenting()),
+    ) {
+        return false;
+    }
+    let Some((_, height)) = compositor::dimensions() else {
+        return step("desktop geometry", false);
+    };
+    let height = height as i32;
+
+    // The pixel watched: (45, 45), inside A's client area at (40, 40). Of
+    // A's (focused) shadow bands, only the one offset by 4 covers it.
+    let (x, y) = (45, 45);
+    let expected: alloc::vec::Vec<u32> = (0..=255u32)
+        .map(|a| {
+            let shadow = (48 * a / 255) as u8;
+            let under = blend_pixel(BLACK, wallpaper(x, y, height), shadow);
+            blend_pixel(RED, under, a as u8)
+        })
+        .collect();
+    let scale = compositor::scale().unwrap_or(1) as usize;
+    let (sx, sy) = (x as usize * scale, y as usize * scale);
+    let start_value = screen_pixel(sx, sy);
+    let client = capability::CapabilitySet::only(capability::Capability::Console).with(capability::Capability::Ipc);
+    let shell_arg = alloc::format!("{}", shell.as_u64());
+    let Some(alpha) = spawn_hello_gui(HELLO_GUI_IMAGE, &["/bin/hello-gui", "--desktop-client", &shell_arg, "a"], Some(client)) else {
+        return step("application A spawned", false);
+    };
+
+    // Sample until the pixel is fully opaque, recording each new value.
+    let mut samples: alloc::vec::Vec<u32> = alloc::vec::Vec::new();
+    let started = timer::ticks();
+    loop {
+        let Some(value) = screen_pixel(sx, sy) else {
+            return step("pixel readable", false);
+        };
+        if samples.last() != Some(&value) {
+            samples.push(value);
+        }
+        if value == RED || timer::ticks().wrapping_sub(started) > 3000 {
+            break;
+        }
+        task::yield_now();
+    }
+    let duration = timer::ticks().wrapping_sub(started);
+
+    // Map each sample to the smallest opacity at or above the previous one
+    // that explains it; a sample nothing explains, or that would need the
+    // opacity to fall, fails.
+    let mut previous = 0usize;
+    let mut opacities: alloc::vec::Vec<usize> = alloc::vec::Vec::new();
+    let mut consistent = start_value == Some(expected[0]);
+    for value in &samples {
+        match (previous..=255).find(|&a| expected[a] == *value) {
+            Some(a) => {
+                opacities.push(a);
+                previous = a;
+            }
+            None => consistent = false,
+        }
+    }
+    let intermediate = opacities.iter().filter(|&&a| a > 0 && a < 255).count();
+    serial::write_line(format_args!(
+        "[S20.7] {} distinct samples over {} ticks; opacities {:?}",
+        samples.len(),
+        duration,
+        opacities
+    ));
+    if !step("every sample is the window blended at some opacity, never decreasing", consistent)
+        || !step("the window passes through at least three intermediate opacities", intermediate >= 3)
+        || !step("the window ends fully opaque", samples.last() == Some(&RED))
+    {
+        return false;
+    }
+    // Settled: the shell is back at its idle frame rate and the window stays
+    // put.
+    let settled = until(500, || screen_pixel(sx, sy) == Some(RED) && compositor::pixel(x, y) == Ok(RED));
+    let exited = mouse::keyboard_loopback(0x2d) && wait_hello_gui(alpha).map(|(_, status)| status) == Some(Ok(0));
+    if !step("the window stays opaque once settled; A takes its key and exits", settled && exited) {
+        return false;
+    }
+
+    if task::kill_process(shell.as_u64(), 9).is_err() || !until(1000, || task::process_exited(shell)) {
+        return step("shell killed", false);
+    }
+    let _ = task::wait_process(shell.as_u64());
+    step(
+        "display returned to the terminal",
+        compositor::holder().is_none() && !compositor::is_presenting(),
+    )
+}
+
+/// Stage 20.6 acceptance: translucent overlays over windows.
+///
+/// The launcher panel and the toast are translucent: their background is
+/// blended over whatever lies beneath, windows included, and their border and
+/// text are an overlay copied with a keyed blit, as is the pointer. The kernel
+/// recomputes every pixel: what lies beneath (wallpaper, the focused window's
+/// shadow bands, the window), the blend of the background over it, and the
+/// overlay rendered with its own font.
+/// - The toast is checked over the wallpaper.
+/// - The pointer is checked over a window: its transparent cells show the
+///   window.
+/// - The panel is checked over a window and its shadow.
+#[cfg(feature = "stage20-6-test")]
+fn stage20_6_self_test() -> bool {
+    use crate::display::{blend_pixel, rgb, Rect, Surface};
+
+    const WALLPAPER_TOP: u32 = rgb(18, 42, 74);
+    const WALLPAPER_BOTTOM: u32 = rgb(64, 28, 88);
+    const WHITE: u32 = rgb(255, 255, 255);
+    const BLACK: u32 = rgb(0, 0, 0);
+    const ACCENT: u32 = rgb(90, 140, 220);
+    const START_FILL: u32 = rgb(52, 96, 180);
+    const PANEL_FILL: u32 = rgb(28, 32, 44);
+    const TOAST_FILL: u32 = rgb(30, 34, 46);
+    const RED: u32 = rgb(200, 60, 60);
+    const UNSET: u32 = 0x0100_0000;
+
+    fn step(name: &str, ok: bool) -> bool {
+        serial::write_line(format_args!(
+            "[S20.6] {} {}",
+            name,
+            if ok { "PASS" } else { "FAIL" }
+        ));
+        ok
+    }
+    fn until(limit: u64, condition: impl Fn() -> bool) -> bool {
+        let start = timer::ticks();
+        loop {
+            if condition() {
+                return true;
+            }
+            if timer::ticks().wrapping_sub(start) > limit {
+                return false;
+            }
+            task::yield_now();
+        }
+    }
+    fn wallpaper(x: i32, y: i32, height: i32) -> u32 {
+        let span = (height - 1).max(1);
+        let t = (y.clamp(0, span) * 255 / span) as u8;
+        let base = blend_pixel(WALLPAPER_BOTTOM, WALLPAPER_TOP, t);
+        if x % 32 == 0 || y % 32 == 0 {
+            blend_pixel(WHITE, base, 28)
+        } else {
+            base
+        }
+    }
+    fn region(x0: i32, y0: i32, width: i32, height: i32, expected: impl Fn(i32, i32) -> u32) -> bool {
+        (y0..y0 + height).all(|y| (x0..x0 + width).all(|x| compositor::pixel(x, y) == Ok(expected(x, y))))
+    }
+    fn packet(dx: i16, screen_dy: i16, left: bool) -> bool {
+        let dy = -screen_dy;
+        let flags = 0x08
+            | u8::from(left)
+            | if dx < 0 { 0x10 } else { 0 }
+            | if dy < 0 { 0x20 } else { 0 };
+        [flags, dx as u8, dy as u8].into_iter().all(mouse::loopback)
+    }
+    fn move_by(mut dx: i32, mut dy: i32, held: bool) -> bool {
+        while dx != 0 || dy != 0 {
+            let (sx, sy) = (dx.clamp(-100, 100), dy.clamp(-100, 100));
+            if !packet(sx as i16, sy as i16, held) {
+                return false;
+            }
+            dx -= sx;
+            dy -= sy;
+        }
+        true
+    }
+    /// An overlay of `size` as the shell draws it: a one-pixel `ACCENT`
+    /// border, then `draw` on top; everything else UNSET (transparent).
+    fn overlay(size: (i32, i32), draw: impl Fn(&mut Surface)) -> Surface {
+        let mut surface = Surface::new(size.0 as usize, size.1 as usize);
+        let bounds = surface.bounds();
+        surface.fill_rect(bounds, UNSET);
+        surface.stroke_rect(bounds, ACCENT);
+        draw(&mut surface);
+        surface
+    }
+
+    let installed = vfs::create_read_only("/bin/hello-gui", HELLO_GUI_IMAGE).is_ok();
+    // No FileRead: the launcher is empty, so the panel says "No matches".
+    let capabilities = capability::CapabilitySet::only(capability::Capability::Console)
+        .with(capability::Capability::DisplayIo)
+        .with(capability::Capability::InputIo)
+        .with(capability::Capability::Ipc);
+    let Some(program) = userspace::load_elf_with_argv(WOVEN_SHELL_IMAGE, &["/bin/woven-shell"]) else {
+        return step("shell image loads", false);
+    };
+    let Ok((shell, _, _)) = task::spawn_user_system_service("woven-shell", program, capabilities) else {
+        return step("shell spawned", false);
+    };
+    if !step(
+        "shell took the display",
+        installed && until(3000, || compositor::holder() == Some(shell.as_u64()) && compositor::is_presenting()),
+    ) {
+        return false;
+    }
+    let Some((width, height)) = compositor::dimensions() else {
+        return step("desktop geometry", false);
+    };
+    let (width, height) = (width as i32, height as i32);
+    let top = height - 24;
+    let client = capability::CapabilitySet::only(capability::Capability::Console).with(capability::Capability::Ipc);
+    let shell_arg = alloc::format!("{}", shell.as_u64());
+    let Some(alpha) = spawn_hello_gui(HELLO_GUI_IMAGE, &["/bin/hello-gui", "--desktop-client", &shell_arg, "a"], Some(client)) else {
+        return step("application A spawned", false);
+    };
+    if !step("window A opened", until(2000, || compositor::pixel(45, 45) == Ok(RED))) {
+        return false;
+    }
+
+    // The toast A posts, over the wallpaper: background blended, border and
+    // text exact.
+    let (toast_x, toast_y) = (width - 188, 8);
+    let toast_overlay = overlay((180, 22), |surface| {
+        surface.draw_text(6, 8, "Alpha ready", WHITE);
+    });
+    let toast = until(1000, || {
+        region(toast_x, toast_y, 180, 22, |x, y| match toast_overlay.pixel(x - toast_x, y - toast_y) {
+            Some(UNSET) | None => blend_pixel(TOAST_FILL, wallpaper(x, y, height), 216),
+            Some(pixel) => pixel,
+        })
+    });
+    if !step("the toast is translucent over the wallpaper", toast) {
+        return false;
+    }
+
+    // Drag A down to the taskbar's edge, under where the panel will open,
+    // then rest the pointer over A's client area.
+    let (px, py) = (width / 2, height / 2);
+    let dragged = move_by(80 - px, 32 - py, false)
+        && packet(0, 0, true)
+        && move_by(0, 300, true)
+        && packet(0, 0, false)
+        && move_by(100 - 80, 340 - 332, false);
+    // A's client area is now (40, 296) 120x80.
+    let pointer = dragged
+        && until(1000, || compositor::pixel(45, top - 40) == Ok(RED))
+        && until(500, || {
+            compositor::pixel(100, 340) == Ok(BLACK)
+                && compositor::pixel(101, 342) == Ok(WHITE)
+                && compositor::pixel(106, 340) == Ok(RED)
+                && compositor::pixel(102, 341) == Ok(RED)
+        });
+    if !step("the pointer's transparent cells show the window beneath", pointer) {
+        return false;
+    }
+
+    // F1 opens the empty launcher: rows of 14 inside the border, three rows
+    // high, just above the taskbar.
+    let panel_height = 3 * 14 + 2;
+    let panel_y = top - 2 - panel_height;
+    let panel_overlay = overlay((160, panel_height), |surface| {
+        surface.fill_rect(Rect::new(1, 1, 158, 14), START_FILL);
+        surface.draw_text(6, 5, "WovenStart", WHITE);
+        surface.draw_text(6, 19, "> _", WHITE);
+        surface.draw_text(6, 33, "No matches", WHITE);
+    });
+    // Beneath the panel: A's client area, A's (focused) shadow beside it,
+    // and the wallpaper. The pointer, at (100, 340), is inside the panel, so
+    // the comparison leaves its cells out.
+    let a_frame = (40, top - 94, 120, 94);
+    let beneath = move |x: i32, y: i32| {
+        let (fx, fy, fw, fh) = a_frame;
+        if x >= fx && x < fx + fw && y >= fy + 14 && y < fy + fh {
+            return RED;
+        }
+        let mut value = wallpaper(x, y, height);
+        for (offset, opacity) in [(8, 24u8), (4, 48u8)] {
+            let (bx, by) = (fx + offset, fy + offset);
+            if x >= bx && x < bx + fw && y >= by && y < by + fh && y < top {
+                value = blend_pixel(BLACK, value, opacity);
+            }
+        }
+        value
+    };
+    let under_pointer = |x: i32, y: i32| (100..107).contains(&x) && (340..350).contains(&y);
+    let panel = mouse::keyboard_loopback(0x3b)
+        && until(1000, || {
+            (panel_y..panel_y + panel_height).all(|y| {
+                (4..164).all(|x| {
+                    if under_pointer(x, y) {
+                        return true;
+                    }
+                    let expected = match panel_overlay.pixel(x - 4, y - panel_y) {
+                        Some(UNSET) | None => blend_pixel(PANEL_FILL, beneath(x, y), 216),
+                        Some(pixel) => pixel,
+                    };
+                    compositor::pixel(x, y) == Ok(expected)
+                })
+            })
+        });
+    if !step("the launcher panel is translucent over a window and its shadow", panel) {
+        return false;
+    }
+    // The pointer stays on top of the panel.
+    if !step(
+        "the pointer is drawn above the panel",
+        compositor::pixel(100, 340) == Ok(BLACK) && compositor::pixel(101, 342) == Ok(WHITE),
+    ) {
+        return false;
+    }
+
+    let closed = mouse::keyboard_loopback(0x3b)
+        && until(1000, || compositor::pixel(20, panel_y + 20) == Ok(wallpaper(20, panel_y + 20, height)))
+        && mouse::keyboard_loopback(0x2d)
+        && wait_hello_gui(alpha).map(|(_, status)| status) == Some(Ok(0));
+    if !step("panel closes; A takes its key and exits", closed) {
+        return false;
+    }
+
+    if task::kill_process(shell.as_u64(), 9).is_err() || !until(1000, || task::process_exited(shell)) {
+        return step("shell killed", false);
+    }
+    let _ = task::wait_process(shell.as_u64());
+    step(
+        "display returned to the terminal",
+        compositor::holder().is_none() && !compositor::is_presenting(),
+    )
+}
 
 /// Stage 20.5 acceptance: depth, from window shadows and elevation.
 ///
@@ -5278,7 +5914,7 @@ fn stage20_3_self_test() -> bool {
         let y = top - 2 - h;
         let mut expected = Surface::new(160, h as usize);
         expected.fill_rect(Rect::new(0, 0, 160, h as usize), ACCENT);
-        expected.fill_rect(Rect::new(1, 1, 158, (h - 2) as usize), PANEL_FILL);
+        expected.fill_rect(Rect::new(1, 1, 158, (h - 2) as usize), UNSET);
         expected.fill_rect(Rect::new(1, 1, 158, 14), START_FILL);
         expected.draw_text(6, 5, "WovenStart", WHITE);
         expected.draw_text(6, 19, &alloc::format!("> {}_", query), WHITE);
@@ -5292,7 +5928,13 @@ fn stage20_3_self_test() -> bool {
             }
             expected.draw_text(6, row_y + 4, name, WHITE);
         }
-        until(500, || region(4, y, 160, h, |x, py| expected.pixel(x - 4, py - y).unwrap_or(UNSET)))
+        // Unset cells are the translucent background over the wallpaper.
+        until(500, || {
+            region(4, y, 160, h, |x, py| match expected.pixel(x - 4, py - y) {
+                Some(UNSET) | None => blend_pixel(PANEL_FILL, wallpaper(x, py, height), 216),
+                Some(pixel) => pixel,
+            })
+        })
     };
     let closed = || {
         let h = panel_height(3);
@@ -5367,7 +6009,7 @@ fn stage20_3_self_test() -> bool {
                 } else if mask.pixel(cx, cy) == Some(WHITE) {
                     WHITE
                 } else {
-                    TOAST_FILL
+                    blend_pixel(TOAST_FILL, wallpaper(x, y, height), 216)
                 }
             })
         })
@@ -5594,7 +6236,7 @@ fn stage20_2_self_test() -> bool {
             } else if mask.pixel(cx, cy) == Some(WHITE) {
                 WHITE
             } else {
-                TOAST_FILL
+                blend_pixel(TOAST_FILL, wallpaper(x, y, height), 216)
             }
         })
     });

@@ -224,6 +224,7 @@ pub mod syscall {
     pub const GRAPHICS_COMPOSITOR_BLIT_REGION_SHARED: u64 = 121;
     pub const GRAPHICS_COMPOSITOR_BLEND_REGION: u64 = 122;
     pub const GRAPHICS_COMPOSITOR_BLEND_REGION_SHARED: u64 = 123;
+    pub const GRAPHICS_COMPOSITOR_BLIT_KEYED: u64 = 124;
     pub const MESSAGE_SEND: u64 = 11;
     pub const MESSAGE_RECEIVE: u64 = 12;
 
@@ -570,6 +571,13 @@ pub mod syscall {
 
     /// # Safety
     /// Must be called from WovenHat userspace.
+    pub unsafe fn graphics_compositor_blit_keyed(handle: u64, x: i32, y: i32, region: u64) -> u64 {
+        let destination = (x as u32 as u64) | ((y as u32 as u64) << 32);
+        unsafe { invoke(GRAPHICS_COMPOSITOR_BLIT_KEYED, handle, destination, region) }
+    }
+
+    /// # Safety
+    /// Must be called from WovenHat userspace.
     pub unsafe fn clock_read() -> u64 {
         unsafe { invoke(CLOCK_READ, 0, 0, 0) }
     }
@@ -753,6 +761,15 @@ impl GraphicsSurface {
         check(result).map(|_| ())
     }
 
+    /// Blit only `region` of this surface to `(x, y)`, skipping pixels equal
+    /// to [`TRANSPARENT`]: draw an overlay on a surface filled with it, and
+    /// only the overlay lands. Lease holder only.
+    pub fn present_region_keyed(&self, region: Region, x: i32, y: i32) -> Result<(), Error> {
+        // SAFETY: integer-only call carrying the surface's own handle.
+        let result = unsafe { syscall::graphics_compositor_blit_keyed(self.handle, x, y, region.pack()) };
+        check(result).map(|_| ())
+    }
+
     /// Upload a whole canvas to the top-left of this surface.
     pub fn write_canvas(&self, canvas: &Canvas<'_>) -> Result<(), Error> {
         let (Ok(width), Ok(height)) = (u16::try_from(canvas.width), u16::try_from(canvas.height))
@@ -933,6 +950,10 @@ pub fn compositor_present() -> Result<u64, Error> {
     let result = unsafe { syscall::graphics_compositor_present() };
     check(result)
 }
+
+/// The colour [`GraphicsSurface::present_region_keyed`] treats as
+/// transparent: magenta, matching the kernel's key.
+pub const TRANSPARENT: u32 = rgb(255, 0, 255);
 
 /// Blend `over` onto `under` with `opacity` (0 keeps `under`, 255 gives
 /// `over`), per channel, rounding to nearest: the same formula the kernel
@@ -1141,6 +1162,140 @@ pub fn compositor_set_scale(scale: u32) -> Result<CompositorInfo, Error> {
         .map(CompositorInfo::unpack)
 }
 
+/// A spring that eases a value toward a target, stepped once per frame:
+/// motion that starts quickly and settles smoothly, without the abrupt stop
+/// of a linear ramp.
+///
+/// The state is fixed-point (16 fractional bits), so it needs no floating
+/// point and every run is identical. Stepping is semi-implicit Euler with
+/// stiffness 0.08 and damping 0.5 per frame, which keeps both roots of the
+/// discrete system real and positive: the value approaches its target
+/// without oscillating or overshooting, and settles within about 30 frames
+/// of a 255-step move.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Spring {
+    position: i64,
+    velocity: i64,
+    target: i64,
+}
+
+impl Spring {
+    const ONE: i64 = 1 << 16;
+    const STIFFNESS: i64 = 5243; // 0.08
+    const DAMPING: i64 = 32768; // 0.5
+    /// Steps taken at most per call, so a long stall cannot loop for long.
+    const MAX_STEPS: u64 = 256;
+
+    /// A spring at rest at `value`.
+    pub const fn new(value: i32) -> Self {
+        let position = value as i64 * Self::ONE;
+        Self { position, velocity: 0, target: position }
+    }
+
+    /// Start moving toward `target` from wherever the spring is now.
+    pub fn set_target(&mut self, target: i32) {
+        self.target = i64::from(target) * Self::ONE;
+    }
+
+    pub const fn target(&self) -> i32 {
+        (self.target / Self::ONE) as i32
+    }
+
+    /// The current value, rounded to the nearest whole unit.
+    pub const fn value(&self) -> i32 {
+        ((self.position + Self::ONE / 2).div_euclid(Self::ONE)) as i32
+    }
+
+    /// Whether the spring has come to rest on its target.
+    pub const fn is_settled(&self) -> bool {
+        self.position == self.target && self.velocity == 0
+    }
+
+    /// Advance by `frames` frames. Pass a [`FrameEvent::Frame`]'s
+    /// `skipped + 1`, so motion stays on time when frames are dropped. Once
+    /// within half a unit and nearly still, the spring snaps to its target.
+    pub fn step(&mut self, frames: u64) {
+        for _ in 0..frames.min(Self::MAX_STEPS) {
+            if self.is_settled() {
+                return;
+            }
+            let force = Self::STIFFNESS * (self.target - self.position) / Self::ONE
+                - Self::DAMPING * self.velocity / Self::ONE;
+            self.velocity += force;
+            self.position += self.velocity;
+            if (self.target - self.position).abs() < Self::ONE / 2 && self.velocity.abs() < Self::ONE / 8 {
+                self.position = self.target;
+                self.velocity = 0;
+            }
+        }
+    }
+}
+
+/// Window layout for a tiling window manager: pure geometry, so it can be
+/// tested on the host.
+pub mod layout {
+    /// A rectangle in screen coordinates.
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub struct Frame {
+        pub x: i32,
+        pub y: i32,
+        pub width: i32,
+        pub height: i32,
+    }
+
+    impl Frame {
+        pub const fn new(x: i32, y: i32, width: i32, height: i32) -> Self {
+            Self { x, y, width, height }
+        }
+
+        /// The client area of a window filling this frame under a title bar
+        /// `title` pixels tall.
+        pub const fn client(self, title: i32) -> Self {
+            Self::new(self.x, self.y + title, self.width, self.height - title)
+        }
+    }
+
+    /// The most windows [`tile`] lays out.
+    pub const MAX_TILES: usize = 8;
+
+    /// Master and stack: the first window takes the left half of `area`, the
+    /// rest share the right half in equal rows, the last taking any
+    /// remainder. One window takes the whole area. Frames cover `area`
+    /// exactly, without overlapping. Returns the frames and how many there
+    /// are (`count`, capped at [`MAX_TILES`]).
+    pub fn tile(count: usize, area: Frame) -> ([Frame; MAX_TILES], usize) {
+        let count = count.min(MAX_TILES);
+        let mut frames = [Frame::new(0, 0, 0, 0); MAX_TILES];
+        match count {
+            0 => {}
+            1 => frames[0] = area,
+            _ => {
+                let master = area.width / 2;
+                frames[0] = Frame::new(area.x, area.y, master, area.height);
+                let stack = (count - 1) as i32;
+                let row = area.height / stack;
+                for index in 0..stack {
+                    let y = area.y + index * row;
+                    let height = if index == stack - 1 { area.y + area.height - y } else { row };
+                    frames[1 + index as usize] = Frame::new(area.x + master, y, area.width - master, height);
+                }
+            }
+        }
+        (frames, count)
+    }
+
+    /// The left or right half of `area`, for snapping a window dragged to
+    /// an edge.
+    pub const fn half(area: Frame, right: bool) -> Frame {
+        let left = area.width / 2;
+        if right {
+            Frame::new(area.x + left, area.y, area.width - left, area.height)
+        } else {
+            Frame::new(area.x, area.y, left, area.height)
+        }
+    }
+}
+
 /// What ended a [`FrameClock::wait`].
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum FrameEvent {
@@ -1218,6 +1373,7 @@ pub enum Key {
     Backspace,
     Tab,
     F1,
+    F2,
 }
 
 /// An input event delivered to the focused process.
@@ -1280,6 +1436,7 @@ fn decode_event(result: u64) -> Result<Option<InputEvent>, Error> {
         3 => InputEvent::Key(Key::Backspace),
         4 => InputEvent::Key(Key::Tab),
         5 => InputEvent::Key(Key::F1),
+        8 => InputEvent::Key(Key::F2),
         6 => InputEvent::PointerMove {
             dx: payload as u16 as i16,
             dy: (payload >> 16) as u16 as i16,
@@ -1580,6 +1737,95 @@ mod tests {
         assert_eq!((packed >> 24) & 0xff_ffff, 0xff_fffe);
         assert_eq!((packed >> 48) & 0xff, 0);
         assert_eq!(packed >> 56, 255);
+    }
+
+    #[test]
+    fn spring_eases_to_its_target_without_overshoot() {
+        for (from, to) in [(0, 255), (255, 0), (-40, 300)] {
+            let mut spring = Spring::new(from);
+            spring.set_target(to);
+            let mut previous = from;
+            let mut frames = 0;
+            let mut intermediate = 0;
+            while !spring.is_settled() {
+                spring.step(1);
+                frames += 1;
+                let value = spring.value();
+                // Monotone toward the target, never past it.
+                if to > from {
+                    assert!(value >= previous && value <= to, "{from}->{to} frame {frames}: {value}");
+                } else {
+                    assert!(value <= previous && value >= to, "{from}->{to} frame {frames}: {value}");
+                }
+                if value != from && value != to {
+                    intermediate += 1;
+                }
+                previous = value;
+                assert!(frames < 60, "{from}->{to} settles");
+            }
+            assert_eq!(spring.value(), to);
+            assert!(intermediate >= 10, "{from}->{to} is a motion, not a jump");
+        }
+    }
+
+    #[test]
+    fn spring_steps_compose_and_are_deterministic() {
+        let mut one_by_one = Spring::new(0);
+        let mut batched = Spring::new(0);
+        one_by_one.set_target(255);
+        batched.set_target(255);
+        for _ in 0..7 {
+            one_by_one.step(1);
+        }
+        batched.step(7);
+        assert_eq!(one_by_one, batched, "skipped frames advance like real ones");
+        let mut again = Spring::new(0);
+        again.set_target(255);
+        again.step(7);
+        assert_eq!(again, batched);
+        // A spring at rest stays at rest, and retargeting starts from where
+        // it is.
+        let mut resting = Spring::new(12);
+        resting.step(100);
+        assert!(resting.is_settled() && resting.value() == 12);
+        batched.set_target(0);
+        let before = batched.value();
+        batched.step(1);
+        assert!(batched.value() <= before);
+    }
+
+    #[test]
+    fn tiling_covers_the_area_exactly_without_overlap() {
+        use layout::{tile, Frame, MAX_TILES};
+        let area = Frame::new(0, 0, 640, 376);
+        assert_eq!(tile(0, area).1, 0);
+        assert_eq!(tile(1, area).0[0], area, "one window takes everything");
+        let (two, _) = tile(2, area);
+        assert_eq!(two[0], Frame::new(0, 0, 320, 376), "master on the left");
+        assert_eq!(two[1], Frame::new(320, 0, 320, 376), "stack on the right");
+        for count in 1..=MAX_TILES + 2 {
+            let (frames, placed) = tile(count, Frame::new(3, 5, 641, 377));
+            assert_eq!(placed, count.min(MAX_TILES));
+            let frames = &frames[..placed];
+            let area: i64 = frames.iter().map(|f| i64::from(f.width) * i64::from(f.height)).sum();
+            assert_eq!(area, 641 * 377, "{count} windows cover the area");
+            for (i, a) in frames.iter().enumerate() {
+                assert!(a.width > 0 && a.height > 0);
+                for b in &frames[i + 1..] {
+                    let overlap = a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height;
+                    assert!(!overlap, "{count} windows: {a:?} and {b:?} overlap");
+                }
+            }
+        }
+        assert_eq!(Frame::new(0, 0, 320, 376).client(14), Frame::new(0, 14, 320, 362));
+    }
+
+    #[test]
+    fn halves_split_the_area() {
+        use layout::{half, Frame};
+        let area = Frame::new(0, 0, 641, 376);
+        assert_eq!(half(area, false), Frame::new(0, 0, 320, 376));
+        assert_eq!(half(area, true), Frame::new(320, 0, 321, 376));
     }
 
     #[test]

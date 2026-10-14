@@ -16,6 +16,9 @@ STAGES={
     '20.3': ('stage20-3-test', '[S20.3] application launcher: PASSED', 'woven-shell-launcher', 'application launcher'),
     '20.4': ('stage20-4-test', '[S20.4] windows that move and close: PASSED', 'woven-shell-windows', 'windows that move and close'),
     '20.5': ('stage20-5-test', '[S20.5] window depth: PASSED', 'woven-shell-depth', 'window depth'),
+    '20.6': ('stage20-6-test', '[S20.6] translucent overlays: PASSED', 'woven-shell-translucency', 'translucent overlays'),
+    '20.7': ('stage20-7-test', '[S20.7] spring animation: PASSED', 'woven-shell-animation', 'spring animation'),
+    '20.8': ('stage20-8-test', '[S20.8] tiling: PASSED', 'woven-shell-tiling', 'tiling'),
 }
 
 def app_build_env(app_dir):
@@ -50,7 +53,7 @@ def main():
     image=app_dir/'target'/'x86_64-unknown-none'/'release'/APP
     env=dict(os.environ)
     env['WOVENHAT_SHELL_IMAGE']=str(image)
-    if a.stage in ('20.2','20.3','20.4','20.5'):
+    if a.stage in ('20.2','20.3','20.4','20.5','20.6','20.7','20.8'):
         gui_dir=root/'apps'/'hello-gui'
         if subprocess.run(['cargo','build','--release'],cwd=gui_dir,env=app_build_env(gui_dir)).returncode: return 1
         env['WOVENHAT_HELLO_GUI_IMAGE']=str(gui_dir/'target'/'x86_64-unknown-none'/'release'/'wovenhat-hello-gui')

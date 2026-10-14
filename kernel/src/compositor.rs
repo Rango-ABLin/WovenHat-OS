@@ -453,6 +453,37 @@ pub fn blit_region_for(
     Ok(touched)
 }
 
+/// [`blit_region_for`] on one of the holder's own surfaces, skipping pixels
+/// equal to [`TRANSPARENT_KEY`](crate::display::TRANSPARENT_KEY). A window
+/// manager draws text, borders and the pointer over what is already composed
+/// this way, without reading the screen back.
+pub fn blit_region_keyed_for(
+    pid: u64,
+    handle: user_graphics::Handle,
+    region: Rect,
+    x: i32,
+    y: i32,
+) -> Result<Rect, Error> {
+    require_holder(pid)?;
+    let (clipped, part) =
+        user_graphics::snapshot_region(handle, region, None).map_err(|_| Error::InvalidClient)?;
+    let mut guard = STATE.lock();
+    let state = guard.as_mut().ok_or(Error::NotReady)?;
+    if state.holder != Some(pid) {
+        return Err(Error::NotHolder);
+    }
+    let bounds = part.bounds();
+    let touched = state.surface.blit_region_keyed(
+        &part,
+        bounds,
+        x.saturating_add(clipped.x - region.x),
+        y.saturating_add(clipped.y - region.y),
+        crate::display::TRANSPARENT_KEY,
+    );
+    state.damage.add(touched);
+    Ok(touched)
+}
+
 /// [`blit_region_for`] with uniform `opacity`: only `region` of the surface is
 /// blended. A window manager draws shadows and translucent layers with it,
 /// clipped to the rectangle it is recomposing.
