@@ -3130,6 +3130,34 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
             serial::write_line(format_args!("[S11.2] threads/TLS/join: FAILED"));
             qemu_test_exit_failure();
         }
+        let Some(program) = userspace::create_stage11_2_thread_process() else {
+            serial::write_line(format_args!("[S11.2] scheduler-backed thread image: FAILED"));
+            qemu_test_exit_failure();
+        };
+        let Ok((pid, _)) = task::spawn_user_process("thread-test", program) else {
+            serial::write_line(format_args!("[S11.2] scheduler-backed thread spawn: FAILED"));
+            qemu_test_exit_failure();
+        };
+        let exit = loop {
+            match task::wait_process(pid.as_u64()) {
+                Ok(exit) => break exit,
+                Err(task::WaitError::StillRunning) => task::yield_now(),
+                Err(task::WaitError::NoSuchChild) => {
+                    serial::write_line(format_args!(
+                        "[S11.2] scheduler-backed thread wait: FAILED"
+                    ));
+                    qemu_test_exit_failure();
+                }
+            }
+        };
+        if exit != 0 {
+            serial::write_line(format_args!(
+                "[S11.2] scheduler-backed thread exit={}: FAILED",
+                exit
+            ));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!("[S11.2] scheduler-backed thread: PASSED"));
         serial::write_line(format_args!("[S11.2] threads/TLS/join: PASSED"));
         qemu_test_exit_success();
     }

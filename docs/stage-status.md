@@ -1788,6 +1788,19 @@ validation. See [audit](audit-stage11-2-2026-09-16.md).
 
 Next: Stage 11.3 structured notifications and lifecycle events.
 
+### Stage 11.2 scheduler-backed thread follow-up — accepted increment on 2026-10-14
+
+The bounded scheduler-backed user-thread path now has an end-to-end Ring-3
+create/exit/join acceptance. It uses private NX stacks, copied initial-exec
+TLS, stable process ownership, generation-safe IDs, and post-switch resource
+reclamation. Build, warning-denying Clippy, host tests, and 1/2/4-CPU QEMU
+passed; see [audit](audit-stage11-2-scheduler-threads-2026-10-14.md).
+
+This is an implementation increment, not closure of every Stage 11 thread
+requirement. Event-driven join blocking, sibling cancellation/teardown,
+shared libraries, symbol resolution, dynamic TLS, and hardware qualification
+remain open.
+
 ## Stages 11.3–11.5 — accepted on 2026-09-16
 
 Structured notifications, the `libwoven` userspace API boundary, and hardened

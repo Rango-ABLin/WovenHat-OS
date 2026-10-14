@@ -335,6 +335,18 @@ pub enum Number {
     SecretRead = 128,
     /// secret handle -> 0 or ERROR
     SecretRevoke = 129,
+    /// entry address, stack size -> generation-tagged thread handle
+    ThreadCreate = 130,
+    /// exit status; never returns for a non-leader thread
+    ThreadExit = 131,
+    /// thread handle -> exit status, WOULD_BLOCK while live, or ERROR
+    ThreadJoin = 132,
+    /// -> current thread handle
+    ThreadSelf = 133,
+    /// TLS base value -> 0 or ERROR
+    ThreadSetTls = 134,
+    /// -> TLS base value or ERROR
+    ThreadGetTls = 135,
 }
 
 pub fn entry_address() -> u64 {
@@ -2280,6 +2292,24 @@ pub extern "C" fn wovenhat_syscall_dispatch(
             0
         }
         value if value == Number::Exit as u64 => crate::task::exit_current_process(arg0 as i32),
+        value if value == Number::ThreadCreate as u64 => crate::task::create_user_thread(arg0, arg1)
+            .map(|id| id.raw())
+            .unwrap_or(SYSCALL_ERROR),
+        value if value == Number::ThreadExit as u64 => crate::task::exit_current_thread(arg0 as i32),
+        value if value == Number::ThreadJoin as u64 => match crate::task::join_user_thread(arg0) {
+            Ok(exit) => exit as u64,
+            Err(crate::task::ThreadJoinError::Running) => u64::MAX - 1,
+            Err(_) => SYSCALL_ERROR,
+        },
+        value if value == Number::ThreadSelf as u64 => crate::task::current_thread_id()
+            .map(|id| id.raw())
+            .unwrap_or(SYSCALL_ERROR),
+        value if value == Number::ThreadSetTls as u64 => crate::task::current_thread_id()
+            .filter(|id| crate::thread::set_tls(*id, arg0))
+            .map_or(SYSCALL_ERROR, |_| 0),
+        value if value == Number::ThreadGetTls as u64 => crate::task::current_thread_id()
+            .and_then(crate::thread::tls)
+            .unwrap_or(SYSCALL_ERROR),
         value if value == Number::Getpid as u64 => crate::task::current_process_id(),
         value if value == Number::Waitpid as u64 => match crate::task::wait_process(arg0) {
             Ok(exit_code) => exit_code as u64,

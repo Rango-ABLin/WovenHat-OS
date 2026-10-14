@@ -320,6 +320,48 @@ global_asm!(
     ".previous",
 );
 
+#[cfg(feature = "stage11-2-test")]
+global_asm!(
+    ".global wovenhat_stage11_2_program_start",
+    ".global wovenhat_stage11_2_program_end",
+    "wovenhat_stage11_2_program_start:",
+    // Start one real scheduler-backed thread at the RX worker label.
+    "lea rdi, [rip + wovenhat_stage11_2_worker]",
+    "mov esi, 16384",
+    "mov eax, 130",
+    "int 0x80",
+    "cmp rax, -1",
+    "je wovenhat_stage11_2_fail",
+    "mov r12, rax",
+    "wovenhat_stage11_2_join:",
+    "mov eax, 132",
+    "mov rdi, r12",
+    "int 0x80",
+    "cmp rax, -2",
+    "je wovenhat_stage11_2_yield",
+    "cmp rax, 17",
+    "jne wovenhat_stage11_2_fail",
+    "xor edi, edi",
+    "mov eax, 3",
+    "int 0x80",
+    "wovenhat_stage11_2_yield:",
+    "mov eax, 7",
+    "int 0x80",
+    "jmp wovenhat_stage11_2_join",
+    "wovenhat_stage11_2_fail:",
+    "mov edi, 91",
+    "mov eax, 3",
+    "int 0x80",
+    "wovenhat_stage11_2_worker:",
+    "mov edi, 17",
+    "mov eax, 131",
+    "int 0x80",
+    "2:",
+    "hlt",
+    "jmp 2b",
+    "wovenhat_stage11_2_program_end:",
+);
+
 global_asm!(
     ".section .rodata.wovenhat_stage10_5_stub, \"a\"",
     ".global wovenhat_stage10_5_program_start",
@@ -4082,6 +4124,10 @@ unsafe extern "C" {
     static wovenhat_stage10_7_program_start: u8;
     #[cfg(feature = "stage10-7-test")]
     static wovenhat_stage10_7_program_end: u8;
+    #[cfg(feature = "stage11-2-test")]
+    static wovenhat_stage11_2_program_start: u8;
+    #[cfg(feature = "stage11-2-test")]
+    static wovenhat_stage11_2_program_end: u8;
     static wovenhat_exec_program_start: u8;
     static wovenhat_exec_program_end: u8;
     static wovenhat_init_program_start: u8;
@@ -4354,6 +4400,24 @@ impl AddressSpace {
 
     pub fn root_address(self) -> u64 {
         self.paging.root_address()
+    }
+
+    /// Return whether `address` belongs to an executable image segment.
+    ///
+    /// Thread entry points are accepted only inside an already loaded RX
+    /// segment.  The check is deliberately against the loader's immutable
+    /// segment table rather than merely checking that the page is mapped.
+    pub fn contains_executable(self, address: u64) -> bool {
+        self.mappings[..self.mapping_count].iter().any(|mapping| {
+            mapping.executable
+                && address >= mapping.start
+                && address < mapping.start.saturating_add(mapping.size as u64)
+        })
+    }
+
+    /// Return the static initial-exec TLS image range, if this image has one.
+    pub fn tls_range(self) -> Option<(u64, usize)> {
+        self.tls
     }
 
     /// Returns whether `address` falls in a logically writable mapping
@@ -4720,6 +4784,16 @@ pub fn create_stage10_7_process() -> Option<UserProgram> {
     };
     let elf = build_stub_elf(stub)?;
     load_elf(&elf)
+}
+
+#[cfg(feature = "stage11-2-test")]
+pub fn create_stage11_2_thread_process() -> Option<UserProgram> {
+    let stub = unsafe {
+        let start = &wovenhat_stage11_2_program_start as *const u8;
+        let end = &wovenhat_stage11_2_program_end as *const u8;
+        core::slice::from_raw_parts(start, end.offset_from(start) as usize)
+    };
+    load_elf(&build_stub_elf(stub)?)
 }
 
 pub fn create_exec_process() -> Option<UserProgram> {
@@ -5259,6 +5333,40 @@ pub fn map_anonymous(
         dirty: 0,
         swap_slots: [None; USER_MMAP_PAGES],
     })
+}
+
+/// Clone the current process's bounded initial-exec TLS image for a new
+/// scheduler task.  The clone gets private writable pages and therefore a
+/// thread cannot mutate another thread's `errno` or compiler TLS variables.
+pub fn clone_initial_tls(
+    address_space: AddressSpace,
+    slot: usize,
+) -> Option<AnonymousMapping> {
+    let (source, size) = address_space.tls_range()?;
+    let mapping = map_anonymous(address_space, slot, size, true)?;
+    let mut buffer = [0u8; 512];
+    let mut offset = 0usize;
+    while offset < size {
+        let count = buffer.len().min(size - offset);
+        if paging::read_user_bytes_in(
+            address_space.paging,
+            source.checked_add(offset as u64)?,
+            &mut buffer[..count],
+        )
+        .is_err()
+            || paging::write_user_bytes(
+                address_space.paging,
+                mapping.address.checked_add(offset as u64)?,
+                &buffer[..count],
+            )
+            .is_err()
+        {
+            let _ = unmap_anonymous(address_space, mapping);
+            return None;
+        }
+        offset += count;
+    }
+    Some(mapping)
 }
 
 /// Populate private NX pages without advancing the file offset.

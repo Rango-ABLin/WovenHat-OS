@@ -53,6 +53,14 @@ fn process_table_lock() -> ProcessTableGuard {
 static IDLE_HEARTBEATS: AtomicU64 = AtomicU64::new(0);
 static NEXT_TASK_ID: AtomicU64 = AtomicU64::new(2);
 static NEXT_PROCESS_ID: AtomicU64 = AtomicU64::new(1);
+/// Process identity of the task currently executing on each CPU.
+///
+/// A process may own more than one scheduler task.  Keeping this identity in
+/// the scheduler-visible TCB, and publishing it at the same hand-off as the
+/// address-space switch, prevents userspace services from accidentally using
+/// the bootstrap task as their process owner once threads are introduced.
+static CURRENT_PROCESS_IDS: [AtomicU64; crate::smp::MAX_CPUS] =
+    [const { AtomicU64::new(0) }; crate::smp::MAX_CPUS];
 static PREEMPTION_REQUESTED: [AtomicBool; crate::smp::MAX_CPUS] =
     [const { AtomicBool::new(false) }; crate::smp::MAX_CPUS];
 static PREEMPTION_SWITCHES: AtomicU64 = AtomicU64::new(0);
@@ -306,6 +314,8 @@ impl TaskStack {
 
 struct TaskControlBlock {
     id: TaskId,
+    process_id: ProcessId,
+    thread_id: Option<crate::thread::ThreadId>,
     name: &'static str,
     state: TaskState,
     priority: TaskPriority,
@@ -340,6 +350,8 @@ struct TaskControlBlock {
     /// Switching tasks acknowledge this only at a scheduler-owned safe point;
     /// tasks that are not physically executing may be retired immediately.
     termination_signal: u8,
+    /// Exit status latched until a thread has completed its scheduler hand-off.
+    thread_exit_code: i32,
     /// Latched scheduler event used by Stage 8.3 wait/wake handshakes.
     /// A signal delivered before the task actually blocks is remembered here
     /// and consumed by `wait_for_event`, closing the classic lost-wakeup window.
@@ -359,6 +371,8 @@ impl TaskControlBlock {
     const fn empty() -> Self {
         Self {
             id: TaskId(u64::MAX),
+            process_id: ProcessId(0),
+            thread_id: None,
             name: "",
             state: TaskState::Empty,
             priority: TaskPriority::NORMAL,
@@ -378,6 +392,7 @@ impl TaskControlBlock {
             ever_dispatched: false,
             affinity_mask: 1,
             termination_signal: 0,
+            thread_exit_code: 0,
             event_pending: false,
             event_deadline: None,
         }
@@ -393,6 +408,8 @@ impl TaskControlBlock {
     ) {
         TASK_STACKS[slot].reset_canary();
         self.id = id;
+        self.process_id = ProcessId(0);
+        self.thread_id = None;
         self.name = name;
         self.state = TaskState::Ready;
         self.priority = priority;
@@ -408,6 +425,7 @@ impl TaskControlBlock {
         self.ever_dispatched = false;
         self.affinity_mask = 1;
         self.termination_signal = 0;
+        self.thread_exit_code = 0;
         self.event_pending = false;
         self.event_deadline = None;
         self.security_domain = wovenguard::SecurityDomain::SystemService;
@@ -443,6 +461,8 @@ impl TaskControlBlock {
     ) {
         TASK_STACKS[slot].reset_canary();
         self.id = id;
+        self.process_id = ProcessId(0);
+        self.thread_id = None;
         self.name = name;
         self.state = TaskState::Ready;
         self.priority = TaskPriority::NORMAL;
@@ -460,6 +480,7 @@ impl TaskControlBlock {
         self.ever_dispatched = false;
         self.affinity_mask = 1;
         self.termination_signal = 0;
+        self.thread_exit_code = 0;
         self.event_pending = false;
         self.event_deadline = None;
 
@@ -492,6 +513,8 @@ impl TaskControlBlock {
     ) {
         TASK_STACKS[slot].reset_canary();
         self.id = id;
+        self.process_id = ProcessId(0);
+        self.thread_id = None;
         self.name = "fork-child";
         self.state = TaskState::Ready;
         self.priority = TaskPriority::NORMAL;
@@ -509,6 +532,7 @@ impl TaskControlBlock {
         self.ever_dispatched = false;
         self.affinity_mask = 1;
         self.termination_signal = 0;
+        self.thread_exit_code = 0;
         self.event_pending = false;
         self.event_deadline = None;
 
@@ -670,6 +694,23 @@ pub struct Process {
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum ProcessError {
     Full,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum ThreadError {
+    NoProcess,
+    InvalidEntry,
+    InvalidStack,
+    Full,
+    MappingFailed,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum ThreadJoinError {
+    Invalid,
+    NotOwner,
+    Running,
+    MappingFailed,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -987,6 +1028,15 @@ impl Scheduler {
         self.tasks[next_slot].state = TaskState::Running;
         self.tasks[next_slot].remaining_ticks = self.tasks[next_slot].priority.quantum();
         self.current_slot[crate::smp::cpu_index()] = next_slot;
+        let process_id = self.tasks[next_slot].process_id.as_u64();
+        let current_owner = if process_id == 0 {
+            // Preserve the historical kernel-task identity returned by
+            // current_process_id(); user tasks use their stable process ID.
+            self.tasks[next_slot].id.as_u64()
+        } else {
+            process_id
+        };
+        CURRENT_PROCESS_IDS[crate::smp::cpu_index()].store(current_owner, Ordering::Release);
         self.context_switches += 1;
 
         let previous_rsp = &mut self.tasks[previous_slot].context.stack_pointer as *mut u64;
@@ -1017,13 +1067,28 @@ impl Scheduler {
         );
 
         let signal = self.tasks[outgoing].termination_signal;
-        if signal != 0 {
+        let thread_exit = self.tasks[outgoing].thread_id.is_some() && signal == u8::MAX;
+        if thread_exit {
+            let thread_id = self.tasks[outgoing].thread_id;
+            let exit_code = self.tasks[outgoing].thread_exit_code;
+            if let Some(thread_id) = thread_id {
+                assert!(
+                    crate::thread::terminate(thread_id, exit_code),
+                    "thread registry must remain running until scheduler hand-off"
+                );
+            }
+            self.tasks[outgoing].state = TaskState::Dead;
+            self.tasks[outgoing].name = "thread-exited";
+            self.tasks[outgoing].termination_signal = 0;
+            self.task_count = self.task_count.saturating_sub(1);
+        } else if signal != 0 {
+            let process_id = self.tasks[outgoing].process_id;
             let task_id = self.tasks[outgoing].id;
             self.tasks[outgoing].state = TaskState::Dead;
             self.tasks[outgoing].name = "terminated";
             self.tasks[outgoing].termination_signal = 0;
             self.task_count = self.task_count.saturating_sub(1);
-            complete_process_termination(task_id, signal);
+            complete_process_termination(process_id, task_id, signal);
         } else {
             self.tasks[outgoing].state = TaskState::Ready;
         }
@@ -1047,7 +1112,10 @@ impl Scheduler {
                 self.tasks[slot].name = "terminated";
                 self.tasks[slot].termination_signal = 0;
                 self.task_count = self.task_count.saturating_sub(1);
-                complete_process_termination(id, signal);
+            if !(self.tasks[slot].thread_id.is_some() && signal == u8::MAX) {
+                let process_id = self.tasks[slot].process_id;
+                complete_process_termination(process_id, id, signal);
+            }
             }
             TaskState::Running | TaskState::Switching => {
                 // Physical execution still owns this task. The request is
@@ -1063,6 +1131,7 @@ impl Scheduler {
             if slot != self.current_slot[crate::smp::cpu_index()]
                 && task.state == TaskState::Dead
                 && task.cpu == crate::smp::cpu_index()
+                && task.thread_id.is_none()
             {
                 // Stage 9.2C: a dead task must not leave live delegation roots
                 // or children behind in the bounded WovenGuard lineage table.
@@ -1437,10 +1506,291 @@ pub fn spawn_user_process(
         context,
         program.address_space.paging(),
     );
+    scheduler.tasks[task_slot].process_id = process_id;
     scheduler.task_count += 1;
     processes[process_slot] = Some(process);
     Ok((process_id, context))
 }
+
+/// Create a scheduler-backed thread in the current process.
+///
+/// The entry point must already be inside an RX ELF segment.  The stack is a
+/// private NX anonymous mapping and the static initial-exec TLS image is
+/// copied into a private mapping for the new task.  Both mappings are owned by
+/// the process table until join or process teardown; no raw userspace pointer
+/// is retained by the kernel.
+pub fn create_user_thread(entry: u64, stack_size: u64) -> Result<crate::thread::ThreadId, ThreadError> {
+    const MIN_STACK: usize = 16 * 1024;
+    const MAX_STACK: usize = 1024 * 1024;
+    let stack_size = usize::try_from(stack_size)
+        .ok()
+        .and_then(|size| size.checked_add(4095))
+        .map(|size| size & !4095)
+        .filter(|size| (MIN_STACK..=MAX_STACK).contains(size))
+        .ok_or(ThreadError::InvalidStack)?;
+    let process_id = ProcessId(current_process_id());
+    let (address_space, stack_slot, tls_slot, has_tls) = {
+        let processes = process_table_lock();
+        let process = processes
+            .iter()
+            .flatten()
+            .find(|process| process.id == process_id && process.state == ProcessState::Ready)
+            .ok_or(ThreadError::NoProcess)?;
+        let address_space = process.address_space.ok_or(ThreadError::NoProcess)?;
+        if !address_space.contains_executable(entry) {
+            return Err(ThreadError::InvalidEntry);
+        }
+        let mut free = process
+            .memory_mappings
+            .iter()
+            .enumerate()
+            .filter(|(_, mapping)| mapping.is_none())
+            .map(|(slot, _)| slot);
+        let stack_slot = free.next().ok_or(ThreadError::Full)?;
+        let has_tls = address_space.tls_range().is_some();
+        let tls_slot = has_tls.then(|| free.next()).flatten();
+        if has_tls && tls_slot.is_none() {
+            return Err(ThreadError::Full);
+        }
+        (address_space, stack_slot, tls_slot, has_tls)
+    };
+
+    let stack = userspace::map_anonymous(address_space, stack_slot, stack_size, true)
+        .ok_or(ThreadError::MappingFailed)?;
+    let tls = if has_tls {
+        let Some(slot) = tls_slot else {
+            let _ = userspace::unmap_anonymous(address_space, stack);
+            return Err(ThreadError::MappingFailed);
+        };
+        match userspace::clone_initial_tls(address_space, slot) {
+            Some(mapping) => Some(mapping),
+            None => {
+                let _ = userspace::unmap_anonymous(address_space, stack);
+                return Err(ThreadError::MappingFailed);
+            }
+        }
+    } else {
+        None
+    };
+
+    let thread_id = match crate::thread::create(process_id.as_u64()) {
+        Some(id) => id,
+        None => {
+            let _ = userspace::unmap_anonymous(address_space, stack);
+            if let Some(tls) = tls {
+                let _ = userspace::unmap_anonymous(address_space, tls);
+            }
+            return Err(ThreadError::Full);
+        }
+    };
+    let (parent_cpu, parent_caps, parent_lineages, parent_domain, parent_profile, task_slot) = {
+        let mut scheduler = SCHEDULER.lock();
+        scheduler.reap_dead();
+        let Some(task_slot) = scheduler
+            .tasks
+            .iter()
+            .position(|task| task.state == TaskState::Empty)
+        else {
+            drop(scheduler);
+            let _ = crate::thread::abort(thread_id);
+            let _ = userspace::unmap_anonymous(address_space, stack);
+            if let Some(tls) = tls {
+                let _ = userspace::unmap_anonymous(address_space, tls);
+            }
+            return Err(ThreadError::Full);
+        };
+        let parent = &scheduler.tasks[scheduler.current_slot[crate::smp::cpu_index()]];
+        (
+            parent.cpu,
+            parent.capabilities,
+            parent.capability_lineages,
+            parent.security_domain,
+            parent.sandbox_profile,
+            task_slot,
+        )
+    };
+    let task_id = TaskId(NEXT_TASK_ID.fetch_add(1, Ordering::Relaxed));
+    let stack_top = stack.address.saturating_add(stack.size as u64);
+    let tls_base = tls.map_or(0, |mapping| mapping.address.saturating_add(mapping.size as u64));
+    let context = prepare_user_context_with_tls(entry as usize, stack_top as usize, tls_base);
+
+    let mut scheduler = SCHEDULER.lock();
+    scheduler.reap_dead();
+    if scheduler.tasks[task_slot].state != TaskState::Empty {
+        drop(scheduler);
+        let _ = crate::thread::abort(thread_id);
+        let _ = userspace::unmap_anonymous(address_space, stack);
+        if let Some(tls) = tls {
+            let _ = userspace::unmap_anonymous(address_space, tls);
+        }
+        return Err(ThreadError::Full);
+    }
+    let mut processes = process_table_lock();
+    let Some(process) = processes
+        .iter_mut()
+        .find(|process| process.as_ref().is_some_and(|process| process.id == process_id))
+        .and_then(Option::as_mut)
+    else {
+        drop(processes);
+        drop(scheduler);
+        let _ = crate::thread::abort(thread_id);
+        let _ = userspace::unmap_anonymous(address_space, stack);
+        if let Some(tls) = tls {
+            let _ = userspace::unmap_anonymous(address_space, tls);
+        }
+        return Err(ThreadError::NoProcess);
+    };
+    if process
+        .address_space
+        .is_none_or(|space| space.root_address() != address_space.root_address())
+        || process.memory_mappings[stack_slot].is_some()
+        || tls_slot.is_some_and(|slot| process.memory_mappings[slot].is_some())
+    {
+        drop(processes);
+        drop(scheduler);
+        let _ = crate::thread::abort(thread_id);
+        let _ = userspace::unmap_anonymous(address_space, stack);
+        if let Some(tls) = tls {
+            let _ = userspace::unmap_anonymous(address_space, tls);
+        }
+        return Err(ThreadError::Full);
+    }
+    process.memory_mappings[stack_slot] = Some(stack);
+    process.memory_mapping_scopes[stack_slot] = None;
+    if let Some(slot) = tls_slot {
+        if let Some(tls) = tls {
+            process.memory_mappings[slot] = Some(tls);
+            process.memory_mapping_scopes[slot] = None;
+        }
+    }
+    scheduler.tasks[task_slot].initialize_user(
+        task_slot,
+        task_id,
+        "user-thread",
+        context,
+        address_space.paging(),
+    );
+    scheduler.tasks[task_slot].process_id = process_id;
+    scheduler.tasks[task_slot].thread_id = Some(thread_id);
+    scheduler.tasks[task_slot].cpu = parent_cpu;
+    scheduler.tasks[task_slot].migratable = false;
+    scheduler.tasks[task_slot].affinity_mask = cpu_bit(parent_cpu);
+    scheduler.tasks[task_slot].capabilities = parent_caps;
+    scheduler.tasks[task_slot].capability_lineages = parent_lineages;
+    scheduler.tasks[task_slot].security_domain = parent_domain;
+    scheduler.tasks[task_slot].sandbox_profile = parent_profile;
+    scheduler.task_count += 1;
+    drop(processes);
+    drop(scheduler);
+    if !crate::thread::attach_resources(thread_id, crate::thread::Resources { stack, tls }) {
+        return Err(ThreadError::Full);
+    }
+    if parent_cpu != crate::smp::cpu_index() {
+        let _ = crate::smp::reschedule_cpu(parent_cpu);
+    }
+    Ok(thread_id)
+}
+
+pub fn current_thread_id() -> Option<crate::thread::ThreadId> {
+    let scheduler = SCHEDULER.lock();
+    scheduler.tasks[scheduler.current_slot[crate::smp::cpu_index()]].thread_id
+}
+
+/// Reclaim a terminated userspace thread's stack/TLS mappings before its
+/// generation-tagged handle is reused.
+pub fn join_user_thread(raw_id: u64) -> Result<i32, ThreadJoinError> {
+    let owner = current_process_id();
+    let id = crate::thread::ThreadId::from_raw(raw_id);
+    match crate::thread::joinable(owner, id) {
+        Ok(true) => {}
+        Ok(false) => return Err(ThreadJoinError::Running),
+        Err(crate::thread::JoinError::Invalid) => return Err(ThreadJoinError::Invalid),
+        Err(crate::thread::JoinError::NotOwner) => return Err(ThreadJoinError::NotOwner),
+        Err(crate::thread::JoinError::Running) => return Err(ThreadJoinError::Running),
+    }
+    let resources = crate::thread::resources(owner, id).ok_or(ThreadJoinError::Invalid)?;
+    let (address_space, stack_slot, tls_slot) = {
+        let processes = process_table_lock();
+        let process = processes
+            .iter()
+            .flatten()
+            .find(|process| process.id.as_u64() == owner)
+            .ok_or(ThreadJoinError::Invalid)?;
+        let address_space = process.address_space.ok_or(ThreadJoinError::Invalid)?;
+        let stack_slot = process
+            .memory_mappings
+            .iter()
+            .position(|mapping| mapping.is_some_and(|mapping| mapping.address == resources.stack.address))
+            .ok_or(ThreadJoinError::Invalid)?;
+        let tls_slot = resources.tls.and_then(|tls| {
+            process
+                .memory_mappings
+                .iter()
+                .position(|mapping| mapping.is_some_and(|mapping| mapping.address == tls.address))
+        });
+        (address_space, stack_slot, tls_slot)
+    };
+    if !userspace::unmap_anonymous(address_space, resources.stack)
+        || resources
+            .tls
+            .is_some_and(|tls| !userspace::unmap_anonymous(address_space, tls))
+    {
+        return Err(ThreadJoinError::MappingFailed);
+    }
+    let mut processes = process_table_lock();
+    let Some(process) = processes
+        .iter_mut()
+        .find(|process| process.as_ref().is_some_and(|process| process.id.as_u64() == owner))
+        .and_then(Option::as_mut)
+    else {
+        return Err(ThreadJoinError::Invalid);
+    };
+    process.memory_mappings[stack_slot] = None;
+    process.memory_mapping_scopes[stack_slot] = None;
+    if let Some(slot) = tls_slot {
+        process.memory_mappings[slot] = None;
+        process.memory_mapping_scopes[slot] = None;
+    }
+    drop(processes);
+    let (exit, _) = crate::thread::join_with_resources(owner, id).map_err(|error| match error {
+        crate::thread::JoinError::Invalid => ThreadJoinError::Invalid,
+        crate::thread::JoinError::NotOwner => ThreadJoinError::NotOwner,
+        crate::thread::JoinError::Running => ThreadJoinError::Running,
+    })?;
+    let mut scheduler = SCHEDULER.lock();
+    if let Some(task) = scheduler
+        .tasks
+        .iter_mut()
+        .find(|task| task.thread_id == Some(id) && task.state == TaskState::Dead)
+    {
+        *task = TaskControlBlock::empty();
+    }
+    Ok(exit)
+}
+
+pub fn exit_current_thread(exit_code: i32) -> ! {
+    let Some(thread_id) = current_thread_id() else {
+        exit_current_process(exit_code);
+    };
+    x86_64::instructions::interrupts::disable();
+    let context_switch = {
+        let mut scheduler = SCHEDULER.lock();
+        let slot = scheduler.current_slot[crate::smp::cpu_index()];
+        if scheduler.tasks[slot].thread_id != Some(thread_id) {
+            exit_current_process(exit_code);
+        }
+        scheduler.tasks[slot].thread_exit_code = exit_code;
+        scheduler.tasks[slot].termination_signal = u8::MAX;
+        scheduler.prepare_switch()
+    };
+    if let Some(context_switch) = context_switch {
+        unsafe { switch_stacks(context_switch) };
+    }
+    loop {
+        x86_64::instructions::hlt();
+    }
+}
+
 /// Spawn a least-privilege Ring-3 system service with an explicit capability set.
 ///
 /// Ordinary applications remain in `SecurityDomain::User` and cannot acquire
@@ -1520,6 +1870,7 @@ pub fn spawn_user_system_service(
         context,
         program.address_space.paging(),
     );
+    scheduler.tasks[task_slot].process_id = process_id;
     scheduler.tasks[task_slot].security_domain = wovenguard::SecurityDomain::SystemService;
     scheduler.tasks[task_slot].capabilities = capabilities;
     scheduler.tasks[task_slot].capability_lineages = [None; Capability::COUNT];
@@ -1604,6 +1955,7 @@ pub fn spawn_multicore_user_process(
             context,
             program.address_space.paging(),
         );
+        scheduler.tasks[task_slot].process_id = process_id;
         scheduler.tasks[task_slot].cpu = owner_cpu;
         scheduler.tasks[task_slot].migratable = true;
         scheduler.tasks[task_slot].affinity_mask = affinity_mask;
@@ -1693,6 +2045,7 @@ pub fn spawn_pinned_user_process_on(
             context,
             program.address_space.paging(),
         );
+        scheduler.tasks[task_slot].process_id = process_id;
         scheduler.tasks[task_slot].cpu = cpu;
         scheduler.tasks[task_slot].migratable = false;
         scheduler.tasks[task_slot].affinity_mask = cpu_bit(cpu);
@@ -1767,6 +2120,7 @@ pub fn spawn_migratable_user_probe(
         context,
         program.address_space.paging(),
     );
+    scheduler.tasks[task_slot].process_id = process_id;
     scheduler.tasks[task_slot].cpu = 0;
     scheduler.tasks[task_slot].migratable = true;
     scheduler.tasks[task_slot].affinity_mask = online_affinity_mask();
@@ -1821,12 +2175,7 @@ pub fn process_task_blocked(id: ProcessId) -> bool {
 }
 
 pub fn current_process_id() -> u64 {
-    let task_id = current_task_id();
-    process_table_lock()
-        .iter()
-        .flatten()
-        .find(|process| process.task_id == task_id)
-        .map_or(task_id.as_u64(), |process| process.id.as_u64())
+    CURRENT_PROCESS_IDS[crate::smp::cpu_index()].load(Ordering::Acquire)
 }
 
 static FILE_IO_DEPTH: [AtomicU64; crate::smp::MAX_CPUS] =
@@ -1938,7 +2287,11 @@ pub fn try_handle_file_fault(address: u64, write: bool) -> bool {
         };
         let (space, slot, mapping) = {
             let processes = process_table_lock();
-            let Some(process) = processes.iter().flatten().find(|p| p.task_id == task_id) else {
+            let Some(process) = processes
+                .iter()
+                .flatten()
+                .find(|p| p.id.as_u64() == current_process_id())
+            else {
                 return false;
             };
             let Some(space) = process.address_space else {
@@ -2148,12 +2501,11 @@ pub fn evict_one_mapped_file_page() -> bool {
 /// Attempt to resolve a user write fault via copy-on-write.
 /// Returns true if the fault was handled and the process may resume.
 pub fn try_handle_cow_fault(fault_address: u64) -> bool {
-    let task_id = current_task_id();
     let processes = process_table_lock();
     let Some(process) = processes
         .iter()
         .flatten()
-        .find(|process| process.task_id == task_id)
+        .find(|process| process.id.as_u64() == current_process_id())
     else {
         return false;
     };
@@ -2172,7 +2524,7 @@ pub fn try_handle_cow_fault(fault_address: u64) -> bool {
     if let Some(process) = processes
         .iter_mut()
         .flatten()
-        .find(|process| process.task_id == task_id)
+        .find(|process| process.id.as_u64() == current_process_id())
     {
         if let Some(mapping) = process
             .memory_mappings
@@ -2190,21 +2542,20 @@ pub fn try_handle_cow_fault(fault_address: u64) -> bool {
 }
 
 pub fn current_credentials() -> Credentials {
-    let task_id = current_task_id();
     process_table_lock()
         .iter()
         .flatten()
-        .find(|process| process.task_id == task_id)
+        .find(|process| process.id.as_u64() == current_process_id())
         .map_or(Credentials::ROOT, |process| process.credentials)
 }
 
 /// Return the active process credentials without panicking during early boot.
 pub fn current_credentials_if_running() -> Option<Credentials> {
-    let task_id = current_task_id_if_running()?;
+    current_task_id_if_running()?;
     process_table_lock()
         .iter()
         .flatten()
-        .find(|process| process.task_id == task_id)
+        .find(|process| process.id.as_u64() == current_process_id())
         .map(|process| process.credentials)
 }
 
@@ -2250,7 +2601,6 @@ fn credentials_may_ipc(sender: Credentials, receiver: Credentials) -> bool {
     sender.is_root() || sender.uid == receiver.uid || sender.gid == receiver.gid
 }
 pub fn fork_current(frame: crate::syscall::UserForkFrame) -> Result<ProcessId, ProcessError> {
-    let task_id = current_task_id();
     let (
         parent,
         capabilities,
@@ -2276,7 +2626,7 @@ pub fn fork_current(frame: crate::syscall::UserForkFrame) -> Result<ProcessId, P
         let parent = processes
             .iter()
             .flatten()
-            .find(|process| process.task_id == task_id)
+            .find(|process| process.id.as_u64() == current_process_id())
             .copied()
             .ok_or(ProcessError::Full)?;
         (
@@ -2375,6 +2725,7 @@ pub fn fork_current(frame: crate::syscall::UserForkFrame) -> Result<ProcessId, P
         },
         parent_fs_base,
     );
+    scheduler.tasks[task_slot].process_id = child_id;
     // Fork preserves the parent's CPU-placement contract. This keeps pinned
     // service workloads pinned and lets Stage 7.6 multicore processes keep
     // their audited affinity/migratability without silently falling back to CPU0.
@@ -2425,7 +2776,7 @@ pub fn exec_current(program: userspace::UserProgram) -> ! {
         let process = processes
             .iter_mut()
             .flatten()
-            .find(|process| process.task_id == task_id)
+            .find(|process| process.id.as_u64() == current_process_id())
             .expect("exec process is missing from the process table");
         let old_address_space = process
             .address_space
@@ -2500,7 +2851,7 @@ pub fn exit_current_process(exit_code: i32) -> ! {
         let address_space_result = process_table_lock()
             .iter_mut()
             .flatten()
-            .find(|process| process.task_id == task_id)
+            .find(|process| process.id.as_u64() == current_process_id())
             .map(|process| {
                 process.state = ProcessState::Exited;
                 process.exit_code = exit_code;
@@ -2663,12 +3014,11 @@ pub fn env_get(key: &[u8], out: &mut [u8]) -> Result<usize, EnvError> {
     if key.is_empty() || key.contains(&b'=') || !key.is_ascii() {
         return Err(EnvError::Invalid);
     }
-    let task_id = current_task_id();
     let processes = process_table_lock();
     let process = processes
         .iter()
         .flatten()
-        .find(|p| p.task_id == task_id)
+        .find(|p| p.id.as_u64() == current_process_id())
         .ok_or(EnvError::NoProcess)?;
     for i in 0..MAX_ENV_VARS {
         let len = process.environment.lengths[i] as usize;
@@ -2686,12 +3036,11 @@ pub fn env_get(key: &[u8], out: &mut [u8]) -> Result<usize, EnvError> {
 }
 
 pub fn env_set(key: &[u8], value: &[u8]) -> Result<(), EnvError> {
-    let task_id = current_task_id();
     let mut processes = process_table_lock();
     let process = processes
         .iter_mut()
         .flatten()
-        .find(|p| p.task_id == task_id)
+        .find(|p| p.id.as_u64() == current_process_id())
         .ok_or(EnvError::NoProcess)?;
     if key.is_empty() || key.contains(&b'=') || !key.is_ascii() || !value.is_ascii() {
         return Err(EnvError::Invalid);
@@ -2707,11 +3056,10 @@ pub fn env_set(key: &[u8], value: &[u8]) -> Result<(), EnvError> {
 }
 
 pub fn env_count() -> usize {
-    let task_id = current_task_id();
     process_table_lock()
         .iter()
         .flatten()
-        .find(|p| p.task_id == task_id)
+        .find(|p| p.id.as_u64() == current_process_id())
         .map(|p| {
             p.environment
                 .lengths
@@ -2723,12 +3071,11 @@ pub fn env_count() -> usize {
 }
 
 pub fn env_entry(index: usize, out: &mut [u8]) -> Result<usize, EnvError> {
-    let task_id = current_task_id();
     let processes = process_table_lock();
     let process = processes
         .iter()
         .flatten()
-        .find(|p| p.task_id == task_id)
+        .find(|p| p.id.as_u64() == current_process_id())
         .ok_or(EnvError::NoProcess)?;
     let mut seen = 0usize;
     for i in 0..MAX_ENV_VARS {
@@ -2755,12 +3102,11 @@ pub fn mmap_current(length: u64, writable: bool) -> Result<u64, MemoryError> {
         .map(|size| size & !4095)
         .filter(|size| *size != 0)
         .ok_or(MemoryError::InvalidLength)?;
-    let task_id = current_task_id();
     let (process_index, slot, address_space) = {
         let processes = process_table_lock();
         let process_index = processes
             .iter()
-            .position(|process| process.is_some_and(|process| process.task_id == task_id))
+            .position(|process| process.is_some_and(|process| process.id.as_u64() == current_process_id()))
             .ok_or(MemoryError::NoProcess)?;
         let process = processes[process_index].ok_or(MemoryError::NoProcess)?;
         let slot = process
@@ -2801,12 +3147,11 @@ pub fn mmap_file_current(
     let descriptor = usize::try_from(descriptor).map_err(|_| MemoryError::BadDescriptor)?;
     let length = usize::try_from(length).map_err(|_| MemoryError::InvalidLength)?;
     let offset = usize::try_from(offset).map_err(|_| MemoryError::InvalidLength)?;
-    let task_id = current_task_id();
     let (index, slot, address_space, file, file_scope) = {
         let processes = process_table_lock();
         let index = processes
             .iter()
-            .position(|p| p.is_some_and(|p| p.task_id == task_id))
+            .position(|p| p.is_some_and(|p| p.id.as_u64() == current_process_id()))
             .ok_or(MemoryError::NoProcess)?;
         let process = processes[index].ok_or(MemoryError::NoProcess)?;
         let Some(FdKind::File { id: file, scope }) =
@@ -2840,7 +3185,10 @@ pub fn mmap_file_current(
     }
     .ok_or(MemoryError::MappingFailed)?;
     let mut processes = process_table_lock();
-    if let Some(process) = processes[index].as_mut().filter(|p| p.task_id == task_id) {
+    if let Some(process) = processes[index]
+        .as_mut()
+        .filter(|p| p.id.as_u64() == current_process_id())
+    {
         if process.memory_mappings[slot].is_none() {
             process.memory_mappings[slot] = Some(mapping);
             process.memory_mapping_scopes[slot] = Some(file_scope);
@@ -2861,13 +3209,12 @@ pub fn msync_current(address: u64, length: u64) -> Result<(), MemoryError> {
         .filter(|_| length != 0)
         .ok_or(MemoryError::InvalidLength)?
         & !4095;
-    let task_id = current_task_id();
     let (space, mapping) = {
         let processes = process_table_lock();
         let process = processes
             .iter()
             .flatten()
-            .find(|p| p.task_id == task_id)
+            .find(|p| p.id.as_u64() == current_process_id())
             .ok_or(MemoryError::NoProcess)?;
         let slot = process
             .memory_mappings
@@ -2901,12 +3248,11 @@ pub fn munmap_current(address: u64, length: u64) -> Result<(), MemoryError> {
         .map(|size| size & !4095)
         .filter(|size| *size != 0)
         .ok_or(MemoryError::InvalidLength)?;
-    let task_id = current_task_id();
     let (process_index, slot, address_space, mapping) = {
         let processes = process_table_lock();
         let process_index = processes
             .iter()
-            .position(|process| process.is_some_and(|process| process.task_id == task_id))
+            .position(|process| process.is_some_and(|process| process.id.as_u64() == current_process_id()))
             .ok_or(MemoryError::NoProcess)?;
         let process = processes[process_index].ok_or(MemoryError::NoProcess)?;
         let slot = process
@@ -2971,12 +3317,12 @@ pub fn open_current(path: &str) -> Result<u64, FileError> {
             vfs::open(&path).map_err(|_| FileError::NotFound)?
         }
     };
-    let task_id = current_task_id();
+    let process_id = current_process_id();
     let mut processes = process_table_lock();
     let process = processes
         .iter_mut()
         .flatten()
-        .find(|process| process.task_id == task_id)
+        .find(|process| process.id.as_u64() == process_id)
         .ok_or(FileError::NoProcess)?;
     let descriptor = (3..MAX_FILE_DESCRIPTORS)
         .find(|descriptor| process.files[*descriptor].is_none())
@@ -2991,11 +3337,11 @@ pub fn descriptor_is_open(descriptor: u64) -> bool {
     let Ok(descriptor) = usize::try_from(descriptor) else {
         return false;
     };
-    let task_id = current_task_id();
+    let process_id = current_process_id();
     process_table_lock()
         .iter()
         .flatten()
-        .find(|process| process.task_id == task_id)
+        .find(|process| process.id.as_u64() == process_id)
         .and_then(|process| process.files.get(descriptor))
         .is_some_and(Option::is_some)
 }
@@ -3008,12 +3354,12 @@ pub fn pin_current_file_for_async(
     write: bool,
 ) -> Result<(vfs::OpenFileId, wovenguard::FileScope, bool), FileError> {
     let descriptor = usize::try_from(descriptor).map_err(|_| FileError::BadDescriptor)?;
-    let task_id = current_task_id();
+    let process_id = current_process_id();
     let processes = process_table_lock();
     let process = processes
         .iter()
         .flatten()
-        .find(|process| process.task_id == task_id)
+        .find(|process| process.id.as_u64() == process_id)
         .ok_or(FileError::NoProcess)?;
     let fd = process
         .files
@@ -3060,12 +3406,12 @@ pub fn authorize_current_file_scope(scope: wovenguard::FileScope, write: bool) -
 
 pub fn read_current(descriptor: u64, buffer: &mut [u8]) -> Result<usize, FileError> {
     let descriptor = usize::try_from(descriptor).map_err(|_| FileError::BadDescriptor)?;
-    let task_id = current_task_id();
+    let process_id = current_process_id();
     let processes = process_table_lock();
     let process = processes
         .iter()
         .flatten()
-        .find(|process| process.task_id == task_id)
+        .find(|process| process.id.as_u64() == process_id)
         .ok_or(FileError::NoProcess)?;
     let fd = process
         .files
@@ -3088,12 +3434,12 @@ pub fn read_current(descriptor: u64, buffer: &mut [u8]) -> Result<usize, FileErr
 
 pub fn write_current(descriptor: u64, buffer: &[u8]) -> Result<usize, FileError> {
     let descriptor = usize::try_from(descriptor).map_err(|_| FileError::BadDescriptor)?;
-    let task_id = current_task_id();
+    let process_id = current_process_id();
     let processes = process_table_lock();
     let process = processes
         .iter()
         .flatten()
-        .find(|process| process.task_id == task_id)
+        .find(|process| process.id.as_u64() == process_id)
         .ok_or(FileError::NoProcess)?;
     let fd = process
         .files
@@ -3126,13 +3472,13 @@ pub fn write_current(descriptor: u64, buffer: &[u8]) -> Result<usize, FileError>
 
 pub fn dup_current(descriptor: u64) -> Result<u64, FileError> {
     let descriptor = usize::try_from(descriptor).map_err(|_| FileError::BadDescriptor)?;
-    let task_id = current_task_id();
+    let process_id = current_process_id();
     let fd = {
         let processes = process_table_lock();
         let process = processes
             .iter()
             .flatten()
-            .find(|process| process.task_id == task_id)
+            .find(|process| process.id.as_u64() == process_id)
             .ok_or(FileError::NoProcess)?;
         process
             .files
@@ -3147,7 +3493,7 @@ pub fn dup_current(descriptor: u64) -> Result<u64, FileError> {
         let process = processes
             .iter_mut()
             .flatten()
-            .find(|process| process.task_id == task_id)
+            .find(|process| process.id.as_u64() == process_id)
             .ok_or(FileError::NoProcess)?;
         if process.files.get(descriptor) != Some(&Some(fd)) {
             Err(FileError::BadDescriptor)
@@ -3171,13 +3517,13 @@ pub fn dup2_current(old: u64, new: u64) -> Result<u64, FileError> {
     if new >= MAX_FILE_DESCRIPTORS {
         return Err(FileError::BadDescriptor);
     }
-    let task_id = current_task_id();
+    let process_id = current_process_id();
     let fd = {
         let processes = process_table_lock();
         let process = processes
             .iter()
             .flatten()
-            .find(|process| process.task_id == task_id)
+            .find(|process| process.id.as_u64() == process_id)
             .ok_or(FileError::NoProcess)?;
         process
             .files
@@ -3195,7 +3541,7 @@ pub fn dup2_current(old: u64, new: u64) -> Result<u64, FileError> {
         let process = processes
             .iter_mut()
             .flatten()
-            .find(|process| process.task_id == task_id)
+            .find(|process| process.id.as_u64() == process_id)
             .ok_or(FileError::NoProcess)?;
         if process.files.get(old) != Some(&Some(fd)) {
             Err(FileError::BadDescriptor)
@@ -3219,13 +3565,13 @@ pub fn dup2_current(old: u64, new: u64) -> Result<u64, FileError> {
 
 pub fn pipe_current() -> Result<(u64, u64), FileError> {
     let pipe_id = crate::pipe::create().map_err(|_| FileError::TooManyFiles)?;
-    let task_id = current_task_id();
+    let process_id = current_process_id();
     let result = (|| {
         let mut processes = process_table_lock();
         let process = processes
             .iter_mut()
             .flatten()
-            .find(|process| process.task_id == task_id)
+            .find(|process| process.id.as_u64() == process_id)
             .ok_or(FileError::NoProcess)?;
         let mut available = (3..MAX_FILE_DESCRIPTORS).filter(|slot| process.files[*slot].is_none());
         let read_fd = available.next().ok_or(FileError::TooManyFiles)?;
@@ -3245,12 +3591,12 @@ pub fn getppid_current() -> u64 {
     // Global lock order is SCHEDULER -> PROCESS_TABLE. Resolve the task id
     // before taking PROCESS_TABLE so SMP callers can never form an AB-BA
     // cycle with fork/exec/exit, which legitimately publish both tables.
-    let task_id = current_task_id();
+    let process_id = current_process_id();
     let processes = process_table_lock();
     processes
         .iter()
         .flatten()
-        .find(|p| p.task_id == task_id)
+        .find(|p| p.id.as_u64() == process_id)
         .map(|p| p.parent.as_u64())
         .unwrap_or(0)
 }
@@ -3261,12 +3607,12 @@ pub fn close_current(descriptor: u64) -> Result<(), FileError> {
     if descriptor < 3 {
         return Err(FileError::BadDescriptor);
     }
-    let task_id = current_task_id();
+    let process_id = current_process_id();
     let mut processes = process_table_lock();
     let process = processes
         .iter_mut()
         .flatten()
-        .find(|process| process.task_id == task_id)
+        .find(|process| process.id.as_u64() == process_id)
         .ok_or(FileError::NoProcess)?;
     let fd = process
         .files
@@ -3351,9 +3697,13 @@ pub fn current_cwd_str(buf: &mut [u8]) -> Result<usize, FileError> {
 
 pub fn current_cwd() -> ([u8; crate::config::MAX_PATH_SIZE], usize) {
     // Preserve the kernel-wide SCHEDULER -> PROCESS_TABLE lock order.
-    let task_id = current_task_id();
+    let process_id = current_process_id();
     let processes = process_table_lock();
-    if let Some(p) = processes.iter().flatten().find(|p| p.task_id == task_id) {
+    if let Some(p) = processes
+        .iter()
+        .flatten()
+        .find(|p| p.id.as_u64() == process_id)
+    {
         return (p.cwd, p.cwd_len);
     }
     let mut root = [0u8; crate::config::MAX_PATH_SIZE];
@@ -3380,12 +3730,12 @@ pub fn chdir_current(path: &str) -> Result<(), FileError> {
     }
     // Resolve scheduler-owned identity before taking PROCESS_TABLE. Keeping
     // this order consistent is required for deadlock-free SMP execution.
-    let task_id = current_task_id();
+    let process_id = current_process_id();
     let mut processes = process_table_lock();
     let process = processes
         .iter_mut()
         .flatten()
-        .find(|p| p.task_id == task_id)
+        .find(|p| p.id.as_u64() == process_id)
         .ok_or(FileError::NoProcess)?;
     process.cwd = [0; crate::config::MAX_PATH_SIZE];
     process.cwd[..bytes.len()].copy_from_slice(bytes);
@@ -4811,7 +5161,7 @@ unsafe fn push_stack_value(cursor: &mut usize, value: u64) {
 /// the global SCHEDULER -> PROCESS_TABLE lock order. Address-space destruction
 /// is deferred to `wait_process`; this keeps teardown out of the scheduler
 /// critical section while making the zombie state truthful.
-fn complete_process_termination(task_id: TaskId, signal: u8) {
+fn complete_process_termination(process_id: ProcessId, task_id: TaskId, signal: u8) {
     // Remote/scheduler-driven termination bypasses exit_current_process(), so
     // it needs the same Stage 10.3 async-owner reclamation guarantee.
     #[cfg(feature = "stage13-9-test")]
@@ -4830,7 +5180,7 @@ fn complete_process_termination(task_id: TaskId, signal: u8) {
         let Some(process) = processes
             .iter_mut()
             .flatten()
-            .find(|process| process.task_id == task_id)
+            .find(|process| process.id == process_id)
         else {
             return;
         };
@@ -4883,7 +5233,7 @@ pub fn honor_current_termination_request() {
             scheduler.tasks[scheduler.current_slot[crate::smp::cpu_index()]].termination_signal
         }
     };
-    if signal != 0 {
+            if signal != 0 {
         exit_current_process(128 + i32::from(signal));
     }
 }
@@ -4990,12 +5340,12 @@ pub fn sigaction_current(sig: u64, handler: u64) -> Result<u64, FileError> {
     if sig == 0 || sig > 31 || sig == 9 {
         return Err(FileError::PermissionDenied);
     }
-    let task_id = current_task_id();
+    let process_id = current_process_id();
     let mut processes = process_table_lock();
     let process = processes
         .iter_mut()
         .flatten()
-        .find(|p| p.task_id == task_id)
+        .find(|p| p.id.as_u64() == process_id)
         .ok_or(FileError::NoProcess)?;
     let slot = &mut process.signal_actions[sig as usize];
     let old = *slot;
@@ -5004,13 +5354,13 @@ pub fn sigaction_current(sig: u64, handler: u64) -> Result<u64, FileError> {
 }
 
 pub fn current_process_group() -> u64 {
-    let task_id = current_task_id();
+    let process_id = current_process_id();
     let group = {
         let processes = process_table_lock();
         processes
             .iter()
             .flatten()
-            .find(|p| p.task_id == task_id)
+            .find(|p| p.id.as_u64() == process_id)
             .map(|p| p.process_group)
     };
     group.unwrap_or_else(current_process_id)
@@ -5035,12 +5385,12 @@ pub fn set_process_group(pid: u64, pgid: u64) -> Result<(), FileError> {
 
 /// Return and clear a pending caught signal for the current process.
 pub fn take_pending_signal_current() -> Option<(u64, u64)> {
-    let task_id = current_task_id();
+    let process_id = current_process_id();
     let mut processes = process_table_lock();
     let process = processes
         .iter_mut()
         .flatten()
-        .find(|p| p.task_id == task_id)?;
+        .find(|p| p.id.as_u64() == process_id)?;
     let sig = process.pending_signal;
     if sig == 0 || sig > 31 {
         return None;
@@ -5056,12 +5406,12 @@ pub fn take_pending_signal_current() -> Option<(u64, u64)> {
 pub fn seek_current(descriptor: u64, offset: u64) -> Result<u64, FileError> {
     let descriptor = usize::try_from(descriptor).map_err(|_| FileError::BadDescriptor)?;
     let offset = usize::try_from(offset).map_err(|_| FileError::BadDescriptor)?;
-    let task_id = current_task_id();
+    let process_id = current_process_id();
     let processes = process_table_lock();
     let process = processes
         .iter()
         .flatten()
-        .find(|process| process.task_id == task_id)
+        .find(|process| process.id.as_u64() == process_id)
         .ok_or(FileError::NoProcess)?;
     let fd = process
         .files
