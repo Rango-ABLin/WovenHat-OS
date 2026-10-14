@@ -3,7 +3,7 @@
 ## Scope
 
 The accepted WovenCalculator, WovenTerminal, WovenFiles, WovenMonitor,
-WovenSettings, and WovenSecurity binaries are now
+WovenSettings, WovenSecurity, and WovenEditor binaries are now
 packaged together by `scripts/package-system-apps.py`. The script builds each
 separate app workspace with the pinned freestanding target, signs every ELF
 using `tools/wapp-packager`, validates the WAPP v1 envelope and ELF payload,
@@ -20,7 +20,7 @@ accepts one package per boot through `WOVENHAT_APP_IMAGE`.
 ## Validation
 
 The packaging command was run after the app-specific host checks, freestanding
-Clippy checks, and signed QEMU 1/2/4 acceptance gates recorded in the six
+Clippy checks, and signed QEMU 1/2/4 acceptance gates recorded in the seven
 application audits. The resulting manifest and package hashes are generated
 under `target/system-apps/0.8.0` and are intentionally ignored build evidence.
 

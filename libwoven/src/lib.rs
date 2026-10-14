@@ -220,6 +220,7 @@ pub mod syscall {
 
     pub const READ: u64 = 0;
     pub const WRITE: u64 = 1;
+    pub const FILE_WRITE: u64 = 10;
     pub const OPEN: u64 = 2;
     pub const EXIT: u64 = 3;
     pub const GETPID: u64 = 4;
@@ -334,6 +335,15 @@ pub mod syscall {
     /// `buffer` must be readable for `len` bytes.
     pub unsafe fn write(descriptor: u64, buffer: *const u8, len: usize) -> u64 {
         unsafe { invoke(WRITE, descriptor, buffer as u64, len as u64) }
+    }
+
+    /// Write bytes to an opened filesystem descriptor.
+    ///
+    /// # Safety
+    /// `buffer` must be readable for `len` bytes and the descriptor must be an
+    /// opened file whose owner has the kernel's `FileWrite` capability.
+    pub unsafe fn file_write(descriptor: u64, buffer: *const u8, len: usize) -> u64 {
+        unsafe { invoke(FILE_WRITE, descriptor, buffer as u64, len as u64) }
     }
 
     /// Read up to `len` bytes from `descriptor` into `buffer`.
@@ -1631,6 +1641,14 @@ pub fn audit_read(offset: u64) -> Result<Option<security::AuditEvent>, Error> {
 pub fn write(descriptor: u64, bytes: &[u8]) -> Result<usize, Error> {
     // SAFETY: a slice is readable for its own length.
     let result = unsafe { syscall::write(descriptor, bytes.as_ptr(), bytes.len()) };
+    check(result).map(|count| count as usize)
+}
+
+/// Write bytes to an opened filesystem descriptor. The kernel enforces the
+/// descriptor's owner and `FileWrite` capability before mutating storage.
+pub fn write_file(descriptor: u64, bytes: &[u8]) -> Result<usize, Error> {
+    // SAFETY: a slice is readable for its own length.
+    let result = unsafe { syscall::file_write(descriptor, bytes.as_ptr(), bytes.len()) };
     check(result).map(|count| count as usize)
 }
 

@@ -4606,6 +4606,8 @@ const SYSTEM_APP_MONITOR: &[u8] = include_bytes!(env!("WOVENHAT_MONITOR_IMAGE"))
 const SYSTEM_APP_SETTINGS: &[u8] = include_bytes!(env!("WOVENHAT_SETTINGS_IMAGE"));
 #[cfg(any(feature = "stage19-app-catalog-test", feature = "system-apps"))]
 const SYSTEM_APP_SECURITY: &[u8] = include_bytes!(env!("WOVENHAT_SECURITY_IMAGE"));
+#[cfg(any(feature = "stage19-app-catalog-test", feature = "system-apps"))]
+const SYSTEM_APP_EDITOR: &[u8] = include_bytes!(env!("WOVENHAT_EDITOR_IMAGE"));
 
 #[cfg(feature = "system-apps")]
 fn install_production_system_apps() -> bool {
@@ -4659,6 +4661,13 @@ fn install_production_system_apps() -> bool {
             binary_path: "/bin/wovenhat-security",
             catalog_path: "/share/applications/woven-security.app",
             catalog: b"Name=WovenSecurity\nExec=/bin/wovenhat-security\n",
+        },
+        App {
+            name: "woven-editor",
+            image: SYSTEM_APP_EDITOR,
+            binary_path: "/bin/wovenhat-editor",
+            catalog_path: "/share/applications/woven-editor.app",
+            catalog: b"Name=WovenEditor\nExec=/bin/wovenhat-editor\n",
         },
     ];
     // Verify and parse all packages before changing the VFS. A malformed or
@@ -4807,6 +4816,13 @@ fn stage19_app_catalog_self_test() -> bool {
             catalog_path: "/share/applications/woven-security.app",
             catalog: b"Name=WovenSecurity\nExec=/bin/wovenhat-security\n",
         },
+        App {
+            name: "woven-editor",
+            image: SYSTEM_APP_EDITOR,
+            binary_path: "/bin/wovenhat-editor",
+            catalog_path: "/share/applications/woven-editor.app",
+            catalog: b"Name=WovenEditor\nExec=/bin/wovenhat-editor\n",
+        },
     ];
     fn step(name: &str, ok: bool) -> bool {
         serial::write_line(format_args!(
@@ -4872,7 +4888,7 @@ fn stage19_app_catalog_self_test() -> bool {
             return false;
         }
     }
-    step("six signed applications installed", true)
+    step("seven signed applications installed", true)
 }
 
 /// Stage 16.1 acceptance: an application built outside the kernel is installed
