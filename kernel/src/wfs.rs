@@ -1444,23 +1444,26 @@ pub fn ensure_vfs_path(path: &str, now: u64) -> Result<(), Error> {
     .unwrap_or(Err(Error::Device))
 }
 
-/// Commit a VFS write directly to native WovenFS and return the new complete
-/// file image in `out`. The caller must refresh its VFS node only after this
-/// returns success; no RAM-only write is reported as durable.
+/// Commit a native write and publish its VFS cache image while the native
+/// mutation lock is still held. This prevents a later native writer from
+/// committing and publishing before an earlier writer publishes its cache.
+/// A publication error still follows a durable commit: callers must reconcile
+/// the cache on failure rather than assume the native write was rolled back.
 #[cfg(not(test))]
-pub fn write_vfs_path_at(
+pub fn write_vfs_path_at_with_publish<T, E>(
     path: &str,
     offset: usize,
     bytes: &[u8],
     out: &mut [u8; MAX_FILE_SIZE],
     now: u64,
-) -> Result<(usize, usize), Error> {
+    publish: impl FnOnce(&[u8], usize, usize) -> Result<T, E>,
+) -> Result<Result<T, E>, Error> {
     let _mutation = MUTATION.lock();
     let name = checked_vfs_name(path)?;
     if bytes.len() > MAX_FILE_SIZE {
         return Err(Error::TooLarge);
     }
-    with_ata_volume(|volume| {
+    let (written, length) = with_ata_volume(|volume| {
         let inode = match volume.lookup(1, name) {
             Ok(entry) => entry.inode,
             Err(Error::NotFound) => volume.create(1, name, 0o600, now)?,
@@ -1476,7 +1479,8 @@ pub fn write_vfs_path_at(
         volume.write_file(inode, &out[..length], now)?;
         Ok((bytes.len(), length))
     })
-    .unwrap_or(Err(Error::Device))
+    .unwrap_or(Err(Error::Device))?;
+    Ok(publish(&out[..length], length, written))
 }
 
 /// Remove a single native root file. The VFS entry is removed by the caller
@@ -1496,13 +1500,14 @@ pub fn unlink_vfs_path(path: &str, now: u64) -> Result<(), Error> {
 }
 
 #[cfg(test)]
-pub fn write_vfs_path_at(
+pub fn write_vfs_path_at_with_publish<T, E>(
     _path: &str,
     _offset: usize,
     _bytes: &[u8],
     _out: &mut [u8; MAX_FILE_SIZE],
     _now: u64,
-) -> Result<(usize, usize), Error> {
+    _publish: impl FnOnce(&[u8], usize, usize) -> Result<T, E>,
+) -> Result<Result<T, E>, Error> {
     Err(Error::Device)
 }
 
