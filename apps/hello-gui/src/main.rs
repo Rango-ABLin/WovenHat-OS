@@ -43,10 +43,11 @@
 //! geometry the kernel reports, and animates a square paced by a
 //! `FrameClock`, checking that no frame came early.
 //!
-//! With `--desktop-client <shell> <a|b>` it is an application on the
+//! With `--desktop-client <shell> <a|b|c>` it is an application on the
 //! WovenShell desktop: it opens a window through the shell's protocol (and,
 //! as `a`, a tray icon and a notification, then redraws part of its window),
-//! and exits once the shell forwards it its key.
+//! and exits once the shell forwards it its key, or asks it to close. `c`
+//! opens a window larger than the old 320×240 surface cap.
 //!
 //! With `--probe <handle>` it runs as an ordinary process and checks that the
 //! kernel refuses it everything it has no authority for: every compositor
@@ -846,6 +847,7 @@ fn desktop_client(args: &Args) -> ! {
         match args.get(3) {
             Some(b"a") => (b"Alpha", 120, 80, rgb(200, 60, 60), b'x', true),
             Some(b"b") => (b"Beta", 100, 60, rgb(60, 60, 200), b'y', false),
+            Some(b"c") => (b"Wide", 400, 260, rgb(60, 160, 90), b'z', false),
             _ => fail(181),
         };
     let window = match GraphicsSurface::create(u32::from(width), u32::from(height)) {
@@ -905,6 +907,12 @@ fn desktop_client(args: &Args) -> ! {
             Ok(_) => {}
         }
         if let Ok((length, sender)) = libwoven::message_receive(&mut key) {
+            if sender == shell && &key[..length] == b"WCLS" {
+                let _ = libwoven::print("hello-gui desktop client: closed by the shell\n");
+                drop(icon);
+                drop(window);
+                libwoven::exit(0);
+            }
             if sender != shell || length != 1 || key[0] != expected {
                 fail(187);
             }

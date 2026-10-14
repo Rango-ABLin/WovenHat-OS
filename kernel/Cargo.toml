@@ -111,6 +111,8 @@ stage20-1-test = ["qemu-test"]
 stage20-2-test = ["qemu-test"]
 # WovenStart: the application launcher.
 stage20-3-test = ["qemu-test"]
+# Windows that move and close; budgeted client surfaces.
+stage20-4-test = ["qemu-test"]
 stage1-5-test = ["qemu-test"]
 
 [dependencies]
