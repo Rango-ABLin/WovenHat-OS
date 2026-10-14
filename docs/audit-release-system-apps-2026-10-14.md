@@ -4,10 +4,12 @@ The authoritative release chain now includes the external Stage 19 application
 workspaces and the signed catalog boundary. `scripts/test-release.py` runs
 warning-denying Clippy for WovenCalculator, WovenTerminal, WovenFiles, and
 WovenMonitor, WovenSettings, WovenSecurity, WovenEditor, WovenImages,
-WovenUpdate, and WovenStore; runs all seven through signed Ring-3 harnesses on 1,
+WovenUpdate, and WovenStore; runs all ten through signed Ring-3 harnesses on 1,
 2, and 4 CPUs; and runs `scripts/test-system-app-catalog-qemu.py` on 1, 2,
-and 4 CPUs. The full release chain passed every host test, debug/release
-memory, storage, network, legacy-PIC, shell, and application check.
+and 4 CPUs. The ten-application focused checks passed. A subsequent full
+release-chain attempt reached the first memory QEMU gate and emitted its
+complete pass marker, but timed out before QEMU returned exit 33; that overall
+release gate is therefore not accepted on this tree yet.
 
 `scripts/package-release.py` now includes the validated system-app manifest,
 ten WAPP packages, ten bounded catalog descriptors, and SHA-256 entries for

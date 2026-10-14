@@ -27,6 +27,6 @@ under `target/system-apps/0.8.0` and are intentionally ignored build evidence.
 
 ## Result
 
-The reproducible signed packaging/catalog boundary passes for the four accepted
-apps. Stage 19 remains incomplete until the remaining applications, persistent
-media update/rollback policy, and full GUI integration are accepted.
+The reproducible signed packaging/catalog boundary passes for all ten accepted
+apps. Stage 19 remains incomplete until persistent media update/rollback
+policy, key lifecycle integration, and full GUI integration are accepted.

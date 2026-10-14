@@ -19,7 +19,7 @@ applications as one install plan:
 
 Each package is verified as WAPP v1, mutated-package refusal is checked, the
 package is written to and read back from the VFS byte-for-byte, and the
-read-back payload is passed through the normal verified ELF loader. The four
+read-back payload is passed through the normal verified ELF loader. The ten
 generated `/share/applications/*.app` descriptors are published only after the
 corresponding package has passed those checks.
 

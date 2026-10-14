@@ -35,11 +35,12 @@ WovenStore adds bounded read-only installed-catalog browsing and passes signed
 1/2/4-CPU execution; see the
 [WovenStore audit](audit-stage19-store-2026-10-14.md).
 
-The full `scripts/test-release.py` chain passed on the current tree. It covered
-warning-denying kernel/host Clippy, all host integration tests, 1/2/4-CPU debug
-memory/storage/network, legacy PIC, 4-CPU release memory/storage/network,
-release compilation, and shell smoke. See the
-[release validation audit](audit-release-validation-2026-10-14.md).
+The ten-application focused gates passed on the current tree. A fresh
+`scripts/test-release.py` attempt passed lint and host tests, then stopped at
+`memory-1-debug`: the serial log emitted `[BOOT] ALL VALIDATIONS PASSED`, but
+the harness timed out waiting for QEMU to return exit 33. Therefore this tree
+is not marked as a fully accepted release until that harness/QEMU exit issue is
+resolved. See the [release validation audit](audit-release-validation-2026-10-14.md).
 
 This is software/QEMU qualification only; native hardware and destructive USB
 media limits remain open.
@@ -57,8 +58,8 @@ collision checks, and rollback of newly created VFS entries on publication
 failure. It requires an explicitly provisioned application trust key; the
 acceptance harness supplies the test key only for QEMU. The 4-CPU shell gate
 confirmed installation before shell startup. Persistent media updates,
-power-loss rollback, key rotation/revocation, and the remaining applications
-are still open. See the
+power-loss rollback, key rotation/revocation, and native hardware
+qualification remain open. See the
 [production system-app boot audit](audit-stage19-production-system-app-boot-2026-10-14.md).
 
 Stage 14.5D was rerun on 1/2/4 CPUs. DHCP, DNS, ICMP, host-verified UDP/TCP,
