@@ -1,5 +1,40 @@
 # Stage status
 
+## Stage 13.12 — boot-time driver bring-up (2026-10-14)
+
+Until now, every Stage 13 driver ran only inside its own test build. A
+normal boot contained no driver manager, NVMe, AHCI, xHCI or HDA code.
+Every normal boot now runs `drivers::bring_up()`, which:
+- matches each controller through the WovenDriver manager;
+- binds its PCI function and MMIO BARs;
+- initializes the controller at that address;
+- rolls the binding back if initialization fails.
+
+A missing or failing device never stops the boot. Ready drivers appear in
+the device registry as `nvme0`, `ahci0`, `xhci0` and `hda0`.
+
+**Evidence.**
+- **Gate `[S13.12] driver bring-up: PASSED`:** passes in its three
+  machine modes (all devices, AHCI without a disk, no devices) on
+  1/2/4 CPUs.
+- **Normal build:** a kernel built with no test feature binds all four
+  drivers and reaches the shell, on 1/2/4 CPUs.
+- **Negative controls:** four controls each failed the gate as intended,
+  and the gate passed again once the source was restored.
+- **Prior gates:** 13.1–13.10 pass on 1/2/4 CPUs.
+
+See the
+[Stage 13.12 audit](audit-stage13-12-driver-bring-up-2026-10-14.md).
+
+**Stage 13 is not closed by this.** Still to do:
+- mount storage from NVMe or AHCI;
+- deliver USB keyboard and mouse input through an interrupt-driven xHCI
+  worker into WovenInput;
+- expose WovenAudio to userspace;
+- move touchpad, touchscreen, pen and game-controller events out of the
+  Stage 13.7 probe;
+- physical qualification of Wi-Fi and Bluetooth.
+
 ## 2026-10-14 revalidation
 
 The first Stage 19 system application, WovenCalculator, now builds outside the

@@ -38,6 +38,44 @@ evidence is recorded in the [Stage 14.5D revalidation audit](audit-stage14-5d-re
 It qualifies the QEMU virtio boundary only; native NIC/radio and physical-link
 behavior remain hardware work.
 
+## Stage 13.12 boot-time driver bring-up (2026-10-14)
+
+Until this stage, every Stage 13 driver (`driver.rs`, `nvme.rs`, `ahci.rs`,
+`xhci.rs`, `hda.rs`) was compiled only into its own test feature: a normal
+boot contained none of them. `drivers.rs` now runs in every normal boot,
+after storage and networking:
+1. It registers a class matcher for NVMe, AHCI, xHCI and HDA with the
+   WovenDriver manager.
+2. For each driver, it finds the first PCI function the manager matches to
+   it.
+3. It binds that function through `driver::bind_pci`. Binding claims the
+   function and its programmed MMIO BARs for the boot owner token.
+4. Only then does it call the driver's `init_at(device)`, with the function
+   re-read after admission because admission may move BARs.
+
+Initialization failure unbinds again (`unbind_pci_resources`), so a failed
+controller never keeps ownership. A missing controller is logged as absent.
+Neither stops the boot. Ready drivers are added to the device registry
+(`nvme0`, `ahci0`, `xhci0`, `hda0`) and listed by the shell's `devices`.
+
+**Rules for this code:**
+- A normal build compiles only the driver code it uses. The PCI hotplug
+  functions stay gated to the Stage 13 tests.
+- Each driver module carries one `expect(dead_code, reason = …)`, active
+  only in production and in `stage13-12-test`. The reason names the APIs
+  still waiting for production callers. The later Stage 13 closure steps
+  (USB input, audio) remove it by giving those APIs callers.
+- Shared PCI/paging items that the live binding path now uses had their
+  dead-code expectations narrowed so they do not apply in those builds.
+
+**Limits.**
+- One function per driver: a second controller of the same class stays
+  unbound.
+- The controllers still poll synchronously under their own locks during
+  initialization.
+- Storage is not yet mounted from NVMe or AHCI.
+- USB devices are not yet read, and audio is not yet exposed to userspace.
+
 ## Stage 13.4–13.7 revalidation (2026-10-14)
 
 The ordered AHCI/SATA, xHCI core, USB HID, and WovenInput software gates pass

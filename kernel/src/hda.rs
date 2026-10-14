@@ -1,3 +1,10 @@
+#![cfg_attr(
+    any(not(feature = "qemu-test"), feature = "stage13-12-test"),
+    expect(
+        dead_code,
+        reason = "production initializes the bound controller (init_at); codec, stream and mixer paths are exercised by the Stage 13.8 gate until the Stage 13 audio step gives them production callers"
+    )
+)]
 use core::{
     ptr,
     sync::atomic::{compiler_fence, Ordering},
@@ -869,11 +876,19 @@ pub fn probe() -> bool {
     find_controller().is_some()
 }
 pub fn init() -> Result<ControllerSummary, InitError> {
+    if let Some(summary) = CONTROLLER.lock().as_ref().map(HdaController::summary) {
+        return Ok(summary);
+    }
+    init_at(find_controller().ok_or(InitError::MissingController)?)
+}
+
+/// Initialize the controller at `device`, the function its driver is bound
+/// to. An already initialized controller is kept.
+pub fn init_at(device: pci::Device) -> Result<ControllerSummary, InitError> {
     let mut slot = CONTROLLER.lock();
     if let Some(c) = slot.as_ref() {
         return Ok(c.summary());
     }
-    let device = find_controller().ok_or(InitError::MissingController)?;
     let c = HdaController::initialize(device)?;
     let summary = c.summary();
     *slot = Some(c);

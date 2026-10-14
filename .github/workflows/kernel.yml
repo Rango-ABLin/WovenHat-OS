@@ -231,6 +231,26 @@ jobs:
               python3 scripts/test-stage10-runtime.py --stage 13.8 --cpus "$cpu" --timeout 120 --qemu "$qemu" --firmware "$ovmf_code"
             done
           done
+      - name: Stage 13.12 boot-time driver bring-up 1/2/4-core acceptance
+        shell: bash
+        run: |
+          qemu=/usr/bin/qemu-system-x86_64
+          ovmf_code=
+          for variant in OVMF_CODE_4M.fd OVMF_CODE.fd; do
+            candidate="/usr/share/OVMF/$variant"
+            if [ -f "$candidate" ]; then
+              ovmf_code="$candidate"
+              break
+            fi
+          done
+          test -n "$ovmf_code"
+          cargo clippy -p wovenhat-kernel --target x86_64-unknown-none -- -D warnings
+          cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage13-12-test -- -D warnings
+          for mode in devices nodisk absent production; do
+            for cpu in 1 2 4; do
+              python3 scripts/test-stage13-12-drivers.py --mode "$mode" --cpus "$cpu" --timeout 240 --qemu "$qemu" --firmware "$ovmf_code"
+            done
+          done
       - name: Stage 13.9 WovenWiFi full-contract 1/2/4-core acceptance
         shell: bash
         run: |

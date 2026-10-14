@@ -49,6 +49,8 @@ stage13-7-test = ["qemu-test"]
 stage13-8-test = ["qemu-test"]
 stage13-9-test = ["qemu-test"]
 stage13-10-test = ["qemu-test"]
+# Boot-time driver bring-up: the driver manager binds storage, USB and audio.
+stage13-12-test = ["qemu-test"]
 stage14-1-test = ["network-test"]
 stage14-2-test = ["network-test", "stage14-1-test"]
 stage14-3-test = ["network-test", "stage14-2-test"]

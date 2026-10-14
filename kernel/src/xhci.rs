@@ -1,3 +1,10 @@
+#![cfg_attr(
+    any(not(feature = "qemu-test"), feature = "stage13-12-test"),
+    expect(
+        dead_code,
+        reason = "production initializes the bound controller (init_at); HID and Bluetooth paths are exercised by the Stage 13.5/13.6/13.10 gates until the Stage 13 USB input step gives them production callers"
+    )
+)]
 use core::{
     cmp, ptr,
     sync::atomic::{fence, Ordering},
@@ -1006,11 +1013,19 @@ impl XhciController {
 }
 
 pub fn init() -> Result<(u8, u8, u8, u8), InitError> {
+    if let Some(summary) = CONTROLLER.lock().as_ref().map(XhciController::summary) {
+        return Ok(summary);
+    }
+    init_at(find_controller().ok_or(InitError::MissingController)?)
+}
+
+/// Initialize the controller at `device`, the function its driver is bound
+/// to. An already initialized controller is kept.
+pub fn init_at(device: pci::Device) -> Result<(u8, u8, u8, u8), InitError> {
     let mut slot = CONTROLLER.lock();
     if let Some(controller) = slot.as_ref() {
         return Ok(controller.summary());
     }
-    let device = find_controller().ok_or(InitError::MissingController)?;
     let controller = XhciController::initialize(device)?;
     let summary = controller.summary();
     *slot = Some(controller);

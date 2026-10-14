@@ -1850,10 +1850,10 @@ pub fn release_mmio_owned(mapping: OwnedMmioMapping) -> Result<(), MapRangeError
 }
 
 /// Revoke every owner-scoped MMIO page before releasing a PCI function.
-#[expect(
+#[cfg_attr(not(any(not(feature = "qemu-test"), feature = "stage13-12-test")), expect(
     dead_code,
     reason = "used by PCI driver lifecycle on freestanding target"
-)]
+))]
 pub fn revoke_mmio_owner(owner: u32) -> Result<(), MapRangeError> {
     if owner == 0 {
         return Err(MapRangeError::InvalidRange);
