@@ -1241,8 +1241,9 @@ RELRO/TLS support remain open.
 
 FAT32 persistence now exposes a separate versioned `WDJ2` journal for bounded
 sixteen-file data batches. Prepared batches roll every partially-written file
-back to its prior bytes and remove stale WMD1/WMD2 metadata intents; committed
-batches are retired only after all intended checksums match. The legacy `WDJ1`
+back to its prior bytes and metadata, removing stale WMD1/WMD2 metadata
+intents; committed batches are retired only after all intended checksums and
+metadata snapshots match. The legacy `WDJ1`
 single-file format and metadata ABIs remain readable. Kernel
 build/check, warning-denying kernel Clippy, and the existing storage gate
 passed on 1/2/4 CPUs, including two-file commit/readback and prepared,
@@ -1264,13 +1265,25 @@ and MBR/GPT-partitioned paths are covered. The 1/2/4-CPU disposable storage
 gates, host crash tests, and warning-denying Clippy passed. See the
 [immediate-rollback audit](audit-stage1-5-immediate-rollback-2026-10-13.md).
 
-This is a bounded hardening increment, not full Stage 1–5 completion. Metadata
-transactions beyond the sidecars, arbitrary-size/full-volume rollback,
-physical storage/DMA qualification, and unclean-shutdown hardware evidence
-remain open.
+This is a bounded hardening increment, not full Stage 1–5 completion. The
+follow-up metadata transaction increment below closes metadata rollback within
+this bounded format; arbitrary-size/full-volume rollback, physical storage/DMA
+qualification, and unclean-shutdown hardware evidence remain open.
 
 The WDJ2 capacity extension was revalidated on 1/2/4 CPUs after increasing the
 bounded batch maximum from four to sixteen entries; see the [capacity audit](audit-stage1-5-wdj2-capacity-2026-10-14.md).
+
+## Stage 1–5 bounded metadata transactions — 2026-10-14
+
+WDJ2 v2 snapshots old and new inode/sidecar ownership metadata while retaining
+version 1 recovery compatibility. Prepared and incomplete committed batches
+restore both bytes and prior metadata; committed recovery retires the journal
+only after bytes and new metadata match. The live FAT32 recovery fixture and
+storage/SMP QEMU gates passed on 1/2/4 CPUs. See the [metadata transaction
+audit](audit-stage1-5-metadata-transactions-2026-10-14.md).
+
+This closes bounded metadata transactions, not arbitrary-size/full-volume
+rollback or physical unclean-shutdown qualification.
 
 ## Stage 14.2D — Router Advertisement state (2026-10-06)
 
