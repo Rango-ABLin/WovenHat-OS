@@ -1188,6 +1188,13 @@ single signed package; no FAT32 round trip, because the gate installs into the V
 `/bin` where `exec` resolves names; no shared libraries or thread-locals, both
 rejected by the loader by design; and no stack-size negotiation.
 
+The accepted Stage 19 applications now have a reproducible packaging boundary:
+`scripts/package-system-apps.py` builds WovenCalculator, WovenTerminal, and
+WovenFiles, signs each WAPP payload, and emits hashed `/bin` install paths plus
+`/share/applications` descriptors in an install-plan manifest. This is a
+release artifact, not a claim that the current one-package acceptance boot can
+install all packages. The multi-package image/installer consumer remains open.
+
 ## Stage 15 — WovenFS native filesystem (2026-10-12)
 
 WovenFS is WovenHat's own on-disk filesystem, specified in

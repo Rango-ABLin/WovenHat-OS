@@ -20,6 +20,15 @@ directory lister and file previewer using the same verified external-image
 path. It passes signed 1/2/4-CPU execution; GUI, boot catalog, and mutation
 workflows remain open. See the Stage 19 WovenFiles audit.
 
+`scripts/package-system-apps.py` is the release packaging boundary for these
+three accepted apps. It builds each app in its own workspace, signs the ELF
+with WAPP v1, checks the envelope before publication, and emits hashed package
+and `/share/applications` catalog artifacts in one install-plan manifest. The
+manifest is deliberately not treated as an installed filesystem: the current
+kernel acceptance path still embeds one package through `WOVENHAT_APP_IMAGE`.
+An atomic multi-package image/installer consumer remains a Stage 19
+prerequisite, as do the remaining applications and full GUI integration.
+
 ## Release validation (2026-10-14)
 
 The repository release chain passed on the current tree, including warning-
