@@ -987,10 +987,15 @@ pub fn self_test() -> bool {
     let bad_ok = short_name_to_str(b"BAD?    TXT", &mut name).is_none();
     let encode_ok = fat32::encode_short_name("kernel.bin") == Some(*b"KERNEL  BIN")
         && fat32::encode_short_name("readme") == Some(*b"README     ");
+    let empty_data: &[u8] = &[];
+    let oversized_paths = [("/mnt/over-capacity.bin", empty_data); BATCH_JOURNAL_MAX_ENTRIES + 1];
+    let oversized_api_rejected =
+        persist_paths_atomic(&oversized_paths) == Err(PersistError::TooLarge);
     kernel_ok
         && readme_ok
         && bad_ok
         && encode_ok
+        && oversized_api_rejected
         && batch_capacity_self_test()
         && data_journal_self_test()
 }
@@ -1137,11 +1142,14 @@ fn data_journal_self_test() -> bool {
             && !decoded[1].old_exists
             && decoded[4].old_data == [11, 12, 13, 14]
     });
+    let truncated_batch_rejected =
+        (0..batch.len()).all(|length| parse_batch_journal(&batch[..length]).is_none());
     let mut bad_batch = batch;
     bad_batch[BATCH_JOURNAL_HEADER_SIZE + BATCH_JOURNAL_ENTRY_HEADER_SIZE] ^= 1;
     valid
         && batch_ok
         && parse_batch_journal(&bad_batch).is_none()
+        && truncated_batch_rejected
         && read_u64(&tampered, 18)
             != data_journal_checksum(&tampered, DATA_JOURNAL_HEADER_SIZE, old.len())
         && committed_data_matches(new.len(), checksum_bytes(&new), Some(&new))
@@ -2075,13 +2083,16 @@ fn live_directory_growth_self_test() -> Result<(), &'static str> {
 /// Persist several `/mnt` files as one bounded crash-recoverable data batch.
 ///
 /// The existing `persist_path` WDJ1 transaction remains unchanged. This API
-/// adds a distinct WDJ2 record with a maximum of sixteen entries; a prepared
+/// adds a distinct WDJ2 record with a maximum of 255 entries; a prepared
 /// record rolls every already-written entry back to its old bytes and metadata,
 /// while a committed record is retained until every new checksum and metadata
-/// snapshot is observed.
+/// snapshot is observed. Requests beyond that bound fail before device access.
 pub fn persist_paths_atomic(paths: &[(&str, &[u8])]) -> Result<(), PersistError> {
-    if paths.is_empty() || paths.len() > BATCH_JOURNAL_MAX_ENTRIES {
+    if paths.is_empty() {
         return Err(PersistError::Failed);
+    }
+    if paths.len() > BATCH_JOURNAL_MAX_ENTRIES {
+        return Err(PersistError::TooLarge);
     }
     if !mnt_mounted() {
         return Err(unavailable_persist_error());

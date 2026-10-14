@@ -5,11 +5,11 @@ mistaken for full production completion.
 
 | Area | Foundation present | Production gaps still open |
 | --- | --- | --- |
-| Stages 1–5 | Boot, memory, paging, scheduler, VFS, userspace, storage; 1/2/4-CPU acceptance; bounded Unicode long-filename create/lookup/delete/rename, NFC name normalization, named listing, mounted import listing, directory growth, bounded VFS uid/gid/mode enforcement, WMD1/WMD2 ownership metadata persistence/import, durable file-intent recovery, and bounded sixteen-file WDJ2 data-plus-metadata rollback/replay | Non-QEMU hardware qualification/drivers, DMA storage completion, arbitrary-size/full-volume rollback, and unclean-shutdown hardware qualification |
+| Stages 1–5 | Boot, memory, paging, scheduler, VFS, userspace, storage; 1/2/4-CPU acceptance; bounded Unicode long-filename create/lookup/delete/rename, NFC name normalization, named listing, mounted import listing, directory growth, bounded VFS uid/gid/mode enforcement, WMD1/WMD2 ownership metadata persistence/import, durable file-intent recovery, and bounded 255-entry WDJ2 data-plus-metadata rollback/replay | Non-QEMU hardware qualification/drivers, DMA storage completion, arbitrary-size/full-volume rollback, and unclean-shutdown hardware qualification |
 | Stage 6 | Bounded SMP, TLB shootdowns, 1–4 CPU tests, ACPI SRAT CPU/memory-domain discovery, domain-local placement/rebalancing/allocation, x2APIC MSR path, migratable audited I/O workers, QEMU-qualified non-contiguous AP offline/re-online control, ranked interrupt-safe locks for scheduler/process/paging/COW/frame-allocation/file-frame cache/VFS/heap/swap/FAT32 clean-page cache, async/completion/worker, pipe, IPC, WovenGuard lineage, device/keyboard, journal, mount-record and key-vault domains, generation-tagged VFS/pipe handles, unlocked/revalidated disk-backed VFS reads and materialization, allocator-reserved contiguous VirtIO DMA arena, in-place heap metadata and runtime chunk growth | General multicore userspace, unrestricted concurrent I/O/DMA throughput, multi-node NUMA qualification, non-contiguous hotplug hardware qualification, APIC-ID-above-255 hardware coverage, cross-layer FAT32 mutation transactions and stress qualification, guarded-allocation headroom/low-memory and multicore heap stress, broader cross-layer lock stress/priority inheritance |
 | Stages 7–9 | Isolation, IPC, capability delegation/revocation, WovenGuard, ELF W^X, formal threat model | Dynamic libc/linking, complete signals, scheduler-backed threads |
 | Stage 10 | TCP, completion ports, timer/event foundations, Ring-3 timer/event gate, unified completion path | Broader production driver and hardware qualification |
-| Stage 11 | Process/thread state, notifications, `libwoven`, loader checks, production ASLR | Real scheduler-backed user threads, dynamic relocations, shared libraries, loader TLS, RELRO |
+| Stage 11 | Process/thread state, notifications, `libwoven`, production ASLR, W^X, static RELRO, static initial-exec TLS, bounded self-contained relative/local-symbol PIE relocations, and a bounded scheduler-backed user-thread create/exit/join path with event-driven wakeup | Shared-library dependency mapping, cross-image symbol resolution, dynamic TLS, and hardware qualification |
 | Stage 12 | Typed VFS, metadata, checksums, snapshot/mount boundaries, xattrs and restore records, ChaCha20-Poly1305 envelope and bounded revocable key vault | Native WovenFS, journaling/COW disk replay, full data rollback, measured/persistent key provisioning and encrypted-volume mount integration |
 
 For every open item we will add implementation, focused host tests, 1/2/4 CPU
@@ -70,8 +70,8 @@ QEMU hotplug gate; claimed-transition hardware-fault and concurrent workload
 stress remain open.
 
 Stage 11 loader boundary follow-up: ELF program headers that require loader
-semantics not yet implemented (`PT_INTERP`, `PT_DYNAMIC`, `PT_TLS`, and
-`PT_GNU_RELRO`) now fail closed instead of being ignored. This is a production
-safety boundary for dynamic linking/TLS/RELRO work, not completion of those
-features; dynamic relocations, shared libraries, TLS image allocation, and RELRO
-permission transitions remain open.
+semantics not yet implemented (`PT_INTERP`, shared-library dependencies,
+symbol-based relocation, and unsupported TLS/RELRO forms) fail closed instead
+of being ignored. Self-contained relative PIE relocation, static RELRO, and
+static initial-exec TLS are separately audited bounded capabilities, not a
+claim of a complete dynamic linker. See the loader audits in docs.

@@ -2,10 +2,50 @@
 
 ## 2026-10-14 revalidation
 
+Stage 14.5D was rerun on 1/2/4 CPUs. DHCP, DNS, ICMP, host-verified UDP/TCP,
+SMP/TLB, and firewall transport/path checks passed with exit 33. See the
+[Stage 14.5D revalidation audit](audit-stage14-5d-revalidation-2026-10-14.md).
+The evidence remains QEMU virtio-only and does not claim native NIC/radio
+qualification.
+
+Stages 13.4, 13.5, 13.6, and 13.7 were independently rerun on 1/2/4 CPUs
+and all passed with exit 33. See the
+[Stage 13.4–13.7 validation audit](audit-stage13-4-7-validation-2026-10-14.md).
+These QEMU gates validate software and protocol contracts, not native-device
+interoperability. The Stage 13.6 fixture exercises USB HID keyboard support;
+The bounded boot-mouse report decoder is now self-tested, but live xHCI mouse
+polling/publication and physical USB mouse interoperability remain open. See
+the [USB mouse decoder audit](audit-stage13-6-usb-mouse-decoder-2026-10-14.md).
+
 Stage 16.1, 17.1, 18.1, 19.1, 19.3, and 19.10 were rerun on 1/2/4 CPUs
 after the remote-termination cleanup change; all emitted their required pass
 markers and exit 33. See
 [the revalidation audit](audit-stage17-19-revalidation-2026-10-14.md).
+
+The complete Stage 12 acceptance chain was independently rerun on the current
+accepted tree. Stages 12.1 through 12.5 all passed on 1/2/4 CPUs with exit 33;
+the retained evidence directories are `stage12.1-1cpu-1791977944719919100`,
+`stage12.1-2cpu-1791978000197697900`,
+`stage12.1-4cpu-1791978038096642600`,
+`stage12.2-1cpu-1791978076763178400`,
+`stage12.2-2cpu-1791978128405584500`,
+`stage12.2-4cpu-1791978166570188900`,
+`stage12.3-1cpu-1791978204787637600`,
+`stage12.3-2cpu-1791978254549661600`,
+`stage12.3-4cpu-1791978294758980400`,
+`stage12.4-1cpu-1791978335142454100`,
+`stage12.4-2cpu-1791978387714722500`,
+`stage12.4-4cpu-1791978427671708800`,
+`stage12.5-1cpu-1791978468908251500`,
+`stage12.5-2cpu-1791978521938978000`, and
+`stage12.5-4cpu-1791978563395332900`.
+
+The ELF dynamic metadata boundary was hardened before shared-library work.
+`DT_NEEDED` is now bounded and string-table validated, while the loader rejects
+dependency-bearing images until dependency mapping, cross-image symbol scope,
+dynamic TLS, and shared-image teardown exist. The Stage 11.3–11.5 1/2/4-CPU
+matrix passed again with the new parser self-test; see the
+[dynamic dependency metadata audit](audit-stage11-needed-metadata-2026-10-14.md).
 
 ## Host-test boundary repair — 2026-10-14
 
@@ -121,6 +161,26 @@ Open:
 - The kernel's own lifecycle notifications (`NotificationPoll`) are not
   shown.
 
+## Syscall numbering for the desktop (2026-10-14)
+
+Twice, the desktop's compositor syscalls took numbers that work on
+`phase2` took at the same time, and merging conflicted:
+- region blend and keyed blit at 122–124 collided with permissions, the
+  audit ledger and secrets (122–129);
+- the same calls renumbered to 130–132 collided with threads (130–135).
+
+They now live at **200–202**:
+
+| Number | Syscall |
+|---|---|
+| 200 | `GraphicsCompositorBlendRegion` |
+| 201 | `GraphicsCompositorBlendRegionShared` |
+| 202 | `GraphicsCompositorBlitKeyed` |
+
+New desktop and compositor syscalls take numbers from the 200 block, so
+the two lines of work cannot collide. The syscalls the desktop added
+earlier, 116–121, were never contested and keep their numbers.
+
 ## Stages 20.4–20.8 — validation after rebasing onto phase2 (2026-10-14)
 
 The Stage 20.4–20.8 commits were rebased onto `phase2` at `c5b13392`,
@@ -136,7 +196,8 @@ merge. They were then validated as one stack in an isolated worktree.
   - the kernel runtime stages back to 1–5;
   - the legacy-IRQ memory suite;
   - Stage 6 hotplug on 2 and 4 CPUs.
-- In the rebase, syscalls 122–124 were renumbered to 130–132; see Stages
+- In the rebase, syscalls 122–124 were renumbered to 130–132, and later
+  to 200–202 (see "Syscall numbering for the desktop" above); see Stages
   20.5 and 20.6.
 
 ## Stage 20.8 — tiling: resize protocol, snap to edges, master and stack (2026-10-13)
@@ -272,7 +333,7 @@ Open:
 
 Roadmap Stage 18.3, Window Experience: subtle translucency.
 
-**Kernel: keyed blit.** Syscall 132 (first numbered 124, renumbered on
+**Kernel: keyed blit.** Syscall 202 (first numbered 124, then 132; renumbered on
 rebasing onto the Stage 1–19 hardening), `GraphicsCompositorBlitKeyed`, is the
 region blit of one of the caller's own surfaces, except that source pixels
 equal to `display::TRANSPARENT_KEY` (magenta, `0x00FF00FF`, which no
@@ -342,7 +403,7 @@ Open:
 
 Roadmap Stage 18.3, Window Experience: dynamic depth.
 
-**Kernel: region blend.** Syscalls 130 and 131 (first numbered 122/123,
+**Kernel: region blend.** Syscalls 200 and 201 (first numbered 122/123, then 130/131;
 renumbered on rebasing onto the Stage 1–19 hardening, which took 122–129),
 `GraphicsCompositorBlendRegion` and its shared variant, are the region blit
 (120/121) with a uniform opacity in place of the copy. They use the same
@@ -1621,11 +1682,18 @@ kernel, not only WovenFS.
 
 Open: WovenFS is not the mounted system filesystem — FAT32 still holds `/mnt`
 and the boot volume — and whether to make it one or to keep FAT32 and reclassify
-Stage 12.2/12.4 is an open product decision. Files import read-only; write-back
-from the VFS into WovenFS is a later stage. Crash recovery is proven by fault
-injection, not by actual power loss on a device, and physical qualification
-covers one device on one host through QEMU's IDE emulation rather than a native
-driver stack.
+Stage 12.2/12.4 is an open product decision. The bounded `/wfs/<name>` file
+authority now supports durable create, write, read-back, and unlink through task
+file syscalls; direct generic VFS mutation remains read-only. Native mutations
+serialize their complete read-modify-write transactions. The adapter remains a
+flat root-file slice: rename, mkdir, directory enumeration, mounted-system
+policy, and native multi-directory semantics remain open. See the [Stage 15
+VFS write-through audit](audit-stage15-wfs-vfs-write-through-2026-10-14.md).
+
+Crash recovery is proven by fault injection, not actual power loss on a device.
+Physical qualification remains incomplete: the inserted USB flash disk was
+inspected read-only, while the destructive harness requires Administrator
+elevation and explicit authorization to erase it.
 
 The complete Stage 12 acceptance chain was revalidated on 2026-10-13: all
 Stages 12.1–12.5 passed on 1/2/4 CPUs with exit 33. See the
@@ -1694,8 +1762,8 @@ scheduler-validated canary on each static kernel task stack. The dedicated
 1/2/4-CPU gate and warning-denying freestanding kernel Clippy pass. See the
 [Stage 15.9 exploit-mitigation audit](audit-stage15-9-exploit-mitigations-2026-10-13.md).
 This closes the verified software-hardening subset only: true unmapped kernel
-stack guards, SMEP/SMAP enablement and hardware qualification, and dynamic
-RELRO/TLS support remain open.
+stack guards, SMEP/SMAP enablement and hardware qualification, shared-library
+RELRO/TLS support, and scheduler-backed user threads remain open.
 
 ## Stage 1–5 bounded batch data journal — 2026-10-06
 
@@ -1756,6 +1824,27 @@ not physical power-loss or torn-sector evidence. FSInfo remains an advisory
 hint and may be stale after an injected failure; physical flash/ATA/DMA,
 torn-write, arbitrary-size/full-volume rollback, and reboot recovery remain
 open.
+
+The WDJ2 codec self-test also rejects every byte-truncated form of a valid
+prepared record before recovery can interpret it. This strengthens software
+journal-boundary evidence; it does not prove physical torn-sector atomicity or
+power-loss recovery.
+
+## Stage 1–5 DMA allocation cleanup — 2026-10-14
+
+The existing AHCI and NVMe DMA-page owners now return allocator frames when
+direct-map setup fails. AHCI also drops all pages on failed controller
+initialization; successful controller ownership remains process-lifetime and
+is held under the controller lock until no hardware command can reference the
+pages. The `BlockDevice` ABI is unchanged.
+
+The Stage 13.3/13.4 freestanding Clippy gates, host Clippy, and the complete
+host test suite passed after this change. The NVMe and AHCI QEMU controller
+gates also passed on 1/2/4 CPUs with exit 33. See the [DMA allocation audit](audit-stage1-5-dma-allocation-2026-10-14.md)
+for the six evidence directories.
+This closes a software allocation-leak path only. Physical AHCI/NVMe and USB
+flash qualification, IOMMU isolation, interrupt completion, torn-sector and
+power-loss evidence, and arbitrary-size rollback remain open.
 
 ## Stage 14.2D — Router Advertisement state (2026-10-06)
 
@@ -2227,6 +2316,18 @@ validation. See [audit](audit-stage11-2-2026-09-16.md).
 
 Next: Stage 11.3 structured notifications and lifecycle events.
 
+### Stage 11.2 scheduler-backed thread follow-up — accepted increment on 2026-10-14
+
+The bounded scheduler-backed user-thread path now has an end-to-end Ring-3
+create/exit/join acceptance. It uses private NX stacks, copied initial-exec
+TLS, stable process ownership, generation-safe IDs, and post-switch resource
+reclamation. Build, warning-denying Clippy, host tests, and 1/2/4-CPU QEMU
+passed; see [audit](audit-stage11-2-scheduler-threads-2026-10-14.md).
+
+This is an implementation increment, not closure of every Stage 11 thread
+requirement. Sibling cancellation/teardown, shared libraries, symbol
+resolution, dynamic TLS, and hardware qualification remain open.
+
 ## Stages 11.3–11.5 — accepted on 2026-09-16
 
 Structured notifications, the `libwoven` userspace API boundary, and hardened
@@ -2236,12 +2337,36 @@ freestanding Clippy, and host tests. See [audit](audit-stage11-3-5-2026-09-16.md
 The follow-up ASLR pass now randomizes production ELF, stack and mmap bases
 with a deterministic `qemu-test` switch; see [audit](audit-aslr-2026-09-16.md).
 
-The 2026-10-05 loader-boundary follow-up rejects `PT_INTERP`, `PT_DYNAMIC`,
+The 2026-10-05 loader-boundary follow-up rejected `PT_INTERP`, `PT_DYNAMIC`,
 `PT_TLS`, and `PT_GNU_RELRO` program headers instead of silently accepting
-binaries whose dynamic-linking, TLS, or RELRO semantics are not yet implemented.
-This is a fail-closed production-safety boundary; dynamic relocations, shared
-libraries, TLS image allocation, and RELRO permission transitions remain open.
+binaries whose dynamic-linking, TLS, or RELRO semantics were not implemented
+at that point. This was a fail-closed production-safety boundary; later
+follow-ups narrow the remaining unsupported surface.
 See [audit](audit-stage11-loader-boundary-2026-10-05.md).
+
+The 2026-10-14 RELRO follow-up closes the static RELRO permission transition:
+a single validated `PT_GNU_RELRO` range is protected read-only after loading,
+ASLR relocation carries the range, and COW write-fault bookkeeping refuses to
+reattach write authority to it. Valid/invalid parser cases and the complete
+Stage 11.5 1/2/4-CPU gate passed. Shared libraries, symbol-based relocation,
+and physical/hardware qualification remain open. See
+the [RELRO audit](audit-stage11-relro-2026-10-14.md).
+
+The 2026-10-14 static TLS follow-up adds a bounded initial-exec `PT_TLS`
+contract: the loader validates and maps one initial TLS image, task context
+switches install its FS base, and fork/exec preserve the ownership and COW
+rules. Shared-library TLS, TLS module IDs, multi-thread TLS semantics, and
+physical/hardware qualification remain open. See the
+[static TLS audit](audit-stage11-static-tls-2026-10-14.md).
+
+The 2026-10-14 dynamic-relocation follow-up accepts bounded self-contained
+ET_DYN images with R_X86_64_RELATIVE plus locally defined symbol RELA entries.
+SysV hash/symbol/string metadata is bounded and validated; relocations are
+applied before W^X and RELRO finalization. The inherited 1/2/4-CPU Stage
+11.3–11.5 matrix passed with an end-to-end mapped-image local-symbol
+relocation self-test. Shared-library dependency mapping, cross-image symbol
+resolution, versioning, lazy binding, and dynamic TLS remain fail-closed. See
+the [dynamic relocation audit](audit-stage11-dynamic-relocations-2026-10-14.md).
 
 ## Stage 12.1 — accepted on 2026-09-16
 
@@ -2680,6 +2805,10 @@ ceiling for package/directory transactions without changing the on-disk
 version or production block-device ABI. Recovery allocation remains explicitly
 bounded; arbitrary-size/full-volume rollback, physical storage/DMA, torn-write
 and reboot qualification remain open.
+
+The public `persist_paths_atomic` boundary now returns `TooLarge` for a
+256-entry request before mount or device access, rather than collapsing the
+bounded-capacity refusal into a generic failure.
 
 
 
