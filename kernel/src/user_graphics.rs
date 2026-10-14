@@ -8,11 +8,20 @@
 //!
 //! # Bounded by construction
 //!
-//! There are at most [`MAX_SURFACES`] surfaces system-wide, [`MAX_PER_OWNER`]
-//! per process, and each surface is at most [`MAX_WIDTH`] by [`MAX_HEIGHT`]
-//! pixels. The caps are deliberately small — this is the primitive, not the
-//! final shape — so an unbounded number of surfaces or very large allocations
-//! cannot be requested from userspace.
+//! There are at most [`MAX_SURFACES`] surfaces system-wide and
+//! [`MAX_PER_OWNER`] per process. Each is at most [`MAX_WIDTH`] by
+//! [`MAX_HEIGHT`], the compositor's own bound, and pixels are budgeted: one
+//! process may hold at most [`OWNER_PIXEL_BUDGET`] pixels across its
+//! surfaces, and all processes together [`SYSTEM_PIXEL_BUDGET`]. Until Stage
+//! 20.4 every surface was capped at 320×240, too small for a real window.
+//!
+//! # Locking
+//!
+//! The registry lock disables preemption, not interrupts. A surface is up to
+//! 9 MB, and copying one for the compositor must not hold interrupts off.
+//! Nothing takes the lock from interrupt context. A new surface is allocated
+//! with the lock released, between a budget check before and a re-check
+//! after, and a destroyed one is freed after the lock is released.
 //!
 //! # Owner binding and generation tags
 //!
@@ -25,21 +34,28 @@
 use alloc::vec::Vec;
 
 use crate::display::{Rect, Surface};
-use crate::irq_lock::IrqMutex as Mutex;
+use crate::irq_lock::PreemptMutex as Mutex;
 
 pub const MAX_SURFACES: usize = 16;
 pub const MAX_PER_OWNER: usize = 4;
-pub const MAX_WIDTH: u32 = 320;
-pub const MAX_HEIGHT: u32 = 240;
+pub const MAX_WIDTH: u32 = 1920;
+pub const MAX_HEIGHT: u32 = 1200;
+/// Pixels one process may hold across its surfaces: 4 MB, enough for a
+/// window filling a 1280×800 screen.
+pub const OWNER_PIXEL_BUDGET: usize = 1 << 20;
+/// Pixels all processes may hold together: 16 MB.
+pub const SYSTEM_PIXEL_BUDGET: usize = 1 << 22;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Error {
     /// The handle names no live surface, or its generation is stale, or its
     /// owner does not match the token's.
     InvalidHandle,
-    /// This process already owns [`MAX_PER_OWNER`] surfaces.
+    /// This process already owns [`MAX_PER_OWNER`] surfaces, or the new
+    /// surface would take it past [`OWNER_PIXEL_BUDGET`].
     OwnerFull,
-    /// The system-wide table is full.
+    /// The system-wide table is full, or the new surface would take the
+    /// system past [`SYSTEM_PIXEL_BUDGET`].
     SystemFull,
     /// Requested dimensions exceed the caps.
     OutOfRange,
@@ -123,11 +139,19 @@ impl Slot {
         }
     }
 
-    fn free(&mut self) {
-        self.surface = None;
+    /// Empty the slot and bump its generation. Returns the surface so the
+    /// caller can free it after releasing the registry lock.
+    fn free(&mut self) -> Option<Surface> {
         self.shared_with = None;
         self.damage = None;
         self.generation = self.generation.wrapping_add(1).max(1);
+        self.surface.take()
+    }
+
+    fn pixels(&self) -> usize {
+        self.surface
+            .as_ref()
+            .map_or(0, |surface| surface.width() * surface.height())
     }
 }
 
@@ -161,6 +185,31 @@ impl Registry {
             .count()
     }
 
+    /// Why a new `pixels`-pixel surface for `owner` would be refused, if it
+    /// would be.
+    fn admit(&self, owner: u64, pixels: usize) -> Result<usize, Error> {
+        if self.count_for(owner) >= MAX_PER_OWNER {
+            return Err(Error::OwnerFull);
+        }
+        let owned: usize = self
+            .slots
+            .iter()
+            .filter(|slot| slot.owner == owner)
+            .map(Slot::pixels)
+            .sum();
+        if owned + pixels > OWNER_PIXEL_BUDGET {
+            return Err(Error::OwnerFull);
+        }
+        let total: usize = self.slots.iter().map(Slot::pixels).sum();
+        if total + pixels > SYSTEM_PIXEL_BUDGET {
+            return Err(Error::SystemFull);
+        }
+        self.slots
+            .iter()
+            .position(|slot| slot.surface.is_none())
+            .ok_or(Error::SystemFull)
+    }
+
     fn resolve_mut(&mut self, handle: Handle) -> Result<&mut Surface, Error> {
         let slot_index = handle.slot();
         let slot = self.slots.get_mut(slot_index).ok_or(Error::InvalidHandle)?;
@@ -184,26 +233,32 @@ fn with_registry<R>(operation: impl FnOnce(&mut Registry) -> R) -> R {
 }
 
 /// Allocate a surface for `owner`.
+///
+/// The caps and budgets are checked before allocating, so a request that
+/// cannot succeed allocates nothing. The allocation then happens with the
+/// lock released, and everything is checked again before the surface is
+/// installed, because another create may have taken the room meanwhile.
 pub fn create(owner: u64, width: u32, height: u32) -> Result<Handle, Error> {
     if width == 0 || height == 0 || width > MAX_WIDTH || height > MAX_HEIGHT {
         return Err(Error::OutOfRange);
     }
-    with_registry(|registry| {
-        if registry.count_for(owner) >= MAX_PER_OWNER {
-            return Err(Error::OwnerFull);
+    let pixels = width as usize * height as usize;
+    with_registry(|registry| registry.admit(owner, pixels))?;
+    let surface = Surface::new(width as usize, height as usize);
+    let (result, refused) = with_registry(|registry| match registry.admit(owner, pixels) {
+        Ok(index) => {
+            let slot = &mut registry.slots[index];
+            slot.owner = owner;
+            slot.shared_with = None;
+            slot.damage = None;
+            slot.surface = Some(surface);
+            (Ok(Handle::pack(index, slot.generation, owner)), None)
         }
-        let index = registry
-            .slots
-            .iter()
-            .position(|slot| slot.surface.is_none())
-            .ok_or(Error::SystemFull)?;
-        let slot = &mut registry.slots[index];
-        slot.owner = owner;
-        slot.shared_with = None;
-        slot.damage = None;
-        slot.surface = Some(Surface::new(width as usize, height as usize));
-        Ok(Handle::pack(index, slot.generation, owner))
-    })
+        Err(error) => (Err(error), Some(surface)),
+    });
+    // A surface that lost the race is freed with the lock released.
+    drop(refused);
+    result
 }
 
 /// Fill a rectangle in the surface named by `handle`.
@@ -252,6 +307,36 @@ pub fn snapshot(handle: Handle) -> Result<Surface, Error> {
         let mut copy = Surface::new(surface.width(), surface.height());
         copy.blit(surface, 0, 0);
         Ok(copy)
+    })
+}
+
+/// Copy just `region` of a surface, clipped to it: the caller's own surface,
+/// or with `grantee`, a surface its owner shared with that process (the same
+/// rules as [`snapshot_shared`]). Returns the clipped region and its pixels.
+///
+/// The compositor's region blit uses this. Copying only the exposed part of a
+/// window, rather than the whole window, keeps a small repaint cheap however
+/// large the window is.
+pub fn snapshot_region(
+    handle: Handle,
+    region: Rect,
+    grantee: Option<u64>,
+) -> Result<(Rect, Surface), Error> {
+    with_registry(|registry| {
+        if let Some(grantee) = grantee {
+            let shared = registry
+                .slots
+                .get(handle.slot())
+                .is_some_and(|slot| slot.shared_with == Some(grantee));
+            if !shared {
+                return Err(Error::InvalidHandle);
+            }
+        }
+        let surface = registry.resolve_mut(handle)?;
+        let clipped = region.intersect(surface.bounds());
+        let mut copy = Surface::new(clipped.width, clipped.height);
+        copy.blit_region(surface, clipped, 0, 0);
+        Ok((clipped, copy))
     })
 }
 
@@ -431,7 +516,7 @@ pub fn pixel(handle: Handle, x: i32, y: i32) -> Result<u32, Error> {
 /// The slot's generation is bumped, so a later syscall carrying the old handle
 /// is refused rather than addressing a reused slot.
 pub fn destroy(handle: Handle) -> Result<(), Error> {
-    with_registry(|registry| {
+    let freed = with_registry(|registry| {
         let slot_index = handle.slot();
         let slot = registry
             .slots
@@ -443,9 +528,11 @@ pub fn destroy(handle: Handle) -> Result<(), Error> {
         {
             return Err(Error::InvalidHandle);
         }
-        slot.free();
-        Ok(())
-    })
+        Ok(slot.free())
+    })?;
+    // Freed with the registry lock released.
+    drop(freed);
+    Ok(())
 }
 
 /// Free every slot owned by `owner`. Returns how many were released.
@@ -463,7 +550,9 @@ pub fn release_owner(owner: u64) -> usize {
         }
         for slot in registry.slots.iter_mut() {
             if slot.surface.is_some() && slot.owner == owner {
-                slot.free();
+                // Freed here: this runs under the scheduler lock on the exit
+                // path, which the registry lock cannot be released ahead of.
+                drop(slot.free());
                 released += 1;
             }
         }

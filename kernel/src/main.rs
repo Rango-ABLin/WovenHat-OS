@@ -3429,6 +3429,15 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         serial::write_line(format_args!("[S1-5] storage journal: PASSED"));
         qemu_test_exit_success();
     }
+    #[cfg(feature = "stage20-4-test")]
+    {
+        if !stage20_4_self_test() {
+            serial::write_line(format_args!("[S20.4] windows that move and close: FAILED"));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!("[S20.4] windows that move and close: PASSED"));
+        qemu_test_exit_success();
+    }
     #[cfg(feature = "stage20-3-test")]
     {
         if !stage20_3_self_test() {
@@ -4688,7 +4697,8 @@ fn stage16_1_self_test() -> bool {
     feature = "stage19-13-test",
     feature = "stage19-14-test",
     feature = "stage20-2-test",
-    feature = "stage20-3-test"
+    feature = "stage20-3-test",
+    feature = "stage20-4-test"
 ))]
 const HELLO_GUI_IMAGE: &[u8] = include_bytes!(env!("WOVENHAT_HELLO_GUI_IMAGE"));
 
@@ -4709,7 +4719,8 @@ const HELLO_GUI_IMAGE: &[u8] = include_bytes!(env!("WOVENHAT_HELLO_GUI_IMAGE"));
     feature = "stage19-13-test",
     feature = "stage19-14-test",
     feature = "stage20-2-test",
-    feature = "stage20-3-test"
+    feature = "stage20-3-test",
+    feature = "stage20-4-test"
 ))]
 fn display_client_capabilities() -> capability::CapabilitySet {
     capability::CapabilitySet::only(capability::Capability::Console)
@@ -4732,7 +4743,8 @@ fn display_client_capabilities() -> capability::CapabilitySet {
     feature = "stage19-13-test",
     feature = "stage19-14-test",
     feature = "stage20-2-test",
-    feature = "stage20-3-test"
+    feature = "stage20-3-test",
+    feature = "stage20-4-test"
 ))]
 fn run_hello_gui(
     image: &[u8],
@@ -4763,7 +4775,8 @@ fn run_hello_gui(
     feature = "stage19-13-test",
     feature = "stage19-14-test",
     feature = "stage20-2-test",
-    feature = "stage20-3-test"
+    feature = "stage20-3-test",
+    feature = "stage20-4-test"
 ))]
 fn spawn_hello_gui(
     image: &[u8],
@@ -4795,7 +4808,8 @@ fn spawn_hello_gui(
     feature = "stage19-13-test",
     feature = "stage19-14-test",
     feature = "stage20-2-test",
-    feature = "stage20-3-test"
+    feature = "stage20-3-test",
+    feature = "stage20-4-test"
 ))]
 fn wait_hello_gui(pid: task::ProcessId) -> Option<(task::ProcessId, Result<i32, task::WaitError>)> {
     let start = timer::ticks();
@@ -4812,9 +4826,233 @@ fn wait_hello_gui(pid: task::ProcessId) -> Option<(task::ProcessId, Result<i32, 
 #[cfg(any(
     feature = "stage20-1-test",
     feature = "stage20-2-test",
-    feature = "stage20-3-test"
+    feature = "stage20-3-test",
+    feature = "stage20-4-test"
 ))]
 const WOVEN_SHELL_IMAGE: &[u8] = include_bytes!(env!("WOVENHAT_SHELL_IMAGE"));
+
+/// Stage 20.4 acceptance: windows that move and close, on budgeted surfaces.
+///
+/// The kernel first checks the surface budgets directly:
+/// - dimensions up to the compositor's bound;
+/// - one process limited to its pixel budget, which a destroy returns;
+/// - all processes together limited to the system budget.
+///
+/// Then the desktop runs with an ordinary window and one larger than the old
+/// 320×240 cap, driven by real i8042 input:
+/// - a title-bar drag moves window A, and the regions it leaves and covers
+///   repaint correctly;
+/// - the close control on the wide window asks its owner to close, and the
+///   owner does;
+/// - A takes its key and exits.
+#[cfg(feature = "stage20-4-test")]
+fn stage20_4_self_test() -> bool {
+    use crate::display::{blend_pixel, rgb, Surface};
+    use crate::user_graphics::{Error as SurfaceError, OWNER_PIXEL_BUDGET};
+
+    const WALLPAPER_TOP: u32 = rgb(18, 42, 74);
+    const WALLPAPER_BOTTOM: u32 = rgb(64, 28, 88);
+    const WHITE: u32 = rgb(255, 255, 255);
+    const ACTIVE: u32 = rgb(70, 120, 210);
+    const CLOSE_FILL: u32 = rgb(170, 60, 60);
+    const RED: u32 = rgb(200, 60, 60);
+    const GREEN: u32 = rgb(60, 160, 90);
+    const UNSET: u32 = 0x0100_0000;
+
+    fn step(name: &str, ok: bool) -> bool {
+        serial::write_line(format_args!(
+            "[S20.4] {} {}",
+            name,
+            if ok { "PASS" } else { "FAIL" }
+        ));
+        ok
+    }
+    fn until(limit: u64, condition: impl Fn() -> bool) -> bool {
+        let start = timer::ticks();
+        loop {
+            if condition() {
+                return true;
+            }
+            if timer::ticks().wrapping_sub(start) > limit {
+                return false;
+            }
+            task::yield_now();
+        }
+    }
+    fn wallpaper(x: i32, y: i32, height: i32) -> u32 {
+        let span = (height - 1).max(1);
+        let t = (y.clamp(0, span) * 255 / span) as u8;
+        let base = blend_pixel(WALLPAPER_BOTTOM, WALLPAPER_TOP, t);
+        if x % 32 == 0 || y % 32 == 0 {
+            blend_pixel(WHITE, base, 28)
+        } else {
+            base
+        }
+    }
+    fn region(x0: i32, y0: i32, width: i32, height: i32, expected: impl Fn(i32, i32) -> u32) -> bool {
+        (y0..y0 + height).all(|y| (x0..x0 + width).all(|x| compositor::pixel(x, y) == Ok(expected(x, y))))
+    }
+    /// A title bar as the kernel renders it: fill, title text, and the
+    /// close control at its right.
+    fn title_bar(x: i32, y: i32, width: i32, text: &str, fill: u32) -> bool {
+        let mut expected = Surface::new(width as usize, 14);
+        let bounds = expected.bounds();
+        expected.fill_rect(bounds, fill);
+        expected.draw_text(4, 4, text, WHITE);
+        let close = crate::display::Rect::new(width - 12, 2, 10, 10);
+        expected.fill_rect(close, CLOSE_FILL);
+        expected.draw_text(width - 12 + 3, 4, "x", WHITE);
+        region(x, y, width, 14, |px, py| expected.pixel(px - x, py - y).unwrap_or(UNSET))
+    }
+    fn packet(dx: i16, screen_dy: i16, left: bool) -> bool {
+        let dy = -screen_dy;
+        let flags = 0x08
+            | u8::from(left)
+            | if dx < 0 { 0x10 } else { 0 }
+            | if dy < 0 { 0x20 } else { 0 };
+        [flags, dx as u8, dy as u8].into_iter().all(mouse::loopback)
+    }
+    /// Relative motion in packets of at most 100 per axis, with the left
+    /// button held or not.
+    fn move_by(mut dx: i32, mut dy: i32, held: bool) -> bool {
+        while dx != 0 || dy != 0 {
+            let (sx, sy) = (dx.clamp(-100, 100), dy.clamp(-100, 100));
+            if !packet(sx as i16, sy as i16, held) {
+                return false;
+            }
+            dx -= sx;
+            dy -= sy;
+        }
+        true
+    }
+
+    // Budgets, checked on the registry directly with owners no process uses.
+    const OWNER: u64 = 4300;
+    let oversized = user_graphics::create(OWNER, user_graphics::MAX_WIDTH + 1, 1)
+        == Err(SurfaceError::OutOfRange)
+        && user_graphics::create(OWNER, 1, user_graphics::MAX_HEIGHT + 1) == Err(SurfaceError::OutOfRange);
+    let whole = user_graphics::create(OWNER, 1024, 1024);
+    let per_owner = oversized
+        && OWNER_PIXEL_BUDGET == 1024 * 1024
+        && whole.is_ok()
+        && user_graphics::create(OWNER, 1, 1) == Err(SurfaceError::OwnerFull)
+        && whole.is_ok_and(|handle| user_graphics::destroy(handle).is_ok())
+        && user_graphics::create(OWNER, 1, 1).is_ok();
+    user_graphics::release_owner(OWNER);
+    if !step("one process is held to its pixel budget", per_owner) {
+        return false;
+    }
+    let owners = [4301u64, 4302, 4303, 4304];
+    let filled = owners.iter().all(|&owner| user_graphics::create(owner, 1024, 1024).is_ok());
+    let system = filled
+        && user_graphics::create(4305, 1, 1) == Err(SurfaceError::SystemFull)
+        && user_graphics::release_owner(owners[0]) == 1
+        && user_graphics::create(4305, 1, 1).is_ok();
+    for owner in owners.into_iter().chain([4305]) {
+        user_graphics::release_owner(owner);
+    }
+    if !step("all processes together are held to the system budget", system) {
+        return false;
+    }
+
+    // The desktop.
+    let installed = vfs::create_read_only("/bin/hello-gui", HELLO_GUI_IMAGE).is_ok();
+    let capabilities = capability::CapabilitySet::only(capability::Capability::Console)
+        .with(capability::Capability::DisplayIo)
+        .with(capability::Capability::InputIo)
+        .with(capability::Capability::Ipc);
+    let Some(program) = userspace::load_elf_with_argv(WOVEN_SHELL_IMAGE, &["/bin/woven-shell"]) else {
+        return step("shell image loads", false);
+    };
+    let Ok((shell, _, _)) = task::spawn_user_system_service("woven-shell", program, capabilities) else {
+        return step("shell spawned", false);
+    };
+    if !step(
+        "shell took the display",
+        installed && until(3000, || compositor::holder() == Some(shell.as_u64()) && compositor::is_presenting()),
+    ) {
+        return false;
+    }
+    let Some((width, height)) = compositor::dimensions() else {
+        return step("desktop geometry", false);
+    };
+    let (width, height) = (width as i32, height as i32);
+    let client = capability::CapabilitySet::only(capability::Capability::Console).with(capability::Capability::Ipc);
+    let shell_arg = alloc::format!("{}", shell.as_u64());
+    let Some(alpha) = spawn_hello_gui(HELLO_GUI_IMAGE, &["/bin/hello-gui", "--desktop-client", &shell_arg, "a"], Some(client)) else {
+        return step("application A spawned", false);
+    };
+    if !step("window A opened", until(2000, || compositor::pixel(45, 45) == Ok(RED))) {
+        return false;
+    }
+    let Some(wide) = spawn_hello_gui(HELLO_GUI_IMAGE, &["/bin/hello-gui", "--desktop-client", &shell_arg, "c"], Some(client)) else {
+        return step("wide application spawned", false);
+    };
+    // 400x260, larger than the old 320x240 cap, cascaded to (64, 64).
+    let opened = until(2000, || compositor::pixel(300, 200) == Ok(GREEN))
+        && until(500, || {
+            region(64, 64, 400, 260, |_, _| GREEN) && title_bar(64, 50, 400, "Wide", ACTIVE)
+        });
+    if !step("a window larger than 320x240 opens, with a close control", opened) {
+        return false;
+    }
+
+    // Drag A by its title bar: take hold at (80, 32), 40 right of and 8
+    // above A's client origin, then move (300, 250) with the button held.
+    let (px, py) = (width / 2, height / 2);
+    // Released at (380, 282), then parked on empty desktop at (600, 150) so
+    // the pointer covers nothing being checked.
+    let dragged = move_by(80 - px, 32 - py, false)
+        && packet(0, 0, true)
+        && move_by(300, 250, true)
+        && packet(0, 0, false)
+        && move_by(600 - 380, 150 - 282, false);
+    // A's client area lands at (380 - 40, 282 + 8) = (340, 290): above the
+    // wide window, which it now overlaps, and focused.
+    let moved = dragged
+        && until(1000, || compositor::pixel(345, 295) == Ok(RED))
+        && until(500, || {
+            title_bar(340, 276, 120, "Alpha", ACTIVE)
+                && region(340, 290, 120, 80, |x, y| {
+                    if (350..370).contains(&x) && (300..310).contains(&y) {
+                        WHITE
+                    } else {
+                        RED
+                    }
+                })
+                && compositor::pixel(45, 45) == Ok(wallpaper(45, 45, height))
+                && compositor::pixel(100, 100) == Ok(GREEN)
+        });
+    if !step("dragging the title bar moves the window and repaints both places", moved) {
+        return false;
+    }
+
+    // The wide window's close control, at (452, 52): the owner is asked to
+    // close, does, and the window goes. A keeps the focus.
+    let closed = move_by(457 - 600, 57 - 150, false)
+        && packet(0, 0, true)
+        && packet(0, 0, false)
+        && wait_hello_gui(wide).map(|(_, status)| status) == Some(Ok(0))
+        && until(1000, || compositor::pixel(300, 200) == Ok(wallpaper(300, 200, height)));
+    if !step("the close control asks the owner to close, and it does", closed) {
+        return false;
+    }
+    let typed = mouse::keyboard_loopback(0x2d)
+        && wait_hello_gui(alpha).map(|(_, status)| status) == Some(Ok(0))
+        && until(1000, || compositor::pixel(345, 295) == Ok(wallpaper(345, 295, height)));
+    if !step("A keeps the focus, takes its key and exits", typed) {
+        return false;
+    }
+
+    if task::kill_process(shell.as_u64(), 9).is_err() || !until(1000, || task::process_exited(shell)) {
+        return step("shell killed", false);
+    }
+    let _ = task::wait_process(shell.as_u64());
+    step(
+        "display returned to the terminal",
+        compositor::holder().is_none() && !compositor::is_presenting(),
+    )
+}
 
 /// Stage 20.3 acceptance: WovenStart, the application launcher.
 ///
@@ -5208,6 +5446,18 @@ fn stage20_2_self_test() -> bool {
             }
         })
     }
+    /// A title bar: fill, title text, and the close control at its right
+    /// (Stage 20.4).
+    fn title_bar(origin: (i32, i32), width: i32, text: &str, fill: u32) -> bool {
+        let (x, y) = origin;
+        let mut expected = Surface::new(width as usize, 14);
+        let bounds = expected.bounds();
+        expected.fill_rect(bounds, fill);
+        expected.draw_text(4, 4, text, WHITE);
+        expected.fill_rect(crate::display::Rect::new(width - 12, 2, 10, 10), rgb(170, 60, 60));
+        expected.draw_text(width - 12 + 3, 4, "x", WHITE);
+        region(x, y, width, 14, |px, py| expected.pixel(px - x, py - y).unwrap_or(UNSET))
+    }
     /// One PS/2 packet through the real auxiliary path.
     fn packet(dx: i16, screen_dy: i16, left: bool) -> bool {
         let dy = -screen_dy;
@@ -5294,7 +5544,7 @@ fn stage20_2_self_test() -> bool {
         return false;
     }
     let frame_a = until(500, || {
-        labelled((40, 26), (120, 14), (4, 4), "Alpha", ACTIVE)
+        title_bar((40, 26), 120, "Alpha", ACTIVE)
             && region(40, 40, 120, 80, |x, y| {
                 if (50..70).contains(&x) && (50..60).contains(&y) {
                     compositor::pixel(x, y).unwrap_or(UNSET)
@@ -5350,8 +5600,8 @@ fn stage20_2_self_test() -> bool {
     let stacked = until(2000, || compositor::pixel(150, 100) == Ok(BLUE))
         && until(500, || {
             compositor::pixel(45, 45) == Ok(RED)
-                && labelled((64, 50), (100, 14), (4, 4), "Beta", ACTIVE)
-                && labelled((40, 26), (120, 14), (4, 4), "Alpha", TITLE_INACTIVE)
+                && title_bar((64, 50), 100, "Beta", ACTIVE)
+                && title_bar((40, 26), 120, "Alpha", TITLE_INACTIVE)
                 && labelled(entry(0), (80, 16), (4, 5), "Alpha", ENTRY_INACTIVE)
                 && labelled(entry(1), (80, 16), (4, 5), "Beta", ACTIVE)
         });
@@ -5404,7 +5654,7 @@ fn stage20_2_self_test() -> bool {
         region(tray_x, tray_y, 16, 16, taskbar)
             && labelled(entry(0), (80, 16), (4, 5), "Beta", ACTIVE)
             && region(entry(1).0, entry(1).1, 80, 16, taskbar)
-            && labelled((64, 50), (100, 14), (4, 4), "Beta", ACTIVE)
+            && title_bar((64, 50), 100, "Beta", ACTIVE)
             && compositor::pixel(150, 100) == Ok(BLUE)
     });
     if !step(

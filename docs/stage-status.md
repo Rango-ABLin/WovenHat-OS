@@ -17,6 +17,83 @@ gate pass. The unsupported `cargo test --workspace --all-targets` command is
 documented as a host-assembler mismatch rather than treated as a production
 failure. See the [host-test audit](audit-host-test-boundary-2026-10-14.md).
 
+## Stage 20.4 — windows that move and close; budgeted client surfaces (2026-10-13)
+
+Roadmap Stage 18.3, Window Experience, first step: the prerequisite in
+`docs/design-stage18-3-window-experience.md`.
+
+**Surface budgets (kernel).** The 320×240 per-surface cap is gone.
+- A surface may be up to 1920×1200, the compositor's own bound.
+- Pixels are budgeted: one process may hold `OWNER_PIXEL_BUDGET` (1 M
+  pixels, 4 MB) across its surfaces, and all processes together
+  `SYSTEM_PIXEL_BUDGET` (4 M pixels, 16 MB).
+- The existing counts stay: 4 surfaces per process and 16 in total.
+- Going over a process's budget is `OwnerFull`, going over the system's is
+  `SystemFull`, and a destroy returns its budget.
+- The sizes are defaults pending the owner's decision on a desktop
+  session's memory target.
+
+Larger surfaces needed three changes to how the registry holds its lock:
+- **The registry lock disables preemption, not interrupts.** Copying a
+  9 MB surface must not hold interrupts off. Nothing takes the lock from
+  interrupt context. The compositor already nests its preemption lock
+  under the scheduler's interrupt lock on the exit path, so the same rank
+  order holds.
+- **Allocation and freeing happen outside the lock.** A new surface is
+  allocated between a budget check before and a re-check after, so a
+  create that lost a race frees its surface after unlocking. A destroyed
+  surface is freed after unlocking. On the exit path, which runs under the
+  scheduler lock, it is freed in place.
+- **Region blits copy only the region.** The new
+  `user_graphics::snapshot_region` copies just the exposed part of a
+  surface, so a small repaint of a large window stays small. Previously
+  every region blit copied the whole surface.
+
+**Shell.**
+- Windows may be as large as the desktop above the taskbar.
+- A drag on a title bar moves the window, raised and focused. The frame is
+  kept on screen and above the taskbar, and the old and new places are
+  repainted on every motion step.
+- Each title bar has a close control. A click on it sends the owner
+  `WCLS`, without focusing the window. The window goes when the owner
+  releases its surface, so an application can finish first or decline.
+- hello-gui `--desktop-client` honours `WCLS`, and gains a `c` variant
+  with a 400×260 window.
+
+Gate `[S20.4] windows that move and close: PASSED`.
+- The kernel checks the budgets directly:
+  - oversized dimensions are `OutOfRange`;
+  - a 1024×1024 surface fills a process's budget, so a further 1×1 is
+    `OwnerFull`, and is admitted once the large surface is destroyed;
+  - four processes with 1024×1024 each fill the system, so a fifth is
+    `SystemFull`, and is admitted once one process releases.
+- On the desktop, real i8042 input:
+  - window A opens, then a 400×260 window opens on top with its title bar
+    and close control exact;
+  - A is dragged by its title bar by (300, 250). It lands at the computed
+    place, above the wide window, focused, with its title bar and its
+    damage patch exact. Its old place shows wallpaper, and the wide window
+    shows where A left it;
+  - the wide window's close control makes it exit 0, and it disappears;
+  - A, still focused, takes `x` and exits;
+  - killing the shell returns the display.
+- Stage 20.2's title-bar checks were updated to include the close control,
+  an intended change of appearance.
+
+Negative controls, with evidence in
+`audit-artifacts/stage20.4-negative-control-*`:
+- With dragging disabled, the gate fails at "dragging the title bar moves
+  the window and repaints both places".
+- With the per-process budget lifted, it fails at "one process is held to
+  its pixel budget".
+
+Open:
+- No resize: the protocol request is in the design. No minimise or
+  maximise.
+- Pointer events are still not forwarded to applications.
+- The other compositor paths (whole-surface blit, blend) still copy whole
+  surfaces, now under a preemption lock rather than an interrupts-off one.
+
 ## Stage 20.3 — WovenStart application launcher (2026-10-13)
 
 Roadmap Stage 18.2, WovenStart: application launcher and search.

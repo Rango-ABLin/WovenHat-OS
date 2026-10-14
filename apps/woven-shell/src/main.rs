@@ -32,6 +32,10 @@
 //! icon goes away when its surface does, normally because its owner exited.
 //! Keystrokes go to the focused window's owner as one-byte messages.
 //!
+//! A window is moved by dragging its title bar. Its close control sends the
+//! owner `WCLS`, a request: the window goes when the owner releases its
+//! surface, so an application can finish first, or decline.
+//!
 //! # WovenStart
 //!
 //! The start button, or F1, opens the launcher: the applications listed in
@@ -97,6 +101,9 @@ const TITLE_HEIGHT: i32 = 14;
 const TITLE_ACTIVE: u32 = rgb(70, 120, 210);
 const TITLE_INACTIVE: u32 = rgb(60, 66, 80);
 const MAX_TITLE: usize = 24;
+/// The close control: a square at the right of the title bar.
+const CLOSE_SIZE: i32 = 10;
+const CLOSE_FILL: u32 = rgb(170, 60, 60);
 const MAX_WINDOWS: usize = 4;
 /// New windows cascade from here, this far apart.
 const CASCADE_ORIGIN: i32 = 40;
@@ -291,6 +298,14 @@ impl Window {
     fn frame(&self) -> Area {
         self.title_area().union(self.body())
     }
+
+    /// The close control, or nothing on a window too narrow to carry one.
+    fn close_area(&self) -> Area {
+        if self.width < 4 * CLOSE_SIZE {
+            return Area::new(0, 0, 0, 0);
+        }
+        Area::new(self.x + self.width - CLOSE_SIZE - 2, self.y - TITLE_HEIGHT + 2, CLOSE_SIZE, CLOSE_SIZE)
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -480,6 +495,8 @@ struct Desktop {
     toast: Option<Toast>,
     pointer: (i32, i32),
     pointer_visible: bool,
+    /// The window being dragged, and where in it the pointer took hold.
+    drag: Option<(usize, i32, i32)>,
     apps: [Option<App>; MAX_APPS],
     app_count: usize,
     launcher_open: bool,
@@ -738,8 +755,14 @@ impl Desktop {
         let area = window.title_area();
         let fill = if focused { TITLE_ACTIVE } else { TITLE_INACTIVE };
         canvas.fill_rect(area.x, area.y, area.width as usize, area.height as usize, fill);
+        let close = window.close_area();
+        if !close.is_empty() {
+            canvas.fill_rect(close.x, close.y, close.width as usize, close.height as usize, CLOSE_FILL);
+            canvas.draw_text(close.x + 3, close.y + 2, "x", TEXT);
+        }
         let mut buffer = [0u8; 32];
-        let chars = ((window.width - 8) / font::ADVANCE).max(0) as usize;
+        let reserved = if close.is_empty() { 8 } else { 8 + CLOSE_SIZE + 4 };
+        let chars = ((window.width - reserved) / font::ADVANCE).max(0) as usize;
         let length = label(&window.title[..window.title_length], chars, &mut buffer);
         let text = core::str::from_utf8(&buffer[..length]).unwrap_or("");
         canvas.draw_text(area.x + 4, area.y + 4, text, TEXT);
@@ -851,8 +874,8 @@ impl Desktop {
         let width = i32::from(u16::from_le_bytes([message[12], message[13]]));
         let height = i32::from(u16::from_le_bytes([message[14], message[15]]));
         if libwoven::surface_owner(token) != owner
-            || !(1..=320).contains(&width)
-            || !(1..=240).contains(&height)
+            || !(1..=self.width).contains(&width)
+            || !(1..=self.taskbar_top() - TITLE_HEIGHT).contains(&height)
         {
             return empty;
         }
@@ -884,6 +907,9 @@ impl Desktop {
         if let Some(position) = self.stack[..self.stacked].iter().position(|&s| s == slot) {
             self.stack[position..self.stacked].rotate_left(1);
             self.stacked -= 1;
+        }
+        if self.drag.is_some_and(|(dragged, _, _)| dragged == slot) {
+            self.drag = None;
         }
         log(&[b"woven-shell: window closed: ", &window.title[..window.title_length]]);
         // The newly focused window's title changes colour too.
@@ -932,7 +958,12 @@ impl Desktop {
                     (self.pointer.1 + i32::from(dy)).clamp(0, self.height - 1),
                 );
                 self.pointer_visible = true;
-                before.union(self.cursor_area())
+                let moved = self.drag_to_pointer();
+                before.union(self.cursor_area()).union(moved)
+            }
+            InputEvent::PointerButton { button: 0, pressed: false } => {
+                self.drag = None;
+                empty
             }
             InputEvent::PointerButton { button: 0, pressed: true } => {
                 let (x, y) = self.pointer;
@@ -962,11 +993,23 @@ impl Desktop {
                 if let Some(slot) = entry {
                     return self.focus(slot);
                 }
-                // Otherwise the topmost window under the pointer.
+                // Otherwise the topmost window under the pointer: its close
+                // control asks the owner to close; anywhere else focuses it,
+                // and its title bar also starts a drag.
                 let hit = self.stack[..self.stacked].iter().rev().copied().find(|&slot| {
                     self.windows[slot].is_some_and(|window| window.frame().contains(x, y))
                 });
-                hit.map_or(empty, |slot| self.focus(slot))
+                let Some(slot) = hit else { return empty };
+                let Some(window) = self.windows[slot] else { return empty };
+                if window.close_area().contains(x, y) {
+                    let _ = libwoven::message_send(window.owner, b"WCLS");
+                    log(&[b"woven-shell: close requested: ", &window.title[..window.title_length]]);
+                    return empty;
+                }
+                if window.title_area().contains(x, y) {
+                    self.drag = Some((slot, x - window.x, y - window.y));
+                }
+                self.focus(slot)
             }
             InputEvent::Key(key) if self.launcher_open => self.launcher_key(key),
             InputEvent::Key(Key::F1) => self.toggle_launcher(),
@@ -978,6 +1021,20 @@ impl Desktop {
             }
             _ => empty,
         }
+    }
+
+    /// Move the dragged window under the pointer, keeping its frame on screen
+    /// and above the taskbar. Returns the area to repaint.
+    fn drag_to_pointer(&mut self) -> Area {
+        let empty = Area::new(0, 0, 0, 0);
+        let Some((slot, grab_x, grab_y)) = self.drag else { return empty };
+        let Some(window) = self.windows[slot].as_mut() else { return empty };
+        let before = window.frame();
+        let top = self.height - TASKBAR_HEIGHT;
+        window.x = (self.pointer.0 - grab_x).clamp(0, (self.width - window.width).max(0));
+        window.y = (self.pointer.1 - grab_y).clamp(TITLE_HEIGHT, (top - window.height).max(TITLE_HEIGHT));
+        let after = window.frame();
+        if after == before { empty } else { before.union(after) }
     }
 
     /// Composite client damage, and drop windows and icons whose surface is
@@ -1079,6 +1136,7 @@ fn main(args: Args) -> ! {
         toast: None,
         pointer: (width / 2, height / 2),
         pointer_visible: false,
+        drag: None,
         apps,
         app_count,
         launcher_open: false,

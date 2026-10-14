@@ -14,6 +14,7 @@ STAGES={
     '20.1': ('stage20-1-test', '[S20.1] woven-shell desktop: PASSED', 'woven-shell', 'woven-shell desktop'),
     '20.2': ('stage20-2-test', '[S20.2] desktop applications: PASSED', 'woven-shell-apps', 'desktop applications'),
     '20.3': ('stage20-3-test', '[S20.3] application launcher: PASSED', 'woven-shell-launcher', 'application launcher'),
+    '20.4': ('stage20-4-test', '[S20.4] windows that move and close: PASSED', 'woven-shell-windows', 'windows that move and close'),
 }
 
 def app_build_env(app_dir):
@@ -48,7 +49,7 @@ def main():
     image=app_dir/'target'/'x86_64-unknown-none'/'release'/APP
     env=dict(os.environ)
     env['WOVENHAT_SHELL_IMAGE']=str(image)
-    if a.stage in ('20.2','20.3'):
+    if a.stage in ('20.2','20.3','20.4'):
         gui_dir=root/'apps'/'hello-gui'
         if subprocess.run(['cargo','build','--release'],cwd=gui_dir,env=app_build_env(gui_dir)).returncode: return 1
         env['WOVENHAT_HELLO_GUI_IMAGE']=str(gui_dir/'target'/'x86_64-unknown-none'/'release'/'wovenhat-hello-gui')
