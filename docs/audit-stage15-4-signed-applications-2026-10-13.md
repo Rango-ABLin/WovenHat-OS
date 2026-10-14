@@ -45,8 +45,8 @@ All three exited 33 with the required marker.
 - rollback metadata, key rotation, and production signed-package tooling;
 - refreshed 1/2/4-CPU evidence for the final loader integration.
 
-The WAPP boundary defaults to the development application trust root for test
-images, while release builds now require the compile-time
+Historical boundary note: the WAPP boundary defaulted to the development
+application trust root for test images, while release builds now require the compile-time
 `WOVENHAT_APP_TRUSTED_PUBLIC_KEY_HEX` provisioning value. The RFC self-test is
 kept independent of the release key. Firmware/installer-owned key slots,
 package rollback metadata, and release package tooling remain open.
@@ -56,9 +56,11 @@ signs the Stage 16.1 ELF before the kernel artifact is compiled. The Stage 16.1
 1/2/4-CPU gate verifies that package before ELF parsing and again after the VFS
 round trip. This closes the previously missing signed-package integration for
 that acceptance path. User-triggered loads reject raw external ELF except for
-the finite kernel-owned system-image allowlist. Multi-application catalogs,
-rollback metadata, key rotation/revocation, and installer/firmware key
-ownership remain open.
+the finite kernel-owned system-image allowlist. The ten-application catalog,
+rollback-safe RAM publication, release packaging, and production system-app
+boot are now covered by the current Stage 19 release chain.
+Installer/firmware-owned key slots, deployment-key rotation/revocation, and
+physical rollback qualification remain open.
 Kernel-internal system images remain explicitly trusted system paths;
 user-controlled `exec`, command, and spawn loads use the signed-package
 boundary.
