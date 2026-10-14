@@ -848,6 +848,7 @@ fn desktop_client(args: &Args) -> ! {
             Some(b"a") => (b"Alpha", 120, 80, rgb(200, 60, 60), b'x', true),
             Some(b"b") => (b"Beta", 100, 60, rgb(60, 60, 200), b'y', false),
             Some(b"c") => (b"Wide", 400, 260, rgb(60, 160, 90), b'z', false),
+            Some(b"n") => (b"Notes", 100, 60, rgb(150, 120, 40), b'n', false),
             _ => fail(181),
         };
     let mut window = match GraphicsSurface::create(u32::from(width), u32::from(height)) {
@@ -897,6 +898,20 @@ fn desktop_client(args: &Args) -> ! {
     } else {
         None
     };
+
+    // Client N posts three notifications, a little apart so the shell sees
+    // them in order.
+    if args.get(3) == Some(b"n") {
+        for note in [&b"NOTEBuild done"[..], b"NOTEMail: 3 new", b"NOTEBattery 80%"] {
+            if libwoven::message_send(shell, note).is_err() {
+                fail(189);
+            }
+            let start = libwoven::ticks();
+            while libwoven::ticks().wrapping_sub(start) < 10 {
+                libwoven::yield_now();
+            }
+        }
+    }
 
     // Exactly our key, from the shell.
     let deadline = libwoven::ticks() + 6000;

@@ -57,6 +57,14 @@
 //! owner `WCLS`, a request: the window goes when the owner releases its
 //! surface, so an application can finish first, or decline.
 //!
+//! # Notification Center
+//!
+//! Every notification is kept after its toast expires: the last
+//! [`MAX_NOTES`], newest first, each labelled with the sender's window title.
+//! A badge beside the clock counts the unread ones. Clicking the clock opens
+//! the Notification Center, a translucent panel listing them, and marks them
+//! read; its Clear button empties the history.
+//!
 //! # WovenStart
 //!
 //! The start button, or F1, opens the launcher: the applications listed in
@@ -178,6 +186,14 @@ const PANEL_ROW: i32 = 14;
 const PANEL_FILL: u32 = rgb(28, 32, 44);
 const PANEL_OPACITY: u8 = 216;
 const PANEL_TITLE: &str = "WovenStart";
+
+/// Notifications remembered for the Notification Center.
+const MAX_NOTES: usize = 8;
+const CENTER_WIDTH: i32 = 164;
+const CENTER_TITLE: &str = "Notifications";
+const CENTER_CLEAR: &str = "Clear";
+/// Characters of a `source: text` row that fit.
+const CENTER_CHARS: usize = ((CENTER_WIDTH - 12) / font::ADVANCE) as usize;
 
 const TILE_WIDTH: usize = 320;
 const TILE_HEIGHT: usize = 40;
@@ -495,6 +511,14 @@ struct Child {
     app: usize,
 }
 
+/// One remembered notification, already formatted for its row:
+/// `source: text`, cut to what fits.
+#[derive(Clone, Copy)]
+struct Note {
+    text: [u8; 32],
+    length: usize,
+}
+
 struct Toast {
     text: [u8; 32],
     length: usize,
@@ -652,6 +676,12 @@ struct Desktop {
     opened: i32,
     tray: [Option<TrayIcon>; MAX_TRAY],
     toast: Option<Toast>,
+    /// Remembered notifications, newest first.
+    notes: [Option<Note>; MAX_NOTES],
+    /// How many of them arrived since the Notification Center was last
+    /// opened.
+    unread: usize,
+    center_open: bool,
     pointer: (i32, i32),
     pointer_visible: bool,
     /// The window being dragged, and where in it the pointer took hold.
@@ -774,7 +804,12 @@ impl Desktop {
 
     /// Open or close the launcher. Returns the area to repaint.
     fn toggle_launcher(&mut self) -> Area {
-        let before = self.panel_area();
+        let mut before = self.panel_area();
+        if !self.launcher_open && self.center_open {
+            // Only one panel at a time.
+            before = before.union(self.center_area());
+            self.center_open = false;
+        }
         self.launcher_open = !self.launcher_open;
         self.query_length = 0;
         self.selected = 0;
@@ -912,6 +947,103 @@ impl Desktop {
         let text = core::str::from_utf8(&bytes[..length]).unwrap_or("");
         let clock_x = self.width - CLOCK_MARGIN - font::text_width(text) as i32;
         canvas.draw_text(clock_x, self.text_y(), text, TEXT);
+
+        // The unread badge, just left of the clock: a count up to 9.
+        if self.unread > 0 {
+            let badge = self.badge_area();
+            canvas.fill_rect(badge.x, badge.y, badge.width as usize, badge.height as usize, ACCENT);
+            let digit = [b'0' + self.unread.min(9) as u8];
+            canvas.draw_text(badge.x + 3, badge.y + 2, core::str::from_utf8(&digit).unwrap_or("?"), TEXT);
+        }
+    }
+
+    /// Where the unread badge sits: a 10x11 box just left of the clock text.
+    fn badge_area(&self) -> Area {
+        let (_, length) = clock_text(self.time, self.seconds);
+        let clock_width = length as i32 * font::ADVANCE - (font::ADVANCE - font::WIDTH as i32);
+        let clock_x = self.width - CLOCK_MARGIN - clock_width;
+        Area::new(clock_x - 13, self.taskbar_top() + 7, 10, 11)
+    }
+
+    /// The Notification Center, sized to its rows, above the taskbar's right
+    /// end; empty while closed.
+    fn center_area(&self) -> Area {
+        if !self.center_open {
+            return Area::new(0, 0, 0, 0);
+        }
+        let count = self.notes.iter().flatten().count();
+        let height = (1 + count.max(1) as i32) * PANEL_ROW + 2;
+        Area::new(self.width - 4 - CENTER_WIDTH, self.taskbar_top() - 2 - height, CENTER_WIDTH, height)
+    }
+
+    /// The Notification Center's overlay: border, title row with Clear, and
+    /// one row per remembered notification.
+    fn render_center(&self, canvas: &mut Canvas<'_>) {
+        let area = self.center_area();
+        let (x, y) = (area.x, area.y);
+        outline(canvas, area, ACCENT);
+        canvas.fill_rect(x + 1, y + 1, (area.width - 2) as usize, PANEL_ROW as usize, START_FILL);
+        canvas.draw_text(x + 6, y + 5, CENTER_TITLE, TEXT);
+        let clear_x = x + area.width - 6 - font::text_width(CENTER_CLEAR) as i32;
+        canvas.draw_text(clear_x, y + 5, CENTER_CLEAR, TEXT);
+        let mut any = false;
+        for (row, note) in self.notes.iter().flatten().enumerate() {
+            any = true;
+            let text = core::str::from_utf8(&note.text[..note.length]).unwrap_or("");
+            canvas.draw_text(x + 6, y + 1 + (1 + row as i32) * PANEL_ROW + 4, text, TEXT);
+        }
+        if !any {
+            canvas.draw_text(x + 6, y + 1 + PANEL_ROW + 4, "No notifications", TEXT);
+        }
+    }
+
+    /// Open or close the Notification Center. Opening it closes the
+    /// launcher and marks every notification read. Returns the area to
+    /// repaint.
+    fn toggle_center(&mut self) -> Area {
+        let mut dirty = self.center_area();
+        if self.launcher_open {
+            dirty = dirty.union(self.toggle_launcher());
+        }
+        self.center_open = !self.center_open;
+        if self.center_open && self.unread > 0 {
+            self.unread = 0;
+            dirty = dirty.union(self.taskbar());
+        }
+        dirty.union(self.center_area())
+    }
+
+    /// Remember a notification from `sender`. Returns the area to repaint.
+    fn remember(&mut self, sender: process::Id, text: &[u8]) -> Area {
+        // The sender's window title names it; a sender without a window is
+        // "app".
+        let window = self.windows.iter().flatten().find(|window| window.owner == sender);
+        let source = window.map_or(&b"app"[..], |window| &window.title[..window.title_length]);
+        let mut row = [0u8; 64];
+        let mut length = 0;
+        for part in [source, b": ", text] {
+            let take = part.len().min(row.len() - length);
+            row[length..length + take].copy_from_slice(&part[..take]);
+            length += take;
+        }
+        let mut note = Note { text: [0; 32], length: 0 };
+        note.length = label(&row[..length], CENTER_CHARS, &mut note.text);
+        let before = self.center_area();
+        self.notes.rotate_right(1);
+        self.notes[0] = Some(note);
+        if !self.center_open {
+            self.unread += 1;
+        }
+        before.union(self.center_area()).union(self.taskbar())
+    }
+
+    /// Forget every notification. Returns the area to repaint.
+    fn clear_notes(&mut self) -> Area {
+        let before = self.center_area();
+        self.notes = [None; MAX_NOTES];
+        self.unread = 0;
+        log(&[b"woven-shell: notifications cleared"]);
+        before.union(self.center_area()).union(self.taskbar())
     }
 
     fn render_title(window: &Window, focused: bool, canvas: &mut Canvas<'_>) {
@@ -1026,6 +1158,12 @@ impl Desktop {
         if !panel.is_empty() {
             painter.blend(panel, PANEL_FILL, PANEL_OPACITY);
             painter.overlay(panel, |canvas| self.render_panel(canvas));
+        }
+
+        let center = self.center_area().intersect(area);
+        if !center.is_empty() {
+            painter.blend(center, PANEL_FILL, PANEL_OPACITY);
+            painter.overlay(center, |canvas| self.render_center(canvas));
         }
 
         let cursor = self.cursor_area().intersect(area);
@@ -1228,7 +1366,7 @@ impl Desktop {
                     until: libwoven::ticks() + TOAST_TICKS,
                 });
                 log(&[b"woven-shell: notification: ", &text[..length]]);
-                self.toast_area()
+                self.toast_area().union(self.remember(sender, &message[4..]))
             }
             _ => empty,
         }
@@ -1262,6 +1400,21 @@ impl Desktop {
                 let (x, y) = self.pointer;
                 if self.start_area().contains(x, y) {
                     return self.toggle_launcher();
+                }
+                // The clock opens and closes the Notification Center.
+                if self.clock_area().contains(x, y) || (self.unread > 0 && self.badge_area().contains(x, y)) {
+                    return self.toggle_center();
+                }
+                if self.center_open {
+                    let center = self.center_area();
+                    if !center.contains(x, y) {
+                        return self.toggle_center();
+                    }
+                    // Clear, at the right of the title row.
+                    if y < center.y + 1 + PANEL_ROW && x >= center.x + center.width - 40 {
+                        return self.clear_notes();
+                    }
+                    return empty;
                 }
                 if self.launcher_open {
                     // A click on an application launches it; anywhere else
@@ -1452,6 +1605,9 @@ fn main(args: Args) -> ! {
         opened: 0,
         tray: [None; MAX_TRAY],
         toast: None,
+        notes: [None; MAX_NOTES],
+        unread: 0,
+        center_open: false,
         pointer: (width / 2, height / 2),
         pointer_visible: false,
         drag: None,

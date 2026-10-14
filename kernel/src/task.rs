@@ -1454,7 +1454,8 @@ pub fn spawn_user_process(
     feature = "stage20-5-test",
     feature = "stage20-6-test",
     feature = "stage20-7-test",
-    feature = "stage20-8-test"
+    feature = "stage20-8-test",
+    feature = "stage20-9-test"
 ))]
 pub fn spawn_user_system_service(
     name: &'static str,

@@ -17,6 +17,57 @@ gate pass. The unsupported `cargo test --workspace --all-targets` command is
 documented as a host-assembler mismatch rather than treated as a production
 failure. See the [host-test audit](audit-host-test-boundary-2026-10-14.md).
 
+## Stage 20.9 — Notification Center (2026-10-14)
+
+Roadmap Stage 18.4, Notification Center.
+
+**Shell.**
+- **History.** Every notification is kept after its toast expires: the
+  last 8, newest first. Each is stored as one row, `source: text`, where
+  the source is the sending application's window title ("app" for a
+  sender without a window), cut to what fits.
+- **Unread badge.** A 10×11 accent box just left of the clock counts the
+  notifications that arrived since the Notification Center was last
+  opened, up to 9.
+- **Panel.** Clicking the clock, or the badge, opens the Notification
+  Center: a translucent panel above the taskbar's right end, with a title
+  row holding "Clear", one row per notification, or "No notifications".
+  - Opening it marks everything read, and the badge goes.
+  - Clear empties the history.
+  - A click outside the panel, or on the clock again, closes it.
+- **One panel at a time.** It and the launcher close each other.
+- **Rendering.** It is drawn like the launcher: a region-blended
+  background, with an overlay copied by the keyed blit.
+
+hello-gui `--desktop-client` gains an `n` variant, Notes, which posts
+three notifications 10 ticks apart.
+
+Gate `[S20.9] notification center: PASSED`. Real i8042 pointer and
+keyboard input, and every pixel compared with the kernel's own rendering
+(the background blended over the wallpaper, the border, title row and text
+in the kernel font):
+- Window N opens and posts "Build done", "Mail: 3 new" and "Battery 80%".
+- The toast shows the latest, and the badge reads 3.
+- A click on the clock opens the center, listing `Notes: Battery 80%`,
+  `Notes: Mail: 3 new` and `Notes: Build done` in that order, and the
+  badge goes.
+- Clear leaves "No notifications", and a click on the clock closes the
+  panel, showing the wallpaper again.
+- N takes its key and exits, and killing the shell returns the display.
+
+Negative controls, with evidence in the worktree's
+`audit-artifacts/stage20.9-negative-control-*`:
+- With notifications not remembered, the gate fails at "clicking the
+  clock opens the center, newest first, and clears the badge".
+- With the badge left set on opening, it fails at the same check.
+
+Open:
+- No per-notification actions: a click on a row does not focus the
+  sender.
+- The history is not persisted across shell restarts.
+- The kernel's own lifecycle notifications (`NotificationPoll`) are not
+  shown.
+
 ## Stages 20.4–20.8 — validation after rebasing onto phase2 (2026-10-14)
 
 The Stage 20.4–20.8 commits were rebased onto `phase2` at `c5b13392`,

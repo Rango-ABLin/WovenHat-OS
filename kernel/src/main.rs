@@ -3431,6 +3431,15 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         serial::write_line(format_args!("[S1-5] storage journal: PASSED"));
         qemu_test_exit_success();
     }
+    #[cfg(feature = "stage20-9-test")]
+    {
+        if !stage20_9_self_test() {
+            serial::write_line(format_args!("[S20.9] notification center: FAILED"));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!("[S20.9] notification center: PASSED"));
+        qemu_test_exit_success();
+    }
     #[cfg(feature = "stage20-8-test")]
     {
         if !stage20_8_self_test() {
@@ -4740,7 +4749,8 @@ fn stage16_1_self_test() -> bool {
     feature = "stage20-5-test",
     feature = "stage20-6-test",
     feature = "stage20-7-test",
-    feature = "stage20-8-test"
+    feature = "stage20-8-test",
+    feature = "stage20-9-test"
 ))]
 const HELLO_GUI_IMAGE: &[u8] = include_bytes!(env!("WOVENHAT_HELLO_GUI_IMAGE"));
 
@@ -4766,7 +4776,8 @@ const HELLO_GUI_IMAGE: &[u8] = include_bytes!(env!("WOVENHAT_HELLO_GUI_IMAGE"));
     feature = "stage20-5-test",
     feature = "stage20-6-test",
     feature = "stage20-7-test",
-    feature = "stage20-8-test"
+    feature = "stage20-8-test",
+    feature = "stage20-9-test"
 ))]
 fn display_client_capabilities() -> capability::CapabilitySet {
     capability::CapabilitySet::only(capability::Capability::Console)
@@ -4794,7 +4805,8 @@ fn display_client_capabilities() -> capability::CapabilitySet {
     feature = "stage20-5-test",
     feature = "stage20-6-test",
     feature = "stage20-7-test",
-    feature = "stage20-8-test"
+    feature = "stage20-8-test",
+    feature = "stage20-9-test"
 ))]
 fn run_hello_gui(
     image: &[u8],
@@ -4830,7 +4842,8 @@ fn run_hello_gui(
     feature = "stage20-5-test",
     feature = "stage20-6-test",
     feature = "stage20-7-test",
-    feature = "stage20-8-test"
+    feature = "stage20-8-test",
+    feature = "stage20-9-test"
 ))]
 fn spawn_hello_gui(
     image: &[u8],
@@ -4867,7 +4880,8 @@ fn spawn_hello_gui(
     feature = "stage20-5-test",
     feature = "stage20-6-test",
     feature = "stage20-7-test",
-    feature = "stage20-8-test"
+    feature = "stage20-8-test",
+    feature = "stage20-9-test"
 ))]
 fn wait_hello_gui(pid: task::ProcessId) -> Option<(task::ProcessId, Result<i32, task::WaitError>)> {
     let start = timer::ticks();
@@ -4889,9 +4903,230 @@ fn wait_hello_gui(pid: task::ProcessId) -> Option<(task::ProcessId, Result<i32, 
     feature = "stage20-5-test",
     feature = "stage20-6-test",
     feature = "stage20-7-test",
-    feature = "stage20-8-test"
+    feature = "stage20-8-test",
+    feature = "stage20-9-test"
 ))]
 const WOVEN_SHELL_IMAGE: &[u8] = include_bytes!(env!("WOVENHAT_SHELL_IMAGE"));
+
+/// Stage 20.9 acceptance: the Notification Center.
+///
+/// Application N posts three notifications. The kernel checks:
+/// - the toast shows the latest;
+/// - a badge beside the clock counts three unread;
+/// - clicking the clock opens the Notification Center, listing all three
+///   newest first under N's window title, and clears the badge;
+/// - Clear empties it ("No notifications");
+/// - clicking the clock again closes it.
+///
+/// Every pixel is compared with the kernel's own rendering: the panel's
+/// background blended over the wallpaper, its border, title row and text in
+/// the kernel's font. Pointer and keyboard input travel the real i8042
+/// path.
+#[cfg(feature = "stage20-9-test")]
+fn stage20_9_self_test() -> bool {
+    use crate::display::{blend_pixel, rgb, Rect, Surface};
+
+    const WALLPAPER_TOP: u32 = rgb(18, 42, 74);
+    const WALLPAPER_BOTTOM: u32 = rgb(64, 28, 88);
+    const WHITE: u32 = rgb(255, 255, 255);
+    const TASKBAR: u32 = rgb(20, 24, 32);
+    const ACCENT: u32 = rgb(90, 140, 220);
+    const START_FILL: u32 = rgb(52, 96, 180);
+    const PANEL_FILL: u32 = rgb(28, 32, 44);
+    const TOAST_FILL: u32 = rgb(30, 34, 46);
+    const NOTES: u32 = rgb(150, 120, 40);
+    const UNSET: u32 = 0x0100_0000;
+
+    fn step(name: &str, ok: bool) -> bool {
+        serial::write_line(format_args!(
+            "[S20.9] {} {}",
+            name,
+            if ok { "PASS" } else { "FAIL" }
+        ));
+        ok
+    }
+    fn until(limit: u64, condition: impl Fn() -> bool) -> bool {
+        let start = timer::ticks();
+        loop {
+            if condition() {
+                return true;
+            }
+            if timer::ticks().wrapping_sub(start) > limit {
+                return false;
+            }
+            task::yield_now();
+        }
+    }
+    fn wallpaper(x: i32, y: i32, height: i32) -> u32 {
+        let span = (height - 1).max(1);
+        let t = (y.clamp(0, span) * 255 / span) as u8;
+        let base = blend_pixel(WALLPAPER_BOTTOM, WALLPAPER_TOP, t);
+        if x % 32 == 0 || y % 32 == 0 {
+            blend_pixel(WHITE, base, 28)
+        } else {
+            base
+        }
+    }
+    fn region(x0: i32, y0: i32, width: i32, height: i32, expected: impl Fn(i32, i32) -> u32) -> bool {
+        (y0..y0 + height).all(|y| (x0..x0 + width).all(|x| compositor::pixel(x, y) == Ok(expected(x, y))))
+    }
+    fn packet(dx: i16, screen_dy: i16, left: bool) -> bool {
+        let dy = -screen_dy;
+        let flags = 0x08
+            | u8::from(left)
+            | if dx < 0 { 0x10 } else { 0 }
+            | if dy < 0 { 0x20 } else { 0 };
+        [flags, dx as u8, dy as u8].into_iter().all(mouse::loopback)
+    }
+    fn move_by(mut dx: i32, mut dy: i32) -> bool {
+        while dx != 0 || dy != 0 {
+            let (sx, sy) = (dx.clamp(-100, 100), dy.clamp(-100, 100));
+            if !packet(sx as i16, sy as i16, false) {
+                return false;
+            }
+            dx -= sx;
+            dy -= sy;
+        }
+        true
+    }
+    fn click() -> bool {
+        packet(0, 0, true) && packet(0, 0, false)
+    }
+
+    let installed = vfs::create_read_only("/bin/hello-gui", HELLO_GUI_IMAGE).is_ok();
+    let capabilities = capability::CapabilitySet::only(capability::Capability::Console)
+        .with(capability::Capability::DisplayIo)
+        .with(capability::Capability::InputIo)
+        .with(capability::Capability::Ipc);
+    let Some(program) = userspace::load_elf_with_argv(WOVEN_SHELL_IMAGE, &["/bin/woven-shell"]) else {
+        return step("shell image loads", false);
+    };
+    let Ok((shell, _, _)) = task::spawn_user_system_service("woven-shell", program, capabilities) else {
+        return step("shell spawned", false);
+    };
+    if !step(
+        "shell took the display",
+        installed && until(3000, || compositor::holder() == Some(shell.as_u64()) && compositor::is_presenting()),
+    ) {
+        return false;
+    }
+    let Some((width, height)) = compositor::dimensions() else {
+        return step("desktop geometry", false);
+    };
+    let (width, height) = (width as i32, height as i32);
+    let top = height - 24;
+    let taskbar = move |x: i32, y: i32| blend_pixel(TASKBAR, wallpaper(x, y, height), 216);
+    let client = capability::CapabilitySet::only(capability::Capability::Console).with(capability::Capability::Ipc);
+    let shell_arg = alloc::format!("{}", shell.as_u64());
+    let Some(notes) = spawn_hello_gui(HELLO_GUI_IMAGE, &["/bin/hello-gui", "--desktop-client", &shell_arg, "n"], Some(client)) else {
+        return step("application N spawned", false);
+    };
+    if !step("window N opened", until(2000, || compositor::pixel(45, 45) == Ok(NOTES))) {
+        return false;
+    }
+
+    // An overlay as the shell draws it: a one-pixel ACCENT border, then
+    // `draw`; everything else UNSET (transparent over a blended background).
+    let overlay = |size: (i32, i32), draw: &dyn Fn(&mut Surface)| {
+        let mut surface = Surface::new(size.0 as usize, size.1 as usize);
+        let bounds = surface.bounds();
+        surface.fill_rect(bounds, UNSET);
+        surface.stroke_rect(bounds, ACCENT);
+        draw(&mut surface);
+        surface
+    };
+    let translucent = |x0: i32, y0: i32, image: &Surface, fill: u32| {
+        let (w, h) = (image.width() as i32, image.bounds().height as i32);
+        region(x0, y0, w, h, |x, y| match image.pixel(x - x0, y - y0) {
+            Some(UNSET) | None => blend_pixel(fill, wallpaper(x, y, height), 216),
+            Some(pixel) => pixel,
+        })
+    };
+
+    // The toast shows the latest notification.
+    let toast = overlay((180, 22), &|surface| {
+        surface.draw_text(6, 8, "Battery 80%", WHITE);
+    });
+    if !step(
+        "the toast shows the latest notification",
+        until(1500, || translucent(width - 188, 8, &toast, TOAST_FILL)),
+    ) {
+        return false;
+    }
+
+    // The badge: "3" in a 10x11 accent box just left of the HH:MM clock.
+    let clock_x = width - 6 - crate::font::text_width("00:00") as i32;
+    let (badge_x, badge_y) = (clock_x - 13, top + 7);
+    let badge = |digit: &str| {
+        let mut image = Surface::new(10, 11);
+        let bounds = image.bounds();
+        image.fill_rect(bounds, ACCENT);
+        image.draw_text(3, 2, digit, WHITE);
+        region(badge_x, badge_y, 10, 11, |x, y| image.pixel(x - badge_x, y - badge_y).unwrap_or(UNSET))
+    };
+    if !step("a badge counts three unread notifications", until(1000, || badge("3"))) {
+        return false;
+    }
+
+    // Click the clock: the Notification Center opens with all three, newest
+    // first, under N's title; the badge goes. Rows of 14 inside the border.
+    let center = |rows: &[&str]| {
+        let lines = rows.len().max(1) as i32;
+        let h = (1 + lines) * 14 + 2;
+        let (x0, y0) = (width - 4 - 164, top - 2 - h);
+        let image = overlay((164, h), &|surface| {
+            surface.fill_rect(Rect::new(1, 1, 162, 14), START_FILL);
+            surface.draw_text(6, 5, "Notifications", WHITE);
+            surface.draw_text(164 - 6 - crate::font::text_width("Clear") as i32, 5, "Clear", WHITE);
+            if rows.is_empty() {
+                surface.draw_text(6, 1 + 14 + 4, "No notifications", WHITE);
+            }
+            for (index, row) in rows.iter().enumerate() {
+                surface.draw_text(6, 1 + (1 + index as i32) * 14 + 4, row, WHITE);
+            }
+        });
+        (x0, y0, h, image)
+    };
+    let (px, py) = (width / 2, height / 2);
+    let (cx, cy) = (width - 20, top + 12);
+    let (x0, y0, _, full) = center(&["Notes: Battery 80%", "Notes: Mail: 3 new", "Notes: Build done"]);
+    let opened = move_by(cx - px, cy - py)
+        && click()
+        && until(1000, || translucent(x0, y0, &full, PANEL_FILL))
+        && until(500, || region(badge_x, badge_y, 10, 11, taskbar));
+    if !step("clicking the clock opens the center, newest first, and clears the badge", opened) {
+        return false;
+    }
+
+    // Clear, at the right of the title row; then the clock closes it.
+    let (ex, ey, eh, empty) = center(&[]);
+    let clear_point = (x0 + 164 - 20, y0 + 7);
+    let cleared = move_by(clear_point.0 - cx, clear_point.1 - cy)
+        && click()
+        && until(1000, || translucent(ex, ey, &empty, PANEL_FILL));
+    if !step("Clear empties the Notification Center", cleared) {
+        return false;
+    }
+    let closed = move_by(cx - clear_point.0, cy - clear_point.1)
+        && click()
+        && until(1000, || region(ex, ey, 164, eh, |x, y| wallpaper(x, y, height)));
+    if !step("clicking the clock again closes it", closed) {
+        return false;
+    }
+
+    let exited = mouse::keyboard_loopback(0x31) && wait_hello_gui(notes).map(|(_, status)| status) == Some(Ok(0));
+    if !step("N takes its key and exits", exited) {
+        return false;
+    }
+    if task::kill_process(shell.as_u64(), 9).is_err() || !until(1000, || task::process_exited(shell)) {
+        return step("shell killed", false);
+    }
+    let _ = task::wait_process(shell.as_u64());
+    step(
+        "display returned to the terminal",
+        compositor::holder().is_none() && !compositor::is_presenting(),
+    )
+}
 
 /// Stage 20.8 acceptance: tiling.
 ///
