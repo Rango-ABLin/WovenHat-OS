@@ -1076,6 +1076,14 @@ impl Scheduler {
                     crate::thread::terminate(thread_id, exit_code),
                     "thread registry must remain running until scheduler hand-off"
                 );
+                if let Some(waiter) = crate::thread::take_waiter(thread_id) {
+                    let (found, cpu) = self.signal_event_locked(TaskId::from_u64(waiter));
+                    if found {
+                        if let Some(cpu) = cpu {
+                            crate::smp::reschedule_cpu(cpu);
+                        }
+                    }
+                }
             }
             self.tasks[outgoing].state = TaskState::Dead;
             self.tasks[outgoing].name = "thread-exited";
@@ -1155,6 +1163,25 @@ impl Scheduler {
                 task.state = TaskState::Ready;
                 task.wake_tick = 0;
             }
+        }
+    }
+
+    fn signal_event_locked(&mut self, id: TaskId) -> (bool, Option<usize>) {
+        let Some(task) = self
+            .tasks
+            .iter_mut()
+            .find(|task| task.id == id && task.state != TaskState::Empty)
+        else {
+            return (false, None);
+        };
+        if task.state == TaskState::Blocked {
+            task.state = TaskState::Ready;
+            task.wake_tick = 0;
+            task.event_deadline = None;
+            (true, Some(task.cpu))
+        } else {
+            task.event_pending = true;
+            (true, None)
         }
     }
 
@@ -4098,23 +4125,11 @@ pub fn wake_task(id: TaskId) -> bool {
 pub fn signal_event(id: TaskId) -> bool {
     let target = {
         let mut scheduler = SCHEDULER.lock();
-        let Some(task) = scheduler
-            .tasks
-            .iter_mut()
-            .find(|task| task.id == id && task.state != TaskState::Empty)
-        else {
+        let (found, cpu) = scheduler.signal_event_locked(id);
+        if !found {
             return false;
-        };
-
-        if task.state == TaskState::Blocked {
-            task.state = TaskState::Ready;
-            task.wake_tick = 0;
-            task.event_deadline = None;
-            Some(task.cpu)
-        } else {
-            task.event_pending = true;
-            None
         }
+        cpu
     };
 
     if let Some(cpu) = target {

@@ -23,6 +23,10 @@ qualification remain open.
 - Kernel-task identity remains compatible with existing sandbox and scheduler
   self-tests; user-task identity is process-stable for shared-address-space
   lookup.
+- A joiner now registers with the thread record before blocking. Thread exit
+  wakes that task through the scheduler's latched event path after safe
+  hand-off, eliminating userspace polling and closing the registration/exit
+  race.
 
 ## Validation
 
@@ -42,6 +46,15 @@ CPU counts, with exit code 33 and retained serial logs:
 audit-artifacts/stage11.2-1cpu-1791975128090915200
 audit-artifacts/stage11.2-2cpu-1791975197249865000
 audit-artifacts/stage11.2-4cpu-1791975247102041500
+
+The event-driven join follow-up reran the same gate and retained these newer
+serial artifacts:
+
+```text
+audit-artifacts/stage11.2-1cpu-1791975427938656800
+audit-artifacts/stage11.2-2cpu-1791975491088108800
+audit-artifacts/stage11.2-4cpu-1791975537755343700
+```
 ```
 
 The image emitted the existing lower-stage markers and the new

@@ -1797,9 +1797,8 @@ reclamation. Build, warning-denying Clippy, host tests, and 1/2/4-CPU QEMU
 passed; see [audit](audit-stage11-2-scheduler-threads-2026-10-14.md).
 
 This is an implementation increment, not closure of every Stage 11 thread
-requirement. Event-driven join blocking, sibling cancellation/teardown,
-shared libraries, symbol resolution, dynamic TLS, and hardware qualification
-remain open.
+requirement. Sibling cancellation/teardown, shared libraries, symbol
+resolution, dynamic TLS, and hardware qualification remain open.
 
 ## Stages 11.3–11.5 — accepted on 2026-09-16
 

@@ -2296,10 +2296,24 @@ pub extern "C" fn wovenhat_syscall_dispatch(
             .map(|id| id.raw())
             .unwrap_or(SYSCALL_ERROR),
         value if value == Number::ThreadExit as u64 => crate::task::exit_current_thread(arg0 as i32),
-        value if value == Number::ThreadJoin as u64 => match crate::task::join_user_thread(arg0) {
-            Ok(exit) => exit as u64,
-            Err(crate::task::ThreadJoinError::Running) => u64::MAX - 1,
-            Err(_) => SYSCALL_ERROR,
+        value if value == Number::ThreadJoin as u64 => loop {
+            match crate::task::join_user_thread(arg0) {
+                Ok(exit) => break exit as u64,
+                Err(crate::task::ThreadJoinError::Running) => {
+                    let owner = crate::task::current_process_id();
+                    let waiter = crate::task::current_task_id().as_u64();
+                    match crate::thread::register_waiter(
+                        owner,
+                        crate::thread::ThreadId::from_raw(arg0),
+                        waiter,
+                    ) {
+                        Ok(true) => continue,
+                        Ok(false) => crate::task::wait_for_event(),
+                        Err(_) => break SYSCALL_ERROR,
+                    }
+                }
+                Err(_) => break SYSCALL_ERROR,
+            }
         },
         value if value == Number::ThreadSelf as u64 => crate::task::current_thread_id()
             .map(|id| id.raw())

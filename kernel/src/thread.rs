@@ -42,6 +42,7 @@ struct Record {
     errno: i32,
     tls: u64,
     resources: Option<Resources>,
+    waiter: Option<u64>,
 }
 
 impl Record {
@@ -53,6 +54,7 @@ impl Record {
         errno: 0,
         tls: 0,
         resources: None,
+        waiter: None,
     };
 }
 
@@ -88,6 +90,7 @@ pub fn create(owner: u64) -> Option<ThreadId> {
     record.errno = 0;
     record.tls = 0;
     record.resources = None;
+    record.waiter = None;
     Some(ThreadId::new(slot, record.generation))
 }
 
@@ -102,6 +105,31 @@ pub fn terminate(id: ThreadId, exit: i32) -> bool {
     record.state = State::Exited;
     record.exit = exit;
     true
+}
+
+/// Register the current task as the sole join waiter. The boolean is true
+/// when termination won the race before registration, so the caller can retry
+/// the join without blocking.
+pub fn register_waiter(owner: u64, id: ThreadId, waiter: u64) -> Result<bool, JoinError> {
+    let mut table = TABLE.lock();
+    let record = lookup(&mut table, id).ok_or(JoinError::Invalid)?;
+    if record.owner != owner {
+        return Err(JoinError::NotOwner);
+    }
+    if record.state == State::Exited {
+        return Ok(true);
+    }
+    if record.waiter.is_some() {
+        return Err(JoinError::Invalid);
+    }
+    record.waiter = Some(waiter);
+    Ok(false)
+}
+
+/// Consume a waiter after the exiting task is no longer physically running.
+pub fn take_waiter(id: ThreadId) -> Option<u64> {
+    let mut table = TABLE.lock();
+    lookup(&mut table, id)?.waiter.take()
 }
 
 pub fn join(owner: u64, id: ThreadId) -> Result<i32, JoinError> {
@@ -197,6 +225,7 @@ pub fn reap_owner(owner: u64) -> usize {
             record.errno = 0;
             record.tls = 0;
             record.resources = None;
+            record.waiter = None;
             record.generation = record
                 .generation
                 .checked_add(1)
