@@ -567,7 +567,13 @@ fn stage13_2_entry_valid(entry: &Entry) -> bool {
                 })
                 && binding.interrupt.is_none_or(|interrupt| match interrupt {
                     PciInterrupt::Msi(lease) => lease.function == binding.function,
-                    PciInterrupt::Msix(lease) => lease.function == binding.function,
+                    PciInterrupt::Msix(lease) => {
+                        let index = usize::from(lease.bar.bar);
+                        lease.function == binding.function
+                            && lease.bar.function == binding.function
+                            && index < PCI_BAR_COUNT
+                            && binding.bars[index] == Some(lease.bar)
+                    },
                 })
         }
         (State::Bound, None) => true, // Non-PCI driver.
