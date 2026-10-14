@@ -67,6 +67,22 @@ APPS = (
         "install_path": "/bin/wovenhat-editor",
         "exec": "/bin/wovenhat-editor",
     },
+    {
+        "id": "woven-images",
+        "directory": "woven-images",
+        "binary": "wovenhat-images",
+        "display_name": "WovenImages",
+        "install_path": "/bin/wovenhat-images",
+        "exec": "/bin/wovenhat-images",
+    },
+    {
+        "id": "woven-update",
+        "directory": "woven-update",
+        "binary": "wovenhat-update",
+        "display_name": "WovenUpdate",
+        "install_path": "/bin/wovenhat-update",
+        "exec": "/bin/wovenhat-update",
+    },
 )
 
 
