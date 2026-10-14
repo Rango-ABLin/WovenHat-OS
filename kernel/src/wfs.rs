@@ -859,6 +859,55 @@ impl<D: BlockDevice> Volume<D> {
         Ok(view)
     }
 
+    /// Return whether `target` is reachable below the directory `root`.
+    ///
+    /// Directory entries are untrusted persistent data, so this walk is
+    /// iterative, tracks visited inodes, and has a fixed bound.  Running out
+    /// of tracking space fails closed instead of permitting a rename that
+    /// could create a namespace cycle.
+    fn directory_contains(&mut self, root: u64, target: u64) -> Result<bool, Error> {
+        const WALK_CAPACITY: usize = 128;
+        let txn = Transaction::new();
+        let mut stack = [0u64; WALK_CAPACITY];
+        let mut stack_len = 1usize;
+        stack[0] = root;
+        let mut visited = [0u64; WALK_CAPACITY];
+        let mut visited_len = 0usize;
+
+        while let Some(inode_number) = stack_len.checked_sub(1) {
+            stack_len = inode_number;
+            let current = stack[stack_len];
+            if current == target {
+                return Ok(true);
+            }
+            if visited[..visited_len].contains(&current) {
+                continue;
+            }
+            if visited_len == visited.len() {
+                return Err(Error::NoSpace);
+            }
+            visited[visited_len] = current;
+            visited_len += 1;
+
+            let node = self.inode_staged(&txn, current)?;
+            if node.kind != KIND_DIR {
+                continue;
+            }
+            let view = self.dir_entries(&txn, &node)?;
+            for entry in view.entries.iter().filter(|entry| entry.inode != 0) {
+                if visited[..visited_len].contains(&entry.inode) {
+                    continue;
+                }
+                if stack_len == stack.len() {
+                    return Err(Error::NoSpace);
+                }
+                stack[stack_len] = entry.inode;
+                stack_len += 1;
+            }
+        }
+        Ok(false)
+    }
+
     /// Look up `name` in a directory inode.
     pub fn lookup(&mut self, dir_inode: u64, name: &str) -> Result<DirEntry, Error> {
         let txn = Transaction::new();
@@ -959,7 +1008,13 @@ impl<D: BlockDevice> Volume<D> {
     }
 
     /// Create a directory and its first data block in one journal transaction.
-    pub fn mkdir(&mut self, parent_inode: u64, name: &str, mode: u32, now: u64) -> Result<u64, Error> {
+    pub fn mkdir(
+        &mut self,
+        parent_inode: u64,
+        name: &str,
+        mode: u32,
+        now: u64,
+    ) -> Result<u64, Error> {
         Self::valid_component(name)?;
         let mut txn = Transaction::new();
         let mut parent = self.inode(parent_inode)?;
@@ -1137,6 +1192,10 @@ impl<D: BlockDevice> Volume<D> {
     /// transaction. Existing destinations are refused; replacement semantics
     /// would require a larger bounded transaction and explicit policy.
     pub fn rename_path(&mut self, old: &str, new: &str, now: u64) -> Result<(), Error> {
+        if old == new {
+            self.resolve_path(old)?;
+            return Ok(());
+        }
         let (old_parent, old_name) = self.parent_and_name(old)?;
         let (new_parent, new_name) = self.parent_and_name(new)?;
         Self::valid_component(&new_name)?;
@@ -1156,8 +1215,15 @@ impl<D: BlockDevice> Volume<D> {
         else {
             return Err(Error::NotFound);
         };
+        if source.kind == KIND_DIR && self.directory_contains(source.inode, new_parent)? {
+            return Err(Error::InvalidName);
+        }
         let target_view = self.dir_entries(&txn, &target_dir)?;
-        if target_view.entries.iter().any(|entry| entry.matches(&new_name)) {
+        if target_view
+            .entries
+            .iter()
+            .any(|entry| entry.matches(&new_name))
+        {
             return Err(Error::Exists);
         }
         let target_pos = if old_parent == new_parent {
@@ -1570,7 +1636,9 @@ pub fn ensure_vfs_path(path: &str, now: u64) -> Result<(), Error> {
     let native = checked_vfs_path(path)?;
     with_ata_volume(|volume| match volume.resolve_path(&native) {
         Ok(inode) => volume.inode(inode).and_then(|node| {
-            (node.kind == KIND_FILE).then_some(()).ok_or(Error::NotADirectory)
+            (node.kind == KIND_FILE)
+                .then_some(())
+                .ok_or(Error::NotADirectory)
         }),
         Err(Error::NotFound) => volume.create_path(&native, 0o600, now).map(|_| ()),
         Err(error) => Err(error),
@@ -1619,8 +1687,7 @@ pub fn write_vfs_path_at(
 pub fn unlink_vfs_path(path: &str, now: u64) -> Result<(), Error> {
     let _mutation = MUTATION.lock();
     let native = checked_vfs_path(path)?;
-    with_ata_volume(|volume| volume.unlink_path(&native, now))
-    .unwrap_or(Err(Error::Device))
+    with_ata_volume(|volume| volume.unlink_path(&native, now)).unwrap_or(Err(Error::Device))
 }
 
 #[cfg(not(test))]
@@ -1938,7 +2005,10 @@ pub fn stage15_2_self_test() -> bool {
         volume.read_file(entry.inode, &mut persisted) == Ok(alpha.len())
             && persisted[..alpha.len()] == *alpha
     });
-    if !step("denied VFS write preserves durable contents", unchanged == Some(true)) {
+    if !step(
+        "denied VFS write preserves durable contents",
+        unchanged == Some(true),
+    ) {
         return false;
     }
 

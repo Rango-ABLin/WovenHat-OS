@@ -151,6 +151,24 @@ fn format_produces_a_consistent_mountable_volume() {
 }
 
 #[test]
+fn directory_rename_rejects_descendant_cycles_and_allows_same_path() {
+    let disk = formatted();
+    let mut volume = mount_consistent(&disk, "cycle setup");
+    volume.mkdir_path("/parent", 0o755, 1).expect("parent");
+    volume.mkdir_path("/parent/child", 0o755, 2).expect("child");
+
+    assert_eq!(
+        volume.rename_path("/parent", "/parent/child/moved", 3),
+        Err(Error::InvalidName)
+    );
+    volume
+        .rename_path("/parent", "/parent", 4)
+        .expect("same-path rename");
+    assert!(volume.resolve_path("/parent/child").is_ok());
+    mount_consistent(&disk, "cycle rejection");
+}
+
+#[test]
 fn a_partly_written_format_is_not_mistaken_for_a_filesystem() {
     // The real superblock is written last, so a truncated format must leave
     // either no filesystem at all or a complete, consistent one -- never a

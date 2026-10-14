@@ -15,6 +15,9 @@ or physical flash qualification.
   update parent entries in the same bounded journal transaction as the inode
   and allocation bitmap changes. Destination replacement is refused rather
   than performed partially.
+- Directory rename rejects a destination below the moved directory using a
+  bounded, cycle-detecting ancestry walk. Same-path rename is an explicit
+  validated no-op; traversal capacity exhaustion fails closed.
 - `task::write_current` commits the native journaled transaction before it
   refreshes the VFS cache and descriptor offset. Direct generic VFS mutation
   remains read-only for `/wfs`, preventing a capability bypass.
@@ -28,7 +31,7 @@ or physical flash qualification.
 - Freestanding Clippy passed for `stage11-5-test`, `stage15-1-test`, and
   `stage15-2-test` with `-D warnings`.
 - `cargo test -p wovenhat-os --tests --no-fail-fast` — passed, including all
-  11 WovenFS crash-recovery tests.
+  12 WovenFS crash-recovery tests.
 - Stage 15.1 QEMU acceptance passed on 1, 2, and 4 CPUs (exit 33):
   `stage15.1-1cpu-1791981155975268700`,
   `stage15.1-2cpu-1791981222170305100`, and
@@ -43,6 +46,10 @@ or physical flash qualification.
   `stage15.1-4cpu-1792007054767355600`.
 - Fresh scratch-device Stage 15.2 evidence passed on 1, 2, and 4 CPUs with
   exit 33 under `target/wovenfs-device-scratch-{1,2,4}cpu`.
+- Cycle-guard hardening rerun passed Stage 15.1 on 1, 2, and 4 CPUs with exit
+  33: `stage15.1-1cpu-1792014304834644400`,
+  `stage15.1-2cpu-1792014406693740800`, and
+  `stage15.1-4cpu-1792014471416201400`.
 
 An earlier 1-CPU timeout is retained as
 `stage15.1-1cpu-1791980850302510700`; the exact rerun passed.

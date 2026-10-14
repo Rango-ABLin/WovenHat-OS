@@ -1278,7 +1278,8 @@ authority now supports durable create, write, read-back, and unlink through task
 file syscalls; direct generic VFS mutation remains read-only. Native mutations
 serialize their complete read-modify-write transactions. The adapter remains a
 Nested native paths, directory creation, empty-directory removal, and rename
-are now transactional; recursive import into the VFS mount and mounted-system
+are now transactional; directory rename rejects descendant cycles with a
+bounded fail-closed walk. Recursive import into the VFS mount and mounted-system
 policy remain open. See the [Stage 15
 VFS write-through audit](audit-stage15-wfs-vfs-write-through-2026-10-14.md).
 
