@@ -1883,6 +1883,28 @@ pub fn stage15_2_self_test() -> bool {
     }
 
 
+    // Reject oversized mutations and overlong names before touching ATA.
+    // A rejected overwrite must preserve the previously committed bytes.
+    let too_large = [0u8; MAX_FILE_SIZE + 1];
+    let oversized_rejected = vfs_write_through(
+        &authority, "/wfs/alpha.txt", &too_large, 30,
+    ) == Err(Error::TooLarge);
+    let long_name = "x".repeat(MAX_NAME + 1);
+    let long_path = alloc::format!("/wfs/{long_name}");
+    let overlong_rejected = vfs_write_through(
+        &authority, &long_path, b"no", 31,
+    ) == Err(Error::InvalidName);
+    let mut durable_after_rejection = [0u8; 64];
+    let original_preserved = vfs_read_through(
+        "/wfs/alpha.txt", &mut durable_after_rejection,
+    ).map(|n| &durable_after_rejection[..n] == alpha).unwrap_or(false);
+    if !step(
+        "oversized and overlong mutations preserve durable data",
+        oversized_rejected && overlong_rejected && original_preserved,
+    ) {
+        return false;
+    }
+
     let verified = with_ata_volume(|volume| {
         if volume.check().is_err() {
             return false;
