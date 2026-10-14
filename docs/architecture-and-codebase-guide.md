@@ -1,5 +1,14 @@
 # WovenHat OS Architecture & Codebase Guide
 
+## Stage 13.4–13.7 revalidation (2026-10-14)
+
+The ordered AHCI/SATA, xHCI core, USB HID, and WovenInput software gates pass
+on 1/2/4 CPUs in the current tree. Their evidence is recorded in the
+[Stage 13.4–13.7 validation audit](audit-stage13-4-7-validation-2026-10-14.md).
+The QEMU fixtures validate bounded ownership and protocol contracts; they do
+not substitute for native-controller or physical USB interoperability. USB
+mouse report decoding is still outside the accepted keyboard-only fixture.
+
 ## Stage 15 bounded WovenFS VFS write-through (2026-10-14)
 
 The `/wfs/<name>` namespace has one production mutation authority:

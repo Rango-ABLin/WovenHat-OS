@@ -2,6 +2,13 @@
 
 ## 2026-10-14 revalidation
 
+Stages 13.4, 13.5, 13.6, and 13.7 were independently rerun on 1/2/4 CPUs
+and all passed with exit 33. See the
+[Stage 13.4–13.7 validation audit](audit-stage13-4-7-validation-2026-10-14.md).
+These QEMU gates validate software and protocol contracts, not native-device
+interoperability. The Stage 13.6 fixture exercises USB HID keyboard support;
+USB mouse report decoding remains open.
+
 Stage 16.1, 17.1, 18.1, 19.1, 19.3, and 19.10 were rerun on 1/2/4 CPUs
 after the remote-termination cleanup change; all emitted their required pass
 markers and exit 33. See
