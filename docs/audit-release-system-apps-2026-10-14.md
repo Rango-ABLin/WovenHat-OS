@@ -11,7 +11,7 @@ memory, storage, network, legacy-PIC, shell, and application check.
 `scripts/package-release.py` now includes the validated system-app manifest,
 four WAPP packages, four bounded catalog descriptors, and SHA-256 entries for
 every release artifact in both the release directory and ZIP archive. The
-validated release image remains independently hashed and unchanged.
+final release image is independently hashed in the release manifest.
 
 The release artifact is still a software/QEMU qualification. The feature-gated
 release image installs the four packages into RAM after verification, while
