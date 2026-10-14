@@ -1,11 +1,4 @@
-"""Build, sign, and catalog the accepted WovenHat system applications.
-
-The output is an install plan, not a boot image.  The kernel currently accepts
-one WAPP package per Stage 16.1 acceptance boot; keeping this packaging step
-separate makes that limitation explicit while giving release tooling a
-reproducible multi-application artifact to consume when multi-package install
-is enabled.
-"""
+"""Build, sign, and catalog the accepted WovenHat system applications."""
 
 import argparse
 import hashlib
@@ -49,6 +42,14 @@ APPS = (
         "display_name": "WovenMonitor",
         "install_path": "/bin/wovenhat-monitor",
         "exec": "/bin/wovenhat-monitor",
+    },
+    {
+        "id": "woven-settings",
+        "directory": "woven-settings",
+        "binary": "wovenhat-settings",
+        "display_name": "WovenSettings",
+        "install_path": "/bin/wovenhat-settings",
+        "exec": "/bin/wovenhat-settings",
     },
 )
 
@@ -157,7 +158,7 @@ def main() -> int:
         "format_version": 1,
         "version": args.version,
         "package_signature_format": "WAPP-v1",
-        "kernel_install_boundary": "stage16.1-single-package-acceptance",
+        "kernel_install_boundary": "stage19-multi-package-ram-install",
         "apps": records,
     }
     (output / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")

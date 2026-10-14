@@ -3,13 +3,14 @@
 ## Scope
 
 The feature-gated `stage19-app-catalog-test` acceptance consumes the output of
-`scripts/package-system-apps.py` and exercises the four accepted external
+`scripts/package-system-apps.py` and exercises the five accepted external
 applications as one install plan:
 
 - WovenCalculator at `/bin/wovenhat-calculator`;
 - WovenTerminal at `/bin/wovenhat-terminal`; and
 - WovenFiles at `/bin/wovenhat-files`; and
 - WovenMonitor at `/bin/wovenhat-monitor`.
+- WovenSettings at `/bin/wovenhat-settings`.
 
 Each package is verified as WAPP v1, mutated-package refusal is checked, the
 package is written to and read back from the VFS byte-for-byte, and the
@@ -21,7 +22,7 @@ corresponding package has passed those checks.
 
 `scripts/test-system-app-catalog-qemu.py` passed sequentially on 1, 2, and 4
 virtual CPUs, each with exit 33 and the marker
-`[S19-APP] four signed applications installed PASS`. Serial and QEMU logs are
+`[S19-APP] five signed applications installed PASS`. Serial and QEMU logs are
 preserved in `audit-artifacts/system-app-catalog-1cpu`,
 `audit-artifacts/system-app-catalog-2cpu`, and
 `audit-artifacts/system-app-catalog-4cpu`.

@@ -4602,6 +4602,8 @@ const SYSTEM_APP_TERMINAL: &[u8] = include_bytes!(env!("WOVENHAT_TERMINAL_IMAGE"
 const SYSTEM_APP_FILES: &[u8] = include_bytes!(env!("WOVENHAT_FILES_IMAGE"));
 #[cfg(any(feature = "stage19-app-catalog-test", feature = "system-apps"))]
 const SYSTEM_APP_MONITOR: &[u8] = include_bytes!(env!("WOVENHAT_MONITOR_IMAGE"));
+#[cfg(any(feature = "stage19-app-catalog-test", feature = "system-apps"))]
+const SYSTEM_APP_SETTINGS: &[u8] = include_bytes!(env!("WOVENHAT_SETTINGS_IMAGE"));
 
 #[cfg(feature = "system-apps")]
 fn install_production_system_apps() -> bool {
@@ -4641,6 +4643,13 @@ fn install_production_system_apps() -> bool {
             binary_path: "/bin/wovenhat-monitor",
             catalog_path: "/share/applications/woven-monitor.app",
             catalog: b"Name=WovenMonitor\nExec=/bin/wovenhat-monitor\n",
+        },
+        App {
+            name: "woven-settings",
+            image: SYSTEM_APP_SETTINGS,
+            binary_path: "/bin/wovenhat-settings",
+            catalog_path: "/share/applications/woven-settings.app",
+            catalog: b"Name=WovenSettings\nExec=/bin/wovenhat-settings\n",
         },
     ];
     // Verify and parse all packages before changing the VFS. A malformed or
@@ -4775,6 +4784,13 @@ fn stage19_app_catalog_self_test() -> bool {
             catalog_path: "/share/applications/woven-monitor.app",
             catalog: b"Name=WovenMonitor\nExec=/bin/wovenhat-monitor\n",
         },
+        App {
+            name: "woven-settings",
+            image: SYSTEM_APP_SETTINGS,
+            binary_path: "/bin/wovenhat-settings",
+            catalog_path: "/share/applications/woven-settings.app",
+            catalog: b"Name=WovenSettings\nExec=/bin/wovenhat-settings\n",
+        },
     ];
     fn step(name: &str, ok: bool) -> bool {
         serial::write_line(format_args!(
@@ -4840,7 +4856,7 @@ fn stage19_app_catalog_self_test() -> bool {
             return false;
         }
     }
-    step("four signed applications installed", true)
+    step("five signed applications installed", true)
 }
 
 /// Stage 16.1 acceptance: an application built outside the kernel is installed

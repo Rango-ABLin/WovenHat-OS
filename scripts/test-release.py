@@ -54,7 +54,7 @@ def main():
         run(f'{suite}-4-release', [sys.executable, f'scripts/test-{suite}-qemu.py', '--cpus', '4', '--release'] + options)
     run('build-release', ['cargo', 'build', '--release'])
     run('shell-smoke', [sys.executable, 'scripts/test-shell-qemu.py'] + options)
-    app_directories = ('woven-calculator', 'woven-terminal', 'woven-files', 'woven-monitor')
+    app_directories = ('woven-calculator', 'woven-terminal', 'woven-files', 'woven-monitor', 'woven-settings')
     for app in app_directories:
         run(
             f'lint-app-{app}',
@@ -63,6 +63,8 @@ def main():
         )
     for cpus in (1, 2, 4):
         run(f'monitor-{cpus}', [sys.executable, 'scripts/test-monitor-qemu.py', '--cpus', str(cpus)] + options)
+    for cpus in (1, 2, 4):
+        run(f'settings-{cpus}', [sys.executable, 'scripts/test-settings-qemu.py', '--cpus', str(cpus)] + options)
     for cpus in (1, 2, 4):
         run(
             f'system-app-catalog-{cpus}',
@@ -82,6 +84,7 @@ def main():
             'woven-terminal': 'WOVENHAT_TERMINAL_IMAGE',
             'woven-files': 'WOVENHAT_FILES_IMAGE',
             'woven-monitor': 'WOVENHAT_MONITOR_IMAGE',
+            'woven-settings': 'WOVENHAT_SETTINGS_IMAGE',
         }[item['id']]
         system_app_env[variable] = str(system_app_output / item['package'])
     image = Path(subprocess.check_output(
