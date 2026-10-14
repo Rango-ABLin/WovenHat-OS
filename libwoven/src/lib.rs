@@ -1922,6 +1922,101 @@ pub fn close(descriptor: u64) -> Result<(), Error> {
     check(unsafe { syscall::close(descriptor) }).map(|_| ())
 }
 
+/// Local accounts for the login manager: a name, a random salt and
+/// `SHA-256(salt || PIN)`, one per line of an accounts file:
+/// `name:salt-hex:hash-hex`. No PIN is ever stored.
+pub mod accounts {
+    use sha2::{Digest, Sha256};
+
+    pub const MAX_NAME: usize = 16;
+    pub const MAX_SALT: usize = 32;
+
+    /// One account, as read from its line.
+    #[derive(Clone, Copy, PartialEq, Eq, Debug)]
+    pub struct Account {
+        name: [u8; MAX_NAME],
+        name_length: usize,
+        salt: [u8; MAX_SALT],
+        salt_length: usize,
+        hash: [u8; 32],
+    }
+
+    /// `SHA-256(salt || pin)`.
+    pub fn hash_pin(salt: &[u8], pin: &[u8]) -> [u8; 32] {
+        let mut hasher = Sha256::new();
+        hasher.update(salt);
+        hasher.update(pin);
+        hasher.finalize().into()
+    }
+
+    fn hex_digit(byte: u8) -> Option<u8> {
+        match byte {
+            b'0'..=b'9' => Some(byte - b'0'),
+            b'a'..=b'f' => Some(byte - b'a' + 10),
+            b'A'..=b'F' => Some(byte - b'A' + 10),
+            _ => None,
+        }
+    }
+
+    /// Decode hex into `out`, returning the byte count; `None` for odd
+    /// length, a non-hex digit, or too much input.
+    fn hex(text: &[u8], out: &mut [u8]) -> Option<usize> {
+        if !text.len().is_multiple_of(2) || text.len() / 2 > out.len() {
+            return None;
+        }
+        for (slot, pair) in out.iter_mut().zip(text.as_chunks::<2>().0) {
+            *slot = hex_digit(pair[0])? << 4 | hex_digit(pair[1])?;
+        }
+        Some(text.len() / 2)
+    }
+
+    impl Account {
+        /// Parse `name:salt-hex:hash-hex`. The name is 1-16 printable ASCII
+        /// characters other than `:`; the salt 1-32 bytes; the hash exactly
+        /// 32. Anything else is refused.
+        pub fn parse(line: &[u8]) -> Option<Self> {
+            let line = line.strip_suffix(b"\r").unwrap_or(line);
+            let mut fields = line.split(|byte| *byte == b':');
+            let (name, salt, hash) = (fields.next()?, fields.next()?, fields.next()?);
+            if fields.next().is_some()
+                || name.is_empty()
+                || name.len() > MAX_NAME
+                || !name.iter().all(|byte| (b' '..=b'~').contains(byte))
+            {
+                return None;
+            }
+            let mut account = Self {
+                name: [0; MAX_NAME],
+                name_length: name.len(),
+                salt: [0; MAX_SALT],
+                salt_length: 0,
+                hash: [0; 32],
+            };
+            account.name[..name.len()].copy_from_slice(name);
+            account.salt_length = hex(salt, &mut account.salt).filter(|length| *length > 0)?;
+            if hex(hash, &mut account.hash)? != 32 {
+                return None;
+            }
+            Some(account)
+        }
+
+        pub fn name(&self) -> &[u8] {
+            &self.name[..self.name_length]
+        }
+
+        /// Whether `pin` is this account's PIN. The comparison of the two
+        /// hashes takes the same time wherever they differ.
+        pub fn verify(&self, pin: &[u8]) -> bool {
+            let candidate = hash_pin(&self.salt[..self.salt_length], pin);
+            let mut difference = 0u8;
+            for (a, b) in candidate.iter().zip(&self.hash) {
+                difference |= a ^ b;
+            }
+            difference == 0
+        }
+    }
+}
+
 /// The longest name a directory entry can carry.
 pub const MAX_NAME: usize = 255;
 
@@ -2280,6 +2375,52 @@ mod tests {
         let area = Frame::new(0, 0, 641, 376);
         assert_eq!(half(area, false), Frame::new(0, 0, 320, 376));
         assert_eq!(half(area, true), Frame::new(320, 0, 321, 376));
+    }
+
+    #[test]
+    fn pin_hash_is_sha256_of_salt_then_pin() {
+        // FIPS 180-2 test vectors, split across salt and PIN.
+        let abc = accounts::hash_pin(b"a", b"bc");
+        assert_eq!(
+            abc,
+            [
+                0xba, 0x78, 0x16, 0xbf, 0x8f, 0x01, 0xcf, 0xea, 0x41, 0x41, 0x40, 0xde, 0x5d, 0xae, 0x22, 0x23,
+                0xb0, 0x03, 0x61, 0xa3, 0x96, 0x17, 0x7a, 0x9c, 0xb4, 0x10, 0xff, 0x61, 0xf2, 0x00, 0x15, 0xad,
+            ]
+        );
+        let empty = accounts::hash_pin(b"", b"");
+        assert_eq!(empty[..4], [0xe3, 0xb0, 0xc4, 0x42]);
+        assert_eq!(empty[28..], [0x78, 0x52, 0xb8, 0x55]);
+    }
+
+    #[test]
+    fn accounts_parse_and_verify() {
+        let salt = b"\x01\x02\xfe\xff";
+        let hash = accounts::hash_pin(salt, b"2468");
+        let mut line = std::string::String::from("ada:0102feff:");
+        for byte in hash {
+            line.push_str(&std::format!("{byte:02x}"));
+        }
+        let account = accounts::Account::parse(line.as_bytes()).expect("valid line");
+        assert_eq!(account.name(), b"ada");
+        assert!(account.verify(b"2468"));
+        assert!(!account.verify(b"2469") && !account.verify(b"") && !account.verify(b"24680"));
+        // A trailing CR is tolerated; malformed lines are refused.
+        assert!(accounts::Account::parse(std::format!("{line}\r").as_bytes()).is_some());
+        let refused = [
+            "ada:0102feff",                       // no hash
+            ":0102feff:00",                       // no name
+            "a:b:c:d",                            // too many fields
+            "ada::00",                            // empty salt
+            "ada:010:00",                         // odd salt hex
+            "ada:0102feff:zz",                    // not hex
+            "this-name-is-too-long:00:00",        // name over 16
+        ];
+        for bad in refused {
+            assert!(accounts::Account::parse(bad.as_bytes()).is_none(), "{bad}");
+        }
+        let short_hash = std::format!("ada:0102feff:{}", &line[13..line.len() - 2]);
+        assert!(accounts::Account::parse(short_hash.as_bytes()).is_none(), "31-byte hash");
     }
 
     #[test]

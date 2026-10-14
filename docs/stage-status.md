@@ -57,6 +57,91 @@ gate pass. The unsupported `cargo test --workspace --all-targets` command is
 documented as a host-assembler mismatch rather than treated as a production
 failure. See the [host-test audit](audit-host-test-boundary-2026-10-14.md).
 
+## Stage 20.12 — sign-in screen and local accounts (2026-10-14)
+
+Roadmap Stage 18.7, Login Manager.
+
+**Accounts.** `libwoven::accounts` reads an accounts file with one local
+account per line: `name:salt-hex:hash-hex`.
+- The hash is `SHA-256(salt || PIN)`. It uses the same freestanding,
+  software-only `sha2` crate as the kernel's boot measurement.
+- No PIN is stored anywhere.
+- Names are 1–16 printable ASCII characters other than `:`. Salts are
+  1–32 bytes, and hashes exactly 32. Any other line is refused.
+- Hashes are compared in constant time.
+- Host tests check FIPS 180-2 vectors split across salt and PIN, and the
+  parser's refusals.
+
+**Shell.** With `--accounts <file>`, the desktop starts at a sign-in
+screen. The screen shows "Sign in" and the accounts, with the chosen one
+marked.
+- Tab chooses the next account, digits enter its PIN, and Enter signs in.
+  Masking and the three-try lockout work as on the lock screen.
+- Once signed in, the account's name appears on the taskbar, left of the
+  Quick Settings button.
+- The lock screen then asks for that account's PIN, not `--pin`.
+- If `--accounts` is given but no account can be read, the shell refuses
+  to start rather than open the desktop to anyone.
+
+**Fixes found by the first runs.**
+- **The shell overflowed its user stack.** A user stack is 8 KiB
+  (`UserStack::SIZE`). The desktop state was built in `main`'s 5.8 KiB
+  frame, and the catalog loader's 2.3 KiB frame sat on top. Adding the
+  accounts pushed the total past the guard page: a page fault at the
+  shell's first instruction in `load_catalog`. The state now lives in a
+  static (.bss), like the tile buffer, and the loaders fill it in place.
+  `main` is down to 1.5 KiB and `load_catalog` to 1.1 KiB. The kernel's
+  stack size is unchanged.
+- **The gate tried to create `/etc`, which boot already creates.** It now
+  accepts an existing directory.
+- **The Stage 20.1 gate failed after Stage 20.10.** 20.10 put the Quick
+  Settings button inside the strip the 20.1 gate required to be plain
+  taskbar. CI's desktop-userspace job on `stage20-10` failed there. The
+  20.1 gate now checks the strip on both sides of the button, and the
+  button's fill and "Q" exactly. The fix is on `stage20-10` and merged
+  forward.
+
+Gate `[S20.12] sign-in: PASSED`. The kernel writes an accounts file with
+`ada` (PIN 1234) and `lin` (PIN 9876), salted and hashed with the kernel's
+own SHA-256. The shell runs with `FileRead` and real i8042 input. Screens
+are compared row by row with the kernel's rendering.
+- The desktop opens at the sign-in screen, with ada chosen.
+- Tab chooses lin.
+- ada's PIN is refused for lin.
+- lin's PIN signs in, and lin's name is on the taskbar.
+- Locked through Quick Settings, the lock screen refuses ada's PIN and
+  takes lin's.
+- Killing the shell returns the display.
+
+Validation in the second worktree, on `stage20-12`:
+- **Lint and tests:** kernel Clippy for every Stage 20 feature, host
+  `--all-targets` Clippy and woven-shell Clippy, all with warnings denied,
+  pass. libwoven host tests pass (16).
+- **Gates 20.2–20.12:** pass on 1/2/4 CPUs.
+- **Gate 20.1:** failed on 1/2/4 CPUs before the Quick Settings fix
+  above. After the fix, it was rerun on 1/2/4 CPUs; see the commit.
+
+Negative controls, each run on 1 CPU, with the source restored byte for
+byte afterwards and the gate passing again:
+- Any PIN accepted: fails at "ada's PIN is refused for lin".
+- Tab ignored: fails at "Tab chooses lin".
+- Lock forgets the session: fails at "the lock screen refuses ada's PIN
+  and takes lin's".
+- No sign-in screen: fails at "the desktop opens at the sign-in screen".
+- Name not shown: fails at "lin's PIN signs in; lin's name is on the
+  taskbar".
+
+Open:
+- **Every process still runs with the same kernel credentials.** Per-user
+  sessions need the kernel to start processes as another user.
+- **Accounts are read from a file given at startup.** There is no account
+  creation, password change, or protected credential store; the file's
+  integrity rests on the filesystem.
+- **A 4-digit PIN behind a salted fast hash protects only against casual
+  access.** An attacker who can read the accounts file can try all 10,000
+  PINs instantly. A slow KDF and longer secrets belong with a real
+  credential store.
+
 ## Stage 20.11 — lock screen (2026-10-14)
 
 Roadmap Stage 18.6, Lock Screen.

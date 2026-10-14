@@ -3458,6 +3458,15 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         serial::write_line(format_args!("[S1-5] storage journal: PASSED"));
         qemu_test_exit_success();
     }
+    #[cfg(feature = "stage20-12-test")]
+    {
+        if !stage20_12_self_test() {
+            serial::write_line(format_args!("[S20.12] sign-in: FAILED"));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!("[S20.12] sign-in: PASSED"));
+        qemu_test_exit_success();
+    }
     #[cfg(feature = "stage20-11-test")]
     {
         if !stage20_11_self_test() {
@@ -4797,7 +4806,8 @@ fn stage16_1_self_test() -> bool {
     feature = "stage20-8-test",
     feature = "stage20-9-test",
     feature = "stage20-10-test",
-    feature = "stage20-11-test"
+    feature = "stage20-11-test",
+    feature = "stage20-12-test"
 ))]
 const HELLO_GUI_IMAGE: &[u8] = include_bytes!(env!("WOVENHAT_HELLO_GUI_IMAGE"));
 
@@ -4826,7 +4836,8 @@ const HELLO_GUI_IMAGE: &[u8] = include_bytes!(env!("WOVENHAT_HELLO_GUI_IMAGE"));
     feature = "stage20-8-test",
     feature = "stage20-9-test",
     feature = "stage20-10-test",
-    feature = "stage20-11-test"
+    feature = "stage20-11-test",
+    feature = "stage20-12-test"
 ))]
 fn display_client_capabilities() -> capability::CapabilitySet {
     capability::CapabilitySet::only(capability::Capability::Console)
@@ -4857,7 +4868,8 @@ fn display_client_capabilities() -> capability::CapabilitySet {
     feature = "stage20-8-test",
     feature = "stage20-9-test",
     feature = "stage20-10-test",
-    feature = "stage20-11-test"
+    feature = "stage20-11-test",
+    feature = "stage20-12-test"
 ))]
 fn run_hello_gui(
     image: &[u8],
@@ -4896,7 +4908,8 @@ fn run_hello_gui(
     feature = "stage20-8-test",
     feature = "stage20-9-test",
     feature = "stage20-10-test",
-    feature = "stage20-11-test"
+    feature = "stage20-11-test",
+    feature = "stage20-12-test"
 ))]
 fn spawn_hello_gui(
     image: &[u8],
@@ -4936,7 +4949,8 @@ fn spawn_hello_gui(
     feature = "stage20-8-test",
     feature = "stage20-9-test",
     feature = "stage20-10-test",
-    feature = "stage20-11-test"
+    feature = "stage20-11-test",
+    feature = "stage20-12-test"
 ))]
 fn wait_hello_gui(pid: task::ProcessId) -> Option<(task::ProcessId, Result<i32, task::WaitError>)> {
     let start = timer::ticks();
@@ -4961,9 +4975,226 @@ fn wait_hello_gui(pid: task::ProcessId) -> Option<(task::ProcessId, Result<i32, 
     feature = "stage20-8-test",
     feature = "stage20-9-test",
     feature = "stage20-10-test",
-    feature = "stage20-11-test"
+    feature = "stage20-11-test",
+    feature = "stage20-12-test"
 ))]
 const WOVEN_SHELL_IMAGE: &[u8] = include_bytes!(env!("WOVENHAT_SHELL_IMAGE"));
+
+/// Stage 20.12 acceptance: signing in.
+///
+/// The kernel writes an accounts file with two local accounts: `ada`, PIN
+/// 1234, and `lin`, PIN 9876. Each line holds a salt and `SHA-256(salt ||
+/// PIN)`, computed here with the kernel's own SHA-256. The shell starts with
+/// `--accounts` and `FileRead`. With real i8042 input the kernel checks:
+/// - the desktop opens at the sign-in screen, ada chosen;
+/// - Tab chooses lin;
+/// - ada's PIN is refused for lin;
+/// - lin's PIN signs in, and lin's name appears in the taskbar;
+/// - once locked, the lock screen wants lin's PIN, and refuses ada's.
+///
+/// Rows are compared with the kernel's own rendering.
+#[cfg(feature = "stage20-12-test")]
+fn stage20_12_self_test() -> bool {
+    use crate::display::{blend_pixel, rgb, Surface};
+    use sha2::{Digest, Sha256};
+
+    const WALLPAPER_TOP: u32 = rgb(18, 42, 74);
+    const WALLPAPER_BOTTOM: u32 = rgb(64, 28, 88);
+    const WHITE: u32 = rgb(255, 255, 255);
+    const BLACK: u32 = rgb(0, 0, 0);
+    const TASKBAR: u32 = rgb(20, 24, 32);
+    const UNSET: u32 = 0x0100_0000;
+
+    fn step(name: &str, ok: bool) -> bool {
+        serial::write_line(format_args!(
+            "[S20.12] {} {}",
+            name,
+            if ok { "PASS" } else { "FAIL" }
+        ));
+        ok
+    }
+    fn until(limit: u64, condition: impl Fn() -> bool) -> bool {
+        let start = timer::ticks();
+        loop {
+            if condition() {
+                return true;
+            }
+            if timer::ticks().wrapping_sub(start) > limit {
+                return false;
+            }
+            task::yield_now();
+        }
+    }
+    fn wallpaper(x: i32, y: i32, height: i32) -> u32 {
+        let span = (height - 1).max(1);
+        let t = (y.clamp(0, span) * 255 / span) as u8;
+        let base = blend_pixel(WALLPAPER_BOTTOM, WALLPAPER_TOP, t);
+        if x % 32 == 0 || y % 32 == 0 {
+            blend_pixel(WHITE, base, 28)
+        } else {
+            base
+        }
+    }
+    fn packet(dx: i16, screen_dy: i16, left: bool) -> bool {
+        let dy = -screen_dy;
+        let flags = 0x08
+            | u8::from(left)
+            | if dx < 0 { 0x10 } else { 0 }
+            | if dy < 0 { 0x20 } else { 0 };
+        [flags, dx as u8, dy as u8].into_iter().all(mouse::loopback)
+    }
+    fn move_by(mut dx: i32, mut dy: i32) -> bool {
+        while dx != 0 || dy != 0 {
+            let (sx, sy) = (dx.clamp(-100, 100), dy.clamp(-100, 100));
+            if !packet(sx as i16, sy as i16, false) {
+                return false;
+            }
+            dx -= sx;
+            dy -= sy;
+        }
+        true
+    }
+    fn click() -> bool {
+        packet(0, 0, true) && packet(0, 0, false)
+    }
+    fn keys(codes: &[u8]) -> bool {
+        codes.iter().all(|&code| mouse::keyboard_loopback(code))
+    }
+    /// One accounts-file line: `name:salt-hex:SHA-256(salt || pin)-hex`.
+    fn account_line(name: &str, salt: &[u8], pin: &[u8]) -> alloc::string::String {
+        let mut hasher = Sha256::new();
+        hasher.update(salt);
+        hasher.update(pin);
+        let digest = hasher.finalize();
+        let mut line = alloc::format!("{name}:");
+        for byte in salt {
+            line.push_str(&alloc::format!("{byte:02x}"));
+        }
+        line.push(':');
+        for byte in digest {
+            line.push_str(&alloc::format!("{byte:02x}"));
+        }
+        line.push('\n');
+        line
+    }
+
+    let mut file = account_line("ada", b"\x11\x22\x33\x44\x55\x66\x77\x88", b"1234");
+    file.push_str(&account_line("lin", b"\xa0\xb1\xc2\xd3\xe4\xf5\x06\x17", b"9876"));
+    // Boot creates /etc; make sure of it rather than assume.
+    let written = (vfs::stat("/etc").is_ok() || vfs::mkdir("/etc").is_ok())
+        && vfs::mkdir("/etc/wovenhat").is_ok()
+        && vfs::create_read_only("/etc/wovenhat/accounts", file.as_bytes()).is_ok()
+        && vfs::create_read_only("/bin/hello-gui", HELLO_GUI_IMAGE).is_ok();
+    if !step("accounts file written (salted hashes, no PINs)", written) {
+        return false;
+    }
+    let capabilities = capability::CapabilitySet::only(capability::Capability::Console)
+        .with(capability::Capability::DisplayIo)
+        .with(capability::Capability::InputIo)
+        .with(capability::Capability::Ipc)
+        .with(capability::Capability::FileRead);
+    let Some(program) = userspace::load_elf_with_argv(
+        WOVEN_SHELL_IMAGE,
+        &["/bin/woven-shell", "--accounts", "/etc/wovenhat/accounts"],
+    ) else {
+        return step("shell image loads", false);
+    };
+    let Ok((shell, _, _)) = task::spawn_user_system_service("woven-shell", program, capabilities) else {
+        return step("shell spawned", false);
+    };
+    if !step(
+        "shell took the display",
+        until(3000, || compositor::holder() == Some(shell.as_u64()) && compositor::is_presenting()),
+    ) {
+        return false;
+    }
+    let Some((width, height)) = compositor::dimensions() else {
+        return step("desktop geometry", false);
+    };
+    let (width, height) = (width as i32, height as i32);
+    let top = height - 24;
+    let middle = height / 2;
+    let dim = move |x: i32, y: i32| blend_pixel(BLACK, wallpaper(x, y, height), 160);
+    let line = |y0: i32, text: &str| {
+        let x0 = (width - crate::font::text_width(text) as i32) / 2;
+        let mut mask = Surface::new(width as usize, 7);
+        let bounds = mask.bounds();
+        mask.fill_rect(bounds, UNSET);
+        mask.draw_text(x0, 0, text, WHITE);
+        (y0..y0 + 7).all(|y| {
+            (0..width).all(|x| {
+                let expected = if mask.pixel(x, y - y0) == Some(WHITE) { WHITE } else { dim(x, y) };
+                compositor::pixel(x, y) == Ok(expected)
+            })
+        })
+    };
+    let sign_in = |first: &str, second: &str, prompt: &str| {
+        line(middle - 60, "Sign in")
+            && line(middle - 46, first)
+            && line(middle - 36, second)
+            && line(middle - 4, prompt)
+            && compositor::pixel(300, top + 12) == Ok(dim(300, top + 12))
+    };
+    if !step(
+        "the desktop opens at the sign-in screen, ada chosen",
+        until(1000, || sign_in("> ada", "  lin", "Enter PIN")),
+    ) {
+        return false;
+    }
+    if !step("Tab chooses lin", keys(&[0x0f]) && until(500, || sign_in("  ada", "> lin", "Enter PIN"))) {
+        return false;
+    }
+    let refused = keys(&[0x02, 0x03, 0x04, 0x05, 0x1c]) && until(500, || sign_in("  ada", "> lin", "Wrong PIN"));
+    if !step("ada's PIN is refused for lin", refused) {
+        return false;
+    }
+    // lin's name sits left of the Quick Settings button, on the taskbar.
+    let button = (width - 54 - 5 * 20, top + 4);
+    let name_x = button.0 - 6 - crate::font::text_width("lin") as i32;
+    let taskbar = move |x: i32, y: i32| blend_pixel(TASKBAR, wallpaper(x, y, height), 216);
+    let name_shown = || {
+        let mut mask = Surface::new(18, 7);
+        let bounds = mask.bounds();
+        mask.fill_rect(bounds, UNSET);
+        mask.draw_text(0, 0, "lin", WHITE);
+        (top + 9..top + 16).all(|y| {
+            (name_x..name_x + 18).all(|x| {
+                let expected = if mask.pixel(x - name_x, y - (top + 9)) == Some(WHITE) { WHITE } else { taskbar(x, y) };
+                compositor::pixel(x, y) == Ok(expected)
+            })
+        })
+    };
+    let signed_in = keys(&[0x0a, 0x09, 0x08, 0x07, 0x1c]) && until(1000, name_shown);
+    if !step("lin's PIN signs in; lin's name is on the taskbar", signed_in) {
+        return false;
+    }
+
+    // Lock through Quick Settings: the lock screen wants lin's PIN.
+    let lock_row = (width - 4 - 164 + 28, top - 2 - (5 * 14 + 2) + 1 + 4 * 14 + 7);
+    let (px, py) = (width / 2, height / 2);
+    let locked = move_by(button.0 + 8 - px, button.1 + 8 - py)
+        && click()
+        && move_by(lock_row.0 - (button.0 + 8), lock_row.1 - (button.1 + 8))
+        && click()
+        && until(1000, || line(middle - 34, "Locked") && line(middle - 4, "Enter PIN"));
+    let lock_checks = locked
+        && keys(&[0x02, 0x03, 0x04, 0x05, 0x1c])
+        && until(500, || line(middle - 4, "Wrong PIN"))
+        && keys(&[0x0a, 0x09, 0x08, 0x07, 0x1c])
+        && until(1000, name_shown);
+    if !step("the lock screen refuses ada's PIN and takes lin's", lock_checks) {
+        return false;
+    }
+
+    if task::kill_process(shell.as_u64(), 9).is_err() || !until(1000, || task::process_exited(shell)) {
+        return step("shell killed", false);
+    }
+    let _ = task::wait_process(shell.as_u64());
+    step(
+        "display returned to the terminal",
+        compositor::holder().is_none() && !compositor::is_presenting(),
+    )
+}
 
 /// Stage 20.11 acceptance: the lock screen.
 ///

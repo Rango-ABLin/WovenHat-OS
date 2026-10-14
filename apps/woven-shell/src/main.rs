@@ -88,6 +88,17 @@
 //! lock entry out for five seconds. Without `--pin`, Enter unlocks: real
 //! accounts and credentials come with the login manager.
 //!
+//! # Login
+//!
+//! With `--accounts <file>` the shell starts at a sign-in screen. The file
+//! holds one local account per line, `name:salt-hex:hash-hex`, the hash
+//! being `SHA-256(salt || PIN)` (see `libwoven::accounts`); no PIN is stored.
+//! Tab chooses the account, digits enter its PIN, Enter signs in, with the
+//! same masking and lockout as the lock screen. Once signed in, the
+//! account's name is shown in the taskbar, and the lock screen asks for that
+//! account's PIN. Every process still runs with the same kernel credentials:
+//! per-user sessions need the kernel to start processes as another user.
+//!
 //! # WovenStart
 //!
 //! The start button, or F1, opens the launcher: the applications listed in
@@ -225,6 +236,16 @@ const MAX_PIN: usize = 16;
 const PIN_ATTEMPTS: u32 = 3;
 const PIN_LOCKOUT: u64 = 5 * libwoven::time::TICKS_PER_SECOND;
 
+/// Accounts the sign-in screen offers.
+const MAX_ACCOUNTS: usize = 4;
+
+/// Whether the locked screen is the sign-in screen or the lock screen.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum LockMode {
+    SignIn,
+    Lock,
+}
+
 /// What the lock screen's prompt says.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum LockPrompt {
@@ -255,6 +276,15 @@ struct TileBuffer(UnsafeCell<[u32; TILE_PIXELS]>);
 unsafe impl Sync for TileBuffer {}
 
 static TILE: TileBuffer = TileBuffer(UnsafeCell::new([0; TILE_PIXELS]));
+
+/// The desktop's state, in .bss too: the user stack is 8 KiB, and the state
+/// built in `main`'s frame, with the catalog loader's on top, overflowed it.
+struct DesktopState(UnsafeCell<Desktop>);
+
+// SAFETY: the shell is single-threaded, and `main` takes the only reference.
+unsafe impl Sync for DesktopState {}
+
+static DESKTOP: DesktopState = DesktopState(UnsafeCell::new(Desktop::INITIAL));
 
 /// Exit with a numeric reason so the gate can tell which step failed.
 fn fail(code: u64) -> ! {
@@ -496,8 +526,8 @@ impl App {
 
 /// Load the catalog, sorted by name. A missing catalog, or no `FileRead`,
 /// leaves the launcher empty rather than stopping the shell.
-fn load_catalog() -> ([Option<App>; MAX_APPS], usize) {
-    let mut apps = [None; MAX_APPS];
+/// The apps are written into `apps`, which starts empty; returns how many.
+fn load_catalog(apps: &mut [Option<App>; MAX_APPS]) -> usize {
     let mut count = 0;
     let mut name = [0u8; libwoven::MAX_NAME];
     let mut index = 0;
@@ -535,7 +565,7 @@ fn load_catalog() -> ([Option<App>; MAX_APPS], usize) {
         apps[position] = Some(app);
         count += 1;
     }
-    (apps, count)
+    count
 }
 
 /// Whether `name` contains `query`, ignoring ASCII case.
@@ -737,6 +767,12 @@ struct Desktop {
     failures: u32,
     lockout_until: libwoven::time::Ticks,
     prompt: LockPrompt,
+    mode: LockMode,
+    accounts: [Option<libwoven::accounts::Account>; MAX_ACCOUNTS],
+    /// The account chosen on the sign-in screen.
+    chosen: usize,
+    /// The account signed in, if any.
+    session: Option<usize>,
     pointer: (i32, i32),
     pointer_visible: bool,
     /// The window being dragged, and where in it the pointer took hold.
@@ -753,6 +789,48 @@ struct Desktop {
 }
 
 impl Desktop {
+    /// The state before `main` fills in the display, options and catalog.
+    const INITIAL: Desktop = Desktop {
+        width: 0,
+        height: 0,
+        seconds: false,
+        time: None,
+        windows: [None; MAX_WINDOWS],
+        stack: [0; MAX_WINDOWS],
+        stacked: 0,
+        opened: 0,
+        tray: [None; MAX_TRAY],
+        toast: None,
+        notes: [None; MAX_NOTES],
+        unread: 0,
+        center_open: false,
+        qs_open: false,
+        dnd: false,
+        scale: 1,
+        locked: false,
+        pin: None,
+        entry: [0; MAX_PIN],
+        entry_length: 0,
+        failures: 0,
+        lockout_until: 0,
+        prompt: LockPrompt::Enter,
+        mode: LockMode::SignIn,
+        accounts: [None; MAX_ACCOUNTS],
+        chosen: 0,
+        session: None,
+        pointer: (0, 0),
+        pointer_visible: false,
+        drag: None,
+        tiled: false,
+        apps: [None; MAX_APPS],
+        app_count: 0,
+        launcher_open: false,
+        query: [0; MAX_QUERY],
+        query_length: 0,
+        selected: 0,
+        children: [None; MAX_CHILDREN],
+    };
+
     fn screen(&self) -> Area {
         Area::new(0, 0, self.width, self.height)
     }
@@ -1004,6 +1082,13 @@ impl Desktop {
         let clock_x = self.width - CLOCK_MARGIN - font::text_width(text) as i32;
         canvas.draw_text(clock_x, self.text_y(), text, TEXT);
 
+        // The signed-in account's name, left of the Quick Settings button.
+        if let Some(account) = self.session.and_then(|index| self.accounts[index]) {
+            let name = core::str::from_utf8(account.name()).unwrap_or("?");
+            let x = self.qs_button().x - 6 - font::text_width(name) as i32;
+            canvas.draw_text(x, self.text_y(), name, TEXT);
+        }
+
         // The Quick Settings button.
         let button = self.qs_button();
         let fill = if self.qs_open { ENTRY_ACTIVE } else { ENTRY_INACTIVE };
@@ -1052,10 +1137,24 @@ impl Desktop {
         canvas.shade(|x, y| blend(rgb(0, 0, 0), wallpaper(x, y, height), LOCK_DIM));
         let middle = self.height / 2;
         let centred = |text: &str| (self.width - font::text_width(text) as i32) / 2;
-        canvas.draw_text(centred("Locked"), middle - 34, "Locked", TEXT);
-        let (bytes, length) = clock_text(self.time, false);
-        let clock = core::str::from_utf8(&bytes[..length]).unwrap_or("");
-        canvas.draw_text(centred(clock), middle - 20, clock, TEXT);
+        if self.mode == LockMode::SignIn {
+            // "Sign in", then the accounts, the chosen one marked.
+            canvas.draw_text(centred("Sign in"), middle - 60, "Sign in", TEXT);
+            for (index, account) in self.accounts.iter().flatten().enumerate() {
+                let mut line = [b' '; 2 + libwoven::accounts::MAX_NAME];
+                if index == self.chosen {
+                    line[0] = b'>';
+                }
+                line[2..2 + account.name().len()].copy_from_slice(account.name());
+                let text = core::str::from_utf8(&line[..2 + account.name().len()]).unwrap_or("");
+                canvas.draw_text(centred(text), middle - 46 + index as i32 * 10, text, TEXT);
+            }
+        } else {
+            canvas.draw_text(centred("Locked"), middle - 34, "Locked", TEXT);
+            let (bytes, length) = clock_text(self.time, false);
+            let clock = core::str::from_utf8(&bytes[..length]).unwrap_or("");
+            canvas.draw_text(centred(clock), middle - 20, clock, TEXT);
+        }
         let prompt = match self.prompt {
             LockPrompt::Enter => "Enter PIN",
             LockPrompt::Wrong => "Wrong PIN",
@@ -1072,6 +1171,7 @@ impl Desktop {
     fn lock(&mut self) -> Area {
         let _ = self.close_panels();
         self.locked = true;
+        self.mode = LockMode::Lock;
         self.forget_entry();
         self.prompt = LockPrompt::Enter;
         log(&[b"woven-shell: locked"]);
@@ -1088,8 +1188,16 @@ impl Desktop {
         self.entry_length = 0;
     }
 
-    /// Check the typed digits against the PIN.
+    /// Check the typed digits: against the chosen account when signing in,
+    /// the signed-in account when locked, or else the `--pin` PIN.
     fn pin_matches(&self) -> bool {
+        let account = match self.mode {
+            LockMode::SignIn => Some(self.chosen),
+            LockMode::Lock => self.session,
+        };
+        if let Some(account) = account.and_then(|index| self.accounts[index]) {
+            return account.verify(&self.entry[..self.entry_length]);
+        }
         let Some((stored, length)) = &self.pin else { return true };
         // Constant time over the whole buffer: no early exit on a mismatch.
         let mut difference = u8::from(*length != self.entry_length);
@@ -1114,13 +1222,25 @@ impl Desktop {
                     self.entry[self.entry_length] = 0;
                 }
             }
+            Key::Tab if self.mode == LockMode::SignIn => {
+                let count = self.accounts.iter().flatten().count().max(1);
+                self.chosen = (self.chosen + 1) % count;
+                self.forget_entry();
+                self.prompt = LockPrompt::Enter;
+            }
             Key::Enter => {
                 if libwoven::ticks() < self.lockout_until {
                     self.prompt = LockPrompt::LockedOut;
                 } else if self.pin_matches() {
                     self.locked = false;
                     self.failures = 0;
-                    log(&[b"woven-shell: unlocked"]);
+                    if self.mode == LockMode::SignIn {
+                        self.session = Some(self.chosen);
+                        let name = self.accounts[self.chosen];
+                        log(&[b"woven-shell: signed in: ", name.as_ref().map_or(&b"?"[..], |account| account.name())]);
+                    } else {
+                        log(&[b"woven-shell: unlocked"]);
+                    }
                 } else {
                     self.failures += 1;
                     self.prompt = LockPrompt::Wrong;
@@ -1860,13 +1980,33 @@ impl Desktop {
     }
 }
 
+/// Read up to [`MAX_ACCOUNTS`] accounts from an accounts file into
+/// `accounts`, which starts empty; malformed lines are skipped.
+fn load_accounts(path: &str, accounts: &mut [Option<libwoven::accounts::Account>; MAX_ACCOUNTS]) {
+    let Ok(descriptor) = libwoven::open(path) else { return };
+    let mut text = [0u8; 1024];
+    let read = libwoven::read(descriptor, &mut text);
+    let _ = libwoven::close(descriptor);
+    let Ok(length) = read else { return };
+    let mut count = 0;
+    for line in text[..length].split(|byte| *byte == b'\n') {
+        if count == MAX_ACCOUNTS {
+            break;
+        }
+        if let Some(account) = libwoven::accounts::Account::parse(line) {
+            accounts[count] = Some(account);
+            count += 1;
+        }
+    }
+}
+
 fn main(args: Args) -> ! {
-    let mut seconds = false;
-    let mut pin = None;
+    // SAFETY: the only reference to the desktop's state, taken once.
+    let desktop = unsafe { &mut *DESKTOP.0.get() };
     let mut index = 1;
     while let Some(argument) = args.get(index) {
         match argument {
-            b"--seconds" => seconds = true,
+            b"--seconds" => desktop.seconds = true,
             b"--pin" => {
                 index += 1;
                 match args.get(index) {
@@ -1875,9 +2015,22 @@ fn main(args: Args) -> ! {
                     {
                         let mut stored = [0u8; MAX_PIN];
                         stored[..digits.len()].copy_from_slice(digits);
-                        pin = Some((stored, digits.len()));
+                        desktop.pin = Some((stored, digits.len()));
                     }
                     _ => fail(1),
+                }
+            }
+            b"--accounts" => {
+                index += 1;
+                let path = args.get(index).and_then(|path| core::str::from_utf8(path).ok());
+                desktop.accounts = [None; MAX_ACCOUNTS];
+                if let Some(path) = path {
+                    load_accounts(path, &mut desktop.accounts);
+                }
+                // Asked to sign users in but none can be read: refuse to start
+                // rather than open the desktop to anyone.
+                if desktop.accounts.iter().all(Option::is_none) {
+                    fail(9);
                 }
             }
             _ => fail(1),
@@ -1907,43 +2060,14 @@ fn main(args: Args) -> ! {
     let mut painter = Painter { staging, tile };
 
     let (width, height) = (info.width as i32, info.height as i32);
-    let (apps, app_count) = load_catalog();
-    let mut desktop = Desktop {
-        width,
-        height,
-        seconds,
-        time: libwoven::clock().ok(),
-        windows: [None; MAX_WINDOWS],
-        stack: [0; MAX_WINDOWS],
-        stacked: 0,
-        opened: 0,
-        tray: [None; MAX_TRAY],
-        toast: None,
-        notes: [None; MAX_NOTES],
-        unread: 0,
-        center_open: false,
-        qs_open: false,
-        dnd: false,
-        scale: info.scale,
-        locked: false,
-        pin,
-        entry: [0; MAX_PIN],
-        entry_length: 0,
-        failures: 0,
-        lockout_until: 0,
-        prompt: LockPrompt::Enter,
-        pointer: (width / 2, height / 2),
-        pointer_visible: false,
-        drag: None,
-        tiled: false,
-        apps,
-        app_count,
-        launcher_open: false,
-        query: [0; MAX_QUERY],
-        query_length: 0,
-        selected: 0,
-        children: [None; MAX_CHILDREN],
-    };
+    desktop.width = width;
+    desktop.height = height;
+    desktop.time = libwoven::clock().ok();
+    desktop.scale = info.scale;
+    // With accounts, the desktop starts at the sign-in screen.
+    desktop.locked = desktop.accounts.iter().any(Option::is_some);
+    desktop.pointer = (width / 2, height / 2);
+    desktop.app_count = load_catalog(&mut desktop.apps);
     desktop.repaint(&mut painter, desktop.screen());
     // The first present takes the display from the text terminal.
     if libwoven::compositor_present().is_err() {
