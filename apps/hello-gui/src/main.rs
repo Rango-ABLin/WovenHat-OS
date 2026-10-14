@@ -849,6 +849,7 @@ fn desktop_client(args: &Args) -> ! {
             Some(b"b") => (b"Beta", 100, 60, rgb(60, 60, 200), b'y', false),
             Some(b"c") => (b"Wide", 400, 260, rgb(60, 160, 90), b'z', false),
             Some(b"n") => (b"Notes", 100, 60, rgb(150, 120, 40), b'n', false),
+            Some(b"q") => (b"Quiet", 100, 60, rgb(90, 170, 170), b'q', false),
             _ => fail(181),
         };
     let mut window = match GraphicsSurface::create(u32::from(width), u32::from(height)) {
@@ -948,6 +949,13 @@ fn desktop_client(args: &Args) -> ! {
                 drop(icon);
                 drop(window);
                 libwoven::exit(0);
+            }
+            // Client Q posts a notification each time it is sent 'p'.
+            if sender == shell && length == 1 && key[0] == b'p' && args.get(3) == Some(b"q") {
+                if libwoven::message_send(shell, b"NOTEPing").is_err() {
+                    fail(189);
+                }
+                continue;
             }
             if sender != shell || length != 1 || key[0] != expected {
                 fail(187);

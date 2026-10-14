@@ -65,6 +65,14 @@
 //! the Notification Center, a translucent panel listing them, and marks them
 //! read; its Clear button empties the history.
 //!
+//! # Quick Settings
+//!
+//! The button left of the tray opens Quick Settings, a translucent panel of
+//! toggles that act on the system today: the display scale (1x or 2x, with
+//! every window laid out again at the new geometry), Do Not Disturb (no
+//! toasts; notifications are still remembered and counted), and tiling (as
+//! F2). Settings the system cannot act on yet are not offered.
+//!
 //! # WovenStart
 //!
 //! The start button, or F1, opens the launcher: the applications listed in
@@ -192,6 +200,9 @@ const MAX_NOTES: usize = 8;
 const CENTER_WIDTH: i32 = 164;
 const CENTER_TITLE: &str = "Notifications";
 const CENTER_CLEAR: &str = "Clear";
+const QS_TITLE: &str = "Quick Settings";
+const QS_ROWS: usize = 3;
+
 /// Characters of a `source: text` row that fit.
 const CENTER_CHARS: usize = ((CENTER_WIDTH - 12) / font::ADVANCE) as usize;
 
@@ -682,6 +693,11 @@ struct Desktop {
     /// opened.
     unread: usize,
     center_open: bool,
+    qs_open: bool,
+    /// Do Not Disturb: notifications are remembered but raise no toast.
+    dnd: bool,
+    /// The display scale the shell set.
+    scale: u32,
     pointer: (i32, i32),
     pointer_visible: bool,
     /// The window being dragged, and where in it the pointer took hold.
@@ -805,10 +821,11 @@ impl Desktop {
     /// Open or close the launcher. Returns the area to repaint.
     fn toggle_launcher(&mut self) -> Area {
         let mut before = self.panel_area();
-        if !self.launcher_open && self.center_open {
+        if !self.launcher_open && (self.center_open || self.qs_open) {
             // Only one panel at a time.
-            before = before.union(self.center_area());
+            before = before.union(self.center_area()).union(self.qs_area()).union(self.qs_button());
             self.center_open = false;
+            self.qs_open = false;
         }
         self.launcher_open = !self.launcher_open;
         self.query_length = 0;
@@ -948,6 +965,12 @@ impl Desktop {
         let clock_x = self.width - CLOCK_MARGIN - font::text_width(text) as i32;
         canvas.draw_text(clock_x, self.text_y(), text, TEXT);
 
+        // The Quick Settings button.
+        let button = self.qs_button();
+        let fill = if self.qs_open { ENTRY_ACTIVE } else { ENTRY_INACTIVE };
+        canvas.fill_rect(button.x, button.y, button.width as usize, button.height as usize, fill);
+        canvas.draw_text(button.x + 5, self.text_y(), "Q", TEXT);
+
         // The unread badge, just left of the clock: a count up to 9.
         if self.unread > 0 {
             let badge = self.badge_area();
@@ -955,6 +978,97 @@ impl Desktop {
             let digit = [b'0' + self.unread.min(9) as u8];
             canvas.draw_text(badge.x + 3, badge.y + 2, core::str::from_utf8(&digit).unwrap_or("?"), TEXT);
         }
+    }
+
+    /// The Quick Settings button, left of the tray's last icon slot.
+    fn qs_button(&self) -> Area {
+        let x = self.width - CLOCK_WIDTH - (MAX_TRAY as i32 + 1) * (TRAY_ICON + TRAY_GAP);
+        Area::new(x, self.taskbar_top() + 4, TRAY_ICON, TRAY_ICON)
+    }
+
+    /// Quick Settings: a title row and one row per toggle, above the
+    /// taskbar's right end; empty while closed.
+    fn qs_area(&self) -> Area {
+        if !self.qs_open {
+            return Area::new(0, 0, 0, 0);
+        }
+        let height = (1 + QS_ROWS as i32) * PANEL_ROW + 2;
+        Area::new(self.width - 4 - CENTER_WIDTH, self.taskbar_top() - 2 - height, CENTER_WIDTH, height)
+    }
+
+    /// The toggles as they currently read.
+    fn qs_rows(&self) -> [&'static str; QS_ROWS] {
+        [
+            if self.scale == 2 { "Display scale: 2x" } else { "Display scale: 1x" },
+            if self.dnd { "Do not disturb: On" } else { "Do not disturb: Off" },
+            if self.tiled { "Tiling: On" } else { "Tiling: Off" },
+        ]
+    }
+
+    fn render_qs(&self, canvas: &mut Canvas<'_>) {
+        let area = self.qs_area();
+        let (x, y) = (area.x, area.y);
+        outline(canvas, area, ACCENT);
+        canvas.fill_rect(x + 1, y + 1, (area.width - 2) as usize, PANEL_ROW as usize, START_FILL);
+        canvas.draw_text(x + 6, y + 5, QS_TITLE, TEXT);
+        for (row, text) in self.qs_rows().iter().enumerate() {
+            canvas.draw_text(x + 6, y + 1 + (1 + row as i32) * PANEL_ROW + 4, text, TEXT);
+        }
+    }
+
+    /// Close whichever panel is open. Returns the area to repaint.
+    fn close_panels(&mut self) -> Area {
+        let mut dirty = Area::new(0, 0, 0, 0);
+        if self.launcher_open {
+            dirty = dirty.union(self.toggle_launcher());
+        }
+        if self.center_open {
+            dirty = dirty.union(self.center_area());
+            self.center_open = false;
+        }
+        if self.qs_open {
+            dirty = dirty.union(self.qs_area()).union(self.qs_button());
+            self.qs_open = false;
+        }
+        dirty
+    }
+
+    fn toggle_qs(&mut self) -> Area {
+        let opening = !self.qs_open;
+        let mut dirty = self.close_panels();
+        if opening {
+            self.qs_open = true;
+            dirty = dirty.union(self.qs_area()).union(self.qs_button());
+        }
+        dirty
+    }
+
+    fn toggle_tiling(&mut self) -> Area {
+        self.tiled = !self.tiled;
+        log(if self.tiled { &[b"woven-shell: tiling on"] } else { &[b"woven-shell: tiling off"] });
+        self.retile().union(self.qs_area())
+    }
+
+    /// Switch between display scales 2 and 1: the compositor surface is
+    /// reallocated at the new geometry, every window is kept on screen (and
+    /// tiled again if tiling is on), and the whole desktop is repainted.
+    fn toggle_scale(&mut self) -> Area {
+        let target = if self.scale == 2 { 1 } else { 2 };
+        let Ok(info) = libwoven::compositor_set_scale(target) else {
+            return Area::new(0, 0, 0, 0);
+        };
+        self.scale = info.scale;
+        self.width = info.width as i32;
+        self.height = info.height as i32;
+        let top = self.taskbar_top();
+        for window in self.windows.iter_mut().flatten() {
+            window.x = window.x.clamp(0, (self.width - window.width).max(0));
+            window.y = window.y.clamp(TITLE_HEIGHT, (top - window.height).max(TITLE_HEIGHT));
+        }
+        self.pointer = (self.pointer.0.min(self.width - 1), self.pointer.1.min(self.height - 1));
+        log(if target == 1 { &[b"woven-shell: display scale 1x"] } else { &[b"woven-shell: display scale 2x"] });
+        let _ = self.retile();
+        self.screen()
     }
 
     /// Where the unread badge sits: a 10x11 box just left of the clock text.
@@ -1001,11 +1115,9 @@ impl Desktop {
     /// launcher and marks every notification read. Returns the area to
     /// repaint.
     fn toggle_center(&mut self) -> Area {
-        let mut dirty = self.center_area();
-        if self.launcher_open {
-            dirty = dirty.union(self.toggle_launcher());
-        }
-        self.center_open = !self.center_open;
+        let opening = !self.center_open;
+        let mut dirty = self.close_panels();
+        self.center_open = opening;
         if self.center_open && self.unread > 0 {
             self.unread = 0;
             dirty = dirty.union(self.taskbar());
@@ -1158,6 +1270,12 @@ impl Desktop {
         if !panel.is_empty() {
             painter.blend(panel, PANEL_FILL, PANEL_OPACITY);
             painter.overlay(panel, |canvas| self.render_panel(canvas));
+        }
+
+        let qs = self.qs_area().intersect(area);
+        if !qs.is_empty() {
+            painter.blend(qs, PANEL_FILL, PANEL_OPACITY);
+            painter.overlay(qs, |canvas| self.render_qs(canvas));
         }
 
         let center = self.center_area().intersect(area);
@@ -1360,13 +1478,18 @@ impl Desktop {
             Some(b"NOTE") => {
                 let mut text = [0u8; 32];
                 let length = label(&message[4..], TOAST_CHARS, &mut text);
+                log(&[b"woven-shell: notification: ", &text[..length]]);
+                let remembered = self.remember(sender, &message[4..]);
+                // Do Not Disturb keeps the notification but raises no toast.
+                if self.dnd {
+                    return remembered;
+                }
                 self.toast = Some(Toast {
                     text,
                     length,
                     until: libwoven::ticks() + TOAST_TICKS,
                 });
-                log(&[b"woven-shell: notification: ", &text[..length]]);
-                self.toast_area().union(self.remember(sender, &message[4..]))
+                self.toast_area().union(remembered)
             }
             _ => empty,
         }
@@ -1400,6 +1523,26 @@ impl Desktop {
                 let (x, y) = self.pointer;
                 if self.start_area().contains(x, y) {
                     return self.toggle_launcher();
+                }
+                // The Quick Settings button, and its panel's rows.
+                if self.qs_button().contains(x, y) {
+                    return self.toggle_qs();
+                }
+                if self.qs_open {
+                    let panel = self.qs_area();
+                    if !panel.contains(x, y) {
+                        return self.close_panels();
+                    }
+                    return match (y - panel.y - 1) / PANEL_ROW - 1 {
+                        0 => self.toggle_scale(),
+                        1 => {
+                            self.dnd = !self.dnd;
+                            log(if self.dnd { &[b"woven-shell: do not disturb on"] } else { &[b"woven-shell: do not disturb off"] });
+                            panel
+                        }
+                        2 => self.toggle_tiling(),
+                        _ => empty,
+                    };
                 }
                 // The clock opens and closes the Notification Center.
                 if self.clock_area().contains(x, y) || (self.unread > 0 && self.badge_area().contains(x, y)) {
@@ -1459,11 +1602,7 @@ impl Desktop {
             }
             InputEvent::Key(key) if self.launcher_open => self.launcher_key(key),
             InputEvent::Key(Key::F1) => self.toggle_launcher(),
-            InputEvent::Key(Key::F2) => {
-                self.tiled = !self.tiled;
-                log(if self.tiled { &[b"woven-shell: tiling on"] } else { &[b"woven-shell: tiling off"] });
-                self.retile()
-            }
+            InputEvent::Key(Key::F2) => self.toggle_tiling(),
             InputEvent::Key(Key::Char(character)) if character.is_ascii() => {
                 if let Some(window) = self.focused().and_then(|slot| self.windows[slot]) {
                     let _ = libwoven::message_send(window.owner, &[character as u8]);
@@ -1608,6 +1747,9 @@ fn main(args: Args) -> ! {
         notes: [None; MAX_NOTES],
         unread: 0,
         center_open: false,
+        qs_open: false,
+        dnd: false,
+        scale: info.scale,
         pointer: (width / 2, height / 2),
         pointer_visible: false,
         drag: None,

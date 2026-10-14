@@ -3431,6 +3431,15 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         serial::write_line(format_args!("[S1-5] storage journal: PASSED"));
         qemu_test_exit_success();
     }
+    #[cfg(feature = "stage20-10-test")]
+    {
+        if !stage20_10_self_test() {
+            serial::write_line(format_args!("[S20.10] quick settings: FAILED"));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!("[S20.10] quick settings: PASSED"));
+        qemu_test_exit_success();
+    }
     #[cfg(feature = "stage20-9-test")]
     {
         if !stage20_9_self_test() {
@@ -4750,7 +4759,8 @@ fn stage16_1_self_test() -> bool {
     feature = "stage20-6-test",
     feature = "stage20-7-test",
     feature = "stage20-8-test",
-    feature = "stage20-9-test"
+    feature = "stage20-9-test",
+    feature = "stage20-10-test"
 ))]
 const HELLO_GUI_IMAGE: &[u8] = include_bytes!(env!("WOVENHAT_HELLO_GUI_IMAGE"));
 
@@ -4777,7 +4787,8 @@ const HELLO_GUI_IMAGE: &[u8] = include_bytes!(env!("WOVENHAT_HELLO_GUI_IMAGE"));
     feature = "stage20-6-test",
     feature = "stage20-7-test",
     feature = "stage20-8-test",
-    feature = "stage20-9-test"
+    feature = "stage20-9-test",
+    feature = "stage20-10-test"
 ))]
 fn display_client_capabilities() -> capability::CapabilitySet {
     capability::CapabilitySet::only(capability::Capability::Console)
@@ -4806,7 +4817,8 @@ fn display_client_capabilities() -> capability::CapabilitySet {
     feature = "stage20-6-test",
     feature = "stage20-7-test",
     feature = "stage20-8-test",
-    feature = "stage20-9-test"
+    feature = "stage20-9-test",
+    feature = "stage20-10-test"
 ))]
 fn run_hello_gui(
     image: &[u8],
@@ -4843,7 +4855,8 @@ fn run_hello_gui(
     feature = "stage20-6-test",
     feature = "stage20-7-test",
     feature = "stage20-8-test",
-    feature = "stage20-9-test"
+    feature = "stage20-9-test",
+    feature = "stage20-10-test"
 ))]
 fn spawn_hello_gui(
     image: &[u8],
@@ -4881,7 +4894,8 @@ fn spawn_hello_gui(
     feature = "stage20-6-test",
     feature = "stage20-7-test",
     feature = "stage20-8-test",
-    feature = "stage20-9-test"
+    feature = "stage20-9-test",
+    feature = "stage20-10-test"
 ))]
 fn wait_hello_gui(pid: task::ProcessId) -> Option<(task::ProcessId, Result<i32, task::WaitError>)> {
     let start = timer::ticks();
@@ -4904,9 +4918,272 @@ fn wait_hello_gui(pid: task::ProcessId) -> Option<(task::ProcessId, Result<i32, 
     feature = "stage20-6-test",
     feature = "stage20-7-test",
     feature = "stage20-8-test",
-    feature = "stage20-9-test"
+    feature = "stage20-9-test",
+    feature = "stage20-10-test"
 ))]
 const WOVEN_SHELL_IMAGE: &[u8] = include_bytes!(env!("WOVENHAT_SHELL_IMAGE"));
+
+/// Stage 20.10 acceptance: Quick Settings.
+///
+/// The Quick Settings button opens a translucent panel of toggles that act
+/// on the system:
+/// - Do Not Disturb: a notification is remembered (the badge counts it)
+///   but raises no toast;
+/// - tiling: the only window fills the work area;
+/// - display scale: the compositor surface really becomes 1280x800 at
+///   scale 1, and returns to 640x400 at scale 2.
+///
+/// Each panel state is compared with the kernel's own rendering: the
+/// background blended over what lies beneath, the border, title row and
+/// rows in the kernel font. Pointer and keyboard input travel the real
+/// i8042 path.
+#[cfg(feature = "stage20-10-test")]
+fn stage20_10_self_test() -> bool {
+    use crate::display::{blend_pixel, rgb, Rect, Surface};
+
+    const WALLPAPER_TOP: u32 = rgb(18, 42, 74);
+    const WALLPAPER_BOTTOM: u32 = rgb(64, 28, 88);
+    const WHITE: u32 = rgb(255, 255, 255);
+    const ACCENT: u32 = rgb(90, 140, 220);
+    const START_FILL: u32 = rgb(52, 96, 180);
+    const ENTRY_ACTIVE: u32 = rgb(70, 120, 210);
+    const PANEL_FILL: u32 = rgb(28, 32, 44);
+    const QUIET: u32 = rgb(90, 170, 170);
+    const UNSET: u32 = 0x0100_0000;
+
+    fn step(name: &str, ok: bool) -> bool {
+        serial::write_line(format_args!(
+            "[S20.10] {} {}",
+            name,
+            if ok { "PASS" } else { "FAIL" }
+        ));
+        ok
+    }
+    fn until(limit: u64, condition: impl Fn() -> bool) -> bool {
+        let start = timer::ticks();
+        loop {
+            if condition() {
+                return true;
+            }
+            if timer::ticks().wrapping_sub(start) > limit {
+                return false;
+            }
+            task::yield_now();
+        }
+    }
+    fn wallpaper(x: i32, y: i32, height: i32) -> u32 {
+        let span = (height - 1).max(1);
+        let t = (y.clamp(0, span) * 255 / span) as u8;
+        let base = blend_pixel(WALLPAPER_BOTTOM, WALLPAPER_TOP, t);
+        if x % 32 == 0 || y % 32 == 0 {
+            blend_pixel(WHITE, base, 28)
+        } else {
+            base
+        }
+    }
+    /// Whether `condition` holds at every check for `limit` ticks.
+    fn stays(limit: u64, condition: impl Fn() -> bool) -> bool {
+        let start = timer::ticks();
+        while timer::ticks().wrapping_sub(start) <= limit {
+            if !condition() {
+                return false;
+            }
+            task::yield_now();
+        }
+        true
+    }
+    fn region(x0: i32, y0: i32, width: i32, height: i32, expected: impl Fn(i32, i32) -> u32) -> bool {
+        (y0..y0 + height).all(|y| (x0..x0 + width).all(|x| compositor::pixel(x, y) == Ok(expected(x, y))))
+    }
+    fn packet(dx: i16, screen_dy: i16, left: bool) -> bool {
+        let dy = -screen_dy;
+        let flags = 0x08
+            | u8::from(left)
+            | if dx < 0 { 0x10 } else { 0 }
+            | if dy < 0 { 0x20 } else { 0 };
+        [flags, dx as u8, dy as u8].into_iter().all(mouse::loopback)
+    }
+    fn move_by(mut dx: i32, mut dy: i32) -> bool {
+        while dx != 0 || dy != 0 {
+            let (sx, sy) = (dx.clamp(-100, 100), dy.clamp(-100, 100));
+            if !packet(sx as i16, sy as i16, false) {
+                return false;
+            }
+            dx -= sx;
+            dy -= sy;
+        }
+        true
+    }
+    fn click() -> bool {
+        packet(0, 0, true) && packet(0, 0, false)
+    }
+    /// The Quick Settings panel for a desktop `width`x`height`, with `rows`,
+    /// over whatever `beneath` gives, skipping the cells under the pointer
+    /// at `pointer`.
+    fn panel(width: i32, height: i32, rows: [&str; 3], beneath: impl Fn(i32, i32) -> u32, pointer: (i32, i32)) -> bool {
+        let top = height - 24;
+        let h = 4 * 14 + 2;
+        let (x0, y0) = (width - 4 - 164, top - 2 - h);
+        let mut image = Surface::new(164, h as usize);
+        let bounds = image.bounds();
+        image.fill_rect(bounds, UNSET);
+        image.stroke_rect(bounds, ACCENT);
+        image.fill_rect(Rect::new(1, 1, 162, 14), START_FILL);
+        image.draw_text(6, 5, "Quick Settings", WHITE);
+        for (index, row) in rows.iter().enumerate() {
+            image.draw_text(6, 1 + (1 + index as i32) * 14 + 4, row, WHITE);
+        }
+        (y0..y0 + h).all(|y| {
+            (x0..x0 + 164).all(|x| {
+                if (pointer.0..pointer.0 + 7).contains(&x) && (pointer.1..pointer.1 + 10).contains(&y) {
+                    return true;
+                }
+                let expected = match image.pixel(x - x0, y - y0) {
+                    Some(UNSET) | None => blend_pixel(PANEL_FILL, beneath(x, y), 216),
+                    Some(pixel) => pixel,
+                };
+                compositor::pixel(x, y) == Ok(expected)
+            })
+        })
+    }
+
+    let installed = vfs::create_read_only("/bin/hello-gui", HELLO_GUI_IMAGE).is_ok();
+    let capabilities = capability::CapabilitySet::only(capability::Capability::Console)
+        .with(capability::Capability::DisplayIo)
+        .with(capability::Capability::InputIo)
+        .with(capability::Capability::Ipc);
+    let Some(program) = userspace::load_elf_with_argv(WOVEN_SHELL_IMAGE, &["/bin/woven-shell"]) else {
+        return step("shell image loads", false);
+    };
+    let Ok((shell, _, _)) = task::spawn_user_system_service("woven-shell", program, capabilities) else {
+        return step("shell spawned", false);
+    };
+    if !step(
+        "shell took the display",
+        installed && until(3000, || compositor::holder() == Some(shell.as_u64()) && compositor::is_presenting()),
+    ) {
+        return false;
+    }
+    let Some((width, height)) = compositor::dimensions() else {
+        return step("desktop geometry", false);
+    };
+    let (width, height) = (width as i32, height as i32);
+    let top = height - 24;
+    let client = capability::CapabilitySet::only(capability::Capability::Console).with(capability::Capability::Ipc);
+    let shell_arg = alloc::format!("{}", shell.as_u64());
+    let Some(quiet) = spawn_hello_gui(HELLO_GUI_IMAGE, &["/bin/hello-gui", "--desktop-client", &shell_arg, "q"], Some(client)) else {
+        return step("application Q spawned", false);
+    };
+    if !step("window Q opened", until(2000, || compositor::pixel(45, 45) == Ok(QUIET))) {
+        return false;
+    }
+
+    // The button sits left of the tray's last slot; the panel's rows are 14
+    // pixels apart, the toggles at rows 1-3 under the title.
+    let button = (width - 54 - 5 * 20, top + 4);
+    let panel_y = top - 2 - (4 * 14 + 2);
+    let row = |index: i32| (width - 4 - 164 + 28, panel_y + 1 + (1 + index) * 14 + 7);
+    let wall = move |x: i32, y: i32| wallpaper(x, y, height);
+
+    let (mut px, mut py) = (width / 2, height / 2);
+    let opened = move_by(button.0 + 8 - px, button.1 + 8 - py)
+        && click()
+        && until(1000, || {
+            panel(width, height, ["Display scale: 2x", "Do not disturb: Off", "Tiling: Off"], wall, (button.0 + 8, button.1 + 8))
+                && compositor::pixel(button.0 + 1, button.1 + 1) == Ok(ENTRY_ACTIVE)
+        });
+    (px, py) = (button.0 + 8, button.1 + 8);
+    if !step("the Quick Settings button opens its panel", opened) {
+        return false;
+    }
+
+    // Do Not Disturb on, then have Q post a notification: the badge counts
+    // it, but no toast appears.
+    let (dx, dy) = row(1);
+    let dnd = move_by(dx - px, dy - py)
+        && click()
+        && until(1000, || panel(width, height, ["Display scale: 2x", "Do not disturb: On", "Tiling: Off"], wall, (dx, dy)));
+    (px, py) = (dx, dy);
+    if !step("Do Not Disturb turns on", dnd) {
+        return false;
+    }
+    let clock_x = width - 6 - crate::font::text_width("00:00") as i32;
+    let (badge_x, badge_y) = (clock_x - 13, top + 7);
+    let mut badge = Surface::new(10, 11);
+    let bounds = badge.bounds();
+    badge.fill_rect(bounds, ACCENT);
+    badge.draw_text(3, 2, "1", WHITE);
+    let silenced = mouse::keyboard_loopback(0x19)
+        && until(1500, || region(badge_x, badge_y, 10, 11, |x, y| badge.pixel(x - badge_x, y - badge_y).unwrap_or(UNSET)))
+        // The shell repaints a notification's whole area at once, desktop
+        // layer (with the badge) before the toast layer, so the badge can be
+        // seen before a toast would be: the toast area must stay clear for a
+        // full second, not just at one instant.
+        && stays(100, || region(width - 188, 8, 180, 22, wall));
+    if !step("a notification under Do Not Disturb is counted but raises no toast", silenced) {
+        return false;
+    }
+
+    // Tiling on: the only window fills the work area, under the panel.
+    let (tx, ty) = row(2);
+    let tiled = move_by(tx - px, ty - py)
+        && click()
+        && until(2000, || {
+            compositor::pixel(5, top - 40) == Ok(QUIET)
+                && compositor::pixel(width - 300, 20) == Ok(QUIET)
+                && panel(width, height, ["Display scale: 2x", "Do not disturb: On", "Tiling: On"], |_, _| QUIET, (tx, ty))
+        });
+    (px, py) = (tx, ty);
+    if !step("tiling turns on and the window fills the work area", tiled) {
+        return false;
+    }
+
+    // Display scale 1: the desktop becomes 1280x800, and the panel follows
+    // the new geometry. (At 1x the window cannot grow to the whole work area
+    // within its owner's surface budget while the old surface still exists,
+    // so it keeps its size; what lies beneath the panel is wallpaper.)
+    let (sx, sy) = row(0);
+    let full = (width * 2, height * 2);
+    let scaled = move_by(sx - px, sy - py)
+        && click()
+        && until(2000, || compositor::scale() == Some(1) && compositor::dimensions() == Some((full.0 as u32, full.1 as u32)))
+        && until(2000, || {
+            panel(full.0, full.1, ["Display scale: 1x", "Do not disturb: On", "Tiling: On"], |x, y| wallpaper(x, y, full.1), (sx, sy))
+        });
+    (px, py) = (sx, sy);
+    if !step("display scale 1x makes the desktop 1280x800", scaled) {
+        return false;
+    }
+    // Back to 2x through the panel's scale row at the 1x geometry.
+    let back_row = (full.0 - 4 - 164 + 28, (full.1 - 24) - 2 - (4 * 14 + 2) + 1 + 14 + 7);
+    let restored = move_by(back_row.0 - px, back_row.1 - py)
+        && click()
+        && until(2000, || compositor::scale() == Some(2) && compositor::dimensions() == Some((width as u32, height as u32)));
+    (px, py) = ((back_row.0).min(width - 1), (back_row.1).min(height - 1));
+    if !step("display scale 2x restores 640x400", restored) {
+        return false;
+    }
+
+    // The button closes the panel; Q takes its key and exits.
+    let closed = move_by(button.0 + 8 - px, button.1 + 8 - py)
+        && click()
+        && until(1000, || region(width - 4 - 164 + 10, panel_y + 10, 100, 30, |_, _| QUIET) || region(width - 4 - 164 + 10, panel_y + 10, 100, 30, wall));
+    if !step("the button closes the panel", closed) {
+        return false;
+    }
+    let exited = mouse::keyboard_loopback(0x10) && wait_hello_gui(quiet).map(|(_, status)| status) == Some(Ok(0));
+    if !step("Q takes its key and exits", exited) {
+        return false;
+    }
+    if task::kill_process(shell.as_u64(), 9).is_err() || !until(1000, || task::process_exited(shell)) {
+        return step("shell killed", false);
+    }
+    let _ = task::wait_process(shell.as_u64());
+    step(
+        "display returned to the terminal",
+        compositor::holder().is_none() && !compositor::is_presenting(),
+    )
+}
 
 /// Stage 20.9 acceptance: the Notification Center.
 ///

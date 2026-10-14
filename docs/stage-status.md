@@ -17,6 +17,59 @@ gate pass. The unsupported `cargo test --workspace --all-targets` command is
 documented as a host-assembler mismatch rather than treated as a production
 failure. See the [host-test audit](audit-host-test-boundary-2026-10-14.md).
 
+## Stage 20.10 — Quick Settings (2026-10-14)
+
+Roadmap Stage 18.5, Quick Settings. The roadmap lists Wi-Fi, Bluetooth,
+sound, brightness, power, VPN and security. Most of these have no service
+userspace can act on yet. This stage offers only toggles that act on the
+system today, and the others are not faked.
+
+**Shell.** A "Q" button left of the tray's last slot opens Quick Settings,
+a translucent panel above the taskbar's right end. Like the other panels
+it is drawn as a blended background plus a keyed overlay, and it, the
+launcher and the Notification Center close each other. Its toggles:
+- **Display scale, 2× or 1×.** The compositor surface is reallocated at
+  the new geometry (syscall 117). Every window is kept on screen, and
+  re-tiled if tiling is on. The pointer is clamped, and the whole desktop
+  is repainted.
+- **Do Not Disturb.** Notifications are still remembered and counted by
+  the Notification Center badge, but raise no toast.
+- **Tiling.** The same switch as F2.
+
+hello-gui `--desktop-client` gains a `q` variant, Quiet, which posts a
+notification each time it is sent `p`.
+
+Gate `[S20.10] quick settings: PASSED`. Real i8042 input; each panel state
+is compared with the kernel's own rendering over what lies beneath.
+- The button opens the panel: scale 2×, Do Not Disturb off, tiling off.
+- With Do Not Disturb on, `p` makes Q post a notification. The badge reads
+  1, and the toast area stays clear for a full second.
+- With tiling on, the only window fills the work area under the panel.
+- Scale 1× makes the desktop 1280×800, and the panel follows the new
+  geometry. Scale 2× from the panel at that geometry restores 640×400.
+- The button closes the panel, Q takes its key and exits, and killing the
+  shell returns the display.
+
+Negative controls, with evidence in the worktree's
+`audit-artifacts/stage20.10-negative-control-*`:
+- With Do Not Disturb ignored, the first version of the gate still
+  passed. It checked the toast area once, at the instant the badge
+  appeared. The shell paints the desktop layer, with the badge, before the
+  toast layer within one repaint, so that instant can come before the
+  toast is drawn. The gate now requires the toast area to stay clear for
+  a second, and the control then fails at "a notification under Do Not
+  Disturb is counted but raises no toast".
+- With the scale toggle stuck, it fails at "display scale 1x makes the
+  desktop 1280x800".
+
+Open:
+- Wi-Fi, Bluetooth, sound, brightness, power, VPN and security toggles
+  await services userspace can reach.
+- At 1×, a window cannot be resized to the whole work area. Its owner
+  needs the old and new surfaces at once, and together they exceed the
+  4 MB per-process budget, so the window keeps its size.
+- Settings are not persisted.
+
 ## Stage 20.9 — Notification Center (2026-10-14)
 
 Roadmap Stage 18.4, Notification Center.

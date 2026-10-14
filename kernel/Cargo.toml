@@ -123,6 +123,8 @@ stage20-7-test = ["qemu-test"]
 stage20-8-test = ["qemu-test"]
 # Notification Center: history, unread badge, panel, clear.
 stage20-9-test = ["qemu-test"]
+# Quick Settings: display scale, Do Not Disturb, tiling.
+stage20-10-test = ["qemu-test"]
 stage1-5-test = ["qemu-test"]
 
 [dependencies]
