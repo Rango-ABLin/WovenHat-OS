@@ -2,16 +2,13 @@
 
 ## 2026-10-14 revalidation
 
-The first Stage 19 system application, WovenCalculator, now builds outside the
-kernel, signs into WAPP, and executes in Ring 3 through the existing verified
-application boundary. Its bounded parser and signed 1/2/4-CPU acceptance are
-recorded in the [WovenCalculator audit](audit-stage19-calculator-2026-10-14.md).
-WovenTerminal now provides bounded `help`, `ls`, `cat`, `calc`, and `exit`
-commands through the same ABI and passes its signed 1/2/4-CPU acceptance; see
-the [WovenTerminal audit](audit-stage19-terminal-2026-10-14.md). The remaining
-roadmap application suite and catalog/boot-image installation are not yet
-claimed complete. WovenFiles now adds a read-only bounded directory/file
-browser with signed 1/2/4-CPU acceptance; see the
+The Stage 19 system applications now build outside the kernel, sign into WAPP,
+and execute in Ring 3 through the existing verified application boundary.
+WovenCalculator, WovenTerminal, and WovenFiles retain their bounded 1/2/4-CPU
+acceptance; see their individual audits. The remaining roadmap applications,
+catalog, and multi-package boot-image installation are now covered by the
+ten-application release chain. WovenFiles now adds a read-only bounded
+directory/file browser; see the
 [WovenFiles audit](audit-stage19-files-2026-10-14.md).
 WovenMonitor adds bounded read-only clock, display, and storage diagnostics
 and passes signed 1/2/4-CPU execution; see the
@@ -1227,19 +1224,19 @@ single signed package; no FAT32 round trip, because the gate installs into the V
 rejected by the loader by design; and no stack-size negotiation.
 
 The accepted Stage 19 applications now have a reproducible packaging boundary:
-`scripts/package-system-apps.py` builds WovenCalculator, WovenTerminal, and
-WovenFiles, signs each WAPP payload, and emits hashed `/bin` install paths plus
-`/share/applications` descriptors in an install-plan manifest. This is a
-release artifact, not a claim that the current one-package acceptance boot can
-install all packages. The multi-package image/installer consumer remains open.
+`scripts/package-system-apps.py` builds all ten applications, signs each WAPP
+payload, and emits hashed `/bin` install paths plus `/share/applications`
+descriptors in an install-plan manifest. The release image consumes that plan
+and installs all ten packages transactionally in RAM after verification.
 
 The feature-gated multi-application catalog gate now passes on 1/2/4 CPUs.
-It consumes the signed calculator, terminal, and files packages, rejects a
-tampered copy of each, verifies VFS byte-for-byte read-back and normal ELF
-loading, and publishes their matching catalog descriptors. See the
+It consumes all ten signed packages, rejects tampered copies, verifies VFS
+byte-for-byte read-back and normal ELF loading, and publishes matching catalog
+descriptors. The normal-boot production image gate confirms installation
+before shell startup. See the
 [Stage 19 system-app catalog audit](audit-stage19-system-app-catalog-2026-10-14.md).
-This closes the acceptance boundary only; rollback, trusted catalog
-publication, and normal-boot image installation remain open.
+Persistent-media installation, power-loss rollback, and deployment-key
+rotation/revocation remain separate production requirements.
 
 ## Stage 15 — WovenFS native filesystem (2026-10-12)
 
