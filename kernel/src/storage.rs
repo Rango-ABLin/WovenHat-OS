@@ -987,10 +987,15 @@ pub fn self_test() -> bool {
     let bad_ok = short_name_to_str(b"BAD?    TXT", &mut name).is_none();
     let encode_ok = fat32::encode_short_name("kernel.bin") == Some(*b"KERNEL  BIN")
         && fat32::encode_short_name("readme") == Some(*b"README     ");
+    let empty_data: &[u8] = &[];
+    let oversized_paths = [("/mnt/over-capacity.bin", empty_data); BATCH_JOURNAL_MAX_ENTRIES + 1];
+    let oversized_api_rejected =
+        persist_paths_atomic(&oversized_paths) == Err(PersistError::TooLarge);
     kernel_ok
         && readme_ok
         && bad_ok
         && encode_ok
+        && oversized_api_rejected
         && batch_capacity_self_test()
         && data_journal_self_test()
 }
@@ -2083,8 +2088,11 @@ fn live_directory_growth_self_test() -> Result<(), &'static str> {
 /// while a committed record is retained until every new checksum and metadata
 /// snapshot is observed.
 pub fn persist_paths_atomic(paths: &[(&str, &[u8])]) -> Result<(), PersistError> {
-    if paths.is_empty() || paths.len() > BATCH_JOURNAL_MAX_ENTRIES {
+    if paths.is_empty() {
         return Err(PersistError::Failed);
+    }
+    if paths.len() > BATCH_JOURNAL_MAX_ENTRIES {
+        return Err(PersistError::TooLarge);
     }
     if !mnt_mounted() {
         return Err(unavailable_persist_error());

@@ -2226,5 +2226,9 @@ version or production block-device ABI. Recovery allocation remains explicitly
 bounded; arbitrary-size/full-volume rollback, physical storage/DMA, torn-write
 and reboot qualification remain open.
 
+The public `persist_paths_atomic` boundary now returns `TooLarge` for a
+256-entry request before mount or device access, rather than collapsing the
+bounded-capacity refusal into a generic failure.
+
 
 
