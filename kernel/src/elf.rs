@@ -20,6 +20,7 @@ const RELA_ENTRY_SIZE: usize = 24;
 const MAX_RELATIVE_RELOCATIONS: usize = 4096;
 const MAX_DYNAMIC_SYMBOLS: usize = 4096;
 const MAX_DYNAMIC_STRING_TABLE: usize = 64 * 1024;
+pub const MAX_NEEDED_LIBRARIES: usize = 4;
 
 #[derive(Clone, Copy)]
 pub struct LoadSegment {
@@ -58,6 +59,8 @@ pub struct DynamicImage {
     pub symbol_count: usize,
     pub hash_address: u64,
     pub hash_file_offset: usize,
+    pub needed_offsets: [u64; MAX_NEEDED_LIBRARIES],
+    pub needed_count: usize,
 }
 
 pub struct Image {
@@ -247,6 +250,8 @@ pub fn parse(bytes: &[u8]) -> Result<Image, Error> {
             let mut symtab_address = 0;
             let mut symtab_entry_size = 0usize;
             let mut hash_address = 0;
+            let mut needed_offsets = [0; MAX_NEEDED_LIBRARIES];
+            let mut needed_count = 0;
             let dynamic_bytes = &bytes[file_offset..file_end];
             let mut terminated = false;
             let (dynamic_entries, _) = dynamic_bytes.as_chunks::<16>();
@@ -258,7 +263,14 @@ pub fn parse(bytes: &[u8]) -> Result<Image, Error> {
                         terminated = true;
                         break;
                     }
-                    1 | 14 | 15 | 16 | 17 | 18 | 19 | 22 | 23 | 29 => {
+                    1 => {
+                        if needed_count == MAX_NEEDED_LIBRARIES {
+                            return Err(Error::Unsupported);
+                        }
+                        needed_offsets[needed_count] = value;
+                        needed_count += 1;
+                    }
+                    14 | 15 | 16 | 17 | 18 | 19 | 22 | 23 | 29 => {
                         // Dependencies, symbol-based relocation tables, and
                         // text-relocation requests need a dynamic linker or
                         // shared-library authority that the kernel does not
@@ -322,6 +334,8 @@ pub fn parse(bytes: &[u8]) -> Result<Image, Error> {
                     symbol_count: 0,
                     hash_address,
                     hash_file_offset: 0,
+                    needed_offsets,
+                    needed_count,
                 });
                 // Resolve the virtual relocation table to its file-backed
                 // bytes after all PT_LOAD headers have been collected.
@@ -344,6 +358,8 @@ pub fn parse(bytes: &[u8]) -> Result<Image, Error> {
                     symbol_count: 0,
                     hash_address,
                     hash_file_offset: 0,
+                    needed_offsets,
+                    needed_count,
                 });
             }
             continue;
@@ -633,6 +649,24 @@ pub fn parse(bytes: &[u8]) -> Result<Image, Error> {
                     return Err(Error::Truncated);
                 }
                 dynamic.symbol_count = symbol_count;
+            }
+            for offset in dynamic.needed_offsets[..dynamic.needed_count].iter().copied() {
+                let name_start = dynamic
+                    .strtab_file_offset
+                    .checked_add(usize::try_from(offset).map_err(|_| Error::InvalidSegment)?)
+                    .ok_or(Error::InvalidSegment)?;
+                let name_end = dynamic
+                    .strtab_file_offset
+                    .checked_add(dynamic.strtab_size)
+                    .ok_or(Error::InvalidSegment)?;
+                if name_start >= name_end
+                    || bytes
+                        .get(name_start..name_end)
+                        .and_then(|slice| slice.iter().position(|byte| *byte == 0))
+                        .is_none()
+                {
+                    return Err(Error::InvalidSegment);
+                }
             }
             if dynamic.rela_size != 0 && dynamic.symtab_address == 0 {
                 return Err(Error::InvalidSegment);

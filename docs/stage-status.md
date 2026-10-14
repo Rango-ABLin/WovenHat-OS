@@ -25,6 +25,13 @@ the retained evidence directories are `stage12.1-1cpu-1791977944719919100`,
 `stage12.5-2cpu-1791978521938978000`, and
 `stage12.5-4cpu-1791978563395332900`.
 
+The ELF dynamic metadata boundary was hardened before shared-library work.
+`DT_NEEDED` is now bounded and string-table validated, while the loader rejects
+dependency-bearing images until dependency mapping, cross-image symbol scope,
+dynamic TLS, and shared-image teardown exist. The Stage 11.3–11.5 1/2/4-CPU
+matrix passed again with the new parser self-test; see the
+[dynamic dependency metadata audit](audit-stage11-needed-metadata-2026-10-14.md).
+
 ## Host-test boundary repair — 2026-10-14
 
 The freestanding kernel now has an explicit host-test boundary: test builds no

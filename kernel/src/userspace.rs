@@ -4641,6 +4641,20 @@ pub fn elf_loader_self_test() -> bool {
         if dynamic.symbol_count != 2 || dynamic.rela_size != 48 {
             return None;
         }
+        let dependency_fixture = {
+            let mut dependency_elf = elf.clone();
+            write_u64(&mut dependency_elf, DYNAMIC_OFFSET + 128, 1)?;
+            write_u64(&mut dependency_elf, DYNAMIC_OFFSET + 136, 1)?;
+            write_u64(&mut dependency_elf, DYNAMIC_OFFSET + 144, 0)?;
+            dependency_elf
+        };
+        let dependency_metadata = crate::elf::parse(&dependency_fixture)
+            .ok()
+            .and_then(|image| image.dynamic())
+            .is_some_and(|dynamic| {
+                dynamic.needed_count == 1 && dynamic.needed_offsets[0] == 1
+            });
+        let dependency_fail_closed = load_elf(&dependency_fixture).is_none();
         let program = load_elf(&elf)?;
         let mut relocated = [0u8; 16];
         let expected = aslr_image_delta().checked_add(0x20)?;
@@ -4658,6 +4672,8 @@ pub fn elf_loader_self_test() -> bool {
             dynamic.rela_size == 48
                 && dynamic.rela_entry_size == 24
                 && dynamic.symbol_count == 2
+                && dependency_metadata
+                && dependency_fail_closed
                 && applied
                 && destroyed,
         )
@@ -5053,6 +5069,12 @@ pub fn load_elf(bytes: &[u8]) -> Option<UserProgram> {
     let image = crate::elf::parse(bytes)
         .ok()?
         .relocated(aslr_image_delta())?;
+    // Dependency names are parsed and bounds-checked by the ELF layer, but
+    // this loader still has no dependency namespace or cross-image teardown.
+    // Refuse them explicitly until that authority is implemented.
+    if image.dynamic().is_some_and(|dynamic| dynamic.needed_count != 0) {
+        return None;
+    }
     let mmap_base = aslr_mmap_base()?;
     let page_table = paging::create_user_address_space(image.entry)?;
     let mut mappings = [UserMapping::EMPTY; MAX_ELF_SEGMENTS];
