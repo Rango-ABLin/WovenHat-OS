@@ -1071,6 +1071,68 @@ pub fn file_generation(id: OpenFileId) -> Result<u64, Error> {
     }
     Ok(entry.generation)
 }
+
+/// Snapshot the path and current offset of an open file without retaining a
+/// VFS lock across backend I/O.
+pub fn file_path_and_offset(id: OpenFileId, out: &mut [u8]) -> Result<(usize, usize), Error> {
+    let mut files = OPEN_FILES.lock();
+    let entry = files.get_mut(id)?;
+    let registry = REGISTRY.lock();
+    let node = registry
+        .nodes
+        .get(entry.node)
+        .filter(|node| node.occupied && registry.generations[entry.node] == entry.generation)
+        .ok_or(Error::InvalidDescriptor)?;
+    if out.len() < node.path_length {
+        return Err(Error::Full);
+    }
+    out[..node.path_length].copy_from_slice(&node.path[..node.path_length]);
+    Ok((node.path_length, entry.offset))
+}
+
+/// Publish a successful durable backend write into the VFS cache. The
+/// expected offset prevents a stale open-file operation from moving a shared
+/// descriptor after another writer has advanced it.
+pub fn commit_backend_write(
+    id: OpenFileId,
+    expected_offset: usize,
+    bytes: &[u8],
+    length: usize,
+    written: usize,
+) -> Result<usize, Error> {
+    if length > NODE_CAPACITY || written > bytes.len() || length > bytes.len() {
+        return Err(Error::Full);
+    }
+    let mut files = OPEN_FILES.lock();
+    let entry = files.get_mut(id)?;
+    if entry.offset != expected_offset {
+        return Err(Error::Io);
+    }
+    let node_index = entry.node;
+    let generation = entry.generation;
+    let mut registry = REGISTRY.lock();
+    if registry.generations[node_index] != generation {
+        return Err(Error::InvalidDescriptor);
+    }
+    let node = registry
+        .nodes
+        .get_mut(node_index)
+        .filter(|node| node.occupied && node.kind == NodeKind::File)
+        .ok_or(Error::InvalidDescriptor)?;
+    if !node.path_str().starts_with("/wfs/") {
+        return Err(Error::InvalidDescriptor);
+    }
+    node.data.fill(0);
+    node.data[..length].copy_from_slice(&bytes[..length]);
+    node.length = length;
+    // Keep the generic VFS mutation path read-only; all future writes must
+    // continue through the authority-checked native backend.
+    node.writable = false;
+    registry.versions[node_index] = registry.versions[node_index].wrapping_add(1);
+    crate::file_frames::replace(node_index, generation, &bytes[..length]);
+    entry.offset = expected_offset.saturating_add(written);
+    Ok(written)
+}
 pub fn read_mapping_at(
     id: OpenFileId,
     generation: u64,

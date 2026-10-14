@@ -1186,11 +1186,18 @@ kernel, not only WovenFS.
 
 Open: WovenFS is not the mounted system filesystem — FAT32 still holds `/mnt`
 and the boot volume — and whether to make it one or to keep FAT32 and reclassify
-Stage 12.2/12.4 is an open product decision. Files import read-only; write-back
-from the VFS into WovenFS is a later stage. Crash recovery is proven by fault
-injection, not by actual power loss on a device, and physical qualification
-covers one device on one host through QEMU's IDE emulation rather than a native
-driver stack.
+Stage 12.2/12.4 is an open product decision. The bounded `/wfs/<name>` file
+authority now supports durable create, write, read-back, and unlink through task
+file syscalls; direct generic VFS mutation remains read-only. Native mutations
+serialize their complete read-modify-write transactions. The adapter remains a
+flat root-file slice: rename, mkdir, directory enumeration, mounted-system
+policy, and native multi-directory semantics remain open. See the [Stage 15
+VFS write-through audit](audit-stage15-wfs-vfs-write-through-2026-10-14.md).
+
+Crash recovery is proven by fault injection, not actual power loss on a device.
+Physical qualification remains incomplete: the inserted USB flash disk was
+inspected read-only, while the destructive harness requires Administrator
+elevation and explicit authorization to erase it.
 
 The complete Stage 12 acceptance chain was revalidated on 2026-10-13: all
 Stages 12.1–12.5 passed on 1/2/4 CPUs with exit 33. See the

@@ -3343,7 +3343,13 @@ pub fn open_current(path: &str) -> Result<u64, FileError> {
             if !current_has(Capability::FileWrite) || !authorize_current_file_path(&path, true) {
                 return Err(FileError::NotFound);
             }
-            vfs::write_file(&path, &[]).map_err(|_| FileError::NotFound)?;
+            if path.starts_with("/wfs/") {
+                crate::wfs::ensure_vfs_path(&path, crate::timer::ticks())
+                    .map_err(map_wfs_file_error)?;
+                vfs::create_read_only(&path, &[]).map_err(map_vfs_file_error)?;
+            } else {
+                vfs::write_file(&path, &[]).map_err(|_| FileError::NotFound)?;
+            }
             if is_mnt_child(&path) {
                 crate::storage::mark_mnt_dirty();
             }
@@ -3485,6 +3491,24 @@ pub fn write_current(descriptor: u64, buffer: &[u8]) -> Result<usize, FileError>
         FdKind::File { id, scope } => {
             if !current_file_access_allowed(Capability::FileWrite, scope, true) {
                 return Err(FileError::PermissionDenied);
+            }
+            let mut path_bytes = [0u8; crate::config::MAX_PATH_SIZE];
+            let (path_length, offset) = vfs::file_path_and_offset(id, &mut path_bytes)
+                .map_err(|_| FileError::BadDescriptor)?;
+            if path_bytes[..path_length].starts_with(b"/wfs/") {
+                let path = core::str::from_utf8(&path_bytes[..path_length])
+                    .map_err(|_| FileError::BadDescriptor)?;
+                let mut image = [0u8; crate::wfs::MAX_FILE_SIZE];
+                let (written, length) = crate::wfs::write_vfs_path_at(
+                    path,
+                    offset,
+                    buffer,
+                    &mut image,
+                    crate::timer::ticks(),
+                )
+                .map_err(map_wfs_file_error)?;
+                return vfs::commit_backend_write(id, offset, &image, length, written)
+                    .map_err(|_| FileError::BadDescriptor);
             }
             let under_mnt = vfs::open_file_path_starts_with(id, "/mnt/").unwrap_or(false);
             if under_mnt && !crate::storage::mnt_mounted() {
@@ -5514,6 +5538,10 @@ pub fn unlink_current(path: &str) -> Result<(), FileError> {
         vfs::can_remove(&path).map_err(map_vfs_file_error)?;
         vfs::prepare_remove(&path).map_err(map_vfs_file_error)?;
         crate::storage::delete_path(&path).map_err(map_mutation_file_error)?;
+    } else if path.starts_with("/wfs/") {
+        vfs::can_remove(&path).map_err(map_vfs_file_error)?;
+        crate::wfs::unlink_vfs_path(&path, crate::timer::ticks())
+            .map_err(map_wfs_file_error)?;
     }
     vfs::remove(&path).map_err(map_vfs_file_error)
 }
@@ -5600,6 +5628,17 @@ fn map_vfs_file_error(error: vfs::Error) -> FileError {
         vfs::Error::ReadOnly => FileError::PermissionDenied,
         vfs::Error::NotEmpty => FileError::NotEmpty,
         vfs::Error::Full => FileError::TooManyFiles,
+        _ => FileError::NotFound,
+    }
+}
+
+fn map_wfs_file_error(error: crate::wfs::Error) -> FileError {
+    match error {
+        crate::wfs::Error::Exists => FileError::AlreadyExists,
+        crate::wfs::Error::TooLarge | crate::wfs::Error::NoSpace => FileError::TooManyFiles,
+        crate::wfs::Error::NotADirectory => FileError::NotFound,
+        #[cfg(any(test, feature = "stage15-1-test", feature = "stage15-2-test"))]
+        crate::wfs::Error::NotEmpty => FileError::NotEmpty,
         _ => FileError::NotFound,
     }
 }

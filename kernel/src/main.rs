@@ -123,7 +123,6 @@ mod bluetooth_hci;
 mod irq_mailbox;
 #[cfg(any(feature = "stage12-3-test", feature = "stage12-5-test"))]
 mod volume_crypto;
-#[cfg(any(feature = "stage15-1-test", feature = "stage15-2-test"))]
 mod wfs;
 #[cfg(feature = "stage13-9-test")]
 mod wifi;

@@ -1,5 +1,21 @@
 # WovenHat OS Architecture & Codebase Guide
 
+## Stage 15 bounded WovenFS VFS write-through (2026-10-14)
+
+The `/wfs/<name>` namespace has one production mutation authority:
+`task::open_current`, `task::write_current`, and `task::unlink_current` route
+through native WovenFS. Creation is durable before a read-only VFS node is
+published; writes commit the native transaction before updating the VFS cache
+or shared descriptor offset; unlink follows durable-first ordering. The
+adapter validates one flat root name and rejects traversal, nested paths, and
+prefix confusion.
+
+Native mutations serialize their complete read-modify-write operation with a
+rank-5 `PreemptMutex`, below the ATA device lock at rank 10. No IRQ-disabled
+guard spans device I/O. This is a bounded file authority, not full
+directory/POSIX integration; rename, mkdir, directory enumeration, and
+physical flash qualification remain open. See the Stage 15 write-through audit.
+
 ## Stage 11.2 scheduler-backed thread ownership (2026-10-14)
 
 `TaskControlBlock` carries both the stable process owner and an optional
