@@ -9,11 +9,13 @@ read-only. Address-space write-fault bookkeeping carries the same range, so a
 fork/COW fault cannot re-enable writes to RELRO pages. Relocation by the
 production ASLR delta updates the RELRO range with the load segments.
 
-`PT_DYNAMIC` and `PT_INTERP` remain rejected. Static `PT_TLS` is now supported
-by the separate initial-exec TLS path documented in the
+`PT_INTERP` remains rejected. Self-contained `ET_DYN` images with only bounded
+relative `RELA` relocations are now supported by the dynamic-relocation path
+documented in the dynamic relocation audit. Static `PT_TLS` is supported by
+the separate initial-exec TLS path documented in the
 [static TLS audit](audit-stage11-static-tls-2026-10-14.md). Dynamic symbol
-resolution, shared-library ownership, TLS module IDs, and RELRO relocation
-sequencing remain outside the loader contract.
+resolution, shared-library ownership, TLS module IDs, and symbol-based
+relocation sequencing remain outside the loader contract.
 
 ## Validation
 

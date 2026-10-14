@@ -12,9 +12,10 @@ writable for COW fault bookkeeping.
 
 The parser rejects duplicate or malformed TLS headers, including zero-sized,
 file-larger-than-memory, non-power-of-two, over-page alignment, and truncated
-file ranges. `PT_DYNAMIC` and `PT_INTERP` remain rejected. Dynamic relocation,
-shared-library TLS, TLS module IDs, and multiple kernel-managed user threads
-remain outside this static initial-exec contract.
+file ranges. `PT_INTERP` remains rejected. Self-contained relative ET_DYN
+relocations are covered by the separate dynamic-relocation audit. Shared-library
+TLS, TLS module IDs, and multiple kernel-managed user threads remain outside
+this static initial-exec contract.
 
 ## Validation
 

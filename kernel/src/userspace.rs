@@ -4491,6 +4491,70 @@ pub fn elf_loader_self_test() -> bool {
     .and_then(|elf| crate::elf::parse(&elf).ok())
     .is_some_and(|image| image.relro() == Some((USER_REGION_START + USER_CODE_SIZE as u64, 4096)));
 
+    let valid_dynamic_relative = build_stub_elf(stub).and_then(|mut elf| {
+        const DYNAMIC_OFFSET: usize = 4096 + 256;
+        const RELA_OFFSET: usize = 4096 + 320;
+        let data_address = USER_REGION_START + USER_CODE_SIZE as u64;
+        let dynamic_header = PROGRAM_HEADER_OFFSET + PROGRAM_HEADER_SIZE;
+        let data_header = dynamic_header + PROGRAM_HEADER_SIZE;
+        if write_u16(&mut elf, 56, 3).is_none()
+            || write_u16(&mut elf, 16, 3).is_none()
+            || write_u32(&mut elf, dynamic_header, PT_DYNAMIC).is_none()
+            || write_u64(&mut elf, dynamic_header + 8, DYNAMIC_OFFSET as u64).is_none()
+            || write_u64(
+                &mut elf,
+                dynamic_header + 16,
+                USER_REGION_START + 256,
+            )
+            .is_none()
+            || write_u64(&mut elf, dynamic_header + 32, 64).is_none()
+            || write_u64(&mut elf, dynamic_header + 40, 64).is_none()
+            || write_u32(&mut elf, data_header, 1).is_none()
+            || write_u32(&mut elf, data_header + 4, 6).is_none()
+            || write_u64(&mut elf, data_header + 8, 0).is_none()
+            || write_u64(&mut elf, data_header + 16, data_address).is_none()
+            || write_u64(&mut elf, data_header + 32, 0).is_none()
+            || write_u64(&mut elf, data_header + 40, 4096).is_none()
+            || write_u64(&mut elf, data_header + 48, 4096).is_none()
+            // DT_RELA, DT_RELASZ, DT_RELAENT, DT_NULL
+            || write_u64(&mut elf, DYNAMIC_OFFSET, 7).is_none()
+            || write_u64(&mut elf, DYNAMIC_OFFSET + 8, USER_REGION_START + 320)
+                .is_none()
+            || write_u64(&mut elf, DYNAMIC_OFFSET + 16, 8).is_none()
+            || write_u64(&mut elf, DYNAMIC_OFFSET + 24, 24).is_none()
+            || write_u64(&mut elf, DYNAMIC_OFFSET + 32, 9).is_none()
+            || write_u64(&mut elf, DYNAMIC_OFFSET + 40, 24).is_none()
+            || write_u64(&mut elf, DYNAMIC_OFFSET + 48, 0).is_none()
+            || write_u64(&mut elf, DYNAMIC_OFFSET + 56, 0).is_none()
+            // One R_X86_64_RELATIVE relocation into writable data.
+            || write_u64(&mut elf, RELA_OFFSET, data_address).is_none()
+            || write_u64(&mut elf, RELA_OFFSET + 8, 8).is_none()
+            || write_u64(&mut elf, RELA_OFFSET + 16, 0x20).is_none()
+        {
+            return None;
+        }
+        let image = crate::elf::parse(&elf).ok()?;
+        let dynamic = image.dynamic()?;
+        let program = load_elf(&elf)?;
+        let mut relocated = [0u8; 8];
+        let expected = aslr_image_delta().checked_add(0x20)?;
+        let applied = paging::read_user_bytes_in(
+            program.address_space.paging(),
+            data_address.checked_add(aslr_image_delta())?,
+            &mut relocated,
+        )
+        .is_ok()
+            && u64::from_le_bytes(relocated) == expected;
+        let destroyed = destroy(program.address_space);
+        Some(
+            dynamic.rela_size == 24
+                && dynamic.rela_entry_size == 24
+                && applied
+                && destroyed,
+        )
+    })
+    .unwrap_or(false);
+
     let valid_tls = build_stub_elf(stub).and_then(|mut elf| {
         let tls_header = PROGRAM_HEADER_OFFSET + PROGRAM_HEADER_SIZE;
         if write_u16(&mut elf, 56, 2).is_none()
@@ -4521,6 +4585,7 @@ pub fn elf_loader_self_test() -> bool {
         && invalid_tls_rejected
         && relro_requires_writable_data
         && valid_relro
+        && valid_dynamic_relative
         && valid_tls
 }
 /// Regression test for the mmap W^X invariant.
@@ -4927,14 +4992,71 @@ pub fn load_elf(bytes: &[u8]) -> Option<UserProgram> {
                 bytes.get(segment.file_offset..file_end)?,
             )
             .is_err()
-            || paging::protect_user_range_in_inactive(
-                page_table,
-                segment.mapping_start,
-                segment.mapping_size,
-                segment.writable,
-                segment.executable,
-            )
-            .is_err()
+        {
+            release_partial(page_table, &mappings[..mapping_count]);
+            return None;
+        }
+    }
+
+    if let Some(dynamic) = image.dynamic().filter(|dynamic| dynamic.rela_size != 0) {
+        let Some(rela_end) = dynamic.rela_file_offset.checked_add(dynamic.rela_size) else {
+            release_partial(page_table, &mappings[..mapping_count]);
+            return None;
+        };
+        let Some(rela_bytes) = bytes.get(dynamic.rela_file_offset..rela_end) else {
+            release_partial(page_table, &mappings[..mapping_count]);
+            return None;
+        };
+        for entry in rela_bytes.chunks_exact(dynamic.rela_entry_size) {
+            let Some(target) = entry
+                .get(..8)
+                .and_then(|bytes| bytes.try_into().ok())
+                .map(u64::from_le_bytes)
+            else {
+                release_partial(page_table, &mappings[..mapping_count]);
+                return None;
+            };
+            let Some(addend) = entry
+                .get(16..24)
+                .and_then(|bytes| bytes.try_into().ok())
+                .map(i64::from_le_bytes)
+            else {
+                release_partial(page_table, &mappings[..mapping_count]);
+                return None;
+            };
+            let Some(target) = target.checked_add(image.load_bias()) else {
+                release_partial(page_table, &mappings[..mapping_count]);
+                return None;
+            };
+            let value = if addend >= 0 {
+                let Some(value) = image.load_bias().checked_add(addend as u64) else {
+                    release_partial(page_table, &mappings[..mapping_count]);
+                    return None;
+                };
+                value
+            } else {
+                let Some(value) = image.load_bias().checked_sub(addend.unsigned_abs()) else {
+                    release_partial(page_table, &mappings[..mapping_count]);
+                    return None;
+                };
+                value
+            };
+            if paging::write_user_bytes(page_table, target, &value.to_le_bytes()).is_err() {
+                release_partial(page_table, &mappings[..mapping_count]);
+                return None;
+            }
+        }
+    }
+
+    for segment in image.segments() {
+        if paging::protect_user_range_in_inactive(
+            page_table,
+            segment.mapping_start,
+            segment.mapping_size,
+            segment.writable,
+            segment.executable,
+        )
+        .is_err()
         {
             release_partial(page_table, &mappings[..mapping_count]);
             return None;

@@ -1234,8 +1234,8 @@ scheduler-validated canary on each static kernel task stack. The dedicated
 1/2/4-CPU gate and warning-denying freestanding kernel Clippy pass. See the
 [Stage 15.9 exploit-mitigation audit](audit-stage15-9-exploit-mitigations-2026-10-13.md).
 This closes the verified software-hardening subset only: true unmapped kernel
-stack guards, SMEP/SMAP enablement and hardware qualification, and dynamic
-RELRO/TLS support remain open.
+stack guards, SMEP/SMAP enablement and hardware qualification, shared-library
+RELRO/TLS support, and scheduler-backed user threads remain open.
 
 ## Stage 1–5 bounded batch data journal — 2026-10-06
 
@@ -1808,16 +1808,23 @@ The 2026-10-14 RELRO follow-up closes the static RELRO permission transition:
 a single validated `PT_GNU_RELRO` range is protected read-only after loading,
 ASLR relocation carries the range, and COW write-fault bookkeeping refuses to
 reattach write authority to it. Valid/invalid parser cases and the complete
-Stage 11.5 1/2/4-CPU gate passed. Dynamic relocations, shared libraries, and
-physical/hardware qualification remain open. See
+Stage 11.5 1/2/4-CPU gate passed. Shared libraries, symbol-based relocation,
+and physical/hardware qualification remain open. See
 the [RELRO audit](audit-stage11-relro-2026-10-14.md).
 
 The 2026-10-14 static TLS follow-up adds a bounded initial-exec `PT_TLS`
 contract: the loader validates and maps one initial TLS image, task context
 switches install its FS base, and fork/exec preserve the ownership and COW
-rules. Dynamic relocations, shared-library TLS, TLS module IDs, multi-thread
-TLS semantics, and physical/hardware qualification remain open. See the
+rules. Shared-library TLS, TLS module IDs, multi-thread TLS semantics, and
+physical/hardware qualification remain open. See the
 [static TLS audit](audit-stage11-static-tls-2026-10-14.md).
+
+The 2026-10-14 dynamic-relocation follow-up accepts bounded self-contained
+ET_DYN images with only R_X86_64_RELATIVE RELA entries. Relocations are applied
+before W^X and RELRO finalization, and the 1/2/4-CPU Stage 11.5 gate passed
+with an end-to-end mapped-image relocation self-test. Shared libraries,
+symbol resolution, versioning, lazy binding, and dynamic TLS remain fail-closed.
+See the [dynamic relocation audit](audit-stage11-dynamic-relocations-2026-10-14.md).
 
 ## Stage 12.1 — accepted on 2026-09-16
 
