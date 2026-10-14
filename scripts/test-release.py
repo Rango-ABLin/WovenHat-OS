@@ -19,13 +19,21 @@ def main():
     out = root / 'target' / 'release-validation'
     out.mkdir(parents=True, exist_ok=True)
     report = []
+    # Release acceptance is serialized and must not depend on Cargo's
+    # incremental artifact graph. On Windows, a stale/missing incremental
+    # object directory can make an otherwise valid image build fail before
+    # QEMU starts. Keep the documented project-local target tree, but make the
+    # acceptance chain deterministic and safe to rerun.
+    acceptance_env = os.environ.copy()
+    acceptance_env['CARGO_INCREMENTAL'] = '0'
 
     def run(name, command, run_cwd=root):
         print(f'[{name}]', flush=True)
         start = time.monotonic()
         flags = subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
-        result = subprocess.run(command, cwd=run_cwd, text=True, stdout=subprocess.PIPE,
-                                stderr=subprocess.STDOUT, creationflags=flags)
+        result = subprocess.run(command, cwd=run_cwd, env=acceptance_env, text=True,
+                                stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                                creationflags=flags)
         (out / f'{name}.log').write_text(result.stdout, encoding='utf-8')
         print(result.stdout, flush=True)
         report.append(dict(check=name, passed=result.returncode == 0,
@@ -83,7 +91,7 @@ def main():
     run('system-apps-boot', [sys.executable, 'scripts/test-shell-qemu.py', '--system-apps'] + options)
     system_app_output = root / 'target' / 'system-apps' / '0.8.0'
     system_app_manifest = json.loads((system_app_output / 'manifest.json').read_text(encoding='utf-8'))
-    system_app_env = os.environ.copy()
+    system_app_env = acceptance_env.copy()
     system_app_env.setdefault(
         'WOVENHAT_APP_TRUSTED_PUBLIC_KEY_HEX',
         'd75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a',
