@@ -61,18 +61,36 @@ pub enum InitError {
     UnsupportedDevice,
 }
 
-#[derive(Clone, Copy)]
 struct DmaPage {
     physical: u64,
     virtual_address: u64,
+}
+
+impl Drop for DmaPage {
+    fn drop(&mut self) {
+        if let Ok(frame) = x86_64::structures::paging::PhysFrame::from_start_address(
+            x86_64::PhysAddr::new(self.physical),
+        ) {
+            // A failed controller initialization must not permanently consume
+            // allocator frames.  Once the page owner is dropped, no command
+            // has been submitted that can still reference it.
+            let _ = memory::deallocate_frame(frame);
+        }
+    }
 }
 
 impl DmaPage {
     fn allocate_zeroed() -> Option<Self> {
         let frame = memory::allocate_contiguous_frames(1)?;
         let physical = frame.start_address().as_u64();
-        let offset = paging::physical_memory_offset()?;
-        let virtual_address = offset.checked_add(physical)?;
+        let Some(offset) = paging::physical_memory_offset() else {
+            let _ = memory::deallocate_frame(frame);
+            return None;
+        };
+        let Some(virtual_address) = offset.checked_add(physical) else {
+            let _ = memory::deallocate_frame(frame);
+            return None;
+        };
         // SAFETY: this page is exclusively owned by the AHCI driver.
         unsafe { ptr::write_bytes(virtual_address as *mut u8, 0, PAGE_SIZE) };
         Some(Self {
