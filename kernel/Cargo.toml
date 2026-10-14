@@ -3,6 +3,16 @@ name = "wovenhat-kernel"
 version = "0.8.0"
 edition = "2021"
 
+[[bin]]
+name = "wovenhat-kernel"
+path = "src/main.rs"
+# The kernel is a freestanding no_std image. Cargo's host test harness cannot
+# link it: it would provide a second panic/allocator implementation and apply
+# `cfg(test)` to only part of the image. Keep host tests in the explicit
+# integration crates and compile the kernel image through its normal target.
+test = false
+bench = false
+
 [features]
 physical-probe = []
 qemu-test = []
@@ -51,6 +61,56 @@ stage14-5d-test = ["stage14-5c-test", "stage13-9-test"]
 stage15-1-test = ["qemu-test"]
 # WovenFS on a real block device through the ATA driver, visible in the VFS.
 stage15-2-test = ["qemu-test"]
+stage15-3-test = ["qemu-test"]
+stage15-4-test = ["qemu-test"]
+secure-boot = []
+stage15-5-test = ["qemu-test", "secure-boot"]
+stage15-6-test = ["qemu-test"]
+stage15-7-test = ["qemu-test"]
+stage15-8-test = ["qemu-test"]
+stage15-9-test = ["qemu-test"]
+# An application built outside the kernel, loaded from the filesystem.
+stage16-1-test = ["qemu-test"]
+# Full printable-ASCII font and text layout.
+stage17-1-test = ["qemu-test"]
+# Owner-bound client surface registry for userspace graphics.
+stage18-1-test = ["qemu-test"]
+# A userspace app that drives the graphics syscalls end-to-end.
+stage18-2-test = ["qemu-test"]
+# Kernel-held compositor surface and screen blit syscalls.
+stage19-1-test = ["qemu-test"]
+# A userspace app that paints its window onto the compositor.
+stage19-2-test = ["qemu-test"]
+# Compositor presentation to the framebuffer and display ownership.
+stage19-3-test = ["qemu-test"]
+# Compositor authority: DisplayIo, the exclusive lease and handle binding.
+stage19-4-test = ["qemu-test"]
+# Input focus routed to the compositor lease holder.
+stage19-5-test = ["qemu-test"]
+# Event-driven input wait for the focus holder.
+stage19-6-test = ["qemu-test"]
+# Client surfaces delegated to a separate compositor process.
+stage19-7-test = ["qemu-test"]
+# One sleep over input and IPC.
+stage19-8-test = ["qemu-test"]
+# Client damage notification and damage-only compositing.
+stage19-9-test = ["qemu-test"]
+# Compositor follows the framebuffer; every framebuffer writer behind one lock.
+stage19-10-test = ["qemu-test"]
+# A userspace window manager: stacking, raise, focus and input routing.
+stage19-11-test = ["qemu-test"]
+# PS/2 pointer input and IRQ-time keystroke delivery.
+stage19-12-test = ["qemu-test"]
+# Translucent windows and shadows.
+stage19-13-test = ["qemu-test"]
+# Integer display scaling and paced animation.
+stage19-14-test = ["qemu-test"]
+# WovenShell desktop: wallpaper, taskbar and clock.
+stage20-1-test = ["qemu-test"]
+# WovenShell desktop: windows, taskbar entries, tray and notifications.
+stage20-2-test = ["qemu-test"]
+# WovenStart: the application launcher.
+stage20-3-test = ["qemu-test"]
 stage1-5-test = ["qemu-test"]
 
 [dependencies]
@@ -76,5 +136,7 @@ sha1 = { version = "0.10", default-features = false, features = ["force-soft"] }
 pbkdf2 = { version = "0.12", default-features = false, features = ["hmac"] }
 subtle = { version = "2.6", default-features = false }
 zeroize = { version = "1.8", default-features = false }
+ed25519-compact = { version = "2.6", default-features = false }
+sha2 = { version = "0.10.9", default-features = false, features = ["force-soft"] }
 [lints.rust]
 warnings = "deny"

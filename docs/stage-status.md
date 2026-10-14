@@ -1,11 +1,1281 @@
-﻿# Stage status
+# Stage status
+
+## 2026-10-14 revalidation
+
+Stage 16.1, 17.1, 18.1, 19.1, 19.3, and 19.10 were rerun on 1/2/4 CPUs
+after the remote-termination cleanup change; all emitted their required pass
+markers and exit 33. See
+[the revalidation audit](audit-stage17-19-revalidation-2026-10-14.md).
+
+The complete Stage 12 acceptance chain was independently rerun on the current
+accepted tree. Stages 12.1 through 12.5 all passed on 1/2/4 CPUs with exit 33;
+the retained evidence directories are `stage12.1-1cpu-1791977944719919100`,
+`stage12.1-2cpu-1791978000197697900`,
+`stage12.1-4cpu-1791978038096642600`,
+`stage12.2-1cpu-1791978076763178400`,
+`stage12.2-2cpu-1791978128405584500`,
+`stage12.2-4cpu-1791978166570188900`,
+`stage12.3-1cpu-1791978204787637600`,
+`stage12.3-2cpu-1791978254549661600`,
+`stage12.3-4cpu-1791978294758980400`,
+`stage12.4-1cpu-1791978335142454100`,
+`stage12.4-2cpu-1791978387714722500`,
+`stage12.4-4cpu-1791978427671708800`,
+`stage12.5-1cpu-1791978468908251500`,
+`stage12.5-2cpu-1791978521938978000`, and
+`stage12.5-4cpu-1791978563395332900`.
+
+The ELF dynamic metadata boundary was hardened before shared-library work.
+`DT_NEEDED` is now bounded and string-table validated, while the loader rejects
+dependency-bearing images until dependency mapping, cross-image symbol scope,
+dynamic TLS, and shared-image teardown exist. The Stage 11.3–11.5 1/2/4-CPU
+matrix passed again with the new parser self-test; see the
+[dynamic dependency metadata audit](audit-stage11-needed-metadata-2026-10-14.md).
+
+## Host-test boundary repair — 2026-10-14
+
+The freestanding kernel now has an explicit host-test boundary: test builds no
+longer hide mutex/heap symbols needed by compiled production modules, and they
+do not install a second panic or allocator handler. Warning-denying kernel
+Clippy, all-targets Clippy, and the complete `wovenhat-os` integration-test
+gate pass. The unsupported `cargo test --workspace --all-targets` command is
+documented as a host-assembler mismatch rather than treated as a production
+failure. See the [host-test audit](audit-host-test-boundary-2026-10-14.md).
+
+## Stage 20.3 — WovenStart application launcher (2026-10-13)
+
+Roadmap Stage 18.2, WovenStart: application launcher and search.
+
+**Catalog.** `/share/applications/*.app` holds one small text file per
+application, with a `Name=` line and an `Exec=` line. In the command, `%p`
+becomes the shell's process id; that is how a launched application finds
+the shell, which closes the discovery gap for launched applications. The
+shell loads up to eight entries at startup and sorts them by name.
+Directories, non-`.app` files and malformed entries are skipped. A missing
+catalog, or no `FileRead`, leaves the launcher empty rather than stopping
+the shell.
+
+**Launcher.** The start button, or F1, opens a panel above the taskbar. It
+has a title row, a search row showing the query, and one row per matching
+application, the first highlighted.
+- Typing filters by case-insensitive substring. Backspace edits, Tab moves
+  the selection, Enter launches the selection, and F1 closes.
+- A click on a row launches it; a click outside the panel closes it.
+- While the panel is open, keys go to it rather than to the focused window.
+- With no match, the panel says "No matches".
+- The panel is a layer of its own in the exposed-region repaint, between
+  the toast and the pointer.
+
+**Launching and reaping.** The shell starts an application with
+`SpawnCommand`, which needs `FileRead` and `ProcessCreate`. The application
+is an ordinary user process with the default user capabilities, including
+`Ipc` but not `DisplayIo`, and it is the shell's child.
+- If the program cannot be started, the shell shows a "Could not start …"
+  toast.
+- `waitpid` does not block (it returns would-block while the child runs),
+  so the shell polls its children every frame and reaps each as it exits.
+  Without that, exited applications would stay zombies until the shell
+  exited.
+- libwoven adds `open`, `close` and `read_dir`. `read_dir` requires a
+  255-byte name buffer, because the kernel copies the whole name.
+- The kernel adds `task::child_count`, test-only, so the gate can see
+  reaping.
+
+**Fixed: double-encoded UTF-8 (since Stage 19.14).** The negative-control
+runs for 19.14, 20.1 and 20.2 restored source files through Windows
+PowerShell 5.1 `Get-Content`. It decoded UTF-8 as Latin-1 and wrote the
+result back as UTF-8, so every `×` and `—` in doc comments in
+`compositor.rs`, `libwoven/src/lib.rs` and `woven-shell` became mojibake,
+and some was committed. No code was affected. The runs were repaired here.
+Negative controls now edit and restore files byte for byte through Python.
+
+Gate `[S20.3] application launcher: PASSED`. The catalog is Alpha, Beta and
+Gamma, where Gamma names a missing program, plus a stray `notes.txt`. The
+shell runs with `FileRead` and `ProcessCreate`, driven by real i8042 input.
+Every panel state is compared with the kernel's own rendering.
+- F1 opens the sorted catalog, without `notes.txt`. Tab moves the
+  selection. Typing `be` filters to Beta.
+- Enter launches Beta: its window opens, the panel closes, and the shell
+  has one child. Beta takes `y` and exits, and the shell reaps it (child
+  count 0).
+- The start button opens the panel, and clicking Alpha's row launches it.
+  Alpha takes `x` and exits, and is reaped.
+- `g` then Enter shows "Could not start Gamma", with no child.
+- `zz` shows "No matches", Enter does nothing, and F1 closes.
+- Killing the shell returns the display.
+
+Negative controls, with evidence in
+`audit-artifacts/stage20.3-negative-control-*`:
+- With reaping disabled, the gate fails at "Beta takes its key, exits, and
+  is reaped".
+- With the search ignoring the query, it fails at "typing filters the
+  list".
+
+Open:
+- The catalog is read once at startup, with no reload, and up to 8 entries.
+- No icons, no categories, and no search beyond names.
+- Launched applications get the default user capabilities; there is no
+  per-application manifest of capabilities.
+- Not started at boot yet (see Stage 20.1).
+
+## Stage 20.2 — desktop applications: windows, taskbar entries, tray, notifications (2026-10-13)
+
+Roadmap Stage 18.1, Desktop, completed.
+
+**Protocol.** Applications talk to woven-shell over IPC. Each message
+starts with a four-byte tag:
+- `WOPN`, token, width, height, title: open a window showing a surface the
+  sender shared with the shell.
+- `TRAY`, token: show a 16×16 surface in the system tray.
+- `NOTE`, text: show a notification toast for 4 s.
+
+A surface is accepted only if the sender owns it. `libwoven::surface_owner`
+reads the owner from the token, and the kernel enforces that name on every
+operation. A window or icon disappears when its surface does, normally
+because its owner exited; the shell's per-frame damage check detects this.
+Keystrokes go to the focused window's owner as one-byte messages.
+
+**Shell.**
+- Windows cascade from (40, 40) with a title bar above the client area,
+  focused or unfocused, and never overlap the taskbar.
+- The taskbar has one entry per window, highlighted when focused. Clicking
+  an entry, or a window, raises and focuses it.
+- Tray icons sit right to left from the clock.
+- The toast is drawn top-right.
+- The pointer is a two-tone arrow, hidden until the mouse first moves.
+- The shell waits on input, messages and damage together, with a 250 ms
+  frame clock.
+- Without the `Ipc` capability it runs the desktop with applications
+  disabled, rather than failing; this keeps Stage 20.1's minimal
+  capability set working.
+
+**Exposed-region redraw.** Every change becomes a repaint of one
+rectangle, recomposed completely, bottom to top:
+1. the desktop;
+2. tray icons;
+3. each window: its title bar, then its client surface;
+4. the toast;
+5. the pointer, drawn over what is already on screen.
+
+Each layer contributes only its part inside the rectangle. This needs
+syscalls 120, `GraphicsCompositorBlitRegion` (own surface), and 121,
+`GraphicsCompositorBlitRegionShared`. They carry the same authority as the
+whole-surface blits and are backed by `display::Surface::blit_region`, with
+two new host tests. A whole-surface blit would paint over windows stacked
+above outside the rectangle.
+
+Client damage still goes through `GraphicsCompositorBlitDamage`. That blit
+can land over a higher window, so the shell repaints the damaged rectangle
+before presenting, and the overdraw never reaches the screen.
+
+**Test-only change.** The i8042 loopback helpers (`mouse::loopback`,
+`keyboard_loopback`) are now compiled for this gate too.
+
+Gate `[S20.2] desktop applications: PASSED`. The shell runs with two
+hello-gui `--desktop-client` applications, driven by real i8042 pointer
+packets and keyboard scancodes.
+- Application A opens a window. The kernel checks against its own
+  rendering:
+  - the window's frame, and the focused title bar with the kernel font;
+  - A's taskbar entry;
+  - the green tray icon;
+  - the toast, with its border.
+- A redraws a patch and reports damage, and the patch appears.
+- B opens on top and focused: B covers A at the overlap, A's title bar
+  turns unfocused, and both entries show the right state.
+- The toast expires and the wallpaper shows through.
+- The pointer moves onto A's entry and clicks: A is raised. The pointer is
+  drawn at its position.
+- `x` is typed: A receives exactly its key and exits 0. Its window, entry
+  and tray icon disappear, and B is focused.
+- A click in B, then `y`: B receives its key and exits, leaving the desktop
+  empty.
+- Killing the shell returns the display to the terminal.
+
+The Stage 20.1 gate still passes with the extended shell.
+
+Negative controls, with evidence in
+`audit-artifacts/stage20.2-negative-control-*`:
+- With keys sent to the bottom window instead of the focused one, the gate
+  fails at "key x routed to focused window A".
+- With taskbar entries ignoring clicks, it fails at "taskbar click raises
+  window A".
+
+Open:
+- **Discovery.** Applications learn the shell's process id from their
+  arguments; there is no name service yet.
+- **Window controls.** No move, resize, close button or minimise. Windows
+  are limited to the 320×240 surface cap, and the shell takes four windows
+  and four tray icons.
+- **Notifications** are one toast at a time; there is no history. The
+  Notification Center is 18.4.
+- **Input routing.** Only printable ASCII keys are forwarded. Pointer
+  events are not forwarded to applications yet.
+- **Not started at boot yet** (see Stage 20.1).
+
+## Stage 20.1 — WovenShell desktop: wallpaper, taskbar, clock (2026-10-13)
+
+Roadmap Stage 18.1, Desktop, first part. Repo stage 20 is roadmap Stage 18,
+WovenShell. Stages 18–19 of this repo were roadmap Stage 17, WovenCompositor.
+
+**Desktop program.** `apps/woven-shell` is a new userspace program, a
+separate crate built like hello-gui.
+- It takes the compositor lease, and switches to display scale 2 on a
+  screen of at least 1280×800 so the 5×7 font stays legible.
+- It draws:
+  - a procedural wallpaper: a vertical gradient with a faint woven grid;
+  - a translucent taskbar with an accent line;
+  - the WovenStart button, a placeholder until 18.2;
+  - a clock (`HH:MM`, or `HH:MM:SS` with `--seconds`).
+- It wakes four times a second through `FrameClock` and repaints only the
+  clock's tiles when the text changes. It drains input, since nothing on
+  the desktop takes input yet.
+
+Client surfaces are capped at 320×240, so the desktop is never one surface.
+The scene is a pure function of position and state. The shell renders it
+in software into a `libwoven::Canvas`, one 320×40 tile at a time, uploads
+each tile into one staging surface and blits it into place. Any region is
+repainted by rendering the tiles that cover it.
+
+**Kernel.**
+- `kernel/src/rtc.rs`: CMOS real-time clock.
+  - Readings are taken only while update-in-progress is clear, and accepted
+    when two consecutive readings agree.
+  - BCD and binary, and 12- and 24-hour forms, are decoded. Invalid digits
+    and out-of-range fields are refused.
+  - It is serialised by its own lock, with bounded polling. Times are UTC,
+    the clock's own zone.
+- Syscall 119, `ClockRead`: returns the packed date-time. It needs no
+  capability, like `Getticks`.
+- Syscall 118, `GraphicsSurfaceWrite(handle, rect, pixels)`: uploads
+  little-endian pixels into one of the caller's surfaces.
+  - The rectangle is checked against the surface before anything is copied,
+    which bounds the copy by the surface caps.
+  - Pixels are copied from user memory with no lock held, and the handle is
+    re-resolved for the write, so a surface destroyed in between is refused.
+  - The unused high byte is cleared.
+  - `display::Surface::write_pixels` does the write, with two new host
+    tests.
+
+**libwoven.** `GraphicsSurface::write` and `write_canvas`, `Canvas`
+(clipped fill, blend, shade and text), `blend`, `clock` / `DateTime`, and
+`font`. The font is the kernel's own source file, so client text matches
+kernel text pixel for pixel.
+
+**Defects found and fixed.**
+- **Kill path skipped display teardown (since Stage 18).** A process
+  killed from outside is torn down by `complete_process_termination`, not
+  `exit_current_process`. That path never released the process's client
+  surfaces or its compositor lease, so a killed compositor or desktop kept
+  the screen forever. Both are now released there, under the same
+  scheduler lock as on the exit path.
+- **App linker script missed large-model sections.** The large code model
+  emits `.ltext`, `.lrodata`, `.ldata` and `.lbss`, which `link.x` did not
+  match. The linker placed them as orphans in the first, read-execute
+  segment, so the shell's first write to a static faulted. No earlier app
+  had a writable static. The fix is in all three apps.
+- **Stale images.** Each app now has a `build.rs` that reruns when
+  `link.x` changes, because Cargo does not track files named only in link
+  arguments.
+
+Gate `[S20.1] woven-shell desktop: PASSED`. QEMU's 1280×800 framebuffer
+gives a 640×400 desktop at scale 2.
+- The kernel checks the clock decoder against fixed vectors, then reads the
+  hardware clock.
+- It starts the shell as a system service (`Console`, `DisplayIo`,
+  `InputIo`) and waits for it to take the display.
+- It checks the geometry against the framebuffer and the scale rule.
+- It checks three 40×40 wallpaper blocks against the formula restated in
+  the kernel.
+- It checks the accent line and the translucent taskbar body.
+- It checks the start button against the label rendered with the kernel's
+  own font.
+- It checks the clock region against the kernel's own reading of the
+  hardware clock, allowing up to 2 s of lag, then waits for a later
+  reading, so the clock is seen to advance.
+- It reads the physical framebuffer back at scale 2.
+- It kills the shell, then checks that the lease is gone, presentation has
+  stopped, and terminal text reaches the framebuffer again.
+
+Negative controls, with evidence in
+`audit-artifacts/stage20.1-negative-control-*`:
+- With the kill-path teardown removed (the pre-fix behaviour), the killed
+  shell keeps the display and the gate fails at "display returned to the
+  terminal".
+- With the shell's clock never repainting, it fails at "clock advances
+  with the hardware clock".
+
+Open:
+- **Not yet started at boot.** The desktop runs under its acceptance gate.
+  Starting it at boot belongs with session start: the login manager (18.7),
+  or a boot option before that.
+- **18.1 items still to come:** client windows on the desktop with a
+  taskbar window list, the system tray, and notification toasts.
+- **WovenStart** is a placeholder button; the launcher is 18.2.
+- **Clock** shows UTC: there is no time-zone configuration.
+- **Kill-path cleanup now matches explicit exit.** Scheduler-driven remote
+  termination releases thread handles, queued notifications, terminal
+  foreground ownership, and process sockets before publishing the zombie.
+  Host Clippy and the complete host test suite pass after this fix; physical
+  USB and multi-monitor qualification remain outside the QEMU gate.
+
+## Stage 19.14 — integer display scaling and paced animation (2026-10-14)
+
+Roadmap Stage 17's DPI-scaling and animation items. This closes the
+compositor stage except multiple monitors, which is deferred (see Open).
+
+**Scaling.** The compositor keeps an integer display scale, 1 to
+`MAX_SCALE` (4).
+- The surface is the framebuffer divided by the scale, clamped to the
+  existing 1920×1200 bound. `display::present_scaled` draws each surface
+  pixel as a scale×scale block, and scales the damage with it. `present`
+  is now `present_scaled` at scale 1, so every earlier presentation path
+  is unchanged. Three new host tests in `tests/display_compositing.rs`
+  cover:
+  - block expansion;
+  - damage scaling;
+  - screen clipping, plus scale 1 matching `present` byte for byte.
+- Changing the scale reallocates the surface, cleared to black and wholly
+  damaged; the holder redraws at the new geometry. The allocation and the
+  free happen with the compositor lock released, and the lease is
+  re-checked afterwards because the holder can exit in between.
+- A new lease holder always starts at scale 1, whatever the previous holder
+  chose. The reset happens in `claim`, not in `release_owner`, because the
+  exit path holds the scheduler lock and must not allocate.
+
+Two syscalls, both requiring `DisplayIo` and the lease:
+- 116, `GraphicsCompositorInfo`: returns `width | height << 24 |
+  scale << 48`.
+- 117, `GraphicsCompositorScale(scale)`: returns the new geometry in the
+  same packing, or ERROR for a scale outside 1–4.
+
+libwoven adds `CompositorInfo`, `compositor_info` and
+`compositor_set_scale`. Pointer motion stays relative; the window manager
+tracks the pointer in surface coordinates.
+
+**Frame pacing.** libwoven `FrameClock` paces at a fixed period on the
+kernel timer, with no new kernel interface.
+- Frame boundaries are absolute (`start + n * period`), so one late frame
+  does not push back the rest.
+- A late caller is told how many frames it skipped, so an animation stays
+  on time rather than slowing down.
+- `wait(mask)` uses the existing `WaitAny` deadline, so a window manager
+  can sleep on input, messages or damage until the next frame. A mask of 0
+  sleeps for the frame alone.
+
+Gate `[S19.14] display scaling and frame pacing: PASSED`, on QEMU's
+1280×800 framebuffer:
+- The kernel checks that the boot compositor is at scale 1 and that scales
+  0 and 5 are refused.
+- It takes the display, sets scale 2 (640×400), and checks that the
+  repaint writes all 1280×800 pixels. It blits an 8×8 surface at (10, 10)
+  and reads the physical framebuffer back: the 16×16 block at (20, 20) has
+  the colour, and its neighbours do not.
+- The unprivileged probe is refused info and scale (exit 223 otherwise).
+- hello-gui `--scaled-compositor`:
+  - checks that info is refused before claiming and reads scale 1 after;
+  - checks that out-of-range scales leave the geometry alone;
+  - sets scale 2 and checks the exact half geometry, black corners, and an
+    out-of-range read refused;
+  - checks the first present writes the whole physical screen;
+  - animates a square for 12 frames at 2 ticks per frame. No frame may
+    arrive before its due tick, each frame writes exactly the 200×150
+    backdrop region at 2×2, and the whole run takes at least 24 ticks.
+    Observed: 12 frames in 25 ticks.
+- The kernel then re-reads the final frame at scale 2 and checks that the
+  next holder starts at scale 1.
+
+Negative controls, with evidence in
+`audit-artifacts/stage19.14-negative-control-*`:
+- With presentation ignoring the scale, the gate fails at "rescale repaints
+  the whole screen".
+- With a `FrameClock` that never sleeps, hello-gui fails at step 176 (a
+  frame arrived early).
+
+Open:
+- **Multiple monitors (deferred).** The firmware framebuffer is one
+  output, and there is no GPU or virtio-gpu driver to enumerate more. The
+  roadmap says native GPU support must not block the first GUI release, so
+  this waits for a display-driver stage.
+- Scale is whole-number only, and is not detected from the display: there
+  is no EDID or physical-size source.
+- No vsync. Frames follow the 100 Hz timer, so the shortest period is
+  10 ms and frames are not aligned to the display's refresh.
+- Rescaling transiently holds two surfaces (up to about 18 MB). This is
+  bounded because only the holder can rescale.
+
+## Stage 19.13 — translucent windows and shadows (2026-10-14)
+
+Roadmap Stage 17's transparency and shadow items.
+
+Pixels carry no alpha channel (`0x00RRGGBB`), and per-pixel alpha would have
+made every existing surface, whose high byte is zero, transparent. So
+translucency is a property of the blit. `display::Surface::blend` draws a
+source with uniform opacity, using `display::blend_pixel`: per channel,
+`(over * a + under * (255 - a) + 127) / 255`. That is exact at both ends:
+opacity 0 changes nothing and reports no damage, and 255 is a plain blit.
+Clipping matches `blit`. Three new host tests in
+`tests/display_compositing.rs` cover:
+- endpoints, rounding at the midpoint, and colour-over-itself identity;
+- opacity 255 matching `blit` pixel for pixel, and opacity 0 touching
+  nothing;
+- clipping off the corner, so only the overlap is mixed.
+
+Two syscalls carry the opacity in their third argument. The existing blits
+(102, 110) ignore that argument, so it could not be repurposed without
+breaking their ABI:
+- 114, `GraphicsCompositorBlend`: one of the caller's own surfaces. This is
+  how a window manager draws shadows and translucent chrome.
+- 115, `GraphicsCompositorBlendShared`: a shared client window.
+
+The authority is the same as the corresponding blits: `DisplayIo` plus the
+lease, and the caller's own token for 114 or a grant naming the caller for
+115. An opacity above 255 is refused rather than truncated. libwoven adds
+`GraphicsSurface::present_blended` and `compositor_blend_shared`.
+
+Gate `[S19.13] translucency and shadows: PASSED`:
+- The probe is refused both blends.
+- hello-gui `--alpha-compositor` draws an opaque backdrop, a black shadow
+  from its own surface at 96/255 offset under the window, and the Stage 19.7
+  `--client`'s shared window at 160/255 over both.
+- It checks four regions against the formula, restated independently in the
+  app: backdrop only, shadow only, window over the backdrop, and window over
+  the shadow.
+- It checks that opacity 0 leaves the screen unchanged, that the private
+  surface is refused, and that opacity 256 is refused.
+- The kernel recomputes the four regions with its own `blend_pixel` after
+  both processes exit.
+
+Local 1/2/4-CPU evidence is recorded in the
+[Stage 19.13 transparency audit](audit-stage19-13-transparency-2026-10-13.md).
+
+Negative control: with `blend` copying opaquely, the compositor fails its
+region check (exit 167) and the gate fails. Evidence is in
+`audit-artifacts/stage19.13-negative-control-*`.
+
+Open:
+- No per-pixel alpha, so no anti-aliased edges or soft shadows; a soft
+  shadow needs several stacked blends.
+- No animation: frame timing belongs to the window manager, and there is no
+  vsync source.
+
+## Stage 19.12 — PS/2 pointer input; keystrokes delivered at IRQ time (2026-10-14)
+
+**Defect fixed (Stages 19.5/19.6).** The keyboard IRQ handler only queued raw
+scancodes. They became WovenInput events only when a consumer called
+`keyboard::poll` or `read_bytes`, which in practice meant the kernel shell
+loop or a userspace `read`. A focus holder asleep in `InputWait` or `WaitAny`
+polls nothing, so real keystrokes reached it only if something else happened
+to be polling. The 19.5 and 19.6 gates published keys directly into WovenInput
+and never exercised the hardware path. The handler now decodes and publishes
+at IRQ time. Every lock on that path is an IRQ mutex at rank 10, and the two
+`PreemptMutex`es an IRQ can interrupt are also rank 10, so neither inversion
+nor recursion is possible. The polled fallback (`poll_legacy`) now leaves
+auxiliary bytes for the mouse.
+
+**Mouse.** `kernel/src/mouse.rs` drives the i8042 auxiliary port.
+- Initialisation runs with interrupts off and polls with bounds: enable the
+  port, set defaults, enable reporting (each acknowledged), then set the
+  auxiliary IRQ bit and clear the auxiliary clock-disable bit in the
+  controller configuration.
+- IRQ12 is routed through the IOAPIC beside the keyboard. Unlike the keyboard,
+  the mouse is optional: an unusable GSI leaves it unrouted rather than
+  failing boot. Under the legacy PIC it is unmasked only if a mouse answered.
+  Boot logs `[BOOT] ps2 mouse present=`.
+- The handler takes only bytes flagged auxiliary and decodes three-byte
+  packets: bit-3 resynchronisation, 9-bit signed deltas, Y flipped to screen
+  orientation, overflow packets dropped whole, and button edges. It publishes
+  `PointerMove` / `PointerButton`, which are now production WovenInput
+  events rather than Stage 13.7 probe-only.
+
+**Userspace.** `InputPoll` and `InputWait` encode pointer motion as kind 6
+(two's-complement dx/dy halves) and buttons as kind 7. libwoven adds
+`InputEvent` and `input_poll_event`; `input_poll` and `input_wait` keep
+returning keys only, skipping pointer events. The window manager tracks the
+pointer from relative motion; a left click on an uncovered part of the bottom
+window raises and focuses it (click-to-focus).
+
+Gate `[S19.12] pointer input: PASSED`. Every input travels the real i8042
+path: command 0xD3 presents a byte as if the mouse sent it (IRQ12, the mouse
+driver), and 0xD2 as if the keyboard did (IRQ1, the keyboard driver).
+- The kernel checks the packet decoder, then the raw paths into a focus
+  queue: a mouse packet arrives as motion plus press, then release; a
+  keyboard make code arrives as a decoded key with no one polling.
+- hello-gui `--wm` with two clients: the kernel moves the pointer into A
+  only, clicks, and types `x`; then moves into B only, clicks, and types `y`.
+- Each client must receive exactly its own key, and the kernel reads B on top
+  at the overlap.
+
+Negative control: with the IRQ-time decode removed, which was the pre-19.12
+behaviour, the gate fails at "keyboard bytes through IRQ1 are decoded at IRQ
+time". Evidence is in `audit-artifacts/stage19.12-negative-control-*`.
+
+Open:
+- PS/2 only. The USB HID mouse protocol is recognised by the xHCI driver but
+  not yet decoded into pointer events.
+- No scroll wheel (IntelliMouse) and no acceleration.
+- The pointer position lives in the window manager. There is no cursor
+  image: drawing one is the window manager's job, and there is no hardware
+  cursor.
+
+## Stage 19.11 — userspace window manager: stacking, raise, focus, input routing (2026-10-14)
+
+**Roadmap mapping.** This repository's Stage 18–19 numbering has drifted
+from `docs/master-development-roadmap.md`: the work from Stage 18.1 onward is
+the roadmap's **Stage 17, WovenCompositor**. That stage lists windows,
+surfaces, compositing, damage tracking, z-order, transparency, shadows,
+animations, input routing, focus, multiple monitors and DPI scaling. Its
+security rule is that applications must never directly control another
+application's surface. The desktop shell is roadmap Stage 18 and follows it.
+This increment covers z-order, focus and input routing.
+
+**What it shows.** A complete userspace window manager runs on the existing
+primitives, with no new kernel interface:
+- the compositor lease and display (19.4, 19.3);
+- input focus and `WaitAny` (19.5, 19.8);
+- shared client surfaces (19.7);
+- IPC.
+
+hello-gui `--wm` takes the display, and with it focus. It receives each
+client's shared-surface token, position and colour over IPC, and stacks the
+windows, the older client at the bottom. It draws them bottom to top and, after
+every redraw, checks its own screen: a pixel inside both windows must show the
+top window, and an uncovered corner of the bottom window must show the bottom
+window. Tab raises and focuses the other window. A typed character is forwarded
+over IPC to the focused (topmost) window's client only. Clients never touch
+each other's windows; the window manager reads them only through their grants.
+
+Gate `[S19.11] window stacking and focus: PASSED`:
+- `--wm` runs with `Console | DisplayIo | InputIo | Ipc`. Two ordinary
+  `--wm-client` processes share overlapping 120×80 windows: A at (200,150),
+  red; B at (260,190), blue.
+- Whenever the window manager is asleep for input, the kernel publishes the
+  next of Tab, `x`, Tab, `y` through the keyboard path.
+- A must receive exactly `x` (it is on top after the first Tab), and B
+  exactly `y` (on top again after the second Tab). Each client then waits a
+  quiet period for stray keys. A misrouted key that arrives later still fails
+  the gate: the window manager's send to an exited client fails, and the
+  intended client never gets its key.
+- The kernel reads the overlap (blue, B on top) and each window's private
+  area from the compositor, and confirms lease and focus are released.
+
+Negative control: with the window manager forwarding to the bottom window,
+the wrong client receives the key (exit 156) and the gate fails. Evidence is
+in `audit-artifacts/stage19.11-negative-control-*`.
+
+The first run failed the window manager's own check (step 144): its "bottom
+window still visible" probe used a corner the raised window covers in the
+swapped layout. That was a test defect. The probe now picks an uncovered
+corner. Evidence is in `audit-artifacts/stage19.11-probe-point-1cpu-*`.
+
+Open (remaining roadmap Stage 17 items after the accepted Stage 19 gates):
+- A window move or lower redraws all windows: the window manager tracks no
+  exposed regions, and the kernel compositor has no z-order of its own,
+  because stacking is policy, held in userspace.
+- Multi-monitor output and per-display policy are not implemented.
+- Scaling is integer-only and animation pacing is bounded software timing;
+  fractional DPI and hardware GPU acceleration remain outside this gate.
+
+Pointer-driven focus is closed by Stage 19.12: IRQ12 mouse packets and
+IRQ1 keyboard input reach the event-driven window manager, clicks raise and
+focus the selected window, and keys route only to that client. See the
+[Stage 19.12 pointer audit](audit-stage19-12-pointer-2026-10-13.md).
+
+## Stage 19.10 — compositor follows the framebuffer; one framebuffer writer (2026-10-12)
+
+**Geometry.** The boot compositor is now sized to the framebuffer instead of
+a fixed 640×480. `compositor::init_for_display` reads
+`terminal::framebuffer_info` after the heap self-test and clamps to
+1920×1200. A 4K display would otherwise cost a 33 MB kernel allocation; the
+clamp bounds it near 9 MB, and a larger display shows the compositor in its
+top-left corner. The self-tests that reset and re-initialise the compositor
+still use the fixed default, so their expectations are unchanged.
+
+**Single writer.** The early-boot `Console` no longer holds the framebuffer
+slice. It keeps only the geometry, and each operation (character, clear,
+scroll, backspace, desktop present) borrows the buffer once through
+`terminal::with_text_framebuffer`. That accessor refuses while the
+compositor owns the display. Every framebuffer write after `terminal::init`
+now goes through the terminal lock: console, userspace terminal and
+compositor. This closes the Stage 19.3 open item, which noted that the boot
+console wrote outside the lock and had to move behind it before the
+compositor could be activated at boot. `Console` lost its lifetime parameter;
+its users in `shell.rs`, `smp.rs` and `physical_probe.rs` changed
+accordingly.
+
+Gate `[S19.10] display geometry and single writer: PASSED`:
+- The boot compositor's dimensions equal the clamped framebuffer size
+  (1280×800 on QEMU).
+- Taking the display repaints exactly that many pixels, and the far corner of
+  the framebuffer shows the compositor background, where before it was
+  outside the compositor.
+- Boot-console output leaves the framebuffer checksum unchanged while the
+  compositor owns the display, and changes it after release.
+
+Negative control: with `with_text_framebuffer` ignoring display ownership,
+the gate fails at "boot console suppressed while compositing". The evidence
+is labelled in `audit-artifacts/stage19.10-1cpu-1791825577739619200`.
+
+Open:
+- The production boot still does not activate the compositor. That is now a
+  policy decision (when a desktop process starts) rather than a safety
+  prerequisite.
+- The kernel shell's desktop renderer keeps its own retained surface,
+  presented through the same lock; it is not a compositor client.
+
+Next prerequisite: a desktop/shell process that takes the lease at startup
+and composites client windows, which is the Phase 5 desktop itself.
+
+## Stage 19.9 — client damage notification and damage-only compositing (2026-10-12)
+
+A client now tells the compositor what changed, and the compositor copies only
+that.
+
+- **Declaring damage:** syscall 112 (`GraphicsSurfaceDamage(handle, rect)`)
+  lets the owner record a changed rectangle. The token is bound to the
+  caller, and no capability is needed, since only the caller's own pixels are
+  involved. Damage is clipped to the surface and unioned into one bounding
+  rectangle per slot, so per-slot state stays fixed-size. It is cleared when
+  the slot is freed. If the surface is shared, the grantee's damage waiter is
+  woken after the registry lock is released.
+- **Compositing damage:** syscall 113 (`GraphicsCompositorBlitDamage(token,
+  origin)`) lets the lease holder take the pending damage of a surface shared
+  with it, copy just that region, and blit it at its offset within a window
+  placed at `origin`. It returns the region, or 0 when nothing was pending.
+  The grant rules are the same as for the whole-surface shared blit.
+- **Waiting on damage:** `WaitAny` gains source bit 2, damage on any surface
+  shared with the caller, which requires `DisplayIo`. Waiters live in a
+  bounded four-entry table in the registry. A grantee's exit drops its entry
+  without waking, since that path holds the scheduler lock. The usual rules
+  apply: one registration per grantee, live-holder refusal, and take-over
+  from a dead holder.
+- **libwoven:** `GraphicsSurface::damage`, `compositor_blit_damage ->
+  Option<Region>`, and `wait::DAMAGE`.
+
+Gate `[S19.9] damage compositing: PASSED`:
+- The kernel first checks the damage rules: clipping, union, reads only
+  through a grant, cleared on take, rectangles outside the surface ignored,
+  damage dies with the slot.
+- The probe is refused damage waits, damage on a foreign surface, and
+  damage-only compositing.
+- hello-gui `--damage-compositor` takes the lease and composites the client's
+  declared full-window damage, (0,0,40,30); a second take finds nothing. It
+  then sleeps in `WaitAny(DAMAGE)`.
+- Once the kernel sees it `Blocked`, it tells `--damage-client` to go. The
+  client recolours (10,5,4,3) and declares it, and recolours (30,20,2,2)
+  without declaring it.
+- The compositor must be woken before its 500-tick deadline and copy exactly
+  (10,5,4,3). The screen must show the new colour there and the old colour
+  where the undeclared change was. The kernel re-reads both pixels after
+  both processes exit.
+
+Negative controls (evidence in `audit-artifacts/stage19.9-negative-control*`):
+- With the wakeup removed from `mark_damage`, the first version of the gate
+  still failed, but only through the kernel's wait for the client timing out.
+  The compositor itself passed: `WaitAny` is level-checked, so at its
+  deadline it correctly reported damage that had arrived without a wakeup.
+- The compositor now times its wait and fails if only the deadline woke it.
+  The same control then fails crisply at that step (exit 111).
+
+Open:
+- One bounding rectangle per surface: two small distant changes copy the
+  span between them.
+- Damage is not tied to a particular blit position; the compositor supplies
+  the window origin each time.
+- No per-client damage queue: `WaitAny` says some shared surface has damage,
+  and the compositor asks each of its clients.
+
+Next prerequisites: the compositor surface following real framebuffer
+geometry instead of a fixed 640×480, and boot-time activation once the early
+boot console writes through the terminal lock.
+
+## Stage 19.8 — one sleep over input and IPC (2026-10-12)
+
+A process can now sleep until any of several sources is ready. Syscall 111
+(`WaitAny(deadline, mask)`) takes a mask: bit 0 is input (`InputIo`, live only
+while the caller holds focus), bit 1 is the caller's pid mailbox (`Ipc`). It
+returns the mask of ready sources, or 0 when the timer reaches `deadline`.
+Nothing is consumed: the caller follows up with `InputPoll` or
+`MessageReceive`. Empty or unknown masks are refused, and so is waiting on
+input alone without focus, which could never complete.
+
+The pid mailbox gained a waiter. `LegacyEndpoint` holds one optional `TaskId`;
+`ipc::send` takes it under the IPC lock and calls `signal_event` after
+releasing it. Endpoint teardown drops the waiter without waking, as focus
+withdrawal does. `woven_input` gained `register_waiter`, `clear_waiter` and
+`pending`, so the same focus waiter slot serves both `InputWait` and
+`WaitAny`.
+
+The wait registers with every requested source, then re-checks readiness, then
+sleeps. An event between registration and sleep latches the scheduler's
+pending permit, so it cannot be lost. A slot held by another live task of the
+same process is refused; a slot held by a dead task is taken over, with
+liveness checked outside the source's lock. All registrations are dropped
+before returning.
+
+Gate `[S19.8] combined wait: PASSED`:
+- An unprivileged probe is refused `WaitAny` on input, and refused empty and
+  unknown masks.
+- hello-gui `--multiplex <peer>` takes focus and sleeps over both sources.
+- The kernel registers a stand-in peer mailbox. Once it sees the client
+  `Blocked`, it sends a message; the client must report exactly `MESSAGE` and
+  receive `ping` from the peer.
+- Once the client is `Blocked` again, the kernel publishes a key; the client
+  must report exactly `INPUT` and read `z`.
+- A 20-tick timed wait then returns 0, no earlier than its deadline, and focus
+  returns on exit.
+
+Negative control: with the wakeup removed from `ipc::send`, the client sleeps
+through the message and wakes on the key with both sources ready (exit 83), so
+the gate fails. Evidence is in `audit-artifacts/stage19.8-negative-control-*`.
+
+Two problems found while bringing this up:
+- The first design had the client reply to the stand-in peer. `may_ipc_with`
+  refused it, correctly: the peer is a bare mailbox with no process
+  credentials. The reply step was removed instead of relaxing the policy.
+  Evidence is in `audit-artifacts/stage19.8-reply-refused-1cpu-*`.
+- **Harness defect.** The three app harnesses built the app with
+  `cargo build`, inheriting `CARGO_TARGET_DIR` from the caller's shell. With
+  the project's documented environment, the fresh binary went to the kernel's
+  target tree, while the kernel embedded the stale binary in
+  `apps/*/target`. Earlier gates were unaffected only because the app had
+  been built by hand from the same source before each run. All three
+  harnesses now build with the app's own target directory pinned and the
+  kernel's build-directory override removed.
+
+Open:
+- The pid mailbox has one waiter; handle-based endpoints keep their existing
+  multi-waiter queues and are not yet `WaitAny` sources.
+- Timers and event objects are not `WaitAny` sources either; the deadline
+  covers the common timeout case.
+
+Next prerequisite: client-to-compositor damage notification, so a compositor
+sleeping in `WaitAny` redraws only what a client changed.
+
+## Stage 19.7 — client surfaces delegated to a compositor process (2026-10-12)
+
+A separate compositor process can now draw other clients' windows, with each
+client's consent.
+
+**Sharing:** a client grants one process read access to one of its own
+surfaces with syscall 109 (`GraphicsSurfaceShare(handle, grantee)`; grantee 0
+revokes). Sharing needs no capability: a process may always decide who reads
+its pixels. The token still goes through `caller_surface`, so only the owner
+can share. Each surface carries at most one grant, in the slot. The grant is
+cleared whenever the slot is freed, by destroy or by the owner's exit, so it
+never outlives the surface or carries over to the slot's next occupant. Pids
+are never reused, so a grant naming an exited process is inert.
+
+**Compositing:** the lease holder draws a shared surface with syscall 110
+(`GraphicsCompositorBlitShared(token, x | y << 32)`). It requires `DisplayIo`
+and the lease. The token is the owner's, passed out of band, so it is
+deliberately not bound to the caller. Instead
+`user_graphics::snapshot_shared` requires slot, generation and owner to match
+and the slot's grant to name the caller: a token alone confers nothing. The
+snapshot-then-blit lock pattern is the same as `blit_for`.
+
+**libwoven:** `GraphicsSurface::share_with` / `unshare`,
+`compositor_blit_shared`, and typed IPC: `message_send` /
+`message_receive` over the existing syscalls 11 and 12.
+
+Gate `[S19.7] surface delegation: PASSED`:
+- The kernel first checks the grant rules: nothing is shared by default; the
+  grantee is allowed while a stranger and the owner itself are not; stale and
+  forged tokens are refused even for the grantee; revocation works; a grant
+  dies with its surface.
+- hello-gui `--compositor` (`Console | DisplayIo | Ipc`) takes the lease.
+  hello-gui `--client <pid>` runs as an ordinary process: it shares one
+  surface with the compositor, keeps a second private, checks it cannot blit
+  anything itself, and sends both tokens over IPC.
+- The compositor must draw the shared surface and see the client's colour on
+  the screen. It must be refused the private surface even with its genuine
+  token, and refused the shared one through the owner-only blit path. It then
+  presents and replies; the client waits for that reply so its surfaces stay
+  alive until drawn.
+- After both exit, the kernel reads the client's colour at two corners of the
+  composited window, and checks that the client's surfaces and grants and the
+  lease are gone.
+
+Negative control: with the grant check bypassed in `snapshot_shared`, the gate
+fails at the grant-rules check. Evidence is in
+`audit-artifacts/stage19.7-negative-control-*`.
+
+Open:
+- A shared surface is copied whole at each blit, and there is no damage
+  notification from client to compositor: the compositor redraws when it
+  chooses.
+- One grantee per surface.
+- Token transfer is by plain IPC bytes. It cannot be forged into access,
+  because the grant is the authority, but it is not a kernel-transferred
+  handle.
+- IPC receive is still non-blocking, so both test processes poll with a
+  bounded deadline.
+
+Next prerequisites: a blocking IPC receive (or a combined wait with input),
+and client-to-compositor damage notification.
+
+## Stage 19.6 — event-driven input wait (2026-10-12)
+
+The focus holder can now sleep until input arrives instead of polling.
+Syscall 108 (`InputWait(deadline)`) returns the next event, or `WOULD_BLOCK`
+when the timer reaches `deadline` (`u64::MAX` waits indefinitely). It has the
+same authority as `InputPoll`: `InputIo` plus focus. libwoven wraps it as
+`input_wait(Option<Ticks>)`.
+
+`woven_input::wait_for` registers the calling task as the focus waiter under
+`FOCUS`, releases the lock, and sleeps with
+`task::wait_for_event_until(deadline)`. `publish` takes the waiter out under
+`FOCUS` and calls `task::signal_event` after releasing it. No wakeup is lost:
+a publish between registration and sleep latches the scheduler's pending
+permit, and the sleep consumes it. Unrelated wakeups simply re-check.
+
+Lock order:
+- The task-exit path takes the scheduler lock, then the compositor lock, then
+  `FOCUS`. So `FOCUS` is never held while the scheduler lock is taken: waking
+  and liveness checks happen with it released.
+- Focus withdrawal forgets the waiter rather than waking it. It runs under the
+  scheduler lock on the exit path, and only the owner's exit withdraws focus,
+  which takes every task that could be waiting with it.
+
+Waiter rules:
+- One task per process may wait. A second concurrent waiter is refused, unless
+  the registered one has died, in which case `task::task_live` (checked after
+  releasing `FOCUS`) lets the newcomer take over by compare-and-set. Task ids
+  are never reused, so a dead answer is final.
+- A timed-out wait unregisters itself and returns any event that raced in
+  after its last check.
+
+Gate `[S19.6] blocking input wait: PASSED`:
+- An unprivileged probe must be refused `InputWait`, with a bounded deadline
+  so a broken check cannot hang the gate.
+- hello-gui `--wait` gains focus and reads `o`, `k`, Enter through
+  `input_wait(None)`. Before publishing each key, the kernel waits until the
+  client's task is `Blocked`. A polling client is only ever `Ready`, so this
+  proves it sleeps in the kernel and is woken by the publish itself.
+- The app then makes a 20-tick timed wait with nothing pending. It must return
+  `None`, and no earlier than the deadline.
+- Focus returns on exit.
+
+Negative control: with the sleep in `wait_for` replaced by `yield_now` (a
+spinning wait), the gate fails at "client sleeps while waiting". Evidence is in
+`audit-artifacts/stage19.6-negative-control-*`.
+
+Open: the waiter slot is per process, not per thread, so a multi-threaded
+client must funnel input through one thread. There is no combined wait on
+input plus other events: `InputWait` is separate from the event objects, so a
+client cannot yet sleep on "input or timer or IPC" in one call. Next
+prerequisite: delegating client surfaces to the holder by capability, so a
+separate compositor process can draw other clients' windows.
+
+## Stage 19.5 — input focus follows the compositor lease holder (2026-10-12)
+
+When the compositor lease holder takes the display (its first present), it
+also takes input focus. From then on, `woven_input::publish` delivers every
+event into a bounded 128-entry focus queue that only that process can read.
+The terminal's queue gets nothing, because the user is looking at the
+holder's screen, not the hidden terminal. When the holder exits,
+`compositor::release_owner` withdraws focus and the terminal receives input
+again. Every focus change discards the focus queue, so keys typed for one
+owner never reach the next owner or leak to the shell. `compositor::reset`
+also releases a holder's focus.
+
+The focus state is an IRQ mutex, because the keyboard interrupt path
+publishes through it. Lock order: compositor or keyboard decoder (rank 10),
+then `FOCUS`, then the terminal `QUEUE`. `FOCUS` is held across the fallback
+push so focus cannot change between the check and the push.
+
+Syscall 107 (`InputPoll`) returns the next event as `kind << 56 | value`
+(character, Enter, Backspace, Tab, F1), `WOULD_BLOCK` when the queue is empty,
+or `ERROR`. It requires `InputIo`, and the caller must hold focus. libwoven
+wraps it as `input_poll() -> Result<Option<Key>, Error>`. Pointer events exist
+only in the Stage 13.7 probe build and have no userspace encoding yet.
+
+Gate `[S19.5] input focus: PASSED`:
+- The kernel first checks the focus rules: no focus routes to the terminal;
+  focus routes only to the owner; non-owners are refused; the queue is bounded
+  and overflow is refused; a release by a non-owner is ignored; a focus change
+  discards pending events.
+- An ordinary-process probe must be refused `InputPoll`, along with all the
+  Stage 19.4 refusals, against a genuinely foreign surface.
+- hello-gui `--input` runs with `Console | DisplayIo | InputIo`. Once it holds
+  focus, the kernel publishes `o`, `k`, Enter through the keyboard interrupt's
+  own path. The terminal queue must stay empty, and the app must receive
+  exactly those keys in order with nothing extra. After exit, focus is gone
+  and a keystroke reaches the terminal again.
+
+Negative control: with `publish` changed to ignore focus, the gate fails at
+the focus-rules check. Evidence is in
+`audit-artifacts/stage19.5-negative-control-*`.
+
+Two defects were found while bringing this up:
+- The first `publish` returned `QUEUE.lock().push(event)` as its tail
+  expression. Rust drops tail-expression temporaries after locals, so the
+  `FOCUS` guard was released before `QUEUE`, out of nesting order. The
+  lock-order tracker panicked on the first unfocused keystroke, which the boot
+  sequence produces in every build. The push result is now bound and `FOCUS`
+  dropped explicitly.
+- `kernel_panic` parked forever, so under `qemu-test` that panic surfaced as a
+  300-second host timeout. It now exits QEMU with the failure status after
+  printing the panic report, as `halt()` already did. Every harness already
+  treats `KERNEL PANIC` as a failure. The timeout evidence is in
+  `audit-artifacts/stage19.5-timeout-1cpu-*`.
+
+Open: `InputPoll` is non-blocking, so clients poll with `yield_now`. A
+blocking wait belongs on the existing event objects, so a client sleeps until
+input arrives. Focus is all-or-nothing per holder, with no per-window focus
+yet; that is the holder's job once it composites several clients. Next
+prerequisites: an event-driven input wait, then delegating client surfaces to
+the holder by capability.
+
+## Stage 19.4 — compositor authority and client handle binding (2026-10-12)
+
+**Defect fixed from Stage 18.** The client surface registry compared a slot's
+owner with the owner field inside the handle, but userspace supplies that
+handle. Any process could forge a token naming another process as owner, and
+the slot index (0–15), generation (low after boot) and pid are all small and
+guessable. With that token it could read, fill, stroke, destroy or blit the
+other process's surface. The Stage 18.1 impostor test only swapped the owner
+field of a genuine token, so it never exercised a forgery. Every graphics
+syscall now resolves its token through `caller_surface`, which requires the
+token to name the calling process; the registry then checks slot, generation
+and owner as before.
+
+**Compositor authority.** Blitting onto the compositor, reading screen pixels
+and presenting to the framebuffer now require the `DisplayIo` capability. They
+also require the compositor lease, which exactly one process holds at a time:
+`compositor::claim` (syscall 105) takes it, and claiming again as the holder
+succeeds. Reading the screen carries the same authority as drawing on it,
+because the screen holds every client's pixels. Syscall 106 presents
+compositor damage to the framebuffer, taking the display from the terminal on
+first use. The task-exit path calls `compositor::release_owner`, which drops
+the lease and gives the display back, so a crashed holder cannot keep the
+screen. Ordinary user processes do not carry `DisplayIo`; client surfaces
+(syscalls 98–101, 104) still need no capability, since a process can only
+reach its own.
+
+**libwoven.** `libwoven::entry!(main)` defines `_start` as a three-instruction
+assembly stub that passes the entry stack pointer to `main(Args)`. Rust code
+cannot observe that pointer reliably, which is the only reason the stub is
+assembly. `Args::get` bounds each string scan by the kernel's 256-byte argument
+limit. Also new: `compositor_claim()` and `compositor_present()`.
+
+**Gate.** `[S19.4] compositor authority: PASSED`. The kernel first checks the
+lease rules directly: exclusivity, idempotent re-claim, non-holders refused
+blit, read and present, and a release by a non-holder ignored. It then creates
+a surface owned by another pid and runs hello-gui twice:
+- `--probe <token>` as an ordinary user process. Claim, blit, screen read and
+  present must all fail. Every operation on the foreign surface must fail,
+  both with its genuine token and with a token forged to name the probe. The
+  kernel then checks that the foreign surface still holds its colour and that
+  the probe never held the lease.
+- Normal mode with `Console | DisplayIo`. The app claims, blits, verifies the
+  screen and presents. The kernel then reads the framebuffer itself and finds
+  the window's content colour, and checks that the lease was released, the
+  display returned to the terminal, and the app's surfaces were reclaimed.
+
+A negative control was run: with `caller_surface` removed from the pixel
+syscall alone, the probe's forged read succeeds, it exits 207 and the gate
+fails. The evidence is in `audit-artifacts/stage19.4-negative-control-*`.
+
+Stages 18.2 and 19.2 now start hello-gui through the system-service spawn path
+with `Console | DisplayIo`, because the app needs display authority. Their
+assertions are unchanged.
+
+Open: `DisplayIo` is granted at spawn by the kernel; there is no service
+manager or user-facing grant flow. The lease has no revocation other than the
+holder's exit, and no hand-over to a successor compositor. The holder still
+blits clients' surfaces itself, so there is no way yet for one process to
+composite another's surface by capability. Next prerequisites: input events
+routed to the lease holder, then delegating client surfaces to the holder by
+capability so a separate compositor process can draw them.
+
+## Stage 19.3 — compositor presentation and display ownership (2026-10-12)
+
+The compositor surface now reaches the real framebuffer.
+`compositor::activate_display()` takes the display from the text terminal and
+marks the whole surface damaged. `compositor::present()` copies only the damaged
+regions through `display::present` and clears the damage after a successful
+copy, so a failed presentation loses nothing. `deactivate_display()` returns the
+display to the terminal.
+
+There is exactly one path to the framebuffer after boot.
+`terminal::with_framebuffer` lends the buffer under the terminal's lock, so the
+compositor keeps no pointer of its own and its writes cannot interleave with
+terminal text. While the compositor owns the display, terminal rendering is
+suppressed; when it releases the display, terminal rendering resumes. The
+compositor lock changed from an IRQ mutex to a preemption mutex: copying a
+1280×800 frame with interrupts disabled would stall device interrupts, and
+nothing takes the lock from interrupt context. Lock order is compositor, then
+terminal, both at rank 10. The terminal never calls the compositor.
+`with_framebuffer` deliberately avoids `file_fault_io`, which takes the
+scheduler lock: the framebuffer mapping is resident and cannot fault.
+
+The self-test reads framebuffer bytes back itself, converting by the reported
+pixel format, rather than trusting the compositor's state. It checks:
+presentation is refused before takeover; takeover repaints exactly the visible
+area (640×480 on QEMU's 1280×800 framebuffer); the screen shows the compositor's
+black background where the terminal's background was dark blue; a second
+present writes nothing; one 32×16 client blit presents exactly 512 pixels, with
+the client colour at its offset and background next to it; terminal output
+leaves the framebuffer checksum unchanged while the compositor owns the display;
+presentation is refused after release; and terminal output changes the
+framebuffer again afterwards. Marker: `[S19.3] compositor presentation: PASSED`.
+Passed on 1, 2 and 4 CPUs.
+
+Open: nothing in the production boot activates the compositor yet. The early
+boot `Console` still writes the framebuffer directly, outside the terminal lock.
+That is safe only while it runs single-threaded before the scheduler starts, and
+it must move behind `with_framebuffer` before the compositor is activated at
+boot. Userspace cannot present: activation and presentation are kernel calls,
+pending a compositor capability. Terminal output while compositing is not shown
+anywhere on screen; a terminal client of the compositor would replace that.
+Next prerequisites: the compositor capability (a single holder may present),
+then input events routed to the focused client.
+
+## Stages 18–19 — client surfaces and the compositor primitive (2026-10-12)
+
+A userspace process can now own a drawing surface, draw into it through
+syscalls, and place it on a kernel-held compositor surface that outlives the
+process.
+
+**Stage 18.1 — client surface registry.** `kernel/src/user_graphics.rs` is a
+bounded, owner-tagged registry of `display::Surface` objects: 16 surfaces
+system-wide, 4 per process, at most 320×240 each. A handle packs slot (8 bits),
+generation (24) and owner pid (32). Every operation checks all three, so a stale
+handle or another process's handle is refused rather than resolving to a reused
+slot. `release_owner(pid)` runs on the task-exit path in `task.rs`, next to the
+other per-process registries. Syscalls 98–101 cover create, fill, pixel
+readback and destroy, and 104 covers stroke. Fill and stroke pack x/y/w/h as four
+u16 values in one register, because the ABI carries three arguments. A text
+syscall was tried and removed: handle, origin, pointer, length and colour do not
+fit in three arguments. Text drawing stays kernel-internal until the syscall ABI
+gains an argument block. Marker: `[S18.1] client surface registry: PASSED`.
+
+**Stage 18.2 — end to end through a real application.** `apps/hello-gui`
+builds outside the kernel, like `apps/hello`. It allocates a surface, draws a
+window (background, title bar, content, one-pixel border) and reads back seven
+pixels, one in each region and edge, through the pixel syscall. Each mismatch
+exits with its own status. The kernel then checks the app's exit status and that
+`count_for(pid) == 0` after exit. Marker:
+`[S18.2] client surface end-to-end: PASSED`.
+
+**Stage 19.1 — compositor surface.** `kernel/src/compositor.rs` holds one
+640×480 `Surface` plus a `Damage` list. It is initialised lazily after the heap
+self-test, because a 1.2 MB allocation earlier in boot fails. `blit` takes a
+snapshot of the client surface under the `user_graphics` lock, releases that
+lock, and then takes the compositor's. Both locks are rank 10, so the two
+subsystems never nest and need no ordering rule between them. The self-test
+covers: refusal before init (NotReady regardless of the handle), idempotent
+init, exact colour at the blitted offset and untouched pixels next to it,
+edge-clipped touched rectangles, refusal of a bogus handle, and refusal of a
+handle whose owner has exited. Syscalls 102 (blit, `x | y << 32` as i32) and
+103 (screen pixel). Marker: `[S19.1] compositor surface: PASSED`.
+
+**Stage 19.2 — application through the compositor.** `hello-gui` presents its
+window at (60, 40), reads screen pixels back from userspace, and exits. The
+kernel then reads `compositor::pixel(160, 100)` itself, after the process has
+gone. A userspace check that only claimed success cannot pass this gate, and the
+read also shows that composed pixels do not depend on the client's lifetime.
+Marker: `[S19.2] hello-gui through the compositor: PASSED`.
+
+Validation: Stages 17.1, 18.1, 18.2, 19.1 and 19.2 passed on 1, 2 and 4 CPUs.
+The kernel Clippy matrix (49 feature configurations) is clean with
+`-D warnings`, as are libwoven and host Clippy (`--all-targets`). The first
+Stage 19.1 run failed on all CPU counts because `blit` snapshotted the client
+before checking readiness. It returned `InvalidClient` where `NotReady` was
+specified, and the fix checks readiness first.
+
+Historical note: the following paragraph describes the pre-19.3 baseline; the
+later Stage 19 gates supersede those limitations.
+
+Open: the compositor surface is not yet presented to the real framebuffer. It is
+a fixed 640×480 off-screen surface, because no global framebuffer accessor
+exists for it. There is no stacking, focus or input routing: a blit lands where
+the client asks, so this is the primitive a userspace window manager will drive,
+not a window manager. Any process may blit its own surfaces anywhere. Before a
+second graphical client is admitted, that authority must become a capability.
+Blits copy the whole client surface (at most 300 KB) per call. Text drawing
+from userspace needs the argument-block ABI. Next prerequisites: framebuffer
+presentation of compositor damage, a compositor capability, and keyboard and
+pointer events delivered to the focused client.
+
+## Stage 17.1 — WovenHat font and software compositing (2026-10-12)
+
+`kernel/src/font.rs` covers all 95 printable ASCII glyphs at 5×7. The old table
+had 14, so "WOVENHAT DESKTOP" could not render. `kernel/src/display.rs` adds
+`Surface`, bounded `Damage` (16 rectangles, then a bounding box) and a single
+`present` path that resolves the pixel format once per run. Host tests in
+`tests/display_compositing.rs` cover clipping, stride and damage coalescing.
+Marker: `[S17.1] WovenHat font coverage: PASSED`. Passed on 1, 2 and
+4 CPUs in the Stage 18–19 validation.
+
+## Stage 16.1 — applications built outside the kernel (2026-10-14)
+
+WovenHat runs a program produced by the ordinary Rust toolchain. Before this,
+every userspace program was one of 32 `global_asm!` blocks in
+`kernel/src/userspace.rs`, wrapped in a synthetic ELF by `build_stub_elf` at
+runtime, so a program could not exist without editing the kernel. That was the
+binding constraint on a userspace platform, and therefore on any desktop.
+
+`apps/hello` is a separate crate, excluded from the kernel workspace, with its
+own linker script and link flags. It compiles to a static ET_EXEC image; the
+dedicated harness signs that image into a WAPP package before the kernel build.
+The kernel verifies the package, installs it into the filesystem, reads it back,
+and loads the verified payload through the same ELF loader every other
+executable uses. The self-test loads the bytes read from the filesystem rather
+than the embedded constant, so the gate proves signature enforcement and that
+path rather than assuming either.
+
+`libwoven` grew from two bound syscalls to the process, I/O, filesystem, time
+and environment core, in two layers: one `unsafe` wrapper per kernel entry point
+returning the kernel's value unchanged, and a safe surface returning
+`Result<_, libwoven::Error>` where the unsafety can be discharged. The kernel
+implements 98 syscalls; the remainder are reachable through
+`libwoven::syscall::invoke` and should grow typed wrappers as they are used.
+
+Three build settings follow from the loader's rules and the user address space,
+each documented in [the application guide](writing-wovenhat-applications.md):
+`code-model=large`, because `USER_REGION_START` is far outside the small code
+model's ±2 GB; `build-std = ["core"]`, because the precompiled `core` uses the
+small model and conflicts; and an explicit `PHDRS` linker script with
+`-z norelro`, because the loader rejects `PT_GNU_RELRO` and any
+writable-executable segment.
+
+The marker is `[S16.1] out-of-kernel application: PASSED`, with per-step markers
+for WAPP verification, tamper refusal, unsigned-external-image refusal, loader
+acceptance, filesystem install, read-back, load, spawn, completion and exit
+status. The dedicated application harness now passes on 1, 2 and 4 CPUs; see
+the [Stage 16.1 audit](audit-stage16-1-out-of-kernel-application-2026-10-14.md).
+
+Open: one application per acceptance build, since `WOVENHAT_APP_IMAGE` names a
+single signed package; no FAT32 round trip, because the gate installs into the VFS at
+`/bin` where `exec` resolves names; no shared libraries or thread-locals, both
+rejected by the loader by design; and no stack-size negotiation.
+
+## Stage 15 — WovenFS native filesystem (2026-10-12)
+
+WovenFS is WovenHat's own on-disk filesystem, specified in
+[the format document](wovenfs-on-disk-format.md). Its design constraint is that
+no operation depends on more than one sector being written atomically: the
+superblock alternates between two checkpoint slots rather than being overwritten
+in place, and every multi-sector change is staged in a write-ahead journal whose
+completion is decided by a single commit sector.
+
+Stage 15.1 covers the filesystem itself — format, mount, create, write, read,
+unlink, lookup, read_dir and a consistency check, with checksummed inodes and
+file contents. Crash recovery is proven rather than asserted:
+`tests/wovenfs_crash.rs` counts the writes each of format, create, write and
+unlink performs, replays the operation once per write boundary against a fresh
+image with the device refusing every later write, and at each point requires the
+volume to mount, the consistency check to pass, and the operation to be entirely
+absent or entirely present. Replay idempotence, checkpoint-slot fallback and
+torn journal payloads are covered too.
+
+Stage 15.2 covers WovenFS on a real block device through the ATA driver, with
+its root published into the VFS at `/wfs`. It passed on 1/2/4 CPUs against a
+scratch image and on an 8 GB USB device, verified independently from the host:
+LBA 0 reads `WOVENFS1` with the checkpoint sequence in the slot the alternation
+scheme predicts.
+
+Physical qualification exposed an ATA defect invisible to emulation. The drive
+wait was bounded by iteration count rather than time, and real flash stalls for
+tens of milliseconds once its write buffer fills, so the driver read a normal
+programming cycle as a fault and format failed at the 320th sector write. The
+wait is now wall-clock bounded. This affected every ATA read and write in the
+kernel, not only WovenFS.
+
+Open: WovenFS is not the mounted system filesystem — FAT32 still holds `/mnt`
+and the boot volume — and whether to make it one or to keep FAT32 and reclassify
+Stage 12.2/12.4 is an open product decision. The bounded `/wfs/<name>` file
+authority now supports durable create, write, read-back, and unlink through task
+file syscalls; direct generic VFS mutation remains read-only. Native mutations
+serialize their complete read-modify-write transactions. The adapter remains a
+flat root-file slice: rename, mkdir, directory enumeration, mounted-system
+policy, and native multi-directory semantics remain open. See the [Stage 15
+VFS write-through audit](audit-stage15-wfs-vfs-write-through-2026-10-14.md).
+
+Crash recovery is proven by fault injection, not actual power loss on a device.
+Physical qualification remains incomplete: the inserted USB flash disk was
+inspected read-only, while the destructive harness requires Administrator
+elevation and explicit authorization to erase it.
+
+The complete Stage 12 acceptance chain was revalidated on 2026-10-13: all
+Stages 12.1–12.5 passed on 1/2/4 CPUs with exit 33. See the
+[revalidation audit](audit-stage12-acceptance-2026-10-13.md). This confirms the
+bounded gates only; the integration and physical limits above remain open.
+
+## Stage 15.3 — runtime permission broker (2026-10-13)
+
+The bounded permission broker now exposes generation-safe request/poll/decide/
+revoke operations through the userspace ABI. Decisions require `TaskControl`
+and successful changes pass through WovenGuard grant/revoke lineage checks;
+security-ledger events record each request and decision. The 1/2/4-CPU gate,
+freestanding Clippy, and all-target Clippy pass. See the
+[Stage 15.3 permission-broker audit](audit-stage15-3-permission-broker-2026-10-13.md).
+Graphical prompts, signed application identity, persistent consent, secure or
+measured boot, and WovenVault remain open Stage 15 work.
+
+## Stage 15.4 — signed application cryptographic boundary (2026-10-13)
+
+The pure-Rust `no_std` Ed25519 verifier and bounded versioned WAPP envelope
+now reject malformed and tampered payloads. The exact 1/2/4-CPU gate and
+warning-denying freestanding Clippy pass; see the
+[Stage 15.4 audit](audit-stage15-4-signed-applications-2026-10-13.md).
+Release builds now require `WOVENHAT_APP_TRUSTED_PUBLIC_KEY_HEX`; the RFC
+self-test remains pinned to the development vector. Signed package
+installation now has a real external-application path through
+`tools/wapp-packager`, and Stage 16.1 verifies that package before and after its
+VFS round trip. Multi-application catalogs, rollback protection, key
+rotation/revocation, and firmware/installer-owned key slots remain open. User
+`exec`/`spawn` now reject raw external ELF; only the finite kernel-owned system
+image allowlist retains the explicit internal-image path.
+Stage 15.5 software signed-kernel handoff is accepted with the exact 1/2/4-CPU
+gate; see the [secure-boot audit](audit-stage15-5-secure-boot-2026-10-13.md).
+Firmware UEFI Secure Boot state, TPM/event logs, release-key provisioning,
+rollback/revocation, and signed-initrd enforcement remain hardware/platform
+work and are not claimed complete.
+
+## Stage 15.7 — WovenVault volatile secret handles (2026-10-13)
+
+WovenVault now provides generation-safe per-owner secret handles with bounded
+storage, validated copy-in/copy-out, zeroizing revoke, and owner teardown.
+The `Secrets` capability is not granted by default. The 1/2/4-CPU gate and
+warning-denying freestanding kernel Clippy pass. See the
+[Stage 15.7 WovenVault audit](audit-stage15-7-wovenvault-handles-2026-10-13.md).
+The Stage 15.6 software measurement audit records the separate 1/2/4-CPU
+kernel measurement gate; TPM PCR extension, event logs, and firmware Secure
+Boot state remain hardware-dependent.
+Persistent encrypted records, rotation, TPM/firmware provisioning, and a
+secrets UI remain open.
+
+## Stage 15.8 — security-ledger read ABI (2026-10-13)
+
+The security ledger now has a bounded newest-relative read syscall authorized
+by `TaskInspect`, with validated userspace copies and a fixed 48-byte record
+decoded by typed `libwoven` wrappers. The 1/2/4-CPU gate, build, and
+warning-denying freestanding kernel Clippy pass. See the
+[Stage 15.8 security-ledger audit](audit-stage15-8-security-ledger-2026-10-13.md).
+This is an ABI boundary, not a complete security-center product: durable
+retention/export, signed identity, graphical review, and secure/measured boot
+remain open.
+
+## Stage 15.9 — exploit-mitigation hardening (2026-10-13)
+
+The existing ASLR, W^X, and user-stack guard-page checks are now joined by a
+scheduler-validated canary on each static kernel task stack. The dedicated
+1/2/4-CPU gate and warning-denying freestanding kernel Clippy pass. See the
+[Stage 15.9 exploit-mitigation audit](audit-stage15-9-exploit-mitigations-2026-10-13.md).
+This closes the verified software-hardening subset only: true unmapped kernel
+stack guards, SMEP/SMAP enablement and hardware qualification, shared-library
+RELRO/TLS support, and scheduler-backed user threads remain open.
 
 ## Stage 1–5 bounded batch data journal — 2026-10-06
 
 FAT32 persistence now exposes a separate versioned `WDJ2` journal for bounded
-four-file data batches. Prepared batches roll every partially-written file
-back to its prior bytes and remove stale WMD1/WMD2 metadata intents; committed
-batches are retired only after all intended checksums match. The legacy `WDJ1`
+sixteen-file data batches. Prepared batches roll every partially-written file
+back to its prior bytes and metadata, removing stale WMD1/WMD2 metadata
+intents; committed batches are retired only after all intended checksums and
+metadata snapshots match. The legacy `WDJ1`
 single-file format and metadata ABIs remain readable. Kernel
 build/check, warning-denying kernel Clippy, and the existing storage gate
 passed on 1/2/4 CPUs, including two-file commit/readback and prepared,
@@ -14,6 +1284,71 @@ partial-commit, and complete-commit recovery exercises. See the
 
 Physical storage/DMA qualification, unclean-shutdown hardware testing,
 metadata transactions, and arbitrary-size transactions remain open.
+
+## Stage 1–5 immediate batch rollback — 2026-10-13
+
+The bounded WDJ2 data-batch API now invokes durable recovery immediately when a
+post-journal write, metadata, commit-record, or journal-retirement operation
+fails. It invalidates file-page cache state before recovery, preventing a
+transient runtime error from leaving partially committed data on disk or stale
+pages available to the current boot's VFS; the original error is preserved and
+a failed rollback remains recoverable from the durable journal. Direct FAT32
+and MBR/GPT-partitioned paths are covered. The 1/2/4-CPU disposable storage
+gates, host crash tests, and warning-denying Clippy passed. See the
+[immediate-rollback audit](audit-stage1-5-immediate-rollback-2026-10-13.md).
+
+This is a bounded hardening increment, not full Stage 1–5 completion. The
+follow-up metadata transaction increment below closes metadata rollback within
+this bounded format; arbitrary-size/full-volume rollback, physical storage/DMA
+qualification, and unclean-shutdown hardware evidence remain open.
+
+The WDJ2 capacity extension was revalidated on 1/2/4 CPUs after increasing the
+bounded batch maximum from four to sixteen entries; see the [capacity audit](audit-stage1-5-wdj2-capacity-2026-10-14.md).
+
+## Stage 1–5 bounded metadata transactions — 2026-10-14
+
+WDJ2 v2 snapshots old and new inode/sidecar ownership metadata while retaining
+version 1 recovery compatibility. Prepared and incomplete committed batches
+restore both bytes and prior metadata; committed recovery retires the journal
+only after bytes and new metadata match. The live FAT32 recovery fixture and
+storage/SMP QEMU gates passed on 1/2/4 CPUs. See the [metadata transaction
+audit](audit-stage1-5-metadata-transactions-2026-10-14.md).
+
+This closes bounded metadata transactions, not arbitrary-size/full-volume
+rollback or physical unclean-shutdown qualification.
+
+## Stage 1–5 sector-write fault injection — 2026-10-14
+
+FAT32 mutation self-tests now inject a deterministic `DeviceFault` at every
+bounded file-creation sector-write boundary. Failed mutations must leave the
+volume structurally checkable, remove the new file, and preserve the original
+file bytes; successful mutations are also checked. Host and freestanding
+storage gates use the same self-test. This is software error-return evidence,
+not physical power-loss or torn-sector evidence. FSInfo remains an advisory
+hint and may be stale after an injected failure; physical flash/ATA/DMA,
+torn-write, arbitrary-size/full-volume rollback, and reboot recovery remain
+open.
+
+The WDJ2 codec self-test also rejects every byte-truncated form of a valid
+prepared record before recovery can interpret it. This strengthens software
+journal-boundary evidence; it does not prove physical torn-sector atomicity or
+power-loss recovery.
+
+## Stage 1–5 DMA allocation cleanup — 2026-10-14
+
+The existing AHCI and NVMe DMA-page owners now return allocator frames when
+direct-map setup fails. AHCI also drops all pages on failed controller
+initialization; successful controller ownership remains process-lifetime and
+is held under the controller lock until no hardware command can reference the
+pages. The `BlockDevice` ABI is unchanged.
+
+The Stage 13.3/13.4 freestanding Clippy gates, host Clippy, and the complete
+host test suite passed after this change. The NVMe and AHCI QEMU controller
+gates also passed on 1/2/4 CPUs with exit 33. See the [DMA allocation audit](audit-stage1-5-dma-allocation-2026-10-14.md)
+for the six evidence directories.
+This closes a software allocation-leak path only. Physical AHCI/NVMe and USB
+flash qualification, IOMMU isolation, interrupt completion, torn-sector and
+power-loss evidence, and arbitrary-size rollback remain open.
 
 ## Stage 14.2D — Router Advertisement state (2026-10-06)
 
@@ -485,6 +1820,18 @@ validation. See [audit](audit-stage11-2-2026-09-16.md).
 
 Next: Stage 11.3 structured notifications and lifecycle events.
 
+### Stage 11.2 scheduler-backed thread follow-up — accepted increment on 2026-10-14
+
+The bounded scheduler-backed user-thread path now has an end-to-end Ring-3
+create/exit/join acceptance. It uses private NX stacks, copied initial-exec
+TLS, stable process ownership, generation-safe IDs, and post-switch resource
+reclamation. Build, warning-denying Clippy, host tests, and 1/2/4-CPU QEMU
+passed; see [audit](audit-stage11-2-scheduler-threads-2026-10-14.md).
+
+This is an implementation increment, not closure of every Stage 11 thread
+requirement. Sibling cancellation/teardown, shared libraries, symbol
+resolution, dynamic TLS, and hardware qualification remain open.
+
 ## Stages 11.3–11.5 — accepted on 2026-09-16
 
 Structured notifications, the `libwoven` userspace API boundary, and hardened
@@ -494,12 +1841,36 @@ freestanding Clippy, and host tests. See [audit](audit-stage11-3-5-2026-09-16.md
 The follow-up ASLR pass now randomizes production ELF, stack and mmap bases
 with a deterministic `qemu-test` switch; see [audit](audit-aslr-2026-09-16.md).
 
-The 2026-10-05 loader-boundary follow-up rejects `PT_INTERP`, `PT_DYNAMIC`,
+The 2026-10-05 loader-boundary follow-up rejected `PT_INTERP`, `PT_DYNAMIC`,
 `PT_TLS`, and `PT_GNU_RELRO` program headers instead of silently accepting
-binaries whose dynamic-linking, TLS, or RELRO semantics are not yet implemented.
-This is a fail-closed production-safety boundary; dynamic relocations, shared
-libraries, TLS image allocation, and RELRO permission transitions remain open.
+binaries whose dynamic-linking, TLS, or RELRO semantics were not implemented
+at that point. This was a fail-closed production-safety boundary; later
+follow-ups narrow the remaining unsupported surface.
 See [audit](audit-stage11-loader-boundary-2026-10-05.md).
+
+The 2026-10-14 RELRO follow-up closes the static RELRO permission transition:
+a single validated `PT_GNU_RELRO` range is protected read-only after loading,
+ASLR relocation carries the range, and COW write-fault bookkeeping refuses to
+reattach write authority to it. Valid/invalid parser cases and the complete
+Stage 11.5 1/2/4-CPU gate passed. Shared libraries, symbol-based relocation,
+and physical/hardware qualification remain open. See
+the [RELRO audit](audit-stage11-relro-2026-10-14.md).
+
+The 2026-10-14 static TLS follow-up adds a bounded initial-exec `PT_TLS`
+contract: the loader validates and maps one initial TLS image, task context
+switches install its FS base, and fork/exec preserve the ownership and COW
+rules. Shared-library TLS, TLS module IDs, multi-thread TLS semantics, and
+physical/hardware qualification remain open. See the
+[static TLS audit](audit-stage11-static-tls-2026-10-14.md).
+
+The 2026-10-14 dynamic-relocation follow-up accepts bounded self-contained
+ET_DYN images with R_X86_64_RELATIVE plus locally defined symbol RELA entries.
+SysV hash/symbol/string metadata is bounded and validated; relocations are
+applied before W^X and RELRO finalization. The inherited 1/2/4-CPU Stage
+11.3–11.5 matrix passed with an end-to-end mapped-image local-symbol
+relocation self-test. Shared-library dependency mapping, cross-image symbol
+resolution, versioning, lazy binding, and dynamic TLS remain fail-closed. See
+the [dynamic relocation audit](audit-stage11-dynamic-relocations-2026-10-14.md).
 
 ## Stage 12.1 — accepted on 2026-09-16
 
@@ -523,15 +1894,155 @@ leases, teardown-before-reuse invalidation, and bridge bus-window parentage.
 The dedicated preservation gate requires focused host tests, warning-denying
 kernel Clippy, runtime-harness regressions, and 1/2/4-CPU QEMU evidence.
 
-Full Stage 13.2 acceptance remains blocked on BAR size probing/allocation and
-rebalance, bridge I/O/MMIO/prefetchable resource routing, generic MSI/MSI-X
-vector allocation/programming/teardown, PCIe hotplug, and WovenDriver
-binding/unbinding integrated with generation ownership. The current paging
-layer also lacks a physical MMIO unmap/revoke primitive; topology teardown
-therefore revokes logical lease authority but must not be described as page
-table mapping revocation.
+Full Stage 13.2 acceptance remains open for physical BAR qualification,
+bridge interoperability beyond the QEMU fixture, MSI qualification beyond the
+QEMU SATA path, MSI-X delivery, PCIe link/power hotplug, and device-specific
+reset/recovery. The software BAR probe, bounded
+allocation/rebalance, bridge routing transaction, interrupt ownership paths,
+and hotplug reconciliation are covered by the follow-ups below. Raw legacy
+MMIO mappings remain shared and non-revocable; owner-scoped mappings are
+covered by the follow-up below.
 
-Stage 13.3 NVMe is intentionally not advanced by this work.
+The WovenDriver integration item now has a bounded acceptance probe. The
+Stage 13.2 gate claims one discovered function for a synthetic feature-gated
+owner, retains its programmed MMIO BAR leases, and releases subordinate
+resources before function ownership. The 1/2/4-CPU preservation gate passed;
+see [the lifecycle audit](audit-stage13-2-driver-lifecycle-2026-10-13.md).
+This does not close the remaining physical rebalance, hardware interrupt
+qualification, hotplug, or MMIO mapping-revoke requirements.
+
+The follow-up adds owner-scoped page mappings: raw legacy MMIO mappings remain
+shared and non-revocable, while PCI driver mappings carry an owner token and
+are revoked after interrupt quiescence and before BAR/function release. The
+1/2/4-CPU gate passes and proves same-page remap after teardown. QEMU's only
+candidate firmware BAR is outside the direct-map range and is rejected
+fail-closed, so this is not physical device-BAR qualification. Remaining work
+is MSI-X/physical interrupt qualification, PCIe link/power hotplug, and
+valid-BAR hardware qualification beyond the QEMU fixture.
+
+The acceptance probe now also runs the driver-aware no-removal rescan after
+teardown and recomputes bridge routing before it finishes. The 1/2/4-CPU
+matrix passed; this validates coordinator ordering but does not substitute for
+physical PCIe insertion/removal qualification.
+
+Initial PCI discovery now has the same admission boundary: `hal::init` uses
+discover-and-route, bridge-bearing generations are not driver-admissible until
+the rollback-capable bridge transaction succeeds, and routing/discovery failure
+rejects later driver claims fail-closed. The 1/2/4-CPU preservation gate passed;
+see the [admission-routing audit](audit-stage13-2-admission-routing-2026-10-13.md).
+This validates ordering and failure policy, not physical bridge-window
+interoperability on hardware absent from QEMU.
+
+The ECAM configuration path now applies the mapped page offset for both reads
+and writes. Before this repair, live ECAM discovery repeated the vendor/device
+dword at every offset, masking real class, BAR, and capability behavior. The
+corrected path is covered by the 1/2/4-CPU gate and the
+[ECAM offset audit](audit-stage13-2-ecam-offset-2026-10-13.md).
+
+The reconciliation boundary also clears admission before publishing a
+refreshed inventory, eliminating the interval where a concurrent bind could
+observe new topology before bridge programming completed. The updated 1/2/4
+CPU matrix passed with warning-denying Clippy.
+
+The firmware BAR rebalance path now retains successful reservations in bounded
+persistent PCI resource state, rejects duplicate function admission, clears
+and verifies BAR registers before releasing reservations, and refreshes the
+published device state. The focused freestanding check and warning-denying
+Clippy pass; see the [persistent BAR audit](audit-stage13-2-bar-resources-2026-10-13.md).
+
+Persistent BAR teardown now verifies PCI command-space decoding is disabled,
+clears the assigned BARs, refreshes inventory, and reroutes bridge windows
+before releasing address reservations; failed verification retains the
+allocation for retry. This prevents allocator reuse while a device could
+still decode its old BAR assignment.
+
+Normal PCI driver admission now invokes the BAR allocator for the safe
+all-unassigned case, refreshes the published BAR view before leasing, rejects
+mixed layouts fail-closed, and checkpoints persistent ownership through
+unbind. Successful rebalance also reroutes the bridge hierarchy before any
+MMIO lease is published. See the [automatic BAR admission audit](audit-stage13-2-bar-admission-2026-10-13.md).
+QEMU still lacks a valid physical unassigned-BAR fixture, so the positive
+hardware allocation path remains unqualified.
+
+PCI rescans now report newly inserted functions through a bounded
+`hotplug_rescan_report` while preserving the existing summary-only API. Full
+driver-relevant identity changes at a BDF are detected; if replacement occurs
+before old-owner quiescence, the entire batch fails closed before any teardown
+configuration write. Persistent BAR reservations are released before unbound
+generations are invalidated, and new functions are verified after topology
+publication and bridge routing before being returned to driver matching;
+unknown hardware is never auto-bound. See the [hotplug insertion audit](audit-stage13-2-hotplug-insertion-2026-10-13.md).
+Physical PCIe link/power hotplug remains hardware-dependent.
+
+The driver manager now provides bounded PCI identity matching and an explicit
+match-then-bind API for insertion reports. Empty matchers are rejected and
+unknown hardware remains unclaimed. See the [driver-matching audit](audit-stage13-driver-matching-2026-10-13.md).
+Device-specific drivers, initialization policies, and physical PCIe
+interoperability remain later qualification work.
+
+The driver layer now exposes generic interrupt selection: MSI-X is attempted
+when capability and retained BAR authority permit it, clean failures fall back
+to MSI, and activation-retained leases never fall back or lose ownership. See
+the [interrupt-selection audit](audit-stage13-2-interrupt-selection-2026-10-13.md).
+Physical vector delivery remains unqualified on QEMU.
+
+PCI driver suspend/resume now owner-checks the function, disables and verifies
+command decoding, and, when the PCI Power Management capability is present,
+checkpoints PMCSR, enters D3hot, restores D0, and restores the exact command
+checkpoint before resuming. Missing checkpoints and failed transitions fail
+closed. See the [PCI suspend/resume audit](audit-stage13-2-suspend-resume-2026-10-13.md).
+Device-specific reset, D3cold, wake signaling, and physical power-management
+qualification remain open.
+
+The generic MSI programming path now snapshots and restores the original
+capability/message state on every configuration failure, including a failed
+initial disabled-header write. Every header, address, and data write is
+read-back verified; `RestoreFailed` is returned when repair itself cannot be
+verified. Vector and interrupt-mode ownership remain retained until successful
+quiescence. Corrected ECAM offset handling now decodes live PCI classes and
+capabilities correctly; the QEMU SATA fixture exercised generic MSI activation
+and ordered teardown on the 1/2/4-CPU preservation matrix. See the
+[MSI rollback audit](audit-stage13-2-msi-rollback-2026-10-13.md). Physical
+MSI qualification beyond this QEMU fixture and MSI-X table/vector delivery
+remain hardware-dependent.
+
+MSI-X activation now asserts Function Mask and keeps MSI-X disabled before any
+table MMIO. Table reads and programming use owner-scoped MMIO mappings and
+release those mappings after each bounded volatile operation. If programming
+has made a table entry device-visible but cleanup fails, the `MsixLease` is
+retained for ordered teardown rather than losing the vector obligation. The
+Stage 13.2 probe now also scans disposable QEMU PCI fixtures, activates a real
+MSI-X lease when its table BAR is admissible, and verifies the bounded
+high-MMIO fallback mapping; the 1/2/4-CPU preservation matrix passed with
+those fixtures present. See the
+[MSI-X mapping audit](audit-stage13-2-msix-mapping-2026-10-13.md). Physical
+MSI-X delivery, PCIe hotplug, and physical device lifecycle remain
+unqualified because QEMU does not provide those physical conditions.
+
+High 64-bit BAR pages no longer depend on the low fixed virtual alias. The
+bounded high-MMIO window retains each mapping's virtual address and uses that
+address for revocation/release; see the
+[high-MMIO audit](audit-stage13-2-high-mmio-2026-10-13.md).
+
+Stage 13.3 NVMe now passes its ordered 1/2/4-CPU QEMU acceptance gate. The
+driver identifies a namespace, creates admin and I/O queues, performs
+write/read/flush against a disposable image, returns owned DMA pages on failed
+initialization, and restores the original PCI command after bounded controller
+quiescence. See the [Stage 13.3 NVMe audit](audit-stage13-3-nvme-2026-10-13.md).
+This closes the emulated synchronous foundation only; interrupt-backed
+completion, reset/recovery, hotplug removal, multi-namespace policy, and
+physical NVMe qualification remain open.
+
+Stage 13.8 HDA/WovenAudio now passes its ordered 1/2/4-CPU QEMU gate after
+correcting register page-offset handling in all HDA MMIO helpers. The gate
+covers codec discovery, topology, playback/capture streams, mixer state, and
+the WovenAudio API boundary. See the [HDA MMIO audit](audit-stage13-8-hda-mmio-2026-10-13.md).
+Physical codec interoperability and interrupt/DMA fault recovery remain open.
+
+The local Stage 14.1–14.5D feature gates now pass build/lint and live network
+acceptance on 1/2/4 CPUs. A shared PCI `expect(dead_code)` guard was extended
+through the later feature family after Stage 14.1 exposed that it could not
+compile cleanly under warning denial. See the [Stage 14 feature-gate audit](audit-stage14-feature-gates-2026-10-13.md).
 
 ## Stages 12.2–12.5 — accepted on 2026-09-16
 
@@ -788,6 +2299,20 @@ session is rejected before notification encoding, while a session meeting the
 16-byte policy is accepted. The local 1/2/4-CPU gate, host tests and
 warning-denying kernel Clippy pass; GitHub acceptance for the pushed tip is
 still required.
+
+## Stage 1–5 WDJ2 capacity extension — 2026-10-14
+
+The compatible WDJ2 batch journal now accepts the full 255-entry range
+representable by its existing one-byte count field, with a host round-trip
+self-test at the maximum. This removes the former sixteen-file implementation
+ceiling for package/directory transactions without changing the on-disk
+version or production block-device ABI. Recovery allocation remains explicitly
+bounded; arbitrary-size/full-volume rollback, physical storage/DMA, torn-write
+and reboot qualification remain open.
+
+The public `persist_paths_atomic` boundary now returns `TooLarge` for a
+256-entry request before mount or device access, rather than collapsing the
+bounded-capacity refusal into a generic failure.
 
 
 

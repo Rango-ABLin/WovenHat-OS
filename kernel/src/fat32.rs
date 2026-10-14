@@ -3458,6 +3458,7 @@ pub fn self_test() -> bool {
         && directory_growth_self_test()
         && overwrite_rollback_self_test()
         && directory_extension_rollback_self_test()
+        && sector_write_fault_injection_self_test()
 }
 
 fn range_self_test() -> bool {
@@ -3555,6 +3556,7 @@ fn streaming_read_self_test() -> bool {
         .all(|(index, byte)| *byte == ((offset + index) % 251) as u8)
 }
 
+#[derive(Clone)]
 struct MutableFatDisk {
     boot: [u8; SECTOR_SIZE],
     inode_metadata: [[u8; SECTOR_SIZE]; INODE_METADATA_SECTOR_COUNT],
@@ -3762,7 +3764,7 @@ impl BlockDevice for MutableFatDisk {
 }
 
 fn read_path_bytes(
-    disk: &mut MutableFatDisk,
+    disk: &mut impl BlockDevice,
     volume: Volume,
     path: &str,
     out: &mut [u8],
@@ -4096,6 +4098,79 @@ struct FailingWriteDisk {
     inner: MutableFatDisk,
     fail_lba: u64,
     failed: bool,
+}
+
+struct WriteBudgetDisk {
+    inner: MutableFatDisk,
+    fail_after: usize,
+    writes: usize,
+}
+
+impl BlockDevice for WriteBudgetDisk {
+    fn sector_count(&self) -> u64 {
+        self.inner.sector_count()
+    }
+
+    fn read_sector(&mut self, lba: u64, sector: &mut [u8]) -> Result<(), BlockError> {
+        self.inner.read_sector(lba, sector)
+    }
+
+    fn write_sector(&mut self, lba: u64, sector: &[u8]) -> Result<(), BlockError> {
+        if self.writes == self.fail_after {
+            self.writes += 1;
+            return Err(BlockError::DeviceFault);
+        }
+        self.writes += 1;
+        self.inner.write_sector(lba, sector)
+    }
+}
+
+fn sector_write_fault_injection_self_test() -> bool {
+    let mut baseline = MutableFatDisk::new();
+    let Ok(volume) = mount(&mut baseline) else {
+        return false;
+    };
+    if create_path_file(&mut baseline, volume, "keep.txt", b"old").is_err() {
+        return false;
+    }
+
+    let mut saw_failure = false;
+    let mut saw_success = false;
+    for fail_after in 0..128 {
+        let mut disk = WriteBudgetDisk {
+            inner: baseline.clone(),
+            fail_after,
+            writes: 0,
+        };
+        match create_path_file(&mut disk, volume, "new.txt", b"new") {
+            Ok(()) => {
+                saw_success = true;
+                if check_volume(&mut disk, volume).is_err()
+                    || resolve_path(&mut disk, volume, "new.txt").is_err()
+                {
+                    return false;
+                }
+            }
+            Err(Error::Block(BlockError::DeviceFault)) => {
+                saw_failure = true;
+                if check_volume(&mut disk, volume).is_err() {
+                    return false;
+                }
+                if resolve_path(&mut disk, volume, "new.txt") != Err(Error::NotFound) {
+                    return false;
+                }
+                let mut bytes = [0_u8; 4];
+                if read_path_bytes(&mut disk, volume, "keep.txt", &mut bytes) != Ok(3)
+                    || &bytes[..3] != b"old"
+                {
+                    return false;
+                }
+            }
+            Err(_) => return false,
+        }
+    }
+
+    saw_failure && saw_success
 }
 
 impl BlockDevice for FailingWriteDisk {

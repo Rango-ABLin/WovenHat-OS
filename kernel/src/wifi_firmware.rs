@@ -349,7 +349,8 @@ pub fn stage13_10l_self_test() -> bool {
         || parsed.paging_size() != Some(4096)
         || parsed.section_group(0) != Some(IntelFirmwareSectionGroup::Lmac)
         || parsed.section_group(1) != Some(IntelFirmwareSectionGroup::Umac)
-        || parsed.section(1).map(|s| (s.device_offset, s.bytes)) != Some((0x3000, &[5, 6, 7, 8][..]))
+        || parsed.section(1).map(|s| (s.device_offset, s.bytes))
+            != Some((0x3000, &[5, 6, 7, 8][..]))
         || section.image != IntelFirmwareImageKind::Runtime
         || section.device_offset != 0x2000
         || section.bytes != [1, 2, 3, 4, 5, 6, 7, 8]

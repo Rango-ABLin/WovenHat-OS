@@ -15,7 +15,12 @@ pub const MAX_HCI_EVENT: usize = 257;
 pub const MAX_HCI_PAYLOAD: usize = 255;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum HciError { PayloadTooLarge, MalformedEvent, UnexpectedOpcode, ControllerFailure(u8) }
+pub enum HciError {
+    PayloadTooLarge,
+    MalformedEvent,
+    UnexpectedOpcode,
+    ControllerFailure(u8),
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct HciCommand {
@@ -26,24 +31,38 @@ pub struct HciCommand {
 
 impl HciCommand {
     pub fn new(opcode: u16, data: &[u8]) -> Result<Self, HciError> {
-        if data.len() > MAX_HCI_PAYLOAD { return Err(HciError::PayloadTooLarge); }
+        if data.len() > MAX_HCI_PAYLOAD {
+            return Err(HciError::PayloadTooLarge);
+        }
         let mut payload = [0; MAX_HCI_PAYLOAD];
         payload[..data.len()].copy_from_slice(data);
-        Ok(Self { opcode, len: data.len() as u8, payload })
+        Ok(Self {
+            opcode,
+            len: data.len() as u8,
+            payload,
+        })
     }
-    pub fn payload(&self) -> &[u8] { &self.payload[..self.len as usize] }
-    pub fn encoded_len(&self) -> usize { 3 + self.len as usize }
+    pub fn payload(&self) -> &[u8] {
+        &self.payload[..self.len as usize]
+    }
+    pub fn encoded_len(&self) -> usize {
+        3 + self.len as usize
+    }
     pub fn encode(&self, out: &mut [u8; 258]) -> usize {
         out[0..2].copy_from_slice(&self.opcode.to_le_bytes());
         out[2] = self.len;
         let n = self.len as usize;
-        out[3..3+n].copy_from_slice(self.payload());
-        3+n
+        out[3..3 + n].copy_from_slice(self.payload());
+        3 + n
     }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct CommandComplete { pub credits: u8, pub opcode: u16, pub status: u8 }
+pub struct CommandComplete {
+    pub credits: u8,
+    pub opcode: u16,
+    pub status: u8,
+}
 
 pub fn parse_command_complete(event: &[u8]) -> Result<CommandComplete, HciError> {
     if event.len() < 6 || event[0] != EVT_COMMAND_COMPLETE || event[1] < 4 {
@@ -51,28 +70,48 @@ pub fn parse_command_complete(event: &[u8]) -> Result<CommandComplete, HciError>
     }
     let opcode = u16::from_le_bytes([event[3], event[4]]);
     let status = event[5];
-    Ok(CommandComplete { credits: event[2], opcode, status })
+    Ok(CommandComplete {
+        credits: event[2],
+        opcode,
+        status,
+    })
 }
 
-pub struct ControllerState { credits: u8, last_opcode: Option<u16> }
+pub struct ControllerState {
+    credits: u8,
+    last_opcode: Option<u16>,
+}
 
 impl ControllerState {
-    pub const fn new() -> Self { Self { credits: 1, last_opcode: None } }
+    pub const fn new() -> Self {
+        Self {
+            credits: 1,
+            last_opcode: None,
+        }
+    }
     pub fn begin(&mut self, command: &HciCommand) -> bool {
-        if self.credits == 0 { return false; }
+        if self.credits == 0 {
+            return false;
+        }
         self.credits -= 1;
         self.last_opcode = Some(command.opcode);
         true
     }
     pub fn complete(&mut self, event: &[u8]) -> Result<(), HciError> {
         let done = parse_command_complete(event)?;
-        if self.last_opcode != Some(done.opcode) { return Err(HciError::UnexpectedOpcode); }
+        if self.last_opcode != Some(done.opcode) {
+            return Err(HciError::UnexpectedOpcode);
+        }
         self.credits = done.credits;
         self.last_opcode = None;
-        if done.status != 0 { return Err(HciError::ControllerFailure(done.status)); }
+        if done.status != 0 {
+            return Err(HciError::ControllerFailure(done.status));
+        }
         Ok(())
     }
-    pub fn ready(&self) -> bool { self.credits != 0 && self.last_opcode.is_none() }
+    pub fn ready(&self) -> bool {
+        self.credits != 0 && self.last_opcode.is_none()
+    }
 }
 
 pub struct HciTransaction {
@@ -174,12 +213,11 @@ pub fn initialization_self_test() -> bool {
     if init.next_command(&mut bytes) != Ok(Some(3)) || bytes[..3] != [0x01, 0x10, 0] {
         return false;
     }
-    init.complete(&[EVT_COMMAND_COMPLETE, 4, 1, 0x01, 0x10, 0]).is_ok()
+    init.complete(&[EVT_COMMAND_COMPLETE, 4, 1, 0x01, 0x10, 0])
+        .is_ok()
         && init.ready()
         && init.next_command(&mut bytes) == Ok(None)
 }
-
-
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct LocalVersion {
@@ -244,10 +282,24 @@ pub fn parse_supported_commands_complete(event: &[u8]) -> Result<[u8; 64], HciEr
 
 pub fn capability_self_test() -> bool {
     let version = [
-        EVT_COMMAND_COMPLETE, 12, 1, 0x01, 0x10, 0,
-        0x0c, 0x34, 0x12, 0x0c, 0x4c, 0x00, 0x78, 0x56,
+        EVT_COMMAND_COMPLETE,
+        12,
+        1,
+        0x01,
+        0x10,
+        0,
+        0x0c,
+        0x34,
+        0x12,
+        0x0c,
+        0x4c,
+        0x00,
+        0x78,
+        0x56,
     ];
-    let Ok(info) = parse_local_version_complete(&version) else { return false; };
+    let Ok(info) = parse_local_version_complete(&version) else {
+        return false;
+    };
     if info.hci_version != 0x0c
         || info.hci_revision != 0x1234
         || info.lmp_version != 0x0c
@@ -257,10 +309,7 @@ pub fn capability_self_test() -> bool {
         return false;
     }
 
-    let address_event = [
-        EVT_COMMAND_COMPLETE, 10, 1, 0x09, 0x10, 0,
-        1, 2, 3, 4, 5, 6,
-    ];
+    let address_event = [EVT_COMMAND_COMPLETE, 10, 1, 0x09, 0x10, 0, 1, 2, 3, 4, 5, 6];
     if parse_bd_addr_complete(&address_event) != Ok([1, 2, 3, 4, 5, 6]) {
         return false;
     }
@@ -274,7 +323,9 @@ pub fn capability_self_test() -> bool {
     for (index, byte) in supported[6..70].iter_mut().enumerate() {
         *byte = index as u8;
     }
-    let Ok(commands) = parse_supported_commands_complete(&supported) else { return false; };
+    let Ok(commands) = parse_supported_commands_complete(&supported) else {
+        return false;
+    };
     commands[0] == 0
         && commands[63] == 63
         && parse_bd_addr_complete(&version).is_err()
@@ -317,7 +368,13 @@ impl DiscoveryState {
     }
 
     pub fn begin(&mut self, out: &mut [u8; 258]) -> Result<usize, HciError> {
-        let params = [INQUIRY_GIAC[0], INQUIRY_GIAC[1], INQUIRY_GIAC[2], 0x08, 0x00];
+        let params = [
+            INQUIRY_GIAC[0],
+            INQUIRY_GIAC[1],
+            INQUIRY_GIAC[2],
+            0x08,
+            0x00,
+        ];
         let command = HciCommand::new(OPCODE_INQUIRY, &params)?;
         self.active = true;
         Ok(command.encode(out))
@@ -381,10 +438,18 @@ impl DiscoveryState {
         }
     }
 
-    pub fn active(&self) -> bool { self.active }
-    pub fn count(&self) -> usize { self.count }
+    pub fn active(&self) -> bool {
+        self.active
+    }
+    pub fn count(&self) -> usize {
+        self.count
+    }
     pub fn device(&self, index: usize) -> Option<DiscoveredDevice> {
-        if index >= self.count { None } else { self.devices[index] }
+        if index >= self.count {
+            None
+        } else {
+            self.devices[index]
+        }
     }
 }
 
@@ -399,11 +464,23 @@ pub fn discovery_self_test() -> bool {
     }
 
     let result = [
-        EVT_INQUIRY_RESULT, 15, 1,
-        1, 2, 3, 4, 5, 6,
-        1, 0, 0,
-        0x04, 0x02, 0x0c,
-        0x34, 0x12,
+        EVT_INQUIRY_RESULT,
+        15,
+        1,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        1,
+        0,
+        0,
+        0x04,
+        0x02,
+        0x0c,
+        0x34,
+        0x12,
     ];
     if discovery.handle_event(&result) != Ok(DiscoveryEvent::Results(1))
         || discovery.count() != 1
@@ -412,7 +489,9 @@ pub fn discovery_self_test() -> bool {
     {
         return false;
     }
-    let Some(device) = discovery.device(0) else { return false; };
+    let Some(device) = discovery.device(0) else {
+        return false;
+    };
     if device.address != [1, 2, 3, 4, 5, 6]
         || device.page_scan_repetition_mode != 1
         || device.class_of_device != [0x04, 0x02, 0x0c]
@@ -425,8 +504,6 @@ pub fn discovery_self_test() -> bool {
         && !discovery.active()
         && discovery.handle_event(&[EVT_INQUIRY_RESULT, 1, 1]).is_err()
 }
-
-
 
 pub const EVT_LE_META: u8 = 0x3e;
 pub const LE_SUBEVENT_ADVERTISING_REPORT: u8 = 0x02;
@@ -446,7 +523,9 @@ pub struct LeDiscoveredDevice {
 }
 
 impl LeDiscoveredDevice {
-    pub fn data(&self) -> &[u8] { &self.data[..self.data_len as usize] }
+    pub fn data(&self) -> &[u8] {
+        &self.data[..self.data_len as usize]
+    }
 }
 
 pub struct LeDiscoveryState {
@@ -457,16 +536,23 @@ pub struct LeDiscoveryState {
 
 impl LeDiscoveryState {
     pub const fn new() -> Self {
-        Self { devices: [None; MAX_LE_DISCOVERED_DEVICES], count: 0, scanning: false }
+        Self {
+            devices: [None; MAX_LE_DISCOVERED_DEVICES],
+            count: 0,
+            scanning: false,
+        }
     }
 
     pub fn scan_parameters_command(out: &mut [u8; 258]) -> Result<usize, HciError> {
         let params = [0x01, 0x10, 0x00, 0x10, 0x00, 0x00, 0x00];
-        HciCommand::new(OPCODE_LE_SET_SCAN_PARAMETERS, &params)
-            .map(|command| command.encode(out))
+        HciCommand::new(OPCODE_LE_SET_SCAN_PARAMETERS, &params).map(|command| command.encode(out))
     }
 
-    pub fn scan_enable_command(&mut self, enable: bool, out: &mut [u8; 258]) -> Result<usize, HciError> {
+    pub fn scan_enable_command(
+        &mut self,
+        enable: bool,
+        out: &mut [u8; 258],
+    ) -> Result<usize, HciError> {
         let params = [u8::from(enable), 0x01];
         let encoded = HciCommand::new(OPCODE_LE_SET_SCAN_ENABLE, &params)
             .map(|command| command.encode(out))?;
@@ -475,7 +561,8 @@ impl LeDiscoveryState {
     }
 
     pub fn handle_advertising_report(&mut self, event: &[u8]) -> Result<usize, HciError> {
-        if event.len() < 4 || event[0] != EVT_LE_META || event[2] != LE_SUBEVENT_ADVERTISING_REPORT {
+        if event.len() < 4 || event[0] != EVT_LE_META || event[2] != LE_SUBEVENT_ADVERTISING_REPORT
+        {
             return Err(HciError::MalformedEvent);
         }
         let parameter_len = event[1] as usize;
@@ -506,14 +593,26 @@ impl LeDiscoveryState {
             data[..data_len].copy_from_slice(&event[cursor + 9..rssi_index]);
 
             if let Some(index) = self.devices[..self.count].iter().position(|entry| {
-                entry.is_some_and(|device| device.address_type == address_type && device.address == address)
+                entry.is_some_and(|device| {
+                    device.address_type == address_type && device.address == address
+                })
             }) {
                 self.devices[index] = Some(LeDiscoveredDevice {
-                    event_type, address_type, address, data_len: data_len as u8, data, rssi,
+                    event_type,
+                    address_type,
+                    address,
+                    data_len: data_len as u8,
+                    data,
+                    rssi,
                 });
             } else if self.count < MAX_LE_DISCOVERED_DEVICES {
                 self.devices[self.count] = Some(LeDiscoveredDevice {
-                    event_type, address_type, address, data_len: data_len as u8, data, rssi,
+                    event_type,
+                    address_type,
+                    address,
+                    data_len: data_len as u8,
+                    data,
+                    rssi,
                 });
                 self.count += 1;
                 added += 1;
@@ -526,10 +625,18 @@ impl LeDiscoveryState {
         Ok(added)
     }
 
-    pub fn scanning(&self) -> bool { self.scanning }
-    pub fn count(&self) -> usize { self.count }
+    pub fn scanning(&self) -> bool {
+        self.scanning
+    }
+    pub fn count(&self) -> usize {
+        self.count
+    }
     pub fn device(&self, index: usize) -> Option<LeDiscoveredDevice> {
-        if index >= self.count { None } else { self.devices[index] }
+        if index >= self.count {
+            None
+        } else {
+            self.devices[index]
+        }
     }
 }
 
@@ -546,9 +653,24 @@ pub fn le_discovery_self_test() -> bool {
     }
 
     let report = [
-        EVT_LE_META, 16, LE_SUBEVENT_ADVERTISING_REPORT, 1,
-        0, 1, 1, 2, 3, 4, 5, 6,
-        4, 2, 1, 6, 0xaa, 0xd8,
+        EVT_LE_META,
+        16,
+        LE_SUBEVENT_ADVERTISING_REPORT,
+        1,
+        0,
+        1,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        4,
+        2,
+        1,
+        6,
+        0xaa,
+        0xd8,
     ];
     if state.handle_advertising_report(&report) != Ok(1)
         || state.count() != 1
@@ -557,8 +679,11 @@ pub fn le_discovery_self_test() -> bool {
     {
         return false;
     }
-    let Some(device) = state.device(0) else { return false; };
-    if device.event_type != 0 || device.address_type != 1
+    let Some(device) = state.device(0) else {
+        return false;
+    };
+    if device.event_type != 0
+        || device.address_type != 1
         || device.address != [1, 2, 3, 4, 5, 6]
         || device.data() != [2, 1, 6, 0xaa]
         || device.rssi != -40
@@ -567,9 +692,10 @@ pub fn le_discovery_self_test() -> bool {
     }
     state.scan_enable_command(false, &mut out) == Ok(5)
         && !state.scanning()
-        && state.handle_advertising_report(&[EVT_LE_META, 2, LE_SUBEVENT_ADVERTISING_REPORT, 1]).is_err()
+        && state
+            .handle_advertising_report(&[EVT_LE_META, 2, LE_SUBEVENT_ADVERTISING_REPORT, 1])
+            .is_err()
 }
-
 
 pub const LE_SUBEVENT_CONNECTION_COMPLETE: u8 = 0x01;
 pub const OPCODE_LE_CREATE_CONNECTION: u16 = 0x200d;
@@ -593,7 +719,10 @@ pub struct LeLinkState {
 
 impl LeLinkState {
     pub const fn new() -> Self {
-        Self { links: [None; MAX_LE_LINKS], count: 0 }
+        Self {
+            links: [None; MAX_LE_LINKS],
+            count: 0,
+        }
     }
 
     pub fn create_connection_command(
@@ -613,8 +742,7 @@ impl LeLinkState {
         params[19..21].copy_from_slice(&0x01f4_u16.to_le_bytes());
         params[21..23].copy_from_slice(&0_u16.to_le_bytes());
         params[23..25].copy_from_slice(&0_u16.to_le_bytes());
-        HciCommand::new(OPCODE_LE_CREATE_CONNECTION, &params)
-            .map(|command| command.encode(out))
+        HciCommand::new(OPCODE_LE_CREATE_CONNECTION, &params).map(|command| command.encode(out))
     }
 
     pub fn handle_connection_complete(&mut self, event: &[u8]) -> Result<LeLink, HciError> {
@@ -685,7 +813,10 @@ impl LeLinkState {
     }
 
     pub fn contains_handle(&self, handle: u16) -> bool {
-        self.links[..self.count].iter().flatten().any(|link| link.handle == handle)
+        self.links[..self.count]
+            .iter()
+            .flatten()
+            .any(|link| link.handle == handle)
     }
 
     pub fn clear(&mut self) {
@@ -693,9 +824,15 @@ impl LeLinkState {
         self.count = 0;
     }
 
-    pub fn count(&self) -> usize { self.count }
+    pub fn count(&self) -> usize {
+        self.count
+    }
     pub fn link(&self, index: usize) -> Option<LeLink> {
-        if index >= self.count { None } else { self.links[index] }
+        if index >= self.count {
+            None
+        } else {
+            self.links[index]
+        }
     }
 }
 
@@ -720,11 +857,31 @@ pub fn le_link_lifecycle_self_test() -> bool {
 
     let mut links = LeLinkState::new();
     let connected = [
-        EVT_LE_META, 19, LE_SUBEVENT_CONNECTION_COMPLETE, 0,
-        0x42, 0x00, 0, 1, 1, 2, 3, 4, 5, 6,
-        0x18, 0x00, 0, 0, 0xf4, 0x01, 0,
+        EVT_LE_META,
+        19,
+        LE_SUBEVENT_CONNECTION_COMPLETE,
+        0,
+        0x42,
+        0x00,
+        0,
+        1,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        0x18,
+        0x00,
+        0,
+        0,
+        0xf4,
+        0x01,
+        0,
     ];
-    let Ok(link) = links.handle_connection_complete(&connected) else { return false; };
+    let Ok(link) = links.handle_connection_complete(&connected) else {
+        return false;
+    };
     if link.handle != 0x42
         || link.address != [1, 2, 3, 4, 5, 6]
         || link.address_type != 1
@@ -741,7 +898,6 @@ pub fn le_link_lifecycle_self_test() -> bool {
         && !links.contains_handle(0x42)
         && links.handle_disconnection_complete(&disconnected).is_err()
 }
-
 
 pub const ATT_OP_ERROR_RESPONSE: u8 = 0x01;
 pub const ATT_OP_READ_REQUEST: u8 = 0x0a;
@@ -767,15 +923,30 @@ pub struct AttAttribute {
 }
 
 impl AttAttribute {
-    pub fn new(handle: u16, uuid16: u16, readable: bool, writable: bool, value: &[u8]) -> Result<Self, HciError> {
+    pub fn new(
+        handle: u16,
+        uuid16: u16,
+        readable: bool,
+        writable: bool,
+        value: &[u8],
+    ) -> Result<Self, HciError> {
         if handle == 0 || value.len() > MAX_ATT_VALUE {
             return Err(HciError::MalformedEvent);
         }
         let mut stored = [0_u8; MAX_ATT_VALUE];
         stored[..value.len()].copy_from_slice(value);
-        Ok(Self { handle, uuid16, readable, writable, value_len: value.len() as u8, value: stored })
+        Ok(Self {
+            handle,
+            uuid16,
+            readable,
+            writable,
+            value_len: value.len() as u8,
+            value: stored,
+        })
     }
-    pub fn value(&self) -> &[u8] { &self.value[..self.value_len as usize] }
+    pub fn value(&self) -> &[u8] {
+        &self.value[..self.value_len as usize]
+    }
 }
 
 pub struct AttDatabase {
@@ -785,13 +956,22 @@ pub struct AttDatabase {
 
 impl AttDatabase {
     pub const fn new() -> Self {
-        Self { attributes: [None; MAX_ATT_ATTRIBUTES], count: 0 }
+        Self {
+            attributes: [None; MAX_ATT_ATTRIBUTES],
+            count: 0,
+        }
     }
 
-    pub fn remaining_capacity(&self) -> usize { MAX_ATT_ATTRIBUTES - self.count }
+    pub fn remaining_capacity(&self) -> usize {
+        MAX_ATT_ATTRIBUTES - self.count
+    }
 
     pub fn insert(&mut self, attribute: AttAttribute) -> Result<(), HciError> {
-        if self.attributes[..self.count].iter().flatten().any(|entry| entry.handle == attribute.handle) {
+        if self.attributes[..self.count]
+            .iter()
+            .flatten()
+            .any(|entry| entry.handle == attribute.handle)
+        {
             return Err(HciError::UnexpectedOpcode);
         }
         if self.count == MAX_ATT_ATTRIBUTES {
@@ -803,11 +983,17 @@ impl AttDatabase {
     }
 
     fn find(&self, handle: u16) -> Option<&AttAttribute> {
-        self.attributes[..self.count].iter().flatten().find(|entry| entry.handle == handle)
+        self.attributes[..self.count]
+            .iter()
+            .flatten()
+            .find(|entry| entry.handle == handle)
     }
 
     fn find_mut(&mut self, handle: u16) -> Option<&mut AttAttribute> {
-        self.attributes[..self.count].iter_mut().flatten().find(|entry| entry.handle == handle)
+        self.attributes[..self.count]
+            .iter_mut()
+            .flatten()
+            .find(|entry| entry.handle == handle)
     }
 
     fn error_response(request: u8, handle: u16, error: u8, out: &mut [u8; MAX_ATT_PDU]) -> usize {
@@ -827,12 +1013,18 @@ impl AttDatabase {
         uuid16: u16,
         out: &mut [u16; MAX_ATT_ATTRIBUTES],
     ) -> Result<usize, HciError> {
-        if !links.contains_handle(connection_handle) || start_handle == 0 || start_handle > end_handle {
+        if !links.contains_handle(connection_handle)
+            || start_handle == 0
+            || start_handle > end_handle
+        {
             return Err(HciError::UnexpectedOpcode);
         }
         let mut count = 0;
         for attribute in self.attributes[..self.count].iter().flatten() {
-            if attribute.handle >= start_handle && attribute.handle <= end_handle && attribute.uuid16 == uuid16 {
+            if attribute.handle >= start_handle
+                && attribute.handle <= end_handle
+                && attribute.uuid16 == uuid16
+            {
                 out[count] = attribute.handle;
                 count += 1;
             }
@@ -860,10 +1052,20 @@ impl AttDatabase {
                 }
                 let handle = u16::from_le_bytes([request[1], request[2]]);
                 let Some(attribute) = self.find(handle) else {
-                    return Ok(Self::error_response(opcode, handle, ATT_ERR_INVALID_HANDLE, out));
+                    return Ok(Self::error_response(
+                        opcode,
+                        handle,
+                        ATT_ERR_INVALID_HANDLE,
+                        out,
+                    ));
                 };
                 if !attribute.readable {
-                    return Ok(Self::error_response(opcode, handle, ATT_ERR_READ_NOT_PERMITTED, out));
+                    return Ok(Self::error_response(
+                        opcode,
+                        handle,
+                        ATT_ERR_READ_NOT_PERMITTED,
+                        out,
+                    ));
                 }
                 out[0] = ATT_OP_READ_RESPONSE;
                 let value = attribute.value();
@@ -876,10 +1078,20 @@ impl AttDatabase {
                 }
                 let handle = u16::from_le_bytes([request[1], request[2]]);
                 let Some(attribute) = self.find_mut(handle) else {
-                    return Ok(Self::error_response(opcode, handle, ATT_ERR_INVALID_HANDLE, out));
+                    return Ok(Self::error_response(
+                        opcode,
+                        handle,
+                        ATT_ERR_INVALID_HANDLE,
+                        out,
+                    ));
                 };
                 if !attribute.writable {
-                    return Ok(Self::error_response(opcode, handle, ATT_ERR_WRITE_NOT_PERMITTED, out));
+                    return Ok(Self::error_response(
+                        opcode,
+                        handle,
+                        ATT_ERR_WRITE_NOT_PERMITTED,
+                        out,
+                    ));
                 }
                 let value = &request[3..];
                 attribute.value.fill(0);
@@ -896,36 +1108,82 @@ impl AttDatabase {
 pub fn att_foundation_self_test() -> bool {
     let mut links = LeLinkState::new();
     let connected = [
-        EVT_LE_META, 19, LE_SUBEVENT_CONNECTION_COMPLETE, 0,
-        0x42, 0x00, 0, 1, 1, 2, 3, 4, 5, 6,
-        0x18, 0x00, 0, 0, 0xf4, 0x01, 0,
+        EVT_LE_META,
+        19,
+        LE_SUBEVENT_CONNECTION_COMPLETE,
+        0,
+        0x42,
+        0x00,
+        0,
+        1,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        0x18,
+        0x00,
+        0,
+        0,
+        0xf4,
+        0x01,
+        0,
     ];
     if links.handle_connection_complete(&connected).is_err() {
         return false;
     }
     let mut db = AttDatabase::new();
-    let Ok(read_write) = AttAttribute::new(1, 0x2a00, true, true, b"WovenHat") else { return false; };
-    let Ok(read_only) = AttAttribute::new(2, 0x2a01, true, false, &[0, 0]) else { return false; };
+    let Ok(read_write) = AttAttribute::new(1, 0x2a00, true, true, b"WovenHat") else {
+        return false;
+    };
+    let Ok(read_only) = AttAttribute::new(2, 0x2a01, true, false, &[0, 0]) else {
+        return false;
+    };
     if db.insert(read_write).is_err() || db.insert(read_only).is_err() {
         return false;
     }
     let mut out = [0_u8; MAX_ATT_PDU];
     if db.transact(&links, 0x42, &[ATT_OP_READ_REQUEST, 1, 0], &mut out) != Ok(9)
-        || out[..9] != [ATT_OP_READ_RESPONSE, b'W', b'o', b'v', b'e', b'n', b'H', b'a', b't']
-        || db.transact(&links, 0x42, &[ATT_OP_WRITE_REQUEST, 1, 0, b'O', b'S'], &mut out) != Ok(1)
+        || out[..9]
+            != [
+                ATT_OP_READ_RESPONSE,
+                b'W',
+                b'o',
+                b'v',
+                b'e',
+                b'n',
+                b'H',
+                b'a',
+                b't',
+            ]
+        || db.transact(
+            &links,
+            0x42,
+            &[ATT_OP_WRITE_REQUEST, 1, 0, b'O', b'S'],
+            &mut out,
+        ) != Ok(1)
         || out[0] != ATT_OP_WRITE_RESPONSE
         || db.transact(&links, 0x42, &[ATT_OP_READ_REQUEST, 1, 0], &mut out) != Ok(3)
         || out[..3] != [ATT_OP_READ_RESPONSE, b'O', b'S']
         || db.transact(&links, 0x42, &[ATT_OP_WRITE_REQUEST, 2, 0, 1], &mut out) != Ok(5)
-        || out[..5] != [ATT_OP_ERROR_RESPONSE, ATT_OP_WRITE_REQUEST, 2, 0, ATT_ERR_WRITE_NOT_PERMITTED]
+        || out[..5]
+            != [
+                ATT_OP_ERROR_RESPONSE,
+                ATT_OP_WRITE_REQUEST,
+                2,
+                0,
+                ATT_ERR_WRITE_NOT_PERMITTED,
+            ]
     {
         return false;
     }
     let disconnected = [EVT_DISCONNECTION_COMPLETE, 4, 0, 0x42, 0, 0x13];
     links.handle_disconnection_complete(&disconnected).is_ok()
-        && db.transact(&links, 0x42, &[ATT_OP_READ_REQUEST, 1, 0], &mut out).is_err()
+        && db
+            .transact(&links, 0x42, &[ATT_OP_READ_REQUEST, 1, 0], &mut out)
+            .is_err()
 }
-
 
 pub const GATT_UUID_PRIMARY_SERVICE: u16 = 0x2800;
 pub const GATT_UUID_CHARACTERISTIC: u16 = 0x2803;
@@ -953,7 +1211,10 @@ pub struct GattSubscriptions {
 
 impl GattSubscriptions {
     pub const fn new() -> Self {
-        Self { entries: [None; MAX_GATT_SUBSCRIPTIONS], count: 0 }
+        Self {
+            entries: [None; MAX_GATT_SUBSCRIPTIONS],
+            count: 0,
+        }
     }
 
     pub fn configure(
@@ -967,10 +1228,14 @@ impl GattSubscriptions {
             return Err(HciError::UnexpectedOpcode);
         }
         if let Some(index) = self.entries[..self.count].iter().position(|entry| {
-            entry.is_some_and(|item| item.connection_handle == connection_handle && item.value_handle == value_handle)
+            entry.is_some_and(|item| {
+                item.connection_handle == connection_handle && item.value_handle == value_handle
+            })
         }) {
             if cccd == 0 {
-                for slot in index..self.count - 1 { self.entries[slot] = self.entries[slot + 1]; }
+                for slot in index..self.count - 1 {
+                    self.entries[slot] = self.entries[slot + 1];
+                }
                 self.count -= 1;
                 self.entries[self.count] = None;
             } else {
@@ -983,8 +1248,12 @@ impl GattSubscriptions {
             }
             return Ok(());
         }
-        if cccd == 0 { return Ok(()); }
-        if self.count == MAX_GATT_SUBSCRIPTIONS { return Err(HciError::ControllerFailure(0xff)); }
+        if cccd == 0 {
+            return Ok(());
+        }
+        if self.count == MAX_GATT_SUBSCRIPTIONS {
+            return Err(HciError::ControllerFailure(0xff));
+        }
         self.entries[self.count] = Some(GattSubscription {
             connection_handle,
             value_handle,
@@ -1005,7 +1274,9 @@ impl GattSubscriptions {
                 }
             }
         }
-        for slot in write..self.count { self.entries[slot] = None; }
+        for slot in write..self.count {
+            self.entries[slot] = None;
+        }
         self.count = write;
     }
 
@@ -1014,7 +1285,9 @@ impl GattSubscriptions {
         self.count = 0;
     }
 
-    pub fn count(&self) -> usize { self.count }
+    pub fn count(&self) -> usize {
+        self.count
+    }
 
     pub fn emit(
         &self,
@@ -1025,16 +1298,25 @@ impl GattSubscriptions {
         value: &[u8],
         out: &mut [u8; MAX_ATT_PDU],
     ) -> Result<usize, HciError> {
-        if !links.contains_handle(connection_handle) || value_handle == 0 || value.len() + 3 > MAX_ATT_PDU {
+        if !links.contains_handle(connection_handle)
+            || value_handle == 0
+            || value.len() + 3 > MAX_ATT_PDU
+        {
             return Err(HciError::UnexpectedOpcode);
         }
         let Some(subscription) = self.entries[..self.count].iter().flatten().find(|item| {
             item.connection_handle == connection_handle && item.value_handle == value_handle
-        }) else { return Err(HciError::UnexpectedOpcode); };
+        }) else {
+            return Err(HciError::UnexpectedOpcode);
+        };
         if (indication && !subscription.indicate) || (!indication && !subscription.notify) {
             return Err(HciError::UnexpectedOpcode);
         }
-        out[0] = if indication { ATT_OP_HANDLE_VALUE_INDICATION } else { ATT_OP_HANDLE_VALUE_NOTIFICATION };
+        out[0] = if indication {
+            ATT_OP_HANDLE_VALUE_INDICATION
+        } else {
+            ATT_OP_HANDLE_VALUE_NOTIFICATION
+        };
         out[1..3].copy_from_slice(&value_handle.to_le_bytes());
         out[3..3 + value.len()].copy_from_slice(value);
         Ok(3 + value.len())
@@ -1049,10 +1331,16 @@ pub struct BluetoothLeLifecycle {
 
 impl BluetoothLeLifecycle {
     pub const fn new() -> Self {
-        Self { links: LeLinkState::new(), subscriptions: GattSubscriptions::new(), generation: 0 }
+        Self {
+            links: LeLinkState::new(),
+            subscriptions: GattSubscriptions::new(),
+            generation: 0,
+        }
     }
 
-    pub fn generation(&self) -> u32 { self.generation }
+    pub fn generation(&self) -> u32 {
+        self.generation
+    }
 
     pub fn disconnect(&mut self, event: &[u8]) -> Result<u16, HciError> {
         let handle = self.links.handle_disconnection_complete(event)?;
@@ -1071,23 +1359,59 @@ impl BluetoothLeLifecycle {
 pub fn bluetooth_le_lifecycle_hardening_self_test() -> bool {
     let mut lifecycle = BluetoothLeLifecycle::new();
     let connected = [
-        EVT_LE_META, 19, LE_SUBEVENT_CONNECTION_COMPLETE, 0,
-        0x42, 0x00, 0, 1, 1, 2, 3, 4, 5, 6,
-        0x18, 0x00, 0, 0, 0xf4, 0x01, 0,
+        EVT_LE_META,
+        19,
+        LE_SUBEVENT_CONNECTION_COMPLETE,
+        0,
+        0x42,
+        0x00,
+        0,
+        1,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        0x18,
+        0x00,
+        0,
+        0,
+        0xf4,
+        0x01,
+        0,
     ];
-    if lifecycle.links.handle_connection_complete(&connected).is_err()
-        || lifecycle.subscriptions.configure(&lifecycle.links, 0x42, 8, 0x0001).is_err()
+    if lifecycle
+        .links
+        .handle_connection_complete(&connected)
+        .is_err()
+        || lifecycle
+            .subscriptions
+            .configure(&lifecycle.links, 0x42, 8, 0x0001)
+            .is_err()
         || lifecycle.subscriptions.count() != 1
-    { return false; }
+    {
+        return false;
+    }
     let disconnected = [EVT_DISCONNECTION_COMPLETE, 4, 0, 0x42, 0, 0x13];
     if lifecycle.disconnect(&disconnected) != Ok(0x42)
         || lifecycle.links.contains_handle(0x42)
         || lifecycle.subscriptions.count() != 0
         || lifecycle.generation() != 1
-    { return false; }
-    if lifecycle.links.handle_connection_complete(&connected).is_err()
-        || lifecycle.subscriptions.configure(&lifecycle.links, 0x42, 8, 0x0001).is_err()
-    { return false; }
+    {
+        return false;
+    }
+    if lifecycle
+        .links
+        .handle_connection_complete(&connected)
+        .is_err()
+        || lifecycle
+            .subscriptions
+            .configure(&lifecycle.links, 0x42, 8, 0x0001)
+            .is_err()
+    {
+        return false;
+    }
     lifecycle.controller_reset();
     lifecycle.links.count() == 0
         && lifecycle.subscriptions.count() == 0
@@ -1097,13 +1421,39 @@ pub fn bluetooth_le_lifecycle_hardening_self_test() -> bool {
 pub fn bluetooth_le_recovery_self_test() -> bool {
     let mut lifecycle = BluetoothLeLifecycle::new();
     let connected = [
-        EVT_LE_META, 19, LE_SUBEVENT_CONNECTION_COMPLETE, 0,
-        0x42, 0x00, 0, 1, 1, 2, 3, 4, 5, 6,
-        0x18, 0x00, 0, 0, 0xf4, 0x01, 0,
+        EVT_LE_META,
+        19,
+        LE_SUBEVENT_CONNECTION_COMPLETE,
+        0,
+        0x42,
+        0x00,
+        0,
+        1,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        0x18,
+        0x00,
+        0,
+        0,
+        0xf4,
+        0x01,
+        0,
     ];
-    if lifecycle.links.handle_connection_complete(&connected).is_err()
-        || lifecycle.subscriptions.configure(&lifecycle.links, 0x42, 8, 0x0001).is_err()
-    { return false; }
+    if lifecycle
+        .links
+        .handle_connection_complete(&connected)
+        .is_err()
+        || lifecycle
+            .subscriptions
+            .configure(&lifecycle.links, 0x42, 8, 0x0001)
+            .is_err()
+    {
+        return false;
+    }
     let malformed = [EVT_DISCONNECTION_COMPLETE, 3, 0, 0x42, 0];
     let unknown = [EVT_DISCONNECTION_COMPLETE, 4, 0, 0x43, 0, 0x13];
     if lifecycle.disconnect(&malformed).is_ok()
@@ -1112,24 +1462,44 @@ pub fn bluetooth_le_recovery_self_test() -> bool {
         || !lifecycle.links.contains_handle(0x42)
         || lifecycle.subscriptions.count() != 1
         || lifecycle.generation() != 0
-    { return false; }
+    {
+        return false;
+    }
 
     let disconnected = [EVT_DISCONNECTION_COMPLETE, 4, 0, 0x42, 0, 0x13];
     if lifecycle.disconnect(&disconnected) != Ok(0x42)
         || lifecycle.links.count() != 0
         || lifecycle.subscriptions.count() != 0
         || lifecycle.generation() != 1
-    { return false; }
+    {
+        return false;
+    }
 
-    if lifecycle.links.handle_connection_complete(&connected).is_err()
+    if lifecycle
+        .links
+        .handle_connection_complete(&connected)
+        .is_err()
         || lifecycle.subscriptions.count() != 0
-    { return false; }
+    {
+        return false;
+    }
     let mut out = [0_u8; MAX_ATT_PDU];
-    if lifecycle.subscriptions.emit(&lifecycle.links, 0x42, 8, false, &[75], &mut out).is_ok()
-        || lifecycle.subscriptions.configure(&lifecycle.links, 0x42, 8, 0x0001).is_err()
-        || lifecycle.subscriptions.emit(&lifecycle.links, 0x42, 8, false, &[75], &mut out) != Ok(4)
+    if lifecycle
+        .subscriptions
+        .emit(&lifecycle.links, 0x42, 8, false, &[75], &mut out)
+        .is_ok()
+        || lifecycle
+            .subscriptions
+            .configure(&lifecycle.links, 0x42, 8, 0x0001)
+            .is_err()
+        || lifecycle
+            .subscriptions
+            .emit(&lifecycle.links, 0x42, 8, false, &[75], &mut out)
+            != Ok(4)
         || out[..4] != [ATT_OP_HANDLE_VALUE_NOTIFICATION, 8, 0, 75]
-    { return false; }
+    {
+        return false;
+    }
 
     lifecycle.controller_reset();
     lifecycle.links.count() == 0
@@ -1146,29 +1516,65 @@ pub fn bluetooth_le_lifecycle_stress_self_test() -> bool {
         let handle = 0x40_u16 + u16::from(cycle & 0x0f);
         let [handle_lo, handle_hi] = handle.to_le_bytes();
         let connected = [
-            EVT_LE_META, 19, LE_SUBEVENT_CONNECTION_COMPLETE, 0,
-            handle_lo, handle_hi, 0, 1, 1, 2, 3, 4, 5, cycle,
-            0x18, 0x00, 0, 0, 0xf4, 0x01, 0,
+            EVT_LE_META,
+            19,
+            LE_SUBEVENT_CONNECTION_COMPLETE,
+            0,
+            handle_lo,
+            handle_hi,
+            0,
+            1,
+            1,
+            2,
+            3,
+            4,
+            5,
+            cycle,
+            0x18,
+            0x00,
+            0,
+            0,
+            0xf4,
+            0x01,
+            0,
         ];
-        if lifecycle.links.handle_connection_complete(&connected).is_err()
+        if lifecycle
+            .links
+            .handle_connection_complete(&connected)
+            .is_err()
             || lifecycle.links.count() != 1
-            || lifecycle.subscriptions.configure(&lifecycle.links, handle, 8, 0x0001).is_err()
+            || lifecycle
+                .subscriptions
+                .configure(&lifecycle.links, handle, 8, 0x0001)
+                .is_err()
             || lifecycle.subscriptions.count() != 1
-            || lifecycle.subscriptions.emit(&lifecycle.links, handle, 8, false, &[cycle], &mut out) != Ok(4)
-        { return false; }
+            || lifecycle
+                .subscriptions
+                .emit(&lifecycle.links, handle, 8, false, &[cycle], &mut out)
+                != Ok(4)
+        {
+            return false;
+        }
 
         if cycle % 4 == 3 {
             lifecycle.controller_reset();
         } else {
             let disconnected = [EVT_DISCONNECTION_COMPLETE, 4, 0, handle_lo, handle_hi, 0x13];
-            if lifecycle.disconnect(&disconnected) != Ok(handle) { return false; }
+            if lifecycle.disconnect(&disconnected) != Ok(handle) {
+                return false;
+            }
         }
 
         if lifecycle.links.count() != 0
             || lifecycle.subscriptions.count() != 0
             || lifecycle.links.contains_handle(handle)
-            || lifecycle.subscriptions.emit(&lifecycle.links, handle, 8, false, &[cycle], &mut out).is_ok()
-        { return false; }
+            || lifecycle
+                .subscriptions
+                .emit(&lifecycle.links, handle, 8, false, &[cycle], &mut out)
+                .is_ok()
+        {
+            return false;
+        }
     }
     lifecycle.generation() == 32
 }
@@ -1180,7 +1586,10 @@ pub struct GattDatabase {
 
 impl GattDatabase {
     pub const fn new() -> Self {
-        Self { att: AttDatabase::new(), next_handle: 1 }
+        Self {
+            att: AttDatabase::new(),
+            next_handle: 1,
+        }
     }
 
     pub fn add_primary_service(&mut self, uuid16: u16) -> Result<u16, HciError> {
@@ -1193,7 +1602,10 @@ impl GattDatabase {
             &uuid16.to_le_bytes(),
         )?;
         self.att.insert(attribute)?;
-        self.next_handle = self.next_handle.checked_add(1).ok_or(HciError::PayloadTooLarge)?;
+        self.next_handle = self
+            .next_handle
+            .checked_add(1)
+            .ok_or(HciError::PayloadTooLarge)?;
         Ok(handle)
     }
 
@@ -1208,7 +1620,9 @@ impl GattDatabase {
             return Err(HciError::ControllerFailure(0xff));
         }
         let declaration_handle = self.next_handle;
-        let value_handle = declaration_handle.checked_add(1).ok_or(HciError::PayloadTooLarge)?;
+        let value_handle = declaration_handle
+            .checked_add(1)
+            .ok_or(HciError::PayloadTooLarge)?;
         let mut declaration = [0_u8; 5];
         declaration[0] = (if readable { GATT_PROP_READ } else { 0 })
             | (if writable { GATT_PROP_WRITE } else { 0 });
@@ -1228,7 +1642,9 @@ impl GattDatabase {
             writable,
             value,
         )?)?;
-        self.next_handle = value_handle.checked_add(1).ok_or(HciError::PayloadTooLarge)?;
+        self.next_handle = value_handle
+            .checked_add(1)
+            .ok_or(HciError::PayloadTooLarge)?;
         Ok((declaration_handle, value_handle))
     }
 
@@ -1238,7 +1654,14 @@ impl GattDatabase {
         connection_handle: u16,
         out: &mut [u16; MAX_ATT_ATTRIBUTES],
     ) -> Result<usize, HciError> {
-        self.att.discover_uuid16(links, connection_handle, 1, u16::MAX, GATT_UUID_PRIMARY_SERVICE, out)
+        self.att.discover_uuid16(
+            links,
+            connection_handle,
+            1,
+            u16::MAX,
+            GATT_UUID_PRIMARY_SERVICE,
+            out,
+        )
     }
 
     pub fn discover_characteristics(
@@ -1249,7 +1672,14 @@ impl GattDatabase {
         end_handle: u16,
         out: &mut [u16; MAX_ATT_ATTRIBUTES],
     ) -> Result<usize, HciError> {
-        self.att.discover_uuid16(links, connection_handle, start_handle, end_handle, GATT_UUID_CHARACTERISTIC, out)
+        self.att.discover_uuid16(
+            links,
+            connection_handle,
+            start_handle,
+            end_handle,
+            GATT_UUID_CHARACTERISTIC,
+            out,
+        )
     }
 
     pub fn transact(
@@ -1285,8 +1715,11 @@ impl GattDatabase {
         model: &[u8],
         battery_level: u8,
     ) -> Result<BleStandardProfileHandles, HciError> {
-        if battery_level > 100 { return Err(HciError::PayloadTooLarge); }
-        let device_information_service = self.add_primary_service(BLE_SERVICE_DEVICE_INFORMATION)?;
+        if battery_level > 100 {
+            return Err(HciError::PayloadTooLarge);
+        }
+        let device_information_service =
+            self.add_primary_service(BLE_SERVICE_DEVICE_INFORMATION)?;
         let (_, manufacturer_name_value) =
             self.add_characteristic(BLE_CHAR_MANUFACTURER_NAME, true, false, manufacturer)?;
         let (_, model_number_value) =
@@ -1311,11 +1744,18 @@ pub struct BleBatteryService {
 
 impl BleBatteryService {
     pub const fn new(value_handle: u16, level: u8) -> Result<Self, HciError> {
-        if value_handle == 0 || level > 100 { return Err(HciError::PayloadTooLarge); }
-        Ok(Self { value_handle, level })
+        if value_handle == 0 || level > 100 {
+            return Err(HciError::PayloadTooLarge);
+        }
+        Ok(Self {
+            value_handle,
+            level,
+        })
     }
 
-    pub fn level(&self) -> u8 { self.level }
+    pub fn level(&self) -> u8 {
+        self.level
+    }
 
     pub fn update_and_notify(
         &mut self,
@@ -1325,7 +1765,9 @@ impl BleBatteryService {
         level: u8,
         out: &mut [u8; MAX_ATT_PDU],
     ) -> Result<usize, HciError> {
-        if level > 100 { return Err(HciError::PayloadTooLarge); }
+        if level > 100 {
+            return Err(HciError::PayloadTooLarge);
+        }
         let len = subscriptions.emit(
             links,
             connection_handle,
@@ -1342,37 +1784,69 @@ impl BleBatteryService {
 pub fn ble_battery_notification_self_test() -> bool {
     let mut links = LeLinkState::new();
     let connected = [
-        EVT_LE_META, 19, LE_SUBEVENT_CONNECTION_COMPLETE, 0,
-        0x42, 0x00, 0, 1, 1, 2, 3, 4, 5, 6,
-        0x18, 0x00, 0, 0, 0xf4, 0x01, 0,
+        EVT_LE_META,
+        19,
+        LE_SUBEVENT_CONNECTION_COMPLETE,
+        0,
+        0x42,
+        0x00,
+        0,
+        1,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        0x18,
+        0x00,
+        0,
+        0,
+        0xf4,
+        0x01,
+        0,
     ];
-    if links.handle_connection_complete(&connected).is_err() { return false; }
+    if links.handle_connection_complete(&connected).is_err() {
+        return false;
+    }
     let mut subscriptions = GattSubscriptions::new();
     let mut battery = match BleBatteryService::new(8, 87) {
         Ok(service) => service,
         Err(_) => return false,
     };
     let mut out = [0_u8; MAX_ATT_PDU];
-    if battery.update_and_notify(&links, &subscriptions, 0x42, 86, &mut out).is_ok()
+    if battery
+        .update_and_notify(&links, &subscriptions, 0x42, 86, &mut out)
+        .is_ok()
         || battery.level() != 87
         || subscriptions.configure(&links, 0x42, 8, 0x0001).is_err()
         || battery.update_and_notify(&links, &subscriptions, 0x42, 86, &mut out) != Ok(4)
         || out[..4] != [ATT_OP_HANDLE_VALUE_NOTIFICATION, 8, 0, 86]
         || battery.level() != 86
-        || battery.update_and_notify(&links, &subscriptions, 0x42, 101, &mut out).is_ok()
+        || battery
+            .update_and_notify(&links, &subscriptions, 0x42, 101, &mut out)
+            .is_ok()
         || battery.level() != 86
         || subscriptions.configure(&links, 0x42, 7, 0x0001).is_err()
-    { return false; }
+    {
+        return false;
+    }
     let mut other = match BleBatteryService::new(9, 50) {
         Ok(service) => service,
         Err(_) => return false,
     };
-    if other.update_and_notify(&links, &subscriptions, 0x42, 49, &mut out).is_ok()
+    if other
+        .update_and_notify(&links, &subscriptions, 0x42, 49, &mut out)
+        .is_ok()
         || other.level() != 50
-    { return false; }
+    {
+        return false;
+    }
     let disconnected = [EVT_DISCONNECTION_COMPLETE, 4, 0, 0x42, 0, 0x13];
     links.handle_disconnection_complete(&disconnected).is_ok()
-        && battery.update_and_notify(&links, &subscriptions, 0x42, 85, &mut out).is_err()
+        && battery
+            .update_and_notify(&links, &subscriptions, 0x42, 85, &mut out)
+            .is_err()
         && battery.level() == 86
 }
 
@@ -1397,79 +1871,199 @@ impl GattDatabase {
             self.add_characteristic(WOVENHAT_BLE_STATUS_UUID, true, false, status)?;
         let (_, command_value) =
             self.add_characteristic(WOVENHAT_BLE_COMMAND_UUID, false, true, &[])?;
-        Ok(WovenHatBleServiceHandles { service, status_value, command_value })
+        Ok(WovenHatBleServiceHandles {
+            service,
+            status_value,
+            command_value,
+        })
     }
 }
 
 pub fn wovenhat_ble_service_self_test() -> bool {
     let mut links = LeLinkState::new();
     let connected = [
-        EVT_LE_META, 19, LE_SUBEVENT_CONNECTION_COMPLETE, 0,
-        0x42, 0x00, 0, 1, 1, 2, 3, 4, 5, 6,
-        0x18, 0x00, 0, 0, 0xf4, 0x01, 0,
+        EVT_LE_META,
+        19,
+        LE_SUBEVENT_CONNECTION_COMPLETE,
+        0,
+        0x42,
+        0x00,
+        0,
+        1,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        0x18,
+        0x00,
+        0,
+        0,
+        0xf4,
+        0x01,
+        0,
     ];
-    if links.handle_connection_complete(&connected).is_err() { return false; }
+    if links.handle_connection_complete(&connected).is_err() {
+        return false;
+    }
     let mut gatt = GattDatabase::new();
-    let Ok(handles) = gatt.add_wovenhat_os_service(b"ready") else { return false; };
-    if handles != (WovenHatBleServiceHandles { service: 1, status_value: 3, command_value: 5 }) {
+    let Ok(handles) = gatt.add_wovenhat_os_service(b"ready") else {
+        return false;
+    };
+    if handles
+        != (WovenHatBleServiceHandles {
+            service: 1,
+            status_value: 3,
+            command_value: 5,
+        })
+    {
         return false;
     }
     let mut out = [0_u8; MAX_ATT_PDU];
     if gatt.transact(&links, 0x42, &[ATT_OP_READ_REQUEST, 3, 0], &mut out) != Ok(6)
         || out[..6] != [ATT_OP_READ_RESPONSE, b'r', b'e', b'a', b'd', b'y']
         || gatt.transact(&links, 0x42, &[ATT_OP_WRITE_REQUEST, 3, 0, b'x'], &mut out) != Ok(5)
-        || out[..5] != [ATT_OP_ERROR_RESPONSE, ATT_OP_WRITE_REQUEST, 3, 0, ATT_ERR_WRITE_NOT_PERMITTED]
+        || out[..5]
+            != [
+                ATT_OP_ERROR_RESPONSE,
+                ATT_OP_WRITE_REQUEST,
+                3,
+                0,
+                ATT_ERR_WRITE_NOT_PERMITTED,
+            ]
         || gatt.transact(&links, 0x42, &[ATT_OP_READ_REQUEST, 5, 0], &mut out) != Ok(5)
-        || out[..5] != [ATT_OP_ERROR_RESPONSE, ATT_OP_READ_REQUEST, 5, 0, ATT_ERR_READ_NOT_PERMITTED]
-        || gatt.transact(&links, 0x42, &[ATT_OP_WRITE_REQUEST, 5, 0, b'p', b'i', b'n', b'g'], &mut out) != Ok(1)
-    { return false; }
+        || out[..5]
+            != [
+                ATT_OP_ERROR_RESPONSE,
+                ATT_OP_READ_REQUEST,
+                5,
+                0,
+                ATT_ERR_READ_NOT_PERMITTED,
+            ]
+        || gatt.transact(
+            &links,
+            0x42,
+            &[ATT_OP_WRITE_REQUEST, 5, 0, b'p', b'i', b'n', b'g'],
+            &mut out,
+        ) != Ok(1)
+    {
+        return false;
+    }
     let disconnected = [EVT_DISCONNECTION_COMPLETE, 4, 0, 0x42, 0, 0x13];
     links.handle_disconnection_complete(&disconnected).is_ok()
-        && gatt.transact(&links, 0x42, &[ATT_OP_WRITE_REQUEST, 5, 0, b'x'], &mut out).is_err()
+        && gatt
+            .transact(&links, 0x42, &[ATT_OP_WRITE_REQUEST, 5, 0, b'x'], &mut out)
+            .is_err()
 }
 
 pub fn ble_standard_profiles_self_test() -> bool {
     let mut links = LeLinkState::new();
     let connected = [
-        EVT_LE_META, 19, LE_SUBEVENT_CONNECTION_COMPLETE, 0,
-        0x42, 0x00, 0, 1, 1, 2, 3, 4, 5, 6,
-        0x18, 0x00, 0, 0, 0xf4, 0x01, 0,
+        EVT_LE_META,
+        19,
+        LE_SUBEVENT_CONNECTION_COMPLETE,
+        0,
+        0x42,
+        0x00,
+        0,
+        1,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        0x18,
+        0x00,
+        0,
+        0,
+        0xf4,
+        0x01,
+        0,
     ];
-    if links.handle_connection_complete(&connected).is_err() { return false; }
+    if links.handle_connection_complete(&connected).is_err() {
+        return false;
+    }
     let mut gatt = GattDatabase::new();
     let Ok(handles) = gatt.add_wovenhat_standard_profiles(b"WovenHat", b"OS", 87) else {
         return false;
     };
-    if handles != (BleStandardProfileHandles {
-        device_information_service: 1,
-        manufacturer_name_value: 3,
-        model_number_value: 5,
-        battery_service: 6,
-        battery_level_value: 8,
-    }) || gatt.add_wovenhat_standard_profiles(b"WovenHat", b"OS", 101).is_ok() {
+    if handles
+        != (BleStandardProfileHandles {
+            device_information_service: 1,
+            manufacturer_name_value: 3,
+            model_number_value: 5,
+            battery_service: 6,
+            battery_level_value: 8,
+        })
+        || gatt
+            .add_wovenhat_standard_profiles(b"WovenHat", b"OS", 101)
+            .is_ok()
+    {
         return false;
     }
     let mut out = [0_u8; MAX_ATT_PDU];
     if gatt.transact(&links, 0x42, &[ATT_OP_READ_REQUEST, 3, 0], &mut out) != Ok(9)
-        || out[..9] != [ATT_OP_READ_RESPONSE, b'W', b'o', b'v', b'e', b'n', b'H', b'a', b't']
+        || out[..9]
+            != [
+                ATT_OP_READ_RESPONSE,
+                b'W',
+                b'o',
+                b'v',
+                b'e',
+                b'n',
+                b'H',
+                b'a',
+                b't',
+            ]
         || gatt.transact(&links, 0x42, &[ATT_OP_READ_REQUEST, 5, 0], &mut out) != Ok(3)
         || out[..3] != [ATT_OP_READ_RESPONSE, b'O', b'S']
         || gatt.transact(&links, 0x42, &[ATT_OP_READ_REQUEST, 8, 0], &mut out) != Ok(2)
         || out[..2] != [ATT_OP_READ_RESPONSE, 87]
         || gatt.transact(&links, 0x42, &[ATT_OP_WRITE_REQUEST, 8, 0, 50], &mut out) != Ok(5)
-        || out[..5] != [ATT_OP_ERROR_RESPONSE, ATT_OP_WRITE_REQUEST, 8, 0, ATT_ERR_WRITE_NOT_PERMITTED]
-    { return false; }
+        || out[..5]
+            != [
+                ATT_OP_ERROR_RESPONSE,
+                ATT_OP_WRITE_REQUEST,
+                8,
+                0,
+                ATT_ERR_WRITE_NOT_PERMITTED,
+            ]
+    {
+        return false;
+    }
     let disconnected = [EVT_DISCONNECTION_COMPLETE, 4, 0, 0x42, 0, 0x13];
     links.handle_disconnection_complete(&disconnected).is_ok()
-        && gatt.transact(&links, 0x42, &[ATT_OP_READ_REQUEST, 8, 0], &mut out).is_err()
+        && gatt
+            .transact(&links, 0x42, &[ATT_OP_READ_REQUEST, 8, 0], &mut out)
+            .is_err()
 }
 
 pub fn gatt_foundation_self_test() -> bool {
     let mut links = LeLinkState::new();
     let connected = [
-        EVT_LE_META, 19, LE_SUBEVENT_CONNECTION_COMPLETE, 0,
-        0x42, 0x00, 0, 1, 1, 2, 3, 4, 5, 6,
-        0x18, 0x00, 0, 0, 0xf4, 0x01, 0,
+        EVT_LE_META,
+        19,
+        LE_SUBEVENT_CONNECTION_COMPLETE,
+        0,
+        0x42,
+        0x00,
+        0,
+        1,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        0x18,
+        0x00,
+        0,
+        0,
+        0xf4,
+        0x01,
+        0,
     ];
     if links.handle_connection_complete(&connected).is_err() {
         return false;
@@ -1486,12 +2080,43 @@ pub fn gatt_foundation_self_test() -> bool {
     if gatt.transact(&links, 0x42, &[ATT_OP_READ_REQUEST, 1, 0], &mut out) != Ok(3)
         || out[..3] != [ATT_OP_READ_RESPONSE, 0x00, 0x18]
         || gatt.transact(&links, 0x42, &[ATT_OP_READ_REQUEST, 2, 0], &mut out) != Ok(6)
-        || out[..6] != [ATT_OP_READ_RESPONSE, GATT_PROP_READ | GATT_PROP_WRITE, 3, 0, 0x00, 0x2a]
+        || out[..6]
+            != [
+                ATT_OP_READ_RESPONSE,
+                GATT_PROP_READ | GATT_PROP_WRITE,
+                3,
+                0,
+                0x00,
+                0x2a,
+            ]
         || gatt.transact(&links, 0x42, &[ATT_OP_READ_REQUEST, 3, 0], &mut out) != Ok(9)
-        || out[..9] != [ATT_OP_READ_RESPONSE, b'W', b'o', b'v', b'e', b'n', b'H', b'a', b't']
+        || out[..9]
+            != [
+                ATT_OP_READ_RESPONSE,
+                b'W',
+                b'o',
+                b'v',
+                b'e',
+                b'n',
+                b'H',
+                b'a',
+                b't',
+            ]
         || gatt.transact(&links, 0x42, &[ATT_OP_WRITE_REQUEST, 2, 0, 1], &mut out) != Ok(5)
-        || out[..5] != [ATT_OP_ERROR_RESPONSE, ATT_OP_WRITE_REQUEST, 2, 0, ATT_ERR_WRITE_NOT_PERMITTED]
-        || gatt.transact(&links, 0x42, &[ATT_OP_WRITE_REQUEST, 3, 0, b'O', b'S'], &mut out) != Ok(1)
+        || out[..5]
+            != [
+                ATT_OP_ERROR_RESPONSE,
+                ATT_OP_WRITE_REQUEST,
+                2,
+                0,
+                ATT_ERR_WRITE_NOT_PERMITTED,
+            ]
+        || gatt.transact(
+            &links,
+            0x42,
+            &[ATT_OP_WRITE_REQUEST, 3, 0, b'O', b'S'],
+            &mut out,
+        ) != Ok(1)
         || gatt.transact(&links, 0x42, &[ATT_OP_READ_REQUEST, 3, 0], &mut out) != Ok(3)
         || out[..3] != [ATT_OP_READ_RESPONSE, b'O', b'S']
     {
@@ -1500,24 +2125,47 @@ pub fn gatt_foundation_self_test() -> bool {
 
     let disconnected = [EVT_DISCONNECTION_COMPLETE, 4, 0, 0x42, 0, 0x13];
     links.handle_disconnection_complete(&disconnected).is_ok()
-        && gatt.transact(&links, 0x42, &[ATT_OP_READ_REQUEST, 3, 0], &mut out).is_err()
+        && gatt
+            .transact(&links, 0x42, &[ATT_OP_READ_REQUEST, 3, 0], &mut out)
+            .is_err()
 }
-
 
 pub fn gatt_discovery_self_test() -> bool {
     let mut links = LeLinkState::new();
     let connected = [
-        EVT_LE_META, 19, LE_SUBEVENT_CONNECTION_COMPLETE, 0,
-        0x42, 0x00, 0, 1, 1, 2, 3, 4, 5, 6,
-        0x18, 0x00, 0, 0, 0xf4, 0x01, 0,
+        EVT_LE_META,
+        19,
+        LE_SUBEVENT_CONNECTION_COMPLETE,
+        0,
+        0x42,
+        0x00,
+        0,
+        1,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        0x18,
+        0x00,
+        0,
+        0,
+        0xf4,
+        0x01,
+        0,
     ];
-    if links.handle_connection_complete(&connected).is_err() { return false; }
+    if links.handle_connection_complete(&connected).is_err() {
+        return false;
+    }
     let mut gatt = GattDatabase::new();
     if gatt.add_primary_service(0x1800) != Ok(1)
         || gatt.add_characteristic(0x2a00, true, true, b"WovenHat") != Ok((2, 3))
         || gatt.add_primary_service(0x180f) != Ok(4)
         || gatt.add_characteristic(0x2a19, true, false, &[100]) != Ok((5, 6))
-    { return false; }
+    {
+        return false;
+    }
 
     let mut found = [0_u16; MAX_ATT_ATTRIBUTES];
     if gatt.discover_primary_services(&links, 0x42, &mut found) != Ok(2)
@@ -1526,38 +2174,81 @@ pub fn gatt_discovery_self_test() -> bool {
         || found[0] != 2
         || gatt.discover_characteristics(&links, 0x42, 4, 6, &mut found) != Ok(1)
         || found[0] != 5
-    { return false; }
+    {
+        return false;
+    }
 
     let disconnected = [EVT_DISCONNECTION_COMPLETE, 4, 0, 0x42, 0, 0x13];
     links.handle_disconnection_complete(&disconnected).is_ok()
-        && gatt.discover_primary_services(&links, 0x42, &mut found).is_err()
+        && gatt
+            .discover_primary_services(&links, 0x42, &mut found)
+            .is_err()
 }
-
 
 pub fn gatt_subscription_self_test() -> bool {
     let mut links = LeLinkState::new();
     let connected = [
-        EVT_LE_META, 19, LE_SUBEVENT_CONNECTION_COMPLETE, 0,
-        0x42, 0x00, 0, 1, 1, 2, 3, 4, 5, 6,
-        0x18, 0x00, 0, 0, 0xf4, 0x01, 0,
+        EVT_LE_META,
+        19,
+        LE_SUBEVENT_CONNECTION_COMPLETE,
+        0,
+        0x42,
+        0x00,
+        0,
+        1,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        0x18,
+        0x00,
+        0,
+        0,
+        0xf4,
+        0x01,
+        0,
     ];
-    if links.handle_connection_complete(&connected).is_err() { return false; }
+    if links.handle_connection_complete(&connected).is_err() {
+        return false;
+    }
     let mut subscriptions = GattSubscriptions::new();
     let mut out = [0_u8; MAX_ATT_PDU];
     if subscriptions.configure(&links, 0x42, 3, 0x0001).is_err()
         || subscriptions.emit(&links, 0x42, 3, false, b"ready", &mut out) != Ok(8)
-        || out[..8] != [ATT_OP_HANDLE_VALUE_NOTIFICATION, 3, 0, b'r', b'e', b'a', b'd', b'y']
-        || subscriptions.emit(&links, 0x42, 3, true, b"ready", &mut out).is_ok()
+        || out[..8]
+            != [
+                ATT_OP_HANDLE_VALUE_NOTIFICATION,
+                3,
+                0,
+                b'r',
+                b'e',
+                b'a',
+                b'd',
+                b'y',
+            ]
+        || subscriptions
+            .emit(&links, 0x42, 3, true, b"ready", &mut out)
+            .is_ok()
         || subscriptions.configure(&links, 0x42, 3, 0x0002).is_err()
         || subscriptions.emit(&links, 0x42, 3, true, b"go", &mut out) != Ok(5)
         || out[..5] != [ATT_OP_HANDLE_VALUE_INDICATION, 3, 0, b'g', b'o']
         || subscriptions.configure(&links, 0x42, 3, 0).is_err()
-        || subscriptions.emit(&links, 0x42, 3, false, b"x", &mut out).is_ok()
-    { return false; }
-    if subscriptions.configure(&links, 0x42, 3, 0x0003).is_err() { return false; }
+        || subscriptions
+            .emit(&links, 0x42, 3, false, b"x", &mut out)
+            .is_ok()
+    {
+        return false;
+    }
+    if subscriptions.configure(&links, 0x42, 3, 0x0003).is_err() {
+        return false;
+    }
     let disconnected = [EVT_DISCONNECTION_COMPLETE, 4, 0, 0x42, 0, 0x13];
     links.handle_disconnection_complete(&disconnected).is_ok()
-        && subscriptions.emit(&links, 0x42, 3, false, b"x", &mut out).is_err()
+        && subscriptions
+            .emit(&links, 0x42, 3, false, b"x", &mut out)
+            .is_err()
         && subscriptions.configure(&links, 0x42, 3, 0x0001).is_err()
 }
 
@@ -1587,7 +2278,10 @@ pub struct LinkState {
 
 impl LinkState {
     pub const fn new() -> Self {
-        Self { links: [None; MAX_ACL_LINKS], count: 0 }
+        Self {
+            links: [None; MAX_ACL_LINKS],
+            count: 0,
+        }
     }
 
     pub fn create_connection_command(
@@ -1604,7 +2298,11 @@ impl LinkState {
         HciCommand::new(OPCODE_CREATE_CONNECTION, &params).map(|command| command.encode(out))
     }
 
-    pub fn disconnect_command(handle: u16, reason: u8, out: &mut [u8; 258]) -> Result<usize, HciError> {
+    pub fn disconnect_command(
+        handle: u16,
+        reason: u8,
+        out: &mut [u8; 258],
+    ) -> Result<usize, HciError> {
         if handle > 0x0fff {
             return Err(HciError::MalformedEvent);
         }
@@ -1646,7 +2344,11 @@ impl LinkState {
                 if self.count == MAX_ACL_LINKS {
                     return Err(HciError::ControllerFailure(0xff));
                 }
-                let link = AclLink { handle, address, encrypted: event[12] != 0 };
+                let link = AclLink {
+                    handle,
+                    address,
+                    encrypted: event[12] != 0,
+                };
                 self.links[self.count] = Some(link);
                 self.count += 1;
                 Ok(LinkEvent::Connected(link))
@@ -1682,12 +2384,17 @@ impl LinkState {
             .map(|link| link.address)
     }
 
-    pub fn count(&self) -> usize { self.count }
+    pub fn count(&self) -> usize {
+        self.count
+    }
     pub fn link(&self, index: usize) -> Option<AclLink> {
-        if index >= self.count { None } else { self.links[index] }
+        if index >= self.count {
+            None
+        } else {
+            self.links[index]
+        }
     }
 }
-
 
 pub const HCI_ACL_PACKET: u8 = 0x02;
 pub const MAX_ACL_PAYLOAD: usize = 1024;
@@ -1702,21 +2409,37 @@ pub struct AclPacket {
 }
 
 impl AclPacket {
-    pub fn new(handle: u16, packet_boundary: u8, broadcast: u8, data: &[u8]) -> Result<Self, HciError> {
-        if handle > 0x0fff || packet_boundary > 0x03 || broadcast > 0x03 || data.len() > MAX_ACL_PAYLOAD {
+    pub fn new(
+        handle: u16,
+        packet_boundary: u8,
+        broadcast: u8,
+        data: &[u8],
+    ) -> Result<Self, HciError> {
+        if handle > 0x0fff
+            || packet_boundary > 0x03
+            || broadcast > 0x03
+            || data.len() > MAX_ACL_PAYLOAD
+        {
             return Err(HciError::PayloadTooLarge);
         }
         let mut payload = [0_u8; MAX_ACL_PAYLOAD];
         payload[..data.len()].copy_from_slice(data);
-        Ok(Self { handle, packet_boundary, broadcast, len: data.len() as u16, payload })
+        Ok(Self {
+            handle,
+            packet_boundary,
+            broadcast,
+            len: data.len() as u16,
+            payload,
+        })
     }
 
-    pub fn payload(&self) -> &[u8] { &self.payload[..self.len as usize] }
+    pub fn payload(&self) -> &[u8] {
+        &self.payload[..self.len as usize]
+    }
 
     pub fn encode(&self, out: &mut [u8; MAX_ACL_PAYLOAD + 4]) -> usize {
-        let handle_flags = self.handle
-            | ((self.packet_boundary as u16) << 12)
-            | ((self.broadcast as u16) << 14);
+        let handle_flags =
+            self.handle | ((self.packet_boundary as u16) << 12) | ((self.broadcast as u16) << 14);
         out[0..2].copy_from_slice(&handle_flags.to_le_bytes());
         out[2..4].copy_from_slice(&self.len.to_le_bytes());
         let n = self.len as usize;
@@ -1769,20 +2492,33 @@ impl LinkState {
 pub fn acl_data_self_test() -> bool {
     let mut links = LinkState::new();
     let connected = [
-        EVT_CONNECTION_COMPLETE, 11, 0, 0x42, 0x00,
-        1, 2, 3, 4, 5, 6, 1, 0,
+        EVT_CONNECTION_COMPLETE,
+        11,
+        0,
+        0x42,
+        0x00,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        1,
+        0,
     ];
     if links.handle_event(&connected).is_err() {
         return false;
     }
-    let Ok(packet) = links.outbound_acl(0x42, &[0xaa, 0xbb, 0xcc]) else { return false; };
+    let Ok(packet) = links.outbound_acl(0x42, &[0xaa, 0xbb, 0xcc]) else {
+        return false;
+    };
     let mut encoded = [0_u8; MAX_ACL_PAYLOAD + 4];
-    if packet.encode(&mut encoded) != 7
-        || encoded[..7] != [0x42, 0x20, 3, 0, 0xaa, 0xbb, 0xcc]
-    {
+    if packet.encode(&mut encoded) != 7 || encoded[..7] != [0x42, 0x20, 3, 0, 0xaa, 0xbb, 0xcc] {
         return false;
     }
-    let Ok(parsed) = links.inbound_acl(&encoded[..7]) else { return false; };
+    let Ok(parsed) = links.inbound_acl(&encoded[..7]) else {
+        return false;
+    };
     parsed.handle == 0x42
         && parsed.packet_boundary == 0x02
         && parsed.broadcast == 0
@@ -1791,7 +2527,6 @@ pub fn acl_data_self_test() -> bool {
         && links.inbound_acl(&[0x43, 0x20, 1, 0, 1]).is_err()
         && AclPacket::parse(&[0x42, 0x20, 4, 0, 1]).is_err()
 }
-
 
 pub const L2CAP_CID_SIGNALING: u16 = 0x0001;
 pub const L2CAP_FIRST_DYNAMIC_CID: u16 = 0x0040;
@@ -1811,10 +2546,16 @@ impl L2capFrame {
         }
         let mut payload = [0_u8; MAX_L2CAP_PAYLOAD];
         payload[..data.len()].copy_from_slice(data);
-        Ok(Self { cid, len: data.len() as u16, payload })
+        Ok(Self {
+            cid,
+            len: data.len() as u16,
+            payload,
+        })
     }
 
-    pub fn payload(&self) -> &[u8] { &self.payload[..self.len as usize] }
+    pub fn payload(&self) -> &[u8] {
+        &self.payload[..self.len as usize]
+    }
 
     pub fn encode(&self, out: &mut [u8; MAX_L2CAP_PAYLOAD + 4]) -> usize {
         out[0..2].copy_from_slice(&self.len.to_le_bytes());
@@ -1857,7 +2598,6 @@ impl LinkState {
     }
 }
 
-
 pub const L2CAP_CMD_CONNECTION_REQUEST: u8 = 0x02;
 pub const L2CAP_CMD_CONNECTION_RESPONSE: u8 = 0x03;
 pub const L2CAP_CMD_DISCONNECTION_REQUEST: u8 = 0x06;
@@ -1880,7 +2620,11 @@ pub struct L2capChannels {
 
 impl L2capChannels {
     pub const fn new() -> Self {
-        Self { channels: [None; MAX_L2CAP_CHANNELS], count: 0, next_cid: L2CAP_FIRST_DYNAMIC_CID }
+        Self {
+            channels: [None; MAX_L2CAP_CHANNELS],
+            count: 0,
+            next_cid: L2CAP_FIRST_DYNAMIC_CID,
+        }
     }
 
     fn allocate_cid(&mut self) -> Result<u16, HciError> {
@@ -1890,7 +2634,11 @@ impl L2capChannels {
             if self.next_cid < L2CAP_FIRST_DYNAMIC_CID {
                 self.next_cid = L2CAP_FIRST_DYNAMIC_CID;
             }
-            if !self.channels[..self.count].iter().flatten().any(|channel| channel.local_cid == cid) {
+            if !self.channels[..self.count]
+                .iter()
+                .flatten()
+                .any(|channel| channel.local_cid == cid)
+            {
                 return Ok(cid);
             }
         }
@@ -1904,7 +2652,11 @@ impl L2capChannels {
         psm: u16,
         identifier: u8,
     ) -> Result<(u16, L2capFrame), HciError> {
-        if identifier == 0 || psm == 0 || !links.owns_handle(handle) || self.count == MAX_L2CAP_CHANNELS {
+        if identifier == 0
+            || psm == 0
+            || !links.owns_handle(handle)
+            || self.count == MAX_L2CAP_CHANNELS
+        {
             return Err(HciError::UnexpectedOpcode);
         }
         let local_cid = self.allocate_cid()?;
@@ -1924,7 +2676,9 @@ impl L2capChannels {
         local_cid: u16,
         bytes: &[u8],
     ) -> Result<L2capChannel, HciError> {
-        if bytes.len() != 12 || bytes[0] != L2CAP_CMD_CONNECTION_RESPONSE || bytes[1] == 0
+        if bytes.len() != 12
+            || bytes[0] != L2CAP_CMD_CONNECTION_RESPONSE
+            || bytes[1] == 0
             || u16::from_le_bytes([bytes[2], bytes[3]]) != 8
         {
             return Err(HciError::MalformedEvent);
@@ -1933,24 +2687,43 @@ impl L2capChannels {
         let source_cid = u16::from_le_bytes([bytes[6], bytes[7]]);
         let result = u16::from_le_bytes([bytes[8], bytes[9]]);
         let status = u16::from_le_bytes([bytes[10], bytes[11]]);
-        if source_cid != local_cid || remote_cid < L2CAP_FIRST_DYNAMIC_CID || result != 0 || status != 0 {
+        if source_cid != local_cid
+            || remote_cid < L2CAP_FIRST_DYNAMIC_CID
+            || result != 0
+            || status != 0
+        {
             return Err(HciError::ControllerFailure((result & 0xff) as u8));
         }
         if self.count == MAX_L2CAP_CHANNELS
             || self.channels[..self.count].iter().flatten().any(|channel| {
-                channel.handle == handle && (channel.local_cid == local_cid || channel.remote_cid == remote_cid)
+                channel.handle == handle
+                    && (channel.local_cid == local_cid || channel.remote_cid == remote_cid)
             })
         {
             return Err(HciError::UnexpectedOpcode);
         }
-        let channel = L2capChannel { handle, psm, local_cid, remote_cid };
+        let channel = L2capChannel {
+            handle,
+            psm,
+            local_cid,
+            remote_cid,
+        };
         self.channels[self.count] = Some(channel);
         self.count += 1;
         Ok(channel)
     }
 
-    pub fn disconnection_request(&self, channel: L2capChannel, identifier: u8) -> Result<L2capFrame, HciError> {
-        if identifier == 0 || !self.channels[..self.count].iter().flatten().any(|entry| *entry == channel) {
+    pub fn disconnection_request(
+        &self,
+        channel: L2capChannel,
+        identifier: u8,
+    ) -> Result<L2capFrame, HciError> {
+        if identifier == 0
+            || !self.channels[..self.count]
+                .iter()
+                .flatten()
+                .any(|entry| *entry == channel)
+        {
             return Err(HciError::UnexpectedOpcode);
         }
         let mut command = [0_u8; 8];
@@ -1962,15 +2735,24 @@ impl L2capChannels {
         L2capFrame::new(L2CAP_CID_SIGNALING, &command)
     }
 
-    pub fn accept_disconnection_response(&mut self, channel: L2capChannel, bytes: &[u8]) -> Result<(), HciError> {
-        if bytes.len() != 8 || bytes[0] != L2CAP_CMD_DISCONNECTION_RESPONSE || bytes[1] == 0
+    pub fn accept_disconnection_response(
+        &mut self,
+        channel: L2capChannel,
+        bytes: &[u8],
+    ) -> Result<(), HciError> {
+        if bytes.len() != 8
+            || bytes[0] != L2CAP_CMD_DISCONNECTION_RESPONSE
+            || bytes[1] == 0
             || u16::from_le_bytes([bytes[2], bytes[3]]) != 4
             || u16::from_le_bytes([bytes[4], bytes[5]]) != channel.remote_cid
             || u16::from_le_bytes([bytes[6], bytes[7]]) != channel.local_cid
         {
             return Err(HciError::MalformedEvent);
         }
-        let Some(index) = self.channels[..self.count].iter().position(|entry| *entry == Some(channel)) else {
+        let Some(index) = self.channels[..self.count]
+            .iter()
+            .position(|entry| *entry == Some(channel))
+        else {
             return Err(HciError::UnexpectedOpcode);
         };
         self.count -= 1;
@@ -1986,7 +2768,10 @@ impl L2capChannels {
         data: &[u8],
     ) -> Result<AclPacket, HciError> {
         if !links.owns_handle(channel.handle)
-            || !self.channels[..self.count].iter().flatten().any(|entry| *entry == channel)
+            || !self.channels[..self.count]
+                .iter()
+                .flatten()
+                .any(|entry| *entry == channel)
         {
             return Err(HciError::UnexpectedOpcode);
         }
@@ -2011,58 +2796,109 @@ impl L2capChannels {
         Ok((channel, frame))
     }
 
-    pub fn count(&self) -> usize { self.count }
+    pub fn count(&self) -> usize {
+        self.count
+    }
 }
 
 pub fn l2cap_channel_self_test() -> bool {
     let mut links = LinkState::new();
-    if links.handle_event(&[
-        EVT_CONNECTION_COMPLETE, 11, 0, 0x42, 0,
-        1, 2, 3, 4, 5, 6, 1, 0,
-    ]).is_err() {
+    if links
+        .handle_event(&[
+            EVT_CONNECTION_COMPLETE,
+            11,
+            0,
+            0x42,
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            1,
+            0,
+        ])
+        .is_err()
+    {
         return false;
     }
     let mut channels = L2capChannels::new();
-    let Ok((local_cid, request)) = channels.connection_request(&links, 0x42, 0x0001, 1) else { return false; };
+    let Ok((local_cid, request)) = channels.connection_request(&links, 0x42, 0x0001, 1) else {
+        return false;
+    };
     if local_cid != 0x0040
         || request.payload() != [L2CAP_CMD_CONNECTION_REQUEST, 1, 4, 0, 1, 0, 0x40, 0]
     {
         return false;
     }
     let response = [
-        L2CAP_CMD_CONNECTION_RESPONSE, 1, 8, 0,
-        0x41, 0, 0x40, 0, 0, 0, 0, 0,
+        L2CAP_CMD_CONNECTION_RESPONSE,
+        1,
+        8,
+        0,
+        0x41,
+        0,
+        0x40,
+        0,
+        0,
+        0,
+        0,
+        0,
     ];
-    let Ok(channel) = channels.accept_connection_response(0x42, 0x0001, local_cid, &response) else { return false; };
+    let Ok(channel) = channels.accept_connection_response(0x42, 0x0001, local_cid, &response)
+    else {
+        return false;
+    };
     if channel.remote_cid != 0x0041 || channels.count() != 1 {
         return false;
     }
-    let Ok(data_acl) = channels.outbound_data(&links, channel, &[0xde, 0xad]) else { return false; };
+    let Ok(data_acl) = channels.outbound_data(&links, channel, &[0xde, 0xad]) else {
+        return false;
+    };
     let mut data_bytes = [0_u8; MAX_ACL_PAYLOAD + 4];
     let data_len = data_acl.encode(&mut data_bytes);
-    let Ok(parsed_acl) = AclPacket::parse(&data_bytes[..data_len]) else { return false; };
-    let Ok(outbound_frame) = L2capFrame::parse(parsed_acl.payload()) else { return false; };
+    let Ok(parsed_acl) = AclPacket::parse(&data_bytes[..data_len]) else {
+        return false;
+    };
+    let Ok(outbound_frame) = L2capFrame::parse(parsed_acl.payload()) else {
+        return false;
+    };
     if outbound_frame.cid != channel.remote_cid || outbound_frame.payload() != [0xde, 0xad] {
         return false;
     }
 
-    let Ok(inbound_frame) = L2capFrame::new(channel.local_cid, &[0xbe, 0xef]) else { return false; };
-    let Ok(inbound_acl) = links.outbound_l2cap(channel.handle, &inbound_frame) else { return false; };
+    let Ok(inbound_frame) = L2capFrame::new(channel.local_cid, &[0xbe, 0xef]) else {
+        return false;
+    };
+    let Ok(inbound_acl) = links.outbound_l2cap(channel.handle, &inbound_frame) else {
+        return false;
+    };
     let inbound_len = inbound_acl.encode(&mut data_bytes);
-    let Ok((owned_channel, owned_frame)) = channels.inbound_data(&links, &data_bytes[..inbound_len]) else { return false; };
+    let Ok((owned_channel, owned_frame)) =
+        channels.inbound_data(&links, &data_bytes[..inbound_len])
+    else {
+        return false;
+    };
     if owned_channel != channel || owned_frame.payload() != [0xbe, 0xef] {
         return false;
     }
 
-    let Ok(disconnect) = channels.disconnection_request(channel, 2) else { return false; };
+    let Ok(disconnect) = channels.disconnection_request(channel, 2) else {
+        return false;
+    };
     if disconnect.payload() != [L2CAP_CMD_DISCONNECTION_REQUEST, 2, 4, 0, 0x41, 0, 0x40, 0] {
         return false;
     }
     let disconnect_response = [L2CAP_CMD_DISCONNECTION_RESPONSE, 2, 4, 0, 0x41, 0, 0x40, 0];
-    channels.accept_disconnection_response(channel, &disconnect_response).is_ok()
+    channels
+        .accept_disconnection_response(channel, &disconnect_response)
+        .is_ok()
         && channels.count() == 0
         && channels.outbound_data(&links, channel, &[1]).is_err()
-        && channels.inbound_data(&links, &data_bytes[..inbound_len]).is_err()
+        && channels
+            .inbound_data(&links, &data_bytes[..inbound_len])
+            .is_err()
         && channels.disconnection_request(channel, 3).is_err()
         && channels.connection_request(&links, 0x43, 1, 1).is_err()
 }
@@ -2070,8 +2906,19 @@ pub fn l2cap_channel_self_test() -> bool {
 pub fn l2cap_framing_self_test() -> bool {
     let mut links = LinkState::new();
     let connected = [
-        EVT_CONNECTION_COMPLETE, 11, 0, 0x42, 0x00,
-        1, 2, 3, 4, 5, 6, 1, 0,
+        EVT_CONNECTION_COMPLETE,
+        11,
+        0,
+        0x42,
+        0x00,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        1,
+        0,
     ];
     if links.handle_event(&connected).is_err() {
         return false;
@@ -2081,16 +2928,18 @@ pub fn l2cap_framing_self_test() -> bool {
         return false;
     };
     let mut l2cap = [0_u8; MAX_L2CAP_PAYLOAD + 4];
-    if frame.encode(&mut l2cap) != 8
-        || l2cap[..8] != [4, 0, 1, 0, 0x02, 0x01, 0, 0]
-    {
+    if frame.encode(&mut l2cap) != 8 || l2cap[..8] != [4, 0, 1, 0, 0x02, 0x01, 0, 0] {
         return false;
     }
 
-    let Ok(acl) = links.outbound_l2cap(0x42, &frame) else { return false; };
+    let Ok(acl) = links.outbound_l2cap(0x42, &frame) else {
+        return false;
+    };
     let mut acl_bytes = [0_u8; MAX_ACL_PAYLOAD + 4];
     let acl_len = acl.encode(&mut acl_bytes);
-    let Ok((handle, parsed)) = links.inbound_l2cap(&acl_bytes[..acl_len]) else { return false; };
+    let Ok((handle, parsed)) = links.inbound_l2cap(&acl_bytes[..acl_len]) else {
+        return false;
+    };
     handle == 0x42
         && parsed.cid == L2CAP_CID_SIGNALING
         && parsed.payload() == [0x02, 0x01, 0, 0]
@@ -2116,23 +2965,56 @@ pub fn link_lifecycle_self_test() -> bool {
 
     let mut links = LinkState::new();
     let connected = [
-        EVT_CONNECTION_COMPLETE, 11, 0, 0x42, 0x00,
-        1, 2, 3, 4, 5, 6,
-        1, 0,
+        EVT_CONNECTION_COMPLETE,
+        11,
+        0,
+        0x42,
+        0x00,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        1,
+        0,
     ];
-    let Ok(LinkEvent::Connected(link)) = links.handle_event(&connected) else { return false; };
-    if link.handle != 0x42 || link.address != device.address || link.encrypted || links.count() != 1 {
+    let Ok(LinkEvent::Connected(link)) = links.handle_event(&connected) else {
+        return false;
+    };
+    if link.handle != 0x42 || link.address != device.address || link.encrypted || links.count() != 1
+    {
         return false;
     }
     let conflicting_handle = [
-        EVT_CONNECTION_COMPLETE, 11, 0, 0x42, 0x00,
-        6, 5, 4, 3, 2, 1,
-        1, 0,
+        EVT_CONNECTION_COMPLETE,
+        11,
+        0,
+        0x42,
+        0x00,
+        6,
+        5,
+        4,
+        3,
+        2,
+        1,
+        1,
+        0,
     ];
     let conflicting_address = [
-        EVT_CONNECTION_COMPLETE, 11, 0, 0x43, 0x00,
-        1, 2, 3, 4, 5, 6,
-        1, 0,
+        EVT_CONNECTION_COMPLETE,
+        11,
+        0,
+        0x43,
+        0x00,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        1,
+        0,
     ];
     if links.handle_event(&conflicting_handle).is_ok()
         || links.handle_event(&conflicting_address).is_ok()
@@ -2154,7 +3036,6 @@ pub fn link_lifecycle_self_test() -> bool {
         && links.handle_event(&connected[..12]).is_err()
         && LinkState::disconnect_command(0x1000, 0x13, &mut bytes).is_err()
 }
-
 
 pub const EVT_AUTHENTICATION_COMPLETE: u8 = 0x06;
 pub const EVT_ENCRYPTION_CHANGE: u8 = 0x08;
@@ -2184,7 +3065,10 @@ pub struct LinkSecurityState {
 
 impl LinkSecurityState {
     pub const fn new() -> Self {
-        Self { links: [None; MAX_SECURE_LINKS], count: 0 }
+        Self {
+            links: [None; MAX_SECURE_LINKS],
+            count: 0,
+        }
     }
 
     fn index(&self, handle: u16) -> Option<usize> {
@@ -2204,7 +3088,10 @@ impl LinkSecurityState {
             return Err(HciError::ControllerFailure(0xff));
         }
         let index = self.count;
-        self.links[index] = Some(SecureLink { handle, phase: LinkSecurityPhase::Unauthenticated });
+        self.links[index] = Some(SecureLink {
+            handle,
+            phase: LinkSecurityPhase::Unauthenticated,
+        });
         self.count += 1;
         Ok(index)
     }
@@ -2216,7 +3103,9 @@ impl LinkSecurityState {
         out: &mut [u8; 258],
     ) -> Result<usize, HciError> {
         let index = self.ensure_link(links, handle)?;
-        let Some(mut secure) = self.links[index] else { return Err(HciError::UnexpectedOpcode); };
+        let Some(mut secure) = self.links[index] else {
+            return Err(HciError::UnexpectedOpcode);
+        };
         if secure.phase != LinkSecurityPhase::Unauthenticated {
             return Err(HciError::UnexpectedOpcode);
         }
@@ -2231,8 +3120,12 @@ impl LinkSecurityState {
             return Err(HciError::MalformedEvent);
         }
         let handle = u16::from_le_bytes([event[3], event[4]]);
-        let Some(index) = self.index(handle) else { return Err(HciError::UnexpectedOpcode); };
-        let Some(mut secure) = self.links[index] else { return Err(HciError::UnexpectedOpcode); };
+        let Some(index) = self.index(handle) else {
+            return Err(HciError::UnexpectedOpcode);
+        };
+        let Some(mut secure) = self.links[index] else {
+            return Err(HciError::UnexpectedOpcode);
+        };
         if secure.phase != LinkSecurityPhase::Authenticating {
             return Err(HciError::UnexpectedOpcode);
         }
@@ -2255,8 +3148,12 @@ impl LinkSecurityState {
         if !links.owns_handle(handle) {
             return Err(HciError::UnexpectedOpcode);
         }
-        let Some(index) = self.index(handle) else { return Err(HciError::UnexpectedOpcode); };
-        let Some(mut secure) = self.links[index] else { return Err(HciError::UnexpectedOpcode); };
+        let Some(index) = self.index(handle) else {
+            return Err(HciError::UnexpectedOpcode);
+        };
+        let Some(mut secure) = self.links[index] else {
+            return Err(HciError::UnexpectedOpcode);
+        };
         if secure.phase != LinkSecurityPhase::Authenticated {
             return Err(HciError::UnexpectedOpcode);
         }
@@ -2272,15 +3169,23 @@ impl LinkSecurityState {
             return Err(HciError::MalformedEvent);
         }
         let handle = u16::from_le_bytes([event[3], event[4]]);
-        let Some(index) = self.index(handle) else { return Err(HciError::UnexpectedOpcode); };
-        let Some(mut secure) = self.links[index] else { return Err(HciError::UnexpectedOpcode); };
+        let Some(index) = self.index(handle) else {
+            return Err(HciError::UnexpectedOpcode);
+        };
+        let Some(mut secure) = self.links[index] else {
+            return Err(HciError::UnexpectedOpcode);
+        };
         if secure.phase != LinkSecurityPhase::EnablingEncryption {
             return Err(HciError::UnexpectedOpcode);
         }
         if event[2] != 0 || event[5] == 0 {
             secure.phase = LinkSecurityPhase::Authenticated;
             self.links[index] = Some(secure);
-            return Err(HciError::ControllerFailure(if event[2] != 0 { event[2] } else { 0xff }));
+            return Err(HciError::ControllerFailure(if event[2] != 0 {
+                event[2]
+            } else {
+                0xff
+            }));
         }
         secure.phase = LinkSecurityPhase::Secured;
         self.links[index] = Some(secure);
@@ -2289,29 +3194,28 @@ impl LinkSecurityState {
 
     pub fn is_secured(&self, links: &LinkState, handle: u16) -> bool {
         links.owns_handle(handle)
-            && self.index(handle)
+            && self
+                .index(handle)
                 .and_then(|index| self.links[index])
                 .is_some_and(|secure| secure.phase == LinkSecurityPhase::Secured)
     }
 
-    pub fn trusted_secured(
-        &self,
-        links: &LinkState,
-        keys: &LinkKeyStore,
-        handle: u16,
-    ) -> bool {
+    pub fn trusted_secured(&self, links: &LinkState, keys: &LinkKeyStore, handle: u16) -> bool {
         self.is_secured(links, handle)
-            && links.address_for_handle(handle).is_some_and(|address| keys.contains(address))
+            && links
+                .address_for_handle(handle)
+                .is_some_and(|address| keys.contains(address))
     }
 
     pub fn revoke(&mut self, handle: u16) {
-        let Some(index) = self.index(handle) else { return; };
+        let Some(index) = self.index(handle) else {
+            return;
+        };
         self.count -= 1;
         self.links[index] = self.links[self.count];
         self.links[self.count] = None;
     }
 }
-
 
 pub const EVT_LINK_KEY_REQUEST: u8 = 0x17;
 pub const EVT_LINK_KEY_NOTIFICATION: u8 = 0x18;
@@ -2333,7 +3237,10 @@ pub struct LinkKeyStore {
 
 impl LinkKeyStore {
     pub const fn new() -> Self {
-        Self { keys: [None; MAX_LINK_KEYS], count: 0 }
+        Self {
+            keys: [None; MAX_LINK_KEYS],
+            count: 0,
+        }
     }
 
     fn index(&self, address: [u8; 6]) -> Option<usize> {
@@ -2350,7 +3257,11 @@ impl LinkKeyStore {
         address.copy_from_slice(&event[2..8]);
         let mut key = [0_u8; 16];
         key.copy_from_slice(&event[8..24]);
-        let entry = LinkKey { address, key, key_type: event[24] };
+        let entry = LinkKey {
+            address,
+            key,
+            key_type: event[24],
+        };
         if let Some(index) = self.index(address) {
             self.keys[index] = Some(entry);
             return Ok(());
@@ -2370,7 +3281,9 @@ impl LinkKeyStore {
         let mut address = [0_u8; 6];
         address.copy_from_slice(&event[2..8]);
         if let Some(index) = self.index(address) {
-            let Some(entry) = self.keys[index] else { return Err(HciError::UnexpectedOpcode); };
+            let Some(entry) = self.keys[index] else {
+                return Err(HciError::UnexpectedOpcode);
+            };
             let mut params = [0_u8; 22];
             params[..6].copy_from_slice(&address);
             params[6..].copy_from_slice(&entry.key);
@@ -2386,15 +3299,18 @@ impl LinkKeyStore {
     }
 
     pub fn remove(&mut self, address: [u8; 6]) {
-        let Some(index) = self.index(address) else { return; };
+        let Some(index) = self.index(address) else {
+            return;
+        };
         self.count -= 1;
         self.keys[index] = self.keys[self.count];
         self.keys[self.count] = None;
     }
 
-    pub fn count(&self) -> usize { self.count }
+    pub fn count(&self) -> usize {
+        self.count
+    }
 }
-
 
 pub const EVT_IO_CAPABILITY_REQUEST: u8 = 0x31;
 pub const EVT_USER_CONFIRMATION_REQUEST: u8 = 0x33;
@@ -2427,8 +3343,7 @@ pub fn io_capability_reply(
     params[6] = io_capability;
     params[7] = u8::from(oob_present);
     params[8] = authentication_requirements;
-    HciCommand::new(OPCODE_IO_CAPABILITY_REQUEST_REPLY, &params)
-        .map(|command| command.encode(out))
+    HciCommand::new(OPCODE_IO_CAPABILITY_REQUEST_REPLY, &params).map(|command| command.encode(out))
 }
 
 pub fn parse_user_confirmation_request(event: &[u8]) -> Result<PairingRequest, HciError> {
@@ -2441,7 +3356,10 @@ pub fn parse_user_confirmation_request(event: &[u8]) -> Result<PairingRequest, H
     if numeric_value > 999_999 {
         return Err(HciError::MalformedEvent);
     }
-    Ok(PairingRequest { address, numeric_value: Some(numeric_value) })
+    Ok(PairingRequest {
+        address,
+        numeric_value: Some(numeric_value),
+    })
 }
 
 pub fn user_confirmation_reply(
@@ -2463,7 +3381,10 @@ pub fn parse_user_passkey_request(event: &[u8]) -> Result<PairingRequest, HciErr
     }
     let mut address = [0_u8; 6];
     address.copy_from_slice(&event[2..8]);
-    Ok(PairingRequest { address, numeric_value: None })
+    Ok(PairingRequest {
+        address,
+        numeric_value: None,
+    })
 }
 
 pub fn user_passkey_reply(
@@ -2508,11 +3429,24 @@ pub fn pairing_interaction_self_test() -> bool {
     }
 
     let confirm_event = [
-        EVT_USER_CONFIRMATION_REQUEST, 10, 1, 2, 3, 4, 5, 6,
-        0x40, 0xe2, 0x01, 0,
+        EVT_USER_CONFIRMATION_REQUEST,
+        10,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        0x40,
+        0xe2,
+        0x01,
+        0,
     ];
-    let Ok(confirm) = parse_user_confirmation_request(&confirm_event) else { return false; };
-    if confirm.address != address || confirm.numeric_value != Some(123_456)
+    let Ok(confirm) = parse_user_confirmation_request(&confirm_event) else {
+        return false;
+    };
+    if confirm.address != address
+        || confirm.numeric_value != Some(123_456)
         || user_confirmation_reply(confirm, false, &mut out) != Ok(9)
         || out[..3] != [0x2d, 0x04, 6]
     {
@@ -2520,7 +3454,9 @@ pub fn pairing_interaction_self_test() -> bool {
     }
 
     let passkey_event = [EVT_USER_PASSKEY_REQUEST, 6, 1, 2, 3, 4, 5, 6];
-    let Ok(passkey) = parse_user_passkey_request(&passkey_event) else { return false; };
+    let Ok(passkey) = parse_user_passkey_request(&passkey_event) else {
+        return false;
+    };
     if user_passkey_reply(passkey, Some(654_321), &mut out) != Ok(13)
         || out[..3] != [0x2e, 0x04, 10]
         || user_passkey_reply(passkey, Some(1_000_000), &mut out).is_ok()
@@ -2528,12 +3464,10 @@ pub fn pairing_interaction_self_test() -> bool {
         return false;
     }
 
-    parse_simple_pairing_complete(&[
-        EVT_SIMPLE_PAIRING_COMPLETE, 7, 0, 1, 2, 3, 4, 5, 6,
-    ]) == Ok(address)
-        && parse_simple_pairing_complete(&[
-            EVT_SIMPLE_PAIRING_COMPLETE, 7, 5, 1, 2, 3, 4, 5, 6,
-        ]).is_err()
+    parse_simple_pairing_complete(&[EVT_SIMPLE_PAIRING_COMPLETE, 7, 0, 1, 2, 3, 4, 5, 6])
+        == Ok(address)
+        && parse_simple_pairing_complete(&[EVT_SIMPLE_PAIRING_COMPLETE, 7, 5, 1, 2, 3, 4, 5, 6])
+            .is_err()
 }
 
 pub fn link_key_self_test() -> bool {
@@ -2570,26 +3504,49 @@ pub fn link_key_self_test() -> bool {
     store.count() == 0
         && store.request_reply(&request, &mut out) == Ok(9)
         && out[..3] == [0x0c, 0x04, 6]
-        && store.store_notification(&[EVT_LINK_KEY_NOTIFICATION, 23]).is_err()
+        && store
+            .store_notification(&[EVT_LINK_KEY_NOTIFICATION, 23])
+            .is_err()
 }
-
 
 pub fn trusted_security_self_test() -> bool {
     let address = [1, 2, 3, 4, 5, 6];
     let mut links = LinkState::new();
-    if links.handle_event(&[
-        EVT_CONNECTION_COMPLETE, 11, 0, 0x42, 0,
-        1, 2, 3, 4, 5, 6, 1, 0,
-    ]).is_err() {
+    if links
+        .handle_event(&[
+            EVT_CONNECTION_COMPLETE,
+            11,
+            0,
+            0x42,
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            1,
+            0,
+        ])
+        .is_err()
+    {
         return false;
     }
     let mut security = LinkSecurityState::new();
     let mut keys = LinkKeyStore::new();
     let mut out = [0_u8; 258];
-    if security.authentication_command(&links, 0x42, &mut out).is_err()
-        || security.authentication_complete(&[EVT_AUTHENTICATION_COMPLETE, 3, 0, 0x42, 0]).is_err()
-        || security.enable_encryption_command(&links, 0x42, &mut out).is_err()
-        || security.encryption_change(&[EVT_ENCRYPTION_CHANGE, 4, 0, 0x42, 0, 1]).is_err()
+    if security
+        .authentication_command(&links, 0x42, &mut out)
+        .is_err()
+        || security
+            .authentication_complete(&[EVT_AUTHENTICATION_COMPLETE, 3, 0, 0x42, 0])
+            .is_err()
+        || security
+            .enable_encryption_command(&links, 0x42, &mut out)
+            .is_err()
+        || security
+            .encryption_change(&[EVT_ENCRYPTION_CHANGE, 4, 0, 0x42, 0, 1])
+            .is_err()
         || security.trusted_secured(&links, &keys, 0x42)
     {
         return false;
@@ -2614,7 +3571,10 @@ pub fn trusted_security_self_test() -> bool {
     if keys.store_notification(&notification).is_err() {
         return false;
     }
-    if links.handle_event(&[EVT_DISCONNECTION_COMPLETE, 4, 0, 0x42, 0, 0x13]).is_err() {
+    if links
+        .handle_event(&[EVT_DISCONNECTION_COMPLETE, 4, 0, 0x42, 0, 0x13])
+        .is_err()
+    {
         return false;
     }
     !security.trusted_secured(&links, &keys, 0x42)
@@ -2622,10 +3582,24 @@ pub fn trusted_security_self_test() -> bool {
 
 pub fn link_security_self_test() -> bool {
     let mut links = LinkState::new();
-    if links.handle_event(&[
-        EVT_CONNECTION_COMPLETE, 11, 0, 0x42, 0,
-        1, 2, 3, 4, 5, 6, 1, 0,
-    ]).is_err() {
+    if links
+        .handle_event(&[
+            EVT_CONNECTION_COMPLETE,
+            11,
+            0,
+            0x42,
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            1,
+            0,
+        ])
+        .is_err()
+    {
         return false;
     }
 
@@ -2651,12 +3625,19 @@ pub fn link_security_self_test() -> bool {
         return false;
     }
 
-    if links.handle_event(&[EVT_DISCONNECTION_COMPLETE, 4, 0, 0x42, 0, 0x13]).is_err() {
+    if links
+        .handle_event(&[EVT_DISCONNECTION_COMPLETE, 4, 0, 0x42, 0, 0x13])
+        .is_err()
+    {
         return false;
     }
     !security.is_secured(&links, 0x42)
-        && security.authentication_command(&links, 0x42, &mut bytes).is_err()
-        && security.encryption_change(&[EVT_ENCRYPTION_CHANGE, 4, 0, 0x43, 0, 1]).is_err()
+        && security
+            .authentication_command(&links, 0x42, &mut bytes)
+            .is_err()
+        && security
+            .encryption_change(&[EVT_ENCRYPTION_CHANGE, 4, 0, 0x43, 0, 1])
+            .is_err()
 }
 
 pub fn transaction_self_test() -> bool {
@@ -2690,16 +3671,25 @@ pub fn self_test() -> bool {
     let reset = HciCommand::new(OPCODE_RESET, &[]).unwrap();
     let mut encoded = [0u8; 258];
     let n = reset.encode(&mut encoded);
-    if n != 3 || encoded[..3] != [0x03, 0x0c, 0x00] { return false; }
+    if n != 3 || encoded[..3] != [0x03, 0x0c, 0x00] {
+        return false;
+    }
 
     let mut state = ControllerState::new();
-    if !state.begin(&reset) || state.begin(&reset) { return false; }
-    if state.complete(&[EVT_COMMAND_COMPLETE, 4, 1, 0x03, 0x0c, 0]).is_err() || !state.ready() { return false; }
+    if !state.begin(&reset) || state.begin(&reset) {
+        return false;
+    }
+    if state
+        .complete(&[EVT_COMMAND_COMPLETE, 4, 1, 0x03, 0x0c, 0])
+        .is_err()
+        || !state.ready()
+    {
+        return false;
+    }
 
     parse_command_complete(&[EVT_COMMAND_COMPLETE, 3, 1, 3, 12]).is_err()
         && HciCommand::new(0x0001, &[0u8; MAX_HCI_PAYLOAD]).is_ok()
 }
-
 
 // Stage 13.10M: bounded LE bond persistence and reconnect restoration.
 pub const MAX_LE_BONDS: usize = 8;
@@ -2727,7 +3717,10 @@ pub struct LeBondStore {
 
 impl LeBondStore {
     pub const fn new() -> Self {
-        Self { bonds: [None; MAX_LE_BONDS], count: 0 }
+        Self {
+            bonds: [None; MAX_LE_BONDS],
+            count: 0,
+        }
     }
 
     fn live_link(links: &LeLinkState, handle: u16) -> Option<LeLink> {
@@ -2795,15 +3788,35 @@ impl LeBondStore {
         true
     }
 
-    pub fn count(&self) -> usize { self.count }
+    pub fn count(&self) -> usize {
+        self.count
+    }
 }
 
 pub fn le_bond_persistence_self_test() -> bool {
     let mut links = LeLinkState::new();
     let connected = [
-        EVT_LE_META, 19, LE_SUBEVENT_CONNECTION_COMPLETE, 0,
-        0x42, 0x00, 0, 1, 1, 2, 3, 4, 5, 6,
-        0x18, 0x00, 0, 0, 0xf4, 0x01, 0,
+        EVT_LE_META,
+        19,
+        LE_SUBEVENT_CONNECTION_COMPLETE,
+        0,
+        0x42,
+        0x00,
+        0,
+        1,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        0x18,
+        0x00,
+        0,
+        0,
+        0xf4,
+        0x01,
+        0,
     ];
     if links.handle_connection_complete(&connected).is_err() {
         return false;
@@ -2825,7 +3838,10 @@ pub fn le_bond_persistence_self_test() -> bool {
         return false;
     }
 
-    let invalid = LeBondMaterial { key_size: 6, ..material };
+    let invalid = LeBondMaterial {
+        key_size: 6,
+        ..material
+    };
     if bonds.store(&links, 0x42, invalid).is_ok() || bonds.count() != 1 {
         return false;
     }
@@ -2839,9 +3855,27 @@ pub fn le_bond_persistence_self_test() -> bool {
     }
 
     let reconnected = [
-        EVT_LE_META, 19, LE_SUBEVENT_CONNECTION_COMPLETE, 0,
-        0x55, 0x00, 0, 1, 1, 2, 3, 4, 5, 6,
-        0x18, 0x00, 0, 0, 0xf4, 0x01, 0,
+        EVT_LE_META,
+        19,
+        LE_SUBEVENT_CONNECTION_COMPLETE,
+        0,
+        0x55,
+        0x00,
+        0,
+        1,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        0x18,
+        0x00,
+        0,
+        0,
+        0xf4,
+        0x01,
+        0,
     ];
     if links.handle_connection_complete(&reconnected).is_err()
         || bonds.restore(&links, 0x55) != Ok(material)
@@ -2850,13 +3884,34 @@ pub fn le_bond_persistence_self_test() -> bool {
     }
 
     let disconnected_again = [EVT_DISCONNECTION_COMPLETE, 4, 0, 0x55, 0, 0x13];
-    if links.handle_disconnection_complete(&disconnected_again).is_err() {
+    if links
+        .handle_disconnection_complete(&disconnected_again)
+        .is_err()
+    {
         return false;
     }
     let wrong_peer = [
-        EVT_LE_META, 19, LE_SUBEVENT_CONNECTION_COMPLETE, 0,
-        0x56, 0x00, 0, 1, 6, 5, 4, 3, 2, 1,
-        0x18, 0x00, 0, 0, 0xf4, 0x01, 0,
+        EVT_LE_META,
+        19,
+        LE_SUBEVENT_CONNECTION_COMPLETE,
+        0,
+        0x56,
+        0x00,
+        0,
+        1,
+        6,
+        5,
+        4,
+        3,
+        2,
+        1,
+        0x18,
+        0x00,
+        0,
+        0,
+        0xf4,
+        0x01,
+        0,
     ];
     links.handle_connection_complete(&wrong_peer).is_ok()
         && bonds.restore(&links, 0x56).is_err()
@@ -2864,7 +3919,6 @@ pub fn le_bond_persistence_self_test() -> bool {
         && bonds.count() == 0
         && !bonds.remove(1, [1, 2, 3, 4, 5, 6])
 }
-
 
 // Stage 13.10N: restore LE controller encryption from a persisted bond.
 pub const LE_SUBEVENT_LONG_TERM_KEY_REQUEST: u8 = 0x05;
@@ -2888,8 +3942,7 @@ impl LeBondStore {
 
         let handle = u16::from_le_bytes([event[3], event[4]]);
         let rand = u64::from_le_bytes([
-            event[5], event[6], event[7], event[8],
-            event[9], event[10], event[11], event[12],
+            event[5], event[6], event[7], event[8], event[9], event[10], event[11], event[12],
         ]);
         let ediv = u16::from_le_bytes([event[13], event[14]]);
         let material = self.restore(links, handle);
@@ -2902,13 +3955,11 @@ impl LeBondStore {
                 HciCommand::new(OPCODE_LE_LONG_TERM_KEY_REQUEST_REPLY, &params)
                     .map(|command| command.encode(out))
             }
-            Ok(_) | Err(HciError::UnexpectedOpcode) => {
-                HciCommand::new(
-                    OPCODE_LE_LONG_TERM_KEY_REQUEST_NEGATIVE_REPLY,
-                    &handle.to_le_bytes(),
-                )
-                .map(|command| command.encode(out))
-            }
+            Ok(_) | Err(HciError::UnexpectedOpcode) => HciCommand::new(
+                OPCODE_LE_LONG_TERM_KEY_REQUEST_NEGATIVE_REPLY,
+                &handle.to_le_bytes(),
+            )
+            .map(|command| command.encode(out)),
             Err(error) => Err(error),
         }
     }
@@ -2917,9 +3968,27 @@ impl LeBondStore {
 pub fn le_bond_encryption_restore_self_test() -> bool {
     let mut links = LeLinkState::new();
     let connected = [
-        EVT_LE_META, 19, LE_SUBEVENT_CONNECTION_COMPLETE, 0,
-        0x55, 0x00, 0, 1, 1, 2, 3, 4, 5, 6,
-        0x18, 0x00, 0, 0, 0xf4, 0x01, 0,
+        EVT_LE_META,
+        19,
+        LE_SUBEVENT_CONNECTION_COMPLETE,
+        0,
+        0x55,
+        0x00,
+        0,
+        1,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        0x18,
+        0x00,
+        0,
+        0,
+        0xf4,
+        0x01,
+        0,
     ];
     if links.handle_connection_complete(&connected).is_err() {
         return false;
@@ -2976,9 +4045,27 @@ pub fn le_bond_encryption_restore_self_test() -> bool {
     }
 
     let reconnected = [
-        EVT_LE_META, 19, LE_SUBEVENT_CONNECTION_COMPLETE, 0,
-        0x66, 0x00, 0, 1, 1, 2, 3, 4, 5, 6,
-        0x18, 0x00, 0, 0, 0xf4, 0x01, 0,
+        EVT_LE_META,
+        19,
+        LE_SUBEVENT_CONNECTION_COMPLETE,
+        0,
+        0x66,
+        0x00,
+        0,
+        1,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        0x18,
+        0x00,
+        0,
+        0,
+        0xf4,
+        0x01,
+        0,
     ];
     if links.handle_connection_complete(&reconnected).is_err() {
         return false;
@@ -2988,9 +4075,10 @@ pub fn le_bond_encryption_restore_self_test() -> bool {
         && u16::from_le_bytes([out[0], out[1]]) == OPCODE_LE_LONG_TERM_KEY_REQUEST_REPLY
         && out[3..5] == 0x66_u16.to_le_bytes()
         && out[5..21] == material.ltk
-        && bonds.long_term_key_request_reply(&links, &request[..14], &mut out).is_err()
+        && bonds
+            .long_term_key_request_reply(&links, &request[..14], &mut out)
+            .is_err()
 }
-
 
 // Stage 13.10O: transient LE encrypted-session state bound to a restored bond.
 pub const MAX_LE_SECURE_SESSIONS: usize = MAX_LE_LINKS;
@@ -3011,7 +4099,10 @@ pub struct LeSecuritySessions {
 
 impl LeSecuritySessions {
     pub const fn new() -> Self {
-        Self { sessions: [None; MAX_LE_SECURE_SESSIONS], count: 0 }
+        Self {
+            sessions: [None; MAX_LE_SECURE_SESSIONS],
+            count: 0,
+        }
     }
 
     fn live_link(links: &LeLinkState, handle: u16) -> Option<LeLink> {
@@ -3120,15 +4211,35 @@ impl LeSecuritySessions {
         })
     }
 
-    pub fn count(&self) -> usize { self.count }
+    pub fn count(&self) -> usize {
+        self.count
+    }
 }
 
 pub fn le_encrypted_session_self_test() -> bool {
     let mut links = LeLinkState::new();
     let connected = [
-        EVT_LE_META, 19, LE_SUBEVENT_CONNECTION_COMPLETE, 0,
-        0x66, 0x00, 0, 1, 1, 2, 3, 4, 5, 6,
-        0x18, 0x00, 0, 0, 0xf4, 0x01, 0,
+        EVT_LE_META,
+        19,
+        LE_SUBEVENT_CONNECTION_COMPLETE,
+        0,
+        0x66,
+        0x00,
+        0,
+        1,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        0x18,
+        0x00,
+        0,
+        0,
+        0xf4,
+        0x01,
+        0,
     ];
     if links.handle_connection_complete(&connected).is_err() {
         return false;
@@ -3151,13 +4262,14 @@ pub fn le_encrypted_session_self_test() -> bool {
     if sessions.encryption_change(&links, &bonds, &encrypted) != Ok(0x66)
         || !sessions.secured(0x66)
         || sessions.count() != 1
-        || sessions.session(0x66) != Some(LeSecureSession {
-            handle: 0x66,
-            address_type: 1,
-            address: [1, 2, 3, 4, 5, 6],
-            authenticated: true,
-            key_size: 16,
-        })
+        || sessions.session(0x66)
+            != Some(LeSecureSession {
+                handle: 0x66,
+                address_type: 1,
+                address: [1, 2, 3, 4, 5, 6],
+                authenticated: true,
+                key_size: 16,
+            })
     {
         return false;
     }
@@ -3166,18 +4278,21 @@ pub fn le_encrypted_session_self_test() -> bool {
     if sessions.encryption_change(&links, &bonds, &disabled) != Ok(0x66)
         || sessions.secured(0x66)
         || sessions.count() != 0
-        || sessions.encryption_change(&links, &bonds, &encrypted).is_err()
+        || sessions
+            .encryption_change(&links, &bonds, &encrypted)
+            .is_err()
     {
         return false;
     }
 
     let failed = [EVT_ENCRYPTION_CHANGE, 4, 5, 0x66, 0, 0];
-    if sessions.encryption_change(&links, &bonds, &failed).is_ok()
-        || sessions.secured(0x66)
-    {
+    if sessions.encryption_change(&links, &bonds, &failed).is_ok() || sessions.secured(0x66) {
         return false;
     }
-    if sessions.encryption_change(&links, &bonds, &encrypted).is_err() {
+    if sessions
+        .encryption_change(&links, &bonds, &encrypted)
+        .is_err()
+    {
         return false;
     }
 
@@ -3191,9 +4306,27 @@ pub fn le_encrypted_session_self_test() -> bool {
     }
 
     let reconnected = [
-        EVT_LE_META, 19, LE_SUBEVENT_CONNECTION_COMPLETE, 0,
-        0x77, 0x00, 0, 1, 1, 2, 3, 4, 5, 6,
-        0x18, 0x00, 0, 0, 0xf4, 0x01, 0,
+        EVT_LE_META,
+        19,
+        LE_SUBEVENT_CONNECTION_COMPLETE,
+        0,
+        0x77,
+        0x00,
+        0,
+        1,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        0x18,
+        0x00,
+        0,
+        0,
+        0xf4,
+        0x01,
+        0,
     ];
     if links.handle_connection_complete(&reconnected).is_err() {
         return false;
@@ -3210,9 +4343,10 @@ pub fn le_encrypted_session_self_test() -> bool {
         && sessions.count() == 0
         && !sessions.secured(0x77)
         && bonds.count() == 1
-        && sessions.encryption_change(&links, &bonds, &reencrypted).is_err()
+        && sessions
+            .encryption_change(&links, &bonds, &reencrypted)
+            .is_err()
 }
-
 
 // Stage 13.10P: ATT/GATT authorization bound to LE encrypted-session state.
 pub const ATT_ERR_INSUFFICIENT_AUTHENTICATION: u8 = 0x05;
@@ -3240,7 +4374,10 @@ pub struct AttSecurityPolicies {
 
 impl AttSecurityPolicies {
     pub const fn new() -> Self {
-        Self { entries: [None; MAX_ATT_SECURITY_POLICIES], count: 0 }
+        Self {
+            entries: [None; MAX_ATT_SECURITY_POLICIES],
+            count: 0,
+        }
     }
 
     pub fn require(
@@ -3254,13 +4391,21 @@ impl AttSecurityPolicies {
         if let Some(index) = self.entries[..self.count].iter().position(|entry| {
             entry.is_some_and(|policy| policy.attribute_handle == attribute_handle)
         }) {
-            self.entries[index] = Some(AttSecurityPolicy { attribute_handle, requirement, min_key_size: 0 });
+            self.entries[index] = Some(AttSecurityPolicy {
+                attribute_handle,
+                requirement,
+                min_key_size: 0,
+            });
             return Ok(());
         }
         if self.count == MAX_ATT_SECURITY_POLICIES {
             return Err(HciError::ControllerFailure(0xff));
         }
-        self.entries[self.count] = Some(AttSecurityPolicy { attribute_handle, requirement, min_key_size: 0 });
+        self.entries[self.count] = Some(AttSecurityPolicy {
+            attribute_handle,
+            requirement,
+            min_key_size: 0,
+        });
         self.count += 1;
         Ok(())
     }
@@ -3292,7 +4437,9 @@ impl AttSecurityPolicies {
             .copied()
     }
 
-    pub fn count(&self) -> usize { self.count }
+    pub fn count(&self) -> usize {
+        self.count
+    }
 }
 
 impl AttDatabase {
@@ -3312,8 +4459,12 @@ impl AttDatabase {
             return Err(HciError::MalformedEvent);
         };
         let handle = match opcode {
-            ATT_OP_READ_REQUEST if request.len() == 3 => u16::from_le_bytes([request[1], request[2]]),
-            ATT_OP_WRITE_REQUEST if request.len() >= 3 => u16::from_le_bytes([request[1], request[2]]),
+            ATT_OP_READ_REQUEST if request.len() == 3 => {
+                u16::from_le_bytes([request[1], request[2]])
+            }
+            ATT_OP_WRITE_REQUEST if request.len() >= 3 => {
+                u16::from_le_bytes([request[1], request[2]])
+            }
             _ => return self.transact(links, connection_handle, request, out),
         };
 
@@ -3326,7 +4477,8 @@ impl AttDatabase {
                     out,
                 ));
             };
-            if policy.requirement == AttSecurityRequirement::Authenticated && !session.authenticated {
+            if policy.requirement == AttSecurityRequirement::Authenticated && !session.authenticated
+            {
                 return Ok(Self::error_response(
                     opcode,
                     handle,
@@ -3357,33 +4509,51 @@ impl GattDatabase {
         request: &[u8],
         out: &mut [u8; MAX_ATT_PDU],
     ) -> Result<usize, HciError> {
-        self.att.transact_secured(
-            links,
-            sessions,
-            policies,
-            connection_handle,
-            request,
-            out,
-        )
+        self.att
+            .transact_secured(links, sessions, policies, connection_handle, request, out)
     }
 }
 
 pub fn le_gatt_security_policy_self_test() -> bool {
     let mut links = LeLinkState::new();
     let connected = [
-        EVT_LE_META, 19, LE_SUBEVENT_CONNECTION_COMPLETE, 0,
-        0x42, 0x00, 0, 1, 1, 2, 3, 4, 5, 6,
-        0x18, 0x00, 0, 0, 0xf4, 0x01, 0,
+        EVT_LE_META,
+        19,
+        LE_SUBEVENT_CONNECTION_COMPLETE,
+        0,
+        0x42,
+        0x00,
+        0,
+        1,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        0x18,
+        0x00,
+        0,
+        0,
+        0xf4,
+        0x01,
+        0,
     ];
     if links.handle_connection_complete(&connected).is_err() {
         return false;
     }
 
     let mut gatt = GattDatabase::new();
-    let Ok(handles) = gatt.add_wovenhat_os_service(b"ready") else { return false; };
+    let Ok(handles) = gatt.add_wovenhat_os_service(b"ready") else {
+        return false;
+    };
     let mut policies = AttSecurityPolicies::new();
-    if policies.require(handles.status_value, AttSecurityRequirement::Encrypted).is_err()
-        || policies.require(handles.command_value, AttSecurityRequirement::Authenticated).is_err()
+    if policies
+        .require(handles.status_value, AttSecurityRequirement::Encrypted)
+        .is_err()
+        || policies
+            .require(handles.command_value, AttSecurityRequirement::Authenticated)
+            .is_err()
         || policies.count() != 2
     {
         return false;
@@ -3396,7 +4566,11 @@ pub fn le_gatt_security_policy_self_test() -> bool {
         &sessions,
         &policies,
         0x42,
-        &[ATT_OP_READ_REQUEST, handles.status_value as u8, (handles.status_value >> 8) as u8],
+        &[
+            ATT_OP_READ_REQUEST,
+            handles.status_value as u8,
+            (handles.status_value >> 8) as u8,
+        ],
         &mut out,
     ) != Ok(5)
         || out[4] != ATT_ERR_INSUFFICIENT_ENCRYPTION
@@ -3413,11 +4587,9 @@ pub fn le_gatt_security_policy_self_test() -> bool {
     };
     let mut bonds = LeBondStore::new();
     if bonds.store(&links, 0x42, unauthenticated).is_err()
-        || sessions.encryption_change(
-            &links,
-            &bonds,
-            &[EVT_ENCRYPTION_CHANGE, 4, 0, 0x42, 0, 1],
-        ).is_err()
+        || sessions
+            .encryption_change(&links, &bonds, &[EVT_ENCRYPTION_CHANGE, 4, 0, 0x42, 0, 1])
+            .is_err()
     {
         return false;
     }
@@ -3426,7 +4598,11 @@ pub fn le_gatt_security_policy_self_test() -> bool {
         &sessions,
         &policies,
         0x42,
-        &[ATT_OP_READ_REQUEST, handles.status_value as u8, (handles.status_value >> 8) as u8],
+        &[
+            ATT_OP_READ_REQUEST,
+            handles.status_value as u8,
+            (handles.status_value >> 8) as u8,
+        ],
         &mut out,
     ) != Ok(6)
         || out[..6] != [ATT_OP_READ_RESPONSE, b'r', b'e', b'a', b'd', b'y']
@@ -3438,7 +4614,12 @@ pub fn le_gatt_security_policy_self_test() -> bool {
         &sessions,
         &policies,
         0x42,
-        &[ATT_OP_WRITE_REQUEST, handles.command_value as u8, (handles.command_value >> 8) as u8, b'x'],
+        &[
+            ATT_OP_WRITE_REQUEST,
+            handles.command_value as u8,
+            (handles.command_value >> 8) as u8,
+            b'x',
+        ],
         &mut out,
     ) != Ok(5)
         || out[4] != ATT_ERR_INSUFFICIENT_AUTHENTICATION
@@ -3446,13 +4627,14 @@ pub fn le_gatt_security_policy_self_test() -> bool {
         return false;
     }
 
-    let authenticated = LeBondMaterial { authenticated: true, ..unauthenticated };
+    let authenticated = LeBondMaterial {
+        authenticated: true,
+        ..unauthenticated
+    };
     if bonds.store(&links, 0x42, authenticated).is_err()
-        || sessions.encryption_change(
-            &links,
-            &bonds,
-            &[EVT_ENCRYPTION_CHANGE, 4, 0, 0x42, 0, 1],
-        ).is_err()
+        || sessions
+            .encryption_change(&links, &bonds, &[EVT_ENCRYPTION_CHANGE, 4, 0, 0x42, 0, 1])
+            .is_err()
     {
         return false;
     }
@@ -3461,7 +4643,15 @@ pub fn le_gatt_security_policy_self_test() -> bool {
         &sessions,
         &policies,
         0x42,
-        &[ATT_OP_WRITE_REQUEST, handles.command_value as u8, (handles.command_value >> 8) as u8, b'p', b'i', b'n', b'g'],
+        &[
+            ATT_OP_WRITE_REQUEST,
+            handles.command_value as u8,
+            (handles.command_value >> 8) as u8,
+            b'p',
+            b'i',
+            b'n',
+            b'g',
+        ],
         &mut out,
     ) != Ok(1)
         || out[0] != ATT_OP_WRITE_RESPONSE
@@ -3471,16 +4661,21 @@ pub fn le_gatt_security_policy_self_test() -> bool {
 
     let disconnected = [EVT_DISCONNECTION_COMPLETE, 4, 0, 0x42, 0, 0x13];
     sessions.disconnect(&mut links, &disconnected).is_ok()
-        && gatt.transact_secured(
-            &links,
-            &sessions,
-            &policies,
-            0x42,
-            &[ATT_OP_READ_REQUEST, handles.status_value as u8, (handles.status_value >> 8) as u8],
-            &mut out,
-        ).is_err()
+        && gatt
+            .transact_secured(
+                &links,
+                &sessions,
+                &policies,
+                0x42,
+                &[
+                    ATT_OP_READ_REQUEST,
+                    handles.status_value as u8,
+                    (handles.status_value >> 8) as u8,
+                ],
+                &mut out,
+            )
+            .is_err()
 }
-
 
 // Stage 13.10Q: enforce ATT security policy on outbound notifications/indications.
 pub struct GattSecuredEmission<'a> {
@@ -3503,7 +4698,8 @@ impl GattSubscriptions {
             let Some(session) = sessions.session_for_link(links, emission.connection_handle) else {
                 return Err(HciError::UnexpectedOpcode);
             };
-            if policy.requirement == AttSecurityRequirement::Authenticated && !session.authenticated {
+            if policy.requirement == AttSecurityRequirement::Authenticated && !session.authenticated
+            {
                 return Err(HciError::UnexpectedOpcode);
             }
             if policy.min_key_size != 0 && session.key_size < policy.min_key_size {
@@ -3524,9 +4720,27 @@ impl GattSubscriptions {
 pub fn le_gatt_secure_notification_self_test() -> bool {
     let mut links = LeLinkState::new();
     let connected = [
-        EVT_LE_META, 19, LE_SUBEVENT_CONNECTION_COMPLETE, 0,
-        0x42, 0x00, 0, 1, 1, 2, 3, 4, 5, 6,
-        0x18, 0x00, 0, 0, 0xf4, 0x01, 0,
+        EVT_LE_META,
+        19,
+        LE_SUBEVENT_CONNECTION_COMPLETE,
+        0,
+        0x42,
+        0x00,
+        0,
+        1,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        0x18,
+        0x00,
+        0,
+        0,
+        0xf4,
+        0x01,
+        0,
     ];
     if links.handle_connection_complete(&connected).is_err() {
         return false;
@@ -3534,17 +4748,24 @@ pub fn le_gatt_secure_notification_self_test() -> bool {
 
     let value_handle = 8;
     let mut subscriptions = GattSubscriptions::new();
-    if subscriptions.configure(&links, 0x42, value_handle, 0x0003).is_err() {
+    if subscriptions
+        .configure(&links, 0x42, value_handle, 0x0003)
+        .is_err()
+    {
         return false;
     }
     let mut policies = AttSecurityPolicies::new();
-    if policies.require(value_handle, AttSecurityRequirement::Authenticated).is_err() {
+    if policies
+        .require(value_handle, AttSecurityRequirement::Authenticated)
+        .is_err()
+    {
         return false;
     }
 
     let mut sessions = LeSecuritySessions::new();
     let mut out = [0_u8; MAX_ATT_PDU];
-    if subscriptions.emit_secured(
+    if subscriptions
+        .emit_secured(
             &links,
             &sessions,
             &policies,
@@ -3555,7 +4776,9 @@ pub fn le_gatt_secure_notification_self_test() -> bool {
                 value: &[87],
             },
             &mut out,
-        ).is_ok() {
+        )
+        .is_ok()
+    {
         return false;
     }
 
@@ -3568,34 +4791,35 @@ pub fn le_gatt_secure_notification_self_test() -> bool {
         authenticated: false,
     };
     if bonds.store(&links, 0x42, unauthenticated).is_err()
-        || sessions.encryption_change(
-            &links,
-            &bonds,
-            &[EVT_ENCRYPTION_CHANGE, 4, 0, 0x42, 0, 1],
-        ).is_err()
-        || subscriptions.emit_secured(
-            &links,
-            &sessions,
-            &policies,
-            GattSecuredEmission {
-                connection_handle: 0x42,
-                value_handle,
-                indication: false,
-                value: &[86],
-            },
-            &mut out,
-        ).is_ok()
+        || sessions
+            .encryption_change(&links, &bonds, &[EVT_ENCRYPTION_CHANGE, 4, 0, 0x42, 0, 1])
+            .is_err()
+        || subscriptions
+            .emit_secured(
+                &links,
+                &sessions,
+                &policies,
+                GattSecuredEmission {
+                    connection_handle: 0x42,
+                    value_handle,
+                    indication: false,
+                    value: &[86],
+                },
+                &mut out,
+            )
+            .is_ok()
     {
         return false;
     }
 
-    let authenticated = LeBondMaterial { authenticated: true, ..unauthenticated };
+    let authenticated = LeBondMaterial {
+        authenticated: true,
+        ..unauthenticated
+    };
     if bonds.store(&links, 0x42, authenticated).is_err()
-        || sessions.encryption_change(
-            &links,
-            &bonds,
-            &[EVT_ENCRYPTION_CHANGE, 4, 0, 0x42, 0, 1],
-        ).is_err()
+        || sessions
+            .encryption_change(&links, &bonds, &[EVT_ENCRYPTION_CHANGE, 4, 0, 0x42, 0, 1])
+            .is_err()
         || subscriptions.emit_secured(
             &links,
             &sessions,
@@ -3628,36 +4852,48 @@ pub fn le_gatt_secure_notification_self_test() -> bool {
 
     let disabled = [EVT_ENCRYPTION_CHANGE, 4, 0, 0x42, 0, 0];
     sessions.encryption_change(&links, &bonds, &disabled) == Ok(0x42)
-        && subscriptions.emit_secured(
-            &links,
-            &sessions,
-            &policies,
-            GattSecuredEmission {
-                connection_handle: 0x42,
-                value_handle,
-                indication: false,
-                value: &[83],
-            },
-            &mut out,
-        ).is_err()
-        && subscriptions.emit(
-            &links,
-            0x42,
-            value_handle,
-            false,
-            &[82],
-            &mut out,
-        ) == Ok(4)
+        && subscriptions
+            .emit_secured(
+                &links,
+                &sessions,
+                &policies,
+                GattSecuredEmission {
+                    connection_handle: 0x42,
+                    value_handle,
+                    indication: false,
+                    value: &[83],
+                },
+                &mut out,
+            )
+            .is_err()
+        && subscriptions.emit(&links, 0x42, value_handle, false, &[82], &mut out) == Ok(4)
 }
-
 
 // Stage 13.10R: reject stale secure sessions after LE connection-handle reuse.
 pub fn le_secure_session_identity_binding_self_test() -> Result<(), u8> {
     let mut links = LeLinkState::new();
     let peer_a = [
-        EVT_LE_META, 19, LE_SUBEVENT_CONNECTION_COMPLETE, 0,
-        0x42, 0x00, 0, 1, 1, 2, 3, 4, 5, 6,
-        0x18, 0x00, 0, 0, 0xf4, 0x01, 0,
+        EVT_LE_META,
+        19,
+        LE_SUBEVENT_CONNECTION_COMPLETE,
+        0,
+        0x42,
+        0x00,
+        0,
+        1,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        0x18,
+        0x00,
+        0,
+        0,
+        0xf4,
+        0x01,
+        0,
     ];
     if links.handle_connection_complete(&peer_a).is_err() {
         crate::serial::write_line(format_args!("[S13.10R-DIAG] R1 peer A connect failed"));
@@ -3677,11 +4913,9 @@ pub fn le_secure_session_identity_binding_self_test() -> Result<(), u8> {
         crate::serial::write_line(format_args!("[S13.10R-DIAG] R2 bond store failed"));
         return Err(2);
     }
-    if sessions.encryption_change(
-        &links,
-        &bonds,
-        &[EVT_ENCRYPTION_CHANGE, 4, 0, 0x42, 0, 1],
-    ) != Ok(0x42) {
+    if sessions.encryption_change(&links, &bonds, &[EVT_ENCRYPTION_CHANGE, 4, 0, 0x42, 0, 1])
+        != Ok(0x42)
+    {
         crate::serial::write_line(format_args!("[S13.10R-DIAG] R3 encryption session failed"));
         return Err(3);
     }
@@ -3696,14 +4930,34 @@ pub fn le_secure_session_identity_binding_self_test() -> Result<(), u8> {
         return Err(5);
     }
     if sessions.session(0x42).is_none() {
-        crate::serial::write_line(format_args!("[S13.10R-DIAG] R6 stale-session fixture missing"));
+        crate::serial::write_line(format_args!(
+            "[S13.10R-DIAG] R6 stale-session fixture missing"
+        ));
         return Err(6);
     }
 
     let peer_b = [
-        EVT_LE_META, 19, LE_SUBEVENT_CONNECTION_COMPLETE, 0,
-        0x42, 0x00, 0, 1, 6, 5, 4, 3, 2, 1,
-        0x18, 0x00, 0, 0, 0xf4, 0x01, 0,
+        EVT_LE_META,
+        19,
+        LE_SUBEVENT_CONNECTION_COMPLETE,
+        0,
+        0x42,
+        0x00,
+        0,
+        1,
+        6,
+        5,
+        4,
+        3,
+        2,
+        1,
+        0x18,
+        0x00,
+        0,
+        0,
+        0xf4,
+        0x01,
+        0,
     ];
     if links.handle_connection_complete(&peer_b).is_err() {
         crate::serial::write_line(format_args!("[S13.10R-DIAG] R7 peer B handle reuse failed"));
@@ -3716,7 +4970,10 @@ pub fn le_secure_session_identity_binding_self_test() -> Result<(), u8> {
 
     let protected_handle = 8;
     let mut policies = AttSecurityPolicies::new();
-    if policies.require(protected_handle, AttSecurityRequirement::Authenticated).is_err() {
+    if policies
+        .require(protected_handle, AttSecurityRequirement::Authenticated)
+        .is_err()
+    {
         crate::serial::write_line(format_args!("[S13.10R-DIAG] R9 policy install failed"));
         return Err(9);
     }
@@ -3746,44 +5003,68 @@ pub fn le_secure_session_identity_binding_self_test() -> Result<(), u8> {
     if att_result != Ok(5) || out[4] != ATT_ERR_INSUFFICIENT_ENCRYPTION {
         crate::serial::write_line(format_args!(
             "[S13.10R-DIAG] R12 ATT stale-session denial failed result={:?} error={}",
-            att_result,
-            out[4]
+            att_result, out[4]
         ));
         return Err(12);
     }
 
     let mut subscriptions = GattSubscriptions::new();
-    if subscriptions.configure(&links, 0x42, protected_handle, 0x0001).is_err() {
+    if subscriptions
+        .configure(&links, 0x42, protected_handle, 0x0001)
+        .is_err()
+    {
         crate::serial::write_line(format_args!("[S13.10R-DIAG] R13 subscription failed"));
         return Err(13);
     }
-    if subscriptions.emit_secured(
-        &links,
-        &sessions,
-        &policies,
-        GattSecuredEmission {
-            connection_handle: 0x42,
-            value_handle: protected_handle,
-            indication: false,
-            value: b"safe",
-        },
-        &mut out,
-    ).is_ok() {
-        crate::serial::write_line(format_args!("[S13.10R-DIAG] R14 notification stale-session accepted"));
+    if subscriptions
+        .emit_secured(
+            &links,
+            &sessions,
+            &policies,
+            GattSecuredEmission {
+                connection_handle: 0x42,
+                value_handle: protected_handle,
+                indication: false,
+                value: b"safe",
+            },
+            &mut out,
+        )
+        .is_ok()
+    {
+        crate::serial::write_line(format_args!(
+            "[S13.10R-DIAG] R14 notification stale-session accepted"
+        ));
         return Err(14);
     }
 
     Ok(())
 }
 
-
 // Stage 13.10S: enforce minimum BLE encryption key size on protected ATT/GATT access.
 pub fn le_gatt_minimum_key_size_self_test() -> bool {
     let mut links = LeLinkState::new();
     let connected = [
-        EVT_LE_META, 19, LE_SUBEVENT_CONNECTION_COMPLETE, 0,
-        0x52, 0x00, 0, 1, 2, 4, 6, 8, 10, 12,
-        0x18, 0x00, 0, 0, 0xf4, 0x01, 0,
+        EVT_LE_META,
+        19,
+        LE_SUBEVENT_CONNECTION_COMPLETE,
+        0,
+        0x52,
+        0x00,
+        0,
+        1,
+        2,
+        4,
+        6,
+        8,
+        10,
+        12,
+        0x18,
+        0x00,
+        0,
+        0,
+        0xf4,
+        0x01,
+        0,
     ];
     if links.handle_connection_complete(&connected).is_err() {
         return false;
@@ -3799,7 +5080,9 @@ pub fn le_gatt_minimum_key_size_self_test() -> bool {
     }
 
     let mut policies = AttSecurityPolicies::new();
-    if policies.require(handle, AttSecurityRequirement::Authenticated).is_err()
+    if policies
+        .require(handle, AttSecurityRequirement::Authenticated)
+        .is_err()
         || policies.require_min_key_size(handle, 16).is_err()
         || policies.require_min_key_size(handle, 6).is_ok()
         || policies.require_min_key_size(handle, 17).is_ok()
@@ -3817,11 +5100,9 @@ pub fn le_gatt_minimum_key_size_self_test() -> bool {
     let mut bonds = LeBondStore::new();
     let mut sessions = LeSecuritySessions::new();
     if bonds.store(&links, 0x52, weak).is_err()
-        || sessions.encryption_change(
-            &links,
-            &bonds,
-            &[EVT_ENCRYPTION_CHANGE, 4, 0, 0x52, 0, 1],
-        ).is_err()
+        || sessions
+            .encryption_change(&links, &bonds, &[EVT_ENCRYPTION_CHANGE, 4, 0, 0x52, 0, 1])
+            .is_err()
     {
         return false;
     }
@@ -3835,38 +5116,36 @@ pub fn le_gatt_minimum_key_size_self_test() -> bool {
     }
 
     let mut subscriptions = GattSubscriptions::new();
-    if subscriptions.configure(&links, 0x52, handle, 0x0001).is_err()
-        || subscriptions.emit_secured(
-            &links,
-            &sessions,
-            &policies,
-            GattSecuredEmission {
-                connection_handle: 0x52,
-                value_handle: handle,
-                indication: false,
-                value: b"weak",
-            },
-            &mut out,
-        ).is_ok()
+    if subscriptions
+        .configure(&links, 0x52, handle, 0x0001)
+        .is_err()
+        || subscriptions
+            .emit_secured(
+                &links,
+                &sessions,
+                &policies,
+                GattSecuredEmission {
+                    connection_handle: 0x52,
+                    value_handle: handle,
+                    indication: false,
+                    value: b"weak",
+                },
+                &mut out,
+            )
+            .is_ok()
     {
         return false;
     }
 
-    let strong = LeBondMaterial { key_size: 16, ..weak };
+    let strong = LeBondMaterial {
+        key_size: 16,
+        ..weak
+    };
     bonds.store(&links, 0x52, strong).is_ok()
-        && sessions.encryption_change(
-            &links,
-            &bonds,
-            &[EVT_ENCRYPTION_CHANGE, 4, 0, 0x52, 0, 1],
-        ).is_ok()
-        && att.transact_secured(
-            &links,
-            &sessions,
-            &policies,
-            0x52,
-            &request,
-            &mut out,
-        ) == Ok(7)
+        && sessions
+            .encryption_change(&links, &bonds, &[EVT_ENCRYPTION_CHANGE, 4, 0, 0x52, 0, 1])
+            .is_ok()
+        && att.transact_secured(&links, &sessions, &policies, 0x52, &request, &mut out) == Ok(7)
         && out[..7] == [ATT_OP_READ_RESPONSE, b's', b't', b'r', b'o', b'n', b'g']
         && subscriptions.emit_secured(
             &links,
@@ -3880,16 +5159,45 @@ pub fn le_gatt_minimum_key_size_self_test() -> bool {
             },
             &mut out,
         ) == Ok(9)
-        && out[..9] == [ATT_OP_HANDLE_VALUE_NOTIFICATION, 8, 0, b's', b't', b'r', b'o', b'n', b'g']
+        && out[..9]
+            == [
+                ATT_OP_HANDLE_VALUE_NOTIFICATION,
+                8,
+                0,
+                b's',
+                b't',
+                b'r',
+                b'o',
+                b'n',
+                b'g',
+            ]
 }
 
 // Stage 13.10T: enforce minimum BLE encryption key size on outbound GATT values.
 pub fn le_gatt_minimum_key_size_notification_self_test() -> bool {
     let mut links = LeLinkState::new();
     let connected = [
-        EVT_LE_META, 19, LE_SUBEVENT_CONNECTION_COMPLETE, 0,
-        0x53, 0x00, 0, 1, 3, 5, 7, 9, 11, 13,
-        0x18, 0x00, 0, 0, 0xf4, 0x01, 0,
+        EVT_LE_META,
+        19,
+        LE_SUBEVENT_CONNECTION_COMPLETE,
+        0,
+        0x53,
+        0x00,
+        0,
+        1,
+        3,
+        5,
+        7,
+        9,
+        11,
+        13,
+        0x18,
+        0x00,
+        0,
+        0,
+        0xf4,
+        0x01,
+        0,
     ];
     if links.handle_connection_complete(&connected).is_err() {
         return false;
@@ -3897,7 +5205,9 @@ pub fn le_gatt_minimum_key_size_notification_self_test() -> bool {
 
     let handle = 8;
     let mut policies = AttSecurityPolicies::new();
-    if policies.require(handle, AttSecurityRequirement::Authenticated).is_err()
+    if policies
+        .require(handle, AttSecurityRequirement::Authenticated)
+        .is_err()
         || policies.require_min_key_size(handle, 16).is_err()
     {
         return false;
@@ -3913,41 +5223,44 @@ pub fn le_gatt_minimum_key_size_notification_self_test() -> bool {
     let mut bonds = LeBondStore::new();
     let mut sessions = LeSecuritySessions::new();
     if bonds.store(&links, 0x53, weak).is_err()
-        || sessions.encryption_change(
-            &links,
-            &bonds,
-            &[EVT_ENCRYPTION_CHANGE, 4, 0, 0x53, 0, 1],
-        ).is_err()
+        || sessions
+            .encryption_change(&links, &bonds, &[EVT_ENCRYPTION_CHANGE, 4, 0, 0x53, 0, 1])
+            .is_err()
     {
         return false;
     }
 
     let mut subscriptions = GattSubscriptions::new();
     let mut out = [0_u8; MAX_ATT_PDU];
-    if subscriptions.configure(&links, 0x53, handle, 0x0001).is_err()
-        || subscriptions.emit_secured(
-            &links,
-            &sessions,
-            &policies,
-            GattSecuredEmission {
-                connection_handle: 0x53,
-                value_handle: handle,
-                indication: false,
-                value: b"weak",
-            },
-            &mut out,
-        ).is_ok()
+    if subscriptions
+        .configure(&links, 0x53, handle, 0x0001)
+        .is_err()
+        || subscriptions
+            .emit_secured(
+                &links,
+                &sessions,
+                &policies,
+                GattSecuredEmission {
+                    connection_handle: 0x53,
+                    value_handle: handle,
+                    indication: false,
+                    value: b"weak",
+                },
+                &mut out,
+            )
+            .is_ok()
     {
         return false;
     }
 
-    let strong = LeBondMaterial { key_size: 16, ..weak };
+    let strong = LeBondMaterial {
+        key_size: 16,
+        ..weak
+    };
     bonds.store(&links, 0x53, strong).is_ok()
-        && sessions.encryption_change(
-            &links,
-            &bonds,
-            &[EVT_ENCRYPTION_CHANGE, 4, 0, 0x53, 0, 1],
-        ).is_ok()
+        && sessions
+            .encryption_change(&links, &bonds, &[EVT_ENCRYPTION_CHANGE, 4, 0, 0x53, 0, 1])
+            .is_ok()
         && subscriptions.emit_secured(
             &links,
             &sessions,
@@ -3960,9 +5273,19 @@ pub fn le_gatt_minimum_key_size_notification_self_test() -> bool {
             },
             &mut out,
         ) == Ok(9)
-        && out[..9] == [ATT_OP_HANDLE_VALUE_NOTIFICATION, 8, 0, b's', b't', b'r', b'o', b'n', b'g']
+        && out[..9]
+            == [
+                ATT_OP_HANDLE_VALUE_NOTIFICATION,
+                8,
+                0,
+                b's',
+                b't',
+                b'r',
+                b'o',
+                b'n',
+                b'g',
+            ]
 }
-
 
 // Stage 13.11A: BLE Security Manager Protocol pairing negotiation and fixed channel.
 pub const BLE_SMP_CID: u16 = 0x0006;
@@ -4031,12 +5354,7 @@ impl SmpPairingState {
         }
     }
 
-    pub fn begin(
-        &mut self,
-        links: &LeLinkState,
-        handle: u16,
-        pdu: &[u8],
-    ) -> Result<(), HciError> {
+    pub fn begin(&mut self, links: &LeLinkState, handle: u16, pdu: &[u8]) -> Result<(), HciError> {
         if self.phase != SmpPairingPhase::Idle || !links.contains_handle(handle) {
             return Err(HciError::UnexpectedOpcode);
         }
@@ -4059,10 +5377,7 @@ impl SmpPairingState {
         {
             return Err(HciError::UnexpectedOpcode);
         }
-        self.response = Some(SmpPairingParameters::parse(
-            pdu,
-            BLE_SMP_PAIRING_RESPONSE,
-        )?);
+        self.response = Some(SmpPairingParameters::parse(pdu, BLE_SMP_PAIRING_RESPONSE)?);
         self.phase = SmpPairingPhase::Negotiated;
         Ok(())
     }
@@ -4111,18 +5426,13 @@ impl BleSmpFixedChannel {
         }
     }
 
-    pub fn outbound(
-        links: &LeLinkState,
-        handle: u16,
-        pdu: &[u8],
-    ) -> Result<L2capFrame, HciError> {
+    pub fn outbound(links: &LeLinkState, handle: u16, pdu: &[u8]) -> Result<L2capFrame, HciError> {
         if !links.contains_handle(handle) || pdu.is_empty() {
             return Err(HciError::UnexpectedOpcode);
         }
         L2capFrame::new(BLE_SMP_CID, pdu)
     }
 }
-
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SmpLifecyclePhase {
@@ -4185,22 +5495,22 @@ impl SmpLifecycle {
                 self.phase = SmpLifecyclePhase::Negotiated;
                 Ok(())
             }
-            BLE_SMP_ENCRYPTION_INFORMATION if self.phase == SmpLifecyclePhase::Negotiated => {
-                self.key_distribution.encryption_information(links, &self.pairing, handle, pdu)
-            }
-            BLE_SMP_MASTER_IDENTIFICATION if self.phase == SmpLifecyclePhase::Negotiated => {
-                self.key_distribution.master_identification(
-                    links, &self.pairing, bonds, handle, pdu,
-                )
-            }
-            BLE_SMP_IDENTITY_INFORMATION if self.phase == SmpLifecyclePhase::Negotiated => {
-                self.identity_distribution.identity_information(
-                    links, &self.pairing, handle, pdu,
-                )
-            }
+            BLE_SMP_ENCRYPTION_INFORMATION if self.phase == SmpLifecyclePhase::Negotiated => self
+                .key_distribution
+                .encryption_information(links, &self.pairing, handle, pdu),
+            BLE_SMP_MASTER_IDENTIFICATION if self.phase == SmpLifecyclePhase::Negotiated => self
+                .key_distribution
+                .master_identification(links, &self.pairing, bonds, handle, pdu),
+            BLE_SMP_IDENTITY_INFORMATION if self.phase == SmpLifecyclePhase::Negotiated => self
+                .identity_distribution
+                .identity_information(links, &self.pairing, handle, pdu),
             BLE_SMP_IDENTITY_ADDRESS_INFORMATION if self.phase == SmpLifecyclePhase::Negotiated => {
                 self.identity_distribution.identity_address_information(
-                    links, &self.pairing, identities, handle, pdu,
+                    links,
+                    &self.pairing,
+                    identities,
+                    handle,
+                    pdu,
                 )
             }
             BLE_SMP_PAIRING_FAILED if pdu.len() == 2 && self.active_handle == Some(handle) => {
@@ -4236,9 +5546,27 @@ impl SmpLifecycle {
 pub fn ble_smp_lifecycle_hardening_13_11h_self_test() -> bool {
     let mut links = LeLinkState::new();
     let connected = [
-        EVT_LE_META, 19, LE_SUBEVENT_CONNECTION_COMPLETE, 0,
-        0x42, 0, 0, 1, 1, 2, 3, 4, 5, 6,
-        0x18, 0, 0, 0, 0xf4, 1, 0,
+        EVT_LE_META,
+        19,
+        LE_SUBEVENT_CONNECTION_COMPLETE,
+        0,
+        0x42,
+        0,
+        0,
+        1,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        0x18,
+        0,
+        0,
+        0,
+        0xf4,
+        1,
+        0,
     ];
     if links.handle_connection_complete(&connected).is_err() {
         return false;
@@ -4246,20 +5574,36 @@ pub fn ble_smp_lifecycle_hardening_13_11h_self_test() -> bool {
     let request = [BLE_SMP_PAIRING_REQUEST, 3, 0, 0x01, 16, 0x03, 0x03];
     let response = [BLE_SMP_PAIRING_RESPONSE, 3, 0, 0x01, 16, 0x03, 0x03];
     let failed = [BLE_SMP_PAIRING_FAILED, 0x08];
-    let Ok(request_frame) = L2capFrame::new(BLE_SMP_CID, &request) else { return false; };
-    let Ok(response_frame) = L2capFrame::new(BLE_SMP_CID, &response) else { return false; };
-    let Ok(failed_frame) = L2capFrame::new(BLE_SMP_CID, &failed) else { return false; };
+    let Ok(request_frame) = L2capFrame::new(BLE_SMP_CID, &request) else {
+        return false;
+    };
+    let Ok(response_frame) = L2capFrame::new(BLE_SMP_CID, &response) else {
+        return false;
+    };
+    let Ok(failed_frame) = L2capFrame::new(BLE_SMP_CID, &failed) else {
+        return false;
+    };
 
     let mut lifecycle = SmpLifecycle::new();
     let mut bonds = LeBondStore::new();
     let mut identities = LeIdentityStore::new();
-    if lifecycle.inbound(&links, &mut bonds, &mut identities, 0x42, &response_frame).is_ok()
-        || lifecycle.inbound(&links, &mut bonds, &mut identities, 0x42, &request_frame).is_err()
+    if lifecycle
+        .inbound(&links, &mut bonds, &mut identities, 0x42, &response_frame)
+        .is_ok()
+        || lifecycle
+            .inbound(&links, &mut bonds, &mut identities, 0x42, &request_frame)
+            .is_err()
         || lifecycle.phase() != SmpLifecyclePhase::Pairing
-        || lifecycle.inbound(&links, &mut bonds, &mut identities, 0x42, &request_frame).is_ok()
-        || lifecycle.inbound(&links, &mut bonds, &mut identities, 0x42, &response_frame).is_err()
+        || lifecycle
+            .inbound(&links, &mut bonds, &mut identities, 0x42, &request_frame)
+            .is_ok()
+        || lifecycle
+            .inbound(&links, &mut bonds, &mut identities, 0x42, &response_frame)
+            .is_err()
         || lifecycle.phase() != SmpLifecyclePhase::Negotiated
-        || lifecycle.inbound(&links, &mut bonds, &mut identities, 0x42, &failed_frame).is_err()
+        || lifecycle
+            .inbound(&links, &mut bonds, &mut identities, 0x42, &failed_frame)
+            .is_err()
         || lifecycle.phase() != SmpLifecyclePhase::Failed
     {
         return false;
@@ -4267,7 +5611,9 @@ pub fn ble_smp_lifecycle_hardening_13_11h_self_test() -> bool {
 
     lifecycle.reset();
     if lifecycle.phase() != SmpLifecyclePhase::Idle
-        || lifecycle.inbound(&links, &mut bonds, &mut identities, 0x42, &request_frame).is_err()
+        || lifecycle
+            .inbound(&links, &mut bonds, &mut identities, 0x42, &request_frame)
+            .is_err()
     {
         return false;
     }
@@ -4281,24 +5627,61 @@ pub fn ble_smp_lifecycle_hardening_13_11h_self_test() -> bool {
         return false;
     }
     let reconnected = [
-        EVT_LE_META, 19, LE_SUBEVENT_CONNECTION_COMPLETE, 0,
-        0x55, 0, 0, 1, 1, 2, 3, 4, 5, 6,
-        0x18, 0, 0, 0, 0xf4, 1, 0,
+        EVT_LE_META,
+        19,
+        LE_SUBEVENT_CONNECTION_COMPLETE,
+        0,
+        0x55,
+        0,
+        0,
+        1,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        0x18,
+        0,
+        0,
+        0,
+        0xf4,
+        1,
+        0,
     ];
     if links.handle_connection_complete(&reconnected).is_err() {
         return false;
     }
-    lifecycle.inbound(&links, &mut bonds, &mut identities, 0x55, &request_frame).is_ok()
+    lifecycle
+        .inbound(&links, &mut bonds, &mut identities, 0x55, &request_frame)
+        .is_ok()
         && lifecycle.phase() == SmpLifecyclePhase::Pairing
 }
-
 
 pub fn ble_smp_foundation_13_11a_self_test() -> bool {
     let mut links = LeLinkState::new();
     let connected = [
-        EVT_LE_META, 19, LE_SUBEVENT_CONNECTION_COMPLETE, 0,
-        0x42, 0, 0, 1, 1, 2, 3, 4, 5, 6,
-        0x18, 0, 0, 0, 0xf4, 1, 0,
+        EVT_LE_META,
+        19,
+        LE_SUBEVENT_CONNECTION_COMPLETE,
+        0,
+        0x42,
+        0,
+        0,
+        1,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        0x18,
+        0,
+        0,
+        0,
+        0xf4,
+        1,
+        0,
     ];
     if links.handle_connection_complete(&connected).is_err() {
         return false;
@@ -4339,8 +5722,6 @@ pub fn ble_smp_foundation_13_11a_self_test() -> bool {
     links.handle_disconnection_complete(&disconnected).is_ok()
         && BleSmpFixedChannel::outbound(&links, 0x42, &request).is_err()
 }
-
-
 
 // Stage 13.11E: legacy SMP pairing-method selection and MITM authentication policy.
 const SMP_AUTHREQ_MITM: u8 = 0x04;
@@ -4403,9 +5784,27 @@ impl SmpPairingState {
 pub fn ble_smp_authentication_policy_13_11e_self_test() -> bool {
     let mut links = LeLinkState::new();
     let connected = [
-        EVT_LE_META, 19, LE_SUBEVENT_CONNECTION_COMPLETE, 0,
-        0x42, 0, 0, 1, 1, 2, 3, 4, 5, 6,
-        0x18, 0, 0, 0, 0xf4, 1, 0,
+        EVT_LE_META,
+        19,
+        LE_SUBEVENT_CONNECTION_COMPLETE,
+        0,
+        0x42,
+        0,
+        0,
+        1,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        0x18,
+        0,
+        0,
+        0,
+        0xf4,
+        1,
+        0,
     ];
     if links.handle_connection_complete(&connected).is_err() {
         return false;
@@ -4415,11 +5814,14 @@ pub fn ble_smp_authentication_policy_13_11e_self_test() -> bool {
     let jw_request = [BLE_SMP_PAIRING_REQUEST, 3, 0, 0x01, 16, 0x01, 0x01];
     let jw_response = [BLE_SMP_PAIRING_RESPONSE, 3, 0, 0x01, 16, 0x01, 0x01];
     if just_works.begin(&links, 0x42, &jw_request).is_err()
-        || just_works.accept_response(&links, 0x42, &jw_response).is_err()
-        || just_works.authentication() != Ok(SmpAuthentication {
-            method: SmpPairingMethod::JustWorks,
-            authenticated: false,
-        })
+        || just_works
+            .accept_response(&links, 0x42, &jw_response)
+            .is_err()
+        || just_works.authentication()
+            != Ok(SmpAuthentication {
+                method: SmpPairingMethod::JustWorks,
+                authenticated: false,
+            })
     {
         return false;
     }
@@ -4429,10 +5831,11 @@ pub fn ble_smp_authentication_policy_13_11e_self_test() -> bool {
     let pk_response = [BLE_SMP_PAIRING_RESPONSE, 2, 0, 0x05, 16, 0x01, 0x01];
     if passkey.begin(&links, 0x42, &pk_request).is_err()
         || passkey.accept_response(&links, 0x42, &pk_response).is_err()
-        || passkey.authentication() != Ok(SmpAuthentication {
-            method: SmpPairingMethod::PasskeyEntry,
-            authenticated: true,
-        })
+        || passkey.authentication()
+            != Ok(SmpAuthentication {
+                method: SmpPairingMethod::PasskeyEntry,
+                authenticated: true,
+            })
     {
         return false;
     }
@@ -4441,7 +5844,9 @@ pub fn ble_smp_authentication_policy_13_11e_self_test() -> bool {
     let mitm_request = [BLE_SMP_PAIRING_REQUEST, 3, 0, 0x05, 16, 0x01, 0x01];
     let mitm_response = [BLE_SMP_PAIRING_RESPONSE, 3, 0, 0x05, 16, 0x01, 0x01];
     if impossible_mitm.begin(&links, 0x42, &mitm_request).is_err()
-        || impossible_mitm.accept_response(&links, 0x42, &mitm_response).is_err()
+        || impossible_mitm
+            .accept_response(&links, 0x42, &mitm_response)
+            .is_err()
         || impossible_mitm.authentication().is_ok()
     {
         return false;
@@ -4452,12 +5857,12 @@ pub fn ble_smp_authentication_policy_13_11e_self_test() -> bool {
     let oob_response = [BLE_SMP_PAIRING_RESPONSE, 3, 1, 0x05, 16, 0x01, 0x01];
     oob.begin(&links, 0x42, &oob_request).is_ok()
         && oob.accept_response(&links, 0x42, &oob_response).is_ok()
-        && oob.authentication() == Ok(SmpAuthentication {
-            method: SmpPairingMethod::OutOfBand,
-            authenticated: true,
-        })
+        && oob.authentication()
+            == Ok(SmpAuthentication {
+                method: SmpPairingMethod::OutOfBand,
+                authenticated: true,
+            })
 }
-
 
 // Stage 13.11B: SMP legacy LTK distribution into the canonical LE bond store.
 pub const BLE_SMP_ENCRYPTION_INFORMATION: u8 = 0x06;
@@ -4569,7 +5974,9 @@ impl SmpKeyDistribution {
     pub fn abort(&mut self) {
         if let Some(mut ltk) = self.ltk.take() {
             for byte in &mut ltk {
-                unsafe { core::ptr::write_volatile(byte, 0); }
+                unsafe {
+                    core::ptr::write_volatile(byte, 0);
+                }
             }
         }
         self.handle = None;
@@ -4581,9 +5988,27 @@ impl SmpKeyDistribution {
 pub fn ble_smp_persistent_authentication_audit_self_test() -> bool {
     let mut links = LeLinkState::new();
     let connected = [
-        EVT_LE_META, 19, LE_SUBEVENT_CONNECTION_COMPLETE, 0,
-        0x42, 0, 0, 1, 1, 2, 3, 4, 5, 6,
-        0x18, 0, 0, 0, 0xf4, 1, 0,
+        EVT_LE_META,
+        19,
+        LE_SUBEVENT_CONNECTION_COMPLETE,
+        0,
+        0x42,
+        0,
+        0,
+        1,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        0x18,
+        0,
+        0,
+        0,
+        0xf4,
+        1,
+        0,
     ];
     if links.handle_connection_complete(&connected).is_err() {
         return false;
@@ -4621,15 +6046,35 @@ pub fn ble_smp_persistent_authentication_audit_self_test() -> bool {
     {
         return false;
     }
-    bonds.restore(&links, 0x42).is_ok_and(|material| !material.authenticated)
+    bonds
+        .restore(&links, 0x42)
+        .is_ok_and(|material| !material.authenticated)
 }
 
 pub fn ble_smp_key_distribution_13_11b_self_test() -> bool {
     let mut links = LeLinkState::new();
     let connected = [
-        EVT_LE_META, 19, LE_SUBEVENT_CONNECTION_COMPLETE, 0,
-        0x42, 0, 0, 1, 1, 2, 3, 4, 5, 6,
-        0x18, 0, 0, 0, 0xf4, 1, 0,
+        EVT_LE_META,
+        19,
+        LE_SUBEVENT_CONNECTION_COMPLETE,
+        0,
+        0x42,
+        0,
+        0,
+        1,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        0x18,
+        0,
+        0,
+        0,
+        0xf4,
+        1,
+        0,
     ];
     if links.handle_connection_complete(&connected).is_err() {
         return false;
@@ -4684,21 +6129,43 @@ pub fn ble_smp_key_distribution_13_11b_self_test() -> bool {
     }
 
     let mut stale = SmpKeyDistribution::new();
-    if stale.encryption_information(&links, &pairing, 0x42, &information).is_err() {
+    if stale
+        .encryption_information(&links, &pairing, 0x42, &information)
+        .is_err()
+    {
         return false;
     }
     let disconnected = [EVT_DISCONNECTION_COMPLETE, 4, 0, 0x42, 0, 0x13];
     let replacement = [
-        EVT_LE_META, 19, LE_SUBEVENT_CONNECTION_COMPLETE, 0,
-        0x42, 0, 0, 1, 6, 5, 4, 3, 2, 1,
-        0x18, 0, 0, 0, 0xf4, 1, 0,
+        EVT_LE_META,
+        19,
+        LE_SUBEVENT_CONNECTION_COMPLETE,
+        0,
+        0x42,
+        0,
+        0,
+        1,
+        6,
+        5,
+        4,
+        3,
+        2,
+        1,
+        0x18,
+        0,
+        0,
+        0,
+        0xf4,
+        1,
+        0,
     ];
     links.handle_disconnection_complete(&disconnected).is_ok()
         && links.handle_connection_complete(&replacement).is_ok()
-        && stale.master_identification(&links, &pairing, &mut bonds, 0x42, &identification).is_err()
+        && stale
+            .master_identification(&links, &pairing, &mut bonds, 0x42, &identification)
+            .is_err()
         && bonds.count() == 1
 }
-
 
 // Stage 13.11C: SMP legacy Pairing Confirm/Random verification boundary.
 pub const BLE_SMP_PAIRING_CONFIRM: u8 = 0x03;
@@ -4711,22 +6178,22 @@ pub trait SmpAes128 {
 pub struct ProductionSmpAes128;
 
 const AES_SBOX: [u8; 256] = [
-    0x63,0x7c,0x77,0x7b,0xf2,0x6b,0x6f,0xc5,0x30,0x01,0x67,0x2b,0xfe,0xd7,0xab,0x76,
-    0xca,0x82,0xc9,0x7d,0xfa,0x59,0x47,0xf0,0xad,0xd4,0xa2,0xaf,0x9c,0xa4,0x72,0xc0,
-    0xb7,0xfd,0x93,0x26,0x36,0x3f,0xf7,0xcc,0x34,0xa5,0xe5,0xf1,0x71,0xd8,0x31,0x15,
-    0x04,0xc7,0x23,0xc3,0x18,0x96,0x05,0x9a,0x07,0x12,0x80,0xe2,0xeb,0x27,0xb2,0x75,
-    0x09,0x83,0x2c,0x1a,0x1b,0x6e,0x5a,0xa0,0x52,0x3b,0xd6,0xb3,0x29,0xe3,0x2f,0x84,
-    0x53,0xd1,0x00,0xed,0x20,0xfc,0xb1,0x5b,0x6a,0xcb,0xbe,0x39,0x4a,0x4c,0x58,0xcf,
-    0xd0,0xef,0xaa,0xfb,0x43,0x4d,0x33,0x85,0x45,0xf9,0x02,0x7f,0x50,0x3c,0x9f,0xa8,
-    0x51,0xa3,0x40,0x8f,0x92,0x9d,0x38,0xf5,0xbc,0xb6,0xda,0x21,0x10,0xff,0xf3,0xd2,
-    0xcd,0x0c,0x13,0xec,0x5f,0x97,0x44,0x17,0xc4,0xa7,0x7e,0x3d,0x64,0x5d,0x19,0x73,
-    0x60,0x81,0x4f,0xdc,0x22,0x2a,0x90,0x88,0x46,0xee,0xb8,0x14,0xde,0x5e,0x0b,0xdb,
-    0xe0,0x32,0x3a,0x0a,0x49,0x06,0x24,0x5c,0xc2,0xd3,0xac,0x62,0x91,0x95,0xe4,0x79,
-    0xe7,0xc8,0x37,0x6d,0x8d,0xd5,0x4e,0xa9,0x6c,0x56,0xf4,0xea,0x65,0x7a,0xae,0x08,
-    0xba,0x78,0x25,0x2e,0x1c,0xa6,0xb4,0xc6,0xe8,0xdd,0x74,0x1f,0x4b,0xbd,0x8b,0x8a,
-    0x70,0x3e,0xb5,0x66,0x48,0x03,0xf6,0x0e,0x61,0x35,0x57,0xb9,0x86,0xc1,0x1d,0x9e,
-    0xe1,0xf8,0x98,0x11,0x69,0xd9,0x8e,0x94,0x9b,0x1e,0x87,0xe9,0xce,0x55,0x28,0xdf,
-    0x8c,0xa1,0x89,0x0d,0xbf,0xe6,0x42,0x68,0x41,0x99,0x2d,0x0f,0xb0,0x54,0xbb,0x16,
+    0x63, 0x7c, 0x77, 0x7b, 0xf2, 0x6b, 0x6f, 0xc5, 0x30, 0x01, 0x67, 0x2b, 0xfe, 0xd7, 0xab, 0x76,
+    0xca, 0x82, 0xc9, 0x7d, 0xfa, 0x59, 0x47, 0xf0, 0xad, 0xd4, 0xa2, 0xaf, 0x9c, 0xa4, 0x72, 0xc0,
+    0xb7, 0xfd, 0x93, 0x26, 0x36, 0x3f, 0xf7, 0xcc, 0x34, 0xa5, 0xe5, 0xf1, 0x71, 0xd8, 0x31, 0x15,
+    0x04, 0xc7, 0x23, 0xc3, 0x18, 0x96, 0x05, 0x9a, 0x07, 0x12, 0x80, 0xe2, 0xeb, 0x27, 0xb2, 0x75,
+    0x09, 0x83, 0x2c, 0x1a, 0x1b, 0x6e, 0x5a, 0xa0, 0x52, 0x3b, 0xd6, 0xb3, 0x29, 0xe3, 0x2f, 0x84,
+    0x53, 0xd1, 0x00, 0xed, 0x20, 0xfc, 0xb1, 0x5b, 0x6a, 0xcb, 0xbe, 0x39, 0x4a, 0x4c, 0x58, 0xcf,
+    0xd0, 0xef, 0xaa, 0xfb, 0x43, 0x4d, 0x33, 0x85, 0x45, 0xf9, 0x02, 0x7f, 0x50, 0x3c, 0x9f, 0xa8,
+    0x51, 0xa3, 0x40, 0x8f, 0x92, 0x9d, 0x38, 0xf5, 0xbc, 0xb6, 0xda, 0x21, 0x10, 0xff, 0xf3, 0xd2,
+    0xcd, 0x0c, 0x13, 0xec, 0x5f, 0x97, 0x44, 0x17, 0xc4, 0xa7, 0x7e, 0x3d, 0x64, 0x5d, 0x19, 0x73,
+    0x60, 0x81, 0x4f, 0xdc, 0x22, 0x2a, 0x90, 0x88, 0x46, 0xee, 0xb8, 0x14, 0xde, 0x5e, 0x0b, 0xdb,
+    0xe0, 0x32, 0x3a, 0x0a, 0x49, 0x06, 0x24, 0x5c, 0xc2, 0xd3, 0xac, 0x62, 0x91, 0x95, 0xe4, 0x79,
+    0xe7, 0xc8, 0x37, 0x6d, 0x8d, 0xd5, 0x4e, 0xa9, 0x6c, 0x56, 0xf4, 0xea, 0x65, 0x7a, 0xae, 0x08,
+    0xba, 0x78, 0x25, 0x2e, 0x1c, 0xa6, 0xb4, 0xc6, 0xe8, 0xdd, 0x74, 0x1f, 0x4b, 0xbd, 0x8b, 0x8a,
+    0x70, 0x3e, 0xb5, 0x66, 0x48, 0x03, 0xf6, 0x0e, 0x61, 0x35, 0x57, 0xb9, 0x86, 0xc1, 0x1d, 0x9e,
+    0xe1, 0xf8, 0x98, 0x11, 0x69, 0xd9, 0x8e, 0x94, 0x9b, 0x1e, 0x87, 0xe9, 0xce, 0x55, 0x28, 0xdf,
+    0x8c, 0xa1, 0x89, 0x0d, 0xbf, 0xe6, 0x42, 0x68, 0x41, 0x99, 0x2d, 0x0f, 0xb0, 0x54, 0xbb, 0x16,
 ];
 
 fn aes_xtime(x: u8) -> u8 {
@@ -4734,52 +6201,80 @@ fn aes_xtime(x: u8) -> u8 {
 }
 
 fn aes_add_round_key(state: &mut [u8; 16], round_key: &[u8; 16]) {
-    for (byte, key) in state.iter_mut().zip(round_key.iter()) { *byte ^= *key; }
+    for (byte, key) in state.iter_mut().zip(round_key.iter()) {
+        *byte ^= *key;
+    }
 }
 
 fn aes_sub_bytes(state: &mut [u8; 16]) {
-    for byte in state.iter_mut() { *byte = AES_SBOX[*byte as usize]; }
+    for byte in state.iter_mut() {
+        *byte = AES_SBOX[*byte as usize];
+    }
 }
 
 fn aes_shift_rows(s: &mut [u8; 16]) {
     let old = *s;
-    s[1]=old[5]; s[5]=old[9]; s[9]=old[13]; s[13]=old[1];
-    s[2]=old[10]; s[6]=old[14]; s[10]=old[2]; s[14]=old[6];
-    s[3]=old[15]; s[7]=old[3]; s[11]=old[7]; s[15]=old[11];
+    s[1] = old[5];
+    s[5] = old[9];
+    s[9] = old[13];
+    s[13] = old[1];
+    s[2] = old[10];
+    s[6] = old[14];
+    s[10] = old[2];
+    s[14] = old[6];
+    s[3] = old[15];
+    s[7] = old[3];
+    s[11] = old[7];
+    s[15] = old[11];
 }
 
 fn aes_mix_columns(s: &mut [u8; 16]) {
     for c in 0..4 {
-        let i=c*4; let a0=s[i]; let a1=s[i+1]; let a2=s[i+2]; let a3=s[i+3];
-        let t=a0^a1^a2^a3;
-        s[i] ^= t ^ aes_xtime(a0^a1);
-        s[i+1] ^= t ^ aes_xtime(a1^a2);
-        s[i+2] ^= t ^ aes_xtime(a2^a3);
-        s[i+3] ^= t ^ aes_xtime(a3^a0);
+        let i = c * 4;
+        let a0 = s[i];
+        let a1 = s[i + 1];
+        let a2 = s[i + 2];
+        let a3 = s[i + 3];
+        let t = a0 ^ a1 ^ a2 ^ a3;
+        s[i] ^= t ^ aes_xtime(a0 ^ a1);
+        s[i + 1] ^= t ^ aes_xtime(a1 ^ a2);
+        s[i + 2] ^= t ^ aes_xtime(a2 ^ a3);
+        s[i + 3] ^= t ^ aes_xtime(a3 ^ a0);
     }
 }
 
 fn aes_next_round_key(key: [u8; 16], rcon: u8) -> [u8; 16] {
-    let mut out=key;
-    let t=[AES_SBOX[key[13] as usize]^rcon,AES_SBOX[key[14] as usize],AES_SBOX[key[15] as usize],AES_SBOX[key[12] as usize]];
-    for i in 0..4 { out[i]=key[i]^t[i]; }
-    for i in 4..16 { out[i]=key[i]^out[i-4]; }
+    let mut out = key;
+    let t = [
+        AES_SBOX[key[13] as usize] ^ rcon,
+        AES_SBOX[key[14] as usize],
+        AES_SBOX[key[15] as usize],
+        AES_SBOX[key[12] as usize],
+    ];
+    for i in 0..4 {
+        out[i] = key[i] ^ t[i];
+    }
+    for i in 4..16 {
+        out[i] = key[i] ^ out[i - 4];
+    }
     out
 }
 
 impl SmpAes128 for ProductionSmpAes128 {
     fn encrypt_block(&self, key: [u8; 16], plaintext: [u8; 16]) -> [u8; 16] {
-        let mut state=plaintext;
-        let mut round_key=key;
-        aes_add_round_key(&mut state,&round_key);
-        let mut rcon=1_u8;
+        let mut state = plaintext;
+        let mut round_key = key;
+        aes_add_round_key(&mut state, &round_key);
+        let mut rcon = 1_u8;
         for round in 1..=10 {
             aes_sub_bytes(&mut state);
             aes_shift_rows(&mut state);
-            if round != 10 { aes_mix_columns(&mut state); }
-            round_key=aes_next_round_key(round_key,rcon);
-            aes_add_round_key(&mut state,&round_key);
-            rcon=aes_xtime(rcon);
+            if round != 10 {
+                aes_mix_columns(&mut state);
+            }
+            round_key = aes_next_round_key(round_key, rcon);
+            aes_add_round_key(&mut state, &round_key);
+            rcon = aes_xtime(rcon);
         }
         state
     }
@@ -4788,16 +6283,16 @@ impl SmpAes128 for ProductionSmpAes128 {
 pub fn ble_smp_aes128_13_11d_self_test() -> bool {
     // FIPS-197 Appendix B / AES-128 known-answer vector.
     let key = [
-        0x2b, 0x7e, 0x15, 0x16, 0x28, 0xae, 0xd2, 0xa6,
-        0xab, 0xf7, 0x15, 0x88, 0x09, 0xcf, 0x4f, 0x3c,
+        0x2b, 0x7e, 0x15, 0x16, 0x28, 0xae, 0xd2, 0xa6, 0xab, 0xf7, 0x15, 0x88, 0x09, 0xcf, 0x4f,
+        0x3c,
     ];
     let plaintext = [
-        0x32, 0x43, 0xf6, 0xa8, 0x88, 0x5a, 0x30, 0x8d,
-        0x31, 0x31, 0x98, 0xa2, 0xe0, 0x37, 0x07, 0x34,
+        0x32, 0x43, 0xf6, 0xa8, 0x88, 0x5a, 0x30, 0x8d, 0x31, 0x31, 0x98, 0xa2, 0xe0, 0x37, 0x07,
+        0x34,
     ];
     let expected = [
-        0x39, 0x25, 0x84, 0x1d, 0x02, 0xdc, 0x09, 0xfb,
-        0xdc, 0x11, 0x85, 0x97, 0x19, 0x6a, 0x0b, 0x32,
+        0x39, 0x25, 0x84, 0x1d, 0x02, 0xdc, 0x09, 0xfb, 0xdc, 0x11, 0x85, 0x97, 0x19, 0x6a, 0x0b,
+        0x32,
     ];
     ProductionSmpAes128.encrypt_block(key, plaintext) == expected
 }
@@ -4828,7 +6323,11 @@ impl SmpAuthenticationProof {
         if pairing.authentication()?.method != SmpPairingMethod::JustWorks {
             return Err(HciError::UnexpectedOpcode);
         }
-        Ok(Self { method: SmpPairingMethod::JustWorks, authenticated: false, temporary_key: [0; 16] })
+        Ok(Self {
+            method: SmpPairingMethod::JustWorks,
+            authenticated: false,
+            temporary_key: [0; 16],
+        })
     }
 
     pub fn passkey(pairing: &SmpPairingState, passkey: u32) -> Result<Self, HciError> {
@@ -4837,14 +6336,25 @@ impl SmpAuthenticationProof {
         }
         let mut temporary_key = [0_u8; 16];
         temporary_key[..4].copy_from_slice(&passkey.to_le_bytes());
-        Ok(Self { method: SmpPairingMethod::PasskeyEntry, authenticated: true, temporary_key })
+        Ok(Self {
+            method: SmpPairingMethod::PasskeyEntry,
+            authenticated: true,
+            temporary_key,
+        })
     }
 
-    pub fn out_of_band(pairing: &SmpPairingState, temporary_key: [u8; 16]) -> Result<Self, HciError> {
+    pub fn out_of_band(
+        pairing: &SmpPairingState,
+        temporary_key: [u8; 16],
+    ) -> Result<Self, HciError> {
         if pairing.authentication()?.method != SmpPairingMethod::OutOfBand {
             return Err(HciError::UnexpectedOpcode);
         }
-        Ok(Self { method: SmpPairingMethod::OutOfBand, authenticated: true, temporary_key })
+        Ok(Self {
+            method: SmpPairingMethod::OutOfBand,
+            authenticated: true,
+            temporary_key,
+        })
     }
 
     pub fn temporary_key(&self) -> [u8; 16] {
@@ -4864,7 +6374,6 @@ pub struct SmpProofVerificationInputs {
     pub initiator: SmpAddress,
     pub responder: SmpAddress,
 }
-
 
 pub struct SmpConfirmState {
     handle: u16,
@@ -4927,12 +6436,7 @@ impl SmpConfirmState {
         }
         let mut random = [0_u8; 16];
         random.copy_from_slice(&pdu[1..]);
-        let expected = smp_c1(
-            crypto,
-            random,
-            pairing,
-            inputs,
-        )?;
+        let expected = smp_c1(crypto, random, pairing, inputs)?;
         if self.peer_confirm != Some(expected) {
             self.phase = SmpConfirmPhase::Failed;
             return Err(HciError::ControllerFailure(0x04));
@@ -4985,7 +6489,8 @@ impl SmpConfirmState {
         if self.phase != SmpConfirmPhase::Verified {
             return Err(HciError::UnexpectedOpcode);
         }
-        self.verified_authentication.ok_or(HciError::UnexpectedOpcode)
+        self.verified_authentication
+            .ok_or(HciError::UnexpectedOpcode)
     }
 }
 
@@ -5054,7 +6559,6 @@ pub fn smp_s1<C: SmpAes128>(
     crypto.encrypt_block(temporary_key, plaintext)
 }
 
-
 pub const OPCODE_LE_START_ENCRYPTION: u16 = 0x2019;
 
 #[derive(Clone, Copy)]
@@ -5093,7 +6597,9 @@ impl SmpConfirmState {
             .find(|link| link.handle == self.handle)
             .ok_or(HciError::UnexpectedOpcode)?;
         let authentication = self.verified_authentication()?;
-        let key_size = pairing.negotiated_key_size().ok_or(HciError::UnexpectedOpcode)?;
+        let key_size = pairing
+            .negotiated_key_size()
+            .ok_or(HciError::UnexpectedOpcode)?;
         let mut stk = smp_s1(
             crypto,
             inputs.temporary_key,
@@ -5110,15 +6616,20 @@ impl SmpConfirmState {
         params[12..].copy_from_slice(&stk);
         let len = HciCommand::new(OPCODE_LE_START_ENCRYPTION, &params)?.encode(out);
         for byte in &mut stk {
-            unsafe { core::ptr::write_volatile(byte, 0); }
+            unsafe {
+                core::ptr::write_volatile(byte, 0);
+            }
         }
-        Ok((len, SmpPendingEncryption {
-            handle: self.handle,
-            address_type: link.address_type,
-            address: link.address,
-            key_size,
-            authenticated: authentication.authenticated,
-        }))
+        Ok((
+            len,
+            SmpPendingEncryption {
+                handle: self.handle,
+                address_type: link.address_type,
+                address: link.address,
+                key_size,
+                authenticated: authentication.authenticated,
+            },
+        ))
     }
 }
 
@@ -5181,9 +6692,27 @@ impl LeSecuritySessions {
 pub fn ble_smp_encryption_authority_13_11f_self_test() -> bool {
     let mut links = LeLinkState::new();
     let connected = [
-        EVT_LE_META, 19, LE_SUBEVENT_CONNECTION_COMPLETE, 0,
-        0x42, 0, 0, 1, 1, 2, 3, 4, 5, 6,
-        0x18, 0, 0, 0, 0xf4, 1, 0,
+        EVT_LE_META,
+        19,
+        LE_SUBEVENT_CONNECTION_COMPLETE,
+        0,
+        0x42,
+        0,
+        0,
+        1,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        0x18,
+        0,
+        0,
+        0,
+        0xf4,
+        1,
+        0,
     ];
     if links.handle_connection_complete(&connected).is_err() {
         return false;
@@ -5205,8 +6734,14 @@ pub fn ble_smp_encryption_authority_13_11f_self_test() -> bool {
     let random = [0x44; 16];
     let inputs = SmpConfirmInputs {
         temporary_key: tk,
-        initiator: SmpAddress { address_type: 0, address: [9, 8, 7, 6, 5, 4] },
-        responder: SmpAddress { address_type: 1, address: [1, 2, 3, 4, 5, 6] },
+        initiator: SmpAddress {
+            address_type: 0,
+            address: [9, 8, 7, 6, 5, 4],
+        },
+        responder: SmpAddress {
+            address_type: 1,
+            address: [1, 2, 3, 4, 5, 6],
+        },
     };
     let Ok(expected) = smp_c1(&crypto, random, &pairing, inputs) else {
         return false;
@@ -5221,17 +6756,19 @@ pub fn ble_smp_encryption_authority_13_11f_self_test() -> bool {
         return false;
     };
     if confirm.receive_confirm(&links, 0x42, &confirm_pdu).is_err()
-        || confirm.verify_random_with_proof(
-            &links,
-            &pairing,
-            &crypto,
-            SmpProofVerificationInputs {
-                proof,
-                initiator: inputs.initiator,
-                responder: inputs.responder,
-            },
-            &random_pdu,
-        ).is_err()
+        || confirm
+            .verify_random_with_proof(
+                &links,
+                &pairing,
+                &crypto,
+                SmpProofVerificationInputs {
+                    proof,
+                    initiator: inputs.initiator,
+                    responder: inputs.responder,
+                },
+                &random_pdu,
+            )
+            .is_err()
     {
         return false;
     }
@@ -5240,9 +6777,15 @@ pub fn ble_smp_encryption_authority_13_11f_self_test() -> bool {
     let Ok(mut raw_confirm) = SmpConfirmState::new(&pairing) else {
         return false;
     };
-    if raw_confirm.receive_confirm(&links, 0x42, &confirm_pdu).is_err()
-        || raw_confirm.verify_random(&links, &pairing, &crypto, inputs, &random_pdu).is_err()
-        || raw_confirm.verified_authentication().is_ok_and(|auth| auth.authenticated)
+    if raw_confirm
+        .receive_confirm(&links, 0x42, &confirm_pdu)
+        .is_err()
+        || raw_confirm
+            .verify_random(&links, &pairing, &crypto, inputs, &random_pdu)
+            .is_err()
+        || raw_confirm
+            .verified_authentication()
+            .is_ok_and(|auth| auth.authenticated)
     {
         return false;
     }
@@ -5289,19 +6832,40 @@ pub fn ble_smp_encryption_authority_13_11f_self_test() -> bool {
     }
 
     let wrong_peer = [
-        EVT_LE_META, 19, LE_SUBEVENT_CONNECTION_COMPLETE, 0,
-        0x43, 0, 0, 1, 6, 5, 4, 3, 2, 1,
-        0x18, 0, 0, 0, 0xf4, 1, 0,
+        EVT_LE_META,
+        19,
+        LE_SUBEVENT_CONNECTION_COMPLETE,
+        0,
+        0x43,
+        0,
+        0,
+        1,
+        6,
+        5,
+        4,
+        3,
+        2,
+        1,
+        0x18,
+        0,
+        0,
+        0,
+        0xf4,
+        1,
+        0,
     ];
     links.handle_connection_complete(&wrong_peer).is_ok()
-        && sessions.encryption_change_from_pairing(
-            &links,
-            SmpPendingEncryption { handle: 0x43, ..pending },
-            &[EVT_ENCRYPTION_CHANGE, 4, 0, 0x43, 0, 1],
-        ).is_err()
+        && sessions
+            .encryption_change_from_pairing(
+                &links,
+                SmpPendingEncryption {
+                    handle: 0x43,
+                    ..pending
+                },
+                &[EVT_ENCRYPTION_CHANGE, 4, 0, 0x43, 0, 1],
+            )
+            .is_err()
 }
-
-
 
 pub const BLE_SMP_IDENTITY_INFORMATION: u8 = 0x08;
 pub const BLE_SMP_IDENTITY_ADDRESS_INFORMATION: u8 = 0x09;
@@ -5320,7 +6884,10 @@ pub struct LeIdentityStore {
 
 impl LeIdentityStore {
     pub const fn new() -> Self {
-        Self { identities: [None; MAX_LE_BONDS], count: 0 }
+        Self {
+            identities: [None; MAX_LE_BONDS],
+            count: 0,
+        }
     }
 
     pub fn store(&mut self, identity: LeIdentity) -> Result<(), HciError> {
@@ -5343,11 +6910,7 @@ impl LeIdentityStore {
         Ok(())
     }
 
-    pub fn resolve_rpa<C: SmpAes128>(
-        &self,
-        crypto: &C,
-        address: [u8; 6],
-    ) -> Option<LeIdentity> {
+    pub fn resolve_rpa<C: SmpAes128>(&self, crypto: &C, address: [u8; 6]) -> Option<LeIdentity> {
         // In the HCI little-endian address representation, prand is bytes 3..6.
         let prand = [address[3], address[4], address[5]];
         if prand[2] & 0xc0 != 0x40 {
@@ -5360,7 +6923,9 @@ impl LeIdentityStore {
             .copied()
     }
 
-    pub fn count(&self) -> usize { self.count }
+    pub fn count(&self) -> usize {
+        self.count
+    }
 }
 
 pub fn smp_ah<C: SmpAes128>(crypto: &C, irk: [u8; 16], prand: [u8; 3]) -> [u8; 3] {
@@ -5377,7 +6942,10 @@ pub struct SmpIdentityDistribution {
 
 impl SmpIdentityDistribution {
     pub const fn new() -> Self {
-        Self { handle: None, irk: None }
+        Self {
+            handle: None,
+            irk: None,
+        }
     }
 
     pub fn identity_information(
@@ -5425,7 +6993,11 @@ impl SmpIdentityDistribution {
         };
         let mut address = [0_u8; 6];
         address.copy_from_slice(&pdu[2..8]);
-        identities.store(LeIdentity { address_type: pdu[1], address, irk })?;
+        identities.store(LeIdentity {
+            address_type: pdu[1],
+            address,
+            irk,
+        })?;
         self.abort();
         Ok(())
     }
@@ -5433,7 +7005,9 @@ impl SmpIdentityDistribution {
     pub fn abort(&mut self) {
         if let Some(mut irk) = self.irk.take() {
             for byte in &mut irk {
-                unsafe { core::ptr::write_volatile(byte, 0); }
+                unsafe {
+                    core::ptr::write_volatile(byte, 0);
+                }
             }
         }
         self.handle = None;
@@ -5443,9 +7017,27 @@ impl SmpIdentityDistribution {
 pub fn ble_smp_identity_privacy_13_11g_self_test() -> bool {
     let mut links = LeLinkState::new();
     let connected = [
-        EVT_LE_META, 19, LE_SUBEVENT_CONNECTION_COMPLETE, 0,
-        0x42, 0, 0, 1, 1, 2, 3, 4, 5, 6,
-        0x18, 0, 0, 0, 0xf4, 1, 0,
+        EVT_LE_META,
+        19,
+        LE_SUBEVENT_CONNECTION_COMPLETE,
+        0,
+        0x42,
+        0,
+        0,
+        1,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        0x18,
+        0,
+        0,
+        0,
+        0xf4,
+        1,
+        0,
     ];
     if links.handle_connection_complete(&connected).is_err() {
         return false;
@@ -5498,9 +7090,10 @@ pub fn ble_smp_identity_privacy_13_11g_self_test() -> bool {
 
     let wrong_rpa = [hash[0] ^ 1, hash[1], hash[2], prand[0], prand[1], prand[2]];
     identities.resolve_rpa(&crypto, wrong_rpa).is_none()
-        && identities.resolve_rpa(&crypto, [1, 2, 3, 4, 5, 0xc0]).is_none()
+        && identities
+            .resolve_rpa(&crypto, [1, 2, 3, 4, 5, 0xc0])
+            .is_none()
 }
-
 
 pub fn ble_smp_confirm_random_13_11c_self_test() -> bool {
     struct TestAes;
@@ -5516,9 +7109,27 @@ pub fn ble_smp_confirm_random_13_11c_self_test() -> bool {
 
     let mut links = LeLinkState::new();
     let connected = [
-        EVT_LE_META, 19, LE_SUBEVENT_CONNECTION_COMPLETE, 0,
-        0x42, 0, 0, 1, 1, 2, 3, 4, 5, 6,
-        0x18, 0, 0, 0, 0xf4, 1, 0,
+        EVT_LE_META,
+        19,
+        LE_SUBEVENT_CONNECTION_COMPLETE,
+        0,
+        0x42,
+        0,
+        0,
+        1,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        0x18,
+        0,
+        0,
+        0,
+        0xf4,
+        1,
+        0,
     ];
     if links.handle_connection_complete(&connected).is_err() {
         return false;
@@ -5537,8 +7148,14 @@ pub fn ble_smp_confirm_random_13_11c_self_test() -> bool {
     let random = [0x5a; 16];
     let inputs = SmpConfirmInputs {
         temporary_key: tk,
-        initiator: SmpAddress { address_type: 0, address: [1, 2, 3, 4, 5, 6] },
-        responder: SmpAddress { address_type: 1, address: [6, 5, 4, 3, 2, 1] },
+        initiator: SmpAddress {
+            address_type: 0,
+            address: [1, 2, 3, 4, 5, 6],
+        },
+        responder: SmpAddress {
+            address_type: 1,
+            address: [6, 5, 4, 3, 2, 1],
+        },
     };
     let Ok(confirm) = smp_c1(&crypto, random, &pairing, inputs) else {
         return false;
@@ -5554,13 +7171,9 @@ pub fn ble_smp_confirm_random_13_11c_self_test() -> bool {
         return false;
     };
     if state.receive_confirm(&links, 0x42, &confirm_pdu).is_err()
-        || state.verify_random(
-            &links,
-            &pairing,
-            &crypto,
-            inputs,
-            &random_pdu,
-        ).is_err()
+        || state
+            .verify_random(&links, &pairing, &crypto, inputs, &random_pdu)
+            .is_err()
         || state.phase() != SmpConfirmPhase::Verified
     {
         return false;
@@ -5576,13 +7189,11 @@ pub fn ble_smp_confirm_random_13_11c_self_test() -> bool {
     };
     let mut wrong_confirm = confirm_pdu;
     wrong_confirm[1] ^= 1;
-    rejected.receive_confirm(&links, 0x42, &wrong_confirm).is_ok()
-        && rejected.verify_random(
-            &links,
-            &pairing,
-            &crypto,
-            inputs,
-            &random_pdu,
-        ).is_err()
+    rejected
+        .receive_confirm(&links, 0x42, &wrong_confirm)
+        .is_ok()
+        && rejected
+            .verify_random(&links, &pairing, &crypto, inputs, &random_pdu)
+            .is_err()
         && rejected.phase() == SmpConfirmPhase::Failed
 }

@@ -17,7 +17,9 @@ fn record(bytes: &mut Vec<u8>, kind: u32, payload: &[u8]) {
     bytes.extend(kind.to_le_bytes());
     bytes.extend((payload.len() as u32).to_le_bytes());
     bytes.extend(payload);
-    while !bytes.len().is_multiple_of(4) { bytes.push(0); }
+    while !bytes.len().is_multiple_of(4) {
+        bytes.push(0);
+    }
 }
 
 fn section(bytes: &mut Vec<u8>, kind: u32, offset: u32, data: &[u8]) {
@@ -41,16 +43,25 @@ fn runtime_image(paging: bool) -> Vec<u8> {
 
 #[test]
 fn canonical_parser_rejects_empty_images_and_bad_separator_state() {
-    assert_eq!(IntelTlvFirmware::parse(&image()).err(), Some(IntelTlvError::NoSections));
+    assert_eq!(
+        IntelTlvFirmware::parse(&image()).err(),
+        Some(IntelTlvError::NoSections)
+    );
 
     let mut bytes = image();
     section(&mut bytes, INTEL_TLV_SEC_RT, INTEL_CPU_SEPARATOR, &[]);
-    assert_eq!(IntelTlvFirmware::parse(&bytes).err(), Some(IntelTlvError::InvalidSeparator));
+    assert_eq!(
+        IntelTlvFirmware::parse(&bytes).err(),
+        Some(IntelTlvError::InvalidSeparator)
+    );
 
     let mut bytes = image();
     section(&mut bytes, INTEL_TLV_SEC_RT, 0x1000, &[1]);
     section(&mut bytes, INTEL_TLV_SEC_RT, INTEL_PAGING_SEPARATOR, &[]);
-    assert_eq!(IntelTlvFirmware::parse(&bytes).err(), Some(IntelTlvError::InvalidSeparator));
+    assert_eq!(
+        IntelTlvFirmware::parse(&bytes).err(),
+        Some(IntelTlvError::InvalidSeparator)
+    );
 }
 
 #[test]
@@ -87,11 +98,17 @@ fn ax200_layout_requires_complete_runtime_group_progression() {
     let mut bytes = image();
     section(&mut bytes, INTEL_TLV_SEC_RT, 0x1000, &[1]);
     let fw = IntelTlvFirmware::parse(&bytes).unwrap();
-    assert!(matches!(Ax200RuntimeImage::validate(&fw), Err(Ax200ImageError::MissingSeparator)));
+    assert!(matches!(
+        Ax200RuntimeImage::validate(&fw),
+        Err(Ax200ImageError::MissingSeparator)
+    ));
 
     let bytes = runtime_image(false);
     let fw = IntelTlvFirmware::parse(&bytes).unwrap();
-    assert!(matches!(Ax200RuntimeImage::validate(&fw), Err(Ax200ImageError::MissingSeparator)));
+    assert!(matches!(
+        Ax200RuntimeImage::validate(&fw),
+        Err(Ax200ImageError::MissingSeparator)
+    ));
 }
 
 #[test]
@@ -119,7 +136,12 @@ fn ax200_layout_enforces_chunk_bound_before_dma() {
 fn canonical_parser_enforces_bounded_section_table() {
     let mut bytes = image();
     for index in 0..=MAX_INTEL_TLV_SECTIONS {
-        section(&mut bytes, INTEL_TLV_SEC_RT, 0x1000 + index as u32 * 0x100, &[1]);
+        section(
+            &mut bytes,
+            INTEL_TLV_SEC_RT,
+            0x1000 + index as u32 * 0x100,
+            &[1],
+        );
     }
     assert_eq!(
         IntelTlvFirmware::parse(&bytes).err(),
@@ -155,5 +177,8 @@ fn header_unknown_records_and_bounds_remain_fail_closed() {
 
     let mut oversized = image();
     oversized.resize(MAX_FIRMWARE_IMAGE_SIZE + 1, 0);
-    assert_eq!(IntelTlvFirmware::parse(&oversized).err(), Some(IntelTlvError::ImageTooLarge));
+    assert_eq!(
+        IntelTlvFirmware::parse(&oversized).err(),
+        Some(IntelTlvError::ImageTooLarge)
+    );
 }

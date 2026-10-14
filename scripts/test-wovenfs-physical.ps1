@@ -16,7 +16,7 @@ param(
     # the only thing standing between a test and the wrong disk.
     [int]$DiskNumber = -1,
     [string]$ExpectedModel = 'VendorCo ProductCode USB Device',
-    [long]$ExpectedSize = 8052549120,
+    [long]$ExpectedSize = 8053063680,
     [string]$ExpectedSerial = '5474001281346643368',
     [ValidateSet(1, 2, 4)][int]$Cpus = 1,
     [int]$TimeoutSeconds = 240,

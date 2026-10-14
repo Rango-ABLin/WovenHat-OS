@@ -43,9 +43,12 @@ struct Slot {
 }
 
 impl Slot {
-    #[cfg_attr(not(test), expect(dead_code, reason = "constructed through dormant Stage 13.2 aperture setup until host resources are wired"))]
     const fn empty() -> Self {
-        Self { occupied: false, generation: 1, range: Range { base: 0, size: 0 } }
+        Self {
+            occupied: false,
+            generation: 1,
+            range: Range { base: 0, size: 0 },
+        }
     }
 }
 
@@ -57,21 +60,33 @@ pub struct Allocator {
 }
 
 impl Allocator {
-    #[cfg_attr(not(test), expect(dead_code, reason = "production constructor becomes live when host bridge apertures are discovered"))]
     pub const fn new(base: u64, size: u64) -> Self {
         let mut apertures = [None; MAX_APERTURES];
         if size != 0 {
             apertures[0] = Some(Range { base, size });
         }
-        Self { apertures, slots: [Slot::empty(); MAX_RANGES] }
+        Self {
+            apertures,
+            slots: [Slot::empty(); MAX_RANGES],
+        }
     }
 
-    #[cfg_attr(test, expect(dead_code, reason = "standalone resource tests do not compile the production assignment caller"))]
+    #[cfg_attr(
+        test,
+        expect(
+            dead_code,
+            reason = "standalone resource tests do not compile the production assignment caller"
+        )
+    )]
     pub fn from_ranges(ranges: &[Range]) -> Result<Self, Error> {
-        if ranges.len() > MAX_APERTURES { return Err(Error::Capacity); }
+        if ranges.len() > MAX_APERTURES {
+            return Err(Error::Capacity);
+        }
         let mut allocator = Self::new(0, 0);
         for (index, range) in ranges.iter().copied().enumerate() {
-            if range.size == 0 || range.end().is_none() { return Err(Error::InvalidRange); }
+            if range.size == 0 || range.end().is_none() {
+                return Err(Error::InvalidRange);
+            }
             let end = range.end().ok_or(Error::InvalidRange)?;
             for existing in allocator.apertures[..index].iter().flatten() {
                 let existing_end = existing.end().ok_or(Error::InvalidRange)?;
@@ -85,14 +100,26 @@ impl Allocator {
     }
 
     pub fn reserve(&mut self, size: u64, alignment: u64) -> Result<Reservation, Error> {
-        if size == 0 { return Err(Error::InvalidRange); }
-        if alignment == 0 || !alignment.is_power_of_two() { return Err(Error::InvalidAlignment); }
-        let slot = self.slots.iter().position(|slot| !slot.occupied).ok_or(Error::Capacity)?;
+        if size == 0 {
+            return Err(Error::InvalidRange);
+        }
+        if alignment == 0 || !alignment.is_power_of_two() {
+            return Err(Error::InvalidAlignment);
+        }
+        let slot = self
+            .slots
+            .iter()
+            .position(|slot| !slot.occupied)
+            .ok_or(Error::Capacity)?;
         for aperture in self.apertures.iter().flatten().copied() {
             let aperture_end = aperture.end().ok_or(Error::InvalidRange)?;
-            let Some(mut candidate) = align_up(aperture.base, alignment) else { continue; };
+            let Some(mut candidate) = align_up(aperture.base, alignment) else {
+                continue;
+            };
             while let Some(end) = candidate.checked_add(size) {
-                if end > aperture_end { break; }
+                if end > aperture_end {
+                    break;
+                }
                 let mut next = None;
                 for used in self.slots.iter().filter(|slot| slot.occupied) {
                     let used_end = used.range.end().ok_or(Error::InvalidRange)?;
@@ -102,15 +129,24 @@ impl Allocator {
                 }
                 match next {
                     Some(after) => {
-                        let Some(aligned) = align_up(after, alignment) else { break; };
+                        let Some(aligned) = align_up(after, alignment) else {
+                            break;
+                        };
                         candidate = aligned;
                     }
                     None => {
                         let generation = self.slots[slot].generation;
-                        let range = Range { base: candidate, size };
+                        let range = Range {
+                            base: candidate,
+                            size,
+                        };
                         self.slots[slot].occupied = true;
                         self.slots[slot].range = range;
-                        return Ok(Reservation { slot: slot as u8, generation, range });
+                        return Ok(Reservation {
+                            slot: slot as u8,
+                            generation,
+                            range,
+                        });
                     }
                 }
             }
@@ -122,7 +158,10 @@ impl Allocator {
         let Some(slot) = self.slots.get_mut(reservation.slot as usize) else {
             return Err(Error::InvalidReservation);
         };
-        if !slot.occupied || slot.generation != reservation.generation || slot.range != reservation.range {
+        if !slot.occupied
+            || slot.generation != reservation.generation
+            || slot.range != reservation.range
+        {
             return Err(Error::InvalidReservation);
         }
         slot.occupied = false;

@@ -1,5 +1,132 @@
 # WovenHat OS Architecture & Codebase Guide
 
+## Stage 15 bounded WovenFS VFS write-through (2026-10-14)
+
+The `/wfs/<name>` namespace has one production mutation authority:
+`task::open_current`, `task::write_current`, and `task::unlink_current` route
+through native WovenFS. Creation is durable before a read-only VFS node is
+published; writes commit the native transaction before updating the VFS cache
+or shared descriptor offset; unlink follows durable-first ordering. The
+adapter validates one flat root name and rejects traversal, nested paths, and
+prefix confusion.
+
+Native mutations serialize their complete read-modify-write operation with a
+rank-5 `PreemptMutex`, below the ATA device lock at rank 10. No IRQ-disabled
+guard spans device I/O. This is a bounded file authority, not full
+directory/POSIX integration; rename, mkdir, directory enumeration, and
+physical flash qualification remain open. See the Stage 15 write-through audit.
+
+## Stage 11.2 scheduler-backed thread ownership (2026-10-14)
+
+`TaskControlBlock` carries both the stable process owner and an optional
+generation-safe thread ID. User-thread creation maps a private NX stack and a
+private copy of the process's bounded initial-exec TLS image into the existing
+address space; it never retains an unchecked userspace pointer. Thread exit
+publishes registry termination only after the scheduler completes the stack
+hand-off, so join can safely reclaim those mappings. Join waiters use the
+scheduler's latched event path, and process termination retires ready/blocked
+siblings immediately while running siblings receive a safe-point termination
+request. The address space remains owned by the process until its parent
+reaps the process. Shared libraries, symbol resolution, dynamic TLS, and
+physical qualification remain outside this bounded increment.
+
+## Stage 11.5 bounded symbol relocation (2026-10-14)
+
+`elf::DynamicImage` validates a SysV hash table, dynamic symbol table, and
+string table within bounded file-backed load segments. `userspace::load_elf`
+applies `R_X86_64_RELATIVE` and locally defined `R_X86_64_64`,
+`R_X86_64_GLOB_DAT`, and `R_X86_64_JUMP_SLOT` entries before W^X/RELRO
+finalization. Undefined symbols, `DT_NEEDED`, legacy REL/PLT tables, and
+cross-image resolution fail closed. This is a prerequisite for a dynamic
+linker, not shared-library support; dependency mapping, versioning, lazy
+binding, and dynamic TLS are still unimplemented.
+
+## Stage 13.2 PCI power-state ownership (2026-10-13)
+
+`hal::pci::suspend_owned` and `resume_owned` operate only on a validated,
+generation-owned function. Suspend first disables and verifies I/O, memory,
+and bus-master decoding. If the discovered PCI capability list contains Power
+Management, the exact low-half PMCSR value is checkpointed and the function is
+transitioned to D3hot; resume transitions the same capability to D0 before
+restoring the command checkpoint. PMCSR writes preserve the upper half of the
+containing configuration dword, preventing adjacent PM capability fields from
+being clobbered. A failed transition attempts the safe rollback state and
+returns an error, while the driver manager retains the checkpoint until the
+binding state publication succeeds. Interrupt-active bindings cannot suspend.
+
+This is a software ownership and configuration-state boundary. Device reset,
+D3cold, platform wake signaling, and physical device suspend/resume still
+require device-specific drivers and hardware qualification. See the
+[Stage 13.2 suspend/resume audit](audit-stage13-2-suspend-resume-2026-10-13.md).
+
+The PCI hotplug coordinator compares both BDF and the full driver-relevant
+identity (vendor/device, revision, class, subclass, and programming
+interface). A same-slot replacement detected before old-owner quiescence fails
+closed before any teardown configuration write; a platform hotplug boundary
+must establish ordering before the replacement can be processed. Unbound
+persistent BAR reservations are released before topology invalidation;
+release failures leave the removal retryable. See the [hotplug insertion audit](audit-stage13-2-hotplug-insertion-2026-10-13.md).
+
+## Stage 13.2 PCI BAR admission lifetime (2026-10-13)
+
+Persistent BAR reservation state is released only after BAR clear/read-back,
+published-inventory refresh, and bridge-window rerouting succeed. The binding
+remains in `Unbinding` when any phase fails, so no allocator range can be reused
+while hardware or forwarding state is uncertain. See the [automatic BAR
+admission audit](audit-stage13-2-bar-admission-2026-10-13.md).
+
+## Stage 13.2 verified MSI activation (2026-10-13)
+
+Owner-bound MSI activation keeps the vector and interrupt-mode claims private
+until the capability header, message address/data, and final enable state all
+read back as expected. The original capability image is retained with MSI
+disabled during recovery; if restoration cannot be verified, the concrete
+lease remains retained for ordered teardown. Disablement likewise verifies the
+final disabled header before releasing mode and vector ownership. Physical
+APIC delivery still requires hardware qualification. MSI-X activation follows
+the same ownership boundary, asserting Function Mask before table MMIO and
+retaining the lease if cleanup fails. See the [MSI rollback audit](audit-stage13-2-msi-rollback-2026-10-13.md).
+
+The Stage 13.2 preservation probe keeps hardware qualification conditional:
+it scans the discovered QEMU fixtures without creating shared mappings, and
+only attempts generic interrupt activation when a capability and the required
+BAR are admissible. Its disposable NVMe/e1000 fixtures exercise inventory and
+fail-closed admission; the QEMU virtio fixture now qualifies MSI-X activation
+and teardown, including the high-MMIO fallback mapping. Physical vector
+delivery and PCIe hardware lifecycle qualification remain open.
+
+## Stage 13.3 NVMe queue and failure lifecycle (2026-10-13)
+
+The NVMe driver owns each queue, identify buffer, and transfer buffer through
+an owning `DmaPage`; dropping any partially initialized controller therefore
+returns its physical frames to the allocator. Initialization also snapshots the
+PCI command register and uses a rollback guard that disables the controller
+with bounded readiness polling before restoring the exact command value. This
+keeps failed discovery from leaking DMA memory or leaving bus mastering active.
+
+The accepted gate is limited to the disposable QEMU controller and synchronous
+polling I/O. Interrupt completion, controller reset/recovery, hotplug removal,
+multi-namespace policy, and physical NVMe qualification remain open. See the
+[Stage 13.3 NVMe audit](audit-stage13-3-nvme-2026-10-13.md).
+
+## Stage 13.8 HDA register addressing (2026-10-13)
+
+HDA MMIO access splits each register address into its containing page and
+offset before performing the volatile access. This is required for the reset,
+command-ring, codec, stream, and mixer registers; mapping a page without
+adding the offset silently aliases every register to the BAR base. The QEMU
+HDA codec/topology/stream gate now passes on 1/2/4 CPUs. Physical codec and
+interrupt/DMA recovery qualification remain open. See the
+[HDA MMIO audit](audit-stage13-8-hda-mmio-2026-10-13.md).
+
+## Stage 14 later-feature lint coverage (2026-10-13)
+
+PCI persistent BAR admission diagnostics are guarded across the complete later
+feature family, not only the Stage 13 feature set. This keeps `-D warnings`
+meaningful when Stage 14–20 code compiles the shared PCI module. The live
+Stage 14.1–14.5D network matrices pass on 1/2/4 CPUs; hardware NIC and radio
+qualification remains separate. See the [Stage 14 feature-gate audit](audit-stage14-feature-gates-2026-10-13.md).
+
 ## TCP close/drain repair (2026-09-24)
 
 A closed TCP descriptor retains its transport after the final async reference
@@ -123,7 +250,7 @@ programs, and host/QEMU acceptance harnesses. The supplied
 ## Stage 1–5 data journal boundary
 
 FAT32 persistence retains the original single-file `WDJ1` journal and adds a
-separate bounded `WDJ2` batch journal. A batch contains at most four file data
+separate bounded `WDJ2` batch journal. A batch contains at most sixteen file data
 replacements. Prepared records carry the old bytes and committed records carry
 the intended lengths/checksums; WMD1/WMD2 metadata intents are published before
 data and removed or finalized with the batch. Mount recovery rolls back
@@ -142,17 +269,21 @@ qualification.
 | `build.rs`, `src/main.rs` | Package the kernel with the UEFI bootloader; expose the generated image path to harnesses |
 | `kernel/src/main.rs`, `config.rs` | Initialization order, subsystem wiring, configuration bounds and boot acceptance orchestration |
 | `hal/`, `ap_start.S`, `smp.rs`, `gdt.rs`, `interrupts.rs`, `pic.rs`, `timer.rs` | CPU/platform discovery, AP startup, descriptor tables, interrupts and timekeeping |
-| `task.rs`, `userspace.rs`, `elf.rs`, `syscall.rs` | Scheduling, process lifecycle, Ring-3 images, ELF validation and syscall dispatch |
+| `task.rs`, `userspace.rs`, `elf.rs`, `syscall.rs` | Scheduling, process lifecycle, Ring-3 images, ELF validation, scheduler-checked static kernel-stack canaries, and syscall dispatch |
 | `memory.rs`, `paging.rs`, `heap.rs`, `swap.rs`, `file_frames.rs`, `file_mapping.rs`, `page_cache.rs` | Physical/virtual memory, allocation, backing storage and file mappings |
 | `block.rs`, `block_cache.rs`, `block_io.rs`, `ata.rs`, `partition.rs`, `gpt.rs`, `storage.rs` | Block devices, request execution, caching, partitions and storage initialization |
 | `vfs.rs`, `fat32.rs`, `async_file.rs` | Filesystem operations and positional asynchronous file requests |
 | `async_op.rs`, `async_network.rs`, `irq_lock.rs` | Completion ownership, asynchronous sockets and interrupt-safe network/completion locks |
 | `network.rs`, `virtio_net.rs` | smoltcp IPv4 sockets and the transitional VirtIO-net transport |
-| `capability.rs`, `wovenguard.rs`, `audit.rs`, `entropy.rs` | Authority, domains, resource policy, security ledger and entropy support |
+| `capability.rs`, `wovenguard.rs`, `audit.rs`, `permission.rs`, `secret_vault.rs`, `signed_app.rs`, `secure_boot.rs`, `boot_measurement.rs`, `entropy.rs` | Authority, domains, resource policy, runtime permission decisions, volatile WovenVault handles, signed applications, software signed-kernel handoff, boot measurement, security-ledger recording/read ABI, and entropy support |
 | `ipc.rs`, `pipe.rs` | IPC objects, endpoint/message operations and byte pipes |
-| `device.rs`, `keyboard.rs`, `serial.rs`, `console.rs`, `terminal.rs`, `shell.rs` | Device registry, input, diagnostics and command interfaces |
+| `device.rs`, `keyboard.rs`, `mouse.rs`, `serial.rs`, `console.rs`, `terminal.rs`, `shell.rs` | Device registry, input (keyboard and PS/2 mouse both decode and publish at IRQ time), diagnostics and command interfaces |
 | `graphics.rs`, `gui.rs` | Existing framebuffer/GUI support; not the future compositor |
+| `rtc.rs` | CMOS real-time clock (UTC), behind the `ClockRead` syscall |
+| `font.rs`, `display.rs` | 5×7 ASCII font (also compiled into libwoven); `Surface` (opaque `blit`, `blit_region` for exposed-region redraw, uniform-opacity `blend`, `write_pixels` for client uploads), bounded `Damage` and the single format-resolving presentation path (`present_scaled`, integer display scale; `present` is scale 1) |
+| `user_graphics.rs`, `compositor.rs` | Owner-tagged, generation-checked client surfaces (syscalls 98–101, 104) and the kernel-held compositor surface they are blitted onto (102–103); `blit` snapshots under the registry lock and releases it before taking the compositor lock, so the two rank-10 locks never nest. Presentation borrows the framebuffer through `terminal::with_framebuffer` (lock order compositor → terminal), and display ownership suppresses terminal rendering while the compositor presents. Userspace reaches the compositor only with `DisplayIo` and the single-holder lease (syscalls 105–106), released on exit; every client token is bound to the calling process before the registry sees it. A presenting holder also takes input focus: `woven_input` routes events to its private bounded queue (syscall 107, `InputIo`) until it exits; syscall 108 sleeps for the next event with a single registered waiter woken by `publish` after `FOCUS` is released (lock order scheduler → compositor → FOCUS). A client may share one of its surfaces with one process (syscall 109); the lease holder composites it with syscall 110, authorised by the slot's grant rather than the token. Syscall 111 sleeps over input and the pid mailbox at once; `ipc::send` wakes the mailbox's single waiter after releasing the IPC lock. Clients declare damage on their surfaces (syscall 112); the holder sleeps on it via `WaitAny` and copies only the damaged region (syscall 113). The boot compositor is sized to the framebuffer (clamped to 1920×1200), and every framebuffer writer, including the boot `Console`, goes through the terminal lock. Stacking, raise and per-window focus are window-manager policy in userspace (Stage 19.11), built on the lease, focus, `WaitAny`, shared surfaces and IPC |
 | `panic.rs`, `benchmark.rs` | Failure reporting and existing benchmark support |
+| `libwoven/`, `apps/hello`, `apps/hello-gui`, `apps/woven-shell` | The userspace API (one thin wrapper per syscall, plus `Canvas` software rendering and the shared kernel font) and the Ring-3 programs. Each app is its own crate with a large-code-model `link.x` (whose `.l*` sections must be placed explicitly) and a `build.rs` that relinks when it changes. `woven-shell` is the desktop: it holds the compositor lease and recomposes exposed rectangles from its own software layers and clients' shared surfaces (region blits, syscalls 120–121), hosting applications over an IPC protocol (`WOPN`, `TRAY`, `NOTE`) |
 | `tests/`, `scripts/`, `run-stage*-acceptance.ps1` | Host regressions, QEMU orchestration and stage preservation gates |
 
 ## Stage 6 filesystem concurrency boundary

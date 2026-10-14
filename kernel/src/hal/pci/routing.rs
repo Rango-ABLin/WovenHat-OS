@@ -44,14 +44,46 @@ pub struct Plan {
 
 impl Plan {
     pub const fn new() -> Self {
-        Self { nodes: [Node { occupied: false, bridge: Bridge { id: 0, parent: None }, direct: Demand { io: None, memory: None, prefetch: None }, aggregate: Demand { io: None, memory: None, prefetch: None } }; MAX_ROUTES], count: 0 }
+        Self {
+            nodes: [Node {
+                occupied: false,
+                bridge: Bridge {
+                    id: 0,
+                    parent: None,
+                },
+                direct: Demand {
+                    io: None,
+                    memory: None,
+                    prefetch: None,
+                },
+                aggregate: Demand {
+                    io: None,
+                    memory: None,
+                    prefetch: None,
+                },
+            }; MAX_ROUTES],
+            count: 0,
+        }
     }
 
     pub fn add_bridge(&mut self, bridge: Bridge) -> Result<(), Error> {
-        if self.find(bridge.id).is_some() { return Err(Error::DuplicateBridge); }
-        if bridge.parent == Some(bridge.id) { return Err(Error::InvalidParent); }
-        let slot = self.nodes.iter().position(|node| !node.occupied).ok_or(Error::Capacity)?;
-        self.nodes[slot] = Node { occupied: true, bridge, direct: Demand::default(), aggregate: Demand::default() };
+        if self.find(bridge.id).is_some() {
+            return Err(Error::DuplicateBridge);
+        }
+        if bridge.parent == Some(bridge.id) {
+            return Err(Error::InvalidParent);
+        }
+        let slot = self
+            .nodes
+            .iter()
+            .position(|node| !node.occupied)
+            .ok_or(Error::Capacity)?;
+        self.nodes[slot] = Node {
+            occupied: true,
+            bridge,
+            direct: Demand::default(),
+            aggregate: Demand::default(),
+        };
         self.count += 1;
         Ok(())
     }
@@ -63,16 +95,24 @@ impl Plan {
 
     pub fn solve(&mut self) -> Result<(), Error> {
         for node in &mut self.nodes {
-            if node.occupied { node.aggregate = node.direct; }
+            if node.occupied {
+                node.aggregate = node.direct;
+            }
         }
         for index in 0..MAX_ROUTES {
-            if !self.nodes[index].occupied { continue; }
+            if !self.nodes[index].occupied {
+                continue;
+            }
             let mut seen = [false; MAX_ROUTES];
             let mut current = index;
             loop {
-                if seen[current] { return Err(Error::InvalidParent); }
+                if seen[current] {
+                    return Err(Error::InvalidParent);
+                }
                 seen[current] = true;
-                let Some(parent_id) = self.nodes[current].bridge.parent else { break; };
+                let Some(parent_id) = self.nodes[current].bridge.parent else {
+                    break;
+                };
                 current = self.find(parent_id).ok_or(Error::InvalidParent)?;
             }
         }
@@ -82,9 +122,13 @@ impl Plan {
         for _ in 0..self.count {
             let previous = self.nodes;
             for index in 0..MAX_ROUTES {
-                if !previous[index].occupied { continue; }
+                if !previous[index].occupied {
+                    continue;
+                }
                 let mut aggregate = previous[index].direct;
-                for child in previous.iter().filter(|node| node.occupied && node.bridge.parent == Some(previous[index].bridge.id)) {
+                for child in previous.iter().filter(|node| {
+                    node.occupied && node.bridge.parent == Some(previous[index].bridge.id)
+                }) {
                     merge_demand(&mut aggregate, child.aggregate)?;
                 }
                 self.nodes[index].aggregate = aggregate;
@@ -94,12 +138,19 @@ impl Plan {
     }
 
     pub fn bridge_at(&self, index: usize) -> Option<Bridge> {
-        self.nodes.get(index).filter(|node| node.occupied).map(|node| node.bridge)
+        self.nodes
+            .get(index)
+            .filter(|node| node.occupied)
+            .map(|node| node.bridge)
     }
 
     pub fn windows(&self, bridge_id: u8) -> Result<Windows, Error> {
         let node = self.nodes[self.find(bridge_id).ok_or(Error::MissingBridge)?];
-        Ok(Windows { io: node.aggregate.io, memory: node.aggregate.memory, prefetch: node.aggregate.prefetch })
+        Ok(Windows {
+            io: node.aggregate.io,
+            memory: node.aggregate.memory,
+            prefetch: node.aggregate.prefetch,
+        })
     }
 
     pub fn depth(&self, bridge_id: u8) -> Result<u8, Error> {
@@ -107,16 +158,22 @@ impl Plan {
         let mut depth = 0u8;
         let mut seen = [false; MAX_ROUTES];
         loop {
-            if seen[current] { return Err(Error::InvalidParent); }
+            if seen[current] {
+                return Err(Error::InvalidParent);
+            }
             seen[current] = true;
-            let Some(parent_id) = self.nodes[current].bridge.parent else { return Ok(depth); };
+            let Some(parent_id) = self.nodes[current].bridge.parent else {
+                return Ok(depth);
+            };
             current = self.find(parent_id).ok_or(Error::InvalidParent)?;
             depth = depth.checked_add(1).ok_or(Error::Overflow)?;
         }
     }
 
     fn find(&self, id: u8) -> Option<usize> {
-        self.nodes.iter().position(|node| node.occupied && node.bridge.id == id)
+        self.nodes
+            .iter()
+            .position(|node| node.occupied && node.bridge.id == id)
     }
 }
 
@@ -127,16 +184,34 @@ fn merge_demand(target: &mut Demand, incoming: Demand) -> Result<(), Error> {
     Ok(())
 }
 
-fn merge_window(target: &mut Option<Window>, incoming: Option<Window>, granularity: u64) -> Result<(), Error> {
-    let Some(incoming) = incoming else { return Ok(()); };
-    let incoming_end = incoming.base.checked_add(incoming.size).ok_or(Error::Overflow)?;
+fn merge_window(
+    target: &mut Option<Window>,
+    incoming: Option<Window>,
+    granularity: u64,
+) -> Result<(), Error> {
+    let Some(incoming) = incoming else {
+        return Ok(());
+    };
+    let incoming_end = incoming
+        .base
+        .checked_add(incoming.size)
+        .ok_or(Error::Overflow)?;
     let mut base = incoming.base & !(granularity - 1);
-    let mut end = incoming_end.checked_add(granularity - 1).ok_or(Error::Overflow)? & !(granularity - 1);
+    let mut end = incoming_end
+        .checked_add(granularity - 1)
+        .ok_or(Error::Overflow)?
+        & !(granularity - 1);
     if let Some(current) = *target {
-        let current_end = current.base.checked_add(current.size).ok_or(Error::Overflow)?;
+        let current_end = current
+            .base
+            .checked_add(current.size)
+            .ok_or(Error::Overflow)?;
         base = core::cmp::min(base, current.base);
         end = core::cmp::max(end, current_end);
     }
-    *target = Some(Window { base, size: end.checked_sub(base).ok_or(Error::Overflow)? });
+    *target = Some(Window {
+        base,
+        size: end.checked_sub(base).ok_or(Error::Overflow)?,
+    });
     Ok(())
 }

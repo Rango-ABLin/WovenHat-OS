@@ -320,6 +320,48 @@ global_asm!(
     ".previous",
 );
 
+#[cfg(feature = "stage11-2-test")]
+global_asm!(
+    ".global wovenhat_stage11_2_program_start",
+    ".global wovenhat_stage11_2_program_end",
+    "wovenhat_stage11_2_program_start:",
+    // Start one real scheduler-backed thread at the RX worker label.
+    "lea rdi, [rip + wovenhat_stage11_2_worker]",
+    "mov esi, 16384",
+    "mov eax, 130",
+    "int 0x80",
+    "cmp rax, -1",
+    "je wovenhat_stage11_2_fail",
+    "mov r12, rax",
+    "wovenhat_stage11_2_join:",
+    "mov eax, 132",
+    "mov rdi, r12",
+    "int 0x80",
+    "cmp rax, -2",
+    "je wovenhat_stage11_2_yield",
+    "cmp rax, 17",
+    "jne wovenhat_stage11_2_fail",
+    "xor edi, edi",
+    "mov eax, 3",
+    "int 0x80",
+    "wovenhat_stage11_2_yield:",
+    "mov eax, 7",
+    "int 0x80",
+    "jmp wovenhat_stage11_2_join",
+    "wovenhat_stage11_2_fail:",
+    "mov edi, 91",
+    "mov eax, 3",
+    "int 0x80",
+    "wovenhat_stage11_2_worker:",
+    "mov edi, 17",
+    "mov eax, 131",
+    "int 0x80",
+    "2:",
+    "hlt",
+    "jmp 2b",
+    "wovenhat_stage11_2_program_end:",
+);
+
 global_asm!(
     ".section .rodata.wovenhat_stage10_5_stub, \"a\"",
     ".global wovenhat_stage10_5_program_start",
@@ -4082,6 +4124,10 @@ unsafe extern "C" {
     static wovenhat_stage10_7_program_start: u8;
     #[cfg(feature = "stage10-7-test")]
     static wovenhat_stage10_7_program_end: u8;
+    #[cfg(feature = "stage11-2-test")]
+    static wovenhat_stage11_2_program_start: u8;
+    #[cfg(feature = "stage11-2-test")]
+    static wovenhat_stage11_2_program_end: u8;
     static wovenhat_exec_program_start: u8;
     static wovenhat_exec_program_end: u8;
     static wovenhat_init_program_start: u8;
@@ -4272,6 +4318,10 @@ pub fn setup_argv_stack(
 const USER_MMAP_START: u64 = USER_REGION_START + 0x0e_0000;
 const USER_MMAP_STRIDE: u64 = 0x10_000;
 const USER_MMAP_MAX_SIZE: usize = USER_MMAP_STRIDE as usize;
+
+fn page_align_up(value: u64) -> Option<u64> {
+    value.checked_add(4095).map(|value| value & !4095)
+}
 const USER_MMAP_PAGES: usize = USER_MMAP_MAX_SIZE / 4096;
 const _: () = assert!(
     USER_MMAP_START + MAX_ANONYMOUS_MAPPINGS as u64 * USER_MMAP_STRIDE
@@ -4339,6 +4389,8 @@ pub struct AddressSpace {
     mmap_base: u64,
     mappings: [UserMapping; MAX_ELF_SEGMENTS],
     mapping_count: usize,
+    relro: Option<(u64, usize)>,
+    tls: Option<(u64, usize)>,
 }
 
 impl AddressSpace {
@@ -4348,6 +4400,24 @@ impl AddressSpace {
 
     pub fn root_address(self) -> u64 {
         self.paging.root_address()
+    }
+
+    /// Return whether `address` belongs to an executable image segment.
+    ///
+    /// Thread entry points are accepted only inside an already loaded RX
+    /// segment.  The check is deliberately against the loader's immutable
+    /// segment table rather than merely checking that the page is mapped.
+    pub fn contains_executable(self, address: u64) -> bool {
+        self.mappings[..self.mapping_count].iter().any(|mapping| {
+            mapping.executable
+                && address >= mapping.start
+                && address < mapping.start.saturating_add(mapping.size as u64)
+        })
+    }
+
+    /// Return the static initial-exec TLS image range, if this image has one.
+    pub fn tls_range(self) -> Option<(u64, usize)> {
+        self.tls
     }
 
     /// Returns whether `address` falls in a logically writable mapping
@@ -4365,8 +4435,20 @@ impl AddressSpace {
                 && address >= mapping.start
                 && address < mapping.start + mapping.size as u64
             {
+                if self
+                    .relro
+                    .is_some_and(|(start, size)| address >= start && address < start + size as u64)
+                {
+                    return false;
+                }
                 return true;
             }
+        }
+        if self
+            .tls
+            .is_some_and(|(start, size)| address >= start && address < start + size as u64)
+        {
+            return true;
         }
         for mapping in anonymous.iter().flatten() {
             if mapping.writable
@@ -4385,6 +4467,7 @@ pub struct UserProgram {
     pub image: UserImage,
     pub stack: UserStack,
     pub address_space: AddressSpace,
+    pub tls_base: u64,
 }
 
 pub fn elf_loader_self_test() -> bool {
@@ -4418,7 +4501,7 @@ pub fn elf_loader_self_test() -> bool {
     let mut writable_executable = valid;
     writable_executable[68] = 7;
 
-    let unsupported_program_header_rejected = [PT_INTERP, PT_DYNAMIC, PT_TLS, PT_GNU_RELRO]
+    let unsupported_program_header_rejected = [PT_INTERP, PT_DYNAMIC]
         .into_iter()
         .all(|program_type| {
             let Some(mut elf) = build_stub_elf(stub) else {
@@ -4430,16 +4513,205 @@ pub fn elf_loader_self_test() -> bool {
             {
                 return false;
             }
-            matches!(
-                crate::elf::parse(&elf),
-                Err(crate::elf::Error::Unsupported)
-            )
+            match crate::elf::parse(&elf) {
+                Err(crate::elf::Error::Unsupported) if program_type == PT_INTERP => true,
+                Err(crate::elf::Error::Unsupported | crate::elf::Error::InvalidSegment)
+                    if program_type == PT_DYNAMIC => true,
+                _ => false,
+            }
         });
+
+    let invalid_tls_rejected = build_stub_elf(stub).is_some_and(|mut elf| {
+        let second_header = PROGRAM_HEADER_OFFSET + PROGRAM_HEADER_SIZE;
+        write_u16(&mut elf, 56, 2).is_some()
+            && write_u32(&mut elf, second_header, PT_TLS).is_some()
+            && write_u64(&mut elf, second_header + 32, 8).is_some()
+            && write_u64(&mut elf, second_header + 40, 4).is_some()
+            && matches!(crate::elf::parse(&elf), Err(crate::elf::Error::InvalidSegment))
+    });
+
+    let relro_requires_writable_data = build_stub_elf(stub).is_some_and(|mut elf| {
+        let second_header = PROGRAM_HEADER_OFFSET + PROGRAM_HEADER_SIZE;
+        write_u16(&mut elf, 56, 2).is_some()
+            && write_u32(&mut elf, second_header, PT_GNU_RELRO).is_some()
+            && write_u64(&mut elf, second_header + 16, USER_REGION_START).is_some()
+            && write_u64(&mut elf, second_header + 40, USER_CODE_SIZE as u64).is_some()
+            && matches!(crate::elf::parse(&elf), Err(crate::elf::Error::InvalidSegment))
+    });
+
+    let valid_relro = build_stub_elf(stub).and_then(|mut elf| {
+        let data_address = USER_REGION_START + USER_CODE_SIZE as u64;
+        let data_header = PROGRAM_HEADER_OFFSET + PROGRAM_HEADER_SIZE;
+        let relro_header = data_header + PROGRAM_HEADER_SIZE;
+        if write_u16(&mut elf, 56, 3).is_none()
+            || write_u32(&mut elf, data_header, 1).is_none()
+            || write_u32(&mut elf, data_header + 4, 6).is_none()
+            || write_u64(&mut elf, data_header + 16, data_address).is_none()
+            || write_u64(&mut elf, data_header + 40, 4096).is_none()
+            || write_u64(&mut elf, data_header + 48, 4096).is_none()
+            || write_u32(&mut elf, relro_header, PT_GNU_RELRO).is_none()
+            || write_u64(&mut elf, relro_header + 16, data_address).is_none()
+            || write_u64(&mut elf, relro_header + 40, 4096).is_none()
+        {
+            return None;
+        }
+        Some(elf)
+    })
+    .and_then(|elf| crate::elf::parse(&elf).ok())
+    .is_some_and(|image| image.relro() == Some((USER_REGION_START + USER_CODE_SIZE as u64, 4096)));
+
+    let valid_dynamic_relative = build_stub_elf(stub).and_then(|mut elf| {
+        const FIXTURE_PAYLOAD_SIZE: usize = 640;
+        const DYNAMIC_OFFSET: usize = 4096 + 256;
+        const HASH_OFFSET: usize = 4096 + 448;
+        const SYMTAB_OFFSET: usize = 4096 + 464;
+        const STRTAB_OFFSET: usize = 4096 + 512;
+        const RELA_OFFSET: usize = 4096 + 528;
+        if elf.len() < 4096 + FIXTURE_PAYLOAD_SIZE {
+            elf.resize(4096 + FIXTURE_PAYLOAD_SIZE, 0);
+        }
+        write_u64(&mut elf, PROGRAM_HEADER_OFFSET + 32, FIXTURE_PAYLOAD_SIZE as u64)?;
+        write_u64(&mut elf, PROGRAM_HEADER_OFFSET + 40, 4096)?;
+        let strtab = elf.get_mut(STRTAB_OFFSET..STRTAB_OFFSET + 7)?;
+        strtab.copy_from_slice(b"\0local\0");
+        let data_address = USER_REGION_START + USER_CODE_SIZE as u64;
+        let dynamic_header = PROGRAM_HEADER_OFFSET + PROGRAM_HEADER_SIZE;
+        let data_header = dynamic_header + PROGRAM_HEADER_SIZE;
+        if write_u16(&mut elf, 56, 3).is_none()
+            || write_u16(&mut elf, 16, 3).is_none()
+            || write_u32(&mut elf, dynamic_header, PT_DYNAMIC).is_none()
+            || write_u64(&mut elf, dynamic_header + 8, DYNAMIC_OFFSET as u64).is_none()
+            || write_u64(
+                &mut elf,
+                dynamic_header + 16,
+                USER_REGION_START + 256,
+            )
+            .is_none()
+            || write_u64(&mut elf, dynamic_header + 32, 160).is_none()
+            || write_u64(&mut elf, dynamic_header + 40, 160).is_none()
+            || write_u32(&mut elf, data_header, 1).is_none()
+            || write_u32(&mut elf, data_header + 4, 6).is_none()
+            || write_u64(&mut elf, data_header + 8, 0).is_none()
+            || write_u64(&mut elf, data_header + 16, data_address).is_none()
+            || write_u64(&mut elf, data_header + 32, 0).is_none()
+            || write_u64(&mut elf, data_header + 40, 4096).is_none()
+            || write_u64(&mut elf, data_header + 48, 4096).is_none()
+            // DT_HASH, DT_STRTAB, DT_STRSZ, DT_SYMTAB, DT_SYMENT,
+            // DT_RELA, DT_RELASZ, DT_RELAENT, DT_NULL.
+            || write_u64(&mut elf, DYNAMIC_OFFSET, 4).is_none()
+            || write_u64(&mut elf, DYNAMIC_OFFSET + 8, USER_REGION_START + 448).is_none()
+            || write_u64(&mut elf, DYNAMIC_OFFSET + 16, 5).is_none()
+            || write_u64(&mut elf, DYNAMIC_OFFSET + 24, USER_REGION_START + 512).is_none()
+            || write_u64(&mut elf, DYNAMIC_OFFSET + 32, 10).is_none()
+            || write_u64(&mut elf, DYNAMIC_OFFSET + 40, 7).is_none()
+            || write_u64(&mut elf, DYNAMIC_OFFSET + 48, 6).is_none()
+            || write_u64(&mut elf, DYNAMIC_OFFSET + 56, USER_REGION_START + 464).is_none()
+            || write_u64(&mut elf, DYNAMIC_OFFSET + 64, 11).is_none()
+            || write_u64(&mut elf, DYNAMIC_OFFSET + 72, 24).is_none()
+            || write_u64(&mut elf, DYNAMIC_OFFSET + 80, 7).is_none()
+            || write_u64(&mut elf, DYNAMIC_OFFSET + 88, USER_REGION_START + 528).is_none()
+            || write_u64(&mut elf, DYNAMIC_OFFSET + 96, 8).is_none()
+            || write_u64(&mut elf, DYNAMIC_OFFSET + 104, 48).is_none()
+            || write_u64(&mut elf, DYNAMIC_OFFSET + 112, 9).is_none()
+            || write_u64(&mut elf, DYNAMIC_OFFSET + 120, 24).is_none()
+            || write_u64(&mut elf, DYNAMIC_OFFSET + 128, 0).is_none()
+            || write_u64(&mut elf, DYNAMIC_OFFSET + 136, 0).is_none()
+            // SysV hash header: one bucket and two symbols (null + local).
+            || write_u32(&mut elf, HASH_OFFSET, 1).is_none()
+            || write_u32(&mut elf, HASH_OFFSET + 4, 2).is_none()
+            // Symbol 1 is defined in the executable.
+            || write_u32(&mut elf, SYMTAB_OFFSET + 24, 1).is_none()
+            || write_u16(&mut elf, SYMTAB_OFFSET + 24 + 6, 1).is_none()
+            || write_u64(&mut elf, SYMTAB_OFFSET + 24 + 8, USER_REGION_START + 32).is_none()
+            // One R_X86_64_RELATIVE and one local R_X86_64_64 relocation.
+            || write_u64(&mut elf, RELA_OFFSET, data_address).is_none()
+            || write_u64(&mut elf, RELA_OFFSET + 8, 8).is_none()
+            || write_u64(&mut elf, RELA_OFFSET + 16, 0x20).is_none()
+            || write_u64(&mut elf, RELA_OFFSET + 24, data_address + 8).is_none()
+            || write_u64(&mut elf, RELA_OFFSET + 32, (1_u64 << 32) | 1).is_none()
+            || write_u64(&mut elf, RELA_OFFSET + 40, 0).is_none()
+        {
+            return None;
+        }
+        let image = match crate::elf::parse(&elf) {
+            Ok(image) => image,
+            Err(_) => return None,
+        };
+        let dynamic = image.dynamic()?;
+        if dynamic.symbol_count != 2 || dynamic.rela_size != 48 {
+            return None;
+        }
+        let dependency_fixture = {
+            let mut dependency_elf = elf.clone();
+            write_u64(&mut dependency_elf, DYNAMIC_OFFSET + 128, 1)?;
+            write_u64(&mut dependency_elf, DYNAMIC_OFFSET + 136, 1)?;
+            write_u64(&mut dependency_elf, DYNAMIC_OFFSET + 144, 0)?;
+            dependency_elf
+        };
+        let dependency_metadata = crate::elf::parse(&dependency_fixture)
+            .ok()
+            .and_then(|image| image.dynamic())
+            .is_some_and(|dynamic| {
+                dynamic.needed_count == 1 && dynamic.needed_offsets[0] == 1
+            });
+        let dependency_fail_closed = load_elf(&dependency_fixture).is_none();
+        let program = load_elf(&elf)?;
+        let mut relocated = [0u8; 16];
+        let expected = aslr_image_delta().checked_add(0x20)?;
+        let applied = paging::read_user_bytes_in(
+            program.address_space.paging(),
+            data_address.checked_add(aslr_image_delta())?,
+            &mut relocated,
+        )
+        .is_ok()
+            && u64::from_le_bytes(relocated[..8].try_into().ok()?) == expected
+            && u64::from_le_bytes(relocated[8..].try_into().ok()?)
+                == aslr_image_delta() + USER_REGION_START + 32;
+        let destroyed = destroy(program.address_space);
+        Some(
+            dynamic.rela_size == 48
+                && dynamic.rela_entry_size == 24
+                && dynamic.symbol_count == 2
+                && dependency_metadata
+                && dependency_fail_closed
+                && applied
+                && destroyed,
+        )
+    })
+    .unwrap_or(false);
+
+    let valid_tls = build_stub_elf(stub).and_then(|mut elf| {
+        let tls_header = PROGRAM_HEADER_OFFSET + PROGRAM_HEADER_SIZE;
+        if write_u16(&mut elf, 56, 2).is_none()
+            || write_u32(&mut elf, tls_header, PT_TLS).is_none()
+            || write_u64(&mut elf, tls_header + 8, 4096).is_none()
+            || write_u64(&mut elf, tls_header + 32, 4).is_none()
+            || write_u64(&mut elf, tls_header + 40, 4096).is_none()
+            || write_u64(&mut elf, tls_header + 48, 4096).is_none()
+        {
+            return None;
+        }
+        Some(elf)
+    })
+    .and_then(|elf| crate::elf::parse(&elf).ok())
+    .is_some_and(|image| {
+        image.tls().is_some_and(|tls| {
+            tls.file_offset == 4096
+                && tls.file_size == 4
+                && tls.memory_size == 4096
+                && tls.alignment == 4096
+        })
+    });
 
     valid_segment
         && crate::elf::parse(&bad_magic).is_err()
         && crate::elf::parse(&writable_executable).is_err()
         && unsupported_program_header_rejected
+        && invalid_tls_rejected
+        && relro_requires_writable_data
+        && valid_relro
+        && valid_dynamic_relative
+        && valid_tls
 }
 /// Regression test for the mmap W^X invariant.
 ///
@@ -4573,6 +4845,16 @@ pub fn create_stage10_7_process() -> Option<UserProgram> {
     };
     let elf = build_stub_elf(stub)?;
     load_elf(&elf)
+}
+
+#[cfg(feature = "stage11-2-test")]
+pub fn create_stage11_2_thread_process() -> Option<UserProgram> {
+    let stub = unsafe {
+        let start = &wovenhat_stage11_2_program_start as *const u8;
+        let end = &wovenhat_stage11_2_program_end as *const u8;
+        core::slice::from_raw_parts(start, end.offset_from(start) as usize)
+    };
+    load_elf(&build_stub_elf(stub)?)
 }
 
 pub fn create_exec_process() -> Option<UserProgram> {
@@ -4727,16 +5009,80 @@ pub fn install_shell_executable() -> bool {
     };
     build_stub_elf(stub).is_some_and(|elf| crate::vfs::create_read_only("/bin/sh", &elf).is_ok())
 }
+
+pub fn load_signed_elf_with_argv(package: &[u8], args: &[&str]) -> Option<UserProgram> {
+    let verified = crate::signed_app::verify_package(package).ok()?;
+    load_elf_with_argv(verified.bytes(), args)
+}
+
+fn is_kernel_trusted_executable(path: &str) -> bool {
+    matches!(
+        path,
+        "/bin/init"
+            | "/bin/sh"
+            | "/bin/woven-shell"
+            | "/bin/hello-gui"
+            | "/bin/true"
+            | "/bin/false"
+            | "/bin/ls"
+            | "/bin/sleep"
+            | "/bin/cat"
+            | "/bin/echo"
+            | "/bin/pwd"
+            | "/bin/mkdir"
+            | "/bin/rm"
+            | "/bin/selftest"
+            | "/bin/ip"
+            | "/bin/netstat"
+            | "/bin/dns"
+            | "/bin/udp"
+            | "/bin/nc"
+            | "/bin/ping"
+            | "/bin/bin"
+            | "/bin/en"
+            | "/bin/env"
+            | "/bin/ps"
+            | "/bin/uptime"
+            | "/bin/tcpd"
+            | "/bin/mmaptest"
+    )
+}
+
+/// Preserve the established in-kernel image ABI while routing WAPP packages
+/// through signature verification before ELF parsing. Raw ELF remains accepted
+/// only for the fixed kernel-owned system image paths; user-controlled paths
+/// must carry a WAPP envelope.
+pub fn load_elf_with_argv_verified(bytes: &[u8], args: &[&str]) -> Option<UserProgram> {
+    if bytes.starts_with(&crate::signed_app::PACKAGE_MAGIC) {
+        load_signed_elf_with_argv(bytes, args)
+    } else if args
+        .first()
+        .is_some_and(|path| is_kernel_trusted_executable(path))
+    {
+        load_elf_with_argv(bytes, args)
+    } else {
+        None
+    }
+}
+
 pub fn load_elf(bytes: &[u8]) -> Option<UserProgram> {
     let image = crate::elf::parse(bytes)
         .ok()?
         .relocated(aslr_image_delta())?;
+    // Dependency names are parsed and bounds-checked by the ELF layer, but
+    // this loader still has no dependency namespace or cross-image teardown.
+    // Refuse them explicitly until that authority is implemented.
+    if image.dynamic().is_some_and(|dynamic| dynamic.needed_count != 0) {
+        return None;
+    }
     let mmap_base = aslr_mmap_base()?;
     let page_table = paging::create_user_address_space(image.entry)?;
     let mut mappings = [UserMapping::EMPTY; MAX_ELF_SEGMENTS];
     let mut mapping_count = 0;
 
     let stack_base = aslr_stack_base()?;
+    let relro = image.relro();
+    let tls_image = image.tls();
     let stack = UserStack::new(stack_base);
     let mmap_end = mmap_base.checked_add(MAX_ANONYMOUS_MAPPINGS as u64 * USER_MMAP_STRIDE)?;
     for segment in image.segments() {
@@ -4787,35 +5133,255 @@ pub fn load_elf(bytes: &[u8]) -> Option<UserProgram> {
                 bytes.get(segment.file_offset..file_end)?,
             )
             .is_err()
-            || paging::protect_user_range_in_inactive(
-                page_table,
-                segment.mapping_start,
-                segment.mapping_size,
-                segment.writable,
-                segment.executable,
-            )
-            .is_err()
         {
             release_partial(page_table, &mappings[..mapping_count]);
             return None;
         }
     }
 
+    if let Some(dynamic) = image.dynamic().filter(|dynamic| dynamic.rela_size != 0) {
+        let Some(rela_end) = dynamic.rela_file_offset.checked_add(dynamic.rela_size) else {
+            release_partial(page_table, &mappings[..mapping_count]);
+            return None;
+        };
+        let Some(rela_bytes) = bytes.get(dynamic.rela_file_offset..rela_end) else {
+            release_partial(page_table, &mappings[..mapping_count]);
+            return None;
+        };
+        for entry in rela_bytes.chunks_exact(dynamic.rela_entry_size) {
+            let Some(target) = entry
+                .get(..8)
+                .and_then(|bytes| bytes.try_into().ok())
+                .map(u64::from_le_bytes)
+            else {
+                release_partial(page_table, &mappings[..mapping_count]);
+                return None;
+            };
+            let Some(addend) = entry
+                .get(16..24)
+                .and_then(|bytes| bytes.try_into().ok())
+                .map(i64::from_le_bytes)
+            else {
+                release_partial(page_table, &mappings[..mapping_count]);
+                return None;
+            };
+            let Some(info) = entry
+                .get(8..16)
+                .and_then(|bytes| bytes.try_into().ok())
+                .map(u64::from_le_bytes)
+            else {
+                release_partial(page_table, &mappings[..mapping_count]);
+                return None;
+            };
+            let relocation_type = info as u32;
+            let symbol_index = (info >> 32) as usize;
+            let Some(target) = target.checked_add(image.load_bias()) else {
+                release_partial(page_table, &mappings[..mapping_count]);
+                return None;
+            };
+            let symbol_value = if symbol_index == 0 {
+                None
+            } else {
+                if symbol_index >= dynamic.symbol_count {
+                    release_partial(page_table, &mappings[..mapping_count]);
+                    return None;
+                }
+                let resolved = (|| {
+                    let symbol_offset = dynamic
+                        .symtab_file_offset
+                        .checked_add(symbol_index.checked_mul(dynamic.symtab_entry_size)?)?;
+                    let symbol = bytes.get(symbol_offset..symbol_offset.checked_add(24)?)?;
+                    let name_offset =
+                        u32::from_le_bytes(symbol[..4].try_into().ok()?) as usize;
+                    let section = u16::from_le_bytes(symbol[6..8].try_into().ok()?);
+                    let value = u64::from_le_bytes(symbol[8..16].try_into().ok()?);
+                    if section == 0
+                        || !image.segments().any(|segment| {
+                            value >= segment.virtual_address
+                                && value
+                                    < segment
+                                        .virtual_address
+                                        .saturating_add(segment.memory_size as u64)
+                        })
+                    {
+                        // Undefined symbols require a dependency scope. That
+                        // scope is deliberately not guessed from the main image.
+                        return None;
+                    }
+                    let name_start = dynamic.strtab_file_offset.checked_add(name_offset)?;
+                    let name_end = dynamic
+                        .strtab_file_offset
+                        .checked_add(dynamic.strtab_size)?;
+                    if name_start >= name_end
+                        || bytes
+                            .get(name_start..name_end)?
+                            .iter()
+                            .position(|byte| *byte == 0)
+                            .is_none()
+                    {
+                        return None;
+                    }
+                    image.load_bias().checked_add(value)
+                })();
+                let Some(resolved) = resolved else {
+                    release_partial(page_table, &mappings[..mapping_count]);
+                    return None;
+                };
+                Some(resolved)
+            };
+            let value = match relocation_type {
+                crate::elf::R_X86_64_RELATIVE => {
+                    if symbol_index != 0 {
+                        release_partial(page_table, &mappings[..mapping_count]);
+                        return None;
+                    }
+                    if addend >= 0 {
+                        let Some(value) = image.load_bias().checked_add(addend as u64) else {
+                            release_partial(page_table, &mappings[..mapping_count]);
+                            return None;
+                        };
+                        value
+                    } else {
+                        let Some(value) = image.load_bias().checked_sub(addend.unsigned_abs()) else {
+                            release_partial(page_table, &mappings[..mapping_count]);
+                            return None;
+                        };
+                        value
+                    }
+                }
+                crate::elf::R_X86_64_64
+                | crate::elf::R_X86_64_GLOB_DAT
+                | crate::elf::R_X86_64_JUMP_SLOT => {
+                    let Some(symbol_value) = symbol_value else {
+                        release_partial(page_table, &mappings[..mapping_count]);
+                        return None;
+                    };
+                    if addend >= 0 {
+                        let Some(value) = symbol_value.checked_add(addend as u64) else {
+                            release_partial(page_table, &mappings[..mapping_count]);
+                            return None;
+                        };
+                        value
+                    } else {
+                        let Some(value) = symbol_value.checked_sub(addend.unsigned_abs()) else {
+                            release_partial(page_table, &mappings[..mapping_count]);
+                            return None;
+                        };
+                        value
+                    }
+                }
+                _ => {
+                    release_partial(page_table, &mappings[..mapping_count]);
+                    return None;
+                }
+            };
+            if paging::write_user_bytes(page_table, target, &value.to_le_bytes()).is_err() {
+                release_partial(page_table, &mappings[..mapping_count]);
+                return None;
+            }
+        }
+    }
+
+    for segment in image.segments() {
+        if paging::protect_user_range_in_inactive(
+            page_table,
+            segment.mapping_start,
+            segment.mapping_size,
+            segment.writable,
+            segment.executable,
+        )
+        .is_err()
+        {
+            release_partial(page_table, &mappings[..mapping_count]);
+            return None;
+        }
+    }
+
+    if let Some((relro_start, relro_size)) = relro {
+        if paging::protect_user_range_in_inactive(
+            page_table,
+            relro_start,
+            relro_size,
+            false,
+            false,
+        )
+        .is_err()
+        {
+            release_partial(page_table, &mappings[..mapping_count]);
+            return None;
+        }
+    }
+
+    // Static TLS is placed below the stack guard.  The initial-exec ABI uses
+    // the end of this block as FS, so keeping the block page aligned makes
+    // fork's existing COW address-space clone sufficient for the initial
+    // thread image. Dynamic TLS/shared libraries remain intentionally outside
+    // this loader's contract.
+    let (tls, tls_base) = if let Some(tls_image) = tls_image {
+        let Some(tls_size) = page_align_up(tls_image.memory_size as u64)
+            .and_then(|size| usize::try_from(size).ok())
+        else {
+            release_partial(page_table, &mappings[..mapping_count]);
+            return None;
+        };
+        let Some(tls_start) = stack.guard_base.checked_sub(tls_size as u64) else {
+            release_partial(page_table, &mappings[..mapping_count]);
+            return None;
+        };
+        let Some(tls_file_end) = tls_image.file_offset.checked_add(tls_image.file_size) else {
+            release_partial(page_table, &mappings[..mapping_count]);
+            return None;
+        };
+        if tls_start < mmap_end
+            || mappings[..mapping_count].iter().any(|mapping| {
+                tls_start < mapping.start + mapping.size as u64
+                    && mapping.start < stack.guard_base
+            })
+        {
+            release_partial(page_table, &mappings[..mapping_count]);
+            return None;
+        }
+        let Some(tls_bytes) = bytes.get(tls_image.file_offset..tls_file_end) else {
+            release_partial(page_table, &mappings[..mapping_count]);
+            return None;
+        };
+        if paging::map_user_range_in_inactive(page_table, tls_start, tls_size, true, false)
+            .is_err()
+            || paging::zero_user_range_in(page_table, tls_start, tls_size).is_err()
+            || paging::write_user_bytes(
+                page_table,
+                tls_start,
+                tls_bytes,
+            )
+            .is_err()
+        {
+            release_partial_with_tls(page_table, &mappings[..mapping_count], (tls_start, tls_size));
+            return None;
+        }
+        let Some(tls_base) = tls_start.checked_add(tls_size as u64) else {
+            release_partial_with_tls(page_table, &mappings[..mapping_count], (tls_start, tls_size));
+            return None;
+        };
+        (Some((tls_start, tls_size)), tls_base)
+    } else {
+        (None, 0)
+    };
+
     if paging::map_user_range_in_inactive(page_table, stack_base, UserStack::SIZE, true, false)
         .is_err()
     {
-        release_partial(page_table, &mappings[..mapping_count]);
+        release_with_stack(page_table, stack_base, tls, &mappings[..mapping_count]);
         return None;
     }
     if paging::zero_user_range_in(page_table, stack_base, UserStack::SIZE).is_err() {
-        release_with_stack(page_table, stack_base, &mappings[..mapping_count]);
+        release_with_stack(page_table, stack_base, tls, &mappings[..mapping_count]);
         return None;
     }
 
     if !paging::user_range_is_unmapped_in(page_table, stack.guard_base, UserStack::GUARD_SIZE)
         || !paging::user_range_has_protection_in(page_table, stack.base, stack.size, true, false)
     {
-        release_with_stack(page_table, stack_base, &mappings[..mapping_count]);
+        release_with_stack(page_table, stack_base, tls, &mappings[..mapping_count]);
         return None;
     }
 
@@ -4836,7 +5402,10 @@ pub fn load_elf(bytes: &[u8]) -> Option<UserProgram> {
             mmap_base,
             mappings,
             mapping_count,
+            relro,
+            tls,
         },
+        tls_base,
     })
 }
 
@@ -4849,13 +5418,23 @@ pub fn load_elf_with_argv(bytes: &[u8], args: &[&str]) -> Option<UserProgram> {
     Some(program)
 }
 
-fn release_with_stack(page_table: paging::AddressSpace, stack_base: u64, mappings: &[UserMapping]) {
-    let mut ranges = [(0, 0); MAX_ELF_SEGMENTS + 1];
+fn release_with_stack(
+    page_table: paging::AddressSpace,
+    stack_base: u64,
+    tls: Option<(u64, usize)>,
+    mappings: &[UserMapping],
+) {
+    let mut ranges = [(0, 0); MAX_ELF_SEGMENTS + 2];
     ranges[0] = (stack_base, UserStack::SIZE);
     for (range, mapping) in ranges[1..].iter_mut().zip(mappings) {
         *range = (mapping.start, mapping.size);
     }
-    let _ = paging::destroy_user_address_space(page_table, &ranges[..mappings.len() + 1]);
+    let mut count = mappings.len() + 1;
+    if let Some(tls) = tls {
+        ranges[count] = tls;
+        count += 1;
+    }
+    let _ = paging::destroy_user_address_space(page_table, &ranges[..count]);
 }
 fn release_partial(page_table: paging::AddressSpace, mappings: &[UserMapping]) {
     if mappings.is_empty() {
@@ -4867,6 +5446,19 @@ fn release_partial(page_table: paging::AddressSpace, mappings: &[UserMapping]) {
         *range = (mapping.start, mapping.size);
     }
     let _ = paging::destroy_user_address_space(page_table, &ranges[..mappings.len()]);
+}
+
+fn release_partial_with_tls(
+    page_table: paging::AddressSpace,
+    mappings: &[UserMapping],
+    tls: (u64, usize),
+) {
+    let mut ranges = [(0, 0); MAX_ELF_SEGMENTS + 1];
+    for (range, mapping) in ranges[..mappings.len()].iter_mut().zip(mappings) {
+        *range = (mapping.start, mapping.size);
+    }
+    ranges[mappings.len()] = tls;
+    let _ = paging::destroy_user_address_space(page_table, &ranges[..mappings.len() + 1]);
 }
 
 pub fn map_anonymous(
@@ -4901,6 +5493,40 @@ pub fn map_anonymous(
         dirty: 0,
         swap_slots: [None; USER_MMAP_PAGES],
     })
+}
+
+/// Clone the current process's bounded initial-exec TLS image for a new
+/// scheduler task.  The clone gets private writable pages and therefore a
+/// thread cannot mutate another thread's `errno` or compiler TLS variables.
+pub fn clone_initial_tls(
+    address_space: AddressSpace,
+    slot: usize,
+) -> Option<AnonymousMapping> {
+    let (source, size) = address_space.tls_range()?;
+    let mapping = map_anonymous(address_space, slot, size, true)?;
+    let mut buffer = [0u8; 512];
+    let mut offset = 0usize;
+    while offset < size {
+        let count = buffer.len().min(size - offset);
+        if paging::read_user_bytes_in(
+            address_space.paging,
+            source.checked_add(offset as u64)?,
+            &mut buffer[..count],
+        )
+        .is_err()
+            || paging::write_user_bytes(
+                address_space.paging,
+                mapping.address.checked_add(offset as u64)?,
+                &buffer[..count],
+            )
+            .is_err()
+        {
+            let _ = unmap_anonymous(address_space, mapping);
+            return None;
+        }
+        offset += count;
+    }
+    Some(mapping)
 }
 
 /// Populate private NX pages without advancing the file offset.
@@ -5199,7 +5825,7 @@ pub fn destroy_process_address_space(
     destroy(address_space)
 }
 pub fn destroy(address_space: AddressSpace) -> bool {
-    let mut ranges = [(0, 0); MAX_ELF_SEGMENTS + 1];
+    let mut ranges = [(0, 0); MAX_ELF_SEGMENTS + 2];
     ranges[0] = (address_space.stack_base, UserStack::SIZE);
     for (range, mapping) in ranges[1..]
         .iter_mut()
@@ -5207,10 +5833,12 @@ pub fn destroy(address_space: AddressSpace) -> bool {
     {
         *range = (mapping.start, mapping.size);
     }
-    paging::destroy_user_address_space(
-        address_space.paging,
-        &ranges[..address_space.mapping_count + 1],
-    )
+    let mut count = address_space.mapping_count + 1;
+    if let Some(tls) = address_space.tls {
+        ranges[count] = tls;
+        count += 1;
+    }
+    paging::destroy_user_address_space(address_space.paging, &ranges[..count])
     .is_ok()
 }
 
@@ -5225,8 +5853,10 @@ pub fn clone_address_space(
         mmap_base: source.mmap_base,
         mappings: source.mappings,
         mapping_count: source.mapping_count,
+        relro: source.relro,
+        tls: source.tls,
     };
-    let mut completed = [(0_u64, 0_usize); MAX_ELF_SEGMENTS + 1 + MAX_ANONYMOUS_MAPPINGS * 16];
+    let mut completed = [(0_u64, 0_usize); MAX_ELF_SEGMENTS + 2 + MAX_ANONYMOUS_MAPPINGS * 16];
     let mut completed_count = 0;
 
     // Copy-on-write: share physical frames and mark writable ranges read-only.
@@ -5262,6 +5892,24 @@ pub fn clone_address_space(
     }
     completed[completed_count] = (source.stack_base, UserStack::SIZE);
     completed_count += 1;
+
+    if let Some((tls_start, tls_size)) = source.tls {
+        if paging::share_user_range_in(
+            source.paging,
+            destination.paging,
+            tls_start,
+            tls_size,
+            true,
+            false,
+        )
+        .is_err()
+        {
+            release_clone(destination.paging, &completed[..completed_count]);
+            return None;
+        }
+        completed[completed_count] = (tls_start, tls_size);
+        completed_count += 1;
+    }
 
     for mapping in anonymous.iter().flatten() {
         for index in 0..mapping.size / 4096 {
@@ -5531,6 +6179,8 @@ pub fn shared_disk_mmap_self_test() -> bool {
             mmap_base: USER_MMAP_START,
             mappings: [UserMapping::EMPTY; MAX_ELF_SEGMENTS],
             mapping_count: 0,
+            relro: None,
+            tls: None,
         };
         let anchor = USER_MMAP_START + 15 * USER_MMAP_STRIDE;
         if paging::map_user_range_in(root, anchor, 4096, false, false).is_err() {
@@ -5584,6 +6234,8 @@ pub fn disk_unlink_mmap_self_test() -> bool {
             mmap_base: USER_MMAP_START,
             mappings: [UserMapping::EMPTY; MAX_ELF_SEGMENTS],
             mapping_count: 0,
+            relro: None,
+            tls: None,
         };
         let anchor = USER_MMAP_START + 15 * USER_MMAP_STRIDE;
         if paging::map_user_range_in(root, anchor, 4096, false, false).is_err() {
@@ -5628,6 +6280,8 @@ pub fn shared_file_mmap_self_test() -> bool {
         mmap_base: USER_MMAP_START,
         mappings: [UserMapping::EMPTY; MAX_ELF_SEGMENTS],
         mapping_count: 0,
+        relro: None,
+        tls: None,
     };
     let anchor = USER_MMAP_START + 15 * USER_MMAP_STRIDE;
     if paging::map_user_range_in(root, anchor, 4096, false, false).is_err() {
@@ -5712,6 +6366,8 @@ pub fn lazy_file_mmap_self_test() -> bool {
         mmap_base: USER_MMAP_START,
         mappings: [UserMapping::EMPTY; MAX_ELF_SEGMENTS],
         mapping_count: 0,
+        relro: None,
+        tls: None,
     };
     // Keep a teardown anchor while sparse mapping pages are removed individually.
     let anchor = USER_MMAP_START + 15 * USER_MMAP_STRIDE;
@@ -5797,6 +6453,8 @@ pub fn private_lazy_swap_self_test() -> bool {
         mmap_base: USER_MMAP_START,
         mappings: [UserMapping::EMPTY; MAX_ELF_SEGMENTS],
         mapping_count: 0,
+        relro: None,
+        tls: None,
     };
     let anchor = USER_MMAP_START + 15 * USER_MMAP_STRIDE;
     if paging::map_user_range_in(root, anchor, 4096, false, false).is_err() {
@@ -5866,6 +6524,8 @@ pub fn file_mmap_self_test() -> bool {
         mmap_base: USER_MMAP_START,
         mappings: [UserMapping::EMPTY; MAX_ELF_SEGMENTS],
         mapping_count: 0,
+        relro: None,
+        tls: None,
     };
     let _ = crate::vfs::seek(file, 3);
     let Some(mapping) = map_file_private(space, 0, file, 0, DATA.len(), false) else {

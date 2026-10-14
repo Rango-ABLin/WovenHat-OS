@@ -170,6 +170,9 @@ struct LegacyEndpoint {
     owner: u64,
     messages: [Message; QUEUE_DEPTH],
     length: usize,
+    /// One task of the owner sleeping until a message arrives. `send` takes
+    /// it and wakes it after STATE is released; teardown just drops it.
+    waiter: Option<TaskId>,
 }
 
 impl LegacyEndpoint {
@@ -177,6 +180,7 @@ impl LegacyEndpoint {
         owner: 0,
         messages: [Message::EMPTY; QUEUE_DEPTH],
         length: 0,
+        waiter: None,
     };
 
     fn enqueue(&mut self, message: Message) -> Result<(), Error> {
@@ -1598,7 +1602,50 @@ pub fn unregister(owner: u64) -> Result<(), Error> {
 }
 
 pub fn send(sender: u64, receiver: u64, payload: &[u8]) -> Result<(), Error> {
-    STATE.lock().send(sender, receiver, payload)
+    let wake = {
+        let mut state = STATE.lock();
+        state.send(sender, receiver, payload)?;
+        state
+            .legacy_endpoint_mut(receiver)
+            .and_then(|endpoint| endpoint.waiter.take())
+    };
+    // Woken with STATE released, so the scheduler lock is never taken under
+    // the IPC lock.
+    if let Some(task_id) = wake {
+        let _ = task::signal_event(task_id);
+    }
+    Ok(())
+}
+
+/// Register `task` to be woken by the next message to `owner`'s pid mailbox.
+/// Returns the other task already registered, if there is one, without
+/// replacing it.
+pub fn register_message_waiter(owner: u64, task_id: TaskId) -> Result<Option<TaskId>, Error> {
+    let mut state = STATE.lock();
+    let endpoint = state.legacy_endpoint_mut(owner).ok_or(Error::NoEndpoint)?;
+    match endpoint.waiter {
+        Some(other) if other != task_id => Ok(Some(other)),
+        _ => {
+            endpoint.waiter = Some(task_id);
+            Ok(None)
+        }
+    }
+}
+
+/// Drop the registration of `task` on `owner`'s mailbox, if it is the one
+/// registered.
+pub fn clear_message_waiter(owner: u64, task_id: TaskId) {
+    let mut state = STATE.lock();
+    if let Some(endpoint) = state.legacy_endpoint_mut(owner) {
+        if endpoint.waiter == Some(task_id) {
+            endpoint.waiter = None;
+        }
+    }
+}
+
+/// Whether `owner`'s pid mailbox holds a message.
+pub fn message_pending(owner: u64) -> bool {
+    STATE.lock().peek(owner).is_ok()
 }
 
 pub fn receive(receiver: u64) -> Result<Message, Error> {

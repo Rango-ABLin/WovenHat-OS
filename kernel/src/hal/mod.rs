@@ -44,7 +44,10 @@ pub fn init(acpi: Option<&acpi::Summary>) -> HardwareInfo {
                 valid = false;
                 break;
             }
-            let range = pci::HostAperture { base: resource.base, size: resource.length };
+            let range = pci::HostAperture {
+                base: resource.base,
+                size: resource.length,
+            };
             let result = match resource.kind {
                 acpi::PciRootResourceKind::Io => apertures.io.push(range),
                 acpi::PciRootResourceKind::Memory if resource.prefetchable => {
@@ -59,9 +62,7 @@ pub fn init(acpi: Option<&acpi::Summary>) -> HardwareInfo {
         }
         if valid && summary.pci_root_resource_count != 0 {
             if let Err(error) = pci::configure_host_apertures(apertures) {
-                crate::serial::write_line(format_args!(
-                    "[PCI] host apertures rejected: {error:?}"
-                ));
+                crate::serial::write_line(format_args!("[PCI] host apertures rejected: {error:?}"));
             }
         } else if summary.pci_root_resource_count != 0 {
             crate::serial::write_line(format_args!(
@@ -75,6 +76,6 @@ pub fn init(acpi: Option<&acpi::Summary>) -> HardwareInfo {
         cpu_vendor: cpu::detect_vendor(),
         cpu_features: cpu::detect_features(),
         logical_cpus: cpu::count_logical_cpus(),
-        pci: pci::discover(),
+        pci: pci::discover_and_route(),
     }
 }

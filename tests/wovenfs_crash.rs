@@ -20,7 +20,7 @@ mod block;
 mod wfs;
 
 use block::{BlockDevice, Error as BlockError, SECTOR_SIZE};
-use wfs::{Error, Volume, MAX_FILE_SIZE};
+use wfs::{Error, MAX_FILE_SIZE, Volume};
 
 const SECTORS: usize = 192;
 const INODES: u32 = 32;
@@ -183,7 +183,10 @@ fn create_is_atomic_across_every_crash_point() {
     let writes = write_count(&base, |volume| {
         volume.create(1, "report.txt", 0o644, 100).expect("create");
     });
-    assert!(writes > 2, "expected a multi-sector operation, got {writes}");
+    assert!(
+        writes > 2,
+        "expected a multi-sector operation, got {writes}"
+    );
 
     for cut in 0..=writes {
         let crashing = base.fork(Some(cut));
@@ -287,9 +290,9 @@ fn unlink_is_atomic_across_every_crash_point() {
             Ok(entry) => {
                 // Still linked, so its contents must still be intact.
                 let mut out = vec![0u8; MAX_FILE_SIZE];
-                let read = recovered.read_file(entry.inode, &mut out).unwrap_or_else(|e| {
-                    panic!("crash at {cut}: surviving file unreadable: {e:?}")
-                });
+                let read = recovered
+                    .read_file(entry.inode, &mut out)
+                    .unwrap_or_else(|e| panic!("crash at {cut}: surviving file unreadable: {e:?}"));
                 assert_eq!(&out[..read], &payload[..], "crash at {cut}: torn survivor");
             }
             Err(Error::NotFound) => {}
