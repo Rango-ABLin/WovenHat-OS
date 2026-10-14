@@ -22,7 +22,10 @@ bounded software increment. WDJ2 now covers bounded sixteen-file data-plus-
 metadata rollback
 and replay with 1/2/4-CPU recovery evidence. The remaining Stage 1–5 gaps are
 hardware/DMA qualification,
-arbitrary-size/full-volume rollback, and unclean-shutdown qualification.
+arbitrary-size/full-volume rollback, and unclean-shutdown qualification. A
+software sector-write fault-injection gate now covers bounded file-creation
+error returns; it does not substitute for physical power-loss, torn-sector,
+or reboot evidence.
 
 The bounded WDJ2 metadata transaction gap is closed by the v2 entry extension;
 see [the metadata transaction audit](audit-stage1-5-metadata-transactions-2026-10-14.md).

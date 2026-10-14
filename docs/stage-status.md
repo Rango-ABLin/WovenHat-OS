@@ -1285,6 +1285,18 @@ audit](audit-stage1-5-metadata-transactions-2026-10-14.md).
 This closes bounded metadata transactions, not arbitrary-size/full-volume
 rollback or physical unclean-shutdown qualification.
 
+## Stage 1–5 sector-write fault injection — 2026-10-14
+
+FAT32 mutation self-tests now inject a deterministic `DeviceFault` at every
+bounded file-creation sector-write boundary. Failed mutations must leave the
+volume structurally checkable, remove the new file, and preserve the original
+file bytes; successful mutations are also checked. Host and freestanding
+storage gates use the same self-test. This is software error-return evidence,
+not physical power-loss or torn-sector evidence. FSInfo remains an advisory
+hint and may be stale after an injected failure; physical flash/ATA/DMA,
+torn-write, arbitrary-size/full-volume rollback, and reboot recovery remain
+open.
+
 ## Stage 14.2D — Router Advertisement state (2026-10-06)
 
 Router Advertisement state now tracks a link-local router, bounded lifetimes,
