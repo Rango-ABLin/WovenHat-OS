@@ -17,6 +17,24 @@ gate pass. The unsupported `cargo test --workspace --all-targets` command is
 documented as a host-assembler mismatch rather than treated as a production
 failure. See the [host-test audit](audit-host-test-boundary-2026-10-14.md).
 
+## Stages 20.4–20.8 — validation after rebasing onto phase2 (2026-10-14)
+
+The Stage 20.4–20.8 commits were rebased onto `phase2` at `c5b13392`,
+which includes the Stage 1–19 hardening (`b4f00fd3`) and the Stage 13.2
+merge. They were then validated as one stack in an isolated worktree.
+- Kernel Clippy is clean across all 77 feature configurations, including
+  `stage13-2-test`, which compiles again.
+- Clippy for woven-shell, hello-gui, libwoven and the host is clean, and
+  the host tests pass.
+- **102 QEMU gates pass across 1, 2 and 4 CPUs**:
+  - every Stage 20.1–20.8 desktop gate;
+  - all Stage 19.x application gates;
+  - the kernel runtime stages back to 1–5;
+  - the legacy-IRQ memory suite;
+  - Stage 6 hotplug on 2 and 4 CPUs.
+- In the rebase, syscalls 122–124 were renumbered to 130–132; see Stages
+  20.5 and 20.6.
+
 ## Stage 20.8 — tiling: resize protocol, snap to edges, master and stack (2026-10-13)
 
 Roadmap Stage 18.3, Window Experience: intelligent tiling. This completes
