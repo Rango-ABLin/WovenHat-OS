@@ -1460,7 +1460,9 @@ pub fn write_vfs_path_at_with_publish<T, E>(
 ) -> Result<Result<T, E>, Error> {
     let _mutation = MUTATION.lock();
     let name = checked_vfs_name(path)?;
-    if bytes.len() > MAX_FILE_SIZE {
+    // Reject impossible offsets before creating a new inode on disk.
+    // Otherwise an invalid write could leave an empty file behind.
+    if offset > MAX_FILE_SIZE || bytes.len() > MAX_FILE_SIZE.saturating_sub(offset) {
         return Err(Error::TooLarge);
     }
     let (written, length) = with_ata_volume(|volume| {
