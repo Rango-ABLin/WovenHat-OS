@@ -1311,7 +1311,9 @@ is held under the controller lock until no hardware command can reference the
 pages. The `BlockDevice` ABI is unchanged.
 
 The Stage 13.3/13.4 freestanding Clippy gates, host Clippy, and the complete
-host test suite passed after this change. See the [DMA allocation audit](audit-stage1-5-dma-allocation-2026-10-14.md).
+host test suite passed after this change. The NVMe and AHCI QEMU controller
+gates also passed on 1/2/4 CPUs with exit 33. See the [DMA allocation audit](audit-stage1-5-dma-allocation-2026-10-14.md)
+for the six evidence directories.
 This closes a software allocation-leak path only. Physical AHCI/NVMe and USB
 flash qualification, IOMMU isolation, interrupt completion, torn-sector and
 power-loss evidence, and arbitrary-size rollback remain open.

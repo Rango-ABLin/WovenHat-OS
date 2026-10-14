@@ -22,6 +22,14 @@ reference it.
 - `cargo clippy --all-targets -- -D warnings` — passed.
 - `cargo test -p wovenhat-os --tests --no-fail-fast` — passed, including the
   WovenFS crash, page-cache, PCI, async-runtime, display, and Wi-Fi suites.
+- NVMe QEMU controller gate, 1/2/4 CPUs — passed (exit 33):
+  `audit-artifacts/stage13.3-1cpu-1791970727679324400`,
+  `audit-artifacts/stage13.3-2cpu-1791970800950732500`,
+  `audit-artifacts/stage13.3-4cpu-1791970842780539000`.
+- AHCI QEMU controller gate, 1/2/4 CPUs — passed (exit 33):
+  `audit-artifacts/stage13.4-1cpu-1791970885814072600`,
+  `audit-artifacts/stage13.4-2cpu-1791970942613349500`,
+  `audit-artifacts/stage13.4-4cpu-1791971012860405400`.
 
 ## Limits
 
