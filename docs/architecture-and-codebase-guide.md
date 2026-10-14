@@ -14,6 +14,17 @@ request. The address space remains owned by the process until its parent
 reaps the process. Shared libraries, symbol resolution, dynamic TLS, and
 physical qualification remain outside this bounded increment.
 
+## Stage 11.5 bounded symbol relocation (2026-10-14)
+
+`elf::DynamicImage` validates a SysV hash table, dynamic symbol table, and
+string table within bounded file-backed load segments. `userspace::load_elf`
+applies `R_X86_64_RELATIVE` and locally defined `R_X86_64_64`,
+`R_X86_64_GLOB_DAT`, and `R_X86_64_JUMP_SLOT` entries before W^X/RELRO
+finalization. Undefined symbols, `DT_NEEDED`, legacy REL/PLT tables, and
+cross-image resolution fail closed. This is a prerequisite for a dynamic
+linker, not shared-library support; dependency mapping, versioning, lazy
+binding, and dynamic TLS are still unimplemented.
+
 ## Stage 13.2 PCI power-state ownership (2026-10-13)
 
 `hal::pci::suspend_owned` and `resume_owned` operate only on a validated,

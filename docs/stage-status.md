@@ -1832,11 +1832,13 @@ physical/hardware qualification remain open. See the
 [static TLS audit](audit-stage11-static-tls-2026-10-14.md).
 
 The 2026-10-14 dynamic-relocation follow-up accepts bounded self-contained
-ET_DYN images with only R_X86_64_RELATIVE RELA entries. Relocations are applied
-before W^X and RELRO finalization, and the 1/2/4-CPU Stage 11.5 gate passed
-with an end-to-end mapped-image relocation self-test. Shared libraries,
-symbol resolution, versioning, lazy binding, and dynamic TLS remain fail-closed.
-See the [dynamic relocation audit](audit-stage11-dynamic-relocations-2026-10-14.md).
+ET_DYN images with R_X86_64_RELATIVE plus locally defined symbol RELA entries.
+SysV hash/symbol/string metadata is bounded and validated; relocations are
+applied before W^X and RELRO finalization. The inherited 1/2/4-CPU Stage
+11.3–11.5 matrix passed with an end-to-end mapped-image local-symbol
+relocation self-test. Shared-library dependency mapping, cross-image symbol
+resolution, versioning, lazy binding, and dynamic TLS remain fail-closed. See
+the [dynamic relocation audit](audit-stage11-dynamic-relocations-2026-10-14.md).
 
 ## Stage 12.1 — accepted on 2026-09-16
 

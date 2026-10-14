@@ -4513,7 +4513,12 @@ pub fn elf_loader_self_test() -> bool {
             {
                 return false;
             }
-            matches!(crate::elf::parse(&elf), Err(crate::elf::Error::Unsupported))
+            match crate::elf::parse(&elf) {
+                Err(crate::elf::Error::Unsupported) if program_type == PT_INTERP => true,
+                Err(crate::elf::Error::Unsupported | crate::elf::Error::InvalidSegment)
+                    if program_type == PT_DYNAMIC => true,
+                _ => false,
+            }
         });
 
     let invalid_tls_rejected = build_stub_elf(stub).is_some_and(|mut elf| {
@@ -4556,8 +4561,19 @@ pub fn elf_loader_self_test() -> bool {
     .is_some_and(|image| image.relro() == Some((USER_REGION_START + USER_CODE_SIZE as u64, 4096)));
 
     let valid_dynamic_relative = build_stub_elf(stub).and_then(|mut elf| {
+        const FIXTURE_PAYLOAD_SIZE: usize = 640;
         const DYNAMIC_OFFSET: usize = 4096 + 256;
-        const RELA_OFFSET: usize = 4096 + 320;
+        const HASH_OFFSET: usize = 4096 + 448;
+        const SYMTAB_OFFSET: usize = 4096 + 464;
+        const STRTAB_OFFSET: usize = 4096 + 512;
+        const RELA_OFFSET: usize = 4096 + 528;
+        if elf.len() < 4096 + FIXTURE_PAYLOAD_SIZE {
+            elf.resize(4096 + FIXTURE_PAYLOAD_SIZE, 0);
+        }
+        write_u64(&mut elf, PROGRAM_HEADER_OFFSET + 32, FIXTURE_PAYLOAD_SIZE as u64)?;
+        write_u64(&mut elf, PROGRAM_HEADER_OFFSET + 40, 4096)?;
+        let strtab = elf.get_mut(STRTAB_OFFSET..STRTAB_OFFSET + 7)?;
+        strtab.copy_from_slice(b"\0local\0");
         let data_address = USER_REGION_START + USER_CODE_SIZE as u64;
         let dynamic_header = PROGRAM_HEADER_OFFSET + PROGRAM_HEADER_SIZE;
         let data_header = dynamic_header + PROGRAM_HEADER_SIZE;
@@ -4571,8 +4587,8 @@ pub fn elf_loader_self_test() -> bool {
                 USER_REGION_START + 256,
             )
             .is_none()
-            || write_u64(&mut elf, dynamic_header + 32, 64).is_none()
-            || write_u64(&mut elf, dynamic_header + 40, 64).is_none()
+            || write_u64(&mut elf, dynamic_header + 32, 160).is_none()
+            || write_u64(&mut elf, dynamic_header + 40, 160).is_none()
             || write_u32(&mut elf, data_header, 1).is_none()
             || write_u32(&mut elf, data_header + 4, 6).is_none()
             || write_u64(&mut elf, data_header + 8, 0).is_none()
@@ -4580,27 +4596,53 @@ pub fn elf_loader_self_test() -> bool {
             || write_u64(&mut elf, data_header + 32, 0).is_none()
             || write_u64(&mut elf, data_header + 40, 4096).is_none()
             || write_u64(&mut elf, data_header + 48, 4096).is_none()
-            // DT_RELA, DT_RELASZ, DT_RELAENT, DT_NULL
-            || write_u64(&mut elf, DYNAMIC_OFFSET, 7).is_none()
-            || write_u64(&mut elf, DYNAMIC_OFFSET + 8, USER_REGION_START + 320)
-                .is_none()
-            || write_u64(&mut elf, DYNAMIC_OFFSET + 16, 8).is_none()
-            || write_u64(&mut elf, DYNAMIC_OFFSET + 24, 24).is_none()
-            || write_u64(&mut elf, DYNAMIC_OFFSET + 32, 9).is_none()
-            || write_u64(&mut elf, DYNAMIC_OFFSET + 40, 24).is_none()
-            || write_u64(&mut elf, DYNAMIC_OFFSET + 48, 0).is_none()
-            || write_u64(&mut elf, DYNAMIC_OFFSET + 56, 0).is_none()
-            // One R_X86_64_RELATIVE relocation into writable data.
+            // DT_HASH, DT_STRTAB, DT_STRSZ, DT_SYMTAB, DT_SYMENT,
+            // DT_RELA, DT_RELASZ, DT_RELAENT, DT_NULL.
+            || write_u64(&mut elf, DYNAMIC_OFFSET, 4).is_none()
+            || write_u64(&mut elf, DYNAMIC_OFFSET + 8, USER_REGION_START + 448).is_none()
+            || write_u64(&mut elf, DYNAMIC_OFFSET + 16, 5).is_none()
+            || write_u64(&mut elf, DYNAMIC_OFFSET + 24, USER_REGION_START + 512).is_none()
+            || write_u64(&mut elf, DYNAMIC_OFFSET + 32, 10).is_none()
+            || write_u64(&mut elf, DYNAMIC_OFFSET + 40, 7).is_none()
+            || write_u64(&mut elf, DYNAMIC_OFFSET + 48, 6).is_none()
+            || write_u64(&mut elf, DYNAMIC_OFFSET + 56, USER_REGION_START + 464).is_none()
+            || write_u64(&mut elf, DYNAMIC_OFFSET + 64, 11).is_none()
+            || write_u64(&mut elf, DYNAMIC_OFFSET + 72, 24).is_none()
+            || write_u64(&mut elf, DYNAMIC_OFFSET + 80, 7).is_none()
+            || write_u64(&mut elf, DYNAMIC_OFFSET + 88, USER_REGION_START + 528).is_none()
+            || write_u64(&mut elf, DYNAMIC_OFFSET + 96, 8).is_none()
+            || write_u64(&mut elf, DYNAMIC_OFFSET + 104, 48).is_none()
+            || write_u64(&mut elf, DYNAMIC_OFFSET + 112, 9).is_none()
+            || write_u64(&mut elf, DYNAMIC_OFFSET + 120, 24).is_none()
+            || write_u64(&mut elf, DYNAMIC_OFFSET + 128, 0).is_none()
+            || write_u64(&mut elf, DYNAMIC_OFFSET + 136, 0).is_none()
+            // SysV hash header: one bucket and two symbols (null + local).
+            || write_u32(&mut elf, HASH_OFFSET, 1).is_none()
+            || write_u32(&mut elf, HASH_OFFSET + 4, 2).is_none()
+            // Symbol 1 is defined in the executable.
+            || write_u32(&mut elf, SYMTAB_OFFSET + 24, 1).is_none()
+            || write_u16(&mut elf, SYMTAB_OFFSET + 24 + 6, 1).is_none()
+            || write_u64(&mut elf, SYMTAB_OFFSET + 24 + 8, USER_REGION_START + 32).is_none()
+            // One R_X86_64_RELATIVE and one local R_X86_64_64 relocation.
             || write_u64(&mut elf, RELA_OFFSET, data_address).is_none()
             || write_u64(&mut elf, RELA_OFFSET + 8, 8).is_none()
             || write_u64(&mut elf, RELA_OFFSET + 16, 0x20).is_none()
+            || write_u64(&mut elf, RELA_OFFSET + 24, data_address + 8).is_none()
+            || write_u64(&mut elf, RELA_OFFSET + 32, (1_u64 << 32) | 1).is_none()
+            || write_u64(&mut elf, RELA_OFFSET + 40, 0).is_none()
         {
             return None;
         }
-        let image = crate::elf::parse(&elf).ok()?;
+        let image = match crate::elf::parse(&elf) {
+            Ok(image) => image,
+            Err(_) => return None,
+        };
         let dynamic = image.dynamic()?;
+        if dynamic.symbol_count != 2 || dynamic.rela_size != 48 {
+            return None;
+        }
         let program = load_elf(&elf)?;
-        let mut relocated = [0u8; 8];
+        let mut relocated = [0u8; 16];
         let expected = aslr_image_delta().checked_add(0x20)?;
         let applied = paging::read_user_bytes_in(
             program.address_space.paging(),
@@ -4608,11 +4650,14 @@ pub fn elf_loader_self_test() -> bool {
             &mut relocated,
         )
         .is_ok()
-            && u64::from_le_bytes(relocated) == expected;
+            && u64::from_le_bytes(relocated[..8].try_into().ok()?) == expected
+            && u64::from_le_bytes(relocated[8..].try_into().ok()?)
+                == aslr_image_delta() + USER_REGION_START + 32;
         let destroyed = destroy(program.address_space);
         Some(
-            dynamic.rela_size == 24
+            dynamic.rela_size == 48
                 && dynamic.rela_entry_size == 24
+                && dynamic.symbol_count == 2
                 && applied
                 && destroyed,
         )
@@ -5098,22 +5143,115 @@ pub fn load_elf(bytes: &[u8]) -> Option<UserProgram> {
                 release_partial(page_table, &mappings[..mapping_count]);
                 return None;
             };
+            let Some(info) = entry
+                .get(8..16)
+                .and_then(|bytes| bytes.try_into().ok())
+                .map(u64::from_le_bytes)
+            else {
+                release_partial(page_table, &mappings[..mapping_count]);
+                return None;
+            };
+            let relocation_type = info as u32;
+            let symbol_index = (info >> 32) as usize;
             let Some(target) = target.checked_add(image.load_bias()) else {
                 release_partial(page_table, &mappings[..mapping_count]);
                 return None;
             };
-            let value = if addend >= 0 {
-                let Some(value) = image.load_bias().checked_add(addend as u64) else {
-                    release_partial(page_table, &mappings[..mapping_count]);
-                    return None;
-                };
-                value
+            let symbol_value = if symbol_index == 0 {
+                None
             } else {
-                let Some(value) = image.load_bias().checked_sub(addend.unsigned_abs()) else {
+                if symbol_index >= dynamic.symbol_count {
+                    release_partial(page_table, &mappings[..mapping_count]);
+                    return None;
+                }
+                let resolved = (|| {
+                    let symbol_offset = dynamic
+                        .symtab_file_offset
+                        .checked_add(symbol_index.checked_mul(dynamic.symtab_entry_size)?)?;
+                    let symbol = bytes.get(symbol_offset..symbol_offset.checked_add(24)?)?;
+                    let name_offset =
+                        u32::from_le_bytes(symbol[..4].try_into().ok()?) as usize;
+                    let section = u16::from_le_bytes(symbol[6..8].try_into().ok()?);
+                    let value = u64::from_le_bytes(symbol[8..16].try_into().ok()?);
+                    if section == 0
+                        || !image.segments().any(|segment| {
+                            value >= segment.virtual_address
+                                && value
+                                    < segment
+                                        .virtual_address
+                                        .saturating_add(segment.memory_size as u64)
+                        })
+                    {
+                        // Undefined symbols require a dependency scope. That
+                        // scope is deliberately not guessed from the main image.
+                        return None;
+                    }
+                    let name_start = dynamic.strtab_file_offset.checked_add(name_offset)?;
+                    let name_end = dynamic
+                        .strtab_file_offset
+                        .checked_add(dynamic.strtab_size)?;
+                    if name_start >= name_end
+                        || bytes
+                            .get(name_start..name_end)?
+                            .iter()
+                            .position(|byte| *byte == 0)
+                            .is_none()
+                    {
+                        return None;
+                    }
+                    image.load_bias().checked_add(value)
+                })();
+                let Some(resolved) = resolved else {
                     release_partial(page_table, &mappings[..mapping_count]);
                     return None;
                 };
-                value
+                Some(resolved)
+            };
+            let value = match relocation_type {
+                crate::elf::R_X86_64_RELATIVE => {
+                    if symbol_index != 0 {
+                        release_partial(page_table, &mappings[..mapping_count]);
+                        return None;
+                    }
+                    if addend >= 0 {
+                        let Some(value) = image.load_bias().checked_add(addend as u64) else {
+                            release_partial(page_table, &mappings[..mapping_count]);
+                            return None;
+                        };
+                        value
+                    } else {
+                        let Some(value) = image.load_bias().checked_sub(addend.unsigned_abs()) else {
+                            release_partial(page_table, &mappings[..mapping_count]);
+                            return None;
+                        };
+                        value
+                    }
+                }
+                crate::elf::R_X86_64_64
+                | crate::elf::R_X86_64_GLOB_DAT
+                | crate::elf::R_X86_64_JUMP_SLOT => {
+                    let Some(symbol_value) = symbol_value else {
+                        release_partial(page_table, &mappings[..mapping_count]);
+                        return None;
+                    };
+                    if addend >= 0 {
+                        let Some(value) = symbol_value.checked_add(addend as u64) else {
+                            release_partial(page_table, &mappings[..mapping_count]);
+                            return None;
+                        };
+                        value
+                    } else {
+                        let Some(value) = symbol_value.checked_sub(addend.unsigned_abs()) else {
+                            release_partial(page_table, &mappings[..mapping_count]);
+                            return None;
+                        };
+                        value
+                    }
+                }
+                _ => {
+                    release_partial(page_table, &mappings[..mapping_count]);
+                    return None;
+                }
             };
             if paging::write_user_bytes(page_table, target, &value.to_le_bytes()).is_err() {
                 release_partial(page_table, &mappings[..mapping_count]);

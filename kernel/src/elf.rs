@@ -12,9 +12,14 @@ const PF_WRITE: u32 = 2;
 const ELF_MACHINE_X86_64: u16 = 0x3e;
 const USER_ADDRESS_LIMIT: u64 = 0x0000_8000_0000_0000;
 const PAGE_SIZE: u64 = 4096;
-const R_X86_64_RELATIVE: u32 = 8;
+pub const R_X86_64_RELATIVE: u32 = 8;
+pub const R_X86_64_64: u32 = 1;
+pub const R_X86_64_GLOB_DAT: u32 = 6;
+pub const R_X86_64_JUMP_SLOT: u32 = 7;
 const RELA_ENTRY_SIZE: usize = 24;
 const MAX_RELATIVE_RELOCATIONS: usize = 4096;
+const MAX_DYNAMIC_SYMBOLS: usize = 4096;
+const MAX_DYNAMIC_STRING_TABLE: usize = 64 * 1024;
 
 #[derive(Clone, Copy)]
 pub struct LoadSegment {
@@ -44,6 +49,15 @@ pub struct DynamicImage {
     pub rela_file_offset: usize,
     pub rela_size: usize,
     pub rela_entry_size: usize,
+    pub strtab_address: u64,
+    pub strtab_file_offset: usize,
+    pub strtab_size: usize,
+    pub symtab_address: u64,
+    pub symtab_file_offset: usize,
+    pub symtab_entry_size: usize,
+    pub symbol_count: usize,
+    pub hash_address: u64,
+    pub hash_file_offset: usize,
 }
 
 pub struct Image {
@@ -228,6 +242,11 @@ pub fn parse(bytes: &[u8]) -> Result<Image, Error> {
             let mut rela_size = 0usize;
             let mut rela_entry_size = 0usize;
             let mut plt_rela_size = 0usize;
+            let mut strtab_address = 0;
+            let mut strtab_size = 0usize;
+            let mut symtab_address = 0;
+            let mut symtab_entry_size = 0usize;
+            let mut hash_address = 0;
             let dynamic_bytes = &bytes[file_offset..file_end];
             let mut terminated = false;
             let (dynamic_entries, _) = dynamic_bytes.as_chunks::<16>();
@@ -249,17 +268,25 @@ pub fn parse(bytes: &[u8]) -> Result<Image, Error> {
                             return Err(Error::Unsupported);
                         }
                     }
+                    4 => hash_address = value,
+                    5 => strtab_address = value,
+                    6 => symtab_address = value,
                     7 => rela_address = Some(value),
                     8 => rela_size = usize::try_from(value).map_err(|_| Error::InvalidSegment)?,
                     9 => {
                         rela_entry_size = usize::try_from(value)
                             .map_err(|_| Error::InvalidSegment)?;
                     }
+                    10 => strtab_size = usize::try_from(value).map_err(|_| Error::InvalidSegment)?,
+                    11 => {
+                        symtab_entry_size =
+                            usize::try_from(value).map_err(|_| Error::InvalidSegment)?;
+                    }
                     2 => plt_rela_size = usize::try_from(value)
                         .map_err(|_| Error::InvalidSegment)?,
                     // Common metadata tags do not affect relocation of a
                     // symbol-free static PIE and are intentionally ignored.
-                    3 | 4 | 5 | 6 | 10 | 11 | 30 | 0x6fff_fff0 | 0x6fff_fff9
+                    3 | 30 | 0x6fff_fff0 | 0x6fff_fff9
                     | 0x6fff_fffb | 0x6fff_fffe | 0x6fff_ffff => {}
                     _ => return Err(Error::Unsupported),
                 }
@@ -286,6 +313,15 @@ pub fn parse(bytes: &[u8]) -> Result<Image, Error> {
                     rela_file_offset: 0,
                     rela_size,
                     rela_entry_size,
+                    strtab_address,
+                    strtab_file_offset: 0,
+                    strtab_size,
+                    symtab_address,
+                    symtab_file_offset: 0,
+                    symtab_entry_size,
+                    symbol_count: 0,
+                    hash_address,
+                    hash_file_offset: 0,
                 });
                 // Resolve the virtual relocation table to its file-backed
                 // bytes after all PT_LOAD headers have been collected.
@@ -299,6 +335,15 @@ pub fn parse(bytes: &[u8]) -> Result<Image, Error> {
                     rela_file_offset: 0,
                     rela_size: 0,
                     rela_entry_size: 0,
+                    strtab_address,
+                    strtab_file_offset: 0,
+                    strtab_size,
+                    symtab_address,
+                    symtab_file_offset: 0,
+                    symtab_entry_size,
+                    symbol_count: 0,
+                    hash_address,
+                    hash_file_offset: 0,
                 });
             }
             continue;
@@ -470,8 +515,17 @@ pub fn parse(bytes: &[u8]) -> Result<Image, Error> {
                 let info = u64::from_le_bytes(entry[8..16].try_into().unwrap());
                 let relocation_type = info as u32;
                 let symbol = info >> 32;
-                if relocation_type != R_X86_64_RELATIVE || symbol != 0 {
+                if !matches!(
+                    relocation_type,
+                    R_X86_64_RELATIVE | R_X86_64_64 | R_X86_64_GLOB_DAT | R_X86_64_JUMP_SLOT
+                ) {
                     return Err(Error::Unsupported);
+                }
+                if relocation_type == R_X86_64_RELATIVE && symbol != 0 {
+                    return Err(Error::InvalidSegment);
+                }
+                if relocation_type != R_X86_64_RELATIVE && symbol == 0 {
+                    return Err(Error::InvalidSegment);
                 }
                 let target_end = target.checked_add(8).ok_or(Error::InvalidSegment)?;
                 let writable_target = image.segments().any(|segment| {
@@ -486,6 +540,102 @@ pub fn parse(bytes: &[u8]) -> Result<Image, Error> {
                 if !writable_target {
                     return Err(Error::InvalidSegment);
                 }
+            }
+        }
+        if dynamic.strtab_address != 0 || dynamic.symtab_address != 0 {
+            if dynamic.strtab_address == 0
+                || dynamic.symtab_address == 0
+                || dynamic.strtab_size == 0
+                || dynamic.strtab_size > MAX_DYNAMIC_STRING_TABLE
+                || dynamic.symtab_entry_size != 24
+            {
+                return Err(Error::InvalidSegment);
+            }
+            let strtab = image
+                .segments()
+                .find(|segment| {
+                    let file_end = segment
+                        .virtual_address
+                        .saturating_add(segment.file_size as u64);
+                    dynamic.strtab_address >= segment.virtual_address
+                        && dynamic
+                            .strtab_address
+                            .checked_add(dynamic.strtab_size as u64)
+                            .is_some_and(|end| end <= file_end)
+                })
+                .ok_or(Error::InvalidSegment)?;
+            dynamic.strtab_file_offset = strtab
+                .file_offset
+                .checked_add((dynamic.strtab_address - strtab.virtual_address) as usize)
+                .ok_or(Error::InvalidSegment)?;
+            if dynamic
+                .strtab_file_offset
+                .checked_add(dynamic.strtab_size)
+                .filter(|end| *end <= bytes.len())
+                .is_none()
+            {
+                return Err(Error::Truncated);
+            }
+            if dynamic.symtab_address != 0 {
+                if dynamic.hash_address == 0 {
+                    return Err(Error::InvalidSegment);
+                }
+                let hash_segment = image
+                    .segments()
+                    .find(|segment| {
+                        let file_end = segment
+                            .virtual_address
+                            .saturating_add(segment.file_size as u64);
+                        dynamic.hash_address >= segment.virtual_address
+                            && dynamic.hash_address.checked_add(8).is_some_and(|end| end <= file_end)
+                    })
+                    .ok_or(Error::InvalidSegment)?;
+                dynamic.hash_file_offset = hash_segment
+                    .file_offset
+                    .checked_add((dynamic.hash_address - hash_segment.virtual_address) as usize)
+                    .ok_or(Error::InvalidSegment)?;
+                let hash_end = dynamic
+                    .hash_file_offset
+                    .checked_add(8)
+                    .filter(|end| *end <= bytes.len())
+                    .ok_or(Error::Truncated)?;
+                let symbol_count = read_u32(bytes, dynamic.hash_file_offset + 4)? as usize;
+                if symbol_count == 0 || symbol_count > MAX_DYNAMIC_SYMBOLS {
+                    return Err(Error::InvalidSegment);
+                }
+                let _ = hash_end;
+                let symtab_bytes = symbol_count
+                    .checked_mul(dynamic.symtab_entry_size)
+                    .ok_or(Error::InvalidSegment)?;
+                let symtab_segment = image
+                    .segments()
+                    .find(|segment| {
+                        let file_end = segment
+                            .virtual_address
+                            .saturating_add(segment.file_size as u64);
+                        dynamic.symtab_address >= segment.virtual_address
+                            && dynamic
+                                .symtab_address
+                                .checked_add(symtab_bytes as u64)
+                                .is_some_and(|end| end <= file_end)
+                    })
+                    .ok_or(Error::InvalidSegment)?;
+                dynamic.symtab_file_offset = symtab_segment
+                    .file_offset
+                    .checked_add((dynamic.symtab_address - symtab_segment.virtual_address) as usize)
+                    .ok_or(Error::InvalidSegment)?;
+                if dynamic
+                    .symtab_file_offset
+                    .checked_add(symtab_bytes)
+                    .filter(|end| *end <= bytes.len())
+                    .is_none()
+                {
+                    return Err(Error::Truncated);
+                }
+                dynamic.symbol_count = symbol_count;
+            }
+            if dynamic.rela_size != 0 && dynamic.symtab_address == 0 {
+                return Err(Error::InvalidSegment);
             }
         }
         image.dynamic = Some(dynamic);
