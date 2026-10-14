@@ -99,6 +99,8 @@ stage20-4-test = ["qemu-test"]
 stage20-5-test = ["qemu-test"]
 # Translucent panel, toast and pointer overlays over windows.
 stage20-6-test = ["qemu-test"]
+# Physics-based animation: windows fade in on a spring.
+stage20-7-test = ["qemu-test"]
 stage1-5-test = ["qemu-test"]
 
 [dependencies]
