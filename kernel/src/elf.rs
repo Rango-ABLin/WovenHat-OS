@@ -29,6 +29,7 @@ pub struct Image {
     pub entry: u64,
     segments: [Option<LoadSegment>; MAX_LOAD_SEGMENTS],
     segment_count: usize,
+    relro: Option<(u64, usize)>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -53,11 +54,23 @@ impl Image {
         self.segment_count
     }
 
+    /// Page-aligned GNU RELRO range, if the image declares one.
+    pub const fn relro(&self) -> Option<(u64, usize)> {
+        self.relro
+    }
+
     /// Relocate every load segment and the entry by one page-aligned delta.
     /// The parser's W^X, overlap and file-range checks remain in force, while
     /// this second pass rechecks user bounds after the randomized placement.
     pub fn relocated(mut self, delta: u64) -> Option<Self> {
         self.entry = self.entry.checked_add(delta)?;
+        if let Some((start, size)) = self.relro.as_mut() {
+            *start = start.checked_add(delta)?;
+            let end = start.checked_add(*size as u64)?;
+            if end > USER_ADDRESS_LIMIT {
+                return None;
+            }
+        }
         for segment in self.segments[..self.segment_count].iter_mut().flatten() {
             segment.virtual_address = segment.virtual_address.checked_add(delta)?;
             segment.mapping_start = segment.mapping_start.checked_add(delta)?;
@@ -132,14 +145,35 @@ pub fn parse(bytes: &[u8]) -> Result<Image, Error> {
         entry,
         segments: [None; MAX_LOAD_SEGMENTS],
         segment_count: 0,
+        relro: None,
     };
     let mut entry_is_executable = false;
 
     for index in 0..program_count {
         let offset = program_offset + index * program_entry_size;
         let program_type = read_u32(bytes, offset)?;
-        if matches!(program_type, PT_DYNAMIC | PT_INTERP | PT_TLS | PT_GNU_RELRO) {
+        if matches!(program_type, PT_DYNAMIC | PT_INTERP | PT_TLS) {
             return Err(Error::Unsupported);
+        }
+        if program_type == PT_GNU_RELRO {
+            if image.relro.is_some() {
+                return Err(Error::Unsupported);
+            }
+            let virtual_address = read_u64(bytes, offset + 16)?;
+            let memory_size =
+                usize::try_from(read_u64(bytes, offset + 40)?).map_err(|_| Error::InvalidSegment)?;
+            if memory_size == 0 {
+                return Err(Error::InvalidSegment);
+            }
+            let end = virtual_address
+                .checked_add(memory_size as u64)
+                .filter(|end| *end <= USER_ADDRESS_LIMIT)
+                .and_then(align_up)
+                .ok_or(Error::InvalidSegment)?;
+            let start = align_down(virtual_address);
+            let size = usize::try_from(end - start).map_err(|_| Error::InvalidSegment)?;
+            image.relro = Some((start, size));
+            continue;
         }
         if program_type != PT_LOAD {
             continue;
@@ -208,6 +242,21 @@ pub fn parse(bytes: &[u8]) -> Result<Image, Error> {
 
     if image.segment_count == 0 || !entry_is_executable {
         return Err(Error::InvalidEntry);
+    }
+    if let Some((relro_start, relro_size)) = image.relro {
+        let relro_end = relro_start
+            .checked_add(relro_size as u64)
+            .ok_or(Error::InvalidSegment)?;
+        let covered_by_writable_data = image.segments().any(|segment| {
+            let segment_end = segment.mapping_start + segment.mapping_size as u64;
+            !segment.executable
+                && segment.writable
+                && segment.mapping_start <= relro_start
+                && relro_end <= segment_end
+        });
+        if !covered_by_writable_data {
+            return Err(Error::InvalidSegment);
+        }
     }
     Ok(image)
 }

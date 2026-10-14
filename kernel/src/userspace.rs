@@ -4339,6 +4339,7 @@ pub struct AddressSpace {
     mmap_base: u64,
     mappings: [UserMapping; MAX_ELF_SEGMENTS],
     mapping_count: usize,
+    relro: Option<(u64, usize)>,
 }
 
 impl AddressSpace {
@@ -4365,6 +4366,12 @@ impl AddressSpace {
                 && address >= mapping.start
                 && address < mapping.start + mapping.size as u64
             {
+                if self
+                    .relro
+                    .is_some_and(|(start, size)| address >= start && address < start + size as u64)
+                {
+                    return false;
+                }
                 return true;
             }
         }
@@ -4418,7 +4425,7 @@ pub fn elf_loader_self_test() -> bool {
     let mut writable_executable = valid;
     writable_executable[68] = 7;
 
-    let unsupported_program_header_rejected = [PT_INTERP, PT_DYNAMIC, PT_TLS, PT_GNU_RELRO]
+    let unsupported_program_header_rejected = [PT_INTERP, PT_DYNAMIC, PT_TLS]
         .into_iter()
         .all(|program_type| {
             let Some(mut elf) = build_stub_elf(stub) else {
@@ -4433,10 +4440,42 @@ pub fn elf_loader_self_test() -> bool {
             matches!(crate::elf::parse(&elf), Err(crate::elf::Error::Unsupported))
         });
 
+    let relro_requires_writable_data = build_stub_elf(stub).is_some_and(|mut elf| {
+        let second_header = PROGRAM_HEADER_OFFSET + PROGRAM_HEADER_SIZE;
+        write_u16(&mut elf, 56, 2).is_some()
+            && write_u32(&mut elf, second_header, PT_GNU_RELRO).is_some()
+            && write_u64(&mut elf, second_header + 16, USER_REGION_START).is_some()
+            && write_u64(&mut elf, second_header + 40, USER_CODE_SIZE as u64).is_some()
+            && matches!(crate::elf::parse(&elf), Err(crate::elf::Error::InvalidSegment))
+    });
+
+    let valid_relro = build_stub_elf(stub).and_then(|mut elf| {
+        let data_address = USER_REGION_START + USER_CODE_SIZE as u64;
+        let data_header = PROGRAM_HEADER_OFFSET + PROGRAM_HEADER_SIZE;
+        let relro_header = data_header + PROGRAM_HEADER_SIZE;
+        if write_u16(&mut elf, 56, 3).is_none()
+            || write_u32(&mut elf, data_header, 1).is_none()
+            || write_u32(&mut elf, data_header + 4, 6).is_none()
+            || write_u64(&mut elf, data_header + 16, data_address).is_none()
+            || write_u64(&mut elf, data_header + 40, 4096).is_none()
+            || write_u64(&mut elf, data_header + 48, 4096).is_none()
+            || write_u32(&mut elf, relro_header, PT_GNU_RELRO).is_none()
+            || write_u64(&mut elf, relro_header + 16, data_address).is_none()
+            || write_u64(&mut elf, relro_header + 40, 4096).is_none()
+        {
+            return None;
+        }
+        Some(elf)
+    })
+    .and_then(|elf| crate::elf::parse(&elf).ok())
+    .is_some_and(|image| image.relro() == Some((USER_REGION_START + USER_CODE_SIZE as u64, 4096)));
+
     valid_segment
         && crate::elf::parse(&bad_magic).is_err()
         && crate::elf::parse(&writable_executable).is_err()
         && unsupported_program_header_rejected
+        && relro_requires_writable_data
+        && valid_relro
 }
 /// Regression test for the mmap W^X invariant.
 ///
@@ -4790,6 +4829,7 @@ pub fn load_elf(bytes: &[u8]) -> Option<UserProgram> {
     let mut mapping_count = 0;
 
     let stack_base = aslr_stack_base()?;
+    let relro = image.relro();
     let stack = UserStack::new(stack_base);
     let mmap_end = mmap_base.checked_add(MAX_ANONYMOUS_MAPPINGS as u64 * USER_MMAP_STRIDE)?;
     for segment in image.segments() {
@@ -4854,6 +4894,21 @@ pub fn load_elf(bytes: &[u8]) -> Option<UserProgram> {
         }
     }
 
+    if let Some((relro_start, relro_size)) = relro {
+        if paging::protect_user_range_in_inactive(
+            page_table,
+            relro_start,
+            relro_size,
+            false,
+            false,
+        )
+        .is_err()
+        {
+            release_partial(page_table, &mappings[..mapping_count]);
+            return None;
+        }
+    }
+
     if paging::map_user_range_in_inactive(page_table, stack_base, UserStack::SIZE, true, false)
         .is_err()
     {
@@ -4889,6 +4944,7 @@ pub fn load_elf(bytes: &[u8]) -> Option<UserProgram> {
             mmap_base,
             mappings,
             mapping_count,
+            relro,
         },
     })
 }
@@ -5278,6 +5334,7 @@ pub fn clone_address_space(
         mmap_base: source.mmap_base,
         mappings: source.mappings,
         mapping_count: source.mapping_count,
+        relro: source.relro,
     };
     let mut completed = [(0_u64, 0_usize); MAX_ELF_SEGMENTS + 1 + MAX_ANONYMOUS_MAPPINGS * 16];
     let mut completed_count = 0;
@@ -5584,6 +5641,7 @@ pub fn shared_disk_mmap_self_test() -> bool {
             mmap_base: USER_MMAP_START,
             mappings: [UserMapping::EMPTY; MAX_ELF_SEGMENTS],
             mapping_count: 0,
+            relro: None,
         };
         let anchor = USER_MMAP_START + 15 * USER_MMAP_STRIDE;
         if paging::map_user_range_in(root, anchor, 4096, false, false).is_err() {
@@ -5637,6 +5695,7 @@ pub fn disk_unlink_mmap_self_test() -> bool {
             mmap_base: USER_MMAP_START,
             mappings: [UserMapping::EMPTY; MAX_ELF_SEGMENTS],
             mapping_count: 0,
+            relro: None,
         };
         let anchor = USER_MMAP_START + 15 * USER_MMAP_STRIDE;
         if paging::map_user_range_in(root, anchor, 4096, false, false).is_err() {
@@ -5681,6 +5740,7 @@ pub fn shared_file_mmap_self_test() -> bool {
         mmap_base: USER_MMAP_START,
         mappings: [UserMapping::EMPTY; MAX_ELF_SEGMENTS],
         mapping_count: 0,
+        relro: None,
     };
     let anchor = USER_MMAP_START + 15 * USER_MMAP_STRIDE;
     if paging::map_user_range_in(root, anchor, 4096, false, false).is_err() {
@@ -5765,6 +5825,7 @@ pub fn lazy_file_mmap_self_test() -> bool {
         mmap_base: USER_MMAP_START,
         mappings: [UserMapping::EMPTY; MAX_ELF_SEGMENTS],
         mapping_count: 0,
+        relro: None,
     };
     // Keep a teardown anchor while sparse mapping pages are removed individually.
     let anchor = USER_MMAP_START + 15 * USER_MMAP_STRIDE;
@@ -5850,6 +5911,7 @@ pub fn private_lazy_swap_self_test() -> bool {
         mmap_base: USER_MMAP_START,
         mappings: [UserMapping::EMPTY; MAX_ELF_SEGMENTS],
         mapping_count: 0,
+        relro: None,
     };
     let anchor = USER_MMAP_START + 15 * USER_MMAP_STRIDE;
     if paging::map_user_range_in(root, anchor, 4096, false, false).is_err() {
@@ -5919,6 +5981,7 @@ pub fn file_mmap_self_test() -> bool {
         mmap_base: USER_MMAP_START,
         mappings: [UserMapping::EMPTY; MAX_ELF_SEGMENTS],
         mapping_count: 0,
+        relro: None,
     };
     let _ = crate::vfs::seek(file, 3);
     let Some(mapping) = map_file_private(space, 0, file, 0, DATA.len(), false) else {

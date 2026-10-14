@@ -1804,6 +1804,14 @@ This is a fail-closed production-safety boundary; dynamic relocations, shared
 libraries, TLS image allocation, and RELRO permission transitions remain open.
 See [audit](audit-stage11-loader-boundary-2026-10-05.md).
 
+The 2026-10-14 RELRO follow-up closes the static RELRO permission transition:
+a single validated `PT_GNU_RELRO` range is protected read-only after loading,
+ASLR relocation carries the range, and COW write-fault bookkeeping refuses to
+reattach write authority to it. Valid/invalid parser cases and the complete
+Stage 11.5 1/2/4-CPU gate passed. Dynamic relocations, shared libraries, TLS
+image allocation, and their physical/hardware qualification remain open. See
+the [RELRO audit](audit-stage11-relro-2026-10-14.md).
+
 ## Stage 12.1 — accepted on 2026-09-16
 
 The VFS 2.0 typed interface and SystemVfs adapter passed build, freestanding
