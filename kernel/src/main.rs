@@ -4520,9 +4520,9 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
 fn qemu_test_exit_success() {
     unsafe {
         core::arch::asm!(
-            "out dx, eax",
+            "out dx, al",
             in("dx") 0xf4_u16,
-            in("eax") 0x10_u32,
+            in("al") 0x10_u8,
             options(nomem, nostack, preserves_flags),
         );
     }
@@ -4538,9 +4538,9 @@ fn qemu_test_exit_failure() -> ! {
     // host-side 180-second timeout expires.
     unsafe {
         core::arch::asm!(
-            "out dx, eax",
+            "out dx, al",
             in("dx") 0xf4_u16,
-            in("eax") 0x11_u32,
+            in("al") 0x11_u8,
             options(nomem, nostack, preserves_flags),
         );
     }
