@@ -1427,17 +1427,7 @@ pub fn with_ata_volume<R>(
 #[cfg(not(test))]
 fn checked_vfs_name(path: &str) -> Result<&str, Error> {
     let name = path.strip_prefix("/wfs/").ok_or(Error::InvalidName)?;
-    if name.is_empty()
-        || name.len() > MAX_NAME
-        || name == "."
-        || name == ".."
-        || name.contains('/')
-        || name.contains('\\')
-        || name.as_bytes().contains(&0)
-    {
-        return Err(Error::InvalidName);
-    }
-    Ok(name)
+    checked_native_name(name)
 }
 
 /// Ensure a VFS-visible file exists durably before publishing its VFS node.
@@ -1536,8 +1526,9 @@ impl AuthorizedWfsWriter {
     pub(crate) const fn after_capability_check() -> Self { Self { _private: () } }
 }
 
-/// Validate the native root-directory filename before any ATA I/O.
-#[cfg(feature = "stage15-2-test")]
+/// Validate the native root-directory filename before any ATA I/O. Shared
+/// by the native and VFS-path adapters, so both refuse the same names.
+#[cfg(not(test))]
 fn checked_native_name(name: &str) -> Result<&str, Error> {
     if name.is_empty() || name.len() > MAX_NAME || name == "." || name == ".."
         || name.contains('/') || name.contains('\\') || name.as_bytes().contains(&0)
@@ -1582,15 +1573,6 @@ pub fn unlink_ata_file(
 ) -> Result<(), Error> {
     checked_native_name(name)?;
     with_ata_volume(|volume| volume.unlink(1, name, now)).unwrap_or(Err(Error::Device))
-}
-
-/// Translate a VFS path into a single root-directory WovenFS filename.
-/// Reject prefix confusion (/wfs2), traversal, and nested paths rather than
-/// accidentally granting access to a different namespace.
-#[cfg(feature = "stage15-2-test")]
-fn checked_vfs_name(path: &str) -> Result<&str, Error> {
-    let name = path.strip_prefix("/wfs/").ok_or(Error::InvalidName)?;
-    checked_native_name(name)
 }
 
 /// Explicit VFS-path adapter: commits to the native journal before reporting
