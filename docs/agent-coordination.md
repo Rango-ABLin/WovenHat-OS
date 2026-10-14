@@ -43,14 +43,16 @@ you start or finish something.
   tiling, Notification Center, Quick Settings, the lock screen, and
   sign-in with local accounts.
 
+- Stage 13.13, USB keyboards and mice into WovenInput, interrupt driven.
+  Also fixed: **MSI-X activation left Function Mask set, so no MSI-X
+  interrupt was ever delivered on any device.** Any driver using
+  `driver::enable_pci_interrupt` now actually receives interrupts.
+
 **In progress, Stage 13 closure** (do not start these without
 coordinating here):
-1. **13.13:** USB keyboard and mouse into WovenInput, through an
-   interrupt-driven xHCI worker with several devices
-   (`kernel/src/xhci.rs`, `woven_input.rs`).
-2. **13.14:** mount storage from NVMe or AHCI.
-3. **13.15:** WovenAudio for userspace.
-4. **13.16:** touchpad, touchscreen, pen and game-controller events out of
+1. **13.14:** mount storage from NVMe or AHCI.
+2. **13.15:** WovenAudio for userspace.
+3. **13.16:** touchpad, touchscreen, pen and game-controller events out of
    the 13.7 probe.
 
 **Next after that:** roadmap 18.8 Workspaces and 18.9 Multi-monitor.
