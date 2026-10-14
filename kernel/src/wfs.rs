@@ -1468,7 +1468,10 @@ pub fn write_vfs_path_at_with_publish<T, E>(
     let (written, length) = with_ata_volume(|volume| {
         let inode = match volume.lookup(1, name) {
             Ok(entry) => entry.inode,
-            Err(Error::NotFound) => volume.create(1, name, 0o600, now)?,
+            // WovenFS does not support sparse writes. Do not create a file
+            // for an offset that cannot be valid for a new empty inode.
+            Err(Error::NotFound) if offset == 0 => volume.create(1, name, 0o600, now)?,
+            Err(Error::NotFound) => return Err(Error::TooLarge),
             Err(error) => return Err(error),
         };
         let mut length = volume.read_file(inode, out)?;
