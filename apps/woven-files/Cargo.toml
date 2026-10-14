@@ -1,0 +1,23 @@
+[workspace]
+
+[package]
+name = "wovenhat-files"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[[bin]]
+name = "wovenhat-files"
+path = "src/main.rs"
+test = false
+
+[dependencies]
+libwoven = { path = "../../libwoven" }
+
+[profile.release]
+panic = "abort"
+opt-level = "s"
+lto = true
+
+[profile.dev]
+panic = "abort"

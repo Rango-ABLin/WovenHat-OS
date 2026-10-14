@@ -246,6 +246,62 @@ jobs:
               python3 scripts/test-stage10-runtime.py --stage 13.8 --cpus "$cpu" --timeout 120 --qemu "$qemu" --firmware "$ovmf_code"
             done
           done
+      - name: Stage 13.12 boot-time driver bring-up 1/2/4-core acceptance
+        shell: bash
+        run: |
+          qemu=/usr/bin/qemu-system-x86_64
+          ovmf_code=
+          for variant in OVMF_CODE_4M.fd OVMF_CODE.fd; do
+            candidate="/usr/share/OVMF/$variant"
+            if [ -f "$candidate" ]; then
+              ovmf_code="$candidate"
+              break
+            fi
+          done
+          test -n "$ovmf_code"
+          cargo clippy -p wovenhat-kernel --target x86_64-unknown-none -- -D warnings
+          cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage13-12-test -- -D warnings
+          for mode in devices nodisk absent production; do
+            for cpu in 1 2 4; do
+              python3 scripts/test-stage13-12-drivers.py --mode "$mode" --cpus "$cpu" --timeout 240 --qemu "$qemu" --firmware "$ovmf_code"
+            done
+          done
+      - name: Stage 13.13 USB keyboard and mouse input 1/2/4-core acceptance
+        shell: bash
+        run: |
+          qemu=/usr/bin/qemu-system-x86_64
+          ovmf_code=
+          for variant in OVMF_CODE_4M.fd OVMF_CODE.fd; do
+            candidate="/usr/share/OVMF/$variant"
+            if [ -f "$candidate" ]; then
+              ovmf_code="$candidate"
+              break
+            fi
+          done
+          test -n "$ovmf_code"
+          cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage13-13-test -- -D warnings
+          for cpu in 1 2 4; do
+            python3 scripts/test-stage13-13-usb-input.py --cpus "$cpu" --timeout 240 --qemu "$qemu" --firmware "$ovmf_code"
+          done
+      - name: Stage 13.14 NVMe/AHCI storage 1/2/4-core acceptance
+        shell: bash
+        run: |
+          qemu=/usr/bin/qemu-system-x86_64
+          ovmf_code=
+          for variant in OVMF_CODE_4M.fd OVMF_CODE.fd; do
+            candidate="/usr/share/OVMF/$variant"
+            if [ -f "$candidate" ]; then
+              ovmf_code="$candidate"
+              break
+            fi
+          done
+          test -n "$ovmf_code"
+          cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage13-14-test -- -D warnings
+          for mode in nvme ahci production; do
+            for cpu in 1 2 4; do
+              python3 scripts/test-stage13-14-storage.py --mode "$mode" --cpus "$cpu" --timeout 300 --qemu "$qemu" --firmware "$ovmf_code"
+            done
+          done
       - name: Stage 13.9 WovenWiFi full-contract 1/2/4-core acceptance
         shell: bash
         run: |
@@ -840,10 +896,28 @@ jobs:
           cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage20-1-test -- -D warnings
           cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage20-2-test -- -D warnings
           cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage20-3-test -- -D warnings
+          cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage20-4-test -- -D warnings
+          cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage20-5-test -- -D warnings
+          cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage20-6-test -- -D warnings
+          cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage20-7-test -- -D warnings
+          cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage20-8-test -- -D warnings
+          cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage20-9-test -- -D warnings
+          cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage20-10-test -- -D warnings
+          cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage20-11-test -- -D warnings
+          cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage20-12-test -- -D warnings
           for cpu in 1 2 4; do
             python3 scripts/test-woven-shell-qemu.py --stage 20.1 --cpus "$cpu" --timeout 300 --qemu "$qemu" --firmware "$ovmf_code"
             python3 scripts/test-woven-shell-qemu.py --stage 20.2 --cpus "$cpu" --timeout 300 --qemu "$qemu" --firmware "$ovmf_code"
             python3 scripts/test-woven-shell-qemu.py --stage 20.3 --cpus "$cpu" --timeout 300 --qemu "$qemu" --firmware "$ovmf_code"
+            python3 scripts/test-woven-shell-qemu.py --stage 20.4 --cpus "$cpu" --timeout 300 --qemu "$qemu" --firmware "$ovmf_code"
+            python3 scripts/test-woven-shell-qemu.py --stage 20.5 --cpus "$cpu" --timeout 300 --qemu "$qemu" --firmware "$ovmf_code"
+            python3 scripts/test-woven-shell-qemu.py --stage 20.6 --cpus "$cpu" --timeout 300 --qemu "$qemu" --firmware "$ovmf_code"
+            python3 scripts/test-woven-shell-qemu.py --stage 20.7 --cpus "$cpu" --timeout 300 --qemu "$qemu" --firmware "$ovmf_code"
+            python3 scripts/test-woven-shell-qemu.py --stage 20.8 --cpus "$cpu" --timeout 300 --qemu "$qemu" --firmware "$ovmf_code"
+            python3 scripts/test-woven-shell-qemu.py --stage 20.9 --cpus "$cpu" --timeout 300 --qemu "$qemu" --firmware "$ovmf_code"
+            python3 scripts/test-woven-shell-qemu.py --stage 20.10 --cpus "$cpu" --timeout 300 --qemu "$qemu" --firmware "$ovmf_code"
+            python3 scripts/test-woven-shell-qemu.py --stage 20.11 --cpus "$cpu" --timeout 300 --qemu "$qemu" --firmware "$ovmf_code"
+            python3 scripts/test-woven-shell-qemu.py --stage 20.12 --cpus "$cpu" --timeout 300 --qemu "$qemu" --firmware "$ovmf_code"
           done
       - name: Preserve desktop-userspace evidence
         if: always()

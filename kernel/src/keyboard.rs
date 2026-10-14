@@ -105,6 +105,7 @@ impl Keyboard {
             0x0E => Some(Key::Backspace),
             0x0F => Some(Key::Tab),
             0x3B => Some(Key::F1),
+            0x3C => Some(Key::F2),
             code => decode_scancode(code, self.shift).map(Key::Char),
         }
     }

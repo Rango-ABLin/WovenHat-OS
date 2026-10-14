@@ -1,3 +1,10 @@
+#![cfg_attr(
+    any(not(feature = "qemu-test"), feature = "stage13-12-test"),
+    expect(
+        dead_code,
+        reason = "production initializes the bound controller (init_at); self-tests and probing are exercised by the Stage 13.4 gate"
+    )
+)]
 use core::{
     ptr,
     sync::atomic::{fence, Ordering},
@@ -319,11 +326,19 @@ pub fn probe() -> bool {
 }
 
 pub fn init() -> Result<u64, InitError> {
+    if let Some(sectors) = CONTROLLER.lock().as_ref().map(|disk| disk.sectors) {
+        return Ok(sectors);
+    }
+    init_at(find_controller().ok_or(InitError::MissingController)?)
+}
+
+/// Initialize the controller at `device`, the function its driver is bound
+/// to. An already initialized disk is kept.
+pub fn init_at(device: pci::Device) -> Result<u64, InitError> {
     let mut slot = CONTROLLER.lock();
     if let Some(disk) = slot.as_ref() {
         return Ok(disk.sectors);
     }
-    let device = find_controller().ok_or(InitError::MissingController)?;
     let disk = AhciDisk::initialize(device)?;
     let sectors = disk.sectors;
     *slot = Some(disk);

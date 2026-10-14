@@ -49,6 +49,13 @@ stage13-7-test = ["qemu-test"]
 stage13-8-test = ["qemu-test"]
 stage13-9-test = ["qemu-test"]
 stage13-10-test = ["qemu-test"]
+# Boot-time driver bring-up: the driver manager binds storage, USB and audio.
+stage13-12-test = ["qemu-test"]
+# USB keyboards and mice into WovenInput through an interrupt-driven xHCI
+# worker. Builds on 13.12 bring-up; its gate block runs before 13.12's.
+stage13-13-test = ["qemu-test", "stage13-12-test"]
+# Storage mounted from NVMe or AHCI through the selectable root block device.
+stage13-14-test = ["qemu-test", "stage13-12-test"]
 stage14-1-test = ["network-test"]
 stage14-2-test = ["network-test", "stage14-1-test"]
 stage14-3-test = ["network-test", "stage14-2-test"]
@@ -71,6 +78,10 @@ stage15-8-test = ["qemu-test"]
 stage15-9-test = ["qemu-test"]
 # An application built outside the kernel, loaded from the filesystem.
 stage16-1-test = ["qemu-test"]
+# Three signed system applications installed through one bounded catalog plan.
+stage19-app-catalog-test = ["qemu-test"]
+# Production image build: install the signed system-app catalog during boot.
+system-apps = []
 # Full printable-ASCII font and text layout.
 stage17-1-test = ["qemu-test"]
 # Owner-bound client surface registry for userspace graphics.
@@ -111,6 +122,24 @@ stage20-1-test = ["qemu-test"]
 stage20-2-test = ["qemu-test"]
 # WovenStart: the application launcher.
 stage20-3-test = ["qemu-test"]
+# Windows that move and close; budgeted client surfaces.
+stage20-4-test = ["qemu-test"]
+# Depth: window shadows and elevation through region blends.
+stage20-5-test = ["qemu-test"]
+# Translucent panel, toast and pointer overlays over windows.
+stage20-6-test = ["qemu-test"]
+# Physics-based animation: windows fade in on a spring.
+stage20-7-test = ["qemu-test"]
+# Tiling: resize protocol, snap to edges, master-and-stack layout.
+stage20-8-test = ["qemu-test"]
+# Notification Center: history, unread badge, panel, clear.
+stage20-9-test = ["qemu-test"]
+# Quick Settings: display scale, Do Not Disturb, tiling.
+stage20-10-test = ["qemu-test"]
+# Lock screen: PIN held by the shell, input withheld from applications.
+stage20-11-test = ["qemu-test"]
+# Login: local accounts with salted SHA-256 PIN hashes, sign-in screen.
+stage20-12-test = ["qemu-test"]
 stage1-5-test = ["qemu-test"]
 
 [dependencies]

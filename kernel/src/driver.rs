@@ -1,4 +1,11 @@
 //! Bounded WovenDriver manager: discovery, matching, binding, and power state.
+#![cfg_attr(
+    any(not(feature = "qemu-test"), feature = "stage13-12-test"),
+    expect(
+        dead_code,
+        reason = "production binds through register_pci/bind_pci/unbind_pci_resources; power, interrupt and hotplug paths are exercised by the Stage 13.1/13.2 gates until production drivers call them"
+    )
+)]
 use crate::device::DeviceKind;
 use crate::irq_lock::IrqMutex as Mutex;
 const MAX: usize = 32;
@@ -39,7 +46,7 @@ impl PciMatch {
             || self.prog_if.is_some()
     }
 
-    fn matches(self, device: crate::hal::pci::Device) -> bool {
+    pub(crate) fn matches(self, device: crate::hal::pci::Device) -> bool {
         self.vendor_id.is_none_or(|value| value == device.vendor_id)
             && self.device_id.is_none_or(|value| value == device.device_id)
             && self.class.is_none_or(|value| value == device.class)
@@ -93,6 +100,8 @@ fn register_inner(name: &'static str, kind: DeviceKind, pci_match: Option<PciMat
 /// not claim hardware until [`bind_matching_pci`] is called.
 #[cfg_attr(
     not(any(
+        not(feature = "qemu-test"),
+        feature = "stage13-12-test",
         feature = "stage13-1-test",
         feature = "stage13-2-test",
         feature = "stage13-3-test",
@@ -113,6 +122,8 @@ pub fn register_pci(name: &'static str, kind: DeviceKind, matcher: PciMatch) -> 
 /// function. Registration order is deterministic and bounded.
 #[cfg_attr(
     not(any(
+        not(feature = "qemu-test"),
+        feature = "stage13-12-test",
         feature = "stage13-1-test",
         feature = "stage13-2-test",
         feature = "stage13-3-test",
@@ -614,6 +625,8 @@ pub enum PciInterruptError {
 /// already own a live vector/table entry that must be torn down explicitly.
 #[cfg_attr(
     not(any(
+        not(feature = "qemu-test"),
+        feature = "stage13-12-test",
         feature = "stage13-1-test",
         feature = "stage13-2-test",
         feature = "stage13-3-test",
@@ -968,9 +981,42 @@ pub fn pci_driver_name(
         .map(|entry| entry.name)
 }
 
+/// The PCI function a driver is bound to, if it is bound to one.
+pub fn pci_binding(name: &'static str) -> Option<crate::hal::pci::Address> {
+    TABLE
+        .lock()
+        .iter()
+        .flatten()
+        .find(|entry| entry.name == name && entry.state == State::Bound)
+        .and_then(|entry| entry.pci)
+        .map(|binding| binding.address)
+}
+
+/// How many MMIO BAR leases a bound driver holds.
+pub fn pci_bar_leases(name: &'static str) -> usize {
+    TABLE
+        .lock()
+        .iter()
+        .flatten()
+        .find(|entry| entry.name == name)
+        .and_then(|entry| entry.pci)
+        .map_or(0, |binding| binding.bars.iter().flatten().count())
+}
+
 /// Hot-remove a bound PCI function using the same ordered resource teardown as
 /// explicit driver unbind, then invalidate the topology generation before the
 /// slot can be reused.
+#[cfg(any(
+    feature = "stage13-1-test",
+    feature = "stage13-2-test",
+    feature = "stage13-3-test",
+    feature = "stage13-4-test",
+    feature = "stage13-5-test",
+    feature = "stage13-6-test",
+    feature = "stage13-7-test",
+    feature = "stage13-8-test",
+    feature = "stage13-9-test"
+))]
 pub fn remove_pci_function(
     function: crate::hal::pci::topology::FunctionHandle,
 ) -> Result<(), PciUnbindError> {
@@ -990,6 +1036,17 @@ pub fn remove_pci_function(
     crate::hal::pci::teardown_function(function, owner).map_err(PciUnbindError::Topology)
 }
 
+#[cfg(any(
+    feature = "stage13-1-test",
+    feature = "stage13-2-test",
+    feature = "stage13-3-test",
+    feature = "stage13-4-test",
+    feature = "stage13-5-test",
+    feature = "stage13-6-test",
+    feature = "stage13-7-test",
+    feature = "stage13-8-test",
+    feature = "stage13-9-test"
+))]
 #[derive(Clone, Copy)]
 pub struct PciHotplugReport {
     pub summary: crate::hal::pci::Summary,
@@ -1103,6 +1160,17 @@ pub fn stage13_2_legacy_lifecycle_self_test() -> bool {
 
 /// Driver-aware PCI hotplug reconciliation. The HAL only detects removals;
 /// this layer owns driver teardown policy, preserving dependency direction.
+#[cfg(any(
+    feature = "stage13-1-test",
+    feature = "stage13-2-test",
+    feature = "stage13-3-test",
+    feature = "stage13-4-test",
+    feature = "stage13-5-test",
+    feature = "stage13-6-test",
+    feature = "stage13-7-test",
+    feature = "stage13-8-test",
+    feature = "stage13-9-test"
+))]
 pub fn hotplug_rescan() -> Result<crate::hal::pci::Summary, PciUnbindError> {
     Ok(hotplug_rescan_report()?.summary)
 }
@@ -1111,6 +1179,17 @@ pub fn hotplug_rescan() -> Result<crate::hal::pci::Summary, PciUnbindError> {
 /// before publication; newly present functions are returned only after the
 /// refreshed topology and bridge routing have succeeded. Unknown functions
 /// remain unclaimed.
+#[cfg(any(
+    feature = "stage13-1-test",
+    feature = "stage13-2-test",
+    feature = "stage13-3-test",
+    feature = "stage13-4-test",
+    feature = "stage13-5-test",
+    feature = "stage13-6-test",
+    feature = "stage13-7-test",
+    feature = "stage13-8-test",
+    feature = "stage13-9-test"
+))]
 pub fn hotplug_rescan_report() -> Result<PciHotplugReport, PciUnbindError> {
     let mut additions = [None; crate::hal::pci::topology::MAX_FUNCTIONS];
     let added_count = crate::hal::pci::rescan_added(&mut additions)

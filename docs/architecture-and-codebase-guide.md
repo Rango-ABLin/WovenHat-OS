@@ -1,5 +1,218 @@
 # WovenHat OS Architecture & Codebase Guide
 
+## Stage 19 WovenCalculator (2026-10-14)
+
+`apps/woven-calculator` is a separate Ring-3 crate with a bounded checked
+arithmetic core, a console mode, and an optional GUI mode. It uses the same
+static ET_EXEC linker contract and WAPP signing path as the existing external
+application. Its 1/2/4-CPU signed QEMU evidence is recorded in the Stage 19
+calculator audit. This is the first system application increment; the rest of
+the roadmap application suite and catalog/boot-image installation remain open.
+
+`apps/woven-terminal` is the second application increment. It provides bounded
+console commands over `libwoven` file descriptors, delegates arithmetic to the
+calculator core, and passes signed 1/2/4-CPU Ring-3 execution. Its listing and
+file-output caps are documented in the Stage 19 terminal audit; interactive
+stdin and boot-catalog installation remain open.
+
+`apps/woven-files` is the third application increment: a read-only bounded
+directory lister and file previewer using the same verified external-image
+path. It passes signed 1/2/4-CPU execution; GUI, boot catalog, and mutation
+workflows remain open. See the Stage 19 WovenFiles audit.
+
+`apps/woven-monitor` is the fourth increment. It reports bounded UTC clock,
+authorized compositor geometry, and `/mnt` entry-count diagnostics without
+write or privilege authority. Its signed 1/2/4-CPU execution evidence is
+recorded in the Stage 19 WovenMonitor audit.
+
+`apps/woven-settings` is the fifth increment. It reports bounded process
+identity, UTC clock, and compositor display policy without mutating settings or
+requesting privileged authority. Its signed 1/2/4-CPU execution evidence is
+recorded in the Stage 19 WovenSettings audit.
+
+`apps/woven-security` is the sixth increment. It reports bounded process
+identity and security-ledger entries when the existing inspect authority is
+available, without granting or revoking policy. Its signed 1/2/4-CPU execution
+evidence is recorded in the Stage 19 WovenSecurity audit.
+
+`apps/woven-editor` is the seventh increment. It provides bounded text preview
+and capability-enforced file writing through the safe `libwoven` file-write
+wrapper. Its signed 1/2/4-CPU execution evidence is recorded in the Stage 19
+WovenEditor audit.
+
+`apps/woven-images` is the eighth increment. It provides bounded image
+inventory and common-header inspection without decoding untrusted pixel data.
+Its signed 1/2/4-CPU execution evidence is recorded in the Stage 19 WovenImages
+audit.
+
+`apps/woven-update` is the ninth increment. It provides bounded read-only
+update preflight and leaves installation, activation, and rollback to a future
+privileged update service. Its signed 1/2/4-CPU execution evidence is recorded
+in the Stage 19 WovenUpdate audit.
+
+`scripts/package-system-apps.py` is the release packaging boundary for these
+nine accepted apps. It builds each app in its own workspace, signs the ELF
+with WAPP v1, checks the envelope before publication, and emits hashed package
+and `/share/applications` catalog artifacts in one install-plan manifest. The
+manifest is consumed by the feature-gated multi-package RAM installer; the
+remaining roadmap applications and full GUI integration remain open.
+
+The feature-gated `stage19-app-catalog-test` now exercises the install-plan
+boundary for all nine accepted packages together. It verifies each WAPP,
+rejects a mutation, installs and reads each package back through the VFS,
+passes the bytes through the verified ELF loader, and publishes the matching
+catalog descriptor only after those checks. The 1/2/4-CPU evidence is in the
+Stage 19 system-app catalog audit. This is not ordinary-boot installation:
+rollback, trusted catalog publication, and image/installer ownership remain
+required for production deployment.
+
+The `system-apps` image feature is the first production-image consumer. It
+requires a compile-time provisioned application public key, validates every
+WAPP and normal ELF load before VFS mutation, checks path collisions, and
+rolls back entries created by a failed publication. Acceptance harnesses pass
+the deterministic test key explicitly; production provisioning must replace
+it. The current publication is RAM-backed at boot, so persistent update,
+power-loss rollback, and key lifecycle policy remain open.
+
+## Release validation (2026-10-14)
+
+The repository release chain passed on the current tree, including warning-
+denying kernel/host Clippy, all host integration tests, 1/2/4-CPU debug
+memory/storage/network gates, legacy PIC, 4-CPU release gates, release build,
+and shell smoke. It now also runs app-specific warning-denying Clippy and the
+signed five-application catalog gate on 1/2/4 CPUs. The release ZIP includes
+the signed WAPP packages, catalog descriptors, and complete SHA-256 inventory.
+The durable report and image manifest are recorded by the
+[release validation audit](audit-release-validation-2026-10-14.md) and the
+[system-app release audit](audit-release-system-apps-2026-10-14.md). This is
+software/QEMU qualification only; native hardware and destructive media limits
+remain explicit.
+
+## Stage 14.5D network revalidation (2026-10-14)
+
+The live WovenGuard transport/path suite passes on 1/2/4 CPUs, including
+DHCP, DNS, ICMP, host-verified UDP/TCP round trips, and SMP/TLB checks. The
+evidence is recorded in the [Stage 14.5D revalidation audit](audit-stage14-5d-revalidation-2026-10-14.md).
+It qualifies the QEMU virtio boundary only; native NIC/radio and physical-link
+behavior remain hardware work.
+
+## Stage 13.14 storage on NVMe and AHCI (2026-10-14)
+
+The storage layer reaches its disk only through `block_io`:
+- the block-I/O worker's `direct_primary`;
+- the `PrimaryAta` handle, which storage uses for persistence, journals and
+  swap;
+- the FAT32 mount in `storage::mount_ata_root`.
+
+`block_io` now has a selectable root device, `RootDevice::{Ata, Nvme,
+Ahci}`, and every one of those paths goes through `block_io::with_root`.
+The default stays ATA, so every existing configuration behaves as before.
+
+A normal boot with no ATA volume mounted does this after driver bring-up:
+1. `drivers::storage_root` picks the first ready `nvme0` or `ahci0`.
+2. `block_io::select_root` makes it the root device.
+3. The volume is mounted at `/mnt` through the same storage code, so
+   persistence, the data journal and swap all run on the NVMe or AHCI disk.
+
+`storage.rs` no longer refers to the ATA driver directly.
+
+**Still ATA-only.** WovenFS (`wfs.rs`) remains on the ATA primary master.
+
+## Stage 13.13 USB keyboards and mice (2026-10-14)
+
+When bring-up starts `xhci0`, it calls `xhci::start_input("xhci0")`.
+
+**Enumeration.** Every connected root port gets its own reset and slot.
+`enumerate_hid` runs on the controller's active fields, which are then
+moved into a per-device `InputDevice`. Each device keeps its own slot, EP0
+ring, contexts, interrupt ring and report buffer, for up to four keyboards
+and mice. Each one is switched to report-on-change (`SET_IDLE 0`) and has
+one interrupt-IN transfer armed.
+
+**Interrupts.**
+- An MSI-X or MSI vector is bound through the driver manager.
+- `interrupts::set_pci_vector_waiter` registers the `usb-input` worker as
+  that vector's waiter. The generic PCI handler, after publishing the work
+  flag, wakes the waiter through the scheduler event latch, so a wakeup
+  cannot be lost.
+- Interrupter 0 is enabled, moderated to one interrupt per millisecond.
+
+**The worker.**
+1. Under the controller lock, `service_inputs` clears IMAN.IP and drains
+   the event ring. It never waits.
+2. For each completed transfer it copies the report out and re-arms the
+   transfer.
+3. Only after unlocking does the worker decode and publish into
+   WovenInput: keyboard key-down edges (`keyboard_presses`, with shift and
+   held-key suppression) and mouse motion and buttons
+   (`decode_boot_mouse`).
+4. It then sleeps in `wait_for_event` until the vector fires again.
+
+USB input reaches the same queue as PS/2, so the kernel shell, `/bin/sh`
+and the desktop all receive it.
+
+**Two fixes found by this stage.**
+- **MSI-X never delivered.** `msix::enable_owned` enabled the function with
+  Function Mask asserted and never cleared it. Function Mask masks every
+  vector, so no MSI-X interrupt could ever be delivered on any device. It
+  is now cleared, and the write verified, as the last activation step.
+- **The USB mouse Y axis was inverted.** HID boot mice report Y positive
+  downwards, which is already WovenInput's orientation; only PS/2 reports
+  up as positive.
+
+## Stage 13.12 boot-time driver bring-up (2026-10-14)
+
+Until this stage, every Stage 13 driver (`driver.rs`, `nvme.rs`, `ahci.rs`,
+`xhci.rs`, `hda.rs`) was compiled only into its own test feature: a normal
+boot contained none of them. `drivers.rs` now runs in every normal boot,
+after storage and networking:
+1. It registers a class matcher for NVMe, AHCI, xHCI and HDA with the
+   WovenDriver manager.
+2. For each driver, it finds the first PCI function the manager matches to
+   it.
+3. It binds that function through `driver::bind_pci`. Binding claims the
+   function and its programmed MMIO BARs for the boot owner token.
+4. Only then does it call the driver's `init_at(device)`, with the function
+   re-read after admission because admission may move BARs.
+
+Initialization failure unbinds again (`unbind_pci_resources`), so a failed
+controller never keeps ownership. A missing controller is logged as absent.
+Neither stops the boot. Ready drivers are added to the device registry
+(`nvme0`, `ahci0`, `xhci0`, `hda0`) and listed by the shell's `devices`.
+
+**Rules for this code:**
+- A normal build compiles only the driver code it uses. The PCI hotplug
+  functions stay gated to the Stage 13 tests.
+- Each driver module carries one `expect(dead_code, reason = …)`, active
+  only in production and in `stage13-12-test`. The reason names the APIs
+  still waiting for production callers. The later Stage 13 closure steps
+  (USB input, audio) remove it by giving those APIs callers.
+- Shared PCI/paging items that the live binding path now uses had their
+  dead-code expectations narrowed so they do not apply in those builds.
+
+**Limits.**
+- One function per driver: a second controller of the same class stays
+  unbound.
+- The controllers still poll synchronously under their own locks during
+  initialization.
+- Storage is not yet mounted from NVMe or AHCI.
+- USB devices are not yet read, and audio is not yet exposed to userspace.
+
+## Stage 13.4–13.7 revalidation (2026-10-14)
+
+The ordered AHCI/SATA, xHCI core, USB HID, and WovenInput software gates pass
+on 1/2/4 CPUs in the current tree. Their evidence is recorded in the
+[Stage 13.4–13.7 validation audit](audit-stage13-4-7-validation-2026-10-14.md).
+The QEMU fixtures validate bounded ownership and protocol contracts; they do
+not substitute for native-controller or physical USB interoperability. USB
+mouse report decoding is still outside the accepted keyboard-only fixture.
+
+The bounded USB boot-mouse decoder now exists in `xhci.rs`; it emits WovenInput
+motion and button-edge events from copied report bytes and carries button state
+explicitly between reports. It is self-tested and does not yet claim a live
+xHCI mouse polling worker or physical-device qualification. See the Stage 13.6
+USB mouse decoder audit.
+
 ## Stage 15 bounded WovenFS VFS write-through (2026-10-14)
 
 The `/wfs/<name>` namespace has one production mutation authority:
@@ -281,9 +494,9 @@ qualification.
 | `graphics.rs`, `gui.rs` | Existing framebuffer/GUI support; not the future compositor |
 | `rtc.rs` | CMOS real-time clock (UTC), behind the `ClockRead` syscall |
 | `font.rs`, `display.rs` | 5×7 ASCII font (also compiled into libwoven); `Surface` (opaque `blit`, `blit_region` for exposed-region redraw, uniform-opacity `blend`, `write_pixels` for client uploads), bounded `Damage` and the single format-resolving presentation path (`present_scaled`, integer display scale; `present` is scale 1) |
-| `user_graphics.rs`, `compositor.rs` | Owner-tagged, generation-checked client surfaces (syscalls 98–101, 104) and the kernel-held compositor surface they are blitted onto (102–103); `blit` snapshots under the registry lock and releases it before taking the compositor lock, so the two rank-10 locks never nest. Presentation borrows the framebuffer through `terminal::with_framebuffer` (lock order compositor → terminal), and display ownership suppresses terminal rendering while the compositor presents. Userspace reaches the compositor only with `DisplayIo` and the single-holder lease (syscalls 105–106), released on exit; every client token is bound to the calling process before the registry sees it. A presenting holder also takes input focus: `woven_input` routes events to its private bounded queue (syscall 107, `InputIo`) until it exits; syscall 108 sleeps for the next event with a single registered waiter woken by `publish` after `FOCUS` is released (lock order scheduler → compositor → FOCUS). A client may share one of its surfaces with one process (syscall 109); the lease holder composites it with syscall 110, authorised by the slot's grant rather than the token. Syscall 111 sleeps over input and the pid mailbox at once; `ipc::send` wakes the mailbox's single waiter after releasing the IPC lock. Clients declare damage on their surfaces (syscall 112); the holder sleeps on it via `WaitAny` and copies only the damaged region (syscall 113). The boot compositor is sized to the framebuffer (clamped to 1920×1200), and every framebuffer writer, including the boot `Console`, goes through the terminal lock. Stacking, raise and per-window focus are window-manager policy in userspace (Stage 19.11), built on the lease, focus, `WaitAny`, shared surfaces and IPC |
+| `user_graphics.rs`, `compositor.rs` | Owner-tagged, generation-checked client surfaces (syscalls 98–101, 104), up to 1920×1200 within a 4 MB per-process and 16 MB system pixel budget, behind a preemption lock (not interrupts-off) with allocation and freeing outside it and the kernel-held compositor surface they are blitted onto (102–103); `blit` snapshots under the registry lock and releases it before taking the compositor lock, so the two rank-10 locks never nest. Presentation borrows the framebuffer through `terminal::with_framebuffer` (lock order compositor → terminal), and display ownership suppresses terminal rendering while the compositor presents. Userspace reaches the compositor only with `DisplayIo` and the single-holder lease (syscalls 105–106), released on exit; every client token is bound to the calling process before the registry sees it. A presenting holder also takes input focus: `woven_input` routes events to its private bounded queue (syscall 107, `InputIo`) until it exits; syscall 108 sleeps for the next event with a single registered waiter woken by `publish` after `FOCUS` is released (lock order scheduler → compositor → FOCUS). A client may share one of its surfaces with one process (syscall 109); the lease holder composites it with syscall 110, authorised by the slot's grant rather than the token. Syscall 111 sleeps over input and the pid mailbox at once; `ipc::send` wakes the mailbox's single waiter after releasing the IPC lock. Clients declare damage on their surfaces (syscall 112); the holder sleeps on it via `WaitAny` and copies only the damaged region (syscall 113). The boot compositor is sized to the framebuffer (clamped to 1920×1200), and every framebuffer writer, including the boot `Console`, goes through the terminal lock. Stacking, raise and per-window focus are window-manager policy in userspace (Stage 19.11), built on the lease, focus, `WaitAny`, shared surfaces and IPC |
 | `panic.rs`, `benchmark.rs` | Failure reporting and existing benchmark support |
-| `libwoven/`, `apps/hello`, `apps/hello-gui`, `apps/woven-shell` | The userspace API (one thin wrapper per syscall, plus `Canvas` software rendering and the shared kernel font) and the Ring-3 programs. Each app is its own crate with a large-code-model `link.x` (whose `.l*` sections must be placed explicitly) and a `build.rs` that relinks when it changes. `woven-shell` is the desktop: it holds the compositor lease and recomposes exposed rectangles from its own software layers and clients' shared surfaces (region blits, syscalls 120–121), hosting applications over an IPC protocol (`WOPN`, `TRAY`, `NOTE`) |
+| `libwoven/`, `apps/hello`, `apps/hello-gui`, `apps/woven-shell` | The userspace API (one thin wrapper per syscall, plus `Canvas` software rendering, the shared kernel font, and a fixed-point `Spring` for animation, and `accounts`, local accounts held as a salt and `SHA-256(salt || PIN)`) and the Ring-3 programs. Each app is its own crate with a large-code-model `link.x` (whose `.l*` sections must be placed explicitly) and a `build.rs` that relinks when it changes. `woven-shell` is the desktop: it holds the compositor lease and recomposes exposed rectangles from its own software layers and clients' shared surfaces (region blits, syscalls 120–121), hosting applications over an IPC protocol (`WOPN`, `TRAY`, `NOTE`, `WCLS`, and `WSIZ`/`WRSZ` for resizing; `libwoven::layout` tiles them); shadows and other translucent layers use region blends (syscalls 200–201), and text, borders and the pointer are overlays copied with a keyed blit that skips the transparent key (syscall 202), so nothing is read back from the screen. With `--accounts` it starts at a sign-in screen, and its lock screen asks for the signed-in account's PIN. A user stack is 8 KiB (`UserStack::SIZE`), so the shell keeps its tile buffer and desktop state in statics (.bss), never in `main`'s frame |
 | `tests/`, `scripts/`, `run-stage*-acceptance.ps1` | Host regressions, QEMU orchestration and stage preservation gates |
 
 ## Stage 6 filesystem concurrency boundary
