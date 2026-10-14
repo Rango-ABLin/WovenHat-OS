@@ -13,6 +13,12 @@ pub const TIMER_VECTOR: u8 = 0xe0;
 pub const RESCHEDULE_VECTOR: u8 = 0xe1;
 pub const SPURIOUS_VECTOR: u8 = 0xff;
 static IDS: [AtomicU32; MAX_CPUS] = [const { AtomicU32::new(u32::MAX) }; MAX_CPUS];
+
+/// The boot CPU's local APIC ID, the destination for device interrupts.
+#[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
+pub fn bsp_apic_id() -> u32 {
+    IDS[0].load(Ordering::Acquire)
+}
 static DOMAINS: [AtomicU32; MAX_CPUS] = [const { AtomicU32::new(0) }; MAX_CPUS];
 static ONLINE: [AtomicBool; MAX_CPUS] = [const { AtomicBool::new(false) }; MAX_CPUS];
 // 0=initial online, 1=offline requested, 2=offline transitioning,

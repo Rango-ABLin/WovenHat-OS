@@ -38,6 +38,48 @@ evidence is recorded in the [Stage 14.5D revalidation audit](audit-stage14-5d-re
 It qualifies the QEMU virtio boundary only; native NIC/radio and physical-link
 behavior remain hardware work.
 
+## Stage 13.13 USB keyboards and mice (2026-10-14)
+
+When bring-up starts `xhci0`, it calls `xhci::start_input("xhci0")`.
+
+**Enumeration.** Every connected root port gets its own reset and slot.
+`enumerate_hid` runs on the controller's active fields, which are then
+moved into a per-device `InputDevice`. Each device keeps its own slot, EP0
+ring, contexts, interrupt ring and report buffer, for up to four keyboards
+and mice. Each one is switched to report-on-change (`SET_IDLE 0`) and has
+one interrupt-IN transfer armed.
+
+**Interrupts.**
+- An MSI-X or MSI vector is bound through the driver manager.
+- `interrupts::set_pci_vector_waiter` registers the `usb-input` worker as
+  that vector's waiter. The generic PCI handler, after publishing the work
+  flag, wakes the waiter through the scheduler event latch, so a wakeup
+  cannot be lost.
+- Interrupter 0 is enabled, moderated to one interrupt per millisecond.
+
+**The worker.**
+1. Under the controller lock, `service_inputs` clears IMAN.IP and drains
+   the event ring. It never waits.
+2. For each completed transfer it copies the report out and re-arms the
+   transfer.
+3. Only after unlocking does the worker decode and publish into
+   WovenInput: keyboard key-down edges (`keyboard_presses`, with shift and
+   held-key suppression) and mouse motion and buttons
+   (`decode_boot_mouse`).
+4. It then sleeps in `wait_for_event` until the vector fires again.
+
+USB input reaches the same queue as PS/2, so the kernel shell, `/bin/sh`
+and the desktop all receive it.
+
+**Two fixes found by this stage.**
+- **MSI-X never delivered.** `msix::enable_owned` enabled the function with
+  Function Mask asserted and never cleared it. Function Mask masks every
+  vector, so no MSI-X interrupt could ever be delivered on any device. It
+  is now cleared, and the write verified, as the last activation step.
+- **The USB mouse Y axis was inverted.** HID boot mice report Y positive
+  downwards, which is already WovenInput's orientation; only PS/2 reports
+  up as positive.
+
 ## Stage 13.12 boot-time driver bring-up (2026-10-14)
 
 Until this stage, every Stage 13 driver (`driver.rs`, `nvme.rs`, `ahci.rs`,

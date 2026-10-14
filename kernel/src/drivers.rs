@@ -86,9 +86,19 @@ const SPECS: [Spec; COUNT] = [
         kind: DeviceKind::UsbHost,
         matcher: class(0x0c, 0x03, Some(0x30)),
         init: |device| {
-            crate::xhci::init_at(device)
-                .map(|(_, ports, _, _)| u64::from(ports))
-                .map_err(|_| ())
+            let (_, ports, _, _) = crate::xhci::init_at(device).map_err(|_| ())?;
+            // Keyboards and mice into WovenInput. Input is optional: a
+            // controller whose input cannot start still serves the bus.
+            match crate::xhci::start_input("xhci0") {
+                Ok(input) => crate::serial::write_line(format_args!(
+                    "[DRIVERS] xhci0 input: keyboards={} mice={} vector={:#x}",
+                    input.keyboards, input.mice, input.vector
+                )),
+                Err(error) => {
+                    crate::serial::write_line(format_args!("[DRIVERS] xhci0 input unavailable: {:?}", error))
+                }
+            }
+            Ok(u64::from(ports))
         },
     },
     Spec {

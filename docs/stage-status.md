@@ -1,5 +1,33 @@
 # Stage status
 
+## Stage 13.13 — USB keyboards and mice into WovenInput (2026-10-14)
+
+USB keyboards and mice now work in every normal boot.
+- The xHCI driver enumerates each connected port, with its own slot per
+  device.
+- It binds an MSI-X or MSI vector through the driver manager.
+- A worker sleeps until that vector fires, drains reports under the
+  controller lock and publishes after releasing it.
+- USB input reaches the same queue as PS/2.
+
+**Two existing bugs fixed.**
+- **MSI-X never delivered on any device.** Activation left Function Mask
+  set.
+- **The USB mouse Y axis was inverted.**
+
+Gate `[S13.13] USB input: PASSED`. Input injected through QEMU's USB
+keyboard and mouse arrives exactly, through device interrupts, with the
+worker sleeping between them.
+- **Runs:** passes on 1/2/4 CPUs.
+- **Negative controls:** all six failed the gate as intended.
+- **Regression:** 13.12 in all modes, and 13.2, 13.5, 13.6, 13.7, 13.9 and
+  13.10, pass on 1/2/4 CPUs.
+
+See the [Stage 13.13 audit](audit-stage13-13-usb-input-2026-10-14.md).
+
+**Open.** Report-protocol HID devices (touchpads; Stage 13.16), USB
+hotplug, a fuller keymap, and physical-device qualification.
+
 ## Stage 13.12 — boot-time driver bring-up (2026-10-14)
 
 Until now, every Stage 13 driver ran only inside its own test build. A

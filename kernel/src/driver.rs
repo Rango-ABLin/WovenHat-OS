@@ -625,6 +625,8 @@ pub enum PciInterruptError {
 /// already own a live vector/table entry that must be torn down explicitly.
 #[cfg_attr(
     not(any(
+        not(feature = "qemu-test"),
+        feature = "stage13-12-test",
         feature = "stage13-1-test",
         feature = "stage13-2-test",
         feature = "stage13-3-test",

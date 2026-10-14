@@ -498,7 +498,7 @@ impl From<super::vector::Error> for LifecycleError {
 
 /// Complete one-vector MSI-X activation transaction. Vector ownership is
 /// retained on every failure after the device could have observed the vector.
-#[expect(dead_code)]
+#[cfg_attr(not(any(not(feature = "qemu-test"), feature = "stage13-12-test")), expect(dead_code))]
 pub fn enable_owned(
     function: super::topology::FunctionHandle,
     bar: super::topology::MmioLease,
@@ -639,7 +639,41 @@ pub fn enable_owned(
     if let Err(error) = unmask_entry(table_base, enabled, entry_index, owner) {
         return Err(LifecycleError::ActivationRetained { error, lease });
     }
+    // Function Mask masks every vector regardless of its entry. It protected
+    // the table while it was programmed; leaving it set means the function
+    // can never deliver an interrupt.
+    if let Err(error) = clear_function_mask(device) {
+        return Err(LifecycleError::ActivationRetained { error, lease });
+    }
     Ok(lease)
+}
+
+/// Clear Function Mask on an enabled MSI-X function so its unmasked entries
+/// deliver. The write is verified; Enable stays set.
+fn clear_function_mask(device: Device) -> Result<(), Error> {
+    let capability = capability(device)?;
+    let address = Address {
+        segment: device.segment,
+        bus: device.bus,
+        device: device.device,
+        function: device.function,
+    };
+    let _guard = super::CONFIG_LOCK.lock();
+    let header =
+        super::read_config_unlocked(address, capability.offset).ok_or(Error::ConfigRead)?;
+    let mut control = (header >> 16) as u16;
+    control &= !PCI_MSIX_FUNCTION_MASK;
+    control |= PCI_MSIX_ENABLE;
+    let updated = (header & 0x0000_ffff) | (u32::from(control) << 16);
+    if !super::write_config_unlocked(address, capability.offset, updated) {
+        return Err(Error::ConfigWrite);
+    }
+    let verify =
+        super::read_config_unlocked(address, capability.offset).ok_or(Error::ConfigRead)?;
+    if (verify >> 16) as u16 != control {
+        return Err(Error::VerifyFailed);
+    }
+    Ok(())
 }
 
 /// Quiesce the function before recycling its interrupt vector. Failure keeps

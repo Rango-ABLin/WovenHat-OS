@@ -3427,6 +3427,17 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         ));
         qemu_test_exit_success();
     }
+    // Before the 13.12 block: a 13.13 build also enables stage13-12-test,
+    // and each block ends the boot.
+    #[cfg(feature = "stage13-13-test")]
+    {
+        if !xhci::input_self_test() {
+            serial::write_line(format_args!("[S13.13] USB input: FAILED"));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!("[S13.13] USB input: PASSED"));
+        qemu_test_exit_success();
+    }
     #[cfg(feature = "stage13-12-test")]
     {
         if !drivers::self_test() {
