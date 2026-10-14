@@ -125,6 +125,8 @@ stage20-8-test = ["qemu-test"]
 stage20-9-test = ["qemu-test"]
 # Quick Settings: display scale, Do Not Disturb, tiling.
 stage20-10-test = ["qemu-test"]
+# Lock screen: PIN in the secret vault, input withheld from applications.
+stage20-11-test = ["qemu-test"]
 stage1-5-test = ["qemu-test"]
 
 [dependencies]

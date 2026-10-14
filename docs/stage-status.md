@@ -17,6 +17,69 @@ gate pass. The unsupported `cargo test --workspace --all-targets` command is
 documented as a host-assembler mismatch rather than treated as a production
 failure. See the [host-test audit](audit-host-test-boundary-2026-10-14.md).
 
+## Stage 20.11 — lock screen (2026-10-14)
+
+Roadmap Stage 18.6, Lock Screen.
+
+**Shell.** Quick Settings gains a fourth row, "Lock screen", which locks
+the desktop.
+- **What locking hides.** No window is drawn, no keystroke reaches an
+  application, and a notification is remembered and counted but never
+  shown. The pointer still moves, unseen.
+- **What it shows.** The wallpaper dimmed (160/255), with "Locked", the
+  time, a prompt, and one masked dot per digit typed, all centred.
+- **Unlocking.** The PIN is given with `--pin <digits>`, 1–16 digits.
+  - Attempts are compared in constant time, and typed digits are wiped
+    after each one.
+  - A wrong PIN says "Wrong PIN".
+  - Three wrong PINs in a row lock entry out for 5 s, during which even
+    the right PIN is refused ("Try again shortly").
+  - Without `--pin`, Enter unlocks.
+
+**Why the PIN is not in the secret vault.** The PIN is in the shell's own
+memory, not the kernel's secret vault. The vault needs the `Secrets`
+capability. Codex's security model (Stage 15.3) reserves it for
+applications the permission broker grants it to, and keeps it out of the
+system-service ceiling, and the shell is a system service, because it
+needs the display and input. Widening that ceiling to pass a gate would
+be wrong, so this stage does not. Real accounts and credentials belong
+with the login manager (18.7).
+
+**Gate changes.**
+- The Stage 20.10 gate now expects the fourth row, and passes.
+- In the 20.11 gate, the lockout check first raced the shell. It began
+  its one-second stability check while the typed digits were still
+  showing. It now waits until the shell's input queue is empty and the
+  lockout screen has settled.
+
+Gate `[S20.11] lock screen: PASSED`. The shell runs with `--pin 2468` and
+no more authority than the other desktop gates; real i8042 input. The lock
+screen's rows are compared with the kernel's rendering: the dimmed
+wallpaper and the text in the kernel font.
+- Quick Settings locks the screen, and the window is hidden.
+- `x` while locked reaches no application: A, waiting for `x`, is still
+  running a second later.
+- Two digits show as two dots.
+- A wrong PIN says so and stays locked.
+- 2468 unlocks, the window returns, and A then gets `x` and exits.
+- After locking again, three wrong PINs lock entry out, and 2468 is
+  refused for a full second. After the 5 s lockout, 2468 unlocks.
+- Killing the shell returns the display.
+
+Negative controls, with evidence in the worktree's
+`audit-artifacts/stage20.11-negative-control-*`:
+- With the PIN check bypassed, the gate fails at "a wrong PIN says so and
+  stays locked".
+- With keys passed through while locked, it fails at "a key while locked
+  reaches no application".
+
+Open:
+- **No idle auto-lock.** There is also no lock key beyond Quick Settings.
+- **The PIN is a startup argument held in the shell's memory.** There is
+  no credential store or account model yet; that is 18.7.
+- **Nothing is protected against a process that can already read the
+  shell's memory.**
+
 ## Stage 20.10 — Quick Settings (2026-10-14)
 
 Roadmap Stage 18.5, Quick Settings. The roadmap lists Wi-Fi, Bluetooth,

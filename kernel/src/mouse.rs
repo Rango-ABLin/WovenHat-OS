@@ -158,7 +158,8 @@ pub fn handle_interrupt() {
     feature = "stage20-7-test",
     feature = "stage20-8-test",
     feature = "stage20-9-test",
-    feature = "stage20-10-test"
+    feature = "stage20-10-test",
+    feature = "stage20-11-test"
 ))]
 pub fn loopback(byte: u8) -> bool {
     loopback_through(0xd3, byte)
@@ -176,7 +177,8 @@ pub fn loopback(byte: u8) -> bool {
     feature = "stage20-7-test",
     feature = "stage20-8-test",
     feature = "stage20-9-test",
-    feature = "stage20-10-test"
+    feature = "stage20-10-test",
+    feature = "stage20-11-test"
 ))]
 pub fn keyboard_loopback(byte: u8) -> bool {
     loopback_through(0xd2, byte)
@@ -192,7 +194,8 @@ pub fn keyboard_loopback(byte: u8) -> bool {
     feature = "stage20-7-test",
     feature = "stage20-8-test",
     feature = "stage20-9-test",
-    feature = "stage20-10-test"
+    feature = "stage20-10-test",
+    feature = "stage20-11-test"
 ))]
 fn loopback_through(command_byte: u8, byte: u8) -> bool {
     // The output buffer holds one byte: wait for the previous one to be taken

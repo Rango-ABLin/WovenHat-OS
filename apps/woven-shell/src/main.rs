@@ -73,6 +73,21 @@
 //! toasts; notifications are still remembered and counted), and tiling (as
 //! F2). Settings the system cannot act on yet are not offered.
 //!
+//! # Lock screen
+//!
+//! Quick Settings' last row locks the desktop. The lock screen covers
+//! everything: no window is drawn, no keystroke reaches an application, and
+//! a notification is remembered and counted but never shown. It shows the
+//! time and a PIN prompt, with one masked dot per digit typed.
+//!
+//! The PIN is given with `--pin <digits>` and kept in the shell's own
+//! memory: the kernel's secret vault needs the `Secrets` capability, which
+//! the security model reserves for broker-granted applications and keeps out
+//! of system services such as the shell. Attempts are compared in constant
+//! time and typed digits are wiped after each one. Three wrong PINs in a row
+//! lock entry out for five seconds. Without `--pin`, Enter unlocks: real
+//! accounts and credentials come with the login manager.
+//!
 //! # WovenStart
 //!
 //! The start button, or F1, opens the launcher: the applications listed in
@@ -201,7 +216,22 @@ const CENTER_WIDTH: i32 = 164;
 const CENTER_TITLE: &str = "Notifications";
 const CENTER_CLEAR: &str = "Clear";
 const QS_TITLE: &str = "Quick Settings";
-const QS_ROWS: usize = 3;
+const QS_ROWS: usize = 4;
+
+/// How dark the lock screen makes the wallpaper behind it.
+const LOCK_DIM: u8 = 160;
+const MAX_PIN: usize = 16;
+/// Wrong PINs in a row before entry is locked out, and for how long.
+const PIN_ATTEMPTS: u32 = 3;
+const PIN_LOCKOUT: u64 = 5 * libwoven::time::TICKS_PER_SECOND;
+
+/// What the lock screen's prompt says.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum LockPrompt {
+    Enter,
+    Wrong,
+    LockedOut,
+}
 
 /// Characters of a `source: text` row that fit.
 const CENTER_CHARS: usize = ((CENTER_WIDTH - 12) / font::ADVANCE) as usize;
@@ -698,6 +728,15 @@ struct Desktop {
     dnd: bool,
     /// The display scale the shell set.
     scale: u32,
+    locked: bool,
+    /// The PIN and its length, if one was given.
+    pin: Option<([u8; MAX_PIN], usize)>,
+    /// Digits typed at the lock screen so far.
+    entry: [u8; MAX_PIN],
+    entry_length: usize,
+    failures: u32,
+    lockout_until: libwoven::time::Ticks,
+    prompt: LockPrompt,
     pointer: (i32, i32),
     pointer_visible: bool,
     /// The window being dragged, and where in it the pointer took hold.
@@ -1002,7 +1041,101 @@ impl Desktop {
             if self.scale == 2 { "Display scale: 2x" } else { "Display scale: 1x" },
             if self.dnd { "Do not disturb: On" } else { "Do not disturb: Off" },
             if self.tiled { "Tiling: On" } else { "Tiling: Off" },
+            "Lock screen",
         ]
+    }
+
+    /// The lock screen: the wallpaper dimmed, "Locked", the time, the
+    /// prompt, and a masked dot per digit typed, all centred.
+    fn render_lock(&self, canvas: &mut Canvas<'_>) {
+        let height = self.height;
+        canvas.shade(|x, y| blend(rgb(0, 0, 0), wallpaper(x, y, height), LOCK_DIM));
+        let middle = self.height / 2;
+        let centred = |text: &str| (self.width - font::text_width(text) as i32) / 2;
+        canvas.draw_text(centred("Locked"), middle - 34, "Locked", TEXT);
+        let (bytes, length) = clock_text(self.time, false);
+        let clock = core::str::from_utf8(&bytes[..length]).unwrap_or("");
+        canvas.draw_text(centred(clock), middle - 20, clock, TEXT);
+        let prompt = match self.prompt {
+            LockPrompt::Enter => "Enter PIN",
+            LockPrompt::Wrong => "Wrong PIN",
+            LockPrompt::LockedOut => "Try again shortly",
+        };
+        canvas.draw_text(centred(prompt), middle - 4, prompt, TEXT);
+        let dots = self.entry_length as i32;
+        let left = (self.width - (dots * 10 - 4)) / 2;
+        for index in 0..dots {
+            canvas.fill_rect(left + index * 10, middle + 12, 6, 6, TEXT);
+        }
+    }
+
+    fn lock(&mut self) -> Area {
+        let _ = self.close_panels();
+        self.locked = true;
+        self.forget_entry();
+        self.prompt = LockPrompt::Enter;
+        log(&[b"woven-shell: locked"]);
+        self.screen()
+    }
+
+    /// Wipe the typed digits.
+    fn forget_entry(&mut self) {
+        for byte in &mut self.entry {
+            // SAFETY: a valid, aligned byte of our own array; volatile so the
+            // wipe is not optimised away.
+            unsafe { core::ptr::write_volatile(byte, 0) };
+        }
+        self.entry_length = 0;
+    }
+
+    /// Check the typed digits against the PIN.
+    fn pin_matches(&self) -> bool {
+        let Some((stored, length)) = &self.pin else { return true };
+        // Constant time over the whole buffer: no early exit on a mismatch.
+        let mut difference = u8::from(*length != self.entry_length);
+        for (stored, typed) in stored.iter().zip(&self.entry) {
+            difference |= stored ^ typed;
+        }
+        difference == 0
+    }
+
+    /// A key at the lock screen. Returns the area to repaint.
+    fn lock_key(&mut self, key: Key) -> Area {
+        match key {
+            Key::Char(digit) if digit.is_ascii_digit() => {
+                if self.entry_length < MAX_PIN {
+                    self.entry[self.entry_length] = digit as u8;
+                    self.entry_length += 1;
+                }
+            }
+            Key::Backspace => {
+                if self.entry_length > 0 {
+                    self.entry_length -= 1;
+                    self.entry[self.entry_length] = 0;
+                }
+            }
+            Key::Enter => {
+                if libwoven::ticks() < self.lockout_until {
+                    self.prompt = LockPrompt::LockedOut;
+                } else if self.pin_matches() {
+                    self.locked = false;
+                    self.failures = 0;
+                    log(&[b"woven-shell: unlocked"]);
+                } else {
+                    self.failures += 1;
+                    self.prompt = LockPrompt::Wrong;
+                    log(&[b"woven-shell: wrong PIN"]);
+                    if self.failures >= PIN_ATTEMPTS {
+                        self.failures = 0;
+                        self.lockout_until = libwoven::ticks() + PIN_LOCKOUT;
+                        self.prompt = LockPrompt::LockedOut;
+                    }
+                }
+                self.forget_entry();
+            }
+            _ => return Area::new(0, 0, 0, 0),
+        }
+        self.screen()
     }
 
     fn render_qs(&self, canvas: &mut Canvas<'_>) {
@@ -1202,6 +1335,12 @@ impl Desktop {
     fn repaint(&self, painter: &mut Painter<'_>, area: Area) {
         let area = area.intersect(self.screen());
         if area.is_empty() {
+            return;
+        }
+        // Locked, nothing but the lock screen is drawn: no window, no
+        // notification, no pointer.
+        if self.locked {
+            painter.draw(area, |canvas| self.render_lock(canvas));
             return;
         }
         painter.draw(area, |canvas| self.render_desktop(canvas));
@@ -1480,8 +1619,9 @@ impl Desktop {
                 let length = label(&message[4..], TOAST_CHARS, &mut text);
                 log(&[b"woven-shell: notification: ", &text[..length]]);
                 let remembered = self.remember(sender, &message[4..]);
-                // Do Not Disturb keeps the notification but raises no toast.
-                if self.dnd {
+                // Do Not Disturb, or the lock screen, keeps the notification
+                // but raises no toast.
+                if self.dnd || self.locked {
                     return remembered;
                 }
                 self.toast = Some(Toast {
@@ -1497,6 +1637,21 @@ impl Desktop {
 
     fn handle_input(&mut self, event: InputEvent) -> Area {
         let empty = Area::new(0, 0, 0, 0);
+        // Locked, keys go to the PIN prompt and nowhere else; the pointer
+        // still moves, unseen, so it is where it was left once unlocked.
+        if self.locked {
+            return match event {
+                InputEvent::Key(key) => self.lock_key(key),
+                InputEvent::PointerMove { dx, dy } => {
+                    self.pointer = (
+                        (self.pointer.0 + i32::from(dx)).clamp(0, self.width - 1),
+                        (self.pointer.1 + i32::from(dy)).clamp(0, self.height - 1),
+                    );
+                    empty
+                }
+                _ => empty,
+            };
+        }
         match event {
             InputEvent::PointerMove { dx, dy } => {
                 let before = self.cursor_area();
@@ -1541,6 +1696,7 @@ impl Desktop {
                             panel
                         }
                         2 => self.toggle_tiling(),
+                        3 => self.lock(),
                         _ => empty,
                     };
                 }
@@ -1693,7 +1849,8 @@ impl Desktop {
         let time = libwoven::clock().ok();
         if clock_text(time, self.seconds) != clock_text(self.time, self.seconds) {
             self.time = time;
-            dirty = dirty.union(self.clock_area());
+            // The lock screen's clock is in the middle of the screen.
+            dirty = dirty.union(if self.locked { self.screen() } else { self.clock_area() });
         }
         if self.toast.as_ref().is_some_and(|toast| libwoven::ticks() >= toast.until) {
             self.toast = None;
@@ -1704,11 +1861,29 @@ impl Desktop {
 }
 
 fn main(args: Args) -> ! {
-    let seconds = match args.get(1) {
-        None => false,
-        Some(b"--seconds") => true,
-        Some(_) => fail(1),
-    };
+    let mut seconds = false;
+    let mut pin = None;
+    let mut index = 1;
+    while let Some(argument) = args.get(index) {
+        match argument {
+            b"--seconds" => seconds = true,
+            b"--pin" => {
+                index += 1;
+                match args.get(index) {
+                    Some(digits)
+                        if (1..=MAX_PIN).contains(&digits.len()) && digits.iter().all(u8::is_ascii_digit) =>
+                    {
+                        let mut stored = [0u8; MAX_PIN];
+                        stored[..digits.len()].copy_from_slice(digits);
+                        pin = Some((stored, digits.len()));
+                    }
+                    _ => fail(1),
+                }
+            }
+            _ => fail(1),
+        }
+        index += 1;
+    }
     // SAFETY: the only reference to the tile buffer, taken once.
     let tile = unsafe { &mut *TILE.0.get() };
 
@@ -1750,6 +1925,13 @@ fn main(args: Args) -> ! {
         qs_open: false,
         dnd: false,
         scale: info.scale,
+        locked: false,
+        pin,
+        entry: [0; MAX_PIN],
+        entry_length: 0,
+        failures: 0,
+        lockout_until: 0,
+        prompt: LockPrompt::Enter,
         pointer: (width / 2, height / 2),
         pointer_visible: false,
         drag: None,

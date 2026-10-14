@@ -3431,6 +3431,15 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         serial::write_line(format_args!("[S1-5] storage journal: PASSED"));
         qemu_test_exit_success();
     }
+    #[cfg(feature = "stage20-11-test")]
+    {
+        if !stage20_11_self_test() {
+            serial::write_line(format_args!("[S20.11] lock screen: FAILED"));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!("[S20.11] lock screen: PASSED"));
+        qemu_test_exit_success();
+    }
     #[cfg(feature = "stage20-10-test")]
     {
         if !stage20_10_self_test() {
@@ -4760,7 +4769,8 @@ fn stage16_1_self_test() -> bool {
     feature = "stage20-7-test",
     feature = "stage20-8-test",
     feature = "stage20-9-test",
-    feature = "stage20-10-test"
+    feature = "stage20-10-test",
+    feature = "stage20-11-test"
 ))]
 const HELLO_GUI_IMAGE: &[u8] = include_bytes!(env!("WOVENHAT_HELLO_GUI_IMAGE"));
 
@@ -4788,7 +4798,8 @@ const HELLO_GUI_IMAGE: &[u8] = include_bytes!(env!("WOVENHAT_HELLO_GUI_IMAGE"));
     feature = "stage20-7-test",
     feature = "stage20-8-test",
     feature = "stage20-9-test",
-    feature = "stage20-10-test"
+    feature = "stage20-10-test",
+    feature = "stage20-11-test"
 ))]
 fn display_client_capabilities() -> capability::CapabilitySet {
     capability::CapabilitySet::only(capability::Capability::Console)
@@ -4818,7 +4829,8 @@ fn display_client_capabilities() -> capability::CapabilitySet {
     feature = "stage20-7-test",
     feature = "stage20-8-test",
     feature = "stage20-9-test",
-    feature = "stage20-10-test"
+    feature = "stage20-10-test",
+    feature = "stage20-11-test"
 ))]
 fn run_hello_gui(
     image: &[u8],
@@ -4856,7 +4868,8 @@ fn run_hello_gui(
     feature = "stage20-7-test",
     feature = "stage20-8-test",
     feature = "stage20-9-test",
-    feature = "stage20-10-test"
+    feature = "stage20-10-test",
+    feature = "stage20-11-test"
 ))]
 fn spawn_hello_gui(
     image: &[u8],
@@ -4895,7 +4908,8 @@ fn spawn_hello_gui(
     feature = "stage20-7-test",
     feature = "stage20-8-test",
     feature = "stage20-9-test",
-    feature = "stage20-10-test"
+    feature = "stage20-10-test",
+    feature = "stage20-11-test"
 ))]
 fn wait_hello_gui(pid: task::ProcessId) -> Option<(task::ProcessId, Result<i32, task::WaitError>)> {
     let start = timer::ticks();
@@ -4919,9 +4933,236 @@ fn wait_hello_gui(pid: task::ProcessId) -> Option<(task::ProcessId, Result<i32, 
     feature = "stage20-7-test",
     feature = "stage20-8-test",
     feature = "stage20-9-test",
-    feature = "stage20-10-test"
+    feature = "stage20-10-test",
+    feature = "stage20-11-test"
 ))]
 const WOVEN_SHELL_IMAGE: &[u8] = include_bytes!(env!("WOVENHAT_SHELL_IMAGE"));
+
+/// Stage 20.11 acceptance: the lock screen.
+///
+/// The shell runs with `--pin 2468` and no more authority than any other
+/// desktop gate. The kernel checks, with real i8042 input:
+/// - Quick Settings' last row locks: the window is no longer drawn, and a
+///   key does not reach its application;
+/// - each digit shows as a masked dot;
+/// - a wrong PIN says so and stays locked;
+/// - the right PIN unlocks, and the application then gets its key;
+/// - three wrong PINs lock entry out, so even the right PIN is refused
+///   until the lockout ends, and then accepted.
+///
+/// The lock screen's rows are compared with the kernel's own rendering: the
+/// dimmed wallpaper and the text in the kernel font.
+#[cfg(feature = "stage20-11-test")]
+fn stage20_11_self_test() -> bool {
+    use crate::display::{blend_pixel, rgb, Surface};
+
+    const WALLPAPER_TOP: u32 = rgb(18, 42, 74);
+    const WALLPAPER_BOTTOM: u32 = rgb(64, 28, 88);
+    const WHITE: u32 = rgb(255, 255, 255);
+    const BLACK: u32 = rgb(0, 0, 0);
+    const RED: u32 = rgb(200, 60, 60);
+    const UNSET: u32 = 0x0100_0000;
+
+    fn step(name: &str, ok: bool) -> bool {
+        serial::write_line(format_args!(
+            "[S20.11] {} {}",
+            name,
+            if ok { "PASS" } else { "FAIL" }
+        ));
+        ok
+    }
+    fn until(limit: u64, condition: impl Fn() -> bool) -> bool {
+        let start = timer::ticks();
+        loop {
+            if condition() {
+                return true;
+            }
+            if timer::ticks().wrapping_sub(start) > limit {
+                return false;
+            }
+            task::yield_now();
+        }
+    }
+    fn stays(limit: u64, condition: impl Fn() -> bool) -> bool {
+        let start = timer::ticks();
+        while timer::ticks().wrapping_sub(start) <= limit {
+            if !condition() {
+                return false;
+            }
+            task::yield_now();
+        }
+        true
+    }
+    fn wallpaper(x: i32, y: i32, height: i32) -> u32 {
+        let span = (height - 1).max(1);
+        let t = (y.clamp(0, span) * 255 / span) as u8;
+        let base = blend_pixel(WALLPAPER_BOTTOM, WALLPAPER_TOP, t);
+        if x % 32 == 0 || y % 32 == 0 {
+            blend_pixel(WHITE, base, 28)
+        } else {
+            base
+        }
+    }
+    fn packet(dx: i16, screen_dy: i16, left: bool) -> bool {
+        let dy = -screen_dy;
+        let flags = 0x08
+            | u8::from(left)
+            | if dx < 0 { 0x10 } else { 0 }
+            | if dy < 0 { 0x20 } else { 0 };
+        [flags, dx as u8, dy as u8].into_iter().all(mouse::loopback)
+    }
+    fn move_by(mut dx: i32, mut dy: i32) -> bool {
+        while dx != 0 || dy != 0 {
+            let (sx, sy) = (dx.clamp(-100, 100), dy.clamp(-100, 100));
+            if !packet(sx as i16, sy as i16, false) {
+                return false;
+            }
+            dx -= sx;
+            dy -= sy;
+        }
+        true
+    }
+    fn click() -> bool {
+        packet(0, 0, true) && packet(0, 0, false)
+    }
+    fn keys(codes: &[u8]) -> bool {
+        codes.iter().all(|&code| mouse::keyboard_loopback(code))
+    }
+
+    let installed = vfs::create_read_only("/bin/hello-gui", HELLO_GUI_IMAGE).is_ok();
+    let capabilities = capability::CapabilitySet::only(capability::Capability::Console)
+        .with(capability::Capability::DisplayIo)
+        .with(capability::Capability::InputIo)
+        .with(capability::Capability::Ipc);
+    let Some(program) = userspace::load_elf_with_argv(WOVEN_SHELL_IMAGE, &["/bin/woven-shell", "--pin", "2468"]) else {
+        return step("shell image loads", false);
+    };
+    let Ok((shell, _, _)) = task::spawn_user_system_service("woven-shell", program, capabilities) else {
+        return step("shell spawned", false);
+    };
+    if !step(
+        "shell took the display",
+        installed && until(3000, || compositor::holder() == Some(shell.as_u64()) && compositor::is_presenting()),
+    ) {
+        return false;
+    }
+    let Some((width, height)) = compositor::dimensions() else {
+        return step("desktop geometry", false);
+    };
+    let (width, height) = (width as i32, height as i32);
+    let top = height - 24;
+    let client = capability::CapabilitySet::only(capability::Capability::Console).with(capability::Capability::Ipc);
+    let shell_arg = alloc::format!("{}", shell.as_u64());
+    let Some(alpha) = spawn_hello_gui(HELLO_GUI_IMAGE, &["/bin/hello-gui", "--desktop-client", &shell_arg, "a"], Some(client)) else {
+        return step("application A spawned", false);
+    };
+    if !step("window A opened", until(2000, || compositor::pixel(45, 45) == Ok(RED))) {
+        return false;
+    }
+
+    // The lock screen as the kernel renders it: dimmed wallpaper, with
+    // "Locked", the time, the prompt and the dots centred on the middle row.
+    let dim = move |x: i32, y: i32| blend_pixel(BLACK, wallpaper(x, y, height), 160);
+    let middle = height / 2;
+    let line = |y0: i32, text: &str| {
+        let x0 = (width - crate::font::text_width(text) as i32) / 2;
+        let mut mask = Surface::new(width as usize, 7);
+        let bounds = mask.bounds();
+        mask.fill_rect(bounds, UNSET);
+        mask.draw_text(x0, 0, text, WHITE);
+        (y0..y0 + 7).all(|y| {
+            (0..width).all(|x| {
+                let expected = if mask.pixel(x, y - y0) == Some(WHITE) { WHITE } else { dim(x, y) };
+                compositor::pixel(x, y) == Ok(expected)
+            })
+        })
+    };
+    let dots = |count: i32| {
+        let left = (width - (count * 10 - 4)) / 2;
+        (middle + 12..middle + 18).all(|y| {
+            (0..width).all(|x| {
+                let on = count > 0 && x >= left && x < left + count * 10 - 4 && (x - left) % 10 < 6;
+                compositor::pixel(x, y) == Ok(if on { WHITE } else { dim(x, y) })
+            })
+        })
+    };
+    let screen = |prompt: &str, count: i32| {
+        line(middle - 34, "Locked") && line(middle - 4, prompt) && dots(count) && compositor::pixel(45, 45) == Ok(dim(45, 45))
+    };
+
+    // Quick Settings: the button, then its last row, "Lock screen".
+    let button = (width - 54 - 5 * 20 + 8, top + 12);
+    let lock_row = (width - 4 - 164 + 28, top - 2 - (5 * 14 + 2) + 1 + 4 * 14 + 7);
+    let (mut px, mut py) = (width / 2, height / 2);
+    let lock = |px: &mut i32, py: &mut i32| {
+        let ok = move_by(button.0 - *px, button.1 - *py)
+            && click()
+            && move_by(lock_row.0 - button.0, lock_row.1 - button.1)
+            && click();
+        (*px, *py) = lock_row;
+        ok
+    };
+    if !step("Quick Settings locks the screen; the window is hidden", lock(&mut px, &mut py) && until(1000, || screen("Enter PIN", 0))) {
+        return false;
+    }
+    // A key while locked reaches no application: A, waiting for x, must
+    // still be running a second later.
+    let withheld = keys(&[0x2d]) && stays(100, || !task::process_exited(alpha) && screen("Enter PIN", 0));
+    if !step("a key while locked reaches no application", withheld) {
+        return false;
+    }
+    let masked = keys(&[0x03, 0x05]) && until(500, || screen("Enter PIN", 2));
+    if !step("each digit shows as a masked dot", masked) {
+        return false;
+    }
+    let wrong = keys(&[0x1c]) && until(500, || screen("Wrong PIN", 0));
+    if !step("a wrong PIN says so and stays locked", wrong) {
+        return false;
+    }
+    let unlocked = keys(&[0x03, 0x05, 0x07, 0x09, 0x1c]) && until(1000, || compositor::pixel(45, 45) == Ok(RED));
+    if !step("the right PIN unlocks and the window returns", unlocked) {
+        return false;
+    }
+    let delivered = keys(&[0x2d]) && wait_hello_gui(alpha).map(|(_, status)| status) == Some(Ok(0));
+    if !step("unlocked, A gets its key and exits", delivered) {
+        return false;
+    }
+
+    // Lockout: lock again, three wrong PINs, then the right one too soon.
+    let gone = until(1000, || compositor::pixel(45, 45) == Ok(wallpaper(45, 45, height)));
+    let relocked = gone && lock(&mut px, &mut py) && until(1000, || screen("Enter PIN", 0));
+    let locked_out = relocked
+        && keys(&[0x02, 0x1c, 0x02, 0x1c, 0x02, 0x1c])
+        && until(500, || screen("Try again shortly", 0))
+        && keys(&[0x03, 0x05, 0x07, 0x09, 0x1c])
+        // Every key consumed and the repaint after Enter finished, then the
+        // lockout must hold: had the PIN been accepted, the screen would
+        // unlock.
+        && until(500, || !woven_input::pending(shell.as_u64()))
+        && until(500, || screen("Try again shortly", 0))
+        && stays(100, || screen("Try again shortly", 0));
+    if !step("three wrong PINs lock entry out; the right PIN is refused meanwhile", locked_out) {
+        return false;
+    }
+    let started = timer::ticks();
+    while timer::ticks().wrapping_sub(started) < 520 {
+        task::yield_now();
+    }
+    let after = keys(&[0x03, 0x05, 0x07, 0x09, 0x1c])
+        && until(1000, || compositor::pixel(45, 45) == Ok(wallpaper(45, 45, height)));
+    if !step("after the lockout the right PIN unlocks", after) {
+        return false;
+    }
+
+    if task::kill_process(shell.as_u64(), 9).is_err() || !until(1000, || task::process_exited(shell)) {
+        return step("shell killed", false);
+    }
+    let _ = task::wait_process(shell.as_u64());
+    step(
+        "display returned to the terminal",
+        compositor::holder().is_none() && !compositor::is_presenting(),
+    )
+}
 
 /// Stage 20.10 acceptance: Quick Settings.
 ///
@@ -5020,9 +5261,9 @@ fn stage20_10_self_test() -> bool {
     /// The Quick Settings panel for a desktop `width`x`height`, with `rows`,
     /// over whatever `beneath` gives, skipping the cells under the pointer
     /// at `pointer`.
-    fn panel(width: i32, height: i32, rows: [&str; 3], beneath: impl Fn(i32, i32) -> u32, pointer: (i32, i32)) -> bool {
+    fn panel(width: i32, height: i32, rows: [&str; 4], beneath: impl Fn(i32, i32) -> u32, pointer: (i32, i32)) -> bool {
         let top = height - 24;
-        let h = 4 * 14 + 2;
+        let h = 5 * 14 + 2;
         let (x0, y0) = (width - 4 - 164, top - 2 - h);
         let mut image = Surface::new(164, h as usize);
         let bounds = image.bounds();
@@ -5081,7 +5322,7 @@ fn stage20_10_self_test() -> bool {
     // The button sits left of the tray's last slot; the panel's rows are 14
     // pixels apart, the toggles at rows 1-3 under the title.
     let button = (width - 54 - 5 * 20, top + 4);
-    let panel_y = top - 2 - (4 * 14 + 2);
+    let panel_y = top - 2 - (5 * 14 + 2);
     let row = |index: i32| (width - 4 - 164 + 28, panel_y + 1 + (1 + index) * 14 + 7);
     let wall = move |x: i32, y: i32| wallpaper(x, y, height);
 
@@ -5089,7 +5330,7 @@ fn stage20_10_self_test() -> bool {
     let opened = move_by(button.0 + 8 - px, button.1 + 8 - py)
         && click()
         && until(1000, || {
-            panel(width, height, ["Display scale: 2x", "Do not disturb: Off", "Tiling: Off"], wall, (button.0 + 8, button.1 + 8))
+            panel(width, height, ["Display scale: 2x", "Do not disturb: Off", "Tiling: Off", "Lock screen"], wall, (button.0 + 8, button.1 + 8))
                 && compositor::pixel(button.0 + 1, button.1 + 1) == Ok(ENTRY_ACTIVE)
         });
     (px, py) = (button.0 + 8, button.1 + 8);
@@ -5102,7 +5343,7 @@ fn stage20_10_self_test() -> bool {
     let (dx, dy) = row(1);
     let dnd = move_by(dx - px, dy - py)
         && click()
-        && until(1000, || panel(width, height, ["Display scale: 2x", "Do not disturb: On", "Tiling: Off"], wall, (dx, dy)));
+        && until(1000, || panel(width, height, ["Display scale: 2x", "Do not disturb: On", "Tiling: Off", "Lock screen"], wall, (dx, dy)));
     (px, py) = (dx, dy);
     if !step("Do Not Disturb turns on", dnd) {
         return false;
@@ -5131,7 +5372,7 @@ fn stage20_10_self_test() -> bool {
         && until(2000, || {
             compositor::pixel(5, top - 40) == Ok(QUIET)
                 && compositor::pixel(width - 300, 20) == Ok(QUIET)
-                && panel(width, height, ["Display scale: 2x", "Do not disturb: On", "Tiling: On"], |_, _| QUIET, (tx, ty))
+                && panel(width, height, ["Display scale: 2x", "Do not disturb: On", "Tiling: On", "Lock screen"], |_, _| QUIET, (tx, ty))
         });
     (px, py) = (tx, ty);
     if !step("tiling turns on and the window fills the work area", tiled) {
@@ -5148,14 +5389,14 @@ fn stage20_10_self_test() -> bool {
         && click()
         && until(2000, || compositor::scale() == Some(1) && compositor::dimensions() == Some((full.0 as u32, full.1 as u32)))
         && until(2000, || {
-            panel(full.0, full.1, ["Display scale: 1x", "Do not disturb: On", "Tiling: On"], |x, y| wallpaper(x, y, full.1), (sx, sy))
+            panel(full.0, full.1, ["Display scale: 1x", "Do not disturb: On", "Tiling: On", "Lock screen"], |x, y| wallpaper(x, y, full.1), (sx, sy))
         });
     (px, py) = (sx, sy);
     if !step("display scale 1x makes the desktop 1280x800", scaled) {
         return false;
     }
     // Back to 2x through the panel's scale row at the 1x geometry.
-    let back_row = (full.0 - 4 - 164 + 28, (full.1 - 24) - 2 - (4 * 14 + 2) + 1 + 14 + 7);
+    let back_row = (full.0 - 4 - 164 + 28, (full.1 - 24) - 2 - (5 * 14 + 2) + 1 + 14 + 7);
     let restored = move_by(back_row.0 - px, back_row.1 - py)
         && click()
         && until(2000, || compositor::scale() == Some(2) && compositor::dimensions() == Some((width as u32, height as u32)));
