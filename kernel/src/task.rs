@@ -3739,6 +3739,21 @@ pub fn mkdir_path(path: &str) -> Result<(), FileError> {
     if is_mnt_child(&path) {
         ensure_mnt_parent(&path)?;
     }
+    if path.starts_with("/wfs/") {
+        if vfs::stat(&path).is_ok() {
+            return Err(FileError::AlreadyExists);
+        }
+        crate::wfs::mkdir_vfs_path(&path, crate::timer::ticks())
+            .map_err(map_wfs_file_error)?;
+        if let Err(error) = vfs::mkdir(&path) {
+            // Native WovenFS is authoritative. If the bounded VFS registry
+            // cannot publish the node, remove the just-created native entry
+            // before returning so the two namespaces do not diverge.
+            let _ = crate::wfs::unlink_vfs_path(&path, crate::timer::ticks());
+            return Err(map_vfs_file_error(error));
+        }
+        return Ok(());
+    }
     match vfs::mkdir(&path) {
         Ok(()) => {}
         Err(vfs::Error::AlreadyExists) => return Err(FileError::AlreadyExists),
@@ -5577,8 +5592,23 @@ pub fn rename_current(old: &str, new: &str) -> Result<(), FileError> {
         ensure_mnt_parent(&new)?;
         vfs::can_rename(&old, &new).map_err(map_vfs_file_error)?;
         crate::storage::rename_path(&old, &new).map_err(map_mutation_file_error)?;
+    } else if old.starts_with("/wfs/") || new.starts_with("/wfs/") {
+        if !old.starts_with("/wfs/") || !new.starts_with("/wfs/") {
+            return Err(FileError::NotFound);
+        }
+        vfs::can_rename(&old, &new).map_err(map_vfs_file_error)?;
+        crate::wfs::rename_vfs_path(&old, &new, crate::timer::ticks())
+            .map_err(map_wfs_file_error)?;
     }
-    vfs::rename(&old, &new).map_err(map_vfs_file_error)
+    match vfs::rename(&old, &new).map_err(map_vfs_file_error) {
+        Ok(()) => Ok(()),
+        Err(error) if old.starts_with("/wfs/") && new.starts_with("/wfs/") => {
+            // Restore the native name if the in-memory publication failed.
+            let _ = crate::wfs::rename_vfs_path(&new, &old, crate::timer::ticks());
+            Err(error)
+        }
+        Err(error) => Err(error),
+    }
 }
 fn ensure_existing_mnt_path(path: &str) -> Result<(), FileError> {
     if touches_mnt(path) {
@@ -5648,7 +5678,6 @@ fn map_wfs_file_error(error: crate::wfs::Error) -> FileError {
         crate::wfs::Error::Exists => FileError::AlreadyExists,
         crate::wfs::Error::TooLarge | crate::wfs::Error::NoSpace => FileError::TooManyFiles,
         crate::wfs::Error::NotADirectory => FileError::NotFound,
-        #[cfg(any(test, feature = "stage15-1-test", feature = "stage15-2-test"))]
         crate::wfs::Error::NotEmpty => FileError::NotEmpty,
         _ => FileError::NotFound,
     }

@@ -20,7 +20,10 @@ Validation:
 - 4 CPUs: `audit-artifacts/stage15.7-4cpu-1791901119604868100`;
 - marker: `[S15.7] WovenVault handles: PASSED`.
 
-This closes the volatile handle and teardown boundary only. Persistent secret
-records, encrypted-at-rest storage, rotation policy, TPM/firmware-backed key
-provisioning, and a graphical secrets UI remain required for a complete
+This closes the volatile handle and teardown boundary. The later kernel
+security pass added authenticated persistent wrapped-key records, encrypted
+mount-record I/O, and crash-safe successor-generation rotation; those are
+covered by `audit-volume-crypto-2026-09-16.md`. TPM/firmware-backed key
+provisioning, deployment key custody/revocation, physical power-loss
+qualification, and a graphical secrets UI remain required for a complete
 WovenVault product.

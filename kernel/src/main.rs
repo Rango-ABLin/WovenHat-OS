@@ -4702,9 +4702,9 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
 fn qemu_test_exit_success() {
     unsafe {
         core::arch::asm!(
-            "out dx, eax",
+            "out dx, al",
             in("dx") 0xf4_u16,
-            in("eax") 0x10_u32,
+            in("al") 0x10_u8,
             options(nomem, nostack, preserves_flags),
         );
     }
@@ -4720,9 +4720,9 @@ fn qemu_test_exit_failure() -> ! {
     // host-side 180-second timeout expires.
     unsafe {
         core::arch::asm!(
-            "out dx, eax",
+            "out dx, al",
             in("dx") 0xf4_u16,
-            in("eax") 0x11_u32,
+            in("al") 0x11_u8,
             options(nomem, nostack, preserves_flags),
         );
     }
@@ -4794,6 +4794,8 @@ const SYSTEM_APP_EDITOR: &[u8] = include_bytes!(env!("WOVENHAT_EDITOR_IMAGE"));
 const SYSTEM_APP_IMAGES: &[u8] = include_bytes!(env!("WOVENHAT_IMAGES_IMAGE"));
 #[cfg(any(feature = "stage19-app-catalog-test", feature = "system-apps"))]
 const SYSTEM_APP_UPDATE: &[u8] = include_bytes!(env!("WOVENHAT_UPDATE_IMAGE"));
+#[cfg(any(feature = "stage19-app-catalog-test", feature = "system-apps"))]
+const SYSTEM_APP_STORE: &[u8] = include_bytes!(env!("WOVENHAT_STORE_IMAGE"));
 
 #[cfg(feature = "system-apps")]
 fn install_production_system_apps() -> bool {
@@ -4868,6 +4870,13 @@ fn install_production_system_apps() -> bool {
             binary_path: "/bin/wovenhat-update",
             catalog_path: "/share/applications/woven-update.app",
             catalog: b"Name=WovenUpdate\nExec=/bin/wovenhat-update\n",
+        },
+        App {
+            name: "woven-store",
+            image: SYSTEM_APP_STORE,
+            binary_path: "/bin/wovenhat-store",
+            catalog_path: "/share/applications/woven-store.app",
+            catalog: b"Name=WovenStore\nExec=/bin/wovenhat-store\n",
         },
     ];
     // Verify and parse all packages before changing the VFS. A malformed or
@@ -5037,6 +5046,13 @@ fn stage19_app_catalog_self_test() -> bool {
             catalog_path: "/share/applications/woven-update.app",
             catalog: b"Name=WovenUpdate\nExec=/bin/wovenhat-update\n",
         },
+        App {
+            name: "woven-store",
+            image: SYSTEM_APP_STORE,
+            binary_path: "/bin/wovenhat-store",
+            catalog_path: "/share/applications/woven-store.app",
+            catalog: b"Name=WovenStore\nExec=/bin/wovenhat-store\n",
+        },
     ];
     fn step(name: &str, ok: bool) -> bool {
         serial::write_line(format_args!(
@@ -5102,7 +5118,7 @@ fn stage19_app_catalog_self_test() -> bool {
             return false;
         }
     }
-    step("nine signed applications installed", true)
+    step("ten signed applications installed", true)
 }
 
 /// Stage 16.1 acceptance: an application built outside the kernel is installed

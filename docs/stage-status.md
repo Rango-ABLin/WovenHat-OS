@@ -222,16 +222,13 @@ See the
 
 ## 2026-10-14 revalidation
 
-The first Stage 19 system application, WovenCalculator, now builds outside the
-kernel, signs into WAPP, and executes in Ring 3 through the existing verified
-application boundary. Its bounded parser and signed 1/2/4-CPU acceptance are
-recorded in the [WovenCalculator audit](audit-stage19-calculator-2026-10-14.md).
-WovenTerminal now provides bounded `help`, `ls`, `cat`, `calc`, and `exit`
-commands through the same ABI and passes its signed 1/2/4-CPU acceptance; see
-the [WovenTerminal audit](audit-stage19-terminal-2026-10-14.md). The remaining
-roadmap application suite and catalog/boot-image installation are not yet
-claimed complete. WovenFiles now adds a read-only bounded directory/file
-browser with signed 1/2/4-CPU acceptance; see the
+The Stage 19 system applications now build outside the kernel, sign into WAPP,
+and execute in Ring 3 through the existing verified application boundary.
+WovenCalculator, WovenTerminal, and WovenFiles retain their bounded 1/2/4-CPU
+acceptance; see their individual audits. The remaining roadmap applications,
+catalog, and multi-package boot-image installation are now covered by the
+ten-application release chain. WovenFiles now adds a read-only bounded
+directory/file browser; see the
 [WovenFiles audit](audit-stage19-files-2026-10-14.md).
 WovenMonitor adds bounded read-only clock, display, and storage diagnostics
 and passes signed 1/2/4-CPU execution; see the
@@ -251,31 +248,34 @@ signed 1/2/4-CPU execution; see the
 WovenUpdate adds bounded read-only update preflight and passes signed 1/2/4-CPU
 execution; see the
 [WovenUpdate audit](audit-stage19-update-2026-10-14.md).
+WovenStore adds bounded read-only installed-catalog browsing and passes signed
+1/2/4-CPU execution; see the
+[WovenStore audit](audit-stage19-store-2026-10-14.md).
 
-The full `scripts/test-release.py` chain passed on the current tree. It covered
-warning-denying kernel/host Clippy, all host integration tests, 1/2/4-CPU debug
-memory/storage/network, legacy PIC, 4-CPU release memory/storage/network,
-release compilation, and shell smoke. See the
-[release validation audit](audit-release-validation-2026-10-14.md).
+The complete `scripts/test-release.py` chain now passes on the current tree.
+The debug QEMU exit path was corrected to issue the `isa-debug-exit` byte-width
+write explicitly; the full chain then passed lint, host tests, 1/2/4-CPU debug
+and release gates, all ten applications, catalog acceptance, and production
+system-app boot. See the [release validation audit](audit-release-validation-2026-10-14.md).
 
 This is software/QEMU qualification only; native hardware and destructive USB
 media limits remain open.
 
 The authoritative release chain now includes app-specific Clippy, the signed
-nine-application catalog gate on 1/2/4 CPUs, and release packaging of WAPP
+ten-application catalog gate on 1/2/4 CPUs, and release packaging of WAPP
 payloads, catalog descriptors, and per-artifact hashes. See the
 [system-app release audit](audit-release-system-apps-2026-10-14.md). The
 feature-gated release image now claims multi-package RAM installation; physical
 media qualification remains open.
 
-The `system-apps` production-image feature now installs the nine signed
+The `system-apps` production-image feature now installs the ten signed
 packages during normal boot, with pre-mutation signature/ELF validation,
 collision checks, and rollback of newly created VFS entries on publication
 failure. It requires an explicitly provisioned application trust key; the
 acceptance harness supplies the test key only for QEMU. The 4-CPU shell gate
 confirmed installation before shell startup. Persistent media updates,
-power-loss rollback, key rotation/revocation, and the remaining applications
-are still open. See the
+power-loss rollback, key rotation/revocation, and native hardware
+qualification remain open. See the
 [production system-app boot audit](audit-stage19-production-system-app-boot-2026-10-14.md).
 
 Stage 14.5D was rerun on 1/2/4 CPUs. DHCP, DNS, ICMP, host-verified UDP/TCP,
@@ -2067,25 +2067,26 @@ acceptance, filesystem install, read-back, load, spawn, completion and exit
 status. The dedicated application harness now passes on 1, 2 and 4 CPUs; see
 the [Stage 16.1 audit](audit-stage16-1-out-of-kernel-application-2026-10-14.md).
 
-Open: one application per acceptance build, since `WOVENHAT_APP_IMAGE` names a
-single signed package; no FAT32 round trip, because the gate installs into the VFS at
-`/bin` where `exec` resolves names; no shared libraries or thread-locals, both
-rejected by the loader by design; and no stack-size negotiation.
+The original Stage 16.1 boundary remains intentionally single-package and
+VFS-backed; the release-level Stage 19 catalog/production-image gates now cover
+the ten-package install plan and are recorded above. Shared libraries and
+stack-size negotiation remain outside the bounded loader contract; static
+initial-exec TLS and self-contained dynamic relocation are now supported.
 
 The accepted Stage 19 applications now have a reproducible packaging boundary:
-`scripts/package-system-apps.py` builds WovenCalculator, WovenTerminal, and
-WovenFiles, signs each WAPP payload, and emits hashed `/bin` install paths plus
-`/share/applications` descriptors in an install-plan manifest. This is a
-release artifact, not a claim that the current one-package acceptance boot can
-install all packages. The multi-package image/installer consumer remains open.
+`scripts/package-system-apps.py` builds all ten applications, signs each WAPP
+payload, and emits hashed `/bin` install paths plus `/share/applications`
+descriptors in an install-plan manifest. The release image consumes that plan
+and installs all ten packages transactionally in RAM after verification.
 
 The feature-gated multi-application catalog gate now passes on 1/2/4 CPUs.
-It consumes the signed calculator, terminal, and files packages, rejects a
-tampered copy of each, verifies VFS byte-for-byte read-back and normal ELF
-loading, and publishes their matching catalog descriptors. See the
+It consumes all ten signed packages, rejects tampered copies, verifies VFS
+byte-for-byte read-back and normal ELF loading, and publishes matching catalog
+descriptors. The normal-boot production image gate confirms installation
+before shell startup. See the
 [Stage 19 system-app catalog audit](audit-stage19-system-app-catalog-2026-10-14.md).
-This closes the acceptance boundary only; rollback, trusted catalog
-publication, and normal-boot image installation remain open.
+Persistent-media installation, power-loss rollback, and deployment-key
+rotation/revocation remain separate production requirements.
 
 ## Stage 15 — WovenFS native filesystem (2026-10-12)
 
@@ -2125,8 +2126,10 @@ Stage 12.2/12.4 is an open product decision. The bounded `/wfs/<name>` file
 authority now supports durable create, write, read-back, and unlink through task
 file syscalls; direct generic VFS mutation remains read-only. Native mutations
 serialize their complete read-modify-write transactions. The adapter remains a
-flat root-file slice: rename, mkdir, directory enumeration, mounted-system
-policy, and native multi-directory semantics remain open. See the [Stage 15
+Nested native paths, directory creation, empty-directory removal, and rename
+are now transactional; directory rename rejects descendant cycles with a
+bounded fail-closed walk. Recursive import into the VFS mount and mounted-system
+policy remain open. See the [Stage 15
 VFS write-through audit](audit-stage15-wfs-vfs-write-through-2026-10-14.md).
 
 Crash recovery is proven by fault injection, not actual power loss on a device.
@@ -2160,8 +2163,9 @@ Release builds now require `WOVENHAT_APP_TRUSTED_PUBLIC_KEY_HEX`; the RFC
 self-test remains pinned to the development vector. Signed package
 installation now has a real external-application path through
 `tools/wapp-packager`, and Stage 16.1 verifies that package before and after its
-VFS round trip. Multi-application catalogs, rollback protection, key
-rotation/revocation, and firmware/installer-owned key slots remain open. User
+VFS round trip. Multi-application catalogs and rollback-safe RAM publication
+are now covered by the ten-app release gates. Deployment-key
+rotation/revocation and firmware/installer-owned key slots remain open. User
 `exec`/`spawn` now reject raw external ELF; only the finite kernel-owned system
 image allowlist retains the explicit internal-image path.
 Stage 15.5 software signed-kernel handoff is accepted with the exact 1/2/4-CPU
@@ -2180,7 +2184,8 @@ warning-denying freestanding kernel Clippy pass. See the
 The Stage 15.6 software measurement audit records the separate 1/2/4-CPU
 kernel measurement gate; TPM PCR extension, event logs, and firmware Secure
 Boot state remain hardware-dependent.
-Persistent encrypted records, rotation, TPM/firmware provisioning, and a
+Persistent encrypted records and crash-safe successor rotation now pass at the
+kernel boundary; TPM/firmware provisioning, deployment-key custody, and a
 secrets UI remain open.
 
 ## Stage 15.8 — security-ledger read ABI (2026-10-13)
@@ -2985,9 +2990,11 @@ WovenFS metadata/integrity, volume-integrity envelope boundaries, snapshots,
 and storage-management inventory each passed their 1/2/4-CPU gates. See
 [audit](audit-stage12-2-5-2026-09-16.md). Production AEAD now passes the
 isolated 1/2/4-CPU gate with a bounded revocable key vault; see
-[audit](audit-volume-crypto-2026-09-16.md). Measured key provisioning,
-persistent key storage, rotation policy, and encrypted-volume mount integration
-remain open before encrypted volumes are security-complete.
+[audit](audit-volume-crypto-2026-09-16.md). The follow-up integration now
+covers measured provisioning, authenticated persistent wrapped keys,
+successor-generation rotation, and encrypted mount-record I/O. A TPM/firmware
+measured-root backend, physical power-loss evidence, and deployment key-slot
+policy remain open.
 
 ## Stage 7.1.5 - accepted on 2026-09-16
 
