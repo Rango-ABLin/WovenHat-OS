@@ -850,7 +850,7 @@ fn desktop_client(args: &Args) -> ! {
             Some(b"c") => (b"Wide", 400, 260, rgb(60, 160, 90), b'z', false),
             _ => fail(181),
         };
-    let window = match GraphicsSurface::create(u32::from(width), u32::from(height)) {
+    let mut window = match GraphicsSurface::create(u32::from(width), u32::from(height)) {
         Ok(surface) => surface,
         Err(_) => fail(182),
     };
@@ -907,6 +907,27 @@ fn desktop_client(args: &Args) -> ! {
             Ok(_) => {}
         }
         if let Ok((length, sender)) = libwoven::message_receive(&mut key) {
+            // A resize request: answer with a new surface of that size,
+            // then release the old one.
+            if sender == shell && length == 8 && &key[..4] == b"WSIZ" {
+                let w = u16::from_le_bytes([key[4], key[5]]);
+                let h = u16::from_le_bytes([key[6], key[7]]);
+                if let Ok(resized) = GraphicsSurface::create(u32::from(w), u32::from(h)) {
+                    let mut reply = [0u8; 16];
+                    reply[..4].copy_from_slice(b"WRSZ");
+                    reply[4..12].copy_from_slice(&resized.handle().to_le_bytes());
+                    reply[12..14].copy_from_slice(&w.to_le_bytes());
+                    reply[14..].copy_from_slice(&h.to_le_bytes());
+                    if resized.fill_rect(0, 0, w, h, color).is_ok()
+                        && resized.share_with(shell).is_ok()
+                        && libwoven::message_send(shell, &reply).is_ok()
+                    {
+                        window = resized;
+                        let _ = libwoven::print("hello-gui desktop client: resized\n");
+                    }
+                }
+                continue;
+            }
             if sender == shell && &key[..length] == b"WCLS" {
                 let _ = libwoven::print("hello-gui desktop client: closed by the shell\n");
                 drop(icon);

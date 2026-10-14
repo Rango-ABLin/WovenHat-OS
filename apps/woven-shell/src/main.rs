@@ -46,6 +46,13 @@
 //! right; the focused window sits higher, so its shadow falls further and
 //! darker. Shadows stay off the taskbar.
 //!
+//! Windows change size by request: the shell sends the owner `WSIZ` with a
+//! client size, and the owner answers `WRSZ` with a new surface of that size
+//! (token, width, height), releasing the old one. Dropping a window on the
+//! left or right edge snaps it to that half of the screen. F2 toggles
+//! tiling: master and stack, the first window on the left half and the rest
+//! sharing the right, re-tiled as windows open and close.
+//!
 //! A window is moved by dragging its title bar. Its close control sends the
 //! owner `WCLS`, a request: the window goes when the owner releases its
 //! surface, so an application can finish first, or decline.
@@ -67,6 +74,7 @@
 use core::cell::UnsafeCell;
 use core::panic::PanicInfo;
 
+use libwoven::layout::{self, Frame};
 use libwoven::{
     blend, font, process, rgb, wait, Args, Canvas, DateTime, FrameEvent, GraphicsSurface,
     InputEvent, Key, Region, Spring, TRANSPARENT,
@@ -178,6 +186,8 @@ const TILE_PIXELS: usize = TILE_WIDTH * TILE_HEIGHT;
 /// The shell wakes at least four times a second for the clock, the toast
 /// timer and window liveness.
 const FRAME_PERIOD: u64 = libwoven::time::TICKS_PER_SECOND / 4;
+/// How long a resize may take before a vanished surface counts as an exit.
+const RESIZE_GRACE: u64 = libwoven::time::TICKS_PER_SECOND;
 /// The frame clock while something animates: 20 ms.
 const ANIMATION_PERIOD: u64 = 2;
 
@@ -321,6 +331,10 @@ struct Window {
     title_length: usize,
     /// Opacity, 0 to 255: animated from 0 as the window opens.
     fade: Spring,
+    /// Until this tick, a resize has been requested and the owner may be
+    /// swapping surfaces: a failed blit of the old one does not mean it
+    /// exited.
+    resizing_until: libwoven::time::Ticks,
 }
 
 impl Window {
@@ -642,6 +656,8 @@ struct Desktop {
     pointer_visible: bool,
     /// The window being dragged, and where in it the pointer took hold.
     drag: Option<(usize, i32, i32)>,
+    /// Whether windows are tiled.
+    tiled: bool,
     apps: [Option<App>; MAX_APPS],
     app_count: usize,
     launcher_open: bool,
@@ -830,7 +846,8 @@ impl Desktop {
                 }
             }
             Key::F1 => return self.toggle_launcher(),
-            Key::Char(_) => {}
+            // Tiling waits until the launcher closes.
+            Key::Char(_) | Key::F2 => {}
         }
         before.union(self.panel_area())
     }
@@ -1063,13 +1080,104 @@ impl Desktop {
         title[..title_length].copy_from_slice(&message[16..16 + title_length]);
         let mut fade = Spring::new(0);
         fade.set_target(i32::from(u8::MAX));
-        let window = Window { owner, token, x, y, width, height, title, title_length, fade };
+        let window = Window {
+            owner,
+            token,
+            x,
+            y,
+            width,
+            height,
+            title,
+            title_length,
+            fade,
+            resizing_until: 0,
+        };
         self.windows[slot] = Some(window);
         let previous = self.focused().and_then(|old| self.windows[old]).map(|w| w.footprint());
         self.stack[self.stacked] = slot;
         self.stacked += 1;
         log(&[b"woven-shell: window opened: ", &title[..title_length]]);
-        window.footprint().union(previous.unwrap_or(empty)).union(self.taskbar())
+        window
+            .footprint()
+            .union(previous.unwrap_or(empty))
+            .union(self.taskbar())
+            .union(self.retile())
+    }
+
+    /// Where windows may go: the screen above the taskbar.
+    fn work_area(&self) -> Frame {
+        Frame::new(0, 0, self.width, self.taskbar_top())
+    }
+
+    /// Put window `slot` in `frame`, title bar included: move it now, and if
+    /// its client area changes size, ask the owner for a surface of the new
+    /// size. Returns the area to repaint.
+    fn place(&mut self, slot: usize, frame: Frame) -> Area {
+        let Some(window) = self.windows[slot].as_mut() else {
+            return Area::new(0, 0, 0, 0);
+        };
+        let before = window.footprint();
+        let client = frame.client(TITLE_HEIGHT);
+        window.x = client.x;
+        window.y = client.y;
+        if (client.width, client.height) != (window.width, window.height) {
+            let mut request = [0u8; 8];
+            request[..4].copy_from_slice(b"WSIZ");
+            request[4..6].copy_from_slice(&(client.width as u16).to_le_bytes());
+            request[6..].copy_from_slice(&(client.height as u16).to_le_bytes());
+            window.resizing_until = libwoven::ticks() + RESIZE_GRACE;
+            let _ = libwoven::message_send(window.owner, &request);
+        }
+        before.union(window.footprint())
+    }
+
+    /// Lay every window out again, if tiling is on. Returns the area to
+    /// repaint.
+    fn retile(&mut self) -> Area {
+        let mut dirty = Area::new(0, 0, 0, 0);
+        if !self.tiled {
+            return dirty;
+        }
+        let mut slots = [0usize; MAX_WINDOWS];
+        let mut count = 0;
+        for (slot, _) in self.entries() {
+            slots[count] = slot;
+            count += 1;
+        }
+        let (frames, placed) = layout::tile(count, self.work_area());
+        for index in 0..placed {
+            dirty = dirty.union(self.place(slots[index], frames[index]));
+        }
+        dirty
+    }
+
+    /// `WRSZ`: the owner replaced a window's surface with one of a new size.
+    /// Returns the area to repaint.
+    fn resized(&mut self, owner: process::Id, message: &[u8]) -> Area {
+        let empty = Area::new(0, 0, 0, 0);
+        if message.len() != 16 {
+            return empty;
+        }
+        let token = u64::from_le_bytes(message[4..12].try_into().unwrap_or([0; 8]));
+        let width = i32::from(u16::from_le_bytes([message[12], message[13]]));
+        let height = i32::from(u16::from_le_bytes([message[14], message[15]]));
+        let top = self.taskbar_top();
+        if libwoven::surface_owner(token) != owner
+            || !(1..=self.width).contains(&width)
+            || !(1..=top - TITLE_HEIGHT).contains(&height)
+        {
+            return empty;
+        }
+        let Some(window) = self.windows.iter_mut().flatten().find(|window| window.owner == owner) else {
+            return empty;
+        };
+        let before = window.footprint();
+        window.token = token;
+        window.width = width;
+        window.height = height;
+        window.resizing_until = 0;
+        log(&[b"woven-shell: window resized: ", &window.title[..window.title_length]]);
+        before.union(window.footprint())
     }
 
     /// Remove window `slot`. Returns the area to repaint.
@@ -1087,13 +1195,18 @@ impl Desktop {
         log(&[b"woven-shell: window closed: ", &window.title[..window.title_length]]);
         // The newly focused window's title and shadow change too.
         let next = self.focused().and_then(|top| self.windows[top]).map(|w| w.footprint());
-        window.footprint().union(next.unwrap_or(Area::new(0, 0, 0, 0))).union(self.taskbar())
+        window
+            .footprint()
+            .union(next.unwrap_or(Area::new(0, 0, 0, 0)))
+            .union(self.taskbar())
+            .union(self.retile())
     }
 
     fn handle_message(&mut self, sender: process::Id, message: &[u8]) -> Area {
         let empty = Area::new(0, 0, 0, 0);
         match message.get(..4) {
             Some(b"WOPN") => self.open(sender, message),
+            Some(b"WRSZ") => self.resized(sender, message),
             Some(b"TRAY") if message.len() == 12 => {
                 let token = u64::from_le_bytes(message[4..12].try_into().unwrap_or([0; 8]));
                 if libwoven::surface_owner(token) != sender {
@@ -1135,7 +1248,14 @@ impl Desktop {
                 before.union(self.cursor_area()).union(moved)
             }
             InputEvent::PointerButton { button: 0, pressed: false } => {
-                self.drag = None;
+                // Dropped on the left or right edge: snap to that half.
+                let Some((slot, _, _)) = self.drag.take() else { return empty };
+                let (x, _) = self.pointer;
+                if x <= 0 || x >= self.width - 1 {
+                    let half = layout::half(self.work_area(), x > 0);
+                    log(&[b"woven-shell: window snapped"]);
+                    return self.place(slot, half);
+                }
                 empty
             }
             InputEvent::PointerButton { button: 0, pressed: true } => {
@@ -1186,6 +1306,11 @@ impl Desktop {
             }
             InputEvent::Key(key) if self.launcher_open => self.launcher_key(key),
             InputEvent::Key(Key::F1) => self.toggle_launcher(),
+            InputEvent::Key(Key::F2) => {
+                self.tiled = !self.tiled;
+                log(if self.tiled { &[b"woven-shell: tiling on"] } else { &[b"woven-shell: tiling off"] });
+                self.retile()
+            }
             InputEvent::Key(Key::Char(character)) if character.is_ascii() => {
                 if let Some(window) = self.focused().and_then(|slot| self.windows[slot]) {
                     let _ = libwoven::message_send(window.owner, &[character as u8]);
@@ -1229,6 +1354,9 @@ impl Desktop {
                     dirty = dirty.union(changed);
                 }
                 Ok(None) => {}
+                // While a resize is outstanding the owner may have released
+                // the old surface before its new one arrives.
+                Err(_) if libwoven::ticks() < window.resizing_until => {}
                 Err(_) => dirty = dirty.union(self.close(slot)),
             }
         }
@@ -1327,6 +1455,7 @@ fn main(args: Args) -> ! {
         pointer: (width / 2, height / 2),
         pointer_visible: false,
         drag: None,
+        tiled: false,
         apps,
         app_count,
         launcher_open: false,

@@ -1379,6 +1379,81 @@ impl Spring {
     }
 }
 
+/// Window layout for a tiling window manager: pure geometry, so it can be
+/// tested on the host.
+pub mod layout {
+    /// A rectangle in screen coordinates.
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub struct Frame {
+        pub x: i32,
+        pub y: i32,
+        pub width: i32,
+        pub height: i32,
+    }
+
+    impl Frame {
+        pub const fn new(x: i32, y: i32, width: i32, height: i32) -> Self {
+            Self {
+                x,
+                y,
+                width,
+                height,
+            }
+        }
+
+        /// The client area of a window filling this frame under a title bar
+        /// `title` pixels tall.
+        pub const fn client(self, title: i32) -> Self {
+            Self::new(self.x, self.y + title, self.width, self.height - title)
+        }
+    }
+
+    /// The most windows [`tile`] lays out.
+    pub const MAX_TILES: usize = 8;
+
+    /// Master and stack: the first window takes the left half of `area`, the
+    /// rest share the right half in equal rows, the last taking any
+    /// remainder. One window takes the whole area. Frames cover `area`
+    /// exactly, without overlapping. Returns the frames and how many there
+    /// are (`count`, capped at [`MAX_TILES`]).
+    pub fn tile(count: usize, area: Frame) -> ([Frame; MAX_TILES], usize) {
+        let count = count.min(MAX_TILES);
+        let mut frames = [Frame::new(0, 0, 0, 0); MAX_TILES];
+        match count {
+            0 => {}
+            1 => frames[0] = area,
+            _ => {
+                let master = area.width / 2;
+                frames[0] = Frame::new(area.x, area.y, master, area.height);
+                let stack = (count - 1) as i32;
+                let row = area.height / stack;
+                for index in 0..stack {
+                    let y = area.y + index * row;
+                    let height = if index == stack - 1 {
+                        area.y + area.height - y
+                    } else {
+                        row
+                    };
+                    frames[1 + index as usize] =
+                        Frame::new(area.x + master, y, area.width - master, height);
+                }
+            }
+        }
+        (frames, count)
+    }
+
+    /// The left or right half of `area`, for snapping a window dragged to
+    /// an edge.
+    pub const fn half(area: Frame, right: bool) -> Frame {
+        let left = area.width / 2;
+        if right {
+            Frame::new(area.x + left, area.y, area.width - left, area.height)
+        } else {
+            Frame::new(area.x, area.y, left, area.height)
+        }
+    }
+}
+
 /// What ended a [`FrameClock::wait`].
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum FrameEvent {
@@ -1456,6 +1531,7 @@ pub enum Key {
     Backspace,
     Tab,
     F1,
+    F2,
 }
 
 /// An input event delivered to the focused process.
@@ -1526,6 +1602,7 @@ fn decode_event(result: u64) -> Result<Option<InputEvent>, Error> {
         3 => InputEvent::Key(Key::Backspace),
         4 => InputEvent::Key(Key::Tab),
         5 => InputEvent::Key(Key::F1),
+        8 => InputEvent::Key(Key::F2),
         6 => InputEvent::PointerMove {
             dx: payload as u16 as i16,
             dy: (payload >> 16) as u16 as i16,
@@ -2086,6 +2163,49 @@ mod tests {
         let before = batched.value();
         batched.step(1);
         assert!(batched.value() <= before);
+    }
+
+    #[test]
+    fn tiling_covers_the_area_exactly_without_overlap() {
+        use layout::{Frame, MAX_TILES, tile};
+        let area = Frame::new(0, 0, 640, 376);
+        assert_eq!(tile(0, area).1, 0);
+        assert_eq!(tile(1, area).0[0], area, "one window takes everything");
+        let (two, _) = tile(2, area);
+        assert_eq!(two[0], Frame::new(0, 0, 320, 376), "master on the left");
+        assert_eq!(two[1], Frame::new(320, 0, 320, 376), "stack on the right");
+        for count in 1..=MAX_TILES + 2 {
+            let (frames, placed) = tile(count, Frame::new(3, 5, 641, 377));
+            assert_eq!(placed, count.min(MAX_TILES));
+            let frames = &frames[..placed];
+            let area: i64 = frames
+                .iter()
+                .map(|f| i64::from(f.width) * i64::from(f.height))
+                .sum();
+            assert_eq!(area, 641 * 377, "{count} windows cover the area");
+            for (i, a) in frames.iter().enumerate() {
+                assert!(a.width > 0 && a.height > 0);
+                for b in &frames[i + 1..] {
+                    let overlap = a.x < b.x + b.width
+                        && b.x < a.x + a.width
+                        && a.y < b.y + b.height
+                        && b.y < a.y + a.height;
+                    assert!(!overlap, "{count} windows: {a:?} and {b:?} overlap");
+                }
+            }
+        }
+        assert_eq!(
+            Frame::new(0, 0, 320, 376).client(14),
+            Frame::new(0, 14, 320, 362)
+        );
+    }
+
+    #[test]
+    fn halves_split_the_area() {
+        use layout::{Frame, half};
+        let area = Frame::new(0, 0, 641, 376);
+        assert_eq!(half(area, false), Frame::new(0, 0, 320, 376));
+        assert_eq!(half(area, true), Frame::new(320, 0, 321, 376));
     }
 
     #[test]

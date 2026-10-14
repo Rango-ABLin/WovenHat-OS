@@ -17,6 +17,72 @@ gate pass. The unsupported `cargo test --workspace --all-targets` command is
 documented as a host-assembler mismatch rather than treated as a production
 failure. See the [host-test audit](audit-host-test-boundary-2026-10-14.md).
 
+## Stage 20.8 — tiling: resize protocol, snap to edges, master and stack (2026-10-13)
+
+Roadmap Stage 18.3, Window Experience: intelligent tiling. This completes
+the design's 20.4–20.8 sequence. Workspace transitions are deferred to
+roadmap 18.8.
+
+**Input.** F2 is decoded (scancode 0x3C) and reaches applications.
+- `woven_input::Key::F2` is encoded as input kind 8 and decoded by
+  libwoven.
+- The kernel's own terminal paths ignore it.
+- This is an additive change to the `InputPoll` encoding.
+
+**libwoven `layout`.** Pure geometry, host-tested:
+- `tile(count, area)` places master and stack: the first window takes the
+  left half, and the rest share the right half in equal rows, the last
+  taking the remainder.
+- `half(area, right)` gives the left or right half.
+- `Frame::client` gives the client area under a title bar.
+- The tests show frames cover the area exactly, with no overlap, for 1 to
+  10 windows (capped at 8), and check the halves.
+
+**Resize protocol.** The shell sends the owner `WSIZ` with a client size,
+and the owner answers `WRSZ` with a new surface of that size (token,
+width and height, owner-checked like `WOPN`), then releases the old one.
+- The shell moves the window at once and swaps the surface when the reply
+  arrives.
+- For one second after a request, a vanished surface does not count as an
+  exit: the owner may release the old surface before its reply is
+  processed.
+- hello-gui `--desktop-client` answers `WSIZ`.
+
+**Shell.**
+- Dropping a dragged window on the left or right screen edge snaps it to
+  that half.
+- F2 toggles tiling: master and stack over the screen above the taskbar,
+  in window order, applied again whenever a window opens or closes.
+
+Gate `[S20.8] tiling: PASSED`, driven by real i8042 input:
+- Window A is dragged by its title bar onto the left edge and dropped. It
+  snaps and is resized: its 320×362 client area and its title bar are
+  exact.
+- F2 tiles: A keeps the left half and B takes the right half, resized,
+  with both title bars exact (A focused, B not).
+- F2 turns tiling off. Both applications take their keys and exit, and
+  killing the shell returns the display.
+
+The first run failed at the tiling check because of the gate, not the
+shell. A, focused after its drag, correctly casts its deep shadow across
+the first 8 columns of B beside it, and the gate had expected plain blue
+there. The gate now applies A's shadow bands to B's expected pixels, the
+same stacking the Stage 20.5 gate computes.
+
+Negative controls, with evidence in the worktree's
+`audit-artifacts/stage20.8-negative-control-*`:
+- With F2 ignored, the gate fails at "F2 tiles the windows: master on the
+  left, stack on the right".
+- With snapping disabled, it fails at "dropping A on the left edge snaps
+  it to the left half, resized".
+
+Open:
+- No minimum sizes: windows are never refused a tile size.
+- No resizing by dragging window edges; resizing happens only through
+  snapping and tiling.
+- No keyboard tiling beyond F2. Real modifier keys (Ctrl, Alt, Super) are
+  still missing.
+
 ## Stage 20.7 — physics-based animation: windows fade in on a spring (2026-10-13)
 
 Roadmap Stage 18.3, Window Experience: smooth physics-based animation.
