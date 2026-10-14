@@ -2,6 +2,15 @@
 
 ## 2026-10-14 revalidation
 
+The full `scripts/test-release.py` chain passed on the current tree. It covered
+warning-denying kernel/host Clippy, all host integration tests, 1/2/4-CPU debug
+memory/storage/network, legacy PIC, 4-CPU release memory/storage/network,
+release compilation, and shell smoke. See the
+[release validation audit](audit-release-validation-2026-10-14.md).
+
+This is software/QEMU qualification only; native hardware and destructive USB
+media limits remain open.
+
 Stage 14.5D was rerun on 1/2/4 CPUs. DHCP, DNS, ICMP, host-verified UDP/TCP,
 SMP/TLB, and firewall transport/path checks passed with exit 33. See the
 [Stage 14.5D revalidation audit](audit-stage14-5d-revalidation-2026-10-14.md).

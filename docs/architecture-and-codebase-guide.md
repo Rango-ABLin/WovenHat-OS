@@ -1,5 +1,15 @@
 # WovenHat OS Architecture & Codebase Guide
 
+## Release validation (2026-10-14)
+
+The repository release chain passed on the current tree, including warning-
+denying kernel/host Clippy, all host integration tests, 1/2/4-CPU debug
+memory/storage/network gates, legacy PIC, 4-CPU release gates, release build,
+and shell smoke. The durable report and image manifest are recorded by the
+[release validation audit](audit-release-validation-2026-10-14.md). This is
+software/QEMU qualification only; native hardware and destructive media limits
+remain explicit.
+
 ## Stage 14.5D network revalidation (2026-10-14)
 
 The live WovenGuard transport/path suite passes on 1/2/4 CPUs, including
