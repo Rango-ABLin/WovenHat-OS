@@ -37,6 +37,10 @@ or physical flash qualification.
   `stage15.1-1cpu-1792003097975720200`,
   `stage15.1-2cpu-1792003179899219100`, and
   `stage15.1-4cpu-1792003230834435200`.
+- The durable-first publication hardening was rechecked on 1/2/4 CPUs:
+  `stage15.1-1cpu-1792006921025775400`,
+  `stage15.1-2cpu-1792006991018191200`, and
+  `stage15.1-4cpu-1792007054767355600`.
 - Fresh scratch-device Stage 15.2 evidence passed on 1, 2, and 4 CPUs with
   exit 33 under `target/wovenfs-device-scratch-{1,2,4}cpu`.
 
