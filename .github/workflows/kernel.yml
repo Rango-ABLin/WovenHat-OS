@@ -1,5 +1,8 @@
 name: kernel
 
+permissions:
+  contents: read
+
 on:
   push:
   pull_request:
