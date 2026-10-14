@@ -2,6 +2,12 @@
 
 ## 2026-10-14 revalidation
 
+Stage 14.5D was rerun on 1/2/4 CPUs. DHCP, DNS, ICMP, host-verified UDP/TCP,
+SMP/TLB, and firewall transport/path checks passed with exit 33. See the
+[Stage 14.5D revalidation audit](audit-stage14-5d-revalidation-2026-10-14.md).
+The evidence remains QEMU virtio-only and does not claim native NIC/radio
+qualification.
+
 Stages 13.4, 13.5, 13.6, and 13.7 were independently rerun on 1/2/4 CPUs
 and all passed with exit 33. See the
 [Stage 13.4–13.7 validation audit](audit-stage13-4-7-validation-2026-10-14.md).

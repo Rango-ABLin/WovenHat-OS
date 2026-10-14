@@ -1,5 +1,13 @@
 # WovenHat OS Architecture & Codebase Guide
 
+## Stage 14.5D network revalidation (2026-10-14)
+
+The live WovenGuard transport/path suite passes on 1/2/4 CPUs, including
+DHCP, DNS, ICMP, host-verified UDP/TCP round trips, and SMP/TLB checks. The
+evidence is recorded in the [Stage 14.5D revalidation audit](audit-stage14-5d-revalidation-2026-10-14.md).
+It qualifies the QEMU virtio boundary only; native NIC/radio and physical-link
+behavior remain hardware work.
+
 ## Stage 13.4–13.7 revalidation (2026-10-14)
 
 The ordered AHCI/SATA, xHCI core, USB HID, and WovenInput software gates pass
