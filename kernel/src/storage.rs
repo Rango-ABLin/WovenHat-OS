@@ -1137,11 +1137,14 @@ fn data_journal_self_test() -> bool {
             && !decoded[1].old_exists
             && decoded[4].old_data == [11, 12, 13, 14]
     });
+    let truncated_batch_rejected =
+        (0..batch.len()).all(|length| parse_batch_journal(&batch[..length]).is_none());
     let mut bad_batch = batch;
     bad_batch[BATCH_JOURNAL_HEADER_SIZE + BATCH_JOURNAL_ENTRY_HEADER_SIZE] ^= 1;
     valid
         && batch_ok
         && parse_batch_journal(&bad_batch).is_none()
+        && truncated_batch_rejected
         && read_u64(&tampered, 18)
             != data_journal_checksum(&tampered, DATA_JOURNAL_HEADER_SIZE, old.len())
         && committed_data_matches(new.len(), checksum_bytes(&new), Some(&new))

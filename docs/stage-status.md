@@ -1297,6 +1297,11 @@ hint and may be stale after an injected failure; physical flash/ATA/DMA,
 torn-write, arbitrary-size/full-volume rollback, and reboot recovery remain
 open.
 
+The WDJ2 codec self-test also rejects every byte-truncated form of a valid
+prepared record before recovery can interpret it. This strengthens software
+journal-boundary evidence; it does not prove physical torn-sector atomicity or
+power-loss recovery.
+
 ## Stage 14.2D — Router Advertisement state (2026-10-06)
 
 Router Advertisement state now tracks a link-local router, bounded lifetimes,
