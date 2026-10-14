@@ -10,7 +10,9 @@ WovenTerminal now provides bounded `help`, `ls`, `cat`, `calc`, and `exit`
 commands through the same ABI and passes its signed 1/2/4-CPU acceptance; see
 the [WovenTerminal audit](audit-stage19-terminal-2026-10-14.md). The remaining
 roadmap application suite and catalog/boot-image installation are not yet
-claimed complete.
+claimed complete. WovenFiles now adds a read-only bounded directory/file
+browser with signed 1/2/4-CPU acceptance; see the
+[WovenFiles audit](audit-stage19-files-2026-10-14.md).
 
 The full `scripts/test-release.py` chain passed on the current tree. It covered
 warning-denying kernel/host Clippy, all host integration tests, 1/2/4-CPU debug

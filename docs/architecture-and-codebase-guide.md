@@ -15,6 +15,11 @@ calculator core, and passes signed 1/2/4-CPU Ring-3 execution. Its listing and
 file-output caps are documented in the Stage 19 terminal audit; interactive
 stdin and boot-catalog installation remain open.
 
+`apps/woven-files` is the third application increment: a read-only bounded
+directory lister and file previewer using the same verified external-image
+path. It passes signed 1/2/4-CPU execution; GUI, boot catalog, and mutation
+workflows remain open. See the Stage 19 WovenFiles audit.
+
 ## Release validation (2026-10-14)
 
 The repository release chain passed on the current tree, including warning-
