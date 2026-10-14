@@ -1,5 +1,69 @@
 # WovenHat OS Architecture & Codebase Guide
 
+## Stage 14.5D network revalidation (2026-10-14)
+
+The live WovenGuard transport/path suite passes on 1/2/4 CPUs, including
+DHCP, DNS, ICMP, host-verified UDP/TCP round trips, and SMP/TLB checks. The
+evidence is recorded in the [Stage 14.5D revalidation audit](audit-stage14-5d-revalidation-2026-10-14.md).
+It qualifies the QEMU virtio boundary only; native NIC/radio and physical-link
+behavior remain hardware work.
+
+## Stage 13.4–13.7 revalidation (2026-10-14)
+
+The ordered AHCI/SATA, xHCI core, USB HID, and WovenInput software gates pass
+on 1/2/4 CPUs in the current tree. Their evidence is recorded in the
+[Stage 13.4–13.7 validation audit](audit-stage13-4-7-validation-2026-10-14.md).
+The QEMU fixtures validate bounded ownership and protocol contracts; they do
+not substitute for native-controller or physical USB interoperability. USB
+mouse report decoding is still outside the accepted keyboard-only fixture.
+
+The bounded USB boot-mouse decoder now exists in `xhci.rs`; it emits WovenInput
+motion and button-edge events from copied report bytes and carries button state
+explicitly between reports. It is self-tested and does not yet claim a live
+xHCI mouse polling worker or physical-device qualification. See the Stage 13.6
+USB mouse decoder audit.
+
+## Stage 15 bounded WovenFS VFS write-through (2026-10-14)
+
+The `/wfs/<name>` namespace has one production mutation authority:
+`task::open_current`, `task::write_current`, and `task::unlink_current` route
+through native WovenFS. Creation is durable before a read-only VFS node is
+published; writes commit the native transaction before updating the VFS cache
+or shared descriptor offset; unlink follows durable-first ordering. The
+adapter validates one flat root name and rejects traversal, nested paths, and
+prefix confusion.
+
+Native mutations serialize their complete read-modify-write operation with a
+rank-5 `PreemptMutex`, below the ATA device lock at rank 10. No IRQ-disabled
+guard spans device I/O. This is a bounded file authority, not full
+directory/POSIX integration; rename, mkdir, directory enumeration, and
+physical flash qualification remain open. See the Stage 15 write-through audit.
+
+## Stage 11.2 scheduler-backed thread ownership (2026-10-14)
+
+`TaskControlBlock` carries both the stable process owner and an optional
+generation-safe thread ID. User-thread creation maps a private NX stack and a
+private copy of the process's bounded initial-exec TLS image into the existing
+address space; it never retains an unchecked userspace pointer. Thread exit
+publishes registry termination only after the scheduler completes the stack
+hand-off, so join can safely reclaim those mappings. Join waiters use the
+scheduler's latched event path, and process termination retires ready/blocked
+siblings immediately while running siblings receive a safe-point termination
+request. The address space remains owned by the process until its parent
+reaps the process. Shared libraries, symbol resolution, dynamic TLS, and
+physical qualification remain outside this bounded increment.
+
+## Stage 11.5 bounded symbol relocation (2026-10-14)
+
+`elf::DynamicImage` validates a SysV hash table, dynamic symbol table, and
+string table within bounded file-backed load segments. `userspace::load_elf`
+applies `R_X86_64_RELATIVE` and locally defined `R_X86_64_64`,
+`R_X86_64_GLOB_DAT`, and `R_X86_64_JUMP_SLOT` entries before W^X/RELRO
+finalization. Undefined symbols, `DT_NEEDED`, legacy REL/PLT tables, and
+cross-image resolution fail closed. This is a prerequisite for a dynamic
+linker, not shared-library support; dependency mapping, versioning, lazy
+binding, and dynamic TLS are still unimplemented.
+
 ## Stage 13.2 PCI power-state ownership (2026-10-13)
 
 `hal::pci::suspend_owned` and `resume_owned` operate only on a validated,
@@ -242,7 +306,7 @@ qualification.
 | `font.rs`, `display.rs` | 5×7 ASCII font (also compiled into libwoven); `Surface` (opaque `blit`, `blit_region` for exposed-region redraw, uniform-opacity `blend`, `write_pixels` for client uploads), bounded `Damage` and the single format-resolving presentation path (`present_scaled`, integer display scale; `present` is scale 1) |
 | `user_graphics.rs`, `compositor.rs` | Owner-tagged, generation-checked client surfaces (syscalls 98–101, 104), up to 1920×1200 within a 4 MB per-process and 16 MB system pixel budget, behind a preemption lock (not interrupts-off) with allocation and freeing outside it and the kernel-held compositor surface they are blitted onto (102–103); `blit` snapshots under the registry lock and releases it before taking the compositor lock, so the two rank-10 locks never nest. Presentation borrows the framebuffer through `terminal::with_framebuffer` (lock order compositor → terminal), and display ownership suppresses terminal rendering while the compositor presents. Userspace reaches the compositor only with `DisplayIo` and the single-holder lease (syscalls 105–106), released on exit; every client token is bound to the calling process before the registry sees it. A presenting holder also takes input focus: `woven_input` routes events to its private bounded queue (syscall 107, `InputIo`) until it exits; syscall 108 sleeps for the next event with a single registered waiter woken by `publish` after `FOCUS` is released (lock order scheduler → compositor → FOCUS). A client may share one of its surfaces with one process (syscall 109); the lease holder composites it with syscall 110, authorised by the slot's grant rather than the token. Syscall 111 sleeps over input and the pid mailbox at once; `ipc::send` wakes the mailbox's single waiter after releasing the IPC lock. Clients declare damage on their surfaces (syscall 112); the holder sleeps on it via `WaitAny` and copies only the damaged region (syscall 113). The boot compositor is sized to the framebuffer (clamped to 1920×1200), and every framebuffer writer, including the boot `Console`, goes through the terminal lock. Stacking, raise and per-window focus are window-manager policy in userspace (Stage 19.11), built on the lease, focus, `WaitAny`, shared surfaces and IPC |
 | `panic.rs`, `benchmark.rs` | Failure reporting and existing benchmark support |
-| `libwoven/`, `apps/hello`, `apps/hello-gui`, `apps/woven-shell` | The userspace API (one thin wrapper per syscall, plus `Canvas` software rendering, the shared kernel font, and a fixed-point `Spring` for animation) and the Ring-3 programs. Each app is its own crate with a large-code-model `link.x` (whose `.l*` sections must be placed explicitly) and a `build.rs` that relinks when it changes. `woven-shell` is the desktop: it holds the compositor lease and recomposes exposed rectangles from its own software layers and clients' shared surfaces (region blits, syscalls 120–121), hosting applications over an IPC protocol (`WOPN`, `TRAY`, `NOTE`, `WCLS`, and `WSIZ`/`WRSZ` for resizing; `libwoven::layout` tiles them); shadows and other translucent layers use region blends (syscalls 130–131), and text, borders and the pointer are overlays copied with a keyed blit that skips the transparent key (syscall 132), so nothing is read back from the screen |
+| `libwoven/`, `apps/hello`, `apps/hello-gui`, `apps/woven-shell` | The userspace API (one thin wrapper per syscall, plus `Canvas` software rendering, the shared kernel font, and a fixed-point `Spring` for animation) and the Ring-3 programs. Each app is its own crate with a large-code-model `link.x` (whose `.l*` sections must be placed explicitly) and a `build.rs` that relinks when it changes. `woven-shell` is the desktop: it holds the compositor lease and recomposes exposed rectangles from its own software layers and clients' shared surfaces (region blits, syscalls 120–121), hosting applications over an IPC protocol (`WOPN`, `TRAY`, `NOTE`, `WCLS`, and `WSIZ`/`WRSZ` for resizing; `libwoven::layout` tiles them); shadows and other translucent layers use region blends (syscalls 200–201), and text, borders and the pointer are overlays copied with a keyed blit that skips the transparent key (syscall 202), so nothing is read back from the screen |
 | `tests/`, `scripts/`, `run-stage*-acceptance.ps1` | Host regressions, QEMU orchestration and stage preservation gates |
 
 ## Stage 6 filesystem concurrency boundary

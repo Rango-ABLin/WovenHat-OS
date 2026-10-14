@@ -1,9 +1,15 @@
 name: kernel
 
+permissions:
+  contents: read
+
 on:
   push:
   pull_request:
   workflow_dispatch:
+
+permissions:
+  contents: read
 
 jobs:
   core-foundation:

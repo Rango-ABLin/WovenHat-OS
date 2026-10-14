@@ -113,6 +113,13 @@ macro_rules! entry {
 pub mod thread {
     #[derive(Clone, Copy, PartialEq, Eq, Debug)]
     pub struct Id(pub u64);
+
+    #[derive(Clone, Copy, PartialEq, Eq, Debug)]
+    pub enum Join {
+        Exited(i32),
+        Running,
+        Invalid,
+    }
 }
 pub mod fs {
     #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -273,9 +280,15 @@ pub mod syscall {
     pub const SECRET_STORE: u64 = 127;
     pub const SECRET_READ: u64 = 128;
     pub const SECRET_REVOKE: u64 = 129;
-    pub const GRAPHICS_COMPOSITOR_BLEND_REGION: u64 = 130;
-    pub const GRAPHICS_COMPOSITOR_BLEND_REGION_SHARED: u64 = 131;
-    pub const GRAPHICS_COMPOSITOR_BLIT_KEYED: u64 = 132;
+    pub const THREAD_CREATE: u64 = 130;
+    pub const THREAD_EXIT: u64 = 131;
+    pub const THREAD_JOIN: u64 = 132;
+    pub const THREAD_SELF: u64 = 133;
+    pub const THREAD_SET_TLS: u64 = 134;
+    pub const THREAD_GET_TLS: u64 = 135;
+    pub const GRAPHICS_COMPOSITOR_BLEND_REGION: u64 = 200;
+    pub const GRAPHICS_COMPOSITOR_BLEND_REGION_SHARED: u64 = 201;
+    pub const GRAPHICS_COMPOSITOR_BLIT_KEYED: u64 = 202;
     pub const MESSAGE_SEND: u64 = 11;
     pub const MESSAGE_RECEIVE: u64 = 12;
 
@@ -372,6 +385,67 @@ pub mod syscall {
     /// Must be called from WovenHat userspace.
     pub unsafe fn getgid() -> u64 {
         unsafe { invoke(GETGID, 0, 0, 0) }
+    }
+
+    /// Create a thread at an RX image address with a private stack of
+    /// `stack_size` bytes. The entry function takes no arguments and must
+    /// eventually call [`thread_exit`].
+    ///
+    /// # Safety
+    /// `entry` must be a valid WovenHat userspace code address and the size
+    /// must satisfy the kernel's bounded stack contract.
+    pub unsafe fn thread_create(entry: u64, stack_size: usize) -> u64 {
+        unsafe { invoke(THREAD_CREATE, entry, stack_size as u64, 0) }
+    }
+
+    /// Terminate the calling thread. The process leader uses `exit` semantics.
+    ///
+    /// # Safety
+    /// Must be called from WovenHat userspace.
+    pub unsafe fn thread_exit(status: i32) -> ! {
+        unsafe { invoke(THREAD_EXIT, status as u64, 0, 0) };
+        loop {
+            core::hint::spin_loop();
+        }
+    }
+
+    /// Join a thread owned by the current process.
+    ///
+    /// # Safety
+    /// Must be called from WovenHat userspace.
+    pub unsafe fn thread_join(id: super::thread::Id) -> super::thread::Join {
+        let result = unsafe { invoke(THREAD_JOIN, id.0, 0, 0) };
+        if result == WOULD_BLOCK {
+            super::thread::Join::Running
+        } else if result == ERROR {
+            super::thread::Join::Invalid
+        } else {
+            super::thread::Join::Exited(result as i32)
+        }
+    }
+
+    /// Return the current thread's generation-tagged handle.
+    ///
+    /// # Safety
+    /// Must be called from WovenHat userspace.
+    pub unsafe fn thread_self() -> u64 {
+        unsafe { invoke(THREAD_SELF, 0, 0, 0) }
+    }
+
+    /// Set the current thread's kernel-visible TLS base value.
+    ///
+    /// # Safety
+    /// The value must point at the caller's valid initial-exec TLS base.
+    pub unsafe fn thread_set_tls(base: u64) -> u64 {
+        unsafe { invoke(THREAD_SET_TLS, base, 0, 0) }
+    }
+
+    /// Read the current thread's kernel-visible TLS base value.
+    ///
+    /// # Safety
+    /// Must be called from WovenHat userspace.
+    pub unsafe fn thread_get_tls() -> u64 {
+        unsafe { invoke(THREAD_GET_TLS, 0, 0, 0) }
     }
 
     /// Yield the remainder of this time slice.

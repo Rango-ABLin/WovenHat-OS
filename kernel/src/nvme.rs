@@ -61,8 +61,14 @@ impl DmaPage {
     fn allocate_zeroed() -> Option<Self> {
         let frame = memory::allocate_contiguous_frames(1)?;
         let physical = frame.start_address().as_u64();
-        let offset = paging::physical_memory_offset()?;
-        let virtual_address = offset.checked_add(physical)?;
+        let Some(offset) = paging::physical_memory_offset() else {
+            let _ = memory::deallocate_frame(frame);
+            return None;
+        };
+        let Some(virtual_address) = offset.checked_add(physical) else {
+            let _ = memory::deallocate_frame(frame);
+            return None;
+        };
         // SAFETY: The frame is exclusively owned by this DMA page and is
         // reachable through the bootloader's direct physical-memory mapping.
         unsafe { ptr::write_bytes(virtual_address as *mut u8, 0, PAGE_SIZE) };
