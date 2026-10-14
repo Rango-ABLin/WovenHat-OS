@@ -12,6 +12,11 @@
 
 use crate::block::{BlockDevice, Error as BlockError, SECTOR_SIZE};
 
+#[cfg(not(test))]
+use alloc::string::String;
+#[cfg(test)]
+use std::string::String;
+
 pub const SUPER_MAGIC: &[u8; 8] = b"WOVENFS1";
 pub const JOURNAL_DESC_MAGIC: &[u8; 8] = b"WFSJDESC";
 pub const JOURNAL_COMMIT_MAGIC: &[u8; 8] = b"WFSJCOMM";
@@ -47,7 +52,6 @@ pub enum Error {
     InvalidName,
     TooLarge,
     NotADirectory,
-    #[cfg(any(test, feature = "stage15-1-test", feature = "stage15-2-test"))]
     NotEmpty,
 }
 
@@ -794,6 +798,49 @@ impl<D: BlockDevice> Volume<D> {
         Err(Error::NoSpace)
     }
 
+    fn valid_component(name: &str) -> Result<(), Error> {
+        if name.is_empty()
+            || name.len() > MAX_NAME
+            || name == "."
+            || name == ".."
+            || name.contains('/')
+            || name.contains('\\')
+            || name.as_bytes().contains(&0)
+        {
+            return Err(Error::InvalidName);
+        }
+        Ok(())
+    }
+
+    fn parent_and_name(&mut self, path: &str) -> Result<(u64, String), Error> {
+        if !path.starts_with('/') || path == "/" || path.ends_with('/') {
+            return Err(Error::InvalidName);
+        }
+        let split = path.rfind('/').ok_or(Error::InvalidName)?;
+        let parent = if split == 0 { "/" } else { &path[..split] };
+        let name = &path[split + 1..];
+        Self::valid_component(name)?;
+        Ok((self.resolve_path(parent)?, String::from(name)))
+    }
+
+    /// Resolve an absolute native path without allocating. The bounded
+    /// directory walk also rejects traversal rather than normalising it.
+    pub fn resolve_path(&mut self, path: &str) -> Result<u64, Error> {
+        if path == "/" {
+            return Ok(self.super_block.root_inode);
+        }
+        if !path.starts_with('/') || path.ends_with('/') {
+            return Err(Error::InvalidName);
+        }
+        let mut current = self.super_block.root_inode;
+        for component in path.split('/').skip(1) {
+            Self::valid_component(component)?;
+            let entry = self.lookup(current, component)?;
+            current = entry.inode;
+        }
+        Ok(current)
+    }
+
     // -------------------------------------------------------- directories
 
     fn dir_entries(&mut self, txn: &Transaction, dir: &Inode) -> Result<DirectoryView, Error> {
@@ -867,9 +914,7 @@ impl<D: BlockDevice> Volume<D> {
         mode: u32,
         now: u64,
     ) -> Result<u64, Error> {
-        if name.is_empty() || name.len() > MAX_NAME || name.contains('/') {
-            return Err(Error::InvalidName);
-        }
+        Self::valid_component(name)?;
         let mut txn = Transaction::new();
         let mut dir = self.inode(dir_inode)?;
         if dir.kind != KIND_DIR {
@@ -911,6 +956,64 @@ impl<D: BlockDevice> Volume<D> {
 
         self.commit(&txn)?;
         Ok(number)
+    }
+
+    /// Create a directory and its first data block in one journal transaction.
+    pub fn mkdir(&mut self, parent_inode: u64, name: &str, mode: u32, now: u64) -> Result<u64, Error> {
+        Self::valid_component(name)?;
+        let mut txn = Transaction::new();
+        let mut parent = self.inode(parent_inode)?;
+        if parent.kind != KIND_DIR {
+            return Err(Error::NotADirectory);
+        }
+        let view = self.dir_entries(&txn, &parent)?;
+        if view.entries.iter().any(|entry| entry.matches(name)) {
+            return Err(Error::Exists);
+        }
+        let Some(position) = view
+            .entries
+            .iter()
+            .enumerate()
+            .filter(|(position, _)| parent.direct[position / DIR_ENTRIES_PER_BLOCK] != 0)
+            .find(|(_, entry)| entry.inode == 0)
+            .map(|(position, _)| position)
+        else {
+            return Err(Error::NoSpace);
+        };
+
+        let number = self.allocate_inode(&mut txn)?;
+        let block = self.allocate_block(&mut txn)?;
+        txn.stage(block, &[0; SECTOR_SIZE])?;
+        let mut node = Inode::empty();
+        node.mode = mode.max(1);
+        node.links = 2;
+        node.kind = KIND_DIR;
+        node.created = now;
+        node.modified = now;
+        node.direct[0] = block;
+        node.size = SECTOR_SIZE as u64;
+        self.stage_inode(&mut txn, number, &node)?;
+
+        let mut entry = DirEntry::empty();
+        entry.inode = number;
+        entry.kind = KIND_DIR;
+        entry.name_len = name.len() as u16;
+        entry.name[..name.len()].copy_from_slice(name.as_bytes());
+        self.stage_dir_entry(&mut txn, &parent, position, &entry)?;
+        parent.modified = now;
+        self.stage_inode(&mut txn, parent_inode, &parent)?;
+        self.commit(&txn)?;
+        Ok(number)
+    }
+
+    pub fn create_path(&mut self, path: &str, mode: u32, now: u64) -> Result<u64, Error> {
+        let (parent, name) = self.parent_and_name(path)?;
+        self.create(parent, &name, mode, now)
+    }
+
+    pub fn mkdir_path(&mut self, path: &str, mode: u32, now: u64) -> Result<u64, Error> {
+        let (parent, name) = self.parent_and_name(path)?;
+        self.mkdir(parent, &name, mode, now)
     }
 
     /// Replace a file's contents, as one transaction.
@@ -1005,6 +1108,12 @@ impl<D: BlockDevice> Volume<D> {
         };
 
         let mut node = self.inode_staged(&txn, entry.inode)?;
+        if node.kind == KIND_DIR {
+            let children = self.dir_entries(&txn, &node)?;
+            if children.entries.iter().any(|child| child.inode != 0) {
+                return Err(Error::NotEmpty);
+            }
+        }
         for slot in 0..DIRECT_BLOCKS {
             if node.direct[slot] != 0 {
                 let block = node.direct[slot];
@@ -1016,6 +1125,69 @@ impl<D: BlockDevice> Volume<D> {
         self.stage_dir_entry(&mut txn, &dir, position, &DirEntry::empty())?;
         dir.modified = now;
         self.stage_inode(&mut txn, dir_inode, &dir)?;
+        self.commit(&txn)
+    }
+
+    pub fn unlink_path(&mut self, path: &str, now: u64) -> Result<(), Error> {
+        let (parent, name) = self.parent_and_name(path)?;
+        self.unlink(parent, &name, now)
+    }
+
+    /// Rename a file or empty directory by moving its directory entry in one
+    /// transaction. Existing destinations are refused; replacement semantics
+    /// would require a larger bounded transaction and explicit policy.
+    pub fn rename_path(&mut self, old: &str, new: &str, now: u64) -> Result<(), Error> {
+        let (old_parent, old_name) = self.parent_and_name(old)?;
+        let (new_parent, new_name) = self.parent_and_name(new)?;
+        Self::valid_component(&new_name)?;
+        let mut txn = Transaction::new();
+        let mut source_dir = self.inode(old_parent)?;
+        let mut target_dir = self.inode(new_parent)?;
+        if source_dir.kind != KIND_DIR || target_dir.kind != KIND_DIR {
+            return Err(Error::NotADirectory);
+        }
+        let source_view = self.dir_entries(&txn, &source_dir)?;
+        let Some((source_pos, source)) = source_view
+            .entries
+            .iter()
+            .enumerate()
+            .find(|(_, entry)| entry.matches(&old_name))
+            .map(|(position, entry)| (position, *entry))
+        else {
+            return Err(Error::NotFound);
+        };
+        let target_view = self.dir_entries(&txn, &target_dir)?;
+        if target_view.entries.iter().any(|entry| entry.matches(&new_name)) {
+            return Err(Error::Exists);
+        }
+        let target_pos = if old_parent == new_parent {
+            source_pos
+        } else {
+            target_view
+                .entries
+                .iter()
+                .enumerate()
+                .filter(|(position, _)| target_dir.direct[position / DIR_ENTRIES_PER_BLOCK] != 0)
+                .find(|(_, entry)| entry.inode == 0)
+                .map(|(position, _)| position)
+                .ok_or(Error::NoSpace)?
+        };
+        let mut moved = source;
+        moved.name_len = new_name.len() as u16;
+        moved.name.fill(0);
+        moved.name[..new_name.len()].copy_from_slice(new_name.as_bytes());
+        if old_parent == new_parent {
+            self.stage_dir_entry(&mut txn, &source_dir, source_pos, &moved)?;
+            source_dir.modified = now;
+            self.stage_inode(&mut txn, old_parent, &source_dir)?;
+        } else {
+            self.stage_dir_entry(&mut txn, &source_dir, source_pos, &DirEntry::empty())?;
+            self.stage_dir_entry(&mut txn, &target_dir, target_pos, &moved)?;
+            source_dir.modified = now;
+            target_dir.modified = now;
+            self.stage_inode(&mut txn, old_parent, &source_dir)?;
+            self.stage_inode(&mut txn, new_parent, &target_dir)?;
+        }
         self.commit(&txn)
     }
 
@@ -1238,6 +1410,27 @@ pub fn stage15_1_self_test() -> bool {
         return false;
     }
 
+    // Nested directory lifecycle: parent creation, path resolution, rename,
+    // and empty-directory removal all remain journaled operations.
+    let Ok(docs) = remounted.mkdir(1, "docs", 0o755, 13) else {
+        return false;
+    };
+    let Ok(note) = remounted.create(docs, "note.txt", 0o644, 14) else {
+        return false;
+    };
+    if remounted.write_file(note, b"nested", 15).is_err()
+        || remounted.resolve_path("/docs/note.txt") != Ok(note)
+        || remounted
+            .rename_path("/docs/note.txt", "/docs/final.txt", 16)
+            .is_err()
+        || remounted.resolve_path("/docs/final.txt") != Ok(note)
+        || remounted.unlink_path("/docs/final.txt", 17).is_err()
+        || remounted.unlink_path("/docs", 18).is_err()
+        || remounted.check().is_err()
+    {
+        return false;
+    }
+
     // Crash recovery. Count the writes one create performs, then replay the
     // operation once per write boundary, cutting power at that exact write, and
     // require the result to be consistent and all-or-nothing every time.
@@ -1350,34 +1543,36 @@ pub fn with_ata_volume<R>(
     .flatten()
 }
 
-/// Translate the mounted VFS namespace into one native WovenFS root name.
-/// The adapter intentionally does not accept nested paths, traversal, or
-/// prefix-confusion paths such as `/wfs2/...`.
+/// Translate the mounted VFS namespace into an absolute native WovenFS path.
+/// Traversal, empty components and prefix-confusion paths are rejected before
+/// the path reaches the on-disk resolver.
 #[cfg(not(test))]
-fn checked_vfs_name(path: &str) -> Result<&str, Error> {
-    let name = path.strip_prefix("/wfs/").ok_or(Error::InvalidName)?;
-    if name.is_empty()
-        || name.len() > MAX_NAME
-        || name == "."
-        || name == ".."
-        || name.contains('/')
-        || name.contains('\\')
-        || name.as_bytes().contains(&0)
-    {
+fn checked_vfs_path(path: &str) -> Result<alloc::string::String, Error> {
+    let relative = path.strip_prefix("/wfs/").ok_or(Error::InvalidName)?;
+    if relative.is_empty() || relative.len() + 1 > crate::config::MAX_PATH_SIZE {
         return Err(Error::InvalidName);
     }
-    Ok(name)
+    let mut native = alloc::string::String::with_capacity(relative.len() + 1);
+    native.push('/');
+    native.push_str(relative);
+    let mut components = native.split('/');
+    let _ = components.next();
+    for component in components {
+        Volume::<&mut crate::ata::BufferedAta>::valid_component(component)?;
+    }
+    Ok(native)
 }
 
 /// Ensure a VFS-visible file exists durably before publishing its VFS node.
 #[cfg(not(test))]
 pub fn ensure_vfs_path(path: &str, now: u64) -> Result<(), Error> {
     let _mutation = MUTATION.lock();
-    let name = checked_vfs_name(path)?;
-    with_ata_volume(|volume| match volume.lookup(1, name) {
-        Ok(entry) if entry.kind == KIND_FILE => Ok(()),
-        Ok(_) => Err(Error::NotADirectory),
-        Err(Error::NotFound) => volume.create(1, name, 0o600, now).map(|_| ()),
+    let native = checked_vfs_path(path)?;
+    with_ata_volume(|volume| match volume.resolve_path(&native) {
+        Ok(inode) => volume.inode(inode).and_then(|node| {
+            (node.kind == KIND_FILE).then_some(()).ok_or(Error::NotADirectory)
+        }),
+        Err(Error::NotFound) => volume.create_path(&native, 0o600, now).map(|_| ()),
         Err(error) => Err(error),
     })
     .unwrap_or(Err(Error::Device))
@@ -1395,14 +1590,14 @@ pub fn write_vfs_path_at(
     now: u64,
 ) -> Result<(usize, usize), Error> {
     let _mutation = MUTATION.lock();
-    let name = checked_vfs_name(path)?;
+    let native = checked_vfs_path(path)?;
     if bytes.len() > MAX_FILE_SIZE {
         return Err(Error::TooLarge);
     }
     with_ata_volume(|volume| {
-        let inode = match volume.lookup(1, name) {
-            Ok(entry) => entry.inode,
-            Err(Error::NotFound) => volume.create(1, name, 0o600, now)?,
+        let inode = match volume.resolve_path(&native) {
+            Ok(inode) => inode,
+            Err(Error::NotFound) => volume.create_path(&native, 0o600, now)?,
             Err(error) => return Err(error),
         };
         let mut length = volume.read_file(inode, out)?;
@@ -1423,15 +1618,26 @@ pub fn write_vfs_path_at(
 #[cfg(not(test))]
 pub fn unlink_vfs_path(path: &str, now: u64) -> Result<(), Error> {
     let _mutation = MUTATION.lock();
-    let name = checked_vfs_name(path)?;
-    with_ata_volume(|volume| {
-        let entry = volume.lookup(1, name)?;
-        if entry.kind != KIND_FILE {
-            return Err(Error::NotADirectory);
-        }
-        volume.unlink(1, name, now)
-    })
+    let native = checked_vfs_path(path)?;
+    with_ata_volume(|volume| volume.unlink_path(&native, now))
     .unwrap_or(Err(Error::Device))
+}
+
+#[cfg(not(test))]
+pub fn mkdir_vfs_path(path: &str, now: u64) -> Result<(), Error> {
+    let _mutation = MUTATION.lock();
+    let native = checked_vfs_path(path)?;
+    with_ata_volume(|volume| volume.mkdir_path(&native, 0o755, now).map(|_| ()))
+        .unwrap_or(Err(Error::Device))
+}
+
+#[cfg(not(test))]
+pub fn rename_vfs_path(old: &str, new: &str, now: u64) -> Result<(), Error> {
+    let _mutation = MUTATION.lock();
+    let old_native = checked_vfs_path(old)?;
+    let new_native = checked_vfs_path(new)?;
+    with_ata_volume(|volume| volume.rename_path(&old_native, &new_native, now))
+        .unwrap_or(Err(Error::Device))
 }
 
 #[cfg(test)]
@@ -1452,6 +1658,16 @@ pub fn ensure_vfs_path(_path: &str, _now: u64) -> Result<(), Error> {
 
 #[cfg(test)]
 pub fn unlink_vfs_path(_path: &str, _now: u64) -> Result<(), Error> {
+    Err(Error::Device)
+}
+
+#[cfg(test)]
+pub fn mkdir_vfs_path(_path: &str, _now: u64) -> Result<(), Error> {
+    Err(Error::Device)
+}
+
+#[cfg(test)]
+pub fn rename_vfs_path(_old: &str, _new: &str, _now: u64) -> Result<(), Error> {
     Err(Error::Device)
 }
 

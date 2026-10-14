@@ -8,8 +8,13 @@ or physical flash qualification.
 
 - Production task file operations create, write, and unlink `/wfs/<name>` files
   through native WovenFS before publishing or removing the VFS name.
-- The adapter accepts one validated flat root name only; nested paths,
-  traversal, separators, NULs, and prefix-confusion paths are rejected.
+- The adapter resolves validated nested absolute paths below `/wfs`; traversal,
+  empty components, separators inside names, NULs, and prefix-confusion paths
+  are rejected.
+- Native directory creation, empty-directory removal, and file/directory rename
+  update parent entries in the same bounded journal transaction as the inode
+  and allocation bitmap changes. Destination replacement is refused rather
+  than performed partially.
 - `task::write_current` commits the native journaled transaction before it
   refreshes the VFS cache and descriptor offset. Direct generic VFS mutation
   remains read-only for `/wfs`, preventing a capability bypass.
@@ -28,15 +33,21 @@ or physical flash qualification.
   `stage15.1-1cpu-1791981155975268700`,
   `stage15.1-2cpu-1791981222170305100`, and
   `stage15.1-4cpu-1791981275434721400`.
+- Fresh Stage 15.1 evidence after nested-directory integration:
+  `stage15.1-1cpu-1792003097975720200`,
+  `stage15.1-2cpu-1792003179899219100`, and
+  `stage15.1-4cpu-1792003230834435200`.
+- Fresh scratch-device Stage 15.2 evidence passed on 1, 2, and 4 CPUs with
+  exit 33 under `target/wovenfs-device-scratch-{1,2,4}cpu`.
 
 An earlier 1-CPU timeout is retained as
 `stage15.1-1cpu-1791980850302510700`; the exact rerun passed.
 
 ## Limits and next prerequisite
 
-The adapter is a bounded flat root-file slice. Rename, mkdir, directory
-enumeration through `/wfs`, multi-directory trees, and mounted-system policy
-are not claimed. Physical qualification remains incomplete: the inserted USB
+The VFS import path still publishes only the bounded entries exercised by the
+Stage 15.2 mount gate; recursive directory import and mounted-system policy
+remain open. Physical qualification remains incomplete: the inserted USB
 flash disk was inventoried read-only, while the destructive harness requires
 Administrator elevation and explicit authorization to erase it. No destructive
 write was issued in this audit.

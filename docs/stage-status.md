@@ -1277,8 +1277,9 @@ Stage 12.2/12.4 is an open product decision. The bounded `/wfs/<name>` file
 authority now supports durable create, write, read-back, and unlink through task
 file syscalls; direct generic VFS mutation remains read-only. Native mutations
 serialize their complete read-modify-write transactions. The adapter remains a
-flat root-file slice: rename, mkdir, directory enumeration, mounted-system
-policy, and native multi-directory semantics remain open. See the [Stage 15
+Nested native paths, directory creation, empty-directory removal, and rename
+are now transactional; recursive import into the VFS mount and mounted-system
+policy remain open. See the [Stage 15
 VFS write-through audit](audit-stage15-wfs-vfs-write-through-2026-10-14.md).
 
 Crash recovery is proven by fault injection, not actual power loss on a device.
