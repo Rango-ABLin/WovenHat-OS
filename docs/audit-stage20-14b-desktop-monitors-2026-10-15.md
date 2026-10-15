@@ -24,7 +24,8 @@ Roadmap Stage 18.9, Multi-monitor Desktop, completed on top of the Stage
   `[DISPLAY] virtio-gpu: N monitors`.
 
 **Syscall 207, `GraphicsCompositorOutputs`.** It returns the monitors left
-to right; 206 stays reserved for audio recording. libwoven exposes it as
+to right. 206 is Codex's `WaitAnyObjects`, so audio recording is now
+reserved 208. libwoven exposes it as
 `compositor_outputs`.
 
 **WovenShell.**

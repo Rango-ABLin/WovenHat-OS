@@ -50,6 +50,26 @@ See the
 
 **Stage 18 is complete in software.** Roadmap 18.1–18.9 are Stages 20.1
 to 20.14b.
+## Stage 19.8 timer/event sources — 2026-10-15
+
+The unified wait path now has append-only syscall 206, `WaitAnyObjects`, for
+up to eight generation-safe timer/event objects. The kernel copies the source
+array before registration, enforces capability and owner/generation checks,
+uses event-driven task wakeups, consumes one-shot timer expiry exactly once,
+preserves manual-reset event level semantics, and clears every registration on
+all return paths. A live completion-handle waiter is refused rather than
+replaced; manual-reset events support four bounded task waiters with broadcast
+wakeups, while one-shot timers retain a single consuming task waiter. The safe `libwoven::wait_any_objects` wrapper
+uses the same bounded ABI. The existing syscall 111 remains ABI-compatible.
+
+The Stage 19.8 feature gate now includes an object-registration self-test and
+the `hello-gui --timer-event` userspace scenario and an event waiter fan-out
+self-test. Host/all-target Clippy,
+freestanding Stage 19.8 and neighboring Stage 19.13 warning-denying gates, and
+full 1/2/4-CPU QEMU acceptance all pass. The scenario verifies one-shot timer
+wake, manual-reset event wake, cleanup, bounded event fan-out, and the existing
+multiplexed input/message/damage/timeout behavior. Timer expiry remains
+single-consumer by design. See [the ABI contract](wait-any-objects-abi.md).
 
 ## Stage 20.14a — two monitors through virtio-gpu (2026-10-15)
 
@@ -1482,9 +1502,12 @@ behaviour, the gate fails at "keyboard bytes through IRQ1 are decoded at IRQ
 time". Evidence is in `audit-artifacts/stage19.12-negative-control-*`.
 
 Open:
-- PS/2 only. The USB HID mouse protocol is recognised by the xHCI driver but
-  not yet decoded into pointer events.
-- No scroll wheel (IntelliMouse) and no acceleration.
+- USB boot and report-protocol HID pointer reports are decoded into
+  `WovenInput` events by the xHCI worker; Stage 13.13 and 13.16 QEMU gates
+  cover the software paths. Physical USB qualification, multi-application
+  devices, and virtio-input remain open.
+- The PS/2 boot-mouse path has no IntelliMouse wheel or acceleration; report
+  protocol wheel events are supported by the HID decoder.
 - The pointer position lives in the window manager. There is no cursor
   image: drawing one is the window manager's job, and there is no hardware
   cursor.
@@ -1717,8 +1740,11 @@ Two problems found while bringing this up:
 Open:
 - The pid mailbox has one waiter; handle-based endpoints keep their existing
   multi-waiter queues and are not yet `WaitAny` sources.
-- Timers and event objects are not `WaitAny` sources either; the deadline
-  covers the common timeout case.
+- Syscall 206 now exposes timer/event objects as bounded `WaitAny` sources;
+  the current focused gate covers registration safety, the full userspace
+  timer/event scenario, and bounded manual-reset-event fan-out. One-shot timer
+  fan-out remains intentionally single-consumer; handle-based endpoint sources
+  remain outside syscall 206.
 
 Next prerequisite: client-to-compositor damage notification, so a compositor
 sleeping in `WaitAny` redraws only what a client changed.
@@ -2180,7 +2206,11 @@ serialize their complete read-modify-write transactions. The adapter remains a
 Nested native paths, directory creation, empty-directory removal, and rename
 are now transactional; directory rename rejects descendant cycles with a
 bounded fail-closed walk. Recursive import into the VFS mount and mounted-system
-policy remain open. See the [Stage 15
+publication now walks validated nested directories with bounded depth and
+visited-inode tracking; oversized files fail closed at the VFS capacity
+boundary. `Volume::check()` validates the complete reachable tree and rejects
+cycles, duplicate references, malformed names, and orphaned live inodes.
+Mounted-system policy remains open. See the [Stage 15
 VFS write-through audit](audit-stage15-wfs-vfs-write-through-2026-10-14.md).
 
 Crash recovery is proven by fault injection, not actual power loss on a device.
@@ -2819,9 +2849,12 @@ TLS, stable process ownership, generation-safe IDs, and post-switch resource
 reclamation. Build, warning-denying Clippy, host tests, and 1/2/4-CPU QEMU
 passed; see [audit](audit-stage11-2-scheduler-threads-2026-10-14.md).
 
-This is an implementation increment, not closure of every Stage 11 thread
-requirement. Sibling cancellation/teardown, shared libraries, symbol
-resolution, dynamic TLS, and hardware qualification remain open.
+The 2026-10-15 cancellation follow-up adds ABI 136 for owned sibling-thread
+cancellation. Ready/blocked and running targets both remain joinable, wake the
+registered joiner, and reclaim stack/TLS mappings only through join. The
+focused 1/2/4-CPU QEMU gate, host tests, and warning-denying Clippy passed;
+see the scheduler-thread audit. Process-wide teardown, shared libraries,
+symbol resolution, dynamic TLS, and hardware qualification remain open.
 
 ## Stages 11.3–11.5 — accepted on 2026-09-16
 

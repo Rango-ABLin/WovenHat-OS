@@ -347,6 +347,8 @@ pub enum Number {
     ThreadSetTls = 134,
     /// -> TLS base value or ERROR
     ThreadGetTls = 135,
+    /// thread handle, exit status -> 0 or ERROR; cancels an owned sibling
+    ThreadCancel = 136,
     /// own handle, packed destination and opacity (x | y<<24 | opacity<<56,
     /// x and y 24-bit signed, bits 48..56 zero), packed source region -> 0 or
     /// ERROR
@@ -366,9 +368,12 @@ pub enum Number {
     /// volume percent (0 mutes) -> the amplifier gain set; needs
     /// AudioPlayback
     AudioSetVolume = 205,
+    /// deadline, user array of `{object, kind, mask}` records, count -> ready
+    /// mask or 0 on timeout. `kind` is 0 for timer and 1 for event.
+    WaitAnyObjects = 206,
     /// out *[x u32, y u32, width u32, height u32; 4] -> the number of
     /// monitors, left to right in surface coordinates. Requires DisplayIo and
-    /// the lease. (206 is reserved for audio recording.)
+    /// the lease. (208 is reserved for audio recording.)
     GraphicsCompositorOutputs = 207,
 }
 
@@ -2412,6 +2417,11 @@ pub extern "C" fn wovenhat_syscall_dispatch(
         value if value == Number::ThreadGetTls as u64 => crate::task::current_thread_id()
             .and_then(crate::thread::tls)
             .unwrap_or(SYSCALL_ERROR),
+        value if value == Number::ThreadCancel as u64 => crate::task::cancel_user_thread(
+            arg0,
+            arg1 as i32,
+        )
+        .map_or(SYSCALL_ERROR, |_| 0),
         value if value == Number::Getpid as u64 => crate::task::current_process_id(),
         value if value == Number::Waitpid as u64 => match crate::task::wait_process(arg0) {
             Ok(exit_code) => exit_code as u64,
@@ -2516,6 +2526,9 @@ pub extern "C" fn wovenhat_syscall_dispatch(
             sys_compositor_blit_shared(arg0, arg1)
         }
         value if value == Number::WaitAny as u64 => sys_wait_any(arg0, arg1),
+        value if value == Number::WaitAnyObjects as u64 => {
+            sys_wait_any_objects(arg0, arg1, arg2)
+        }
         value if value == Number::GraphicsSurfaceDamage as u64 => sys_graphics_damage(arg0, arg1),
         value if value == Number::GraphicsCompositorBlitDamage as u64 => {
             sys_compositor_blit_damage(arg0, arg1)
@@ -3186,6 +3199,87 @@ fn sys_wait_any(deadline: u64, mask: u64) -> u64 {
     }
     if want_damage {
         crate::user_graphics::clear_damage_waiter(owner, task);
+    }
+    result
+}
+
+const MAX_WAIT_OBJECTS: usize = 8;
+const WAIT_OBJECT_TIMER: u64 = 0;
+const WAIT_OBJECT_EVENT: u64 = 1;
+
+/// Wait on generation-safe timer/event objects without retaining a userspace
+/// pointer asynchronously. The complete source array is copied before any
+/// registration, and every registration is removed before return.
+fn sys_wait_any_objects(deadline: u64, user_sources: u64, count: u64) -> u64 {
+    let Ok(count) = usize::try_from(count) else {
+        return SYSCALL_ERROR;
+    };
+    if count == 0 || count > MAX_WAIT_OBJECTS {
+        return SYSCALL_ERROR;
+    }
+    let byte_count = count * 24;
+    let mut bytes = [0u8; MAX_WAIT_OBJECTS * 24];
+    if crate::paging::copy_from_current_user(user_sources, &mut bytes[..byte_count]).is_err() {
+        return SYSCALL_ERROR;
+    }
+    let mut sources = [(0u64, false, 0u64); MAX_WAIT_OBJECTS];
+    let mut used_masks = 0u64;
+    for (index, source) in sources.iter_mut().take(count).enumerate() {
+        let offset = index * 24;
+        let raw = u64::from_le_bytes(bytes[offset..offset + 8].try_into().unwrap());
+        let kind = u64::from_le_bytes(bytes[offset + 8..offset + 16].try_into().unwrap());
+        let mask = u64::from_le_bytes(bytes[offset + 16..offset + 24].try_into().unwrap());
+        if mask < (1 << 3)
+            || !mask.is_power_of_two()
+            || used_masks & mask != 0
+            || !matches!(kind, WAIT_OBJECT_TIMER | WAIT_OBJECT_EVENT)
+        {
+            return SYSCALL_ERROR;
+        }
+        if (kind == WAIT_OBJECT_TIMER
+            && !crate::task::current_has(crate::capability::Capability::TimerRead))
+            || (kind == WAIT_OBJECT_EVENT
+                && !crate::task::current_has(crate::capability::Capability::Ipc))
+        {
+            return SYSCALL_ERROR;
+        }
+        *source = (raw, kind == WAIT_OBJECT_TIMER, mask);
+        used_masks |= mask;
+    }
+    let owner = crate::task::current_process_id();
+    let task = crate::task::current_task_id();
+    let mut registered = [false; MAX_WAIT_OBJECTS];
+    let result = 'wait: loop {
+        let mut ready = 0u64;
+        for (index, (raw, is_timer, mask)) in sources.iter().take(count).enumerate() {
+            match crate::async_events::register_task(owner, *raw, *is_timer, task) {
+                Ok(crate::async_events::TaskWaitRegistration::Ready) => ready |= *mask,
+                Ok(crate::async_events::TaskWaitRegistration::Registered) => {
+                    registered[index] = true
+                }
+                Ok(crate::async_events::TaskWaitRegistration::Busy) | Err(()) => {
+                    break 'wait SYSCALL_ERROR
+                }
+            }
+        }
+        if ready != 0 {
+            break 'wait ready;
+        }
+        if deadline != u64::MAX && crate::timer::ticks() >= deadline {
+            break 'wait 0;
+        }
+        crate::task::wait_for_event_until(deadline);
+        for (index, (raw, is_timer, _)) in sources.iter().take(count).enumerate() {
+            if registered[index] {
+                crate::async_events::clear_task_waiter(owner, *raw, *is_timer, task);
+                registered[index] = false;
+            }
+        }
+    };
+    for (index, (raw, is_timer, _)) in sources.iter().take(count).enumerate() {
+        if registered[index] {
+            crate::async_events::clear_task_waiter(owner, *raw, *is_timer, task);
+        }
     }
     result
 }

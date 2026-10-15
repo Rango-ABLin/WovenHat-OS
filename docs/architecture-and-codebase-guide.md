@@ -309,8 +309,10 @@ NULs, and prefix confusion.
 Native mutations serialize their complete read-modify-write operation with a
 rank-5 `PreemptMutex`, below the ATA device lock at rank 10. No IRQ-disabled
 guard spans device I/O. Directory creation, empty-directory removal, and
-rename update parent entries transactionally; recursive VFS import, mounted
-system policy, and physical flash qualification remain open. See the Stage 15
+rename update parent entries transactionally; ATA publication recursively
+imports validated nested directories with bounded depth and visited-inode
+tracking; `Volume::check()` applies the same complete-tree integrity boundary.
+Mounted system policy and physical flash qualification remain open. See the Stage 15
 write-through audit.
 
 ## Stage 11.2 scheduler-backed thread ownership (2026-10-14)
@@ -323,9 +325,14 @@ publishes registry termination only after the scheduler completes the stack
 hand-off, so join can safely reclaim those mappings. Join waiters use the
 scheduler's latched event path, and process termination retires ready/blocked
 siblings immediately while running siblings receive a safe-point termination
-request. The address space remains owned by the process until its parent
-reaps the process. Shared libraries, symbol resolution, dynamic TLS, and
-physical qualification remain outside this bounded increment.
+request. `ThreadCancel` (ABI 136) applies the same two-state rule to an owned
+sibling without killing its process: ready/blocked targets are marked dead and
+the registry is transitioned under the scheduler lock, while running targets
+carry the request through the existing post-switch finalizer. Both paths wake
+the single join waiter and retain the generation-tagged record until join
+reclaims the private mappings. The address space remains owned by the process
+until its parent reaps the process. Shared libraries, symbol resolution,
+dynamic TLS, and physical qualification remain outside this bounded increment.
 
 ## Stage 11.5 bounded symbol relocation (2026-10-14)
 
@@ -1297,3 +1304,13 @@ This closure does not yet claim complete transport parity, malformed-IP
 fail-closed parsing, IPv6 extension-header inspection, a live routed Forward
 hook, persistent rules, logging/counters, stateful connection tracking, or
 NAT. Those are subsequent firewall/network-management hardening work.
+## Unified timer/event waits
+
+Stage 19.8 keeps syscall 111 stable for input, mailbox, and compositor damage.
+Syscall 206 (`WaitAnyObjects`) adds a separate bounded ABI for up to eight
+owner- and generation-checked timer/event objects. The kernel copies the source
+array before registration, uses task wakeups rather than polling, and clears
+registrations on every return path. Manual-reset events support four bounded
+task waiters and broadcast wakeups; one-shot timers retain one consuming task
+waiter so expiry is not duplicated. See [the ABI contract](wait-any-objects-abi.md)
+and [the Stage 19.8 audit](audit-stage19-8-timer-event-wait-2026-10-15.md).

@@ -15,6 +15,13 @@ or physical flash qualification.
   update parent entries in the same bounded journal transaction as the inode
   and allocation bitmap changes. Destination replacement is refused rather
   than performed partially.
+- ATA mount publication now recursively imports validated WovenFS directories
+  and files below `/wfs`, with bounded depth and visited-inode tracking so
+  malformed cycles or namespace growth fail closed. Imported files remain
+  read-only in the VFS.
+- `Volume::check()` now validates the complete reachable tree, including
+  nested names, inode references, cycles/duplicate links, and orphaned live
+  inodes, before a volume is accepted by the mount path.
 - Directory rename rejects a destination below the moved directory using a
   bounded, cycle-detecting ancestry walk. Same-path rename is an explicit
   validated no-op; traversal capacity exhaustion fails closed.
@@ -50,15 +57,23 @@ or physical flash qualification.
   33: `stage15.1-1cpu-1792014304834644400`,
   `stage15.1-2cpu-1792014406693740800`, and
   `stage15.1-4cpu-1792014471416201400`.
+- Recursive-import Stage 15.2 scratch-device rerun passed on 1, 2, and 4 CPUs
+  with exit 33 under `target/wovenfs-device-scratch-{1,2,4}cpu`; the fixture
+  creates and reads `/docs/note.txt` through the mounted VFS.
+- Full-tree consistency rerun passed Stage 15.1 on 1, 2, and 4 CPUs with exit
+  33: `stage15.1-1cpu-1792021922584370300`,
+  `stage15.1-2cpu-1792022028479024300`, and
+  `stage15.1-4cpu-1792022100180585200`.
 
 An earlier 1-CPU timeout is retained as
 `stage15.1-1cpu-1791980850302510700`; the exact rerun passed.
 
 ## Limits and next prerequisite
 
-The VFS import path still publishes only the bounded entries exercised by the
-Stage 15.2 mount gate; recursive directory import and mounted-system policy
-remain open. Physical qualification remains incomplete: the inserted USB
+Mounted-system policy, including whether WovenFS replaces the FAT32 system
+volume, remains open. The recursive importer is intentionally bounded to
+16 path levels and 256 visited inodes and skips files larger than the VFS
+payload capacity. Physical qualification remains incomplete: the inserted USB
 flash disk was inventoried read-only, while the destructive harness requires
 Administrator elevation and explicit authorization to erase it. No destructive
 write was issued in this audit.

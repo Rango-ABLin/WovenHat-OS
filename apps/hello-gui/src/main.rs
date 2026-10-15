@@ -23,6 +23,9 @@
 //! input and IPC: it must be woken by a message from `<peer>`, then by a key,
 //! then time out.
 //!
+//! With `--timer-event` it waits on a one-shot timer and a manual-reset event
+//! through the unified object wait ABI, then verifies both source masks.
+//!
 //! With `--damage-compositor` and `--damage-client <pid> <peer>` the pair
 //! check damage-only compositing: the compositor sleeps on damage and must
 //! copy exactly the region the client declared, and nothing it changed
@@ -114,6 +117,49 @@ fn audio() -> ! {
     libwoven::exit(0)
 }
 
+fn timer_event() -> ! {
+    let Ok(timer) = libwoven::timer_create(10, 0) else {
+        fail(31)
+    };
+    let Ok(event) = libwoven::event_create(false) else {
+        let _ = libwoven::timer_close(timer);
+        fail(32)
+    };
+    let timer_source = libwoven::WaitObject {
+        handle: timer,
+        timer: true,
+        mask: 1 << 3,
+    };
+    let event_source = libwoven::WaitObject {
+        handle: event,
+        timer: false,
+        mask: 1 << 4,
+    };
+    let deadline = libwoven::ticks().saturating_add(100);
+    let timer_ready = libwoven::wait_any_objects(&[timer_source, event_source], Some(deadline));
+    if timer_ready != Ok(1 << 3) {
+        let _ = libwoven::event_close(event);
+        let _ = libwoven::timer_close(timer);
+        fail(33);
+    }
+    if libwoven::event_set(event, true).is_err() {
+        let _ = libwoven::event_close(event);
+        let _ = libwoven::timer_close(timer);
+        fail(34);
+    }
+    let event_ready = libwoven::wait_any_objects(
+        &[event_source],
+        Some(libwoven::ticks().saturating_add(20)),
+    );
+    let _ = libwoven::event_close(event);
+    let _ = libwoven::timer_close(timer);
+    if event_ready != Ok(1 << 4) {
+        fail(35);
+    }
+    let _ = libwoven::print("hello-gui timer/event wait: PASS\n");
+    libwoven::exit(0)
+}
+
 fn fail(code: u64) -> ! {
     let _ = libwoven::print("hello-gui: failure at step ");
     let mut digits = [0u8; 20];
@@ -126,6 +172,7 @@ fn fail(code: u64) -> ! {
 fn main(args: Args) -> ! {
     match args.get(1) {
         Some(b"--audio") => audio(),
+        Some(b"--timer-event") => timer_event(),
         Some(b"--probe") => probe(args.get(2)),
         Some(b"--input") => run(Input::Poll),
         Some(b"--wait") => run(Input::Wait),
