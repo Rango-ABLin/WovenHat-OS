@@ -1,5 +1,37 @@
 # Production-ASLR geometry — source finding, correction not implemented
 
+## CPU reproduction — 2026-10-16
+
+The bounded compiler local-exec TLS prerequisite is accepted in `8b5d7150`.
+A new independently guarded `stage11-aslr-test` uses the same production graph
+loader with explicit private geometry, not a separate test loader. It forces
+the supported stack draw 16 / mmap draw 0 pair. Its Ring-3 program calls the
+ordinary Mmap syscall sixteen times for writable 64 KiB allocations and checks
+every returned address against the expected arena slots. Only then does it
+write the intended guard, checked unmapped before spawning. Allocation failure
+exits 98; a successful guard write exits 99; the regression requires fault
+status -11 and exact frame/process/endpoint/thread teardown.
+
+Session 43891 exited 1, QEMU 35, as expected for this unfixed defect. Serial:
+`audit-artifacts/stage11.2-aslr-1cpu-1792103210808207600/serial.log`.
+It records guard `0x4000001df000`, process status `Some(99)` and exact frames
+3488/3488. Thus actual CPU execution confirms removal of the intended guard,
+not merely a source overlap or a rejected allocation. Existing failure
+assertions and timeouts are unchanged. This is retained failing evidence,
+not acceptance. The private geometry seam preserves normal production draws;
+no layout correction is implemented in this checkpoint.
+
+The harness additionally requires the original Stage 11.2 scheduler-backed
+thread and overall markers; host negative tests reject each missing marker.
+The new gate deliberately remains red until the joint planner is corrected.
+
+Regression-source checks pass: all 168 root Rust host tests, twenty-two Python
+harness tests, warning-denying host all-targets Clippy, and both original
+`stage11-2-test` / new `stage11-aslr-test` kernel feature Clippy. Logs are in
+`audit-artifacts/aslr-geometry-20261016/`. These establish that the regression
+integrates cleanly; they do not convert its failed CPU security assertion into
+acceptance. Full inherited preservation must run after the actual correction.
+
 This read-only review ran during the frozen compiler-TLS chain (session
 77593). It changes no kernel source, executes no second build/QEMU chain and
 does not certify a planner. Source baseline: `e58b803b`.

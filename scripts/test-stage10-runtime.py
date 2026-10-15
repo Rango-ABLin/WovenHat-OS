@@ -76,6 +76,7 @@ def required_markers(stage, cpus):
                   '11.2': '[S11.2] threads/TLS/join: PASSED',
                   '11.2-status': '[S11.STATUS] libwoven signed exit status/ownership/teardown: PASSED',
                   '11.2-tls': '[S11.TLS] compiler TLS lifecycle: PASSED',
+                  '11.2-aslr': '[S11.ASLR] arena and stack guard: PASSED',
                   '11.3': '[S11.3] notifications: PASSED',
                   '11.4': '[S11.4] libwoven runtime boundary: PASSED',
                   '11.5': '[S11.5] loader hardening: PASSED',
@@ -107,6 +108,11 @@ def required_markers(stage, cpus):
                   '19.1': '[S19.1] compositor surface: PASSED',
                   '19.3': '[S19.3] compositor presentation: PASSED',
                   '19.10': '[S19.10] display geometry and single writer: PASSED'}[stage])]
+    if stage == '11.2-aslr':
+        required.extend([
+            '[S11.2] scheduler-backed thread: PASSED',
+            '[S11.2] threads/TLS/join: PASSED',
+        ])
     if stage == '11.2-tls':
         required.extend([
             '[S11.TLS] static compiler TLS: PASSED',
@@ -173,7 +179,7 @@ def validation_errors(returncode, log, required):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--stage', choices=('10.8', '10.9', '11.1', '11.2', '11.2-status', '11.2-tls', '11.3', '11.4', '11.5', '11.5-compiler', '12.1', '12.2', '12.3', '12.4', '12.5', '13.1', '13.2', '13.3', '13.4', '13.5', '13.6', '13.7', '13.8', '13.9', '13.10', '13.11', '1-5', '15.1', '15.3', '15.4', '15.5', '15.6', '15.7', '15.8', '15.9', '17.1', '18.1', '19.1', '19.3', '19.10'), default='10.8')
+    parser.add_argument('--stage', choices=('10.8', '10.9', '11.1', '11.2', '11.2-status', '11.2-tls', '11.2-aslr', '11.3', '11.4', '11.5', '11.5-compiler', '12.1', '12.2', '12.3', '12.4', '12.5', '13.1', '13.2', '13.3', '13.4', '13.5', '13.6', '13.7', '13.8', '13.9', '13.10', '13.11', '1-5', '15.1', '15.3', '15.4', '15.5', '15.6', '15.7', '15.8', '15.9', '17.1', '18.1', '19.1', '19.3', '19.10'), default='10.8')
     parser.add_argument('--cpus', type=int, choices=(1, 2, 4), default=1)
     parser.add_argument('--qemu', default=shutil.which('qemu-system-x86_64') or r'C:\Program Files\qemu\qemu-system-x86_64.exe')
     parser.add_argument('--firmware', type=Path)
@@ -187,6 +193,8 @@ def main():
     out = root / 'audit-artifacts' / f'stage{args.stage}-{args.cpus}cpu-{time.time_ns()}'
     out.mkdir(parents=True)
     feature = 'stage13-10-test' if args.stage == '13.11' else f'stage{args.stage.replace(".", "-")}-test'
+    if args.stage == '11.2-aslr':
+        feature = 'stage11-aslr-test'
     env = dict(os.environ)
     if args.stage == '11.2-status':
         import importlib.util

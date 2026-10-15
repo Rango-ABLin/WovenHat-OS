@@ -6,6 +6,13 @@ you start or finish something.
 
 ## Shared rules
 
+**ASLR CPU failure preserved (2026-10-16):** session 43891 is terminal exit 1
+(QEMU 35). Supported stack=16 / mmap=0 allowed all sixteen full allocations
+and a write to the intended guard: status 99, exact frames 3488/3488. New
+`stage11-aslr-test` remains red; see the ASLR audit. Codex retains the next
+serialized slot for checked joint planning and full validation. Foreign chains
+remain held; source-only work may continue. No ASLR/stage acceptance claim.
+
 **TLS revision-2 accepted; next ASLR slot reserved (2026-10-16):** session
 37505 is terminal, exit 0, with full acceptance PASS at 00:17:15 local.
 Independent audit verified 515 unchanged inputs, nine focused boots / 28 TLS

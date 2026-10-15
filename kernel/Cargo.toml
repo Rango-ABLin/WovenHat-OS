@@ -35,6 +35,7 @@ stage11-5-test = ["qemu-test"]
 # Execute unmodified compiler output before the unchanged loader gate exits.
 stage11-compiler-test = ["stage11-5-test"]
 stage11-tls-test = ["stage11-2-test"]
+stage11-aslr-test = ["stage11-2-test"]
 stage12-1-test = ["qemu-test"]
 stage12-2-test = ["qemu-test"]
 stage12-3-test = ["qemu-test"]

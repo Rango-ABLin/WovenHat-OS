@@ -3171,6 +3171,14 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         }
         qemu_test_exit_success();
     }
+    #[cfg(feature = "stage11-aslr-test")]
+    {
+        if !userspace::aslr_geometry_self_test() {
+            serial::write_line(format_args!("[S11.ASLR] arena and stack guard: FAILED"));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!("[S11.ASLR] arena and stack guard: PASSED"));
+    }
     #[cfg(feature = "stage11-tls-test")]
     {
         if !userspace::compiler_tls_self_test() {

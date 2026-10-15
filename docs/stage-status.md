@@ -2,6 +2,13 @@
 
 ## Stage 1–19 production closure review — 2026-10-15
 
+**ASLR guard defect confirmed (2026-10-16):** forced supported stack draw 16 /
+mmap draw 0 CPU execution mapped all sixteen full slots, then successfully
+wrote the intended stack guard (exit 99 rather than required fault -11).
+The new independently guarded regression remains deliberately failing; its
+serial and exact 3488/3488 frame teardown are preserved in the ASLR geometry
+audit. A joint image/arena/TLS/guard/stack planner is required before acceptance.
+
 The current synchronized branch has extensive bounded software/QEMU coverage,
 but Stages 1–19 are **not collectively production-ready**. The exact closure
 decision and remaining blockers are recorded in the

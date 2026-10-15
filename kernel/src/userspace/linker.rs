@@ -185,6 +185,18 @@ pub(super) fn load_with_candidate_bias(
     args: &[&str],
     candidate_bias: u64,
 ) -> Option<UserProgram> {
+    load_with_geometry(bytes, args, candidate_bias, aslr_stack_base()?, aslr_mmap_base()?)
+}
+
+// One graph-loader path for production draws and forced-draw CPU regressions.
+// Explicit geometry is private to the userspace module, not a userspace ABI.
+pub(super) fn load_with_geometry(
+    bytes: &[u8],
+    args: &[&str],
+    candidate_bias: u64,
+    stack_base: u64,
+    mmap_base: u64,
+) -> Option<UserProgram> {
     let images = prepare(bytes, candidate_bias)?;
     let main = images.first()?;
     let mut scope = SymbolScope::new(&main.image, &main.bytes);
@@ -194,9 +206,7 @@ pub(super) fn load_with_candidate_bias(
             .ok()?;
     }
     scope.validate_dependencies().ok()?;
-    let stack_base = aslr_stack_base()?;
     let stack = UserStack::new(stack_base);
-    let mmap_base = aslr_mmap_base()?;
     let mmap_end = mmap_base.checked_add(MAX_ANONYMOUS_MAPPINGS as u64 * USER_MMAP_STRIDE)?;
     let page_table = paging::create_user_address_space(main.image.entry)?;
     let mut pending = Pending {

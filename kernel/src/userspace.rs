@@ -7,6 +7,10 @@ global_asm!(include_str!("stage10_9.S"));
 
 mod linker;
 mod tls_layout;
+#[cfg(feature = "stage11-aslr-test")]
+mod aslr_acceptance;
+#[cfg(feature = "stage11-aslr-test")]
+pub fn aslr_geometry_self_test() -> bool { aslr_acceptance::run() }
 #[cfg(feature = "stage11-tls-test")]
 mod tls_acceptance;
 
