@@ -6,6 +6,16 @@ you start or finish something.
 
 ## Shared rules
 
+**TLS revision-2 accepted; next ASLR slot reserved (2026-10-16):** session
+37505 is terminal, exit 0, with full acceptance PASS at 00:17:15 local.
+Independent audit verified 515 unchanged inputs, nine focused boots / 28 TLS
+executions, twenty-one inherited boots, seventeen feature lints and sixty
+stress logs. See the compiler-TLS implementation audit for bounded scope and
+evidence. Codex reserves the next serialized slot for forced-draw ASLR guard
+reproduction and a validated arena/stack/TLS planner. Foreign acceptance/build
+chains remain held; source-only work may continue. Older ACTIVE notes are
+historical. General TLS, full-stage, release and hardware closure remain open.
+
 **TLS revision-2 full chain ACTIVE, session 37505 (2026-10-15):** source
 `c366cfaa` is published; corrected TLS-feature Clippy passes without warning
 suppression. A new 515-input freeze and full restart live under

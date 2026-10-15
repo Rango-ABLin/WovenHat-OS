@@ -21,9 +21,10 @@ increment, not full Stage 11.5 or a newly qualified release image.
 **Loader interoperability finding:** a separate unmodified
 Rust/LLD executable probe identified null `DT_DEBUG` rejection and an incorrect
 compiler TLS/TCB layout, including live-state copying when creating threads.
-The debug-metadata prerequisite is now accepted below; TLS remains unresolved.
-Main-image compiler TLS is therefore not accepted from the synthetic TLS
-metadata tests. See the shared-library audit for exact evidence and next fixes.
+The debug-metadata prerequisite and bounded main-image compiler local-exec TLS
+are now accepted below after actual compiler execution and full preservation,
+not merely synthetic metadata tests. Broader TLS models remain unresolved.
+See the shared-library and compiler-TLS implementation audits for scope.
 The Stage 11.2 thread-generation saturation correction is accepted: permanent
 retirement and five actual-source host regressions pass, as do full Stage 10.7
 preservation and Stage 10.8–11.5 matrices on 1/2/4 CPUs on the unchanged frozen
@@ -79,15 +80,19 @@ verified all 505 frozen inputs and sixty stress logs. See the compiler-PIE
 audit. Compiler TLS, general dynamic linking, merged-tree, release and hardware
 qualification remain open.
 
-**Compiler TLS integration pending:** checked Variant-II layout, a mapped TCB
+**Compiler main-image local-exec TLS accepted (2026-10-16):** checked Variant-II layout, a mapped TCB
 self pointer and an immutable post-relocation template fix the retained
 compiler FS/guard fault. Host parser/layout tests and first expanded Ring-3
 execution pass on 1/2/4 CPUs, including fresh children, page/congruence edges, fork mapping
 protection and rollback. Expanded compiler fork/cancel/capacity/owner-exit and
-relocated-pointer cases pass on every online CPU in 1/2/4-CPU boots. Full
-inherited acceptance remains required. Review also found ASLR mmap/stack-range
+relocated-pointer cases pass on every online CPU in 1/2/4-CPU boots. Session
+37505 passed full inherited acceptance: 515 unchanged inputs, nine focused
+boots / 28 TLS executions, twenty-one inherited boots, seventeen feature lints,
+168 host / nineteen libwoven / twenty-one Python tests and sixty stress logs.
+Review also found ASLR mmap/stack-range
 overlap, hidden by zero-draw QEMU boots; that needs a separate validated layout
-gate. See the compiler-TLS implementation audit. No full TLS/stage claim.
+gate. Pure-BSS runtime, broader/library TLS and physical qualification remain
+open. See the compiler-TLS implementation audit. No full TLS/stage claim.
 
 ## Presentation and repaint performance (2026-10-15)
 

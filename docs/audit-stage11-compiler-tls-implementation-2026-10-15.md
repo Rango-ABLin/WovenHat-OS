@@ -1,4 +1,35 @@
-# Compiler static TLS/TCB implementation — integration, acceptance pending
+# Compiler static TLS/TCB implementation — bounded acceptance 2026-10-16
+
+## Acceptance decision
+
+Session 37505 exited 0 with `COMPILER TLS FULL ACCEPTANCE: PASS` at
+2026-10-16 00:17:15 local. Sources `a33dea86`, `e58b803b` and `c366cfaa`
+are accepted for bounded main-image compiler local-exec TLS, not general TLS
+or full-stage production readiness. Independent inspection verified all 515
+frozen inputs unchanged, nine focused boots, 28 TLS execution cases across
+every online CPU in 1/2/4-CPU configurations, twenty-one inherited runtime
+boots, seventeen feature lints and sixty individual stress logs.
+
+Build, warning-denying host/production/affected-feature and fixture Clippy,
+168 root host Rust tests, nineteen libwoven tests and twenty-one Python tests
+passed. The exact full Stage 10.7 launcher passed, followed by Stage
+10.8–11.5 on 1/2/4 CPUs. Existing assertions and capacities were preserved.
+
+The immutable manifest/runner are in
+`audit-artifacts/compiler-tls-20261015/revision2/`; final QA is in
+`attempt-20261015-233729-275/` beneath it. Exact inherited launcher evidence:
+`audit-artifacts/acceptance-20261015-234437-300/`; sixty stress logs:
+`stage7-6-artifacts/20261015-234440-216/`. The first failed full attempt and
+its separate original manifest remain historical evidence, not a passing gate.
+
+This qualifies initialized/mixed-zero main-image local-exec TLS, relocated PIE
+initializer pointers, fresh threads, fork state, cancellation, capacity, stale
+joins, owner exit, rollback and exact resource reclamation. Pure-BSS TLS has
+parser/layout coverage but no dedicated all-BSS runtime compiler fixture.
+Initial-exec relocation models, library/dynamic TLS, general dynamic linking,
+production ASLR geometry, combined-tree, release and physical qualification
+remain open. Earlier pending statements below describe historical checkpoints;
+this decision supersedes them only for the stated bounded contract.
 
 ## Preserved failure and initial correction
 

@@ -29,7 +29,7 @@ Missing evidence is **blocked**, not inferred from an older green run.
 | 1–5 | Software gates and bounded storage transactions pass | Native storage/DMA matrix, arbitrary-size/full-volume rollback, torn-write and unclean-shutdown qualification |
 | 6 | Bounded SMP, TLB, hotplug and lock foundations pass in QEMU | General multicore stress, NUMA/high-APIC-ID and physical hotplug qualification, broader priority-inheritance/low-memory evidence |
 | 7–10 | Core isolation, corrected COW ancestors/child-wait authority/status, IPC with permanent exhausted-handle-slot retirement, capabilities, networking, completion and timer foundations pass bounded gates | Complete signals, dynamic userspace runtime, broader driver/hardware qualification and full cancellation stress |
-| 11 | Processes, scheduler-backed threads, signed wait/join results, join/cancel/teardown, permanent exhausted-thread-record retirement, fixed-ET_EXEC/nonzero-PIE placement, real signed compiler shared-PIE execution, ASLR, W^X, RELRO, synthetic TLS metadata, and bounded signed shared-object graph loading with cross-image relocation | Compiler-compatible main/child TLS, general shared-library/toolchain interoperability, library TLS, REL/PLT tables, constructors/destructors, versioning, and physical qualification |
+| 11 | Processes, scheduler-backed threads, signed wait/join results, join/cancel/teardown, permanent exhausted-thread-record retirement, fixed-ET_EXEC/nonzero-PIE placement, real signed compiler shared-PIE execution, deterministic ASLR candidates, W^X, RELRO, bounded main-image compiler local-exec TLS and lifecycle, and bounded signed shared-object graph loading with cross-image relocation | Production ASLR arena/guard geometry, pure-BSS runtime and broader TLS models, general shared-library/toolchain interoperability, library TLS, REL/PLT tables, constructors/destructors, versioning, and physical qualification |
 | 12 | Typed VFS, metadata, crypto, snapshots and mount boundaries pass bounded gates | Native WovenFS as the mounted system filesystem, durable crash/power-loss evidence, full rollback and persistent key provisioning |
 | 13 | QEMU driver/input/storage/audio/HID foundations pass their accepted gates | Native PCIe/NVMe/AHCI/xHCI/HDA/Wi-Fi/Bluetooth/input qualification, hotplug and fault recovery |
 | 14 | Bounded IPv4/IPv6, DHCP/DNS, sockets and firewall paths pass QEMU gates | Live IPv6 socket lifecycle, routing/policy breadth and physical NIC/radio qualification |
@@ -91,9 +91,12 @@ test session.
    corrected in source `da6d16e6`, accepted after full session 73596 passed
    with all 505 inputs unchanged. Actual signed shared imports execute at
    zero/nonzero bias on 1/2/4 CPUs, preserving all original loader assertions.
-   The incompatible main-thread TLS/TCB layout remains open;
-   compiler TLS execution and fresh child-thread template initialization
-   are unaccepted even though synthetic TLS metadata tests pass.
+   Main-image compiler local-exec TLS/TCB and fresh child-template initialization
+   are accepted after full session 37505 passed on 515 unchanged inputs, with
+   actual compiler lifecycle execution on every online CPU in 1/2/4-CPU boots.
+   See the compiler-TLS implementation audit. Production ASLR arena/guard
+   geometry is the next prerequisite; pure-BSS runtime and broader TLS models
+   remain unqualified.
    See the shared-library audit for the exact
    implemented graph, permission and teardown contract.
 5. Close the native WovenFS mount/write-through policy and recovery evidence

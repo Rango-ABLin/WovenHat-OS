@@ -1,5 +1,12 @@
 # Compiler TLS follow-up — source review, not acceptance
 
+**Later bounded acceptance (2026-10-16):** session 37505 passed full
+preservation on 515 unchanged inputs. Main-image compiler local-exec TLS,
+fresh immutable-template initialization and tested lifecycle are now accepted;
+see the implementation audit for evidence and exact limits. This document
+retains the earlier review, not a current blanket TLS rejection. Broader TLS,
+pure-BSS runtime and production ASLR geometry remain open.
+
 **Prerequisite update:** compiler shared-PIE/null-DT_DEBUG correction source
 `da6d16e6` is accepted after session 73596 exited 0 with full preservation and
 all 505 inputs unchanged. See the compiler-PIE audit. That resolves the separate

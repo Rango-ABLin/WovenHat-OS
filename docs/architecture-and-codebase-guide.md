@@ -317,15 +317,18 @@ write-through audit.
 
 ## Stage 11.2 scheduler-backed thread ownership (2026-10-14)
 
-Compiler TLS integration pending (2026-10-15): `InitialTls` records a checked
+Bounded main-image local-exec TLS accepted (2026-10-16): `InitialTls` records a checked
 Variant-II layout and an independently tracked RO/NX post-relocation template.
 Mutable main/child storage contains a mapped FS:0 self pointer; fresh threads
 receive initialized template state, not mutated main-thread bytes. Parser
 backing/congruence, clone, logical permission and teardown accounting are
 updated together. Expanded compiler fork/cancel/capacity/owner-exit and biased
 pointer-initializer execution passes on every online CPU in 1/2/4-CPU boots;
-full inherited acceptance remains pending. See the implementation audit, including
-the separate inherited production-ASLR arena-overlap finding.
+full session 37505 passed with 515 unchanged inputs, seventeen feature lints,
+nine focused and twenty-one inherited boots, plus sixty stress logs. See the
+implementation audit for scope: pure-BSS runtime and broader/library TLS remain
+open, as does the separate production-ASLR arena-overlap finding. Later older
+TLS-pending statements in this section describe the pre-correction baseline.
 
 Compiler shared-PIE correction accepted (2026-10-15): ELF parsing explicitly
 accepts a single inert null DT_DEBUG entry, rejecting nonzero addresses and
@@ -382,7 +385,7 @@ compiler-compatible TLS remains open.
 
 `TaskControlBlock` carries both the stable process owner and an optional
 generation-safe thread ID. User-thread creation maps a private NX stack and a
-private copy of the process's bounded initial-exec TLS image into the existing
+private initialization from the immutable main-image TLS template into the existing
 address space; it never retains an unchecked userspace pointer. Thread exit
 publishes registry termination only after the scheduler completes the stack
 hand-off, so join can safely reclaim those mappings. Join waiters use the
@@ -420,12 +423,12 @@ Legacy REL/PLT tables, versioned/weak symbols, constructors/destructors, lazy
 binding and library TLS remain unsupported. See
 `audit-stage11-shared-libraries-2026-10-15.md` for validation and limits.
 
-The preserved main-image TLS mapping is not yet a compiler-compatible TCB:
+The historical main-image TLS mapping was not a compiler-compatible TCB:
 the real Rust local-exec probe expects a self-pointer at `FS:0` and aligned
 template bytes immediately below it. The existing page-end FS base has neither;
-new-thread cloning also copies mutable main-thread state. Compiler TLS
-execution, fresh thread initialization and fork/self-pointer rebasing require
-a dedicated correction and runtime acceptance before broader TLS claims.
+new-thread cloning also copied mutable main-thread state. The correction and
+full bounded compiler local-exec acceptance are recorded above and in the
+compiler-TLS implementation audit. Do not infer broader TLS-model acceptance.
 
 The symbol resolver and the production loader now share
 `Image::defined_symbol_value`: ELF symbol values receive the image load bias

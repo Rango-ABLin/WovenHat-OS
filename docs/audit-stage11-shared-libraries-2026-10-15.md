@@ -5,7 +5,9 @@ initial null-DT_DEBUG rejection recorded below. Session 73596 passed full
 preservation and actual signed Rust/LLD shared imports at zero/nonzero bias on
 1/2/4 CPUs, with all 505 inputs unchanged. See the compiler-PIE audit for the
 accepted bounded correction. The original probes remain historical evidence;
-compiler TLS and broader dynamic linking are still open.
+main-image compiler local-exec TLS was subsequently accepted by full session
+37505 on 515 unchanged inputs (2026-10-16); see its implementation audit.
+Broader/library TLS and general dynamic linking remain open.
 
 ## Implementation and authority
 
