@@ -1,5 +1,6 @@
 use core::arch::asm;
 use core::fmt::{self, Write};
+use core::sync::atomic::{AtomicU8, AtomicUsize, Ordering};
 
 const COM1: u16 = 0x3f8;
 const LINE_STATUS_TRANSMITTER_EMPTY: u8 = 1 << 5;
@@ -16,6 +17,41 @@ pub fn init() {
         outb(COM1 + 2, 0xc7);
         outb(COM1 + 4, 0x0b);
     }
+}
+
+/// The kernel log: every byte written to the serial port, the newest
+/// [`LOG_BYTES`] of them kept, so the log can be saved where there is no
+/// serial line, such as the live-test log on the WovenHat USB stick
+/// (Stage 13.19).
+pub const LOG_BYTES: usize = 256 * 1024;
+static LOG: [AtomicU8; LOG_BYTES] = [const { AtomicU8::new(0) }; LOG_BYTES];
+/// Bytes logged since boot; the next byte goes to `LOG[LOG_HEAD % LOG_BYTES]`.
+static LOG_HEAD: AtomicUsize = AtomicUsize::new(0);
+
+fn record(byte: u8) {
+    let at = LOG_HEAD.fetch_add(1, Ordering::Relaxed);
+    LOG[at % LOG_BYTES].store(byte, Ordering::Release);
+}
+
+/// Bytes logged since boot.
+#[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
+pub fn log_position() -> usize {
+    LOG_HEAD.load(Ordering::Acquire)
+}
+
+/// Copy logged bytes, starting at position `from`, into `out`. Returns the
+/// position actually copied from (later than `from` when older bytes have
+/// been overwritten) and the number of bytes copied. A byte being written
+/// concurrently may read as its predecessor; readers re-read the tail.
+#[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
+pub fn read_log(from: usize, out: &mut [u8]) -> (usize, usize) {
+    let head = LOG_HEAD.load(Ordering::Acquire);
+    let start = from.max(head.saturating_sub(LOG_BYTES)).min(head);
+    let count = (head - start).min(out.len());
+    for (offset, byte) in out[..count].iter_mut().enumerate() {
+        *byte = LOG[(start + offset) % LOG_BYTES].load(Ordering::Acquire);
+    }
+    (start, count)
 }
 
 pub fn write_fmt(arguments: fmt::Arguments<'_>) {
@@ -54,6 +90,10 @@ impl Write for SerialPort {
 
 impl SerialPort {
     fn write_byte(&mut self, byte: u8) {
+        // The line ending's carriage return is for terminals, not the log.
+        if byte != b'\r' {
+            record(byte);
+        }
         // The physical inventory target may have no usable legacy UART.
         // Its framebuffer is authoritative: never hang that diagnostic on
         // serial readiness. Ordinary/test builds retain their existing path.
