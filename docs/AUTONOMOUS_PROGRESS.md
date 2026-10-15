@@ -4,6 +4,84 @@ Each entry is one bounded checkpoint. Entries record exactly what was run.
 Nothing here claims production readiness; completion requires independent
 human review.
 
+## 2026-10-15 — WovenFS: commit checksum covers the journal descriptor
+
+Branch: `auto/wovenhat-development` (base `346e4eb`). The working tree was
+clean at the start, so there was no unfinished work to resume. This takes the
+"uncovered journal descriptor" open item from the previous entries.
+
+### Defect
+
+The commit checksum covered only the staged data sectors, not the
+descriptor's target list. A descriptor damaged after its commit landed still
+looked committed. Replay checked only that each target was inside the
+transactional regions (`bitmap_start..total_blocks`). So a changed target
+there made replay write a staged block over the wrong bitmap, inode-table or
+data block. Mount then returned success on a corrupted volume.
+
+### Change
+
+- `kernel/src/wfs.rs`: `staged_checksum` replaced by `journal_checksum`.
+  It hashes the descriptor's used bytes (`[..24 + count * 8]`: magic, id,
+  count, targets), then the data sectors, with the same FNV-1a chain. `commit`
+  and `replay` both use it. The `journal_may_target` range check stays as an
+  independent guard. Commit-sector layout and offsets are unchanged.
+- `tests/wovenfs_crash.rs`: new `pending_transaction` helper (carries the
+  existing replay-and-retire control) and `retarget_journal_block` (with
+  optional commit reseal). New test
+  `journal_replay_refuses_a_descriptor_changed_after_commit` covers in-range
+  targets (bitmap, last inode-table block, last data block). For each one, a
+  resealed control proves replay writes the target, and the unsealed
+  retarget must leave the image byte-identical.
+  `journal_replay_refuses_targets_outside_the_transactional_regions` now
+  reseals, so it still isolates the range check rather than passing on the
+  checksum.
+- `docs/wovenfs-on-disk-format.md`: documents what the commit checksum covers
+  and the compatibility consequence below.
+
+### Compatibility limit (intentional, documented)
+
+A transaction committed but not yet retired by a kernel built before this
+change is discarded on first mount by this kernel. Its commit checksum does
+not include the descriptor. The volume presents the consistent prior state
+for that one transaction rather than the new one. Retired journals and all
+other on-disk structures are unaffected. `FORMAT_VERSION` was not bumped.
+
+### Results (run on this host, 2026-10-15)
+
+Using project-local `CARGO_BUILD_BUILD_DIR=.cargo-build`,
+`CARGO_TARGET_DIR=target`:
+
+| Command | Result |
+|---|---|
+| New test, unfixed `wfs.rs`, as written | FAILS, but in the resealed control (`bitmap: a resealed descriptor must be replayed to its target`). The test reseals with the new checksum, which the old code rejects, so this run does not show the defect. |
+| New test, unfixed `wfs.rs`, control temporarily unsealed (negative control) | FAILS as expected: `bitmap: inconsistent: Corrupt`. Old code replayed the unsealed retarget onto the bitmap and mounted a corrupt volume. Both files were restored afterwards and checked with `cmp`. |
+| `cargo fmt --all -- --check` | PASS |
+| `cargo test --test wovenfs_crash` | PASS, 22 passed / 0 failed |
+| `cargo test -p wovenhat-os --tests --no-fail-fast` | PASS, 132 passed / 0 failed |
+| `cargo clippy --all-targets -- -D warnings` | PASS |
+| `cargo clippy -p wovenhat-kernel --target x86_64-unknown-none -- -D warnings` (default) | PASS |
+| same, `--features stage11-5-test` | PASS |
+| same, `--features stage15-1-test` … `stage15-9-test` (each) | PASS |
+| QEMU Stage 15.x on 1/2/4 CPUs | **NOT RUN**: see below |
+
+Correction to earlier entries: QEMU is installed here.
+`C:\Program Files\qemu\qemu-system-x86_64.exe` reports version 11.1.0. It
+is not on `PATH`, which is why `which` did not find it. The Stage 15.2 device
+harness (`scripts/test-wovenfs-device.py`) is a Python script, though, and
+this host has only the Microsoft Store `python` stub, no interpreter. So the
+QEMU gate still cannot run here as written.
+
+### Open / next
+
+- Install Python, or port `scripts/test-wovenfs-device.py` to PowerShell,
+  then run the Stage 15.1/15.2 QEMU acceptance on 1/2/4 CPUs. Until then
+  none of the WovenFS checkpoints count as stage acceptance.
+- FNV-1a detects corruption but is not a MAC. A deliberately crafted image
+  can still reseal a descriptor. That is consistent with the rest of the
+  format's checksums and is out of scope for this checkpoint.
+- Cross-inode block aliasing and `unlink` ignoring `links` remain open.
+
 ## 2026-10-15 — WovenFS: read_file refuses directory inodes
 
 Branch: `auto/wovenhat-development` (base `e0a8f47`). The working tree was

@@ -771,10 +771,9 @@ fn superblock_geometry_that_does_not_fit_is_refused() {
     }
 }
 
-#[test]
-fn journal_replay_refuses_targets_outside_the_transactional_regions() {
-    // Leave a committed, applied but unretired transaction in the journal by
-    // cutting power at the final retire write.
+/// A committed, applied but unretired transaction left in the journal by
+/// cutting power at the final retire write, and the volume's superblock.
+fn pending_transaction() -> (CrashDisk, wfs::SuperBlock) {
     let base = formatted();
     let sb = *Volume::mount(base.clone()).expect("mount").super_block();
     let full = write_count(&base, |volume| {
@@ -785,20 +784,51 @@ fn journal_replay_refuses_targets_outside_the_transactional_regions() {
         let mut volume = Volume::mount(pending.clone()).expect("mount");
         let _ = volume.create(1, "j.txt", 0o644, 2);
     }
-    let descriptor = sb.journal_start as usize;
 
     // Control: the untouched descriptor is live, so mount replays it and
-    // retires the journal. Without this the cases below would prove nothing.
+    // retires the journal. Without this the callers' cases would prove
+    // nothing.
     let control = pending.fork(None);
     mount_consistent(&control, "valid pending transaction");
     assert_eq!(
-        control.sectors()[descriptor],
+        control.sectors()[sb.journal_start as usize],
         [0u8; SECTOR_SIZE],
         "a valid committed transaction must be replayed and retired"
     );
+    (pending, sb)
+}
 
-    // The commit checksum covers the staged data but not the descriptor's
-    // targets, so retargeting a block keeps the transaction "committed".
+fn test_fnv1a_seeded(seed: u64, bytes: &[u8]) -> u64 {
+    bytes.iter().fold(seed, |hash, byte| {
+        (hash ^ u64::from(*byte)).wrapping_mul(0x0000_0100_0000_01b3)
+    })
+}
+
+/// Point the pending transaction's first staged block at `target`. With
+/// `reseal`, the commit checksum is recomputed over the edited descriptor so
+/// the damage is not caught by the checksum alone; this models a crafted
+/// image rather than a descriptor damaged after commit.
+fn retarget_journal_block(image: &CrashDisk, sb: &wfs::SuperBlock, target: u64, reseal: bool) {
+    let mut sectors = image.image.borrow_mut();
+    let descriptor = sb.journal_start as usize;
+    sectors[descriptor][24..32].copy_from_slice(&target.to_le_bytes());
+    if !reseal {
+        return;
+    }
+    let count = u32::from_le_bytes(sectors[descriptor][16..20].try_into().unwrap()) as usize;
+    let header = test_fnv1a(&sectors[descriptor][..24 + count * 8]);
+    let checksum = sectors[descriptor + 1..descriptor + 1 + count]
+        .iter()
+        .fold(header, |hash, data| test_fnv1a_seeded(hash, data));
+    sectors[descriptor + 1 + count][16..24].copy_from_slice(&checksum.to_le_bytes());
+}
+
+#[test]
+fn journal_replay_refuses_targets_outside_the_transactional_regions() {
+    let (pending, sb) = pending_transaction();
+
+    // The commit checksum is resealed, so only the target range check stands
+    // between these descriptors and a write over a checkpoint or the journal.
     let cases = [
         ("superblock slot 0", 0),
         ("superblock slot 1", 1),
@@ -809,12 +839,56 @@ fn journal_replay_refuses_targets_outside_the_transactional_regions() {
     ];
     for (case, target) in cases {
         let image = pending.fork(None);
-        image.image.borrow_mut()[descriptor][24..32].copy_from_slice(&target.to_le_bytes());
+        retarget_journal_block(&image, &sb, target, true);
         let before = image.sectors();
         mount_consistent(&image, case);
         assert!(
             image.sectors() == before,
             "{case}: replay must discard the transaction without writing"
+        );
+    }
+}
+
+#[test]
+fn journal_replay_refuses_a_descriptor_changed_after_commit() {
+    let (pending, sb) = pending_transaction();
+
+    // Targets inside the transactional regions pass the range check, so only
+    // the commit checksum can tell that the descriptor no longer matches what
+    // was committed.
+    let cases = [
+        ("bitmap", sb.bitmap_start),
+        ("last inode table block", sb.data_start - 1),
+        ("last data block", sb.total_blocks - 1),
+    ];
+    for (case, target) in cases {
+        // Control: resealed, the retargeted block is replayed onto `target`,
+        // so the unsealed case below is refused by the checksum and not by
+        // anything else.
+        let resealed = pending.fork(None);
+        retarget_journal_block(&resealed, &sb, target, true);
+        let staged = resealed.sectors()[sb.journal_start as usize + 1];
+        assert_ne!(
+            resealed.sectors()[target as usize],
+            staged,
+            "{case}: the target must not already hold the staged bytes"
+        );
+        // Replaying staged bytes onto the wrong block leaves an inconsistent
+        // volume, which is the point; only the write is checked here.
+        drop(Volume::mount(resealed.clone()));
+        assert_eq!(
+            resealed.sectors()[target as usize],
+            staged,
+            "{case}: a resealed descriptor must be replayed to its target"
+        );
+
+        let image = pending.fork(None);
+        retarget_journal_block(&image, &sb, target, false);
+        let before = image.sectors();
+        mount_consistent(&image, case);
+        assert!(
+            image.sectors() == before,
+            "{case}: replay must discard a descriptor the commit does not cover"
         );
     }
 }

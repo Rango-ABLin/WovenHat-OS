@@ -142,7 +142,16 @@ LBA for each staged data block (up to `MAX_TXN_BLOCKS`).
 order.
 
 **Commit** — magic `WFSJCOMM`, the same transaction id, and a checksum computed
-over every staged data sector. Written last, and written alone.
+over the descriptor's used bytes (magic, id, count and the `count` target LBAs),
+then every staged data sector in order. Written last, and written alone.
+
+The descriptor is covered so that a descriptor damaged after its commit landed
+is discarded rather than replayed. Without it, a changed target inside the
+transactional regions would still look committed and replay would write a
+staged block over the wrong bitmap, inode or data block. A commit sector
+written before this rule covered only the data, so a transaction committed but
+not yet retired by an older kernel is discarded on first mount by this one:
+the volume presents the prior state, not the new one, for that transaction.
 
 ### Write path
 
@@ -159,15 +168,15 @@ On mount, after choosing the authoritative superblock:
 1. Read the journal descriptor. If its magic or id is invalid, there is no
    pending transaction; mount proceeds.
 2. Read the commit sector. If it is missing, its id does not match the
-   descriptor, or its checksum does not match the staged data, the transaction
+   descriptor, or its checksum does not match the descriptor and staged data, the transaction
    was never committed. It is discarded and the filesystem is left exactly as it
    was before the transaction began.
    A transaction may only target the bitmap, inode table and data regions
    (`bitmap_start <= target < total_blocks`). The superblock slots are written
-   only by the checkpoint and the journal only by the commit path. The commit
-   checksum covers staged data, not the descriptor's targets, so a descriptor
-   naming any other target is discarded the same way. `commit` refuses such a
-   transaction with `Corrupt` before it writes to the journal.
+   only by the checkpoint and the journal only by the commit path. A
+   descriptor naming any other target is discarded the same way, even if
+   its commit checksum matches. `commit` refuses such a transaction with
+   `Corrupt` before it writes to the journal.
 3. Otherwise the transaction is committed but possibly only partly applied, so
    every staged data sector is written to its target again. Replay is
    **idempotent** — applying it twice is identical to applying it once — so a

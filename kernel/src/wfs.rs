@@ -390,10 +390,15 @@ impl Transaction {
     }
 }
 
-fn staged_checksum(blocks: &[StagedBlock]) -> u64 {
-    blocks.iter().fold(0xcbf2_9ce4_8422_2325, |hash, block| {
-        fnv1a_seeded(hash, &block.data)
-    })
+/// Commit checksum over the descriptor's used bytes (header and target list),
+/// then every staged data sector. Covering the targets means a descriptor
+/// damaged after commit is discarded on replay rather than writing committed
+/// bytes to the wrong block.
+fn journal_checksum(descriptor: &[u8; SECTOR_SIZE], blocks: &[StagedBlock]) -> u64 {
+    let header = fnv1a(&descriptor[..24 + blocks.len() * 8]);
+    blocks
+        .iter()
+        .fold(header, |hash, block| fnv1a_seeded(hash, &block.data))
 }
 
 // ------------------------------------------------------------------- volume
@@ -669,10 +674,9 @@ impl<D: BlockDevice> Volume<D> {
         }; MAX_TXN_BLOCKS];
         for (index, slot) in blocks.iter_mut().take(count).enumerate() {
             let target = read_u64(&descriptor, 24 + index * 8);
-            // The commit checksum covers the staged data, not the descriptor's
-            // targets, so a target outside the transactional regions is
-            // discarded here rather than applied over a checkpoint or the
-            // journal.
+            // `commit` never stages a target outside the transactional
+            // regions, so one here is discarded rather than applied over a
+            // checkpoint or the journal, independent of the checksum.
             if !sb.journal_may_target(target) {
                 return Ok(());
             }
@@ -681,9 +685,10 @@ impl<D: BlockDevice> Volume<D> {
                 .read_sector(sb.journal_start + 1 + index as u64, &mut data)?;
             *slot = StagedBlock { target, data };
         }
-        if read_u64(&commit, 16) != staged_checksum(&blocks[..count]) {
-            // The staged payload does not match what was committed, so the
-            // journal itself is torn. Discard rather than apply unknown bytes.
+        if read_u64(&commit, 16) != journal_checksum(&descriptor, &blocks[..count]) {
+            // The descriptor or staged payload does not match what was
+            // committed, so the journal itself is torn. Discard rather than
+            // apply unknown bytes, or known bytes to unknown targets.
             return Ok(());
         }
 
@@ -744,7 +749,8 @@ impl<D: BlockDevice> Volume<D> {
         let mut commit = [0u8; SECTOR_SIZE];
         commit[..8].copy_from_slice(JOURNAL_COMMIT_MAGIC);
         commit[8..16].copy_from_slice(&transaction_id.to_le_bytes());
-        commit[16..24].copy_from_slice(&staged_checksum(&txn.blocks[..count]).to_le_bytes());
+        commit[16..24]
+            .copy_from_slice(&journal_checksum(&descriptor, &txn.blocks[..count]).to_le_bytes());
         self.device
             .write_sector(sb.journal_start + 1 + count as u64, &commit)?;
         self.device.flush()?;
