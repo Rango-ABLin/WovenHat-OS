@@ -1,7 +1,15 @@
 #![cfg_attr(feature = "qemu-test", allow(dead_code, unused_imports))]
 #![cfg_attr(not(test), no_std)]
 #![cfg_attr(not(test), no_main)]
-#![cfg_attr(test, allow(dead_code, unused_imports, unused_variables, unfulfilled_lint_expectations))]
+#![cfg_attr(
+    test,
+    allow(
+        dead_code,
+        unused_imports,
+        unused_variables,
+        unfulfilled_lint_expectations
+    )
+)]
 #![feature(abi_x86_interrupt)]
 #![cfg_attr(not(test), feature(alloc_error_handler))]
 
@@ -3164,11 +3172,15 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
             qemu_test_exit_failure();
         }
         let Some(program) = userspace::create_stage11_2_thread_process() else {
-            serial::write_line(format_args!("[S11.2] scheduler-backed thread image: FAILED"));
+            serial::write_line(format_args!(
+                "[S11.2] scheduler-backed thread image: FAILED"
+            ));
             qemu_test_exit_failure();
         };
         let Ok((pid, _)) = task::spawn_user_process("thread-test", program) else {
-            serial::write_line(format_args!("[S11.2] scheduler-backed thread spawn: FAILED"));
+            serial::write_line(format_args!(
+                "[S11.2] scheduler-backed thread spawn: FAILED"
+            ));
             qemu_test_exit_failure();
         };
         let exit = loop {
