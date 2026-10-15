@@ -75,6 +75,50 @@ It has **not been executed or accepted**; run it only in a serialized slot,
 after the current thread correction gate, then add production-source and
 inherited runtime coverage before accepting any IPC correction.
 
+## IPC boundary and runtime regression requirements
+
+The IPC encoding differs from the thread registry: all 24 generation bits can
+be used in a valid live handle, including `0x00ff_ffff`. The exhausted state is
+an **empty** slot whose preserved generation already equals that maximum.
+Keep the last issued handle valid until close; skip its slot on subsequent
+allocation rather than wrapping or rejecting the last live generation. Normal
+capacity remains 16, while a surviving namespace can permanently lose exhausted
+slots. `count()` measures live entries, not remaining allocatable capacity.
+
+For the next correction, seed generation counters only in synthetic namespaces
+owned by the regression, under the existing IPC state lock. Never rewrite the
+generation of a live entry or reset exhausted counters to manufacture cleanup.
+An endpoint receive handle needed to test transfer must remain in a separate,
+non-exhausted live slot. Required production-path assertions are:
+
+- Endpoint creation into an all-retired namespace returns `HandleTableFull`
+  without changing endpoint-object count; repeated failures remain bounded.
+- Failed delegated installation preserves source authority, rights and lineage
+  and returns its temporary object reference. Closing the source afterward
+  releases the object exactly once.
+- Failed shared-memory installation leaves no registered shared object. Test
+  frame ownership at the public allocation wrapper as well as the private
+  install method: the latter does not itself own the caller's failure cleanup.
+- Failed transfer receive preserves the queue head, payload, transferred
+  object's escrow reference and sender waiters. Freeing an ordinary receiver
+  slot permits exactly one successful dequeue; an exhausted slot must not be
+  revived. Verify installed rights/lineage and stale-handle rejection afterward.
+- Failed service discovery preserves publication and its owning escrow while
+  releasing the attempted client reference. Publisher teardown removes service
+  discoverability, and surviving delegated/queued references follow their
+  existing independent lifetimes.
+- Unregister drains both live last-generation handles and ordinary handles,
+  removes owner waiters, and restores object/frame baselines. A different newly
+  registered process-local namespace may start at generation one; that is not
+  permission to recycle handles inside a surviving namespace.
+
+The existing boot-time handle self-test and post-SMP Stage 8.1 probe cover
+ordinary reuse only; neither currently seeds the 24-bit boundary. Retain those
+assertions and the Stage 8.2–8.6 messaging, blocking, shared-memory, transfer and
+service acceptance. Extend boundary coverage without adding a production
+syscall for generation mutation, new capabilities, lock nesting, or scheduling
+under the IPC lock. These are reviewed requirements, not executed test results.
+
 ## Compared earlier-stage implementations
 
 - `async_op::Table::allocate` skips free slots at `u32::MAX` before increment.
