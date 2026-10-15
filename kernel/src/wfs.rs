@@ -1297,12 +1297,47 @@ impl<D: BlockDevice> Volume<D> {
         if root.kind != KIND_DIR {
             return Err(Error::Corrupt);
         }
-        let view = self.dir_entries(&txn, &root)?;
-        for entry in view.entries.iter().filter(|entry| entry.inode != 0) {
-            if entry.inode > u64::from(sb.inode_count) {
+
+        // Validate the complete reachable namespace, not only the root
+        // directory. The on-disk format has no hard links, so every live inode
+        // must be reached exactly once; this also rejects directory cycles and
+        // duplicate references before path resolution or mount publication.
+        const MAX_REACHABLE_INODES: usize = 256;
+        let mut reachable = [0u64; MAX_REACHABLE_INODES];
+        let mut reachable_len = 1usize;
+        reachable[0] = sb.root_inode;
+        let mut stack = [0u64; MAX_REACHABLE_INODES];
+        let mut stack_len = 1usize;
+        stack[0] = sb.root_inode;
+        while let Some(index) = stack_len.checked_sub(1) {
+            stack_len = index;
+            let directory_inode = stack[index];
+            let directory = self.inode(directory_inode)?;
+            if directory.kind != KIND_DIR {
                 return Err(Error::Corrupt);
             }
-            if !self.inode(entry.inode)?.is_used() {
+            let view = self.dir_entries(&txn, &directory)?;
+            for entry in view.entries.iter().filter(|entry| entry.inode != 0) {
+                if entry.inode > u64::from(sb.inode_count)
+                    || !self.inode(entry.inode)?.is_used()
+                    || Self::valid_component(entry.name_str()).is_err()
+                    || reachable[..reachable_len].contains(&entry.inode)
+                {
+                    return Err(Error::Corrupt);
+                }
+                if reachable_len == reachable.len() || stack_len == stack.len() {
+                    return Err(Error::Corrupt);
+                }
+                reachable[reachable_len] = entry.inode;
+                reachable_len += 1;
+                if self.inode(entry.inode)?.kind == KIND_DIR {
+                    stack[stack_len] = entry.inode;
+                    stack_len += 1;
+                }
+            }
+        }
+        for number in 1..=u64::from(sb.inode_count) {
+            if self.inode(number)?.is_used() && !reachable[..reachable_len].contains(&number) {
                 return Err(Error::Corrupt);
             }
         }

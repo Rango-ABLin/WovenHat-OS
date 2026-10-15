@@ -132,8 +132,8 @@ rank-5 `PreemptMutex`, below the ATA device lock at rank 10. No IRQ-disabled
 guard spans device I/O. Directory creation, empty-directory removal, and
 rename update parent entries transactionally; ATA publication recursively
 imports validated nested directories with bounded depth and visited-inode
-tracking, while mounted system policy and physical flash qualification remain
-open. See the Stage 15
+tracking; `Volume::check()` applies the same complete-tree integrity boundary.
+Mounted system policy and physical flash qualification remain open. See the Stage 15
 write-through audit.
 
 ## Stage 11.2 scheduler-backed thread ownership (2026-10-14)

@@ -1282,7 +1282,9 @@ are now transactional; directory rename rejects descendant cycles with a
 bounded fail-closed walk. Recursive import into the VFS mount and mounted-system
 publication now walks validated nested directories with bounded depth and
 visited-inode tracking; oversized files fail closed at the VFS capacity
-boundary. Mounted-system policy remains open. See the [Stage 15
+boundary. `Volume::check()` validates the complete reachable tree and rejects
+cycles, duplicate references, malformed names, and orphaned live inodes.
+Mounted-system policy remains open. See the [Stage 15
 VFS write-through audit](audit-stage15-wfs-vfs-write-through-2026-10-14.md).
 
 Crash recovery is proven by fault injection, not actual power loss on a device.
