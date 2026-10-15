@@ -1,4 +1,5 @@
 #[allow(dead_code)]
+#[rustfmt::skip]
 #[path = "../kernel/src/hal/pci/topology.rs"]
 mod topology;
 
