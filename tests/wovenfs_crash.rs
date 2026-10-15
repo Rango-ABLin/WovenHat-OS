@@ -595,3 +595,88 @@ fn inode_block_pointers_outside_the_data_region_are_refused() {
         );
     }
 }
+
+/// Rewrite one little-endian field of the superblock in `slot`, re-sealing its
+/// checksum so only the geometry check can catch the change.
+fn reseal_super_field(image: &CrashDisk, slot: usize, at: usize, value: &[u8]) {
+    let mut sectors = image.image.borrow_mut();
+    let raw = &mut sectors[slot];
+    raw[at..at + value.len()].copy_from_slice(value);
+    let checksum = test_fnv1a(&raw[..80]);
+    raw[80..88].copy_from_slice(&checksum.to_le_bytes());
+}
+
+#[test]
+fn superblock_geometry_that_does_not_fit_is_refused() {
+    let base = formatted();
+    let sb = *Volume::mount(base.clone()).expect("mount").super_block();
+    let device = base.sector_count();
+    let u64le = |v: u64| v.to_le_bytes().to_vec();
+    let u32le = |v: u32| v.to_le_bytes().to_vec();
+    let cases: [(&str, usize, Vec<u8>); 11] = [
+        ("total_blocks past the device", 20, u64le(device + 1)),
+        ("journal over the superblock slots", 28, u64le(1)),
+        ("journal too small for a transaction", 36, u32le(4)),
+        (
+            "bitmap overlapping the journal",
+            40,
+            u64le(sb.journal_start + 1),
+        ),
+        ("bitmap too small for total_blocks", 48, u32le(0)),
+        (
+            "inode table overlapping the bitmap",
+            52,
+            u64le(sb.bitmap_start),
+        ),
+        ("no inodes", 60, u32le(0)),
+        (
+            "data region overlapping the inode table",
+            64,
+            u64le(sb.inode_start),
+        ),
+        ("data region past the end", 64, u64le(sb.total_blocks)),
+        ("root inode zero", 72, u64le(0)),
+        (
+            "root inode past the table",
+            72,
+            u64le(u64::from(sb.inode_count) + 1),
+        ),
+    ];
+
+    for (case, at, value) in &cases {
+        // A freshly formatted image has only slot 0, so nothing to fall back to.
+        let image = base.fork(None);
+        reseal_super_field(&image, 0, *at, value);
+        let before = image.sectors();
+        assert!(
+            matches!(Volume::mount(image.clone()), Err(Error::Corrupt)),
+            "{case}: mount must refuse the geometry"
+        );
+        assert!(
+            image.sectors() == before,
+            "{case}: a refused mount must not modify the image"
+        );
+    }
+
+    // With a valid older checkpoint present, a newer slot whose geometry does
+    // not fit is discarded like one whose checksum fails.
+    let committed = base.fork(None);
+    {
+        let mut volume = Volume::mount(committed.clone()).expect("mount");
+        volume.create(1, "keep.txt", 0o644, 1).expect("create");
+    }
+    let newest = Volume::mount(committed.clone())
+        .expect("mount")
+        .super_block()
+        .sequence;
+    for (case, at, value) in &cases {
+        let image = committed.fork(None);
+        reseal_super_field(&image, 1, *at, value);
+        let volume = mount_consistent(&image, case);
+        assert_eq!(volume.super_block().total_blocks, sb.total_blocks, "{case}");
+        assert!(
+            volume.super_block().sequence < newest,
+            "{case}: must fall back"
+        );
+    }
+}

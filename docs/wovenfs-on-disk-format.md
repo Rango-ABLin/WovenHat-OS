@@ -46,9 +46,25 @@ All units are 512-byte sectors; one block is one sector.
 
 **Checkpoint alternation.** A superblock is never overwritten in place. Each
 commit writes the slot *not* currently authoritative, with `sequence + 1`. Mount
-reads both slots, discards any whose magic, version or checksum fails, and
-adopts the survivor with the highest sequence. A torn superblock write therefore
-cannot destroy the filesystem: the other slot remains intact and older.
+reads both slots, discards any whose magic, version or checksum fails or whose
+geometry does not fit, and adopts the survivor with the highest sequence. A torn
+superblock write therefore cannot destroy the filesystem: the other slot remains
+intact and older.
+
+**Geometry.** The checksum is unkeyed, so it shows only that the sector was
+written whole, not that its fields are sane. Mount also requires, with no
+arithmetic overflow:
+
+- `journal_start >= 2` and `journal_blocks >= MAX_TXN_BLOCKS + 2`;
+- journal, bitmap, inode table and data regions in that order without overlap
+  (`journal_start + journal_blocks <= bitmap_start`, and so on up to
+  `inode_start + ceil(inode_count / 4) <= data_start`);
+- `bitmap_blocks` large enough for one bit per block of `total_blocks`;
+- `inode_count > 0` and `1 <= root_inode <= inode_count`;
+- `data_start < total_blocks <=` the device's sector count.
+
+Every later bounds check (inode block pointers, bitmap and inode locations,
+replay targets) is relative to this geometry.
 
 ### Inode (128 bytes, 4 per sector)
 

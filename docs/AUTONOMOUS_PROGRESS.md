@@ -4,6 +4,68 @@ Each entry is one bounded checkpoint. Entries record exactly what was run.
 Nothing here claims production readiness; completion requires independent
 human review.
 
+## 2026-10-15 — WovenFS: validate superblock geometry on mount
+
+Branch: `auto/wovenhat-development` (base `073780e`). The working tree was
+clean at the start, so there was no unfinished work to resume. This closes the
+first "Open / next" item of the previous entry.
+
+### Defect
+
+`Volume::mount` adopted any superblock whose magic, version and checksum
+matched. The checksum is unkeyed FNV-1a, so a crafted or mis-written image
+with re-sealed checksum was accepted with any geometry: a data region
+overlapping the inode table or journal, a journal smaller than one
+transaction, a bitmap too small for `total_blocks`, `total_blocks` beyond the
+device, zero inodes, or a root inode outside the table. The inode-pointer
+check added in the previous checkpoint is relative to `data_start` /
+`total_blocks`, so it was only as strong as this geometry.
+
+### Change
+
+- `kernel/src/wfs.rs`: `SuperBlock::geometry_fits(device_sectors)` checks,
+  with overflow-checked arithmetic, that slots, journal, bitmap, inode table
+  and data are ordered and non-overlapping; the journal holds a full
+  transaction (`MAX_TXN_BLOCKS + 2`); the bitmap covers `total_blocks`;
+  `inode_count > 0`; `root_inode` is in `1..=inode_count`; and
+  `data_start < total_blocks <= device.sector_count()`. `mount` discards a
+  slot that fails it, exactly like a failed checksum, so a valid older
+  checkpoint is still used and with none left mount returns `Corrupt`
+  (reported as `NotWovenFs` by `mount_ata_into_vfs`). Valid layouts
+  produced by `format`/`plan` are unaffected.
+- `tests/wovenfs_crash.rs`: `superblock_geometry_that_does_not_fit_is_refused`
+  re-seals 11 bad geometries. With only slot 0, mount must return `Corrupt`
+  and leave the image byte-identical. With a valid older slot 0, a bad newer
+  slot 1 must be skipped and the volume must mount consistent from slot 0.
+- `docs/wovenfs-on-disk-format.md`: documents the geometry invariant.
+
+### Results (run on this host, 2026-10-15)
+
+Using project-local `CARGO_BUILD_BUILD_DIR=.cargo-build`,
+`CARGO_TARGET_DIR=target`:
+
+| Command | Result |
+|---|---|
+| New test with the `geometry_fits` check disabled (negative control) | FAILS as expected at the "mount must refuse the geometry" assertion; check restored afterwards |
+| `cargo fmt --all -- --check` | PASS |
+| `cargo test --test wovenfs_crash` | PASS, 15 passed / 0 failed |
+| `cargo test -p wovenhat-os --tests --no-fail-fast` | PASS, 125 passed / 0 failed |
+| `cargo clippy --all-targets -- -D warnings` | PASS |
+| `cargo clippy -p wovenhat-kernel --target x86_64-unknown-none -- -D warnings` (default) | PASS |
+| same, `--features stage11-5-test` | PASS |
+| same, `--features stage15-1-test` … `stage15-9-test` (each) | PASS |
+| QEMU Stage 15.x on 1/2/4 CPUs | **NOT RUN**: `qemu-system-x86_64` is not installed on this host |
+
+### Open / next
+
+- Pointer aliasing (two inodes claiming one block) is still detected only by
+  `check()` (test/self-test builds), not on the write path.
+- Journal replay accepts any target below `total_blocks`, including the
+  superblock slots. Staged targets are not yet restricted to the regions a
+  transaction may legitimately write.
+- QEMU Stage 15.1/15.2 acceptance on 1/2/4 CPUs must be rerun on a host with
+  QEMU before this counts as stage acceptance.
+
 ## 2026-10-15 — WovenFS: refuse inode block pointers outside the data region
 
 Branch: `auto/wovenhat-development` (base `f04a994`). The working tree was

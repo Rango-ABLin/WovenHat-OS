@@ -138,6 +138,40 @@ impl SuperBlock {
             root_inode: read_u64(sector, 72),
         })
     }
+
+    /// Whether the regions this superblock describes fit the device in order
+    /// and without overlap: slots, journal, bitmap, inode table, data.
+    ///
+    /// The checksum is unkeyed, so it proves only that the sector was written
+    /// whole. Every later bounds check (inode pointers, bitmap and inode
+    /// locations, journal replay targets) is relative to this geometry, so an
+    /// unchecked geometry would let a crafted image aim them at metadata or
+    /// past the device.
+    fn geometry_fits(&self, device_sectors: u64) -> bool {
+        let end = |start: u64, len: u64| start.checked_add(len);
+        let inode_blocks = u64::from(self.inode_count).div_ceil(INODES_PER_BLOCK as u64);
+        let bitmap_needed = self.total_blocks.div_ceil((SECTOR_SIZE * 8) as u64);
+        // Replay reads the descriptor, up to MAX_TXN_BLOCKS staged sectors and
+        // the commit sector, all inside the journal.
+        let journal_needed = MAX_TXN_BLOCKS as u64 + 2;
+        let (Some(journal_end), Some(bitmap_end), Some(inode_end)) = (
+            end(self.journal_start, u64::from(self.journal_blocks)),
+            end(self.bitmap_start, u64::from(self.bitmap_blocks)),
+            end(self.inode_start, inode_blocks),
+        ) else {
+            return false;
+        };
+        self.journal_start >= 2
+            && u64::from(self.journal_blocks) >= journal_needed
+            && journal_end <= self.bitmap_start
+            && u64::from(self.bitmap_blocks) >= bitmap_needed
+            && bitmap_end <= self.inode_start
+            && self.inode_count > 0
+            && inode_end <= self.data_start
+            && self.data_start < self.total_blocks
+            && self.total_blocks <= device_sectors
+            && (1..=u64::from(self.inode_count)).contains(&self.root_inode)
+    }
 }
 
 // -------------------------------------------------------------------- inode
@@ -549,6 +583,7 @@ impl<D: BlockDevice> Volume<D> {
 
     /// Mount an existing volume, replaying any committed transaction.
     pub fn mount(mut device: D) -> Result<Self, Error> {
+        let device_sectors = device.sector_count();
         let mut best: Option<(u64, SuperBlock)> = None;
         for slot in 0..2u64 {
             let mut sector = [0u8; SECTOR_SIZE];
@@ -561,6 +596,11 @@ impl<D: BlockDevice> Volume<D> {
             let Some(candidate) = SuperBlock::decode(&sector) else {
                 continue;
             };
+            // A slot whose geometry does not fit is discarded exactly like a
+            // slot whose checksum fails.
+            if !candidate.geometry_fits(device_sectors) {
+                continue;
+            }
             if best.is_none_or(|(_, current)| candidate.sequence > current.sequence) {
                 best = Some((slot, candidate));
             }
