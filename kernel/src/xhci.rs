@@ -1,13 +1,20 @@
+#![cfg_attr(
+    any(not(feature = "qemu-test"), feature = "stage13-12-test"),
+    expect(
+        dead_code,
+        reason = "production initializes the bound controller (init_at); HID and Bluetooth paths are exercised by the Stage 13.5/13.6/13.10 gates until the Stage 13 USB input step gives them production callers"
+    )
+)]
 use core::{
     cmp, ptr,
-    sync::atomic::{fence, Ordering},
+    sync::atomic::{fence, AtomicU64, AtomicU8, Ordering},
 };
 
 use crate::{
     hal::pci::{self, Address, BarKind},
     irq_lock::IrqMutex as Mutex,
     memory, paging,
-    woven_input::Event,
+    woven_input::{Event, Key},
 };
 
 const USB_CLASS: u8 = 0x0c;
@@ -60,6 +67,8 @@ pub enum InitError {
     DescriptorInvalid,
     HidNotFound,
     BluetoothNotFound,
+    /// No MSI/MSI-X vector could be bound for input delivery.
+    InterruptUnavailable,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -175,6 +184,33 @@ impl Ring {
     }
 }
 
+/// Keyboards and mice the controller delivers into WovenInput.
+const MAX_INPUTS: usize = 4;
+/// Reports copied out per pass over the event ring.
+const REPORTS_PER_PASS: usize = 32;
+/// The longest report kept; longer ones are truncated.
+const MAX_REPORT: usize = 64;
+
+/// One enumerated USB keyboard or mouse, with its own slot, rings and
+/// report buffer; one interrupt transfer is always armed for it.
+#[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
+struct InputDevice {
+    slot_id: u8,
+    port: u8,
+    kind: HidKind,
+    /// Report-protocol devices (tablets, digitizers, game controllers): the
+    /// parsed report descriptor.
+    layout: Option<crate::hid::Layout>,
+    dci: u8,
+    length: usize,
+    ring: Ring,
+    buffer: DmaPage,
+    /// Physical address of the armed Normal TRB.
+    pending: u64,
+    _output_context: Option<DmaPage>,
+    _ep0_ring: Option<Ring>,
+}
+
 #[derive(Clone, Copy)]
 struct HidInterface {
     interface: u8,
@@ -183,6 +219,8 @@ struct HidInterface {
     max_packet: u16,
     interval: u8,
     protocol: u8,
+    /// Length of the interface's report descriptor, from its HID descriptor.
+    report_length: u16,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -225,6 +263,8 @@ pub struct XhciController {
     bt_acl_in_buffer: Option<DmaPage>,
     bt_acl_out_ring: Option<Ring>,
     bt_acl_out_buffer: Option<DmaPage>,
+    #[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
+    inputs: [Option<InputDevice>; MAX_INPUTS],
 }
 
 impl XhciController {
@@ -322,6 +362,8 @@ impl XhciController {
             bt_acl_in_buffer: None,
             bt_acl_out_ring: None,
             bt_acl_out_buffer: None,
+            #[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
+            inputs: [const { None }; MAX_INPUTS],
         };
         controller.reset_port(connected_port)?;
         controller.slot_id = controller.enable_slot()?;
@@ -971,6 +1013,17 @@ impl XhciController {
 
     fn wait_event(&mut self) -> Result<Trb, InitError> {
         for _ in 0..POLL_LIMIT {
+            if let Some(event) = self.try_event()? {
+                return Ok(event);
+            }
+            core::hint::spin_loop();
+        }
+        Err(InitError::ControllerTimeout)
+    }
+
+    /// The next event, if the controller has written one; never waits.
+    fn try_event(&mut self) -> Result<Option<Trb>, InitError> {
+        {
             fence(Ordering::Acquire);
             let offset = self.event_index * 16;
             let bytes = self.event_ring.bytes_mut();
@@ -988,11 +1041,153 @@ impl XhciController {
                 }
                 let dequeue = self.event_ring.physical + (self.event_index as u64 * 16);
                 mmio_write64(self.runtime_base + 0x20 + 0x18, dequeue | (1 << 3))?;
-                return Ok(event);
+                return Ok(Some(event));
             }
-            core::hint::spin_loop();
         }
-        Err(InitError::ControllerTimeout)
+        Ok(None)
+    }
+
+    /// Stage 13.13: enumerate a keyboard or mouse on every connected root
+    /// port, each with its own slot, and arm one interrupt transfer for each.
+    /// A port whose device is not a boot keyboard or mouse is skipped.
+    #[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
+    fn enumerate_inputs(&mut self) -> usize {
+        let mut count = self.inputs.iter().flatten().count();
+        for port in 1..=self.max_ports {
+            if count == MAX_INPUTS {
+                break;
+            }
+            if self.inputs.iter().flatten().any(|device| device.port == port) {
+                continue;
+            }
+            let portsc = self.op_base + 0x400 + (u64::from(port - 1) * 0x10);
+            if mmio_read32(portsc).map_or(true, |value| value & 1 == 0) {
+                continue;
+            }
+            // The first connected port was reset and given a slot when the
+            // controller started; every other port gets its own here.
+            if port != self.connected_port || self.slot_id == 0 {
+                if self.reset_port(port).is_err() {
+                    continue;
+                }
+                self.connected_port = port;
+                self.output_context = None;
+                self.ep0_ring = None;
+                self.hid_ring = None;
+                self.hid_buffer = None;
+                self.hid = None;
+                self.slot_id = match self.enable_slot() {
+                    Ok(slot) => slot,
+                    Err(_) => continue,
+                };
+            }
+            let summary = self.enumerate_hid();
+            let device = summary.ok().and_then(|summary| {
+                let hid = self.hid?;
+                // Boot keyboards and mice have fixed reports; anything else
+                // must describe its reports in a layout this kernel decodes.
+                let layout = if summary.kind == HidKind::Other {
+                    Some(self.report_layout(hid)?)
+                } else {
+                    None
+                };
+                // Report only on change: the enumeration's short idle period
+                // exists for the Stage 13.6 probe, not for input devices.
+                self.control_no_data(0x21, USB_REQUEST_SET_IDLE, 0, u16::from(hid.interface)).ok()?;
+                let limit = if layout.is_some() { MAX_REPORT } else { 8 };
+                Some(InputDevice {
+                    slot_id: self.slot_id,
+                    port,
+                    kind: summary.kind,
+                    layout,
+                    dci: (hid.endpoint_address & 0x0f).saturating_mul(2).saturating_add(1),
+                    length: cmp::min(usize::from(hid.max_packet), limit),
+                    ring: self.hid_ring.take()?,
+                    buffer: self.hid_buffer.take()?,
+                    pending: 0,
+                    _output_context: self.output_context.take(),
+                    _ep0_ring: self.ep0_ring.take(),
+                })
+            });
+            // The active slot is consumed either way; the next port starts
+            // from a fresh one.
+            self.slot_id = 0;
+            self.hid = None;
+            let Some(mut device) = device else { continue };
+            if arm_input(self.doorbell_base, &mut device).is_err() {
+                continue;
+            }
+            if let Some(slot) = self.inputs.iter_mut().find(|slot| slot.is_none()) {
+                *slot = Some(device);
+                count += 1;
+            }
+        }
+        count
+    }
+
+    /// Fetch and parse the active device's report descriptor.
+    #[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
+    fn report_layout(&mut self, hid: HidInterface) -> Option<crate::hid::Layout> {
+        let length = usize::from(hid.report_length);
+        if length == 0 || length > PAGE_SIZE {
+            return None;
+        }
+        let mut descriptor = DmaPage::allocate_zeroed()?;
+        // GET_DESCRIPTOR(Report), addressed to the interface.
+        self.control_in(0x81, USB_REQUEST_GET_DESCRIPTOR, 0x22 << 8, u16::from(hid.interface), &mut descriptor, length)
+            .ok()?;
+        crate::hid::parse(&descriptor.bytes()[..length]).ok()
+    }
+
+    /// Let the controller interrupt: interrupter 0 enabled, moderated to at
+    /// most one interrupt per millisecond, and USBCMD.INTE set.
+    #[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
+    fn enable_interrupts(&mut self) -> Result<(), InitError> {
+        let interrupter = self.runtime_base + 0x20;
+        mmio_write32(interrupter + 0x04, 4000)?;
+        // IMAN: IP is write-one-to-clear; IE enables the interrupter.
+        mmio_write32(interrupter, 0b11)?;
+        let command = mmio_read32(self.op_base)?;
+        mmio_write32(self.op_base, command | (1 << 2))
+    }
+
+    /// Drain the event ring: copy each completed input report out and re-arm
+    /// its transfer. Runs under the controller lock and never waits; the
+    /// reports are decoded and published by the caller after unlocking.
+    #[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
+    fn service_inputs(&mut self, reports: &mut [(HidKind, usize, [u8; MAX_REPORT]); REPORTS_PER_PASS]) -> usize {
+        // Acknowledge first, so an event written while draining raises a
+        // fresh interrupt rather than being folded into this one.
+        let _ = mmio_write32(self.runtime_base + 0x20, 0b11);
+        let doorbell_base = self.doorbell_base;
+        let mut count = 0;
+        while count < REPORTS_PER_PASS {
+            let Ok(Some(event)) = self.try_event() else { break };
+            if trb_type(event.control) != TRB_TYPE_TRANSFER_EVENT {
+                continue;
+            }
+            let slot = ((event.control >> 24) & 0xff) as u8;
+            let Some((index, device)) = self.inputs.iter_mut().enumerate().find_map(|(index, device)| {
+                device
+                    .as_mut()
+                    .filter(|device| device.slot_id == slot && device.pending == event.parameter)
+                    .map(|device| (index, device))
+            }) else {
+                continue;
+            };
+            let code = completion_code(event.status);
+            if code == 1 || code == 13 {
+                fence(Ordering::Acquire);
+                let mut report = [0u8; MAX_REPORT];
+                report[..device.length].copy_from_slice(&device.buffer.bytes()[..device.length]);
+                reports[count] = (device.kind, index, report);
+                count += 1;
+                INPUT_REPORTS.fetch_add(1, Ordering::Relaxed);
+            }
+            // Keep the device's stream alive whatever the completion said.
+            let _ = arm_input(doorbell_base, device);
+        }
+        count
     }
 
     pub fn summary(&self) -> (u8, u8, u8, u8) {
@@ -1005,12 +1200,257 @@ impl XhciController {
     }
 }
 
+/// Queue one interrupt-IN transfer for `device` and ring its doorbell.
+#[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
+fn arm_input(doorbell_base: u64, device: &mut InputDevice) -> Result<(), InitError> {
+    device.buffer.bytes_mut()[..MAX_REPORT].fill(0);
+    device.pending = device.ring.push(Trb {
+        parameter: device.buffer.physical,
+        status: device.length as u32,
+        // Normal TRB, interrupt on completion.
+        control: (TRB_TYPE_NORMAL << 10) | (1 << 5),
+    });
+    fence(Ordering::Release);
+    mmio_write32(doorbell_base + (u64::from(device.slot_id) * 4), u32::from(device.dci))
+}
+
+/// The input interrupt vector (0 until input delivery starts).
+static INPUT_VECTOR: AtomicU8 = AtomicU8::new(0);
+/// Reports copied out of the controller, and worker passes, for the gate.
+static INPUT_REPORTS: AtomicU64 = AtomicU64::new(0);
+static INPUT_PASSES: AtomicU64 = AtomicU64::new(0);
+
+/// What input delivery found and the vector it runs on.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct InputSummary {
+    pub keyboards: u8,
+    pub mice: u8,
+    pub vector: u8,
+}
+
+/// Stage 13.13: deliver the controller's keyboards and mice into WovenInput.
+/// Enumerates every connected port, binds an MSI/MSI-X vector through the
+/// driver manager for `driver`, and starts a worker that sleeps until that
+/// vector fires. Without any keyboard or mouse, nothing is started.
+#[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
+pub fn start_input(driver: &'static str) -> Result<InputSummary, InitError> {
+    if INPUT_VECTOR.load(Ordering::Acquire) != 0 {
+        return input_summary().ok_or(InitError::InterruptUnavailable);
+    }
+    let (keyboards, mice) = {
+        let mut slot = CONTROLLER.lock();
+        let controller = slot.as_mut().ok_or(InitError::MissingController)?;
+        controller.enumerate_inputs();
+        count_inputs(controller)
+    };
+    if keyboards + mice == 0 {
+        return Ok(InputSummary { keyboards, mice, vector: 0 });
+    }
+    let vector = match crate::driver::enable_pci_interrupt(driver, crate::smp::bsp_apic_id(), 0) {
+        Ok(crate::driver::PciInterruptLease::Msi(lease)) => lease.vector.vector,
+        Ok(crate::driver::PciInterruptLease::Msix(lease)) => lease.vector.vector,
+        Err(_) => return Err(InitError::InterruptUnavailable),
+    };
+    INPUT_VECTOR.store(vector, Ordering::Release);
+    let worker = crate::task::spawn_io_service("usb-input", input_worker)
+        .map_err(|_| InitError::InterruptUnavailable)?;
+    if !crate::interrupts::set_pci_vector_waiter(vector, worker) {
+        return Err(InitError::InterruptUnavailable);
+    }
+    CONTROLLER
+        .lock()
+        .as_mut()
+        .ok_or(InitError::MissingController)?
+        .enable_interrupts()?;
+    // Reports that completed before interrupts were enabled raised none.
+    let _ = crate::task::signal_event(worker);
+    Ok(InputSummary { keyboards, mice, vector })
+}
+
+#[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
+fn count_inputs(controller: &XhciController) -> (u8, u8) {
+    let devices = controller.inputs.iter().flatten();
+    // Report-protocol pointers count as mice; other report devices are
+    // counted by `input_layouts`.
+    devices.fold((0, 0), |(keyboards, mice), device| match (device.kind, device.layout.map(|layout| layout.application)) {
+        (HidKind::Keyboard, _) => (keyboards + 1, mice),
+        (HidKind::Mouse, _) => (keyboards, mice + 1),
+        (_, Some(crate::hid::Application::Mouse | crate::hid::Application::Pointer)) => (keyboards, mice + 1),
+        _ => (keyboards, mice),
+    })
+}
+
+/// The running input delivery, if it has started.
+#[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
+pub fn input_summary() -> Option<InputSummary> {
+    let vector = INPUT_VECTOR.load(Ordering::Acquire);
+    if vector == 0 {
+        return None;
+    }
+    let (keyboards, mice) = CONTROLLER.lock().as_ref().map(count_inputs)?;
+    Some(InputSummary { keyboards, mice, vector })
+}
+
+/// (reports copied, worker passes) since boot.
+#[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
+pub fn input_counters() -> (u64, u64) {
+    (INPUT_REPORTS.load(Ordering::Acquire), INPUT_PASSES.load(Ordering::Acquire))
+}
+
+/// The worker: drain under the lock, publish after it, sleep until the
+/// vector fires again.
+#[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
+fn input_worker() -> ! {
+    let mut held = [[0u8; 6]; MAX_INPUTS];
+    let mut buttons = [0u8; MAX_INPUTS];
+    // Decoders for report-protocol devices, set up once from their layouts:
+    // devices are enumerated before the worker starts.
+    let mut decoders = [None; MAX_INPUTS];
+    if let Some(controller) = CONTROLLER.lock().as_ref() {
+        for (decoder, device) in decoders.iter_mut().zip(controller.inputs.iter()) {
+            *decoder = device.as_ref().and_then(|device| device.layout).map(crate::hid::Decoder::new);
+        }
+    }
+    loop {
+        let _ = crate::interrupts::take_pci_device_work(INPUT_VECTOR.load(Ordering::Acquire));
+        let mut reports = [(HidKind::Other, 0usize, [0u8; MAX_REPORT]); REPORTS_PER_PASS];
+        let count = CONTROLLER
+            .lock()
+            .as_mut()
+            .map_or(0, |controller| controller.service_inputs(&mut reports));
+        INPUT_PASSES.fetch_add(1, Ordering::Relaxed);
+        for (kind, index, report) in reports[..count].iter().copied() {
+            match kind {
+                HidKind::Keyboard => {
+                    let mut boot = [0u8; 8];
+                    boot.copy_from_slice(&report[..8]);
+                    for key in keyboard_presses(boot, &mut held[index]).into_iter().flatten() {
+                        let _ = crate::woven_input::publish_key(key);
+                    }
+                }
+                HidKind::Other => {
+                    let Some(decoder) = decoders[index].as_mut() else { continue };
+                    let mut inputs = [None; crate::hid::MAX_EVENTS];
+                    let count = decoder.decode(&report, &mut inputs);
+                    for input in inputs[..count].iter().flatten() {
+                        let _ = crate::woven_input::publish(hid_event(*input));
+                    }
+                }
+                HidKind::Mouse => {
+                    let mut boot = [0u8; 8];
+                    boot.copy_from_slice(&report[..8]);
+                    let (events, state) = decode_boot_mouse(boot, buttons[index]);
+                    buttons[index] = state;
+                    for event in events.into_iter().flatten() {
+                        let _ = crate::woven_input::publish(event);
+                    }
+                }
+            }
+        }
+        // A full pass may have left events behind; drain again first.
+        if count < REPORTS_PER_PASS {
+            crate::task::wait_for_event();
+        }
+    }
+}
+
+/// A decoded HID input as a WovenInput event.
+#[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
+fn hid_event(input: crate::hid::Input) -> Event {
+    use crate::hid::Input;
+    match input {
+        Input::Relative { dx, dy } => Event::PointerMove { dx, dy },
+        Input::Absolute { x, y } => Event::PointerAbsolute { x, y },
+        Input::Wheel(vertical) => Event::Scroll { vertical },
+        Input::Button { index, pressed } => Event::PointerButton { button: index, pressed },
+        Input::Pen { x, y, pressure, touching } => Event::Pen { x, y, pressure, touching },
+        Input::Touch { contact, x, y, active } => Event::Touch { contact, x, y, active },
+        Input::Control { control, value } => Event::GameController { control, value },
+    }
+}
+
+/// Report-protocol devices by application, for the gate.
+#[cfg(feature = "stage13-16-test")]
+pub fn input_layouts() -> alloc::vec::Vec<crate::hid::Application> {
+    CONTROLLER
+        .lock()
+        .as_ref()
+        .map(|controller| {
+            controller.inputs.iter().flatten().filter_map(|device| device.layout.map(|layout| layout.application)).collect()
+        })
+        .unwrap_or_default()
+}
+
+#[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
+/// Keys newly pressed in a boot keyboard report, relative to the keys held
+/// in the previous one (updated). Held keys do not repeat; released keys
+/// produce nothing; usages WovenInput has no key for are ignored.
+pub fn keyboard_presses(report: [u8; 8], held: &mut [u8; 6]) -> [Option<Key>; 6] {
+    let shift = report[0] & 0x22 != 0;
+    let mut keys = [None; 6];
+    let mut current = [0u8; 6];
+    current.copy_from_slice(&report[2..8]);
+    // 0x01 in every slot is the keyboard's rollover-error report: no keys.
+    if current.iter().all(|usage| *usage == 1) {
+        return keys;
+    }
+    for (slot, usage) in keys.iter_mut().zip(current) {
+        if usage > 3 && !held.contains(&usage) {
+            *slot = usage_key(usage, shift);
+        }
+    }
+    *held = current;
+    keys
+}
+
+/// A HID keyboard usage (page 7) as a WovenInput key.
+#[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
+fn usage_key(usage: u8, shift: bool) -> Option<Key> {
+    const DIGITS: &[u8; 10] = b"1234567890";
+    const SHIFTED_DIGITS: &[u8; 10] = b"!@#$%^&*()";
+    // Usages 0x2d-0x38: - = [ ] \ (non-US #) ; ' ` , . /
+    const PUNCTUATION: &[u8; 12] = b"-=[]\\#;'`,./";
+    const SHIFTED_PUNCTUATION: &[u8; 12] = b"_+{}|~:\"~<>?";
+    let character = match usage {
+        0x04..=0x1d => {
+            let letter = b'a' + (usage - 0x04);
+            if shift { letter.to_ascii_uppercase() } else { letter }
+        }
+        0x1e..=0x27 => {
+            let index = usize::from(usage - 0x1e);
+            if shift { SHIFTED_DIGITS[index] } else { DIGITS[index] }
+        }
+        0x28 => return Some(Key::Enter),
+        0x2a => return Some(Key::Backspace),
+        0x2b => return Some(Key::Tab),
+        0x2c => b' ',
+        0x2d..=0x38 => {
+            let index = usize::from(usage - 0x2d);
+            if shift { SHIFTED_PUNCTUATION[index] } else { PUNCTUATION[index] }
+        }
+        0x3a => return Some(Key::F1),
+        0x3b => return Some(Key::F2),
+        0x3c => return Some(Key::F3),
+        0x3d => return Some(Key::F4),
+        _ => return None,
+    };
+    Some(Key::Char(char::from(character)))
+}
+
 pub fn init() -> Result<(u8, u8, u8, u8), InitError> {
+    if let Some(summary) = CONTROLLER.lock().as_ref().map(XhciController::summary) {
+        return Ok(summary);
+    }
+    init_at(find_controller().ok_or(InitError::MissingController)?)
+}
+
+/// Initialize the controller at `device`, the function its driver is bound
+/// to. An already initialized controller is kept.
+pub fn init_at(device: pci::Device) -> Result<(u8, u8, u8, u8), InitError> {
     let mut slot = CONTROLLER.lock();
     if let Some(controller) = slot.as_ref() {
         return Ok(controller.summary());
     }
-    let device = find_controller().ok_or(InitError::MissingController)?;
     let controller = XhciController::initialize(device)?;
     let summary = controller.summary();
     *slot = Some(controller);
@@ -1168,6 +1608,7 @@ fn find_connected_port(op_base: u64, max_ports: u8) -> Result<u8, InitError> {
 fn parse_hid_interface(bytes: &[u8], configuration: u8) -> Option<HidInterface> {
     let mut offset = 0usize;
     let mut current: Option<(u8, u8)> = None;
+    let mut report_length = 0u16;
     while offset + 2 <= bytes.len() {
         let length = usize::from(bytes[offset]);
         if length < 2 || offset + length > bytes.len() {
@@ -1180,6 +1621,11 @@ fn parse_hid_interface(bytes: &[u8], configuration: u8) -> Option<HidInterface> 
                 } else {
                     current = None;
                 }
+                report_length = 0;
+            }
+            // HID class descriptor: the report descriptor's length.
+            0x21 if length >= 9 && current.is_some() && bytes[offset + 6] == 0x22 => {
+                report_length = u16::from_le_bytes([bytes[offset + 7], bytes[offset + 8]]);
             }
             5 if length >= 7 => {
                 if let Some((interface, protocol)) = current {
@@ -1196,6 +1642,7 @@ fn parse_hid_interface(bytes: &[u8], configuration: u8) -> Option<HidInterface> 
                                 max_packet,
                                 interval: bytes[offset + 6],
                                 protocol,
+                                report_length,
                             });
                         }
                     }
@@ -1438,8 +1885,11 @@ pub fn decode_boot_keyboard(report: [u8; 8]) -> Option<u8> {
 pub fn decode_boot_mouse(report: [u8; 8], previous_buttons: u8) -> ([Option<Event>; 4], u8) {
     let mut events = [None; 4];
     let buttons = report[0] & 0x07;
+    // HID boot mice report Y positive towards the user, i.e. down the
+    // screen, which is already WovenInput's orientation (PS/2 is the one
+    // that reports up as positive).
     let dx = i16::from(report[1] as i8);
-    let dy = -i16::from(report[2] as i8);
+    let dy = i16::from(report[2] as i8);
     let mut count = 0;
     if dx != 0 || dy != 0 {
         events[count] = Some(Event::PointerMove { dx, dy });
@@ -1458,13 +1908,184 @@ pub fn decode_boot_mouse(report: [u8; 8], previous_buttons: u8) -> ([Option<Even
     (events, buttons)
 }
 
+/// Stage 13.13 acceptance: USB keyboard and mouse input. The harness types
+/// and moves through QEMU's own USB keyboard and mouse (QMP, addressed to
+/// those devices) once this prints its ready line; the events must arrive in
+/// WovenInput exactly, and through interrupts rather than polling.
+#[cfg(feature = "stage13-13-test")]
+pub fn input_self_test() -> bool {
+    use crate::woven_input;
+    use alloc::vec::Vec;
+
+    fn step(name: &str, ok: bool) -> bool {
+        crate::serial::write_line(format_args!("[S13.13] {} {}", name, if ok { "PASS" } else { "FAIL" }));
+        ok
+    }
+
+    // The decoder first: presses, no repeats while held, shift, rollover.
+    let mut held = [0u8; 6];
+    let press = keyboard_presses([0, 0, 0x04, 0, 0, 0, 0, 0], &mut held);
+    let repeat = keyboard_presses([0, 0, 0x04, 0, 0, 0, 0, 0], &mut held);
+    let second = keyboard_presses([0, 0, 0x04, 0x28, 0, 0, 0, 0], &mut held);
+    let released = keyboard_presses([0; 8], &mut held);
+    let shifted = keyboard_presses([0x02, 0, 0x1e, 0, 0, 0, 0, 0], &mut held);
+    let before_rollover = held;
+    let rollover = keyboard_presses([0, 0, 1, 1, 1, 1, 1, 1], &mut held);
+    let decoding = press[0] == Some(Key::Char('a'))
+        && press[1..].iter().all(Option::is_none)
+        && repeat.iter().all(Option::is_none)
+        && second[0].is_none()
+        && second[1] == Some(Key::Enter)
+        && released.iter().all(Option::is_none)
+        && shifted[0] == Some(Key::Char('!'))
+        && rollover.iter().all(Option::is_none)
+        && held == before_rollover;
+    if !step("keyboard reports: presses once, shift, rollover ignored", decoding) {
+        return false;
+    }
+
+    let report = crate::drivers::bring_up();
+    let xhci = report.drivers[2];
+    if !step("xhci0 bound and ready", matches!(xhci.outcome, crate::drivers::Outcome::Ready(_))) {
+        return false;
+    }
+    let Some(summary) = input_summary() else {
+        return step("input delivery started", false);
+    };
+    let started = summary.keyboards == 1
+        && summary.mice == 1
+        && (crate::interrupts::PCI_VECTOR_FIRST..=crate::interrupts::PCI_VECTOR_LAST).contains(&summary.vector);
+    if !step("one keyboard and one mouse, on a device interrupt vector", started) {
+        return false;
+    }
+    // Nothing queued before the input arrives.
+    while woven_input::poll().is_some() {}
+    let irqs_before = crate::interrupts::pci_device_irq_count(summary.vector);
+    let (reports_before, passes_before) = input_counters();
+    crate::serial::write_line(format_args!("[S13.13] ready for input"));
+
+    let expected = [Key::Char('w'), Key::Char('h'), Key::Char('1'), Key::Char('A'), Key::Enter];
+    let mut keys = Vec::new();
+    let mut motion = (0i32, 0i32);
+    let mut clicks = Vec::new();
+    let start = crate::timer::ticks();
+    while crate::timer::ticks().wrapping_sub(start) < 6000 {
+        while let Some(event) = woven_input::poll() {
+            match event {
+                woven_input::Event::Key(key) => keys.push(key),
+                woven_input::Event::PointerMove { dx, dy } => {
+                    motion.0 += i32::from(dx);
+                    motion.1 += i32::from(dy);
+                }
+                woven_input::Event::PointerButton { button, pressed } => clicks.push((button, pressed)),
+                #[allow(unreachable_patterns)]
+                _ => {}
+            }
+        }
+        if keys.len() >= expected.len() && clicks.len() >= 2 && motion == (40, 25) {
+            break;
+        }
+        crate::task::yield_now();
+    }
+    crate::serial::write_line(format_args!(
+        "[S13.13] received keys={:?} motion={:?} clicks={:?}",
+        keys, motion, clicks
+    ));
+    let keys_ok = step("typed keys arrive once each, in order, shift applied", keys == expected);
+    let mouse_ok = step(
+        "mouse motion (right 40, down 25) and a left click arrive",
+        motion == (40, 25) && clicks == [(0, true), (0, false)],
+    );
+    let irqs = crate::interrupts::pci_device_irq_count(summary.vector) - irqs_before;
+    let (reports, passes) = input_counters();
+    let (reports, passes) = (reports - reports_before, passes - passes_before);
+    crate::serial::write_line(format_args!(
+        "[S13.13] interrupts={} reports={} worker passes={}",
+        irqs, reports, passes
+    ));
+    // Every pass but a trailing one follows an interrupt: the worker sleeps
+    // between them instead of polling.
+    let event_driven = step(
+        "delivered by device interrupts; the worker sleeps between them",
+        irqs > 0 && reports >= 5 && passes <= irqs + 2,
+    );
+    keys_ok && mouse_ok && event_driven
+}
+
+/// Stage 13.16 acceptance: a report-protocol HID device. QEMU's usb-tablet
+/// describes its reports in a report descriptor (absolute X/Y, buttons,
+/// wheel). Bring-up must parse it, and positions, a click and a wheel step
+/// injected over QMP must arrive in WovenInput exactly, carried by device
+/// interrupts.
+#[cfg(feature = "stage13-16-test")]
+pub fn report_device_self_test() -> bool {
+    use crate::woven_input;
+    use alloc::vec::Vec;
+
+    fn step(name: &str, ok: bool) -> bool {
+        crate::serial::write_line(format_args!("[S13.16] {} {}", name, if ok { "PASS" } else { "FAIL" }));
+        ok
+    }
+    let report = crate::drivers::bring_up();
+    if !step("xhci0 bound and ready", matches!(report.drivers[2].outcome, crate::drivers::Outcome::Ready(_))) {
+        return false;
+    }
+    let layouts = input_layouts();
+    crate::serial::write_line(format_args!("[S13.16] report-protocol devices: {:?}", layouts));
+    let Some(summary) = input_summary() else {
+        return step("input delivery started", false);
+    };
+    if !step(
+        "the tablet's report descriptor parses as a pointer",
+        layouts == [crate::hid::Application::Mouse] && summary.mice == 1,
+    ) {
+        return false;
+    }
+    while woven_input::poll().is_some() {}
+    let irqs_before = crate::interrupts::pci_device_irq_count(summary.vector);
+    crate::serial::write_line(format_args!("[S13.16] ready for input"));
+
+    let mut positions = Vec::new();
+    let mut clicks = Vec::new();
+    let mut scrolls = Vec::new();
+    let start = crate::timer::ticks();
+    while crate::timer::ticks().wrapping_sub(start) < 6000 {
+        while let Some(event) = woven_input::poll() {
+            match event {
+                woven_input::Event::PointerAbsolute { x, y } => positions.push((x, y)),
+                woven_input::Event::PointerButton { button, pressed } => clicks.push((button, pressed)),
+                woven_input::Event::Scroll { vertical } => scrolls.push(vertical),
+                _ => {}
+            }
+        }
+        if positions.contains(&(24_576, 8_192)) && clicks.len() >= 2 && scrolls.len() >= 2 {
+            break;
+        }
+        crate::task::yield_now();
+    }
+    crate::serial::write_line(format_args!(
+        "[S13.16] received positions={:?} clicks={:?} scrolls={:?}",
+        positions, clicks, scrolls
+    ));
+    // In order, X before Y: a swapped axis or a wrong scale moves them.
+    let moved = step(
+        "absolute positions arrive scaled to the full range, in order",
+        positions.first() == Some(&(8_192, 24_576)) && positions[1..].contains(&(24_576, 8_192)),
+    );
+    let clicked = step("a left click arrives as press then release", clicks == [(0, true), (0, false)]);
+    let scrolled = step("a wheel step up then down arrives", scrolls == [1, -1]);
+    let irqs = crate::interrupts::pci_device_irq_count(summary.vector) - irqs_before;
+    let interrupt = step("delivered by device interrupts", irqs > 0);
+    moved && clicked && scrolled && interrupt
+}
+
 pub fn self_test() -> bool {
     let descriptor = [
         9, 2, 25, 0, 1, 1, 0, 0x80, 50, 9, 4, 0, 0, 1, 3, 1, 1, 0, 7, 5, 0x81, 3, 8, 0, 10,
     ];
     let hid = parse_hid_interface(&descriptor, 1);
     let (mouse_events, mouse_buttons) = decode_boot_mouse([0x01, 5, 0xfd, 0, 0, 0, 0, 0], 0);
-    let mouse_path = mouse_events[0] == Some(Event::PointerMove { dx: 5, dy: 3 })
+    let mouse_path = mouse_events[0] == Some(Event::PointerMove { dx: 5, dy: -3 })
         && mouse_events[1]
             == Some(Event::PointerButton {
                 button: 0,

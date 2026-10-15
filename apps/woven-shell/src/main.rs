@@ -32,6 +32,81 @@
 //! icon goes away when its surface does, normally because its owner exited.
 //! Keystrokes go to the focused window's owner as one-byte messages.
 //!
+//! A new window fades in: its opacity follows a [`Spring`] from 0 to 255,
+//! and its title bar, client area and shadow are composed at that opacity.
+//! While anything animates the shell runs a 20 ms frame clock; otherwise
+//! 250 ms.
+//!
+//! The launcher panel and the toast are translucent over whatever lies
+//! beneath, windows included: their background is region-blended, and their
+//! border and text are an overlay drawn on the transparent key and copied with
+//! a keyed blit, as is the pointer. Nothing is read back from the screen.
+//!
+//! Every window casts a soft shadow of two translucent bands, offset down and
+//! right; the focused window sits higher, so its shadow falls further and
+//! darker. Shadows stay off the taskbar.
+//!
+//! Windows change size by request: the shell sends the owner `WSIZ` with a
+//! client size, and the owner answers `WRSZ` with a new surface of that size
+//! (token, width, height), releasing the old one. Dropping a window on the
+//! left or right edge snaps it to that half of the screen. F2 toggles
+//! tiling: master and stack, the first window on the left half and the rest
+//! sharing the right, re-tiled as windows open and close.
+//!
+//! A window is moved by dragging its title bar. Its close control sends the
+//! owner `WCLS`, a request: the window goes when the owner releases its
+//! surface, so an application can finish first, or decline.
+//!
+//! # Notification Center
+//!
+//! Every notification is kept after its toast expires: the last
+//! [`MAX_NOTES`], newest first, each labelled with the sender's window title.
+//! A badge beside the clock counts the unread ones. Clicking the clock opens
+//! the Notification Center, a translucent panel listing them, and marks them
+//! read; its Clear button empties the history.
+//!
+//! # Quick Settings
+//!
+//! The button left of the tray opens Quick Settings, a translucent panel of
+//! toggles that act on the system today: the display scale (1x or 2x, with
+//! every window laid out again at the new geometry), Do Not Disturb (no
+//! toasts; notifications are still remembered and counted), and tiling (as
+//! F2). Settings the system cannot act on yet are not offered.
+//!
+//! # Lock screen
+//!
+//! Quick Settings' last row locks the desktop. The lock screen covers
+//! everything: no window is drawn, no keystroke reaches an application, and
+//! a notification is remembered and counted but never shown. It shows the
+//! time and a PIN prompt, with one masked dot per digit typed.
+//!
+//! The PIN is given with `--pin <digits>` and kept in the shell's own
+//! memory: the kernel's secret vault needs the `Secrets` capability, which
+//! the security model reserves for broker-granted applications and keeps out
+//! of system services such as the shell. Attempts are compared in constant
+//! time and typed digits are wiped after each one. Three wrong PINs in a row
+//! lock entry out for five seconds. Without `--pin`, Enter unlocks: real
+//! accounts and credentials come with the login manager.
+//!
+//! # Login
+//!
+//! With `--accounts <file>` the shell starts at a sign-in screen. The file
+//! holds one local account per line, `name:salt-hex:hash-hex`, the hash
+//! being `SHA-256(salt || PIN)` (see `libwoven::accounts`); no PIN is stored.
+//! Tab chooses the account, digits enter its PIN, Enter signs in, with the
+//! same masking and lockout as the lock screen. Once signed in, the
+//! account's name is shown in the taskbar, and the lock screen asks for that
+//! account's PIN. Every process still runs with the same kernel credentials:
+//! per-user sessions need the kernel to start processes as another user.
+//!
+//! # Workspaces
+//!
+//! Four workspaces, each with its own windows and stacking order. The
+//! switcher left of the Quick Settings button shows them, the current one
+//! highlighted; clicking one, or F3, switches. F4 moves the focused window
+//! to the next workspace and follows it. Windows open on the current
+//! workspace; tiling and the taskbar's window entries cover only it.
+//!
 //! # WovenStart
 //!
 //! The start button, or F1, opens the launcher: the applications listed in
@@ -49,9 +124,10 @@
 use core::cell::UnsafeCell;
 use core::panic::PanicInfo;
 
+use libwoven::layout::{self, Frame};
 use libwoven::{
     blend, font, process, rgb, wait, Args, Canvas, DateTime, FrameEvent, GraphicsSurface,
-    InputEvent, Key, Region,
+    InputEvent, Key, Region, Spring, TRANSPARENT,
 };
 
 libwoven::entry!(main);
@@ -97,7 +173,22 @@ const TITLE_HEIGHT: i32 = 14;
 const TITLE_ACTIVE: u32 = rgb(70, 120, 210);
 const TITLE_INACTIVE: u32 = rgb(60, 66, 80);
 const MAX_TITLE: usize = 24;
+/// Shadow bands, outermost first, as (offset, opacity) of black over what
+/// lies beneath. The focused window's shadow is deeper: its elevation.
+const FOCUSED_SHADOW: [(i32, u8); 2] = [(8, 24), (4, 48)];
+const UNFOCUSED_SHADOW: [(i32, u8); 2] = [(4, 20), (2, 40)];
+/// The furthest any shadow band reaches beyond its window.
+const SHADOW_REACH: i32 = 8;
+const SHADOW: u32 = rgb(0, 0, 0);
+
+/// The close control: a square at the right of the title bar.
+const CLOSE_SIZE: i32 = 10;
+const CLOSE_FILL: u32 = rgb(170, 60, 60);
 const MAX_WINDOWS: usize = 4;
+/// Workspaces, and the switcher boxes that show them.
+const WORKSPACES: usize = 4;
+const WORKSPACE_BOX: i32 = 12;
+const WORKSPACE_GAP: i32 = 2;
 /// New windows cascade from here, this far apart.
 const CASCADE_ORIGIN: i32 = 40;
 const CASCADE_STEP: i32 = 24;
@@ -106,6 +197,7 @@ const TOAST_WIDTH: i32 = 180;
 const TOAST_HEIGHT: i32 = 22;
 const TOAST_MARGIN: i32 = 8;
 const TOAST_FILL: u32 = rgb(30, 34, 46);
+const TOAST_OPACITY: u8 = 216;
 const TOAST_CHARS: usize = ((TOAST_WIDTH - 12) / font::ADVANCE) as usize;
 const TOAST_TICKS: u64 = 4 * libwoven::time::TICKS_PER_SECOND;
 
@@ -138,7 +230,44 @@ const PANEL_X: i32 = 4;
 const PANEL_WIDTH: i32 = 160;
 const PANEL_ROW: i32 = 14;
 const PANEL_FILL: u32 = rgb(28, 32, 44);
+const PANEL_OPACITY: u8 = 216;
 const PANEL_TITLE: &str = "WovenStart";
+
+/// Notifications remembered for the Notification Center.
+const MAX_NOTES: usize = 8;
+const CENTER_WIDTH: i32 = 164;
+const CENTER_TITLE: &str = "Notifications";
+const CENTER_CLEAR: &str = "Clear";
+const QS_TITLE: &str = "Quick Settings";
+const QS_ROWS: usize = 4;
+
+/// How dark the lock screen makes the wallpaper behind it.
+const LOCK_DIM: u8 = 160;
+const MAX_PIN: usize = 16;
+/// Wrong PINs in a row before entry is locked out, and for how long.
+const PIN_ATTEMPTS: u32 = 3;
+const PIN_LOCKOUT: u64 = 5 * libwoven::time::TICKS_PER_SECOND;
+
+/// Accounts the sign-in screen offers.
+const MAX_ACCOUNTS: usize = 4;
+
+/// Whether the locked screen is the sign-in screen or the lock screen.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum LockMode {
+    SignIn,
+    Lock,
+}
+
+/// What the lock screen's prompt says.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum LockPrompt {
+    Enter,
+    Wrong,
+    LockedOut,
+}
+
+/// Characters of a `source: text` row that fit.
+const CENTER_CHARS: usize = ((CENTER_WIDTH - 12) / font::ADVANCE) as usize;
 
 const TILE_WIDTH: usize = 320;
 const TILE_HEIGHT: usize = 40;
@@ -147,6 +276,10 @@ const TILE_PIXELS: usize = TILE_WIDTH * TILE_HEIGHT;
 /// The shell wakes at least four times a second for the clock, the toast
 /// timer and window liveness.
 const FRAME_PERIOD: u64 = libwoven::time::TICKS_PER_SECOND / 4;
+/// How long a resize may take before a vanished surface counts as an exit.
+const RESIZE_GRACE: u64 = libwoven::time::TICKS_PER_SECOND;
+/// The frame clock while something animates: 20 ms.
+const ANIMATION_PERIOD: u64 = 2;
 
 /// The one tile buffer, in .bss rather than on the stack.
 struct TileBuffer(UnsafeCell<[u32; TILE_PIXELS]>);
@@ -155,6 +288,15 @@ struct TileBuffer(UnsafeCell<[u32; TILE_PIXELS]>);
 unsafe impl Sync for TileBuffer {}
 
 static TILE: TileBuffer = TileBuffer(UnsafeCell::new([0; TILE_PIXELS]));
+
+/// The desktop's state, in .bss too: the user stack is 8 KiB, and the state
+/// built in `main`'s frame, with the catalog loader's on top, overflowed it.
+struct DesktopState(UnsafeCell<Desktop>);
+
+// SAFETY: the shell is single-threaded, and `main` takes the only reference.
+unsafe impl Sync for DesktopState {}
+
+static DESKTOP: DesktopState = DesktopState(UnsafeCell::new(Desktop::INITIAL));
 
 /// Exit with a numeric reason so the gate can tell which step failed.
 fn fail(code: u64) -> ! {
@@ -209,6 +351,15 @@ fn label(bytes: &[u8], limit: usize, buffer: &mut [u8; 32]) -> usize {
         *slot = if (b' '..=b'~').contains(byte) { *byte } else { b'?' };
     }
     length
+}
+
+/// A one-pixel outline of `area` in `color`.
+fn outline(canvas: &mut Canvas<'_>, area: Area, color: u32) {
+    let (width, height) = (area.width as usize, area.height as usize);
+    canvas.fill_rect(area.x, area.y, width, 1, color);
+    canvas.fill_rect(area.x, area.y + area.height - 1, width, 1, color);
+    canvas.fill_rect(area.x, area.y, 1, height, color);
+    canvas.fill_rect(area.x + area.width - 1, area.y, 1, height, color);
 }
 
 /// A rectangle in screen coordinates.
@@ -277,9 +428,21 @@ struct Window {
     height: i32,
     title: [u8; MAX_TITLE],
     title_length: usize,
+    /// Opacity, 0 to 255: animated from 0 as the window opens.
+    fade: Spring,
+    /// The workspace the window belongs to.
+    workspace: usize,
+    /// Until this tick, a resize has been requested and the owner may be
+    /// swapping surfaces: a failed blit of the old one does not mean it
+    /// exited.
+    resizing_until: libwoven::time::Ticks,
 }
 
 impl Window {
+    fn alpha(&self) -> u8 {
+        self.fade.value().clamp(0, 255) as u8
+    }
+
     fn title_area(&self) -> Area {
         Area::new(self.x, self.y - TITLE_HEIGHT, self.width, TITLE_HEIGHT)
     }
@@ -290,6 +453,21 @@ impl Window {
 
     fn frame(&self) -> Area {
         self.title_area().union(self.body())
+    }
+
+    /// Everything the window and its deepest shadow can cover: what to
+    /// repaint when it opens, closes, moves or changes elevation.
+    fn footprint(&self) -> Area {
+        let frame = self.frame();
+        frame.union(Area::new(frame.x + SHADOW_REACH, frame.y + SHADOW_REACH, frame.width, frame.height))
+    }
+
+    /// The close control, or nothing on a window too narrow to carry one.
+    fn close_area(&self) -> Area {
+        if self.width < 4 * CLOSE_SIZE {
+            return Area::new(0, 0, 0, 0);
+        }
+        Area::new(self.x + self.width - CLOSE_SIZE - 2, self.y - TITLE_HEIGHT + 2, CLOSE_SIZE, CLOSE_SIZE)
     }
 }
 
@@ -362,8 +540,8 @@ impl App {
 
 /// Load the catalog, sorted by name. A missing catalog, or no `FileRead`,
 /// leaves the launcher empty rather than stopping the shell.
-fn load_catalog() -> ([Option<App>; MAX_APPS], usize) {
-    let mut apps = [None; MAX_APPS];
+/// The apps are written into `apps`, which starts empty; returns how many.
+fn load_catalog(apps: &mut [Option<App>; MAX_APPS]) -> usize {
     let mut count = 0;
     let mut name = [0u8; libwoven::MAX_NAME];
     let mut index = 0;
@@ -401,7 +579,7 @@ fn load_catalog() -> ([Option<App>; MAX_APPS], usize) {
         apps[position] = Some(app);
         count += 1;
     }
-    (apps, count)
+    count
 }
 
 /// Whether `name` contains `query`, ignoring ASCII case.
@@ -418,6 +596,14 @@ struct Child {
     app: usize,
 }
 
+/// One remembered notification, already formatted for its row:
+/// `source: text`, cut to what fits.
+#[derive(Clone, Copy)]
+struct Note {
+    text: [u8; 32],
+    length: usize,
+}
+
 struct Toast {
     text: [u8; 32],
     length: usize,
@@ -431,6 +617,103 @@ struct Painter<'a> {
 }
 
 impl Painter<'_> {
+    /// [`draw`](Self::draw), blended at `opacity` over what is composed.
+    fn draw_blended(&mut self, area: Area, opacity: u8, render: impl Fn(&mut Canvas<'_>)) {
+        let mut y = area.y;
+        while y < area.y + area.height {
+            let height = (area.y + area.height - y).min(TILE_HEIGHT as i32);
+            let mut x = area.x;
+            while x < area.x + area.width {
+                let width = (area.x + area.width - x).min(TILE_WIDTH as i32);
+                let Some(mut canvas) =
+                    Canvas::new(self.tile, x, y, width as usize, height as usize)
+                else {
+                    fail(16);
+                };
+                render(&mut canvas);
+                let region = Region {
+                    x: 0,
+                    y: 0,
+                    width: width as u16,
+                    height: height as u16,
+                };
+                if self.staging.write_canvas(&canvas).is_err()
+                    || self.staging.present_region_blended(region, x, y, opacity).is_err()
+                {
+                    fail(17);
+                }
+                x += width;
+            }
+            y += height;
+        }
+    }
+
+    /// Render an overlay over `area` with `render`, on a canvas pre-filled
+    /// with the transparent key, and copy it with a keyed blit: only what
+    /// `render` drew lands, over what is already composed.
+    fn overlay(&mut self, area: Area, render: impl Fn(&mut Canvas<'_>)) {
+        let mut y = area.y;
+        while y < area.y + area.height {
+            let height = (area.y + area.height - y).min(TILE_HEIGHT as i32);
+            let mut x = area.x;
+            while x < area.x + area.width {
+                let width = (area.x + area.width - x).min(TILE_WIDTH as i32);
+                let Some(mut canvas) =
+                    Canvas::new(self.tile, x, y, width as usize, height as usize)
+                else {
+                    fail(14);
+                };
+                canvas.fill_rect(x, y, width as usize, height as usize, TRANSPARENT);
+                render(&mut canvas);
+                let region = Region {
+                    x: 0,
+                    y: 0,
+                    width: width as u16,
+                    height: height as u16,
+                };
+                if self.staging.write_canvas(&canvas).is_err()
+                    || self.staging.present_region_keyed(region, x, y).is_err()
+                {
+                    fail(15);
+                }
+                x += width;
+            }
+            y += height;
+        }
+    }
+
+    /// Blend `color` over `area` with uniform `opacity`, in chunks no larger
+    /// than the staging surface.
+    fn blend(&mut self, area: Area, color: u32, opacity: u8) {
+        let mut y = area.y;
+        while y < area.y + area.height {
+            let height = (area.y + area.height - y).min(TILE_HEIGHT as i32);
+            let mut x = area.x;
+            while x < area.x + area.width {
+                let width = (area.x + area.width - x).min(TILE_WIDTH as i32);
+                let Some(mut canvas) =
+                    Canvas::new(self.tile, x, y, width as usize, height as usize)
+                else {
+                    fail(12);
+                };
+                canvas.fill_rect(x, y, width as usize, height as usize, color);
+                let region = Region {
+                    x: 0,
+                    y: 0,
+                    width: width as u16,
+                    height: height as u16,
+                };
+                if self.staging.write_canvas(&canvas).is_err()
+                    || self.staging.present_region_blended(region, x, y, opacity).is_err()
+                {
+                    fail(13);
+                }
+                x += width;
+            }
+            y += height;
+        }
+    }
+
     /// Render `area` with `render` in chunks no larger than the staging
     /// surface, uploading and blitting each.
     fn draw(&mut self, area: Area, render: impl Fn(&mut Canvas<'_>)) {
@@ -471,15 +754,49 @@ struct Desktop {
     /// The time on screen, `None` if the clock could not be read.
     time: Option<DateTime>,
     windows: [Option<Window>; MAX_WINDOWS],
-    /// Window slots bottom to top; the last is focused.
+    /// The current workspace's window slots bottom to top; the last is
+    /// focused.
     stack: [usize; MAX_WINDOWS],
     stacked: usize,
+    /// The current workspace, and every other workspace's saved stack.
+    workspace: usize,
+    saved: [([usize; MAX_WINDOWS], usize); WORKSPACES],
     /// Windows opened so far, for the cascade.
     opened: i32,
     tray: [Option<TrayIcon>; MAX_TRAY],
     toast: Option<Toast>,
+    /// Remembered notifications, newest first.
+    notes: [Option<Note>; MAX_NOTES],
+    /// How many of them arrived since the Notification Center was last
+    /// opened.
+    unread: usize,
+    center_open: bool,
+    qs_open: bool,
+    /// Do Not Disturb: notifications are remembered but raise no toast.
+    dnd: bool,
+    /// The display scale the shell set.
+    scale: u32,
+    locked: bool,
+    /// The PIN and its length, if one was given.
+    pin: Option<([u8; MAX_PIN], usize)>,
+    /// Digits typed at the lock screen so far.
+    entry: [u8; MAX_PIN],
+    entry_length: usize,
+    failures: u32,
+    lockout_until: libwoven::time::Ticks,
+    prompt: LockPrompt,
+    mode: LockMode,
+    accounts: [Option<libwoven::accounts::Account>; MAX_ACCOUNTS],
+    /// The account chosen on the sign-in screen.
+    chosen: usize,
+    /// The account signed in, if any.
+    session: Option<usize>,
     pointer: (i32, i32),
     pointer_visible: bool,
+    /// The window being dragged, and where in it the pointer took hold.
+    drag: Option<(usize, i32, i32)>,
+    /// Whether windows are tiled.
+    tiled: bool,
     apps: [Option<App>; MAX_APPS],
     app_count: usize,
     launcher_open: bool,
@@ -490,6 +807,50 @@ struct Desktop {
 }
 
 impl Desktop {
+    /// The state before `main` fills in the display, options and catalog.
+    const INITIAL: Desktop = Desktop {
+        width: 0,
+        height: 0,
+        seconds: false,
+        time: None,
+        windows: [None; MAX_WINDOWS],
+        stack: [0; MAX_WINDOWS],
+        stacked: 0,
+        workspace: 0,
+        saved: [([0; MAX_WINDOWS], 0); WORKSPACES],
+        opened: 0,
+        tray: [None; MAX_TRAY],
+        toast: None,
+        notes: [None; MAX_NOTES],
+        unread: 0,
+        center_open: false,
+        qs_open: false,
+        dnd: false,
+        scale: 1,
+        locked: false,
+        pin: None,
+        entry: [0; MAX_PIN],
+        entry_length: 0,
+        failures: 0,
+        lockout_until: 0,
+        prompt: LockPrompt::Enter,
+        mode: LockMode::SignIn,
+        accounts: [None; MAX_ACCOUNTS],
+        chosen: 0,
+        session: None,
+        pointer: (0, 0),
+        pointer_visible: false,
+        drag: None,
+        tiled: false,
+        apps: [None; MAX_APPS],
+        app_count: 0,
+        launcher_open: false,
+        query: [0; MAX_QUERY],
+        query_length: 0,
+        selected: 0,
+        children: [None; MAX_CHILDREN],
+    };
+
     fn screen(&self) -> Area {
         Area::new(0, 0, self.width, self.height)
     }
@@ -562,12 +923,13 @@ impl Desktop {
         Area::new(PANEL_X, self.taskbar_top() - 2 - height, PANEL_WIDTH, height)
     }
 
+    /// The panel's overlay: border, title row, selection and text. Its
+    /// background is blended separately, so what lies beneath shows through.
     fn render_panel(&self, canvas: &mut Canvas<'_>) {
         let area = self.panel_area();
         let (x, y) = (area.x, area.y);
         let inner = (area.width - 2) as usize;
-        canvas.fill_rect(x, y, area.width as usize, area.height as usize, ACCENT);
-        canvas.fill_rect(x + 1, y + 1, inner, (area.height - 2) as usize, PANEL_FILL);
+        outline(canvas, area, ACCENT);
         canvas.fill_rect(x + 1, y + 1, inner, PANEL_ROW as usize, START_FILL);
         canvas.draw_text(x + 6, y + 5, PANEL_TITLE, TEXT);
 
@@ -595,7 +957,13 @@ impl Desktop {
 
     /// Open or close the launcher. Returns the area to repaint.
     fn toggle_launcher(&mut self) -> Area {
-        let before = self.panel_area();
+        let mut before = self.panel_area();
+        if !self.launcher_open && (self.center_open || self.qs_open) {
+            // Only one panel at a time.
+            before = before.union(self.center_area()).union(self.qs_area()).union(self.qs_button());
+            self.center_open = false;
+            self.qs_open = false;
+        }
         self.launcher_open = !self.launcher_open;
         self.query_length = 0;
         self.selected = 0;
@@ -667,7 +1035,8 @@ impl Desktop {
                 }
             }
             Key::F1 => return self.toggle_launcher(),
-            Key::Char(_) => {}
+            // Tiling waits until the launcher closes.
+            Key::Char(_) | Key::F2 | Key::F3 | Key::F4 => {}
         }
         before.union(self.panel_area())
     }
@@ -695,11 +1064,56 @@ impl Desktop {
     }
 
     /// Open windows in slot order: the taskbar's entries.
+    /// The current workspace's windows, by slot.
     fn entries(&self) -> impl Iterator<Item = (usize, &Window)> {
+        let workspace = self.workspace;
         self.windows
             .iter()
             .enumerate()
             .filter_map(|(slot, window)| window.as_ref().map(|window| (slot, window)))
+            .filter(move |(_, window)| window.workspace == workspace)
+    }
+
+    /// The switcher box for workspace `index`, left of the Quick Settings
+    /// button.
+    fn workspace_area(&self, index: usize) -> Area {
+        let span = WORKSPACES as i32 * (WORKSPACE_BOX + WORKSPACE_GAP) - WORKSPACE_GAP;
+        let x = self.qs_button().x - 6 - span + index as i32 * (WORKSPACE_BOX + WORKSPACE_GAP);
+        Area::new(x, self.taskbar_top() + 4, WORKSPACE_BOX, START_HEIGHT as i32)
+    }
+
+    /// Show workspace `target`: save the current stack, restore the target's.
+    fn switch_workspace(&mut self, target: usize) -> Area {
+        if target >= WORKSPACES || target == self.workspace {
+            return Area::new(0, 0, 0, 0);
+        }
+        let _ = self.close_panels();
+        self.drag = None;
+        self.saved[self.workspace] = (self.stack, self.stacked);
+        (self.stack, self.stacked) = self.saved[target];
+        self.workspace = target;
+        let digit = [b'1' + target as u8];
+        log(&[b"woven-shell: workspace ", &digit]);
+        let _ = self.retile();
+        self.screen()
+    }
+
+    /// Move the focused window to the next workspace and follow it.
+    fn move_focused_to_next_workspace(&mut self) -> Area {
+        let Some(slot) = self.focused() else { return Area::new(0, 0, 0, 0) };
+        let target = (self.workspace + 1) % WORKSPACES;
+        // Off this workspace's stack, onto the top of the target's.
+        self.stacked -= 1;
+        let (stack, count) = &mut self.saved[target];
+        if *count < MAX_WINDOWS {
+            stack[*count] = slot;
+            *count += 1;
+        }
+        if let Some(window) = self.windows[slot].as_mut() {
+            window.workspace = target;
+        }
+        let _ = self.retile();
+        self.switch_workspace(target)
     }
 
     /// The desktop layer: wallpaper and taskbar, with its start button,
@@ -732,31 +1146,372 @@ impl Desktop {
         let text = core::str::from_utf8(&bytes[..length]).unwrap_or("");
         let clock_x = self.width - CLOCK_MARGIN - font::text_width(text) as i32;
         canvas.draw_text(clock_x, self.text_y(), text, TEXT);
+
+        // The workspace switcher, left of the Quick Settings button.
+        for index in 0..WORKSPACES {
+            let area = self.workspace_area(index);
+            let fill = if index == self.workspace { ENTRY_ACTIVE } else { ENTRY_INACTIVE };
+            canvas.fill_rect(area.x, area.y, area.width as usize, area.height as usize, fill);
+            let digit = [b'1' + index as u8];
+            canvas.draw_text(area.x + 3, self.text_y(), core::str::from_utf8(&digit).unwrap_or("?"), TEXT);
+        }
+
+        // The signed-in account's name, left of the workspace switcher.
+        if let Some(account) = self.session.and_then(|index| self.accounts[index]) {
+            let name = core::str::from_utf8(account.name()).unwrap_or("?");
+            let x = self.workspace_area(0).x - 6 - font::text_width(name) as i32;
+            canvas.draw_text(x, self.text_y(), name, TEXT);
+        }
+
+        // The Quick Settings button.
+        let button = self.qs_button();
+        let fill = if self.qs_open { ENTRY_ACTIVE } else { ENTRY_INACTIVE };
+        canvas.fill_rect(button.x, button.y, button.width as usize, button.height as usize, fill);
+        canvas.draw_text(button.x + 5, self.text_y(), "Q", TEXT);
+
+        // The unread badge, just left of the clock: a count up to 9.
+        if self.unread > 0 {
+            let badge = self.badge_area();
+            canvas.fill_rect(badge.x, badge.y, badge.width as usize, badge.height as usize, ACCENT);
+            let digit = [b'0' + self.unread.min(9) as u8];
+            canvas.draw_text(badge.x + 3, badge.y + 2, core::str::from_utf8(&digit).unwrap_or("?"), TEXT);
+        }
+    }
+
+    /// The Quick Settings button, left of the tray's last icon slot.
+    fn qs_button(&self) -> Area {
+        let x = self.width - CLOCK_WIDTH - (MAX_TRAY as i32 + 1) * (TRAY_ICON + TRAY_GAP);
+        Area::new(x, self.taskbar_top() + 4, TRAY_ICON, TRAY_ICON)
+    }
+
+    /// Quick Settings: a title row and one row per toggle, above the
+    /// taskbar's right end; empty while closed.
+    fn qs_area(&self) -> Area {
+        if !self.qs_open {
+            return Area::new(0, 0, 0, 0);
+        }
+        let height = (1 + QS_ROWS as i32) * PANEL_ROW + 2;
+        Area::new(self.width - 4 - CENTER_WIDTH, self.taskbar_top() - 2 - height, CENTER_WIDTH, height)
+    }
+
+    /// The toggles as they currently read.
+    fn qs_rows(&self) -> [&'static str; QS_ROWS] {
+        [
+            if self.scale == 2 { "Display scale: 2x" } else { "Display scale: 1x" },
+            if self.dnd { "Do not disturb: On" } else { "Do not disturb: Off" },
+            if self.tiled { "Tiling: On" } else { "Tiling: Off" },
+            "Lock screen",
+        ]
+    }
+
+    /// The lock screen: the wallpaper dimmed, "Locked", the time, the
+    /// prompt, and a masked dot per digit typed, all centred.
+    fn render_lock(&self, canvas: &mut Canvas<'_>) {
+        let height = self.height;
+        canvas.shade(|x, y| blend(rgb(0, 0, 0), wallpaper(x, y, height), LOCK_DIM));
+        let middle = self.height / 2;
+        let centred = |text: &str| (self.width - font::text_width(text) as i32) / 2;
+        if self.mode == LockMode::SignIn {
+            // "Sign in", then the accounts, the chosen one marked.
+            canvas.draw_text(centred("Sign in"), middle - 60, "Sign in", TEXT);
+            for (index, account) in self.accounts.iter().flatten().enumerate() {
+                let mut line = [b' '; 2 + libwoven::accounts::MAX_NAME];
+                if index == self.chosen {
+                    line[0] = b'>';
+                }
+                line[2..2 + account.name().len()].copy_from_slice(account.name());
+                let text = core::str::from_utf8(&line[..2 + account.name().len()]).unwrap_or("");
+                canvas.draw_text(centred(text), middle - 46 + index as i32 * 10, text, TEXT);
+            }
+        } else {
+            canvas.draw_text(centred("Locked"), middle - 34, "Locked", TEXT);
+            let (bytes, length) = clock_text(self.time, false);
+            let clock = core::str::from_utf8(&bytes[..length]).unwrap_or("");
+            canvas.draw_text(centred(clock), middle - 20, clock, TEXT);
+        }
+        let prompt = match self.prompt {
+            LockPrompt::Enter => "Enter PIN",
+            LockPrompt::Wrong => "Wrong PIN",
+            LockPrompt::LockedOut => "Try again shortly",
+        };
+        canvas.draw_text(centred(prompt), middle - 4, prompt, TEXT);
+        let dots = self.entry_length as i32;
+        let left = (self.width - (dots * 10 - 4)) / 2;
+        for index in 0..dots {
+            canvas.fill_rect(left + index * 10, middle + 12, 6, 6, TEXT);
+        }
+    }
+
+    fn lock(&mut self) -> Area {
+        let _ = self.close_panels();
+        self.locked = true;
+        self.mode = LockMode::Lock;
+        self.forget_entry();
+        self.prompt = LockPrompt::Enter;
+        log(&[b"woven-shell: locked"]);
+        self.screen()
+    }
+
+    /// Wipe the typed digits.
+    fn forget_entry(&mut self) {
+        for byte in &mut self.entry {
+            // SAFETY: a valid, aligned byte of our own array; volatile so the
+            // wipe is not optimised away.
+            unsafe { core::ptr::write_volatile(byte, 0) };
+        }
+        self.entry_length = 0;
+    }
+
+    /// Check the typed digits: against the chosen account when signing in,
+    /// the signed-in account when locked, or else the `--pin` PIN.
+    fn pin_matches(&self) -> bool {
+        let account = match self.mode {
+            LockMode::SignIn => Some(self.chosen),
+            LockMode::Lock => self.session,
+        };
+        if let Some(account) = account.and_then(|index| self.accounts[index]) {
+            return account.verify(&self.entry[..self.entry_length]);
+        }
+        let Some((stored, length)) = &self.pin else { return true };
+        // Constant time over the whole buffer: no early exit on a mismatch.
+        let mut difference = u8::from(*length != self.entry_length);
+        for (stored, typed) in stored.iter().zip(&self.entry) {
+            difference |= stored ^ typed;
+        }
+        difference == 0
+    }
+
+    /// A key at the lock screen. Returns the area to repaint.
+    fn lock_key(&mut self, key: Key) -> Area {
+        match key {
+            Key::Char(digit) if digit.is_ascii_digit() => {
+                if self.entry_length < MAX_PIN {
+                    self.entry[self.entry_length] = digit as u8;
+                    self.entry_length += 1;
+                }
+            }
+            Key::Backspace => {
+                if self.entry_length > 0 {
+                    self.entry_length -= 1;
+                    self.entry[self.entry_length] = 0;
+                }
+            }
+            Key::Tab if self.mode == LockMode::SignIn => {
+                let count = self.accounts.iter().flatten().count().max(1);
+                self.chosen = (self.chosen + 1) % count;
+                self.forget_entry();
+                self.prompt = LockPrompt::Enter;
+            }
+            Key::Enter => {
+                if libwoven::ticks() < self.lockout_until {
+                    self.prompt = LockPrompt::LockedOut;
+                } else if self.pin_matches() {
+                    self.locked = false;
+                    self.failures = 0;
+                    if self.mode == LockMode::SignIn {
+                        self.session = Some(self.chosen);
+                        let name = self.accounts[self.chosen];
+                        log(&[b"woven-shell: signed in: ", name.as_ref().map_or(&b"?"[..], |account| account.name())]);
+                    } else {
+                        log(&[b"woven-shell: unlocked"]);
+                    }
+                } else {
+                    self.failures += 1;
+                    self.prompt = LockPrompt::Wrong;
+                    log(&[b"woven-shell: wrong PIN"]);
+                    if self.failures >= PIN_ATTEMPTS {
+                        self.failures = 0;
+                        self.lockout_until = libwoven::ticks() + PIN_LOCKOUT;
+                        self.prompt = LockPrompt::LockedOut;
+                    }
+                }
+                self.forget_entry();
+            }
+            _ => return Area::new(0, 0, 0, 0),
+        }
+        self.screen()
+    }
+
+    fn render_qs(&self, canvas: &mut Canvas<'_>) {
+        let area = self.qs_area();
+        let (x, y) = (area.x, area.y);
+        outline(canvas, area, ACCENT);
+        canvas.fill_rect(x + 1, y + 1, (area.width - 2) as usize, PANEL_ROW as usize, START_FILL);
+        canvas.draw_text(x + 6, y + 5, QS_TITLE, TEXT);
+        for (row, text) in self.qs_rows().iter().enumerate() {
+            canvas.draw_text(x + 6, y + 1 + (1 + row as i32) * PANEL_ROW + 4, text, TEXT);
+        }
+    }
+
+    /// Close whichever panel is open. Returns the area to repaint.
+    fn close_panels(&mut self) -> Area {
+        let mut dirty = Area::new(0, 0, 0, 0);
+        if self.launcher_open {
+            dirty = dirty.union(self.toggle_launcher());
+        }
+        if self.center_open {
+            dirty = dirty.union(self.center_area());
+            self.center_open = false;
+        }
+        if self.qs_open {
+            dirty = dirty.union(self.qs_area()).union(self.qs_button());
+            self.qs_open = false;
+        }
+        dirty
+    }
+
+    fn toggle_qs(&mut self) -> Area {
+        let opening = !self.qs_open;
+        let mut dirty = self.close_panels();
+        if opening {
+            self.qs_open = true;
+            dirty = dirty.union(self.qs_area()).union(self.qs_button());
+        }
+        dirty
+    }
+
+    fn toggle_tiling(&mut self) -> Area {
+        self.tiled = !self.tiled;
+        log(if self.tiled { &[b"woven-shell: tiling on"] } else { &[b"woven-shell: tiling off"] });
+        self.retile().union(self.qs_area())
+    }
+
+    /// Switch between display scales 2 and 1: the compositor surface is
+    /// reallocated at the new geometry, every window is kept on screen (and
+    /// tiled again if tiling is on), and the whole desktop is repainted.
+    fn toggle_scale(&mut self) -> Area {
+        let target = if self.scale == 2 { 1 } else { 2 };
+        let Ok(info) = libwoven::compositor_set_scale(target) else {
+            return Area::new(0, 0, 0, 0);
+        };
+        self.scale = info.scale;
+        self.width = info.width as i32;
+        self.height = info.height as i32;
+        let top = self.taskbar_top();
+        for window in self.windows.iter_mut().flatten() {
+            window.x = window.x.clamp(0, (self.width - window.width).max(0));
+            window.y = window.y.clamp(TITLE_HEIGHT, (top - window.height).max(TITLE_HEIGHT));
+        }
+        self.pointer = (self.pointer.0.min(self.width - 1), self.pointer.1.min(self.height - 1));
+        log(if target == 1 { &[b"woven-shell: display scale 1x"] } else { &[b"woven-shell: display scale 2x"] });
+        let _ = self.retile();
+        self.screen()
+    }
+
+    /// Where the unread badge sits: a 10x11 box just left of the clock text.
+    fn badge_area(&self) -> Area {
+        let (_, length) = clock_text(self.time, self.seconds);
+        let clock_width = length as i32 * font::ADVANCE - (font::ADVANCE - font::WIDTH as i32);
+        let clock_x = self.width - CLOCK_MARGIN - clock_width;
+        Area::new(clock_x - 13, self.taskbar_top() + 7, 10, 11)
+    }
+
+    /// The Notification Center, sized to its rows, above the taskbar's right
+    /// end; empty while closed.
+    fn center_area(&self) -> Area {
+        if !self.center_open {
+            return Area::new(0, 0, 0, 0);
+        }
+        let count = self.notes.iter().flatten().count();
+        let height = (1 + count.max(1) as i32) * PANEL_ROW + 2;
+        Area::new(self.width - 4 - CENTER_WIDTH, self.taskbar_top() - 2 - height, CENTER_WIDTH, height)
+    }
+
+    /// The Notification Center's overlay: border, title row with Clear, and
+    /// one row per remembered notification.
+    fn render_center(&self, canvas: &mut Canvas<'_>) {
+        let area = self.center_area();
+        let (x, y) = (area.x, area.y);
+        outline(canvas, area, ACCENT);
+        canvas.fill_rect(x + 1, y + 1, (area.width - 2) as usize, PANEL_ROW as usize, START_FILL);
+        canvas.draw_text(x + 6, y + 5, CENTER_TITLE, TEXT);
+        let clear_x = x + area.width - 6 - font::text_width(CENTER_CLEAR) as i32;
+        canvas.draw_text(clear_x, y + 5, CENTER_CLEAR, TEXT);
+        let mut any = false;
+        for (row, note) in self.notes.iter().flatten().enumerate() {
+            any = true;
+            let text = core::str::from_utf8(&note.text[..note.length]).unwrap_or("");
+            canvas.draw_text(x + 6, y + 1 + (1 + row as i32) * PANEL_ROW + 4, text, TEXT);
+        }
+        if !any {
+            canvas.draw_text(x + 6, y + 1 + PANEL_ROW + 4, "No notifications", TEXT);
+        }
+    }
+
+    /// Open or close the Notification Center. Opening it closes the
+    /// launcher and marks every notification read. Returns the area to
+    /// repaint.
+    fn toggle_center(&mut self) -> Area {
+        let opening = !self.center_open;
+        let mut dirty = self.close_panels();
+        self.center_open = opening;
+        if self.center_open && self.unread > 0 {
+            self.unread = 0;
+            dirty = dirty.union(self.taskbar());
+        }
+        dirty.union(self.center_area())
+    }
+
+    /// Remember a notification from `sender`. Returns the area to repaint.
+    fn remember(&mut self, sender: process::Id, text: &[u8]) -> Area {
+        // The sender's window title names it; a sender without a window is
+        // "app".
+        let window = self.windows.iter().flatten().find(|window| window.owner == sender);
+        let source = window.map_or(&b"app"[..], |window| &window.title[..window.title_length]);
+        let mut row = [0u8; 64];
+        let mut length = 0;
+        for part in [source, b": ", text] {
+            let take = part.len().min(row.len() - length);
+            row[length..length + take].copy_from_slice(&part[..take]);
+            length += take;
+        }
+        let mut note = Note { text: [0; 32], length: 0 };
+        note.length = label(&row[..length], CENTER_CHARS, &mut note.text);
+        let before = self.center_area();
+        self.notes.rotate_right(1);
+        self.notes[0] = Some(note);
+        if !self.center_open {
+            self.unread += 1;
+        }
+        before.union(self.center_area()).union(self.taskbar())
+    }
+
+    /// Forget every notification. Returns the area to repaint.
+    fn clear_notes(&mut self) -> Area {
+        let before = self.center_area();
+        self.notes = [None; MAX_NOTES];
+        self.unread = 0;
+        log(&[b"woven-shell: notifications cleared"]);
+        before.union(self.center_area()).union(self.taskbar())
     }
 
     fn render_title(window: &Window, focused: bool, canvas: &mut Canvas<'_>) {
         let area = window.title_area();
         let fill = if focused { TITLE_ACTIVE } else { TITLE_INACTIVE };
         canvas.fill_rect(area.x, area.y, area.width as usize, area.height as usize, fill);
+        let close = window.close_area();
+        if !close.is_empty() {
+            canvas.fill_rect(close.x, close.y, close.width as usize, close.height as usize, CLOSE_FILL);
+            canvas.draw_text(close.x + 3, close.y + 2, "x", TEXT);
+        }
         let mut buffer = [0u8; 32];
-        let chars = ((window.width - 8) / font::ADVANCE).max(0) as usize;
+        let reserved = if close.is_empty() { 8 } else { 8 + CLOSE_SIZE + 4 };
+        let chars = ((window.width - reserved) / font::ADVANCE).max(0) as usize;
         let length = label(&window.title[..window.title_length], chars, &mut buffer);
         let text = core::str::from_utf8(&buffer[..length]).unwrap_or("");
         canvas.draw_text(area.x + 4, area.y + 4, text, TEXT);
     }
 
+    /// The toast's overlay: border and text over its blended background.
     fn render_toast(&self, toast: &Toast, canvas: &mut Canvas<'_>) {
         let area = self.toast_area();
-        let (width, height) = (area.width as usize, area.height as usize);
-        canvas.fill_rect(area.x, area.y, width, height, ACCENT);
-        canvas.fill_rect(area.x + 1, area.y + 1, width - 2, height - 2, TOAST_FILL);
+        outline(canvas, area, ACCENT);
         let text = core::str::from_utf8(&toast.text[..toast.length]).unwrap_or("");
         canvas.draw_text(area.x + 6, area.y + 8, text, TEXT);
     }
 
-    /// The pointer over whatever is already on screen beneath it.
+    /// The pointer, as an overlay: its transparent cells stay on the key.
     fn render_cursor(&self, canvas: &mut Canvas<'_>) {
-        canvas.shade(|x, y| libwoven::screen_pixel(x, y).unwrap_or(0));
         let (left, top) = self.pointer;
         for (row, line) in CURSOR.iter().enumerate() {
             for (column, cell) in line.iter().enumerate() {
@@ -776,6 +1531,12 @@ impl Desktop {
         if area.is_empty() {
             return;
         }
+        // Locked, nothing but the lock screen is drawn: no window, no
+        // notification, no pointer.
+        if self.locked {
+            painter.draw(area, |canvas| self.render_lock(canvas));
+            return;
+        }
         painter.draw(area, |canvas| self.render_desktop(canvas));
 
         for (index, icon) in self.tray.iter().enumerate() {
@@ -791,35 +1552,74 @@ impl Desktop {
         }
 
         let focused = self.focused();
+        let above_taskbar = Area::new(0, 0, self.width, self.taskbar_top());
         for &slot in &self.stack[..self.stacked] {
             let Some(window) = &self.windows[slot] else { continue };
+            let bands = if Some(slot) == focused { FOCUSED_SHADOW } else { UNFOCUSED_SHADOW };
+            let frame = window.frame();
+            // Everything about a fading window, its shadow included, is
+            // composed at its current opacity.
+            let alpha = window.alpha();
+            if alpha == 0 {
+                continue;
+            }
+            for (offset, opacity) in bands {
+                let band = Area::new(frame.x + offset, frame.y + offset, frame.width, frame.height);
+                let part = band.intersect(area).intersect(above_taskbar);
+                let opacity = (u32::from(opacity) * u32::from(alpha) / 255) as u8;
+                if !part.is_empty() && opacity != 0 {
+                    painter.blend(part, SHADOW, opacity);
+                }
+            }
             let title = window.title_area().intersect(area);
             if !title.is_empty() {
                 let active = Some(slot) == focused;
-                painter.draw(title, |canvas| Self::render_title(window, active, canvas));
+                if alpha == u8::MAX {
+                    painter.draw(title, |canvas| Self::render_title(window, active, canvas));
+                } else {
+                    painter.draw_blended(title, alpha, |canvas| Self::render_title(window, active, canvas));
+                }
             }
             let body = window.body().intersect(area);
             if !body.is_empty() {
                 let region = body.relative_to(window.x, window.y);
-                let _ = libwoven::compositor_blit_region_shared(window.token, region, body.x, body.y);
+                let _ = if alpha == u8::MAX {
+                    libwoven::compositor_blit_region_shared(window.token, region, body.x, body.y)
+                } else {
+                    libwoven::compositor_blend_region_shared(window.token, region, body.x, body.y, alpha)
+                };
             }
         }
 
         if let Some(toast) = &self.toast {
             let part = self.toast_area().intersect(area);
             if !part.is_empty() {
-                painter.draw(part, |canvas| self.render_toast(toast, canvas));
+                painter.blend(part, TOAST_FILL, TOAST_OPACITY);
+                painter.overlay(part, |canvas| self.render_toast(toast, canvas));
             }
         }
 
         let panel = self.panel_area().intersect(area);
         if !panel.is_empty() {
-            painter.draw(panel, |canvas| self.render_panel(canvas));
+            painter.blend(panel, PANEL_FILL, PANEL_OPACITY);
+            painter.overlay(panel, |canvas| self.render_panel(canvas));
+        }
+
+        let qs = self.qs_area().intersect(area);
+        if !qs.is_empty() {
+            painter.blend(qs, PANEL_FILL, PANEL_OPACITY);
+            painter.overlay(qs, |canvas| self.render_qs(canvas));
+        }
+
+        let center = self.center_area().intersect(area);
+        if !center.is_empty() {
+            painter.blend(center, PANEL_FILL, PANEL_OPACITY);
+            painter.overlay(center, |canvas| self.render_center(canvas));
         }
 
         let cursor = self.cursor_area().intersect(area);
         if !cursor.is_empty() {
-            painter.draw(cursor, |canvas| self.render_cursor(canvas));
+            painter.overlay(cursor, |canvas| self.render_cursor(canvas));
         }
     }
 
@@ -835,9 +1635,9 @@ impl Desktop {
         if self.focused() == Some(slot) {
             return Area::new(0, 0, 0, 0);
         }
-        let previous = self.focused().and_then(|old| self.windows[old]).map(|w| w.frame());
+        let previous = self.focused().and_then(|old| self.windows[old]).map(|w| w.footprint());
         self.raise(slot);
-        let current = self.windows[slot].map(|w| w.frame()).unwrap_or(Area::new(0, 0, 0, 0));
+        let current = self.windows[slot].map(|w| w.footprint()).unwrap_or(Area::new(0, 0, 0, 0));
         current.union(previous.unwrap_or(Area::new(0, 0, 0, 0))).union(self.taskbar())
     }
 
@@ -851,8 +1651,8 @@ impl Desktop {
         let width = i32::from(u16::from_le_bytes([message[12], message[13]]));
         let height = i32::from(u16::from_le_bytes([message[14], message[15]]));
         if libwoven::surface_owner(token) != owner
-            || !(1..=320).contains(&width)
-            || !(1..=240).contains(&height)
+            || !(1..=self.width).contains(&width)
+            || !(1..=self.taskbar_top() - TITLE_HEIGHT).contains(&height)
         {
             return empty;
         }
@@ -867,13 +1667,107 @@ impl Desktop {
         let mut title = [0u8; MAX_TITLE];
         let title_length = (message.len() - 16).min(MAX_TITLE);
         title[..title_length].copy_from_slice(&message[16..16 + title_length]);
-        let window = Window { owner, token, x, y, width, height, title, title_length };
+        let mut fade = Spring::new(0);
+        fade.set_target(i32::from(u8::MAX));
+        let window = Window {
+            owner,
+            token,
+            x,
+            y,
+            width,
+            height,
+            title,
+            title_length,
+            fade,
+            workspace: self.workspace,
+            resizing_until: 0,
+        };
         self.windows[slot] = Some(window);
-        let previous = self.focused().and_then(|old| self.windows[old]).map(|w| w.frame());
+        let previous = self.focused().and_then(|old| self.windows[old]).map(|w| w.footprint());
         self.stack[self.stacked] = slot;
         self.stacked += 1;
         log(&[b"woven-shell: window opened: ", &title[..title_length]]);
-        window.frame().union(previous.unwrap_or(empty)).union(self.taskbar())
+        window
+            .footprint()
+            .union(previous.unwrap_or(empty))
+            .union(self.taskbar())
+            .union(self.retile())
+    }
+
+    /// Where windows may go: the screen above the taskbar.
+    fn work_area(&self) -> Frame {
+        Frame::new(0, 0, self.width, self.taskbar_top())
+    }
+
+    /// Put window `slot` in `frame`, title bar included: move it now, and if
+    /// its client area changes size, ask the owner for a surface of the new
+    /// size. Returns the area to repaint.
+    fn place(&mut self, slot: usize, frame: Frame) -> Area {
+        let Some(window) = self.windows[slot].as_mut() else {
+            return Area::new(0, 0, 0, 0);
+        };
+        let before = window.footprint();
+        let client = frame.client(TITLE_HEIGHT);
+        window.x = client.x;
+        window.y = client.y;
+        if (client.width, client.height) != (window.width, window.height) {
+            let mut request = [0u8; 8];
+            request[..4].copy_from_slice(b"WSIZ");
+            request[4..6].copy_from_slice(&(client.width as u16).to_le_bytes());
+            request[6..].copy_from_slice(&(client.height as u16).to_le_bytes());
+            window.resizing_until = libwoven::ticks() + RESIZE_GRACE;
+            let _ = libwoven::message_send(window.owner, &request);
+        }
+        before.union(window.footprint())
+    }
+
+    /// Lay every window out again, if tiling is on. Returns the area to
+    /// repaint.
+    fn retile(&mut self) -> Area {
+        let mut dirty = Area::new(0, 0, 0, 0);
+        if !self.tiled {
+            return dirty;
+        }
+        let mut slots = [0usize; MAX_WINDOWS];
+        let mut count = 0;
+        for (slot, _) in self.entries() {
+            slots[count] = slot;
+            count += 1;
+        }
+        let (frames, placed) = layout::tile(count, self.work_area());
+        for index in 0..placed {
+            dirty = dirty.union(self.place(slots[index], frames[index]));
+        }
+        dirty
+    }
+
+    /// `WRSZ`: the owner replaced a window's surface with one of a new size.
+    /// Returns the area to repaint.
+    fn resized(&mut self, owner: process::Id, message: &[u8]) -> Area {
+        let empty = Area::new(0, 0, 0, 0);
+        if message.len() != 16 {
+            return empty;
+        }
+        let token = u64::from_le_bytes(message[4..12].try_into().unwrap_or([0; 8]));
+        let width = i32::from(u16::from_le_bytes([message[12], message[13]]));
+        let height = i32::from(u16::from_le_bytes([message[14], message[15]]));
+        let top = self.taskbar_top();
+        if libwoven::surface_owner(token) != owner
+            || !(1..=self.width).contains(&width)
+            || !(1..=top - TITLE_HEIGHT).contains(&height)
+        {
+            return empty;
+        }
+        let Some(window) = self.windows.iter_mut().flatten().find(|window| window.owner == owner) else {
+            return empty;
+        };
+        let before = window.footprint();
+        window.token = token;
+        window.width = width;
+        window.height = height;
+        window.resizing_until = 0;
+        log(&[b"woven-shell: window resized: ", &window.title[..window.title_length]]);
+        before.union(window.footprint())
     }
 
     /// Remove window `slot`. Returns the area to repaint.
@@ -881,20 +1775,36 @@ impl Desktop {
         let Some(window) = self.windows[slot].take() else {
             return Area::new(0, 0, 0, 0);
         };
-        if let Some(position) = self.stack[..self.stacked].iter().position(|&s| s == slot) {
-            self.stack[position..self.stacked].rotate_left(1);
-            self.stacked -= 1;
+        if window.workspace == self.workspace {
+            if let Some(position) = self.stack[..self.stacked].iter().position(|&s| s == slot) {
+                self.stack[position..self.stacked].rotate_left(1);
+                self.stacked -= 1;
+            }
+        } else {
+            let (stack, count) = &mut self.saved[window.workspace];
+            if let Some(position) = stack[..*count].iter().position(|&s| s == slot) {
+                stack[position..*count].rotate_left(1);
+                *count -= 1;
+            }
+        }
+        if self.drag.is_some_and(|(dragged, _, _)| dragged == slot) {
+            self.drag = None;
         }
         log(&[b"woven-shell: window closed: ", &window.title[..window.title_length]]);
-        // The newly focused window's title changes colour too.
-        let next = self.focused().and_then(|top| self.windows[top]).map(|w| w.title_area());
-        window.frame().union(next.unwrap_or(Area::new(0, 0, 0, 0))).union(self.taskbar())
+        // The newly focused window's title and shadow change too.
+        let next = self.focused().and_then(|top| self.windows[top]).map(|w| w.footprint());
+        window
+            .footprint()
+            .union(next.unwrap_or(Area::new(0, 0, 0, 0)))
+            .union(self.taskbar())
+            .union(self.retile())
     }
 
     fn handle_message(&mut self, sender: process::Id, message: &[u8]) -> Area {
         let empty = Area::new(0, 0, 0, 0);
         match message.get(..4) {
             Some(b"WOPN") => self.open(sender, message),
+            Some(b"WRSZ") => self.resized(sender, message),
             Some(b"TRAY") if message.len() == 12 => {
                 let token = u64::from_le_bytes(message[4..12].try_into().unwrap_or([0; 8]));
                 if libwoven::surface_owner(token) != sender {
@@ -910,13 +1820,19 @@ impl Desktop {
             Some(b"NOTE") => {
                 let mut text = [0u8; 32];
                 let length = label(&message[4..], TOAST_CHARS, &mut text);
+                log(&[b"woven-shell: notification: ", &text[..length]]);
+                let remembered = self.remember(sender, &message[4..]);
+                // Do Not Disturb, or the lock screen, keeps the notification
+                // but raises no toast.
+                if self.dnd || self.locked {
+                    return remembered;
+                }
                 self.toast = Some(Toast {
                     text,
                     length,
                     until: libwoven::ticks() + TOAST_TICKS,
                 });
-                log(&[b"woven-shell: notification: ", &text[..length]]);
-                self.toast_area()
+                self.toast_area().union(remembered)
             }
             _ => empty,
         }
@@ -924,6 +1840,21 @@ impl Desktop {
 
     fn handle_input(&mut self, event: InputEvent) -> Area {
         let empty = Area::new(0, 0, 0, 0);
+        // Locked, keys go to the PIN prompt and nowhere else; the pointer
+        // still moves, unseen, so it is where it was left once unlocked.
+        if self.locked {
+            return match event {
+                InputEvent::Key(key) => self.lock_key(key),
+                InputEvent::PointerMove { dx, dy } => {
+                    self.pointer = (
+                        (self.pointer.0 + i32::from(dx)).clamp(0, self.width - 1),
+                        (self.pointer.1 + i32::from(dy)).clamp(0, self.height - 1),
+                    );
+                    empty
+                }
+                _ => empty,
+            };
+        }
         match event {
             InputEvent::PointerMove { dx, dy } => {
                 let before = self.cursor_area();
@@ -932,12 +1863,63 @@ impl Desktop {
                     (self.pointer.1 + i32::from(dy)).clamp(0, self.height - 1),
                 );
                 self.pointer_visible = true;
-                before.union(self.cursor_area())
+                let moved = self.drag_to_pointer();
+                before.union(self.cursor_area()).union(moved)
+            }
+            InputEvent::PointerButton { button: 0, pressed: false } => {
+                // Dropped on the left or right edge: snap to that half.
+                let Some((slot, _, _)) = self.drag.take() else { return empty };
+                let (x, _) = self.pointer;
+                if x <= 0 || x >= self.width - 1 {
+                    let half = layout::half(self.work_area(), x > 0);
+                    log(&[b"woven-shell: window snapped"]);
+                    return self.place(slot, half);
+                }
+                empty
             }
             InputEvent::PointerButton { button: 0, pressed: true } => {
                 let (x, y) = self.pointer;
+                if let Some(index) = (0..WORKSPACES).find(|&index| self.workspace_area(index).contains(x, y)) {
+                    return self.switch_workspace(index);
+                }
                 if self.start_area().contains(x, y) {
                     return self.toggle_launcher();
+                }
+                // The Quick Settings button, and its panel's rows.
+                if self.qs_button().contains(x, y) {
+                    return self.toggle_qs();
+                }
+                if self.qs_open {
+                    let panel = self.qs_area();
+                    if !panel.contains(x, y) {
+                        return self.close_panels();
+                    }
+                    return match (y - panel.y - 1) / PANEL_ROW - 1 {
+                        0 => self.toggle_scale(),
+                        1 => {
+                            self.dnd = !self.dnd;
+                            log(if self.dnd { &[b"woven-shell: do not disturb on"] } else { &[b"woven-shell: do not disturb off"] });
+                            panel
+                        }
+                        2 => self.toggle_tiling(),
+                        3 => self.lock(),
+                        _ => empty,
+                    };
+                }
+                // The clock opens and closes the Notification Center.
+                if self.clock_area().contains(x, y) || (self.unread > 0 && self.badge_area().contains(x, y)) {
+                    return self.toggle_center();
+                }
+                if self.center_open {
+                    let center = self.center_area();
+                    if !center.contains(x, y) {
+                        return self.toggle_center();
+                    }
+                    // Clear, at the right of the title row.
+                    if y < center.y + 1 + PANEL_ROW && x >= center.x + center.width - 40 {
+                        return self.clear_notes();
+                    }
+                    return empty;
                 }
                 if self.launcher_open {
                     // A click on an application launches it; anywhere else
@@ -962,14 +1944,29 @@ impl Desktop {
                 if let Some(slot) = entry {
                     return self.focus(slot);
                 }
-                // Otherwise the topmost window under the pointer.
+                // Otherwise the topmost window under the pointer: its close
+                // control asks the owner to close; anywhere else focuses it,
+                // and its title bar also starts a drag.
                 let hit = self.stack[..self.stacked].iter().rev().copied().find(|&slot| {
                     self.windows[slot].is_some_and(|window| window.frame().contains(x, y))
                 });
-                hit.map_or(empty, |slot| self.focus(slot))
+                let Some(slot) = hit else { return empty };
+                let Some(window) = self.windows[slot] else { return empty };
+                if window.close_area().contains(x, y) {
+                    let _ = libwoven::message_send(window.owner, b"WCLS");
+                    log(&[b"woven-shell: close requested: ", &window.title[..window.title_length]]);
+                    return empty;
+                }
+                if window.title_area().contains(x, y) {
+                    self.drag = Some((slot, x - window.x, y - window.y));
+                }
+                self.focus(slot)
             }
             InputEvent::Key(key) if self.launcher_open => self.launcher_key(key),
             InputEvent::Key(Key::F1) => self.toggle_launcher(),
+            InputEvent::Key(Key::F2) => self.toggle_tiling(),
+            InputEvent::Key(Key::F3) => self.switch_workspace((self.workspace + 1) % WORKSPACES),
+            InputEvent::Key(Key::F4) => self.move_focused_to_next_workspace(),
             InputEvent::Key(Key::Char(character)) if character.is_ascii() => {
                 if let Some(window) = self.focused().and_then(|slot| self.windows[slot]) {
                     let _ = libwoven::message_send(window.owner, &[character as u8]);
@@ -978,6 +1975,20 @@ impl Desktop {
             }
             _ => empty,
         }
+    }
+
+    /// Move the dragged window under the pointer, keeping its frame on screen
+    /// and above the taskbar. Returns the area to repaint.
+    fn drag_to_pointer(&mut self) -> Area {
+        let empty = Area::new(0, 0, 0, 0);
+        let Some((slot, grab_x, grab_y)) = self.drag else { return empty };
+        let Some(window) = self.windows[slot].as_mut() else { return empty };
+        let before = window.footprint();
+        let top = self.height - TASKBAR_HEIGHT;
+        window.x = (self.pointer.0 - grab_x).clamp(0, (self.width - window.width).max(0));
+        window.y = (self.pointer.1 - grab_y).clamp(TITLE_HEIGHT, (top - window.height).max(TITLE_HEIGHT));
+        let after = window.footprint();
+        if after == before { empty } else { before.union(after) }
     }
 
     /// Composite client damage, and drop windows and icons whose surface is
@@ -999,6 +2010,9 @@ impl Desktop {
                     dirty = dirty.union(changed);
                 }
                 Ok(None) => {}
+                // While a resize is outstanding the owner may have released
+                // the old surface before its new one arrives.
+                Err(_) if libwoven::ticks() < window.resizing_until => {}
                 Err(_) => dirty = dirty.union(self.close(slot)),
             }
         }
@@ -1018,6 +2032,23 @@ impl Desktop {
         dirty
     }
 
+    /// Whether any window is still fading.
+    fn animating(&self) -> bool {
+        self.windows.iter().flatten().any(|window| !window.fade.is_settled())
+    }
+
+    /// Advance every animation by `frames`. Returns the area to repaint.
+    fn animate(&mut self, frames: u64) -> Area {
+        let mut dirty = Area::new(0, 0, 0, 0);
+        for window in self.windows.iter_mut().flatten() {
+            if !window.fade.is_settled() {
+                window.fade.step(frames);
+                dirty = dirty.union(window.footprint());
+            }
+        }
+        dirty
+    }
+
     /// Advance the clock and the toast timer, and reap exited
     /// applications. Returns the area to repaint.
     fn tick(&mut self) -> Area {
@@ -1026,7 +2057,8 @@ impl Desktop {
         let time = libwoven::clock().ok();
         if clock_text(time, self.seconds) != clock_text(self.time, self.seconds) {
             self.time = time;
-            dirty = dirty.union(self.clock_area());
+            // The lock screen's clock is in the middle of the screen.
+            dirty = dirty.union(if self.locked { self.screen() } else { self.clock_area() });
         }
         if self.toast.as_ref().is_some_and(|toast| libwoven::ticks() >= toast.until) {
             self.toast = None;
@@ -1036,12 +2068,63 @@ impl Desktop {
     }
 }
 
+/// Read up to [`MAX_ACCOUNTS`] accounts from an accounts file into
+/// `accounts`, which starts empty; malformed lines are skipped.
+fn load_accounts(path: &str, accounts: &mut [Option<libwoven::accounts::Account>; MAX_ACCOUNTS]) {
+    let Ok(descriptor) = libwoven::open(path) else { return };
+    let mut text = [0u8; 1024];
+    let read = libwoven::read(descriptor, &mut text);
+    let _ = libwoven::close(descriptor);
+    let Ok(length) = read else { return };
+    let mut count = 0;
+    for line in text[..length].split(|byte| *byte == b'\n') {
+        if count == MAX_ACCOUNTS {
+            break;
+        }
+        if let Some(account) = libwoven::accounts::Account::parse(line) {
+            accounts[count] = Some(account);
+            count += 1;
+        }
+    }
+}
+
 fn main(args: Args) -> ! {
-    let seconds = match args.get(1) {
-        None => false,
-        Some(b"--seconds") => true,
-        Some(_) => fail(1),
-    };
+    // SAFETY: the only reference to the desktop's state, taken once.
+    let desktop = unsafe { &mut *DESKTOP.0.get() };
+    let mut index = 1;
+    while let Some(argument) = args.get(index) {
+        match argument {
+            b"--seconds" => desktop.seconds = true,
+            b"--pin" => {
+                index += 1;
+                match args.get(index) {
+                    Some(digits)
+                        if (1..=MAX_PIN).contains(&digits.len()) && digits.iter().all(u8::is_ascii_digit) =>
+                    {
+                        let mut stored = [0u8; MAX_PIN];
+                        stored[..digits.len()].copy_from_slice(digits);
+                        desktop.pin = Some((stored, digits.len()));
+                    }
+                    _ => fail(1),
+                }
+            }
+            b"--accounts" => {
+                index += 1;
+                let path = args.get(index).and_then(|path| core::str::from_utf8(path).ok());
+                desktop.accounts = [None; MAX_ACCOUNTS];
+                if let Some(path) = path {
+                    load_accounts(path, &mut desktop.accounts);
+                }
+                // Asked to sign users in but none can be read: refuse to start
+                // rather than open the desktop to anyone.
+                if desktop.accounts.iter().all(Option::is_none) {
+                    fail(9);
+                }
+            }
+            _ => fail(1),
+        }
+        index += 1;
+    }
     // SAFETY: the only reference to the tile buffer, taken once.
     let tile = unsafe { &mut *TILE.0.get() };
 
@@ -1065,28 +2148,14 @@ fn main(args: Args) -> ! {
     let mut painter = Painter { staging, tile };
 
     let (width, height) = (info.width as i32, info.height as i32);
-    let (apps, app_count) = load_catalog();
-    let mut desktop = Desktop {
-        width,
-        height,
-        seconds,
-        time: libwoven::clock().ok(),
-        windows: [None; MAX_WINDOWS],
-        stack: [0; MAX_WINDOWS],
-        stacked: 0,
-        opened: 0,
-        tray: [None; MAX_TRAY],
-        toast: None,
-        pointer: (width / 2, height / 2),
-        pointer_visible: false,
-        apps,
-        app_count,
-        launcher_open: false,
-        query: [0; MAX_QUERY],
-        query_length: 0,
-        selected: 0,
-        children: [None; MAX_CHILDREN],
-    };
+    desktop.width = width;
+    desktop.height = height;
+    desktop.time = libwoven::clock().ok();
+    desktop.scale = info.scale;
+    // With accounts, the desktop starts at the sign-in screen.
+    desktop.locked = desktop.accounts.iter().any(Option::is_some);
+    desktop.pointer = (width / 2, height / 2);
+    desktop.app_count = load_catalog(&mut desktop.apps);
     desktop.repaint(&mut painter, desktop.screen());
     // The first present takes the display from the text terminal.
     if libwoven::compositor_present().is_err() {
@@ -1102,9 +2171,16 @@ fn main(args: Args) -> ! {
     // Large enough for any message: one that did not fit would stay queued
     // and keep the mailbox ready forever.
     let mut message = [0u8; 256];
+    // Whether the clock is running at the animation rate.
+    let mut fast = false;
     loop {
+        // Switch frame rate as animations start and finish.
+        if desktop.animating() != fast {
+            fast = !fast;
+            clock = libwoven::FrameClock::new(if fast { ANIMATION_PERIOD } else { FRAME_PERIOD });
+        }
         let mut dirty = match clock.wait(sources) {
-            Ok(FrameEvent::Frame { .. }) => desktop.tick(),
+            Ok(FrameEvent::Frame { skipped }) => desktop.animate(skipped + 1).union(desktop.tick()),
             Ok(FrameEvent::Ready(_)) => Area::new(0, 0, 0, 0),
             Err(_) if sources & wait::MESSAGE != 0 => {
                 sources &= !wait::MESSAGE;

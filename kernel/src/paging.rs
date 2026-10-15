@@ -166,10 +166,10 @@ impl MmioEntry {
 
 /// An owner-scoped device-register mapping. Raw [`map_mmio`] mappings are
 /// intentionally not represented by this token and are never revoked.
-#[expect(
+#[cfg_attr(not(any(not(feature = "qemu-test"), feature = "stage13-12-test")), expect(
     dead_code,
     reason = "host kernel targets do not instantiate PCI driver lifecycle"
-)]
+))]
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub struct OwnedMmioMapping {
     slot: u16,
@@ -187,10 +187,10 @@ impl OwnedMmioMapping {
     pub const fn physical_address(self) -> u64 {
         self.physical
     }
-    #[expect(
+    #[cfg_attr(not(any(not(feature = "qemu-test"), feature = "stage13-12-test")), expect(
         dead_code,
         reason = "used by PCI driver lifecycle on freestanding target"
-    )]
+    ))]
     pub const fn virtual_address(self) -> u64 {
         self.virtual_address
     }
@@ -1750,10 +1750,10 @@ fn mmio_virtual_address(physical_page: u64, slot: usize) -> Result<u64, MapRange
 /// A page already mapped through the legacy shared API is rejected. This
 /// conservative rule prevents an owner from later unmapping a translation
 /// whose users are not represented by the owner token.
-#[expect(
+#[cfg_attr(not(any(not(feature = "qemu-test"), feature = "stage13-12-test")), expect(
     dead_code,
     reason = "used by PCI driver lifecycle on freestanding target"
-)]
+))]
 pub fn map_mmio_owned(physical: u64, owner: u32) -> Result<OwnedMmioMapping, MapRangeError> {
     if owner == 0 {
         return Err(MapRangeError::InvalidRange);
@@ -1810,10 +1810,10 @@ pub fn map_mmio_owned(physical: u64, owner: u32) -> Result<OwnedMmioMapping, Map
 }
 
 /// Release one owner-scoped device-register mapping after device quiescence.
-#[expect(
+#[cfg_attr(not(any(not(feature = "qemu-test"), feature = "stage13-12-test")), expect(
     dead_code,
     reason = "used by PCI driver lifecycle on freestanding target"
-)]
+))]
 pub fn release_mmio_owned(mapping: OwnedMmioMapping) -> Result<(), MapRangeError> {
     let mut state = PAGING.lock();
     let entry = state
@@ -1850,10 +1850,10 @@ pub fn release_mmio_owned(mapping: OwnedMmioMapping) -> Result<(), MapRangeError
 }
 
 /// Revoke every owner-scoped MMIO page before releasing a PCI function.
-#[expect(
+#[cfg_attr(not(any(not(feature = "qemu-test"), feature = "stage13-12-test")), expect(
     dead_code,
     reason = "used by PCI driver lifecycle on freestanding target"
-)]
+))]
 pub fn revoke_mmio_owner(owner: u32) -> Result<(), MapRangeError> {
     if owner == 0 {
         return Err(MapRangeError::InvalidRange);

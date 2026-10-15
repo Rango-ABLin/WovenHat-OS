@@ -287,6 +287,12 @@ pub mod syscall {
     pub const THREAD_SELF: u64 = 133;
     pub const THREAD_SET_TLS: u64 = 134;
     pub const THREAD_GET_TLS: u64 = 135;
+    pub const GRAPHICS_COMPOSITOR_BLEND_REGION: u64 = 200;
+    pub const GRAPHICS_COMPOSITOR_BLEND_REGION_SHARED: u64 = 201;
+    pub const GRAPHICS_COMPOSITOR_BLIT_KEYED: u64 = 202;
+    pub const AUDIO_INFO: u64 = 203;
+    pub const AUDIO_PLAY: u64 = 204;
+    pub const AUDIO_SET_VOLUME: u64 = 205;
     pub const MESSAGE_SEND: u64 = 11;
     pub const MESSAGE_RECEIVE: u64 = 12;
 
@@ -701,6 +707,38 @@ pub mod syscall {
 
     /// # Safety
     /// Must be called from WovenHat userspace.
+    pub unsafe fn graphics_compositor_blend_region(
+        handle: u64,
+        x: i32,
+        y: i32,
+        opacity: u8,
+        region: u64,
+        shared: bool,
+    ) -> u64 {
+        let number = if shared {
+            GRAPHICS_COMPOSITOR_BLEND_REGION_SHARED
+        } else {
+            GRAPHICS_COMPOSITOR_BLEND_REGION
+        };
+        unsafe {
+            invoke(
+                number,
+                handle,
+                super::pack_blend_destination(x, y, opacity),
+                region,
+            )
+        }
+    }
+
+    /// # Safety
+    /// Must be called from WovenHat userspace.
+    pub unsafe fn graphics_compositor_blit_keyed(handle: u64, x: i32, y: i32, region: u64) -> u64 {
+        let destination = (x as u32 as u64) | ((y as u32 as u64) << 32);
+        unsafe { invoke(GRAPHICS_COMPOSITOR_BLIT_KEYED, handle, destination, region) }
+    }
+
+    /// # Safety
+    /// Must be called from WovenHat userspace.
     pub unsafe fn clock_read() -> u64 {
         unsafe { invoke(CLOCK_READ, 0, 0, 0) }
     }
@@ -896,6 +934,40 @@ impl GraphicsSurface {
         check(result).map(|_| ())
     }
 
+    /// Blend only `region` of this surface onto the compositor with uniform
+    /// `opacity`, its top-left at `(x, y)`. Lease holder only. `x` and `y`
+    /// travel as 24-bit signed values, far beyond any screen.
+    pub fn present_region_blended(
+        &self,
+        region: Region,
+        x: i32,
+        y: i32,
+        opacity: u8,
+    ) -> Result<(), Error> {
+        // SAFETY: integer-only call carrying the surface's own handle.
+        let result = unsafe {
+            syscall::graphics_compositor_blend_region(
+                self.handle,
+                x,
+                y,
+                opacity,
+                region.pack(),
+                false,
+            )
+        };
+        check(result).map(|_| ())
+    }
+
+    /// Blit only `region` of this surface to `(x, y)`, skipping pixels equal
+    /// to [`TRANSPARENT`]: draw an overlay on a surface filled with it, and
+    /// only the overlay lands. Lease holder only.
+    pub fn present_region_keyed(&self, region: Region, x: i32, y: i32) -> Result<(), Error> {
+        // SAFETY: integer-only call carrying the surface's own handle.
+        let result =
+            unsafe { syscall::graphics_compositor_blit_keyed(self.handle, x, y, region.pack()) };
+        check(result).map(|_| ())
+    }
+
     /// Upload a whole canvas to the top-left of this surface.
     pub fn write_canvas(&self, canvas: &Canvas<'_>) -> Result<(), Error> {
         let (Ok(width), Ok(height)) = (u16::try_from(canvas.width), u16::try_from(canvas.height))
@@ -974,6 +1046,28 @@ impl Region {
             | (self.width as u64) << 32
             | (self.height as u64) << 48
     }
+}
+
+/// The region blend's destination word: `x` and `y` as 24-bit two's
+/// complement fields, the opacity in the top byte, the byte between zero.
+pub const fn pack_blend_destination(x: i32, y: i32, opacity: u8) -> u64 {
+    (x as u32 as u64 & 0xff_ffff) | ((y as u32 as u64 & 0xff_ffff) << 24) | ((opacity as u64) << 56)
+}
+
+/// Blend only `region` of another process's shared surface with uniform
+/// `opacity`. Same rules as [`compositor_blit_region_shared`].
+pub fn compositor_blend_region_shared(
+    handle: u64,
+    region: Region,
+    x: i32,
+    y: i32,
+    opacity: u8,
+) -> Result<(), Error> {
+    // SAFETY: integer-only call.
+    let result = unsafe {
+        syscall::graphics_compositor_blend_region(handle, x, y, opacity, region.pack(), true)
+    };
+    check(result).map(|_| ())
 }
 
 /// The process that owns the surface `token` names. A token packs its
@@ -1063,6 +1157,10 @@ pub fn compositor_present() -> Result<u64, Error> {
     let result = unsafe { syscall::graphics_compositor_present() };
     check(result)
 }
+
+/// The colour [`GraphicsSurface::present_region_keyed`] treats as
+/// transparent: magenta, matching the kernel's key.
+pub const TRANSPARENT: u32 = rgb(255, 0, 255);
 
 /// Blend `over` onto `under` with `opacity` (0 keeps `under`, 255 gives
 /// `over`), per channel, rounding to nearest: the same formula the kernel
@@ -1293,6 +1391,156 @@ pub fn compositor_set_scale(scale: u32) -> Result<CompositorInfo, Error> {
         .map(CompositorInfo::unpack)
 }
 
+/// A spring that eases a value toward a target, stepped once per frame:
+/// motion that starts quickly and settles smoothly, without the abrupt stop
+/// of a linear ramp.
+///
+/// The state is fixed-point (16 fractional bits), so it needs no floating
+/// point and every run is identical. Stepping is semi-implicit Euler with
+/// stiffness 0.08 and damping 0.5 per frame, which keeps both roots of the
+/// discrete system real and positive: the value approaches its target
+/// without oscillating or overshooting, and settles within about 30 frames
+/// of a 255-step move.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Spring {
+    position: i64,
+    velocity: i64,
+    target: i64,
+}
+
+impl Spring {
+    const ONE: i64 = 1 << 16;
+    const STIFFNESS: i64 = 5243; // 0.08
+    const DAMPING: i64 = 32768; // 0.5
+    /// Steps taken at most per call, so a long stall cannot loop for long.
+    const MAX_STEPS: u64 = 256;
+
+    /// A spring at rest at `value`.
+    pub const fn new(value: i32) -> Self {
+        let position = value as i64 * Self::ONE;
+        Self {
+            position,
+            velocity: 0,
+            target: position,
+        }
+    }
+
+    /// Start moving toward `target` from wherever the spring is now.
+    pub fn set_target(&mut self, target: i32) {
+        self.target = i64::from(target) * Self::ONE;
+    }
+
+    pub const fn target(&self) -> i32 {
+        (self.target / Self::ONE) as i32
+    }
+
+    /// The current value, rounded to the nearest whole unit.
+    pub const fn value(&self) -> i32 {
+        ((self.position + Self::ONE / 2).div_euclid(Self::ONE)) as i32
+    }
+
+    /// Whether the spring has come to rest on its target.
+    pub const fn is_settled(&self) -> bool {
+        self.position == self.target && self.velocity == 0
+    }
+
+    /// Advance by `frames` frames. Pass a [`FrameEvent::Frame`]'s
+    /// `skipped + 1`, so motion stays on time when frames are dropped. Once
+    /// within half a unit and nearly still, the spring snaps to its target.
+    pub fn step(&mut self, frames: u64) {
+        for _ in 0..frames.min(Self::MAX_STEPS) {
+            if self.is_settled() {
+                return;
+            }
+            let force = Self::STIFFNESS * (self.target - self.position) / Self::ONE
+                - Self::DAMPING * self.velocity / Self::ONE;
+            self.velocity += force;
+            self.position += self.velocity;
+            if (self.target - self.position).abs() < Self::ONE / 2
+                && self.velocity.abs() < Self::ONE / 8
+            {
+                self.position = self.target;
+                self.velocity = 0;
+            }
+        }
+    }
+}
+
+/// Window layout for a tiling window manager: pure geometry, so it can be
+/// tested on the host.
+pub mod layout {
+    /// A rectangle in screen coordinates.
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub struct Frame {
+        pub x: i32,
+        pub y: i32,
+        pub width: i32,
+        pub height: i32,
+    }
+
+    impl Frame {
+        pub const fn new(x: i32, y: i32, width: i32, height: i32) -> Self {
+            Self {
+                x,
+                y,
+                width,
+                height,
+            }
+        }
+
+        /// The client area of a window filling this frame under a title bar
+        /// `title` pixels tall.
+        pub const fn client(self, title: i32) -> Self {
+            Self::new(self.x, self.y + title, self.width, self.height - title)
+        }
+    }
+
+    /// The most windows [`tile`] lays out.
+    pub const MAX_TILES: usize = 8;
+
+    /// Master and stack: the first window takes the left half of `area`, the
+    /// rest share the right half in equal rows, the last taking any
+    /// remainder. One window takes the whole area. Frames cover `area`
+    /// exactly, without overlapping. Returns the frames and how many there
+    /// are (`count`, capped at [`MAX_TILES`]).
+    pub fn tile(count: usize, area: Frame) -> ([Frame; MAX_TILES], usize) {
+        let count = count.min(MAX_TILES);
+        let mut frames = [Frame::new(0, 0, 0, 0); MAX_TILES];
+        match count {
+            0 => {}
+            1 => frames[0] = area,
+            _ => {
+                let master = area.width / 2;
+                frames[0] = Frame::new(area.x, area.y, master, area.height);
+                let stack = (count - 1) as i32;
+                let row = area.height / stack;
+                for index in 0..stack {
+                    let y = area.y + index * row;
+                    let height = if index == stack - 1 {
+                        area.y + area.height - y
+                    } else {
+                        row
+                    };
+                    frames[1 + index as usize] =
+                        Frame::new(area.x + master, y, area.width - master, height);
+                }
+            }
+        }
+        (frames, count)
+    }
+
+    /// The left or right half of `area`, for snapping a window dragged to
+    /// an edge.
+    pub const fn half(area: Frame, right: bool) -> Frame {
+        let left = area.width / 2;
+        if right {
+            Frame::new(area.x + left, area.y, area.width - left, area.height)
+        } else {
+            Frame::new(area.x, area.y, left, area.height)
+        }
+    }
+}
+
 /// What ended a [`FrameClock::wait`].
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum FrameEvent {
@@ -1370,6 +1618,9 @@ pub enum Key {
     Backspace,
     Tab,
     F1,
+    F2,
+    F3,
+    F4,
 }
 
 /// An input event delivered to the focused process.
@@ -1385,6 +1636,35 @@ pub enum InputEvent {
     PointerButton {
         button: u8,
         pressed: bool,
+    },
+    /// Wheel motion; positive is away from the user.
+    Scroll {
+        vertical: i16,
+    },
+    /// An absolute pointer position (tablets): each axis 0..=32767.
+    PointerAbsolute {
+        x: u16,
+        y: u16,
+    },
+    /// A touch contact at 0..=32767; `active` false is its lift.
+    Touch {
+        contact: u8,
+        x: u16,
+        y: u16,
+        active: bool,
+    },
+    /// Pen position 0..=32767 and pressure 0..=1023.
+    Pen {
+        x: u16,
+        y: u16,
+        pressure: u16,
+        touching: bool,
+    },
+    /// A game-controller button (its number; 0 or 1), axis (0x100 + axis;
+    /// -32768..=32767) or hat (0x200; position or -1).
+    GameController {
+        control: u16,
+        value: i16,
     },
 }
 
@@ -1440,6 +1720,9 @@ fn decode_event(result: u64) -> Result<Option<InputEvent>, Error> {
         3 => InputEvent::Key(Key::Backspace),
         4 => InputEvent::Key(Key::Tab),
         5 => InputEvent::Key(Key::F1),
+        8 => InputEvent::Key(Key::F2),
+        14 => InputEvent::Key(Key::F3),
+        15 => InputEvent::Key(Key::F4),
         6 => InputEvent::PointerMove {
             dx: payload as u16 as i16,
             dy: (payload >> 16) as u16 as i16,
@@ -1448,6 +1731,21 @@ fn decode_event(result: u64) -> Result<Option<InputEvent>, Error> {
             button: payload as u8,
             pressed: (payload >> 8) & 1 != 0,
         },
+        9 => InputEvent::Scroll { vertical: payload as u16 as i16 },
+        10 => InputEvent::PointerAbsolute { x: payload as u16, y: (payload >> 16) as u16 },
+        11 => InputEvent::Touch {
+            contact: payload as u8,
+            active: (payload >> 8) & 1 != 0,
+            x: (payload >> 16) as u16,
+            y: (payload >> 32) as u16,
+        },
+        12 => InputEvent::Pen {
+            x: payload as u16,
+            y: (payload >> 16) as u16,
+            pressure: ((payload >> 32) & 0x3ff) as u16,
+            touching: (payload >> 48) & 1 != 0,
+        },
+        13 => InputEvent::GameController { control: payload as u16, value: (payload >> 16) as u16 as i16 },
         _ => return Err(Error::Failed),
     }))
 }
@@ -1543,6 +1841,44 @@ pub fn permission_revoke(handle: u64) -> Result<(), Error> {
 
 /// Store a bounded secret in the caller-owned volatile WovenVault and return a
 /// generation-tagged handle. The input is copied before the syscall returns.
+/// What WovenAudio plays: 48 kHz 16-bit stereo today.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct AudioInfo {
+    pub sample_rate: u32,
+    /// The most PCM bytes one `audio_play` accepts.
+    pub max_bytes: u32,
+    pub playback_streams: u8,
+    pub capture_streams: u8,
+    pub channels: u8,
+    pub bits: u8,
+}
+
+/// The audio output, if the system has one.
+pub fn audio_info() -> Result<AudioInfo, Error> {
+    let mut bytes = [0u8; 12];
+    check(unsafe { syscall::invoke(syscall::AUDIO_INFO, bytes.as_mut_ptr() as u64, 0, 0) })?;
+    Ok(AudioInfo {
+        sample_rate: u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]),
+        max_bytes: u32::from_le_bytes([bytes[4], bytes[5], bytes[6], bytes[7]]),
+        playback_streams: bytes[8],
+        capture_streams: bytes[9],
+        channels: bytes[10],
+        bits: bytes[11],
+    })
+}
+
+/// Play interleaved 16-bit little-endian stereo PCM at the output's sample
+/// rate; returns once it has finished. Needs the AudioPlayback capability.
+pub fn audio_play(pcm: &[u8]) -> Result<usize, Error> {
+    check(unsafe { syscall::invoke(syscall::AUDIO_PLAY, pcm.as_ptr() as u64, pcm.len() as u64, 0) })
+        .map(|played| played as usize)
+}
+
+/// Set the output volume, 0-100 (0 mutes); returns the amplifier gain set.
+pub fn audio_set_volume(percent: u8) -> Result<u8, Error> {
+    check(unsafe { syscall::invoke(syscall::AUDIO_SET_VOLUME, u64::from(percent), 0, 0) }).map(|gain| gain as u8)
+}
+
 pub fn secret_store(secret: &[u8]) -> Result<u64, Error> {
     check(unsafe {
         syscall::invoke(
@@ -1691,6 +2027,101 @@ pub fn open(path: &str) -> Result<u64, Error> {
 pub fn close(descriptor: u64) -> Result<(), Error> {
     // SAFETY: integer-only call.
     check(unsafe { syscall::close(descriptor) }).map(|_| ())
+}
+
+/// Local accounts for the login manager: a name, a random salt and
+/// `SHA-256(salt || PIN)`, one per line of an accounts file:
+/// `name:salt-hex:hash-hex`. No PIN is ever stored.
+pub mod accounts {
+    use sha2::{Digest, Sha256};
+
+    pub const MAX_NAME: usize = 16;
+    pub const MAX_SALT: usize = 32;
+
+    /// One account, as read from its line.
+    #[derive(Clone, Copy, PartialEq, Eq, Debug)]
+    pub struct Account {
+        name: [u8; MAX_NAME],
+        name_length: usize,
+        salt: [u8; MAX_SALT],
+        salt_length: usize,
+        hash: [u8; 32],
+    }
+
+    /// `SHA-256(salt || pin)`.
+    pub fn hash_pin(salt: &[u8], pin: &[u8]) -> [u8; 32] {
+        let mut hasher = Sha256::new();
+        hasher.update(salt);
+        hasher.update(pin);
+        hasher.finalize().into()
+    }
+
+    fn hex_digit(byte: u8) -> Option<u8> {
+        match byte {
+            b'0'..=b'9' => Some(byte - b'0'),
+            b'a'..=b'f' => Some(byte - b'a' + 10),
+            b'A'..=b'F' => Some(byte - b'A' + 10),
+            _ => None,
+        }
+    }
+
+    /// Decode hex into `out`, returning the byte count; `None` for odd
+    /// length, a non-hex digit, or too much input.
+    fn hex(text: &[u8], out: &mut [u8]) -> Option<usize> {
+        if !text.len().is_multiple_of(2) || text.len() / 2 > out.len() {
+            return None;
+        }
+        for (slot, pair) in out.iter_mut().zip(text.as_chunks::<2>().0) {
+            *slot = hex_digit(pair[0])? << 4 | hex_digit(pair[1])?;
+        }
+        Some(text.len() / 2)
+    }
+
+    impl Account {
+        /// Parse `name:salt-hex:hash-hex`. The name is 1-16 printable ASCII
+        /// characters other than `:`; the salt 1-32 bytes; the hash exactly
+        /// 32. Anything else is refused.
+        pub fn parse(line: &[u8]) -> Option<Self> {
+            let line = line.strip_suffix(b"\r").unwrap_or(line);
+            let mut fields = line.split(|byte| *byte == b':');
+            let (name, salt, hash) = (fields.next()?, fields.next()?, fields.next()?);
+            if fields.next().is_some()
+                || name.is_empty()
+                || name.len() > MAX_NAME
+                || !name.iter().all(|byte| (b' '..=b'~').contains(byte))
+            {
+                return None;
+            }
+            let mut account = Self {
+                name: [0; MAX_NAME],
+                name_length: name.len(),
+                salt: [0; MAX_SALT],
+                salt_length: 0,
+                hash: [0; 32],
+            };
+            account.name[..name.len()].copy_from_slice(name);
+            account.salt_length = hex(salt, &mut account.salt).filter(|length| *length > 0)?;
+            if hex(hash, &mut account.hash)? != 32 {
+                return None;
+            }
+            Some(account)
+        }
+
+        pub fn name(&self) -> &[u8] {
+            &self.name[..self.name_length]
+        }
+
+        /// Whether `pin` is this account's PIN. The comparison of the two
+        /// hashes takes the same time wherever they differ.
+        pub fn verify(&self, pin: &[u8]) -> bool {
+            let candidate = hash_pin(&self.salt[..self.salt_length], pin);
+            let mut difference = 0u8;
+            for (a, b) in candidate.iter().zip(&self.hash) {
+                difference |= a ^ b;
+            }
+            difference == 0
+        }
+    }
 }
 
 /// The longest name a directory entry can carry.
@@ -1932,6 +2363,171 @@ mod tests {
                 scale: 4
             }
         );
+    }
+
+    #[test]
+    fn blend_destination_packs_signed_coordinates_and_opacity() {
+        assert_eq!(
+            pack_blend_destination(5, 7, 0x80),
+            5 | (7 << 24) | (0x80 << 56)
+        );
+        // Negative coordinates are 24-bit two's complement; the reserved
+        // byte stays zero.
+        let packed = pack_blend_destination(-1, -2, 255);
+        assert_eq!(packed & 0xff_ffff, 0xff_ffff);
+        assert_eq!((packed >> 24) & 0xff_ffff, 0xff_fffe);
+        assert_eq!((packed >> 48) & 0xff, 0);
+        assert_eq!(packed >> 56, 255);
+    }
+
+    #[test]
+    fn spring_eases_to_its_target_without_overshoot() {
+        for (from, to) in [(0, 255), (255, 0), (-40, 300)] {
+            let mut spring = Spring::new(from);
+            spring.set_target(to);
+            let mut previous = from;
+            let mut frames = 0;
+            let mut intermediate = 0;
+            while !spring.is_settled() {
+                spring.step(1);
+                frames += 1;
+                let value = spring.value();
+                // Monotone toward the target, never past it.
+                if to > from {
+                    assert!(
+                        value >= previous && value <= to,
+                        "{from}->{to} frame {frames}: {value}"
+                    );
+                } else {
+                    assert!(
+                        value <= previous && value >= to,
+                        "{from}->{to} frame {frames}: {value}"
+                    );
+                }
+                if value != from && value != to {
+                    intermediate += 1;
+                }
+                previous = value;
+                assert!(frames < 60, "{from}->{to} settles");
+            }
+            assert_eq!(spring.value(), to);
+            assert!(intermediate >= 10, "{from}->{to} is a motion, not a jump");
+        }
+    }
+
+    #[test]
+    fn spring_steps_compose_and_are_deterministic() {
+        let mut one_by_one = Spring::new(0);
+        let mut batched = Spring::new(0);
+        one_by_one.set_target(255);
+        batched.set_target(255);
+        for _ in 0..7 {
+            one_by_one.step(1);
+        }
+        batched.step(7);
+        assert_eq!(one_by_one, batched, "skipped frames advance like real ones");
+        let mut again = Spring::new(0);
+        again.set_target(255);
+        again.step(7);
+        assert_eq!(again, batched);
+        // A spring at rest stays at rest, and retargeting starts from where
+        // it is.
+        let mut resting = Spring::new(12);
+        resting.step(100);
+        assert!(resting.is_settled() && resting.value() == 12);
+        batched.set_target(0);
+        let before = batched.value();
+        batched.step(1);
+        assert!(batched.value() <= before);
+    }
+
+    #[test]
+    fn tiling_covers_the_area_exactly_without_overlap() {
+        use layout::{Frame, MAX_TILES, tile};
+        let area = Frame::new(0, 0, 640, 376);
+        assert_eq!(tile(0, area).1, 0);
+        assert_eq!(tile(1, area).0[0], area, "one window takes everything");
+        let (two, _) = tile(2, area);
+        assert_eq!(two[0], Frame::new(0, 0, 320, 376), "master on the left");
+        assert_eq!(two[1], Frame::new(320, 0, 320, 376), "stack on the right");
+        for count in 1..=MAX_TILES + 2 {
+            let (frames, placed) = tile(count, Frame::new(3, 5, 641, 377));
+            assert_eq!(placed, count.min(MAX_TILES));
+            let frames = &frames[..placed];
+            let area: i64 = frames
+                .iter()
+                .map(|f| i64::from(f.width) * i64::from(f.height))
+                .sum();
+            assert_eq!(area, 641 * 377, "{count} windows cover the area");
+            for (i, a) in frames.iter().enumerate() {
+                assert!(a.width > 0 && a.height > 0);
+                for b in &frames[i + 1..] {
+                    let overlap = a.x < b.x + b.width
+                        && b.x < a.x + a.width
+                        && a.y < b.y + b.height
+                        && b.y < a.y + a.height;
+                    assert!(!overlap, "{count} windows: {a:?} and {b:?} overlap");
+                }
+            }
+        }
+        assert_eq!(
+            Frame::new(0, 0, 320, 376).client(14),
+            Frame::new(0, 14, 320, 362)
+        );
+    }
+
+    #[test]
+    fn halves_split_the_area() {
+        use layout::{Frame, half};
+        let area = Frame::new(0, 0, 641, 376);
+        assert_eq!(half(area, false), Frame::new(0, 0, 320, 376));
+        assert_eq!(half(area, true), Frame::new(320, 0, 321, 376));
+    }
+
+    #[test]
+    fn pin_hash_is_sha256_of_salt_then_pin() {
+        // FIPS 180-2 test vectors, split across salt and PIN.
+        let abc = accounts::hash_pin(b"a", b"bc");
+        assert_eq!(
+            abc,
+            [
+                0xba, 0x78, 0x16, 0xbf, 0x8f, 0x01, 0xcf, 0xea, 0x41, 0x41, 0x40, 0xde, 0x5d, 0xae, 0x22, 0x23,
+                0xb0, 0x03, 0x61, 0xa3, 0x96, 0x17, 0x7a, 0x9c, 0xb4, 0x10, 0xff, 0x61, 0xf2, 0x00, 0x15, 0xad,
+            ]
+        );
+        let empty = accounts::hash_pin(b"", b"");
+        assert_eq!(empty[..4], [0xe3, 0xb0, 0xc4, 0x42]);
+        assert_eq!(empty[28..], [0x78, 0x52, 0xb8, 0x55]);
+    }
+
+    #[test]
+    fn accounts_parse_and_verify() {
+        let salt = b"\x01\x02\xfe\xff";
+        let hash = accounts::hash_pin(salt, b"2468");
+        let mut line = std::string::String::from("ada:0102feff:");
+        for byte in hash {
+            line.push_str(&std::format!("{byte:02x}"));
+        }
+        let account = accounts::Account::parse(line.as_bytes()).expect("valid line");
+        assert_eq!(account.name(), b"ada");
+        assert!(account.verify(b"2468"));
+        assert!(!account.verify(b"2469") && !account.verify(b"") && !account.verify(b"24680"));
+        // A trailing CR is tolerated; malformed lines are refused.
+        assert!(accounts::Account::parse(std::format!("{line}\r").as_bytes()).is_some());
+        let refused = [
+            "ada:0102feff",                       // no hash
+            ":0102feff:00",                       // no name
+            "a:b:c:d",                            // too many fields
+            "ada::00",                            // empty salt
+            "ada:010:00",                         // odd salt hex
+            "ada:0102feff:zz",                    // not hex
+            "this-name-is-too-long:00:00",        // name over 16
+        ];
+        for bad in refused {
+            assert!(accounts::Account::parse(bad.as_bytes()).is_none(), "{bad}");
+        }
+        let short_hash = std::format!("ada:0102feff:{}", &line[13..line.len() - 2]);
+        assert!(accounts::Account::parse(short_hash.as_bytes()).is_none(), "31-byte hash");
     }
 
     #[test]

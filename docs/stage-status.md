@@ -1,5 +1,225 @@
 # Stage status
 
+## Stage 20.14a — two monitors through virtio-gpu (2026-10-15)
+
+Roadmap Stage 18.9, first part.
+- **Transport.** A modern virtio 1.x PCI transport, `virtio_pci.rs`.
+- **Driver.** A virtio-gpu 2D driver with several scanouts,
+  `virtio_gpu.rs`. It creates, backs, binds, transfers and flushes one
+  resource per head.
+
+**Evidence.**
+- **Gate `[S20.14] two monitors: PASSED`:** two heads show exact kernel
+  patterns, and host captures of both heads match pixel for pixel on
+  1/2/4 CPUs.
+- **Negative controls:** all four failed the gate as intended.
+
+See the [Stage 20.14a audit](audit-stage20-14a-monitors-2026-10-15.md).
+
+**Next: 20.14b.** The compositor will present the desktop across the
+heads, and the shell will use the second monitor.
+
+## Stage 20.13 — workspaces (2026-10-15)
+
+Roadmap Stage 18.8, Multiple Workspaces.
+
+**Shell.** There are four workspaces, each with its own windows and
+stacking order.
+- **The switcher.** Four numbered boxes left of the Quick Settings button
+  show them, with the current workspace highlighted.
+- **Switching.** Clicking a box, or pressing F3, switches workspace. F4
+  moves the focused window to the next workspace and follows it.
+- **Per-workspace behaviour.** New windows open on the current workspace.
+  The taskbar's window entries and tiling cover only the current workspace.
+- **Implementation.**
+  - The shell's stack holds only the current workspace's windows.
+  - Switching saves that stack and restores the target's.
+  - A window that closes, or whose owner exits, on a hidden workspace is
+    removed from that workspace's saved stack.
+
+**Keys.** F3 and F4 are new keys through WovenInput: PS/2 scancodes
+0x3D/0x3E and USB usages 0x3C/0x3D. They reach userspace as input kinds 14
+and 15 and libwoven's `Key::F3`/`Key::F4`. The kernel's own consumers
+ignore them.
+
+**USB F2 fix.** The USB keyboard map, from Stage 13.13, also lacked F2,
+which is added.
+
+**Gate changes.**
+- The Stage 20.1 gate now checks the switcher, each box and digit exactly,
+  and keeps checking the bare taskbar on both sides.
+- The Stage 20.12 gate expects the signed-in name left of the switcher.
+
+Gate `[S20.13] workspaces: PASSED`, driven by real i8042 input and checked
+against the kernel's own rendering:
+- Four workspaces, with the first current, and window A opens on it.
+- F3 moves to workspace 2, and A and its taskbar entry disappear.
+- Window B opens on workspace 2.
+- Clicking box 1 brings A back and hides B.
+- F4 moves A to workspace 2 and follows it, with A on top and both listed.
+- F3 moves to workspace 3, which shows neither window.
+- B is killed while hidden; back on workspace 2, only A remains.
+- Killing the shell returns the display.
+
+B lies inside A's shadowed footprint, so the gate judges "B hidden" by
+B's colour being absent and the taskbar listing one window.
+
+**Validation**, in the first worktree on `stage20-13`:
+- **Lint and host tests:** kernel Clippy for production, every Stage 20
+  feature, `stage13-13-test`, `stage13-16-test` and `stage19-12-test`, plus
+  woven-shell and host Clippy, all with warnings denied, pass; the libwoven
+  tests pass.
+- **Gates:** 20.1–20.13 pass on 1/2/4 CPUs, and 13.13 and 13.6 pass on
+  1/2/4 CPUs.
+
+Negative controls, each on 1 CPU with the source restored byte for byte
+afterwards. Each failed the gate as intended:
+- Taskbar entries not filtered by workspace.
+- Saved stack not restored on switching.
+- F4 doing nothing.
+- Switcher clicks ignored.
+- Windows always opening on workspace 1.
+
+Open:
+- **No transition animation.** Workspace transitions are not animated yet.
+- **No overview.** There is no workspace overview.
+- **Fixed count.** There are always four workspaces.
+
+## Stage 13.16 — tablets, pens, touch and game controllers (2026-10-14)
+
+HID devices that describe their own reports now work.
+- **Parser and decoder.** A pure report-descriptor parser and decoder
+  (`kernel/src/hid.rs`) covers pointers, tablets, pens, touch screens and
+  game controllers.
+- **xHCI.** It fetches and parses each such device's descriptor.
+- **Userspace.** Scroll, absolute-pointer, touch, pen and game-controller
+  events reach userspace as input kinds 9–13.
+
+**Evidence.**
+- **Host tests:** pass against real descriptors for a tablet, a game pad,
+  a pen and a touch screen. They caught a lost-axis bug.
+- **Gate `[S13.16] report-protocol HID input: PASSED`:** QEMU's USB tablet
+  delivers exact absolute positions, a click and wheel steps on 1/2/4
+  CPUs.
+- **Negative controls:** all four failed the gate as intended, one after a
+  harness gap was closed.
+- **Regression:** 13.5, 13.6, 13.7, 13.13 and 19.12 pass on 1/2/4 CPUs.
+
+See the [Stage 13.16 audit](audit-stage13-16-hid-reports-2026-10-14.md).
+
+**Open.** Multi-application devices, a virtio-input driver, and physical
+qualification of digitizers and controllers.
+
+## Stage 13.15 — WovenAudio playback for userspace (2026-10-14)
+
+Applications can now play sound.
+- **New capability.** `AudioPlayback` (24), which the permission broker
+  can grant as `Permission::Audio`.
+- **Syscalls.** 203 `AudioInfo`, 204 `AudioPlay` and 205
+  `AudioSetVolume`, with libwoven wrappers.
+- **Interrupt-driven HDA output.** The player sleeps until the stream's
+  completion interrupt wakes it.
+- **Ledger.** Every play attempt is recorded in the security ledger.
+
+**Evidence.**
+- **Gate `[S13.15] WovenAudio playback: PASSED`:** passes on 1/2/4 CPUs.
+  QEMU's recording of the output holds the exact square wave the Ring-3
+  client played, and a client without the capability is refused.
+- **Negative controls:** all five failed the gate as intended.
+- **Regression:** 13.8, 15.3, 15.4 and 15.8 pass on 1/2/4 CPUs.
+
+See the [Stage 13.15 audit](audit-stage13-15-audio-2026-10-14.md).
+
+**Open.** Streaming and mixing, other sample formats, recording through
+`Microphone`, and physical codecs.
+
+## Stage 13.14 — storage on NVMe and AHCI (2026-10-14)
+
+A machine with no ATA disk now mounts its NVMe or AHCI disk at `/mnt`.
+- `block_io` routes all primary storage I/O, the FAT32 mount, persistence,
+  journals and swap to a selectable root device.
+- A normal boot selects the first ready `nvme0` or `ahci0` after
+  bring-up.
+- ATA stays the default, so existing configurations are unchanged.
+
+**Evidence.**
+- **Gate `[S13.14] NVMe/AHCI storage: PASSED`:** passes for NVMe and for
+  AHCI on 1/2/4 CPUs. A persisted file survives a remount and is found in
+  the disk image on the host.
+- **Production:** a production boot mounts the NVMe volume and reaches
+  the shell, on 1/2/4 CPUs.
+- **Negative controls:** all four failed the gate as intended.
+- **Regression:** the ATA storage regression, the WovenFS device gate, and
+  1-5, 10.8, 12.1, 13.3 and 13.4 pass on 1/2/4 CPUs.
+
+See the [Stage 13.14 audit](audit-stage13-14-storage-2026-10-14.md).
+
+**Open.** WovenFS on NVMe or AHCI, multiple volumes, interrupt-driven
+NVMe and AHCI I/O, and physical-device qualification.
+
+## Stage 13.13 — USB keyboards and mice into WovenInput (2026-10-14)
+
+USB keyboards and mice now work in every normal boot.
+- The xHCI driver enumerates each connected port, with its own slot per
+  device.
+- It binds an MSI-X or MSI vector through the driver manager.
+- A worker sleeps until that vector fires, drains reports under the
+  controller lock and publishes after releasing it.
+- USB input reaches the same queue as PS/2.
+
+**Two existing bugs fixed.**
+- **MSI-X never delivered on any device.** Activation left Function Mask
+  set.
+- **The USB mouse Y axis was inverted.**
+
+Gate `[S13.13] USB input: PASSED`. Input injected through QEMU's USB
+keyboard and mouse arrives exactly, through device interrupts, with the
+worker sleeping between them.
+- **Runs:** passes on 1/2/4 CPUs.
+- **Negative controls:** all six failed the gate as intended.
+- **Regression:** 13.12 in all modes, and 13.2, 13.5, 13.6, 13.7, 13.9 and
+  13.10, pass on 1/2/4 CPUs.
+
+See the [Stage 13.13 audit](audit-stage13-13-usb-input-2026-10-14.md).
+
+**Open.** Report-protocol HID devices (touchpads; Stage 13.16), USB
+hotplug, a fuller keymap, and physical-device qualification.
+
+## Stage 13.12 — boot-time driver bring-up (2026-10-14)
+
+Until now, every Stage 13 driver ran only inside its own test build. A
+normal boot contained no driver manager, NVMe, AHCI, xHCI or HDA code.
+Every normal boot now runs `drivers::bring_up()`, which:
+- matches each controller through the WovenDriver manager;
+- binds its PCI function and MMIO BARs;
+- initializes the controller at that address;
+- rolls the binding back if initialization fails.
+
+A missing or failing device never stops the boot. Ready drivers appear in
+the device registry as `nvme0`, `ahci0`, `xhci0` and `hda0`.
+
+**Evidence.**
+- **Gate `[S13.12] driver bring-up: PASSED`:** passes in its three
+  machine modes (all devices, AHCI without a disk, no devices) on
+  1/2/4 CPUs.
+- **Normal build:** a kernel built with no test feature binds all four
+  drivers and reaches the shell, on 1/2/4 CPUs.
+- **Negative controls:** four controls each failed the gate as intended,
+  and the gate passed again once the source was restored.
+- **Prior gates:** 13.1–13.10 pass on 1/2/4 CPUs.
+
+See the
+[Stage 13.12 audit](audit-stage13-12-driver-bring-up-2026-10-14.md).
+
+**Stage 13 is not closed by this.** Still to do:
+- mount storage from NVMe or AHCI;
+- deliver USB keyboard and mouse input through an interrupt-driven xHCI
+  worker into WovenInput;
+- expose WovenAudio to userspace;
+- move touchpad, touchscreen, pen and game-controller events out of the
+  Stage 13.7 probe;
+- physical qualification of Wi-Fi and Bluetooth.
+
 ## 2026-10-14 revalidation
 
 The Stage 19 system applications now build outside the kernel, sign into WAPP,
@@ -112,6 +332,635 @@ Clippy, all-targets Clippy, and the complete `wovenhat-os` integration-test
 gate pass. The unsupported `cargo test --workspace --all-targets` command is
 documented as a host-assembler mismatch rather than treated as a production
 failure. See the [host-test audit](audit-host-test-boundary-2026-10-14.md).
+
+## Stage 20.12 — sign-in screen and local accounts (2026-10-14)
+
+Roadmap Stage 18.7, Login Manager.
+
+**Accounts.** `libwoven::accounts` reads an accounts file with one local
+account per line: `name:salt-hex:hash-hex`.
+- The hash is `SHA-256(salt || PIN)`. It uses the same freestanding,
+  software-only `sha2` crate as the kernel's boot measurement.
+- No PIN is stored anywhere.
+- Names are 1–16 printable ASCII characters other than `:`. Salts are
+  1–32 bytes, and hashes exactly 32. Any other line is refused.
+- Hashes are compared in constant time.
+- Host tests check FIPS 180-2 vectors split across salt and PIN, and the
+  parser's refusals.
+
+**Shell.** With `--accounts <file>`, the desktop starts at a sign-in
+screen. The screen shows "Sign in" and the accounts, with the chosen one
+marked.
+- Tab chooses the next account, digits enter its PIN, and Enter signs in.
+  Masking and the three-try lockout work as on the lock screen.
+- Once signed in, the account's name appears on the taskbar, left of the
+  Quick Settings button.
+- The lock screen then asks for that account's PIN, not `--pin`.
+- If `--accounts` is given but no account can be read, the shell refuses
+  to start rather than open the desktop to anyone.
+
+**Fixes found by the first runs.**
+- **The shell overflowed its user stack.** A user stack is 8 KiB
+  (`UserStack::SIZE`). The desktop state was built in `main`'s 5.8 KiB
+  frame, and the catalog loader's 2.3 KiB frame sat on top. Adding the
+  accounts pushed the total past the guard page: a page fault at the
+  shell's first instruction in `load_catalog`. The state now lives in a
+  static (.bss), like the tile buffer, and the loaders fill it in place.
+  `main` is down to 1.5 KiB and `load_catalog` to 1.1 KiB. The kernel's
+  stack size is unchanged.
+- **The gate tried to create `/etc`, which boot already creates.** It now
+  accepts an existing directory.
+- **The Stage 20.1 gate failed after Stage 20.10.** 20.10 put the Quick
+  Settings button inside the strip the 20.1 gate required to be plain
+  taskbar. CI's desktop-userspace job on `stage20-10` failed there. The
+  20.1 gate now checks the strip on both sides of the button, and the
+  button's fill and "Q" exactly. The fix is on `stage20-10` and merged
+  forward.
+
+Gate `[S20.12] sign-in: PASSED`. The kernel writes an accounts file with
+`ada` (PIN 1234) and `lin` (PIN 9876), salted and hashed with the kernel's
+own SHA-256. The shell runs with `FileRead` and real i8042 input. Screens
+are compared row by row with the kernel's rendering.
+- The desktop opens at the sign-in screen, with ada chosen.
+- Tab chooses lin.
+- ada's PIN is refused for lin.
+- lin's PIN signs in, and lin's name is on the taskbar.
+- Locked through Quick Settings, the lock screen refuses ada's PIN and
+  takes lin's.
+- Killing the shell returns the display.
+
+Validation in the second worktree, on `stage20-12`:
+- **Lint and tests:** kernel Clippy for every Stage 20 feature, host
+  `--all-targets` Clippy and woven-shell Clippy, all with warnings denied,
+  pass. libwoven host tests pass (16).
+- **Gates 20.2–20.12:** pass on 1/2/4 CPUs.
+- **Gate 20.1:** failed on 1/2/4 CPUs before the Quick Settings fix
+  above. After the fix, it was rerun on 1/2/4 CPUs; see the commit.
+
+Negative controls, each run on 1 CPU, with the source restored byte for
+byte afterwards and the gate passing again:
+- Any PIN accepted: fails at "ada's PIN is refused for lin".
+- Tab ignored: fails at "Tab chooses lin".
+- Lock forgets the session: fails at "the lock screen refuses ada's PIN
+  and takes lin's".
+- No sign-in screen: fails at "the desktop opens at the sign-in screen".
+- Name not shown: fails at "lin's PIN signs in; lin's name is on the
+  taskbar".
+
+Open:
+- **Every process still runs with the same kernel credentials.** Per-user
+  sessions need the kernel to start processes as another user.
+- **Accounts are read from a file given at startup.** There is no account
+  creation, password change, or protected credential store; the file's
+  integrity rests on the filesystem.
+- **A 4-digit PIN behind a salted fast hash protects only against casual
+  access.** An attacker who can read the accounts file can try all 10,000
+  PINs instantly. A slow KDF and longer secrets belong with a real
+  credential store.
+
+## Stage 20.11 — lock screen (2026-10-14)
+
+Roadmap Stage 18.6, Lock Screen.
+
+**Shell.** Quick Settings gains a fourth row, "Lock screen", which locks
+the desktop.
+- **What locking hides.** No window is drawn, no keystroke reaches an
+  application, and a notification is remembered and counted but never
+  shown. The pointer still moves, unseen.
+- **What it shows.** The wallpaper dimmed (160/255), with "Locked", the
+  time, a prompt, and one masked dot per digit typed, all centred.
+- **Unlocking.** The PIN is given with `--pin <digits>`, 1–16 digits.
+  - Attempts are compared in constant time, and typed digits are wiped
+    after each one.
+  - A wrong PIN says "Wrong PIN".
+  - Three wrong PINs in a row lock entry out for 5 s, during which even
+    the right PIN is refused ("Try again shortly").
+  - Without `--pin`, Enter unlocks.
+
+**Why the PIN is not in the secret vault.** The PIN is in the shell's own
+memory, not the kernel's secret vault. The vault needs the `Secrets`
+capability. Codex's security model (Stage 15.3) reserves it for
+applications the permission broker grants it to, and keeps it out of the
+system-service ceiling, and the shell is a system service, because it
+needs the display and input. Widening that ceiling to pass a gate would
+be wrong, so this stage does not. Real accounts and credentials belong
+with the login manager (18.7).
+
+**Gate changes.**
+- The Stage 20.10 gate now expects the fourth row, and passes.
+- In the 20.11 gate, the lockout check first raced the shell. It began
+  its one-second stability check while the typed digits were still
+  showing. It now waits until the shell's input queue is empty and the
+  lockout screen has settled.
+
+Gate `[S20.11] lock screen: PASSED`. The shell runs with `--pin 2468` and
+no more authority than the other desktop gates; real i8042 input. The lock
+screen's rows are compared with the kernel's rendering: the dimmed
+wallpaper and the text in the kernel font.
+- Quick Settings locks the screen, and the window is hidden.
+- `x` while locked reaches no application: A, waiting for `x`, is still
+  running a second later.
+- Two digits show as two dots.
+- A wrong PIN says so and stays locked.
+- 2468 unlocks, the window returns, and A then gets `x` and exits.
+- After locking again, three wrong PINs lock entry out, and 2468 is
+  refused for a full second. After the 5 s lockout, 2468 unlocks.
+- Killing the shell returns the display.
+
+Negative controls, with evidence in the worktree's
+`audit-artifacts/stage20.11-negative-control-*`:
+- With the PIN check bypassed, the gate fails at "a wrong PIN says so and
+  stays locked".
+- With keys passed through while locked, it fails at "a key while locked
+  reaches no application".
+
+Open:
+- **No idle auto-lock.** There is also no lock key beyond Quick Settings.
+- **The PIN is a startup argument held in the shell's memory.** There is
+  no credential store or account model yet; that is 18.7.
+- **Nothing is protected against a process that can already read the
+  shell's memory.**
+
+## Stage 20.10 — Quick Settings (2026-10-14)
+
+Roadmap Stage 18.5, Quick Settings. The roadmap lists Wi-Fi, Bluetooth,
+sound, brightness, power, VPN and security. Most of these have no service
+userspace can act on yet. This stage offers only toggles that act on the
+system today, and the others are not faked.
+
+**Shell.** A "Q" button left of the tray's last slot opens Quick Settings,
+a translucent panel above the taskbar's right end. Like the other panels
+it is drawn as a blended background plus a keyed overlay, and it, the
+launcher and the Notification Center close each other. Its toggles:
+- **Display scale, 2× or 1×.** The compositor surface is reallocated at
+  the new geometry (syscall 117). Every window is kept on screen, and
+  re-tiled if tiling is on. The pointer is clamped, and the whole desktop
+  is repainted.
+- **Do Not Disturb.** Notifications are still remembered and counted by
+  the Notification Center badge, but raise no toast.
+- **Tiling.** The same switch as F2.
+
+hello-gui `--desktop-client` gains a `q` variant, Quiet, which posts a
+notification each time it is sent `p`.
+
+Gate `[S20.10] quick settings: PASSED`. Real i8042 input; each panel state
+is compared with the kernel's own rendering over what lies beneath.
+- The button opens the panel: scale 2×, Do Not Disturb off, tiling off.
+- With Do Not Disturb on, `p` makes Q post a notification. The badge reads
+  1, and the toast area stays clear for a full second.
+- With tiling on, the only window fills the work area under the panel.
+- Scale 1× makes the desktop 1280×800, and the panel follows the new
+  geometry. Scale 2× from the panel at that geometry restores 640×400.
+- The button closes the panel, Q takes its key and exits, and killing the
+  shell returns the display.
+
+Negative controls, with evidence in the worktree's
+`audit-artifacts/stage20.10-negative-control-*`:
+- With Do Not Disturb ignored, the first version of the gate still
+  passed. It checked the toast area once, at the instant the badge
+  appeared. The shell paints the desktop layer, with the badge, before the
+  toast layer within one repaint, so that instant can come before the
+  toast is drawn. The gate now requires the toast area to stay clear for
+  a second, and the control then fails at "a notification under Do Not
+  Disturb is counted but raises no toast".
+- With the scale toggle stuck, it fails at "display scale 1x makes the
+  desktop 1280x800".
+
+Open:
+- Wi-Fi, Bluetooth, sound, brightness, power, VPN and security toggles
+  await services userspace can reach.
+- At 1×, a window cannot be resized to the whole work area. Its owner
+  needs the old and new surfaces at once, and together they exceed the
+  4 MB per-process budget, so the window keeps its size.
+- Settings are not persisted.
+
+## Stage 20.9 — Notification Center (2026-10-14)
+
+Roadmap Stage 18.4, Notification Center.
+
+**Shell.**
+- **History.** Every notification is kept after its toast expires: the
+  last 8, newest first. Each is stored as one row, `source: text`, where
+  the source is the sending application's window title ("app" for a
+  sender without a window), cut to what fits.
+- **Unread badge.** A 10×11 accent box just left of the clock counts the
+  notifications that arrived since the Notification Center was last
+  opened, up to 9.
+- **Panel.** Clicking the clock, or the badge, opens the Notification
+  Center: a translucent panel above the taskbar's right end, with a title
+  row holding "Clear", one row per notification, or "No notifications".
+  - Opening it marks everything read, and the badge goes.
+  - Clear empties the history.
+  - A click outside the panel, or on the clock again, closes it.
+- **One panel at a time.** It and the launcher close each other.
+- **Rendering.** It is drawn like the launcher: a region-blended
+  background, with an overlay copied by the keyed blit.
+
+hello-gui `--desktop-client` gains an `n` variant, Notes, which posts
+three notifications 10 ticks apart.
+
+Gate `[S20.9] notification center: PASSED`. Real i8042 pointer and
+keyboard input, and every pixel compared with the kernel's own rendering
+(the background blended over the wallpaper, the border, title row and text
+in the kernel font):
+- Window N opens and posts "Build done", "Mail: 3 new" and "Battery 80%".
+- The toast shows the latest, and the badge reads 3.
+- A click on the clock opens the center, listing `Notes: Battery 80%`,
+  `Notes: Mail: 3 new` and `Notes: Build done` in that order, and the
+  badge goes.
+- Clear leaves "No notifications", and a click on the clock closes the
+  panel, showing the wallpaper again.
+- N takes its key and exits, and killing the shell returns the display.
+
+Negative controls, with evidence in the worktree's
+`audit-artifacts/stage20.9-negative-control-*`:
+- With notifications not remembered, the gate fails at "clicking the
+  clock opens the center, newest first, and clears the badge".
+- With the badge left set on opening, it fails at the same check.
+
+Open:
+- No per-notification actions: a click on a row does not focus the
+  sender.
+- The history is not persisted across shell restarts.
+- The kernel's own lifecycle notifications (`NotificationPoll`) are not
+  shown.
+
+## Syscall numbering for the desktop (2026-10-14)
+
+Twice, the desktop's compositor syscalls took numbers that work on
+`phase2` took at the same time, and merging conflicted:
+- region blend and keyed blit at 122–124 collided with permissions, the
+  audit ledger and secrets (122–129);
+- the same calls renumbered to 130–132 collided with threads (130–135).
+
+They now live at **200–202**:
+
+| Number | Syscall |
+|---|---|
+| 200 | `GraphicsCompositorBlendRegion` |
+| 201 | `GraphicsCompositorBlendRegionShared` |
+| 202 | `GraphicsCompositorBlitKeyed` |
+
+New desktop and compositor syscalls take numbers from the 200 block, so
+the two lines of work cannot collide. The syscalls the desktop added
+earlier, 116–121, were never contested and keep their numbers.
+
+## Stages 20.4–20.8 — validation after rebasing onto phase2 (2026-10-14)
+
+The Stage 20.4–20.8 commits were rebased onto `phase2` at `c5b13392`,
+which includes the Stage 1–19 hardening (`b4f00fd3`) and the Stage 13.2
+merge. They were then validated as one stack in an isolated worktree.
+- Kernel Clippy is clean across all 77 feature configurations, including
+  `stage13-2-test`, which compiles again.
+- Clippy for woven-shell, hello-gui, libwoven and the host is clean, and
+  the host tests pass.
+- **102 QEMU gates pass across 1, 2 and 4 CPUs**:
+  - every Stage 20.1–20.8 desktop gate;
+  - all Stage 19.x application gates;
+  - the kernel runtime stages back to 1–5;
+  - the legacy-IRQ memory suite;
+  - Stage 6 hotplug on 2 and 4 CPUs.
+- In the rebase, syscalls 122–124 were renumbered to 130–132, and later
+  to 200–202 (see "Syscall numbering for the desktop" above); see Stages
+  20.5 and 20.6.
+
+## Stage 20.8 — tiling: resize protocol, snap to edges, master and stack (2026-10-13)
+
+Roadmap Stage 18.3, Window Experience: intelligent tiling. This completes
+the design's 20.4–20.8 sequence. Workspace transitions are deferred to
+roadmap 18.8.
+
+**Input.** F2 is decoded (scancode 0x3C) and reaches applications.
+- `woven_input::Key::F2` is encoded as input kind 8 and decoded by
+  libwoven.
+- The kernel's own terminal paths ignore it.
+- This is an additive change to the `InputPoll` encoding.
+
+**libwoven `layout`.** Pure geometry, host-tested:
+- `tile(count, area)` places master and stack: the first window takes the
+  left half, and the rest share the right half in equal rows, the last
+  taking the remainder.
+- `half(area, right)` gives the left or right half.
+- `Frame::client` gives the client area under a title bar.
+- The tests show frames cover the area exactly, with no overlap, for 1 to
+  10 windows (capped at 8), and check the halves.
+
+**Resize protocol.** The shell sends the owner `WSIZ` with a client size,
+and the owner answers `WRSZ` with a new surface of that size (token,
+width and height, owner-checked like `WOPN`), then releases the old one.
+- The shell moves the window at once and swaps the surface when the reply
+  arrives.
+- For one second after a request, a vanished surface does not count as an
+  exit: the owner may release the old surface before its reply is
+  processed.
+- hello-gui `--desktop-client` answers `WSIZ`.
+
+**Shell.**
+- Dropping a dragged window on the left or right screen edge snaps it to
+  that half.
+- F2 toggles tiling: master and stack over the screen above the taskbar,
+  in window order, applied again whenever a window opens or closes.
+
+Gate `[S20.8] tiling: PASSED`, driven by real i8042 input:
+- Window A is dragged by its title bar onto the left edge and dropped. It
+  snaps and is resized: its 320×362 client area and its title bar are
+  exact.
+- F2 tiles: A keeps the left half and B takes the right half, resized,
+  with both title bars exact (A focused, B not).
+- F2 turns tiling off. Both applications take their keys and exit, and
+  killing the shell returns the display.
+
+The first run failed at the tiling check because of the gate, not the
+shell. A, focused after its drag, correctly casts its deep shadow across
+the first 8 columns of B beside it, and the gate had expected plain blue
+there. The gate now applies A's shadow bands to B's expected pixels, the
+same stacking the Stage 20.5 gate computes.
+
+Negative controls, with evidence in the worktree's
+`audit-artifacts/stage20.8-negative-control-*`:
+- With F2 ignored, the gate fails at "F2 tiles the windows: master on the
+  left, stack on the right".
+- With snapping disabled, it fails at "dropping A on the left edge snaps
+  it to the left half, resized".
+
+Open:
+- No minimum sizes: windows are never refused a tile size.
+- No resizing by dragging window edges; resizing happens only through
+  snapping and tiling.
+- No keyboard tiling beyond F2. Real modifier keys (Ctrl, Alt, Super) are
+  still missing.
+
+## Stage 20.7 — physics-based animation: windows fade in on a spring (2026-10-13)
+
+Roadmap Stage 18.3, Window Experience: smooth physics-based animation.
+
+**libwoven `Spring`.** The spring eases a value toward a target, stepped
+once per frame.
+- It is fixed-point (16 fractional bits): no floating point, and every run
+  is identical.
+- Stepping is semi-implicit Euler with stiffness 0.08 and damping 0.5 per
+  frame. That keeps both roots of the discrete system real and positive:
+  the value approaches its target monotonically, with no overshoot, and
+  settles within about 30 frames of a 255-step move.
+- `step(skipped + 1)` keeps motion on time when frames are dropped.
+- Host tests cover:
+  - monotone approach with no overshoot, for three moves including
+    negative values, settling within 60 frames, with at least 10
+    intermediate values (a motion, not a jump);
+  - stepping 7 frames at once equals 7 single steps;
+  - determinism;
+  - rest staying at rest, and retargeting starting from the current value.
+- An integer Python model of the same arithmetic agreed before the first
+  build: 28–30 frames, monotone.
+
+**Shell.** A new window fades in: its opacity follows the spring from 0 to
+255.
+- Its title bar is drawn into the staging surface and region-blended at
+  that opacity.
+- Its client area is region-blended with the shared-surface blend (123).
+- Its shadow bands are scaled to `opacity * alpha / 255`.
+- While anything animates, the frame clock runs at 20 ms (2 ticks); at
+  rest, at 250 ms.
+
+Gate `[S20.7] spring animation: PASSED`. The kernel samples one pixel of
+the appearing window as fast as it can.
+- It samples the **physical framebuffer**, which changes only when a fully
+  composed frame is presented. The compositor surface is updated layer by
+  layer, and sampling it could catch a frame half built.
+- For every opacity `a` it computes what that pixel must read: the
+  wallpaper, the window's own shadow band at `48a/255`, then the client
+  colour blended at `a`.
+- Every sample must be one of those values, the opacities they imply must
+  never decrease, at least three intermediate opacities must be seen, and
+  the pixel must end fully opaque.
+- Then A takes its key and exits, and killing the shell returns the
+  display.
+
+The first run sampled 11 distinct frames over 69 ticks, at opacities
+0, 20, 80, 135, 178, 217, 244, 248, 251, 253 and 255: the spring's curve.
+
+Negative controls, with evidence in the worktree's
+`audit-artifacts/stage20.7-negative-control-*`:
+- With windows appearing at full opacity, only opacities 0 and 255 are
+  seen, and the gate fails at "the window passes through at least three
+  intermediate opacities".
+- With the shadow not scaled by the fade, the samples are no longer
+  explained, and it fails at "every sample is the window blended at some
+  opacity, never decreasing".
+
+Open:
+- Only window opening is animated. Closing cannot fade, because the
+  surface is gone when the owner exits. Minimise does not exist yet.
+- The spring constants are fixed.
+
+## Stage 20.6 — translucent overlays over windows (2026-10-13)
+
+Roadmap Stage 18.3, Window Experience: subtle translucency.
+
+**Kernel: keyed blit.** Syscall 202 (first numbered 124, then 132; renumbered on
+rebasing onto the Stage 1–19 hardening), `GraphicsCompositorBlitKeyed`, is the
+region blit of one of the caller's own surfaces, except that source pixels
+equal to `display::TRANSPARENT_KEY` (magenta, `0x00FF00FF`, which no
+WovenHat chrome uses) leave the destination as it was.
+- It uses the same region snapshot and authority as the other region
+  blits.
+- `display::Surface::blit_region_keyed` does the work, with two new host
+  tests: key skipped and everything else copied; without keyed pixels,
+  exactly the region blit, clipping included.
+- libwoven adds `TRANSPARENT` and `GraphicsSurface::present_region_keyed`.
+
+**Shell.**
+- The launcher panel and the toast are translucent, 216/255, over whatever
+  lies beneath, windows and shadows included. Their background is
+  region-blended. Their border, title row, selection, and text are an
+  overlay drawn on the transparent key and copied with a keyed blit.
+- The pointer is now an overlay too. It no longer reads the screen back
+  pixel by pixel through `screen_pixel`, which cost about 70 system calls
+  per pointer repaint.
+
+**Gate changes.** The Stage 20.2 and 20.3 gates now expect the toast's and
+the panel's backgrounds blended over the wallpaper. This is an intended
+change of appearance; both pass.
+
+Gate `[S20.6] translucent overlays: PASSED`. The kernel recomputes each
+pixel: what lies beneath (wallpaper, the focused window's shadow bands, or
+the window), the background blended over it, and the overlay rendered with
+its own font and outline.
+- A's toast is translucent over the wallpaper.
+- A is dragged onto the taskbar's edge. The pointer rests over A's client
+  area: its outline and fill are exact, and its transparent cells show A.
+- F1 opens the empty launcher over A. The panel is translucent over A's
+  client area, A's shadow and the wallpaper, every pixel except the
+  pointer's cells, and the pointer stays above it.
+- The panel closes, A takes its key and exits, and killing the shell
+  returns the display.
+
+Negative controls, with evidence in the worktree's
+`audit-artifacts/stage20.6-negative-control-*`:
+- With overlays copied without the key, the gate fails at "the toast is
+  translucent over the wallpaper", because the key colour lands.
+- With an opaque panel background, it fails at "the launcher panel is
+  translucent over a window and its shadow".
+
+**Physical hardware check.** On 2026-10-13 the Stage 15.2 physical WovenFS
+qualification ran again on the USB flash drive. The drive is identified by
+model `VendorCo ProductCode USB Device`, 8,052,549,120 bytes, and serial
+5474001281346643368; the system NVMe disk was never addressed. The run
+used the Stage 20.5 commit, in an isolated worktree, with the device
+passed raw to the kernel's ATA driver.
+- Formatting, writing, remounting, VFS mount, reading, unlink, and unlink
+  surviving a remount passed on 1, 2 and 4 CPUs, each with exit code 33.
+- Windows then read `WOVENFS1` at LBA 0 with checkpoint sequence 5.
+- Evidence is in the worktree's `audit-artifacts/wovenfs-physical-*`.
+- This shows the storage stack still works on real flash with the desktop
+  stages in place. It is not a native boot of the desktop on physical
+  hardware.
+
+Open:
+- Translucency is uniform per layer. There is no blur behind translucent
+  surfaces.
+- Adaptive surfaces (chrome tinted from the wallpaper) were not done in
+  this stage. They wait for selectable wallpapers, since there is
+  currently one fixed wallpaper.
+
+## Stage 20.5 — depth: window shadows and elevation (2026-10-13)
+
+Roadmap Stage 18.3, Window Experience: dynamic depth.
+
+**Kernel: region blend.** Syscalls 200 and 201 (first numbered 122/123, then 130/131;
+renumbered on rebasing onto the Stage 1–19 hardening, which took 122–129),
+`GraphicsCompositorBlendRegion` and its shared variant, are the region blit
+(120/121) with a uniform opacity in place of the copy. They use the same
+region snapshot, so only the exposed part is copied, and the same authority
+rules.
+- Four values have to fit in three registers. The destination word packs x
+  and y as 24-bit signed fields, ample for a compositor bounded at
+  1920×1200, with the opacity in the top byte.
+- The byte between them is reserved and must be zero; anything else is
+  refused.
+- libwoven adds `GraphicsSurface::present_region_blended`,
+  `compositor_blend_region_shared` and `pack_blend_destination`, with a
+  host test of the packing.
+
+**Shell.**
+- Every window casts a soft shadow: two bands of black blended over what
+  lies beneath, offset down and right, outer band lighter.
+- The focused window sits higher: bands at (8 px, 24/255) and
+  (4 px, 48/255), against (4, 20) and (2, 40) for the others. Focus changes
+  repaint both windows' shadows.
+- Shadows are clipped at the taskbar.
+- Repaint areas follow a window's footprint (its frame plus its deepest
+  shadow), not just its frame, so opening, closing, moving and refocusing
+  leave no stale shadow.
+- Shadow bands are rendered as solid chunks in the staging surface and
+  region-blended into the exposed rectangle.
+
+Gate `[S20.5] window depth: PASSED`. Every shadow pixel checked is
+recomputed by the kernel: the wallpaper, then each window's bands, bottom
+to top, with `display::blend_pixel`.
+- With B focused, B's right and bottom strips carry the deep bands, and
+  A's exposed strips carry the shallow ones.
+- A shadow pixel really differs from the bare wallpaper.
+- Clicking A's title bar swaps the shadows, including where both windows'
+  bands overlap.
+- Dragging A onto the taskbar's edge: its shadow beside it stops at the
+  taskbar, and the accent line and taskbar rows below it are untouched.
+- Both applications exit, taking their windows and shadows with them.
+- Killing the shell returns the display.
+- The first run showed the gate typing to B before the shell had seen A
+  go. A key there goes to the still-focused, exited A, so the gate now
+  waits for A's window to disappear first, as the Stage 20.2 gate does.
+
+Negative controls, with evidence in the worktree's
+`audit-artifacts/stage20.5-negative-control-*`:
+- With the focused window given the shallow shadow, the gate fails at
+  "focused window B casts the deeper shadow".
+- With shadows allowed onto the taskbar, it fails at "shadows stop at the
+  taskbar".
+
+Open:
+- Shadows are rectangular bands, without blur or rounded corners.
+- No dimming of unfocused windows yet.
+- A key typed in the instant between an application exiting and the shell
+  noticing, within one 250 ms frame, goes to the exited application and is
+  lost.
+
+## Stage 20.4 — windows that move and close; budgeted client surfaces (2026-10-13)
+
+Roadmap Stage 18.3, Window Experience, first step: the prerequisite in
+`docs/design-stage18-3-window-experience.md`.
+
+**Surface budgets (kernel).** The 320×240 per-surface cap is gone.
+- A surface may be up to 1920×1200, the compositor's own bound.
+- Pixels are budgeted: one process may hold `OWNER_PIXEL_BUDGET` (1 M
+  pixels, 4 MB) across its surfaces, and all processes together
+  `SYSTEM_PIXEL_BUDGET` (4 M pixels, 16 MB).
+- The existing counts stay: 4 surfaces per process and 16 in total.
+- Going over a process's budget is `OwnerFull`, going over the system's is
+  `SystemFull`, and a destroy returns its budget.
+- The sizes are defaults pending the owner's decision on a desktop
+  session's memory target.
+
+Larger surfaces needed three changes to how the registry holds its lock:
+- **The registry lock disables preemption, not interrupts.** Copying a
+  9 MB surface must not hold interrupts off. Nothing takes the lock from
+  interrupt context. The compositor already nests its preemption lock
+  under the scheduler's interrupt lock on the exit path, so the same rank
+  order holds.
+- **Allocation and freeing happen outside the lock.** A new surface is
+  allocated between a budget check before and a re-check after, so a
+  create that lost a race frees its surface after unlocking. A destroyed
+  surface is freed after unlocking. On the exit path, which runs under the
+  scheduler lock, it is freed in place.
+- **Region blits copy only the region.** The new
+  `user_graphics::snapshot_region` copies just the exposed part of a
+  surface, so a small repaint of a large window stays small. Previously
+  every region blit copied the whole surface.
+
+**Shell.**
+- Windows may be as large as the desktop above the taskbar.
+- A drag on a title bar moves the window, raised and focused. The frame is
+  kept on screen and above the taskbar, and the old and new places are
+  repainted on every motion step.
+- Each title bar has a close control. A click on it sends the owner
+  `WCLS`, without focusing the window. The window goes when the owner
+  releases its surface, so an application can finish first or decline.
+- hello-gui `--desktop-client` honours `WCLS`, and gains a `c` variant
+  with a 400×260 window.
+
+Gate `[S20.4] windows that move and close: PASSED`.
+- The kernel checks the budgets directly:
+  - oversized dimensions are `OutOfRange`;
+  - a 1024×1024 surface fills a process's budget, so a further 1×1 is
+    `OwnerFull`, and is admitted once the large surface is destroyed;
+  - four processes with 1024×1024 each fill the system, so a fifth is
+    `SystemFull`, and is admitted once one process releases.
+- On the desktop, real i8042 input:
+  - window A opens, then a 400×260 window opens on top with its title bar
+    and close control exact;
+  - A is dragged by its title bar by (300, 250). It lands at the computed
+    place, above the wide window, focused, with its title bar and its
+    damage patch exact. Its old place shows wallpaper, and the wide window
+    shows where A left it;
+  - the wide window's close control makes it exit 0, and it disappears;
+  - A, still focused, takes `x` and exits;
+  - killing the shell returns the display.
+- Stage 20.2's title-bar checks were updated to include the close control,
+  an intended change of appearance.
+
+Negative controls, with evidence in
+`audit-artifacts/stage20.4-negative-control-*`:
+- With dragging disabled, the gate fails at "dragging the title bar moves
+  the window and repaints both places".
+- With the per-process budget lifted, it fails at "one process is held to
+  its pixel budget".
+
+Open:
+- No resize: the protocol request is in the design. No minimise or
+  maximise.
+- Pointer events are still not forwarded to applications.
+- The other compositor paths (whole-surface blit, blend) still copy whole
+  surfaces, now under a preemption lock rather than an interrupts-off one.
 
 ## Stage 20.3 — WovenStart application launcher (2026-10-13)
 

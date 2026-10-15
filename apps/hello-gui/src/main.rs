@@ -43,10 +43,11 @@
 //! geometry the kernel reports, and animates a square paced by a
 //! `FrameClock`, checking that no frame came early.
 //!
-//! With `--desktop-client <shell> <a|b>` it is an application on the
+//! With `--desktop-client <shell> <a|b|c>` it is an application on the
 //! WovenShell desktop: it opens a window through the shell's protocol (and,
 //! as `a`, a tray icon and a notification, then redraws part of its window),
-//! and exits once the shell forwards it its key.
+//! and exits once the shell forwards it its key, or asks it to close. `c`
+//! opens a window larger than the old 320×240 surface cap.
 //!
 //! With `--probe <handle>` it runs as an ordinary process and checks that the
 //! kernel refuses it everything it has no authority for: every compositor
@@ -72,6 +73,47 @@ const HEIGHT: u32 = 120;
 
 /// Fail the process with a numeric reason so the gate can tell which step
 /// failed from the exit status.
+/// A quarter second of a 500 Hz square wave: 96-frame periods of +/-0x2000,
+/// 48 kHz 16-bit stereo. In .bss and filled at run time: neither on the
+/// 8 KiB stack nor in the image (the RAM file system holds at most 64 KiB).
+const AUDIO_FRAMES: usize = 12_000;
+
+struct AudioBuffer(core::cell::UnsafeCell<[u8; AUDIO_FRAMES * 4]>);
+
+// SAFETY: hello-gui is single-threaded and audio() takes the only reference.
+unsafe impl Sync for AudioBuffer {}
+
+static AUDIO_PCM: AudioBuffer = AudioBuffer(core::cell::UnsafeCell::new([0; AUDIO_FRAMES * 4]));
+
+fn square_wave(pcm: &mut [u8; AUDIO_FRAMES * 4]) {
+    for (frame, bytes) in pcm.as_chunks_mut::<4>().0.iter_mut().enumerate() {
+        let sample: i16 = if (frame / 48) % 2 == 0 { 0x2000 } else { -0x2000 };
+        let [low, high] = sample.to_le_bytes();
+        *bytes = [low, high, low, high];
+    }
+}
+
+/// Stage 13.15: play the square wave through WovenAudio. Exit 0 once it has
+/// played, 2 with no audio output, 3 if playback was refused or failed, 4 if
+/// the volume could not be set, 5 for an unexpected format.
+fn audio() -> ! {
+    // SAFETY: the only reference to the buffer, taken once.
+    let pcm = unsafe { &mut *AUDIO_PCM.0.get() };
+    square_wave(pcm);
+    let Ok(info) = libwoven::audio_info() else { fail(2) };
+    if info.sample_rate != 48_000 || info.channels != 2 || info.bits != 16 || info.max_bytes < pcm.len() as u32 {
+        fail(5);
+    }
+    match libwoven::audio_play(pcm) {
+        Ok(played) if played == pcm.len() => {}
+        _ => fail(3),
+    }
+    if libwoven::audio_set_volume(80).is_err() {
+        fail(4);
+    }
+    libwoven::exit(0)
+}
+
 fn fail(code: u64) -> ! {
     let _ = libwoven::print("hello-gui: failure at step ");
     let mut digits = [0u8; 20];
@@ -83,6 +125,7 @@ fn fail(code: u64) -> ! {
 
 fn main(args: Args) -> ! {
     match args.get(1) {
+        Some(b"--audio") => audio(),
         Some(b"--probe") => probe(args.get(2)),
         Some(b"--input") => run(Input::Poll),
         Some(b"--wait") => run(Input::Wait),
@@ -846,9 +889,12 @@ fn desktop_client(args: &Args) -> ! {
         match args.get(3) {
             Some(b"a") => (b"Alpha", 120, 80, rgb(200, 60, 60), b'x', true),
             Some(b"b") => (b"Beta", 100, 60, rgb(60, 60, 200), b'y', false),
+            Some(b"c") => (b"Wide", 400, 260, rgb(60, 160, 90), b'z', false),
+            Some(b"n") => (b"Notes", 100, 60, rgb(150, 120, 40), b'n', false),
+            Some(b"q") => (b"Quiet", 100, 60, rgb(90, 170, 170), b'q', false),
             _ => fail(181),
         };
-    let window = match GraphicsSurface::create(u32::from(width), u32::from(height)) {
+    let mut window = match GraphicsSurface::create(u32::from(width), u32::from(height)) {
         Ok(surface) => surface,
         Err(_) => fail(182),
     };
@@ -896,6 +942,20 @@ fn desktop_client(args: &Args) -> ! {
         None
     };
 
+    // Client N posts three notifications, a little apart so the shell sees
+    // them in order.
+    if args.get(3) == Some(b"n") {
+        for note in [&b"NOTEBuild done"[..], b"NOTEMail: 3 new", b"NOTEBattery 80%"] {
+            if libwoven::message_send(shell, note).is_err() {
+                fail(189);
+            }
+            let start = libwoven::ticks();
+            while libwoven::ticks().wrapping_sub(start) < 10 {
+                libwoven::yield_now();
+            }
+        }
+    }
+
     // Exactly our key, from the shell.
     let deadline = libwoven::ticks() + 6000;
     let mut key = [0u8; 8];
@@ -905,6 +965,40 @@ fn desktop_client(args: &Args) -> ! {
             Ok(_) => {}
         }
         if let Ok((length, sender)) = libwoven::message_receive(&mut key) {
+            // A resize request: answer with a new surface of that size,
+            // then release the old one.
+            if sender == shell && length == 8 && &key[..4] == b"WSIZ" {
+                let w = u16::from_le_bytes([key[4], key[5]]);
+                let h = u16::from_le_bytes([key[6], key[7]]);
+                if let Ok(resized) = GraphicsSurface::create(u32::from(w), u32::from(h)) {
+                    let mut reply = [0u8; 16];
+                    reply[..4].copy_from_slice(b"WRSZ");
+                    reply[4..12].copy_from_slice(&resized.handle().to_le_bytes());
+                    reply[12..14].copy_from_slice(&w.to_le_bytes());
+                    reply[14..].copy_from_slice(&h.to_le_bytes());
+                    if resized.fill_rect(0, 0, w, h, color).is_ok()
+                        && resized.share_with(shell).is_ok()
+                        && libwoven::message_send(shell, &reply).is_ok()
+                    {
+                        window = resized;
+                        let _ = libwoven::print("hello-gui desktop client: resized\n");
+                    }
+                }
+                continue;
+            }
+            if sender == shell && &key[..length] == b"WCLS" {
+                let _ = libwoven::print("hello-gui desktop client: closed by the shell\n");
+                drop(icon);
+                drop(window);
+                libwoven::exit(0);
+            }
+            // Client Q posts a notification each time it is sent 'p'.
+            if sender == shell && length == 1 && key[0] == b'p' && args.get(3) == Some(b"q") {
+                if libwoven::message_send(shell, b"NOTEPing").is_err() {
+                    fail(189);
+                }
+                continue;
+            }
             if sender != shell || length != 1 || key[0] != expected {
                 fail(187);
             }

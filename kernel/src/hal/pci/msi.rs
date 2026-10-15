@@ -342,7 +342,7 @@ pub fn stage13_10aa_msi_self_test() -> bool {
 
 /// Allocate and program one owner-bound MSI vector. If configuration-space
 /// programming fails, the vector reservation is rolled back before returning.
-#[expect(dead_code)]
+#[cfg_attr(not(any(not(feature = "qemu-test"), feature = "stage13-12-test")), expect(dead_code))]
 pub fn enable_owned_msi(
     function: topology::FunctionHandle,
     owner: u32,
@@ -389,7 +389,7 @@ pub fn enable_owned_msi(
 /// Disable MSI before releasing its vector. A failed disable deliberately
 /// retains the vector lease so a still-live device can never target a reused
 /// interrupt vector.
-#[expect(dead_code)]
+#[cfg_attr(not(any(not(feature = "qemu-test"), feature = "stage13-12-test")), expect(dead_code))]
 pub fn disable_owned_msi(lease: MsiLease, owner: u32) -> Result<(), MsiLifecycleError> {
     VECTOR_ALLOCATOR.lock().validate(lease.vector, owner)?;
     let (snapshot, device) =

@@ -1,7 +1,7 @@
 use core::sync::atomic::{AtomicBool, AtomicU64, AtomicU8, AtomicUsize, Ordering};
 
 use crate::block::BlockDevice;
-use crate::{ata, block_io, fat32, gpt, partition, swap, vfs};
+use crate::{block_io, fat32, gpt, partition, swap, vfs};
 
 const READ_ONLY_ATTRIBUTE: u8 = 0x01;
 const DIRECTORY_ATTRIBUTE: u8 = 0x10;
@@ -87,7 +87,7 @@ pub enum SpaceError {
     NotFat32,
     Failed,
 }
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum MountStatus {
     NoDevice,
     NotFat32,
@@ -187,8 +187,13 @@ fn unavailable_space_error() -> SpaceError {
         _ => SpaceError::Unmounted,
     }
 }
+/// Mount the FAT32 volume of the selected primary device (ATA unless a
+/// boot selected NVMe or AHCI; see `block_io::select_root`) at /mnt.
 pub fn mount_ata_root() -> MountStatus {
-    let status = ata::with_primary_master(|disk| {
+    let status = block_io::with_root(|disk| {
+        // A sized handle for the generic mount helpers.
+        let mut disk = disk;
+        let disk = &mut disk;
         let direct = mount_device(disk);
         if direct != MountStatus::NotFat32 {
             if matches!(direct, MountStatus::Mounted(_)) {

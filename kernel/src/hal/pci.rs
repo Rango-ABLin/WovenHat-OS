@@ -21,7 +21,7 @@ const MAX_DEVICES: usize = 64;
 const MAX_ECAM_REGIONS: usize = crate::hal::acpi::MAX_MCFG_ALLOCATIONS;
 const MAX_CAPABILITY_STEPS: usize = 48;
 
-#[derive(Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Address {
     pub segment: u16,
     pub bus: u8,
@@ -171,7 +171,7 @@ static ADMISSION_READY: AtomicBool = AtomicBool::new(false);
 /// has a validated bridge-forwarding configuration. Bridge-free systems are
 /// admitted after discovery; a routing failure leaves admission fail-closed.
 #[cfg_attr(
-    not(any(feature = "stage13-1-test", feature = "stage13-2-test")),
+    not(any(not(feature = "qemu-test"), feature = "stage13-12-test", feature = "stage13-1-test", feature = "stage13-2-test")),
     expect(
         dead_code,
         reason = "used by production driver admission and stage feature gates"
@@ -276,6 +276,8 @@ struct PersistentBarAllocation {
     address: Address,
     #[cfg_attr(
         not(any(
+            not(feature = "qemu-test"),
+            feature = "stage13-12-test",
             feature = "qemu-test",
             feature = "stage1-5-test",
             feature = "stage13-1-test",
@@ -405,6 +407,8 @@ pub enum PersistentBarError {
     Capacity,
     #[cfg_attr(
         not(any(
+            not(feature = "qemu-test"),
+            feature = "stage13-12-test",
             feature = "qemu-test",
             feature = "stage1-5-test",
             feature = "stage13-1-test",
@@ -461,6 +465,8 @@ pub enum PersistentBarError {
     Rebalance(RebalanceError),
     #[cfg_attr(
         not(any(
+            not(feature = "qemu-test"),
+            feature = "stage13-12-test",
             feature = "qemu-test",
             feature = "stage1-5-test",
             feature = "stage13-1-test",
@@ -517,6 +523,8 @@ pub enum PersistentBarError {
     Disable(BarProgramError),
     #[cfg_attr(
         not(any(
+            not(feature = "qemu-test"),
+            feature = "stage13-12-test",
             feature = "qemu-test",
             feature = "stage1-5-test",
             feature = "stage13-1-test",
@@ -577,6 +585,8 @@ pub enum PersistentBarError {
 
 #[cfg_attr(
     not(any(
+        not(feature = "qemu-test"),
+        feature = "stage13-12-test",
         feature = "stage13-1-test",
         feature = "stage13-2-test",
         feature = "stage13-3-test",
@@ -622,6 +632,8 @@ fn refresh_published_bars(address: Address) -> bool {
 /// function's BAR set would require a device-specific quiescence protocol.
 #[cfg_attr(
     not(any(
+        not(feature = "qemu-test"),
+        feature = "stage13-12-test",
         feature = "stage13-1-test",
         feature = "stage13-2-test",
         feature = "stage13-3-test",
@@ -1128,7 +1140,7 @@ pub fn rescan_added(
     Ok(count)
 }
 
-#[expect(dead_code)]
+#[cfg_attr(not(any(not(feature = "qemu-test"), feature = "stage13-12-test")), expect(dead_code))]
 pub fn topology_handle(address: Address) -> Option<topology::FunctionHandle> {
     let published = PUBLISHED.lock();
     for slot in 0..topology::MAX_FUNCTIONS {
@@ -1155,7 +1167,7 @@ pub fn topology_handle(address: Address) -> Option<topology::FunctionHandle> {
     None
 }
 
-#[expect(dead_code)]
+#[cfg_attr(not(any(not(feature = "qemu-test"), feature = "stage13-12-test")), expect(dead_code))]
 pub(crate) fn function_device(
     handle: topology::FunctionHandle,
 ) -> Option<(topology::NodeSnapshot, Device)> {
@@ -1176,7 +1188,7 @@ pub(crate) fn function_device(
     Some((snapshot, device))
 }
 
-#[expect(dead_code)]
+#[cfg_attr(not(any(not(feature = "qemu-test"), feature = "stage13-12-test")), expect(dead_code))]
 pub fn claim_function(handle: topology::FunctionHandle, owner: u32) -> Result<(), topology::Error> {
     PUBLISHED.lock().topology.claim(handle, owner)
 }
@@ -1201,7 +1213,7 @@ pub fn topology_owner(handle: topology::FunctionHandle) -> Result<u32, topology:
         .unwrap_or(topology::NO_OWNER))
 }
 
-#[expect(dead_code)]
+#[cfg_attr(not(any(not(feature = "qemu-test"), feature = "stage13-12-test")), expect(dead_code))]
 pub fn release_function(
     handle: topology::FunctionHandle,
     owner: u32,
@@ -1209,7 +1221,7 @@ pub fn release_function(
     PUBLISHED.lock().topology.release(handle, owner)
 }
 
-#[expect(dead_code)]
+#[cfg_attr(not(any(not(feature = "qemu-test"), feature = "stage13-12-test")), expect(dead_code))]
 pub fn lease_bar(
     handle: topology::FunctionHandle,
     owner: u32,
@@ -1255,12 +1267,12 @@ pub fn lease_bar(
         .lease_mmio(handle, owner, bar_index, bar.address, probe.size)
 }
 
-#[expect(dead_code)]
+#[cfg_attr(not(any(not(feature = "qemu-test"), feature = "stage13-12-test")), expect(dead_code))]
 pub fn validate_bar_lease(lease: topology::MmioLease, owner: u32) -> bool {
     PUBLISHED.lock().topology.validate_mmio(lease, owner)
 }
 
-#[expect(dead_code)]
+#[cfg_attr(not(any(not(feature = "qemu-test"), feature = "stage13-12-test")), expect(dead_code))]
 pub fn release_bar_lease(lease: topology::MmioLease, owner: u32) -> Result<(), topology::Error> {
     PUBLISHED.lock().topology.release_mmio(lease, owner)
 }
@@ -1471,6 +1483,8 @@ pub fn enable_io_bus_master(bus: u8, device: u8, function: u8) {
 /// Enable MMIO decoding and DMA bus mastering for a PCI/PCIe function.
 /// Returns false if the configuration transaction cannot be completed.
 #[cfg(any(
+    not(feature = "qemu-test"),
+    feature = "stage13-12-test",
     feature = "stage13-3-test",
     feature = "stage13-4-test",
     feature = "stage13-5-test",
@@ -1478,7 +1492,8 @@ pub fn enable_io_bus_master(bus: u8, device: u8, function: u8) {
     feature = "stage13-7-test",
     feature = "stage13-8-test",
     feature = "stage13-9-test",
-    feature = "stage13-10-test"
+    feature = "stage13-10-test",
+    feature = "stage20-14-test"
 ))]
 pub fn enable_memory_bus_master(address: Address) -> bool {
     let _guard = CONFIG_LOCK.lock();
@@ -1493,6 +1508,8 @@ pub fn enable_memory_bus_master(address: Address) -> bool {
 /// device.  This is deliberately narrow: callers must own the function and
 /// must have quiesced all DMA before restoring bus mastering.
 #[cfg(any(
+    not(feature = "qemu-test"),
+    feature = "stage13-12-test",
     feature = "stage13-3-test",
     feature = "stage13-4-test",
     feature = "stage13-5-test",
@@ -2143,10 +2160,10 @@ pub enum RebalanceError {
     RollbackFailed,
 }
 
-#[expect(
+#[cfg_attr(not(any(not(feature = "qemu-test"), feature = "stage13-12-test")), expect(
     dead_code,
     reason = "Stage 13.2 firmware BAR rebalance is an explicit recovery/admission path, not unconditional normal bind"
-)]
+))]
 pub fn rebalance_bars_from_firmware(
     address: Address,
     header_type: u8,
@@ -2186,7 +2203,7 @@ pub fn rebalance_bars_from_firmware(
 /// allocation remains authoritative so its address cannot be reused while the
 /// device may still decode it.
 #[cfg_attr(
-    not(feature = "stage13-2-test"),
+    not(any(not(feature = "qemu-test"), feature = "stage13-12-test", feature = "stage13-2-test")),
     expect(
         dead_code,
         reason = "explicit hot-remove/admission teardown API is dormant until live BAR admission is wired"
@@ -2296,7 +2313,7 @@ pub fn release_bars_from_firmware(address: Address) -> Result<(), PersistentBarE
     Ok(())
 }
 
-#[expect(dead_code)]
+#[cfg_attr(not(any(not(feature = "qemu-test"), feature = "stage13-12-test")), expect(dead_code))]
 pub fn rebalance_bars(
     address: Address,
     header_type: u8,
