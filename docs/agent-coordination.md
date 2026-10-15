@@ -107,8 +107,14 @@ as `3f1b5e3`. Host check/Clippy/tests, freestanding Stage 11.2 Clippy, the
 validated package has UEFI image SHA-256
 `a1e565aae98ccbc59be4dfee49128701a7b55e8fa81166a4d64da2caf79687c6`.
 
-The current follow-up fixes process exit with unjoined scheduler-backed
-threads: address-space destruction is deferred until parent reaping, and the
-termination-request path distinguishes thread cancellation from process
-signals. The final 1/2/4-CPU Stage 11.2 gate and host tests pass; this work is
-ready for its separate commit and release-chain rerun.
+The process-exit follow-up is committed as `1577a59`: unjoined scheduler-backed
+threads are retired safely, address-space destruction is deferred until parent
+reaping, and the termination-request path distinguishes thread cancellation
+from process signals. Its final 1/2/4-CPU gate, host tests, and full release
+chain pass.
+
+Claude’s Stage 20.14b multi-monitor work is synchronized into the shared branch
+at merge commit `f8f847ca`. The synchronized branch is clean and matches
+`origin/phase2/userspace-platform`. The current validated package is `0.8.0`
+with UEFI image SHA-256
+`6195a4721219a80b4e7775531a3657c7ce7e50a78648da53ca0b31b53ae03544`.
