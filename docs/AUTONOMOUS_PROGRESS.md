@@ -4,6 +4,56 @@ Each entry is one bounded checkpoint. Entries record exactly what was run.
 Nothing here claims production readiness; completion requires independent
 human review.
 
+## 2026-10-15 — WovenFS: PowerShell QEMU harness; Stage 15.1/15.2 rerun
+
+Branch: `auto/wovenhat-development` (base `4e9e236`). The working tree was
+clean at the start, so there was no unfinished work to resume. This takes the
+first open item from the previous entry: every WovenFS checkpoint so far
+lacked QEMU evidence because this host has no Python interpreter.
+
+### Change
+
+- New `scripts/test-wovenfs-qemu.ps1 -Stage 15.1|15.2 [-Cpus 1|2|4]`. It is a
+  port of `scripts/test-stage10-runtime.py --stage 15.1` (`q35`, boot disk
+  only) and `scripts/test-wovenfs-device.py` (`pc`, blank scratch image as
+  ATA primary master), with the same QEMU arguments. Pass rule: exit 33,
+  stage marker, `[SMP] online=N expected=N`, and no `FAILED`/`TIMEOUT` stage
+  line or panic. That is the runtime harness's rule; it is stricter than the
+  device script's, which checked only exit code and marker. Raw physical
+  drives are not supported here; `test-wovenfs-physical.ps1` (identity
+  gated) still covers that. Reuses `.cargo-build`/`target`. Evidence
+  (`serial.log`, `qemu.log`, `qemu.err`, `command.txt`, `result.txt`, scratch
+  image) is kept under `audit-artifacts/` on pass and on failure. On timeout
+  it kills only the QEMU process it started.
+- `docs/stage-status.md`: Stage 15 revalidation note.
+- No kernel or test source changed.
+
+### Results (run on this host, 2026-10-15, QEMU 11.1.0, TCG)
+
+| Command | Result |
+|---|---|
+| `test-wovenfs-qemu.ps1 -Stage 15.1 -Cpus 1` | PASS, exit 33 (`wovenfs-stage15.1-1cpu-20261015-180415-952`) |
+| same, `-Cpus 2` | PASS, exit 33 (`…-2cpu-20261015-180607-949`) |
+| same, `-Cpus 4` | PASS, exit 33 (`…-4cpu-20261015-180725-769`) |
+| `test-wovenfs-qemu.ps1 -Stage 15.2 -Cpus 1` | PASS, exit 33, all 16 `[S15.2]` sub-checks PASS (`wovenfs-stage15.2-1cpu-20261015-180824-618`) |
+| same, `-Cpus 2` | PASS, exit 33 (`…-2cpu-20261015-181013-975`) |
+| same, `-Cpus 4` | PASS, exit 33 (`…-4cpu-20261015-181134-184`) |
+| Negative control: `-Stage 15.2 -Cpus 1 -TimeoutSeconds 3` | FAILS as expected (script exit 1): timeout, both markers missing, `QEMU exit -1` (`…-1cpu-20261015-181254-100`). No QEMU process left running. |
+
+Directory names are under `audit-artifacts/` (Git-ignored, kept locally).
+Cargo build, Clippy and host tests were not rerun: nothing they compile
+changed since `4e9e236`, whose entry below records them passing.
+
+### Open / next
+
+- The Python originals were not run (no interpreter), so the two harnesses'
+  agreement is by code review, not side-by-side runs.
+- Physical USB qualification (`test-wovenfs-physical.ps1`) needs elevation
+  and authorization to erase the device; not rerun.
+- Other Stage 15 gates (15.3–15.9) and earlier stages still go through
+  `test-stage10-runtime.py`; they were not rerun in QEMU here.
+- Cross-inode block aliasing and `unlink` ignoring `links` remain open.
+
 ## 2026-10-15 — WovenFS: commit checksum covers the journal descriptor
 
 Branch: `auto/wovenhat-development` (base `346e4eb`). The working tree was

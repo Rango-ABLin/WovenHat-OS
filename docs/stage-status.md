@@ -1194,6 +1194,12 @@ flat root-file slice: rename, mkdir, directory enumeration, mounted-system
 policy, and native multi-directory semantics remain open. See the [Stage 15
 VFS write-through audit](audit-stage15-wfs-vfs-write-through-2026-10-14.md).
 
+Revalidation 2026-10-15 at `4e9e236` (after the WovenFS hardening series in
+`docs/AUTONOMOUS_PROGRESS.md`): Stage 15.1 and Stage 15.2 (scratch image) both
+passed QEMU on 1/2/4 CPUs with exit 33 through `scripts/test-wovenfs-qemu.ps1`,
+a PowerShell port of the Python harnesses for hosts without Python. Physical
+USB qualification was not rerun.
+
 Crash recovery is proven by fault injection, not actual power loss on a device.
 Physical qualification remains incomplete: the inserted USB flash disk was
 inspected read-only, while the destructive harness requires Administrator
