@@ -6,6 +6,15 @@ you start or finish something.
 
 ## Shared rules
 
+**Coordination confirmed by the user on 2026-10-15.** A second
+handoff overlap occurred: Claude's `run2015b.py` (PID 30304, start 2026-10-15
+17:59:57 local) began during Codex's reserved gate. Codex stopped only its own
+tree rooted at PID 29444 and retained all evidence. Session 4650 is terminal.
+The user has since replied "Yes" to confirmation that Claude agreed to hold
+new acceptance chains. A fresh complete repeat may queue behind the already-
+live PID 30304 and any remaining foreign compiler/test/QEMU processes. Preserve
+that hold until Codex releases the gate; do not terminate foreign processes.
+
 - **`phase2/userspace-platform` is the shared branch.** Each agent merges
   its validated work into it and merges the other's work back. Nobody
   force-pushes or rewrites history there. `master` is merged only when the
@@ -40,6 +49,14 @@ you start or finish something.
   gate evidence, and skips any checkout where cargo or QEMU is running.
 
 ## Checkouts
+
+**Peer correction follow-up:** Claude's `ca07b342` fixes the two recorded
+desktop regressions with a stripped 60,904-byte shell and a full six-row panel
+reference. Its `run2015b.py` completed all fourteen reported cases; fixed-path
+success logs, source snapshots and ELF are preserved beside the original
+failures in `audit-artifacts/claude-session-correction-20261015-1809/`.
+This is reviewed peer evidence, not a merged-tree acceptance or general large-
+file VFS solution. Current Codex session 79248 still owns the acceptance slot.
 
 **Quick Settings inherited failure (Codex read-only):** Stage 20.10's full
 pixel reference still renders four rows/72 pixels; the new shell renders six
@@ -143,15 +160,26 @@ source host regressions, and structural-fixture cleanup. Full build, host tests,
 host/kernel/affected-feature warning-denying Clippy all pass. A new 135-file
 manifest under `audit-artifacts/thread-generation-20261015/` freezes this source
 until its runtime/inherited gates finish. Do not edit the frozen kernel/harness.
-The original Claude chain completed with 102 passing release checks. Codex's
-first runtime attempt was deliberately stopped after a new Claude chain started;
-its empty serial/QEMU logs remain preserved, not accepted. New queued session
-4650 waits for live Claude PID 20780 (start 17:04:46) and remaining foreign
-compiler/test/QEMU processes, then runs Stage 11.2 1/2/4, full Stage 10.7
-preservation and the remaining 10.8–11.5 gates in a unique attempt directory.
+Both completed Claude release sub-chains report 102 passing checks, but the
+second enclosing chain also has retained inherited desktop failures. Codex's
+second runtime attempt observed Stage 11.2 passes on 1/2/4 CPUs, then entered
+full Stage 10.7 preservation. Claude's new `run2015b.py` overlapped that handoff,
+so Codex stopped only its own tree again; session 4650 is terminal (exit 1).
+All logs remain in `runtime-attempt-20261015-175941-447/`; they do not close the
+gate. The user has now confirmed the all-checkout reservation. Preserve the
+original 135-file freeze and repeat the complete gate after PID 30304 exits.
+That runner has now exited. Active Codex session **79248** owns the serialized
+acceptance slot. Its fresh attempt is `runtime-attempt-20261015-180920-929/`;
+Stage 11.2 passed on 1/2/4 CPUs (exit 33), and full Stage 10.7 preservation is
+running. Keep the user-confirmed hold until this complete chain is released.
+Focused passes do not yet accept the correction or authorize its commit.
 Own idle `.cargo-build` was cleared after explicit path/process/reparse checks
-to recover disk space; all audit/gate/release evidence and foreign caches remain
-preserved. The historical packaged image still matches SHA-256 `6195a472…`.
+to recover disk space; at that point foreign caches were untouched. Later,
+the prescribed deep cleanup reclaimed only 13 validated idle compiler caches
+in `C:\WovenHat-OS-wt2` (its `.cargo-build` and twelve per-app targets), after
+absolute-path, reparse and process checks. Sources and audit/gate/release
+evidence remain preserved; that checkout's compiler outputs will rebuild.
+The historical packaged image still matches SHA-256 `6195a472…`.
 
 **Completed loader validation (`454f1ff2`):** build/host/feature Clippy, fifteen
 ELF regressions, and Stage 10.8–11.5 on 1/2/4 CPUs passed. Full Stage 10.7
@@ -186,6 +214,14 @@ is recorded as a source candidate, not executable acceptance evidence, in
 `audit-handle-generation-review-2026-10-15.md`. Reproduce and resolve this
 earlier-stage lifecycle requirement after the current generation gate and
 before advancing compiler TLS. No frozen source was edited for this review.
+
+**Thread status ABI follow-up:** `Ok(exit) => exit as u64` in `ThreadJoin`
+collides with libwoven's error/would-block sentinels for successful statuses
+`-1` and `-2`. The source counterexample and required natural-exit/cancellation
+host + Ring-3 tests are in `audit-stage11-thread-exit-encoding-2026-10-15.md`.
+Resolve after the current generation/earlier IPC gates, before compiler TLS.
+No source was changed or competing test run started for this finding. High-bit
+thread IDs themselves do not collide with the exact sentinels; preserve their ABI.
 Fixture commits `2cfd5f8f` and `44850832` are pushed and included in Claude's
 branch; direct warning-denying generation and fifteen Python harness tests
 pass. Their shared-PIE and TLS-thread runtime acceptance remains open.

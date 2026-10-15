@@ -23,8 +23,10 @@ Rust/LLD executable probe identifies null `DT_DEBUG` rejection and an incorrect
 compiler TLS/TCB layout, including live-state copying when creating threads.
 Main-image compiler TLS is therefore not accepted from the synthetic TLS
 metadata tests. See the shared-library audit for exact evidence and next fixes.
-Thread-generation saturation is also an open Stage 11.2 correction; all three
-retirement paths reproduce stale-handle reuse in the copied-source host tests.
+Thread-generation saturation is also an open Stage 11.2 correction. Permanent
+retirement is integrated and five actual-source host regressions pass; full
+kernel/runtime preservation remains pending. The old stale-handle failures
+through all three retirement paths are retained in the generation audit.
 
 ## Presentation and repaint performance (2026-10-15)
 

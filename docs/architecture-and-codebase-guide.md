@@ -317,6 +317,12 @@ write-through audit.
 
 ## Stage 11.2 scheduler-backed thread ownership (2026-10-14)
 
+The registry now reserves generation `u32::MAX` as a permanent exhaustion
+sentinel: a free record at that value is never allocated again. All three
+release paths retain their existing checked generation advancement under the
+rank-10 registry guard. The integrated correction has five actual-source host
+regressions; runtime preservation is pending in the thread-generation audit.
+
 `TaskControlBlock` carries both the stable process owner and an optional
 generation-safe thread ID. User-thread creation maps a private NX stack and a
 private copy of the process's bounded initial-exec TLS image into the existing

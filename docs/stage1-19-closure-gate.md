@@ -64,7 +64,12 @@ test session.
    before advancing loader work. The source review identifies a 24-bit counter
    wrapping to one in a surviving process-local slot, but executable regression
    evidence is still required. See `audit-handle-generation-review-2026-10-15.md`.
-3. Finish Stage 11 loader interoperability and TLS above the bounded signed
+3. Correct the Stage 11.2 signed exit-result sentinel collision for `-1` and
+   `-2` through both ordinary exit and cancellation/join. The source finding
+   and required host/Ring-3 evidence are in
+   `audit-stage11-thread-exit-encoding-2026-10-15.md`; it is not yet a runtime
+   acceptance result.
+4. Finish Stage 11 loader interoperability and TLS above the bounded signed
    `/lib` graph implementation. Explicitly preserve Claude's pending `6f02202d`
    fixed-`ET_EXEC` placement correction in the replacement graph loader and
    require nonzero-bias/production execution evidence: zero-bias test builds
@@ -76,11 +81,11 @@ test session.
    are unaccepted even though synthetic TLS metadata tests pass.
    See the shared-library audit for the exact
    implemented graph, permission and teardown contract.
-4. Close the native WovenFS mount/write-through policy and recovery evidence
+5. Close the native WovenFS mount/write-through policy and recovery evidence
    on a deliberately selected non-boot device.
-5. Add service-owned capability provisioning and signed update/recovery
+6. Add service-owned capability provisioning and signed update/recovery
    rollback evidence before calling the desktop/application stages complete.
-6. Re-run the inherited 1/2/4-CPU matrix and release chain after each accepted
+7. Re-run the inherited 1/2/4-CPU matrix and release chain after each accepted
    increment; commit each accepted increment separately.
 
 This ledger does not mark any stage complete merely because a bounded gate
