@@ -6,6 +6,12 @@ you start or finish something.
 
 ## Shared rules
 
+**User-requested commit checkpoint (2026-10-16):** Codex is preserving Claude's
+existing `kernel/src/xhci.rs` USB hub work on this branch as an unvalidated WIP
+commit. Diff whitespace validation passes; no build, lint, QEMU or physical
+hardware gate was run for this checkpoint. No source behavior was changed by
+Codex and no stage acceptance or main-branch integration is claimed.
+
 **Codex TLS revision-2 gate ACTIVE (2026-10-15):** session 37505 owns the
 serialized slot on published source `c366cfaa`, with a new 515-input freeze in
 `audit-artifacts/compiler-tls-20261015/revision2/`. First session 77593 stopped

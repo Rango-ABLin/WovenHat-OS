@@ -36,6 +36,22 @@ const TRB_TYPE_COMMAND_COMPLETION: u32 = 33;
 const TRB_TYPE_PORT_STATUS_CHANGE: u32 = 34;
 
 const USB_REQUEST_GET_DESCRIPTOR: u8 = 6;
+const USB_REQUEST_GET_STATUS: u8 = 0;
+const USB_REQUEST_CLEAR_FEATURE: u8 = 1;
+const USB_REQUEST_SET_FEATURE: u8 = 3;
+const USB_DESCRIPTOR_HUB: u8 = 0x29;
+const USB_CLASS_HUB: u8 = 0x09;
+/// Hub port features and status bits (USB 2.0, 11.24.2).
+const HUB_PORT_RESET: u16 = 4;
+const HUB_PORT_POWER: u16 = 8;
+const HUB_C_PORT_CONNECTION: u16 = 16;
+const HUB_C_PORT_RESET: u16 = 20;
+const HUB_PORT_STATUS_CONNECTION: u16 = 1 << 0;
+const HUB_PORT_STATUS_ENABLE: u16 = 1 << 1;
+const HUB_PORT_STATUS_RESET: u16 = 1 << 4;
+const HUB_PORT_STATUS_LOW_SPEED: u16 = 1 << 9;
+const HUB_PORT_STATUS_HIGH_SPEED: u16 = 1 << 10;
+const HUB_PORT_CHANGE_RESET: u16 = 1 << 4;
 const USB_REQUEST_SET_CONFIGURATION: u8 = 9;
 const USB_REQUEST_SET_IDLE: u8 = 10;
 const USB_REQUEST_SET_PROTOCOL: u8 = 11;
@@ -190,6 +206,54 @@ impl Ring {
 
 /// Keyboards and mice the controller delivers into WovenInput.
 const MAX_INPUTS: usize = 4;
+/// Hubs enumerated, and how deep hubs may chain below a root port.
+#[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
+const MAX_HUBS: usize = 4;
+#[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
+const MAX_HUB_DEPTH: u8 = 4;
+
+/// An enumerated USB 2.0 hub: its slot and control pipe, kept while its
+/// downstream devices are attached and after, so its contexts stay valid.
+#[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
+struct HubDevice {
+    slot_id: u8,
+    speed: u8,
+    route: u32,
+    tt: (u8, u8),
+    ep0_ring: Option<Ring>,
+    output_context: Option<DmaPage>,
+}
+
+/// The protocol of a hub interface in a configuration descriptor (0 a
+/// full-speed hub, 1 single-TT, 2 multi-TT), if it has one.
+#[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
+fn hub_interface(config: &[u8]) -> Option<u8> {
+    let mut offset = 0;
+    while offset + 2 <= config.len() {
+        let length = usize::from(config[offset]);
+        if length < 2 || offset + length > config.len() {
+            return None;
+        }
+        if config[offset + 1] == 4 && length >= 9 && config[offset + 5] == USB_CLASS_HUB {
+            return Some(config[offset + 7]);
+        }
+        offset += length;
+    }
+    None
+}
+
+/// Wait for `ticks` timer edges (10 ms each), or a bounded spin if the
+/// timer is not running.
+#[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
+fn hold_ticks(ticks: u64) {
+    let start = crate::timer::ticks();
+    for _ in 0..POLL_LIMIT * 4 {
+        if crate::timer::ticks().wrapping_sub(start) >= ticks {
+            return;
+        }
+        core::hint::spin_loop();
+    }
+}
 /// Reports copied out per pass over the event ring.
 const REPORTS_PER_PASS: usize = 32;
 /// The longest report kept; longer ones are truncated.
@@ -323,6 +387,16 @@ pub struct XhciController {
     bt_acl_out_buffer: Option<DmaPage>,
     #[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
     inputs: [Option<InputDevice>; MAX_INPUTS],
+    /// The device being addressed, when it is not directly on a root port:
+    /// its speed (xHCI speed ID), route string, and the transaction
+    /// translator a low- or full-speed device behind a high-speed hub needs
+    /// (hub slot, hub port). All zero for a root-port device.
+    dev_speed: u8,
+    dev_route: u32,
+    dev_tt: (u8, u8),
+    /// Hubs found at enumeration; kept so their contexts stay valid.
+    #[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
+    hubs: [Option<HubDevice>; MAX_HUBS],
     /// The USB disk (Stage 13.18).
     #[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
     storage: Option<StorageDevice>,
@@ -431,6 +505,11 @@ impl XhciController {
             bt_acl_out_buffer: None,
             #[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
             inputs: [const { None }; MAX_INPUTS],
+            dev_speed: 0,
+            dev_route: 0,
+            dev_tt: (0, 0),
+            #[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
+            hubs: [const { None }; MAX_HUBS],
             #[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
             storage: None,
             #[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
@@ -462,6 +541,12 @@ impl XhciController {
         Ok(((mmio_read32(portsc)? >> 10) & 0x0f) as u8)
     }
 
+    /// The speed of the device being addressed: behind a hub, the speed
+    /// its hub port reported; otherwise its root port's.
+    fn device_speed(&self) -> Result<u8, InitError> {
+        if self.dev_speed != 0 { Ok(self.dev_speed) } else { self.port_speed() }
+    }
+
     fn enable_slot(&mut self) -> Result<u8, InitError> {
         let command_ptr = self.command_ring.push(Trb {
             parameter: 0,
@@ -478,7 +563,7 @@ impl XhciController {
     }
 
     fn address_device(&mut self) -> Result<(), InitError> {
-        let speed = self.port_speed()?;
+        let speed = self.device_speed()?;
         let ep0_max_packet: u32 = match speed {
             3 => 64,
             4 | 5 => 512,
@@ -501,12 +586,19 @@ impl XhciController {
         write_u32(
             input.bytes_mut(),
             slot_offset,
-            (u32::from(speed) << 20) | (1 << 27),
+            (self.dev_route & 0xf_ffff) | (u32::from(speed) << 20) | (1 << 27),
         );
         write_u32(
             input.bytes_mut(),
             slot_offset + 4,
             u32::from(self.connected_port) << 16,
+        );
+        // TT hub slot and port, for a low- or full-speed device behind a
+        // high-speed hub.
+        write_u32(
+            input.bytes_mut(),
+            slot_offset + 8,
+            u32::from(self.dev_tt.0) | (u32::from(self.dev_tt.1) << 8),
         );
         let ep0_offset = self.context_size * 2;
         write_u32(
@@ -699,7 +791,7 @@ impl XhciController {
             bluetooth.event_endpoint,
             bluetooth.event_max_packet,
             bluetooth.event_interval,
-            self.port_speed()?,
+            self.device_speed()?,
             event_ring.page.physical,
             USB_ENDPOINT_INTERRUPT,
         )?;
@@ -710,7 +802,7 @@ impl XhciController {
             bluetooth.acl_in_endpoint,
             bluetooth.acl_in_max_packet,
             0,
-            self.port_speed()?,
+            self.device_speed()?,
             acl_in_ring.page.physical,
             USB_ENDPOINT_BULK,
         )?;
@@ -721,7 +813,7 @@ impl XhciController {
             bluetooth.acl_out_endpoint,
             bluetooth.acl_out_max_packet,
             0,
-            self.port_speed()?,
+            self.device_speed()?,
             acl_out_ring.page.physical,
             USB_ENDPOINT_BULK,
         )?;
@@ -884,7 +976,7 @@ impl XhciController {
         write_u32(input.bytes_mut(), slot_offset, slot_dword0);
 
         let endpoint_offset = self.context_size * (usize::from(dci) + 1);
-        let interval = xhci_interval(self.port_speed()?, hid.interval);
+        let interval = xhci_interval(self.device_speed()?, hid.interval);
         write_u32(
             input.bytes_mut(),
             endpoint_offset,
@@ -1165,75 +1257,239 @@ impl XhciController {
                     Err(_) => continue,
                 };
             }
-            // A mass-storage device becomes the USB disk (Stage 13.18);
-            // anything else is tried as an input device.
-            let Ok((descriptor, total_length, configuration)) =
-                self.address_device().and_then(|()| self.read_configuration())
-            else {
-                self.slot_id = 0;
-                continue;
-            };
-            if self.storage.is_none() {
-                if let Some(interface) = crate::usb_msc::parse_interface(&descriptor.bytes()[..total_length], configuration) {
-                    match self.attach_storage(port, interface) {
-                        Ok(device) => {
-                            crate::serial::write_line(format_args!(
-                                "[USB] mass storage on port {}: {} blocks of {} bytes",
-                                port, device.blocks, device.block_size
-                            ));
-                            self.storage = Some(device);
-                        }
-                        Err(error) => {
-                            crate::serial::write_line(format_args!("[USB] mass storage on port {}: {:?}", port, error));
-                        }
-                    }
-                    self.slot_id = 0;
-                    self.hid = None;
-                    continue;
-                }
-            }
-            let summary = self.finish_hid(&descriptor, total_length, configuration);
-            let device = summary.ok().and_then(|summary| {
-                let hid = self.hid?;
-                // Boot keyboards and mice have fixed reports; anything else
-                // must describe its reports in a layout this kernel decodes.
-                let layout = if summary.kind == HidKind::Other {
-                    Some(self.report_layout(hid)?)
-                } else {
-                    None
-                };
-                // Report only on change: the enumeration's short idle period
-                // exists for the Stage 13.6 probe, not for input devices.
-                self.control_no_data(0x21, USB_REQUEST_SET_IDLE, 0, u16::from(hid.interface)).ok()?;
-                let limit = if layout.is_some() { MAX_REPORT } else { 8 };
-                Some(InputDevice {
-                    slot_id: self.slot_id,
-                    port,
-                    kind: summary.kind,
-                    layout,
-                    dci: (hid.endpoint_address & 0x0f).saturating_mul(2).saturating_add(1),
-                    length: cmp::min(usize::from(hid.max_packet), limit),
-                    ring: self.hid_ring.take()?,
-                    buffer: self.hid_buffer.take()?,
-                    pending: 0,
-                    _output_context: self.output_context.take(),
-                    _ep0_ring: self.ep0_ring.take(),
-                })
-            });
-            // The active slot is consumed either way; the next port starts
-            // from a fresh one.
-            self.slot_id = 0;
-            self.hid = None;
-            let Some(mut device) = device else { continue };
-            if arm_input(self.doorbell_base, &mut device).is_err() {
-                continue;
-            }
-            if let Some(slot) = self.inputs.iter_mut().find(|slot| slot.is_none()) {
-                *slot = Some(device);
-                count += 1;
-            }
+            self.dev_speed = 0;
+            self.dev_route = 0;
+            self.dev_tt = (0, 0);
+            self.attach_current(port, 0, &mut count);
         }
         count
+    }
+
+    /// Address the device in the active slot (on a root port, or behind a
+    /// hub per `dev_speed`, `dev_route`, `dev_tt`) and attach it: a hub is
+    /// enumerated in turn, a mass-storage device becomes the USB disk, and
+    /// anything else is tried as an input device. The active slot is
+    /// consumed either way.
+    #[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
+    fn attach_current(&mut self, port: u8, depth: u8, count: &mut usize) {
+        let Ok((descriptor, total_length, configuration)) =
+            self.address_device().and_then(|()| self.read_configuration())
+        else {
+            self.slot_id = 0;
+            return;
+        };
+        let config = &descriptor.bytes()[..total_length];
+        if let Some(protocol) = hub_interface(config) {
+            // A SuperSpeed hub's USB 2.0 half carries keyboards and mice; the
+            // SuperSpeed half is left alone.
+            if self.device_speed().is_ok_and(|speed| speed < 4) && depth < MAX_HUB_DEPTH {
+                match self.enumerate_hub(port, depth, configuration, protocol, count) {
+                    Ok(ports) => crate::serial::write_line(format_args!(
+                        "[USB] hub on port {} (tier {}): {} ports", port, depth + 1, ports
+                    )),
+                    Err(error) => crate::serial::write_line(format_args!("[USB] hub on port {}: {:?}", port, error)),
+                }
+            }
+            self.slot_id = 0;
+            return;
+        }
+        if self.storage.is_none() {
+            if let Some(interface) = crate::usb_msc::parse_interface(config, configuration) {
+                match self.attach_storage(port, interface) {
+                    Ok(device) => {
+                        crate::serial::write_line(format_args!(
+                            "[USB] mass storage on port {}: {} blocks of {} bytes",
+                            port, device.blocks, device.block_size
+                        ));
+                        self.storage = Some(device);
+                    }
+                    Err(error) => {
+                        crate::serial::write_line(format_args!("[USB] mass storage on port {}: {:?}", port, error));
+                    }
+                }
+                self.slot_id = 0;
+                self.hid = None;
+                return;
+            }
+        }
+        if *count == MAX_INPUTS {
+            self.slot_id = 0;
+            return;
+        }
+        let summary = self.finish_hid(&descriptor, total_length, configuration);
+        let device = summary.ok().and_then(|summary| {
+            let hid = self.hid?;
+            // Boot keyboards and mice have fixed reports; anything else
+            // must describe its reports in a layout this kernel decodes.
+            let layout = if summary.kind == HidKind::Other {
+                Some(self.report_layout(hid)?)
+            } else {
+                None
+            };
+            // Report only on change: the enumeration's short idle period
+            // exists for the Stage 13.6 probe, not for input devices.
+            self.control_no_data(0x21, USB_REQUEST_SET_IDLE, 0, u16::from(hid.interface)).ok()?;
+            let limit = if layout.is_some() { MAX_REPORT } else { 8 };
+            Some(InputDevice {
+                slot_id: self.slot_id,
+                port,
+                kind: summary.kind,
+                layout,
+                dci: (hid.endpoint_address & 0x0f).saturating_mul(2).saturating_add(1),
+                length: cmp::min(usize::from(hid.max_packet), limit),
+                ring: self.hid_ring.take()?,
+                buffer: self.hid_buffer.take()?,
+                pending: 0,
+                _output_context: self.output_context.take(),
+                _ep0_ring: self.ep0_ring.take(),
+            })
+        });
+        // The active slot is consumed either way.
+        self.slot_id = 0;
+        self.hid = None;
+        let Some(mut device) = device else { return };
+        if arm_input(self.doorbell_base, &mut device).is_err() {
+            return;
+        }
+        if let Some(slot) = self.inputs.iter_mut().find(|slot| slot.is_none()) {
+            *slot = Some(device);
+            *count += 1;
+        }
+    }
+
+    /// Configure the hub in the active slot and attach the device on each
+    /// of its connected ports. Returns the hub's port count.
+    #[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
+    fn enumerate_hub(&mut self, root_port: u8, depth: u8, configuration: u8, protocol: u8, count: &mut usize) -> Result<u8, InitError> {
+        self.control_no_data(0x00, USB_REQUEST_SET_CONFIGURATION, u16::from(configuration), 0)?;
+        let mut descriptor = DmaPage::allocate_zeroed().ok_or(InitError::DmaUnavailable)?;
+        // GET_DESCRIPTOR(Hub), class request to the device.
+        self.control_in(0xa0, USB_REQUEST_GET_DESCRIPTOR, u16::from(USB_DESCRIPTOR_HUB) << 8, 0, &mut descriptor, 9)?;
+        let bytes = descriptor.bytes();
+        if bytes[0] < 7 || bytes[1] != USB_DESCRIPTOR_HUB {
+            return Err(InitError::DescriptorInvalid);
+        }
+        let ports = bytes[2].min(15);
+        let think_time = (u16::from_le_bytes([bytes[3], bytes[4]]) >> 5) & 0x3;
+        let power_good_ticks = (u64::from(bytes[5]) * 2).div_ceil(10).max(10);
+        let speed = self.device_speed()?;
+        self.mark_hub(ports, protocol == 2 && speed == 3, think_time)?;
+
+        let mut hub = HubDevice {
+            slot_id: self.slot_id,
+            speed,
+            route: self.dev_route,
+            tt: self.dev_tt,
+            ep0_ring: self.ep0_ring.take(),
+            output_context: self.output_context.take(),
+        };
+        for hub_port in 1..=ports {
+            let _ = self.hub_request(&mut hub, |c| c.control_no_data(0x23, USB_REQUEST_SET_FEATURE, HUB_PORT_POWER, u16::from(hub_port)));
+        }
+        hold_ticks(power_good_ticks);
+        for hub_port in 1..=ports {
+            let Ok(Some(port_speed)) = self.hub_request(&mut hub, |c| c.reset_hub_port(hub_port)) else { continue };
+            // The device behind this port: its route adds the port at this
+            // tier; behind a high-speed hub a slower device uses the hub's
+            // transaction translator.
+            self.dev_speed = port_speed;
+            self.dev_route = hub.route | (u32::from(hub_port) << (4 * u32::from(depth)));
+            self.dev_tt = if hub.speed == 3 && port_speed < 3 { (hub.slot_id, hub_port) } else { hub.tt };
+            self.output_context = None;
+            self.ep0_ring = None;
+            self.slot_id = match self.enable_slot() {
+                Ok(slot) => slot,
+                Err(_) => continue,
+            };
+            self.attach_current(root_port, depth + 1, count);
+        }
+        self.dev_speed = 0;
+        self.dev_route = 0;
+        self.dev_tt = (0, 0);
+        if let Some(slot) = self.hubs.iter_mut().find(|slot| slot.is_none()) {
+            *slot = Some(hub);
+        }
+        Ok(ports)
+    }
+
+    /// Mark the active slot as a hub: its port count, multi-TT, and TT
+    /// think time (Configure Endpoint with only the slot context added).
+    #[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
+    fn mark_hub(&mut self, ports: u8, multi_tt: bool, think_time: u16) -> Result<(), InitError> {
+        let mut input = DmaPage::allocate_zeroed().ok_or(InitError::DmaUnavailable)?;
+        let output = self.output_context.as_ref().ok_or(InitError::CommandFailed)?;
+        input.bytes_mut()[self.context_size..self.context_size * 2].copy_from_slice(&output.bytes()[..self.context_size]);
+        write_u32(input.bytes_mut(), 4, 1);
+        let slot = self.context_size;
+        let dword0 = read_u32(input.bytes(), slot) | (1 << 26) | (u32::from(multi_tt) << 25);
+        let dword1 = (read_u32(input.bytes(), slot + 4) & !(0xff << 24)) | (u32::from(ports) << 24);
+        let dword2 = (read_u32(input.bytes(), slot + 8) & !(0x3 << 16)) | (u32::from(think_time) << 16);
+        write_u32(input.bytes_mut(), slot, dword0);
+        write_u32(input.bytes_mut(), slot + 4, dword1);
+        write_u32(input.bytes_mut(), slot + 8, dword2);
+        fence(Ordering::Release);
+        let command = self.command_ring.push(Trb {
+            parameter: input.physical,
+            status: 0,
+            control: (TRB_TYPE_CONFIGURE_ENDPOINT << 10) | (u32::from(self.slot_id) << 24),
+        });
+        mmio_write32(self.doorbell_base, 0)?;
+        self.wait_command_completion(command).map(|_| ())
+    }
+
+    /// Run `request` on `hub`'s control pipe, then give the active slot back.
+    #[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
+    fn hub_request<R>(&mut self, hub: &mut HubDevice, request: impl FnOnce(&mut Self) -> Result<R, InitError>) -> Result<R, InitError> {
+        let saved = (self.slot_id, self.ep0_ring.take(), self.output_context.take());
+        self.slot_id = hub.slot_id;
+        self.ep0_ring = hub.ep0_ring.take();
+        self.output_context = hub.output_context.take();
+        let result = request(self);
+        hub.ep0_ring = self.ep0_ring.take();
+        hub.output_context = self.output_context.take();
+        (self.slot_id, self.ep0_ring, self.output_context) = saved;
+        result
+    }
+
+    /// On the hub in the active slot: if `hub_port` has a device, reset the
+    /// port and return the device's speed (xHCI speed ID).
+    #[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
+    fn reset_hub_port(&mut self, hub_port: u8) -> Result<Option<u8>, InitError> {
+        let mut status = DmaPage::allocate_zeroed().ok_or(InitError::DmaUnavailable)?;
+        let read = |c: &mut Self, status: &mut DmaPage| -> Result<(u16, u16), InitError> {
+            c.control_in(0xa3, USB_REQUEST_GET_STATUS, 0, u16::from(hub_port), status, 4)?;
+            let bytes = status.bytes();
+            Ok((u16::from_le_bytes([bytes[0], bytes[1]]), u16::from_le_bytes([bytes[2], bytes[3]])))
+        };
+        let (port_status, _) = read(self, &mut status)?;
+        if port_status & HUB_PORT_STATUS_CONNECTION == 0 {
+            return Ok(None);
+        }
+        self.control_no_data(0x23, USB_REQUEST_SET_FEATURE, HUB_PORT_RESET, u16::from(hub_port))?;
+        let mut reset = None;
+        for _ in 0..100 {
+            hold_ticks(1);
+            let (port_status, change) = read(self, &mut status)?;
+            if change & HUB_PORT_CHANGE_RESET != 0 && port_status & HUB_PORT_STATUS_RESET == 0 {
+                reset = Some(port_status);
+                break;
+            }
+        }
+        let port_status = reset.ok_or(InitError::ControllerTimeout)?;
+        let _ = self.control_no_data(0x23, USB_REQUEST_CLEAR_FEATURE, HUB_C_PORT_RESET, u16::from(hub_port));
+        let _ = self.control_no_data(0x23, USB_REQUEST_CLEAR_FEATURE, HUB_C_PORT_CONNECTION, u16::from(hub_port));
+        if port_status & HUB_PORT_STATUS_ENABLE == 0 {
+            return Ok(None);
+        }
+        // Reset recovery before the device is addressed.
+        hold_ticks(2);
+        Ok(Some(if port_status & HUB_PORT_STATUS_LOW_SPEED != 0 {
+            2
+        } else if port_status & HUB_PORT_STATUS_HIGH_SPEED != 0 {
+            3
+        } else {
+            1
+        }))
     }
 
     /// Fetch and parse the active device's report descriptor.
@@ -1348,7 +1604,7 @@ impl XhciController {
         let slot_offset = self.context_size;
         let slot_dword0 = (read_u32(input.bytes(), slot_offset) & !(0x1f << 27)) | (u32::from(in_dci.max(out_dci)) << 27);
         write_u32(input.bytes_mut(), slot_offset, slot_dword0);
-        let speed = self.port_speed()?;
+        let speed = self.device_speed()?;
         write_bluetooth_endpoint_context(input.bytes_mut(), self.context_size, in_dci, interface.bulk_in,
             interface.bulk_in_max_packet, 0, speed, in_ring.page.physical, USB_ENDPOINT_BULK)?;
         write_bluetooth_endpoint_context(input.bytes_mut(), self.context_size, out_dci, interface.bulk_out,
