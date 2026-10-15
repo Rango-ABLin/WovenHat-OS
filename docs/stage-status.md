@@ -1,5 +1,24 @@
 # Stage status
 
+## Syscall user-pointer bounds (2026-10-15, source fix, QEMU pending)
+
+Any Ring-3 process could panic the kernel with one syscall.
+`copy_from_current_user` and `copy_to_current_user` passed raw user
+addresses to `VirtAddr::new`, which panics on non-canonical values. For
+example, `write(1, 0x0001_0000_0000_0000, 1)` stopped the whole kernel.
+- **Fix:** both routines now bound every range to the canonical lower half
+  first (`user_address::check_user_range`, like Linux `access_ok`).
+- **Defence in depth:** `translated_chunk` uses `VirtAddr::try_new`.
+- **ABI:** unchanged.
+
+**Evidence.** The host test `user_address` passes 6 tests, the host suite
+passes 154, and Clippy is clean on 5 kernel feature sets and all host
+targets.
+
+**Open.** 1/2/4-CPU QEMU and release-chain runs, which wait on the
+acceptance hold, and a Ring-3 negative-pointer gate. See the
+[user-pointer bounds audit](audit-syscall-user-pointer-bounds-2026-10-15.md).
+
 ## Stage 20.15 — the desktop as the session (2026-10-15)
 
 A system-apps (release) boot now starts the WovenShell desktop instead of

@@ -121,6 +121,7 @@ mod thread;
 mod timer;
 #[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
 mod usb_msc;
+mod user_address;
 mod user_graphics;
 mod userspace;
 mod vfs;

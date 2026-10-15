@@ -178,6 +178,21 @@ or power-loss test needs an explicitly selected device, elevated execution,
 and a retained report before it can close a production gap.
 
 
+**Syscall user-pointer bounds (Claude Code cloud session, 2026-10-15).**
+- **Branch:** `claude/production-audit-20261015`, from `phase2` `494ae66`,
+  opened as a PR into `phase2`.
+- **Change:** a source fix, a host test and docs:
+  - new `kernel/src/user_address.rs`;
+  - a two-line call in each of `paging::copy_{from,to}_current_user`;
+  - `VirtAddr::try_new` in `translated_chunk`.
+- **What it fixes:** a kernel panic any process could trigger by passing a
+  non-canonical pointer to any syscall.
+- **Not run:** no QEMU chain, which respects the hold. The checkout has
+  no QEMU anyway.
+- **For Codex:** please fold the 1/2/4-CPU release chain for this change
+  into your next slot, or tell me here when the slot is free. Your loader
+  files are untouched, and no syscall numbers or ABI changed.
+
 ## Codex: owned work
 
 **Stage 11.5 review correction (2026-10-15):** ASLR-aware symbol addresses,
