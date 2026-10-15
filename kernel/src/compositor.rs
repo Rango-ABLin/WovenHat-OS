@@ -66,6 +66,9 @@ struct State {
     /// Whether the compositor owns the display. While false, damage keeps
     /// accumulating but nothing reaches the framebuffer.
     presenting: bool,
+    /// The diagnostic console is showing (Stage 20.15): the holder's frames
+    /// are held back and the terminal owns the display.
+    console: bool,
     /// The one process allowed to drive the compositor from userspace.
     holder: Option<u64>,
     /// Integer display scale: each surface pixel is presented as a
@@ -100,6 +103,7 @@ impl State {
             surface: Surface::new(width, height),
             damage: Damage::new(),
             presenting: false,
+            console: false,
             holder: None,
             scale: 1,
             #[cfg(any(not(feature = "qemu-test"), feature = "stage20-14-test", feature = "stage20-14b-test"))]
@@ -778,6 +782,10 @@ pub fn present_for(pid: u64) -> Result<usize, Error> {
     if state.holder != Some(pid) {
         return Err(Error::NotHolder);
     }
+    // The console has the display: draw nothing, keep the damage.
+    if state.console {
+        return Ok(0);
+    }
     if !state.presenting {
         if !crate::terminal::set_display_owned(true) && !has_gpu(state) {
             return Err(Error::NoDisplay);
@@ -792,6 +800,24 @@ pub fn present_for(pid: u64) -> Result<usize, Error> {
     let written = present_state(state)?;
     state.damage.clear();
     Ok(written)
+}
+
+/// Show the diagnostic console instead of the holder's frames, or return
+/// to them (Stage 20.15). Returning damages the whole surface, so the
+/// holder's next present takes the display back with a complete frame.
+pub fn set_console(active: bool) {
+    let mut guard = STATE.lock();
+    let Some(state) = guard.as_mut() else { return };
+    state.console = active;
+    if active {
+        if state.presenting {
+            state.presenting = false;
+            crate::terminal::set_display_owned(false);
+        }
+    } else {
+        let bounds = state.surface.bounds();
+        state.damage.add(bounds);
+    }
 }
 
 /// Read one pixel from the compositor surface.

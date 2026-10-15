@@ -70,6 +70,8 @@ stage13-19-test = ["qemu-test", "stage13-12-test"]
 # ACPI power-off (S5); 13.20b resets instead.
 stage13-20-test = ["qemu-test", "stage13-12-test"]
 stage13-20b-test = ["qemu-test", "stage13-20-test"]
+# The WovenShell desktop as the session: F12 console, power off.
+stage20-15-test = ["qemu-test", "stage13-12-test"]
 stage14-1-test = ["network-test"]
 stage14-2-test = ["network-test", "stage14-1-test"]
 stage14-3-test = ["network-test", "stage14-2-test"]

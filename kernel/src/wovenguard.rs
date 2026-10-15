@@ -81,7 +81,10 @@ pub const fn domain_ceiling(domain: SecurityDomain) -> CapabilitySet {
             .with(Capability::DisplayIo)
             .with(Capability::InputIo)
             .with(Capability::NetworkAdmin)
-            .with(Capability::AudioPlayback),
+            .with(Capability::AudioPlayback)
+            // The desktop session turns the machine off (Stage 20.15);
+            // applications never can.
+            .with(Capability::PowerControl),
         SecurityDomain::User => CapabilitySet::userspace_ceiling(),
         SecurityDomain::Restricted => CapabilitySet::only(Capability::TimerRead),
     }

@@ -375,6 +375,9 @@ pub enum Number {
     /// monitors, left to right in surface coordinates. Requires DisplayIo and
     /// the lease. (208 is reserved for audio recording.)
     GraphicsCompositorOutputs = 207,
+    /// action (0 power off, 1 restart) -> does not return when it works; an
+    /// error code says why the machine is still running. Needs PowerControl.
+    PowerControl = 209,
 }
 
 pub fn entry_address() -> u64 {
@@ -2594,6 +2597,7 @@ pub extern "C" fn wovenhat_syscall_dispatch(
         value if value == Number::AudioPlay as u64 => sys_audio_play(arg0, arg1),
         value if value == Number::AudioSetVolume as u64 => sys_audio_set_volume(arg0),
         value if value == Number::GraphicsCompositorOutputs as u64 => sys_compositor_outputs(arg0),
+        value if value == Number::PowerControl as u64 => sys_power_control(arg0),
         _ => u64::MAX,
     };
 
@@ -2897,6 +2901,27 @@ fn pack_compositor_info(width: u32, height: u32, scale: u32) -> u64 {
     u64::from(width) | (u64::from(height) << 24) | (u64::from(scale) << 48)
 }
 
+/// Turn the machine off (action 0) or restart it (action 1). Requires
+/// PowerControl, which only the desktop session holds; every request is in
+/// the security ledger. Returns only when the machine is still running:
+/// 1 no ACPI power-off, 2 the firmware refused ACPI mode, 3 ignored.
+fn sys_power_control(action: u64) -> u64 {
+    let actor = crate::task::current_task_id().as_u64();
+    let allowed = crate::task::current_has(crate::capability::Capability::PowerControl) && action <= 1;
+    crate::audit::record(actor, crate::audit::Action::PowerControl, action, allowed);
+    if !allowed {
+        return SYSCALL_ERROR;
+    }
+    if action == 1 {
+        crate::power::reboot();
+    }
+    match crate::power::power_off() {
+        crate::power::Error::NoAcpi => 1,
+        crate::power::Error::AcpiModeRefused => 2,
+        crate::power::Error::StillRunning => 3,
+    }
+}
+
 /// The compositor surface's size and display scale. Requires `DisplayIo` and
 /// the lease: the geometry is the holder's to draw on.
 fn sys_compositor_outputs(user_outputs: u64) -> u64 {
@@ -2983,6 +3008,8 @@ fn encode_input(event: crate::woven_input::Event) -> Option<u64> {
         Event::Key(Key::F2) => Some(packed(INPUT_KIND_F2, 0)),
         Event::Key(Key::F3) => Some(packed(INPUT_KIND_F3, 0)),
         Event::Key(Key::F4) => Some(packed(INPUT_KIND_F4, 0)),
+        // The kernel's own key; never published to a focus holder.
+        Event::Key(Key::F12) => None,
         // dx and dy as two's-complement u16 halves.
         Event::PointerMove { dx, dy } => Some(packed(
             INPUT_KIND_POINTER_MOVE,

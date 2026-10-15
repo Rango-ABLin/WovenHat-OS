@@ -303,6 +303,7 @@ pub mod syscall {
     pub const AUDIO_PLAY: u64 = 204;
     pub const AUDIO_SET_VOLUME: u64 = 205;
     pub const GRAPHICS_COMPOSITOR_OUTPUTS: u64 = 207;
+    pub const POWER_CONTROL: u64 = 209;
     pub const MESSAGE_SEND: u64 = 11;
     pub const MESSAGE_RECEIVE: u64 = 12;
 
@@ -1960,6 +1961,20 @@ pub struct Output {
 
 /// The compositor's monitors, left to right, and how many there are. Same
 /// authority as the other compositor calls (DisplayIo and the lease).
+/// Turn the machine off. Returns only if it is still running, with the
+/// reason: 1 no ACPI power-off, 2 the firmware refused ACPI mode, 3 the
+/// machine ignored the request. Needs PowerControl (the desktop session).
+pub fn power_off() -> Result<u64, Error> {
+    // SAFETY: integer-only call.
+    check(unsafe { syscall::invoke(syscall::POWER_CONTROL, 0, 0, 0) })
+}
+
+/// Restart the machine. Returns only on refusal. Needs PowerControl.
+pub fn restart() -> Result<u64, Error> {
+    // SAFETY: integer-only call.
+    check(unsafe { syscall::invoke(syscall::POWER_CONTROL, 1, 0, 0) })
+}
+
 pub fn compositor_outputs() -> Result<([Output; 4], usize), Error> {
     let mut bytes = [0u8; 64];
     let count = check(unsafe { syscall::invoke(syscall::GRAPHICS_COMPOSITOR_OUTPUTS, bytes.as_mut_ptr() as u64, 0, 0) })?;
