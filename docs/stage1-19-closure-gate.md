@@ -28,7 +28,7 @@ Missing evidence is **blocked**, not inferred from an older green run.
 | --- | --- | --- |
 | 1–5 | Software gates and bounded storage transactions pass | Native storage/DMA matrix, arbitrary-size/full-volume rollback, torn-write and unclean-shutdown qualification |
 | 6 | Bounded SMP, TLB, hotplug and lock foundations pass in QEMU | General multicore stress, NUMA/high-APIC-ID and physical hotplug qualification, broader priority-inheritance/low-memory evidence |
-| 7–10 | Core isolation, IPC, capabilities, networking, completion and timer foundations pass bounded gates | IPC handle-generation rollover reproduction/resolution, complete signals, dynamic userspace runtime, broader driver/hardware qualification and full cancellation stress |
+| 7–10 | Core isolation, IPC with permanent exhausted-handle-slot retirement, capabilities, networking, completion and timer foundations pass bounded gates | Signed process-wait result collision, complete signals, dynamic userspace runtime, broader driver/hardware qualification and full cancellation stress |
 | 11 | Processes, scheduler-backed threads, join/cancel/teardown, permanent exhausted-thread-record retirement, ASLR, W^X, RELRO, synthetic TLS metadata, and bounded signed shared-object graph loading with cross-image relocation | Negative exit-result ABI collision, compiler-compatible main/child TLS, general shared-library/toolchain interoperability, library TLS, REL/PLT tables, constructors/destructors, versioning, and physical qualification |
 | 12 | Typed VFS, metadata, crypto, snapshots and mount boundaries pass bounded gates | Native WovenFS as the mounted system filesystem, durable crash/power-loss evidence, full rollback and persistent key provisioning |
 | 13 | QEMU driver/input/storage/audio/HID foundations pass their accepted gates | Native PCIe/NVMe/AHCI/xHCI/HDA/Wi-Fi/Bluetooth/input qualification, hotplug and fault recovery |
@@ -62,13 +62,14 @@ test session.
    `audit-artifacts/thread-generation-20261015/runtime-attempt-20261015-180920-929/`
    exited 0 with its final pass marker after Stage 11.2, full Stage 10.7
    preservation and Stage 10.8–11.5 matrices on 1/2/4 CPUs. All 135 frozen
-   source hashes still match. This is not full Stage 11 or release acceptance.
-2. Accept the earlier IPC handle-generation correction before advancing loader
-   work. Actual-source execution reproduced stale same-process handle reissue
-   and two other exhaustion defects. Permanent exhausted-slot skipping is now
-   integrated and five allocator probe tests pass; production installation,
-   rollback/teardown and inherited runtime acceptance remain pending. See
-   `audit-handle-generation-review-2026-10-15.md`.
+   hashes matched at that acceptance; the subsequent IPC increment uses its
+   own new freeze. This is not full Stage 11 or release acceptance.
+2. **Accepted bounded increment:** permanent exhausted IPC handle-slot
+   retirement, durable actual-source regressions, real installation/rollback/
+   teardown probes, complete host/lint QA and inherited runtime preservation.
+   Session 63244 exited 0 after full Stage 10.7 and Stage 10.8–11.5 on 1/2/4
+   CPUs, with all 488 frozen inputs unchanged. See
+   `audit-handle-generation-review-2026-10-15.md` for final and failed evidence.
 3. Correct signed exit-result sentinel collisions for `-1` and `-2` in both
    earlier process wait/reap and Stage 11.2 ordinary exit/cancellation/join.
    The process `Waitpid` success cast also collides with its running/no-child

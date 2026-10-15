@@ -317,16 +317,19 @@ write-through audit.
 
 ## Stage 11.2 scheduler-backed thread ownership (2026-10-14)
 
-Earlier-stage IPC follow-up (2026-10-15, acceptance pending): `HandleSpace`
+Earlier-stage IPC follow-up (2026-10-15, bounded correction accepted): `HandleSpace`
 now skips empty slots whose preserved 24-bit generation is already maximum.
 The last live generation remains valid until close. The existing state guard,
 16-slot ordinary capacity, 32-bit encoding, metadata and five installation
-paths are unchanged. Actual-source boundary probes pass, but production
-rollback/teardown and inherited runtime qualification remain required; see the
+paths are unchanged. Actual-source boundary probes, production rollback/teardown
+and inherited runtime preservation pass on the frozen baseline; see the
 handle-generation audit. This is separate from thread-record retirement.
 Durable host coverage is now part of `cargo test`; a `qemu-test`-guarded
 post-SMP probe exercises real installation rollback, queued escrow, waiters,
-lineage and frame cleanup. Its final revised full acceptance chain is pending.
+lineage and frame cleanup. Its final revised full acceptance chain exited 0,
+including full Stage 10.7 and Stage 10.8–11.5 matrices on 1/2/4 CPUs. All 488
+frozen inputs matched. Negative process/thread exit-result encoding is next;
+full runtime, release and hardware production closure remain open.
 
 The registry now reserves generation `u32::MAX` as a permanent exhaustion
 sentinel: a free record at that value is never allocated again. All three

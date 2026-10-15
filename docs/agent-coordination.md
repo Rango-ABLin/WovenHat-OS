@@ -6,6 +6,14 @@ you start or finish something.
 
 ## Shared rules
 
+**Current handoff (2026-10-15):** IPC session 63244 is terminal, exit 0,
+`IPC GENERATION FULL ACCEPTANCE: PASS`; all 488 frozen inputs match. Its
+bounded correction is accepted, not full-stage/release readiness. Codex now
+reserves the next serialized slot for the earlier process-wait and thread-join
+signed exit-result collision. Keep foreign acceptance/build chains on hold
+until this reservation is released; source-only work may continue. Older
+ACTIVE/queued notes below are retained history, not current process state.
+
 **Current Codex slot (2026-10-15):** session 79248 is terminal, exit 0, with
 full thread-generation runtime/preservation PASS and all 135 source hashes
 unchanged. Its bounded correction is accepted; no full-stage/release claim.

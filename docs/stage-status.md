@@ -27,19 +27,17 @@ The Stage 11.2 thread-generation saturation correction is accepted: permanent
 retirement and five actual-source host regressions pass, as do full Stage 10.7
 preservation and Stage 10.8–11.5 matrices on 1/2/4 CPUs on the unchanged frozen
 sources. The generation audit retains the original three retirement-path
-failures and final serialized evidence. Negative exit-result encoding, earlier
-IPC rollover, compiler TLS and full Stage 11 production closure remain open.
+failures and final serialized evidence. Negative process/thread exit-result
+encoding, compiler TLS and full Stage 11 production closure remain open.
 
-**IPC correction in progress:** actual-source host execution reproduced stale
-same-process handle reissue at the 24-bit generation boundary. Permanent
-exhausted-slot skipping is integrated; all five allocator probe tests and
-production kernel Clippy pass. Persistent repository regressions, installation
-rollback/teardown coverage and inherited runtime acceptance are still pending.
-See the handle-generation audit; this is not Stage 8–10 production closure.
-Durable Cargo regression coverage and a guarded real-state QEMU boundary probe
-are integrated. An extended teardown test exposed and corrected a test-ordering
-mistake; failed logs remain preserved. Final revised acceptance is running under
-the separate 488-file freeze in `audit-artifacts/ipc-generation-20261015/revision2/`.
+**IPC correction accepted:** permanent exhausted-slot skipping passed durable
+actual-source allocator regressions, real-state installation/rollback/teardown
+probes on 1/2/4 CPUs, host/production/fourteen-feature warning-denying lint,
+host/libwoven/Python tests, full Stage 10.7 preservation and Stage 10.8–11.5
+matrices. Session 63244 exited 0 with the final pass marker; all 488 frozen
+inputs still match. The handle-generation audit retains final evidence and
+the earlier test-ordering failure. This accepts the bounded IPC correction,
+not Stage 7–11 production closure or a newly qualified release image.
 
 ## Presentation and repaint performance (2026-10-15)
 

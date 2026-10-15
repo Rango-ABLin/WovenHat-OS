@@ -1,4 +1,38 @@
-# Handle generation review — IPC correction integrated, acceptance pending
+# Handle generation review — bounded IPC correction accepted
+
+## Final serialized IPC acceptance — 2026-10-15
+
+Session 63244 completed with exit 0 and
+`=== IPC GENERATION FULL ACCEPTANCE: PASS ===`. Final evidence:
+`audit-artifacts/ipc-generation-20261015/revision2/attempt-20261015-185944-027/`.
+The unchanged 488-file baseline passed all three revised focused boots;
+build, host all-targets Clippy, all host Rust tests (including the durable
+actual-source allocator regressions), sixteen libwoven tests and fifteen
+Python tests; production kernel Clippy and fourteen affected-feature Clippy
+configurations, all with warnings denied; exact full `RUN-STAGE10.7.ps1`
+preservation; and all twenty-one Stage 10.8–11.5 runtime boots on 1/2/4 CPUs.
+The full launcher evidence is `audit-artifacts/acceptance-20261015-190547-079/`.
+
+Inherited memory stress retained all 10/30/20 one-/two-/four-CPU serial logs
+at `stage7-6-artifacts/20261015-190549-058/`; every log contains the new IPC
+exhaustion marker. Live network and isolated asynchronous I/O/TCP preservation
+also passed on 1/2/4 CPUs. Independent post-run inspection checked all 21 stage
+result files, three final focused markers and fourteen feature-lint completions;
+all 488 original hashes still matched. No foreign compiler/test process was
+found at that inspection. Earlier failed source/test-ordering evidence and
+manifests were preserved, not replaced or counted as acceptance.
+
+This accepts permanent retirement of exhausted process-local IPC handle slots,
+with five installation-path rollback/teardown coverage, as implemented in
+`998abd05` and the durable/runtime regressions in `8d6addea`. The 32-bit handle
+ABI, normal 16-slot capacity, authorization/metadata, reference ownership and
+existing lock boundaries are preserved. Exhausted slots remain permanently
+unavailable within the surviving namespace; a newly registered namespace is
+distinct. This is not full Stage 7–11 closure, combined-tree/release acceptance,
+or native hardware qualification. Process/thread signed exit-result encoding,
+compiler TLS and broader loader interoperability remain open. Pending/read-only
+statements below describe the retained investigation timeline, not this final
+decision.
 
 ## Executable IPC boundary finding — 2026-10-15
 
