@@ -29,7 +29,7 @@ Missing evidence is **blocked**, not inferred from an older green run.
 | 1–5 | Software gates and bounded storage transactions pass | Native storage/DMA matrix, arbitrary-size/full-volume rollback, torn-write and unclean-shutdown qualification |
 | 6 | Bounded SMP, TLB, hotplug and lock foundations pass in QEMU | General multicore stress, NUMA/high-APIC-ID and physical hotplug qualification, broader priority-inheritance/low-memory evidence |
 | 7–10 | Core isolation, IPC, capabilities, networking, completion and timer foundations pass bounded gates | IPC handle-generation rollover reproduction/resolution, complete signals, dynamic userspace runtime, broader driver/hardware qualification and full cancellation stress |
-| 11 | Processes, scheduler-backed threads, join/cancel/teardown, ASLR, W^X, RELRO, synthetic TLS metadata, and bounded signed shared-object graph loading with cross-image relocation | Thread-generation exhaustion runtime preservation, compiler-compatible main/child TLS, general shared-library/toolchain interoperability, library TLS, REL/PLT tables, constructors/destructors, versioning, and physical qualification |
+| 11 | Processes, scheduler-backed threads, join/cancel/teardown, permanent exhausted-thread-record retirement, ASLR, W^X, RELRO, synthetic TLS metadata, and bounded signed shared-object graph loading with cross-image relocation | Negative exit-result ABI collision, compiler-compatible main/child TLS, general shared-library/toolchain interoperability, library TLS, REL/PLT tables, constructors/destructors, versioning, and physical qualification |
 | 12 | Typed VFS, metadata, crypto, snapshots and mount boundaries pass bounded gates | Native WovenFS as the mounted system filesystem, durable crash/power-loss evidence, full rollback and persistent key provisioning |
 | 13 | QEMU driver/input/storage/audio/HID foundations pass their accepted gates | Native PCIe/NVMe/AHCI/xHCI/HDA/Wi-Fi/Bluetooth/input qualification, hotplug and fault recovery |
 | 14 | Bounded IPv4/IPv6, DHCP/DNS, sockets and firewall paths pass QEMU gates | Live IPv6 socket lifecycle, routing/policy breadth and physical NIC/radio qualification |
@@ -54,16 +54,15 @@ test session.
 
 ## Required next implementation gates
 
-1. Accept the Stage 11.2 thread-generation exhaustion correction: permanent
-   retirement is integrated, and five actual-source host regressions plus
-   build and warning-denying host/kernel/affected-feature checks pass. The
-   failing stale-handle evidence is preserved. The inherited runtime chain
-   remains pending. Commit `92959b3d` records the correction as in progress;
-   it is not acceptance. The fresh serialized chain in
+1. **Accepted bounded increment:** Stage 11.2 permanent exhausted-thread-record
+   retirement, five actual-source host regressions, build and warning-denying
+   host/kernel/affected-feature checks, plus complete runtime preservation.
+   The failing stale-handle evidence is preserved. Commit `92959b3d` contains
+   the correction; the fresh serialized chain in
    `audit-artifacts/thread-generation-20261015/runtime-attempt-20261015-180920-929/`
-   passed Stage 11.2 on 1/2/4 CPUs and all 60 inherited memory boots, and is
-   running network preservation. The remaining inherited and stage-specific
-   matrices must pass before the correction is accepted.
+   exited 0 with its final pass marker after Stage 11.2, full Stage 10.7
+   preservation and Stage 10.8–11.5 matrices on 1/2/4 CPUs. All 135 frozen
+   source hashes still match. This is not full Stage 11 or release acceptance.
 2. Reproduce and resolve the earlier IPC handle-generation rollover candidate
    before advancing loader work. The source review identifies a 24-bit counter
    wrapping to one in a surviving process-local slot, but executable regression

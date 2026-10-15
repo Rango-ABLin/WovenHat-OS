@@ -1,4 +1,27 @@
-# Stage 11 thread generation exhaustion — integrated, acceptance pending
+# Stage 11 thread generation exhaustion — bounded correction accepted
+
+## Final serialized acceptance — 2026-10-15
+
+Session 79248 completed with exit 0 and
+`=== THREAD GENERATION RUNTIME AND PRESERVATION: PASS ===`. The fresh attempt
+`audit-artifacts/thread-generation-20261015/runtime-attempt-20261015-180920-929/`
+passed Stage 11.2 on 1/2/4 CPUs, the exact full `RUN-STAGE10.7.ps1` launcher,
+and Stage 10.8, 10.9, 11.1, 11.3, 11.4 and 11.5 on 1/2/4 CPUs. The launcher
+evidence is `audit-artifacts/acceptance-20261015-181015-071/`; inherited stress
+includes 10 one-CPU, 30 two-CPU and 20 four-CPU memory boots plus live network
+and isolated asynchronous I/O gates. Host QA ends with its explicit pass marker.
+All 135 original frozen source hashes matched at completion and independent
+post-run inspection. No competing foreign test/compiler/QEMU process was found
+at that inspection. Earlier interrupted attempts remain historical evidence,
+not the basis for acceptance.
+
+This accepts the permanent thread-record retirement correction committed in
+`92959b3d`, including its actual-source host boundary regressions and inherited
+runtime preservation. It does not resolve the separately documented negative
+exit-result ABI collision, IPC rollover, compiler TLS, loader interoperability,
+combined-tree integration, or hardware qualification. No release image is
+newly qualified by this increment. The pending statements below describe the
+retained investigation timeline, not the final acceptance decision.
 
 ## Finding
 
@@ -196,7 +219,7 @@ image again matched `6195a472…`. No kernel freeze or test requirement changed.
 Run warning-denying host/kernel Clippy, all host tests, Stage 11.2 on
 1/2/4 CPUs and inherited acceptance before accepting the correction.
 
-The integrated correction is not yet an accepted production fix. Stage 11
-readiness remains open until runtime preservation passes; compiler TLS,
+The bounded correction has passed the required integration gate above. Full
+Stage 11 readiness remains open: negative exit-result encoding, compiler TLS,
 loader interoperability, combined-tree integration and hardware qualification
 remain separate prerequisites.

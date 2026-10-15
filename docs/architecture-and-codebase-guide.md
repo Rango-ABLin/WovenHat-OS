@@ -320,8 +320,10 @@ write-through audit.
 The registry now reserves generation `u32::MAX` as a permanent exhaustion
 sentinel: a free record at that value is never allocated again. All three
 release paths retain their existing checked generation advancement under the
-rank-10 registry guard. The integrated correction has five actual-source host
-regressions; runtime preservation is pending in the thread-generation audit.
+rank-10 registry guard. The accepted bounded correction has five actual-source
+host regressions plus full Stage 10.7 and Stage 10.8–11.5 preservation on
+1/2/4 CPUs with unchanged frozen sources; see the thread-generation audit.
+The negative exit-result ABI collision and compiler-compatible TLS remain open.
 
 `TaskControlBlock` carries both the stable process owner and an optional
 generation-safe thread ID. User-thread creation maps a private NX stack and a

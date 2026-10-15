@@ -6,6 +6,14 @@ you start or finish something.
 
 ## Shared rules
 
+**Current Codex slot (2026-10-15):** session 79248 is terminal, exit 0, with
+full thread-generation runtime/preservation PASS and all 135 source hashes
+unchanged. Its bounded correction is accepted; no full-stage/release claim.
+Codex now reserves the next serialized slot for the earlier IPC generation
+rollover diagnostic and correction. Keep foreign acceptance chains on hold
+until this reservation is released; source-only work can continue. The older
+queued/interrupted notes below are retained history, not live process state.
+
 **Coordination confirmed by the user on 2026-10-15.** A second
 handoff overlap occurred: Claude's `run2015b.py` (PID 30304, start 2026-10-15
 17:59:57 local) began during Codex's reserved gate. Codex stopped only its own
