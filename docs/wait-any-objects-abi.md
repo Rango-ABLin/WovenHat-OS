@@ -22,8 +22,10 @@ registers the current task with each object, rechecks readiness, and sleeps
 event-driven until a source, the deadline, or an error occurs. All task
 registrations are removed before return. A timer expiry is consumed once;
 manual-reset events remain ready until cleared. A live completion-handle waiter
-or another task waiter makes that object unavailable rather than replacing the
-existing owner.
+makes that object unavailable rather than replacing the existing owner. Manual-
+reset events accept up to four distinct task waiters and wake all of them;
+one-shot timers retain a single consuming task waiter so expiry is not
+duplicated.
 
 The safe `libwoven::wait_any_objects` wrapper bounds the source array to eight
 records and performs the same packed encoding. The ABI deliberately does not

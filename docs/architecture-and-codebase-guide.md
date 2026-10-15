@@ -1305,5 +1305,7 @@ Stage 19.8 keeps syscall 111 stable for input, mailbox, and compositor damage.
 Syscall 206 (`WaitAnyObjects`) adds a separate bounded ABI for up to eight
 owner- and generation-checked timer/event objects. The kernel copies the source
 array before registration, uses task wakeups rather than polling, and clears
-registrations on every return path. See [the ABI contract](wait-any-objects-abi.md)
+registrations on every return path. Manual-reset events support four bounded
+task waiters and broadcast wakeups; one-shot timers retain one consuming task
+waiter so expiry is not duplicated. See [the ABI contract](wait-any-objects-abi.md)
 and [the Stage 19.8 audit](audit-stage19-8-timer-event-wait-2026-10-15.md).

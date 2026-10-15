@@ -9431,6 +9431,12 @@ fn stage19_8_self_test() -> bool {
     ) {
         return false;
     }
+    if !step(
+        "manual-reset event wakes bounded task waiter fan-out",
+        async_events::event_task_fanout_self_test(),
+    ) {
+        return false;
+    }
 
     if !step(
         "install into the filesystem",

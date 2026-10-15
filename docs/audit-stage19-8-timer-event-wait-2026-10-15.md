@@ -15,7 +15,9 @@ increment adds syscall 206 (`WaitAnyObjects`) and the safe `libwoven` wrapper.
 - Object lookup remains owner- and generation-checked.
 - An existing completion-handle waiter or another task's waiter is refused; a
   single task may register across multiple distinct objects without replacing
-  any waiter.
+  any waiter. Manual-reset events additionally retain up to four distinct task
+  waiters and broadcast wakeups to all of them; one-shot timers remain single-
+  consumer.
 - Timer expiry is consumed once; manual-reset events remain level-triggered.
 - Every task registration is removed on success, timeout, or error.
 - Object locks are released before task wakeups and no userspace pointer is
@@ -41,7 +43,7 @@ PASS` and `[S19.8] combined wait: PASSED`.
 
 ## Limit
 
-This closes the timer/event source integration boundary for the new ABI. It
-does not claim physical hardware qualification, multi-thread object waiter
-fan-out, or completion-port replacement; each object still has one waiter
-owner, while one task may wait on multiple objects.
+This closes the timer/event source integration boundary for the new ABI and
+adds bounded event fan-out. It does not claim physical hardware qualification,
+timer fan-out, or completion-port replacement; one-shot timer expiry remains a
+single-consumer resource by design.

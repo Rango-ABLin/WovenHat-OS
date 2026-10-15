@@ -7,17 +7,19 @@ up to eight generation-safe timer/event objects. The kernel copies the source
 array before registration, enforces capability and owner/generation checks,
 uses event-driven task wakeups, consumes one-shot timer expiry exactly once,
 preserves manual-reset event level semantics, and clears every registration on
-all return paths. A live completion-handle waiter or another task waiter is
-refused rather than replaced. The safe `libwoven::wait_any_objects` wrapper
+all return paths. A live completion-handle waiter is refused rather than
+replaced; manual-reset events support four bounded task waiters with broadcast
+wakeups, while one-shot timers retain a single consuming task waiter. The safe `libwoven::wait_any_objects` wrapper
 uses the same bounded ABI. The existing syscall 111 remains ABI-compatible.
 
 The Stage 19.8 feature gate now includes an object-registration self-test and
-the `hello-gui --timer-event` userspace scenario. Host/all-target Clippy,
+the `hello-gui --timer-event` userspace scenario and an event waiter fan-out
+self-test. Host/all-target Clippy,
 freestanding Stage 19.8 and neighboring Stage 19.13 warning-denying gates, and
 full 1/2/4-CPU QEMU acceptance all pass. The scenario verifies one-shot timer
-wake, manual-reset event wake, cleanup, and the existing multiplexed input/
-message/damage/timeout behavior. Each object retains a single-waiter ownership
-contract, but one task may wait on multiple objects. See [the ABI contract](wait-any-objects-abi.md).
+wake, manual-reset event wake, cleanup, bounded event fan-out, and the existing
+multiplexed input/message/damage/timeout behavior. Timer expiry remains
+single-consumer by design. See [the ABI contract](wait-any-objects-abi.md).
 
 ## Stage 20.14a — two monitors through virtio-gpu (2026-10-15)
 
@@ -1689,9 +1691,10 @@ Open:
 - The pid mailbox has one waiter; handle-based endpoints keep their existing
   multi-waiter queues and are not yet `WaitAny` sources.
 - Syscall 206 now exposes timer/event objects as bounded `WaitAny` sources;
-  the current focused gate covers registration safety and the accepted
-  input/IPC path. A full userspace timer/event QEMU scenario and multi-thread
-  fan-out qualification remain open.
+  the current focused gate covers registration safety, the full userspace
+  timer/event scenario, and bounded manual-reset-event fan-out. One-shot timer
+  fan-out remains intentionally single-consumer; handle-based endpoint sources
+  remain outside syscall 206.
 
 Next prerequisite: client-to-compositor damage notification, so a compositor
 sleeping in `WaitAny` redraws only what a client changed.
