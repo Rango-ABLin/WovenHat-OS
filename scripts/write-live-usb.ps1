@@ -140,6 +140,35 @@ public static class VolumeLock {
     $null = Format-Volume -Partition $logPartition -FileSystem FAT32 -NewFileSystemLabel 'WOVENLOG' -Force -Confirm:$false
     $logPartition = Get-Partition -DiskNumber $number -PartitionNumber $logPartition.PartitionNumber
     # The kernel recognises the partition by the label in its boot sector.
+    # Windows' FAT32 format keeps the label only in the root directory and
+    # leaves NO NAME in the boot sector, so set it there, in the boot sector
+    # and its backup (sector 6), with the volume locked.
+    $volumePath = (($logPartition | Get-Volume).Path.TrimEnd('\')) -replace '^\\\\\?\\', '\\.\'
+    $volumeLock = [VolumeLock]::LockAndDismount($volumePath)
+    try {
+        $stream = [System.IO.FileStream]::new("\\.\PhysicalDrive$number", [System.IO.FileMode]::Open,
+            [System.IO.FileAccess]::ReadWrite, [System.IO.FileShare]::ReadWrite, 4096,
+            [System.IO.FileOptions]::WriteThrough)
+        try {
+            $labelBytes = [System.Text.Encoding]::ASCII.GetBytes('WOVENLOG   ')
+            foreach ($sectorIndex in 0, 6) {
+                $sector = New-Object byte[] 512
+                $stream.Position = $logPartition.Offset + $sectorIndex * 512
+                $null = $stream.Read($sector, 0, 512)
+                if ([System.Text.Encoding]::ASCII.GetString($sector, 82, 8) -ne 'FAT32   ') {
+                    throw "Sector $sectorIndex of the log partition is not a FAT32 boot sector."
+                }
+                [Array]::Copy($labelBytes, 0, $sector, 71, 11)
+                $stream.Position = $logPartition.Offset + $sectorIndex * 512
+                $stream.Write($sector, 0, 512)
+            }
+            $stream.Flush()
+        } finally {
+            $stream.Dispose()
+        }
+    } finally {
+        $volumeLock.Dispose()
+    }
     $stream = [System.IO.FileStream]::new("\\.\PhysicalDrive$number", [System.IO.FileMode]::Open,
         [System.IO.FileAccess]::Read, [System.IO.FileShare]::ReadWrite)
     try {
