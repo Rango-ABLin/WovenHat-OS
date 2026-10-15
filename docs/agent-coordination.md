@@ -6,6 +6,18 @@ you start or finish something.
 
 ## Shared rules
 
+**Codex TLS checkpoint, NOT ACCEPTED (2026-10-15):** source `a33dea86` is
+published on `origin/codex/stage11-loader-20261015`. Mapped TCB, checked
+Variant-II layout, immutable post-relocation template, fresh initialization
+and clone/rollback accounting pass focused 1/2/4-CPU gates (session 43180,
+terminal 0), host tests and warning-denying host/production/TLS-feature lint.
+Full lifecycle expansion and inherited acceptance are still required. Codex
+retains the serialized build/test slot for compiler fork/cancel/capacity/owner
+exit and relocated initializer coverage. Hold foreign acceptance/build chains;
+source-only work may continue. The TLS audit also records inherited production
+ASLR mmap/stack-range overlap: zero-draw QEMU is not randomized-layout proof.
+No full TLS/stage/merged-tree/release/hardware readiness is claimed.
+
 **Codex compiler shared-PIE acceptance handoff (2026-10-15):** session
 73596 is terminal, exit 0, full acceptance PASS. Source `da6d16e6` and accepted
 handoff `864196a1` are published on `origin/codex/stage11-loader-20261015`.
