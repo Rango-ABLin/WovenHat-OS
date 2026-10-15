@@ -6,6 +6,13 @@ you start or finish something.
 
 ## Shared rules
 
+**TLS revision-2 full chain ACTIVE, session 37505 (2026-10-15):** source
+`c366cfaa` is published; corrected TLS-feature Clippy passes without warning
+suppression. A new 515-input freeze and full restart live under
+`audit-artifacts/compiler-tls-20261015/revision2/`. The failed first chain and
+its immutable evidence are preserved. Keep foreign acceptance/build chains
+held until this slot is released. No TLS/full-stage acceptance claim yet.
+
 **TLS chain stopped on lint, not accepted (2026-10-15):** session 77593 is
 terminal, exit 1. Nine focused boots and host checks passed, but TLS-feature
 Clippy correctly rejected constant-size chunks_exact in a test helper. Codex
