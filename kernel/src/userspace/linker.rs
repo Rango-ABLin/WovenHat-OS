@@ -38,8 +38,8 @@ fn library_path(name: &[u8]) -> Option<alloc::string::String> {
     Some(path)
 }
 
-fn prepare(bytes: &[u8]) -> Option<Vec<LinkImage<'_>>> {
-    let main = elf::parse(bytes).ok()?.relocated(aslr_image_delta())?;
+fn prepare(bytes: &[u8], candidate_bias: u64) -> Option<Vec<LinkImage<'_>>> {
+    let main = elf::parse(bytes).ok()?.relocated_for_execution(candidate_bias)?;
     let mut images = Vec::with_capacity(elf::MAX_SCOPE_IMAGES);
     images.push(LinkImage {
         name: None,
@@ -167,7 +167,15 @@ impl Drop for Pending {
 }
 
 pub(super) fn load(bytes: &[u8], args: &[&str]) -> Option<UserProgram> {
-    let images = prepare(bytes)?;
+    load_with_candidate_bias(bytes, args, aslr_image_delta())
+}
+
+pub(super) fn load_with_candidate_bias(
+    bytes: &[u8],
+    args: &[&str],
+    candidate_bias: u64,
+) -> Option<UserProgram> {
+    let images = prepare(bytes, candidate_bias)?;
     let main = images.first()?;
     let mut scope = SymbolScope::new(&main.image, &main.bytes);
     for image in &images[1..] {

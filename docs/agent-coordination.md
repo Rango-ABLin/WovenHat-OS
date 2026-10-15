@@ -6,6 +6,13 @@ you start or finish something.
 
 ## Shared rules
 
+**Commit checkpoint (2026-10-15):** at the user's request, Codex is committing
+the executable-placement correction and its focused evidence as acceptance
+pending. Seventeen ELF host tests and the expanded 1/2/4-CPU fixture passed;
+full inherited preservation has not run for these changed sources. No build or
+QEMU process was live at this checkpoint. The previous loader reservation is
+retained; this checkpoint is not full-stage or production acceptance.
+
 **Current handoff (2026-10-15):** session 94658 finished, exit 0, full
 signed-status/earlier-prerequisite acceptance PASS; all 500 frozen inputs match.
 The COW, wait-ownership and signed-status corrections are accepted separately

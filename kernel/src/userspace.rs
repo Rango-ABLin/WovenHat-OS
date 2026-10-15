@@ -5186,6 +5186,24 @@ pub fn load_elf(bytes: &[u8]) -> Option<UserProgram> {
     linker::load(bytes, &["a.out"])
 }
 
+#[cfg(feature = "stage11-exit-status-test")]
+pub fn load_fixed_placement_probe(bytes: &[u8]) -> Option<UserProgram> {
+    // Exercise the same production loader with a definitely nonzero ASLR draw.
+    // Other boot probes keep their established deterministic placements.
+    linker::load_with_candidate_bias(bytes, &["exit-status-fixture"], 0x30_000)
+}
+
+#[cfg(feature = "stage11-exit-status-test")]
+pub fn load_pie_placement_probe() -> Option<UserProgram> {
+    // Position-independent x86-64 scalar Exit(37), followed by an unreachable
+    // trap. No absolute address or TLS is involved in this placement probe.
+    let mut bytes = build_stub_elf(&[
+        0xbf, 37, 0, 0, 0, 0xb8, 3, 0, 0, 0, 0xcd, 0x80, 0x0f, 0x0b,
+    ])?;
+    write_u16(&mut bytes, 16, 3)?;
+    linker::load_with_candidate_bias(&bytes, &["pie-placement"], 0x30_000)
+}
+
 #[cfg(feature = "stage11-5-test")]
 pub fn shared_library_self_test() -> bool { linker::shared_library_self_test() }
 

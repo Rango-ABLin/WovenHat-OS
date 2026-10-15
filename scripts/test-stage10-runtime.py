@@ -106,6 +106,8 @@ def required_markers(stage, cpus):
                   '19.10': '[S19.10] display geometry and single writer: PASSED'}[stage])]
     if stage == '11.2-status':
         required.extend([
+            '[S11.PLACEMENT] fixed ET_EXEC at nonzero ASLR candidate: PASSED',
+            '[S11.PLACEMENT] PIE executes with nonzero ASLR: PASSED',
             '[S11.STATUS] libwoven signed process waits and double-reap: PASSED',
             '[S11.STATUS] libwoven signed natural/canceled joins and stale IDs: PASSED',
             '[S11.STATUS] ownership and genuine wait errors: PASSED',

@@ -3176,10 +3176,18 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         let frames = memory::stats().allocated_frames;
         let processes = task::process_count();
         let endpoints = ipc::endpoint_count();
-        let Some(program) = userspace::load_elf(include_bytes!(env!("WOVENHAT_EXIT_STATUS_ELF"))) else {
+        let bytes = include_bytes!(env!("WOVENHAT_EXIT_STATUS_ELF"));
+        let Ok(parsed) = elf::parse(bytes) else {
+            serial::write_line(format_args!("[S11.PLACEMENT] fixture parse: FAILED"));
+            qemu_test_exit_failure();
+        };
+        let expected_entry = parsed.entry;
+        let Some(program) = userspace::load_fixed_placement_probe(bytes) else {
             serial::write_line(format_args!("[S11.STATUS] fixture ELF: FAILED"));
             qemu_test_exit_failure();
         };
+        let loaded_entry = program.image.entry;
+        serial::write_line(format_args!("[S11.PLACEMENT] candidate=0x30000 entry={:#x} expected={:#x}", loaded_entry, expected_entry));
         let Ok((pid, _)) = task::spawn_user_process("exit-status-fixture", program) else {
             serial::write_line(format_args!("[S11.STATUS] fixture spawn: FAILED"));
             qemu_test_exit_failure();
@@ -3194,7 +3202,7 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
                 }
             }
         };
-        if exit != 0 || memory::stats().allocated_frames != frames
+        if exit != 0 || loaded_entry != expected_entry || memory::stats().allocated_frames != frames
             || task::process_count() != processes || ipc::endpoint_count() != endpoints
             || thread::reap_owner(pid.as_u64()) != 0
         {
@@ -3203,6 +3211,36 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
                 ipc::endpoint_count(), endpoints));
             qemu_test_exit_failure();
         }
+        serial::write_line(format_args!("[S11.PLACEMENT] fixed ET_EXEC at nonzero ASLR candidate: PASSED"));
+        let Some(pie) = userspace::load_pie_placement_probe() else {
+            serial::write_line(format_args!("[S11.PLACEMENT] PIE preparation: FAILED"));
+            qemu_test_exit_failure();
+        };
+        if pie.image.entry != 0x4000_0003_0000 {
+            serial::write_line(format_args!("[S11.PLACEMENT] PIE bias lost: FAILED"));
+            qemu_test_exit_failure();
+        }
+        let Ok((pid, _)) = task::spawn_user_process("pie-placement", pie) else {
+            serial::write_line(format_args!("[S11.PLACEMENT] PIE spawn: FAILED"));
+            qemu_test_exit_failure();
+        };
+        let status = loop {
+            match task::wait_process(pid.as_u64()) {
+                Ok(status) => break status,
+                Err(task::WaitError::StillRunning) => task::yield_now(),
+                Err(task::WaitError::NoSuchChild) => {
+                    serial::write_line(format_args!("[S11.PLACEMENT] PIE wait: FAILED"));
+                    qemu_test_exit_failure();
+                }
+            }
+        };
+        if status != 37 || memory::stats().allocated_frames != frames
+            || task::process_count() != processes || ipc::endpoint_count() != endpoints
+        {
+            serial::write_line(format_args!("[S11.PLACEMENT] PIE execution/teardown: FAILED"));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!("[S11.PLACEMENT] PIE executes with nonzero ASLR: PASSED"));
         serial::write_line(format_args!("[S11.STATUS] libwoven signed exit status/ownership/teardown: PASSED"));
     }
     #[cfg(feature = "stage11-2-test")]

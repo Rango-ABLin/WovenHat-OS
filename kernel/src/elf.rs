@@ -78,6 +78,8 @@ pub struct Image {
     tls: Option<TlsImage>,
     dynamic: Option<DynamicImage>,
     load_bias: u64,
+    // ET_EXEC retains absolute addresses; only ET_DYN accepts an ASLR bias.
+    position_independent: bool,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -115,6 +117,20 @@ pub struct SymbolScope<'a> {
 }
 
 impl Image {
+    pub const fn is_position_independent(&self) -> bool {
+        self.position_independent
+    }
+
+    /// Choose executable placement without changing the library relocation API.
+    pub fn relocated_for_execution(self, candidate_bias: u64) -> Option<Self> {
+        let bias = if self.is_position_independent() {
+            candidate_bias
+        } else {
+            0
+        };
+        self.relocated(bias)
+    }
+
     pub fn segments(&self) -> impl Iterator<Item = LoadSegment> + '_ {
         self.segments[..self.segment_count]
             .iter()
@@ -458,6 +474,7 @@ fn parse_image(bytes: &[u8], shared: bool) -> Result<Image, Error> {
         tls: None,
         dynamic: None,
         load_bias: 0,
+        position_independent: elf_type == 3,
     };
     let mut entry_is_executable = false;
 

@@ -58,6 +58,14 @@ This is not full Stage 11 or a release qualification. Compiler TLS, ET_EXEC
 placement/interoperability, combined-tree, persistent security/recovery and
 native hardware remain open. Earlier manifests are retained historical baselines.
 
+**Executable placement in progress:** Claude's fixed-ET_EXEC policy is adapted
+to the signed graph loader. A real nonzero-bias execution reproduced the prior
+instruction-fetch failure; the correction passes seventeen ELF host tests and
+the expanded 1/2/4-CPU fixture, including retained nonzero PIE execution and all
+original thread/status assertions. Full inherited acceptance remains pending.
+See the executable-placement audit. Compiler TLS and general interoperability
+are not closed by this increment.
+
 ## Presentation and repaint performance (2026-10-15)
 
 A fix to accepted Stage 19/20 behaviour, found by the Stage 20.7 fade gate.

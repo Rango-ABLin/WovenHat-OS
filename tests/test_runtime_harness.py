@@ -14,6 +14,8 @@ spec.loader.exec_module(harness)
 class RuntimeAcceptanceTests(unittest.TestCase):
     def test_exit_status_fixture_and_original_thread_gate_are_required(self):
         required = harness.required_markers('11.2-status', 4)
+        self.assertIn('[S11.PLACEMENT] fixed ET_EXEC at nonzero ASLR candidate: PASSED', required)
+        self.assertIn('[S11.PLACEMENT] PIE executes with nonzero ASLR: PASSED', required)
         self.assertIn('[S11.2] threads/TLS/join: PASSED', required)
         self.assertTrue(any('ownership/teardown' in marker for marker in required))
         for missing in required:

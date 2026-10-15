@@ -19,6 +19,33 @@ fn put64(bytes: &mut [u8], offset: usize, value: u64) {
     bytes[offset..offset + 8].copy_from_slice(&value.to_le_bytes());
 }
 
+#[test]
+fn fixed_executables_ignore_even_overflowing_aslr_candidates() {
+    let mut bytes = fixture(&[]);
+    put16(&mut bytes, 16, 2);
+    put16(&mut bytes, 56, 1); // static ET_EXEC, no PT_DYNAMIC
+    for candidate in [0, 0x30_000, u64::MAX] {
+        let image = elf::parse(&bytes).unwrap_or_else(|_| panic!("static fixture"));
+        assert!(!image.is_position_independent());
+        let image = image.relocated_for_execution(candidate).unwrap();
+        assert_eq!(image.entry, BASE);
+        assert_eq!(image.load_bias(), 0);
+        assert_eq!(image.segments().next().unwrap().mapping_start, BASE);
+    }
+    assert!(matches!(elf::parse_shared(&bytes), Err(elf::Error::InvalidHeader)));
+}
+
+#[test]
+fn position_independent_executables_keep_nonzero_aslr() {
+    let bytes = fixture(&[]);
+    let image = elf::parse(&bytes).unwrap_or_else(|_| panic!("PIE fixture"));
+    assert!(image.is_position_independent());
+    let image = image.relocated_for_execution(0x30_000).unwrap();
+    assert_eq!(image.entry, BASE + 0x30_000);
+    assert_eq!(image.load_bias(), 0x30_000);
+    assert_eq!(image.segments().next().unwrap().mapping_start, BASE + 0x30_000);
+}
+
 // A real ELF64 ET_DYN with RX text, a dynamic table, SysV symbol metadata,
 // and one exported function. Each test goes through the production parser.
 fn fixture(dependencies: &[u64]) -> Vec<u8> {
