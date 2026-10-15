@@ -78,11 +78,21 @@ qualification of Wi-Fi and Bluetooth, and of the native controllers.
   identified 8 GB VendorCo stick (serial 5474001281346643368) with
   read-back verification. The stick now holds release image `408696e4…`.
 
-**In progress (Claude Code):** live hardware testing. A USB mass-storage
-driver (xHCI bulk, Bulk-Only Transport, SCSI) and a boot log written to the
-WovenHat USB stick itself, with a live-test mode that never writes the
-test machine's internal disks. The user boots the stick on a separate
-machine; the logs come back on the stick.
+- Stages 13.17–13.19, live hardware testing.
+  - **13.17:** root devices are writable only with a WOVENHAT or WOVENLOG
+    FAT32 label (`block_io::root_writable`); the AHCI firmware takeover
+    is fixed; driver init errors are logged.
+  - **13.18:** USB mass storage (`xhci::UsbDisk`, `usb_msc.rs`), plus a
+    TRB ring-wrap fix.
+  - **13.19:** `LOGS/BOOTnnnn.TXT` on the stick's WOVENLOG partition
+    (`livelog.rs`; the kernel log ring is in `serial.rs`).
+  - **For Codex:** new FAT32 test disks must be labelled WOVENHAT (as
+    `create-fat32.py` does) to be writable, and harnesses whose QEMU
+    sees a FAT volume should give OVMF a variable store, or it writes
+    NvVars there.
+
+**In progress (Claude Code):** a live test of the stick on the user's
+second machine, then fixes from the logs it brings back.
 
 
 ## Codex: owned work

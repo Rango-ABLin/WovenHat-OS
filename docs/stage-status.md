@@ -1,5 +1,35 @@
 # Stage status
 
+## Stages 13.17–13.19 — live hardware testing (2026-10-15)
+
+Booting a WovenHat USB stick on another machine is now safe, and the boot
+reports back on the stick.
+- **13.17: disks WovenHat does not own are never written.** A root device
+  is writable only if its FAT32 volume is labelled WOVENHAT or WOVENLOG.
+  Before this, a normal boot mounted another PC's EFI system partition
+  writable.
+  - Also fixed: AHCI takeover from firmware. A port the firmware stopped
+    was skipped (`NoSataPort`), which likely affected every real SATA
+    machine.
+  - Driver bring-up now logs specific errors.
+- **13.18: USB mass storage.** Bulk-Only Transport with SCSI commands over
+  xHCI, as a block device. Input reports are routed during storage I/O.
+  - Also fixed: a TRB ring-wrap ordering bug that could stop a USB
+    keyboard after 255 reports on real controllers.
+- **13.19: the boot's log on the stick.** Each boot writes
+  `LOGS/BOOTnnnn.TXT` on the stick's FAT32 WOVENLOG partition: a summary
+  of every reported failure, a hardware inventory, and the full kernel
+  log, flushed every 3 s and on panic. The kernel shell has `note <text>`
+  and `savelog`.
+
+**Evidence.** All three gates pass on 1/2/4 CPUs, and seven negative
+controls were caught (one AHCI control was faulty and was redone).
+Regression passes for 13.3–13.6, 13.12–13.14, 13.16, storage, 20.1,
+20.14b and the release gate (100/100).
+
+See the
+[audit](audit-stage13-17-to-19-live-hardware-testing-2026-10-15.md).
+
 ## Presentation and repaint performance (2026-10-15)
 
 A fix to accepted Stage 19/20 behaviour, found by the Stage 20.7 fade gate.

@@ -321,6 +321,40 @@ jobs:
           for cpu in 1 2 4; do
             python3 scripts/test-stage13-16-hid-reports.py --cpus "$cpu" --timeout 240 --qemu "$qemu" --firmware "$ovmf_code"
           done
+      - name: Stage 13.17-13.19 live hardware testing 1/2/4-core acceptance
+        shell: bash
+        run: |
+          qemu=/usr/bin/qemu-system-x86_64
+          ovmf_code=
+          for variant in OVMF_CODE_4M.fd OVMF_CODE.fd; do
+            candidate="/usr/share/OVMF/$variant"
+            if [ -f "$candidate" ]; then
+              ovmf_code="$candidate"
+              break
+            fi
+          done
+          test -n "$ovmf_code"
+          ovmf_vars=
+          for variant in OVMF_VARS_4M.fd OVMF_VARS.fd; do
+            if [ -f "/usr/share/OVMF/$variant" ]; then
+              ovmf_vars="/usr/share/OVMF/$variant"
+              break
+            fi
+          done
+          test -n "$ovmf_vars"
+          cargo test --test usb_msc
+          for feature in stage13-17-test stage13-18-test stage13-19-test; do
+            cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features "$feature" -- -D warnings
+          done
+          for cpu in 1 2 4; do
+            for mode in nvme ahci production; do
+              python3 scripts/test-stage13-17-foreign-disk.py --mode "$mode" --cpus "$cpu" --timeout 300 --qemu "$qemu" --firmware "$ovmf_code" --firmware-vars "$ovmf_vars"
+            done
+            python3 scripts/test-stage13-18-usb-storage.py --cpus "$cpu" --timeout 300 --qemu "$qemu" --firmware "$ovmf_code"
+            for mode in test production unlabelled; do
+              python3 scripts/test-stage13-19-livelog.py --mode "$mode" --cpus "$cpu" --timeout 300 --qemu "$qemu" --firmware "$ovmf_code" --firmware-vars "$ovmf_vars"
+            done
+          done
       - name: Stage 13.9 WovenWiFi full-contract 1/2/4-core acceptance
         shell: bash
         run: |

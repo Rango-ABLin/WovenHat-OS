@@ -8,6 +8,8 @@
 # and its SHA-256 must still match that record.
 #
 # After writing, the image region is read back and compared byte for byte.
+# The rest of the stick then becomes the FAT32 partition labelled WOVENLOG
+# where each WovenHat boot keeps its log (Stage 13.19).
 #
 # Requires an Administrator shell: raw \\.\PhysicalDriveN access is privileged.
 
@@ -129,6 +131,41 @@ public static class VolumeLock {
         foreach ($lock in $locks) { $lock.Dispose() }
     }
     Update-Disk -Number $number
+
+    # ---- the live-test log partition (Stage 13.19) ------------------------
+    # The rest of the stick becomes a FAT32 partition labelled WOVENLOG: the
+    # one volume a WovenHat boot writes, keeping LOGS\BOOTnnnn.TXT for every
+    # boot so the stick brings the logs back.
+    $logPartition = New-Partition -DiskNumber $number -UseMaximumSize -GptType '{ebd0a0a2-b9e5-4433-87c0-68b6b72699c7}'
+    $null = Format-Volume -Partition $logPartition -FileSystem FAT32 -NewFileSystemLabel 'WOVENLOG' -Force -Confirm:$false
+    $logPartition = Get-Partition -DiskNumber $number -PartitionNumber $logPartition.PartitionNumber
+    # The kernel recognises the partition by the label in its boot sector.
+    $stream = [System.IO.FileStream]::new("\\.\PhysicalDrive$number", [System.IO.FileMode]::Open,
+        [System.IO.FileAccess]::Read, [System.IO.FileShare]::ReadWrite)
+    try {
+        $boot = New-Object byte[] 512
+        $stream.Position = $logPartition.Offset
+        $null = $stream.Read($boot, 0, 512)
+    } finally {
+        $stream.Dispose()
+    }
+    $label = [System.Text.Encoding]::ASCII.GetString($boot, 71, 11)
+    $fileSystem = [System.Text.Encoding]::ASCII.GetString($boot, 82, 8)
+    if ($label -ne 'WOVENLOG   ' -or $fileSystem -ne 'FAT32   ') {
+        throw "The log partition's boot sector reads label '$label', file system '$fileSystem'."
+    }
+    Write-Host "Log partition: $([math]::Round($logPartition.Size / 1MB)) MiB FAT32, label WOVENLOG at offset $($logPartition.Offset)."
+    $letter = ($logPartition | Get-Volume).DriveLetter
+    if ($letter) {
+        Set-Content -Path "${letter}:\README.TXT" -Encoding ASCII -Value @(
+            'WovenHat OS live-test stick',
+            '',
+            'Boot a machine from this stick (UEFI, Secure Boot off). Each boot writes',
+            'LOGS\BOOTnnnn.TXT here: a summary of every problem the boot reported,',
+            'the hardware it found, and the full kernel log. In the WovenHat shell,',
+            '"note <text>" adds your own observation and "savelog" saves at once.',
+            'Bring the stick back to read and fix what the logs show.')
+    }
     Get-Partition -DiskNumber $number | Format-Table PartitionNumber, Offset, Size, GptType -AutoSize | Out-String | Write-Host
     Write-Host 'DONE'
 } catch {
