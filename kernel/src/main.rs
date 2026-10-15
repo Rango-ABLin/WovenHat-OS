@@ -6652,9 +6652,9 @@ fn stage20_10_self_test() -> bool {
     /// The Quick Settings panel for a desktop `width`x`height`, with `rows`,
     /// over whatever `beneath` gives, skipping the cells under the pointer
     /// at `pointer`.
-    fn panel(width: i32, height: i32, rows: [&str; 4], beneath: impl Fn(i32, i32) -> u32, pointer: (i32, i32)) -> bool {
+    fn panel(width: i32, height: i32, rows: [&str; 6], beneath: impl Fn(i32, i32) -> u32, pointer: (i32, i32)) -> bool {
         let top = height - 24;
-        let h = 5 * 14 + 2;
+        let h = 7 * 14 + 2;
         let (x0, y0) = (width - 4 - 164, top - 2 - h);
         let mut image = Surface::new(164, h as usize);
         let bounds = image.bounds();
@@ -6711,9 +6711,10 @@ fn stage20_10_self_test() -> bool {
     }
 
     // The button sits left of the tray's last slot; the panel's rows are 14
-    // pixels apart, the toggles at rows 1-3 under the title.
+    // pixels apart: Power off and Restart (Stage 20.15), then the toggles at
+    // rows 3-5 under the title, and Lock screen.
     let button = (width - 54 - 5 * 20, top + 4);
-    let panel_y = top - 2 - (5 * 14 + 2);
+    let panel_y = top - 2 - (7 * 14 + 2);
     let row = |index: i32| (width - 4 - 164 + 28, panel_y + 1 + (1 + index) * 14 + 7);
     let wall = move |x: i32, y: i32| wallpaper(x, y, height);
 
@@ -6721,7 +6722,7 @@ fn stage20_10_self_test() -> bool {
     let opened = move_by(button.0 + 8 - px, button.1 + 8 - py)
         && click()
         && until(1000, || {
-            panel(width, height, ["Display scale: 2x", "Do not disturb: Off", "Tiling: Off", "Lock screen"], wall, (button.0 + 8, button.1 + 8))
+            panel(width, height, ["Power off", "Restart", "Display scale: 2x", "Do not disturb: Off", "Tiling: Off", "Lock screen"], wall, (button.0 + 8, button.1 + 8))
                 && compositor::pixel(button.0 + 1, button.1 + 1) == Ok(ENTRY_ACTIVE)
         });
     (px, py) = (button.0 + 8, button.1 + 8);
@@ -6731,10 +6732,10 @@ fn stage20_10_self_test() -> bool {
 
     // Do Not Disturb on, then have Q post a notification: the badge counts
     // it, but no toast appears.
-    let (dx, dy) = row(1);
+    let (dx, dy) = row(3);
     let dnd = move_by(dx - px, dy - py)
         && click()
-        && until(1000, || panel(width, height, ["Display scale: 2x", "Do not disturb: On", "Tiling: Off", "Lock screen"], wall, (dx, dy)));
+        && until(1000, || panel(width, height, ["Power off", "Restart", "Display scale: 2x", "Do not disturb: On", "Tiling: Off", "Lock screen"], wall, (dx, dy)));
     (px, py) = (dx, dy);
     if !step("Do Not Disturb turns on", dnd) {
         return false;
@@ -6757,13 +6758,13 @@ fn stage20_10_self_test() -> bool {
     }
 
     // Tiling on: the only window fills the work area, under the panel.
-    let (tx, ty) = row(2);
+    let (tx, ty) = row(4);
     let tiled = move_by(tx - px, ty - py)
         && click()
         && until(2000, || {
             compositor::pixel(5, top - 40) == Ok(QUIET)
                 && compositor::pixel(width - 300, 20) == Ok(QUIET)
-                && panel(width, height, ["Display scale: 2x", "Do not disturb: On", "Tiling: On", "Lock screen"], |_, _| QUIET, (tx, ty))
+                && panel(width, height, ["Power off", "Restart", "Display scale: 2x", "Do not disturb: On", "Tiling: On", "Lock screen"], |_, _| QUIET, (tx, ty))
         });
     (px, py) = (tx, ty);
     if !step("tiling turns on and the window fills the work area", tiled) {
@@ -6774,20 +6775,20 @@ fn stage20_10_self_test() -> bool {
     // the new geometry. (At 1x the window cannot grow to the whole work area
     // within its owner's surface budget while the old surface still exists,
     // so it keeps its size; what lies beneath the panel is wallpaper.)
-    let (sx, sy) = row(0);
+    let (sx, sy) = row(2);
     let full = (width * 2, height * 2);
     let scaled = move_by(sx - px, sy - py)
         && click()
         && until(2000, || compositor::scale() == Some(1) && compositor::dimensions() == Some((full.0 as u32, full.1 as u32)))
         && until(2000, || {
-            panel(full.0, full.1, ["Display scale: 1x", "Do not disturb: On", "Tiling: On", "Lock screen"], |x, y| wallpaper(x, y, full.1), (sx, sy))
+            panel(full.0, full.1, ["Power off", "Restart", "Display scale: 1x", "Do not disturb: On", "Tiling: On", "Lock screen"], |x, y| wallpaper(x, y, full.1), (sx, sy))
         });
     (px, py) = (sx, sy);
     if !step("display scale 1x makes the desktop 1280x800", scaled) {
         return false;
     }
     // Back to 2x through the panel's scale row at the 1x geometry.
-    let back_row = (full.0 - 4 - 164 + 28, (full.1 - 24) - 2 - (5 * 14 + 2) + 1 + 14 + 7);
+    let back_row = (full.0 - 4 - 164 + 28, (full.1 - 24) - 2 - (7 * 14 + 2) + 1 + 3 * 14 + 7);
     let restored = move_by(back_row.0 - px, back_row.1 - py)
         && click()
         && until(2000, || compositor::scale() == Some(2) && compositor::dimensions() == Some((width as u32, height as u32)));

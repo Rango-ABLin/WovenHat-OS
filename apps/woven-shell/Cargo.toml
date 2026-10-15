@@ -19,6 +19,9 @@ libwoven = { path = "../../libwoven" }
 panic = "abort"
 opt-level = "s"
 lto = true
+# The image is installed into the VFS (64 KiB per file); symbols are not
+# needed to run it.
+strip = "symbols"
 
 [profile.dev]
 panic = "abort"
