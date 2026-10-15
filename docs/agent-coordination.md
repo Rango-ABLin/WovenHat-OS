@@ -6,6 +6,14 @@ you start or finish something.
 
 ## Shared rules
 
+**Codex IPC handoff (2026-10-15):** session 63244 is terminal, exit 0,
+full IPC-generation acceptance PASS; all 488 frozen inputs match. The bounded
+correction is accepted and published in `40e51aa2` on
+`origin/codex/stage11-loader-20261015`; no full-stage/release claim. Codex now
+reserves the next serialized slot for process-wait/thread-join signed status
+encoding. Keep foreign acceptance/build chains on hold until that reservation
+is released. Earlier ACTIVE session notes below are historical.
+
 **Codex IPC gate ACTIVE: session 63244 (2026-10-15).** Revised real-state
 exhaustion/rollback probes and full inherited acceptance are running under
 the 488-file freeze at `C:\\WovenHat-OS\\audit-artifacts\\ipc-generation-20261015\\revision2\\`.
