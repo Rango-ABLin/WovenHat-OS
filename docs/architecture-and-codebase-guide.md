@@ -317,12 +317,14 @@ write-through audit.
 
 ## Stage 11.2 scheduler-backed thread ownership (2026-10-14)
 
-Pending loader placement increment (2026-10-15): the validated ELF kind now
+Accepted loader placement correction (2026-10-15): the validated ELF kind now
 selects main-image placement. ET_EXEC ignores an offered ASLR delta; ET_DYN
 retains it. The signed graph loader, dependency ownership and library windows
 are preserved. A nonzero-candidate compiled static fixture and a biased PIC
-probe pass on 1/2/4 CPUs; full preservation is pending. See the executable-
-placement audit and Claude's source policy `6f02202d`. Compiler TLS remains open.
+probe pass on 1/2/4 CPUs. Full host/lint, exact Stage 10.7 and Stage 10.8–11.5
+preservation passed in session 62865, exit 0, with all 500 inputs unchanged.
+See the executable-placement audit and Claude's source policy `6f02202d`.
+Compiler TLS remains open; this does not qualify a new release or full stage.
 
 Accepted foundation/status corrections (2026-10-15): user-mapping ancestors
 are explicitly writable while leaves retain W^X/RELRO/COW policy, including

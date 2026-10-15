@@ -6,6 +6,17 @@ you start or finish something.
 
 ## Shared rules
 
+**Executable placement accepted (2026-10-15):** session 62865 is terminal,
+exit 0, full acceptance PASS. Independent inspection verified all 500 frozen
+inputs, fifteen feature lints, three focused and twenty-one inherited runtime
+boots, and sixty stress logs. Source `a8acbaaf` adapts Claude's `6f02202d`
+fixed-ET_EXEC policy without replacing the signed graph loader; nonzero PIE
+execution remains mandatory. See the executable-placement audit for evidence.
+Codex retains the next serialized slot for compiler-loader/TLS correctness.
+Keep foreign build/acceptance chains on hold; source-only work may continue.
+The older ACTIVE note below is historical. Full Stage 1–19, merged-tree,
+release and hardware readiness are not claimed.
+
 **Executable-placement full acceptance ACTIVE, session 62865 (2026-10-15):** committed source
 `a8acbaaf` is the new baseline. Codex is starting the serialized full chain
 under `audit-artifacts/elf-placement-20261015/`, including a fresh nonzero-bias

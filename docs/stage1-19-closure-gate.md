@@ -29,7 +29,7 @@ Missing evidence is **blocked**, not inferred from an older green run.
 | 1–5 | Software gates and bounded storage transactions pass | Native storage/DMA matrix, arbitrary-size/full-volume rollback, torn-write and unclean-shutdown qualification |
 | 6 | Bounded SMP, TLB, hotplug and lock foundations pass in QEMU | General multicore stress, NUMA/high-APIC-ID and physical hotplug qualification, broader priority-inheritance/low-memory evidence |
 | 7–10 | Core isolation, corrected COW ancestors/child-wait authority/status, IPC with permanent exhausted-handle-slot retirement, capabilities, networking, completion and timer foundations pass bounded gates | Complete signals, dynamic userspace runtime, broader driver/hardware qualification and full cancellation stress |
-| 11 | Processes, scheduler-backed threads, signed wait/join results, join/cancel/teardown, permanent exhausted-thread-record retirement, ASLR, W^X, RELRO, synthetic TLS metadata, and bounded signed shared-object graph loading with cross-image relocation | Fixed-ET_EXEC placement in the graph loader, compiler-compatible main/child TLS, general shared-library/toolchain interoperability, library TLS, REL/PLT tables, constructors/destructors, versioning, and physical qualification |
+| 11 | Processes, scheduler-backed threads, signed wait/join results, join/cancel/teardown, permanent exhausted-thread-record retirement, fixed-ET_EXEC/nonzero-PIE placement, ASLR, W^X, RELRO, synthetic TLS metadata, and bounded signed shared-object graph loading with cross-image relocation | Compiler-compatible main/child TLS, general shared-library/toolchain interoperability, library TLS, REL/PLT tables, constructors/destructors, versioning, and physical qualification |
 | 12 | Typed VFS, metadata, crypto, snapshots and mount boundaries pass bounded gates | Native WovenFS as the mounted system filesystem, durable crash/power-loss evidence, full rollback and persistent key provisioning |
 | 13 | QEMU driver/input/storage/audio/HID foundations pass their accepted gates | Native PCIe/NVMe/AHCI/xHCI/HDA/Wi-Fi/Bluetooth/input qualification, hotplug and fault recovery |
 | 14 | Bounded IPv4/IPv6, DHCP/DNS, sockets and firewall paths pass QEMU gates | Live IPv6 socket lifecycle, routing/policy breadth and physical NIC/radio qualification |
@@ -80,10 +80,12 @@ test session.
    See the individual and combined audits for final and original failed evidence.
    This is not full-stage, combined-tree, release or hardware qualification.
 4. Finish Stage 11 loader interoperability and TLS above the bounded signed
-   `/lib` graph implementation. Explicitly preserve Claude's pending `6f02202d`
-   fixed-`ET_EXEC` placement correction in the replacement graph loader and
-   require nonzero-bias/production execution evidence: zero-bias test builds
-   do not cover that case. Legacy REL/PLT tables, constructors/destructors,
+   `/lib` graph implementation. Claude's `6f02202d` fixed-ET_EXEC policy is now
+   adapted in source `a8acbaaf` and accepted after full serialized preservation
+   (session 62865, exit 0; all 500 inputs match). The expanded fixture executes
+   both fixed ET_EXEC and nonzero PIE candidates on 1/2/4 CPUs; no global ASLR
+   disabling or old-loader restoration was used. See the placement audit.
+   Legacy REL/PLT tables, constructors/destructors,
    versioned/weak symbols, dynamic library TLS and broader toolchain/stress
    qualification remain open. A real Rust/LLD probe also exposes null
    `DT_DEBUG` rejection and an incompatible main-thread TLS/TCB layout;

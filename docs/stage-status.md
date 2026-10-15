@@ -58,13 +58,15 @@ This is not full Stage 11 or a release qualification. Compiler TLS, ET_EXEC
 placement/interoperability, combined-tree, persistent security/recovery and
 native hardware remain open. Earlier manifests are retained historical baselines.
 
-**Executable placement in progress:** Claude's fixed-ET_EXEC policy is adapted
-to the signed graph loader. A real nonzero-bias execution reproduced the prior
-instruction-fetch failure; the correction passes seventeen ELF host tests and
-the expanded 1/2/4-CPU fixture, including retained nonzero PIE execution and all
-original thread/status assertions. Full inherited acceptance remains pending.
-See the executable-placement audit. Compiler TLS and general interoperability
-are not closed by this increment.
+**Executable placement correction accepted:** Claude's fixed-ET_EXEC policy is
+adapted to the signed graph loader. After reproducing the nonzero-bias fault,
+source `a8acbaaf` passed the expanded 1/2/4-CPU fixture, 159 host Rust tests,
+nineteen libwoven/Python tests each, warning-denying host/production/fifteen-
+feature lint, exact full Stage 10.7 and Stage 10.8–11.5 preservation. Session
+62865 exited 0; independent inspection verified all 500 frozen inputs and sixty
+stress logs. Nonzero PIE execution and original assertions remain intact.
+See the executable-placement audit. Compiler TLS, general interoperability,
+combined-tree, release and hardware qualification remain open.
 
 ## Presentation and repaint performance (2026-10-15)
 
