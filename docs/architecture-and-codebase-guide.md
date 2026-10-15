@@ -354,6 +354,20 @@ mapping, versioning, lazy binding, dynamic TLS and ordered shared-image
 teardown are still unimplemented. See
 `audit-stage11-symbol-scope-2026-10-15.md`.
 
+The symbol resolver and the production loader now share
+`Image::defined_symbol_value`: ELF symbol values receive the image load bias
+before validation against relocated segments, and the entire declared symbol
+range must fit. Local relocation can reference private definitions; scope
+exports require global binding, default/protected visibility and ordinary
+NOTYPE/OBJECT/FUNC semantics. Undefined, TLS, IFUNC and reserved section values
+cannot become ordinary relocation addresses. Dependency scope validation
+preserves `DT_NEEDED` order, and resolution requires a complete validated scope.
+Parser-backed regression fixtures live in `tests/elf_scope.rs`.
+
+Debug builds optimize the `sha2` dependency (`profile.dev.package.sha2`) so
+hashing the complete debug kernel ELF does not dominate emulated boot. Full
+kernel measurement and the SHA known-answer check remain enabled.
+
 ## Stage 13.2 PCI power-state ownership (2026-10-13)
 
 `hal::pci::suspend_owned` and `resume_owned` operate only on a validated,

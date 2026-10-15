@@ -2919,7 +2919,15 @@ cross-image symbol-scope contract with duplicate/capacity/unknown-name
 negative checks. It is not yet connected to dependency mapping or relocation;
 the loader remains fail-closed for `DT_NEEDED`. Neighboring Stage 11.3/11.4
 regression matrices pass, while the final 11.5 2/4-CPU rerun remains pending
-after QEMU contention. See the [symbol-scope audit](audit-stage11-symbol-scope-2026-10-15.md).
+after QEMU contention in the initial report; those final reruns subsequently
+passed as recorded in the [symbol-scope audit](audit-stage11-symbol-scope-2026-10-15.md).
+
+The symbol-scope review found ASLR address-validation, export-visibility,
+dependency-order and dependency-index defects that the zero-bias fixture had
+missed. The production local-relocation path now shares the corrected address
+validation with scope lookup. Parser-backed host regressions cover the failing
+cases, private versus exported symbols, overflow and segment bounds. Full
+shared-library mapping and teardown remain open.
 
 ## Stage 12.1 — accepted on 2026-09-16
 

@@ -145,8 +145,35 @@ impl Image {
     /// dynamic string table.
     pub fn needed_name<'a>(&self, bytes: &'a [u8], index: usize) -> Option<&'a [u8]> {
         let dynamic = self.dynamic?;
+        if index >= dynamic.needed_count {
+            return None;
+        }
         let offset = *dynamic.needed_offsets.get(index)?;
         dynamic_string(bytes, dynamic, offset)
+    }
+
+    /// Resolve a defined symbol for an image-local relocation. Visibility does
+    /// not restrict references from the defining image. Unsupported TLS, IFUNC
+    /// and reserved section encodings must never become ordinary addresses.
+    pub fn defined_symbol_value(&self, bytes: &[u8], index: usize) -> Option<u64> {
+        let dynamic = self.dynamic?;
+        if index == 0 || index >= dynamic.symbol_count || dynamic.symtab_entry_size != 24 {
+            return None;
+        }
+        let offset = dynamic
+            .symtab_file_offset
+            .checked_add(index.checked_mul(24)?)?;
+        let symbol = bytes.get(offset..offset.checked_add(24)?)?;
+        let section = u16::from_le_bytes(symbol[6..8].try_into().ok()?);
+        if !matches!(symbol[4] & 0xf, 0..=2) || section == 0 || section >= 0xff00 {
+            return None;
+        }
+        let name = u32::from_le_bytes(symbol[..4].try_into().ok()?);
+        dynamic_string(bytes, dynamic, u64::from(name))?;
+        let value =
+            u64::from_le_bytes(symbol[8..16].try_into().ok()?).checked_add(self.load_bias)?;
+        let size = u64::from_le_bytes(symbol[16..24].try_into().ok()?);
+        self.contains_symbol(value, size).then_some(value)
     }
 
     /// Resolve one defined global symbol within this image. Undefined symbols,
@@ -167,25 +194,34 @@ impl Image {
             let symbol = bytes.get(symbol_offset..symbol_end)?;
             let name_offset = u32::from_le_bytes(symbol[..4].try_into().ok()?) as u64;
             let binding = symbol[4] >> 4;
-            let section = u16::from_le_bytes(symbol[6..8].try_into().ok()?);
-            let value = u64::from_le_bytes(symbol[8..16].try_into().ok()?);
+            let visibility = symbol[5] & 3;
             // STB_GLOBAL is the only binding exported by this first scope
             // implementation. STB_WEAK/versioned symbols remain unsupported.
-            if binding != 1 || section == 0 || !self.contains_value(value) {
+            if binding != 1 || !matches!(visibility, 0 | 3) {
                 continue;
             }
             if dynamic_string(bytes, dynamic, name_offset)? != name {
                 continue;
             }
-            return self.load_bias.checked_add(value);
+            if let Some(value) = self.defined_symbol_value(bytes, index) {
+                return Some(value);
+            }
         }
         None
     }
 
-    fn contains_value(&self, value: u64) -> bool {
+    fn contains_symbol(&self, value: u64, size: u64) -> bool {
         self.segments().any(|segment| {
             value >= segment.virtual_address
-                && value < segment.virtual_address.saturating_add(segment.memory_size as u64)
+                && value
+                    < segment
+                        .virtual_address
+                        .saturating_add(segment.memory_size as u64)
+                && value.checked_add(size).is_some_and(|end| {
+                    end <= segment
+                        .virtual_address
+                        .saturating_add(segment.memory_size as u64)
+                })
         })
     }
 
@@ -264,11 +300,11 @@ impl<'a> SymbolScope<'a> {
         if self.count == MAX_SCOPE_IMAGES {
             return Err(ScopeError::Capacity);
         }
-        if self.images[..self.count].iter().flatten().any(|entry| {
-            entry
-                .name
-                .is_some_and(|existing| existing == name)
-        }) {
+        if self.images[..self.count]
+            .iter()
+            .flatten()
+            .any(|entry| entry.name.is_some_and(|existing| existing == name))
+        {
             return Err(ScopeError::DuplicateDependency);
         }
         self.images[self.count] = Some(ScopeImage {
@@ -283,7 +319,10 @@ impl<'a> SymbolScope<'a> {
     /// Require an exact one-to-one match between DT_NEEDED and the namespace.
     pub fn validate_dependencies(&self) -> Result<(), ScopeError> {
         let main = self.images[0].ok_or(ScopeError::MissingDependency)?;
-        let needed_count = main.image.dynamic().map_or(0, |dynamic| dynamic.needed_count);
+        let needed_count = main
+            .image
+            .dynamic()
+            .map_or(0, |dynamic| dynamic.needed_count);
         if needed_count != self.count.saturating_sub(1) {
             return Err(ScopeError::MissingDependency);
         }
@@ -292,9 +331,9 @@ impl<'a> SymbolScope<'a> {
                 .image
                 .needed_name(main.bytes, index)
                 .ok_or(ScopeError::MissingDependency)?;
-            if !self.images[1..self.count].iter().flatten().any(|entry| {
-                entry.name.is_some_and(|name| name == needed)
-            }) {
+            if needed.is_empty()
+                || self.images[index + 1].and_then(|entry| entry.name) != Some(needed)
+            {
                 return Err(ScopeError::MissingDependency);
             }
         }
@@ -303,6 +342,7 @@ impl<'a> SymbolScope<'a> {
 
     /// Resolve an exact exported global symbol in main-image-first scope.
     pub fn resolve(&self, name: &[u8]) -> Option<u64> {
+        self.validate_dependencies().ok()?;
         self.images[..self.count]
             .iter()
             .flatten()
@@ -314,7 +354,9 @@ fn dynamic_string(bytes: &[u8], dynamic: DynamicImage, offset: u64) -> Option<&[
     let start = dynamic
         .strtab_file_offset
         .checked_add(usize::try_from(offset).ok()?)?;
-    let end = dynamic.strtab_file_offset.checked_add(dynamic.strtab_size)?;
+    let end = dynamic
+        .strtab_file_offset
+        .checked_add(dynamic.strtab_size)?;
     let string = bytes.get(start..end)?;
     let length = string.iter().position(|byte| *byte == 0)?;
     Some(&string[..length])
@@ -379,8 +421,8 @@ pub fn parse(bytes: &[u8]) -> Result<Image, Error> {
             if image.dynamic.is_some() {
                 return Err(Error::Unsupported);
             }
-            let file_offset = usize::try_from(read_u64(bytes, offset + 8)?)
-                .map_err(|_| Error::InvalidSegment)?;
+            let file_offset =
+                usize::try_from(read_u64(bytes, offset + 8)?).map_err(|_| Error::InvalidSegment)?;
             let virtual_address = read_u64(bytes, offset + 16)?;
             let file_size = usize::try_from(read_u64(bytes, offset + 32)?)
                 .map_err(|_| Error::InvalidSegment)?;
@@ -434,7 +476,8 @@ pub fn parse(bytes: &[u8]) -> Result<Image, Error> {
                         // text-relocation requests need a dynamic linker or
                         // shared-library authority that the kernel does not
                         // provide.
-                        if value != 0 || matches!(tag, 1 | 14 | 15 | 16 | 17 | 18 | 19 | 22 | 23 | 29)
+                        if value != 0
+                            || matches!(tag, 1 | 14 | 15 | 16 | 17 | 18 | 19 | 22 | 23 | 29)
                         {
                             return Err(Error::Unsupported);
                         }
@@ -445,20 +488,23 @@ pub fn parse(bytes: &[u8]) -> Result<Image, Error> {
                     7 => rela_address = Some(value),
                     8 => rela_size = usize::try_from(value).map_err(|_| Error::InvalidSegment)?,
                     9 => {
-                        rela_entry_size = usize::try_from(value)
-                            .map_err(|_| Error::InvalidSegment)?;
+                        rela_entry_size =
+                            usize::try_from(value).map_err(|_| Error::InvalidSegment)?;
                     }
-                    10 => strtab_size = usize::try_from(value).map_err(|_| Error::InvalidSegment)?,
+                    10 => {
+                        strtab_size = usize::try_from(value).map_err(|_| Error::InvalidSegment)?
+                    }
                     11 => {
                         symtab_entry_size =
                             usize::try_from(value).map_err(|_| Error::InvalidSegment)?;
                     }
-                    2 => plt_rela_size = usize::try_from(value)
-                        .map_err(|_| Error::InvalidSegment)?,
+                    2 => {
+                        plt_rela_size = usize::try_from(value).map_err(|_| Error::InvalidSegment)?
+                    }
                     // Common metadata tags do not affect relocation of a
                     // symbol-free static PIE and are intentionally ignored.
-                    3 | 30 | 0x6fff_fff0 | 0x6fff_fff9
-                    | 0x6fff_fffb | 0x6fff_fffe | 0x6fff_ffff => {}
+                    3 | 30 | 0x6fff_fff0 | 0x6fff_fff9 | 0x6fff_fffb | 0x6fff_fffe
+                    | 0x6fff_ffff => {}
                     _ => return Err(Error::Unsupported),
                 }
             }
@@ -529,10 +575,10 @@ pub fn parse(bytes: &[u8]) -> Result<Image, Error> {
             }
             let file_offset =
                 usize::try_from(read_u64(bytes, offset + 8)?).map_err(|_| Error::InvalidSegment)?;
-            let file_size =
-                usize::try_from(read_u64(bytes, offset + 32)?).map_err(|_| Error::InvalidSegment)?;
-            let memory_size =
-                usize::try_from(read_u64(bytes, offset + 40)?).map_err(|_| Error::InvalidSegment)?;
+            let file_size = usize::try_from(read_u64(bytes, offset + 32)?)
+                .map_err(|_| Error::InvalidSegment)?;
+            let memory_size = usize::try_from(read_u64(bytes, offset + 40)?)
+                .map_err(|_| Error::InvalidSegment)?;
             let alignment = read_u64(bytes, offset + 48)?;
             if memory_size == 0
                 || file_size > memory_size
@@ -558,8 +604,8 @@ pub fn parse(bytes: &[u8]) -> Result<Image, Error> {
                 return Err(Error::Unsupported);
             }
             let virtual_address = read_u64(bytes, offset + 16)?;
-            let memory_size =
-                usize::try_from(read_u64(bytes, offset + 40)?).map_err(|_| Error::InvalidSegment)?;
+            let memory_size = usize::try_from(read_u64(bytes, offset + 40)?)
+                .map_err(|_| Error::InvalidSegment)?;
             if memory_size == 0 {
                 return Err(Error::InvalidSegment);
             }
@@ -669,8 +715,7 @@ pub fn parse(bytes: &[u8]) -> Result<Image, Error> {
                 let segment_file_end = segment
                     .virtual_address
                     .saturating_add(segment.file_size as u64);
-                segment.virtual_address <= dynamic.rela_address
-                    && rela_end <= segment_file_end
+                segment.virtual_address <= dynamic.rela_address && rela_end <= segment_file_end
             }) else {
                 return Err(Error::InvalidSegment);
             };
@@ -762,7 +807,10 @@ pub fn parse(bytes: &[u8]) -> Result<Image, Error> {
                             .virtual_address
                             .saturating_add(segment.file_size as u64);
                         dynamic.hash_address >= segment.virtual_address
-                            && dynamic.hash_address.checked_add(8).is_some_and(|end| end <= file_end)
+                            && dynamic
+                                .hash_address
+                                .checked_add(8)
+                                .is_some_and(|end| end <= file_end)
                     })
                     .ok_or(Error::InvalidSegment)?;
                 dynamic.hash_file_offset = hash_segment
@@ -809,7 +857,10 @@ pub fn parse(bytes: &[u8]) -> Result<Image, Error> {
                 }
                 dynamic.symbol_count = symbol_count;
             }
-            for offset in dynamic.needed_offsets[..dynamic.needed_count].iter().copied() {
+            for offset in dynamic.needed_offsets[..dynamic.needed_count]
+                .iter()
+                .copied()
+            {
                 let name_start = dynamic
                     .strtab_file_offset
                     .checked_add(usize::try_from(offset).map_err(|_| Error::InvalidSegment)?)

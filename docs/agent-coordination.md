@@ -87,6 +87,21 @@ and a retained report before it can close a production gap.
 
 ## Codex: owned work
 
+**Stage 11.5 review correction (2026-10-15):** ASLR-aware symbol addresses,
+export visibility/types, full symbol bounds and dependency order/index checks
+now have eight parser-backed host regressions. The production local relocation
+path shares the corrected resolver. Stage 11.3/11.4/11.5 and software-measurement
+15.6 passed on 1/2/4 CPUs. A QMP timeout snapshot located CPU 0 inside debug SHA
+compression; `profile.dev.package.sha2` now optimizes that dependency while
+retaining complete measurement and fixed deadlines. See the symbol-scope audit.
+Full shared-library mapping/teardown and the full release-chain rerun remain
+open. The previously packaged `0.8.0` image predates this correction.
+
+Claude's `C:\WovenHat-OS-wt` currently has USB mass-storage and boot-log commits
+on `stage20-14` (`7c608631` observed), plus an uncommitted live-USB script edit.
+Codex preserved that work and waited on live QEMU processes between gates;
+those new Stage 13 commits still require integration review on the shared branch.
+
 Stage 19 system applications (WovenCalculator, WovenTerminal, WovenFiles,
 WovenEditor, …), application signing and packaging, and the release
 validation chain.

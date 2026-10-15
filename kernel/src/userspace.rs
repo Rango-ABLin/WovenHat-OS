@@ -4616,6 +4616,10 @@ pub fn elf_loader_self_test() -> bool {
         write_u64(&mut elf, PROGRAM_HEADER_OFFSET + 40, 4096)?;
         let strtab = elf.get_mut(STRTAB_OFFSET..STRTAB_OFFSET + 7)?;
         strtab.copy_from_slice(b"\0local\0");
+        // This region initially contains copied machine code. Initialize both
+        // complete ELF symbol records, including type/visibility/size, before
+        // populating the fields below.
+        elf.get_mut(SYMTAB_OFFSET..SYMTAB_OFFSET + 48)?.fill(0);
         let data_address = USER_REGION_START + USER_CODE_SIZE as u64;
         let dynamic_header = PROGRAM_HEADER_OFFSET + PROGRAM_HEADER_SIZE;
         let data_header = dynamic_header + PROGRAM_HEADER_SIZE;
@@ -4705,7 +4709,7 @@ pub fn elf_loader_self_test() -> bool {
             let main_image = crate::elf::parse(&main_bytes).ok()?;
             let mut dependency_export = elf.clone();
             *dependency_export.get_mut(SYMTAB_OFFSET + 24 + 4)? = 0x10;
-            let dependency_image = crate::elf::parse(&dependency_export).ok()?;
+            let dependency_image = crate::elf::parse(&dependency_export).ok()?.relocated(4096)?;
             let mut scope = alloc::boxed::Box::new(crate::elf::SymbolScope::new(
                 &main_image,
                 &main_bytes,
@@ -4714,7 +4718,7 @@ pub fn elf_loader_self_test() -> bool {
                 .add_dependency(b"local", &dependency_image, &dependency_export)
                 .ok()?;
             scope.validate_dependencies().ok()?;
-            let exact_resolution = scope.resolve(b"local") == Some(USER_REGION_START + 32)
+            let exact_resolution = scope.resolve(b"local") == Some(USER_REGION_START + 4096 + 32)
                 && scope.resolve(b"local-extra").is_none();
             let duplicate_rejected = scope
                 .add_dependency(b"local", &dependency_image, &dependency_export)
@@ -4745,16 +4749,20 @@ pub fn elf_loader_self_test() -> bool {
         let dependency_fail_closed = load_elf(&dependency_fixture).is_none();
         let program = load_elf(&elf)?;
         let mut relocated = [0u8; 16];
-        let expected = aslr_image_delta().checked_add(0x20)?;
+        // Observe this loaded image's actual bias. Drawing fresh entropy here
+        // would compare the relocation against a different random placement
+        // on a production boot (qemu-test fixes every draw at zero).
+        let load_bias = program.image.entry.checked_sub(image.entry)?;
+        let expected = load_bias.checked_add(0x20)?;
         let applied = paging::read_user_bytes_in(
             program.address_space.paging(),
-            data_address.checked_add(aslr_image_delta())?,
+            data_address.checked_add(load_bias)?,
             &mut relocated,
         )
         .is_ok()
             && u64::from_le_bytes(relocated[..8].try_into().ok()?) == expected
             && u64::from_le_bytes(relocated[8..].try_into().ok()?)
-                == aslr_image_delta() + USER_REGION_START + 32;
+                == load_bias + USER_REGION_START + 32;
         let destroyed = destroy(program.address_space);
         Some(
             dynamic.rela_size == 48
@@ -5275,43 +5283,7 @@ pub fn load_elf(bytes: &[u8]) -> Option<UserProgram> {
                     release_partial(page_table, &mappings[..mapping_count]);
                     return None;
                 }
-                let resolved = (|| {
-                    let symbol_offset = dynamic
-                        .symtab_file_offset
-                        .checked_add(symbol_index.checked_mul(dynamic.symtab_entry_size)?)?;
-                    let symbol = bytes.get(symbol_offset..symbol_offset.checked_add(24)?)?;
-                    let name_offset =
-                        u32::from_le_bytes(symbol[..4].try_into().ok()?) as usize;
-                    let section = u16::from_le_bytes(symbol[6..8].try_into().ok()?);
-                    let value = u64::from_le_bytes(symbol[8..16].try_into().ok()?);
-                    if section == 0
-                        || !image.segments().any(|segment| {
-                            value >= segment.virtual_address
-                                && value
-                                    < segment
-                                        .virtual_address
-                                        .saturating_add(segment.memory_size as u64)
-                        })
-                    {
-                        // Undefined symbols require a dependency scope. That
-                        // scope is deliberately not guessed from the main image.
-                        return None;
-                    }
-                    let name_start = dynamic.strtab_file_offset.checked_add(name_offset)?;
-                    let name_end = dynamic
-                        .strtab_file_offset
-                        .checked_add(dynamic.strtab_size)?;
-                    if name_start >= name_end
-                        || bytes
-                            .get(name_start..name_end)?
-                            .iter()
-                            .position(|byte| *byte == 0)
-                            .is_none()
-                    {
-                        return None;
-                    }
-                    image.load_bias().checked_add(value)
-                })();
+                let resolved = image.defined_symbol_value(bytes, symbol_index);
                 let Some(resolved) = resolved else {
                     release_partial(page_table, &mappings[..mapping_count]);
                     return None;
