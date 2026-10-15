@@ -4,6 +4,15 @@ on:
   push:
     branches:
       - ci/nine-lane-production-validation-20261015
+  pull_request:
+    paths:
+      - '.github/workflows/nine-lane-validation.yml'
+      - 'scripts/**'
+      - 'tests/**'
+      - 'kernel/**'
+      - 'libwoven/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
   workflow_dispatch:
 permissions:
   contents: read
