@@ -13,11 +13,19 @@
 //! failure; a few calls additionally use `u64::MAX - 1` to mean "would block".
 //! Raw wrappers return the kernel's value unchanged so a caller can tell those
 //! apart.
+//!
+//! Successful process waits and thread joins carry a zero-extended 32-bit
+//! exit-status payload. After checking the full-width error sentinels, casting
+//! that payload to `i32` recovers negative statuses, including -1 and -2.
 
 pub mod process {
     #[derive(Clone, Copy, PartialEq, Eq, Debug)]
     pub struct Id(pub u64);
 }
+
+#[cfg(test)]
+#[path = "../../kernel/src/exit_status.rs"]
+mod kernel_exit_status;
 
 /// The kernel's 5x7 bitmap font, shared source rather than a copy, so text
 /// a client renders matches text the kernel renders pixel for pixel.
@@ -119,6 +127,16 @@ pub mod thread {
         Exited(i32),
         Running,
         Invalid,
+    }
+
+    pub(crate) const fn decode_join(result: u64) -> Join {
+        if result == crate::syscall::WOULD_BLOCK {
+            Join::Running
+        } else if result == crate::syscall::ERROR {
+            Join::Invalid
+        } else {
+            Join::Exited(result as i32)
+        }
     }
 }
 pub mod fs {
@@ -438,13 +456,7 @@ pub mod syscall {
     /// Must be called from WovenHat userspace.
     pub unsafe fn thread_join(id: super::thread::Id) -> super::thread::Join {
         let result = unsafe { invoke(THREAD_JOIN, id.0, 0, 0) };
-        if result == WOULD_BLOCK {
-            super::thread::Join::Running
-        } else if result == ERROR {
-            super::thread::Join::Invalid
-        } else {
-            super::thread::Join::Exited(result as i32)
-        }
+        super::thread::decode_join(result)
     }
 
     /// Return the current thread's generation-tagged handle.
@@ -502,7 +514,8 @@ pub mod syscall {
         unsafe { invoke(GETTICKS, 0, 0, 0) }
     }
 
-    /// Wait for a child, returning its packed status.
+    /// Wait for a child, returning its zero-extended 32-bit status payload.
+    /// Full-width ERROR/WOULD_BLOCK remain distinct; decode success as `i32`.
     ///
     /// # Safety
     /// Must be called from WovenHat userspace.
@@ -2299,7 +2312,9 @@ pub fn spawn(command: &str) -> Result<process::Id, Error> {
     check(result).map(process::Id)
 }
 
-/// Wait for a child process, returning its exit status.
+/// Wait for a child process, returning its zero-extended 32-bit exit payload.
+/// Cast a successful value to `i32` to recover a signed status. A running child
+/// returns `Error::WouldBlock`; an invalid/non-child wait returns `Error::Failed`.
 pub fn wait(pid: process::Id) -> Result<u64, Error> {
     // SAFETY: waitpid takes no pointers.
     check(unsafe { syscall::waitpid(pid.0) })
@@ -2340,6 +2355,33 @@ pub fn format_u64(mut value: u64, buffer: &mut [u8]) -> &[u8] {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn kernel_signed_thread_statuses_decode_without_sentinel_aliasing() {
+        for status in [-1, -2, i32::MIN, i32::MAX, 0, 37] {
+            assert_eq!(
+                thread::decode_join(kernel_exit_status::encode(status)),
+                thread::Join::Exited(status)
+            );
+        }
+        assert_eq!(thread::decode_join(syscall::ERROR), thread::Join::Invalid);
+        assert_eq!(
+            thread::decode_join(syscall::WOULD_BLOCK),
+            thread::Join::Running
+        );
+    }
+
+    #[test]
+    fn kernel_signed_process_statuses_are_successful_wait_payloads() {
+        for status in [-1, -2, i32::MIN, i32::MAX, 0, 37] {
+            assert_eq!(
+                check(kernel_exit_status::encode(status)),
+                Ok(u64::from(status as u32))
+            );
+        }
+        assert_eq!(check(syscall::ERROR), Err(Error::Failed));
+        assert_eq!(check(syscall::WOULD_BLOCK), Err(Error::WouldBlock));
+    }
 
     #[test]
     fn blend_is_exact_at_both_ends_and_rounds_to_nearest() {

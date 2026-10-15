@@ -1,4 +1,69 @@
-# Stage 11.2 thread exit-result encoding — source finding, unaccepted
+# Process/thread exit-result encoding — integrated, acceptance pending
+
+## Current executable correction — 2026-10-15
+
+The original casts were extracted without changing behavior into the production
+`exit_status::encode` helper, and both syscall branches were wired through it.
+Actual-source host tests reproduced the kernel payload collision and both
+libwoven decoder failures (exit 101):
+`audit-artifacts/exit-status-20261015/kernel-before.txt` and `libwoven-before.txt`.
+The helper now zero-extends through `u32`. Kernel payload tests and nineteen
+libwoven tests pass (`kernel-after.txt`, `libwoven-after.txt`). The actual
+thread decoder is shared with its test rather than copied. Syscall IDs, full-width
+error constants, `Join` variants, and the public process wait return type remain
+unchanged. A successful wait retains the status's low 32 bits; `as i32` recovers
+the signed value. No unsafe code, object, capability, lock or wait was added
+for the encoding correction.
+
+`tools/exit-status-fixture` is a separate freestanding crate linked against the
+actual libwoven library, using the established static ELF linker contract.
+Its only assembly establishes CPU entry-stack alignment. It exercises six
+signed process exits, six natural thread exits, six cancelled sibling statuses,
+double reap/stale joins, cross-process authority, real WouldBlock and invalid
+errors, and signal-terminated child cleanup. Workers park on timer events;
+nonblocking process waits sleep between retries. It uses existing test process
+capabilities, not an expanded capability set or unsigned production image path.
+
+The independent `stage11-exit-status-test` subgate deliberately includes the
+existing Stage 11.2 feature. Its guarded block runs first and then falls through
+to the unchanged original thread assertions and exit. The runtime harness's
+`11.2-status` choice builds the fixture, supplies its mandatory compile-time ELF
+input, and requires every new family marker plus the original thread markers.
+It cannot pass merely by reaching an earlier exit. Linting that new feature
+requires `WOVENHAT_EXIT_STATUS_ELF`; missing input is not a pass.
+
+Real execution exposed earlier COW ancestor-permission and wait-ownership
+classification defects. They are documented separately in the Stage 7 COW and
+process-wait ownership audits; all failing serial logs and source snapshots
+are preserved. After their corrections, the full one-CPU fixture and original
+Stage 11.2 gate passed in `stage11.2-status-1cpu-1792087223023180400/` with exact
+resource baselines. A final revised 1/2/4-CPU matrix is running. Full lint,
+host, inherited runtime and combined-source preservation are still required;
+none of these integrated corrections is accepted yet. The original read-only
+findings below remain investigation history.
+
+### Final revised focused matrix and current full gate
+
+All three revised focused boots passed, exit 33, with every libwoven family,
+resource-baseline and original Stage 11.2 marker required by the harness:
+
+- `stage11.2-status-1cpu-1792087580234175000/`
+- `stage11.2-status-2cpu-1792087612734709000/`
+- `stage11.2-status-4cpu-1792087650972914800/`
+
+All nineteen Python harness/builder regressions pass. The builder uses a locked
+dependency graph and shared project-local Cargo caches, records compiler and
+input/output hashes, refuses existing evidence directories, and refuses to
+publish a manifest if any input changes during compilation. Missing markers,
+wrong exit, panic and failure strings remain fatal in the runtime harness.
+
+Session 94658 is running the complete combined acceptance from
+`audit-artifacts/exit-status-20261015/run-acceptance.ps1`, with the immutable
+500-file manifest alongside it. This freeze also includes the ELF and its
+published manifest supplied to new-feature Clippy. It is separate from all
+historical thread/IPC manifests. Full build, host and fixture Clippy, all tests,
+fifteen affected kernel-feature lint configurations, full Stage 10.7 and
+Stage 10.8–11.5 runtime preservation remain required before acceptance.
 
 Read-only review during the serialized runtime wait. No kernel/runtime input
 was changed and no competing test chain was started for this finding.

@@ -28,7 +28,7 @@ Missing evidence is **blocked**, not inferred from an older green run.
 | --- | --- | --- |
 | 1–5 | Software gates and bounded storage transactions pass | Native storage/DMA matrix, arbitrary-size/full-volume rollback, torn-write and unclean-shutdown qualification |
 | 6 | Bounded SMP, TLB, hotplug and lock foundations pass in QEMU | General multicore stress, NUMA/high-APIC-ID and physical hotplug qualification, broader priority-inheritance/low-memory evidence |
-| 7–10 | Core isolation, IPC with permanent exhausted-handle-slot retirement, capabilities, networking, completion and timer foundations pass bounded gates | Signed process-wait result collision, complete signals, dynamic userspace runtime, broader driver/hardware qualification and full cancellation stress |
+| 7–10 | Core isolation, IPC with permanent exhausted-handle-slot retirement, capabilities, networking, completion and timer foundations pass bounded gates | Pending COW ancestor-permission and process-wait ownership/status corrections, complete signals, dynamic userspace runtime, broader driver/hardware qualification and full cancellation stress |
 | 11 | Processes, scheduler-backed threads, join/cancel/teardown, permanent exhausted-thread-record retirement, ASLR, W^X, RELRO, synthetic TLS metadata, and bounded signed shared-object graph loading with cross-image relocation | Negative exit-result ABI collision, compiler-compatible main/child TLS, general shared-library/toolchain interoperability, library TLS, REL/PLT tables, constructors/destructors, versioning, and physical qualification |
 | 12 | Typed VFS, metadata, crypto, snapshots and mount boundaries pass bounded gates | Native WovenFS as the mounted system filesystem, durable crash/power-loss evidence, full rollback and persistent key provisioning |
 | 13 | QEMU driver/input/storage/audio/HID foundations pass their accepted gates | Native PCIe/NVMe/AHCI/xHCI/HDA/Wi-Fi/Bluetooth/input qualification, hotplug and fault recovery |
@@ -77,6 +77,12 @@ test session.
    and required host/Ring-3 evidence are in
    `audit-stage11-thread-exit-encoding-2026-10-15.md`; it is not yet a runtime
    acceptance result.
+   The real fixture also exposed earlier COW ancestor-permission and foreign-wait
+   classification defects. Those corrections and their dedicated audits are
+   integrated; complete revised focused boots pass on 1/2/4 CPUs. Full combined
+   acceptance is running under the separate 500-file freeze in
+   `audit-artifacts/exit-status-20261015/`. Accept the earlier foundation fixes
+   before accepting the signed-status increment or advancing loader/TLS work.
 4. Finish Stage 11 loader interoperability and TLS above the bounded signed
    `/lib` graph implementation. Explicitly preserve Claude's pending `6f02202d`
    fixed-`ET_EXEC` placement correction in the replacement graph loader and

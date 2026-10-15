@@ -51,6 +51,7 @@ mod driver;
 mod drivers;
 mod elf;
 mod entropy;
+mod exit_status;
 mod fat32;
 mod file_frames;
 mod file_mapping;
@@ -84,6 +85,7 @@ mod notifications;
 #[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test", feature = "stage13-3-test"))]
 mod nvme;
 mod page_cache;
+mod page_permissions;
 mod paging;
 mod panic;
 mod partition;
@@ -3168,6 +3170,40 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
             ));
         }
         qemu_test_exit_success();
+    }
+    #[cfg(feature = "stage11-exit-status-test")]
+    {
+        let frames = memory::stats().allocated_frames;
+        let processes = task::process_count();
+        let endpoints = ipc::endpoint_count();
+        let Some(program) = userspace::load_elf(include_bytes!(env!("WOVENHAT_EXIT_STATUS_ELF"))) else {
+            serial::write_line(format_args!("[S11.STATUS] fixture ELF: FAILED"));
+            qemu_test_exit_failure();
+        };
+        let Ok((pid, _)) = task::spawn_user_process("exit-status-fixture", program) else {
+            serial::write_line(format_args!("[S11.STATUS] fixture spawn: FAILED"));
+            qemu_test_exit_failure();
+        };
+        let exit = loop {
+            match task::wait_process(pid.as_u64()) {
+                Ok(status) => break status,
+                Err(task::WaitError::StillRunning) => task::yield_now(),
+                Err(task::WaitError::NoSuchChild) => {
+                    serial::write_line(format_args!("[S11.STATUS] fixture wait: FAILED"));
+                    qemu_test_exit_failure();
+                }
+            }
+        };
+        if exit != 0 || memory::stats().allocated_frames != frames
+            || task::process_count() != processes || ipc::endpoint_count() != endpoints
+            || thread::reap_owner(pid.as_u64()) != 0
+        {
+            serial::write_line(format_args!("[S11.STATUS] fixture exit={} frames={}/{} processes={}/{} endpoints={}/{}: FAILED",
+                exit, memory::stats().allocated_frames, frames, task::process_count(), processes,
+                ipc::endpoint_count(), endpoints));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!("[S11.STATUS] libwoven signed exit status/ownership/teardown: PASSED"));
     }
     #[cfg(feature = "stage11-2-test")]
     {

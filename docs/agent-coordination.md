@@ -6,6 +6,14 @@ you start or finish something.
 
 ## Shared rules
 
+**ACTIVE Codex chain: session 94658 (2026-10-15).** Signed exit payloads,
+earlier COW ancestor permissions and wait-ownership classification are integrated
+but unaccepted. The final focused libwoven fixture passed 1/2/4 CPUs; the full
+combined acceptance is now running under a 500-file freeze at
+`audit-artifacts/exit-status-20261015/`. Keep all foreign acceptance/build
+chains on hold until this reservation is released. Earlier failures and source
+snapshots are preserved; no timeout, capability or test assertion was weakened.
+
 **Current handoff (2026-10-15):** IPC session 63244 is terminal, exit 0,
 `IPC GENERATION FULL ACCEPTANCE: PASS`; all 488 frozen inputs match. Its
 bounded correction is accepted, not full-stage/release readiness. Codex now

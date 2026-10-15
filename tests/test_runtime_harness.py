@@ -12,6 +12,15 @@ spec.loader.exec_module(harness)
 
 
 class RuntimeAcceptanceTests(unittest.TestCase):
+    def test_exit_status_fixture_and_original_thread_gate_are_required(self):
+        required = harness.required_markers('11.2-status', 4)
+        self.assertIn('[S11.2] threads/TLS/join: PASSED', required)
+        self.assertTrue(any('ownership/teardown' in marker for marker in required))
+        for missing in required:
+            with self.subTest(missing=missing):
+                log = '\n'.join(marker for marker in required if marker != missing)
+                self.assertTrue(harness.validation_errors(33, log, required))
+
     def test_shared_library_evidence_is_required(self):
         required = harness.required_markers('11.5', 4)
         self.assertTrue(any('Ring-3 import call and owner teardown' in marker for marker in required))

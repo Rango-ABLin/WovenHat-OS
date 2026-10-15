@@ -290,7 +290,9 @@ fn map_to_reclaim_on_failure(
         let mut recorder = TableFrameRecorder::new(allocator, table_frame_limit);
         // SAFETY: The caller supplied a unique data frame and the recorder
         // forwards unique table frames from the physical allocator.
-        let result = unsafe { mapper.map_to(page, frame, flags, &mut recorder) };
+        let result = unsafe {
+            mapper.map_to_with_table_flags(page, frame, flags, ancestor_flags(flags), &mut recorder)
+        };
         (result, recorder.frames)
     };
     match result {
@@ -530,6 +532,18 @@ fn user_flags(writable: bool, executable: bool) -> PageTableFlags {
     }
     flags
 }
+
+fn ancestor_flags(leaf: PageTableFlags) -> PageTableFlags {
+    // Leaf W^X/RELRO/COW policy is unchanged. Ancestor W permits independent
+    // user leaves to enforce their own policies, including a later COW break.
+    PageTableFlags::from_bits_truncate(crate::page_permissions::ancestor_bits(leaf.bits()))
+}
+
+const _: () = assert!(
+    PageTableFlags::PRESENT.bits() == 1
+        && PageTableFlags::WRITABLE.bits() == 2
+        && PageTableFlags::USER_ACCESSIBLE.bits() == 4
+);
 
 fn page_range(start: u64, size: usize) -> Result<(Page<Size4KiB>, Page<Size4KiB>), MapRangeError> {
     if size == 0
@@ -863,7 +877,11 @@ pub fn share_user_range_in(
             return Err(MapRangeError::OutOfFrames);
         }
         // Map destination to the same frame.
-        match unsafe { destination_mapper.map_to(page, frame, flags, &mut *allocator) } {
+        match unsafe {
+            destination_mapper.map_to_with_table_flags(
+                page, frame, flags, ancestor_flags(flags), &mut *allocator,
+            )
+        } {
             Ok(flush) => {
                 flush.ignore();
                 crate::smp::shootdown();
@@ -1011,14 +1029,22 @@ pub fn try_break_cow(address_space: AddressSpace, fault_address: u64) -> bool {
     crate::smp::shootdown();
 
     let mut allocator = memory::allocator();
-    match unsafe { mapper.map_to(page, new_frame, new_flags, &mut *allocator) } {
+    match unsafe {
+        mapper.map_to_with_table_flags(
+            page, new_frame, new_flags, ancestor_flags(new_flags), &mut *allocator,
+        )
+    } {
         Ok(flush) => {
             flush.flush();
             crate::smp::shootdown();
         }
         Err(_) => {
             // Best-effort restore of the old mapping.
-            let _ = unsafe { mapper.map_to(page, old_frame, flags, &mut *allocator) };
+            let _ = unsafe {
+                mapper.map_to_with_table_flags(
+                    page, old_frame, flags, ancestor_flags(flags), &mut *allocator,
+                )
+            };
             let _ = memory::deallocate_frame(new_frame);
             return false;
         }
@@ -1580,7 +1606,10 @@ pub fn map_private_frame_from_bytes(
         core::ptr::copy_nonoverlapping(bytes.as_ptr(), destination, 4096);
     }
     let mut allocator = memory::allocator();
-    match unsafe { mapper.map_to(page, frame, user_flags(writable, false), &mut *allocator) } {
+    let flags = user_flags(writable, false);
+    match unsafe {
+        mapper.map_to_with_table_flags(page, frame, flags, ancestor_flags(flags), &mut *allocator)
+    } {
         Ok(flush) => {
             if Cr3::read().0 == space.level_4_frame {
                 flush.flush();
@@ -1647,7 +1676,10 @@ pub fn map_file_frame(space: AddressSpace, address: u64, physical: u64, writable
     if refs.share(physical).is_err() {
         return false;
     }
-    match unsafe { mapper.map_to(page, frame, user_flags(writable, false), &mut *allocator) } {
+    let flags = user_flags(writable, false);
+    match unsafe {
+        mapper.map_to_with_table_flags(page, frame, flags, ancestor_flags(flags), &mut *allocator)
+    } {
         Ok(flush) => {
             if Cr3::read().0 == space.level_4_frame {
                 flush.flush();

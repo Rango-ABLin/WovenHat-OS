@@ -317,6 +317,16 @@ write-through audit.
 
 ## Stage 11.2 scheduler-backed thread ownership (2026-10-14)
 
+Pending earlier-foundation corrections (2026-10-15): user-mapping ancestors
+are explicitly writable while leaves retain W^X/RELRO/COW policy, including
+read-only COW/file mappings; this prevents sole-owner COW refaults. Process wait
+checks parent ownership before scheduler liveness, without nesting those locks,
+and rechecks in the original reap transaction. Process wait and thread join
+share a zero-extending 32-bit exit payload encoder, separate from 64-bit errors.
+The real libwoven fixture catches these boundaries and preserves original
+Stage 11.2 assertions. See the three dedicated audits. 1/2/4-CPU focused execution
+passes; full acceptance remains pending. None is a release/hardware qualification.
+
 Earlier-stage IPC follow-up (2026-10-15, bounded correction accepted): `HandleSpace`
 now skips empty slots whose preserved 24-bit generation is already maximum.
 The last live generation remains valid until close. The existing state guard,

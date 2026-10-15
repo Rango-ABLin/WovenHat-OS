@@ -27,6 +27,8 @@ stage10-8-test = ["qemu-test"]
 stage10-9-test = ["qemu-test"]
 stage11-1-test = ["qemu-test"]
 stage11-2-test = ["qemu-test"]
+# Run the compiled libwoven fixture first, then the unchanged Stage 11.2 gate.
+stage11-exit-status-test = ["stage11-2-test"]
 stage11-3-test = ["qemu-test"]
 stage11-4-test = ["qemu-test"]
 stage11-5-test = ["qemu-test"]

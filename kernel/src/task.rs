@@ -3090,6 +3090,19 @@ fn process_has_live_tasks(process_id: u64) -> bool {
 pub fn wait_process(child_id: u64) -> Result<i32, WaitError> {
     let parent = ProcessId(current_process_id());
     let child = ProcessId(child_id);
+    {
+        // Classify only an owned child as running. Release PROCESS_TABLE before
+        // inspecting scheduler state: the scheduler is lower-ranked. A sibling
+        // waiter may reap meanwhile, so the final transaction rechecks ownership.
+        let processes = process_table_lock();
+        if !processes
+            .iter()
+            .flatten()
+            .any(|process| process.id == child && process.parent == parent)
+        {
+            return Err(WaitError::NoSuchChild);
+        }
+    }
     if process_has_live_tasks(child_id) {
         return Err(WaitError::StillRunning);
     }

@@ -2391,7 +2391,7 @@ pub extern "C" fn wovenhat_syscall_dispatch(
         value if value == Number::ThreadExit as u64 => crate::task::exit_current_thread(arg0 as i32),
         value if value == Number::ThreadJoin as u64 => loop {
             match crate::task::join_user_thread(arg0) {
-                Ok(exit) => break exit as u64,
+                Ok(exit) => break crate::exit_status::encode(exit),
                 Err(crate::task::ThreadJoinError::Running) => {
                     let owner = crate::task::current_process_id();
                     let waiter = crate::task::current_task_id().as_u64();
@@ -2424,7 +2424,7 @@ pub extern "C" fn wovenhat_syscall_dispatch(
         .map_or(SYSCALL_ERROR, |_| 0),
         value if value == Number::Getpid as u64 => crate::task::current_process_id(),
         value if value == Number::Waitpid as u64 => match crate::task::wait_process(arg0) {
-            Ok(exit_code) => exit_code as u64,
+            Ok(exit_code) => crate::exit_status::encode(exit_code),
             Err(crate::task::WaitError::StillRunning) => u64::MAX - 1,
             Err(crate::task::WaitError::NoSuchChild) => u64::MAX,
         },
