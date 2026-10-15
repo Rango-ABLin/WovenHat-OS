@@ -1897,6 +1897,31 @@ pub fn stage15_2_self_test() -> bool {
         return false;
     }
 
+    // Regression for Stage 15: a rejected sparse write must not create an
+    // empty inode or publish a VFS cache entry. Check the disk directory too.
+    let mut sparse_out = [0u8; MAX_FILE_SIZE];
+    let mut sparse_published = false;
+    let sparse_rejected = write_vfs_path_at_with_publish(
+        "/wfs/sparse-reject.bin",
+        1,
+        b"x",
+        &mut sparse_out,
+        32,
+        |_, _, _| {
+            sparse_published = true;
+            Ok::<(), ()>(())
+        },
+    ) == Err(Error::TooLarge);
+    let sparse_absent = with_ata_volume(|volume| {
+        volume.lookup(1, "sparse-reject.bin") == Err(Error::NotFound)
+    }) == Some(true);
+    if !step(
+        "rejected sparse write creates no inode or VFS publication",
+        sparse_rejected && sparse_absent && !sparse_published,
+    ) {
+        return false;
+    }
+
     let verified = with_ata_volume(|volume| {
         if volume.check().is_err() {
             return false;
