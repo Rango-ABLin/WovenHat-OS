@@ -10,7 +10,10 @@ command record. The ELF files are not patched after linking. The shared PIE
 imports `woven_answer` from `libwoven-demo.so`; the static TLS executable uses
 a real volatile compiler-generated local-exec access. Both should exit 42 when
 executed by the ordinary WovenHat loader. This is the test's required outcome,
-not a claim that the current kernel passes it.
+not a claim that the current kernel passes it. `tls-threads-demo` additionally
+checks zero-fill, 64-byte alignment, two freshly initialized child threads,
+private mutations and preservation of the main thread's changed values.
+Thread join uses the existing event-driven blocking syscall, not busy waiting.
 
 At the initial 2026-10-15 probe, the shared PIE is rejected for LLD's null
 `DT_DEBUG`, while the static TLS image parses but exposes the missing TCB and

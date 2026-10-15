@@ -23,7 +23,7 @@ def build(output, rustc='rustc'):
     output = output.resolve()
     output.mkdir(parents=True, exist_ok=False)
     commands = []
-    inputs = ('library.rs', 'shared-main.rs', 'static-tls.rs')
+    inputs = ('library.rs', 'shared-main.rs', 'static-tls.rs', 'tls-threads.rs')
     input_hashes = {name: digest(source / name) for name in inputs}
     builder_hash = digest(Path(__file__).resolve())
 
@@ -56,13 +56,14 @@ def build(output, rustc='rustc'):
         command = [rustc, '--edition=2024', '--crate-type=lib', '--emit=obj',
                    '--target=x86_64-unknown-none', '-Dwarnings', '-Cpanic=abort',
                    '-Copt-level=2', '-Crelocation-model=pic', '-Ccode-model=large']
-        if name == 'static-tls.rs':
+        if name in ('static-tls.rs', 'tls-threads.rs'):
             command.append('-Ztls-model=local-exec')
         run(command + [source / name, '-o', output / (Path(name).stem + '.o')])
 
     library = output / 'libwoven-demo.so'
     shared = output / 'shared-demo'
     tls = output / 'static-tls-demo'
+    threads = output / 'tls-threads-demo'
     run([linker, '-flavor', 'gnu', '-shared', '--hash-style=sysv',
          '-soname', library.name, '-z', 'now', '-o', library, output / 'library.o'])
     run([linker, '-flavor', 'gnu', '-pie', '--no-dynamic-linker', '--hash-style=sysv',
@@ -70,7 +71,9 @@ def build(output, rustc='rustc'):
          '-lwoven-demo', '-o', shared, output / 'shared-main.o'])
     run([linker, '-flavor', 'gnu', '-static', '--image-base=0x400000000000',
          '-e', '_start', '-o', tls, output / 'static-tls.o'])
-    outputs = (library, shared, tls)
+    run([linker, '-flavor', 'gnu', '-static', '--image-base=0x400000000000',
+         '-e', '_start', '-o', threads, output / 'tls-threads.o'])
+    outputs = (library, shared, tls, threads)
     report = run([readobj, '--file-headers', '--program-headers', '--dynamic-table',
                   '--relocations', '--symbols', *outputs])
     (output / 'elf-report.txt').write_text(report, encoding='utf-8')
