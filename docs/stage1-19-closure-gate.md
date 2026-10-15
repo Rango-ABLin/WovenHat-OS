@@ -58,8 +58,12 @@ test session.
    retirement is integrated, and five actual-source host regressions plus
    build and warning-denying host/kernel/affected-feature checks pass. The
    failing stale-handle evidence is preserved. The inherited runtime chain
-   remains pending, serialized behind Claude's live acceptance process;
-   the correction is not yet accepted or committed.
+   remains pending. Commit `92959b3d` records the correction as in progress;
+   it is not acceptance. The fresh serialized chain in
+   `audit-artifacts/thread-generation-20261015/runtime-attempt-20261015-180920-929/`
+   passed Stage 11.2 on 1/2/4 CPUs and all 60 inherited memory boots, and is
+   running network preservation. The remaining inherited and stage-specific
+   matrices must pass before the correction is accepted.
 2. Reproduce and resolve the earlier IPC handle-generation rollover candidate
    before advancing loader work. The source review identifies a 24-bit counter
    wrapping to one in a surviving process-local slot, but executable regression
