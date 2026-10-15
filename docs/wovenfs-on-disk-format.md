@@ -91,6 +91,15 @@ rot, not a mis-written or crafted image. Without the check, a write would put
 file data over the journal or metadata, and an unlink would free a metadata
 block.
 
+An inode that names the same block in two slots also reads as corrupt. A
+write that rewrites an existing block in place, and a shrink or unlink that
+frees one, first requires that block's bitmap bit to be set. If the bit is
+clear, the operation fails with `Corrupt` before anything is committed,
+because the allocator may already have handed that block to another inode.
+Two live inodes that both name one allocated block are not detected on these
+paths. Only `check()` finds that, and it is compiled into test and self-test
+builds only.
+
 ### Directory entry (64 bytes, 8 per block)
 
 | Offset | Size | Field |

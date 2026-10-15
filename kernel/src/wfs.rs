@@ -811,13 +811,20 @@ impl<D: BlockDevice> Volume<D> {
     /// bitmap bits, so a pointer at the superblock, journal, bitmap or inode
     /// table would let file data overwrite metadata or free a metadata block.
     /// Free inodes are checked too, because a stale directory entry can still
-    /// reach one through `unlink`.
+    /// reach one through `unlink`. Two slots naming the same block are refused
+    /// too: a write would stage that block twice with different bytes, and a
+    /// shrink would free it while another slot still names it.
     fn checked_inode(&self, raw: &[u8]) -> Result<Inode, Error> {
         let node = Inode::decode(raw).ok_or(Error::Corrupt)?;
         let sb = &self.super_block;
         let in_data = |block: &u64| *block == 0 || (sb.data_start..sb.total_blocks).contains(block);
         if !node.direct.iter().all(in_data) {
             return Err(Error::Corrupt);
+        }
+        for (slot, block) in node.direct.iter().enumerate() {
+            if *block != 0 && node.direct[slot + 1..].contains(block) {
+                return Err(Error::Corrupt);
+            }
         }
         if node.is_used()
             && (!matches!(node.kind, KIND_FILE | KIND_DIR) || node.size > MAX_FILE_SIZE as u64)
@@ -859,6 +866,18 @@ impl<D: BlockDevice> Volume<D> {
             sector[byte] &= !mask;
         }
         txn.stage(lba, &sector)
+    }
+
+    /// Stage `block` as free, refusing a block the bitmap already marks free.
+    ///
+    /// Only a block some inode still names is ever freed. A clear bit means the
+    /// allocator may already have handed it to another inode, which would then
+    /// lose a block it owns.
+    fn stage_free_block(&mut self, txn: &mut Transaction, block: u64) -> Result<(), Error> {
+        if !self.bitmap_get(txn, block)? {
+            return Err(Error::Corrupt);
+        }
+        self.stage_bitmap(txn, block, false)
     }
 
     fn allocate_block(&mut self, txn: &mut Transaction) -> Result<u64, Error> {
@@ -1067,6 +1086,10 @@ impl<D: BlockDevice> Volume<D> {
             if slot < needed {
                 if node.direct[slot] == 0 {
                     node.direct[slot] = self.allocate_block(txn)?;
+                } else if !self.bitmap_get(txn, node.direct[slot])? {
+                    // Rewriting in place a block the bitmap calls free would
+                    // overwrite whatever the allocator has since given it to.
+                    return Err(Error::Corrupt);
                 }
                 let mut sector = [0u8; SECTOR_SIZE];
                 let from = slot * SECTOR_SIZE;
@@ -1076,7 +1099,7 @@ impl<D: BlockDevice> Volume<D> {
                 txn.stage(block, &sector)?;
             } else if node.direct[slot] != 0 {
                 let block = node.direct[slot];
-                self.stage_bitmap(txn, block, false)?;
+                self.stage_free_block(txn, block)?;
                 node.direct[slot] = 0;
             }
         }
@@ -1142,7 +1165,7 @@ impl<D: BlockDevice> Volume<D> {
         for slot in 0..DIRECT_BLOCKS {
             if node.direct[slot] != 0 {
                 let block = node.direct[slot];
-                self.stage_bitmap(&mut txn, block, false)?;
+                self.stage_free_block(&mut txn, block)?;
                 node.direct[slot] = 0;
             }
         }

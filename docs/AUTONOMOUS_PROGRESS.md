@@ -4,6 +4,78 @@ Each entry is one bounded checkpoint. Entries record exactly what was run.
 Nothing here claims production readiness; completion requires independent
 human review.
 
+## 2026-10-15 — WovenFS: refuse to reuse or free blocks the bitmap marks free
+
+Branch: `auto/wovenhat-development` (base `0989924`). The working tree was
+clean at the start, so there was no unfinished work to resume. This narrows
+the "pointer aliasing" item left open by the previous entry. It does not
+close it.
+
+### Defect
+
+The write path trusted inode pointers against the bitmap:
+
+- `stage_write` rewrote an existing pointer's block in place without checking
+  that the bitmap still marked it allocated. `stage_write` (shrink) and
+  `unlink` cleared bitmap bits without checking that they were set. A
+  pointer to a block the bitmap calls free is the step that leads to
+  aliasing: the allocator gives that block to another file, and the first
+  inode then overwrites or frees the other file's data.
+- An inode naming the same block in two slots was accepted. A write staged
+  that block twice with different bytes, and a shrink freed it while another
+  slot still named it.
+
+### Change
+
+- `kernel/src/wfs.rs`:
+  - `checked_inode` refuses duplicate non-zero pointers within one inode.
+  - The new `stage_free_block` refuses (`Corrupt`) to free a block whose bit
+    is already clear. Shrink and `unlink` use it.
+  - `stage_write` refuses to rewrite in place an existing block whose bit is
+    clear.
+  - Every refusal happens while staging, so nothing reaches the journal or
+    the disk.
+- `tests/wovenfs_crash.rs`:
+  - `a_pointer_at_a_block_the_bitmap_marks_free_is_not_reused_or_freed`
+    redirects a pointer to a free data block, with the inode checksum
+    re-sealed. `check()` confirms the bit is clear. A growing write, a
+    shrinking write and `unlink` must each return `Corrupt` and leave the
+    image byte-identical.
+  - `an_inode_naming_one_block_twice_is_refused` makes `inode`, `read_file`,
+    both writes and `unlink` return `Corrupt`, again with the image
+    unchanged.
+- `docs/wovenfs-on-disk-format.md`: documents both rules and the remaining
+  gap.
+
+### Results (run on this host, 2026-10-15)
+
+Using project-local `CARGO_BUILD_BUILD_DIR=.cargo-build`,
+`CARGO_TARGET_DIR=target`:
+
+| Command | Result |
+|---|---|
+| New tests against `HEAD`'s `wfs.rs` (negative control) | Both FAIL as expected: `in-place write: must refuse a block the bitmap marks free` (`left: Ok(())`), and the duplicate-pointer `inode()` assertion (`left: Ok(())`). The fixed file was restored afterwards |
+| `cargo fmt --all -- --check` | PASS |
+| `cargo test --test wovenfs_crash` | PASS, 18 passed / 0 failed |
+| `cargo test -p wovenhat-os --tests --no-fail-fast` | PASS, 128 passed / 0 failed |
+| `cargo clippy --all-targets -- -D warnings` | PASS. The first run failed with `clippy::type_complexity` in the new test; fixed with a type alias, then rerun |
+| `cargo clippy -p wovenhat-kernel --target x86_64-unknown-none -- -D warnings` (default) | PASS |
+| same, `--features stage11-5-test` | PASS |
+| same, `--features stage15-1-test` … `stage15-9-test` (each) | PASS |
+| QEMU Stage 15.x on 1/2/4 CPUs | **NOT RUN**: `qemu-system-x86_64` is not installed on this host |
+
+### Open / next
+
+- Cross-inode aliasing, where two live inodes both name one block marked
+  allocated, is still detected only by `check()` (test and self-test builds).
+  Closing it needs an ownership scan, either at mount or before each
+  in-place write or free. That costs inode-table reads and needs a design
+  decision.
+- The journal descriptor's target list is still not covered by any checksum
+  (format change; needs a compatibility decision).
+- QEMU Stage 15.1/15.2 acceptance on 1/2/4 CPUs must be rerun on a host with
+  QEMU before this counts as stage acceptance.
+
 ## 2026-10-15 — WovenFS: restrict journal replay targets
 
 Branch: `auto/wovenhat-development` (base `897ec82`). The working tree was

@@ -596,6 +596,96 @@ fn inode_block_pointers_outside_the_data_region_are_refused() {
     }
 }
 
+/// A two-block file whose second pointer the caller then redirects.
+fn two_block_file() -> (CrashDisk, u64) {
+    let base = formatted();
+    let inode = {
+        let mut volume = Volume::mount(base.clone()).expect("mount");
+        volume
+            .create_file(1, "p.bin", 0o644, &[7u8; 600], 1)
+            .expect("create_file")
+    };
+    (base, inode)
+}
+
+/// An operation on a mounted volume and the file's inode number.
+type Attempt = fn(&mut Volume<CrashDisk>, u64) -> Result<(), Error>;
+
+#[test]
+fn a_pointer_at_a_block_the_bitmap_marks_free_is_not_reused_or_freed() {
+    let (base, inode) = two_block_file();
+    let free = Volume::mount(base.clone())
+        .expect("mount")
+        .super_block()
+        .total_blocks
+        - 1;
+    redirect_inode_block(&base, inode, 1, free);
+    assert_eq!(
+        Volume::mount(base.clone()).expect("mount").check(),
+        Err(Error::Corrupt),
+        "the redirected block must be free in the bitmap"
+    );
+
+    // Growing rewrites the free block in place; shrinking and unlink free it
+    // again. Each would leave the block with two owners once the allocator
+    // hands it out.
+    let attempts: [(&str, Attempt); 3] = [
+        ("in-place write", |volume, inode| {
+            volume.write_file(inode, &[9u8; 1500], 2)
+        }),
+        ("shrinking write", |volume, inode| {
+            volume.write_file(inode, &[9u8; 100], 2)
+        }),
+        ("unlink", |volume, _| volume.unlink(1, "p.bin", 2)),
+    ];
+    for (operation, attempt) in attempts {
+        let image = base.fork(None);
+        let before = image.sectors();
+        let mut volume = Volume::mount(image.clone()).expect("mount");
+        assert_eq!(
+            attempt(&mut volume, inode),
+            Err(Error::Corrupt),
+            "{operation}: must refuse a block the bitmap marks free"
+        );
+        assert!(
+            image.sectors() == before,
+            "{operation}: a refused operation must not modify the image"
+        );
+    }
+}
+
+#[test]
+fn an_inode_naming_one_block_twice_is_refused() {
+    let (base, inode) = two_block_file();
+    let first = Volume::mount(base.clone())
+        .expect("mount")
+        .inode(inode)
+        .expect("inode")
+        .direct[0];
+    redirect_inode_block(&base, inode, 1, first);
+    let before = base.sectors();
+
+    let mut volume = Volume::mount(base.clone()).expect("mount");
+    assert_eq!(volume.inode(inode).map(|_| ()), Err(Error::Corrupt));
+    let mut out = vec![0u8; MAX_FILE_SIZE];
+    assert_eq!(volume.read_file(inode, &mut out), Err(Error::Corrupt));
+    assert_eq!(
+        volume.write_file(inode, &[9u8; 1500], 2),
+        Err(Error::Corrupt),
+        "write must not stage one block twice"
+    );
+    assert_eq!(
+        volume.write_file(inode, &[9u8; 100], 2),
+        Err(Error::Corrupt),
+        "shrink must not free a block another slot still names"
+    );
+    assert_eq!(volume.unlink(1, "p.bin", 3), Err(Error::Corrupt));
+    assert!(
+        base.sectors() == before,
+        "a refused operation must not modify the image"
+    );
+}
+
 /// Rewrite one little-endian field of the superblock in `slot`, re-sealing its
 /// checksum so only the geometry check can catch the change.
 fn reseal_super_field(image: &CrashDisk, slot: usize, at: usize, value: &[u8]) {
