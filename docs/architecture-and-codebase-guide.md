@@ -324,6 +324,9 @@ The last live generation remains valid until close. The existing state guard,
 paths are unchanged. Actual-source boundary probes pass, but production
 rollback/teardown and inherited runtime qualification remain required; see the
 handle-generation audit. This is separate from thread-record retirement.
+Durable host coverage is now part of `cargo test`; a `qemu-test`-guarded
+post-SMP probe exercises real installation rollback, queued escrow, waiters,
+lineage and frame cleanup. Its final revised full acceptance chain is pending.
 
 The registry now reserves generation `u32::MAX` as a permanent exhaustion
 sentinel: a free record at that value is never allocated again. All three

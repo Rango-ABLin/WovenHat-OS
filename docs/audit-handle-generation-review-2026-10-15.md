@@ -37,6 +37,55 @@ explicit native-exit capture produced `IPC production Clippy exit: 0`, retained
 in `ipc-production-clippy-repeat.txt`. Neither check establishes host-all-target
 or affected-feature/runtime acceptance. Those remain required.
 
+## Durable and production-state regressions — in progress
+
+`tests/ipc_handles.rs` now invokes the repository-owned
+`scripts/test-ipc-handle-generation.py` from `cargo test`. The runner extracts
+the actual allocator unchanged, fails closed if its extraction/configuration
+boundaries change, compiles with warnings denied, and runs the five boundary,
+capacity and metadata cases. Generated compiler/command/hash evidence uses
+unique directories under `audit-artifacts/`. The authorization double panics
+if invoked; these tests do not substitute for security or paging acceptance.
+The durable host test and `qemu-test` kernel Clippy passed before the final
+teardown extension.
+
+`kernel/src/ipc_generation_tests.rs` is guarded by `qemu-test`, including its
+call inside the existing Stage 8.1 post-SMP probe. It uses the real global state,
+authorization and public shared-frame allocator. Only empty counters in newly
+registered synthetic namespaces are seeded; no live generation is modified,
+no exhausted counter is reset, and cleanup only touches registered test owners.
+The test covers valid last-generation handles; repeated endpoint, delegation,
+discovery and shared-memory allocation failures; exact reference rollback;
+failed transfer FIFO/escrow/waiter preservation; a successful retry into an
+ordinary freed slot; stale handles and metadata; publisher/service exit; an
+actual pending owner waiter; abandoned queued escrow; receiver teardown; and
+exact object/service/lineage/frame baselines. Synthetic waiter IDs are inspected
+only through private State return values and are never signaled to the scheduler.
+There is no new unsafe code, production syscall, capability or lock. Frame
+allocation is outside the existing state guard; established higher-rank frame
+release paths are unchanged. No scheduling occurs under that guard.
+
+The initial focused matrix passed on 1/2/4 CPUs at
+`audit-artifacts/ipc-focused-20261015-185039-168/`, but review extended the probe
+to retain queued escrow and an actual waiter during publisher teardown. The
+first extended run failed on one CPU and stopped before host/full acceptance:
+`audit-artifacts/ipc-generation-20261015/attempt-20261015-185442-871/`.
+The diagnostic counterpart, source and logs are retained in
+`diagnostic-waiter-order-20261015-1858/`. It showed correct reference counts
+and exact cleanup baselines, but a second send had legitimately consumed the
+receive waiter before the test expected close to return it again. The test now
+asserts close-time waiter removal on the empty original channel and uses a
+replacement channel for independent escrow/owner teardown. This retains the
+waiter assertion and adds stale-channel validation; no production behavior,
+timeout or prior assertion was disabled to obtain a pass.
+
+A new 488-file freeze and full serialized attempt are under
+`audit-artifacts/ipc-generation-20261015/revision2/`. They do not overwrite
+either earlier manifest or failed evidence. Focused 1/2/4 boots, build, host
+all-targets Clippy, host/libwoven/Python tests, production and affected-feature
+Clippy, exact full Stage 10.7 preservation and Stage 10.8–11.5 matrices are
+required before acceptance. This final revised chain is still running.
+
 This read-only review was performed while the thread-generation runtime chain
 waited behind Claude's live release validation. No kernel source or frozen
 manifest was changed for this review. No additional test chain was started.

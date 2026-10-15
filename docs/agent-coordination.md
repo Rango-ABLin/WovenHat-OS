@@ -14,6 +14,13 @@ rollover diagnostic and correction. Keep foreign acceptance chains on hold
 until this reservation is released; source-only work can continue. The older
 queued/interrupted notes below are retained history, not live process state.
 
+**IPC chain ACTIVE (session 63244):** final revised exhaustion/rollback probe,
+host QA and full inherited 1/2/4-CPU preservation are running from
+`audit-artifacts/ipc-generation-20261015/revision2/` under a 488-file freeze.
+Earlier extended-probe failure and waiter-order diagnostic are retained; no IPC
+acceptance claim yet. Keep all foreign acceptance/build chains on hold while
+this session is live. Source-only work in other worktrees remains independent.
+
 **Coordination confirmed by the user on 2026-10-15.** A second
 handoff overlap occurred: Claude's `run2015b.py` (PID 30304, start 2026-10-15
 17:59:57 local) began during Codex's reserved gate. Codex stopped only its own

@@ -14,6 +14,10 @@ use crate::paging;
 use crate::task::{self, TaskId};
 use crate::wovenguard::{self, LineageId, ServiceClass};
 
+#[cfg(feature = "qemu-test")]
+#[path = "ipc_generation_tests.rs"]
+mod generation_tests;
+
 pub use crate::config::MAX_MESSAGE_SIZE;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -2257,6 +2261,11 @@ pub fn handle_object_self_test() -> bool {
 /// endpoint/object/handle behind. This proves the production lock/state path,
 /// not only the local pure-State self-test.
 pub fn stage8_1_runtime_probe() -> bool {
+    #[cfg(feature = "qemu-test")]
+    if !generation_tests::run() {
+        return false;
+    }
+
     const PROBE_OWNER: u64 = u64::MAX - 8;
 
     // Exercise the production public API rather than reaching into State

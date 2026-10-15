@@ -36,6 +36,10 @@ exhausted-slot skipping is integrated; all five allocator probe tests and
 production kernel Clippy pass. Persistent repository regressions, installation
 rollback/teardown coverage and inherited runtime acceptance are still pending.
 See the handle-generation audit; this is not Stage 8–10 production closure.
+Durable Cargo regression coverage and a guarded real-state QEMU boundary probe
+are integrated. An extended teardown test exposed and corrected a test-ordering
+mistake; failed logs remain preserved. Final revised acceptance is running under
+the separate 488-file freeze in `audit-artifacts/ipc-generation-20261015/revision2/`.
 
 ## Presentation and repaint performance (2026-10-15)
 
