@@ -264,6 +264,13 @@ pub mod syscall {
     pub const GRAPHICS_COMPOSITOR_BLIT_SHARED: u64 = 110;
     pub const WAIT_ANY: u64 = 111;
     pub const WAIT_ANY_OBJECTS: u64 = 206;
+    pub const TIMER_CREATE: u64 = 87;
+    pub const TIMER_WAIT: u64 = 88;
+    pub const EVENT_CREATE: u64 = 89;
+    pub const EVENT_SET: u64 = 90;
+    pub const EVENT_WAIT: u64 = 91;
+    pub const TIMER_CLOSE: u64 = 92;
+    pub const EVENT_CLOSE: u64 = 93;
     pub const GRAPHICS_SURFACE_DAMAGE: u64 = 112;
     pub const GRAPHICS_COMPOSITOR_BLIT_DAMAGE: u64 = 113;
     pub const GRAPHICS_COMPOSITOR_BLEND: u64 = 114;
@@ -633,6 +640,36 @@ pub mod syscall {
     /// readable WovenHat userspace memory.
     pub unsafe fn wait_any_objects(sources: *const u8, count: u64, deadline: u64) -> u64 {
         unsafe { invoke(WAIT_ANY_OBJECTS, deadline, sources as u64, count) }
+    }
+
+    /// # Safety
+    /// Must be called from WovenHat userspace.
+    pub unsafe fn timer_create(relative: u64, period: u64) -> u64 {
+        unsafe { invoke(TIMER_CREATE, relative, period, 0) }
+    }
+
+    /// # Safety
+    /// Must be called from WovenHat userspace.
+    pub unsafe fn event_create(initial: u64) -> u64 {
+        unsafe { invoke(EVENT_CREATE, initial, 0, 0) }
+    }
+
+    /// # Safety
+    /// Must be called from WovenHat userspace with an owned event handle.
+    pub unsafe fn event_set(handle: u64, state: u64) -> u64 {
+        unsafe { invoke(EVENT_SET, handle, state, 0) }
+    }
+
+    /// # Safety
+    /// Must be called from WovenHat userspace with an owned object handle.
+    pub unsafe fn timer_close(handle: u64) -> u64 {
+        unsafe { invoke(TIMER_CLOSE, handle, 0, 0) }
+    }
+
+    /// # Safety
+    /// Must be called from WovenHat userspace with an owned object handle.
+    pub unsafe fn event_close(handle: u64) -> u64 {
+        unsafe { invoke(EVENT_CLOSE, handle, 0, 0) }
     }
 
     /// # Safety
@@ -1035,6 +1072,29 @@ pub struct WaitObject {
     pub mask: u64,
 }
 
+/// Create a one-shot or periodic userspace timer. Requires `TimerRead`.
+pub fn timer_create(relative: time::Ticks, period: time::Ticks) -> Result<u64, Error> {
+    check(unsafe { syscall::timer_create(relative, period) })
+}
+
+/// Create a manual-reset event. Requires `Ipc`.
+pub fn event_create(initial: bool) -> Result<u64, Error> {
+    check(unsafe { syscall::event_create(u64::from(initial)) })
+}
+
+/// Set or clear a manual-reset event.
+pub fn event_set(handle: u64, state: bool) -> Result<(), Error> {
+    check(unsafe { syscall::event_set(handle, u64::from(state)) }).map(|_| ())
+}
+
+pub fn timer_close(handle: u64) -> Result<(), Error> {
+    check(unsafe { syscall::timer_close(handle) }).map(|_| ())
+}
+
+pub fn event_close(handle: u64) -> Result<(), Error> {
+    check(unsafe { syscall::event_close(handle) }).map(|_| ())
+}
+
 /// Wait on up to eight timer/event objects. The source records are copied by
 /// the kernel before registration; no userspace pointer is retained while the
 /// task sleeps.
@@ -1046,8 +1106,8 @@ pub fn wait_any_objects(sources: &[WaitObject], deadline: Option<time::Ticks>) -
     for (index, source) in sources.iter().enumerate() {
         let offset = index * 24;
         packed[offset..offset + 8].copy_from_slice(&source.handle.to_le_bytes());
-        packed[offset + 8..offset + 16]
-            .copy_from_slice(&u64::from(source.timer).to_le_bytes());
+        let kind = u64::from(!source.timer);
+        packed[offset + 8..offset + 16].copy_from_slice(&kind.to_le_bytes());
         packed[offset + 16..offset + 24].copy_from_slice(&source.mask.to_le_bytes());
     }
     // SAFETY: `packed` is live and readable for the duration of the syscall.

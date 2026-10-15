@@ -2462,7 +2462,7 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         console.println("BLOCK I/O WORKER: START FAILED");
         halt();
     }
-    #[cfg(feature = "stage10-9-test")]
+    #[cfg(any(feature = "stage10-9-test", feature = "stage19-8-test"))]
     if !async_events::start_worker() {
         console.println("TIMER/EVENT WORKER: START FAILED");
         halt();
@@ -9441,6 +9441,22 @@ fn stage19_8_self_test() -> bool {
     let mut image = alloc::vec![0u8; HELLO_GUI_IMAGE.len()];
     if vfs::read_all("/bin/hello-gui", &mut image) != Ok(HELLO_GUI_IMAGE.len()) {
         return step("filesystem round-trip", false);
+    }
+
+    let timer_event_caps = capability::CapabilitySet::only(capability::Capability::Console)
+        .with(capability::Capability::TimerRead)
+        .with(capability::Capability::Ipc);
+    let timer_event = spawn_hello_gui(
+        &image,
+        &["/bin/hello-gui", "--timer-event"],
+        Some(timer_event_caps),
+    )
+    .and_then(wait_hello_gui);
+    if !step(
+        "userspace timer and event sources wake unified wait",
+        matches!(timer_event, Some((_, Ok(0)))),
+    ) {
+        return false;
     }
 
     const VICTIM_OWNER: u64 = 4245;

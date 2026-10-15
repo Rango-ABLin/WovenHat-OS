@@ -171,8 +171,15 @@ pub fn register_task(
         if matches!(object.kind, Kind::Timer(_)) != is_timer {
             return Err(());
         }
-        if object.waiter.is_some() || object.waiter_task.is_some() {
+        if object.waiter.is_some() {
             return Ok(TaskWaitRegistration::Busy);
+        }
+        if let Some(waiter) = object.waiter_task {
+            return Ok(if waiter == task {
+                TaskWaitRegistration::Registered
+            } else {
+                TaskWaitRegistration::Busy
+            });
         }
         if object.ready(timer::ticks()) != 0 {
             return Ok(TaskWaitRegistration::Ready);
@@ -276,15 +283,20 @@ fn pump(now: u64) -> u64 {
                     deadline = deadline.min(next);
                 }
             }
-            if object.waiter.is_some() || object.waiter_task.is_some() {
+            if object.waiter.is_some() {
                 let count = object.ready(now);
                 if count != 0 {
                     if let Some(waiter) = object.waiter.take() {
                         completions[index] = Some((waiter, count));
                     }
-                    if let Some(task) = object.waiter_task.take() {
-                        task::signal_event(task);
-                    }
+                }
+            } else if let Some(task) = object.waiter_task {
+                let ready = match &object.kind {
+                    Kind::Timer(timer) => timer.pending() != 0,
+                    Kind::Event(set) => *set,
+                };
+                if ready {
+                    task::signal_event(task);
                 }
             }
         }

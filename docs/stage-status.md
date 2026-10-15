@@ -11,11 +11,13 @@ all return paths. A live completion-handle waiter or another task waiter is
 refused rather than replaced. The safe `libwoven::wait_any_objects` wrapper
 uses the same bounded ABI. The existing syscall 111 remains ABI-compatible.
 
-The Stage 19.8 feature gate now includes an object-registration self-test, and
-host/all-target Clippy plus the freestanding Stage 19.8 warning-denying gate
-pass. Full 1/2/4-CPU QEMU acceptance of a userspace timer/event integration is
-still required before this increment is accepted as a complete stage gate.
-See [the ABI contract](wait-any-objects-abi.md).
+The Stage 19.8 feature gate now includes an object-registration self-test and
+the `hello-gui --timer-event` userspace scenario. Host/all-target Clippy,
+freestanding Stage 19.8 and neighboring Stage 19.13 warning-denying gates, and
+full 1/2/4-CPU QEMU acceptance all pass. The scenario verifies one-shot timer
+wake, manual-reset event wake, cleanup, and the existing multiplexed input/
+message/damage/timeout behavior. Each object retains a single-waiter ownership
+contract, but one task may wait on multiple objects. See [the ABI contract](wait-any-objects-abi.md).
 
 ## Stage 20.14a — two monitors through virtio-gpu (2026-10-15)
 
