@@ -83,6 +83,6 @@ branch. The Stage 19.8 timer/event unified-wait userspace integration is
 committed as `ba02d38`, and bounded manual-reset-event waiter fan-out is
 committed as `0459108`; the focused 1/2/4-CPU gate and the complete release
 chain pass after both changes. The validated package is `0.8.0` with UEFI
-image SHA-256 `8ab3b3de1bc610d583a71dddadf282b51f1d429824572fec2d684ceecf87ee46`.
+image SHA-256 `19107f771ae7658068dd37b7c4a25c4f241d9086812d1ab1ab19a7c34c80afeb`.
 The flash disk was inspected non-destructively only; no USB media is being
 modified.
