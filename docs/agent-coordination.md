@@ -6,6 +6,15 @@ you start or finish something.
 
 ## Shared rules
 
+**Codex TLS revision-2 gate ACTIVE (2026-10-15):** session 37505 owns the
+serialized slot on published source `c366cfaa`, with a new 515-input freeze in
+`audit-artifacts/compiler-tls-20261015/revision2/`. First session 77593 stopped
+at TLS-feature Clippy, exit 1, before inherited QEMU preservation. Its warning
+is fixed with as_chunks, not suppressed, and focused TLS Clippy passes. All
+first-attempt evidence is retained. Full acceptance is restarting, not accepted.
+Keep foreign build/acceptance chains held; source-only work may continue.
+Older ACTIVE notes below are historical. ASLR geometry/full-stage/hardware open.
+
 **Codex TLS full gate ACTIVE (2026-10-15):** session 77593 owns serialized
 acceptance on published source `e58b803b`; 515 inputs are frozen under
 `audit-artifacts/compiler-tls-20261015/`. Expanded compiler fork/cancel/full
