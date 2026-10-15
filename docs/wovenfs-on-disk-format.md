@@ -111,6 +111,16 @@ builds only.
 
 Eight direct blocks per directory inode give 64 entries per directory.
 
+Directory blocks carry no checksum. A `name_len` past the 48-byte name field
+never matches a lookup. `unlink` frees nothing unless the entry names a live
+file inode inside the table, other than the directory itself, and no other
+entry in the directory names the same inode. Otherwise it fails with
+`Corrupt` before anything is committed. Without this, an entry naming the
+directory would free the directory's own blocks, and a duplicate entry would
+be left pointing at whatever file next reuses the inode number. The duplicate
+scan covers only the directory being changed. That is sufficient while the
+root is the only directory.
+
 ## Journal
 
 A transaction is a contiguous run of journal sectors:

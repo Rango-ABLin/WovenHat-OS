@@ -818,3 +818,88 @@ fn journal_replay_refuses_targets_outside_the_transactional_regions() {
         );
     }
 }
+
+/// A root directory holding `a.txt` and `b.txt`, the root's first directory
+/// block, and the entry index of `a.txt` within it.
+fn two_file_root() -> (CrashDisk, u64, usize) {
+    let base = formatted();
+    let mut volume = Volume::mount(base.clone()).expect("mount");
+    volume
+        .create_file(1, "a.txt", 0o644, b"alpha", 1)
+        .expect("create a");
+    volume
+        .create_file(1, "b.txt", 0o644, b"bravo", 1)
+        .expect("create b");
+    let block = volume.inode(1).expect("root").direct[0];
+    let index = volume
+        .read_dir(1)
+        .expect("read_dir")
+        .entries
+        .iter()
+        .position(|entry| entry.matches("a.txt"))
+        .expect("a.txt entry");
+    assert!(index < 8, "a.txt must sit in the first directory block");
+    (base, block, index)
+}
+
+/// Overwrite `len` bytes at `at` within one directory entry. Directory blocks
+/// carry no checksum, so nothing needs re-sealing.
+fn patch_dir_entry(image: &CrashDisk, block: u64, index: usize, at: usize, value: &[u8]) {
+    let start = index * 64 + at;
+    image.image.borrow_mut()[block as usize][start..start + value.len()].copy_from_slice(value);
+}
+
+#[test]
+fn unlink_refuses_an_entry_that_does_not_name_one_live_file() {
+    let (base, block, index) = two_file_root();
+    let b_inode = Volume::mount(base.clone())
+        .expect("mount")
+        .lookup(1, "b.txt")
+        .expect("b.txt")
+        .inode;
+    let cases = [
+        ("the directory's own inode", 1u64),
+        ("an inode another entry names", b_inode),
+        ("a free inode", u64::from(INODES)),
+        ("an inode past the table", u64::from(INODES) + 1),
+    ];
+    for (case, target) in cases {
+        let image = base.fork(None);
+        patch_dir_entry(&image, block, index, 0, &target.to_le_bytes());
+        let before = image.sectors();
+        let mut volume = Volume::mount(image.clone()).expect("mount");
+        assert_eq!(
+            volume.unlink(1, "a.txt", 2),
+            Err(Error::Corrupt),
+            "{case}: unlink must refuse the entry"
+        );
+        assert!(
+            image.sectors() == before,
+            "{case}: a refused unlink must not modify the image"
+        );
+        assert_eq!(
+            volume.read_file(b_inode, &mut [0u8; MAX_FILE_SIZE]),
+            Ok(5),
+            "{case}: other files must stay readable"
+        );
+    }
+
+    // Control: the untouched entry unlinks normally.
+    let image = base.fork(None);
+    let mut volume = Volume::mount(image.clone()).expect("mount");
+    volume.unlink(1, "a.txt", 2).expect("unlink a valid entry");
+    mount_consistent(&image, "after a valid unlink");
+}
+
+#[test]
+fn an_entry_name_length_past_the_name_field_does_not_match() {
+    let (base, block, index) = two_file_root();
+    let long = "x".repeat(60);
+    patch_dir_entry(&base, block, index, 8, &60u16.to_le_bytes());
+    let mut volume = Volume::mount(base.clone()).expect("mount");
+    assert_eq!(
+        volume.lookup(1, &long).map(|entry| entry.inode),
+        Err(Error::NotFound)
+    );
+    assert_eq!(volume.unlink(1, &long, 2), Err(Error::NotFound));
+}

@@ -281,10 +281,12 @@ impl DirEntry {
         }
     }
 
+    /// `name_len` comes from an unchecksummed directory block, so a value past
+    /// the name field must not match rather than index out of bounds.
     pub fn matches(&self, name: &str) -> bool {
         self.inode != 0
             && usize::from(self.name_len) == name.len()
-            && &self.name[..name.len()] == name.as_bytes()
+            && self.name.get(..name.len()) == Some(name.as_bytes())
     }
 
     #[cfg(any(test, feature = "stage15-1-test", feature = "stage15-2-test"))]
@@ -1161,7 +1163,26 @@ impl<D: BlockDevice> Volume<D> {
             return Err(Error::NotFound);
         };
 
+        // Directory blocks carry no checksum. Before freeing anything, require
+        // that the entry names a live file inode and is the only entry that
+        // does. An entry naming the directory would free the directory's own
+        // blocks, and a second entry naming the same inode would be left
+        // pointing at whatever file next reuses that inode number.
+        if entry.inode == dir_inode
+            || entry.inode > u64::from(self.super_block.inode_count)
+            || view
+                .entries
+                .iter()
+                .filter(|other| other.inode == entry.inode)
+                .count()
+                != 1
+        {
+            return Err(Error::Corrupt);
+        }
         let mut node = self.inode_staged(&txn, entry.inode)?;
+        if !node.is_used() || node.kind != KIND_FILE {
+            return Err(Error::Corrupt);
+        }
         for slot in 0..DIRECT_BLOCKS {
             if node.direct[slot] != 0 {
                 let block = node.direct[slot];

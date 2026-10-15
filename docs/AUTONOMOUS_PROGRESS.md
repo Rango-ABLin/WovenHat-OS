@@ -4,6 +4,77 @@ Each entry is one bounded checkpoint. Entries record exactly what was run.
 Nothing here claims production readiness; completion requires independent
 human review.
 
+## 2026-10-15 — WovenFS: validate directory entries before unlink
+
+Branch: `auto/wovenhat-development` (base `3024bdb`). The working tree was
+clean at the start, so there was no unfinished work to resume. The previous
+entry's open items (cross-inode aliasing scan, descriptor checksum) both
+need design decisions, so this checkpoint takes a separate, bounded gap:
+directory entries, which carry no checksum, were trusted.
+
+### Defects
+
+- `unlink` freed whatever inode an entry named. An entry naming the root
+  directory's own inode returned `Ok(())`, emptied the root inode and freed
+  its directory blocks, losing the whole namespace. An entry sharing an inode
+  with another entry freed it while the other entry kept pointing at it. An
+  entry naming a free inode was "unlinked" as if valid.
+- `DirEntry::matches` sliced `name[..name.len()]` after only checking
+  `name_len == name.len()`. An entry with `name_len > 48`, looked up by a name
+  of that length through the public `Volume::lookup`/`unlink`, panicked with
+  an out-of-bounds slice. The kernel adapters cap names at 48 first, so this
+  was not reachable through them.
+
+### Change
+
+- `kernel/src/wfs.rs`:
+  - `matches` uses `name.get(..len)`, so an oversized `name_len` never
+    matches.
+  - `unlink` returns `Corrupt` before staging anything when the entry names
+    the directory itself, an inode past the table, an inode another entry in
+    the directory also names, or an inode that is not a used file.
+- `tests/wovenfs_crash.rs`:
+  - `unlink_refuses_an_entry_that_does_not_name_one_live_file`: retargets
+    `a.txt`'s entry at the root inode, at `b.txt`'s inode, at a free inode and
+    past the table. Each `unlink` must return `Corrupt`, leave the image
+    byte-identical and keep `b.txt` readable. A control unlinks the untouched
+    entry and checks consistency.
+  - `an_entry_name_length_past_the_name_field_does_not_match`: `name_len = 60`
+    and a 60-byte lookup/unlink must return `NotFound`.
+- `docs/wovenfs-on-disk-format.md`: documents the directory-entry rules and
+  the remaining scope limit.
+
+### Results (run on this host, 2026-10-15)
+
+Using project-local `CARGO_BUILD_BUILD_DIR=.cargo-build`,
+`CARGO_TARGET_DIR=target`:
+
+| Command | Result |
+|---|---|
+| New tests against `HEAD`'s `wfs.rs` (negative control, before the fix) | Both FAIL as expected: `the directory's own inode: unlink must refuse the entry` (`left: Ok(())`), and a panic `range end index 60 out of range for slice of length 48` at `wfs.rs:287` |
+| `cargo fmt --all -- --check` | PASS. The first check failed on the formatting of one new assertion; fixed with `cargo fmt --all`, then rerun |
+| `cargo test --test wovenfs_crash` | PASS, 20 passed / 0 failed |
+| `cargo test -p wovenhat-os --tests --no-fail-fast` | PASS, 130 passed / 0 failed |
+| `cargo clippy --all-targets -- -D warnings` | PASS |
+| `cargo clippy -p wovenhat-kernel --target x86_64-unknown-none -- -D warnings` (default) | PASS |
+| same, `--features stage11-5-test` | PASS |
+| same, `--features stage15-1-test` … `stage15-9-test` (each) | PASS |
+| QEMU Stage 15.x on 1/2/4 CPUs | **NOT RUN**: `qemu-system-x86_64` is not installed on this host |
+
+### Open / next
+
+- `lookup` still returns an entry that names a free inode or a directory
+  without validating it. `write_file` refuses unused and non-file inodes, but
+  `read_file`'s behaviour on such an entry was not examined or tested in this
+  checkpoint.
+- `unlink` ignores `links`. Hard links are not implemented, so every file has
+  `links = 1`. If hard links are added, unlink must decrement instead of
+  freeing.
+- Cross-inode block aliasing and the uncovered journal descriptor remain open
+  from the previous entry. Both need design decisions.
+- QEMU Stage 15.1/15.2 acceptance on 1/2/4 CPUs must be rerun on a host with
+  QEMU before this counts as stage acceptance.
+
 ## 2026-10-15 — WovenFS: refuse to reuse or free blocks the bitmap marks free
 
 Branch: `auto/wovenhat-development` (base `0989924`). The working tree was
