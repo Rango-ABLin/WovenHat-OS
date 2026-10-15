@@ -53,3 +53,37 @@ inherited 1/2/4-CPU preservation without weakening assertions or timeouts.
 
 This finding does not change the frozen generation correction or certify
 Stage 11.2/Stages 1–19. The ABI correction remains a separate unaccepted gate.
+
+## Earlier process wait path has the same collision — source review
+
+Read-only follow-up during IPC session 63244; no new test chain or source
+edit. `task::wait_process` returns `Result<i32, WaitError>`, and the `Waitpid`
+syscall encodes `Ok(exit_code)` with the same sign-extending `as u64` cast.
+Its explicit errors are `u64::MAX - 1` for `StillRunning` and `u64::MAX` for
+`NoSuchChild`. `libwoven::wait` passes the result through `check`, which maps
+those exact values to `Error::WouldBlock` and `Error::Failed` respectively.
+Successful child statuses `-2` and `-1` are therefore indistinguishable from
+those errors even after the kernel has consumed the zombie and reclaimed its
+resources. This is a source counterexample, not executed process regression
+evidence. The reviewed syscall/libwoven hashes above still match; task source
+SHA-256 is `11b2cd9d1c61903f2624fae10e0eb2b7e670bdd57530f555ccc3c474d1c16a3c`.
+
+The current shell's `reap` treats `WouldBlock` as still running; it can thus
+temporarily retain a completed `-2` child until a subsequent wait reports no
+child. That does not prove a kernel resource leak or indefinite shell retention.
+The reviewed shell SHA-256 is
+`59514e1e23ae695a0db9774fd7c5ae4a3cec4b35d9a631f4262fbd4ea0a90127`.
+Existing boot wait/reap tests exercise successful status zero and double-wait
+rejection; those assertions do not cover this signed boundary.
+
+Resolve this earlier process-wait encoding together with the thread-status
+prerequisite after IPC acceptance, before advancing loader/TLS work. Preserve
+syscall 5, the existing public `Result<u64, Error>` wait signature, actual-running
+and no-child errors, parent ownership, zombie/resource reclamation and all
+ordinary positive statuses. Review raw consumers and explicitly document the
+32-bit status payload representation before sharing an encoding helper; do not
+change the type or invent a new wait ABI silently. Require host production
+encode/decode tests and real Ring-3 parent/child waits for `-1`, `-2`, `i32::MIN`,
+`i32::MAX`, zero and positive status, actual-running/no-child/foreign-child
+errors, double reaping and exact resource baselines. Original thread natural
+exit/cancellation coverage remains required as well.

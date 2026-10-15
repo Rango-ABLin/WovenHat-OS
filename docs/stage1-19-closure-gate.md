@@ -69,8 +69,10 @@ test session.
    integrated and five allocator probe tests pass; production installation,
    rollback/teardown and inherited runtime acceptance remain pending. See
    `audit-handle-generation-review-2026-10-15.md`.
-3. Correct the Stage 11.2 signed exit-result sentinel collision for `-1` and
-   `-2` through both ordinary exit and cancellation/join. The source finding
+3. Correct signed exit-result sentinel collisions for `-1` and `-2` in both
+   earlier process wait/reap and Stage 11.2 ordinary exit/cancellation/join.
+   The process `Waitpid` success cast also collides with its running/no-child
+   errors; its current zero-status tests do not cover that boundary. The findings
    and required host/Ring-3 evidence are in
    `audit-stage11-thread-exit-encoding-2026-10-15.md`; it is not yet a runtime
    acceptance result.
