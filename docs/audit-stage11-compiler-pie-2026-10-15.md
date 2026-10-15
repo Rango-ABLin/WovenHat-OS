@@ -1,4 +1,38 @@
-# Compiler-produced signed shared PIE — integration, acceptance pending
+# Compiler-produced signed shared PIE — accepted bounded correction
+
+## Full acceptance decision
+
+Source `da6d16e6` passed complete serialized preservation. Session 73596 exited
+**0** at 2026-10-15 22:42:56 local with:
+`=== COMPILER SHARED PIE FULL ACCEPTANCE: PASS ===`.
+Independent post-run inspection verified all 505 frozen source/fixture inputs
+with zero mismatches and every retained result below. No compiler or QEMU
+process remained at inspection. Earlier pending/focused notes are historical.
+
+- Immutable manifest and runner: `audit-artifacts/compiler-pie-20261015/`.
+- Full QA transcript/results: `attempt-20261015-220041-866/` below that path.
+- Three fresh signed-status/placement runs: 1 CPU `1792094442058959300`,
+  2 CPUs `1792094492270433100`, 4 CPUs `1792094573402180300`, under their
+  `audit-artifacts/stage11.2-status-*cpu-*` directories. Original thread,
+  signed-status/authority/resource and fixed/nonzero-PIE markers pass.
+- Three fresh compiler shared-PIE runs: 1 CPU `1792094635152162500`,
+  2 CPUs `1792094689206155400`, 4 CPUs `1792094738901937300`, under their
+  `audit-artifacts/stage11.5-compiler-*cpu-*` directories. Each executes the
+  unpatched signed compiler ELF at zero and `0x30000` bias, returns 42, restores
+  exact resources and then passes every original Stage 11.5 assertion.
+- Build, fixture release Clippy, host all-targets Clippy, production kernel
+  Clippy and all sixteen feature lints complete with warnings denied.
+  Root host tests: 162 passed; libwoven: nineteen; Python: twenty.
+- Exact full launcher: `audit-artifacts/acceptance-20261015-221058-179/`.
+  All sixty logs in `stage7-6-artifacts/20261015-221104-415/` contain the
+  success marker: 1 CPU x10, 2 CPUs x30 and 4 CPUs x20. Live network and
+  isolated async block, VFS, UDP and TCP preservation pass on all three CPUs.
+- Twenty-one existing Stage 10.8, 10.9 and 11.1–11.5 runtime boots pass on
+  1/2/4 CPUs, each QEMU exit 33. All six focused boots also exit 33.
+
+This accepts explicit inert-debug metadata handling and real compiler-produced
+signed shared-PIE execution. It does not qualify compiler TLS, general dynamic
+linking, full Stage 11, the combined Claude/Codex tree, a new release or hardware.
 
 ## Defect and explicit metadata policy
 
@@ -65,9 +99,9 @@ The expanded focused matrix passed, QEMU exit 33 on all three CPU counts:
 `stage11.5-compiler-4cpu-1792094296734632600/`, under `audit-artifacts/`.
 Session 66821 exited 0 with its focused-matrix pass marker. The full chain
 will repeat these checks on the final formatting-cleaned frozen inputs.
-These are focused results, not acceptance. Full host/kernel/sixteen-feature warning-denying
+At that checkpoint these were focused results, not acceptance. Full host/kernel/sixteen-feature warning-denying
 lint/tests, signed-status/placement preservation, exact Stage 10.7 and Stage
-10.8–11.5 preservation are required before accepting this correction.
+10.8–11.5 preservation were required; the full decision above now supplies them.
 
 Compiler-compatible TLS/TCB and fresh child initialization, virtual-address
 congruence, dynamic-library TLS, general REL/PLT tables, symbol/version/weak

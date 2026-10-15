@@ -6,6 +6,17 @@ you start or finish something.
 
 ## Shared rules
 
+**Compiler shared-PIE accepted (2026-10-15):** session 73596 is terminal,
+exit 0, full acceptance PASS. Independent inspection verified 505 unchanged
+inputs, sixteen feature lints, six focused and twenty-one inherited runtime
+boots, sixty stress logs and exact full Stage 10.7 preservation. Source
+`da6d16e6` accepts inert null DT_DEBUG metadata and executes unpatched signed
+compiler output at zero/nonzero bias; all prior assertions remain intact.
+Codex retains the next serialized slot for compiler TLS/TCB, immutable fresh
+templates and full rollback/fork/thread ownership. Hold foreign build and
+acceptance chains; source-only work may continue. Older ACTIVE notes below
+are historical. No full-stage, combined-tree, release or hardware claim.
+
 **Compiler shared-PIE full acceptance ACTIVE, session 73596 (2026-10-15):** the expanded
 zero/nonzero-bias signed execution gate passed on 1/2/4 CPUs, with exact
 resources and all original loader assertions. Host ELF/Python suites each

@@ -19,8 +19,9 @@ See the shared-library audit for retained evidence. This accepts the bounded
 increment, not full Stage 11.5 or a newly qualified release image.
 
 **Loader interoperability finding:** a separate unmodified
-Rust/LLD executable probe identifies null `DT_DEBUG` rejection and an incorrect
+Rust/LLD executable probe identified null `DT_DEBUG` rejection and an incorrect
 compiler TLS/TCB layout, including live-state copying when creating threads.
+The debug-metadata prerequisite is now accepted below; TLS remains unresolved.
 Main-image compiler TLS is therefore not accepted from the synthetic TLS
 metadata tests. See the shared-library audit for exact evidence and next fixes.
 The Stage 11.2 thread-generation saturation correction is accepted: permanent
@@ -68,12 +69,15 @@ stress logs. Nonzero PIE execution and original assertions remain intact.
 See the executable-placement audit. Compiler TLS, general interoperability,
 combined-tree, release and hardware qualification remain open.
 
-**Compiler shared-PIE integration pending:** an explicit inert null DT_DEBUG
-policy corrects the retained host/QEMU load failure. Twenty ELF host tests
-pass, and exact signed Rust/LLD output executes a real shared import on 1/2/4 CPUs.
-The expanded gate also requires nonzero PIE bias and every original Stage 11.5
-assertion. Full inherited acceptance remains pending; compiler TLS is
-not certified by this increment. See the compiler-PIE audit.
+**Compiler shared-PIE correction accepted:** source `da6d16e6` explicitly handles
+inert null DT_DEBUG metadata while rejecting nonzero/duplicate values. Session
+73596 exited 0 after zero/nonzero-bias compiler execution, signed-status and
+all original assertions on 1/2/4 CPUs; 162 root host, nineteen libwoven and
+twenty Python tests; warning-denying host/production/sixteen-feature lint;
+exact full Stage 10.7 and Stage 10.8–11.5 preservation. Independent inspection
+verified all 505 frozen inputs and sixty stress logs. See the compiler-PIE
+audit. Compiler TLS, general dynamic linking, merged-tree, release and hardware
+qualification remain open.
 
 ## Presentation and repaint performance (2026-10-15)
 

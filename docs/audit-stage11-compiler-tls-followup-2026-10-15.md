@@ -1,5 +1,10 @@
 # Compiler TLS follow-up — source review, not acceptance
 
+**Prerequisite update:** compiler shared-PIE/null-DT_DEBUG correction source
+`da6d16e6` is accepted after session 73596 exited 0 with full preservation and
+all 505 inputs unchanged. See the compiler-PIE audit. That resolves the separate
+debug-metadata prerequisite mentioned historically below, not any TLS contract.
+
 This review was performed while executable-placement session 62865 tests a
 frozen source tree. No compiler fixture or kernel source was edited during
 that gate. Main-image compiler TLS, library TLS and full Stage 11 remain open.

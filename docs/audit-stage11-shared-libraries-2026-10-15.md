@@ -1,5 +1,12 @@
 # Stage 11.5 signed shared-library loading — 2026-10-15
 
+**Later compiler-interoperability follow-up:** source `da6d16e6` resolves the
+initial null-DT_DEBUG rejection recorded below. Session 73596 passed full
+preservation and actual signed Rust/LLD shared imports at zero/nonzero bias on
+1/2/4 CPUs, with all 505 inputs unchanged. See the compiler-PIE audit for the
+accepted bounded correction. The original probes remain historical evidence;
+compiler TLS and broader dynamic linking are still open.
+
 ## Implementation and authority
 
 `userspace::load_elf` and `load_elf_with_argv` now use the same transactional
