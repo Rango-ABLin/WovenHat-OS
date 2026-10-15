@@ -148,6 +148,27 @@ Stage 11.5 as a whole and the release image are not certified by this decision.
 
 ## Remaining loader and production limits
 
+### Fixed executable placement integration requirement
+
+Read-only review of Claude's pending branch found commit `6f02202d` (followed
+by session commit `4586c3f2`): its ELF parser records whether the main image is
+`ET_DYN`, and its old loader applies image ASLR only to that kind. The commit
+records a production WovenShell instruction-fetch fault caused by relocating
+an `ET_EXEC` image; its new acceptance chain is still running. That report is
+not combined-tree acceptance.
+
+The accepted bounded graph loader in this checkout still unconditionally calls
+`relocated(aslr_image_delta())` in `linker::prepare`. Its replacement of the old
+`load_elf` body means a mechanical merge must not silently discard Claude's
+placement correction or restore the obsolete dependency-rejecting loader.
+Port the parser's image-kind knowledge into the graph loader explicitly, retain
+fixed `ET_EXEC` placement, and qualify randomized `ET_DYN` placement separately.
+Current `qemu-test` builds force the ASLR draw to zero, so their passing loader
+markers are not evidence for this production nonzero-bias case. Require a
+nonzero-bias/production-path executable regression and preserve graph loading,
+W^X/RELRO and transactional teardown tests. No frozen source changed during
+this review; integration follows the current generation/earlier IPC gates.
+
 A separate real-toolchain probe is retained in
 `audit-artifacts/shared-library-integration-20261015/toolchain-probe/`.
 Nightly Rust emitted PIC objects and its bundled LLD linked a SysV-hash shared
