@@ -2,7 +2,7 @@
 //! Lock order: async operation table -> one port. Never call the scheduler
 //! under a port lock; return waiter IDs to the caller for notification instead.
 use crate::{
-    completion_queue::{BATCH, Event, Queue},
+    completion_queue::{Event, Queue, BATCH},
     irq_lock::IrqMutex,
     task::{self, TaskId},
 };

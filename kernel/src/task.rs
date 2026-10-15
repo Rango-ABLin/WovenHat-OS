@@ -1125,11 +1125,11 @@ impl Scheduler {
                 self.tasks[slot].name = "terminated";
                 self.tasks[slot].termination_signal = 0;
                 self.task_count = self.task_count.saturating_sub(1);
-            if !(self.tasks[slot].thread_id.is_some() && signal == u8::MAX) {
-                let process_id = self.tasks[slot].process_id;
-                complete_process_termination(self, process_id, id, signal);
-                self.tasks[slot].thread_id = None;
-            }
+                if !(self.tasks[slot].thread_id.is_some() && signal == u8::MAX) {
+                    let process_id = self.tasks[slot].process_id;
+                    complete_process_termination(self, process_id, id, signal);
+                    self.tasks[slot].thread_id = None;
+                }
             }
             TaskState::Running | TaskState::Switching => {
                 // Physical execution still owns this task. The request is
@@ -1552,7 +1552,10 @@ pub fn spawn_user_process(
 /// copied into a private mapping for the new task.  Both mappings are owned by
 /// the process table until join or process teardown; no raw userspace pointer
 /// is retained by the kernel.
-pub fn create_user_thread(entry: u64, stack_size: u64) -> Result<crate::thread::ThreadId, ThreadError> {
+pub fn create_user_thread(
+    entry: u64,
+    stack_size: u64,
+) -> Result<crate::thread::ThreadId, ThreadError> {
     const MIN_STACK: usize = 16 * 1024;
     const MAX_STACK: usize = 1024 * 1024;
     let stack_size = usize::try_from(stack_size)
@@ -1644,7 +1647,9 @@ pub fn create_user_thread(entry: u64, stack_size: u64) -> Result<crate::thread::
     };
     let task_id = TaskId(NEXT_TASK_ID.fetch_add(1, Ordering::Relaxed));
     let stack_top = stack.address.saturating_add(stack.size as u64);
-    let tls_base = tls.map_or(0, |mapping| mapping.address.saturating_add(mapping.size as u64));
+    let tls_base = tls.map_or(0, |mapping| {
+        mapping.address.saturating_add(mapping.size as u64)
+    });
     let context = prepare_user_context_with_tls(entry as usize, stack_top as usize, tls_base);
 
     let mut scheduler = SCHEDULER.lock();
@@ -1661,7 +1666,11 @@ pub fn create_user_thread(entry: u64, stack_size: u64) -> Result<crate::thread::
     let mut processes = process_table_lock();
     let Some(process) = processes
         .iter_mut()
-        .find(|process| process.as_ref().is_some_and(|process| process.id == process_id))
+        .find(|process| {
+            process
+                .as_ref()
+                .is_some_and(|process| process.id == process_id)
+        })
         .and_then(Option::as_mut)
     else {
         drop(processes);
@@ -1753,7 +1762,9 @@ pub fn join_user_thread(raw_id: u64) -> Result<i32, ThreadJoinError> {
         let stack_slot = process
             .memory_mappings
             .iter()
-            .position(|mapping| mapping.is_some_and(|mapping| mapping.address == resources.stack.address))
+            .position(|mapping| {
+                mapping.is_some_and(|mapping| mapping.address == resources.stack.address)
+            })
             .ok_or(ThreadJoinError::Invalid)?;
         let tls_slot = resources.tls.and_then(|tls| {
             process
@@ -1773,7 +1784,11 @@ pub fn join_user_thread(raw_id: u64) -> Result<i32, ThreadJoinError> {
     let mut processes = process_table_lock();
     let Some(process) = processes
         .iter_mut()
-        .find(|process| process.as_ref().is_some_and(|process| process.id.as_u64() == owner))
+        .find(|process| {
+            process
+                .as_ref()
+                .is_some_and(|process| process.id.as_u64() == owner)
+        })
         .and_then(Option::as_mut)
     else {
         return Err(ThreadJoinError::Invalid);
@@ -3139,7 +3154,9 @@ pub fn mmap_current(length: u64, writable: bool) -> Result<u64, MemoryError> {
         let processes = process_table_lock();
         let process_index = processes
             .iter()
-            .position(|process| process.is_some_and(|process| process.id.as_u64() == current_process_id()))
+            .position(|process| {
+                process.is_some_and(|process| process.id.as_u64() == current_process_id())
+            })
             .ok_or(MemoryError::NoProcess)?;
         let process = processes[process_index].ok_or(MemoryError::NoProcess)?;
         let slot = process
@@ -3285,7 +3302,9 @@ pub fn munmap_current(address: u64, length: u64) -> Result<(), MemoryError> {
         let processes = process_table_lock();
         let process_index = processes
             .iter()
-            .position(|process| process.is_some_and(|process| process.id.as_u64() == current_process_id()))
+            .position(|process| {
+                process.is_some_and(|process| process.id.as_u64() == current_process_id())
+            })
             .ok_or(MemoryError::NoProcess)?;
         let process = processes[process_index].ok_or(MemoryError::NoProcess)?;
         let slot = process
@@ -5324,7 +5343,7 @@ pub fn honor_current_termination_request() {
             scheduler.tasks[scheduler.current_slot[crate::smp::cpu_index()]].termination_signal
         }
     };
-            if signal != 0 {
+    if signal != 0 {
         exit_current_process(128 + i32::from(signal));
     }
 }
@@ -5542,8 +5561,7 @@ pub fn unlink_current(path: &str) -> Result<(), FileError> {
         crate::storage::delete_path(&path).map_err(map_mutation_file_error)?;
     } else if path.starts_with("/wfs/") {
         vfs::can_remove(&path).map_err(map_vfs_file_error)?;
-        crate::wfs::unlink_vfs_path(&path, crate::timer::ticks())
-            .map_err(map_wfs_file_error)?;
+        crate::wfs::unlink_vfs_path(&path, crate::timer::ticks()).map_err(map_wfs_file_error)?;
     }
     vfs::remove(&path).map_err(map_vfs_file_error)
 }

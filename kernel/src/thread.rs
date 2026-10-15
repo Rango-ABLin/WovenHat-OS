@@ -273,7 +273,9 @@ pub fn structural_self_test() -> bool {
         && join(1, id) == Ok(23)
         && tls(id).is_none()
         && {
-            let Some(waited) = create(1) else { return false };
+            let Some(waited) = create(1) else {
+                return false;
+            };
             register_waiter(1, waited, 99) == Ok(false)
                 && terminate(waited, 41)
                 && take_waiter(waited) == Some(99)
