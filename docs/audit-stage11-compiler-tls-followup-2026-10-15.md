@@ -72,3 +72,53 @@ arithmetic. Require both zero- and nonzero-congruence host and compiler/runtime
 cases, including a template spanning a page boundary. The upstream source is
 design evidence, not a claim about the exact bundled LLD version; compare its
 actual linked offsets when integrating the retained toolchain fixtures.
+
+## Concrete source/lifetime integration review after placement acceptance
+
+This additional review runs while shared-PIE session 73596 freezes the kernel;
+it changes no tested source and is not TLS implementation or acceptance.
+
+`AddressSpace` currently stores only one TLS `(start, size)` range. A fresh
+immutable initialization image needs distinct lifetime accounting from the
+writable main-thread TLS/TCB. A candidate compatible with compact Copy metadata
+is a process-owned RO/NX template mapping plus explicit scalar layout metadata,
+not a large inline kernel buffer or an unowned borrowed ELF slice. This design
+still needs implementation review and tests; it is not an allocated object yet.
+
+Audit these exact paths together:
+
+- `linker::Pending::drop`: record only successfully mapped ranges, including
+  a template if one is added, and unwind every partially initialized layout.
+- `linker::load_with_candidate_bias`: validate the template's source and size,
+  retain initialization independently of mutable TLS, construct a mapped self
+  pointer, and preserve image/mmap/stack-guard disjointness and RW/NX policy.
+- `clone_initial_tls` and `task::create_user_thread`: initialize fresh private
+  bytes from the retained template and use the validated thread-pointer offset;
+  do not continue deriving FS as the end of a page-rounded anonymous mapping.
+- `destroy`, `clone_address_space` and its rollback journal: account for the
+  template separately, sharing it only read-only and reclaiming it on all
+  failure/owner-exit paths. Their fixed range-array capacities must include
+  every additional range; do not overwrite or omit an entry at maximum load.
+- `AddressSpace::is_logically_writable`: include mutable TLS/TCB but exclude
+  the template even after fork/COW. New thread mappings retain existing slot
+  ownership, NX permissions, cancellation, join and teardown behavior.
+
+The retained `tls-threads-demo` report has PT_TLS file size 128, memory size
+136, alignment 64 and zero virtual-address congruence. Its static TLS span
+before TP must therefore be 192 bytes, not a page-rounded 4096. A template
+whose memory size is exactly a page additionally needs mapped storage for the
+TCB beyond that span; leaving TP at the following guard page is invalid.
+Nonzero-congruence and cross-page cases remain required independent tests.
+
+The mmap implementation has an existing 64 KiB stride/maximum, and anonymous
+mapping metadata tracks sixteen resident pages. Any proposed TLS layout must
+explicitly check this capacity rather than overflowing a slot or silently
+changing the mmap ABI. If broader TLS allocation is needed, design and qualify
+that allocator as well; do not claim general TLS from fixtures that fit.
+
+Finally, initialized TLS bytes can contain dynamic relocations. Validate their
+relationship to the loaded ELF image and capture the correct post-relocation
+initialization state, rather than assuming a raw pre-relocation file copy is
+sufficient. The existing synthetic parser-only TLS header is not proof of a
+mapped compiler template. Preserve its bounds tests and add real initializer,
+fresh-thread, fork/COW, malformed-header, capacity and rollback evidence.
