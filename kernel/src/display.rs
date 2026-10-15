@@ -169,6 +169,24 @@ impl Surface {
             .copied()
     }
 
+    /// Fill `out` with physical row pixels starting at physical column `x`,
+    /// each surface pixel of row `y` repeated `scale` times; pixels beyond
+    /// the surface are black.
+    #[allow(dead_code)]
+    pub fn scaled_row(&self, y: usize, x: usize, scale: usize, out: &mut [u32]) {
+        let scale = scale.max(1);
+        let row = if y < self.height { &self.pixels[y * self.width..(y + 1) * self.width] } else { &[][..] };
+        let (mut source, mut phase) = (x / scale, x % scale);
+        for pixel in out {
+            *pixel = row.get(source).copied().unwrap_or(0);
+            phase += 1;
+            if phase == scale {
+                phase = 0;
+                source += 1;
+            }
+        }
+    }
+
     pub fn set_pixel(&mut self, x: i32, y: i32, color: u32) {
         if !self.bounds().contains(x, y) {
             return;
@@ -386,6 +404,12 @@ impl Surface {
     }
 }
 
+/// Whether `a` and `b` together cover exactly their bounding box.
+fn exact_union(a: Rect, b: Rect) -> bool {
+    let area = |rect: Rect| rect.width as u64 * rect.height as u64;
+    area(a.union(b)) == area(a) + area(b) - area(a.intersect(b))
+}
+
 /// The regions changed since the last presentation.
 ///
 /// Holds up to [`MAX_DAMAGE_RECTS`] regions and collapses to their bounding box
@@ -439,9 +463,12 @@ impl Damage {
     /// Record a changed region.
     ///
     /// An empty region is ignored, a region already covered by a tracked one is
-    /// dropped, and once the list is full everything merges into one bounding
-    /// box. Merging loses precision but keeps presentation bounded, which
-    /// matters more than redrawing a little extra.
+    /// dropped, and tracked regions the new one covers are dropped. A region
+    /// that, together with a tracked one, forms exactly a rectangle merges
+    /// with it, which costs no extra pixels: a frame drawn in adjacent tiles
+    /// stays a few regions. Once the list is full everything merges into one
+    /// bounding box. Merging loses precision but keeps presentation bounded,
+    /// which matters more than redrawing a little extra.
     pub fn add(&mut self, rect: Rect) {
         if rect.is_empty() {
             return;
@@ -450,10 +477,28 @@ impl Damage {
             self.rects[0] = self.rects[0].union(rect);
             return;
         }
-        for existing in &self.rects[..self.len] {
-            if existing.intersect(rect) == rect {
-                return;
+        let mut rect = rect;
+        'merge: loop {
+            let mut index = 0;
+            while index < self.len {
+                let existing = self.rects[index];
+                if existing.intersect(rect) == rect {
+                    return;
+                }
+                let covered = rect.intersect(existing) == existing;
+                if covered || exact_union(existing, rect) {
+                    self.len -= 1;
+                    self.rects[index] = self.rects[self.len];
+                    if !covered {
+                        // The merged region may now cover or extend others.
+                        rect = existing.union(rect);
+                        continue 'merge;
+                    }
+                    continue;
+                }
+                index += 1;
             }
+            break;
         }
         if self.len == MAX_DAMAGE_RECTS {
             let mut bounds = rect;
@@ -519,6 +564,9 @@ pub fn present(
 /// 640×400 fills a 1280×800 screen at scale 2. Damage is in surface
 /// coordinates and is scaled with it. Returns framebuffer pixels written.
 /// A scale of 0 writes nothing.
+/// Bytes of one physical row staged at a time by [`present_scaled`].
+const PRESENT_STAGING: usize = 2048;
+
 pub fn present_scaled(
     surface: &Surface,
     damage: &Damage,
@@ -526,11 +574,13 @@ pub fn present_scaled(
     info: FrameBufferInfo,
     scale: usize,
 ) -> usize {
-    if damage.is_empty() || scale == 0 {
+    let bytes = info.bytes_per_pixel;
+    // Framebuffers are 1 to 4 bytes per pixel; anything else is not drawn.
+    if damage.is_empty() || scale == 0 || bytes == 0 || bytes > 4 {
         return 0;
     }
     let screen = Rect::new(0, 0, info.width, info.height);
-    let bytes = info.bytes_per_pixel;
+    let chunk = PRESENT_STAGING / bytes;
     let mut written = 0usize;
 
     for region in damage.regions() {
@@ -550,39 +600,50 @@ pub fn present_scaled(
         if physical.is_empty() {
             continue;
         }
-        for y in physical.y as usize..physical.bottom() as usize {
+        // Each logical row is converted once, a chunk at a time, into the
+        // framebuffer's format, then copied into each physical row it covers:
+        // no per-pixel division or format match, and no framebuffer reads
+        // (write-combined memory is slow to read back).
+        let order = match info.pixel_format {
+            PixelFormat::Rgb => Some([16u32, 8, 0]),
+            PixelFormat::Bgr => Some([0u32, 8, 16]),
+            _ => None,
+        };
+        let mut staged = [0u8; PRESENT_STAGING];
+        let (left, right) = (physical.x as usize, physical.right() as usize);
+        let mut y = physical.y as usize;
+        while y < physical.bottom() as usize {
             let row = (y / scale) * surface.width();
-            let mut offset = (y * info.stride + physical.x as usize) * bytes;
-            for x in physical.x as usize..physical.right() as usize {
-                if offset + bytes > framebuffer.len() {
-                    break;
-                }
-                let color = surface.pixels[row + x / scale];
-                let (red, green, blue) = ((color >> 16) as u8, (color >> 8) as u8, color as u8);
-                match info.pixel_format {
-                    PixelFormat::Rgb => {
-                        framebuffer[offset] = red;
-                        if bytes > 1 {
-                            framebuffer[offset + 1] = green;
-                        }
-                        if bytes > 2 {
-                            framebuffer[offset + 2] = blue;
-                        }
-                    }
-                    PixelFormat::Bgr => {
-                        framebuffer[offset] = blue;
-                        if bytes > 1 {
-                            framebuffer[offset + 1] = green;
-                        }
-                        if bytes > 2 {
-                            framebuffer[offset + 2] = red;
+            let rows = (scale - y % scale).min(physical.bottom() as usize - y);
+            let mut x = left;
+            while x < right {
+                let count = (right - x).min(chunk);
+                if let Some(order) = order {
+                    let (mut source, mut phase) = (row + x / scale, x % scale);
+                    let width = bytes.min(4);
+                    for slot in staged[..count * bytes].chunks_exact_mut(bytes) {
+                        let color = surface.pixels[source];
+                        let pixel = [(color >> order[0]) as u8, (color >> order[1]) as u8, (color >> order[2]) as u8, 0];
+                        slot[..width].copy_from_slice(&pixel[..width]);
+                        phase += 1;
+                        if phase == scale {
+                            phase = 0;
+                            source += 1;
                         }
                     }
-                    _ => {}
                 }
-                offset += bytes;
-                written += 1;
+                for physical_y in y..y + rows {
+                    let offset = (physical_y * info.stride + x) * bytes;
+                    // Whole pixels that fit in the mapping.
+                    let fit = count.min(framebuffer.len().saturating_sub(offset) / bytes);
+                    if fit > 0 && order.is_some() {
+                        framebuffer[offset..offset + fit * bytes].copy_from_slice(&staged[..fit * bytes]);
+                    }
+                    written += fit;
+                }
+                x += count;
             }
+            y += rows;
         }
     }
     written

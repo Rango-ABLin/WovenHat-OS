@@ -121,9 +121,9 @@ mod vfs;
 #[cfg(feature = "stage12-1-test")]
 mod vfs_api;
 mod virtio_net;
-#[cfg(feature = "stage20-14-test")]
+#[cfg(any(not(feature = "qemu-test"), feature = "stage20-14-test", feature = "stage20-14b-test"))]
 mod virtio_pci;
-#[cfg(feature = "stage20-14-test")]
+#[cfg(any(not(feature = "qemu-test"), feature = "stage20-14-test", feature = "stage20-14b-test"))]
 mod virtio_gpu;
 // `storage_manager` seals records through this key vault, so the Stage 12.5
 // gate needs the module even though it does not run the Stage 12.3 self-test.
@@ -1475,6 +1475,10 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         // Storage, USB and audio controllers: bound through the driver
         // manager; a missing or failing device never stops the boot.
         let driver_report = drivers::bring_up();
+        // A multi-head virtio-gpu becomes the desktop's monitors.
+        if let Ok(heads) = compositor::attach_gpu_outputs() {
+            serial::write_line(format_args!("[DISPLAY] virtio-gpu: {} monitors", heads));
+        }
         // Without an ATA disk, mount the first ready NVMe or AHCI disk.
         if !storage::mnt_mounted() {
             if let Some((root, name)) = drivers::storage_root(&driver_report) {
@@ -3545,6 +3549,15 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         serial::write_line(format_args!("[S1-5] storage journal: PASSED"));
         qemu_test_exit_success();
     }
+    #[cfg(feature = "stage20-14b-test")]
+    {
+        if !stage20_14b_self_test() {
+            serial::write_line(format_args!("[S20.14B] desktop across monitors: FAILED"));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!("[S20.14B] desktop across monitors: PASSED"));
+        qemu_test_exit_success();
+    }
     #[cfg(feature = "stage20-14-test")]
     {
         if !virtio_gpu::self_test() {
@@ -5266,7 +5279,8 @@ fn stage16_1_self_test() -> bool {
     feature = "stage20-11-test",
     feature = "stage20-12-test",
     feature = "stage13-15-test",
-    feature = "stage20-13-test"
+    feature = "stage20-13-test",
+    feature = "stage20-14b-test"
 ))]
 const HELLO_GUI_IMAGE: &[u8] = include_bytes!(env!("WOVENHAT_HELLO_GUI_IMAGE"));
 
@@ -5440,7 +5454,8 @@ fn stage13_15_self_test() -> bool {
     feature = "stage20-11-test",
     feature = "stage20-12-test",
     feature = "stage13-15-test",
-    feature = "stage20-13-test"
+    feature = "stage20-13-test",
+    feature = "stage20-14b-test"
 ))]
 fn spawn_hello_gui(
     image: &[u8],
@@ -5483,7 +5498,8 @@ fn spawn_hello_gui(
     feature = "stage20-11-test",
     feature = "stage20-12-test",
     feature = "stage13-15-test",
-    feature = "stage20-13-test"
+    feature = "stage20-13-test",
+    feature = "stage20-14b-test"
 ))]
 fn wait_hello_gui(pid: task::ProcessId) -> Option<(task::ProcessId, Result<i32, task::WaitError>)> {
     let start = timer::ticks();
@@ -5510,9 +5526,191 @@ fn wait_hello_gui(pid: task::ProcessId) -> Option<(task::ProcessId, Result<i32, 
     feature = "stage20-10-test",
     feature = "stage20-11-test",
     feature = "stage20-12-test",
-    feature = "stage20-13-test"
+    feature = "stage20-13-test",
+    feature = "stage20-14b-test"
 ))]
 const WOVEN_SHELL_IMAGE: &[u8] = include_bytes!(env!("WOVENHAT_SHELL_IMAGE"));
+
+/// Stage 20.14b acceptance: the desktop across two monitors. The kernel
+/// makes a two-head virtio-gpu the display, starts the shell and checks,
+/// against its own rendering, that the taskbar is on the primary monitor only
+/// and that window A, dragged by its title bar, moves onto the second
+/// monitor. It then prints sample pixels with their physical head
+/// coordinates; the harness captures both heads from the host and checks
+/// each sample.
+#[cfg(feature = "stage20-14b-test")]
+fn stage20_14b_self_test() -> bool {
+    use crate::display::{blend_pixel, rgb};
+
+    const WALLPAPER_TOP: u32 = rgb(18, 42, 74);
+    const WALLPAPER_BOTTOM: u32 = rgb(64, 28, 88);
+    const WHITE: u32 = rgb(255, 255, 255);
+    const RED: u32 = rgb(200, 60, 60);
+    const START_FILL: u32 = rgb(52, 96, 180);
+
+    fn step(name: &str, ok: bool) -> bool {
+        serial::write_line(format_args!("[S20.14B] {} {}", name, if ok { "PASS" } else { "FAIL" }));
+        ok
+    }
+    fn until(limit: u64, condition: impl Fn() -> bool) -> bool {
+        let start = timer::ticks();
+        loop {
+            if condition() {
+                return true;
+            }
+            if timer::ticks().wrapping_sub(start) > limit {
+                return false;
+            }
+            task::yield_now();
+        }
+    }
+    fn stays(limit: u64, condition: impl Fn() -> bool) -> bool {
+        let start = timer::ticks();
+        while timer::ticks().wrapping_sub(start) <= limit {
+            if !condition() {
+                return false;
+            }
+            task::yield_now();
+        }
+        true
+    }
+    fn wallpaper(x: i32, y: i32, height: i32) -> u32 {
+        let span = (height - 1).max(1);
+        let t = (y.clamp(0, span) * 255 / span) as u8;
+        let base = blend_pixel(WALLPAPER_BOTTOM, WALLPAPER_TOP, t);
+        if x % 32 == 0 || y % 32 == 0 {
+            blend_pixel(WHITE, base, 28)
+        } else {
+            base
+        }
+    }
+    fn packet(dx: i16, screen_dy: i16, left: bool) -> bool {
+        let dy = -screen_dy;
+        let flags = 0x08 | u8::from(left) | if dx < 0 { 0x10 } else { 0 } | if dy < 0 { 0x20 } else { 0 };
+        [flags, dx as u8, dy as u8].into_iter().all(mouse::loopback)
+    }
+    fn move_by(mut dx: i32, mut dy: i32, left: bool) -> bool {
+        while dx != 0 || dy != 0 {
+            let (sx, sy) = (dx.clamp(-100, 100), dy.clamp(-100, 100));
+            if !packet(sx as i16, sy as i16, left) {
+                return false;
+            }
+            dx -= sx;
+            dy -= sy;
+        }
+        true
+    }
+
+    let heads = match compositor::attach_gpu_outputs() {
+        Ok(heads) => heads,
+        Err(error) => {
+            serial::write_line(format_args!("[S20.14B] attach: {:?}", error));
+            return step("a two-head virtio-gpu is the display", false);
+        }
+    };
+    if !step("a two-head virtio-gpu is the display", heads == 2) {
+        return false;
+    }
+    let installed = vfs::create_read_only("/bin/hello-gui", HELLO_GUI_IMAGE).is_ok();
+    let capabilities = capability::CapabilitySet::only(capability::Capability::Console)
+        .with(capability::Capability::DisplayIo)
+        .with(capability::Capability::InputIo)
+        .with(capability::Capability::Ipc);
+    let Some(program) = userspace::load_elf_with_argv(WOVEN_SHELL_IMAGE, &["/bin/woven-shell"]) else {
+        return step("shell image loads", false);
+    };
+    let Ok((shell, _, _)) = task::spawn_user_system_service("woven-shell", program, capabilities) else {
+        return step("shell spawned", false);
+    };
+    if !step(
+        "shell took the display",
+        installed && until(3000, || compositor::holder() == Some(shell.as_u64()) && compositor::is_presenting()),
+    ) {
+        return false;
+    }
+    let Some((width, height)) = compositor::dimensions() else {
+        return step("desktop geometry", false);
+    };
+    let (width, height) = (width as i32, height as i32);
+    let scale = compositor::scale().unwrap_or(1) as i32;
+    let primary = width / 2;
+    let top = height - 24;
+    serial::write_line(format_args!("[S20.14B] desktop {}x{} at scale {}, primary {} wide", width, height, scale, primary));
+    let wall = move |x: i32, y: i32| compositor::pixel(x, y) == Ok(wallpaper(x, y, height));
+    let taskbar_on_primary_only = until(2000, || {
+        compositor::pixel(6, top + 6) == Ok(START_FILL)
+            && wall(primary + 7, top + 7)
+            && wall(width - 7, top + 7)
+    });
+    if !step("the taskbar spans the primary monitor only", taskbar_on_primary_only) {
+        return false;
+    }
+    let client = capability::CapabilitySet::only(capability::Capability::Console).with(capability::Capability::Ipc);
+    let shell_arg = alloc::format!("{}", shell.as_u64());
+    let Some(_alpha) = spawn_hello_gui(HELLO_GUI_IMAGE, &["/bin/hello-gui", "--desktop-client", &shell_arg, "a"], Some(client)) else {
+        return step("application A spawned", false);
+    };
+    if !step("window A opens on the primary monitor", until(2000, || compositor::pixel(45, 45) == Ok(RED))) {
+        return false;
+    }
+    // From the desktop's centre to A's title bar, then drag it one
+    // monitor-width to the right.
+    let (px, py) = (width / 2, height / 2);
+    // Judged only on completed frames: the surface is read live, and the
+    // shell draws a frame in several writes.
+    let on_second = |pixel: &dyn Fn(i32, i32) -> Option<u32>| {
+        pixel(45 + primary, 45) == Some(RED) && pixel(45, 45) == Some(wallpaper(45, 45, height))
+    };
+    let injected = move_by(100 - px, 33 - py, false)
+        && packet(0, 0, true)
+        && move_by(primary, 0, true)
+        && packet(0, 0, false);
+    let arrived = injected && until(1000, || compositor::between_frames(on_second) == Some(true));
+    // And it stays there: the release is processed after the moves, and an
+    // edge snap or resize would move it again.
+    let stayed = arrived && stays(100, || compositor::between_frames(on_second) != Some(false));
+    if !stayed {
+        serial::write_line(format_args!(
+            "[S20.14B] drag: injected={} arrived={} stayed={}",
+            injected, arrived, stayed
+        ));
+    }
+    let dragged = stayed;
+    if !step("dragging A by its title bar moves it onto the second monitor", dragged) {
+        return false;
+    }
+    // The surface is right; wait until it has reached the monitors too.
+    if !step("everything drawn has been presented to the monitors", until(1000, compositor::presented)) {
+        return false;
+    }
+    // Samples for the host captures: surface point -> head and physical
+    // position at the centre of its scaled block.
+    let samples = [(45 + primary, 45), (45, 45), (6, top + 6), (primary + 7, top + 7), (100 + primary, 60), (primary / 2, height / 3)];
+    let head_width = primary * scale;
+    for (x, y) in samples {
+        let Ok(pixel) = compositor::pixel(x, y) else {
+            return step("sample read", false);
+        };
+        let physical = (x * scale + scale / 2, y * scale + scale / 2);
+        serial::write_line(format_args!(
+            "[S20.14B] sample head={} x={} y={} rgb={:06x}",
+            physical.0 / head_width,
+            physical.0 % head_width,
+            physical.1,
+            pixel
+        ));
+    }
+    serial::write_line(format_args!("[S20.14B] ready for capture {}x{}", head_width, height * scale));
+    let start = timer::ticks();
+    while timer::ticks().wrapping_sub(start) < 1500 {
+        task::yield_now();
+    }
+    if task::kill_process(shell.as_u64(), 9).is_err() || !until(1000, || task::process_exited(shell)) {
+        return step("shell killed", false);
+    }
+    let _ = task::wait_process(shell.as_u64());
+    step("shell released the display", compositor::holder().is_none() && !compositor::is_presenting())
+}
 
 /// Stage 20.13 acceptance: workspaces. With real i8042 input the kernel
 /// checks, against its own computation of every pixel it samples:

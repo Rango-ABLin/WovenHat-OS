@@ -149,6 +149,8 @@ stage20-12-test = ["qemu-test"]
 stage20-13-test = ["qemu-test"]
 # Two monitors: modern virtio-pci transport and a multi-scanout virtio-gpu.
 stage20-14-test = ["qemu-test"]
+# The desktop across two monitors.
+stage20-14b-test = ["qemu-test"]
 stage1-5-test = ["qemu-test"]
 
 [dependencies]

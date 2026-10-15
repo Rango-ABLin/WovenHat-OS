@@ -206,6 +206,34 @@ fn damage_drops_a_region_already_covered() {
 }
 
 #[test]
+fn damage_merges_regions_that_form_exactly_a_rectangle() {
+    // A window drawn in 320x40 tiles, five passes over the same area (as a
+    // shell repaints wallpaper, shadow, title and body), plus a distant clock.
+    let mut damage = Damage::new();
+    for _pass in 0..5 {
+        for row in 0..6 {
+            damage.add(Rect::new(30, 20 + row * 40, 320, 40));
+            damage.add(Rect::new(350, 20 + row * 40, 50, 40));
+        }
+    }
+    damage.add(Rect::new(560, 380, 60, 20));
+    assert!(!damage.is_collapsed(), "adjacent tiles must not overflow the list");
+    assert_eq!(damage.regions(), &[Rect::new(30, 20, 370, 240), Rect::new(560, 380, 60, 20)]);
+}
+
+#[test]
+fn damage_keeps_regions_whose_union_would_add_pixels() {
+    let mut damage = Damage::new();
+    damage.add(Rect::new(0, 0, 10, 10));
+    damage.add(Rect::new(10, 5, 10, 10)); // adjacent but offset: an L shape
+    damage.add(Rect::new(30, 0, 5, 5)); // separate
+    assert_eq!(damage.len(), 3);
+    // A region covering tracked ones replaces them.
+    damage.add(Rect::new(0, 0, 40, 20));
+    assert_eq!(damage.regions(), &[Rect::new(0, 0, 40, 20)]);
+}
+
+#[test]
 fn damage_collapses_to_a_bounding_box_when_full() {
     let mut damage = Damage::new();
     for index in 0..MAX_DAMAGE_RECTS {
@@ -686,4 +714,100 @@ fn keyed_blit_clips_like_the_region_blit() {
         keyed.blit_region_keyed(&overlay, overlay.bounds(), 9, 9, TRANSPARENT_KEY),
         Rect::EMPTY
     );
+}
+
+/// The per-pixel definition of scaled presentation, written for clarity:
+/// physical pixel (x, y) shows surface pixel (x / scale, y / scale), and only
+/// whole pixels inside the mapping are written.
+fn present_reference(
+    surface: &Surface,
+    damage: &Damage,
+    framebuffer: &mut [u8],
+    descriptor: FrameBufferInfo,
+    scale: usize,
+) -> usize {
+    let bytes = descriptor.bytes_per_pixel;
+    let mut written = 0;
+    for region in damage.regions() {
+        let logical = region.intersect(surface.bounds());
+        for y in 0..descriptor.height {
+            for x in 0..descriptor.width {
+                let (lx, ly) = ((x / scale) as i32, (y / scale) as i32);
+                if lx < logical.x || lx >= logical.right() || ly < logical.y || ly >= logical.bottom() {
+                    continue;
+                }
+                let offset = (y * descriptor.stride + x) * bytes;
+                if offset + bytes > framebuffer.len() {
+                    continue;
+                }
+                let color = surface.pixel(lx, ly).unwrap();
+                let (red, green, blue) = ((color >> 16) as u8, (color >> 8) as u8, color as u8);
+                let channels = match descriptor.pixel_format {
+                    PixelFormat::Rgb => [red, green, blue],
+                    _ => [blue, green, red],
+                };
+                framebuffer[offset..offset + bytes.min(3)].copy_from_slice(&channels[..bytes.min(3)]);
+                written += 1;
+            }
+        }
+    }
+    written
+}
+
+#[test]
+fn scaled_presentation_matches_the_per_pixel_definition() {
+    // A surface wide enough that a scaled row spans several staging chunks.
+    let mut surface = Surface::new(700, 9);
+    for y in 0..9 {
+        for x in 0..700 {
+            surface.set_pixel(x, y, rgb((x * 7) as u8, (y * 31) as u8, (x / 3 + y) as u8));
+        }
+    }
+    for format in [PixelFormat::Rgb, PixelFormat::Bgr] {
+        for bytes in [3, 4] {
+            for scale in 1..=3 {
+                let mut damage = Damage::new();
+                damage.add(Rect::new(3, 1, 650, 5));
+                damage.add(Rect::new(690, 7, 40, 4)); // clipped by the surface
+                let mut descriptor = info(1500, 20, format, bytes);
+                descriptor.stride = 1504;
+                // The mapping ends partway through a row.
+                let length = (17 * descriptor.stride + 333) * bytes + 1;
+                descriptor.byte_len = length;
+                let (mut fast, mut slow) = (vec![0xa5u8; length], vec![0xa5u8; length]);
+                let written = present_scaled(&surface, &damage, &mut fast, descriptor, scale);
+                let expected = present_reference(&surface, &damage, &mut slow, descriptor, scale);
+                assert_eq!(written, expected, "{format:?} {bytes} bytes, scale {scale}: pixel count");
+                // Colour bytes must match; a 4-byte pixel's padding byte is
+                // not part of the colour.
+                for (index, (a, b)) in fast.iter().zip(&slow).enumerate() {
+                    if bytes == 4 && index % 4 == 3 {
+                        continue;
+                    }
+                    assert_eq!(a, b, "{format:?} {bytes} bytes, scale {scale}: byte {index}");
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn a_scaled_row_repeats_each_pixel_and_pads_with_black() {
+    let mut surface = Surface::new(5, 2);
+    for x in 0..5 {
+        surface.set_pixel(x, 1, rgb(x as u8 + 1, 0, 0));
+    }
+    for scale in 1..=3usize {
+        for start in 0..4usize {
+            let mut out = [0xffff_ffffu32; 20];
+            surface.scaled_row(1, start, scale, &mut out);
+            for (index, pixel) in out.iter().enumerate() {
+                let x = ((start + index) / scale) as i32;
+                assert_eq!(Some(*pixel), Some(surface.pixel(x, 1).unwrap_or(0)), "scale {scale} start {start} index {index}");
+            }
+        }
+    }
+    let mut out = [7u32; 4];
+    surface.scaled_row(2, 0, 2, &mut out);
+    assert_eq!(out, [0; 4], "a row below the surface is black");
 }

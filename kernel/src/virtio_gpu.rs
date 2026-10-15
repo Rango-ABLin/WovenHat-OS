@@ -59,7 +59,31 @@ pub struct Head {
 }
 
 impl Head {
+    /// Write `pixels` (0x00RRGGBB) into row `y` from column `x`, crossing
+    /// backing runs as needed.
+    pub fn write_row(&mut self, x: u32, y: u32, pixels: &[u32]) {
+        if y >= self.height || x >= self.width {
+            return;
+        }
+        let count = pixels.len().min((self.width - x) as usize);
+        let run = CHUNK_PAGES * PAGE_SIZE;
+        let mut offset = (y as usize * self.width as usize + x as usize) * 4;
+        let mut written = 0;
+        while written < count {
+            let (chunk, within) = (offset / run, offset % run);
+            let fit = ((run - within) / 4).min(count - written);
+            let Some(Some(pages)) = self.chunks.get_mut(chunk) else { return };
+            let bytes = &mut pages.bytes_mut()[within..within + fit * 4];
+            for (slot, pixel) in bytes.as_chunks_mut::<4>().0.iter_mut().zip(&pixels[written..written + fit]) {
+                *slot = pixel.to_le_bytes();
+            }
+            written += fit;
+            offset += fit * 4;
+        }
+    }
+
     /// Set one pixel (0x00RRGGBB) in the head's backing memory.
+    #[cfg(feature = "stage20-14-test")]
     pub fn put(&mut self, x: u32, y: u32, pixel: u32) {
         if x >= self.width || y >= self.height {
             return;
@@ -184,21 +208,33 @@ impl Gpu {
     }
 
     /// Show scanout `index`'s current pixels.
+    #[cfg(feature = "stage20-14-test")]
     pub fn present(&mut self, index: usize) -> Result<(), Error> {
-        let (width, height, resource) = match self.heads.get(index) {
-            Some(Some(head)) => (head.width, head.height, head.resource),
+        let (width, height) = match self.heads.get(index) {
+            Some(Some(head)) => (head.width, head.height),
             _ => return Err(Error::NotFound),
         };
+        self.present_rect(index, 0, 0, width, height)
+    }
+
+    /// Show the `width` x `height` rectangle at (`x`, `y`) of scanout
+    /// `index`.
+    pub fn present_rect(&mut self, index: usize, x: u32, y: u32, width: u32, height: u32) -> Result<(), Error> {
+        let (stride, resource) = match self.heads.get(index) {
+            Some(Some(head)) if x + width <= head.width && y + height <= head.height => (head.width, head.resource),
+            _ => return Err(Error::NotFound),
+        };
+        let offset = (u64::from(y) * u64::from(stride) + u64::from(x)) * 4;
         let mut request = header(CMD_TRANSFER_TO_HOST_2D).to_vec();
-        for value in [0, 0, width, height] {
+        for value in [x, y, width, height] {
             request.extend_from_slice(&value.to_le_bytes());
         }
-        request.extend_from_slice(&0u64.to_le_bytes());
+        request.extend_from_slice(&offset.to_le_bytes());
         request.extend_from_slice(&resource.to_le_bytes());
         request.extend_from_slice(&0u32.to_le_bytes());
         self.expect_ok(&request)?;
         let mut request = header(CMD_RESOURCE_FLUSH).to_vec();
-        for value in [0, 0, width, height, resource, 0] {
+        for value in [x, y, width, height, resource, 0] {
             request.extend_from_slice(&value.to_le_bytes());
         }
         self.expect_ok(&request)

@@ -15,7 +15,8 @@ you start or finish something.
   so only one of those runs on the machine at a time.
 - **Never terminate the other agent's QEMU or cargo processes.**
 - **Syscall numbers.** Desktop and compositor syscalls take numbers from
-  the 200 block (200–202 are used). Codex's permission, ledger, secret and
+  the 200 block (200–207 are used: 206 is Codex's `WaitAnyObjects`, 207
+  `GraphicsCompositorOutputs`; 208 is reserved for audio recording). Codex's permission, ledger, secret and
   thread syscalls own 122–135. Check `kernel/src/syscall.rs` before taking
   a number.
 - **Feature gates.** Each new stage gets its own feature and harness, per
@@ -53,7 +54,7 @@ you start or finish something.
   should go through `block_io`, not `ata::with_primary_master`.
 
 - Stage 13.15, WovenAudio playback: `AudioPlayback` capability 24 and
-  `Permission::Audio` 16; syscalls 203–205 (206 is reserved for
+  `Permission::Audio` 16; syscalls 203–205 (208 is reserved for
   recording); `Action::AudioPlay` in the ledger.
 
 - Stage 13.16, report-protocol HID (`kernel/src/hid.rs`): tablets, pens,
@@ -66,9 +67,22 @@ qualification of Wi-Fi and Bluetooth, and of the native controllers.
 - Stage 20.13, workspaces (roadmap 18.8): the shell has four workspaces; F3 and F4
   are new keys (input kinds 14 and 15).
 
-**In progress (Claude Code):** Stage 20.14, multi-monitor (roadmap 18.9): a modern
-virtio-pci transport, a virtio-gpu multi-scanout driver, then an extended
-desktop across the heads.
+- Stage 20.14, multi-monitor (roadmap 18.9): a modern virtio-pci
+  transport, a virtio-gpu multi-scanout driver (20.14a) and the desktop
+  across the heads (20.14b, syscall 207). **Roadmap Stage 18 is complete in
+  software.**
+- Presentation and repaint performance: shell dirty areas, exact damage
+  coalescing, row-wise present (see its audit). Touches `display.rs`,
+  `compositor.rs` and the shell.
+- `scripts/write-live-usb.ps1`: writes the release-validated image to the
+  identified 8 GB VendorCo stick (serial 5474001281346643368) with
+  read-back verification. The stick now holds release image `408696e4…`.
+
+**In progress (Claude Code):** live hardware testing. A USB mass-storage
+driver (xHCI bulk, Bulk-Only Transport, SCSI) and a boot log written to the
+WovenHat USB stick itself, with a live-test mode that never writes the
+test machine's internal disks. The user boots the stick on a separate
+machine; the logs come back on the stick.
 
 
 ## Codex: owned work
