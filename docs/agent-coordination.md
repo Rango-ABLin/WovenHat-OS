@@ -75,4 +75,9 @@ desktop across the heads.
 
 Stage 19 system applications (WovenCalculator, WovenTerminal, WovenFiles,
 WovenEditor, …), application signing and packaging, and the release
-validation chain. Update this section with anything in progress.
+validation chain.
+
+**Current Codex work (2026-10-15):** WovenFS nested mount publication and
+complete reachable-tree consistency validation are committed on the shared
+branch. The final release chain is being rerun against the Claude merge
+`a403c7d2`; no USB media is being modified.
