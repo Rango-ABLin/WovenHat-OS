@@ -795,7 +795,7 @@ jobs:
             target/*regression-*/qemu.log
             target/hello-gui-*/serial.log
 
-  desktop-userspace:
+  desktop-application:
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
@@ -826,6 +826,32 @@ jobs:
           for cpu in 1 2 4; do
             python3 scripts/test-application-qemu.py --cpus "$cpu" --timeout 300 --qemu "$qemu" --firmware "$ovmf_code"
           done
+      - name: Preserve desktop-userspace evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop-application-evidence
+          if-no-files-found: ignore
+          path: |
+            target/release-validation/
+            audit-artifacts/
+            target/*regression-*/serial.log
+            target/*regression-*/qemu.log
+            target/hello-gui-*/serial.log
+
+
+  desktop-compositor:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: nightly-2026-07-10
+          targets: x86_64-unknown-none,x86_64-unknown-uefi
+          components: clippy,rust-src,llvm-tools-preview
+      - name: Install QEMU and OVMF
+        run: sudo apt-get update && sudo apt-get install --yes qemu-system-x86 ovmf
       - name: Stage 17-19 display, client surface and compositor acceptance
         shell: bash
         run: |
@@ -875,6 +901,32 @@ jobs:
             python3 scripts/test-hello-gui-compositor-qemu.py --stage 19.13 --cpus "$cpu" --timeout 300 --qemu "$qemu" --firmware "$ovmf_code"
             python3 scripts/test-hello-gui-compositor-qemu.py --stage 19.14 --cpus "$cpu" --timeout 300 --qemu "$qemu" --firmware "$ovmf_code"
           done
+      - name: Preserve desktop-userspace evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop-compositor-evidence
+          if-no-files-found: ignore
+          path: |
+            target/release-validation/
+            audit-artifacts/
+            target/*regression-*/serial.log
+            target/*regression-*/qemu.log
+            target/hello-gui-*/serial.log
+
+
+  desktop-shell:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: nightly-2026-07-10
+          targets: x86_64-unknown-none,x86_64-unknown-uefi
+          components: clippy,rust-src,llvm-tools-preview
+      - name: Install QEMU and OVMF
+        run: sudo apt-get update && sudo apt-get install --yes qemu-system-x86 ovmf
       - name: Stage 20 WovenShell desktop acceptance
         shell: bash
         run: |
@@ -923,7 +975,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: desktop-userspace-evidence
+          name: desktop-shell-evidence
           if-no-files-found: ignore
           path: |
             target/release-validation/
@@ -931,6 +983,7 @@ jobs:
             target/*regression-*/serial.log
             target/*regression-*/qemu.log
             target/hello-gui-*/serial.log
+
 
   wovenfs-lint:
     runs-on: ubuntu-latest
