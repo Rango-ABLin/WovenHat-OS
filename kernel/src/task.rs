@@ -1661,20 +1661,20 @@ pub fn create_user_thread(entry: u64, stack_size: u64) -> Result<crate::thread::
 
     let stack = userspace::map_anonymous(address_space, stack_slot, stack_size, true)
         .ok_or(ThreadError::MappingFailed)?;
-    let tls = if has_tls {
+    let (tls, tls_base) = if has_tls {
         let Some(slot) = tls_slot else {
             let _ = userspace::unmap_anonymous(address_space, stack);
             return Err(ThreadError::MappingFailed);
         };
         match userspace::clone_initial_tls(address_space, slot) {
-            Some(mapping) => Some(mapping),
+            Some((mapping, pointer)) => (Some(mapping), pointer),
             None => {
                 let _ = userspace::unmap_anonymous(address_space, stack);
                 return Err(ThreadError::MappingFailed);
             }
         }
     } else {
-        None
+        (None, 0)
     };
 
     let thread_id = match crate::thread::create(process_id.as_u64()) {
@@ -1715,7 +1715,6 @@ pub fn create_user_thread(entry: u64, stack_size: u64) -> Result<crate::thread::
     };
     let task_id = TaskId(NEXT_TASK_ID.fetch_add(1, Ordering::Relaxed));
     let stack_top = stack.address.saturating_add(stack.size as u64);
-    let tls_base = tls.map_or(0, |mapping| mapping.address.saturating_add(mapping.size as u64));
     let context = prepare_user_context_with_tls(entry as usize, stack_top as usize, tls_base);
 
     let mut scheduler = SCHEDULER.lock();

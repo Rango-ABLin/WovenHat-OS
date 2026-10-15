@@ -3171,6 +3171,14 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         }
         qemu_test_exit_success();
     }
+    #[cfg(feature = "stage11-tls-test")]
+    {
+        if !userspace::compiler_tls_self_test() {
+            serial::write_line(format_args!("[S11.TLS] compiler TLS lifecycle: FAILED"));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!("[S11.TLS] compiler TLS lifecycle: PASSED"));
+    }
     #[cfg(feature = "stage11-exit-status-test")]
     {
         let frames = memory::stats().allocated_frames;

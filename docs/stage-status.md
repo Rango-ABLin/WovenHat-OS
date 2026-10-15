@@ -79,6 +79,15 @@ verified all 505 frozen inputs and sixty stress logs. See the compiler-PIE
 audit. Compiler TLS, general dynamic linking, merged-tree, release and hardware
 qualification remain open.
 
+**Compiler TLS integration pending:** checked Variant-II layout, a mapped TCB
+self pointer and an immutable post-relocation template fix the retained
+compiler FS/guard fault. Host parser/layout tests and first expanded Ring-3
+execution pass on 1/2/4 CPUs, including fresh children, page/congruence edges, fork mapping
+protection and rollback. Full lifecycle expansion and inherited acceptance
+remain required. Read-only review also found production ASLR mmap/stack-range
+overlap, hidden by zero-draw QEMU boots; that needs a separate validated layout
+gate. See the compiler-TLS implementation audit. No full TLS/stage claim.
+
 ## Presentation and repaint performance (2026-10-15)
 
 A fix to accepted Stage 19/20 behaviour, found by the Stage 20.7 fade gate.

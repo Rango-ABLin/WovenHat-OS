@@ -135,6 +135,7 @@ fn prepare(bytes: &[u8], candidate_bias: u64) -> Option<Vec<LinkImage<'_>>> {
 struct Pending {
     space: AddressSpace,
     stack_mapped: bool,
+    template_mapped: Option<(u64, usize)>,
     committed: bool,
 }
 
@@ -143,14 +144,18 @@ impl Drop for Pending {
         if self.committed {
             return;
         }
-        let mut ranges = [(0, 0); MAX_IMAGE_MAPPINGS + 2];
+        let mut ranges = [(0, 0); MAX_IMAGE_MAPPINGS + 3];
         let mut count = 0;
         if self.stack_mapped {
             ranges[count] = (self.space.stack_base, UserStack::SIZE);
             count += 1;
         }
         if let Some(tls) = self.space.tls {
-            ranges[count] = tls;
+            ranges[count] = tls.range();
+            count += 1;
+        }
+        if let Some(template) = self.template_mapped {
+            ranges[count] = template;
             count += 1;
         }
         for mapping in self.space.mappings[..self.space.mapping_count].iter().rev() {
@@ -206,6 +211,7 @@ pub(super) fn load_with_candidate_bias(
             tls: None,
         },
         stack_mapped: false,
+        template_mapped: None,
         committed: false,
     };
     for (index, linked) in images.iter().enumerate() {
@@ -277,24 +283,35 @@ pub(super) fn load_with_candidate_bias(
         }
     }
     let tls_base = if let Some(tls) = main.image.tls() {
-        let size = usize::try_from(page_align_up(tls.memory_size as u64)?).ok()?;
-        let start = stack.guard_base.checked_sub(size as u64)?;
-        if start < mmap_end
+        let layout = tls_layout::Layout::new(tls.file_size, tls.memory_size,
+            tls.alignment, tls.virtual_address, USER_MMAP_MAX_SIZE)?;
+        let template_size = usize::try_from(page_align_up(tls.file_size as u64)?).ok()?;
+        let total = layout.mapping_size.checked_add(template_size)?;
+        let template_start = stack.guard_base.checked_sub(total as u64)?;
+        let start = template_start.checked_add(template_size as u64)?;
+        if template_start < mmap_end
             || pending.space.mappings[..pending.space.mapping_count]
                 .iter()
                 .any(|mapping| {
-                    start < mapping.start() + mapping.size() as u64
+                    template_start < mapping.start() + mapping.size() as u64
                         && mapping.start() < stack.guard_base
                 })
         {
             return None;
         }
-        let file_end = tls.file_offset.checked_add(tls.file_size)?;
-        paging::map_user_range_in_inactive(page_table, start, size, true, false).ok()?;
-        pending.space.tls = Some((start, size));
-        paging::zero_user_range_in(page_table, start, size).ok()?;
-        paging::write_user_bytes(page_table, start, bytes.get(tls.file_offset..file_end)?).ok()?;
-        start.checked_add(size as u64)?
+        if template_size != 0 {
+            paging::map_user_range_in_inactive(page_table, template_start, template_size, true, false).ok()?;
+            pending.template_mapped = Some((template_start, template_size));
+            paging::zero_user_range_in(page_table, template_start, template_size).ok()?;
+            // Capture post-relocation initialization bytes from the validated
+            // PT_LOAD source, not raw ELF or the mutable first thread's TLS.
+            copy_tls_bytes(page_table, tls.virtual_address, template_start, tls.file_size)?;
+            paging::protect_user_range_in_inactive(page_table, template_start, template_size, false, false).ok()?;
+        }
+        paging::map_user_range_in_inactive(page_table, start, layout.mapping_size, true, false).ok()?;
+        let initial = InitialTls { start, layout, template: pending.template_mapped, file_size: tls.file_size };
+        pending.space.tls = Some(initial);
+        initialize_tls(page_table, start, initial)?
     } else {
         0
     };

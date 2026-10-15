@@ -6,6 +6,21 @@ you start or finish something.
 
 ## Shared rules
 
+**Compiler TLS focused checkpoint (2026-10-15):** session 43180 is terminal,
+exit 0. Checked layout, immutable template, TCB/self-pointer, clone and rollback
+integration passed host tests, host/production/TLS-feature warning-denying
+Clippy and 1/2/4-CPU focused execution. Full acceptance has NOT run. Codex
+retains the serialized slot to strengthen compiler fork/cancel/capacity/owner
+exit and relocated-initializer coverage before freezing the full gate. A
+separate inherited production-ASLR arena-overlap finding is documented; do not
+infer randomized geometry from deterministic QEMU boots. Foreign chains held.
+
+**Compiler TLS implementation slot (2026-10-15):** shared-PIE prerequisite
+is accepted. Codex is integrating real compiler static/fresh-thread TLS probes,
+first preserving the existing FS/guard failure, then fixing validated layout,
+template lifetime and rollback. Foreign build/acceptance chains remain held;
+source-only work may continue. No TLS acceptance or production claim yet.
+
 **Compiler shared-PIE accepted (2026-10-15):** session 73596 is terminal,
 exit 0, full acceptance PASS. Independent inspection verified 505 unchanged
 inputs, sixteen feature lints, six focused and twenty-one inherited runtime

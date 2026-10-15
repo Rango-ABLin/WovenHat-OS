@@ -12,6 +12,21 @@ spec.loader.exec_module(harness)
 
 
 class RuntimeAcceptanceTests(unittest.TestCase):
+    def test_compiler_tls_requires_fresh_threads_and_original_thread_gate(self):
+        required = harness.required_markers('11.2-tls', 4)
+        for marker in ('[S11.TLS] static compiler TLS: PASSED',
+                       '[S11.TLS] fresh child TLS: PASSED',
+                       '[S11.TLS] nonzero congruence TLS: PASSED',
+                       '[S11.TLS] page-edge TCB: PASSED',
+                       '[S11.TLS] template/TCB rollback and fork protection: PASSED',
+                       '[S11.TLS] compiler TLS lifecycle: PASSED',
+                       '[S11.2] threads/TLS/join: PASSED'):
+            self.assertIn(marker, required)
+        for missing in required:
+            with self.subTest(missing=missing):
+                log = '\n'.join(marker for marker in required if marker != missing)
+                self.assertTrue(harness.validation_errors(33, log, required))
+
     def test_compiler_gate_preserves_all_original_loader_checks(self):
         required = harness.required_markers('11.5-compiler', 4)
         for marker in harness.required_markers('11.5', 4):

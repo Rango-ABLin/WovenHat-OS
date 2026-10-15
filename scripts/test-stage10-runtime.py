@@ -75,6 +75,7 @@ def required_markers(stage, cpus):
                   '11.1': '[S11.1] production process model: PASSED',
                   '11.2': '[S11.2] threads/TLS/join: PASSED',
                   '11.2-status': '[S11.STATUS] libwoven signed exit status/ownership/teardown: PASSED',
+                  '11.2-tls': '[S11.TLS] compiler TLS lifecycle: PASSED',
                   '11.3': '[S11.3] notifications: PASSED',
                   '11.4': '[S11.4] libwoven runtime boundary: PASSED',
                   '11.5': '[S11.5] loader hardening: PASSED',
@@ -106,6 +107,16 @@ def required_markers(stage, cpus):
                   '19.1': '[S19.1] compositor surface: PASSED',
                   '19.3': '[S19.3] compositor presentation: PASSED',
                   '19.10': '[S19.10] display geometry and single writer: PASSED'}[stage])]
+    if stage == '11.2-tls':
+        required.extend([
+            '[S11.TLS] static compiler TLS: PASSED',
+            '[S11.TLS] fresh child TLS: PASSED',
+            '[S11.TLS] nonzero congruence TLS: PASSED',
+            '[S11.TLS] page-edge TCB: PASSED',
+            '[S11.TLS] template/TCB rollback and fork protection: PASSED',
+            '[S11.2] scheduler-backed thread: PASSED',
+            '[S11.2] threads/TLS/join: PASSED',
+        ])
     if stage == '11.2-status':
         required.extend([
             '[S11.PLACEMENT] fixed ET_EXEC at nonzero ASLR candidate: PASSED',
@@ -156,7 +167,7 @@ def validation_errors(returncode, log, required):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--stage', choices=('10.8', '10.9', '11.1', '11.2', '11.2-status', '11.3', '11.4', '11.5', '11.5-compiler', '12.1', '12.2', '12.3', '12.4', '12.5', '13.1', '13.2', '13.3', '13.4', '13.5', '13.6', '13.7', '13.8', '13.9', '13.10', '13.11', '1-5', '15.1', '15.3', '15.4', '15.5', '15.6', '15.7', '15.8', '15.9', '17.1', '18.1', '19.1', '19.3', '19.10'), default='10.8')
+    parser.add_argument('--stage', choices=('10.8', '10.9', '11.1', '11.2', '11.2-status', '11.2-tls', '11.3', '11.4', '11.5', '11.5-compiler', '12.1', '12.2', '12.3', '12.4', '12.5', '13.1', '13.2', '13.3', '13.4', '13.5', '13.6', '13.7', '13.8', '13.9', '13.10', '13.11', '1-5', '15.1', '15.3', '15.4', '15.5', '15.6', '15.7', '15.8', '15.9', '17.1', '18.1', '19.1', '19.3', '19.10'), default='10.8')
     parser.add_argument('--cpus', type=int, choices=(1, 2, 4), default=1)
     parser.add_argument('--qemu', default=shutil.which('qemu-system-x86_64') or r'C:\Program Files\qemu\qemu-system-x86_64.exe')
     parser.add_argument('--firmware', type=Path)
@@ -182,7 +193,7 @@ def main():
             print(str(error), file=sys.stderr)
             return 1
         feature = 'stage11-exit-status-test'
-    if args.stage == '11.5-compiler':
+    if args.stage in ('11.5-compiler', '11.2-tls'):
         import importlib.util
         spec = importlib.util.spec_from_file_location('loader_builder', root / 'scripts/build-loader-fixtures.py')
         builder = importlib.util.module_from_spec(spec)
@@ -192,10 +203,12 @@ def main():
             manifest = json.loads(manifest_path.read_text(encoding='utf-8'))
             env['WOVENHAT_COMPILER_MAIN_ELF'] = manifest['outputs']['shared-demo']['path']
             env['WOVENHAT_COMPILER_LIBRARY_ELF'] = manifest['outputs']['libwoven-demo.so']['path']
+            env['WOVENHAT_TLS_STATIC_ELF'] = manifest['outputs']['static-tls-demo']['path']
+            env['WOVENHAT_TLS_THREADS_ELF'] = manifest['outputs']['tls-threads-demo']['path']
         except RuntimeError as error:
             print(str(error), file=sys.stderr)
             return 1
-        feature = 'stage11-compiler-test'
+        feature = 'stage11-tls-test' if args.stage == '11.2-tls' else 'stage11-compiler-test'
     build = subprocess.run(['cargo', 'run', '--quiet', '--features', feature, '--', '--print-image'],
                            cwd=root, env=env, text=True, capture_output=True)
     (out / 'build.log').write_text(build.stdout + build.stderr, encoding='utf-8')

@@ -136,6 +136,55 @@ fn image(bytes: &[u8]) -> elf::Image {
     elf::parse(bytes).unwrap_or_else(|_| panic!("fixture must parse"))
 }
 
+fn tls_fixture() -> Vec<u8> {
+    let mut bytes = fixture(&[]);
+    put16(&mut bytes, 56, 3);
+    put32(&mut bytes, 176, 7);
+    put64(&mut bytes, 184, 0x1008);
+    put64(&mut bytes, 192, BASE + 8);
+    put64(&mut bytes, 208, 8);
+    put64(&mut bytes, 216, 136);
+    put64(&mut bytes, 224, 64);
+    bytes
+}
+
+#[test]
+fn tls_source_congruence_and_address_survive_image_relocation() {
+    let bytes = tls_fixture();
+    let parsed = image(&bytes);
+    let tls = parsed.tls().unwrap();
+    assert_eq!(tls.virtual_address, BASE + 8);
+    assert_eq!(tls.file_offset, 0x1008);
+    assert_eq!(tls.alignment, 64);
+    assert_eq!(parsed.relocated(0x30000).unwrap().tls().unwrap().virtual_address, BASE + 0x30008);
+}
+
+#[test]
+fn tls_initializer_requires_exact_file_backed_source() {
+    for (field, value) in [(184, 0x1208), (192, BASE + 0x48), (208, 0x401)] {
+        let mut bytes = tls_fixture();
+        put64(&mut bytes, field, value);
+        assert!(elf::parse(&bytes).is_err());
+    }
+    let mut bss = tls_fixture();
+    put64(&mut bss, 208, 0);
+    assert!(elf::parse(&bss).is_ok());
+}
+
+#[test]
+fn tls_overflow_alignment_and_duplicate_headers_fail_closed() {
+    for (field, value) in [(192, u64::MAX), (216, u64::MAX), (224, 0), (224, 3), (224, 8192)] {
+        let mut bytes = tls_fixture();
+        put64(&mut bytes, field, value);
+        assert!(elf::parse(&bytes).is_err());
+    }
+    let mut duplicate = tls_fixture();
+    put16(&mut duplicate, 56, 4);
+    let header = duplicate[176..232].to_vec();
+    duplicate[232..288].copy_from_slice(&header);
+    assert!(elf::parse(&duplicate).is_err());
+}
+
 #[test]
 fn exported_symbol_tracks_aslr_once() {
     let bytes = fixture(&[]);

@@ -6,6 +6,12 @@ global_asm!(include_str!("stage10_8.S"));
 global_asm!(include_str!("stage10_9.S"));
 
 mod linker;
+mod tls_layout;
+#[cfg(feature = "stage11-tls-test")]
+mod tls_acceptance;
+
+#[cfg(feature = "stage11-tls-test")]
+pub fn compiler_tls_self_test() -> bool { tls_acceptance::run() }
 
 const MAX_IMAGE_MAPPINGS: usize = crate::config::MAX_ELF_SEGMENTS * crate::elf::MAX_SCOPE_IMAGES;
 use crate::paging;
@@ -4444,6 +4450,18 @@ impl UserMapping {
 const _: () = assert!(core::mem::size_of::<UserMapping>() == 8);
 
 #[derive(Clone, Copy)]
+struct InitialTls {
+    start: u64,
+    layout: tls_layout::Layout,
+    template: Option<(u64, usize)>,
+    file_size: usize,
+}
+
+impl InitialTls {
+    fn range(self) -> (u64, usize) { (self.start, self.layout.mapping_size) }
+}
+
+#[derive(Clone, Copy)]
 pub struct AddressSpace {
     paging: paging::AddressSpace,
     stack_base: u64,
@@ -4452,7 +4470,7 @@ pub struct AddressSpace {
     mapping_count: usize,
     relro: Option<(u64, usize)>,
     library_relro: [Option<(u64, usize)>; crate::elf::MAX_NEEDED_LIBRARIES],
-    tls: Option<(u64, usize)>,
+    tls: Option<InitialTls>,
 }
 
 impl AddressSpace {
@@ -4479,7 +4497,7 @@ impl AddressSpace {
 
     /// Return the static initial-exec TLS image range, if this image has one.
     pub fn tls_range(self) -> Option<(u64, usize)> {
-        self.tls
+        self.tls.map(InitialTls::range)
     }
 
     /// Returns whether `address` falls in a logically writable mapping
@@ -4508,7 +4526,7 @@ impl AddressSpace {
         }
         if self
             .tls
-            .is_some_and(|(start, size)| address >= start && address < start + size as u64)
+            .is_some_and(|tls| address >= tls.start && address < tls.start + tls.layout.mapping_size as u64)
         {
             return true;
         }
@@ -4802,6 +4820,7 @@ pub fn elf_loader_self_test() -> bool {
         if write_u16(&mut elf, 56, 2).is_none()
             || write_u32(&mut elf, tls_header, PT_TLS).is_none()
             || write_u64(&mut elf, tls_header + 8, 4096).is_none()
+            || write_u64(&mut elf, tls_header + 16, USER_REGION_START).is_none()
             || write_u64(&mut elf, tls_header + 32, 4).is_none()
             || write_u64(&mut elf, tls_header + 40, 4096).is_none()
             || write_u64(&mut elf, tls_header + 48, 4096).is_none()
@@ -5249,38 +5268,45 @@ pub fn map_anonymous(
     })
 }
 
-/// Clone the current process's bounded initial-exec TLS image for a new
-/// scheduler task.  The clone gets private writable pages and therefore a
-/// thread cannot mutate another thread's `errno` or compiler TLS variables.
+/// Initialize a private TLS allocation from the immutable relocated template.
+/// New threads never inherit mutable parent-thread values or its self pointer.
 pub fn clone_initial_tls(
     address_space: AddressSpace,
     slot: usize,
-) -> Option<AnonymousMapping> {
-    let (source, size) = address_space.tls_range()?;
-    let mapping = map_anonymous(address_space, slot, size, true)?;
+) -> Option<(AnonymousMapping, u64)> {
+    let tls = address_space.tls?;
+    let mapping = map_anonymous(address_space, slot, tls.layout.mapping_size, true)?;
+    let pointer = initialize_tls(address_space.paging, mapping.address, tls);
+    if let Some(pointer) = pointer {
+        Some((mapping, pointer))
+    } else {
+        let _ = unmap_anonymous(address_space, mapping);
+        None
+    }
+}
+
+fn copy_tls_bytes(space: paging::AddressSpace, source: u64, target: u64, size: usize) -> Option<()> {
     let mut buffer = [0u8; 512];
     let mut offset = 0usize;
     while offset < size {
         let count = buffer.len().min(size - offset);
-        if paging::read_user_bytes_in(
-            address_space.paging,
-            source.checked_add(offset as u64)?,
-            &mut buffer[..count],
-        )
-        .is_err()
-            || paging::write_user_bytes(
-                address_space.paging,
-                mapping.address.checked_add(offset as u64)?,
-                &buffer[..count],
-            )
-            .is_err()
-        {
-            let _ = unmap_anonymous(address_space, mapping);
-            return None;
-        }
+        paging::read_user_bytes_in(space, source.checked_add(offset as u64)?, &mut buffer[..count]).ok()?;
+        paging::write_user_bytes(space, target.checked_add(offset as u64)?, &buffer[..count]).ok()?;
         offset += count;
     }
-    Some(mapping)
+    Some(())
+}
+
+fn initialize_tls(space: paging::AddressSpace, start: u64, tls: InitialTls) -> Option<u64> {
+    paging::zero_user_range_in(space, start, tls.layout.mapping_size).ok()?;
+    if let Some((template, _)) = tls.template {
+        copy_tls_bytes(space, template, start.checked_add(tls.layout.image_offset as u64)?, tls.file_size)?;
+    } else if tls.file_size != 0 {
+        return None;
+    }
+    let pointer = start.checked_add(tls.layout.thread_pointer_offset as u64)?;
+    paging::write_user_bytes(space, pointer, &pointer.to_le_bytes()).ok()?;
+    Some(pointer)
 }
 
 /// Populate private NX pages without advancing the file offset.
@@ -5579,7 +5605,7 @@ pub fn destroy_process_address_space(
     destroy(address_space)
 }
 pub fn destroy(address_space: AddressSpace) -> bool {
-    let mut ranges = [(0, 0); MAX_IMAGE_MAPPINGS + 2];
+    let mut ranges = [(0, 0); MAX_IMAGE_MAPPINGS + 3];
     ranges[0] = (address_space.stack_base, UserStack::SIZE);
     for (range, mapping) in ranges[1..]
         .iter_mut()
@@ -5589,8 +5615,12 @@ pub fn destroy(address_space: AddressSpace) -> bool {
     }
     let mut count = address_space.mapping_count + 1;
     if let Some(tls) = address_space.tls {
-        ranges[count] = tls;
+        ranges[count] = tls.range();
         count += 1;
+        if let Some(template) = tls.template {
+            ranges[count] = template;
+            count += 1;
+        }
     }
     paging::destroy_user_address_space(address_space.paging, &ranges[..count])
     .is_ok()
@@ -5611,7 +5641,7 @@ pub fn clone_address_space(
         library_relro: source.library_relro,
         tls: source.tls,
     };
-    let mut completed = [(0_u64, 0_usize); MAX_IMAGE_MAPPINGS + 2 + MAX_ANONYMOUS_MAPPINGS * 16];
+    let mut completed = [(0_u64, 0_usize); MAX_IMAGE_MAPPINGS + 3 + MAX_ANONYMOUS_MAPPINGS * 16];
     let mut completed_count = 0;
 
     // Copy-on-write: share physical frames and mark writable ranges read-only.
@@ -5648,7 +5678,8 @@ pub fn clone_address_space(
     completed[completed_count] = (source.stack_base, UserStack::SIZE);
     completed_count += 1;
 
-    if let Some((tls_start, tls_size)) = source.tls {
+    if let Some(tls) = source.tls {
+        let (tls_start, tls_size) = tls.range();
         if paging::share_user_range_in(
             source.paging,
             destination.paging,
@@ -5664,6 +5695,14 @@ pub fn clone_address_space(
         }
         completed[completed_count] = (tls_start, tls_size);
         completed_count += 1;
+        if let Some((start, size)) = tls.template {
+            if paging::share_user_range_in(source.paging, destination.paging, start, size, false, false).is_err() {
+                release_clone(destination.paging, &completed[..completed_count]);
+                return None;
+            }
+            completed[completed_count] = (start, size);
+            completed_count += 1;
+        }
     }
 
     for mapping in anonymous.iter().flatten() {

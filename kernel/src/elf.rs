@@ -43,6 +43,7 @@ pub struct LoadSegment {
 #[derive(Clone, Copy)]
 pub struct TlsImage {
     pub file_offset: usize,
+    pub virtual_address: u64,
     pub file_size: usize,
     pub memory_size: usize,
     pub alignment: u64,
@@ -286,6 +287,12 @@ impl Image {
     pub fn relocated(mut self, delta: u64) -> Option<Self> {
         self.entry = self.entry.checked_add(delta)?;
         self.load_bias = delta;
+        if let Some(tls) = self.tls.as_mut() {
+            tls.virtual_address = tls.virtual_address.checked_add(delta)?;
+            if tls.virtual_address.checked_add(tls.memory_size as u64)? >= USER_ADDRESS_LIMIT {
+                return None;
+            }
+        }
         if let Some((start, size)) = self.relro.as_mut() {
             *start = start.checked_add(delta)?;
             let end = start.checked_add(*size as u64)?;
@@ -672,10 +679,14 @@ fn parse_image(bytes: &[u8], shared: bool) -> Result<Image, Error> {
             let memory_size = usize::try_from(read_u64(bytes, offset + 40)?)
                 .map_err(|_| Error::InvalidSegment)?;
             let alignment = read_u64(bytes, offset + 48)?;
+            let virtual_address = read_u64(bytes, offset + 16)?;
             if memory_size == 0
                 || file_size > memory_size
                 || !alignment.is_power_of_two()
                 || alignment > PAGE_SIZE
+                || virtual_address % alignment != file_offset as u64 % alignment
+                || virtual_address.checked_add(memory_size as u64)
+                    .is_none_or(|end| end >= USER_ADDRESS_LIMIT)
                 || file_offset
                     .checked_add(file_size)
                     .filter(|end| *end <= bytes.len())
@@ -685,6 +696,7 @@ fn parse_image(bytes: &[u8], shared: bool) -> Result<Image, Error> {
             }
             image.tls = Some(TlsImage {
                 file_offset,
+                virtual_address,
                 file_size,
                 memory_size,
                 alignment,
@@ -778,6 +790,15 @@ fn parse_image(bytes: &[u8], shared: bool) -> Result<Image, Error> {
 
     if image.segment_count == 0 || (!entry_is_executable && !(shared && entry == 0)) {
         return Err(Error::InvalidEntry);
+    }
+    if let Some(tls) = image.tls.filter(|tls| tls.file_size != 0) {
+        let contained = image.segments().any(|segment| {
+            tls.file_offset.checked_sub(segment.file_offset).is_some_and(|offset| {
+                offset.checked_add(tls.file_size).is_some_and(|end| end <= segment.file_size)
+                    && segment.virtual_address.checked_add(offset as u64) == Some(tls.virtual_address)
+            })
+        });
+        if !contained { return Err(Error::InvalidSegment); }
     }
     if let Some(mut dynamic) = image.dynamic {
         let dynamic_end = dynamic

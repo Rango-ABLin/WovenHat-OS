@@ -317,6 +317,15 @@ write-through audit.
 
 ## Stage 11.2 scheduler-backed thread ownership (2026-10-14)
 
+Compiler TLS integration pending (2026-10-15): `InitialTls` records a checked
+Variant-II layout and an independently tracked RO/NX post-relocation template.
+Mutable main/child storage contains a mapped FS:0 self pointer; fresh threads
+receive initialized template state, not mutated main-thread bytes. Parser
+backing/congruence, clone, logical permission and teardown accounting are
+updated together. Focused execution passes, but lifecycle expansion and full
+acceptance remain pending. See the compiler-TLS implementation audit, including
+the separate inherited production-ASLR arena-overlap finding.
+
 Compiler shared-PIE correction accepted (2026-10-15): ELF parsing explicitly
 accepts a single inert null DT_DEBUG entry, rejecting nonzero addresses and
 duplicates. The new opt-in compiler gate executes exact signed Rust/LLD output

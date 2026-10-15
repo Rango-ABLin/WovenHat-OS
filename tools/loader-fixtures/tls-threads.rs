@@ -84,7 +84,7 @@ pub extern "C" fn demo_main() -> u64 {
     }
     set(99, 23, 19);
     for _ in 0..2 {
-        let id = syscall(130, tls_thread_entry as *const () as u64, 8192);
+        let id = syscall(130, tls_thread_entry as *const () as u64, 16 * 1024);
         if id == u64::MAX {
             return 4;
         }
