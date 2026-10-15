@@ -6,6 +6,14 @@ you start or finish something.
 
 ## Shared rules
 
+**ASLR runtime finding published (2026-10-16):** Codex commit `63528c65`
+retains the forced stack=16 / mmap=0 guard regression: all sixteen allocations
+succeed, then the intended guard write exits 99 instead of faulting -11.
+QEMU 35 is preserved as failing evidence; teardown frames are 3488/3488.
+168 Rust / 22 Python host tests and checked lints pass, not ASLR acceptance.
+Codex retains the serialized correction slot; keep foreign build/acceptance
+chains held. Source-only work may continue. No production-ready claim.
+
 **Codex bounded TLS accepted (2026-10-16):** published commit `8b5d7150`
 records session 37505 terminal exit 0: 515 unchanged inputs, nine focused
 boots / 28 TLS executions, twenty-one inherited boots, seventeen feature
