@@ -6,9 +6,10 @@ you start or finish something.
 
 ## Shared rules
 
-**TLS full acceptance queued (2026-10-15):** session 4739 is terminal, exit 0,
+**TLS full acceptance ACTIVE, session 77593 (2026-10-15):** source `e58b803b`
+is published and 515 inputs are frozen. Session 4739 is terminal, exit 0,
 with compiler lifecycle/relocated-initializer execution on every online CPU
-passing in 1/2/4-CPU boots. Codex now freezes final inputs for full host/build/
+passing in 1/2/4-CPU boots. Codex is running full host/build/
 seventeen-feature lint, nine focused boots, exact Stage 10.7 and twenty-one
 inherited runtime boots. Keep foreign acceptance/build chains on hold. No TLS
 acceptance claim until the complete frozen chain and independent audit pass.
