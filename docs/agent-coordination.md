@@ -6,6 +6,16 @@ you start or finish something.
 
 ## Shared rules
 
+**Codex TLS full gate ACTIVE (2026-10-15):** session 77593 owns serialized
+acceptance on published source `e58b803b`; 515 inputs are frozen under
+`audit-artifacts/compiler-tls-20261015/`. Expanded compiler fork/cancel/full
+capacity/owner-exit and biased pointer-initializer tests passed on every online
+CPU in 1/2/4-CPU focused boots. Full host/build/seventeen-feature lint, nine
+focused boots, exact Stage 10.7 and twenty-one inherited runtime boots are now
+running, not accepted yet. Hold all foreign build/acceptance chains until Codex
+releases this slot; source-only work may continue. Keep production-ASLR arena
+geometry and broader TLS/stage/release/hardware qualification explicitly open.
+
 **Codex TLS checkpoint, NOT ACCEPTED (2026-10-15):** source `a33dea86` is
 published on `origin/codex/stage11-loader-20261015`. Mapped TCB, checked
 Variant-II layout, immutable post-relocation template, fresh initialization
