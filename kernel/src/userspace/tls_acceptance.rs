@@ -86,7 +86,28 @@ fn protected_layout_and_fork(program: &UserProgram) -> bool {
     copied && destroyed
 }
 
-pub(super) fn run() -> bool {
+fn has_relative_tls_initializer(image: &crate::elf::Image, bytes: &[u8]) -> bool {
+    let (Some(tls), Some(dynamic)) = (image.tls(), image.dynamic()) else {
+        return false;
+    };
+    let Some(end) = dynamic.rela_file_offset.checked_add(dynamic.rela_size) else {
+        return false;
+    };
+    let Some(table) = bytes.get(dynamic.rela_file_offset..end) else {
+        return false;
+    };
+    table.chunks_exact(24).any(|entry| {
+        let target = u64::from_le_bytes(entry[..8].try_into().unwrap());
+        let info = u64::from_le_bytes(entry[8..16].try_into().unwrap());
+        info == u64::from(crate::elf::R_X86_64_RELATIVE)
+            && target >= tls.virtual_address
+            && target
+                .checked_add(8)
+                .is_some_and(|end| end <= tls.virtual_address + tls.file_size as u64)
+    })
+}
+
+fn run_on(cpu: usize) -> bool {
     let Some(nonzero) = edge_fixture(72, 136, 64, 184) else {
         return false;
     };
@@ -109,17 +130,40 @@ pub(super) fn run() -> bool {
         let frames = crate::memory::stats().allocated_frames;
         let processes = crate::task::process_count();
         let endpoints = crate::ipc::endpoint_count();
-        let Some(program) = load_elf(bytes) else {
+        let Ok(parsed) = crate::elf::parse(bytes) else {
+            return false;
+        };
+        if name == "fresh child TLS"
+            && (!parsed.is_position_independent() || !has_relative_tls_initializer(&parsed, bytes))
+        {
+            return false;
+        }
+        let bias = if parsed.is_position_independent() {
+            0x30_000
+        } else {
+            0
+        };
+        let Some(program) = linker::load_with_candidate_bias(bytes, &["compiler-tls"], bias) else {
             crate::serial::write_line(format_args!("[S11.TLS] {name}: FAILED load"));
             return false;
         };
-        if !protected_layout_and_fork(&program) {
+        if Some(program.image.entry) != parsed.entry.checked_add(bias)
+            || !protected_layout_and_fork(&program)
+        {
             let _ = destroy(program.address_space);
             return false;
         }
-        let Ok((pid, _)) = crate::task::spawn_user_process("compiler-tls", program) else {
+        // Use the existing production multicore API with one allowed CPU,
+        // not a service/System spawn or broadened capabilities. Exercise real
+        // per-CPU FS switching and remote retirement on every online test CPU.
+        let Ok((pid, _, _, placement)) =
+            crate::task::spawn_multicore_user_process("compiler-tls", program, 1_usize << cpu)
+        else {
             return false;
         };
+        if placement.owner_cpu != cpu {
+            return false;
+        }
         let start = crate::timer::ticks();
         while !crate::task::process_exited(pid) {
             if crate::timer::ticks().wrapping_sub(start) > 500 {
@@ -142,6 +186,11 @@ pub(super) fn run() -> bool {
         if !passed {
             return false;
         }
+        if name == "fresh child TLS" {
+            crate::serial::write_line(format_args!(
+                "[S11.TLS] biased PIE initializer relocation: PASSED"
+            ));
+        }
         let oversized = alloc::string::String::from_utf8(alloc::vec![b'x'; 256]).unwrap();
         let rollback_frames = crate::memory::stats().allocated_frames;
         let rejected = match load_elf_with_argv(bytes, &[&oversized]) {
@@ -158,5 +207,15 @@ pub(super) fn run() -> bool {
     crate::serial::write_line(format_args!(
         "[S11.TLS] template/TCB rollback and fork protection: PASSED"
     ));
+    true
+}
+
+pub(super) fn run() -> bool {
+    for cpu in 0..crate::smp::online_count() {
+        if !run_on(cpu) {
+            return false;
+        }
+        crate::serial::write_line(format_args!("[S11.TLS] lifecycle CPU {cpu}: PASSED"));
+    }
     true
 }

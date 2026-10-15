@@ -83,8 +83,9 @@ qualification remain open.
 self pointer and an immutable post-relocation template fix the retained
 compiler FS/guard fault. Host parser/layout tests and first expanded Ring-3
 execution pass on 1/2/4 CPUs, including fresh children, page/congruence edges, fork mapping
-protection and rollback. Full lifecycle expansion and inherited acceptance
-remain required. Read-only review also found production ASLR mmap/stack-range
+protection and rollback. Expanded compiler fork/cancel/capacity/owner-exit and
+relocated-pointer cases pass on every online CPU in 1/2/4-CPU boots. Full
+inherited acceptance remains required. Review also found ASLR mmap/stack-range
 overlap, hidden by zero-draw QEMU boots; that needs a separate validated layout
 gate. See the compiler-TLS implementation audit. No full TLS/stage claim.
 

@@ -6,6 +6,19 @@ you start or finish something.
 
 ## Shared rules
 
+**TLS full acceptance queued (2026-10-15):** session 4739 is terminal, exit 0,
+with compiler lifecycle/relocated-initializer execution on every online CPU
+passing in 1/2/4-CPU boots. Codex now freezes final inputs for full host/build/
+seventeen-feature lint, nine focused boots, exact Stage 10.7 and twenty-one
+inherited runtime boots. Keep foreign acceptance/build chains on hold. No TLS
+acceptance claim until the complete frozen chain and independent audit pass.
+
+**TLS lifecycle expansion in progress (2026-10-15):** Codex is extending the
+real compiler fixture to fork/fresh descendants, full stack/TLS capacity,
+cancellation/stale joins and owner exit, plus a biased PIE pointer initializer.
+The initial source `a33dea86` remains acceptance pending. Keep foreign build
+and acceptance chains held; source-only work may continue.
+
 **Compiler TLS focused checkpoint (2026-10-15):** session 43180 is terminal,
 exit 0. Checked layout, immutable template, TCB/self-pointer, clone and rollback
 integration passed host tests, host/production/TLS-feature warning-denying

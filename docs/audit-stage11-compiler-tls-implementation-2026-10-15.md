@@ -74,11 +74,9 @@ Do not treat a leaf-only mapping query as proof of CPU writability.
   `stage11.2-tls-2cpu-1792098524417062400/`,
   `stage11.2-tls-4cpu-1792098567320766300/`. These are focused, not acceptance.
 
-Before full acceptance, strengthen actual compiler lifecycle coverage for
-forked mutable state and fresh descendants, cancellation at full TLS/stack
-capacity, stale joins and unjoined sleeping TLS siblings at owner exit. Add an
-actual relocated pointer initializer case, rather than inferring correctness
-only from the post-relocation copy implementation. Then freeze inputs and run
+At that checkpoint, further compiler lifecycle and relocated-initializer
+coverage was required. The expansion below now implements those probes.
+Before acceptance, freeze the final inputs and run
 all host/build/warning-denying affected-feature checks, prior signed-status and
 compiler shared-PIE matrices, exact full Stage 10.7 and Stage 10.8–11.5 gates.
 Retain failed and final serial evidence and commit acceptance separately.
@@ -86,6 +84,41 @@ Retain failed and final serial evidence and commit acceptance separately.
 Dynamic-library TLS, general dynamic-linker interoperability and full Stage 11
 remain open. Neither these focused tests nor source integration qualify the
 combined tree, a release, physical hardware, or Stage 1–19 production readiness.
+
+## Expanded compiler lifecycle and every-CPU gate
+
+The compiler TLS-thread fixture is now an unmodified LLD PIE, still with
+compiler-generated local-exec access. A volatile TLS pointer to a separate
+global adds an actual R_X86_64_RELATIVE relocation inside the PT_TLS initializer.
+The gate requires the PIE kind, a relative relocation within that initializer,
+and a nonzero `0x30000` load bias before accepting real pointer equality and
+dereference. The first passing bundle at
+`stage11.2-tls-1cpu-1792098947990990300/` records PT_TLS virtual start
+`0x400000005080` and a relative relocation targeting that exact address. This
+exercises post-relocation template capture rather than raw-file initialization.
+
+The same compiled program checks mutable parent TLS through fork, independent
+child changes and a freshly initialized descendant thread. It then joins two
+fresh threads, rejects stale joins, fills all eight available stack/TLS pairs
+in the established sixteen-slot arena, verifies the ninth creation fails,
+cancels each initialized sleeping worker with signed status -2 and reaps each
+exactly once. Parent state stays unchanged. Finally it exits with an initialized
+sleeping sibling deliberately unjoined; the kernel wait and exact resource
+baselines prove owner cleanup rather than treating a user report as cleanup.
+Readiness waits use the existing timer sleep, not spinning. No timeout or
+capacity is increased.
+
+The first strengthened compiler lifecycle passed on 1 CPU. A subsequent gate
+runs all four execution cases separately on every online CPU through the
+existing production multicore spawn API, with one allowed CPU at a time and
+ordinary User capabilities. It requires an individual lifecycle marker for
+every CPU. Thus 2/4-CPU boots exercise real AP FS switching, fork/thread calls
+and remote retirement, not merely a BSP-only program under an SMP kernel.
+The all-CPU matrix passed in session 4739, exit 0, with its explicit focused
+pass marker: 1 CPU `stage11.2-tls-1cpu-1792099168828370800/`, 2 CPUs
+`stage11.2-tls-2cpu-1792099208530646200/`, 4 CPUs
+`stage11.2-tls-4cpu-1792099254231710700/`. Every individual online-CPU marker
+and all earlier assertions are present. Full acceptance is still pending.
 
 ## Separate inherited production-ASLR geometry finding
 

@@ -111,12 +111,18 @@ def required_markers(stage, cpus):
         required.extend([
             '[S11.TLS] static compiler TLS: PASSED',
             '[S11.TLS] fresh child TLS: PASSED',
+            '[S11.TLS] relocated pointer initializer: PASSED',
+            '[S11.TLS] biased PIE initializer relocation: PASSED',
+            '[S11.TLS] compiled fork state and fresh descendant: PASSED',
+            '[S11.TLS] compiled capacity cancellation and stale joins: PASSED',
+            '[S11.TLS] compiled owner-exit sibling armed: PASSED',
             '[S11.TLS] nonzero congruence TLS: PASSED',
             '[S11.TLS] page-edge TCB: PASSED',
             '[S11.TLS] template/TCB rollback and fork protection: PASSED',
             '[S11.2] scheduler-backed thread: PASSED',
             '[S11.2] threads/TLS/join: PASSED',
         ])
+        required.extend(f'[S11.TLS] lifecycle CPU {cpu}: PASSED' for cpu in range(cpus))
     if stage == '11.2-status':
         required.extend([
             '[S11.PLACEMENT] fixed ET_EXEC at nonzero ASLR candidate: PASSED',

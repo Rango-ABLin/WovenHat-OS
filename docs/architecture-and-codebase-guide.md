@@ -322,8 +322,9 @@ Variant-II layout and an independently tracked RO/NX post-relocation template.
 Mutable main/child storage contains a mapped FS:0 self pointer; fresh threads
 receive initialized template state, not mutated main-thread bytes. Parser
 backing/congruence, clone, logical permission and teardown accounting are
-updated together. Focused execution passes, but lifecycle expansion and full
-acceptance remain pending. See the compiler-TLS implementation audit, including
+updated together. Expanded compiler fork/cancel/capacity/owner-exit and biased
+pointer-initializer execution passes on every online CPU in 1/2/4-CPU boots;
+full inherited acceptance remains pending. See the implementation audit, including
 the separate inherited production-ASLR arena-overlap finding.
 
 Compiler shared-PIE correction accepted (2026-10-15): ELF parsing explicitly

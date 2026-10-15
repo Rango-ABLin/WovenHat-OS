@@ -16,12 +16,19 @@ class RuntimeAcceptanceTests(unittest.TestCase):
         required = harness.required_markers('11.2-tls', 4)
         for marker in ('[S11.TLS] static compiler TLS: PASSED',
                        '[S11.TLS] fresh child TLS: PASSED',
+                       '[S11.TLS] relocated pointer initializer: PASSED',
+                       '[S11.TLS] biased PIE initializer relocation: PASSED',
+                       '[S11.TLS] compiled fork state and fresh descendant: PASSED',
+                       '[S11.TLS] compiled capacity cancellation and stale joins: PASSED',
+                       '[S11.TLS] compiled owner-exit sibling armed: PASSED',
                        '[S11.TLS] nonzero congruence TLS: PASSED',
                        '[S11.TLS] page-edge TCB: PASSED',
                        '[S11.TLS] template/TCB rollback and fork protection: PASSED',
                        '[S11.TLS] compiler TLS lifecycle: PASSED',
                        '[S11.2] threads/TLS/join: PASSED'):
             self.assertIn(marker, required)
+        for cpu in range(4):
+            self.assertIn(f'[S11.TLS] lifecycle CPU {cpu}: PASSED', required)
         for missing in required:
             with self.subTest(missing=missing):
                 log = '\n'.join(marker for marker in required if marker != missing)
