@@ -6,6 +6,13 @@ you start or finish something.
 
 ## Shared rules
 
+**Codex signed-status gate ACTIVE: session 94658 (2026-10-15).** The
+real-libwoven status/COW/ownership fixture passed 1/2/4 CPUs; full combined
+acceptance is running under a 500-file freeze in
+`C:\\WovenHat-OS\\audit-artifacts\\exit-status-20261015\\`. Keep all foreign
+acceptance/build chains on hold until this slot is released. Corrections are
+not yet accepted; original failures and diagnostic source snapshots remain.
+
 **Codex IPC handoff (2026-10-15):** session 63244 is terminal, exit 0,
 full IPC-generation acceptance PASS; all 488 frozen inputs match. The bounded
 correction is accepted and published in `40e51aa2` on
