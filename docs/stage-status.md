@@ -43,7 +43,12 @@ not Stage 7–11 production closure or a newly qualified release image.
 0 after complete host/lint/runtime preservation. See the COW and combined
 acceptance audits. This is a bounded foundation correction, not full-stage closure.
 
-**Signed-status/wait-ownership decisions pending:** actual-source host tests
+**Wait-ownership correction accepted:** parent ownership is checked before
+scheduler liveness and revalidated in the original reap transaction, without
+inverting lock order. The common 500-input full acceptance and real 1/2/4-CPU
+authority/error tests pass. See the process-wait ownership audit for limits.
+
+**Signed-status decision pending:** actual-source host tests
 reproduced process-wait and thread-join sentinel collisions; zero-extended
 32-bit success payloads are integrated. A real libwoven Ring-3 fixture then
 exposed COW read-only ancestor and foreign-wait classification defects. Their

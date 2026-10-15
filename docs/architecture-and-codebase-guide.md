@@ -321,7 +321,8 @@ Accepted COW foundation correction (2026-10-15): user-mapping ancestors
 are explicitly writable while leaves retain W^X/RELRO/COW policy, including
 read-only COW/file mappings; this prevents sole-owner COW refaults. The 500-input
 combined chain passed full inherited runtime and warning-denying QA; see the
-COW audit. Wait-ownership and signed-status acceptance records follow separately.
+COW audit. Process-wait ownership is also accepted on that unchanged baseline;
+see its separate audit. The signed-status decision is recorded next.
 Process wait
 checks parent ownership before scheduler liveness, without nesting those locks,
 and rechecks in the original reap transaction. Process wait and thread join

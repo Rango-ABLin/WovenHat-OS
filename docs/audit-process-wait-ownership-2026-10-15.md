@@ -1,4 +1,20 @@
-# Process wait ownership classification — integrated, acceptance pending
+# Process wait ownership classification — bounded correction accepted
+
+## Final acceptance — 2026-10-15
+
+After the earlier COW correction was accepted in `79b2f5a`, the wait-ownership
+correction in source commit `ad11e1f1` is accepted on the same unchanged
+500-input baseline. Session 94658 exited 0 with full combined acceptance PASS.
+Real foreign process waits/joins and genuine owned-child errors passed on
+1/2/4 CPUs, with exact resource baselines and the original thread gate intact.
+Complete warning-denying/build/host and inherited Stage 10.7/10.8–11.5
+preservation also passed. See [combined evidence](audit-exit-status-combined-acceptance-2026-10-15.md).
+
+This accepts correct child-ownership classification and its existing-rank
+lock sequencing, not full process/signals production closure, a new release,
+combined-tree or physical qualification. Signed-status acceptance is recorded
+next; compiler TLS and loader/hardware prerequisites remain open. Pending
+statements below describe the preserved investigation timeline.
 
 The real Ring-3 fixture's child called `libwoven::wait` on its live parent.
 It expected the existing non-child error but received WouldBlock. Evidence:
