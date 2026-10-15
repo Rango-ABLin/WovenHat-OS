@@ -331,8 +331,12 @@ the registry is transitioned under the scheduler lock, while running targets
 carry the request through the existing post-switch finalizer. Both paths wake
 the single join waiter and retain the generation-tagged record until join
 reclaims the private mappings. The address space remains owned by the process
-until its parent reaps the process. Shared libraries, symbol resolution,
-dynamic TLS, and physical qualification remain outside this bounded increment.
+until its parent reaps the process. Process exit now retires unjoined sibling
+threads, defers address-space destruction until all scheduler hand-offs are
+complete, and reclaims generation-tagged thread records only after the parent
+wait path releases the process-table lock. Shared libraries, symbol
+resolution, dynamic TLS, and physical qualification remain outside this
+bounded increment.
 
 ## Stage 11.5 bounded symbol relocation (2026-10-14)
 

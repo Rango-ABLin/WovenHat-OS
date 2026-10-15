@@ -2806,6 +2806,13 @@ focused 1/2/4-CPU QEMU gate, host tests, and warning-denying Clippy passed;
 see the scheduler-thread audit. Process-wide teardown, shared libraries,
 symbol resolution, dynamic TLS, and hardware qualification remain open.
 
+The 2026-10-15 teardown follow-up closes the process-wide scheduler lifecycle
+for unjoined threads: process exit retires ready/blocked siblings, running
+siblings take the thread-safe termination path, and the parent wait defers
+address-space destruction until all sibling hand-offs complete. The exact
+1/2/4-CPU gate now exercises create/exit/join, cancel/join, and process exit
+with an unjoined sibling.
+
 ## Stages 11.3–11.5 — accepted on 2026-09-16
 
 Structured notifications, the `libwoven` userspace API boundary, and hardened
