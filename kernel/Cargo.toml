@@ -67,6 +67,9 @@ stage13-17-test = ["qemu-test", "stage13-12-test"]
 stage13-18-test = ["qemu-test", "stage13-12-test"]
 # The boot's log kept on the WovenHat USB stick's WOVENLOG partition.
 stage13-19-test = ["qemu-test", "stage13-12-test"]
+# ACPI power-off (S5); 13.20b resets instead.
+stage13-20-test = ["qemu-test", "stage13-12-test"]
+stage13-20b-test = ["qemu-test", "stage13-20-test"]
 stage14-1-test = ["network-test"]
 stage14-2-test = ["network-test", "stage14-1-test"]
 stage14-3-test = ["network-test", "stage14-2-test"]
