@@ -46,6 +46,41 @@ fn position_independent_executables_keep_nonzero_aslr() {
     assert_eq!(image.segments().next().unwrap().mapping_start, BASE + 0x30_000);
 }
 
+#[test]
+fn null_debug_rendezvous_metadata_is_inert() {
+    let mut bytes = fixture(&[]);
+    put64(&mut bytes, 152, 7 * 16);
+    put64(&mut bytes, 160, 7 * 16);
+    put64(&mut bytes, DYNAMIC + 5 * 16, 21);
+    let parsed = image(&bytes);
+    assert_eq!(parsed.entry, BASE);
+    assert_eq!(parsed.defined_global_symbol(&bytes, b"export"), Some(BASE + 0x20));
+    put64(&mut bytes, 24, 0);
+    assert!(elf::parse_shared(&bytes).is_ok());
+}
+
+#[test]
+fn nonzero_debug_rendezvous_addresses_are_not_trusted_or_followed() {
+    for value in [1, BASE, u64::MAX] {
+        let mut bytes = fixture(&[]);
+        put64(&mut bytes, 152, 7 * 16);
+        put64(&mut bytes, 160, 7 * 16);
+        put64(&mut bytes, DYNAMIC + 5 * 16, 21);
+        put64(&mut bytes, DYNAMIC + 5 * 16 + 8, value);
+        assert!(matches!(elf::parse(&bytes), Err(elf::Error::Unsupported)));
+    }
+}
+
+#[test]
+fn duplicate_debug_metadata_is_rejected() {
+    let mut bytes = fixture(&[]);
+    put64(&mut bytes, 152, 8 * 16);
+    put64(&mut bytes, 160, 8 * 16);
+    put64(&mut bytes, DYNAMIC + 5 * 16, 21);
+    put64(&mut bytes, DYNAMIC + 6 * 16, 21);
+    assert!(elf::parse(&bytes).is_err());
+}
+
 // A real ELF64 ET_DYN with RX text, a dynamic table, SysV symbol metadata,
 // and one exported function. Each test goes through the production parser.
 fn fixture(dependencies: &[u64]) -> Vec<u8> {

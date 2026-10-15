@@ -12,6 +12,19 @@ spec.loader.exec_module(harness)
 
 
 class RuntimeAcceptanceTests(unittest.TestCase):
+    def test_compiler_gate_preserves_all_original_loader_checks(self):
+        required = harness.required_markers('11.5-compiler', 4)
+        for marker in harness.required_markers('11.5', 4):
+            self.assertIn(marker, required)
+        self.assertIn('[S11.COMPILER] signed toolchain PIE: PASSED', required)
+        self.assertIn('[S11.COMPILER] actual shared import and exact owner teardown: PASSED', required)
+        self.assertIn('[S11.COMPILER] nonzero-bias shared PIE and teardown: PASSED', required)
+        self.assertFalse(harness.validation_errors(33, '\n'.join(required), required))
+        for missing in required:
+            with self.subTest(missing=missing):
+                log = '\n'.join(marker for marker in required if marker != missing)
+                self.assertTrue(harness.validation_errors(33, log, required))
+
     def test_exit_status_fixture_and_original_thread_gate_are_required(self):
         required = harness.required_markers('11.2-status', 4)
         self.assertIn('[S11.PLACEMENT] fixed ET_EXEC at nonzero ASLR candidate: PASSED', required)

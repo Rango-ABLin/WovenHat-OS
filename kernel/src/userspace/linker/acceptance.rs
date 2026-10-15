@@ -106,6 +106,89 @@ fn step(name: &str, passed: bool) -> bool {
     passed
 }
 
+#[cfg(feature = "stage11-compiler-test")]
+pub(super) fn compiler_run() -> bool {
+    // These are exact, unpatched Rust/LLD outputs. The harness retains their
+    // input/output/tool hashes and supplies mandatory paths, never fallbacks.
+    let main = include_bytes!(env!("WOVENHAT_COMPILER_MAIN_ELF"));
+    let library = include_bytes!(env!("WOVENHAT_COMPILER_LIBRARY_ELF"));
+    const PATH: &str = "/lib/libwoven-demo.so";
+    if crate::vfs::stat(PATH).is_ok() {
+        return false;
+    }
+    let made_lib = crate::vfs::stat("/lib").is_err();
+    if made_lib && crate::vfs::mkdir("/lib").is_err() {
+        return false;
+    }
+    let mut installed = false;
+    let result = (|| -> Option<bool> {
+        crate::vfs::create_read_only(PATH, &package(library)).ok()?;
+        installed = true;
+        let signed_main = package(main);
+        drop(alloc::vec![0_u8; crate::vfs::NODE_CAPACITY * 3]);
+        crate::heap::maintain_capacity();
+        let frames = crate::memory::stats().allocated_frames;
+        let processes = crate::task::process_count();
+        let endpoints = crate::ipc::endpoint_count();
+        let image = elf::parse(main).ok()?;
+        if !image.is_position_independent() {
+            return None;
+        }
+        for candidate in [0_u64, 0x30_000] {
+            let program = if candidate == 0 {
+                load_signed_elf_with_argv(&signed_main, &["compiler-shared-pie"])
+            } else {
+                // Offer the production graph loader a nonzero draw after the
+                // same WAPP verification; never edit the linked ELF bytes.
+                let verified = crate::signed_app::verify_package(&signed_main).ok()?;
+                load_with_candidate_bias(verified.bytes(), &["compiler-shared-pie"], candidate)
+            };
+            let Some(program) = program else {
+                crate::serial::write_line(format_args!(
+                    "[S11.COMPILER] unmodified signed PIE load: FAILED bias={candidate:#x}"
+                ));
+                return None;
+            };
+            if Some(program.image.entry) != image.entry.checked_add(candidate) {
+                let _ = destroy(program.address_space);
+                return None;
+            }
+            let (pid, _) = crate::task::spawn_user_process("compiler-shared-pie", program).ok()?;
+            let start = crate::timer::ticks();
+            while !crate::task::process_exited(pid) {
+                if crate::timer::ticks().wrapping_sub(start) > 500 {
+                    return None;
+                }
+                crate::task::yield_now();
+            }
+            let status = crate::task::wait_process(pid.as_u64());
+            let after = crate::memory::stats().allocated_frames;
+            crate::serial::write_line(format_args!(
+                "[S11.COMPILER] bias={candidate:#x} child status={:?} frames={frames}/{after}",
+                status.as_ref().ok()
+            ));
+            if status != Ok(42) || after != frames
+                || crate::task::process_count() != processes
+                || crate::ipc::endpoint_count() != endpoints
+                || crate::thread::reap_owner(pid.as_u64()) != 0
+            {
+                return None;
+            }
+        }
+        crate::serial::write_line(format_args!(
+            "[S11.COMPILER] actual shared import and exact owner teardown: PASSED"
+        ));
+        crate::serial::write_line(format_args!(
+            "[S11.COMPILER] nonzero-bias shared PIE and teardown: PASSED"
+        ));
+        Some(true)
+    })()
+    .unwrap_or(false);
+    let cleaned = !installed || crate::vfs::remove(PATH).is_ok();
+    let directory_cleaned = !made_lib || crate::vfs::remove("/lib").is_ok();
+    result && cleaned && directory_cleaned
+}
+
 pub(super) fn run() -> bool {
     let Some(main) = fixture(0) else {
         return false;

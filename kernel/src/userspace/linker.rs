@@ -13,6 +13,11 @@ pub(super) fn shared_library_self_test() -> bool {
     acceptance::run()
 }
 
+#[cfg(feature = "stage11-compiler-test")]
+pub(super) fn compiler_loader_self_test() -> bool {
+    acceptance::compiler_run()
+}
+
 const LIBRARY_START: u64 = USER_REGION_START + 0x1000_0000;
 const LIBRARY_STRIDE: u64 = 0x0100_0000;
 

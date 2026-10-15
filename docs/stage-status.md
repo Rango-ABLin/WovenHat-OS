@@ -68,6 +68,13 @@ stress logs. Nonzero PIE execution and original assertions remain intact.
 See the executable-placement audit. Compiler TLS, general interoperability,
 combined-tree, release and hardware qualification remain open.
 
+**Compiler shared-PIE integration pending:** an explicit inert null DT_DEBUG
+policy corrects the retained host/QEMU load failure. Twenty ELF host tests
+pass, and exact signed Rust/LLD output executes a real shared import on 1/2/4 CPUs.
+The expanded gate also requires nonzero PIE bias and every original Stage 11.5
+assertion. Full inherited acceptance remains pending; compiler TLS is
+not certified by this increment. See the compiler-PIE audit.
+
 ## Presentation and repaint performance (2026-10-15)
 
 A fix to accepted Stage 19/20 behaviour, found by the Stage 20.7 fade gate.

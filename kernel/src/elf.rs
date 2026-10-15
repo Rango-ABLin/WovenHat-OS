@@ -526,6 +526,7 @@ fn parse_image(bytes: &[u8], shared: bool) -> Result<Image, Error> {
             let mut soname_offset = None;
             let dynamic_bytes = &bytes[file_offset..file_end];
             let mut terminated = false;
+            let mut debug_seen = false;
             let (dynamic_entries, _) = dynamic_bytes.as_chunks::<16>();
             for entry in dynamic_entries {
                 let tag = i64::from_le_bytes(entry[..8].try_into().unwrap());
@@ -544,6 +545,19 @@ fn parse_image(bytes: &[u8], shared: bool) -> Result<Image, Error> {
                     }
                     14 => {
                         if soname_offset.replace(value).is_some() { return Err(Error::InvalidSegment); }
+                    }
+                    21 => {
+                        // DT_DEBUG is debugger rendezvous metadata, not an
+                        // import or relocation. Accept only the inert null
+                        // placeholder emitted by LLD; never follow a supplied
+                        // address or advertise an unimplemented debugger ABI.
+                        if value != 0 {
+                            return Err(Error::Unsupported);
+                        }
+                        if debug_seen {
+                            return Err(Error::InvalidSegment);
+                        }
+                        debug_seen = true;
                     }
                     15 | 16 | 17 | 18 | 19 | 22 | 23 | 29 => {
                         // Dependencies, symbol-based relocation tables, and

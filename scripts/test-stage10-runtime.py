@@ -1,5 +1,6 @@
 """Run isolated completion-port/timer/runtime acceptance with durable logs."""
 import argparse
+import json
 import os
 import re
 from pathlib import Path
@@ -77,6 +78,7 @@ def required_markers(stage, cpus):
                   '11.3': '[S11.3] notifications: PASSED',
                   '11.4': '[S11.4] libwoven runtime boundary: PASSED',
                   '11.5': '[S11.5] loader hardening: PASSED',
+                  '11.5-compiler': '[S11.COMPILER] signed toolchain PIE: PASSED',
                   '12.1': '[S12.1] VFS boundary: PASSED', '12.2': '[S12.2] WovenFS: PASSED',
                   '12.3': '[S12.3] encryption: PASSED', '12.4': '[S12.4] snapshots: PASSED',
                   '12.5': '[S12.5] storage management: PASSED', '13.1': '[S13.1] driver framework: PASSED',
@@ -114,7 +116,13 @@ def required_markers(stage, cpus):
             '[S11.2] scheduler-backed thread: PASSED',
             '[S11.2] threads/TLS/join: PASSED',
         ])
-    if stage == '11.5':
+    if stage == '11.5-compiler':
+        required.extend([
+            '[S11.COMPILER] actual shared import and exact owner teardown: PASSED',
+            '[S11.COMPILER] nonzero-bias shared PIE and teardown: PASSED',
+            '[S11.5] loader hardening: PASSED',
+        ])
+    if stage in ('11.5', '11.5-compiler'):
         required.extend([
             '[S11.5] shared libraries unsigned dependency rejected: PASSED',
             '[S11.5] shared libraries writable dependency rejected: PASSED',
@@ -148,7 +156,7 @@ def validation_errors(returncode, log, required):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--stage', choices=('10.8', '10.9', '11.1', '11.2', '11.2-status', '11.3', '11.4', '11.5', '12.1', '12.2', '12.3', '12.4', '12.5', '13.1', '13.2', '13.3', '13.4', '13.5', '13.6', '13.7', '13.8', '13.9', '13.10', '13.11', '1-5', '15.1', '15.3', '15.4', '15.5', '15.6', '15.7', '15.8', '15.9', '17.1', '18.1', '19.1', '19.3', '19.10'), default='10.8')
+    parser.add_argument('--stage', choices=('10.8', '10.9', '11.1', '11.2', '11.2-status', '11.3', '11.4', '11.5', '11.5-compiler', '12.1', '12.2', '12.3', '12.4', '12.5', '13.1', '13.2', '13.3', '13.4', '13.5', '13.6', '13.7', '13.8', '13.9', '13.10', '13.11', '1-5', '15.1', '15.3', '15.4', '15.5', '15.6', '15.7', '15.8', '15.9', '17.1', '18.1', '19.1', '19.3', '19.10'), default='10.8')
     parser.add_argument('--cpus', type=int, choices=(1, 2, 4), default=1)
     parser.add_argument('--qemu', default=shutil.which('qemu-system-x86_64') or r'C:\Program Files\qemu\qemu-system-x86_64.exe')
     parser.add_argument('--firmware', type=Path)
@@ -174,6 +182,20 @@ def main():
             print(str(error), file=sys.stderr)
             return 1
         feature = 'stage11-exit-status-test'
+    if args.stage == '11.5-compiler':
+        import importlib.util
+        spec = importlib.util.spec_from_file_location('loader_builder', root / 'scripts/build-loader-fixtures.py')
+        builder = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(builder)
+        try:
+            manifest_path = builder.build(out / 'fixture')
+            manifest = json.loads(manifest_path.read_text(encoding='utf-8'))
+            env['WOVENHAT_COMPILER_MAIN_ELF'] = manifest['outputs']['shared-demo']['path']
+            env['WOVENHAT_COMPILER_LIBRARY_ELF'] = manifest['outputs']['libwoven-demo.so']['path']
+        except RuntimeError as error:
+            print(str(error), file=sys.stderr)
+            return 1
+        feature = 'stage11-compiler-test'
     build = subprocess.run(['cargo', 'run', '--quiet', '--features', feature, '--', '--print-image'],
                            cwd=root, env=env, text=True, capture_output=True)
     (out / 'build.log').write_text(build.stdout + build.stderr, encoding='utf-8')

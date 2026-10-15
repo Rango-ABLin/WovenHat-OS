@@ -317,6 +317,12 @@ write-through audit.
 
 ## Stage 11.2 scheduler-backed thread ownership (2026-10-14)
 
+Compiler shared-PIE increment pending (2026-10-15): ELF parsing now explicitly
+accepts a single inert null DT_DEBUG entry, rejecting nonzero addresses and
+duplicates. The new opt-in compiler gate executes exact signed Rust/LLD output
+through the graph loader before requiring every original Stage 11.5 check.
+Full acceptance is pending; compiler TLS remains open. See the compiler-PIE audit.
+
 Accepted loader placement correction (2026-10-15): the validated ELF kind now
 selects main-image placement. ET_EXEC ignores an offered ASLR delta; ET_DYN
 retains it. The signed graph loader, dependency ownership and library windows

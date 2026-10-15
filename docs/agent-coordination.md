@@ -6,6 +6,21 @@ you start or finish something.
 
 ## Shared rules
 
+**Compiler shared-PIE full acceptance queued (2026-10-15):** the expanded
+zero/nonzero-bias signed execution gate passed on 1/2/4 CPUs, with exact
+resources and all original loader assertions. Host ELF/Python suites each
+have twenty passing tests. Codex is freezing the final inputs and will repeat
+both focused matrices, sixteen feature lints and all inherited preservation
+under `audit-artifacts/compiler-pie-20261015/`. No acceptance claim yet.
+Keep foreign build/acceptance chains on hold until this reservation is released.
+
+**Compiler shared-PIE correction in progress (2026-10-15):** the placement
+prerequisite is accepted. Codex now owns the serialized build/test slot for a
+new compiler-produced signed execution gate, starting with null DT_DEBUG
+interoperability. Preserve baseline failure logs before changing the parser.
+Compiler TLS and the fixture's undersized stack are separate next steps; no
+later-stage or hardware acceptance is inferred. Foreign chains remain on hold.
+
 **Executable placement accepted (2026-10-15):** session 62865 is terminal,
 exit 0, full acceptance PASS. Independent inspection verified all 500 frozen
 inputs, fifteen feature lints, three focused and twenty-one inherited runtime

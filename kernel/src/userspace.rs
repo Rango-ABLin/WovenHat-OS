@@ -5207,6 +5207,9 @@ pub fn load_pie_placement_probe() -> Option<UserProgram> {
 #[cfg(feature = "stage11-5-test")]
 pub fn shared_library_self_test() -> bool { linker::shared_library_self_test() }
 
+#[cfg(feature = "stage11-compiler-test")]
+pub fn compiler_loader_self_test() -> bool { linker::compiler_loader_self_test() }
+
 /// Load an ELF and place a custom argv vector on the user stack.
 pub fn load_elf_with_argv(bytes: &[u8], args: &[&str]) -> Option<UserProgram> {
     linker::load(bytes, args)
