@@ -77,6 +77,9 @@ pub struct Image {
     tls: Option<TlsImage>,
     dynamic: Option<DynamicImage>,
     load_bias: u64,
+    /// ET_DYN: the image may be loaded at any page-aligned bias. An ET_EXEC
+    /// image holds absolute addresses and must run where it was linked.
+    position_independent: bool,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -114,6 +117,12 @@ pub struct SymbolScope<'a> {
 }
 
 impl Image {
+    /// Whether the image may be relocated (ET_DYN). Relocating an ET_EXEC
+    /// image moves its code away from the absolute addresses it jumps to.
+    pub fn is_position_independent(&self) -> bool {
+        self.position_independent
+    }
+
     pub fn segments(&self) -> impl Iterator<Item = LoadSegment> + '_ {
         self.segments[..self.segment_count]
             .iter()
@@ -405,6 +414,7 @@ pub fn parse(bytes: &[u8]) -> Result<Image, Error> {
         tls: None,
         dynamic: None,
         load_bias: 0,
+        position_independent: elf_type == 3,
     };
     let mut entry_is_executable = false;
 

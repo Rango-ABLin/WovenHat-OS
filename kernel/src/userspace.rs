@@ -5163,9 +5163,11 @@ pub fn load_elf_with_argv_verified(bytes: &[u8], args: &[&str]) -> Option<UserPr
 }
 
 pub fn load_elf(bytes: &[u8]) -> Option<UserProgram> {
-    let image = crate::elf::parse(bytes)
-        .ok()?
-        .relocated(aslr_image_delta())?;
+    let image = crate::elf::parse(bytes).ok()?;
+    // Only a position-independent image is randomized: an ET_EXEC image runs
+    // where it was linked, or its absolute jumps leave its own code.
+    let delta = if image.is_position_independent() { aslr_image_delta() } else { 0 };
+    let image = image.relocated(delta)?;
     // Dependency names are parsed and bounds-checked by the ELF layer, but
     // this loader still has no dependency namespace or cross-image teardown.
     // Refuse them explicitly until that authority is implemented.
