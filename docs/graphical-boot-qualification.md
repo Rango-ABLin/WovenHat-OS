@@ -20,3 +20,11 @@ Boot normally to a graphical login/session and desktop without a keypress, with 
 
 ## Current blockers
 Stage 1–19 closure ledger is still BLOCKED; issue #72 legacy SHA-256 PIN verifier; physical hardware and installer/recovery evidence missing. No source boot change is claimed by this plan.
+
+## October 15: root-cause trace and CI evidence
+
+Normal boot in `kernel/src/main.rs` starts the userspace init process before creating the demo desktop. The init assembly in `kernel/src/userspace.rs` executes `/bin/sh`, which owns terminal input; `terminal::foreground_active()` prevents competing keyboard polling. A boolean-only desktop change cannot safely establish an automatic graphical session.
+
+The Stage 20.11 QEMU test instead launches the Ring-3 WovenShell as a system service with scoped Console, DisplayIo, InputIo and Ipc capabilities. Production boot must use a real authenticated session manager and must not reuse the test PIN.
+
+[Kernel run 38796050372](https://github.com/Rango-ABLin/WovenHat-OS/actions/runs/38796050372) completed five jobs successfully; desktop-userspace was cancelled after Stage 20.11 four-CPU lock-screen acceptance passed. [Desktop evidence](https://github.com/Rango-ABLin/WovenHat-OS/actions/runs/38796050372/artifacts/12005757560). This is not evidence of an actual Clippy or compilation failure, nor does it verify later stages. Draft PR #75 contains a previously green split desktop CI workflow; normal-boot graphical acceptance at 1/2/4 CPUs and hardware testing remain outstanding.
