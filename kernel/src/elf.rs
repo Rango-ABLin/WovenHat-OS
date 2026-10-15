@@ -22,6 +22,12 @@ const MAX_DYNAMIC_SYMBOLS: usize = 4096;
 const MAX_DYNAMIC_STRING_TABLE: usize = 64 * 1024;
 pub const MAX_NEEDED_LIBRARIES: usize = 4;
 
+/// A bounded dynamic-linker scope. The main image is searched first, followed
+/// by its direct `/lib` dependencies in declaration order. This is deliberately
+/// a small, immutable scope: it cannot grow while relocations are being
+/// applied, and it has no lazy-binding or versioned-symbol semantics.
+pub const MAX_SCOPE_IMAGES: usize = MAX_NEEDED_LIBRARIES + 1;
+
 #[derive(Clone, Copy)]
 pub struct LoadSegment {
     pub file_offset: usize,
@@ -84,6 +90,29 @@ pub enum Error {
     TooManySegments,
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum ScopeError {
+    InvalidName,
+    DuplicateDependency,
+    Capacity,
+    MissingDependency,
+}
+
+#[derive(Clone, Copy)]
+struct ScopeImage<'a> {
+    name: Option<&'a [u8]>,
+    image: &'a Image,
+    bytes: &'a [u8],
+}
+
+/// An immutable, bounded symbol scope for one executable and its direct
+/// dependencies. The caller owns the image bytes for the scope's lifetime;
+/// this prevents asynchronous use of borrowed file buffers.
+pub struct SymbolScope<'a> {
+    images: [Option<ScopeImage<'a>>; MAX_SCOPE_IMAGES],
+    count: usize,
+}
+
 impl Image {
     pub fn segments(&self) -> impl Iterator<Item = LoadSegment> + '_ {
         self.segments[..self.segment_count]
@@ -110,6 +139,54 @@ impl Image {
 
     pub const fn load_bias(&self) -> u64 {
         self.load_bias
+    }
+
+    /// Return one exact NUL-terminated dependency name from the validated
+    /// dynamic string table.
+    pub fn needed_name<'a>(&self, bytes: &'a [u8], index: usize) -> Option<&'a [u8]> {
+        let dynamic = self.dynamic?;
+        let offset = *dynamic.needed_offsets.get(index)?;
+        dynamic_string(bytes, dynamic, offset)
+    }
+
+    /// Resolve one defined global symbol within this image. Undefined symbols,
+    /// local-only symbols and malformed names never escape the loader boundary.
+    pub fn defined_global_symbol(&self, bytes: &[u8], name: &[u8]) -> Option<u64> {
+        if name.is_empty() || name.contains(&0) {
+            return None;
+        }
+        let dynamic = self.dynamic?;
+        if dynamic.symbol_count == 0 || dynamic.symtab_entry_size != 24 {
+            return None;
+        }
+        for index in 1..dynamic.symbol_count {
+            let symbol_offset = dynamic
+                .symtab_file_offset
+                .checked_add(index.checked_mul(dynamic.symtab_entry_size)?)?;
+            let symbol_end = symbol_offset.checked_add(24)?;
+            let symbol = bytes.get(symbol_offset..symbol_end)?;
+            let name_offset = u32::from_le_bytes(symbol[..4].try_into().ok()?) as u64;
+            let binding = symbol[4] >> 4;
+            let section = u16::from_le_bytes(symbol[6..8].try_into().ok()?);
+            let value = u64::from_le_bytes(symbol[8..16].try_into().ok()?);
+            // STB_GLOBAL is the only binding exported by this first scope
+            // implementation. STB_WEAK/versioned symbols remain unsupported.
+            if binding != 1 || section == 0 || !self.contains_value(value) {
+                continue;
+            }
+            if dynamic_string(bytes, dynamic, name_offset)? != name {
+                continue;
+            }
+            return self.load_bias.checked_add(value);
+        }
+        None
+    }
+
+    fn contains_value(&self, value: u64) -> bool {
+        self.segments().any(|segment| {
+            value >= segment.virtual_address
+                && value < segment.virtual_address.saturating_add(segment.memory_size as u64)
+        })
     }
 
     /// Relocate every load segment and the entry by one page-aligned delta.
@@ -159,6 +236,88 @@ impl Image {
         }
         Some(self)
     }
+}
+
+impl<'a> SymbolScope<'a> {
+    /// Start a scope with the main executable. Its name is intentionally absent
+    /// because it is not a dependency selected by a DT_NEEDED string.
+    pub fn new(main: &'a Image, bytes: &'a [u8]) -> Self {
+        let mut images = [None; MAX_SCOPE_IMAGES];
+        images[0] = Some(ScopeImage {
+            name: None,
+            image: main,
+            bytes,
+        });
+        Self { images, count: 1 }
+    }
+
+    /// Add one direct dependency under its exact soname/path bytes.
+    pub fn add_dependency(
+        &mut self,
+        name: &'a [u8],
+        image: &'a Image,
+        bytes: &'a [u8],
+    ) -> Result<(), ScopeError> {
+        if name.is_empty() || name.contains(&0) {
+            return Err(ScopeError::InvalidName);
+        }
+        if self.count == MAX_SCOPE_IMAGES {
+            return Err(ScopeError::Capacity);
+        }
+        if self.images[..self.count].iter().flatten().any(|entry| {
+            entry
+                .name
+                .is_some_and(|existing| existing == name)
+        }) {
+            return Err(ScopeError::DuplicateDependency);
+        }
+        self.images[self.count] = Some(ScopeImage {
+            name: Some(name),
+            image,
+            bytes,
+        });
+        self.count += 1;
+        Ok(())
+    }
+
+    /// Require an exact one-to-one match between DT_NEEDED and the namespace.
+    pub fn validate_dependencies(&self) -> Result<(), ScopeError> {
+        let main = self.images[0].ok_or(ScopeError::MissingDependency)?;
+        let needed_count = main.image.dynamic().map_or(0, |dynamic| dynamic.needed_count);
+        if needed_count != self.count.saturating_sub(1) {
+            return Err(ScopeError::MissingDependency);
+        }
+        for index in 0..needed_count {
+            let needed = main
+                .image
+                .needed_name(main.bytes, index)
+                .ok_or(ScopeError::MissingDependency)?;
+            if !self.images[1..self.count].iter().flatten().any(|entry| {
+                entry.name.is_some_and(|name| name == needed)
+            }) {
+                return Err(ScopeError::MissingDependency);
+            }
+        }
+        Ok(())
+    }
+
+    /// Resolve an exact exported global symbol in main-image-first scope.
+    pub fn resolve(&self, name: &[u8]) -> Option<u64> {
+        self.images[..self.count]
+            .iter()
+            .flatten()
+            .find_map(|entry| entry.image.defined_global_symbol(entry.bytes, name))
+    }
+}
+
+fn dynamic_string(bytes: &[u8], dynamic: DynamicImage, offset: u64) -> Option<&[u8]> {
+    let start = dynamic
+        .strtab_file_offset
+        .checked_add(usize::try_from(offset).ok()?)?;
+    let end = dynamic.strtab_file_offset.checked_add(dynamic.strtab_size)?;
+    let string = bytes.get(start..end)?;
+    let length = string.iter().position(|byte| *byte == 0)?;
+    Some(&string[..length])
 }
 
 pub fn parse(bytes: &[u8]) -> Result<Image, Error> {

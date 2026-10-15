@@ -4685,6 +4685,7 @@ pub fn elf_loader_self_test() -> bool {
         }
         let dependency_fixture = {
             let mut dependency_elf = elf.clone();
+            *dependency_elf.get_mut(SYMTAB_OFFSET + 24 + 4)? = 0x10;
             write_u64(&mut dependency_elf, DYNAMIC_OFFSET + 128, 1)?;
             write_u64(&mut dependency_elf, DYNAMIC_OFFSET + 136, 1)?;
             write_u64(&mut dependency_elf, DYNAMIC_OFFSET + 144, 0)?;
@@ -4696,6 +4697,51 @@ pub fn elf_loader_self_test() -> bool {
             .is_some_and(|dynamic| {
                 dynamic.needed_count == 1 && dynamic.needed_offsets[0] == 1
             });
+        let cross_image_scope = (|| -> Option<bool> {
+            let mut main_bytes = dependency_fixture.clone();
+            // The main image imports `local`; the dependency fixture above
+            // exports it as a global symbol at USER_REGION_START + 32.
+            write_u16(&mut main_bytes, SYMTAB_OFFSET + 24 + 6, 0)?;
+            let main_image = crate::elf::parse(&main_bytes).ok()?;
+            let mut dependency_export = elf.clone();
+            *dependency_export.get_mut(SYMTAB_OFFSET + 24 + 4)? = 0x10;
+            let dependency_image = crate::elf::parse(&dependency_export).ok()?;
+            let mut scope = alloc::boxed::Box::new(crate::elf::SymbolScope::new(
+                &main_image,
+                &main_bytes,
+            ));
+            scope
+                .add_dependency(b"local", &dependency_image, &dependency_export)
+                .ok()?;
+            scope.validate_dependencies().ok()?;
+            let exact_resolution = scope.resolve(b"local") == Some(USER_REGION_START + 32)
+                && scope.resolve(b"local-extra").is_none();
+            let duplicate_rejected = scope
+                .add_dependency(b"local", &dependency_image, &dependency_export)
+                .is_err();
+            let empty_name_rejected = scope
+                .add_dependency(b"", &dependency_image, &dependency_export)
+                .is_err();
+            let capacity_rejected = scope
+                .add_dependency(b"a", &dependency_image, &dependency_export)
+                .is_ok()
+                && scope
+                    .add_dependency(b"b", &dependency_image, &dependency_export)
+                    .is_ok()
+                && scope
+                    .add_dependency(b"c", &dependency_image, &dependency_export)
+                    .is_ok()
+                && scope
+                    .add_dependency(b"d", &dependency_image, &dependency_export)
+                    .is_err();
+            Some(
+                exact_resolution
+                    && duplicate_rejected
+                    && empty_name_rejected
+                    && capacity_rejected,
+            )
+        })()
+        .unwrap_or(false);
         let dependency_fail_closed = load_elf(&dependency_fixture).is_none();
         let program = load_elf(&elf)?;
         let mut relocated = [0u8; 16];
@@ -4715,6 +4761,7 @@ pub fn elf_loader_self_test() -> bool {
                 && dynamic.rela_entry_size == 24
                 && dynamic.symbol_count == 2
                 && dependency_metadata
+                && cross_image_scope
                 && dependency_fail_closed
                 && applied
                 && destroyed,

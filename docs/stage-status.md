@@ -2914,6 +2914,13 @@ relocation self-test. Shared-library dependency mapping, cross-image symbol
 resolution, versioning, lazy binding, and dynamic TLS remain fail-closed. See
 the [dynamic relocation audit](audit-stage11-dynamic-relocations-2026-10-14.md).
 
+The 2026-10-15 scope groundwork adds an immutable, bounded exact-name
+cross-image symbol-scope contract with duplicate/capacity/unknown-name
+negative checks. It is not yet connected to dependency mapping or relocation;
+the loader remains fail-closed for `DT_NEEDED`. Neighboring Stage 11.3/11.4
+regression matrices pass, while the final 11.5 2/4-CPU rerun remains pending
+after QEMU contention. See the [symbol-scope audit](audit-stage11-symbol-scope-2026-10-15.md).
+
 ## Stage 12.1 — accepted on 2026-09-16
 
 The VFS 2.0 typed interface and SystemVfs adapter passed build, freestanding
