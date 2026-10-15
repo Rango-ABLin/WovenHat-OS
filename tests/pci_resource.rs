@@ -1,3 +1,4 @@
+#[rustfmt::skip]
 #[path = "../kernel/src/hal/pci/resource.rs"]
 mod resource;
 

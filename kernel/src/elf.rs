@@ -220,8 +220,8 @@ pub fn parse(bytes: &[u8]) -> Result<Image, Error> {
             if image.dynamic.is_some() {
                 return Err(Error::Unsupported);
             }
-            let file_offset = usize::try_from(read_u64(bytes, offset + 8)?)
-                .map_err(|_| Error::InvalidSegment)?;
+            let file_offset =
+                usize::try_from(read_u64(bytes, offset + 8)?).map_err(|_| Error::InvalidSegment)?;
             let virtual_address = read_u64(bytes, offset + 16)?;
             let file_size = usize::try_from(read_u64(bytes, offset + 32)?)
                 .map_err(|_| Error::InvalidSegment)?;
@@ -275,7 +275,8 @@ pub fn parse(bytes: &[u8]) -> Result<Image, Error> {
                         // text-relocation requests need a dynamic linker or
                         // shared-library authority that the kernel does not
                         // provide.
-                        if value != 0 || matches!(tag, 1 | 14 | 15 | 16 | 17 | 18 | 19 | 22 | 23 | 29)
+                        if value != 0
+                            || matches!(tag, 1 | 14 | 15 | 16 | 17 | 18 | 19 | 22 | 23 | 29)
                         {
                             return Err(Error::Unsupported);
                         }
@@ -286,20 +287,23 @@ pub fn parse(bytes: &[u8]) -> Result<Image, Error> {
                     7 => rela_address = Some(value),
                     8 => rela_size = usize::try_from(value).map_err(|_| Error::InvalidSegment)?,
                     9 => {
-                        rela_entry_size = usize::try_from(value)
-                            .map_err(|_| Error::InvalidSegment)?;
+                        rela_entry_size =
+                            usize::try_from(value).map_err(|_| Error::InvalidSegment)?;
                     }
-                    10 => strtab_size = usize::try_from(value).map_err(|_| Error::InvalidSegment)?,
+                    10 => {
+                        strtab_size = usize::try_from(value).map_err(|_| Error::InvalidSegment)?
+                    }
                     11 => {
                         symtab_entry_size =
                             usize::try_from(value).map_err(|_| Error::InvalidSegment)?;
                     }
-                    2 => plt_rela_size = usize::try_from(value)
-                        .map_err(|_| Error::InvalidSegment)?,
+                    2 => {
+                        plt_rela_size = usize::try_from(value).map_err(|_| Error::InvalidSegment)?
+                    }
                     // Common metadata tags do not affect relocation of a
                     // symbol-free static PIE and are intentionally ignored.
-                    3 | 30 | 0x6fff_fff0 | 0x6fff_fff9
-                    | 0x6fff_fffb | 0x6fff_fffe | 0x6fff_ffff => {}
+                    3 | 30 | 0x6fff_fff0 | 0x6fff_fff9 | 0x6fff_fffb | 0x6fff_fffe
+                    | 0x6fff_ffff => {}
                     _ => return Err(Error::Unsupported),
                 }
             }
@@ -370,10 +374,10 @@ pub fn parse(bytes: &[u8]) -> Result<Image, Error> {
             }
             let file_offset =
                 usize::try_from(read_u64(bytes, offset + 8)?).map_err(|_| Error::InvalidSegment)?;
-            let file_size =
-                usize::try_from(read_u64(bytes, offset + 32)?).map_err(|_| Error::InvalidSegment)?;
-            let memory_size =
-                usize::try_from(read_u64(bytes, offset + 40)?).map_err(|_| Error::InvalidSegment)?;
+            let file_size = usize::try_from(read_u64(bytes, offset + 32)?)
+                .map_err(|_| Error::InvalidSegment)?;
+            let memory_size = usize::try_from(read_u64(bytes, offset + 40)?)
+                .map_err(|_| Error::InvalidSegment)?;
             let alignment = read_u64(bytes, offset + 48)?;
             if memory_size == 0
                 || file_size > memory_size
@@ -399,8 +403,8 @@ pub fn parse(bytes: &[u8]) -> Result<Image, Error> {
                 return Err(Error::Unsupported);
             }
             let virtual_address = read_u64(bytes, offset + 16)?;
-            let memory_size =
-                usize::try_from(read_u64(bytes, offset + 40)?).map_err(|_| Error::InvalidSegment)?;
+            let memory_size = usize::try_from(read_u64(bytes, offset + 40)?)
+                .map_err(|_| Error::InvalidSegment)?;
             if memory_size == 0 {
                 return Err(Error::InvalidSegment);
             }
@@ -510,8 +514,7 @@ pub fn parse(bytes: &[u8]) -> Result<Image, Error> {
                 let segment_file_end = segment
                     .virtual_address
                     .saturating_add(segment.file_size as u64);
-                segment.virtual_address <= dynamic.rela_address
-                    && rela_end <= segment_file_end
+                segment.virtual_address <= dynamic.rela_address && rela_end <= segment_file_end
             }) else {
                 return Err(Error::InvalidSegment);
             };
@@ -603,7 +606,10 @@ pub fn parse(bytes: &[u8]) -> Result<Image, Error> {
                             .virtual_address
                             .saturating_add(segment.file_size as u64);
                         dynamic.hash_address >= segment.virtual_address
-                            && dynamic.hash_address.checked_add(8).is_some_and(|end| end <= file_end)
+                            && dynamic
+                                .hash_address
+                                .checked_add(8)
+                                .is_some_and(|end| end <= file_end)
                     })
                     .ok_or(Error::InvalidSegment)?;
                 dynamic.hash_file_offset = hash_segment
@@ -650,7 +656,10 @@ pub fn parse(bytes: &[u8]) -> Result<Image, Error> {
                 }
                 dynamic.symbol_count = symbol_count;
             }
-            for offset in dynamic.needed_offsets[..dynamic.needed_count].iter().copied() {
+            for offset in dynamic.needed_offsets[..dynamic.needed_count]
+                .iter()
+                .copied()
+            {
                 let name_start = dynamic
                     .strtab_file_offset
                     .checked_add(usize::try_from(offset).map_err(|_| Error::InvalidSegment)?)

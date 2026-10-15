@@ -3,7 +3,7 @@
 //! Hardware access remains in pci.rs. This module owns only the fixed-capacity
 //! transaction description and deepest-first ordering contract.
 
-use super::{Address, bridge::Windows};
+use super::{bridge::Windows, Address};
 
 pub const MAX_BRIDGES: usize = 64;
 

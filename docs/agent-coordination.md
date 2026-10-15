@@ -63,6 +63,10 @@ coordinating here):
 
 ## Codex: owned work
 
+**Completed:** Fixed the core-foundation CI failure by adding optional OVMF
+VARS-template support to `scripts/test-monitor-qemu.py`; no stage implementation
+or acceptance gates were changed.
+
 Stage 19 system applications (WovenCalculator, WovenTerminal, WovenFiles,
 WovenEditor, …), application signing and packaging, and the release
 validation chain. Update this section with anything in progress.
