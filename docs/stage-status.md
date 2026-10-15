@@ -1448,9 +1448,12 @@ behaviour, the gate fails at "keyboard bytes through IRQ1 are decoded at IRQ
 time". Evidence is in `audit-artifacts/stage19.12-negative-control-*`.
 
 Open:
-- PS/2 only. The USB HID mouse protocol is recognised by the xHCI driver but
-  not yet decoded into pointer events.
-- No scroll wheel (IntelliMouse) and no acceleration.
+- USB boot and report-protocol HID pointer reports are decoded into
+  `WovenInput` events by the xHCI worker; Stage 13.13 and 13.16 QEMU gates
+  cover the software paths. Physical USB qualification, multi-application
+  devices, and virtio-input remain open.
+- The PS/2 boot-mouse path has no IntelliMouse wheel or acceleration; report
+  protocol wheel events are supported by the HID decoder.
 - The pointer position lives in the window manager. There is no cursor
   image: drawing one is the window manager's job, and there is no hardware
   cursor.
@@ -1683,8 +1686,10 @@ Two problems found while bringing this up:
 Open:
 - The pid mailbox has one waiter; handle-based endpoints keep their existing
   multi-waiter queues and are not yet `WaitAny` sources.
-- Timers and event objects are not `WaitAny` sources either; the deadline
-  covers the common timeout case.
+- Syscall 206 now exposes timer/event objects as bounded `WaitAny` sources;
+  the current focused gate covers registration safety and the accepted
+  input/IPC path. A full userspace timer/event QEMU scenario and multi-thread
+  fan-out qualification remain open.
 
 Next prerequisite: client-to-compositor damage notification, so a compositor
 sleeping in `WaitAny` redraws only what a client changed.
