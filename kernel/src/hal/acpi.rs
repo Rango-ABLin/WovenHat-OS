@@ -25,6 +25,31 @@ pub enum Error {
     AddressOverflow,
 }
 
+/// What ACPI says about turning the machine off and resetting it
+/// (Stage 13.20), from the FADT and the `\_S5` object.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Power {
+    /// PM1a/PM1b control register I/O ports (0 when absent).
+    pub pm1a_control: u16,
+    pub pm1b_control: u16,
+    /// The SMI command port and the value that hands the machine to ACPI.
+    pub smi_command: u16,
+    pub acpi_enable: u8,
+    /// The FADT reset register, when the firmware says it works:
+    /// (address space, address, value).
+    pub reset: Option<(u8, u64, u8)>,
+    /// `\_S5` sleep types for PM1a and PM1b.
+    pub s5: Option<(u8, u8)>,
+}
+
+/// The power information found at boot.
+static POWER: spin::Mutex<Option<Power>> = spin::Mutex::new(None);
+
+/// What ACPI discovery found about power-off and reset, if it ran.
+pub fn power() -> Option<Power> {
+    *POWER.lock()
+}
+
 #[derive(Clone, Copy, Default)]
 pub struct MemoryAffinity {
     pub domain: u32,
@@ -99,6 +124,7 @@ pub struct Summary {
     pub interrupt_overrides: u16,
     pub madt_entries: u16,
     pub fadt: bool,
+    pub power: Power,
     pub dsdt_address: u64,
     pub dsdt_length: usize,
     // SSDTs extend the DSDT namespace. Retain their validated table bounds so
@@ -276,6 +302,16 @@ pub fn discover(
             }
         }
     }
+    // Stage 13.20: \_S5, from the DSDT or else an SSDT.
+    let dsdt = (summary.dsdt_address != 0).then_some(AmlTable {
+        address: summary.dsdt_address,
+        length: summary.dsdt_length,
+    });
+    summary.power.s5 = dsdt
+        .into_iter()
+        .chain(summary.aml_tables[..summary.aml_table_count].iter().copied())
+        .find_map(|table| aml_table_body(physical_offset, table, regions).ok().and_then(aml_s5));
+    *POWER.lock() = Some(summary.power);
     Ok(summary)
 }
 
@@ -313,6 +349,7 @@ fn parse_fadt(
     } else {
         0
     };
+    read_fadt_power(physical_offset, address, length, regions, &mut summary.power)?;
     let dsdt = if extended != 0 { extended } else { legacy };
     if dsdt == 0 {
         return Ok(());
@@ -329,6 +366,80 @@ fn parse_fadt(
     summary.dsdt_address = dsdt;
     summary.dsdt_length = header.length;
     Ok(())
+}
+
+/// The FADT's PM1 control blocks, SMI command and reset register. The
+/// extended (GAS) PM1 addresses are preferred when they are system I/O.
+fn read_fadt_power(
+    physical_offset: u64,
+    address: u64,
+    length: usize,
+    regions: &[MemoryRegion],
+    power: &mut Power,
+) -> Result<(), Error> {
+    let mut fadt = [0_u8; 244];
+    let available = length.min(fadt.len());
+    read_physical(physical_offset, address, &mut fadt[..available], regions)?;
+    let port = |value: u32| u16::try_from(value).unwrap_or(0);
+    if available >= 72 {
+        power.smi_command = port(read_u32(&fadt, 48));
+        power.acpi_enable = fadt[52];
+        power.pm1a_control = port(read_u32(&fadt, 64));
+        power.pm1b_control = port(read_u32(&fadt, 68));
+    }
+    // RESET_REG_SUP (flags bit 10): the reset register is usable.
+    if available >= 129 && read_u32(&fadt, 112) & (1 << 10) != 0 {
+        let reset = read_u64(&fadt, 120);
+        if reset != 0 {
+            power.reset = Some((fadt[116], reset, fadt[128]));
+        }
+    }
+    // X_PM1a/X_PM1b_CNT_BLK: generic addresses, used when in system I/O.
+    for (offset, slot) in [(172usize, &mut power.pm1a_control), (184, &mut power.pm1b_control)] {
+        if available >= offset + 12 && fadt[offset] == 1 {
+            let extended = read_u64(&fadt, offset + 4);
+            if let Ok(io) = u16::try_from(extended) {
+                if io != 0 {
+                    *slot = io;
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+/// The sleep types of `\_S5`, from `Name (_S5, Package () { a, b, ... })`
+/// anywhere in a definition block. Each element may be Zero, One, or a
+/// byte, word or dword constant.
+fn aml_s5(body: &[u8]) -> Option<(u8, u8)> {
+    fn integer(bytes: &[u8], offset: usize) -> Option<(u64, usize)> {
+        match *bytes.get(offset)? {
+            0x00 => Some((0, 1)),
+            0x01 => Some((1, 1)),
+            0xff => Some((u64::MAX, 1)),
+            0x0a => Some((u64::from(*bytes.get(offset + 1)?), 2)),
+            0x0b => Some((u64::from(u16::from_le_bytes(bytes.get(offset + 1..offset + 3)?.try_into().ok()?)), 3)),
+            0x0c => Some((u64::from(u32::from_le_bytes(bytes.get(offset + 1..offset + 5)?.try_into().ok()?)), 5)),
+            _ => None,
+        }
+    }
+    let mut start = 0;
+    while let Some(found) = body[start..].windows(4).position(|window| window == b"_S5_") {
+        let at = start + found;
+        start = at + 4;
+        // NameOp, optionally with a root prefix, before the name.
+        let named = at >= 1 && (body[at - 1] == 0x08 || (at >= 2 && body[at - 1] == b'\\' && body[at - 2] == 0x08));
+        if !named || body.get(at + 4) != Some(&0x12) {
+            continue;
+        }
+        let Ok((package_length, length_bytes)) = decode_aml_pkg_length(body, at + 5) else { continue };
+        let _ = package_length;
+        let elements = at + 5 + length_bytes + 1;
+        let Some((a, used)) = integer(body, elements) else { continue };
+        let Some((b, _)) = integer(body, elements + used) else { continue };
+        return Some(((a & 0x7) as u8, (b & 0x7) as u8));
+    }
+    None
 }
 
 fn parse_mcfg(

@@ -130,6 +130,25 @@ impl Shell {
                 }
             }
             "version" | "ver" => console.println("WovenHat kernel 0.8.0 Multicore Foundation"),
+            // Stage 13.20: turn the machine off or reset it.
+            "poweroff" | "shutdown" => {
+                if authorize(Capability::Console, console) {
+                    console.println("powering off...");
+                    let error = crate::power::power_off();
+                    console.println("the machine is still running:");
+                    console.println(match error {
+                        crate::power::Error::NoAcpi => "  ACPI describes no way to turn it off",
+                        crate::power::Error::AcpiModeRefused => "  the firmware would not enter ACPI mode",
+                        crate::power::Error::StillRunning => "  it ignored the request; hold the power button",
+                    });
+                }
+            }
+            "reboot" | "restart" => {
+                if authorize(Capability::Console, console) {
+                    console.println("restarting...");
+                    crate::power::reboot();
+                }
+            }
             // Stage 13.19: a tester's observation, kept in the live-test log.
             #[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
             "note" => {
@@ -452,6 +471,7 @@ fn print_help(console: &mut Console) {
     console.println("test:    mmaptest (private/shared mappings, fork, msync), msynctest (disk)");
     console.println("nav:     cd [path]  pwd  echo <text>");
     console.println("live:    note <text> (kept in the USB stick's log)  savelog");
+    console.println("power:   poweroff|shutdown  reboot|restart");
     console.println("process: run <elf>  sh  init  spawn  user|ring3  kill <pid> [sig]");
     console
         .println("runtime: userland udpecho [port] dhcp <on|off>   (Multicore Foundation runtime)");

@@ -91,6 +91,7 @@ mod panic;
 mod partition;
 mod permission;
 mod pic;
+mod power;
 mod pipe;
 mod rtc;
 mod secret_vault;
@@ -3476,6 +3477,24 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     }
     // Before the 13.12 block: 13.13 and 13.14 builds also enable
     // stage13-12-test, and each block ends the boot.
+    // Both 13.20 gates end with the machine off or reset: the self-test
+    // returns only when the machine is still running.
+    #[cfg(feature = "stage13-20b-test")]
+    {
+        if !power::self_test(true) {
+            serial::write_line(format_args!("[S13.20] reset: FAILED"));
+            qemu_test_exit_failure();
+        }
+        qemu_test_exit_success();
+    }
+    #[cfg(feature = "stage13-20-test")]
+    {
+        if !power::self_test(false) {
+            serial::write_line(format_args!("[S13.20] power-off: FAILED"));
+            qemu_test_exit_failure();
+        }
+        qemu_test_exit_success();
+    }
     #[cfg(feature = "stage13-19-test")]
     {
         if !livelog::self_test() {
