@@ -6,6 +6,14 @@ you start or finish something.
 
 ## Shared rules
 
+**Codex accepted handoff (2026-10-15):** session 94658 is terminal, exit 0,
+full combined acceptance PASS; all 500 frozen inputs match. Accepted separately
+in order: COW ancestors `79b2f5ad`, wait ownership `6c57a179`, signed statuses
+`e3d72f97`; all are pushed on `origin/codex/stage11-loader-20261015`.
+Codex reserves the next serialized slot for fixed-ET_EXEC/loader and compiler-TLS
+interoperability. Keep foreign acceptance/build chains on hold until released.
+Older ACTIVE notes are historical. No full-stage/release/hardware claim is made.
+
 **Codex signed-status gate ACTIVE: session 94658 (2026-10-15).** The
 real-libwoven status/COW/ownership fixture passed 1/2/4 CPUs; full combined
 acceptance is running under a 500-file freeze in
