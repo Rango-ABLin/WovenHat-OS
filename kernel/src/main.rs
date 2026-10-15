@@ -77,6 +77,8 @@ mod ipc;
 mod irq_lock;
 mod journal;
 mod keyboard;
+#[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
+mod livelog;
 mod memory;
 mod mouse;
 mod network;
@@ -1496,6 +1498,13 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
                     )),
                 }
             }
+        }
+
+        // Stage 13.19: booted from a WovenHat live stick, this boot's log
+        // is kept on the stick.
+        match livelog::start() {
+            Ok(boot) => serial::write_line(format_args!("[LIVELOG] boot {} is logged on the USB stick", boot)),
+            Err(error) => serial::write_line(format_args!("[LIVELOG] no live-test stick: {:?}", error)),
         }
 
         serial::write_line(format_args!(
@@ -3467,6 +3476,15 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     }
     // Before the 13.12 block: 13.13 and 13.14 builds also enable
     // stage13-12-test, and each block ends the boot.
+    #[cfg(feature = "stage13-19-test")]
+    {
+        if !livelog::self_test() {
+            serial::write_line(format_args!("[S13.19] live-test log on the USB stick: FAILED"));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!("[S13.19] live-test log on the USB stick: PASSED"));
+        qemu_test_exit_success();
+    }
     #[cfg(feature = "stage13-18-test")]
     {
         if !xhci::storage_self_test() {

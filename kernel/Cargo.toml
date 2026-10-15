@@ -63,6 +63,8 @@ stage13-15-test = ["qemu-test", "stage13-12-test"]
 stage13-16-test = ["qemu-test", "stage13-12-test"]
 # USB mass storage (Bulk-Only Transport, SCSI) as a block device.
 stage13-18-test = ["qemu-test", "stage13-12-test"]
+# The boot's log kept on the WovenHat USB stick's WOVENLOG partition.
+stage13-19-test = ["qemu-test", "stage13-12-test"]
 stage14-1-test = ["network-test"]
 stage14-2-test = ["network-test", "stage14-1-test"]
 stage14-3-test = ["network-test", "stage14-2-test"]

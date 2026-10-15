@@ -1655,6 +1655,13 @@ pub fn usb_disk_info() -> Option<UsbDiskInfo> {
     Some(UsbDiskInfo { port: device.port, blocks: device.blocks, vendor: device.vendor, product: device.product })
 }
 
+/// Whether the controller lock is free right now (for a panic handler,
+/// which must not wait on a lock the panicking code may hold).
+#[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
+pub fn controller_free() -> bool {
+    CONTROLLER.try_lock().is_some()
+}
+
 /// Run `operation` on the USB disk, if one is attached.
 #[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
 pub fn with_usb_disk<R>(operation: impl FnOnce(&mut UsbDisk) -> R) -> Option<R> {

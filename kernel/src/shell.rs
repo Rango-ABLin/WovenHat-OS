@@ -130,6 +130,32 @@ impl Shell {
                 }
             }
             "version" | "ver" => console.println("WovenHat kernel 0.8.0 Multicore Foundation"),
+            // Stage 13.19: a tester's observation, kept in the live-test log.
+            #[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
+            "note" => {
+                if authorize(Capability::Console, console) {
+                    if arg.is_empty() {
+                        console.println("usage: note <what you saw>");
+                    } else {
+                        crate::serial::write_line(format_args!("[NOTE] {}", arg));
+                        console.println(if crate::livelog::flush_now() {
+                            "noted; saved to the USB stick"
+                        } else {
+                            "noted (no live-test stick to save it to)"
+                        });
+                    }
+                }
+            }
+            #[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
+            "savelog" => {
+                if authorize(Capability::Console, console) {
+                    console.println(if crate::livelog::flush_now() {
+                        "log saved to the USB stick"
+                    } else {
+                        "no live-test stick"
+                    });
+                }
+            }
             "ticks" | "uptime" => {
                 if authorize(Capability::TimerRead, console) {
                     console.print("ticks: ");
@@ -425,6 +451,7 @@ fn print_help(console: &mut Console) {
     console.println("         rename|mv <old> <new>");
     console.println("test:    mmaptest (private/shared mappings, fork, msync), msynctest (disk)");
     console.println("nav:     cd [path]  pwd  echo <text>");
+    console.println("live:    note <text> (kept in the USB stick's log)  savelog");
     console.println("process: run <elf>  sh  init  spawn  user|ring3  kill <pid> [sig]");
     console
         .println("runtime: userland udpecho [port] dhcp <on|off>   (Multicore Foundation runtime)");
