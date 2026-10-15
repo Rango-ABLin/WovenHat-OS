@@ -1,5 +1,22 @@
 # Stage status
 
+## Stage 19.8 timer/event sources — 2026-10-15
+
+The unified wait path now has append-only syscall 206, `WaitAnyObjects`, for
+up to eight generation-safe timer/event objects. The kernel copies the source
+array before registration, enforces capability and owner/generation checks,
+uses event-driven task wakeups, consumes one-shot timer expiry exactly once,
+preserves manual-reset event level semantics, and clears every registration on
+all return paths. A live completion-handle waiter or another task waiter is
+refused rather than replaced. The safe `libwoven::wait_any_objects` wrapper
+uses the same bounded ABI. The existing syscall 111 remains ABI-compatible.
+
+The Stage 19.8 feature gate now includes an object-registration self-test, and
+host/all-target Clippy plus the freestanding Stage 19.8 warning-denying gate
+pass. Full 1/2/4-CPU QEMU acceptance of a userspace timer/event integration is
+still required before this increment is accepted as a complete stage gate.
+See [the ABI contract](wait-any-objects-abi.md).
+
 ## Stage 20.14a — two monitors through virtio-gpu (2026-10-15)
 
 Roadmap Stage 18.9, first part.

@@ -21,6 +21,7 @@ struct Object {
     owner: Option<u64>,
     kind: Kind,
     waiter: Option<Handle>,
+    waiter_task: Option<TaskId>,
 }
 impl Object {
     const EMPTY: Self = Self {
@@ -28,10 +29,12 @@ impl Object {
         owner: None,
         kind: Kind::Event(false),
         waiter: None,
+        waiter_task: None,
     };
     fn clear(&mut self) {
         self.owner = None;
         self.waiter = None;
+        self.waiter_task = None;
     }
     fn ready(&mut self, now: u64) -> u64 {
         match &mut self.kind {
@@ -115,7 +118,10 @@ pub fn wait_current(raw: u64, is_timer: bool) -> Result<Handle, ()> {
     let result = (|| {
         let mut objects = OBJECTS.lock();
         let object = lookup(&mut objects, owner, raw)?;
-        if matches!(object.kind, Kind::Timer(_)) != is_timer || object.waiter.is_some() {
+        if matches!(object.kind, Kind::Timer(_)) != is_timer
+            || object.waiter.is_some()
+            || object.waiter_task.is_some()
+        {
             return Err(());
         }
         let count = object.ready(timer::ticks());
@@ -140,8 +146,62 @@ pub fn wait_current(raw: u64, is_timer: bool) -> Result<Handle, ()> {
     }
     Ok(handle)
 }
+
+/// Result of registering a task in the unified wait path.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum TaskWaitRegistration {
+    Ready,
+    Registered,
+    Busy,
+}
+
+/// Register `task` as the level-triggered waiter for one timer/event object.
+/// The object lock is released before the caller observes the result. Timer
+/// expiry is consumed exactly once; manual-reset events remain ready until
+/// cleared by `set_event(..., false)`.
+pub fn register_task(
+    owner: u64,
+    raw: u64,
+    is_timer: bool,
+    task: TaskId,
+) -> Result<TaskWaitRegistration, ()> {
+    let result = {
+        let mut objects = OBJECTS.lock();
+        let object = lookup(&mut objects, owner, raw)?;
+        if matches!(object.kind, Kind::Timer(_)) != is_timer {
+            return Err(());
+        }
+        if object.waiter.is_some() || object.waiter_task.is_some() {
+            return Ok(TaskWaitRegistration::Busy);
+        }
+        if object.ready(timer::ticks()) != 0 {
+            return Ok(TaskWaitRegistration::Ready);
+        }
+        if matches!(object.kind, Kind::Timer(timer) if timer.exhausted()) {
+            return Err(());
+        }
+        object.waiter_task = Some(task);
+        TaskWaitRegistration::Registered
+    };
+    if result == TaskWaitRegistration::Registered {
+        notify_worker();
+    }
+    Ok(result)
+}
+
+/// Remove a task registration without touching a different live waiter.
+pub fn clear_task_waiter(owner: u64, raw: u64, is_timer: bool, task: TaskId) {
+    let mut objects = OBJECTS.lock();
+    if let Ok(object) = lookup(&mut objects, owner, raw) {
+        if matches!(object.kind, Kind::Timer(_)) == is_timer
+            && object.waiter_task == Some(task)
+        {
+            object.waiter_task = None;
+        }
+    }
+}
 pub fn set_event(owner: u64, raw: u64, set: bool) -> Result<(), ()> {
-    let waiter = {
+    let (waiter, task_waiter) = {
         let mut objects = OBJECTS.lock();
         let object = lookup(&mut objects, owner, raw)?;
         let Kind::Event(state) = &mut object.kind else {
@@ -149,31 +209,38 @@ pub fn set_event(owner: u64, raw: u64, set: bool) -> Result<(), ()> {
         };
         *state = set;
         if set {
-            object.waiter.take()
+            (object.waiter.take(), object.waiter_task.take())
         } else {
-            None
+            (None, None)
         }
     };
     if let Some(waiter) = waiter {
         let _ = async_op::complete(waiter, Completion::new(0, 1));
     }
+    if let Some(task) = task_waiter {
+        task::signal_event(task);
+    }
     Ok(())
 }
 pub fn close(owner: u64, raw: u64, is_timer: bool) -> Result<(), ()> {
-    let waiter = {
+    let (waiter, task_waiter) = {
         let mut objects = OBJECTS.lock();
         let object = lookup(&mut objects, owner, raw)?;
         if matches!(object.kind, Kind::Timer(_)) != is_timer {
             return Err(());
         }
         let waiter = object.waiter;
+        let task_waiter = object.waiter_task;
         object.clear();
-        waiter
+        (waiter, task_waiter)
     };
     // Current processes have one thread. Stage 11 must extend close to cancel
     // sibling-thread waits without weakening generic operation ownership.
     if let Some(waiter) = waiter {
         let _ = async_op::cancel_current(waiter);
+    }
+    if let Some(task) = task_waiter {
+        task::signal_event(task);
     }
     notify_worker();
     Ok(())
@@ -209,10 +276,15 @@ fn pump(now: u64) -> u64 {
                     deadline = deadline.min(next);
                 }
             }
-            if object.waiter.is_some() {
+            if object.waiter.is_some() || object.waiter_task.is_some() {
                 let count = object.ready(now);
                 if count != 0 {
-                    completions[index] = Some((object.waiter.take().unwrap(), count));
+                    if let Some(waiter) = object.waiter.take() {
+                        completions[index] = Some((waiter, count));
+                    }
+                    if let Some(task) = object.waiter_task.take() {
+                        task::signal_event(task);
+                    }
                 }
             }
         }
@@ -228,6 +300,21 @@ fn worker() -> ! {
         task::wait_for_event_until(deadline);
     }
 }
+
+#[cfg(feature = "stage19-8-test")]
+pub fn wait_any_object_self_test() -> bool {
+    let owner = task::current_process_id();
+    let event = match create_event(owner, true) {
+        Ok(raw) => raw,
+        Err(()) => return false,
+    };
+    let ready = matches!(
+        register_task(owner, event, false, task::current_task_id()),
+        Ok(TaskWaitRegistration::Ready)
+    );
+    close(owner, event, false).is_ok() && ready
+}
+
 #[cfg(feature = "stage10-9-test")]
 pub fn active_count() -> usize {
     OBJECTS.lock().iter().filter(|o| o.owner.is_some()).count()

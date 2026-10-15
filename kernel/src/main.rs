@@ -9426,6 +9426,13 @@ fn stage19_8_self_test() -> bool {
     }
 
     if !step(
+        "timer/event object registration is level-safe",
+        async_events::wait_any_object_self_test(),
+    ) {
+        return false;
+    }
+
+    if !step(
         "install into the filesystem",
         vfs::create_read_only("/bin/hello-gui", HELLO_GUI_IMAGE).is_ok(),
     ) {

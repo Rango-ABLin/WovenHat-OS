@@ -263,6 +263,7 @@ pub mod syscall {
     pub const GRAPHICS_SURFACE_SHARE: u64 = 109;
     pub const GRAPHICS_COMPOSITOR_BLIT_SHARED: u64 = 110;
     pub const WAIT_ANY: u64 = 111;
+    pub const WAIT_ANY_OBJECTS: u64 = 206;
     pub const GRAPHICS_SURFACE_DAMAGE: u64 = 112;
     pub const GRAPHICS_COMPOSITOR_BLIT_DAMAGE: u64 = 113;
     pub const GRAPHICS_COMPOSITOR_BLEND: u64 = 114;
@@ -625,6 +626,13 @@ pub mod syscall {
     /// Must be called from WovenHat userspace.
     pub unsafe fn wait_any(deadline: u64, mask: u64) -> u64 {
         unsafe { invoke(WAIT_ANY, deadline, mask, 0) }
+    }
+
+    /// # Safety
+    /// `sources` must point to `count` packed 24-byte wait-object records in
+    /// readable WovenHat userspace memory.
+    pub unsafe fn wait_any_objects(sources: *const u8, count: u64, deadline: u64) -> u64 {
+        unsafe { invoke(WAIT_ANY_OBJECTS, deadline, sources as u64, count) }
     }
 
     /// # Safety
@@ -1017,6 +1025,35 @@ pub mod wait {
     pub const MESSAGE: u64 = 1 << 1;
     /// Damage on a surface shared with this process (`DisplayIo`).
     pub const DAMAGE: u64 = 1 << 2;
+}
+
+/// A timer or manual-reset event that can participate in [`wait_any_objects`].
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct WaitObject {
+    pub handle: u64,
+    pub timer: bool,
+    pub mask: u64,
+}
+
+/// Wait on up to eight timer/event objects. The source records are copied by
+/// the kernel before registration; no userspace pointer is retained while the
+/// task sleeps.
+pub fn wait_any_objects(sources: &[WaitObject], deadline: Option<time::Ticks>) -> Result<u64, Error> {
+    if sources.is_empty() || sources.len() > 8 {
+        return Err(Error::Failed);
+    }
+    let mut packed = [0u8; 8 * 24];
+    for (index, source) in sources.iter().enumerate() {
+        let offset = index * 24;
+        packed[offset..offset + 8].copy_from_slice(&source.handle.to_le_bytes());
+        packed[offset + 8..offset + 16]
+            .copy_from_slice(&u64::from(source.timer).to_le_bytes());
+        packed[offset + 16..offset + 24].copy_from_slice(&source.mask.to_le_bytes());
+    }
+    // SAFETY: `packed` is live and readable for the duration of the syscall.
+    check(unsafe {
+        syscall::wait_any_objects(packed.as_ptr(), sources.len() as u64, deadline.unwrap_or(u64::MAX))
+    })
 }
 
 /// Sleep until any source in `mask` is ready, or until the timer reaches
