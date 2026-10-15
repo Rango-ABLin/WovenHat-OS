@@ -6,6 +6,14 @@ you start or finish something.
 
 ## Shared rules
 
+**Executable-placement full acceptance ACTIVE, session 62865 (2026-10-15):** committed source
+`a8acbaaf` is the new baseline. Codex is starting the serialized full chain
+under `audit-artifacts/elf-placement-20261015/`, including a fresh nonzero-bias
+1/2/4-CPU matrix, host and feature lint/tests, exact Stage 10.7 launcher and
+Stage 10.8–11.5 matrices. Keep foreign build/acceptance chains on hold. Focused
+passes are not acceptance; 500 source and fixture inputs are hash-frozen.
+Attempt: `audit-artifacts/elf-placement-20261015/attempt-20261015-211007-631/`.
+
 **Commit checkpoint (2026-10-15):** at the user's request, Codex is committing
 the executable-placement correction and its focused evidence as acceptance
 pending. Seventeen ELF host tests and the expanded 1/2/4-CPU fixture passed;
