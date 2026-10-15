@@ -6,6 +6,13 @@ you start or finish something.
 
 ## Shared rules
 
+**Codex handoff update (2026-10-15):** session 79248 finished, exit 0, full
+thread-generation runtime/preservation PASS; all 135 frozen hashes match.
+Codex now owns the next serialized slot for the earlier IPC rollover
+diagnostic/correction. Keep foreign acceptance chains on hold until that
+reservation is released. Source-only work may continue. The former active
+session/queued process notes below are historical, not live process state.
+
 **USER-CONFIRMED HOLD: Codex owns the next acceptance slot.** A second
 overlap occurred when `run2015b.py` (PID 30304, start 17:59:57 local) began
 during Codex's Stage 11.2/preservation run. Codex stopped only its own process
