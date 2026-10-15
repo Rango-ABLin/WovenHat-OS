@@ -39,13 +39,18 @@ inputs matched at acceptance. The handle-generation audit retains final evidence
 the earlier test-ordering failure. This accepts the bounded IPC correction,
 not Stage 7–11 production closure or a newly qualified release image.
 
-**Signed-status/prerequisite corrections pending:** actual-source host tests
+**COW ancestor correction accepted:** the frozen 500-input combined chain exited
+0 after complete host/lint/runtime preservation. See the COW and combined
+acceptance audits. This is a bounded foundation correction, not full-stage closure.
+
+**Signed-status/wait-ownership decisions pending:** actual-source host tests
 reproduced process-wait and thread-join sentinel collisions; zero-extended
 32-bit success payloads are integrated. A real libwoven Ring-3 fixture then
 exposed COW read-only ancestor and foreign-wait classification defects. Their
 corrections and separate audits are integrated; the complete revised 1/2/4-CPU
 fixture, original thread gate and exact resource baselines pass. Full combined
-acceptance is running in session 94658 under a new 500-file freeze. The former IPC freeze is
+acceptance completed successfully in session 94658 under the 500-file freeze;
+the remaining component decisions are recorded next in prerequisite order. The former IPC freeze is
 historical evidence, not a claim that these new source edits preserve its hash.
 
 ## Presentation and repaint performance (2026-10-15)

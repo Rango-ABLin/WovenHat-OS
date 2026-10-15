@@ -1,4 +1,20 @@
-# User page-table ancestor permissions — correction integrated, acceptance pending
+# User page-table ancestor permissions — bounded correction accepted
+
+## Final acceptance — 2026-10-15
+
+The earlier COW/mapping correction in `ad11e1f1` is accepted after session 94658
+exited 0 with full combined acceptance PASS. All 500 frozen inputs matched at
+completion and independent inspection. The real libwoven fixture and original
+thread assertions passed on 1/2/4 CPUs, along with full Stage 10.7 preservation,
+all Stage 10.8–11.5 matrices, host tests and warning-denying host/fixture/kernel/
+fifteen-feature lint. See [combined evidence](audit-exit-status-combined-acceptance-2026-10-15.md)
+for exact paths, requirement coverage and retained per-run results.
+
+This accepts the bounded ancestor-policy correction, not full Stage 7, a new
+release or native hardware readiness. Wait ownership and signed-status decisions
+are recorded separately, in prerequisite order. Compiler TLS, loader placement/
+interoperability and broader production closure remain open. The pending
+statements below are retained investigation history, not the final decision.
 
 ## Executable finding
 
