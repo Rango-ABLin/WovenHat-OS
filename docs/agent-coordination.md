@@ -87,8 +87,8 @@ image SHA-256 `19107f771ae7658068dd37b7c4a25c4f241d9086812d1ab1ab19a7c34c80afeb`
 The flash disk was inspected non-destructively only; no USB media is being
 modified.
 
-The current uncommitted follow-up adds Stage 11.2 sibling cancellation (ABI
-136) with join-safe teardown. Host check/Clippy/tests, freestanding Stage
-11.2 Clippy, and the 1/2/4-CPU focused gate pass. Next action is to commit
-this increment, then rerun the release package because the kernel and image
-changed.
+Stage 11.2 sibling cancellation (ABI 136) with join-safe teardown is committed
+as `3f1b5e3`. Host check/Clippy/tests, freestanding Stage 11.2 Clippy, the
+1/2/4-CPU focused gate, and the full release chain pass. The post-change
+validated package has UEFI image SHA-256
+`a1e565aae98ccbc59be4dfee49128701a7b55e8fa81166a4d64da2caf79687c6`.
