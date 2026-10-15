@@ -1,5 +1,16 @@
 # Stage status
 
+## Stage 1–19 production closure review — 2026-10-15
+
+The current synchronized branch has extensive bounded software/QEMU coverage,
+but Stages 1–19 are **not collectively production-ready**. The exact closure
+decision and remaining blockers are recorded in the
+[Stage 1–19 closure gate](stage1-19-closure-gate.md). In particular, shared
+libraries/dynamic TLS, native hardware and power-loss qualification, firmware
+security provisioning, persistent update rollback, and several driver/service
+boundaries remain open. The read-only host preflight found two USB disks but was
+not elevated and performed no physical test.
+
 ## Presentation and repaint performance (2026-10-15)
 
 A fix to accepted Stage 19/20 behaviour, found by the Stage 20.7 fade gate.

@@ -74,15 +74,15 @@ qualification of Wi-Fi and Bluetooth, and of the native controllers.
 - Presentation and repaint performance: shell dirty areas, exact damage
   coalescing, row-wise present (see its audit). Touches `display.rs`,
   `compositor.rs` and the shell.
-- `scripts/write-live-usb.ps1`: writes the release-validated image to the
-  identified 8 GB VendorCo stick (serial 5474001281346643368) with
-  read-back verification. The stick now holds release image `408696e4…`.
+- `scripts/write-live-usb.ps1`: available for an explicitly authorized,
+  elevated live-media test. It has not been run by Codex in this checkout;
+  no USB media write or read-back claim is accepted here.
 
-**In progress (Claude Code):** live hardware testing. A USB mass-storage
-driver (xHCI bulk, Bulk-Only Transport, SCSI) and a boot log written to the
-WovenHat USB stick itself, with a live-test mode that never writes the
-test machine's internal disks. The user boots the stick on a separate
-machine; the logs come back on the stick.
+**Hardware boundary:** live hardware testing is not accepted from this
+checkout. The current host preflight is read-only and non-elevated; it found
+two non-boot USB disks, but no disk was written by Codex. Any USB mass-storage
+or power-loss test needs an explicitly selected device, elevated execution,
+and a retained report before it can close a production gap.
 
 
 ## Codex: owned work
@@ -118,3 +118,9 @@ at merge commit `f8f847ca`. The synchronized branch is clean and matches
 `origin/phase2/userspace-platform`. The current validated package is `0.8.0`
 with UEFI image SHA-256
 `6195a4721219a80b4e7775531a3657c7ce7e50a78648da53ca0b31b53ae03544`.
+
+The 2026-10-15 Stage 1–19 closure review is recorded in
+`docs/stage1-19-closure-gate.md`. It remains blocked by explicit shared-library,
+hardware, recovery, firmware-security and service-boundary requirements; no
+agent may report the stages as collectively production-ready from QEMU markers
+alone.
