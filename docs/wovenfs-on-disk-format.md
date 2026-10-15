@@ -137,6 +137,12 @@ On mount, after choosing the authoritative superblock:
    descriptor, or its checksum does not match the staged data, the transaction
    was never committed. It is discarded and the filesystem is left exactly as it
    was before the transaction began.
+   A transaction may only target the bitmap, inode table and data regions
+   (`bitmap_start <= target < total_blocks`). The superblock slots are written
+   only by the checkpoint and the journal only by the commit path. The commit
+   checksum covers staged data, not the descriptor's targets, so a descriptor
+   naming any other target is discarded the same way. `commit` refuses such a
+   transaction with `Corrupt` before it writes to the journal.
 3. Otherwise the transaction is committed but possibly only partly applied, so
    every staged data sector is written to its target again. Replay is
    **idempotent** — applying it twice is identical to applying it once — so a

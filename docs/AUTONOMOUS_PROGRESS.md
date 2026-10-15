@@ -4,6 +4,67 @@ Each entry is one bounded checkpoint. Entries record exactly what was run.
 Nothing here claims production readiness; completion requires independent
 human review.
 
+## 2026-10-15 — WovenFS: restrict journal replay targets
+
+Branch: `auto/wovenhat-development` (base `897ec82`). The working tree was
+clean at the start, so there was no unfinished work to resume. This closes the
+second "Open / next" item of the previous entry.
+
+### Defect
+
+`Volume::replay` applied any committed descriptor target below
+`total_blocks`, including superblock slots 0/1 and the journal sectors. The
+commit checksum covers only the staged data, not the descriptor's target
+list, so a retargeted descriptor still counted as committed. Replay would
+then write a data or metadata sector over a checkpoint, or over the journal
+sectors it was still reading.
+
+### Change
+
+- `kernel/src/wfs.rs`: `SuperBlock::journal_may_target(lba)` allows only
+  `bitmap_start..total_blocks` (bitmap, inode table, data). Replay discards a
+  transaction with any other target, the same way it handles a torn commit.
+  `commit` refuses with `Corrupt` before writing to the journal if a staged
+  target is outside that range. All current staging sites derive targets
+  from the bitmap/inode/data geometry, so this check is defense in depth.
+- `tests/wovenfs_crash.rs`:
+  `journal_replay_refuses_targets_outside_the_transactional_regions` leaves a
+  committed, unretired transaction in the journal. A control mount must
+  replay it and retire the journal. For targets at slot 0, slot 1, the
+  journal descriptor, the first payload sector, the last journal block and
+  `total_blocks`, mount must stay consistent and leave the image
+  byte-identical.
+- `docs/wovenfs-on-disk-format.md`: documents the allowed target range.
+
+### Results (run on this host, 2026-10-15)
+
+Using project-local `CARGO_BUILD_BUILD_DIR=.cargo-build`,
+`CARGO_TARGET_DIR=target`:
+
+| Command | Result |
+|---|---|
+| New test with replay check reverted to `target >= total_blocks` (negative control) | FAILS as expected: `superblock slot 0: replay must discard the transaction without writing`; check restored afterwards |
+| `cargo fmt --all -- --check` | PASS |
+| `cargo test --test wovenfs_crash` | PASS, 16 passed / 0 failed |
+| `cargo test -p wovenhat-os --tests --no-fail-fast` | PASS, 126 passed / 0 failed |
+| `cargo clippy --all-targets -- -D warnings` | PASS |
+| `cargo clippy -p wovenhat-kernel --target x86_64-unknown-none -- -D warnings` (default) | PASS |
+| same, `--features stage11-5-test` | PASS |
+| same, `--features stage15-1-test` … `stage15-9-test` (each) | PASS |
+| QEMU Stage 15.x on 1/2/4 CPUs | **NOT RUN**: `qemu-system-x86_64` is not installed on this host |
+
+### Open / next
+
+- The descriptor (block count and target list) is still not covered by any
+  checksum. A bit flip in a target that stays within the allowed regions
+  would replay committed data to the wrong block. Fixing this changes the
+  commit sector format (for example, hashing the descriptor into the commit
+  checksum) and needs a compatibility decision.
+- Pointer aliasing (two inodes claiming one block) is still detected only by
+  `check()` (test/self-test builds), not on the write path.
+- QEMU Stage 15.1/15.2 acceptance on 1/2/4 CPUs must be rerun on a host with
+  QEMU before this counts as stage acceptance.
+
 ## 2026-10-15 — WovenFS: validate superblock geometry on mount
 
 Branch: `auto/wovenhat-development` (base `073780e`). The working tree was

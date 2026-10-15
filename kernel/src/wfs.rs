@@ -172,6 +172,15 @@ impl SuperBlock {
             && self.total_blocks <= device_sectors
             && (1..=u64::from(self.inode_count)).contains(&self.root_inode)
     }
+
+    /// Whether a transaction may write `lba`: the bitmap, inode table and
+    /// data regions. The superblock slots are written only by the checkpoint
+    /// and the journal only by `commit` itself, so a staged target in either
+    /// would let one transaction overwrite a checkpoint or the very journal
+    /// sectors replay is still reading.
+    fn journal_may_target(&self, lba: u64) -> bool {
+        (self.bitmap_start..self.total_blocks).contains(&lba)
+    }
 }
 
 // -------------------------------------------------------------------- inode
@@ -658,7 +667,11 @@ impl<D: BlockDevice> Volume<D> {
         }; MAX_TXN_BLOCKS];
         for (index, slot) in blocks.iter_mut().take(count).enumerate() {
             let target = read_u64(&descriptor, 24 + index * 8);
-            if target >= sb.total_blocks {
+            // The commit checksum covers the staged data, not the descriptor's
+            // targets, so a target outside the transactional regions is
+            // discarded here rather than applied over a checkpoint or the
+            // journal.
+            if !sb.journal_may_target(target) {
                 return Ok(());
             }
             let mut data = [0u8; SECTOR_SIZE];
@@ -698,6 +711,16 @@ impl<D: BlockDevice> Volume<D> {
         }
         let sb = self.super_block;
         let count = txn.len;
+        // Every staged target is derived from this geometry, so this fails
+        // only on an internal bug. Refuse before the journal is touched:
+        // replay would otherwise discard a transaction already reported as
+        // committed.
+        if !txn.blocks[..count]
+            .iter()
+            .all(|block| sb.journal_may_target(block.target))
+        {
+            return Err(Error::Corrupt);
+        }
         let transaction_id = sb.sequence.wrapping_add(1).max(1);
 
         let mut descriptor = [0u8; SECTOR_SIZE];

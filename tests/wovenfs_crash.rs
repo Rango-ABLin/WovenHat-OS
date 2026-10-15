@@ -680,3 +680,51 @@ fn superblock_geometry_that_does_not_fit_is_refused() {
         );
     }
 }
+
+#[test]
+fn journal_replay_refuses_targets_outside_the_transactional_regions() {
+    // Leave a committed, applied but unretired transaction in the journal by
+    // cutting power at the final retire write.
+    let base = formatted();
+    let sb = *Volume::mount(base.clone()).expect("mount").super_block();
+    let full = write_count(&base, |volume| {
+        volume.create(1, "j.txt", 0o644, 2).expect("create");
+    });
+    let pending = base.fork(Some(full - 1));
+    {
+        let mut volume = Volume::mount(pending.clone()).expect("mount");
+        let _ = volume.create(1, "j.txt", 0o644, 2);
+    }
+    let descriptor = sb.journal_start as usize;
+
+    // Control: the untouched descriptor is live, so mount replays it and
+    // retires the journal. Without this the cases below would prove nothing.
+    let control = pending.fork(None);
+    mount_consistent(&control, "valid pending transaction");
+    assert_eq!(
+        control.sectors()[descriptor],
+        [0u8; SECTOR_SIZE],
+        "a valid committed transaction must be replayed and retired"
+    );
+
+    // The commit checksum covers the staged data but not the descriptor's
+    // targets, so retargeting a block keeps the transaction "committed".
+    let cases = [
+        ("superblock slot 0", 0),
+        ("superblock slot 1", 1),
+        ("journal descriptor", sb.journal_start),
+        ("journal payload", sb.journal_start + 1),
+        ("last journal block", sb.bitmap_start - 1),
+        ("past the volume", sb.total_blocks),
+    ];
+    for (case, target) in cases {
+        let image = pending.fork(None);
+        image.image.borrow_mut()[descriptor][24..32].copy_from_slice(&target.to_le_bytes());
+        let before = image.sectors();
+        mount_consistent(&image, case);
+        assert!(
+            image.sectors() == before,
+            "{case}: replay must discard the transaction without writing"
+        );
+    }
+}
