@@ -2799,9 +2799,12 @@ TLS, stable process ownership, generation-safe IDs, and post-switch resource
 reclamation. Build, warning-denying Clippy, host tests, and 1/2/4-CPU QEMU
 passed; see [audit](audit-stage11-2-scheduler-threads-2026-10-14.md).
 
-This is an implementation increment, not closure of every Stage 11 thread
-requirement. Sibling cancellation/teardown, shared libraries, symbol
-resolution, dynamic TLS, and hardware qualification remain open.
+The 2026-10-15 cancellation follow-up adds ABI 136 for owned sibling-thread
+cancellation. Ready/blocked and running targets both remain joinable, wake the
+registered joiner, and reclaim stack/TLS mappings only through join. The
+focused 1/2/4-CPU QEMU gate, host tests, and warning-denying Clippy passed;
+see the scheduler-thread audit. Process-wide teardown, shared libraries,
+symbol resolution, dynamic TLS, and hardware qualification remain open.
 
 ## Stages 11.3–11.5 — accepted on 2026-09-16
 

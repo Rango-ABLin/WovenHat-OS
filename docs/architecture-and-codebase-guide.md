@@ -325,9 +325,14 @@ publishes registry termination only after the scheduler completes the stack
 hand-off, so join can safely reclaim those mappings. Join waiters use the
 scheduler's latched event path, and process termination retires ready/blocked
 siblings immediately while running siblings receive a safe-point termination
-request. The address space remains owned by the process until its parent
-reaps the process. Shared libraries, symbol resolution, dynamic TLS, and
-physical qualification remain outside this bounded increment.
+request. `ThreadCancel` (ABI 136) applies the same two-state rule to an owned
+sibling without killing its process: ready/blocked targets are marked dead and
+the registry is transitioned under the scheduler lock, while running targets
+carry the request through the existing post-switch finalizer. Both paths wake
+the single join waiter and retain the generation-tagged record until join
+reclaims the private mappings. The address space remains owned by the process
+until its parent reaps the process. Shared libraries, symbol resolution,
+dynamic TLS, and physical qualification remain outside this bounded increment.
 
 ## Stage 11.5 bounded symbol relocation (2026-10-14)
 

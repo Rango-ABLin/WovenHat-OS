@@ -347,6 +347,8 @@ pub enum Number {
     ThreadSetTls = 134,
     /// -> TLS base value or ERROR
     ThreadGetTls = 135,
+    /// thread handle, exit status -> 0 or ERROR; cancels an owned sibling
+    ThreadCancel = 136,
     /// own handle, packed destination and opacity (x | y<<24 | opacity<<56,
     /// x and y 24-bit signed, bits 48..56 zero), packed source region -> 0 or
     /// ERROR
@@ -2411,6 +2413,11 @@ pub extern "C" fn wovenhat_syscall_dispatch(
         value if value == Number::ThreadGetTls as u64 => crate::task::current_thread_id()
             .and_then(crate::thread::tls)
             .unwrap_or(SYSCALL_ERROR),
+        value if value == Number::ThreadCancel as u64 => crate::task::cancel_user_thread(
+            arg0,
+            arg1 as i32,
+        )
+        .map_or(SYSCALL_ERROR, |_| 0),
         value if value == Number::Getpid as u64 => crate::task::current_process_id(),
         value if value == Number::Waitpid as u64 => match crate::task::wait_process(arg0) {
             Ok(exit_code) => exit_code as u64,

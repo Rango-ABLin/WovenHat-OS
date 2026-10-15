@@ -295,6 +295,7 @@ pub mod syscall {
     pub const THREAD_SELF: u64 = 133;
     pub const THREAD_SET_TLS: u64 = 134;
     pub const THREAD_GET_TLS: u64 = 135;
+    pub const THREAD_CANCEL: u64 = 136;
     pub const GRAPHICS_COMPOSITOR_BLEND_REGION: u64 = 200;
     pub const GRAPHICS_COMPOSITOR_BLEND_REGION_SHARED: u64 = 201;
     pub const GRAPHICS_COMPOSITOR_BLIT_KEYED: u64 = 202;
@@ -467,6 +468,15 @@ pub mod syscall {
     /// Must be called from WovenHat userspace.
     pub unsafe fn thread_get_tls() -> u64 {
         unsafe { invoke(THREAD_GET_TLS, 0, 0, 0) }
+    }
+
+    /// Cancel an owned sibling thread. The sibling remains joinable and the
+    /// supplied status is returned by [`thread_join`].
+    ///
+    /// # Safety
+    /// Must be called from WovenHat userspace with a valid owned thread ID.
+    pub unsafe fn thread_cancel(id: super::thread::Id, status: i32) -> u64 {
+        unsafe { invoke(THREAD_CANCEL, id.0, status as u64, 0) }
     }
 
     /// Yield the remainder of this time slice.

@@ -713,6 +713,71 @@ pub enum ThreadJoinError {
     MappingFailed,
 }
 
+/// Cancel an owned sibling thread without tearing down its process.
+///
+/// The target remains joinable until `join_user_thread` reclaims its private
+/// stack/TLS mappings. Running targets are retired at scheduler hand-off;
+/// non-running targets are retired while the scheduler lock protects their
+/// state, so they cannot be selected after the registry becomes Exited.
+pub fn cancel_user_thread(raw_id: u64, exit_code: i32) -> Result<(), ThreadJoinError> {
+    let owner = current_process_id();
+    let id = crate::thread::ThreadId::from_raw(raw_id);
+    match crate::thread::joinable(owner, id) {
+        Ok(false) => {}
+        Ok(true) => return Err(ThreadJoinError::Invalid),
+        Err(crate::thread::JoinError::Invalid) => return Err(ThreadJoinError::Invalid),
+        Err(crate::thread::JoinError::NotOwner) => return Err(ThreadJoinError::NotOwner),
+        Err(crate::thread::JoinError::Running) => return Err(ThreadJoinError::Running),
+    }
+    if current_thread_id() == Some(id) {
+        return Err(ThreadJoinError::Invalid);
+    }
+
+    let mut immediate_release = None;
+    let reschedule_cpu;
+    {
+        let mut scheduler = SCHEDULER.lock();
+        let Some(slot) = scheduler.tasks.iter().position(|task| {
+            task.thread_id == Some(id)
+                && task.process_id.as_u64() == owner
+                && !matches!(task.state, TaskState::Empty | TaskState::Dead)
+        }) else {
+            return Err(ThreadJoinError::Invalid);
+        };
+        let task_id = scheduler.tasks[slot].id;
+        scheduler.tasks[slot].thread_exit_code = exit_code;
+        scheduler.tasks[slot].termination_signal = u8::MAX;
+        reschedule_cpu = scheduler.tasks[slot].cpu;
+        match scheduler.tasks[slot].state {
+            TaskState::Ready | TaskState::Blocked | TaskState::Sleeping => {
+                if !crate::thread::terminate(id, exit_code) {
+                    return Err(ThreadJoinError::Invalid);
+                }
+                scheduler.tasks[slot].state = TaskState::Dead;
+                scheduler.tasks[slot].name = "thread-canceled";
+                scheduler.tasks[slot].termination_signal = 0;
+                scheduler.task_count = scheduler.task_count.saturating_sub(1);
+                if let Some(waiter) = crate::thread::take_waiter(id) {
+                    let (found, cpu) = scheduler.signal_event_locked(TaskId::from_u64(waiter));
+                    if found {
+                        if let Some(cpu) = cpu {
+                            crate::smp::reschedule_cpu(cpu);
+                        }
+                    }
+                }
+                immediate_release = Some(task_id);
+            }
+            TaskState::Running | TaskState::Switching => {}
+            TaskState::Empty | TaskState::Dead => return Err(ThreadJoinError::Invalid),
+        }
+    }
+    if let Some(task_id) = immediate_release {
+        release_task_runtime_resources(task_id);
+    }
+    let _ = crate::smp::reschedule_cpu(reschedule_cpu);
+    Ok(())
+}
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum WaitError {
     NoSuchChild,
