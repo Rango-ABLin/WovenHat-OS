@@ -903,3 +903,58 @@ fn an_entry_name_length_past_the_name_field_does_not_match() {
     );
     assert_eq!(volume.unlink(1, &long, 2), Err(Error::NotFound));
 }
+
+/// Set an on-disk inode's `data_checksum` to the checksum of `bytes`,
+/// re-sealing the inode checksum.
+fn reseal_inode_data_checksum(image: &CrashDisk, inode: u64, bytes: &[u8]) {
+    let inode_start = {
+        let volume = Volume::mount(image.clone()).expect("mount");
+        volume.super_block().inode_start
+    };
+    let index = inode - 1;
+    let lba = (inode_start + index / 4) as usize;
+    let offset = (index % 4) as usize * 128;
+    let mut sectors = image.image.borrow_mut();
+    let raw = &mut sectors[lba][offset..offset + 128];
+    raw[32..40].copy_from_slice(&test_fnv1a(bytes).to_le_bytes());
+    let checksum = test_fnv1a(&raw[..120]);
+    raw[120..128].copy_from_slice(&checksum.to_le_bytes());
+}
+
+#[test]
+fn read_file_refuses_a_directory_inode() {
+    let (base, block, index) = two_file_root();
+    // Give the root inode a data checksum that matches its entry table, so
+    // only the kind check stands between `read_file` and the raw entries.
+    let table = base.sectors()[block as usize];
+    reseal_inode_data_checksum(&base, 1, &table);
+    let mut out = vec![0u8; MAX_FILE_SIZE];
+
+    let mut volume = Volume::mount(base.clone()).expect("mount");
+    assert_eq!(
+        volume.read_file(1, &mut out),
+        Err(Error::NotADirectory),
+        "the root directory must not read as a file"
+    );
+
+    // The same directory reached through a retargeted entry.
+    patch_dir_entry(&base, block, index, 0, &1u64.to_le_bytes());
+    let mut volume = Volume::mount(base.clone()).expect("mount");
+    let target = volume.lookup(1, "a.txt").expect("a.txt").inode;
+    assert_eq!(
+        volume.read_file(target, &mut out),
+        Err(Error::NotADirectory),
+        "an entry naming a directory must not read as a file"
+    );
+
+    // An entry naming a free inode reads as absent.
+    patch_dir_entry(&base, block, index, 0, &u64::from(INODES).to_le_bytes());
+    let mut volume = Volume::mount(base.clone()).expect("mount");
+    let target = volume.lookup(1, "a.txt").expect("a.txt").inode;
+    assert_eq!(volume.read_file(target, &mut out), Err(Error::NotFound));
+
+    // Control: an untouched file still reads.
+    let b = volume.lookup(1, "b.txt").expect("b.txt").inode;
+    assert_eq!(volume.read_file(b, &mut out), Ok(5));
+    assert_eq!(&out[..5], b"bravo");
+}

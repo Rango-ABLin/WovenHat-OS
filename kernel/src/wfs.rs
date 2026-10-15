@@ -1115,11 +1115,17 @@ impl<D: BlockDevice> Volume<D> {
     /// Read a file's contents into `out`, returning the byte count.
     ///
     /// Fails closed on a content checksum mismatch rather than returning bytes
-    /// that do not match what was written.
+    /// that do not match what was written. Refuses a directory inode the same
+    /// way `write_file` does: directory blocks are raw entry tables, and a
+    /// directory's `data_checksum` is never maintained, so a crafted value
+    /// would otherwise export the entry table as file contents.
     pub fn read_file(&mut self, inode: u64, out: &mut [u8]) -> Result<usize, Error> {
         let node = self.inode(inode)?;
         if !node.is_used() {
             return Err(Error::NotFound);
+        }
+        if node.kind != KIND_FILE {
+            return Err(Error::NotADirectory);
         }
         let size = node.size as usize;
         if out.len() < size {

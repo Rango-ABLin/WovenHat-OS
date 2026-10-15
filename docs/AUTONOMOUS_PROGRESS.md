@@ -4,6 +4,66 @@ Each entry is one bounded checkpoint. Entries record exactly what was run.
 Nothing here claims production readiness; completion requires independent
 human review.
 
+## 2026-10-15 — WovenFS: read_file refuses directory inodes
+
+Branch: `auto/wovenhat-development` (base `e0a8f47`). The working tree was
+clean at the start, so there was no unfinished work to resume. This takes the
+first open item from the previous entry: what `read_file` does when an entry
+names a free inode or a directory.
+
+### Defect
+
+`read_file` checked only `is_used()`, not `kind`. A directory inode read as a
+file whenever its `data_checksum` matched its blocks. Directories never
+maintain `data_checksum` (format leaves it 0), so in practice a read failed
+with `Corrupt`. A crafted or mis-written image that set it, however, made
+`read_file` return the raw directory entry table as file contents. This
+applied both to a direct call and to a directory entry retargeted at a
+directory inode. The reachable kernel paths were `read_ata_file`, the
+mount-time VFS import loop, and the read-modify-write in
+`write_vfs_path_at_with_publish`. A free inode already returned `NotFound`.
+
+### Change
+
+- `kernel/src/wfs.rs`: `read_file` returns `NotADirectory` for any used
+  inode whose kind is not `KIND_FILE`. That is the wrong-kind error
+  `write_file` already uses; `task.rs` maps it to `FileError::NotFound`. No
+  new error variant, so no ABI or mapping change.
+- `tests/wovenfs_crash.rs`: `read_file_refuses_a_directory_inode` re-seals
+  the root inode with a `data_checksum` matching its entry table. It then
+  checks that a direct `read_file(1)` and a read through an entry retargeted
+  at inode 1 both return `NotADirectory`, that an entry retargeted at a free
+  inode returns `NotFound`, and (control) that `b.txt` still reads `bravo`.
+- `docs/wovenfs-on-disk-format.md`: documents the kind rule for read/write.
+
+### Results (run on this host, 2026-10-15)
+
+Using project-local `CARGO_BUILD_BUILD_DIR=.cargo-build`,
+`CARGO_TARGET_DIR=target`:
+
+| Command | Result |
+|---|---|
+| New test with the `wfs.rs` fix stashed (negative control) | FAILS as expected: `the root directory must not read as a file`, `left: Ok(512)` |
+| `cargo fmt --all -- --check` | PASS |
+| `cargo test --test wovenfs_crash` | PASS, 21 passed / 0 failed |
+| `cargo test -p wovenhat-os --tests --no-fail-fast` | PASS, 131 passed / 0 failed |
+| `cargo clippy --all-targets -- -D warnings` | PASS |
+| `cargo clippy -p wovenhat-kernel --target x86_64-unknown-none -- -D warnings` (default) | PASS |
+| same, `--features stage11-5-test` | PASS |
+| same, `--features stage15-1-test` … `stage15-9-test` (each) | PASS |
+| QEMU Stage 15.x on 1/2/4 CPUs | **NOT RUN**: `qemu-system-x86_64` is not installed on this host |
+
+### Open / next
+
+- `NotADirectory` is a misleading name for "is a directory". A dedicated
+  variant would need a matching `task.rs` mapping. Left unchanged to keep
+  the existing error surface.
+- `unlink` still ignores `links` (no hard links yet). Cross-inode block
+  aliasing and the uncovered journal descriptor checksum remain open. Both
+  need design decisions.
+- QEMU Stage 15.1/15.2 acceptance on 1/2/4 CPUs must be rerun on a host with
+  QEMU before this counts as stage acceptance.
+
 ## 2026-10-15 — WovenFS: validate directory entries before unlink
 
 Branch: `auto/wovenhat-development` (base `3024bdb`). The working tree was

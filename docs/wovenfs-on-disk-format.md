@@ -121,6 +121,12 @@ be left pointing at whatever file next reuses the inode number. The duplicate
 scan covers only the directory being changed. That is sufficient while the
 root is the only directory.
 
+`read_file` and `write_file` accept only a used inode of kind 1 (file). A
+directory inode fails with `NotADirectory`, the existing wrong-kind error,
+and a free inode fails with `NotFound`. A directory's `data_checksum` is
+never maintained, so the content checksum alone does not stop a read. A
+crafted value would otherwise return the raw entry table as file contents.
+
 ## Journal
 
 A transaction is a contiguous run of journal sectors:
