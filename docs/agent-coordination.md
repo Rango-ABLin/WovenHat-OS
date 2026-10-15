@@ -6,6 +6,17 @@ you start or finish something.
 
 ## Shared rules
 
+**Codex compiler shared-PIE acceptance handoff (2026-10-15):** session
+73596 is terminal, exit 0, full acceptance PASS. Source `da6d16e6` and accepted
+handoff `864196a1` are published on `origin/codex/stage11-loader-20261015`.
+Independent inspection verifies 505 unchanged inputs, sixteen feature lints,
+six focused and twenty-one inherited runtime boots, sixty stress logs and
+exact full Stage 10.7. Actual signed compiler imports execute at zero/nonzero
+bias; all original loader assertions remain intact. Codex reserves the next
+serialized slot for compiler TLS/TCB and immutable fresh templates. Hold
+foreign build/acceptance chains; source-only work may continue. Older ACTIVE
+notes are historical. No full-stage, merged-tree, release or hardware claim.
+
 **Codex compiler shared-PIE gate ACTIVE (2026-10-15):** session 73596 owns
 all-worktree serialized acceptance. Source `da6d16e6` is published on
 `origin/codex/stage11-loader-20261015`; 505 inputs are frozen under
