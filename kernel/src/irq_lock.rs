@@ -11,7 +11,7 @@ use x86_64::instructions::interrupts;
 
 #[cfg(not(test))]
 mod lock_order {
-    use core::sync::atomic::{AtomicU8, AtomicU32, AtomicUsize, Ordering};
+    use core::sync::atomic::{AtomicU32, AtomicU8, AtomicUsize, Ordering};
 
     const MAX_DEPTH: usize = 8;
     static DEPTH: [AtomicU8; crate::smp::MAX_CPUS] =
