@@ -6,6 +6,15 @@ you start or finish something.
 
 ## Shared rules
 
+**Codex bounded TLS accepted (2026-10-16):** published commit `8b5d7150`
+records session 37505 terminal exit 0: 515 unchanged inputs, nine focused
+boots / 28 TLS executions, twenty-one inherited boots, seventeen feature
+lints and sixty stress logs. Only tested main-image local-exec TLS is accepted;
+ASLR geometry, broader TLS, full-stage/release/hardware remain open. Codex
+reserves the next serialized slot for ASLR forced-draw guard reproduction and
+joint layout correction. Hold foreign acceptance/build chains; source-only
+work may continue. Older ACTIVE notes below are historical.
+
 **User-requested commit checkpoint (2026-10-16):** Codex is preserving Claude's
 existing `kernel/src/xhci.rs` USB hub work on this branch as an unvalidated WIP
 commit. Diff whitespace validation passes; no build, lint, QEMU or physical
