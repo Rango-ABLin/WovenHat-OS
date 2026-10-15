@@ -79,5 +79,9 @@ validation chain.
 
 **Current Codex work (2026-10-15):** WovenFS nested mount publication and
 complete reachable-tree consistency validation are committed on the shared
-branch. The final release chain is being rerun against the Claude merge
-`a403c7d2`; no USB media is being modified.
+branch. The Stage 19.8 timer/event unified-wait userspace integration is
+committed as `ba02d38`; its 1/2/4-CPU focused gate and the complete 98-check
+release chain pass. The validated package is `0.8.0` with UEFI image SHA-256
+`8ab3b3de1bc610d583a71dddadf282b51f1d429824572fec2d684ceecf87ee46`.
+The flash disk was inspected non-destructively only; no USB media is being
+modified.
