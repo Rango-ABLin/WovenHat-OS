@@ -6,10 +6,11 @@ you start or finish something.
 
 ## Shared rules
 
-**Compiler shared-PIE full acceptance queued (2026-10-15):** the expanded
+**Compiler shared-PIE full acceptance ACTIVE, session 73596 (2026-10-15):** the expanded
 zero/nonzero-bias signed execution gate passed on 1/2/4 CPUs, with exact
 resources and all original loader assertions. Host ELF/Python suites each
-have twenty passing tests. Codex is freezing the final inputs and will repeat
+have twenty passing tests. Source `da6d16e6` is committed and published;
+505 inputs are frozen. Codex is repeating
 both focused matrices, sixteen feature lints and all inherited preservation
 under `audit-artifacts/compiler-pie-20261015/`. No acceptance claim yet.
 Keep foreign build/acceptance chains on hold until this reservation is released.
