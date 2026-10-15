@@ -96,7 +96,8 @@ fn has_relative_tls_initializer(image: &crate::elf::Image, bytes: &[u8]) -> bool
     let Some(table) = bytes.get(dynamic.rela_file_offset..end) else {
         return false;
     };
-    table.chunks_exact(24).any(|entry| {
+    let (entries, _) = table.as_chunks::<24>();
+    entries.iter().any(|entry| {
         let target = u64::from_le_bytes(entry[..8].try_into().unwrap());
         let info = u64::from_le_bytes(entry[8..16].try_into().unwrap());
         info == u64::from(crate::elf::R_X86_64_RELATIVE)

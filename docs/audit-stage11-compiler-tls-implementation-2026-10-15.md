@@ -87,6 +87,16 @@ combined tree, a release, physical hardware, or Stage 1–19 production readines
 
 ## Expanded compiler lifecycle and every-CPU gate
 
+The first full attempt, session 77593, stopped with exit 1 at TLS-feature
+Clippy: its constant-size `chunks_exact(24)` test helper must use `as_chunks`.
+Nine focused boots, 168 host Rust tests, nineteen libwoven tests, twenty-one
+Python tests, host/production lint and preceding feature lints passed, but
+full inherited runtime preservation had not started. Evidence and the original
+515-input freeze remain in
+`audit-artifacts/compiler-tls-20261015/attempt-20261015-232423-500/` and its
+parent. The helper is corrected without a lint suppression, assertion change,
+capability expansion or timeout increase. A complete fresh chain is required.
+
 The compiler TLS-thread fixture is now an unmodified LLD PIE, still with
 compiler-generated local-exec access. A volatile TLS pointer to a separate
 global adds an actual R_X86_64_RELATIVE relocation inside the PT_TLS initializer.

@@ -6,6 +6,14 @@ you start or finish something.
 
 ## Shared rules
 
+**TLS chain stopped on lint, not accepted (2026-10-15):** session 77593 is
+terminal, exit 1. Nine focused boots and host checks passed, but TLS-feature
+Clippy correctly rejected constant-size chunks_exact in a test helper. Codex
+is replacing it with as_chunks, not suppressing the warning. The first 515-
+input manifest and all failure logs remain historical evidence; restart full
+preservation on a new frozen baseline after focused lint passes. Foreign
+acceptance/build chains remain held. The older ACTIVE note below is historical.
+
 **TLS full acceptance ACTIVE, session 77593 (2026-10-15):** source `e58b803b`
 is published and 515 inputs are frozen. Session 4739 is terminal, exit 0,
 with compiler lifecycle/relocated-initializer execution on every online CPU
