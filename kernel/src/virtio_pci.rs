@@ -154,7 +154,6 @@ impl Queue {
 }
 
 pub struct Transport {
-    address: pci::Address,
     common: Region,
     notify: Region,
     notify_multiplier: u32,
@@ -217,7 +216,6 @@ impl Transport {
             pointer = next & 0xfc;
         }
         let transport = Self {
-            address,
             common: common.ok_or(Error::MissingCapability)?,
             notify: notify.ok_or(Error::MissingCapability)?,
             notify_multiplier: multiplier,
@@ -321,9 +319,5 @@ impl Transport {
             core::hint::spin_loop();
         }
         Err(Error::Timeout)
-    }
-
-    pub fn pci_address(&self) -> pci::Address {
-        self.address
     }
 }

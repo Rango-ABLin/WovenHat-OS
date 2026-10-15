@@ -366,6 +366,10 @@ pub enum Number {
     /// volume percent (0 mutes) -> the amplifier gain set; needs
     /// AudioPlayback
     AudioSetVolume = 205,
+    /// out *[x u32, y u32, width u32, height u32; 4] -> the number of
+    /// monitors, left to right in surface coordinates. Requires DisplayIo and
+    /// the lease. (206 is reserved for audio recording.)
+    GraphicsCompositorOutputs = 207,
 }
 
 pub fn entry_address() -> u64 {
@@ -2576,6 +2580,7 @@ pub extern "C" fn wovenhat_syscall_dispatch(
         value if value == Number::AudioInfo as u64 => sys_audio_info(arg0),
         value if value == Number::AudioPlay as u64 => sys_audio_play(arg0, arg1),
         value if value == Number::AudioSetVolume as u64 => sys_audio_set_volume(arg0),
+        value if value == Number::GraphicsCompositorOutputs as u64 => sys_compositor_outputs(arg0),
         _ => u64::MAX,
     };
 
@@ -2881,6 +2886,25 @@ fn pack_compositor_info(width: u32, height: u32, scale: u32) -> u64 {
 
 /// The compositor surface's size and display scale. Requires `DisplayIo` and
 /// the lease: the geometry is the holder's to draw on.
+fn sys_compositor_outputs(user_outputs: u64) -> u64 {
+    if !display_authorized() {
+        return SYSCALL_ERROR;
+    }
+    let Ok((outputs, count)) = crate::compositor::outputs_for(crate::task::current_process_id()) else {
+        return SYSCALL_ERROR;
+    };
+    let mut bytes = [0u8; crate::compositor::MAX_OUTPUTS * 16];
+    for (output, chunk) in outputs.iter().zip(bytes.as_chunks_mut::<16>().0) {
+        for (value, field) in [output.0, output.1, output.2, output.3].iter().zip(chunk.as_chunks_mut::<4>().0) {
+            *field = value.to_le_bytes();
+        }
+    }
+    if crate::paging::copy_to_current_user(user_outputs, &bytes).is_err() {
+        return SYSCALL_ERROR;
+    }
+    count as u64
+}
+
 fn sys_compositor_info() -> u64 {
     if !display_authorized() {
         return SYSCALL_ERROR;

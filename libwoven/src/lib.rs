@@ -293,6 +293,7 @@ pub mod syscall {
     pub const AUDIO_INFO: u64 = 203;
     pub const AUDIO_PLAY: u64 = 204;
     pub const AUDIO_SET_VOLUME: u64 = 205;
+    pub const GRAPHICS_COMPOSITOR_OUTPUTS: u64 = 207;
     pub const MESSAGE_SEND: u64 = 11;
     pub const MESSAGE_RECEIVE: u64 = 12;
 
@@ -1841,6 +1842,28 @@ pub fn permission_revoke(handle: u64) -> Result<(), Error> {
 
 /// Store a bounded secret in the caller-owned volatile WovenVault and return a
 /// generation-tagged handle. The input is copied before the syscall returns.
+/// A monitor's area of the compositor surface.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Output {
+    pub x: u32,
+    pub y: u32,
+    pub width: u32,
+    pub height: u32,
+}
+
+/// The compositor's monitors, left to right, and how many there are. Same
+/// authority as the other compositor calls (DisplayIo and the lease).
+pub fn compositor_outputs() -> Result<([Output; 4], usize), Error> {
+    let mut bytes = [0u8; 64];
+    let count = check(unsafe { syscall::invoke(syscall::GRAPHICS_COMPOSITOR_OUTPUTS, bytes.as_mut_ptr() as u64, 0, 0) })?;
+    let mut outputs = [Output::default(); 4];
+    for (output, chunk) in outputs.iter_mut().zip(bytes.as_chunks::<16>().0) {
+        let field = |index: usize| u32::from_le_bytes([chunk[index], chunk[index + 1], chunk[index + 2], chunk[index + 3]]);
+        *output = Output { x: field(0), y: field(4), width: field(8), height: field(12) };
+    }
+    Ok((outputs, (count as usize).min(4)))
+}
+
 /// What WovenAudio plays: 48 kHz 16-bit stereo today.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct AudioInfo {

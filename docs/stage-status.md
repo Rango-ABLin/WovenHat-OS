@@ -1,5 +1,56 @@
 # Stage status
 
+## Presentation and repaint performance (2026-10-15)
+
+A fix to accepted Stage 19/20 behaviour, found by the Stage 20.7 fade gate.
+On 1 CPU the fade showed only 4–6 of its frames, because every frame
+over-drew. Three changes:
+- **WovenShell.** It repaints up to four separate dirty areas instead of
+  one bounding box. Window opening and notifications report their parts
+  separately.
+- **Damage.** Kernel `Damage` merges regions that form exactly a
+  rectangle, so tiled repaints no longer overflow the list into a bounding
+  box.
+- **Present.** It converts each row once and copies it to the physical
+  rows it covers; the virtio-gpu path does the same.
+
+**Results.**
+- A fading frame presents 52 k pixels instead of 167 k.
+- The window-open frame dropped from about 1.8 G to 60 M cycles.
+- 20.7 passed six consecutive 1-CPU runs.
+- 20.1–20.14, 17.1–19.14 and 13.12 production pass on 1/2/4 CPUs.
+
+See the
+[performance audit](audit-presentation-performance-2026-10-15.md).
+
+## Stage 20.14b — the desktop across two monitors (2026-10-15)
+
+Roadmap Stage 18.9, Multi-monitor Desktop.
+- **Compositor.** It drives a multi-head virtio-gpu, with heads side by
+  side, and presents each damaged region to the heads it covers.
+- **Syscall 207.** It reports the monitors.
+- **Shell.** The taskbar and panels stay on the primary monitor; the
+  wallpaper, pointer and window dragging span every monitor.
+
+**Fixes found by the gate.**
+- A drop on the second monitor no longer snaps back to the primary.
+- Windows on the second monitor are no longer clipped.
+- The scale toggle no longer resets the primary.
+
+**Evidence.**
+- **Gate `[S20.14B] desktop across monitors: PASSED`:** passes on 1/2/4
+  CPUs. Host captures of both heads match the kernel's rendering after a
+  window is dragged onto the second monitor.
+- **Negative controls:** all five failed the gate as intended.
+- **Regression:** 20.1–20.14a, 17.1–19.14 and the 13.12 production boot
+  pass on 1/2/4 CPUs.
+
+See the
+[Stage 20.14b audit](audit-stage20-14b-desktop-monitors-2026-10-15.md).
+
+**Stage 18 is complete in software.** Roadmap 18.1–18.9 are Stages 20.1
+to 20.14b.
+
 ## Stage 20.14a — two monitors through virtio-gpu (2026-10-15)
 
 Roadmap Stage 18.9, first part.
