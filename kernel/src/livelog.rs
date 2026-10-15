@@ -134,7 +134,13 @@ fn open(disk: &mut xhci::UsbDisk) -> Result<Log, Error> {
             let volume = fat32::mount(&mut view).ok()?;
             let mut sector = [0u8; SECTOR_SIZE];
             view.read_sector(0, &mut sector).ok()?;
-            (&sector[71..82] == LABEL).then_some((partition, volume))
+            // The label is in the boot sector, or (as Windows' format
+            // writes it) only in the root directory's volume-label entry.
+            let mut labelled = &sector[71..82] == LABEL;
+            if !labelled {
+                labelled = root_label(&mut view, volume) == Some(*LABEL);
+            }
+            labelled.then_some((partition, volume))
         })
         .ok_or(Error::NoLogPartition)?;
     let mut view = partition::PartitionDevice::new(&mut *disk, partition).map_err(|_| Error::NoLogPartition)?;
@@ -184,6 +190,25 @@ fn open(disk: &mut xhci::UsbDisk) -> Result<Log, Error> {
         issues: Vec::new(),
         flushes: 0,
     })
+}
+
+/// The volume-label entry in the first cluster of the root directory.
+fn root_label(device: &mut impl BlockDevice, volume: fat32::Volume) -> Option<[u8; 11]> {
+    let first = volume.cluster_lba(volume.root_cluster).ok()?;
+    let mut sector = [0u8; SECTOR_SIZE];
+    for index in 0..u64::from(volume.sectors_per_cluster) {
+        device.read_sector(first + index, &mut sector).ok()?;
+        for entry in sector.as_chunks::<32>().0 {
+            match entry[0] {
+                0 => return None,
+                0xe5 => continue,
+                // A volume label, not a long-name record (0x0f).
+                _ if entry[11] & 0x3f == 0x08 => return entry[..11].try_into().ok(),
+                _ => {}
+            }
+        }
+    }
+    None
 }
 
 /// Write the summary and every log byte not yet on the stick. Each pass

@@ -11,6 +11,9 @@ controller. Modes:
               flush period longer, then stops it
   unlabelled  as production, but the FAT32 partition is labelled NO NAME:
               nothing on the stick may change
+  windows-label  as production, with NO NAME in the boot sector and the
+              WOVENLOG label only in the root directory, as Windows' format
+              writes it: the log must still be kept
 
 The harness then reads LOGS/BOOT0001.TXT back from the image with its own
 FAT32 reader and checks its summary and contents, and requires every byte
@@ -39,7 +42,7 @@ EFI_SYSTEM = bytes([0x28, 0x73, 0x2a, 0xc1, 0x1f, 0xf8, 0xd2, 0x11, 0xba, 0x4b, 
 BASIC_DATA = bytes([0xa2, 0xa0, 0xd0, 0xeb, 0xe5, 0xb9, 0x33, 0x44, 0x87, 0xc0, 0x68, 0xb6, 0xb7, 0x26, 0x99, 0xc7])
 
 
-def fat32_volume(sectors, label):
+def fat32_volume(sectors, label, root_label=None):
     """A blank FAT32 volume of `sectors` 512-byte sectors, one per cluster."""
     reserved = 32
     clusters_guess = sectors
@@ -75,10 +78,16 @@ def fat32_volume(sectors, label):
     struct.pack_into('<I', info, 508, 0xAA550000)
     fat = bytearray(SECTOR)
     struct.pack_into('<III', fat, 0, 0x0FFFFFF8, 0xFFFFFFFF, 0x0FFFFFFF)
-    return [(0, boot), (1, info), (6, boot), (7, info), (reserved, fat), (reserved + fat_sectors, fat)]
+    blocks = [(0, boot), (1, info), (6, boot), (7, info), (reserved, fat), (reserved + fat_sectors, fat)]
+    if root_label:
+        root = bytearray(SECTOR)
+        root[0:11] = root_label
+        root[11] = 0x08
+        blocks.append((first_data, root))
+    return blocks
 
 
-def gpt_disk(path, label):
+def gpt_disk(path, label, root_label=None):
     disk = bytearray(DISK_SECTORS * SECTOR)
     # Protective MBR.
     mbr = bytearray(SECTOR)
@@ -107,7 +116,7 @@ def gpt_disk(path, label):
     # The EFI partition: recognisable bytes that must survive untouched.
     for lba in range(ESP_START, ESP_START + ESP_SECTORS):
         disk[lba * SECTOR:lba * SECTOR + 16] = b'EFI-PART-%07d' % lba
-    for lba, block in fat32_volume(LOG_SECTORS, label):
+    for lba, block in fat32_volume(LOG_SECTORS, label, root_label):
         start = (LOG_START + lba) * SECTOR
         disk[start:start + SECTOR] = block
     path.write_bytes(disk)
@@ -154,7 +163,7 @@ class Fat32:
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument('--mode', choices=('test', 'production', 'unlabelled'), default='test')
+    parser.add_argument('--mode', choices=('test', 'production', 'unlabelled', 'windows-label'), default='test')
     parser.add_argument('--cpus', type=int, choices=(1, 2, 4), default=1)
     parser.add_argument('--qemu', default=shutil.which('qemu-system-x86_64') or r'C:\Program Files\qemu\qemu-system-x86_64.exe')
     parser.add_argument('--firmware', type=Path)
@@ -177,7 +186,10 @@ def main():
         print(build.stderr, file=sys.stderr)
         return 1
     stick = out / 'stick.img'
-    gpt_disk(stick, b'NO NAME    ' if args.mode == 'unlabelled' else b'WOVENLOG   ')
+    if args.mode == 'windows-label':
+        gpt_disk(stick, b'NO NAME    ', b'WOVENLOG   ')
+    else:
+        gpt_disk(stick, b'NO NAME    ' if args.mode == 'unlabelled' else b'WOVENLOG   ')
     original = stick.read_bytes()
     # The firmware gets its own variable store, so it never writes NvVars to
     # a FAT volume on the stick.
