@@ -331,19 +331,42 @@ the registry is transitioned under the scheduler lock, while running targets
 carry the request through the existing post-switch finalizer. Both paths wake
 the single join waiter and retain the generation-tagged record until join
 reclaims the private mappings. The address space remains owned by the process
-until its parent reaps the process. Shared libraries, symbol resolution,
-dynamic TLS, and physical qualification remain outside this bounded increment.
+until its parent reaps the process. Process exit now retires unjoined sibling
+threads, defers address-space destruction until all scheduler hand-offs are
+complete, and reclaims generation-tagged thread records only after the parent
+wait path releases the process-table lock. Shared libraries, symbol
+resolution, dynamic TLS, and physical qualification remain outside this
+bounded increment.
 
-## Stage 11.5 bounded symbol relocation (2026-10-14)
+## Stage 11.5 bounded symbol relocation (2026-10-14; scope groundwork 2026-10-15)
 
 `elf::DynamicImage` validates a SysV hash table, dynamic symbol table, and
 string table within bounded file-backed load segments. `userspace::load_elf`
 applies `R_X86_64_RELATIVE` and locally defined `R_X86_64_64`,
 `R_X86_64_GLOB_DAT`, and `R_X86_64_JUMP_SLOT` entries before W^X/RELRO
-finalization. Undefined symbols, `DT_NEEDED`, legacy REL/PLT tables, and
-cross-image resolution fail closed. This is a prerequisite for a dynamic
-linker, not shared-library support; dependency mapping, versioning, lazy
-binding, and dynamic TLS are still unimplemented.
+finalization. `elf::SymbolScope` now provides a bounded, immutable main-image-first
+scope for up to four exact-name direct dependencies and defined global-symbol
+lookup. It is tested as a metadata/resolution contract, not yet wired to
+mapping or relocation. Undefined symbols without that scope, `DT_NEEDED`,
+legacy REL/PLT tables, and cross-image loading still fail closed. This is a
+prerequisite for a dynamic linker, not shared-library support; dependency
+mapping, versioning, lazy binding, dynamic TLS and ordered shared-image
+teardown are still unimplemented. See
+`audit-stage11-symbol-scope-2026-10-15.md`.
+
+The symbol resolver and the production loader now share
+`Image::defined_symbol_value`: ELF symbol values receive the image load bias
+before validation against relocated segments, and the entire declared symbol
+range must fit. Local relocation can reference private definitions; scope
+exports require global binding, default/protected visibility and ordinary
+NOTYPE/OBJECT/FUNC semantics. Undefined, TLS, IFUNC and reserved section values
+cannot become ordinary relocation addresses. Dependency scope validation
+preserves `DT_NEEDED` order, and resolution requires a complete validated scope.
+Parser-backed regression fixtures live in `tests/elf_scope.rs`.
+
+Debug builds optimize the `sha2` dependency (`profile.dev.package.sha2`) so
+hashing the complete debug kernel ELF does not dominate emulated boot. Full
+kernel measurement and the SHA known-answer check remain enabled.
 
 ## Stage 13.2 PCI power-state ownership (2026-10-13)
 

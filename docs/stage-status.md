@@ -30,6 +30,17 @@ Regression passes for 13.3–13.6, 13.12–13.14, 13.16, storage, 20.1,
 See the
 [audit](audit-stage13-17-to-19-live-hardware-testing-2026-10-15.md).
 
+## Stage 1–19 production closure review — 2026-10-15
+
+The current synchronized branch has extensive bounded software/QEMU coverage,
+but Stages 1–19 are **not collectively production-ready**. The exact closure
+decision and remaining blockers are recorded in the
+[Stage 1–19 closure gate](stage1-19-closure-gate.md). In particular, shared
+libraries/dynamic TLS, native hardware and power-loss qualification, firmware
+security provisioning, persistent update rollback, and several driver/service
+boundaries remain open. The read-only host preflight found two USB disks but was
+not elevated and performed no physical test.
+
 ## Presentation and repaint performance (2026-10-15)
 
 A fix to accepted Stage 19/20 behaviour, found by the Stage 20.7 fade gate.
@@ -2886,6 +2897,13 @@ focused 1/2/4-CPU QEMU gate, host tests, and warning-denying Clippy passed;
 see the scheduler-thread audit. Process-wide teardown, shared libraries,
 symbol resolution, dynamic TLS, and hardware qualification remain open.
 
+The 2026-10-15 teardown follow-up closes the process-wide scheduler lifecycle
+for unjoined threads: process exit retires ready/blocked siblings, running
+siblings take the thread-safe termination path, and the parent wait defers
+address-space destruction until all sibling hand-offs complete. The exact
+1/2/4-CPU gate now exercises create/exit/join, cancel/join, and process exit
+with an unjoined sibling.
+
 ## Stages 11.3–11.5 — accepted on 2026-09-16
 
 Structured notifications, the `libwoven` userspace API boundary, and hardened
@@ -2925,6 +2943,21 @@ applied before W^X and RELRO finalization. The inherited 1/2/4-CPU Stage
 relocation self-test. Shared-library dependency mapping, cross-image symbol
 resolution, versioning, lazy binding, and dynamic TLS remain fail-closed. See
 the [dynamic relocation audit](audit-stage11-dynamic-relocations-2026-10-14.md).
+
+The 2026-10-15 scope groundwork adds an immutable, bounded exact-name
+cross-image symbol-scope contract with duplicate/capacity/unknown-name
+negative checks. It is not yet connected to dependency mapping or relocation;
+the loader remains fail-closed for `DT_NEEDED`. Neighboring Stage 11.3/11.4
+regression matrices pass, while the final 11.5 2/4-CPU rerun remains pending
+after QEMU contention in the initial report; those final reruns subsequently
+passed as recorded in the [symbol-scope audit](audit-stage11-symbol-scope-2026-10-15.md).
+
+The symbol-scope review found ASLR address-validation, export-visibility,
+dependency-order and dependency-index defects that the zero-bias fixture had
+missed. The production local-relocation path now shares the corrected address
+validation with scope lookup. Parser-backed host regressions cover the failing
+cases, private versus exported symbols, overflow and segment bounds. Full
+shared-library mapping and teardown remain open.
 
 ## Stage 12.1 — accepted on 2026-09-16
 

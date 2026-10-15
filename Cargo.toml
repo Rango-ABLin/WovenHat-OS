@@ -107,6 +107,12 @@ stage1-5-test = ["qemu-test", "kernel/stage1-5-test"]
 [profile.dev]
 panic = "abort"
 
+# Boot measurement hashes the complete kernel ELF before device/task startup.
+# Debug software SHA-256 otherwise dominates TCG boot time as debug ELF grows.
+# Preserve measurement coverage and crypto checks with the normal gate bounds.
+[profile.dev.package.sha2]
+opt-level = 3
+
 [package]
 name = "wovenhat-os"
 version = "0.8.0"

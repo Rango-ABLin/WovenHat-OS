@@ -74,9 +74,9 @@ qualification of Wi-Fi and Bluetooth, and of the native controllers.
 - Presentation and repaint performance: shell dirty areas, exact damage
   coalescing, row-wise present (see its audit). Touches `display.rs`,
   `compositor.rs` and the shell.
-- `scripts/write-live-usb.ps1`: writes the release-validated image to the
-  identified 8 GB VendorCo stick (serial 5474001281346643368) with
-  read-back verification. The stick now holds release image `408696e4…`.
+- `scripts/write-live-usb.ps1`: available for an explicitly authorized,
+  elevated live-media test. It has not been run by Codex in this checkout;
+  no USB media write or read-back claim is accepted here.
 
 - Stages 13.17–13.19, live hardware testing.
   - **13.17:** root devices are writable only with a WOVENHAT or WOVENLOG
@@ -94,8 +94,29 @@ qualification of Wi-Fi and Bluetooth, and of the native controllers.
 **In progress (Claude Code):** a live test of the stick on the user's
 second machine, then fixes from the logs it brings back.
 
+**Hardware boundary:** live hardware testing is not accepted from this
+checkout. The current host preflight is read-only and non-elevated; it found
+two non-boot USB disks, but no disk was written by Codex. Any USB mass-storage
+or power-loss test needs an explicitly selected device, elevated execution,
+and a retained report before it can close a production gap.
+
 
 ## Codex: owned work
+
+**Stage 11.5 review correction (2026-10-15):** ASLR-aware symbol addresses,
+export visibility/types, full symbol bounds and dependency order/index checks
+now have eight parser-backed host regressions. The production local relocation
+path shares the corrected resolver. Stage 11.3/11.4/11.5 and software-measurement
+15.6 passed on 1/2/4 CPUs. A QMP timeout snapshot located CPU 0 inside debug SHA
+compression; `profile.dev.package.sha2` now optimizes that dependency while
+retaining complete measurement and fixed deadlines. See the symbol-scope audit.
+Full shared-library mapping/teardown and the full release-chain rerun remain
+open. The previously packaged `0.8.0` image predates this correction.
+
+Claude's `C:\WovenHat-OS-wt` currently has USB mass-storage and boot-log commits
+on `stage20-14` (`7c608631` observed), plus an uncommitted live-USB script edit.
+Codex preserved that work and waited on live QEMU processes between gates;
+those new Stage 13 commits still require integration review on the shared branch.
 
 Stage 19 system applications (WovenCalculator, WovenTerminal, WovenFiles,
 WovenEditor, …), application signing and packaging, and the release
@@ -116,3 +137,21 @@ as `3f1b5e3`. Host check/Clippy/tests, freestanding Stage 11.2 Clippy, the
 1/2/4-CPU focused gate, and the full release chain pass. The post-change
 validated package has UEFI image SHA-256
 `a1e565aae98ccbc59be4dfee49128701a7b55e8fa81166a4d64da2caf79687c6`.
+
+The process-exit follow-up is committed as `1577a59`: unjoined scheduler-backed
+threads are retired safely, address-space destruction is deferred until parent
+reaping, and the termination-request path distinguishes thread cancellation
+from process signals. Its final 1/2/4-CPU gate, host tests, and full release
+chain pass.
+
+Claude’s Stage 20.14b multi-monitor work is synchronized into the shared branch
+at merge commit `f8f847ca`. The synchronized branch is clean and matches
+`origin/phase2/userspace-platform`. The current validated package is `0.8.0`
+with UEFI image SHA-256
+`6195a4721219a80b4e7775531a3657c7ce7e50a78648da53ca0b31b53ae03544`.
+
+The 2026-10-15 Stage 1–19 closure review is recorded in
+`docs/stage1-19-closure-gate.md`. It remains blocked by explicit shared-library,
+hardware, recovery, firmware-security and service-boundary requirements; no
+agent may report the stages as collectively production-ready from QEMU markers
+alone.

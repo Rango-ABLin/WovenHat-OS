@@ -734,6 +734,7 @@ pub fn cancel_user_thread(raw_id: u64, exit_code: i32) -> Result<(), ThreadJoinE
     }
 
     let mut immediate_release = None;
+    let mut immediate_thread = None;
     let reschedule_cpu;
     {
         let mut scheduler = SCHEDULER.lock();
@@ -750,21 +751,11 @@ pub fn cancel_user_thread(raw_id: u64, exit_code: i32) -> Result<(), ThreadJoinE
         reschedule_cpu = scheduler.tasks[slot].cpu;
         match scheduler.tasks[slot].state {
             TaskState::Ready | TaskState::Blocked | TaskState::Sleeping => {
-                if !crate::thread::terminate(id, exit_code) {
-                    return Err(ThreadJoinError::Invalid);
-                }
                 scheduler.tasks[slot].state = TaskState::Dead;
                 scheduler.tasks[slot].name = "thread-canceled";
                 scheduler.tasks[slot].termination_signal = 0;
                 scheduler.task_count = scheduler.task_count.saturating_sub(1);
-                if let Some(waiter) = crate::thread::take_waiter(id) {
-                    let (found, cpu) = scheduler.signal_event_locked(TaskId::from_u64(waiter));
-                    if found {
-                        if let Some(cpu) = cpu {
-                            crate::smp::reschedule_cpu(cpu);
-                        }
-                    }
-                }
+                immediate_thread = Some(id);
                 immediate_release = Some(task_id);
             }
             TaskState::Running | TaskState::Switching => {}
@@ -773,6 +764,21 @@ pub fn cancel_user_thread(raw_id: u64, exit_code: i32) -> Result<(), ThreadJoinE
     }
     if let Some(task_id) = immediate_release {
         release_task_runtime_resources(task_id);
+    }
+    if let Some(thread_id) = immediate_thread {
+        if !crate::thread::terminate(thread_id, exit_code) {
+            return Err(ThreadJoinError::Invalid);
+        }
+        if let Some(waiter) = crate::thread::take_waiter(thread_id) {
+            let mut scheduler = SCHEDULER.lock();
+            let (found, cpu) = scheduler.signal_event_locked(TaskId::from_u64(waiter));
+            drop(scheduler);
+            if found {
+                if let Some(cpu) = cpu {
+                    crate::smp::reschedule_cpu(cpu);
+                }
+            }
+        }
     }
     let _ = crate::smp::reschedule_cpu(reschedule_cpu);
     Ok(())
@@ -2922,10 +2928,15 @@ pub fn exit_current_process(exit_code: i32) -> ! {
     crate::terminal::release_foreground(exiting_pid);
     crate::network::close_process_sockets(exiting_pid);
     x86_64::instructions::interrupts::disable();
-    let (context_switch_result, mut detached_files) = {
+    let mut retired_threads = [None; MAX_TASKS];
+    let mut retired_thread_count = 0;
+    let mut retired_tasks = [TaskId::from_u64(0); MAX_TASKS];
+    let mut retired_task_count = 0;
+    let (context_switch_result, mut detached_files, exiting_thread) = {
         let mut scheduler = SCHEDULER.lock();
         let slot = scheduler.current_slot[crate::smp::cpu_index()];
         let task_id = scheduler.tasks[slot].id;
+        let exiting_thread = scheduler.tasks[slot].thread_id;
         assert!(
             task_id != KERNEL_TASK_ID,
             "kernel task cannot exit as a process"
@@ -2948,11 +2959,49 @@ pub fn exit_current_process(exit_code: i32) -> ! {
         crate::user_graphics::release_owner(exiting_pid);
         // A compositor lease holder that exits hands the display back.
         crate::compositor::release_owner(exiting_pid);
-        // Reclaim all registry records before the process becomes a zombie;
-        // generation advancement invalidates handles held by the exiting task.
-        crate::thread::reap_owner(exiting_pid);
         crate::notifications::discard_recipient(exiting_pid);
 
+        // Retire every sibling before publishing the zombie.  The process
+        // address space must remain alive until these scheduler hand-offs
+        // finish; otherwise a sibling running on another CPU could return
+        // through a page table that the leader has already destroyed.
+        for slot in 0..scheduler.tasks.len() {
+            let (sibling_id, sibling_process, sibling_state, sibling_thread) = {
+                let sibling = &scheduler.tasks[slot];
+                (sibling.id, sibling.process_id.as_u64(), sibling.state, sibling.thread_id)
+            };
+            if sibling_id == task_id || sibling_process != exiting_pid {
+                continue;
+            }
+            match sibling_state {
+                TaskState::Ready | TaskState::Blocked | TaskState::Sleeping => {
+                    if let Some(thread_id) = sibling_thread {
+                        if retired_thread_count < retired_threads.len() {
+                            retired_threads[retired_thread_count] = Some(thread_id);
+                            retired_thread_count += 1;
+                        }
+                    }
+                    scheduler.tasks[slot].state = TaskState::Dead;
+                    scheduler.tasks[slot].name = "process-exit";
+                    scheduler.tasks[slot].termination_signal = 0;
+                    scheduler.tasks[slot].thread_id = None;
+                    scheduler.task_count = scheduler.task_count.saturating_sub(1);
+                    if retired_task_count < retired_tasks.len() {
+                        retired_tasks[retired_task_count] = sibling_id;
+                        retired_task_count += 1;
+                    }
+                }
+                TaskState::Running | TaskState::Switching => {
+                    if sibling_thread.is_some() {
+                        scheduler.tasks[slot].thread_exit_code = exit_code;
+                        scheduler.tasks[slot].termination_signal = u8::MAX;
+                    } else {
+                        scheduler.tasks[slot].termination_signal = 1;
+                    }
+                }
+                TaskState::Dead | TaskState::Empty => {}
+            }
+        }
         // Interrupts are already disabled here. Use the same process-table
         // guard as every other path so the lock's IRQ-safety contract is not
         // bypassed during process teardown. Lock order is SCHEDULER ->
@@ -2968,17 +3017,11 @@ pub fn exit_current_process(exit_code: i32) -> ! {
                 // Detach open files while PROCESS_TABLE is held, then release
                 // their VFS/pipe references after this guard is dropped.
                 detached_files = core::mem::take(&mut process.files);
-                let address_space = process.address_space.take();
-                let memory_mappings = if address_space.is_some() {
-                    let memory_mappings = core::mem::replace(
-                        &mut process.memory_mappings,
-                        [None; userspace::MAX_ANONYMOUS_MAPPINGS],
-                    );
-                    Some(memory_mappings)
-                } else {
-                    None
-                };
-                (address_space, memory_mappings)
+                // Keep the address space and mappings in the zombie until
+                // wait_process observes that every sibling is dead.  This is
+                // the ownership boundary that makes cross-CPU thread exit
+                // safe.
+                ((), ())
             });
 
         scheduler.tasks[slot].state = TaskState::Dead;
@@ -2986,33 +3029,36 @@ pub fn exit_current_process(exit_code: i32) -> ! {
         scheduler.task_count = scheduler.task_count.saturating_sub(1);
 
         (
-            address_space_result.and_then(|(address_space, memory_mappings)| {
-                address_space.map(|address_space| {
-                    (
-                        scheduler.prepare_switch(),
-                        address_space,
-                        memory_mappings.unwrap_or([None; userspace::MAX_ANONYMOUS_MAPPINGS]),
-                    )
-                })
-            }),
+            address_space_result.map(|_| scheduler.prepare_switch()),
             detached_files,
+            exiting_thread,
         )
     };
+    for sibling in retired_tasks.into_iter().take(retired_task_count) {
+        release_task_runtime_resources(sibling);
+    }
     release_file_table(&mut detached_files);
+    if let Some(thread_id) = exiting_thread {
+        let _ = crate::thread::terminate(thread_id, exit_code);
+        let _ = crate::thread::take_waiter(thread_id);
+    }
+    for thread_id in retired_threads.into_iter().take(retired_thread_count).flatten() {
+        let _ = crate::thread::terminate(thread_id, exit_code);
+        if let Some(waiter) = crate::thread::take_waiter(thread_id) {
+            let mut scheduler = SCHEDULER.lock();
+            let (found, cpu) = scheduler.signal_event_locked(TaskId::from_u64(waiter));
+            drop(scheduler);
+            if found {
+                if let Some(cpu) = cpu {
+                    crate::smp::reschedule_cpu(cpu);
+                }
+            }
+        }
+    }
 
-    if let Some((context_switch, address_space, memory_mappings)) = context_switch_result {
+    if let Some(context_switch) = context_switch_result {
         if let Some(context_switch) = context_switch {
             paging::switch_to(context_switch.next_address_space);
-            for mapping in memory_mappings.into_iter().flatten() {
-                assert!(
-                    userspace::unmap_anonymous(address_space, mapping),
-                    "failed to release exiting process mapping"
-                );
-            }
-            assert!(
-                userspace::destroy(address_space),
-                "failed to release exiting process address space"
-            );
             unsafe { switch_stacks(context_switch) };
         }
     } else {
@@ -3025,9 +3071,28 @@ pub fn exit_current_process(exit_code: i32) -> ! {
         x86_64::instructions::hlt();
     }
 }
+
+fn process_has_live_tasks(process_id: u64) -> bool {
+    let scheduler = SCHEDULER.lock();
+    scheduler.tasks.iter().any(|task| {
+        task.process_id.as_u64() == process_id
+            && matches!(
+                task.state,
+                TaskState::Ready
+                    | TaskState::Running
+                    | TaskState::Switching
+                    | TaskState::Blocked
+                    | TaskState::Sleeping
+            )
+    })
+}
+
 pub fn wait_process(child_id: u64) -> Result<i32, WaitError> {
     let parent = ProcessId(current_process_id());
     let child = ProcessId(child_id);
+    if process_has_live_tasks(child_id) {
+        return Err(WaitError::StillRunning);
+    }
     let (exit_code, deferred_space, mut detached_files) = {
         let mut processes = process_table_lock();
         let Some(slot) = processes.iter().position(
@@ -3052,6 +3117,9 @@ pub fn wait_process(child_id: u64) -> Result<i32, WaitError> {
         (exit_code, deferred_space, detached_files)
     };
 
+    // Reclaim generation-tagged thread records only after PROCESS_TABLE is
+    // released; the thread registry is lower-ranked than that table.
+    crate::thread::reap_owner(child_id);
     release_file_table(&mut detached_files);
     assert!(
         ipc::unregister(child.as_u64()).is_ok(),
@@ -5373,7 +5441,6 @@ fn complete_process_termination(
     // keeping them outside PROCESS_TABLE makes the global lock order explicit.
     crate::terminal::release_foreground(process_id.as_u64());
     crate::network::close_process_sockets(process_id.as_u64());
-    crate::thread::reap_owner(process_id.as_u64());
     crate::notifications::discard_recipient(process_id.as_u64());
     crate::completion_port::release_owner(process_id.as_u64());
     crate::async_events::release_owner(process_id.as_u64());
@@ -5406,15 +5473,18 @@ fn release_task_runtime_resources(task_id: TaskId) {
 /// SIGKILL)`), acknowledge it before returning to ring 3. Remote running tasks
 /// are retired by the scheduler hand-off path instead.
 pub fn honor_current_termination_request() {
-    let signal = {
+    let (signal, thread_exit_code, is_thread) = {
         let scheduler = SCHEDULER.lock();
         if scheduler.task_count == 0 {
-            0
+            (0, 0, false)
         } else {
-            scheduler.tasks[scheduler.current_slot[crate::smp::cpu_index()]].termination_signal
+            let task = &scheduler.tasks[scheduler.current_slot[crate::smp::cpu_index()]];
+            (task.termination_signal, task.thread_exit_code, task.thread_id.is_some())
         }
     };
-            if signal != 0 {
+    if signal == u8::MAX && is_thread {
+        exit_current_thread(thread_exit_code);
+    } else if signal != 0 {
         exit_current_process(128 + i32::from(signal));
     }
 }
