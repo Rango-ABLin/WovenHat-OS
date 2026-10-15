@@ -728,7 +728,7 @@ impl<D: BlockDevice> Volume<D> {
         }
         let (lba, offset) = inode_location(&self.super_block, number);
         let sector = self.read_block(lba)?;
-        Inode::decode(&sector[offset..offset + INODE_SIZE]).ok_or(Error::Corrupt)
+        self.checked_inode(&sector[offset..offset + INODE_SIZE])
     }
 
     fn inode_staged(&mut self, txn: &Transaction, number: u64) -> Result<Inode, Error> {
@@ -737,7 +737,31 @@ impl<D: BlockDevice> Volume<D> {
         }
         let (lba, offset) = inode_location(&self.super_block, number);
         let sector = self.read_block_staged(txn, lba)?;
-        Inode::decode(&sector[offset..offset + INODE_SIZE]).ok_or(Error::Corrupt)
+        self.checked_inode(&sector[offset..offset + INODE_SIZE])
+    }
+
+    /// Decode an inode, refusing one whose block pointers leave the data
+    /// region.
+    ///
+    /// The inode checksum detects bit rot, not a mis-written or crafted image.
+    /// Writes reuse an inode's existing blocks in place and unlink clears their
+    /// bitmap bits, so a pointer at the superblock, journal, bitmap or inode
+    /// table would let file data overwrite metadata or free a metadata block.
+    /// Free inodes are checked too, because a stale directory entry can still
+    /// reach one through `unlink`.
+    fn checked_inode(&self, raw: &[u8]) -> Result<Inode, Error> {
+        let node = Inode::decode(raw).ok_or(Error::Corrupt)?;
+        let sb = &self.super_block;
+        let in_data = |block: &u64| *block == 0 || (sb.data_start..sb.total_blocks).contains(block);
+        if !node.direct.iter().all(in_data) {
+            return Err(Error::Corrupt);
+        }
+        if node.is_used()
+            && (!matches!(node.kind, KIND_FILE | KIND_DIR) || node.size > MAX_FILE_SIZE as u64)
+        {
+            return Err(Error::Corrupt);
+        }
+        Ok(node)
     }
 
     fn stage_inode(

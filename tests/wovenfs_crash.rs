@@ -525,3 +525,73 @@ fn content_corruption_is_detected_on_read() {
         "a flipped data byte must fail the content checksum"
     );
 }
+
+fn test_fnv1a(bytes: &[u8]) -> u64 {
+    bytes.iter().fold(0xcbf2_9ce4_8422_2325, |hash, byte| {
+        (hash ^ u64::from(*byte)).wrapping_mul(0x0000_0100_0000_01b3)
+    })
+}
+
+/// Point `direct[slot]` of an on-disk inode at `target`, re-sealing the inode
+/// checksum so the damage is not caught by the checksum alone. This models a
+/// crafted or mis-written image rather than random bit rot.
+fn redirect_inode_block(image: &CrashDisk, inode: u64, slot: usize, target: u64) {
+    let inode_start = {
+        let volume = Volume::mount(image.clone()).expect("mount");
+        volume.super_block().inode_start
+    };
+    let index = inode - 1;
+    let lba = (inode_start + index / 4) as usize;
+    let offset = (index % 4) as usize * 128;
+    let mut sectors = image.image.borrow_mut();
+    let raw = &mut sectors[lba][offset..offset + 128];
+    raw[40 + slot * 8..48 + slot * 8].copy_from_slice(&target.to_le_bytes());
+    let checksum = test_fnv1a(&raw[..120]);
+    raw[120..128].copy_from_slice(&checksum.to_le_bytes());
+}
+
+#[test]
+fn inode_block_pointers_outside_the_data_region_are_refused() {
+    let base = formatted();
+    let inode = {
+        let mut volume = Volume::mount(base.clone()).expect("mount");
+        volume
+            .create_file(1, "p.bin", 0o644, &[7u8; 600], 1)
+            .expect("create_file")
+    };
+    let sb = *Volume::mount(base.clone()).expect("mount").super_block();
+    let targets = [
+        ("superblock slot 1", 1),
+        ("journal", sb.journal_start),
+        ("bitmap", sb.bitmap_start),
+        ("inode table", sb.inode_start),
+        ("past the end", sb.total_blocks),
+    ];
+    for (region, target) in targets {
+        let image = base.fork(None);
+        redirect_inode_block(&image, inode, 1, target);
+        let before = image.sectors();
+
+        let mut volume = Volume::mount(image.clone()).expect("mount");
+        let mut out = vec![0u8; MAX_FILE_SIZE];
+        assert_eq!(
+            volume.read_file(inode, &mut out),
+            Err(Error::Corrupt),
+            "{region}: read must fail closed"
+        );
+        assert_eq!(
+            volume.write_file(inode, &[9u8; 1500], 2),
+            Err(Error::Corrupt),
+            "{region}: write must not reuse a metadata block"
+        );
+        assert_eq!(
+            volume.unlink(1, "p.bin", 3),
+            Err(Error::Corrupt),
+            "{region}: unlink must not free a metadata block"
+        );
+        assert!(
+            image.sectors() == before,
+            "{region}: a refused operation must not modify the image"
+        );
+    }
+}

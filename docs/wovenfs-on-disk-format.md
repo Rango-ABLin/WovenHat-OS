@@ -67,6 +67,14 @@ cannot destroy the filesystem: the other slot remains intact and older.
 Eight direct blocks give a 4 KiB maximum file size. Bounded by construction, in
 keeping with the rest of the kernel; indirect blocks are a later extension.
 
+A direct pointer of 0 means "no block". Every other pointer must lie in
+`data_start .. total_blocks`. An inode that breaks this, or a used inode whose
+`kind` is not 1 or 2 or whose `size` is over 4 KiB, reads as corrupt even when
+its checksum matches. This holds for free inodes too. The checksum catches bit
+rot, not a mis-written or crafted image. Without the check, a write would put
+file data over the journal or metadata, and an unlink would free a metadata
+block.
+
 ### Directory entry (64 bytes, 8 per block)
 
 | Offset | Size | Field |
