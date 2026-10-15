@@ -29,7 +29,7 @@ Missing evidence is **blocked**, not inferred from an older green run.
 | 1–5 | Software gates and bounded storage transactions pass | Native storage/DMA matrix, arbitrary-size/full-volume rollback, torn-write and unclean-shutdown qualification |
 | 6 | Bounded SMP, TLB, hotplug and lock foundations pass in QEMU | General multicore stress, NUMA/high-APIC-ID and physical hotplug qualification, broader priority-inheritance/low-memory evidence |
 | 7–10 | Core isolation, IPC, capabilities, networking, completion and timer foundations pass bounded gates | Complete signals, dynamic userspace runtime, broader driver/hardware qualification and full cancellation stress |
-| 11 | Processes, scheduler-backed threads, join/cancel/teardown, ASLR, W^X, RELRO, static initial-exec TLS and self-contained relocations pass | Shared-library namespace/mapping, cross-image symbol resolution, dynamic TLS, and physical qualification |
+| 11 | Processes, scheduler-backed threads, join/cancel/teardown, ASLR, W^X, RELRO, static initial-exec TLS, and bounded signed shared-object graph loading with cross-image relocation | General shared-library/toolchain interoperability, library TLS, REL/PLT tables, constructors/destructors, versioning, and physical qualification |
 | 12 | Typed VFS, metadata, crypto, snapshots and mount boundaries pass bounded gates | Native WovenFS as the mounted system filesystem, durable crash/power-loss evidence, full rollback and persistent key provisioning |
 | 13 | QEMU driver/input/storage/audio/HID foundations pass their accepted gates | Native PCIe/NVMe/AHCI/xHCI/HDA/Wi-Fi/Bluetooth/input qualification, hotplug and fault recovery |
 | 14 | Bounded IPv4/IPv6, DHCP/DNS, sockets and firewall paths pass QEMU gates | Live IPv6 socket lifecycle, routing/policy breadth and physical NIC/radio qualification |
@@ -51,15 +51,23 @@ test session.
 
 ## Required next implementation gates
 
-1. Design and implement the bounded `/lib` dependency namespace, separate
-   W^X mappings, exact-name cross-image resolution, shared-image teardown and
-   acceptance fixtures. Keep versioned symbols, lazy binding and dynamic TLS
-   fail-closed until separately specified.
-2. Close the native WovenFS mount/write-through policy and recovery evidence
+1. Correct Stage 11.2 thread-generation exhaustion: saturated free slots are
+   currently reissued. The copied-source host reproducer fails all three
+   retirement paths; integration and the inherited runtime gate remain open.
+2. Finish Stage 11 loader interoperability and TLS above the bounded signed
+   `/lib` graph implementation. Legacy REL/PLT tables, constructors/destructors,
+   versioned/weak symbols, dynamic library TLS and broader toolchain/stress
+   qualification remain open. A real Rust/LLD probe also exposes null
+   `DT_DEBUG` rejection and an incompatible main-thread TLS/TCB layout;
+   compiler TLS execution and fresh child-thread template initialization
+   are unaccepted even though synthetic TLS metadata tests pass.
+   See the shared-library audit for the exact
+   implemented graph, permission and teardown contract.
+3. Close the native WovenFS mount/write-through policy and recovery evidence
    on a deliberately selected non-boot device.
-3. Add service-owned capability provisioning and signed update/recovery
+4. Add service-owned capability provisioning and signed update/recovery
    rollback evidence before calling the desktop/application stages complete.
-4. Re-run the inherited 1/2/4-CPU matrix and release chain after each accepted
+5. Re-run the inherited 1/2/4-CPU matrix and release chain after each accepted
    increment; commit each accepted increment separately.
 
 This ledger does not mark any stage complete merely because a bounded gate

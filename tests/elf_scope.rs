@@ -177,6 +177,70 @@ fn needed_index_stops_at_declared_count() {
 }
 
 #[test]
+fn shared_objects_have_a_distinct_entry_and_type_contract() {
+    let mut bytes = fixture(&[]);
+    put64(&mut bytes, 24, 0);
+    assert!(elf::parse(&bytes).is_err());
+    assert!(elf::parse_shared(&bytes).is_ok());
+    put16(&mut bytes, 16, 2);
+    assert!(elf::parse_shared(&bytes).is_err());
+}
+
+#[test]
+fn transitive_cycles_share_one_bounded_namespace() {
+    let main_bytes = fixture(&[8]);
+    let a_bytes = fixture(&[13]);
+    let b_bytes = fixture(&[8]);
+    let main = image(&main_bytes);
+    let a = image(&a_bytes);
+    let b = image(&b_bytes);
+    let mut scope = elf::SymbolScope::new(&main, &main_bytes);
+    assert!(scope.add_dependency(b"a.so", &a, &a_bytes).is_ok());
+    assert!(scope.validate_dependencies().is_err());
+    assert!(scope.add_dependency(b"b.so", &b, &b_bytes).is_ok());
+    assert!(scope.validate_dependencies().is_ok());
+    assert_eq!(scope.resolve(b"export"), Some(BASE + 0x20));
+}
+
+#[test]
+fn undefined_imports_use_scope_and_protected_definitions_bind_locally() {
+    let mut main_bytes = fixture(&[8]);
+    put16(&mut main_bytes, SYMBOL + 6, 0);
+    let main = image(&main_bytes);
+    let mut bytes = fixture(&[]);
+    bytes[SYMBOL + 5] = 3;
+    let library = image(&bytes).relocated(0x8000).unwrap();
+    let mut scope = elf::SymbolScope::new(&main, &main_bytes);
+    assert!(scope.add_dependency(b"a.so", &library, &bytes).is_ok());
+    assert_eq!(
+        main.relocation_symbol_value(&main_bytes, 1, &scope),
+        Some(BASE + 0x8020)
+    );
+    assert_eq!(
+        library.relocation_symbol_value(&bytes, 1, &scope),
+        Some(BASE + 0x8020)
+    );
+}
+
+#[test]
+fn versioned_metadata_is_rejected_before_unversioned_resolution() {
+    for tag in [
+        0x6fff_fff0,
+        0x6fff_fffc,
+        0x6fff_fffd,
+        0x6fff_fffe,
+        0x6fff_ffff,
+    ] {
+        let mut bytes = fixture(&[]);
+        put64(&mut bytes, DYNAMIC + 5 * 16, tag);
+        put64(&mut bytes, DYNAMIC + 5 * 16 + 8, BASE + 0x300);
+        put64(&mut bytes, 152, 7 * 16);
+        put64(&mut bytes, 160, 7 * 16);
+        assert!(elf::parse(&bytes).is_err());
+    }
+}
+
+#[test]
 fn dependency_order_and_duplicate_needed_are_checked() {
     let main_bytes = fixture(&[8, 13]);
     let main = image(&main_bytes);
@@ -208,4 +272,84 @@ fn dependency_order_and_duplicate_needed_are_checked() {
             .is_ok()
     );
     assert!(scope.validate_dependencies().is_err());
+}
+
+#[test]
+fn every_truncated_file_backed_fixture_is_rejected() {
+    let bytes = fixture(&[8, 13]);
+    assert!(elf::parse(&bytes).is_ok());
+    assert!(elf::parse_shared(&bytes).is_ok());
+    for length in 0..bytes.len() {
+        assert!(
+            elf::parse(&bytes[..length]).is_err(),
+            "main prefix {length}"
+        );
+        assert!(
+            elf::parse_shared(&bytes[..length]).is_err(),
+            "shared prefix {length}"
+        );
+    }
+}
+
+#[test]
+fn overflowing_file_and_dynamic_metadata_is_rejected() {
+    for offset in [
+        32,
+        72,
+        80,
+        96,
+        104,
+        128,
+        136,
+        152,
+        DYNAMIC + 8,
+        DYNAMIC + 24,
+        DYNAMIC + 40,
+        DYNAMIC + 56,
+        DYNAMIC + 72,
+        DYNAMIC + 88,
+    ] {
+        let mut bytes = fixture(&[8]);
+        put64(&mut bytes, offset, u64::MAX);
+        assert!(elf::parse(&bytes).is_err(), "main metadata at {offset:#x}");
+        assert!(
+            elf::parse_shared(&bytes).is_err(),
+            "shared metadata at {offset:#x}"
+        );
+    }
+}
+
+#[test]
+fn deterministic_metadata_mutations_never_panic_in_parser_or_resolver() {
+    let original = fixture(&[8, 13]);
+    let offsets = (0..176)
+        .chain(DYNAMIC..DYNAMIC + 8 * 16)
+        .chain(SYMBOL..SYMBOL + 24)
+        .chain(0x1280..0x1290)
+        .chain(0x1300..0x1312);
+    for offset in offsets {
+        for mask in [1, 0x80, 0xff] {
+            let mut bytes = original.clone();
+            bytes[offset] ^= mask;
+            let result = std::panic::catch_unwind(|| {
+                for image in [elf::parse(&bytes), elf::parse_shared(&bytes)]
+                    .into_iter()
+                    .flatten()
+                {
+                    for index in [0, 1, 4, usize::MAX] {
+                        let _ = image.needed_name(&bytes, index);
+                        let _ = image.defined_symbol_value(&bytes, index);
+                    }
+                    let _ = image.soname(&bytes);
+                    let _ = image.defined_global_symbol(&bytes, b"export");
+                    let scope = elf::SymbolScope::new(&image, &bytes);
+                    let _ = scope.validate_dependencies();
+                    let _ = scope.resolve(b"export");
+                    let _ = image.relocation_symbol_value(&bytes, usize::MAX, &scope);
+                    let _ = image.relocated(0x1000);
+                }
+            });
+            assert!(result.is_ok(), "mutation at {offset:#x}, XOR {mask:#x}");
+        }
+    }
 }

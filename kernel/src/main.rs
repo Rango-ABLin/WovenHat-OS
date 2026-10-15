@@ -3989,7 +3989,7 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     }
     #[cfg(feature = "stage11-5-test")]
     {
-        if !userspace::elf_loader_self_test() {
+        if !userspace::elf_loader_self_test() || !userspace::shared_library_self_test() {
             serial::write_line(format_args!("[S11.5] loader hardening: FAILED"));
             qemu_test_exit_failure();
         }

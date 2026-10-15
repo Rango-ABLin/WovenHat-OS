@@ -5,7 +5,9 @@ global_asm!(include_str!("stage10_8.S"));
 #[cfg(feature = "stage10-9-test")]
 global_asm!(include_str!("stage10_9.S"));
 
-use crate::config::MAX_ELF_SEGMENTS;
+mod linker;
+
+const MAX_IMAGE_MAPPINGS: usize = crate::config::MAX_ELF_SEGMENTS * crate::elf::MAX_SCOPE_IMAGES;
 use crate::paging;
 
 pub use crate::config::MAX_ANONYMOUS_MAPPINGS;
@@ -4409,29 +4411,47 @@ struct LazyFile {
 }
 #[derive(Clone, Copy)]
 struct UserMapping {
-    start: u64,
-    size: usize,
+    // Image windows are page-aligned and bounded by the loader. Store page
+    // offsets/counts instead of repeating full 64-bit addresses in every copy
+    // of process metadata (notably the unoptimized fork syscall path).
+    start_page: u32,
+    page_count: u16,
     writable: bool,
     executable: bool,
 }
 
 impl UserMapping {
     const EMPTY: Self = Self {
-        start: 0,
-        size: 0,
+        start_page: 0,
+        page_count: 0,
         writable: false,
         executable: false,
     };
+
+    fn new(start: u64, size: usize, writable: bool, executable: bool) -> Option<Self> {
+        if !start.is_multiple_of(4096) || size == 0 || !size.is_multiple_of(4096) { return None; }
+        Some(Self {
+            start_page: u32::try_from(start.checked_sub(USER_REGION_START)? / 4096).ok()?,
+            page_count: u16::try_from(size / 4096).ok()?,
+            writable, executable,
+        })
+    }
+
+    fn start(self) -> u64 { USER_REGION_START + u64::from(self.start_page) * 4096 }
+    fn size(self) -> usize { usize::from(self.page_count) * 4096 }
 }
+
+const _: () = assert!(core::mem::size_of::<UserMapping>() == 8);
 
 #[derive(Clone, Copy)]
 pub struct AddressSpace {
     paging: paging::AddressSpace,
     stack_base: u64,
     mmap_base: u64,
-    mappings: [UserMapping; MAX_ELF_SEGMENTS],
+    mappings: [UserMapping; MAX_IMAGE_MAPPINGS],
     mapping_count: usize,
     relro: Option<(u64, usize)>,
+    library_relro: [Option<(u64, usize)>; crate::elf::MAX_NEEDED_LIBRARIES],
     tls: Option<(u64, usize)>,
 }
 
@@ -4452,8 +4472,8 @@ impl AddressSpace {
     pub fn contains_executable(self, address: u64) -> bool {
         self.mappings[..self.mapping_count].iter().any(|mapping| {
             mapping.executable
-                && address >= mapping.start
-                && address < mapping.start.saturating_add(mapping.size as u64)
+                && address >= mapping.start()
+                && address < mapping.start().saturating_add(mapping.size() as u64)
         })
     }
 
@@ -4474,12 +4494,12 @@ impl AddressSpace {
         }
         for mapping in &self.mappings[..self.mapping_count] {
             if mapping.writable
-                && address >= mapping.start
-                && address < mapping.start + mapping.size as u64
+                && address >= mapping.start()
+                && address < mapping.start() + mapping.size() as u64
             {
                 if self
-                    .relro
-                    .is_some_and(|(start, size)| address >= start && address < start + size as u64)
+                    .relro.into_iter().chain(self.library_relro.into_iter().flatten())
+                    .any(|(start, size)| address >= start && address < start + size as u64)
                 {
                     return false;
                 }
@@ -5163,363 +5183,15 @@ pub fn load_elf_with_argv_verified(bytes: &[u8], args: &[&str]) -> Option<UserPr
 }
 
 pub fn load_elf(bytes: &[u8]) -> Option<UserProgram> {
-    let image = crate::elf::parse(bytes)
-        .ok()?
-        .relocated(aslr_image_delta())?;
-    // Dependency names are parsed and bounds-checked by the ELF layer, but
-    // this loader still has no dependency namespace or cross-image teardown.
-    // Refuse them explicitly until that authority is implemented.
-    if image.dynamic().is_some_and(|dynamic| dynamic.needed_count != 0) {
-        return None;
-    }
-    let mmap_base = aslr_mmap_base()?;
-    let page_table = paging::create_user_address_space(image.entry)?;
-    let mut mappings = [UserMapping::EMPTY; MAX_ELF_SEGMENTS];
-    let mut mapping_count = 0;
-
-    let stack_base = aslr_stack_base()?;
-    let relro = image.relro();
-    let tls_image = image.tls();
-    let stack = UserStack::new(stack_base);
-    let mmap_end = mmap_base.checked_add(MAX_ANONYMOUS_MAPPINGS as u64 * USER_MMAP_STRIDE)?;
-    for segment in image.segments() {
-        let mapping_end = segment
-            .mapping_start
-            .checked_add(segment.mapping_size as u64)?;
-        if segment.mapping_start < USER_REGION_START
-            || mapping_end > stack.guard_base
-            || (segment.mapping_start < mmap_end && mmap_base < mapping_end)
-        {
-            release_partial(page_table, &mappings[..mapping_count]);
-            return None;
-        }
-        if mapping_count == mappings.len()
-            || paging::map_user_range_in_inactive(
-                page_table,
-                segment.mapping_start,
-                segment.mapping_size,
-                true,
-                false,
-            )
-            .is_err()
-        {
-            release_partial(page_table, &mappings[..mapping_count]);
-            return None;
-        }
-        mappings[mapping_count] = UserMapping {
-            start: segment.mapping_start,
-            size: segment.mapping_size,
-            writable: segment.writable,
-            executable: segment.executable,
-        };
-        mapping_count += 1;
-
-        let file_end = segment.file_offset.checked_add(segment.file_size)?;
-        let memory_end = segment
-            .virtual_address
-            .checked_add(segment.memory_size as u64)?;
-        if memory_end
-            > segment
-                .mapping_start
-                .checked_add(segment.mapping_size as u64)?
-            || paging::zero_user_range_in(page_table, segment.mapping_start, segment.mapping_size)
-                .is_err()
-            || paging::write_user_bytes(
-                page_table,
-                segment.virtual_address,
-                bytes.get(segment.file_offset..file_end)?,
-            )
-            .is_err()
-        {
-            release_partial(page_table, &mappings[..mapping_count]);
-            return None;
-        }
-    }
-
-    if let Some(dynamic) = image.dynamic().filter(|dynamic| dynamic.rela_size != 0) {
-        let Some(rela_end) = dynamic.rela_file_offset.checked_add(dynamic.rela_size) else {
-            release_partial(page_table, &mappings[..mapping_count]);
-            return None;
-        };
-        let Some(rela_bytes) = bytes.get(dynamic.rela_file_offset..rela_end) else {
-            release_partial(page_table, &mappings[..mapping_count]);
-            return None;
-        };
-        for entry in rela_bytes.chunks_exact(dynamic.rela_entry_size) {
-            let Some(target) = entry
-                .get(..8)
-                .and_then(|bytes| bytes.try_into().ok())
-                .map(u64::from_le_bytes)
-            else {
-                release_partial(page_table, &mappings[..mapping_count]);
-                return None;
-            };
-            let Some(addend) = entry
-                .get(16..24)
-                .and_then(|bytes| bytes.try_into().ok())
-                .map(i64::from_le_bytes)
-            else {
-                release_partial(page_table, &mappings[..mapping_count]);
-                return None;
-            };
-            let Some(info) = entry
-                .get(8..16)
-                .and_then(|bytes| bytes.try_into().ok())
-                .map(u64::from_le_bytes)
-            else {
-                release_partial(page_table, &mappings[..mapping_count]);
-                return None;
-            };
-            let relocation_type = info as u32;
-            let symbol_index = (info >> 32) as usize;
-            let Some(target) = target.checked_add(image.load_bias()) else {
-                release_partial(page_table, &mappings[..mapping_count]);
-                return None;
-            };
-            let symbol_value = if symbol_index == 0 {
-                None
-            } else {
-                if symbol_index >= dynamic.symbol_count {
-                    release_partial(page_table, &mappings[..mapping_count]);
-                    return None;
-                }
-                let resolved = image.defined_symbol_value(bytes, symbol_index);
-                let Some(resolved) = resolved else {
-                    release_partial(page_table, &mappings[..mapping_count]);
-                    return None;
-                };
-                Some(resolved)
-            };
-            let value = match relocation_type {
-                crate::elf::R_X86_64_RELATIVE => {
-                    if symbol_index != 0 {
-                        release_partial(page_table, &mappings[..mapping_count]);
-                        return None;
-                    }
-                    if addend >= 0 {
-                        let Some(value) = image.load_bias().checked_add(addend as u64) else {
-                            release_partial(page_table, &mappings[..mapping_count]);
-                            return None;
-                        };
-                        value
-                    } else {
-                        let Some(value) = image.load_bias().checked_sub(addend.unsigned_abs()) else {
-                            release_partial(page_table, &mappings[..mapping_count]);
-                            return None;
-                        };
-                        value
-                    }
-                }
-                crate::elf::R_X86_64_64
-                | crate::elf::R_X86_64_GLOB_DAT
-                | crate::elf::R_X86_64_JUMP_SLOT => {
-                    let Some(symbol_value) = symbol_value else {
-                        release_partial(page_table, &mappings[..mapping_count]);
-                        return None;
-                    };
-                    if addend >= 0 {
-                        let Some(value) = symbol_value.checked_add(addend as u64) else {
-                            release_partial(page_table, &mappings[..mapping_count]);
-                            return None;
-                        };
-                        value
-                    } else {
-                        let Some(value) = symbol_value.checked_sub(addend.unsigned_abs()) else {
-                            release_partial(page_table, &mappings[..mapping_count]);
-                            return None;
-                        };
-                        value
-                    }
-                }
-                _ => {
-                    release_partial(page_table, &mappings[..mapping_count]);
-                    return None;
-                }
-            };
-            if paging::write_user_bytes(page_table, target, &value.to_le_bytes()).is_err() {
-                release_partial(page_table, &mappings[..mapping_count]);
-                return None;
-            }
-        }
-    }
-
-    for segment in image.segments() {
-        if paging::protect_user_range_in_inactive(
-            page_table,
-            segment.mapping_start,
-            segment.mapping_size,
-            segment.writable,
-            segment.executable,
-        )
-        .is_err()
-        {
-            release_partial(page_table, &mappings[..mapping_count]);
-            return None;
-        }
-    }
-
-    if let Some((relro_start, relro_size)) = relro {
-        if paging::protect_user_range_in_inactive(
-            page_table,
-            relro_start,
-            relro_size,
-            false,
-            false,
-        )
-        .is_err()
-        {
-            release_partial(page_table, &mappings[..mapping_count]);
-            return None;
-        }
-    }
-
-    // Static TLS is placed below the stack guard.  The initial-exec ABI uses
-    // the end of this block as FS, so keeping the block page aligned makes
-    // fork's existing COW address-space clone sufficient for the initial
-    // thread image. Dynamic TLS/shared libraries remain intentionally outside
-    // this loader's contract.
-    let (tls, tls_base) = if let Some(tls_image) = tls_image {
-        let Some(tls_size) = page_align_up(tls_image.memory_size as u64)
-            .and_then(|size| usize::try_from(size).ok())
-        else {
-            release_partial(page_table, &mappings[..mapping_count]);
-            return None;
-        };
-        let Some(tls_start) = stack.guard_base.checked_sub(tls_size as u64) else {
-            release_partial(page_table, &mappings[..mapping_count]);
-            return None;
-        };
-        let Some(tls_file_end) = tls_image.file_offset.checked_add(tls_image.file_size) else {
-            release_partial(page_table, &mappings[..mapping_count]);
-            return None;
-        };
-        if tls_start < mmap_end
-            || mappings[..mapping_count].iter().any(|mapping| {
-                tls_start < mapping.start + mapping.size as u64
-                    && mapping.start < stack.guard_base
-            })
-        {
-            release_partial(page_table, &mappings[..mapping_count]);
-            return None;
-        }
-        let Some(tls_bytes) = bytes.get(tls_image.file_offset..tls_file_end) else {
-            release_partial(page_table, &mappings[..mapping_count]);
-            return None;
-        };
-        if paging::map_user_range_in_inactive(page_table, tls_start, tls_size, true, false)
-            .is_err()
-            || paging::zero_user_range_in(page_table, tls_start, tls_size).is_err()
-            || paging::write_user_bytes(
-                page_table,
-                tls_start,
-                tls_bytes,
-            )
-            .is_err()
-        {
-            release_partial_with_tls(page_table, &mappings[..mapping_count], (tls_start, tls_size));
-            return None;
-        }
-        let Some(tls_base) = tls_start.checked_add(tls_size as u64) else {
-            release_partial_with_tls(page_table, &mappings[..mapping_count], (tls_start, tls_size));
-            return None;
-        };
-        (Some((tls_start, tls_size)), tls_base)
-    } else {
-        (None, 0)
-    };
-
-    if paging::map_user_range_in_inactive(page_table, stack_base, UserStack::SIZE, true, false)
-        .is_err()
-    {
-        release_with_stack(page_table, stack_base, tls, &mappings[..mapping_count]);
-        return None;
-    }
-    if paging::zero_user_range_in(page_table, stack_base, UserStack::SIZE).is_err() {
-        release_with_stack(page_table, stack_base, tls, &mappings[..mapping_count]);
-        return None;
-    }
-
-    if !paging::user_range_is_unmapped_in(page_table, stack.guard_base, UserStack::GUARD_SIZE)
-        || !paging::user_range_has_protection_in(page_table, stack.base, stack.size, true, false)
-    {
-        release_with_stack(page_table, stack_base, tls, &mappings[..mapping_count]);
-        return None;
-    }
-
-    // Default argv so every loaded image starts with a valid C-style stack.
-    let stack_top = setup_argv_stack(page_table, stack, &["a.out"])?;
-
-    Some(UserProgram {
-        image: UserImage {
-            entry: image.entry,
-            stack_top,
-            image_size: bytes.len() as u64,
-            load_segments: image.segment_count(),
-        },
-        stack,
-        address_space: AddressSpace {
-            paging: page_table,
-            stack_base,
-            mmap_base,
-            mappings,
-            mapping_count,
-            relro,
-            tls,
-        },
-        tls_base,
-    })
+    linker::load(bytes, &["a.out"])
 }
+
+#[cfg(feature = "stage11-5-test")]
+pub fn shared_library_self_test() -> bool { linker::shared_library_self_test() }
 
 /// Load an ELF and place a custom argv vector on the user stack.
 pub fn load_elf_with_argv(bytes: &[u8], args: &[&str]) -> Option<UserProgram> {
-    let mut program = load_elf(bytes)?;
-    // Rebuild argv over the default one.
-    let stack_top = setup_argv_stack(program.address_space.paging(), program.stack, args)?;
-    program.image.stack_top = stack_top;
-    Some(program)
-}
-
-fn release_with_stack(
-    page_table: paging::AddressSpace,
-    stack_base: u64,
-    tls: Option<(u64, usize)>,
-    mappings: &[UserMapping],
-) {
-    let mut ranges = [(0, 0); MAX_ELF_SEGMENTS + 2];
-    ranges[0] = (stack_base, UserStack::SIZE);
-    for (range, mapping) in ranges[1..].iter_mut().zip(mappings) {
-        *range = (mapping.start, mapping.size);
-    }
-    let mut count = mappings.len() + 1;
-    if let Some(tls) = tls {
-        ranges[count] = tls;
-        count += 1;
-    }
-    let _ = paging::destroy_user_address_space(page_table, &ranges[..count]);
-}
-fn release_partial(page_table: paging::AddressSpace, mappings: &[UserMapping]) {
-    if mappings.is_empty() {
-        let _ = paging::discard_empty_user_address_space(page_table);
-        return;
-    }
-    let mut ranges = [(0, 0); MAX_ELF_SEGMENTS];
-    for (range, mapping) in ranges.iter_mut().zip(mappings) {
-        *range = (mapping.start, mapping.size);
-    }
-    let _ = paging::destroy_user_address_space(page_table, &ranges[..mappings.len()]);
-}
-
-fn release_partial_with_tls(
-    page_table: paging::AddressSpace,
-    mappings: &[UserMapping],
-    tls: (u64, usize),
-) {
-    let mut ranges = [(0, 0); MAX_ELF_SEGMENTS + 1];
-    for (range, mapping) in ranges[..mappings.len()].iter_mut().zip(mappings) {
-        *range = (mapping.start, mapping.size);
-    }
-    ranges[mappings.len()] = tls;
-    let _ = paging::destroy_user_address_space(page_table, &ranges[..mappings.len() + 1]);
+    linker::load(bytes, args)
 }
 
 pub fn map_anonymous(
@@ -5886,13 +5558,13 @@ pub fn destroy_process_address_space(
     destroy(address_space)
 }
 pub fn destroy(address_space: AddressSpace) -> bool {
-    let mut ranges = [(0, 0); MAX_ELF_SEGMENTS + 2];
+    let mut ranges = [(0, 0); MAX_IMAGE_MAPPINGS + 2];
     ranges[0] = (address_space.stack_base, UserStack::SIZE);
     for (range, mapping) in ranges[1..]
         .iter_mut()
-        .zip(&address_space.mappings[..address_space.mapping_count])
+        .zip(address_space.mappings[..address_space.mapping_count].iter().rev())
     {
-        *range = (mapping.start, mapping.size);
+        *range = (mapping.start(), mapping.size());
     }
     let mut count = address_space.mapping_count + 1;
     if let Some(tls) = address_space.tls {
@@ -5915,9 +5587,10 @@ pub fn clone_address_space(
         mappings: source.mappings,
         mapping_count: source.mapping_count,
         relro: source.relro,
+        library_relro: source.library_relro,
         tls: source.tls,
     };
-    let mut completed = [(0_u64, 0_usize); MAX_ELF_SEGMENTS + 2 + MAX_ANONYMOUS_MAPPINGS * 16];
+    let mut completed = [(0_u64, 0_usize); MAX_IMAGE_MAPPINGS + 2 + MAX_ANONYMOUS_MAPPINGS * 16];
     let mut completed_count = 0;
 
     // Copy-on-write: share physical frames and mark writable ranges read-only.
@@ -5925,8 +5598,8 @@ pub fn clone_address_space(
         if paging::share_user_range_in(
             source.paging,
             destination.paging,
-            mapping.start,
-            mapping.size,
+            mapping.start(),
+            mapping.size(),
             mapping.writable,
             mapping.executable,
         )
@@ -5935,7 +5608,7 @@ pub fn clone_address_space(
             release_clone(destination.paging, &completed[..completed_count]);
             return None;
         }
-        completed[completed_count] = (mapping.start, mapping.size);
+        completed[completed_count] = (mapping.start(), mapping.size());
         completed_count += 1;
     }
     if paging::share_user_range_in(
@@ -6238,9 +5911,10 @@ pub fn shared_disk_mmap_self_test() -> bool {
             paging: root,
             stack_base: 0,
             mmap_base: USER_MMAP_START,
-            mappings: [UserMapping::EMPTY; MAX_ELF_SEGMENTS],
+            mappings: [UserMapping::EMPTY; MAX_IMAGE_MAPPINGS],
             mapping_count: 0,
             relro: None,
+            library_relro: [None; crate::elf::MAX_NEEDED_LIBRARIES],
             tls: None,
         };
         let anchor = USER_MMAP_START + 15 * USER_MMAP_STRIDE;
@@ -6293,9 +5967,10 @@ pub fn disk_unlink_mmap_self_test() -> bool {
             paging: root,
             stack_base: 0,
             mmap_base: USER_MMAP_START,
-            mappings: [UserMapping::EMPTY; MAX_ELF_SEGMENTS],
+            mappings: [UserMapping::EMPTY; MAX_IMAGE_MAPPINGS],
             mapping_count: 0,
             relro: None,
+            library_relro: [None; crate::elf::MAX_NEEDED_LIBRARIES],
             tls: None,
         };
         let anchor = USER_MMAP_START + 15 * USER_MMAP_STRIDE;
@@ -6339,9 +6014,10 @@ pub fn shared_file_mmap_self_test() -> bool {
         paging: root,
         stack_base: 0,
         mmap_base: USER_MMAP_START,
-        mappings: [UserMapping::EMPTY; MAX_ELF_SEGMENTS],
+        mappings: [UserMapping::EMPTY; MAX_IMAGE_MAPPINGS],
         mapping_count: 0,
         relro: None,
+        library_relro: [None; crate::elf::MAX_NEEDED_LIBRARIES],
         tls: None,
     };
     let anchor = USER_MMAP_START + 15 * USER_MMAP_STRIDE;
@@ -6425,9 +6101,10 @@ pub fn lazy_file_mmap_self_test() -> bool {
         paging: root,
         stack_base: 0,
         mmap_base: USER_MMAP_START,
-        mappings: [UserMapping::EMPTY; MAX_ELF_SEGMENTS],
+        mappings: [UserMapping::EMPTY; MAX_IMAGE_MAPPINGS],
         mapping_count: 0,
         relro: None,
+        library_relro: [None; crate::elf::MAX_NEEDED_LIBRARIES],
         tls: None,
     };
     // Keep a teardown anchor while sparse mapping pages are removed individually.
@@ -6512,9 +6189,10 @@ pub fn private_lazy_swap_self_test() -> bool {
         paging: root,
         stack_base: 0,
         mmap_base: USER_MMAP_START,
-        mappings: [UserMapping::EMPTY; MAX_ELF_SEGMENTS],
+        mappings: [UserMapping::EMPTY; MAX_IMAGE_MAPPINGS],
         mapping_count: 0,
         relro: None,
+        library_relro: [None; crate::elf::MAX_NEEDED_LIBRARIES],
         tls: None,
     };
     let anchor = USER_MMAP_START + 15 * USER_MMAP_STRIDE;
@@ -6583,9 +6261,10 @@ pub fn file_mmap_self_test() -> bool {
         paging: root,
         stack_base: 0,
         mmap_base: USER_MMAP_START,
-        mappings: [UserMapping::EMPTY; MAX_ELF_SEGMENTS],
+        mappings: [UserMapping::EMPTY; MAX_IMAGE_MAPPINGS],
         mapping_count: 0,
         relro: None,
+        library_relro: [None; crate::elf::MAX_NEEDED_LIBRARIES],
         tls: None,
     };
     let _ = crate::vfs::seek(file, 3);

@@ -87,6 +87,66 @@ and a retained report before it can close a production gap.
 
 ## Codex: owned work
 
+**Validated loader increment:** `kernel/src/userspace/linker.rs`, ELF shared
+object parsing and dependency resolution, address-space mapping/RELRO metadata,
+loader fixtures and `tests/elf_scope.rs`. Signed `/lib` dependencies are being
+wired into the production loader with transactional rollback. The final
+pre-commit matrices are now green; commit/push handoff is in progress.
+
+**Validation handoff:** focused Stage 11.2/11.3/11.4/11.5 matrices and the
+warning-denying build/host/feature checks pass. Codex's full Stage 10.7
+preservation launcher started after Claude's release-validation PID 22308
+finished (100 checks passed in `C:\WovenHat-OS-wt`). Current evidence is under
+`audit-artifacts/acceptance-20261015-151448-207/`, result pending. No competing
+acceptance chain will start. Kernel/build sources are frozen by the 134-file
+manifest under `audit-artifacts/shared-library-integration-20261015/`.
+Please retain that exclusion until Codex records the final result and commit.
+An isolated Rust/LLD probe found null `DT_DEBUG` metadata currently rejects
+an otherwise parseable executable; that interoperability follow-up is not
+part of the frozen loader increment. The shared-library audit records it.
+The same isolated probe found compiler local-exec TLS requires a mapped
+`FS:0` self-pointer and alignment-aware template placement; the existing
+page-rounded TLS allocation provides neither. `clone_initial_tls` also copies
+live main-thread state instead of a fresh template. These are the next Stage
+11 correctness fixes; do not claim compiler TLS works from metadata tests.
+The real-toolchain fixture builder and three failure/evidence regressions are
+committed and pushed separately as `2cfd5f8f`. It uses direct Rust/LLVM commands,
+not Cargo/QEMU; all 15 Python harness tests pass. Current kernel/build hashes
+still match all 134 frozen entries. These fixtures are preparatory acceptance
+infrastructure, not a claim of compiler TLS or shared-PIE runtime acceptance.
+Follow-up `44850832` is also pushed: the real compiler TLS thread fixture
+requires aligned initialized/zero-filled variables, fresh state across two
+joined child threads and unchanged mutated parent state. Fixture generation
+with warnings denied and all 15 Python regressions pass; runtime remains open.
+Three additional ELF malformed-input host tests now pass with warnings denied
+(15 ELF tests total). Their formatter followed `#[path]` and temporarily
+reformatted parser whitespace; all 134 exact frozen hashes were restored by
+15:35:26. The shared-library audit records this provenance incident. Codex has
+queued a repeat of the original Stage 7.6 4-CPU x20 stress and 1/2/4-CPU live
+network functions after the current Stage 10.7 chain succeeds and exits, plus
+final host Clippy/ELF tests. Do not start a competing chain or count the
+overlapped phase as frozen-source acceptance until that repeat passes.
+The original Stage 10.7 launcher has now exited 0 with its final pass marker.
+The phase repeat started after Claude's live Stage 13.20 reboot QEMU finished.
+Its transcript is
+`audit-artifacts/restored-baseline-repeat-20261015-154630-461/repeat.txt`, with
+per-run evidence under `stage7-6-artifacts/20261015-154630-577/`. It exited 0:
+all twenty 4-CPU stress runs, live networking on 1/2/4 CPUs, warning-denying
+host all-targets Clippy and fifteen ELF tests pass. Exact frozen hashes match.
+The remaining pre-commit validation passed: Stage 10.8, 10.9 and 11.1
+feature Clippy and their 1/2/4-CPU runtime matrices; these are not covered by
+the Stage 10.7 launcher. Its exit-0 transcript is
+`audit-artifacts/loader-prior-runtime-20261015-155714-747/matrix.txt`, and all
+134 exact frozen hashes match. Both validation chains are terminal. This
+accepts the bounded signed-library increment, not full Stage 11.5 or a release
+image; generation exhaustion and compiler TLS remain next correctness work.
+Read-only thread-lifecycle review also found saturated generations are still
+allocatable. A copied-source host reproducer fails join/abort/owner-reap stale
+alias checks; an isolated skip-exhausted-slot candidate passes all three. No
+kernel edit was made. This earlier Stage 11.2 correctness fix is queued ahead
+of TLS integration after the frozen gate/repeat. See the thread-generation
+exhaustion audit; do not infer generation-wrap safety from ordinary reuse tests.
+
 **Stage 11.5 review correction (2026-10-15):** ASLR-aware symbol addresses,
 export visibility/types, full symbol bounds and dependency order/index checks
 now have eight parser-backed host regressions. The production local relocation
@@ -97,10 +157,17 @@ retaining complete measurement and fixed deadlines. See the symbol-scope audit.
 Full shared-library mapping/teardown and the full release-chain rerun remain
 open. The previously packaged `0.8.0` image predates this correction.
 
-Claude's `C:\WovenHat-OS-wt` currently has USB mass-storage and boot-log commits
-on `stage20-14` (`7c608631` observed), plus an uncommitted live-USB script edit.
-Codex preserved that work and waited on live QEMU processes between gates;
-those new Stage 13 commits still require integration review on the shared branch.
+Claude's `C:\WovenHat-OS-wt` now has USB mass-storage, boot-log and documentation
+commits on `stage20-14` (`df9a1a34` observed). Its retained release report has
+100 passing checks and image SHA-256
+`4d8205a5a31234259ade1ad8906b7ca38304843f56382ca9e08f04705f2b11e2`.
+Codex preserved that work and waited for its release process to exit; those
+new Stage 13 commits still require integration review on the shared branch.
+Claude's branch also records an earlier write/read-back on the identified
+8 GB VendorCo stick. Codex has not independently verified that media report
+and has performed no physical-media writes. Do not interpret Codex's read-only
+preflight as evidence that no other agent changed the stick, or as a physical
+boot/power-loss qualification result.
 
 Stage 19 system applications (WovenCalculator, WovenTerminal, WovenFiles,
 WovenEditor, …), application signing and packaging, and the release

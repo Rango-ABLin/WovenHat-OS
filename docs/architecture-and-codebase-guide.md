@@ -344,15 +344,25 @@ bounded increment.
 string table within bounded file-backed load segments. `userspace::load_elf`
 applies `R_X86_64_RELATIVE` and locally defined `R_X86_64_64`,
 `R_X86_64_GLOB_DAT`, and `R_X86_64_JUMP_SLOT` entries before W^X/RELRO
-finalization. `elf::SymbolScope` now provides a bounded, immutable main-image-first
-scope for up to four exact-name direct dependencies and defined global-symbol
-lookup. It is tested as a metadata/resolution contract, not yet wired to
-mapping or relocation. Undefined symbols without that scope, `DT_NEEDED`,
-legacy REL/PLT tables, and cross-image loading still fail closed. This is a
-prerequisite for a dynamic linker, not shared-library support; dependency
-mapping, versioning, lazy binding, dynamic TLS and ordered shared-image
-teardown are still unimplemented. See
-`audit-stage11-symbol-scope-2026-10-15.md`.
+finalization. The subsequent signed-library integration in
+`userspace/linker.rs` loads a breadth-first graph of at most four verified WAPP
+dependencies from `/lib`, checks SONAME identity, maps each into a separate
+window, applies cross-image relocations, and protects every RELRO range.
+`elf::SymbolScope` preserves discovery order and supports transitive cycles.
+The process owns all mappings; an unpublished `Pending` guard rolls back all
+failures, including argv setup. Compact page-range metadata retains forty
+mapping slots within the existing fork stack budget. Root destruction walks
+every empty private user-table branch and refuses copied kernel branches.
+Legacy REL/PLT tables, versioned/weak symbols, constructors/destructors, lazy
+binding and library TLS remain unsupported. See
+`audit-stage11-shared-libraries-2026-10-15.md` for validation and limits.
+
+The preserved main-image TLS mapping is not yet a compiler-compatible TCB:
+the real Rust local-exec probe expects a self-pointer at `FS:0` and aligned
+template bytes immediately below it. The existing page-end FS base has neither;
+new-thread cloning also copies mutable main-thread state. Compiler TLS
+execution, fresh thread initialization and fork/self-pointer rebasing require
+a dedicated correction and runtime acceptance before broader TLS claims.
 
 The symbol resolver and the production loader now share
 `Image::defined_symbol_value`: ELF symbol values receive the image load bias

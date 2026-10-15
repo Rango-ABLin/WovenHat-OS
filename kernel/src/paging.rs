@@ -1210,6 +1210,23 @@ pub fn destroy_user_address_space(
     }
 
     let paging = PAGING.lock();
+    if address_space.root_address() == paging.level_4_frame {
+        return Err(MapRangeError::MappingFailed);
+    }
+    // Refuse copied kernel branches before unmapping any page. A process root
+    // owns only its distinct user branches, even though it can translate the
+    // shared kernel mappings copied at creation.
+    for &(start, size) in ranges {
+        let (first, last) = page_range(start, size)?;
+        let first = usize::from(first.p4_index());
+        let last = usize::from(last.p4_index());
+        if first > last { return Err(MapRangeError::InvalidRange); }
+        for index in first..=last {
+            if private_root_branch(&paging, address_space, index)?.is_none() {
+                return Err(MapRangeError::MappingFailed);
+            }
+        }
+    }
     let mut mapper = mapper_for(&paging, address_space)?;
     for &(start, size) in ranges {
         let (start_page, end_page) = page_range(start, size)?;
@@ -1225,38 +1242,73 @@ pub fn destroy_user_address_space(
         }
     }
 
-    let first_page = Page::<Size4KiB>::containing_address(VirtAddr::new(ranges[0].0));
-    let root = page_table_at_mut(
-        paging.physical_memory_offset,
-        address_space.level_4_frame.start_address().as_u64(),
-    )
-    .ok_or(MapRangeError::MappingFailed)?;
-    let p3_frame = root[first_page.p4_index()]
-        .frame()
-        .map_err(|_| MapRangeError::MappingFailed)?;
-    let p3 = page_table_at_mut(
-        paging.physical_memory_offset,
-        p3_frame.start_address().as_u64(),
-    )
-    .ok_or(MapRangeError::MappingFailed)?;
-    let p2_frame = p3[first_page.p3_index()]
-        .frame()
-        .map_err(|_| MapRangeError::MappingFailed)?;
-    let p2 = page_table_at_mut(
-        paging.physical_memory_offset,
-        p2_frame.start_address().as_u64(),
-    )
-    .ok_or(MapRangeError::MappingFailed)?;
-    let p1_frame = p2[first_page.p2_index()]
-        .frame()
-        .map_err(|_| MapRangeError::MappingFailed)?;
+    reclaim_retired_user_root(&paging, address_space)
+}
 
-    root[first_page.p4_index()].set_unused();
-    for frame in [p1_frame, p2_frame, p3_frame, address_space.level_4_frame] {
-        if !memory::deallocate_frame(frame) {
-            return Err(MapRangeError::MappingFailed);
+/// Identify tables owned by this process, never the copied kernel branches.
+fn private_root_branch(
+    paging: &PagingState,
+    space: AddressSpace,
+    index: usize,
+) -> Result<Option<PhysFrame<Size4KiB>>, MapRangeError> {
+    let root = page_table_at(paging.physical_memory_offset, space.root_address())
+        .ok_or(MapRangeError::MappingFailed)?;
+    let entry = &root[index];
+    if entry.is_unused() { return Ok(None); }
+    let kernel = page_table_at(paging.physical_memory_offset, paging.level_4_frame)
+        .ok_or(MapRangeError::MappingFailed)?;
+    if entry.addr() == kernel[index].addr() { return Ok(None); }
+    if !entry.flags().contains(PageTableFlags::USER_ACCESSIBLE)
+        || entry.flags().contains(PageTableFlags::HUGE_PAGE)
+    { return Err(MapRangeError::MappingFailed); }
+    Ok(Some(entry.frame().map_err(|_| MapRangeError::MappingFailed)?))
+}
+
+fn user_tables_are_empty(offset: u64, frame: PhysFrame<Size4KiB>, level: u8) -> bool {
+    let Some(table) = page_table_at(offset, frame.start_address().as_u64()) else { return false; };
+    for entry in table.iter().filter(|entry| !entry.is_unused()) {
+        if level == 1 || entry.flags().contains(PageTableFlags::HUGE_PAGE) { return false; }
+        let Ok(child) = entry.frame() else { return false; };
+        if !user_tables_are_empty(offset, child, level - 1) { return false; }
+    }
+    true
+}
+
+fn free_empty_user_tables(offset: u64, frame: PhysFrame<Size4KiB>, level: u8) -> Result<(), MapRangeError> {
+    if level > 1 {
+        let table = page_table_at(offset, frame.start_address().as_u64())
+            .ok_or(MapRangeError::MappingFailed)?;
+        for entry in table.iter().filter(|entry| !entry.is_unused()) {
+            let child = entry.frame().map_err(|_| MapRangeError::MappingFailed)?;
+            free_empty_user_tables(offset, child, level - 1)?;
         }
     }
+    if !memory::deallocate_frame(frame) { return Err(MapRangeError::MappingFailed); }
+    Ok(())
+}
+
+/// The scheduler has retired the root on every CPU. PAGING serializes the
+/// validation/free passes; no new mapping can appear between them. Validate
+/// every branch before freeing anything, so omitted live ranges fail closed.
+fn reclaim_retired_user_root(paging: &PagingState, space: AddressSpace) -> Result<(), MapRangeError> {
+    if space.root_address() == paging.level_4_frame || Cr3::read().0 == space.level_4_frame {
+        return Err(MapRangeError::MappingFailed);
+    }
+    for index in 0..512 {
+        if let Some(frame) = private_root_branch(paging, space, index)? {
+            if !user_tables_are_empty(paging.physical_memory_offset, frame, 3) {
+                return Err(MapRangeError::MappingFailed);
+            }
+        }
+    }
+    for index in 0..512 {
+        if let Some(frame) = private_root_branch(paging, space, index)? {
+            page_table_at_mut(paging.physical_memory_offset, space.root_address())
+                .ok_or(MapRangeError::MappingFailed)?[index].set_unused();
+            free_empty_user_tables(paging.physical_memory_offset, frame, 3)?;
+        }
+    }
+    if !memory::deallocate_frame(space.level_4_frame) { return Err(MapRangeError::MappingFailed); }
     Ok(())
 }
 
@@ -1301,7 +1353,7 @@ pub fn discard_empty_user_address_space(address_space: AddressSpace) -> bool {
     if Cr3::read().0 == address_space.level_4_frame {
         return false;
     }
-    memory::deallocate_frame(address_space.level_4_frame)
+    reclaim_retired_user_root(&PAGING.lock(), address_space).is_ok()
 }
 pub fn switch_to(address_space: AddressSpace) {
     if Cr3::read().0 == address_space.level_4_frame {

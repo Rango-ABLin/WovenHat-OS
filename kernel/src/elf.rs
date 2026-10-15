@@ -67,6 +67,7 @@ pub struct DynamicImage {
     pub hash_file_offset: usize,
     pub needed_offsets: [u64; MAX_NEEDED_LIBRARIES],
     pub needed_count: usize,
+    pub soname_offset: Option<u64>,
 }
 
 pub struct Image {
@@ -150,6 +151,44 @@ impl Image {
         }
         let offset = *dynamic.needed_offsets.get(index)?;
         dynamic_string(bytes, dynamic, offset)
+    }
+
+    pub fn soname<'a>(&self, bytes: &'a [u8]) -> Option<&'a [u8]> {
+        let dynamic = self.dynamic?;
+        dynamic_string(bytes, dynamic, dynamic.soname_offset?)
+    }
+
+    /// Resolve supported eager relocations. Private/protected definitions bind
+    /// locally; default-visible globals use executable-first interposition.
+    pub fn relocation_symbol_value(
+        &self,
+        bytes: &[u8],
+        index: usize,
+        scope: &SymbolScope<'_>,
+    ) -> Option<u64> {
+        let dynamic = self.dynamic?;
+        if index == 0 || index >= dynamic.symbol_count || dynamic.symtab_entry_size != 24 {
+            return None;
+        }
+        let offset = dynamic.symtab_file_offset.checked_add(index.checked_mul(24)?)?;
+        let symbol = bytes.get(offset..offset.checked_add(24)?)?;
+        let binding = symbol[4] >> 4;
+        let visibility = symbol[5] & 3;
+        let section = u16::from_le_bytes(symbol[6..8].try_into().ok()?);
+        if !matches!(binding, 0 | 1) || !matches!(symbol[4] & 0xf, 0..=2) {
+            return None;
+        }
+        let name = dynamic_string(bytes, dynamic, u64::from(u32::from_le_bytes(symbol[..4].try_into().ok()?)))?;
+        if section == 0 {
+            return (binding == 1 && visibility == 0 && !name.is_empty())
+                .then(|| scope.resolve(name)).flatten();
+        }
+        let local = self.defined_symbol_value(bytes, index)?;
+        if binding == 1 && visibility == 0 {
+            scope.resolve(name)
+        } else {
+            Some(local)
+        }
     }
 
     /// Resolve a defined symbol for an image-local relocation. Visibility does
@@ -318,26 +357,29 @@ impl<'a> SymbolScope<'a> {
 
     /// Require an exact one-to-one match between DT_NEEDED and the namespace.
     pub fn validate_dependencies(&self) -> Result<(), ScopeError> {
-        let main = self.images[0].ok_or(ScopeError::MissingDependency)?;
-        let needed_count = main
-            .image
-            .dynamic()
-            .map_or(0, |dynamic| dynamic.needed_count);
-        if needed_count != self.count.saturating_sub(1) {
-            return Err(ScopeError::MissingDependency);
-        }
-        for index in 0..needed_count {
-            let needed = main
-                .image
-                .needed_name(main.bytes, index)
-                .ok_or(ScopeError::MissingDependency)?;
-            if needed.is_empty()
-                || self.images[index + 1].and_then(|entry| entry.name) != Some(needed)
-            {
+        let mut discovered = 1;
+        for image_index in 0..self.count {
+            if image_index >= discovered {
                 return Err(ScopeError::MissingDependency);
             }
+            let entry = self.images[image_index].ok_or(ScopeError::MissingDependency)?;
+            let count = entry.image.dynamic().map_or(0, |dynamic| dynamic.needed_count);
+            for index in 0..count {
+                let needed = entry.image.needed_name(entry.bytes, index)
+                    .filter(|name| !name.is_empty()).ok_or(ScopeError::InvalidName)?;
+                if (0..index).any(|prior| entry.image.needed_name(entry.bytes, prior) == Some(needed)) {
+                    return Err(ScopeError::DuplicateDependency);
+                }
+                if self.images[1..discovered].iter().flatten().any(|prior| prior.name == Some(needed)) {
+                    continue;
+                }
+                if discovered >= self.count || self.images[discovered].and_then(|next| next.name) != Some(needed) {
+                    return Err(ScopeError::MissingDependency);
+                }
+                discovered += 1;
+            }
         }
-        Ok(())
+        if discovered == self.count { Ok(()) } else { Err(ScopeError::MissingDependency) }
     }
 
     /// Resolve an exact exported global symbol in main-image-first scope.
@@ -363,6 +405,16 @@ fn dynamic_string(bytes: &[u8], dynamic: DynamicImage, offset: u64) -> Option<&[
 }
 
 pub fn parse(bytes: &[u8]) -> Result<Image, Error> {
+    parse_image(bytes, false)
+}
+
+/// Shared objects may have no entry point, but must be ET_DYN. All segment,
+/// metadata, relocation-target and W^X checks are shared with executables.
+pub fn parse_shared(bytes: &[u8]) -> Result<Image, Error> {
+    parse_image(bytes, true)
+}
+
+fn parse_image(bytes: &[u8], shared: bool) -> Result<Image, Error> {
     if bytes.len() < ELF_HEADER_SIZE {
         return Err(Error::Truncated);
     }
@@ -372,6 +424,7 @@ pub fn parse(bytes: &[u8]) -> Result<Image, Error> {
         || bytes[5] != 1
         || bytes[6] != 1
         || !matches!(elf_type, 2 | 3)
+        || (shared && elf_type != 3)
         || read_u16(bytes, 18)? != ELF_MACHINE_X86_64
         || read_u32(bytes, 20)? != 1
         || read_u16(bytes, 52)? as usize != ELF_HEADER_SIZE
@@ -453,6 +506,7 @@ pub fn parse(bytes: &[u8]) -> Result<Image, Error> {
             let mut hash_address = 0;
             let mut needed_offsets = [0; MAX_NEEDED_LIBRARIES];
             let mut needed_count = 0;
+            let mut soname_offset = None;
             let dynamic_bytes = &bytes[file_offset..file_end];
             let mut terminated = false;
             let (dynamic_entries, _) = dynamic_bytes.as_chunks::<16>();
@@ -471,7 +525,10 @@ pub fn parse(bytes: &[u8]) -> Result<Image, Error> {
                         needed_offsets[needed_count] = value;
                         needed_count += 1;
                     }
-                    14 | 15 | 16 | 17 | 18 | 19 | 22 | 23 | 29 => {
+                    14 => {
+                        if soname_offset.replace(value).is_some() { return Err(Error::InvalidSegment); }
+                    }
+                    15 | 16 | 17 | 18 | 19 | 22 | 23 | 29 => {
                         // Dependencies, symbol-based relocation tables, and
                         // text-relocation requests need a dynamic linker or
                         // shared-library authority that the kernel does not
@@ -503,8 +560,10 @@ pub fn parse(bytes: &[u8]) -> Result<Image, Error> {
                     }
                     // Common metadata tags do not affect relocation of a
                     // symbol-free static PIE and are intentionally ignored.
-                    3 | 30 | 0x6fff_fff0 | 0x6fff_fff9 | 0x6fff_fffb | 0x6fff_fffe
-                    | 0x6fff_ffff => {}
+                    0x6fff_fff0 | 0x6fff_fffc | 0x6fff_fffd | 0x6fff_fffe | 0x6fff_ffff => {
+                        return Err(Error::Unsupported);
+                    }
+                    3 | 30 | 0x6fff_fff9 | 0x6fff_fffb => {}
                     _ => return Err(Error::Unsupported),
                 }
             }
@@ -541,6 +600,7 @@ pub fn parse(bytes: &[u8]) -> Result<Image, Error> {
                     hash_file_offset: 0,
                     needed_offsets,
                     needed_count,
+                    soname_offset,
                 });
                 // Resolve the virtual relocation table to its file-backed
                 // bytes after all PT_LOAD headers have been collected.
@@ -565,6 +625,7 @@ pub fn parse(bytes: &[u8]) -> Result<Image, Error> {
                     hash_file_offset: 0,
                     needed_offsets,
                     needed_count,
+                    soname_offset,
                 });
             }
             continue;
@@ -684,7 +745,7 @@ pub fn parse(bytes: &[u8]) -> Result<Image, Error> {
         image.segment_count += 1;
     }
 
-    if image.segment_count == 0 || !entry_is_executable {
+    if image.segment_count == 0 || (!entry_is_executable && !(shared && entry == 0)) {
         return Err(Error::InvalidEntry);
     }
     if let Some(mut dynamic) = image.dynamic {
@@ -704,6 +765,11 @@ pub fn parse(bytes: &[u8]) -> Result<Image, Error> {
                 && dynamic_end <= segment_end
         });
         if !dynamic_contained {
+            return Err(Error::InvalidSegment);
+        }
+        if (dynamic.needed_count != 0 || dynamic.soname_offset.is_some())
+            && (dynamic.strtab_address == 0 || dynamic.symtab_address == 0)
+        {
             return Err(Error::InvalidSegment);
         }
         if dynamic.rela_size != 0 {
@@ -860,6 +926,7 @@ pub fn parse(bytes: &[u8]) -> Result<Image, Error> {
             for offset in dynamic.needed_offsets[..dynamic.needed_count]
                 .iter()
                 .copied()
+                .chain(dynamic.soname_offset)
             {
                 let name_start = dynamic
                     .strtab_file_offset

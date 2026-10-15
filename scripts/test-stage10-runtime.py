@@ -103,6 +103,19 @@ def required_markers(stage, cpus):
                   '19.1': '[S19.1] compositor surface: PASSED',
                   '19.3': '[S19.3] compositor presentation: PASSED',
                   '19.10': '[S19.10] display geometry and single writer: PASSED'}[stage])]
+    if stage == '11.5':
+        required.extend([
+            '[S11.5] shared libraries unsigned dependency rejected: PASSED',
+            '[S11.5] shared libraries writable dependency rejected: PASSED',
+            '[S11.5] shared libraries tampered signature rejected: PASSED',
+            '[S11.5] shared libraries SONAME mismatch rejected: PASSED',
+            '[S11.5] shared libraries path traversal rejected: PASSED',
+            '[S11.5] shared libraries transitive graph and cross-image relocation: PASSED',
+            '[S11.5] shared libraries W^X RELRO and fork preservation: PASSED',
+            '[S11.5] shared libraries Ring-3 import call and owner teardown: PASSED',
+            '[S11.5] shared libraries unresolved import rollback: PASSED',
+            '[S11.5] shared libraries argv failure rollback: PASSED',
+        ])
     if stage == '13.11':
         required.extend([
             '[S13.11G] BLE SMP identity/privacy foundation: PASSED',

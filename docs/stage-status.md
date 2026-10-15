@@ -11,6 +11,21 @@ security provisioning, persistent update rollback, and several driver/service
 boundaries remain open. The read-only host preflight found two USB disks but was
 not elevated and performed no physical test.
 
+**Signed-library increment:** the bounded signed `/lib` dependency graph and
+transactional teardown passed Stage 10.8–11.5 on 1/2/4 CPUs, warning-denying
+host/kernel/affected-feature checks and full Stage 10.7 preservation. The
+formatter-overlapped phase was repeated successfully on exact restored sources.
+See the shared-library audit for retained evidence. This accepts the bounded
+increment, not full Stage 11.5 or a newly qualified release image.
+
+**Loader interoperability finding:** a separate unmodified
+Rust/LLD executable probe identifies null `DT_DEBUG` rejection and an incorrect
+compiler TLS/TCB layout, including live-state copying when creating threads.
+Main-image compiler TLS is therefore not accepted from the synthetic TLS
+metadata tests. See the shared-library audit for exact evidence and next fixes.
+Thread-generation saturation is also an open Stage 11.2 correction; all three
+retirement paths reproduce stale-handle reuse in the copied-source host tests.
+
 ## Presentation and repaint performance (2026-10-15)
 
 A fix to accepted Stage 19/20 behaviour, found by the Stage 20.7 fade gate.
@@ -2928,6 +2943,16 @@ missed. The production local-relocation path now shares the corrected address
 validation with scope lookup. Parser-backed host regressions cover the failing
 cases, private versus exported symbols, overflow and segment bounds. Full
 shared-library mapping and teardown remain open.
+
+The subsequent signed-library integration implements a bounded `/lib` graph,
+cross-image eager relocation, per-library RELRO, transactional load rollback,
+and complete private-page-table reclamation. The new gate executes a Ring-3
+import call returning 42 and requires exact frame reclamation, along with
+signature, namespace and rollback negatives. Final acceptance and inherited
+regression results are tracked in the
+[shared-library audit](audit-stage11-shared-libraries-2026-10-15.md).
+Versioning, legacy PLT/REL tables, constructors/destructors, dynamic library
+TLS, runtime loading and broader qualification remain open.
 
 ## Stage 12.1 — accepted on 2026-09-16
 

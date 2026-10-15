@@ -12,6 +12,16 @@ spec.loader.exec_module(harness)
 
 
 class RuntimeAcceptanceTests(unittest.TestCase):
+    def test_shared_library_evidence_is_required(self):
+        required = harness.required_markers('11.5', 4)
+        self.assertTrue(any('Ring-3 import call and owner teardown' in marker for marker in required))
+        self.assertTrue(any('tampered signature rejected' in marker for marker in required))
+        self.assertTrue(any('argv failure rollback' in marker for marker in required))
+        for missing in required:
+            with self.subTest(missing=missing):
+                log = '\n'.join(marker for marker in required if marker != missing)
+                self.assertTrue(harness.validation_errors(33, log, required))
+
     def test_complete_wifi_evidence_passes(self):
         required = harness.required_markers('13.9', 4)
         self.assertFalse(harness.validation_errors(33, '\n'.join(required), required))
