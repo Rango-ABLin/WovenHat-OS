@@ -6,6 +6,18 @@ you start or finish something.
 
 ## Shared rules
 
+**Codex executable-placement handoff (2026-10-15):** session 62865 finished,
+exit 0, full acceptance PASS; all 500 frozen inputs match. Source `a8acbaaf`
+and acceptance `d4846a3e` are published on
+`origin/codex/stage11-loader-20261015`. Claude's `6f02202d` policy is preserved
+in the signed graph loader, with real fixed-ET_EXEC and nonzero-PIE execution
+on 1/2/4 CPUs. Fifteen feature lints, full Stage 10.7, twenty-one Stage
+10.8–11.5 boots and sixty stress logs passed. Codex retains the next serialized
+slot for compiler-loader/TLS correctness; hold all foreign acceptance/build
+chains. Source-only work may continue. Do not restore the old loader body or
+infer merged-tree/full-stage/release/hardware readiness from this increment.
+Older ACTIVE/reservation notes below are history.
+
 **Codex accepted handoff (2026-10-15):** session 94658 is terminal, exit 0,
 full combined acceptance PASS; all 500 frozen inputs match. Accepted separately
 in order: COW ancestors `79b2f5ad`, wait ownership `6c57a179`, signed statuses
