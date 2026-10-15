@@ -46,3 +46,29 @@ correct the TLS contract and run actual Ring-3 tests on 1/2/4 CPUs plus all
 required inherited gates. The separate null DT_DEBUG rejection in the shared
 PIE also needs an explicit parser policy and signed execution proof; neither
 that fix nor dynamic-library TLS is certified by a static TLS fixture.
+
+## Primary ABI references checked during the frozen gate
+
+The [x86-64 psABI thread-pointer clarification](https://gitlab.com/x86-psABIs/x86-64-ABI/-/merge_requests/14)
+specifies FS as the thread-pointer segment and a linear self pointer at offset
+zero. This independently supports the disassembly finding above.
+
+Drepper's [ELF TLS specification](https://www.akkadia.org/drepper/tls.pdf),
+section 2 and table 3, describes a retained initialization image and a fresh
+copy for each thread, with PT_TLS file size, total memory size and alignment.
+Section 4.4.6 describes x86-64 local-exec access through FS:0 and a linked
+thread-pointer-relative offset. These are implementation requirements, not
+evidence that WovenHat currently meets the contract. The integration must
+preserve the initialized template separately from mutable per-thread storage.
+
+LLVM's [LLD TLS offset implementation](https://raw.githubusercontent.com/llvm/llvm-project/main/lld/ELF/InputSection.cpp)
+(`getTlsTpOffset`, x86-64 Variant 2) also accounts for PT_TLS virtual-address
+congruence, not merely rounding memory size. With aligned TP, padding must
+make `TP - memory_size - padding` congruent to `p_vaddr` modulo `p_align`.
+The current `TlsImage` metadata retains alignment and sizes but discards
+PT_TLS `p_vaddr`; simply rounding memory size would miss nonzero congruence.
+Preserve the necessary validated congruence and use checked allocation/layout
+arithmetic. Require both zero- and nonzero-congruence host and compiler/runtime
+cases, including a template spanning a page boundary. The upstream source is
+design evidence, not a claim about the exact bundled LLD version; compare its
+actual linked offsets when integrating the retained toolchain fixtures.
