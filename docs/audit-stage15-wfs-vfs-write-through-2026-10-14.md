@@ -40,3 +40,23 @@ are not claimed. Physical qualification remains incomplete: the inserted USB
 flash disk was inventoried read-only, while the destructive harness requires
 Administrator elevation and explicit authorization to erase it. No destructive
 write was issued in this audit.
+
+## Follow-up 2026-10-15: atomic create-with-contents
+
+Defect: a write to an absent `/wfs/<name>` (both `write_vfs_path_at_with_publish`
+at offset 0 and `write_ata_file`) committed `create` as one transaction and
+the contents as a second. If the second failed (`NoSpace`, device error) the
+caller reported failure while an empty file stayed durable on disk.
+
+Fix: `Volume::create_file` stages the inode, directory entry, data blocks and
+bitmap into one journaled transaction (at most 8 data sectors plus inode,
+directory and bitmap sectors, within `MAX_TXN_BLOCKS = 32`). `create` and
+`write_file` now delegate to shared `stage_create`/`stage_write` helpers;
+existing-file writes are unchanged.
+
+Validation: new host tests `create_file_is_atomic_across_every_crash_point`
+and `create_file_out_of_space_leaves_no_file` pass (13/13 WovenFS crash
+tests; 123 host tests total). Host and freestanding Clippy (default,
+`stage11-5-test`, `stage15-1-test` … `stage15-9-test`) pass with
+`-D warnings`. QEMU acceptance was **not run**: no QEMU binary is installed on
+the host used for this checkpoint.

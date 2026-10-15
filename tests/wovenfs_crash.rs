@@ -43,8 +43,12 @@ struct CrashDisk {
 
 impl CrashDisk {
     fn blank() -> Self {
+        Self::blank_sized(SECTORS)
+    }
+
+    fn blank_sized(sectors: usize) -> Self {
         Self {
-            image: Rc::new(RefCell::new(vec![[0; SECTOR_SIZE]; SECTORS])),
+            image: Rc::new(RefCell::new(vec![[0; SECTOR_SIZE]; sectors])),
             budget: Rc::new(Cell::new(None)),
             accepted: Rc::new(Cell::new(0)),
         }
@@ -412,6 +416,89 @@ fn names_are_validated_and_duplicates_refused() {
     volume.create(1, "once.txt", 0o644, 1).expect("create");
     assert_eq!(volume.create(1, "once.txt", 0o644, 1), Err(Error::Exists));
     volume.check().expect("consistent");
+}
+
+#[test]
+fn create_file_is_atomic_across_every_crash_point() {
+    let payload: Vec<u8> = (0..1500u32).map(|index| (index % 239) as u8).collect();
+    let base = formatted();
+    let writes = write_count(&base, |volume| {
+        volume
+            .create_file(1, "new.bin", 0o644, &payload, 100)
+            .expect("create_file");
+    });
+    assert!(
+        writes > 3,
+        "expected a multi-sector operation, got {writes}"
+    );
+
+    for cut in 0..=writes {
+        let crashing = base.fork(Some(cut));
+        let mut volume = Volume::mount(crashing.clone()).expect("mount");
+        let _ = volume.create_file(1, "new.bin", 0o644, &payload, 100);
+        drop(volume);
+
+        let settled = crashing.fork(None);
+        let mut recovered = mount_consistent(&settled, &format!("crash at {cut}"));
+
+        match recovered.lookup(1, "new.bin") {
+            Ok(entry) => {
+                // Present must mean present with its contents, never empty.
+                let mut out = vec![0u8; MAX_FILE_SIZE];
+                let read = recovered
+                    .read_file(entry.inode, &mut out)
+                    .unwrap_or_else(|e| panic!("crash at {cut}: read failed: {e:?}"));
+                assert_eq!(&out[..read], &payload[..], "crash at {cut}: torn new file");
+            }
+            Err(Error::NotFound) => {}
+            Err(error) => panic!("crash at {cut}: unexpected lookup error: {error:?}"),
+        }
+    }
+}
+
+/// A volume whose data blocks, not its inodes or root directory slots, are
+/// exhausted. The 80-sector image has 34 free data blocks, so four full-size
+/// files fit and the fifth runs out of blocks with directory slots and
+/// inodes to spare.
+fn data_full_volume() -> Volume<CrashDisk> {
+    let image = CrashDisk::blank_sized(80);
+    Volume::format(image.clone(), INODES).expect("format");
+    let payload = vec![1u8; MAX_FILE_SIZE];
+    let mut volume = Volume::mount(image).expect("mount");
+    let mut filled = 0;
+    loop {
+        let name = format!("fill{filled}");
+        match volume.create_file(1, &name, 0o644, &payload, 1) {
+            Ok(_) => filled += 1,
+            Err(Error::NoSpace) => break,
+            Err(error) => panic!("filling {name}: {error:?}"),
+        }
+    }
+    assert_eq!(filled, 4, "expected data blocks to bound the fill");
+    volume
+}
+
+#[test]
+fn create_file_out_of_space_leaves_no_file() {
+    let mut volume = data_full_volume();
+    let payload = vec![2u8; MAX_FILE_SIZE];
+
+    assert_eq!(
+        volume.create_file(1, "late.bin", 0o644, &payload, 2),
+        Err(Error::NoSpace)
+    );
+    assert_eq!(
+        volume.lookup(1, "late.bin").map(|entry| entry.inode),
+        Err(Error::NotFound),
+        "a failed create_file must not leave an empty file"
+    );
+    volume.check().expect("consistent after refusal");
+
+    // The separate create-then-write sequence is the defect this replaces:
+    // the empty file commits before the write fails.
+    let orphan = volume.create(1, "orphan.bin", 0o644, 3).expect("create");
+    assert_eq!(volume.write_file(orphan, &payload, 3), Err(Error::NoSpace));
+    assert!(volume.lookup(1, "orphan.bin").is_ok());
 }
 
 #[test]

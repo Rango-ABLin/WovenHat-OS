@@ -867,15 +867,53 @@ impl<D: BlockDevice> Volume<D> {
         mode: u32,
         now: u64,
     ) -> Result<u64, Error> {
+        let mut txn = Transaction::new();
+        let number = self.stage_create(&mut txn, dir_inode, name, mode, now)?;
+        self.commit(&txn)?;
+        Ok(number)
+    }
+
+    /// Create a file in `dir_inode` holding `data`, as one transaction.
+    ///
+    /// `create` followed by `write_file` commits the empty file first, so a
+    /// write that then fails (no space, device error) leaves an empty file
+    /// behind although the caller reports failure. Here the file either
+    /// appears with its contents or does not appear at all.
+    pub fn create_file(
+        &mut self,
+        dir_inode: u64,
+        name: &str,
+        mode: u32,
+        data: &[u8],
+        now: u64,
+    ) -> Result<u64, Error> {
+        if data.len() > MAX_FILE_SIZE {
+            return Err(Error::TooLarge);
+        }
+        let mut txn = Transaction::new();
+        let number = self.stage_create(&mut txn, dir_inode, name, mode, now)?;
+        self.stage_write(&mut txn, number, data, now)?;
+        self.commit(&txn)?;
+        Ok(number)
+    }
+
+    /// Stage a new empty file and its directory entry into `txn`.
+    fn stage_create(
+        &mut self,
+        txn: &mut Transaction,
+        dir_inode: u64,
+        name: &str,
+        mode: u32,
+        now: u64,
+    ) -> Result<u64, Error> {
         if name.is_empty() || name.len() > MAX_NAME || name.contains('/') {
             return Err(Error::InvalidName);
         }
-        let mut txn = Transaction::new();
-        let mut dir = self.inode(dir_inode)?;
+        let mut dir = self.inode_staged(txn, dir_inode)?;
         if dir.kind != KIND_DIR {
             return Err(Error::NotADirectory);
         }
-        let view = self.dir_entries(&txn, &dir)?;
+        let view = self.dir_entries(txn, &dir)?;
         if view.entries.iter().any(|entry| entry.matches(name)) {
             return Err(Error::Exists);
         }
@@ -890,36 +928,46 @@ impl<D: BlockDevice> Volume<D> {
             return Err(Error::NoSpace);
         };
 
-        let number = self.allocate_inode(&mut txn)?;
+        let number = self.allocate_inode(txn)?;
         let mut node = Inode::empty();
         node.mode = mode.max(1);
         node.links = 1;
         node.kind = KIND_FILE;
         node.created = now;
         node.modified = now;
-        self.stage_inode(&mut txn, number, &node)?;
+        self.stage_inode(txn, number, &node)?;
 
         let mut entry = DirEntry::empty();
         entry.inode = number;
         entry.kind = KIND_FILE;
         entry.name_len = name.len() as u16;
         entry.name[..name.len()].copy_from_slice(name.as_bytes());
-        self.stage_dir_entry(&mut txn, &dir, position, &entry)?;
+        self.stage_dir_entry(txn, &dir, position, &entry)?;
 
         dir.modified = now;
-        self.stage_inode(&mut txn, dir_inode, &dir)?;
-
-        self.commit(&txn)?;
+        self.stage_inode(txn, dir_inode, &dir)?;
         Ok(number)
     }
 
     /// Replace a file's contents, as one transaction.
     pub fn write_file(&mut self, inode: u64, data: &[u8], now: u64) -> Result<(), Error> {
+        let mut txn = Transaction::new();
+        self.stage_write(&mut txn, inode, data, now)?;
+        self.commit(&txn)
+    }
+
+    /// Stage a replacement of a file's contents into `txn`.
+    fn stage_write(
+        &mut self,
+        txn: &mut Transaction,
+        inode: u64,
+        data: &[u8],
+        now: u64,
+    ) -> Result<(), Error> {
         if data.len() > MAX_FILE_SIZE {
             return Err(Error::TooLarge);
         }
-        let mut txn = Transaction::new();
-        let mut node = self.inode_staged(&txn, inode)?;
+        let mut node = self.inode_staged(txn, inode)?;
         if !node.is_used() {
             return Err(Error::NotFound);
         }
@@ -931,7 +979,7 @@ impl<D: BlockDevice> Volume<D> {
         for slot in 0..DIRECT_BLOCKS {
             if slot < needed {
                 if node.direct[slot] == 0 {
-                    node.direct[slot] = self.allocate_block(&mut txn)?;
+                    node.direct[slot] = self.allocate_block(txn)?;
                 }
                 let mut sector = [0u8; SECTOR_SIZE];
                 let from = slot * SECTOR_SIZE;
@@ -941,7 +989,7 @@ impl<D: BlockDevice> Volume<D> {
                 txn.stage(block, &sector)?;
             } else if node.direct[slot] != 0 {
                 let block = node.direct[slot];
-                self.stage_bitmap(&mut txn, block, false)?;
+                self.stage_bitmap(txn, block, false)?;
                 node.direct[slot] = 0;
             }
         }
@@ -949,8 +997,7 @@ impl<D: BlockDevice> Volume<D> {
         node.size = data.len() as u64;
         node.modified = now;
         node.data_checksum = fnv1a(data);
-        self.stage_inode(&mut txn, inode, &node)?;
-        self.commit(&txn)
+        self.stage_inode(txn, inode, &node)
     }
 
     /// Read a file's contents into `out`, returning the byte count.
@@ -1471,9 +1518,15 @@ pub fn write_vfs_path_at_with_publish<T, E>(
     let (written, length) = with_ata_volume(|volume| {
         let inode = match volume.lookup(1, name) {
             Ok(entry) => entry.inode,
+            // Create and fill a missing file in one transaction, so a failed
+            // write cannot leave an empty file behind.
+            Err(Error::NotFound) if offset == 0 => {
+                volume.create_file(1, name, 0o600, bytes, now)?;
+                out[..bytes.len()].copy_from_slice(bytes);
+                return Ok((bytes.len(), bytes.len()));
+            }
             // WovenFS does not support sparse writes. Do not create a file
             // for an offset that cannot be valid for a new empty inode.
-            Err(Error::NotFound) if offset == 0 => volume.create(1, name, 0o600, now)?,
             Err(Error::NotFound) => return Err(Error::TooLarge),
             Err(error) => return Err(error),
         };
@@ -1573,13 +1626,10 @@ pub fn write_ata_file(
     if bytes.len() > MAX_FILE_SIZE {
         return Err(Error::TooLarge);
     }
-    with_ata_volume(|volume| {
-        let inode = match volume.lookup(1, name) {
-            Ok(entry) => entry.inode,
-            Err(Error::NotFound) => volume.create(1, name, 0o600, now)?,
-            Err(error) => return Err(error),
-        };
-        volume.write_file(inode, bytes, now)
+    with_ata_volume(|volume| match volume.lookup(1, name) {
+        Ok(entry) => volume.write_file(entry.inode, bytes, now),
+        Err(Error::NotFound) => volume.create_file(1, name, 0o600, bytes, now).map(|_| ()),
+        Err(error) => Err(error),
     })
     .unwrap_or(Err(Error::Device))
 }
