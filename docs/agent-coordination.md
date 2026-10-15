@@ -6,6 +6,13 @@ you start or finish something.
 
 ## Shared rules
 
+**Codex IPC gate ACTIVE: session 63244 (2026-10-15).** Revised real-state
+exhaustion/rollback probes and full inherited acceptance are running under
+the 488-file freeze at `C:\\WovenHat-OS\\audit-artifacts\\ipc-generation-20261015\\revision2\\`.
+Keep foreign acceptance/build chains on hold until Codex releases this slot.
+Earlier failed test-ordering diagnostics are preserved, not accepted. No IPC
+or full-stage production closure is claimed yet; source-only work may continue.
+
 **Codex handoff update (2026-10-15):** session 79248 finished, exit 0, full
 thread-generation runtime/preservation PASS; all 135 frozen hashes match.
 Codex now owns the next serialized slot for the earlier IPC rollover
