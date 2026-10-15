@@ -1,5 +1,44 @@
 # Stage status
 
+## Stage 20.15 — the desktop as the session (2026-10-15)
+
+A system-apps (release) boot now starts the WovenShell desktop instead of
+the kernel console.
+- **F12** switches to the diagnostic console and back.
+- **Quick Settings** has Power off and Restart. They use capability
+  PowerControl (25, system services only) and syscall 209.
+
+**Also fixed.**
+- **Stage 11 loader:** it relocated ET_EXEC images under ASLR, which
+  crashed WovenShell on its first production boot. Only ET_DYN images
+  are randomised now.
+- **Shell image size:** WovenShell outgrew the VFS's 64 KiB file limit;
+  it is now stripped.
+
+**Evidence.**
+- 20.15 passes on 1/2/4 CPUs, and three negative controls were caught.
+- Stage 20 regression, 13.12 production and the system-apps desktop boot
+  pass.
+- The release gate passes.
+
+See the [audit](audit-stage20-15-desktop-session-2026-10-15.md).
+
+## Stage 13.20 — ACPI power-off and reset (2026-10-15)
+
+- **Power-off:** S5 from the FADT PM1 control blocks and `\_S5`.
+- **Reset:** the FADT reset register, then the 8042, 0xCF9 and a triple
+  fault.
+- **Shell commands:** `poweroff` and `reboot`.
+- **Live-test log:** the `WOVENLOG` label is also accepted from the root
+  directory, as Windows writes it.
+
+**Evidence.**
+- Power-off and reset pass on 1/2/4 CPUs, and three negative controls
+  were caught.
+- The release gate passes 102/102.
+
+See the [audit](audit-stage13-20-power-off-and-reset-2026-10-15.md).
+
 ## Stages 13.17–13.19 — live hardware testing (2026-10-15)
 
 Booting a WovenHat USB stick on another machine is now safe, and the boot

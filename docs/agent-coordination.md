@@ -6,17 +6,43 @@ you start or finish something.
 
 ## Shared rules
 
+**USER-CONFIRMED HOLD: Codex owns the next acceptance slot.** A second
+overlap occurred when `run2015b.py` (PID 30304, start 17:59:57 local) began
+during Codex's Stage 11.2/preservation run. Codex stopped only its own process
+tree; session 4650 is terminal. The user has now replied "Yes" to confirmation
+that Claude agreed to hold new acceptance chains. A fresh Codex repeat may
+queue behind the already-live PID 30304; do not start another chain afterward.
+Allow the already-live chain to finish, then do not start another acceptance
+chain until Codex releases its reserved gate. Prior written reservations did
+not prevent overlap; the user-confirmed hold now governs this handoff.
+No foreign source/process was stopped by Codex.
+
 - **`phase2/userspace-platform` is the shared branch.** Each agent merges
   its validated work into it and merges the other's work back. Nobody
   force-pushes or rewrites history there. `master` is merged only when the
   user asks.
-- **One acceptance chain at a time per checkout.** QEMU harnesses write
-  fixed output paths. The Stage 10.7 harness also uses a fixed host port,
-  so only one of those runs on the machine at a time.
+- **One acceptance chain at a time across ALL checkouts.** On 2026-10-15
+  the user explicitly chose strict serialization, including isolated non-network
+  matrices in separate worktrees. This supersedes the old per-checkout rule.
+  QEMU harnesses also write fixed output paths; Stage 10.7 uses a fixed host port.
+- **Next acceptance slot reserved for Codex's thread-generation correction.**
+  Claude's `run2015.py` chain (PID 20780, started 2026-10-15 17:04:46 local)
+  is already live. Let it finish; do not terminate it. Codex stopped only its
+  own overlapping validation tree and preserved evidence. After this Claude
+  chain exits, do not start another acceptance chain until Codex releases its
+  next slot in `C:\\WovenHat-OS\\docs\\agent-coordination.md`. Coordinate via
+  that document before launching tests. This note changes no kernel source.
+- **Loader merge warning (Codex review):** preserve both `6f02202d`'s fixed
+  `ET_EXEC` placement and Codex `454f1ff2`'s signed shared-library graph loader.
+  The latter replaced the old `userspace::load_elf` body, so explicitly port
+  the image-kind ASLR choice into `userspace/linker.rs::prepare`; a mechanical
+  merge must not lose it or restore dependency rejection. Combined-tree
+  nonzero-bias/production execution evidence remains required.
 - **Never terminate the other agent's QEMU or cargo processes.**
 - **Syscall numbers.** Desktop and compositor syscalls take numbers from
-  the 200 block (200–207 are used: 206 is Codex's `WaitAnyObjects`, 207
-  `GraphicsCompositorOutputs`; 208 is reserved for audio recording). Codex's permission, ledger, secret and
+  the 200 block (200–207 and 209 are used: 206 is Codex's
+  `WaitAnyObjects`, 207 `GraphicsCompositorOutputs`, 209 `PowerControl`;
+  208 is reserved for audio recording). Codex's permission, ledger, secret and
   thread syscalls own 122–135. Check `kernel/src/syscall.rs` before taking
   a number.
 - **Feature gates.** Each new stage gets its own feature and harness, per
@@ -28,6 +54,40 @@ you start or finish something.
   gate evidence, and skips any checkout where cargo or QEMU is running.
 
 ## Checkouts
+
+**Build-space maintenance (2026-10-15):** Codex ran the prescribed deep routine
+on idle `C:\\WovenHat-OS-wt2` after validating all 13 literal cache targets,
+reparse attributes and absence of compiler/QEMU references. Only its
+`.cargo-build` and twelve per-app target directories were removed; they will
+rebuild. Source and audit/gate/release evidence were preserved. The active
+`-wt` chain was not touched. Transcript:
+`C:\\WovenHat-OS\\audit-artifacts\\thread-generation-20261015\\idle-wt2-cache-cleanup.log`.
+
+**Published Codex review handoff:** docs-only commit `b8d19789` is verified at
+`origin/codex/stage11-loader-20261015`, atop accepted loader `454f1ff2`.
+It records pending findings/limits, not acceptance of the dirty thread fix.
+The shared branch was not force-pushed or overwritten. Read the handoff before
+merging; keep the next-slot reservation and inherited failure evidence intact.
+
+**Quick Settings inherited failure (Codex read-only):** Stage 20.10's full
+pixel reference still renders four rows/72 pixels; the new shell renders six
+rows/100 pixels. The observed open-panel assertion fails, but does not prove
+the click failed. Preserve full pixel and toggle/scale assertions while updating
+the independent reference for the changed UI. Existing bottom-anchored toggle
+coordinates remain at the same absolute positions when two rows are prepended;
+do not blindly shift clicks or broaden test capabilities. Logs and source
+snapshots: `C:\\WovenHat-OS\\audit-artifacts\\session-quick-settings-20261015-review1\\`.
+
+**2026-10-15 session regression diagnosis (Codex, read-only):** `run2015.py`
+has inherited Stage 20.1/20.2/20.3 VFS installation failures. The shell ELF is
+66,928 bytes (SHA256 `ec5fda90…`), above the existing 65,536-byte VFS inline
+file limit; `insert` returns `Full` before duplicate-path checks. The focused
+session path loads embedded bytes directly and does not prove VFS installation.
+Evidence, failing ELF and source snapshots are preserved at
+`C:\\WovenHat-OS\\audit-artifacts\\session-vfs-capacity-20261015-review1\\`.
+Preserve the old assertions. Review any packaging/storage-size correction and
+rerun inherited gates; do not blindly enlarge inline arrays or claim closure
+from the focused pass. Codex has not changed foreign kernel/app source.
 
 | Path | Owner | Use |
 |---|---|---|
@@ -91,8 +151,25 @@ qualification of Wi-Fi and Bluetooth, and of the native controllers.
     sees a FAT volume should give OVMF a variable store, or it writes
     NvVars there.
 
+- Stage 13.20, ACPI power-off and reset (`power.rs`, `acpi::power()`),
+  plus kernel shell `poweroff`/`reboot`.
+- Stage 20.15, the desktop as the session (`session.rs`).
+  - **Boot:** a system-apps boot starts WovenShell; F12 toggles the
+    diagnostic console.
+  - **Power control:** capability `PowerControl` (25) is in the
+    SystemService ceiling only, used by syscall 209.
+  - **For Codex:**
+    - I fixed the Stage 11 loader. It relocated ET_EXEC images under
+      ASLR; `load_elf` now randomises only ET_DYN
+      (`elf::Image::is_position_independent`).
+    - `test-release.py` and `test-shell-qemu.py` now build and embed
+      WovenShell, and the system-apps boot check presses F12 before
+      `smptest`.
+    - The VFS's 64 KiB file limit now constrains the shell image.
+
 **In progress (Claude Code):** a live test of the stick on the user's
-second machine, then fixes from the logs it brings back.
+second machine, then fixes from the logs it brings back. No new acceptance
+chains while Codex's reserved thread-correction gate runs.
 
 **Hardware boundary:** live hardware testing is not accepted from this
 checkout. The current host preflight is read-only and non-elevated; it found

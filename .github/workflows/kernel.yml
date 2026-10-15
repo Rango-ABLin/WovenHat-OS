@@ -354,6 +354,11 @@ jobs:
             for mode in test production unlabelled; do
               python3 scripts/test-stage13-19-livelog.py --mode "$mode" --cpus "$cpu" --timeout 300 --qemu "$qemu" --firmware "$ovmf_code" --firmware-vars "$ovmf_vars"
             done
+            python3 scripts/test-stage13-19-livelog.py --mode windows-label --cpus "$cpu" --timeout 300 --qemu "$qemu" --firmware "$ovmf_code" --firmware-vars "$ovmf_vars"
+            for mode in poweroff reboot; do
+              python3 scripts/test-stage13-20-power.py --mode "$mode" --cpus "$cpu" --timeout 240 --qemu "$qemu" --firmware "$ovmf_code"
+            done
+            python3 scripts/test-stage20-15-session.py --cpus "$cpu" --timeout 300 --qemu "$qemu" --firmware "$ovmf_code"
           done
       - name: Stage 13.9 WovenWiFi full-contract 1/2/4-core acceptance
         shell: bash
