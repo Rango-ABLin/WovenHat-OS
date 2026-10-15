@@ -27,8 +27,8 @@ The Stage 11.2 thread-generation saturation correction is accepted: permanent
 retirement and five actual-source host regressions pass, as do full Stage 10.7
 preservation and Stage 10.8–11.5 matrices on 1/2/4 CPUs on the unchanged frozen
 sources. The generation audit retains the original three retirement-path
-failures and final serialized evidence. Negative process/thread exit-result
-encoding, compiler TLS and full Stage 11 production closure remain open.
+failures and final serialized evidence. Compiler TLS, loader interoperability
+and full Stage 11 production closure remain open.
 
 **IPC correction accepted:** permanent exhausted-slot skipping passed durable
 actual-source allocator regressions, real-state installation/rollback/teardown
@@ -48,15 +48,15 @@ scheduler liveness and revalidated in the original reap transaction, without
 inverting lock order. The common 500-input full acceptance and real 1/2/4-CPU
 authority/error tests pass. See the process-wait ownership audit for limits.
 
-**Signed-status decision pending:** actual-source host tests
-reproduced process-wait and thread-join sentinel collisions; zero-extended
-32-bit success payloads are integrated. A real libwoven Ring-3 fixture then
-exposed COW read-only ancestor and foreign-wait classification defects. Their
-corrections and separate audits are integrated; the complete revised 1/2/4-CPU
-fixture, original thread gate and exact resource baselines pass. Full combined
-acceptance completed successfully in session 94658 under the 500-file freeze;
-the remaining component decisions are recorded next in prerequisite order. The former IPC freeze is
-historical evidence, not a claim that these new source edits preserve its hash.
+**Signed-status correction accepted:** after the two earlier prerequisite
+decisions, zero-extended 32-bit process-wait/thread-join payloads passed actual
+kernel/libwoven host and Ring-3 tests on 1/2/4 CPUs, with original thread
+assertions and exact resource baselines preserved. Session 94658 exited 0 after
+full host/lint QA, Stage 10.7 and Stage 10.8–11.5 preservation, with all 500
+frozen inputs unchanged. See the signed-status and combined acceptance audits.
+This is not full Stage 11 or a release qualification. Compiler TLS, ET_EXEC
+placement/interoperability, combined-tree, persistent security/recovery and
+native hardware remain open. Earlier manifests are retained historical baselines.
 
 ## Presentation and repaint performance (2026-10-15)
 

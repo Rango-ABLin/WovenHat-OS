@@ -6,6 +6,15 @@ you start or finish something.
 
 ## Shared rules
 
+**Current handoff (2026-10-15):** session 94658 finished, exit 0, full
+signed-status/earlier-prerequisite acceptance PASS; all 500 frozen inputs match.
+The COW, wait-ownership and signed-status corrections are accepted separately
+in prerequisite order. Codex now reserves the next serialized slot for Stage 11
+loader interoperability, first preserving fixed ET_EXEC placement in the graph
+loader, then compiler TLS. Keep foreign acceptance/build chains on hold until
+this reservation is released. Older ACTIVE/queued notes below are historical.
+No full-stage/release/hardware readiness or combined-tree acceptance is claimed.
+
 **ACTIVE Codex chain: session 94658 (2026-10-15).** Signed exit payloads,
 earlier COW ancestor permissions and wait-ownership classification are integrated
 but unaccepted. The final focused libwoven fixture passed 1/2/4 CPUs; the full

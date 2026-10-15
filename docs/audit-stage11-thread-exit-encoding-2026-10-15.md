@@ -1,4 +1,26 @@
-# Process/thread exit-result encoding — integrated, acceptance pending
+# Process/thread exit-result encoding — bounded correction accepted
+
+## Final acceptance — 2026-10-15
+
+Following COW acceptance `79b2f5a` and wait-ownership acceptance `6c57a17`,
+the signed-status correction in `ad11e1f1` is accepted. Session 94658 exited 0
+with full combined acceptance PASS; all 500 frozen inputs matched at completion
+and independent inspection. The expanded actual-libwoven fixture and original
+thread gate passed on 1/2/4 CPUs. All six process statuses and twelve natural/
+cancelled thread cases, stale/double joins, child ownership and genuine errors,
+signal termination and exact resource baselines are covered. Full Stage 10.7,
+all twenty-one Stage 10.8–11.5 runtime boots, all host tests, nineteen libwoven
+and nineteen Python tests, build and warning-denying host/fixture/production/
+fifteen-feature Clippy passed. See [combined evidence](audit-exit-status-combined-acceptance-2026-10-15.md)
+for authoritative paths and independent audit checks.
+
+The public wait type, syscall numbers and full-width errors are unchanged;
+successful signed exit statuses now have an unambiguous low-32-bit payload.
+This accepts the bounded encoding correction, not full Stage 11, combined-tree
+integration, a new release or hardware readiness. Compiler TLS, fixed-ET_EXEC
+placement and general loader interoperability are the next open prerequisites.
+Pending/read-only statements below are the retained investigation timeline,
+not the final acceptance decision. No original failing evidence was removed.
 
 ## Current executable correction — 2026-10-15
 

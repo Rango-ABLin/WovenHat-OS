@@ -317,20 +317,18 @@ write-through audit.
 
 ## Stage 11.2 scheduler-backed thread ownership (2026-10-14)
 
-Accepted COW foundation correction (2026-10-15): user-mapping ancestors
+Accepted foundation/status corrections (2026-10-15): user-mapping ancestors
 are explicitly writable while leaves retain W^X/RELRO/COW policy, including
-read-only COW/file mappings; this prevents sole-owner COW refaults. The 500-input
-combined chain passed full inherited runtime and warning-denying QA; see the
-COW audit. Process-wait ownership is also accepted on that unchanged baseline;
-see its separate audit. The signed-status decision is recorded next.
-Process wait
+read-only COW/file mappings; this prevents sole-owner COW refaults. Process wait
 checks parent ownership before scheduler liveness, without nesting those locks,
 and rechecks in the original reap transaction. Process wait and thread join
 share a zero-extending 32-bit exit payload encoder, separate from 64-bit errors.
 The real libwoven fixture catches these boundaries and preserves original
-Stage 11.2 assertions. See the three dedicated audits. 1/2/4-CPU focused execution
-passes; the combined runtime chain is complete, with component decisions recorded
-in prerequisite order. None is a release/hardware qualification.
+Stage 11.2 assertions. All three bounded corrections are accepted in prerequisite
+order on the unchanged 500-input baseline, with full Stage 10.7/10.8–11.5
+preservation on 1/2/4 CPUs and warning-denying host/fixture/kernel QA. See the
+three dedicated audits and combined evidence. None is a release/hardware
+qualification or complete compiler-TLS/loader interoperability.
 
 Earlier-stage IPC follow-up (2026-10-15, bounded correction accepted): `HandleSpace`
 now skips empty slots whose preserved 24-bit generation is already maximum.
@@ -343,7 +341,8 @@ Durable host coverage is now part of `cargo test`; a `qemu-test`-guarded
 post-SMP probe exercises real installation rollback, queued escrow, waiters,
 lineage and frame cleanup. Its final revised full acceptance chain exited 0,
 including full Stage 10.7 and Stage 10.8–11.5 matrices on 1/2/4 CPUs. All 488
-frozen inputs matched. Negative process/thread exit-result encoding is next;
+frozen inputs matched at that increment's acceptance. Signed-status encoding
+has since passed its own separate 500-input acceptance;
 full runtime, release and hardware production closure remain open.
 
 The registry now reserves generation `u32::MAX` as a permanent exhaustion
@@ -352,7 +351,8 @@ release paths retain their existing checked generation advancement under the
 rank-10 registry guard. The accepted bounded correction has five actual-source
 host regressions plus full Stage 10.7 and Stage 10.8–11.5 preservation on
 1/2/4 CPUs with unchanged frozen sources; see the thread-generation audit.
-The negative exit-result ABI collision and compiler-compatible TLS remain open.
+The exit-result ABI collision has since been corrected and accepted separately;
+compiler-compatible TLS remains open.
 
 `TaskControlBlock` carries both the stable process owner and an optional
 generation-safe thread ID. User-thread creation maps a private NX stack and a
