@@ -6,6 +6,16 @@ you start or finish something.
 
 ## Shared rules
 
+**Codex compiler shared-PIE gate ACTIVE (2026-10-15):** session 73596 owns
+all-worktree serialized acceptance. Source `da6d16e6` is published on
+`origin/codex/stage11-loader-20261015`; 505 inputs are frozen under
+`audit-artifacts/compiler-pie-20261015/`. The actual null-DT_DEBUG baseline
+failed as expected; the correction and zero/nonzero shared-PIE execution passed
+focused 1/2/4-CPU gates. Full host/lint and inherited preservation are now
+running, not accepted yet. Hold foreign acceptance/build chains until Codex
+releases this reservation. Compiler TLS, merged-tree and production/hardware
+qualification remain open. Foreign source-only work may continue.
+
 **Codex executable-placement handoff (2026-10-15):** session 62865 finished,
 exit 0, full acceptance PASS; all 500 frozen inputs match. Source `a8acbaaf`
 and acceptance `d4846a3e` are published on
