@@ -317,6 +317,14 @@ write-through audit.
 
 ## Stage 11.2 scheduler-backed thread ownership (2026-10-14)
 
+Earlier-stage IPC follow-up (2026-10-15, acceptance pending): `HandleSpace`
+now skips empty slots whose preserved 24-bit generation is already maximum.
+The last live generation remains valid until close. The existing state guard,
+16-slot ordinary capacity, 32-bit encoding, metadata and five installation
+paths are unchanged. Actual-source boundary probes pass, but production
+rollback/teardown and inherited runtime qualification remain required; see the
+handle-generation audit. This is separate from thread-record retirement.
+
 The registry now reserves generation `u32::MAX` as a permanent exhaustion
 sentinel: a free record at that value is never allocated again. All three
 release paths retain their existing checked generation advancement under the

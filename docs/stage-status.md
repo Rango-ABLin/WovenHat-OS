@@ -30,6 +30,13 @@ sources. The generation audit retains the original three retirement-path
 failures and final serialized evidence. Negative exit-result encoding, earlier
 IPC rollover, compiler TLS and full Stage 11 production closure remain open.
 
+**IPC correction in progress:** actual-source host execution reproduced stale
+same-process handle reissue at the 24-bit generation boundary. Permanent
+exhausted-slot skipping is integrated; all five allocator probe tests and
+production kernel Clippy pass. Persistent repository regressions, installation
+rollback/teardown coverage and inherited runtime acceptance are still pending.
+See the handle-generation audit; this is not Stage 8–10 production closure.
+
 ## Presentation and repaint performance (2026-10-15)
 
 A fix to accepted Stage 19/20 behaviour, found by the Stage 20.7 fade gate.

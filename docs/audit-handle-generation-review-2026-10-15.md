@@ -1,4 +1,41 @@
-# Handle generation review — source findings, not acceptance
+# Handle generation review — IPC correction integrated, acceptance pending
+
+## Executable IPC boundary finding — 2026-10-15
+
+After session 79248 completed its thread-generation gate with exit 0, the
+serialized actual-source allocator probe reproduced all three exhaustion
+defects. Evidence:
+`audit-artifacts/thread-generation-20261015/ipc-generation-probe-1792082615316658700/`.
+Warning-denying compilation passed; execution exited 101 with three failing
+boundary tests and two passing ordinary-capacity/metadata tests. The surviving
+namespace reissued stale raw handle `257`. Exhausted-slot skipping and permanent
+all-slot refusal also failed. These are now executable defects, not only source
+candidates.
+
+The integrated allocator selects an empty slot only when its preserved
+generation is below `0x00ff_ffff`, then increments without wrapping. The last
+generation remains usable until close; subsequent allocation permanently skips
+that exhausted slot. No handle format, rights, lineage, service class, object
+reference path, lock, allocation or wait was added or changed. The same five
+actual-source probe tests pass with warnings denied in
+`ipc-generation-probe-1792082651878246200/`. Each evidence directory retains
+source/extraction hashes, compiler version, commands, logs and exit statuses.
+
+This is **not accepted IPC production closure**: persistent repository boundary
+regressions, all five installation/rollback paths, owner/waiter/frame cleanup,
+host/kernel lint and inherited 1/2/4-CPU runtime preservation remain required.
+The original 135-file freeze is now historical evidence of the accepted thread
+increment; the IPC edit deliberately begins a new correction baseline. Do not
+replace that original manifest or claim its old runtime results cover this edit.
+The earlier read-only findings and prepared-diagnostic descriptions below are
+retained investigation history.
+
+Formatting and production freestanding kernel Clippy (`-D warnings`) pass.
+The first PowerShell wrapper reported exit 1 despite Cargo's successful compile;
+its transcript is retained in `ipc-production-clippy.txt`. Repeating through
+explicit native-exit capture produced `IPC production Clippy exit: 0`, retained
+in `ipc-production-clippy-repeat.txt`. Neither check establishes host-all-target
+or affected-feature/runtime acceptance. Those remain required.
 
 This read-only review was performed while the thread-generation runtime chain
 waited behind Claude's live release validation. No kernel source or frozen

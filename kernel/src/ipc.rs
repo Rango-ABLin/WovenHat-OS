@@ -368,6 +368,10 @@ struct HandleSpace {
 }
 
 impl HandleSpace {
+    // All 24 generation bits are valid in a live handle. Once that last
+    // handle is closed, its slot must never reissue an earlier authority.
+    const MAX_GENERATION: u32 = 0x00ff_ffff;
+
     const EMPTY: Self = Self {
         owner: 0,
         entries: [None; MAX_HANDLES],
@@ -393,12 +397,14 @@ impl HandleSpace {
         let slot = self
             .entries
             .iter()
-            .position(Option::is_none)
+            .enumerate()
+            .find_map(|(slot, entry)| {
+                (entry.is_none() && self.generations[slot] < Self::MAX_GENERATION).then_some(slot)
+            })
             .ok_or(Error::HandleTableFull)?;
-        let mut generation = self.generations[slot].wrapping_add(1) & 0x00ff_ffff;
-        if generation == 0 {
-            generation = 1;
-        }
+        // Selection above proves this addition fits the ABI generation field.
+        // Preserve exhausted counters on remove and retire them permanently.
+        let generation = self.generations[slot] + 1;
         self.generations[slot] = generation;
         self.entries[slot] = Some(HandleEntry {
             object,

@@ -63,10 +63,12 @@ test session.
    exited 0 with its final pass marker after Stage 11.2, full Stage 10.7
    preservation and Stage 10.8–11.5 matrices on 1/2/4 CPUs. All 135 frozen
    source hashes still match. This is not full Stage 11 or release acceptance.
-2. Reproduce and resolve the earlier IPC handle-generation rollover candidate
-   before advancing loader work. The source review identifies a 24-bit counter
-   wrapping to one in a surviving process-local slot, but executable regression
-   evidence is still required. See `audit-handle-generation-review-2026-10-15.md`.
+2. Accept the earlier IPC handle-generation correction before advancing loader
+   work. Actual-source execution reproduced stale same-process handle reissue
+   and two other exhaustion defects. Permanent exhausted-slot skipping is now
+   integrated and five allocator probe tests pass; production installation,
+   rollback/teardown and inherited runtime acceptance remain pending. See
+   `audit-handle-generation-review-2026-10-15.md`.
 3. Correct the Stage 11.2 signed exit-result sentinel collision for `-1` and
    `-2` through both ordinary exit and cancellation/join. The source finding
    and required host/Ring-3 evidence are in
