@@ -159,9 +159,13 @@ impl Ring {
 
     fn push(&mut self, mut trb: Trb) -> u64 {
         if self.index == (PAGE_SIZE / 16) - 1 {
+            // The link TRB carries the cycle the consumer is on, so it follows
+            // it back to the start; only then does the producer's cycle flip.
+            // Written after the flip, it would carry the new cycle, and a
+            // controller that had not yet fetched it would stop there.
+            self.install_link();
             self.index = 0;
             self.cycle = !self.cycle;
-            self.install_link();
         }
         if self.cycle {
             trb.control |= 1;
@@ -209,6 +213,60 @@ struct InputDevice {
     pending: u64,
     _output_context: Option<DmaPage>,
     _ep0_ring: Option<Ring>,
+}
+
+/// Input reports kept while a storage transfer waits (see `stashed`).
+#[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
+const STASHED_REPORTS: usize = 32;
+/// Transfer Request Block types the USB disk's stall recovery uses.
+#[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
+const TRB_TYPE_RESET_ENDPOINT: u32 = 14;
+#[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
+const TRB_TYPE_SET_TR_DEQUEUE: u32 = 16;
+/// Completion codes: success, stall, short packet.
+#[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
+const COMPLETION_STALL: u8 = 6;
+/// TEST UNIT READY attempts while a disk becomes ready.
+#[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
+const READY_ATTEMPTS: usize = 10;
+
+/// The USB disk: a Bulk-Only SCSI device with its own slot, one ring per
+/// bulk endpoint, a data page and a page for the command and status
+/// wrappers. One command is in flight at a time, under the controller lock.
+#[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
+struct StorageDevice {
+    slot_id: u8,
+    port: u8,
+    interface: crate::usb_msc::Interface,
+    in_dci: u8,
+    out_dci: u8,
+    in_ring: Ring,
+    out_ring: Ring,
+    data: DmaPage,
+    wrappers: DmaPage,
+    tag: u32,
+    blocks: u64,
+    block_size: u32,
+    vendor: [u8; 8],
+    product: [u8; 16],
+    /// Kept for control transfers (stall recovery) and so the slot's
+    /// contexts outlive enumeration.
+    output_context: Option<DmaPage>,
+    ep0_ring: Option<Ring>,
+}
+
+/// Why a USB disk command failed.
+#[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum StorageError {
+    /// The device reported CHECK CONDITION; REQUEST SENSE says why.
+    CheckCondition,
+    /// A transfer stalled or failed, or the status wrapper was invalid.
+    Transport,
+    /// The controller did not complete the transfer in time.
+    Timeout,
+    /// No disk, or the request does not fit it.
+    NoDisk,
 }
 
 #[derive(Clone, Copy)]
@@ -265,6 +323,15 @@ pub struct XhciController {
     bt_acl_out_buffer: Option<DmaPage>,
     #[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
     inputs: [Option<InputDevice>; MAX_INPUTS],
+    /// The USB disk (Stage 13.18).
+    #[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
+    storage: Option<StorageDevice>,
+    /// Input reports a storage transfer drained while waiting for its own
+    /// completion, kept for the input worker's next pass.
+    #[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
+    stashed: [(HidKind, usize, [u8; MAX_REPORT]); STASHED_REPORTS],
+    #[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
+    stashed_len: usize,
 }
 
 impl XhciController {
@@ -364,6 +431,12 @@ impl XhciController {
             bt_acl_out_buffer: None,
             #[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
             inputs: [const { None }; MAX_INPUTS],
+            #[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
+            storage: None,
+            #[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
+            stashed: [(HidKind::Other, 0, [0; MAX_REPORT]); STASHED_REPORTS],
+            #[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
+            stashed_len: 0,
         };
         controller.reset_port(connected_port)?;
         controller.slot_id = controller.enable_slot()?;
@@ -463,7 +536,13 @@ impl XhciController {
 
     fn enumerate_hid(&mut self) -> Result<HidSummary, InitError> {
         self.address_device()?;
+        let (descriptor, total_length, configuration) = self.read_configuration()?;
+        self.finish_hid(&descriptor, total_length, configuration)
+    }
 
+    /// Check the addressed device's device descriptor, then read its whole
+    /// configuration descriptor: (buffer, length, configuration value).
+    fn read_configuration(&mut self) -> Result<(DmaPage, usize, u8), InitError> {
         let mut descriptor = DmaPage::allocate_zeroed().ok_or(InitError::DmaUnavailable)?;
         self.control_in(
             0x80,
@@ -503,6 +582,11 @@ impl XhciController {
             &mut descriptor,
             total_length,
         )?;
+        Ok((descriptor, total_length, configuration))
+    }
+
+    /// Configure the addressed device as a HID device from its configuration.
+    fn finish_hid(&mut self, descriptor: &DmaPage, total_length: usize, configuration: u8) -> Result<HidSummary, InitError> {
         let hid = parse_hid_interface(&descriptor.bytes()[..total_length], configuration)
             .ok_or(InitError::HidNotFound)?;
 
@@ -1081,7 +1165,34 @@ impl XhciController {
                     Err(_) => continue,
                 };
             }
-            let summary = self.enumerate_hid();
+            // A mass-storage device becomes the USB disk (Stage 13.18);
+            // anything else is tried as an input device.
+            let Ok((descriptor, total_length, configuration)) =
+                self.address_device().and_then(|()| self.read_configuration())
+            else {
+                self.slot_id = 0;
+                continue;
+            };
+            if self.storage.is_none() {
+                if let Some(interface) = crate::usb_msc::parse_interface(&descriptor.bytes()[..total_length], configuration) {
+                    match self.attach_storage(port, interface) {
+                        Ok(device) => {
+                            crate::serial::write_line(format_args!(
+                                "[USB] mass storage on port {}: {} blocks of {} bytes",
+                                port, device.blocks, device.block_size
+                            ));
+                            self.storage = Some(device);
+                        }
+                        Err(error) => {
+                            crate::serial::write_line(format_args!("[USB] mass storage on port {}: {:?}", port, error));
+                        }
+                    }
+                    self.slot_id = 0;
+                    self.hid = None;
+                    continue;
+                }
+            }
+            let summary = self.finish_hid(&descriptor, total_length, configuration);
             let device = summary.ok().and_then(|summary| {
                 let hid = self.hid?;
                 // Boot keyboards and mice have fixed reports; anything else
@@ -1159,35 +1270,49 @@ impl XhciController {
         // Acknowledge first, so an event written while draining raises a
         // fresh interrupt rather than being folded into this one.
         let _ = mmio_write32(self.runtime_base + 0x20, 0b11);
-        let doorbell_base = self.doorbell_base;
         let mut count = 0;
+        // Reports a storage transfer drained come first, in arrival order.
+        let stashed = self.stashed_len.min(REPORTS_PER_PASS);
+        reports[..stashed].copy_from_slice(&self.stashed[..stashed]);
+        self.stashed.copy_within(stashed..self.stashed_len, 0);
+        self.stashed_len -= stashed;
+        count += stashed;
         while count < REPORTS_PER_PASS {
             let Ok(Some(event)) = self.try_event() else { break };
-            if trb_type(event.control) != TRB_TYPE_TRANSFER_EVENT {
-                continue;
-            }
-            let slot = ((event.control >> 24) & 0xff) as u8;
-            let Some((index, device)) = self.inputs.iter_mut().enumerate().find_map(|(index, device)| {
-                device
-                    .as_mut()
-                    .filter(|device| device.slot_id == slot && device.pending == event.parameter)
-                    .map(|device| (index, device))
-            }) else {
-                continue;
-            };
-            let code = completion_code(event.status);
-            if code == 1 || code == 13 {
-                fence(Ordering::Acquire);
-                let mut report = [0u8; MAX_REPORT];
-                report[..device.length].copy_from_slice(&device.buffer.bytes()[..device.length]);
-                reports[count] = (device.kind, index, report);
+            if let Some(report) = self.route_input_event(event) {
+                reports[count] = report;
                 count += 1;
-                INPUT_REPORTS.fetch_add(1, Ordering::Relaxed);
             }
-            // Keep the device's stream alive whatever the completion said.
-            let _ = arm_input(doorbell_base, device);
         }
         count
+    }
+
+    /// An input device's completed transfer: copy its report out and re-arm
+    /// it. `None` for any other event, or a completion without a report.
+    #[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
+    fn route_input_event(&mut self, event: Trb) -> Option<(HidKind, usize, [u8; MAX_REPORT])> {
+        if trb_type(event.control) != TRB_TYPE_TRANSFER_EVENT {
+            return None;
+        }
+        let doorbell_base = self.doorbell_base;
+        let slot = ((event.control >> 24) & 0xff) as u8;
+        let (index, device) = self.inputs.iter_mut().enumerate().find_map(|(index, device)| {
+            device
+                .as_mut()
+                .filter(|device| device.slot_id == slot && device.pending == event.parameter)
+                .map(|device| (index, device))
+        })?;
+        let code = completion_code(event.status);
+        let report = (code == 1 || code == 13).then(|| {
+            fence(Ordering::Acquire);
+            let mut report = [0u8; MAX_REPORT];
+            report[..device.length].copy_from_slice(&device.buffer.bytes()[..device.length]);
+            INPUT_REPORTS.fetch_add(1, Ordering::Relaxed);
+            (device.kind, index, report)
+        });
+        // Keep the device's stream alive whatever the completion said.
+        let _ = arm_input(doorbell_base, device);
+        report
     }
 
     pub fn summary(&self) -> (u8, u8, u8, u8) {
@@ -1198,6 +1323,343 @@ impl XhciController {
             self.slot_id,
         )
     }
+}
+
+/// Stage 13.18: the USB disk.
+#[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
+impl XhciController {
+    /// Configure the addressed device's Bulk-Only interface and bring the
+    /// disk up: INQUIRY, TEST UNIT READY until ready, READ CAPACITY. Only
+    /// 512-byte blocks addressable by 10-byte commands are accepted.
+    fn attach_storage(&mut self, port: u8, interface: crate::usb_msc::Interface) -> Result<StorageDevice, InitError> {
+        let in_dci = endpoint_dci(interface.bulk_in)?;
+        let out_dci = endpoint_dci(interface.bulk_out)?;
+        if in_dci == out_dci {
+            return Err(InitError::DescriptorInvalid);
+        }
+        self.control_no_data(0x00, USB_REQUEST_SET_CONFIGURATION, u16::from(interface.configuration), 0)?;
+
+        let in_ring = Ring::new(DmaPage::allocate_zeroed().ok_or(InitError::DmaUnavailable)?);
+        let out_ring = Ring::new(DmaPage::allocate_zeroed().ok_or(InitError::DmaUnavailable)?);
+        let mut input = DmaPage::allocate_zeroed().ok_or(InitError::DmaUnavailable)?;
+        let output = self.output_context.as_ref().ok_or(InitError::CommandFailed)?;
+        input.bytes_mut()[self.context_size..self.context_size * 2].copy_from_slice(&output.bytes()[..self.context_size]);
+        write_u32(input.bytes_mut(), 4, 1 | (1_u32 << in_dci) | (1_u32 << out_dci));
+        let slot_offset = self.context_size;
+        let slot_dword0 = (read_u32(input.bytes(), slot_offset) & !(0x1f << 27)) | (u32::from(in_dci.max(out_dci)) << 27);
+        write_u32(input.bytes_mut(), slot_offset, slot_dword0);
+        let speed = self.port_speed()?;
+        write_bluetooth_endpoint_context(input.bytes_mut(), self.context_size, in_dci, interface.bulk_in,
+            interface.bulk_in_max_packet, 0, speed, in_ring.page.physical, USB_ENDPOINT_BULK)?;
+        write_bluetooth_endpoint_context(input.bytes_mut(), self.context_size, out_dci, interface.bulk_out,
+            interface.bulk_out_max_packet, 0, speed, out_ring.page.physical, USB_ENDPOINT_BULK)?;
+        fence(Ordering::Release);
+        let command_ptr = self.command_ring.push(Trb {
+            parameter: input.physical,
+            status: 0,
+            control: (TRB_TYPE_CONFIGURE_ENDPOINT << 10) | (u32::from(self.slot_id) << 24),
+        });
+        mmio_write32(self.doorbell_base, 0)?;
+        self.wait_command_completion(command_ptr)?;
+
+        let mut device = StorageDevice {
+            slot_id: self.slot_id,
+            port,
+            interface,
+            in_dci,
+            out_dci,
+            in_ring,
+            out_ring,
+            data: DmaPage::allocate_zeroed().ok_or(InitError::DmaUnavailable)?,
+            wrappers: DmaPage::allocate_zeroed().ok_or(InitError::DmaUnavailable)?,
+            tag: 1,
+            blocks: 0,
+            block_size: 0,
+            vendor: [0; 8],
+            product: [0; 16],
+            output_context: self.output_context.take(),
+            ep0_ring: self.ep0_ring.take(),
+        };
+
+        let inquiry = self.scsi(&mut device, &crate::usb_msc::inquiry(36), Direction::In(36));
+        if inquiry.is_ok() {
+            device.vendor.copy_from_slice(&device.data.bytes()[8..16]);
+            device.product.copy_from_slice(&device.data.bytes()[16..32]);
+        }
+        // A disk reports UNIT ATTENTION, or not ready, until it settles;
+        // REQUEST SENSE clears the condition between attempts.
+        let mut ready = false;
+        for _ in 0..READY_ATTEMPTS {
+            if self.scsi(&mut device, &crate::usb_msc::test_unit_ready(), Direction::None).is_ok() {
+                ready = true;
+                break;
+            }
+            let sensed = self.scsi(&mut device, &crate::usb_msc::request_sense(18), Direction::In(18)).is_ok();
+            // NOT READY, MEDIUM NOT PRESENT: an empty card reader never settles.
+            if sensed && matches!(crate::usb_msc::parse_sense(&device.data.bytes()[..18]), Some((0x02, 0x3a, _))) {
+                return Err(InitError::TransferFailed);
+            }
+        }
+        if !ready {
+            return Err(InitError::TransferFailed);
+        }
+        self.scsi(&mut device, &crate::usb_msc::read_capacity(), Direction::In(8)).map_err(|_| InitError::TransferFailed)?;
+        let (blocks, block_size) =
+            crate::usb_msc::parse_capacity(&device.data.bytes()[..8]).ok_or(InitError::DescriptorInvalid)?;
+        if block_size as usize != crate::block::SECTOR_SIZE || blocks > u64::from(u32::MAX) + 1 {
+            return Err(InitError::DescriptorInvalid);
+        }
+        device.blocks = blocks;
+        device.block_size = block_size;
+        Ok(device)
+    }
+
+    /// One Bulk-Only command: the command wrapper, the data stage into or
+    /// out of `device.data`, and the status wrapper. Returns the bytes the
+    /// data stage moved.
+    fn scsi(&mut self, device: &mut StorageDevice, command: &[u8], direction: Direction) -> Result<usize, StorageError> {
+        let (length, data_in) = match direction {
+            Direction::None => (0, false),
+            Direction::In(length) => (length, true),
+            Direction::Out(length) => (length, false),
+        };
+        if length > PAGE_SIZE {
+            return Err(StorageError::NoDisk);
+        }
+        let tag = device.tag;
+        device.tag = device.tag.wrapping_add(1).max(1);
+        let block = crate::usb_msc::command_block(tag, length as u32, data_in, command).ok_or(StorageError::NoDisk)?;
+        device.wrappers.bytes_mut()[..crate::usb_msc::CBW_LENGTH].copy_from_slice(&block);
+        let wrappers = device.wrappers.physical;
+        self.bulk(device, false, wrappers, crate::usb_msc::CBW_LENGTH)?;
+
+        let mut moved = 0;
+        if length > 0 {
+            let data = device.data.physical;
+            match self.bulk(device, data_in, data, length) {
+                Ok(count) => moved = count,
+                // A stalled data stage still ends with a status wrapper,
+                // once the endpoint's halt is cleared.
+                Err(BulkError::Stall) => self.clear_halt(device, data_in)?,
+                Err(error) => return Err(error.into()),
+            }
+        }
+
+        const STATUS: usize = 256;
+        device.wrappers.bytes_mut()[STATUS..STATUS + crate::usb_msc::CSW_LENGTH].fill(0);
+        let status = match self.bulk(device, true, wrappers + STATUS as u64, crate::usb_msc::CSW_LENGTH) {
+            Err(BulkError::Stall) => {
+                // A stalled status stage is retried once after clearing it.
+                self.clear_halt(device, true)?;
+                self.bulk(device, true, wrappers + STATUS as u64, crate::usb_msc::CSW_LENGTH)?
+            }
+            other => other?,
+        };
+        if status != crate::usb_msc::CSW_LENGTH {
+            return Err(StorageError::Transport);
+        }
+        fence(Ordering::Acquire);
+        let wrapper = &device.wrappers.bytes()[STATUS..STATUS + crate::usb_msc::CSW_LENGTH];
+        match crate::usb_msc::parse_status(wrapper, tag, length as u32) {
+            Ok(crate::usb_msc::Status::Passed { residue }) => Ok(moved.min(length - residue as usize)),
+            Ok(crate::usb_msc::Status::Failed) => Err(StorageError::CheckCondition),
+            Ok(crate::usb_msc::Status::PhaseError) | Err(_) => Err(StorageError::Transport),
+        }
+    }
+
+    /// One bulk transfer of `length` bytes at `physical`; returns the bytes
+    /// moved. Events for other devices seen while waiting are routed: input
+    /// reports are stashed for the input worker.
+    fn bulk(&mut self, device: &mut StorageDevice, data_in: bool, physical: u64, length: usize) -> Result<usize, BulkError> {
+        let (ring, dci) = if data_in { (&mut device.in_ring, device.in_dci) } else { (&mut device.out_ring, device.out_dci) };
+        // Normal TRB, interrupt on completion, and for IN, an event on a
+        // short packet so a short read completes.
+        let short = if data_in { 1 << 2 } else { 0 };
+        let pending = ring.push(Trb { parameter: physical, status: length as u32, control: (TRB_TYPE_NORMAL << 10) | (1 << 5) | short });
+        fence(Ordering::Release);
+        mmio_write32(self.doorbell_base + u64::from(device.slot_id) * 4, u32::from(dci)).map_err(|_| BulkError::Fault)?;
+        for _ in 0..POLL_LIMIT {
+            let Some(event) = self.try_event().map_err(|_| BulkError::Fault)? else {
+                core::hint::spin_loop();
+                continue;
+            };
+            let slot = ((event.control >> 24) & 0xff) as u8;
+            if trb_type(event.control) == TRB_TYPE_TRANSFER_EVENT && slot == device.slot_id && event.parameter == pending {
+                let residual = (event.status & 0x00ff_ffff) as usize;
+                return match completion_code(event.status) {
+                    1 | 13 => Ok(length.saturating_sub(residual)),
+                    COMPLETION_STALL => Err(BulkError::Stall),
+                    _ => Err(BulkError::Fault),
+                };
+            }
+            if let Some(report) = self.route_input_event(event) {
+                if self.stashed_len < STASHED_REPORTS {
+                    self.stashed[self.stashed_len] = report;
+                    self.stashed_len += 1;
+                }
+            }
+        }
+        Err(BulkError::Timeout)
+    }
+
+    /// Clear a halted bulk endpoint: Reset Endpoint, point its ring past
+    /// the stalled transfer, and CLEAR_FEATURE(ENDPOINT_HALT) on the device.
+    fn clear_halt(&mut self, device: &mut StorageDevice, data_in: bool) -> Result<(), StorageError> {
+        let (dci, address) = if data_in {
+            (device.in_dci, device.interface.bulk_in)
+        } else {
+            (device.out_dci, device.interface.bulk_out)
+        };
+        let slot = u32::from(device.slot_id) << 24;
+        let endpoint = u32::from(dci) << 16;
+        let command = self.command_ring.push(Trb { parameter: 0, status: 0, control: (TRB_TYPE_RESET_ENDPOINT << 10) | slot | endpoint });
+        mmio_write32(self.doorbell_base, 0).map_err(|_| StorageError::Transport)?;
+        self.wait_command_completion(command).map_err(|_| StorageError::Transport)?;
+        let ring = if data_in { &device.in_ring } else { &device.out_ring };
+        let dequeue = (ring.page.physical + ring.index as u64 * 16) | u64::from(ring.cycle);
+        let command = self.command_ring.push(Trb { parameter: dequeue, status: 0, control: (TRB_TYPE_SET_TR_DEQUEUE << 10) | slot | endpoint });
+        mmio_write32(self.doorbell_base, 0).map_err(|_| StorageError::Transport)?;
+        self.wait_command_completion(command).map_err(|_| StorageError::Transport)?;
+        // The control pipe is the disk's: lend it to the control helpers.
+        let (saved_slot, saved_ring) = (self.slot_id, self.ep0_ring.take());
+        self.slot_id = device.slot_id;
+        self.ep0_ring = device.ep0_ring.take();
+        let cleared = self.control_no_data(0x02, 1, 0, u16::from(address));
+        device.ep0_ring = self.ep0_ring.take();
+        self.slot_id = saved_slot;
+        self.ep0_ring = saved_ring;
+        cleared.map_err(|_| StorageError::Transport)
+    }
+
+    /// Read or write one 512-byte block of the USB disk.
+    fn storage_block(&mut self, lba: u64, write: Option<&[u8]>, read: Option<&mut [u8]>) -> Result<(), StorageError> {
+        let mut device = self.storage.take().ok_or(StorageError::NoDisk)?;
+        let result = (|| {
+            let block = u32::try_from(lba).ok().filter(|_| lba < device.blocks).ok_or(StorageError::NoDisk)?;
+            let size = crate::block::SECTOR_SIZE;
+            let moved = if let Some(data) = write {
+                device.data.bytes_mut()[..size].copy_from_slice(data);
+                fence(Ordering::Release);
+                self.scsi(&mut device, &crate::usb_msc::read_write(true, block, 1), Direction::Out(size))?
+            } else {
+                self.scsi(&mut device, &crate::usb_msc::read_write(false, block, 1), Direction::In(size))?
+            };
+            if moved != size {
+                return Err(StorageError::Transport);
+            }
+            if let Some(out) = read {
+                out.copy_from_slice(&device.data.bytes()[..size]);
+            }
+            Ok(())
+        })();
+        self.storage = Some(device);
+        result
+    }
+
+    fn storage_flush(&mut self) -> Result<(), StorageError> {
+        let mut device = self.storage.take().ok_or(StorageError::NoDisk)?;
+        let result = self.scsi(&mut device, &crate::usb_msc::synchronize_cache(), Direction::None).map(|_| ());
+        self.storage = Some(device);
+        result
+    }
+}
+
+/// The data stage of a Bulk-Only command.
+#[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
+#[derive(Clone, Copy)]
+enum Direction {
+    None,
+    In(usize),
+    Out(usize),
+}
+
+/// Why one bulk transfer failed.
+#[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum BulkError {
+    Stall,
+    Fault,
+    Timeout,
+}
+
+#[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
+impl From<BulkError> for StorageError {
+    fn from(error: BulkError) -> Self {
+        match error {
+            BulkError::Timeout => StorageError::Timeout,
+            BulkError::Stall | BulkError::Fault => StorageError::Transport,
+        }
+    }
+}
+
+/// The USB disk as a block device. Each block takes the controller lock
+/// for one Bulk-Only command and releases it, so a long run of I/O never
+/// holds the lock, or keeps interrupts masked, for more than one block.
+#[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
+pub struct UsbDisk;
+
+#[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
+impl crate::block::BlockDevice for UsbDisk {
+    fn sector_count(&self) -> u64 {
+        CONTROLLER.lock().as_ref().and_then(|controller| controller.storage.as_ref()).map_or(0, |device| device.blocks)
+    }
+
+    fn flush(&mut self) -> Result<(), crate::block::Error> {
+        let mut slot = CONTROLLER.lock();
+        let controller = slot.as_mut().ok_or(crate::block::Error::DeviceFault)?;
+        controller.storage_flush().map_err(storage_error)
+    }
+
+    fn read_sector(&mut self, lba: u64, sector: &mut [u8]) -> Result<(), crate::block::Error> {
+        if sector.len() != crate::block::SECTOR_SIZE {
+            return Err(crate::block::Error::InvalidBuffer);
+        }
+        let mut slot = CONTROLLER.lock();
+        let controller = slot.as_mut().ok_or(crate::block::Error::DeviceFault)?;
+        controller.storage_block(lba, None, Some(sector)).map_err(storage_error)
+    }
+
+    fn write_sector(&mut self, lba: u64, sector: &[u8]) -> Result<(), crate::block::Error> {
+        if sector.len() != crate::block::SECTOR_SIZE {
+            return Err(crate::block::Error::InvalidBuffer);
+        }
+        let mut slot = CONTROLLER.lock();
+        let controller = slot.as_mut().ok_or(crate::block::Error::DeviceFault)?;
+        controller.storage_block(lba, Some(sector), None).map_err(storage_error)
+    }
+}
+
+#[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
+fn storage_error(error: StorageError) -> crate::block::Error {
+    match error {
+        StorageError::NoDisk => crate::block::Error::OutOfBounds,
+        _ => crate::block::Error::DeviceFault,
+    }
+}
+
+/// What the USB disk reported when it was attached.
+#[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct UsbDiskInfo {
+    pub port: u8,
+    pub blocks: u64,
+    pub vendor: [u8; 8],
+    pub product: [u8; 16],
+}
+
+/// The attached USB disk, if any (enumerated by `start_input`).
+#[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
+pub fn usb_disk_info() -> Option<UsbDiskInfo> {
+    let slot = CONTROLLER.lock();
+    let device = slot.as_ref()?.storage.as_ref()?;
+    Some(UsbDiskInfo { port: device.port, blocks: device.blocks, vendor: device.vendor, product: device.product })
+}
+
+/// Run `operation` on the USB disk, if one is attached.
+#[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
+pub fn with_usb_disk<R>(operation: impl FnOnce(&mut UsbDisk) -> R) -> Option<R> {
+    usb_disk_info()?;
+    Some(operation(&mut UsbDisk))
 }
 
 /// Queue one interrupt-IN transfer for `device` and ring its doorbell.
@@ -2010,6 +2472,118 @@ pub fn input_self_test() -> bool {
         irqs > 0 && reports >= 5 && passes <= irqs + 2,
     );
     keys_ok && mouse_ok && event_driven
+}
+
+/// Stage 13.18 acceptance: a USB mass-storage disk.
+///
+/// QEMU attaches a 32 MiB raw image as `usb-storage` beside a USB keyboard.
+/// Every sector of the image starts with `WOVEN-LBA-` and its LBA in eight
+/// decimal digits. The kernel must identify the disk and its capacity, read
+/// the pattern back, write 64 sectors and read them back after a flush, and
+/// refuse a block past the end. It then reads 300 more blocks, which wraps
+/// both bulk rings several times, while the harness types on the USB
+/// keyboard: the keys must arrive, in order, though storage transfers drain
+/// the event ring they arrive on. The harness requires exactly the written
+/// sectors to have changed in the image.
+#[cfg(feature = "stage13-18-test")]
+pub fn storage_self_test() -> bool {
+    use crate::block::{BlockDevice, SECTOR_SIZE};
+    use crate::woven_input;
+    use alloc::vec::Vec;
+
+    fn step(name: &str, ok: bool) -> bool {
+        crate::serial::write_line(format_args!("[S13.18] {} {}", name, if ok { "PASS" } else { "FAIL" }));
+        ok
+    }
+    fn pattern(lba: u64) -> [u8; 18] {
+        let mut text = *b"WOVEN-LBA-00000000";
+        let mut value = lba;
+        for digit in text[10..].iter_mut().rev() {
+            *digit = b'0' + (value % 10) as u8;
+            value /= 10;
+        }
+        text
+    }
+    const BLOCKS: u64 = 32 * 1024 * 1024 / 512;
+    const WRITE_BASE: u64 = 4096;
+    const WRITTEN: u64 = 64;
+
+    let report = crate::drivers::bring_up();
+    if !step("xhci0 bound and ready", matches!(report.drivers[2].outcome, crate::drivers::Outcome::Ready(_))) {
+        return false;
+    }
+    let Some(info) = usb_disk_info() else {
+        return step("a USB disk is attached", false);
+    };
+    crate::serial::write_line(format_args!(
+        "[S13.18] disk on port {}: '{}' '{}', {} blocks",
+        info.port,
+        core::str::from_utf8(&info.vendor).unwrap_or("?").trim_end(),
+        core::str::from_utf8(&info.product).unwrap_or("?").trim_end(),
+        info.blocks
+    ));
+    if !step("identified as QEMU's disk, 32 MiB of 512-byte blocks", &info.vendor[..4] == b"QEMU" && info.blocks == BLOCKS) {
+        return false;
+    }
+    let mut disk = UsbDisk;
+    let mut sector = [0u8; SECTOR_SIZE];
+    let reads = (0..8u64).chain([BLOCKS - 1]).all(|lba| disk.read_sector(lba, &mut sector).is_ok() && sector[..18] == pattern(lba));
+    if !step("the host's pattern reads back, first and last blocks", reads) {
+        return false;
+    }
+    let mut writes = true;
+    for lba in WRITE_BASE..WRITE_BASE + WRITTEN {
+        let mut data = [0u8; SECTOR_SIZE];
+        data[..13].copy_from_slice(b"S13.18-WRITE-");
+        data[13..21].copy_from_slice(&lba.to_le_bytes());
+        data[SECTOR_SIZE - 1] = lba as u8;
+        writes &= disk.write_sector(lba, &data).is_ok();
+    }
+    writes &= disk.flush().is_ok();
+    let readback = (WRITE_BASE..WRITE_BASE + WRITTEN).all(|lba| {
+        disk.read_sector(lba, &mut sector).is_ok()
+            && &sector[..13] == b"S13.18-WRITE-"
+            && sector[13..21] == lba.to_le_bytes()
+            && sector[SECTOR_SIZE - 1] == lba as u8
+    });
+    if !step("64 blocks written, flushed and read back", writes && readback) {
+        return false;
+    }
+    if !step("a block past the end is refused", disk.read_sector(BLOCKS, &mut sector).is_err()) {
+        return false;
+    }
+
+    let Some(summary) = input_summary() else {
+        return step("keyboard input started", false);
+    };
+    if !step("a USB keyboard beside the disk", summary.keyboards == 1) {
+        return false;
+    }
+    while woven_input::poll().is_some() {}
+    crate::serial::write_line(format_args!("[S13.18] ready for input"));
+    let expected = [Key::Char('u'), Key::Char('s'), Key::Char('b'), Key::Enter];
+    let mut keys = Vec::new();
+    let mut verified = 0u64;
+    let start = crate::timer::ticks();
+    let mut lba = 100u64;
+    // Storage I/O runs throughout: the keys arrive while transfers drain the
+    // event ring.
+    while crate::timer::ticks().wrapping_sub(start) < 6000 && (keys.len() < expected.len() || verified < 300) {
+        if disk.read_sector(lba, &mut sector).is_ok() && sector[..18] == pattern(lba) {
+            verified += 1;
+        }
+        lba = if lba >= 3000 { 100 } else { lba + 1 };
+        while let Some(event) = woven_input::poll() {
+            if let woven_input::Event::Key(key) = event {
+                keys.push(key);
+            }
+        }
+        crate::task::yield_now();
+    }
+    crate::serial::write_line(format_args!("[S13.18] verified {} reads; keys {:?}", verified, keys));
+    let storage_ok = step("300 more reads verify, wrapping both bulk rings", verified >= 300);
+    let keys_ok = step("typed keys arrive once each, in order, during storage I/O", keys == expected);
+    storage_ok && keys_ok
 }
 
 /// Stage 13.16 acceptance: a report-protocol HID device. QEMU's usb-tablet

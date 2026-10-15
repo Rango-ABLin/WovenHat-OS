@@ -115,6 +115,8 @@ mod terminal;
 #[allow(dead_code)]
 mod thread;
 mod timer;
+#[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
+mod usb_msc;
 mod user_graphics;
 mod userspace;
 mod vfs;
@@ -3465,6 +3467,15 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     }
     // Before the 13.12 block: 13.13 and 13.14 builds also enable
     // stage13-12-test, and each block ends the boot.
+    #[cfg(feature = "stage13-18-test")]
+    {
+        if !xhci::storage_self_test() {
+            serial::write_line(format_args!("[S13.18] USB mass storage: FAILED"));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!("[S13.18] USB mass storage: PASSED"));
+        qemu_test_exit_success();
+    }
     #[cfg(feature = "stage13-16-test")]
     {
         if !xhci::report_device_self_test() {
