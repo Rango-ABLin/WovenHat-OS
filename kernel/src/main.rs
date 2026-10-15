@@ -3465,6 +3465,15 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     }
     // Before the 13.12 block: 13.13 and 13.14 builds also enable
     // stage13-12-test, and each block ends the boot.
+    #[cfg(feature = "stage13-17-test")]
+    {
+        if !drivers::foreign_disk_self_test() {
+            serial::write_line(format_args!("[S13.17] foreign disks are read-only: FAILED"));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!("[S13.17] foreign disks are read-only: PASSED"));
+        qemu_test_exit_success();
+    }
     #[cfg(feature = "stage13-16-test")]
     {
         if !xhci::report_device_self_test() {

@@ -9,17 +9,27 @@ sources, or anything outside the named checkouts. A checkout in which a
 cargo, rustc or QEMU process is running is skipped, so a build or gate in
 progress (ours or Codex's) is never disturbed.
 
+Evidence is compressed, not removed: raw disk images (`*.img`) over 4 MiB
+in `audit-artifacts/`, untouched for 30 minutes, are gzipped in place
+(`*.img.gz`). Gate disk images are mostly zeros or repeating patterns, so
+this recovers nearly all of their space and keeps every byte.
+
 Usage:
   python scripts/reclaim-build-space.py [--min-free-gb 8] [--deep] CHECKOUT...
 With --min-free-gb, nothing is removed while the drive already has that
 much free space.
 """
 import argparse
+import gzip
 import os
 import shutil
 import subprocess
 import sys
+import time
 from pathlib import Path
+
+IMAGE_MIN_BYTES = 4 * 2**20
+IMAGE_IDLE_SECONDS = 30 * 60
 
 
 def free_gb(path):
@@ -70,6 +80,29 @@ def targets(checkout, deep):
     return kept
 
 
+def evidence_images(checkout):
+    """Large raw disk images in the checkout's evidence, idle long enough
+    that no gate is still using them."""
+    evidence = checkout / 'audit-artifacts'
+    if not evidence.is_dir():
+        return []
+    now = time.time()
+    return [path for path in evidence.rglob('*.img')
+            if path.is_file() and path.stat().st_size > IMAGE_MIN_BYTES
+            and now - path.stat().st_mtime > IMAGE_IDLE_SECONDS]
+
+
+def compress(path):
+    """gzip `path` to `path.gz`, then remove the original only once the
+    compressed copy is complete."""
+    packed = path.with_name(path.name + '.gz')
+    partial = path.with_name(path.name + '.gz.partial')
+    with path.open('rb') as source, gzip.open(partial, 'wb', compresslevel=6) as target:
+        shutil.copyfileobj(source, target, 4 * 2**20)
+    partial.replace(packed)
+    path.unlink()
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument('checkouts', nargs='+', type=Path)
@@ -97,6 +130,14 @@ def main():
             print(f'{"would remove" if args.dry_run else "remove"} {path} ({size:.2f} GB)')
             if not args.dry_run:
                 shutil.rmtree(path, ignore_errors=True)
+        for path in evidence_images(checkout):
+            size = path.stat().st_size / 2**30
+            print(f'{"would compress" if args.dry_run else "compress"} {path} ({size:.2f} GB)')
+            if not args.dry_run:
+                try:
+                    compress(path)
+                except OSError as error:
+                    print(f'  kept uncompressed: {error}', file=sys.stderr)
     print(f'free: {before:.1f} GB -> {free_gb(drive):.1f} GB')
     return 0
 

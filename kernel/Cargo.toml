@@ -61,6 +61,8 @@ stage13-14-test = ["qemu-test", "stage13-12-test"]
 stage13-15-test = ["qemu-test", "stage13-12-test"]
 # Report-protocol HID devices: tablets, digitizers, game controllers.
 stage13-16-test = ["qemu-test", "stage13-12-test"]
+# Disks WovenHat does not own (no WOVENHAT/WOVENLOG volume) are read-only.
+stage13-17-test = ["qemu-test", "stage13-12-test"]
 stage14-1-test = ["network-test"]
 stage14-2-test = ["network-test", "stage14-1-test"]
 stage14-3-test = ["network-test", "stage14-2-test"]
