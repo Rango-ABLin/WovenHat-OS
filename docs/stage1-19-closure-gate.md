@@ -81,3 +81,11 @@ Decision: BLOCKED | VERIFIED | CLOSED
 - Existing import treats `AlreadyExists` as imported without refreshing contents; a remount must not silently retain stale cached data. Define mount namespace ownership and unmount/refresh semantics before enabling write-back.
 - `with_ata_volume()` mounts for the duration of a closure, but this is not an end-to-end VFS-backed writable mount.
 - **Required next patch:** implement an authorized VFS backend adapter with create/read/write/unlink, explicit mount ownership and teardown; exercise reboot/remount, stale handles, failure injection and crash recovery in the normal VFS path. Do not claim this functionality exists yet.
+
+## 2026-10-15 CI evidence addendum — stacked Stage 10 integration
+
+- Source commit: `5dfb87b9eb33e663906d2ae8948f3c421276d725` on `fix/nine-lane-stage10-vars-20261015` (draft PR #78, stacked on draft PR #74).
+- Nine-lane workflow: https://github.com/Rango-ABLin/WovenHat-OS/actions/runs/38786616343 — **9/9 jobs succeeded**: kernel-lint, host-regressions, smp-hotplug, security-foundation, wovenfs-storage, network-firewall, pcie-drivers, usb-input and release-integration.
+- Kernel workflow: https://github.com/Rango-ABLin/WovenHat-OS/actions/runs/38786616331 — at evidence capture, drivers-radio, network-security, wovenfs-lint and core-foundation passed; desktop-userspace and runtime-storage-pcie remained **in progress**. Do not record a full kernel pass until those jobs complete successfully.
+- Integration defect fixed: nine-lane security-foundation calls `scripts/test-stage10-runtime.py --firmware-vars`; ported the Stage 10 per-run OVMF VARS harness and regression test from draft PR #73, then added a pull-request trigger for the nine-lane workflow.
+- These results are **CI evidence, not Stage 1–19 closure**. Outstanding: dependent PR integration, authentication KDF issue #72, physical hardware qualification, power-loss/recovery, installer/update/rollback and independent security review. No merge or release authorized.

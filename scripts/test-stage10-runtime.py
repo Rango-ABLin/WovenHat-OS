@@ -128,15 +128,20 @@ def main():
     parser.add_argument('--cpus', type=int, choices=(1, 2, 4), default=1)
     parser.add_argument('--qemu', default=shutil.which('qemu-system-x86_64') or r'C:\Program Files\qemu\qemu-system-x86_64.exe')
     parser.add_argument('--firmware', type=Path)
+    parser.add_argument('--firmware-vars', type=Path, help='matching OVMF VARS template (copied per run)')
     parser.add_argument('--timeout', type=float, default=180)
     args = parser.parse_args()
     root = Path(__file__).resolve().parents[1]
     qemu = Path(args.qemu)
     firmware = args.firmware or qemu.parent / 'share' / 'edk2-x86_64-code.fd'
-    if not qemu.is_file() or not firmware.is_file():
-        parser.error('QEMU and firmware files must exist')
+    if not qemu.is_file() or not firmware.is_file() or (args.firmware_vars is not None and not args.firmware_vars.is_file()):
+        parser.error('QEMU, firmware CODE, and optional firmware VARS files must exist')
     out = root / 'audit-artifacts' / f'stage{args.stage}-{args.cpus}cpu-{time.time_ns()}'
     out.mkdir(parents=True)
+    vars_copy = None
+    if args.firmware_vars is not None:
+        vars_copy = out / 'OVMF_VARS.fd'
+        shutil.copyfile(args.firmware_vars, vars_copy)
     feature = 'stage13-10-test' if args.stage == '13.11' else f'stage{args.stage.replace(".", "-")}-test'
     build = subprocess.run(['cargo', 'run', '--quiet', '--features', feature, '--', '--print-image'],
                            cwd=root, text=True, capture_output=True)
@@ -148,7 +153,8 @@ def main():
     command = [str(qemu), '-accel', 'tcg,tb-size=128', '-machine', 'q35', '-m', '256M', '-smp', str(args.cpus),
                '-display', 'none', '-serial', f'file:{serial}', '-no-reboot',
                '-device', 'isa-debug-exit,iobase=0xf4,iosize=0x04',
-               '-drive', f'if=pflash,format=raw,readonly=on,file={firmware}',
+               '-drive', f'if=pflash,unit=0,format=raw,readonly=on,file={firmware}',
+               *(['-drive', f'if=pflash,unit=1,format=raw,file={vars_copy}'] if vars_copy is not None else []),
                '-drive', f'if=none,id=boot,format=raw,readonly=on,file={build.stdout.strip()}',
                '-device', 'virtio-blk-pci,drive=boot,bootindex=1']
     if args.stage in ('13.5', '13.6'):
