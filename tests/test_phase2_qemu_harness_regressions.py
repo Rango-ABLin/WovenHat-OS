@@ -1,8 +1,6 @@
 """Regression guards for OVMF VARS isolation and Stage 13.16 QMP shutdown."""
 import ast
-import io
 import runpy
-from types import SimpleNamespace
 from pathlib import Path
 import unittest
 
@@ -42,16 +40,30 @@ class HarnessRegression(unittest.TestCase):
             ('', EOFError),
             ('not-json\\n', ValueError),
         )
+        class FakeQmpFile:
+            def __init__(self, responses):
+                self.responses = iter(responses.splitlines(keepends=True))
+                self.writes = []
+
+            def write(self, message):
+                self.writes.append(message)
+
+            def flush(self):
+                pass
+
+            def readline(self):
+                return next(self.responses, '')
+
         for response, expected_error in cases:
             with self.subTest(response=response):
                 qmp = qmp_type.__new__(qmp_type)
-                qmp.file = io.StringIO(response)
+                qmp.file = FakeQmpFile(response)
                 if expected_error:
                     with self.assertRaises(expected_error):
                         qmp.command("input-send-event", events=[])
                 else:
                     self.assertEqual(qmp.command("input-send-event", events=[]), {})
-                self.assertIn('"execute": "input-send-event"', qmp.file.getvalue())
+                self.assertIn('"execute": "input-send-event"', ''.join(qmp.file.writes))
 
 
 if __name__ == "__main__":
