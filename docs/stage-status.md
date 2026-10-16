@@ -1,5 +1,16 @@
 # Stage status
 
+## Foundation preservation failure — 2026-10-16
+
+Session 71482 exited 1 on a 1-CPU live DNS timeout inside exact Stage 10.7
+preservation. Independent inspection matched all 861 frozen inputs and all
+sixty stress logs' overall pass markers. Prior focused 1/2/4-CPU foundation,
+debug/optimized storage/memory and 2/4-CPU hotplug checks passed, but this is
+not full acceptance. See the foundation validation audit. The next ATA
+durability candidate is isolated in `codex/foundation-ata-flush-20261016`;
+no unvalidated kernel patch is integrated here. Release finalisation remains
+blocked by these and the previously documented durability/hardware/guard gaps.
+
 ## Merge integration checkpoint — 2026-10-16
 
 The foundation validator preservation run was invalidated by a concurrent

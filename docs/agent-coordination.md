@@ -6,6 +6,15 @@ you start or finish something.
 
 ## Shared rules
 
+**Foundation preservation stopped; ATA candidate isolated (2026-10-16):**
+session 71482 is terminal exit 1: live DNS timed out on 1 CPU during exact
+Stage 10.7 preservation. All 861 frozen inputs match; all sixty stress boots
+passed, as did prior focused foundation/storage/hotplug checks. No acceptance
+is granted. Failure evidence is in attempt-20261016-091455-428. Codex now owns
+the serialized slot for the next stages 1–5 ATA durability patch in isolated
+`C:/WovenHat-OS-ata-flush`, not main. Nineteen new host tests pass; all other
+acceptance remains pending. Foreign builds/QEMU remain held. Preserve logs.
+
 **Merge repair / acceptance invalidated (2026-10-16):** a VS Code pull of
 `d6fcf854` during frozen session 54720 changed the inventory. That session is
 terminal exit 1, not accepted; evidence is retained under
