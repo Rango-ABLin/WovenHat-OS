@@ -8,8 +8,10 @@
 //! the boot.
 
 /// Kernel log lines worth a tester's eye.
-const PREFIXES: [&str; 9] =
-    ["[DRIVERS]", "[USB]", "[DISPLAY]", "[FS]", "[LIVELOG]", "[SESSION]", "[POWER]", "woven-shell", "EXCEPTION"];
+const PREFIXES: [&str; 11] = [
+    "[PCI]", "[DRIVERS]", "[USB]", "[DISPLAY]", "[FS]", "[LIVELOG]", "[SESSION]", "[POWER]", "woven-shell", "EXCEPTION",
+    "HARDWARE:",
+];
 
 /// Call `each` with every diagnostic line logged since boot, in order.
 pub fn for_each_line(mut each: impl FnMut(&str)) {

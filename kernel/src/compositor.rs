@@ -150,6 +150,14 @@ pub fn init_for_display() {
             )
         })
         .unwrap_or((DEFAULT_WIDTH, DEFAULT_HEIGHT));
+    if let Some(info) = crate::terminal::framebuffer_info() {
+        crate::serial::write_line(format_args!(
+            "[DISPLAY] framebuffer {}x{} stride {} {:?}, {} bytes/pixel; compositor {}x{}",
+            info.width, info.height, info.stride, info.pixel_format, info.bytes_per_pixel, width, height
+        ));
+    } else {
+        crate::serial::write_line(format_args!("[DISPLAY] no framebuffer; compositor {}x{}", width, height));
+    }
     init(width, height);
 }
 

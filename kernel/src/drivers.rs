@@ -171,7 +171,13 @@ fn bring_up_one(spec: &Spec) -> Driver {
         address: Some(address),
         ..absent
     };
-    if driver::bind_pci(spec.name, address, OWNER).is_err() {
+    if let Err(error) = driver::bind_pci(spec.name, address, OWNER) {
+        crate::serial::write_line(format_args!(
+            "[DRIVERS] {} bind error: {:?} (PCI admission ready: {})",
+            spec.name,
+            error,
+            pci::admission_ready()
+        ));
         result.outcome = Outcome::BindFailed;
         return result;
     }

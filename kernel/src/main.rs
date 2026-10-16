@@ -1575,9 +1575,37 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         shell.print_prompt(&mut console);
         #[cfg(feature = "system-apps")]
         let mut session_reported = false;
+        #[cfg(feature = "system-apps")]
+        let session_started = timer::ticks();
 
         let mut userspace_was_foreground = false;
         loop {
+            // The desktop session is running but has not taken the display
+            // six seconds on: say what the compositor reports.
+            #[cfg(feature = "system-apps")]
+            if !session_reported
+                && !session::ended()
+                && timer::ticks().wrapping_sub(session_started) > 600
+                && !compositor::is_presenting()
+                && !session::console_active()
+            {
+                session_reported = true;
+                console.println("");
+                console.println("THE DESKTOP HAS NOT APPEARED. COMPOSITOR STATE:");
+                let line = alloc::format!(
+                    "  holder {:?}, presenting {}, surface {:?}",
+                    compositor::holder(),
+                    compositor::is_presenting(),
+                    compositor::dimensions()
+                );
+                console.println(&line);
+                diagnostics::for_each_line(|line| {
+                    if line.contains("woven-shell") || line.contains("SESSION") || line.contains("DISPLAY") {
+                        console.println(line);
+                    }
+                });
+                shell.print_prompt(&mut console);
+            }
             // The desktop session stopped: say so, with what it reported.
             #[cfg(feature = "system-apps")]
             if !session_reported && session::ended() {

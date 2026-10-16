@@ -770,17 +770,41 @@ pub fn discover() -> Summary {
 /// leaves [`admission_ready`] false; no driver can claim the generation.
 pub fn discover_and_route() -> Summary {
     ADMISSION_READY.store(false, Ordering::Release);
-    let mut summary = discover();
+    let summary = discover();
     if summary.truncated || summary.bridges == 0 {
         if !summary.truncated {
             ADMISSION_READY.store(true, Ordering::Release);
+        } else {
+            // Real hardware: the functions that were recorded are complete
+            // and correct; refusing every driver because more exist than
+            // fit leaves the machine without storage or input.
+            #[cfg(not(feature = "qemu-test"))]
+            {
+                crate::serial::write_line(format_args!(
+                    "[PCI] inventory truncated at {} functions; admitting the recorded ones",
+                    summary.recorded
+                ));
+                ADMISSION_READY.store(true, Ordering::Release);
+            }
         }
         return summary;
     }
-    if route_discovered_bridges().is_ok() {
-        ADMISSION_READY.store(true, Ordering::Release);
-    } else {
-        summary.truncated = true;
+    match route_discovered_bridges() {
+        Ok(()) => ADMISSION_READY.store(true, Ordering::Release),
+        // Real firmware has already programmed every bridge window. A plan
+        // this kernel cannot build leaves those windows in place rather than
+        // refusing every driver: on an HP desktop that refusal left no
+        // storage, USB or input at all.
+        #[cfg(not(feature = "qemu-test"))]
+        Err(error) => {
+            crate::serial::write_line(format_args!(
+                "[PCI] bridge routing failed ({:?}); keeping the firmware's bridge windows",
+                error
+            ));
+            ADMISSION_READY.store(true, Ordering::Release);
+        }
+        #[cfg(feature = "qemu-test")]
+        Err(_) => return Summary { truncated: true, ..summary },
     }
     summary
 }
