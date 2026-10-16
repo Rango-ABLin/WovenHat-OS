@@ -991,7 +991,15 @@ fn sys_exec(user_path: u64, length: u64) -> u64 {
     let Ok(path) = core::str::from_utf8(&path[..length]) else {
         return SYSCALL_ERROR;
     };
-    let mut image = alloc::vec![0_u8; crate::vfs::NODE_CAPACITY];
+    let Some(mut image) = crate::heap::try_filled(0_u8, crate::vfs::NODE_CAPACITY) else {
+        crate::audit::record(
+            actor,
+            crate::audit::Action::ProcessExec,
+            length as u64,
+            false,
+        );
+        return SYSCALL_ERROR;
+    };
     let Ok(image_length) = crate::vfs::read_all(path, &mut image) else {
         crate::audit::record(
             actor,
@@ -1100,7 +1108,15 @@ fn sys_exec_command(user_line: u64, length: u64) -> u64 {
         argv[index] = argument;
     }
 
-    let mut image = alloc::vec![0_u8; crate::vfs::NODE_CAPACITY];
+    let Some(mut image) = crate::heap::try_filled(0_u8, crate::vfs::NODE_CAPACITY) else {
+        crate::audit::record(
+            actor,
+            crate::audit::Action::ProcessExec,
+            length as u64,
+            false,
+        );
+        return SYSCALL_ERROR;
+    };
     let Ok(image_length) = crate::vfs::read_all(resolved.as_str(), &mut image) else {
         crate::audit::record(
             actor,
@@ -1199,7 +1215,15 @@ fn sys_spawn_command(user_line: u64, length: u64) -> u64 {
         };
         argv[index] = argument;
     }
-    let mut image = alloc::vec![0_u8; crate::vfs::NODE_CAPACITY];
+    let Some(mut image) = crate::heap::try_filled(0_u8, crate::vfs::NODE_CAPACITY) else {
+        crate::audit::record(
+            actor,
+            crate::audit::Action::ProcessExec,
+            length as u64,
+            false,
+        );
+        return SYSCALL_ERROR;
+    };
     let Ok(image_length) = crate::vfs::read_all(resolved.as_str(), &mut image) else {
         crate::audit::record(
             actor,
@@ -2210,7 +2234,10 @@ fn sys_audio_play(user_pcm: u64, length: u64) -> u64 {
     if length == 0 || length > crate::hda::MAX_PLAY_BYTES {
         return SYSCALL_ERROR;
     }
-    let mut pcm = alloc::vec![0u8; length];
+    let Some(mut pcm) = crate::heap::try_filled(0u8, length) else {
+        crate::audit::record(actor, crate::audit::Action::AudioPlay, length as u64, false);
+        return SYSCALL_ERROR;
+    };
     if crate::paging::copy_from_current_user(user_pcm, &mut pcm).is_err() {
         return SYSCALL_ERROR;
     }
@@ -2677,7 +2704,9 @@ fn sys_graphics_write(handle: u64, packed: u64, user_pixels: u64) -> u64 {
     if width == 0 || height == 0 || x + width > surface_width || y + height > surface_height {
         return SYSCALL_ERROR;
     }
-    let mut bytes = alloc::vec![0u8; width * height * 4];
+    let Some(mut bytes) = crate::heap::try_filled(0u8, width * height * 4) else {
+        return SYSCALL_ERROR;
+    };
     if crate::paging::copy_from_current_user(user_pixels, &mut bytes).is_err() {
         return SYSCALL_ERROR;
     }
