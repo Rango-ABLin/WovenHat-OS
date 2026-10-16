@@ -1403,6 +1403,18 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
             }
         }
         x86_64::instructions::interrupts::enable();
+        // Without a running tick nothing schedules and the boot appears to
+        // hang: check it, by the PM timer, and say so on screen.
+        {
+            let before = timer::ticks();
+            timer::spin_ms(100);
+            let advanced = timer::ticks().wrapping_sub(before);
+            serial::write_line(format_args!(
+                "[TIMER] {} ticks in 100 ms (expected about 10){}",
+                advanced,
+                if advanced == 0 { ": THE SYSTEM TICK IS NOT RUNNING" } else { "" }
+            ));
+        }
         if !block_io::start_worker() {
             console.println("BLOCK I/O WORKER: START FAILED");
             halt();

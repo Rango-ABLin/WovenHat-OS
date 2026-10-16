@@ -259,13 +259,7 @@ fn hub_interface(config: &[u8]) -> Option<u8> {
 /// timer is not running.
 #[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
 fn hold_ticks(ticks: u64) {
-    let start = crate::timer::ticks();
-    for _ in 0..POLL_LIMIT * 4 {
-        if crate::timer::ticks().wrapping_sub(start) >= ticks {
-            return;
-        }
-        core::hint::spin_loop();
-    }
+    crate::timer::spin_ms(ticks * 10);
 }
 /// Reports copied out per pass over the event ring.
 const REPORTS_PER_PASS: usize = 32;
@@ -2392,15 +2386,16 @@ fn write_bluetooth_endpoint_context(
 /// The first port with a device connected, waiting up to half a second
 /// for one to appear; 0 when there is none.
 fn wait_for_connection(op_base: u64, max_ports: u8) -> u8 {
-    let start = crate::timer::ticks();
-    for _ in 0..POLL_LIMIT * 4 {
+    let mut deadline = crate::timer::Deadline::after_ms(500);
+    // Bounded even if no clock advances.
+    for _ in 0..200_000 {
         for port in 1..=max_ports {
             let portsc = mmio_read32(op_base + 0x400 + (u64::from(port - 1) * 0x10)).unwrap_or(0);
             if portsc & 1 != 0 {
                 return port;
             }
         }
-        if crate::timer::ticks().wrapping_sub(start) >= 50 {
+        if deadline.passed() {
             break;
         }
         core::hint::spin_loop();
@@ -2420,12 +2415,9 @@ fn take_from_firmware(mmio: u64, hcc1: u32) -> Result<(), InitError> {
         if header & 0xff == XECP_LEGACY_SUPPORT {
             if header & LEGACY_BIOS_OWNED != 0 {
                 mmio_write32(capability, header | LEGACY_OS_OWNED)?;
-                let start = crate::timer::ticks();
-                for _ in 0..POLL_LIMIT * 8 {
-                    if mmio_read32(capability)? & LEGACY_BIOS_OWNED == 0 {
-                        break;
-                    }
-                    if crate::timer::ticks().wrapping_sub(start) >= 100 {
+                let mut deadline = crate::timer::Deadline::after_ms(1000);
+                for _ in 0..1_000_000 {
+                    if mmio_read32(capability)? & LEGACY_BIOS_OWNED == 0 || deadline.passed() {
                         break;
                     }
                     core::hint::spin_loop();

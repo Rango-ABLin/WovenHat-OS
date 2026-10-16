@@ -8,8 +8,8 @@
 //! the boot.
 
 /// Kernel log lines worth a tester's eye.
-const PREFIXES: [&str; 11] = [
-    "[PCI]", "[DRIVERS]", "[USB]", "[DISPLAY]", "[FS]", "[LIVELOG]", "[SESSION]", "[POWER]", "woven-shell", "EXCEPTION",
+const PREFIXES: [&str; 12] = [
+    "[TIMER]", "[PCI]", "[DRIVERS]", "[USB]", "[DISPLAY]", "[FS]", "[LIVELOG]", "[SESSION]", "[POWER]", "woven-shell", "EXCEPTION",
     "HARDWARE:",
 ];
 

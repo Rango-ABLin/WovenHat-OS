@@ -31,6 +31,66 @@ pub fn record_tick() {
     });
 }
 
+/// The ACPI PM timer: port in the low 16 bits, bit 16 set when it counts
+/// 32 bits; 0 before ACPI discovery or when there is none.
+static PM_TIMER: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32::new(0);
+/// The PM timer's rate.
+pub const PM_TIMER_HZ: u64 = 3_579_545;
+
+/// Use the ACPI PM timer at `port` for calibration and deadlines.
+pub fn set_pm_timer(port: u16, wide: bool) {
+    PM_TIMER.store(u32::from(port) | (u32::from(wide) << 16), Ordering::Release);
+}
+
+/// The PM timer's current count and its width mask, if there is one.
+pub fn pm_read() -> Option<(u32, u32)> {
+    let config = PM_TIMER.load(Ordering::Acquire);
+    let port = (config & 0xffff) as u16;
+    if port == 0 {
+        return None;
+    }
+    let mask = if config & (1 << 16) != 0 { u32::MAX } else { 0x00ff_ffff };
+    // SAFETY: the FADT names this port as the read-only PM timer.
+    let value = unsafe { x86_64::instructions::port::Port::<u32>::new(port).read() };
+    Some((value & mask, mask))
+}
+
+/// A bounded wait measured by the PM timer, or by ticks without one, so a
+/// stalled tick cannot stretch a driver's wait into minutes. Poll
+/// [`Deadline::passed`] at least every few seconds (the 24-bit PM timer
+/// wraps every 4.7 s).
+pub struct Deadline {
+    start: Option<(u32, u32)>,
+    elapsed: u64,
+    start_tick: u64,
+    limit_ms: u64,
+}
+
+impl Deadline {
+    pub fn after_ms(limit_ms: u64) -> Self {
+        Self { start: pm_read(), elapsed: 0, start_tick: ticks(), limit_ms }
+    }
+
+    pub fn passed(&mut self) -> bool {
+        match (self.start, pm_read()) {
+            (Some((last, mask)), Some((now, _))) => {
+                self.elapsed += u64::from(now.wrapping_sub(last) & mask);
+                self.start = Some((now, mask));
+                self.elapsed * 1000 >= self.limit_ms * PM_TIMER_HZ
+            }
+            _ => ticks().wrapping_sub(self.start_tick) * 1000 / u64::from(FREQUENCY_HZ) >= self.limit_ms,
+        }
+    }
+}
+
+/// Wait `ms` milliseconds by the PM timer (by ticks without one).
+pub fn spin_ms(ms: u64) {
+    let mut deadline = Deadline::after_ms(ms);
+    while !deadline.passed() {
+        core::hint::spin_loop();
+    }
+}
+
 pub fn ticks() -> u64 {
     TICKS.load(Ordering::Relaxed)
 }

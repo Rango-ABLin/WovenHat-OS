@@ -40,6 +40,10 @@ pub struct Power {
     pub reset: Option<(u8, u64, u8)>,
     /// `\_S5` sleep types for PM1a and PM1b.
     pub s5: Option<(u8, u8)>,
+    /// The ACPI PM timer (3.579545 MHz) I/O port, 0 when absent, and
+    /// whether it counts 32 bits (TMR_VAL_EXT) rather than 24.
+    pub pm_timer: u16,
+    pub pm_timer_32: bool,
 }
 
 /// The power information found at boot.
@@ -386,6 +390,20 @@ fn read_fadt_power(
         power.acpi_enable = fadt[52];
         power.pm1a_control = port(read_u32(&fadt, 64));
         power.pm1b_control = port(read_u32(&fadt, 68));
+    }
+    if available >= 80 {
+        power.pm_timer = port(read_u32(&fadt, 76));
+    }
+    if available >= 116 {
+        power.pm_timer_32 = read_u32(&fadt, 112) & (1 << 8) != 0;
+    }
+    // X_PM_TMR_BLK, when it is system I/O.
+    if available >= 220 && fadt[208] == 1 {
+        if let Ok(io) = u16::try_from(read_u64(&fadt, 212)) {
+            if io != 0 {
+                power.pm_timer = io;
+            }
+        }
     }
     // RESET_REG_SUP (flags bit 10): the reset register is usable.
     if available >= 129 && read_u32(&fadt, 112) & (1 << 10) != 0 {

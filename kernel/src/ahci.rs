@@ -447,13 +447,7 @@ fn reset_port(port: u64) -> Result<(), InitError> {
 /// Wait for `ticks` timer edges (10 ms each), or a bounded spin if the
 /// timer is not running.
 fn hold_ticks(ticks: u64) {
-    let start = crate::timer::ticks();
-    for _ in 0..POLL_LIMIT * 4 {
-        if crate::timer::ticks().wrapping_sub(start) >= ticks {
-            return;
-        }
-        core::hint::spin_loop();
-    }
+    crate::timer::spin_ms(ticks * 10);
 }
 
 fn start_engine(port: u64) -> Result<(), InitError> {
