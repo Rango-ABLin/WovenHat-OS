@@ -22,9 +22,9 @@ The syscall-boundary audit found two more defects, both fixed on PR #80.
 Ring-3 probes in the program every boot runs cover both fixes. See the
 [signal authority audit](audit-syscall-signal-authority-2026-10-16.md).
 
-**Open.** Kernel allocations sized by user arguments are infallible and
-halt the kernel when memory is exhausted. This low-memory follow-up is not
-fixed yet.
+**Allocation failure.** Fixed separately: syscall-path allocations sized
+by user arguments are now fallible. Exhaustion fails the call instead of
+halting the kernel.
 
 ## Syscall user-pointer bounds (2026-10-15, source fix, QEMU pending)
 

@@ -139,6 +139,21 @@ impl Surface {
         }
     }
 
+    /// [`new`](Self::new), or `None` if memory runs out. For surfaces a
+    /// syscall asks for, so exhaustion refuses the request rather than
+    /// halting the kernel.
+    pub fn try_new(width: usize, height: usize) -> Option<Self> {
+        let len = width.checked_mul(height)?;
+        let mut pixels = Vec::new();
+        pixels.try_reserve_exact(len).ok()?;
+        pixels.resize(len, 0);
+        Some(Self {
+            pixels,
+            width,
+            height,
+        })
+    }
+
     pub fn width(&self) -> usize {
         self.width
     }

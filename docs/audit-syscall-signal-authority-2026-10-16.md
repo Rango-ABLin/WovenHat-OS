@@ -79,13 +79,28 @@ The fix has two parts:
   - `audio_play`: limited to 64 KiB.
   - Both use a heap that grows on demand.
 
-## Known gap, not fixed here
+## Allocation failure in syscall paths (fixed 2026-10-16)
 
-Kernel allocations sized by user arguments use infallible `alloc::vec!`. If
-physical memory is exhausted, the allocation-error handler halts the kernel
-instead of failing the syscall (Linux returns `ENOMEM`). The fix is
-fallible allocation (`try_reserve_exact`) in those syscalls. It is a
-low-memory robustness item, recorded for a follow-up.
+Kernel allocations sized by user arguments used infallible `alloc::vec!`.
+If physical memory was exhausted, the allocation-error handler halted the
+kernel instead of failing the syscall (Linux returns `ENOMEM`).
+
+They now use fallible allocation. On exhaustion the call returns
+`SYSCALL_ERROR`, audited as a failure where the path already audits:
+
+- `heap::try_filled(value, len)` (`try_reserve_exact`) for:
+  - the exec/spawn image buffers (`sys_exec`, `sys_exec_command`,
+    `sys_spawn_command`);
+  - the `sys_audio_play` PCM copy;
+  - the `sys_graphics_write` pixel copy.
+- `display::Surface::try_new` for `user_graphics::create`, which
+  returns `SystemFull`.
+
+Sizes were already bounded: surfaces are capped at 1 Mpixel per process
+and 4 Mpixels system-wide; audio at 64 KiB. The heap returns null when
+growth fails, so `try_reserve_exact` reports the failure instead of
+reaching `alloc_error_handler`. Kernel-internal allocations (boot, self
+tests, storage recovery) are unchanged.
 
 ## Evidence
 
