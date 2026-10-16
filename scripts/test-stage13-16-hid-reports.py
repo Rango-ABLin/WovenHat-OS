@@ -54,10 +54,7 @@ class Qmp:
         while True:
             line = self.file.readline()
             if not line:
-                # QEMU closed the monitor: it exited, possibly because the
-                # guest finished on this very event. Callers decide by the
-                # process state; the exit code and marker still decide the gate.
-                raise ConnectionError(f'{name}: QMP connection closed')
+                raise EOFError(f'{name}: QMP disconnected before command reply')
             reply = json.loads(line)
             if 'return' in reply:
                 return reply['return']
@@ -148,11 +145,17 @@ def main():
                     if not args.no_input:
                         try:
                             inject(qmp)
-                        except OSError:
-                            # The guest may finish, and QEMU exit, before the
-                            # last event is sent; anything else is an error.
-                            time.sleep(1)
-                            if process.poll() is None:
+                        except (OSError, EOFError):
+                            # A guest completing its acceptance test can shut
+                            # QEMU down before the final QMP reply. Accept this
+                            # only if the guest actually exited successfully
+                            # and emitted the required stage marker.
+                            try:
+                                process.wait(timeout=2)
+                            except subprocess.TimeoutExpired:
+                                raise
+                            completed_log = serial.read_text(errors='replace') if serial.exists() else ''
+                            if process.returncode != 33 or PASS_MARKER not in completed_log:
                                 raise
                 time.sleep(0.2)
         except Exception as error:  # noqa: BLE001 - recorded as a failure
