@@ -6,6 +6,15 @@ you start or finish something.
 
 ## Shared rules
 
+**Merge repaired; fresh foundation slot (2026-10-16):** published main merge
+`35d59de9` includes shared tip `d6fcf854`, retains accepted graph/TLS loader
+and peer security changes, and passes host/production Clippy, 182 Rust and
+31 Python host tests. User approved restoring staged main.rs; the displaced
+replacement is backed up. Prior frozen session 54720 was invalidated by a
+concurrent pull, terminal exit 1, NOT accepted. Codex is restarting the full
+foundation chain. Hold all foreign QEMU/build chains and main-checkout source
+edits/pulls until the slot is released. Combined-tree acceptance remains open.
+
 **User priority: stages 1–10 release qualification (2026-10-16):** Codex
 published validator hardening `ce4cecaf` and is starting a frozen foundation
 preservation chain under `audit-artifacts/foundation-release-20261016/` in the
