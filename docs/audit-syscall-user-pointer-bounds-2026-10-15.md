@@ -84,7 +84,19 @@ All run on Linux, nightly-2026-07-10:
   run on 1/2/4 CPUs:
   - the release chain (`scripts/test-release.py`);
   - the Stage 7–11 user-memory, IPC and async gates.
-- **No Ring-3 negative test yet.** The next gate should add one: a
-  process passes non-canonical, kernel-half and limit-crossing pointers to
-  `write`, `read`, `open` and an async submission, and expects
-  `SYSCALL_ERROR` for each, with the kernel still alive.
+- **Ring-3 negative probes (added 2026-10-16).** The integrated user
+  program (`wovenhat_user_program_start`, which every normal and test boot
+  runs) now calls:
+  - `write(1, ...)` with a non-canonical pointer, a kernel-half pointer,
+    and a 2-byte range crossing the top of user space;
+  - `open` with a non-canonical path pointer.
+
+  Any result other than `-1` exits the program with status 1, and the boot
+  then fails with `PROCESS WAIT/REAP: FAILED`. On a kernel without this fix,
+  the first probe panics the kernel instead. The disassembly confirms all
+  four addresses are encoded as full 64-bit immediates. The program is 780
+  bytes (limit 4096).
+  - **Not yet run:** the negative control, running the probes against the
+    unfixed kernel to watch the panic, and the QEMU run with the fix. The
+    PR's CI lanes run every QEMU gate on 1/2/4 CPUs, so they exercise the
+    probes.

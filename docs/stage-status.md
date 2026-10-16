@@ -15,8 +15,12 @@ example, `write(1, 0x0001_0000_0000_0000, 1)` stopped the whole kernel.
 passes 154, and Clippy is clean on 5 kernel feature sets and all host
 targets.
 
-**Open.** 1/2/4-CPU QEMU and release-chain runs, which wait on the
-acceptance hold, and a Ring-3 negative-pointer gate. See the
+**Ring-3 probes.** The integrated user program run by every boot now
+passes bad pointers to `write` and `open`, and fails the boot unless each
+call returns `-1`.
+
+**Open.** 1/2/4-CPU QEMU and release-chain evidence (CI lanes on PR #80;
+the local runs wait on the acceptance hold). See the
 [user-pointer bounds audit](audit-syscall-user-pointer-bounds-2026-10-15.md).
 
 ## Stage 20.15 — the desktop as the session (2026-10-15)
