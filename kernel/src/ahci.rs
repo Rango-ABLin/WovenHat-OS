@@ -37,10 +37,14 @@ const PX_CMD: u64 = 0x18;
 const PX_TFD: u64 = 0x20;
 const PX_SIG: u64 = 0x24;
 const PX_SSTS: u64 = 0x28;
+const PX_SCTL: u64 = 0x2c;
 const PX_SERR: u64 = 0x30;
 const PX_SACT: u64 = 0x34;
 const PX_CI: u64 = 0x38;
 const CMD_ST: u32 = 1;
+/// Interface Communication Control: Active (wake the link).
+const CMD_ICC_ACTIVE: u32 = 1 << 28;
+const CMD_ICC_MASK: u32 = 0xf << 28;
 const CMD_FRE: u32 = 1 << 4;
 const CMD_FR: u32 = 1 << 14;
 const CMD_CR: u32 = 1 << 15;
@@ -141,36 +145,44 @@ impl AhciDisk {
         mmio_write32(hba + HBA_GHC, ghc | GHC_AE)?;
         let implemented = mmio_read32(hba + HBA_PI)?;
 
+        let command_list = DmaPage::allocate_zeroed().ok_or(InitError::DmaUnavailable)?;
+        let received_fis = DmaPage::allocate_zeroed().ok_or(InitError::DmaUnavailable)?;
+        let command_table = DmaPage::allocate_zeroed().ok_or(InitError::DmaUnavailable)?;
+        let transfer = DmaPage::allocate_zeroed().ok_or(InitError::DmaUnavailable)?;
+
+        // Take each port over from the firmware, which may have stopped it
+        // (so its signature reads all ones) or left its link in a
+        // power-saving state: stop it, give it this driver's buffers with
+        // FIS receive running, and reset it if it does not then report an
+        // active link and an ATA signature.
         let mut selected = None;
         for index in 0..MAX_PORTS {
             if implemented & (1_u32 << index) == 0 {
                 continue;
             }
             let port = hba + HBA_PORT_BASE + index as u64 * HBA_PORT_STRIDE;
-            let ssts = mmio_read32(port + PX_SSTS)?;
-            let det = ssts & 0x0f;
-            let ipm = (ssts >> 8) & 0x0f;
-            if det != 3 || ipm != 1 {
+            if mmio_read32(port + PX_SSTS)? & 0x0f == 0 {
+                continue; // no device
+            }
+            if stop_engine(port).is_err() {
                 continue;
             }
-            if mmio_read32(port + PX_SIG)? != SATA_SIG_ATA {
-                continue;
+            mmio_write32(port + PX_CLB, command_list.physical as u32)?;
+            mmio_write32(port + PX_CLBU, (command_list.physical >> 32) as u32)?;
+            mmio_write32(port + PX_FB, received_fis.physical as u32)?;
+            mmio_write32(port + PX_FBU, (received_fis.physical >> 32) as u32)?;
+            mmio_write32(port + PX_CMD, mmio_read32(port + PX_CMD)? | CMD_FRE)?;
+            if !(link_active(port)? && mmio_read32(port + PX_SIG)? == SATA_SIG_ATA) {
+                reset_port(port)?;
             }
-            selected = Some(port);
-            break;
+            if link_active(port)? && mmio_read32(port + PX_SIG)? == SATA_SIG_ATA {
+                selected = Some(port);
+                break;
+            }
+            // Not a usable ATA disk: leave the port stopped.
+            let _ = stop_engine(port);
         }
         let port = selected.ok_or(InitError::NoSataPort)?;
-
-        stop_engine(port)?;
-        let command_list = DmaPage::allocate_zeroed().ok_or(InitError::DmaUnavailable)?;
-        let received_fis = DmaPage::allocate_zeroed().ok_or(InitError::DmaUnavailable)?;
-        let command_table = DmaPage::allocate_zeroed().ok_or(InitError::DmaUnavailable)?;
-        let transfer = DmaPage::allocate_zeroed().ok_or(InitError::DmaUnavailable)?;
-
-        mmio_write32(port + PX_CLB, command_list.physical as u32)?;
-        mmio_write32(port + PX_CLBU, (command_list.physical >> 32) as u32)?;
-        mmio_write32(port + PX_FB, received_fis.physical as u32)?;
-        mmio_write32(port + PX_FBU, (received_fis.physical >> 32) as u32)?;
         mmio_write32(port + PX_IE, 0)?;
         mmio_write32(port + PX_IS, u32::MAX)?;
         mmio_write32(port + PX_SERR, u32::MAX)?;
@@ -382,6 +394,66 @@ fn stop_engine(port: u64) -> Result<(), InitError> {
         core::hint::spin_loop();
     }
     Err(InitError::PortTimeout)
+}
+
+/// Whether the port has a device with an established, active link, waking
+/// a link the firmware left in a power-saving state.
+fn link_active(port: u64) -> Result<bool, InitError> {
+    let ssts = mmio_read32(port + PX_SSTS)?;
+    if ssts & 0x0f != 3 {
+        return Ok(false);
+    }
+    if (ssts >> 8) & 0x0f != 1 {
+        let cmd = mmio_read32(port + PX_CMD)? & !CMD_ICC_MASK;
+        mmio_write32(port + PX_CMD, cmd | CMD_ICC_ACTIVE)?;
+        for _ in 0..POLL_LIMIT {
+            if (mmio_read32(port + PX_SSTS)? >> 8) & 0x0f == 1 {
+                return Ok(true);
+            }
+            core::hint::spin_loop();
+        }
+        return Ok(false);
+    }
+    Ok(true)
+}
+
+/// COMRESET (AHCI 1.3, 10.4.2): hold DET=1 for at least a millisecond,
+/// release it, wait for the link, then for the device's first register FIS,
+/// which carries its signature. The engine must be stopped and FIS receive
+/// running.
+fn reset_port(port: u64) -> Result<(), InitError> {
+    let control = mmio_read32(port + PX_SCTL)? & !0x0f;
+    mmio_write32(port + PX_SCTL, control | 1)?;
+    hold_ticks(2);
+    mmio_write32(port + PX_SCTL, control)?;
+    for _ in 0..POLL_LIMIT {
+        if mmio_read32(port + PX_SSTS)? & 0x0f == 3 {
+            break;
+        }
+        core::hint::spin_loop();
+    }
+    mmio_write32(port + PX_SERR, u32::MAX)?;
+    for _ in 0..POLL_LIMIT {
+        if mmio_read32(port + PX_TFD)? & TFD_BSY == 0 && mmio_read32(port + PX_SIG)? != u32::MAX {
+            return Ok(());
+        }
+        core::hint::spin_loop();
+    }
+    // A port that never answers is not selected; that is not an error for
+    // the controller as a whole.
+    Ok(())
+}
+
+/// Wait for `ticks` timer edges (10 ms each), or a bounded spin if the
+/// timer is not running.
+fn hold_ticks(ticks: u64) {
+    let start = crate::timer::ticks();
+    for _ in 0..POLL_LIMIT * 4 {
+        if crate::timer::ticks().wrapping_sub(start) >= ticks {
+            return;
+        }
+        core::hint::spin_loop();
+    }
 }
 
 fn start_engine(port: u64) -> Result<(), InitError> {

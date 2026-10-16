@@ -26,6 +26,9 @@ pub enum Key {
     F2,
     F3,
     F4,
+    /// Switches between the desktop and the diagnostic console; handled by
+    /// the kernel and never delivered (Stage 20.15).
+    F12,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -150,6 +153,12 @@ static FOCUS: Mutex<Focus> = Mutex::with_rank(
 pub struct NotFocused;
 
 pub fn publish(event: Event) -> bool {
+    // F12 belongs to the kernel: it switches between the desktop session
+    // and the diagnostic console, whoever holds focus.
+    if event == Event::Key(Key::F12) {
+        crate::session::toggle_console();
+        return true;
+    }
     let mut focus = FOCUS.lock();
     if focus.owner.is_some() {
         let pushed = focus.queue.push(event);
@@ -328,7 +337,7 @@ pub fn read_bytes(buffer: &mut [u8]) -> usize {
             Key::Enter => b'\n',
             Key::Backspace => 8,
             Key::Tab => b'\t',
-            Key::F1 | Key::F2 | Key::F3 | Key::F4 | Key::Char(_) => continue,
+            Key::F1 | Key::F2 | Key::F3 | Key::F4 | Key::F12 | Key::Char(_) => continue,
         };
         buffer[count] = byte;
         count += 1;

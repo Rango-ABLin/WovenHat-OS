@@ -43,7 +43,7 @@ const JOURNAL_RECORD_SIZE: usize = 32;
 const JOURNAL_CAPACITY: usize = (SECTOR_SIZE - JOURNAL_HEADER_SIZE) / JOURNAL_RECORD_SIZE;
 const JOURNAL_SECTOR_COUNT: usize = 2;
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Error {
     Block(BlockError),
     InvalidBootSector,

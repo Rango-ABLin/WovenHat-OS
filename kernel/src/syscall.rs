@@ -375,6 +375,9 @@ pub enum Number {
     /// monitors, left to right in surface coordinates. Requires DisplayIo and
     /// the lease. (208 is reserved for audio recording.)
     GraphicsCompositorOutputs = 207,
+    /// action (0 power off, 1 restart) -> does not return when it works; an
+    /// error code says why the machine is still running. Needs PowerControl.
+    PowerControl = 209,
 }
 
 pub fn entry_address() -> u64 {
@@ -775,19 +778,26 @@ fn sys_message_receive(user_buffer: u64, capacity: u64, user_sender: u64) -> u64
         return SYSCALL_ERROR;
     };
     let receiver = crate::task::current_process_id();
-    let Ok(message) = crate::ipc::peek(receiver) else {
-        return SYSCALL_ERROR;
-    };
-    if message.payload().len() > capacity
-        || crate::paging::copy_to_current_user(user_buffer, message.payload()).is_err()
-        || crate::paging::copy_to_current_user(user_sender, &message.sender.to_le_bytes()).is_err()
-    {
-        return SYSCALL_ERROR;
+    // Peek, copy out with no lock held (the copy can fault), then dequeue
+    // only that message. If another thread of this process dequeued first,
+    // the copy is stale: take the next message instead.
+    loop {
+        let Ok((message, serial)) = crate::ipc::peek(receiver) else {
+            return SYSCALL_ERROR;
+        };
+        if message.payload().len() > capacity
+            || crate::paging::copy_to_current_user(user_buffer, message.payload()).is_err()
+            || crate::paging::copy_to_current_user(user_sender, &message.sender.to_le_bytes())
+                .is_err()
+        {
+            return SYSCALL_ERROR;
+        }
+        match crate::ipc::receive_if(receiver, serial) {
+            Ok(_) => return message.payload().len() as u64,
+            Err(crate::ipc::Error::QueueEmpty) => continue,
+            Err(_) => return SYSCALL_ERROR,
+        }
     }
-    if crate::ipc::receive(receiver).is_err() {
-        return SYSCALL_ERROR;
-    }
-    message.payload().len() as u64
 }
 
 fn sys_pipe() -> u64 {
@@ -881,7 +891,7 @@ fn sys_sleep(ticks: u64) -> u64 {
 }
 
 fn sys_kill(pid: u64, sig: u64) -> u64 {
-    match crate::task::kill_process(pid, sig) {
+    match crate::task::kill_process_from_user(pid, sig) {
         Ok(()) => 0,
         Err(_) => SYSCALL_ERROR,
     }
@@ -950,6 +960,11 @@ fn prepare_signal_delivery(frame: *const UserForkFrame) {
     if frame.is_null() {
         return;
     }
+    // `sigaction` admits only executable user addresses; never return to a
+    // non-user RIP, which would fault on `iretq` in ring 0.
+    if crate::user_address::check_user_range(handler, 1).is_err() {
+        return;
+    }
     let frame = unsafe { &mut *(frame as *mut UserForkFrame) };
     let Some(new_rsp) = frame.rsp.checked_sub(8) else {
         return;
@@ -983,7 +998,15 @@ fn sys_exec(user_path: u64, length: u64) -> u64 {
     let Ok(path) = core::str::from_utf8(&path[..length]) else {
         return SYSCALL_ERROR;
     };
-    let mut image = alloc::vec![0_u8; crate::vfs::NODE_CAPACITY];
+    let Some(mut image) = crate::heap::try_filled(0_u8, crate::vfs::NODE_CAPACITY) else {
+        crate::audit::record(
+            actor,
+            crate::audit::Action::ProcessExec,
+            length as u64,
+            false,
+        );
+        return SYSCALL_ERROR;
+    };
     let Ok(image_length) = crate::vfs::read_all(path, &mut image) else {
         crate::audit::record(
             actor,
@@ -1092,7 +1115,15 @@ fn sys_exec_command(user_line: u64, length: u64) -> u64 {
         argv[index] = argument;
     }
 
-    let mut image = alloc::vec![0_u8; crate::vfs::NODE_CAPACITY];
+    let Some(mut image) = crate::heap::try_filled(0_u8, crate::vfs::NODE_CAPACITY) else {
+        crate::audit::record(
+            actor,
+            crate::audit::Action::ProcessExec,
+            length as u64,
+            false,
+        );
+        return SYSCALL_ERROR;
+    };
     let Ok(image_length) = crate::vfs::read_all(resolved.as_str(), &mut image) else {
         crate::audit::record(
             actor,
@@ -1191,7 +1222,15 @@ fn sys_spawn_command(user_line: u64, length: u64) -> u64 {
         };
         argv[index] = argument;
     }
-    let mut image = alloc::vec![0_u8; crate::vfs::NODE_CAPACITY];
+    let Some(mut image) = crate::heap::try_filled(0_u8, crate::vfs::NODE_CAPACITY) else {
+        crate::audit::record(
+            actor,
+            crate::audit::Action::ProcessExec,
+            length as u64,
+            false,
+        );
+        return SYSCALL_ERROR;
+    };
     let Ok(image_length) = crate::vfs::read_all(resolved.as_str(), &mut image) else {
         crate::audit::record(
             actor,
@@ -2202,7 +2241,10 @@ fn sys_audio_play(user_pcm: u64, length: u64) -> u64 {
     if length == 0 || length > crate::hda::MAX_PLAY_BYTES {
         return SYSCALL_ERROR;
     }
-    let mut pcm = alloc::vec![0u8; length];
+    let Some(mut pcm) = crate::heap::try_filled(0u8, length) else {
+        crate::audit::record(actor, crate::audit::Action::AudioPlay, length as u64, false);
+        return SYSCALL_ERROR;
+    };
     if crate::paging::copy_from_current_user(user_pcm, &mut pcm).is_err() {
         return SYSCALL_ERROR;
     }
@@ -2594,6 +2636,7 @@ pub extern "C" fn wovenhat_syscall_dispatch(
         value if value == Number::AudioPlay as u64 => sys_audio_play(arg0, arg1),
         value if value == Number::AudioSetVolume as u64 => sys_audio_set_volume(arg0),
         value if value == Number::GraphicsCompositorOutputs as u64 => sys_compositor_outputs(arg0),
+        value if value == Number::PowerControl as u64 => sys_power_control(arg0),
         _ => u64::MAX,
     };
 
@@ -2668,7 +2711,9 @@ fn sys_graphics_write(handle: u64, packed: u64, user_pixels: u64) -> u64 {
     if width == 0 || height == 0 || x + width > surface_width || y + height > surface_height {
         return SYSCALL_ERROR;
     }
-    let mut bytes = alloc::vec![0u8; width * height * 4];
+    let Some(mut bytes) = crate::heap::try_filled(0u8, width * height * 4) else {
+        return SYSCALL_ERROR;
+    };
     if crate::paging::copy_from_current_user(user_pixels, &mut bytes).is_err() {
         return SYSCALL_ERROR;
     }
@@ -2897,6 +2942,27 @@ fn pack_compositor_info(width: u32, height: u32, scale: u32) -> u64 {
     u64::from(width) | (u64::from(height) << 24) | (u64::from(scale) << 48)
 }
 
+/// Turn the machine off (action 0) or restart it (action 1). Requires
+/// PowerControl, which only the desktop session holds; every request is in
+/// the security ledger. Returns only when the machine is still running:
+/// 1 no ACPI power-off, 2 the firmware refused ACPI mode, 3 ignored.
+fn sys_power_control(action: u64) -> u64 {
+    let actor = crate::task::current_task_id().as_u64();
+    let allowed = crate::task::current_has(crate::capability::Capability::PowerControl) && action <= 1;
+    crate::audit::record(actor, crate::audit::Action::PowerControl, action, allowed);
+    if !allowed {
+        return SYSCALL_ERROR;
+    }
+    if action == 1 {
+        crate::power::reboot();
+    }
+    match crate::power::power_off() {
+        crate::power::Error::NoAcpi => 1,
+        crate::power::Error::AcpiModeRefused => 2,
+        crate::power::Error::StillRunning => 3,
+    }
+}
+
 /// The compositor surface's size and display scale. Requires `DisplayIo` and
 /// the lease: the geometry is the holder's to draw on.
 fn sys_compositor_outputs(user_outputs: u64) -> u64 {
@@ -2983,6 +3049,8 @@ fn encode_input(event: crate::woven_input::Event) -> Option<u64> {
         Event::Key(Key::F2) => Some(packed(INPUT_KIND_F2, 0)),
         Event::Key(Key::F3) => Some(packed(INPUT_KIND_F3, 0)),
         Event::Key(Key::F4) => Some(packed(INPUT_KIND_F4, 0)),
+        // The kernel's own key; never published to a focus holder.
+        Event::Key(Key::F12) => None,
         // dx and dy as two's-complement u16 halves.
         Event::PointerMove { dx, dy } => Some(packed(
             INPUT_KIND_POINTER_MOVE,

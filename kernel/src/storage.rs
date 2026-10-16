@@ -190,6 +190,15 @@ fn unavailable_space_error() -> SpaceError {
 /// Mount the FAT32 volume of the selected primary device (ATA unless a
 /// boot selected NVMe or AHCI; see `block_io::select_root`) at /mnt.
 pub fn mount_ata_root() -> MountStatus {
+    // Stage 13.17: decide whether the device is WovenHat's own before
+    // mounting, so a foreign disk is imported read-only and never written.
+    let owned = block_io::with_root(|disk| {
+        let mut disk = disk;
+        fat32_label(&mut disk)
+    })
+    .flatten()
+    .is_some_and(|label| block_io::OWNED_LABELS.iter().any(|owned| **owned == label));
+    block_io::set_root_owned(owned);
     let status = block_io::with_root(|disk| {
         // A sized handle for the generic mount helpers.
         let mut disk = disk;
@@ -226,6 +235,27 @@ pub fn mount_ata_root() -> MountStatus {
     .unwrap_or(MountStatus::NoDevice);
     record_mount_status(status);
     status
+}
+
+/// The boot-sector label of the FAT32 volume the mount finds on `device`:
+/// the whole device, else an MBR partition, else a GPT partition.
+fn fat32_label(device: &mut impl crate::block::BlockDevice) -> Option<[u8; 11]> {
+    fn label(device: &mut impl crate::block::BlockDevice) -> Option<[u8; 11]> {
+        fat32::mount(device).ok()?;
+        let mut sector = [0u8; crate::block::SECTOR_SIZE];
+        device.read_sector(0, &mut sector).ok()?;
+        sector[71..82].try_into().ok()
+    }
+    if let Some(found) = label(device) {
+        return Some(found);
+    }
+    let partition = match partition::find_fat32(device) {
+        Ok(Some(partition)) => partition,
+        Ok(None) => gpt::find_fat_partition(device).ok().flatten()?,
+        Err(_) => return None,
+    };
+    let mut view = partition::PartitionDevice::new(device, partition).ok()?;
+    label(&mut view)
 }
 
 fn mount_partition(

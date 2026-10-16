@@ -24,6 +24,12 @@ pub enum Error {
 }
 
 pub fn find_fat_partition(device: &mut impl BlockDevice) -> Result<Option<Partition>, Error> {
+    Ok(fat_partitions(device)?.first().copied())
+}
+
+/// Every EFI system and basic data partition, in table order. The whole
+/// table is validated first: one bad entry rejects it.
+pub fn fat_partitions(device: &mut impl BlockDevice) -> Result<alloc::vec::Vec<Partition>, Error> {
     validate_protective_mbr(device)?;
     let mut header = [0_u8; SECTOR_SIZE];
     device.read_sector(1, &mut header).map_err(Error::Block)?;
@@ -79,7 +85,7 @@ pub fn find_fat_partition(device: &mut impl BlockDevice) -> Result<Option<Partit
         return Err(Error::InvalidChecksum);
     }
 
-    let mut selected = None;
+    let mut selected = alloc::vec::Vec::new();
     let mut entry = [0_u8; MAX_PARTITION_ENTRY_SIZE];
     for index in 0..entry_count {
         read_bytes(
@@ -96,8 +102,8 @@ pub fn find_fat_partition(device: &mut impl BlockDevice) -> Result<Option<Partit
         if first_lba < first_usable || last_lba > last_usable || first_lba > last_lba {
             return Err(Error::OutOfBounds);
         }
-        if selected.is_none() && (kind == EFI_SYSTEM_GUID || kind == BASIC_DATA_GUID) {
-            selected = Some(Partition {
+        if kind == EFI_SYSTEM_GUID || kind == BASIC_DATA_GUID {
+            selected.push(Partition {
                 start_lba: first_lba,
                 sectors: last_lba - first_lba + 1,
                 kind: 0xee,

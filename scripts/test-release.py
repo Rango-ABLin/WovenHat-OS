@@ -9,6 +9,16 @@ import sys
 import time
 
 
+def build_woven_shell(root):
+    """Build WovenShell, the desktop session a system-apps image embeds
+    (Stage 20.15), in its own target directory; returns the image path."""
+    app_dir = root / 'apps' / 'woven-shell'
+    env = os.environ.copy()
+    env.pop('CARGO_BUILD_BUILD_DIR', None)
+    env['CARGO_TARGET_DIR'] = str(app_dir / 'target')
+    subprocess.run(['cargo', 'build', '--release'], cwd=app_dir, env=env, check=True)
+    return app_dir / 'target' / 'x86_64-unknown-none' / 'release' / 'wovenhat-woven-shell'
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--qemu')
@@ -110,6 +120,7 @@ def main():
             'woven-store': 'WOVENHAT_STORE_IMAGE',
         }[item['id']]
         system_app_env[variable] = str(system_app_output / item['package'])
+    system_app_env['WOVENHAT_SHELL_IMAGE'] = str(build_woven_shell(root))
     image = Path(subprocess.check_output(
         ['cargo', 'run', '--quiet', '--release', '--features', 'system-apps', '--', '--print-image'],
         cwd=root, env=system_app_env, text=True).strip())
@@ -119,7 +130,7 @@ def main():
     sources += sorted((root / 'src').rglob('*.rs'))
     sources += sorted((root / 'libwoven' / 'src').rglob('*.rs'))
     sources += sorted((root / 'tools' / 'wapp-packager').rglob('*.rs'))
-    for app in app_directories:
+    for app in app_directories + ('woven-shell',):
         app_root = root / 'apps' / app
         sources += sorted(path for path in app_root.rglob('*') if path.is_file() and path.suffix in {'.rs', '.toml', '.x', '.S'})
     sources += sorted((root / 'scripts').glob('*.py'))

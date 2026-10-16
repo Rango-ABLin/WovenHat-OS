@@ -10,7 +10,7 @@ pub struct HardwareInfo {
     pub pci: pci::Summary,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub enum CpuVendor {
     Intel,
     Amd,

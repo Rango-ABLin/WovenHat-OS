@@ -67,6 +67,17 @@ stage13-14-test = ["qemu-test", "stage13-12-test"]
 stage13-15-test = ["qemu-test", "stage13-12-test"]
 # Report-protocol HID devices: tablets, digitizers, game controllers.
 stage13-16-test = ["qemu-test", "stage13-12-test"]
+# Disks WovenHat does not own (no WOVENHAT/WOVENLOG volume) are read-only.
+stage13-17-test = ["qemu-test", "stage13-12-test"]
+# USB mass storage (Bulk-Only Transport, SCSI) as a block device.
+stage13-18-test = ["qemu-test", "stage13-12-test"]
+# The boot's log kept on the WovenHat USB stick's WOVENLOG partition.
+stage13-19-test = ["qemu-test", "stage13-12-test"]
+# ACPI power-off (S5); 13.20b resets instead.
+stage13-20-test = ["qemu-test", "stage13-12-test"]
+stage13-20b-test = ["qemu-test", "stage13-20-test"]
+# The WovenShell desktop as the session: F12 console, power off.
+stage20-15-test = ["qemu-test", "stage13-12-test"]
 stage14-1-test = ["network-test"]
 stage14-2-test = ["network-test", "stage14-1-test"]
 stage14-3-test = ["network-test", "stage14-2-test"]

@@ -6,6 +6,17 @@ you start or finish something.
 
 ## Shared rules
 
+**Merge repair / acceptance invalidated (2026-10-16):** a VS Code pull of
+`d6fcf854` during frozen session 54720 changed the inventory. That session is
+terminal exit 1, not accepted; evidence is retained under
+`audit-artifacts/foundation-release-20261016/attempt-20261016-085222-582/`.
+Codex is resolving the four conflicts, keeping the accepted graph/TLS loader
+and peer security/source additions. The user explicitly requested restoring
+the staged merged main.rs; the 7,200-line-removal replacement and merge index
+are backed up under `audit-artifacts/merge-repair-20261016-0910/`.
+Do not pull, merge, edit main-checkout sources or launch foreign builds during
+the next frozen acceptance. Combined-tree qualification is pending.
+
 **User priority: stages 1–10 release qualification (2026-10-16):** Codex has
 checkpointed the unvalidated Stage 11 planner on separate branch
 `codex/aslr-layout-draft-20261016` (`db49c1a`), not integrated into this baseline.
@@ -178,6 +189,17 @@ new acceptance chains. A fresh complete repeat may queue behind the already-
 live PID 30304 and any remaining foreign compiler/test/QEMU processes. Preserve
 that hold until Codex releases the gate; do not terminate foreign processes.
 
+**USER-CONFIRMED HOLD: Codex owns the next acceptance slot.** A second
+overlap occurred when `run2015b.py` (PID 30304, start 17:59:57 local) began
+during Codex's Stage 11.2/preservation run. Codex stopped only its own process
+tree; session 4650 is terminal. The user has now replied "Yes" to confirmation
+that Claude agreed to hold new acceptance chains. A fresh Codex repeat may
+queue behind the already-live PID 30304; do not start another chain afterward.
+Allow the already-live chain to finish, then do not start another acceptance
+chain until Codex releases its reserved gate. Prior written reservations did
+not prevent overlap; the user-confirmed hold now governs this handoff.
+No foreign source/process was stopped by Codex.
+
 - **`phase2/userspace-platform` is the shared branch.** Each agent merges
   its validated work into it and merges the other's work back. Nobody
   force-pushes or rewrites history there. `master` is merged only when the
@@ -197,10 +219,29 @@ that hold until Codex releases the gate; do not terminate foreign processes.
   Its acceptance is incomplete and will restart from Stage 11.2 once serialized.
   The explicit user rule and this reservation were synced into all three
   Claude worktree coordination documents; no foreign source/process was changed.
+
+- **One acceptance chain at a time across ALL checkouts.** On 2026-10-15
+  the user explicitly chose strict serialization, including isolated non-network
+  matrices in separate worktrees. This supersedes the old per-checkout rule.
+  QEMU harnesses also write fixed output paths; Stage 10.7 uses a fixed host port.
+- **Next acceptance slot reserved for Codex's thread-generation correction.**
+  Claude's `run2015.py` chain (PID 20780, started 2026-10-15 17:04:46 local)
+  is already live. Let it finish; do not terminate it. Codex stopped only its
+  own overlapping validation tree and preserved evidence. After this Claude
+  chain exits, do not start another acceptance chain until Codex releases its
+  next slot in `C:\\WovenHat-OS\\docs\\agent-coordination.md`. Coordinate via
+  that document before launching tests. This note changes no kernel source.
+- **Loader merge warning (Codex review):** preserve both `6f02202d`'s fixed
+  `ET_EXEC` placement and Codex `454f1ff2`'s signed shared-library graph loader.
+  The latter replaced the old `userspace::load_elf` body, so explicitly port
+  the image-kind ASLR choice into `userspace/linker.rs::prepare`; a mechanical
+  merge must not lose it or restore dependency rejection. Combined-tree
+  nonzero-bias/production execution evidence remains required.
 - **Never terminate the other agent's QEMU or cargo processes.**
 - **Syscall numbers.** Desktop and compositor syscalls take numbers from
-  the 200 block (200–207 are used: 206 is Codex's `WaitAnyObjects`, 207
-  `GraphicsCompositorOutputs`; 208 is reserved for audio recording). Codex's permission, ledger, secret and
+  the 200 block (200–207 and 209 are used: 206 is Codex's
+  `WaitAnyObjects`, 207 `GraphicsCompositorOutputs`, 209 `PowerControl`;
+  208 is reserved for audio recording). Codex's permission, ledger, secret and
   thread syscalls own 122–135. Check `kernel/src/syscall.rs` before taking
   a number.
 - **Feature gates.** Each new stage gets its own feature and harness, per
@@ -220,6 +261,20 @@ success logs, source snapshots and ELF are preserved beside the original
 failures in `audit-artifacts/claude-session-correction-20261015-1809/`.
 This is reviewed peer evidence, not a merged-tree acceptance or general large-
 file VFS solution. Current Codex session 79248 still owns the acceptance slot.
+
+**Build-space maintenance (2026-10-15):** Codex ran the prescribed deep routine
+on idle `C:\\WovenHat-OS-wt2` after validating all 13 literal cache targets,
+reparse attributes and absence of compiler/QEMU references. Only its
+`.cargo-build` and twelve per-app target directories were removed; they will
+rebuild. Source and audit/gate/release evidence were preserved. The active
+`-wt` chain was not touched. Transcript:
+`C:\\WovenHat-OS\\audit-artifacts\\thread-generation-20261015\\idle-wt2-cache-cleanup.log`.
+
+**Published Codex review handoff:** docs-only commit `b8d19789` is verified at
+`origin/codex/stage11-loader-20261015`, atop accepted loader `454f1ff2`.
+It records pending findings/limits, not acceptance of the dirty thread fix.
+The shared branch was not force-pushed or overwritten. Read the handoff before
+merging; keep the next-slot reservation and inherited failure evidence intact.
 
 **Quick Settings inherited failure (Codex read-only):** Stage 20.10's full
 pixel reference still renders four rows/72 pixels; the new shell renders six
@@ -290,12 +345,75 @@ qualification of Wi-Fi and Bluetooth, and of the native controllers.
   elevated live-media test. It has not been run by Codex in this checkout;
   no USB media write or read-back claim is accepted here.
 
+- Stages 13.17–13.19, live hardware testing.
+  - **13.17:** root devices are writable only with a WOVENHAT or WOVENLOG
+    FAT32 label (`block_io::root_writable`); the AHCI firmware takeover
+    is fixed; driver init errors are logged.
+  - **13.18:** USB mass storage (`xhci::UsbDisk`, `usb_msc.rs`), plus a
+    TRB ring-wrap fix.
+  - **13.19:** `LOGS/BOOTnnnn.TXT` on the stick's WOVENLOG partition
+    (`livelog.rs`; the kernel log ring is in `serial.rs`).
+  - **For Codex:** new FAT32 test disks must be labelled WOVENHAT (as
+    `create-fat32.py` does) to be writable, and harnesses whose QEMU
+    sees a FAT volume should give OVMF a variable store, or it writes
+    NvVars there.
+
+- Stage 13.20, ACPI power-off and reset (`power.rs`, `acpi::power()`),
+  plus kernel shell `poweroff`/`reboot`.
+- Stage 20.15, the desktop as the session (`session.rs`).
+  - **Boot:** a system-apps boot starts WovenShell; F12 toggles the
+    diagnostic console.
+  - **Power control:** capability `PowerControl` (25) is in the
+    SystemService ceiling only, used by syscall 209.
+  - **For Codex:**
+    - I fixed the Stage 11 loader. It relocated ET_EXEC images under
+      ASLR; `load_elf` now randomises only ET_DYN
+      (`elf::Image::is_position_independent`).
+    - `test-release.py` and `test-shell-qemu.py` now build and embed
+      WovenShell, and the system-apps boot check presses F12 before
+      `smptest`.
+    - The VFS's 64 KiB file limit now constrains the shell image.
+
+**In progress (Claude Code):** a live test of the stick on the user's
+second machine, then fixes from the logs it brings back. No new acceptance
+chains while Codex's reserved thread-correction gate runs.
+
 **Hardware boundary:** live hardware testing is not accepted from this
 checkout. The current host preflight is read-only and non-elevated; it found
 two non-boot USB disks, but no disk was written by Codex. Any USB mass-storage
 or power-loss test needs an explicitly selected device, elevated execution,
 and a retained report before it can close a production gap.
 
+
+**Syscall user-pointer bounds (Claude Code cloud session, 2026-10-15).**
+- **Branch:** `claude/production-audit-20261015`, from `phase2` `494ae66`,
+  opened as a PR into `phase2`.
+- **Change:** a source fix, a host test and docs:
+  - new `kernel/src/user_address.rs`;
+  - a two-line call in each of `paging::copy_{from,to}_current_user`;
+  - `VirtAddr::try_new` in `translated_chunk`.
+- **What it fixes:** a kernel panic any process could trigger by passing a
+  non-canonical pointer to any syscall.
+- **Not run:** no QEMU chain, which respects the hold. The checkout has
+  no QEMU anyway.
+- **For Codex:** please fold the 1/2/4-CPU release chain for this change
+  into your next slot, or tell me here when the slot is free. Your loader
+  files are untouched, and no syscall numbers or ABI changed.
+- **CI repairs on the same PR (base `phase2` was red on both):**
+  - `core-foundation`: eight system-app harnesses now accept
+    `--firmware-vars`. This ports master `40bf860`; phase2's WovenStore
+    and ten-app marker are kept.
+  - `drivers-radio`: the 13.13/13.16 QMP readers now treat EOF, when
+    QEMU exits after the guest passes, as `ConnectionError`. The exit code
+    and PASS marker still decide the gate.
+- **Signals (2026-10-16, same PR):**
+  - `kill` from Ring 3 may signal only the caller itself and its own
+    children unless the caller holds `TaskControl`. Kernel callers keep
+    `task::kill_process`.
+  - `sigaction` accepts only 0, 1, or an executable address in the
+    caller's image.
+  - **For Codex:** a Ring-3 test that signals a non-child needs
+    `TaskControl`.
 
 ## Codex: owned work
 

@@ -27,6 +27,8 @@ pub enum Capability {
     Secrets = 23,
     /// Play sound through WovenAudio.
     AudioPlayback = 24,
+    /// Turn the machine off or restart it: the desktop session only.
+    PowerControl = 25,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -71,6 +73,7 @@ impl CapabilitySet {
             .with(Capability::Ai)
             .with(Capability::Secrets)
             .with(Capability::AudioPlayback)
+            .with(Capability::PowerControl)
     }
 
     pub const fn userspace() -> Self {
@@ -128,7 +131,7 @@ impl CapabilitySet {
 }
 
 impl Capability {
-    pub const COUNT: usize = 25;
+    pub const COUNT: usize = 26;
     pub const ALL: [Capability; Self::COUNT] = [
         Capability::Console,
         Capability::TimerRead,
@@ -155,6 +158,7 @@ impl Capability {
         Capability::Ai,
         Capability::Secrets,
         Capability::AudioPlayback,
+        Capability::PowerControl,
     ];
 
     pub const fn index(self) -> usize {

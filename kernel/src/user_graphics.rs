@@ -244,7 +244,7 @@ pub fn create(owner: u64, width: u32, height: u32) -> Result<Handle, Error> {
     }
     let pixels = width as usize * height as usize;
     with_registry(|registry| registry.admit(owner, pixels))?;
-    let surface = Surface::new(width as usize, height as usize);
+    let surface = Surface::try_new(width as usize, height as usize).ok_or(Error::SystemFull)?;
     let (result, refused) = with_registry(|registry| match registry.admit(owner, pixels) {
         Ok(index) => {
             let slot = &mut registry.slots[index];

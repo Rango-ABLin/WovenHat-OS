@@ -78,6 +78,9 @@ mod ipc;
 mod irq_lock;
 mod journal;
 mod keyboard;
+#[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
+mod livelog;
+mod session;
 mod memory;
 mod mouse;
 mod network;
@@ -91,6 +94,7 @@ mod panic;
 mod partition;
 mod permission;
 mod pic;
+mod power;
 mod pipe;
 mod rtc;
 mod secret_vault;
@@ -117,6 +121,9 @@ mod terminal;
 #[allow(dead_code)]
 mod thread;
 mod timer;
+#[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
+mod usb_msc;
+mod user_address;
 mod user_graphics;
 mod userspace;
 mod vfs;
@@ -1498,6 +1505,27 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
             }
         }
 
+        // Stage 13.19: booted from a WovenHat live stick, this boot's log
+        // is kept on the stick.
+        match livelog::start() {
+            Ok(boot) => serial::write_line(format_args!("[LIVELOG] boot {} is logged on the USB stick", boot)),
+            Err(error) => serial::write_line(format_args!("[LIVELOG] no live-test stick: {:?}", error)),
+        }
+
+        // Stage 20.15: the WovenShell desktop is the session; F12 shows this
+        // diagnostic console instead.
+        #[cfg(feature = "system-apps")]
+        {
+            let accounts = vfs::stat("/etc/wovenhat/accounts").is_ok().then_some("/etc/wovenhat/accounts");
+            match session::start(WOVEN_SHELL_IMAGE, accounts) {
+                Ok(pid) => {
+                    serial::write_line(format_args!("[SESSION] WovenShell desktop started as pid {}", pid));
+                    console.println("DESKTOP SESSION: STARTED (F12 SWITCHES TO THIS CONSOLE)");
+                }
+                Err(error) => serial::write_line(format_args!("[SESSION] desktop not started: {:?}", error)),
+            }
+        }
+
         serial::write_line(format_args!(
             "[BOOT] shell-first runtime ready; entering diagnostic shell"
         ));
@@ -1559,7 +1587,7 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
             // userspace read(0, ...) syscall and make the shell appear hung.
             if !userspace_foreground {
                 if let Some(key) = keyboard::poll() {
-                    if matches!(key, keyboard::Key::F2 | keyboard::Key::F3 | keyboard::Key::F4) {
+                    if matches!(key, keyboard::Key::F2 | keyboard::Key::F3 | keyboard::Key::F4 | keyboard::Key::F12) {
                         // F2-F4 have no use in the kernel's own desktop.
                     } else if matches!(key, keyboard::Key::F1) {
                         desktop_active = !desktop_active;
@@ -1576,7 +1604,11 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
                             keyboard::Key::Enter => gui::InputEvent::Key('\n'),
                             keyboard::Key::Backspace => gui::InputEvent::Key('\u{8}'),
                             keyboard::Key::Tab => gui::InputEvent::Key('\t'),
-                            keyboard::Key::F1 | keyboard::Key::F2 | keyboard::Key::F3 | keyboard::Key::F4 => {
+                            keyboard::Key::F1
+                            | keyboard::Key::F2
+                            | keyboard::Key::F3
+                            | keyboard::Key::F4
+                            | keyboard::Key::F12 => {
                                 unreachable!()
                             }
                         };
@@ -3555,6 +3587,60 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     }
     // Before the 13.12 block: 13.13 and 13.14 builds also enable
     // stage13-12-test, and each block ends the boot.
+    #[cfg(feature = "stage13-17-test")]
+    {
+        if !drivers::foreign_disk_self_test() {
+            serial::write_line(format_args!("[S13.17] foreign disks are read-only: FAILED"));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!("[S13.17] foreign disks are read-only: PASSED"));
+        qemu_test_exit_success();
+    }
+    // Ends with the machine off: the self-test returns only if it is not.
+    #[cfg(feature = "stage20-15-test")]
+    {
+        if !stage20_15_self_test() {
+            serial::write_line(format_args!("[S20.15] desktop session: FAILED"));
+            qemu_test_exit_failure();
+        }
+        qemu_test_exit_success();
+    }
+    // Both 13.20 gates end with the machine off or reset: the self-test
+    // returns only when the machine is still running.
+    #[cfg(feature = "stage13-20b-test")]
+    {
+        if !power::self_test(true) {
+            serial::write_line(format_args!("[S13.20] reset: FAILED"));
+            qemu_test_exit_failure();
+        }
+        qemu_test_exit_success();
+    }
+    #[cfg(feature = "stage13-20-test")]
+    {
+        if !power::self_test(false) {
+            serial::write_line(format_args!("[S13.20] power-off: FAILED"));
+            qemu_test_exit_failure();
+        }
+        qemu_test_exit_success();
+    }
+    #[cfg(feature = "stage13-19-test")]
+    {
+        if !livelog::self_test() {
+            serial::write_line(format_args!("[S13.19] live-test log on the USB stick: FAILED"));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!("[S13.19] live-test log on the USB stick: PASSED"));
+        qemu_test_exit_success();
+    }
+    #[cfg(feature = "stage13-18-test")]
+    {
+        if !xhci::storage_self_test() {
+            serial::write_line(format_args!("[S13.18] USB mass storage: FAILED"));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!("[S13.18] USB mass storage: PASSED"));
+        qemu_test_exit_success();
+    }
     #[cfg(feature = "stage13-16-test")]
     {
         if !xhci::report_device_self_test() {
@@ -5378,7 +5464,8 @@ fn stage16_1_self_test() -> bool {
     feature = "stage20-12-test",
     feature = "stage13-15-test",
     feature = "stage20-13-test",
-    feature = "stage20-14b-test"
+    feature = "stage20-14b-test",
+    feature = "stage20-15-test"
 ))]
 const HELLO_GUI_IMAGE: &[u8] = include_bytes!(env!("WOVENHAT_HELLO_GUI_IMAGE"));
 
@@ -5625,7 +5712,9 @@ fn wait_hello_gui(pid: task::ProcessId) -> Option<(task::ProcessId, Result<i32, 
     feature = "stage20-11-test",
     feature = "stage20-12-test",
     feature = "stage20-13-test",
-    feature = "stage20-14b-test"
+    feature = "stage20-14b-test",
+    feature = "stage20-15-test",
+    feature = "system-apps"
 ))]
 const WOVEN_SHELL_IMAGE: &[u8] = include_bytes!(env!("WOVENHAT_SHELL_IMAGE"));
 
@@ -5808,6 +5897,141 @@ fn stage20_14b_self_test() -> bool {
     }
     let _ = task::wait_process(shell.as_u64());
     step("shell released the display", compositor::holder().is_none() && !compositor::is_presenting())
+}
+
+/// Stage 20.15 acceptance: the desktop as the session.
+///
+/// The session starts through `session::start`, as a system-apps boot
+/// starts it, with an application in the catalog. Then, with real i8042
+/// input:
+/// - the shell takes the display and input focus, and its launcher (F1)
+///   lists the application;
+/// - F12 shows the diagnostic console: the session's frames stop, the
+///   terminal owns the display, and a typed key reaches the kernel shell's
+///   queue rather than the session;
+/// - F12 returns: the session takes the display and focus back;
+/// - Quick Settings' first row, Power off, turns the machine off through
+///   syscall 209: the harness requires QEMU to stop by itself.
+#[cfg(feature = "stage20-15-test")]
+fn stage20_15_self_test() -> bool {
+    use crate::display::rgb;
+    fn step(name: &str, ok: bool) -> bool {
+        serial::write_line(format_args!("[S20.15] {} {}", name, if ok { "PASS" } else { "FAIL" }));
+        ok
+    }
+    fn until(limit: u64, condition: impl Fn() -> bool) -> bool {
+        let start = timer::ticks();
+        loop {
+            if condition() {
+                return true;
+            }
+            if timer::ticks().wrapping_sub(start) > limit {
+                return false;
+            }
+            task::yield_now();
+        }
+    }
+    fn packet(dx: i16, screen_dy: i16, left: bool) -> bool {
+        let dy = -screen_dy;
+        let flags = 0x08 | u8::from(left) | if dx < 0 { 0x10 } else { 0 } | if dy < 0 { 0x20 } else { 0 };
+        [flags, dx as u8, dy as u8].into_iter().all(mouse::loopback)
+    }
+    fn move_by(mut dx: i32, mut dy: i32) -> bool {
+        while dx != 0 || dy != 0 {
+            let (sx, sy) = (dx.clamp(-100, 100), dy.clamp(-100, 100));
+            if !packet(sx as i16, sy as i16, false) {
+                return false;
+            }
+            dx -= sx;
+            dy -= sy;
+        }
+        true
+    }
+    fn click() -> bool {
+        packet(0, 0, true) && packet(0, 0, false)
+    }
+    /// Press and release one key on the i8042.
+    fn key(code: u8) -> bool {
+        mouse::keyboard_loopback(code) && mouse::keyboard_loopback(code | 0x80)
+    }
+    /// The launcher's first row reads `name` in white.
+    fn text_at(x: i32, y: i32, name: &str, color: u32) -> bool {
+        let mut mask = crate::display::Surface::new(crate::font::text_width(name), 7);
+        let bounds = mask.bounds();
+        mask.fill_rect(bounds, 0x0100_0000);
+        mask.draw_text(0, 0, name, color);
+        (0..7).all(|row| {
+            (0..crate::font::text_width(name) as i32)
+                .all(|column| mask.pixel(column, row) != Some(color) || compositor::pixel(x + column, y + row) == Ok(color))
+        })
+    }
+
+    let catalog = (vfs::stat("/share").is_ok() || vfs::mkdir("/share").is_ok())
+        && (vfs::stat("/share/applications").is_ok() || vfs::mkdir("/share/applications").is_ok())
+        && vfs::create_read_only("/share/applications/hello.app", b"Name=Hello\nExec=hello-gui --desktop-client %p a\n").is_ok()
+        && vfs::create_read_only("/bin/hello-gui", HELLO_GUI_IMAGE).is_ok();
+    if !step("an application in the catalog", catalog) {
+        return false;
+    }
+    let Ok(shell) = session::start(WOVEN_SHELL_IMAGE, None) else {
+        return step("the session started", false);
+    };
+    let presenting = || compositor::holder() == Some(shell) && compositor::is_presenting();
+    if !step(
+        "the session takes the display and input focus",
+        until(3000, || presenting() && woven_input::focus() == Some(shell) && session::active() == Some(shell)),
+    ) {
+        return false;
+    }
+    let Some((width, height)) = compositor::dimensions() else {
+        return step("desktop geometry", false);
+    };
+    let (width, height) = (width as i32, height as i32);
+    let top = height - 24;
+    // F1: the launcher's first row is the catalog's application.
+    // The launcher panel: x 4, three rows of 14 plus its border, above the
+    // taskbar; the first match's text at (+6, +1 + 2 * 14 + 4).
+    let listed = key(0x3b) && until(1000, || text_at(4 + 6, top - 2 - 44 + 33, "Hello", rgb(255, 255, 255)));
+    let closed = key(0x3b);
+    if !step("the launcher lists the installed application", listed && closed) {
+        return false;
+    }
+
+    // F12: the diagnostic console.
+    let console = key(0x58)
+        && until(1000, || session::console_active() && !compositor::is_presenting() && woven_input::focus().is_none());
+    if !step("F12 shows the diagnostic console; the session's frames stop", console) {
+        return false;
+    }
+    while keyboard::poll().is_some() {}
+    let typed = mouse::keyboard_loopback(0x2d)
+        && mouse::keyboard_loopback(0xad)
+        && until(500, || matches!(keyboard::poll(), Some(keyboard::Key::Char('x'))));
+    if !step("a key typed at the console reaches the kernel shell", typed) {
+        return false;
+    }
+    let back = key(0x58)
+        && until(1000, || !session::console_active() && presenting() && woven_input::focus() == Some(shell));
+    if !step("F12 returns to the desktop: display and focus", back) {
+        return false;
+    }
+
+    // Quick Settings, then its first row: Power off.
+    let button = (width - 54 - 5 * 20, top + 4);
+    let power_row = (width - 4 - 164 + 28, top - 2 - (7 * 14 + 2) + 1 + 14 + 7);
+    let (px, py) = (width / 2, height / 2);
+    let opened = move_by(button.0 + 8 - px, button.1 + 8 - py) && click();
+    if !step("Quick Settings opens", opened && until(1000, || text_at(power_row.0 - 28 + 6, power_row.1 - 3, "Power off", rgb(255, 255, 255)))) {
+        return false;
+    }
+    serial::write_line(format_args!("[S20.15] clicking Power off"));
+    let _ = move_by(power_row.0 - (button.0 + 8), power_row.1 - (button.1 + 8)) && click();
+    // The machine should now be off; still running after this is failure.
+    let start = timer::ticks();
+    while timer::ticks().wrapping_sub(start) < 1000 {
+        task::yield_now();
+    }
+    step("the machine turned off from the desktop", false)
 }
 
 /// Stage 20.13 acceptance: workspaces. With real i8042 input the kernel
@@ -6527,9 +6751,9 @@ fn stage20_10_self_test() -> bool {
     /// The Quick Settings panel for a desktop `width`x`height`, with `rows`,
     /// over whatever `beneath` gives, skipping the cells under the pointer
     /// at `pointer`.
-    fn panel(width: i32, height: i32, rows: [&str; 4], beneath: impl Fn(i32, i32) -> u32, pointer: (i32, i32)) -> bool {
+    fn panel(width: i32, height: i32, rows: [&str; 6], beneath: impl Fn(i32, i32) -> u32, pointer: (i32, i32)) -> bool {
         let top = height - 24;
-        let h = 5 * 14 + 2;
+        let h = 7 * 14 + 2;
         let (x0, y0) = (width - 4 - 164, top - 2 - h);
         let mut image = Surface::new(164, h as usize);
         let bounds = image.bounds();
@@ -6586,9 +6810,10 @@ fn stage20_10_self_test() -> bool {
     }
 
     // The button sits left of the tray's last slot; the panel's rows are 14
-    // pixels apart, the toggles at rows 1-3 under the title.
+    // pixels apart: Power off and Restart (Stage 20.15), then the toggles at
+    // rows 3-5 under the title, and Lock screen.
     let button = (width - 54 - 5 * 20, top + 4);
-    let panel_y = top - 2 - (5 * 14 + 2);
+    let panel_y = top - 2 - (7 * 14 + 2);
     let row = |index: i32| (width - 4 - 164 + 28, panel_y + 1 + (1 + index) * 14 + 7);
     let wall = move |x: i32, y: i32| wallpaper(x, y, height);
 
@@ -6596,7 +6821,7 @@ fn stage20_10_self_test() -> bool {
     let opened = move_by(button.0 + 8 - px, button.1 + 8 - py)
         && click()
         && until(1000, || {
-            panel(width, height, ["Display scale: 2x", "Do not disturb: Off", "Tiling: Off", "Lock screen"], wall, (button.0 + 8, button.1 + 8))
+            panel(width, height, ["Power off", "Restart", "Display scale: 2x", "Do not disturb: Off", "Tiling: Off", "Lock screen"], wall, (button.0 + 8, button.1 + 8))
                 && compositor::pixel(button.0 + 1, button.1 + 1) == Ok(ENTRY_ACTIVE)
         });
     (px, py) = (button.0 + 8, button.1 + 8);
@@ -6606,10 +6831,10 @@ fn stage20_10_self_test() -> bool {
 
     // Do Not Disturb on, then have Q post a notification: the badge counts
     // it, but no toast appears.
-    let (dx, dy) = row(1);
+    let (dx, dy) = row(3);
     let dnd = move_by(dx - px, dy - py)
         && click()
-        && until(1000, || panel(width, height, ["Display scale: 2x", "Do not disturb: On", "Tiling: Off", "Lock screen"], wall, (dx, dy)));
+        && until(1000, || panel(width, height, ["Power off", "Restart", "Display scale: 2x", "Do not disturb: On", "Tiling: Off", "Lock screen"], wall, (dx, dy)));
     (px, py) = (dx, dy);
     if !step("Do Not Disturb turns on", dnd) {
         return false;
@@ -6632,13 +6857,13 @@ fn stage20_10_self_test() -> bool {
     }
 
     // Tiling on: the only window fills the work area, under the panel.
-    let (tx, ty) = row(2);
+    let (tx, ty) = row(4);
     let tiled = move_by(tx - px, ty - py)
         && click()
         && until(2000, || {
             compositor::pixel(5, top - 40) == Ok(QUIET)
                 && compositor::pixel(width - 300, 20) == Ok(QUIET)
-                && panel(width, height, ["Display scale: 2x", "Do not disturb: On", "Tiling: On", "Lock screen"], |_, _| QUIET, (tx, ty))
+                && panel(width, height, ["Power off", "Restart", "Display scale: 2x", "Do not disturb: On", "Tiling: On", "Lock screen"], |_, _| QUIET, (tx, ty))
         });
     (px, py) = (tx, ty);
     if !step("tiling turns on and the window fills the work area", tiled) {
@@ -6649,20 +6874,20 @@ fn stage20_10_self_test() -> bool {
     // the new geometry. (At 1x the window cannot grow to the whole work area
     // within its owner's surface budget while the old surface still exists,
     // so it keeps its size; what lies beneath the panel is wallpaper.)
-    let (sx, sy) = row(0);
+    let (sx, sy) = row(2);
     let full = (width * 2, height * 2);
     let scaled = move_by(sx - px, sy - py)
         && click()
         && until(2000, || compositor::scale() == Some(1) && compositor::dimensions() == Some((full.0 as u32, full.1 as u32)))
         && until(2000, || {
-            panel(full.0, full.1, ["Display scale: 1x", "Do not disturb: On", "Tiling: On", "Lock screen"], |x, y| wallpaper(x, y, full.1), (sx, sy))
+            panel(full.0, full.1, ["Power off", "Restart", "Display scale: 1x", "Do not disturb: On", "Tiling: On", "Lock screen"], |x, y| wallpaper(x, y, full.1), (sx, sy))
         });
     (px, py) = (sx, sy);
     if !step("display scale 1x makes the desktop 1280x800", scaled) {
         return false;
     }
     // Back to 2x through the panel's scale row at the 1x geometry.
-    let back_row = (full.0 - 4 - 164 + 28, (full.1 - 24) - 2 - (5 * 14 + 2) + 1 + 14 + 7);
+    let back_row = (full.0 - 4 - 164 + 28, (full.1 - 24) - 2 - (7 * 14 + 2) + 1 + 3 * 14 + 7);
     let restored = move_by(back_row.0 - px, back_row.1 - py)
         && click()
         && until(2000, || compositor::scale() == Some(2) && compositor::dimensions() == Some((width as u32, height as u32)));
@@ -7489,10 +7714,14 @@ fn stage20_6_self_test() -> bool {
     if !step("the launcher panel is translucent over a window and its shadow", panel) {
         return false;
     }
-    // The pointer stays on top of the panel.
+    // The pointer stays on top of the panel. The shell presents each layer
+    // separately (panel, then cursor), so poll for the settled frame as the
+    // checks above do; a single read can land between the two presents.
     if !step(
         "the pointer is drawn above the panel",
-        compositor::pixel(100, 340) == Ok(BLACK) && compositor::pixel(101, 342) == Ok(WHITE),
+        until(500, || {
+            compositor::pixel(100, 340) == Ok(BLACK) && compositor::pixel(101, 342) == Ok(WHITE)
+        }),
     ) {
         return false;
     }

@@ -1416,11 +1416,21 @@ pub enum UserMemoryError {
     PermissionDenied,
 }
 
+/// Reject a syscall range that leaves the canonical lower half before any
+/// page-table walk, like Linux's `access_ok()`.
+fn check_current_user_range(start: u64, length: usize) -> Result<(), UserMemoryError> {
+    crate::user_address::check_user_range(start, length).map_err(|error| match error {
+        crate::user_address::RangeError::Overflow => UserMemoryError::AddressOverflow,
+        crate::user_address::RangeError::OutsideUser => UserMemoryError::PermissionDenied,
+    })
+}
+
 pub fn copy_from_current_user(start: u64, destination: &mut [u8]) -> Result<(), UserMemoryError> {
     copy_current_user(start, destination, false)
 }
 
 pub fn copy_to_current_user(start: u64, source: &[u8]) -> Result<(), UserMemoryError> {
+    check_current_user_range(start, source.len())?;
     let mut copied = 0;
     while copied < source.len() {
         let paging = PAGING.lock();
@@ -1472,6 +1482,7 @@ fn copy_current_user(
     destination: &mut [u8],
     require_writable: bool,
 ) -> Result<(), UserMemoryError> {
+    check_current_user_range(start, destination.len())?;
     let mut copied = 0;
     while copied < destination.len() {
         let paging = PAGING.lock();
@@ -1516,7 +1527,10 @@ fn translated_chunk(
     virtual_address: u64,
     remaining: usize,
 ) -> Result<(u64, usize, PageTableFlags), UserMemoryError> {
-    match mapper.translate(VirtAddr::new(virtual_address)) {
+    // Callers bound the range first; never panic on a non-canonical address.
+    let address =
+        VirtAddr::try_new(virtual_address).map_err(|_| UserMemoryError::PermissionDenied)?;
+    match mapper.translate(address) {
         TranslateResult::Mapped {
             frame,
             offset,

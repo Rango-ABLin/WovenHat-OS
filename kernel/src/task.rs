@@ -1928,7 +1928,9 @@ pub fn exit_current_thread(exit_code: i32) -> ! {
     feature = "stage20-12-test",
     feature = "stage13-15-test",
     feature = "stage20-13-test",
-    feature = "stage20-14b-test"
+    feature = "stage20-14b-test",
+    feature = "stage20-15-test",
+    feature = "system-apps"
 ))]
 pub fn spawn_user_system_service(
     name: &'static str,
@@ -5512,7 +5514,43 @@ pub fn child_count(parent: ProcessId) -> usize {
         .count()
 }
 
+/// Who is sending a signal. The kernel (its own self-tests, the kernel shell
+/// after its `TaskControl` check) may signal any process. A Ring-3 caller may
+/// signal itself and its own children; anything else needs `TaskControl`.
+#[derive(Clone, Copy)]
+enum SignalSender {
+    Kernel,
+    User { caller: u64, task_control: bool },
+}
+
+impl SignalSender {
+    fn may_signal(self, target: &Process) -> bool {
+        match self {
+            Self::Kernel => true,
+            Self::User {
+                caller,
+                task_control,
+            } => task_control || target.id.as_u64() == caller || target.parent.as_u64() == caller,
+        }
+    }
+}
+
 pub fn kill_process(pid: u64, sig: u64) -> Result<(), FileError> {
+    signal_processes(pid, sig, SignalSender::Kernel)
+}
+
+/// `kill` from Ring 3. Each selected process is checked separately, as POSIX
+/// does for process groups. Processes the caller may not signal are skipped;
+/// if every match is refused, the call fails with `PermissionDenied`.
+pub fn kill_process_from_user(pid: u64, sig: u64) -> Result<(), FileError> {
+    let sender = SignalSender::User {
+        caller: current_process_id(),
+        task_control: current_has(crate::capability::Capability::TaskControl),
+    };
+    signal_processes(pid, sig, sender)
+}
+
+fn signal_processes(pid: u64, sig: u64, sender: SignalSender) -> Result<(), FileError> {
     if sig > 31 {
         return Err(FileError::NotFound);
     }
@@ -5536,6 +5574,7 @@ pub fn kill_process(pid: u64, sig: u64) -> Result<(), FileError> {
         None
     };
     let mut matched = false;
+    let mut refused = false;
     let mut termination_requests = alloc::vec::Vec::new();
     for process in processes.iter_mut().flatten() {
         let selected = if let Some(group) = target_group {
@@ -5544,6 +5583,10 @@ pub fn kill_process(pid: u64, sig: u64) -> Result<(), FileError> {
             process.id.as_u64() == pid
         };
         if !selected {
+            continue;
+        }
+        if !sender.may_signal(process) {
+            refused = true;
             continue;
         }
         matched = true;
@@ -5592,6 +5635,8 @@ pub fn kill_process(pid: u64, sig: u64) -> Result<(), FileError> {
 
     if matched {
         Ok(())
+    } else if refused {
+        Err(FileError::PermissionDenied)
     } else {
         Err(FileError::NotFound)
     }
@@ -5610,6 +5655,16 @@ pub fn sigaction_current(sig: u64, handler: u64) -> Result<u64, FileError> {
         .flatten()
         .find(|p| p.id.as_u64() == process_id)
         .ok_or(FileError::NoProcess)?;
+    // A handler becomes the user RIP that `iretq` returns to. A non-canonical
+    // value faults in ring 0 and halts the kernel, so accept only addresses
+    // inside the caller's own executable image, as thread entry points are.
+    if handler > 1
+        && !process
+            .address_space
+            .is_some_and(|space| space.contains_executable(handler))
+    {
+        return Err(FileError::PermissionDenied);
+    }
     let slot = &mut process.signal_actions[sig as usize];
     let old = *slot;
     *slot = handler;

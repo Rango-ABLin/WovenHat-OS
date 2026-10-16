@@ -246,7 +246,7 @@ const CENTER_WIDTH: i32 = 164;
 const CENTER_TITLE: &str = "Notifications";
 const CENTER_CLEAR: &str = "Clear";
 const QS_TITLE: &str = "Quick Settings";
-const QS_ROWS: usize = 4;
+const QS_ROWS: usize = 6;
 
 /// How dark the lock screen makes the wallpaper behind it.
 const LOCK_DIM: u8 = 160;
@@ -1270,6 +1270,8 @@ impl Desktop {
     /// The toggles as they currently read.
     fn qs_rows(&self) -> [&'static str; QS_ROWS] {
         [
+            "Power off",
+            "Restart",
             if self.scale == 2 { "Display scale: 2x" } else { "Display scale: 1x" },
             if self.dnd { "Do not disturb: On" } else { "Do not disturb: Off" },
             if self.tiled { "Tiling: On" } else { "Tiling: Off" },
@@ -1441,6 +1443,23 @@ impl Desktop {
             dirty = dirty.union(self.qs_area()).union(self.qs_button());
         }
         dirty
+    }
+
+    /// Power off, or restart. Returns only if the machine is still
+    /// running; a toast says why.
+    fn power(&mut self, restart: bool) -> Area {
+        log(if restart { &[b"woven-shell: restart"] } else { &[b"woven-shell: power off"] });
+        let result = if restart { libwoven::restart() } else { libwoven::power_off() };
+        let reason: &[u8] = match result {
+            Err(_) => b"Not allowed to turn the machine off",
+            Ok(1) => b"This machine has no ACPI power-off",
+            Ok(2) => b"The firmware refused ACPI power-off",
+            Ok(_) => b"The machine ignored the request",
+        };
+        let mut text = [0u8; 32];
+        let length = label(reason, TOAST_CHARS, &mut text);
+        self.toast = Some(Toast { text, length, until: libwoven::ticks() + TOAST_TICKS });
+        self.close_panels().union(self.toast_area())
     }
 
     fn toggle_tiling(&mut self) -> Area {
@@ -1981,14 +2000,16 @@ impl Desktop {
                         return self.close_panels();
                     }
                     return match (y - panel.y - 1) / PANEL_ROW - 1 {
-                        0 => self.toggle_scale(),
-                        1 => {
+                        0 => self.power(false),
+                        1 => self.power(true),
+                        2 => self.toggle_scale(),
+                        3 => {
                             self.dnd = !self.dnd;
                             log(if self.dnd { &[b"woven-shell: do not disturb on"] } else { &[b"woven-shell: do not disturb off"] });
                             panel
                         }
-                        2 => self.toggle_tiling(),
-                        3 => self.lock(),
+                        4 => self.toggle_tiling(),
+                        5 => self.lock(),
                         _ => empty,
                     };
                 }
