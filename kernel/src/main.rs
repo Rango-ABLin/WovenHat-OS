@@ -78,6 +78,8 @@ mod irq_lock;
 mod journal;
 mod keyboard;
 #[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
+mod diagnostics;
+#[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
 mod livelog;
 mod session;
 mod memory;
@@ -1562,10 +1564,33 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         // Start in the diagnostic shell. F1 toggles to the graphical desktop.
         console.clear();
         console.println("WOVENHAT DIAGNOSTIC SHELL (F1 TO OPEN DESKTOP)");
+        // What the boot found, on screen: on a machine without a serial
+        // line, a photo of this is the diagnosis.
+        #[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
+        {
+            console.println("BOOT DIAGNOSTICS:");
+            diagnostics::for_each_line(|line| console.println(line));
+            console.println("");
+        }
         shell.print_prompt(&mut console);
+        #[cfg(feature = "system-apps")]
+        let mut session_reported = false;
 
         let mut userspace_was_foreground = false;
         loop {
+            // The desktop session stopped: say so, with what it reported.
+            #[cfg(feature = "system-apps")]
+            if !session_reported && session::ended() {
+                session_reported = true;
+                console.println("");
+                console.println("THE DESKTOP SESSION STOPPED. WHAT IT REPORTED:");
+                diagnostics::for_each_line(|line| {
+                    if line.contains("woven-shell") || line.contains("SESSION") || line.contains("EXCEPTION") {
+                        console.println(line);
+                    }
+                });
+                shell.print_prompt(&mut console);
+            }
             let userspace_foreground = terminal::foreground_active();
             if userspace_was_foreground && !userspace_foreground {
                 console.clear();

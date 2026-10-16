@@ -36,6 +36,19 @@ const TRB_TYPE_COMMAND_COMPLETION: u32 = 33;
 const TRB_TYPE_PORT_STATUS_CHANGE: u32 = 34;
 
 const USB_REQUEST_GET_DESCRIPTOR: u8 = 6;
+/// USBSTS Controller Not Ready.
+const USBSTS_CNR: u32 = 1 << 11;
+/// PORTSC Port Power, and the bits a write must carry over unchanged
+/// (everything but the write-one-to-clear change bits and Port Enabled).
+const PORTSC_PP: u32 = 1 << 9;
+const PORTSC_PRESERVE: u32 = 0x0e01_c3e0;
+/// xHCI extended capability: USB Legacy Support, and its semaphores and
+/// SMI controls.
+const XECP_LEGACY_SUPPORT: u32 = 1;
+const LEGACY_BIOS_OWNED: u32 = 1 << 16;
+const LEGACY_OS_OWNED: u32 = 1 << 24;
+const LEGACY_SMI_ENABLES: u32 = (1 << 0) | (1 << 4) | (1 << 13) | (1 << 14) | (1 << 15);
+const LEGACY_SMI_STATUS: u32 = (1 << 29) | (1 << 30) | (1 << 31);
 const USB_REQUEST_GET_STATUS: u8 = 0;
 const USB_REQUEST_CLEAR_FEATURE: u8 = 1;
 const USB_REQUEST_SET_FEATURE: u8 = 3;
@@ -385,6 +398,9 @@ pub struct XhciController {
     bt_acl_in_buffer: Option<DmaPage>,
     bt_acl_out_ring: Option<Ring>,
     bt_acl_out_buffer: Option<DmaPage>,
+    /// The scratchpad buffer array and its pages, which real controllers
+    /// (Intel's among them) require and keep using while running.
+    _scratchpad: Option<(DmaPage, alloc::vec::Vec<DmaPage>)>,
     #[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
     inputs: [Option<InputDevice>; MAX_INPUTS],
     /// The device being addressed, when it is not directly on a root port:
@@ -441,11 +457,18 @@ impl XhciController {
         let doorbell_base = mmio + u64::from(mmio_read32(mmio + 0x14)? & !0x3);
         let op_base = mmio + u64::from(cap_length);
 
+        // Firmware owns the controller at boot (it emulates a PS/2 keyboard
+        // through it); take it over before resetting it.
+        take_from_firmware(mmio, hcc1)?;
+
         let command = mmio_read32(op_base)?;
         mmio_write32(op_base, command & !1)?;
         wait_until(op_base + 0x04, 1, 1)?;
         mmio_write32(op_base, (command & !1) | (1 << 1))?;
         wait_until(op_base, 1 << 1, 0)?;
+        // Controller Not Ready: no operational register may be written
+        // until it clears after a reset.
+        wait_until(op_base + 0x04, USBSTS_CNR, 0)?;
 
         let mut dcbaa = DmaPage::allocate_zeroed().ok_or(InitError::DmaUnavailable)?;
         let command_page = DmaPage::allocate_zeroed().ok_or(InitError::DmaUnavailable)?;
@@ -456,6 +479,27 @@ impl XhciController {
         erst.bytes_mut().fill(0);
         let command_ring = Ring::new(command_page);
 
+        // Scratchpad buffers: as many pages as the controller asks for, their
+        // addresses in an array that DCBAA entry 0 points to.
+        let hcs2 = mmio_read32(mmio + 0x08)?;
+        let scratchpads = (((hcs2 >> 21) & 0x1f) << 5 | ((hcs2 >> 27) & 0x1f)) as usize;
+        let scratchpad = if scratchpads == 0 {
+            None
+        } else {
+            if scratchpads > PAGE_SIZE / 8 {
+                return Err(InitError::InvalidRegisters);
+            }
+            let mut array = DmaPage::allocate_zeroed().ok_or(InitError::DmaUnavailable)?;
+            let mut pages = alloc::vec::Vec::with_capacity(scratchpads);
+            for index in 0..scratchpads {
+                let page = DmaPage::allocate_zeroed().ok_or(InitError::DmaUnavailable)?;
+                write_u64(array.bytes_mut(), index * 8, page.physical);
+                pages.push(page);
+            }
+            write_u64(dcbaa.bytes_mut(), 0, array.physical);
+            Some((array, pages))
+        };
+        fence(Ordering::Release);
         mmio_write64(op_base + 0x30, dcbaa.physical)?;
         mmio_write64(op_base + 0x18, command_ring.page.physical | 1)?;
         mmio_write32(op_base + 0x38, u32::from(max_slots))?;
@@ -475,7 +519,23 @@ impl XhciController {
         mmio_write32(op_base, 1)?;
         wait_until(op_base + 0x04, 1, 0)?;
 
-        let connected_port = find_connected_port(op_base, max_ports)?;
+        // Ports the controller leaves unpowered (Port Power Control) are
+        // switched on; then devices get time to connect, as a real port
+        // takes tens of milliseconds to report one.
+        if hcc1 & (1 << 3) != 0 {
+            for port in 1..=max_ports {
+                let portsc = op_base + 0x400 + (u64::from(port - 1) * 0x10);
+                let value = mmio_read32(portsc)?;
+                if value & PORTSC_PP == 0 {
+                    mmio_write32(portsc, (value & PORTSC_PRESERVE) | PORTSC_PP)?;
+                }
+            }
+        }
+        let connected_port = wait_for_connection(op_base, max_ports);
+        crate::serial::write_line(format_args!(
+            "[USB] xHCI: {} ports, {} slots, {} scratchpads, first connected port {}",
+            max_ports, max_slots, scratchpads, connected_port
+        ));
         let mut controller = Self {
             max_slots,
             max_ports,
@@ -503,6 +563,7 @@ impl XhciController {
             bt_acl_in_buffer: None,
             bt_acl_out_ring: None,
             bt_acl_out_buffer: None,
+            _scratchpad: scratchpad,
             #[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
             inputs: [const { None }; MAX_INPUTS],
             dev_speed: 0,
@@ -517,8 +578,12 @@ impl XhciController {
             #[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
             stashed_len: 0,
         };
-        controller.reset_port(connected_port)?;
-        controller.slot_id = controller.enable_slot()?;
+        // With a device already connected, its port is reset and given a slot
+        // now, as before; with none, enumeration finds devices later.
+        if connected_port != 0 {
+            controller.reset_port(connected_port)?;
+            controller.slot_id = controller.enable_slot()?;
+        }
         Ok(controller)
     }
 
@@ -537,6 +602,9 @@ impl XhciController {
     }
 
     fn port_speed(&self) -> Result<u8, InitError> {
+        if self.connected_port == 0 {
+            return Err(InitError::NoConnectedPort);
+        }
         let portsc = self.op_base + 0x400 + (u64::from(self.connected_port - 1) * 0x10);
         Ok(((mmio_read32(portsc)? >> 10) & 0x0f) as u8)
     }
@@ -2321,14 +2389,64 @@ fn write_bluetooth_endpoint_context(
     Ok(())
 }
 
-fn find_connected_port(op_base: u64, max_ports: u8) -> Result<u8, InitError> {
-    for port in 1..=max_ports {
-        let portsc = mmio_read32(op_base + 0x400 + (u64::from(port - 1) * 0x10))?;
-        if portsc & 1 != 0 {
-            return Ok(port);
+/// The first port with a device connected, waiting up to half a second
+/// for one to appear; 0 when there is none.
+fn wait_for_connection(op_base: u64, max_ports: u8) -> u8 {
+    let start = crate::timer::ticks();
+    for _ in 0..POLL_LIMIT * 4 {
+        for port in 1..=max_ports {
+            let portsc = mmio_read32(op_base + 0x400 + (u64::from(port - 1) * 0x10)).unwrap_or(0);
+            if portsc & 1 != 0 {
+                return port;
+            }
         }
+        if crate::timer::ticks().wrapping_sub(start) >= 50 {
+            break;
+        }
+        core::hint::spin_loop();
     }
-    Err(InitError::NoConnectedPort)
+    0
+}
+
+/// The xHCI BIOS/OS handoff (xHCI 1.2, 4.22.1): set the OS-owned semaphore
+/// in the USB Legacy Support capability, wait for the firmware to release
+/// its own (up to a second), then disable the firmware's USB SMIs. Without
+/// it, firmware can keep driving the controller behind the driver's back.
+fn take_from_firmware(mmio: u64, hcc1: u32) -> Result<(), InitError> {
+    let mut offset = u64::from(hcc1 >> 16) * 4;
+    while offset != 0 {
+        let capability = mmio + offset;
+        let header = mmio_read32(capability)?;
+        if header & 0xff == XECP_LEGACY_SUPPORT {
+            if header & LEGACY_BIOS_OWNED != 0 {
+                mmio_write32(capability, header | LEGACY_OS_OWNED)?;
+                let start = crate::timer::ticks();
+                for _ in 0..POLL_LIMIT * 8 {
+                    if mmio_read32(capability)? & LEGACY_BIOS_OWNED == 0 {
+                        break;
+                    }
+                    if crate::timer::ticks().wrapping_sub(start) >= 100 {
+                        break;
+                    }
+                    core::hint::spin_loop();
+                }
+                let now = mmio_read32(capability)?;
+                if now & LEGACY_BIOS_OWNED != 0 {
+                    // The firmware did not let go: take it anyway.
+                    crate::serial::write_line(format_args!("[USB] xHCI: firmware kept ownership; forcing the handoff"));
+                    mmio_write32(capability, (now & !LEGACY_BIOS_OWNED) | LEGACY_OS_OWNED)?;
+                }
+            }
+            // USB Legacy Support Control/Status: SMI enables off, the
+            // write-one-to-clear SMI status bits cleared.
+            let control = mmio_read32(capability + 4)?;
+            mmio_write32(capability + 4, (control & !LEGACY_SMI_ENABLES) | LEGACY_SMI_STATUS)?;
+            return Ok(());
+        }
+        let next = (header >> 8) & 0xff;
+        offset = if next == 0 { 0 } else { offset + u64::from(next) * 4 };
+    }
+    Ok(())
 }
 
 fn parse_hid_interface(bytes: &[u8], configuration: u8) -> Option<HidInterface> {

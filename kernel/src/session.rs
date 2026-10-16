@@ -14,6 +14,9 @@ use crate::capability::{Capability, CapabilitySet};
 
 /// The session's process id; 0 before a session starts.
 static SESSION: AtomicU64 = AtomicU64::new(0);
+/// The session's process, to tell when it has exited.
+#[cfg(feature = "system-apps")]
+static SESSION_PROCESS: spin::Mutex<Option<crate::task::ProcessId>> = spin::Mutex::new(None);
 static CONSOLE: AtomicBool = AtomicBool::new(false);
 
 #[cfg(any(feature = "system-apps", feature = "stage20-15-test"))]
@@ -50,7 +53,17 @@ pub fn start(image: &[u8], accounts: Option<&str>) -> Result<u64, Error> {
         .map_err(|_| Error::Spawn)?;
     CONSOLE.store(false, Ordering::Release);
     SESSION.store(pid.as_u64(), Ordering::Release);
+    #[cfg(feature = "system-apps")]
+    {
+        *SESSION_PROCESS.lock() = Some(pid);
+    }
     Ok(pid.as_u64())
+}
+
+/// Whether a session was started and its process has exited.
+#[cfg(feature = "system-apps")]
+pub fn ended() -> bool {
+    SESSION_PROCESS.lock().is_some_and(crate::task::process_exited)
 }
 
 /// The running session's process id.
@@ -75,7 +88,13 @@ pub fn toggle_console() {
         crate::compositor::set_console(true);
         crate::woven_input::set_focus(None);
         crate::terminal::clear();
-        crate::terminal::write_bytes(b"WOVENHAT DIAGNOSTIC CONSOLE  (F12: BACK TO THE DESKTOP)\n> ");
+        crate::terminal::write_bytes(b"WOVENHAT DIAGNOSTIC CONSOLE  (F12: BACK TO THE DESKTOP)\n");
+        #[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
+        crate::diagnostics::for_each_line(|line| {
+            crate::terminal::write_bytes(line.as_bytes());
+            crate::terminal::write_bytes(b"\n");
+        });
+        crate::terminal::write_bytes(b"> ");
         crate::serial::write_line(format_args!("[SESSION] diagnostic console"));
     } else {
         crate::compositor::set_console(false);
