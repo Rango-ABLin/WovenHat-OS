@@ -1279,3 +1279,57 @@ fn unlink_refuses_a_file_whose_link_count_is_not_one() {
         .expect("unlink a one-link file");
     mount_consistent(&image, "after a valid unlink");
 }
+
+#[test]
+fn create_refuses_a_free_inode_that_an_entry_still_names() {
+    let (base, block, index) = two_file_root();
+    let (b, next) = {
+        let mut volume = Volume::mount(base.clone()).expect("mount");
+        let b = volume.lookup(1, "b.txt").expect("b.txt").inode;
+        // The allocator hands out the lowest free inode.
+        let next = (2..=u64::from(INODES))
+            .find(|number| !volume.inode(*number).expect("inode").is_used())
+            .expect("a free inode");
+        (b, next)
+    };
+
+    // Point a.txt's entry at the inode the next create would allocate.
+    let image = base.fork(None);
+    patch_dir_entry(&image, block, index, 0, &next.to_le_bytes());
+    assert_eq!(
+        Volume::mount(image.clone()).expect("mount").check(),
+        Err(Error::Corrupt),
+        "check() must flag an entry naming a free inode"
+    );
+    let before = image.sectors();
+    let mut volume = Volume::mount(image.clone()).expect("mount");
+    assert_eq!(
+        volume.create(1, "c.txt", 0o644, 2),
+        Err(Error::Corrupt),
+        "create must not give a second name to an inode"
+    );
+    assert_eq!(
+        volume.create_file(1, "c.txt", 0o644, b"charlie", 2),
+        Err(Error::Corrupt),
+        "create_file must not give a second name to an inode"
+    );
+    assert!(
+        image.sectors() == before,
+        "a refused create must not modify the image"
+    );
+    assert_eq!(
+        volume.read_file(b, &mut [0u8; MAX_FILE_SIZE]),
+        Ok(5),
+        "other files must stay readable"
+    );
+
+    // Control: without the stale entry, the same create succeeds and takes
+    // that inode.
+    let image = base.fork(None);
+    let mut volume = Volume::mount(image.clone()).expect("mount");
+    assert_eq!(
+        volume.create_file(1, "c.txt", 0o644, b"charlie", 2),
+        Ok(next)
+    );
+    mount_consistent(&image, "after a valid create");
+}

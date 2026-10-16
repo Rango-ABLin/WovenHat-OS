@@ -4,6 +4,75 @@ Each entry is one bounded checkpoint. Entries record exactly what was run.
 Nothing here claims production readiness; completion requires independent
 human review.
 
+## 2026-10-16 — WovenFS: create refuses a free inode that an entry still names
+
+Branch: `auto/wovenhat-development` (base `8c29d64`). The working tree was
+clean at the start, so there was no unfinished work to resume.
+
+### Defect
+
+Directory blocks carry no checksum, so a stale or crafted entry can name a
+free inode. `check()` flags that, but the write path did not: `create` and
+`create_file` allocated the lowest free inode without looking at entries. If
+an entry already named it, the new file got a second name. The stale name then
+read (and could overwrite) the new file's data. `unlink` refuses duplicate
+entries, so neither name could be removed.
+
+### Change
+
+- `stage_create` (used by `create` and `create_file`) returns `Corrupt`
+  before committing anything if any entry in the target directory names the
+  inode it just allocated. Failing closed was chosen over skipping to the next
+  free inode, which would leave the dangling entry in place.
+- Test `create_refuses_a_free_inode_that_an_entry_still_names`: a.txt's entry
+  is patched to name the inode the next create would take. `check()` returns
+  `Corrupt`; `create` and `create_file` return `Corrupt` and leave the image
+  byte-identical; b.txt stays readable. Control: on the unpatched image the
+  same `create_file` succeeds, takes that inode, and the volume passes
+  `check()`.
+- Docs: `wovenfs-on-disk-format.md` directory-entry section;
+  `stage-status.md` Stage 15 note.
+
+### Results (run on this host, 2026-10-16)
+
+Using project-local `CARGO_BUILD_BUILD_DIR=.cargo-build`,
+`CARGO_TARGET_DIR=target`:
+
+| Command | Result |
+|---|---|
+| `cargo fmt --all -- --check` | PASS |
+| `cargo test --test wovenfs_crash` | PASS, 28 passed / 0 failed |
+| Negative control: same tests against `HEAD`'s `wfs.rs` (via `git show`; fixed copy restored and verified with `cmp`) | FAIL as expected: new test fails at `create must not give a second name to an inode` (`left: Ok(4)`, `right: Err(Corrupt)`); 27 others pass |
+| `cargo test -p wovenhat-os --tests --no-fail-fast` | First attempt: `LNK1104` on the `async_network` test exe (no such process was running). Rerun unchanged: PASS, 138 passed / 0 failed |
+| `cargo clippy --all-targets -- -D warnings` | PASS |
+| `cargo clippy -p wovenhat-kernel --target x86_64-unknown-none -- -D warnings` (default) | PASS |
+| same, `--features stage11-5-test` | PASS |
+| same, `--features stage15-1-test` … `stage15-9-test` (each) | PASS |
+| `scripts/test-wovenfs-qemu.ps1 -Stage 15.1 -Cpus 1/2/4` | PASS, exit 33 each (`wovenfs-stage15.1-{1cpu-20261016-094711-960,2cpu-…-094900-760,4cpu-…-095051-871}`) |
+| `scripts/test-wovenfs-qemu.ps1 -Stage 15.2 -Cpus 1/2/4` | PASS, exit 33 each (`wovenfs-stage15.2-{1cpu-20261016-095218-883,2cpu-…-095341-744,4cpu-…-095507-927}`) |
+
+After the QEMU runs, a source comment and the matching doc sentence were
+corrected: they wrongly said `unlink` through either name would free the
+other file, but `unlink` refuses duplicates. This was comment-only. After it,
+`cargo fmt --check`, `cargo test --test wovenfs_crash` (28/0), all-targets
+Clippy and kernel Clippy `--features stage15-2-test` were rerun and passed.
+QEMU was not rerun for the comment change.
+
+Evidence directories are under `audit-artifacts/` (Git-ignored, kept
+locally). No QEMU process was left running.
+
+### Limits / open
+
+- The scan covers only the target directory. That is sufficient while the
+  root is the only directory. Subdirectories would need a volume-wide check.
+- `lookup` still returns an entry naming a free inode; `read_file` and
+  `write_file` then fail with `NotFound` rather than `Corrupt`.
+- `check()` records at most 64 blocks in its aliasing table. Beyond that,
+  aliasing goes unchecked by the test oracle (the write-path checks are not
+  affected).
+- There is no repair (fsck) path. Stage 15.3–15.9 QEMU gates and physical USB
+  qualification were not rerun.
+
 ## 2026-10-16 — WovenFS: unlink refuses a file whose link count is not 1
 
 Branch: `auto/wovenhat-development` (base `59bfa08`). The working tree was

@@ -139,6 +139,15 @@ inode that another name might still reach would destroy that file's data.
 `check()` flags such an inode too. Adding hard links would change `unlink` to
 decrement the count and free only at zero.
 
+Create allocates the lowest free inode. If any entry in the directory already
+names that inode (a stale or crafted entry, since directory blocks carry no
+checksum), create and `create_file` fail with `Corrupt` before anything is
+committed. Otherwise the new file would get two names: the old name would
+read and overwrite the new file's data, and `unlink` would refuse both names
+as duplicates, so neither could be removed. Skipping to the next free inode was rejected because it would
+leave the dangling entry in place. Like the duplicate scan, this covers only
+the target directory, which is sufficient while the root is the only one.
+
 `read_file` and `write_file` accept only a used inode of kind 1 (file). A
 directory inode fails with `NotADirectory`, the existing wrong-kind error,
 and a free inode fails with `NotFound`. A directory's `data_checksum` is

@@ -1212,6 +1212,10 @@ file inode names or that the bitmap marks free. See
 flags one. Hard links do not exist yet, so any other count is corruption.
 See `docs/AUTONOMOUS_PROGRESS.md` for the gate results.
 
+2026-10-16: create refuses to allocate a free inode that a directory entry
+still names, so a stale entry cannot become a second name for a new file.
+See `docs/AUTONOMOUS_PROGRESS.md` for the gate results.
+
 Crash recovery is proven by fault injection, not actual power loss on a device.
 Physical qualification remains incomplete: the inserted USB flash disk was
 inspected read-only, while the destructive harness requires Administrator

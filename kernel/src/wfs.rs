@@ -1084,6 +1084,15 @@ impl<D: BlockDevice> Volume<D> {
         };
 
         let number = self.allocate_inode(txn)?;
+        // Directory blocks carry no checksum, so a stale or crafted entry can
+        // name a free inode. Handing that inode to the new file would give it
+        // two names: the old one would read and overwrite the new file's
+        // data, and unlink would refuse both as duplicates. Fail closed rather
+        // than skip the inode, which would leave the dangling entry in place.
+        // The root is the only directory, so `view` holds every entry.
+        if view.entries.iter().any(|entry| entry.inode == number) {
+            return Err(Error::Corrupt);
+        }
         let mut node = Inode::empty();
         node.mode = mode.max(1);
         node.links = 1;
