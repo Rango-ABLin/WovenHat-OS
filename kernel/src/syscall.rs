@@ -778,19 +778,26 @@ fn sys_message_receive(user_buffer: u64, capacity: u64, user_sender: u64) -> u64
         return SYSCALL_ERROR;
     };
     let receiver = crate::task::current_process_id();
-    let Ok(message) = crate::ipc::peek(receiver) else {
-        return SYSCALL_ERROR;
-    };
-    if message.payload().len() > capacity
-        || crate::paging::copy_to_current_user(user_buffer, message.payload()).is_err()
-        || crate::paging::copy_to_current_user(user_sender, &message.sender.to_le_bytes()).is_err()
-    {
-        return SYSCALL_ERROR;
+    // Peek, copy out with no lock held (the copy can fault), then dequeue
+    // only that message. If another thread of this process dequeued first,
+    // the copy is stale: take the next message instead.
+    loop {
+        let Ok((message, serial)) = crate::ipc::peek(receiver) else {
+            return SYSCALL_ERROR;
+        };
+        if message.payload().len() > capacity
+            || crate::paging::copy_to_current_user(user_buffer, message.payload()).is_err()
+            || crate::paging::copy_to_current_user(user_sender, &message.sender.to_le_bytes())
+                .is_err()
+        {
+            return SYSCALL_ERROR;
+        }
+        match crate::ipc::receive_if(receiver, serial) {
+            Ok(_) => return message.payload().len() as u64,
+            Err(crate::ipc::Error::QueueEmpty) => continue,
+            Err(_) => return SYSCALL_ERROR,
+        }
     }
-    if crate::ipc::receive(receiver).is_err() {
-        return SYSCALL_ERROR;
-    }
-    message.payload().len() as u64
 }
 
 fn sys_pipe() -> u64 {
@@ -884,7 +891,7 @@ fn sys_sleep(ticks: u64) -> u64 {
 }
 
 fn sys_kill(pid: u64, sig: u64) -> u64 {
-    match crate::task::kill_process(pid, sig) {
+    match crate::task::kill_process_from_user(pid, sig) {
         Ok(()) => 0,
         Err(_) => SYSCALL_ERROR,
     }
@@ -953,6 +960,11 @@ fn prepare_signal_delivery(frame: *const UserForkFrame) {
     if frame.is_null() {
         return;
     }
+    // `sigaction` admits only executable user addresses; never return to a
+    // non-user RIP, which would fault on `iretq` in ring 0.
+    if crate::user_address::check_user_range(handler, 1).is_err() {
+        return;
+    }
     let frame = unsafe { &mut *(frame as *mut UserForkFrame) };
     let Some(new_rsp) = frame.rsp.checked_sub(8) else {
         return;
@@ -986,7 +998,15 @@ fn sys_exec(user_path: u64, length: u64) -> u64 {
     let Ok(path) = core::str::from_utf8(&path[..length]) else {
         return SYSCALL_ERROR;
     };
-    let mut image = alloc::vec![0_u8; crate::vfs::NODE_CAPACITY];
+    let Some(mut image) = crate::heap::try_filled(0_u8, crate::vfs::NODE_CAPACITY) else {
+        crate::audit::record(
+            actor,
+            crate::audit::Action::ProcessExec,
+            length as u64,
+            false,
+        );
+        return SYSCALL_ERROR;
+    };
     let Ok(image_length) = crate::vfs::read_all(path, &mut image) else {
         crate::audit::record(
             actor,
@@ -1095,7 +1115,15 @@ fn sys_exec_command(user_line: u64, length: u64) -> u64 {
         argv[index] = argument;
     }
 
-    let mut image = alloc::vec![0_u8; crate::vfs::NODE_CAPACITY];
+    let Some(mut image) = crate::heap::try_filled(0_u8, crate::vfs::NODE_CAPACITY) else {
+        crate::audit::record(
+            actor,
+            crate::audit::Action::ProcessExec,
+            length as u64,
+            false,
+        );
+        return SYSCALL_ERROR;
+    };
     let Ok(image_length) = crate::vfs::read_all(resolved.as_str(), &mut image) else {
         crate::audit::record(
             actor,
@@ -1194,7 +1222,15 @@ fn sys_spawn_command(user_line: u64, length: u64) -> u64 {
         };
         argv[index] = argument;
     }
-    let mut image = alloc::vec![0_u8; crate::vfs::NODE_CAPACITY];
+    let Some(mut image) = crate::heap::try_filled(0_u8, crate::vfs::NODE_CAPACITY) else {
+        crate::audit::record(
+            actor,
+            crate::audit::Action::ProcessExec,
+            length as u64,
+            false,
+        );
+        return SYSCALL_ERROR;
+    };
     let Ok(image_length) = crate::vfs::read_all(resolved.as_str(), &mut image) else {
         crate::audit::record(
             actor,
@@ -2205,7 +2241,10 @@ fn sys_audio_play(user_pcm: u64, length: u64) -> u64 {
     if length == 0 || length > crate::hda::MAX_PLAY_BYTES {
         return SYSCALL_ERROR;
     }
-    let mut pcm = alloc::vec![0u8; length];
+    let Some(mut pcm) = crate::heap::try_filled(0u8, length) else {
+        crate::audit::record(actor, crate::audit::Action::AudioPlay, length as u64, false);
+        return SYSCALL_ERROR;
+    };
     if crate::paging::copy_from_current_user(user_pcm, &mut pcm).is_err() {
         return SYSCALL_ERROR;
     }
@@ -2672,7 +2711,9 @@ fn sys_graphics_write(handle: u64, packed: u64, user_pixels: u64) -> u64 {
     if width == 0 || height == 0 || x + width > surface_width || y + height > surface_height {
         return SYSCALL_ERROR;
     }
-    let mut bytes = alloc::vec![0u8; width * height * 4];
+    let Some(mut bytes) = crate::heap::try_filled(0u8, width * height * 4) else {
+        return SYSCALL_ERROR;
+    };
     if crate::paging::copy_from_current_user(user_pixels, &mut bytes).is_err() {
         return SYSCALL_ERROR;
     }

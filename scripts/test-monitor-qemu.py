@@ -21,7 +21,7 @@ def main() -> int:
     firmware = args.firmware or qemu.parent / 'share' / 'edk2-x86_64-code.fd'
     firmware_vars = args.firmware_vars
     if not qemu.is_file() or not firmware.is_file() or (firmware_vars is not None and not firmware_vars.is_file()):
-        parser.error('Set --qemu/--firmware and optional matching --firmware-vars to existing files.')
+        parser.error('Set --qemu and --firmware to existing QEMU and OVMF files.')
     build_env = dict(os.environ)
     build_env.pop('CARGO_BUILD_BUILD_DIR', None)
     build_env['CARGO_TARGET_DIR'] = str(app / 'target')

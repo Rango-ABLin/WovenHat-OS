@@ -53,7 +53,7 @@ def main() -> int:
     serial = out / 'serial.log'
     vars_copy = None
     if firmware_vars is not None:
-        vars_copy = out / "OVMF_VARS.fd"
+        vars_copy = out / 'OVMF_VARS.fd'
         shutil.copyfile(firmware_vars, vars_copy)
     command = [
         str(qemu), '-accel', 'tcg,tb-size=128', '-machine', 'q35', '-m', '256M', '-smp', str(args.cpus),
