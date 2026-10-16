@@ -57,31 +57,31 @@ Chain results:
 ```
 lint-all-features: exit 0 []
 host tests: ok
-13.20 poweroff 1cpu: PASS (57s) 
-13.20 reboot 1cpu: PASS (34s) 
-13.19 windows-label 1cpu: PASS (37s) 
-13.20 poweroff 2cpu: PASS (18s) 
-13.20 reboot 2cpu: PASS (29s) 
-13.19 windows-label 2cpu: PASS (47s) 
-13.20 poweroff 4cpu: PASS (30s) 
-13.20 reboot 4cpu: PASS (20s) 
-13.19 windows-label 4cpu: PASS (32s) 
-13.19 test 1cpu: PASS (99s) 
-13.19 production 1cpu: PASS (30s) 
-13.19 unlabelled 1cpu: PASS (24s) 
+13.20 poweroff 1cpu: PASS (57s)
+13.20 reboot 1cpu: PASS (34s)
+13.19 windows-label 1cpu: PASS (37s)
+13.20 poweroff 2cpu: PASS (18s)
+13.20 reboot 2cpu: PASS (29s)
+13.19 windows-label 2cpu: PASS (47s)
+13.20 poweroff 4cpu: PASS (30s)
+13.20 reboot 4cpu: PASS (20s)
+13.19 windows-label 4cpu: PASS (32s)
+13.19 test 1cpu: PASS (99s)
+13.19 production 1cpu: PASS (30s)
+13.19 unlabelled 1cpu: PASS (24s)
 negative control 13.20 S5 sleep type ignored (suspend instead of off): caught ['timeout: the machine neither turned off nor reset', 'QEMU exit status 1, expected 0 (stopped by the guest)', 'FAILED; evidence: C:\\WovenHat-OS-wt\\audit-artifacts\\stage13.20-poweroff-1cpu-1792074113568239300']
 negative control 13.20 every reset method skipped: caught ['timeout: the machine neither turned off nor reset', 'QEMU exit status 1, expected 0 (stopped by the guest)', 'FAILED; evidence: C:\\WovenHat-OS-wt\\audit-artifacts\\stage13.20-reboot-1cpu-1792074383549659200']
 negative control 13.19 root-directory label ignored: caught ['FAILED; evidence: C:\\WovenHat-OS-wt\\audit-artifacts\\stage13.19-windows-label-1cpu-1792074649172553700']
-13.12 production 1cpu: PASS (21s) 
-13.2 1cpu: PASS (27s) 
-13.12 production 2cpu: PASS (6s) 
-13.2 2cpu: PASS (13s) 
-13.12 production 4cpu: PASS (6s) 
-13.2 4cpu: PASS (13s) 
-13.17 ahci 1cpu: PASS (37s) 
-13.18 1cpu: PASS (34s) 
-20.1 1cpu: PASS (27s) 
-release: PASS (1753s) 
+13.12 production 1cpu: PASS (21s)
+13.2 1cpu: PASS (27s)
+13.12 production 2cpu: PASS (6s)
+13.2 2cpu: PASS (13s)
+13.12 production 4cpu: PASS (6s)
+13.2 4cpu: PASS (13s)
+13.17 ahci 1cpu: PASS (37s)
+13.18 1cpu: PASS (34s)
+20.1 1cpu: PASS (27s)
+release: PASS (1753s)
 DONE
 ```
 

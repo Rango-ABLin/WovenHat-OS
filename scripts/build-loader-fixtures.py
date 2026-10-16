@@ -71,7 +71,8 @@ def build(output, rustc='rustc'):
          '-lwoven-demo', '-o', shared, output / 'shared-main.o'])
     run([linker, '-flavor', 'gnu', '-static', '--image-base=0x400000000000',
          '-e', '_start', '-o', tls, output / 'static-tls.o'])
-    run([linker, '-flavor', 'gnu', '-static', '--image-base=0x400000000000',
+    run([linker, '-flavor', 'gnu', '-pie', '--no-dynamic-linker', '--hash-style=sysv',
+         '-z', 'now', '--image-base=0x400000000000',
          '-e', '_start', '-o', threads, output / 'tls-threads.o'])
     outputs = (library, shared, tls, threads)
     report = run([readobj, '--file-headers', '--program-headers', '--dynamic-table',

@@ -1,5 +1,24 @@
 # Stage status
 
+## Merge integration checkpoint — 2026-10-16
+
+The foundation validator preservation run was invalidated by a concurrent
+VS Code pull of `d6fcf854`: session 54720 exited 1 on tracked inventory change.
+Its successful partial checks are not full acceptance. Merge repair retains
+both the accepted compiler graph/TLS loader and the peer security/driver
+additions. The user-directed main.rs restoration is backed up. All earlier
+release-pass claims below retain their original peer/baseline scope; none
+qualifies this newly combined tree. A fresh frozen chain is required.
+
+## Current priority: stages 1–10 release qualification — 2026-10-16
+
+The user requested desktop/laptop release preparation for stages 1–10. See
+[the ordered release ledger](stage1-10-release-readiness.md). No release-ready
+claim is made. The Stage 11 layout draft is preserved separately, not integrated;
+the known guard vulnerability remains a release blocker. Codex is beginning
+with foundation evidence integrity and stages 1–5 validation before later
+closure decisions. Hardware, durability and failure-stress gaps remain explicit.
+
 ## IPC message receive race (2026-10-16, source fix)
 
 Two threads of one process receiving messages at once could deliver one
@@ -120,6 +139,13 @@ See the
 
 ## Stage 1–19 production closure review — 2026-10-15
 
+**ASLR guard defect confirmed (2026-10-16):** forced supported stack draw 16 /
+mmap draw 0 CPU execution mapped all sixteen full slots, then successfully
+wrote the intended stack guard (exit 99 rather than required fault -11).
+The new independently guarded regression remains deliberately failing; its
+serial and exact 3488/3488 frame teardown are preserved in the ASLR geometry
+audit. A joint image/arena/TLS/guard/stack planner is required before acceptance.
+
 The current synchronized branch has extensive bounded software/QEMU coverage,
 but Stages 1–19 are **not collectively production-ready**. The exact closure
 decision and remaining blockers are recorded in the
@@ -128,6 +154,89 @@ libraries/dynamic TLS, native hardware and power-loss qualification, firmware
 security provisioning, persistent update rollback, and several driver/service
 boundaries remain open. The read-only host preflight found two USB disks but was
 not elevated and performed no physical test.
+
+**Signed-library increment:** the bounded signed `/lib` dependency graph and
+transactional teardown passed Stage 10.8–11.5 on 1/2/4 CPUs, warning-denying
+host/kernel/affected-feature checks and full Stage 10.7 preservation. The
+formatter-overlapped phase was repeated successfully on exact restored sources.
+See the shared-library audit for retained evidence. This accepts the bounded
+increment, not full Stage 11.5 or a newly qualified release image.
+
+**Loader interoperability finding:** a separate unmodified
+Rust/LLD executable probe identified null `DT_DEBUG` rejection and an incorrect
+compiler TLS/TCB layout, including live-state copying when creating threads.
+The debug-metadata prerequisite and bounded main-image compiler local-exec TLS
+are now accepted below after actual compiler execution and full preservation,
+not merely synthetic metadata tests. Broader TLS models remain unresolved.
+See the shared-library and compiler-TLS implementation audits for scope.
+The Stage 11.2 thread-generation saturation correction is accepted: permanent
+retirement and five actual-source host regressions pass, as do full Stage 10.7
+preservation and Stage 10.8–11.5 matrices on 1/2/4 CPUs on the unchanged frozen
+sources. The generation audit retains the original three retirement-path
+failures and final serialized evidence. Compiler TLS, loader interoperability
+and full Stage 11 production closure remain open.
+
+**IPC correction accepted:** permanent exhausted-slot skipping passed durable
+actual-source allocator regressions, real-state installation/rollback/teardown
+probes on 1/2/4 CPUs, host/production/fourteen-feature warning-denying lint,
+host/libwoven/Python tests, full Stage 10.7 preservation and Stage 10.8–11.5
+matrices. Session 63244 exited 0 with the final pass marker; all 488 frozen
+inputs matched at acceptance. The handle-generation audit retains final evidence and
+the earlier test-ordering failure. This accepts the bounded IPC correction,
+not Stage 7–11 production closure or a newly qualified release image.
+
+**COW ancestor correction accepted:** the frozen 500-input combined chain exited
+0 after complete host/lint/runtime preservation. See the COW and combined
+acceptance audits. This is a bounded foundation correction, not full-stage closure.
+
+**Wait-ownership correction accepted:** parent ownership is checked before
+scheduler liveness and revalidated in the original reap transaction, without
+inverting lock order. The common 500-input full acceptance and real 1/2/4-CPU
+authority/error tests pass. See the process-wait ownership audit for limits.
+
+**Signed-status correction accepted:** after the two earlier prerequisite
+decisions, zero-extended 32-bit process-wait/thread-join payloads passed actual
+kernel/libwoven host and Ring-3 tests on 1/2/4 CPUs, with original thread
+assertions and exact resource baselines preserved. Session 94658 exited 0 after
+full host/lint QA, Stage 10.7 and Stage 10.8–11.5 preservation, with all 500
+frozen inputs unchanged. See the signed-status and combined acceptance audits.
+This is not full Stage 11 or a release qualification. Compiler TLS, ET_EXEC
+placement/interoperability, combined-tree, persistent security/recovery and
+native hardware remain open. Earlier manifests are retained historical baselines.
+
+**Executable placement correction accepted:** Claude's fixed-ET_EXEC policy is
+adapted to the signed graph loader. After reproducing the nonzero-bias fault,
+source `a8acbaaf` passed the expanded 1/2/4-CPU fixture, 159 host Rust tests,
+nineteen libwoven/Python tests each, warning-denying host/production/fifteen-
+feature lint, exact full Stage 10.7 and Stage 10.8–11.5 preservation. Session
+62865 exited 0; independent inspection verified all 500 frozen inputs and sixty
+stress logs. Nonzero PIE execution and original assertions remain intact.
+See the executable-placement audit. Compiler TLS, general interoperability,
+combined-tree, release and hardware qualification remain open.
+
+**Compiler shared-PIE correction accepted:** source `da6d16e6` explicitly handles
+inert null DT_DEBUG metadata while rejecting nonzero/duplicate values. Session
+73596 exited 0 after zero/nonzero-bias compiler execution, signed-status and
+all original assertions on 1/2/4 CPUs; 162 root host, nineteen libwoven and
+twenty Python tests; warning-denying host/production/sixteen-feature lint;
+exact full Stage 10.7 and Stage 10.8–11.5 preservation. Independent inspection
+verified all 505 frozen inputs and sixty stress logs. See the compiler-PIE
+audit. Compiler TLS, general dynamic linking, merged-tree, release and hardware
+qualification remain open.
+
+**Compiler main-image local-exec TLS accepted (2026-10-16):** checked Variant-II layout, a mapped TCB
+self pointer and an immutable post-relocation template fix the retained
+compiler FS/guard fault. Host parser/layout tests and first expanded Ring-3
+execution pass on 1/2/4 CPUs, including fresh children, page/congruence edges, fork mapping
+protection and rollback. Expanded compiler fork/cancel/capacity/owner-exit and
+relocated-pointer cases pass on every online CPU in 1/2/4-CPU boots. Session
+37505 passed full inherited acceptance: 515 unchanged inputs, nine focused
+boots / 28 TLS executions, twenty-one inherited boots, seventeen feature lints,
+168 host / nineteen libwoven / twenty-one Python tests and sixty stress logs.
+Review also found ASLR mmap/stack-range
+overlap, hidden by zero-draw QEMU boots; that needs a separate validated layout
+gate. Pure-BSS runtime, broader/library TLS and physical qualification remain
+open. See the compiler-TLS implementation audit. No full TLS/stage claim.
 
 ## Presentation and repaint performance (2026-10-15)
 
@@ -3046,6 +3155,16 @@ missed. The production local-relocation path now shares the corrected address
 validation with scope lookup. Parser-backed host regressions cover the failing
 cases, private versus exported symbols, overflow and segment bounds. Full
 shared-library mapping and teardown remain open.
+
+The subsequent signed-library integration implements a bounded `/lib` graph,
+cross-image eager relocation, per-library RELRO, transactional load rollback,
+and complete private-page-table reclamation. The new gate executes a Ring-3
+import call returning 42 and requires exact frame reclamation, along with
+signature, namespace and rollback negatives. Final acceptance and inherited
+regression results are tracked in the
+[shared-library audit](audit-stage11-shared-libraries-2026-10-15.md).
+Versioning, legacy PLT/REL tables, constructors/destructors, dynamic library
+TLS, runtime loading and broader qualification remain open.
 
 ## Stage 12.1 — accepted on 2026-09-16
 

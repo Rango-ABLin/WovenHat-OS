@@ -14,6 +14,10 @@ use crate::paging;
 use crate::task::{self, TaskId};
 use crate::wovenguard::{self, LineageId, ServiceClass};
 
+#[cfg(feature = "qemu-test")]
+#[path = "ipc_generation_tests.rs"]
+mod generation_tests;
+
 pub use crate::config::MAX_MESSAGE_SIZE;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -375,6 +379,10 @@ struct HandleSpace {
 }
 
 impl HandleSpace {
+    // All 24 generation bits are valid in a live handle. Once that last
+    // handle is closed, its slot must never reissue an earlier authority.
+    const MAX_GENERATION: u32 = 0x00ff_ffff;
+
     const EMPTY: Self = Self {
         owner: 0,
         entries: [None; MAX_HANDLES],
@@ -400,12 +408,14 @@ impl HandleSpace {
         let slot = self
             .entries
             .iter()
-            .position(Option::is_none)
+            .enumerate()
+            .find_map(|(slot, entry)| {
+                (entry.is_none() && self.generations[slot] < Self::MAX_GENERATION).then_some(slot)
+            })
             .ok_or(Error::HandleTableFull)?;
-        let mut generation = self.generations[slot].wrapping_add(1) & 0x00ff_ffff;
-        if generation == 0 {
-            generation = 1;
-        }
+        // Selection above proves this addition fits the ABI generation field.
+        // Preserve exhausted counters on remove and retire them permanently.
+        let generation = self.generations[slot] + 1;
         self.generations[slot] = generation;
         self.entries[slot] = Some(HandleEntry {
             object,
@@ -2294,6 +2304,11 @@ pub fn handle_object_self_test() -> bool {
 /// endpoint/object/handle behind. This proves the production lock/state path,
 /// not only the local pure-State self-test.
 pub fn stage8_1_runtime_probe() -> bool {
+    #[cfg(feature = "qemu-test")]
+    if !generation_tests::run() {
+        return false;
+    }
+
     const PROBE_OWNER: u64 = u64::MAX - 8;
 
     // Exercise the production public API rather than reaching into State

@@ -1,5 +1,15 @@
 # WovenHat OS Architecture & Codebase Guide
 
+## Stages 1–10 release evidence integrity (2026-10-16)
+
+Memory, storage, live-network and Stage 6 hotplug QEMU gates share
+`scripts/qemu_validation.py`: exact successful exit, line-anchored required
+markers, and rejection of tagged failure/timeout or kernel panic anywhere in
+serial output. Expected user faults remain valid isolation evidence. Negative
+host tests exercise every consumer's imported validator. This changes no kernel
+ABI or lifecycle; full preservation is pending, not release acceptance. See
+the foundation release-validation audit and stages 1–10 release ledger.
+
 ## Stage 19 WovenCalculator (2026-10-14)
 
 `apps/woven-calculator` is a separate Ring-3 crate with a bounded checked
@@ -317,9 +327,83 @@ write-through audit.
 
 ## Stage 11.2 scheduler-backed thread ownership (2026-10-14)
 
+ASLR geometry CPU regression (2026-10-16): the private graph-loader geometry
+seam exercises supported production draws without changing the userspace ABI
+or normal randomization. Stage `11.2-aslr` fills all sixteen 64 KiB mmap slots
+before writing the prevalidated stack guard. Stack draw 16 / mmap draw 0
+currently exits 99, proving the guard became writable; required fault -11 is
+not met. This failing gate is evidence, not a planner correction or acceptance.
+See the ASLR geometry audit. Both its call site and module are feature guarded.
+
+Bounded main-image local-exec TLS accepted (2026-10-16): `InitialTls` records a checked
+Variant-II layout and an independently tracked RO/NX post-relocation template.
+Mutable main/child storage contains a mapped FS:0 self pointer; fresh threads
+receive initialized template state, not mutated main-thread bytes. Parser
+backing/congruence, clone, logical permission and teardown accounting are
+updated together. Expanded compiler fork/cancel/capacity/owner-exit and biased
+pointer-initializer execution passes on every online CPU in 1/2/4-CPU boots;
+full session 37505 passed with 515 unchanged inputs, seventeen feature lints,
+nine focused and twenty-one inherited boots, plus sixty stress logs. See the
+implementation audit for scope: pure-BSS runtime and broader/library TLS remain
+open, as does the separate production-ASLR arena-overlap finding. Later older
+TLS-pending statements in this section describe the pre-correction baseline.
+
+Compiler shared-PIE correction accepted (2026-10-15): ELF parsing explicitly
+accepts a single inert null DT_DEBUG entry, rejecting nonzero addresses and
+duplicates. The new opt-in compiler gate executes exact signed Rust/LLD output
+through the graph loader before requiring every original Stage 11.5 check.
+Session 73596 passed full host/lint and inherited 1/2/4-CPU preservation with
+all 505 inputs unchanged. Compiler TLS remains open. See the compiler-PIE audit.
+
+Accepted loader placement correction (2026-10-15): the validated ELF kind now
+selects main-image placement. ET_EXEC ignores an offered ASLR delta; ET_DYN
+retains it. The signed graph loader, dependency ownership and library windows
+are preserved. A nonzero-candidate compiled static fixture and a biased PIC
+probe pass on 1/2/4 CPUs. Full host/lint, exact Stage 10.7 and Stage 10.8–11.5
+preservation passed in session 62865, exit 0, with all 500 inputs unchanged.
+See the executable-placement audit and Claude's source policy `6f02202d`.
+Compiler TLS remains open; this does not qualify a new release or full stage.
+
+Accepted foundation/status corrections (2026-10-15): user-mapping ancestors
+are explicitly writable while leaves retain W^X/RELRO/COW policy, including
+read-only COW/file mappings; this prevents sole-owner COW refaults. Process wait
+checks parent ownership before scheduler liveness, without nesting those locks,
+and rechecks in the original reap transaction. Process wait and thread join
+share a zero-extending 32-bit exit payload encoder, separate from 64-bit errors.
+The real libwoven fixture catches these boundaries and preserves original
+Stage 11.2 assertions. All three bounded corrections are accepted in prerequisite
+order on the unchanged 500-input baseline, with full Stage 10.7/10.8–11.5
+preservation on 1/2/4 CPUs and warning-denying host/fixture/kernel QA. See the
+three dedicated audits and combined evidence. None is a release/hardware
+qualification or complete compiler-TLS/loader interoperability.
+
+Earlier-stage IPC follow-up (2026-10-15, bounded correction accepted): `HandleSpace`
+now skips empty slots whose preserved 24-bit generation is already maximum.
+The last live generation remains valid until close. The existing state guard,
+16-slot ordinary capacity, 32-bit encoding, metadata and five installation
+paths are unchanged. Actual-source boundary probes, production rollback/teardown
+and inherited runtime preservation pass on the frozen baseline; see the
+handle-generation audit. This is separate from thread-record retirement.
+Durable host coverage is now part of `cargo test`; a `qemu-test`-guarded
+post-SMP probe exercises real installation rollback, queued escrow, waiters,
+lineage and frame cleanup. Its final revised full acceptance chain exited 0,
+including full Stage 10.7 and Stage 10.8–11.5 matrices on 1/2/4 CPUs. All 488
+frozen inputs matched at that increment's acceptance. Signed-status encoding
+has since passed its own separate 500-input acceptance;
+full runtime, release and hardware production closure remain open.
+
+The registry now reserves generation `u32::MAX` as a permanent exhaustion
+sentinel: a free record at that value is never allocated again. All three
+release paths retain their existing checked generation advancement under the
+rank-10 registry guard. The accepted bounded correction has five actual-source
+host regressions plus full Stage 10.7 and Stage 10.8–11.5 preservation on
+1/2/4 CPUs with unchanged frozen sources; see the thread-generation audit.
+The exit-result ABI collision has since been corrected and accepted separately;
+compiler-compatible TLS remains open.
+
 `TaskControlBlock` carries both the stable process owner and an optional
 generation-safe thread ID. User-thread creation maps a private NX stack and a
-private copy of the process's bounded initial-exec TLS image into the existing
+private initialization from the immutable main-image TLS template into the existing
 address space; it never retains an unchecked userspace pointer. Thread exit
 publishes registry termination only after the scheduler completes the stack
 hand-off, so join can safely reclaim those mappings. Join waiters use the
@@ -344,15 +428,25 @@ bounded increment.
 string table within bounded file-backed load segments. `userspace::load_elf`
 applies `R_X86_64_RELATIVE` and locally defined `R_X86_64_64`,
 `R_X86_64_GLOB_DAT`, and `R_X86_64_JUMP_SLOT` entries before W^X/RELRO
-finalization. `elf::SymbolScope` now provides a bounded, immutable main-image-first
-scope for up to four exact-name direct dependencies and defined global-symbol
-lookup. It is tested as a metadata/resolution contract, not yet wired to
-mapping or relocation. Undefined symbols without that scope, `DT_NEEDED`,
-legacy REL/PLT tables, and cross-image loading still fail closed. This is a
-prerequisite for a dynamic linker, not shared-library support; dependency
-mapping, versioning, lazy binding, dynamic TLS and ordered shared-image
-teardown are still unimplemented. See
-`audit-stage11-symbol-scope-2026-10-15.md`.
+finalization. The subsequent signed-library integration in
+`userspace/linker.rs` loads a breadth-first graph of at most four verified WAPP
+dependencies from `/lib`, checks SONAME identity, maps each into a separate
+window, applies cross-image relocations, and protects every RELRO range.
+`elf::SymbolScope` preserves discovery order and supports transitive cycles.
+The process owns all mappings; an unpublished `Pending` guard rolls back all
+failures, including argv setup. Compact page-range metadata retains forty
+mapping slots within the existing fork stack budget. Root destruction walks
+every empty private user-table branch and refuses copied kernel branches.
+Legacy REL/PLT tables, versioned/weak symbols, constructors/destructors, lazy
+binding and library TLS remain unsupported. See
+`audit-stage11-shared-libraries-2026-10-15.md` for validation and limits.
+
+The historical main-image TLS mapping was not a compiler-compatible TCB:
+the real Rust local-exec probe expects a self-pointer at `FS:0` and aligned
+template bytes immediately below it. The existing page-end FS base has neither;
+new-thread cloning also copied mutable main-thread state. The correction and
+full bounded compiler local-exec acceptance are recorded above and in the
+compiler-TLS implementation audit. Do not infer broader TLS-model acceptance.
 
 The symbol resolver and the production loader now share
 `Image::defined_symbol_value`: ELF symbol values receive the image load bias

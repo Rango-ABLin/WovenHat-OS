@@ -5,6 +5,7 @@ from pathlib import Path
 import shutil
 import subprocess
 import sys
+from qemu_validation import validation_errors
 import time
 
 
@@ -56,7 +57,9 @@ def main():
                 f'[S6.HOTPLUG] lifecycle: PASSED cycles=2 online={args.cpus} mask=0x{((1 << args.cpus) - 1):x}']
     if args.cpus == 4:
         required.append('[S6.HOTPLUG] middle lifecycle: PASSED cycles=2 online=4 mask=0xf')
-    if result.returncode != 33 or any(marker not in log for marker in required):
+    errors = validation_errors(result.returncode, log, required)
+    if errors:
+        print('\n'.join(errors), file=sys.stderr)
         print(log[-12000:], file=sys.stderr)
         print('FAILED; evidence:', out, file=sys.stderr)
         return 1
