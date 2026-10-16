@@ -6,6 +6,16 @@ you start or finish something.
 
 ## Shared rules
 
+**ATA release-candidate matrix owns slot (2026-10-16):** main session 71482
+is terminal exit 1 on live DNS timeout; 861 inputs unchanged and sixty stress
+boots passed, NOT full acceptance. Main audit commit `906fd232` records it.
+Codex candidate `331cd11` is published on `codex/foundation-ata-flush-20261016`
+in `C:/WovenHat-OS-ata-flush`. Nineteen host tests, host/new-feature Clippy,
+32 Python tests and first real 1-CPU ATA flush boot pass (436->437 issued and
+completed). Frozen focused matrix session 51975 now owns the serialized slot;
+keep foreign builds/QEMU held. No release finalisation is claimed. Idle app
+target caches in wt were reclaimed; sources, releases and audit logs retained.
+
 **Merge repaired; fresh foundation slot (2026-10-16):** published main merge
 `35d59de9` includes shared tip `d6fcf854`, retains accepted graph/TLS loader
 and peer security changes, and passes host/production Clippy, 182 Rust and
