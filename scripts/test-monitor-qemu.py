@@ -1,7 +1,6 @@
 """Build and execute WovenMonitor through the signed Ring-3 ABI."""
 
 import argparse
-import json
 import re
 import time
 import os
@@ -12,8 +11,8 @@ import subprocess
 
 PASS_MARKER = '[S16.1] out-of-kernel application: PASSED'
 FAILURE_PATTERN = re.compile(
-    r'(?im)(?:\\b(?:kernel panic|panicked at|fatal error|assertion failed|'
-    r'FAILED|TEST FAILED|SECURITY VIOLATION)\\b|\\[S16\\.1\\].*\\bFAIL\\b)'
+    r'(?im)(?:\b(?:kernel panic|panicked at|fatal error|assertion failed|'
+    r'FAILED|TEST FAILED|SECURITY VIOLATION)\b|\[S16\.1\].*\bFAIL(?:ED)?\b)'
 )
 
 
