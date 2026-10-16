@@ -42,7 +42,7 @@ class HarnessRegression(unittest.TestCase):
         )
         class FakeQmpFile:
             def __init__(self, responses):
-                self.responses = iter(responses.splitlines(keepends=True))
+                self.responses = iter(responses.replace(chr(92) + 'n', chr(10)).splitlines(keepends=True))
                 self.writes = []
 
             def write(self, message):
