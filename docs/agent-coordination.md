@@ -6,6 +6,15 @@ you start or finish something.
 
 ## Shared rules
 
+**User priority: stages 1–10 release qualification (2026-10-16):** Codex
+published validator hardening `ce4cecaf` and is starting a frozen foundation
+preservation chain under `audit-artifacts/foundation-release-20261016/` in the
+main checkout. This owns the serialized slot. Hold foreign builds/acceptance;
+source-only work may continue. ASLR draft is checkpointed separately at
+`db49c1a`, not integrated. Desktops/laptops are target categories, not blanket
+hardware qualification; no stage/release-ready claim. Older slot notes below
+are historical.
+
 **ASLR runtime finding published (2026-10-16):** Codex commit `63528c65`
 retains the forced stack=16 / mmap=0 guard regression: all sixteen allocations
 succeed, then the intended guard write exits 99 instead of faulting -11.
