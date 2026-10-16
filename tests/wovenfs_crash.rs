@@ -757,6 +757,80 @@ fn a_block_named_by_two_inodes_is_not_rewritten_or_freed() {
     }
 }
 
+/// Directory-entry rewrites of the root: create (empty and with contents) and
+/// unlink of a file whose own blocks are sound.
+const DIR_ENTRY_ATTEMPTS: [(&str, Attempt); 3] = [
+    ("create", |volume, _| {
+        volume.create(1, "c.bin", 0o644, 2).map(|_| ())
+    }),
+    ("create_file", |volume, _| {
+        volume
+            .create_file(1, "c.bin", 0o644, &[3u8; 300], 2)
+            .map(|_| ())
+    }),
+    ("unlink a", |volume, _| volume.unlink(1, "a.bin", 2)),
+];
+
+fn assert_dir_entry_writes_refused(base: &CrashDisk, why: &str) {
+    for (operation, attempt) in DIR_ENTRY_ATTEMPTS {
+        let image = base.fork(None);
+        let before = image.sectors();
+        let mut volume = Volume::mount(image.clone()).expect("mount");
+        assert_eq!(
+            attempt(&mut volume, 0),
+            Err(Error::Corrupt),
+            "{operation}: must not rewrite a directory block {why}"
+        );
+        assert!(
+            image.sectors() == before,
+            "{operation}: a refused operation must not modify the image"
+        );
+    }
+}
+
+#[test]
+fn a_directory_block_named_by_a_file_is_not_rewritten() {
+    let (base, _, b) = two_one_block_files();
+    let root_block = Volume::mount(base.clone())
+        .expect("mount")
+        .inode(1)
+        .expect("root")
+        .direct[0];
+    redirect_inode_block(&base, b, 0, root_block);
+    assert_eq!(
+        Volume::mount(base.clone()).expect("mount").check(),
+        Err(Error::Corrupt),
+        "check() must see the alias"
+    );
+    // None of these operations touches b, yet each rewrites the directory
+    // block b names, which would overwrite b's data.
+    assert_dir_entry_writes_refused(&base, "a file also names");
+}
+
+#[test]
+fn a_directory_block_the_bitmap_marks_free_is_not_rewritten() {
+    let (base, _, _) = two_one_block_files();
+    let (sb, root_block) = {
+        let mut volume = Volume::mount(base.clone()).expect("mount");
+        let root = volume.inode(1).expect("root");
+        (*volume.super_block(), root.direct[0])
+    };
+    {
+        let bits = SECTOR_SIZE as u64 * 8;
+        let within = (root_block % bits) as usize;
+        let mut sectors = base.image.borrow_mut();
+        sectors[(sb.bitmap_start + root_block / bits) as usize][within / 8] &=
+            !(1u8 << (within % 8));
+    }
+    assert_eq!(
+        Volume::mount(base.clone()).expect("mount").check(),
+        Err(Error::Corrupt),
+        "the root block must now be free in the bitmap"
+    );
+    // The allocator may already have handed a free block to another file.
+    assert_dir_entry_writes_refused(&base, "the bitmap marks free");
+}
+
 #[test]
 fn a_free_block_named_by_a_live_inode_is_not_allocated() {
     let (base, _, b) = two_one_block_files();

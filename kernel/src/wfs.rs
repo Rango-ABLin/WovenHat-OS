@@ -984,9 +984,17 @@ impl<D: BlockDevice> Volume<D> {
         self.dir_entries(&txn, &dir)
     }
 
+    /// Stage one entry of directory `dir_inode` (whose inode is `dir`).
+    ///
+    /// The entry's block is rewritten in place, so it gets the same ownership
+    /// checks as a file block rewritten by `stage_write`. A file inode naming
+    /// that block would otherwise have its data overwritten by a `create` or
+    /// `unlink` that never touches the file, and a block the bitmap calls free
+    /// may already belong to someone else.
     fn stage_dir_entry(
         &mut self,
         txn: &mut Transaction,
+        dir_inode: u64,
         dir: &Inode,
         position: usize,
         entry: &DirEntry,
@@ -994,9 +1002,10 @@ impl<D: BlockDevice> Volume<D> {
         let slot = position / DIR_ENTRIES_PER_BLOCK;
         let index = position % DIR_ENTRIES_PER_BLOCK;
         let block = dir.direct[slot];
-        if block == 0 {
+        if block == 0 || !self.bitmap_get(txn, block)? {
             return Err(Error::Corrupt);
         }
+        self.refuse_shared_blocks(txn, dir_inode, &[block])?;
         let mut sector = self.read_block_staged(txn, block)?;
         let at = index * DIR_ENTRY_SIZE;
         entry.encode(&mut sector[at..at + DIR_ENTRY_SIZE]);
@@ -1088,7 +1097,7 @@ impl<D: BlockDevice> Volume<D> {
         entry.kind = KIND_FILE;
         entry.name_len = name.len() as u16;
         entry.name[..name.len()].copy_from_slice(name.as_bytes());
-        self.stage_dir_entry(txn, &dir, position, &entry)?;
+        self.stage_dir_entry(txn, dir_inode, &dir, position, &entry)?;
 
         dir.modified = now;
         self.stage_inode(txn, dir_inode, &dir)?;
@@ -1242,7 +1251,7 @@ impl<D: BlockDevice> Volume<D> {
             }
         }
         self.stage_inode(&mut txn, entry.inode, &Inode::empty())?;
-        self.stage_dir_entry(&mut txn, &dir, position, &DirEntry::empty())?;
+        self.stage_dir_entry(&mut txn, dir_inode, &dir, position, &DirEntry::empty())?;
         dir.modified = now;
         self.stage_inode(&mut txn, dir_inode, &dir)?;
         self.commit(&txn)

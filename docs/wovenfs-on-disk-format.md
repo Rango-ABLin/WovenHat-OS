@@ -104,8 +104,12 @@ for the blocks it frees. The newly-allocated case catches a live inode that
 names a block the bitmap marks free, which the allocator would otherwise hand
 out. The scan reads every inode through the transaction view, so a write costs
 O(`inode_count`) inode-table reads. Any unreadable or corrupt inode in the
-table therefore fails the write closed. `check()` still runs the full
-whole-volume audit in test and self-test builds.
+table therefore fails the write closed. Create and unlink rewrite one
+directory block in place to add or clear an entry. That block gets the same
+two checks: its bitmap bit must be set, and no live inode other than the
+directory may name it. Otherwise a create or unlink would overwrite the data
+of a file it never touches. `check()` still runs the full whole-volume audit
+in test and self-test builds.
 
 ### Directory entry (64 bytes, 8 per block)
 

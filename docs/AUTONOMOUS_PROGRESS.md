@@ -4,6 +4,70 @@ Each entry is one bounded checkpoint. Entries record exactly what was run.
 Nothing here claims production readiness; completion requires independent
 human review.
 
+## 2026-10-16 — WovenFS: directory-entry rewrites check block ownership
+
+Branch: `auto/wovenhat-development` (base `5722e0e`). The working tree was
+clean at the start, so there was no unfinished work to resume. This closes the
+open item "Directory-block aliasing is checked only when the writer is a file
+inode" from the previous entry.
+
+### Defect
+
+`create`, `create_file` and `unlink` add or clear a directory entry by
+rewriting one root directory block in place. That path checked neither the
+block's bitmap bit nor whether another inode names the block. A file inode
+that aliased a directory block therefore had its data overwritten by a create
+or unlink that never touched the file. The previous checkpoint's scan caught
+this only when the aliasing file itself was written or unlinked. A directory
+block the bitmap marks free (one the allocator may already have handed out)
+was also rewritten.
+
+### Change
+
+- `stage_dir_entry` now takes the directory's inode number. Before staging, it
+  returns `Corrupt` if the entry's block is free in the bitmap, or if any live
+  inode other than the directory names it (`refuse_shared_blocks`). Both
+  callers (`stage_create`, `unlink`) pass `dir_inode`. The check runs before
+  commit, so a refused operation leaves the image unchanged.
+- Tests: `a_directory_block_named_by_a_file_is_not_rewritten` and
+  `a_directory_block_the_bitmap_marks_free_is_not_rewritten`. Each checks
+  that `create`, `create_file` and `unlink` of an unrelated sound file return
+  `Corrupt` and leave the image byte-identical.
+- Docs: `wovenfs-on-disk-format.md` integrity section; `stage-status.md`
+  Stage 15 note.
+
+### Results (run on this host, 2026-10-16)
+
+Using project-local `CARGO_BUILD_BUILD_DIR=.cargo-build`,
+`CARGO_TARGET_DIR=target`:
+
+| Command | Result |
+|---|---|
+| `cargo fmt --all -- --check` | PASS (after `cargo fmt --all` reflowed one closure in the new test) |
+| `cargo test --test wovenfs_crash` | PASS, 26 passed / 0 failed |
+| Same tests against `HEAD`'s `wfs.rs` (negative control; fixed copy restored and verified identical with `cmp`) | FAIL as expected: both new tests fail at `create: must not rewrite a directory block …`; 24 others pass |
+| `cargo test -p wovenhat-os --tests --no-fail-fast` | PASS, 136 passed / 0 failed |
+| `cargo clippy --all-targets -- -D warnings` | PASS |
+| `cargo clippy -p wovenhat-kernel --target x86_64-unknown-none -- -D warnings` (default) | PASS |
+| same, `--features stage11-5-test` | PASS |
+| same, `--features stage15-1-test` … `stage15-9-test` (each) | PASS |
+| `scripts/test-wovenfs-qemu.ps1 -Stage 15.1 -Cpus 1/2/4` | PASS, exit 33 each (`wovenfs-stage15.1-{1cpu-20261016-091005-893,2cpu-…-091207-188,4cpu-…-091355-462}`) |
+| `scripts/test-wovenfs-qemu.ps1 -Stage 15.2 -Cpus 1/2/4` | PASS, exit 33 each (`wovenfs-stage15.2-{1cpu-20261016-091543-323,2cpu-…-091745-424,4cpu-…-091935-496}`) |
+
+Evidence directories are under `audit-artifacts/` (Git-ignored, kept
+locally). No QEMU process was left running.
+
+### Limits / open
+
+- Cost: `unlink` now scans the inode table twice (once for the file's blocks
+  and once for the directory block), and `create_file` scans it twice. Both
+  are O(`inode_count`). Folding the scans into one is possible but was not
+  needed at current volume sizes.
+- Only the root directory exists, so directory-to-directory aliasing is not
+  reachable yet. The check covers it once subdirectories exist.
+- `unlink` still ignores `links`. There is still no repair (fsck) path.
+  Stage 15.3–15.9 QEMU gates and physical USB qualification were not rerun.
+
 ## 2026-10-16 — WovenFS: refuse blocks shared by two live inodes
 
 Branch: `auto/wovenhat-development` (base `a720b9e`).

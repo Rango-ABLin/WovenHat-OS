@@ -1204,6 +1204,10 @@ USB qualification was not rerun.
 (cross-inode aliasing). The refusal happens on these paths, not only in
 `check()`. See `docs/AUTONOMOUS_PROGRESS.md` for the gate results.
 
+2026-10-16: create and unlink also refuse to rewrite a directory block that a
+file inode names or that the bitmap marks free. See
+`docs/AUTONOMOUS_PROGRESS.md` for the gate results.
+
 Crash recovery is proven by fault injection, not actual power loss on a device.
 Physical qualification remains incomplete: the inserted USB flash disk was
 inspected read-only, while the destructive harness requires Administrator
