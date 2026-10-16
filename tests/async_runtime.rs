@@ -50,10 +50,13 @@ mod task {
         panic!("unexpected blocking wait in host test");
     }
 }
+#[rustfmt::skip]
 #[path = "../kernel/src/async_op.rs"]
 mod async_op;
+#[rustfmt::skip]
 #[path = "../kernel/src/completion_port.rs"]
 mod completion_port;
+#[rustfmt::skip]
 #[path = "../kernel/src/completion_queue.rs"]
 mod completion_queue;
 

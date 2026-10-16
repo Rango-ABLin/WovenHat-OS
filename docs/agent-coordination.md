@@ -540,6 +540,10 @@ and has performed no physical-media writes. Do not interpret Codex's read-only
 preflight as evidence that no other agent changed the stick, or as a physical
 boot/power-loss qualification result.
 
+**Completed earlier (from `master`):** Fixed the core-foundation CI failure by adding optional OVMF
+VARS-template support to `scripts/test-monitor-qemu.py`; no stage implementation
+or acceptance gates were changed.
+
 Stage 19 system applications (WovenCalculator, WovenTerminal, WovenFiles,
 WovenEditor, …), application signing and packaging, and the release
 validation chain.

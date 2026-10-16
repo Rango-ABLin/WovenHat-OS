@@ -150,7 +150,7 @@ def main():
                 '#[derive(Clone, Copy, PartialEq, Eq)]\nstruct ServiceName {'),
     ])
     output = root / 'audit-artifacts' / f'ipc-generation-probe-{time.time_ns()}'
-    output.mkdir()
+    output.mkdir(parents=True)
     rust = output / 'ipc-allocator.rs'
     rust.write_text('const MAX_HANDLES: usize = 16;\n' + PRELUDE + extracted + TESTS, encoding='utf-8')
     binary = output / 'ipc-allocator-tests.exe'

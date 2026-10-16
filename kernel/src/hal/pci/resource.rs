@@ -183,5 +183,9 @@ fn align_up(value: u64, alignment: u64) -> Option<u64> {
 
 fn next_generation(generation: u32) -> u32 {
     let next = generation.wrapping_add(1);
-    if next == 0 { 1 } else { next }
+    if next == 0 {
+        1
+    } else {
+        next
+    }
 }
