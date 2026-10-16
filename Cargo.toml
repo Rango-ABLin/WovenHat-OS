@@ -110,6 +110,7 @@ stage20-13-test = ["qemu-test", "kernel/stage20-13-test"]
 stage20-14-test = ["qemu-test", "kernel/stage20-14-test"]
 stage20-14b-test = ["qemu-test", "kernel/stage20-14b-test"]
 stage1-5-test = ["qemu-test", "kernel/stage1-5-test"]
+stage1-5-ata-flush-test = ["qemu-test", "kernel/stage1-5-ata-flush-test"]
 
 [profile.dev]
 panic = "abort"

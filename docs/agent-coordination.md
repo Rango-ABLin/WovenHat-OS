@@ -6,6 +6,13 @@ you start or finish something.
 
 ## Shared rules
 
+**Isolated ATA durability patch (2026-10-16):** Codex owns
+`codex/foundation-ata-flush-20261016` in `C:/WovenHat-OS-ata-flush`, based on
+`35d59de9`. Source-only work while main session 71482 preserves its 861 frozen
+inputs. No compiler/QEMU chain may run here until that main chain is terminal
+and the serialized slot is free. This patch is the next stages 1–5 durability
+correction, not full stage/release finalisation. Preserve main sources and logs.
+
 **Merge repair / acceptance invalidated (2026-10-16):** a VS Code pull of
 `d6fcf854` during frozen session 54720 changed the inventory. That session is
 terminal exit 1, not accepted; evidence is retained under

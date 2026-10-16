@@ -1,5 +1,13 @@
 # Stage status
 
+## Stages 1–5 ATA durability candidate — 2026-10-16
+
+The isolated ATA release patch replaces successful no-op flush with a checked
+device command, keeps errors and timeouts fail-closed, and adds actual-source
+host tests plus an independently guarded real ATA gate. Nineteen host tests
+pass; full software acceptance and physical durability remain pending. See
+the ATA-flush audit. No stages 1–10 release-ready claim is made.
+
 ## Merge integration checkpoint — 2026-10-16
 
 The foundation validator preservation run was invalidated by a concurrent

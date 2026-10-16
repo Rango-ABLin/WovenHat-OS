@@ -4,6 +4,15 @@ use crate::irq_lock::IrqMutex as Mutex;
 
 use crate::block::{BlockDevice, Error, SECTOR_SIZE};
 
+mod flush;
+
+#[cfg(feature = "stage1-5-ata-flush-test")]
+use core::sync::atomic::{AtomicU64, Ordering};
+#[cfg(feature = "stage1-5-ata-flush-test")]
+static FLUSH_ISSUED: AtomicU64 = AtomicU64::new(0);
+#[cfg(feature = "stage1-5-ata-flush-test")]
+static FLUSH_COMPLETED: AtomicU64 = AtomicU64::new(0);
+
 const DATA: u16 = 0x1f0;
 const SECTOR_COUNT: u16 = 0x1f2;
 const LBA_LOW: u16 = 0x1f3;
@@ -50,6 +59,7 @@ static PRIMARY_MASTER: Mutex<Option<BufferedAta>> = Mutex::with_rank(None, 10);
 
 pub struct AtaPio {
     sectors: u64,
+    flush_command: flush::Command,
 }
 
 impl AtaPio {
@@ -74,7 +84,10 @@ impl AtaPio {
             for word in &mut words {
                 *word = inw(DATA);
             }
-            identify_sector_count(&words).map(|sectors| Self { sectors })
+            identify_sector_count(&words).map(|sectors| Self {
+                sectors,
+                flush_command: flush::Command::from_identify(words[83]),
+            })
         }
     }
 }
@@ -82,6 +95,22 @@ impl AtaPio {
 impl BlockDevice for AtaPio {
     fn sector_count(&self) -> u64 {
         self.sectors
+    }
+
+    fn flush(&mut self) -> Result<(), Error> {
+        // AtaPio is constructed privately and owned by PRIMARY_MASTER; the
+        // caller already owns that channel's IRQ lock for this entire command.
+        let result = flush::run(
+            &mut FlushPorts,
+            self.flush_command,
+            POLL_DEADLINE_TICKS,
+            POLL_LIMIT,
+        );
+        #[cfg(feature = "stage1-5-ata-flush-test")]
+        if result.is_ok() {
+            FLUSH_COMPLETED.fetch_add(1, Ordering::SeqCst);
+        }
+        result
     }
 
     fn read_sector(&mut self, lba: u64, sector: &mut [u8]) -> Result<(), Error> {
@@ -116,6 +145,39 @@ impl BlockDevice for AtaPio {
             unsafe { io_delay() };
         }
         Err(Error::DeviceFault)
+    }
+}
+
+/// Private adapter for the already serialized primary ATA channel. Only the
+/// port accesses require unsafe; all command sequencing is in safe Rust.
+struct FlushPorts;
+
+impl flush::Transport for FlushPorts {
+    fn status(&mut self) -> u8 {
+        // SAFETY: constructed only by the channel owner in AtaPio::flush.
+        unsafe { inb(STATUS_COMMAND) }
+    }
+    fn select_master(&mut self) {
+        // SAFETY: the caller exclusively owns the primary channel; low device
+        // bits are zero for the non-data command (not an LBA sector address).
+        unsafe { outb(DRIVE, 0xa0) }
+    }
+    fn issue(&mut self, command: u8) {
+        // SAFETY: the sequencer verified channel idle and owns its registers.
+        unsafe { outb(STATUS_COMMAND, command) }
+        #[cfg(feature = "stage1-5-ata-flush-test")]
+        FLUSH_ISSUED.fetch_add(1, Ordering::SeqCst);
+    }
+    fn settle(&mut self) {
+        // SAFETY: same channel ownership; four alternate-status reads settle
+        // device selection/command writes without consuming a data word.
+        unsafe { io_delay() }
+    }
+    fn ticks(&mut self) -> u64 {
+        crate::timer::ticks()
+    }
+    fn relax(&mut self) {
+        core::hint::spin_loop();
     }
 }
 
@@ -183,6 +245,25 @@ pub fn init() -> Option<u64> {
 pub fn with_primary_master<R>(operation: impl FnOnce(&mut BufferedAta) -> R) -> Option<R> {
     let mut disk = PRIMARY_MASTER.lock();
     disk.as_mut().map(operation)
+}
+
+#[cfg(feature = "stage1-5-ata-flush-test")]
+pub fn hardware_flush_self_test() -> bool {
+    let before_issued = FLUSH_ISSUED.load(Ordering::SeqCst);
+    let before_completed = FLUSH_COMPLETED.load(Ordering::SeqCst);
+    // This is the actual cached hardware device, not a RAM disk or mock. An
+    // empty software cache must still submit and complete a hardware command.
+    let success = with_primary_master(|disk| disk.flush().is_ok()).unwrap_or(false);
+    let issued = FLUSH_ISSUED.load(Ordering::SeqCst);
+    let completed = FLUSH_COMPLETED.load(Ordering::SeqCst);
+    let passed = success
+        && before_issued.checked_add(1) == Some(issued)
+        && before_completed.checked_add(1) == Some(completed);
+    crate::serial::write_line(format_args!(
+        "[S1-5.ATA] real cached-device flush: {} issued={before_issued}/{issued} completed={before_completed}/{completed}",
+        if passed { "PASSED" } else { "FAILED" },
+    ));
+    passed
 }
 
 fn identify_sector_count(words: &[u16; 256]) -> Option<u64> {

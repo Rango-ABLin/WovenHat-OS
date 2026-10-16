@@ -1,5 +1,16 @@
 # WovenHat OS Architecture & Codebase Guide
 
+## ATA durability candidate (2026-10-16; full acceptance pending)
+
+`ata/flush.rs` provides safe allocation-free non-data flush sequencing shared
+by the real AtaPio port adapter and host mocks. AtaPio now overrides flush;
+software-cache flush must propagate hardware completion/errors instead of a
+successful no-op. IDENTIFY selects baseline/extended commands. Existing channel
+ownership, bounds and deadlines remain; no task switch occurs under its lock.
+The independently guarded real-device gate requires issued/completed command
+counts and every original FAT32/SMP marker. See the ATA-flush audit for tests,
+hardware/deadline limitations and the still-open full preservation gate.
+
 ## Stages 1–10 release evidence integrity (2026-10-16)
 
 Memory, storage, live-network and Stage 6 hotplug QEMU gates share

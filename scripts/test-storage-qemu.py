@@ -8,6 +8,17 @@ import sys
 from qemu_validation import validation_errors
 
 
+def required_markers(cpus, ata_flush=False):
+    required = ['[STORAGE MUTATION] live FAT32 rename/delete/growth/lifecycle: PASSED',
+                '[BOOT] ALL VALIDATIONS PASSED', f'[SMP] online={cpus} expected={cpus}',
+                '[SMP] scheduler/barrier: PASSED', '[SMP] acknowledged TLB shootdowns: PASSED',
+                '[SMP] remote stale-translation/refree: PASSED', '[SMP] per-CPU timer preemption: PASSED',
+                '[SMP] automatic rebalancing: PASSED', '[SMP] reschedule IPI: PASSED', '[SMP] migration stress: PASSED']
+    if ata_flush:
+        required.append('[S1-5.ATA] real cached-device flush: PASSED')
+    return required
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--qemu', default=shutil.which('qemu-system-x86_64') or r'C:\Program Files\qemu\qemu-system-x86_64.exe')
@@ -16,6 +27,7 @@ def main():
     parser.add_argument('--cpus', type=int, choices=(1, 2, 4), default=2)
     parser.add_argument('--timeout', type=float, default=180)
     parser.add_argument('--release', action='store_true')
+    parser.add_argument('--ata-flush', action='store_true', help='require actual ATA flush command and completion')
     args = parser.parse_args()
     root = Path(__file__).resolve().parents[1]
     qemu = Path(args.qemu)
@@ -23,10 +35,13 @@ def main():
     firmware_vars = args.firmware_vars
     if not qemu.is_file() or not firmware.is_file() or (firmware_vars is not None and not firmware_vars.is_file()):
         parser.error('Set --qemu and --firmware to existing QEMU and OVMF files.')
+    feature = 'stage1-5-ata-flush-test' if args.ata_flush else 'qemu-test'
     image = subprocess.check_output(
-        ['cargo', 'run', '--quiet'] + (['--release'] if args.release else []) + ['--features', 'qemu-test', '--', '--print-image'],
+        ['cargo', 'run', '--quiet'] + (['--release'] if args.release else []) + ['--features', feature, '--', '--print-image'],
         cwd=root, text=True).strip()
     out = root / 'target' / f'storage-regression-{args.cpus}-{"release" if args.release else "debug"}'
+    if args.ata_flush:
+        out = out.with_name(out.name + '-ata-flush')
     out.mkdir(parents=True, exist_ok=True)
     serial = out / 'serial.log'
     serial.write_text('')
@@ -55,10 +70,7 @@ def main():
         print('QEMU storage boot timed out. See', serial, file=sys.stderr)
         return 1
     log = serial.read_text(errors='replace')
-    required = ['[STORAGE MUTATION] live FAT32 rename/delete/growth/lifecycle: PASSED',
-                '[BOOT] ALL VALIDATIONS PASSED', f'[SMP] online={args.cpus} expected={args.cpus}',
-                '[SMP] scheduler/barrier: PASSED', '[SMP] acknowledged TLB shootdowns: PASSED',
-                '[SMP] remote stale-translation/refree: PASSED', '[SMP] per-CPU timer preemption: PASSED', '[SMP] automatic rebalancing: PASSED', '[SMP] reschedule IPI: PASSED', '[SMP] migration stress: PASSED']
+    required = required_markers(args.cpus, args.ata_flush)
     errors = validation_errors(result.returncode, log, required)
     if errors:
         print('\n'.join(errors), file=sys.stderr)

@@ -3716,6 +3716,13 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
             }
         }
     }
+    #[cfg(feature = "stage1-5-ata-flush-test")]
+    {
+        if !ata::hardware_flush_self_test() {
+            serial::write_line(format_args!("[S1-5.ATA] flush completion: FAILED"));
+            qemu_test_exit_failure();
+        }
+    }
     #[cfg(feature = "stage1-5-test")]
     {
         if !journal::structural_self_test() || !storage::self_test() {

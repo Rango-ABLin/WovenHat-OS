@@ -169,6 +169,7 @@ stage20-14-test = ["qemu-test"]
 # The desktop across two monitors.
 stage20-14b-test = ["qemu-test"]
 stage1-5-test = ["qemu-test"]
+stage1-5-ata-flush-test = ["qemu-test"]
 
 [dependencies]
 bootloader_api = "0.11.17"

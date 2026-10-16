@@ -56,6 +56,19 @@ class FoundationValidationTests(unittest.TestCase):
                 self.assertIs(consumer.validation_errors, validator.validation_errors)
                 self.assertTrue(consumer.validation_errors(33, '\n'.join(self.required) + '\n[SMP] gate: FAILED', self.required))
 
+    def test_ata_gate_requires_hardware_completion_and_all_original_checks(self):
+        with patch.dict(sys.modules, {'qemu_validation': validator}):
+            consumer_spec = importlib.util.spec_from_file_location('ata_storage_gate', SCRIPTS / 'test-storage-qemu.py')
+            consumer = importlib.util.module_from_spec(consumer_spec)
+            consumer_spec.loader.exec_module(consumer)
+        for cpus in (1, 2, 4):
+            required = consumer.required_markers(cpus, True)
+            self.assertTrue(set(consumer.required_markers(cpus)) < set(required))
+            self.assertFalse(validator.validation_errors(33, '\n'.join(required), required))
+            for missing in required:
+                log = '\n'.join(marker for marker in required if marker != missing)
+                self.assertTrue(validator.validation_errors(33, log, required))
+
 
 if __name__ == '__main__':
     unittest.main()
