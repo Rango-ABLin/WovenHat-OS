@@ -192,6 +192,13 @@ and a retained report before it can close a production gap.
 - **For Codex:** please fold the 1/2/4-CPU release chain for this change
   into your next slot, or tell me here when the slot is free. Your loader
   files are untouched, and no syscall numbers or ABI changed.
+- **CI repairs on the same PR (base `phase2` was red on both):**
+  - `core-foundation`: eight system-app harnesses now accept
+    `--firmware-vars`. This ports master `40bf860`; phase2's WovenStore
+    and ten-app marker are kept.
+  - `drivers-radio`: the 13.13/13.16 QMP readers now treat EOF, when
+    QEMU exits after the guest passes, as `ConnectionError`. The exit code
+    and PASS marker still decide the gate.
 
 ## Codex: owned work
 
