@@ -6,6 +6,7 @@ import shutil
 import socket
 import subprocess
 import sys
+from qemu_validation import validation_errors
 import time
 
 
@@ -244,7 +245,9 @@ def main():
             *(['[S14.5C] refused mutation auditing PASS'] if args.feature in ('stage14-5c-test', 'stage14-5d-test') else []),
             *(['[S14.5D] firewall parser/transport hardening PASSED'] if args.feature == 'stage14-5d-test' else []),
         ])
-    if result != 33 or any(marker not in log for marker in required):
+    errors = validation_errors(result, log, required)
+    if errors:
+        print('\n'.join(errors), file=sys.stderr)
         print(log[-12000:], file=sys.stderr)
         print(qemu_log.read_text(errors='replace')[-4000:], file=sys.stderr)
         return 1

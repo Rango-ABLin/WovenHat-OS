@@ -1,5 +1,15 @@
 # WovenHat OS Architecture & Codebase Guide
 
+## Stages 1–10 release evidence integrity (2026-10-16)
+
+Memory, storage, live-network and Stage 6 hotplug QEMU gates share
+`scripts/qemu_validation.py`: exact successful exit, line-anchored required
+markers, and rejection of tagged failure/timeout or kernel panic anywhere in
+serial output. Expected user faults remain valid isolation evidence. Negative
+host tests exercise every consumer's imported validator. This changes no kernel
+ABI or lifecycle; full preservation is pending, not release acceptance. See
+the foundation release-validation audit and stages 1–10 release ledger.
+
 ## Stage 19 WovenCalculator (2026-10-14)
 
 `apps/woven-calculator` is a separate Ring-3 crate with a bounded checked

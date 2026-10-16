@@ -5,6 +5,7 @@ from pathlib import Path
 import shutil
 import subprocess
 import sys
+from qemu_validation import validation_errors
 
 
 def main():
@@ -79,7 +80,9 @@ def main():
         ]
     else:
         required = ['[BOOT] ALL VALIDATIONS PASSED', '[S6.PAGING] table allocation rollback: PASSED', '[S6.HEAP] unbounded live metadata: PASSED', '[S6.HEAP] runtime growth: PASSED', '[S6.MEMORY] reclaimed overflow/double-free: PASSED', f'[SMP] online={args.cpus} expected={args.cpus}', '[SMP] scheduler/barrier: PASSED', '[SMP] acknowledged TLB shootdowns: PASSED', '[SMP] remote stale-translation/refree: PASSED', '[SMP] per-CPU timer preemption: PASSED', '[SMP] automatic rebalancing: PASSED', '[SMP] reschedule IPI: PASSED', '[SMP] migration stress: PASSED']
-    if result.returncode != 33 or any(marker not in log for marker in required):
+    errors = validation_errors(result.returncode, log, required)
+    if errors:
+        print('\n'.join(errors), file=sys.stderr)
         print(log[-10000:], file=sys.stderr)
         print(result.stderr, file=sys.stderr)
         return 1

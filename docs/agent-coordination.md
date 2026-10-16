@@ -6,6 +6,15 @@ you start or finish something.
 
 ## Shared rules
 
+**User priority: stages 1–10 release qualification (2026-10-16):** Codex has
+checkpointed the unvalidated Stage 11 planner on separate branch
+`codex/aslr-layout-draft-20261016` (`db49c1a`), not integrated into this baseline.
+The serialized slot now covers foundation release evidence, starting at stages
+1–5. Known guard, storage/recovery and hardware gaps remain release blockers;
+no zero-error or production-ready claim. Codex is hardening legacy foundation
+log validators against contradictory success/failure output before fresh gates.
+Foreign build/acceptance chains remain held; source-only work may continue.
+
 **ASLR CPU failure preserved (2026-10-16):** session 43891 is terminal exit 1
 (QEMU 35). Supported stack=16 / mmap=0 allowed all sixteen full allocations
 and a write to the intended guard: status 99, exact frames 3488/3488. New

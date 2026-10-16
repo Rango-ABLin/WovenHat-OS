@@ -1,5 +1,14 @@
 # Stage status
 
+## Current priority: stages 1–10 release qualification — 2026-10-16
+
+The user requested desktop/laptop release preparation for stages 1–10. See
+[the ordered release ledger](stage1-10-release-readiness.md). No release-ready
+claim is made. The Stage 11 layout draft is preserved separately, not integrated;
+the known guard vulnerability remains a release blocker. Codex is beginning
+with foundation evidence integrity and stages 1–5 validation before later
+closure decisions. Hardware, durability and failure-stress gaps remain explicit.
+
 ## Stage 1–19 production closure review — 2026-10-15
 
 **ASLR guard defect confirmed (2026-10-16):** forced supported stack draw 16 /
