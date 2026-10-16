@@ -1,9 +1,12 @@
+#[rustfmt::skip]
 #[path = "../kernel/src/hal/pci/assignment.rs"]
 mod assignment;
 #[allow(dead_code)]
+#[rustfmt::skip]
 #[path = "../kernel/src/hal/pci/bar.rs"]
 mod bar;
 #[allow(dead_code)]
+#[rustfmt::skip]
 #[path = "../kernel/src/hal/pci/resource.rs"]
 mod resource;
 

@@ -1,4 +1,5 @@
 #[allow(dead_code)]
+#[rustfmt::skip]
 #[path = "../kernel/src/hal/pci/bridge.rs"]
 mod bridge;
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -8,6 +9,7 @@ pub struct Address {
     pub device: u8,
     pub function: u8,
 }
+#[rustfmt::skip]
 #[path = "../kernel/src/hal/pci/bridge_transaction.rs"]
 mod bridge_transaction;
 

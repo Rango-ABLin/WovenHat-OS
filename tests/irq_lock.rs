@@ -33,6 +33,7 @@ pub mod instructions {
         }
     }
 }
+#[rustfmt::skip]
 #[path = "../kernel/src/irq_lock.rs"]
 mod irq_lock;
 use instructions::interrupts;
