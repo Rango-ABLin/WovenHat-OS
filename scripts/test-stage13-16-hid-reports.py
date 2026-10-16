@@ -52,7 +52,13 @@ class Qmp:
         self.file.write(json.dumps(message) + '\n')
         self.file.flush()
         while True:
-            reply = json.loads(self.file.readline())
+            line = self.file.readline()
+            if not line:
+                # QEMU closed the monitor: it exited, possibly because the
+                # guest finished on this very event. Callers decide by the
+                # process state; the exit code and marker still decide the gate.
+                raise ConnectionError(f'{name}: QMP connection closed')
+            reply = json.loads(line)
             if 'return' in reply:
                 return reply['return']
             if 'error' in reply:
