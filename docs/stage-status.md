@@ -1,5 +1,14 @@
 # Stage status
 
+## IPC message receive race (2026-10-16, source fix)
+
+Two threads of one process receiving messages at once could deliver one
+message twice and silently drop the next. Receive peeks, copies out and
+then dequeued whatever was at the head. It now dequeues only the message it
+peeked, using the mailbox's dequeue serial, and a losing thread takes the
+next message. Every boot's IPC self-test covers the race. See the
+[IPC receive race audit](audit-ipc-receive-race-2026-10-16.md).
+
 ## Signal authority and handler validation (2026-10-16, source fix)
 
 The syscall-boundary audit found two more defects, both fixed on PR #80.
