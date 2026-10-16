@@ -1200,6 +1200,10 @@ passed QEMU on 1/2/4 CPUs with exit 33 through `scripts/test-wovenfs-qemu.ps1`,
 a PowerShell port of the Python harnesses for hosts without Python. Physical
 USB qualification was not rerun.
 
+2026-10-16: write and unlink refuse blocks that another live inode also names
+(cross-inode aliasing). The refusal happens on these paths, not only in
+`check()`. See `docs/AUTONOMOUS_PROGRESS.md` for the gate results.
+
 Crash recovery is proven by fault injection, not actual power loss on a device.
 Physical qualification remains incomplete: the inserted USB flash disk was
 inspected read-only, while the destructive harness requires Administrator

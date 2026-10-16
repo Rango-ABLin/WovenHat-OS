@@ -686,6 +686,111 @@ fn an_inode_naming_one_block_twice_is_refused() {
     );
 }
 
+/// Two one-block files, `a.bin` and `b.bin`, and their inode numbers.
+fn two_one_block_files() -> (CrashDisk, u64, u64) {
+    let base = formatted();
+    let (a, b) = {
+        let mut volume = Volume::mount(base.clone()).expect("mount");
+        let a = volume
+            .create_file(1, "a.bin", 0o644, &[1u8; 300], 1)
+            .expect("create a");
+        let b = volume
+            .create_file(1, "b.bin", 0o644, &[2u8; 300], 1)
+            .expect("create b");
+        (a, b)
+    };
+    (base, a, b)
+}
+
+#[test]
+fn a_block_named_by_two_inodes_is_not_rewritten_or_freed() {
+    let (base, a, b) = two_one_block_files();
+    let shared = Volume::mount(base.clone())
+        .expect("mount")
+        .inode(a)
+        .expect("inode a")
+        .direct[0];
+    // Both pointers now name an allocated block, so the bitmap check alone
+    // cannot see the alias; b's own block is leaked, which is harmless here.
+    redirect_inode_block(&base, b, 0, shared);
+    assert_eq!(
+        Volume::mount(base.clone()).expect("mount").check(),
+        Err(Error::Corrupt),
+        "check() must see the alias"
+    );
+
+    // Rewriting either owner overwrites the other's data in place; shrinking
+    // or unlinking either frees a block the other still names.
+    let attempts: [(&str, Attempt); 6] = [
+        ("in-place write of b", |volume, _| {
+            let inode = volume.lookup(1, "b.bin")?.inode;
+            volume.write_file(inode, &[9u8; 300], 2)
+        }),
+        ("in-place write of a", |volume, _| {
+            let inode = volume.lookup(1, "a.bin")?.inode;
+            volume.write_file(inode, &[9u8; 300], 2)
+        }),
+        ("shrinking write of b", |volume, _| {
+            let inode = volume.lookup(1, "b.bin")?.inode;
+            volume.write_file(inode, &[], 2)
+        }),
+        ("shrinking write of a", |volume, _| {
+            let inode = volume.lookup(1, "a.bin")?.inode;
+            volume.write_file(inode, &[], 2)
+        }),
+        ("unlink b", |volume, _| volume.unlink(1, "b.bin", 2)),
+        ("unlink a", |volume, _| volume.unlink(1, "a.bin", 2)),
+    ];
+    for (operation, attempt) in attempts {
+        let image = base.fork(None);
+        let before = image.sectors();
+        let mut volume = Volume::mount(image.clone()).expect("mount");
+        assert_eq!(
+            attempt(&mut volume, b),
+            Err(Error::Corrupt),
+            "{operation}: must refuse a block another inode names"
+        );
+        assert!(
+            image.sectors() == before,
+            "{operation}: a refused operation must not modify the image"
+        );
+    }
+}
+
+#[test]
+fn a_free_block_named_by_a_live_inode_is_not_allocated() {
+    let (base, _, b) = two_one_block_files();
+    let free = {
+        let mut volume = Volume::mount(base.clone()).expect("mount");
+        let sb = *volume.super_block();
+        // The allocator scans the data region upward, so the next block it
+        // hands out is the first one past every live inode's blocks.
+        let used = volume.inode(1).expect("root").direct[0]
+            .max(volume.inode(b).expect("inode b").direct[0]);
+        assert!(used + 1 < sb.total_blocks);
+        used + 1
+    };
+    redirect_inode_block(&base, b, 0, free);
+    let before = base.sectors();
+
+    let mut volume = Volume::mount(base.clone()).expect("mount");
+    assert_eq!(
+        volume.create_file(1, "c.bin", 0o644, &[3u8; 300], 2),
+        Err(Error::Corrupt),
+        "create_file must not take a block b still names"
+    );
+    let a = volume.lookup(1, "a.bin").expect("a").inode;
+    assert_eq!(
+        volume.write_file(a, &[4u8; 900], 2),
+        Err(Error::Corrupt),
+        "a growing write must not take a block b still names"
+    );
+    assert!(
+        base.sectors() == before,
+        "a refused operation must not modify the image"
+    );
+}
+
 /// Rewrite one little-endian field of the superblock in `slot`, re-sealing its
 /// checksum so only the geometry check can catch the change.
 fn reseal_super_field(image: &CrashDisk, slot: usize, at: usize, value: &[u8]) {

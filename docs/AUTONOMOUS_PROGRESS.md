@@ -4,6 +4,76 @@ Each entry is one bounded checkpoint. Entries record exactly what was run.
 Nothing here claims production readiness; completion requires independent
 human review.
 
+## 2026-10-16 — WovenFS: refuse blocks shared by two live inodes
+
+Branch: `auto/wovenhat-development` (base `a720b9e`).
+
+Resumed uncommitted work found in `kernel/src/wfs.rs` and
+`tests/wovenfs_crash.rs`. I reviewed and validated that diff before
+committing. No new work was started. This closes the open item "Cross-inode
+block aliasing" from the previous entry.
+
+### Defect
+
+The bitmap records that a block is allocated, not which inode owns it. Two
+live inodes naming one allocated block passed every per-inode check. A write
+to one owner overwrote the other's data in place, and a shrink or unlink
+freed a block the other still named. A live inode naming a block the bitmap
+marks free was also missed: the allocator could give that block to a new or
+growing file. Only `check()` (test/self-test builds) detected aliasing.
+
+### Change
+
+- `Volume::refuse_shared_blocks(txn, owner, blocks)` scans every inode
+  through the transaction view and returns `Corrupt` if a live inode other
+  than `owner` names any of `blocks`.
+- `stage_write` (used by `write_file` and `create_file`) checks the union of
+  the old and new pointers. That covers blocks rewritten in place, freed, or
+  newly allocated. `unlink` checks the blocks it is about to free. Both run
+  before commit, so a refused operation leaves the image unchanged.
+- Tests: `a_block_named_by_two_inodes_is_not_rewritten_or_freed` (in-place
+  write, shrink and unlink of either owner, image byte-identical after
+  refusal); `a_free_block_named_by_a_live_inode_is_not_allocated`
+  (`create_file` and a growing write).
+- Docs: `wovenfs-on-disk-format.md` integrity section; `stage-status.md`
+  Stage 15 note.
+
+### Results (run on this host, 2026-10-16)
+
+Using project-local `CARGO_BUILD_BUILD_DIR=.cargo-build`,
+`CARGO_TARGET_DIR=target`:
+
+| Command | Result |
+|---|---|
+| `cargo fmt --all -- --check` | PASS |
+| `cargo test --test wovenfs_crash` | PASS, 24 passed / 0 failed |
+| Same tests against `HEAD`'s `wfs.rs` (negative control, working copy restored afterwards) | FAIL as expected: both new tests fail (`create_file` returned `Ok(4)`; in-place write of b returned `Ok(())`), 22 others pass |
+| `cargo test -p wovenhat-os --tests --no-fail-fast` | First attempt: `LNK1104` (Windows could not open the `wovenfs_crash` test exe for linking; host file lock). Rerun: PASS, 134 passed / 0 failed |
+| `cargo clippy --all-targets -- -D warnings` | PASS |
+| `cargo clippy -p wovenhat-kernel --target x86_64-unknown-none -- -D warnings` (default) | PASS |
+| same, `--features stage11-5-test` | PASS |
+| same, `--features stage15-1-test` … `stage15-9-test` (each) | PASS |
+| `scripts/test-wovenfs-qemu.ps1 -Stage 15.1 -Cpus 1/2/4` | PASS, exit 33 each (`wovenfs-stage15.1-{1cpu-20261016-085119-836,2cpu-…-085249-104,4cpu-…-085443-831}`) |
+| `scripts/test-wovenfs-qemu.ps1 -Stage 15.2 -Cpus 1/2/4` | PASS, exit 33 each (`wovenfs-stage15.2-{1cpu-20261016-085640-839,2cpu-…-085840-224,4cpu-…-090034-650}`) |
+
+`audit-artifacts/wovenfs-stage15.1-1cpu-20261016-085103-375` is from a first
+QEMU batch I stopped early because its tool timeout was too short. It has no
+result and is not evidence. No QEMU process was left running.
+
+### Limits / open
+
+- Cost: every write and unlink now reads the whole inode table,
+  O(`inode_count`) reads. That is acceptable at current volume sizes. An
+  in-memory owner map would be needed for larger tables.
+- A corrupt or unreadable inode anywhere in the table now fails every write
+  and unlink closed, not just operations that touch it. This is deliberate:
+  ownership cannot be proven otherwise. There is still no repair (fsck) path.
+- Directory-block aliasing is checked only when the writer is a file inode.
+  `create` stages directory entries without this scan. A file aliasing a
+  directory block is still refused when that file is written or unlinked.
+- `unlink` still ignores `links`. Stage 15.3–15.9 and physical USB
+  qualification were not rerun.
+
 ## 2026-10-15 — WovenFS: PowerShell QEMU harness; Stage 15.1/15.2 rerun
 
 Branch: `auto/wovenhat-development` (base `4e9e236`). The working tree was

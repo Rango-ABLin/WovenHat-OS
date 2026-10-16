@@ -888,6 +888,38 @@ impl<D: BlockDevice> Volume<D> {
         self.stage_bitmap(txn, block, false)
     }
 
+    /// Refuse `blocks` if a live inode other than `owner` names any of them.
+    ///
+    /// The bitmap records only that a block is allocated, not to whom, so two
+    /// inodes naming one allocated block (or a live inode naming a block the
+    /// bitmap calls free, which the allocator may hand out) pass every
+    /// per-inode check. Rewriting such a block in place would overwrite the
+    /// other owner's data, and freeing it would leave the other owner pointing
+    /// at a block the allocator can reuse. The scan reads the inode table
+    /// through `txn`, so inodes staged earlier in the same transaction count.
+    fn refuse_shared_blocks(
+        &mut self,
+        txn: &Transaction,
+        owner: u64,
+        blocks: &[u64],
+    ) -> Result<(), Error> {
+        for number in 1..=u64::from(self.super_block.inode_count) {
+            if number == owner {
+                continue;
+            }
+            let other = self.inode_staged(txn, number)?;
+            if other.is_used()
+                && other
+                    .direct
+                    .iter()
+                    .any(|block| *block != 0 && blocks.contains(block))
+            {
+                return Err(Error::Corrupt);
+            }
+        }
+        Ok(())
+    }
+
     fn allocate_block(&mut self, txn: &mut Transaction) -> Result<u64, Error> {
         let sb = self.super_block;
         for block in sb.data_start..sb.total_blocks {
@@ -1089,6 +1121,9 @@ impl<D: BlockDevice> Volume<D> {
             return Err(Error::NotADirectory);
         }
 
+        // Every block this write rewrites, frees or newly takes.
+        let mut touched = [0u64; 2 * DIRECT_BLOCKS];
+        touched[..DIRECT_BLOCKS].copy_from_slice(&node.direct);
         let needed = data.len().div_ceil(SECTOR_SIZE);
         for slot in 0..DIRECT_BLOCKS {
             if slot < needed {
@@ -1111,6 +1146,9 @@ impl<D: BlockDevice> Volume<D> {
                 node.direct[slot] = 0;
             }
         }
+
+        touched[DIRECT_BLOCKS..].copy_from_slice(&node.direct);
+        self.refuse_shared_blocks(txn, inode, &touched)?;
 
         node.size = data.len() as u64;
         node.modified = now;
@@ -1195,6 +1233,7 @@ impl<D: BlockDevice> Volume<D> {
         if !node.is_used() || node.kind != KIND_FILE {
             return Err(Error::Corrupt);
         }
+        self.refuse_shared_blocks(&txn, entry.inode, &node.direct)?;
         for slot in 0..DIRECT_BLOCKS {
             if node.direct[slot] != 0 {
                 let block = node.direct[slot];

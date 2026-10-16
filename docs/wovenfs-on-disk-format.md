@@ -96,9 +96,16 @@ write that rewrites an existing block in place, and a shrink or unlink that
 frees one, first requires that block's bitmap bit to be set. If the bit is
 clear, the operation fails with `Corrupt` before anything is committed,
 because the allocator may already have handed that block to another inode.
-Two live inodes that both name one allocated block are not detected on these
-paths. Only `check()` finds that, and it is compiled into test and self-test
-builds only.
+The bitmap records that a block is allocated, not which inode owns it, so a
+second check covers two live inodes that name the same block. Before a write
+commits, it fails with `Corrupt` if any other live inode names a block the
+write rewrites in place, frees, or newly allocates. Unlink does the same
+for the blocks it frees. The newly-allocated case catches a live inode that
+names a block the bitmap marks free, which the allocator would otherwise hand
+out. The scan reads every inode through the transaction view, so a write costs
+O(`inode_count`) inode-table reads. Any unreadable or corrupt inode in the
+table therefore fails the write closed. `check()` still runs the full
+whole-volume audit in test and self-test builds.
 
 ### Directory entry (64 bytes, 8 per block)
 
