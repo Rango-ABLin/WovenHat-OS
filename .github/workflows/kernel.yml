@@ -49,6 +49,21 @@ jobs:
           echo "OVMF VARS: $ovmf_vars"
           sha256sum "$ovmf_code" "$ovmf_vars"
           python3 scripts/test-release.py --qemu "$qemu" --firmware "$ovmf_code" --firmware-vars "$ovmf_vars"
+      - name: Stage 1–19 closure baseline and source-integrity preflight
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "Closure baseline: $(git rev-parse HEAD)"
+          test -f docs/stage1-19-closure-gate.md
+          git diff --exit-code -- kernel/src/storage_manager.rs
+          python3 - <<'PY'
+          from pathlib import Path
+          source = Path("kernel/src/storage_manager.rs").read_text()
+          required = "let i = m.iter_mut().position(|x| x.is_none())?;"
+          if required not in source:
+              raise SystemExit("::error::Storage mount slot declaration missing before acceptance")
+          print("Storage mount source-integrity preflight passed")
+          PY
       - name: Stage 1-5 production software gate 1/2/4-core acceptance
         shell: bash
         run: |
@@ -803,7 +818,17 @@ jobs:
             fi
           done
           test -n "$ovmf_code"
+          baseline_storage_sha="$(sha256sum kernel/src/storage_manager.rs | cut -d' ' -f1)"
           for stage in 12.1 12.2 12.3 12.4 12.5; do
+            echo "::group::Stage $stage source integrity"
+            current_storage_sha="$(sha256sum kernel/src/storage_manager.rs | cut -d' ' -f1)"
+            if [ "$current_storage_sha" != "$baseline_storage_sha" ]; then
+              echo "::error::storage_manager.rs changed during acceptance before Stage $stage"
+              git diff -- kernel/src/storage_manager.rs
+              exit 1
+            fi
+            nl -ba kernel/src/storage_manager.rs | sed -n '19,44p'
+            echo "::endgroup::"
             feature="stage${stage/./-}-test"
             cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features "$feature" -- -D warnings
             for cpu in 1 2 4; do

@@ -2427,10 +2427,14 @@ pub extern "C" fn wovenhat_syscall_dispatch(
             0
         }
         value if value == Number::Exit as u64 => crate::task::exit_current_process(arg0 as i32),
-        value if value == Number::ThreadCreate as u64 => crate::task::create_user_thread(arg0, arg1)
-            .map(|id| id.raw())
-            .unwrap_or(SYSCALL_ERROR),
-        value if value == Number::ThreadExit as u64 => crate::task::exit_current_thread(arg0 as i32),
+        value if value == Number::ThreadCreate as u64 => {
+            crate::task::create_user_thread(arg0, arg1)
+                .map(|id| id.raw())
+                .unwrap_or(SYSCALL_ERROR)
+        }
+        value if value == Number::ThreadExit as u64 => {
+            crate::task::exit_current_thread(arg0 as i32)
+        }
         value if value == Number::ThreadJoin as u64 => loop {
             match crate::task::join_user_thread(arg0) {
                 Ok(exit) => break exit as u64,

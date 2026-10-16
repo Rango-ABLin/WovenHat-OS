@@ -225,6 +225,10 @@ on `stage20-14` (`7c608631` observed), plus an uncommitted live-USB script edit.
 Codex preserved that work and waited on live QEMU processes between gates;
 those new Stage 13 commits still require integration review on the shared branch.
 
+**Completed earlier (from `master`):** Fixed the core-foundation CI failure by adding optional OVMF
+VARS-template support to `scripts/test-monitor-qemu.py`; no stage implementation
+or acceptance gates were changed.
+
 Stage 19 system applications (WovenCalculator, WovenTerminal, WovenFiles,
 WovenEditor, …), application signing and packaging, and the release
 validation chain.
