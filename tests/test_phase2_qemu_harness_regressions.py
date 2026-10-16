@@ -1,5 +1,8 @@
 """Regression guards for OVMF VARS isolation and Stage 13.16 QMP shutdown."""
 import ast
+import io
+import runpy
+from types import SimpleNamespace
 from pathlib import Path
 import unittest
 
@@ -27,6 +30,28 @@ class HarnessRegression(unittest.TestCase):
         self.assertIn("process.returncode != 33 or PASS_MARKER not in completed_log", source)
         self.assertIn("if process.returncode != 33:", source)
         self.assertIn("if PASS_MARKER not in log:", source)
+
+    def test_qmp_protocol_responses_and_disconnects(self):
+        # Exercise the actual QMP parser without starting QEMU or opening a socket.
+        module = runpy.run_path(str(ROOT / "scripts" / "test-stage13-16-hid-reports.py"))
+        qmp_type = module["Qmp"]
+        cases = (
+            ('{"return": {}}\\n', None),
+            ('{"event": "STOP"}\\n{"return": {}}\\n', None),
+            ('{"error": {"class": "GenericError", "desc": "rejected"}}\\n', RuntimeError),
+            ('', EOFError),
+            ('not-json\\n', ValueError),
+        )
+        for response, expected_error in cases:
+            with self.subTest(response=response):
+                qmp = qmp_type.__new__(qmp_type)
+                qmp.file = io.StringIO(response)
+                if expected_error:
+                    with self.assertRaises(expected_error):
+                        qmp.command("input-send-event", events=[])
+                else:
+                    self.assertEqual(qmp.command("input-send-event", events=[]), {})
+                self.assertIn('"execute": "input-send-event"', qmp.file.getvalue())
 
 
 if __name__ == "__main__":
