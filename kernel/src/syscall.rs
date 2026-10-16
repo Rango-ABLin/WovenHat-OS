@@ -778,19 +778,26 @@ fn sys_message_receive(user_buffer: u64, capacity: u64, user_sender: u64) -> u64
         return SYSCALL_ERROR;
     };
     let receiver = crate::task::current_process_id();
-    let Ok(message) = crate::ipc::peek(receiver) else {
-        return SYSCALL_ERROR;
-    };
-    if message.payload().len() > capacity
-        || crate::paging::copy_to_current_user(user_buffer, message.payload()).is_err()
-        || crate::paging::copy_to_current_user(user_sender, &message.sender.to_le_bytes()).is_err()
-    {
-        return SYSCALL_ERROR;
+    // Peek, copy out with no lock held (the copy can fault), then dequeue
+    // only that message. If another thread of this process dequeued first,
+    // the copy is stale: take the next message instead.
+    loop {
+        let Ok((message, serial)) = crate::ipc::peek(receiver) else {
+            return SYSCALL_ERROR;
+        };
+        if message.payload().len() > capacity
+            || crate::paging::copy_to_current_user(user_buffer, message.payload()).is_err()
+            || crate::paging::copy_to_current_user(user_sender, &message.sender.to_le_bytes())
+                .is_err()
+        {
+            return SYSCALL_ERROR;
+        }
+        match crate::ipc::receive_if(receiver, serial) {
+            Ok(_) => return message.payload().len() as u64,
+            Err(crate::ipc::Error::QueueEmpty) => continue,
+            Err(_) => return SYSCALL_ERROR,
+        }
     }
-    if crate::ipc::receive(receiver).is_err() {
-        return SYSCALL_ERROR;
-    }
-    message.payload().len() as u64
 }
 
 fn sys_pipe() -> u64 {
