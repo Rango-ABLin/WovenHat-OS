@@ -884,7 +884,7 @@ fn sys_sleep(ticks: u64) -> u64 {
 }
 
 fn sys_kill(pid: u64, sig: u64) -> u64 {
-    match crate::task::kill_process(pid, sig) {
+    match crate::task::kill_process_from_user(pid, sig) {
         Ok(()) => 0,
         Err(_) => SYSCALL_ERROR,
     }
@@ -951,6 +951,11 @@ fn prepare_signal_delivery(frame: *const UserForkFrame) {
         return;
     };
     if frame.is_null() {
+        return;
+    }
+    // `sigaction` admits only executable user addresses; never return to a
+    // non-user RIP, which would fault on `iretq` in ring 0.
+    if crate::user_address::check_user_range(handler, 1).is_err() {
         return;
     }
     let frame = unsafe { &mut *(frame as *mut UserForkFrame) };

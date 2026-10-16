@@ -199,6 +199,14 @@ and a retained report before it can close a production gap.
   - `drivers-radio`: the 13.13/13.16 QMP readers now treat EOF, when
     QEMU exits after the guest passes, as `ConnectionError`. The exit code
     and PASS marker still decide the gate.
+- **Signals (2026-10-16, same PR):**
+  - `kill` from Ring 3 may signal only the caller itself and its own
+    children unless the caller holds `TaskControl`. Kernel callers keep
+    `task::kill_process`.
+  - `sigaction` accepts only 0, 1, or an executable address in the
+    caller's image.
+  - **For Codex:** a Ring-3 test that signals a non-child needs
+    `TaskControl`.
 
 ## Codex: owned work
 

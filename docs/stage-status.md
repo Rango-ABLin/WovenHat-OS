@@ -1,5 +1,22 @@
 # Stage status
 
+## Signal authority and handler validation (2026-10-16, source fix)
+
+The syscall-boundary audit found two more defects, both fixed on PR #80.
+- **Any process could kill any other.** `kill` had no permission check.
+  Ring 3 may now signal only itself and its own children, unless it holds
+  `TaskControl`.
+- **`sigaction` could halt the kernel.** It accepted any handler address.
+  A non-canonical one made `iretq` raise #GP in ring 0, and the kernel
+  halted. Handlers must now be executable code in the caller's own image.
+
+Ring-3 probes in the program every boot runs cover both fixes. See the
+[signal authority audit](audit-syscall-signal-authority-2026-10-16.md).
+
+**Open.** Kernel allocations sized by user arguments are infallible and
+halt the kernel when memory is exhausted. This low-memory follow-up is not
+fixed yet.
+
 ## Syscall user-pointer bounds (2026-10-15, source fix, QEMU pending)
 
 Any Ring-3 process could panic the kernel with one syscall.
