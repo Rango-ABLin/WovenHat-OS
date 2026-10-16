@@ -1,10 +1,34 @@
 """Build and execute WovenMonitor through the signed Ring-3 ABI."""
 
 import argparse
+import re
+import time
 import os
 from pathlib import Path
 import shutil
 import subprocess
+
+
+PASS_MARKER = '[S16.1] out-of-kernel application: PASSED'
+FAILURE_PATTERN = re.compile(
+    r'(?im)(?:\b(?:kernel panic|panicked at|fatal error|assertion failed|'
+    r'FAILED|TEST FAILED|SECURITY VIOLATION)\b|\[S16\.1\].*\bFAIL(?:ED)?\b)'
+)
+
+
+def validate_monitor_result(exit_code: int, serial_text: str) -> bool:
+    """Require the expected exit and a clean, unique standalone pass marker."""
+    lines = [line.strip() for line in serial_text.splitlines()]
+    return (exit_code == 33
+            and lines.count(PASS_MARKER) == 1
+            and FAILURE_PATTERN.search(serial_text) is None)
+
+
+def create_evidence_directory(root: Path, cpus: int, timestamp_ns: int) -> Path:
+    """Never reuse or overwrite the evidence from a previous QEMU run."""
+    output = root / 'audit-artifacts' / f'woven-monitor-{cpus}cpu-{timestamp_ns}'
+    output.mkdir(parents=True, exist_ok=False)
+    return output
 
 
 def main() -> int:
@@ -48,8 +72,7 @@ def main() -> int:
     if boot.returncode:
         print(boot.stdout, boot.stderr)
         return boot.returncode
-    out = root / 'audit-artifacts' / f'woven-monitor-{args.cpus}cpu'
-    out.mkdir(parents=True, exist_ok=True)
+    out = create_evidence_directory(root, args.cpus, time.time_ns())
     serial = out / 'serial.log'
     vars_copy = None
     if firmware_vars is not None:
@@ -71,7 +94,7 @@ def main() -> int:
         print(f'QEMU timeout; evidence: {out}')
         return 1
     text = serial.read_text(errors='replace') if serial.exists() else ''
-    if code != 33 or '[S16.1] out-of-kernel application: PASSED' not in text:
+    if not validate_monitor_result(code, text):
         print(f'WovenMonitor failed (exit {code}); evidence: {out}')
         return 1
     print(f'WovenMonitor: PASS ({args.cpus} CPU, exit 33). Evidence: {out}')
