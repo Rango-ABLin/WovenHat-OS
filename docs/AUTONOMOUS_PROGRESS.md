@@ -4,6 +4,70 @@ Each entry is one bounded checkpoint. Entries record exactly what was run.
 Nothing here claims production readiness; completion requires independent
 human review.
 
+## 2026-10-16 — WovenFS: unlink refuses a file whose link count is not 1
+
+Branch: `auto/wovenhat-development` (base `59bfa08`). The working tree was
+clean at the start, so there was no unfinished work to resume. This closes the
+open item "`unlink` still ignores `links`" carried since the 2026-10-15
+entries.
+
+### Defect
+
+WovenFS has no hard links: create writes `links = 1` and nothing changes it.
+`unlink` never read the field. It freed the blocks of a file inode whose
+checksummed `links` was 0, 2 or anything else. With any count other than 1,
+another name may still reach the inode (or the image is crafted), so freeing
+the blocks could destroy another file's data. `check()` did not flag the count
+either.
+
+### Change
+
+- `unlink` returns `Corrupt` before staging anything if the file inode's
+  `links != 1`. The comment records that adding hard links means
+  decrementing the count instead of freeing.
+- `check()` (test/self-test builds) flags a live file inode with `links != 1`.
+  Directory inodes are not checked: the root is formatted with `links = 2`.
+- Test `unlink_refuses_a_file_whose_link_count_is_not_one`: for `links` = 0, 2
+  and `u32::MAX` (inode checksum re-sealed), `check()` returns `Corrupt`,
+  `unlink` returns `Corrupt` and leaves the image byte-identical, and both
+  files stay readable. Control: a rewritten file keeps `links = 1` and
+  unlinks normally.
+- Docs: `wovenfs-on-disk-format.md` directory-entry section;
+  `stage-status.md` Stage 15 note.
+
+### Results (run on this host, 2026-10-16)
+
+Using project-local `CARGO_BUILD_BUILD_DIR=.cargo-build`,
+`CARGO_TARGET_DIR=target`:
+
+| Command | Result |
+|---|---|
+| `cargo fmt --all -- --check` | PASS (after `cargo fmt --all` reflowed one call in the new test) |
+| `cargo test --test wovenfs_crash` | PASS, 27 passed / 0 failed |
+| Negative control 1: same tests against `HEAD`'s `wfs.rs` | FAIL as expected: new test fails at `links = 0: check() must flag the count` (`left: Ok(())`); 26 others pass |
+| Negative control 2: fixed `wfs.rs` with only the `unlink` `links` condition reverted | FAIL as expected at `links = 0: unlink must not free a file another name may reach` (`left: Ok(())`); 26 others pass. The first attempt hit `LNK1104` and was rerun unchanged. The fixed copy was restored and verified identical with `cmp` after each control |
+| `cargo test -p wovenhat-os --tests --no-fail-fast` | First attempt: `LNK1104` on the `wovenfs_crash` exe (no test process was running). Rerun unchanged: PASS, 137 passed / 0 failed |
+| `cargo clippy --all-targets -- -D warnings` | PASS |
+| `cargo clippy -p wovenhat-kernel --target x86_64-unknown-none -- -D warnings` (default) | PASS |
+| same, `--features stage11-5-test` | PASS |
+| same, `--features stage15-1-test` … `stage15-9-test` (each) | PASS |
+| `scripts/test-wovenfs-qemu.ps1 -Stage 15.1 -Cpus 1/2/4` | PASS, exit 33 each (`wovenfs-stage15.1-{1cpu-20261016-093024-482,2cpu-…-093220-378,4cpu-…-093353-444}`) |
+| `scripts/test-wovenfs-qemu.ps1 -Stage 15.2 -Cpus 1/2/4` | PASS, exit 33 each (`wovenfs-stage15.2-{1cpu-20261016-093520-941,2cpu-…-093711-439,4cpu-…-093902-128}`) |
+
+Evidence directories are under `audit-artifacts/` (Git-ignored, kept
+locally). No QEMU process was left running.
+
+The first negative-control attempt replaced `wfs.rs` through a PowerShell
+pipe, which mangled the file. That run is not evidence. The fixed file was
+restored from a saved copy, and controls were redone with `git show` in bash.
+
+### Limits / open
+
+- Hard links remain unimplemented. Directory link counts are not validated.
+- The O(`inode_count`) ownership scans on write and unlink are unchanged.
+  There is still no repair (fsck) path.
+- Stage 15.3–15.9 QEMU gates and physical USB qualification were not rerun.
+
 ## 2026-10-16 — WovenFS: directory-entry rewrites check block ownership
 
 Branch: `auto/wovenhat-development` (base `5722e0e`). The working tree was

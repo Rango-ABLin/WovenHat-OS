@@ -1238,8 +1238,13 @@ impl<D: BlockDevice> Volume<D> {
         {
             return Err(Error::Corrupt);
         }
+        // WovenFS has no hard links: create writes `links = 1` and nothing
+        // changes it. Any other count means some other name may still reach
+        // the inode (or the image is crafted), and freeing the blocks would
+        // destroy that file's data. Fail closed rather than guess; supporting
+        // hard links later means decrementing here instead of freeing.
         let mut node = self.inode_staged(&txn, entry.inode)?;
-        if !node.is_used() || node.kind != KIND_FILE {
+        if !node.is_used() || node.kind != KIND_FILE || node.links != 1 {
             return Err(Error::Corrupt);
         }
         self.refuse_shared_blocks(&txn, entry.inode, &node.direct)?;
@@ -1257,9 +1262,9 @@ impl<D: BlockDevice> Volume<D> {
         self.commit(&txn)
     }
 
-    /// Verify internal consistency: every block referenced by a live inode is
-    /// marked allocated, every directory entry names a live inode, and no two
-    /// inodes claim the same block.
+    /// Verify internal consistency: every live file inode has one link, every
+    /// block referenced by a live inode is marked allocated, every directory
+    /// entry names a live inode, and no two inodes claim the same block.
     #[cfg(any(test, feature = "stage15-1-test", feature = "stage15-2-test"))]
     pub fn check(&mut self) -> Result<(), Error> {
         let sb = self.super_block;
@@ -1271,6 +1276,9 @@ impl<D: BlockDevice> Volume<D> {
             let node = self.inode(number)?;
             if !node.is_used() {
                 continue;
+            }
+            if node.kind == KIND_FILE && node.links != 1 {
+                return Err(Error::Corrupt);
             }
             for slot in 0..DIRECT_BLOCKS {
                 let block = node.direct[slot];

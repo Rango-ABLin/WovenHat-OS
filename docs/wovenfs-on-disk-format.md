@@ -132,6 +132,13 @@ be left pointing at whatever file next reuses the inode number. The duplicate
 scan covers only the directory being changed. That is sufficient while the
 root is the only directory.
 
+WovenFS has no hard links. Create writes `links = 1` on a file inode and
+nothing changes it, so `unlink` also requires `links == 1`. Any other count
+fails with `Corrupt` before anything is committed. Freeing the blocks of an
+inode that another name might still reach would destroy that file's data.
+`check()` flags such an inode too. Adding hard links would change `unlink` to
+decrement the count and free only at zero.
+
 `read_file` and `write_file` accept only a used inode of kind 1 (file). A
 directory inode fails with `NotADirectory`, the existing wrong-kind error,
 and a free inode fails with `NotFound`. A directory's `data_checksum` is

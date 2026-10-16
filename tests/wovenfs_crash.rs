@@ -1211,3 +1211,71 @@ fn read_file_refuses_a_directory_inode() {
     assert_eq!(volume.read_file(b, &mut out), Ok(5));
     assert_eq!(&out[..5], b"bravo");
 }
+
+/// Set an on-disk inode's `links` field, re-sealing the inode checksum.
+fn reseal_inode_links(image: &CrashDisk, inode: u64, links: u32) {
+    let inode_start = {
+        let volume = Volume::mount(image.clone()).expect("mount");
+        volume.super_block().inode_start
+    };
+    let index = inode - 1;
+    let lba = (inode_start + index / 4) as usize;
+    let offset = (index % 4) as usize * 128;
+    let mut sectors = image.image.borrow_mut();
+    let raw = &mut sectors[lba][offset..offset + 128];
+    raw[4..8].copy_from_slice(&links.to_le_bytes());
+    let checksum = test_fnv1a(&raw[..120]);
+    raw[120..128].copy_from_slice(&checksum.to_le_bytes());
+}
+
+#[test]
+fn unlink_refuses_a_file_whose_link_count_is_not_one() {
+    let (base, _, _) = two_file_root();
+    let (a, b) = {
+        let mut volume = Volume::mount(base.clone()).expect("mount");
+        let a = volume.lookup(1, "a.txt").expect("a.txt").inode;
+        let b = volume.lookup(1, "b.txt").expect("b.txt").inode;
+        assert_eq!(volume.inode(a).expect("inode a").links, 1);
+        (a, b)
+    };
+    for links in [0u32, 2, u32::MAX] {
+        let image = base.fork(None);
+        reseal_inode_links(&image, a, links);
+        assert_eq!(
+            Volume::mount(image.clone()).expect("mount").check(),
+            Err(Error::Corrupt),
+            "links = {links}: check() must flag the count"
+        );
+        let before = image.sectors();
+        let mut volume = Volume::mount(image.clone()).expect("mount");
+        assert_eq!(
+            volume.unlink(1, "a.txt", 2),
+            Err(Error::Corrupt),
+            "links = {links}: unlink must not free a file another name may reach"
+        );
+        assert!(
+            image.sectors() == before,
+            "links = {links}: a refused unlink must not modify the image"
+        );
+        assert_eq!(
+            volume.read_file(a, &mut [0u8; MAX_FILE_SIZE]),
+            Ok(5),
+            "links = {links}: the refused file must stay readable"
+        );
+        assert_eq!(
+            volume.read_file(b, &mut [0u8; MAX_FILE_SIZE]),
+            Ok(5),
+            "links = {links}: other files must stay readable"
+        );
+    }
+
+    // Control: a file written after create keeps one link and unlinks.
+    let image = base.fork(None);
+    let mut volume = Volume::mount(image.clone()).expect("mount");
+    volume.write_file(a, b"rewritten", 2).expect("rewrite a");
+    assert_eq!(volume.inode(a).expect("inode a").links, 1);
+    volume
+        .unlink(1, "a.txt", 3)
+        .expect("unlink a one-link file");
+    mount_consistent(&image, "after a valid unlink");
+}

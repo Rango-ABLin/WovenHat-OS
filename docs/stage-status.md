@@ -1208,6 +1208,10 @@ USB qualification was not rerun.
 file inode names or that the bitmap marks free. See
 `docs/AUTONOMOUS_PROGRESS.md` for the gate results.
 
+2026-10-16: unlink refuses a file inode whose `links` is not 1, and `check()`
+flags one. Hard links do not exist yet, so any other count is corruption.
+See `docs/AUTONOMOUS_PROGRESS.md` for the gate results.
+
 Crash recovery is proven by fault injection, not actual power loss on a device.
 Physical qualification remains incomplete: the inserted USB flash disk was
 inspected read-only, while the destructive harness requires Administrator
