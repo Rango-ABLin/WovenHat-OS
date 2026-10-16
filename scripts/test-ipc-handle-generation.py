@@ -124,6 +124,13 @@ mod tests {
 '''
 
 
+def create_evidence_directory(root: Path, timestamp_ns: int) -> Path:
+    """Create a unique probe directory without overwriting prior evidence."""
+    output = root / 'audit-artifacts' / f'ipc-generation-probe-{timestamp_ns}'
+    output.mkdir(parents=True, exist_ok=False)
+    return output
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--expected-source-sha256', required=True)
@@ -149,8 +156,7 @@ def main():
         section(text, '#[derive(Clone, Copy)]\nstruct HandleEntry {',
                 '#[derive(Clone, Copy, PartialEq, Eq)]\nstruct ServiceName {'),
     ])
-    output = root / 'audit-artifacts' / f'ipc-generation-probe-{time.time_ns()}'
-    output.mkdir(parents=True)
+    output = create_evidence_directory(root, time.time_ns())
     rust = output / 'ipc-allocator.rs'
     rust.write_text('const MAX_HANDLES: usize = 16;\n' + PRELUDE + extracted + TESTS, encoding='utf-8')
     binary = output / 'ipc-allocator-tests.exe'
