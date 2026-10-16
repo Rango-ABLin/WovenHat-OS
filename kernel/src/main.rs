@@ -7616,10 +7616,14 @@ fn stage20_6_self_test() -> bool {
     if !step("the launcher panel is translucent over a window and its shadow", panel) {
         return false;
     }
-    // The pointer stays on top of the panel.
+    // The pointer stays on top of the panel. The shell presents each layer
+    // separately (panel, then cursor), so poll for the settled frame as the
+    // checks above do; a single read can land between the two presents.
     if !step(
         "the pointer is drawn above the panel",
-        compositor::pixel(100, 340) == Ok(BLACK) && compositor::pixel(101, 342) == Ok(WHITE),
+        until(500, || {
+            compositor::pixel(100, 340) == Ok(BLACK) && compositor::pixel(101, 342) == Ok(WHITE)
+        }),
     ) {
         return false;
     }
