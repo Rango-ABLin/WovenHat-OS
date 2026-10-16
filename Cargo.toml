@@ -23,9 +23,13 @@ stage10-8-test = ["qemu-test", "kernel/stage10-8-test"]
 stage10-9-test = ["qemu-test", "kernel/stage10-9-test"]
 stage11-1-test = ["qemu-test", "kernel/stage11-1-test"]
 stage11-2-test = ["qemu-test", "kernel/stage11-2-test"]
+stage11-exit-status-test = ["qemu-test", "kernel/stage11-exit-status-test"]
 stage11-3-test = ["qemu-test", "kernel/stage11-3-test"]
 stage11-4-test = ["qemu-test", "kernel/stage11-4-test"]
 stage11-5-test = ["qemu-test", "kernel/stage11-5-test"]
+stage11-compiler-test = ["stage11-5-test", "kernel/stage11-compiler-test"]
+stage11-tls-test = ["stage11-2-test", "kernel/stage11-tls-test"]
+stage11-aslr-test = ["stage11-2-test", "kernel/stage11-aslr-test"]
 stage12-1-test = ["qemu-test", "kernel/stage12-1-test"]
 stage12-2-test = ["qemu-test", "kernel/stage12-2-test"]
 stage12-3-test = ["qemu-test", "kernel/stage12-3-test"]
@@ -44,6 +48,14 @@ stage13-10-test = ["qemu-test", "kernel/stage13-10-test"]
 stage13-12-test = ["qemu-test", "kernel/stage13-12-test"]
 stage13-13-test = ["qemu-test", "stage13-12-test", "kernel/stage13-13-test"]
 stage13-14-test = ["qemu-test", "stage13-12-test", "kernel/stage13-14-test"]
+stage13-15-test = ["qemu-test", "stage13-12-test", "kernel/stage13-15-test"]
+stage13-16-test = ["qemu-test", "stage13-12-test", "kernel/stage13-16-test"]
+stage13-17-test = ["qemu-test", "stage13-12-test", "kernel/stage13-17-test"]
+stage13-18-test = ["qemu-test", "stage13-12-test", "kernel/stage13-18-test"]
+stage13-19-test = ["qemu-test", "stage13-12-test", "kernel/stage13-19-test"]
+stage13-20-test = ["qemu-test", "stage13-12-test", "kernel/stage13-20-test"]
+stage13-20b-test = ["qemu-test", "stage13-20-test", "kernel/stage13-20b-test"]
+stage20-15-test = ["qemu-test", "stage13-12-test", "kernel/stage20-15-test"]
 stage14-1-test = ["network-test", "kernel/stage14-1-test"]
 stage14-2-test = ["network-test", "kernel/stage14-1-test", "kernel/stage14-2-test"]
 stage14-3-test = ["network-test", "kernel/stage14-3-test"]
@@ -94,10 +106,19 @@ stage20-9-test = ["qemu-test", "kernel/stage20-9-test"]
 stage20-10-test = ["qemu-test", "kernel/stage20-10-test"]
 stage20-11-test = ["qemu-test", "kernel/stage20-11-test"]
 stage20-12-test = ["qemu-test", "kernel/stage20-12-test"]
+stage20-13-test = ["qemu-test", "kernel/stage20-13-test"]
+stage20-14-test = ["qemu-test", "kernel/stage20-14-test"]
+stage20-14b-test = ["qemu-test", "kernel/stage20-14b-test"]
 stage1-5-test = ["qemu-test", "kernel/stage1-5-test"]
 
 [profile.dev]
 panic = "abort"
+
+# Boot measurement hashes the complete kernel ELF before device/task startup.
+# Debug software SHA-256 otherwise dominates TCG boot time as debug ELF grows.
+# Preserve measurement coverage and crypto checks with the normal gate bounds.
+[profile.dev.package.sha2]
+opt-level = 3
 
 [package]
 name = "wovenhat-os"

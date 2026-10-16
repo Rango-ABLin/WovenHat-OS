@@ -1,0 +1,2 @@
+# Keep this acceptance-frozen Rust source byte-stable on Windows.
+/kernel/src/thread.rs text eol=lf

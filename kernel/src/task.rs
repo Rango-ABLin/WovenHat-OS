@@ -713,6 +713,77 @@ pub enum ThreadJoinError {
     MappingFailed,
 }
 
+/// Cancel an owned sibling thread without tearing down its process.
+///
+/// The target remains joinable until `join_user_thread` reclaims its private
+/// stack/TLS mappings. Running targets are retired at scheduler hand-off;
+/// non-running targets are retired while the scheduler lock protects their
+/// state, so they cannot be selected after the registry becomes Exited.
+pub fn cancel_user_thread(raw_id: u64, exit_code: i32) -> Result<(), ThreadJoinError> {
+    let owner = current_process_id();
+    let id = crate::thread::ThreadId::from_raw(raw_id);
+    match crate::thread::joinable(owner, id) {
+        Ok(false) => {}
+        Ok(true) => return Err(ThreadJoinError::Invalid),
+        Err(crate::thread::JoinError::Invalid) => return Err(ThreadJoinError::Invalid),
+        Err(crate::thread::JoinError::NotOwner) => return Err(ThreadJoinError::NotOwner),
+        Err(crate::thread::JoinError::Running) => return Err(ThreadJoinError::Running),
+    }
+    if current_thread_id() == Some(id) {
+        return Err(ThreadJoinError::Invalid);
+    }
+
+    let mut immediate_release = None;
+    let mut immediate_thread = None;
+    let reschedule_cpu;
+    {
+        let mut scheduler = SCHEDULER.lock();
+        let Some(slot) = scheduler.tasks.iter().position(|task| {
+            task.thread_id == Some(id)
+                && task.process_id.as_u64() == owner
+                && !matches!(task.state, TaskState::Empty | TaskState::Dead)
+        }) else {
+            return Err(ThreadJoinError::Invalid);
+        };
+        let task_id = scheduler.tasks[slot].id;
+        scheduler.tasks[slot].thread_exit_code = exit_code;
+        scheduler.tasks[slot].termination_signal = u8::MAX;
+        reschedule_cpu = scheduler.tasks[slot].cpu;
+        match scheduler.tasks[slot].state {
+            TaskState::Ready | TaskState::Blocked | TaskState::Sleeping => {
+                scheduler.tasks[slot].state = TaskState::Dead;
+                scheduler.tasks[slot].name = "thread-canceled";
+                scheduler.tasks[slot].termination_signal = 0;
+                scheduler.task_count = scheduler.task_count.saturating_sub(1);
+                immediate_thread = Some(id);
+                immediate_release = Some(task_id);
+            }
+            TaskState::Running | TaskState::Switching => {}
+            TaskState::Empty | TaskState::Dead => return Err(ThreadJoinError::Invalid),
+        }
+    }
+    if let Some(task_id) = immediate_release {
+        release_task_runtime_resources(task_id);
+    }
+    if let Some(thread_id) = immediate_thread {
+        if !crate::thread::terminate(thread_id, exit_code) {
+            return Err(ThreadJoinError::Invalid);
+        }
+        if let Some(waiter) = crate::thread::take_waiter(thread_id) {
+            let mut scheduler = SCHEDULER.lock();
+            let (found, cpu) = scheduler.signal_event_locked(TaskId::from_u64(waiter));
+            drop(scheduler);
+            if found {
+                if let Some(cpu) = cpu {
+                    crate::smp::reschedule_cpu(cpu);
+                }
+            }
+        }
+    }
+    let _ = crate::smp::reschedule_cpu(reschedule_cpu);
+    Ok(())
+}
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum WaitError {
     NoSuchChild,
@@ -1593,20 +1664,20 @@ pub fn create_user_thread(
 
     let stack = userspace::map_anonymous(address_space, stack_slot, stack_size, true)
         .ok_or(ThreadError::MappingFailed)?;
-    let tls = if has_tls {
+    let (tls, tls_base) = if has_tls {
         let Some(slot) = tls_slot else {
             let _ = userspace::unmap_anonymous(address_space, stack);
             return Err(ThreadError::MappingFailed);
         };
         match userspace::clone_initial_tls(address_space, slot) {
-            Some(mapping) => Some(mapping),
+            Some((mapping, pointer)) => (Some(mapping), pointer),
             None => {
                 let _ = userspace::unmap_anonymous(address_space, stack);
                 return Err(ThreadError::MappingFailed);
             }
         }
     } else {
-        None
+        (None, 0)
     };
 
     let thread_id = match crate::thread::create(process_id.as_u64()) {
@@ -1647,9 +1718,6 @@ pub fn create_user_thread(
     };
     let task_id = TaskId(NEXT_TASK_ID.fetch_add(1, Ordering::Relaxed));
     let stack_top = stack.address.saturating_add(stack.size as u64);
-    let tls_base = tls.map_or(0, |mapping| {
-        mapping.address.saturating_add(mapping.size as u64)
-    });
     let context = prepare_user_context_with_tls(entry as usize, stack_top as usize, tls_base);
 
     let mut scheduler = SCHEDULER.lock();
@@ -1870,7 +1938,12 @@ pub fn exit_current_thread(exit_code: i32) -> ! {
     feature = "stage20-9-test",
     feature = "stage20-10-test",
     feature = "stage20-11-test",
-    feature = "stage20-12-test"
+    feature = "stage20-12-test",
+    feature = "stage13-15-test",
+    feature = "stage20-13-test",
+    feature = "stage20-14b-test",
+    feature = "stage20-15-test",
+    feature = "system-apps"
 ))]
 pub fn spawn_user_system_service(
     name: &'static str,
@@ -2869,10 +2942,15 @@ pub fn exit_current_process(exit_code: i32) -> ! {
     crate::terminal::release_foreground(exiting_pid);
     crate::network::close_process_sockets(exiting_pid);
     x86_64::instructions::interrupts::disable();
-    let (context_switch_result, mut detached_files) = {
+    let mut retired_threads = [None; MAX_TASKS];
+    let mut retired_thread_count = 0;
+    let mut retired_tasks = [TaskId::from_u64(0); MAX_TASKS];
+    let mut retired_task_count = 0;
+    let (context_switch_result, mut detached_files, exiting_thread) = {
         let mut scheduler = SCHEDULER.lock();
         let slot = scheduler.current_slot[crate::smp::cpu_index()];
         let task_id = scheduler.tasks[slot].id;
+        let exiting_thread = scheduler.tasks[slot].thread_id;
         assert!(
             task_id != KERNEL_TASK_ID,
             "kernel task cannot exit as a process"
@@ -2895,11 +2973,49 @@ pub fn exit_current_process(exit_code: i32) -> ! {
         crate::user_graphics::release_owner(exiting_pid);
         // A compositor lease holder that exits hands the display back.
         crate::compositor::release_owner(exiting_pid);
-        // Reclaim all registry records before the process becomes a zombie;
-        // generation advancement invalidates handles held by the exiting task.
-        crate::thread::reap_owner(exiting_pid);
         crate::notifications::discard_recipient(exiting_pid);
 
+        // Retire every sibling before publishing the zombie.  The process
+        // address space must remain alive until these scheduler hand-offs
+        // finish; otherwise a sibling running on another CPU could return
+        // through a page table that the leader has already destroyed.
+        for slot in 0..scheduler.tasks.len() {
+            let (sibling_id, sibling_process, sibling_state, sibling_thread) = {
+                let sibling = &scheduler.tasks[slot];
+                (sibling.id, sibling.process_id.as_u64(), sibling.state, sibling.thread_id)
+            };
+            if sibling_id == task_id || sibling_process != exiting_pid {
+                continue;
+            }
+            match sibling_state {
+                TaskState::Ready | TaskState::Blocked | TaskState::Sleeping => {
+                    if let Some(thread_id) = sibling_thread {
+                        if retired_thread_count < retired_threads.len() {
+                            retired_threads[retired_thread_count] = Some(thread_id);
+                            retired_thread_count += 1;
+                        }
+                    }
+                    scheduler.tasks[slot].state = TaskState::Dead;
+                    scheduler.tasks[slot].name = "process-exit";
+                    scheduler.tasks[slot].termination_signal = 0;
+                    scheduler.tasks[slot].thread_id = None;
+                    scheduler.task_count = scheduler.task_count.saturating_sub(1);
+                    if retired_task_count < retired_tasks.len() {
+                        retired_tasks[retired_task_count] = sibling_id;
+                        retired_task_count += 1;
+                    }
+                }
+                TaskState::Running | TaskState::Switching => {
+                    if sibling_thread.is_some() {
+                        scheduler.tasks[slot].thread_exit_code = exit_code;
+                        scheduler.tasks[slot].termination_signal = u8::MAX;
+                    } else {
+                        scheduler.tasks[slot].termination_signal = 1;
+                    }
+                }
+                TaskState::Dead | TaskState::Empty => {}
+            }
+        }
         // Interrupts are already disabled here. Use the same process-table
         // guard as every other path so the lock's IRQ-safety contract is not
         // bypassed during process teardown. Lock order is SCHEDULER ->
@@ -2915,17 +3031,11 @@ pub fn exit_current_process(exit_code: i32) -> ! {
                 // Detach open files while PROCESS_TABLE is held, then release
                 // their VFS/pipe references after this guard is dropped.
                 detached_files = core::mem::take(&mut process.files);
-                let address_space = process.address_space.take();
-                let memory_mappings = if address_space.is_some() {
-                    let memory_mappings = core::mem::replace(
-                        &mut process.memory_mappings,
-                        [None; userspace::MAX_ANONYMOUS_MAPPINGS],
-                    );
-                    Some(memory_mappings)
-                } else {
-                    None
-                };
-                (address_space, memory_mappings)
+                // Keep the address space and mappings in the zombie until
+                // wait_process observes that every sibling is dead.  This is
+                // the ownership boundary that makes cross-CPU thread exit
+                // safe.
+                ((), ())
             });
 
         scheduler.tasks[slot].state = TaskState::Dead;
@@ -2933,33 +3043,36 @@ pub fn exit_current_process(exit_code: i32) -> ! {
         scheduler.task_count = scheduler.task_count.saturating_sub(1);
 
         (
-            address_space_result.and_then(|(address_space, memory_mappings)| {
-                address_space.map(|address_space| {
-                    (
-                        scheduler.prepare_switch(),
-                        address_space,
-                        memory_mappings.unwrap_or([None; userspace::MAX_ANONYMOUS_MAPPINGS]),
-                    )
-                })
-            }),
+            address_space_result.map(|_| scheduler.prepare_switch()),
             detached_files,
+            exiting_thread,
         )
     };
+    for sibling in retired_tasks.into_iter().take(retired_task_count) {
+        release_task_runtime_resources(sibling);
+    }
     release_file_table(&mut detached_files);
+    if let Some(thread_id) = exiting_thread {
+        let _ = crate::thread::terminate(thread_id, exit_code);
+        let _ = crate::thread::take_waiter(thread_id);
+    }
+    for thread_id in retired_threads.into_iter().take(retired_thread_count).flatten() {
+        let _ = crate::thread::terminate(thread_id, exit_code);
+        if let Some(waiter) = crate::thread::take_waiter(thread_id) {
+            let mut scheduler = SCHEDULER.lock();
+            let (found, cpu) = scheduler.signal_event_locked(TaskId::from_u64(waiter));
+            drop(scheduler);
+            if found {
+                if let Some(cpu) = cpu {
+                    crate::smp::reschedule_cpu(cpu);
+                }
+            }
+        }
+    }
 
-    if let Some((context_switch, address_space, memory_mappings)) = context_switch_result {
+    if let Some(context_switch) = context_switch_result {
         if let Some(context_switch) = context_switch {
             paging::switch_to(context_switch.next_address_space);
-            for mapping in memory_mappings.into_iter().flatten() {
-                assert!(
-                    userspace::unmap_anonymous(address_space, mapping),
-                    "failed to release exiting process mapping"
-                );
-            }
-            assert!(
-                userspace::destroy(address_space),
-                "failed to release exiting process address space"
-            );
             unsafe { switch_stacks(context_switch) };
         }
     } else {
@@ -2972,9 +3085,41 @@ pub fn exit_current_process(exit_code: i32) -> ! {
         x86_64::instructions::hlt();
     }
 }
+
+fn process_has_live_tasks(process_id: u64) -> bool {
+    let scheduler = SCHEDULER.lock();
+    scheduler.tasks.iter().any(|task| {
+        task.process_id.as_u64() == process_id
+            && matches!(
+                task.state,
+                TaskState::Ready
+                    | TaskState::Running
+                    | TaskState::Switching
+                    | TaskState::Blocked
+                    | TaskState::Sleeping
+            )
+    })
+}
+
 pub fn wait_process(child_id: u64) -> Result<i32, WaitError> {
     let parent = ProcessId(current_process_id());
     let child = ProcessId(child_id);
+    {
+        // Classify only an owned child as running. Release PROCESS_TABLE before
+        // inspecting scheduler state: the scheduler is lower-ranked. A sibling
+        // waiter may reap meanwhile, so the final transaction rechecks ownership.
+        let processes = process_table_lock();
+        if !processes
+            .iter()
+            .flatten()
+            .any(|process| process.id == child && process.parent == parent)
+        {
+            return Err(WaitError::NoSuchChild);
+        }
+    }
+    if process_has_live_tasks(child_id) {
+        return Err(WaitError::StillRunning);
+    }
     let (exit_code, deferred_space, mut detached_files) = {
         let mut processes = process_table_lock();
         let Some(slot) = processes.iter().position(
@@ -2999,6 +3144,9 @@ pub fn wait_process(child_id: u64) -> Result<i32, WaitError> {
         (exit_code, deferred_space, detached_files)
     };
 
+    // Reclaim generation-tagged thread records only after PROCESS_TABLE is
+    // released; the thread registry is lower-ranked than that table.
+    crate::thread::reap_owner(child_id);
     release_file_table(&mut detached_files);
     assert!(
         ipc::unregister(child.as_u64()).is_ok(),
@@ -3757,6 +3905,21 @@ pub fn mkdir_path(path: &str) -> Result<(), FileError> {
     }
     if is_mnt_child(&path) {
         ensure_mnt_parent(&path)?;
+    }
+    if path.starts_with("/wfs/") {
+        if vfs::stat(&path).is_ok() {
+            return Err(FileError::AlreadyExists);
+        }
+        crate::wfs::mkdir_vfs_path(&path, crate::timer::ticks())
+            .map_err(map_wfs_file_error)?;
+        if let Err(error) = vfs::mkdir(&path) {
+            // Native WovenFS is authoritative. If the bounded VFS registry
+            // cannot publish the node, remove the just-created native entry
+            // before returning so the two namespaces do not diverge.
+            let _ = crate::wfs::unlink_vfs_path(&path, crate::timer::ticks());
+            return Err(map_vfs_file_error(error));
+        }
+        return Ok(());
     }
     match vfs::mkdir(&path) {
         Ok(()) => {}
@@ -5311,7 +5474,6 @@ fn complete_process_termination(
     // keeping them outside PROCESS_TABLE makes the global lock order explicit.
     crate::terminal::release_foreground(process_id.as_u64());
     crate::network::close_process_sockets(process_id.as_u64());
-    crate::thread::reap_owner(process_id.as_u64());
     crate::notifications::discard_recipient(process_id.as_u64());
     crate::completion_port::release_owner(process_id.as_u64());
     crate::async_events::release_owner(process_id.as_u64());
@@ -5344,15 +5506,18 @@ fn release_task_runtime_resources(task_id: TaskId) {
 /// SIGKILL)`), acknowledge it before returning to ring 3. Remote running tasks
 /// are retired by the scheduler hand-off path instead.
 pub fn honor_current_termination_request() {
-    let signal = {
+    let (signal, thread_exit_code, is_thread) = {
         let scheduler = SCHEDULER.lock();
         if scheduler.task_count == 0 {
-            0
+            (0, 0, false)
         } else {
-            scheduler.tasks[scheduler.current_slot[crate::smp::cpu_index()]].termination_signal
+            let task = &scheduler.tasks[scheduler.current_slot[crate::smp::cpu_index()]];
+            (task.termination_signal, task.thread_exit_code, task.thread_id.is_some())
         }
     };
-    if signal != 0 {
+    if signal == u8::MAX && is_thread {
+        exit_current_thread(thread_exit_code);
+    } else if signal != 0 {
         exit_current_process(128 + i32::from(signal));
     }
 }
@@ -5368,7 +5533,43 @@ pub fn child_count(parent: ProcessId) -> usize {
         .count()
 }
 
+/// Who is sending a signal. The kernel (its own self-tests, the kernel shell
+/// after its `TaskControl` check) may signal any process. A Ring-3 caller may
+/// signal itself and its own children; anything else needs `TaskControl`.
+#[derive(Clone, Copy)]
+enum SignalSender {
+    Kernel,
+    User { caller: u64, task_control: bool },
+}
+
+impl SignalSender {
+    fn may_signal(self, target: &Process) -> bool {
+        match self {
+            Self::Kernel => true,
+            Self::User {
+                caller,
+                task_control,
+            } => task_control || target.id.as_u64() == caller || target.parent.as_u64() == caller,
+        }
+    }
+}
+
 pub fn kill_process(pid: u64, sig: u64) -> Result<(), FileError> {
+    signal_processes(pid, sig, SignalSender::Kernel)
+}
+
+/// `kill` from Ring 3. Each selected process is checked separately, as POSIX
+/// does for process groups. Processes the caller may not signal are skipped;
+/// if every match is refused, the call fails with `PermissionDenied`.
+pub fn kill_process_from_user(pid: u64, sig: u64) -> Result<(), FileError> {
+    let sender = SignalSender::User {
+        caller: current_process_id(),
+        task_control: current_has(crate::capability::Capability::TaskControl),
+    };
+    signal_processes(pid, sig, sender)
+}
+
+fn signal_processes(pid: u64, sig: u64, sender: SignalSender) -> Result<(), FileError> {
     if sig > 31 {
         return Err(FileError::NotFound);
     }
@@ -5392,6 +5593,7 @@ pub fn kill_process(pid: u64, sig: u64) -> Result<(), FileError> {
         None
     };
     let mut matched = false;
+    let mut refused = false;
     let mut termination_requests = alloc::vec::Vec::new();
     for process in processes.iter_mut().flatten() {
         let selected = if let Some(group) = target_group {
@@ -5400,6 +5602,10 @@ pub fn kill_process(pid: u64, sig: u64) -> Result<(), FileError> {
             process.id.as_u64() == pid
         };
         if !selected {
+            continue;
+        }
+        if !sender.may_signal(process) {
+            refused = true;
             continue;
         }
         matched = true;
@@ -5448,6 +5654,8 @@ pub fn kill_process(pid: u64, sig: u64) -> Result<(), FileError> {
 
     if matched {
         Ok(())
+    } else if refused {
+        Err(FileError::PermissionDenied)
     } else {
         Err(FileError::NotFound)
     }
@@ -5466,6 +5674,16 @@ pub fn sigaction_current(sig: u64, handler: u64) -> Result<u64, FileError> {
         .flatten()
         .find(|p| p.id.as_u64() == process_id)
         .ok_or(FileError::NoProcess)?;
+    // A handler becomes the user RIP that `iretq` returns to. A non-canonical
+    // value faults in ring 0 and halts the kernel, so accept only addresses
+    // inside the caller's own executable image, as thread entry points are.
+    if handler > 1
+        && !process
+            .address_space
+            .is_some_and(|space| space.contains_executable(handler))
+    {
+        return Err(FileError::PermissionDenied);
+    }
     let slot = &mut process.signal_actions[sig as usize];
     let old = *slot;
     *slot = handler;
@@ -5595,8 +5813,23 @@ pub fn rename_current(old: &str, new: &str) -> Result<(), FileError> {
         ensure_mnt_parent(&new)?;
         vfs::can_rename(&old, &new).map_err(map_vfs_file_error)?;
         crate::storage::rename_path(&old, &new).map_err(map_mutation_file_error)?;
+    } else if old.starts_with("/wfs/") || new.starts_with("/wfs/") {
+        if !old.starts_with("/wfs/") || !new.starts_with("/wfs/") {
+            return Err(FileError::NotFound);
+        }
+        vfs::can_rename(&old, &new).map_err(map_vfs_file_error)?;
+        crate::wfs::rename_vfs_path(&old, &new, crate::timer::ticks())
+            .map_err(map_wfs_file_error)?;
     }
-    vfs::rename(&old, &new).map_err(map_vfs_file_error)
+    match vfs::rename(&old, &new).map_err(map_vfs_file_error) {
+        Ok(()) => Ok(()),
+        Err(error) if old.starts_with("/wfs/") && new.starts_with("/wfs/") => {
+            // Restore the native name if the in-memory publication failed.
+            let _ = crate::wfs::rename_vfs_path(&new, &old, crate::timer::ticks());
+            Err(error)
+        }
+        Err(error) => Err(error),
+    }
 }
 fn ensure_existing_mnt_path(path: &str) -> Result<(), FileError> {
     if touches_mnt(path) {
@@ -5666,7 +5899,6 @@ fn map_wfs_file_error(error: crate::wfs::Error) -> FileError {
         crate::wfs::Error::Exists => FileError::AlreadyExists,
         crate::wfs::Error::TooLarge | crate::wfs::Error::NoSpace => FileError::TooManyFiles,
         crate::wfs::Error::NotADirectory => FileError::NotFound,
-        #[cfg(any(test, feature = "stage15-1-test", feature = "stage15-2-test"))]
         crate::wfs::Error::NotEmpty => FileError::NotEmpty,
         _ => FileError::NotFound,
     }

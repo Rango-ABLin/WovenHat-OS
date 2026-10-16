@@ -83,6 +83,14 @@ APPS = (
         "install_path": "/bin/wovenhat-update",
         "exec": "/bin/wovenhat-update",
     },
+    {
+        "id": "woven-store",
+        "directory": "woven-store",
+        "binary": "wovenhat-store",
+        "display_name": "WovenStore",
+        "install_path": "/bin/wovenhat-store",
+        "exec": "/bin/wovenhat-store",
+    },
 )
 
 

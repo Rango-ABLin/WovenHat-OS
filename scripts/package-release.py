@@ -16,6 +16,15 @@ required = {'lint-kernel', 'lint-host', 'legacy-pic', 'build-release', 'shell-sm
             'test-buffer_cache', 'test-file_mapping', 'test-page_cache'}
 required |= {f'{suite}-{cpus}-debug' for suite in ('memory', 'storage') for cpus in (1, 2, 4)}
 required |= {f'{suite}-4-release' for suite in ('memory', 'storage')}
+apps = ('woven-calculator', 'woven-terminal', 'woven-files', 'woven-monitor',
+        'woven-settings', 'woven-security', 'woven-editor', 'woven-images',
+        'woven-update', 'woven-store')
+required |= {f'lint-app-{app}' for app in apps}
+required |= {f'{app.removeprefix("woven-")}-{cpus}'
+             for app in apps if app not in ('woven-calculator', 'woven-terminal', 'woven-files')
+             for cpus in (1, 2, 4)}
+required |= {f'system-app-catalog-{cpus}' for cpus in (1, 2, 4)}
+required.add('system-apps-boot')
 if not required <= {item['check'] for item in checks} or not all(item['passed'] for item in checks):
     raise SystemExit('Release gates are incomplete or failed.')
 sha = lambda path: hashlib.sha256(path.read_bytes()).hexdigest()
@@ -26,7 +35,7 @@ current_sources += list((root / 'kernel' / 'src').rglob('*.rs')) + list((root / 
 current_sources += list((root / 'src').rglob('*.rs'))
 current_sources += list((root / 'libwoven' / 'src').rglob('*.rs'))
 current_sources += list((root / 'tools' / 'wapp-packager').rglob('*.rs'))
-for app in ('woven-calculator', 'woven-terminal', 'woven-files', 'woven-monitor'):
+for app in apps:
     app_root = root / 'apps' / app
     current_sources += [path for path in app_root.rglob('*') if path.is_file() and path.suffix in {'.rs', '.toml', '.x', '.S'}]
 current_sources += list((root / 'scripts').glob('*.py'))

@@ -30,7 +30,10 @@ def clippy(args):
                '--', '-D', 'warnings']
     r = subprocess.run(command, cwd=ROOT, capture_output=True, text=True)
     missing = re.findall(r'environment variable `(WOVENHAT_[A-Z_]+)` not defined', r.stderr)
-    if r.returncode and missing and not re.search(r'^error(\[E\d+\])?: (?!environment variable|could not compile)', r.stderr, re.M):
+    # A build-time check that names a required signing key is the same kind of
+    # missing input as an image.
+    missing += re.findall(r'requires (WOVENHAT_[A-Z_]+)', r.stderr)
+    if r.returncode and missing and not re.search(r'^error(\[E\d+\])?: (?!environment variable|could not compile|evaluation panicked: [a-z-]+ requires WOVENHAT_)', r.stderr, re.M):
         return 'needs-image', sorted(set(missing))
     errors = [l for l in r.stderr.splitlines() if l.startswith('error')][:3]
     return ('ok' if r.returncode == 0 else 'FAIL'), errors

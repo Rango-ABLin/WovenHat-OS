@@ -347,6 +347,8 @@ pub enum Number {
     ThreadSetTls = 134,
     /// -> TLS base value or ERROR
     ThreadGetTls = 135,
+    /// thread handle, exit status -> 0 or ERROR; cancels an owned sibling
+    ThreadCancel = 136,
     /// own handle, packed destination and opacity (x | y<<24 | opacity<<56,
     /// x and y 24-bit signed, bits 48..56 zero), packed source region -> 0 or
     /// ERROR
@@ -357,6 +359,25 @@ pub enum Number {
     /// own handle, packed destination (x | y<<32), packed source region ->
     /// 0 or ERROR; source pixels equal to the transparent key are skipped
     GraphicsCompositorBlitKeyed = 202,
+    /// out *AudioInfo (sample_rate u32, max_bytes u32, playback u8, capture
+    /// u8, channels u8, bits u8) -> 1, or ERROR if there is no audio output
+    AudioInfo = 203,
+    /// pcm, length (48 kHz 16-bit stereo, whole frames, <= max_bytes) ->
+    /// bytes played once playback has finished; needs AudioPlayback
+    AudioPlay = 204,
+    /// volume percent (0 mutes) -> the amplifier gain set; needs
+    /// AudioPlayback
+    AudioSetVolume = 205,
+    /// deadline, user array of `{object, kind, mask}` records, count -> ready
+    /// mask or 0 on timeout. `kind` is 0 for timer and 1 for event.
+    WaitAnyObjects = 206,
+    /// out *[x u32, y u32, width u32, height u32; 4] -> the number of
+    /// monitors, left to right in surface coordinates. Requires DisplayIo and
+    /// the lease. (208 is reserved for audio recording.)
+    GraphicsCompositorOutputs = 207,
+    /// action (0 power off, 1 restart) -> does not return when it works; an
+    /// error code says why the machine is still running. Needs PowerControl.
+    PowerControl = 209,
 }
 
 pub fn entry_address() -> u64 {
@@ -757,19 +778,26 @@ fn sys_message_receive(user_buffer: u64, capacity: u64, user_sender: u64) -> u64
         return SYSCALL_ERROR;
     };
     let receiver = crate::task::current_process_id();
-    let Ok(message) = crate::ipc::peek(receiver) else {
-        return SYSCALL_ERROR;
-    };
-    if message.payload().len() > capacity
-        || crate::paging::copy_to_current_user(user_buffer, message.payload()).is_err()
-        || crate::paging::copy_to_current_user(user_sender, &message.sender.to_le_bytes()).is_err()
-    {
-        return SYSCALL_ERROR;
+    // Peek, copy out with no lock held (the copy can fault), then dequeue
+    // only that message. If another thread of this process dequeued first,
+    // the copy is stale: take the next message instead.
+    loop {
+        let Ok((message, serial)) = crate::ipc::peek(receiver) else {
+            return SYSCALL_ERROR;
+        };
+        if message.payload().len() > capacity
+            || crate::paging::copy_to_current_user(user_buffer, message.payload()).is_err()
+            || crate::paging::copy_to_current_user(user_sender, &message.sender.to_le_bytes())
+                .is_err()
+        {
+            return SYSCALL_ERROR;
+        }
+        match crate::ipc::receive_if(receiver, serial) {
+            Ok(_) => return message.payload().len() as u64,
+            Err(crate::ipc::Error::QueueEmpty) => continue,
+            Err(_) => return SYSCALL_ERROR,
+        }
     }
-    if crate::ipc::receive(receiver).is_err() {
-        return SYSCALL_ERROR;
-    }
-    message.payload().len() as u64
 }
 
 fn sys_pipe() -> u64 {
@@ -863,7 +891,7 @@ fn sys_sleep(ticks: u64) -> u64 {
 }
 
 fn sys_kill(pid: u64, sig: u64) -> u64 {
-    match crate::task::kill_process(pid, sig) {
+    match crate::task::kill_process_from_user(pid, sig) {
         Ok(()) => 0,
         Err(_) => SYSCALL_ERROR,
     }
@@ -932,6 +960,11 @@ fn prepare_signal_delivery(frame: *const UserForkFrame) {
     if frame.is_null() {
         return;
     }
+    // `sigaction` admits only executable user addresses; never return to a
+    // non-user RIP, which would fault on `iretq` in ring 0.
+    if crate::user_address::check_user_range(handler, 1).is_err() {
+        return;
+    }
     let frame = unsafe { &mut *(frame as *mut UserForkFrame) };
     let Some(new_rsp) = frame.rsp.checked_sub(8) else {
         return;
@@ -965,7 +998,15 @@ fn sys_exec(user_path: u64, length: u64) -> u64 {
     let Ok(path) = core::str::from_utf8(&path[..length]) else {
         return SYSCALL_ERROR;
     };
-    let mut image = alloc::vec![0_u8; crate::vfs::NODE_CAPACITY];
+    let Some(mut image) = crate::heap::try_filled(0_u8, crate::vfs::NODE_CAPACITY) else {
+        crate::audit::record(
+            actor,
+            crate::audit::Action::ProcessExec,
+            length as u64,
+            false,
+        );
+        return SYSCALL_ERROR;
+    };
     let Ok(image_length) = crate::vfs::read_all(path, &mut image) else {
         crate::audit::record(
             actor,
@@ -1074,7 +1115,15 @@ fn sys_exec_command(user_line: u64, length: u64) -> u64 {
         argv[index] = argument;
     }
 
-    let mut image = alloc::vec![0_u8; crate::vfs::NODE_CAPACITY];
+    let Some(mut image) = crate::heap::try_filled(0_u8, crate::vfs::NODE_CAPACITY) else {
+        crate::audit::record(
+            actor,
+            crate::audit::Action::ProcessExec,
+            length as u64,
+            false,
+        );
+        return SYSCALL_ERROR;
+    };
     let Ok(image_length) = crate::vfs::read_all(resolved.as_str(), &mut image) else {
         crate::audit::record(
             actor,
@@ -1173,7 +1222,15 @@ fn sys_spawn_command(user_line: u64, length: u64) -> u64 {
         };
         argv[index] = argument;
     }
-    let mut image = alloc::vec![0_u8; crate::vfs::NODE_CAPACITY];
+    let Some(mut image) = crate::heap::try_filled(0_u8, crate::vfs::NODE_CAPACITY) else {
+        crate::audit::record(
+            actor,
+            crate::audit::Action::ProcessExec,
+            length as u64,
+            false,
+        );
+        return SYSCALL_ERROR;
+    };
     let Ok(image_length) = crate::vfs::read_all(resolved.as_str(), &mut image) else {
         crate::audit::record(
             actor,
@@ -2146,6 +2203,74 @@ fn sys_audit_read(offset: u64, user_event: u64) -> u64 {
     1
 }
 
+#[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
+fn sys_audio_info(user_info: u64) -> u64 {
+    let Some(info) = crate::hda::audio_info() else {
+        return SYSCALL_ERROR;
+    };
+    let mut bytes = [0u8; 12];
+    bytes[0..4].copy_from_slice(&info.sample_rate.to_le_bytes());
+    bytes[4..8].copy_from_slice(&info.max_bytes.to_le_bytes());
+    bytes[8] = info.playback_streams;
+    bytes[9] = info.capture_streams;
+    bytes[10] = info.channels;
+    bytes[11] = info.bits;
+    if crate::paging::copy_to_current_user(user_info, &bytes).is_err() {
+        return SYSCALL_ERROR;
+    }
+    1
+}
+
+#[cfg(not(any(not(feature = "qemu-test"), feature = "stage13-12-test")))]
+fn sys_audio_info(_user_info: u64) -> u64 {
+    SYSCALL_ERROR
+}
+
+/// The PCM is copied into kernel memory first: user pages may fault, and the
+/// HDA controller lock must not be held across that.
+#[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
+fn sys_audio_play(user_pcm: u64, length: u64) -> u64 {
+    let actor = crate::task::current_task_id().as_u64();
+    if !crate::task::current_has(crate::capability::Capability::AudioPlayback) {
+        crate::audit::record(actor, crate::audit::Action::AudioPlay, 0, false);
+        return SYSCALL_ERROR;
+    }
+    let Ok(length) = usize::try_from(length) else {
+        return SYSCALL_ERROR;
+    };
+    if length == 0 || length > crate::hda::MAX_PLAY_BYTES {
+        return SYSCALL_ERROR;
+    }
+    let Some(mut pcm) = crate::heap::try_filled(0u8, length) else {
+        crate::audit::record(actor, crate::audit::Action::AudioPlay, length as u64, false);
+        return SYSCALL_ERROR;
+    };
+    if crate::paging::copy_from_current_user(user_pcm, &mut pcm).is_err() {
+        return SYSCALL_ERROR;
+    }
+    let result = crate::hda::play(&pcm);
+    crate::audit::record(actor, crate::audit::Action::AudioPlay, length as u64, result.is_ok());
+    result.map_or(SYSCALL_ERROR, |played| played as u64)
+}
+
+#[cfg(not(any(not(feature = "qemu-test"), feature = "stage13-12-test")))]
+fn sys_audio_play(_user_pcm: u64, _length: u64) -> u64 {
+    SYSCALL_ERROR
+}
+
+#[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
+fn sys_audio_set_volume(percent: u64) -> u64 {
+    if !crate::task::current_has(crate::capability::Capability::AudioPlayback) || percent > 100 {
+        return SYSCALL_ERROR;
+    }
+    crate::hda::set_volume(percent as u8).map_or(SYSCALL_ERROR, u64::from)
+}
+
+#[cfg(not(any(not(feature = "qemu-test"), feature = "stage13-12-test")))]
+fn sys_audio_set_volume(_percent: u64) -> u64 {
+    SYSCALL_ERROR
+}
+
 fn sys_secret_store(user_secret: u64, length: u64) -> u64 {
     if !crate::task::current_has(crate::capability::Capability::Secrets) {
         return SYSCALL_ERROR;
@@ -2312,7 +2437,7 @@ pub extern "C" fn wovenhat_syscall_dispatch(
         }
         value if value == Number::ThreadJoin as u64 => loop {
             match crate::task::join_user_thread(arg0) {
-                Ok(exit) => break exit as u64,
+                Ok(exit) => break crate::exit_status::encode(exit),
                 Err(crate::task::ThreadJoinError::Running) => {
                     let owner = crate::task::current_process_id();
                     let waiter = crate::task::current_task_id().as_u64();
@@ -2338,9 +2463,14 @@ pub extern "C" fn wovenhat_syscall_dispatch(
         value if value == Number::ThreadGetTls as u64 => crate::task::current_thread_id()
             .and_then(crate::thread::tls)
             .unwrap_or(SYSCALL_ERROR),
+        value if value == Number::ThreadCancel as u64 => crate::task::cancel_user_thread(
+            arg0,
+            arg1 as i32,
+        )
+        .map_or(SYSCALL_ERROR, |_| 0),
         value if value == Number::Getpid as u64 => crate::task::current_process_id(),
         value if value == Number::Waitpid as u64 => match crate::task::wait_process(arg0) {
-            Ok(exit_code) => exit_code as u64,
+            Ok(exit_code) => crate::exit_status::encode(exit_code),
             Err(crate::task::WaitError::StillRunning) => u64::MAX - 1,
             Err(crate::task::WaitError::NoSuchChild) => u64::MAX,
         },
@@ -2442,6 +2572,9 @@ pub extern "C" fn wovenhat_syscall_dispatch(
             sys_compositor_blit_shared(arg0, arg1)
         }
         value if value == Number::WaitAny as u64 => sys_wait_any(arg0, arg1),
+        value if value == Number::WaitAnyObjects as u64 => {
+            sys_wait_any_objects(arg0, arg1, arg2)
+        }
         value if value == Number::GraphicsSurfaceDamage as u64 => sys_graphics_damage(arg0, arg1),
         value if value == Number::GraphicsCompositorBlitDamage as u64 => {
             sys_compositor_blit_damage(arg0, arg1)
@@ -2503,6 +2636,11 @@ pub extern "C" fn wovenhat_syscall_dispatch(
         value if value == Number::GraphicsCompositorBlendRegionShared as u64 => {
             sys_compositor_blend_region(arg0, arg1, arg2, true)
         }
+        value if value == Number::AudioInfo as u64 => sys_audio_info(arg0),
+        value if value == Number::AudioPlay as u64 => sys_audio_play(arg0, arg1),
+        value if value == Number::AudioSetVolume as u64 => sys_audio_set_volume(arg0),
+        value if value == Number::GraphicsCompositorOutputs as u64 => sys_compositor_outputs(arg0),
+        value if value == Number::PowerControl as u64 => sys_power_control(arg0),
         _ => u64::MAX,
     };
 
@@ -2577,7 +2715,9 @@ fn sys_graphics_write(handle: u64, packed: u64, user_pixels: u64) -> u64 {
     if width == 0 || height == 0 || x + width > surface_width || y + height > surface_height {
         return SYSCALL_ERROR;
     }
-    let mut bytes = alloc::vec![0u8; width * height * 4];
+    let Some(mut bytes) = crate::heap::try_filled(0u8, width * height * 4) else {
+        return SYSCALL_ERROR;
+    };
     if crate::paging::copy_from_current_user(user_pixels, &mut bytes).is_err() {
         return SYSCALL_ERROR;
     }
@@ -2806,8 +2946,48 @@ fn pack_compositor_info(width: u32, height: u32, scale: u32) -> u64 {
     u64::from(width) | (u64::from(height) << 24) | (u64::from(scale) << 48)
 }
 
+/// Turn the machine off (action 0) or restart it (action 1). Requires
+/// PowerControl, which only the desktop session holds; every request is in
+/// the security ledger. Returns only when the machine is still running:
+/// 1 no ACPI power-off, 2 the firmware refused ACPI mode, 3 ignored.
+fn sys_power_control(action: u64) -> u64 {
+    let actor = crate::task::current_task_id().as_u64();
+    let allowed = crate::task::current_has(crate::capability::Capability::PowerControl) && action <= 1;
+    crate::audit::record(actor, crate::audit::Action::PowerControl, action, allowed);
+    if !allowed {
+        return SYSCALL_ERROR;
+    }
+    if action == 1 {
+        crate::power::reboot();
+    }
+    match crate::power::power_off() {
+        crate::power::Error::NoAcpi => 1,
+        crate::power::Error::AcpiModeRefused => 2,
+        crate::power::Error::StillRunning => 3,
+    }
+}
+
 /// The compositor surface's size and display scale. Requires `DisplayIo` and
 /// the lease: the geometry is the holder's to draw on.
+fn sys_compositor_outputs(user_outputs: u64) -> u64 {
+    if !display_authorized() {
+        return SYSCALL_ERROR;
+    }
+    let Ok((outputs, count)) = crate::compositor::outputs_for(crate::task::current_process_id()) else {
+        return SYSCALL_ERROR;
+    };
+    let mut bytes = [0u8; crate::compositor::MAX_OUTPUTS * 16];
+    for (output, chunk) in outputs.iter().zip(bytes.as_chunks_mut::<16>().0) {
+        for (value, field) in [output.0, output.1, output.2, output.3].iter().zip(chunk.as_chunks_mut::<4>().0) {
+            *field = value.to_le_bytes();
+        }
+    }
+    if crate::paging::copy_to_current_user(user_outputs, &bytes).is_err() {
+        return SYSCALL_ERROR;
+    }
+    count as u64
+}
+
 fn sys_compositor_info() -> u64 {
     if !display_authorized() {
         return SYSCALL_ERROR;
@@ -2849,8 +3029,15 @@ const INPUT_KIND_BACKSPACE: u64 = 3;
 const INPUT_KIND_TAB: u64 = 4;
 const INPUT_KIND_F1: u64 = 5;
 const INPUT_KIND_F2: u64 = 8;
+const INPUT_KIND_F3: u64 = 14;
+const INPUT_KIND_F4: u64 = 15;
 const INPUT_KIND_POINTER_MOVE: u64 = 6;
 const INPUT_KIND_POINTER_BUTTON: u64 = 7;
+const INPUT_KIND_SCROLL: u64 = 9;
+const INPUT_KIND_POINTER_ABSOLUTE: u64 = 10;
+const INPUT_KIND_TOUCH: u64 = 11;
+const INPUT_KIND_PEN: u64 = 12;
+const INPUT_KIND_GAME_CONTROLLER: u64 = 13;
 
 fn encode_input(event: crate::woven_input::Event) -> Option<u64> {
     use crate::woven_input::{Event, Key};
@@ -2864,6 +3051,10 @@ fn encode_input(event: crate::woven_input::Event) -> Option<u64> {
         Event::Key(Key::Tab) => Some(packed(INPUT_KIND_TAB, 0)),
         Event::Key(Key::F1) => Some(packed(INPUT_KIND_F1, 0)),
         Event::Key(Key::F2) => Some(packed(INPUT_KIND_F2, 0)),
+        Event::Key(Key::F3) => Some(packed(INPUT_KIND_F3, 0)),
+        Event::Key(Key::F4) => Some(packed(INPUT_KIND_F4, 0)),
+        // The kernel's own key; never published to a focus holder.
+        Event::Key(Key::F12) => None,
         // dx and dy as two's-complement u16 halves.
         Event::PointerMove { dx, dy } => Some(packed(
             INPUT_KIND_POINTER_MOVE,
@@ -2873,10 +3064,25 @@ fn encode_input(event: crate::woven_input::Event) -> Option<u64> {
             INPUT_KIND_POINTER_BUTTON,
             u64::from(button) | (u64::from(pressed) << 8),
         )),
-        // Other device events exist only in the Stage 13.7 probe build and
-        // have no userspace encoding yet.
-        #[cfg(feature = "stage13-7-test")]
-        _ => None,
+        Event::Scroll { vertical } => Some(packed(INPUT_KIND_SCROLL, u64::from(vertical as u16))),
+        Event::PointerAbsolute { x, y } => Some(packed(
+            INPUT_KIND_POINTER_ABSOLUTE,
+            u64::from(x) | (u64::from(y) << 16),
+        )),
+        // contact | active << 8 | x << 16 | y << 32
+        Event::Touch { contact, x, y, active } => Some(packed(
+            INPUT_KIND_TOUCH,
+            u64::from(contact) | (u64::from(active) << 8) | (u64::from(x) << 16) | (u64::from(y) << 32),
+        )),
+        // x | y << 16 | pressure (10 bits) << 32 | touching << 48
+        Event::Pen { x, y, pressure, touching } => Some(packed(
+            INPUT_KIND_PEN,
+            u64::from(x) | (u64::from(y) << 16) | (u64::from(pressure & 0x3ff) << 32) | (u64::from(touching) << 48),
+        )),
+        Event::GameController { control, value } => Some(packed(
+            INPUT_KIND_GAME_CONTROLLER,
+            u64::from(control) | (u64::from(value as u16) << 16),
+        )),
     }
 }
 
@@ -3065,6 +3271,87 @@ fn sys_wait_any(deadline: u64, mask: u64) -> u64 {
     }
     if want_damage {
         crate::user_graphics::clear_damage_waiter(owner, task);
+    }
+    result
+}
+
+const MAX_WAIT_OBJECTS: usize = 8;
+const WAIT_OBJECT_TIMER: u64 = 0;
+const WAIT_OBJECT_EVENT: u64 = 1;
+
+/// Wait on generation-safe timer/event objects without retaining a userspace
+/// pointer asynchronously. The complete source array is copied before any
+/// registration, and every registration is removed before return.
+fn sys_wait_any_objects(deadline: u64, user_sources: u64, count: u64) -> u64 {
+    let Ok(count) = usize::try_from(count) else {
+        return SYSCALL_ERROR;
+    };
+    if count == 0 || count > MAX_WAIT_OBJECTS {
+        return SYSCALL_ERROR;
+    }
+    let byte_count = count * 24;
+    let mut bytes = [0u8; MAX_WAIT_OBJECTS * 24];
+    if crate::paging::copy_from_current_user(user_sources, &mut bytes[..byte_count]).is_err() {
+        return SYSCALL_ERROR;
+    }
+    let mut sources = [(0u64, false, 0u64); MAX_WAIT_OBJECTS];
+    let mut used_masks = 0u64;
+    for (index, source) in sources.iter_mut().take(count).enumerate() {
+        let offset = index * 24;
+        let raw = u64::from_le_bytes(bytes[offset..offset + 8].try_into().unwrap());
+        let kind = u64::from_le_bytes(bytes[offset + 8..offset + 16].try_into().unwrap());
+        let mask = u64::from_le_bytes(bytes[offset + 16..offset + 24].try_into().unwrap());
+        if mask < (1 << 3)
+            || !mask.is_power_of_two()
+            || used_masks & mask != 0
+            || !matches!(kind, WAIT_OBJECT_TIMER | WAIT_OBJECT_EVENT)
+        {
+            return SYSCALL_ERROR;
+        }
+        if (kind == WAIT_OBJECT_TIMER
+            && !crate::task::current_has(crate::capability::Capability::TimerRead))
+            || (kind == WAIT_OBJECT_EVENT
+                && !crate::task::current_has(crate::capability::Capability::Ipc))
+        {
+            return SYSCALL_ERROR;
+        }
+        *source = (raw, kind == WAIT_OBJECT_TIMER, mask);
+        used_masks |= mask;
+    }
+    let owner = crate::task::current_process_id();
+    let task = crate::task::current_task_id();
+    let mut registered = [false; MAX_WAIT_OBJECTS];
+    let result = 'wait: loop {
+        let mut ready = 0u64;
+        for (index, (raw, is_timer, mask)) in sources.iter().take(count).enumerate() {
+            match crate::async_events::register_task(owner, *raw, *is_timer, task) {
+                Ok(crate::async_events::TaskWaitRegistration::Ready) => ready |= *mask,
+                Ok(crate::async_events::TaskWaitRegistration::Registered) => {
+                    registered[index] = true
+                }
+                Ok(crate::async_events::TaskWaitRegistration::Busy) | Err(()) => {
+                    break 'wait SYSCALL_ERROR
+                }
+            }
+        }
+        if ready != 0 {
+            break 'wait ready;
+        }
+        if deadline != u64::MAX && crate::timer::ticks() >= deadline {
+            break 'wait 0;
+        }
+        crate::task::wait_for_event_until(deadline);
+        for (index, (raw, is_timer, _)) in sources.iter().take(count).enumerate() {
+            if registered[index] {
+                crate::async_events::clear_task_waiter(owner, *raw, *is_timer, task);
+                registered[index] = false;
+            }
+        }
+    };
+    for (index, (raw, is_timer, _)) in sources.iter().take(count).enumerate() {
+        if registered[index] {
+            crate::async_events::clear_task_waiter(owner, *raw, *is_timer, task);
+        }
     }
     result
 }

@@ -263,14 +263,75 @@ pub fn root_device() -> RootDevice {
     }
 }
 
-/// Run `operation` on the selected primary device, if it is present.
+/// FAT volume labels of the volumes WovenHat creates, and so may write: its
+/// own data disks and the live-test log partition on its USB stick.
+pub const OWNED_LABELS: [&[u8; 11]; 2] = [b"WOVENHAT   ", b"WOVENLOG   "];
+
+/// Whether the selected root device holds a WovenHat volume (Stage 13.17).
+static ROOT_OWNED: AtomicBool = AtomicBool::new(false);
+
+/// Record whether the selected root device holds a volume WovenHat owns.
+/// The mount decides this before it mounts.
+pub fn set_root_owned(owned: bool) {
+    ROOT_OWNED.store(owned, Ordering::Release);
+}
+
+/// Whether anything may write the selected root device (Stage 13.17).
+///
+/// Only a disk holding a WovenHat volume is writable. Any other disk, such
+/// as another operating system's disk or its EFI system partition on a
+/// machine booted from WovenHat live media, is read-only to every writer:
+/// file write-back, journals, swap and raw block requests alike. Test boots
+/// keep the ATA primary master writable, because several gates write raw
+/// sectors on scratch disks that hold no file system.
+pub fn root_writable() -> bool {
+    ROOT_OWNED.load(Ordering::Acquire)
+        || (cfg!(feature = "qemu-test") && root_device() == RootDevice::Ata)
+}
+
+/// A root device as every writer sees it: writes are refused, and the
+/// device reports itself read-only, unless [`root_writable`].
+struct Guarded<'a> {
+    disk: &'a mut dyn BlockDevice,
+    writable: bool,
+}
+
+impl BlockDevice for Guarded<'_> {
+    fn sector_count(&self) -> u64 {
+        self.disk.sector_count()
+    }
+
+    fn is_read_only(&self) -> bool {
+        !self.writable || self.disk.is_read_only()
+    }
+
+    fn flush(&mut self) -> Result<(), Error> {
+        if self.writable { self.disk.flush() } else { Ok(()) }
+    }
+
+    fn read_sector(&mut self, lba: u64, sector: &mut [u8]) -> Result<(), Error> {
+        self.disk.read_sector(lba, sector)
+    }
+
+    fn write_sector(&mut self, lba: u64, sector: &[u8]) -> Result<(), Error> {
+        if !self.writable {
+            return Err(Error::ReadOnly);
+        }
+        self.disk.write_sector(lba, sector)
+    }
+}
+
+/// Run `operation` on the selected primary device, if it is present, with
+/// writes allowed only when [`root_writable`].
 pub fn with_root<R>(operation: impl FnOnce(&mut dyn BlockDevice) -> R) -> Option<R> {
+    let writable = root_writable();
+    let guarded = move |disk: &mut dyn BlockDevice| operation(&mut Guarded { disk, writable });
     match root_device() {
-        RootDevice::Ata => crate::ata::with_primary_master(|disk| operation(disk)),
+        RootDevice::Ata => crate::ata::with_primary_master(|disk| guarded(disk)),
         #[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
-        RootDevice::Nvme => crate::nvme::with_controller(|disk| operation(disk)),
+        RootDevice::Nvme => crate::nvme::with_controller(|disk| guarded(disk)),
         #[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
-        RootDevice::Ahci => crate::ahci::with_controller(|disk| operation(disk)),
+        RootDevice::Ahci => crate::ahci::with_controller(|disk| guarded(disk)),
     }
 }
 

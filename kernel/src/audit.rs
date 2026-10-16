@@ -36,6 +36,9 @@ pub enum Action {
     SandboxDeviceAccess,
     SecretStore,
     SecretRevoke,
+    AudioPlay,
+    /// Power off (detail 0) or restart (detail 1) requested.
+    PowerControl,
 }
 
 /// One immutable security-ledger record.

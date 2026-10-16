@@ -1,5 +1,447 @@
 # Stage status
 
+## Merge integration checkpoint — 2026-10-16
+
+The foundation validator preservation run was invalidated by a concurrent
+VS Code pull of `d6fcf854`: session 54720 exited 1 on tracked inventory change.
+Its successful partial checks are not full acceptance. Merge repair retains
+both the accepted compiler graph/TLS loader and the peer security/driver
+additions. The user-directed main.rs restoration is backed up. All earlier
+release-pass claims below retain their original peer/baseline scope; none
+qualifies this newly combined tree. A fresh frozen chain is required.
+
+## Current priority: stages 1–10 release qualification — 2026-10-16
+
+The user requested desktop/laptop release preparation for stages 1–10. See
+[the ordered release ledger](stage1-10-release-readiness.md). No release-ready
+claim is made. The Stage 11 layout draft is preserved separately, not integrated;
+the known guard vulnerability remains a release blocker. Codex is beginning
+with foundation evidence integrity and stages 1–5 validation before later
+closure decisions. Hardware, durability and failure-stress gaps remain explicit.
+
+## IPC message receive race (2026-10-16, source fix)
+
+Two threads of one process receiving messages at once could deliver one
+message twice and silently drop the next. Receive peeks, copies out and
+then dequeued whatever was at the head. It now dequeues only the message it
+peeked, using the mailbox's dequeue serial, and a losing thread takes the
+next message. Every boot's IPC self-test covers the race. See the
+[IPC receive race audit](audit-ipc-receive-race-2026-10-16.md).
+
+## Signal authority and handler validation (2026-10-16, source fix)
+
+The syscall-boundary audit found two more defects, both fixed on PR #80.
+- **Any process could kill any other.** `kill` had no permission check.
+  Ring 3 may now signal only itself and its own children, unless it holds
+  `TaskControl`.
+- **`sigaction` could halt the kernel.** It accepted any handler address.
+  A non-canonical one made `iretq` raise #GP in ring 0, and the kernel
+  halted. Handlers must now be executable code in the caller's own image.
+
+Ring-3 probes in the program every boot runs cover both fixes. See the
+[signal authority audit](audit-syscall-signal-authority-2026-10-16.md).
+
+**Allocation failure.** Fixed separately: syscall-path allocations sized
+by user arguments are now fallible. Exhaustion fails the call instead of
+halting the kernel.
+
+## Syscall user-pointer bounds (2026-10-15, source fix, QEMU pending)
+
+Any Ring-3 process could panic the kernel with one syscall.
+`copy_from_current_user` and `copy_to_current_user` passed raw user
+addresses to `VirtAddr::new`, which panics on non-canonical values. For
+example, `write(1, 0x0001_0000_0000_0000, 1)` stopped the whole kernel.
+- **Fix:** both routines now bound every range to the canonical lower half
+  first (`user_address::check_user_range`, like Linux `access_ok`).
+- **Defence in depth:** `translated_chunk` uses `VirtAddr::try_new`.
+- **ABI:** unchanged.
+
+**Evidence.** The host test `user_address` passes 6 tests, the host suite
+passes 154, and Clippy is clean on 5 kernel feature sets and all host
+targets.
+
+**Ring-3 probes.** The integrated user program run by every boot now
+passes bad pointers to `write` and `open`, and fails the boot unless each
+call returns `-1`.
+
+**Open.** 1/2/4-CPU QEMU and release-chain evidence (CI lanes on PR #80;
+the local runs wait on the acceptance hold). See the
+[user-pointer bounds audit](audit-syscall-user-pointer-bounds-2026-10-15.md).
+
+## Stage 20.15 — the desktop as the session (2026-10-15)
+
+A system-apps (release) boot now starts the WovenShell desktop instead of
+the kernel console.
+- **F12** switches to the diagnostic console and back.
+- **Quick Settings** has Power off and Restart. They use capability
+  PowerControl (25, system services only) and syscall 209.
+
+**Also fixed.**
+- **Stage 11 loader:** it relocated ET_EXEC images under ASLR, which
+  crashed WovenShell on its first production boot. Only ET_DYN images
+  are randomised now.
+- **Shell image size:** WovenShell outgrew the VFS's 64 KiB file limit;
+  it is now stripped.
+
+**Evidence.**
+- 20.15 passes on 1/2/4 CPUs, and three negative controls were caught.
+- Stage 20 regression, 13.12 production and the system-apps desktop boot
+  pass.
+- The release gate passes.
+
+See the [audit](audit-stage20-15-desktop-session-2026-10-15.md).
+
+## Stage 13.20 — ACPI power-off and reset (2026-10-15)
+
+- **Power-off:** S5 from the FADT PM1 control blocks and `\_S5`.
+- **Reset:** the FADT reset register, then the 8042, 0xCF9 and a triple
+  fault.
+- **Shell commands:** `poweroff` and `reboot`.
+- **Live-test log:** the `WOVENLOG` label is also accepted from the root
+  directory, as Windows writes it.
+
+**Evidence.**
+- Power-off and reset pass on 1/2/4 CPUs, and three negative controls
+  were caught.
+- The release gate passes 102/102.
+
+See the [audit](audit-stage13-20-power-off-and-reset-2026-10-15.md).
+
+## Stages 13.17–13.19 — live hardware testing (2026-10-15)
+
+Booting a WovenHat USB stick on another machine is now safe, and the boot
+reports back on the stick.
+- **13.17: disks WovenHat does not own are never written.** A root device
+  is writable only if its FAT32 volume is labelled WOVENHAT or WOVENLOG.
+  Before this, a normal boot mounted another PC's EFI system partition
+  writable.
+  - Also fixed: AHCI takeover from firmware. A port the firmware stopped
+    was skipped (`NoSataPort`), which likely affected every real SATA
+    machine.
+  - Driver bring-up now logs specific errors.
+- **13.18: USB mass storage.** Bulk-Only Transport with SCSI commands over
+  xHCI, as a block device. Input reports are routed during storage I/O.
+  - Also fixed: a TRB ring-wrap ordering bug that could stop a USB
+    keyboard after 255 reports on real controllers.
+- **13.19: the boot's log on the stick.** Each boot writes
+  `LOGS/BOOTnnnn.TXT` on the stick's FAT32 WOVENLOG partition: a summary
+  of every reported failure, a hardware inventory, and the full kernel
+  log, flushed every 3 s and on panic. The kernel shell has `note <text>`
+  and `savelog`.
+
+**Evidence.** All three gates pass on 1/2/4 CPUs, and seven negative
+controls were caught (one AHCI control was faulty and was redone).
+Regression passes for 13.3–13.6, 13.12–13.14, 13.16, storage, 20.1,
+20.14b and the release gate (100/100).
+
+See the
+[audit](audit-stage13-17-to-19-live-hardware-testing-2026-10-15.md).
+
+## Stage 1–19 production closure review — 2026-10-15
+
+**ASLR guard defect confirmed (2026-10-16):** forced supported stack draw 16 /
+mmap draw 0 CPU execution mapped all sixteen full slots, then successfully
+wrote the intended stack guard (exit 99 rather than required fault -11).
+The new independently guarded regression remains deliberately failing; its
+serial and exact 3488/3488 frame teardown are preserved in the ASLR geometry
+audit. A joint image/arena/TLS/guard/stack planner is required before acceptance.
+
+The current synchronized branch has extensive bounded software/QEMU coverage,
+but Stages 1–19 are **not collectively production-ready**. The exact closure
+decision and remaining blockers are recorded in the
+[Stage 1–19 closure gate](stage1-19-closure-gate.md). In particular, shared
+libraries/dynamic TLS, native hardware and power-loss qualification, firmware
+security provisioning, persistent update rollback, and several driver/service
+boundaries remain open. The read-only host preflight found two USB disks but was
+not elevated and performed no physical test.
+
+**Signed-library increment:** the bounded signed `/lib` dependency graph and
+transactional teardown passed Stage 10.8–11.5 on 1/2/4 CPUs, warning-denying
+host/kernel/affected-feature checks and full Stage 10.7 preservation. The
+formatter-overlapped phase was repeated successfully on exact restored sources.
+See the shared-library audit for retained evidence. This accepts the bounded
+increment, not full Stage 11.5 or a newly qualified release image.
+
+**Loader interoperability finding:** a separate unmodified
+Rust/LLD executable probe identified null `DT_DEBUG` rejection and an incorrect
+compiler TLS/TCB layout, including live-state copying when creating threads.
+The debug-metadata prerequisite and bounded main-image compiler local-exec TLS
+are now accepted below after actual compiler execution and full preservation,
+not merely synthetic metadata tests. Broader TLS models remain unresolved.
+See the shared-library and compiler-TLS implementation audits for scope.
+The Stage 11.2 thread-generation saturation correction is accepted: permanent
+retirement and five actual-source host regressions pass, as do full Stage 10.7
+preservation and Stage 10.8–11.5 matrices on 1/2/4 CPUs on the unchanged frozen
+sources. The generation audit retains the original three retirement-path
+failures and final serialized evidence. Compiler TLS, loader interoperability
+and full Stage 11 production closure remain open.
+
+**IPC correction accepted:** permanent exhausted-slot skipping passed durable
+actual-source allocator regressions, real-state installation/rollback/teardown
+probes on 1/2/4 CPUs, host/production/fourteen-feature warning-denying lint,
+host/libwoven/Python tests, full Stage 10.7 preservation and Stage 10.8–11.5
+matrices. Session 63244 exited 0 with the final pass marker; all 488 frozen
+inputs matched at acceptance. The handle-generation audit retains final evidence and
+the earlier test-ordering failure. This accepts the bounded IPC correction,
+not Stage 7–11 production closure or a newly qualified release image.
+
+**COW ancestor correction accepted:** the frozen 500-input combined chain exited
+0 after complete host/lint/runtime preservation. See the COW and combined
+acceptance audits. This is a bounded foundation correction, not full-stage closure.
+
+**Wait-ownership correction accepted:** parent ownership is checked before
+scheduler liveness and revalidated in the original reap transaction, without
+inverting lock order. The common 500-input full acceptance and real 1/2/4-CPU
+authority/error tests pass. See the process-wait ownership audit for limits.
+
+**Signed-status correction accepted:** after the two earlier prerequisite
+decisions, zero-extended 32-bit process-wait/thread-join payloads passed actual
+kernel/libwoven host and Ring-3 tests on 1/2/4 CPUs, with original thread
+assertions and exact resource baselines preserved. Session 94658 exited 0 after
+full host/lint QA, Stage 10.7 and Stage 10.8–11.5 preservation, with all 500
+frozen inputs unchanged. See the signed-status and combined acceptance audits.
+This is not full Stage 11 or a release qualification. Compiler TLS, ET_EXEC
+placement/interoperability, combined-tree, persistent security/recovery and
+native hardware remain open. Earlier manifests are retained historical baselines.
+
+**Executable placement correction accepted:** Claude's fixed-ET_EXEC policy is
+adapted to the signed graph loader. After reproducing the nonzero-bias fault,
+source `a8acbaaf` passed the expanded 1/2/4-CPU fixture, 159 host Rust tests,
+nineteen libwoven/Python tests each, warning-denying host/production/fifteen-
+feature lint, exact full Stage 10.7 and Stage 10.8–11.5 preservation. Session
+62865 exited 0; independent inspection verified all 500 frozen inputs and sixty
+stress logs. Nonzero PIE execution and original assertions remain intact.
+See the executable-placement audit. Compiler TLS, general interoperability,
+combined-tree, release and hardware qualification remain open.
+
+**Compiler shared-PIE correction accepted:** source `da6d16e6` explicitly handles
+inert null DT_DEBUG metadata while rejecting nonzero/duplicate values. Session
+73596 exited 0 after zero/nonzero-bias compiler execution, signed-status and
+all original assertions on 1/2/4 CPUs; 162 root host, nineteen libwoven and
+twenty Python tests; warning-denying host/production/sixteen-feature lint;
+exact full Stage 10.7 and Stage 10.8–11.5 preservation. Independent inspection
+verified all 505 frozen inputs and sixty stress logs. See the compiler-PIE
+audit. Compiler TLS, general dynamic linking, merged-tree, release and hardware
+qualification remain open.
+
+**Compiler main-image local-exec TLS accepted (2026-10-16):** checked Variant-II layout, a mapped TCB
+self pointer and an immutable post-relocation template fix the retained
+compiler FS/guard fault. Host parser/layout tests and first expanded Ring-3
+execution pass on 1/2/4 CPUs, including fresh children, page/congruence edges, fork mapping
+protection and rollback. Expanded compiler fork/cancel/capacity/owner-exit and
+relocated-pointer cases pass on every online CPU in 1/2/4-CPU boots. Session
+37505 passed full inherited acceptance: 515 unchanged inputs, nine focused
+boots / 28 TLS executions, twenty-one inherited boots, seventeen feature lints,
+168 host / nineteen libwoven / twenty-one Python tests and sixty stress logs.
+Review also found ASLR mmap/stack-range
+overlap, hidden by zero-draw QEMU boots; that needs a separate validated layout
+gate. Pure-BSS runtime, broader/library TLS and physical qualification remain
+open. See the compiler-TLS implementation audit. No full TLS/stage claim.
+
+## Presentation and repaint performance (2026-10-15)
+
+A fix to accepted Stage 19/20 behaviour, found by the Stage 20.7 fade gate.
+On 1 CPU the fade showed only 4–6 of its frames, because every frame
+over-drew. Three changes:
+- **WovenShell.** It repaints up to four separate dirty areas instead of
+  one bounding box. Window opening and notifications report their parts
+  separately.
+- **Damage.** Kernel `Damage` merges regions that form exactly a
+  rectangle, so tiled repaints no longer overflow the list into a bounding
+  box.
+- **Present.** It converts each row once and copies it to the physical
+  rows it covers; the virtio-gpu path does the same.
+
+**Results.**
+- A fading frame presents 52 k pixels instead of 167 k.
+- The window-open frame dropped from about 1.8 G to 60 M cycles.
+- 20.7 passed six consecutive 1-CPU runs.
+- 20.1–20.14, 17.1–19.14 and 13.12 production pass on 1/2/4 CPUs.
+
+See the
+[performance audit](audit-presentation-performance-2026-10-15.md).
+
+## Stage 20.14b — the desktop across two monitors (2026-10-15)
+
+Roadmap Stage 18.9, Multi-monitor Desktop.
+- **Compositor.** It drives a multi-head virtio-gpu, with heads side by
+  side, and presents each damaged region to the heads it covers.
+- **Syscall 207.** It reports the monitors.
+- **Shell.** The taskbar and panels stay on the primary monitor; the
+  wallpaper, pointer and window dragging span every monitor.
+
+**Fixes found by the gate.**
+- A drop on the second monitor no longer snaps back to the primary.
+- Windows on the second monitor are no longer clipped.
+- The scale toggle no longer resets the primary.
+
+**Evidence.**
+- **Gate `[S20.14B] desktop across monitors: PASSED`:** passes on 1/2/4
+  CPUs. Host captures of both heads match the kernel's rendering after a
+  window is dragged onto the second monitor.
+- **Negative controls:** all five failed the gate as intended.
+- **Regression:** 20.1–20.14a, 17.1–19.14 and the 13.12 production boot
+  pass on 1/2/4 CPUs.
+
+See the
+[Stage 20.14b audit](audit-stage20-14b-desktop-monitors-2026-10-15.md).
+
+**Stage 18 is complete in software.** Roadmap 18.1–18.9 are Stages 20.1
+to 20.14b.
+## Stage 19.8 timer/event sources — 2026-10-15
+
+The unified wait path now has append-only syscall 206, `WaitAnyObjects`, for
+up to eight generation-safe timer/event objects. The kernel copies the source
+array before registration, enforces capability and owner/generation checks,
+uses event-driven task wakeups, consumes one-shot timer expiry exactly once,
+preserves manual-reset event level semantics, and clears every registration on
+all return paths. A live completion-handle waiter is refused rather than
+replaced; manual-reset events support four bounded task waiters with broadcast
+wakeups, while one-shot timers retain a single consuming task waiter. The safe `libwoven::wait_any_objects` wrapper
+uses the same bounded ABI. The existing syscall 111 remains ABI-compatible.
+
+The Stage 19.8 feature gate now includes an object-registration self-test and
+the `hello-gui --timer-event` userspace scenario and an event waiter fan-out
+self-test. Host/all-target Clippy,
+freestanding Stage 19.8 and neighboring Stage 19.13 warning-denying gates, and
+full 1/2/4-CPU QEMU acceptance all pass. The scenario verifies one-shot timer
+wake, manual-reset event wake, cleanup, bounded event fan-out, and the existing
+multiplexed input/message/damage/timeout behavior. Timer expiry remains
+single-consumer by design. See [the ABI contract](wait-any-objects-abi.md).
+
+## Stage 20.14a — two monitors through virtio-gpu (2026-10-15)
+
+Roadmap Stage 18.9, first part.
+- **Transport.** A modern virtio 1.x PCI transport, `virtio_pci.rs`.
+- **Driver.** A virtio-gpu 2D driver with several scanouts,
+  `virtio_gpu.rs`. It creates, backs, binds, transfers and flushes one
+  resource per head.
+
+**Evidence.**
+- **Gate `[S20.14] two monitors: PASSED`:** two heads show exact kernel
+  patterns, and host captures of both heads match pixel for pixel on
+  1/2/4 CPUs.
+- **Negative controls:** all four failed the gate as intended.
+
+See the [Stage 20.14a audit](audit-stage20-14a-monitors-2026-10-15.md).
+
+**Next: 20.14b.** The compositor will present the desktop across the
+heads, and the shell will use the second monitor.
+
+## Stage 20.13 — workspaces (2026-10-15)
+
+Roadmap Stage 18.8, Multiple Workspaces.
+
+**Shell.** There are four workspaces, each with its own windows and
+stacking order.
+- **The switcher.** Four numbered boxes left of the Quick Settings button
+  show them, with the current workspace highlighted.
+- **Switching.** Clicking a box, or pressing F3, switches workspace. F4
+  moves the focused window to the next workspace and follows it.
+- **Per-workspace behaviour.** New windows open on the current workspace.
+  The taskbar's window entries and tiling cover only the current workspace.
+- **Implementation.**
+  - The shell's stack holds only the current workspace's windows.
+  - Switching saves that stack and restores the target's.
+  - A window that closes, or whose owner exits, on a hidden workspace is
+    removed from that workspace's saved stack.
+
+**Keys.** F3 and F4 are new keys through WovenInput: PS/2 scancodes
+0x3D/0x3E and USB usages 0x3C/0x3D. They reach userspace as input kinds 14
+and 15 and libwoven's `Key::F3`/`Key::F4`. The kernel's own consumers
+ignore them.
+
+**USB F2 fix.** The USB keyboard map, from Stage 13.13, also lacked F2,
+which is added.
+
+**Gate changes.**
+- The Stage 20.1 gate now checks the switcher, each box and digit exactly,
+  and keeps checking the bare taskbar on both sides.
+- The Stage 20.12 gate expects the signed-in name left of the switcher.
+
+Gate `[S20.13] workspaces: PASSED`, driven by real i8042 input and checked
+against the kernel's own rendering:
+- Four workspaces, with the first current, and window A opens on it.
+- F3 moves to workspace 2, and A and its taskbar entry disappear.
+- Window B opens on workspace 2.
+- Clicking box 1 brings A back and hides B.
+- F4 moves A to workspace 2 and follows it, with A on top and both listed.
+- F3 moves to workspace 3, which shows neither window.
+- B is killed while hidden; back on workspace 2, only A remains.
+- Killing the shell returns the display.
+
+B lies inside A's shadowed footprint, so the gate judges "B hidden" by
+B's colour being absent and the taskbar listing one window.
+
+**Validation**, in the first worktree on `stage20-13`:
+- **Lint and host tests:** kernel Clippy for production, every Stage 20
+  feature, `stage13-13-test`, `stage13-16-test` and `stage19-12-test`, plus
+  woven-shell and host Clippy, all with warnings denied, pass; the libwoven
+  tests pass.
+- **Gates:** 20.1–20.13 pass on 1/2/4 CPUs, and 13.13 and 13.6 pass on
+  1/2/4 CPUs.
+
+Negative controls, each on 1 CPU with the source restored byte for byte
+afterwards. Each failed the gate as intended:
+- Taskbar entries not filtered by workspace.
+- Saved stack not restored on switching.
+- F4 doing nothing.
+- Switcher clicks ignored.
+- Windows always opening on workspace 1.
+
+Open:
+- **No transition animation.** Workspace transitions are not animated yet.
+- **No overview.** There is no workspace overview.
+- **Fixed count.** There are always four workspaces.
+
+## Stage 13.16 — tablets, pens, touch and game controllers (2026-10-14)
+
+HID devices that describe their own reports now work.
+- **Parser and decoder.** A pure report-descriptor parser and decoder
+  (`kernel/src/hid.rs`) covers pointers, tablets, pens, touch screens and
+  game controllers.
+- **xHCI.** It fetches and parses each such device's descriptor.
+- **Userspace.** Scroll, absolute-pointer, touch, pen and game-controller
+  events reach userspace as input kinds 9–13.
+
+**Evidence.**
+- **Host tests:** pass against real descriptors for a tablet, a game pad,
+  a pen and a touch screen. They caught a lost-axis bug.
+- **Gate `[S13.16] report-protocol HID input: PASSED`:** QEMU's USB tablet
+  delivers exact absolute positions, a click and wheel steps on 1/2/4
+  CPUs.
+- **Negative controls:** all four failed the gate as intended, one after a
+  harness gap was closed.
+- **Regression:** 13.5, 13.6, 13.7, 13.13 and 19.12 pass on 1/2/4 CPUs.
+
+See the [Stage 13.16 audit](audit-stage13-16-hid-reports-2026-10-14.md).
+
+**Open.** Multi-application devices, a virtio-input driver, and physical
+qualification of digitizers and controllers.
+
+## Stage 13.15 — WovenAudio playback for userspace (2026-10-14)
+
+Applications can now play sound.
+- **New capability.** `AudioPlayback` (24), which the permission broker
+  can grant as `Permission::Audio`.
+- **Syscalls.** 203 `AudioInfo`, 204 `AudioPlay` and 205
+  `AudioSetVolume`, with libwoven wrappers.
+- **Interrupt-driven HDA output.** The player sleeps until the stream's
+  completion interrupt wakes it.
+- **Ledger.** Every play attempt is recorded in the security ledger.
+
+**Evidence.**
+- **Gate `[S13.15] WovenAudio playback: PASSED`:** passes on 1/2/4 CPUs.
+  QEMU's recording of the output holds the exact square wave the Ring-3
+  client played, and a client without the capability is refused.
+- **Negative controls:** all five failed the gate as intended.
+- **Regression:** 13.8, 15.3, 15.4 and 15.8 pass on 1/2/4 CPUs.
+
+See the [Stage 13.15 audit](audit-stage13-15-audio-2026-10-14.md).
+
+**Open.** Streaming and mixing, other sample formats, recording through
+`Microphone`, and physical codecs.
+
 ## Stage 13.14 — storage on NVMe and AHCI (2026-10-14)
 
 A machine with no ATA disk now mounts its NVMe or AHCI disk at `/mnt`.
@@ -89,16 +531,13 @@ See the
 
 ## 2026-10-14 revalidation
 
-The first Stage 19 system application, WovenCalculator, now builds outside the
-kernel, signs into WAPP, and executes in Ring 3 through the existing verified
-application boundary. Its bounded parser and signed 1/2/4-CPU acceptance are
-recorded in the [WovenCalculator audit](audit-stage19-calculator-2026-10-14.md).
-WovenTerminal now provides bounded `help`, `ls`, `cat`, `calc`, and `exit`
-commands through the same ABI and passes its signed 1/2/4-CPU acceptance; see
-the [WovenTerminal audit](audit-stage19-terminal-2026-10-14.md). The remaining
-roadmap application suite and catalog/boot-image installation are not yet
-claimed complete. WovenFiles now adds a read-only bounded directory/file
-browser with signed 1/2/4-CPU acceptance; see the
+The Stage 19 system applications now build outside the kernel, sign into WAPP,
+and execute in Ring 3 through the existing verified application boundary.
+WovenCalculator, WovenTerminal, and WovenFiles retain their bounded 1/2/4-CPU
+acceptance; see their individual audits. The remaining roadmap applications,
+catalog, and multi-package boot-image installation are now covered by the
+ten-application release chain. WovenFiles now adds a read-only bounded
+directory/file browser; see the
 [WovenFiles audit](audit-stage19-files-2026-10-14.md).
 WovenMonitor adds bounded read-only clock, display, and storage diagnostics
 and passes signed 1/2/4-CPU execution; see the
@@ -118,31 +557,34 @@ signed 1/2/4-CPU execution; see the
 WovenUpdate adds bounded read-only update preflight and passes signed 1/2/4-CPU
 execution; see the
 [WovenUpdate audit](audit-stage19-update-2026-10-14.md).
+WovenStore adds bounded read-only installed-catalog browsing and passes signed
+1/2/4-CPU execution; see the
+[WovenStore audit](audit-stage19-store-2026-10-14.md).
 
-The full `scripts/test-release.py` chain passed on the current tree. It covered
-warning-denying kernel/host Clippy, all host integration tests, 1/2/4-CPU debug
-memory/storage/network, legacy PIC, 4-CPU release memory/storage/network,
-release compilation, and shell smoke. See the
-[release validation audit](audit-release-validation-2026-10-14.md).
+The complete `scripts/test-release.py` chain now passes on the current tree.
+The debug QEMU exit path was corrected to issue the `isa-debug-exit` byte-width
+write explicitly; the full chain then passed lint, host tests, 1/2/4-CPU debug
+and release gates, all ten applications, catalog acceptance, and production
+system-app boot. See the [release validation audit](audit-release-validation-2026-10-14.md).
 
 This is software/QEMU qualification only; native hardware and destructive USB
 media limits remain open.
 
 The authoritative release chain now includes app-specific Clippy, the signed
-nine-application catalog gate on 1/2/4 CPUs, and release packaging of WAPP
+ten-application catalog gate on 1/2/4 CPUs, and release packaging of WAPP
 payloads, catalog descriptors, and per-artifact hashes. See the
 [system-app release audit](audit-release-system-apps-2026-10-14.md). The
 feature-gated release image now claims multi-package RAM installation; physical
 media qualification remains open.
 
-The `system-apps` production-image feature now installs the nine signed
+The `system-apps` production-image feature now installs the ten signed
 packages during normal boot, with pre-mutation signature/ELF validation,
 collision checks, and rollback of newly created VFS entries on publication
 failure. It requires an explicitly provisioned application trust key; the
 acceptance harness supplies the test key only for QEMU. The 4-CPU shell gate
 confirmed installation before shell startup. Persistent media updates,
-power-loss rollback, key rotation/revocation, and the remaining applications
-are still open. See the
+power-loss rollback, key rotation/revocation, and native hardware
+qualification remain open. See the
 [production system-app boot audit](audit-stage19-production-system-app-boot-2026-10-14.md).
 
 Stage 14.5D was rerun on 1/2/4 CPUs. DHCP, DNS, ICMP, host-verified UDP/TCP,
@@ -1298,9 +1740,12 @@ behaviour, the gate fails at "keyboard bytes through IRQ1 are decoded at IRQ
 time". Evidence is in `audit-artifacts/stage19.12-negative-control-*`.
 
 Open:
-- PS/2 only. The USB HID mouse protocol is recognised by the xHCI driver but
-  not yet decoded into pointer events.
-- No scroll wheel (IntelliMouse) and no acceleration.
+- USB boot and report-protocol HID pointer reports are decoded into
+  `WovenInput` events by the xHCI worker; Stage 13.13 and 13.16 QEMU gates
+  cover the software paths. Physical USB qualification, multi-application
+  devices, and virtio-input remain open.
+- The PS/2 boot-mouse path has no IntelliMouse wheel or acceleration; report
+  protocol wheel events are supported by the HID decoder.
 - The pointer position lives in the window manager. There is no cursor
   image: drawing one is the window manager's job, and there is no hardware
   cursor.
@@ -1533,8 +1978,11 @@ Two problems found while bringing this up:
 Open:
 - The pid mailbox has one waiter; handle-based endpoints keep their existing
   multi-waiter queues and are not yet `WaitAny` sources.
-- Timers and event objects are not `WaitAny` sources either; the deadline
-  covers the common timeout case.
+- Syscall 206 now exposes timer/event objects as bounded `WaitAny` sources;
+  the current focused gate covers registration safety, the full userspace
+  timer/event scenario, and bounded manual-reset-event fan-out. One-shot timer
+  fan-out remains intentionally single-consumer; handle-based endpoint sources
+  remain outside syscall 206.
 
 Next prerequisite: client-to-compositor damage notification, so a compositor
 sleeping in `WaitAny` redraws only what a client changed.
@@ -1934,25 +2382,26 @@ acceptance, filesystem install, read-back, load, spawn, completion and exit
 status. The dedicated application harness now passes on 1, 2 and 4 CPUs; see
 the [Stage 16.1 audit](audit-stage16-1-out-of-kernel-application-2026-10-14.md).
 
-Open: one application per acceptance build, since `WOVENHAT_APP_IMAGE` names a
-single signed package; no FAT32 round trip, because the gate installs into the VFS at
-`/bin` where `exec` resolves names; no shared libraries or thread-locals, both
-rejected by the loader by design; and no stack-size negotiation.
+The original Stage 16.1 boundary remains intentionally single-package and
+VFS-backed; the release-level Stage 19 catalog/production-image gates now cover
+the ten-package install plan and are recorded above. Shared libraries and
+stack-size negotiation remain outside the bounded loader contract; static
+initial-exec TLS and self-contained dynamic relocation are now supported.
 
 The accepted Stage 19 applications now have a reproducible packaging boundary:
-`scripts/package-system-apps.py` builds WovenCalculator, WovenTerminal, and
-WovenFiles, signs each WAPP payload, and emits hashed `/bin` install paths plus
-`/share/applications` descriptors in an install-plan manifest. This is a
-release artifact, not a claim that the current one-package acceptance boot can
-install all packages. The multi-package image/installer consumer remains open.
+`scripts/package-system-apps.py` builds all ten applications, signs each WAPP
+payload, and emits hashed `/bin` install paths plus `/share/applications`
+descriptors in an install-plan manifest. The release image consumes that plan
+and installs all ten packages transactionally in RAM after verification.
 
 The feature-gated multi-application catalog gate now passes on 1/2/4 CPUs.
-It consumes the signed calculator, terminal, and files packages, rejects a
-tampered copy of each, verifies VFS byte-for-byte read-back and normal ELF
-loading, and publishes their matching catalog descriptors. See the
+It consumes all ten signed packages, rejects tampered copies, verifies VFS
+byte-for-byte read-back and normal ELF loading, and publishes matching catalog
+descriptors. The normal-boot production image gate confirms installation
+before shell startup. See the
 [Stage 19 system-app catalog audit](audit-stage19-system-app-catalog-2026-10-14.md).
-This closes the acceptance boundary only; rollback, trusted catalog
-publication, and normal-boot image installation remain open.
+Persistent-media installation, power-loss rollback, and deployment-key
+rotation/revocation remain separate production requirements.
 
 ## Stage 15 — WovenFS native filesystem (2026-10-12)
 
@@ -1992,8 +2441,14 @@ Stage 12.2/12.4 is an open product decision. The bounded `/wfs/<name>` file
 authority now supports durable create, write, read-back, and unlink through task
 file syscalls; direct generic VFS mutation remains read-only. Native mutations
 serialize their complete read-modify-write transactions. The adapter remains a
-flat root-file slice: rename, mkdir, directory enumeration, mounted-system
-policy, and native multi-directory semantics remain open. See the [Stage 15
+Nested native paths, directory creation, empty-directory removal, and rename
+are now transactional; directory rename rejects descendant cycles with a
+bounded fail-closed walk. Recursive import into the VFS mount and mounted-system
+publication now walks validated nested directories with bounded depth and
+visited-inode tracking; oversized files fail closed at the VFS capacity
+boundary. `Volume::check()` validates the complete reachable tree and rejects
+cycles, duplicate references, malformed names, and orphaned live inodes.
+Mounted-system policy remains open. See the [Stage 15
 VFS write-through audit](audit-stage15-wfs-vfs-write-through-2026-10-14.md).
 
 Crash recovery is proven by fault injection, not actual power loss on a device.
@@ -2027,8 +2482,9 @@ Release builds now require `WOVENHAT_APP_TRUSTED_PUBLIC_KEY_HEX`; the RFC
 self-test remains pinned to the development vector. Signed package
 installation now has a real external-application path through
 `tools/wapp-packager`, and Stage 16.1 verifies that package before and after its
-VFS round trip. Multi-application catalogs, rollback protection, key
-rotation/revocation, and firmware/installer-owned key slots remain open. User
+VFS round trip. Multi-application catalogs and rollback-safe RAM publication
+are now covered by the ten-app release gates. Deployment-key
+rotation/revocation and firmware/installer-owned key slots remain open. User
 `exec`/`spawn` now reject raw external ELF; only the finite kernel-owned system
 image allowlist retains the explicit internal-image path.
 Stage 15.5 software signed-kernel handoff is accepted with the exact 1/2/4-CPU
@@ -2047,7 +2503,8 @@ warning-denying freestanding kernel Clippy pass. See the
 The Stage 15.6 software measurement audit records the separate 1/2/4-CPU
 kernel measurement gate; TPM PCR extension, event logs, and firmware Secure
 Boot state remain hardware-dependent.
-Persistent encrypted records, rotation, TPM/firmware provisioning, and a
+Persistent encrypted records and crash-safe successor rotation now pass at the
+kernel boundary; TPM/firmware provisioning, deployment-key custody, and a
 secrets UI remain open.
 
 ## Stage 15.8 — security-ledger read ABI (2026-10-13)
@@ -2630,9 +3087,19 @@ TLS, stable process ownership, generation-safe IDs, and post-switch resource
 reclamation. Build, warning-denying Clippy, host tests, and 1/2/4-CPU QEMU
 passed; see [audit](audit-stage11-2-scheduler-threads-2026-10-14.md).
 
-This is an implementation increment, not closure of every Stage 11 thread
-requirement. Sibling cancellation/teardown, shared libraries, symbol
-resolution, dynamic TLS, and hardware qualification remain open.
+The 2026-10-15 cancellation follow-up adds ABI 136 for owned sibling-thread
+cancellation. Ready/blocked and running targets both remain joinable, wake the
+registered joiner, and reclaim stack/TLS mappings only through join. The
+focused 1/2/4-CPU QEMU gate, host tests, and warning-denying Clippy passed;
+see the scheduler-thread audit. Process-wide teardown, shared libraries,
+symbol resolution, dynamic TLS, and hardware qualification remain open.
+
+The 2026-10-15 teardown follow-up closes the process-wide scheduler lifecycle
+for unjoined threads: process exit retires ready/blocked siblings, running
+siblings take the thread-safe termination path, and the parent wait defers
+address-space destruction until all sibling hand-offs complete. The exact
+1/2/4-CPU gate now exercises create/exit/join, cancel/join, and process exit
+with an unjoined sibling.
 
 ## Stages 11.3–11.5 — accepted on 2026-09-16
 
@@ -2673,6 +3140,31 @@ applied before W^X and RELRO finalization. The inherited 1/2/4-CPU Stage
 relocation self-test. Shared-library dependency mapping, cross-image symbol
 resolution, versioning, lazy binding, and dynamic TLS remain fail-closed. See
 the [dynamic relocation audit](audit-stage11-dynamic-relocations-2026-10-14.md).
+
+The 2026-10-15 scope groundwork adds an immutable, bounded exact-name
+cross-image symbol-scope contract with duplicate/capacity/unknown-name
+negative checks. It is not yet connected to dependency mapping or relocation;
+the loader remains fail-closed for `DT_NEEDED`. Neighboring Stage 11.3/11.4
+regression matrices pass, while the final 11.5 2/4-CPU rerun remains pending
+after QEMU contention in the initial report; those final reruns subsequently
+passed as recorded in the [symbol-scope audit](audit-stage11-symbol-scope-2026-10-15.md).
+
+The symbol-scope review found ASLR address-validation, export-visibility,
+dependency-order and dependency-index defects that the zero-bias fixture had
+missed. The production local-relocation path now shares the corrected address
+validation with scope lookup. Parser-backed host regressions cover the failing
+cases, private versus exported symbols, overflow and segment bounds. Full
+shared-library mapping and teardown remain open.
+
+The subsequent signed-library integration implements a bounded `/lib` graph,
+cross-image eager relocation, per-library RELRO, transactional load rollback,
+and complete private-page-table reclamation. The new gate executes a Ring-3
+import call returning 42 and requires exact frame reclamation, along with
+signature, namespace and rollback negatives. Final acceptance and inherited
+regression results are tracked in the
+[shared-library audit](audit-stage11-shared-libraries-2026-10-15.md).
+Versioning, legacy PLT/REL tables, constructors/destructors, dynamic library
+TLS, runtime loading and broader qualification remain open.
 
 ## Stage 12.1 — accepted on 2026-09-16
 
@@ -2852,9 +3344,11 @@ WovenFS metadata/integrity, volume-integrity envelope boundaries, snapshots,
 and storage-management inventory each passed their 1/2/4-CPU gates. See
 [audit](audit-stage12-2-5-2026-09-16.md). Production AEAD now passes the
 isolated 1/2/4-CPU gate with a bounded revocable key vault; see
-[audit](audit-volume-crypto-2026-09-16.md). Measured key provisioning,
-persistent key storage, rotation policy, and encrypted-volume mount integration
-remain open before encrypted volumes are security-complete.
+[audit](audit-volume-crypto-2026-09-16.md). The follow-up integration now
+covers measured provisioning, authenticated persistent wrapped keys,
+successor-generation rotation, and encrypted mount-record I/O. A TPM/firmware
+measured-root backend, physical power-loss evidence, and deployment key-slot
+policy remain open.
 
 ## Stage 7.1.5 - accepted on 2026-09-16
 

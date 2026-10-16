@@ -13,11 +13,19 @@
 //! failure; a few calls additionally use `u64::MAX - 1` to mean "would block".
 //! Raw wrappers return the kernel's value unchanged so a caller can tell those
 //! apart.
+//!
+//! Successful process waits and thread joins carry a zero-extended 32-bit
+//! exit-status payload. After checking the full-width error sentinels, casting
+//! that payload to `i32` recovers negative statuses, including -1 and -2.
 
 pub mod process {
     #[derive(Clone, Copy, PartialEq, Eq, Debug)]
     pub struct Id(pub u64);
 }
+
+#[cfg(test)]
+#[path = "../../kernel/src/exit_status.rs"]
+mod kernel_exit_status;
 
 /// The kernel's 5x7 bitmap font, shared source rather than a copy, so text
 /// a client renders matches text the kernel renders pixel for pixel.
@@ -119,6 +127,16 @@ pub mod thread {
         Exited(i32),
         Running,
         Invalid,
+    }
+
+    pub(crate) const fn decode_join(result: u64) -> Join {
+        if result == crate::syscall::WOULD_BLOCK {
+            Join::Running
+        } else if result == crate::syscall::ERROR {
+            Join::Invalid
+        } else {
+            Join::Exited(result as i32)
+        }
     }
 }
 pub mod fs {
@@ -263,6 +281,14 @@ pub mod syscall {
     pub const GRAPHICS_SURFACE_SHARE: u64 = 109;
     pub const GRAPHICS_COMPOSITOR_BLIT_SHARED: u64 = 110;
     pub const WAIT_ANY: u64 = 111;
+    pub const WAIT_ANY_OBJECTS: u64 = 206;
+    pub const TIMER_CREATE: u64 = 87;
+    pub const TIMER_WAIT: u64 = 88;
+    pub const EVENT_CREATE: u64 = 89;
+    pub const EVENT_SET: u64 = 90;
+    pub const EVENT_WAIT: u64 = 91;
+    pub const TIMER_CLOSE: u64 = 92;
+    pub const EVENT_CLOSE: u64 = 93;
     pub const GRAPHICS_SURFACE_DAMAGE: u64 = 112;
     pub const GRAPHICS_COMPOSITOR_BLIT_DAMAGE: u64 = 113;
     pub const GRAPHICS_COMPOSITOR_BLEND: u64 = 114;
@@ -287,9 +313,15 @@ pub mod syscall {
     pub const THREAD_SELF: u64 = 133;
     pub const THREAD_SET_TLS: u64 = 134;
     pub const THREAD_GET_TLS: u64 = 135;
+    pub const THREAD_CANCEL: u64 = 136;
     pub const GRAPHICS_COMPOSITOR_BLEND_REGION: u64 = 200;
     pub const GRAPHICS_COMPOSITOR_BLEND_REGION_SHARED: u64 = 201;
     pub const GRAPHICS_COMPOSITOR_BLIT_KEYED: u64 = 202;
+    pub const AUDIO_INFO: u64 = 203;
+    pub const AUDIO_PLAY: u64 = 204;
+    pub const AUDIO_SET_VOLUME: u64 = 205;
+    pub const GRAPHICS_COMPOSITOR_OUTPUTS: u64 = 207;
+    pub const POWER_CONTROL: u64 = 209;
     pub const MESSAGE_SEND: u64 = 11;
     pub const MESSAGE_RECEIVE: u64 = 12;
 
@@ -425,13 +457,7 @@ pub mod syscall {
     /// Must be called from WovenHat userspace.
     pub unsafe fn thread_join(id: super::thread::Id) -> super::thread::Join {
         let result = unsafe { invoke(THREAD_JOIN, id.0, 0, 0) };
-        if result == WOULD_BLOCK {
-            super::thread::Join::Running
-        } else if result == ERROR {
-            super::thread::Join::Invalid
-        } else {
-            super::thread::Join::Exited(result as i32)
-        }
+        super::thread::decode_join(result)
     }
 
     /// Return the current thread's generation-tagged handle.
@@ -458,6 +484,15 @@ pub mod syscall {
         unsafe { invoke(THREAD_GET_TLS, 0, 0, 0) }
     }
 
+    /// Cancel an owned sibling thread. The sibling remains joinable and the
+    /// supplied status is returned by [`thread_join`].
+    ///
+    /// # Safety
+    /// Must be called from WovenHat userspace with a valid owned thread ID.
+    pub unsafe fn thread_cancel(id: super::thread::Id, status: i32) -> u64 {
+        unsafe { invoke(THREAD_CANCEL, id.0, status as u64, 0) }
+    }
+
     /// Yield the remainder of this time slice.
     ///
     /// # Safety
@@ -480,7 +515,8 @@ pub mod syscall {
         unsafe { invoke(GETTICKS, 0, 0, 0) }
     }
 
-    /// Wait for a child, returning its packed status.
+    /// Wait for a child, returning its zero-extended 32-bit status payload.
+    /// Full-width ERROR/WOULD_BLOCK remain distinct; decode success as `i32`.
     ///
     /// # Safety
     /// Must be called from WovenHat userspace.
@@ -622,6 +658,43 @@ pub mod syscall {
     /// Must be called from WovenHat userspace.
     pub unsafe fn wait_any(deadline: u64, mask: u64) -> u64 {
         unsafe { invoke(WAIT_ANY, deadline, mask, 0) }
+    }
+
+    /// # Safety
+    /// `sources` must point to `count` packed 24-byte wait-object records in
+    /// readable WovenHat userspace memory.
+    pub unsafe fn wait_any_objects(sources: *const u8, count: u64, deadline: u64) -> u64 {
+        unsafe { invoke(WAIT_ANY_OBJECTS, deadline, sources as u64, count) }
+    }
+
+    /// # Safety
+    /// Must be called from WovenHat userspace.
+    pub unsafe fn timer_create(relative: u64, period: u64) -> u64 {
+        unsafe { invoke(TIMER_CREATE, relative, period, 0) }
+    }
+
+    /// # Safety
+    /// Must be called from WovenHat userspace.
+    pub unsafe fn event_create(initial: u64) -> u64 {
+        unsafe { invoke(EVENT_CREATE, initial, 0, 0) }
+    }
+
+    /// # Safety
+    /// Must be called from WovenHat userspace with an owned event handle.
+    pub unsafe fn event_set(handle: u64, state: u64) -> u64 {
+        unsafe { invoke(EVENT_SET, handle, state, 0) }
+    }
+
+    /// # Safety
+    /// Must be called from WovenHat userspace with an owned object handle.
+    pub unsafe fn timer_close(handle: u64) -> u64 {
+        unsafe { invoke(TIMER_CLOSE, handle, 0, 0) }
+    }
+
+    /// # Safety
+    /// Must be called from WovenHat userspace with an owned object handle.
+    pub unsafe fn event_close(handle: u64) -> u64 {
+        unsafe { invoke(EVENT_CLOSE, handle, 0, 0) }
     }
 
     /// # Safety
@@ -1014,6 +1087,58 @@ pub mod wait {
     pub const MESSAGE: u64 = 1 << 1;
     /// Damage on a surface shared with this process (`DisplayIo`).
     pub const DAMAGE: u64 = 1 << 2;
+}
+
+/// A timer or manual-reset event that can participate in [`wait_any_objects`].
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct WaitObject {
+    pub handle: u64,
+    pub timer: bool,
+    pub mask: u64,
+}
+
+/// Create a one-shot or periodic userspace timer. Requires `TimerRead`.
+pub fn timer_create(relative: time::Ticks, period: time::Ticks) -> Result<u64, Error> {
+    check(unsafe { syscall::timer_create(relative, period) })
+}
+
+/// Create a manual-reset event. Requires `Ipc`.
+pub fn event_create(initial: bool) -> Result<u64, Error> {
+    check(unsafe { syscall::event_create(u64::from(initial)) })
+}
+
+/// Set or clear a manual-reset event.
+pub fn event_set(handle: u64, state: bool) -> Result<(), Error> {
+    check(unsafe { syscall::event_set(handle, u64::from(state)) }).map(|_| ())
+}
+
+pub fn timer_close(handle: u64) -> Result<(), Error> {
+    check(unsafe { syscall::timer_close(handle) }).map(|_| ())
+}
+
+pub fn event_close(handle: u64) -> Result<(), Error> {
+    check(unsafe { syscall::event_close(handle) }).map(|_| ())
+}
+
+/// Wait on up to eight timer/event objects. The source records are copied by
+/// the kernel before registration; no userspace pointer is retained while the
+/// task sleeps.
+pub fn wait_any_objects(sources: &[WaitObject], deadline: Option<time::Ticks>) -> Result<u64, Error> {
+    if sources.is_empty() || sources.len() > 8 {
+        return Err(Error::Failed);
+    }
+    let mut packed = [0u8; 8 * 24];
+    for (index, source) in sources.iter().enumerate() {
+        let offset = index * 24;
+        packed[offset..offset + 8].copy_from_slice(&source.handle.to_le_bytes());
+        let kind = u64::from(!source.timer);
+        packed[offset + 8..offset + 16].copy_from_slice(&kind.to_le_bytes());
+        packed[offset + 16..offset + 24].copy_from_slice(&source.mask.to_le_bytes());
+    }
+    // SAFETY: `packed` is live and readable for the duration of the syscall.
+    check(unsafe {
+        syscall::wait_any_objects(packed.as_ptr(), sources.len() as u64, deadline.unwrap_or(u64::MAX))
+    })
 }
 
 /// Sleep until any source in `mask` is ready, or until the timer reaches
@@ -1616,6 +1741,8 @@ pub enum Key {
     Tab,
     F1,
     F2,
+    F3,
+    F4,
 }
 
 /// An input event delivered to the focused process.
@@ -1631,6 +1758,35 @@ pub enum InputEvent {
     PointerButton {
         button: u8,
         pressed: bool,
+    },
+    /// Wheel motion; positive is away from the user.
+    Scroll {
+        vertical: i16,
+    },
+    /// An absolute pointer position (tablets): each axis 0..=32767.
+    PointerAbsolute {
+        x: u16,
+        y: u16,
+    },
+    /// A touch contact at 0..=32767; `active` false is its lift.
+    Touch {
+        contact: u8,
+        x: u16,
+        y: u16,
+        active: bool,
+    },
+    /// Pen position 0..=32767 and pressure 0..=1023.
+    Pen {
+        x: u16,
+        y: u16,
+        pressure: u16,
+        touching: bool,
+    },
+    /// A game-controller button (its number; 0 or 1), axis (0x100 + axis;
+    /// -32768..=32767) or hat (0x200; position or -1).
+    GameController {
+        control: u16,
+        value: i16,
     },
 }
 
@@ -1687,6 +1843,8 @@ fn decode_event(result: u64) -> Result<Option<InputEvent>, Error> {
         4 => InputEvent::Key(Key::Tab),
         5 => InputEvent::Key(Key::F1),
         8 => InputEvent::Key(Key::F2),
+        14 => InputEvent::Key(Key::F3),
+        15 => InputEvent::Key(Key::F4),
         6 => InputEvent::PointerMove {
             dx: payload as u16 as i16,
             dy: (payload >> 16) as u16 as i16,
@@ -1695,6 +1853,21 @@ fn decode_event(result: u64) -> Result<Option<InputEvent>, Error> {
             button: payload as u8,
             pressed: (payload >> 8) & 1 != 0,
         },
+        9 => InputEvent::Scroll { vertical: payload as u16 as i16 },
+        10 => InputEvent::PointerAbsolute { x: payload as u16, y: (payload >> 16) as u16 },
+        11 => InputEvent::Touch {
+            contact: payload as u8,
+            active: (payload >> 8) & 1 != 0,
+            x: (payload >> 16) as u16,
+            y: (payload >> 32) as u16,
+        },
+        12 => InputEvent::Pen {
+            x: payload as u16,
+            y: (payload >> 16) as u16,
+            pressure: ((payload >> 32) & 0x3ff) as u16,
+            touching: (payload >> 48) & 1 != 0,
+        },
+        13 => InputEvent::GameController { control: payload as u16, value: (payload >> 16) as u16 as i16 },
         _ => return Err(Error::Failed),
     }))
 }
@@ -1790,6 +1963,80 @@ pub fn permission_revoke(handle: u64) -> Result<(), Error> {
 
 /// Store a bounded secret in the caller-owned volatile WovenVault and return a
 /// generation-tagged handle. The input is copied before the syscall returns.
+/// A monitor's area of the compositor surface.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Output {
+    pub x: u32,
+    pub y: u32,
+    pub width: u32,
+    pub height: u32,
+}
+
+/// The compositor's monitors, left to right, and how many there are. Same
+/// authority as the other compositor calls (DisplayIo and the lease).
+/// Turn the machine off. Returns only if it is still running, with the
+/// reason: 1 no ACPI power-off, 2 the firmware refused ACPI mode, 3 the
+/// machine ignored the request. Needs PowerControl (the desktop session).
+pub fn power_off() -> Result<u64, Error> {
+    // SAFETY: integer-only call.
+    check(unsafe { syscall::invoke(syscall::POWER_CONTROL, 0, 0, 0) })
+}
+
+/// Restart the machine. Returns only on refusal. Needs PowerControl.
+pub fn restart() -> Result<u64, Error> {
+    // SAFETY: integer-only call.
+    check(unsafe { syscall::invoke(syscall::POWER_CONTROL, 1, 0, 0) })
+}
+
+pub fn compositor_outputs() -> Result<([Output; 4], usize), Error> {
+    let mut bytes = [0u8; 64];
+    let count = check(unsafe { syscall::invoke(syscall::GRAPHICS_COMPOSITOR_OUTPUTS, bytes.as_mut_ptr() as u64, 0, 0) })?;
+    let mut outputs = [Output::default(); 4];
+    for (output, chunk) in outputs.iter_mut().zip(bytes.as_chunks::<16>().0) {
+        let field = |index: usize| u32::from_le_bytes([chunk[index], chunk[index + 1], chunk[index + 2], chunk[index + 3]]);
+        *output = Output { x: field(0), y: field(4), width: field(8), height: field(12) };
+    }
+    Ok((outputs, (count as usize).min(4)))
+}
+
+/// What WovenAudio plays: 48 kHz 16-bit stereo today.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct AudioInfo {
+    pub sample_rate: u32,
+    /// The most PCM bytes one `audio_play` accepts.
+    pub max_bytes: u32,
+    pub playback_streams: u8,
+    pub capture_streams: u8,
+    pub channels: u8,
+    pub bits: u8,
+}
+
+/// The audio output, if the system has one.
+pub fn audio_info() -> Result<AudioInfo, Error> {
+    let mut bytes = [0u8; 12];
+    check(unsafe { syscall::invoke(syscall::AUDIO_INFO, bytes.as_mut_ptr() as u64, 0, 0) })?;
+    Ok(AudioInfo {
+        sample_rate: u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]),
+        max_bytes: u32::from_le_bytes([bytes[4], bytes[5], bytes[6], bytes[7]]),
+        playback_streams: bytes[8],
+        capture_streams: bytes[9],
+        channels: bytes[10],
+        bits: bytes[11],
+    })
+}
+
+/// Play interleaved 16-bit little-endian stereo PCM at the output's sample
+/// rate; returns once it has finished. Needs the AudioPlayback capability.
+pub fn audio_play(pcm: &[u8]) -> Result<usize, Error> {
+    check(unsafe { syscall::invoke(syscall::AUDIO_PLAY, pcm.as_ptr() as u64, pcm.len() as u64, 0) })
+        .map(|played| played as usize)
+}
+
+/// Set the output volume, 0-100 (0 mutes); returns the amplifier gain set.
+pub fn audio_set_volume(percent: u8) -> Result<u8, Error> {
+    check(unsafe { syscall::invoke(syscall::AUDIO_SET_VOLUME, u64::from(percent), 0, 0) }).map(|gain| gain as u8)
+}
+
 pub fn secret_store(secret: &[u8]) -> Result<u64, Error> {
     check(unsafe {
         syscall::invoke(
@@ -2080,7 +2327,9 @@ pub fn spawn(command: &str) -> Result<process::Id, Error> {
     check(result).map(process::Id)
 }
 
-/// Wait for a child process, returning its exit status.
+/// Wait for a child process, returning its zero-extended 32-bit exit payload.
+/// Cast a successful value to `i32` to recover a signed status. A running child
+/// returns `Error::WouldBlock`; an invalid/non-child wait returns `Error::Failed`.
 pub fn wait(pid: process::Id) -> Result<u64, Error> {
     // SAFETY: waitpid takes no pointers.
     check(unsafe { syscall::waitpid(pid.0) })
@@ -2121,6 +2370,33 @@ pub fn format_u64(mut value: u64, buffer: &mut [u8]) -> &[u8] {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn kernel_signed_thread_statuses_decode_without_sentinel_aliasing() {
+        for status in [-1, -2, i32::MIN, i32::MAX, 0, 37] {
+            assert_eq!(
+                thread::decode_join(kernel_exit_status::encode(status)),
+                thread::Join::Exited(status)
+            );
+        }
+        assert_eq!(thread::decode_join(syscall::ERROR), thread::Join::Invalid);
+        assert_eq!(
+            thread::decode_join(syscall::WOULD_BLOCK),
+            thread::Join::Running
+        );
+    }
+
+    #[test]
+    fn kernel_signed_process_statuses_are_successful_wait_payloads() {
+        for status in [-1, -2, i32::MIN, i32::MAX, 0, 37] {
+            assert_eq!(
+                check(kernel_exit_status::encode(status)),
+                Ok(u64::from(status as u32))
+            );
+        }
+        assert_eq!(check(syscall::ERROR), Err(Error::Failed));
+        assert_eq!(check(syscall::WOULD_BLOCK), Err(Error::WouldBlock));
+    }
 
     #[test]
     fn blend_is_exact_at_both_ends_and_rounds_to_nearest() {

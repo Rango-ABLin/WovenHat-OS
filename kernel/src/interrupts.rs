@@ -56,8 +56,20 @@ pub fn set_pci_vector_waiter(vector: u8, task: task::TaskId) -> bool {
         .is_ok()
 }
 
+/// Remove `task` as the waiter of `vector`; another task's registration is
+/// left alone.
+#[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
+pub fn clear_pci_vector_waiter(vector: u8, task: task::TaskId) -> bool {
+    if !(PCI_VECTOR_FIRST..=PCI_VECTOR_LAST).contains(&vector) {
+        return false;
+    }
+    PCI_DEVICE_WAITER[usize::from(vector - PCI_VECTOR_FIRST)]
+        .compare_exchange(task.as_u64(), 0, Ordering::AcqRel, Ordering::Acquire)
+        .is_ok()
+}
+
 /// How many times `vector` has fired.
-#[cfg(feature = "stage13-13-test")]
+#[cfg(any(feature = "stage13-13-test", feature = "stage13-15-test", feature = "stage13-16-test"))]
 pub fn pci_device_irq_count(vector: u8) -> u64 {
     if !(PCI_VECTOR_FIRST..=PCI_VECTOR_LAST).contains(&vector) {
         return 0;

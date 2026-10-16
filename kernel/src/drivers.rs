@@ -73,20 +73,20 @@ const SPECS: [Spec; COUNT] = [
         name: "nvme0",
         kind: DeviceKind::Block,
         matcher: class(0x01, 0x08, Some(0x02)),
-        init: |device| crate::nvme::init_at(device).map_err(|_| ()),
+        init: |device| crate::nvme::init_at(device).map_err(|error| init_error("nvme0", error)),
     },
     Spec {
         name: "ahci0",
         kind: DeviceKind::Block,
         matcher: class(0x01, 0x06, Some(0x01)),
-        init: |device| crate::ahci::init_at(device).map_err(|_| ()),
+        init: |device| crate::ahci::init_at(device).map_err(|error| init_error("ahci0", error)),
     },
     Spec {
         name: "xhci0",
         kind: DeviceKind::UsbHost,
         matcher: class(0x0c, 0x03, Some(0x30)),
         init: |device| {
-            let (_, ports, _, _) = crate::xhci::init_at(device).map_err(|_| ())?;
+            let (_, ports, _, _) = crate::xhci::init_at(device).map_err(|error| init_error("xhci0", error))?;
             // Keyboards and mice into WovenInput. Input is optional: a
             // controller whose input cannot start still serves the bus.
             match crate::xhci::start_input("xhci0") {
@@ -106,12 +106,26 @@ const SPECS: [Spec; COUNT] = [
         kind: DeviceKind::Audio,
         matcher: class(0x04, 0x03, None),
         init: |device| {
-            crate::hda::init_at(device)
-                .map(|summary| u64::from(summary.output_streams))
-                .map_err(|_| ())
+            let summary = crate::hda::init_at(device).map_err(|error| init_error("hda0", error))?;
+            // WovenAudio playback. Optional: a controller whose output path
+            // cannot start is still bound.
+            match crate::hda::start_output("hda0") {
+                Ok(info) => crate::serial::write_line(format_args!(
+                    "[DRIVERS] hda0 audio: playback streams={} vector={:#x}",
+                    info.playback_streams, info.vector
+                )),
+                Err(error) => crate::serial::write_line(format_args!("[DRIVERS] hda0 audio unavailable: {:?}", error)),
+            }
+            Ok(u64::from(summary.output_streams))
         },
     },
 ];
+
+/// Log why a driver failed to initialize: the outcome alone says only
+/// that it did, which on real hardware leaves nothing to act on.
+fn init_error(name: &str, error: impl core::fmt::Debug) {
+    crate::serial::write_line(format_args!("[DRIVERS] {} init error: {:?}", name, error));
+}
 
 fn address_of(device: &pci::Device) -> pci::Address {
     pci::Address {
@@ -330,4 +344,54 @@ pub fn storage_self_test() -> bool {
     let read = crate::storage::read_disk_file(PATH, 0, &mut back[..MARKER.len()]);
     let durable = remounted && read == Ok(MARKER.len()) && &back[..MARKER.len()] == MARKER;
     step("after a remount the file reads back from the disk", durable)
+}
+
+/// Stage 13.17 acceptance: a disk WovenHat does not own is never written.
+///
+/// The data disk is an NVMe namespace holding a FAT32 volume labelled
+/// `NO NAME` with one file, as another operating system's EFI system
+/// partition would be. The volume must mount and its file must read; then
+/// every kind of write is attempted and must be refused: changing the file,
+/// creating one, a raw sector write and a flush. The harness requires the
+/// disk image to be byte-for-byte unchanged afterwards.
+#[cfg(feature = "stage13-17-test")]
+pub fn foreign_disk_self_test() -> bool {
+    use crate::block::BlockDevice;
+
+    fn step(name: &str, ok: bool) -> bool {
+        crate::serial::write_line(format_args!("[S13.17] {} {}", name, if ok { "PASS" } else { "FAIL" }));
+        ok
+    }
+    const FILE: &str = "/mnt/HELLO.TXT";
+    const CONTENT: &[u8] = b"Another system's file
+";
+
+    let report = bring_up();
+    let Some((root, _)) = storage_root(&report) else {
+        return step("a storage driver is ready", false);
+    };
+    crate::block_io::select_root(root);
+    let mounted = matches!(crate::storage::mount_ata_root(), crate::storage::MountStatus::Mounted(_));
+    if !step("the foreign FAT32 volume mounts at /mnt", mounted) {
+        return false;
+    }
+    if !step("the device is not WovenHat's, so it is not writable", !crate::block_io::root_writable()) {
+        return false;
+    }
+    let mut back = [0u8; 64];
+    let read = crate::storage::read_disk_file(FILE, 0, &mut back[..CONTENT.len()]);
+    if !step("its file reads", read == Ok(CONTENT.len()) && &back[..CONTENT.len()] == CONTENT) {
+        return false;
+    }
+    // Every write path is attempted; each must fail.
+    let changed = crate::vfs::write_file(FILE, b"overwritten").is_ok() && crate::storage::persist_path(FILE).is_ok();
+    let created = crate::vfs::write_file("/mnt/NEW.TXT", b"new").is_ok() && crate::storage::persist_path("/mnt/NEW.TXT").is_ok();
+    let mut disk = crate::block_io::primary_ata();
+    let raw = disk.write_sector(0, &[0u8; crate::block::SECTOR_SIZE]);
+    let flushed = disk.flush();
+    step("changing its file is refused", !changed)
+        & step("creating a file is refused", !created)
+        & step("a raw sector write is refused", raw == Err(crate::block::Error::ReadOnly))
+        & step("the device reports itself read-only", disk.is_read_only())
+        & step("a flush writes nothing and succeeds", flushed.is_ok())
 }

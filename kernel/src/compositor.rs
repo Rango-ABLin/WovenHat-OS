@@ -30,7 +30,8 @@ pub const DEFAULT_HEIGHT: u32 = 480;
 /// framebuffer, but a 4K display would otherwise cost a 33 MB kernel
 /// allocation; 1920×1200 bounds it near 9 MB. A larger display shows the
 /// compositor in its top-left corner.
-pub const MAX_WIDTH: u32 = 1920;
+/// Two 1280-pixel monitors side by side (Stage 20.14b).
+pub const MAX_WIDTH: u32 = 2560;
 pub const MAX_HEIGHT: u32 = 1200;
 
 /// Largest integer display scale. At 4 a 1920×1200 framebuffer gives a
@@ -65,12 +66,36 @@ struct State {
     /// Whether the compositor owns the display. While false, damage keeps
     /// accumulating but nothing reaches the framebuffer.
     presenting: bool,
+    /// The diagnostic console is showing (Stage 20.15): the holder's frames
+    /// are held back and the terminal owns the display.
+    console: bool,
     /// The one process allowed to drive the compositor from userspace.
     holder: Option<u64>,
     /// Integer display scale: each surface pixel is presented as a
     /// `scale`×`scale` block. The surface is the framebuffer divided by this.
     scale: u32,
+    /// Monitors on a virtio-gpu, side by side, when one has several heads
+    /// (Stage 20.14b); otherwise the boot framebuffer is the one output.
+    #[cfg(any(not(feature = "qemu-test"), feature = "stage20-14-test", feature = "stage20-14b-test"))]
+    gpu: Option<GpuOutputs>,
 }
+
+/// The heads of a multi-scanout virtio-gpu, each `width` x `height`
+/// physical pixels, placed left to right.
+#[cfg(any(not(feature = "qemu-test"), feature = "stage20-14-test", feature = "stage20-14b-test"))]
+struct GpuOutputs {
+    gpu: crate::virtio_gpu::Gpu,
+    heads: usize,
+    width: u32,
+    height: u32,
+}
+
+
+/// Monitors the compositor drives at most.
+pub const MAX_OUTPUTS: usize = 4;
+
+/// A monitor's area of the surface: x, y, width, height.
+pub type OutputRect = (u32, u32, u32, u32);
 
 impl State {
     fn new(width: usize, height: usize) -> Self {
@@ -78,8 +103,11 @@ impl State {
             surface: Surface::new(width, height),
             damage: Damage::new(),
             presenting: false,
+            console: false,
             holder: None,
             scale: 1,
+            #[cfg(any(not(feature = "qemu-test"), feature = "stage20-14-test", feature = "stage20-14b-test"))]
+            gpu: None,
         };
         // A compositor without an initial fill reads as transparent-looking
         // zeros, which the test cannot distinguish from "a client blitted
@@ -172,7 +200,7 @@ pub fn blit(handle: user_graphics::Handle, x: i32, y: i32) -> Result<Rect, Error
 pub fn activate_display() -> Result<(), Error> {
     let mut guard = STATE.lock();
     let state = guard.as_mut().ok_or(Error::NotReady)?;
-    if !crate::terminal::set_display_owned(true) {
+    if !crate::terminal::set_display_owned(true) && !has_gpu(state) {
         return Err(Error::NoDisplay);
     }
     state.presenting = true;
@@ -218,8 +246,157 @@ pub fn present() -> Result<usize, Error> {
     Ok(written)
 }
 
-/// Copy `state`'s damage to the framebuffer at its scale.
-fn present_state(state: &State) -> Result<usize, Error> {
+/// Copy `state`'s damage to the display at its scale: each monitor of a
+/// multi-head GPU, or the boot framebuffer.
+fn present_state(state: &mut State) -> Result<usize, Error> {
+    #[cfg(any(not(feature = "qemu-test"), feature = "stage20-14-test", feature = "stage20-14b-test"))]
+    if state.gpu.is_some() {
+        return present_gpu(state);
+    }
+    present_framebuffer(state)
+}
+
+#[cfg(any(not(feature = "qemu-test"), feature = "stage20-14-test", feature = "stage20-14b-test"))]
+fn has_gpu(state: &State) -> bool {
+    state.gpu.is_some()
+}
+
+#[cfg(not(any(not(feature = "qemu-test"), feature = "stage20-14-test", feature = "stage20-14b-test")))]
+fn has_gpu(_state: &State) -> bool {
+    false
+}
+
+/// Scale each damaged region into the heads it covers, then transfer and
+/// flush just that rectangle of each.
+#[cfg(any(not(feature = "qemu-test"), feature = "stage20-14-test", feature = "stage20-14b-test"))]
+fn present_gpu(state: &mut State) -> Result<usize, Error> {
+    let scale = state.scale.max(1);
+    let Some(outputs) = state.gpu.as_mut() else { return Ok(0) };
+    let (head_width, head_height) = (outputs.width, outputs.height);
+    let mut written = 0usize;
+    let mut row = alloc::vec![0u32; head_width as usize];
+    for region in state.damage.regions() {
+        // The region in physical pixels across all heads.
+        let x0 = (region.x.max(0) as u32).saturating_mul(scale);
+        let y0 = (region.y.max(0) as u32).saturating_mul(scale);
+        let x1 = x0.saturating_add(region.width as u32 * scale).min(head_width * outputs.heads as u32);
+        let y1 = y0.saturating_add(region.height as u32 * scale).min(head_height);
+        if x1 <= x0 || y1 <= y0 {
+            continue;
+        }
+        for head in 0..outputs.heads {
+            let left = head as u32 * head_width;
+            let (hx0, hx1) = (x0.max(left), x1.min(left + head_width));
+            if hx1 <= hx0 {
+                continue;
+            }
+            let Some(Some(target)) = outputs.gpu.heads.get_mut(head) else { continue };
+            // Each surface row is scaled once and written to every physical
+            // row it covers.
+            let width = (hx1 - hx0) as usize;
+            let mut py = y0;
+            while py < y1 {
+                let rows = (scale - py % scale).min(y1 - py);
+                state.surface.scaled_row((py / scale) as usize, hx0 as usize, scale as usize, &mut row[..width]);
+                for y in py..py + rows {
+                    target.write_row(hx0 - left, y, &row[..width]);
+                }
+                py += rows;
+            }
+            outputs
+                .gpu
+                .present_rect(head, hx0 - left, y0, hx1 - hx0, y1 - y0)
+                .map_err(|_| Error::NoDisplay)?;
+            written += ((hx1 - hx0) * (y1 - y0)) as usize;
+        }
+    }
+    Ok(written)
+}
+
+/// Use a multi-head virtio-gpu as the display, its heads side by side at
+/// head 0's mode (at most 1280x800), and size the surface to them. A GPU
+/// with one head is left alone: the boot framebuffer serves.
+#[cfg(any(not(feature = "qemu-test"), feature = "stage20-14-test", feature = "stage20-14b-test"))]
+pub fn attach_gpu_outputs() -> Result<usize, Error> {
+    let mut gpu = crate::virtio_gpu::Gpu::probe().map_err(|_| Error::NoDisplay)?;
+    if gpu.scanouts < 2 {
+        return Err(Error::NoDisplay);
+    }
+    let modes = gpu.display_info().map_err(|_| Error::NoDisplay)?;
+    let (width, height) = match modes[0] {
+        mode if mode.enabled && mode.width > 0 && mode.height > 0 => (mode.width.min(1280), mode.height.min(800)),
+        _ => (1024, 768),
+    };
+    let heads = (gpu.scanouts as usize).min(MAX_OUTPUTS).min((MAX_WIDTH / width) as usize);
+    for head in 0..heads {
+        gpu.set_mode(head, width, height).map_err(|_| Error::NoDisplay)?;
+    }
+    let scale = {
+        let mut guard = STATE.lock();
+        let state = guard.as_mut().ok_or(Error::NotReady)?;
+        state.gpu = Some(GpuOutputs { gpu, heads, width, height });
+        state.scale
+    };
+    rescale_to(scale, None)?;
+    Ok(heads)
+}
+
+/// Whether everything drawn has reached the display.
+#[cfg(feature = "stage20-14b-test")]
+pub fn presented() -> bool {
+    STATE.lock().as_ref().is_some_and(|state| state.presenting && state.damage.is_empty())
+}
+
+/// Evaluate `check` against the surface only between frames: when everything
+/// drawn has been presented, read under the same lock so a frame the holder
+/// is still drawing cannot be seen. `None` mid-frame.
+#[cfg(feature = "stage20-14b-test")]
+pub fn between_frames(check: impl Fn(&dyn Fn(i32, i32) -> Option<u32>) -> bool) -> Option<bool> {
+    let guard = STATE.lock();
+    let state = guard.as_ref()?;
+    if !state.presenting || !state.damage.is_empty() {
+        return None;
+    }
+    Some(check(&|x, y| state.surface.pixel(x, y)))
+}
+
+/// The physical size of the display: all GPU heads, or the framebuffer.
+fn display_size() -> Option<(u32, u32)> {
+    #[cfg(any(not(feature = "qemu-test"), feature = "stage20-14-test", feature = "stage20-14b-test"))]
+    if let Some(size) = STATE
+        .lock()
+        .as_ref()
+        .and_then(|state| state.gpu.as_ref())
+        .map(|outputs| (outputs.width * outputs.heads as u32, outputs.height))
+    {
+        return Some(size);
+    }
+    crate::terminal::framebuffer_info().map(|info| (info.width as u32, info.height as u32))
+}
+
+/// The holder's monitors in surface coordinates (x, y, width, height), left
+/// to right; one output without a multi-head GPU.
+pub fn outputs_for(pid: u64) -> Result<([OutputRect; MAX_OUTPUTS], usize), Error> {
+    let guard = STATE.lock();
+    let state = guard.as_ref().ok_or(Error::NotReady)?;
+    if state.holder != Some(pid) {
+        return Err(Error::NotHolder);
+    }
+    let mut outputs = [(0, 0, 0, 0); MAX_OUTPUTS];
+    #[cfg(any(not(feature = "qemu-test"), feature = "stage20-14-test", feature = "stage20-14b-test"))]
+    if let Some(gpu) = state.gpu.as_ref() {
+        let scale = state.scale.max(1);
+        let (width, height) = (gpu.width / scale, gpu.height / scale);
+        for (head, output) in outputs.iter_mut().enumerate().take(gpu.heads) {
+            *output = (head as u32 * width, 0, width, height);
+        }
+        return Ok((outputs, gpu.heads));
+    }
+    outputs[0] = (0, 0, state.surface.width() as u32, state.surface.height() as u32);
+    Ok((outputs, 1))
+}
+
+fn present_framebuffer(state: &State) -> Result<usize, Error> {
     crate::terminal::with_framebuffer(|buffer, info| {
         crate::display::present_scaled(
             &state.surface,
@@ -283,9 +460,9 @@ fn rescale_to(scale: u32, holder: Option<u64>) -> Result<(u32, u32), Error> {
     if !(1..=MAX_SCALE).contains(&scale) {
         return Err(Error::InvalidScale);
     }
-    let info = crate::terminal::framebuffer_info().ok_or(Error::NoDisplay)?;
-    let width = (info.width as u32 / scale).clamp(1, MAX_WIDTH);
-    let height = (info.height as u32 / scale).clamp(1, MAX_HEIGHT);
+    let (display_width, display_height) = display_size().ok_or(Error::NoDisplay)?;
+    let width = (display_width / scale).clamp(1, MAX_WIDTH);
+    let height = (display_height / scale).clamp(1, MAX_HEIGHT);
     let mut surface = Surface::new(width as usize, height as usize);
     let previous = {
         let mut guard = STATE.lock();
@@ -605,8 +782,12 @@ pub fn present_for(pid: u64) -> Result<usize, Error> {
     if state.holder != Some(pid) {
         return Err(Error::NotHolder);
     }
+    // The console has the display: draw nothing, keep the damage.
+    if state.console {
+        return Ok(0);
+    }
     if !state.presenting {
-        if !crate::terminal::set_display_owned(true) {
+        if !crate::terminal::set_display_owned(true) && !has_gpu(state) {
             return Err(Error::NoDisplay);
         }
         state.presenting = true;
@@ -619,6 +800,24 @@ pub fn present_for(pid: u64) -> Result<usize, Error> {
     let written = present_state(state)?;
     state.damage.clear();
     Ok(written)
+}
+
+/// Show the diagnostic console instead of the holder's frames, or return
+/// to them (Stage 20.15). Returning damages the whole surface, so the
+/// holder's next present takes the display back with a complete frame.
+pub fn set_console(active: bool) {
+    let mut guard = STATE.lock();
+    let Some(state) = guard.as_mut() else { return };
+    state.console = active;
+    if active {
+        if state.presenting {
+            state.presenting = false;
+            crate::terminal::set_display_owned(false);
+        }
+    } else {
+        let bounds = state.surface.bounds();
+        state.damage.add(bounds);
+    }
 }
 
 /// Read one pixel from the compositor surface.

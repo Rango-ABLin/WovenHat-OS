@@ -9,6 +9,16 @@ import sys
 import time
 
 
+def build_woven_shell(root):
+    """Build WovenShell, the desktop session a system-apps image embeds
+    (Stage 20.15), in its own target directory; returns the image path."""
+    app_dir = root / 'apps' / 'woven-shell'
+    env = os.environ.copy()
+    env.pop('CARGO_BUILD_BUILD_DIR', None)
+    env['CARGO_TARGET_DIR'] = str(app_dir / 'target')
+    subprocess.run(['cargo', 'build', '--release'], cwd=app_dir, env=env, check=True)
+    return app_dir / 'target' / 'x86_64-unknown-none' / 'release' / 'wovenhat-woven-shell'
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--qemu')
@@ -19,13 +29,21 @@ def main():
     out = root / 'target' / 'release-validation'
     out.mkdir(parents=True, exist_ok=True)
     report = []
+    # Release acceptance is serialized and must not depend on Cargo's
+    # incremental artifact graph. On Windows, a stale/missing incremental
+    # object directory can make an otherwise valid image build fail before
+    # QEMU starts. Keep the documented project-local target tree, but make the
+    # acceptance chain deterministic and safe to rerun.
+    acceptance_env = os.environ.copy()
+    acceptance_env['CARGO_INCREMENTAL'] = '0'
 
     def run(name, command, run_cwd=root):
         print(f'[{name}]', flush=True)
         start = time.monotonic()
         flags = subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
-        result = subprocess.run(command, cwd=run_cwd, text=True, stdout=subprocess.PIPE,
-                                stderr=subprocess.STDOUT, creationflags=flags)
+        result = subprocess.run(command, cwd=run_cwd, env=acceptance_env, text=True,
+                                stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                                creationflags=flags)
         (out / f'{name}.log').write_text(result.stdout, encoding='utf-8')
         print(result.stdout, flush=True)
         report.append(dict(check=name, passed=result.returncode == 0,
@@ -54,7 +72,7 @@ def main():
         run(f'{suite}-4-release', [sys.executable, f'scripts/test-{suite}-qemu.py', '--cpus', '4', '--release'] + options)
     run('build-release', ['cargo', 'build', '--release'])
     run('shell-smoke', [sys.executable, 'scripts/test-shell-qemu.py'] + options)
-    app_directories = ('woven-calculator', 'woven-terminal', 'woven-files', 'woven-monitor', 'woven-settings', 'woven-security', 'woven-editor', 'woven-images', 'woven-update')
+    app_directories = ('woven-calculator', 'woven-terminal', 'woven-files', 'woven-monitor', 'woven-settings', 'woven-security', 'woven-editor', 'woven-images', 'woven-update', 'woven-store')
     for app in app_directories:
         run(
             f'lint-app-{app}',
@@ -74,6 +92,8 @@ def main():
     for cpus in (1, 2, 4):
         run(f'update-{cpus}', [sys.executable, 'scripts/test-update-qemu.py', '--cpus', str(cpus)] + options)
     for cpus in (1, 2, 4):
+        run(f'store-{cpus}', [sys.executable, 'scripts/test-store-qemu.py', '--cpus', str(cpus)] + options)
+    for cpus in (1, 2, 4):
         run(
             f'system-app-catalog-{cpus}',
             [sys.executable, 'scripts/test-system-app-catalog-qemu.py', '--cpus', str(cpus)] + options,
@@ -81,7 +101,7 @@ def main():
     run('system-apps-boot', [sys.executable, 'scripts/test-shell-qemu.py', '--system-apps'] + options)
     system_app_output = root / 'target' / 'system-apps' / '0.8.0'
     system_app_manifest = json.loads((system_app_output / 'manifest.json').read_text(encoding='utf-8'))
-    system_app_env = os.environ.copy()
+    system_app_env = acceptance_env.copy()
     system_app_env.setdefault(
         'WOVENHAT_APP_TRUSTED_PUBLIC_KEY_HEX',
         'd75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a',
@@ -97,8 +117,10 @@ def main():
             'woven-editor': 'WOVENHAT_EDITOR_IMAGE',
             'woven-images': 'WOVENHAT_IMAGES_IMAGE',
             'woven-update': 'WOVENHAT_UPDATE_IMAGE',
+            'woven-store': 'WOVENHAT_STORE_IMAGE',
         }[item['id']]
         system_app_env[variable] = str(system_app_output / item['package'])
+    system_app_env['WOVENHAT_SHELL_IMAGE'] = str(build_woven_shell(root))
     image = Path(subprocess.check_output(
         ['cargo', 'run', '--quiet', '--release', '--features', 'system-apps', '--', '--print-image'],
         cwd=root, env=system_app_env, text=True).strip())
@@ -108,7 +130,7 @@ def main():
     sources += sorted((root / 'src').rglob('*.rs'))
     sources += sorted((root / 'libwoven' / 'src').rglob('*.rs'))
     sources += sorted((root / 'tools' / 'wapp-packager').rglob('*.rs'))
-    for app in app_directories:
+    for app in app_directories + ('woven-shell',):
         app_root = root / 'apps' / app
         sources += sorted(path for path in app_root.rglob('*') if path.is_file() and path.suffix in {'.rs', '.toml', '.x', '.S'})
     sources += sorted((root / 'scripts').glob('*.py'))

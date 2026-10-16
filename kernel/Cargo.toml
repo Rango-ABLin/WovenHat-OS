@@ -27,9 +27,15 @@ stage10-8-test = ["qemu-test"]
 stage10-9-test = ["qemu-test"]
 stage11-1-test = ["qemu-test"]
 stage11-2-test = ["qemu-test"]
+# Run the compiled libwoven fixture first, then the unchanged Stage 11.2 gate.
+stage11-exit-status-test = ["stage11-2-test"]
 stage11-3-test = ["qemu-test"]
 stage11-4-test = ["qemu-test"]
 stage11-5-test = ["qemu-test"]
+# Execute unmodified compiler output before the unchanged loader gate exits.
+stage11-compiler-test = ["stage11-5-test"]
+stage11-tls-test = ["stage11-2-test"]
+stage11-aslr-test = ["stage11-2-test"]
 stage12-1-test = ["qemu-test"]
 stage12-2-test = ["qemu-test"]
 stage12-3-test = ["qemu-test"]
@@ -56,6 +62,22 @@ stage13-12-test = ["qemu-test"]
 stage13-13-test = ["qemu-test", "stage13-12-test"]
 # Storage mounted from NVMe or AHCI through the selectable root block device.
 stage13-14-test = ["qemu-test", "stage13-12-test"]
+# WovenAudio playback for userspace: AudioPlayback capability, syscalls
+# 203-205, interrupt-driven HDA completion.
+stage13-15-test = ["qemu-test", "stage13-12-test"]
+# Report-protocol HID devices: tablets, digitizers, game controllers.
+stage13-16-test = ["qemu-test", "stage13-12-test"]
+# Disks WovenHat does not own (no WOVENHAT/WOVENLOG volume) are read-only.
+stage13-17-test = ["qemu-test", "stage13-12-test"]
+# USB mass storage (Bulk-Only Transport, SCSI) as a block device.
+stage13-18-test = ["qemu-test", "stage13-12-test"]
+# The boot's log kept on the WovenHat USB stick's WOVENLOG partition.
+stage13-19-test = ["qemu-test", "stage13-12-test"]
+# ACPI power-off (S5); 13.20b resets instead.
+stage13-20-test = ["qemu-test", "stage13-12-test"]
+stage13-20b-test = ["qemu-test", "stage13-20-test"]
+# The WovenShell desktop as the session: F12 console, power off.
+stage20-15-test = ["qemu-test", "stage13-12-test"]
 stage14-1-test = ["network-test"]
 stage14-2-test = ["network-test", "stage14-1-test"]
 stage14-3-test = ["network-test", "stage14-2-test"]
@@ -140,6 +162,12 @@ stage20-10-test = ["qemu-test"]
 stage20-11-test = ["qemu-test"]
 # Login: local accounts with salted SHA-256 PIN hashes, sign-in screen.
 stage20-12-test = ["qemu-test"]
+# Workspaces: switcher, F3/F4, per-workspace windows.
+stage20-13-test = ["qemu-test"]
+# Two monitors: modern virtio-pci transport and a multi-scanout virtio-gpu.
+stage20-14-test = ["qemu-test"]
+# The desktop across two monitors.
+stage20-14b-test = ["qemu-test"]
 stage1-5-test = ["qemu-test"]
 
 [dependencies]

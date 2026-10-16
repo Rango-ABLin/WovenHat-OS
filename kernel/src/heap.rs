@@ -531,6 +531,19 @@ pub fn maintain_capacity() {
 #[cfg(test)]
 pub fn maintain_capacity() {}
 
+/// A `Vec` of `len` copies of `value`, or `None` if memory runs out.
+///
+/// Infallible allocation (`vec![...]`) halts the kernel through the
+/// allocation-error handler when physical memory is exhausted. Paths that
+/// size a buffer from a syscall argument use this instead, so the caller
+/// gets an error rather than stopping the machine.
+pub fn try_filled<T: Copy>(value: T, len: usize) -> Option<Vec<T>> {
+    let mut buffer = Vec::new();
+    buffer.try_reserve_exact(len).ok()?;
+    buffer.resize(len, value);
+    Some(buffer)
+}
+
 pub fn self_test() -> bool {
     let boxed = Box::new(0x574F_5645_4E48_4154_u64);
     let value = *boxed;
@@ -641,6 +654,17 @@ fn align_up(value: usize, alignment: usize) -> Option<usize> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn try_filled_returns_buffer_or_none() {
+        let filled = super::try_filled(7u8, 4096).expect("small allocation");
+        assert_eq!(filled.len(), 4096);
+        assert!(filled.iter().all(|&byte| byte == 7));
+        assert!(super::try_filled(0u8, 0).is_some_and(|buffer| buffer.is_empty()));
+        // A size no allocator can satisfy fails instead of aborting.
+        assert!(super::try_filled(0u32, usize::MAX).is_none());
+        assert!(super::try_filled(0u8, isize::MAX as usize).is_none());
+    }
+
     use super::*;
     use core::{
         ops::{Deref, DerefMut},

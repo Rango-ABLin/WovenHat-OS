@@ -9,7 +9,7 @@ mistaken for full production completion.
 | Stage 6 | Bounded SMP, TLB shootdowns, 1–4 CPU tests, ACPI SRAT CPU/memory-domain discovery, domain-local placement/rebalancing/allocation, x2APIC MSR path, migratable audited I/O workers, QEMU-qualified non-contiguous AP offline/re-online control, ranked interrupt-safe locks for scheduler/process/paging/COW/frame-allocation/file-frame cache/VFS/heap/swap/FAT32 clean-page cache, async/completion/worker, pipe, IPC, WovenGuard lineage, device/keyboard, journal, mount-record and key-vault domains, generation-tagged VFS/pipe handles, unlocked/revalidated disk-backed VFS reads and materialization, allocator-reserved contiguous VirtIO DMA arena, in-place heap metadata and runtime chunk growth | General multicore userspace, unrestricted concurrent I/O/DMA throughput, multi-node NUMA qualification, non-contiguous hotplug hardware qualification, APIC-ID-above-255 hardware coverage, cross-layer FAT32 mutation transactions and stress qualification, guarded-allocation headroom/low-memory and multicore heap stress, broader cross-layer lock stress/priority inheritance |
 | Stages 7–9 | Isolation, IPC, capability delegation/revocation, WovenGuard, ELF W^X, formal threat model | Dynamic libc/linking, complete signals, scheduler-backed threads |
 | Stage 10 | TCP, completion ports, timer/event foundations, Ring-3 timer/event gate, unified completion path | Broader production driver and hardware qualification |
-| Stage 11 | Process/thread state, notifications, `libwoven`, production ASLR, W^X, static RELRO, static initial-exec TLS, bounded self-contained relative/local-symbol PIE relocations, and a bounded scheduler-backed user-thread create/exit/join path with event-driven wakeup | Shared-library dependency mapping, cross-image symbol resolution, dynamic TLS, and hardware qualification |
+| Stage 11 | Process/thread state, notifications, `libwoven`, ASLR, W^X, RELRO, static initial-exec TLS, scheduler-backed user threads, and bounded signed `/lib` graph mapping with cross-image relocation and transactional teardown | General shared-library/toolchain interoperability, REL/PLT tables, constructors/destructors, versioned/weak symbols, library TLS, dynamic TLS, and hardware qualification |
 | Stage 12 | Typed VFS, metadata, checksums, snapshot/mount boundaries, xattrs and restore records, ChaCha20-Poly1305 envelope and bounded revocable key vault | Native WovenFS, journaling/COW disk replay, full data rollback, measured/persistent key provisioning and encrypted-volume mount integration |
 
 For every open item we will add implementation, focused host tests, 1/2/4 CPU
@@ -69,9 +69,13 @@ Deterministic AP rejection and unclaimed-timeout recovery now pass the 2/4-CPU
 QEMU hotplug gate; claimed-transition hardware-fault and concurrent workload
 stress remain open.
 
-Stage 11 loader boundary follow-up: ELF program headers that require loader
-semantics not yet implemented (`PT_INTERP`, shared-library dependencies,
-symbol-based relocation, and unsupported TLS/RELRO forms) fail closed instead
-of being ignored. Self-contained relative PIE relocation, static RELRO, and
-static initial-exec TLS are separately audited bounded capabilities, not a
-claim of a complete dynamic linker. See the loader audits in docs.
+Stage 11 loader follow-up: the original fail-closed boundary has been extended
+with relative/local/global RELA relocation, static main-image initial-exec TLS,
+RELRO, and bounded signed shared-object graphs. `PT_INTERP`, legacy REL/PLT
+tables, library/dynamic TLS, versioned/weak binding and constructors remain
+unsupported. The graph and transactional rollback contract is documented in
+the shared-library audit; this is not a claim of a complete dynamic linker.
+The real Rust/LLD probe additionally finds an incompatible main-image TLS/TCB
+layout and live-state copying during thread initialization. Static TLS metadata
+acceptance does not prove compiler TLS execution; this correctness gate remains
+open alongside the shared-library TLS work.

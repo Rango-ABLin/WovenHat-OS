@@ -10,6 +10,16 @@ import sys
 import time
 
 
+def build_woven_shell(root):
+    """Build WovenShell, the desktop session a system-apps image embeds
+    (Stage 20.15), in its own target directory; returns the image path."""
+    app_dir = root / 'apps' / 'woven-shell'
+    env = os.environ.copy()
+    env.pop('CARGO_BUILD_BUILD_DIR', None)
+    env['CARGO_TARGET_DIR'] = str(app_dir / 'target')
+    subprocess.run(['cargo', 'build', '--release'], cwd=app_dir, env=env, check=True)
+    return app_dir / 'target' / 'x86_64-unknown-none' / 'release' / 'wovenhat-woven-shell'
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--qemu', default=shutil.which('qemu-system-x86_64') or r'C:\Program Files\qemu\qemu-system-x86_64.exe')
@@ -55,7 +65,9 @@ def main():
         build_env['WOVENHAT_EDITOR_IMAGE'] = str(packages['woven-editor'])
         build_env['WOVENHAT_IMAGES_IMAGE'] = str(packages['woven-images'])
         build_env['WOVENHAT_UPDATE_IMAGE'] = str(packages['woven-update'])
+        build_env['WOVENHAT_STORE_IMAGE'] = str(packages['woven-store'])
         build_env.setdefault('WOVENHAT_APP_TRUSTED_PUBLIC_KEY_HEX', test_public_key)
+        build_env['WOVENHAT_SHELL_IMAGE'] = str(build_woven_shell(root))
         feature_arguments = ['--features', 'system-apps']
     cargo_command = ['cargo']
     target_arguments = []
@@ -100,7 +112,7 @@ def main():
                 if process.poll() is not None or time.monotonic() > deadline:
                     raise RuntimeError('Normal boot failed; inspect shell-regression logs')
                 time.sleep(0.1)
-            if args.system_apps and '[APPS] 9 signed applications installed' not in serial.read_text(errors='replace'):
+            if args.system_apps and '[APPS] 10 signed applications installed' not in serial.read_text(errors='replace'):
                 raise RuntimeError('Production system-app catalog was not installed; inspect shell-regression logs')
             time.sleep(1)
             with socket.create_connection(('127.0.0.1', port), timeout=5) as connection:
@@ -121,6 +133,21 @@ def main():
                             return response['return']
 
                 execute('qmp_capabilities')
+                if args.system_apps:
+                    # The desktop session holds the keyboard (Stage 20.15):
+                    # F12 switches to the diagnostic console first.
+                    deadline = time.monotonic() + 60
+                    while '[SESSION] WovenShell desktop started' not in serial.read_text(errors='replace'):
+                        if process.poll() is not None or time.monotonic() > deadline:
+                            raise RuntimeError('The desktop session did not start; inspect shell-regression logs')
+                        time.sleep(0.1)
+                    time.sleep(2)
+                    execute('send-key', {'keys': [{'type': 'qcode', 'data': 'f12'}], 'hold-time': 40})
+                    deadline = time.monotonic() + 30
+                    while '[SESSION] diagnostic console' not in serial.read_text(errors='replace'):
+                        if process.poll() is not None or time.monotonic() > deadline:
+                            raise RuntimeError('F12 did not open the diagnostic console; inspect shell-regression logs')
+                        time.sleep(0.1)
                 for key in list('smptest') + ['ret']:
                     execute('send-key', {'keys': [{'type': 'qcode', 'data': key}], 'hold-time': 40})
                     time.sleep(0.1)

@@ -23,6 +23,9 @@
 //! input and IPC: it must be woken by a message from `<peer>`, then by a key,
 //! then time out.
 //!
+//! With `--timer-event` it waits on a one-shot timer and a manual-reset event
+//! through the unified object wait ABI, then verifies both source masks.
+//!
 //! With `--damage-compositor` and `--damage-client <pid> <peer>` the pair
 //! check damage-only compositing: the compositor sleeps on damage and must
 //! copy exactly the region the client declared, and nothing it changed
@@ -73,6 +76,90 @@ const HEIGHT: u32 = 120;
 
 /// Fail the process with a numeric reason so the gate can tell which step
 /// failed from the exit status.
+/// A quarter second of a 500 Hz square wave: 96-frame periods of +/-0x2000,
+/// 48 kHz 16-bit stereo. In .bss and filled at run time: neither on the
+/// 8 KiB stack nor in the image (the RAM file system holds at most 64 KiB).
+const AUDIO_FRAMES: usize = 12_000;
+
+struct AudioBuffer(core::cell::UnsafeCell<[u8; AUDIO_FRAMES * 4]>);
+
+// SAFETY: hello-gui is single-threaded and audio() takes the only reference.
+unsafe impl Sync for AudioBuffer {}
+
+static AUDIO_PCM: AudioBuffer = AudioBuffer(core::cell::UnsafeCell::new([0; AUDIO_FRAMES * 4]));
+
+fn square_wave(pcm: &mut [u8; AUDIO_FRAMES * 4]) {
+    for (frame, bytes) in pcm.as_chunks_mut::<4>().0.iter_mut().enumerate() {
+        let sample: i16 = if (frame / 48) % 2 == 0 { 0x2000 } else { -0x2000 };
+        let [low, high] = sample.to_le_bytes();
+        *bytes = [low, high, low, high];
+    }
+}
+
+/// Stage 13.15: play the square wave through WovenAudio. Exit 0 once it has
+/// played, 2 with no audio output, 3 if playback was refused or failed, 4 if
+/// the volume could not be set, 5 for an unexpected format.
+fn audio() -> ! {
+    // SAFETY: the only reference to the buffer, taken once.
+    let pcm = unsafe { &mut *AUDIO_PCM.0.get() };
+    square_wave(pcm);
+    let Ok(info) = libwoven::audio_info() else { fail(2) };
+    if info.sample_rate != 48_000 || info.channels != 2 || info.bits != 16 || info.max_bytes < pcm.len() as u32 {
+        fail(5);
+    }
+    match libwoven::audio_play(pcm) {
+        Ok(played) if played == pcm.len() => {}
+        _ => fail(3),
+    }
+    if libwoven::audio_set_volume(80).is_err() {
+        fail(4);
+    }
+    libwoven::exit(0)
+}
+
+fn timer_event() -> ! {
+    let Ok(timer) = libwoven::timer_create(10, 0) else {
+        fail(31)
+    };
+    let Ok(event) = libwoven::event_create(false) else {
+        let _ = libwoven::timer_close(timer);
+        fail(32)
+    };
+    let timer_source = libwoven::WaitObject {
+        handle: timer,
+        timer: true,
+        mask: 1 << 3,
+    };
+    let event_source = libwoven::WaitObject {
+        handle: event,
+        timer: false,
+        mask: 1 << 4,
+    };
+    let deadline = libwoven::ticks().saturating_add(100);
+    let timer_ready = libwoven::wait_any_objects(&[timer_source, event_source], Some(deadline));
+    if timer_ready != Ok(1 << 3) {
+        let _ = libwoven::event_close(event);
+        let _ = libwoven::timer_close(timer);
+        fail(33);
+    }
+    if libwoven::event_set(event, true).is_err() {
+        let _ = libwoven::event_close(event);
+        let _ = libwoven::timer_close(timer);
+        fail(34);
+    }
+    let event_ready = libwoven::wait_any_objects(
+        &[event_source],
+        Some(libwoven::ticks().saturating_add(20)),
+    );
+    let _ = libwoven::event_close(event);
+    let _ = libwoven::timer_close(timer);
+    if event_ready != Ok(1 << 4) {
+        fail(35);
+    }
+    let _ = libwoven::print("hello-gui timer/event wait: PASS\n");
+    libwoven::exit(0)
+}
+
 fn fail(code: u64) -> ! {
     let _ = libwoven::print("hello-gui: failure at step ");
     let mut digits = [0u8; 20];
@@ -84,6 +171,8 @@ fn fail(code: u64) -> ! {
 
 fn main(args: Args) -> ! {
     match args.get(1) {
+        Some(b"--audio") => audio(),
+        Some(b"--timer-event") => timer_event(),
         Some(b"--probe") => probe(args.get(2)),
         Some(b"--input") => run(Input::Poll),
         Some(b"--wait") => run(Input::Wait),

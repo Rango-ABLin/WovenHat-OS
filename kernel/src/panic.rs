@@ -132,6 +132,9 @@ pub fn kernel_panic(message: &dyn fmt::Display) -> ! {
     x86_64::instructions::interrupts::disable();
     let context = PanicContext::capture();
     context.print(message);
+    // On a WovenHat live stick, the report reaches the stick's log too.
+    #[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
+    crate::livelog::panic_flush();
 
     // Under test, a panic is a definite failure: report it to the host now
     // instead of parking until the harness timeout. The report above is

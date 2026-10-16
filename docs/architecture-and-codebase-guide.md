@@ -1,5 +1,15 @@
 # WovenHat OS Architecture & Codebase Guide
 
+## Stages 1–10 release evidence integrity (2026-10-16)
+
+Memory, storage, live-network and Stage 6 hotplug QEMU gates share
+`scripts/qemu_validation.py`: exact successful exit, line-anchored required
+markers, and rejection of tagged failure/timeout or kernel panic anywhere in
+serial output. Expected user faults remain valid isolation evidence. Negative
+host tests exercise every consumer's imported validator. This changes no kernel
+ABI or lifecycle; full preservation is pending, not release acceptance. See
+the foundation release-validation audit and stages 1–10 release ledger.
+
 ## Stage 19 WovenCalculator (2026-10-14)
 
 `apps/woven-calculator` is a separate Ring-3 crate with a bounded checked
@@ -50,15 +60,20 @@ update preflight and leaves installation, activation, and rollback to a future
 privileged update service. Its signed 1/2/4-CPU execution evidence is recorded
 in the Stage 19 WovenUpdate audit.
 
+`apps/woven-store` is the tenth increment. It provides bounded read-only
+installed-catalog browsing and leaves package acquisition and mutation to a
+future privileged service. Its signed 1/2/4-CPU execution evidence is recorded
+in the Stage 19 WovenStore audit.
+
 `scripts/package-system-apps.py` is the release packaging boundary for these
-nine accepted apps. It builds each app in its own workspace, signs the ELF
+ten accepted apps. It builds each app in its own workspace, signs the ELF
 with WAPP v1, checks the envelope before publication, and emits hashed package
 and `/share/applications` catalog artifacts in one install-plan manifest. The
 manifest is consumed by the feature-gated multi-package RAM installer; the
 remaining roadmap applications and full GUI integration remain open.
 
 The feature-gated `stage19-app-catalog-test` now exercises the install-plan
-boundary for all nine accepted packages together. It verifies each WAPP,
+boundary for all ten accepted packages together. It verifies each WAPP,
 rejects a mutation, installs and reads each package back through the VFS,
 passes the bytes through the verified ELF loader, and publishes the matching
 catalog descriptor only after those checks. The 1/2/4-CPU evidence is in the
@@ -95,6 +110,83 @@ DHCP, DNS, ICMP, host-verified UDP/TCP round trips, and SMP/TLB checks. The
 evidence is recorded in the [Stage 14.5D revalidation audit](audit-stage14-5d-revalidation-2026-10-14.md).
 It qualifies the QEMU virtio boundary only; native NIC/radio and physical-link
 behavior remain hardware work.
+
+## Stage 13.16 report-protocol HID: tablets, pens, touch, game controllers (2026-10-14)
+
+`kernel/src/hid.rs` is a pure module (no allocation, no kernel state) that
+host tests compile directly (`tests/hid_reports.rs`).
+
+**`parse`.** It reads a HID report descriptor into a bounded `Layout`:
+- the top-level application: mouse, pointer, pen, touch screen, touchpad,
+  joystick or game pad;
+- up to 48 input fields, each with its usage, report ID, bit offset and
+  size, logical range, and whether it is relative.
+
+It handles report IDs, usage ranges, push and pop, padding, and long
+items. A malformed descriptor, or one with an application it doesn't
+decode, is refused.
+
+**`Decoder`.** It turns reports into `Input` events and keeps the state it
+needs to report only changes:
+- relative and absolute pointer motion;
+- wheel;
+- button edges;
+- pen position, pressure and contact;
+- per-contact touch, with each contact's lift;
+- game-controller buttons, axes and hat.
+
+Positions are scaled to 0..=32767 and pressure to 0..=1023.
+
+**xHCI.**
+- `parse_hid_interface` reads the report descriptor's length from the HID
+  class descriptor.
+- A HID interface that isn't a boot keyboard or mouse has its report
+  descriptor fetched (GET_DESCRIPTOR, report type, addressed to the
+  interface) and parsed. It is kept as an input device only if the layout
+  decodes.
+- Reports up to 64 bytes are copied.
+- The `usb-input` worker builds one `Decoder` per report device when it
+  starts, and maps decoded inputs to WovenInput events, still outside the
+  controller lock.
+
+**WovenInput and userspace.** `Scroll`, `PointerAbsolute`, `Touch`, `Pen`
+and `GameController` are production events, encoded to userspace as input
+kinds 9–13 and decoded by libwoven's `InputEvent`.
+
+## Stage 13.15 WovenAudio playback for userspace (2026-10-14)
+
+When bring-up starts `hda0`, it calls `hda::start_output("hda0")`.
+1. **Output setup.** `prepare_output` finds the output route (converter,
+   pin, amplifier), enables the pin, sets the amplifier to 75%, and
+   allocates the playback stream's memory once: a buffer descriptor list
+   and 16 DMA pages, 64 KiB in all.
+2. **Interrupt.** The controller's MSI-X or MSI vector is bound through the
+   driver manager.
+
+**Syscalls.**
+- **203 `AudioInfo`:** the output format, 48 kHz 16-bit stereo, and the
+  largest buffer one play accepts.
+- **204 `AudioPlay`:** needs the new `AudioPlayback` capability.
+  1. It copies the PCM into kernel memory, because user pages may fault and
+     the controller's IRQ lock must not be held across a fault.
+  2. Only one playback runs at a time. The calling task registers as the
+     vector's waiter.
+  3. `begin_playback` fills the pages and the descriptor list, with
+     interrupt-on-completion on the last entry only, and starts the stream
+     with IOCE set. The caller then sleeps in `wait_for_event_until`.
+  4. The stream's completion interrupt wakes it. It checks BCIS, stops the
+     stream and clears its waiter registration.
+  5. Every attempt is recorded in the security ledger (`Action::AudioPlay`).
+- **205 `AudioSetVolume`:** needs `AudioPlayback`; sets the output
+  amplifier gain, and 0 mutes.
+
+libwoven exposes `audio_info`, `audio_play` and `audio_set_volume`.
+
+**Capability.** `AudioPlayback` is capability 24 and permission 16
+(`Permission::Audio`). It is in the system-service ceiling and in the user
+ceiling, so the permission broker can grant it. Recording is not
+implemented yet; it will use the existing broker-gated `Microphone`
+capability.
 
 ## Stage 13.14 storage on NVMe and AHCI (2026-10-14)
 
@@ -216,43 +308,159 @@ USB mouse decoder audit.
 ## Stage 15 bounded WovenFS VFS write-through (2026-10-14)
 
 The `/wfs/<name>` namespace has one production mutation authority:
-`task::open_current`, `task::write_current`, and `task::unlink_current` route
+`task::open_current`, `task::write_current`, `task::mkdir_path`,
+`task::rename_current`, and `task::unlink_current` route
 through native WovenFS. Creation is durable before a read-only VFS node is
 published; writes commit the native transaction before updating the VFS cache
 or shared descriptor offset; unlink follows durable-first ordering. The
-adapter validates one flat root name and rejects traversal, nested paths, and
-prefix confusion.
+adapter validates nested native paths and rejects traversal, empty components,
+NULs, and prefix confusion.
 
 Native mutations serialize their complete read-modify-write operation with a
 rank-5 `PreemptMutex`, below the ATA device lock at rank 10. No IRQ-disabled
-guard spans device I/O. This is a bounded file authority, not full
-directory/POSIX integration; rename, mkdir, directory enumeration, and
-physical flash qualification remain open. See the Stage 15 write-through audit.
+guard spans device I/O. Directory creation, empty-directory removal, and
+rename update parent entries transactionally; ATA publication recursively
+imports validated nested directories with bounded depth and visited-inode
+tracking; `Volume::check()` applies the same complete-tree integrity boundary.
+Mounted system policy and physical flash qualification remain open. See the Stage 15
+write-through audit.
 
 ## Stage 11.2 scheduler-backed thread ownership (2026-10-14)
 
+ASLR geometry CPU regression (2026-10-16): the private graph-loader geometry
+seam exercises supported production draws without changing the userspace ABI
+or normal randomization. Stage `11.2-aslr` fills all sixteen 64 KiB mmap slots
+before writing the prevalidated stack guard. Stack draw 16 / mmap draw 0
+currently exits 99, proving the guard became writable; required fault -11 is
+not met. This failing gate is evidence, not a planner correction or acceptance.
+See the ASLR geometry audit. Both its call site and module are feature guarded.
+
+Bounded main-image local-exec TLS accepted (2026-10-16): `InitialTls` records a checked
+Variant-II layout and an independently tracked RO/NX post-relocation template.
+Mutable main/child storage contains a mapped FS:0 self pointer; fresh threads
+receive initialized template state, not mutated main-thread bytes. Parser
+backing/congruence, clone, logical permission and teardown accounting are
+updated together. Expanded compiler fork/cancel/capacity/owner-exit and biased
+pointer-initializer execution passes on every online CPU in 1/2/4-CPU boots;
+full session 37505 passed with 515 unchanged inputs, seventeen feature lints,
+nine focused and twenty-one inherited boots, plus sixty stress logs. See the
+implementation audit for scope: pure-BSS runtime and broader/library TLS remain
+open, as does the separate production-ASLR arena-overlap finding. Later older
+TLS-pending statements in this section describe the pre-correction baseline.
+
+Compiler shared-PIE correction accepted (2026-10-15): ELF parsing explicitly
+accepts a single inert null DT_DEBUG entry, rejecting nonzero addresses and
+duplicates. The new opt-in compiler gate executes exact signed Rust/LLD output
+through the graph loader before requiring every original Stage 11.5 check.
+Session 73596 passed full host/lint and inherited 1/2/4-CPU preservation with
+all 505 inputs unchanged. Compiler TLS remains open. See the compiler-PIE audit.
+
+Accepted loader placement correction (2026-10-15): the validated ELF kind now
+selects main-image placement. ET_EXEC ignores an offered ASLR delta; ET_DYN
+retains it. The signed graph loader, dependency ownership and library windows
+are preserved. A nonzero-candidate compiled static fixture and a biased PIC
+probe pass on 1/2/4 CPUs. Full host/lint, exact Stage 10.7 and Stage 10.8–11.5
+preservation passed in session 62865, exit 0, with all 500 inputs unchanged.
+See the executable-placement audit and Claude's source policy `6f02202d`.
+Compiler TLS remains open; this does not qualify a new release or full stage.
+
+Accepted foundation/status corrections (2026-10-15): user-mapping ancestors
+are explicitly writable while leaves retain W^X/RELRO/COW policy, including
+read-only COW/file mappings; this prevents sole-owner COW refaults. Process wait
+checks parent ownership before scheduler liveness, without nesting those locks,
+and rechecks in the original reap transaction. Process wait and thread join
+share a zero-extending 32-bit exit payload encoder, separate from 64-bit errors.
+The real libwoven fixture catches these boundaries and preserves original
+Stage 11.2 assertions. All three bounded corrections are accepted in prerequisite
+order on the unchanged 500-input baseline, with full Stage 10.7/10.8–11.5
+preservation on 1/2/4 CPUs and warning-denying host/fixture/kernel QA. See the
+three dedicated audits and combined evidence. None is a release/hardware
+qualification or complete compiler-TLS/loader interoperability.
+
+Earlier-stage IPC follow-up (2026-10-15, bounded correction accepted): `HandleSpace`
+now skips empty slots whose preserved 24-bit generation is already maximum.
+The last live generation remains valid until close. The existing state guard,
+16-slot ordinary capacity, 32-bit encoding, metadata and five installation
+paths are unchanged. Actual-source boundary probes, production rollback/teardown
+and inherited runtime preservation pass on the frozen baseline; see the
+handle-generation audit. This is separate from thread-record retirement.
+Durable host coverage is now part of `cargo test`; a `qemu-test`-guarded
+post-SMP probe exercises real installation rollback, queued escrow, waiters,
+lineage and frame cleanup. Its final revised full acceptance chain exited 0,
+including full Stage 10.7 and Stage 10.8–11.5 matrices on 1/2/4 CPUs. All 488
+frozen inputs matched at that increment's acceptance. Signed-status encoding
+has since passed its own separate 500-input acceptance;
+full runtime, release and hardware production closure remain open.
+
+The registry now reserves generation `u32::MAX` as a permanent exhaustion
+sentinel: a free record at that value is never allocated again. All three
+release paths retain their existing checked generation advancement under the
+rank-10 registry guard. The accepted bounded correction has five actual-source
+host regressions plus full Stage 10.7 and Stage 10.8–11.5 preservation on
+1/2/4 CPUs with unchanged frozen sources; see the thread-generation audit.
+The exit-result ABI collision has since been corrected and accepted separately;
+compiler-compatible TLS remains open.
+
 `TaskControlBlock` carries both the stable process owner and an optional
 generation-safe thread ID. User-thread creation maps a private NX stack and a
-private copy of the process's bounded initial-exec TLS image into the existing
+private initialization from the immutable main-image TLS template into the existing
 address space; it never retains an unchecked userspace pointer. Thread exit
 publishes registry termination only after the scheduler completes the stack
 hand-off, so join can safely reclaim those mappings. Join waiters use the
 scheduler's latched event path, and process termination retires ready/blocked
 siblings immediately while running siblings receive a safe-point termination
-request. The address space remains owned by the process until its parent
-reaps the process. Shared libraries, symbol resolution, dynamic TLS, and
-physical qualification remain outside this bounded increment.
+request. `ThreadCancel` (ABI 136) applies the same two-state rule to an owned
+sibling without killing its process: ready/blocked targets are marked dead and
+the registry is transitioned under the scheduler lock, while running targets
+carry the request through the existing post-switch finalizer. Both paths wake
+the single join waiter and retain the generation-tagged record until join
+reclaims the private mappings. The address space remains owned by the process
+until its parent reaps the process. Process exit now retires unjoined sibling
+threads, defers address-space destruction until all scheduler hand-offs are
+complete, and reclaims generation-tagged thread records only after the parent
+wait path releases the process-table lock. Shared libraries, symbol
+resolution, dynamic TLS, and physical qualification remain outside this
+bounded increment.
 
-## Stage 11.5 bounded symbol relocation (2026-10-14)
+## Stage 11.5 bounded symbol relocation (2026-10-14; scope groundwork 2026-10-15)
 
 `elf::DynamicImage` validates a SysV hash table, dynamic symbol table, and
 string table within bounded file-backed load segments. `userspace::load_elf`
 applies `R_X86_64_RELATIVE` and locally defined `R_X86_64_64`,
 `R_X86_64_GLOB_DAT`, and `R_X86_64_JUMP_SLOT` entries before W^X/RELRO
-finalization. Undefined symbols, `DT_NEEDED`, legacy REL/PLT tables, and
-cross-image resolution fail closed. This is a prerequisite for a dynamic
-linker, not shared-library support; dependency mapping, versioning, lazy
-binding, and dynamic TLS are still unimplemented.
+finalization. The subsequent signed-library integration in
+`userspace/linker.rs` loads a breadth-first graph of at most four verified WAPP
+dependencies from `/lib`, checks SONAME identity, maps each into a separate
+window, applies cross-image relocations, and protects every RELRO range.
+`elf::SymbolScope` preserves discovery order and supports transitive cycles.
+The process owns all mappings; an unpublished `Pending` guard rolls back all
+failures, including argv setup. Compact page-range metadata retains forty
+mapping slots within the existing fork stack budget. Root destruction walks
+every empty private user-table branch and refuses copied kernel branches.
+Legacy REL/PLT tables, versioned/weak symbols, constructors/destructors, lazy
+binding and library TLS remain unsupported. See
+`audit-stage11-shared-libraries-2026-10-15.md` for validation and limits.
+
+The historical main-image TLS mapping was not a compiler-compatible TCB:
+the real Rust local-exec probe expects a self-pointer at `FS:0` and aligned
+template bytes immediately below it. The existing page-end FS base has neither;
+new-thread cloning also copied mutable main-thread state. The correction and
+full bounded compiler local-exec acceptance are recorded above and in the
+compiler-TLS implementation audit. Do not infer broader TLS-model acceptance.
+
+The symbol resolver and the production loader now share
+`Image::defined_symbol_value`: ELF symbol values receive the image load bias
+before validation against relocated segments, and the entire declared symbol
+range must fit. Local relocation can reference private definitions; scope
+exports require global binding, default/protected visibility and ordinary
+NOTYPE/OBJECT/FUNC semantics. Undefined, TLS, IFUNC and reserved section values
+cannot become ordinary relocation addresses. Dependency scope validation
+preserves `DT_NEEDED` order, and resolution requires a complete validated scope.
+Parser-backed regression fixtures live in `tests/elf_scope.rs`.
+
+Debug builds optimize the `sha2` dependency (`profile.dev.package.sha2`) so
+hashing the complete debug kernel ELF does not dominate emulated boot. Full
+kernel measurement and the SHA known-answer check remain enabled.
 
 ## Stage 13.2 PCI power-state ownership (2026-10-13)
 
@@ -493,10 +701,10 @@ qualification.
 | `device.rs`, `keyboard.rs`, `mouse.rs`, `serial.rs`, `console.rs`, `terminal.rs`, `shell.rs` | Device registry, input (keyboard and PS/2 mouse both decode and publish at IRQ time), diagnostics and command interfaces |
 | `graphics.rs`, `gui.rs` | Existing framebuffer/GUI support; not the future compositor |
 | `rtc.rs` | CMOS real-time clock (UTC), behind the `ClockRead` syscall |
-| `font.rs`, `display.rs` | 5×7 ASCII font (also compiled into libwoven); `Surface` (opaque `blit`, `blit_region` for exposed-region redraw, uniform-opacity `blend`, `write_pixels` for client uploads), bounded `Damage` and the single format-resolving presentation path (`present_scaled`, integer display scale; `present` is scale 1) |
+| `font.rs`, `display.rs` | 5×7 ASCII font (also compiled into libwoven); `Surface` (opaque `blit`, `blit_region` for exposed-region redraw, uniform-opacity `blend`, `write_pixels` for client uploads), bounded `Damage` (regions that form exactly a rectangle merge; a full list collapses to one bounding box) and the single format-resolving presentation path (`present_scaled`, integer display scale, each row converted once and copied to the physical rows it covers; `present` is scale 1; `Surface::scaled_row` serves the virtio-gpu heads) |
 | `user_graphics.rs`, `compositor.rs` | Owner-tagged, generation-checked client surfaces (syscalls 98–101, 104), up to 1920×1200 within a 4 MB per-process and 16 MB system pixel budget, behind a preemption lock (not interrupts-off) with allocation and freeing outside it and the kernel-held compositor surface they are blitted onto (102–103); `blit` snapshots under the registry lock and releases it before taking the compositor lock, so the two rank-10 locks never nest. Presentation borrows the framebuffer through `terminal::with_framebuffer` (lock order compositor → terminal), and display ownership suppresses terminal rendering while the compositor presents. Userspace reaches the compositor only with `DisplayIo` and the single-holder lease (syscalls 105–106), released on exit; every client token is bound to the calling process before the registry sees it. A presenting holder also takes input focus: `woven_input` routes events to its private bounded queue (syscall 107, `InputIo`) until it exits; syscall 108 sleeps for the next event with a single registered waiter woken by `publish` after `FOCUS` is released (lock order scheduler → compositor → FOCUS). A client may share one of its surfaces with one process (syscall 109); the lease holder composites it with syscall 110, authorised by the slot's grant rather than the token. Syscall 111 sleeps over input and the pid mailbox at once; `ipc::send` wakes the mailbox's single waiter after releasing the IPC lock. Clients declare damage on their surfaces (syscall 112); the holder sleeps on it via `WaitAny` and copies only the damaged region (syscall 113). The boot compositor is sized to the framebuffer (clamped to 1920×1200), and every framebuffer writer, including the boot `Console`, goes through the terminal lock. Stacking, raise and per-window focus are window-manager policy in userspace (Stage 19.11), built on the lease, focus, `WaitAny`, shared surfaces and IPC |
 | `panic.rs`, `benchmark.rs` | Failure reporting and existing benchmark support |
-| `libwoven/`, `apps/hello`, `apps/hello-gui`, `apps/woven-shell` | The userspace API (one thin wrapper per syscall, plus `Canvas` software rendering, the shared kernel font, and a fixed-point `Spring` for animation, and `accounts`, local accounts held as a salt and `SHA-256(salt || PIN)`) and the Ring-3 programs. Each app is its own crate with a large-code-model `link.x` (whose `.l*` sections must be placed explicitly) and a `build.rs` that relinks when it changes. `woven-shell` is the desktop: it holds the compositor lease and recomposes exposed rectangles from its own software layers and clients' shared surfaces (region blits, syscalls 120–121), hosting applications over an IPC protocol (`WOPN`, `TRAY`, `NOTE`, `WCLS`, and `WSIZ`/`WRSZ` for resizing; `libwoven::layout` tiles them); shadows and other translucent layers use region blends (syscalls 200–201), and text, borders and the pointer are overlays copied with a keyed blit that skips the transparent key (syscall 202), so nothing is read back from the screen. With `--accounts` it starts at a sign-in screen, and its lock screen asks for the signed-in account's PIN. A user stack is 8 KiB (`UserStack::SIZE`), so the shell keeps its tile buffer and desktop state in statics (.bss), never in `main`'s frame |
+| `libwoven/`, `apps/hello`, `apps/hello-gui`, `apps/woven-shell` | The userspace API (one thin wrapper per syscall, plus `Canvas` software rendering, the shared kernel font, and a fixed-point `Spring` for animation, and `accounts`, local accounts held as a salt and `SHA-256(salt || PIN)`) and the Ring-3 programs. Each app is its own crate with a large-code-model `link.x` (whose `.l*` sections must be placed explicitly) and a `build.rs` that relinks when it changes. `woven-shell` is the desktop, with four workspaces (per-workspace stacks, a taskbar switcher, F3/F4): it holds the compositor lease and recomposes exposed rectangles from its own software layers and clients' shared surfaces (region blits, syscalls 120–121), hosting applications over an IPC protocol (`WOPN`, `TRAY`, `NOTE`, `WCLS`, and `WSIZ`/`WRSZ` for resizing; `libwoven::layout` tiles them); shadows and other translucent layers use region blends (syscalls 200–201), and text, borders and the pointer are overlays copied with a keyed blit that skips the transparent key (syscall 202), so nothing is read back from the screen. With `--accounts` it starts at a sign-in screen, and its lock screen asks for the signed-in account's PIN. A user stack is 8 KiB (`UserStack::SIZE`), so the shell keeps its tile buffer and desktop state in statics (.bss), never in `main`'s frame |
 | `tests/`, `scripts/`, `run-stage*-acceptance.ps1` | Host regressions, QEMU orchestration and stage preservation gates |
 
 ## Stage 6 filesystem concurrency boundary
@@ -1213,3 +1421,13 @@ This closure does not yet claim complete transport parity, malformed-IP
 fail-closed parsing, IPv6 extension-header inspection, a live routed Forward
 hook, persistent rules, logging/counters, stateful connection tracking, or
 NAT. Those are subsequent firewall/network-management hardening work.
+## Unified timer/event waits
+
+Stage 19.8 keeps syscall 111 stable for input, mailbox, and compositor damage.
+Syscall 206 (`WaitAnyObjects`) adds a separate bounded ABI for up to eight
+owner- and generation-checked timer/event objects. The kernel copies the source
+array before registration, uses task wakeups rather than polling, and clears
+registrations on every return path. Manual-reset events support four bounded
+task waiters and broadcast wakeups; one-shot timers retain one consuming task
+waiter so expiry is not duplicated. See [the ABI contract](wait-any-objects-abi.md)
+and [the Stage 19.8 audit](audit-stage19-8-timer-event-wait-2026-10-15.md).

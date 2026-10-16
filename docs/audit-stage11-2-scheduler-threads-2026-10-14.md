@@ -90,3 +90,67 @@ fully event-driven wait queue. Process-wide sibling cancellation and teardown
 of unjoined thread records still need a dedicated lifecycle pass. Shared
 libraries, symbol-based relocations, dynamic TLS/module IDs, and physical
 hardware qualification remain fail-closed or unqualified.
+
+## 2026-10-15 sibling-cancellation follow-up
+
+The scheduler-backed thread boundary now includes append-only syscall 136,
+`ThreadCancel`. A process may cancel an owned sibling with an explicit exit
+status. Ready, blocked, and sleeping targets are retired while the scheduler
+lock protects selection metadata; running and switching targets carry the
+request to the existing post-switch finalizer. Both paths transition the
+generation-tagged registry exactly once, wake the registered join waiter, and
+leave the thread record/resources available for `ThreadJoin` to unmap and
+reclaim. Canceling the current thread, a foreign handle, an exited handle, or
+an invalid generation is rejected.
+
+The Stage 11.2 Ring-3 image now exercises normal create/exit/join followed by
+create/cancel/join with status 23. The focused gate passed on 1, 2, and 4
+CPUs; serial evidence is retained at:
+
+```text
+audit-artifacts/stage11.2-1cpu-1792053325191002600
+audit-artifacts/stage11.2-2cpu-1792053407390931300
+audit-artifacts/stage11.2-4cpu-1792053457047808100
+```
+
+Additional validation passed:
+
+```text
+cargo check -p wovenhat-os --all-targets
+cargo clippy -p wovenhat-os --all-targets -- -D warnings
+cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage11-2-test -- -D warnings
+cargo test -p wovenhat-os --tests --no-fail-fast
+```
+
+This closes sibling cancellation for the bounded scheduler-backed thread
+increment. It does not claim process-wide teardown of unjoined thread records,
+shared-library loading, cross-image symbol resolution, dynamic TLS/module IDs,
+or physical hardware qualification.
+
+## 2026-10-15 process-teardown follow-up
+
+The process exit path now retires unjoined scheduler-backed siblings before
+publishing the process zombie. Ready/blocked/sleeping siblings are removed
+from scheduling and their thread records are terminated after releasing the
+scheduler lock. Running siblings receive the internal thread-exit request and
+complete through the existing post-switch finalizer; the termination-request
+safe point distinguishes that sentinel from a process signal. The exited
+process retains its address space and mappings until `wait_process` observes
+that no sibling task is live, then reclaims thread records and destroys the
+address space after releasing the process-table lock.
+
+This closes the previously open unjoined-sibling teardown requirement for the
+bounded scheduler-backed thread model. The Ring-3 image explicitly creates a
+third sibling and exits the process without joining it. Final focused evidence:
+
+```text
+audit-artifacts/stage11.2-1cpu-1792057473308506500
+audit-artifacts/stage11.2-2cpu-1792057580969821900
+audit-artifacts/stage11.2-4cpu-1792057667538341900
+```
+
+The earlier failed runs remain preserved as diagnostic evidence: one
+identified lower-ranked registry cleanup under the scheduler lock, and the
+other identified a privileged `HLT` in the Ring-3 fixture. Neither is counted
+as acceptance evidence. Host tests, host all-targets Clippy, freestanding
+Stage 11.2 Clippy, and the final 1/2/4-CPU gates passed after both fixes.

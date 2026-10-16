@@ -14,6 +14,10 @@ use crate::paging;
 use crate::task::{self, TaskId};
 use crate::wovenguard::{self, LineageId, ServiceClass};
 
+#[cfg(feature = "qemu-test")]
+#[path = "ipc_generation_tests.rs"]
+mod generation_tests;
+
 pub use crate::config::MAX_MESSAGE_SIZE;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -173,6 +177,11 @@ struct LegacyEndpoint {
     /// One task of the owner sleeping until a message arrives. `send` takes
     /// it and wakes it after STATE is released; teardown just drops it.
     waiter: Option<TaskId>,
+    /// Messages dequeued so far (wrapping). A receiver peeks, copies the
+    /// payload out with no lock held, then dequeues only if this is
+    /// unchanged, so two threads of one process never take the same message
+    /// or drop the next one.
+    dequeued: u64,
 }
 
 impl LegacyEndpoint {
@@ -181,6 +190,7 @@ impl LegacyEndpoint {
         messages: [Message::EMPTY; QUEUE_DEPTH],
         length: 0,
         waiter: None,
+        dequeued: 0,
     };
 
     fn enqueue(&mut self, message: Message) -> Result<(), Error> {
@@ -200,6 +210,7 @@ impl LegacyEndpoint {
         self.messages.copy_within(1..self.length, 0);
         self.length -= 1;
         self.messages[self.length] = Message::EMPTY;
+        self.dequeued = self.dequeued.wrapping_add(1);
         Ok(message)
     }
 }
@@ -368,6 +379,10 @@ struct HandleSpace {
 }
 
 impl HandleSpace {
+    // All 24 generation bits are valid in a live handle. Once that last
+    // handle is closed, its slot must never reissue an earlier authority.
+    const MAX_GENERATION: u32 = 0x00ff_ffff;
+
     const EMPTY: Self = Self {
         owner: 0,
         entries: [None; MAX_HANDLES],
@@ -393,12 +408,14 @@ impl HandleSpace {
         let slot = self
             .entries
             .iter()
-            .position(Option::is_none)
+            .enumerate()
+            .find_map(|(slot, entry)| {
+                (entry.is_none() && self.generations[slot] < Self::MAX_GENERATION).then_some(slot)
+            })
             .ok_or(Error::HandleTableFull)?;
-        let mut generation = self.generations[slot].wrapping_add(1) & 0x00ff_ffff;
-        if generation == 0 {
-            generation = 1;
-        }
+        // Selection above proves this addition fits the ABI generation field.
+        // Preserve exhausted counters on remove and retire them permanently.
+        let generation = self.generations[slot] + 1;
         self.generations[slot] = generation;
         self.entries[slot] = Some(HandleEntry {
             object,
@@ -608,14 +625,27 @@ impl State {
             .dequeue()
     }
 
-    fn peek(&self, receiver: u64) -> Result<Message, Error> {
+    fn peek(&self, receiver: u64) -> Result<(Message, u64), Error> {
         let endpoint = self.legacy_endpoint(receiver).ok_or(Error::NoEndpoint)?;
         endpoint
             .messages
             .first()
             .copied()
             .filter(|_| endpoint.length != 0)
+            .map(|message| (message, endpoint.dequeued))
             .ok_or(Error::QueueEmpty)
+    }
+
+    /// Dequeue the head only if it is still the message `peek` returned
+    /// with `serial`; otherwise another receiver took it (`QueueEmpty`).
+    fn receive_if(&mut self, receiver: u64, serial: u64) -> Result<Message, Error> {
+        let endpoint = self
+            .legacy_endpoint_mut(receiver)
+            .ok_or(Error::NoEndpoint)?;
+        if endpoint.dequeued != serial {
+            return Err(Error::QueueEmpty);
+        }
+        endpoint.dequeue()
     }
 
     fn create_endpoint_object(&mut self, owner: u64) -> Result<Handle, Error> {
@@ -1648,12 +1678,15 @@ pub fn message_pending(owner: u64) -> bool {
     STATE.lock().peek(owner).is_ok()
 }
 
-pub fn receive(receiver: u64) -> Result<Message, Error> {
-    STATE.lock().receive(receiver)
+/// The head message and the endpoint's dequeue serial, for [`receive_if`].
+pub fn peek(receiver: u64) -> Result<(Message, u64), Error> {
+    STATE.lock().peek(receiver)
 }
 
-pub fn peek(receiver: u64) -> Result<Message, Error> {
-    STATE.lock().peek(receiver)
+/// Dequeue the message [`peek`] returned with `serial`, if no other
+/// receiver has dequeued since.
+pub fn receive_if(receiver: u64, serial: u64) -> Result<Message, Error> {
+    STATE.lock().receive_if(receiver, serial)
 }
 
 /// Stage 8.1: create a kernel-owned IPC endpoint object and install an opaque
@@ -2147,6 +2180,26 @@ pub fn self_test() -> bool {
             || message.payload() != payload
             || state.receive(RECEIVER) != Err(Error::QueueEmpty)
             || state.send(99, RECEIVER, payload) != Err(Error::NoEndpoint)
+        {
+            return None;
+        }
+        // Two receivers peek the same head; the first dequeues it. The
+        // second's stale serial must neither take a message nor drop the
+        // next one, and a fresh peek must see that next message.
+        state.send(SENDER, RECEIVER, b"first").ok()?;
+        state.send(SENDER, RECEIVER, b"second").ok()?;
+        let (peeked, serial) = state.peek(RECEIVER).ok()?;
+        let taken = state.receive_if(RECEIVER, serial).ok()?;
+        if peeked.payload() != b"first"
+            || taken.payload() != b"first"
+            || state.receive_if(RECEIVER, serial) != Err(Error::QueueEmpty)
+        {
+            return None;
+        }
+        let (next, serial) = state.peek(RECEIVER).ok()?;
+        if next.payload() != b"second"
+            || state.receive_if(RECEIVER, serial).ok()?.payload() != b"second"
+            || state.peek(RECEIVER).err() != Some(Error::QueueEmpty)
             || state.unregister(SENDER).is_err()
             || state.unregister(SENDER) != Err(Error::NoEndpoint)
         {
@@ -2251,6 +2304,11 @@ pub fn handle_object_self_test() -> bool {
 /// endpoint/object/handle behind. This proves the production lock/state path,
 /// not only the local pure-State self-test.
 pub fn stage8_1_runtime_probe() -> bool {
+    #[cfg(feature = "qemu-test")]
+    if !generation_tests::run() {
+        return false;
+    }
+
     const PROBE_OWNER: u64 = u64::MAX - 8;
 
     // Exercise the production public API rather than reaching into State

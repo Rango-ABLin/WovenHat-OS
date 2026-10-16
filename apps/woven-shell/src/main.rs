@@ -99,6 +99,21 @@
 //! account's PIN. Every process still runs with the same kernel credentials:
 //! per-user sessions need the kernel to start processes as another user.
 //!
+//! # Monitors
+//!
+//! With several monitors (a multi-head display), the desktop spans them
+//! left to right. The first is the primary: the taskbar, panels, launcher,
+//! new windows and tiling use it, while the wallpaper, pointer and window
+//! dragging cover every monitor.
+//!
+//! # Workspaces
+//!
+//! Four workspaces, each with its own windows and stacking order. The
+//! switcher left of the Quick Settings button shows them, the current one
+//! highlighted; clicking one, or F3, switches. F4 moves the focused window
+//! to the next workspace and follows it. Windows open on the current
+//! workspace; tiling and the taskbar's window entries cover only it.
+//!
 //! # WovenStart
 //!
 //! The start button, or F1, opens the launcher: the applications listed in
@@ -177,6 +192,10 @@ const SHADOW: u32 = rgb(0, 0, 0);
 const CLOSE_SIZE: i32 = 10;
 const CLOSE_FILL: u32 = rgb(170, 60, 60);
 const MAX_WINDOWS: usize = 4;
+/// Workspaces, and the switcher boxes that show them.
+const WORKSPACES: usize = 4;
+const WORKSPACE_BOX: i32 = 12;
+const WORKSPACE_GAP: i32 = 2;
 /// New windows cascade from here, this far apart.
 const CASCADE_ORIGIN: i32 = 40;
 const CASCADE_STEP: i32 = 24;
@@ -227,7 +246,7 @@ const CENTER_WIDTH: i32 = 164;
 const CENTER_TITLE: &str = "Notifications";
 const CENTER_CLEAR: &str = "Clear";
 const QS_TITLE: &str = "Quick Settings";
-const QS_ROWS: usize = 4;
+const QS_ROWS: usize = 6;
 
 /// How dark the lock screen makes the wallpaper behind it.
 const LOCK_DIM: u8 = 160;
@@ -405,6 +424,68 @@ impl Area {
     }
 }
 
+/// Most separate areas [`Dirty`] keeps.
+const DIRTY_AREAS: usize = 4;
+
+/// The areas to repaint this frame, kept apart while merging them would
+/// repaint pixels that did not change: one bounding box over a window at the
+/// top left and the tray at the bottom right covers most of the screen.
+struct Dirty {
+    areas: [Area; DIRTY_AREAS],
+    len: usize,
+}
+
+impl Dirty {
+    const fn new() -> Self {
+        Self { areas: [Area::new(0, 0, 0, 0); DIRTY_AREAS], len: 0 }
+    }
+
+    fn of(area: Area) -> Self {
+        let mut dirty = Self::new();
+        dirty.add(area);
+        dirty
+    }
+
+    fn add(&mut self, area: Area) {
+        if area.is_empty() {
+            return;
+        }
+        let size = |area: Area| i64::from(area.width) * i64::from(area.height);
+        // Absorb every area whose merge costs no more than the two apart.
+        let mut area = area;
+        let mut index = 0;
+        while index < self.len {
+            let other = self.areas[index];
+            if size(other.union(area)) <= size(other) + size(area) {
+                area = area.union(other);
+                self.len -= 1;
+                self.areas[index] = self.areas[self.len];
+                index = 0;
+            } else {
+                index += 1;
+            }
+        }
+        if self.len < DIRTY_AREAS {
+            self.areas[self.len] = area;
+            self.len += 1;
+            return;
+        }
+        // Full: merge into the area that grows least.
+        let mut best = 0;
+        for index in 1..self.len {
+            let growth = |i: usize| size(self.areas[i].union(area)) - size(self.areas[i]);
+            if growth(index) < growth(best) {
+                best = index;
+            }
+        }
+        self.areas[best] = self.areas[best].union(area);
+    }
+
+    fn areas(&self) -> &[Area] {
+        &self.areas[..self.len]
+    }
+}
+
 #[derive(Clone, Copy)]
 struct Window {
     owner: process::Id,
@@ -418,6 +499,8 @@ struct Window {
     title_length: usize,
     /// Opacity, 0 to 255: animated from 0 as the window opens.
     fade: Spring,
+    /// The workspace the window belongs to.
+    workspace: usize,
     /// Until this tick, a resize has been requested and the owner may be
     /// swapping surfaces: a failed blit of the old one does not mean it
     /// exited.
@@ -734,15 +817,22 @@ impl Painter<'_> {
 }
 
 struct Desktop {
+    /// The primary monitor's width; the taskbar spans it.
     width: i32,
+    /// The whole desktop's width, across every monitor.
+    desktop_width: i32,
     height: i32,
     seconds: bool,
     /// The time on screen, `None` if the clock could not be read.
     time: Option<DateTime>,
     windows: [Option<Window>; MAX_WINDOWS],
-    /// Window slots bottom to top; the last is focused.
+    /// The current workspace's window slots bottom to top; the last is
+    /// focused.
     stack: [usize; MAX_WINDOWS],
     stacked: usize,
+    /// The current workspace, and every other workspace's saved stack.
+    workspace: usize,
+    saved: [([usize; MAX_WINDOWS], usize); WORKSPACES],
     /// Windows opened so far, for the cascade.
     opened: i32,
     tray: [Option<TrayIcon>; MAX_TRAY],
@@ -792,12 +882,15 @@ impl Desktop {
     /// The state before `main` fills in the display, options and catalog.
     const INITIAL: Desktop = Desktop {
         width: 0,
+        desktop_width: 0,
         height: 0,
         seconds: false,
         time: None,
         windows: [None; MAX_WINDOWS],
         stack: [0; MAX_WINDOWS],
         stacked: 0,
+        workspace: 0,
+        saved: [([0; MAX_WINDOWS], 0); WORKSPACES],
         opened: 0,
         tray: [None; MAX_TRAY],
         toast: None,
@@ -832,7 +925,7 @@ impl Desktop {
     };
 
     fn screen(&self) -> Area {
-        Area::new(0, 0, self.width, self.height)
+        Area::new(0, 0, self.desktop_width, self.height)
     }
 
     fn taskbar_top(&self) -> i32 {
@@ -1016,7 +1109,7 @@ impl Desktop {
             }
             Key::F1 => return self.toggle_launcher(),
             // Tiling waits until the launcher closes.
-            Key::Char(_) | Key::F2 => {}
+            Key::Char(_) | Key::F2 | Key::F3 | Key::F4 => {}
         }
         before.union(self.panel_area())
     }
@@ -1044,11 +1137,56 @@ impl Desktop {
     }
 
     /// Open windows in slot order: the taskbar's entries.
+    /// The current workspace's windows, by slot.
     fn entries(&self) -> impl Iterator<Item = (usize, &Window)> {
+        let workspace = self.workspace;
         self.windows
             .iter()
             .enumerate()
             .filter_map(|(slot, window)| window.as_ref().map(|window| (slot, window)))
+            .filter(move |(_, window)| window.workspace == workspace)
+    }
+
+    /// The switcher box for workspace `index`, left of the Quick Settings
+    /// button.
+    fn workspace_area(&self, index: usize) -> Area {
+        let span = WORKSPACES as i32 * (WORKSPACE_BOX + WORKSPACE_GAP) - WORKSPACE_GAP;
+        let x = self.qs_button().x - 6 - span + index as i32 * (WORKSPACE_BOX + WORKSPACE_GAP);
+        Area::new(x, self.taskbar_top() + 4, WORKSPACE_BOX, START_HEIGHT as i32)
+    }
+
+    /// Show workspace `target`: save the current stack, restore the target's.
+    fn switch_workspace(&mut self, target: usize) -> Area {
+        if target >= WORKSPACES || target == self.workspace {
+            return Area::new(0, 0, 0, 0);
+        }
+        let _ = self.close_panels();
+        self.drag = None;
+        self.saved[self.workspace] = (self.stack, self.stacked);
+        (self.stack, self.stacked) = self.saved[target];
+        self.workspace = target;
+        let digit = [b'1' + target as u8];
+        log(&[b"woven-shell: workspace ", &digit]);
+        let _ = self.retile();
+        self.screen()
+    }
+
+    /// Move the focused window to the next workspace and follow it.
+    fn move_focused_to_next_workspace(&mut self) -> Area {
+        let Some(slot) = self.focused() else { return Area::new(0, 0, 0, 0) };
+        let target = (self.workspace + 1) % WORKSPACES;
+        // Off this workspace's stack, onto the top of the target's.
+        self.stacked -= 1;
+        let (stack, count) = &mut self.saved[target];
+        if *count < MAX_WINDOWS {
+            stack[*count] = slot;
+            *count += 1;
+        }
+        if let Some(window) = self.windows[slot].as_mut() {
+            window.workspace = target;
+        }
+        let _ = self.retile();
+        self.switch_workspace(target)
     }
 
     /// The desktop layer: wallpaper and taskbar, with its start button,
@@ -1082,10 +1220,19 @@ impl Desktop {
         let clock_x = self.width - CLOCK_MARGIN - font::text_width(text) as i32;
         canvas.draw_text(clock_x, self.text_y(), text, TEXT);
 
-        // The signed-in account's name, left of the Quick Settings button.
+        // The workspace switcher, left of the Quick Settings button.
+        for index in 0..WORKSPACES {
+            let area = self.workspace_area(index);
+            let fill = if index == self.workspace { ENTRY_ACTIVE } else { ENTRY_INACTIVE };
+            canvas.fill_rect(area.x, area.y, area.width as usize, area.height as usize, fill);
+            let digit = [b'1' + index as u8];
+            canvas.draw_text(area.x + 3, self.text_y(), core::str::from_utf8(&digit).unwrap_or("?"), TEXT);
+        }
+
+        // The signed-in account's name, left of the workspace switcher.
         if let Some(account) = self.session.and_then(|index| self.accounts[index]) {
             let name = core::str::from_utf8(account.name()).unwrap_or("?");
-            let x = self.qs_button().x - 6 - font::text_width(name) as i32;
+            let x = self.workspace_area(0).x - 6 - font::text_width(name) as i32;
             canvas.draw_text(x, self.text_y(), name, TEXT);
         }
 
@@ -1123,6 +1270,8 @@ impl Desktop {
     /// The toggles as they currently read.
     fn qs_rows(&self) -> [&'static str; QS_ROWS] {
         [
+            "Power off",
+            "Restart",
             if self.scale == 2 { "Display scale: 2x" } else { "Display scale: 1x" },
             if self.dnd { "Do not disturb: On" } else { "Do not disturb: Off" },
             if self.tiled { "Tiling: On" } else { "Tiling: Off" },
@@ -1296,6 +1445,23 @@ impl Desktop {
         dirty
     }
 
+    /// Power off, or restart. Returns only if the machine is still
+    /// running; a toast says why.
+    fn power(&mut self, restart: bool) -> Area {
+        log(if restart { &[b"woven-shell: restart"] } else { &[b"woven-shell: power off"] });
+        let result = if restart { libwoven::restart() } else { libwoven::power_off() };
+        let reason: &[u8] = match result {
+            Err(_) => b"Not allowed to turn the machine off",
+            Ok(1) => b"This machine has no ACPI power-off",
+            Ok(2) => b"The firmware refused ACPI power-off",
+            Ok(_) => b"The machine ignored the request",
+        };
+        let mut text = [0u8; 32];
+        let length = label(reason, TOAST_CHARS, &mut text);
+        self.toast = Some(Toast { text, length, until: libwoven::ticks() + TOAST_TICKS });
+        self.close_panels().union(self.toast_area())
+    }
+
     fn toggle_tiling(&mut self) -> Area {
         self.tiled = !self.tiled;
         log(if self.tiled { &[b"woven-shell: tiling on"] } else { &[b"woven-shell: tiling off"] });
@@ -1311,14 +1477,17 @@ impl Desktop {
             return Area::new(0, 0, 0, 0);
         };
         self.scale = info.scale;
-        self.width = info.width as i32;
+        // The monitors scale together; the first stays the primary.
+        let (outputs, monitors) = libwoven::compositor_outputs().unwrap_or(([libwoven::Output::default(); 4], 0));
+        self.desktop_width = info.width as i32;
+        self.width = if monitors > 0 { (outputs[0].width as i32).clamp(1, self.desktop_width) } else { self.desktop_width };
         self.height = info.height as i32;
         let top = self.taskbar_top();
         for window in self.windows.iter_mut().flatten() {
-            window.x = window.x.clamp(0, (self.width - window.width).max(0));
+            window.x = window.x.clamp(0, (self.desktop_width - window.width).max(0));
             window.y = window.y.clamp(TITLE_HEIGHT, (top - window.height).max(TITLE_HEIGHT));
         }
-        self.pointer = (self.pointer.0.min(self.width - 1), self.pointer.1.min(self.height - 1));
+        self.pointer = (self.pointer.0.min(self.desktop_width - 1), self.pointer.1.min(self.height - 1));
         log(if target == 1 { &[b"woven-shell: display scale 1x"] } else { &[b"woven-shell: display scale 2x"] });
         let _ = self.retile();
         self.screen()
@@ -1478,7 +1647,8 @@ impl Desktop {
         }
 
         let focused = self.focused();
-        let above_taskbar = Area::new(0, 0, self.width, self.taskbar_top());
+        // Windows may sit on any monitor; only the taskbar band is excluded.
+        let above_taskbar = Area::new(0, 0, self.desktop_width, self.taskbar_top());
         for &slot in &self.stack[..self.stacked] {
             let Some(window) = &self.windows[slot] else { continue };
             let bands = if Some(slot) == focused { FOCUSED_SHADOW } else { UNFOCUSED_SHADOW };
@@ -1567,11 +1737,10 @@ impl Desktop {
         current.union(previous.unwrap_or(Area::new(0, 0, 0, 0))).union(self.taskbar())
     }
 
-    /// Open a window for `owner`. Returns the area to repaint.
-    fn open(&mut self, owner: process::Id, message: &[u8]) -> Area {
-        let empty = Area::new(0, 0, 0, 0);
+    /// Open a window for `owner`. Returns the areas to repaint.
+    fn open(&mut self, owner: process::Id, message: &[u8]) -> Dirty {
         if message.len() < 16 {
-            return empty;
+            return Dirty::new();
         }
         let token = u64::from_le_bytes(message[4..12].try_into().unwrap_or([0; 8]));
         let width = i32::from(u16::from_le_bytes([message[12], message[13]]));
@@ -1580,10 +1749,10 @@ impl Desktop {
             || !(1..=self.width).contains(&width)
             || !(1..=self.taskbar_top() - TITLE_HEIGHT).contains(&height)
         {
-            return empty;
+            return Dirty::new();
         }
         let Some(slot) = self.windows.iter().position(Option::is_none) else {
-            return empty;
+            return Dirty::new();
         };
         let offset = CASCADE_ORIGIN + (self.opened % 6) * CASCADE_STEP;
         self.opened += 1;
@@ -1605,6 +1774,7 @@ impl Desktop {
             title,
             title_length,
             fade,
+            workspace: self.workspace,
             resizing_until: 0,
         };
         self.windows[slot] = Some(window);
@@ -1612,11 +1782,14 @@ impl Desktop {
         self.stack[self.stacked] = slot;
         self.stacked += 1;
         log(&[b"woven-shell: window opened: ", &title[..title_length]]);
-        window
-            .footprint()
-            .union(previous.unwrap_or(empty))
-            .union(self.taskbar())
-            .union(self.retile())
+        // Apart: the new window, the one it unfocused, the taskbar and any
+        // retiled windows, rather than one box over most of the screen.
+        let mut dirty = Dirty::new();
+        dirty.add(window.footprint());
+        dirty.add(previous.unwrap_or(Area::new(0, 0, 0, 0)));
+        dirty.add(self.taskbar());
+        dirty.add(self.retile());
+        dirty
     }
 
     /// Where windows may go: the screen above the taskbar.
@@ -1700,9 +1873,17 @@ impl Desktop {
         let Some(window) = self.windows[slot].take() else {
             return Area::new(0, 0, 0, 0);
         };
-        if let Some(position) = self.stack[..self.stacked].iter().position(|&s| s == slot) {
-            self.stack[position..self.stacked].rotate_left(1);
-            self.stacked -= 1;
+        if window.workspace == self.workspace {
+            if let Some(position) = self.stack[..self.stacked].iter().position(|&s| s == slot) {
+                self.stack[position..self.stacked].rotate_left(1);
+                self.stacked -= 1;
+            }
+        } else {
+            let (stack, count) = &mut self.saved[window.workspace];
+            if let Some(position) = stack[..*count].iter().position(|&s| s == slot) {
+                stack[position..*count].rotate_left(1);
+                *count -= 1;
+            }
         }
         if self.drag.is_some_and(|(dragged, _, _)| dragged == slot) {
             self.drag = None;
@@ -1717,11 +1898,11 @@ impl Desktop {
             .union(self.retile())
     }
 
-    fn handle_message(&mut self, sender: process::Id, message: &[u8]) -> Area {
-        let empty = Area::new(0, 0, 0, 0);
+    fn handle_message(&mut self, sender: process::Id, message: &[u8]) -> Dirty {
+        let empty = Dirty::new();
         match message.get(..4) {
             Some(b"WOPN") => self.open(sender, message),
-            Some(b"WRSZ") => self.resized(sender, message),
+            Some(b"WRSZ") => Dirty::of(self.resized(sender, message)),
             Some(b"TRAY") if message.len() == 12 => {
                 let token = u64::from_le_bytes(message[4..12].try_into().unwrap_or([0; 8]));
                 if libwoven::surface_owner(token) != sender {
@@ -1732,7 +1913,7 @@ impl Desktop {
                 };
                 self.tray[index] = Some(TrayIcon { token });
                 log(&[b"woven-shell: tray icon added"]);
-                self.tray_area(index)
+                Dirty::of(self.tray_area(index))
             }
             Some(b"NOTE") => {
                 let mut text = [0u8; 32];
@@ -1742,14 +1923,16 @@ impl Desktop {
                 // Do Not Disturb, or the lock screen, keeps the notification
                 // but raises no toast.
                 if self.dnd || self.locked {
-                    return remembered;
+                    return Dirty::of(remembered);
                 }
                 self.toast = Some(Toast {
                     text,
                     length,
                     until: libwoven::ticks() + TOAST_TICKS,
                 });
-                self.toast_area().union(remembered)
+                let mut dirty = Dirty::of(self.toast_area());
+                dirty.add(remembered);
+                dirty
             }
             _ => empty,
         }
@@ -1764,7 +1947,7 @@ impl Desktop {
                 InputEvent::Key(key) => self.lock_key(key),
                 InputEvent::PointerMove { dx, dy } => {
                     self.pointer = (
-                        (self.pointer.0 + i32::from(dx)).clamp(0, self.width - 1),
+                        (self.pointer.0 + i32::from(dx)).clamp(0, self.desktop_width - 1),
                         (self.pointer.1 + i32::from(dy)).clamp(0, self.height - 1),
                     );
                     empty
@@ -1776,7 +1959,7 @@ impl Desktop {
             InputEvent::PointerMove { dx, dy } => {
                 let before = self.cursor_area();
                 self.pointer = (
-                    (self.pointer.0 + i32::from(dx)).clamp(0, self.width - 1),
+                    (self.pointer.0 + i32::from(dx)).clamp(0, self.desktop_width - 1),
                     (self.pointer.1 + i32::from(dy)).clamp(0, self.height - 1),
                 );
                 self.pointer_visible = true;
@@ -1787,8 +1970,13 @@ impl Desktop {
                 // Dropped on the left or right edge: snap to that half.
                 let Some((slot, _, _)) = self.drag.take() else { return empty };
                 let (x, _) = self.pointer;
-                if x <= 0 || x >= self.width - 1 {
-                    let half = layout::half(self.work_area(), x > 0);
+                // The desktop's outer edges: the left snaps on the primary,
+                // the right on the last monitor (monitors are the same size).
+                if x <= 0 || x >= self.desktop_width - 1 {
+                    let mut half = layout::half(self.work_area(), x > 0);
+                    if x > 0 {
+                        half.x += self.desktop_width - self.width;
+                    }
                     log(&[b"woven-shell: window snapped"]);
                     return self.place(slot, half);
                 }
@@ -1796,6 +1984,9 @@ impl Desktop {
             }
             InputEvent::PointerButton { button: 0, pressed: true } => {
                 let (x, y) = self.pointer;
+                if let Some(index) = (0..WORKSPACES).find(|&index| self.workspace_area(index).contains(x, y)) {
+                    return self.switch_workspace(index);
+                }
                 if self.start_area().contains(x, y) {
                     return self.toggle_launcher();
                 }
@@ -1809,14 +2000,16 @@ impl Desktop {
                         return self.close_panels();
                     }
                     return match (y - panel.y - 1) / PANEL_ROW - 1 {
-                        0 => self.toggle_scale(),
-                        1 => {
+                        0 => self.power(false),
+                        1 => self.power(true),
+                        2 => self.toggle_scale(),
+                        3 => {
                             self.dnd = !self.dnd;
                             log(if self.dnd { &[b"woven-shell: do not disturb on"] } else { &[b"woven-shell: do not disturb off"] });
                             panel
                         }
-                        2 => self.toggle_tiling(),
-                        3 => self.lock(),
+                        4 => self.toggle_tiling(),
+                        5 => self.lock(),
                         _ => empty,
                     };
                 }
@@ -1879,6 +2072,8 @@ impl Desktop {
             InputEvent::Key(key) if self.launcher_open => self.launcher_key(key),
             InputEvent::Key(Key::F1) => self.toggle_launcher(),
             InputEvent::Key(Key::F2) => self.toggle_tiling(),
+            InputEvent::Key(Key::F3) => self.switch_workspace((self.workspace + 1) % WORKSPACES),
+            InputEvent::Key(Key::F4) => self.move_focused_to_next_workspace(),
             InputEvent::Key(Key::Char(character)) if character.is_ascii() => {
                 if let Some(window) = self.focused().and_then(|slot| self.windows[slot]) {
                     let _ = libwoven::message_send(window.owner, &[character as u8]);
@@ -1897,7 +2092,7 @@ impl Desktop {
         let Some(window) = self.windows[slot].as_mut() else { return empty };
         let before = window.footprint();
         let top = self.height - TASKBAR_HEIGHT;
-        window.x = (self.pointer.0 - grab_x).clamp(0, (self.width - window.width).max(0));
+        window.x = (self.pointer.0 - grab_x).clamp(0, (self.desktop_width - window.width).max(0));
         window.y = (self.pointer.1 - grab_y).clamp(TITLE_HEIGHT, (top - window.height).max(TITLE_HEIGHT));
         let after = window.footprint();
         if after == before { empty } else { before.union(after) }
@@ -2060,7 +2255,14 @@ fn main(args: Args) -> ! {
     let mut painter = Painter { staging, tile };
 
     let (width, height) = (info.width as i32, info.height as i32);
-    desktop.width = width;
+    // The first monitor is the primary; the desktop spans them all.
+    let (outputs, monitors) = libwoven::compositor_outputs().unwrap_or(([libwoven::Output::default(); 4], 0));
+    desktop.width = if monitors > 0 { (outputs[0].width as i32).clamp(1, width) } else { width };
+    desktop.desktop_width = width;
+    if monitors > 1 {
+        let count = [b'0' + monitors as u8];
+        log(&[b"woven-shell: monitors ", &count]);
+    }
     desktop.height = height;
     desktop.time = libwoven::clock().ok();
     desktop.scale = info.scale;
@@ -2091,18 +2293,24 @@ fn main(args: Args) -> ! {
             fast = !fast;
             clock = libwoven::FrameClock::new(if fast { ANIMATION_PERIOD } else { FRAME_PERIOD });
         }
-        let mut dirty = match clock.wait(sources) {
-            Ok(FrameEvent::Frame { skipped }) => desktop.animate(skipped + 1).union(desktop.tick()),
-            Ok(FrameEvent::Ready(_)) => Area::new(0, 0, 0, 0),
+        let mut dirty = Dirty::new();
+        match clock.wait(sources) {
+            Ok(FrameEvent::Frame { skipped }) => {
+                dirty.add(desktop.animate(skipped + 1));
+                dirty.add(desktop.tick());
+            }
+            Ok(FrameEvent::Ready(_)) => {}
             Err(_) if sources & wait::MESSAGE != 0 => {
                 sources &= !wait::MESSAGE;
                 let _ = libwoven::print("woven-shell: no Ipc capability; applications disabled\n");
                 continue;
             }
             Err(_) => fail(8),
-        };
+        }
         while let Ok((length, sender)) = libwoven::message_receive(&mut message) {
-            dirty = dirty.union(desktop.handle_message(sender, &message[..length]));
+            for &area in desktop.handle_message(sender, &message[..length]).areas() {
+                dirty.add(area);
+            }
         }
         while let Ok(Some(event)) = libwoven::input_poll_event() {
             let area = desktop.handle_input(event);
@@ -2112,9 +2320,9 @@ fn main(args: Args) -> ! {
                 desktop.repaint(&mut painter, area);
             }
         }
-        dirty = dirty.union(desktop.check_clients());
-        if !dirty.is_empty() {
-            desktop.repaint(&mut painter, dirty);
+        dirty.add(desktop.check_clients());
+        for &area in dirty.areas() {
+            desktop.repaint(&mut painter, area);
         }
         if libwoven::compositor_present().is_err() {
             fail(7);
