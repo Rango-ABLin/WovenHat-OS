@@ -23,6 +23,14 @@ import time
 CLICK = '[S20.15] clicking Power off'
 
 
+def serial_has_fatal_evidence(log: str) -> bool:
+    """Reject guest panic and security failure evidence anywhere in the serial log."""
+    normalized = log.lower()
+    return any(marker in normalized for marker in (
+        'kernel panic', 'panicked at', 'security violation', 'security: failed',
+    ))
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument('--cpus', type=int, choices=(1, 2, 4), default=1)
@@ -78,7 +86,7 @@ def main():
         errors.append(f'missing {CLICK!r}')
     # The desktop marker must not mask a kernel panic or an unrelated security failure.
     # Check the entire serial log, not just Stage 20.15 lines.
-    if any(marker in log.lower() for marker in ('kernel panic', 'panicked at', 'security violation', 'security: failed')):
+    if serial_has_fatal_evidence(log):
         errors.append('kernel panic or security failure found in serial evidence')
     if any('FAIL' in line for line in steps):
         errors.append('a step failed')
