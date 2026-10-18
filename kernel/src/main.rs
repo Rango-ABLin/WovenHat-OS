@@ -1520,40 +1520,52 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
             Err(error) => serial::write_line(format_args!("[LIVELOG] no live-test stick: {:?}", error)),
         }
 
-        // Stage 20.15: the WovenShell desktop is the session; F12 shows this
-        // diagnostic console instead.
+        // The signed system-apps image boots directly into the Ring-3
+        // WovenShell session. The diagnostic shell is a recovery path, not
+        // a competing boot-time display or foreground terminal owner.
         #[cfg(feature = "system-apps")]
-        {
+        let desktop_session_started = {
             let accounts = vfs::stat("/etc/wovenhat/accounts").is_ok().then_some("/etc/wovenhat/accounts");
             match session::start(WOVEN_SHELL_IMAGE, accounts) {
                 Ok(pid) => {
                     serial::write_line(format_args!("[SESSION] WovenShell desktop started as pid {}", pid));
-                    console.println("DESKTOP SESSION: STARTED (F12 SWITCHES TO THIS CONSOLE)");
+                    true
                 }
-                Err(error) => serial::write_line(format_args!("[SESSION] desktop not started: {:?}", error)),
+                Err(error) => {
+                    serial::write_line(format_args!("[SESSION] desktop not started: {:?}", error));
+                    false
+                }
             }
+        };
+        #[cfg(not(feature = "system-apps"))]
+        let desktop_session_started = false;
+
+        if desktop_session_started {
+            serial::write_line(format_args!("[BOOT] desktop-first runtime ready"));
+        } else {
+            serial::write_line(format_args!(
+                "[BOOT] shell-first runtime ready; entering diagnostic shell"
+            ));
         }
 
-        serial::write_line(format_args!(
-            "[BOOT] shell-first runtime ready; entering diagnostic shell"
-        ));
-
-        // Start userspace init -> /bin/sh (non-fatal if spawn fails).
-        match userspace::create_init_process() {
-            Some(program) => match task::spawn_user_process("init", program) {
-                Ok((pid, _)) => {
-                    serial::write_line(format_args!(
-                        "[BOOT] userspace init/sh scheduled as pid {}",
-                        pid.as_u64()
-                    ));
-                    console.println("USERSPACE INIT+SH: STARTED");
-                }
-                Err(_) => console.println("USERSPACE INIT+SH: SPAWN FAILED"),
-            },
-            None => console.println("USERSPACE INIT+SH: IMAGE FAILED"),
+        // A successful desktop session must not compete with /bin/sh for
+        // display and input. Keep the existing text-mode fallback on failure.
+        if !desktop_session_started {
+            match userspace::create_init_process() {
+                Some(program) => match task::spawn_user_process("init", program) {
+                    Ok((pid, _)) => {
+                        serial::write_line(format_args!(
+                            "[BOOT] userspace init/sh scheduled as pid {}",
+                            pid.as_u64()
+                        ));
+                        console.println("USERSPACE INIT+SH: STARTED");
+                    }
+                    Err(_) => console.println("USERSPACE INIT+SH: SPAWN FAILED"),
+                },
+                None => console.println("USERSPACE INIT+SH: IMAGE FAILED"),
+            }
+            console.println("");
         }
-
-        console.println("");
         let mut desktop = gui::Desktop::new(graphics::Color::DARK_BLUE);
         let mut window = gui::Window::new(gui::Rect::new(80, 80, 480, 280), "WOVENHAT DESKTOP");
         window.add_button(gui::Button::new(
@@ -1570,13 +1582,30 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         let mut shell = Shell::new();
         let mut desktop_active = false;
 
-        // Start in the diagnostic shell. F1 toggles to the graphical desktop.
-        console.clear();
-        console.println("WOVENHAT DIAGNOSTIC SHELL (F1 TO OPEN DESKTOP)");
-        shell.print_prompt(&mut console);
+        // Only the text-mode fallback shows the diagnostic shell at boot.
+        // On graphical boots F12 switches to it through WovenInput.
+        if !desktop_session_started {
+            console.clear();
+            console.println("WOVENHAT DIAGNOSTIC SHELL (F1 TO OPEN DESKTOP)");
+            shell.print_prompt(&mut console);
+        }
 
         let mut userspace_was_foreground = false;
+        let mut desktop_was_presenting = false;
         loop {
+            let desktop_presenting = desktop_session_started
+                && session::active().is_some()
+                && !session::console_active();
+            if desktop_was_presenting && !desktop_presenting && !session::console_active() {
+                // A crashed or exited compositor returns the display to the
+                // terminal. Do not leave an unusable, unprompted screen.
+                console.clear();
+                console.println("WOVENHAT DIAGNOSTIC SHELL");
+                console.println("DESKTOP SESSION ENDED");
+                shell.print_prompt(&mut console);
+                desktop_active = false;
+            }
+            desktop_was_presenting = desktop_presenting;
             let userspace_foreground = terminal::foreground_active();
             if userspace_was_foreground && !userspace_foreground {
                 console.clear();
@@ -1593,11 +1622,11 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
             // call keyboard::poll() while /bin/sh is foreground: poll() pops
             // the scancode from the shared queue, which would starve the
             // userspace read(0, ...) syscall and make the shell appear hung.
-            if !userspace_foreground {
+            if !userspace_foreground && !desktop_presenting {
                 if let Some(key) = keyboard::poll() {
                     if matches!(key, keyboard::Key::F2 | keyboard::Key::F3 | keyboard::Key::F4 | keyboard::Key::F12) {
                         // F2-F4 have no use in the kernel's own desktop.
-                    } else if matches!(key, keyboard::Key::F1) {
+                    } else if matches!(key, keyboard::Key::F1) && !desktop_session_started {
                         desktop_active = !desktop_active;
                         if desktop_active {
                             console.render_desktop(&desktop);

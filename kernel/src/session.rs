@@ -60,7 +60,6 @@ pub fn active() -> Option<u64> {
 }
 
 /// Whether the diagnostic console is showing instead of the session.
-#[cfg(feature = "stage20-15-test")]
 pub fn console_active() -> bool {
     CONSOLE.load(Ordering::Acquire)
 }
