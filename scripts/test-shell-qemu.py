@@ -108,7 +108,9 @@ def main():
         process = subprocess.Popen(command, cwd=root, stdout=errors, stderr=errors, creationflags=flags)
         try:
             deadline = time.monotonic() + 180
-            while '[BOOT] shell-first runtime ready' not in serial.read_text(errors='replace'):
+            expected_boot = ('[BOOT] desktop-first runtime ready' if args.system_apps
+                             else '[BOOT] shell-first runtime ready')
+            while expected_boot not in serial.read_text(errors='replace'):
                 if process.poll() is not None or time.monotonic() > deadline:
                     raise RuntimeError('Normal boot failed; inspect shell-regression logs')
                 time.sleep(0.1)
