@@ -176,6 +176,22 @@ def validation_errors(returncode, log, required):
         errors.append('Serial log contains a failure, timeout, or panic')
     return errors
 
+def copy_firmware_vars(template: Path | None, evidence: Path) -> Path | None:
+    """Copy writable OVMF state into this run's isolated evidence directory."""
+    if template is None:
+        return None
+    destination = evidence / 'OVMF_VARS.fd'
+    shutil.copyfile(template, destination)
+    return destination
+
+
+def firmware_drives(code: Path, vars_copy: Path | None) -> list[str]:
+    """Keep immutable CODE and per-run writable VARS on distinct pflash units."""
+    drives = ['-drive', f'if=pflash,unit=0,format=raw,readonly=on,file={code}']
+    if vars_copy is not None:
+        drives.extend(['-drive', f'if=pflash,unit=1,format=raw,file={vars_copy}'])
+    return drives
+
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
@@ -183,15 +199,17 @@ def main():
     parser.add_argument('--cpus', type=int, choices=(1, 2, 4), default=1)
     parser.add_argument('--qemu', default=shutil.which('qemu-system-x86_64') or r'C:\Program Files\qemu\qemu-system-x86_64.exe')
     parser.add_argument('--firmware', type=Path)
+    parser.add_argument('--firmware-vars', type=Path, help='matching OVMF VARS template, copied per run')
     parser.add_argument('--timeout', type=float, default=180)
     args = parser.parse_args()
     root = Path(__file__).resolve().parents[1]
     qemu = Path(args.qemu)
     firmware = args.firmware or qemu.parent / 'share' / 'edk2-x86_64-code.fd'
-    if not qemu.is_file() or not firmware.is_file():
-        parser.error('QEMU and firmware files must exist')
+    if not qemu.is_file() or not firmware.is_file() or (args.firmware_vars is not None and not args.firmware_vars.is_file()):
+        parser.error('QEMU, firmware CODE, and optional firmware VARS files must exist')
     out = root / 'audit-artifacts' / f'stage{args.stage}-{args.cpus}cpu-{time.time_ns()}'
-    out.mkdir(parents=True)
+    out.mkdir(parents=True, exist_ok=False)
+    vars_copy = copy_firmware_vars(args.firmware_vars, out)
     feature = 'stage13-10-test' if args.stage == '13.11' else f'stage{args.stage.replace(".", "-")}-test'
     if args.stage == '11.2-aslr':
         feature = 'stage11-aslr-test'
@@ -233,7 +251,7 @@ def main():
     command = [str(qemu), '-accel', 'tcg,tb-size=128', '-machine', 'q35', '-m', '256M', '-smp', str(args.cpus),
                '-display', 'none', '-serial', f'file:{serial}', '-no-reboot',
                '-device', 'isa-debug-exit,iobase=0xf4,iosize=0x04',
-               '-drive', f'if=pflash,format=raw,readonly=on,file={firmware}',
+               *firmware_drives(firmware, vars_copy),
                '-drive', f'if=none,id=boot,format=raw,readonly=on,file={build.stdout.strip()}',
                '-device', 'virtio-blk-pci,drive=boot,bootindex=1']
     if args.stage in ('13.5', '13.6'):
