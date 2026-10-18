@@ -76,6 +76,10 @@ def main():
         errors.append(f'QEMU exit status {process.returncode}, expected 0 (turned off by the guest)')
     if CLICK not in log:
         errors.append(f'missing {CLICK!r}')
+    # The desktop marker must not mask a kernel panic or an unrelated security failure.
+    # Check the entire serial log, not just Stage 20.15 lines.
+    if any(marker in log.lower() for marker in ('kernel panic', 'panicked at', 'security violation', 'security: failed')):
+        errors.append('kernel panic or security failure found in serial evidence')
     if any('FAIL' in line for line in steps):
         errors.append('a step failed')
     passed = [line for line in steps if line.endswith(' PASS')]
