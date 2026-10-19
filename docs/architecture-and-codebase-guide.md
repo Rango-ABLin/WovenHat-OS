@@ -1,5 +1,13 @@
 # WovenHat OS Architecture & Codebase Guide
 
+## Graphics WovenCalculator desktop acceptance (2026-10-19)
+
+The existing `apps/woven-calculator/src/main.rs` Canvas/WOPN client is covered
+by the shared QMP visual gate on 1/2/4 CPUs, using the production `--gui %p`
+catalog entry. The preview evaluates a fixed `2 + 2` expression; CLI
+expression evaluation remains authoritative, and desktop input, WSIZ resize,
+and hardware GPU output are not implied.
+
 ## Graphics WovenTerminal desktop preview (2026-10-19)
 
 `apps/woven-terminal/src/gui.rs` adds a bounded read-only terminal preview

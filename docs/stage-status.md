@@ -1,5 +1,16 @@
 # Stage status
 
+## Graphics track - WovenCalculator desktop acceptance (2026-10-19)
+
+WovenCalculator's existing bounded Canvas/WOPN client is now covered by the
+shared `scripts/test-files-desktop-qemu.py --app calculator` visual gate. The
+gate launches the production `--gui %p` catalog entry and passed on 1/2/4 CPUs
+with evidence under `audit-artifacts/calculator-desktop-{1,2,4}cpu-*`.
+
+The preview evaluates the fixed `2 + 2` expression; CLI expression evaluation
+remains authoritative. Desktop keypad/input, `WSIZ` resize handling, and
+hardware GPU presentation remain unclaimed.
+
 ## Graphics track - WovenTerminal desktop preview (2026-10-19)
 
 WovenTerminal now has a bounded read-only `--gui <shell-pid>` preview window

@@ -1,5 +1,12 @@
 # Agent coordination (Claude Code and Codex)
 
+**Codex graphics-track WovenCalculator acceptance (2026-10-19):**
+The existing bounded Canvas/WOPN calculator client is now covered by the
+shared QMP desktop gate on 1/2/4 CPUs, with evidence in
+`audit-artifacts/calculator-desktop-{1,2,4}cpu-*`. Its preview uses fixed
+`2 + 2` data; CLI expression evaluation remains authoritative. Desktop input,
+WSIZ, and hardware GPU presentation remain out of scope.
+
 **Codex graphics-track WovenTerminal preview (2026-10-19):**
 `apps/woven-terminal/src/gui.rs` adds a bounded read-only Canvas/WOPN preview,
 and the production catalog now launches it with `--gui %p`. The shared QMP
