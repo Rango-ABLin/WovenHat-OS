@@ -1,5 +1,13 @@
 # WovenHat OS Architecture & Codebase Guide
 
+## Graphics WovenEditor bounded resize (2026-10-19)
+
+`apps/woven-editor/src/gui.rs` now handles `WSIZ` by creating and sharing a
+replacement surface, publishing `WRSZ` before the bounded Canvas upload, and
+clamping requests to a loader-safe 480×320 static render target. The QEMU
+resize gate passed on 1/2/4 CPUs. The desktop client remains read-only; CLI
+editing, pointer widgets, and hardware GPU output are separate boundaries.
+
 ## Graphics WovenSecurity bounded resize (2026-10-19)
 
 `apps/woven-security/src/gui.rs` now handles `WSIZ` by creating and sharing a
@@ -92,7 +100,8 @@ existing bounded `--list`/`--info` CLI remains authoritative.
 window. It uses a static Canvas buffer and the WovenShell WOPN/WCLS lifecycle;
 the catalog supplies `--gui %p`. The shared QMP launcher/screendump gate
 passed on 1/2/4 CPUs. CLI `--view`/`--write` remains the editing interface;
-desktop text input, WSIZ resize, and hardware GPU output are not implied.
+desktop text input, pointer widgets, and hardware GPU output are not implied.
+Bounded WSIZ/WRSZ is covered by the newer Editor resize section.
 
 ## Graphics WovenSecurity client (2026-10-19)
 

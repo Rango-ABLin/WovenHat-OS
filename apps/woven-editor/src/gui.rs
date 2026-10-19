@@ -11,14 +11,16 @@ const PANEL_Y: i32 = 12;
 const PANEL_WIDTH: usize = 336;
 const PANEL_HEIGHT: usize = 196;
 const MAX_ENTRIES: usize = 32;
+const MAX_SURFACE_WIDTH: usize = 480;
+const MAX_SURFACE_HEIGHT: usize = 320;
 
-struct PixelBuffer(core::cell::UnsafeCell<[u32; (WIDTH * HEIGHT) as usize]>);
+struct PixelBuffer(core::cell::UnsafeCell<[u32; MAX_SURFACE_WIDTH * MAX_SURFACE_HEIGHT]>);
 
 // SAFETY: the editor GUI is single-threaded and owns this buffer exclusively.
 unsafe impl Sync for PixelBuffer {}
 
 static CANVAS_PIXELS: PixelBuffer =
-    PixelBuffer(core::cell::UnsafeCell::new([0; (WIDTH * HEIGHT) as usize]));
+    PixelBuffer(core::cell::UnsafeCell::new([0; MAX_SURFACE_WIDTH * MAX_SURFACE_HEIGHT]));
 
 fn fail(code: u64) -> ! {
     let _ = libwoven::print("WovenEditor: failure\n");
@@ -44,21 +46,10 @@ fn entry_count() -> usize {
     count
 }
 
-/// Open a bounded read-only editor workspace window through WovenShell.
-/// Editing commands remain available through the existing CLI until input
-/// widgets and file-operation events are added to the desktop client.
-pub fn run(shell: Option<&[u8]>) -> ! {
-    let Some(shell) = shell.and_then(parse_u64).map(libwoven::process::Id) else {
-        fail(7)
-    };
-    let window = GraphicsSurface::create(WIDTH, HEIGHT).unwrap_or_else(|_| fail(1));
-    // SAFETY: this process is single-threaded and takes the buffer once.
-    let pixels = unsafe { &mut *CANVAS_PIXELS.0.get() };
-    let mut canvas = Canvas::new(pixels, 0, 0, WIDTH as usize, HEIGHT as usize)
-        .unwrap_or_else(|| fail(2));
-    canvas.fill_rect(0, 0, WIDTH as usize, HEIGHT as usize, BACKGROUND);
+fn draw_editor(canvas: &mut Canvas<'_>) {
+    canvas.fill_rect(0, 0, canvas.width(), canvas.height(), BACKGROUND);
     canvas.fill_rect(PANEL_X, PANEL_Y, PANEL_WIDTH, PANEL_HEIGHT, PANEL);
-    stroke_rect(&mut canvas, PANEL_X, PANEL_Y, PANEL_WIDTH, PANEL_HEIGHT, ACCENT);
+    stroke_rect(canvas, PANEL_X, PANEL_Y, PANEL_WIDTH, PANEL_HEIGHT, ACCENT);
     canvas.draw_text(PANEL_X + 10, PANEL_Y + 8, "WovenEditor", TEXT);
     canvas.draw_text(PANEL_X + 10, PANEL_Y + 36, "Workspace", ACCENT);
     canvas.draw_text(PANEL_X + 10, PANEL_Y + 54, "/mnt", TEXT);
@@ -73,7 +64,41 @@ pub fn run(shell: Option<&[u8]>) -> ! {
     canvas.draw_text(PANEL_X + 10, PANEL_Y + 136, "CLI: --view PATH", TEXT);
     canvas.draw_text(PANEL_X + 10, PANEL_Y + 154, "CLI: --write PATH TEXT", TEXT);
     canvas.draw_text(PANEL_X + 10, PANEL_Y + 178, "Read-only desktop preview", TEXT);
-    if window.write_canvas(&canvas).is_err() {
+}
+
+fn render(window: &GraphicsSurface) -> bool {
+    let pixels = unsafe { &mut *CANVAS_PIXELS.0.get() };
+    let Some(mut canvas) = Canvas::new(
+        pixels,
+        0,
+        0,
+        window.width() as usize,
+        window.height() as usize,
+    ) else {
+        return false;
+    };
+    draw_editor(&mut canvas);
+    window.write_canvas(&canvas).is_ok()
+}
+
+fn send_resize(window: &GraphicsSurface, shell: libwoven::process::Id) -> bool {
+    let mut response = [0u8; 16];
+    response[..4].copy_from_slice(b"WRSZ");
+    response[4..12].copy_from_slice(&window.handle().to_le_bytes());
+    response[12..14].copy_from_slice(&(window.width() as u16).to_le_bytes());
+    response[14..].copy_from_slice(&(window.height() as u16).to_le_bytes());
+    libwoven::message_send(shell, &response).is_ok()
+}
+
+/// Open a bounded read-only editor workspace window through WovenShell.
+/// Editing commands remain available through the existing CLI until input
+/// widgets and file-operation events are added to the desktop client.
+pub fn run(shell: Option<&[u8]>) -> ! {
+    let Some(shell) = shell.and_then(parse_u64).map(libwoven::process::Id) else {
+        fail(7)
+    };
+    let mut window = GraphicsSurface::create(WIDTH, HEIGHT).unwrap_or_else(|_| fail(1));
+    if !render(&window) {
         fail(3)
     }
     if window.share_with(shell).is_err() {
@@ -96,8 +121,28 @@ pub fn run(shell: Option<&[u8]>) -> ! {
             fail(6)
         }
         if let Ok((length, sender)) = libwoven::message_receive(&mut message) {
-            if sender == shell && message.get(..length.min(4)) == Some(&b"WCLS"[..]) {
+            if sender != shell {
+                continue;
+            }
+            if message.get(..length.min(4)) == Some(&b"WCLS"[..]) {
                 break;
+            }
+            if message.get(..4) == Some(&b"WSIZ"[..]) && length == 8 {
+                let width = u32::from(u16::from_le_bytes([message[4], message[5]])).min(MAX_SURFACE_WIDTH as u32);
+                let height = u32::from(u16::from_le_bytes([message[6], message[7]])).min(MAX_SURFACE_HEIGHT as u32);
+                if let Ok(resized) = GraphicsSurface::create(width, height) {
+                    if resized.share_with(shell).is_ok() && send_resize(&resized, shell) {
+                        if render(&resized) {
+                            let previous = core::mem::replace(&mut window, resized);
+                            drop(previous);
+                            let _ = libwoven::print("WovenEditor: window resized\n");
+                        } else {
+                            drop(resized);
+                        }
+                    } else {
+                        drop(resized);
+                    }
+                }
             }
         }
     }

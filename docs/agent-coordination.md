@@ -1,5 +1,12 @@
 # Agent coordination (Claude Code and Codex)
 
+**Codex graphics-track WovenEditor resize (2026-10-19):**
+WovenEditor now negotiates bounded `WSIZ/WRSZ` replacement surfaces with a
+480×320 loader-safe Canvas cap. Its QMP resize gate passed on 1/2/4 CPUs with
+evidence in `audit-artifacts/editor-desktop-{1,2,4}cpu-*`. The client remains
+read-only; editing controls, pointer widgets, and hardware GPU presentation
+remain out of scope.
+
 **Codex graphics-track WovenSecurity resize (2026-10-19):**
 WovenSecurity now negotiates bounded `WSIZ/WRSZ` replacement surfaces with a
 480×320 loader-safe Canvas cap. Its QMP resize gate passed on 1/2/4 CPUs with
@@ -81,7 +88,8 @@ WSIZ, and hardware GPU presentation remain out of scope.
 preview and the catalog now passes `--gui %p`. The shared QMP desktop gate
 launches it from F1 and passed on 1/2/4 CPUs, with evidence in
 `audit-artifacts/editor-desktop-{1,2,4}cpu-*`. CLI editing remains separate;
-desktop text input, WSIZ, and hardware GPU presentation remain out of scope.
+desktop text input, pointer widgets, and hardware GPU presentation remain out
+of scope; bounded WSIZ/WRSZ is covered by the newer Editor resize slice.
 
 **Codex graphics-track WovenSecurity client (2026-10-19):**
 `apps/woven-security/src/gui.rs` adds a read-only bounded identity/audit
