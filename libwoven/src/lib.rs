@@ -9933,10 +9933,16 @@ pub mod graphics {
             if rect.is_empty() {
                 return;
             }
+            let right = rect
+                .x
+                .saturating_add(i32::try_from(rect.width).unwrap_or(i32::MAX));
+            let bottom = rect
+                .y
+                .saturating_add(i32::try_from(rect.height).unwrap_or(i32::MAX));
             let (x0, y0) = transform.map(rect.x, rect.y);
-            let (x1, y1) = transform.map(rect.x + rect.width as i32, rect.y);
-            let (x2, y2) = transform.map(rect.x + rect.width as i32, rect.y + rect.height as i32);
-            let (x3, y3) = transform.map(rect.x, rect.y + rect.height as i32);
+            let (x1, y1) = transform.map(right, rect.y);
+            let (x2, y2) = transform.map(right, bottom);
+            let (x3, y3) = transform.map(rect.x, bottom);
             self.fill_triangle([(x0, y0), (x1, y1), (x2, y2)], color);
             self.fill_triangle([(x0, y0), (x2, y2), (x3, y3)], color);
         }
@@ -12980,6 +12986,23 @@ mod tests {
             Renderer::new(&mut canvas).transformed_rect(
                 Rect::new(-1, -1, 4, 4),
                 Transform::new(i32::MAX, 0, 0, i32::MAX, 0, 0),
+                Color::TITLE,
+            );
+        }
+        assert_eq!(pixels[0], Color::TITLE.packed());
+        assert_eq!(pixels[15], Color::TITLE.packed());
+    }
+
+    #[test]
+    fn wovengraphics_transformed_rect_bounds_extreme_dimensions() {
+        use crate::graphics::{Color, Rect, Renderer, Transform};
+
+        let mut pixels = [0u32; 16];
+        {
+            let mut canvas = Canvas::new(&mut pixels, 0, 0, 4, 4).unwrap();
+            Renderer::new(&mut canvas).transformed_rect(
+                Rect::new(0, 0, usize::MAX, 4),
+                Transform::IDENTITY,
                 Color::TITLE,
             );
         }

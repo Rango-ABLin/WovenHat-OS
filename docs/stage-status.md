@@ -1,5 +1,15 @@
 # Stage status
 
+## Graphics track - bounded transformed-rectangle corners (2026-10-19)
+
+Transformed rectangles now construct their far corners with checked
+`usize`-to-`i32` conversion and saturation before affine mapping. Extreme
+dimensions therefore cannot wrap before reaching the bounded triangle
+rasterizer. The 48-test `libwoven` suite, warning-denying
+library/kernel/workspace Clippy, formatting, and Stage 19.2 compositor visual
+acceptance passed on 1/2/4 CPUs. Hardware GPU acceleration remains a separate
+boundary.
+
 ## Graphics track - bounded image blits (2026-10-19)
 
 WovenGraphics opaque and blended image blits now iterate only over the Canvas

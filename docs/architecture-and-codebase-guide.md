@@ -1,5 +1,12 @@
 # WovenHat OS Architecture & Codebase Guide
 
+## Graphics transformed-rectangle corner update (2026-10-19)
+
+`Renderer::transformed_rect` derives its exclusive far edges with checked
+conversion and saturation before calling the fixed-point transform. This
+preserves the clipped triangle path while preventing dimension narrowing from
+wrapping geometry.
+
 ## Graphics image blit update (2026-10-19)
 
 `Renderer::image` and `image_blended` clip their iteration to the Canvas and
