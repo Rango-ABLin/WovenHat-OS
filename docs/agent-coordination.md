@@ -1,5 +1,12 @@
 # Agent coordination (Claude Code and Codex)
 
+**Codex graphics-track GSUB multiple-substitution extension acceptance
+(2026-10-19):** direct and type-7 extension-wrapped type-2 substitutions now
+have end-to-end regressions, including oversized-sequence rejection. The 57
+`libwoven` tests, warning-denying Clippy, formatting, and Stage 19.2 visual
+acceptance passed on 1/2/4 CPUs. Full feature ordering and hardware GPU output
+remain open.
+
 **Codex graphics-track bounded GSUB multiple substitutions (2026-10-19):**
 GSUB lookup type 2 now expands a glyph through checked sequences capped at 16
 replacement glyphs, including direct and type-7 extension dispatch, while

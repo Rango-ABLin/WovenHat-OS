@@ -14393,6 +14393,35 @@ mod tests {
         assert_eq!(multiple_output[0].source_count, 1);
         assert_eq!(multiple_output[1].source, '\0');
         assert_eq!(multiple_output[1].source_count, 0);
+        let mut extension_multiple_bytes = multiple_bytes;
+        put32(&mut extension_multiple_bytes, 104, 78);
+        put16(&mut extension_multiple_bytes, 302, 7);
+        put16(&mut extension_multiple_bytes, 310, 1);
+        put16(&mut extension_multiple_bytes, 312, 2);
+        put32(&mut extension_multiple_bytes, 314, 8);
+        extension_multiple_bytes[318..340].copy_from_slice(&multiple_bytes[310..332]);
+        let extension_multiple_face = TrueTypeFace::from_bytes(&extension_multiple_bytes).unwrap();
+        let mut extension_multiple_output = [ShapedGlyph {
+            glyph_id: 0,
+            source: '\0',
+            source_count: 0,
+            origin: Point::new(0, 0),
+            advance: 0,
+        }; 2];
+        assert_eq!(
+            extension_multiple_face
+                .shape_text_ligatures("A", Point::new(2, 15), 10, &mut extension_multiple_output,)
+                .unwrap(),
+            2
+        );
+        assert_eq!(extension_multiple_output[0].glyph_id, 3);
+        assert_eq!(extension_multiple_output[1].glyph_id, 2);
+        let mut malformed_multiple = multiple_bytes;
+        put16(&mut malformed_multiple, 320, 17);
+        assert_eq!(
+            crate::graphics::gsub_multiple_subtable(&malformed_multiple, 310, 1, 372),
+            Err(crate::graphics::TrueTypeError::TooLarge)
+        );
         let mut context_bytes = single_bytes;
         put32(&mut context_bytes, 104, 116);
         put32(&mut context_bytes, 262, 0x0001_0000);

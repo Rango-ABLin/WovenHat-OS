@@ -1,5 +1,13 @@
 # WovenHat OS Architecture & Codebase Guide
 
+## Graphics GSUB multiple-substitution extension evidence (2026-10-19)
+
+The type-2 multiple-substitution implementation is regression-tested through
+both a direct lookup and a type-7 extension wrapper. A sequence count above
+the 16-glyph bound fails closed before output generation. The acceptance still
+covers software shaping only; full feature ordering and hardware GPU output
+remain outside this boundary.
+
 ## Graphics GSUB multiple-substitution update (2026-10-19)
 
 The shaping pipeline now supports bounded GSUB lookup type 2 sequences. A

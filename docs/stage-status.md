@@ -1,5 +1,15 @@
 # Stage status
 
+## Graphics track - GSUB multiple-substitution extension acceptance (2026-10-19)
+
+The GSUB type-2 slice now has an end-to-end regression for a type-7 extension
+wrapper as well as direct lookup coverage. Oversized replacement sequences
+fail closed before any output is emitted. The 57-test `libwoven` suite,
+warning-denying library/kernel/workspace Clippy, formatting, and Stage 19.2
+compositor visual acceptance passed on 1/2/4 CPUs. This strengthens the
+software shaping boundary; complete OpenType feature ordering and hardware GPU
+acceleration remain separate.
+
 ## Graphics track - bounded GSUB multiple substitutions (2026-10-19)
 
 GSUB lookup type 2 multiple substitutions now expand one shaped input glyph
