@@ -1,5 +1,16 @@
 # Stage status
 
+## Graphics backend boundary - VIRGL lifecycle rerun (2026-10-19)
+
+The capability-gated `virtio-gpu-gl-pci` probe now has fresh 1/2/4-CPU
+evidence for VIRGL capability discovery, context/resource lifecycle, and
+bounded command submission. All three runs passed under
+`audit-artifacts/stage20.14-{1,2,4}cpu-*`. This closes the transport/lifecycle
+qualification slice only: QEMU still rejects the tested 3D resource through
+classic `SET_SCANOUT`, and the blob path is not accepted by the VirGL context,
+so visible GPU-backed compositor presentation remains hardware/QEMU-bound and
+unclaimed. Software/2D scanout remains the accepted fallback.
+
 ## Graphics track - bounded GSUB reverse-chaining substitutions (2026-10-19)
 
 GSUB lookup type 8 reverse-chaining substitutions now match checked backtrack

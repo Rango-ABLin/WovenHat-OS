@@ -1,5 +1,11 @@
 # Agent coordination (Claude Code and Codex)
 
+**Codex graphics backend boundary rerun (2026-10-19):** the capability-gated
+`virtio-gpu-gl-pci` VIRGL discovery/context/resource/command lifecycle passed
+on 1/2/4 CPUs with fresh audit artifacts. This does not claim visible GPU
+scanout: QEMU still rejects the tested 3D resource/blob presentation path, so
+software/2D scanout remains the accepted fallback.
+
 **Codex graphics-track bounded GSUB reverse-chaining substitutions
 (2026-10-19):** GSUB lookup type 8 now validates current, backtrack, and
 lookahead coverages before applying a bounded reverse-chaining replacement;

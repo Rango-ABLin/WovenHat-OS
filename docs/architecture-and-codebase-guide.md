@@ -1,5 +1,15 @@
 # WovenHat OS Architecture & Codebase Guide
 
+## Graphics VIRGL lifecycle evidence update (2026-10-19)
+
+The capability-gated `virtio-gpu-gl-pci` probe passes on 1/2/4 CPUs for
+capability discovery, context/resource creation and teardown, and bounded
+VIRGL command submission. This is transport/lifecycle evidence only. The
+tested 3D resource is still not accepted by QEMU's classic `SET_SCANOUT`, and
+the experimental blob resource is not accepted by the VirGL context; the
+software/2D scanout remains the accepted fallback until a visible GPU frame is
+verified.
+
 ## Graphics GSUB reverse-chaining update (2026-10-19)
 
 The bounded GSUB pipeline supports lookup type 8 reverse-chaining
