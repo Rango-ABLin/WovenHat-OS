@@ -9652,6 +9652,10 @@ pub mod graphics {
             width: usize,
             height: usize,
         ) -> Option<Self> {
+            if !crate::coordinate_extent_fits(x, width) || !crate::coordinate_extent_fits(y, height)
+            {
+                return None;
+            }
             let length = width.checked_mul(height)?;
             values.get_mut(..length)?;
             Some(Self {
@@ -11804,9 +11808,18 @@ pub struct Canvas<'a> {
     height: usize,
 }
 
+fn coordinate_extent_fits(origin: i32, extent: usize) -> bool {
+    extent == 0
+        || i128::from(origin) + i128::try_from(extent.saturating_sub(1)).unwrap_or(i128::MAX)
+            <= i128::from(i32::MAX)
+}
+
 impl<'a> Canvas<'a> {
     /// `None` if `pixels` is shorter than `width * height`.
     pub fn new(pixels: &'a mut [u32], x: i32, y: i32, width: usize, height: usize) -> Option<Self> {
+        if !coordinate_extent_fits(x, width) || !coordinate_extent_fits(y, height) {
+            return None;
+        }
         let length = width.checked_mul(height)?;
         let pixels = pixels.get_mut(..length)?;
         Some(Self {
@@ -15929,8 +15942,19 @@ mod tests {
             Canvas::new(&mut pixels, 0, 0, usize::MAX, 2).is_none(),
             "overflow refused"
         );
+        assert!(Canvas::new(&mut pixels, i32::MAX, 0, 2, 1).is_none());
+        assert!(Canvas::new(&mut pixels, 0, i32::MAX, 1, 2).is_none());
         let canvas = Canvas::new(&mut pixels, 0, 0, 2, 2).unwrap();
         assert_eq!(canvas.pixels().len(), 4, "only the rectangle is exposed");
+    }
+
+    #[test]
+    fn depth_buffer_rejects_unrepresentable_coordinates() {
+        use crate::graphics::DepthBuffer;
+
+        let mut depths = [0u16; 4];
+        assert!(DepthBuffer::new(&mut depths, i32::MAX, 0, 2, 1).is_none());
+        assert!(DepthBuffer::new(&mut depths, 0, i32::MAX, 1, 2).is_none());
     }
 
     #[test]

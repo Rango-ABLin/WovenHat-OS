@@ -35,6 +35,16 @@ catalog apps (woven-files, woven-settings, woven-monitor, woven-security,
 woven-editor, woven-images, woven-update, woven-store, woven-terminal) are
 still CLI-only and would need the same `share_with()`/`WOPN` treatment.
 
+## Graphics track - bounded surface coordinate extents (2026-10-19)
+
+Canvas and DepthBuffer constructors now reject non-empty rectangles whose
+logical right or bottom edge cannot be represented by their `i32` coordinate
+APIs. This keeps shader and raster offset arithmetic defined for every
+accepted surface. The 54-test `libwoven` suite, warning-denying
+library/kernel/workspace Clippy, formatting, and Stage 19.2 compositor visual
+acceptance passed on 1/2/4 CPUs. Hardware GPU acceleration remains a separate
+boundary.
+
 ## Graphics track - bounded affine transform arithmetic (2026-10-19)
 
 WovenGraphics fixed-point scale and translation constructors now saturate

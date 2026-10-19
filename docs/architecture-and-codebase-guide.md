@@ -1,5 +1,11 @@
 # WovenHat OS Architecture & Codebase Guide
 
+## Graphics surface-coordinate invariant (2026-10-19)
+
+Canvas and DepthBuffer accept only non-empty rectangles whose right and bottom
+coordinates fit the `i32` APIs used by shader and raster offset arithmetic.
+This makes the downstream coordinate additions safe by construction.
+
 ## Graphics affine transform update (2026-10-19)
 
 `Transform::scale` and `translate` saturate fixed-point construction, while
