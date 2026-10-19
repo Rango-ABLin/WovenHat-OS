@@ -1,5 +1,18 @@
 # Stage status
 
+## Graphics track - WovenMonitor desktop client (2026-10-19)
+
+WovenMonitor now has a read-only `--gui <shell-pid>` client path. It renders
+bounded clock, compositor geometry, and `/mnt` storage-count data into a
+full-window Canvas buffer, shares the surface, opens it with `WOPN`, and waits
+for `WCLS`. The production catalog passes the shell PID. The shared
+`scripts/test-files-desktop-qemu.py --app monitor` launcher/screendump gate
+passed on 1/2/4 CPUs with evidence under
+`audit-artifacts/monitor-desktop-{1,2,4}cpu-*`.
+
+This slice is intentionally read-only and bounded at 128 storage entries; it
+does not claim controls, resize (`WSIZ`), or hardware GPU presentation.
+
 ## Graphics track - WovenSettings desktop client (2026-10-19)
 
 WovenSettings now has a read-only `--gui <shell-pid>` client path. It renders

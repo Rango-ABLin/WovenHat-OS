@@ -5207,7 +5207,7 @@ fn install_production_system_apps() -> bool {
             image: SYSTEM_APP_MONITOR,
             binary_path: "/bin/wovenhat-monitor",
             catalog_path: "/share/applications/woven-monitor.app",
-            catalog: b"Name=WovenMonitor\nExec=/bin/wovenhat-monitor\n",
+            catalog: b"Name=WovenMonitor\nExec=/bin/wovenhat-monitor --gui %p\n",
         },
         App {
             name: "woven-settings",

@@ -1,5 +1,13 @@
 # Agent coordination (Claude Code and Codex)
 
+**Codex graphics-track WovenMonitor client (2026-10-19):**
+`apps/woven-monitor/src/gui.rs` adds a read-only bounded telemetry window for
+clock, display geometry, and `/mnt` storage count. The catalog now passes
+`--gui %p`; the shared QMP desktop gate launches it from F1 and passed on
+1/2/4 CPUs, with evidence in
+`audit-artifacts/monitor-desktop-{1,2,4}cpu-*`. Storage remains capped at 128
+entries; controls, WSIZ, and hardware GPU presentation remain out of scope.
+
 **Codex graphics-track WovenSettings client (2026-10-19):**
 `apps/woven-settings/src/gui.rs` adds a read-only Canvas/WOPN client for
 identity, UTC clock, and compositor geometry. The production catalog now

@@ -1,5 +1,14 @@
 # WovenHat OS Architecture & Codebase Guide
 
+## Graphics WovenMonitor client (2026-10-19)
+
+`apps/woven-monitor/src/gui.rs` is a bounded read-only desktop client for
+clock, display geometry, and storage-count telemetry. It uses a static Canvas
+buffer and the WovenShell WOPN/WCLS lifecycle; the catalog supplies
+`--gui %p`. The shared QMP launcher/screendump gate passed on 1/2/4 CPUs.
+Storage enumeration remains capped at 128 entries, and no controls, WSIZ
+resize, or hardware GPU output is implied.
+
 ## Graphics WovenSettings client (2026-10-19)
 
 `apps/woven-settings/src/gui.rs` is a bounded, read-only desktop client. It
