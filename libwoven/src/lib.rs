@@ -3738,6 +3738,7 @@ pub mod graphics {
                             ppem,
                             previous: context.map(|value| value.0),
                             next: context.map(|value| value.1),
+                            input_count: 2,
                             target_sequence_index: 0,
                         },
                     )
@@ -4159,6 +4160,7 @@ pub mod graphics {
                         ppem,
                         previous: context.map(|value| value.0),
                         next: context.map(|value| value.1),
+                        input_count: 2,
                         target_sequence_index: 0,
                     },
                 )
@@ -5296,6 +5298,7 @@ pub mod graphics {
                             ppem,
                             previous: context.map(|value| value.0),
                             next: context.map(|value| value.1),
+                            input_count: 2,
                             target_sequence_index: 1,
                         },
                     )?
@@ -5322,6 +5325,52 @@ pub mod graphics {
                 output[index + 1].origin.y = output[index + 1].origin.y.saturating_add(y_placement);
                 output[index + 1].advance = output[index + 1].advance.saturating_add(x_advance);
                 for following in output.iter_mut().take(count).skip(index + 2) {
+                    following.origin.x = following.origin.x.saturating_add(x_advance);
+                    following.origin.y = following.origin.y.saturating_add(y_advance);
+                }
+            }
+            for index in 0..count {
+                let glyph = output[index].glyph_id;
+                let context = (index > 0)
+                    .then(|| output[index - 1].glyph_id)
+                    .zip((index + 1 < count).then(|| output[index + 1].glyph_id));
+                let Some((x_placement, y_placement, x_advance, y_advance)) = self
+                    .gpos_contextual_adjustment(
+                        glyph,
+                        u16::MAX,
+                        GposContextOptions {
+                            script_tag,
+                            language_tag,
+                            ppem,
+                            previous: context.map(|value| value.0),
+                            next: context.map(|value| value.1),
+                            input_count: 1,
+                            target_sequence_index: 0,
+                        },
+                    )?
+                else {
+                    continue;
+                };
+                let x_placement = (i64::from(x_placement) * scale)
+                    .div_euclid(units)
+                    .clamp(i64::from(i32::MIN), i64::from(i32::MAX))
+                    as i32;
+                let y_placement = (i64::from(y_placement) * scale)
+                    .div_euclid(units)
+                    .clamp(i64::from(i32::MIN), i64::from(i32::MAX))
+                    as i32;
+                let x_advance = (i64::from(x_advance) * scale)
+                    .div_euclid(units)
+                    .clamp(i64::from(i32::MIN), i64::from(i32::MAX))
+                    as i32;
+                let y_advance = (i64::from(y_advance) * scale)
+                    .div_euclid(units)
+                    .clamp(i64::from(i32::MIN), i64::from(i32::MAX))
+                    as i32;
+                output[index].origin.x = output[index].origin.x.saturating_add(x_placement);
+                output[index].origin.y = output[index].origin.y.saturating_add(y_placement);
+                output[index].advance = output[index].advance.saturating_add(x_advance);
+                for following in output.iter_mut().take(count).skip(index + 1) {
                     following.origin.x = following.origin.x.saturating_add(x_advance);
                     following.origin.y = following.origin.y.saturating_add(y_advance);
                 }
@@ -7422,6 +7471,7 @@ pub mod graphics {
         ppem: Option<u16>,
         previous: Option<u16>,
         next: Option<u16>,
+        input_count: u16,
         target_sequence_index: u16,
     }
 
@@ -7433,7 +7483,10 @@ pub mod graphics {
         right: u16,
         options: GposContextOptions,
     ) -> Result<Option<(i32, i32, i32, i32)>, TrueTypeError> {
-        if options.target_sequence_index > 1 {
+        if options.input_count == 0
+            || options.input_count > 2
+            || options.target_sequence_index >= options.input_count
+        {
             return Ok(None);
         }
         let target_glyph = if options.target_sequence_index == 0 {
@@ -7556,7 +7609,7 @@ pub mod graphics {
                         read_u16(bytes, input_count_offset)
                             .ok_or(TrueTypeError::BadTableDirectory)?,
                     );
-                    if input_count != 2 {
+                    if input_count != usize::from(options.input_count) {
                         continue;
                     }
                     let input_offsets = input_count_offset
@@ -7653,8 +7706,11 @@ pub mod graphics {
                                 .ok_or(TrueTypeError::BadTableDirectory)?,
                         ))
                         .ok_or(TrueTypeError::BadTableDirectory)?;
-                    if gsub_coverage_index(bytes, first_coverage, table_end, left)?.is_none()
-                        || gsub_coverage_index(bytes, second_coverage, table_end, right)?.is_none()
+                    if gsub_coverage_index(bytes, first_coverage, table_end, left)?.is_none() {
+                        continue;
+                    }
+                    if options.input_count == 2
+                        && gsub_coverage_index(bytes, second_coverage, table_end, right)?.is_none()
                     {
                         continue;
                     }
@@ -7721,7 +7777,7 @@ pub mod graphics {
                                 continue;
                             }
                             if nested_type == 2 {
-                                if options.target_sequence_index != 0 {
+                                if options.input_count != 2 || options.target_sequence_index != 0 {
                                     continue;
                                 }
                                 if nested_subtable
@@ -12815,6 +12871,23 @@ mod tests {
         assert_eq!(shaped[0].advance, 525);
         assert_eq!(shaped[1].origin, Point::new(527, 15));
         assert_eq!(shaped[1].advance, 515);
+        let mut contextual_single_input_bytes = contextual_gpos_bytes;
+        put16(&mut contextual_single_input_bytes, 308, 1);
+        put16(&mut contextual_single_input_bytes, 310, 20);
+        put16(&mut contextual_single_input_bytes, 312, 0);
+        put16(&mut contextual_single_input_bytes, 314, 1);
+        put16(&mut contextual_single_input_bytes, 316, 0);
+        put16(&mut contextual_single_input_bytes, 318, 1);
+        let contextual_single_input_face =
+            TrueTypeFace::from_bytes(&contextual_single_input_bytes).unwrap();
+        assert_eq!(
+            contextual_single_input_face
+                .shape_text_ligatures("AB", Point::new(2, 15), 1000, &mut shaped)
+                .unwrap(),
+            2
+        );
+        assert_eq!(shaped[0].advance, 525);
+        assert_eq!(shaped[1].origin, Point::new(527, 15));
         let mut single_adjustment_bytes = [0u8; 420];
         single_adjustment_bytes.copy_from_slice(&bytes);
         put32(&mut single_adjustment_bytes, 104, 156);

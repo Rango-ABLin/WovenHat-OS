@@ -1,5 +1,13 @@
 # WovenHat OS Architecture & Codebase Guide
 
+## Graphics single-input contextual GPOS update (2026-10-19)
+
+The contextual format-3 dispatcher supports one-input coverage records through
+the shaped-glyph pass, applying nested type-1 positioning and propagating
+advance deltas. Adjacent context remains bounded to one checked backtrack and
+one lookahead glyph; broader contextual lookup semantics remain outside this
+path.
+
 ## Graphics contextual GPOS sequence-index-1 update (2026-10-19)
 
 The bounded contextual format-3 dispatcher can apply nested type-1 single
