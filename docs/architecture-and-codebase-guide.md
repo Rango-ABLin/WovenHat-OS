@@ -1,5 +1,13 @@
 # WovenHat OS Architecture & Codebase Guide
 
+## Graphics track - WovenGraphics compositor visual acceptance (2026-10-19)
+
+Stage 19.2 was revalidated on QEMU 1/2/4 CPUs. The `hello-gui` frame passed
+the WovenGraphics visual, 2D, and software 3D markers after compositor
+presentation, and the same runs verified retained-window behavior, clean
+application exit, and owner-slot release. This is software rendering through
+the production compositor; it does not claim accelerated GPU scanout.
+
 ## Graphics track - standard virtio-gpu 2D scanout acceptance (2026-10-19)
 
 The standard `virtio-gpu-pci` backend remains the authoritative visible

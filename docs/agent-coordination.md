@@ -1,5 +1,12 @@
 # Agent coordination (Claude Code and Codex)
 
+**Codex graphics-track WovenGraphics compositor visual acceptance revalidated
+(2026-10-19):** Stage 19.2 passed on QEMU 1/2/4 CPUs. The compositor accepted
+the WovenGraphics visual, 2D, and software 3D frames, and retained-window,
+clean-exit, and owner-release checks also passed. This closes the software
+renderer/compositor visual slice; accelerated GPU scanout remains a separate
+device-dependent boundary.
+
 **Codex graphics-track standard virtio-gpu 2D scanout revalidated
 (2026-10-19):** Fresh QEMU 1/2/4-CPU runs captured both 640x400 heads and
 verified every pixel against the gradient/checkerboard contract. This is the

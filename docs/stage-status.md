@@ -1,5 +1,14 @@
 # Stage status
 
+## Graphics track - WovenGraphics compositor frame revalidated (2026-10-19)
+
+The authoritative Stage 19.2 compositor acceptance passed on QEMU 1/2/4
+CPUs. Each run verified the WovenGraphics visual frame, the 2D frame, and the
+software 3D frame after presentation through the compositor, plus retained
+window, zero exit status, and owner teardown checks. This closes the software
+renderer/compositor visual slice; GPU-accelerated scanout remains the
+explicitly documented device-dependent boundary.
+
 ## Graphics track - standard virtio-gpu 2D scanout revalidated (2026-10-19)
 
 The software/2D presentation fallback is freshly accepted on QEMU 1/2/4-CPU
