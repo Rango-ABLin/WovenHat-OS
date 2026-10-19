@@ -1,5 +1,13 @@
 # Agent coordination (Claude Code and Codex)
 
+**Codex graphics-track bounded transformed-triangle clipping (2026-10-19):**
+the shared 2D triangle helper used by transformed rectangles now clips its
+raster bounds to the Canvas before iterating. Extreme transformed vertices
+cannot cause unbounded software loops; widened edge arithmetic and existing
+pixel clipping remain in force. The 44-test `libwoven` suite, warning-denying
+library/kernel/workspace Clippy, formatting, and Stage 19.2 compositor visual
+acceptance on 1/2/4 CPUs passed. Hardware GPU acceleration remains open.
+
 **Codex graphics-track bounded software-3D triangle clipping (2026-10-19):**
 the WovenGraphics software triangle path now clips raster iteration to the
 intersection of the Canvas and caller-owned depth buffer before walking pixels.

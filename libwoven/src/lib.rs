@@ -9889,10 +9889,19 @@ pub mod graphics {
             if area == 0 {
                 return;
             }
-            let min_x = ax.min(bx).min(cx);
-            let max_x = ax.max(bx).max(cx);
-            let min_y = ay.min(by).min(cy);
-            let max_y = ay.max(by).max(cy);
+            let canvas_right = self.canvas.x.saturating_add(
+                i32::try_from(self.canvas.width.saturating_sub(1)).unwrap_or(i32::MAX),
+            );
+            let canvas_bottom = self.canvas.y.saturating_add(
+                i32::try_from(self.canvas.height.saturating_sub(1)).unwrap_or(i32::MAX),
+            );
+            let min_x = ax.min(bx).min(cx).max(self.canvas.x);
+            let max_x = ax.max(bx).max(cx).min(canvas_right);
+            let min_y = ay.min(by).min(cy).max(self.canvas.y);
+            let max_y = ay.max(by).max(cy).min(canvas_bottom);
+            if min_x > max_x || min_y > max_y {
+                return;
+            }
             let positive = area > 0;
             for y in min_y..=max_y {
                 for x in min_x..=max_x {
@@ -12844,6 +12853,23 @@ mod tests {
         }
         assert!(pixels.iter().any(|pixel| *pixel == Color::TITLE.packed()));
         assert_eq!(pixels[35], 0);
+    }
+
+    #[test]
+    fn wovengraphics_transformed_rect_clips_extreme_vertices() {
+        use crate::graphics::{Color, Rect, Renderer, Transform};
+
+        let mut pixels = [0u32; 16];
+        {
+            let mut canvas = Canvas::new(&mut pixels, 0, 0, 4, 4).unwrap();
+            Renderer::new(&mut canvas).transformed_rect(
+                Rect::new(-1, -1, 4, 4),
+                Transform::new(i32::MAX, 0, 0, i32::MAX, 0, 0),
+                Color::TITLE,
+            );
+        }
+        assert_eq!(pixels[0], Color::TITLE.packed());
+        assert_eq!(pixels[15], Color::TITLE.packed());
     }
 
     #[test]

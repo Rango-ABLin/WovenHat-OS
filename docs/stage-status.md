@@ -1,5 +1,15 @@
 # Stage status
 
+## Graphics track - bounded transformed-triangle clipping (2026-10-19)
+
+The shared 2D triangle helper used by transformed rectangles now clips its
+raster bounds to the Canvas before iterating. Extreme transformed vertices
+therefore cannot cause unbounded software loops; widened edge arithmetic and
+the existing pixel clipping remain in force. The 44-test `libwoven` suite,
+warning-denying library/kernel/workspace Clippy, formatting, and Stage 19.2
+compositor visual acceptance passed on 1/2/4 CPUs. Hardware GPU acceleration
+remains a separate boundary.
+
 ## Graphics track - bounded software-3D triangle clipping (2026-10-19)
 
 The WovenGraphics software triangle path now clips raster iteration to the

@@ -1,5 +1,11 @@
 # WovenHat OS Architecture & Codebase Guide
 
+## Graphics transformed-triangle clipping update (2026-10-19)
+
+The Renderer transformed-rectangle triangle helper clips its iteration bounds
+to the Canvas before rasterization, sharing the widened edge arithmetic and
+safe pixel boundary used by software 3D.
+
 ## Graphics software-3D clipping update (2026-10-19)
 
 `Renderer::triangle_3d` bounds raster iteration by both the Canvas and depth
