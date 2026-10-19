@@ -1,5 +1,17 @@
 # Stage status
 
+## Graphics track - bounded three-input contextual GPOS positioning (2026-10-19)
+
+Contextual GPOS format-3 subtables with three input coverages now apply
+bounded nested type-1 single adjustments to sequence index two, including
+saturating advance propagation to following glyphs. One- and two-input paths
+remain supported; nested pair positioning remains limited to the two-input
+sequence-index-zero path, and longer context/broader lookup semantics remain
+separate boundaries. The 42-test `libwoven` suite, warning-denying
+library/kernel/workspace Clippy, formatting, and Stage 19.2 compositor visual
+acceptance passed on 1/2/4 CPUs. Hardware GPU acceleration remains a separate
+boundary.
+
 ## Graphics track - bounded single-input contextual GPOS positioning (2026-10-19)
 
 Contextual GPOS format-3 subtables with one input coverage now apply bounded
