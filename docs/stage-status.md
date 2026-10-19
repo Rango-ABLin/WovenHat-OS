@@ -1,5 +1,16 @@
 # Stage status
 
+## Graphics track - bounded contextual GPOS sequence-index-1 positioning (2026-10-19)
+
+Contextual GPOS format-3 records targeting sequence index one now apply
+bounded nested type-1 single adjustments to the second input glyph, including
+saturating advance propagation to following glyphs. Nested type-2 pair
+positioning remains limited to sequence index zero in this path; indices beyond
+one and broader contextual dispatch remain separate boundaries. The 42-test
+`libwoven` suite, warning-denying library/kernel/workspace Clippy, formatting,
+and Stage 19.2 compositor visual acceptance passed on 1/2/4 CPUs. Hardware GPU
+acceleration remains a separate boundary.
+
 ## Graphics track - bounded contextual GPOS multi-record composition (2026-10-19)
 
 Contextual GPOS format-3 records targeting sequence index zero now compose

@@ -1,5 +1,13 @@
 # WovenHat OS Architecture & Codebase Guide
 
+## Graphics contextual GPOS sequence-index-1 update (2026-10-19)
+
+The bounded contextual format-3 dispatcher can apply nested type-1 single
+positioning to sequence index one and propagate its advance through following
+shaped glyph origins. Nested pair positioning remains restricted to sequence
+index zero; later indices and broader contextual lookup application remain
+outside this path.
+
 ## Graphics contextual GPOS composition update (2026-10-19)
 
 Contextual format-3 dispatch accumulates multiple nested single or pair value

@@ -3738,6 +3738,7 @@ pub mod graphics {
                             ppem,
                             previous: context.map(|value| value.0),
                             next: context.map(|value| value.1),
+                            target_sequence_index: 0,
                         },
                     )
                 } else {
@@ -4158,11 +4159,30 @@ pub mod graphics {
                         ppem,
                         previous: context.map(|value| value.0),
                         next: context.map(|value| value.1),
+                        target_sequence_index: 0,
                     },
                 )
             } else {
                 Ok(None)
             }
+        }
+
+        fn gpos_contextual_adjustment(
+            &self,
+            left: u16,
+            right: u16,
+            options: GposContextOptions,
+        ) -> Result<Option<(i32, i32, i32, i32)>, TrueTypeError> {
+            let Some((table, length)) = self.gpos else {
+                return Ok(None);
+            };
+            let table_end = table
+                .checked_add(length)
+                .ok_or(TrueTypeError::BadTableDirectory)?;
+            if length < 10 || table_end > self.bytes.len() {
+                return Err(TrueTypeError::BadTableDirectory);
+            }
+            gpos_contextual_single_adjustment(self.bytes, table, table_end, left, right, options)
         }
 
         fn gpos_mark_to_ligature_adjustment(
@@ -5256,6 +5276,52 @@ pub mod graphics {
                 output[index].origin.y = output[index].origin.y.saturating_add(y_placement);
                 output[index].advance = output[index].advance.saturating_add(x_advance);
                 for following in output.iter_mut().take(count).skip(index + 1) {
+                    following.origin.x = following.origin.x.saturating_add(x_advance);
+                    following.origin.y = following.origin.y.saturating_add(y_advance);
+                }
+            }
+            for index in 0..count.saturating_sub(1) {
+                let left = output[index].glyph_id;
+                let right = output[index + 1].glyph_id;
+                let context = (index > 0)
+                    .then(|| output[index - 1].glyph_id)
+                    .zip((index + 2 < count).then(|| output[index + 2].glyph_id));
+                let Some((x_placement, y_placement, x_advance, y_advance)) = self
+                    .gpos_contextual_adjustment(
+                        left,
+                        right,
+                        GposContextOptions {
+                            script_tag,
+                            language_tag,
+                            ppem,
+                            previous: context.map(|value| value.0),
+                            next: context.map(|value| value.1),
+                            target_sequence_index: 1,
+                        },
+                    )?
+                else {
+                    continue;
+                };
+                let x_placement = (i64::from(x_placement) * scale)
+                    .div_euclid(units)
+                    .clamp(i64::from(i32::MIN), i64::from(i32::MAX))
+                    as i32;
+                let y_placement = (i64::from(y_placement) * scale)
+                    .div_euclid(units)
+                    .clamp(i64::from(i32::MIN), i64::from(i32::MAX))
+                    as i32;
+                let x_advance = (i64::from(x_advance) * scale)
+                    .div_euclid(units)
+                    .clamp(i64::from(i32::MIN), i64::from(i32::MAX))
+                    as i32;
+                let y_advance = (i64::from(y_advance) * scale)
+                    .div_euclid(units)
+                    .clamp(i64::from(i32::MIN), i64::from(i32::MAX))
+                    as i32;
+                output[index + 1].origin.x = output[index + 1].origin.x.saturating_add(x_placement);
+                output[index + 1].origin.y = output[index + 1].origin.y.saturating_add(y_placement);
+                output[index + 1].advance = output[index + 1].advance.saturating_add(x_advance);
+                for following in output.iter_mut().take(count).skip(index + 2) {
                     following.origin.x = following.origin.x.saturating_add(x_advance);
                     following.origin.y = following.origin.y.saturating_add(y_advance);
                 }
@@ -7356,6 +7422,7 @@ pub mod graphics {
         ppem: Option<u16>,
         previous: Option<u16>,
         next: Option<u16>,
+        target_sequence_index: u16,
     }
 
     fn gpos_contextual_single_adjustment(
@@ -7366,6 +7433,14 @@ pub mod graphics {
         right: u16,
         options: GposContextOptions,
     ) -> Result<Option<(i32, i32, i32, i32)>, TrueTypeError> {
+        if options.target_sequence_index > 1 {
+            return Ok(None);
+        }
+        let target_glyph = if options.target_sequence_index == 0 {
+            left
+        } else {
+            right
+        };
         let (feature_indices, feature_index_count, feature_count) = gpos_selected_feature_indices(
             bytes,
             table,
@@ -7587,7 +7662,7 @@ pub mod graphics {
                     let mut found = false;
                     for record_index in 0..record_count {
                         let record = record_count_offset + 2 + record_index * 4;
-                        if read_u16(bytes, record) != Some(0) {
+                        if read_u16(bytes, record) != Some(options.target_sequence_index) {
                             continue;
                         }
                         let nested_index = usize::from(
@@ -7646,6 +7721,9 @@ pub mod graphics {
                                 continue;
                             }
                             if nested_type == 2 {
+                                if options.target_sequence_index != 0 {
+                                    continue;
+                                }
                                 if nested_subtable
                                     .checked_add(10)
                                     .is_none_or(|end| end > table_end)
@@ -7659,7 +7737,8 @@ pub mod graphics {
                                             .ok_or(TrueTypeError::BadTableDirectory)?,
                                     ))
                                     .ok_or(TrueTypeError::BadTableDirectory)?;
-                                if gsub_coverage_index(bytes, coverage, table_end, left)?.is_none()
+                                if gsub_coverage_index(bytes, coverage, table_end, target_glyph)?
+                                    .is_none()
                                 {
                                     continue;
                                 }
@@ -7672,7 +7751,7 @@ pub mod graphics {
                                         .ok_or(TrueTypeError::BadTableDirectory)?,
                                 );
                                 let Some(coverage_index) =
-                                    gsub_coverage_index(bytes, coverage, table_end, left)?
+                                    gsub_coverage_index(bytes, coverage, table_end, target_glyph)?
                                 else {
                                     continue;
                                 };
@@ -12724,6 +12803,18 @@ mod tests {
         );
         assert_eq!(shaped[0].advance, 540);
         assert_eq!(shaped[1].origin, Point::new(542, 15));
+        let mut contextual_second_bytes = contextual_multi_bytes;
+        put16(&mut contextual_second_bytes, 322, 1);
+        let contextual_second_face = TrueTypeFace::from_bytes(&contextual_second_bytes).unwrap();
+        assert_eq!(
+            contextual_second_face
+                .shape_text_ligatures("AB", Point::new(2, 15), 1000, &mut shaped)
+                .unwrap(),
+            2
+        );
+        assert_eq!(shaped[0].advance, 525);
+        assert_eq!(shaped[1].origin, Point::new(527, 15));
+        assert_eq!(shaped[1].advance, 515);
         let mut single_adjustment_bytes = [0u8; 420];
         single_adjustment_bytes.copy_from_slice(&bytes);
         put32(&mut single_adjustment_bytes, 104, 156);

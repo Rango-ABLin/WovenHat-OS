@@ -1,5 +1,14 @@
 # Agent coordination (Claude Code and Codex)
 
+**Codex graphics-track bounded contextual GPOS sequence-index-1 positioning (2026-10-19):**
+contextual format-3 records targeting sequence index one now apply bounded
+nested single adjustments to the second input glyph and propagate advances to
+following glyphs. Nested pair positioning remains limited to sequence index
+zero; indices beyond one and broader contextual dispatch remain open. The
+42-test `libwoven` suite, warning-denying library/kernel/workspace Clippy,
+formatting, and Stage 19.2 compositor visual acceptance on 1/2/4 CPUs passed.
+Hardware GPU acceleration remains open.
+
 **Codex graphics-track bounded contextual GPOS multi-record composition (2026-10-19):**
 contextual format-3 records targeting sequence index zero now accumulate
 multiple nested single/pair adjustments with saturating arithmetic. The 42-test
@@ -36,6 +45,19 @@ and launches `qemu-system-x86_64` with a normal visible display (no
 desktop/apps directly. Serial + QEMU monitor share this terminal's stdio via
 `-serial mon:stdio`. This produces no stage acceptance evidence and does not
 touch USB/physical hardware.
+
+Follow-up: the `hardware-demo`/`system-apps` catalog apps (woven-settings,
+woven-monitor, etc.) are currently CLI diagnostic utilities with no window of
+their own -- `display: unavailable (DisplayIo required)` in their output is
+expected (only the compositor-authority holder gets that capability), not a
+defect. The actual 2D/3D `libwoven::graphics` compositor work lives in
+`hello-gui`, exercised only by the Stage 19.x self-test features, which all
+end boot via `qemu_test_exit_success()` (isa-debug-exit) a moment after
+presenting one frame -- too fast for a human to see. Added
+`scripts/run-interactive-graphics-qemu.py`: builds the same `stage19-2-test`
+image but omits the `isa-debug-exit` device, so that exit call's port write is
+a no-op and the kernel parks in its `hlt` loop with the presented frame still
+in the real framebuffer, visible in the QEMU window until closed.
 
 **Codex graphics-track bounded contextual GPOS single adjustment (2026-10-19):**
 added format-3 two-input context matching with checked coverage and lookup
