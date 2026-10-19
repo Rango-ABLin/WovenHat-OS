@@ -7685,6 +7685,311 @@ pub mod graphics {
         target_sequence_index: u16,
     }
 
+    #[derive(Clone, Copy)]
+    struct GposContextTableBounds {
+        table: usize,
+        table_end: usize,
+    }
+
+    #[derive(Clone, Copy)]
+    struct GposContextLookupBounds {
+        lookup_base: usize,
+        lookup_count: usize,
+    }
+
+    fn gpos_contextual_chaining_format1_single_adjustment(
+        bytes: &[u8],
+        subtable: usize,
+        table_bounds: GposContextTableBounds,
+        lookup_bounds: GposContextLookupBounds,
+        left: u16,
+        right: u16,
+        options: GposContextOptions,
+    ) -> Result<Option<(i32, i32, i32, i32)>, TrueTypeError> {
+        let table = table_bounds.table;
+        let table_end = table_bounds.table_end;
+        let lookup_base = lookup_bounds.lookup_base;
+        let lookup_count = lookup_bounds.lookup_count;
+        if subtable.checked_add(6).is_none_or(|end| end > table_end)
+            || read_u16(bytes, subtable) != Some(1)
+        {
+            return Ok(None);
+        }
+        let coverage = subtable
+            .checked_add(usize::from(
+                read_u16(bytes, subtable + 2).ok_or(TrueTypeError::BadTableDirectory)?,
+            ))
+            .ok_or(TrueTypeError::BadTableDirectory)?;
+        let Some(coverage_index) = gsub_coverage_index(bytes, coverage, table_end, left)? else {
+            return Ok(None);
+        };
+        let rule_set_count =
+            usize::from(read_u16(bytes, subtable + 4).ok_or(TrueTypeError::BadTableDirectory)?);
+        if rule_set_count > 128
+            || subtable
+                .checked_add(
+                    6usize
+                        .checked_add(
+                            rule_set_count
+                                .checked_mul(2)
+                                .ok_or(TrueTypeError::TooLarge)?,
+                        )
+                        .ok_or(TrueTypeError::TooLarge)?,
+                )
+                .is_none_or(|end| end > table_end)
+        {
+            return Err(TrueTypeError::TooLarge);
+        }
+        if coverage_index >= rule_set_count {
+            return Ok(None);
+        }
+        let rule_set = subtable
+            .checked_add(usize::from(
+                read_u16(bytes, subtable + 6 + coverage_index * 2)
+                    .ok_or(TrueTypeError::BadTableDirectory)?,
+            ))
+            .ok_or(TrueTypeError::BadTableDirectory)?;
+        if rule_set.checked_add(2).is_none_or(|end| end > table_end) {
+            return Err(TrueTypeError::BadTableDirectory);
+        }
+        let rule_count =
+            usize::from(read_u16(bytes, rule_set).ok_or(TrueTypeError::BadTableDirectory)?);
+        if rule_count > 128
+            || rule_set
+                .checked_add(
+                    2usize
+                        .checked_add(rule_count.checked_mul(2).ok_or(TrueTypeError::TooLarge)?)
+                        .ok_or(TrueTypeError::TooLarge)?,
+                )
+                .is_none_or(|end| end > table_end)
+        {
+            return Err(TrueTypeError::TooLarge);
+        }
+        for rule_index in 0..rule_count {
+            let rule = rule_set
+                .checked_add(usize::from(
+                    read_u16(bytes, rule_set + 2 + rule_index * 2)
+                        .ok_or(TrueTypeError::BadTableDirectory)?,
+                ))
+                .ok_or(TrueTypeError::BadTableDirectory)?;
+            if rule.checked_add(2).is_none_or(|end| end > table_end) {
+                return Err(TrueTypeError::BadTableDirectory);
+            }
+            let backtrack_count =
+                usize::from(read_u16(bytes, rule).ok_or(TrueTypeError::BadTableDirectory)?);
+            if backtrack_count > 2 {
+                continue;
+            }
+            let input_count_offset = rule
+                .checked_add(2 + backtrack_count * 2)
+                .ok_or(TrueTypeError::BadTableDirectory)?;
+            let input_count = usize::from(
+                read_u16(bytes, input_count_offset).ok_or(TrueTypeError::BadTableDirectory)?,
+            );
+            if input_count == 0
+                || input_count > 5
+                || input_count != usize::from(options.input_count)
+            {
+                continue;
+            }
+            let lookahead_count_offset = input_count_offset
+                .checked_add(2 + (input_count - 1) * 2)
+                .ok_or(TrueTypeError::BadTableDirectory)?;
+            let lookahead_count = usize::from(
+                read_u16(bytes, lookahead_count_offset).ok_or(TrueTypeError::BadTableDirectory)?,
+            );
+            if lookahead_count > 2 {
+                continue;
+            }
+            let lookahead_glyphs = lookahead_count_offset
+                .checked_add(2)
+                .ok_or(TrueTypeError::BadTableDirectory)?;
+            let record_count_offset = lookahead_glyphs
+                .checked_add(lookahead_count * 2)
+                .ok_or(TrueTypeError::BadTableDirectory)?;
+            let mut matches = true;
+            for index in 0..backtrack_count {
+                let expected = match index {
+                    0 => options.previous,
+                    1 => options.previous2,
+                    _ => None,
+                };
+                let Some(expected) = expected else {
+                    matches = false;
+                    break;
+                };
+                if read_u16(bytes, rule + 2 + index * 2) != Some(expected) {
+                    matches = false;
+                    break;
+                }
+            }
+            if !matches {
+                continue;
+            }
+            for index in 1..input_count {
+                let expected = match index {
+                    1 => Some(right),
+                    2 => options.third,
+                    3 => options.fourth,
+                    4 => options.fifth,
+                    _ => None,
+                };
+                let Some(expected) = expected else {
+                    matches = false;
+                    break;
+                };
+                if read_u16(bytes, input_count_offset + 2 + (index - 1) * 2) != Some(expected) {
+                    matches = false;
+                    break;
+                }
+            }
+            if !matches {
+                continue;
+            }
+            for index in 0..lookahead_count {
+                let expected = match index {
+                    0 => options.next,
+                    1 => options.next2,
+                    _ => None,
+                };
+                let Some(expected) = expected else {
+                    matches = false;
+                    break;
+                };
+                if read_u16(bytes, lookahead_glyphs + index * 2) != Some(expected) {
+                    matches = false;
+                    break;
+                }
+            }
+            if !matches
+                || record_count_offset
+                    .checked_add(2)
+                    .is_none_or(|end| end > table_end)
+            {
+                if matches {
+                    return Err(TrueTypeError::BadTableDirectory);
+                }
+                continue;
+            }
+            let record_count = usize::from(
+                read_u16(bytes, record_count_offset).ok_or(TrueTypeError::BadTableDirectory)?,
+            );
+            if record_count > 8
+                || record_count_offset
+                    .checked_add(
+                        2usize
+                            .checked_add(
+                                record_count.checked_mul(4).ok_or(TrueTypeError::TooLarge)?,
+                            )
+                            .ok_or(TrueTypeError::TooLarge)?,
+                    )
+                    .is_none_or(|end| end > table_end)
+            {
+                return Err(TrueTypeError::TooLarge);
+            }
+            for record_index in 0..record_count {
+                let record = record_count_offset + 2 + record_index * 4;
+                if read_u16(bytes, record) != Some(options.target_sequence_index) {
+                    continue;
+                }
+                let nested_index = usize::from(
+                    read_u16(bytes, record + 2).ok_or(TrueTypeError::BadTableDirectory)?,
+                );
+                if nested_index >= lookup_count {
+                    return Err(TrueTypeError::BadTableDirectory);
+                }
+                let nested_lookup = lookup_base
+                    .checked_add(usize::from(
+                        read_u16(bytes, lookup_base + 2 + nested_index * 2)
+                            .ok_or(TrueTypeError::BadTableDirectory)?,
+                    ))
+                    .ok_or(TrueTypeError::BadTableDirectory)?;
+                let Some((is_extension, nested_target)) =
+                    gpos_attachment_lookup(bytes, nested_lookup, 1, table_end)?
+                else {
+                    continue;
+                };
+                let nested_count = if is_extension {
+                    1
+                } else {
+                    usize::from(
+                        read_u16(bytes, nested_lookup + 4)
+                            .ok_or(TrueTypeError::BadTableDirectory)?,
+                    )
+                };
+                if nested_count > 32 {
+                    return Err(TrueTypeError::TooLarge);
+                }
+                for nested_subtable_index in 0..nested_count {
+                    let nested_subtable = if is_extension {
+                        nested_target
+                    } else {
+                        nested_lookup
+                            .checked_add(usize::from(
+                                read_u16(bytes, nested_lookup + 6 + nested_subtable_index * 2)
+                                    .ok_or(TrueTypeError::BadTableDirectory)?,
+                            ))
+                            .ok_or(TrueTypeError::BadTableDirectory)?
+                    };
+                    if nested_subtable
+                        .checked_add(6)
+                        .is_none_or(|end| end > table_end)
+                    {
+                        continue;
+                    }
+                    let coverage = nested_subtable
+                        .checked_add(usize::from(
+                            read_u16(bytes, nested_subtable + 2)
+                                .ok_or(TrueTypeError::BadTableDirectory)?,
+                        ))
+                        .ok_or(TrueTypeError::BadTableDirectory)?;
+                    let Some(coverage_index) =
+                        gsub_coverage_index(bytes, coverage, table_end, left)?
+                    else {
+                        continue;
+                    };
+                    let value_format = read_u16(bytes, nested_subtable + 4)
+                        .ok_or(TrueTypeError::BadTableDirectory)?;
+                    let record = if read_u16(bytes, nested_subtable) == Some(1) {
+                        nested_subtable + 6
+                    } else if read_u16(bytes, nested_subtable) == Some(2) {
+                        let count = usize::from(
+                            read_u16(bytes, nested_subtable + 6)
+                                .ok_or(TrueTypeError::BadTableDirectory)?,
+                        );
+                        let record_size = gpos_value_record_size(value_format)?;
+                        if count > 128 || coverage_index >= count {
+                            return Err(TrueTypeError::TooLarge);
+                        }
+                        nested_subtable
+                            .checked_add(
+                                8usize
+                                    .checked_add(
+                                        coverage_index
+                                            .checked_mul(record_size)
+                                            .ok_or(TrueTypeError::TooLarge)?,
+                                    )
+                                    .ok_or(TrueTypeError::TooLarge)?,
+                            )
+                            .ok_or(TrueTypeError::TooLarge)?
+                    } else {
+                        continue;
+                    };
+                    return Ok(Some(gpos_value_adjustment(
+                        bytes,
+                        record,
+                        value_format,
+                        table_end,
+                        table,
+                        options.ppem,
+                    )?));
+                }
+            }
+            return Ok(None);
+        }
+        Ok(None)
+    }
+
     fn gpos_contextual_single_adjustment(
         bytes: &[u8],
         table: usize,
@@ -7828,9 +8133,29 @@ pub mod graphics {
                             ))
                             .ok_or(TrueTypeError::BadTableDirectory)?
                     };
-                    if subtable.checked_add(4).is_none_or(|end| end > table_end)
-                        || read_u16(bytes, subtable) != Some(3)
-                    {
+                    if subtable.checked_add(4).is_none_or(|end| end > table_end) {
+                        continue;
+                    }
+                    if read_u16(bytes, subtable) == Some(1) {
+                        if let Some(adjustment) =
+                            gpos_contextual_chaining_format1_single_adjustment(
+                                bytes,
+                                subtable,
+                                GposContextTableBounds { table, table_end },
+                                GposContextLookupBounds {
+                                    lookup_base,
+                                    lookup_count,
+                                },
+                                left,
+                                right,
+                                options,
+                            )?
+                        {
+                            return Ok(Some(adjustment));
+                        }
+                        continue;
+                    }
+                    if read_u16(bytes, subtable) != Some(3) {
                         continue;
                     }
                     let backtrack_count = usize::from(
@@ -13218,6 +13543,32 @@ mod tests {
             TrueTypeFace::from_bytes(&contextual_chaining_bytes).unwrap();
         assert_eq!(
             contextual_chaining_face
+                .shape_text_ligatures("AB", Point::new(2, 15), 1000, &mut shaped)
+                .unwrap(),
+            2
+        );
+        assert_eq!(shaped[0].advance, 525);
+        assert_eq!(shaped[1].origin, Point::new(527, 15));
+        let mut contextual_glyph_bytes = contextual_gpos_bytes;
+        put16(&mut contextual_glyph_bytes, 304, 1);
+        put16(&mut contextual_glyph_bytes, 306, 26);
+        put16(&mut contextual_glyph_bytes, 308, 1);
+        put16(&mut contextual_glyph_bytes, 310, 8);
+        put16(&mut contextual_glyph_bytes, 312, 1);
+        put16(&mut contextual_glyph_bytes, 314, 4);
+        put16(&mut contextual_glyph_bytes, 316, 0);
+        put16(&mut contextual_glyph_bytes, 318, 2);
+        put16(&mut contextual_glyph_bytes, 320, 2);
+        put16(&mut contextual_glyph_bytes, 322, 0);
+        put16(&mut contextual_glyph_bytes, 324, 1);
+        put16(&mut contextual_glyph_bytes, 326, 0);
+        put16(&mut contextual_glyph_bytes, 328, 1);
+        put16(&mut contextual_glyph_bytes, 330, 1);
+        put16(&mut contextual_glyph_bytes, 332, 1);
+        put16(&mut contextual_glyph_bytes, 334, 1);
+        let contextual_glyph_face = TrueTypeFace::from_bytes(&contextual_glyph_bytes).unwrap();
+        assert_eq!(
+            contextual_glyph_face
                 .shape_text_ligatures("AB", Point::new(2, 15), 1000, &mut shaped)
                 .unwrap(),
             2
