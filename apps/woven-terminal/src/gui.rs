@@ -11,14 +11,19 @@ const PANEL_X: i32 = 12;
 const PANEL_Y: i32 = 12;
 const PANEL_WIDTH: usize = 336;
 const PANEL_HEIGHT: usize = 196;
+// Keep the static render target below the userspace image/stack window while
+// still covering the common tiled-client geometry. Larger WSIZ requests are
+// answered with this bounded surface size.
+const MAX_SURFACE_WIDTH: usize = 480;
+const MAX_SURFACE_HEIGHT: usize = 320;
 
-struct PixelBuffer(core::cell::UnsafeCell<[u32; (WIDTH * HEIGHT) as usize]>);
+struct PixelBuffer(core::cell::UnsafeCell<[u32; MAX_SURFACE_WIDTH * MAX_SURFACE_HEIGHT]>);
 
 // SAFETY: the terminal GUI is single-threaded and owns this buffer exclusively.
 unsafe impl Sync for PixelBuffer {}
 
 static CANVAS_PIXELS: PixelBuffer =
-    PixelBuffer(core::cell::UnsafeCell::new([0; (WIDTH * HEIGHT) as usize]));
+    PixelBuffer(core::cell::UnsafeCell::new([0; MAX_SURFACE_WIDTH * MAX_SURFACE_HEIGHT]));
 
 fn fail(code: u64) -> ! {
     let _ = libwoven::print("WovenTerminal: failure\n");
@@ -35,7 +40,7 @@ fn stroke_rect(canvas: &mut Canvas<'_>, x: i32, y: i32, width: usize, height: us
 const MAX_INPUT: usize = 48;
 
 fn draw(canvas: &mut Canvas<'_>, line: &[u8], status: &[u8]) {
-    canvas.fill_rect(0, 0, WIDTH as usize, HEIGHT as usize, BACKGROUND);
+    canvas.fill_rect(0, 0, canvas.width(), canvas.height(), BACKGROUND);
     canvas.fill_rect(PANEL_X, PANEL_Y, PANEL_WIDTH, PANEL_HEIGHT, PANEL);
     stroke_rect(canvas, PANEL_X, PANEL_Y, PANEL_WIDTH, PANEL_HEIGHT, ACCENT);
     canvas.draw_text(PANEL_X + 10, PANEL_Y + 8, "WovenTerminal", TEXT);
@@ -54,6 +59,30 @@ fn draw(canvas: &mut Canvas<'_>, line: &[u8], status: &[u8]) {
     canvas.draw_text(PANEL_X + 10, PANEL_Y + 174, "Enter submits; Backspace edits", MUTED);
 }
 
+fn render(window: &GraphicsSurface, line: &[u8], status: &[u8]) -> bool {
+    let pixels = unsafe { &mut *CANVAS_PIXELS.0.get() };
+    let Some(mut canvas) = Canvas::new(
+        pixels,
+        0,
+        0,
+        window.width() as usize,
+        window.height() as usize,
+    ) else {
+        return false;
+    };
+    draw(&mut canvas, line, status);
+    window.write_canvas(&canvas).is_ok()
+}
+
+fn send_resize(window: &GraphicsSurface, shell: libwoven::process::Id) -> bool {
+    let mut response = [0u8; 16];
+    response[..4].copy_from_slice(b"WRSZ");
+    response[4..12].copy_from_slice(&window.handle().to_le_bytes());
+    response[12..14].copy_from_slice(&(window.width() as u16).to_le_bytes());
+    response[14..].copy_from_slice(&(window.height() as u16).to_le_bytes());
+    libwoven::message_send(shell, &response).is_ok()
+}
+
 /// Open a terminal preview through WovenShell. ASCII input, Enter, and
 /// Backspace are accepted through the bounded shell key protocol; the
 /// existing `--interactive` CLI remains available for full command I/O.
@@ -61,15 +90,10 @@ pub fn run(shell: Option<&[u8]>) -> ! {
     let Some(shell) = shell.and_then(parse_u64).map(libwoven::process::Id) else {
         fail(7)
     };
-    let window = GraphicsSurface::create(WIDTH, HEIGHT).unwrap_or_else(|_| fail(1));
-    // SAFETY: this process is single-threaded and takes the buffer once.
-    let pixels = unsafe { &mut *CANVAS_PIXELS.0.get() };
-    let mut canvas = Canvas::new(pixels, 0, 0, WIDTH as usize, HEIGHT as usize)
-        .unwrap_or_else(|| fail(2));
+    let mut window = GraphicsSurface::create(WIDTH, HEIGHT).unwrap_or_else(|_| fail(1));
     let line = [0u8; MAX_INPUT];
     let status: &[u8] = b"Ready for a bounded command preview";
-    draw(&mut canvas, &line, status);
-    if window.write_canvas(&canvas).is_err() {
+    if !render(&window, &line, status) {
         fail(3)
     }
     if window.share_with(shell).is_err() {
@@ -101,6 +125,29 @@ pub fn run(shell: Option<&[u8]>) -> ! {
             if message.get(..message_length.min(4)) == Some(&b"WCLS"[..]) {
                 break;
             }
+            if message.get(..4) == Some(&b"WSIZ"[..]) && message_length == 8 {
+                let width = u32::from(u16::from_le_bytes([message[4], message[5]]))
+                    .min(MAX_SURFACE_WIDTH as u32);
+                let height = u32::from(u16::from_le_bytes([message[6], message[7]]))
+                    .min(MAX_SURFACE_HEIGHT as u32);
+                if let Ok(resized) = GraphicsSurface::create(width, height) {
+                    // Publish the replacement token before the potentially
+                    // expensive pixel upload, so the shell's bounded resize
+                    // grace window cannot expire while copying the canvas.
+                    if resized.share_with(shell).is_ok() && send_resize(&resized, shell) {
+                        if render(&resized, &line[..length], status) {
+                            let previous = core::mem::replace(&mut window, resized);
+                            drop(previous);
+                            let _ = libwoven::print("WovenTerminal: window resized\n");
+                        } else {
+                            drop(resized);
+                        }
+                    } else {
+                        drop(resized);
+                    }
+                }
+                continue;
+            }
             if message.get(..4) == Some(&b"WKEY"[..]) && message_length >= 5 {
                 match message[4] {
                     1 => {
@@ -115,24 +162,14 @@ pub fn run(shell: Option<&[u8]>) -> ! {
                 }
                 // Redraw after every bounded edit; the shared surface keeps
                 // the compositor's ownership and lifecycle unchanged.
-                let pixels = unsafe { &mut *CANVAS_PIXELS.0.get() };
-                let Some(mut canvas) = Canvas::new(pixels, 0, 0, WIDTH as usize, HEIGHT as usize) else {
-                    fail(8)
-                };
-                draw(&mut canvas, &line[..length], status);
-                if window.write_canvas(&canvas).is_err() {
+                if !render(&window, &line[..length], status) {
                     fail(9)
                 }
             } else if message_length == 1 && message[0].is_ascii_graphic() && length < MAX_INPUT {
                 line[length] = message[0];
                 length += 1;
                 status = b"Editing command preview";
-                let pixels = unsafe { &mut *CANVAS_PIXELS.0.get() };
-                let Some(mut canvas) = Canvas::new(pixels, 0, 0, WIDTH as usize, HEIGHT as usize) else {
-                    fail(10)
-                };
-                draw(&mut canvas, &line[..length], status);
-                if window.write_canvas(&canvas).is_err() {
+                if !render(&window, &line[..length], status) {
                     fail(11)
                 }
             }

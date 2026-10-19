@@ -1,5 +1,18 @@
 # Stage status
 
+## Graphics track - bounded WSIZ/WRSZ resize negotiation (2026-10-19)
+
+WovenShell now gives the resize handshake a five-second bounded grace period,
+and WovenCalculator/WovenTerminal create, share, and publish replacement
+surfaces with `WRSZ`. Their static render targets are capped at 480×320 to
+stay below the current Ring-3 image/stack layout; larger requests are clamped
+and acknowledged rather than causing an unbounded allocation. The QMP
+`--exercise-resize` gate passed both clients on 1/2/4 CPUs with before/after
+resize captures under `audit-artifacts/{calculator,terminal}-desktop-*`.
+
+Other desktop clients still need resize implementations. Pointer widgets,
+desktop command execution, and hardware GPU presentation remain separate work.
+
 ## Graphics track - Canvas damage registration and Calculator input (2026-10-19)
 
 The kernel userspace-graphics write, fill, stroke, and text paths now register
@@ -9,8 +22,9 @@ a damage wakeup. WovenCalculator now uses bounded ASCII/WKEY expression input
 and redraws its result; its interaction gate passed on 1/2/4 CPUs with
 before/after evidence under `audit-artifacts/calculator-desktop-{1,2,4}cpu-*`.
 
-The existing Calculator CLI remains supported. This slice does not claim
-desktop pointer widgets, `WSIZ` resize handling, or hardware GPU presentation.
+The existing Calculator CLI remains supported. Desktop pointer widgets and
+hardware GPU presentation remain unclaimed; resize is covered by the newer
+bounded WSIZ/WRSZ slice above.
 
 ## Graphics track - bounded desktop key protocol and Terminal input (2026-10-19)
 
@@ -23,7 +37,8 @@ after input frames and passed on 1/2/4 CPUs with evidence under
 `audit-artifacts/terminal-desktop-{1,2,4}cpu-*`.
 
 This slice does not claim terminal command execution from the desktop, pointer
-widgets, `WSIZ` resize handling, or hardware GPU presentation; the existing
+widgets, or hardware GPU presentation; bounded resize is covered by the newer
+WSIZ/WRSZ slice above; the existing
 `--interactive` CLI remains the full command-I/O path.
 
 ## Graphics track - WovenCalculator desktop acceptance (2026-10-19)
@@ -33,9 +48,9 @@ shared `scripts/test-files-desktop-qemu.py --app calculator` visual gate. The
 gate launches the production `--gui %p` catalog entry and passed on 1/2/4 CPUs
 with evidence under `audit-artifacts/calculator-desktop-{1,2,4}cpu-*`.
 
-The preview evaluates the fixed `2 + 2` expression; CLI expression evaluation
-remains authoritative. Desktop keypad/input, `WSIZ` resize handling, and
-hardware GPU presentation remain unclaimed.
+The preview evaluates a bounded expression; CLI expression evaluation remains
+authoritative. Desktop pointer widgets and hardware GPU presentation remain
+unclaimed; Calculator input and resize are covered by newer slices above.
 
 ## Graphics track - WovenTerminal desktop preview (2026-10-19)
 
@@ -176,11 +191,11 @@ borders, panel colour and text placement. `cargo clippy --all-targets -- -D
 warnings` and `scripts/test-shell-qemu.py --hardware-demo` pass on 1/2/4
 CPUs.
 
-**Limits.** WovenTerminal has bounded text input preview but remains
-CLI/interactive for full command execution. Calculator, Files, Settings,
-Monitor, Security, Editor, Images, Update, and Store have desktop preview
-clients. Desktop controls, broader input, and `WSIZ` resize paths remain
-incomplete; hardware GPU presentation is not claimed.
+**Limits.** WovenTerminal has bounded text input and resize preview but
+remains CLI/interactive for full command execution. Calculator has bounded
+input and resize preview. Files, Settings, Monitor, Security, Editor, Images,
+Update, and Store have desktop previews but still lack resize and broader
+controls/input; hardware GPU presentation is not claimed.
 
 ## Graphics track - WovenFiles desktop client foundation (2026-10-19)
 

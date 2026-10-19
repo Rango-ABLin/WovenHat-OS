@@ -1,7 +1,6 @@
 """Launch a packaged WovenShell GUI app and capture its desktop window.
 
-This is the live visual acceptance for the WovenFiles and WovenSettings
-graphics clients. It
+This is the live visual acceptance for the production desktop clients. It
 boots the disposable hardware-demo session, signs in through QMP keyboard
 events, launches the catalog entry by its launcher query, waits for the
 client's WOPN/open marker, and captures the compositor output. The post-launch
@@ -58,7 +57,10 @@ def main():
     parser.add_argument('--firmware', type=Path)
     parser.add_argument('--cpus', type=int, choices=(1, 2, 4), default=1)
     parser.add_argument('--app', choices=('calculator', 'files', 'settings', 'monitor', 'security', 'editor', 'images', 'update', 'store', 'terminal'), default='files')
+    parser.add_argument('--exercise-resize', action='store_true', help='exercise the WovenShell WSIZ/WRSZ path (Calculator or Terminal)')
     args = parser.parse_args()
+    if args.exercise_resize and args.app not in ('calculator', 'terminal'):
+        parser.error('--exercise-resize currently supports calculator and terminal only')
     app = {
         'calculator': ('calculator', 'WovenCalculator', 'woven-calculator', 'calculator'),
         'files': ('files', 'WovenFiles', 'woven-files', 'files'),
@@ -188,7 +190,7 @@ def main():
         input_baseline = None
         input_sequence = {
             'terminal': ['h', 'e', 'l', 'l', 'o', 'backspace', 'p', 'ret'],
-            'calculator': ['4', 'ret'],
+            'calculator': ['4', '2', 'backspace', '2', 'ret'],
         }.get(args.app)
         if input_sequence is not None:
             input_baseline = out / f'woven-{app[0]}-before-input.ppm'
@@ -214,6 +216,25 @@ def main():
             input_changed = sum(left != right for left, right in zip(input_pixels, pixels)) // 3
             if input_changed < 100:
                 raise RuntimeError(f'{app[1]} input did not change its presented surface: changed_pixels={input_changed}')
+        resize_baseline = None
+        if args.exercise_resize:
+            resize_baseline = out / f'woven-{app[0]}-before-resize.ppm'
+            command_qmp('screendump', {'filename': str(resize_baseline)})
+            command_qmp('send-key', {'keys': [{'type': 'qcode', 'data': 'f2'}], 'hold-time': 160})
+            while f'woven-shell: window resized: {app[1].replace("Woven", "")}' not in serial.read_text(errors='replace'):
+                if process.poll() is not None or time.monotonic() > deadline:
+                    raise RuntimeError(f'{app[1]} did not complete the WSIZ/WRSZ resize handshake')
+                time.sleep(0.1)
+            time.sleep(1)
+            resized_capture = out / f'woven-{app[0]}-after-resize.ppm'
+            command_qmp('screendump', {'filename': str(resized_capture)})
+            resize_width, resize_height, resize_pixels = ppm_pixels(resized_capture)
+            before_resize_width, before_resize_height, before_resize = ppm_pixels(resize_baseline)
+            if (resize_width, resize_height) != (before_resize_width, before_resize_height):
+                raise RuntimeError('resize capture dimensions changed')
+            resize_changed = sum(left != right for left, right in zip(before_resize, resize_pixels)) // 3
+            if resize_changed < 1000:
+                raise RuntimeError(f'{app[1]} resize did not change the presented desktop: changed_pixels={resize_changed}')
         command_qmp('quit')
         sock.close()
     except Exception as error:  # noqa: BLE001 - preserve acceptance evidence

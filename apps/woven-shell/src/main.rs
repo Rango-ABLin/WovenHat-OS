@@ -289,7 +289,9 @@ const TILE_PIXELS: usize = TILE_WIDTH * TILE_HEIGHT;
 /// timer and window liveness.
 const FRAME_PERIOD: u64 = libwoven::time::TICKS_PER_SECOND / 4;
 /// How long a resize may take before a vanished surface counts as an exit.
-const RESIZE_GRACE: u64 = libwoven::time::TICKS_PER_SECOND;
+// A resize client may need to copy a bounded replacement Canvas before its
+// WRSZ message reaches the shell on a slow, multi-CPU-free QEMU guest.
+const RESIZE_GRACE: u64 = 5 * libwoven::time::TICKS_PER_SECOND;
 /// The frame clock while something animates: 20 ms.
 const ANIMATION_PERIOD: u64 = 2;
 const KEY_ENTER: u8 = 1;
@@ -1861,9 +1863,11 @@ impl Desktop {
             || !(1..=self.width).contains(&width)
             || !(1..=top - TITLE_HEIGHT).contains(&height)
         {
+            log(&[b"woven-shell: WRSZ rejected: token or geometry"]);
             return empty;
         }
         let Some(window) = self.windows.iter_mut().flatten().find(|window| window.owner == owner) else {
+            log(&[b"woven-shell: WRSZ rejected: owner window missing"]);
             return empty;
         };
         let before = window.footprint();

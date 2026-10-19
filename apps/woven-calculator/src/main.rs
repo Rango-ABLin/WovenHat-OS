@@ -20,6 +20,11 @@ const PANEL_Y: i32 = 12;
 const PANEL_WIDTH: usize = 216;
 const PANEL_HEIGHT: usize = 126;
 const MAX_INPUT: usize = 24;
+// Keep the static render target below the userspace image/stack window while
+// still covering the common tiled-client geometry. Larger WSIZ requests are
+// answered with this bounded surface size.
+const MAX_SURFACE_WIDTH: usize = 480;
+const MAX_SURFACE_HEIGHT: usize = 320;
 
 /// In .bss rather than the 8 KiB task stack: too large to carry as a stack
 /// local. Sized to the whole window: `GraphicsSurface::write_canvas` always
@@ -27,13 +32,13 @@ const MAX_INPUT: usize = 24;
 /// origin (that's purely for the canvas's own coordinate addressing), so
 /// everything must be drawn into one full-window canvas rather than a
 /// separately-placed inset one.
-struct PixelBuffer(core::cell::UnsafeCell<[u32; (WIDTH * HEIGHT) as usize]>);
+struct PixelBuffer(core::cell::UnsafeCell<[u32; MAX_SURFACE_WIDTH * MAX_SURFACE_HEIGHT]>);
 
 // SAFETY: woven-calculator is single-threaded and run_gui takes the only reference.
 unsafe impl Sync for PixelBuffer {}
 
 static CANVAS_PIXELS: PixelBuffer =
-    PixelBuffer(core::cell::UnsafeCell::new([0; (WIDTH * HEIGHT) as usize]));
+    PixelBuffer(core::cell::UnsafeCell::new([0; MAX_SURFACE_WIDTH * MAX_SURFACE_HEIGHT]));
 
 /// A one-pixel-thick rectangle outline, since `Canvas` has no stroke
 /// primitive of its own.
@@ -73,7 +78,7 @@ fn run_console(expression: &[u8], result: i64) -> ! {
 }
 
 fn draw_gui(canvas: &mut Canvas<'_>, expression: &[u8], result: Option<i64>, active: bool) {
-    canvas.fill_rect(0, 0, WIDTH as usize, HEIGHT as usize, BACKGROUND);
+    canvas.fill_rect(0, 0, canvas.width(), canvas.height(), BACKGROUND);
     canvas.fill_rect(PANEL_X, PANEL_Y, PANEL_WIDTH, PANEL_HEIGHT, PANEL);
     stroke_rect(canvas, PANEL_X, PANEL_Y, PANEL_WIDTH, PANEL_HEIGHT, ACCENT);
     canvas.fill_rect(PANEL_X + 184, PANEL_Y + 8, 18, 8, if active { ACCENT } else { PANEL });
@@ -93,6 +98,35 @@ fn draw_gui(canvas: &mut Canvas<'_>, expression: &[u8], result: Option<i64>, act
     canvas.draw_text(PANEL_X - 2, PANEL_Y + 104, "ASCII input; Enter evaluates", TEXT);
 }
 
+fn render(
+    window: &GraphicsSurface,
+    expression: &[u8],
+    result: Option<i64>,
+    active: bool,
+) -> bool {
+    let pixels = unsafe { &mut *CANVAS_PIXELS.0.get() };
+    let Some(mut canvas) = Canvas::new(
+        pixels,
+        0,
+        0,
+        window.width() as usize,
+        window.height() as usize,
+    ) else {
+        return false;
+    };
+    draw_gui(&mut canvas, expression, result, active);
+    window.write_canvas(&canvas).is_ok()
+}
+
+fn send_resize(window: &GraphicsSurface, shell: libwoven::process::Id) -> bool {
+    let mut response = [0u8; 16];
+    response[..4].copy_from_slice(b"WRSZ");
+    response[4..12].copy_from_slice(&window.handle().to_le_bytes());
+    response[12..14].copy_from_slice(&(window.width() as u16).to_le_bytes());
+    response[14..].copy_from_slice(&(window.height() as u16).to_le_bytes());
+    libwoven::message_send(shell, &response).is_ok()
+}
+
 /// Opens a window on the WovenShell desktop: shares a drawn surface and asks
 /// the shell (the sole compositor-authority holder) to place it, following
 /// the same WOPN/WCLS protocol `hello-gui --desktop-client` uses. `shell` is
@@ -103,24 +137,17 @@ fn run_gui(shell: Option<&[u8]>) -> ! {
     let Some(shell) = shell.and_then(parse_u64).map(libwoven::process::Id) else {
         fail(7)
     };
-    let window = match GraphicsSurface::create(WIDTH, HEIGHT) {
+    let mut window = match GraphicsSurface::create(WIDTH, HEIGHT) {
         Ok(window) => window,
         Err(_) => fail(3),
     };
-    // SAFETY: the only reference to the buffer, taken once.
-    let pixels = unsafe { &mut *CANVAS_PIXELS.0.get() };
-    let mut canvas = match Canvas::new(pixels, 0, 0, WIDTH as usize, HEIGHT as usize) {
-        Some(canvas) => canvas,
-        None => fail(5),
-    };
     let expression = [0u8; MAX_INPUT];
-    draw_gui(&mut canvas, &expression, None, false);
-    if window.write_canvas(&canvas).is_err() {
-        fail(6);
+    if !render(&window, &expression, None, false) {
+        fail(5);
     }
 
     if window.share_with(shell).is_err() {
-        fail(8);
+        fail(6);
     }
     const TITLE: &[u8] = b"Calculator";
     let mut open = [0u8; 16 + TITLE.len()];
@@ -130,7 +157,7 @@ fn run_gui(shell: Option<&[u8]>) -> ! {
     open[14..16].copy_from_slice(&(HEIGHT as u16).to_le_bytes());
     open[16..].copy_from_slice(TITLE);
     if libwoven::message_send(shell, &open).is_err() {
-        fail(9);
+        fail(7);
     }
     let _ = libwoven::print("WovenCalculator: window opened\n");
 
@@ -153,6 +180,29 @@ fn run_gui(shell: Option<&[u8]>) -> ! {
             if message.get(..message_length.min(4)) == Some(&b"WCLS"[..]) {
                 break;
             }
+            if message.get(..4) == Some(&b"WSIZ"[..]) && message_length == 8 {
+                let width = u32::from(u16::from_le_bytes([message[4], message[5]]))
+                    .min(MAX_SURFACE_WIDTH as u32);
+                let height = u32::from(u16::from_le_bytes([message[6], message[7]]))
+                    .min(MAX_SURFACE_HEIGHT as u32);
+                if let Ok(resized) = GraphicsSurface::create(width, height) {
+                    // Publish the replacement token before the potentially
+                    // expensive pixel upload, so the shell's bounded resize
+                    // grace window cannot expire while copying the canvas.
+                    if resized.share_with(shell).is_ok() && send_resize(&resized, shell) {
+                        if render(&resized, &expression[..length], result, true) {
+                            let previous = core::mem::replace(&mut window, resized);
+                            drop(previous);
+                            let _ = libwoven::print("WovenCalculator: window resized\n");
+                        } else {
+                            drop(resized);
+                        }
+                    } else {
+                        drop(resized);
+                    }
+                }
+                continue;
+            }
             if message.get(..4) == Some(&b"WKEY"[..]) && message_length >= 5 {
                 active = true;
                 match message[4] {
@@ -171,13 +221,8 @@ fn run_gui(shell: Option<&[u8]>) -> ! {
             } else {
                 continue;
             }
-            let pixels = unsafe { &mut *CANVAS_PIXELS.0.get() };
-            let Some(mut canvas) = Canvas::new(pixels, 0, 0, WIDTH as usize, HEIGHT as usize) else {
+            if !render(&window, &expression[..length], result, active) {
                 fail(10)
-            };
-            draw_gui(&mut canvas, &expression[..length], result, active);
-            if window.write_canvas(&canvas).is_err() {
-                fail(11)
             }
             let _ = libwoven::print("WovenCalculator: input updated\n");
         }

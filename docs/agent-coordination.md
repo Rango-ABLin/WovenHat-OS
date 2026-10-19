@@ -1,5 +1,14 @@
 # Agent coordination (Claude Code and Codex)
 
+**Codex graphics-track bounded WSIZ/WRSZ resize (2026-10-19):**
+WovenShell now allows a five-second replacement grace period. Calculator and
+Terminal negotiate replacement shared surfaces, clamp requests to 480×320 to
+remain within the current Ring-3 image/stack geometry, and passed the QMP
+resize gate on 1/2/4 CPUs. Evidence is under
+`audit-artifacts/{calculator,terminal}-desktop-*`. Other clients still need
+resize paths; pointer widgets and hardware GPU presentation remain out of
+scope.
+
 **Codex graphics-track Canvas damage and Calculator input (2026-10-19):**
 Userspace graphics mutations now register client damage in
 `kernel/src/user_graphics.rs`, so shared WovenShell clients receive repaint

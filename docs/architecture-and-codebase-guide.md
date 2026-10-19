@@ -1,5 +1,14 @@
 # WovenHat OS Architecture & Codebase Guide
 
+## Graphics bounded WSIZ/WRSZ resize negotiation (2026-10-19)
+
+WovenShell allows five seconds for a client replacement surface to arrive.
+WovenCalculator and WovenTerminal handle `WSIZ`, clamp each requested
+dimension to a 480×320 static render target, share the new surface, and send
+`WRSZ` before the potentially slow Canvas upload. The QMP resize gate passed
+on 1/2/4 CPUs. The cap is a deliberate Ring-3 image/stack safety boundary;
+other clients and hardware GPU presentation remain separate work.
+
 ## Graphics client damage registration and Calculator input (2026-10-19)
 
 `kernel/src/user_graphics.rs` records damage for userspace surface writes,
