@@ -1,5 +1,11 @@
 # WovenHat OS Architecture & Codebase Guide
 
+## Graphics Canvas text-origin update (2026-10-19)
+
+`Canvas::draw_text` saturates cursor movement, glyph origins, and newline
+placement before calling the Canvas clip boundary, so the low-level text API
+shares the renderer’s overflow behavior.
+
 ## Graphics surface-coordinate invariant (2026-10-19)
 
 Canvas and DepthBuffer accept only non-empty rectangles whose right and bottom

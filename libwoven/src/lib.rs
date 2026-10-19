@@ -11945,17 +11945,21 @@ impl<'a> Canvas<'a> {
         for character in text.chars() {
             if character == '\n' {
                 cursor_x = x;
-                cursor_y += font::LINE_HEIGHT;
+                cursor_y = cursor_y.saturating_add(font::LINE_HEIGHT);
                 continue;
             }
             for (row, bits) in font::glyph(character).iter().enumerate() {
                 for column in 0..font::WIDTH as i32 {
                     if bits & (1 << (font::WIDTH as i32 - 1 - column)) != 0 {
-                        self.set(cursor_x + column, cursor_y + row as i32, color);
+                        self.set(
+                            cursor_x.saturating_add(column),
+                            cursor_y.saturating_add(row as i32),
+                            color,
+                        );
                     }
                 }
             }
-            cursor_x += font::ADVANCE;
+            cursor_x = cursor_x.saturating_add(font::ADVANCE);
         }
     }
 }
@@ -16047,6 +16051,14 @@ mod tests {
         }
         // The blank column between glyphs stays clear.
         assert!((2..2 + font::HEIGHT as i32).all(|y| !lit(&canvas, 1 + font::WIDTH as i32, y)));
+    }
+
+    #[test]
+    fn canvas_draw_text_bounds_extreme_origins() {
+        let mut pixels = [0u32; 16];
+        let mut canvas = Canvas::new(&mut pixels, 0, 0, 4, 4).unwrap();
+        canvas.draw_text(i32::MAX, i32::MAX, "A\nB", 7);
+        assert_eq!(pixels, [0; 16]);
     }
 
     #[test]

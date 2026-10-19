@@ -35,6 +35,15 @@ catalog apps (woven-files, woven-settings, woven-monitor, woven-security,
 woven-editor, woven-images, woven-update, woven-store, woven-terminal) are
 still CLI-only and would need the same `share_with()`/`WOPN` treatment.
 
+## Graphics track - bounded Canvas text origins (2026-10-19)
+
+The shared `Canvas::draw_text` path now saturates glyph and newline cursor
+arithmetic before clipped writes, matching the bounded `Renderer` text path.
+Extreme text origins cannot wrap into unrelated pixels. The 55-test
+`libwoven` suite, warning-denying library/kernel/workspace Clippy, formatting,
+and Stage 19.2 compositor visual acceptance passed on 1/2/4 CPUs. Hardware GPU
+acceleration remains a separate boundary.
+
 ## Graphics track - bounded surface coordinate extents (2026-10-19)
 
 Canvas and DepthBuffer constructors now reject non-empty rectangles whose
