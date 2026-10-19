@@ -1,5 +1,17 @@
 # Stage status
 
+## Graphics track - bounded GSUB multiple substitutions (2026-10-19)
+
+GSUB lookup type 2 multiple substitutions now expand one shaped input glyph
+into a checked replacement sequence capped at 16 glyphs, while the overall
+shaped output remains bounded by the caller buffer. Direct lookups and type-7
+extension wrappers use the same checked sequence parser; source metadata is
+retained on the first replacement and subsequent generated glyphs are marked
+as continuation records. The 57-test `libwoven` suite, warning-denying
+library/kernel/workspace Clippy, formatting, and Stage 19.2 compositor visual
+acceptance passed on 1/2/4 CPUs. Full OpenType feature ordering and hardware
+GPU acceleration remain separate boundaries.
+
 ## Graphics backend boundary - VIRGL lifecycle rerun (2026-10-19)
 
 The capability-gated `virtio-gpu-gl-pci` probe now has fresh 1/2/4-CPU

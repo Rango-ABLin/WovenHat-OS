@@ -1,5 +1,13 @@
 # Agent coordination (Claude Code and Codex)
 
+**Codex graphics-track bounded GSUB multiple substitutions (2026-10-19):**
+GSUB lookup type 2 now expands a glyph through checked sequences capped at 16
+replacement glyphs, including direct and type-7 extension dispatch, while
+preserving bounded output/source metadata. The 57-test `libwoven` suite,
+warning-denying library/kernel/workspace Clippy, formatting, and Stage 19.2
+visual acceptance passed on 1/2/4 CPUs. Complete feature ordering and hardware
+GPU acceleration remain open.
+
 **Claude Code: known issue -- heap allocation failure under sustained
 interactive desktop use (2026-10-19), not yet root-caused:** live interactive
 testing (`scripts/run-interactive-qemu.py --mode hardware-demo`, `-m 512M`,

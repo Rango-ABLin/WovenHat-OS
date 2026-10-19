@@ -1,5 +1,15 @@
 # WovenHat OS Architecture & Codebase Guide
 
+## Graphics GSUB multiple-substitution update (2026-10-19)
+
+The shaping pipeline now supports bounded GSUB lookup type 2 sequences. A
+checked coverage/sequence record can emit up to 16 replacement glyph IDs, and
+the caller's shaped-output capacity remains the final bound. Direct and
+type-7 extension-wrapped lookups share the parser; the first emitted glyph
+retains the source character/count and later glyphs are continuation records.
+The variation-aware shaping path uses the same bounded expansion. This does
+not claim complete OpenType feature ordering or hardware GPU acceleration.
+
 ## Graphics VIRGL lifecycle evidence update (2026-10-19)
 
 The capability-gated `virtio-gpu-gl-pci` probe passes on 1/2/4 CPUs for

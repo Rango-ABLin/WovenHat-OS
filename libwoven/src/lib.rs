@@ -733,6 +733,11 @@ pub mod graphics {
         gvar: Option<(usize, usize)>,
     }
 
+    enum GsubSubstitution {
+        Single { glyph: u16, consumed: usize },
+        Multiple { glyphs: [u16; 16], count: usize },
+    }
+
     impl<'a> TrueTypeFace<'a> {
         pub fn from_bytes(bytes: &'a [u8]) -> Result<Self, TrueTypeError> {
             if bytes.len() < 12 {
@@ -2904,7 +2909,7 @@ pub mod graphics {
             position: usize,
             script_tag: Option<[u8; 4]>,
             language_tag: Option<[u8; 4]>,
-        ) -> Result<Option<(u16, usize)>, TrueTypeError> {
+        ) -> Result<Option<GsubSubstitution>, TrueTypeError> {
             let Some((table, length)) = self.gsub else {
                 return Ok(None);
             };
@@ -3193,6 +3198,7 @@ pub mod graphics {
                         let extension_type = read_u16(self.bytes, extension + 2)
                             .ok_or(TrueTypeError::BadTableDirectory)?;
                         if extension_type != 1
+                            && extension_type != 2
                             && extension_type != 3
                             && extension_type != 4
                             && extension_type != 5
@@ -3216,7 +3222,19 @@ pub mod graphics {
                                 glyphs[position],
                                 feature_end,
                             )? {
-                                return Ok(Some((substitute, 1)));
+                                return Ok(Some(GsubSubstitution::Single {
+                                    glyph: substitute,
+                                    consumed: 1,
+                                }));
+                            }
+                        } else if extension_type == 2 {
+                            if let Some((glyphs, count)) = gsub_multiple_subtable(
+                                self.bytes,
+                                subtable,
+                                glyphs[position],
+                                feature_end,
+                            )? {
+                                return Ok(Some(GsubSubstitution::Multiple { glyphs, count }));
                             }
                         } else if extension_type == 3 {
                             if let Some(substitute) = gsub_alternate_subtable(
@@ -3225,7 +3243,10 @@ pub mod graphics {
                                 glyphs[position],
                                 feature_end,
                             )? {
-                                return Ok(Some((substitute, 1)));
+                                return Ok(Some(GsubSubstitution::Single {
+                                    glyph: substitute,
+                                    consumed: 1,
+                                }));
                             }
                         } else if extension_type == 4 {
                             if let Some((substitute, consumed)) = gsub_ligature_subtable(
@@ -3235,7 +3256,10 @@ pub mod graphics {
                                 position,
                                 feature_end,
                             )? {
-                                return Ok(Some((substitute, consumed)));
+                                return Ok(Some(GsubSubstitution::Single {
+                                    glyph: substitute,
+                                    consumed,
+                                }));
                             }
                         } else {
                             if extension_type == 5
@@ -3249,7 +3273,10 @@ pub mod graphics {
                                     Some((subtable, extension_type)),
                                 )?
                             {
-                                return Ok(Some((substitute, 1)));
+                                return Ok(Some(GsubSubstitution::Single {
+                                    glyph: substitute,
+                                    consumed: 1,
+                                }));
                             }
                             if extension_type == 6
                                 && let Some(substitute) = gsub_chaining_class_substitution(
@@ -3262,7 +3289,10 @@ pub mod graphics {
                                     Some((subtable, extension_type)),
                                 )?
                             {
-                                return Ok(Some((substitute, 1)));
+                                return Ok(Some(GsubSubstitution::Single {
+                                    glyph: substitute,
+                                    consumed: 1,
+                                }));
                             }
                             if extension_type == 8
                                 && let Some(substitute) = gsub_reverse_chaining_substitution(
@@ -3273,7 +3303,10 @@ pub mod graphics {
                                     feature_end,
                                 )?
                             {
-                                return Ok(Some((substitute, 1)));
+                                return Ok(Some(GsubSubstitution::Single {
+                                    glyph: substitute,
+                                    consumed: 1,
+                                }));
                             }
                             if let Some(substitute) = gsub_contextual_substitution(
                                 self.bytes,
@@ -3284,7 +3317,10 @@ pub mod graphics {
                                 feature_end,
                                 Some((subtable, extension_type)),
                             )? {
-                                return Ok(Some((substitute, 1)));
+                                return Ok(Some(GsubSubstitution::Single {
+                                    glyph: substitute,
+                                    consumed: 1,
+                                }));
                             }
                         }
                     }
@@ -3300,7 +3336,10 @@ pub mod graphics {
                         feature_end,
                         None,
                     )? {
-                        return Ok(Some((substitute, 1)));
+                        return Ok(Some(GsubSubstitution::Single {
+                            glyph: substitute,
+                            consumed: 1,
+                        }));
                     }
                     if let Some(substitute) = gsub_contextual_substitution(
                         self.bytes,
@@ -3311,7 +3350,10 @@ pub mod graphics {
                         feature_end,
                         None,
                     )? {
-                        return Ok(Some((substitute, 1)));
+                        return Ok(Some(GsubSubstitution::Single {
+                            glyph: substitute,
+                            consumed: 1,
+                        }));
                     }
                     continue;
                 }
@@ -3325,7 +3367,10 @@ pub mod graphics {
                         feature_end,
                         None,
                     )? {
-                        return Ok(Some((substitute, 1)));
+                        return Ok(Some(GsubSubstitution::Single {
+                            glyph: substitute,
+                            consumed: 1,
+                        }));
                     }
                     if let Some(substitute) = gsub_contextual_substitution(
                         self.bytes,
@@ -3336,11 +3381,19 @@ pub mod graphics {
                         feature_end,
                         None,
                     )? {
-                        return Ok(Some((substitute, 1)));
+                        return Ok(Some(GsubSubstitution::Single {
+                            glyph: substitute,
+                            consumed: 1,
+                        }));
                     }
                     continue;
                 }
-                if lookup_type != 1 && lookup_type != 3 && lookup_type != 4 && lookup_type != 8 {
+                if lookup_type != 1
+                    && lookup_type != 2
+                    && lookup_type != 3
+                    && lookup_type != 4
+                    && lookup_type != 8
+                {
                     continue;
                 }
                 let subtable_count = usize::from(
@@ -3376,7 +3429,10 @@ pub mod graphics {
                             glyphs[position],
                             feature_end,
                         )? {
-                            return Ok(Some((substitute, 1)));
+                            return Ok(Some(GsubSubstitution::Single {
+                                glyph: substitute,
+                                consumed: 1,
+                            }));
                         }
                         continue;
                     }
@@ -3388,7 +3444,21 @@ pub mod graphics {
                             position,
                             feature_end,
                         )? {
-                            return Ok(Some((substitute, 1)));
+                            return Ok(Some(GsubSubstitution::Single {
+                                glyph: substitute,
+                                consumed: 1,
+                            }));
+                        }
+                        continue;
+                    }
+                    if lookup_type == 2 {
+                        if let Some((glyphs, count)) = gsub_multiple_subtable(
+                            self.bytes,
+                            subtable,
+                            glyphs[position],
+                            feature_end,
+                        )? {
+                            return Ok(Some(GsubSubstitution::Multiple { glyphs, count }));
                         }
                         continue;
                     }
@@ -3450,7 +3520,10 @@ pub mod graphics {
                             }
                             _ => return Err(TrueTypeError::UnsupportedCmap),
                         };
-                        return Ok(Some((substitute, 1)));
+                        return Ok(Some(GsubSubstitution::Single {
+                            glyph: substitute,
+                            consumed: 1,
+                        }));
                     }
                     if subtable.checked_add(6).is_none_or(|end| end > feature_end)
                         || read_u16(self.bytes, subtable) != Some(1)
@@ -3554,7 +3627,10 @@ pub mod graphics {
                             }
                         }
                         if matches {
-                            return Ok(Some((ligature_glyph, component_count)));
+                            return Ok(Some(GsubSubstitution::Single {
+                                glyph: ligature_glyph,
+                                consumed: component_count,
+                            }));
                         }
                     }
                 }
@@ -3568,27 +3644,37 @@ pub mod graphics {
             position: usize,
             script_tag: Option<[u8; 4]>,
             language_tag: Option<[u8; 4]>,
-        ) -> Result<(u16, usize), TrueTypeError> {
+        ) -> Result<GsubSubstitution, TrueTypeError> {
             let mut working = *glyphs;
             let mut glyph = working[position];
             let mut consumed = 1usize;
             for _ in 0..8 {
                 working[position] = glyph;
-                let Some((next, next_consumed)) =
+                let Some(next) =
                     self.ligature_substitution(&working, position, script_tag, language_tag)?
                 else {
                     break;
                 };
-                if next == glyph && next_consumed == 1 {
-                    break;
-                }
-                glyph = next;
-                consumed = next_consumed;
-                if consumed != 1 {
-                    break;
+                match next {
+                    GsubSubstitution::Single {
+                        glyph: next,
+                        consumed: next_consumed,
+                    } => {
+                        if next == glyph && next_consumed == 1 {
+                            break;
+                        }
+                        glyph = next;
+                        consumed = next_consumed;
+                        if consumed != 1 {
+                            return Ok(GsubSubstitution::Single { glyph, consumed });
+                        }
+                    }
+                    GsubSubstitution::Multiple { glyphs, count } => {
+                        return Ok(GsubSubstitution::Multiple { glyphs, count });
+                    }
                 }
             }
-            Ok((glyph, consumed))
+            Ok(GsubSubstitution::Single { glyph, consumed })
         }
 
         fn gpos_pair_adjustment(
@@ -5888,29 +5974,66 @@ pub mod graphics {
                 if output_count == output.len() {
                     return Err(TrueTypeError::TooLarge);
                 }
-                let (glyph, consumed) = self.gsub_substitution_pipeline(
+                let substitution = self.gsub_substitution_pipeline(
                     &glyphs,
                     input,
                     options.script_tag,
                     options.language_tag,
                 )?;
-                let advance = self
-                    .horizontal_metric(usize::from(glyph))
-                    .ok_or(TrueTypeError::BadTableDirectory)?
-                    .0;
-                let pixels = (i64::from(advance) * scale)
-                    .div_euclid(units)
-                    .clamp(1, i64::from(i32::MAX)) as i32;
-                output[output_count] = ShapedGlyph {
-                    glyph_id: glyph,
-                    source: characters[input],
-                    source_count: u8::try_from(consumed).map_err(|_| TrueTypeError::TooLarge)?,
-                    origin: Point::new(cursor, origin.y),
-                    advance: pixels,
-                };
-                cursor = cursor.saturating_add(pixels);
-                input += consumed;
-                output_count += 1;
+                match substitution {
+                    GsubSubstitution::Single { glyph, consumed } => {
+                        let advance = self
+                            .horizontal_metric(usize::from(glyph))
+                            .ok_or(TrueTypeError::BadTableDirectory)?
+                            .0;
+                        let pixels = (i64::from(advance) * scale)
+                            .div_euclid(units)
+                            .clamp(1, i64::from(i32::MAX))
+                            as i32;
+                        output[output_count] = ShapedGlyph {
+                            glyph_id: glyph,
+                            source: characters[input],
+                            source_count: u8::try_from(consumed)
+                                .map_err(|_| TrueTypeError::TooLarge)?,
+                            origin: Point::new(cursor, origin.y),
+                            advance: pixels,
+                        };
+                        cursor = cursor.saturating_add(pixels);
+                        input += consumed;
+                        output_count += 1;
+                    }
+                    GsubSubstitution::Multiple {
+                        glyphs: replacement,
+                        count,
+                    } => {
+                        if output_count
+                            .checked_add(count)
+                            .is_none_or(|end| end > output.len())
+                        {
+                            return Err(TrueTypeError::TooLarge);
+                        }
+                        for (index, glyph) in replacement.iter().copied().take(count).enumerate() {
+                            let advance = self
+                                .horizontal_metric(usize::from(glyph))
+                                .ok_or(TrueTypeError::BadTableDirectory)?
+                                .0;
+                            let pixels = (i64::from(advance) * scale)
+                                .div_euclid(units)
+                                .clamp(1, i64::from(i32::MAX))
+                                as i32;
+                            output[output_count] = ShapedGlyph {
+                                glyph_id: glyph,
+                                source: if index == 0 { characters[input] } else { '\0' },
+                                source_count: if index == 0 { 1 } else { 0 },
+                                origin: Point::new(cursor, origin.y),
+                                advance: pixels,
+                            };
+                            cursor = cursor.saturating_add(pixels);
+                            output_count += 1;
+                        }
+                        input += 1;
+                    }
+                }
             }
             self.apply_gpos_adjustments(
                 output,
@@ -5955,23 +6078,59 @@ pub mod graphics {
                 if output_count == output.len() {
                     return Err(TrueTypeError::TooLarge);
                 }
-                let (glyph, consumed) =
-                    self.gsub_substitution_pipeline(&glyphs, input, None, None)?;
-                let advance =
-                    self.advance_width_glyph_with_variation(glyph, normalized_coordinates)?;
-                let pixels = (i64::from(advance) * scale)
-                    .div_euclid(units)
-                    .clamp(1, i64::from(i32::MAX)) as i32;
-                output[output_count] = ShapedGlyph {
-                    glyph_id: glyph,
-                    source: characters[input],
-                    source_count: u8::try_from(consumed).map_err(|_| TrueTypeError::TooLarge)?,
-                    origin: Point::new(cursor, origin.y),
-                    advance: pixels,
-                };
-                cursor = cursor.saturating_add(pixels);
-                input += consumed;
-                output_count += 1;
+                let substitution = self.gsub_substitution_pipeline(&glyphs, input, None, None)?;
+                match substitution {
+                    GsubSubstitution::Single { glyph, consumed } => {
+                        let advance =
+                            self.advance_width_glyph_with_variation(glyph, normalized_coordinates)?;
+                        let pixels = (i64::from(advance) * scale)
+                            .div_euclid(units)
+                            .clamp(1, i64::from(i32::MAX))
+                            as i32;
+                        output[output_count] = ShapedGlyph {
+                            glyph_id: glyph,
+                            source: characters[input],
+                            source_count: u8::try_from(consumed)
+                                .map_err(|_| TrueTypeError::TooLarge)?,
+                            origin: Point::new(cursor, origin.y),
+                            advance: pixels,
+                        };
+                        cursor = cursor.saturating_add(pixels);
+                        input += consumed;
+                        output_count += 1;
+                    }
+                    GsubSubstitution::Multiple {
+                        glyphs: replacement,
+                        count,
+                    } => {
+                        if output_count
+                            .checked_add(count)
+                            .is_none_or(|end| end > output.len())
+                        {
+                            return Err(TrueTypeError::TooLarge);
+                        }
+                        for (index, glyph) in replacement.iter().copied().take(count).enumerate() {
+                            let advance = self.advance_width_glyph_with_variation(
+                                glyph,
+                                normalized_coordinates,
+                            )?;
+                            let pixels = (i64::from(advance) * scale)
+                                .div_euclid(units)
+                                .clamp(1, i64::from(i32::MAX))
+                                as i32;
+                            output[output_count] = ShapedGlyph {
+                                glyph_id: glyph,
+                                source: if index == 0 { characters[input] } else { '\0' },
+                                source_count: if index == 0 { 1 } else { 0 },
+                                origin: Point::new(cursor, origin.y),
+                                advance: pixels,
+                            };
+                            cursor = cursor.saturating_add(pixels);
+                            output_count += 1;
+                        }
+                        input += 1;
+                    }
+                }
             }
             self.apply_gpos_adjustments(output, output_count, scale, None, None, None)?;
             Ok(output_count)
@@ -6627,6 +6786,75 @@ pub mod graphics {
             }
             _ => Ok(None),
         }
+    }
+
+    pub(crate) fn gsub_multiple_subtable(
+        bytes: &[u8],
+        subtable: usize,
+        glyph: u16,
+        table_end: usize,
+    ) -> Result<Option<([u16; 16], usize)>, TrueTypeError> {
+        if subtable.checked_add(6).is_none_or(|end| end > table_end)
+            || read_u16(bytes, subtable) != Some(1)
+        {
+            return Ok(None);
+        }
+        let coverage = subtable
+            .checked_add(usize::from(
+                read_u16(bytes, subtable + 2).ok_or(TrueTypeError::BadTableDirectory)?,
+            ))
+            .ok_or(TrueTypeError::BadTableDirectory)?;
+        let Some(coverage_index) = gsub_coverage_index(bytes, coverage, table_end, glyph)? else {
+            return Ok(None);
+        };
+        let sequence_count =
+            usize::from(read_u16(bytes, subtable + 4).ok_or(TrueTypeError::BadTableDirectory)?);
+        if sequence_count == 0 || sequence_count > 128 || coverage_index >= sequence_count {
+            return Err(TrueTypeError::TooLarge);
+        }
+        let offsets_end = subtable
+            .checked_add(
+                6usize
+                    .checked_add(
+                        sequence_count
+                            .checked_mul(2)
+                            .ok_or(TrueTypeError::TooLarge)?,
+                    )
+                    .ok_or(TrueTypeError::TooLarge)?,
+            )
+            .ok_or(TrueTypeError::TooLarge)?;
+        if offsets_end > table_end {
+            return Err(TrueTypeError::BadTableDirectory);
+        }
+        let sequence = subtable
+            .checked_add(usize::from(
+                read_u16(bytes, subtable + 6 + coverage_index * 2)
+                    .ok_or(TrueTypeError::BadTableDirectory)?,
+            ))
+            .ok_or(TrueTypeError::BadTableDirectory)?;
+        if sequence.checked_add(2).is_none_or(|end| end > table_end) {
+            return Err(TrueTypeError::BadTableDirectory);
+        }
+        let count = usize::from(read_u16(bytes, sequence).ok_or(TrueTypeError::BadTableDirectory)?);
+        if !(1..=16).contains(&count) {
+            return Err(TrueTypeError::TooLarge);
+        }
+        let end = sequence
+            .checked_add(
+                2usize
+                    .checked_add(count.checked_mul(2).ok_or(TrueTypeError::TooLarge)?)
+                    .ok_or(TrueTypeError::TooLarge)?,
+            )
+            .ok_or(TrueTypeError::TooLarge)?;
+        if end > table_end {
+            return Err(TrueTypeError::BadTableDirectory);
+        }
+        let mut result = [0u16; 16];
+        for (index, value) in result.iter_mut().take(count).enumerate() {
+            *value = read_u16(bytes, sequence + 2 + index * 2)
+                .ok_or(TrueTypeError::BadTableDirectory)?;
+        }
+        Ok(Some((result, count)))
     }
 
     pub(crate) fn gsub_alternate_subtable(
@@ -14128,6 +14356,43 @@ mod tests {
         );
         assert_eq!(output[0].glyph_id, 3);
         assert_eq!(output[0].source_count, 1);
+        let mut multiple_bytes = single_bytes;
+        put32(&mut multiple_bytes, 104, 70);
+        multiple_bytes[274..278].copy_from_slice(b"subs");
+        put16(&mut multiple_bytes, 310, 1);
+        put16(&mut multiple_bytes, 302, 2);
+        put16(&mut multiple_bytes, 312, 16);
+        put16(&mut multiple_bytes, 314, 1);
+        put16(&mut multiple_bytes, 316, 10);
+        put16(&mut multiple_bytes, 320, 2);
+        put16(&mut multiple_bytes, 322, 3);
+        put16(&mut multiple_bytes, 324, 2);
+        put16(&mut multiple_bytes, 326, 1);
+        put16(&mut multiple_bytes, 328, 1);
+        put16(&mut multiple_bytes, 330, 1);
+        let parsed_multiple =
+            crate::graphics::gsub_multiple_subtable(&multiple_bytes, 310, 1, 372).unwrap();
+        assert_eq!(parsed_multiple.as_ref().map(|(_, count)| *count), Some(2));
+        let multiple_face = TrueTypeFace::from_bytes(&multiple_bytes).unwrap();
+        let mut multiple_output = [ShapedGlyph {
+            glyph_id: 0,
+            source: '\0',
+            source_count: 0,
+            origin: Point::new(0, 0),
+            advance: 0,
+        }; 128];
+        assert_eq!(
+            multiple_face
+                .shape_text_ligatures("A", Point::new(2, 15), 10, &mut multiple_output)
+                .unwrap(),
+            2
+        );
+        assert_eq!(multiple_output[0].glyph_id, 3);
+        assert_eq!(multiple_output[1].glyph_id, 2);
+        assert_eq!(multiple_output[0].source, 'A');
+        assert_eq!(multiple_output[0].source_count, 1);
+        assert_eq!(multiple_output[1].source, '\0');
+        assert_eq!(multiple_output[1].source_count, 0);
         let mut context_bytes = single_bytes;
         put32(&mut context_bytes, 104, 116);
         put32(&mut context_bytes, 262, 0x0001_0000);
