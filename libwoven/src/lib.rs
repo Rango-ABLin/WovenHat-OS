@@ -3739,6 +3739,7 @@ pub mod graphics {
                             previous: context.map(|value| value.0),
                             next: context.map(|value| value.1),
                             third: None,
+                            fourth: None,
                             input_count: 2,
                             target_sequence_index: 0,
                         },
@@ -4162,6 +4163,7 @@ pub mod graphics {
                         previous: context.map(|value| value.0),
                         next: context.map(|value| value.1),
                         third: None,
+                        fourth: None,
                         input_count: 2,
                         target_sequence_index: 0,
                     },
@@ -5301,6 +5303,7 @@ pub mod graphics {
                             previous: context.map(|value| value.0),
                             next: context.map(|value| value.1),
                             third: None,
+                            fourth: None,
                             input_count: 2,
                             target_sequence_index: 1,
                         },
@@ -5348,6 +5351,7 @@ pub mod graphics {
                             previous: context.map(|value| value.0),
                             next: context.map(|value| value.1),
                             third: None,
+                            fourth: None,
                             input_count: 1,
                             target_sequence_index: 0,
                         },
@@ -5397,6 +5401,7 @@ pub mod graphics {
                             previous: context.map(|value| value.0),
                             next: context.map(|value| value.1),
                             third: Some(third),
+                            fourth: None,
                             input_count: 3,
                             target_sequence_index: 2,
                         },
@@ -5424,6 +5429,57 @@ pub mod graphics {
                 output[index + 2].origin.y = output[index + 2].origin.y.saturating_add(y_placement);
                 output[index + 2].advance = output[index + 2].advance.saturating_add(x_advance);
                 for following in output.iter_mut().take(count).skip(index + 3) {
+                    following.origin.x = following.origin.x.saturating_add(x_advance);
+                    following.origin.y = following.origin.y.saturating_add(y_advance);
+                }
+            }
+            for index in 0..count.saturating_sub(3) {
+                let left = output[index].glyph_id;
+                let right = output[index + 1].glyph_id;
+                let third = output[index + 2].glyph_id;
+                let fourth = output[index + 3].glyph_id;
+                let context = (index > 0)
+                    .then(|| output[index - 1].glyph_id)
+                    .zip((index + 4 < count).then(|| output[index + 4].glyph_id));
+                let Some((x_placement, y_placement, x_advance, y_advance)) = self
+                    .gpos_contextual_adjustment(
+                        left,
+                        right,
+                        GposContextOptions {
+                            script_tag,
+                            language_tag,
+                            ppem,
+                            previous: context.map(|value| value.0),
+                            next: context.map(|value| value.1),
+                            third: Some(third),
+                            fourth: Some(fourth),
+                            input_count: 4,
+                            target_sequence_index: 3,
+                        },
+                    )?
+                else {
+                    continue;
+                };
+                let x_placement = (i64::from(x_placement) * scale)
+                    .div_euclid(units)
+                    .clamp(i64::from(i32::MIN), i64::from(i32::MAX))
+                    as i32;
+                let y_placement = (i64::from(y_placement) * scale)
+                    .div_euclid(units)
+                    .clamp(i64::from(i32::MIN), i64::from(i32::MAX))
+                    as i32;
+                let x_advance = (i64::from(x_advance) * scale)
+                    .div_euclid(units)
+                    .clamp(i64::from(i32::MIN), i64::from(i32::MAX))
+                    as i32;
+                let y_advance = (i64::from(y_advance) * scale)
+                    .div_euclid(units)
+                    .clamp(i64::from(i32::MIN), i64::from(i32::MAX))
+                    as i32;
+                output[index + 3].origin.x = output[index + 3].origin.x.saturating_add(x_placement);
+                output[index + 3].origin.y = output[index + 3].origin.y.saturating_add(y_placement);
+                output[index + 3].advance = output[index + 3].advance.saturating_add(x_advance);
+                for following in output.iter_mut().take(count).skip(index + 4) {
                     following.origin.x = following.origin.x.saturating_add(x_advance);
                     following.origin.y = following.origin.y.saturating_add(y_advance);
                 }
@@ -7525,6 +7581,7 @@ pub mod graphics {
         previous: Option<u16>,
         next: Option<u16>,
         third: Option<u16>,
+        fourth: Option<u16>,
         input_count: u16,
         target_sequence_index: u16,
     }
@@ -7538,7 +7595,7 @@ pub mod graphics {
         options: GposContextOptions,
     ) -> Result<Option<(i32, i32, i32, i32)>, TrueTypeError> {
         if options.input_count == 0
-            || options.input_count > 3
+            || options.input_count > 4
             || options.target_sequence_index >= options.input_count
         {
             return Ok(None);
@@ -7551,6 +7608,12 @@ pub mod graphics {
                     return Ok(None);
                 };
                 third
+            }
+            3 => {
+                let Some(fourth) = options.fourth else {
+                    return Ok(None);
+                };
+                fourth
             }
             _ => return Ok(None),
         };
@@ -7772,6 +7835,12 @@ pub mod graphics {
                                 .ok_or(TrueTypeError::BadTableDirectory)?,
                         ))
                         .ok_or(TrueTypeError::BadTableDirectory)?;
+                    let fourth_coverage = subtable
+                        .checked_add(usize::from(
+                            read_u16(bytes, input_offsets + 6)
+                                .ok_or(TrueTypeError::BadTableDirectory)?,
+                        ))
+                        .ok_or(TrueTypeError::BadTableDirectory)?;
                     if gsub_coverage_index(bytes, first_coverage, table_end, left)?.is_none() {
                         continue;
                     }
@@ -7786,6 +7855,17 @@ pub mod graphics {
                             third_coverage,
                             table_end,
                             options.third.ok_or(TrueTypeError::BadTableDirectory)?,
+                        )?
+                        .is_none()
+                    {
+                        continue;
+                    }
+                    if options.input_count == 4
+                        && gsub_coverage_index(
+                            bytes,
+                            fourth_coverage,
+                            table_end,
+                            options.fourth.ok_or(TrueTypeError::BadTableDirectory)?,
                         )?
                         .is_none()
                     {
@@ -12986,6 +13066,35 @@ mod tests {
         assert_eq!(shaped_three[1].origin, Point::new(502, 15));
         assert_eq!(shaped_three[2].origin, Point::new(1002, 15));
         assert_eq!(shaped_three[2].advance, 525);
+        let mut contextual_four_bytes = contextual_gpos_bytes;
+        put32(&mut contextual_four_bytes, 104, 156);
+        put16(&mut contextual_four_bytes, 308, 4);
+        put16(&mut contextual_four_bytes, 310, 60);
+        put16(&mut contextual_four_bytes, 312, 66);
+        put16(&mut contextual_four_bytes, 314, 72);
+        put16(&mut contextual_four_bytes, 316, 78);
+        put16(&mut contextual_four_bytes, 318, 0);
+        put16(&mut contextual_four_bytes, 320, 1);
+        put16(&mut contextual_four_bytes, 322, 3);
+        put16(&mut contextual_four_bytes, 324, 1);
+        for offset in [364, 370, 376, 382] {
+            put16(&mut contextual_four_bytes, offset, 1);
+            put16(&mut contextual_four_bytes, offset + 2, 1);
+            put16(&mut contextual_four_bytes, offset + 4, 1);
+        }
+        let contextual_four_face = TrueTypeFace::from_bytes(&contextual_four_bytes).unwrap();
+        let mut shaped_four = [shaped[0]; 4];
+        assert_eq!(
+            contextual_four_face
+                .shape_text_ligatures("AAAA", Point::new(2, 15), 1000, &mut shaped_four)
+                .unwrap(),
+            4
+        );
+        assert_eq!(shaped_four[0].advance, 500);
+        assert_eq!(shaped_four[1].origin, Point::new(502, 15));
+        assert_eq!(shaped_four[2].origin, Point::new(1002, 15));
+        assert_eq!(shaped_four[3].origin, Point::new(1502, 15));
+        assert_eq!(shaped_four[3].advance, 525);
         let mut single_adjustment_bytes = [0u8; 420];
         single_adjustment_bytes.copy_from_slice(&bytes);
         put32(&mut single_adjustment_bytes, 104, 156);

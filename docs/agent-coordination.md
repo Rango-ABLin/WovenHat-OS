@@ -1,5 +1,14 @@
 # Agent coordination (Claude Code and Codex)
 
+**Codex graphics-track bounded four-input contextual GPOS positioning (2026-10-19):**
+format-3 subtables with four input coverages now apply bounded nested single
+adjustments to sequence index three and propagate advances to later glyphs.
+One- through three-input paths remain supported; pair positioning stays on the
+two-input sequence-index-zero path, while longer context and broader lookup
+semantics remain open. The 42-test `libwoven` suite, warning-denying
+library/kernel/workspace Clippy, formatting, and Stage 19.2 compositor visual
+acceptance on 1/2/4 CPUs passed. Hardware GPU acceleration remains open.
+
 **Codex graphics-track bounded three-input contextual GPOS positioning (2026-10-19):**
 format-3 subtables with three input coverages now apply bounded nested single
 adjustments to sequence index two and propagate advances to later glyphs.
