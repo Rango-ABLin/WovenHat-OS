@@ -173,6 +173,13 @@ def main():
                             raise RuntimeError('The desktop session did not start; inspect shell-regression logs')
                         time.sleep(0.1)
                     time.sleep(2)
+                    # Retain the framebuffer *before* switching to diagnostics.
+                    # A serial startup marker alone cannot prove that a desktop
+                    # frame is visible; reviewers must inspect this image.
+                    screenshot = out / 'desktop-before-f12.ppm'
+                    execute('screendump', {'filename': str(screenshot)})
+                    if not screenshot.is_file() or screenshot.stat().st_size == 0:
+                        raise RuntimeError('No pre-diagnostic display screenshot was captured')
                     execute('send-key', {'keys': [{'type': 'qcode', 'data': 'f12'}], 'hold-time': 40})
                     deadline = time.monotonic() + 30
                     while '[SESSION] diagnostic console' not in serial.read_text(errors='replace'):
