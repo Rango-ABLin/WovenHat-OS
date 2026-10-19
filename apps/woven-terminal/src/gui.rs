@@ -8,6 +8,11 @@ const ACCENT: u32 = rgb(100, 220, 180);
 const TEXT: u32 = rgb(235, 240, 250);
 const MUTED: u32 = rgb(150, 170, 190);
 const POINTER_MARKER: u32 = rgb(255, 80, 80);
+const BUTTON: u32 = rgb(45, 65, 90);
+const BUTTON_X: i32 = 250;
+const BUTTON_Y: i32 = 170;
+const BUTTON_WIDTH: usize = 80;
+const BUTTON_HEIGHT: usize = 20;
 const PANEL_X: i32 = 12;
 const PANEL_Y: i32 = 12;
 const PANEL_WIDTH: usize = 336;
@@ -63,6 +68,14 @@ fn draw(
     if let Ok(text) = core::str::from_utf8(status) {
         canvas.draw_text(PANEL_X + 10, PANEL_Y + 158, text, TEXT);
     }
+    canvas.fill_rect(
+        BUTTON_X,
+        BUTTON_Y,
+        BUTTON_WIDTH,
+        BUTTON_HEIGHT,
+        if pressed { ACCENT } else { BUTTON },
+    );
+    canvas.draw_text(BUTTON_X + 14, BUTTON_Y + 6, "Clear", TEXT);
     canvas.draw_text(PANEL_X + 10, PANEL_Y + 174, "Enter submits; Backspace edits", MUTED);
     if let Some((x, y)) = pointer {
         let color = if pressed { TEXT } else { POINTER_MARKER };
@@ -179,11 +192,20 @@ pub fn run(shell: Option<&[u8]>) -> ! {
                 continue;
             }
             if message.get(..4) == Some(&b"WPBT"[..]) && message_length == 10 && message[4] == 0 {
+                let local_x = u16::from_le_bytes([message[6], message[7]]);
+                let local_y = u16::from_le_bytes([message[8], message[9]]);
                 pointer_pressed = message[5] != 0;
-                pointer = Some((
-                    u16::from_le_bytes([message[6], message[7]]),
-                    u16::from_le_bytes([message[8], message[9]]),
-                ));
+                pointer = Some((local_x, local_y));
+                if !pointer_pressed
+                    && i32::from(local_x) >= BUTTON_X
+                    && i32::from(local_x) < BUTTON_X + BUTTON_WIDTH as i32
+                    && i32::from(local_y) >= BUTTON_Y
+                    && i32::from(local_y) < BUTTON_Y + BUTTON_HEIGHT as i32
+                {
+                    length = 0;
+                    status = b"Input cleared by pointer control";
+                    let _ = libwoven::print("WovenTerminal: pointer cleared\n");
+                }
                 if !render(&window, &line[..length], status, pointer, pointer_pressed) {
                     fail(9)
                 }

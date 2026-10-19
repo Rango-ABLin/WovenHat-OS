@@ -1,5 +1,14 @@
 # WovenHat OS Architecture & Codebase Guide
 
+## Graphics WovenTerminal pointer control (2026-10-19)
+
+WovenTerminal renders a bounded `Clear` button in its 360x220 preview surface
+at local x=250..329 and y=170..189. On a primary-button release in that
+rectangle, it clears only the bounded GUI command preview and replaces the
+status text; the full CLI/interactive path is unchanged. QEMU visual
+acceptance passed on 1/2/4 CPUs. USB HID and hardware GPU qualification remain
+separate boundaries.
+
 ## Graphics WovenFiles pointer control (2026-10-19)
 
 WovenFiles renders a bounded `Refresh` button in its 320x240 client surface at

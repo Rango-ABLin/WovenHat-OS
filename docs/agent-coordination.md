@@ -1,5 +1,13 @@
 # Agent coordination (Claude Code and Codex)
 
+**Codex graphics-track WovenTerminal pointer control acceptance (2026-10-19):**
+WovenTerminal now has a bounded local `Clear` button. A forwarded `WPBT`
+release inside x=250..329, y=170..189 clears only the preview input and
+updates its status. The production QEMU gate passed on 1/2/4 CPUs with
+`--app terminal --exercise-client-click`; evidence is under
+`audit-artifacts/terminal-desktop-{1,2,4}cpu-*`. The CLI path is unchanged;
+USB HID and hardware GPU presentation remain separate.
+
 **Codex graphics-track WovenFiles pointer control acceptance (2026-10-19):**
 WovenFiles now has a bounded local `Refresh` button. A forwarded `WPBT`
 release inside x=220..299, y=206..225 re-reads the bounded read-only `/mnt`

@@ -1,5 +1,20 @@
 # Stage status
 
+## Graphics track - WovenTerminal pointer control acceptance (2026-10-19)
+
+WovenTerminal now presents a bounded, preview-only `Clear` control at local
+client coordinates x=250..329, y=170..189. A primary-button release forwarded
+as `WPBT` within that rectangle clears the in-window command preview and
+updates its status text. The production QEMU gate
+`scripts/test-files-desktop-qemu.py --app terminal --exercise-client-click`
+passed on 1/2/4 CPUs. Evidence is under
+`audit-artifacts/terminal-desktop-{1,2,4}cpu-*`.
+
+This accepts a fourth functional client control without changing the separate
+CLI command path or adding privileged behavior. Remaining clients still have
+pointer feedback rather than accepted functional controls; USB HID
+qualification and hardware GPU presentation remain open.
+
 ## Graphics track - WovenFiles pointer control acceptance (2026-10-19)
 
 WovenFiles now presents a bounded, read-only `Refresh` control at local client
