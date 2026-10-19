@@ -1,5 +1,19 @@
 # Stage status
 
+## Graphics track - WovenSecurity pointer control acceptance (2026-10-19)
+
+WovenSecurity now presents a bounded, read-only `Refresh` control at local
+client coordinates x=250..329, y=145..164. A primary-button release forwarded
+as `WPBT` within that rectangle re-reads the bounded audit summary and
+increments a visible refresh counter. The production QEMU gate
+`scripts/test-files-desktop-qemu.py --app security --exercise-client-click`
+passed on 1/2/4 CPUs. Evidence is under
+`audit-artifacts/security-desktop-{1,2,4}cpu-*`.
+
+This accepts a sixth functional client control without changing audit state;
+remaining clients still have pointer feedback rather than accepted functional
+controls. USB HID qualification and hardware GPU presentation remain open.
+
 ## Graphics track - WovenMonitor pointer control acceptance (2026-10-19)
 
 WovenMonitor now presents a bounded, read-only `Refresh` control at local

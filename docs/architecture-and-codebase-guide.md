@@ -1,5 +1,14 @@
 # WovenHat OS Architecture & Codebase Guide
 
+## Graphics WovenSecurity pointer control (2026-10-19)
+
+WovenSecurity renders a bounded `Refresh` button in its 360x200 surface at
+local x=250..329 and y=145..164. On a primary-button release in that
+rectangle, it re-reads the bounded audit summary, increments a saturating
+refresh counter, and repaints. The control is read-only and does not mutate
+audit state. QEMU visual acceptance passed on 1/2/4 CPUs; USB HID and
+hardware GPU qualification remain separate.
+
 ## Graphics WovenMonitor pointer control (2026-10-19)
 
 WovenMonitor renders a bounded `Refresh` button in its 360x220 surface at
