@@ -7,6 +7,7 @@ const PANEL: u32 = rgb(25, 34, 48);
 const ACCENT: u32 = rgb(100, 220, 180);
 const TEXT: u32 = rgb(235, 240, 250);
 const MUTED: u32 = rgb(150, 170, 190);
+const POINTER_MARKER: u32 = rgb(255, 80, 80);
 const PANEL_X: i32 = 12;
 const PANEL_Y: i32 = 12;
 const PANEL_WIDTH: usize = 336;
@@ -39,7 +40,13 @@ fn stroke_rect(canvas: &mut Canvas<'_>, x: i32, y: i32, width: usize, height: us
 
 const MAX_INPUT: usize = 48;
 
-fn draw(canvas: &mut Canvas<'_>, line: &[u8], status: &[u8]) {
+fn draw(
+    canvas: &mut Canvas<'_>,
+    line: &[u8],
+    status: &[u8],
+    pointer: Option<(u16, u16)>,
+    pressed: bool,
+) {
     canvas.fill_rect(0, 0, canvas.width(), canvas.height(), BACKGROUND);
     canvas.fill_rect(PANEL_X, PANEL_Y, PANEL_WIDTH, PANEL_HEIGHT, PANEL);
     stroke_rect(canvas, PANEL_X, PANEL_Y, PANEL_WIDTH, PANEL_HEIGHT, ACCENT);
@@ -57,9 +64,19 @@ fn draw(canvas: &mut Canvas<'_>, line: &[u8], status: &[u8]) {
         canvas.draw_text(PANEL_X + 10, PANEL_Y + 158, text, TEXT);
     }
     canvas.draw_text(PANEL_X + 10, PANEL_Y + 174, "Enter submits; Backspace edits", MUTED);
+    if let Some((x, y)) = pointer {
+        let color = if pressed { TEXT } else { POINTER_MARKER };
+        canvas.fill_rect(i32::from(x).saturating_sub(2), i32::from(y).saturating_sub(2), 5, 5, color);
+    }
 }
 
-fn render(window: &GraphicsSurface, line: &[u8], status: &[u8]) -> bool {
+fn render(
+    window: &GraphicsSurface,
+    line: &[u8],
+    status: &[u8],
+    pointer: Option<(u16, u16)>,
+    pressed: bool,
+) -> bool {
     let pixels = unsafe { &mut *CANVAS_PIXELS.0.get() };
     let Some(mut canvas) = Canvas::new(
         pixels,
@@ -70,7 +87,7 @@ fn render(window: &GraphicsSurface, line: &[u8], status: &[u8]) -> bool {
     ) else {
         return false;
     };
-    draw(&mut canvas, line, status);
+    draw(&mut canvas, line, status, pointer, pressed);
     window.write_canvas(&canvas).is_ok()
 }
 
@@ -93,7 +110,7 @@ pub fn run(shell: Option<&[u8]>) -> ! {
     let mut window = GraphicsSurface::create(WIDTH, HEIGHT).unwrap_or_else(|_| fail(1));
     let line = [0u8; MAX_INPUT];
     let status: &[u8] = b"Ready for a bounded command preview";
-    if !render(&window, &line, status) {
+    if !render(&window, &line, status, None, false) {
         fail(3)
     }
     if window.share_with(shell).is_err() {
@@ -114,6 +131,8 @@ pub fn run(shell: Option<&[u8]>) -> ! {
     let mut line = [0u8; MAX_INPUT];
     let mut length = 0usize;
     let mut status: &[u8] = b"Ready for a bounded command preview";
+    let mut pointer = None;
+    let mut pointer_pressed = false;
     loop {
         if libwoven::wait_any(libwoven::wait::MESSAGE, None).is_err() {
             fail(6)
@@ -135,7 +154,7 @@ pub fn run(shell: Option<&[u8]>) -> ! {
                     // expensive pixel upload, so the shell's bounded resize
                     // grace window cannot expire while copying the canvas.
                     if resized.share_with(shell).is_ok() && send_resize(&resized, shell) {
-                        if render(&resized, &line[..length], status) {
+                        if render(&resized, &line[..length], status, pointer, pointer_pressed) {
                             let previous = core::mem::replace(&mut window, resized);
                             drop(previous);
                             let _ = libwoven::print("WovenTerminal: window resized\n");
@@ -146,6 +165,29 @@ pub fn run(shell: Option<&[u8]>) -> ! {
                         drop(resized);
                     }
                 }
+                continue;
+            }
+            if message.get(..4) == Some(&b"WPMV"[..]) && message_length == 8 {
+                pointer = Some((
+                    u16::from_le_bytes([message[4], message[5]]),
+                    u16::from_le_bytes([message[6], message[7]]),
+                ));
+                if !render(&window, &line[..length], status, pointer, pointer_pressed) {
+                    fail(9)
+                }
+                let _ = libwoven::print("WovenTerminal: pointer updated\n");
+                continue;
+            }
+            if message.get(..4) == Some(&b"WPBT"[..]) && message_length == 10 && message[4] == 0 {
+                pointer_pressed = message[5] != 0;
+                pointer = Some((
+                    u16::from_le_bytes([message[6], message[7]]),
+                    u16::from_le_bytes([message[8], message[9]]),
+                ));
+                if !render(&window, &line[..length], status, pointer, pointer_pressed) {
+                    fail(9)
+                }
+                let _ = libwoven::print("WovenTerminal: pointer updated\n");
                 continue;
             }
             if message.get(..4) == Some(&b"WKEY"[..]) && message_length >= 5 {
@@ -162,14 +204,14 @@ pub fn run(shell: Option<&[u8]>) -> ! {
                 }
                 // Redraw after every bounded edit; the shared surface keeps
                 // the compositor's ownership and lifecycle unchanged.
-                if !render(&window, &line[..length], status) {
+                if !render(&window, &line[..length], status, pointer, pointer_pressed) {
                     fail(9)
                 }
             } else if message_length == 1 && message[0].is_ascii_graphic() && length < MAX_INPUT {
                 line[length] = message[0];
                 length += 1;
                 status = b"Editing command preview";
-                if !render(&window, &line[..length], status) {
+                if !render(&window, &line[..length], status, pointer, pointer_pressed) {
                     fail(11)
                 }
             }

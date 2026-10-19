@@ -1,5 +1,18 @@
 # Stage status
 
+## Graphics track - Terminal client pointer acceptance (2026-10-19)
+
+WovenTerminal now consumes the bounded `WPMV` motion and `WPBT` primary-button
+messages and draws a distinct pointer marker in its shared surface. The
+production QEMU gate
+`scripts/test-files-desktop-qemu.py --app terminal --exercise-client-pointer`
+passed on 1/2/4 CPUs, verifying delivery and a presented-surface pixel delta.
+Evidence is under `audit-artifacts/terminal-desktop-{1,2,4}cpu-*`.
+
+Calculator and Terminal are the accepted client-pointer consumers. The other
+packaged clients still need pointer widgets/controls; USB HID qualification
+and hardware GPU presentation remain open.
+
 ## Graphics track - client pointer forwarding (2026-10-19)
 
 WovenShell now forwards bounded client-local pointer events after handling its

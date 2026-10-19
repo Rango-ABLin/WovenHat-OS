@@ -1,5 +1,13 @@
 # Agent coordination (Claude Code and Codex)
 
+**Codex graphics-track Terminal client pointer acceptance (2026-10-19):**
+WovenTerminal now consumes the bounded `WPMV`/`WPBT` protocol and paints a
+distinct marker. `scripts/test-files-desktop-qemu.py --app terminal
+--exercise-client-pointer` passed on 1/2/4 CPUs with evidence under
+`audit-artifacts/terminal-desktop-{1,2,4}cpu-*`. Calculator and Terminal are
+accepted clients; the remaining packaged clients, USB HID, and hardware GPU
+presentation remain separate.
+
 **Codex graphics-track client pointer forwarding (2026-10-19):**
 WovenShell now forwards bounded client-local `WPMV` motion and `WPBT` primary
 button edges after its own chrome/title-bar hit testing. WovenCalculator draws

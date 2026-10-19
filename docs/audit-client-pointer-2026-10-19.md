@@ -3,11 +3,16 @@
 ## Result
 
 `python scripts/test-files-desktop-qemu.py --app calculator
---exercise-client-pointer --cpus N` passed for `N = 1`, `2`, and `4`.
+--exercise-client-pointer --cpus N` and the equivalent Terminal command passed
+for `N = 1`, `2`, and `4`.
 
-Each run produced the Calculator delivery marker:
+Each Calculator run produced:
 
 `WovenCalculator: pointer updated`
+
+Each Terminal run produced:
+
+`WovenTerminal: pointer updated`
 
 The harness also compared before/after QEMU screendumps and required a
 presented Calculator-surface delta.
@@ -22,11 +27,11 @@ presented Calculator-surface delta.
   `u16`, client-local y `u16`.
 - The shell clamps coordinates to the receiving surface and captures the
   primary-button sequence for its client.
-- Calculator draws a bounded marker for the received position and button
-  state.
+- Calculator and Terminal draw bounded markers for the received position and
+  button state.
 
 ## Boundaries
 
-This is software/2D PS/2 pointer delivery to Calculator. The other packaged
-clients do not yet consume pointer controls; USB HID qualification and
-hardware GPU presentation are not claimed.
+This is software/2D PS/2 pointer delivery to Calculator and Terminal. The
+other packaged clients do not yet consume pointer controls; USB HID
+qualification and hardware GPU presentation are not claimed.
