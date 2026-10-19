@@ -26,9 +26,10 @@ window, focus and key routing remain correct, and killing the shell returns the
 display to the terminal. Evidence is under
 `tar\target\woven-shell-windows-{1,2,4}cpu`.
 
-This accepts the production WovenShell window-manager move/close path. It does
-not claim pointer forwarding into application clients, USB HID qualification,
-hardware GPU presentation, or direct QMP drag automation for WovenFiles.
+This accepts the production WovenShell window-manager move/close path. Client
+pointer forwarding is covered for Calculator by the newer slice above; USB
+HID qualification, hardware GPU presentation, and direct QMP drag automation
+for WovenFiles remain separate.
 
 ## Graphics track - desktop pointer visual acceptance (2026-10-19)
 
@@ -3308,7 +3309,9 @@ Negative controls, with evidence in
 Open:
 - No resize: the protocol request is in the design. No minimise or
   maximise.
-- Pointer events are still not forwarded to applications.
+- At the time of this original gate, pointer events were not forwarded to
+  applications; the later Graphics client pointer forwarding slice covers
+  Calculator.
 - The other compositor paths (whole-surface blit, blend) still copy whole
   surfaces, now under a preemption lock rather than an interrupts-off one.
 

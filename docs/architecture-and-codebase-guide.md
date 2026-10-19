@@ -24,9 +24,10 @@ the larger Wide client through its close control, routes focus and a key to
 Alpha, and verifies that the shell returns the display on teardown. The
 evidence is under `tar\target\woven-shell-windows-{1,2,4}cpu`.
 
-This does not imply pointer forwarding to application clients, USB HID
-qualification, hardware GPU presentation, or direct QMP automation of a
-production WovenFiles drag. Those remain separate boundaries.
+The original Stage 20.4 gate did not cover client pointer forwarding; the
+newer Calculator protocol section above covers that path. USB HID
+qualification, hardware GPU presentation, and direct QMP automation of a
+production WovenFiles drag remain separate boundaries.
 
 ## Graphics desktop pointer visual acceptance (2026-10-19)
 

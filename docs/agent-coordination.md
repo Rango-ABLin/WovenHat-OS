@@ -16,9 +16,9 @@ input through WovenShell: a title-bar drag moves Alpha and repaints both the
 old and new regions; the Wide close control exits its owner; focus and key
 routing then let Alpha exit; the shell releases the display. Evidence is in
 `tar\target\woven-shell-windows-{1,2,4}cpu`. This accepts the production
-window-manager move/close path, not pointer forwarding into clients, USB HID,
-hardware GPU presentation, or the still-experimental direct QMP drag of the
-WovenFiles client.
+window-manager move/close path; client pointer forwarding is covered by the
+newer Calculator slice above. USB HID, hardware GPU presentation, and the
+still-experimental direct QMP drag of the WovenFiles client remain separate.
 
 **Codex graphics-track desktop pointer visual acceptance (2026-10-19):**
 `scripts/test-files-desktop-qemu.py --app files --exercise-pointer` now
