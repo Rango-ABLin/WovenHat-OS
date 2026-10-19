@@ -1,5 +1,12 @@
 # WovenHat OS Architecture & Codebase Guide
 
+## Graphics text-layout update (2026-10-19)
+
+`Renderer::text_centered_scaled` and `text_box` use checked rectangle offsets
+and saturated edges; `text_scaled` saturates cursor and glyph-origin
+arithmetic before delegating to clipped fills. This keeps layout deterministic
+without allowing extreme caller rectangles to wrap coordinates.
+
 ## Graphics transformed-rectangle corner update (2026-10-19)
 
 `Renderer::transformed_rect` derives its exclusive far edges with checked

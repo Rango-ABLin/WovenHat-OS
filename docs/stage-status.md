@@ -1,5 +1,15 @@
 # Stage status
 
+## Graphics track - bounded text layout (2026-10-19)
+
+WovenGraphics centered and wrapped text now derive rectangle edges with
+checked conversions, and scaled glyph placement saturates cursor arithmetic
+before clipped fills. Extreme text rectangles cannot wrap into unintended
+coordinates. The 49-test `libwoven` suite, warning-denying
+library/kernel/workspace Clippy, formatting, and Stage 19.2 compositor visual
+acceptance passed on 1/2/4 CPUs. Hardware GPU acceleration remains a separate
+boundary.
+
 ## Graphics track - bounded transformed-rectangle corners (2026-10-19)
 
 Transformed rectangles now construct their far corners with checked

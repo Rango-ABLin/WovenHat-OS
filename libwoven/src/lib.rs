@@ -10104,8 +10104,12 @@ pub mod graphics {
         /// Center text using a bounded integer glyph scale.
         pub fn text_centered_scaled(&mut self, rect: Rect, text: &str, color: Color, scale: usize) {
             let metrics = Font::DEFAULT.measure_scaled(text, scale);
-            let x = rect.x + rect.width.saturating_sub(metrics.width) as i32 / 2;
-            let y = rect.y + rect.height.saturating_sub(metrics.height) as i32 / 2;
+            let x = rect.x.saturating_add(
+                i32::try_from(rect.width.saturating_sub(metrics.width) / 2).unwrap_or(i32::MAX),
+            );
+            let y = rect.y.saturating_add(
+                i32::try_from(rect.height.saturating_sub(metrics.height) / 2).unwrap_or(i32::MAX),
+            );
             self.text_scaled(x, y, text, color, scale);
         }
 
@@ -10119,7 +10123,8 @@ pub mod graphics {
             for character in text.chars() {
                 if character == '\n' {
                     cursor_x = x;
-                    cursor_y += crate::font::LINE_HEIGHT.saturating_mul(scale as i32);
+                    cursor_y = cursor_y
+                        .saturating_add(crate::font::LINE_HEIGHT.saturating_mul(scale as i32));
                     continue;
                 }
                 for (row, bits) in crate::font::glyph(character).iter().enumerate() {
@@ -10129,8 +10134,8 @@ pub mod graphics {
                         }
                         self.fill(
                             Rect::new(
-                                cursor_x + column as i32 * scale as i32,
-                                cursor_y + row as i32 * scale as i32,
+                                cursor_x.saturating_add(column as i32 * scale as i32),
+                                cursor_y.saturating_add(row as i32 * scale as i32),
                                 scale,
                                 scale,
                             ),
@@ -10138,7 +10143,8 @@ pub mod graphics {
                         );
                     }
                 }
-                cursor_x += crate::font::ADVANCE.saturating_mul(scale as i32);
+                cursor_x =
+                    cursor_x.saturating_add(crate::font::ADVANCE.saturating_mul(scale as i32));
             }
         }
 
@@ -10152,8 +10158,12 @@ pub mod graphics {
             let scale = scale.clamp(1, 16);
             let advance = crate::font::ADVANCE.saturating_mul(scale as i32);
             let line_height = crate::font::LINE_HEIGHT.saturating_mul(scale as i32);
-            let right = rect.x.saturating_add(rect.width.saturating_sub(1) as i32);
-            let bottom = rect.y.saturating_add(rect.height.saturating_sub(1) as i32);
+            let right = rect
+                .x
+                .saturating_add(i32::try_from(rect.width.saturating_sub(1)).unwrap_or(i32::MAX));
+            let bottom = rect
+                .y
+                .saturating_add(i32::try_from(rect.height.saturating_sub(1)).unwrap_or(i32::MAX));
             let mut cursor_x = rect.x;
             let mut cursor_y = rect.y;
             let mut lines: usize = 1;
@@ -15646,6 +15656,23 @@ mod tests {
             assert_eq!(lines, 3);
         }
         assert!(pixels.iter().any(|pixel| *pixel == Color::WHITE.packed()));
+    }
+
+    #[test]
+    fn wovengraphics_text_layout_bounds_extreme_rectangles() {
+        use crate::graphics::{Color, Rect, Renderer};
+
+        let mut pixels = [0u32; 64];
+        {
+            let mut canvas = Canvas::new(&mut pixels, 0, 0, 8, 8).unwrap();
+            let mut renderer = Renderer::new(&mut canvas);
+            assert_eq!(
+                renderer.text_box(Rect::new(0, 0, usize::MAX, 8), "A", Color::WHITE, 1),
+                1
+            );
+            renderer.text_centered(Rect::new(0, 0, usize::MAX, usize::MAX), "A", Color::TITLE);
+        }
+        assert!(pixels.iter().any(|pixel| *pixel != 0));
     }
 
     #[test]
