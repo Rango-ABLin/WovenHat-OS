@@ -1,5 +1,15 @@
 # WovenHat OS Architecture & Codebase Guide
 
+## Graphics WovenImages pointer control (2026-10-19)
+
+WovenImages renders a bounded `Refresh` button in its 360x220 surface at
+local x=250..329 and y=170..189. On a primary-button release in that
+rectangle, it re-reads the bounded `/mnt` image summary, increments a
+saturating refresh counter, and repaints. The desktop control remains
+read-only; image decoding and mutation are not enabled. QEMU visual
+acceptance passed on 1/2/4 CPUs; USB HID and hardware GPU qualification remain
+separate.
+
 ## Graphics WovenEditor pointer control (2026-10-19)
 
 WovenEditor renders a bounded `Refresh` button in its 360x220 surface at local
