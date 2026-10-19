@@ -35,6 +35,16 @@ catalog apps (woven-files, woven-settings, woven-monitor, woven-security,
 woven-editor, woven-images, woven-update, woven-store, woven-terminal) are
 still CLI-only and would need the same `share_with()`/`WOPN` treatment.
 
+## Graphics track - bounded affine transform arithmetic (2026-10-19)
+
+WovenGraphics fixed-point scale and translation constructors now saturate
+large inputs, and affine mapping uses `i128` intermediates before clamping to
+`i32`. Extreme transform inputs therefore cannot overflow before clipped
+triangle rasterization. The 53-test `libwoven` suite, warning-denying
+library/kernel/workspace Clippy, formatting, and Stage 19.2 compositor visual
+acceptance passed on 1/2/4 CPUs. Hardware GPU acceleration remains a separate
+boundary.
+
 ## Graphics track - widened path-fill intersections (2026-10-19)
 
 WovenGraphics ordinary, compound, and supersampled path containment now use

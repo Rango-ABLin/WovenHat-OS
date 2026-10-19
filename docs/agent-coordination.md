@@ -14,6 +14,13 @@ the kernel `hardware-demo` feature Clippy, and
 other nine Stage 19 catalog apps are still CLI-only and are open follow-up
 work, not started.
 
+**Codex graphics-track bounded affine transform arithmetic (2026-10-19):**
+fixed-point scale and translation constructors now saturate large inputs, and
+affine mapping uses `i128` intermediates before clamping to `i32`. The 53-test
+`libwoven` suite, warning-denying library/kernel/workspace Clippy, formatting,
+and Stage 19.2 compositor visual acceptance on 1/2/4 CPUs passed. Hardware
+GPU acceleration remains open.
+
 **Codex graphics-track widened path-fill intersections (2026-10-19):**
 ordinary, compound, and supersampled path containment now use `i128`
 edge-intersection arithmetic, preventing overflow for valid extreme `i32`

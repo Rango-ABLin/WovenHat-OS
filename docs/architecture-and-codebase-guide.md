@@ -1,5 +1,11 @@
 # WovenHat OS Architecture & Codebase Guide
 
+## Graphics affine transform update (2026-10-19)
+
+`Transform::scale` and `translate` saturate fixed-point construction, while
+`Transform::map` uses `i128` products and clamps mapped coordinates to `i32`.
+This keeps transform inputs safe before the bounded triangle path.
+
 ## Graphics path-fill arithmetic update (2026-10-19)
 
 Path scan conversion and supersampled compound containment use `i128`

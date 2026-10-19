@@ -434,25 +434,41 @@ pub mod graphics {
         }
 
         pub const fn scale(x: i32, y: i32) -> Self {
-            Self::new(x << 16, 0, 0, y << 16, 0, 0)
+            Self::new(
+                x.saturating_mul(1 << 16),
+                0,
+                0,
+                y.saturating_mul(1 << 16),
+                0,
+                0,
+            )
         }
 
         pub const fn translate(x: i32, y: i32) -> Self {
-            Self::new(1 << 16, 0, 0, 1 << 16, x << 16, y << 16)
+            Self::new(
+                1 << 16,
+                0,
+                0,
+                1 << 16,
+                x.saturating_mul(1 << 16),
+                y.saturating_mul(1 << 16),
+            )
         }
 
         fn map(self, x: i32, y: i32) -> (i32, i32) {
-            let mapped_x =
-                (i64::from(self.xx) * i64::from(x) + i64::from(self.xy) * i64::from(y) + (1 << 15))
-                    / (1 << 16)
-                    + i64::from(self.tx) / (1 << 16);
-            let mapped_y =
-                (i64::from(self.yx) * i64::from(x) + i64::from(self.yy) * i64::from(y) + (1 << 15))
-                    / (1 << 16)
-                    + i64::from(self.ty) / (1 << 16);
+            let mapped_x = (i128::from(self.xx) * i128::from(x)
+                + i128::from(self.xy) * i128::from(y)
+                + (1 << 15))
+                / (1 << 16)
+                + i128::from(self.tx) / (1 << 16);
+            let mapped_y = (i128::from(self.yx) * i128::from(x)
+                + i128::from(self.yy) * i128::from(y)
+                + (1 << 15))
+                / (1 << 16)
+                + i128::from(self.ty) / (1 << 16);
             (
-                mapped_x.clamp(i64::from(i32::MIN), i64::from(i32::MAX)) as i32,
-                mapped_y.clamp(i64::from(i32::MIN), i64::from(i32::MAX)) as i32,
+                mapped_x.clamp(i128::from(i32::MIN), i128::from(i32::MAX)) as i32,
+                mapped_y.clamp(i128::from(i32::MIN), i128::from(i32::MAX)) as i32,
             )
         }
     }
@@ -13111,6 +13127,22 @@ mod tests {
         }
         assert_eq!(pixels[0], Color::TITLE.packed());
         assert_eq!(pixels[15], Color::TITLE.packed());
+    }
+
+    #[test]
+    fn wovengraphics_transform_bounds_extreme_fixed_point_inputs() {
+        use crate::graphics::{Color, Rect, Renderer, Transform};
+
+        let scale = Transform::scale(i32::MAX, i32::MIN);
+        let translate = Transform::translate(i32::MAX, i32::MIN);
+        let mut pixels = [0u32; 16];
+        {
+            let mut canvas = Canvas::new(&mut pixels, 0, 0, 4, 4).unwrap();
+            let mut renderer = Renderer::new(&mut canvas);
+            renderer.transformed_rect(Rect::new(0, 0, 4, 4), scale, Color::TITLE);
+            renderer.transformed_rect(Rect::new(0, 0, 4, 4), translate, Color::WHITE);
+        }
+        assert_eq!(pixels.len(), 16);
     }
 
     #[test]
