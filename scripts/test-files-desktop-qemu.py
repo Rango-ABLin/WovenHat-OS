@@ -58,6 +58,7 @@ def main():
     parser.add_argument('--cpus', type=int, choices=(1, 2, 4), default=1)
     parser.add_argument('--app', choices=('calculator', 'files', 'settings', 'monitor', 'security', 'editor', 'images', 'update', 'store', 'terminal'), default='files')
     parser.add_argument('--exercise-resize', action='store_true', help='exercise the WovenShell WSIZ/WRSZ path (Calculator, Terminal, Settings, Monitor, Security, Editor, Images, Update, Store, or Files)')
+    parser.add_argument('--exercise-pointer', action='store_true', help='exercise the desktop PS/2 pointer cursor path with relative motion and a click')
     args = parser.parse_args()
     if args.exercise_resize and args.app not in ('calculator', 'terminal', 'settings', 'monitor', 'security', 'editor', 'images', 'update', 'store', 'files'):
         parser.error('--exercise-resize currently supports calculator, terminal, settings, monitor, security, editor, images, update, store, and files only')
@@ -216,6 +217,32 @@ def main():
             input_changed = sum(left != right for left, right in zip(input_pixels, pixels)) // 3
             if input_changed < 100:
                 raise RuntimeError(f'{app[1]} input did not change its presented surface: changed_pixels={input_changed}')
+        pointer_baseline = None
+        if args.exercise_pointer:
+            pointer_baseline = out / f'woven-{app[0]}-before-pointer.ppm'
+            command_qmp('screendump', {'filename': str(pointer_baseline)})
+            command_qmp('input-send-event', {'events': [
+                {'type': 'rel', 'data': {'axis': 'x', 'value': 40}},
+                {'type': 'rel', 'data': {'axis': 'y', 'value': 25}},
+            ]})
+            time.sleep(0.5)
+            command_qmp('input-send-event', {'events': [
+                {'type': 'btn', 'data': {'down': True, 'button': 'left'}},
+            ]})
+            time.sleep(0.2)
+            command_qmp('input-send-event', {'events': [
+                {'type': 'btn', 'data': {'down': False, 'button': 'left'}},
+            ]})
+            time.sleep(1)
+            pointer_capture = out / f'woven-{app[0]}-after-pointer.ppm'
+            command_qmp('screendump', {'filename': str(pointer_capture)})
+            pointer_width, pointer_height, pointer_pixels = ppm_pixels(pointer_capture)
+            before_pointer_width, before_pointer_height, before_pointer = ppm_pixels(pointer_baseline)
+            if (pointer_width, pointer_height) != (before_pointer_width, before_pointer_height):
+                raise RuntimeError('pointer capture dimensions changed')
+            pointer_changed = sum(left != right for left, right in zip(before_pointer, pointer_pixels)) // 3
+            if pointer_changed < 100:
+                raise RuntimeError(f'{app[1]} pointer motion did not change its presented cursor/frame: changed_pixels={pointer_changed}')
         resize_baseline = None
         if args.exercise_resize:
             resize_baseline = out / f'woven-{app[0]}-before-resize.ppm'

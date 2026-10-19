@@ -1,5 +1,14 @@
 # WovenHat OS Architecture & Codebase Guide
 
+## Graphics desktop pointer visual acceptance (2026-10-19)
+
+The production desktop QEMU harness now has `--exercise-pointer`. It injects
+bounded relative motion and a left click through QEMU's input path, then
+requires a stable before/after screendump with a material cursor/frame delta.
+The gate passed on 1/2/4 CPUs. This qualifies the PS/2-backed software cursor
+overlay and existing shell hit-testing; USB HID pointer qualification and
+hardware GPU presentation remain separate boundaries.
+
 ## Graphics WovenFiles bounded resize (2026-10-19)
 
 `apps/woven-files/src/main.rs` now handles `WSIZ` by creating and sharing a
@@ -177,7 +186,8 @@ before and after WovenFiles opens. It requires stable capture geometry and a
 substantial pixel delta in addition to the WOPN/window-open serial markers.
 The gate passed on 1/2/4 CPUs. This proves software/2D desktop presentation,
 not hardware GPU acceleration; Files still has no file-operation UI, and its
-bounded WSIZ/WRSZ path is covered by the newer Files resize section.
+bounded WSIZ/WRSZ path is covered by the newer Files resize section. Pointer
+visual acceptance is covered by the newer desktop pointer section.
 
 ## Graphics WovenFiles client update (2026-10-19)
 

@@ -1,5 +1,16 @@
 # Stage status
 
+## Graphics track - desktop pointer visual acceptance (2026-10-19)
+
+The production desktop QEMU harness now supports `--exercise-pointer`. It
+injects bounded relative motion and a left click, captures before/after frames,
+and requires a material presented cursor/frame delta. The gate passed on 1/2/4
+CPUs with evidence under `audit-artifacts/files-desktop-{1,2,4}cpu-*`.
+
+This accepts the PS/2-backed software cursor overlay and existing shell
+hit-testing. USB HID pointer qualification and hardware GPU presentation
+remain explicitly unclaimed.
+
 ## Graphics track - WovenFiles bounded resize (2026-10-19)
 
 WovenFiles now handles `WSIZ` by creating and sharing a replacement Canvas
@@ -3746,9 +3757,8 @@ Open:
   devices, and virtio-input remain open.
 - The PS/2 boot-mouse path has no IntelliMouse wheel or acceleration; report
   protocol wheel events are supported by the HID decoder.
-- The pointer position lives in the window manager. There is no cursor
-  image: drawing one is the window manager's job, and there is no hardware
-  cursor.
+- The pointer position lives in the window manager. WovenShell draws a bounded
+  software cursor overlay; there is no hardware cursor.
 
 ## Stage 19.11 — userspace window manager: stacking, raise, focus, input routing (2026-10-14)
 
