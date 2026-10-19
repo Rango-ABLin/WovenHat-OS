@@ -1,5 +1,11 @@
 # WovenHat OS Architecture & Codebase Guide
 
+## Graphics contextual GPOS format-1 target update (2026-10-19)
+
+The bounded chaining format-1 path keeps first-input coverage matching separate
+from nested target coverage, so records targeting sequence indices 0 through 4
+apply their single-positioning value to the selected glyph.
+
 ## Graphics contextual GPOS class-matrix extension update (2026-10-19)
 
 Nested lookup-2 format-2 class-matrix pair positioning is regression-tested

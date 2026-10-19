@@ -8056,6 +8056,14 @@ pub mod graphics {
         let table_end = table_bounds.table_end;
         let lookup_base = lookup_bounds.lookup_base;
         let lookup_count = lookup_bounds.lookup_count;
+        let target_glyph = match options.target_sequence_index {
+            0 => left,
+            1 => right,
+            2 => options.third.ok_or(TrueTypeError::BadTableDirectory)?,
+            3 => options.fourth.ok_or(TrueTypeError::BadTableDirectory)?,
+            4 => options.fifth.ok_or(TrueTypeError::BadTableDirectory)?,
+            _ => return Ok(None),
+        };
         if subtable.checked_add(6).is_none_or(|end| end > table_end)
             || read_u16(bytes, subtable) != Some(1)
         {
@@ -8290,7 +8298,7 @@ pub mod graphics {
                         ))
                         .ok_or(TrueTypeError::BadTableDirectory)?;
                     let Some(coverage_index) =
-                        gsub_coverage_index(bytes, coverage, table_end, left)?
+                        gsub_coverage_index(bytes, coverage, table_end, target_glyph)?
                     else {
                         continue;
                     };
@@ -14276,6 +14284,7 @@ mod tests {
         assert_eq!(shaped[0].advance, 525);
         assert_eq!(shaped[1].origin, Point::new(527, 15));
         let mut contextual_glyph_bytes = contextual_gpos_bytes;
+        put16(&mut contextual_glyph_bytes, 296, 8);
         put16(&mut contextual_glyph_bytes, 304, 1);
         put16(&mut contextual_glyph_bytes, 306, 26);
         put16(&mut contextual_glyph_bytes, 308, 1);
@@ -14301,6 +14310,19 @@ mod tests {
         );
         assert_eq!(shaped[0].advance, 525);
         assert_eq!(shaped[1].origin, Point::new(527, 15));
+        let mut contextual_glyph_target_bytes = contextual_glyph_bytes;
+        put16(&mut contextual_glyph_target_bytes, 326, 1);
+        put16(&mut contextual_glyph_target_bytes, 358, 2);
+        let contextual_glyph_target_face =
+            TrueTypeFace::from_bytes(&contextual_glyph_target_bytes).unwrap();
+        assert_eq!(
+            contextual_glyph_target_face
+                .shape_text_ligatures("AB", Point::new(2, 15), 1000, &mut shaped)
+                .unwrap(),
+            2
+        );
+        assert_eq!(shaped[0].advance, 500);
+        assert_eq!(shaped[1].advance, 525);
         let mut contextual_extension_bytes = [0u8; 512];
         contextual_extension_bytes[..contextual_gpos_bytes.len()]
             .copy_from_slice(&contextual_gpos_bytes);
