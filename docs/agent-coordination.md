@@ -1,5 +1,12 @@
 # Agent coordination (Claude Code and Codex)
 
+**Codex graphics-track bounded image blits (2026-10-19):** opaque and
+blended WovenGraphics image paths now iterate only over the Canvas overlap and
+map clipped coordinates back to source rows and columns. The 47-test
+`libwoven` suite, warning-denying library/kernel/workspace Clippy, formatting,
+and Stage 19.2 compositor visual acceptance on 1/2/4 CPUs passed. Hardware
+GPU acceleration remains open.
+
 **Codex graphics-track bounded stroke geometry (2026-10-19):** rectangle
 outlines now convert far-edge dimensions with checked `usize`-to-`i32`
 conversion and saturation before clipped fills, preventing extreme geometry

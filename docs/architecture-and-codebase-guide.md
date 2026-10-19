@@ -1,5 +1,11 @@
 # WovenHat OS Architecture & Codebase Guide
 
+## Graphics image blit update (2026-10-19)
+
+`Renderer::image` and `image_blended` clip their iteration to the Canvas and
+derive source offsets from the clipped origin. Valid source buffers retain
+their existing success semantics while off-screen image area is not rasterized.
+
 ## Graphics stroke geometry update (2026-10-19)
 
 `Renderer::stroke` computes far edges with checked conversion and saturation,

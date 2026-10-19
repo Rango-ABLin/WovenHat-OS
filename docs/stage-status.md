@@ -1,5 +1,15 @@
 # Stage status
 
+## Graphics track - bounded image blits (2026-10-19)
+
+WovenGraphics opaque and blended image blits now iterate only over the Canvas
+overlap and map clipped rows and columns back to the source image. Large
+off-screen images therefore cannot create software work proportional to their
+unseen area. The 47-test `libwoven` suite, warning-denying
+library/kernel/workspace Clippy, formatting, and Stage 19.2 compositor visual
+acceptance passed on 1/2/4 CPUs. Hardware GPU acceleration remains a separate
+boundary.
+
 ## Graphics track - bounded stroke geometry (2026-10-19)
 
 WovenGraphics rectangle outlines now derive their far edges with checked

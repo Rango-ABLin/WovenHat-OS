@@ -9834,12 +9834,37 @@ pub mod graphics {
             let Some(source) = pixels.get(..length) else {
                 return false;
             };
-            for row in 0..height {
-                for column in 0..width {
+            let Some((canvas_column, canvas_row, columns, rows)) =
+                self.canvas.clip(x, y, width, height)
+            else {
+                return true;
+            };
+            let source_column = usize::try_from(
+                i128::from(self.canvas.x) + i128::try_from(canvas_column).unwrap_or(i128::MAX)
+                    - i128::from(x),
+            )
+            .unwrap_or(0);
+            let source_row = usize::try_from(
+                i128::from(self.canvas.y) + i128::try_from(canvas_row).unwrap_or(i128::MAX)
+                    - i128::from(y),
+            )
+            .unwrap_or(0);
+            for row in 0..rows {
+                let source_start = source_row
+                    .checked_add(row)
+                    .and_then(|row| row.checked_mul(width))
+                    .and_then(|row| row.checked_add(source_column));
+                let Some(source_start) = source_start else {
+                    return false;
+                };
+                for column in 0..columns {
+                    let Some(pixel) = source.get(source_start + column).copied() else {
+                        return false;
+                    };
                     self.canvas.set(
-                        x + column as i32,
-                        y + row as i32,
-                        source[row * width + column],
+                        self.canvas.x + canvas_column as i32 + column as i32,
+                        self.canvas.y + canvas_row as i32 + row as i32,
+                        pixel,
                     );
                 }
             }
@@ -9863,12 +9888,37 @@ pub mod graphics {
             let Some(source) = pixels.get(..length) else {
                 return false;
             };
-            for row in 0..height {
-                for column in 0..width {
+            let Some((canvas_column, canvas_row, columns, rows)) =
+                self.canvas.clip(x, y, width, height)
+            else {
+                return true;
+            };
+            let source_column = usize::try_from(
+                i128::from(self.canvas.x) + i128::try_from(canvas_column).unwrap_or(i128::MAX)
+                    - i128::from(x),
+            )
+            .unwrap_or(0);
+            let source_row = usize::try_from(
+                i128::from(self.canvas.y) + i128::try_from(canvas_row).unwrap_or(i128::MAX)
+                    - i128::from(y),
+            )
+            .unwrap_or(0);
+            for row in 0..rows {
+                let source_start = source_row
+                    .checked_add(row)
+                    .and_then(|row| row.checked_mul(width))
+                    .and_then(|row| row.checked_add(source_column));
+                let Some(source_start) = source_start else {
+                    return false;
+                };
+                for column in 0..columns {
+                    let Some(pixel) = source.get(source_start + column).copied() else {
+                        return false;
+                    };
                     self.canvas.blend_pixel(
-                        x + column as i32,
-                        y + row as i32,
-                        source[row * width + column],
+                        self.canvas.x + canvas_column as i32 + column as i32,
+                        self.canvas.y + canvas_row as i32 + row as i32,
+                        pixel,
                         opacity,
                     );
                 }
@@ -12775,6 +12825,20 @@ mod tests {
             assert_eq!(pixels[row * 4], Color::TITLE.packed());
             assert_eq!(pixels[row * 4 + 1], 0);
         }
+    }
+
+    #[test]
+    fn wovengraphics_image_clips_source_rows_and_columns() {
+        use crate::graphics::Renderer;
+
+        let source: Vec<u32> = (1..=12).collect();
+        let mut pixels = [0u32; 8];
+        {
+            let mut canvas = Canvas::new(&mut pixels, 0, 0, 4, 2).unwrap();
+            let mut renderer = Renderer::new(&mut canvas);
+            assert!(renderer.image(-2, 0, 6, 2, &source));
+        }
+        assert_eq!(pixels, [3, 4, 5, 6, 9, 10, 11, 12]);
     }
 
     #[test]
