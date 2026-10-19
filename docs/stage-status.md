@@ -1,5 +1,16 @@
 # Stage status
 
+## Graphics track - bounded contextual GPOS class-pair positioning (2026-10-19)
+
+Nested contextual GPOS type-2 format-2 pair positioning now supports checked
+class definitions and bounded class matrices, reusing the direct class-pair
+value-record semantics for the selected contextual target and pair partner.
+Class counts, matrix extents, coverage and table bounds remain validated;
+broader nested lookup semantics remain a separate boundary. The 42-test
+`libwoven` suite, warning-denying library/kernel/workspace Clippy, formatting,
+and Stage 19.2 compositor visual acceptance passed on 1/2/4 CPUs. Hardware GPU
+acceleration remains a separate boundary.
+
 ## Graphics track - bounded contextual GPOS extension wrappers (2026-10-19)
 
 Contextual GPOS lookup dispatch now unwraps checked type-9 extension records

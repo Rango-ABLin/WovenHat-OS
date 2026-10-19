@@ -1,5 +1,12 @@
 # WovenHat OS Architecture & Codebase Guide
 
+## Graphics contextual GPOS class-pair update (2026-10-19)
+
+Nested contextual type-2 pair positioning supports format-2 class definitions
+and class-matrix value records with checked coverage, class and table bounds.
+The bounded target/partner selection is shared with the contextual input
+sequence path; broader nested lookup application remains outside this slice.
+
 ## Graphics contextual GPOS extension update (2026-10-19)
 
 Contextual GPOS dispatch accepts a checked type-9 extension wrapper around a

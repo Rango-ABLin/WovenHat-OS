@@ -8095,6 +8095,115 @@ pub mod graphics {
                                 let Some(pair_right) = pair_right else {
                                     continue;
                                 };
+                                if read_u16(bytes, nested_subtable) == Some(2) {
+                                    if nested_subtable
+                                        .checked_add(16)
+                                        .is_none_or(|end| end > table_end)
+                                    {
+                                        continue;
+                                    }
+                                    let coverage = nested_subtable
+                                        .checked_add(usize::from(
+                                            read_u16(bytes, nested_subtable + 2)
+                                                .ok_or(TrueTypeError::BadTableDirectory)?,
+                                        ))
+                                        .ok_or(TrueTypeError::BadTableDirectory)?;
+                                    if gsub_coverage_index(
+                                        bytes,
+                                        coverage,
+                                        table_end,
+                                        target_glyph,
+                                    )?
+                                    .is_none()
+                                    {
+                                        continue;
+                                    }
+                                    let value_format1 = read_u16(bytes, nested_subtable + 4)
+                                        .ok_or(TrueTypeError::BadTableDirectory)?;
+                                    let value_format2 = read_u16(bytes, nested_subtable + 6)
+                                        .ok_or(TrueTypeError::BadTableDirectory)?;
+                                    let class_def1 = nested_subtable
+                                        .checked_add(usize::from(
+                                            read_u16(bytes, nested_subtable + 8)
+                                                .ok_or(TrueTypeError::BadTableDirectory)?,
+                                        ))
+                                        .ok_or(TrueTypeError::BadTableDirectory)?;
+                                    let class_def2 = nested_subtable
+                                        .checked_add(usize::from(
+                                            read_u16(bytes, nested_subtable + 10)
+                                                .ok_or(TrueTypeError::BadTableDirectory)?,
+                                        ))
+                                        .ok_or(TrueTypeError::BadTableDirectory)?;
+                                    let class1_count = usize::from(
+                                        read_u16(bytes, nested_subtable + 12)
+                                            .ok_or(TrueTypeError::BadTableDirectory)?,
+                                    );
+                                    let class2_count = usize::from(
+                                        read_u16(bytes, nested_subtable + 14)
+                                            .ok_or(TrueTypeError::BadTableDirectory)?,
+                                    );
+                                    if class1_count == 0
+                                        || class2_count == 0
+                                        || class1_count > 128
+                                        || class2_count > 128
+                                    {
+                                        return Err(TrueTypeError::TooLarge);
+                                    }
+                                    let class1 = usize::from(gpos_class_index(
+                                        bytes,
+                                        class_def1,
+                                        target_glyph,
+                                        table_end,
+                                    )?);
+                                    let class2 = usize::from(gpos_class_index(
+                                        bytes, class_def2, pair_right, table_end,
+                                    )?);
+                                    if class1 >= class1_count || class2 >= class2_count {
+                                        continue;
+                                    }
+                                    let first_size = gpos_value_record_size(value_format1)?;
+                                    let second_size = gpos_value_record_size(value_format2)?;
+                                    let record_size = first_size
+                                        .checked_add(second_size)
+                                        .ok_or(TrueTypeError::TooLarge)?;
+                                    let records_start = nested_subtable
+                                        .checked_add(16)
+                                        .ok_or(TrueTypeError::TooLarge)?;
+                                    let record = records_start
+                                        .checked_add(
+                                            class1
+                                                .checked_mul(class2_count)
+                                                .and_then(|value| value.checked_add(class2))
+                                                .and_then(|value| value.checked_mul(record_size))
+                                                .ok_or(TrueTypeError::TooLarge)?,
+                                        )
+                                        .ok_or(TrueTypeError::TooLarge)?;
+                                    let records_end = records_start
+                                        .checked_add(
+                                            class1_count
+                                                .checked_mul(class2_count)
+                                                .and_then(|value| value.checked_mul(record_size))
+                                                .ok_or(TrueTypeError::TooLarge)?,
+                                        )
+                                        .ok_or(TrueTypeError::TooLarge)?;
+                                    if records_end > table_end {
+                                        return Err(TrueTypeError::BadTableDirectory);
+                                    }
+                                    let adjustment = gpos_value_adjustment(
+                                        bytes,
+                                        record,
+                                        value_format1,
+                                        table_end,
+                                        table,
+                                        options.ppem,
+                                    )?;
+                                    accumulated.0 = accumulated.0.saturating_add(adjustment.0);
+                                    accumulated.1 = accumulated.1.saturating_add(adjustment.1);
+                                    accumulated.2 = accumulated.2.saturating_add(adjustment.2);
+                                    accumulated.3 = accumulated.3.saturating_add(adjustment.3);
+                                    found = true;
+                                    continue;
+                                }
                                 if nested_subtable
                                     .checked_add(10)
                                     .is_none_or(|end| end > table_end)
@@ -13136,6 +13245,36 @@ mod tests {
         let contextual_pair_face = TrueTypeFace::from_bytes(&contextual_pair_bytes).unwrap();
         assert_eq!(
             contextual_pair_face
+                .shape_text_ligatures("AB", Point::new(2, 15), 1000, &mut shaped)
+                .unwrap(),
+            2
+        );
+        assert_eq!(shaped[0].advance, 525);
+        assert_eq!(shaped[1].origin, Point::new(527, 15));
+        let mut contextual_class_pair_bytes = contextual_pair_bytes;
+        put32(&mut contextual_class_pair_bytes, 104, 156);
+        put16(&mut contextual_class_pair_bytes, 344, 2);
+        put16(&mut contextual_class_pair_bytes, 346, 26);
+        put16(&mut contextual_class_pair_bytes, 348, 4);
+        put16(&mut contextual_class_pair_bytes, 350, 0);
+        put16(&mut contextual_class_pair_bytes, 352, 40);
+        put16(&mut contextual_class_pair_bytes, 354, 48);
+        put16(&mut contextual_class_pair_bytes, 356, 1);
+        put16(&mut contextual_class_pair_bytes, 358, 1);
+        put_i16(&mut contextual_class_pair_bytes, 360, 25);
+        put16(&mut contextual_class_pair_bytes, 370, 1);
+        put16(&mut contextual_class_pair_bytes, 372, 1);
+        put16(&mut contextual_class_pair_bytes, 374, 1);
+        for (offset, glyph) in [(384, 1), (392, 2)] {
+            put16(&mut contextual_class_pair_bytes, offset, 1);
+            put16(&mut contextual_class_pair_bytes, offset + 2, glyph);
+            put16(&mut contextual_class_pair_bytes, offset + 4, 1);
+            put16(&mut contextual_class_pair_bytes, offset + 6, 0);
+        }
+        let contextual_class_pair_face =
+            TrueTypeFace::from_bytes(&contextual_class_pair_bytes).unwrap();
+        assert_eq!(
+            contextual_class_pair_face
                 .shape_text_ligatures("AB", Point::new(2, 15), 1000, &mut shaped)
                 .unwrap(),
             2

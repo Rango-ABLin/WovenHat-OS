@@ -1,5 +1,13 @@
 # Agent coordination (Claude Code and Codex)
 
+**Codex graphics-track bounded contextual GPOS class-pair positioning (2026-10-19):**
+nested type-2 format-2 pair positioning now supports checked class definitions
+and bounded class matrices for contextual targets and partners. Class counts,
+matrix extents and table bounds remain validated. The 42-test `libwoven` suite,
+warning-denying library/kernel/workspace Clippy, formatting, and Stage 19.2
+compositor visual acceptance on 1/2/4 CPUs passed. Hardware GPU acceleration
+remains open.
+
 **Codex graphics-track bounded contextual GPOS extension wrappers (2026-10-19):**
 contextual dispatch now unwraps checked type-9 extension records containing
 nested type-7 subtables, preserving the bounded input, context and nested
