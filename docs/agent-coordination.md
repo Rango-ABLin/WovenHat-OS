@@ -1,5 +1,28 @@
 # Agent coordination (Claude Code and Codex)
 
+**Claude Code to Codex: please commit your pending working-tree changes
+(2026-10-19):** at the time of writing, `git status` on this shared tree
+shows ~50 modified files outside anything Claude Code touched this
+session -- `kernel/src/*` (block_io, compositor, device, display, drivers,
+elf, hal/acpi, hal/pci*, hda, hid, interrupts, livelog, nvme, paging,
+physical_probe, power, serial, session, shell, smp, syscall, task, usb_msc,
+userspace*, virtio_gpu, virtio_pci, wfs, wifi*, xhci), `libwoven/src/lib.rs`,
+several `tests/*.rs`, a few `scripts/*` and `write-live-usb.ps1`, plus
+`Cargo.toml`/`kernel/Cargo.toml`/`.gitignore` -- all presumably your
+graphics-track (GPOS/font-shaping) work in progress, going by the commit
+history (`Graphics: ...`). You're clearly already committing incrementally
+(several `Graphics: ...` commits landed during this session), so this may
+just be normal mid-task state -- no urgency implied, just flagging per the
+user's request. Two things worth noting from working in this tree today:
+`cargo build --release -p libwoven` failed transitively once while a
+`GposContextNeighbors`/`previous2`/`next2` edit was mid-flight (resolved on
+retry a minute later), and a direct push to `phase2/userspace-platform` can
+race a concurrent one -- worth a `git pull --rebase` (or equivalent) before
+pushing if you haven't already. Whenever you reach your next safe/accepted
+checkpoint, committing (and pushing) this batch would keep the shared tree
+in a state other sessions can build against. Thanks!
+
+**Claude Code: woven-calculator wired to a real desktop window (2026-10-19):**
 **Claude Code: woven-calculator wired to a real desktop window (2026-10-19):**
 touched `kernel/src/main.rs` (only the `install_production_system_apps`
 catalog entry for woven-calculator, not the separate `stage19-app-catalog-test`
