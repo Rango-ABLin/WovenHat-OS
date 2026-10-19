@@ -26,6 +26,9 @@
 //!   open a window showing a surface the sender shared with the shell.
 //! - `TRAY`, token (u64): show a 16×16 surface in the system tray.
 //! - `NOTE`, text: show a notification toast for four seconds.
+//! - `WPMV`, x (u16), y (u16): report a pointer move in client coordinates.
+//! - `WPBT`, button (u8), pressed (u8), x (u16), y (u16): report a bounded
+//!   client button edge in client coordinates.
 //!
 //! A surface is accepted only if the sender owns it: the token names its
 //! owner, and the kernel enforces that name on every operation. A window or
@@ -876,6 +879,8 @@ struct Desktop {
     pointer_visible: bool,
     /// The window being dragged, and where in it the pointer took hold.
     drag: Option<(usize, i32, i32)>,
+    /// The client receiving the current primary-button click sequence.
+    pointer_capture: Option<usize>,
     /// Whether windows are tiled.
     tiled: bool,
     apps: [Option<App>; MAX_APPS],
@@ -923,6 +928,7 @@ impl Desktop {
         pointer: (0, 0),
         pointer_visible: false,
         drag: None,
+        pointer_capture: None,
         tiled: false,
         apps: [None; MAX_APPS],
         app_count: 0,
@@ -1975,9 +1981,15 @@ impl Desktop {
                 );
                 self.pointer_visible = true;
                 let moved = self.drag_to_pointer();
+                if self.drag.is_none() {
+                    self.forward_pointer_move();
+                }
                 before.union(self.cursor_area()).union(moved)
             }
             InputEvent::PointerButton { button: 0, pressed: false } => {
+                if let Some(slot) = self.pointer_capture.take() {
+                    self.forward_pointer_button(slot, false);
+                }
                 // Dropped on the left or right edge: snap to that half.
                 let Some((slot, _, _)) = self.drag.take() else { return empty };
                 let (x, _) = self.pointer;
@@ -2077,6 +2089,9 @@ impl Desktop {
                 }
                 if window.title_area().contains(x, y) {
                     self.drag = Some((slot, x - window.x, y - window.y));
+                } else if window.body().contains(x, y) {
+                    self.pointer_capture = Some(slot);
+                    self.forward_pointer_button(slot, true);
                 }
                 self.focus(slot)
             }
@@ -2105,6 +2120,41 @@ impl Desktop {
             }
             _ => empty,
         }
+    }
+
+    /// Forward a pointer move to the topmost client under the pointer. Shell
+    /// chrome, title bars and window drags remain shell-owned.
+    fn forward_pointer_move(&self) {
+        let (x, y) = self.pointer;
+        let Some(slot) = self.stack[..self.stacked].iter().rev().copied().find(|&slot| {
+            self.windows[slot].is_some_and(|window| window.body().contains(x, y))
+        }) else {
+            return;
+        };
+        let Some(window) = self.windows[slot] else { return };
+        let local_x = (x - window.x).clamp(0, window.width.saturating_sub(1)) as u16;
+        let local_y = (y - window.y).clamp(0, window.height.saturating_sub(1)) as u16;
+        let mut message = [0u8; 8];
+        message[..4].copy_from_slice(b"WPMV");
+        message[4..6].copy_from_slice(&local_x.to_le_bytes());
+        message[6..8].copy_from_slice(&local_y.to_le_bytes());
+        let _ = libwoven::message_send(window.owner, &message);
+    }
+
+    /// Forward a bounded primary-button edge to a client that owns the
+    /// pointer capture. Coordinates are clamped to the shared surface.
+    fn forward_pointer_button(&self, slot: usize, pressed: bool) {
+        let (x, y) = self.pointer;
+        let Some(window) = self.windows[slot] else { return };
+        let local_x = (x - window.x).clamp(0, window.width.saturating_sub(1)) as u16;
+        let local_y = (y - window.y).clamp(0, window.height.saturating_sub(1)) as u16;
+        let mut message = [0u8; 10];
+        message[..4].copy_from_slice(b"WPBT");
+        message[4] = 0;
+        message[5] = u8::from(pressed);
+        message[6..8].copy_from_slice(&local_x.to_le_bytes());
+        message[8..10].copy_from_slice(&local_y.to_le_bytes());
+        let _ = libwoven::message_send(window.owner, &message);
     }
 
     /// Move the dragged window under the pointer, keeping its frame on screen

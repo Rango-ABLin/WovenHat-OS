@@ -1,5 +1,15 @@
 # Agent coordination (Claude Code and Codex)
 
+**Codex graphics-track client pointer forwarding (2026-10-19):**
+WovenShell now forwards bounded client-local `WPMV` motion and `WPBT` primary
+button edges after its own chrome/title-bar hit testing. WovenCalculator draws
+a visible pointer marker and reports delivery. The production QEMU gate passed
+on 1/2/4 CPUs with `scripts/test-files-desktop-qemu.py --app calculator
+--exercise-client-pointer`; evidence is under
+`audit-artifacts/calculator-desktop-{1,2,4}cpu-*`. This accepts the PS/2 to
+shell to Calculator path only; other clients, USB HID, and hardware GPU
+presentation remain separate boundaries.
+
 **Codex graphics-track Stage 20.4 window interaction acceptance (2026-10-19):**
 The existing Stage 20.4 QEMU gate passed on 1/2/4 CPUs. It drives real i8042
 input through WovenShell: a title-bar drag moves Alpha and repaints both the

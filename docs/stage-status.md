@@ -1,5 +1,22 @@
 # Stage status
 
+## Graphics track - client pointer forwarding (2026-10-19)
+
+WovenShell now forwards bounded client-local pointer events after handling its
+own desktop chrome. `WPMV` carries a clamped `u16` x/y motion position and
+`WPBT` carries the primary button edge plus clamped client-local coordinates;
+title-bar drags remain shell-owned. WovenCalculator consumes the messages and
+draws a visible pointer marker.
+
+The production QEMU gate
+`scripts/test-files-desktop-qemu.py --app calculator --exercise-client-pointer`
+passed on 1/2/4 CPUs. It verifies the serial delivery marker and a presented
+Calculator surface delta. Evidence is under
+`audit-artifacts/calculator-desktop-{1,2,4}cpu-*`.
+
+Only the PS/2-to-WovenShell-to-Calculator path is accepted here. Other client
+controls, USB HID qualification, and hardware GPU presentation remain open.
+
 ## Graphics track - Stage 20.4 window interaction acceptance (2026-10-19)
 
 The existing Stage 20.4 QEMU gate passed on 1/2/4 CPUs. Using real i8042

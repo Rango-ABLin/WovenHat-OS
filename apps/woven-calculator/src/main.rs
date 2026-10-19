@@ -77,7 +77,14 @@ fn run_console(expression: &[u8], result: i64) -> ! {
     libwoven::exit(0)
 }
 
-fn draw_gui(canvas: &mut Canvas<'_>, expression: &[u8], result: Option<i64>, active: bool) {
+fn draw_gui(
+    canvas: &mut Canvas<'_>,
+    expression: &[u8],
+    result: Option<i64>,
+    active: bool,
+    pointer: Option<(u16, u16)>,
+    pressed: bool,
+) {
     canvas.fill_rect(0, 0, canvas.width(), canvas.height(), BACKGROUND);
     canvas.fill_rect(PANEL_X, PANEL_Y, PANEL_WIDTH, PANEL_HEIGHT, PANEL);
     stroke_rect(canvas, PANEL_X, PANEL_Y, PANEL_WIDTH, PANEL_HEIGHT, ACCENT);
@@ -96,6 +103,10 @@ fn draw_gui(canvas: &mut Canvas<'_>, expression: &[u8], result: Option<i64>, act
         canvas.draw_text(PANEL_X - 2, PANEL_Y + 80, "Enter to evaluate", ACCENT);
     }
     canvas.draw_text(PANEL_X - 2, PANEL_Y + 104, "ASCII input; Enter evaluates", TEXT);
+    if let Some((x, y)) = pointer {
+        let color = if pressed { TEXT } else { ACCENT };
+        canvas.fill_rect(i32::from(x).saturating_sub(1), i32::from(y).saturating_sub(1), 3, 3, color);
+    }
 }
 
 fn render(
@@ -103,6 +114,8 @@ fn render(
     expression: &[u8],
     result: Option<i64>,
     active: bool,
+    pointer: Option<(u16, u16)>,
+    pressed: bool,
 ) -> bool {
     let pixels = unsafe { &mut *CANVAS_PIXELS.0.get() };
     let Some(mut canvas) = Canvas::new(
@@ -114,7 +127,7 @@ fn render(
     ) else {
         return false;
     };
-    draw_gui(&mut canvas, expression, result, active);
+    draw_gui(&mut canvas, expression, result, active, pointer, pressed);
     window.write_canvas(&canvas).is_ok()
 }
 
@@ -142,7 +155,7 @@ fn run_gui(shell: Option<&[u8]>) -> ! {
         Err(_) => fail(3),
     };
     let expression = [0u8; MAX_INPUT];
-    if !render(&window, &expression, None, false) {
+    if !render(&window, &expression, None, false, None, false) {
         fail(5);
     }
 
@@ -167,6 +180,8 @@ fn run_gui(shell: Option<&[u8]>) -> ! {
     let mut expression = [0u8; MAX_INPUT];
     let mut length = 0usize;
     let mut result = None;
+    let mut pointer = None;
+    let mut pointer_pressed = false;
     let mut active: bool;
     loop {
         match libwoven::wait_any(libwoven::wait::MESSAGE, None) {
@@ -190,7 +205,7 @@ fn run_gui(shell: Option<&[u8]>) -> ! {
                     // expensive pixel upload, so the shell's bounded resize
                     // grace window cannot expire while copying the canvas.
                     if resized.share_with(shell).is_ok() && send_resize(&resized, shell) {
-                        if render(&resized, &expression[..length], result, true) {
+                        if render(&resized, &expression[..length], result, true, pointer, pointer_pressed) {
                             let previous = core::mem::replace(&mut window, resized);
                             drop(previous);
                             let _ = libwoven::print("WovenCalculator: window resized\n");
@@ -201,6 +216,29 @@ fn run_gui(shell: Option<&[u8]>) -> ! {
                         drop(resized);
                     }
                 }
+                continue;
+            }
+            if message.get(..4) == Some(&b"WPMV"[..]) && message_length == 8 {
+                pointer = Some((
+                    u16::from_le_bytes([message[4], message[5]]),
+                    u16::from_le_bytes([message[6], message[7]]),
+                ));
+                if !render(&window, &expression[..length], result, true, pointer, pointer_pressed) {
+                    fail(10)
+                }
+                let _ = libwoven::print("WovenCalculator: pointer updated\n");
+                continue;
+            }
+            if message.get(..4) == Some(&b"WPBT"[..]) && message_length == 10 && message[4] == 0 {
+                pointer_pressed = message[5] != 0;
+                pointer = Some((
+                    u16::from_le_bytes([message[6], message[7]]),
+                    u16::from_le_bytes([message[8], message[9]]),
+                ));
+                if !render(&window, &expression[..length], result, true, pointer, pointer_pressed) {
+                    fail(10)
+                }
+                let _ = libwoven::print("WovenCalculator: pointer updated\n");
                 continue;
             }
             if message.get(..4) == Some(&b"WKEY"[..]) && message_length >= 5 {
@@ -221,7 +259,7 @@ fn run_gui(shell: Option<&[u8]>) -> ! {
             } else {
                 continue;
             }
-            if !render(&window, &expression[..length], result, active) {
+            if !render(&window, &expression[..length], result, active, pointer, pointer_pressed) {
                 fail(10)
             }
             let _ = libwoven::print("WovenCalculator: input updated\n");

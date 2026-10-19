@@ -59,6 +59,7 @@ def main():
     parser.add_argument('--app', choices=('calculator', 'files', 'settings', 'monitor', 'security', 'editor', 'images', 'update', 'store', 'terminal'), default='files')
     parser.add_argument('--exercise-resize', action='store_true', help='exercise the WovenShell WSIZ/WRSZ path (Calculator, Terminal, Settings, Monitor, Security, Editor, Images, Update, Store, or Files)')
     parser.add_argument('--exercise-pointer', action='store_true', help='exercise the desktop PS/2 pointer cursor path with relative motion and a click')
+    parser.add_argument('--exercise-client-pointer', action='store_true', help='exercise Calculator client pointer forwarding through the desktop PS/2 path')
     args = parser.parse_args()
     if args.exercise_resize and args.app not in ('calculator', 'terminal', 'settings', 'monitor', 'security', 'editor', 'images', 'update', 'store', 'files'):
         parser.error('--exercise-resize currently supports calculator, terminal, settings, monitor, security, editor, images, update, store, and files only')
@@ -243,6 +244,40 @@ def main():
             pointer_changed = sum(left != right for left, right in zip(before_pointer, pointer_pixels)) // 3
             if pointer_changed < 100:
                 raise RuntimeError(f'{app[1]} pointer motion did not change its presented cursor/frame: changed_pixels={pointer_changed}')
+        if args.exercise_client_pointer and args.app != 'calculator':
+            parser.error('--exercise-client-pointer currently supports Calculator only')
+        if args.exercise_client_pointer:
+            client_pointer_baseline = out / 'woven-calculator-before-client-pointer.ppm'
+            command_qmp('screendump', {'filename': str(client_pointer_baseline)})
+            # The first window opens at (40, 40) in the 1280x800 QEMU
+            # desktop. Move from the established centre to a safe point in
+            # Calculator's client surface, then click it.
+            command_qmp('input-send-event', {'events': [
+                {'type': 'rel', 'data': {'axis': 'x', 'value': -540}},
+                {'type': 'rel', 'data': {'axis': 'y', 'value': -320}},
+            ]})
+            time.sleep(0.5)
+            command_qmp('input-send-event', {'events': [
+                {'type': 'btn', 'data': {'down': True, 'button': 'left'}},
+            ]})
+            time.sleep(0.2)
+            command_qmp('input-send-event', {'events': [
+                {'type': 'btn', 'data': {'down': False, 'button': 'left'}},
+            ]})
+            while 'WovenCalculator: pointer updated' not in serial.read_text(errors='replace'):
+                if process.poll() is not None or time.monotonic() > deadline:
+                    raise RuntimeError('WovenCalculator did not receive a forwarded pointer event')
+                time.sleep(0.1)
+            time.sleep(1)
+            client_pointer_capture = out / 'woven-calculator-after-client-pointer.ppm'
+            command_qmp('screendump', {'filename': str(client_pointer_capture)})
+            client_width, client_height, client_pixels = ppm_pixels(client_pointer_capture)
+            before_client_width, before_client_height, before_client = ppm_pixels(client_pointer_baseline)
+            if (client_width, client_height) != (before_client_width, before_client_height):
+                raise RuntimeError('client pointer capture dimensions changed')
+            client_changed = sum(left != right for left, right in zip(before_client, client_pixels)) // 3
+            if client_changed < 20:
+                raise RuntimeError(f'{app[1]} client pointer did not change its presented surface: changed_pixels={client_changed}')
         resize_baseline = None
         if args.exercise_resize:
             resize_baseline = out / f'woven-{app[0]}-before-resize.ppm'
