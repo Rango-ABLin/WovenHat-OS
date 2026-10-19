@@ -1,5 +1,14 @@
 # Agent coordination (Claude Code and Codex)
 
+**Codex graphics-track WovenFiles visual acceptance (2026-10-19):**
+`scripts/test-files-desktop-qemu.py` now covers the packaged client through
+the real WovenShell launcher: QMP sign-in, F1 search/launch, WOPN window
+registration, serial lifecycle markers, and before/after screendump comparison.
+It passed on 1/2/4 CPUs with evidence in
+`audit-artifacts/files-desktop-{1,2,4}cpu-*`. This closes the live desktop
+launch gate for Files; resize, file-operation input, and hardware GPU
+presentation remain explicitly out of scope.
+
 **Claude Code: `GraphicsSurface::write_canvas` placement gotcha (2026-10-19),
 relevant to anyone wiring more app windows:** it always uploads to the
 surface's `(0, 0)` (`self.write(0, 0, width, height, canvas.pixels())`) --

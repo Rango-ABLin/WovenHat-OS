@@ -1,5 +1,15 @@
 # WovenHat OS Architecture & Codebase Guide
 
+## Graphics WovenFiles QEMU visual acceptance (2026-10-19)
+
+`scripts/test-files-desktop-qemu.py` is the live client-to-desktop gate. It
+packages the signed system applications, boots the hardware-demo session,
+drives sign-in and the F1 launcher through QMP, then captures the desktop
+before and after WovenFiles opens. It requires stable capture geometry and a
+substantial pixel delta in addition to the WOPN/window-open serial markers.
+The gate passed on 1/2/4 CPUs. This proves software/2D desktop presentation,
+not hardware GPU acceleration; Files still has no WSIZ or file-operation UI.
+
 ## Graphics WovenFiles client update (2026-10-19)
 
 `apps/woven-files` now follows the ordinary desktop-client boundary: its

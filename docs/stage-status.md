@@ -1,5 +1,21 @@
 # Stage status
 
+## Graphics track - WovenFiles live launcher/screenshot acceptance (2026-10-19)
+
+`scripts/test-files-desktop-qemu.py` now boots the packaged hardware-demo
+desktop, signs in through QMP PS/2 input, launches WovenFiles through the F1
+launcher query, waits for the `WOPN`/`WCLS` client lifecycle marker, and saves
+before/after QEMU screendumps. The capture dimensions must remain stable and
+the post-launch frame must materially change; serial evidence must also show
+`WovenFiles: window opened` and `woven-shell: window opened: Files`. The full
+visual acceptance passed on 1/2/4 CPUs with evidence under
+`audit-artifacts/files-desktop-{1,2,4}cpu-*`.
+
+This closes the desktop-launch visual gate for the WovenFiles client. The
+remaining client limits are unchanged: no resize (`WSIZ`) or interactive file
+operations, and the display path is still software/2D on QEMU; no hardware GPU
+presentation claim is made.
+
 ## WovenFiles desktop window, and a write_canvas placement bug fix in both
 ## (2026-10-19)
 
