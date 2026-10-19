@@ -1,5 +1,16 @@
 # Stage status
 
+## Graphics track - bounded contextual GPOS extension wrappers (2026-10-19)
+
+Contextual GPOS lookup dispatch now unwraps checked type-9 extension records
+that contain nested type-7 contextual subtables, reusing the bounded one- to
+five-input matching and nested single/pair positioning paths. Extension
+format, offsets and nested subtable bounds remain validated; broader lookup
+semantics remain a separate boundary. The 42-test `libwoven` suite,
+warning-denying library/kernel/workspace Clippy, formatting, and Stage 19.2
+compositor visual acceptance passed on 1/2/4 CPUs. Hardware GPU acceleration
+remains a separate boundary.
+
 ## Graphics track - bounded two-coverage contextual GPOS guards (2026-10-19)
 
 Contextual GPOS format-3 matching now supports up to two checked backtrack

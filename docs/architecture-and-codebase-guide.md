@@ -1,5 +1,11 @@
 # WovenHat OS Architecture & Codebase Guide
 
+## Graphics contextual GPOS extension update (2026-10-19)
+
+Contextual GPOS dispatch accepts a checked type-9 extension wrapper around a
+nested type-7 subtable and then applies the existing bounded contextual paths.
+Extension offsets and nested table bounds are validated before dispatch.
+
 ## Graphics two-coverage contextual GPOS guard update (2026-10-19)
 
 The bounded contextual format-3 matcher validates up to two backtrack and two

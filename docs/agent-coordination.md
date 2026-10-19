@@ -1,5 +1,13 @@
 # Agent coordination (Claude Code and Codex)
 
+**Codex graphics-track bounded contextual GPOS extension wrappers (2026-10-19):**
+contextual dispatch now unwraps checked type-9 extension records containing
+nested type-7 subtables, preserving the bounded input, context and nested
+single/pair paths. Extension formats, offsets and nested bounds remain
+validated. The 42-test `libwoven` suite, warning-denying library/kernel/
+workspace Clippy, formatting, and Stage 19.2 compositor visual acceptance on
+1/2/4 CPUs passed. Hardware GPU acceleration remains open.
+
 **Codex graphics-track bounded two-coverage contextual GPOS guards (2026-10-19):**
 format-3 matching now validates up to two backtrack and two lookahead
 coverages from independently supplied adjacent shaped glyphs. Missing context

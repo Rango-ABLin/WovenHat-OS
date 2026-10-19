@@ -7798,24 +7798,32 @@ pub mod graphics {
                             .ok_or(TrueTypeError::BadTableDirectory)?,
                     ))
                     .ok_or(TrueTypeError::BadTableDirectory)?;
-                if lookup.checked_add(6).is_none_or(|end| end > table_end)
-                    || read_u16(bytes, lookup) != Some(7)
-                {
+                let Some((is_extension, lookup_target)) =
+                    gpos_attachment_lookup(bytes, lookup, 7, table_end)?
+                else {
                     continue;
-                }
-                let subtable_count = usize::from(
-                    read_u16(bytes, lookup + 4).ok_or(TrueTypeError::BadTableDirectory)?,
-                );
+                };
+                let subtable_count = if is_extension {
+                    1
+                } else {
+                    usize::from(
+                        read_u16(bytes, lookup + 4).ok_or(TrueTypeError::BadTableDirectory)?,
+                    )
+                };
                 if subtable_count > 32 {
                     return Err(TrueTypeError::TooLarge);
                 }
                 for subtable_index in 0..subtable_count {
-                    let subtable = lookup
-                        .checked_add(usize::from(
-                            read_u16(bytes, lookup + 6 + subtable_index * 2)
-                                .ok_or(TrueTypeError::BadTableDirectory)?,
-                        ))
-                        .ok_or(TrueTypeError::BadTableDirectory)?;
+                    let subtable = if is_extension {
+                        lookup_target
+                    } else {
+                        lookup
+                            .checked_add(usize::from(
+                                read_u16(bytes, lookup + 6 + subtable_index * 2)
+                                    .ok_or(TrueTypeError::BadTableDirectory)?,
+                            ))
+                            .ok_or(TrueTypeError::BadTableDirectory)?
+                    };
                     if subtable.checked_add(4).is_none_or(|end| end > table_end)
                         || read_u16(bytes, subtable) != Some(3)
                     {
@@ -13085,6 +13093,25 @@ mod tests {
         let contextual_gpos_face = TrueTypeFace::from_bytes(&contextual_gpos_bytes).unwrap();
         assert_eq!(
             contextual_gpos_face
+                .shape_text_ligatures("AB", Point::new(2, 15), 1000, &mut shaped)
+                .unwrap(),
+            2
+        );
+        assert_eq!(shaped[0].advance, 525);
+        assert_eq!(shaped[1].origin, Point::new(527, 15));
+        let mut contextual_extension_bytes = [0u8; 512];
+        contextual_extension_bytes[..contextual_gpos_bytes.len()]
+            .copy_from_slice(&contextual_gpos_bytes);
+        put32(&mut contextual_extension_bytes, 104, 250);
+        contextual_extension_bytes[420..452].copy_from_slice(&contextual_gpos_bytes[304..336]);
+        put16(&mut contextual_extension_bytes, 296, 9);
+        put16(&mut contextual_extension_bytes, 304, 1);
+        put16(&mut contextual_extension_bytes, 306, 7);
+        put32(&mut contextual_extension_bytes, 308, 116);
+        let contextual_extension_face =
+            TrueTypeFace::from_bytes(&contextual_extension_bytes).unwrap();
+        assert_eq!(
+            contextual_extension_face
                 .shape_text_ligatures("AB", Point::new(2, 15), 1000, &mut shaped)
                 .unwrap(),
             2
