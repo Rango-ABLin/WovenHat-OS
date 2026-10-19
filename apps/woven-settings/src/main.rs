@@ -6,9 +6,14 @@ use core::panic::PanicInfo;
 use libwoven::Args;
 use wovenhat_settings::{parse, Command};
 
+mod gui;
+
 libwoven::entry!(main);
 
 fn main(args: Args) -> ! {
+    if args.get(1) == Some(b"--gui") {
+        gui::run(args.get(2));
+    }
     let command = parse(args.get(1).unwrap_or(b"--all"));
     let status = match command {
         Command::All => {

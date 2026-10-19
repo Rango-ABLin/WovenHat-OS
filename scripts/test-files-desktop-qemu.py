@@ -1,11 +1,12 @@
-"""Launch WovenFiles from WovenShell and capture its desktop window in QEMU.
+"""Launch a packaged WovenShell GUI app and capture its desktop window.
 
-This is the live visual acceptance for the WovenFiles graphics client.  It
+This is the live visual acceptance for the WovenFiles and WovenSettings
+graphics clients. It
 boots the disposable hardware-demo session, signs in through QMP keyboard
 events, launches the catalog entry by its launcher query, waits for the
-client's WOPN/open marker, and captures the compositor output.  The capture
-must contain the client's solid panel and accent border colors; serial output
-alone is not sufficient evidence that the window was presented.
+client's WOPN/open marker, and captures the compositor output. The post-launch
+frame must materially differ from the signed-in desktop baseline; serial
+output alone is not sufficient evidence that the window was presented.
 """
 import argparse
 import json
@@ -56,7 +57,12 @@ def main():
     parser.add_argument('--qemu', default=shutil.which('qemu-system-x86_64') or r'C:\Program Files\qemu\qemu-system-x86_64.exe')
     parser.add_argument('--firmware', type=Path)
     parser.add_argument('--cpus', type=int, choices=(1, 2, 4), default=1)
+    parser.add_argument('--app', choices=('files', 'settings'), default='files')
     args = parser.parse_args()
+    app = {
+        'files': ('files', 'WovenFiles', 'woven-files'),
+        'settings': ('settings', 'WovenSettings', 'woven-settings'),
+    }[args.app]
     root = Path(__file__).resolve().parents[1]
     qemu = Path(args.qemu)
     firmware = args.firmware or qemu.parent / 'share' / 'edk2-x86_64-code.fd'
@@ -96,7 +102,7 @@ def main():
         cwd=root, env=env, text=True,
     ).strip()
 
-    out = root / 'audit-artifacts' / f'files-desktop-{args.cpus}cpu-{time.time_ns()}'
+    out = root / 'audit-artifacts' / f'{app[0]}-desktop-{args.cpus}cpu-{time.time_ns()}'
     out.mkdir(parents=True)
     serial = out / 'serial.log'
     qmp_port = free_port()
@@ -159,17 +165,17 @@ def main():
             time.sleep(0.1)
         baseline = out / 'desktop-before-files.ppm'
         command_qmp('screendump', {'filename': str(baseline)})
-        for key in ['f1', 'f', 'i', 'l', 'e', 's', 'ret']:
+        for key in ['f1', *app[0], 'ret']:
             command_qmp('send-key', {'keys': [{'type': 'qcode', 'data': key}], 'hold-time': 80})
             time.sleep(0.12)
-        while 'WovenFiles: window opened' not in serial.read_text(errors='replace'):
+        while f'{app[1]}: window opened' not in serial.read_text(errors='replace'):
             if process.poll() is not None or time.monotonic() > deadline:
-                raise RuntimeError('WovenFiles did not open a desktop window')
+                raise RuntimeError(f'{app[1]} did not open a desktop window')
             time.sleep(0.1)
         # The client logs immediately after WOPN; allow the compositor's
         # event-driven repaint to reach the framebuffer before capture.
         time.sleep(2)
-        capture = out / 'woven-files.ppm'
+        capture = out / f'woven-{app[0]}.ppm'
         command_qmp('screendump', {'filename': str(capture)})
         time.sleep(0.5)
         width, height, pixels = ppm_pixels(capture)
@@ -178,7 +184,7 @@ def main():
             raise RuntimeError(f'capture dimensions changed: before={before_width}x{before_height}, after={width}x{height}')
         changed = sum(left != right for left, right in zip(before, pixels)) // 3
         if changed < 1000:
-            raise RuntimeError(f'WovenFiles capture did not change the presented desktop: {width}x{height}, changed_pixels={changed}')
+            raise RuntimeError(f'{app[1]} capture did not change the presented desktop: {width}x{height}, changed_pixels={changed}')
         command_qmp('quit')
         sock.close()
     except Exception as error:  # noqa: BLE001 - preserve acceptance evidence
@@ -194,7 +200,7 @@ def main():
         print('\n'.join(errors), file=sys.stderr)
         print('Evidence:', out, file=sys.stderr)
         return 1
-    print(f'WovenFiles desktop visual acceptance: PASS ({args.cpus} CPU). Evidence: {out}')
+    print(f'{app[1]} desktop visual acceptance: PASS ({args.cpus} CPU). Evidence: {out}')
     return 0
 
 

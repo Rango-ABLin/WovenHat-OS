@@ -1,5 +1,14 @@
 # WovenHat OS Architecture & Codebase Guide
 
+## Graphics WovenSettings client (2026-10-19)
+
+`apps/woven-settings/src/gui.rs` is a bounded, read-only desktop client. It
+uses a static full-window Canvas buffer, displays identity/UTC/display data,
+shares its `GraphicsSurface` with WovenShell, and follows the same WOPN/WCLS
+lifecycle as the other clients. The catalog supplies `--gui %p`. The shared
+QMP visual harness accepts `--app settings` and passed on 1/2/4 CPUs. No
+interactive controls, WSIZ resize handling, or hardware GPU output is implied.
+
 ## Graphics WovenFiles QEMU visual acceptance (2026-10-19)
 
 `scripts/test-files-desktop-qemu.py` is the live client-to-desktop gate. It

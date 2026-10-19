@@ -1,5 +1,20 @@
 # Stage status
 
+## Graphics track - WovenSettings desktop client (2026-10-19)
+
+WovenSettings now has a read-only `--gui <shell-pid>` client path. It renders
+bounded identity, UTC clock, and compositor geometry data into a full-window
+Canvas buffer, shares the surface, opens it with `WOPN`, and waits for `WCLS`.
+The production catalog passes the shell PID, and the shared
+`scripts/test-files-desktop-qemu.py --app settings` gate launches it from the
+F1 desktop launcher and compares before/after QEMU screendumps. Visual
+acceptance passed on 1/2/4 CPUs with evidence under
+`audit-artifacts/settings-desktop-{1,2,4}cpu-*`.
+
+This slice is intentionally read-only: settings controls, resize (`WSIZ`),
+and hardware GPU presentation are not claimed. The existing software/2D
+compositor remains the accepted QEMU path.
+
 ## Graphics track - WovenFiles live launcher/screenshot acceptance (2026-10-19)
 
 `scripts/test-files-desktop-qemu.py` now boots the packaged hardware-demo

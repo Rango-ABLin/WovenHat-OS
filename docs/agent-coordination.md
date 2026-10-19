@@ -1,5 +1,13 @@
 # Agent coordination (Claude Code and Codex)
 
+**Codex graphics-track WovenSettings client (2026-10-19):**
+`apps/woven-settings/src/gui.rs` adds a read-only Canvas/WOPN client for
+identity, UTC clock, and compositor geometry. The production catalog now
+passes `--gui %p`; the shared desktop QEMU harness launches it from F1 and
+passed on 1/2/4 CPUs, with evidence in
+`audit-artifacts/settings-desktop-{1,2,4}cpu-*`. Controls, WSIZ, and hardware
+GPU presentation remain outside this slice.
+
 **Codex graphics-track WovenFiles visual acceptance (2026-10-19):**
 `scripts/test-files-desktop-qemu.py` now covers the packaged client through
 the real WovenShell launcher: QMP sign-in, F1 search/launch, WOPN window

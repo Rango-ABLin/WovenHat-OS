@@ -5214,7 +5214,7 @@ fn install_production_system_apps() -> bool {
             image: SYSTEM_APP_SETTINGS,
             binary_path: "/bin/wovenhat-settings",
             catalog_path: "/share/applications/woven-settings.app",
-            catalog: b"Name=WovenSettings\nExec=/bin/wovenhat-settings\n",
+            catalog: b"Name=WovenSettings\nExec=/bin/wovenhat-settings --gui %p\n",
         },
         App {
             name: "woven-security",
