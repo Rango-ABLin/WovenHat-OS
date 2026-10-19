@@ -1,5 +1,12 @@
 # WovenHat OS Architecture & Codebase Guide
 
+## Graphics contextual GPOS composition update (2026-10-19)
+
+Contextual format-3 dispatch accumulates multiple nested single or pair value
+records targeting sequence index zero with saturating placement/advance
+arithmetic. Other sequence indices and broader contextual lookup application
+remain outside this bounded path.
+
 ## Graphics contextual GPOS guard update (2026-10-19)
 
 Format-3 contextual positioning can validate one previous and one following

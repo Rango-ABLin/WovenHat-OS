@@ -1,5 +1,16 @@
 # Stage status
 
+## Graphics track - bounded contextual GPOS multi-record composition (2026-10-19)
+
+Contextual GPOS format-3 records targeting sequence index zero now compose
+multiple nested type-1 single or type-2 format-1 pair adjustments with
+saturating placement/advance accumulation. Nested lookup/table bounds remain
+validated; sequence indices other than zero and broader contextual dispatch
+remain separate boundaries. The 42-test `libwoven` suite, warning-denying
+library/kernel/workspace Clippy, formatting, and Stage 19.2 compositor visual
+acceptance passed on 1/2/4 CPUs. Hardware GPU acceleration remains a separate
+boundary.
+
 ## Graphics track - bounded contextual GPOS context guards (2026-10-19)
 
 The contextual GPOS format-3 path now validates and matches up to one

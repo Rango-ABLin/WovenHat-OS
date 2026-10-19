@@ -1,5 +1,13 @@
 # Agent coordination (Claude Code and Codex)
 
+**Codex graphics-track bounded contextual GPOS multi-record composition (2026-10-19):**
+contextual format-3 records targeting sequence index zero now accumulate
+multiple nested single/pair adjustments with saturating arithmetic. The 42-test
+`libwoven` suite, warning-denying library/kernel/workspace Clippy, formatting,
+and Stage 19.2 compositor visual acceptance on 1/2/4 CPUs passed. Sequence
+indices beyond zero and broader contextual dispatch remain open; hardware GPU
+acceleration remains open.
+
 **Codex graphics-track bounded contextual GPOS context guards (2026-10-19):**
 added checked one-coverage backtrack/lookahead matching from adjacent shaped
 glyphs to the format-3 contextual path, while retaining context-free matching.

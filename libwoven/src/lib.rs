@@ -7583,6 +7583,8 @@ pub mod graphics {
                     {
                         continue;
                     }
+                    let mut accumulated = (0i32, 0i32, 0i32, 0i32);
+                    let mut found = false;
                     for record_index in 0..record_count {
                         let record = record_count_offset + 2 + record_index * 4;
                         if read_u16(bytes, record) != Some(0) {
@@ -7716,14 +7718,23 @@ pub mod graphics {
                                     if read_u16(bytes, pair_record) != Some(right) {
                                         continue;
                                     }
-                                    return Ok(Some(gpos_value_adjustment(
+                                    let adjustment = gpos_value_adjustment(
                                         bytes,
                                         pair_record + 2,
                                         value_format1,
                                         table_end,
                                         table,
                                         options.ppem,
-                                    )?));
+                                    )?;
+                                    accumulated.0 = accumulated.0.saturating_add(adjustment.0);
+                                    accumulated.1 = accumulated.1.saturating_add(adjustment.1);
+                                    accumulated.2 = accumulated.2.saturating_add(adjustment.2);
+                                    accumulated.3 = accumulated.3.saturating_add(adjustment.3);
+                                    found = true;
+                                    break;
+                                }
+                                if found {
+                                    break;
                                 }
                                 continue;
                             }
@@ -7766,15 +7777,23 @@ pub mod graphics {
                                     )
                                     .ok_or(TrueTypeError::TooLarge)?
                             };
-                            return Ok(Some(gpos_value_adjustment(
+                            let adjustment = gpos_value_adjustment(
                                 bytes,
                                 record,
                                 value_format,
                                 table_end,
                                 table,
                                 options.ppem,
-                            )?));
+                            )?;
+                            accumulated.0 = accumulated.0.saturating_add(adjustment.0);
+                            accumulated.1 = accumulated.1.saturating_add(adjustment.1);
+                            accumulated.2 = accumulated.2.saturating_add(adjustment.2);
+                            accumulated.3 = accumulated.3.saturating_add(adjustment.3);
+                            found = true;
                         }
+                    }
+                    if found {
+                        return Ok(Some(accumulated));
                     }
                 }
             }
@@ -12654,6 +12673,57 @@ mod tests {
         );
         assert_eq!(shaped[0].advance, 525);
         assert_eq!(shaped[1].origin, Point::new(527, 15));
+        let mut contextual_multi_bytes = contextual_gpos_bytes;
+        put32(&mut contextual_multi_bytes, 104, 148);
+        put16(&mut contextual_multi_bytes, 288, 3);
+        put16(&mut contextual_multi_bytes, 290, 8);
+        put16(&mut contextual_multi_bytes, 292, 62);
+        put16(&mut contextual_multi_bytes, 294, 92);
+        put16(&mut contextual_multi_bytes, 308, 2);
+        put16(&mut contextual_multi_bytes, 310, 30);
+        put16(&mut contextual_multi_bytes, 312, 36);
+        put16(&mut contextual_multi_bytes, 316, 2);
+        put16(&mut contextual_multi_bytes, 318, 0);
+        put16(&mut contextual_multi_bytes, 320, 1);
+        put16(&mut contextual_multi_bytes, 322, 0);
+        put16(&mut contextual_multi_bytes, 324, 2);
+        put16(&mut contextual_multi_bytes, 334, 1);
+        put16(&mut contextual_multi_bytes, 336, 1);
+        put16(&mut contextual_multi_bytes, 338, 1);
+        put16(&mut contextual_multi_bytes, 340, 1);
+        put16(&mut contextual_multi_bytes, 342, 1);
+        put16(&mut contextual_multi_bytes, 344, 2);
+        put16(&mut contextual_multi_bytes, 350, 1);
+        put16(&mut contextual_multi_bytes, 352, 0);
+        put16(&mut contextual_multi_bytes, 354, 1);
+        put16(&mut contextual_multi_bytes, 356, 8);
+        put16(&mut contextual_multi_bytes, 358, 1);
+        put16(&mut contextual_multi_bytes, 360, 10);
+        put16(&mut contextual_multi_bytes, 362, 4);
+        put_i16(&mut contextual_multi_bytes, 364, 25);
+        put16(&mut contextual_multi_bytes, 368, 1);
+        put16(&mut contextual_multi_bytes, 370, 1);
+        put16(&mut contextual_multi_bytes, 372, 1);
+        put16(&mut contextual_multi_bytes, 380, 1);
+        put16(&mut contextual_multi_bytes, 382, 0);
+        put16(&mut contextual_multi_bytes, 384, 1);
+        put16(&mut contextual_multi_bytes, 386, 8);
+        put16(&mut contextual_multi_bytes, 388, 1);
+        put16(&mut contextual_multi_bytes, 390, 10);
+        put16(&mut contextual_multi_bytes, 392, 4);
+        put_i16(&mut contextual_multi_bytes, 394, 15);
+        put16(&mut contextual_multi_bytes, 398, 1);
+        put16(&mut contextual_multi_bytes, 400, 1);
+        put16(&mut contextual_multi_bytes, 402, 1);
+        let contextual_multi_face = TrueTypeFace::from_bytes(&contextual_multi_bytes).unwrap();
+        assert_eq!(
+            contextual_multi_face
+                .shape_text_ligatures("AB", Point::new(2, 15), 1000, &mut shaped)
+                .unwrap(),
+            2
+        );
+        assert_eq!(shaped[0].advance, 540);
+        assert_eq!(shaped[1].origin, Point::new(542, 15));
         let mut single_adjustment_bytes = [0u8; 420];
         single_adjustment_bytes.copy_from_slice(&bytes);
         put32(&mut single_adjustment_bytes, 104, 156);
