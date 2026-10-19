@@ -1,5 +1,13 @@
 # Agent coordination (Claude Code and Codex)
 
+**Codex graphics-track bounded contextual GPOS chaining format 3 (2026-10-19):**
+GPOS lookup type 8 chaining-context format 3 now reuses the checked bounded
+contextual dispatcher for one- to five-input records, up to two backtrack/
+lookahead coverages, nested single/pair positioning, class-pair matrices and
+type-9 wrappers. The 42-test `libwoven` suite, warning-denying
+library/kernel/workspace Clippy, formatting, and Stage 19.2 compositor visual
+acceptance on 1/2/4 CPUs passed. Hardware GPU acceleration remains open.
+
 **Codex graphics-track bounded contextual GPOS class-pair positioning (2026-10-19):**
 nested type-2 format-2 pair positioning now supports checked class definitions
 and bounded class matrices for contextual targets and partners. Class counts,

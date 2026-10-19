@@ -1,5 +1,11 @@
 # WovenHat OS Architecture & Codebase Guide
 
+## Graphics contextual GPOS chaining update (2026-10-19)
+
+GPOS lookup type 8 chaining-context format 3 shares the bounded contextual
+dispatcher with type 7, including checked input/context coverage, nested
+single/pair positioning, class matrices and extension wrappers.
+
 ## Graphics contextual GPOS class-pair update (2026-10-19)
 
 Nested contextual type-2 pair positioning supports format-2 class definitions

@@ -1,5 +1,16 @@
 # Stage status
 
+## Graphics track - bounded contextual GPOS chaining format 3 (2026-10-19)
+
+GPOS lookup type 8 chaining-context format 3 now reuses the checked bounded
+contextual dispatcher, including one- to five-input records, up to two
+backtrack/lookahead coverages, nested single/pair positioning, class-pair
+matrices, and type-9 extension wrappers. Unsupported or malformed records
+remain fail-closed. The 42-test `libwoven` suite, warning-denying
+library/kernel/workspace Clippy, formatting, and Stage 19.2 compositor visual
+acceptance passed on 1/2/4 CPUs. Hardware GPU acceleration remains a separate
+boundary.
+
 ## Graphics track - bounded contextual GPOS class-pair positioning (2026-10-19)
 
 Nested contextual GPOS type-2 format-2 pair positioning now supports checked

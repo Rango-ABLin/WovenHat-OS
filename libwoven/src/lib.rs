@@ -7798,9 +7798,13 @@ pub mod graphics {
                             .ok_or(TrueTypeError::BadTableDirectory)?,
                     ))
                     .ok_or(TrueTypeError::BadTableDirectory)?;
-                let Some((is_extension, lookup_target)) =
-                    gpos_attachment_lookup(bytes, lookup, 7, table_end)?
-                else {
+                let contextual_lookup =
+                    if let Some(result) = gpos_attachment_lookup(bytes, lookup, 7, table_end)? {
+                        Some(result)
+                    } else {
+                        gpos_attachment_lookup(bytes, lookup, 8, table_end)?
+                    };
+                let Some((is_extension, lookup_target)) = contextual_lookup else {
                     continue;
                 };
                 let subtable_count = if is_extension {
@@ -13202,6 +13206,18 @@ mod tests {
         let contextual_gpos_face = TrueTypeFace::from_bytes(&contextual_gpos_bytes).unwrap();
         assert_eq!(
             contextual_gpos_face
+                .shape_text_ligatures("AB", Point::new(2, 15), 1000, &mut shaped)
+                .unwrap(),
+            2
+        );
+        assert_eq!(shaped[0].advance, 525);
+        assert_eq!(shaped[1].origin, Point::new(527, 15));
+        let mut contextual_chaining_bytes = contextual_gpos_bytes;
+        put16(&mut contextual_chaining_bytes, 296, 8);
+        let contextual_chaining_face =
+            TrueTypeFace::from_bytes(&contextual_chaining_bytes).unwrap();
+        assert_eq!(
+            contextual_chaining_face
                 .shape_text_ligatures("AB", Point::new(2, 15), 1000, &mut shaped)
                 .unwrap(),
             2
