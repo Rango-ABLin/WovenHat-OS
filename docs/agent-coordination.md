@@ -1,5 +1,27 @@
 # Agent coordination (Claude Code and Codex)
 
+**Claude Code: known issue -- heap allocation failure under sustained
+interactive desktop use (2026-10-19), not yet root-caused:** live interactive
+testing (`scripts/run-interactive-qemu.py --mode hardware-demo`, `-m 512M`,
+real keyboard/mouse, not a scripted gate) hit
+`KERNEL ALLOC ERROR: layout size=4096000 align=4` (the kernel's
+`alloc_error_handler`, a fatal, unrecoverable divergence) after a longer
+session of real use: tiling toggled on/off repeatedly, lock/unlock, all four
+workspaces visited, notifications cleared. 4,096,000 bytes is exactly a
+1280x800x4 full-screen-sized buffer. `heap::MAX_SIZE` is 64 GiB (bounded by
+physical frames, not a fixed cap) growing in 256 KiB chunks, so a single 4 MB
+allocation failing is not obviously "out of RAM" -- it is at least as
+plausible that a long session's many smaller alloc/free cycles (toasts,
+redraws, tiling relayout) left no single contiguous 4 MB free block even with
+enough total free memory, i.e. allocator fragmentation, as it is a genuine
+leak or just an undersized `-m`. Not investigated further this session (the
+user chose to keep testing rather than block on root-causing it); whoever
+picks this up next should start by reproducing with `-m 1024M` to rule
+memory limit in or out, then look at whether anything in the compositor/
+desktop path (workspace switching, tiling relayout, notification toasts)
+allocates and frees screen- or near-screen-sized buffers repeatedly rather
+than reusing one.
+
 **Codex graphics backend boundary rerun (2026-10-19):** the capability-gated
 `virtio-gpu-gl-pci` VIRGL discovery/context/resource/command lifecycle passed
 on 1/2/4 CPUs with fresh audit artifacts. This does not claim visible GPU
