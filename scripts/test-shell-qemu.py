@@ -27,6 +27,9 @@ def normal_boot_serial_errors(log: str, system_apps: bool) -> list[str]:
     for marker in ('kernel panic', 'panicked at', 'security violation', 'security: failed'):
         if marker in normalized:
             errors.append(f'Guest serial contains fatal evidence: {marker}')
+    for line in log.splitlines():
+        if line.startswith(('[BOOT]', '[SESSION]', '[APPS]', '[SMP]')) and ('FAILED' in line or ' FAIL' in line):
+            errors.append(f'Contradictory normal boot failure marker: {line}')
     expected = ('[BOOT] desktop-first runtime ready' if system_apps
                 else '[BOOT] shell-first runtime ready')
     if expected not in log:
