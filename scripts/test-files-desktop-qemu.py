@@ -57,10 +57,10 @@ def main():
     parser.add_argument('--firmware', type=Path)
     parser.add_argument('--cpus', type=int, choices=(1, 2, 4), default=1)
     parser.add_argument('--app', choices=('calculator', 'files', 'settings', 'monitor', 'security', 'editor', 'images', 'update', 'store', 'terminal'), default='files')
-    parser.add_argument('--exercise-resize', action='store_true', help='exercise the WovenShell WSIZ/WRSZ path (Calculator, Terminal, Settings, or Monitor)')
+    parser.add_argument('--exercise-resize', action='store_true', help='exercise the WovenShell WSIZ/WRSZ path (Calculator, Terminal, Settings, Monitor, or Security)')
     args = parser.parse_args()
-    if args.exercise_resize and args.app not in ('calculator', 'terminal', 'settings', 'monitor'):
-        parser.error('--exercise-resize currently supports calculator, terminal, settings, and monitor only')
+    if args.exercise_resize and args.app not in ('calculator', 'terminal', 'settings', 'monitor', 'security'):
+        parser.error('--exercise-resize currently supports calculator, terminal, settings, monitor, and security only')
     app = {
         'calculator': ('calculator', 'WovenCalculator', 'woven-calculator', 'calculator'),
         'files': ('files', 'WovenFiles', 'woven-files', 'files'),

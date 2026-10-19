@@ -1,5 +1,14 @@
 # WovenHat OS Architecture & Codebase Guide
 
+## Graphics WovenSecurity bounded resize (2026-10-19)
+
+`apps/woven-security/src/gui.rs` now handles `WSIZ` by creating and sharing a
+replacement surface, publishing `WRSZ` before the bounded Canvas upload, and
+clamping requests to a loader-safe 480×320 static render target. The QMP
+resize gate passed on 1/2/4 CPUs. Security remains read-only with audit output
+capped at 16 events; controls, pointer widgets, and hardware GPU output are
+not implied.
+
 ## Graphics WovenMonitor bounded resize (2026-10-19)
 
 `apps/woven-monitor/src/gui.rs` now negotiates `WSIZ/WRSZ` replacement
@@ -91,7 +100,8 @@ desktop text input, WSIZ resize, and hardware GPU output are not implied.
 identity and audit summary data. It uses a static Canvas buffer and the
 WovenShell WOPN/WCLS lifecycle; the catalog supplies `--gui %p`. The shared
 QMP launcher/screendump gate passed on 1/2/4 CPUs. Audit display is capped at
-16 events, with no controls, WSIZ resize, or hardware GPU output implied.
+16 events, with no controls, pointer widgets, or hardware GPU output implied;
+bounded WSIZ/WRSZ is covered by the newer Security resize section.
 
 ## Graphics WovenMonitor client (2026-10-19)
 
