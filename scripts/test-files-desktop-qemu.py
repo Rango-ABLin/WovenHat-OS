@@ -57,7 +57,7 @@ def main():
     parser.add_argument('--qemu', default=shutil.which('qemu-system-x86_64') or r'C:\Program Files\qemu\qemu-system-x86_64.exe')
     parser.add_argument('--firmware', type=Path)
     parser.add_argument('--cpus', type=int, choices=(1, 2, 4), default=1)
-    parser.add_argument('--app', choices=('files', 'settings', 'monitor', 'security', 'editor', 'images', 'update', 'store'), default='files')
+    parser.add_argument('--app', choices=('files', 'settings', 'monitor', 'security', 'editor', 'images', 'update', 'store', 'terminal'), default='files')
     args = parser.parse_args()
     app = {
         'files': ('files', 'WovenFiles', 'woven-files', 'files'),
@@ -70,6 +70,7 @@ def main():
         # substring still uniquely selects WovenUpdate.
         'update': ('update', 'WovenUpdate', 'woven-update', 'date'),
         'store': ('store', 'WovenStore', 'woven-store', 'store'),
+        'terminal': ('terminal', 'WovenTerminal', 'woven-terminal', 'terminal'),
     }[args.app]
     root = Path(__file__).resolve().parents[1]
     qemu = Path(args.qemu)

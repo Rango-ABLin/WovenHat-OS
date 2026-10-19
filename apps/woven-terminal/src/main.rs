@@ -7,12 +7,17 @@ use libwoven::Args;
 use wovenhat_calculator::evaluate;
 use wovenhat_terminal::{parse, Command};
 
+mod gui;
+
 libwoven::entry!(main);
 
 const MAX_LIST_ENTRIES: usize = 128;
 const MAX_CAT_CHUNKS: usize = 16;
 
 fn main(args: Args) -> ! {
+    if args.get(1) == Some(b"--gui") {
+        gui::run(args.get(2));
+    }
     if args.get(1) == Some(b"--interactive") {
         interactive()
     }

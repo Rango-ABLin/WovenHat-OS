@@ -1,5 +1,14 @@
 # WovenHat OS Architecture & Codebase Guide
 
+## Graphics WovenTerminal desktop preview (2026-10-19)
+
+`apps/woven-terminal/src/gui.rs` adds a bounded read-only terminal preview
+using a static Canvas buffer and the WovenShell WOPN/WCLS lifecycle; the
+production catalog supplies `--gui %p`. The shared QMP visual gate passed on
+1/2/4 CPUs. CLI `--interactive` remains the input/command path; desktop key
+forwarding, command execution, WSIZ resize, and hardware GPU output are not
+implied.
+
 ## Graphics WovenUpdate/WovenStore clients and catalog capacity (2026-10-19)
 
 `apps/woven-update/src/gui.rs` and `apps/woven-store/src/gui.rs` add bounded

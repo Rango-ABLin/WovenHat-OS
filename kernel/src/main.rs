@@ -5193,7 +5193,7 @@ fn install_production_system_apps() -> bool {
             image: SYSTEM_APP_TERMINAL,
             binary_path: "/bin/wovenhat-terminal",
             catalog_path: "/share/applications/woven-terminal.app",
-            catalog: b"Name=WovenTerminal\nExec=/bin/wovenhat-terminal --interactive\n",
+            catalog: b"Name=WovenTerminal\nExec=/bin/wovenhat-terminal --gui %p\n",
         },
         App {
             name: "woven-files",

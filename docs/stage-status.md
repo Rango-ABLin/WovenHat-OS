@@ -1,5 +1,17 @@
 # Stage status
 
+## Graphics track - WovenTerminal desktop preview (2026-10-19)
+
+WovenTerminal now has a bounded read-only `--gui <shell-pid>` preview window
+with a static Canvas buffer, WOPN/WCLS lifecycle, and production catalog
+`--gui %p` entry. The existing `--interactive` CLI remains authoritative for
+terminal input. The shared `scripts/test-files-desktop-qemu.py --app terminal`
+visual gate passed on 1/2/4 CPUs with evidence under
+`audit-artifacts/terminal-desktop-{1,2,4}cpu-*`.
+
+This slice does not claim desktop key forwarding, command execution,
+`WSIZ` resize handling, or hardware GPU presentation.
+
 ## Graphics track - WovenUpdate and WovenStore desktop clients (2026-10-19)
 
 WovenUpdate now has a read-only `--gui <shell-pid>` preflight window for the
@@ -127,10 +139,11 @@ borders, panel colour and text placement. `cargo clippy --all-targets -- -D
 warnings` and `scripts/test-shell-qemu.py --hardware-demo` pass on 1/2/4
 CPUs.
 
-**Limits.** WovenTerminal remains CLI/interactive by design. Calculator,
-Files, Settings, Monitor, Security, Editor, Images, Update, and Store now have
-desktop preview clients, but their controls/input and `WSIZ` resize paths are
-not yet implemented.
+**Limits.** WovenTerminal remains CLI/interactive by design, while Calculator,
+Files, Settings, Monitor, Security, Editor, Images, Update, and Store have
+desktop preview clients. These preview clients still lack desktop
+controls/input and `WSIZ` resize paths; hardware GPU presentation is not
+claimed.
 
 ## Graphics track - WovenFiles desktop client foundation (2026-10-19)
 

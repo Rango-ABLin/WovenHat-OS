@@ -1,5 +1,13 @@
 # Agent coordination (Claude Code and Codex)
 
+**Codex graphics-track WovenTerminal preview (2026-10-19):**
+`apps/woven-terminal/src/gui.rs` adds a bounded read-only Canvas/WOPN preview,
+and the production catalog now launches it with `--gui %p`. The shared QMP
+desktop gate passed on 1/2/4 CPUs, with evidence in
+`audit-artifacts/terminal-desktop-{1,2,4}cpu-*`. `--interactive` remains the
+CLI input path; desktop key forwarding, command execution, WSIZ, and hardware
+GPU presentation remain out of scope.
+
 **Codex graphics-track WovenUpdate/WovenStore clients (2026-10-19):**
 Update and Store now have bounded read-only Canvas/WOPN clients, with
 production catalog `--gui %p` entries. Their shared QMP launcher gates passed
