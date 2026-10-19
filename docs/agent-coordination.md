@@ -1,5 +1,14 @@
 # Agent coordination (Claude Code and Codex)
 
+**Codex graphics-track bounded chaining format-2 target sequence positioning (2026-10-19):**
+nested single-positioning records under GPOS chaining format 2 now resolve
+coverage against target sequence indices beyond zero, while the outer class
+coverage remains anchored to the first input. The bounded class-rule, context,
+nested lookup and value-record checks remain enforced. The 42-test `libwoven`
+suite, warning-denying library/kernel/workspace Clippy, formatting, and Stage
+19.2 compositor visual acceptance on 1/2/4 CPUs passed. Hardware GPU
+acceleration remains open.
+
 **Codex graphics-track bounded chaining format-1 nested pair extension wrapper (2026-10-19):**
 GPOS chaining format 1 now regression-tests a type-9 extension wrapper around
 nested lookup-2 format-1 pair positioning. Wrapper format, nested offsets,

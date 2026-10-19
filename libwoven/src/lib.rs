@@ -14307,6 +14307,19 @@ mod tests {
         );
         assert_eq!(shaped[0].advance, 525);
         assert_eq!(shaped[1].origin, Point::new(527, 15));
+        let mut contextual_class_target_bytes = contextual_class_bytes;
+        put16(&mut contextual_class_target_bytes, 494, 1);
+        put16(&mut contextual_class_target_bytes, 358, 2);
+        let contextual_class_target_face =
+            TrueTypeFace::from_bytes(&contextual_class_target_bytes).unwrap();
+        assert_eq!(
+            contextual_class_target_face
+                .shape_text_ligatures("AB", Point::new(2, 15), 1000, &mut shaped)
+                .unwrap(),
+            2
+        );
+        assert_eq!(shaped[0].advance, 500);
+        assert_eq!(shaped[1].advance, 525);
         let mut contextual_glyph_bytes = contextual_gpos_bytes;
         put16(&mut contextual_glyph_bytes, 296, 8);
         put16(&mut contextual_glyph_bytes, 304, 1);

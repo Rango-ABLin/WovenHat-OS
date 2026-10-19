@@ -1,5 +1,11 @@
 # WovenHat OS Architecture & Codebase Guide
 
+## Graphics contextual GPOS format-2 target update (2026-10-19)
+
+The chaining format-2 path keeps first-input class coverage separate from
+nested target coverage, allowing bounded single-positioning records to target
+later input sequence indices without weakening class or table validation.
+
 ## Graphics contextual GPOS format-1 pair extension update (2026-10-19)
 
 The chaining format-1 nested lookup-2 pair path is regression-tested through a
