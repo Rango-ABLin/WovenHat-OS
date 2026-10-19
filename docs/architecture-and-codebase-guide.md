@@ -1,5 +1,11 @@
 # WovenHat OS Architecture & Codebase Guide
 
+## Graphics path stroke update (2026-10-19)
+
+`Renderer::stroke_line` clips each segment to the Canvas with widened integer
+intersections before running Bresenham. This preserves visible line coverage
+while bounding work by the target surface rather than endpoint distance.
+
 ## Graphics path-bound update (2026-10-19)
 
 Rounded-rectangle and path scan bounds use the shared `rect_end` saturating

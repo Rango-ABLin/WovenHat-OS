@@ -10457,6 +10457,19 @@ pub mod graphics {
         }
 
         fn stroke_line(&mut self, first: Point, second: Point, color: Color) {
+            if self.canvas.width == 0 || self.canvas.height == 0 {
+                return;
+            }
+            let Some((first, second)) = clip_line_to_bounds(
+                first,
+                second,
+                self.canvas.x,
+                self.canvas.y,
+                rect_end(self.canvas.x, self.canvas.width),
+                rect_end(self.canvas.y, self.canvas.height),
+            ) else {
+                return;
+            };
             let mut x = first.x;
             let mut y = first.y;
             let dx = (i64::from(second.x) - i64::from(first.x)).abs();
@@ -10541,6 +10554,101 @@ pub mod graphics {
 
     fn rect_end(origin: i32, extent: usize) -> i32 {
         origin.saturating_add(i32::try_from(extent.saturating_sub(1)).unwrap_or(i32::MAX))
+    }
+
+    fn clip_line_to_bounds(
+        mut first: Point,
+        mut second: Point,
+        left: i32,
+        top: i32,
+        right: i32,
+        bottom: i32,
+    ) -> Option<(Point, Point)> {
+        const LEFT: u8 = 1;
+        const RIGHT: u8 = 2;
+        const TOP: u8 = 4;
+        const BOTTOM: u8 = 8;
+
+        let code = |point: Point| {
+            let mut result = 0;
+            if point.x < left {
+                result |= LEFT;
+            } else if point.x > right {
+                result |= RIGHT;
+            }
+            if point.y < top {
+                result |= TOP;
+            } else if point.y > bottom {
+                result |= BOTTOM;
+            }
+            result
+        };
+
+        loop {
+            let first_code = code(first);
+            let second_code = code(second);
+            if first_code | second_code == 0 {
+                return Some((first, second));
+            }
+            if first_code & second_code != 0 {
+                return None;
+            }
+            let outside_code = if first_code != 0 {
+                first_code
+            } else {
+                second_code
+            };
+            let candidate = if outside_code & TOP != 0 {
+                let y = top;
+                let numerator = (i128::from(second.x) - i128::from(first.x))
+                    * (i128::from(y) - i128::from(first.y));
+                let denominator = i128::from(second.y) - i128::from(first.y);
+                Point::new(
+                    (i128::from(first.x) + numerator / denominator)
+                        .clamp(i128::from(i32::MIN), i128::from(i32::MAX))
+                        as i32,
+                    y,
+                )
+            } else if outside_code & BOTTOM != 0 {
+                let y = bottom;
+                let numerator = (i128::from(second.x) - i128::from(first.x))
+                    * (i128::from(y) - i128::from(first.y));
+                let denominator = i128::from(second.y) - i128::from(first.y);
+                Point::new(
+                    (i128::from(first.x) + numerator / denominator)
+                        .clamp(i128::from(i32::MIN), i128::from(i32::MAX))
+                        as i32,
+                    y,
+                )
+            } else if outside_code & RIGHT != 0 {
+                let x = right;
+                let numerator = (i128::from(second.y) - i128::from(first.y))
+                    * (i128::from(x) - i128::from(first.x));
+                let denominator = i128::from(second.x) - i128::from(first.x);
+                Point::new(
+                    x,
+                    (i128::from(first.y) + numerator / denominator)
+                        .clamp(i128::from(i32::MIN), i128::from(i32::MAX))
+                        as i32,
+                )
+            } else {
+                let x = left;
+                let numerator = (i128::from(second.y) - i128::from(first.y))
+                    * (i128::from(x) - i128::from(first.x));
+                let denominator = i128::from(second.x) - i128::from(first.x);
+                Point::new(
+                    x,
+                    (i128::from(first.y) + numerator / denominator)
+                        .clamp(i128::from(i32::MIN), i128::from(i32::MAX))
+                        as i32,
+                )
+            };
+            if first_code != 0 {
+                first = candidate;
+            } else {
+                second = candidate;
+            }
+        }
     }
 
     const fn lerp(start: u8, end: u8, amount: u8) -> u8 {
@@ -15523,6 +15631,21 @@ mod tests {
         }
         assert_eq!(pixels[5], Color::TITLE.packed());
         assert_eq!(pixels[3 * 4 + 3], Color::TITLE.packed());
+    }
+
+    #[test]
+    fn wovengraphics_stroke_path_clips_extreme_endpoints() {
+        use crate::graphics::{Color, Path, Point, Renderer};
+
+        let mut path = Path::new();
+        assert!(path.move_to(Point::new(i32::MIN, 1)));
+        assert!(path.line_to(Point::new(i32::MAX, 1)));
+        let mut pixels = [0u32; 16];
+        {
+            let mut canvas = Canvas::new(&mut pixels, 0, 0, 4, 4).unwrap();
+            Renderer::new(&mut canvas).stroke_path(&path, Color::TITLE);
+        }
+        assert_eq!(&pixels[4..8], &[Color::TITLE.packed(); 4]);
     }
 
     #[test]

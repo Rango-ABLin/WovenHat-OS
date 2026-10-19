@@ -1,5 +1,14 @@
 # Stage status
 
+## Graphics track - bounded path stroke rasterization (2026-10-19)
+
+WovenGraphics path segments now use widened integer Cohen-Sutherland
+clipping before Bresenham rasterization. Extreme endpoints therefore produce
+only the Canvas-visible segment instead of an unbounded walk. The 51-test
+`libwoven` suite, warning-denying library/kernel/workspace Clippy, formatting,
+and Stage 19.2 compositor visual acceptance passed on 1/2/4 CPUs. Hardware
+GPU acceleration remains a separate boundary.
+
 ## Graphics track - shared bounded path geometry (2026-10-19)
 
 Rounded rectangles and path scan conversion now use a shared saturating
