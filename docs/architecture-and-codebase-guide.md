@@ -1,5 +1,13 @@
 # WovenHat OS Architecture & Codebase Guide
 
+## Graphics WovenEditor client (2026-10-19)
+
+`apps/woven-editor/src/gui.rs` adds a bounded read-only workspace preview
+window. It uses a static Canvas buffer and the WovenShell WOPN/WCLS lifecycle;
+the catalog supplies `--gui %p`. The shared QMP launcher/screendump gate
+passed on 1/2/4 CPUs. CLI `--view`/`--write` remains the editing interface;
+desktop text input, WSIZ resize, and hardware GPU output are not implied.
+
 ## Graphics WovenSecurity client (2026-10-19)
 
 `apps/woven-security/src/gui.rs` is a bounded read-only desktop client for

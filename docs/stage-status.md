@@ -1,5 +1,19 @@
 # Stage status
 
+## Graphics track - WovenEditor desktop client (2026-10-19)
+
+WovenEditor now has a bounded `--gui <shell-pid>` client path. It renders a
+Canvas-backed `/mnt` workspace summary and the existing CLI view/write entry
+points, shares the surface, opens it with `WOPN`, and waits for `WCLS`. The
+production catalog passes the shell PID. The shared
+`scripts/test-files-desktop-qemu.py --app editor` launcher/screendump gate
+passed on 1/2/4 CPUs with evidence under
+`audit-artifacts/editor-desktop-{1,2,4}cpu-*`.
+
+This is a read-only desktop preview; editor text input, file editing widgets,
+resize (`WSIZ`), and hardware GPU presentation remain unclaimed. The existing
+CLI retains the bounded `--view`/`--write` behavior.
+
 ## Graphics track - WovenSecurity desktop client (2026-10-19)
 
 WovenSecurity now has a read-only `--gui <shell-pid>` client path. It renders

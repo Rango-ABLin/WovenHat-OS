@@ -5228,7 +5228,7 @@ fn install_production_system_apps() -> bool {
             image: SYSTEM_APP_EDITOR,
             binary_path: "/bin/wovenhat-editor",
             catalog_path: "/share/applications/woven-editor.app",
-            catalog: b"Name=WovenEditor\nExec=/bin/wovenhat-editor\n",
+            catalog: b"Name=WovenEditor\nExec=/bin/wovenhat-editor --gui %p\n",
         },
         App {
             name: "woven-images",
