@@ -1,5 +1,13 @@
 # WovenHat OS Architecture & Codebase Guide
 
+## Graphics contextual GPOS chaining format-2 update (2026-10-19)
+
+The GPOS lookup type-8 format-2 path validates class definitions, class-set
+rules, bounded backtrack/input/lookahead classes and nested lookup records.
+Matched rules share the checked nested lookup-1 single-positioning path,
+including type-9 wrappers; nested pair/class positioning remains outside this
+slice.
+
 ## Graphics contextual GPOS chaining format-1 update (2026-10-19)
 
 The GPOS lookup type-8 format-1 path validates bounded glyph-rule chains,

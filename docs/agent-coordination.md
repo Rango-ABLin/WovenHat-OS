@@ -1,5 +1,15 @@
 # Agent coordination (Claude Code and Codex)
 
+**Codex graphics-track bounded contextual GPOS chaining format 2 (2026-10-19):**
+GPOS lookup type 8 chaining-context format 2 now matches bounded backtrack,
+input and lookahead class rules with up to five input glyphs and two context
+classes on either side, then applies nested single-positioning lookup-1
+records through direct or type-9-wrapped lookups. Class definitions, class-set
+and record bounds are checked; unsupported nested pair/class forms fail closed.
+The 42-test `libwoven` suite, warning-denying library/kernel/workspace Clippy,
+formatting, and Stage 19.2 compositor visual acceptance on 1/2/4 CPUs passed.
+Hardware GPU acceleration remains open.
+
 **Codex graphics-track bounded contextual GPOS chaining format 1 (2026-10-19):**
 GPOS lookup type 8 chaining-context format 1 now matches bounded glyph-rule
 records with up to five input glyphs and two backtrack/lookahead glyphs, then
