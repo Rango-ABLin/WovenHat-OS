@@ -98,7 +98,14 @@ def main():
             f'system-app-catalog-{cpus}',
             [sys.executable, 'scripts/test-system-app-catalog-qemu.py', '--cpus', str(cpus)] + options,
         )
-    run('system-apps-boot', [sys.executable, 'scripts/test-shell-qemu.py', '--system-apps'] + options)
+    # Normal system-apps boot is a separate release path from the Stage 20.15
+    # instrumented fixture; qualify session start and F12 recovery on every
+    # supported CPU count instead of relying on the default 4-CPU smoke.
+    for cpus in (1, 2, 4):
+        run(f'system-apps-boot-{cpus}', [
+            sys.executable, 'scripts/test-shell-qemu.py',
+            '--system-apps', '--cpus', str(cpus),
+        ] + options)
     system_app_output = root / 'target' / 'system-apps' / '0.8.0'
     system_app_manifest = json.loads((system_app_output / 'manifest.json').read_text(encoding='utf-8'))
     system_app_env = acceptance_env.copy()
