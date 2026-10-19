@@ -1,5 +1,15 @@
 # Agent coordination (Claude Code and Codex)
 
+**Codex graphics-track bounded contextual GPOS class-rule pair positioning (2026-10-19):**
+the bounded GPOS chaining format-2 class-rule path now applies nested lookup-2
+format-1 pair positioning, including checked pair-set, value-record and
+partner-glyph bounds. Direct nested pair lookups are supported; nested
+extension-wrapped pair lookups use the common type-9 path. Other nested
+pair/class forms remain fail-closed. The 42-test `libwoven` suite,
+warning-denying library/kernel/workspace Clippy, formatting, and Stage 19.2
+compositor visual acceptance on 1/2/4 CPUs passed. Hardware GPU acceleration
+remains open.
+
 **Codex graphics-track bounded contextual GPOS chaining format 2 (2026-10-19):**
 GPOS lookup type 8 chaining-context format 2 now matches bounded backtrack,
 input and lookahead class rules with up to five input glyphs and two context

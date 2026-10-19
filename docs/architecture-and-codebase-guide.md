@@ -1,5 +1,12 @@
 # WovenHat OS Architecture & Codebase Guide
 
+## Graphics contextual GPOS class-rule pair update (2026-10-19)
+
+Nested lookup-2 format-1 pair positioning is now available from the bounded
+GPOS chaining format-2 class-rule path. Pair-set, partner glyph, value-format
+and record extents are checked before applying the first-glyph adjustment;
+broader nested pair/class forms remain outside this slice.
+
 ## Graphics contextual GPOS chaining format-2 update (2026-10-19)
 
 The GPOS lookup type-8 format-2 path validates class definitions, class-set
