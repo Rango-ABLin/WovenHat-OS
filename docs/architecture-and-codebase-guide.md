@@ -1,5 +1,18 @@
 # WovenHat OS Architecture & Codebase Guide
 
+## Graphics window interaction acceptance (2026-10-19)
+
+Stage 20.4 is the authoritative QEMU acceptance for production WovenShell
+window movement and closure. On 1/2/4 CPUs, its real i8042 input path drags
+Alpha by the title bar, verifies repaint at the old and new locations, closes
+the larger Wide client through its close control, routes focus and a key to
+Alpha, and verifies that the shell returns the display on teardown. The
+evidence is under `tar\target\woven-shell-windows-{1,2,4}cpu`.
+
+This does not imply pointer forwarding to application clients, USB HID
+qualification, hardware GPU presentation, or direct QMP automation of a
+production WovenFiles drag. Those remain separate boundaries.
+
 ## Graphics desktop pointer visual acceptance (2026-10-19)
 
 The production desktop QEMU harness now has `--exercise-pointer`. It injects

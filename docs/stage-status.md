@@ -1,5 +1,18 @@
 # Stage status
 
+## Graphics track - Stage 20.4 window interaction acceptance (2026-10-19)
+
+The existing Stage 20.4 QEMU gate passed on 1/2/4 CPUs. Using real i8042
+input, it verifies that a title-bar drag moves Alpha and repaints both the old
+and new regions, the Wide close control asks its owner to exit and removes the
+window, focus and key routing remain correct, and killing the shell returns the
+display to the terminal. Evidence is under
+`tar\target\woven-shell-windows-{1,2,4}cpu`.
+
+This accepts the production WovenShell window-manager move/close path. It does
+not claim pointer forwarding into application clients, USB HID qualification,
+hardware GPU presentation, or direct QMP drag automation for WovenFiles.
+
 ## Graphics track - desktop pointer visual acceptance (2026-10-19)
 
 The production desktop QEMU harness now supports `--exercise-pointer`. It

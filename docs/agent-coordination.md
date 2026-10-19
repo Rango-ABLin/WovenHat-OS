@@ -1,5 +1,15 @@
 # Agent coordination (Claude Code and Codex)
 
+**Codex graphics-track Stage 20.4 window interaction acceptance (2026-10-19):**
+The existing Stage 20.4 QEMU gate passed on 1/2/4 CPUs. It drives real i8042
+input through WovenShell: a title-bar drag moves Alpha and repaints both the
+old and new regions; the Wide close control exits its owner; focus and key
+routing then let Alpha exit; the shell releases the display. Evidence is in
+`tar\target\woven-shell-windows-{1,2,4}cpu`. This accepts the production
+window-manager move/close path, not pointer forwarding into clients, USB HID,
+hardware GPU presentation, or the still-experimental direct QMP drag of the
+WovenFiles client.
+
 **Codex graphics-track desktop pointer visual acceptance (2026-10-19):**
 `scripts/test-files-desktop-qemu.py --app files --exercise-pointer` now
 injects bounded relative motion and a left click through QEMU's input path and
