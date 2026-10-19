@@ -1,5 +1,13 @@
 # WovenHat OS Architecture & Codebase Guide
 
+## Graphics multi-input contextual GPOS pair update (2026-10-19)
+
+Nested type-2 pair positioning can target each supported contextual input
+index, using the following input glyph when available or the next shaped glyph
+outside the matched sequence. The target adjustment and later-origin advance
+propagation remain bounded and checked; broader nested lookup application is
+not implied.
+
 ## Graphics contextual GPOS sequence-index-1 pair update (2026-10-19)
 
 The bounded two-input contextual dispatcher can apply a nested type-2 pair

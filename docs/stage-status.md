@@ -1,5 +1,17 @@
 # Stage status
 
+## Graphics track - bounded multi-input contextual GPOS pair positioning (2026-10-19)
+
+Nested type-2 format-1 pair positioning now dispatches across the bounded
+contextual input sequences: the target uses the following input glyph when it
+is present, or the next shaped glyph when the partner lies outside the matched
+sequence. Coverage, pair-set, partner availability and advance propagation
+remain checked; broader lookup semantics remain a separate boundary. The
+42-test `libwoven` suite, warning-denying library/kernel/workspace Clippy,
+formatting, and Stage 19.2 compositor visual acceptance passed on 1/2/4 CPUs;
+the 4-CPU run required one retry after an early-boot timeout and its rerun
+passed. Hardware GPU acceleration remains a separate boundary.
+
 ## Graphics track - bounded contextual GPOS sequence-index-1 pair positioning (2026-10-19)
 
 Two-input contextual GPOS format-3 records targeting sequence index one can

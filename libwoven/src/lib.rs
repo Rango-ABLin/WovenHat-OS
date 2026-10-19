@@ -5390,9 +5390,8 @@ pub mod graphics {
                 let left = output[index].glyph_id;
                 let right = output[index + 1].glyph_id;
                 let third = output[index + 2].glyph_id;
-                let context = (index > 0)
-                    .then(|| output[index - 1].glyph_id)
-                    .zip((index + 3 < count).then(|| output[index + 3].glyph_id));
+                let previous = (index > 0).then(|| output[index - 1].glyph_id);
+                let next = (index + 3 < count).then(|| output[index + 3].glyph_id);
                 let Some((x_placement, y_placement, x_advance, y_advance)) = self
                     .gpos_contextual_adjustment(
                         left,
@@ -5401,8 +5400,8 @@ pub mod graphics {
                             script_tag,
                             language_tag,
                             ppem,
-                            previous: context.map(|value| value.0),
-                            next: context.map(|value| value.1),
+                            previous,
+                            next,
                             third: Some(third),
                             fourth: None,
                             fifth: None,
@@ -5442,9 +5441,8 @@ pub mod graphics {
                 let right = output[index + 1].glyph_id;
                 let third = output[index + 2].glyph_id;
                 let fourth = output[index + 3].glyph_id;
-                let context = (index > 0)
-                    .then(|| output[index - 1].glyph_id)
-                    .zip((index + 4 < count).then(|| output[index + 4].glyph_id));
+                let previous = (index > 0).then(|| output[index - 1].glyph_id);
+                let next = (index + 4 < count).then(|| output[index + 4].glyph_id);
                 let Some((x_placement, y_placement, x_advance, y_advance)) = self
                     .gpos_contextual_adjustment(
                         left,
@@ -5453,8 +5451,8 @@ pub mod graphics {
                             script_tag,
                             language_tag,
                             ppem,
-                            previous: context.map(|value| value.0),
-                            next: context.map(|value| value.1),
+                            previous,
+                            next,
                             third: Some(third),
                             fourth: Some(fourth),
                             fifth: None,
@@ -5495,9 +5493,8 @@ pub mod graphics {
                 let third = output[index + 2].glyph_id;
                 let fourth = output[index + 3].glyph_id;
                 let fifth = output[index + 4].glyph_id;
-                let context = (index > 0)
-                    .then(|| output[index - 1].glyph_id)
-                    .zip((index + 5 < count).then(|| output[index + 5].glyph_id));
+                let previous = (index > 0).then(|| output[index - 1].glyph_id);
+                let next = (index + 5 < count).then(|| output[index + 5].glyph_id);
                 let Some((x_placement, y_placement, x_advance, y_advance)) = self
                     .gpos_contextual_adjustment(
                         left,
@@ -5506,8 +5503,8 @@ pub mod graphics {
                             script_tag,
                             language_tag,
                             ppem,
-                            previous: context.map(|value| value.0),
-                            next: context.map(|value| value.1),
+                            previous,
+                            next,
                             third: Some(third),
                             fourth: Some(fourth),
                             fifth: Some(fifth),
@@ -8016,16 +8013,22 @@ pub mod graphics {
                                 continue;
                             }
                             if nested_type == 2 {
-                                if options.input_count != 2 || options.target_sequence_index > 1 {
+                                if options.input_count < 2 || options.target_sequence_index > 4 {
                                     continue;
                                 }
-                                let pair_right = if options.target_sequence_index == 0 {
-                                    right
-                                } else {
-                                    let Some(next) = options.next else {
-                                        continue;
-                                    };
-                                    next
+                                let pair_right = match options.target_sequence_index {
+                                    0 => Some(right),
+                                    1 if options.input_count >= 3 => options.third,
+                                    1 => options.next,
+                                    2 if options.input_count >= 4 => options.fourth,
+                                    2 => options.next,
+                                    3 if options.input_count >= 5 => options.fifth,
+                                    3 => options.next,
+                                    4 => options.next,
+                                    _ => None,
+                                };
+                                let Some(pair_right) = pair_right else {
+                                    continue;
                                 };
                                 if nested_subtable
                                     .checked_add(10)
@@ -13172,6 +13175,33 @@ mod tests {
         assert_eq!(shaped_three[1].origin, Point::new(502, 15));
         assert_eq!(shaped_three[2].origin, Point::new(1002, 15));
         assert_eq!(shaped_three[2].advance, 525);
+        let mut contextual_three_pair_bytes = contextual_three_bytes;
+        put32(&mut contextual_three_pair_bytes, 104, 120);
+        put16(&mut contextual_three_pair_bytes, 314, 66);
+        put16(&mut contextual_three_pair_bytes, 336, 2);
+        put16(&mut contextual_three_pair_bytes, 344, 1);
+        put16(&mut contextual_three_pair_bytes, 346, 26);
+        put16(&mut contextual_three_pair_bytes, 348, 4);
+        put16(&mut contextual_three_pair_bytes, 350, 0);
+        put16(&mut contextual_three_pair_bytes, 352, 1);
+        put16(&mut contextual_three_pair_bytes, 354, 18);
+        put16(&mut contextual_three_pair_bytes, 362, 1);
+        put16(&mut contextual_three_pair_bytes, 364, 1);
+        put_i16(&mut contextual_three_pair_bytes, 366, 25);
+        put16(&mut contextual_three_pair_bytes, 370, 1);
+        put16(&mut contextual_three_pair_bytes, 372, 1);
+        put16(&mut contextual_three_pair_bytes, 374, 1);
+        let contextual_three_pair_face =
+            TrueTypeFace::from_bytes(&contextual_three_pair_bytes).unwrap();
+        let mut shaped_three_pair = [shaped[0]; 4];
+        assert_eq!(
+            contextual_three_pair_face
+                .shape_text_ligatures("AAAA", Point::new(2, 15), 1000, &mut shaped_three_pair)
+                .unwrap(),
+            4
+        );
+        assert_eq!(shaped_three_pair[2].advance, 525);
+        assert_eq!(shaped_three_pair[3].origin, Point::new(1527, 15));
         let mut contextual_four_bytes = contextual_gpos_bytes;
         put32(&mut contextual_four_bytes, 104, 156);
         put16(&mut contextual_four_bytes, 308, 4);

@@ -1,5 +1,14 @@
 # Agent coordination (Claude Code and Codex)
 
+**Codex graphics-track bounded multi-input contextual GPOS pair positioning (2026-10-19):**
+nested type-2 format-1 pair positioning now works across the bounded input
+sequences, selecting an in-sequence following glyph or the next shaped glyph
+as partner and propagating advances from the target. Bounds and partner
+availability remain checked. The 42-test `libwoven` suite, warning-denying
+library/kernel/workspace Clippy, formatting, and Stage 19.2 compositor visual
+acceptance on 1/2/4 CPUs passed; the 4-CPU run needed one early-boot retry and
+then passed. Hardware GPU acceleration remains open.
+
 **Codex graphics-track bounded contextual GPOS sequence-index-1 pair positioning (2026-10-19):**
 two-input format-3 records targeting sequence index one can dispatch bounded
 nested type-2 format-1 pair positioning against the next shaped glyph. Pair
