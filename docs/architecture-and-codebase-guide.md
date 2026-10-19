@@ -1,5 +1,12 @@
 # WovenHat OS Architecture & Codebase Guide
 
+## Graphics two-coverage contextual GPOS guard update (2026-10-19)
+
+The bounded contextual format-3 matcher validates up to two backtrack and two
+lookahead coverage records using independently supplied neighboring glyphs.
+The implementation remains explicitly bounded and fails closed when required
+neighbors are unavailable; longer context is not implied.
+
 ## Graphics multi-input contextual GPOS pair update (2026-10-19)
 
 Nested type-2 pair positioning can target each supported contextual input

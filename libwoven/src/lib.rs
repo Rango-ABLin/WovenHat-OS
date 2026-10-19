@@ -3534,7 +3534,7 @@ pub mod graphics {
             &self,
             left: u16,
             right: u16,
-            context: Option<(u16, u16)>,
+            context: GposContextNeighbors,
             script_tag: Option<[u8; 4]>,
             language_tag: Option<[u8; 4]>,
             ppem: Option<u16>,
@@ -3736,8 +3736,10 @@ pub mod graphics {
                             script_tag,
                             language_tag,
                             ppem,
-                            previous: context.map(|value| value.0),
-                            next: context.map(|value| value.1),
+                            previous: context.previous,
+                            previous2: context.previous2,
+                            next: context.next,
+                            next2: context.next2,
                             third: None,
                             fourth: None,
                             fifth: None,
@@ -4161,8 +4163,10 @@ pub mod graphics {
                         script_tag,
                         language_tag,
                         ppem,
-                        previous: context.map(|value| value.0),
-                        next: context.map(|value| value.1),
+                        previous: context.previous,
+                        previous2: context.previous2,
+                        next: context.next,
+                        next2: context.next2,
                         third: None,
                         fourth: None,
                         fifth: None,
@@ -5254,9 +5258,12 @@ pub mod graphics {
                     .gpos_pair_adjustment(
                         left,
                         right,
-                        (index > 0)
-                            .then(|| output[index - 1].glyph_id)
-                            .zip((index + 2 < count).then(|| output[index + 2].glyph_id)),
+                        GposContextNeighbors {
+                            previous: (index > 0).then(|| output[index - 1].glyph_id),
+                            previous2: (index > 1).then(|| output[index - 2].glyph_id),
+                            next: (index + 2 < count).then(|| output[index + 2].glyph_id),
+                            next2: (index + 3 < count).then(|| output[index + 3].glyph_id),
+                        },
                         script_tag,
                         language_tag,
                         ppem,
@@ -5292,7 +5299,9 @@ pub mod graphics {
                 let left = output[index].glyph_id;
                 let right = output[index + 1].glyph_id;
                 let previous = (index > 0).then(|| output[index - 1].glyph_id);
+                let previous2 = (index > 1).then(|| output[index - 2].glyph_id);
                 let next = (index + 2 < count).then(|| output[index + 2].glyph_id);
+                let next2 = (index + 3 < count).then(|| output[index + 3].glyph_id);
                 let Some((x_placement, y_placement, x_advance, y_advance)) = self
                     .gpos_contextual_adjustment(
                         left,
@@ -5302,7 +5311,9 @@ pub mod graphics {
                             language_tag,
                             ppem,
                             previous,
+                            previous2,
                             next,
+                            next2,
                             third: None,
                             fourth: None,
                             fifth: None,
@@ -5339,9 +5350,10 @@ pub mod graphics {
             }
             for index in 0..count {
                 let glyph = output[index].glyph_id;
-                let context = (index > 0)
-                    .then(|| output[index - 1].glyph_id)
-                    .zip((index + 1 < count).then(|| output[index + 1].glyph_id));
+                let previous = (index > 0).then(|| output[index - 1].glyph_id);
+                let previous2 = (index > 1).then(|| output[index - 2].glyph_id);
+                let next = (index + 1 < count).then(|| output[index + 1].glyph_id);
+                let next2 = (index + 2 < count).then(|| output[index + 2].glyph_id);
                 let Some((x_placement, y_placement, x_advance, y_advance)) = self
                     .gpos_contextual_adjustment(
                         glyph,
@@ -5350,8 +5362,10 @@ pub mod graphics {
                             script_tag,
                             language_tag,
                             ppem,
-                            previous: context.map(|value| value.0),
-                            next: context.map(|value| value.1),
+                            previous,
+                            previous2,
+                            next,
+                            next2,
                             third: None,
                             fourth: None,
                             fifth: None,
@@ -5391,7 +5405,9 @@ pub mod graphics {
                 let right = output[index + 1].glyph_id;
                 let third = output[index + 2].glyph_id;
                 let previous = (index > 0).then(|| output[index - 1].glyph_id);
+                let previous2 = (index > 1).then(|| output[index - 2].glyph_id);
                 let next = (index + 3 < count).then(|| output[index + 3].glyph_id);
+                let next2 = (index + 4 < count).then(|| output[index + 4].glyph_id);
                 let Some((x_placement, y_placement, x_advance, y_advance)) = self
                     .gpos_contextual_adjustment(
                         left,
@@ -5401,7 +5417,9 @@ pub mod graphics {
                             language_tag,
                             ppem,
                             previous,
+                            previous2,
                             next,
+                            next2,
                             third: Some(third),
                             fourth: None,
                             fifth: None,
@@ -5442,7 +5460,9 @@ pub mod graphics {
                 let third = output[index + 2].glyph_id;
                 let fourth = output[index + 3].glyph_id;
                 let previous = (index > 0).then(|| output[index - 1].glyph_id);
+                let previous2 = (index > 1).then(|| output[index - 2].glyph_id);
                 let next = (index + 4 < count).then(|| output[index + 4].glyph_id);
+                let next2 = (index + 5 < count).then(|| output[index + 5].glyph_id);
                 let Some((x_placement, y_placement, x_advance, y_advance)) = self
                     .gpos_contextual_adjustment(
                         left,
@@ -5452,7 +5472,9 @@ pub mod graphics {
                             language_tag,
                             ppem,
                             previous,
+                            previous2,
                             next,
+                            next2,
                             third: Some(third),
                             fourth: Some(fourth),
                             fifth: None,
@@ -5494,7 +5516,9 @@ pub mod graphics {
                 let fourth = output[index + 3].glyph_id;
                 let fifth = output[index + 4].glyph_id;
                 let previous = (index > 0).then(|| output[index - 1].glyph_id);
+                let previous2 = (index > 1).then(|| output[index - 2].glyph_id);
                 let next = (index + 5 < count).then(|| output[index + 5].glyph_id);
+                let next2 = (index + 6 < count).then(|| output[index + 6].glyph_id);
                 let Some((x_placement, y_placement, x_advance, y_advance)) = self
                     .gpos_contextual_adjustment(
                         left,
@@ -5504,7 +5528,9 @@ pub mod graphics {
                             language_tag,
                             ppem,
                             previous,
+                            previous2,
                             next,
+                            next2,
                             third: Some(third),
                             fourth: Some(fourth),
                             fifth: Some(fifth),
@@ -5542,7 +5568,14 @@ pub mod graphics {
             for index in 0..count {
                 let glyph = output[index].glyph_id;
                 let Some((x_placement, y_placement, x_advance, y_advance)) = self
-                    .gpos_pair_adjustment(glyph, u16::MAX, None, script_tag, language_tag, ppem)?
+                    .gpos_pair_adjustment(
+                        glyph,
+                        u16::MAX,
+                        GposContextNeighbors::default(),
+                        script_tag,
+                        language_tag,
+                        ppem,
+                    )?
                 else {
                     continue;
                 };
@@ -7628,13 +7661,23 @@ pub mod graphics {
         Ok(Some((true, nested)))
     }
 
+    #[derive(Clone, Copy, Default)]
+    struct GposContextNeighbors {
+        previous: Option<u16>,
+        previous2: Option<u16>,
+        next: Option<u16>,
+        next2: Option<u16>,
+    }
+
     #[derive(Clone, Copy)]
     struct GposContextOptions {
         script_tag: Option<[u8; 4]>,
         language_tag: Option<[u8; 4]>,
         ppem: Option<u16>,
         previous: Option<u16>,
+        previous2: Option<u16>,
         next: Option<u16>,
+        next2: Option<u16>,
         third: Option<u16>,
         fourth: Option<u16>,
         fifth: Option<u16>,
@@ -7781,7 +7824,7 @@ pub mod graphics {
                     let backtrack_count = usize::from(
                         read_u16(bytes, subtable + 2).ok_or(TrueTypeError::BadTableDirectory)?,
                     );
-                    if backtrack_count > 1 {
+                    if backtrack_count > 2 {
                         continue;
                     }
                     let backtrack_offsets = subtable
@@ -7807,7 +7850,7 @@ pub mod graphics {
                         read_u16(bytes, lookahead_count_offset)
                             .ok_or(TrueTypeError::BadTableDirectory)?,
                     );
-                    if lookahead_count > 1 {
+                    if lookahead_count > 2 {
                         continue;
                     }
                     let lookahead_offsets = lookahead_count_offset
@@ -7816,15 +7859,22 @@ pub mod graphics {
                     let record_count_offset = lookahead_offsets
                         .checked_add(lookahead_count * 2)
                         .ok_or(TrueTypeError::BadTableDirectory)?;
-                    if backtrack_count == 1 {
-                        let Some(backtrack) = options.previous else {
-                            continue;
+                    let mut context_matches = true;
+                    for context_index in 0..backtrack_count {
+                        let backtrack = match context_index {
+                            0 => options.previous,
+                            1 => options.previous2,
+                            _ => None,
+                        };
+                        let Some(backtrack) = backtrack else {
+                            context_matches = false;
+                            break;
                         };
                         if gsub_coverage_index(
                             bytes,
                             subtable
                                 .checked_add(usize::from(
-                                    read_u16(bytes, backtrack_offsets)
+                                    read_u16(bytes, backtrack_offsets + context_index * 2)
                                         .ok_or(TrueTypeError::BadTableDirectory)?,
                                 ))
                                 .ok_or(TrueTypeError::BadTableDirectory)?,
@@ -7833,20 +7883,25 @@ pub mod graphics {
                         )?
                         .is_none()
                         {
-                            continue;
+                            context_matches = false;
+                            break;
                         }
-                    } else if backtrack_count != 0 {
-                        continue;
                     }
-                    if lookahead_count == 1 {
-                        let Some(lookahead) = options.next else {
-                            continue;
+                    for context_index in 0..lookahead_count {
+                        let lookahead = match context_index {
+                            0 => options.next,
+                            1 => options.next2,
+                            _ => None,
+                        };
+                        let Some(lookahead) = lookahead else {
+                            context_matches = false;
+                            break;
                         };
                         if gsub_coverage_index(
                             bytes,
                             subtable
                                 .checked_add(usize::from(
-                                    read_u16(bytes, lookahead_offsets)
+                                    read_u16(bytes, lookahead_offsets + context_index * 2)
                                         .ok_or(TrueTypeError::BadTableDirectory)?,
                                 ))
                                 .ok_or(TrueTypeError::BadTableDirectory)?,
@@ -7855,9 +7910,11 @@ pub mod graphics {
                         )?
                         .is_none()
                         {
-                            continue;
+                            context_matches = false;
+                            break;
                         }
-                    } else if lookahead_count != 0 {
+                    }
+                    if !context_matches {
                         continue;
                     }
                     let record_count = usize::from(
@@ -13074,6 +13131,36 @@ mod tests {
         assert_eq!(shaped_pair_second[1].origin, Point::new(502, 15));
         assert_eq!(shaped_pair_second[1].advance, 525);
         assert_eq!(shaped_pair_second[2].origin, Point::new(1027, 15));
+        let mut contextual_context2_bytes = contextual_gpos_bytes;
+        put32(&mut contextual_context2_bytes, 104, 156);
+        put16(&mut contextual_context2_bytes, 306, 2);
+        put16(&mut contextual_context2_bytes, 308, 60);
+        put16(&mut contextual_context2_bytes, 310, 66);
+        put16(&mut contextual_context2_bytes, 312, 2);
+        put16(&mut contextual_context2_bytes, 314, 72);
+        put16(&mut contextual_context2_bytes, 316, 78);
+        put16(&mut contextual_context2_bytes, 318, 2);
+        put16(&mut contextual_context2_bytes, 320, 84);
+        put16(&mut contextual_context2_bytes, 322, 90);
+        put16(&mut contextual_context2_bytes, 324, 1);
+        put16(&mut contextual_context2_bytes, 326, 0);
+        put16(&mut contextual_context2_bytes, 328, 1);
+        for offset in [364, 370, 376, 382, 388, 394] {
+            put16(&mut contextual_context2_bytes, offset, 1);
+            put16(&mut contextual_context2_bytes, offset + 2, 1);
+            put16(&mut contextual_context2_bytes, offset + 4, 1);
+        }
+        let contextual_context2_face =
+            TrueTypeFace::from_bytes(&contextual_context2_bytes).unwrap();
+        let mut shaped_context2 = [shaped[0]; 6];
+        assert_eq!(
+            contextual_context2_face
+                .shape_text_ligatures("AAAAAA", Point::new(2, 15), 1000, &mut shaped_context2)
+                .unwrap(),
+            6
+        );
+        assert_eq!(shaped_context2[2].advance, 525);
+        assert_eq!(shaped_context2[3].origin, Point::new(1527, 15));
         let mut contextual_multi_bytes = contextual_gpos_bytes;
         put32(&mut contextual_multi_bytes, 104, 148);
         put16(&mut contextual_multi_bytes, 288, 3);

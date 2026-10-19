@@ -1,5 +1,15 @@
 # Stage status
 
+## Graphics track - bounded two-coverage contextual GPOS guards (2026-10-19)
+
+Contextual GPOS format-3 matching now supports up to two checked backtrack
+coverages and two checked lookahead coverages, supplied from adjacent shaped
+glyphs at each bounded input pass. Missing neighbors fail closed; longer
+context and broader contextual lookup semantics remain separate boundaries.
+The 42-test `libwoven` suite, warning-denying library/kernel/workspace Clippy,
+formatting, and Stage 19.2 compositor visual acceptance passed on 1/2/4 CPUs.
+Hardware GPU acceleration remains a separate boundary.
+
 ## Graphics track - bounded multi-input contextual GPOS pair positioning (2026-10-19)
 
 Nested type-2 format-1 pair positioning now dispatches across the bounded

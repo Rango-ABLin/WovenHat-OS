@@ -1,5 +1,13 @@
 # Agent coordination (Claude Code and Codex)
 
+**Codex graphics-track bounded two-coverage contextual GPOS guards (2026-10-19):**
+format-3 matching now validates up to two backtrack and two lookahead
+coverages from independently supplied adjacent shaped glyphs. Missing context
+fails closed; longer context and broader contextual lookup semantics remain
+open. The 42-test `libwoven` suite, warning-denying library/kernel/workspace
+Clippy, formatting, and Stage 19.2 compositor visual acceptance on 1/2/4 CPUs
+passed. Hardware GPU acceleration remains open.
+
 **Codex graphics-track bounded multi-input contextual GPOS pair positioning (2026-10-19):**
 nested type-2 format-1 pair positioning now works across the bounded input
 sequences, selecting an in-sequence following glyph or the next shaped glyph
