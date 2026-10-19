@@ -1,5 +1,14 @@
 # Agent coordination (Claude Code and Codex)
 
+**Codex graphics-track Settings pointer control acceptance (2026-10-19):**
+WovenSettings now has a bounded local `Refresh` button. A forwarded `WPBT`
+release inside x=250..339, y=190..213 re-reads the live read-only settings
+values, increments a visible refresh counter, and repaints. The production
+QEMU gate passed on 1/2/4 CPUs with `--app settings
+--exercise-client-click`; evidence is under
+`audit-artifacts/settings-desktop-{1,2,4}cpu-*`. USB HID and hardware GPU
+presentation remain separate boundaries.
+
 **Codex graphics-track Calculator pointer control acceptance (2026-10-19):**
 WovenCalculator now has a bounded local `Evaluate` button. A forwarded
 `WPBT` release inside x=150..209, y=110..127 evaluates the current expression

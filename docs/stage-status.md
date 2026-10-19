@@ -1,5 +1,20 @@
 # Stage status
 
+## Graphics track - Settings pointer control acceptance (2026-10-19)
+
+WovenSettings now presents a bounded, non-mutating `Refresh` control at local
+client coordinates x=250..339, y=190..213. A primary-button release forwarded
+as `WPBT` within that rectangle re-reads the live identity/clock/display data
+and increments a visible refresh counter. The production QEMU gate
+`scripts/test-files-desktop-qemu.py --app settings --exercise-client-click`
+passed on 1/2/4 CPUs. Evidence is under
+`audit-artifacts/settings-desktop-{1,2,4}cpu-*`.
+
+This accepts a second functional client control without adding persistence or
+privileged mutation. Other clients still have pointer feedback rather than
+accepted functional controls; USB HID qualification and hardware GPU
+presentation remain open.
+
 ## Graphics track - Calculator pointer control acceptance (2026-10-19)
 
 WovenCalculator now presents a bounded `Evaluate` control at local client

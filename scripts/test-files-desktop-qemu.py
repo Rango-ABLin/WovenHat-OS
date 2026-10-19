@@ -60,12 +60,12 @@ def main():
     parser.add_argument('--exercise-resize', action='store_true', help='exercise the WovenShell WSIZ/WRSZ path (Calculator, Terminal, Settings, Monitor, Security, Editor, Images, Update, Store, or Files)')
     parser.add_argument('--exercise-pointer', action='store_true', help='exercise the desktop PS/2 pointer cursor path with relative motion and a click')
     parser.add_argument('--exercise-client-pointer', action='store_true', help='exercise client pointer forwarding through the desktop PS/2 path')
-    parser.add_argument('--exercise-client-click', action='store_true', help='exercise the Calculator Evaluate button through forwarded PS/2 pointer input')
+    parser.add_argument('--exercise-client-click', action='store_true', help='exercise a bounded client control through forwarded PS/2 pointer input')
     args = parser.parse_args()
     if args.exercise_resize and args.app not in ('calculator', 'terminal', 'settings', 'monitor', 'security', 'editor', 'images', 'update', 'store', 'files'):
         parser.error('--exercise-resize currently supports calculator, terminal, settings, monitor, security, editor, images, update, store, and files only')
-    if args.exercise_client_click and args.app != 'calculator':
-        parser.error('--exercise-client-click currently supports calculator only')
+    if args.exercise_client_click and args.app not in ('calculator', 'settings'):
+        parser.error('--exercise-client-click currently supports calculator and settings only')
     app = {
         'calculator': ('calculator', 'WovenCalculator', 'woven-calculator', 'calculator'),
         'files': ('files', 'WovenFiles', 'woven-files', 'files'),
@@ -282,15 +282,17 @@ def main():
             if client_changed < 20:
                 raise RuntimeError(f'{app[1]} client pointer did not change its presented surface: changed_pixels={client_changed}')
         if args.exercise_client_click:
-            click_baseline = out / 'woven-calculator-before-client-click.ppm'
+            control = {
+                'calculator': {'move': (-100, -41), 'marker': 'WovenCalculator: pointer evaluated', 'name': 'calculator'},
+                'settings': {'move': (0, 40), 'marker': 'WovenSettings: pointer refreshed', 'name': 'settings'},
+            }[args.app]
+            click_baseline = out / f"woven-{control['name']}-before-client-click.ppm"
             command_qmp('screendump', {'filename': str(click_baseline)})
-            # The first window opens at (40, 40); its client body begins
-            # below the title bar. Target the bounded Evaluate button at
-            # local (150..210, 110..128), which is screen-space (380..500,
-            # 300..336) after the shell's 2x client presentation scale.
+            # The first window opens at (40, 40) in the logical 640x400
+            # desktop. Each client control uses a fixed bounded local target.
             command_qmp('input-send-event', {'events': [
-                {'type': 'rel', 'data': {'axis': 'x', 'value': -100}},
-                {'type': 'rel', 'data': {'axis': 'y', 'value': -41}},
+                {'type': 'rel', 'data': {'axis': 'x', 'value': control['move'][0]}},
+                {'type': 'rel', 'data': {'axis': 'y', 'value': control['move'][1]}},
             ]})
             time.sleep(0.5)
             command_qmp('input-send-event', {'events': [
@@ -300,13 +302,13 @@ def main():
             command_qmp('input-send-event', {'events': [
                 {'type': 'btn', 'data': {'down': False, 'button': 'left'}},
             ]})
-            command_qmp('screendump', {'filename': str(out / 'woven-calculator-after-client-click.ppm')})
-            while 'WovenCalculator: pointer evaluated' not in serial.read_text(errors='replace'):
+            command_qmp('screendump', {'filename': str(out / f"woven-{control['name']}-after-client-click.ppm")})
+            while control['marker'] not in serial.read_text(errors='replace'):
                 if process.poll() is not None or time.monotonic() > deadline:
-                    raise RuntimeError('WovenCalculator did not activate Evaluate through forwarded pointer input')
+                    raise RuntimeError(f'{app[1]} did not activate its bounded control through forwarded pointer input')
                 time.sleep(0.1)
             time.sleep(1)
-            click_capture = out / 'woven-calculator-after-client-click.ppm'
+            click_capture = out / f"woven-{control['name']}-after-client-click.ppm"
             command_qmp('screendump', {'filename': str(click_capture)})
             click_width, click_height, click_pixels = ppm_pixels(click_capture)
             before_click_width, before_click_height, before_click = ppm_pixels(click_baseline)

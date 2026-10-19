@@ -1,5 +1,15 @@
 # WovenHat OS Architecture & Codebase Guide
 
+## Graphics Settings pointer control (2026-10-19)
+
+WovenSettings renders a bounded `Refresh` button in its 360x240 client
+surface at local x=250..339 and y=190..213. On a primary-button release in
+that rectangle, the client increments a bounded refresh counter, re-renders
+the current identity/clock/display values, and emits a delivery marker. The
+operation is read-only and non-persistent. QEMU visual acceptance passed on
+1/2/4 CPUs. This extends functional controls to Settings while USB HID and
+hardware GPU qualification remain separate.
+
 ## Graphics Calculator pointer control (2026-10-19)
 
 WovenCalculator renders a bounded `Evaluate` button in its 240x150 client
