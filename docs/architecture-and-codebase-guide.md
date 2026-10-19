@@ -1,5 +1,11 @@
 # WovenHat OS Architecture & Codebase Guide
 
+## Graphics stroke geometry update (2026-10-19)
+
+`Renderer::stroke` computes far edges with checked conversion and saturation,
+then delegates each edge to the clipped fill path. This preserves normal
+outline behavior while keeping extreme rectangle dimensions bounded.
+
 ## Graphics gradient clipping update (2026-10-19)
 
 `Renderer::vertical_gradient` and `Renderer::horizontal_gradient` iterate

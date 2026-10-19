@@ -9807,15 +9807,15 @@ pub mod graphics {
                 return;
             }
             self.fill(Rect::new(rect.x, rect.y, rect.width, 1), color);
-            self.fill(
-                Rect::new(rect.x, rect.y + rect.height as i32 - 1, rect.width, 1),
-                color,
-            );
+            let right = rect
+                .x
+                .saturating_add(i32::try_from(rect.width.saturating_sub(1)).unwrap_or(i32::MAX));
+            let bottom = rect
+                .y
+                .saturating_add(i32::try_from(rect.height.saturating_sub(1)).unwrap_or(i32::MAX));
+            self.fill(Rect::new(rect.x, bottom, rect.width, 1), color);
             self.fill(Rect::new(rect.x, rect.y, 1, rect.height), color);
-            self.fill(
-                Rect::new(rect.x + rect.width as i32 - 1, rect.y, 1, rect.height),
-                color,
-            );
+            self.fill(Rect::new(right, rect.y, 1, rect.height), color);
         }
 
         /// Blit a bounded row-major image into the Canvas. Invalid dimensions
@@ -12756,6 +12756,25 @@ mod tests {
         assert_eq!(pixels[5], Color::WHITE.packed());
         assert_eq!(pixels[10], Color::WHITE.packed());
         assert_eq!(pixels[15], Color::TITLE.packed());
+    }
+
+    #[test]
+    fn wovengraphics_stroke_clips_extreme_rectangle() {
+        use crate::graphics::{Color, Rect, Renderer};
+
+        let mut pixels = [0u32; 16];
+        {
+            let mut canvas = Canvas::new(&mut pixels, 0, 0, 4, 4).unwrap();
+            Renderer::new(&mut canvas).stroke(Rect::new(0, 0, usize::MAX, 4), Color::TITLE);
+        }
+        for column in 0..4 {
+            assert_eq!(pixels[column], Color::TITLE.packed());
+            assert_eq!(pixels[12 + column], Color::TITLE.packed());
+        }
+        for row in 1..3 {
+            assert_eq!(pixels[row * 4], Color::TITLE.packed());
+            assert_eq!(pixels[row * 4 + 1], 0);
+        }
     }
 
     #[test]

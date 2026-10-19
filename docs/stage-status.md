@@ -1,5 +1,14 @@
 # Stage status
 
+## Graphics track - bounded stroke geometry (2026-10-19)
+
+WovenGraphics rectangle outlines now derive their far edges with checked
+`usize`-to-`i32` conversion and saturation before the existing clipped fills.
+Extreme outline dimensions therefore cannot wrap into an unintended visible
+edge. The 46-test `libwoven` suite, warning-denying library/kernel/workspace
+Clippy, formatting, and Stage 19.2 compositor visual acceptance passed on
+1/2/4 CPUs. Hardware GPU acceleration remains a separate boundary.
+
 ## Graphics track - bounded gradient rasterization (2026-10-19)
 
 WovenGraphics vertical and horizontal gradients now clip iteration to the
