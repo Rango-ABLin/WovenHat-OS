@@ -1,5 +1,13 @@
 # WovenHat OS Architecture & Codebase Guide
 
+## Graphics WovenMonitor bounded resize (2026-10-19)
+
+`apps/woven-monitor/src/gui.rs` now negotiates `WSIZ/WRSZ` replacement
+surfaces with a loader-safe 480×320 static Canvas cap and redraws its bounded
+telemetry snapshot after resizing. The QMP resize gate passed on 1/2/4 CPUs.
+Monitor remains read-only; pointer controls and hardware GPU output are not
+implied.
+
 ## Graphics WovenSettings bounded resize (2026-10-19)
 
 `apps/woven-settings/src/gui.rs` now handles `WSIZ` with a loader-safe static
@@ -91,8 +99,9 @@ QMP launcher/screendump gate passed on 1/2/4 CPUs. Audit display is capped at
 clock, display geometry, and storage-count telemetry. It uses a static Canvas
 buffer and the WovenShell WOPN/WCLS lifecycle; the catalog supplies
 `--gui %p`. The shared QMP launcher/screendump gate passed on 1/2/4 CPUs.
-Storage enumeration remains capped at 128 entries, and no controls, WSIZ
-resize, or hardware GPU output is implied.
+Storage enumeration remains capped at 128 entries, and no controls, pointer
+widgets, or hardware GPU output is implied; bounded WSIZ/WRSZ is covered by
+the newer Monitor resize section.
 
 ## Graphics WovenSettings client (2026-10-19)
 

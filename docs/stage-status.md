@@ -1,5 +1,15 @@
 # Stage status
 
+## Graphics track - WovenMonitor bounded resize (2026-10-19)
+
+WovenMonitor now handles `WSIZ` by creating and sharing a replacement Canvas
+surface, publishing `WRSZ` before the bounded upload, and clamping requests to
+480×320. The QMP `--exercise-resize` gate passed on 1/2/4 CPUs with evidence
+under `audit-artifacts/monitor-desktop-{1,2,4}cpu-*`.
+
+Monitor remains read-only and bounded at 128 storage entries; pointer widgets
+and hardware GPU presentation are not claimed.
+
 ## Graphics track - WovenSettings bounded resize (2026-10-19)
 
 WovenSettings now handles `WSIZ` by creating and sharing a replacement Canvas
@@ -205,9 +215,9 @@ CPUs.
 
 **Limits.** WovenTerminal has bounded text input and resize preview but
 remains CLI/interactive for full command execution. Calculator has bounded
-input and resize preview. Files, Settings, Monitor, Security, Editor, Images,
-Update, and Store have desktop previews but still lack resize and broader
-controls/input; hardware GPU presentation is not claimed.
+input and resize preview. Files, Security, Editor, Images, Update, and Store
+have desktop previews but still lack resize and broader controls/input;
+hardware GPU presentation is not claimed.
 
 ## Graphics track - WovenFiles desktop client foundation (2026-10-19)
 

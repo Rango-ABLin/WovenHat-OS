@@ -11,14 +11,16 @@ const PANEL_Y: i32 = 12;
 const PANEL_WIDTH: usize = 336;
 const PANEL_HEIGHT: usize = 196;
 const MAX_STORAGE_ENTRIES: usize = 128;
+const MAX_SURFACE_WIDTH: usize = 480;
+const MAX_SURFACE_HEIGHT: usize = 320;
 
-struct PixelBuffer(core::cell::UnsafeCell<[u32; (WIDTH * HEIGHT) as usize]>);
+struct PixelBuffer(core::cell::UnsafeCell<[u32; MAX_SURFACE_WIDTH * MAX_SURFACE_HEIGHT]>);
 
 // SAFETY: the monitor GUI is single-threaded and owns this buffer exclusively.
 unsafe impl Sync for PixelBuffer {}
 
 static CANVAS_PIXELS: PixelBuffer =
-    PixelBuffer(core::cell::UnsafeCell::new([0; (WIDTH * HEIGHT) as usize]));
+    PixelBuffer(core::cell::UnsafeCell::new([0; MAX_SURFACE_WIDTH * MAX_SURFACE_HEIGHT]));
 
 fn fail(code: u64) -> ! {
     let _ = libwoven::print("WovenMonitor: failure\n");
@@ -59,41 +61,64 @@ fn storage_count() -> usize {
     count
 }
 
-/// Open a read-only Monitor window through WovenShell's WOPN protocol.
-pub fn run(shell: Option<&[u8]>) -> ! {
-    let Some(shell) = shell.and_then(parse_u64).map(libwoven::process::Id) else {
-        fail(7)
-    };
-    let window = GraphicsSurface::create(WIDTH, HEIGHT).unwrap_or_else(|_| fail(1));
-    // SAFETY: this process is single-threaded and takes the buffer once.
-    let pixels = unsafe { &mut *CANVAS_PIXELS.0.get() };
-    let mut canvas = Canvas::new(pixels, 0, 0, WIDTH as usize, HEIGHT as usize)
-        .unwrap_or_else(|| fail(2));
-    canvas.fill_rect(0, 0, WIDTH as usize, HEIGHT as usize, BACKGROUND);
+fn draw_monitor(canvas: &mut Canvas<'_>) {
+    canvas.fill_rect(0, 0, canvas.width(), canvas.height(), BACKGROUND);
     canvas.fill_rect(PANEL_X, PANEL_Y, PANEL_WIDTH, PANEL_HEIGHT, PANEL);
-    stroke_rect(&mut canvas, PANEL_X, PANEL_Y, PANEL_WIDTH, PANEL_HEIGHT, ACCENT);
+    stroke_rect(canvas, PANEL_X, PANEL_Y, PANEL_WIDTH, PANEL_HEIGHT, ACCENT);
     canvas.draw_text(PANEL_X + 10, PANEL_Y + 8, "WovenMonitor", TEXT);
     canvas.draw_text(PANEL_X + 10, PANEL_Y + 34, "System snapshot", ACCENT);
     let mut digits = [0u8; 20];
     if let Ok(time) = libwoven::clock() {
-        draw_number(&mut canvas, PANEL_X + 10, PANEL_Y + 52, "Hour ", u64::from(time.hour), &mut digits);
-        draw_number(&mut canvas, PANEL_X + 120, PANEL_Y + 52, "Min ", u64::from(time.minute), &mut digits);
-        draw_number(&mut canvas, PANEL_X + 220, PANEL_Y + 52, "Sec ", u64::from(time.second), &mut digits);
+        draw_number(canvas, PANEL_X + 10, PANEL_Y + 52, "Hour ", u64::from(time.hour), &mut digits);
+        draw_number(canvas, PANEL_X + 120, PANEL_Y + 52, "Min ", u64::from(time.minute), &mut digits);
+        draw_number(canvas, PANEL_X + 220, PANEL_Y + 52, "Sec ", u64::from(time.second), &mut digits);
     } else {
         canvas.draw_text(PANEL_X + 10, PANEL_Y + 52, "Clock unavailable", TEXT);
     }
     canvas.draw_text(PANEL_X + 10, PANEL_Y + 84, "Display", ACCENT);
     if let Ok(info) = libwoven::compositor_info() {
-        draw_number(&mut canvas, PANEL_X + 10, PANEL_Y + 100, "W ", u64::from(info.width), &mut digits);
-        draw_number(&mut canvas, PANEL_X + 110, PANEL_Y + 100, "H ", u64::from(info.height), &mut digits);
-        draw_number(&mut canvas, PANEL_X + 210, PANEL_Y + 100, "Scale ", u64::from(info.scale), &mut digits);
+        draw_number(canvas, PANEL_X + 10, PANEL_Y + 100, "W ", u64::from(info.width), &mut digits);
+        draw_number(canvas, PANEL_X + 110, PANEL_Y + 100, "H ", u64::from(info.height), &mut digits);
+        draw_number(canvas, PANEL_X + 210, PANEL_Y + 100, "Scale ", u64::from(info.scale), &mut digits);
     } else {
         canvas.draw_text(PANEL_X + 10, PANEL_Y + 100, "Display unavailable", TEXT);
     }
     canvas.draw_text(PANEL_X + 10, PANEL_Y + 132, "Storage", ACCENT);
-    draw_number(&mut canvas, PANEL_X + 10, PANEL_Y + 148, "Entries ", storage_count() as u64, &mut digits);
+    draw_number(canvas, PANEL_X + 10, PANEL_Y + 148, "Entries ", storage_count() as u64, &mut digits);
     canvas.draw_text(PANEL_X + 10, PANEL_Y + 172, "Bounded scan: 128 entries", TEXT);
-    if window.write_canvas(&canvas).is_err() {
+}
+
+fn render(window: &GraphicsSurface) -> bool {
+    let pixels = unsafe { &mut *CANVAS_PIXELS.0.get() };
+    let Some(mut canvas) = Canvas::new(
+        pixels,
+        0,
+        0,
+        window.width() as usize,
+        window.height() as usize,
+    ) else {
+        return false;
+    };
+    draw_monitor(&mut canvas);
+    window.write_canvas(&canvas).is_ok()
+}
+
+fn send_resize(window: &GraphicsSurface, shell: libwoven::process::Id) -> bool {
+    let mut response = [0u8; 16];
+    response[..4].copy_from_slice(b"WRSZ");
+    response[4..12].copy_from_slice(&window.handle().to_le_bytes());
+    response[12..14].copy_from_slice(&(window.width() as u16).to_le_bytes());
+    response[14..].copy_from_slice(&(window.height() as u16).to_le_bytes());
+    libwoven::message_send(shell, &response).is_ok()
+}
+
+/// Open a read-only Monitor window through WovenShell's WOPN protocol.
+pub fn run(shell: Option<&[u8]>) -> ! {
+    let Some(shell) = shell.and_then(parse_u64).map(libwoven::process::Id) else {
+        fail(7)
+    };
+    let mut window = GraphicsSurface::create(WIDTH, HEIGHT).unwrap_or_else(|_| fail(1));
+    if !render(&window) {
         fail(3)
     }
     if window.share_with(shell).is_err() {
@@ -116,8 +141,28 @@ pub fn run(shell: Option<&[u8]>) -> ! {
             fail(6)
         }
         if let Ok((length, sender)) = libwoven::message_receive(&mut message) {
-            if sender == shell && message.get(..length.min(4)) == Some(&b"WCLS"[..]) {
+            if sender != shell {
+                continue;
+            }
+            if message.get(..length.min(4)) == Some(&b"WCLS"[..]) {
                 break;
+            }
+            if message.get(..4) == Some(&b"WSIZ"[..]) && length == 8 {
+                let width = u32::from(u16::from_le_bytes([message[4], message[5]])).min(MAX_SURFACE_WIDTH as u32);
+                let height = u32::from(u16::from_le_bytes([message[6], message[7]])).min(MAX_SURFACE_HEIGHT as u32);
+                if let Ok(resized) = GraphicsSurface::create(width, height) {
+                    if resized.share_with(shell).is_ok() && send_resize(&resized, shell) {
+                        if render(&resized) {
+                            let previous = core::mem::replace(&mut window, resized);
+                            drop(previous);
+                            let _ = libwoven::print("WovenMonitor: window resized\n");
+                        } else {
+                            drop(resized);
+                        }
+                    } else {
+                        drop(resized);
+                    }
+                }
             }
         }
     }

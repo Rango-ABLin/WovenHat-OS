@@ -1,5 +1,12 @@
 # Agent coordination (Claude Code and Codex)
 
+**Codex graphics-track WovenMonitor resize (2026-10-19):**
+WovenMonitor now negotiates bounded `WSIZ/WRSZ` replacement surfaces with a
+480×320 loader-safe Canvas cap. Its QMP resize gate passed on 1/2/4 CPUs with
+evidence in `audit-artifacts/monitor-desktop-{1,2,4}cpu-*`. The app remains
+read-only; pointer controls and hardware GPU presentation remain out of
+scope.
+
 **Codex graphics-track WovenSettings resize (2026-10-19):**
 WovenSettings now negotiates bounded `WSIZ/WRSZ` replacement surfaces with a
 480×320 loader-safe Canvas cap. Its QMP resize gate passed on 1/2/4 CPUs with
@@ -82,7 +89,8 @@ clock, display geometry, and `/mnt` storage count. The catalog now passes
 `--gui %p`; the shared QMP desktop gate launches it from F1 and passed on
 1/2/4 CPUs, with evidence in
 `audit-artifacts/monitor-desktop-{1,2,4}cpu-*`. Storage remains capped at 128
-entries; controls, WSIZ, and hardware GPU presentation remain out of scope.
+entries; controls, pointer widgets, and hardware GPU presentation remain out
+of scope; bounded WSIZ/WRSZ is covered by the newer Monitor resize slice.
 
 **Codex graphics-track WovenSettings client (2026-10-19):**
 `apps/woven-settings/src/gui.rs` adds a read-only Canvas/WOPN client for
