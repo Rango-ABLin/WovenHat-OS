@@ -64,8 +64,8 @@ def main():
     args = parser.parse_args()
     if args.exercise_resize and args.app not in ('calculator', 'terminal', 'settings', 'monitor', 'security', 'editor', 'images', 'update', 'store', 'files'):
         parser.error('--exercise-resize currently supports calculator, terminal, settings, monitor, security, editor, images, update, store, and files only')
-    if args.exercise_client_click and args.app not in ('calculator', 'settings'):
-        parser.error('--exercise-client-click currently supports calculator and settings only')
+    if args.exercise_client_click and args.app not in ('calculator', 'settings', 'files'):
+        parser.error('--exercise-client-click currently supports calculator, settings, and files only')
     app = {
         'calculator': ('calculator', 'WovenCalculator', 'woven-calculator', 'calculator'),
         'files': ('files', 'WovenFiles', 'woven-files', 'files'),
@@ -285,6 +285,7 @@ def main():
             control = {
                 'calculator': {'move': (-100, -41), 'marker': 'WovenCalculator: pointer evaluated', 'name': 'calculator'},
                 'settings': {'move': (0, 40), 'marker': 'WovenSettings: pointer refreshed', 'name': 'settings'},
+                'files': {'move': (-40, 56), 'marker': 'WovenFiles: pointer refreshed', 'name': 'files'},
             }[args.app]
             click_baseline = out / f"woven-{control['name']}-before-client-click.ppm"
             command_qmp('screendump', {'filename': str(click_baseline)})

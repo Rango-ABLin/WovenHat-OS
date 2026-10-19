@@ -1,5 +1,14 @@
 # WovenHat OS Architecture & Codebase Guide
 
+## Graphics WovenFiles pointer control (2026-10-19)
+
+WovenFiles renders a bounded `Refresh` button in its 320x240 client surface at
+local x=220..299 and y=206..225. On a primary-button release in that rectangle,
+the client re-reads the bounded `/mnt` directory listing, increments a
+saturating refresh counter, and repaints. The control is read-only and does
+not mutate storage. QEMU visual acceptance passed on 1/2/4 CPUs. USB HID and
+hardware GPU qualification remain separate boundaries.
+
 ## Graphics Settings pointer control (2026-10-19)
 
 WovenSettings renders a bounded `Refresh` button in its 360x240 client

@@ -1,5 +1,20 @@
 # Stage status
 
+## Graphics track - WovenFiles pointer control acceptance (2026-10-19)
+
+WovenFiles now presents a bounded, read-only `Refresh` control at local client
+coordinates x=220..299, y=206..225. A primary-button release forwarded as
+`WPBT` within that rectangle redraws the bounded `/mnt` listing and increments
+a visible refresh counter. The production QEMU gate
+`scripts/test-files-desktop-qemu.py --app files --exercise-client-click`
+passed on 1/2/4 CPUs. Evidence is under
+`audit-artifacts/files-desktop-{1,2,4}cpu-*`.
+
+This accepts a third functional client control without adding file mutation or
+storage writes. Remaining clients still have pointer feedback rather than
+accepted functional controls; USB HID qualification and hardware GPU
+presentation remain open.
+
 ## Graphics track - Settings pointer control acceptance (2026-10-19)
 
 WovenSettings now presents a bounded, non-mutating `Refresh` control at local

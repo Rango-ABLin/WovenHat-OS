@@ -1,5 +1,13 @@
 # Agent coordination (Claude Code and Codex)
 
+**Codex graphics-track WovenFiles pointer control acceptance (2026-10-19):**
+WovenFiles now has a bounded local `Refresh` button. A forwarded `WPBT`
+release inside x=220..299, y=206..225 re-reads the bounded read-only `/mnt`
+listing, increments a visible counter, and repaints. The production QEMU gate
+passed on 1/2/4 CPUs with `--app files --exercise-client-click`; evidence is
+under `audit-artifacts/files-desktop-{1,2,4}cpu-*`. No file mutation is
+introduced; USB HID and hardware GPU presentation remain separate.
+
 **Codex graphics-track Settings pointer control acceptance (2026-10-19):**
 WovenSettings now has a bounded local `Refresh` button. A forwarded `WPBT`
 release inside x=250..339, y=190..213 re-reads the live read-only settings
