@@ -17,20 +17,35 @@ const PANEL: u32 = rgb(35, 43, 66);
 const ACCENT: u32 = rgb(100, 220, 180);
 const TEXT: u32 = rgb(235, 240, 250);
 
-const CANVAS_WIDTH: usize = 296;
-const CANVAS_HEIGHT: usize = 216;
+const PANEL_X: i32 = 12;
+const PANEL_Y: i32 = 12;
+const PANEL_WIDTH: usize = 296;
+const PANEL_HEIGHT: usize = 216;
 const LINE_HEIGHT: i32 = 10;
-const MAX_VISIBLE_LINES: usize = (CANVAS_HEIGHT as i32 / LINE_HEIGHT) as usize;
+const MAX_VISIBLE_LINES: usize = (PANEL_HEIGHT as i32 / LINE_HEIGHT) as usize;
 
 /// In .bss rather than the 8 KiB task stack: too large to carry as a stack
-/// local (see woven-calculator for the same pattern and the bug it avoids).
-struct PixelBuffer(core::cell::UnsafeCell<[u32; CANVAS_WIDTH * CANVAS_HEIGHT]>);
+/// local. Sized to the whole window: `GraphicsSurface::write_canvas` always
+/// uploads to the surface's (0, 0), regardless of the canvas's own x/y
+/// origin (that's purely for the canvas's own coordinate addressing), so
+/// everything must be drawn into one full-window canvas rather than a
+/// separately-placed inset one. See woven-calculator for the same pattern.
+struct PixelBuffer(core::cell::UnsafeCell<[u32; (WIDTH * HEIGHT) as usize]>);
 
 // SAFETY: woven-files is single-threaded and run_gui takes the only reference.
 unsafe impl Sync for PixelBuffer {}
 
 static CANVAS_PIXELS: PixelBuffer =
-    PixelBuffer(core::cell::UnsafeCell::new([0; CANVAS_WIDTH * CANVAS_HEIGHT]));
+    PixelBuffer(core::cell::UnsafeCell::new([0; (WIDTH * HEIGHT) as usize]));
+
+/// A one-pixel-thick rectangle outline, since `Canvas` has no stroke
+/// primitive of its own.
+fn stroke_rect(canvas: &mut Canvas<'_>, x: i32, y: i32, width: usize, height: usize, color: u32) {
+    canvas.fill_rect(x, y, width, 1, color);
+    canvas.fill_rect(x, y + height as i32 - 1, width, 1, color);
+    canvas.fill_rect(x, y, 1, height, color);
+    canvas.fill_rect(x + width as i32 - 1, y, 1, height, color);
+}
 
 fn fail(code: u64) -> ! {
     let _ = libwoven::print("WovenFiles: failure\n");
@@ -72,24 +87,17 @@ fn run_gui(shell: Option<&[u8]>) -> ! {
         Ok(window) => window,
         Err(_) => fail(1),
     };
-    if window.fill_rect(0, 0, WIDTH as u16, HEIGHT as u16, BACKGROUND).is_err()
-        || window
-            .fill_rect(12, 12, CANVAS_WIDTH as u16, CANVAS_HEIGHT as u16, PANEL)
-            .is_err()
-        || window
-            .stroke_rect(12, 12, CANVAS_WIDTH as u16, CANVAS_HEIGHT as u16, ACCENT)
-            .is_err()
-    {
-        fail(2);
-    }
 
     // SAFETY: the only reference to the buffer, taken once.
     let pixels = unsafe { &mut *CANVAS_PIXELS.0.get() };
-    let mut canvas = match Canvas::new(pixels, 12, 12, CANVAS_WIDTH, CANVAS_HEIGHT) {
+    let mut canvas = match Canvas::new(pixels, 0, 0, WIDTH as usize, HEIGHT as usize) {
         Some(canvas) => canvas,
         None => fail(3),
     };
-    canvas.draw_text(6, 6, "/mnt", ACCENT);
+    canvas.fill_rect(0, 0, WIDTH as usize, HEIGHT as usize, BACKGROUND);
+    canvas.fill_rect(PANEL_X, PANEL_Y, PANEL_WIDTH, PANEL_HEIGHT, PANEL);
+    stroke_rect(&mut canvas, PANEL_X, PANEL_Y, PANEL_WIDTH, PANEL_HEIGHT, ACCENT);
+    canvas.draw_text(PANEL_X + 6, PANEL_Y + 6, "/mnt", ACCENT);
     let mut name = [0u8; libwoven::MAX_NAME];
     let mut shown = 0usize;
     for index in 0..MAX_ENTRIES {
@@ -106,11 +114,24 @@ fn run_gui(shell: Option<&[u8]>) -> ! {
                 }
                 let shown_length = text_length + usize::from(directory && text_length < line.len());
                 let text = core::str::from_utf8(&line[..shown_length]).unwrap_or("?");
-                canvas.draw_text(6, 6 + (shown as i32 + 1) * LINE_HEIGHT, text, TEXT);
+                canvas.draw_text(
+                    PANEL_X + 6,
+                    PANEL_Y + 6 + (shown as i32 + 1) * LINE_HEIGHT,
+                    text,
+                    TEXT,
+                );
                 shown += 1;
             }
             Err(_) => break,
         }
+    }
+    if shown == 0 {
+        canvas.draw_text(
+            PANEL_X + 6,
+            PANEL_Y + 6 + LINE_HEIGHT,
+            "(empty or unavailable)",
+            TEXT,
+        );
     }
     if window.write_canvas(&canvas).is_err() {
         fail(4);

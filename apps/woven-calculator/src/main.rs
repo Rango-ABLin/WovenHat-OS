@@ -15,18 +15,33 @@ const PANEL: u32 = rgb(35, 43, 66);
 const ACCENT: u32 = rgb(100, 220, 180);
 const TEXT: u32 = rgb(235, 240, 250);
 
-const CANVAS_WIDTH: usize = 216;
-const CANVAS_HEIGHT: usize = 126;
+const PANEL_X: i32 = 12;
+const PANEL_Y: i32 = 12;
+const PANEL_WIDTH: usize = 216;
+const PANEL_HEIGHT: usize = 126;
 
-/// In .bss rather than the 8 KiB task stack: `draw_text`'s scratch canvas is
-/// too large to carry as a stack local.
-struct PixelBuffer(core::cell::UnsafeCell<[u32; CANVAS_WIDTH * CANVAS_HEIGHT]>);
+/// In .bss rather than the 8 KiB task stack: too large to carry as a stack
+/// local. Sized to the whole window: `GraphicsSurface::write_canvas` always
+/// uploads to the surface's (0, 0), regardless of the canvas's own x/y
+/// origin (that's purely for the canvas's own coordinate addressing), so
+/// everything must be drawn into one full-window canvas rather than a
+/// separately-placed inset one.
+struct PixelBuffer(core::cell::UnsafeCell<[u32; (WIDTH * HEIGHT) as usize]>);
 
 // SAFETY: woven-calculator is single-threaded and run_gui takes the only reference.
 unsafe impl Sync for PixelBuffer {}
 
 static CANVAS_PIXELS: PixelBuffer =
-    PixelBuffer(core::cell::UnsafeCell::new([0; CANVAS_WIDTH * CANVAS_HEIGHT]));
+    PixelBuffer(core::cell::UnsafeCell::new([0; (WIDTH * HEIGHT) as usize]));
+
+/// A one-pixel-thick rectangle outline, since `Canvas` has no stroke
+/// primitive of its own.
+fn stroke_rect(canvas: &mut Canvas<'_>, x: i32, y: i32, width: usize, height: usize, color: u32) {
+    canvas.fill_rect(x, y, width, 1, color);
+    canvas.fill_rect(x, y + height as i32 - 1, width, 1, color);
+    canvas.fill_rect(x, y, 1, height, color);
+    canvas.fill_rect(x + width as i32 - 1, y, 1, height, color);
+}
 
 fn fail(code: u64) -> ! {
     let _ = libwoven::print("WovenCalculator: failure\n");
@@ -76,26 +91,23 @@ fn run_gui(shell: Option<&[u8]>) -> ! {
         Ok(window) => window,
         Err(_) => fail(3),
     };
-    if window.fill_rect(0, 0, WIDTH as u16, HEIGHT as u16, BACKGROUND).is_err()
-        || window.fill_rect(12, 12, 216, 126, PANEL).is_err()
-        || window.stroke_rect(12, 12, 216, 126, ACCENT).is_err()
-    {
-        fail(4);
-    }
     // SAFETY: the only reference to the buffer, taken once.
     let pixels = unsafe { &mut *CANVAS_PIXELS.0.get() };
-    let mut canvas = match Canvas::new(pixels, 12, 12, CANVAS_WIDTH, CANVAS_HEIGHT) {
+    let mut canvas = match Canvas::new(pixels, 0, 0, WIDTH as usize, HEIGHT as usize) {
         Some(canvas) => canvas,
         None => fail(5),
     };
-    canvas.draw_text(22, 24, "WovenCalculator", TEXT);
-    canvas.draw_text(22, 48, "Expression:", TEXT);
+    canvas.fill_rect(0, 0, WIDTH as usize, HEIGHT as usize, BACKGROUND);
+    canvas.fill_rect(PANEL_X, PANEL_Y, PANEL_WIDTH, PANEL_HEIGHT, PANEL);
+    stroke_rect(&mut canvas, PANEL_X, PANEL_Y, PANEL_WIDTH, PANEL_HEIGHT, ACCENT);
+    canvas.draw_text(PANEL_X - 2, PANEL_Y, "WovenCalculator", TEXT);
+    canvas.draw_text(PANEL_X - 2, PANEL_Y + 24, "Expression:", TEXT);
     let expression_text = core::str::from_utf8(expression).unwrap_or("?");
-    canvas.draw_text(22, 64, expression_text, TEXT);
-    canvas.draw_text(22, 88, "Result:", ACCENT);
+    canvas.draw_text(PANEL_X - 2, PANEL_Y + 40, expression_text, TEXT);
+    canvas.draw_text(PANEL_X - 2, PANEL_Y + 64, "Result:", ACCENT);
     let mut digits = [0u8; 24];
     let result_text = format_signed(result, &mut digits);
-    canvas.draw_text(22, 104, result_text, ACCENT);
+    canvas.draw_text(PANEL_X - 2, PANEL_Y + 80, result_text, ACCENT);
     if window.write_canvas(&canvas).is_err() {
         fail(6);
     }
