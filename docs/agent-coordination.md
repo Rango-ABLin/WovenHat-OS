@@ -1,5 +1,14 @@
 # Agent coordination (Claude Code and Codex)
 
+**Codex graphics-track WovenUpdate/WovenStore pointer controls accepted
+(2026-10-19):** WovenUpdate's bounded local Refresh control at x=250..329,
+y=145..164 and WovenStore's control at x=250..329, y=170..189 now re-read
+their bounded read-only views on forwarded `WPBT` release and repaint a
+visible counter. Both production QEMU gates passed on 1/2/4 CPUs with
+`--exercise-client-click`; evidence is under the corresponding update/store
+desktop audit directories. All ten packaged clients now have a functional
+pointer control. USB HID and hardware GPU presentation remain separate.
+
 **Codex graphics-track WovenImages pointer control acceptance (2026-10-19):**
 WovenImages now has a bounded local `Refresh` button. A forwarded `WPBT`
 release inside x=250..329, y=170..189 re-reads the read-only bounded `/mnt`

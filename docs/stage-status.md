@@ -1,5 +1,19 @@
 # Stage status
 
+## Graphics track - WovenUpdate and WovenStore pointer controls accepted (2026-10-19)
+
+WovenUpdate now presents a bounded, read-only `Refresh` control at local
+coordinates x=250..329, y=145..164; a `WPBT` release there re-reads the
+bounded `/updates` preflight summary and increments a visible counter.
+WovenStore presents the same read-only control at x=250..329, y=170..189; a
+release there re-reads the installed catalog and increments its visible
+counter. Both production QEMU gates passed on 1/2/4 CPUs. Evidence is under
+`audit-artifacts/{update,store}-desktop-{1,2,4}cpu-*`.
+
+Together with the earlier accepted slices, all ten packaged desktop clients
+now have a bounded functional pointer control. USB HID qualification and
+hardware GPU presentation remain separate hardware-dependent gates.
+
 ## Graphics track - WovenImages pointer control acceptance (2026-10-19)
 
 WovenImages now presents a bounded, read-only `Refresh` control at local

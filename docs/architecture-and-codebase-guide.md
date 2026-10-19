@@ -1,5 +1,16 @@
 # WovenHat OS Architecture & Codebase Guide
 
+## Graphics WovenUpdate and WovenStore pointer controls (2026-10-19)
+
+WovenUpdate renders a bounded `Refresh` control at local x=250..329,
+y=145..164 in its 360x200 preflight surface. WovenStore renders one at
+x=250..329, y=170..189 in its 360x220 catalog surface. A primary-button
+release forwarded through `WPBT` re-reads each bounded read-only view,
+increments a saturating refresh counter, and repaints. Neither control
+installs packages or mutates the catalog. Both QEMU gates passed on 1/2/4
+CPUs. All ten packaged clients now have accepted functional pointer controls;
+USB HID and hardware GPU qualification remain separate.
+
 ## Graphics WovenImages pointer control (2026-10-19)
 
 WovenImages renders a bounded `Refresh` button in its 360x220 surface at
