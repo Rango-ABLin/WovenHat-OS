@@ -5197,7 +5197,7 @@ fn stage19_app_catalog_self_test() -> bool {
             image: SYSTEM_APP_CALCULATOR,
             binary_path: "/bin/wovenhat-calculator",
             catalog_path: "/share/applications/woven-calculator.app",
-            catalog: b"Name=WovenCalculator\nExec=/bin/wovenhat-calculator\n",
+            catalog: b"Name=WovenCalculator\nExec=/bin/wovenhat-calculator --gui %p\n",
         },
         App {
             name: "woven-terminal",

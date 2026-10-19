@@ -15,26 +15,34 @@ const PANEL: u32 = rgb(35, 43, 66);
 const ACCENT: u32 = rgb(100, 220, 180);
 const TEXT: u32 = rgb(235, 240, 250);
 
+const CANVAS_WIDTH: usize = 216;
+const CANVAS_HEIGHT: usize = 126;
+
+/// In .bss rather than the 8 KiB task stack: `draw_text`'s scratch canvas is
+/// too large to carry as a stack local.
+struct PixelBuffer(core::cell::UnsafeCell<[u32; CANVAS_WIDTH * CANVAS_HEIGHT]>);
+
+// SAFETY: woven-calculator is single-threaded and run_gui takes the only reference.
+unsafe impl Sync for PixelBuffer {}
+
+static CANVAS_PIXELS: PixelBuffer =
+    PixelBuffer(core::cell::UnsafeCell::new([0; CANVAS_WIDTH * CANVAS_HEIGHT]));
+
 fn fail(code: u64) -> ! {
     let _ = libwoven::print("WovenCalculator: failure\n");
     libwoven::exit(code)
 }
 
 fn main(args: Args) -> ! {
-    let gui = args.get(1) == Some(b"--gui");
-    let expression = if gui {
-        args.get(2).unwrap_or(b"2 + 2")
-    } else {
-        args.get(1).unwrap_or(b"2 + 2")
-    };
+    if args.get(1) == Some(b"--gui") {
+        run_gui(args.get(2))
+    }
+    let expression = args.get(1).unwrap_or(b"2 + 2");
     let result = match evaluate(expression) {
         Ok(value) => value,
         Err(_) => fail(2),
     };
-    if !gui {
-        run_console(expression, result);
-    }
-    run_gui(expression, result)
+    run_console(expression, result)
 }
 
 fn run_console(expression: &[u8], result: i64) -> ! {
@@ -48,19 +56,35 @@ fn run_console(expression: &[u8], result: i64) -> ! {
     libwoven::exit(0)
 }
 
-fn run_gui(expression: &[u8], result: i64) -> ! {
-    let surface = match GraphicsSurface::create(WIDTH, HEIGHT) {
-        Ok(surface) => surface,
+/// Opens a window on the WovenShell desktop: shares a drawn surface and asks
+/// the shell (the sole compositor-authority holder) to place it, following
+/// the same WOPN/WCLS protocol `hello-gui --desktop-client` uses. `shell` is
+/// the shell's process id, passed as `%p` from the app catalog's `Exec=`
+/// line; an ordinary launched process holds no DisplayIo capability of its
+/// own, so it cannot claim the compositor or present directly.
+fn run_gui(shell: Option<&[u8]>) -> ! {
+    let Some(shell) = shell.and_then(parse_u64).map(libwoven::process::Id) else {
+        fail(7)
+    };
+    let expression: &[u8] = b"2 + 2";
+    let result = match evaluate(expression) {
+        Ok(value) => value,
+        Err(_) => fail(2),
+    };
+
+    let window = match GraphicsSurface::create(WIDTH, HEIGHT) {
+        Ok(window) => window,
         Err(_) => fail(3),
     };
-    if surface.fill_rect(0, 0, WIDTH as u16, HEIGHT as u16, BACKGROUND).is_err()
-        || surface.fill_rect(12, 12, 216, 126, PANEL).is_err()
-        || surface.stroke_rect(12, 12, 216, 126, ACCENT).is_err()
+    if window.fill_rect(0, 0, WIDTH as u16, HEIGHT as u16, BACKGROUND).is_err()
+        || window.fill_rect(12, 12, 216, 126, PANEL).is_err()
+        || window.stroke_rect(12, 12, 216, 126, ACCENT).is_err()
     {
         fail(4);
     }
-    let mut pixels = [0u32; 216 * 126];
-    let mut canvas = match Canvas::new(&mut pixels, 12, 12, 216, 126) {
+    // SAFETY: the only reference to the buffer, taken once.
+    let pixels = unsafe { &mut *CANVAS_PIXELS.0.get() };
+    let mut canvas = match Canvas::new(pixels, 12, 12, CANVAS_WIDTH, CANVAS_HEIGHT) {
         Some(canvas) => canvas,
         None => fail(5),
     };
@@ -72,11 +96,56 @@ fn run_gui(expression: &[u8], result: i64) -> ! {
     let mut digits = [0u8; 24];
     let result_text = format_signed(result, &mut digits);
     canvas.draw_text(22, 104, result_text, ACCENT);
-    if surface.write_canvas(&canvas).is_err() || surface.present(60, 40).is_err() {
+    if window.write_canvas(&canvas).is_err() {
         fail(6);
     }
-    let _ = libwoven::print("WovenCalculator: ready\n");
+
+    if window.share_with(shell).is_err() {
+        fail(8);
+    }
+    const TITLE: &[u8] = b"Calculator";
+    let mut open = [0u8; 16 + TITLE.len()];
+    open[..4].copy_from_slice(b"WOPN");
+    open[4..12].copy_from_slice(&window.handle().to_le_bytes());
+    open[12..14].copy_from_slice(&(WIDTH as u16).to_le_bytes());
+    open[14..16].copy_from_slice(&(HEIGHT as u16).to_le_bytes());
+    open[16..].copy_from_slice(TITLE);
+    if libwoven::message_send(shell, &open).is_err() {
+        fail(9);
+    }
+    let _ = libwoven::print("WovenCalculator: window opened\n");
+
+    // Wait for the shell to close this window (its title bar's close
+    // control). Any other message (a forwarded key, for instance) is not
+    // meaningful yet and is ignored.
+    let mut message = [0u8; 64];
+    loop {
+        match libwoven::wait_any(libwoven::wait::MESSAGE, None) {
+            Ok(_) => {}
+            Err(_) => fail(10),
+        }
+        if let Ok((length, sender)) = libwoven::message_receive(&mut message) {
+            if sender == shell && message.get(..length.min(4)) == Some(&b"WCLS"[..]) {
+                break;
+            }
+        }
+    }
+    drop(window);
     libwoven::exit(0)
+}
+
+fn parse_u64(text: &[u8]) -> Option<u64> {
+    if text.is_empty() {
+        return None;
+    }
+    let mut value = 0u64;
+    for digit in text {
+        if !digit.is_ascii_digit() {
+            return None;
+        }
+        value = value.checked_mul(10)?.checked_add(u64::from(digit - b'0'))?;
+    }
+    Some(value)
 }
 
 fn format_signed(value: i64, output: &mut [u8; 24]) -> &str {
