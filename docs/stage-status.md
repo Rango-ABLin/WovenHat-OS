@@ -1,5 +1,16 @@
 # Stage status
 
+## Graphics track - WovenFiles bounded resize (2026-10-19)
+
+WovenFiles now handles `WSIZ` by creating and sharing a replacement Canvas
+surface, publishing `WRSZ` before the bounded upload, and clamping requests to
+the loader-safe 480×320 render target. The QMP `--exercise-resize` gate passed
+on 1/2/4 CPUs with evidence under
+`audit-artifacts/files-desktop-{1,2,4}cpu-*`.
+
+The `/mnt` listing remains bounded and read-only; file-operation input,
+pointer widgets, and hardware GPU presentation are not claimed.
+
 ## Graphics track - WovenStore bounded resize (2026-10-19)
 
 WovenStore now handles `WSIZ` by creating and sharing a replacement Canvas
@@ -243,9 +254,9 @@ visual acceptance passed on 1/2/4 CPUs with evidence under
 `audit-artifacts/files-desktop-{1,2,4}cpu-*`.
 
 This closes the desktop-launch visual gate for the WovenFiles client. The
-remaining client limits are unchanged: no resize (`WSIZ`) or interactive file
-operations, and the display path is still software/2D on QEMU; no hardware GPU
-presentation claim is made.
+remaining client limits are unchanged: no interactive file operations, and the
+display path is still software/2D on QEMU; bounded resize is covered by the
+newer WovenFiles slice above, and no hardware GPU presentation claim is made.
 
 ## WovenFiles desktop window, and a write_canvas placement bug fix in both
 ## (2026-10-19)
@@ -274,8 +285,7 @@ CPUs.
 
 **Limits.** WovenTerminal has bounded text input and resize preview but
 remains CLI/interactive for full command execution. Calculator has bounded
-input and resize preview. Files have desktop previews but still lack resize
-and broader controls/input;
+input and resize preview. Files retain no interactive file-operation controls;
 hardware GPU presentation is not claimed.
 
 ## Graphics track - WovenFiles desktop client foundation (2026-10-19)

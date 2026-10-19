@@ -23,6 +23,8 @@ const PANEL_WIDTH: usize = 296;
 const PANEL_HEIGHT: usize = 216;
 const LINE_HEIGHT: i32 = 10;
 const MAX_VISIBLE_LINES: usize = (PANEL_HEIGHT as i32 / LINE_HEIGHT) as usize;
+const MAX_SURFACE_WIDTH: usize = 480;
+const MAX_SURFACE_HEIGHT: usize = 320;
 
 /// In .bss rather than the 8 KiB task stack: too large to carry as a stack
 /// local. Sized to the whole window: `GraphicsSurface::write_canvas` always
@@ -30,13 +32,13 @@ const MAX_VISIBLE_LINES: usize = (PANEL_HEIGHT as i32 / LINE_HEIGHT) as usize;
 /// origin (that's purely for the canvas's own coordinate addressing), so
 /// everything must be drawn into one full-window canvas rather than a
 /// separately-placed inset one. See woven-calculator for the same pattern.
-struct PixelBuffer(core::cell::UnsafeCell<[u32; (WIDTH * HEIGHT) as usize]>);
+struct PixelBuffer(core::cell::UnsafeCell<[u32; MAX_SURFACE_WIDTH * MAX_SURFACE_HEIGHT]>);
 
 // SAFETY: woven-files is single-threaded and run_gui takes the only reference.
 unsafe impl Sync for PixelBuffer {}
 
 static CANVAS_PIXELS: PixelBuffer =
-    PixelBuffer(core::cell::UnsafeCell::new([0; (WIDTH * HEIGHT) as usize]));
+    PixelBuffer(core::cell::UnsafeCell::new([0; MAX_SURFACE_WIDTH * MAX_SURFACE_HEIGHT]));
 
 /// A one-pixel-thick rectangle outline, since `Canvas` has no stroke
 /// primitive of its own.
@@ -52,51 +54,10 @@ fn fail(code: u64) -> ! {
     libwoven::exit(code)
 }
 
-fn main(args: Args) -> ! {
-    if args.get(1) == Some(b"--gui") {
-        run_gui(args.get(2))
-    }
-    let status = match args.get(1) {
-        Some(b"--view") => match args.get(2) {
-            Some(path) => view(path),
-            None => 2,
-        },
-        Some(b"--help") => {
-            let _ = libwoven::print("WovenFiles: --path PATH or --view PATH\n");
-            0
-        }
-        Some(b"--path") => match args.get(2) {
-            Some(path) => list(path),
-            None => 2,
-        },
-        None => list(b"/mnt"),
-        Some(_) => 2,
-    };
-    libwoven::exit(status)
-}
-
-/// Opens a window on the WovenShell desktop showing the `/mnt` listing.
-/// `shell` is the shell's process id, passed as `%p` from the app catalog's
-/// `Exec=` line; see woven-calculator's `run_gui` for the protocol details.
-fn run_gui(shell: Option<&[u8]>) -> ! {
-    let Some(shell) = shell.and_then(parse_u64).map(libwoven::process::Id) else {
-        fail(7)
-    };
-
-    let window = match GraphicsSurface::create(WIDTH, HEIGHT) {
-        Ok(window) => window,
-        Err(_) => fail(1),
-    };
-
-    // SAFETY: the only reference to the buffer, taken once.
-    let pixels = unsafe { &mut *CANVAS_PIXELS.0.get() };
-    let mut canvas = match Canvas::new(pixels, 0, 0, WIDTH as usize, HEIGHT as usize) {
-        Some(canvas) => canvas,
-        None => fail(3),
-    };
-    canvas.fill_rect(0, 0, WIDTH as usize, HEIGHT as usize, BACKGROUND);
+fn draw_files(canvas: &mut Canvas<'_>) {
+    canvas.fill_rect(0, 0, canvas.width(), canvas.height(), BACKGROUND);
     canvas.fill_rect(PANEL_X, PANEL_Y, PANEL_WIDTH, PANEL_HEIGHT, PANEL);
-    stroke_rect(&mut canvas, PANEL_X, PANEL_Y, PANEL_WIDTH, PANEL_HEIGHT, ACCENT);
+    stroke_rect(canvas, PANEL_X, PANEL_Y, PANEL_WIDTH, PANEL_HEIGHT, ACCENT);
     canvas.draw_text(PANEL_X + 6, PANEL_Y + 6, "/mnt", ACCENT);
     let mut name = [0u8; libwoven::MAX_NAME];
     let mut shown = 0usize;
@@ -133,7 +94,69 @@ fn run_gui(shell: Option<&[u8]>) -> ! {
             TEXT,
         );
     }
-    if window.write_canvas(&canvas).is_err() {
+}
+
+fn render(window: &GraphicsSurface) -> bool {
+    let pixels = unsafe { &mut *CANVAS_PIXELS.0.get() };
+    let Some(mut canvas) = Canvas::new(
+        pixels,
+        0,
+        0,
+        window.width() as usize,
+        window.height() as usize,
+    ) else {
+        return false;
+    };
+    draw_files(&mut canvas);
+    window.write_canvas(&canvas).is_ok()
+}
+
+fn send_resize(window: &GraphicsSurface, shell: libwoven::process::Id) -> bool {
+    let mut response = [0u8; 16];
+    response[..4].copy_from_slice(b"WRSZ");
+    response[4..12].copy_from_slice(&window.handle().to_le_bytes());
+    response[12..14].copy_from_slice(&(window.width() as u16).to_le_bytes());
+    response[14..].copy_from_slice(&(window.height() as u16).to_le_bytes());
+    libwoven::message_send(shell, &response).is_ok()
+}
+
+fn main(args: Args) -> ! {
+    if args.get(1) == Some(b"--gui") {
+        run_gui(args.get(2))
+    }
+    let status = match args.get(1) {
+        Some(b"--view") => match args.get(2) {
+            Some(path) => view(path),
+            None => 2,
+        },
+        Some(b"--help") => {
+            let _ = libwoven::print("WovenFiles: --path PATH or --view PATH\n");
+            0
+        }
+        Some(b"--path") => match args.get(2) {
+            Some(path) => list(path),
+            None => 2,
+        },
+        None => list(b"/mnt"),
+        Some(_) => 2,
+    };
+    libwoven::exit(status)
+}
+
+/// Opens a window on the WovenShell desktop showing the `/mnt` listing.
+/// `shell` is the shell's process id, passed as `%p` from the app catalog's
+/// `Exec=` line; see woven-calculator's `run_gui` for the protocol details.
+fn run_gui(shell: Option<&[u8]>) -> ! {
+    let Some(shell) = shell.and_then(parse_u64).map(libwoven::process::Id) else {
+        fail(7)
+    };
+
+    let mut window = match GraphicsSurface::create(WIDTH, HEIGHT) {
+        Ok(window) => window,
+        Err(_) => fail(1),
+    };
+
+    if !render(&window) {
         fail(4);
     }
 
@@ -159,8 +182,28 @@ fn run_gui(shell: Option<&[u8]>) -> ! {
             Err(_) => fail(8),
         }
         if let Ok((length, sender)) = libwoven::message_receive(&mut message) {
-            if sender == shell && message.get(..length.min(4)) == Some(&b"WCLS"[..]) {
+            if sender != shell {
+                continue;
+            }
+            if message.get(..length.min(4)) == Some(&b"WCLS"[..]) {
                 break;
+            }
+            if message.get(..4) == Some(&b"WSIZ"[..]) && length == 8 {
+                let width = u32::from(u16::from_le_bytes([message[4], message[5]])).min(MAX_SURFACE_WIDTH as u32);
+                let height = u32::from(u16::from_le_bytes([message[6], message[7]])).min(MAX_SURFACE_HEIGHT as u32);
+                if let Ok(resized) = GraphicsSurface::create(width, height) {
+                    if resized.share_with(shell).is_ok() && send_resize(&resized, shell) {
+                        if render(&resized) {
+                            let previous = core::mem::replace(&mut window, resized);
+                            drop(previous);
+                            let _ = libwoven::print("WovenFiles: window resized\n");
+                        } else {
+                            drop(resized);
+                        }
+                    } else {
+                        drop(resized);
+                    }
+                }
             }
         }
     }

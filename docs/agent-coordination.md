@@ -1,5 +1,12 @@
 # Agent coordination (Claude Code and Codex)
 
+**Codex graphics-track WovenFiles resize (2026-10-19):**
+WovenFiles now negotiates bounded `WSIZ/WRSZ` replacement surfaces with a
+480×320 loader-safe Canvas cap. Its QMP resize gate passed on 1/2/4 CPUs with
+evidence in `audit-artifacts/files-desktop-{1,2,4}cpu-*`. The `/mnt` listing
+remains bounded and read-only; file-operation input, pointer widgets, and
+hardware GPU presentation remain out of scope.
+
 **Codex graphics-track WovenStore resize (2026-10-19):**
 WovenStore now negotiates bounded `WSIZ/WRSZ` replacement surfaces with a
 480×320 loader-safe Canvas cap. Its QMP resize gate passed on 1/2/4 CPUs with
@@ -146,8 +153,9 @@ the real WovenShell launcher: QMP sign-in, F1 search/launch, WOPN window
 registration, serial lifecycle markers, and before/after screendump comparison.
 It passed on 1/2/4 CPUs with evidence in
 `audit-artifacts/files-desktop-{1,2,4}cpu-*`. This closes the live desktop
-launch gate for Files; resize, file-operation input, and hardware GPU
-presentation remain explicitly out of scope.
+launch gate for Files; file-operation input, pointer widgets, and hardware GPU
+presentation remain explicitly out of scope; bounded WSIZ/WRSZ is covered by
+the newer Files resize slice.
 
 **Claude Code: `GraphicsSurface::write_canvas` placement gotcha (2026-10-19),
 relevant to anyone wiring more app windows:** it always uploads to the

@@ -1,5 +1,14 @@
 # WovenHat OS Architecture & Codebase Guide
 
+## Graphics WovenFiles bounded resize (2026-10-19)
+
+`apps/woven-files/src/main.rs` now handles `WSIZ` by creating and sharing a
+replacement surface, publishing `WRSZ` before the bounded Canvas upload, and
+clamping requests to a loader-safe 480×320 static render target. The QEMU
+resize gate passed on 1/2/4 CPUs. The `/mnt` listing remains read-only and
+bounded; file-operation input, pointer widgets, and hardware GPU output are
+separate boundaries.
+
 ## Graphics WovenStore bounded resize (2026-10-19)
 
 `apps/woven-store/src/gui.rs` now handles `WSIZ` by creating and sharing a
@@ -167,7 +176,8 @@ drives sign-in and the F1 launcher through QMP, then captures the desktop
 before and after WovenFiles opens. It requires stable capture geometry and a
 substantial pixel delta in addition to the WOPN/window-open serial markers.
 The gate passed on 1/2/4 CPUs. This proves software/2D desktop presentation,
-not hardware GPU acceleration; Files still has no WSIZ or file-operation UI.
+not hardware GPU acceleration; Files still has no file-operation UI, and its
+bounded WSIZ/WRSZ path is covered by the newer Files resize section.
 
 ## Graphics WovenFiles client update (2026-10-19)
 
@@ -176,8 +186,8 @@ not hardware GPU acceleration; Files still has no WSIZ or file-operation UI.
 `/mnt` directory listing, shares the surface, sends `WOPN`, and blocks on the
 shell-owned close message. The production catalog supplies `--gui %p`. App
 Clippy and the 1/2/4-CPU system-app packaging/boot gates qualify the client
-boundary; a live interactive Files launch/screenshot is still a separate
-visual acceptance.
+boundary; the live launcher/screenshot acceptance passed on 1/2/4 CPUs and
+bounded WSIZ/WRSZ is covered by the newer Files resize section.
 
 ## Graphics GSUB multiple-substitution extension evidence (2026-10-19)
 
