@@ -1,5 +1,12 @@
 # Agent coordination (Claude Code and Codex)
 
+**Codex graphics-track standard virtio-gpu 2D scanout revalidated
+(2026-10-19):** Fresh QEMU 1/2/4-CPU runs captured both 640x400 heads and
+verified every pixel against the gradient/checkerboard contract. This is the
+authoritative visible software/2D presentation path for the release. It is
+separate from the GL/VirGL scanout probe, which remains rejected by QEMU with
+`Device(4611)` (`0x1203`).
+
 **Codex graphics-track VirGL 2D-on-GL scanout boundary (2026-10-19):** The
 stage 20.14 lifecycle gate passes on 1/2/4 CPUs. A capability-gated follow-on
 probe attempts a conventional 2D resource, known-gradient fill, and present

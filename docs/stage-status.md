@@ -1,5 +1,14 @@
 # Stage status
 
+## Graphics track - standard virtio-gpu 2D scanout revalidated (2026-10-19)
+
+The software/2D presentation fallback is freshly accepted on QEMU 1/2/4-CPU
+runs. Both 640x400 heads were captured through QMP and verified pixel for
+pixel against the gradient/checkerboard contract. This is the authoritative
+visible graphics path for the current release. It does not imply that the
+separate GL/VirGL device can scan out a 2D or 3D resource; that boundary is
+documented below with its preserved `Device(4611)` (`0x1203`) evidence.
+
 ## Graphics track - VirGL 2D-on-GL scanout boundary (2026-10-19)
 
 The VirGL capability/context/resource/command lifecycle still passes on QEMU

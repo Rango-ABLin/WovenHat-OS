@@ -1,5 +1,15 @@
 # WovenHat OS Architecture & Codebase Guide
 
+## Graphics track - standard virtio-gpu 2D scanout acceptance (2026-10-19)
+
+The standard `virtio-gpu-pci` backend remains the authoritative visible
+presentation path. Fresh QEMU 1/2/4-CPU runs captured both 640x400 heads and
+verified every pixel against the gradient/checkerboard contract. The driver
+owns bounded per-head 2D resources, transfers changed rows, flushes the
+resource, and presents it through the existing scanout path. This accepted
+software/2D path is intentionally separate from the optional GL/VirGL
+transport and its unsupported visible-scanout boundary.
+
 ## Graphics track - VirGL 2D-on-GL scanout boundary (2026-10-19)
 
 The stage 20.14 VirGL probe now separates lifecycle acceptance from visible
