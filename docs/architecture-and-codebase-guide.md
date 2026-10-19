@@ -1,5 +1,11 @@
 # WovenHat OS Architecture & Codebase Guide
 
+## Graphics shared-font metric update (2026-10-19)
+
+The shared kernel font’s `text_width` and `line_count` use saturating
+accumulation, so WovenGraphics measurement remains defined for arbitrarily
+long UTF-8 input before layout applies its own bounded drawing rules.
+
 ## Graphics Canvas text-origin update (2026-10-19)
 
 `Canvas::draw_text` saturates cursor movement, glyph origins, and newline
