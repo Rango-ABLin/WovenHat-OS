@@ -1,5 +1,13 @@
 # WovenHat OS Architecture & Codebase Guide
 
+## Graphics five-input contextual GPOS update (2026-10-19)
+
+The bounded format-3 dispatcher supports five input coverages and can apply
+nested type-1 positioning to sequence index four, propagating advance deltas
+through later shaped glyph origins. Pair positioning remains restricted to the
+two-input, sequence-index-zero path; longer context and broader nested lookup
+application remain outside this implementation.
+
 ## Graphics four-input contextual GPOS update (2026-10-19)
 
 The bounded format-3 dispatcher supports four input coverages and can apply

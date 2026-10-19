@@ -3740,6 +3740,7 @@ pub mod graphics {
                             next: context.map(|value| value.1),
                             third: None,
                             fourth: None,
+                            fifth: None,
                             input_count: 2,
                             target_sequence_index: 0,
                         },
@@ -4164,6 +4165,7 @@ pub mod graphics {
                         next: context.map(|value| value.1),
                         third: None,
                         fourth: None,
+                        fifth: None,
                         input_count: 2,
                         target_sequence_index: 0,
                     },
@@ -5304,6 +5306,7 @@ pub mod graphics {
                             next: context.map(|value| value.1),
                             third: None,
                             fourth: None,
+                            fifth: None,
                             input_count: 2,
                             target_sequence_index: 1,
                         },
@@ -5352,6 +5355,7 @@ pub mod graphics {
                             next: context.map(|value| value.1),
                             third: None,
                             fourth: None,
+                            fifth: None,
                             input_count: 1,
                             target_sequence_index: 0,
                         },
@@ -5402,6 +5406,7 @@ pub mod graphics {
                             next: context.map(|value| value.1),
                             third: Some(third),
                             fourth: None,
+                            fifth: None,
                             input_count: 3,
                             target_sequence_index: 2,
                         },
@@ -5453,6 +5458,7 @@ pub mod graphics {
                             next: context.map(|value| value.1),
                             third: Some(third),
                             fourth: Some(fourth),
+                            fifth: None,
                             input_count: 4,
                             target_sequence_index: 3,
                         },
@@ -5480,6 +5486,59 @@ pub mod graphics {
                 output[index + 3].origin.y = output[index + 3].origin.y.saturating_add(y_placement);
                 output[index + 3].advance = output[index + 3].advance.saturating_add(x_advance);
                 for following in output.iter_mut().take(count).skip(index + 4) {
+                    following.origin.x = following.origin.x.saturating_add(x_advance);
+                    following.origin.y = following.origin.y.saturating_add(y_advance);
+                }
+            }
+            for index in 0..count.saturating_sub(4) {
+                let left = output[index].glyph_id;
+                let right = output[index + 1].glyph_id;
+                let third = output[index + 2].glyph_id;
+                let fourth = output[index + 3].glyph_id;
+                let fifth = output[index + 4].glyph_id;
+                let context = (index > 0)
+                    .then(|| output[index - 1].glyph_id)
+                    .zip((index + 5 < count).then(|| output[index + 5].glyph_id));
+                let Some((x_placement, y_placement, x_advance, y_advance)) = self
+                    .gpos_contextual_adjustment(
+                        left,
+                        right,
+                        GposContextOptions {
+                            script_tag,
+                            language_tag,
+                            ppem,
+                            previous: context.map(|value| value.0),
+                            next: context.map(|value| value.1),
+                            third: Some(third),
+                            fourth: Some(fourth),
+                            fifth: Some(fifth),
+                            input_count: 5,
+                            target_sequence_index: 4,
+                        },
+                    )?
+                else {
+                    continue;
+                };
+                let x_placement = (i64::from(x_placement) * scale)
+                    .div_euclid(units)
+                    .clamp(i64::from(i32::MIN), i64::from(i32::MAX))
+                    as i32;
+                let y_placement = (i64::from(y_placement) * scale)
+                    .div_euclid(units)
+                    .clamp(i64::from(i32::MIN), i64::from(i32::MAX))
+                    as i32;
+                let x_advance = (i64::from(x_advance) * scale)
+                    .div_euclid(units)
+                    .clamp(i64::from(i32::MIN), i64::from(i32::MAX))
+                    as i32;
+                let y_advance = (i64::from(y_advance) * scale)
+                    .div_euclid(units)
+                    .clamp(i64::from(i32::MIN), i64::from(i32::MAX))
+                    as i32;
+                output[index + 4].origin.x = output[index + 4].origin.x.saturating_add(x_placement);
+                output[index + 4].origin.y = output[index + 4].origin.y.saturating_add(y_placement);
+                output[index + 4].advance = output[index + 4].advance.saturating_add(x_advance);
+                for following in output.iter_mut().take(count).skip(index + 5) {
                     following.origin.x = following.origin.x.saturating_add(x_advance);
                     following.origin.y = following.origin.y.saturating_add(y_advance);
                 }
@@ -7582,6 +7641,7 @@ pub mod graphics {
         next: Option<u16>,
         third: Option<u16>,
         fourth: Option<u16>,
+        fifth: Option<u16>,
         input_count: u16,
         target_sequence_index: u16,
     }
@@ -7595,7 +7655,7 @@ pub mod graphics {
         options: GposContextOptions,
     ) -> Result<Option<(i32, i32, i32, i32)>, TrueTypeError> {
         if options.input_count == 0
-            || options.input_count > 4
+            || options.input_count > 5
             || options.target_sequence_index >= options.input_count
         {
             return Ok(None);
@@ -7614,6 +7674,12 @@ pub mod graphics {
                     return Ok(None);
                 };
                 fourth
+            }
+            4 => {
+                let Some(fifth) = options.fifth else {
+                    return Ok(None);
+                };
+                fifth
             }
             _ => return Ok(None),
         };
@@ -7841,6 +7907,12 @@ pub mod graphics {
                                 .ok_or(TrueTypeError::BadTableDirectory)?,
                         ))
                         .ok_or(TrueTypeError::BadTableDirectory)?;
+                    let fifth_coverage = subtable
+                        .checked_add(usize::from(
+                            read_u16(bytes, input_offsets + 8)
+                                .ok_or(TrueTypeError::BadTableDirectory)?,
+                        ))
+                        .ok_or(TrueTypeError::BadTableDirectory)?;
                     if gsub_coverage_index(bytes, first_coverage, table_end, left)?.is_none() {
                         continue;
                     }
@@ -7866,6 +7938,17 @@ pub mod graphics {
                             fourth_coverage,
                             table_end,
                             options.fourth.ok_or(TrueTypeError::BadTableDirectory)?,
+                        )?
+                        .is_none()
+                    {
+                        continue;
+                    }
+                    if options.input_count == 5
+                        && gsub_coverage_index(
+                            bytes,
+                            fifth_coverage,
+                            table_end,
+                            options.fifth.ok_or(TrueTypeError::BadTableDirectory)?,
                         )?
                         .is_none()
                     {
@@ -13095,6 +13178,33 @@ mod tests {
         assert_eq!(shaped_four[2].origin, Point::new(1002, 15));
         assert_eq!(shaped_four[3].origin, Point::new(1502, 15));
         assert_eq!(shaped_four[3].advance, 525);
+        let mut contextual_five_bytes = contextual_gpos_bytes;
+        put32(&mut contextual_five_bytes, 104, 156);
+        put16(&mut contextual_five_bytes, 308, 5);
+        put16(&mut contextual_five_bytes, 310, 60);
+        put16(&mut contextual_five_bytes, 312, 66);
+        put16(&mut contextual_five_bytes, 314, 72);
+        put16(&mut contextual_five_bytes, 316, 78);
+        put16(&mut contextual_five_bytes, 318, 84);
+        put16(&mut contextual_five_bytes, 320, 0);
+        put16(&mut contextual_five_bytes, 322, 1);
+        put16(&mut contextual_five_bytes, 324, 4);
+        put16(&mut contextual_five_bytes, 326, 1);
+        for offset in [364, 370, 376, 382, 388] {
+            put16(&mut contextual_five_bytes, offset, 1);
+            put16(&mut contextual_five_bytes, offset + 2, 1);
+            put16(&mut contextual_five_bytes, offset + 4, 1);
+        }
+        let contextual_five_face = TrueTypeFace::from_bytes(&contextual_five_bytes).unwrap();
+        let mut shaped_five = [shaped[0]; 5];
+        assert_eq!(
+            contextual_five_face
+                .shape_text_ligatures("AAAAA", Point::new(2, 15), 1000, &mut shaped_five)
+                .unwrap(),
+            5
+        );
+        assert_eq!(shaped_five[4].origin, Point::new(2002, 15));
+        assert_eq!(shaped_five[4].advance, 525);
         let mut single_adjustment_bytes = [0u8; 420];
         single_adjustment_bytes.copy_from_slice(&bytes);
         put32(&mut single_adjustment_bytes, 104, 156);
