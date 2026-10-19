@@ -1,5 +1,21 @@
 # Stage status
 
+## Graphics track - functional controls complete; GPU boundary revalidated (2026-10-19)
+
+All ten packaged desktop clients now have an accepted bounded functional
+pointer control over the PS/2-to-WovenShell-to-client path. Calculator,
+Settings, Files, Terminal, Monitor, Security, Editor, Images, Update, and
+Store each passed their production QEMU control gate on 1/2/4 CPUs, with
+serial activation markers and presented-frame deltas preserved in the client
+audit directories below.
+
+The authoritative VirGL gate was also rerun on 1/2/4 CPUs. Capability,
+context, resource, and command lifecycle passed with evidence under
+`audit-artifacts/stage20.14-{1,2,4}cpu-*`. This still does not prove a visible
+GPU-backed scanout: QEMU's tested 3D/blob presentation path remains rejected,
+so software/2D scanout is the accepted graphics fallback. Physical GPU/HID
+qualification remains a separate hardware-dependent gate.
+
 ## Graphics track - WovenUpdate and WovenStore pointer controls accepted (2026-10-19)
 
 WovenUpdate now presents a bounded, read-only `Refresh` control at local

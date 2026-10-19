@@ -1,5 +1,14 @@
 # Agent coordination (Claude Code and Codex)
 
+**Codex graphics-track functional-control completion and VirGL boundary
+revalidation (2026-10-19):** All ten packaged desktop clients now have a
+bounded functional pointer control accepted on QEMU 1/2/4-CPU runs, with
+serial/frame evidence recorded in the per-client audit documents. Fresh
+VirGL 1/2/4-CPU runs passed capability/context/resource/command lifecycle only;
+QEMU still rejects the tested visible 3D/blob scanout path. Software/2D
+presentation is the accepted fallback, while physical GPU and USB HID remain
+hardware-dependent boundaries.
+
 **Codex graphics-track WovenUpdate/WovenStore pointer controls accepted
 (2026-10-19):** WovenUpdate's bounded local Refresh control at x=250..329,
 y=145..164 and WovenStore's control at x=250..329, y=170..189 now re-read

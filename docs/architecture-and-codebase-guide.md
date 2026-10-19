@@ -1,5 +1,19 @@
 # WovenHat OS Architecture & Codebase Guide
 
+## Graphics track completion boundary (2026-10-19)
+
+The ten packaged desktop clients now each have a QEMU-accepted bounded
+functional pointer control, with 1/2/4-CPU visual evidence and host checks
+recorded in the audit documents. The software WovenGraphics/Canvas path,
+compositor, shell interaction, client resize, pointer forwarding, and client
+control loop are therefore integrated and visually accepted in QEMU.
+
+The remaining hardware-dependent boundary is GPU acceleration: the VirGL
+1/2/4-CPU gate proves capability/context/resource/command transport lifecycle,
+but the tested QEMU 3D/blob resource is not accepted for visible scanout.
+Software/2D presentation remains the authoritative fallback until a visible
+GPU-backed frame is accepted; physical GPU and USB HID testing are separate.
+
 ## Graphics WovenUpdate and WovenStore pointer controls (2026-10-19)
 
 WovenUpdate renders a bounded `Refresh` control at local x=250..329,
