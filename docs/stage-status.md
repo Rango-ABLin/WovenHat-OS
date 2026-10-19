@@ -1,5 +1,20 @@
 # Stage status
 
+## Graphics track - all packaged client pointer acceptance (2026-10-19)
+
+Settings, Monitor, Security, Editor, Images, Update, and Store now consume
+bounded `WPMV` motion and `WPBT` primary-button messages and draw distinct
+pointer markers. Their production QEMU client-pointer gates all passed on
+1/2/4 CPUs, verifying delivery and a presented-surface pixel delta. Evidence
+is under the corresponding
+`audit-artifacts/{settings,monitor,security,editor,images,update,store}-desktop-*`
+directories.
+
+Together with the earlier Calculator, Terminal, and Files slices, all ten
+packaged desktop clients now accept the pointer protocol. This is pointer
+delivery/visual feedback only; functional controls, USB HID qualification, and
+hardware GPU presentation remain open.
+
 ## Graphics track - WovenFiles client pointer acceptance (2026-10-19)
 
 WovenFiles now consumes bounded `WPMV` motion and `WPBT` primary-button

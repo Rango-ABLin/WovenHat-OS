@@ -9,11 +9,11 @@ press/release captured by that client produces `WPBT` with button, edge, and
 client-local coordinates; values are clamped to the shared surface. The shell
 does not forward events while dragging a title bar.
 
-WovenCalculator, WovenTerminal, and WovenFiles consume both messages and
-repaint bounded pointer markers. The QEMU visual gate passed for each client
-on 1/2/4 CPUs and checks both the delivery marker and a presented-surface
-pixel delta. This does not imply that the other clients have controls, that
-USB HID is qualified, or that presentation uses a hardware GPU.
+All ten packaged clients consume both messages and repaint bounded pointer
+markers. The QEMU visual gate passed for each client on 1/2/4 CPUs and checks
+both the delivery marker and a presented-surface pixel delta. This does not
+imply that the clients have full functional controls, that USB HID is
+qualified, or that presentation uses a hardware GPU.
 
 ## Graphics window interaction acceptance (2026-10-19)
 

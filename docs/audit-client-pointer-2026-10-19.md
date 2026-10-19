@@ -36,6 +36,7 @@ presented Calculator-surface delta.
 
 ## Boundaries
 
-This is software/2D PS/2 pointer delivery to Calculator, Terminal, and Files.
-The other packaged clients do not yet consume pointer controls; USB HID
-qualification and hardware GPU presentation are not claimed.
+This is software/2D PS/2 pointer delivery to all ten packaged clients:
+Calculator, Terminal, Files, Settings, Monitor, Security, Editor, Images,
+Update, and Store. The markers are visual feedback, not full application
+controls. USB HID qualification and hardware GPU presentation are not claimed.

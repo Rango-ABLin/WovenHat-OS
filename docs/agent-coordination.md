@@ -1,5 +1,14 @@
 # Agent coordination (Claude Code and Codex)
 
+**Codex graphics-track remaining client pointer acceptance (2026-10-19):**
+Settings, Monitor, Security, Editor, Images, Update, and Store now consume
+bounded `WPMV`/`WPBT` messages and paint distinct markers. The production QEMU
+gate passed for every client on 1/2/4 CPUs; evidence is under each app's
+`audit-artifacts/{settings,monitor,security,editor,images,update,store}-desktop-*`
+directory. All ten packaged clients now accept the pointer protocol; their
+functional controls remain bounded/read-only as previously documented. USB HID
+and hardware GPU presentation remain separate boundaries.
+
 **Codex graphics-track WovenFiles client pointer acceptance (2026-10-19):**
 WovenFiles now consumes bounded `WPMV`/`WPBT` messages and paints a distinct
 marker. The production QEMU gate passed on 1/2/4 CPUs with
