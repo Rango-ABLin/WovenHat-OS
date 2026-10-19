@@ -1,5 +1,14 @@
 # Agent coordination (Claude Code and Codex)
 
+**Codex graphics-track bounded chained class-matrix pair extension wrapper (2026-10-19):**
+the bounded GPOS chaining class-rule path now regression-tests a type-9
+extension wrapper around nested lookup-2 format-2 class-matrix pair
+positioning. Extension format, nested offsets, class definitions, matrix
+dimensions and value-record extents remain checked; malformed or unsupported
+forms fail closed. The 42-test `libwoven` suite, warning-denying
+library/kernel/workspace Clippy, formatting, and Stage 19.2 compositor visual
+acceptance on 1/2/4 CPUs passed. Hardware GPU acceleration remains open.
+
 **Codex graphics-track bounded contextual GPOS class-matrix pair positioning (2026-10-19):**
 nested lookup-2 format-2 class-matrix pair positioning is now supported from
 the bounded GPOS chaining format-2 class-rule path. Coverage, class

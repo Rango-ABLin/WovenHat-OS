@@ -14240,6 +14240,41 @@ mod tests {
         );
         assert_eq!(shaped[0].advance, 525);
         assert_eq!(shaped[1].origin, Point::new(527, 15));
+        let mut contextual_class_matrix_extension_bytes = contextual_class_bytes;
+        put16(&mut contextual_class_matrix_extension_bytes, 336, 9);
+        put16(&mut contextual_class_matrix_extension_bytes, 344, 1);
+        put16(&mut contextual_class_matrix_extension_bytes, 346, 2);
+        put32(&mut contextual_class_matrix_extension_bytes, 348, 36);
+        put16(&mut contextual_class_matrix_extension_bytes, 380, 2);
+        put16(&mut contextual_class_matrix_extension_bytes, 382, 40);
+        put16(&mut contextual_class_matrix_extension_bytes, 384, 4);
+        put16(&mut contextual_class_matrix_extension_bytes, 386, 0);
+        put16(&mut contextual_class_matrix_extension_bytes, 388, 24);
+        put16(&mut contextual_class_matrix_extension_bytes, 390, 32);
+        put16(&mut contextual_class_matrix_extension_bytes, 392, 1);
+        put16(&mut contextual_class_matrix_extension_bytes, 394, 1);
+        put_i16(&mut contextual_class_matrix_extension_bytes, 396, 25);
+        put16(&mut contextual_class_matrix_extension_bytes, 404, 1);
+        put16(&mut contextual_class_matrix_extension_bytes, 406, 1);
+        put16(&mut contextual_class_matrix_extension_bytes, 408, 1);
+        put16(&mut contextual_class_matrix_extension_bytes, 410, 0);
+        put16(&mut contextual_class_matrix_extension_bytes, 412, 1);
+        put16(&mut contextual_class_matrix_extension_bytes, 414, 2);
+        put16(&mut contextual_class_matrix_extension_bytes, 416, 1);
+        put16(&mut contextual_class_matrix_extension_bytes, 418, 0);
+        put16(&mut contextual_class_matrix_extension_bytes, 420, 1);
+        put16(&mut contextual_class_matrix_extension_bytes, 422, 1);
+        put16(&mut contextual_class_matrix_extension_bytes, 424, 1);
+        let contextual_class_matrix_extension_face =
+            TrueTypeFace::from_bytes(&contextual_class_matrix_extension_bytes).unwrap();
+        assert_eq!(
+            contextual_class_matrix_extension_face
+                .shape_text_ligatures("AB", Point::new(2, 15), 1000, &mut shaped)
+                .unwrap(),
+            2
+        );
+        assert_eq!(shaped[0].advance, 525);
+        assert_eq!(shaped[1].origin, Point::new(527, 15));
         let mut contextual_glyph_bytes = contextual_gpos_bytes;
         put16(&mut contextual_glyph_bytes, 304, 1);
         put16(&mut contextual_glyph_bytes, 306, 26);

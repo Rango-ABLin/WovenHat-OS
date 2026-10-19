@@ -1,5 +1,11 @@
 # WovenHat OS Architecture & Codebase Guide
 
+## Graphics contextual GPOS class-matrix extension update (2026-10-19)
+
+Nested lookup-2 format-2 class-matrix pair positioning is regression-tested
+through a checked type-9 extension wrapper. The wrapper target and nested
+subtable bounds feed the same validated class/matrix/value-record path.
+
 ## Graphics contextual GPOS class-matrix pair update (2026-10-19)
 
 Nested lookup-2 format-2 class-matrix pair positioning now shares the bounded
