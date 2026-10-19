@@ -5200,9 +5200,7 @@ fn install_production_system_apps() -> bool {
             image: SYSTEM_APP_FILES,
             binary_path: "/bin/wovenhat-files",
             catalog_path: "/share/applications/woven-files.app",
-            catalog: b"Name=WovenFiles
-Exec=/bin/wovenhat-files --gui %p
-",
+            catalog: b"Name=WovenFiles\nExec=/bin/wovenhat-files --gui %p\n",
         },
         App {
             name: "woven-monitor",
