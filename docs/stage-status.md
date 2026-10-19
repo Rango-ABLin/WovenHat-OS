@@ -1,5 +1,16 @@
 # Stage status
 
+## Graphics track - nested contextual GPOS pair adjustment (2026-10-19)
+
+The bounded format-3 contextual GPOS path now accepts a nested type-2
+format-1 pair lookup in addition to nested type-1 single positioning. Two
+input coverages, sequence index zero, pair-set bounds and optional extension
+wrappers are validated. Broader contextual records, backtrack/lookahead and
+multi-record composition remain open. The 42-test `libwoven` suite,
+warning-denying library/kernel/workspace Clippy, formatting, and Stage 19.2
+compositor visual acceptance passed on 1/2/4 CPUs. Hardware GPU acceleration
+remains a separate boundary.
+
 ## Graphics track - bounded contextual GPOS single adjustment (2026-10-19)
 
 GPOS lookup type 7 format 3 now matches two input coverages with no backtrack

@@ -1,5 +1,13 @@
 # WovenHat OS Architecture & Codebase Guide
 
+## Graphics nested contextual GPOS update (2026-10-19)
+
+Contextual format-3 records may now dispatch a bounded nested type-2
+format-1 pair lookup for the first input sequence position, alongside nested
+single adjustment. Pair-set coverage and value-record bounds are checked;
+general contextual backtrack/lookahead and multi-record dispatch remain
+outside this slice.
+
 ## Graphics contextual GPOS update (2026-10-19)
 
 The bounded contextual positioning path recognizes format-3 records with two

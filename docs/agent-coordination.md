@@ -1,5 +1,26 @@
 # Agent coordination (Claude Code and Codex)
 
+**Codex graphics-track nested contextual GPOS pair adjustment (2026-10-19):**
+extended bounded format-3 context matching with nested type-2 format-1 pair
+lookups, including checked pair sets and extension wrappers. Broader
+backtrack/lookahead and multi-record contextual composition remain open. The
+42-test `libwoven` suite, warning-denying library/kernel/workspace Clippy,
+formatting, and Stage 19.2 compositor visual acceptance on 1/2/4 CPUs passed.
+Hardware GPU acceleration remains open.
+
+**Claude Code interactive QEMU launcher (2026-10-19):** added
+`scripts/run-interactive-qemu.py`, a hands-on dev convenience script, not an
+acceptance harness. It reuses the same build steps as
+`scripts/test-shell-qemu.py` (package-system-apps, build `woven-shell`,
+`cargo run --print-image`) to produce a `hardware-demo` (default),
+`system-apps`, or `plain` boot image from the current working tree, creates/
+reuses the FAT32 `wovenhat-disk.img` data disk via `scripts/create-fat32.py`,
+and launches `qemu-system-x86_64` with a normal visible display (no
+`-display none`, no QMP automation) so a person can sign in and use the
+desktop/apps directly. Serial + QEMU monitor share this terminal's stdio via
+`-serial mon:stdio`. This produces no stage acceptance evidence and does not
+touch USB/physical hardware.
+
 **Codex graphics-track bounded contextual GPOS single adjustment (2026-10-19):**
 added format-3 two-input context matching with checked coverage and lookup
 records, applying a nested type-1 format-1 adjustment to sequence index 0;
