@@ -1,5 +1,15 @@
 # Stage status
 
+## Graphics track - bounded software-3D triangle clipping (2026-10-19)
+
+The WovenGraphics software triangle path now clips raster iteration to the
+intersection of the Canvas and caller-owned depth buffer before walking pixels.
+Edge and barycentric arithmetic uses widened intermediates, so extreme
+off-screen coordinates fail safely without overflow or unbounded iteration.
+The 43-test `libwoven` suite, warning-denying library/kernel/workspace Clippy,
+formatting, and Stage 19.2 compositor visual acceptance passed on 1/2/4 CPUs.
+Hardware GPU acceleration remains a separate boundary.
+
 ## Graphics track - bounded chaining format-2 target sequence positioning (2026-10-19)
 
 Nested single-positioning records under GPOS chaining format 2 now resolve

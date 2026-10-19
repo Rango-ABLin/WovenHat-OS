@@ -9926,10 +9926,45 @@ pub mod graphics {
             if area == 0 {
                 return;
             }
-            let min_x = first.x.min(second.x).min(third.x);
-            let max_x = first.x.max(second.x).max(third.x);
-            let min_y = first.y.min(second.y).min(third.y);
-            let max_y = first.y.max(second.y).max(third.y);
+            let canvas_right = self.canvas.x.saturating_add(
+                i32::try_from(self.canvas.width.saturating_sub(1)).unwrap_or(i32::MAX),
+            );
+            let canvas_bottom = self.canvas.y.saturating_add(
+                i32::try_from(self.canvas.height.saturating_sub(1)).unwrap_or(i32::MAX),
+            );
+            let depth_right = depth
+                .x
+                .saturating_add(i32::try_from(depth.width.saturating_sub(1)).unwrap_or(i32::MAX));
+            let depth_bottom = depth
+                .y
+                .saturating_add(i32::try_from(depth.height.saturating_sub(1)).unwrap_or(i32::MAX));
+            let min_x = first
+                .x
+                .min(second.x)
+                .min(third.x)
+                .max(self.canvas.x)
+                .max(depth.x);
+            let max_x = first
+                .x
+                .max(second.x)
+                .max(third.x)
+                .min(canvas_right)
+                .min(depth_right);
+            let min_y = first
+                .y
+                .min(second.y)
+                .min(third.y)
+                .max(self.canvas.y)
+                .max(depth.y);
+            let max_y = first
+                .y
+                .max(second.y)
+                .max(third.y)
+                .min(canvas_bottom)
+                .min(depth_bottom);
+            if min_x > max_x || min_y > max_y {
+                return;
+            }
             let positive = area > 0;
             for y in min_y..=max_y {
                 for x in min_x..=max_x {
@@ -9944,11 +9979,11 @@ pub mod graphics {
                     if !inside {
                         continue;
                     }
-                    let depth_value = ((i64::from(first.depth) * first_edge.abs()
-                        + i64::from(second.depth) * second_edge.abs()
-                        + i64::from(third.depth) * third_edge.abs())
+                    let depth_value = ((i128::from(first.depth) * first_edge.abs()
+                        + i128::from(second.depth) * second_edge.abs()
+                        + i128::from(third.depth) * third_edge.abs())
                         / area.abs())
-                    .min(i64::from(u16::MAX)) as u16;
+                    .min(i128::from(u16::MAX)) as u16;
                     if depth.test_and_set(x, y, depth_value) {
                         let red = interpolate_channel(
                             first.color.red,
@@ -10446,25 +10481,26 @@ pub mod graphics {
         ((start * (255 - amount) as u16 + end * amount as u16 + 127) / 255) as u8
     }
 
-    fn edge(ax: i32, ay: i32, bx: i32, by: i32, px: i32, py: i32) -> i64 {
-        i64::from(bx - ax) * i64::from(py - ay) - i64::from(by - ay) * i64::from(px - ax)
+    fn edge(ax: i32, ay: i32, bx: i32, by: i32, px: i32, py: i32) -> i128 {
+        (i128::from(bx) - i128::from(ax)) * (i128::from(py) - i128::from(ay))
+            - (i128::from(by) - i128::from(ay)) * (i128::from(px) - i128::from(ax))
     }
 
     fn interpolate_channel(
         first: u8,
         second: u8,
         third: u8,
-        first_weight: i64,
-        second_weight: i64,
-        third_weight: i64,
-        total: i64,
+        first_weight: i128,
+        second_weight: i128,
+        third_weight: i128,
+        total: i128,
     ) -> u8 {
-        ((i64::from(first) * first_weight
-            + i64::from(second) * second_weight
-            + i64::from(third) * third_weight
+        ((i128::from(first) * first_weight
+            + i128::from(second) * second_weight
+            + i128::from(third) * third_weight
             + total / 2)
             / total)
-            .min(i64::from(u8::MAX)) as u8
+            .min(i128::from(u8::MAX)) as u8
     }
 }
 pub mod notifications {
@@ -12770,6 +12806,26 @@ mod tests {
         assert!(center != Color::rgb(255, 0, 0).packed());
         assert!(center != Color::rgb(0, 255, 0).packed());
         assert!(center != Color::rgb(0, 0, 255).packed());
+    }
+
+    #[test]
+    fn wovengraphics_software_3d_clips_extreme_coordinates() {
+        use crate::graphics::{Color, DepthBuffer, Renderer, Vertex3};
+
+        let mut pixels = [0u32; 16];
+        let mut depths = [u16::MAX; 16];
+        {
+            let mut canvas = Canvas::new(&mut pixels, -2, -2, 4, 4).unwrap();
+            let mut depth = DepthBuffer::new(&mut depths, -2, -2, 4, 4).unwrap();
+            Renderer::new(&mut canvas).triangle_3d(
+                &mut depth,
+                Vertex3::new(i32::MIN, i32::MIN, 1, Color::WHITE),
+                Vertex3::new(i32::MAX, i32::MIN, 1, Color::WHITE),
+                Vertex3::new(i32::MIN, i32::MAX, 1, Color::WHITE),
+            );
+        }
+        assert_eq!(pixels[0], Color::WHITE.packed());
+        assert_eq!(pixels[15], 0);
     }
 
     #[test]

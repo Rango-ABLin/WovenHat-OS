@@ -1,5 +1,14 @@
 # Agent coordination (Claude Code and Codex)
 
+**Codex graphics-track bounded software-3D triangle clipping (2026-10-19):**
+the WovenGraphics software triangle path now clips raster iteration to the
+intersection of the Canvas and caller-owned depth buffer before walking pixels.
+Edge and barycentric arithmetic uses widened intermediates, so extreme
+off-screen coordinates fail safely without overflow or unbounded iteration.
+The 43-test `libwoven` suite, warning-denying library/kernel/workspace Clippy,
+formatting, and Stage 19.2 compositor visual acceptance on 1/2/4 CPUs passed.
+Hardware GPU acceleration remains open.
+
 **Codex graphics-track bounded chaining format-2 target sequence positioning (2026-10-19):**
 nested single-positioning records under GPOS chaining format 2 now resolve
 coverage against target sequence indices beyond zero, while the outer class

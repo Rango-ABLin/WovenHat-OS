@@ -1,5 +1,12 @@
 # WovenHat OS Architecture & Codebase Guide
 
+## Graphics software-3D clipping update (2026-10-19)
+
+`Renderer::triangle_3d` bounds raster iteration by both the Canvas and depth
+buffer rectangles and uses i128 edge/interpolation intermediates. This keeps
+caller-owned software 3D safe for extreme projected coordinates while leaving
+the future hardware/GPU backend boundary unchanged.
+
 ## Graphics contextual GPOS format-2 target update (2026-10-19)
 
 The chaining format-2 path keeps first-input class coverage separate from
