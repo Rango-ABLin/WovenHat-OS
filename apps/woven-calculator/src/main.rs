@@ -19,6 +19,7 @@ const PANEL_X: i32 = 12;
 const PANEL_Y: i32 = 12;
 const PANEL_WIDTH: usize = 216;
 const PANEL_HEIGHT: usize = 126;
+const MAX_INPUT: usize = 24;
 
 /// In .bss rather than the 8 KiB task stack: too large to carry as a stack
 /// local. Sized to the whole window: `GraphicsSurface::write_canvas` always
@@ -71,6 +72,27 @@ fn run_console(expression: &[u8], result: i64) -> ! {
     libwoven::exit(0)
 }
 
+fn draw_gui(canvas: &mut Canvas<'_>, expression: &[u8], result: Option<i64>, active: bool) {
+    canvas.fill_rect(0, 0, WIDTH as usize, HEIGHT as usize, BACKGROUND);
+    canvas.fill_rect(PANEL_X, PANEL_Y, PANEL_WIDTH, PANEL_HEIGHT, PANEL);
+    stroke_rect(canvas, PANEL_X, PANEL_Y, PANEL_WIDTH, PANEL_HEIGHT, ACCENT);
+    canvas.fill_rect(PANEL_X + 184, PANEL_Y + 8, 18, 8, if active { ACCENT } else { PANEL });
+    canvas.draw_text(PANEL_X - 2, PANEL_Y, "WovenCalculator", TEXT);
+    canvas.draw_text(PANEL_X - 2, PANEL_Y + 24, "Expression:", TEXT);
+    if let Ok(text) = core::str::from_utf8(expression) {
+        canvas.draw_text(PANEL_X - 2, PANEL_Y + 40, text, TEXT);
+    }
+    canvas.draw_text(PANEL_X - 2, PANEL_Y + 64, "Result:", ACCENT);
+    if let Some(value) = result {
+        let mut digits = [0u8; 24];
+        let result_text = format_signed(value, &mut digits);
+        canvas.draw_text(PANEL_X - 2, PANEL_Y + 80, result_text, ACCENT);
+    } else {
+        canvas.draw_text(PANEL_X - 2, PANEL_Y + 80, "Enter to evaluate", ACCENT);
+    }
+    canvas.draw_text(PANEL_X - 2, PANEL_Y + 104, "ASCII input; Enter evaluates", TEXT);
+}
+
 /// Opens a window on the WovenShell desktop: shares a drawn surface and asks
 /// the shell (the sole compositor-authority holder) to place it, following
 /// the same WOPN/WCLS protocol `hello-gui --desktop-client` uses. `shell` is
@@ -81,12 +103,6 @@ fn run_gui(shell: Option<&[u8]>) -> ! {
     let Some(shell) = shell.and_then(parse_u64).map(libwoven::process::Id) else {
         fail(7)
     };
-    let expression: &[u8] = b"2 + 2";
-    let result = match evaluate(expression) {
-        Ok(value) => value,
-        Err(_) => fail(2),
-    };
-
     let window = match GraphicsSurface::create(WIDTH, HEIGHT) {
         Ok(window) => window,
         Err(_) => fail(3),
@@ -97,17 +113,8 @@ fn run_gui(shell: Option<&[u8]>) -> ! {
         Some(canvas) => canvas,
         None => fail(5),
     };
-    canvas.fill_rect(0, 0, WIDTH as usize, HEIGHT as usize, BACKGROUND);
-    canvas.fill_rect(PANEL_X, PANEL_Y, PANEL_WIDTH, PANEL_HEIGHT, PANEL);
-    stroke_rect(&mut canvas, PANEL_X, PANEL_Y, PANEL_WIDTH, PANEL_HEIGHT, ACCENT);
-    canvas.draw_text(PANEL_X - 2, PANEL_Y, "WovenCalculator", TEXT);
-    canvas.draw_text(PANEL_X - 2, PANEL_Y + 24, "Expression:", TEXT);
-    let expression_text = core::str::from_utf8(expression).unwrap_or("?");
-    canvas.draw_text(PANEL_X - 2, PANEL_Y + 40, expression_text, TEXT);
-    canvas.draw_text(PANEL_X - 2, PANEL_Y + 64, "Result:", ACCENT);
-    let mut digits = [0u8; 24];
-    let result_text = format_signed(result, &mut digits);
-    canvas.draw_text(PANEL_X - 2, PANEL_Y + 80, result_text, ACCENT);
+    let expression = [0u8; MAX_INPUT];
+    draw_gui(&mut canvas, &expression, None, false);
     if window.write_canvas(&canvas).is_err() {
         fail(6);
     }
@@ -127,19 +134,52 @@ fn run_gui(shell: Option<&[u8]>) -> ! {
     }
     let _ = libwoven::print("WovenCalculator: window opened\n");
 
-    // Wait for the shell to close this window (its title bar's close
-    // control). Any other message (a forwarded key, for instance) is not
-    // meaningful yet and is ignored.
+    // Wait for the shell to close this window, or update the bounded
+    // expression preview from forwarded ASCII/WKEY events.
     let mut message = [0u8; 64];
+    let mut expression = [0u8; MAX_INPUT];
+    let mut length = 0usize;
+    let mut result = None;
+    let mut active: bool;
     loop {
         match libwoven::wait_any(libwoven::wait::MESSAGE, None) {
             Ok(_) => {}
             Err(_) => fail(10),
         }
-        if let Ok((length, sender)) = libwoven::message_receive(&mut message) {
-            if sender == shell && message.get(..length.min(4)) == Some(&b"WCLS"[..]) {
+        if let Ok((message_length, sender)) = libwoven::message_receive(&mut message) {
+            if sender != shell {
+                continue;
+            }
+            if message.get(..message_length.min(4)) == Some(&b"WCLS"[..]) {
                 break;
             }
+            if message.get(..4) == Some(&b"WKEY"[..]) && message_length >= 5 {
+                active = true;
+                match message[4] {
+                    1 => result = evaluate(&expression[..length]).ok(),
+                    2 => {
+                        length = length.saturating_sub(1);
+                        result = None;
+                    }
+                    _ => {}
+                }
+            } else if message_length == 1 && message[0].is_ascii_graphic() && length < MAX_INPUT {
+                active = true;
+                expression[length] = message[0];
+                length += 1;
+                result = None;
+            } else {
+                continue;
+            }
+            let pixels = unsafe { &mut *CANVAS_PIXELS.0.get() };
+            let Some(mut canvas) = Canvas::new(pixels, 0, 0, WIDTH as usize, HEIGHT as usize) else {
+                fail(10)
+            };
+            draw_gui(&mut canvas, &expression[..length], result, active);
+            if window.write_canvas(&canvas).is_err() {
+                fail(11)
+            }
+            let _ = libwoven::print("WovenCalculator: input updated\n");
         }
     }
     drop(window);

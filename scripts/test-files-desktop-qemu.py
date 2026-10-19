@@ -186,10 +186,14 @@ def main():
         # event-driven repaint to reach the framebuffer before capture.
         time.sleep(2)
         input_baseline = None
-        if args.app == 'terminal':
-            input_baseline = out / 'woven-terminal-before-input.ppm'
+        input_sequence = {
+            'terminal': ['h', 'e', 'l', 'l', 'o', 'backspace', 'p', 'ret'],
+            'calculator': ['4', 'ret'],
+        }.get(args.app)
+        if input_sequence is not None:
+            input_baseline = out / f'woven-{app[0]}-before-input.ppm'
             command_qmp('screendump', {'filename': str(input_baseline)})
-            for key in ['h', 'e', 'l', 'l', 'o', 'backspace', 'p', 'ret']:
+            for key in input_sequence:
                 command_qmp('send-key', {'keys': [{'type': 'qcode', 'data': key}], 'hold-time': 160})
                 time.sleep(0.3)
             time.sleep(2)

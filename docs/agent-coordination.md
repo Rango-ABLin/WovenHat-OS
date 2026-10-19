@@ -1,5 +1,13 @@
 # Agent coordination (Claude Code and Codex)
 
+**Codex graphics-track Canvas damage and Calculator input (2026-10-19):**
+Userspace graphics mutations now register client damage in
+`kernel/src/user_graphics.rs`, so shared WovenShell clients receive repaint
+wakeups. WovenCalculator accepts bounded ASCII/WKEY expression input and its
+QMP interaction gate passed on 1/2/4 CPUs, with evidence in
+`audit-artifacts/calculator-desktop-{1,2,4}cpu-*`. Pointer widgets, WSIZ, and
+hardware GPU presentation remain out of scope.
+
 **Codex graphics-track bounded key protocol (2026-10-19):**
 WovenShell now forwards Enter and Backspace as `WKEY` plus bounded key codes;
 WovenTerminal redraws its shared Canvas after ASCII edits, Backspace, and

@@ -263,20 +263,26 @@ pub fn create(owner: u64, width: u32, height: u32) -> Result<Handle, Error> {
 
 /// Fill a rectangle in the surface named by `handle`.
 pub fn fill_rect(handle: Handle, rect: Rect, color: u32) -> Result<(), Error> {
-    with_registry(|registry| {
+    let touched = with_registry(|registry| {
         let surface = registry.resolve_mut(handle)?;
-        surface.fill_rect(rect, color);
-        Ok(())
-    })
+        Ok(surface.fill_rect(rect, color))
+    })?;
+    if !touched.is_empty() {
+        mark_damage(handle, touched)?;
+    }
+    Ok(())
 }
 
 /// Stroke a rectangle outline in the surface named by `handle`.
 pub fn stroke_rect(handle: Handle, rect: Rect, color: u32) -> Result<(), Error> {
-    with_registry(|registry| {
+    let touched = with_registry(|registry| {
         let surface = registry.resolve_mut(handle)?;
-        surface.stroke_rect(rect, color);
-        Ok(())
-    })
+        Ok(surface.stroke_rect(rect, color))
+    })?;
+    if !touched.is_empty() {
+        mark_damage(handle, touched)?;
+    }
+    Ok(())
 }
 
 /// Draw `text` into the surface at `(x, y)`.
@@ -287,11 +293,14 @@ pub fn stroke_rect(handle: Handle, rect: Rect, color: u32) -> Result<(), Error> 
 /// so for now the function is reachable only from the Stage 18.1 self-test.
 #[cfg_attr(not(feature = "stage18-1-test"), allow(dead_code))]
 pub fn draw_text(handle: Handle, x: i32, y: i32, text: &str, color: u32) -> Result<(), Error> {
-    with_registry(|registry| {
+    let touched = with_registry(|registry| {
         let surface = registry.resolve_mut(handle)?;
-        surface.draw_text(x, y, text, color);
-        Ok(())
-    })
+        Ok(surface.draw_text(x, y, text, color))
+    })?;
+    if !touched.is_empty() {
+        mark_damage(handle, touched)?;
+    }
+    Ok(())
 }
 
 /// Produce a stand-alone copy of the surface named by `handle`.
@@ -494,13 +503,16 @@ pub fn dimensions(handle: Handle) -> Result<(usize, usize), Error> {
 /// pixels, row by row. The rectangle must lie inside the surface and the
 /// buffer must match it exactly.
 pub fn write_pixels(handle: Handle, rect: Rect, bytes: &[u8]) -> Result<(), Error> {
-    with_registry(|registry| {
+    let touched = with_registry(|registry| {
         let surface = registry.resolve_mut(handle)?;
-        if surface.write_pixels(rect, bytes).is_empty() {
-            return Err(Error::OutOfRange);
+        let touched = surface.write_pixels(rect, bytes);
+        if touched.is_empty() {
+            Err(Error::OutOfRange)
+        } else {
+            Ok(touched)
         }
-        Ok(())
-    })
+    })?;
+    mark_damage(handle, touched)
 }
 
 /// Read one pixel back, so a client can verify what it drew.

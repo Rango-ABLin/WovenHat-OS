@@ -1,5 +1,14 @@
 # WovenHat OS Architecture & Codebase Guide
 
+## Graphics client damage registration and Calculator input (2026-10-19)
+
+`kernel/src/user_graphics.rs` records damage for userspace surface writes,
+fills, strokes, and text mutations, waking a shared compositor client as
+needed. `apps/woven-calculator/src/main.rs` consumes bounded ASCII/WKEY input
+and redraws its expression/result surface. The QMP interaction gate passed on
+1/2/4 CPUs. Pointer widgets, WSIZ resize, and hardware GPU output remain
+separate boundaries.
+
 ## Graphics bounded key protocol and Terminal input (2026-10-19)
 
 WovenShell keeps ASCII text as one-byte owner messages and forwards Enter and

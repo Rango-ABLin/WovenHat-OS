@@ -1,5 +1,17 @@
 # Stage status
 
+## Graphics track - Canvas damage registration and Calculator input (2026-10-19)
+
+The kernel userspace-graphics write, fill, stroke, and text paths now register
+their touched rectangles as client damage. This closes the compositor update
+gap where an app could redraw its shared surface without WovenShell receiving
+a damage wakeup. WovenCalculator now uses bounded ASCII/WKEY expression input
+and redraws its result; its interaction gate passed on 1/2/4 CPUs with
+before/after evidence under `audit-artifacts/calculator-desktop-{1,2,4}cpu-*`.
+
+The existing Calculator CLI remains supported. This slice does not claim
+desktop pointer widgets, `WSIZ` resize handling, or hardware GPU presentation.
+
 ## Graphics track - bounded desktop key protocol and Terminal input (2026-10-19)
 
 WovenShell now forwards Enter and Backspace to the focused window as bounded
