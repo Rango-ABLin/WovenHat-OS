@@ -1,5 +1,14 @@
 # WovenHat OS Architecture & Codebase Guide
 
+## Graphics GSUB reverse-chaining update (2026-10-19)
+
+The bounded GSUB pipeline supports lookup type 8 reverse-chaining
+substitutions. It checks the current coverage, nearest-first backtrack and
+forward lookahead coverages, then selects the corresponding replacement glyph;
+type-7 extension wrappers share the same parser. Sequence counts and table
+extents are capped, and malformed data fails closed. This remains software
+shaping/rasterization; hardware GPU acceleration is not implied.
+
 ## Graphics GSUB alternate update (2026-10-19)
 
 The bounded GSUB pipeline supports lookup type 3 alternate substitutions by

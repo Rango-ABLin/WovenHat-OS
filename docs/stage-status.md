@@ -1,5 +1,16 @@
 # Stage status
 
+## Graphics track - bounded GSUB reverse-chaining substitutions (2026-10-19)
+
+GSUB lookup type 8 reverse-chaining substitutions now match checked backtrack
+and lookahead coverage records before selecting the bounded replacement glyph;
+direct lookups and type-7 extension wrappers use the same fail-closed path.
+Malformed coverage, guard sequences, and replacement arrays are rejected or
+ignored without unbounded work. The 57-test `libwoven` suite, warning-denying
+library/kernel/workspace Clippy, formatting, and Stage 19.2 compositor visual
+acceptance passed on 1/2/4 CPUs. Hardware GPU acceleration remains a separate
+boundary.
+
 ## WovenCalculator desktop window (2026-10-19)
 
 The Stage 19 catalog apps (woven-calculator, woven-settings, etc.) have been
