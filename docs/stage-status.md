@@ -1,5 +1,18 @@
 # Stage status
 
+## Graphics track - WovenFiles client pointer acceptance (2026-10-19)
+
+WovenFiles now consumes bounded `WPMV` motion and `WPBT` primary-button
+messages and draws a distinct pointer marker in its shared surface. The
+production QEMU gate
+`scripts/test-files-desktop-qemu.py --app files --exercise-client-pointer`
+passed on 1/2/4 CPUs, verifying delivery and a presented-surface pixel delta.
+Evidence is under `audit-artifacts/files-desktop-{1,2,4}cpu-*`.
+
+Calculator, Terminal, and Files are the accepted client-pointer consumers.
+Files remains a bounded, read-only `/mnt` listing; USB HID qualification and
+hardware GPU presentation remain open.
+
 ## Graphics track - Terminal client pointer acceptance (2026-10-19)
 
 WovenTerminal now consumes the bounded `WPMV` motion and `WPBT` primary-button

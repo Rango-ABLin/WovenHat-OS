@@ -244,8 +244,8 @@ def main():
             pointer_changed = sum(left != right for left, right in zip(before_pointer, pointer_pixels)) // 3
             if pointer_changed < 100:
                 raise RuntimeError(f'{app[1]} pointer motion did not change its presented cursor/frame: changed_pixels={pointer_changed}')
-        if args.exercise_client_pointer and args.app not in ('calculator', 'terminal'):
-            parser.error('--exercise-client-pointer currently supports Calculator and Terminal only')
+        if args.exercise_client_pointer and args.app not in ('calculator', 'terminal', 'files'):
+            parser.error('--exercise-client-pointer currently supports Calculator, Terminal, and Files only')
         if args.exercise_client_pointer:
             client_pointer_baseline = out / f'woven-{app[0]}-before-client-pointer.ppm'
             command_qmp('screendump', {'filename': str(client_pointer_baseline)})

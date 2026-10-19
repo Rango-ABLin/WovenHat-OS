@@ -1,5 +1,13 @@
 # Agent coordination (Claude Code and Codex)
 
+**Codex graphics-track WovenFiles client pointer acceptance (2026-10-19):**
+WovenFiles now consumes bounded `WPMV`/`WPBT` messages and paints a distinct
+marker. The production QEMU gate passed on 1/2/4 CPUs with
+`--app files --exercise-client-pointer`; evidence is under
+`audit-artifacts/files-desktop-{1,2,4}cpu-*`. Calculator, Terminal, and Files
+are now accepted pointer clients. The Files UI remains read-only; USB HID and
+hardware GPU presentation remain separate.
+
 **Codex graphics-track Terminal client pointer acceptance (2026-10-19):**
 WovenTerminal now consumes the bounded `WPMV`/`WPBT` protocol and paints a
 distinct marker. `scripts/test-files-desktop-qemu.py --app terminal
