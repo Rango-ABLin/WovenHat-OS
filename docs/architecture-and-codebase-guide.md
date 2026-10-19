@@ -1,5 +1,15 @@
 # WovenHat OS Architecture & Codebase Guide
 
+## Graphics WovenFiles client update (2026-10-19)
+
+`apps/woven-files` now follows the ordinary desktop-client boundary: its
+`--gui <shell-pid>` path uses a static bounded Canvas pixel buffer, renders a
+`/mnt` directory listing, shares the surface, sends `WOPN`, and blocks on the
+shell-owned close message. The production catalog supplies `--gui %p`. App
+Clippy and the 1/2/4-CPU system-app packaging/boot gates qualify the client
+boundary; a live interactive Files launch/screenshot is still a separate
+visual acceptance.
+
 ## Graphics GSUB multiple-substitution extension evidence (2026-10-19)
 
 The type-2 multiple-substitution implementation is regression-tested through

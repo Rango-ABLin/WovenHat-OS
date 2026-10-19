@@ -1,5 +1,12 @@
 # Agent coordination (Claude Code and Codex)
 
+**Graphics WovenFiles client foundation (2026-10-19):** commit `39dc9c09`
+adds the Canvas-backed `--gui <shell-pid>` Files client and catalog wiring;
+`98c92061` normalizes its catalog string. Standalone app Clippy and production
+system-app/normal-boot QEMU gates passed on 1/2/4 CPUs. Interactive Files
+launch/screenshot evidence is still pending, so this remains a client/package
+checkpoint rather than full desktop visual acceptance.
+
 **Codex graphics-track GSUB multiple-substitution extension acceptance
 (2026-10-19):** direct and type-7 extension-wrapped type-2 substitutions now
 have end-to-end regressions, including oversized-sequence rejection. The 57

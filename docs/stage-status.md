@@ -1,5 +1,16 @@
 # Stage status
 
+## Graphics track - WovenFiles desktop client foundation (2026-10-19)
+
+`woven-files` now has a bounded `--gui <shell-pid>` client path: it renders a
+Canvas-backed `/mnt` listing into a shared surface, opens it through the
+WovenShell `WOPN` protocol, and waits for the shell's `WCLS` close message.
+The catalog entry now passes the shell PID. Standalone warning-denying app
+Clippy and production system-app packaging/normal-boot QEMU gates passed on
+1/2/4 CPUs. This is a GUI client/package acceptance, not yet a live
+interactive screenshot assertion for launching Files from the desktop; that
+visual workflow remains a follow-up.
+
 ## Graphics track - GSUB multiple-substitution extension acceptance (2026-10-19)
 
 The GSUB type-2 slice now has an end-to-end regression for a type-7 extension
