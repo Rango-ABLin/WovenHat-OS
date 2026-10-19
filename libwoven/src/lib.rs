@@ -3193,6 +3193,7 @@ pub mod graphics {
                         let extension_type = read_u16(self.bytes, extension + 2)
                             .ok_or(TrueTypeError::BadTableDirectory)?;
                         if extension_type != 1
+                            && extension_type != 3
                             && extension_type != 4
                             && extension_type != 5
                             && extension_type != 6
@@ -3209,6 +3210,15 @@ pub mod graphics {
                             .ok_or(TrueTypeError::BadTableDirectory)?;
                         if extension_type == 1 {
                             if let Some(substitute) = gsub_single_subtable(
+                                self.bytes,
+                                subtable,
+                                glyphs[position],
+                                feature_end,
+                            )? {
+                                return Ok(Some((substitute, 1)));
+                            }
+                        } else if extension_type == 3 {
+                            if let Some(substitute) = gsub_alternate_subtable(
                                 self.bytes,
                                 subtable,
                                 glyphs[position],
@@ -3318,7 +3328,7 @@ pub mod graphics {
                     }
                     continue;
                 }
-                if lookup_type != 1 && lookup_type != 4 {
+                if lookup_type != 1 && lookup_type != 3 && lookup_type != 4 {
                     continue;
                 }
                 let subtable_count = usize::from(
@@ -3347,6 +3357,17 @@ pub mod graphics {
                                 .ok_or(TrueTypeError::BadTableDirectory)?,
                         ))
                         .ok_or(TrueTypeError::BadTableDirectory)?;
+                    if lookup_type == 3 {
+                        if let Some(substitute) = gsub_alternate_subtable(
+                            self.bytes,
+                            subtable,
+                            glyphs[position],
+                            feature_end,
+                        )? {
+                            return Ok(Some((substitute, 1)));
+                        }
+                        continue;
+                    }
                     if lookup_type == 1 {
                         if subtable.checked_add(6).is_none_or(|end| end > feature_end) {
                             return Err(TrueTypeError::BadTableDirectory);
@@ -6582,6 +6603,73 @@ pub mod graphics {
             }
             _ => Ok(None),
         }
+    }
+
+    pub(crate) fn gsub_alternate_subtable(
+        bytes: &[u8],
+        subtable: usize,
+        glyph: u16,
+        table_end: usize,
+    ) -> Result<Option<u16>, TrueTypeError> {
+        if subtable.checked_add(6).is_none_or(|end| end > table_end)
+            || read_u16(bytes, subtable) != Some(1)
+        {
+            return Ok(None);
+        }
+        let coverage = subtable
+            .checked_add(usize::from(
+                read_u16(bytes, subtable + 2).ok_or(TrueTypeError::BadTableDirectory)?,
+            ))
+            .ok_or(TrueTypeError::BadTableDirectory)?;
+        let Some(coverage_index) = gsub_coverage_index(bytes, coverage, table_end, glyph)? else {
+            return Ok(None);
+        };
+        let set_count =
+            usize::from(read_u16(bytes, subtable + 4).ok_or(TrueTypeError::BadTableDirectory)?);
+        if set_count > 128 || coverage_index >= set_count {
+            return Err(TrueTypeError::TooLarge);
+        }
+        let sets_end = subtable
+            .checked_add(
+                6usize
+                    .checked_add(set_count.checked_mul(2).ok_or(TrueTypeError::TooLarge)?)
+                    .ok_or(TrueTypeError::TooLarge)?,
+            )
+            .ok_or(TrueTypeError::TooLarge)?;
+        if sets_end > table_end {
+            return Err(TrueTypeError::BadTableDirectory);
+        }
+        let set = subtable
+            .checked_add(usize::from(
+                read_u16(bytes, subtable + 6 + coverage_index * 2)
+                    .ok_or(TrueTypeError::BadTableDirectory)?,
+            ))
+            .ok_or(TrueTypeError::BadTableDirectory)?;
+        if set.checked_add(4).is_none_or(|end| end > table_end) {
+            return Err(TrueTypeError::BadTableDirectory);
+        }
+        let alternate_count =
+            usize::from(read_u16(bytes, set).ok_or(TrueTypeError::BadTableDirectory)?);
+        if alternate_count == 0 || alternate_count > 128 {
+            return Err(TrueTypeError::TooLarge);
+        }
+        let end = set
+            .checked_add(
+                2usize
+                    .checked_add(
+                        alternate_count
+                            .checked_mul(2)
+                            .ok_or(TrueTypeError::TooLarge)?,
+                    )
+                    .ok_or(TrueTypeError::TooLarge)?,
+            )
+            .ok_or(TrueTypeError::TooLarge)?;
+        if end > table_end {
+            return Err(TrueTypeError::BadTableDirectory);
+        }
+        Ok(Some(
+            read_u16(bytes, set + 2).ok_or(TrueTypeError::BadTableDirectory)?,
+        ))
     }
 
     fn gsub_ligature_subtable(
@@ -13652,6 +13740,37 @@ mod tests {
         assert_eq!(face.glyph_index('\u{1f600}'), Some(3));
         assert_eq!(face.glyph_index('A'), None);
         assert_eq!(face.advance_width('\u{1f600}'), Some(700));
+    }
+
+    #[test]
+    fn wovengraphics_gsub_alternate_subtable_selects_first_bounded_alternate() {
+        let mut bytes = [0u8; 26];
+        let put16 = |bytes: &mut [u8], offset: usize, value: u16| {
+            bytes[offset..offset + 2].copy_from_slice(&value.to_be_bytes());
+        };
+        put16(&mut bytes, 0, 1);
+        put16(&mut bytes, 2, 8);
+        put16(&mut bytes, 4, 1);
+        put16(&mut bytes, 6, 20);
+        put16(&mut bytes, 8, 1);
+        put16(&mut bytes, 10, 1);
+        put16(&mut bytes, 12, 7);
+        put16(&mut bytes, 20, 2);
+        put16(&mut bytes, 22, 9);
+        put16(&mut bytes, 24, 10);
+        assert_eq!(
+            crate::graphics::gsub_alternate_subtable(&bytes, 0, 7, bytes.len()),
+            Ok(Some(9))
+        );
+        assert_eq!(
+            crate::graphics::gsub_alternate_subtable(&bytes, 0, 8, bytes.len()),
+            Ok(None)
+        );
+        put16(&mut bytes, 20, 0);
+        assert_eq!(
+            crate::graphics::gsub_alternate_subtable(&bytes, 0, 7, bytes.len()),
+            Err(crate::graphics::TrueTypeError::TooLarge)
+        );
     }
 
     #[test]

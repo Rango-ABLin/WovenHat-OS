@@ -187,7 +187,9 @@ impl Image {
         if index == 0 || index >= dynamic.symbol_count || dynamic.symtab_entry_size != 24 {
             return None;
         }
-        let offset = dynamic.symtab_file_offset.checked_add(index.checked_mul(24)?)?;
+        let offset = dynamic
+            .symtab_file_offset
+            .checked_add(index.checked_mul(24)?)?;
         let symbol = bytes.get(offset..offset.checked_add(24)?)?;
         let binding = symbol[4] >> 4;
         let visibility = symbol[5] & 3;
@@ -195,10 +197,15 @@ impl Image {
         if !matches!(binding, 0 | 1) || !matches!(symbol[4] & 0xf, 0..=2) {
             return None;
         }
-        let name = dynamic_string(bytes, dynamic, u64::from(u32::from_le_bytes(symbol[..4].try_into().ok()?)))?;
+        let name = dynamic_string(
+            bytes,
+            dynamic,
+            u64::from(u32::from_le_bytes(symbol[..4].try_into().ok()?)),
+        )?;
         if section == 0 {
             return (binding == 1 && visibility == 0 && !name.is_empty())
-                .then(|| scope.resolve(name)).flatten();
+                .then(|| scope.resolve(name))
+                .flatten();
         }
         let local = self.defined_symbol_value(bytes, index)?;
         if binding == 1 && visibility == 0 {
@@ -386,23 +393,41 @@ impl<'a> SymbolScope<'a> {
                 return Err(ScopeError::MissingDependency);
             }
             let entry = self.images[image_index].ok_or(ScopeError::MissingDependency)?;
-            let count = entry.image.dynamic().map_or(0, |dynamic| dynamic.needed_count);
+            let count = entry
+                .image
+                .dynamic()
+                .map_or(0, |dynamic| dynamic.needed_count);
             for index in 0..count {
-                let needed = entry.image.needed_name(entry.bytes, index)
-                    .filter(|name| !name.is_empty()).ok_or(ScopeError::InvalidName)?;
-                if (0..index).any(|prior| entry.image.needed_name(entry.bytes, prior) == Some(needed)) {
+                let needed = entry
+                    .image
+                    .needed_name(entry.bytes, index)
+                    .filter(|name| !name.is_empty())
+                    .ok_or(ScopeError::InvalidName)?;
+                if (0..index)
+                    .any(|prior| entry.image.needed_name(entry.bytes, prior) == Some(needed))
+                {
                     return Err(ScopeError::DuplicateDependency);
                 }
-                if self.images[1..discovered].iter().flatten().any(|prior| prior.name == Some(needed)) {
+                if self.images[1..discovered]
+                    .iter()
+                    .flatten()
+                    .any(|prior| prior.name == Some(needed))
+                {
                     continue;
                 }
-                if discovered >= self.count || self.images[discovered].and_then(|next| next.name) != Some(needed) {
+                if discovered >= self.count
+                    || self.images[discovered].and_then(|next| next.name) != Some(needed)
+                {
                     return Err(ScopeError::MissingDependency);
                 }
                 discovered += 1;
             }
         }
-        if discovered == self.count { Ok(()) } else { Err(ScopeError::MissingDependency) }
+        if discovered == self.count {
+            Ok(())
+        } else {
+            Err(ScopeError::MissingDependency)
+        }
     }
 
     /// Resolve an exact exported global symbol in main-image-first scope.
@@ -551,7 +576,9 @@ fn parse_image(bytes: &[u8], shared: bool) -> Result<Image, Error> {
                         needed_count += 1;
                     }
                     14 => {
-                        if soname_offset.replace(value).is_some() { return Err(Error::InvalidSegment); }
+                        if soname_offset.replace(value).is_some() {
+                            return Err(Error::InvalidSegment);
+                        }
                     }
                     21 => {
                         // DT_DEBUG is debugger rendezvous metadata, not an
@@ -685,7 +712,8 @@ fn parse_image(bytes: &[u8], shared: bool) -> Result<Image, Error> {
                 || !alignment.is_power_of_two()
                 || alignment > PAGE_SIZE
                 || virtual_address % alignment != file_offset as u64 % alignment
-                || virtual_address.checked_add(memory_size as u64)
+                || virtual_address
+                    .checked_add(memory_size as u64)
                     .is_none_or(|end| end >= USER_ADDRESS_LIMIT)
                 || file_offset
                     .checked_add(file_size)
@@ -793,12 +821,19 @@ fn parse_image(bytes: &[u8], shared: bool) -> Result<Image, Error> {
     }
     if let Some(tls) = image.tls.filter(|tls| tls.file_size != 0) {
         let contained = image.segments().any(|segment| {
-            tls.file_offset.checked_sub(segment.file_offset).is_some_and(|offset| {
-                offset.checked_add(tls.file_size).is_some_and(|end| end <= segment.file_size)
-                    && segment.virtual_address.checked_add(offset as u64) == Some(tls.virtual_address)
-            })
+            tls.file_offset
+                .checked_sub(segment.file_offset)
+                .is_some_and(|offset| {
+                    offset
+                        .checked_add(tls.file_size)
+                        .is_some_and(|end| end <= segment.file_size)
+                        && segment.virtual_address.checked_add(offset as u64)
+                            == Some(tls.virtual_address)
+                })
         });
-        if !contained { return Err(Error::InvalidSegment); }
+        if !contained {
+            return Err(Error::InvalidSegment);
+        }
     }
     if let Some(mut dynamic) = image.dynamic {
         let dynamic_end = dynamic

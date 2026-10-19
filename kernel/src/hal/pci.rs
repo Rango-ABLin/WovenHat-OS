@@ -171,7 +171,12 @@ static ADMISSION_READY: AtomicBool = AtomicBool::new(false);
 /// has a validated bridge-forwarding configuration. Bridge-free systems are
 /// admitted after discovery; a routing failure leaves admission fail-closed.
 #[cfg_attr(
-    not(any(not(feature = "qemu-test"), feature = "stage13-12-test", feature = "stage13-1-test", feature = "stage13-2-test")),
+    not(any(
+        not(feature = "qemu-test"),
+        feature = "stage13-12-test",
+        feature = "stage13-1-test",
+        feature = "stage13-2-test"
+    )),
     expect(
         dead_code,
         reason = "used by production driver admission and stage feature gates"
@@ -1140,7 +1145,10 @@ pub fn rescan_added(
     Ok(count)
 }
 
-#[cfg_attr(not(any(not(feature = "qemu-test"), feature = "stage13-12-test")), expect(dead_code))]
+#[cfg_attr(
+    not(any(not(feature = "qemu-test"), feature = "stage13-12-test")),
+    expect(dead_code)
+)]
 pub fn topology_handle(address: Address) -> Option<topology::FunctionHandle> {
     let published = PUBLISHED.lock();
     for slot in 0..topology::MAX_FUNCTIONS {
@@ -1167,7 +1175,10 @@ pub fn topology_handle(address: Address) -> Option<topology::FunctionHandle> {
     None
 }
 
-#[cfg_attr(not(any(not(feature = "qemu-test"), feature = "stage13-12-test")), expect(dead_code))]
+#[cfg_attr(
+    not(any(not(feature = "qemu-test"), feature = "stage13-12-test")),
+    expect(dead_code)
+)]
 pub(crate) fn function_device(
     handle: topology::FunctionHandle,
 ) -> Option<(topology::NodeSnapshot, Device)> {
@@ -1188,7 +1199,10 @@ pub(crate) fn function_device(
     Some((snapshot, device))
 }
 
-#[cfg_attr(not(any(not(feature = "qemu-test"), feature = "stage13-12-test")), expect(dead_code))]
+#[cfg_attr(
+    not(any(not(feature = "qemu-test"), feature = "stage13-12-test")),
+    expect(dead_code)
+)]
 pub fn claim_function(handle: topology::FunctionHandle, owner: u32) -> Result<(), topology::Error> {
     PUBLISHED.lock().topology.claim(handle, owner)
 }
@@ -1213,7 +1227,10 @@ pub fn topology_owner(handle: topology::FunctionHandle) -> Result<u32, topology:
         .unwrap_or(topology::NO_OWNER))
 }
 
-#[cfg_attr(not(any(not(feature = "qemu-test"), feature = "stage13-12-test")), expect(dead_code))]
+#[cfg_attr(
+    not(any(not(feature = "qemu-test"), feature = "stage13-12-test")),
+    expect(dead_code)
+)]
 pub fn release_function(
     handle: topology::FunctionHandle,
     owner: u32,
@@ -1221,7 +1238,10 @@ pub fn release_function(
     PUBLISHED.lock().topology.release(handle, owner)
 }
 
-#[cfg_attr(not(any(not(feature = "qemu-test"), feature = "stage13-12-test")), expect(dead_code))]
+#[cfg_attr(
+    not(any(not(feature = "qemu-test"), feature = "stage13-12-test")),
+    expect(dead_code)
+)]
 pub fn lease_bar(
     handle: topology::FunctionHandle,
     owner: u32,
@@ -1267,12 +1287,18 @@ pub fn lease_bar(
         .lease_mmio(handle, owner, bar_index, bar.address, probe.size)
 }
 
-#[cfg_attr(not(any(not(feature = "qemu-test"), feature = "stage13-12-test")), expect(dead_code))]
+#[cfg_attr(
+    not(any(not(feature = "qemu-test"), feature = "stage13-12-test")),
+    expect(dead_code)
+)]
 pub fn validate_bar_lease(lease: topology::MmioLease, owner: u32) -> bool {
     PUBLISHED.lock().topology.validate_mmio(lease, owner)
 }
 
-#[cfg_attr(not(any(not(feature = "qemu-test"), feature = "stage13-12-test")), expect(dead_code))]
+#[cfg_attr(
+    not(any(not(feature = "qemu-test"), feature = "stage13-12-test")),
+    expect(dead_code)
+)]
 pub fn release_bar_lease(lease: topology::MmioLease, owner: u32) -> Result<(), topology::Error> {
     PUBLISHED.lock().topology.release_mmio(lease, owner)
 }
@@ -2161,10 +2187,13 @@ pub enum RebalanceError {
     RollbackFailed,
 }
 
-#[cfg_attr(not(any(not(feature = "qemu-test"), feature = "stage13-12-test")), expect(
-    dead_code,
-    reason = "Stage 13.2 firmware BAR rebalance is an explicit recovery/admission path, not unconditional normal bind"
-))]
+#[cfg_attr(
+    not(any(not(feature = "qemu-test"), feature = "stage13-12-test")),
+    expect(
+        dead_code,
+        reason = "Stage 13.2 firmware BAR rebalance is an explicit recovery/admission path, not unconditional normal bind"
+    )
+)]
 pub fn rebalance_bars_from_firmware(
     address: Address,
     header_type: u8,
@@ -2204,7 +2233,11 @@ pub fn rebalance_bars_from_firmware(
 /// allocation remains authoritative so its address cannot be reused while the
 /// device may still decode it.
 #[cfg_attr(
-    not(any(not(feature = "qemu-test"), feature = "stage13-12-test", feature = "stage13-2-test")),
+    not(any(
+        not(feature = "qemu-test"),
+        feature = "stage13-12-test",
+        feature = "stage13-2-test"
+    )),
     expect(
         dead_code,
         reason = "explicit hot-remove/admission teardown API is dormant until live BAR admission is wired"
@@ -2314,7 +2347,10 @@ pub fn release_bars_from_firmware(address: Address) -> Result<(), PersistentBarE
     Ok(())
 }
 
-#[cfg_attr(not(any(not(feature = "qemu-test"), feature = "stage13-12-test")), expect(dead_code))]
+#[cfg_attr(
+    not(any(not(feature = "qemu-test"), feature = "stage13-12-test")),
+    expect(dead_code)
+)]
 pub fn rebalance_bars(
     address: Address,
     header_type: u8,

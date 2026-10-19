@@ -21,6 +21,7 @@ import sys
 import time
 
 READY = '[S20.14] ready for capture'
+VIRGL_READY = '[S20.14] VIRGL context/resource/command lifecycle PASS'
 PASS_MARKER = '[S20.14] two monitors: PASSED'
 WIDTH, HEIGHT = 640, 400
 
@@ -109,6 +110,10 @@ def main():
     parser.add_argument('--qemu', default=shutil.which('qemu-system-x86_64') or r'C:\Program Files\qemu\qemu-system-x86_64.exe')
     parser.add_argument('--firmware', type=Path)
     parser.add_argument('--timeout', type=float, default=300)
+    parser.add_argument('--virgl', action='store_true',
+                        help='use QEMU virtio-gpu-gl-pci and exercise VIRGL discovery')
+    parser.add_argument('--blob', action='store_true',
+                        help='also enable QEMU resource-blob probing (experimental)')
     args = parser.parse_args()
     root = Path(__file__).resolve().parents[1]
     qemu = Path(args.qemu)
@@ -125,15 +130,18 @@ def main():
         return 1
     serial = out / 'serial.log'
     port = free_port()
+    display = 'egl-headless' if args.virgl else 'none'
+    gpu_device = ('virtio-gpu-gl-pci,id=gpu0,max_outputs=2' + (',blob=true,hostmem=64M' if args.blob else '')
+                  if args.virgl else 'virtio-gpu-pci,id=gpu0,max_outputs=2')
     command = [str(qemu), '-accel', 'tcg,tb-size=128', '-machine', 'q35', '-m', '256M', '-smp', str(args.cpus),
-               '-display', 'none', '-serial', f'file:{serial}', '-no-reboot',
+               '-display', display, '-serial', f'file:{serial}', '-no-reboot',
                '-qmp', f'tcp:127.0.0.1:{port},server=on,wait=off',
                '-device', 'isa-debug-exit,iobase=0xf4,iosize=0x04',
                '-drive', f'if=pflash,format=raw,readonly=on,file={firmware}',
                '-drive', f'if=none,id=boot,format=raw,readonly=on,file={build.stdout.strip()}',
                '-device', 'virtio-blk-pci,drive=boot,bootindex=1',
                '-vga', 'std',
-               '-device', 'virtio-gpu-pci,id=gpu0,max_outputs=2']
+               '-device', gpu_device]
     flags = subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
     errors = []
     captured = False
@@ -147,10 +155,11 @@ def main():
                     errors.append('timeout')
                     break
                 log = serial.read_text(errors='replace') if serial.exists() else ''
-                if not captured and READY in log:
+                if not captured and ((args.virgl and VIRGL_READY in log) or (not args.virgl and READY in log)):
                     captured = True
-                    for head in (0, 1):
-                        qmp('screendump', filename=str(out / f'head{head}.ppm'), device='gpu0', head=head)
+                    if not args.virgl:
+                        for head in (0, 1):
+                            qmp('screendump', filename=str(out / f'head{head}.ppm'), device='gpu0', head=head)
                 time.sleep(0.2)
             sock.close()
         except Exception as error:  # noqa: BLE001 - recorded as a failure
@@ -164,21 +173,26 @@ def main():
         errors.append(f'exit code {process.returncode}, expected 33')
     if PASS_MARKER not in log:
         errors.append(f'missing {PASS_MARKER!r}')
-    if captured:
+    if args.virgl:
+        if VIRGL_READY not in log:
+            errors.append(f'missing {VIRGL_READY!r}')
+    elif captured:
         for head in (0, 1):
             path = out / f'head{head}.ppm'
             if path.exists():
                 errors += head_errors(head, path)
             else:
                 errors.append(f'no capture of head {head}')
-    else:
+    elif not args.virgl:
         errors.append('the kernel never reported both heads ready')
     if errors:
         print('\n'.join(errors), file=sys.stderr)
         print('\n'.join(line for line in log.splitlines() if 'S20.14' in line), file=sys.stderr)
         print('FAILED; evidence:', out, file=sys.stderr)
         return 1
-    print(f'Stage 20.14: PASS ({args.cpus} CPU, both heads verified pixel for pixel). Evidence: {out}')
+    mode = 'VIRGL discovery + ' if args.virgl else ''
+    detail = 'VIRGL capability/context lifecycle verified' if args.virgl else 'both heads verified pixel for pixel'
+    print(f'Stage 20.14: PASS ({mode}{args.cpus} CPU, {detail}). Evidence: {out}')
     return 0
 
 

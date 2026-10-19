@@ -42,7 +42,9 @@ pub const CAPABILITIES: CapabilitySet = CapabilitySet::only(Capability::Console)
 /// at the sign-in screen.
 pub fn start(image: &[u8], accounts: Option<&str>) -> Result<u64, Error> {
     let program = match accounts {
-        Some(path) => crate::userspace::load_elf_with_argv(image, &["/bin/woven-shell", "--accounts", path]),
+        Some(path) => {
+            crate::userspace::load_elf_with_argv(image, &["/bin/woven-shell", "--accounts", path])
+        }
         None => crate::userspace::load_elf_with_argv(image, &["/bin/woven-shell"]),
     }
     .ok_or(Error::Image)?;
@@ -75,7 +77,9 @@ pub fn toggle_console() {
         crate::compositor::set_console(true);
         crate::woven_input::set_focus(None);
         crate::terminal::clear();
-        crate::terminal::write_bytes(b"WOVENHAT DIAGNOSTIC CONSOLE  (F12: BACK TO THE DESKTOP)\n> ");
+        crate::terminal::write_bytes(
+            b"WOVENHAT DIAGNOSTIC CONSOLE  (F12: BACK TO THE DESKTOP)\n> ",
+        );
         crate::serial::write_line(format_args!("[SESSION] diagnostic console"));
     } else {
         crate::compositor::set_console(false);

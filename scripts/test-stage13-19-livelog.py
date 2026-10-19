@@ -214,10 +214,16 @@ def main():
         try:
             while process.poll() is None:
                 log = serial.read_text(errors='replace') if serial.exists() else ''
-                if production and SHELL_MARKER in log:
-                    # One flush period (3 s) and a margin.
-                    time.sleep(8)
-                    break
+                if SHELL_MARKER in log:
+                    if args.mode == 'unlabelled' and '[LIVELOG] no live-test stick: NoLogPartition' in log:
+                        break
+                    if production and '[LIVELOG] boot ' in log and ' is logged on the USB stick' in log:
+                        # Deferred setup can take longer than the old
+                        # synchronous path. Use the existing overall deadline
+                        # and wait one flush period for the desktop marker to
+                        # reach the already-created file.
+                        time.sleep(3.5)
+                        break
                 if time.time() - started > args.timeout:
                     errors.append('timeout')
                     break

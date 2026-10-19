@@ -20,6 +20,7 @@
 
 use alloc::string::String;
 use alloc::vec::Vec;
+use core::sync::atomic::{AtomicBool, Ordering};
 
 use crate::block::{BlockDevice, SECTOR_SIZE};
 use crate::irq_lock::IrqMutex;
@@ -38,8 +39,19 @@ const MAX_ISSUES: usize = 40;
 const ISSUE_CHARS: usize = 96;
 /// Ticks between flushes (100 Hz).
 const FLUSH_TICKS: u64 = 300;
+/// Let the foreground boot/session finish scheduling before touching USB FAT.
+const START_DELAY_TICKS: u64 = 10;
 /// Words that mark a log line as an issue.
-const ISSUE_WORDS: [&str; 8] = ["FAIL", "Fail", "PANIC", "panic", "rror", "InitFailed", "Timeout", "denied"];
+const ISSUE_WORDS: [&str; 8] = [
+    "FAIL",
+    "Fail",
+    "PANIC",
+    "panic",
+    "rror",
+    "InitFailed",
+    "Timeout",
+    "denied",
+];
 
 struct Log {
     partition: partition::Partition,
@@ -59,6 +71,7 @@ struct Log {
 /// Held only to take the log out or put it back, never across I/O: a
 /// flush owns the log while it writes, with no lock held.
 static LOG: IrqMutex<Option<Log>> = IrqMutex::with_rank(None, 5);
+static START_QUEUED: AtomicBool = AtomicBool::new(false);
 
 /// Why the live log could not start.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -76,7 +89,38 @@ pub enum Error {
 
 /// Find the WOVENLOG partition, create this boot's log file, write the
 /// first flush, and start the worker. Returns the boot number.
+#[cfg(feature = "stage13-19-test")]
 pub fn start() -> Result<u32, Error> {
+    let boot = initialize()?;
+    if crate::task::spawn_io_service("livelog", worker).is_err() {
+        serial::write_line(format_args!(
+            "[LIVELOG] worker did not start; the log is flushed only now"
+        ));
+    }
+    Ok(boot)
+}
+
+/// Schedule live-log setup outside the boot-critical path. USB and FAT
+/// operations can be slow or fail on real devices; neither should prevent the
+/// desktop session from starting.
+pub fn start_deferred() -> Result<bool, crate::task::SpawnError> {
+    if LOG.lock().is_some() {
+        return Ok(false);
+    }
+    if START_QUEUED
+        .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+        .is_err()
+    {
+        return Ok(false);
+    }
+    if let Err(error) = crate::task::spawn_io_service("livelog-start", deferred_worker) {
+        START_QUEUED.store(false, Ordering::Release);
+        return Err(error);
+    }
+    Ok(true)
+}
+
+fn initialize() -> Result<u32, Error> {
     if LOG.lock().is_some() {
         return Err(Error::AlreadyStarted);
     }
@@ -90,16 +134,15 @@ pub fn start() -> Result<u32, Error> {
     inventory();
     let _ = xhci::with_usb_disk(|disk| flush(&mut log, disk));
     *LOG.lock() = Some(log);
-    if crate::task::spawn_io_service("livelog", worker).is_err() {
-        serial::write_line(format_args!("[LIVELOG] worker did not start; the log is flushed only now"));
-    }
     Ok(boot)
 }
 
 /// Flush now: everything logged so far reaches the stick. `false` when
 /// there is no log, another flush owns it, or a write failed.
 pub fn flush_now() -> bool {
-    let Some(mut log) = LOG.lock().take() else { return false };
+    let Some(mut log) = LOG.lock().take() else {
+        return false;
+    };
     let ok = xhci::with_usb_disk(|disk| flush(&mut log, disk)).unwrap_or(false);
     *LOG.lock() = Some(log);
     ok
@@ -111,7 +154,9 @@ pub fn panic_flush() {
     if !xhci::controller_free() {
         return;
     }
-    let Some(mut log) = LOG.try_lock().and_then(|mut slot| slot.take()) else { return };
+    let Some(mut log) = LOG.try_lock().and_then(|mut slot| slot.take()) else {
+        return;
+    };
     let _ = xhci::with_usb_disk(|disk| flush(&mut log, disk));
     if let Some(mut slot) = LOG.try_lock() {
         *slot = Some(log);
@@ -122,6 +167,31 @@ fn worker() -> ! {
     loop {
         crate::task::sleep_current(FLUSH_TICKS);
         let _ = flush_now();
+    }
+}
+
+fn deferred_worker() -> ! {
+    crate::task::sleep_current(START_DELAY_TICKS);
+    serial::write_line(format_args!(
+        "[LIVELOG] deferred worker active; probing for WOVENLOG"
+    ));
+    loop {
+        match initialize() {
+            Ok(boot) => {
+                serial::write_line(format_args!(
+                    "[LIVELOG] boot {} is logged on the USB stick",
+                    boot
+                ));
+                worker();
+            }
+            Err(error) => {
+                serial::write_line(format_args!(
+                    "[LIVELOG] no live-test stick: {:?}; retrying",
+                    error
+                ));
+                crate::task::sleep_current(FLUSH_TICKS * 10);
+            }
+        }
     }
 }
 
@@ -143,7 +213,8 @@ fn open(disk: &mut xhci::UsbDisk) -> Result<Log, Error> {
             labelled.then_some((partition, volume))
         })
         .ok_or(Error::NoLogPartition)?;
-    let mut view = partition::PartitionDevice::new(&mut *disk, partition).map_err(|_| Error::NoLogPartition)?;
+    let mut view = partition::PartitionDevice::new(&mut *disk, partition)
+        .map_err(|_| Error::NoLogPartition)?;
     match fat32::mkdir_path(&mut view, volume, DIRECTORY) {
         Ok(()) | Err(fat32::Error::AlreadyExists) => {}
         Err(error) => return Err(Error::Filesystem(error)),
@@ -231,7 +302,12 @@ fn flush(log: &mut Log, disk: &mut xhci::UsbDisk) -> bool {
                 log.issues.push(line.chars().take(ISSUE_CHARS).collect());
             }
         } else if log.partial.len() < 512 {
-            log.partial.push(if byte.is_ascii() && (byte >= 0x20 || byte == b'\t') { byte as char } else { '?' });
+            log.partial
+                .push(if byte.is_ascii() && (byte >= 0x20 || byte == b'\t') {
+                    byte as char
+                } else {
+                    '?'
+                });
         }
     }
     log.flushes += 1;
@@ -285,8 +361,17 @@ fn summary(log: &Log, head: usize) -> Vec<u8> {
         );
     }
     let _ = writeln!(text, "Kernel version: {}", env!("CARGO_PKG_VERSION"));
-    let _ = writeln!(text, "Flushes: {}; log bytes: {}{}", log.flushes, head,
-        if head > log.base + CAPACITY - SUMMARY - 1 { " (truncated: the file is full)" } else { "" });
+    let _ = writeln!(
+        text,
+        "Flushes: {}; log bytes: {}{}",
+        log.flushes,
+        head,
+        if head > log.base + CAPACITY - SUMMARY - 1 {
+            " (truncated: the file is full)"
+        } else {
+            ""
+        }
+    );
     let _ = writeln!(text, "Issues found in the log: {}", log.issues.len());
     for issue in &log.issues {
         let _ = writeln!(text, "  {}", issue);
@@ -302,14 +387,23 @@ fn summary(log: &Log, head: usize) -> Vec<u8> {
 /// What the machine is: written to the log once when it starts.
 fn inventory() {
     let vendor = crate::hal::cpu::detect_vendor();
-    serial::write_line(format_args!("[INVENTORY] cpu {:?} '{}', {} logical", vendor, cpu_brand().trim(),
-        crate::hal::cpu::count_logical_cpus()));
+    serial::write_line(format_args!(
+        "[INVENTORY] cpu {:?} '{}', {} logical",
+        vendor,
+        cpu_brand().trim(),
+        crate::hal::cpu::count_logical_cpus()
+    ));
     let memory = crate::memory::stats();
-    serial::write_line(format_args!("[INVENTORY] memory {} MiB usable in {} regions",
-        memory.total_frames * 4096 / (1024 * 1024), memory.usable_regions));
+    serial::write_line(format_args!(
+        "[INVENTORY] memory {} MiB usable in {} regions",
+        memory.total_frames * 4096 / (1024 * 1024),
+        memory.usable_regions
+    ));
     match crate::terminal::framebuffer_info() {
-        Some(info) => serial::write_line(format_args!("[INVENTORY] display {}x{} stride {} {:?}",
-            info.width, info.height, info.stride, info.pixel_format)),
+        Some(info) => serial::write_line(format_args!(
+            "[INVENTORY] display {}x{} stride {} {:?}",
+            info.width, info.height, info.stride, info.pixel_format
+        )),
         None => serial::write_line(format_args!("[INVENTORY] display: no framebuffer")),
     }
     let mut index = 0;
@@ -322,9 +416,15 @@ fn inventory() {
         index += 1;
     }
     if let Some(info) = xhci::usb_disk_info() {
-        serial::write_line(format_args!("[INVENTORY] usb disk port {} '{}' '{}' {} blocks",
-            info.port, core::str::from_utf8(&info.vendor).unwrap_or("?").trim_end(),
-            core::str::from_utf8(&info.product).unwrap_or("?").trim_end(), info.blocks));
+        serial::write_line(format_args!(
+            "[INVENTORY] usb disk port {} '{}' '{}' {} blocks",
+            info.port,
+            core::str::from_utf8(&info.vendor).unwrap_or("?").trim_end(),
+            core::str::from_utf8(&info.product)
+                .unwrap_or("?")
+                .trim_end(),
+            info.blocks
+        ));
     }
 }
 
@@ -357,28 +457,48 @@ fn cpu_brand() -> String {
 #[cfg(feature = "stage13-19-test")]
 pub fn self_test() -> bool {
     fn step(name: &str, ok: bool) -> bool {
-        serial::write_line(format_args!("[S13.19] {} {}", name, if ok { "PASS" } else { "FAIL" }));
+        serial::write_line(format_args!(
+            "[S13.19] {} {}",
+            name,
+            if ok { "PASS" } else { "FAIL" }
+        ));
         ok
     }
     let report = crate::drivers::bring_up();
-    if !step("xhci0 bound and ready", matches!(report.drivers[2].outcome, crate::drivers::Outcome::Ready(_))) {
+    if !step(
+        "xhci0 bound and ready",
+        matches!(report.drivers[2].outcome, crate::drivers::Outcome::Ready(_)),
+    ) {
         return false;
     }
     if !step("a USB disk is attached", xhci::usb_disk_info().is_some()) {
         return false;
     }
     let started = start();
-    if !step("the log starts on the WOVENLOG partition as boot 1", started == Ok(1)) {
+    if !step(
+        "the log starts on the WOVENLOG partition as boot 1",
+        started == Ok(1),
+    ) {
         serial::write_line(format_args!("[S13.19] start: {:?}", started));
         return false;
     }
-    if !step("a second start is refused", start() == Err(Error::AlreadyStarted)) {
+    if !step(
+        "a second start is refused",
+        start() == Err(Error::AlreadyStarted),
+    ) {
         return false;
     }
-    serial::write_line(format_args!("[NOTE] S13.19 tester note: the screen flickers on resume"));
-    serial::write_line(format_args!("[S13.19] simulated driver FAILURE for the summary"));
+    serial::write_line(format_args!(
+        "[NOTE] S13.19 tester note: the screen flickers on resume"
+    ));
+    serial::write_line(format_args!(
+        "[S13.19] simulated driver FAILURE for the summary"
+    ));
     for line in 0..200 {
-        serial::write_line(format_args!("[S13.19] burst line {:03} of the multi-sector log", line));
+        serial::write_line(format_args!(
+            "[S13.19] burst line {:03} of the multi-sector log",
+            line
+        ));
     }
     step("flushed to the stick", flush_now())
 }

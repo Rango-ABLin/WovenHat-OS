@@ -65,7 +65,10 @@ pub fn parse_interface(config: &[u8], configuration: u8) -> Option<Interface> {
                 if let Some(interface) = current.as_mut() {
                     let address = descriptor[2];
                     let max_packet = u16::from_le_bytes([descriptor[4], descriptor[5]]) & 0x07ff;
-                    if descriptor[3] & 0x03 == ENDPOINT_BULK && address & 0x0f != 0 && max_packet != 0 {
+                    if descriptor[3] & 0x03 == ENDPOINT_BULK
+                        && address & 0x0f != 0
+                        && max_packet != 0
+                    {
                         if address & 0x80 != 0 && interface.bulk_in == 0 {
                             interface.bulk_in = address;
                             interface.bulk_in_max_packet = max_packet;
@@ -89,7 +92,12 @@ fn complete(interface: &Interface) -> bool {
 
 /// A Command Block Wrapper for LUN 0: `tag` is echoed in the status,
 /// `length` bytes of data follow in the direction `data_in` gives.
-pub fn command_block(tag: u32, length: u32, data_in: bool, command: &[u8]) -> Option<[u8; CBW_LENGTH]> {
+pub fn command_block(
+    tag: u32,
+    length: u32,
+    data_in: bool,
+    command: &[u8],
+) -> Option<[u8; CBW_LENGTH]> {
     if command.is_empty() || command.len() > 16 {
         return None;
     }
@@ -174,7 +182,18 @@ pub const fn read_capacity() -> [u8; 10] {
 pub fn read_write(write: bool, lba: u32, blocks: u16) -> [u8; 10] {
     let lba = lba.to_be_bytes();
     let blocks = blocks.to_be_bytes();
-    [if write { 0x2a } else { 0x28 }, 0, lba[0], lba[1], lba[2], lba[3], 0, blocks[0], blocks[1], 0]
+    [
+        if write { 0x2a } else { 0x28 },
+        0,
+        lba[0],
+        lba[1],
+        lba[2],
+        lba[3],
+        0,
+        blocks[0],
+        blocks[1],
+        0,
+    ]
 }
 
 /// SCSI SYNCHRONIZE CACHE (10) of the whole medium.

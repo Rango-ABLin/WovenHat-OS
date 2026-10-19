@@ -62,7 +62,10 @@
 
 use core::panic::PanicInfo;
 
-use libwoven::{rgb, syscall, Args, GraphicsSurface};
+use libwoven::{
+    graphics::{Color, DepthBuffer, Path, Point, Rect, Renderer, Transform, Vertex3},
+    rgb, syscall, Args, GraphicsSurface,
+};
 
 libwoven::entry!(main);
 
@@ -70,6 +73,25 @@ const BACKGROUND: u32 = rgb(4, 12, 28);
 const TITLE_BAR: u32 = rgb(40, 220, 230);
 const CONTENT: u32 = rgb(230, 230, 240);
 const BORDER: u32 = rgb(0, 0, 0);
+
+const WOVEN_ICON: [u32; 16] = [
+    Color::WHITE.packed(),
+    Color::TITLE.packed(),
+    Color::TITLE.packed(),
+    Color::WHITE.packed(),
+    Color::TITLE.packed(),
+    Color::BLACK.packed(),
+    Color::BLACK.packed(),
+    Color::TITLE.packed(),
+    Color::TITLE.packed(),
+    Color::BLACK.packed(),
+    Color::BLACK.packed(),
+    Color::TITLE.packed(),
+    Color::WHITE.packed(),
+    Color::TITLE.packed(),
+    Color::TITLE.packed(),
+    Color::WHITE.packed(),
+];
 
 const WIDTH: u32 = 200;
 const HEIGHT: u32 = 120;
@@ -221,6 +243,71 @@ fn run(input: Input) -> ! {
     if surface.fill_rect(10, 26, 180, 80, CONTENT).is_err() {
         fail(4);
     }
+
+    // Stage 16.1: route a real visible frame through WovenGraphics' typed
+    // software renderer before uploading it to the kernel-owned surface.
+    let mut pixels = [0u32; 32 * 24];
+    let mut depth_values = [u16::MAX; 32 * 24];
+    let mut canvas = libwoven::Canvas::new(&mut pixels, 10, 10, 32, 24).unwrap();
+    let mut depth = DepthBuffer::new(&mut depth_values, 10, 10, 32, 24).unwrap();
+    {
+        let mut renderer = Renderer::new(&mut canvas);
+        depth.clear(u16::MAX);
+        renderer.vertical_gradient(
+            Rect::new(10, 10, 32, 16),
+            Color::TITLE,
+            Color::rgb(0, 80, 160),
+        );
+        renderer.horizontal_gradient(
+            Rect::new(10, 10, 32, 16),
+            Color::rgb(0, 80, 160),
+            Color::TITLE,
+        );
+        renderer.rounded_rect_blended(
+            Rect::new(12, 11, 28, 12),
+            3,
+            Color::WHITE,
+            48,
+        );
+        renderer.triangle_3d(
+            &mut depth,
+            Vertex3::new(18, 16, 80, Color::rgb(255, 90, 70)),
+            Vertex3::new(34, 12, 120, Color::rgb(255, 220, 70)),
+            Vertex3::new(30, 28, 120, Color::rgb(255, 70, 210)),
+        );
+        renderer.triangle_3d(
+            &mut depth,
+            Vertex3::new(18, 16, 80, Color::rgb(70, 180, 255)),
+            Vertex3::new(30, 28, 120, Color::rgb(70, 255, 170)),
+            Vertex3::new(14, 27, 120, Color::rgb(70, 100, 255)),
+        );
+        renderer.stroke(Rect::new(10, 10, 32, 16), Color::WHITE);
+        renderer.transformed_rect(
+            Rect::new(20, 13, 8, 7),
+            Transform::new(1 << 16, 1 << 15, 0, 1 << 16, 0, 0),
+            Color::rgb(255, 150, 40),
+        );
+        if !renderer.image_blended(12, 14, 4, 4, &WOVEN_ICON, 224) {
+            fail(40);
+        }
+        let _ = renderer.text_box(Rect::new(11, 11, 12, 14), "WH", Color::BLACK, 1);
+        renderer.blend(Rect::new(10, 26, 32, 8), Color::WHITE, 64);
+        let mut badge = Path::new();
+        let _ = badge.move_to(Point::new(12, 21));
+        let _ = badge.line_to(Point::new(22, 17));
+        let _ = badge.line_to(Point::new(32, 21));
+        let _ = badge.close();
+        let _ = renderer.fill_path_antialiased_blended(&badge, Color::rgb(20, 120, 180), 220);
+        let mut path = Path::new();
+        let _ = path.move_to(Point::new(15, 29));
+        if !path.quadratic_to(Point::new(22, 18), Point::new(29, 29)) {
+            fail(42);
+        }
+        renderer.stroke_path(&path, Color::TITLE);
+    }
+    if surface.write(10, 10, 32, 24, canvas.pixels()).is_err() {
+        fail(41);
+    }
     // One stroke rather than four fills. Besides being clearer, this
     // exercises the stroke syscall path.
     if surface.stroke_rect(10, 10, 180, 96, BORDER).is_err() {
@@ -286,6 +373,9 @@ fn run(input: Input) -> ! {
         Ok(_) => fail(12),
         Err(_) => fail(13),
     }
+    let _ = libwoven::print("[S16G] WovenGraphics visual frame: PASSED\n");
+    let _ = libwoven::print("[S16G2] WovenGraphics 2D frame: PASSED\n");
+    let _ = libwoven::print("[S16G3D] WovenGraphics software 3D frame: PASSED\n");
     let _ = libwoven::print("hello-gui: framebuffer presented\n");
 
     match input {

@@ -9,7 +9,11 @@ pub enum DeviceKind {
     Timer,
     Keyboard,
     Block,
-    #[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test", feature = "stage13-8-test"))]
+    #[cfg(any(
+        not(feature = "qemu-test"),
+        feature = "stage13-12-test",
+        feature = "stage13-8-test"
+    ))]
     Audio,
     /// A USB host controller.
     #[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]

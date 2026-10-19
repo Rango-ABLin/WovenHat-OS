@@ -309,8 +309,16 @@ pub fn discover(
     });
     summary.power.s5 = dsdt
         .into_iter()
-        .chain(summary.aml_tables[..summary.aml_table_count].iter().copied())
-        .find_map(|table| aml_table_body(physical_offset, table, regions).ok().and_then(aml_s5));
+        .chain(
+            summary.aml_tables[..summary.aml_table_count]
+                .iter()
+                .copied(),
+        )
+        .find_map(|table| {
+            aml_table_body(physical_offset, table, regions)
+                .ok()
+                .and_then(aml_s5)
+        });
     *POWER.lock() = Some(summary.power);
     Ok(summary)
 }
@@ -349,7 +357,13 @@ fn parse_fadt(
     } else {
         0
     };
-    read_fadt_power(physical_offset, address, length, regions, &mut summary.power)?;
+    read_fadt_power(
+        physical_offset,
+        address,
+        length,
+        regions,
+        &mut summary.power,
+    )?;
     let dsdt = if extended != 0 { extended } else { legacy };
     if dsdt == 0 {
         return Ok(());
@@ -395,7 +409,10 @@ fn read_fadt_power(
         }
     }
     // X_PM1a/X_PM1b_CNT_BLK: generic addresses, used when in system I/O.
-    for (offset, slot) in [(172usize, &mut power.pm1a_control), (184, &mut power.pm1b_control)] {
+    for (offset, slot) in [
+        (172usize, &mut power.pm1a_control),
+        (184, &mut power.pm1b_control),
+    ] {
         if available >= offset + 12 && fadt[offset] == 1 {
             let extended = read_u64(&fadt, offset + 4);
             if let Ok(io) = u16::try_from(extended) {
@@ -418,25 +435,45 @@ fn aml_s5(body: &[u8]) -> Option<(u8, u8)> {
             0x01 => Some((1, 1)),
             0xff => Some((u64::MAX, 1)),
             0x0a => Some((u64::from(*bytes.get(offset + 1)?), 2)),
-            0x0b => Some((u64::from(u16::from_le_bytes(bytes.get(offset + 1..offset + 3)?.try_into().ok()?)), 3)),
-            0x0c => Some((u64::from(u32::from_le_bytes(bytes.get(offset + 1..offset + 5)?.try_into().ok()?)), 5)),
+            0x0b => Some((
+                u64::from(u16::from_le_bytes(
+                    bytes.get(offset + 1..offset + 3)?.try_into().ok()?,
+                )),
+                3,
+            )),
+            0x0c => Some((
+                u64::from(u32::from_le_bytes(
+                    bytes.get(offset + 1..offset + 5)?.try_into().ok()?,
+                )),
+                5,
+            )),
             _ => None,
         }
     }
     let mut start = 0;
-    while let Some(found) = body[start..].windows(4).position(|window| window == b"_S5_") {
+    while let Some(found) = body[start..]
+        .windows(4)
+        .position(|window| window == b"_S5_")
+    {
         let at = start + found;
         start = at + 4;
         // NameOp, optionally with a root prefix, before the name.
-        let named = at >= 1 && (body[at - 1] == 0x08 || (at >= 2 && body[at - 1] == b'\\' && body[at - 2] == 0x08));
+        let named = at >= 1
+            && (body[at - 1] == 0x08 || (at >= 2 && body[at - 1] == b'\\' && body[at - 2] == 0x08));
         if !named || body.get(at + 4) != Some(&0x12) {
             continue;
         }
-        let Ok((package_length, length_bytes)) = decode_aml_pkg_length(body, at + 5) else { continue };
+        let Ok((package_length, length_bytes)) = decode_aml_pkg_length(body, at + 5) else {
+            continue;
+        };
         let _ = package_length;
         let elements = at + 5 + length_bytes + 1;
-        let Some((a, used)) = integer(body, elements) else { continue };
-        let Some((b, _)) = integer(body, elements + used) else { continue };
+        let Some((a, used)) = integer(body, elements) else {
+            continue;
+        };
+        let Some((b, _)) = integer(body, elements + used) else {
+            continue;
+        };
         return Some(((a & 0x7) as u8, (b & 0x7) as u8));
     }
     None

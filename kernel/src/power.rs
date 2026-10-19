@@ -30,7 +30,9 @@ pub enum Error {
 
 /// Turn the machine off. Returns only if it is still running.
 pub fn power_off() -> Error {
-    let Some(power) = crate::hal::acpi::power() else { return Error::NoAcpi };
+    let Some(power) = crate::hal::acpi::power() else {
+        return Error::NoAcpi;
+    };
     let (Some((sleep_a, sleep_b)), true) = (power.s5, power.pm1a_control != 0) else {
         return Error::NoAcpi;
     };
@@ -67,7 +69,10 @@ pub fn reboot() -> ! {
     last_flush();
     x86_64::instructions::interrupts::disable();
     if let Some((space, address, value)) = crate::hal::acpi::power().and_then(|power| power.reset) {
-        crate::serial::write_line(format_args!("[POWER] reset register: space {} address {:#x}", space, address));
+        crate::serial::write_line(format_args!(
+            "[POWER] reset register: space {} address {:#x}",
+            space, address
+        ));
         // System I/O is the common case; memory and PCI configuration
         // reset registers fall through to the methods below.
         if space == 1 {
@@ -154,14 +159,21 @@ fn triple_fault() -> ! {
 #[cfg(feature = "stage13-20-test")]
 pub fn self_test(reboot_requested: bool) -> bool {
     fn step(name: &str, ok: bool) -> bool {
-        crate::serial::write_line(format_args!("[S13.20] {} {}", name, if ok { "PASS" } else { "FAIL" }));
+        crate::serial::write_line(format_args!(
+            "[S13.20] {} {}",
+            name,
+            if ok { "PASS" } else { "FAIL" }
+        ));
         ok
     }
     let Some(power) = crate::hal::acpi::power() else {
         return step("ACPI discovery ran", false);
     };
     crate::serial::write_line(format_args!("[S13.20] {:?}", power));
-    if !step("a PM1a control block and \\_S5", power.pm1a_control != 0 && power.s5.is_some()) {
+    if !step(
+        "a PM1a control block and \\_S5",
+        power.pm1a_control != 0 && power.s5.is_some(),
+    ) {
         return false;
     }
     if reboot_requested {

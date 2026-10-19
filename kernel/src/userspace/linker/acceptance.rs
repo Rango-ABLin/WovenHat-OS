@@ -167,7 +167,8 @@ pub(super) fn compiler_run() -> bool {
                 "[S11.COMPILER] bias={candidate:#x} child status={:?} frames={frames}/{after}",
                 status.as_ref().ok()
             ));
-            if status != Ok(42) || after != frames
+            if status != Ok(42)
+                || after != frames
                 || crate::task::process_count() != processes
                 || crate::ipc::endpoint_count() != endpoints
                 || crate::thread::reap_owner(pid.as_u64()) != 0

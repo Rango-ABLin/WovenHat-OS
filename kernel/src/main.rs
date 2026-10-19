@@ -15,10 +15,14 @@
 
 extern crate alloc;
 
-#[cfg(feature = "physical-probe")]
+#[cfg(any(feature = "physical-probe", feature = "physical-wifi"))]
 mod physical_probe;
 
-#[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test", feature = "stage13-4-test"))]
+#[cfg(any(
+    not(feature = "qemu-test"),
+    feature = "stage13-12-test",
+    feature = "stage13-4-test"
+))]
 mod ahci;
 #[cfg(feature = "stage10-8-test")]
 mod async_acceptance;
@@ -76,11 +80,15 @@ mod gpt;
 mod graphics;
 mod gui;
 mod hal;
-#[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
-mod hid;
-#[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test", feature = "stage13-8-test"))]
+#[cfg(any(
+    not(feature = "qemu-test"),
+    feature = "stage13-12-test",
+    feature = "stage13-8-test"
+))]
 mod hda;
 mod heap;
+#[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
+mod hid;
 mod interrupts;
 mod ipc;
 mod irq_lock;
@@ -88,12 +96,15 @@ mod journal;
 mod keyboard;
 #[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
 mod livelog;
-mod session;
 mod memory;
 mod mouse;
 mod network;
 mod notifications;
-#[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test", feature = "stage13-3-test"))]
+#[cfg(any(
+    not(feature = "qemu-test"),
+    feature = "stage13-12-test",
+    feature = "stage13-3-test"
+))]
 mod nvme;
 mod page_cache;
 mod page_permissions;
@@ -102,13 +113,14 @@ mod panic;
 mod partition;
 mod permission;
 mod pic;
-mod power;
 mod pipe;
+mod power;
 mod rtc;
 mod secret_vault;
 #[cfg(feature = "secure-boot")]
 mod secure_boot;
 mod serial;
+mod session;
 mod shell;
 mod signed_app;
 mod smp;
@@ -137,11 +149,19 @@ mod userspace;
 mod vfs;
 #[cfg(feature = "stage12-1-test")]
 mod vfs_api;
-mod virtio_net;
-#[cfg(any(not(feature = "qemu-test"), feature = "stage20-14-test", feature = "stage20-14b-test"))]
-mod virtio_pci;
-#[cfg(any(not(feature = "qemu-test"), feature = "stage20-14-test", feature = "stage20-14b-test"))]
+#[cfg(any(
+    not(feature = "qemu-test"),
+    feature = "stage20-14-test",
+    feature = "stage20-14b-test"
+))]
 mod virtio_gpu;
+mod virtio_net;
+#[cfg(any(
+    not(feature = "qemu-test"),
+    feature = "stage20-14-test",
+    feature = "stage20-14b-test"
+))]
+mod virtio_pci;
 // `storage_manager` seals records through this key vault, so the Stage 12.5
 // gate needs the module even though it does not run the Stage 12.3 self-test.
 #[cfg(feature = "stage13-10-test")]
@@ -161,11 +181,11 @@ mod wifi_backend;
 mod wifi_ccmp;
 #[cfg(feature = "stage13-9-test")]
 mod wifi_crypto;
-#[cfg(feature = "stage13-9-test")]
+#[cfg(any(feature = "stage13-9-test", feature = "physical-wifi"))]
 mod wifi_firmware;
 #[cfg(feature = "stage13-9-test")]
 mod wifi_gtk;
-#[cfg(feature = "stage13-9-test")]
+#[cfg(any(feature = "stage13-9-test", feature = "physical-wifi"))]
 mod wifi_hw;
 #[cfg(feature = "stage13-9-test")]
 mod wifi_link;
@@ -386,7 +406,7 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     });
     // The physical inventory image stops after RAM/paging checks, before
     // driver activation, disk/network I/O, AP startup or QEMU acceptance.
-    #[cfg(feature = "physical-probe")]
+    #[cfg(all(feature = "physical-probe", not(feature = "physical-wifi")))]
     physical_probe::run(&mut console, acpi.as_ref().ok());
 
     #[cfg(feature = "qemu-test")]
@@ -824,6 +844,91 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         }
         serial::write_line(format_args!(
             "[S13.10AC] deferred AX200 IRQ -> CSR RX service: PASSED"
+        ));
+        if !wifi_hw::stage13_10ad_ax201_activation_self_test() {
+            serial::write_line(format_args!(
+                "[S13.10AD] AX201 integrated 22000 activation contract: FAILED"
+            ));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!(
+            "[S13.10AD] AX201 integrated 22000 activation contract: PASSED"
+        ));
+        if !wifi_firmware::stage13_10ae_ax201_firmware_prepare_self_test() {
+            serial::write_line(format_args!(
+                "[S13.10AE] AX201 firmware profile and DMA preparation: FAILED"
+            ));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!(
+            "[S13.10AE] AX201 firmware profile and DMA preparation: PASSED"
+        ));
+        if !wifi_firmware::stage13_10af_ax201_mmio_startup_self_test() {
+            serial::write_line(format_args!(
+                "[S13.10AF] AX201 22000 MMIO/PRPH startup adapter: FAILED"
+            ));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!(
+            "[S13.10AF] AX201 22000 MMIO/PRPH startup adapter: PASSED"
+        ));
+        if !wifi_firmware::stage13_10ag_ax201_driver_lifecycle_self_test() {
+            serial::write_line(format_args!(
+                "[S13.10AG] AX201 driver ownership/lifecycle: FAILED"
+            ));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!(
+            "[S13.10AG] AX201 driver ownership/lifecycle: PASSED"
+        ));
+        if !wifi_hw::stage13_10ai_ax201_queue_owner_self_test() {
+            serial::write_line(format_args!(
+                "[S13.10AI] AX201 physical DMA queue owner: FAILED"
+            ));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!(
+            "[S13.10AI] AX201 physical DMA queue owner: PASSED"
+        ));
+        if !wifi_firmware::stage13_10ah_ax201_firmware_provider_self_test() {
+            serial::write_line(format_args!(
+                "[S13.10AH] AX201 firmware-provider boundary: FAILED"
+            ));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!(
+            "[S13.10AH] AX201 firmware-provider boundary: PASSED"
+        ));
+        if !wifi_firmware::stage13_10aj_ax201_scan_control_self_test() {
+            serial::write_line(format_args!(
+                "[S13.10AJ] AX201 scan-control wire contract: FAILED"
+            ));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!(
+            "[S13.10AJ] AX201 scan-control wire contract: PASSED"
+        ));
+        #[cfg(feature = "stage13-9-test")]
+        if !wifi_firmware::stage13_10ak_ax201_phy_context_self_test() {
+            serial::write_line(format_args!(
+                "[S13.10AK] AX201 PHY-context wire contract: FAILED"
+            ));
+            qemu_test_exit_failure();
+        }
+        #[cfg(feature = "stage13-9-test")]
+        serial::write_line(format_args!(
+            "[S13.10AK] AX201 PHY-context wire contract: PASSED"
+        ));
+        #[cfg(feature = "stage13-9-test")]
+        if !wifi_firmware::stage13_10al_ax201_mac_binding_self_test() {
+            serial::write_line(format_args!(
+                "[S13.10AL] AX201 MAC/binding wire contract: FAILED"
+            ));
+            qemu_test_exit_failure();
+        }
+        #[cfg(feature = "stage13-9-test")]
+        serial::write_line(format_args!(
+            "[S13.10AL] AX201 MAC/binding wire contract: PASSED"
         ));
         if !wifi_backend::self_test() {
             serial::write_line(format_args!(
@@ -1412,6 +1517,8 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
             }
         }
         x86_64::instructions::interrupts::enable();
+        #[cfg(feature = "physical-wifi")]
+        physical_probe::run_ax201_activation(&mut console, acpi.as_ref().ok());
         if !block_io::start_worker() {
             console.println("BLOCK I/O WORKER: START FAILED");
             halt();
@@ -1473,6 +1580,12 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
             let _ = vfs::mkdir(dir);
         }
 
+        #[cfg(feature = "hardware-demo")]
+        if !install_hardware_demo_accounts() {
+            serial::write_line(format_args!("[DEMO] account provisioning failed"));
+            halt();
+        }
+
         #[cfg(feature = "system-apps")]
         if !install_production_system_apps() {
             serial::write_line(format_args!("[APPS] production catalog install failed"));
@@ -1492,6 +1605,24 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         // Storage, USB and audio controllers: bound through the driver
         // manager; a missing or failing device never stops the boot.
         let driver_report = drivers::bring_up();
+
+        // Start live-log setup as soon as the USB controller and attached
+        // storage have been brought up. Its I/O remains on a service task,
+        // overlapping display, filesystem and session setup without blocking
+        // the foreground boot path.
+        match livelog::start_deferred() {
+            Ok(true) => serial::write_line(format_args!(
+                "[LIVELOG] startup queued; remaining boot continues"
+            )),
+            Ok(false) => serial::write_line(format_args!(
+                "[LIVELOG] startup already queued or logging already active"
+            )),
+            Err(error) => serial::write_line(format_args!(
+                "[LIVELOG] startup worker did not start: {:?}",
+                error
+            )),
+        }
+
         // A multi-head virtio-gpu becomes the desktop's monitors.
         if let Ok(heads) = compositor::attach_gpu_outputs() {
             serial::write_line(format_args!("[DISPLAY] virtio-gpu: {} monitors", heads));
@@ -1513,24 +1644,24 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
             }
         }
 
-        // Stage 13.19: booted from a WovenHat live stick, this boot's log
-        // is kept on the stick.
-        match livelog::start() {
-            Ok(boot) => serial::write_line(format_args!("[LIVELOG] boot {} is logged on the USB stick", boot)),
-            Err(error) => serial::write_line(format_args!("[LIVELOG] no live-test stick: {:?}", error)),
-        }
-
         // Stage 20.15: the WovenShell desktop is the session; F12 shows this
         // diagnostic console instead.
         #[cfg(feature = "system-apps")]
         {
-            let accounts = vfs::stat("/etc/wovenhat/accounts").is_ok().then_some("/etc/wovenhat/accounts");
+            let accounts = vfs::stat("/etc/wovenhat/accounts")
+                .is_ok()
+                .then_some("/etc/wovenhat/accounts");
             match session::start(WOVEN_SHELL_IMAGE, accounts) {
                 Ok(pid) => {
-                    serial::write_line(format_args!("[SESSION] WovenShell desktop started as pid {}", pid));
+                    serial::write_line(format_args!(
+                        "[SESSION] WovenShell desktop started as pid {}",
+                        pid
+                    ));
                     console.println("DESKTOP SESSION: STARTED (F12 SWITCHES TO THIS CONSOLE)");
                 }
-                Err(error) => serial::write_line(format_args!("[SESSION] desktop not started: {:?}", error)),
+                Err(error) => {
+                    serial::write_line(format_args!("[SESSION] desktop not started: {:?}", error))
+                }
             }
         }
 
@@ -1595,7 +1726,13 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
             // userspace read(0, ...) syscall and make the shell appear hung.
             if !userspace_foreground {
                 if let Some(key) = keyboard::poll() {
-                    if matches!(key, keyboard::Key::F2 | keyboard::Key::F3 | keyboard::Key::F4 | keyboard::Key::F12) {
+                    if matches!(
+                        key,
+                        keyboard::Key::F2
+                            | keyboard::Key::F3
+                            | keyboard::Key::F4
+                            | keyboard::Key::F12
+                    ) {
                         // F2-F4 have no use in the kernel's own desktop.
                     } else if matches!(key, keyboard::Key::F1) {
                         desktop_active = !desktop_active;
@@ -3243,7 +3380,10 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
             qemu_test_exit_failure();
         };
         let loaded_entry = program.image.entry;
-        serial::write_line(format_args!("[S11.PLACEMENT] candidate=0x30000 entry={:#x} expected={:#x}", loaded_entry, expected_entry));
+        serial::write_line(format_args!(
+            "[S11.PLACEMENT] candidate=0x30000 entry={:#x} expected={:#x}",
+            loaded_entry, expected_entry
+        ));
         let Ok((pid, _)) = task::spawn_user_process("exit-status-fixture", program) else {
             serial::write_line(format_args!("[S11.STATUS] fixture spawn: FAILED"));
             qemu_test_exit_failure();
@@ -3258,16 +3398,28 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
                 }
             }
         };
-        if exit != 0 || loaded_entry != expected_entry || memory::stats().allocated_frames != frames
-            || task::process_count() != processes || ipc::endpoint_count() != endpoints
+        if exit != 0
+            || loaded_entry != expected_entry
+            || memory::stats().allocated_frames != frames
+            || task::process_count() != processes
+            || ipc::endpoint_count() != endpoints
             || thread::reap_owner(pid.as_u64()) != 0
         {
-            serial::write_line(format_args!("[S11.STATUS] fixture exit={} frames={}/{} processes={}/{} endpoints={}/{}: FAILED",
-                exit, memory::stats().allocated_frames, frames, task::process_count(), processes,
-                ipc::endpoint_count(), endpoints));
+            serial::write_line(format_args!(
+                "[S11.STATUS] fixture exit={} frames={}/{} processes={}/{} endpoints={}/{}: FAILED",
+                exit,
+                memory::stats().allocated_frames,
+                frames,
+                task::process_count(),
+                processes,
+                ipc::endpoint_count(),
+                endpoints
+            ));
             qemu_test_exit_failure();
         }
-        serial::write_line(format_args!("[S11.PLACEMENT] fixed ET_EXEC at nonzero ASLR candidate: PASSED"));
+        serial::write_line(format_args!(
+            "[S11.PLACEMENT] fixed ET_EXEC at nonzero ASLR candidate: PASSED"
+        ));
         let Some(pie) = userspace::load_pie_placement_probe() else {
             serial::write_line(format_args!("[S11.PLACEMENT] PIE preparation: FAILED"));
             qemu_test_exit_failure();
@@ -3290,14 +3442,22 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
                 }
             }
         };
-        if status != 37 || memory::stats().allocated_frames != frames
-            || task::process_count() != processes || ipc::endpoint_count() != endpoints
+        if status != 37
+            || memory::stats().allocated_frames != frames
+            || task::process_count() != processes
+            || ipc::endpoint_count() != endpoints
         {
-            serial::write_line(format_args!("[S11.PLACEMENT] PIE execution/teardown: FAILED"));
+            serial::write_line(format_args!(
+                "[S11.PLACEMENT] PIE execution/teardown: FAILED"
+            ));
             qemu_test_exit_failure();
         }
-        serial::write_line(format_args!("[S11.PLACEMENT] PIE executes with nonzero ASLR: PASSED"));
-        serial::write_line(format_args!("[S11.STATUS] libwoven signed exit status/ownership/teardown: PASSED"));
+        serial::write_line(format_args!(
+            "[S11.PLACEMENT] PIE executes with nonzero ASLR: PASSED"
+        ));
+        serial::write_line(format_args!(
+            "[S11.STATUS] libwoven signed exit status/ownership/teardown: PASSED"
+        ));
     }
     #[cfg(feature = "stage11-2-test")]
     {
@@ -3638,10 +3798,14 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     #[cfg(feature = "stage13-19-test")]
     {
         if !livelog::self_test() {
-            serial::write_line(format_args!("[S13.19] live-test log on the USB stick: FAILED"));
+            serial::write_line(format_args!(
+                "[S13.19] live-test log on the USB stick: FAILED"
+            ));
             qemu_test_exit_failure();
         }
-        serial::write_line(format_args!("[S13.19] live-test log on the USB stick: PASSED"));
+        serial::write_line(format_args!(
+            "[S13.19] live-test log on the USB stick: PASSED"
+        ));
         qemu_test_exit_success();
     }
     #[cfg(feature = "stage13-18-test")]
@@ -5022,7 +5186,7 @@ fn install_production_system_apps() -> bool {
             image: SYSTEM_APP_CALCULATOR,
             binary_path: "/bin/wovenhat-calculator",
             catalog_path: "/share/applications/woven-calculator.app",
-            catalog: b"Name=WovenCalculator\nExec=/bin/wovenhat-calculator\n",
+            catalog: b"Name=WovenCalculator\nExec=/bin/wovenhat-calculator --gui %p\n",
         },
         App {
             name: "woven-terminal",
@@ -5173,7 +5337,64 @@ fn install_production_system_apps() -> bool {
         }
         catalogs += 1;
     }
-    serial::write_line(format_args!("[APPS] {} signed applications installed", installed));
+    serial::write_line(format_args!(
+        "[APPS] {} signed applications installed",
+        installed
+    ));
+    true
+}
+
+#[cfg(feature = "hardware-demo")]
+fn install_hardware_demo_accounts() -> bool {
+    use sha2::{Digest, Sha256};
+
+    fn account_line(name: &str, salt: &[u8], pin: &[u8]) -> alloc::string::String {
+        let mut hasher = Sha256::new();
+        hasher.update(salt);
+        hasher.update(pin);
+        let digest = hasher.finalize();
+        let mut line = alloc::format!("{name}:");
+        for byte in salt {
+            line.push_str(&alloc::format!("{byte:02x}"));
+        }
+        line.push(':');
+        for byte in digest {
+            line.push_str(&alloc::format!("{byte:02x}"));
+        }
+        line.push('\n');
+        line
+    }
+
+    const ACCOUNTS_PATH: &str = "/etc/wovenhat/accounts";
+    match vfs::stat(ACCOUNTS_PATH) {
+        Ok(_) => {
+            serial::write_line(format_args!(
+                "[DEMO] existing accounts preserved; demo accounts not installed"
+            ));
+            return true;
+        }
+        Err(vfs::Error::NotFound) => {}
+        Err(_) => return false,
+    }
+
+    for directory in ["/etc", "/etc/wovenhat"] {
+        match vfs::mkdir(directory) {
+            Ok(()) | Err(vfs::Error::AlreadyExists) => {}
+            Err(_) => return false,
+        }
+    }
+    let mut accounts = account_line("ada", b"\x11\x22\x33\x44\x55\x66\x77\x88", b"1234");
+    accounts.push_str(&account_line(
+        "lin",
+        b"\xa0\xb1\xc2\xd3\xe4\xf5\x06\x17",
+        b"9876",
+    ));
+    if vfs::create_read_only(ACCOUNTS_PATH, accounts.as_bytes()).is_err() {
+        return false;
+    }
+    serial::write_line(format_args!(
+        "[DEMO] sample accounts installed in volatile VFS (ada, lin)"
+    ));
     true
 }
 
@@ -5197,7 +5418,7 @@ fn stage19_app_catalog_self_test() -> bool {
             image: SYSTEM_APP_CALCULATOR,
             binary_path: "/bin/wovenhat-calculator",
             catalog_path: "/share/applications/woven-calculator.app",
-            catalog: b"Name=WovenCalculator\nExec=/bin/wovenhat-calculator --gui %p\n",
+            catalog: b"Name=WovenCalculator\nExec=/bin/wovenhat-calculator\n",
         },
         App {
             name: "woven-terminal",
@@ -5564,11 +5785,18 @@ fn run_hello_gui(
 #[cfg(feature = "stage13-15-test")]
 fn stage13_15_self_test() -> bool {
     fn step(name: &str, ok: bool) -> bool {
-        serial::write_line(format_args!("[S13.15] {} {}", name, if ok { "PASS" } else { "FAIL" }));
+        serial::write_line(format_args!(
+            "[S13.15] {} {}",
+            name,
+            if ok { "PASS" } else { "FAIL" }
+        ));
         ok
     }
     let report = drivers::bring_up();
-    if !step("hda0 bound and ready", matches!(report.drivers[3].outcome, drivers::Outcome::Ready(_))) {
+    if !step(
+        "hda0 bound and ready",
+        matches!(report.drivers[3].outcome, drivers::Outcome::Ready(_)),
+    ) {
         return false;
     }
     let Some(info) = hda::audio_info() else {
@@ -5582,7 +5810,8 @@ fn stage13_15_self_test() -> bool {
         return false;
     }
     let installed = (vfs::stat("/bin").is_ok() || vfs::mkdir("/bin").is_ok())
-        && (vfs::stat("/bin/hello-gui").is_ok() || vfs::create_read_only("/bin/hello-gui", HELLO_GUI_IMAGE).is_ok());
+        && (vfs::stat("/bin/hello-gui").is_ok()
+            || vfs::create_read_only("/bin/hello-gui", HELLO_GUI_IMAGE).is_ok());
     if !step("hello-gui installed", installed) {
         return false;
     }
@@ -5591,9 +5820,13 @@ fn stage13_15_self_test() -> bool {
     let irqs_before = interrupts::pci_device_irq_count(info.vector);
     let plays_before = hda::audio_plays();
     let on_time_before = hda::audio_on_time();
-    let played = spawn_hello_gui(HELLO_GUI_IMAGE, &["/bin/hello-gui", "--audio"], Some(player))
-        .and_then(wait_hello_gui)
-        .map(|(_, status)| status);
+    let played = spawn_hello_gui(
+        HELLO_GUI_IMAGE,
+        &["/bin/hello-gui", "--audio"],
+        Some(player),
+    )
+    .and_then(wait_hello_gui)
+    .map(|(_, status)| status);
     let irqs = interrupts::pci_device_irq_count(info.vector) - irqs_before;
     serial::write_line(format_args!(
         "[S13.15] player exit={:?} completion interrupts={} plays={}",
@@ -5615,7 +5848,9 @@ fn stage13_15_self_test() -> bool {
     let denied = spawn_hello_gui(
         HELLO_GUI_IMAGE,
         &["/bin/hello-gui", "--audio"],
-        Some(capability::CapabilitySet::only(capability::Capability::Console)),
+        Some(capability::CapabilitySet::only(
+            capability::Capability::Console,
+        )),
     )
     .and_then(wait_hello_gui)
     .map(|(_, status)| status);
@@ -5748,7 +5983,11 @@ fn stage20_14b_self_test() -> bool {
     const START_FILL: u32 = rgb(52, 96, 180);
 
     fn step(name: &str, ok: bool) -> bool {
-        serial::write_line(format_args!("[S20.14B] {} {}", name, if ok { "PASS" } else { "FAIL" }));
+        serial::write_line(format_args!(
+            "[S20.14B] {} {}",
+            name,
+            if ok { "PASS" } else { "FAIL" }
+        ));
         ok
     }
     fn until(limit: u64, condition: impl Fn() -> bool) -> bool {
@@ -5785,7 +6024,8 @@ fn stage20_14b_self_test() -> bool {
     }
     fn packet(dx: i16, screen_dy: i16, left: bool) -> bool {
         let dy = -screen_dy;
-        let flags = 0x08 | u8::from(left) | if dx < 0 { 0x10 } else { 0 } | if dy < 0 { 0x20 } else { 0 };
+        let flags =
+            0x08 | u8::from(left) | if dx < 0 { 0x10 } else { 0 } | if dy < 0 { 0x20 } else { 0 };
         [flags, dx as u8, dy as u8].into_iter().all(mouse::loopback)
     }
     fn move_by(mut dx: i32, mut dy: i32, left: bool) -> bool {
@@ -5815,15 +6055,20 @@ fn stage20_14b_self_test() -> bool {
         .with(capability::Capability::DisplayIo)
         .with(capability::Capability::InputIo)
         .with(capability::Capability::Ipc);
-    let Some(program) = userspace::load_elf_with_argv(WOVEN_SHELL_IMAGE, &["/bin/woven-shell"]) else {
+    let Some(program) = userspace::load_elf_with_argv(WOVEN_SHELL_IMAGE, &["/bin/woven-shell"])
+    else {
         return step("shell image loads", false);
     };
-    let Ok((shell, _, _)) = task::spawn_user_system_service("woven-shell", program, capabilities) else {
+    let Ok((shell, _, _)) = task::spawn_user_system_service("woven-shell", program, capabilities)
+    else {
         return step("shell spawned", false);
     };
     if !step(
         "shell took the display",
-        installed && until(3000, || compositor::holder() == Some(shell.as_u64()) && compositor::is_presenting()),
+        installed
+            && until(3000, || {
+                compositor::holder() == Some(shell.as_u64()) && compositor::is_presenting()
+            }),
     ) {
         return false;
     }
@@ -5834,22 +6079,36 @@ fn stage20_14b_self_test() -> bool {
     let scale = compositor::scale().unwrap_or(1) as i32;
     let primary = width / 2;
     let top = height - 24;
-    serial::write_line(format_args!("[S20.14B] desktop {}x{} at scale {}, primary {} wide", width, height, scale, primary));
+    serial::write_line(format_args!(
+        "[S20.14B] desktop {}x{} at scale {}, primary {} wide",
+        width, height, scale, primary
+    ));
     let wall = move |x: i32, y: i32| compositor::pixel(x, y) == Ok(wallpaper(x, y, height));
     let taskbar_on_primary_only = until(2000, || {
         compositor::pixel(6, top + 6) == Ok(START_FILL)
             && wall(primary + 7, top + 7)
             && wall(width - 7, top + 7)
     });
-    if !step("the taskbar spans the primary monitor only", taskbar_on_primary_only) {
+    if !step(
+        "the taskbar spans the primary monitor only",
+        taskbar_on_primary_only,
+    ) {
         return false;
     }
-    let client = capability::CapabilitySet::only(capability::Capability::Console).with(capability::Capability::Ipc);
+    let client = capability::CapabilitySet::only(capability::Capability::Console)
+        .with(capability::Capability::Ipc);
     let shell_arg = alloc::format!("{}", shell.as_u64());
-    let Some(_alpha) = spawn_hello_gui(HELLO_GUI_IMAGE, &["/bin/hello-gui", "--desktop-client", &shell_arg, "a"], Some(client)) else {
+    let Some(_alpha) = spawn_hello_gui(
+        HELLO_GUI_IMAGE,
+        &["/bin/hello-gui", "--desktop-client", &shell_arg, "a"],
+        Some(client),
+    ) else {
         return step("application A spawned", false);
     };
-    if !step("window A opens on the primary monitor", until(2000, || compositor::pixel(45, 45) == Ok(RED))) {
+    if !step(
+        "window A opens on the primary monitor",
+        until(2000, || compositor::pixel(45, 45) == Ok(RED)),
+    ) {
         return false;
     }
     // From the desktop's centre to A's title bar, then drag it one
@@ -5875,16 +6134,29 @@ fn stage20_14b_self_test() -> bool {
         ));
     }
     let dragged = stayed;
-    if !step("dragging A by its title bar moves it onto the second monitor", dragged) {
+    if !step(
+        "dragging A by its title bar moves it onto the second monitor",
+        dragged,
+    ) {
         return false;
     }
     // The surface is right; wait until it has reached the monitors too.
-    if !step("everything drawn has been presented to the monitors", until(1000, compositor::presented)) {
+    if !step(
+        "everything drawn has been presented to the monitors",
+        until(1000, compositor::presented),
+    ) {
         return false;
     }
     // Samples for the host captures: surface point -> head and physical
     // position at the centre of its scaled block.
-    let samples = [(45 + primary, 45), (45, 45), (6, top + 6), (primary + 7, top + 7), (100 + primary, 60), (primary / 2, height / 3)];
+    let samples = [
+        (45 + primary, 45),
+        (45, 45),
+        (6, top + 6),
+        (primary + 7, top + 7),
+        (100 + primary, 60),
+        (primary / 2, height / 3),
+    ];
     let head_width = primary * scale;
     for (x, y) in samples {
         let Ok(pixel) = compositor::pixel(x, y) else {
@@ -5899,16 +6171,25 @@ fn stage20_14b_self_test() -> bool {
             pixel
         ));
     }
-    serial::write_line(format_args!("[S20.14B] ready for capture {}x{}", head_width, height * scale));
+    serial::write_line(format_args!(
+        "[S20.14B] ready for capture {}x{}",
+        head_width,
+        height * scale
+    ));
     let start = timer::ticks();
     while timer::ticks().wrapping_sub(start) < 1500 {
         task::yield_now();
     }
-    if task::kill_process(shell.as_u64(), 9).is_err() || !until(1000, || task::process_exited(shell)) {
+    if task::kill_process(shell.as_u64(), 9).is_err()
+        || !until(1000, || task::process_exited(shell))
+    {
         return step("shell killed", false);
     }
     let _ = task::wait_process(shell.as_u64());
-    step("shell released the display", compositor::holder().is_none() && !compositor::is_presenting())
+    step(
+        "shell released the display",
+        compositor::holder().is_none() && !compositor::is_presenting(),
+    )
 }
 
 /// Stage 20.15 acceptance: the desktop as the session.
@@ -5928,7 +6209,11 @@ fn stage20_14b_self_test() -> bool {
 fn stage20_15_self_test() -> bool {
     use crate::display::rgb;
     fn step(name: &str, ok: bool) -> bool {
-        serial::write_line(format_args!("[S20.15] {} {}", name, if ok { "PASS" } else { "FAIL" }));
+        serial::write_line(format_args!(
+            "[S20.15] {} {}",
+            name,
+            if ok { "PASS" } else { "FAIL" }
+        ));
         ok
     }
     fn until(limit: u64, condition: impl Fn() -> bool) -> bool {
@@ -5945,7 +6230,8 @@ fn stage20_15_self_test() -> bool {
     }
     fn packet(dx: i16, screen_dy: i16, left: bool) -> bool {
         let dy = -screen_dy;
-        let flags = 0x08 | u8::from(left) | if dx < 0 { 0x10 } else { 0 } | if dy < 0 { 0x20 } else { 0 };
+        let flags =
+            0x08 | u8::from(left) | if dx < 0 { 0x10 } else { 0 } | if dy < 0 { 0x20 } else { 0 };
         [flags, dx as u8, dy as u8].into_iter().all(mouse::loopback)
     }
     fn move_by(mut dx: i32, mut dy: i32) -> bool {
@@ -5973,14 +6259,20 @@ fn stage20_15_self_test() -> bool {
         mask.fill_rect(bounds, 0x0100_0000);
         mask.draw_text(0, 0, name, color);
         (0..7).all(|row| {
-            (0..crate::font::text_width(name) as i32)
-                .all(|column| mask.pixel(column, row) != Some(color) || compositor::pixel(x + column, y + row) == Ok(color))
+            (0..crate::font::text_width(name) as i32).all(|column| {
+                mask.pixel(column, row) != Some(color)
+                    || compositor::pixel(x + column, y + row) == Ok(color)
+            })
         })
     }
 
     let catalog = (vfs::stat("/share").is_ok() || vfs::mkdir("/share").is_ok())
         && (vfs::stat("/share/applications").is_ok() || vfs::mkdir("/share/applications").is_ok())
-        && vfs::create_read_only("/share/applications/hello.app", b"Name=Hello\nExec=hello-gui --desktop-client %p a\n").is_ok()
+        && vfs::create_read_only(
+            "/share/applications/hello.app",
+            b"Name=Hello\nExec=hello-gui --desktop-client %p a\n",
+        )
+        .is_ok()
         && vfs::create_read_only("/bin/hello-gui", HELLO_GUI_IMAGE).is_ok();
     if !step("an application in the catalog", catalog) {
         return false;
@@ -5991,7 +6283,9 @@ fn stage20_15_self_test() -> bool {
     let presenting = || compositor::holder() == Some(shell) && compositor::is_presenting();
     if !step(
         "the session takes the display and input focus",
-        until(3000, || presenting() && woven_input::focus() == Some(shell) && session::active() == Some(shell)),
+        until(3000, || {
+            presenting() && woven_input::focus() == Some(shell) && session::active() == Some(shell)
+        }),
     ) {
         return false;
     }
@@ -6003,27 +6297,44 @@ fn stage20_15_self_test() -> bool {
     // F1: the launcher's first row is the catalog's application.
     // The launcher panel: x 4, three rows of 14 plus its border, above the
     // taskbar; the first match's text at (+6, +1 + 2 * 14 + 4).
-    let listed = key(0x3b) && until(1000, || text_at(4 + 6, top - 2 - 44 + 33, "Hello", rgb(255, 255, 255)));
+    let listed = key(0x3b)
+        && until(1000, || {
+            text_at(4 + 6, top - 2 - 44 + 33, "Hello", rgb(255, 255, 255))
+        });
     let closed = key(0x3b);
-    if !step("the launcher lists the installed application", listed && closed) {
+    if !step(
+        "the launcher lists the installed application",
+        listed && closed,
+    ) {
         return false;
     }
 
     // F12: the diagnostic console.
     let console = key(0x58)
-        && until(1000, || session::console_active() && !compositor::is_presenting() && woven_input::focus().is_none());
-    if !step("F12 shows the diagnostic console; the session's frames stop", console) {
+        && until(1000, || {
+            session::console_active()
+                && !compositor::is_presenting()
+                && woven_input::focus().is_none()
+        });
+    if !step(
+        "F12 shows the diagnostic console; the session's frames stop",
+        console,
+    ) {
         return false;
     }
     while keyboard::poll().is_some() {}
     let typed = mouse::keyboard_loopback(0x2d)
         && mouse::keyboard_loopback(0xad)
-        && until(500, || matches!(keyboard::poll(), Some(keyboard::Key::Char('x'))));
+        && until(500, || {
+            matches!(keyboard::poll(), Some(keyboard::Key::Char('x')))
+        });
     if !step("a key typed at the console reaches the kernel shell", typed) {
         return false;
     }
     let back = key(0x58)
-        && until(1000, || !session::console_active() && presenting() && woven_input::focus() == Some(shell));
+        && until(1000, || {
+            !session::console_active() && presenting() && woven_input::focus() == Some(shell)
+        });
     if !step("F12 returns to the desktop: display and focus", back) {
         return false;
     }
@@ -6033,7 +6344,18 @@ fn stage20_15_self_test() -> bool {
     let power_row = (width - 4 - 164 + 28, top - 2 - (7 * 14 + 2) + 1 + 14 + 7);
     let (px, py) = (width / 2, height / 2);
     let opened = move_by(button.0 + 8 - px, button.1 + 8 - py) && click();
-    if !step("Quick Settings opens", opened && until(1000, || text_at(power_row.0 - 28 + 6, power_row.1 - 3, "Power off", rgb(255, 255, 255)))) {
+    if !step(
+        "Quick Settings opens",
+        opened
+            && until(1000, || {
+                text_at(
+                    power_row.0 - 28 + 6,
+                    power_row.1 - 3,
+                    "Power off",
+                    rgb(255, 255, 255),
+                )
+            }),
+    ) {
         return false;
     }
     serial::write_line(format_args!("[S20.15] clicking Power off"));
@@ -6072,7 +6394,11 @@ fn stage20_13_self_test() -> bool {
     const F4: u8 = 0x3e;
 
     fn step(name: &str, ok: bool) -> bool {
-        serial::write_line(format_args!("[S20.13] {} {}", name, if ok { "PASS" } else { "FAIL" }));
+        serial::write_line(format_args!(
+            "[S20.13] {} {}",
+            name,
+            if ok { "PASS" } else { "FAIL" }
+        ));
         ok
     }
     fn until(limit: u64, condition: impl Fn() -> bool) -> bool {
@@ -6099,7 +6425,8 @@ fn stage20_13_self_test() -> bool {
     }
     fn packet(dx: i16, screen_dy: i16, left: bool) -> bool {
         let dy = -screen_dy;
-        let flags = 0x08 | u8::from(left) | if dx < 0 { 0x10 } else { 0 } | if dy < 0 { 0x20 } else { 0 };
+        let flags =
+            0x08 | u8::from(left) | if dx < 0 { 0x10 } else { 0 } | if dy < 0 { 0x20 } else { 0 };
         [flags, dx as u8, dy as u8].into_iter().all(mouse::loopback)
     }
     fn move_by(mut dx: i32, mut dy: i32) -> bool {
@@ -6125,15 +6452,20 @@ fn stage20_13_self_test() -> bool {
         .with(capability::Capability::DisplayIo)
         .with(capability::Capability::InputIo)
         .with(capability::Capability::Ipc);
-    let Some(program) = userspace::load_elf_with_argv(WOVEN_SHELL_IMAGE, &["/bin/woven-shell"]) else {
+    let Some(program) = userspace::load_elf_with_argv(WOVEN_SHELL_IMAGE, &["/bin/woven-shell"])
+    else {
         return step("shell image loads", false);
     };
-    let Ok((shell, _, _)) = task::spawn_user_system_service("woven-shell", program, capabilities) else {
+    let Ok((shell, _, _)) = task::spawn_user_system_service("woven-shell", program, capabilities)
+    else {
         return step("shell spawned", false);
     };
     if !step(
         "shell took the display",
-        installed && until(3000, || compositor::holder() == Some(shell.as_u64()) && compositor::is_presenting()),
+        installed
+            && until(3000, || {
+                compositor::holder() == Some(shell.as_u64()) && compositor::is_presenting()
+            }),
     ) {
         return false;
     }
@@ -6147,7 +6479,11 @@ fn stage20_13_self_test() -> bool {
     let box_x = |index: i32| qs_x - 6 - (4 * 14 - 2) + index * 14;
     let current = move |index: i32| {
         (0..4).all(|other| {
-            let expected = if other == index { ENTRY_ACTIVE } else { ENTRY_INACTIVE };
+            let expected = if other == index {
+                ENTRY_ACTIVE
+            } else {
+                ENTRY_INACTIVE
+            };
             compositor::pixel(box_x(other) + 1, top + 5) == Ok(expected)
         })
     };
@@ -6156,70 +6492,117 @@ fn stage20_13_self_test() -> bool {
     let taskbar = move |x: i32, y: i32| blend_pixel(TASKBAR, wallpaper(x, y, height), 216);
     let no_entry = move || compositor::pixel(57, top + 5) == Ok(taskbar(57, top + 5));
     // The second entry slot (80 wide, 4 apart): only one window listed.
-    let one_entry = move || !no_entry() && compositor::pixel(141, top + 5) == Ok(taskbar(141, top + 5));
+    let one_entry =
+        move || !no_entry() && compositor::pixel(141, top + 5) == Ok(taskbar(141, top + 5));
     // B lies inside A's shadowed footprint, so with A showing a hidden B is
     // judged by its colour being gone and by the taskbar listing one window.
     let (a_x, a_y, b_x, b_y) = (45, 45, 162, 122);
     let b_hidden = move || compositor::pixel(b_x, b_y) != Ok(BLUE) && one_entry();
     // Both windows listed on the current workspace.
     let two_entries = move || {
-        matches!(compositor::pixel(141, top + 5), Ok(ENTRY_ACTIVE | ENTRY_INACTIVE)) && !no_entry()
+        matches!(
+            compositor::pixel(141, top + 5),
+            Ok(ENTRY_ACTIVE | ENTRY_INACTIVE)
+        ) && !no_entry()
     };
 
-    if !step("four workspaces, the first current", until(1000, || current(0))) {
+    if !step(
+        "four workspaces, the first current",
+        until(1000, || current(0)),
+    ) {
         return false;
     }
-    let client = capability::CapabilitySet::only(capability::Capability::Console).with(capability::Capability::Ipc);
+    let client = capability::CapabilitySet::only(capability::Capability::Console)
+        .with(capability::Capability::Ipc);
     let shell_arg = alloc::format!("{}", shell.as_u64());
-    let Some(_alpha) = spawn_hello_gui(HELLO_GUI_IMAGE, &["/bin/hello-gui", "--desktop-client", &shell_arg, "a"], Some(client)) else {
+    let Some(_alpha) = spawn_hello_gui(
+        HELLO_GUI_IMAGE,
+        &["/bin/hello-gui", "--desktop-client", &shell_arg, "a"],
+        Some(client),
+    ) else {
         return step("application A spawned", false);
     };
-    if !step("window A opens on workspace 1", until(2000, || compositor::pixel(a_x, a_y) == Ok(RED) && !no_entry())) {
+    if !step(
+        "window A opens on workspace 1",
+        until(2000, || {
+            compositor::pixel(a_x, a_y) == Ok(RED) && !no_entry()
+        }),
+    ) {
         return false;
     }
     let switched = keys(&[F3]) && until(1000, || current(1) && wall(a_x, a_y) && no_entry());
-    if !step("F3: workspace 2 is current; A and its entry are gone", switched) {
+    if !step(
+        "F3: workspace 2 is current; A and its entry are gone",
+        switched,
+    ) {
         return false;
     }
-    let Some(beta) = spawn_hello_gui(HELLO_GUI_IMAGE, &["/bin/hello-gui", "--desktop-client", &shell_arg, "b"], Some(client)) else {
+    let Some(beta) = spawn_hello_gui(
+        HELLO_GUI_IMAGE,
+        &["/bin/hello-gui", "--desktop-client", &shell_arg, "b"],
+        Some(client),
+    ) else {
         return step("application B spawned", false);
     };
     if !step(
         "window B opens on workspace 2, A stays hidden",
-        until(2000, || compositor::pixel(b_x, b_y) == Ok(BLUE) && wall(a_x, a_y)),
+        until(2000, || {
+            compositor::pixel(b_x, b_y) == Ok(BLUE) && wall(a_x, a_y)
+        }),
     ) {
         return false;
     }
     let (px, py) = (width / 2, height / 2);
     let clicked = move_by(box_x(0) + 2 - px, top + 8 - py)
         && click()
-        && until(1000, || current(0) && compositor::pixel(a_x, a_y) == Ok(RED) && b_hidden());
+        && until(1000, || {
+            current(0) && compositor::pixel(a_x, a_y) == Ok(RED) && b_hidden()
+        });
     if !step("clicking box 1 brings A back and hides B", clicked) {
         return false;
     }
     let moved = keys(&[F4])
-        && until(1000, || current(1) && compositor::pixel(a_x, a_y) == Ok(RED) && two_entries());
-    if !step("F4 moves A to workspace 2 and follows: A on top, both listed", moved) {
+        && until(1000, || {
+            current(1) && compositor::pixel(a_x, a_y) == Ok(RED) && two_entries()
+        });
+    if !step(
+        "F4 moves A to workspace 2 and follows: A on top, both listed",
+        moved,
+    ) {
         return false;
     }
-    let away = keys(&[F3]) && until(1000, || current(2) && wall(a_x, a_y) && wall(b_x, b_y) && no_entry());
+    let away = keys(&[F3])
+        && until(1000, || {
+            current(2) && wall(a_x, a_y) && wall(b_x, b_y) && no_entry()
+        });
     if !step("F3: workspace 3 shows neither", away) {
         return false;
     }
-    let killed = task::kill_process(beta.as_u64(), 9).is_ok() && until(1000, || task::process_exited(beta));
+    let killed =
+        task::kill_process(beta.as_u64(), 9).is_ok() && until(1000, || task::process_exited(beta));
     let _ = task::wait_process(beta.as_u64());
     // Workspace 3 -> 4 -> 1 -> 2.
     let back = killed
         && keys(&[F3, F3, F3])
-        && until(1000, || current(1) && compositor::pixel(a_x, a_y) == Ok(RED) && b_hidden());
-    if !step("B closed while hidden; back on workspace 2 only A remains", back) {
+        && until(1000, || {
+            current(1) && compositor::pixel(a_x, a_y) == Ok(RED) && b_hidden()
+        });
+    if !step(
+        "B closed while hidden; back on workspace 2 only A remains",
+        back,
+    ) {
         return false;
     }
-    if task::kill_process(shell.as_u64(), 9).is_err() || !until(1000, || task::process_exited(shell)) {
+    if task::kill_process(shell.as_u64(), 9).is_err()
+        || !until(1000, || task::process_exited(shell))
+    {
         return step("shell killed", false);
     }
     let _ = task::wait_process(shell.as_u64());
-    step("display returned to the terminal", compositor::holder().is_none() && !compositor::is_presenting())
+    step(
+        "display returned to the terminal",
+        compositor::holder().is_none() && !compositor::is_presenting(),
+    )
 }
 
 /// Stage 20.12 acceptance: signing in.
@@ -6279,10 +6662,8 @@ fn stage20_12_self_test() -> bool {
     }
     fn packet(dx: i16, screen_dy: i16, left: bool) -> bool {
         let dy = -screen_dy;
-        let flags = 0x08
-            | u8::from(left)
-            | if dx < 0 { 0x10 } else { 0 }
-            | if dy < 0 { 0x20 } else { 0 };
+        let flags =
+            0x08 | u8::from(left) | if dx < 0 { 0x10 } else { 0 } | if dy < 0 { 0x20 } else { 0 };
         [flags, dx as u8, dy as u8].into_iter().all(mouse::loopback)
     }
     fn move_by(mut dx: i32, mut dy: i32) -> bool {
@@ -6321,7 +6702,11 @@ fn stage20_12_self_test() -> bool {
     }
 
     let mut file = account_line("ada", b"\x11\x22\x33\x44\x55\x66\x77\x88", b"1234");
-    file.push_str(&account_line("lin", b"\xa0\xb1\xc2\xd3\xe4\xf5\x06\x17", b"9876"));
+    file.push_str(&account_line(
+        "lin",
+        b"\xa0\xb1\xc2\xd3\xe4\xf5\x06\x17",
+        b"9876",
+    ));
     // Boot creates /etc; make sure of it rather than assume.
     let written = (vfs::stat("/etc").is_ok() || vfs::mkdir("/etc").is_ok())
         && vfs::mkdir("/etc/wovenhat").is_ok()
@@ -6341,12 +6726,15 @@ fn stage20_12_self_test() -> bool {
     ) else {
         return step("shell image loads", false);
     };
-    let Ok((shell, _, _)) = task::spawn_user_system_service("woven-shell", program, capabilities) else {
+    let Ok((shell, _, _)) = task::spawn_user_system_service("woven-shell", program, capabilities)
+    else {
         return step("shell spawned", false);
     };
     if !step(
         "shell took the display",
-        until(3000, || compositor::holder() == Some(shell.as_u64()) && compositor::is_presenting()),
+        until(3000, || {
+            compositor::holder() == Some(shell.as_u64()) && compositor::is_presenting()
+        }),
     ) {
         return false;
     }
@@ -6365,7 +6753,11 @@ fn stage20_12_self_test() -> bool {
         mask.draw_text(x0, 0, text, WHITE);
         (y0..y0 + 7).all(|y| {
             (0..width).all(|x| {
-                let expected = if mask.pixel(x, y - y0) == Some(WHITE) { WHITE } else { dim(x, y) };
+                let expected = if mask.pixel(x, y - y0) == Some(WHITE) {
+                    WHITE
+                } else {
+                    dim(x, y)
+                };
                 compositor::pixel(x, y) == Ok(expected)
             })
         })
@@ -6383,10 +6775,14 @@ fn stage20_12_self_test() -> bool {
     ) {
         return false;
     }
-    if !step("Tab chooses lin", keys(&[0x0f]) && until(500, || sign_in("  ada", "> lin", "Enter PIN"))) {
+    if !step(
+        "Tab chooses lin",
+        keys(&[0x0f]) && until(500, || sign_in("  ada", "> lin", "Enter PIN")),
+    ) {
         return false;
     }
-    let refused = keys(&[0x02, 0x03, 0x04, 0x05, 0x1c]) && until(500, || sign_in("  ada", "> lin", "Wrong PIN"));
+    let refused = keys(&[0x02, 0x03, 0x04, 0x05, 0x1c])
+        && until(500, || sign_in("  ada", "> lin", "Wrong PIN"));
     if !step("ada's PIN is refused for lin", refused) {
         return false;
     }
@@ -6403,34 +6799,51 @@ fn stage20_12_self_test() -> bool {
         mask.draw_text(0, 0, "lin", WHITE);
         (top + 9..top + 16).all(|y| {
             (name_x..name_x + 18).all(|x| {
-                let expected = if mask.pixel(x - name_x, y - (top + 9)) == Some(WHITE) { WHITE } else { taskbar(x, y) };
+                let expected = if mask.pixel(x - name_x, y - (top + 9)) == Some(WHITE) {
+                    WHITE
+                } else {
+                    taskbar(x, y)
+                };
                 compositor::pixel(x, y) == Ok(expected)
             })
         })
     };
     let signed_in = keys(&[0x0a, 0x09, 0x08, 0x07, 0x1c]) && until(1000, name_shown);
-    if !step("lin's PIN signs in; lin's name is on the taskbar", signed_in) {
+    if !step(
+        "lin's PIN signs in; lin's name is on the taskbar",
+        signed_in,
+    ) {
         return false;
     }
 
     // Lock through Quick Settings: the lock screen wants lin's PIN.
-    let lock_row = (width - 4 - 164 + 28, top - 2 - (5 * 14 + 2) + 1 + 4 * 14 + 7);
+    let lock_row = (
+        width - 4 - 164 + 28,
+        top - 2 - (5 * 14 + 2) + 1 + 4 * 14 + 7,
+    );
     let (px, py) = (width / 2, height / 2);
     let locked = move_by(button.0 + 8 - px, button.1 + 8 - py)
         && click()
         && move_by(lock_row.0 - (button.0 + 8), lock_row.1 - (button.1 + 8))
         && click()
-        && until(1000, || line(middle - 34, "Locked") && line(middle - 4, "Enter PIN"));
+        && until(1000, || {
+            line(middle - 34, "Locked") && line(middle - 4, "Enter PIN")
+        });
     let lock_checks = locked
         && keys(&[0x02, 0x03, 0x04, 0x05, 0x1c])
         && until(500, || line(middle - 4, "Wrong PIN"))
         && keys(&[0x0a, 0x09, 0x08, 0x07, 0x1c])
         && until(1000, name_shown);
-    if !step("the lock screen refuses ada's PIN and takes lin's", lock_checks) {
+    if !step(
+        "the lock screen refuses ada's PIN and takes lin's",
+        lock_checks,
+    ) {
         return false;
     }
 
-    if task::kill_process(shell.as_u64(), 9).is_err() || !until(1000, || task::process_exited(shell)) {
+    if task::kill_process(shell.as_u64(), 9).is_err()
+        || !until(1000, || task::process_exited(shell))
+    {
         return step("shell killed", false);
     }
     let _ = task::wait_process(shell.as_u64());
@@ -6507,10 +6920,8 @@ fn stage20_11_self_test() -> bool {
     }
     fn packet(dx: i16, screen_dy: i16, left: bool) -> bool {
         let dy = -screen_dy;
-        let flags = 0x08
-            | u8::from(left)
-            | if dx < 0 { 0x10 } else { 0 }
-            | if dy < 0 { 0x20 } else { 0 };
+        let flags =
+            0x08 | u8::from(left) | if dx < 0 { 0x10 } else { 0 } | if dy < 0 { 0x20 } else { 0 };
         [flags, dx as u8, dy as u8].into_iter().all(mouse::loopback)
     }
     fn move_by(mut dx: i32, mut dy: i32) -> bool {
@@ -6536,15 +6947,21 @@ fn stage20_11_self_test() -> bool {
         .with(capability::Capability::DisplayIo)
         .with(capability::Capability::InputIo)
         .with(capability::Capability::Ipc);
-    let Some(program) = userspace::load_elf_with_argv(WOVEN_SHELL_IMAGE, &["/bin/woven-shell", "--pin", "2468"]) else {
+    let Some(program) =
+        userspace::load_elf_with_argv(WOVEN_SHELL_IMAGE, &["/bin/woven-shell", "--pin", "2468"])
+    else {
         return step("shell image loads", false);
     };
-    let Ok((shell, _, _)) = task::spawn_user_system_service("woven-shell", program, capabilities) else {
+    let Ok((shell, _, _)) = task::spawn_user_system_service("woven-shell", program, capabilities)
+    else {
         return step("shell spawned", false);
     };
     if !step(
         "shell took the display",
-        installed && until(3000, || compositor::holder() == Some(shell.as_u64()) && compositor::is_presenting()),
+        installed
+            && until(3000, || {
+                compositor::holder() == Some(shell.as_u64()) && compositor::is_presenting()
+            }),
     ) {
         return false;
     }
@@ -6553,12 +6970,20 @@ fn stage20_11_self_test() -> bool {
     };
     let (width, height) = (width as i32, height as i32);
     let top = height - 24;
-    let client = capability::CapabilitySet::only(capability::Capability::Console).with(capability::Capability::Ipc);
+    let client = capability::CapabilitySet::only(capability::Capability::Console)
+        .with(capability::Capability::Ipc);
     let shell_arg = alloc::format!("{}", shell.as_u64());
-    let Some(alpha) = spawn_hello_gui(HELLO_GUI_IMAGE, &["/bin/hello-gui", "--desktop-client", &shell_arg, "a"], Some(client)) else {
+    let Some(alpha) = spawn_hello_gui(
+        HELLO_GUI_IMAGE,
+        &["/bin/hello-gui", "--desktop-client", &shell_arg, "a"],
+        Some(client),
+    ) else {
         return step("application A spawned", false);
     };
-    if !step("window A opened", until(2000, || compositor::pixel(45, 45) == Ok(RED))) {
+    if !step(
+        "window A opened",
+        until(2000, || compositor::pixel(45, 45) == Ok(RED)),
+    ) {
         return false;
     }
 
@@ -6574,7 +6999,11 @@ fn stage20_11_self_test() -> bool {
         mask.draw_text(x0, 0, text, WHITE);
         (y0..y0 + 7).all(|y| {
             (0..width).all(|x| {
-                let expected = if mask.pixel(x, y - y0) == Some(WHITE) { WHITE } else { dim(x, y) };
+                let expected = if mask.pixel(x, y - y0) == Some(WHITE) {
+                    WHITE
+                } else {
+                    dim(x, y)
+                };
                 compositor::pixel(x, y) == Ok(expected)
             })
         })
@@ -6589,12 +7018,18 @@ fn stage20_11_self_test() -> bool {
         })
     };
     let screen = |prompt: &str, count: i32| {
-        line(middle - 34, "Locked") && line(middle - 4, prompt) && dots(count) && compositor::pixel(45, 45) == Ok(dim(45, 45))
+        line(middle - 34, "Locked")
+            && line(middle - 4, prompt)
+            && dots(count)
+            && compositor::pixel(45, 45) == Ok(dim(45, 45))
     };
 
     // Quick Settings: the button, then its last row, "Lock screen".
     let button = (width - 54 - 5 * 20 + 8, top + 12);
-    let lock_row = (width - 4 - 164 + 28, top - 2 - (5 * 14 + 2) + 1 + 4 * 14 + 7);
+    let lock_row = (
+        width - 4 - 164 + 28,
+        top - 2 - (5 * 14 + 2) + 1 + 4 * 14 + 7,
+    );
     let (mut px, mut py) = (width / 2, height / 2);
     let lock = |px: &mut i32, py: &mut i32| {
         let ok = move_by(button.0 - *px, button.1 - *py)
@@ -6604,12 +7039,18 @@ fn stage20_11_self_test() -> bool {
         (*px, *py) = lock_row;
         ok
     };
-    if !step("Quick Settings locks the screen; the window is hidden", lock(&mut px, &mut py) && until(1000, || screen("Enter PIN", 0))) {
+    if !step(
+        "Quick Settings locks the screen; the window is hidden",
+        lock(&mut px, &mut py) && until(1000, || screen("Enter PIN", 0)),
+    ) {
         return false;
     }
     // A key while locked reaches no application: A, waiting for x, must
     // still be running a second later.
-    let withheld = keys(&[0x2d]) && stays(100, || !task::process_exited(alpha) && screen("Enter PIN", 0));
+    let withheld = keys(&[0x2d])
+        && stays(100, || {
+            !task::process_exited(alpha) && screen("Enter PIN", 0)
+        });
     if !step("a key while locked reaches no application", withheld) {
         return false;
     }
@@ -6621,7 +7062,8 @@ fn stage20_11_self_test() -> bool {
     if !step("a wrong PIN says so and stays locked", wrong) {
         return false;
     }
-    let unlocked = keys(&[0x03, 0x05, 0x07, 0x09, 0x1c]) && until(1000, || compositor::pixel(45, 45) == Ok(RED));
+    let unlocked = keys(&[0x03, 0x05, 0x07, 0x09, 0x1c])
+        && until(1000, || compositor::pixel(45, 45) == Ok(RED));
     if !step("the right PIN unlocks and the window returns", unlocked) {
         return false;
     }
@@ -6631,7 +7073,9 @@ fn stage20_11_self_test() -> bool {
     }
 
     // Lockout: lock again, three wrong PINs, then the right one too soon.
-    let gone = until(1000, || compositor::pixel(45, 45) == Ok(wallpaper(45, 45, height)));
+    let gone = until(1000, || {
+        compositor::pixel(45, 45) == Ok(wallpaper(45, 45, height))
+    });
     let relocked = gone && lock(&mut px, &mut py) && until(1000, || screen("Enter PIN", 0));
     let locked_out = relocked
         && keys(&[0x02, 0x1c, 0x02, 0x1c, 0x02, 0x1c])
@@ -6643,7 +7087,10 @@ fn stage20_11_self_test() -> bool {
         && until(500, || !woven_input::pending(shell.as_u64()))
         && until(500, || screen("Try again shortly", 0))
         && stays(100, || screen("Try again shortly", 0));
-    if !step("three wrong PINs lock entry out; the right PIN is refused meanwhile", locked_out) {
+    if !step(
+        "three wrong PINs lock entry out; the right PIN is refused meanwhile",
+        locked_out,
+    ) {
         return false;
     }
     let started = timer::ticks();
@@ -6651,12 +7098,16 @@ fn stage20_11_self_test() -> bool {
         task::yield_now();
     }
     let after = keys(&[0x03, 0x05, 0x07, 0x09, 0x1c])
-        && until(1000, || compositor::pixel(45, 45) == Ok(wallpaper(45, 45, height)));
+        && until(1000, || {
+            compositor::pixel(45, 45) == Ok(wallpaper(45, 45, height))
+        });
     if !step("after the lockout the right PIN unlocks", after) {
         return false;
     }
 
-    if task::kill_process(shell.as_u64(), 9).is_err() || !until(1000, || task::process_exited(shell)) {
+    if task::kill_process(shell.as_u64(), 9).is_err()
+        || !until(1000, || task::process_exited(shell))
+    {
         return step("shell killed", false);
     }
     let _ = task::wait_process(shell.as_u64());
@@ -6735,15 +7186,20 @@ fn stage20_10_self_test() -> bool {
         }
         true
     }
-    fn region(x0: i32, y0: i32, width: i32, height: i32, expected: impl Fn(i32, i32) -> u32) -> bool {
-        (y0..y0 + height).all(|y| (x0..x0 + width).all(|x| compositor::pixel(x, y) == Ok(expected(x, y))))
+    fn region(
+        x0: i32,
+        y0: i32,
+        width: i32,
+        height: i32,
+        expected: impl Fn(i32, i32) -> u32,
+    ) -> bool {
+        (y0..y0 + height)
+            .all(|y| (x0..x0 + width).all(|x| compositor::pixel(x, y) == Ok(expected(x, y))))
     }
     fn packet(dx: i16, screen_dy: i16, left: bool) -> bool {
         let dy = -screen_dy;
-        let flags = 0x08
-            | u8::from(left)
-            | if dx < 0 { 0x10 } else { 0 }
-            | if dy < 0 { 0x20 } else { 0 };
+        let flags =
+            0x08 | u8::from(left) | if dx < 0 { 0x10 } else { 0 } | if dy < 0 { 0x20 } else { 0 };
         [flags, dx as u8, dy as u8].into_iter().all(mouse::loopback)
     }
     fn move_by(mut dx: i32, mut dy: i32) -> bool {
@@ -6763,7 +7219,13 @@ fn stage20_10_self_test() -> bool {
     /// The Quick Settings panel for a desktop `width`x`height`, with `rows`,
     /// over whatever `beneath` gives, skipping the cells under the pointer
     /// at `pointer`.
-    fn panel(width: i32, height: i32, rows: [&str; 6], beneath: impl Fn(i32, i32) -> u32, pointer: (i32, i32)) -> bool {
+    fn panel(
+        width: i32,
+        height: i32,
+        rows: [&str; 6],
+        beneath: impl Fn(i32, i32) -> u32,
+        pointer: (i32, i32),
+    ) -> bool {
         let top = height - 24;
         let h = 7 * 14 + 2;
         let (x0, y0) = (width - 4 - 164, top - 2 - h);
@@ -6778,7 +7240,9 @@ fn stage20_10_self_test() -> bool {
         }
         (y0..y0 + h).all(|y| {
             (x0..x0 + 164).all(|x| {
-                if (pointer.0..pointer.0 + 7).contains(&x) && (pointer.1..pointer.1 + 10).contains(&y) {
+                if (pointer.0..pointer.0 + 7).contains(&x)
+                    && (pointer.1..pointer.1 + 10).contains(&y)
+                {
                     return true;
                 }
                 let expected = match image.pixel(x - x0, y - y0) {
@@ -6795,15 +7259,20 @@ fn stage20_10_self_test() -> bool {
         .with(capability::Capability::DisplayIo)
         .with(capability::Capability::InputIo)
         .with(capability::Capability::Ipc);
-    let Some(program) = userspace::load_elf_with_argv(WOVEN_SHELL_IMAGE, &["/bin/woven-shell"]) else {
+    let Some(program) = userspace::load_elf_with_argv(WOVEN_SHELL_IMAGE, &["/bin/woven-shell"])
+    else {
         return step("shell image loads", false);
     };
-    let Ok((shell, _, _)) = task::spawn_user_system_service("woven-shell", program, capabilities) else {
+    let Ok((shell, _, _)) = task::spawn_user_system_service("woven-shell", program, capabilities)
+    else {
         return step("shell spawned", false);
     };
     if !step(
         "shell took the display",
-        installed && until(3000, || compositor::holder() == Some(shell.as_u64()) && compositor::is_presenting()),
+        installed
+            && until(3000, || {
+                compositor::holder() == Some(shell.as_u64()) && compositor::is_presenting()
+            }),
     ) {
         return false;
     }
@@ -6812,12 +7281,20 @@ fn stage20_10_self_test() -> bool {
     };
     let (width, height) = (width as i32, height as i32);
     let top = height - 24;
-    let client = capability::CapabilitySet::only(capability::Capability::Console).with(capability::Capability::Ipc);
+    let client = capability::CapabilitySet::only(capability::Capability::Console)
+        .with(capability::Capability::Ipc);
     let shell_arg = alloc::format!("{}", shell.as_u64());
-    let Some(quiet) = spawn_hello_gui(HELLO_GUI_IMAGE, &["/bin/hello-gui", "--desktop-client", &shell_arg, "q"], Some(client)) else {
+    let Some(quiet) = spawn_hello_gui(
+        HELLO_GUI_IMAGE,
+        &["/bin/hello-gui", "--desktop-client", &shell_arg, "q"],
+        Some(client),
+    ) else {
         return step("application Q spawned", false);
     };
-    if !step("window Q opened", until(2000, || compositor::pixel(45, 45) == Ok(QUIET))) {
+    if !step(
+        "window Q opened",
+        until(2000, || compositor::pixel(45, 45) == Ok(QUIET)),
+    ) {
         return false;
     }
 
@@ -6833,8 +7310,20 @@ fn stage20_10_self_test() -> bool {
     let opened = move_by(button.0 + 8 - px, button.1 + 8 - py)
         && click()
         && until(1000, || {
-            panel(width, height, ["Power off", "Restart", "Display scale: 2x", "Do not disturb: Off", "Tiling: Off", "Lock screen"], wall, (button.0 + 8, button.1 + 8))
-                && compositor::pixel(button.0 + 1, button.1 + 1) == Ok(ENTRY_ACTIVE)
+            panel(
+                width,
+                height,
+                [
+                    "Power off",
+                    "Restart",
+                    "Display scale: 2x",
+                    "Do not disturb: Off",
+                    "Tiling: Off",
+                    "Lock screen",
+                ],
+                wall,
+                (button.0 + 8, button.1 + 8),
+            ) && compositor::pixel(button.0 + 1, button.1 + 1) == Ok(ENTRY_ACTIVE)
         });
     (px, py) = (button.0 + 8, button.1 + 8);
     if !step("the Quick Settings button opens its panel", opened) {
@@ -6846,7 +7335,22 @@ fn stage20_10_self_test() -> bool {
     let (dx, dy) = row(3);
     let dnd = move_by(dx - px, dy - py)
         && click()
-        && until(1000, || panel(width, height, ["Power off", "Restart", "Display scale: 2x", "Do not disturb: On", "Tiling: Off", "Lock screen"], wall, (dx, dy)));
+        && until(1000, || {
+            panel(
+                width,
+                height,
+                [
+                    "Power off",
+                    "Restart",
+                    "Display scale: 2x",
+                    "Do not disturb: On",
+                    "Tiling: Off",
+                    "Lock screen",
+                ],
+                wall,
+                (dx, dy),
+            )
+        });
     (px, py) = (dx, dy);
     if !step("Do Not Disturb turns on", dnd) {
         return false;
@@ -6864,7 +7368,10 @@ fn stage20_10_self_test() -> bool {
         // seen before a toast would be: the toast area must stay clear for a
         // full second, not just at one instant.
         && stays(100, || region(width - 188, 8, 180, 22, wall));
-    if !step("a notification under Do Not Disturb is counted but raises no toast", silenced) {
+    if !step(
+        "a notification under Do Not Disturb is counted but raises no toast",
+        silenced,
+    ) {
         return false;
     }
 
@@ -6875,7 +7382,20 @@ fn stage20_10_self_test() -> bool {
         && until(2000, || {
             compositor::pixel(5, top - 40) == Ok(QUIET)
                 && compositor::pixel(width - 300, 20) == Ok(QUIET)
-                && panel(width, height, ["Power off", "Restart", "Display scale: 2x", "Do not disturb: On", "Tiling: On", "Lock screen"], |_, _| QUIET, (tx, ty))
+                && panel(
+                    width,
+                    height,
+                    [
+                        "Power off",
+                        "Restart",
+                        "Display scale: 2x",
+                        "Do not disturb: On",
+                        "Tiling: On",
+                        "Lock screen",
+                    ],
+                    |_, _| QUIET,
+                    (tx, ty),
+                )
         });
     (px, py) = (tx, ty);
     if !step("tiling turns on and the window fills the work area", tiled) {
@@ -6890,19 +7410,41 @@ fn stage20_10_self_test() -> bool {
     let full = (width * 2, height * 2);
     let scaled = move_by(sx - px, sy - py)
         && click()
-        && until(2000, || compositor::scale() == Some(1) && compositor::dimensions() == Some((full.0 as u32, full.1 as u32)))
         && until(2000, || {
-            panel(full.0, full.1, ["Power off", "Restart", "Display scale: 1x", "Do not disturb: On", "Tiling: On", "Lock screen"], |x, y| wallpaper(x, y, full.1), (sx, sy))
+            compositor::scale() == Some(1)
+                && compositor::dimensions() == Some((full.0 as u32, full.1 as u32))
+        })
+        && until(2000, || {
+            panel(
+                full.0,
+                full.1,
+                [
+                    "Power off",
+                    "Restart",
+                    "Display scale: 1x",
+                    "Do not disturb: On",
+                    "Tiling: On",
+                    "Lock screen",
+                ],
+                |x, y| wallpaper(x, y, full.1),
+                (sx, sy),
+            )
         });
     (px, py) = (sx, sy);
     if !step("display scale 1x makes the desktop 1280x800", scaled) {
         return false;
     }
     // Back to 2x through the panel's scale row at the 1x geometry.
-    let back_row = (full.0 - 4 - 164 + 28, (full.1 - 24) - 2 - (7 * 14 + 2) + 1 + 3 * 14 + 7);
+    let back_row = (
+        full.0 - 4 - 164 + 28,
+        (full.1 - 24) - 2 - (7 * 14 + 2) + 1 + 3 * 14 + 7,
+    );
     let restored = move_by(back_row.0 - px, back_row.1 - py)
         && click()
-        && until(2000, || compositor::scale() == Some(2) && compositor::dimensions() == Some((width as u32, height as u32)));
+        && until(2000, || {
+            compositor::scale() == Some(2)
+                && compositor::dimensions() == Some((width as u32, height as u32))
+        });
     (px, py) = ((back_row.0).min(width - 1), (back_row.1).min(height - 1));
     if !step("display scale 2x restores 640x400", restored) {
         return false;
@@ -6911,15 +7453,21 @@ fn stage20_10_self_test() -> bool {
     // The button closes the panel; Q takes its key and exits.
     let closed = move_by(button.0 + 8 - px, button.1 + 8 - py)
         && click()
-        && until(1000, || region(width - 4 - 164 + 10, panel_y + 10, 100, 30, |_, _| QUIET) || region(width - 4 - 164 + 10, panel_y + 10, 100, 30, wall));
+        && until(1000, || {
+            region(width - 4 - 164 + 10, panel_y + 10, 100, 30, |_, _| QUIET)
+                || region(width - 4 - 164 + 10, panel_y + 10, 100, 30, wall)
+        });
     if !step("the button closes the panel", closed) {
         return false;
     }
-    let exited = mouse::keyboard_loopback(0x10) && wait_hello_gui(quiet).map(|(_, status)| status) == Some(Ok(0));
+    let exited = mouse::keyboard_loopback(0x10)
+        && wait_hello_gui(quiet).map(|(_, status)| status) == Some(Ok(0));
     if !step("Q takes its key and exits", exited) {
         return false;
     }
-    if task::kill_process(shell.as_u64(), 9).is_err() || !until(1000, || task::process_exited(shell)) {
+    if task::kill_process(shell.as_u64(), 9).is_err()
+        || !until(1000, || task::process_exited(shell))
+    {
         return step("shell killed", false);
     }
     let _ = task::wait_process(shell.as_u64());
@@ -6988,15 +7536,20 @@ fn stage20_9_self_test() -> bool {
             base
         }
     }
-    fn region(x0: i32, y0: i32, width: i32, height: i32, expected: impl Fn(i32, i32) -> u32) -> bool {
-        (y0..y0 + height).all(|y| (x0..x0 + width).all(|x| compositor::pixel(x, y) == Ok(expected(x, y))))
+    fn region(
+        x0: i32,
+        y0: i32,
+        width: i32,
+        height: i32,
+        expected: impl Fn(i32, i32) -> u32,
+    ) -> bool {
+        (y0..y0 + height)
+            .all(|y| (x0..x0 + width).all(|x| compositor::pixel(x, y) == Ok(expected(x, y))))
     }
     fn packet(dx: i16, screen_dy: i16, left: bool) -> bool {
         let dy = -screen_dy;
-        let flags = 0x08
-            | u8::from(left)
-            | if dx < 0 { 0x10 } else { 0 }
-            | if dy < 0 { 0x20 } else { 0 };
+        let flags =
+            0x08 | u8::from(left) | if dx < 0 { 0x10 } else { 0 } | if dy < 0 { 0x20 } else { 0 };
         [flags, dx as u8, dy as u8].into_iter().all(mouse::loopback)
     }
     fn move_by(mut dx: i32, mut dy: i32) -> bool {
@@ -7019,15 +7572,20 @@ fn stage20_9_self_test() -> bool {
         .with(capability::Capability::DisplayIo)
         .with(capability::Capability::InputIo)
         .with(capability::Capability::Ipc);
-    let Some(program) = userspace::load_elf_with_argv(WOVEN_SHELL_IMAGE, &["/bin/woven-shell"]) else {
+    let Some(program) = userspace::load_elf_with_argv(WOVEN_SHELL_IMAGE, &["/bin/woven-shell"])
+    else {
         return step("shell image loads", false);
     };
-    let Ok((shell, _, _)) = task::spawn_user_system_service("woven-shell", program, capabilities) else {
+    let Ok((shell, _, _)) = task::spawn_user_system_service("woven-shell", program, capabilities)
+    else {
         return step("shell spawned", false);
     };
     if !step(
         "shell took the display",
-        installed && until(3000, || compositor::holder() == Some(shell.as_u64()) && compositor::is_presenting()),
+        installed
+            && until(3000, || {
+                compositor::holder() == Some(shell.as_u64()) && compositor::is_presenting()
+            }),
     ) {
         return false;
     }
@@ -7037,12 +7595,20 @@ fn stage20_9_self_test() -> bool {
     let (width, height) = (width as i32, height as i32);
     let top = height - 24;
     let taskbar = move |x: i32, y: i32| blend_pixel(TASKBAR, wallpaper(x, y, height), 216);
-    let client = capability::CapabilitySet::only(capability::Capability::Console).with(capability::Capability::Ipc);
+    let client = capability::CapabilitySet::only(capability::Capability::Console)
+        .with(capability::Capability::Ipc);
     let shell_arg = alloc::format!("{}", shell.as_u64());
-    let Some(notes) = spawn_hello_gui(HELLO_GUI_IMAGE, &["/bin/hello-gui", "--desktop-client", &shell_arg, "n"], Some(client)) else {
+    let Some(notes) = spawn_hello_gui(
+        HELLO_GUI_IMAGE,
+        &["/bin/hello-gui", "--desktop-client", &shell_arg, "n"],
+        Some(client),
+    ) else {
         return step("application N spawned", false);
     };
-    if !step("window N opened", until(2000, || compositor::pixel(45, 45) == Ok(NOTES))) {
+    if !step(
+        "window N opened",
+        until(2000, || compositor::pixel(45, 45) == Ok(NOTES)),
+    ) {
         return false;
     }
 
@@ -7083,9 +7649,14 @@ fn stage20_9_self_test() -> bool {
         let bounds = image.bounds();
         image.fill_rect(bounds, ACCENT);
         image.draw_text(3, 2, digit, WHITE);
-        region(badge_x, badge_y, 10, 11, |x, y| image.pixel(x - badge_x, y - badge_y).unwrap_or(UNSET))
+        region(badge_x, badge_y, 10, 11, |x, y| {
+            image.pixel(x - badge_x, y - badge_y).unwrap_or(UNSET)
+        })
     };
-    if !step("a badge counts three unread notifications", until(1000, || badge("3"))) {
+    if !step(
+        "a badge counts three unread notifications",
+        until(1000, || badge("3")),
+    ) {
         return false;
     }
 
@@ -7098,7 +7669,12 @@ fn stage20_9_self_test() -> bool {
         let image = overlay((164, h), &|surface| {
             surface.fill_rect(Rect::new(1, 1, 162, 14), START_FILL);
             surface.draw_text(6, 5, "Notifications", WHITE);
-            surface.draw_text(164 - 6 - crate::font::text_width("Clear") as i32, 5, "Clear", WHITE);
+            surface.draw_text(
+                164 - 6 - crate::font::text_width("Clear") as i32,
+                5,
+                "Clear",
+                WHITE,
+            );
             if rows.is_empty() {
                 surface.draw_text(6, 1 + 14 + 4, "No notifications", WHITE);
             }
@@ -7110,12 +7686,19 @@ fn stage20_9_self_test() -> bool {
     };
     let (px, py) = (width / 2, height / 2);
     let (cx, cy) = (width - 20, top + 12);
-    let (x0, y0, _, full) = center(&["Notes: Battery 80%", "Notes: Mail: 3 new", "Notes: Build done"]);
+    let (x0, y0, _, full) = center(&[
+        "Notes: Battery 80%",
+        "Notes: Mail: 3 new",
+        "Notes: Build done",
+    ]);
     let opened = move_by(cx - px, cy - py)
         && click()
         && until(1000, || translucent(x0, y0, &full, PANEL_FILL))
         && until(500, || region(badge_x, badge_y, 10, 11, taskbar));
-    if !step("clicking the clock opens the center, newest first, and clears the badge", opened) {
+    if !step(
+        "clicking the clock opens the center, newest first, and clears the badge",
+        opened,
+    ) {
         return false;
     }
 
@@ -7130,16 +7713,21 @@ fn stage20_9_self_test() -> bool {
     }
     let closed = move_by(cx - clear_point.0, cy - clear_point.1)
         && click()
-        && until(1000, || region(ex, ey, 164, eh, |x, y| wallpaper(x, y, height)));
+        && until(1000, || {
+            region(ex, ey, 164, eh, |x, y| wallpaper(x, y, height))
+        });
     if !step("clicking the clock again closes it", closed) {
         return false;
     }
 
-    let exited = mouse::keyboard_loopback(0x31) && wait_hello_gui(notes).map(|(_, status)| status) == Some(Ok(0));
+    let exited = mouse::keyboard_loopback(0x31)
+        && wait_hello_gui(notes).map(|(_, status)| status) == Some(Ok(0));
     if !step("N takes its key and exits", exited) {
         return false;
     }
-    if task::kill_process(shell.as_u64(), 9).is_err() || !until(1000, || task::process_exited(shell)) {
+    if task::kill_process(shell.as_u64(), 9).is_err()
+        || !until(1000, || task::process_exited(shell))
+    {
         return step("shell killed", false);
     }
     let _ = task::wait_process(shell.as_u64());
@@ -7206,26 +7794,40 @@ fn stage20_8_self_test() -> bool {
             base
         }
     }
-    fn region(x0: i32, y0: i32, width: i32, height: i32, expected: impl Fn(i32, i32) -> u32) -> bool {
-        (y0..y0 + height).all(|y| (x0..x0 + width).all(|x| compositor::pixel(x, y) == Ok(expected(x, y))))
+    fn region(
+        x0: i32,
+        y0: i32,
+        width: i32,
+        height: i32,
+        expected: impl Fn(i32, i32) -> u32,
+    ) -> bool {
+        (y0..y0 + height)
+            .all(|y| (x0..x0 + width).all(|x| compositor::pixel(x, y) == Ok(expected(x, y))))
     }
     /// A title bar, with `shade` applied to each expected pixel (for a
     /// shadow falling across it).
-    fn title_bar(x: i32, y: i32, width: i32, text: &str, fill: u32, shade: impl Fn(i32, i32, u32) -> u32) -> bool {
+    fn title_bar(
+        x: i32,
+        y: i32,
+        width: i32,
+        text: &str,
+        fill: u32,
+        shade: impl Fn(i32, i32, u32) -> u32,
+    ) -> bool {
         let mut expected = Surface::new(width as usize, 14);
         let bounds = expected.bounds();
         expected.fill_rect(bounds, fill);
         expected.draw_text(4, 4, text, WHITE);
         expected.fill_rect(crate::display::Rect::new(width - 12, 2, 10, 10), CLOSE_FILL);
         expected.draw_text(width - 12 + 3, 4, "x", WHITE);
-        region(x, y, width, 14, |px, py| shade(px, py, expected.pixel(px - x, py - y).unwrap_or(UNSET)))
+        region(x, y, width, 14, |px, py| {
+            shade(px, py, expected.pixel(px - x, py - y).unwrap_or(UNSET))
+        })
     }
     fn packet(dx: i16, screen_dy: i16, left: bool) -> bool {
         let dy = -screen_dy;
-        let flags = 0x08
-            | u8::from(left)
-            | if dx < 0 { 0x10 } else { 0 }
-            | if dy < 0 { 0x20 } else { 0 };
+        let flags =
+            0x08 | u8::from(left) | if dx < 0 { 0x10 } else { 0 } | if dy < 0 { 0x20 } else { 0 };
         [flags, dx as u8, dy as u8].into_iter().all(mouse::loopback)
     }
     fn move_by(mut dx: i32, mut dy: i32, held: bool) -> bool {
@@ -7245,15 +7847,20 @@ fn stage20_8_self_test() -> bool {
         .with(capability::Capability::DisplayIo)
         .with(capability::Capability::InputIo)
         .with(capability::Capability::Ipc);
-    let Some(program) = userspace::load_elf_with_argv(WOVEN_SHELL_IMAGE, &["/bin/woven-shell"]) else {
+    let Some(program) = userspace::load_elf_with_argv(WOVEN_SHELL_IMAGE, &["/bin/woven-shell"])
+    else {
         return step("shell image loads", false);
     };
-    let Ok((shell, _, _)) = task::spawn_user_system_service("woven-shell", program, capabilities) else {
+    let Ok((shell, _, _)) = task::spawn_user_system_service("woven-shell", program, capabilities)
+    else {
         return step("shell spawned", false);
     };
     if !step(
         "shell took the display",
-        installed && until(3000, || compositor::holder() == Some(shell.as_u64()) && compositor::is_presenting()),
+        installed
+            && until(3000, || {
+                compositor::holder() == Some(shell.as_u64()) && compositor::is_presenting()
+            }),
     ) {
         return false;
     }
@@ -7262,18 +7869,30 @@ fn stage20_8_self_test() -> bool {
     };
     let (width, height) = (width as i32, height as i32);
     let top = height - 24;
-    let client = capability::CapabilitySet::only(capability::Capability::Console).with(capability::Capability::Ipc);
+    let client = capability::CapabilitySet::only(capability::Capability::Console)
+        .with(capability::Capability::Ipc);
     let shell_arg = alloc::format!("{}", shell.as_u64());
-    let Some(alpha) = spawn_hello_gui(HELLO_GUI_IMAGE, &["/bin/hello-gui", "--desktop-client", &shell_arg, "a"], Some(client)) else {
+    let Some(alpha) = spawn_hello_gui(
+        HELLO_GUI_IMAGE,
+        &["/bin/hello-gui", "--desktop-client", &shell_arg, "a"],
+        Some(client),
+    ) else {
         return step("application A spawned", false);
     };
     if !until(2000, || compositor::pixel(45, 45) == Ok(RED)) {
         return step("window A opened", false);
     }
-    let Some(beta) = spawn_hello_gui(HELLO_GUI_IMAGE, &["/bin/hello-gui", "--desktop-client", &shell_arg, "b"], Some(client)) else {
+    let Some(beta) = spawn_hello_gui(
+        HELLO_GUI_IMAGE,
+        &["/bin/hello-gui", "--desktop-client", &shell_arg, "b"],
+        Some(client),
+    ) else {
         return step("application B spawned", false);
     };
-    if !step("windows A and B opened", until(2000, || compositor::pixel(150, 100) == Ok(BLUE))) {
+    if !step(
+        "windows A and B opened",
+        until(2000, || compositor::pixel(150, 100) == Ok(BLUE)),
+    ) {
         return false;
     }
 
@@ -7302,9 +7921,13 @@ fn stage20_8_self_test() -> bool {
         && packet(0, 0, false)
         && move_by(600, top + 14 - 32, false)
         && until(2000, || {
-            region(0, 14, half, client_height, |_, _| RED) && title_bar(0, 0, half, "Alpha", ACTIVE, plain)
+            region(0, 14, half, client_height, |_, _| RED)
+                && title_bar(0, 0, half, "Alpha", ACTIVE, plain)
         });
-    if !step("dropping A on the left edge snaps it to the left half, resized", snapped) {
+    if !step(
+        "dropping A on the left edge snaps it to the left half, resized",
+        snapped,
+    ) {
         return false;
     }
 
@@ -7312,12 +7935,16 @@ fn stage20_8_self_test() -> bool {
     // resized, under the edge of A's shadow; A remains focused.
     let tiled = mouse::keyboard_loopback(0x3c)
         && until(2000, || {
-            region(half, 14, width - half, client_height, |x, y| a_shadow(x, y, BLUE))
-                && title_bar(half, 0, width - half, "Beta", INACTIVE, a_shadow)
+            region(half, 14, width - half, client_height, |x, y| {
+                a_shadow(x, y, BLUE)
+            }) && title_bar(half, 0, width - half, "Beta", INACTIVE, a_shadow)
                 && region(0, 14, half, client_height, |_, _| RED)
                 && title_bar(0, 0, half, "Alpha", ACTIVE, plain)
         });
-    if !step("F2 tiles the windows: master on the left, stack on the right", tiled) {
+    if !step(
+        "F2 tiles the windows: master on the left, stack on the right",
+        tiled,
+    ) {
         return false;
     }
 
@@ -7326,15 +7953,21 @@ fn stage20_8_self_test() -> bool {
     let exited = mouse::keyboard_loopback(0x3c)
         && mouse::keyboard_loopback(0x2d)
         && wait_hello_gui(alpha).map(|(_, status)| status) == Some(Ok(0))
-        && until(1000, || compositor::pixel(5, 300) == Ok(wallpaper(5, 300, height)))
+        && until(1000, || {
+            compositor::pixel(5, 300) == Ok(wallpaper(5, 300, height))
+        })
         && mouse::keyboard_loopback(0x15)
         && wait_hello_gui(beta).map(|(_, status)| status) == Some(Ok(0))
-        && until(1000, || compositor::pixel(half + 10, 300) == Ok(wallpaper(half + 10, 300, height)));
+        && until(1000, || {
+            compositor::pixel(half + 10, 300) == Ok(wallpaper(half + 10, 300, height))
+        });
     if !step("both applications take their keys and exit", exited) {
         return false;
     }
 
-    if task::kill_process(shell.as_u64(), 9).is_err() || !until(1000, || task::process_exited(shell)) {
+    if task::kill_process(shell.as_u64(), 9).is_err()
+        || !until(1000, || task::process_exited(shell))
+    {
         return step("shell killed", false);
     }
     let _ = task::wait_process(shell.as_u64());
@@ -7421,15 +8054,20 @@ fn stage20_7_self_test() -> bool {
         .with(capability::Capability::DisplayIo)
         .with(capability::Capability::InputIo)
         .with(capability::Capability::Ipc);
-    let Some(program) = userspace::load_elf_with_argv(WOVEN_SHELL_IMAGE, &["/bin/woven-shell"]) else {
+    let Some(program) = userspace::load_elf_with_argv(WOVEN_SHELL_IMAGE, &["/bin/woven-shell"])
+    else {
         return step("shell image loads", false);
     };
-    let Ok((shell, _, _)) = task::spawn_user_system_service("woven-shell", program, capabilities) else {
+    let Ok((shell, _, _)) = task::spawn_user_system_service("woven-shell", program, capabilities)
+    else {
         return step("shell spawned", false);
     };
     if !step(
         "shell took the display",
-        installed && until(3000, || compositor::holder() == Some(shell.as_u64()) && compositor::is_presenting()),
+        installed
+            && until(3000, || {
+                compositor::holder() == Some(shell.as_u64()) && compositor::is_presenting()
+            }),
     ) {
         return false;
     }
@@ -7451,9 +8089,14 @@ fn stage20_7_self_test() -> bool {
     let scale = compositor::scale().unwrap_or(1) as usize;
     let (sx, sy) = (x as usize * scale, y as usize * scale);
     let start_value = screen_pixel(sx, sy);
-    let client = capability::CapabilitySet::only(capability::Capability::Console).with(capability::Capability::Ipc);
+    let client = capability::CapabilitySet::only(capability::Capability::Console)
+        .with(capability::Capability::Ipc);
     let shell_arg = alloc::format!("{}", shell.as_u64());
-    let Some(alpha) = spawn_hello_gui(HELLO_GUI_IMAGE, &["/bin/hello-gui", "--desktop-client", &shell_arg, "a"], Some(client)) else {
+    let Some(alpha) = spawn_hello_gui(
+        HELLO_GUI_IMAGE,
+        &["/bin/hello-gui", "--desktop-client", &shell_arg, "a"],
+        Some(client),
+    ) else {
         return step("application A spawned", false);
     };
 
@@ -7496,21 +8139,33 @@ fn stage20_7_self_test() -> bool {
         duration,
         opacities
     ));
-    if !step("every sample is the window blended at some opacity, never decreasing", consistent)
-        || !step("the window passes through at least three intermediate opacities", intermediate >= 3)
-        || !step("the window ends fully opaque", samples.last() == Some(&RED))
+    if !step(
+        "every sample is the window blended at some opacity, never decreasing",
+        consistent,
+    ) || !step(
+        "the window passes through at least three intermediate opacities",
+        intermediate >= 3,
+    ) || !step("the window ends fully opaque", samples.last() == Some(&RED))
     {
         return false;
     }
     // Settled: the shell is back at its idle frame rate and the window stays
     // put.
-    let settled = until(500, || screen_pixel(sx, sy) == Some(RED) && compositor::pixel(x, y) == Ok(RED));
-    let exited = mouse::keyboard_loopback(0x2d) && wait_hello_gui(alpha).map(|(_, status)| status) == Some(Ok(0));
-    if !step("the window stays opaque once settled; A takes its key and exits", settled && exited) {
+    let settled = until(500, || {
+        screen_pixel(sx, sy) == Some(RED) && compositor::pixel(x, y) == Ok(RED)
+    });
+    let exited = mouse::keyboard_loopback(0x2d)
+        && wait_hello_gui(alpha).map(|(_, status)| status) == Some(Ok(0));
+    if !step(
+        "the window stays opaque once settled; A takes its key and exits",
+        settled && exited,
+    ) {
         return false;
     }
 
-    if task::kill_process(shell.as_u64(), 9).is_err() || !until(1000, || task::process_exited(shell)) {
+    if task::kill_process(shell.as_u64(), 9).is_err()
+        || !until(1000, || task::process_exited(shell))
+    {
         return step("shell killed", false);
     }
     let _ = task::wait_process(shell.as_u64());
@@ -7577,15 +8232,20 @@ fn stage20_6_self_test() -> bool {
             base
         }
     }
-    fn region(x0: i32, y0: i32, width: i32, height: i32, expected: impl Fn(i32, i32) -> u32) -> bool {
-        (y0..y0 + height).all(|y| (x0..x0 + width).all(|x| compositor::pixel(x, y) == Ok(expected(x, y))))
+    fn region(
+        x0: i32,
+        y0: i32,
+        width: i32,
+        height: i32,
+        expected: impl Fn(i32, i32) -> u32,
+    ) -> bool {
+        (y0..y0 + height)
+            .all(|y| (x0..x0 + width).all(|x| compositor::pixel(x, y) == Ok(expected(x, y))))
     }
     fn packet(dx: i16, screen_dy: i16, left: bool) -> bool {
         let dy = -screen_dy;
-        let flags = 0x08
-            | u8::from(left)
-            | if dx < 0 { 0x10 } else { 0 }
-            | if dy < 0 { 0x20 } else { 0 };
+        let flags =
+            0x08 | u8::from(left) | if dx < 0 { 0x10 } else { 0 } | if dy < 0 { 0x20 } else { 0 };
         [flags, dx as u8, dy as u8].into_iter().all(mouse::loopback)
     }
     fn move_by(mut dx: i32, mut dy: i32, held: bool) -> bool {
@@ -7616,15 +8276,20 @@ fn stage20_6_self_test() -> bool {
         .with(capability::Capability::DisplayIo)
         .with(capability::Capability::InputIo)
         .with(capability::Capability::Ipc);
-    let Some(program) = userspace::load_elf_with_argv(WOVEN_SHELL_IMAGE, &["/bin/woven-shell"]) else {
+    let Some(program) = userspace::load_elf_with_argv(WOVEN_SHELL_IMAGE, &["/bin/woven-shell"])
+    else {
         return step("shell image loads", false);
     };
-    let Ok((shell, _, _)) = task::spawn_user_system_service("woven-shell", program, capabilities) else {
+    let Ok((shell, _, _)) = task::spawn_user_system_service("woven-shell", program, capabilities)
+    else {
         return step("shell spawned", false);
     };
     if !step(
         "shell took the display",
-        installed && until(3000, || compositor::holder() == Some(shell.as_u64()) && compositor::is_presenting()),
+        installed
+            && until(3000, || {
+                compositor::holder() == Some(shell.as_u64()) && compositor::is_presenting()
+            }),
     ) {
         return false;
     }
@@ -7633,12 +8298,20 @@ fn stage20_6_self_test() -> bool {
     };
     let (width, height) = (width as i32, height as i32);
     let top = height - 24;
-    let client = capability::CapabilitySet::only(capability::Capability::Console).with(capability::Capability::Ipc);
+    let client = capability::CapabilitySet::only(capability::Capability::Console)
+        .with(capability::Capability::Ipc);
     let shell_arg = alloc::format!("{}", shell.as_u64());
-    let Some(alpha) = spawn_hello_gui(HELLO_GUI_IMAGE, &["/bin/hello-gui", "--desktop-client", &shell_arg, "a"], Some(client)) else {
+    let Some(alpha) = spawn_hello_gui(
+        HELLO_GUI_IMAGE,
+        &["/bin/hello-gui", "--desktop-client", &shell_arg, "a"],
+        Some(client),
+    ) else {
         return step("application A spawned", false);
     };
-    if !step("window A opened", until(2000, || compositor::pixel(45, 45) == Ok(RED))) {
+    if !step(
+        "window A opened",
+        until(2000, || compositor::pixel(45, 45) == Ok(RED)),
+    ) {
         return false;
     }
 
@@ -7649,9 +8322,11 @@ fn stage20_6_self_test() -> bool {
         surface.draw_text(6, 8, "Alpha ready", WHITE);
     });
     let toast = until(1000, || {
-        region(toast_x, toast_y, 180, 22, |x, y| match toast_overlay.pixel(x - toast_x, y - toast_y) {
-            Some(UNSET) | None => blend_pixel(TOAST_FILL, wallpaper(x, y, height), 216),
-            Some(pixel) => pixel,
+        region(toast_x, toast_y, 180, 22, |x, y| {
+            match toast_overlay.pixel(x - toast_x, y - toast_y) {
+                Some(UNSET) | None => blend_pixel(TOAST_FILL, wallpaper(x, y, height), 216),
+                Some(pixel) => pixel,
+            }
         })
     });
     if !step("the toast is translucent over the wallpaper", toast) {
@@ -7675,7 +8350,10 @@ fn stage20_6_self_test() -> bool {
                 && compositor::pixel(106, 340) == Ok(RED)
                 && compositor::pixel(102, 341) == Ok(RED)
         });
-    if !step("the pointer's transparent cells show the window beneath", pointer) {
+    if !step(
+        "the pointer's transparent cells show the window beneath",
+        pointer,
+    ) {
         return false;
     }
 
@@ -7723,7 +8401,10 @@ fn stage20_6_self_test() -> bool {
                 })
             })
         });
-    if !step("the launcher panel is translucent over a window and its shadow", panel) {
+    if !step(
+        "the launcher panel is translucent over a window and its shadow",
+        panel,
+    ) {
         return false;
     }
     // The pointer stays on top of the panel. The shell presents each layer
@@ -7739,14 +8420,18 @@ fn stage20_6_self_test() -> bool {
     }
 
     let closed = mouse::keyboard_loopback(0x3b)
-        && until(1000, || compositor::pixel(20, panel_y + 20) == Ok(wallpaper(20, panel_y + 20, height)))
+        && until(1000, || {
+            compositor::pixel(20, panel_y + 20) == Ok(wallpaper(20, panel_y + 20, height))
+        })
         && mouse::keyboard_loopback(0x2d)
         && wait_hello_gui(alpha).map(|(_, status)| status) == Some(Ok(0));
     if !step("panel closes; A takes its key and exits", closed) {
         return false;
     }
 
-    if task::kill_process(shell.as_u64(), 9).is_err() || !until(1000, || task::process_exited(shell)) {
+    if task::kill_process(shell.as_u64(), 9).is_err()
+        || !until(1000, || task::process_exited(shell))
+    {
         return step("shell killed", false);
     }
     let _ = task::wait_process(shell.as_u64());
@@ -7811,15 +8496,20 @@ fn stage20_5_self_test() -> bool {
             base
         }
     }
-    fn region(x0: i32, y0: i32, width: i32, height: i32, expected: impl Fn(i32, i32) -> u32) -> bool {
-        (y0..y0 + height).all(|y| (x0..x0 + width).all(|x| compositor::pixel(x, y) == Ok(expected(x, y))))
+    fn region(
+        x0: i32,
+        y0: i32,
+        width: i32,
+        height: i32,
+        expected: impl Fn(i32, i32) -> u32,
+    ) -> bool {
+        (y0..y0 + height)
+            .all(|y| (x0..x0 + width).all(|x| compositor::pixel(x, y) == Ok(expected(x, y))))
     }
     fn packet(dx: i16, screen_dy: i16, left: bool) -> bool {
         let dy = -screen_dy;
-        let flags = 0x08
-            | u8::from(left)
-            | if dx < 0 { 0x10 } else { 0 }
-            | if dy < 0 { 0x20 } else { 0 };
+        let flags =
+            0x08 | u8::from(left) | if dx < 0 { 0x10 } else { 0 } | if dy < 0 { 0x20 } else { 0 };
         [flags, dx as u8, dy as u8].into_iter().all(mouse::loopback)
     }
     fn move_by(mut dx: i32, mut dy: i32, held: bool) -> bool {
@@ -7858,15 +8548,20 @@ fn stage20_5_self_test() -> bool {
         .with(capability::Capability::DisplayIo)
         .with(capability::Capability::InputIo)
         .with(capability::Capability::Ipc);
-    let Some(program) = userspace::load_elf_with_argv(WOVEN_SHELL_IMAGE, &["/bin/woven-shell"]) else {
+    let Some(program) = userspace::load_elf_with_argv(WOVEN_SHELL_IMAGE, &["/bin/woven-shell"])
+    else {
         return step("shell image loads", false);
     };
-    let Ok((shell, _, _)) = task::spawn_user_system_service("woven-shell", program, capabilities) else {
+    let Ok((shell, _, _)) = task::spawn_user_system_service("woven-shell", program, capabilities)
+    else {
         return step("shell spawned", false);
     };
     if !step(
         "shell took the display",
-        installed && until(3000, || compositor::holder() == Some(shell.as_u64()) && compositor::is_presenting()),
+        installed
+            && until(3000, || {
+                compositor::holder() == Some(shell.as_u64()) && compositor::is_presenting()
+            }),
     ) {
         return false;
     }
@@ -7875,18 +8570,30 @@ fn stage20_5_self_test() -> bool {
     };
     let (width, height) = (width as i32, height as i32);
     let top = height - 24;
-    let client = capability::CapabilitySet::only(capability::Capability::Console).with(capability::Capability::Ipc);
+    let client = capability::CapabilitySet::only(capability::Capability::Console)
+        .with(capability::Capability::Ipc);
     let shell_arg = alloc::format!("{}", shell.as_u64());
-    let Some(alpha) = spawn_hello_gui(HELLO_GUI_IMAGE, &["/bin/hello-gui", "--desktop-client", &shell_arg, "a"], Some(client)) else {
+    let Some(alpha) = spawn_hello_gui(
+        HELLO_GUI_IMAGE,
+        &["/bin/hello-gui", "--desktop-client", &shell_arg, "a"],
+        Some(client),
+    ) else {
         return step("application A spawned", false);
     };
     if !until(2000, || compositor::pixel(45, 45) == Ok(RED)) {
         return step("window A opened", false);
     }
-    let Some(beta) = spawn_hello_gui(HELLO_GUI_IMAGE, &["/bin/hello-gui", "--desktop-client", &shell_arg, "b"], Some(client)) else {
+    let Some(beta) = spawn_hello_gui(
+        HELLO_GUI_IMAGE,
+        &["/bin/hello-gui", "--desktop-client", &shell_arg, "b"],
+        Some(client),
+    ) else {
         return step("application B spawned", false);
     };
-    if !step("windows A and B opened", until(2000, || compositor::pixel(150, 100) == Ok(BLUE))) {
+    if !step(
+        "windows A and B opened",
+        until(2000, || compositor::pixel(150, 100) == Ok(BLUE)),
+    ) {
         return false;
     }
 
@@ -7905,13 +8612,19 @@ fn stage20_5_self_test() -> bool {
     // visible strips (above B and left of it) carry the shallow ones.
     let b_focused = check(
         &[(a, false), (b, true)],
-        &[(164, 58, 8, 74), (72, 124, 100, 8), (160, 28, 4, 22), (42, 120, 22, 4)],
+        &[
+            (164, 58, 8, 74),
+            (72, 124, 100, 8),
+            (160, 28, 4, 22),
+            (42, 120, 22, 4),
+        ],
     );
     if !step("focused window B casts the deeper shadow", b_focused) {
         return false;
     }
     // A shadow pixel is really darker than the wallpaper there.
-    let darker = compositor::pixel(168, 128).is_ok_and(|pixel| pixel != wallpaper(168, 128, height));
+    let darker =
+        compositor::pixel(168, 128).is_ok_and(|pixel| pixel != wallpaper(168, 128, height));
     if !step("shadow pixels differ from the bare wallpaper", darker) {
         return false;
     }
@@ -7925,9 +8638,17 @@ fn stage20_5_self_test() -> bool {
     let a_focused = clicked
         && check(
             &[(b, false), (a, true)],
-            &[(160, 34, 8, 16), (48, 120, 16, 8), (164, 54, 4, 74), (68, 124, 100, 4)],
+            &[
+                (160, 34, 8, 16),
+                (48, 120, 16, 8),
+                (164, 54, 4, 74),
+                (68, 124, 100, 4),
+            ],
         );
-    if !step("raising A gives it the deeper shadow and B the shallow one", a_focused) {
+    if !step(
+        "raising A gives it the deeper shadow and B the shallow one",
+        a_focused,
+    ) {
         return false;
     }
 
@@ -7943,7 +8664,9 @@ fn stage20_5_self_test() -> bool {
         && check(&[(b, false), (low, true)], &[(160, top - 86, 8, 86)])
         && until(500, || {
             region(48, top, 120, 1, |_, _| ACCENT)
-                && region(48, top + 1, 120, 3, |x, y| blend_pixel(TASKBAR, wallpaper(x, y, height), 216))
+                && region(48, top + 1, 120, 3, |x, y| {
+                    blend_pixel(TASKBAR, wallpaper(x, y, height), 216)
+                })
         });
     if !step("shadows stop at the taskbar", edge) {
         return false;
@@ -7957,13 +8680,19 @@ fn stage20_5_self_test() -> bool {
         && mouse::keyboard_loopback(0x15)
         && wait_hello_gui(beta).map(|(_, status)| status) == Some(Ok(0))
         && until(1000, || {
-            region(164, 54, 8, 78, |x, y| wallpaper(x, y, height)) && compositor::pixel(150, 100) == Ok(wallpaper(150, 100, height))
+            region(164, 54, 8, 78, |x, y| wallpaper(x, y, height))
+                && compositor::pixel(150, 100) == Ok(wallpaper(150, 100, height))
         });
-    if !step("windows and their shadows go with their applications", exited) {
+    if !step(
+        "windows and their shadows go with their applications",
+        exited,
+    ) {
         return false;
     }
 
-    if task::kill_process(shell.as_u64(), 9).is_err() || !until(1000, || task::process_exited(shell)) {
+    if task::kill_process(shell.as_u64(), 9).is_err()
+        || !until(1000, || task::process_exited(shell))
+    {
         return step("shell killed", false);
     }
     let _ = task::wait_process(shell.as_u64());
@@ -8031,8 +8760,15 @@ fn stage20_4_self_test() -> bool {
             base
         }
     }
-    fn region(x0: i32, y0: i32, width: i32, height: i32, expected: impl Fn(i32, i32) -> u32) -> bool {
-        (y0..y0 + height).all(|y| (x0..x0 + width).all(|x| compositor::pixel(x, y) == Ok(expected(x, y))))
+    fn region(
+        x0: i32,
+        y0: i32,
+        width: i32,
+        height: i32,
+        expected: impl Fn(i32, i32) -> u32,
+    ) -> bool {
+        (y0..y0 + height)
+            .all(|y| (x0..x0 + width).all(|x| compositor::pixel(x, y) == Ok(expected(x, y))))
     }
     /// A title bar as the kernel renders it: fill, title text, and the
     /// close control at its right.
@@ -8044,14 +8780,14 @@ fn stage20_4_self_test() -> bool {
         let close = crate::display::Rect::new(width - 12, 2, 10, 10);
         expected.fill_rect(close, CLOSE_FILL);
         expected.draw_text(width - 12 + 3, 4, "x", WHITE);
-        region(x, y, width, 14, |px, py| expected.pixel(px - x, py - y).unwrap_or(UNSET))
+        region(x, y, width, 14, |px, py| {
+            expected.pixel(px - x, py - y).unwrap_or(UNSET)
+        })
     }
     fn packet(dx: i16, screen_dy: i16, left: bool) -> bool {
         let dy = -screen_dy;
-        let flags = 0x08
-            | u8::from(left)
-            | if dx < 0 { 0x10 } else { 0 }
-            | if dy < 0 { 0x20 } else { 0 };
+        let flags =
+            0x08 | u8::from(left) | if dx < 0 { 0x10 } else { 0 } | if dy < 0 { 0x20 } else { 0 };
         [flags, dx as u8, dy as u8].into_iter().all(mouse::loopback)
     }
     /// Relative motion in packets of at most 100 per axis, with the left
@@ -8072,7 +8808,8 @@ fn stage20_4_self_test() -> bool {
     const OWNER: u64 = 4300;
     let oversized = user_graphics::create(OWNER, user_graphics::MAX_WIDTH + 1, 1)
         == Err(SurfaceError::OutOfRange)
-        && user_graphics::create(OWNER, 1, user_graphics::MAX_HEIGHT + 1) == Err(SurfaceError::OutOfRange);
+        && user_graphics::create(OWNER, 1, user_graphics::MAX_HEIGHT + 1)
+            == Err(SurfaceError::OutOfRange);
     let whole = user_graphics::create(OWNER, 1024, 1024);
     let per_owner = oversized
         && OWNER_PIXEL_BUDGET == 1024 * 1024
@@ -8085,7 +8822,9 @@ fn stage20_4_self_test() -> bool {
         return false;
     }
     let owners = [4301u64, 4302, 4303, 4304];
-    let filled = owners.iter().all(|&owner| user_graphics::create(owner, 1024, 1024).is_ok());
+    let filled = owners
+        .iter()
+        .all(|&owner| user_graphics::create(owner, 1024, 1024).is_ok());
     let system = filled
         && user_graphics::create(4305, 1, 1) == Err(SurfaceError::SystemFull)
         && user_graphics::release_owner(owners[0]) == 1
@@ -8093,7 +8832,10 @@ fn stage20_4_self_test() -> bool {
     for owner in owners.into_iter().chain([4305]) {
         user_graphics::release_owner(owner);
     }
-    if !step("all processes together are held to the system budget", system) {
+    if !step(
+        "all processes together are held to the system budget",
+        system,
+    ) {
         return false;
     }
 
@@ -8103,15 +8845,20 @@ fn stage20_4_self_test() -> bool {
         .with(capability::Capability::DisplayIo)
         .with(capability::Capability::InputIo)
         .with(capability::Capability::Ipc);
-    let Some(program) = userspace::load_elf_with_argv(WOVEN_SHELL_IMAGE, &["/bin/woven-shell"]) else {
+    let Some(program) = userspace::load_elf_with_argv(WOVEN_SHELL_IMAGE, &["/bin/woven-shell"])
+    else {
         return step("shell image loads", false);
     };
-    let Ok((shell, _, _)) = task::spawn_user_system_service("woven-shell", program, capabilities) else {
+    let Ok((shell, _, _)) = task::spawn_user_system_service("woven-shell", program, capabilities)
+    else {
         return step("shell spawned", false);
     };
     if !step(
         "shell took the display",
-        installed && until(3000, || compositor::holder() == Some(shell.as_u64()) && compositor::is_presenting()),
+        installed
+            && until(3000, || {
+                compositor::holder() == Some(shell.as_u64()) && compositor::is_presenting()
+            }),
     ) {
         return false;
     }
@@ -8119,15 +8866,27 @@ fn stage20_4_self_test() -> bool {
         return step("desktop geometry", false);
     };
     let (width, height) = (width as i32, height as i32);
-    let client = capability::CapabilitySet::only(capability::Capability::Console).with(capability::Capability::Ipc);
+    let client = capability::CapabilitySet::only(capability::Capability::Console)
+        .with(capability::Capability::Ipc);
     let shell_arg = alloc::format!("{}", shell.as_u64());
-    let Some(alpha) = spawn_hello_gui(HELLO_GUI_IMAGE, &["/bin/hello-gui", "--desktop-client", &shell_arg, "a"], Some(client)) else {
+    let Some(alpha) = spawn_hello_gui(
+        HELLO_GUI_IMAGE,
+        &["/bin/hello-gui", "--desktop-client", &shell_arg, "a"],
+        Some(client),
+    ) else {
         return step("application A spawned", false);
     };
-    if !step("window A opened", until(2000, || compositor::pixel(45, 45) == Ok(RED))) {
+    if !step(
+        "window A opened",
+        until(2000, || compositor::pixel(45, 45) == Ok(RED)),
+    ) {
         return false;
     }
-    let Some(wide) = spawn_hello_gui(HELLO_GUI_IMAGE, &["/bin/hello-gui", "--desktop-client", &shell_arg, "c"], Some(client)) else {
+    let Some(wide) = spawn_hello_gui(
+        HELLO_GUI_IMAGE,
+        &["/bin/hello-gui", "--desktop-client", &shell_arg, "c"],
+        Some(client),
+    ) else {
         return step("wide application spawned", false);
     };
     // 400x260, larger than the old 320x240 cap, cascaded to (64, 64).
@@ -8135,7 +8894,10 @@ fn stage20_4_self_test() -> bool {
         && until(500, || {
             region(64, 64, 400, 260, |_, _| GREEN) && title_bar(64, 50, 400, "Wide", ACTIVE)
         });
-    if !step("a window larger than 320x240 opens, with a close control", opened) {
+    if !step(
+        "a window larger than 320x240 opens, with a close control",
+        opened,
+    ) {
         return false;
     }
 
@@ -8165,7 +8927,10 @@ fn stage20_4_self_test() -> bool {
                 && compositor::pixel(45, 45) == Ok(wallpaper(45, 45, height))
                 && compositor::pixel(100, 100) == Ok(GREEN)
         });
-    if !step("dragging the title bar moves the window and repaints both places", moved) {
+    if !step(
+        "dragging the title bar moves the window and repaints both places",
+        moved,
+    ) {
         return false;
     }
 
@@ -8175,18 +8940,27 @@ fn stage20_4_self_test() -> bool {
         && packet(0, 0, true)
         && packet(0, 0, false)
         && wait_hello_gui(wide).map(|(_, status)| status) == Some(Ok(0))
-        && until(1000, || compositor::pixel(300, 200) == Ok(wallpaper(300, 200, height)));
-    if !step("the close control asks the owner to close, and it does", closed) {
+        && until(1000, || {
+            compositor::pixel(300, 200) == Ok(wallpaper(300, 200, height))
+        });
+    if !step(
+        "the close control asks the owner to close, and it does",
+        closed,
+    ) {
         return false;
     }
     let typed = mouse::keyboard_loopback(0x2d)
         && wait_hello_gui(alpha).map(|(_, status)| status) == Some(Ok(0))
-        && until(1000, || compositor::pixel(345, 295) == Ok(wallpaper(345, 295, height)));
+        && until(1000, || {
+            compositor::pixel(345, 295) == Ok(wallpaper(345, 295, height))
+        });
     if !step("A keeps the focus, takes its key and exits", typed) {
         return false;
     }
 
-    if task::kill_process(shell.as_u64(), 9).is_err() || !until(1000, || task::process_exited(shell)) {
+    if task::kill_process(shell.as_u64(), 9).is_err()
+        || !until(1000, || task::process_exited(shell))
+    {
         return step("shell killed", false);
     }
     let _ = task::wait_process(shell.as_u64());
@@ -8598,9 +9372,14 @@ fn stage20_2_self_test() -> bool {
         let bounds = expected.bounds();
         expected.fill_rect(bounds, fill);
         expected.draw_text(4, 4, text, WHITE);
-        expected.fill_rect(crate::display::Rect::new(width - 12, 2, 10, 10), rgb(170, 60, 60));
+        expected.fill_rect(
+            crate::display::Rect::new(width - 12, 2, 10, 10),
+            rgb(170, 60, 60),
+        );
         expected.draw_text(width - 12 + 3, 4, "x", WHITE);
-        region(x, y, width, 14, |px, py| expected.pixel(px - x, py - y).unwrap_or(UNSET))
+        region(x, y, width, 14, |px, py| {
+            expected.pixel(px - x, py - y).unwrap_or(UNSET)
+        })
     }
     /// One PS/2 packet through the real auxiliary path.
     fn packet(dx: i16, screen_dy: i16, left: bool) -> bool {
@@ -9051,19 +9830,29 @@ fn stage20_1_self_test() -> bool {
             taskbar(x, y, height)
         })
         && region(ws_x, top + 1, qs_x - ws_x, 3, |x, y| taskbar(x, y, height))
-        && region(ws_x, top + 20, qs_x - ws_x, TASKBAR_HEIGHT - 20, |x, y| taskbar(x, y, height))
-        && region(qs_x + 16, top + 1, width - 80 - (qs_x + 16), TASKBAR_HEIGHT - 1, |x, y| {
+        && region(ws_x, top + 20, qs_x - ws_x, TASKBAR_HEIGHT - 20, |x, y| {
             taskbar(x, y, height)
         })
+        && region(
+            qs_x + 16,
+            top + 1,
+            width - 80 - (qs_x + 16),
+            TASKBAR_HEIGHT - 1,
+            |x, y| taskbar(x, y, height),
+        )
         && region(qs_x, top + 1, 16, 3, |x, y| taskbar(x, y, height))
-        && region(qs_x, top + 20, 16, TASKBAR_HEIGHT - 20, |x, y| taskbar(x, y, height));
+        && region(qs_x, top + 20, 16, TASKBAR_HEIGHT - 20, |x, y| {
+            taskbar(x, y, height)
+        });
     if !step("taskbar is translucent over the wallpaper", bar) {
         return false;
     }
     let qs_mask = text_mask(16, 16, 5, 5, "Q");
-    let qs = region(qs_x, top + 4, 16, 16, |x, y| match qs_mask.pixel(x - qs_x, y - (top + 4)) {
-        Some(WHITE) => WHITE,
-        _ => QS_FILL,
+    let qs = region(qs_x, top + 4, 16, 16, |x, y| {
+        match qs_mask.pixel(x - qs_x, y - (top + 4)) {
+            Some(WHITE) => WHITE,
+            _ => QS_FILL,
+        }
     });
     if !step("Quick Settings button and its label", qs) {
         return false;
@@ -9076,11 +9865,15 @@ fn stage20_1_self_test() -> bool {
         let digit = [b'1' + index as u8];
         let mask = text_mask(12, 16, 3, 5, core::str::from_utf8(&digit).unwrap_or("?"));
         let fill = if index == 0 { WS_ACTIVE } else { QS_FILL };
-        region(box_x, top + 4, 12, 16, |x, y| match mask.pixel(x - box_x, y - (top + 4)) {
-            Some(WHITE) => WHITE,
-            _ => fill,
+        region(box_x, top + 4, 12, 16, |x, y| {
+            match mask.pixel(x - box_x, y - (top + 4)) {
+                Some(WHITE) => WHITE,
+                _ => fill,
+            }
         }) && (index == 3 || region(box_x + 12, top + 4, 2, 16, |x, y| taskbar(x, y, height)))
-    }) && region(ws_x + 54, top + 4, qs_x - (ws_x + 54), 16, |x, y| taskbar(x, y, height));
+    }) && region(ws_x + 54, top + 4, qs_x - (ws_x + 54), 16, |x, y| {
+        taskbar(x, y, height)
+    });
     if !step("workspace switcher, workspace 1 current", switcher) {
         return false;
     }

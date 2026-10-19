@@ -2249,7 +2249,12 @@ fn sys_audio_play(user_pcm: u64, length: u64) -> u64 {
         return SYSCALL_ERROR;
     }
     let result = crate::hda::play(&pcm);
-    crate::audit::record(actor, crate::audit::Action::AudioPlay, length as u64, result.is_ok());
+    crate::audit::record(
+        actor,
+        crate::audit::Action::AudioPlay,
+        length as u64,
+        result.is_ok(),
+    );
     result.map_or(SYSCALL_ERROR, |played| played as u64)
 }
 
@@ -2463,11 +2468,9 @@ pub extern "C" fn wovenhat_syscall_dispatch(
         value if value == Number::ThreadGetTls as u64 => crate::task::current_thread_id()
             .and_then(crate::thread::tls)
             .unwrap_or(SYSCALL_ERROR),
-        value if value == Number::ThreadCancel as u64 => crate::task::cancel_user_thread(
-            arg0,
-            arg1 as i32,
-        )
-        .map_or(SYSCALL_ERROR, |_| 0),
+        value if value == Number::ThreadCancel as u64 => {
+            crate::task::cancel_user_thread(arg0, arg1 as i32).map_or(SYSCALL_ERROR, |_| 0)
+        }
         value if value == Number::Getpid as u64 => crate::task::current_process_id(),
         value if value == Number::Waitpid as u64 => match crate::task::wait_process(arg0) {
             Ok(exit_code) => crate::exit_status::encode(exit_code),
@@ -2572,9 +2575,7 @@ pub extern "C" fn wovenhat_syscall_dispatch(
             sys_compositor_blit_shared(arg0, arg1)
         }
         value if value == Number::WaitAny as u64 => sys_wait_any(arg0, arg1),
-        value if value == Number::WaitAnyObjects as u64 => {
-            sys_wait_any_objects(arg0, arg1, arg2)
-        }
+        value if value == Number::WaitAnyObjects as u64 => sys_wait_any_objects(arg0, arg1, arg2),
         value if value == Number::GraphicsSurfaceDamage as u64 => sys_graphics_damage(arg0, arg1),
         value if value == Number::GraphicsCompositorBlitDamage as u64 => {
             sys_compositor_blit_damage(arg0, arg1)
@@ -2952,7 +2953,8 @@ fn pack_compositor_info(width: u32, height: u32, scale: u32) -> u64 {
 /// 1 no ACPI power-off, 2 the firmware refused ACPI mode, 3 ignored.
 fn sys_power_control(action: u64) -> u64 {
     let actor = crate::task::current_task_id().as_u64();
-    let allowed = crate::task::current_has(crate::capability::Capability::PowerControl) && action <= 1;
+    let allowed =
+        crate::task::current_has(crate::capability::Capability::PowerControl) && action <= 1;
     crate::audit::record(actor, crate::audit::Action::PowerControl, action, allowed);
     if !allowed {
         return SYSCALL_ERROR;
@@ -2973,12 +2975,16 @@ fn sys_compositor_outputs(user_outputs: u64) -> u64 {
     if !display_authorized() {
         return SYSCALL_ERROR;
     }
-    let Ok((outputs, count)) = crate::compositor::outputs_for(crate::task::current_process_id()) else {
+    let Ok((outputs, count)) = crate::compositor::outputs_for(crate::task::current_process_id())
+    else {
         return SYSCALL_ERROR;
     };
     let mut bytes = [0u8; crate::compositor::MAX_OUTPUTS * 16];
     for (output, chunk) in outputs.iter().zip(bytes.as_chunks_mut::<16>().0) {
-        for (value, field) in [output.0, output.1, output.2, output.3].iter().zip(chunk.as_chunks_mut::<4>().0) {
+        for (value, field) in [output.0, output.1, output.2, output.3]
+            .iter()
+            .zip(chunk.as_chunks_mut::<4>().0)
+        {
             *field = value.to_le_bytes();
         }
     }
@@ -3070,14 +3076,30 @@ fn encode_input(event: crate::woven_input::Event) -> Option<u64> {
             u64::from(x) | (u64::from(y) << 16),
         )),
         // contact | active << 8 | x << 16 | y << 32
-        Event::Touch { contact, x, y, active } => Some(packed(
+        Event::Touch {
+            contact,
+            x,
+            y,
+            active,
+        } => Some(packed(
             INPUT_KIND_TOUCH,
-            u64::from(contact) | (u64::from(active) << 8) | (u64::from(x) << 16) | (u64::from(y) << 32),
+            u64::from(contact)
+                | (u64::from(active) << 8)
+                | (u64::from(x) << 16)
+                | (u64::from(y) << 32),
         )),
         // x | y << 16 | pressure (10 bits) << 32 | touching << 48
-        Event::Pen { x, y, pressure, touching } => Some(packed(
+        Event::Pen {
+            x,
+            y,
+            pressure,
+            touching,
+        } => Some(packed(
             INPUT_KIND_PEN,
-            u64::from(x) | (u64::from(y) << 16) | (u64::from(pressure & 0x3ff) << 32) | (u64::from(touching) << 48),
+            u64::from(x)
+                | (u64::from(y) << 16)
+                | (u64::from(pressure & 0x3ff) << 32)
+                | (u64::from(touching) << 48),
         )),
         Event::GameController { control, value } => Some(packed(
             INPUT_KIND_GAME_CONTROLLER,

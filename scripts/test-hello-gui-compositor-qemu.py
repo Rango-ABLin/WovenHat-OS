@@ -1,4 +1,4 @@
-"""Stage 19.2: hello-gui presents a window through the compositor.
+"""Stage 19.2: hello-gui presents a WovenGraphics frame through the compositor.
 
 With --stage 19.4 the same image runs the compositor authority gate: an
 unprivileged --probe run that must be refused, then a run with DisplayIo.
@@ -82,8 +82,11 @@ def main():
             print(f'QEMU timeout. Evidence: {out}',file=sys.stderr); return 1
     text=serial.read_text(errors='replace') if serial.exists() else ''
     for line in text.splitlines():
-        if '[S19.' in line or 'hello-gui' in line: print('  '+line.strip())
-    if code != 33 or marker not in text:
+        if '[S16G' in line or '[S19.' in line or 'hello-gui' in line: print('  '+line.strip())
+    visual_marker = '[S16G] WovenGraphics visual frame: PASSED'
+    visual_marker_2d = '[S16G2] WovenGraphics 2D frame: PASSED'
+    visual_marker_3d = '[S16G3D] WovenGraphics software 3D frame: PASSED'
+    if code != 33 or marker not in text or (a.stage == '19.2' and (visual_marker not in text or visual_marker_2d not in text or visual_marker_3d not in text)):
         print(f'FAILED (exit {code}). Evidence: {out}',file=sys.stderr)
         print(text[-3000:],file=sys.stderr); return 1
     print(f'{label}: PASS ({a.cpus} CPU, exit 33). Evidence: {out}')

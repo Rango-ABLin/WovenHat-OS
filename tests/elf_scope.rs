@@ -32,7 +32,10 @@ fn fixed_executables_ignore_even_overflowing_aslr_candidates() {
         assert_eq!(image.load_bias(), 0);
         assert_eq!(image.segments().next().unwrap().mapping_start, BASE);
     }
-    assert!(matches!(elf::parse_shared(&bytes), Err(elf::Error::InvalidHeader)));
+    assert!(matches!(
+        elf::parse_shared(&bytes),
+        Err(elf::Error::InvalidHeader)
+    ));
 }
 
 #[test]
@@ -43,7 +46,10 @@ fn position_independent_executables_keep_nonzero_aslr() {
     let image = image.relocated_for_execution(0x30_000).unwrap();
     assert_eq!(image.entry, BASE + 0x30_000);
     assert_eq!(image.load_bias(), 0x30_000);
-    assert_eq!(image.segments().next().unwrap().mapping_start, BASE + 0x30_000);
+    assert_eq!(
+        image.segments().next().unwrap().mapping_start,
+        BASE + 0x30_000
+    );
 }
 
 #[test]
@@ -54,7 +60,10 @@ fn null_debug_rendezvous_metadata_is_inert() {
     put64(&mut bytes, DYNAMIC + 5 * 16, 21);
     let parsed = image(&bytes);
     assert_eq!(parsed.entry, BASE);
-    assert_eq!(parsed.defined_global_symbol(&bytes, b"export"), Some(BASE + 0x20));
+    assert_eq!(
+        parsed.defined_global_symbol(&bytes, b"export"),
+        Some(BASE + 0x20)
+    );
     put64(&mut bytes, 24, 0);
     assert!(elf::parse_shared(&bytes).is_ok());
 }
@@ -156,7 +165,15 @@ fn tls_source_congruence_and_address_survive_image_relocation() {
     assert_eq!(tls.virtual_address, BASE + 8);
     assert_eq!(tls.file_offset, 0x1008);
     assert_eq!(tls.alignment, 64);
-    assert_eq!(parsed.relocated(0x30000).unwrap().tls().unwrap().virtual_address, BASE + 0x30008);
+    assert_eq!(
+        parsed
+            .relocated(0x30000)
+            .unwrap()
+            .tls()
+            .unwrap()
+            .virtual_address,
+        BASE + 0x30008
+    );
 }
 
 #[test]
@@ -173,7 +190,13 @@ fn tls_initializer_requires_exact_file_backed_source() {
 
 #[test]
 fn tls_overflow_alignment_and_duplicate_headers_fail_closed() {
-    for (field, value) in [(192, u64::MAX), (216, u64::MAX), (224, 0), (224, 3), (224, 8192)] {
+    for (field, value) in [
+        (192, u64::MAX),
+        (216, u64::MAX),
+        (224, 0),
+        (224, 3),
+        (224, 8192),
+    ] {
         let mut bytes = tls_fixture();
         put64(&mut bytes, field, value);
         assert!(elf::parse(&bytes).is_err());

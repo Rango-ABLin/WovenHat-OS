@@ -46,8 +46,14 @@ fn skips_other_interfaces_and_needs_both_bulk_endpoints() {
         0x07, 0x05, 0x85, 0x02, 0x40, 0x00, 0x00, // bulk IN 0x85, 64
     ];
     let found = usb_msc::parse_interface(config, 1).unwrap();
-    assert_eq!((found.interface, found.bulk_in, found.bulk_out), (1, 0x85, 0x04));
-    assert_eq!((found.bulk_in_max_packet, found.bulk_out_max_packet), (64, 64));
+    assert_eq!(
+        (found.interface, found.bulk_in, found.bulk_out),
+        (1, 0x85, 0x04)
+    );
+    assert_eq!(
+        (found.bulk_in_max_packet, found.bulk_out_max_packet),
+        (64, 64)
+    );
 
     // Only an IN endpoint: not usable.
     let mut half = QEMU_STORAGE.to_vec();
@@ -71,7 +77,13 @@ fn malformed_descriptors_end_the_walk() {
 
 #[test]
 fn a_command_block_wrapper_has_the_specified_layout() {
-    let block = usb_msc::command_block(0x1234_5678, 512, true, &usb_msc::read_write(false, 0x0102_0304, 1)).unwrap();
+    let block = usb_msc::command_block(
+        0x1234_5678,
+        512,
+        true,
+        &usb_msc::read_write(false, 0x0102_0304, 1),
+    )
+    .unwrap();
     assert_eq!(&block[0..4], b"USBC");
     assert_eq!(&block[4..8], &0x1234_5678u32.to_le_bytes());
     assert_eq!(&block[8..12], &512u32.to_le_bytes());
@@ -98,17 +110,44 @@ fn status(tag: u32, residue: u32, code: u8) -> [u8; 13] {
 
 #[test]
 fn a_command_status_wrapper_is_validated() {
-    assert_eq!(usb_msc::parse_status(&status(5, 0, 0), 5, 512), Ok(Status::Passed { residue: 0 }));
-    assert_eq!(usb_msc::parse_status(&status(5, 12, 0), 5, 36), Ok(Status::Passed { residue: 12 }));
-    assert_eq!(usb_msc::parse_status(&status(5, 0, 1), 5, 512), Ok(Status::Failed));
-    assert_eq!(usb_msc::parse_status(&status(5, 0, 2), 5, 512), Ok(Status::PhaseError));
-    assert_eq!(usb_msc::parse_status(&status(6, 0, 0), 5, 512), Err(StatusError::Tag));
-    assert_eq!(usb_msc::parse_status(&status(5, 0, 3), 5, 512), Err(StatusError::Unknown));
-    assert_eq!(usb_msc::parse_status(&status(5, 513, 0), 5, 512), Err(StatusError::Residue));
+    assert_eq!(
+        usb_msc::parse_status(&status(5, 0, 0), 5, 512),
+        Ok(Status::Passed { residue: 0 })
+    );
+    assert_eq!(
+        usb_msc::parse_status(&status(5, 12, 0), 5, 36),
+        Ok(Status::Passed { residue: 12 })
+    );
+    assert_eq!(
+        usb_msc::parse_status(&status(5, 0, 1), 5, 512),
+        Ok(Status::Failed)
+    );
+    assert_eq!(
+        usb_msc::parse_status(&status(5, 0, 2), 5, 512),
+        Ok(Status::PhaseError)
+    );
+    assert_eq!(
+        usb_msc::parse_status(&status(6, 0, 0), 5, 512),
+        Err(StatusError::Tag)
+    );
+    assert_eq!(
+        usb_msc::parse_status(&status(5, 0, 3), 5, 512),
+        Err(StatusError::Unknown)
+    );
+    assert_eq!(
+        usb_msc::parse_status(&status(5, 513, 0), 5, 512),
+        Err(StatusError::Residue)
+    );
     let mut wrong = status(5, 0, 0);
     wrong[0] = b'X';
-    assert_eq!(usb_msc::parse_status(&wrong, 5, 512), Err(StatusError::Signature));
-    assert_eq!(usb_msc::parse_status(&status(5, 0, 0)[..12], 5, 512), Err(StatusError::Length));
+    assert_eq!(
+        usb_msc::parse_status(&wrong, 5, 512),
+        Err(StatusError::Signature)
+    );
+    assert_eq!(
+        usb_msc::parse_status(&status(5, 0, 0)[..12], 5, 512),
+        Err(StatusError::Length)
+    );
 }
 
 #[test]
@@ -116,8 +155,16 @@ fn capacity_and_sense_data_are_decoded() {
     // An 8 GB stick: last LBA 15728639, 512-byte blocks.
     let data = [0x00, 0xef, 0xff, 0xff, 0x00, 0x00, 0x02, 0x00];
     assert_eq!(usb_msc::parse_capacity(&data), Some((15_728_640, 512)));
-    assert_eq!(usb_msc::parse_capacity(&[0xff, 0xff, 0xff, 0xff, 0, 0, 2, 0]), None, "needs READ CAPACITY (16)");
-    assert_eq!(usb_msc::parse_capacity(&[0, 0, 0, 1, 0, 0, 0, 0]), None, "no block length");
+    assert_eq!(
+        usb_msc::parse_capacity(&[0xff, 0xff, 0xff, 0xff, 0, 0, 2, 0]),
+        None,
+        "needs READ CAPACITY (16)"
+    );
+    assert_eq!(
+        usb_msc::parse_capacity(&[0, 0, 0, 1, 0, 0, 0, 0]),
+        None,
+        "no block length"
+    );
     assert_eq!(usb_msc::parse_capacity(&data[..7]), None);
 
     let mut sense = [0u8; 18];
@@ -136,5 +183,8 @@ fn scsi_command_blocks() {
     assert_eq!(usb_msc::request_sense(18), [0x03, 0, 0, 0, 18, 0]);
     assert_eq!(usb_msc::read_capacity()[0], 0x25);
     assert_eq!(usb_msc::synchronize_cache()[0], 0x35);
-    assert_eq!(usb_msc::read_write(true, 0xa0b0c0d0, 0x0102), [0x2a, 0, 0xa0, 0xb0, 0xc0, 0xd0, 0, 1, 2, 0]);
+    assert_eq!(
+        usb_msc::read_write(true, 0xa0b0c0d0, 0x0102),
+        [0x2a, 0, 0xa0, 0xb0, 0xc0, 0xd0, 0, 1, 2, 0]
+    );
 }

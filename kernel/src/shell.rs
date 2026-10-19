@@ -138,8 +138,12 @@ impl Shell {
                     console.println("the machine is still running:");
                     console.println(match error {
                         crate::power::Error::NoAcpi => "  ACPI describes no way to turn it off",
-                        crate::power::Error::AcpiModeRefused => "  the firmware would not enter ACPI mode",
-                        crate::power::Error::StillRunning => "  it ignored the request; hold the power button",
+                        crate::power::Error::AcpiModeRefused => {
+                            "  the firmware would not enter ACPI mode"
+                        }
+                        crate::power::Error::StillRunning => {
+                            "  it ignored the request; hold the power button"
+                        }
                     });
                 }
             }
@@ -532,7 +536,11 @@ fn cmd_devices(console: &mut Console) {
                 device::DeviceKind::Timer => "timer",
                 device::DeviceKind::Keyboard => "keyboard",
                 device::DeviceKind::Block => "block",
-                #[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test", feature = "stage13-8-test"))]
+                #[cfg(any(
+                    not(feature = "qemu-test"),
+                    feature = "stage13-12-test",
+                    feature = "stage13-8-test"
+                ))]
                 device::DeviceKind::Audio => "audio",
                 #[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
                 device::DeviceKind::UsbHost => "usb-host",

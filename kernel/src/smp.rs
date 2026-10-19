@@ -581,7 +581,7 @@ fn write(reg: u64, value: u32) {
 /// Stage Z deliberately routes device interrupts to the BSP. This keeps the
 /// first physical-device interrupt path deterministic while preserving the
 /// existing per-CPU LAPIC/SMP architecture.
-#[cfg(feature = "stage13-9-test")]
+#[cfg(any(feature = "stage13-9-test", feature = "physical-wifi"))]
 pub fn device_irq_destination() -> Option<u32> {
     if !cpu_is_online(0) {
         return None;
@@ -1042,9 +1042,7 @@ pub fn self_test() {
         return;
     }
     for cpu in 0..online_count() {
-        unsafe { task::spawn_on(cpu, "smp-probe", parallel_probe) }
-            .ok()
-            .expect("SMP probe slots");
+        unsafe { task::spawn_on(cpu, "smp-probe", parallel_probe) }.expect("SMP probe slots");
     }
     let deadline = crate::timer::ticks() + 500;
     while FINISHED.load(Ordering::Acquire) < online_count() {
@@ -1060,9 +1058,7 @@ pub fn self_test() {
         (32 * online_count()) as u64
     );
     // SAFETY: This job touches only an atomic and the CPU-owned scheduler.
-    unsafe { task::spawn_parallel("balanced-probe", balanced_probe) }
-        .ok()
-        .expect("balanced probe slot");
+    unsafe { task::spawn_parallel("balanced-probe", balanced_probe) }.expect("balanced probe slot");
     let deadline = crate::timer::ticks() + 500;
     while !BALANCED_DONE.load(Ordering::Acquire) {
         assert!(crate::timer::ticks() < deadline, "balanced job timeout");
@@ -1105,9 +1101,7 @@ fn translation_reader() -> ! {
 fn stale_translation_test() {
     paging::map_range(TEST_PAGE, 4096).expect("SMP test mapping");
     for cpu in 1..online_count() {
-        unsafe { task::spawn_on(cpu, "tlb-reader", translation_reader) }
-            .ok()
-            .expect("TLB reader slot");
+        unsafe { task::spawn_on(cpu, "tlb-reader", translation_reader) }.expect("TLB reader slot");
     }
     for phase in 1..=8 {
         paging::replace_smp_test_page(TEST_PAGE, phase as u64);
@@ -1160,11 +1154,8 @@ fn preemption_peer() -> ! {
 }
 fn preemption_test() {
     for cpu in 0..online_count() {
-        unsafe { task::spawn_on(cpu, "cpu-bound", cpu_bound_probe) }
-            .ok()
-            .expect("CPU-bound slot");
+        unsafe { task::spawn_on(cpu, "cpu-bound", cpu_bound_probe) }.expect("CPU-bound slot");
         unsafe { task::spawn_on(cpu, "preempt-peer", preemption_peer) }
-            .ok()
             .expect("preemption peer slot");
     }
     let deadline = crate::timer::ticks() + 500;
@@ -1202,7 +1193,6 @@ fn affinity_foundation_test() {
         // SAFETY: The probe uses only atomics plus yield/exit and retains no
         // CPU-local state across scheduling points.
         let id = unsafe { task::spawn_migratable_on(0, "affinity-probe", affinity_probe) }
-            .ok()
             .expect("affinity probe slot");
 
         assert_eq!(
@@ -1303,7 +1293,6 @@ fn ready_migration_test() {
         // CPU 0 while BSP interrupts are disabled guarantees it remains Ready
         // until the scheduler lock transfers ownership to CPU 1.
         let id = unsafe { task::spawn_migratable_on(0, "migration-probe", migration_probe) }
-            .ok()
             .expect("migration probe slot");
         assert_eq!(task::task_cpu(id), Some(0));
         task::migrate_ready_task(id, target).expect("ready task migration");
@@ -1347,9 +1336,7 @@ fn runnable_load_accounting_test() {
             // SAFETY: This probe is deliberately pinned to `cpu`. It uses
             // only atomics plus yield/exit and keeps no CPU-local state
             // across scheduling points.
-            unsafe { task::spawn_on(cpu, "load-probe", load_probe) }
-                .ok()
-                .expect("load probe slot");
+            unsafe { task::spawn_on(cpu, "load-probe", load_probe) }.expect("load probe slot");
         }
     }
 
@@ -1417,7 +1404,6 @@ fn automatic_rebalance_test() {
             // SAFETY: Probe state is atomic-only and obeys the restricted
             // migratable-kernel-job contract.
             unsafe { task::spawn_migratable_on(0, "rebalance-probe", auto_balance_probe) }
-                .ok()
                 .expect("automatic rebalance probe slot");
         }
     });
@@ -1486,9 +1472,7 @@ fn reschedule_ipi_test() {
     IPI_PROBE_DONE.store(false, Ordering::Release);
     let before = reschedule_ipi_count();
     // SAFETY: The probe only stores to an atomic and exits.
-    unsafe { task::spawn_on(1, "ipi-probe", ipi_probe) }
-        .ok()
-        .expect("IPI probe slot");
+    unsafe { task::spawn_on(1, "ipi-probe", ipi_probe) }.expect("IPI probe slot");
     let deadline = crate::timer::ticks() + 500;
     while !IPI_PROBE_DONE.load(Ordering::Acquire) {
         assert!(crate::timer::ticks() < deadline, "reschedule IPI timeout");
@@ -1550,7 +1534,6 @@ fn migration_stress_test() {
         // SAFETY: The coverage probe only updates atomics and exits, and
         // spawn_on keeps it pinned to the requested online CPU.
         unsafe { task::spawn_on(cpu, "migration-coverage", migration_stress_coverage_probe) }
-            .ok()
             .expect("migration coverage slots");
     }
     let coverage_deadline = crate::timer::ticks() + 500;
@@ -1578,7 +1561,6 @@ fn migration_stress_test() {
             // deliberately creates migration pressure.
             *id = Some(
                 unsafe { task::spawn_migratable_on(0, "migration-stress", migration_stress_probe) }
-                    .ok()
                     .expect("migration stress slots"),
             );
         }

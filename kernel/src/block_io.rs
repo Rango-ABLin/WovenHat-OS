@@ -306,7 +306,11 @@ impl BlockDevice for Guarded<'_> {
     }
 
     fn flush(&mut self) -> Result<(), Error> {
-        if self.writable { self.disk.flush() } else { Ok(()) }
+        if self.writable {
+            self.disk.flush()
+        } else {
+            Ok(())
+        }
     }
 
     fn read_sector(&mut self, lba: u64, sector: &mut [u8]) -> Result<(), Error> {

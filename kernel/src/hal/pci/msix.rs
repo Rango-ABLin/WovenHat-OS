@@ -498,7 +498,10 @@ impl From<super::vector::Error> for LifecycleError {
 
 /// Complete one-vector MSI-X activation transaction. Vector ownership is
 /// retained on every failure after the device could have observed the vector.
-#[cfg_attr(not(any(not(feature = "qemu-test"), feature = "stage13-12-test")), expect(dead_code))]
+#[cfg_attr(
+    not(any(not(feature = "qemu-test"), feature = "stage13-12-test")),
+    expect(dead_code)
+)]
 pub fn enable_owned(
     function: super::topology::FunctionHandle,
     bar: super::topology::MmioLease,
@@ -678,7 +681,10 @@ fn clear_function_mask(device: Device) -> Result<(), Error> {
 
 /// Quiesce the function before recycling its interrupt vector. Failure keeps
 /// the lease live and the vector unavailable for reuse.
-#[cfg_attr(not(any(not(feature = "qemu-test"), feature = "stage13-12-test")), expect(dead_code))]
+#[cfg_attr(
+    not(any(not(feature = "qemu-test"), feature = "stage13-12-test")),
+    expect(dead_code)
+)]
 pub fn disable_owned(lease: MsixLease, owner: u32) -> Result<(), LifecycleError> {
     super::msi::validate_vector(lease.vector, owner)?;
     if lease.bar.function != lease.function || !super::validate_bar_lease(lease.bar, owner) {

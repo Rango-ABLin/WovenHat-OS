@@ -5,17 +5,21 @@ global_asm!(include_str!("stage10_8.S"));
 #[cfg(feature = "stage10-9-test")]
 global_asm!(include_str!("stage10_9.S"));
 
+#[cfg(feature = "stage11-aslr-test")]
+mod aslr_acceptance;
 mod linker;
 mod tls_layout;
 #[cfg(feature = "stage11-aslr-test")]
-mod aslr_acceptance;
-#[cfg(feature = "stage11-aslr-test")]
-pub fn aslr_geometry_self_test() -> bool { aslr_acceptance::run() }
+pub fn aslr_geometry_self_test() -> bool {
+    aslr_acceptance::run()
+}
 #[cfg(feature = "stage11-tls-test")]
 mod tls_acceptance;
 
 #[cfg(feature = "stage11-tls-test")]
-pub fn compiler_tls_self_test() -> bool { tls_acceptance::run() }
+pub fn compiler_tls_self_test() -> bool {
+    tls_acceptance::run()
+}
 
 const MAX_IMAGE_MAPPINGS: usize = crate::config::MAX_ELF_SEGMENTS * crate::elf::MAX_SCOPE_IMAGES;
 use crate::paging;
@@ -4512,16 +4516,23 @@ impl UserMapping {
     };
 
     fn new(start: u64, size: usize, writable: bool, executable: bool) -> Option<Self> {
-        if !start.is_multiple_of(4096) || size == 0 || !size.is_multiple_of(4096) { return None; }
+        if !start.is_multiple_of(4096) || size == 0 || !size.is_multiple_of(4096) {
+            return None;
+        }
         Some(Self {
             start_page: u32::try_from(start.checked_sub(USER_REGION_START)? / 4096).ok()?,
             page_count: u16::try_from(size / 4096).ok()?,
-            writable, executable,
+            writable,
+            executable,
         })
     }
 
-    fn start(self) -> u64 { USER_REGION_START + u64::from(self.start_page) * 4096 }
-    fn size(self) -> usize { usize::from(self.page_count) * 4096 }
+    fn start(self) -> u64 {
+        USER_REGION_START + u64::from(self.start_page) * 4096
+    }
+    fn size(self) -> usize {
+        usize::from(self.page_count) * 4096
+    }
 }
 
 const _: () = assert!(core::mem::size_of::<UserMapping>() == 8);
@@ -4535,7 +4546,9 @@ struct InitialTls {
 }
 
 impl InitialTls {
-    fn range(self) -> (u64, usize) { (self.start, self.layout.mapping_size) }
+    fn range(self) -> (u64, usize) {
+        (self.start, self.layout.mapping_size)
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -4593,7 +4606,9 @@ impl AddressSpace {
                 && address < mapping.start() + mapping.size() as u64
             {
                 if self
-                    .relro.into_iter().chain(self.library_relro.into_iter().flatten())
+                    .relro
+                    .into_iter()
+                    .chain(self.library_relro.into_iter().flatten())
                     .any(|(start, size)| address >= start && address < start + size as u64)
                 {
                     return false;
@@ -4601,10 +4616,9 @@ impl AddressSpace {
                 return true;
             }
         }
-        if self
-            .tls
-            .is_some_and(|tls| address >= tls.start && address < tls.start + tls.layout.mapping_size as u64)
-        {
+        if self.tls.is_some_and(|tls| {
+            address >= tls.start && address < tls.start + tls.layout.mapping_size as u64
+        }) {
             return true;
         }
         for mapping in anonymous.iter().flatten() {
@@ -4658,9 +4672,8 @@ pub fn elf_loader_self_test() -> bool {
     let mut writable_executable = valid;
     writable_executable[68] = 7;
 
-    let unsupported_program_header_rejected = [PT_INTERP, PT_DYNAMIC]
-        .into_iter()
-        .all(|program_type| {
+    let unsupported_program_header_rejected =
+        [PT_INTERP, PT_DYNAMIC].into_iter().all(|program_type| {
             let Some(mut elf) = build_stub_elf(stub) else {
                 return false;
             };
@@ -4673,7 +4686,10 @@ pub fn elf_loader_self_test() -> bool {
             match crate::elf::parse(&elf) {
                 Err(crate::elf::Error::Unsupported) if program_type == PT_INTERP => true,
                 Err(crate::elf::Error::Unsupported | crate::elf::Error::InvalidSegment)
-                    if program_type == PT_DYNAMIC => true,
+                    if program_type == PT_DYNAMIC =>
+                {
+                    true
+                }
                 _ => false,
             }
         });
@@ -4684,7 +4700,10 @@ pub fn elf_loader_self_test() -> bool {
             && write_u32(&mut elf, second_header, PT_TLS).is_some()
             && write_u64(&mut elf, second_header + 32, 8).is_some()
             && write_u64(&mut elf, second_header + 40, 4).is_some()
-            && matches!(crate::elf::parse(&elf), Err(crate::elf::Error::InvalidSegment))
+            && matches!(
+                crate::elf::parse(&elf),
+                Err(crate::elf::Error::InvalidSegment)
+            )
     });
 
     let relro_requires_writable_data = build_stub_elf(stub).is_some_and(|mut elf| {
@@ -4693,52 +4712,63 @@ pub fn elf_loader_self_test() -> bool {
             && write_u32(&mut elf, second_header, PT_GNU_RELRO).is_some()
             && write_u64(&mut elf, second_header + 16, USER_REGION_START).is_some()
             && write_u64(&mut elf, second_header + 40, USER_CODE_SIZE as u64).is_some()
-            && matches!(crate::elf::parse(&elf), Err(crate::elf::Error::InvalidSegment))
+            && matches!(
+                crate::elf::parse(&elf),
+                Err(crate::elf::Error::InvalidSegment)
+            )
     });
 
-    let valid_relro = build_stub_elf(stub).and_then(|mut elf| {
-        let data_address = USER_REGION_START + USER_CODE_SIZE as u64;
-        let data_header = PROGRAM_HEADER_OFFSET + PROGRAM_HEADER_SIZE;
-        let relro_header = data_header + PROGRAM_HEADER_SIZE;
-        if write_u16(&mut elf, 56, 3).is_none()
-            || write_u32(&mut elf, data_header, 1).is_none()
-            || write_u32(&mut elf, data_header + 4, 6).is_none()
-            || write_u64(&mut elf, data_header + 16, data_address).is_none()
-            || write_u64(&mut elf, data_header + 40, 4096).is_none()
-            || write_u64(&mut elf, data_header + 48, 4096).is_none()
-            || write_u32(&mut elf, relro_header, PT_GNU_RELRO).is_none()
-            || write_u64(&mut elf, relro_header + 16, data_address).is_none()
-            || write_u64(&mut elf, relro_header + 40, 4096).is_none()
-        {
-            return None;
-        }
-        Some(elf)
-    })
-    .and_then(|elf| crate::elf::parse(&elf).ok())
-    .is_some_and(|image| image.relro() == Some((USER_REGION_START + USER_CODE_SIZE as u64, 4096)));
+    let valid_relro = build_stub_elf(stub)
+        .and_then(|mut elf| {
+            let data_address = USER_REGION_START + USER_CODE_SIZE as u64;
+            let data_header = PROGRAM_HEADER_OFFSET + PROGRAM_HEADER_SIZE;
+            let relro_header = data_header + PROGRAM_HEADER_SIZE;
+            if write_u16(&mut elf, 56, 3).is_none()
+                || write_u32(&mut elf, data_header, 1).is_none()
+                || write_u32(&mut elf, data_header + 4, 6).is_none()
+                || write_u64(&mut elf, data_header + 16, data_address).is_none()
+                || write_u64(&mut elf, data_header + 40, 4096).is_none()
+                || write_u64(&mut elf, data_header + 48, 4096).is_none()
+                || write_u32(&mut elf, relro_header, PT_GNU_RELRO).is_none()
+                || write_u64(&mut elf, relro_header + 16, data_address).is_none()
+                || write_u64(&mut elf, relro_header + 40, 4096).is_none()
+            {
+                return None;
+            }
+            Some(elf)
+        })
+        .and_then(|elf| crate::elf::parse(&elf).ok())
+        .is_some_and(|image| {
+            image.relro() == Some((USER_REGION_START + USER_CODE_SIZE as u64, 4096))
+        });
 
-    let valid_dynamic_relative = build_stub_elf(stub).and_then(|mut elf| {
-        const FIXTURE_PAYLOAD_SIZE: usize = 640;
-        const DYNAMIC_OFFSET: usize = 4096 + 256;
-        const HASH_OFFSET: usize = 4096 + 448;
-        const SYMTAB_OFFSET: usize = 4096 + 464;
-        const STRTAB_OFFSET: usize = 4096 + 512;
-        const RELA_OFFSET: usize = 4096 + 528;
-        if elf.len() < 4096 + FIXTURE_PAYLOAD_SIZE {
-            elf.resize(4096 + FIXTURE_PAYLOAD_SIZE, 0);
-        }
-        write_u64(&mut elf, PROGRAM_HEADER_OFFSET + 32, FIXTURE_PAYLOAD_SIZE as u64)?;
-        write_u64(&mut elf, PROGRAM_HEADER_OFFSET + 40, 4096)?;
-        let strtab = elf.get_mut(STRTAB_OFFSET..STRTAB_OFFSET + 7)?;
-        strtab.copy_from_slice(b"\0local\0");
-        // This region initially contains copied machine code. Initialize both
-        // complete ELF symbol records, including type/visibility/size, before
-        // populating the fields below.
-        elf.get_mut(SYMTAB_OFFSET..SYMTAB_OFFSET + 48)?.fill(0);
-        let data_address = USER_REGION_START + USER_CODE_SIZE as u64;
-        let dynamic_header = PROGRAM_HEADER_OFFSET + PROGRAM_HEADER_SIZE;
-        let data_header = dynamic_header + PROGRAM_HEADER_SIZE;
-        if write_u16(&mut elf, 56, 3).is_none()
+    let valid_dynamic_relative = build_stub_elf(stub)
+        .and_then(|mut elf| {
+            const FIXTURE_PAYLOAD_SIZE: usize = 640;
+            const DYNAMIC_OFFSET: usize = 4096 + 256;
+            const HASH_OFFSET: usize = 4096 + 448;
+            const SYMTAB_OFFSET: usize = 4096 + 464;
+            const STRTAB_OFFSET: usize = 4096 + 512;
+            const RELA_OFFSET: usize = 4096 + 528;
+            if elf.len() < 4096 + FIXTURE_PAYLOAD_SIZE {
+                elf.resize(4096 + FIXTURE_PAYLOAD_SIZE, 0);
+            }
+            write_u64(
+                &mut elf,
+                PROGRAM_HEADER_OFFSET + 32,
+                FIXTURE_PAYLOAD_SIZE as u64,
+            )?;
+            write_u64(&mut elf, PROGRAM_HEADER_OFFSET + 40, 4096)?;
+            let strtab = elf.get_mut(STRTAB_OFFSET..STRTAB_OFFSET + 7)?;
+            strtab.copy_from_slice(b"\0local\0");
+            // This region initially contains copied machine code. Initialize both
+            // complete ELF symbol records, including type/visibility/size, before
+            // populating the fields below.
+            elf.get_mut(SYMTAB_OFFSET..SYMTAB_OFFSET + 48)?.fill(0);
+            let data_address = USER_REGION_START + USER_CODE_SIZE as u64;
+            let dynamic_header = PROGRAM_HEADER_OFFSET + PROGRAM_HEADER_SIZE;
+            let data_header = dynamic_header + PROGRAM_HEADER_SIZE;
+            if write_u16(&mut elf, 56, 3).is_none()
             || write_u16(&mut elf, 16, 3).is_none()
             || write_u32(&mut elf, dynamic_header, PT_DYNAMIC).is_none()
             || write_u64(&mut elf, dynamic_header + 8, DYNAMIC_OFFSET as u64).is_none()
@@ -4791,130 +4821,130 @@ pub fn elf_loader_self_test() -> bool {
             || write_u64(&mut elf, RELA_OFFSET + 24, data_address + 8).is_none()
             || write_u64(&mut elf, RELA_OFFSET + 32, (1_u64 << 32) | 1).is_none()
             || write_u64(&mut elf, RELA_OFFSET + 40, 0).is_none()
-        {
-            return None;
-        }
-        let image = match crate::elf::parse(&elf) {
-            Ok(image) => image,
-            Err(_) => return None,
-        };
-        let dynamic = image.dynamic()?;
-        if dynamic.symbol_count != 2 || dynamic.rela_size != 48 {
-            return None;
-        }
-        let dependency_fixture = {
-            let mut dependency_elf = elf.clone();
-            *dependency_elf.get_mut(SYMTAB_OFFSET + 24 + 4)? = 0x10;
-            write_u64(&mut dependency_elf, DYNAMIC_OFFSET + 128, 1)?;
-            write_u64(&mut dependency_elf, DYNAMIC_OFFSET + 136, 1)?;
-            write_u64(&mut dependency_elf, DYNAMIC_OFFSET + 144, 0)?;
-            dependency_elf
-        };
-        let dependency_metadata = crate::elf::parse(&dependency_fixture)
-            .ok()
-            .and_then(|image| image.dynamic())
-            .is_some_and(|dynamic| {
-                dynamic.needed_count == 1 && dynamic.needed_offsets[0] == 1
-            });
-        let cross_image_scope = (|| -> Option<bool> {
-            let mut main_bytes = dependency_fixture.clone();
-            // The main image imports `local`; the dependency fixture above
-            // exports it as a global symbol at USER_REGION_START + 32.
-            write_u16(&mut main_bytes, SYMTAB_OFFSET + 24 + 6, 0)?;
-            let main_image = crate::elf::parse(&main_bytes).ok()?;
-            let mut dependency_export = elf.clone();
-            *dependency_export.get_mut(SYMTAB_OFFSET + 24 + 4)? = 0x10;
-            let dependency_image = crate::elf::parse(&dependency_export).ok()?.relocated(4096)?;
-            let mut scope = alloc::boxed::Box::new(crate::elf::SymbolScope::new(
-                &main_image,
-                &main_bytes,
-            ));
-            scope
-                .add_dependency(b"local", &dependency_image, &dependency_export)
-                .ok()?;
-            scope.validate_dependencies().ok()?;
-            let exact_resolution = scope.resolve(b"local") == Some(USER_REGION_START + 4096 + 32)
-                && scope.resolve(b"local-extra").is_none();
-            let duplicate_rejected = scope
-                .add_dependency(b"local", &dependency_image, &dependency_export)
-                .is_err();
-            let empty_name_rejected = scope
-                .add_dependency(b"", &dependency_image, &dependency_export)
-                .is_err();
-            let capacity_rejected = scope
-                .add_dependency(b"a", &dependency_image, &dependency_export)
-                .is_ok()
-                && scope
-                    .add_dependency(b"b", &dependency_image, &dependency_export)
-                    .is_ok()
-                && scope
-                    .add_dependency(b"c", &dependency_image, &dependency_export)
-                    .is_ok()
-                && scope
-                    .add_dependency(b"d", &dependency_image, &dependency_export)
+            {
+                return None;
+            }
+            let image = match crate::elf::parse(&elf) {
+                Ok(image) => image,
+                Err(_) => return None,
+            };
+            let dynamic = image.dynamic()?;
+            if dynamic.symbol_count != 2 || dynamic.rela_size != 48 {
+                return None;
+            }
+            let dependency_fixture = {
+                let mut dependency_elf = elf.clone();
+                *dependency_elf.get_mut(SYMTAB_OFFSET + 24 + 4)? = 0x10;
+                write_u64(&mut dependency_elf, DYNAMIC_OFFSET + 128, 1)?;
+                write_u64(&mut dependency_elf, DYNAMIC_OFFSET + 136, 1)?;
+                write_u64(&mut dependency_elf, DYNAMIC_OFFSET + 144, 0)?;
+                dependency_elf
+            };
+            let dependency_metadata = crate::elf::parse(&dependency_fixture)
+                .ok()
+                .and_then(|image| image.dynamic())
+                .is_some_and(|dynamic| dynamic.needed_count == 1 && dynamic.needed_offsets[0] == 1);
+            let cross_image_scope = (|| -> Option<bool> {
+                let mut main_bytes = dependency_fixture.clone();
+                // The main image imports `local`; the dependency fixture above
+                // exports it as a global symbol at USER_REGION_START + 32.
+                write_u16(&mut main_bytes, SYMTAB_OFFSET + 24 + 6, 0)?;
+                let main_image = crate::elf::parse(&main_bytes).ok()?;
+                let mut dependency_export = elf.clone();
+                *dependency_export.get_mut(SYMTAB_OFFSET + 24 + 4)? = 0x10;
+                let dependency_image = crate::elf::parse(&dependency_export)
+                    .ok()?
+                    .relocated(4096)?;
+                let mut scope =
+                    alloc::boxed::Box::new(crate::elf::SymbolScope::new(&main_image, &main_bytes));
+                scope
+                    .add_dependency(b"local", &dependency_image, &dependency_export)
+                    .ok()?;
+                scope.validate_dependencies().ok()?;
+                let exact_resolution = scope.resolve(b"local")
+                    == Some(USER_REGION_START + 4096 + 32)
+                    && scope.resolve(b"local-extra").is_none();
+                let duplicate_rejected = scope
+                    .add_dependency(b"local", &dependency_image, &dependency_export)
                     .is_err();
-            Some(
-                exact_resolution
-                    && duplicate_rejected
-                    && empty_name_rejected
-                    && capacity_rejected,
+                let empty_name_rejected = scope
+                    .add_dependency(b"", &dependency_image, &dependency_export)
+                    .is_err();
+                let capacity_rejected = scope
+                    .add_dependency(b"a", &dependency_image, &dependency_export)
+                    .is_ok()
+                    && scope
+                        .add_dependency(b"b", &dependency_image, &dependency_export)
+                        .is_ok()
+                    && scope
+                        .add_dependency(b"c", &dependency_image, &dependency_export)
+                        .is_ok()
+                    && scope
+                        .add_dependency(b"d", &dependency_image, &dependency_export)
+                        .is_err();
+                Some(
+                    exact_resolution
+                        && duplicate_rejected
+                        && empty_name_rejected
+                        && capacity_rejected,
+                )
+            })()
+            .unwrap_or(false);
+            let dependency_fail_closed = load_elf(&dependency_fixture).is_none();
+            let program = load_elf(&elf)?;
+            let mut relocated = [0u8; 16];
+            // Observe this loaded image's actual bias. Drawing fresh entropy here
+            // would compare the relocation against a different random placement
+            // on a production boot (qemu-test fixes every draw at zero).
+            let load_bias = program.image.entry.checked_sub(image.entry)?;
+            let expected = load_bias.checked_add(0x20)?;
+            let applied = paging::read_user_bytes_in(
+                program.address_space.paging(),
+                data_address.checked_add(load_bias)?,
+                &mut relocated,
             )
-        })()
-        .unwrap_or(false);
-        let dependency_fail_closed = load_elf(&dependency_fixture).is_none();
-        let program = load_elf(&elf)?;
-        let mut relocated = [0u8; 16];
-        // Observe this loaded image's actual bias. Drawing fresh entropy here
-        // would compare the relocation against a different random placement
-        // on a production boot (qemu-test fixes every draw at zero).
-        let load_bias = program.image.entry.checked_sub(image.entry)?;
-        let expected = load_bias.checked_add(0x20)?;
-        let applied = paging::read_user_bytes_in(
-            program.address_space.paging(),
-            data_address.checked_add(load_bias)?,
-            &mut relocated,
-        )
-        .is_ok()
-            && u64::from_le_bytes(relocated[..8].try_into().ok()?) == expected
-            && u64::from_le_bytes(relocated[8..].try_into().ok()?)
-                == load_bias + USER_REGION_START + 32;
-        let destroyed = destroy(program.address_space);
-        Some(
-            dynamic.rela_size == 48
-                && dynamic.rela_entry_size == 24
-                && dynamic.symbol_count == 2
-                && dependency_metadata
-                && cross_image_scope
-                && dependency_fail_closed
-                && applied
-                && destroyed,
-        )
-    })
-    .unwrap_or(false);
-
-    let valid_tls = build_stub_elf(stub).and_then(|mut elf| {
-        let tls_header = PROGRAM_HEADER_OFFSET + PROGRAM_HEADER_SIZE;
-        if write_u16(&mut elf, 56, 2).is_none()
-            || write_u32(&mut elf, tls_header, PT_TLS).is_none()
-            || write_u64(&mut elf, tls_header + 8, 4096).is_none()
-            || write_u64(&mut elf, tls_header + 16, USER_REGION_START).is_none()
-            || write_u64(&mut elf, tls_header + 32, 4).is_none()
-            || write_u64(&mut elf, tls_header + 40, 4096).is_none()
-            || write_u64(&mut elf, tls_header + 48, 4096).is_none()
-        {
-            return None;
-        }
-        Some(elf)
-    })
-    .and_then(|elf| crate::elf::parse(&elf).ok())
-    .is_some_and(|image| {
-        image.tls().is_some_and(|tls| {
-            tls.file_offset == 4096
-                && tls.file_size == 4
-                && tls.memory_size == 4096
-                && tls.alignment == 4096
+            .is_ok()
+                && u64::from_le_bytes(relocated[..8].try_into().ok()?) == expected
+                && u64::from_le_bytes(relocated[8..].try_into().ok()?)
+                    == load_bias + USER_REGION_START + 32;
+            let destroyed = destroy(program.address_space);
+            Some(
+                dynamic.rela_size == 48
+                    && dynamic.rela_entry_size == 24
+                    && dynamic.symbol_count == 2
+                    && dependency_metadata
+                    && cross_image_scope
+                    && dependency_fail_closed
+                    && applied
+                    && destroyed,
+            )
         })
-    });
+        .unwrap_or(false);
+
+    let valid_tls = build_stub_elf(stub)
+        .and_then(|mut elf| {
+            let tls_header = PROGRAM_HEADER_OFFSET + PROGRAM_HEADER_SIZE;
+            if write_u16(&mut elf, 56, 2).is_none()
+                || write_u32(&mut elf, tls_header, PT_TLS).is_none()
+                || write_u64(&mut elf, tls_header + 8, 4096).is_none()
+                || write_u64(&mut elf, tls_header + 16, USER_REGION_START).is_none()
+                || write_u64(&mut elf, tls_header + 32, 4).is_none()
+                || write_u64(&mut elf, tls_header + 40, 4096).is_none()
+                || write_u64(&mut elf, tls_header + 48, 4096).is_none()
+            {
+                return None;
+            }
+            Some(elf)
+        })
+        .and_then(|elf| crate::elf::parse(&elf).ok())
+        .is_some_and(|image| {
+            image.tls().is_some_and(|tls| {
+                tls.file_offset == 4096
+                    && tls.file_size == 4
+                    && tls.memory_size == 4096
+                    && tls.alignment == 4096
+            })
+        });
 
     valid_segment
         && crate::elf::parse(&bad_magic).is_err()
@@ -5293,18 +5323,20 @@ pub fn load_fixed_placement_probe(bytes: &[u8]) -> Option<UserProgram> {
 pub fn load_pie_placement_probe() -> Option<UserProgram> {
     // Position-independent x86-64 scalar Exit(37), followed by an unreachable
     // trap. No absolute address or TLS is involved in this placement probe.
-    let mut bytes = build_stub_elf(&[
-        0xbf, 37, 0, 0, 0, 0xb8, 3, 0, 0, 0, 0xcd, 0x80, 0x0f, 0x0b,
-    ])?;
+    let mut bytes = build_stub_elf(&[0xbf, 37, 0, 0, 0, 0xb8, 3, 0, 0, 0, 0xcd, 0x80, 0x0f, 0x0b])?;
     write_u16(&mut bytes, 16, 3)?;
     linker::load_with_candidate_bias(&bytes, &["pie-placement"], 0x30_000)
 }
 
 #[cfg(feature = "stage11-5-test")]
-pub fn shared_library_self_test() -> bool { linker::shared_library_self_test() }
+pub fn shared_library_self_test() -> bool {
+    linker::shared_library_self_test()
+}
 
 #[cfg(feature = "stage11-compiler-test")]
-pub fn compiler_loader_self_test() -> bool { linker::compiler_loader_self_test() }
+pub fn compiler_loader_self_test() -> bool {
+    linker::compiler_loader_self_test()
+}
 
 /// Load an ELF and place a custom argv vector on the user stack.
 pub fn load_elf_with_argv(bytes: &[u8], args: &[&str]) -> Option<UserProgram> {
@@ -5362,13 +5394,24 @@ pub fn clone_initial_tls(
     }
 }
 
-fn copy_tls_bytes(space: paging::AddressSpace, source: u64, target: u64, size: usize) -> Option<()> {
+fn copy_tls_bytes(
+    space: paging::AddressSpace,
+    source: u64,
+    target: u64,
+    size: usize,
+) -> Option<()> {
     let mut buffer = [0u8; 512];
     let mut offset = 0usize;
     while offset < size {
         let count = buffer.len().min(size - offset);
-        paging::read_user_bytes_in(space, source.checked_add(offset as u64)?, &mut buffer[..count]).ok()?;
-        paging::write_user_bytes(space, target.checked_add(offset as u64)?, &buffer[..count]).ok()?;
+        paging::read_user_bytes_in(
+            space,
+            source.checked_add(offset as u64)?,
+            &mut buffer[..count],
+        )
+        .ok()?;
+        paging::write_user_bytes(space, target.checked_add(offset as u64)?, &buffer[..count])
+            .ok()?;
         offset += count;
     }
     Some(())
@@ -5377,7 +5420,12 @@ fn copy_tls_bytes(space: paging::AddressSpace, source: u64, target: u64, size: u
 fn initialize_tls(space: paging::AddressSpace, start: u64, tls: InitialTls) -> Option<u64> {
     paging::zero_user_range_in(space, start, tls.layout.mapping_size).ok()?;
     if let Some((template, _)) = tls.template {
-        copy_tls_bytes(space, template, start.checked_add(tls.layout.image_offset as u64)?, tls.file_size)?;
+        copy_tls_bytes(
+            space,
+            template,
+            start.checked_add(tls.layout.image_offset as u64)?,
+            tls.file_size,
+        )?;
     } else if tls.file_size != 0 {
         return None;
     }
@@ -5684,10 +5732,11 @@ pub fn destroy_process_address_space(
 pub fn destroy(address_space: AddressSpace) -> bool {
     let mut ranges = [(0, 0); MAX_IMAGE_MAPPINGS + 3];
     ranges[0] = (address_space.stack_base, UserStack::SIZE);
-    for (range, mapping) in ranges[1..]
-        .iter_mut()
-        .zip(address_space.mappings[..address_space.mapping_count].iter().rev())
-    {
+    for (range, mapping) in ranges[1..].iter_mut().zip(
+        address_space.mappings[..address_space.mapping_count]
+            .iter()
+            .rev(),
+    ) {
         *range = (mapping.start(), mapping.size());
     }
     let mut count = address_space.mapping_count + 1;
@@ -5699,8 +5748,7 @@ pub fn destroy(address_space: AddressSpace) -> bool {
             count += 1;
         }
     }
-    paging::destroy_user_address_space(address_space.paging, &ranges[..count])
-    .is_ok()
+    paging::destroy_user_address_space(address_space.paging, &ranges[..count]).is_ok()
 }
 
 pub fn clone_address_space(
@@ -5773,7 +5821,16 @@ pub fn clone_address_space(
         completed[completed_count] = (tls_start, tls_size);
         completed_count += 1;
         if let Some((start, size)) = tls.template {
-            if paging::share_user_range_in(source.paging, destination.paging, start, size, false, false).is_err() {
+            if paging::share_user_range_in(
+                source.paging,
+                destination.paging,
+                start,
+                size,
+                false,
+                false,
+            )
+            .is_err()
+            {
                 release_clone(destination.paging, &completed[..completed_count]);
                 return None;
             }

@@ -44,7 +44,9 @@ fn library_path(name: &[u8]) -> Option<alloc::string::String> {
 }
 
 fn prepare(bytes: &[u8], candidate_bias: u64) -> Option<Vec<LinkImage<'_>>> {
-    let main = elf::parse(bytes).ok()?.relocated_for_execution(candidate_bias)?;
+    let main = elf::parse(bytes)
+        .ok()?
+        .relocated_for_execution(candidate_bias)?;
     let mut images = Vec::with_capacity(elf::MAX_SCOPE_IMAGES);
     images.push(LinkImage {
         name: None,
@@ -185,7 +187,13 @@ pub(super) fn load_with_candidate_bias(
     args: &[&str],
     candidate_bias: u64,
 ) -> Option<UserProgram> {
-    load_with_geometry(bytes, args, candidate_bias, aslr_stack_base()?, aslr_mmap_base()?)
+    load_with_geometry(
+        bytes,
+        args,
+        candidate_bias,
+        aslr_stack_base()?,
+        aslr_mmap_base()?,
+    )
 }
 
 // One graph-loader path for production draws and forced-draw CPU regressions.
@@ -293,8 +301,13 @@ pub(super) fn load_with_geometry(
         }
     }
     let tls_base = if let Some(tls) = main.image.tls() {
-        let layout = tls_layout::Layout::new(tls.file_size, tls.memory_size,
-            tls.alignment, tls.virtual_address, USER_MMAP_MAX_SIZE)?;
+        let layout = tls_layout::Layout::new(
+            tls.file_size,
+            tls.memory_size,
+            tls.alignment,
+            tls.virtual_address,
+            USER_MMAP_MAX_SIZE,
+        )?;
         let template_size = usize::try_from(page_align_up(tls.file_size as u64)?).ok()?;
         let total = layout.mapping_size.checked_add(template_size)?;
         let template_start = stack.guard_base.checked_sub(total as u64)?;
@@ -310,16 +323,41 @@ pub(super) fn load_with_geometry(
             return None;
         }
         if template_size != 0 {
-            paging::map_user_range_in_inactive(page_table, template_start, template_size, true, false).ok()?;
+            paging::map_user_range_in_inactive(
+                page_table,
+                template_start,
+                template_size,
+                true,
+                false,
+            )
+            .ok()?;
             pending.template_mapped = Some((template_start, template_size));
             paging::zero_user_range_in(page_table, template_start, template_size).ok()?;
             // Capture post-relocation initialization bytes from the validated
             // PT_LOAD source, not raw ELF or the mutable first thread's TLS.
-            copy_tls_bytes(page_table, tls.virtual_address, template_start, tls.file_size)?;
-            paging::protect_user_range_in_inactive(page_table, template_start, template_size, false, false).ok()?;
+            copy_tls_bytes(
+                page_table,
+                tls.virtual_address,
+                template_start,
+                tls.file_size,
+            )?;
+            paging::protect_user_range_in_inactive(
+                page_table,
+                template_start,
+                template_size,
+                false,
+                false,
+            )
+            .ok()?;
         }
-        paging::map_user_range_in_inactive(page_table, start, layout.mapping_size, true, false).ok()?;
-        let initial = InitialTls { start, layout, template: pending.template_mapped, file_size: tls.file_size };
+        paging::map_user_range_in_inactive(page_table, start, layout.mapping_size, true, false)
+            .ok()?;
+        let initial = InitialTls {
+            start,
+            layout,
+            template: pending.template_mapped,
+            file_size: tls.file_size,
+        };
         pending.space.tls = Some(initial);
         initialize_tls(page_table, start, initial)?
     } else {

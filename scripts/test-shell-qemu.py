@@ -28,7 +28,11 @@ def main():
     parser.add_argument('--cpus', type=int, choices=(1, 2, 4), default=4)
     parser.add_argument('--system-apps', action='store_true',
                         help='build the production system-app image and verify normal-boot installation')
+    parser.add_argument('--hardware-demo', action='store_true',
+                        help='build the disposable demo image and verify demo sign-in')
     args = parser.parse_args()
+    if args.hardware_demo:
+        args.system_apps = True
     root = Path(__file__).resolve().parents[1]
     qemu = Path(args.qemu)
     firmware = args.firmware or qemu.parent / 'share' / 'edk2-x86_64-code.fd'
@@ -68,7 +72,7 @@ def main():
         build_env['WOVENHAT_STORE_IMAGE'] = str(packages['woven-store'])
         build_env.setdefault('WOVENHAT_APP_TRUSTED_PUBLIC_KEY_HEX', test_public_key)
         build_env['WOVENHAT_SHELL_IMAGE'] = str(build_woven_shell(root))
-        feature_arguments = ['--features', 'system-apps']
+        feature_arguments = ['--features', 'hardware-demo' if args.hardware_demo else 'system-apps']
     cargo_command = ['cargo']
     target_arguments = []
     for variable, setting, default in (
@@ -114,6 +118,8 @@ def main():
                 time.sleep(0.1)
             if args.system_apps and '[APPS] 10 signed applications installed' not in serial.read_text(errors='replace'):
                 raise RuntimeError('Production system-app catalog was not installed; inspect shell-regression logs')
+            if args.hardware_demo and '[DEMO] sample accounts installed in volatile VFS (ada, lin)' not in serial.read_text(errors='replace'):
+                raise RuntimeError('Hardware-demo accounts were not provisioned; inspect shell-regression logs')
             time.sleep(1)
             with socket.create_connection(('127.0.0.1', port), timeout=5) as connection:
                 stream = connection.makefile('rwb')
@@ -142,6 +148,15 @@ def main():
                             raise RuntimeError('The desktop session did not start; inspect shell-regression logs')
                         time.sleep(0.1)
                     time.sleep(2)
+                    if args.hardware_demo:
+                        for key in ['1', '2', '3', '4', 'ret']:
+                            execute('send-key', {'keys': [{'type': 'qcode', 'data': key}], 'hold-time': 80})
+                            time.sleep(0.12)
+                        deadline = time.monotonic() + 15
+                        while 'woven-shell: signed in: ada' not in serial.read_text(errors='replace'):
+                            if process.poll() is not None or time.monotonic() > deadline:
+                                raise RuntimeError('The demo account did not sign in; inspect shell-regression logs')
+                            time.sleep(0.1)
                     execute('send-key', {'keys': [{'type': 'qcode', 'data': 'f12'}], 'hold-time': 40})
                     deadline = time.monotonic() + 30
                     while '[SESSION] diagnostic console' not in serial.read_text(errors='replace'):
@@ -162,8 +177,12 @@ def main():
             if process.poll() is None:
                 process.kill()
                 process.wait(timeout=5)
-    print('Normal release shell + PS/2 IOAPIC + smptest: PASS')
+    if args.hardware_demo:
+        print('Hardware demo: sign-in + 10 applications + desktop + PS/2 IOAPIC + smptest: PASS')
+    else:
+        print('Normal release shell + PS/2 IOAPIC + smptest: PASS')
     print('Serial log:', serial)
+    print('UEFI image:', image)
     return 0
 
 

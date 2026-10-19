@@ -1592,7 +1592,10 @@ pub fn stage15_1_self_test() -> bool {
     let Ok(file_id) = before_overwrite.create(1, "overwrite.bin", 0o600, 50) else {
         return false;
     };
-    if before_overwrite.write_file(file_id, b"old version", 51).is_err() {
+    if before_overwrite
+        .write_file(file_id, b"old version", 51)
+        .is_err()
+    {
         return false;
     }
     let disk_before = before_overwrite.into_device();
@@ -1969,11 +1972,15 @@ fn import_wfs_directory<D: crate::block::BlockDevice>(
 /// Explicit authority for native WovenFS mutations. Must be issued only after
 /// a WovenGuard capability check by the kernel-side caller.
 #[cfg(feature = "stage15-2-test")]
-pub struct AuthorizedWfsWriter { _private: () }
+pub struct AuthorizedWfsWriter {
+    _private: (),
+}
 
 #[cfg(feature = "stage15-2-test")]
 impl AuthorizedWfsWriter {
-    pub(crate) const fn after_capability_check() -> Self { Self { _private: () } }
+    pub(crate) const fn after_capability_check() -> Self {
+        Self { _private: () }
+    }
 }
 
 /// Validate the native root-directory filename before any ATA I/O, for the
@@ -1981,8 +1988,13 @@ impl AuthorizedWfsWriter {
 /// which the nested-path VFS adapter uses.
 #[cfg(all(not(test), feature = "stage15-2-test"))]
 fn checked_native_name(name: &str) -> Result<&str, Error> {
-    if name.is_empty() || name.len() > MAX_NAME || name == "." || name == ".."
-        || name.contains('/') || name.contains('\\') || name.as_bytes().contains(&0)
+    if name.is_empty()
+        || name.len() > MAX_NAME
+        || name == "."
+        || name == ".."
+        || name.contains('/')
+        || name.contains('\\')
+        || name.as_bytes().contains(&0)
     {
         return Err(Error::InvalidName);
     }
@@ -1993,10 +2005,15 @@ fn checked_native_name(name: &str) -> Result<&str, Error> {
 /// operation; VFS namespace invalidation remains a separate integration gate.
 #[cfg(feature = "stage15-2-test")]
 pub fn write_ata_file(
-    _authority: &AuthorizedWfsWriter, name: &str, bytes: &[u8], now: u64,
+    _authority: &AuthorizedWfsWriter,
+    name: &str,
+    bytes: &[u8],
+    now: u64,
 ) -> Result<(), Error> {
     checked_native_name(name)?;
-    if bytes.len() > MAX_FILE_SIZE { return Err(Error::TooLarge); }
+    if bytes.len() > MAX_FILE_SIZE {
+        return Err(Error::TooLarge);
+    }
     with_ata_volume(|volume| {
         let inode = match volume.lookup(1, name) {
             Ok(entry) => entry.inode,
@@ -2004,7 +2021,8 @@ pub fn write_ata_file(
             Err(error) => return Err(error),
         };
         volume.write_file(inode, bytes, now)
-    }).unwrap_or(Err(Error::Device))
+    })
+    .unwrap_or(Err(Error::Device))
 }
 
 /// Reads newly mounted, checksum-verified disk content, not cached VFS bytes.
@@ -2014,13 +2032,16 @@ pub fn read_ata_file(name: &str, out: &mut [u8]) -> Result<usize, Error> {
     with_ata_volume(|volume| {
         let inode = volume.lookup(1, name)?.inode;
         volume.read_file(inode, out)
-    }).unwrap_or(Err(Error::Device))
+    })
+    .unwrap_or(Err(Error::Device))
 }
 
 /// Authorized native unlink. Callers must invalidate VFS cached entries.
 #[cfg(feature = "stage15-2-test")]
 pub fn unlink_ata_file(
-    _authority: &AuthorizedWfsWriter, name: &str, now: u64,
+    _authority: &AuthorizedWfsWriter,
+    name: &str,
+    now: u64,
 ) -> Result<(), Error> {
     checked_native_name(name)?;
     with_ata_volume(|volume| volume.unlink(1, name, now)).unwrap_or(Err(Error::Device))
@@ -2031,7 +2052,10 @@ pub fn unlink_ata_file(
 /// This is NOT yet hooked into generic VFS descriptor/syscall dispatch.
 #[cfg(feature = "stage15-2-test")]
 pub fn vfs_write_through(
-    authority: &AuthorizedWfsWriter, path: &str, bytes: &[u8], now: u64,
+    authority: &AuthorizedWfsWriter,
+    path: &str,
+    bytes: &[u8],
+    now: u64,
 ) -> Result<(), Error> {
     write_ata_file(authority, checked_vfs_name(path)?, bytes, now)
 }
@@ -2045,7 +2069,9 @@ pub fn vfs_read_through(path: &str, out: &mut [u8]) -> Result<usize, Error> {
 /// Delete a file using the same bounded namespace and explicit authority.
 #[cfg(feature = "stage15-2-test")]
 pub fn vfs_unlink_through(
-    authority: &AuthorizedWfsWriter, path: &str, now: u64,
+    authority: &AuthorizedWfsWriter,
+    path: &str,
+    now: u64,
 ) -> Result<(), Error> {
     unlink_ata_file(authority, checked_vfs_name(path)?, now)
 }
@@ -2265,21 +2291,28 @@ pub fn stage15_2_self_test() -> bool {
         .unwrap_or(false);
     let removed = unlink_ata_file(&authority, "adapter.txt", 22).is_ok()
         && read_ata_file("adapter.txt", &mut overwritten_buf) == Err(Error::NotFound);
-    if !step("authorized write-through across remounts", write_through && read_through && overwritten && reread && removed) {
+    if !step(
+        "authorized write-through across remounts",
+        write_through && read_through && overwritten && reread && removed,
+    ) {
         return false;
     }
 
     // The VFS-path boundary must not accept sibling prefixes or traversal.
     let authority = AuthorizedWfsWriter::after_capability_check();
     let mut path_bytes = [0u8; 32];
-    let vfs_adapter_ok = vfs_write_through(&authority, "/wfs/vfs-test.txt", b"vfs-durable", 25).is_ok()
+    let vfs_adapter_ok = vfs_write_through(&authority, "/wfs/vfs-test.txt", b"vfs-durable", 25)
+        .is_ok()
         && vfs_read_through("/wfs/vfs-test.txt", &mut path_bytes) == Ok(11)
         && &path_bytes[..11] == b"vfs-durable"
         && vfs_write_through(&authority, "/wfs2/escape", b"bad", 26) == Err(Error::InvalidName)
         && vfs_write_through(&authority, "/wfs/../escape", b"bad", 26) == Err(Error::InvalidName)
         && vfs_unlink_through(&authority, "/wfs/vfs-test.txt", 27).is_ok()
         && vfs_read_through("/wfs/vfs-test.txt", &mut path_bytes) == Err(Error::NotFound);
-    if !step("VFS path write-through and namespace isolation", vfs_adapter_ok) {
+    if !step(
+        "VFS path write-through and namespace isolation",
+        vfs_adapter_ok,
+    ) {
         return false;
     }
 
@@ -2294,32 +2327,39 @@ pub fn stage15_2_self_test() -> bool {
     if !step("native WovenFS filename validation", native_boundary_ok) {
         return false;
     }
-    let invalid_vfs_paths = ["/wfs", "/wfs/", "/wfs2/file", "/wfs/../file", "/wfs/sub/file", "/wfs/nul\0file"];
+    let invalid_vfs_paths = [
+        "/wfs",
+        "/wfs/",
+        "/wfs2/file",
+        "/wfs/../file",
+        "/wfs/sub/file",
+        "/wfs/nul\0file",
+    ];
     let vfs_boundary_ok = invalid_vfs_paths.iter().all(|path| {
         vfs_write_through(&authority, path, b"no", 29) == Err(Error::InvalidName)
             && vfs_read_through(path, &mut path_bytes) == Err(Error::InvalidName)
             && vfs_unlink_through(&authority, path, 29) == Err(Error::InvalidName)
     });
-    if !step("VFS adapter rejects invalid paths for every operation", vfs_boundary_ok) {
+    if !step(
+        "VFS adapter rejects invalid paths for every operation",
+        vfs_boundary_ok,
+    ) {
         return false;
     }
-
 
     // Reject oversized mutations and overlong names before touching ATA.
     // A rejected overwrite must preserve the previously committed bytes.
     let too_large = [0u8; MAX_FILE_SIZE + 1];
-    let oversized_rejected = vfs_write_through(
-        &authority, "/wfs/alpha.txt", &too_large, 30,
-    ) == Err(Error::TooLarge);
+    let oversized_rejected =
+        vfs_write_through(&authority, "/wfs/alpha.txt", &too_large, 30) == Err(Error::TooLarge);
     let long_name = "x".repeat(MAX_NAME + 1);
     let long_path = alloc::format!("/wfs/{long_name}");
-    let overlong_rejected = vfs_write_through(
-        &authority, &long_path, b"no", 31,
-    ) == Err(Error::InvalidName);
+    let overlong_rejected =
+        vfs_write_through(&authority, &long_path, b"no", 31) == Err(Error::InvalidName);
     let mut durable_after_rejection = [0u8; 64];
-    let original_preserved = vfs_read_through(
-        "/wfs/alpha.txt", &mut durable_after_rejection,
-    ).map(|n| &durable_after_rejection[..n] == alpha).unwrap_or(false);
+    let original_preserved = vfs_read_through("/wfs/alpha.txt", &mut durable_after_rejection)
+        .map(|n| &durable_after_rejection[..n] == alpha)
+        .unwrap_or(false);
     if !step(
         "oversized and overlong mutations preserve durable data",
         oversized_rejected && overlong_rejected && original_preserved,
@@ -2342,9 +2382,9 @@ pub fn stage15_2_self_test() -> bool {
             Ok::<(), ()>(())
         },
     ) == Err(Error::TooLarge);
-    let sparse_absent = with_ata_volume(|volume| {
-        volume.lookup(1, "sparse-reject.bin") == Err(Error::NotFound)
-    }) == Some(true);
+    let sparse_absent =
+        with_ata_volume(|volume| volume.lookup(1, "sparse-reject.bin") == Err(Error::NotFound))
+            == Some(true);
     if !step(
         "rejected sparse write creates no inode or VFS publication",
         sparse_rejected && sparse_absent && !sparse_published,

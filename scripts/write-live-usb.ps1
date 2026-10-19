@@ -18,6 +18,8 @@ param(
     [long]$ExpectedSize = 8052549120,
     [string]$ExpectedSerial = '5474001281346643368',
     [string]$Manifest = (Join-Path (Split-Path -Parent $PSScriptRoot) 'target\release-validation\validated-image.json'),
+    [string]$Image = '',
+    [string]$ExpectedImageSha256 = '',
     [string]$Log = ''
 )
 
@@ -30,11 +32,22 @@ try {
     }
 
     # ---- image -----------------------------------------------------------
-    $record = Get-Content -Raw $Manifest | ConvertFrom-Json
-    $image = $record.image
-    $hash = (Get-FileHash -Algorithm SHA256 $image).Hash.ToLowerInvariant()
-    if ($hash -ne $record.image_sha256) {
-        throw "Refusing: $image has SHA-256 $hash, but the release record says $($record.image_sha256)."
+    if ($Image) {
+        if (-not $ExpectedImageSha256) {
+            throw 'Refusing: -ExpectedImageSha256 is required when -Image is supplied.'
+        }
+        $image = (Resolve-Path -LiteralPath $Image).Path
+        $hash = (Get-FileHash -Algorithm SHA256 $image).Hash.ToLowerInvariant()
+        if ($hash -ne $ExpectedImageSha256.ToLowerInvariant()) {
+            throw "Refusing: $image has SHA-256 $hash, but the supplied digest says $ExpectedImageSha256."
+        }
+    } else {
+        $record = Get-Content -Raw $Manifest | ConvertFrom-Json
+        $image = $record.image
+        $hash = (Get-FileHash -Algorithm SHA256 $image).Hash.ToLowerInvariant()
+        if ($hash -ne $record.image_sha256) {
+            throw "Refusing: $image has SHA-256 $hash, but the release record says $($record.image_sha256)."
+        }
     }
     $length = (Get-Item $image).Length
     if ($length % 512 -ne 0) { throw "Refusing: image length $length is not a whole number of sectors." }

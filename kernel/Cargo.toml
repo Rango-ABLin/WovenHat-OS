@@ -15,6 +15,7 @@ bench = false
 
 [features]
 physical-probe = []
+physical-wifi = ["physical-probe", "stage13-9-test"]
 qemu-test = []
 stage6-hotplug-test = ["qemu-test"]
 network-test = ["qemu-test"]
@@ -104,6 +105,8 @@ stage16-1-test = ["qemu-test"]
 stage19-app-catalog-test = ["qemu-test"]
 # Production image build: install the signed system-app catalog during boot.
 system-apps = []
+# Disposable live-hardware demo: system apps plus documented sample accounts.
+hardware-demo = ["system-apps"]
 # Full printable-ASCII font and text layout.
 stage17-1-test = ["qemu-test"]
 # Owner-bound client surface registry for userspace graphics.

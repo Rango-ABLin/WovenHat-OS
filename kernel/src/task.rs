@@ -856,7 +856,7 @@ pub enum CapabilityError {
     UnknownTask,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SpawnError {
     Full,
     OfflineCpu,
@@ -2982,7 +2982,12 @@ pub fn exit_current_process(exit_code: i32) -> ! {
         for slot in 0..scheduler.tasks.len() {
             let (sibling_id, sibling_process, sibling_state, sibling_thread) = {
                 let sibling = &scheduler.tasks[slot];
-                (sibling.id, sibling.process_id.as_u64(), sibling.state, sibling.thread_id)
+                (
+                    sibling.id,
+                    sibling.process_id.as_u64(),
+                    sibling.state,
+                    sibling.thread_id,
+                )
             };
             if sibling_id == task_id || sibling_process != exiting_pid {
                 continue;
@@ -3056,7 +3061,11 @@ pub fn exit_current_process(exit_code: i32) -> ! {
         let _ = crate::thread::terminate(thread_id, exit_code);
         let _ = crate::thread::take_waiter(thread_id);
     }
-    for thread_id in retired_threads.into_iter().take(retired_thread_count).flatten() {
+    for thread_id in retired_threads
+        .into_iter()
+        .take(retired_thread_count)
+        .flatten()
+    {
         let _ = crate::thread::terminate(thread_id, exit_code);
         if let Some(waiter) = crate::thread::take_waiter(thread_id) {
             let mut scheduler = SCHEDULER.lock();
@@ -3910,8 +3919,7 @@ pub fn mkdir_path(path: &str) -> Result<(), FileError> {
         if vfs::stat(&path).is_ok() {
             return Err(FileError::AlreadyExists);
         }
-        crate::wfs::mkdir_vfs_path(&path, crate::timer::ticks())
-            .map_err(map_wfs_file_error)?;
+        crate::wfs::mkdir_vfs_path(&path, crate::timer::ticks()).map_err(map_wfs_file_error)?;
         if let Err(error) = vfs::mkdir(&path) {
             // Native WovenFS is authoritative. If the bounded VFS registry
             // cannot publish the node, remove the just-created native entry
@@ -5512,7 +5520,11 @@ pub fn honor_current_termination_request() {
             (0, 0, false)
         } else {
             let task = &scheduler.tasks[scheduler.current_slot[crate::smp::cpu_index()]];
-            (task.termination_signal, task.thread_exit_code, task.thread_id.is_some())
+            (
+                task.termination_signal,
+                task.thread_exit_code,
+                task.thread_id.is_some(),
+            )
         }
     };
     if signal == u8::MAX && is_thread {

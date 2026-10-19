@@ -217,8 +217,14 @@ fn damage_merges_regions_that_form_exactly_a_rectangle() {
         }
     }
     damage.add(Rect::new(560, 380, 60, 20));
-    assert!(!damage.is_collapsed(), "adjacent tiles must not overflow the list");
-    assert_eq!(damage.regions(), &[Rect::new(30, 20, 370, 240), Rect::new(560, 380, 60, 20)]);
+    assert!(
+        !damage.is_collapsed(),
+        "adjacent tiles must not overflow the list"
+    );
+    assert_eq!(
+        damage.regions(),
+        &[Rect::new(30, 20, 370, 240), Rect::new(560, 380, 60, 20)]
+    );
 }
 
 #[test]
@@ -733,7 +739,11 @@ fn present_reference(
         for y in 0..descriptor.height {
             for x in 0..descriptor.width {
                 let (lx, ly) = ((x / scale) as i32, (y / scale) as i32);
-                if lx < logical.x || lx >= logical.right() || ly < logical.y || ly >= logical.bottom() {
+                if lx < logical.x
+                    || lx >= logical.right()
+                    || ly < logical.y
+                    || ly >= logical.bottom()
+                {
                     continue;
                 }
                 let offset = (y * descriptor.stride + x) * bytes;
@@ -746,7 +756,8 @@ fn present_reference(
                     PixelFormat::Rgb => [red, green, blue],
                     _ => [blue, green, red],
                 };
-                framebuffer[offset..offset + bytes.min(3)].copy_from_slice(&channels[..bytes.min(3)]);
+                framebuffer[offset..offset + bytes.min(3)]
+                    .copy_from_slice(&channels[..bytes.min(3)]);
                 written += 1;
             }
         }
@@ -777,14 +788,20 @@ fn scaled_presentation_matches_the_per_pixel_definition() {
                 let (mut fast, mut slow) = (vec![0xa5u8; length], vec![0xa5u8; length]);
                 let written = present_scaled(&surface, &damage, &mut fast, descriptor, scale);
                 let expected = present_reference(&surface, &damage, &mut slow, descriptor, scale);
-                assert_eq!(written, expected, "{format:?} {bytes} bytes, scale {scale}: pixel count");
+                assert_eq!(
+                    written, expected,
+                    "{format:?} {bytes} bytes, scale {scale}: pixel count"
+                );
                 // Colour bytes must match; a 4-byte pixel's padding byte is
                 // not part of the colour.
                 for (index, (a, b)) in fast.iter().zip(&slow).enumerate() {
                     if bytes == 4 && index % 4 == 3 {
                         continue;
                     }
-                    assert_eq!(a, b, "{format:?} {bytes} bytes, scale {scale}: byte {index}");
+                    assert_eq!(
+                        a, b,
+                        "{format:?} {bytes} bytes, scale {scale}: byte {index}"
+                    );
                 }
             }
         }
@@ -803,7 +820,11 @@ fn a_scaled_row_repeats_each_pixel_and_pads_with_black() {
             surface.scaled_row(1, start, scale, &mut out);
             for (index, pixel) in out.iter().enumerate() {
                 let x = ((start + index) / scale) as i32;
-                assert_eq!(Some(*pixel), Some(surface.pixel(x, 1).unwrap_or(0)), "scale {scale} start {start} index {index}");
+                assert_eq!(
+                    Some(*pixel),
+                    Some(surface.pixel(x, 1).unwrap_or(0)),
+                    "scale {scale} start {start} index {index}"
+                );
             }
         }
     }

@@ -4,6 +4,8 @@ use core::sync::atomic::{AtomicU8, AtomicUsize, Ordering};
 
 const COM1: u16 = 0x3f8;
 const LINE_STATUS_TRANSMITTER_EMPTY: u8 = 1 << 5;
+/// Never let an absent or wedged legacy UART hold up kernel progress.
+const TX_POLL_LIMIT: u16 = 4096;
 
 pub fn init() {
     // SAFETY: WovenHat owns the machine at this point in kernel startup. These
@@ -94,18 +96,11 @@ impl SerialPort {
         if byte != b'\r' {
             record(byte);
         }
-        // The physical inventory target may have no usable legacy UART.
-        // Its framebuffer is authoritative: never hang that diagnostic on
-        // serial readiness. Ordinary/test builds retain their existing path.
-        #[cfg(feature = "physical-probe")]
         let mut polls = 0u16;
         while unsafe { inb(COM1 + 5) } & LINE_STATUS_TRANSMITTER_EMPTY == 0 {
-            #[cfg(feature = "physical-probe")]
-            {
-                polls += 1;
-                if polls == 4096 {
-                    return;
-                }
+            polls += 1;
+            if polls == TX_POLL_LIMIT {
+                return;
             }
             core::hint::spin_loop();
         }
