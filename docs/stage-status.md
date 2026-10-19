@@ -1,5 +1,36 @@
 # Stage status
 
+## WovenFiles desktop window, and a write_canvas placement bug fix in both
+## (2026-10-19)
+
+Following the WovenCalculator desktop window entry below: woven-files is
+now wired to the same `share_with()`/`WOPN` desktop-client protocol,
+showing a live `/mnt` directory listing (with an "(empty or unavailable)"
+fallback). Live QMP screendump testing of both apps then caught a real
+bug in both: `GraphicsSurface::write_canvas` always uploads to the
+surface's `(0, 0)`, not the `(x, y)` given to `Canvas::new` (that pair is
+only the canvas's own internal coordinate-addressing origin). Both apps
+had drawn a border directly on the window surface at an inset `(12, 12)`
+and separately written a same-sized canvas assuming it would land at that
+same offset; the resulting misalignment erased the border's top/left edges
+(write_canvas overwrites whatever is under it), which was first mistaken
+for a shell resize-grip affordance -- it was not. Fixed by drawing
+everything into one canvas sized to the whole window and uploading it in a
+single call. See `docs/agent-coordination.md` for the full API-trap
+writeup, since this is relevant to any further app-window work.
+
+**Evidence.** Both windows verified via live QMP-driven sessions (sign in,
+launch from the desktop launcher) with screendumps showing correct
+borders, panel colour and text placement. `cargo clippy --all-targets -- -D
+warnings` and `scripts/test-shell-qemu.py --hardware-demo` pass on 1/2/4
+CPUs.
+
+**Limits.** Seven Stage 19 catalog apps remain CLI-only: woven-settings,
+woven-monitor, woven-security, woven-editor, woven-images, woven-update,
+woven-store, (and woven-terminal, which is interactive CLI by design).
+Neither calculator nor files handles `WSIZ` (resize) yet or has real input
+interactivity.
+
 ## Graphics track - WovenFiles desktop client foundation (2026-10-19)
 
 `woven-files` now has a bounded `--gui <shell-pid>` client path: it renders a
