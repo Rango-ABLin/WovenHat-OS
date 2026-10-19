@@ -107,8 +107,12 @@ def main():
     image = subprocess.check_output(
         cargo_command + ['run', '--quiet', '--release'] + feature_arguments + target_arguments + ['--', '--print-image'],
         cwd=root, env=build_env, text=True).strip()
-    out = root / 'target' / 'shell-regression'
-    out.mkdir(parents=True, exist_ok=True)
+    # Keep evidence for each CPU/boot mode distinct; a later run must not
+    # silently overwrite the previous run's serial or QEMU logs.
+    out = root / 'target' / 'shell-regression' / (
+        f'{"system-apps" if args.system_apps else "diagnostic"}-{args.cpus}cpu-{time.time_ns()}'
+    )
+    out.mkdir(parents=True, exist_ok=False)
     serial = out / 'serial.log'
     serial.write_text('')
     vars_copy = None
