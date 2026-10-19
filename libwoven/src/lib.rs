@@ -3534,6 +3534,7 @@ pub mod graphics {
             &self,
             left: u16,
             right: u16,
+            context: Option<(u16, u16)>,
             script_tag: Option<[u8; 4]>,
             language_tag: Option<[u8; 4]>,
             ppem: Option<u16>,
@@ -3735,6 +3736,8 @@ pub mod graphics {
                             script_tag,
                             language_tag,
                             ppem,
+                            previous: context.map(|value| value.0),
+                            next: context.map(|value| value.1),
                         },
                     )
                 } else {
@@ -4153,6 +4156,8 @@ pub mod graphics {
                         script_tag,
                         language_tag,
                         ppem,
+                        previous: context.map(|value| value.0),
+                        next: context.map(|value| value.1),
                     },
                 )
             } else {
@@ -5217,8 +5222,17 @@ pub mod graphics {
             for index in 0..count.saturating_sub(1) {
                 let left = output[index].glyph_id;
                 let right = output[index + 1].glyph_id;
-                let Some((x_placement, y_placement, x_advance, y_advance)) =
-                    self.gpos_pair_adjustment(left, right, script_tag, language_tag, ppem)?
+                let Some((x_placement, y_placement, x_advance, y_advance)) = self
+                    .gpos_pair_adjustment(
+                        left,
+                        right,
+                        (index > 0)
+                            .then(|| output[index - 1].glyph_id)
+                            .zip((index + 2 < count).then(|| output[index + 2].glyph_id)),
+                        script_tag,
+                        language_tag,
+                        ppem,
+                    )?
                 else {
                     continue;
                 };
@@ -5248,8 +5262,8 @@ pub mod graphics {
             }
             for index in 0..count {
                 let glyph = output[index].glyph_id;
-                let Some((x_placement, y_placement, x_advance, y_advance)) =
-                    self.gpos_pair_adjustment(glyph, u16::MAX, script_tag, language_tag, ppem)?
+                let Some((x_placement, y_placement, x_advance, y_advance)) = self
+                    .gpos_pair_adjustment(glyph, u16::MAX, None, script_tag, language_tag, ppem)?
                 else {
                     continue;
                 };
@@ -7340,6 +7354,8 @@ pub mod graphics {
         script_tag: Option<[u8; 4]>,
         language_tag: Option<[u8; 4]>,
         ppem: Option<u16>,
+        previous: Option<u16>,
+        next: Option<u16>,
     }
 
     fn gpos_contextual_single_adjustment(
@@ -7452,11 +7468,14 @@ pub mod graphics {
                     let backtrack_count = usize::from(
                         read_u16(bytes, subtable + 2).ok_or(TrueTypeError::BadTableDirectory)?,
                     );
-                    if backtrack_count != 0 {
+                    if backtrack_count > 1 {
                         continue;
                     }
-                    let input_count_offset = subtable
+                    let backtrack_offsets = subtable
                         .checked_add(4)
+                        .ok_or(TrueTypeError::BadTableDirectory)?;
+                    let input_count_offset = backtrack_offsets
+                        .checked_add(backtrack_count * 2)
                         .ok_or(TrueTypeError::BadTableDirectory)?;
                     let input_count = usize::from(
                         read_u16(bytes, input_count_offset)
@@ -7475,12 +7494,59 @@ pub mod graphics {
                         read_u16(bytes, lookahead_count_offset)
                             .ok_or(TrueTypeError::BadTableDirectory)?,
                     );
-                    if lookahead_count != 0 {
+                    if lookahead_count > 1 {
                         continue;
                     }
-                    let record_count_offset = lookahead_count_offset
+                    let lookahead_offsets = lookahead_count_offset
                         .checked_add(2)
                         .ok_or(TrueTypeError::BadTableDirectory)?;
+                    let record_count_offset = lookahead_offsets
+                        .checked_add(lookahead_count * 2)
+                        .ok_or(TrueTypeError::BadTableDirectory)?;
+                    if backtrack_count == 1 {
+                        let Some(backtrack) = options.previous else {
+                            continue;
+                        };
+                        if gsub_coverage_index(
+                            bytes,
+                            subtable
+                                .checked_add(usize::from(
+                                    read_u16(bytes, backtrack_offsets)
+                                        .ok_or(TrueTypeError::BadTableDirectory)?,
+                                ))
+                                .ok_or(TrueTypeError::BadTableDirectory)?,
+                            table_end,
+                            backtrack,
+                        )?
+                        .is_none()
+                        {
+                            continue;
+                        }
+                    } else if backtrack_count != 0 {
+                        continue;
+                    }
+                    if lookahead_count == 1 {
+                        let Some(lookahead) = options.next else {
+                            continue;
+                        };
+                        if gsub_coverage_index(
+                            bytes,
+                            subtable
+                                .checked_add(usize::from(
+                                    read_u16(bytes, lookahead_offsets)
+                                        .ok_or(TrueTypeError::BadTableDirectory)?,
+                                ))
+                                .ok_or(TrueTypeError::BadTableDirectory)?,
+                            table_end,
+                            lookahead,
+                        )?
+                        .is_none()
+                        {
+                            continue;
+                        }
+                    } else if lookahead_count != 0 {
+                        continue;
+                    }
                     let record_count = usize::from(
                         read_u16(bytes, record_count_offset)
                             .ok_or(TrueTypeError::BadTableDirectory)?,

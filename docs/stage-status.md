@@ -1,5 +1,16 @@
 # Stage status
 
+## Graphics track - bounded contextual GPOS context guards (2026-10-19)
+
+The contextual GPOS format-3 path now validates and matches up to one
+backtrack and one lookahead coverage using adjacent shaped glyphs when
+available. Context-free runs remain supported, and only sequence index zero
+is dispatched to the nested single/pair lookup path. Longer context,
+multi-record dispatch and broader lookup ordering remain open. The 42-test
+`libwoven` suite, warning-denying library/kernel/workspace Clippy, formatting,
+and Stage 19.2 compositor visual acceptance passed on 1/2/4 CPUs. Hardware GPU
+acceleration remains a separate boundary.
+
 ## Graphics track - nested contextual GPOS pair adjustment (2026-10-19)
 
 The bounded format-3 contextual GPOS path now accepts a nested type-2

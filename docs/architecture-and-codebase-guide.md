@@ -1,5 +1,12 @@
 # WovenHat OS Architecture & Codebase Guide
 
+## Graphics contextual GPOS guard update (2026-10-19)
+
+Format-3 contextual positioning can validate one previous and one following
+coverage against adjacent shaped glyphs, while retaining the context-free
+two-input path. The bounded dispatch remains limited to sequence index zero;
+longer context and multi-record lookup application are not implied.
+
 ## Graphics nested contextual GPOS update (2026-10-19)
 
 Contextual format-3 records may now dispatch a bounded nested type-2

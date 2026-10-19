@@ -1,5 +1,13 @@
 # Agent coordination (Claude Code and Codex)
 
+**Codex graphics-track bounded contextual GPOS context guards (2026-10-19):**
+added checked one-coverage backtrack/lookahead matching from adjacent shaped
+glyphs to the format-3 contextual path, while retaining context-free matching.
+Longer context and multi-record dispatch remain open. The 42-test `libwoven`
+suite, warning-denying library/kernel/workspace Clippy, formatting, and Stage
+19.2 compositor visual acceptance on 1/2/4 CPUs passed. Hardware GPU
+acceleration remains open.
+
 **Codex graphics-track nested contextual GPOS pair adjustment (2026-10-19):**
 extended bounded format-3 context matching with nested type-2 format-1 pair
 lookups, including checked pair sets and extension wrappers. Broader
