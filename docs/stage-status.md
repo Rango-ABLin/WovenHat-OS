@@ -1,5 +1,15 @@
 # Stage status
 
+## Graphics track - bounded gradient rasterization (2026-10-19)
+
+WovenGraphics vertical and horizontal gradients now clip iteration to the
+Canvas before calculating pixels, while interpolation remains based on the
+full logical rectangle. The shared Canvas clip arithmetic also handles
+extreme `usize` dimensions without overflow. The 45-test `libwoven` suite,
+warning-denying library/kernel/workspace Clippy, formatting, and Stage 19.2
+compositor visual acceptance passed on 1/2/4 CPUs. Hardware GPU acceleration
+remains a separate boundary.
+
 ## Graphics track - bounded transformed-triangle clipping (2026-10-19)
 
 The shared 2D triangle helper used by transformed rectangles now clips its

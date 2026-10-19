@@ -9755,40 +9755,48 @@ pub mod graphics {
 
         /// Fill a rectangle with a clipped top-to-bottom colour gradient.
         pub fn vertical_gradient(&mut self, rect: Rect, top: Color, bottom: Color) {
-            if rect.is_empty() {
+            let Some((column, row, columns, rows)) =
+                self.canvas.clip(rect.x, rect.y, rect.width, rect.height)
+            else {
                 return;
-            }
-            let last = rect.height.saturating_sub(1).max(1) as u32;
-            for row in 0..rect.height {
-                let t = (row as u32 * 255 / last) as u8;
+            };
+            let last = i128::try_from(rect.height.saturating_sub(1).max(1)).unwrap_or(i128::MAX);
+            for canvas_row in row..row + rows {
+                let y = self.canvas.y + canvas_row as i32;
+                let offset = (i128::from(y) - i128::from(rect.y)).clamp(0, last);
+                let t = (offset * 255 / last) as u8;
                 let color = Color::rgb(
                     lerp(top.red, bottom.red, t),
                     lerp(top.green, bottom.green, t),
                     lerp(top.blue, bottom.blue, t),
                 );
-                for column in 0..rect.width {
+                for canvas_column in column..column + columns {
                     self.canvas
-                        .set(rect.x + column as i32, rect.y + row as i32, color.packed());
+                        .set(self.canvas.x + canvas_column as i32, y, color.packed());
                 }
             }
         }
 
         /// Fill a clipped left-to-right colour gradient.
         pub fn horizontal_gradient(&mut self, rect: Rect, left: Color, right: Color) {
-            if rect.is_empty() {
+            let Some((column, row, columns, rows)) =
+                self.canvas.clip(rect.x, rect.y, rect.width, rect.height)
+            else {
                 return;
-            }
-            let last = rect.width.saturating_sub(1).max(1) as u32;
-            for column in 0..rect.width {
-                let t = (column as u32 * 255 / last) as u8;
+            };
+            let last = i128::try_from(rect.width.saturating_sub(1).max(1)).unwrap_or(i128::MAX);
+            for canvas_column in column..column + columns {
+                let x = self.canvas.x + canvas_column as i32;
+                let offset = (i128::from(x) - i128::from(rect.x)).clamp(0, last);
+                let t = (offset * 255 / last) as u8;
                 let color = Color::rgb(
                     lerp(left.red, right.red, t),
                     lerp(left.green, right.green, t),
                     lerp(left.blue, right.blue, t),
                 );
-                for row in 0..rect.height {
+                for canvas_row in row..row + rows {
                     self.canvas
-                        .set(rect.x + column as i32, rect.y + row as i32, color.packed());
+                        .set(x, self.canvas.y + canvas_row as i32, color.packed());
                 }
             }
         }
@@ -11699,16 +11707,18 @@ impl<'a> Canvas<'a> {
         width: usize,
         height: usize,
     ) -> Option<(usize, usize, usize, usize)> {
-        let left = i64::from(x).max(i64::from(self.x));
-        let top = i64::from(y).max(i64::from(self.y));
-        let right = (i64::from(x) + width as i64).min(i64::from(self.x) + self.width as i64);
-        let bottom = (i64::from(y) + height as i64).min(i64::from(self.y) + self.height as i64);
+        let left = i128::from(x).max(i128::from(self.x));
+        let top = i128::from(y).max(i128::from(self.y));
+        let right = (i128::from(x) + i128::try_from(width).unwrap_or(i128::MAX))
+            .min(i128::from(self.x) + i128::try_from(self.width).unwrap_or(i128::MAX));
+        let bottom = (i128::from(y) + i128::try_from(height).unwrap_or(i128::MAX))
+            .min(i128::from(self.y) + i128::try_from(self.height).unwrap_or(i128::MAX));
         if right <= left || bottom <= top {
             return None;
         }
         Some((
-            (left - i64::from(self.x)) as usize,
-            (top - i64::from(self.y)) as usize,
+            (left - i128::from(self.x)) as usize,
+            (top - i128::from(self.y)) as usize,
             (right - left) as usize,
             (bottom - top) as usize,
         ))
@@ -12765,6 +12775,28 @@ mod tests {
         assert_eq!(pixels[2], Color::rgb(191, 191, 191).packed());
         assert_eq!(pixels[6], Color::rgb(63, 63, 63).packed());
         assert_eq!(pixels[8], Color::rgb(191, 191, 191).packed());
+    }
+
+    #[test]
+    fn wovengraphics_gradients_clip_extreme_rectangles() {
+        use crate::graphics::{Color, Rect, Renderer};
+
+        let mut pixels = [0u32; 16];
+        {
+            let mut canvas = Canvas::new(&mut pixels, 0, 0, 4, 4).unwrap();
+            let mut renderer = Renderer::new(&mut canvas);
+            renderer.vertical_gradient(
+                Rect::new(0, i32::MIN, 4, usize::MAX),
+                Color::BLACK,
+                Color::WHITE,
+            );
+            renderer.horizontal_gradient(
+                Rect::new(i32::MIN, 0, usize::MAX, 4),
+                Color::BLACK,
+                Color::WHITE,
+            );
+        }
+        assert!(pixels.iter().all(|pixel| *pixel <= Color::WHITE.packed()));
     }
 
     #[test]

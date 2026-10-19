@@ -1,5 +1,13 @@
 # Agent coordination (Claude Code and Codex)
 
+**Codex graphics-track bounded gradient rasterization (2026-10-19):**
+WovenGraphics vertical and horizontal gradients now clip iteration to the
+Canvas before calculating pixels while preserving full logical-rectangle
+interpolation. Shared Canvas clipping uses widened arithmetic for extreme
+`usize` dimensions. The 45-test `libwoven` suite, warning-denying
+library/kernel/workspace Clippy, formatting, and Stage 19.2 compositor visual
+acceptance on 1/2/4 CPUs passed. Hardware GPU acceleration remains open.
+
 **Codex graphics-track bounded transformed-triangle clipping (2026-10-19):**
 the shared 2D triangle helper used by transformed rectangles now clips its
 raster bounds to the Canvas before iterating. Extreme transformed vertices

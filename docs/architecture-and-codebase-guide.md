@@ -1,5 +1,13 @@
 # WovenHat OS Architecture & Codebase Guide
 
+## Graphics gradient clipping update (2026-10-19)
+
+`Renderer::vertical_gradient` and `Renderer::horizontal_gradient` iterate
+only over the Canvas intersection, but derive interpolation from the full
+logical rectangle so off-screen origins do not change visual output. The
+shared Canvas clip helper uses i128 bounds to reject extreme dimensions
+without overflow.
+
 ## Graphics transformed-triangle clipping update (2026-10-19)
 
 The Renderer transformed-rectangle triangle helper clips its iteration bounds
