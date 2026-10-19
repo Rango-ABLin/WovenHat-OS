@@ -1,5 +1,12 @@
 # WovenHat OS Architecture & Codebase Guide
 
+## Graphics contextual GPOS class-matrix pair update (2026-10-19)
+
+Nested lookup-2 format-2 class-matrix pair positioning now shares the bounded
+class-rule path. The selected target and partner classes, matrix dimensions,
+value-record size and matrix extents are validated before applying the first
+value record; malformed or unsupported nested forms fail closed.
+
 ## Graphics contextual GPOS class-rule pair update (2026-10-19)
 
 Nested lookup-2 format-1 pair positioning is now available from the bounded

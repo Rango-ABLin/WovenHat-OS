@@ -1,5 +1,16 @@
 # Stage status
 
+## Graphics track - bounded contextual GPOS class-matrix pair positioning (2026-10-19)
+
+Nested lookup-2 format-2 class-matrix pair positioning is now supported from
+the bounded GPOS chaining format-2 class-rule path. Coverage, class
+definitions, matrix dimensions, pair value-record extents and the selected
+partner class are checked before applying the first-glyph adjustment; malformed
+or unsupported nested forms fail closed. The 42-test `libwoven` suite,
+warning-denying library/kernel/workspace Clippy, formatting, and Stage 19.2
+compositor visual acceptance passed on 1/2/4 CPUs. Hardware GPU acceleration
+remains a separate boundary.
+
 ## Graphics track - bounded contextual GPOS class-rule pair positioning (2026-10-19)
 
 The bounded GPOS chaining format-2 class-rule path now applies nested lookup-2
