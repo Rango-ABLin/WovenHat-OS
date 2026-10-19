@@ -1,5 +1,14 @@
 # Agent coordination (Claude Code and Codex)
 
+**Codex graphics-track Calculator pointer control acceptance (2026-10-19):**
+WovenCalculator now has a bounded local `Evaluate` button. A forwarded
+`WPBT` release inside x=150..209, y=110..127 evaluates the current expression
+and repaints the result. The production QEMU gate passed on 1/2/4 CPUs with
+`--app calculator --exercise-client-click`; evidence is under
+`audit-artifacts/calculator-desktop-{1,2,4}cpu-*`. This accepts one functional
+client control; other clients, USB HID, and hardware GPU presentation remain
+separate boundaries.
+
 **Codex graphics-track remaining client pointer acceptance (2026-10-19):**
 Settings, Monitor, Security, Editor, Images, Update, and Store now consume
 bounded `WPMV`/`WPBT` messages and paint distinct markers. The production QEMU

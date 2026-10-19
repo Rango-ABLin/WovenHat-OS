@@ -1,5 +1,20 @@
 # Stage status
 
+## Graphics track - Calculator pointer control acceptance (2026-10-19)
+
+WovenCalculator now presents a bounded `Evaluate` control at local client
+coordinates x=150..209, y=110..127. A primary-button release forwarded as
+`WPBT` within that rectangle evaluates the current bounded expression and
+repaints the result; the button also has a pressed visual state. The
+production QEMU gate
+`scripts/test-files-desktop-qemu.py --app calculator --exercise-client-click`
+passed on 1/2/4 CPUs. Evidence is under
+`audit-artifacts/calculator-desktop-{1,2,4}cpu-*`.
+
+This accepts one functional client control over the PS/2-to-shell-to-client
+path. Other clients still have pointer feedback rather than functional
+controls; USB HID qualification and hardware GPU presentation remain open.
+
 ## Graphics track - all packaged client pointer acceptance (2026-10-19)
 
 Settings, Monitor, Security, Editor, Images, Update, and Store now consume

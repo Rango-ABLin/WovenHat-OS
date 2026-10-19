@@ -1,5 +1,16 @@
 # WovenHat OS Architecture & Codebase Guide
 
+## Graphics Calculator pointer control (2026-10-19)
+
+WovenCalculator renders a bounded `Evaluate` button in its 240x150 client
+surface at local x=150..209 and y=110..127. WovenShell forwards a primary
+button release as `WPBT` with clamped client-local coordinates; the calculator
+checks that rectangle, evaluates its bounded expression, and repaints the
+result. The QEMU visual gate passed on 1/2/4 CPUs. This is the first accepted
+functional client control; the other packaged clients currently provide
+pointer markers only, and USB HID/hardware GPU qualification remains outside
+this gate.
+
 ## Graphics client pointer forwarding (2026-10-19)
 
 WovenShell owns desktop chrome, title-bar drags, close controls, and pointer

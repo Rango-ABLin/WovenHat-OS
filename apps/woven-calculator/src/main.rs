@@ -14,6 +14,11 @@ const BACKGROUND: u32 = rgb(14, 18, 30);
 const PANEL: u32 = rgb(35, 43, 66);
 const ACCENT: u32 = rgb(100, 220, 180);
 const TEXT: u32 = rgb(235, 240, 250);
+const BUTTON: u32 = rgb(45, 65, 90);
+const BUTTON_X: i32 = 150;
+const BUTTON_Y: i32 = 110;
+const BUTTON_WIDTH: usize = 60;
+const BUTTON_HEIGHT: usize = 18;
 
 const PANEL_X: i32 = 12;
 const PANEL_Y: i32 = 12;
@@ -102,7 +107,15 @@ fn draw_gui(
     } else {
         canvas.draw_text(PANEL_X - 2, PANEL_Y + 80, "Enter to evaluate", ACCENT);
     }
-    canvas.draw_text(PANEL_X - 2, PANEL_Y + 104, "ASCII input; Enter evaluates", TEXT);
+    canvas.fill_rect(
+        BUTTON_X,
+        BUTTON_Y,
+        BUTTON_WIDTH,
+        BUTTON_HEIGHT,
+        if pressed { ACCENT } else { BUTTON },
+    );
+    canvas.draw_text(BUTTON_X + 6, BUTTON_Y + 5, "Evaluate", TEXT);
+    canvas.draw_text(PANEL_X - 2, PANEL_Y + 104, "Enter evaluates", TEXT);
     if let Some((x, y)) = pointer {
         let color = if pressed { TEXT } else { ACCENT };
         canvas.fill_rect(i32::from(x).saturating_sub(1), i32::from(y).saturating_sub(1), 3, 3, color);
@@ -230,11 +243,19 @@ fn run_gui(shell: Option<&[u8]>) -> ! {
                 continue;
             }
             if message.get(..4) == Some(&b"WPBT"[..]) && message_length == 10 && message[4] == 0 {
+                let local_x = u16::from_le_bytes([message[6], message[7]]);
+                let local_y = u16::from_le_bytes([message[8], message[9]]);
                 pointer_pressed = message[5] != 0;
-                pointer = Some((
-                    u16::from_le_bytes([message[6], message[7]]),
-                    u16::from_le_bytes([message[8], message[9]]),
-                ));
+                pointer = Some((local_x, local_y));
+                if !pointer_pressed
+                    && i32::from(local_x) >= BUTTON_X
+                    && i32::from(local_x) < BUTTON_X + BUTTON_WIDTH as i32
+                    && i32::from(local_y) >= BUTTON_Y
+                    && i32::from(local_y) < BUTTON_Y + BUTTON_HEIGHT as i32
+                {
+                    result = evaluate(&expression[..length]).ok();
+                    let _ = libwoven::print("WovenCalculator: pointer evaluated\n");
+                }
                 if !render(&window, &expression[..length], result, true, pointer, pointer_pressed) {
                     fail(10)
                 }
