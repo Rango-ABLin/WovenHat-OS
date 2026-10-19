@@ -37,6 +37,13 @@ the kernel `hardware-demo` feature Clippy, and
 other nine Stage 19 catalog apps are still CLI-only and are open follow-up
 work, not started.
 
+**Codex graphics-track bounded GSUB alternate substitutions (2026-10-19):**
+GSUB lookup type 3 now selects the first bounded alternate from checked
+coverage/set records, including extension wrappers. The 56-test `libwoven`
+suite, warning-denying library/kernel/workspace Clippy, formatting, and Stage
+19.2 compositor visual acceptance on 1/2/4 CPUs passed. Hardware GPU
+acceleration remains open.
+
 **Codex graphics-track saturating shared font metrics (2026-10-19):** shared
 font width and line-count accumulation now saturate for arbitrary UTF-8 input.
 The 55-test `libwoven` suite, warning-denying library/kernel/workspace

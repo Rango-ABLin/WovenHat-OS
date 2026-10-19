@@ -1,5 +1,11 @@
 # WovenHat OS Architecture & Codebase Guide
 
+## Graphics GSUB alternate update (2026-10-19)
+
+The bounded GSUB pipeline supports lookup type 3 alternate substitutions by
+selecting the first checked alternate, including type-7 extension wrappers;
+malformed coverage and alternate sets fail closed.
+
 ## Graphics shared-font metric update (2026-10-19)
 
 The shared kernel font’s `text_width` and `line_count` use saturating

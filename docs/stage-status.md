@@ -35,6 +35,15 @@ catalog apps (woven-files, woven-settings, woven-monitor, woven-security,
 woven-editor, woven-images, woven-update, woven-store, woven-terminal) are
 still CLI-only and would need the same `share_with()`/`WOPN` treatment.
 
+## Graphics track - bounded GSUB alternate substitutions (2026-10-19)
+
+GSUB lookup type 3 alternate substitutions now select the first bounded
+alternate from a checked coverage/set record; extension-wrapped type 3 lookups
+use the same path. Missing coverage and empty/oversized alternate sets fail
+closed. The 56-test `libwoven` suite, warning-denying library/kernel/workspace
+Clippy, formatting, and Stage 19.2 compositor visual acceptance passed on
+1/2/4 CPUs. Hardware GPU acceleration remains a separate boundary.
+
 ## Graphics track - saturating shared font metrics (2026-10-19)
 
 The shared kernel font metrics used by WovenGraphics now saturate width and
