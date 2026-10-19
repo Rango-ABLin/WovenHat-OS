@@ -1,5 +1,13 @@
 # WovenHat OS Architecture & Codebase Guide
 
+## Graphics WovenSecurity client (2026-10-19)
+
+`apps/woven-security/src/gui.rs` is a bounded read-only desktop client for
+identity and audit summary data. It uses a static Canvas buffer and the
+WovenShell WOPN/WCLS lifecycle; the catalog supplies `--gui %p`. The shared
+QMP launcher/screendump gate passed on 1/2/4 CPUs. Audit display is capped at
+16 events, with no controls, WSIZ resize, or hardware GPU output implied.
+
 ## Graphics WovenMonitor client (2026-10-19)
 
 `apps/woven-monitor/src/gui.rs` is a bounded read-only desktop client for

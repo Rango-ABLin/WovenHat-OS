@@ -5221,7 +5221,7 @@ fn install_production_system_apps() -> bool {
             image: SYSTEM_APP_SECURITY,
             binary_path: "/bin/wovenhat-security",
             catalog_path: "/share/applications/woven-security.app",
-            catalog: b"Name=WovenSecurity\nExec=/bin/wovenhat-security\n",
+            catalog: b"Name=WovenSecurity\nExec=/bin/wovenhat-security --gui %p\n",
         },
         App {
             name: "woven-editor",

@@ -57,12 +57,13 @@ def main():
     parser.add_argument('--qemu', default=shutil.which('qemu-system-x86_64') or r'C:\Program Files\qemu\qemu-system-x86_64.exe')
     parser.add_argument('--firmware', type=Path)
     parser.add_argument('--cpus', type=int, choices=(1, 2, 4), default=1)
-    parser.add_argument('--app', choices=('files', 'settings', 'monitor'), default='files')
+    parser.add_argument('--app', choices=('files', 'settings', 'monitor', 'security'), default='files')
     args = parser.parse_args()
     app = {
         'files': ('files', 'WovenFiles', 'woven-files'),
         'settings': ('settings', 'WovenSettings', 'woven-settings'),
         'monitor': ('monitor', 'WovenMonitor', 'woven-monitor'),
+        'security': ('security', 'WovenSecurity', 'woven-security'),
     }[args.app]
     root = Path(__file__).resolve().parents[1]
     qemu = Path(args.qemu)
@@ -152,11 +153,11 @@ def main():
         # Match the established shell acceptance: the session has started,
         # but the lock-screen compositor/input handoff needs one frame before
         # the first PS/2 sequence is meaningful.
-        time.sleep(2)
+        time.sleep(4)
         for attempt in range(2):
             for key in ['1', '2', '3', '4', 'ret']:
-                command_qmp('send-key', {'keys': [{'type': 'qcode', 'data': key}], 'hold-time': 100})
-                time.sleep(0.25)
+                command_qmp('send-key', {'keys': [{'type': 'qcode', 'data': key}], 'hold-time': 150})
+                time.sleep(0.4)
             if 'woven-shell: signed in: ada' in serial.read_text(errors='replace'):
                 break
             time.sleep(0.5)

@@ -1,5 +1,18 @@
 # Stage status
 
+## Graphics track - WovenSecurity desktop client (2026-10-19)
+
+WovenSecurity now has a read-only `--gui <shell-pid>` client path. It renders
+bounded identity and audit-count data (capped at 16 events) into a full-window
+Canvas buffer, shares the surface, opens it with `WOPN`, and waits for `WCLS`.
+The production catalog passes the shell PID. The shared
+`scripts/test-files-desktop-qemu.py --app security` launcher/screendump gate
+passed on 1/2/4 CPUs with evidence under
+`audit-artifacts/security-desktop-{1,2,4}cpu-*`.
+
+This slice is intentionally read-only and bounded; no security controls,
+resize (`WSIZ`), or hardware GPU presentation are claimed.
+
 ## Graphics track - WovenMonitor desktop client (2026-10-19)
 
 WovenMonitor now has a read-only `--gui <shell-pid>` client path. It renders

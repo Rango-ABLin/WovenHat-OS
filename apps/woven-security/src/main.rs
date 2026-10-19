@@ -6,11 +6,16 @@ use core::panic::PanicInfo;
 use libwoven::Args;
 use wovenhat_security::{parse, Command};
 
+mod gui;
+
 libwoven::entry!(main);
 
 const MAX_EVENTS: u64 = 16;
 
 fn main(args: Args) -> ! {
+    if args.get(1) == Some(b"--gui") {
+        gui::run(args.get(2));
+    }
     let command = parse(args.get(1).unwrap_or(b"--all"));
     let status = match command {
         Command::All => {
