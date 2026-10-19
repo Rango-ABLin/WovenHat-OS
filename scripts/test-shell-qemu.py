@@ -20,6 +20,28 @@ def build_woven_shell(root):
     subprocess.run(['cargo', 'build', '--release'], cwd=app_dir, env=env, check=True)
     return app_dir / 'target' / 'x86_64-unknown-none' / 'release' / 'wovenhat-woven-shell'
 
+def normal_boot_serial_errors(log: str, system_apps: bool) -> list[str]:
+    """Reject fatal evidence even when all positive boot markers appeared."""
+    errors = []
+    normalized = log.lower()
+    for marker in ('kernel panic', 'panicked at', 'security violation', 'security: failed'):
+        if marker in normalized:
+            errors.append(f'Guest serial contains fatal evidence: {marker}')
+    expected = ('[BOOT] desktop-first runtime ready' if system_apps
+                else '[BOOT] shell-first runtime ready')
+    if expected not in log:
+        errors.append(f'Missing normal boot marker: {expected}')
+    if system_apps:
+        for marker in ('[APPS] 10 signed applications installed',
+                       '[SESSION] WovenShell desktop started',
+                       '[SESSION] diagnostic console'):
+            if marker not in log:
+                errors.append(f'Missing system-apps marker: {marker}')
+    if '[SMP] acknowledged TLB shootdowns: PASSED' not in log:
+        errors.append('Missing keyboard-driven SMP shell acceptance marker')
+    return errors
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--qemu', default=shutil.which('qemu-system-x86_64') or r'C:\Program Files\qemu\qemu-system-x86_64.exe')
@@ -158,6 +180,12 @@ def main():
                     if process.poll() is not None or time.monotonic() > deadline:
                         raise RuntimeError('Keyboard/SMP shell command failed; inspect shell-regression logs')
                     time.sleep(0.1)
+                # Check the complete serial trace, not just the positive marker
+                # that ended the polling loop. A panic after boot is a failure.
+                evidence = serial.read_text(errors='replace')
+                failures = normal_boot_serial_errors(evidence, args.system_apps)
+                if failures:
+                    raise RuntimeError('; '.join(failures))
                 execute('quit')
             process.wait(timeout=5)
         finally:
