@@ -1,5 +1,11 @@
 # WovenHat OS Architecture & Codebase Guide
 
+## Graphics contextual GPOS format-1 pair extension update (2026-10-19)
+
+The chaining format-1 nested lookup-2 pair path is regression-tested through a
+checked type-9 extension wrapper, reusing the same target, partner, pair-set
+and value-record bounds.
+
 ## Graphics contextual GPOS format-1 pair update (2026-10-19)
 
 The chaining format-1 path now shares the checked nested lookup-2 format-1
