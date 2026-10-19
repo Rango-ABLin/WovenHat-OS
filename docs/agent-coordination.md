@@ -1,5 +1,12 @@
 # Agent coordination (Claude Code and Codex)
 
+**Codex graphics-track shared bounded path geometry (2026-10-19):** rounded
+rectangles and path scan conversion now use a shared saturating Canvas-end
+helper; rounded radii use checked conversion. The 50-test `libwoven` suite,
+warning-denying library/kernel/workspace Clippy, formatting, and Stage 19.2
+compositor visual acceptance on 1/2/4 CPUs passed. Hardware GPU acceleration
+remains open.
+
 **Codex graphics-track bounded text layout (2026-10-19):** centered and
 wrapped text now derive rectangle edges with checked conversion, while scaled
 glyph placement saturates cursor arithmetic before clipped fills. The 49-test

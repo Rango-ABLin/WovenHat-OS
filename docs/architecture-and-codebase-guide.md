@@ -1,5 +1,11 @@
 # WovenHat OS Architecture & Codebase Guide
 
+## Graphics path-bound update (2026-10-19)
+
+Rounded-rectangle and path scan bounds use the shared `rect_end` saturating
+helper, while radius conversion is checked. This keeps Canvas clipping stable
+for extreme dimensions without changing normal path coverage behavior.
+
 ## Graphics text-layout update (2026-10-19)
 
 `Renderer::text_centered_scaled` and `text_box` use checked rectangle offsets

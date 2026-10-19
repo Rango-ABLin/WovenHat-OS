@@ -1,5 +1,14 @@
 # Stage status
 
+## Graphics track - shared bounded path geometry (2026-10-19)
+
+Rounded rectangles and path scan conversion now use a shared saturating
+rectangle-end helper for Canvas bounds; rounded-corner radii also use checked
+conversion. Extreme radii and path geometry cannot wrap before clipped scans.
+The 50-test `libwoven` suite, warning-denying library/kernel/workspace
+Clippy, formatting, and Stage 19.2 compositor visual acceptance passed on
+1/2/4 CPUs. Hardware GPU acceleration remains a separate boundary.
+
 ## Graphics track - bounded text layout (2026-10-19)
 
 WovenGraphics centered and wrapped text now derive rectangle edges with

@@ -9722,25 +9722,26 @@ pub mod graphics {
             else {
                 return;
             };
-            let right = rect.x.saturating_add(rect.width.saturating_sub(1) as i32);
-            let bottom = rect.y.saturating_add(rect.height.saturating_sub(1) as i32);
+            let right = rect_end(rect.x, rect.width);
+            let bottom = rect_end(rect.y, rect.height);
+            let radius = i32::try_from(radius).unwrap_or(i32::MAX);
             let r = radius as i64;
             let r2 = r * r;
             for canvas_row in row..row + rows {
                 let y = self.canvas.y + canvas_row as i32;
                 for canvas_column in column..column + columns {
                     let x = self.canvas.x + canvas_column as i32;
-                    let corner_x = if x < rect.x.saturating_add(radius as i32) {
-                        rect.x.saturating_add(radius as i32)
-                    } else if x > right.saturating_sub(radius as i32) {
-                        right.saturating_sub(radius as i32)
+                    let corner_x = if x < rect.x.saturating_add(radius) {
+                        rect.x.saturating_add(radius)
+                    } else if x > right.saturating_sub(radius) {
+                        right.saturating_sub(radius)
                     } else {
                         x
                     };
-                    let corner_y = if y < rect.y.saturating_add(radius as i32) {
-                        rect.y.saturating_add(radius as i32)
-                    } else if y > bottom.saturating_sub(radius as i32) {
-                        bottom.saturating_sub(radius as i32)
+                    let corner_y = if y < rect.y.saturating_add(radius) {
+                        rect.y.saturating_add(radius)
+                    } else if y > bottom.saturating_sub(radius) {
+                        bottom.saturating_sub(radius)
                     } else {
                         y
                     };
@@ -10235,14 +10236,8 @@ pub mod graphics {
                 min_y = min_y.min(point.y);
                 max_y = max_y.max(point.y);
             }
-            let canvas_max_x = self
-                .canvas
-                .x
-                .saturating_add(self.canvas.width.saturating_sub(1) as i32);
-            let canvas_max_y = self
-                .canvas
-                .y
-                .saturating_add(self.canvas.height.saturating_sub(1) as i32);
+            let canvas_max_x = rect_end(self.canvas.x, self.canvas.width);
+            let canvas_max_y = rect_end(self.canvas.y, self.canvas.height);
             min_x = min_x.max(self.canvas.x);
             max_x = max_x.min(canvas_max_x);
             min_y = min_y.max(self.canvas.y);
@@ -10291,17 +10286,13 @@ pub mod graphics {
             }
             let (mut min_x, mut max_x, mut min_y, mut max_y) = path_bounds(points);
             min_x = min_x.saturating_sub(1).max(self.canvas.x);
-            max_x = max_x.saturating_add(1).min(
-                self.canvas
-                    .x
-                    .saturating_add(self.canvas.width.saturating_sub(1) as i32),
-            );
+            max_x = max_x
+                .saturating_add(1)
+                .min(rect_end(self.canvas.x, self.canvas.width));
             min_y = min_y.saturating_sub(1).max(self.canvas.y);
-            max_y = max_y.saturating_add(1).min(
-                self.canvas
-                    .y
-                    .saturating_add(self.canvas.height.saturating_sub(1) as i32),
-            );
+            max_y = max_y
+                .saturating_add(1)
+                .min(rect_end(self.canvas.y, self.canvas.height));
             if min_x > max_x || min_y > max_y {
                 return true;
             }
@@ -10358,14 +10349,8 @@ pub mod graphics {
                     max_y = max_y.max(point.y);
                 }
             }
-            let canvas_max_x = self
-                .canvas
-                .x
-                .saturating_add(self.canvas.width.saturating_sub(1) as i32);
-            let canvas_max_y = self
-                .canvas
-                .y
-                .saturating_add(self.canvas.height.saturating_sub(1) as i32);
+            let canvas_max_x = rect_end(self.canvas.x, self.canvas.width);
+            let canvas_max_y = rect_end(self.canvas.y, self.canvas.height);
             min_x = min_x.max(self.canvas.x);
             max_x = max_x.min(canvas_max_x);
             min_y = min_y.max(self.canvas.y);
@@ -10433,17 +10418,13 @@ pub mod graphics {
                 max_y = max_y.max(bottom);
             }
             min_x = min_x.saturating_sub(1).max(self.canvas.x);
-            max_x = max_x.saturating_add(1).min(
-                self.canvas
-                    .x
-                    .saturating_add(self.canvas.width.saturating_sub(1) as i32),
-            );
+            max_x = max_x
+                .saturating_add(1)
+                .min(rect_end(self.canvas.x, self.canvas.width));
             min_y = min_y.saturating_sub(1).max(self.canvas.y);
-            max_y = max_y.saturating_add(1).min(
-                self.canvas
-                    .y
-                    .saturating_add(self.canvas.height.saturating_sub(1) as i32),
-            );
+            max_y = max_y
+                .saturating_add(1)
+                .min(rect_end(self.canvas.y, self.canvas.height));
             if min_x > max_x || min_y > max_y {
                 return true;
             }
@@ -10557,6 +10538,10 @@ pub mod graphics {
 
     #[derive(Clone, Copy, PartialEq, Eq, Debug)]
     pub struct Surface(pub u64);
+
+    fn rect_end(origin: i32, extent: usize) -> i32 {
+        origin.saturating_add(i32::try_from(extent.saturating_sub(1)).unwrap_or(i32::MAX))
+    }
 
     const fn lerp(start: u8, end: u8, amount: u8) -> u8 {
         let start = start as u16;
@@ -15701,6 +15686,22 @@ mod tests {
             pixels[12],
             blend(Color::WHITE.packed(), Color::BLACK.packed(), 128)
         );
+    }
+
+    #[test]
+    fn wovengraphics_rounded_rect_bounds_extreme_radius() {
+        use crate::graphics::{Color, Rect, Renderer};
+
+        let mut pixels = [0u32; 16];
+        {
+            let mut canvas = Canvas::new(&mut pixels, 0, 0, 4, 4).unwrap();
+            Renderer::new(&mut canvas).rounded_rect(
+                Rect::new(0, 0, 4, 4),
+                usize::MAX,
+                Color::TITLE,
+            );
+        }
+        assert!(pixels.iter().any(|pixel| *pixel == Color::TITLE.packed()));
     }
 
     use super::*;
