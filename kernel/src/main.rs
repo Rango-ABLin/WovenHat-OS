@@ -5242,14 +5242,14 @@ fn install_production_system_apps() -> bool {
             image: SYSTEM_APP_UPDATE,
             binary_path: "/bin/wovenhat-update",
             catalog_path: "/share/applications/woven-update.app",
-            catalog: b"Name=WovenUpdate\nExec=/bin/wovenhat-update\n",
+            catalog: b"Name=WovenUpdate\nExec=/bin/wovenhat-update --gui %p\n",
         },
         App {
             name: "woven-store",
             image: SYSTEM_APP_STORE,
             binary_path: "/bin/wovenhat-store",
             catalog_path: "/share/applications/woven-store.app",
-            catalog: b"Name=WovenStore\nExec=/bin/wovenhat-store\n",
+            catalog: b"Name=WovenStore\nExec=/bin/wovenhat-store --gui %p\n",
         },
     ];
     // Verify and parse all packages before changing the VFS. A malformed or

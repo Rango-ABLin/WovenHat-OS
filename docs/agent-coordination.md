@@ -1,5 +1,14 @@
 # Agent coordination (Claude Code and Codex)
 
+**Codex graphics-track WovenUpdate/WovenStore clients (2026-10-19):**
+Update and Store now have bounded read-only Canvas/WOPN clients, with
+production catalog `--gui %p` entries. Their shared QMP launcher gates passed
+on 1/2/4 CPUs; evidence is in
+`audit-artifacts/{update,store}-desktop-{1,2,4}cpu-*`. WovenShell's catalog
+capacity was raised from 8 to 10 so all signed production apps remain
+launchable. Update is preflight-only, Store is non-mutating, and controls,
+WSIZ, and hardware GPU presentation remain out of scope.
+
 **Codex graphics-track WovenImages client (2026-10-19):**
 `apps/woven-images/src/gui.rs` adds a bounded read-only image-workspace
 preview and the catalog now passes `--gui %p`. The shared QMP desktop gate

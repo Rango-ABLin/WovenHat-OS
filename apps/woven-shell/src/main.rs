@@ -227,7 +227,10 @@ const CURSOR_HEIGHT: i32 = 10;
 
 /// The application catalog: one `*.app` file per application.
 const CATALOG: &str = "/share/applications";
-const MAX_APPS: usize = 8;
+// Production system-apps publishes ten bounded catalog entries. Keep the
+// launcher capacity aligned with that manifest so alphabetical loading does
+// not silently drop the last applications (notably Update and Terminal).
+const MAX_APPS: usize = 10;
 const MAX_APP_NAME: usize = 20;
 const MAX_EXEC: usize = 96;
 const MAX_QUERY: usize = 16;

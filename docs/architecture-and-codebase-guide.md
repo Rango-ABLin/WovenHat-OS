@@ -1,5 +1,15 @@
 # WovenHat OS Architecture & Codebase Guide
 
+## Graphics WovenUpdate/WovenStore clients and catalog capacity (2026-10-19)
+
+`apps/woven-update/src/gui.rs` and `apps/woven-store/src/gui.rs` add bounded
+read-only preflight/catalog windows using the WovenShell WOPN/WCLS lifecycle;
+their production catalog entries pass `--gui %p`. The shared QMP visual gate
+passed both clients on 1/2/4 CPUs. WovenShell `MAX_APPS` is 10, matching the
+ten signed production descriptors so alphabetical loading does not drop
+Update or Terminal. Update performs no installation and Store performs no
+mutation; no controls, WSIZ resize, or hardware GPU output is implied.
+
 ## Graphics WovenImages client (2026-10-19)
 
 `apps/woven-images/src/gui.rs` adds a bounded image-workspace preview using a

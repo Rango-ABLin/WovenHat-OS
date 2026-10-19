@@ -1,5 +1,22 @@
 # Stage status
 
+## Graphics track - WovenUpdate and WovenStore desktop clients (2026-10-19)
+
+WovenUpdate now has a read-only `--gui <shell-pid>` preflight window for the
+bounded `/updates` candidate count, and WovenStore has a read-only
+`--gui <shell-pid>` installed-catalog window for bounded application
+descriptor count. Both use full-window Canvas buffers, WOPN/WCLS, and
+production catalog `--gui %p` entries. The shared
+`scripts/test-files-desktop-qemu.py` launcher/screendump gate passed
+`--app update` and `--app store` on 1/2/4 CPUs with evidence under
+`audit-artifacts/{update,store}-desktop-{1,2,4}cpu-*`.
+
+The slice also raises WovenShell's bounded catalog capacity from 8 to 10,
+matching the ten signed production apps; this prevents alphabetical loading
+from silently dropping Update and Terminal. Update remains preflight-only and
+Store remains read-only: no package mutation, controls, WSIZ resize, or
+hardware GPU presentation is claimed.
+
 ## Graphics track - WovenImages desktop client (2026-10-19)
 
 WovenImages now has a bounded `--gui <shell-pid>` client path. It renders a
@@ -110,11 +127,10 @@ borders, panel colour and text placement. `cargo clippy --all-targets -- -D
 warnings` and `scripts/test-shell-qemu.py --hardware-demo` pass on 1/2/4
 CPUs.
 
-**Limits.** Seven Stage 19 catalog apps remain CLI-only: woven-settings,
-woven-monitor, woven-security, woven-editor, woven-images, woven-update,
-woven-store, (and woven-terminal, which is interactive CLI by design).
-Neither calculator nor files handles `WSIZ` (resize) yet or has real input
-interactivity.
+**Limits.** WovenTerminal remains CLI/interactive by design. Calculator,
+Files, Settings, Monitor, Security, Editor, Images, Update, and Store now have
+desktop preview clients, but their controls/input and `WSIZ` resize paths are
+not yet implemented.
 
 ## Graphics track - WovenFiles desktop client foundation (2026-10-19)
 

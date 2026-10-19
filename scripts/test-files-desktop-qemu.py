@@ -57,15 +57,19 @@ def main():
     parser.add_argument('--qemu', default=shutil.which('qemu-system-x86_64') or r'C:\Program Files\qemu\qemu-system-x86_64.exe')
     parser.add_argument('--firmware', type=Path)
     parser.add_argument('--cpus', type=int, choices=(1, 2, 4), default=1)
-    parser.add_argument('--app', choices=('files', 'settings', 'monitor', 'security', 'editor', 'images'), default='files')
+    parser.add_argument('--app', choices=('files', 'settings', 'monitor', 'security', 'editor', 'images', 'update', 'store'), default='files')
     args = parser.parse_args()
     app = {
-        'files': ('files', 'WovenFiles', 'woven-files'),
-        'settings': ('settings', 'WovenSettings', 'woven-settings'),
-        'monitor': ('monitor', 'WovenMonitor', 'woven-monitor'),
-        'security': ('security', 'WovenSecurity', 'woven-security'),
-        'editor': ('editor', 'WovenEditor', 'woven-editor'),
-        'images': ('images', 'WovenImages', 'woven-images'),
+        'files': ('files', 'WovenFiles', 'woven-files', 'files'),
+        'settings': ('settings', 'WovenSettings', 'woven-settings', 'settings'),
+        'monitor': ('monitor', 'WovenMonitor', 'woven-monitor', 'monitor'),
+        'security': ('security', 'WovenSecurity', 'woven-security', 'security'),
+        'editor': ('editor', 'WovenEditor', 'woven-editor', 'editor'),
+        'images': ('images', 'WovenImages', 'woven-images', 'images'),
+        # Avoid the qcode edge case for the `u` key on this QEMU build; the
+        # substring still uniquely selects WovenUpdate.
+        'update': ('update', 'WovenUpdate', 'woven-update', 'date'),
+        'store': ('store', 'WovenStore', 'woven-store', 'store'),
     }[args.app]
     root = Path(__file__).resolve().parents[1]
     qemu = Path(args.qemu)
@@ -169,7 +173,7 @@ def main():
             time.sleep(0.1)
         baseline = out / 'desktop-before-files.ppm'
         command_qmp('screendump', {'filename': str(baseline)})
-        for key in ['f1', *app[0], 'ret']:
+        for key in ['f1', *app[3], 'ret']:
             command_qmp('send-key', {'keys': [{'type': 'qcode', 'data': key}], 'hold-time': 80})
             time.sleep(0.12)
         while f'{app[1]}: window opened' not in serial.read_text(errors='replace'):
