@@ -1,10 +1,1029 @@
 # Agent coordination (Claude Code and Codex)
 
+**Codex graphics-track bounded contextual GPOS single adjustment (2026-10-19):**
+added format-3 two-input context matching with checked coverage and lookup
+records, applying a nested type-1 format-1 adjustment to sequence index 0;
+type-9 wrappers are supported. Contextual pair and broader nested composition
+remain open. The 42-test `libwoven` suite, warning-denying
+library/kernel/workspace Clippy, formatting, and Stage 19.2 compositor visual
+acceptance on 1/2/4 CPUs passed. Hardware GPU acceleration remains open.
+
+**Codex graphics-track bounded GPOS mark-to-ligature attachment (2026-10-19):**
+implemented format-1 mark-to-ligature positioning with class/component bounds,
+type-9 support and script/LangSys filtering. Since the shaped-glyph ABI does
+not expose a mark's ligature component index, the bounded implementation uses
+the final component deterministically. The 42-test `libwoven` suite,
+warning-denying library/kernel/workspace Clippy, formatting, and Stage 19.2
+compositor visual acceptance on 1/2/4 CPUs passed. Contextual GPOS and hardware
+GPU acceleration remain open.
+
+**Codex graphics-track GPOS attachment extension wrappers (2026-10-19):**
+added bounded type-9 unwrapping for mark-to-base, mark-to-mark and cursive
+lookups, with checked extension formats, nested types and offsets. The 42-test
+`libwoven` suite, warning-denying library/kernel/workspace Clippy, formatting,
+and Stage 19.2 compositor visual acceptance on 1/2/4 CPUs passed. Broader
+GPOS lookup/type semantics and hardware GPU acceleration remain open.
+
+**Codex graphics-track script/LangSys-scoped GPOS attachments (2026-10-19):**
+mark-to-base, mark-to-mark and cursive attachment now share bounded selected
+script/LangSys feature filtering, with missing selections failing closed. The
+42-test `libwoven` suite, warning-denying library/kernel/workspace Clippy,
+formatting, and Stage 19.2 compositor visual acceptance on 1/2/4 CPUs passed.
+Broader GPOS lookup/type semantics and hardware GPU acceleration remain open.
+
+**Codex graphics-track bounded GPOS lookup-order composition (2026-10-19):**
+selected `kern` GPOS single and pair adjustments now accumulate in lookup
+order with saturating arithmetic and strict query-kind filtering. The 42-test
+`libwoven` suite, warning-denying library/kernel/workspace Clippy, formatting,
+and Stage 19.2 compositor visual acceptance on 1/2/4 CPUs passed. Broader
+GPOS feature/type coverage and hardware GPU acceleration remain open.
+
+**Codex graphics-track outline-resolved GPOS format-2 anchors (2026-10-19):**
+resolved format-2 contour-point anchors through the bounded glyph outline
+decoder for mark-to-base, mark-to-mark and cursive attachment, with checked
+point and outline bounds. The 42-test `libwoven` suite, warning-denying
+library/kernel/workspace Clippy, formatting, and Stage 19.2 compositor visual
+acceptance on 1/2/4 CPUs passed. Broader lookup ordering and hardware GPU
+acceleration remain open.
+
+**Codex graphics-track format-3 attachment anchors across GPOS (2026-10-19):**
+extended the checked format-3/device-delta anchor path to mark-to-mark and
+cursive attachment in addition to mark-to-base. Format-2 contour-point anchors
+are now resolved through glyph outlines. The 42-test `libwoven`
+suite, warning-denying library/kernel/workspace Clippy, formatting, and Stage
+19.2 compositor visual acceptance on 1/2/4 CPUs passed. Broader lookup ordering
+and hardware GPU acceleration remain open.
+
+**Codex graphics-track bounded GPOS format-3 anchors (2026-10-19):** added
+checked mark-to-base format-3 anchors with optional ppem device deltas through
+the existing device-table decoder. Format-2 contour-point anchors are now
+resolved through glyph outlines. The 42-test `libwoven` suite,
+warning-denying library/kernel/workspace Clippy, formatting, and Stage 19.2
+compositor visual acceptance on 1/2/4 CPUs passed. Broader lookup ordering and
+hardware GPU acceleration remain open.
+
+**Codex graphics-track bounded GPOS mark-to-mark attachment (2026-10-19):**
+added checked type-6 format-1 `mkmk` attachment with mark1/mark2 coverage,
+class arrays and anchors; stacked marks move without advance changes. The
+42-test `libwoven` suite, warning-denying library/kernel/workspace Clippy,
+formatting, and Stage 19.2 compositor visual acceptance on 1/2/4 CPUs passed.
+Alternate anchors, broader lookup ordering and hardware GPU acceleration remain
+open.
+
+**Codex graphics-track bounded GPOS cursive attachment (2026-10-19):** added
+checked type-3 format-1 `curs` entry/exit anchor matching over adjacent
+covered glyphs, adjusting the right origin without changing advances. The
+42-test `libwoven` suite, warning-denying library/kernel/workspace Clippy,
+formatting, and Stage 19.2 compositor visual acceptance on 1/2/4 CPUs passed.
+Mark-to-mark, alternate anchors, broader lookup ordering and hardware GPU
+acceleration remain open.
+
+**Codex graphics-track bounded GPOS mark-to-base anchors (2026-10-19):**
+added checked type-4 format-1 mark-to-base attachment for `mark`/`mkmk`
+features, including coverage, class-array and anchor validation; mark origins
+move without advance changes. The 42-test `libwoven` suite, warning-denying
+library/kernel/workspace Clippy, formatting, and Stage 19.2 compositor visual
+acceptance on 1/2/4 CPUs passed. Mark-to-mark, cursive, alternate anchors,
+broader lookup ordering and hardware GPU acceleration remain open.
+
+**Codex graphics-track bounded GPOS single adjustments (2026-10-19):** added
+checked GPOS type-1 single-adjustment formats 1/2 with placement, advance and
+ppem device deltas; advances propagate through following glyph origins. The
+42-test `libwoven` suite, warning-denying library/kernel/workspace Clippy,
+formatting, and Stage 19.2 compositor visual acceptance on 1/2/4 CPUs passed.
+Mark/cursive attachment, broader lookup ordering and hardware GPU acceleration
+remain open.
+
+**Codex graphics-track bounded GPOS pair extensions (2026-10-19):** added
+checked GPOS type 9 extension unwrapping for nested type-2 pair positioning,
+including class and pair-set formats with existing ppem device adjustments.
+The 42-test `libwoven` suite, warning-denying library/kernel/workspace
+Clippy, formatting, and Stage 19.2 compositor visual acceptance on 1/2/4 CPUs
+passed. Broader GPOS lookup ordering, other positioning types and hardware GPU
+acceleration remain open.
+
+**Codex graphics-track bounded GSUB extension class lookups (2026-10-19):**
+extended type 7 records to reuse the checked class-based contextual and
+chaining format-2 matchers, including bounded class sets, rules and nested
+single lookups. The 42-test `libwoven` suite, warning-denying
+library/kernel/workspace Clippy, formatting, and Stage 19.2 compositor visual
+acceptance on 1/2/4 CPUs passed. Complete lookup ordering and hardware GPU
+acceleration remain open.
+
+**Codex graphics-track bounded GSUB extension contextual/chaining format 3
+(2026-10-19):** extended type 7 records to reuse the checked format-3
+contextual/chaining matcher, including bounded coverage sequences and nested
+single lookup invocation. The 42-test `libwoven` suite, warning-denying
+library/kernel/workspace Clippy, formatting, and Stage 19.2 compositor visual
+acceptance on 1/2/4 CPUs passed. Extension-wrapped class-based forms,
+complete lookup ordering and hardware GPU acceleration remain open.
+
+**Codex graphics-track bounded GSUB extension ligatures (2026-10-19):**
+extended type 7 extension unwrapping to nested type-4 ligature substitutions,
+preserving bounded component consumption and validating coverage, component,
+offset and glyph ranges. The 42-test `libwoven` suite, warning-denying
+library/kernel/workspace Clippy, formatting, and Stage 19.2 compositor visual
+acceptance on 1/2/4 CPUs passed. Extension-wrapped contextual/chaining
+lookups, complete lookup ordering and hardware GPU acceleration remain open.
+
+**Codex graphics-track bounded GSUB extension lookups (2026-10-19):** added
+checked GSUB type 7 extension unwrapping for nested single substitutions in
+formats 1/2, with bounded offsets, coverage and substitute arrays;
+unsupported extension lookup types fail closed. The 42-test `libwoven` suite,
+warning-denying library/kernel/workspace Clippy, formatting, and Stage 19.2
+compositor visual acceptance on 1/2/4 CPUs passed. Extension-wrapped
+contextual/chaining/ligature lookups, complete lookup ordering and hardware
+GPU acceleration remain open.
+
+**Codex graphics-track bounded GSUB feature-order composition (2026-10-19):**
+added an eight-pass local GSUB pipeline so ordered single substitutions and
+contextual/chaining results can compose. Ligature consumption and no-op/cycle
+repetition remain bounded. The 42-test `libwoven` suite, warning-denying
+library/kernel/workspace Clippy, formatting, and Stage 19.2 compositor visual
+acceptance on 1/2/4 CPUs passed. Complete lookup ordering, broader nested
+composition and hardware GPU acceleration remain open.
+
+**Codex graphics-track bounded class-based GSUB chaining format 2
+(2026-10-19):** added checked backtrack, input and lookahead class-definition
+matching for lookup type 6, with nested type-1 substitution at the current
+glyph. Class-set, rule, sequence, lookup and glyph bounds remain fail-closed.
+The 42-test `libwoven` suite, warning-denying library/kernel/workspace Clippy,
+formatting, and Stage 19.2 compositor visual acceptance on 1/2/4 CPUs passed.
+Broader nested lookup composition, complete feature ordering and hardware GPU
+acceleration remain open.
+
+**Codex graphics-track bounded GSUB chaining format 3 (2026-10-19):** added
+checked lookup type 6 format 3 chaining-context matching across backtrack,
+input and lookahead coverage sequences, with nested type-1 substitution at the
+current glyph. Lookup, sequence, coverage and glyph bounds remain fail-closed.
+The 42-test `libwoven` suite, warning-denying library/kernel/workspace Clippy,
+formatting, and Stage 19.2 compositor visual acceptance on 1/2/4 CPUs passed.
+Class-based chaining, broader nested composition, complete feature ordering and
+hardware GPU acceleration remain open.
+
+**Codex graphics-track bounded class-based contextual GSUB format 2
+(2026-10-19):** added checked class definitions, rule sets, subsequent input
+class matching and nested type-1 substitution at the current glyph. Class-set,
+rule, lookup and glyph bounds remain fail-closed. The 42-test `libwoven` suite,
+warning-denying library/kernel/workspace Clippy, formatting, and Stage 19.2
+compositor visual acceptance on 1/2/4 CPUs passed. Chaining substitution,
+full feature ordering and hardware GPU acceleration remain open.
+
+**Codex graphics-track bounded contextual GSUB format 3 (2026-10-19):** added
+checked lookup type 5 format 3 backtrack/input/lookahead coverage matching with
+one nested type-1 substitution at the current glyph. Unsupported nested forms
+and malformed bounds fail closed. The 42-test `libwoven` suite, warning-denying
+library/kernel/workspace Clippy, formatting, and Stage 19.2 compositor visual
+acceptance on 1/2/4 CPUs passed. Class-based/contextual format 1/2, chaining,
+full feature ordering and hardware GPU acceleration remain open.
+
+**Codex graphics-track bounded GSUB single substitutions (2026-10-19):**
+added checked lookup type 1 formats 1/2 for selected Script/LangSys features,
+including `ccmp`, `locl`, `smcp`, `subs`, `sups`, `case` and `cpsp`. Coverage,
+substitute-array and glyph-range bounds remain fail-closed. The 42-test
+`libwoven` suite, warning-denying library/kernel/workspace Clippy, formatting,
+and Stage 19.2 compositor visual acceptance on 1/2/4 CPUs passed. Contextual/
+chaining GSUB, full feature ordering and hardware GPU acceleration remain open.
+
+**Codex graphics-track bounded named LangSys selection (2026-10-19):** added
+checked named language-system selection within a requested script and exposed
+`TextShapingOptions` for script, language and ppem inputs. GSUB `liga`/`rlig`
+and GPOS `kern` use the selected LangSys; missing language tags do not fall
+back to another feature set. The 42-test `libwoven` suite, warning-denying
+library/kernel/workspace Clippy, formatting, and Stage 19.2 compositor visual
+acceptance on 1/2/4 CPUs passed. Contextual/complex GSUB/GPOS, broader script
+data and hardware GPU acceleration remain open.
+
+**Codex graphics-track bounded script-scoped GPOS (2026-10-19):** extended
+script-aware shaping so the requested ScriptList/default LangSys scopes both
+GSUB `liga`/`rlig` and GPOS `kern` pair positioning. The combined
+`shape_text_ligatures_with_script_and_ppem` entry point makes script and ppem
+requirements explicit. The 42-test `libwoven` suite, warning-denying
+library/kernel/workspace Clippy, formatting, and Stage 19.2 compositor visual
+acceptance on 1/2/4 CPUs passed. Named LangSys selection, contextual/complex
+GSUB/GPOS and hardware GPU acceleration remain open.
+
+**Codex graphics-track bounded GSUB script selection (2026-10-19):** added
+`shape_text_ligatures_with_script` for checked ScriptList/default-LangSys
+selection and bounded `liga`/`rlig` feature lookup resolution. Missing scripts
+fail closed to no substitution; the legacy feature-list path remains intact.
+The 42-test `libwoven` suite, warning-denying library/kernel/workspace Clippy,
+formatting, and Stage 19.2 compositor visual acceptance on 1/2/4 CPUs passed.
+GPOS script scoping, language-specific systems, contextual/complex GSUB and
+hardware GPU acceleration remain open.
+
+**Codex graphics-track bounded GPOS device-table deltas (2026-10-18):**
+added ppem-aware, bounds-checked decoding for GPOS device formats 1, 2 and 3.
+Device deltas augment the corresponding x/y placement or advance field. The
+legacy shaping entry point fails closed when ppem is required, while
+`shape_text_ligatures_with_ppem` makes the dependency explicit. The 42-test
+`libwoven` suite, warning-denying library/kernel/workspace Clippy, formatting,
+and Stage 19.2 compositor visual acceptance on 1/2/4 CPUs passed. Complete
+script shaping, variation-index device semantics and hardware GPU acceleration
+remain open.
+
+**Codex graphics-track bounded GPOS y-value positioning (2026-10-18):**
+extended pair adjustments with y-placement/y-advance fields alongside x
+values. Scaled values update shaped origins and following origins under the
+existing bounds checks. The 42-test `libwoven` suite, warning-denying
+library/kernel/workspace Clippy, formatting, and Stage 19.2 compositor visual
+acceptance on 1/2/4 CPUs passed. Device-table deltas, complete script shaping
+and hardware GPU acceleration remain open.
+
+**Codex graphics-track bounded GPOS class pair positioning (2026-10-18):**
+extended optional GPOS `kern` handling to pair-positioning format 2 with
+bounded class-definition formats 1/2 and class-matrix lookup. Class counts,
+matrix extents and table bounds are checked while scaled x-placement/x-advance
+adjustments update shaped runs. The 42-test `libwoven` suite, warning-denying
+library/kernel/workspace Clippy, formatting, and Stage 19.2 compositor visual
+acceptance on 1/2/4 CPUs passed. Full GPOS value/device semantics, script
+shaping and hardware GPU acceleration remain open.
+
+**Codex graphics-track bounded OpenType GPOS pair positioning (2026-10-18):**
+added optional GPOS `kern` feature handling for type-2 pair-positioning format
+1. Checked x-placement/x-advance adjustments are scaled from font units and
+following origins are shifted; unsupported formats and malformed records fail
+closed. The 42-test `libwoven` suite, warning-denying library/kernel/workspace
+Clippy, formatting, and Stage 19.2 compositor visual acceptance on 1/2/4 CPUs
+passed. Full GPOS value/device formats, script shaping and hardware GPU
+acceleration remain open.
+
+**Codex graphics-track variation-aware shaped rasterization (2026-10-18):**
+extended glyph-ID shaping/rasterization with normalized variation coordinates:
+`advance_width_glyph_with_variation`, variation-aware outline/compound paths,
+and `render_shaped_text_with_variation` carry bounded gvar metrics and outlines
+through GSUB-selected glyphs. Base rendering remains separate so deltas apply
+once. The 41-test `libwoven` suite, warning-denying library/kernel/workspace
+Clippy, formatting, and Stage 19.2 compositor visual acceptance on 1/2/4 CPUs
+passed. Full script shaping and hardware GPU acceleration remain open.
+
+**Codex graphics-track shaped glyph-ID raster integration (2026-10-18):**
+added direct glyph-ID outline/raster entry points and
+`TrueTypeFace::render_shaped_text`, preserving GSUB-selected glyph IDs through
+the antialiased path. Glyph, outline-storage and renderer-capacity bounds are
+checked. The 41-test `libwoven` suite, warning-denying library/kernel/workspace
+Clippy, formatting, and Stage 19.2 compositor visual acceptance on 1/2/4 CPUs
+passed. Variation-aware shaped rasterization, full script shaping and hardware
+GPU acceleration remain open.
+
+**Codex graphics-track bounded OpenType GSUB ligatures (2026-10-18):** added
+`ShapedGlyph` and `TrueTypeFace::shape_text_ligatures` for bounded GSUB type-1
+ligatures linked by `liga`/`rlig`. Coverage, lookup, component, source-span,
+metric and table bounds are checked; absent features fall back to one glyph per
+character and malformed shaping data fails closed. The 41-test `libwoven`
+suite, warning-denying library/kernel/workspace Clippy, formatting, and Stage
+19.2 compositor visual acceptance on 1/2/4 CPUs passed. Full script shaping,
+shaped-glyph raster integration and hardware GPU acceleration remain open.
+
+**Codex graphics-track bounded directional text runs (2026-10-18):** added
+`TextDirection::classify` and `TrueTypeFace::layout_text_bidi` for strong
+RTL/LTR classification, neutral inheritance and visual run ordering in
+caller-owned placements. This is explicitly not full UAX#9 or script shaping.
+The 40-test `libwoven` suite, warning-denying library/kernel/workspace Clippy,
+formatting, and Stage 19.2 compositor visual acceptance on 1/2/4 CPUs passed.
+OpenType shaping, full bidi and hardware GPU acceleration remain open.
+
+**Codex graphics-track bounded hint control flow (2026-10-18):** added
+instruction-span-aware `IF`/`ELSE`/`EIF` selection and bounded relative
+`JMPR`/`JROT`/`JROF` branches. PUSH payloads are skipped during branch scans;
+nesting, targets and the existing 1024-step cap are checked, with malformed
+or unsupported control flow failing closed. The 40-test `libwoven` suite,
+warning-denying library/kernel/workspace Clippy, formatting, and Stage 19.2
+compositor visual acceptance on 1/2/4 CPUs passed. Full hint interpolation,
+function calls, shaping and bidi remain open.
+
+**Codex graphics-track bounded hint storage/CVT resources (2026-10-18):**
+added `execute_glyph_hints_with_resources` with checked caller-owned storage
+for `WS`/`RS` and CVT-backed `MIAP`/`MDAP` execution. The no-storage wrapper
+fails closed on storage access. The 40-test `libwoven` suite,
+warning-denying library/kernel/workspace Clippy, formatting, and Stage 19.2
+compositor visual acceptance on 1/2/4 CPUs passed. Full hint interpolation,
+control flow, shaping and bidi remain open.
+
+**Codex graphics-track bounded hint point/CVT execution (2026-10-18):**
+extended `execute_glyph_hints_with_cvt` with checked `MDAP` and `MIAP` support
+along the active freedom axis. A synthetic program moves point 0 to a caller
+CVT value, while the no-CVT wrapper fails closed. The 40-test `libwoven` suite,
+warning-denying library/kernel/workspace Clippy, formatting, and Stage 19.2
+compositor visual acceptance on 1/2/4 CPUs passed. Full hint interpolation,
+shaping and bidi remain open.
+
+**Codex graphics-track bounded hint-state execution (2026-10-18):** added
+`HintState` and `TrueTypeFace::execute_glyph_hints` for vector-axis,
+rounding-state, stack and PUSHB/PUSHW primitives with 1024-step and
+256-entry-stack limits. Point movement, storage, CVT and control flow fail
+closed. The 40-test `libwoven` suite, warning-denying library/kernel/workspace
+Clippy, formatting, and Stage 19.2 compositor visual acceptance on 1/2/4 CPUs
+passed. Full hinting, shaping and bidi remain open.
+
+**Codex graphics-track bounded TrueType hint-program boundary (2026-10-18):**
+added `TrueTypeFace::glyph_hint_program`, a checked caller-owned copy path for
+simple-glyph instructions with a 256-byte bound. Composite programs and
+execution remain fail-closed. The 40-test `libwoven` suite, warning-denying
+library/kernel/workspace Clippy, formatting, and Stage 19.2 compositor visual
+acceptance on 1/2/4 CPUs passed. The VirGL/QEMU boundary is unchanged.
+
+**Codex graphics-track gvar phantom-point metrics (2026-10-18):** added
+`TrueTypeFace::advance_width_with_variation`, applying simple-glyph phantom
+point deltas and deriving the varied advance from the right/left phantom
+pair. Full and half scalar synthetic metrics pass. The 40-test `libwoven`
+suite, warning-denying library/kernel/workspace Clippy, formatting, and Stage
+19.2 compositor visual acceptance on 1/2/4 CPUs passed. Legacy fonts without
+trailing LSB records retain base advance behavior; hinting, shaping, bidi and
+the VirGL/QEMU boundary remain explicit constraints.
+
+**Codex graphics-track composite gvar component variation (2026-10-18):**
+extended `outline_points_with_variation` to apply bounded component-index
+X/Y placement deltas for composite glyphs, recursively varying nested
+components and tracking each component’s output range. The 40-test `libwoven`
+suite, warning-denying library/kernel/workspace Clippy, formatting, and Stage
+19.2 compositor visual acceptance on 1/2/4 CPUs passed. Phantom metrics,
+hinting, shaping and bidi remain separate constraints; the VirGL/QEMU boundary
+is unchanged.
+
+**Codex graphics-track shared-point gvar tuples (2026-10-18):** added
+glyph-level packed shared-point handling, including the valid all-points form,
+with checked point runs, bounds and reserved tuple flags. The 40-test
+`libwoven` suite, warning-denying library/kernel/workspace Clippy, formatting,
+and Stage 19.2 compositor visual acceptance on 1/2/4 CPUs passed. Composite
+variation, hinting, shaping, bidi and the VirGL/QEMU boundary remain explicit
+follow-on constraints.
+
+**Codex graphics-track intermediate gvar regions (2026-10-18):** extended
+simple-glyph variation to embedded-peak intermediate regions with checked
+start/peak/end ranges and piecewise scalar blending. The synthetic fixture
+verifies full and half strength. The 40-test `libwoven` suite, warning-denying
+library/kernel/workspace Clippy, formatting, and Stage 19.2 compositor visual
+acceptance on 1/2/4 CPUs passed. Shared points, composite variation, hinting,
+shaping and bidi remain explicit follow-on constraints.
+
+**Codex graphics-track simple gvar tuple application (2026-10-18):** added
+`TrueTypeFace::outline_points_with_variation` for bounded embedded-peak
+`gvar` tuples on simple glyphs, including normalized F2DOT14 scalar handling
+and packed point/delta decoding. Composite glyphs and shared-point sets fail
+closed. The 40-test `libwoven` suite, warning-denying
+library/kernel/workspace Clippy, formatting, and Stage 19.2 compositor visual
+acceptance on 1/2/4 CPUs passed. Hinting, shaping and the VirGL/QEMU boundary
+remain explicit follow-on constraints.
+
+**Codex graphics-track bounded gvar payload boundary (2026-10-18):** added
+`TrueTypeFace::glyph_variation_data`, a borrowed, fail-closed slice over
+validated `gvar` glyph data with checked version, glyph count, offset width,
+shared-tuple bounds and table extents. A synthetic fixture covers empty and
+non-empty glyph payloads. The 40-test `libwoven` suite, warning-denying
+library/kernel/workspace Clippy, formatting, and Stage 19.2 compositor visual
+acceptance on 1/2/4 CPUs passed. Delta application remains open; the
+VirGL/QEMU boundary is unchanged.
+
+**Codex graphics-track accepted fvar axis fixture (2026-10-18):** added a
+positive synthetic-font test for the bounded `wght` axis metadata path,
+including checked 16.16 minimum/default/maximum values. The 39-test
+`libwoven` suite, warning-denying library/kernel/workspace Clippy, formatting,
+and Stage 19.2 compositor visual acceptance on 1/2/4 CPUs passed. Variation
+rendering remains metadata-only; the VirGL/QEMU boundary is unchanged.
+
+**Codex graphics-track bounded variable-font axis metadata (2026-10-18):**
+added checked `fvar` axis metadata through `VariationAxis` and
+`variation_axes`, exposing 16.16 min/default/max values without applying
+`gvar` deltas. The 38-test `libwoven` suite, warning-denying
+library/kernel/workspace Clippy, formatting, and Stage 19.2 compositor visual
+acceptance on 1/2/4 CPUs passed. Variation rendering remains open; the
+VirGL/QEMU boundary is unchanged.
+
+**Codex graphics-track explicit RTL placement (2026-10-18):** added
+`TextDirection` and bounded RTL mirroring over validated glyph placements.
+This is an explicit placement mode, not Unicode bidi or script shaping. The
+38-test `libwoven` suite, warning-denying library/kernel/workspace Clippy,
+formatting, and Stage 19.2 compositor visual acceptance on 1/2/4 CPUs passed;
+the VirGL/QEMU boundary is unchanged.
+
+**Codex graphics-track Unicode format-12 cmap (2026-10-18):** added bounded
+format-12 group lookup for non-BMP code points while preserving format-4 BMP
+mapping, with checked group extents and glyph IDs. A synthetic non-BMP fixture
+passes mapping and advance lookup. The 38-test `libwoven` suite,
+warning-denying library/kernel/workspace Clippy, formatting, and Stage 19.2
+compositor visual acceptance on 1/2/4 CPUs passed. Full shaping, bidi and
+variation tables remain open; the VirGL/QEMU boundary is unchanged.
+
+**Codex graphics-track TrueType point-matched composites (2026-10-18):**
+added support for composite component point arguments, anchoring transformed
+components to parent points with strict index validation. The synthetic glyph
+fixture now exercises XY and point-matched components. The 37-test `libwoven`
+suite, warning-denying library/kernel/workspace Clippy, formatting, and Stage
+19.2 compositor visual acceptance on 1/2/4 CPUs passed. Variation deltas,
+hinting, modern shaping and scripts remain open; the VirGL/QEMU boundary is
+unchanged.
+
+**Codex graphics-track bounded TrueType composite glyphs (2026-10-18):**
+added recursive, depth-limited composite component decoding with XY offsets,
+uniform/non-uniform/two-by-two transforms, instruction skipping and bounded
+output. The synthetic mapped glyph is now composite and passes raster tests.
+Point-matching arguments, variation deltas and hint execution fail closed. The
+37-test `libwoven` suite, warning-denying library/kernel/workspace Clippy,
+formatting, and Stage 19.2 compositor visual acceptance on 1/2/4 CPUs passed;
+the VirGL/QEMU boundary is unchanged.
+
+**Codex graphics-track bounded TrueType word wrapping (2026-10-18):** added
+`layout_text_word_box`, keeping whole words intact at spaces while preserving
+newlines, checked advances and optional kerning in caller-owned placements. The
+37-test `libwoven` suite, warning-denying library/kernel/workspace Clippy,
+formatting, and Stage 19.2 compositor visual acceptance on 1/2/4 CPUs passed.
+Script shaping, bidi, hinting and compound components remain open; the
+VirGL/QEMU boundary is unchanged.
+
+**Codex graphics-track TrueType bitmap fallback (2026-10-18):** added
+`render_text_with_bitmap_fallback`, using validated outlines for mapped glyphs
+and the shared bounded bitmap font for missing/unsupported glyphs. Mixed output
+is covered by the synthetic face fixture. The 37-test `libwoven` suite,
+warning-denying library/kernel/workspace Clippy, formatting, and Stage 19.2
+compositor visual acceptance on 1/2/4 CPUs passed. Modern shaping, bidi,
+hinting and compound components remain open; the VirGL/QEMU boundary is
+unchanged.
+
+**Codex graphics-track bounded TrueType line breaking (2026-10-18):** added
+`TrueTypeFace::layout_text_box` with explicit newlines, width wrapping, line
+height, checked advances and optional kerning into caller-owned placements.
+The 37-test `libwoven` suite, warning-denying library/kernel/workspace Clippy,
+formatting, and Stage 19.2 compositor visual acceptance on 1/2/4 CPUs passed.
+Script shaping, bidi, word-level breaking, hinting and fallback remain open;
+the VirGL/QEMU boundary is unchanged.
+
+**Codex graphics-track optional TrueType kerning (2026-10-18):** added
+fail-closed legacy `kern` format-0 pair lookup and applied adjustments in the
+bounded single-line TrueType layout pass. The 37-test `libwoven` suite,
+warning-denying library/kernel/workspace Clippy, formatting, and Stage 19.2
+compositor visual acceptance on 1/2/4 CPUs passed. Modern shaping, scripts,
+line breaking and fallback remain open; the VirGL/QEMU boundary is unchanged.
+
+**Codex graphics-track bounded TrueType text layout (2026-10-18):** added
+`GlyphPlacement`, `TrueTypeFace::layout_text`, and `render_text` using checked
+horizontal advances and the antialiased glyph pipeline. The 37-test `libwoven`
+suite, warning-denying library/kernel/workspace Clippy, formatting, and Stage
+19.2 compositor visual acceptance on 1/2/4 CPUs passed. Kerning, shaping,
+line breaking, hinting and fallback remain open; the VirGL/QEMU boundary is
+unchanged.
+
+**Codex graphics-track TrueType glyph raster entry point (2026-10-18):**
+connected `TrueTypeFace::render_glyph` to the bounded antialiased compound
+path renderer and verified a synthetic glyph reaches Canvas pixels. The
+37-test `libwoven` suite, warning-denying library/kernel/workspace Clippy,
+formatting, and Stage 19.2 compositor visual acceptance on 1/2/4 CPUs passed.
+Shaping, kerning, hinting, fallback and compound components remain open; the
+VirGL/QEMU hardware boundary is unchanged.
+
+**Codex graphics-track bounded antialiased fills (2026-10-18):** added
+integer 4x4 coverage rasterization for `Path` and `CompoundPath`, including
+source-over opacity and even-odd holes, and routed the hello-gui badge through
+the antialiased path. The 37-test `libwoven` suite, warning-denying
+library/kernel/workspace Clippy, formatting, and Stage 19.2 compositor visual
+acceptance on 1/2/4 CPUs passed. The VirGL/QEMU device capability boundary
+remains explicit.
+
+**Codex graphics-track bounded multi-contour paths (2026-10-18):** added the
+eight-contour `CompoundPath`, even-odd hole filling, compound stroking, and
+`TrueTypeFace::outline_compound` for simple glyphs. Overflow and compound
+TrueType components fail closed. The 36-test `libwoven` suite, warning-denying
+library/kernel/workspace Clippy, formatting, and Stage 19.2 compositor visual
+acceptance on 1/2/4 CPUs passed. The VirGL/QEMU hardware capability boundary
+remains unchanged and documented.
+
+**Codex graphics-track TrueType contour assembly (2026-10-18):** added
+`TrueTypeFace::outline_contour`, which maps one simple contour into a bounded
+closed `Path`, handles implied on-curve midpoints and quadratic transitions,
+and commits only after capacity checks succeed. The 35-test `libwoven` suite,
+warning-denying library/kernel/workspace Clippy, formatting, and Stage 19.2
+compositor visual acceptance on 1/2/4 CPUs passed. Multi-contour fill/hole
+semantics, compound glyphs, shaping and antialiasing remain open.
+
+**Codex graphics-track bounded quadratic paths (2026-10-18):** added
+`Path::quadratic_to`, a four-segment deterministic quadratic Bézier flattening
+primitive with atomic capacity failure, and exercised it in `hello-gui`. The
+35-test `libwoven` suite, warning-denying library/kernel/workspace Clippy,
+formatting, and Stage 19.2 compositor visual acceptance on 1/2/4 CPUs passed.
+TrueType contour assembly and antialiased rasterization remain open.
+
+**Codex graphics-track TrueType simple outlines (2026-10-18):** added
+optional `glyf`/`loca` validation and bounded simple-glyph decoding into
+caller-owned `OutlinePoint` buffers. Compound/oversized/malformed glyphs fail
+closed. The 34-test `libwoven` suite, warning-denying Clippy, formatting, and
+Stage 19.2 compositor visual acceptance on 1/2/4 CPUs passed. Curve expansion,
+rasterization, antialiasing and shaping remain open.
+
+**Codex graphics-track TrueType horizontal metrics (2026-10-18):** extended
+`TrueTypeFace` with validated `hhea`/`hmtx` advance-width lookup, including the
+final long-metric fallback rule. The 33-test `libwoven` suite, warning-denying
+library/kernel/workspace Clippy, formatting, and Stage 19.2 compositor visual
+acceptance on 1/2/4 CPUs passed. Outline extraction/rasterization remains
+open.
+
+**Codex graphics-track TrueType face boundary (2026-10-18):** added the safe,
+borrowed `graphics::TrueTypeFace` parser for sfnt metadata and format-4 BMP
+cmap lookup, with fail-closed validation and no allocation/unsafe code. The
+33-test `libwoven` suite, warning-denying library/kernel/workspace Clippy,
+formatting, and Stage 19.2 compositor visual acceptance on 1/2/4 CPUs passed.
+This is metadata/cmap support only; outline rasterization, antialiasing and
+complex shaping remain open because no font asset is bundled.
+
+**Codex graphics-track alpha image blits (2026-10-18):** added bounded
+`Renderer::image_blended` uploads and routed the `hello-gui` icon through the
+alpha-aware path. The 32-test `libwoven` suite, warning-denying
+library/kernel/workspace Clippy, formatting, and Stage 19.2 compositor visual
+acceptance on 1/2/4 CPUs passed.
+
+**Codex graphics-track rounded alpha panels (2026-10-18):** added clipped
+`Renderer::rounded_rect` and `rounded_rect_blended` fills and exercised a
+translucent rounded panel in `hello-gui`. The 32-test `libwoven` suite,
+warning-denying library/kernel/workspace Clippy, formatting, and Stage 19.2
+compositor visual acceptance on 1/2/4 CPUs passed.
+
+**Codex graphics-track bounded text layout (2026-10-18):** added
+`Renderer::text_box` for allocation-free UTF-8 character wrapping and clipping
+with shared glyph fallback and integer scaling. `hello-gui` exercises it. The
+31-test `libwoven` suite, warning-denying library/kernel/workspace Clippy,
+formatting, and Stage 19.2 compositor visual acceptance on 1/2/4 CPUs passed.
+
+**Codex graphics-track alpha path fills (2026-10-18):** added uniform
+source-over alpha for closed paths through `Renderer::fill_path_blended` and
+exercised a translucent polygon in `hello-gui`. The 30-test `libwoven` suite,
+warning-denying library/kernel/workspace Clippy, formatting, and Stage 19.2
+compositor visual acceptance on 1/2/4 CPUs passed.
+
+**Codex graphics-track horizontal gradients (2026-10-18):** added the clipped
+`Renderer::horizontal_gradient` primitive and exercised it alongside the
+vertical gradient in `hello-gui`. The 29-test `libwoven` suite,
+warning-denying library/kernel/workspace Clippy, formatting, and Stage 19.2
+compositor visual acceptance on 1/2/4 CPUs passed.
+
+**Codex graphics-track bounded path filling (2026-10-18):** added clipped
+even-odd filling for closed `graphics::Path` geometry through
+`Renderer::fill_path`; work is restricted to Canvas bounds. `hello-gui`
+exercises a filled polygon. The 28-test `libwoven` suite, warning-denying
+library/kernel/workspace Clippy, formatting, and Stage 19.2 compositor visual
+acceptance on 1/2/4 CPUs passed.
+
+**Codex graphics-track bounded paths (2026-10-18):** added allocation-free
+`graphics::Path` move/line/close geometry and clipped `Renderer::stroke_path`.
+`hello-gui` exercises an open chevron path. The 27-test `libwoven` suite,
+warning-denying library/kernel/workspace Clippy, formatting, and Stage 19.2
+compositor visual acceptance on 1/2/4 CPUs passed. Path filling and richer
+outline/font work remain open.
+
+**Codex graphics-track integer font scaling (2026-10-18):** extended the
+shared-glyph `graphics::Font` with bounded 1×–16× metrics and added
+`Renderer::text_scaled`/`text_centered_scaled`. `hello-gui` exercises a scaled
+glyph. The 26-test `libwoven` suite, warning-denying library/kernel/workspace
+Clippy, formatting, and Stage 19.2 compositor visual acceptance on 1/2/4 CPUs
+passed. Outline fonts, hinting and shaping remain open.
+
+**Codex graphics-track shared font metrics (2026-10-18):** added the
+`graphics::Font`/`TextMetrics` abstraction over the shared 5x7 glyph table and
+`Renderer::text_centered`. `hello-gui` exercises centered text in the visible
+frame. The 25-test `libwoven` suite, warning-denying library/kernel/workspace
+Clippy, formatting, and Stage 19.2 compositor visual acceptance on 1/2/4 CPUs
+passed. TrueType/OpenType shaping and richer fallback remain open; the current
+provider deliberately preserves compositor pixel identity.
+
+**Codex graphics-track fixed-point transforms (2026-10-18):** added the safe,
+deterministic signed 16.16 `graphics::Transform` and clipped
+`Renderer::transformed_rect` primitive. `hello-gui` now exercises transformed
+geometry in its visible frame. The 24-test `libwoven` suite, warning-denying
+library/kernel/workspace Clippy, formatting, and Stage 19.2 compositor visual
+acceptance on 1/2/4 CPUs passed. The surface ABI and software fallback are
+unchanged; the QEMU VirGL blob presentation boundary remains open as an
+environment/device capability issue.
+
+**Codex graphics-track 2D increment (2026-10-18):** extended the existing
+`libwoven::graphics::Renderer` with clipped vertical gradients, one-pixel
+strokes, and bounded image blits. `hello-gui` now exercises those primitives
+and emits `[S16G2] WovenGraphics 2D frame: PASSED`; the Stage 19.2 QEMU
+harness requires both graphics markers. The 21-test `libwoven` suite,
+warning-denying workspace/application Clippy, formatting, harness syntax, and
+QEMU visual acceptance on 1/2/4 CPUs all passed. This remains a safe software
+renderer over `Canvas`; no ABI or unsafe code changed. Paths, font shaping,
+GPU backends, window policy, and physical display acceptance remain open.
+
+**Codex graphics-track software 3D foundation (2026-10-18):** added a safe,
+caller-owned `DepthBuffer`, projected `Vertex3`, and depth-tested triangle
+rasterization with interpolated vertex colour to `libwoven::graphics`.
+`hello-gui` exercises a small two-face 3D frame and emits `[S16G3D]
+WovenGraphics software 3D frame: PASSED`; the Stage 19.2 harness requires it
+with the existing 2D markers. The 23-test
+`libwoven` suite, warning-denying Clippy, formatting, and QEMU visual
+acceptance on 1/2/4 CPUs passed. This is still a deterministic software
+backend; VirtIO-GPU capability negotiation, GPU buffers, command submission,
+and shaders remain the next hardware-facing work.
+
+**Codex graphics-track VirtIO-GPU capability boundary (2026-10-18):** the
+modern VirtIO transport now retains negotiated features, and the VirtIO-GPU
+driver requests/exposes a typed capability record for scanouts and VIRGL/3D
+support. No shader or VIRGL command submission is claimed yet; software
+rendering remains the fallback. Kernel target Clippy, workspace all-target
+Clippy, and Stage 20.14 two-monitor pixel acceptance passed on 1/2/4 CPUs.
+Evidence is under `audit-artifacts/stage20.14-{1,2,4}cpu-*`.
+
+The next VIRGL slice adds capability-gated, bounded `CTX_CREATE` and
+`CTX_DESTROY` packets using the VirtIO-defined context header. The current
+QEMU acceptance device continues through the software/2D fallback, so this
+does not claim shader or GPU rendering yet; the 1/2/4 CPU Stage 20.14 display
+acceptance still passes.
+
+The follow-up adds the bounded `GET_CAPSET_INFO` discovery query and records
+the advertised capset count, version, and maximum payload size before a VIRGL
+context is selected. The current standard QEMU device still uses the 2D
+fallback; Stage 20.14 remains pixel-verified on 1/2/4 CPUs.
+
+The harness now supports `--virgl`, selecting QEMU `virtio-gpu-gl-pci` with
+`egl-headless`; VIRGL capset discovery and context lifecycle pass on 1/2/4
+CPUs. The GL device rejects the legacy 2D resource mode, so this mode is
+discovery-only until 3D resource creation and command submission are wired.
+
+The resource transport slice is now wired and exercised on GL QEMU: create a
+64x64 3D resource, attach it to the context, detach it, and release it. The
+remaining unaccepted step is a valid VIRGL command stream with a visual result;
+the software renderer remains the fallback until that gate passes.
+
+The next probe now submits the protocol-defined VIRGL NOP command through
+`SUBMIT_3D` after resource attachment. GL QEMU passes the complete
+capability/context/resource/command transport lifecycle; no visible GPU frame
+or compositor handoff is claimed yet.
+
+The command packet is now assembled by a bounded `VirglStream` encoder with
+checked payload/header capacity. The encoder-backed NOP transport acceptance
+passes on 1/2/4 CPUs; the next graphics increment must add a real VIRGL clear
+or draw command and prove a visible GPU-backed frame before claiming backend
+completion.
+
+The stream now also encodes surface creation, framebuffer binding, an RGBA
+clear, and surface destruction; the GL-QEMU transport gate passes on 1/2/4
+CPUs. A direct 3D-resource-to-scanout probe was attempted and rejected by QEMU
+with device status `0x1203`; that failed evidence is preserved, and the
+accepted gate was restored. The next increment must resolve the resource
+scanout compatibility boundary before visual GPU acceptance.
+
+The presentation probe now has a bounded, capability-gated resource-blob path
+and an opt-in harness switch (`--blob`). This QEMU build can create a guest
+blob but rejects it in the VirGL context; the host-3D-plus-guest blob class is
+also rejected during creation. The default blob-disabled VIRGL acceptance
+passes on 1/2/4 CPUs, and the blob path remains an explicit failed probe rather
+than being folded into the accepted gate. Repeating the host-3D probe with
+QEMU `hostmem=64M` produced the same `0x1200` creation failure.
+
+**Codex graphics-track increment (2026-10-18):** `libwoven::graphics` now
+provides typed `Color` and clipped `Rect` geometry plus a safe `Renderer`
+over the existing software `Canvas`. `hello-gui` routes a visible frame
+through that boundary and emits `[S16G] WovenGraphics visual frame: PASSED`.
+The Stage 19.2 compositor harness now requires that marker in addition to its
+kernel screen-pixel and retained-window checks. QEMU visual acceptance passed
+on 1/2/4 CPUs; `libwoven` host tests (20), application Clippy, formatting and
+Python validation passed. This is the first graphics abstraction checkpoint;
+paths/gradients, font shaping, GPU backends, window policy and app launching
+remain subsequent work.
+
+**Codex Stage 10.7 release gate closure (2026-10-18):** after reclaiming
+regenerable build output, `powershell.exe -NoProfile -ExecutionPolicy Bypass
+-File .\RUN-STAGE10.7.ps1` exited 0 on the current shared working tree.
+Host acceptance, host lint, build, Clippy, host tests, the repeated Stage 7.5
+1-CPU memory matrix, Stage 7.6 2/4-CPU closure, 1/2/4-CPU network round
+trips, and isolated Stage 10.1–10.7 production boots all passed. Preserved
+transcript and serial evidence is under
+`audit-artifacts/acceptance-20261018-091013-150/`. This closes the local
+Stage 10.7 acceptance gate for this exact working tree; physical USB boot,
+production release packaging, and later graphics/app-window work remain
+separate.
+
+**Claude Code live hands-on test, session 2 (2026-10-18):** at the user's
+request, rebuilt the `hardware-demo` feature from the current working tree
+(which carries the large set of uncommitted modifications already reflected
+in `git status`, not the committed `phase2` tip). `python
+scripts/test-shell-qemu.py --hardware-demo --cpus 1` passed: `Hardware demo:
+sign-in + 10 applications + desktop + PS/2 IOAPIC + smptest: PASS`. The
+resulting image is 13,697,024 bytes, SHA-256
+`57922cab26a2df3a44f6228f648dffd714eae5653461b09f6eedce30f8dc0eec` — a
+different candidate from the previously recorded `67528fa7c4...` write below,
+since the working tree has changed. The same authorized Disk 1 / `VendorCo
+ProductCode USB Device` / serial `4045141272666606378` (15,726,735,360 bytes)
+was rewritten via an elevated `scripts/write-live-usb.ps1` run; raw read-back
+matched, and a 14,985 MiB FAT32 `WOVENLOG` partition was recreated. Transcript:
+`audit-artifacts/hardware-demo-usb-write-20261018-session2.txt`. This is only
+a 1-CPU synthetic/QEMU acceptance plus a verified write; the user is about to
+boot the real target hardware, log in, and exercise the 10 apps by hand.
+Physical boot/login/app evidence is pending. Separately, an interactive
+(non-headless) QEMU GTK window was also launched locally against the prior
+`67528fa7c4...` build artifact for hands-on desktop testing on this machine;
+that is informal, not acceptance evidence.
+
+**Codex physical-login follow-up (2026-10-18):** a fresh
+`python scripts/test-shell-qemu.py --hardware-demo --cpus 1` reproduction
+passed. Its serial evidence contains `[DEMO] sample accounts installed in
+volatile VFS (ada, lin)`, `[SESSION] WovenShell desktop started`, and the
+script's `Hardware demo: sign-in + 10 applications + desktop ...: PASS`.
+Windows currently reports no attached physical disk, so the USB contents and
+firmware boot selection cannot be rechecked or rewritten from this session.
+The previously recorded USB write still identifies the intended
+`hardware-demo` image (`6eb71be0...`) and matching raw read-back; a physical
+boot failure therefore still needs the exact on-screen symptom or serial
+evidence before another image write is justified.
+
+The USB was subsequently reinserted and the user confirmed that it still
+boots the old diagnostic image. Windows identified the authorized target as
+Disk 1 / `VendorCo ProductCode` / serial `4045141272666606378`; the guarded
+rewrite was attempted with the current `hardware-demo` image but refused
+before opening the disk because this shell was not Administrator. No USB
+bytes were changed by that attempt.
+
+The same authorized disk was then rewritten from an elevated PowerShell
+handoff with the correctly quoted model argument. The guard matched
+`PhysicalDrive1`, wrote the current 13,697,024-byte `hardware-demo` image
+(SHA-256 `67528fa7c472efc9d7ab82cc82198002b577056a814fc250ad6ce455258208b4`),
+read it back successfully, and recreated the FAT32 `WOVENLOG` partition.
+
+**Codex desktop-on-hardware correction (2026-10-17):** the USB image recorded
+in `audit-artifacts/ax201-physical-write-20261017.txt` was built with the
+`physical-wifi` feature. `run_ax201_activation` is intentionally non-returning
+and halts after its diagnostic, so that image cannot reach `system-apps`,
+WovenShell, or the desktop session. Do not treat it as a production OS boot.
+There is no current `target/release-validation/validated-image.json`; the
+normal `system-apps` release gate must be regenerated before writing a desktop
+image. Keep AX201 hardware diagnostics separate from the desktop boot path.
+The direct `python scripts/test-shell-qemu.py --system-apps --cpus 4` test
+passed: all 10 signed apps installed, WovenShell started, F12 switched to the
+diagnostic console, and PS/2/SMP shell input passed. Candidate image SHA-256:
+`2c26fb499a8bb0e3f8f626de9f66c672a0cc1d74af7b227fa9f1e8be0c0ad864`.
+Evidence is in `audit-artifacts/system-apps-desktop-qemu-20261018/`. This
+candidate is not a complete release: it uses the acceptance test app-trust
+key and has no provisioned accounts file, so normal boot skips the sign-in
+screen. The full release chain also remains incomplete: after the generated
+build tree was reclaimed, a fresh run timed out at the fixed 180-second
+`memory-4-release` gate after `[FILE MMAP] regression tests: PASSED`; its log
+is preserved under `audit-artifacts/release-gate-memory4-timeout-20261018/`.
+The earlier run passed that matrix row but stopped at `shell-smoke` when C:
+ran out of space; both logs/results are preserved. Do not label or write this
+candidate as a validated, login-ready production image.
+
+**Codex hardware-demo USB profile (2026-10-18):** user explicitly
+requested a full OS demo USB. Build a separate `hardware-demo` profile that
+boots the normal system-apps desktop (never `physical-wifi`), seeds only the
+documented `ada`/`1234` and `lin`/`9876` test accounts when no accounts file
+already exists, and tests sign-in plus apps on 1/2/4 CPUs. Use the acceptance
+app-signing key only for this disposable demo image; it is not a production
+trust key. The QEMU demo passed 1, 2 and 4 CPU counts, each verifying sign-in,
+the desktop, installation of 10 signed apps, keyboard/IOAPIC and SMP smoke.
+Warning-denying bare-metal `hardware-demo` Clippy, `cargo clippy --all-targets
+-- -D warnings`, `cargo fmt --all -- --check`, and Python syntax validation
+passed. Serial/QEMU evidence is in
+`audit-artifacts/hardware-demo-{1,2,4}cpu-20261018/`. Current image is
+`C:\WovenHat-OS\.cargo-build\release\build\wovenhat-os-a76e5ab77178b0d9\out\wovenhat-os-uefi.img`
+(13,697,024 bytes; SHA-256
+`6eb71be03ce1573cfca5b7bf5096f951da6c44511dd4ac74c2c35486dc72354c`). The USB write is
+complete: `audit-artifacts/hardware-demo-usb-write-20261018.txt` records the
+exact USB identity, raw write, and matching read-back SHA-256. The previous
+physical-Wi-Fi image was therefore what produced the hardware-test-only screen
+reported by the user; that image has been replaced. Still awaiting a new
+physical boot to confirm graphics, sign-in and apps on the target hardware.
+The full production release gate remains incomplete as noted above, so this
+is a disposable hardware-demo image, not a production release.
+
+**Codex AX201 provider and queue-owner increment (2026-10-17):** AX201 now
+has an explicit firmware-provider filename boundary for
+`iwlwifi-QuZ-a0-hr-b0-77.ucode`; the provider bytes are still copied into
+owned DMA and no firmware blob is committed. `Ax201QueueOwner` allocates the
+22000 MQ RX free/used/status rings, command ring and one RX buffer per
+descriptor, and
+`Ax201Driver` refuses startup without attaching that owner. Queue storage is
+retained until the caller marks hardware quiesced. Stage 13.9 passed on
+1/2/4 CPUs and warning-denying kernel/host Clippy passed. Physical BAR/MSI
+attachment, device-produced ALIVE and radio qualification
+remain open.
+
+The dedicated `physical-wifi` image now includes the external API-77 firmware,
+Intel reset/readiness and MAC-access sequencing, exact AX201 binding, owned
+512-entry MQ RX storage, context publication, CPU_INIT_RUN and bounded RX ALIVE
+polling. The rebuilt 42,008,576-byte image has SHA-256
+`5b5fd671fc67b48cc3e55cb778c5cab3cdd56cc3e92512d67657857f8eacfaf9`; the
+guarded USB write and raw read-back passed to the authorized USB. Physical boot
+evidence is pending.
+
+The context-info command-queue size now uses the upstream 22000
+`TFD_QUEUE_CB_SIZE` encoding (`2` for 32 entries); the ring itself remains a
+32-entry, 256-byte-TFD allocation.
+The physical startup now also programs the 22000 RFH free/used/status queue
+bases and resets their device cursors before ringing the 512-entry RX doorbell.
+The physical poller now consumes completions and recycles buffers to that free
+ring, ringing on the eight-descriptor cadence.
+The physical activation path now enters after IDT/APIC setup, enables PCI
+memory/bus mastering, programs AX201 MSI and CSR RX causes, services deferred
+IRQ work, and disables those paths before PCI command restoration.
+The latest scan-session image was written and raw-read back through
+`audit-artifacts/ax201-physical-activation-usb-write-scan-session-20261017.txt`.
+The PHY-context candidate image is `8774dc764c9042acbf7f9b94258014707ee91b63a8e3addb5d35a26f89bcd180`;
+the subsequent guarded write was refused because this shell was not elevated.
+The failed transcript is retained in
+`audit-artifacts/ax201-physical-activation-usb-write-phy-context-20261017.txt`.
+The latest code also adds exact managed-station MAC and API-2 binding
+encoders, generic zero-status response validation, and a physical post-ALIVE
+PHY → MAC → binding sequence. Its 42,008,576-byte candidate image SHA-256 is
+`bde089b3b692fc585ff6d9cda73a81a765f69aca321f9f0aed5cf8722665c312`; it has
+not replaced the USB image because the writer requires Administrator access.
+The current RX MPDU/scan-table image is 42,008,576 bytes with SHA-256
+`f0c1d430652071c8f917169da37acc281d2493218db75390ee9253a14f286073`.
+Its Stage 13.9 1/2/4-CPU evidence is
+`stage13.9-1cpu-1792259384946552100`,
+`stage13.9-2cpu-1792259451253593400`, and
+`stage13.9-4cpu-1792259489563484400`.
+The TX boundary increment adds a checked 22000 TX_CMD v9 management-frame
+encoder without misusing the host-command queue. Its current image is
+42,008,576 bytes with SHA-256
+`bddc86b900dfd7525cf59f7ba9917e8a7e71f6de1cd387574c20c7194828d75b` and its
+1/2/4-CPU evidence is
+`stage13.9-1cpu-1792259723636441300`,
+`stage13.9-2cpu-1792259774430287500`, and
+`stage13.9-4cpu-1792259815230643000`.
+The next increment adds an independent AX201 data-TX queue owner: a bounded
+32-entry TFD ring, owned encoded payload retention, exact Intel management/data
+queue-ID validation, and
+exact queue/index completion reclamation. `post_tx_payload` is exposed by the
+driver but is deliberately not called by the physical probe yet; Intel DQA
+queue configuration and TX notification decoding must be added before any
+real frame is handed to hardware. Stage 13.9 passed on 1/2/4 CPUs with
+evidence in `stage13.9-1cpu-1792260873010961800`,
+`stage13.9-2cpu-1792260907652843800`, and
+`stage13.9-4cpu-1792260941804531300`. The candidate physical image is
+43,057,152 bytes, SHA-256
+`3c8220bd850e82171863c13daed3861b92184fdeb1db74109019dec645c727bc`.
+The latest increment corrects the TX_CMD v9 offsets, adds DQA-enable and
+API-v3 scheduler-queue encoders, owns the byte-count table, and decodes
+single-frame `REPLY_TX` responses from the Intel queue/index sequence. The
+physical probe now attempts DQA enable and queue allocation after ALIVE and
+requires a valid queue response before continuing; it still does not emit an
+unsolicited management frame. Stage 13.9 passed with evidence in
+`stage13.9-1cpu-1792261608259229200`,
+`stage13.9-2cpu-1792261642569914800`, and
+`stage13.9-4cpu-1792261677212040100`. The candidate physical image is
+43,057,152 bytes, SHA-256
+`60c7323329d7eeb11407384c087cd40a4cada154186036041660416202cefd29`.
+The physical probe now exercises one host-owned management TX after a
+successful scan: it builds Open-System authentication for the first bounded
+scan result, submits corrected TX_CMD v9 through the configured queue, waits
+for `REPLY_TX`, reclaims the exact queue/index slot, and resets link state
+without attempting association or credentials. Stage 13.9 passed on 1/2/4
+CPUs with evidence in `stage13.9-1cpu-1792265662237988600`,
+`stage13.9-2cpu-1792265696327245000`, and
+`stage13.9-4cpu-1792265730806233400`. The candidate image is 43,057,152
+bytes, SHA-256
+`20bc396f058d6b4a120fbbad5008c2c35b227d585ad11b8ba38b6df57dd233b4`.
+The physical path now follows the successful context sequence with a bounded
+active broadcast scan of channels 1/6/11, parses iteration/completion
+notifications, and aborts by UID on timeout. The encoder also supports up to
+20 checked directed SSIDs. Association, WPA, and returned-frame ingestion
+remain open; AX201 RX MPDU descriptors are now validated and valid scan
+beacons/probe responses are routed into the bounded WovenWiFi scan table.
+The driver now adds a typed scan-control boundary for API-defined scan
+configuration, abort, and scan-complete notification payloads, with strict
+group/command/version/length validation. This remains transport plumbing; no
+full scan request or radio result is asserted.
+It now also encodes explicit API-17 passive and active UMAC scan requests
+(bounded to 67 channels), including an owned broadcast probe template and
+direct-SSID selection, and validates per-iteration result-record lengths.
+The driver also owns one active scan UID at a time; mismatched aborts and
+stale unsolicited iteration/completion notifications are rejected, while a
+matching completion retires the session. The lifecycle is covered by the
+AX201 driver self-test.
+The latest increment adds the checked API-1 `PHY_CONTEXT_CMD` encoder and
+driver submission boundary (40-byte packed payload, channel/band/width
+validation). It remains synthetic and is not issued by the physical probe
+until MAC/binding context and command-status teardown are implemented.
+
+**Codex AX201 driver-owner increment (2026-10-17):** Stage 13.10AE/AF/AG
+now validate the API-77 AX201 runtime image, copy firmware into owned DMA,
+configure context-info queue addresses, publish the 22000 context through the
+MMIO/PRPH adapter, issue `CPU_INIT_RUN`, accept a versioned ALIVE notification,
+and stop by releasing the owned context/DMA resources. Stage 13.9 passed on
+1/2/4 CPUs. The owner still requires a real firmware provider, physical
+BAR/MSI attachment, device ALIVE evidence, queue doorbells, and radio
+qualification before normal boot integration.
+
+**Codex AX201 22000 activation increment (2026-10-17):** the shared Intel
+22000 CSR path now accepts the AX201 family, and AX201 `8086:A0F0` is
+classified as `ActivationReady` with its integrated
+`iwlwifi-QuZ-a0-hr-b0` API-77 profile. A separate AX201 MSI contract and
+Stage 13.10AD self-test were added; the contract is fail-closed for other PCI
+IDs. Stage 13.9 passed on 1/2/4 CPUs, host/all-target Clippy passed, and the
+Wi-Fi TLV tests passed. This is the first activation-boundary increment, not
+physical radio qualification: firmware loading, ALIVE proof, queue ownership,
+scan/association and end-to-end network evidence remain open.
+
+**Codex release and AX201 increment (2026-10-17):** the supplied Stage 10.7
+transcript was preserved in `docs/audit-stage10-7-acceptance-2026-10-17.md`.
+The serialized `python scripts/test-release.py` chain then exited 0 with all
+release checks passed, including host tests/lints, debug and release 1/2/4-CPU
+memory/storage/network, shell smoke, application lints, system-app tests and
+catalog boots. The AX201 PCI identity `8086:A0F0` is now classified as
+`DiscoveryOnly`; its required integrated firmware profile is
+`iwlwifi-QuZ-a0-hr-b0`, API 77 only, and `bind_supported` rejects it with
+`ActivationDeferred`, so it cannot enter the AX200 DMA/MSI path. Stage 13.9
+synthetic acceptance passed on 1/2/4 CPUs after this change. The full release
+validator was rerun against the same current source with the local Cargo cache
+and exited 0. This is an identity/firmware-policy safety increment, not native
+AX201 firmware loading or radio acceptance.
+
+**Codex physical inventory result (2026-10-17):** the user-provided photo of
+the authorized HP Pavilion x360 probe screen shows `PHYSICAL COMPLETE -
+INVENTORY ONLY`. It confirms Intel PCI inventory including xHCI `8086:9A13`,
+with five reported xHCI ports; PORT1 through PORT5 each show `CCS=0`,
+`PED=0`, `RESET=0`, and `SPEED=0`. The screen reports `AX201_COUNT=1`,
+`DMA=NOT-ACTIVATED`, and `RADIO=UNIMPLEMENTED`. This is consistent with the
+probe's read-only safety boundary and does not establish USB attachment,
+DMA/interrupt operation, storage logging, Wi-Fi, or radio acceptance. The
+screen was recorded as `IMG_5963.jpeg`; no source or acceptance chain was
+changed.
+
+**Codex xHCI read-only diagnostic (2026-10-17):** the physical screenshot
+confirmed PCI xHCI `8086:9A13` is discovered, but the original inventory did
+not read controller registers or port state. Codex added a no-write diagnostic
+that reads the xHCI BAR, capability/operational registers, and up to 16 port
+status registers without enabling PCI bus mastering, resetting the controller,
+allocating DMA, or activating USB. Kernel physical-probe Clippy, host Clippy,
+and the QEMU smoke passed. The diagnostic image was written and raw-readback
+verified on the authorized USB (SHA-256
+`5384df56c49c578abae95c965f87e26df5dcd55df6b61056882b5263c4b6a749`). Physical
+diagnostic output is pending; no fix or hardware acceptance is claimed yet.
+
+**Codex physical-probe image (2026-10-17):** because the HP Pavilion x360
+has no serial ports or accessible UART test pads, Codex built the independent
+`physical-probe` framebuffer inventory image and passed its 1-CPU QEMU smoke
+test. The explicitly authorized Disk 1 USB (serial
+`4045141272666606378`, 15,726,735,360 bytes) was written using the guarded
+writer's explicit-image path after SHA-256 verification; raw readback matched
+`855632d2247b504c921b8ca9794c2614e45e6b6409ff52c864e2b3a13c427973`.
+Physical hardware results are pending; the user should photograph the probe
+screen and power off at `PHYSICAL COMPLETE - INVENTORY ONLY`. This is an
+inventory diagnostic, not hardware or Wi-Fi acceptance.
+
+**Codex physical USB retest (2026-10-17):** the user authorized replacing the
+newly inserted USB (Disk 1, VendorCo ProductCode USB Device, serial
+`4045141272666606378`, 15,726,735,360 bytes) after the prior 8 GB stick
+returned with an empty WOVENLOG partition. Codex is using only the guarded
+release-image writer; no source or acceptance chain is being changed. The
+release validation rerun passed all gates after reclaiming regenerable build
+space; the current image SHA-256 is
+`f03564757abd588b76328f738913e78cd4b254a2d7a0cbfdbd98590f75028798`. The USB
+write completed with matching raw readback and a healthy 14.62 GiB FAT32
+WOVENLOG partition. Physical boot and returned-log inspection are pending.
+
+**Codex physical USB retest result (2026-10-17):** after the user booted the
+new 14.65 GB stick and reinserted it, the healthy WOVENLOG FAT32 root contained
+only Windows `System Volume Information`; no `LOGS` directory or
+`BOOT0001.TXT` was present. The temporary `R:` mount used for inspection was
+removed afterward. This confirms the second physical boot also returned no
+live log; serial capture remains required to locate the failure.
+
+**Codex live-log correction (2026-10-17):** physical boots of the
+new validated stick still return no `LOGS` directory. Codex is isolating the
+deferred USB enumeration path: a one-shot enumeration can return success before
+mass storage is ready, and an already-started HID vector can prevent later
+storage discovery. The correction is implemented with bounded retry/discovery
+on the existing event-driven service path. Focused Stage 13.18/13.19 and the
+full release validation passed. The authorized second stick was rewritten and
+raw-readback verified with corrected image SHA-256
+`6ad538d2a7c94017a4d5cdd312b62521128b1bad9d2fceb6ce0d9abe9b32ba8d`.
+Physical confirmation remains pending.
+
+**Codex corrected-image physical retest result (2026-10-17):** the corrected
+image was booted and the USB returned healthy, but its WOVENLOG root again
+contained only Windows `System Volume Information`; no `LOGS` directory or
+`BOOT0001.TXT` was created. The retry correction passes QEMU and full release
+validation but is not physically accepted. Further diagnosis requires the
+serial/xHCI markers from the actual machine; another rewrite without that
+evidence is not justified.
+
 Two agents work on WovenHat OS at once. This file is how they avoid
 colliding. Read it before starting work, and update your own section when
 you start or finish something.
 
 ## Shared rules
+
+**Codex live-boot diagnosis (2026-10-16; software gates passed, hardware pending):**
+the user reports that the attached WOVENLOG stick's boot hangs before the
+desktop and returns with no logs. Production now queues live-log setup before
+session start and retries discovery/setup in the background; driver/xHCI phase
+markers and bounded UART polling improve diagnostics. Exact Stage 10.7,
+full release validation, affected feature lints, Stage 13.19 production/test/
+unlabelled and Stage 20.15 desktop gates passed on 1/2/4 CPUs. The authorized
+VendorCo disk was rewritten with the current release image
+`44d668ef2a463941d39d9415b0d4c4af989b0e958d6ef6fad9adc0e45a13231c`; raw
+readback matched, and a healthy 7665 MiB FAT32 WOVENLOG partition was created.
+Physical boot and returned-log inspection remain pending. A permanent xHCI
+stall still requires external serial capture. See
+`docs/audit-live-boot-log-startup-2026-10-16.md`. The earlier Clippy failure is
+preserved under `audit-artifacts/acceptance-20261016-211412-189`.
+
+**Codex live-boot correction (2026-10-16):** physical USB input and mass-storage
+enumeration is now queued on the audited I/O service after xHCI controller
+bring-up, so slow device transfers cannot block session startup. Stage 13.19
+test and production modes passed on 1 CPU, and default plus Stage 13.12
+warning-denying kernel Clippy passed. A fresh system-apps image was built and
+passed the normal release shell smoke test. The rebuilt image is not yet on
+the attached stick because the guarded writer requires an elevated shell.
 
 **Foundation preservation stopped; ATA candidate isolated (2026-10-16):**
 session 71482 is terminal exit 1: live DNS timed out on 1 CPU during exact
@@ -555,8 +1574,11 @@ committed as `ba02d38`, and bounded manual-reset-event waiter fan-out is
 committed as `0459108`; the focused 1/2/4-CPU gate and the complete release
 chain pass after both changes. The validated package is `0.8.0` with UEFI
 image SHA-256 `19107f771ae7658068dd37b7c4a25c4f241d9086812d1ab1ab19a7c34c80afeb`.
-The flash disk was inspected non-destructively only; no USB media is being
-modified.
+The flash disk was initially inspected non-destructively. On 2026-10-16, after
+the user explicitly authorized writing it, the identified VendorCo device was
+written with the current release-validated UEFI image and raw-readback SHA-256
+verified. Physical boot and returned-log inspection remain pending; see
+`docs/audit-live-boot-log-startup-2026-10-16.md`.
 
 Stage 11.2 sibling cancellation (ABI 136) with join-safe teardown is committed
 as `3f1b5e3`. Host check/Clippy/tests, freestanding Stage 11.2 Clippy, the
@@ -581,3 +1603,14 @@ The 2026-10-15 Stage 1–19 closure review is recorded in
 hardware, recovery, firmware-security and service-boundary requirements; no
 agent may report the stages as collectively production-ready from QEMU markers
 alone.
+
+**AX201 physical retry (Codex, 2026-10-17):** The API-77 AX201 image was
+rebuilt and written/read back again against the guarded VendorCo USB identity;
+the latest transcript is `audit-artifacts/ax201-physical-activation-usb-write-scan-control-20261017.txt`
+and the image digest is
+`11b20a98a11fbb76be39f38a522836986678ac6f65000ca0446abd0511dd5458`.
+The full Stage 13.9 1/2/4-CPU chain passed again. Upstream review found that
+`RFH_QUEUE_CONFIG_CMD` is for extra RX queues; the one-queue owner uses the
+context-info default queue, so no speculative post-ALIVE command path was
+added. RX completion reclaim is now wired into the physical poller and covered
+by the queue-owner self-test. Physical boot/ALIVE evidence is still pending.

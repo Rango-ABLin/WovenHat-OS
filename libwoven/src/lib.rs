@@ -208,8 +208,8568 @@ pub mod time {
     pub const TICKS_PER_SECOND: u64 = 100;
 }
 pub mod graphics {
+    /// A format-independent sRGB colour used by WovenGraphics.
+    #[derive(Clone, Copy, PartialEq, Eq, Debug)]
+    pub struct Color {
+        pub red: u8,
+        pub green: u8,
+        pub blue: u8,
+    }
+
+    impl Color {
+        pub const BLACK: Self = Self::rgb(0, 0, 0);
+        pub const WHITE: Self = Self::rgb(255, 255, 255);
+        pub const TITLE: Self = Self::rgb(40, 220, 230);
+        pub const SURFACE: Self = Self::rgb(230, 230, 240);
+
+        pub const fn rgb(red: u8, green: u8, blue: u8) -> Self {
+            Self { red, green, blue }
+        }
+
+        pub const fn packed(self) -> u32 {
+            crate::rgb(self.red, self.green, self.blue)
+        }
+    }
+
+    /// Logical geometry shared by the renderer and future display drivers.
+    #[derive(Clone, Copy, PartialEq, Eq, Debug)]
+    pub struct Rect {
+        pub x: i32,
+        pub y: i32,
+        pub width: usize,
+        pub height: usize,
+    }
+
+    /// A logical point used by bounded paths and future vector primitives.
+    #[derive(Clone, Copy, PartialEq, Eq, Debug)]
+    pub struct Point {
+        pub x: i32,
+        pub y: i32,
+    }
+
+    impl Point {
+        pub const fn new(x: i32, y: i32) -> Self {
+            Self { x, y }
+        }
+    }
+
+    const MAX_PATH_POINTS: usize = 64;
+
+    /// A bounded open or closed path. The fixed storage keeps scene geometry
+    /// allocation-free and makes the renderer's worst-case work explicit.
+    pub struct Path {
+        points: [Point; MAX_PATH_POINTS],
+        length: usize,
+        closed: bool,
+    }
+
+    impl Default for Path {
+        fn default() -> Self {
+            Self::new()
+        }
+    }
+
+    impl Path {
+        pub const fn new() -> Self {
+            Self {
+                points: [Point::new(0, 0); MAX_PATH_POINTS],
+                length: 0,
+                closed: false,
+            }
+        }
+
+        pub fn move_to(&mut self, point: Point) -> bool {
+            self.length = 0;
+            self.closed = false;
+            self.line_to(point)
+        }
+
+        pub fn line_to(&mut self, point: Point) -> bool {
+            if self.length >= MAX_PATH_POINTS || self.closed {
+                return false;
+            }
+            self.points[self.length] = point;
+            self.length += 1;
+            true
+        }
+
+        /// Append a quadratic Bézier segment as four deterministic line
+        /// segments. The fixed subdivision keeps curve work bounded and
+        /// avoids floating-point state in freestanding userspace.
+        pub fn quadratic_to(&mut self, control: Point, end: Point) -> bool {
+            if self.length == 0 || self.closed || self.length + 4 > MAX_PATH_POINTS {
+                return false;
+            }
+            let start = self.points[self.length - 1];
+            let points = [
+                Self::quadratic_sample(start, control, end, 9, 6, 1),
+                Self::quadratic_sample(start, control, end, 4, 8, 4),
+                Self::quadratic_sample(start, control, end, 1, 6, 9),
+                end,
+            ];
+            self.points[self.length..self.length + points.len()].copy_from_slice(&points);
+            self.length += points.len();
+            true
+        }
+
+        fn quadratic_sample(
+            start: Point,
+            control: Point,
+            end: Point,
+            start_weight: i32,
+            control_weight: i32,
+            end_weight: i32,
+        ) -> Point {
+            let x = i64::from(start.x) * i64::from(start_weight)
+                + i64::from(control.x) * i64::from(control_weight)
+                + i64::from(end.x) * i64::from(end_weight);
+            let y = i64::from(start.y) * i64::from(start_weight)
+                + i64::from(control.y) * i64::from(control_weight)
+                + i64::from(end.y) * i64::from(end_weight);
+            Point::new(
+                (x / 16).clamp(i64::from(i32::MIN), i64::from(i32::MAX)) as i32,
+                (y / 16).clamp(i64::from(i32::MIN), i64::from(i32::MAX)) as i32,
+            )
+        }
+
+        pub fn close(&mut self) -> bool {
+            if self.length < 2 || self.closed {
+                return false;
+            }
+            self.closed = true;
+            true
+        }
+
+        pub const fn len(&self) -> usize {
+            self.length
+        }
+
+        pub const fn is_empty(&self) -> bool {
+            self.length == 0
+        }
+
+        fn points(&self) -> &[Point] {
+            &self.points[..self.length]
+        }
+    }
+
+    const MAX_CONTOURS: usize = 8;
+
+    /// A bounded collection of closed contours. Even-odd filling treats
+    /// nested contours as holes without allocating or changing `Path`'s
+    /// single-subpath contract.
+    pub struct CompoundPath {
+        paths: [Path; MAX_CONTOURS],
+        length: usize,
+    }
+
+    impl Default for CompoundPath {
+        fn default() -> Self {
+            Self::new()
+        }
+    }
+
+    impl CompoundPath {
+        pub fn new() -> Self {
+            Self {
+                paths: core::array::from_fn(|_| Path::new()),
+                length: 0,
+            }
+        }
+
+        pub fn push(&mut self, path: Path) -> bool {
+            if self.length >= MAX_CONTOURS {
+                return false;
+            }
+            self.paths[self.length] = path;
+            self.length += 1;
+            true
+        }
+
+        pub const fn len(&self) -> usize {
+            self.length
+        }
+
+        pub const fn is_empty(&self) -> bool {
+            self.length == 0
+        }
+
+        fn paths(&self) -> &[Path] {
+            &self.paths[..self.length]
+        }
+    }
+
+    /// A fixed-point 2D affine transform. Values use signed 16.16 format so
+    /// transformed geometry remains deterministic in freestanding userspace
+    /// without pulling floating-point state into the renderer.
+    #[derive(Clone, Copy, PartialEq, Eq, Debug)]
+    pub struct Transform {
+        pub xx: i32,
+        pub xy: i32,
+        pub yx: i32,
+        pub yy: i32,
+        pub tx: i32,
+        pub ty: i32,
+    }
+
+    impl Transform {
+        pub const IDENTITY: Self = Self {
+            xx: 1 << 16,
+            xy: 0,
+            yx: 0,
+            yy: 1 << 16,
+            tx: 0,
+            ty: 0,
+        };
+
+        pub const fn new(xx: i32, xy: i32, yx: i32, yy: i32, tx: i32, ty: i32) -> Self {
+            Self {
+                xx,
+                xy,
+                yx,
+                yy,
+                tx,
+                ty,
+            }
+        }
+
+        pub const fn scale(x: i32, y: i32) -> Self {
+            Self::new(x << 16, 0, 0, y << 16, 0, 0)
+        }
+
+        pub const fn translate(x: i32, y: i32) -> Self {
+            Self::new(1 << 16, 0, 0, 1 << 16, x << 16, y << 16)
+        }
+
+        fn map(self, x: i32, y: i32) -> (i32, i32) {
+            let mapped_x =
+                (i64::from(self.xx) * i64::from(x) + i64::from(self.xy) * i64::from(y) + (1 << 15))
+                    / (1 << 16)
+                    + i64::from(self.tx) / (1 << 16);
+            let mapped_y =
+                (i64::from(self.yx) * i64::from(x) + i64::from(self.yy) * i64::from(y) + (1 << 15))
+                    / (1 << 16)
+                    + i64::from(self.ty) / (1 << 16);
+            (
+                mapped_x.clamp(i64::from(i32::MIN), i64::from(i32::MAX)) as i32,
+                mapped_y.clamp(i64::from(i32::MIN), i64::from(i32::MAX)) as i32,
+            )
+        }
+    }
+
+    /// Metrics for a UTF-8 string after the bounded shared-font fallback has
+    /// selected a glyph for each scalar value.
+    #[derive(Clone, Copy, PartialEq, Eq, Debug)]
+    pub struct TextMetrics {
+        pub width: usize,
+        pub height: usize,
+        pub lines: usize,
+    }
+
+    /// The first WovenGraphics font provider. It intentionally shares the
+    /// kernel's glyph table so userspace and compositor text remain pixel
+    /// identical while a richer TrueType/OpenType provider can replace this
+    /// implementation behind the same scene-facing API.
+    #[derive(Clone, Copy, Debug, Default)]
+    pub struct Font;
+
+    impl Font {
+        pub const DEFAULT: Self = Self;
+
+        pub fn measure(self, text: &str) -> TextMetrics {
+            self.measure_scaled(text, 1)
+        }
+
+        /// Measure text at a bounded integer scale. A zero scale is treated
+        /// as one so callers never create a degenerate layout.
+        pub fn measure_scaled(self, text: &str, scale: usize) -> TextMetrics {
+            let scale = scale.clamp(1, 16);
+            TextMetrics {
+                width: crate::font::text_width(text).saturating_mul(scale),
+                height: crate::font::line_count(text)
+                    .saturating_mul(crate::font::LINE_HEIGHT as usize)
+                    .saturating_mul(scale),
+                lines: crate::font::line_count(text),
+            }
+        }
+    }
+
+    /// Errors returned while validating a bounded TrueType sfnt face.
+    #[derive(Clone, Copy, PartialEq, Eq, Debug)]
+    pub enum TrueTypeError {
+        TooSmall,
+        BadSignature,
+        BadTableDirectory,
+        MissingTable,
+        UnsupportedCmap,
+        UnsupportedGlyph,
+        UnsupportedVariation,
+        UnsupportedHinting,
+        TooLarge,
+    }
+
+    /// One decoded point from a simple TrueType glyph outline.
+    #[derive(Clone, Copy, PartialEq, Eq, Debug)]
+    pub struct OutlinePoint {
+        pub x: i16,
+        pub y: i16,
+        pub on_curve: bool,
+        pub contour_end: bool,
+    }
+
+    /// One allocation-free placement produced by the bounded TrueType text
+    /// layout pass.
+    #[derive(Clone, Copy, PartialEq, Eq, Debug)]
+    pub struct GlyphPlacement {
+        pub character: char,
+        pub origin: Point,
+        pub advance: i32,
+    }
+
+    /// One bounded OpenType-shaped glyph. `source` identifies the first
+    /// character contributing to the glyph; ligatures report their consumed
+    /// source count while retaining the selected glyph ID.
+    #[derive(Clone, Copy, PartialEq, Eq, Debug)]
+    pub struct ShapedGlyph {
+        pub glyph_id: u16,
+        pub source: char,
+        pub source_count: u8,
+        pub origin: Point,
+        pub advance: i32,
+    }
+
+    /// Explicit bounded OpenType shaping inputs. `script_tag` and
+    /// `language_tag` scope ScriptList/LangSys feature selection; `ppem` is
+    /// required when selected GPOS records reference device tables.
+    #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+    pub struct TextShapingOptions {
+        pub script_tag: Option<[u8; 4]>,
+        pub language_tag: Option<[u8; 4]>,
+        pub ppem: Option<u16>,
+    }
+
+    #[derive(Clone, Copy, PartialEq, Eq, Debug)]
+    pub enum TextDirection {
+        Ltr,
+        Rtl,
+    }
+
+    impl TextDirection {
+        /// Classify the strong directional characters handled by the bounded
+        /// bidi pass. Punctuation, whitespace and combining marks are
+        /// neutral and inherit surrounding strong direction.
+        pub fn classify(character: char) -> Option<Self> {
+            let code = u32::from(character);
+            if (0x0590..=0x08ff).contains(&code)
+                || (0xfb1d..=0xfdff).contains(&code)
+                || (0xfe70..=0xfeff).contains(&code)
+            {
+                Some(Self::Rtl)
+            } else if character.is_alphanumeric() {
+                Some(Self::Ltr)
+            } else {
+                None
+            }
+        }
+    }
+
+    #[derive(Clone, Copy, PartialEq, Eq, Debug)]
+    pub struct VariationAxis {
+        pub tag: [u8; 4],
+        pub minimum: i32,
+        pub default: i32,
+        pub maximum: i32,
+    }
+
+    /// Bounded state exposed by the supported, coordinate-independent hint
+    /// instruction subset.
+    #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+    pub struct HintState {
+        pub projection_axis: u8,
+        pub freedom_axis: u8,
+        pub round_to_grid: bool,
+        pub stack_depth: u8,
+    }
+
+    fn hint_next_pc(program: &[u8], length: usize, pc: usize) -> Result<usize, TrueTypeError> {
+        let opcode = *program.get(pc).ok_or(TrueTypeError::BadTableDirectory)?;
+        let payload = match opcode {
+            0x40 => {
+                let count = usize::from(
+                    *program
+                        .get(pc + 1)
+                        .ok_or(TrueTypeError::BadTableDirectory)?,
+                );
+                2usize.checked_add(count).ok_or(TrueTypeError::TooLarge)?
+            }
+            0x41 => {
+                let count = usize::from(
+                    *program
+                        .get(pc + 1)
+                        .ok_or(TrueTypeError::BadTableDirectory)?,
+                );
+                2usize
+                    .checked_add(count.checked_mul(2).ok_or(TrueTypeError::TooLarge)?)
+                    .ok_or(TrueTypeError::TooLarge)?
+            }
+            0xb0..=0xb7 => usize::from(opcode - 0xb0) + 2,
+            0xb8..=0xbf => (usize::from(opcode - 0xb8) + 1)
+                .checked_mul(2)
+                .and_then(|count| count.checked_add(1))
+                .ok_or(TrueTypeError::TooLarge)?,
+            0x1c | 0x78 | 0x79 => 2,
+            _ => 1,
+        };
+        let next = pc.checked_add(payload).ok_or(TrueTypeError::TooLarge)?;
+        if next > length {
+            return Err(TrueTypeError::BadTableDirectory);
+        }
+        Ok(next)
+    }
+
+    fn hint_skip_to_else_or_eif(
+        program: &[u8],
+        length: usize,
+        mut pc: usize,
+    ) -> Result<usize, TrueTypeError> {
+        let mut depth = 0usize;
+        while pc < length {
+            let opcode = program[pc];
+            let next = hint_next_pc(program, length, pc)?;
+            match opcode {
+                0x58 => depth = depth.checked_add(1).ok_or(TrueTypeError::TooLarge)?,
+                0x59 => {
+                    if depth == 0 {
+                        return Ok(next);
+                    }
+                    depth -= 1;
+                }
+                0x1b if depth == 0 => return Ok(next),
+                _ => {}
+            }
+            pc = next;
+        }
+        Err(TrueTypeError::UnsupportedHinting)
+    }
+
+    fn hint_skip_to_eif(
+        program: &[u8],
+        length: usize,
+        mut pc: usize,
+    ) -> Result<usize, TrueTypeError> {
+        let mut depth = 0usize;
+        while pc < length {
+            let opcode = program[pc];
+            let next = hint_next_pc(program, length, pc)?;
+            match opcode {
+                0x58 => depth = depth.checked_add(1).ok_or(TrueTypeError::TooLarge)?,
+                0x59 => {
+                    if depth == 0 {
+                        return Ok(next);
+                    }
+                    depth -= 1;
+                }
+                _ => {}
+            }
+            pc = next;
+        }
+        Err(TrueTypeError::UnsupportedHinting)
+    }
+
+    fn hint_relative_target(
+        program: &[u8],
+        length: usize,
+        pc: usize,
+    ) -> Result<usize, TrueTypeError> {
+        let offset = i32::from(i8::from_be_bytes([*program
+            .get(pc + 1)
+            .ok_or(TrueTypeError::BadTableDirectory)?]));
+        let base = i32::try_from(pc.checked_add(2).ok_or(TrueTypeError::TooLarge)?)
+            .map_err(|_| TrueTypeError::TooLarge)?;
+        let target = base.checked_add(offset).ok_or(TrueTypeError::TooLarge)?;
+        if target < 0 || target > i32::try_from(length).map_err(|_| TrueTypeError::TooLarge)? {
+            return Err(TrueTypeError::UnsupportedHinting);
+        }
+        usize::try_from(target).map_err(|_| TrueTypeError::UnsupportedHinting)
+    }
+
+    /// A borrowed, validated TrueType face. The face owns no memory and only
+    /// exposes checked metadata/cmap lookup; outline rasterization remains a
+    /// separate backend so malformed font bytes cannot reach the Canvas.
+    pub struct TrueTypeFace<'a> {
+        bytes: &'a [u8],
+        units_per_em: u16,
+        glyph_count: u16,
+        cmap_offset: usize,
+        cmap_length: usize,
+        cmap4: Option<(usize, usize)>,
+        cmap12: Option<(usize, usize)>,
+        hmtx_offset: usize,
+        hmtx_length: usize,
+        horizontal_metrics: u16,
+        glyf: Option<(usize, usize)>,
+        loca: Option<(usize, usize)>,
+        index_to_loc_format: i16,
+        kern: Option<(usize, usize)>,
+        gsub: Option<(usize, usize)>,
+        gpos: Option<(usize, usize)>,
+        fvar: Option<(usize, usize)>,
+        gvar: Option<(usize, usize)>,
+    }
+
+    impl<'a> TrueTypeFace<'a> {
+        pub fn from_bytes(bytes: &'a [u8]) -> Result<Self, TrueTypeError> {
+            if bytes.len() < 12 {
+                return Err(TrueTypeError::TooSmall);
+            }
+            if read_u32(bytes, 0) != Some(0x0001_0000) {
+                return Err(TrueTypeError::BadSignature);
+            }
+            let table_count = usize::from(read_u16(bytes, 4).ok_or(TrueTypeError::TooSmall)?);
+            let directory_end = 12usize
+                .checked_add(
+                    table_count
+                        .checked_mul(16)
+                        .ok_or(TrueTypeError::BadTableDirectory)?,
+                )
+                .ok_or(TrueTypeError::BadTableDirectory)?;
+            if directory_end > bytes.len() {
+                return Err(TrueTypeError::BadTableDirectory);
+            }
+            let (head_offset, head_length) =
+                find_table(bytes, table_count, *b"head").ok_or(TrueTypeError::MissingTable)?;
+            let (maxp_offset, maxp_length) =
+                find_table(bytes, table_count, *b"maxp").ok_or(TrueTypeError::MissingTable)?;
+            let (cmap_offset, cmap_length) =
+                find_table(bytes, table_count, *b"cmap").ok_or(TrueTypeError::MissingTable)?;
+            let (hhea_offset, hhea_length) =
+                find_table(bytes, table_count, *b"hhea").ok_or(TrueTypeError::MissingTable)?;
+            let (hmtx_offset, hmtx_length) =
+                find_table(bytes, table_count, *b"hmtx").ok_or(TrueTypeError::MissingTable)?;
+            let glyf = find_table(bytes, table_count, *b"glyf");
+            let loca = find_table(bytes, table_count, *b"loca");
+            let kern = find_table(bytes, table_count, *b"kern");
+            let gsub = find_table(bytes, table_count, *b"GSUB");
+            let gpos = find_table(bytes, table_count, *b"GPOS");
+            let fvar = find_table(bytes, table_count, *b"fvar");
+            let gvar = find_table(bytes, table_count, *b"gvar");
+            if head_length < 20
+                || maxp_length < 6
+                || cmap_length < 4
+                || hhea_length < 36
+                || hmtx_length < 4
+            {
+                return Err(TrueTypeError::BadTableDirectory);
+            }
+            let units_per_em =
+                read_u16(bytes, head_offset + 18).ok_or(TrueTypeError::BadTableDirectory)?;
+            let glyph_count =
+                read_u16(bytes, maxp_offset + 4).ok_or(TrueTypeError::BadTableDirectory)?;
+            let horizontal_metrics =
+                read_u16(bytes, hhea_offset + 34).ok_or(TrueTypeError::BadTableDirectory)?;
+            let index_to_loc_format = if head_length >= 52 {
+                read_i16(bytes, head_offset + 50).ok_or(TrueTypeError::BadTableDirectory)?
+            } else {
+                0
+            };
+            if units_per_em == 0
+                || glyph_count == 0
+                || horizontal_metrics == 0
+                || (index_to_loc_format != 0 && index_to_loc_format != 1)
+                || usize::from(horizontal_metrics).saturating_mul(4) > hmtx_length
+            {
+                return Err(TrueTypeError::BadTableDirectory);
+            }
+            if let Some((_, loca_length)) = loca {
+                let loca_entries = usize::from(glyph_count).saturating_add(1);
+                let loca_bytes = if index_to_loc_format == 0 {
+                    loca_entries.saturating_mul(2)
+                } else {
+                    loca_entries.saturating_mul(4)
+                };
+                if loca_bytes > loca_length || glyf.is_none() {
+                    return Err(TrueTypeError::BadTableDirectory);
+                }
+            }
+            let cmap_records = usize::from(
+                read_u16(bytes, cmap_offset + 2).ok_or(TrueTypeError::BadTableDirectory)?,
+            );
+            let records_end = cmap_offset
+                .checked_add(
+                    4usize
+                        .checked_add(
+                            cmap_records
+                                .checked_mul(8)
+                                .ok_or(TrueTypeError::BadTableDirectory)?,
+                        )
+                        .ok_or(TrueTypeError::BadTableDirectory)?,
+                )
+                .ok_or(TrueTypeError::BadTableDirectory)?;
+            if records_end > cmap_offset + cmap_length {
+                return Err(TrueTypeError::BadTableDirectory);
+            }
+            let mut cmap4 = None;
+            for index in 0..cmap_records {
+                let record = cmap_offset + 4 + index * 8;
+                let platform = read_u16(bytes, record).ok_or(TrueTypeError::BadTableDirectory)?;
+                let encoding =
+                    read_u16(bytes, record + 2).ok_or(TrueTypeError::BadTableDirectory)?;
+                let relative = usize::try_from(
+                    read_u32(bytes, record + 4).ok_or(TrueTypeError::BadTableDirectory)?,
+                )
+                .map_err(|_| TrueTypeError::BadTableDirectory)?;
+                let subtable = cmap_offset
+                    .checked_add(relative)
+                    .ok_or(TrueTypeError::BadTableDirectory)?;
+                if subtable + 4 > cmap_offset + cmap_length || read_u16(bytes, subtable) != Some(4)
+                {
+                    continue;
+                }
+                if platform == 3 || (platform == 0 && encoding == 3) {
+                    let length = usize::from(
+                        read_u16(bytes, subtable + 2).ok_or(TrueTypeError::BadTableDirectory)?,
+                    );
+                    if length >= 16
+                        && subtable
+                            .checked_add(length)
+                            .is_some_and(|end| end <= cmap_offset + cmap_length)
+                    {
+                        cmap4 = Some((subtable, length));
+                        if platform == 3 {
+                            break;
+                        }
+                    }
+                }
+            }
+            let mut cmap12 = None;
+            for index in 0..cmap_records {
+                let record = cmap_offset + 4 + index * 8;
+                let platform = read_u16(bytes, record).ok_or(TrueTypeError::BadTableDirectory)?;
+                let encoding =
+                    read_u16(bytes, record + 2).ok_or(TrueTypeError::BadTableDirectory)?;
+                let relative = usize::try_from(
+                    read_u32(bytes, record + 4).ok_or(TrueTypeError::BadTableDirectory)?,
+                )
+                .map_err(|_| TrueTypeError::BadTableDirectory)?;
+                let subtable = cmap_offset
+                    .checked_add(relative)
+                    .ok_or(TrueTypeError::BadTableDirectory)?;
+                if subtable
+                    .checked_add(16)
+                    .is_none_or(|end| end > cmap_offset + cmap_length)
+                    || read_u16(bytes, subtable) != Some(12)
+                    || !((platform == 3 && encoding == 10) || platform == 0)
+                {
+                    continue;
+                }
+                let length = usize::try_from(
+                    read_u32(bytes, subtable + 4).ok_or(TrueTypeError::BadTableDirectory)?,
+                )
+                .map_err(|_| TrueTypeError::BadTableDirectory)?;
+                if length >= 16
+                    && subtable
+                        .checked_add(length)
+                        .is_some_and(|end| end <= cmap_offset + cmap_length)
+                {
+                    cmap12 = Some((subtable, length));
+                    if platform == 3 {
+                        break;
+                    }
+                }
+            }
+            if cmap4.is_none() && cmap12.is_none() {
+                return Err(TrueTypeError::UnsupportedCmap);
+            }
+            Ok(Self {
+                bytes,
+                units_per_em,
+                glyph_count,
+                cmap_offset,
+                cmap_length,
+                cmap4,
+                cmap12,
+                hmtx_offset,
+                hmtx_length,
+                horizontal_metrics,
+                glyf,
+                loca,
+                index_to_loc_format,
+                kern,
+                gsub,
+                gpos,
+                fvar,
+                gvar,
+            })
+        }
+
+        pub const fn units_per_em(&self) -> u16 {
+            self.units_per_em
+        }
+
+        pub const fn glyph_count(&self) -> u16 {
+            self.glyph_count
+        }
+
+        /// Return the mapped glyph's advance width in font units.
+        pub fn advance_width(&self, character: char) -> Option<u16> {
+            let glyph = usize::from(self.glyph_index(character)?);
+            self.horizontal_metric(glyph).map(|metric| metric.0)
+        }
+
+        fn horizontal_metric(&self, glyph: usize) -> Option<(u16, Option<i16>)> {
+            let metrics = usize::from(self.horizontal_metrics);
+            let metric = glyph.min(metrics.checked_sub(1)?);
+            let offset = self.hmtx_offset.checked_add(metric.checked_mul(4)?)?;
+            if offset.checked_add(4)? > self.hmtx_offset + self.hmtx_length {
+                return None;
+            }
+            let advance = read_u16(self.bytes, offset)?;
+            let lsb = if glyph < metrics {
+                read_i16(self.bytes, offset + 2)
+            } else {
+                let lsb_offset = self
+                    .hmtx_offset
+                    .checked_add(metrics.checked_mul(4)?)?
+                    .checked_add((glyph - metrics).checked_mul(2)?)?;
+                if lsb_offset.checked_add(2)? > self.hmtx_offset + self.hmtx_length {
+                    None
+                } else {
+                    read_i16(self.bytes, lsb_offset)
+                }
+            };
+            Some((advance, lsb))
+        }
+
+        /// Return a simple-glyph advance after applying its bounded `gvar`
+        /// phantom-point deltas at normalized F2DOT14 coordinates.
+        pub fn advance_width_with_variation(
+            &self,
+            character: char,
+            normalized_coordinates: &[i16],
+        ) -> Result<u16, TrueTypeError> {
+            let glyph = self
+                .glyph_index(character)
+                .ok_or(TrueTypeError::UnsupportedGlyph)?;
+            self.advance_width_glyph_with_variation(glyph, normalized_coordinates)
+        }
+
+        /// Return a direct glyph's advance after applying bounded gvar
+        /// phantom-point deltas.
+        pub fn advance_width_glyph_with_variation(
+            &self,
+            glyph: u16,
+            normalized_coordinates: &[i16],
+        ) -> Result<u16, TrueTypeError> {
+            let (advance, lsb) = self
+                .horizontal_metric(usize::from(glyph))
+                .ok_or(TrueTypeError::BadTableDirectory)?;
+            let lsb = lsb.ok_or(TrueTypeError::UnsupportedVariation)?;
+            let Some(data) = self.glyph_variation_data(glyph)? else {
+                return Ok(advance);
+            };
+            if data.is_empty() {
+                return Ok(advance);
+            }
+            let axis_count = self.gvar_axis_count()?;
+            if axis_count > 32 || normalized_coordinates.len() != axis_count {
+                return Err(TrueTypeError::UnsupportedVariation);
+            }
+            let mut points = [OutlinePoint {
+                x: 0,
+                y: 0,
+                on_curve: false,
+                contour_end: false,
+            }; 132];
+            let outline_count =
+                self.outline_points_for_glyph(usize::from(glyph), &mut points[..128], 0)?;
+            let variation_point_count = outline_count
+                .checked_add(4)
+                .ok_or(TrueTypeError::TooLarge)?;
+            if variation_point_count > points.len() || outline_count == 0 {
+                return Err(TrueTypeError::UnsupportedVariation);
+            }
+            let min_x = points[..outline_count]
+                .iter()
+                .map(|point| i32::from(point.x))
+                .min()
+                .ok_or(TrueTypeError::UnsupportedVariation)?;
+            let left = min_x
+                .checked_sub(i32::from(lsb))
+                .ok_or(TrueTypeError::TooLarge)?;
+            let right = left
+                .checked_add(i32::from(advance))
+                .ok_or(TrueTypeError::TooLarge)?;
+            points[outline_count].x = i16::try_from(left).map_err(|_| TrueTypeError::TooLarge)?;
+            points[outline_count + 1].x =
+                i16::try_from(right).map_err(|_| TrueTypeError::TooLarge)?;
+            self.apply_gvar_tuples(
+                data,
+                normalized_coordinates,
+                &mut points[..variation_point_count],
+            )?;
+            let width = i32::from(points[outline_count + 1].x)
+                .checked_sub(i32::from(points[outline_count].x))
+                .ok_or(TrueTypeError::TooLarge)?;
+            u16::try_from(width).map_err(|_| TrueTypeError::TooLarge)
+        }
+
+        /// Copy a validated simple-glyph TrueType instruction program into a
+        /// caller-owned buffer. Instruction execution is intentionally not
+        /// performed by the deterministic renderer yet.
+        pub fn glyph_hint_program(
+            &self,
+            character: char,
+            output: &mut [u8],
+        ) -> Result<usize, TrueTypeError> {
+            let glyph = usize::from(
+                self.glyph_index(character)
+                    .ok_or(TrueTypeError::UnsupportedGlyph)?,
+            );
+            let Some((start, length)) = self.simple_glyph_instruction_span(glyph)? else {
+                return Err(TrueTypeError::UnsupportedHinting);
+            };
+            if length > output.len() {
+                return Err(TrueTypeError::TooLarge);
+            }
+            output[..length].copy_from_slice(
+                self.bytes
+                    .get(start..start + length)
+                    .ok_or(TrueTypeError::BadTableDirectory)?,
+            );
+            Ok(length)
+        }
+
+        /// Execute the bounded coordinate-independent hint subset. Vector
+        /// state, rounding state and stack primitives are supported; point
+        /// movement, storage, CVT and control-flow instructions fail closed
+        /// until their resource model is implemented.
+        pub fn execute_glyph_hints(
+            &self,
+            character: char,
+            points: &mut [OutlinePoint],
+            state: &mut HintState,
+        ) -> Result<usize, TrueTypeError> {
+            self.execute_glyph_hints_with_cvt(character, points, &[], state)
+        }
+
+        /// Execute the bounded hint subset with caller-owned CVT values.
+        /// `MIAP` can place a point on a CVT value; all indices and storage
+        /// remain bounded, and unsupported instructions fail closed.
+        pub fn execute_glyph_hints_with_cvt(
+            &self,
+            character: char,
+            points: &mut [OutlinePoint],
+            cvt: &[i16],
+            state: &mut HintState,
+        ) -> Result<usize, TrueTypeError> {
+            let mut storage = [0i32; 0];
+            self.execute_glyph_hints_with_resources(character, points, cvt, &mut storage, state)
+        }
+
+        /// Execute the bounded hint subset with caller-owned CVT and storage
+        /// resources. `WS` and `RS` are supported; unbounded resource access
+        /// and unsupported instructions fail closed.
+        pub fn execute_glyph_hints_with_resources(
+            &self,
+            character: char,
+            points: &mut [OutlinePoint],
+            cvt: &[i16],
+            storage: &mut [i32],
+            state: &mut HintState,
+        ) -> Result<usize, TrueTypeError> {
+            if points.len() > 128 {
+                return Err(TrueTypeError::TooLarge);
+            }
+            let mut program = [0u8; 256];
+            let length = self.glyph_hint_program(character, &mut program)?;
+            let mut stack = [0i32; 256];
+            let mut stack_depth = 0usize;
+            let mut pc = 0usize;
+            let mut steps = 0usize;
+            while pc < length {
+                steps = steps.checked_add(1).ok_or(TrueTypeError::TooLarge)?;
+                if steps > 1024 {
+                    return Err(TrueTypeError::TooLarge);
+                }
+                let opcode = program[pc];
+                pc += 1;
+                match opcode {
+                    0x1b => pc = hint_skip_to_eif(&program, length, pc)?,
+                    0x1c => pc = hint_relative_target(&program, length, pc - 1)?,
+                    0x58 => {
+                        if stack_depth == 0 {
+                            return Err(TrueTypeError::UnsupportedHinting);
+                        }
+                        let condition = stack[stack_depth - 1];
+                        stack_depth -= 1;
+                        if condition == 0 {
+                            pc = hint_skip_to_else_or_eif(&program, length, pc)?;
+                        }
+                    }
+                    0x59 => {}
+                    0x78 | 0x79 => {
+                        if stack_depth == 0 {
+                            return Err(TrueTypeError::UnsupportedHinting);
+                        }
+                        let condition = stack[stack_depth - 1];
+                        stack_depth -= 1;
+                        let jump = (opcode == 0x78 && condition != 0)
+                            || (opcode == 0x79 && condition == 0);
+                        if jump {
+                            pc = hint_relative_target(&program, length, pc - 1)?;
+                        } else {
+                            pc = pc.checked_add(1).ok_or(TrueTypeError::TooLarge)?;
+                            if pc > length {
+                                return Err(TrueTypeError::BadTableDirectory);
+                            }
+                        }
+                    }
+                    0x00 | 0x02 => state.projection_axis = 1,
+                    0x01 | 0x03 => state.projection_axis = 0,
+                    0x04 => state.freedom_axis = 1,
+                    0x05 => state.freedom_axis = 0,
+                    0x18 | 0x19 | 0x7c | 0x7d => state.round_to_grid = true,
+                    0x2e | 0x2f => {
+                        if stack_depth == 0 {
+                            return Err(TrueTypeError::UnsupportedHinting);
+                        }
+                        let point = usize::try_from(stack[stack_depth - 1])
+                            .map_err(|_| TrueTypeError::UnsupportedHinting)?;
+                        stack_depth -= 1;
+                        if point >= points.len() {
+                            return Err(TrueTypeError::UnsupportedHinting);
+                        }
+                        if opcode & 1 != 0 {
+                            state.round_to_grid = true;
+                        }
+                    }
+                    0x3e | 0x3f => {
+                        if stack_depth < 2 {
+                            return Err(TrueTypeError::UnsupportedHinting);
+                        }
+                        let point = usize::try_from(stack[stack_depth - 2])
+                            .map_err(|_| TrueTypeError::UnsupportedHinting)?;
+                        let cvt_index = usize::try_from(stack[stack_depth - 1])
+                            .map_err(|_| TrueTypeError::UnsupportedHinting)?;
+                        stack_depth -= 2;
+                        if point >= points.len() || cvt_index >= cvt.len() {
+                            return Err(TrueTypeError::UnsupportedHinting);
+                        }
+                        let value = cvt[cvt_index];
+                        if state.freedom_axis == 0 {
+                            points[point].x = value;
+                        } else {
+                            points[point].y = value;
+                        }
+                        if opcode & 1 != 0 {
+                            state.round_to_grid = true;
+                        }
+                    }
+                    0x42 => {
+                        if stack_depth < 2 {
+                            return Err(TrueTypeError::UnsupportedHinting);
+                        }
+                        let index = usize::try_from(stack[stack_depth - 2])
+                            .map_err(|_| TrueTypeError::UnsupportedHinting)?;
+                        if index >= storage.len() {
+                            return Err(TrueTypeError::UnsupportedHinting);
+                        }
+                        storage[index] = stack[stack_depth - 1];
+                        stack_depth -= 2;
+                    }
+                    0x43 => {
+                        if stack_depth == 0 {
+                            return Err(TrueTypeError::UnsupportedHinting);
+                        }
+                        let index = usize::try_from(stack[stack_depth - 1])
+                            .map_err(|_| TrueTypeError::UnsupportedHinting)?;
+                        if index >= storage.len() || stack_depth == stack.len() {
+                            return Err(TrueTypeError::UnsupportedHinting);
+                        }
+                        stack[stack_depth - 1] = storage[index];
+                    }
+                    0x20 => {
+                        if stack_depth == 0 || stack_depth == stack.len() {
+                            return Err(TrueTypeError::UnsupportedHinting);
+                        }
+                        stack[stack_depth] = stack[stack_depth - 1];
+                        stack_depth += 1;
+                    }
+                    0x21 => {
+                        if stack_depth == 0 {
+                            return Err(TrueTypeError::UnsupportedHinting);
+                        }
+                        stack_depth -= 1;
+                    }
+                    0x22 => stack_depth = 0,
+                    0x23 => {
+                        if stack_depth < 2 {
+                            return Err(TrueTypeError::UnsupportedHinting);
+                        }
+                        stack.swap(stack_depth - 1, stack_depth - 2);
+                    }
+                    0x40 => {
+                        let count =
+                            usize::from(*program.get(pc).ok_or(TrueTypeError::BadTableDirectory)?);
+                        pc += 1;
+                        if stack_depth
+                            .checked_add(count)
+                            .is_none_or(|end| end > stack.len())
+                            || pc.checked_add(count).is_none_or(|end| end > length)
+                        {
+                            return Err(TrueTypeError::TooLarge);
+                        }
+                        for value in program[pc..pc + count].iter().copied() {
+                            stack[stack_depth] = i32::from(value);
+                            stack_depth += 1;
+                        }
+                        pc += count;
+                    }
+                    0x41 => {
+                        let count =
+                            usize::from(*program.get(pc).ok_or(TrueTypeError::BadTableDirectory)?);
+                        pc += 1;
+                        if stack_depth
+                            .checked_add(count)
+                            .is_none_or(|end| end > stack.len())
+                            || pc
+                                .checked_add(count.checked_mul(2).ok_or(TrueTypeError::TooLarge)?)
+                                .is_none_or(|end| end > length)
+                        {
+                            return Err(TrueTypeError::TooLarge);
+                        }
+                        for _ in 0..count {
+                            stack[stack_depth] =
+                                i32::from(i16::from_be_bytes([program[pc], program[pc + 1]]));
+                            stack_depth += 1;
+                            pc += 2;
+                        }
+                    }
+                    0xb0..=0xb7 => {
+                        let count = usize::from(opcode - 0xb0) + 1;
+                        if stack_depth
+                            .checked_add(count)
+                            .is_none_or(|end| end > stack.len())
+                            || pc.checked_add(count).is_none_or(|end| end > length)
+                        {
+                            return Err(TrueTypeError::TooLarge);
+                        }
+                        for value in program[pc..pc + count].iter().copied() {
+                            stack[stack_depth] = i32::from(value);
+                            stack_depth += 1;
+                        }
+                        pc += count;
+                    }
+                    0xb8..=0xbf => {
+                        let count = usize::from(opcode - 0xb8) + 1;
+                        if stack_depth
+                            .checked_add(count)
+                            .is_none_or(|end| end > stack.len())
+                            || pc
+                                .checked_add(count.checked_mul(2).ok_or(TrueTypeError::TooLarge)?)
+                                .is_none_or(|end| end > length)
+                        {
+                            return Err(TrueTypeError::TooLarge);
+                        }
+                        for _ in 0..count {
+                            stack[stack_depth] =
+                                i32::from(i16::from_be_bytes([program[pc], program[pc + 1]]));
+                            stack_depth += 1;
+                            pc += 2;
+                        }
+                    }
+                    _ => return Err(TrueTypeError::UnsupportedHinting),
+                }
+            }
+            state.stack_depth = u8::try_from(stack_depth).map_err(|_| TrueTypeError::TooLarge)?;
+            Ok(length)
+        }
+
+        fn simple_glyph_instruction_span(
+            &self,
+            glyph: usize,
+        ) -> Result<Option<(usize, usize)>, TrueTypeError> {
+            let (glyf_offset, glyf_length) = self.glyf.ok_or(TrueTypeError::UnsupportedGlyph)?;
+            let (loca_offset, loca_length) = self.loca.ok_or(TrueTypeError::UnsupportedGlyph)?;
+            if glyph >= usize::from(self.glyph_count) {
+                return Err(TrueTypeError::UnsupportedGlyph);
+            }
+            let loca_entry = |index: usize| -> Option<usize> {
+                if self.index_to_loc_format == 0 {
+                    let entry = loca_offset.checked_add(index.checked_mul(2)?)?;
+                    if entry.checked_add(2)? > loca_offset + loca_length {
+                        return None;
+                    }
+                    usize::from(read_u16(self.bytes, entry)?).checked_mul(2)
+                } else {
+                    let entry = loca_offset.checked_add(index.checked_mul(4)?)?;
+                    if entry.checked_add(4)? > loca_offset + loca_length {
+                        return None;
+                    }
+                    usize::try_from(read_u32(self.bytes, entry)?).ok()
+                }
+            };
+            let start = loca_entry(glyph).ok_or(TrueTypeError::BadTableDirectory)?;
+            let end = loca_entry(glyph + 1).ok_or(TrueTypeError::BadTableDirectory)?;
+            if start > end || end > glyf_length {
+                return Err(TrueTypeError::BadTableDirectory);
+            }
+            if start == end {
+                return Ok(Some((glyf_offset, 0)));
+            }
+            let glyph_start = glyf_offset
+                .checked_add(start)
+                .ok_or(TrueTypeError::BadTableDirectory)?;
+            let glyph_end = glyf_offset
+                .checked_add(end)
+                .ok_or(TrueTypeError::BadTableDirectory)?;
+            if glyph_end > self.bytes.len() || glyph_end - glyph_start < 10 {
+                return Err(TrueTypeError::BadTableDirectory);
+            }
+            let contours =
+                read_i16(self.bytes, glyph_start).ok_or(TrueTypeError::BadTableDirectory)?;
+            if contours < 0 {
+                return Ok(None);
+            }
+            let contours =
+                usize::try_from(contours).map_err(|_| TrueTypeError::BadTableDirectory)?;
+            let endpoints_end = glyph_start
+                .checked_add(
+                    10usize
+                        .checked_add(contours.checked_mul(2).ok_or(TrueTypeError::TooLarge)?)
+                        .ok_or(TrueTypeError::TooLarge)?,
+                )
+                .ok_or(TrueTypeError::TooLarge)?;
+            if endpoints_end
+                .checked_add(2)
+                .is_none_or(|end| end > glyph_end)
+            {
+                return Err(TrueTypeError::BadTableDirectory);
+            }
+            let length = usize::from(
+                read_u16(self.bytes, endpoints_end).ok_or(TrueTypeError::BadTableDirectory)?,
+            );
+            const MAX_HINT_INSTRUCTIONS: usize = 256;
+            if length > MAX_HINT_INSTRUCTIONS {
+                return Err(TrueTypeError::TooLarge);
+            }
+            let instruction_start = endpoints_end + 2;
+            let instruction_end = instruction_start
+                .checked_add(length)
+                .ok_or(TrueTypeError::TooLarge)?;
+            if instruction_end > glyph_end {
+                return Err(TrueTypeError::BadTableDirectory);
+            }
+            Ok(Some((instruction_start, length)))
+        }
+
+        /// Return a legacy TrueType format-0 horizontal kerning adjustment in
+        /// font units. Unsupported or malformed optional tables return None.
+        pub fn kerning(&self, left: char, right: char) -> Option<i16> {
+            let table = self.kern?;
+            let left = self.glyph_index(left)?;
+            let right = self.glyph_index(right)?;
+            let table_end = table.0.checked_add(table.1)?;
+            if table.1 < 4 || table_end > self.bytes.len() {
+                return None;
+            }
+            let subtables = usize::from(read_u16(self.bytes, table.0 + 2)?);
+            let mut cursor = table.0 + 4;
+            for _ in 0..subtables {
+                if cursor.checked_add(6)? > table_end {
+                    return None;
+                }
+                let length = usize::from(read_u16(self.bytes, cursor + 2)?);
+                let subtable_end = cursor.checked_add(length)?;
+                if length < 14 || subtable_end > table_end {
+                    return None;
+                }
+                let coverage = read_u16(self.bytes, cursor + 4)?;
+                if coverage >> 8 == 0 && coverage & 1 != 0 {
+                    let pairs = usize::from(read_u16(self.bytes, cursor + 6)?);
+                    let pairs_end = cursor.checked_add(14)?.checked_add(pairs.checked_mul(6)?)?;
+                    if pairs_end > subtable_end {
+                        return None;
+                    }
+                    for pair in 0..pairs {
+                        let entry = cursor + 14 + pair * 6;
+                        if read_u16(self.bytes, entry)? == left
+                            && read_u16(self.bytes, entry + 2)? == right
+                        {
+                            return read_i16(self.bytes, entry + 4);
+                        }
+                    }
+                }
+                cursor = subtable_end;
+            }
+            None
+        }
+
+        /// Read bounded `fvar` axis metadata in 16.16 font units. Variation
+        /// deltas are not applied by this parser; callers select and render
+        /// only the base outline until a gvar backend is available.
+        pub fn variation_axes(&self, output: &mut [VariationAxis]) -> Result<usize, TrueTypeError> {
+            let Some((offset, length)) = self.fvar else {
+                return Ok(0);
+            };
+            if length < 16 {
+                return Err(TrueTypeError::BadTableDirectory);
+            }
+            let axis_offset = usize::from(
+                read_u16(self.bytes, offset + 8).ok_or(TrueTypeError::BadTableDirectory)?,
+            );
+            let axis_count = usize::from(
+                read_u16(self.bytes, offset + 12).ok_or(TrueTypeError::BadTableDirectory)?,
+            );
+            let axis_size = usize::from(
+                read_u16(self.bytes, offset + 14).ok_or(TrueTypeError::BadTableDirectory)?,
+            );
+            if axis_size < 20 || axis_count > output.len() {
+                return Err(TrueTypeError::TooLarge);
+            }
+            let table_end = offset
+                .checked_add(length)
+                .ok_or(TrueTypeError::BadTableDirectory)?;
+            let axes_end = offset
+                .checked_add(axis_offset)
+                .and_then(|start| start.checked_add(axis_count.checked_mul(axis_size)?))
+                .ok_or(TrueTypeError::BadTableDirectory)?;
+            if axes_end > table_end {
+                return Err(TrueTypeError::BadTableDirectory);
+            }
+            for (index, slot) in output.iter_mut().enumerate().take(axis_count) {
+                let axis = offset + axis_offset + index * axis_size;
+                let mut tag = [0u8; 4];
+                tag.copy_from_slice(
+                    self.bytes
+                        .get(axis..axis + 4)
+                        .ok_or(TrueTypeError::BadTableDirectory)?,
+                );
+                *slot = VariationAxis {
+                    tag,
+                    minimum: read_i32(self.bytes, axis + 4)
+                        .ok_or(TrueTypeError::BadTableDirectory)?,
+                    default: read_i32(self.bytes, axis + 8)
+                        .ok_or(TrueTypeError::BadTableDirectory)?,
+                    maximum: read_i32(self.bytes, axis + 12)
+                        .ok_or(TrueTypeError::BadTableDirectory)?,
+                };
+            }
+            Ok(axis_count)
+        }
+
+        /// Return the checked raw `gvar` payload for one glyph. The payload
+        /// is borrowed from the face and remains encoded; applying tuple
+        /// deltas is a separate bounded rasterization step.
+        pub fn glyph_variation_data(&self, glyph: u16) -> Result<Option<&'a [u8]>, TrueTypeError> {
+            let Some((offset, length)) = self.gvar else {
+                return Ok(None);
+            };
+            if length < 20 {
+                return Err(TrueTypeError::BadTableDirectory);
+            }
+            if read_u32(self.bytes, offset) != Some(0x0001_0000) {
+                return Err(TrueTypeError::BadTableDirectory);
+            }
+            let axis_count = usize::from(
+                read_u16(self.bytes, offset + 4).ok_or(TrueTypeError::BadTableDirectory)?,
+            );
+            let shared_tuple_count = usize::from(
+                read_u16(self.bytes, offset + 6).ok_or(TrueTypeError::BadTableDirectory)?,
+            );
+            let shared_tuples_offset = usize::try_from(
+                read_u32(self.bytes, offset + 8).ok_or(TrueTypeError::BadTableDirectory)?,
+            )
+            .map_err(|_| TrueTypeError::BadTableDirectory)?;
+            let glyph_count = usize::from(
+                read_u16(self.bytes, offset + 12).ok_or(TrueTypeError::BadTableDirectory)?,
+            );
+            if usize::from(glyph) >= glyph_count || glyph_count != usize::from(self.glyph_count) {
+                return Err(TrueTypeError::BadTableDirectory);
+            }
+            let flags =
+                read_u16(self.bytes, offset + 14).ok_or(TrueTypeError::BadTableDirectory)?;
+            let data_offset = usize::try_from(
+                read_u32(self.bytes, offset + 16).ok_or(TrueTypeError::BadTableDirectory)?,
+            )
+            .map_err(|_| TrueTypeError::BadTableDirectory)?;
+            let table_end = offset
+                .checked_add(length)
+                .ok_or(TrueTypeError::BadTableDirectory)?;
+            let shared_end = offset
+                .checked_add(shared_tuples_offset)
+                .and_then(|start| {
+                    start.checked_add(axis_count.checked_mul(shared_tuple_count)?.checked_mul(2)?)
+                })
+                .ok_or(TrueTypeError::BadTableDirectory)?;
+            let offsets_start = offset
+                .checked_add(20)
+                .ok_or(TrueTypeError::BadTableDirectory)?;
+            let offset_width = if flags & 1 != 0 { 4 } else { 2 };
+            let offsets_end = offsets_start
+                .checked_add(
+                    (glyph_count + 1)
+                        .checked_mul(offset_width)
+                        .ok_or(TrueTypeError::TooLarge)?,
+                )
+                .ok_or(TrueTypeError::BadTableDirectory)?;
+            let data_start = offset
+                .checked_add(data_offset)
+                .ok_or(TrueTypeError::BadTableDirectory)?;
+            if shared_end > table_end
+                || offsets_end > table_end
+                || data_start < offsets_end
+                || data_start > table_end
+            {
+                return Err(TrueTypeError::BadTableDirectory);
+            }
+            let read_offset = |index: usize| -> Option<usize> {
+                let entry = offsets_start.checked_add(index.checked_mul(offset_width)?)?;
+                if flags & 1 != 0 {
+                    usize::try_from(read_u32(self.bytes, entry)?).ok()
+                } else {
+                    usize::from(read_u16(self.bytes, entry)?).checked_mul(2)
+                }
+            };
+            let start = data_start
+                .checked_add(
+                    read_offset(usize::from(glyph)).ok_or(TrueTypeError::BadTableDirectory)?,
+                )
+                .ok_or(TrueTypeError::BadTableDirectory)?;
+            let end = data_start
+                .checked_add(
+                    read_offset(usize::from(glyph) + 1).ok_or(TrueTypeError::BadTableDirectory)?,
+                )
+                .ok_or(TrueTypeError::BadTableDirectory)?;
+            if start > end || end > table_end {
+                return Err(TrueTypeError::BadTableDirectory);
+            }
+            self.bytes
+                .get(start..end)
+                .map(Some)
+                .ok_or(TrueTypeError::BadTableDirectory)
+        }
+
+        /// Decode `gvar` tuples at normalized F2DOT14 axis coordinates.
+        /// Simple glyphs receive point deltas; composite glyphs apply bounded
+        /// component-position deltas and recursively vary their components.
+        pub fn outline_points_with_variation(
+            &self,
+            character: char,
+            normalized_coordinates: &[i16],
+            output: &mut [OutlinePoint],
+        ) -> Result<usize, TrueTypeError> {
+            let glyph = self
+                .glyph_index(character)
+                .ok_or(TrueTypeError::UnsupportedGlyph)?;
+            let axis_count = self.gvar_axis_count()?;
+            if axis_count > 32 || normalized_coordinates.len() != axis_count {
+                return Err(TrueTypeError::UnsupportedVariation);
+            }
+            self.outline_points_for_glyph_variation(
+                usize::from(glyph),
+                output,
+                0,
+                Some(normalized_coordinates),
+            )
+        }
+
+        fn gvar_axis_count(&self) -> Result<usize, TrueTypeError> {
+            let Some((offset, length)) = self.gvar else {
+                return Ok(0);
+            };
+            if length < 20 {
+                return Err(TrueTypeError::BadTableDirectory);
+            }
+            Ok(usize::from(
+                read_u16(self.bytes, offset + 4).ok_or(TrueTypeError::BadTableDirectory)?,
+            ))
+        }
+
+        fn apply_gvar_tuples(
+            &self,
+            data: &[u8],
+            coordinates: &[i16],
+            points: &mut [OutlinePoint],
+        ) -> Result<(), TrueTypeError> {
+            const PRIVATE_POINTS: u16 = 0x2000;
+            const INTERMEDIATE_REGION: u16 = 0x4000;
+            const EMBEDDED_PEAK: u16 = 0x8000;
+            const SHARED_POINTS: u16 = 0x8000;
+            const MAX_TUPLES: usize = 64;
+            const MAX_POINTS: usize = 128;
+            if points.len() > MAX_POINTS || data.len() < 2 {
+                return Err(TrueTypeError::TooLarge);
+            }
+            let tuple_count_word = read_u16(data, 0).ok_or(TrueTypeError::BadTableDirectory)?;
+            if tuple_count_word & 0x7000 != 0 {
+                return Err(TrueTypeError::UnsupportedVariation);
+            }
+            let tuple_count = usize::from(tuple_count_word & 0x0fff);
+            if tuple_count > MAX_TUPLES {
+                return Err(TrueTypeError::TooLarge);
+            }
+            #[derive(Clone, Copy)]
+            struct Tuple {
+                data_start: usize,
+                data_end: usize,
+                flags: u16,
+                peak: [i16; 32],
+                start: [i16; 32],
+                end: [i16; 32],
+            }
+            let mut tuples = [Tuple {
+                data_start: 0,
+                data_end: 0,
+                flags: 0,
+                peak: [0; 32],
+                start: [0; 32],
+                end: [0; 32],
+            }; MAX_TUPLES];
+            let mut shared_points = [0usize; MAX_POINTS];
+            let (shared_count, mut cursor) = if tuple_count_word & SHARED_POINTS != 0 {
+                Self::decode_gvar_points(data, 2, data.len(), &mut shared_points, points.len())?
+            } else {
+                (0, 2)
+            };
+            for tuple in tuples.iter_mut().take(tuple_count) {
+                let data_size =
+                    usize::from(read_u16(data, cursor).ok_or(TrueTypeError::BadTableDirectory)?);
+                let flags = read_u16(data, cursor + 2).ok_or(TrueTypeError::BadTableDirectory)?;
+                cursor = cursor
+                    .checked_add(4)
+                    .ok_or(TrueTypeError::BadTableDirectory)?;
+                if flags & EMBEDDED_PEAK == 0 {
+                    return Err(TrueTypeError::UnsupportedVariation);
+                }
+                for peak in tuple.peak.iter_mut().take(coordinates.len()) {
+                    *peak = read_i16(data, cursor).ok_or(TrueTypeError::BadTableDirectory)?;
+                    cursor += 2;
+                }
+                if flags & INTERMEDIATE_REGION != 0 {
+                    for start in tuple.start.iter_mut().take(coordinates.len()) {
+                        *start = read_i16(data, cursor).ok_or(TrueTypeError::BadTableDirectory)?;
+                        cursor += 2;
+                    }
+                    for end in tuple.end.iter_mut().take(coordinates.len()) {
+                        *end = read_i16(data, cursor).ok_or(TrueTypeError::BadTableDirectory)?;
+                        cursor += 2;
+                    }
+                }
+                let data_start = cursor;
+                let data_end = data_start
+                    .checked_add(data_size)
+                    .ok_or(TrueTypeError::BadTableDirectory)?;
+                if data_end > data.len() {
+                    return Err(TrueTypeError::BadTableDirectory);
+                }
+                tuple.data_start = data_start;
+                tuple.data_end = data_end;
+                tuple.flags = flags;
+                cursor = data_end;
+            }
+            for tuple in tuples.iter().take(tuple_count) {
+                let mut point_indices = [0usize; MAX_POINTS];
+                let (point_count, mut delta_cursor) = if tuple.flags & PRIVATE_POINTS != 0 {
+                    let (count, _) = Self::decode_gvar_points(
+                        data,
+                        tuple.data_start,
+                        tuple.data_end,
+                        &mut point_indices,
+                        points.len(),
+                    )?;
+                    let end = Self::gvar_points_end(
+                        data,
+                        tuple.data_start,
+                        tuple.data_end,
+                        points.len(),
+                    )?;
+                    (count, end)
+                } else if tuple_count_word & SHARED_POINTS != 0 {
+                    point_indices[..shared_count].copy_from_slice(&shared_points[..shared_count]);
+                    (shared_count, tuple.data_start)
+                } else {
+                    for (index, point) in point_indices.iter_mut().enumerate().take(points.len()) {
+                        *point = index;
+                    }
+                    (points.len(), tuple.data_start)
+                };
+                let mut x_deltas = [0i16; MAX_POINTS];
+                let mut y_deltas = [0i16; MAX_POINTS];
+                delta_cursor = Self::decode_gvar_deltas(
+                    data,
+                    delta_cursor,
+                    tuple.data_end,
+                    point_count,
+                    &mut x_deltas,
+                )?;
+                let _ = Self::decode_gvar_deltas(
+                    data,
+                    delta_cursor,
+                    tuple.data_end,
+                    point_count,
+                    &mut y_deltas,
+                )?;
+                let scalar = Self::gvar_scalar(
+                    coordinates,
+                    &tuple.peak,
+                    &tuple.start,
+                    &tuple.end,
+                    tuple.flags & INTERMEDIATE_REGION != 0,
+                );
+                for index in 0..point_count {
+                    let point = point_indices[index];
+                    let x = i64::from(points[point].x)
+                        + (i64::from(x_deltas[index]) * i64::from(scalar)).div_euclid(16384);
+                    let y = i64::from(points[point].y)
+                        + (i64::from(y_deltas[index]) * i64::from(scalar)).div_euclid(16384);
+                    points[point].x = i16::try_from(x).map_err(|_| TrueTypeError::TooLarge)?;
+                    points[point].y = i16::try_from(y).map_err(|_| TrueTypeError::TooLarge)?;
+                }
+            }
+            Ok(())
+        }
+
+        fn gvar_scalar(
+            coordinates: &[i16],
+            peak: &[i16; 32],
+            start: &[i16; 32],
+            end: &[i16; 32],
+            intermediate: bool,
+        ) -> i16 {
+            let mut scalar = 16384i64;
+            for (index, (coordinate, peak)) in coordinates.iter().zip(peak.iter()).enumerate() {
+                let coordinate = i64::from(*coordinate);
+                let peak = i64::from(*peak);
+                if peak == 0 {
+                    continue;
+                }
+                if intermediate {
+                    let start = i64::from(start[index]);
+                    let end = i64::from(end[index]);
+                    if start > peak || peak > end || coordinate < start || coordinate > end {
+                        return 0;
+                    }
+                    let axis_scalar = if coordinate < peak {
+                        if peak == start {
+                            16384
+                        } else {
+                            (coordinate - start) * 16384 / (peak - start)
+                        }
+                    } else if coordinate > peak {
+                        if end == peak {
+                            16384
+                        } else {
+                            (end - coordinate) * 16384 / (end - peak)
+                        }
+                    } else {
+                        16384
+                    };
+                    scalar = scalar * axis_scalar.clamp(0, 16384) / 16384;
+                    continue;
+                }
+                if coordinate == 0 || (coordinate < 0) != (peak < 0) {
+                    return 0;
+                }
+                let magnitude = coordinate.abs();
+                let peak_magnitude = peak.abs();
+                if magnitude < peak_magnitude {
+                    scalar = scalar * magnitude / peak_magnitude;
+                }
+            }
+            scalar as i16
+        }
+
+        fn decode_gvar_points(
+            data: &[u8],
+            start: usize,
+            end: usize,
+            output: &mut [usize],
+            point_limit: usize,
+        ) -> Result<(usize, usize), TrueTypeError> {
+            let count = usize::from(read_u16(data, start).ok_or(TrueTypeError::BadTableDirectory)?);
+            if count == 0 {
+                if point_limit > output.len() {
+                    return Err(TrueTypeError::TooLarge);
+                }
+                for (index, point) in output.iter_mut().enumerate().take(point_limit) {
+                    *point = index;
+                }
+                return Ok((point_limit, start + 2));
+            }
+            if count > output.len() || count > point_limit {
+                return Err(TrueTypeError::TooLarge);
+            }
+            let mut cursor = start + 2;
+            let mut previous = 0usize;
+            let mut written = 0;
+            while written < count {
+                let control = *data.get(cursor).ok_or(TrueTypeError::BadTableDirectory)?;
+                cursor += 1;
+                let run = usize::from(control & 0x7f) + 1;
+                if written + run > count {
+                    return Err(TrueTypeError::BadTableDirectory);
+                }
+                for _ in 0..run {
+                    let value = if control & 0x80 != 0 {
+                        usize::from(read_u16(data, cursor).ok_or(TrueTypeError::BadTableDirectory)?)
+                    } else {
+                        usize::from(*data.get(cursor).ok_or(TrueTypeError::BadTableDirectory)?)
+                    };
+                    cursor += if control & 0x80 != 0 { 2 } else { 1 };
+                    previous = previous.checked_add(value).ok_or(TrueTypeError::TooLarge)?;
+                    if previous >= point_limit {
+                        return Err(TrueTypeError::BadTableDirectory);
+                    }
+                    output[written] = previous;
+                    written += 1;
+                }
+            }
+            if cursor > end {
+                return Err(TrueTypeError::BadTableDirectory);
+            }
+            Ok((written, cursor))
+        }
+
+        fn gvar_points_end(
+            data: &[u8],
+            start: usize,
+            end: usize,
+            point_limit: usize,
+        ) -> Result<usize, TrueTypeError> {
+            let count = usize::from(read_u16(data, start).ok_or(TrueTypeError::BadTableDirectory)?);
+            if count == 0 {
+                return Ok(start + 2);
+            }
+            let mut cursor = start + 2;
+            let mut written = 0;
+            while written < count {
+                let control = *data.get(cursor).ok_or(TrueTypeError::BadTableDirectory)?;
+                cursor += 1;
+                let run = usize::from(control & 0x7f) + 1;
+                written = written.checked_add(run).ok_or(TrueTypeError::TooLarge)?;
+                cursor = cursor
+                    .checked_add(if control & 0x80 != 0 { run * 2 } else { run })
+                    .ok_or(TrueTypeError::TooLarge)?;
+                if written > point_limit || cursor > end {
+                    return Err(TrueTypeError::BadTableDirectory);
+                }
+            }
+            Ok(cursor)
+        }
+
+        fn decode_gvar_deltas(
+            data: &[u8],
+            start: usize,
+            end: usize,
+            count: usize,
+            output: &mut [i16],
+        ) -> Result<usize, TrueTypeError> {
+            let mut cursor = start;
+            let mut written = 0;
+            while written < count {
+                let control = *data.get(cursor).ok_or(TrueTypeError::BadTableDirectory)?;
+                cursor += 1;
+                let run = usize::from(control & 0x3f) + 1;
+                if written + run > count {
+                    return Err(TrueTypeError::BadTableDirectory);
+                }
+                for slot in output.iter_mut().skip(written).take(run) {
+                    *slot = if control & 0x40 != 0 {
+                        0
+                    } else if control & 0x80 != 0 {
+                        let value =
+                            read_i16(data, cursor).ok_or(TrueTypeError::BadTableDirectory)?;
+                        cursor += 2;
+                        value
+                    } else {
+                        let value = i8::from_ne_bytes([*data
+                            .get(cursor)
+                            .ok_or(TrueTypeError::BadTableDirectory)?]);
+                        cursor += 1;
+                        i16::from(value)
+                    };
+                }
+                written += run;
+            }
+            if cursor > end {
+                return Err(TrueTypeError::BadTableDirectory);
+            }
+            Ok(cursor)
+        }
+
+        /// Decode one simple or bounded composite TrueType glyph into
+        /// caller-owned outline points. Malformed or oversized data fails
+        /// closed; no font bytes are retained by the output.
+        pub fn outline_points(
+            &self,
+            character: char,
+            output: &mut [OutlinePoint],
+        ) -> Result<usize, TrueTypeError> {
+            let glyph = self
+                .glyph_index(character)
+                .ok_or(TrueTypeError::UnsupportedGlyph)?;
+            self.outline_points_glyph(glyph, output)
+        }
+
+        /// Decode a validated glyph ID directly, including glyphs introduced
+        /// by OpenType substitutions and not addressable by a Unicode scalar.
+        pub fn outline_points_glyph(
+            &self,
+            glyph: u16,
+            output: &mut [OutlinePoint],
+        ) -> Result<usize, TrueTypeError> {
+            if glyph >= self.glyph_count {
+                return Err(TrueTypeError::UnsupportedGlyph);
+            }
+            self.outline_points_for_glyph(usize::from(glyph), output, 0)
+        }
+
+        fn outline_points_for_glyph(
+            &self,
+            glyph: usize,
+            output: &mut [OutlinePoint],
+            depth: usize,
+        ) -> Result<usize, TrueTypeError> {
+            self.outline_points_for_glyph_variation(glyph, output, depth, None)
+        }
+
+        fn outline_points_for_glyph_variation(
+            &self,
+            glyph: usize,
+            output: &mut [OutlinePoint],
+            depth: usize,
+            variation: Option<&[i16]>,
+        ) -> Result<usize, TrueTypeError> {
+            let (glyf_offset, glyf_length) = self.glyf.ok_or(TrueTypeError::UnsupportedGlyph)?;
+            let (loca_offset, loca_length) = self.loca.ok_or(TrueTypeError::UnsupportedGlyph)?;
+            let loca = |index: usize| -> Option<usize> {
+                if index > usize::from(self.glyph_count) {
+                    return None;
+                }
+                if self.index_to_loc_format == 0 {
+                    let offset = loca_offset.checked_add(index.checked_mul(2)?)?;
+                    if offset.checked_add(2)? > loca_offset + loca_length {
+                        return None;
+                    }
+                    Some(usize::from(read_u16(self.bytes, offset)?) * 2)
+                } else {
+                    let offset = loca_offset.checked_add(index.checked_mul(4)?)?;
+                    if offset.checked_add(4)? > loca_offset + loca_length {
+                        return None;
+                    }
+                    usize::try_from(read_u32(self.bytes, offset)?).ok()
+                }
+            };
+            let start = loca(glyph).ok_or(TrueTypeError::BadTableDirectory)?;
+            let end = loca(glyph + 1).ok_or(TrueTypeError::BadTableDirectory)?;
+            if start > end || end > glyf_length {
+                return Err(TrueTypeError::BadTableDirectory);
+            }
+            if start == end {
+                return Ok(0);
+            }
+            let glyph_start = glyf_offset
+                .checked_add(start)
+                .ok_or(TrueTypeError::BadTableDirectory)?;
+            let glyph_end = glyf_offset
+                .checked_add(end)
+                .ok_or(TrueTypeError::BadTableDirectory)?;
+            if glyph_end > self.bytes.len() || glyph_end - glyph_start < 10 {
+                return Err(TrueTypeError::BadTableDirectory);
+            }
+            let contours =
+                read_i16(self.bytes, glyph_start).ok_or(TrueTypeError::BadTableDirectory)?;
+            if contours < 0 {
+                if depth >= 8 {
+                    return Err(TrueTypeError::TooLarge);
+                }
+                return self.composite_points(
+                    glyph,
+                    glyph_start,
+                    glyph_end,
+                    output,
+                    depth + 1,
+                    variation,
+                );
+            }
+            let contours =
+                usize::try_from(contours).map_err(|_| TrueTypeError::BadTableDirectory)?;
+            if contours == 0 {
+                return Ok(0);
+            }
+            let endpoints_end = glyph_start
+                .checked_add(
+                    10usize
+                        .checked_add(contours.checked_mul(2).ok_or(TrueTypeError::TooLarge)?)
+                        .ok_or(TrueTypeError::TooLarge)?,
+                )
+                .ok_or(TrueTypeError::TooLarge)?;
+            if endpoints_end + 2 > glyph_end {
+                return Err(TrueTypeError::BadTableDirectory);
+            }
+            let last_point = usize::from(
+                read_u16(self.bytes, endpoints_end - 2).ok_or(TrueTypeError::BadTableDirectory)?,
+            ) + 1;
+            const MAX_POINTS: usize = 128;
+            if last_point > MAX_POINTS || last_point > output.len() {
+                return Err(TrueTypeError::TooLarge);
+            }
+            let instructions = usize::from(
+                read_u16(self.bytes, endpoints_end).ok_or(TrueTypeError::BadTableDirectory)?,
+            );
+            let flags_start = endpoints_end
+                .checked_add(
+                    2usize
+                        .checked_add(instructions)
+                        .ok_or(TrueTypeError::TooLarge)?,
+                )
+                .ok_or(TrueTypeError::TooLarge)?;
+            if flags_start > glyph_end {
+                return Err(TrueTypeError::BadTableDirectory);
+            }
+            let mut flags = [0u8; MAX_POINTS];
+            let mut cursor = flags_start;
+            let mut point = 0;
+            while point < last_point {
+                let flag = *self
+                    .bytes
+                    .get(cursor)
+                    .ok_or(TrueTypeError::BadTableDirectory)?;
+                cursor += 1;
+                let repeat = if flag & 0x08 != 0 {
+                    let count = usize::from(
+                        *self
+                            .bytes
+                            .get(cursor)
+                            .ok_or(TrueTypeError::BadTableDirectory)?,
+                    );
+                    cursor += 1;
+                    count
+                } else {
+                    0
+                };
+                for _ in 0..=repeat {
+                    if point >= last_point {
+                        return Err(TrueTypeError::BadTableDirectory);
+                    }
+                    flags[point] = flag;
+                    point += 1;
+                }
+            }
+            let mut x = 0i32;
+            let mut x_coordinates = [0i16; MAX_POINTS];
+            for index in 0..last_point {
+                let flag = flags[index];
+                let dx = if flag & 0x02 != 0 {
+                    let value = i32::from(
+                        *self
+                            .bytes
+                            .get(cursor)
+                            .ok_or(TrueTypeError::BadTableDirectory)?,
+                    );
+                    cursor += 1;
+                    if flag & 0x10 != 0 { value } else { -value }
+                } else if flag & 0x10 != 0 {
+                    0
+                } else {
+                    let value = i32::from(
+                        read_i16(self.bytes, cursor).ok_or(TrueTypeError::BadTableDirectory)?,
+                    );
+                    cursor += 2;
+                    value
+                };
+                x = x.checked_add(dx).ok_or(TrueTypeError::TooLarge)?;
+                x_coordinates[index] = i16::try_from(x).map_err(|_| TrueTypeError::TooLarge)?;
+            }
+            let mut y = 0i32;
+            let mut y_coordinates = [0i16; MAX_POINTS];
+            for index in 0..last_point {
+                let flag = flags[index];
+                let dy = if flag & 0x04 != 0 {
+                    let value = i32::from(
+                        *self
+                            .bytes
+                            .get(cursor)
+                            .ok_or(TrueTypeError::BadTableDirectory)?,
+                    );
+                    cursor += 1;
+                    if flag & 0x20 != 0 { value } else { -value }
+                } else if flag & 0x20 != 0 {
+                    0
+                } else {
+                    let value = i32::from(
+                        read_i16(self.bytes, cursor).ok_or(TrueTypeError::BadTableDirectory)?,
+                    );
+                    cursor += 2;
+                    value
+                };
+                y = y.checked_add(dy).ok_or(TrueTypeError::TooLarge)?;
+                y_coordinates[index] = i16::try_from(y).map_err(|_| TrueTypeError::TooLarge)?;
+            }
+            for index in 0..last_point {
+                let flag = flags[index];
+                output[index] = OutlinePoint {
+                    x: x_coordinates[index],
+                    y: y_coordinates[index],
+                    on_curve: flag & 0x01 != 0,
+                    contour_end: (0..contours).any(|contour| {
+                        read_u16(self.bytes, glyph_start + 10 + contour * 2)
+                            .is_some_and(|end_point| usize::from(end_point) == index)
+                    }),
+                };
+            }
+            if cursor > glyph_end {
+                return Err(TrueTypeError::BadTableDirectory);
+            }
+            if let Some(coordinates) = variation
+                && let Some(data) = self.glyph_variation_data(glyph as u16)?
+                && !data.is_empty()
+            {
+                let variation_point_count =
+                    last_point.checked_add(4).ok_or(TrueTypeError::TooLarge)?;
+                let mut varied_points = [OutlinePoint {
+                    x: 0,
+                    y: 0,
+                    on_curve: false,
+                    contour_end: false,
+                }; 132];
+                varied_points[..last_point].copy_from_slice(&output[..last_point]);
+                self.apply_gvar_tuples(
+                    data,
+                    coordinates,
+                    &mut varied_points[..variation_point_count],
+                )?;
+                output[..last_point].copy_from_slice(&varied_points[..last_point]);
+            }
+            Ok(last_point)
+        }
+
+        fn composite_points(
+            &self,
+            glyph: usize,
+            glyph_start: usize,
+            glyph_end: usize,
+            output: &mut [OutlinePoint],
+            depth: usize,
+            variation: Option<&[i16]>,
+        ) -> Result<usize, TrueTypeError> {
+            const ARG_WORDS: u16 = 0x0001;
+            const ARG_XY: u16 = 0x0002;
+            const MORE: u16 = 0x0020;
+            const SCALE: u16 = 0x0008;
+            const XY_SCALE: u16 = 0x0040;
+            const TWO_BY_TWO: u16 = 0x0080;
+            const INSTRUCTIONS: u16 = 0x0100;
+            let mut cursor = glyph_start
+                .checked_add(10)
+                .ok_or(TrueTypeError::BadTableDirectory)?;
+            let mut written = 0;
+            const MAX_COMPONENTS: usize = 32;
+            let mut component_starts = [0usize; MAX_COMPONENTS];
+            let mut component_ends = [0usize; MAX_COMPONENTS];
+            let mut component_total = 0usize;
+            let final_flags = loop {
+                if cursor
+                    .checked_add(4)
+                    .ok_or(TrueTypeError::BadTableDirectory)?
+                    > glyph_end
+                {
+                    return Err(TrueTypeError::BadTableDirectory);
+                }
+                let flags = read_u16(self.bytes, cursor).ok_or(TrueTypeError::BadTableDirectory)?;
+                let component = usize::from(
+                    read_u16(self.bytes, cursor + 2).ok_or(TrueTypeError::BadTableDirectory)?,
+                );
+                cursor += 4;
+                let xy_arguments = flags & ARG_XY != 0;
+                let (arg1, arg2) = if flags & ARG_WORDS != 0 {
+                    if cursor
+                        .checked_add(4)
+                        .ok_or(TrueTypeError::BadTableDirectory)?
+                        > glyph_end
+                    {
+                        return Err(TrueTypeError::BadTableDirectory);
+                    }
+                    let arg1 = if xy_arguments {
+                        i32::from(
+                            read_i16(self.bytes, cursor).ok_or(TrueTypeError::BadTableDirectory)?,
+                        )
+                    } else {
+                        i32::from(
+                            read_u16(self.bytes, cursor).ok_or(TrueTypeError::BadTableDirectory)?,
+                        )
+                    };
+                    let arg2 = if xy_arguments {
+                        i32::from(
+                            read_i16(self.bytes, cursor + 2)
+                                .ok_or(TrueTypeError::BadTableDirectory)?,
+                        )
+                    } else {
+                        i32::from(
+                            read_u16(self.bytes, cursor + 2)
+                                .ok_or(TrueTypeError::BadTableDirectory)?,
+                        )
+                    };
+                    cursor += 4;
+                    (arg1, arg2)
+                } else {
+                    if cursor
+                        .checked_add(2)
+                        .ok_or(TrueTypeError::BadTableDirectory)?
+                        > glyph_end
+                    {
+                        return Err(TrueTypeError::BadTableDirectory);
+                    }
+                    let arg1 = if xy_arguments {
+                        i8::from_ne_bytes([self.bytes[cursor]]) as i32
+                    } else {
+                        i32::from(self.bytes[cursor])
+                    };
+                    let arg2 = if xy_arguments {
+                        i8::from_ne_bytes([self.bytes[cursor + 1]]) as i32
+                    } else {
+                        i32::from(self.bytes[cursor + 1])
+                    };
+                    cursor += 2;
+                    (arg1, arg2)
+                };
+                let mut dx = if xy_arguments { arg1 } else { 0 };
+                let mut dy = if xy_arguments { arg2 } else { 0 };
+                let mut xx = 16384i32;
+                let mut xy = 0i32;
+                let mut yx = 0i32;
+                let mut yy = 16384i32;
+                if flags & TWO_BY_TWO != 0 {
+                    if cursor
+                        .checked_add(8)
+                        .ok_or(TrueTypeError::BadTableDirectory)?
+                        > glyph_end
+                    {
+                        return Err(TrueTypeError::BadTableDirectory);
+                    }
+                    xx = i32::from(
+                        read_i16(self.bytes, cursor).ok_or(TrueTypeError::BadTableDirectory)?,
+                    );
+                    yx = i32::from(
+                        read_i16(self.bytes, cursor + 2).ok_or(TrueTypeError::BadTableDirectory)?,
+                    );
+                    xy = i32::from(
+                        read_i16(self.bytes, cursor + 4).ok_or(TrueTypeError::BadTableDirectory)?,
+                    );
+                    yy = i32::from(
+                        read_i16(self.bytes, cursor + 6).ok_or(TrueTypeError::BadTableDirectory)?,
+                    );
+                    cursor += 8;
+                } else if flags & XY_SCALE != 0 {
+                    if cursor
+                        .checked_add(4)
+                        .ok_or(TrueTypeError::BadTableDirectory)?
+                        > glyph_end
+                    {
+                        return Err(TrueTypeError::BadTableDirectory);
+                    }
+                    xx = i32::from(
+                        read_i16(self.bytes, cursor).ok_or(TrueTypeError::BadTableDirectory)?,
+                    );
+                    yy = i32::from(
+                        read_i16(self.bytes, cursor + 2).ok_or(TrueTypeError::BadTableDirectory)?,
+                    );
+                    cursor += 4;
+                } else if flags & SCALE != 0 {
+                    if cursor
+                        .checked_add(2)
+                        .ok_or(TrueTypeError::BadTableDirectory)?
+                        > glyph_end
+                    {
+                        return Err(TrueTypeError::BadTableDirectory);
+                    }
+                    xx = i32::from(
+                        read_i16(self.bytes, cursor).ok_or(TrueTypeError::BadTableDirectory)?,
+                    );
+                    yy = xx;
+                    cursor += 2;
+                }
+                let mut component_points = [OutlinePoint {
+                    x: 0,
+                    y: 0,
+                    on_curve: false,
+                    contour_end: false,
+                }; 128];
+                let component_count = self.outline_points_for_glyph_variation(
+                    component,
+                    &mut component_points,
+                    depth,
+                    variation,
+                )?;
+                if !xy_arguments {
+                    let parent_index =
+                        usize::try_from(arg1).map_err(|_| TrueTypeError::BadTableDirectory)?;
+                    let component_index =
+                        usize::try_from(arg2).map_err(|_| TrueTypeError::BadTableDirectory)?;
+                    if parent_index >= written || component_index >= component_count {
+                        return Err(TrueTypeError::BadTableDirectory);
+                    }
+                    let anchor = component_points[component_index];
+                    let transformed_x = (i64::from(xx) * i64::from(anchor.x)
+                        + i64::from(xy) * i64::from(anchor.y))
+                    .div_euclid(16384);
+                    let transformed_y = (i64::from(yx) * i64::from(anchor.x)
+                        + i64::from(yy) * i64::from(anchor.y))
+                    .div_euclid(16384);
+                    dx = i64::from(output[parent_index].x)
+                        .checked_sub(transformed_x)
+                        .ok_or(TrueTypeError::TooLarge)?
+                        .clamp(i64::from(i32::MIN), i64::from(i32::MAX))
+                        as i32;
+                    dy = i64::from(output[parent_index].y)
+                        .checked_sub(transformed_y)
+                        .ok_or(TrueTypeError::TooLarge)?
+                        .clamp(i64::from(i32::MIN), i64::from(i32::MAX))
+                        as i32;
+                }
+                if component_total >= MAX_COMPONENTS {
+                    return Err(TrueTypeError::TooLarge);
+                }
+                component_starts[component_total] = written;
+                for point in component_points.iter().take(component_count) {
+                    if written >= output.len() {
+                        return Err(TrueTypeError::TooLarge);
+                    }
+                    let x = (i64::from(xx) * i64::from(point.x)
+                        + i64::from(xy) * i64::from(point.y))
+                    .div_euclid(16384)
+                    .checked_add(i64::from(dx))
+                    .ok_or(TrueTypeError::TooLarge)?;
+                    let y = (i64::from(yx) * i64::from(point.x)
+                        + i64::from(yy) * i64::from(point.y))
+                    .div_euclid(16384)
+                    .checked_add(i64::from(dy))
+                    .ok_or(TrueTypeError::TooLarge)?;
+                    output[written] = OutlinePoint {
+                        x: i16::try_from(x).map_err(|_| TrueTypeError::TooLarge)?,
+                        y: i16::try_from(y).map_err(|_| TrueTypeError::TooLarge)?,
+                        on_curve: point.on_curve,
+                        contour_end: point.contour_end,
+                    };
+                    written += 1;
+                }
+                component_ends[component_total] = written;
+                component_total += 1;
+                if flags & MORE == 0 {
+                    break flags;
+                }
+            };
+            if final_flags & INSTRUCTIONS != 0 {
+                let instruction_length = usize::from(
+                    read_u16(self.bytes, cursor).ok_or(TrueTypeError::BadTableDirectory)?,
+                );
+                cursor = cursor
+                    .checked_add(2)
+                    .and_then(|value| value.checked_add(instruction_length))
+                    .ok_or(TrueTypeError::TooLarge)?;
+            }
+            if cursor > glyph_end {
+                return Err(TrueTypeError::BadTableDirectory);
+            }
+            if let Some(coordinates) = variation
+                && let Some(data) = self.glyph_variation_data(glyph as u16)?
+                && !data.is_empty()
+            {
+                let variation_point_count = component_total
+                    .checked_add(4)
+                    .ok_or(TrueTypeError::TooLarge)?;
+                let mut component_offsets = [OutlinePoint {
+                    x: 0,
+                    y: 0,
+                    on_curve: false,
+                    contour_end: false,
+                }; 128];
+                self.apply_gvar_tuples(
+                    data,
+                    coordinates,
+                    &mut component_offsets[..variation_point_count],
+                )?;
+                for component in 0..component_total {
+                    for point in output
+                        .iter_mut()
+                        .take(component_ends[component])
+                        .skip(component_starts[component])
+                    {
+                        point.x = point
+                            .x
+                            .checked_add(component_offsets[component].x)
+                            .ok_or(TrueTypeError::TooLarge)?;
+                        point.y = point
+                            .y
+                            .checked_add(component_offsets[component].y)
+                            .ok_or(TrueTypeError::TooLarge)?;
+                    }
+                }
+            }
+            Ok(written)
+        }
+
+        /// Assemble one simple-glyph contour into a bounded path.
+        ///
+        /// `origin` is the baseline origin in canvas coordinates and `scale`
+        /// is the requested pixel height per em. TrueType's positive Y axis
+        /// is inverted into canvas coordinates. The caller selects a contour
+        /// because `Path` deliberately remains a single closed subpath; a
+        /// later scene/path slice can add multi-contour fill semantics.
+        pub fn outline_contour(
+            &self,
+            character: char,
+            contour: usize,
+            origin: Point,
+            scale: u16,
+            output: &mut Path,
+        ) -> Result<usize, TrueTypeError> {
+            let glyph = self
+                .glyph_index(character)
+                .ok_or(TrueTypeError::UnsupportedGlyph)?;
+            self.outline_contour_glyph(glyph, contour, origin, scale, output)
+        }
+
+        /// Assemble one contour from a direct glyph ID.
+        pub fn outline_contour_glyph(
+            &self,
+            glyph: u16,
+            contour: usize,
+            origin: Point,
+            scale: u16,
+            output: &mut Path,
+        ) -> Result<usize, TrueTypeError> {
+            self.outline_contour_glyph_variation(glyph, contour, origin, scale, output, None)
+        }
+
+        /// Assemble one contour from a glyph ID with normalized variation
+        /// coordinates applied to its outline.
+        pub fn outline_contour_glyph_with_variation(
+            &self,
+            glyph: u16,
+            contour: usize,
+            origin: Point,
+            scale: u16,
+            normalized_coordinates: &[i16],
+            output: &mut Path,
+        ) -> Result<usize, TrueTypeError> {
+            self.outline_contour_glyph_variation(
+                glyph,
+                contour,
+                origin,
+                scale,
+                output,
+                Some(normalized_coordinates),
+            )
+        }
+
+        fn outline_contour_glyph_variation(
+            &self,
+            glyph: u16,
+            contour: usize,
+            origin: Point,
+            scale: u16,
+            output: &mut Path,
+            variation: Option<&[i16]>,
+        ) -> Result<usize, TrueTypeError> {
+            let mut points = [OutlinePoint {
+                x: 0,
+                y: 0,
+                on_curve: false,
+                contour_end: false,
+            }; 128];
+            let point_count = self.outline_points_for_glyph_variation(
+                usize::from(glyph),
+                &mut points,
+                0,
+                variation,
+            )?;
+            if point_count == 0 {
+                *output = Path::new();
+                return Ok(0);
+            }
+            let mut start = 0;
+            let mut contour_index = 0;
+            let mut selected = None;
+            for (index, point) in points.iter().enumerate().take(point_count) {
+                if point.contour_end {
+                    if contour == contour_index {
+                        selected = Some((start, index));
+                        break;
+                    }
+                    start = index + 1;
+                    contour_index += 1;
+                }
+            }
+            let (start, end) = selected.ok_or(TrueTypeError::UnsupportedGlyph)?;
+            if start > end {
+                return Err(TrueTypeError::BadTableDirectory);
+            }
+            let scale = i64::from(scale.max(1));
+            let units = i64::from(self.units_per_em.max(1));
+            let map = |point: OutlinePoint| -> Point {
+                let x = i64::from(origin.x) + (i64::from(point.x) * scale).div_euclid(units);
+                let y = i64::from(origin.y) - (i64::from(point.y) * scale).div_euclid(units);
+                Point::new(
+                    x.clamp(i64::from(i32::MIN), i64::from(i32::MAX)) as i32,
+                    y.clamp(i64::from(i32::MIN), i64::from(i32::MAX)) as i32,
+                )
+            };
+            let midpoint = |a: OutlinePoint, b: OutlinePoint| -> OutlinePoint {
+                OutlinePoint {
+                    x: ((i32::from(a.x) + i32::from(b.x)) / 2) as i16,
+                    y: ((i32::from(a.y) + i32::from(b.y)) / 2) as i16,
+                    on_curve: true,
+                    contour_end: false,
+                }
+            };
+            let first = points[start];
+            let last = points[end];
+            let (initial, mut index) = if first.on_curve {
+                (first, start + 1)
+            } else if last.on_curve {
+                (last, start)
+            } else {
+                (midpoint(last, first), start)
+            };
+            let mut path = Path::new();
+            if !path.move_to(map(initial)) {
+                return Err(TrueTypeError::TooLarge);
+            }
+            while index <= end {
+                let point = points[index];
+                if point.on_curve {
+                    if !path.line_to(map(point)) {
+                        return Err(TrueTypeError::TooLarge);
+                    }
+                    index += 1;
+                    continue;
+                }
+                let next_index = if index == end { start } else { index + 1 };
+                let next = points[next_index];
+                if next.on_curve {
+                    if !path.quadratic_to(map(point), map(next)) {
+                        return Err(TrueTypeError::TooLarge);
+                    }
+                    index += 2;
+                } else {
+                    let implied = midpoint(point, next);
+                    if !path.quadratic_to(map(point), map(implied)) {
+                        return Err(TrueTypeError::TooLarge);
+                    }
+                    index += 1;
+                }
+            }
+            if !path.close() {
+                return Err(TrueTypeError::TooLarge);
+            }
+            *output = path;
+            Ok(end - start + 1)
+        }
+
+        /// Assemble all simple contours of a glyph into a bounded compound
+        /// path. Compound TrueType glyph components remain unsupported.
+        pub fn outline_compound(
+            &self,
+            character: char,
+            origin: Point,
+            scale: u16,
+            output: &mut CompoundPath,
+        ) -> Result<usize, TrueTypeError> {
+            let glyph = self
+                .glyph_index(character)
+                .ok_or(TrueTypeError::UnsupportedGlyph)?;
+            self.outline_compound_glyph(glyph, origin, scale, output)
+        }
+
+        /// Assemble all contours from a direct glyph ID.
+        pub fn outline_compound_glyph(
+            &self,
+            glyph: u16,
+            origin: Point,
+            scale: u16,
+            output: &mut CompoundPath,
+        ) -> Result<usize, TrueTypeError> {
+            self.outline_compound_glyph_variation(glyph, origin, scale, output, None)
+        }
+
+        /// Assemble all contours from a glyph ID with normalized variation
+        /// coordinates applied to each component and outline.
+        pub fn outline_compound_glyph_with_variation(
+            &self,
+            glyph: u16,
+            origin: Point,
+            scale: u16,
+            normalized_coordinates: &[i16],
+            output: &mut CompoundPath,
+        ) -> Result<usize, TrueTypeError> {
+            self.outline_compound_glyph_variation(
+                glyph,
+                origin,
+                scale,
+                output,
+                Some(normalized_coordinates),
+            )
+        }
+
+        fn outline_compound_glyph_variation(
+            &self,
+            glyph: u16,
+            origin: Point,
+            scale: u16,
+            output: &mut CompoundPath,
+            variation: Option<&[i16]>,
+        ) -> Result<usize, TrueTypeError> {
+            let mut compound = CompoundPath::new();
+            for contour in 0..=MAX_CONTOURS {
+                let mut path = Path::new();
+                match self.outline_contour_glyph_variation(
+                    glyph, contour, origin, scale, &mut path, variation,
+                ) {
+                    Ok(0) if contour == 0 => {
+                        *output = compound;
+                        return Ok(0);
+                    }
+                    Ok(_) if contour == MAX_CONTOURS => return Err(TrueTypeError::TooLarge),
+                    Ok(_) => {
+                        if !compound.push(path) {
+                            return Err(TrueTypeError::TooLarge);
+                        }
+                    }
+                    Err(TrueTypeError::UnsupportedGlyph) if contour > 0 => break,
+                    Err(error) => return Err(error),
+                }
+            }
+            if compound.is_empty() {
+                return Err(TrueTypeError::UnsupportedGlyph);
+            }
+            let contours = compound.len();
+            *output = compound;
+            Ok(contours)
+        }
+
+        /// Rasterize one simple TrueType glyph through the bounded
+        /// antialiased compound-path renderer.
+        pub fn render_glyph(
+            &self,
+            character: char,
+            origin: Point,
+            scale: u16,
+            color: Color,
+            renderer: &mut Renderer<'_, '_>,
+        ) -> Result<usize, TrueTypeError> {
+            let glyph = self
+                .glyph_index(character)
+                .ok_or(TrueTypeError::UnsupportedGlyph)?;
+            self.render_glyph_id(glyph, origin, scale, color, renderer)
+        }
+
+        /// Rasterize a direct glyph ID, including a glyph selected by GSUB.
+        pub fn render_glyph_id(
+            &self,
+            glyph: u16,
+            origin: Point,
+            scale: u16,
+            color: Color,
+            renderer: &mut Renderer<'_, '_>,
+        ) -> Result<usize, TrueTypeError> {
+            let mut compound = CompoundPath::new();
+            let contours = self.outline_compound_glyph(glyph, origin, scale, &mut compound)?;
+            if contours != 0 && !renderer.fill_compound_path_antialiased(&compound, color) {
+                return Err(TrueTypeError::BadTableDirectory);
+            }
+            Ok(contours)
+        }
+
+        /// Rasterize a direct glyph ID with normalized variation coordinates.
+        pub fn render_glyph_id_with_variation(
+            &self,
+            glyph: u16,
+            origin: Point,
+            scale: u16,
+            normalized_coordinates: &[i16],
+            color: Color,
+            renderer: &mut Renderer<'_, '_>,
+        ) -> Result<usize, TrueTypeError> {
+            let mut compound = CompoundPath::new();
+            let contours = self.outline_compound_glyph_with_variation(
+                glyph,
+                origin,
+                scale,
+                normalized_coordinates,
+                &mut compound,
+            )?;
+            if contours != 0 && !renderer.fill_compound_path_antialiased(&compound, color) {
+                return Err(TrueTypeError::BadTableDirectory);
+            }
+            Ok(contours)
+        }
+
+        /// Lay out one single-line string using checked horizontal metrics.
+        /// Kerning, shaping and line breaking are intentionally separate
+        /// stages; unsupported characters fail without partial output.
+        pub fn layout_text(
+            &self,
+            text: &str,
+            origin: Point,
+            scale: u16,
+            output: &mut [GlyphPlacement],
+        ) -> Result<usize, TrueTypeError> {
+            let scale = i64::from(scale.max(1));
+            let units = i64::from(self.units_per_em.max(1));
+            let mut cursor = origin.x;
+            let mut count = 0;
+            let mut previous = None;
+            for character in text.chars() {
+                if character == '\n' || count >= output.len() {
+                    return Err(TrueTypeError::TooLarge);
+                }
+                let advance = self
+                    .advance_width(character)
+                    .ok_or(TrueTypeError::UnsupportedGlyph)?;
+                if let Some(previous) = previous
+                    && let Some(kern) = self.kerning(previous, character)
+                {
+                    let adjustment = (i64::from(kern) * scale).div_euclid(units);
+                    cursor = cursor.saturating_add(
+                        adjustment.clamp(i64::from(i32::MIN), i64::from(i32::MAX)) as i32,
+                    );
+                }
+                let pixels = (i64::from(advance) * scale)
+                    .div_euclid(units)
+                    .clamp(1, i64::from(i32::MAX)) as i32;
+                output[count] = GlyphPlacement {
+                    character,
+                    origin: Point::new(cursor, origin.y),
+                    advance: pixels,
+                };
+                cursor = cursor.saturating_add(pixels);
+                previous = Some(character);
+                count += 1;
+            }
+            Ok(count)
+        }
+
+        /// Lay out a single line in an explicit direction. RTL mirrors the
+        /// bounded placements; it does not claim Unicode bidi or shaping.
+        pub fn layout_text_direction(
+            &self,
+            text: &str,
+            origin: Point,
+            scale: u16,
+            direction: TextDirection,
+            output: &mut [GlyphPlacement],
+        ) -> Result<usize, TrueTypeError> {
+            let count = self.layout_text(text, origin, scale, output)?;
+            if direction == TextDirection::Ltr || count == 0 {
+                return Ok(count);
+            }
+            let end = output[count - 1]
+                .origin
+                .x
+                .saturating_add(output[count - 1].advance);
+            let width = end.saturating_sub(origin.x);
+            let mut consumed = 0;
+            for index in 0..count {
+                let source = count - 1 - index;
+                let advance = output[source].advance;
+                let mut placement = output[source];
+                placement.origin = Point::new(
+                    origin
+                        .x
+                        .saturating_add(width)
+                        .saturating_sub(consumed)
+                        .saturating_sub(advance),
+                    origin.y,
+                );
+                output[index] = placement;
+                consumed = consumed.saturating_add(advance);
+            }
+            Ok(count)
+        }
+
+        /// Resolve strong directional runs and neutrals, then emit visual
+        /// run order into caller-owned placements. This bounded pass handles
+        /// common Hebrew/Arabic and left-to-right text, but does not claim
+        /// the full Unicode Bidirectional Algorithm or script shaping.
+        pub fn layout_text_bidi(
+            &self,
+            text: &str,
+            origin: Point,
+            scale: u16,
+            base_direction: TextDirection,
+            output: &mut [GlyphPlacement],
+        ) -> Result<usize, TrueTypeError> {
+            let mut logical = [GlyphPlacement {
+                character: '\0',
+                origin: Point::new(0, 0),
+                advance: 0,
+            }; 128];
+            let count = self.layout_text(text, origin, scale, &mut logical)?;
+            if count == 0 {
+                return Ok(0);
+            }
+            if output.len() < count {
+                return Err(TrueTypeError::TooLarge);
+            }
+
+            let mut directions = [base_direction; 128];
+            let mut strong = [None; 128];
+            for index in 0..count {
+                strong[index] = TextDirection::classify(logical[index].character);
+            }
+            for index in 0..count {
+                if let Some(direction) = strong[index] {
+                    directions[index] = direction;
+                    continue;
+                }
+                let previous = (0..index).rev().find_map(|candidate| strong[candidate]);
+                let next = ((index + 1)..count).find_map(|candidate| strong[candidate]);
+                directions[index] = if previous.is_some() && previous == next {
+                    previous.unwrap_or(base_direction)
+                } else {
+                    base_direction
+                };
+            }
+
+            let mut order = [0usize; 128];
+            let mut order_count = 0;
+            let mut emit_run = |start: usize, end: usize, direction: TextDirection| {
+                if direction == TextDirection::Rtl {
+                    for index in (start..end).rev() {
+                        order[order_count] = index;
+                        order_count += 1;
+                    }
+                } else {
+                    for index in start..end {
+                        order[order_count] = index;
+                        order_count += 1;
+                    }
+                }
+            };
+            if base_direction == TextDirection::Ltr {
+                let mut start = 0;
+                while start < count {
+                    let direction = directions[start];
+                    let mut end = start + 1;
+                    while end < count && directions[end] == direction {
+                        end += 1;
+                    }
+                    emit_run(start, end, direction);
+                    start = end;
+                }
+            } else {
+                let mut end = count;
+                while end != 0 {
+                    let direction = directions[end - 1];
+                    let mut start = end - 1;
+                    while start != 0 && directions[start - 1] == direction {
+                        start -= 1;
+                    }
+                    emit_run(start, end, direction);
+                    end = start;
+                }
+            }
+
+            let mut cursor = origin.x;
+            for (index, source) in order[..order_count].iter().copied().enumerate() {
+                let mut placement = logical[source];
+                placement.origin = Point::new(cursor, origin.y);
+                cursor = cursor.saturating_add(placement.advance);
+                output[index] = placement;
+            }
+            Ok(order_count)
+        }
+
+        fn ligature_substitution(
+            &self,
+            glyphs: &[u16],
+            position: usize,
+            script_tag: Option<[u8; 4]>,
+            language_tag: Option<[u8; 4]>,
+        ) -> Result<Option<(u16, usize)>, TrueTypeError> {
+            let Some((table, length)) = self.gsub else {
+                return Ok(None);
+            };
+            if length < 10
+                || table
+                    .checked_add(length)
+                    .is_none_or(|end| end > self.bytes.len())
+            {
+                return Err(TrueTypeError::BadTableDirectory);
+            }
+            if read_u32(self.bytes, table) != Some(0x0001_0000) {
+                return Err(TrueTypeError::UnsupportedCmap);
+            }
+            let script = usize::from(read_u16(self.bytes, table + 4).unwrap_or(0));
+            let feature = usize::from(
+                read_u16(self.bytes, table + 6).ok_or(TrueTypeError::BadTableDirectory)?,
+            );
+            let lookup = usize::from(
+                read_u16(self.bytes, table + 8).ok_or(TrueTypeError::BadTableDirectory)?,
+            );
+            let feature_base = table
+                .checked_add(feature)
+                .ok_or(TrueTypeError::BadTableDirectory)?;
+            let feature_end = table
+                .checked_add(length)
+                .ok_or(TrueTypeError::BadTableDirectory)?;
+            if script != 0
+                && table
+                    .checked_add(script)
+                    .is_none_or(|end| end > feature_end)
+            {
+                return Err(TrueTypeError::BadTableDirectory);
+            }
+            if feature_base
+                .checked_add(2)
+                .is_none_or(|end| end > feature_end)
+            {
+                return Err(TrueTypeError::BadTableDirectory);
+            }
+            let feature_count = usize::from(
+                read_u16(self.bytes, feature_base).ok_or(TrueTypeError::BadTableDirectory)?,
+            );
+            if feature_count > 64
+                || feature_base
+                    .checked_add(
+                        2usize
+                            .checked_add(
+                                feature_count
+                                    .checked_mul(6)
+                                    .ok_or(TrueTypeError::TooLarge)?,
+                            )
+                            .ok_or(TrueTypeError::TooLarge)?,
+                    )
+                    .is_none_or(|end| end > feature_end)
+            {
+                return Err(TrueTypeError::TooLarge);
+            }
+            let mut feature_indices = [0u16; 64];
+            let mut feature_index_count = 0usize;
+            if let Some(script_tag) = script_tag {
+                if script == 0 {
+                    return Ok(None);
+                }
+                let script_list = table
+                    .checked_add(script)
+                    .ok_or(TrueTypeError::BadTableDirectory)?;
+                let script_count = usize::from(
+                    read_u16(self.bytes, script_list).ok_or(TrueTypeError::BadTableDirectory)?,
+                );
+                if script_count > 32
+                    || script_list
+                        .checked_add(
+                            2usize
+                                .checked_add(
+                                    script_count.checked_mul(6).ok_or(TrueTypeError::TooLarge)?,
+                                )
+                                .ok_or(TrueTypeError::TooLarge)?,
+                        )
+                        .is_none_or(|end| end > feature_end)
+                {
+                    return Err(TrueTypeError::TooLarge);
+                }
+                let mut selected_script = None;
+                for index in 0..script_count {
+                    let record = script_list + 2 + index * 6;
+                    if self
+                        .bytes
+                        .get(record..record + 4)
+                        .ok_or(TrueTypeError::BadTableDirectory)?
+                        == script_tag
+                    {
+                        selected_script = Some(
+                            script_list
+                                .checked_add(usize::from(
+                                    read_u16(self.bytes, record + 4)
+                                        .ok_or(TrueTypeError::BadTableDirectory)?,
+                                ))
+                                .ok_or(TrueTypeError::BadTableDirectory)?,
+                        );
+                        break;
+                    }
+                }
+                let Some(script_table) = selected_script else {
+                    return Ok(None);
+                };
+                let Some(lang_sys) =
+                    layout_lang_sys(self.bytes, script_table, language_tag, feature_end)?
+                else {
+                    return Ok(None);
+                };
+                let required =
+                    read_u16(self.bytes, lang_sys + 2).ok_or(TrueTypeError::BadTableDirectory)?;
+                let count = usize::from(
+                    read_u16(self.bytes, lang_sys + 4).ok_or(TrueTypeError::BadTableDirectory)?,
+                );
+                if count > 63
+                    || lang_sys
+                        .checked_add(
+                            6usize
+                                .checked_add(count.checked_mul(2).ok_or(TrueTypeError::TooLarge)?)
+                                .ok_or(TrueTypeError::TooLarge)?,
+                        )
+                        .is_none_or(|end| end > feature_end)
+                {
+                    return Err(TrueTypeError::TooLarge);
+                }
+                if required != u16::MAX {
+                    feature_indices[feature_index_count] = required;
+                    feature_index_count += 1;
+                }
+                for index in 0..count {
+                    feature_indices[feature_index_count] =
+                        read_u16(self.bytes, lang_sys + 6 + index * 2)
+                            .ok_or(TrueTypeError::BadTableDirectory)?;
+                    feature_index_count += 1;
+                }
+            } else {
+                for index in 0..feature_count {
+                    feature_indices[feature_index_count] =
+                        u16::try_from(index).map_err(|_| TrueTypeError::TooLarge)?;
+                    feature_index_count += 1;
+                }
+            }
+            let mut lookup_indices = [0u16; 32];
+            let mut lookup_count = 0usize;
+            for feature_index in feature_indices.iter().copied().take(feature_index_count) {
+                let feature_index = usize::from(feature_index);
+                if feature_index >= feature_count {
+                    return Err(TrueTypeError::BadTableDirectory);
+                }
+                let record = feature_base + 2 + feature_index * 6;
+                let tag = self
+                    .bytes
+                    .get(record..record + 4)
+                    .ok_or(TrueTypeError::BadTableDirectory)?;
+                if tag != b"liga"
+                    && tag != b"rlig"
+                    && tag != b"ccmp"
+                    && tag != b"locl"
+                    && tag != b"smcp"
+                    && tag != b"subs"
+                    && tag != b"sups"
+                    && tag != b"case"
+                    && tag != b"cpsp"
+                    && tag != b"calt"
+                    && tag != b"clig"
+                {
+                    continue;
+                }
+                let feature_offset = usize::from(
+                    read_u16(self.bytes, record + 4).ok_or(TrueTypeError::BadTableDirectory)?,
+                );
+                let feature_table = feature_base
+                    .checked_add(feature_offset)
+                    .ok_or(TrueTypeError::BadTableDirectory)?;
+                if feature_table
+                    .checked_add(4)
+                    .is_none_or(|end| end > feature_end)
+                {
+                    return Err(TrueTypeError::BadTableDirectory);
+                }
+                let count = usize::from(
+                    read_u16(self.bytes, feature_table + 2)
+                        .ok_or(TrueTypeError::BadTableDirectory)?,
+                );
+                if count > 32
+                    || feature_table
+                        .checked_add(
+                            4usize
+                                .checked_add(count.checked_mul(2).ok_or(TrueTypeError::TooLarge)?)
+                                .ok_or(TrueTypeError::TooLarge)?,
+                        )
+                        .is_none_or(|end| end > feature_end)
+                {
+                    return Err(TrueTypeError::TooLarge);
+                }
+                if lookup_count.checked_add(count).is_none_or(|end| end > 32) {
+                    return Err(TrueTypeError::TooLarge);
+                }
+                for item in 0..count {
+                    lookup_indices[lookup_count] =
+                        read_u16(self.bytes, feature_table + 4 + item * 2)
+                            .ok_or(TrueTypeError::BadTableDirectory)?;
+                    lookup_count += 1;
+                }
+            }
+            if lookup_count == 0 {
+                return Ok(None);
+            }
+            let lookup_base = table
+                .checked_add(lookup)
+                .ok_or(TrueTypeError::BadTableDirectory)?;
+            if lookup_base
+                .checked_add(2)
+                .is_none_or(|end| end > feature_end)
+            {
+                return Err(TrueTypeError::BadTableDirectory);
+            }
+            let lookup_total = usize::from(
+                read_u16(self.bytes, lookup_base).ok_or(TrueTypeError::BadTableDirectory)?,
+            );
+            if lookup_total > 128
+                || lookup_base
+                    .checked_add(
+                        2usize
+                            .checked_add(
+                                lookup_total.checked_mul(2).ok_or(TrueTypeError::TooLarge)?,
+                            )
+                            .ok_or(TrueTypeError::TooLarge)?,
+                    )
+                    .is_none_or(|end| end > feature_end)
+            {
+                return Err(TrueTypeError::TooLarge);
+            }
+            for selected in lookup_indices.iter().copied().take(lookup_count) {
+                let selected = usize::from(selected);
+                if selected >= lookup_total {
+                    return Err(TrueTypeError::BadTableDirectory);
+                }
+                let lookup_table = lookup_base
+                    .checked_add(usize::from(
+                        read_u16(self.bytes, lookup_base + 2 + selected * 2)
+                            .ok_or(TrueTypeError::BadTableDirectory)?,
+                    ))
+                    .ok_or(TrueTypeError::BadTableDirectory)?;
+                if lookup_table
+                    .checked_add(6)
+                    .is_none_or(|end| end > feature_end)
+                {
+                    return Err(TrueTypeError::BadTableDirectory);
+                }
+                let lookup_type =
+                    read_u16(self.bytes, lookup_table).ok_or(TrueTypeError::BadTableDirectory)?;
+                if lookup_type == 7 {
+                    let subtable_count = usize::from(
+                        read_u16(self.bytes, lookup_table + 4)
+                            .ok_or(TrueTypeError::BadTableDirectory)?,
+                    );
+                    if subtable_count > 32
+                        || lookup_table
+                            .checked_add(
+                                6usize
+                                    .checked_add(
+                                        subtable_count
+                                            .checked_mul(2)
+                                            .ok_or(TrueTypeError::TooLarge)?,
+                                    )
+                                    .ok_or(TrueTypeError::TooLarge)?,
+                            )
+                            .is_none_or(|end| end > feature_end)
+                    {
+                        return Err(TrueTypeError::TooLarge);
+                    }
+                    for subtable_index in 0..subtable_count {
+                        let extension = lookup_table
+                            .checked_add(usize::from(
+                                read_u16(self.bytes, lookup_table + 6 + subtable_index * 2)
+                                    .ok_or(TrueTypeError::BadTableDirectory)?,
+                            ))
+                            .ok_or(TrueTypeError::BadTableDirectory)?;
+                        if extension.checked_add(8).is_none_or(|end| end > feature_end)
+                            || read_u16(self.bytes, extension) != Some(1)
+                        {
+                            continue;
+                        }
+                        let extension_type = read_u16(self.bytes, extension + 2)
+                            .ok_or(TrueTypeError::BadTableDirectory)?;
+                        if extension_type != 1
+                            && extension_type != 4
+                            && extension_type != 5
+                            && extension_type != 6
+                        {
+                            continue;
+                        }
+                        let offset = usize::try_from(
+                            read_u32(self.bytes, extension + 4)
+                                .ok_or(TrueTypeError::BadTableDirectory)?,
+                        )
+                        .map_err(|_| TrueTypeError::TooLarge)?;
+                        let subtable = extension
+                            .checked_add(offset)
+                            .ok_or(TrueTypeError::BadTableDirectory)?;
+                        if extension_type == 1 {
+                            if let Some(substitute) = gsub_single_subtable(
+                                self.bytes,
+                                subtable,
+                                glyphs[position],
+                                feature_end,
+                            )? {
+                                return Ok(Some((substitute, 1)));
+                            }
+                        } else if extension_type == 4 {
+                            if let Some((substitute, consumed)) = gsub_ligature_subtable(
+                                self.bytes,
+                                subtable,
+                                glyphs,
+                                position,
+                                feature_end,
+                            )? {
+                                return Ok(Some((substitute, consumed)));
+                            }
+                        } else {
+                            if extension_type == 5
+                                && let Some(substitute) = gsub_contextual_class_substitution(
+                                    self.bytes,
+                                    lookup_base,
+                                    lookup_base,
+                                    glyphs,
+                                    position,
+                                    feature_end,
+                                    Some((subtable, extension_type)),
+                                )?
+                            {
+                                return Ok(Some((substitute, 1)));
+                            }
+                            if extension_type == 6
+                                && let Some(substitute) = gsub_chaining_class_substitution(
+                                    self.bytes,
+                                    lookup_base,
+                                    lookup_base,
+                                    glyphs,
+                                    position,
+                                    feature_end,
+                                    Some((subtable, extension_type)),
+                                )?
+                            {
+                                return Ok(Some((substitute, 1)));
+                            }
+                            if let Some(substitute) = gsub_contextual_substitution(
+                                self.bytes,
+                                lookup_base,
+                                lookup_base,
+                                glyphs,
+                                position,
+                                feature_end,
+                                Some((subtable, extension_type)),
+                            )? {
+                                return Ok(Some((substitute, 1)));
+                            }
+                        }
+                    }
+                    continue;
+                }
+                if lookup_type == 5 {
+                    if let Some(substitute) = gsub_contextual_class_substitution(
+                        self.bytes,
+                        lookup_table,
+                        lookup_base,
+                        glyphs,
+                        position,
+                        feature_end,
+                        None,
+                    )? {
+                        return Ok(Some((substitute, 1)));
+                    }
+                    if let Some(substitute) = gsub_contextual_substitution(
+                        self.bytes,
+                        lookup_table,
+                        lookup_base,
+                        glyphs,
+                        position,
+                        feature_end,
+                        None,
+                    )? {
+                        return Ok(Some((substitute, 1)));
+                    }
+                    continue;
+                }
+                if lookup_type == 6 {
+                    if let Some(substitute) = gsub_chaining_class_substitution(
+                        self.bytes,
+                        lookup_table,
+                        lookup_base,
+                        glyphs,
+                        position,
+                        feature_end,
+                        None,
+                    )? {
+                        return Ok(Some((substitute, 1)));
+                    }
+                    if let Some(substitute) = gsub_contextual_substitution(
+                        self.bytes,
+                        lookup_table,
+                        lookup_base,
+                        glyphs,
+                        position,
+                        feature_end,
+                        None,
+                    )? {
+                        return Ok(Some((substitute, 1)));
+                    }
+                    continue;
+                }
+                if lookup_type != 1 && lookup_type != 4 {
+                    continue;
+                }
+                let subtable_count = usize::from(
+                    read_u16(self.bytes, lookup_table + 4)
+                        .ok_or(TrueTypeError::BadTableDirectory)?,
+                );
+                if subtable_count > 32
+                    || lookup_table
+                        .checked_add(
+                            6usize
+                                .checked_add(
+                                    subtable_count
+                                        .checked_mul(2)
+                                        .ok_or(TrueTypeError::TooLarge)?,
+                                )
+                                .ok_or(TrueTypeError::TooLarge)?,
+                        )
+                        .is_none_or(|end| end > feature_end)
+                {
+                    return Err(TrueTypeError::TooLarge);
+                }
+                for subtable_index in 0..subtable_count {
+                    let subtable = lookup_table
+                        .checked_add(usize::from(
+                            read_u16(self.bytes, lookup_table + 6 + subtable_index * 2)
+                                .ok_or(TrueTypeError::BadTableDirectory)?,
+                        ))
+                        .ok_or(TrueTypeError::BadTableDirectory)?;
+                    if lookup_type == 1 {
+                        if subtable.checked_add(6).is_none_or(|end| end > feature_end) {
+                            return Err(TrueTypeError::BadTableDirectory);
+                        }
+                        let format = read_u16(self.bytes, subtable)
+                            .ok_or(TrueTypeError::BadTableDirectory)?;
+                        let coverage = subtable
+                            .checked_add(usize::from(
+                                read_u16(self.bytes, subtable + 2)
+                                    .ok_or(TrueTypeError::BadTableDirectory)?,
+                            ))
+                            .ok_or(TrueTypeError::BadTableDirectory)?;
+                        let Some(coverage_index) = gsub_coverage_index(
+                            self.bytes,
+                            coverage,
+                            feature_end,
+                            glyphs[position],
+                        )?
+                        else {
+                            continue;
+                        };
+                        let substitute = match format {
+                            1 => {
+                                let delta = i32::from(
+                                    read_i16(self.bytes, subtable + 4)
+                                        .ok_or(TrueTypeError::BadTableDirectory)?,
+                                );
+                                let glyph = i32::from(glyphs[position]) + delta;
+                                u16::try_from(glyph)
+                                    .map_err(|_| TrueTypeError::BadTableDirectory)?
+                            }
+                            2 => {
+                                let count = usize::from(
+                                    read_u16(self.bytes, subtable + 4)
+                                        .ok_or(TrueTypeError::BadTableDirectory)?,
+                                );
+                                if count > 128 || coverage_index >= count {
+                                    return Err(TrueTypeError::TooLarge);
+                                }
+                                let end = subtable
+                                    .checked_add(
+                                        6usize
+                                            .checked_add(
+                                                count
+                                                    .checked_mul(2)
+                                                    .ok_or(TrueTypeError::TooLarge)?,
+                                            )
+                                            .ok_or(TrueTypeError::TooLarge)?,
+                                    )
+                                    .ok_or(TrueTypeError::TooLarge)?;
+                                if end > feature_end {
+                                    return Err(TrueTypeError::BadTableDirectory);
+                                }
+                                read_u16(self.bytes, subtable + 6 + coverage_index * 2)
+                                    .ok_or(TrueTypeError::BadTableDirectory)?
+                            }
+                            _ => return Err(TrueTypeError::UnsupportedCmap),
+                        };
+                        return Ok(Some((substitute, 1)));
+                    }
+                    if subtable.checked_add(6).is_none_or(|end| end > feature_end)
+                        || read_u16(self.bytes, subtable) != Some(1)
+                    {
+                        continue;
+                    }
+                    let coverage = subtable
+                        .checked_add(usize::from(
+                            read_u16(self.bytes, subtable + 2)
+                                .ok_or(TrueTypeError::BadTableDirectory)?,
+                        ))
+                        .ok_or(TrueTypeError::BadTableDirectory)?;
+                    let Some(coverage_index) =
+                        gsub_coverage_index(self.bytes, coverage, feature_end, glyphs[position])?
+                    else {
+                        continue;
+                    };
+                    let set_count = usize::from(
+                        read_u16(self.bytes, subtable + 4)
+                            .ok_or(TrueTypeError::BadTableDirectory)?,
+                    );
+                    if coverage_index >= set_count
+                        || set_count > 128
+                        || subtable
+                            .checked_add(
+                                6usize
+                                    .checked_add(
+                                        set_count.checked_mul(2).ok_or(TrueTypeError::TooLarge)?,
+                                    )
+                                    .ok_or(TrueTypeError::TooLarge)?,
+                            )
+                            .is_none_or(|end| end > feature_end)
+                    {
+                        return Err(TrueTypeError::TooLarge);
+                    }
+                    let set = subtable
+                        .checked_add(usize::from(
+                            read_u16(self.bytes, subtable + 6 + coverage_index * 2)
+                                .ok_or(TrueTypeError::BadTableDirectory)?,
+                        ))
+                        .ok_or(TrueTypeError::BadTableDirectory)?;
+                    let ligature_count = usize::from(
+                        read_u16(self.bytes, set).ok_or(TrueTypeError::BadTableDirectory)?,
+                    );
+                    if ligature_count > 64
+                        || set
+                            .checked_add(
+                                2usize
+                                    .checked_add(
+                                        ligature_count
+                                            .checked_mul(2)
+                                            .ok_or(TrueTypeError::TooLarge)?,
+                                    )
+                                    .ok_or(TrueTypeError::TooLarge)?,
+                            )
+                            .is_none_or(|end| end > feature_end)
+                    {
+                        return Err(TrueTypeError::TooLarge);
+                    }
+                    for ligature_index in 0..ligature_count {
+                        let ligature = set
+                            .checked_add(usize::from(
+                                read_u16(self.bytes, set + 2 + ligature_index * 2)
+                                    .ok_or(TrueTypeError::BadTableDirectory)?,
+                            ))
+                            .ok_or(TrueTypeError::BadTableDirectory)?;
+                        if ligature.checked_add(4).is_none_or(|end| end > feature_end) {
+                            return Err(TrueTypeError::BadTableDirectory);
+                        }
+                        let ligature_glyph = read_u16(self.bytes, ligature)
+                            .ok_or(TrueTypeError::BadTableDirectory)?;
+                        let component_count = usize::from(
+                            read_u16(self.bytes, ligature + 2)
+                                .ok_or(TrueTypeError::BadTableDirectory)?,
+                        );
+                        if !(2..=32).contains(&component_count)
+                            || ligature
+                                .checked_add(
+                                    4usize
+                                        .checked_add(
+                                            (component_count - 1)
+                                                .checked_mul(2)
+                                                .ok_or(TrueTypeError::TooLarge)?,
+                                        )
+                                        .ok_or(TrueTypeError::TooLarge)?,
+                                )
+                                .is_none_or(|end| end > feature_end)
+                        {
+                            return Err(TrueTypeError::TooLarge);
+                        }
+                        if position + component_count > glyphs.len() {
+                            continue;
+                        }
+                        let mut matches = true;
+                        for component in 1..component_count {
+                            if read_u16(self.bytes, ligature + 4 + (component - 1) * 2)
+                                != Some(glyphs[position + component])
+                            {
+                                matches = false;
+                                break;
+                            }
+                        }
+                        if matches {
+                            return Ok(Some((ligature_glyph, component_count)));
+                        }
+                    }
+                }
+            }
+            Ok(None)
+        }
+
+        fn gsub_substitution_pipeline(
+            &self,
+            glyphs: &[u16; 128],
+            position: usize,
+            script_tag: Option<[u8; 4]>,
+            language_tag: Option<[u8; 4]>,
+        ) -> Result<(u16, usize), TrueTypeError> {
+            let mut working = *glyphs;
+            let mut glyph = working[position];
+            let mut consumed = 1usize;
+            for _ in 0..8 {
+                working[position] = glyph;
+                let Some((next, next_consumed)) =
+                    self.ligature_substitution(&working, position, script_tag, language_tag)?
+                else {
+                    break;
+                };
+                if next == glyph && next_consumed == 1 {
+                    break;
+                }
+                glyph = next;
+                consumed = next_consumed;
+                if consumed != 1 {
+                    break;
+                }
+            }
+            Ok((glyph, consumed))
+        }
+
+        fn gpos_pair_adjustment(
+            &self,
+            left: u16,
+            right: u16,
+            script_tag: Option<[u8; 4]>,
+            language_tag: Option<[u8; 4]>,
+            ppem: Option<u16>,
+        ) -> Result<Option<(i32, i32, i32, i32)>, TrueTypeError> {
+            let Some((table, length)) = self.gpos else {
+                return Ok(None);
+            };
+            let table_end = table
+                .checked_add(length)
+                .ok_or(TrueTypeError::BadTableDirectory)?;
+            if length < 10 || table_end > self.bytes.len() {
+                return Err(TrueTypeError::BadTableDirectory);
+            }
+            if read_u32(self.bytes, table) != Some(0x0001_0000) {
+                return Err(TrueTypeError::UnsupportedCmap);
+            }
+            let feature_offset = usize::from(
+                read_u16(self.bytes, table + 6).ok_or(TrueTypeError::BadTableDirectory)?,
+            );
+            let lookup_offset = usize::from(
+                read_u16(self.bytes, table + 8).ok_or(TrueTypeError::BadTableDirectory)?,
+            );
+            let feature_base = table
+                .checked_add(feature_offset)
+                .ok_or(TrueTypeError::BadTableDirectory)?;
+            if feature_base
+                .checked_add(2)
+                .is_none_or(|end| end > table_end)
+            {
+                return Err(TrueTypeError::BadTableDirectory);
+            }
+            let feature_count = usize::from(
+                read_u16(self.bytes, feature_base).ok_or(TrueTypeError::BadTableDirectory)?,
+            );
+            if feature_count > 64
+                || feature_base
+                    .checked_add(
+                        2usize
+                            .checked_add(
+                                feature_count
+                                    .checked_mul(6)
+                                    .ok_or(TrueTypeError::TooLarge)?,
+                            )
+                            .ok_or(TrueTypeError::TooLarge)?,
+                    )
+                    .is_none_or(|end| end > table_end)
+            {
+                return Err(TrueTypeError::TooLarge);
+            }
+            let script = usize::from(
+                read_u16(self.bytes, table + 4).ok_or(TrueTypeError::BadTableDirectory)?,
+            );
+            let mut feature_indices = [0u16; 64];
+            let mut feature_index_count = 0usize;
+            if let Some(script_tag) = script_tag {
+                if script == 0 {
+                    return Ok(None);
+                }
+                let script_list = table
+                    .checked_add(script)
+                    .ok_or(TrueTypeError::BadTableDirectory)?;
+                let script_count = usize::from(
+                    read_u16(self.bytes, script_list).ok_or(TrueTypeError::BadTableDirectory)?,
+                );
+                if script_count > 32
+                    || script_list
+                        .checked_add(
+                            2usize
+                                .checked_add(
+                                    script_count.checked_mul(6).ok_or(TrueTypeError::TooLarge)?,
+                                )
+                                .ok_or(TrueTypeError::TooLarge)?,
+                        )
+                        .is_none_or(|end| end > table_end)
+                {
+                    return Err(TrueTypeError::TooLarge);
+                }
+                let mut selected_script = None;
+                for index in 0..script_count {
+                    let record = script_list + 2 + index * 6;
+                    if self
+                        .bytes
+                        .get(record..record + 4)
+                        .ok_or(TrueTypeError::BadTableDirectory)?
+                        == script_tag
+                    {
+                        selected_script = Some(
+                            script_list
+                                .checked_add(usize::from(
+                                    read_u16(self.bytes, record + 4)
+                                        .ok_or(TrueTypeError::BadTableDirectory)?,
+                                ))
+                                .ok_or(TrueTypeError::BadTableDirectory)?,
+                        );
+                        break;
+                    }
+                }
+                let Some(script_table) = selected_script else {
+                    return Ok(None);
+                };
+                let Some(lang_sys) =
+                    layout_lang_sys(self.bytes, script_table, language_tag, table_end)?
+                else {
+                    return Ok(None);
+                };
+                let required =
+                    read_u16(self.bytes, lang_sys + 2).ok_or(TrueTypeError::BadTableDirectory)?;
+                let count = usize::from(
+                    read_u16(self.bytes, lang_sys + 4).ok_or(TrueTypeError::BadTableDirectory)?,
+                );
+                if count > 63
+                    || lang_sys
+                        .checked_add(
+                            6usize
+                                .checked_add(count.checked_mul(2).ok_or(TrueTypeError::TooLarge)?)
+                                .ok_or(TrueTypeError::TooLarge)?,
+                        )
+                        .is_none_or(|end| end > table_end)
+                {
+                    return Err(TrueTypeError::TooLarge);
+                }
+                if required != u16::MAX {
+                    feature_indices[feature_index_count] = required;
+                    feature_index_count += 1;
+                }
+                for index in 0..count {
+                    feature_indices[feature_index_count] =
+                        read_u16(self.bytes, lang_sys + 6 + index * 2)
+                            .ok_or(TrueTypeError::BadTableDirectory)?;
+                    feature_index_count += 1;
+                }
+            } else {
+                for index in 0..feature_count {
+                    feature_indices[feature_index_count] =
+                        u16::try_from(index).map_err(|_| TrueTypeError::TooLarge)?;
+                    feature_index_count += 1;
+                }
+            }
+            let mut lookup_indices = [0u16; 32];
+            let mut selected_count = 0usize;
+            for feature_index in feature_indices.iter().copied().take(feature_index_count) {
+                let feature_index = usize::from(feature_index);
+                if feature_index >= feature_count {
+                    return Err(TrueTypeError::BadTableDirectory);
+                }
+                let record = feature_base + 2 + feature_index * 6;
+                if self
+                    .bytes
+                    .get(record..record + 4)
+                    .ok_or(TrueTypeError::BadTableDirectory)?
+                    != b"kern"
+                {
+                    continue;
+                }
+                let feature_table = feature_base
+                    .checked_add(usize::from(
+                        read_u16(self.bytes, record + 4).ok_or(TrueTypeError::BadTableDirectory)?,
+                    ))
+                    .ok_or(TrueTypeError::BadTableDirectory)?;
+                if feature_table
+                    .checked_add(4)
+                    .is_none_or(|end| end > table_end)
+                {
+                    return Err(TrueTypeError::BadTableDirectory);
+                }
+                let count = usize::from(
+                    read_u16(self.bytes, feature_table + 2)
+                        .ok_or(TrueTypeError::BadTableDirectory)?,
+                );
+                if count > 32 || selected_count.checked_add(count).is_none_or(|end| end > 32) {
+                    return Err(TrueTypeError::TooLarge);
+                }
+                let end = feature_table
+                    .checked_add(
+                        4usize
+                            .checked_add(count.checked_mul(2).ok_or(TrueTypeError::TooLarge)?)
+                            .ok_or(TrueTypeError::TooLarge)?,
+                    )
+                    .ok_or(TrueTypeError::TooLarge)?;
+                if end > table_end {
+                    return Err(TrueTypeError::BadTableDirectory);
+                }
+                for item in 0..count {
+                    lookup_indices[selected_count] =
+                        read_u16(self.bytes, feature_table + 4 + item * 2)
+                            .ok_or(TrueTypeError::BadTableDirectory)?;
+                    selected_count += 1;
+                }
+            }
+            if selected_count == 0 {
+                return if right != u16::MAX {
+                    gpos_contextual_single_adjustment(
+                        self.bytes,
+                        table,
+                        table_end,
+                        left,
+                        right,
+                        GposContextOptions {
+                            script_tag,
+                            language_tag,
+                            ppem,
+                        },
+                    )
+                } else {
+                    Ok(None)
+                };
+            }
+            let mut accumulated = (0i32, 0i32, 0i32, 0i32);
+            let mut found = false;
+            let lookup_base = table
+                .checked_add(lookup_offset)
+                .ok_or(TrueTypeError::BadTableDirectory)?;
+            if lookup_base.checked_add(2).is_none_or(|end| end > table_end) {
+                return Err(TrueTypeError::BadTableDirectory);
+            }
+            let lookup_count = usize::from(
+                read_u16(self.bytes, lookup_base).ok_or(TrueTypeError::BadTableDirectory)?,
+            );
+            if lookup_count > 128
+                || lookup_base
+                    .checked_add(
+                        2usize
+                            .checked_add(
+                                lookup_count.checked_mul(2).ok_or(TrueTypeError::TooLarge)?,
+                            )
+                            .ok_or(TrueTypeError::TooLarge)?,
+                    )
+                    .is_none_or(|end| end > table_end)
+            {
+                return Err(TrueTypeError::TooLarge);
+            }
+            for selected in lookup_indices.iter().copied().take(selected_count) {
+                let selected = usize::from(selected);
+                if selected >= lookup_count {
+                    return Err(TrueTypeError::BadTableDirectory);
+                }
+                let lookup_table = lookup_base
+                    .checked_add(usize::from(
+                        read_u16(self.bytes, lookup_base + 2 + selected * 2)
+                            .ok_or(TrueTypeError::BadTableDirectory)?,
+                    ))
+                    .ok_or(TrueTypeError::BadTableDirectory)?;
+                if lookup_table
+                    .checked_add(6)
+                    .is_none_or(|end| end > table_end)
+                {
+                    return Err(TrueTypeError::BadTableDirectory);
+                }
+                let lookup_type =
+                    read_u16(self.bytes, lookup_table).ok_or(TrueTypeError::BadTableDirectory)?;
+                let extension_subtable = if lookup_type == 9 {
+                    let extension = lookup_table
+                        .checked_add(usize::from(
+                            read_u16(self.bytes, lookup_table + 6)
+                                .ok_or(TrueTypeError::BadTableDirectory)?,
+                        ))
+                        .ok_or(TrueTypeError::BadTableDirectory)?;
+                    if extension.checked_add(8).is_none_or(|end| end > table_end) {
+                        return Err(TrueTypeError::BadTableDirectory);
+                    }
+                    if read_u16(self.bytes, extension) != Some(1)
+                        || read_u16(self.bytes, extension + 2) != Some(2)
+                    {
+                        None
+                    } else {
+                        Some(
+                            extension
+                                .checked_add(
+                                    usize::try_from(
+                                        read_u32(self.bytes, extension + 4)
+                                            .ok_or(TrueTypeError::BadTableDirectory)?,
+                                    )
+                                    .map_err(|_| TrueTypeError::TooLarge)?,
+                                )
+                                .ok_or(TrueTypeError::BadTableDirectory)?,
+                        )
+                    }
+                } else {
+                    None
+                };
+                if lookup_type != 1 && lookup_type != 2 && extension_subtable.is_none() {
+                    continue;
+                }
+                let subtable_count = if extension_subtable.is_some() {
+                    1
+                } else {
+                    usize::from(
+                        read_u16(self.bytes, lookup_table + 4)
+                            .ok_or(TrueTypeError::BadTableDirectory)?,
+                    )
+                };
+                if subtable_count > 32 {
+                    return Err(TrueTypeError::TooLarge);
+                }
+                let lookup_end = if let Some(subtable) = extension_subtable {
+                    subtable.checked_add(2).ok_or(TrueTypeError::TooLarge)?
+                } else {
+                    lookup_table
+                        .checked_add(
+                            6usize
+                                .checked_add(
+                                    subtable_count
+                                        .checked_mul(2)
+                                        .ok_or(TrueTypeError::TooLarge)?,
+                                )
+                                .ok_or(TrueTypeError::TooLarge)?,
+                        )
+                        .ok_or(TrueTypeError::TooLarge)?
+                };
+                if lookup_end > table_end {
+                    return Err(TrueTypeError::BadTableDirectory);
+                }
+                for subtable_index in 0..subtable_count {
+                    let subtable = if let Some(subtable) = extension_subtable {
+                        subtable
+                    } else {
+                        lookup_table
+                            .checked_add(usize::from(
+                                read_u16(self.bytes, lookup_table + 6 + subtable_index * 2)
+                                    .ok_or(TrueTypeError::BadTableDirectory)?,
+                            ))
+                            .ok_or(TrueTypeError::BadTableDirectory)?
+                    };
+                    if lookup_type == 1 {
+                        if right != u16::MAX {
+                            continue;
+                        }
+                        if subtable.checked_add(6).is_none_or(|end| end > table_end) {
+                            return Err(TrueTypeError::BadTableDirectory);
+                        }
+                        let format = read_u16(self.bytes, subtable)
+                            .ok_or(TrueTypeError::BadTableDirectory)?;
+                        let coverage = subtable
+                            .checked_add(usize::from(
+                                read_u16(self.bytes, subtable + 2)
+                                    .ok_or(TrueTypeError::BadTableDirectory)?,
+                            ))
+                            .ok_or(TrueTypeError::BadTableDirectory)?;
+                        let Some(coverage_index) =
+                            gsub_coverage_index(self.bytes, coverage, table_end, left)?
+                        else {
+                            continue;
+                        };
+                        let value_format = read_u16(self.bytes, subtable + 4)
+                            .ok_or(TrueTypeError::BadTableDirectory)?;
+                        let record = match format {
+                            1 => subtable + 6,
+                            2 => {
+                                let count = usize::from(
+                                    read_u16(self.bytes, subtable + 6)
+                                        .ok_or(TrueTypeError::BadTableDirectory)?,
+                                );
+                                let record_size = gpos_value_record_size(value_format)?;
+                                if count > 128 || coverage_index >= count {
+                                    return Err(TrueTypeError::TooLarge);
+                                }
+                                subtable
+                                    .checked_add(
+                                        6usize
+                                            .checked_add(
+                                                2usize
+                                                    .checked_add(
+                                                        count
+                                                            .checked_mul(record_size)
+                                                            .ok_or(TrueTypeError::TooLarge)?,
+                                                    )
+                                                    .ok_or(TrueTypeError::TooLarge)?,
+                                            )
+                                            .ok_or(TrueTypeError::TooLarge)?,
+                                    )
+                                    .is_none_or(|end| end > table_end)
+                                    .then_some(())
+                                    .ok_or(TrueTypeError::BadTableDirectory)?;
+                                subtable
+                                    .checked_add(
+                                        8usize
+                                            .checked_add(
+                                                count
+                                                    .checked_mul(record_size)
+                                                    .ok_or(TrueTypeError::TooLarge)?,
+                                            )
+                                            .ok_or(TrueTypeError::TooLarge)?,
+                                    )
+                                    .is_none_or(|end| end > table_end)
+                                    .then_some(())
+                                    .ok_or(TrueTypeError::BadTableDirectory)?;
+                                subtable
+                                    .checked_add(
+                                        8usize
+                                            .checked_add(
+                                                coverage_index
+                                                    .checked_mul(record_size)
+                                                    .ok_or(TrueTypeError::TooLarge)?,
+                                            )
+                                            .ok_or(TrueTypeError::TooLarge)?,
+                                    )
+                                    .ok_or(TrueTypeError::TooLarge)?
+                            }
+                            _ => continue,
+                        };
+                        let adjustment = gpos_value_adjustment(
+                            self.bytes,
+                            record,
+                            value_format,
+                            table_end,
+                            table,
+                            ppem,
+                        )?;
+                        accumulated.0 = accumulated.0.saturating_add(adjustment.0);
+                        accumulated.1 = accumulated.1.saturating_add(adjustment.1);
+                        accumulated.2 = accumulated.2.saturating_add(adjustment.2);
+                        accumulated.3 = accumulated.3.saturating_add(adjustment.3);
+                        found = true;
+                        continue;
+                    }
+                    if right == u16::MAX {
+                        continue;
+                    }
+                    if subtable.checked_add(10).is_none_or(|end| end > table_end) {
+                        continue;
+                    }
+                    let format =
+                        read_u16(self.bytes, subtable).ok_or(TrueTypeError::BadTableDirectory)?;
+                    if format == 2 {
+                        let coverage = subtable
+                            .checked_add(usize::from(
+                                read_u16(self.bytes, subtable + 2)
+                                    .ok_or(TrueTypeError::BadTableDirectory)?,
+                            ))
+                            .ok_or(TrueTypeError::BadTableDirectory)?;
+                        if gsub_coverage_index(self.bytes, coverage, table_end, left)?.is_none() {
+                            continue;
+                        }
+                        let value_format1 = read_u16(self.bytes, subtable + 4)
+                            .ok_or(TrueTypeError::BadTableDirectory)?;
+                        let value_format2 = read_u16(self.bytes, subtable + 6)
+                            .ok_or(TrueTypeError::BadTableDirectory)?;
+                        let class_def1 = subtable
+                            .checked_add(usize::from(
+                                read_u16(self.bytes, subtable + 8)
+                                    .ok_or(TrueTypeError::BadTableDirectory)?,
+                            ))
+                            .ok_or(TrueTypeError::BadTableDirectory)?;
+                        let class_def2 = subtable
+                            .checked_add(usize::from(
+                                read_u16(self.bytes, subtable + 10)
+                                    .ok_or(TrueTypeError::BadTableDirectory)?,
+                            ))
+                            .ok_or(TrueTypeError::BadTableDirectory)?;
+                        let class1_count = usize::from(
+                            read_u16(self.bytes, subtable + 12)
+                                .ok_or(TrueTypeError::BadTableDirectory)?,
+                        );
+                        let class2_count = usize::from(
+                            read_u16(self.bytes, subtable + 14)
+                                .ok_or(TrueTypeError::BadTableDirectory)?,
+                        );
+                        if class1_count > 128 || class2_count > 128 {
+                            return Err(TrueTypeError::TooLarge);
+                        }
+                        let class1 =
+                            usize::from(gpos_class_index(self.bytes, class_def1, left, table_end)?);
+                        let class2 = usize::from(gpos_class_index(
+                            self.bytes, class_def2, right, table_end,
+                        )?);
+                        if class1 >= class1_count || class2 >= class2_count {
+                            continue;
+                        }
+                        let first_value_size = gpos_value_record_size(value_format1)?;
+                        let second_value_size = gpos_value_record_size(value_format2)?;
+                        let record_size = first_value_size
+                            .checked_add(second_value_size)
+                            .ok_or(TrueTypeError::TooLarge)?;
+                        let records_start =
+                            subtable.checked_add(16).ok_or(TrueTypeError::TooLarge)?;
+                        let record = records_start
+                            .checked_add(
+                                class1
+                                    .checked_mul(class2_count)
+                                    .and_then(|value| value.checked_add(class2))
+                                    .and_then(|value| value.checked_mul(record_size))
+                                    .ok_or(TrueTypeError::TooLarge)?,
+                            )
+                            .ok_or(TrueTypeError::TooLarge)?;
+                        let records_end = records_start
+                            .checked_add(
+                                class1_count
+                                    .checked_mul(class2_count)
+                                    .and_then(|value| value.checked_mul(record_size))
+                                    .ok_or(TrueTypeError::TooLarge)?,
+                            )
+                            .ok_or(TrueTypeError::TooLarge)?;
+                        if records_end > table_end {
+                            return Err(TrueTypeError::BadTableDirectory);
+                        }
+                        let adjustment = gpos_value_adjustment(
+                            self.bytes,
+                            record,
+                            value_format1,
+                            table_end,
+                            table,
+                            ppem,
+                        )?;
+                        accumulated.0 = accumulated.0.saturating_add(adjustment.0);
+                        accumulated.1 = accumulated.1.saturating_add(adjustment.1);
+                        accumulated.2 = accumulated.2.saturating_add(adjustment.2);
+                        accumulated.3 = accumulated.3.saturating_add(adjustment.3);
+                        found = true;
+                        continue;
+                    }
+                    if format != 1 {
+                        continue;
+                    }
+                    let coverage = subtable
+                        .checked_add(usize::from(
+                            read_u16(self.bytes, subtable + 2)
+                                .ok_or(TrueTypeError::BadTableDirectory)?,
+                        ))
+                        .ok_or(TrueTypeError::BadTableDirectory)?;
+                    let Some(coverage_index) =
+                        gsub_coverage_index(self.bytes, coverage, table_end, left)?
+                    else {
+                        continue;
+                    };
+                    let value_format1 = read_u16(self.bytes, subtable + 4)
+                        .ok_or(TrueTypeError::BadTableDirectory)?;
+                    let value_format2 = read_u16(self.bytes, subtable + 6)
+                        .ok_or(TrueTypeError::BadTableDirectory)?;
+                    let pair_set_count = usize::from(
+                        read_u16(self.bytes, subtable + 8)
+                            .ok_or(TrueTypeError::BadTableDirectory)?,
+                    );
+                    if pair_set_count > 128 || coverage_index >= pair_set_count {
+                        return Err(TrueTypeError::TooLarge);
+                    }
+                    let offset_end = subtable
+                        .checked_add(
+                            10usize
+                                .checked_add(
+                                    pair_set_count
+                                        .checked_mul(2)
+                                        .ok_or(TrueTypeError::TooLarge)?,
+                                )
+                                .ok_or(TrueTypeError::TooLarge)?,
+                        )
+                        .ok_or(TrueTypeError::TooLarge)?;
+                    if offset_end > table_end {
+                        return Err(TrueTypeError::BadTableDirectory);
+                    }
+                    let first_value_size = gpos_value_record_size(value_format1)?;
+                    let second_value_size = gpos_value_record_size(value_format2)?;
+                    let pair_set = subtable
+                        .checked_add(usize::from(
+                            read_u16(self.bytes, subtable + 10 + coverage_index * 2)
+                                .ok_or(TrueTypeError::BadTableDirectory)?,
+                        ))
+                        .ok_or(TrueTypeError::BadTableDirectory)?;
+                    if pair_set.checked_add(2).is_none_or(|end| end > table_end) {
+                        return Err(TrueTypeError::BadTableDirectory);
+                    }
+                    let pair_count = usize::from(
+                        read_u16(self.bytes, pair_set).ok_or(TrueTypeError::BadTableDirectory)?,
+                    );
+                    if pair_count > 128 {
+                        return Err(TrueTypeError::TooLarge);
+                    }
+                    let record_size = 2usize
+                        .checked_add(first_value_size)
+                        .and_then(|size| size.checked_add(second_value_size))
+                        .ok_or(TrueTypeError::TooLarge)?;
+                    let records_end = pair_set
+                        .checked_add(
+                            2usize
+                                .checked_add(
+                                    pair_count
+                                        .checked_mul(record_size)
+                                        .ok_or(TrueTypeError::TooLarge)?,
+                                )
+                                .ok_or(TrueTypeError::TooLarge)?,
+                        )
+                        .ok_or(TrueTypeError::TooLarge)?;
+                    if records_end > table_end {
+                        return Err(TrueTypeError::BadTableDirectory);
+                    }
+                    for pair in 0..pair_count {
+                        let record = pair_set + 2 + pair * record_size;
+                        if read_u16(self.bytes, record) != Some(right) {
+                            continue;
+                        }
+                        let first_value = gpos_value_adjustment(
+                            self.bytes,
+                            record + 2,
+                            value_format1,
+                            table_end,
+                            table,
+                            ppem,
+                        )?;
+                        accumulated.0 = accumulated.0.saturating_add(first_value.0);
+                        accumulated.1 = accumulated.1.saturating_add(first_value.1);
+                        accumulated.2 = accumulated.2.saturating_add(first_value.2);
+                        accumulated.3 = accumulated.3.saturating_add(first_value.3);
+                        found = true;
+                        break;
+                    }
+                }
+            }
+            if found {
+                Ok(Some(accumulated))
+            } else if right != u16::MAX {
+                gpos_contextual_single_adjustment(
+                    self.bytes,
+                    table,
+                    table_end,
+                    left,
+                    right,
+                    GposContextOptions {
+                        script_tag,
+                        language_tag,
+                        ppem,
+                    },
+                )
+            } else {
+                Ok(None)
+            }
+        }
+
+        fn gpos_mark_to_ligature_adjustment(
+            &self,
+            ligature: u16,
+            mark: u16,
+            script_tag: Option<[u8; 4]>,
+            language_tag: Option<[u8; 4]>,
+            ppem: Option<u16>,
+        ) -> Result<Option<(i32, i32)>, TrueTypeError> {
+            let Some((table, length)) = self.gpos else {
+                return Ok(None);
+            };
+            let table_end = table
+                .checked_add(length)
+                .ok_or(TrueTypeError::BadTableDirectory)?;
+            if length < 10 || table_end > self.bytes.len() {
+                return Err(TrueTypeError::BadTableDirectory);
+            }
+            let feature_base = table
+                .checked_add(usize::from(
+                    read_u16(self.bytes, table + 6).ok_or(TrueTypeError::BadTableDirectory)?,
+                ))
+                .ok_or(TrueTypeError::BadTableDirectory)?;
+            let (feature_indices, feature_index_count, feature_count) =
+                gpos_selected_feature_indices(
+                    self.bytes,
+                    table,
+                    table_end,
+                    script_tag,
+                    language_tag,
+                )?;
+            let lookup_base = table
+                .checked_add(usize::from(
+                    read_u16(self.bytes, table + 8).ok_or(TrueTypeError::BadTableDirectory)?,
+                ))
+                .ok_or(TrueTypeError::BadTableDirectory)?;
+            let lookup_count = usize::from(
+                read_u16(self.bytes, lookup_base).ok_or(TrueTypeError::BadTableDirectory)?,
+            );
+            if lookup_count > 128
+                || lookup_base
+                    .checked_add(
+                        2usize
+                            .checked_add(
+                                lookup_count.checked_mul(2).ok_or(TrueTypeError::TooLarge)?,
+                            )
+                            .ok_or(TrueTypeError::TooLarge)?,
+                    )
+                    .is_none_or(|end| end > table_end)
+            {
+                return Err(TrueTypeError::TooLarge);
+            }
+            for feature_index in feature_indices.iter().copied().take(feature_index_count) {
+                let feature_index = usize::from(feature_index);
+                if feature_index >= feature_count {
+                    return Err(TrueTypeError::BadTableDirectory);
+                }
+                let record = feature_base + 2 + feature_index * 6;
+                if self
+                    .bytes
+                    .get(record..record + 4)
+                    .ok_or(TrueTypeError::BadTableDirectory)?
+                    != b"mark"
+                {
+                    continue;
+                }
+                let feature = feature_base
+                    .checked_add(usize::from(
+                        read_u16(self.bytes, record + 4).ok_or(TrueTypeError::BadTableDirectory)?,
+                    ))
+                    .ok_or(TrueTypeError::BadTableDirectory)?;
+                let lookup_total = usize::from(
+                    read_u16(self.bytes, feature + 2).ok_or(TrueTypeError::BadTableDirectory)?,
+                );
+                if lookup_total > 32
+                    || feature
+                        .checked_add(
+                            4usize
+                                .checked_add(
+                                    lookup_total.checked_mul(2).ok_or(TrueTypeError::TooLarge)?,
+                                )
+                                .ok_or(TrueTypeError::TooLarge)?,
+                        )
+                        .is_none_or(|end| end > table_end)
+                {
+                    return Err(TrueTypeError::TooLarge);
+                }
+                for item in 0..lookup_total {
+                    let selected = usize::from(
+                        read_u16(self.bytes, feature + 4 + item * 2)
+                            .ok_or(TrueTypeError::BadTableDirectory)?,
+                    );
+                    if selected >= lookup_count {
+                        return Err(TrueTypeError::BadTableDirectory);
+                    }
+                    let lookup = lookup_base
+                        .checked_add(usize::from(
+                            read_u16(self.bytes, lookup_base + 2 + selected * 2)
+                                .ok_or(TrueTypeError::BadTableDirectory)?,
+                        ))
+                        .ok_or(TrueTypeError::BadTableDirectory)?;
+                    let Some((is_extension, extension_subtable)) =
+                        gpos_attachment_lookup(self.bytes, lookup, 5, table_end)?
+                    else {
+                        continue;
+                    };
+                    let subtable_count = if is_extension {
+                        1
+                    } else {
+                        usize::from(
+                            read_u16(self.bytes, lookup + 4)
+                                .ok_or(TrueTypeError::BadTableDirectory)?,
+                        )
+                    };
+                    if subtable_count > 32 {
+                        return Err(TrueTypeError::TooLarge);
+                    }
+                    for subtable_index in 0..subtable_count {
+                        let subtable = if is_extension {
+                            extension_subtable
+                        } else {
+                            lookup
+                                .checked_add(usize::from(
+                                    read_u16(self.bytes, lookup + 6 + subtable_index * 2)
+                                        .ok_or(TrueTypeError::BadTableDirectory)?,
+                                ))
+                                .ok_or(TrueTypeError::BadTableDirectory)?
+                        };
+                        if subtable.checked_add(12).is_none_or(|end| end > table_end)
+                            || read_u16(self.bytes, subtable) != Some(1)
+                        {
+                            continue;
+                        }
+                        let mark_coverage = subtable
+                            .checked_add(usize::from(
+                                read_u16(self.bytes, subtable + 2)
+                                    .ok_or(TrueTypeError::BadTableDirectory)?,
+                            ))
+                            .ok_or(TrueTypeError::BadTableDirectory)?;
+                        let ligature_coverage = subtable
+                            .checked_add(usize::from(
+                                read_u16(self.bytes, subtable + 4)
+                                    .ok_or(TrueTypeError::BadTableDirectory)?,
+                            ))
+                            .ok_or(TrueTypeError::BadTableDirectory)?;
+                        let Some(mark_index) =
+                            gsub_coverage_index(self.bytes, mark_coverage, table_end, mark)?
+                        else {
+                            continue;
+                        };
+                        let Some(ligature_index) = gsub_coverage_index(
+                            self.bytes,
+                            ligature_coverage,
+                            table_end,
+                            ligature,
+                        )?
+                        else {
+                            continue;
+                        };
+                        let class_count = usize::from(
+                            read_u16(self.bytes, subtable + 6)
+                                .ok_or(TrueTypeError::BadTableDirectory)?,
+                        );
+                        let mark_array = subtable
+                            .checked_add(usize::from(
+                                read_u16(self.bytes, subtable + 8)
+                                    .ok_or(TrueTypeError::BadTableDirectory)?,
+                            ))
+                            .ok_or(TrueTypeError::BadTableDirectory)?;
+                        let ligature_array = subtable
+                            .checked_add(usize::from(
+                                read_u16(self.bytes, subtable + 10)
+                                    .ok_or(TrueTypeError::BadTableDirectory)?,
+                            ))
+                            .ok_or(TrueTypeError::BadTableDirectory)?;
+                        if class_count == 0 || class_count > 32 {
+                            return Err(TrueTypeError::TooLarge);
+                        }
+                        if mark_array.checked_add(2).is_none_or(|end| end > table_end)
+                            || ligature_array
+                                .checked_add(2)
+                                .is_none_or(|end| end > table_end)
+                        {
+                            return Err(TrueTypeError::BadTableDirectory);
+                        }
+                        let mark_count = usize::from(
+                            read_u16(self.bytes, mark_array)
+                                .ok_or(TrueTypeError::BadTableDirectory)?,
+                        );
+                        let ligature_count = usize::from(
+                            read_u16(self.bytes, ligature_array)
+                                .ok_or(TrueTypeError::BadTableDirectory)?,
+                        );
+                        if mark_count > 128
+                            || ligature_count > 128
+                            || mark_index >= mark_count
+                            || ligature_index >= ligature_count
+                        {
+                            return Err(TrueTypeError::TooLarge);
+                        }
+                        let mark_record = mark_array
+                            .checked_add(
+                                2usize
+                                    .checked_add(
+                                        mark_index.checked_mul(4).ok_or(TrueTypeError::TooLarge)?,
+                                    )
+                                    .ok_or(TrueTypeError::TooLarge)?,
+                            )
+                            .ok_or(TrueTypeError::TooLarge)?;
+                        if mark_record.checked_add(4).is_none_or(|end| end > table_end) {
+                            return Err(TrueTypeError::BadTableDirectory);
+                        }
+                        let mark_class = usize::from(
+                            read_u16(self.bytes, mark_record)
+                                .ok_or(TrueTypeError::BadTableDirectory)?,
+                        );
+                        if mark_class >= class_count {
+                            return Err(TrueTypeError::TooLarge);
+                        }
+                        let mark_anchor_offset = read_u16(self.bytes, mark_record + 2)
+                            .ok_or(TrueTypeError::BadTableDirectory)?;
+                        if mark_anchor_offset == 0 {
+                            continue;
+                        }
+                        let ligature_record = ligature_array
+                            .checked_add(
+                                2usize
+                                    .checked_add(
+                                        ligature_index
+                                            .checked_mul(2)
+                                            .ok_or(TrueTypeError::TooLarge)?,
+                                    )
+                                    .ok_or(TrueTypeError::TooLarge)?,
+                            )
+                            .ok_or(TrueTypeError::TooLarge)?;
+                        let ligature_offset = read_u16(self.bytes, ligature_record)
+                            .ok_or(TrueTypeError::BadTableDirectory)?;
+                        if ligature_offset == 0 {
+                            continue;
+                        }
+                        let ligature_attach = ligature_array
+                            .checked_add(usize::from(ligature_offset))
+                            .ok_or(TrueTypeError::BadTableDirectory)?;
+                        if ligature_attach
+                            .checked_add(2)
+                            .is_none_or(|end| end > table_end)
+                        {
+                            return Err(TrueTypeError::BadTableDirectory);
+                        }
+                        let component_count = usize::from(
+                            read_u16(self.bytes, ligature_attach)
+                                .ok_or(TrueTypeError::BadTableDirectory)?,
+                        );
+                        if component_count == 0 || component_count > 128 {
+                            return Err(TrueTypeError::TooLarge);
+                        }
+                        let component = component_count - 1;
+                        let component_record = ligature_attach
+                            .checked_add(
+                                2usize
+                                    .checked_add(
+                                        component
+                                            .checked_mul(class_count * 2)
+                                            .ok_or(TrueTypeError::TooLarge)?,
+                                    )
+                                    .ok_or(TrueTypeError::TooLarge)?,
+                            )
+                            .ok_or(TrueTypeError::TooLarge)?;
+                        let ligature_anchor_offset = read_u16(
+                            self.bytes,
+                            component_record
+                                .checked_add(mark_class * 2)
+                                .ok_or(TrueTypeError::TooLarge)?,
+                        )
+                        .ok_or(TrueTypeError::BadTableDirectory)?;
+                        if ligature_anchor_offset == 0 {
+                            continue;
+                        }
+                        let mark_anchor = mark_array
+                            .checked_add(usize::from(mark_anchor_offset))
+                            .ok_or(TrueTypeError::BadTableDirectory)?;
+                        let ligature_anchor = ligature_attach
+                            .checked_add(usize::from(ligature_anchor_offset))
+                            .ok_or(TrueTypeError::BadTableDirectory)?;
+                        let Some((mark_x, mark_y)) =
+                            gpos_anchor_coordinates(self, mark_anchor, ppem, table_end, mark)?
+                        else {
+                            continue;
+                        };
+                        let Some((ligature_x, ligature_y)) = gpos_anchor_coordinates(
+                            self,
+                            ligature_anchor,
+                            ppem,
+                            table_end,
+                            ligature,
+                        )?
+                        else {
+                            continue;
+                        };
+                        return Ok(Some((ligature_x - mark_x, ligature_y - mark_y)));
+                    }
+                }
+            }
+            Ok(None)
+        }
+
+        fn gpos_mark_to_base_adjustment(
+            &self,
+            base: u16,
+            mark: u16,
+            script_tag: Option<[u8; 4]>,
+            language_tag: Option<[u8; 4]>,
+            ppem: Option<u16>,
+        ) -> Result<Option<(i32, i32)>, TrueTypeError> {
+            let Some((table, length)) = self.gpos else {
+                return Ok(None);
+            };
+            let table_end = table
+                .checked_add(length)
+                .ok_or(TrueTypeError::BadTableDirectory)?;
+            if length < 10 || table_end > self.bytes.len() {
+                return Err(TrueTypeError::BadTableDirectory);
+            }
+            let feature_base = table
+                .checked_add(usize::from(
+                    read_u16(self.bytes, table + 6).ok_or(TrueTypeError::BadTableDirectory)?,
+                ))
+                .ok_or(TrueTypeError::BadTableDirectory)?;
+            let (feature_indices, feature_index_count, feature_count) =
+                gpos_selected_feature_indices(
+                    self.bytes,
+                    table,
+                    table_end,
+                    script_tag,
+                    language_tag,
+                )?;
+            let lookup_base = table
+                .checked_add(usize::from(
+                    read_u16(self.bytes, table + 8).ok_or(TrueTypeError::BadTableDirectory)?,
+                ))
+                .ok_or(TrueTypeError::BadTableDirectory)?;
+            let lookup_count = usize::from(
+                read_u16(self.bytes, lookup_base).ok_or(TrueTypeError::BadTableDirectory)?,
+            );
+            if lookup_count > 128
+                || lookup_base
+                    .checked_add(
+                        2usize
+                            .checked_add(
+                                lookup_count.checked_mul(2).ok_or(TrueTypeError::TooLarge)?,
+                            )
+                            .ok_or(TrueTypeError::TooLarge)?,
+                    )
+                    .is_none_or(|end| end > table_end)
+            {
+                return Err(TrueTypeError::TooLarge);
+            }
+            for feature_index in feature_indices.iter().copied().take(feature_index_count) {
+                let feature_index = usize::from(feature_index);
+                if feature_index >= feature_count {
+                    return Err(TrueTypeError::BadTableDirectory);
+                }
+                let record = feature_base + 2 + feature_index * 6;
+                let tag = self
+                    .bytes
+                    .get(record..record + 4)
+                    .ok_or(TrueTypeError::BadTableDirectory)?;
+                if tag != b"mark" && tag != b"mkmk" {
+                    continue;
+                }
+                let feature = feature_base
+                    .checked_add(usize::from(
+                        read_u16(self.bytes, record + 4).ok_or(TrueTypeError::BadTableDirectory)?,
+                    ))
+                    .ok_or(TrueTypeError::BadTableDirectory)?;
+                let lookup_total = usize::from(
+                    read_u16(self.bytes, feature + 2).ok_or(TrueTypeError::BadTableDirectory)?,
+                );
+                if lookup_total > 32
+                    || feature
+                        .checked_add(
+                            4usize
+                                .checked_add(
+                                    lookup_total.checked_mul(2).ok_or(TrueTypeError::TooLarge)?,
+                                )
+                                .ok_or(TrueTypeError::TooLarge)?,
+                        )
+                        .is_none_or(|end| end > table_end)
+                {
+                    return Err(TrueTypeError::TooLarge);
+                }
+                for item in 0..lookup_total {
+                    let selected = usize::from(
+                        read_u16(self.bytes, feature + 4 + item * 2)
+                            .ok_or(TrueTypeError::BadTableDirectory)?,
+                    );
+                    if selected >= lookup_count {
+                        return Err(TrueTypeError::BadTableDirectory);
+                    }
+                    let lookup = lookup_base
+                        .checked_add(usize::from(
+                            read_u16(self.bytes, lookup_base + 2 + selected * 2)
+                                .ok_or(TrueTypeError::BadTableDirectory)?,
+                        ))
+                        .ok_or(TrueTypeError::BadTableDirectory)?;
+                    let Some((is_extension, extension_subtable)) =
+                        gpos_attachment_lookup(self.bytes, lookup, 4, table_end)?
+                    else {
+                        continue;
+                    };
+                    let subtable_count = if is_extension {
+                        1
+                    } else {
+                        usize::from(
+                            read_u16(self.bytes, lookup + 4)
+                                .ok_or(TrueTypeError::BadTableDirectory)?,
+                        )
+                    };
+                    if subtable_count > 32 {
+                        return Err(TrueTypeError::TooLarge);
+                    }
+                    for subtable_index in 0..subtable_count {
+                        let subtable = if is_extension {
+                            extension_subtable
+                        } else {
+                            lookup
+                                .checked_add(usize::from(
+                                    read_u16(self.bytes, lookup + 6 + subtable_index * 2)
+                                        .ok_or(TrueTypeError::BadTableDirectory)?,
+                                ))
+                                .ok_or(TrueTypeError::BadTableDirectory)?
+                        };
+                        if subtable.checked_add(12).is_none_or(|end| end > table_end)
+                            || read_u16(self.bytes, subtable) != Some(1)
+                        {
+                            continue;
+                        }
+                        let mark_coverage = subtable
+                            .checked_add(usize::from(
+                                read_u16(self.bytes, subtable + 2)
+                                    .ok_or(TrueTypeError::BadTableDirectory)?,
+                            ))
+                            .ok_or(TrueTypeError::BadTableDirectory)?;
+                        let base_coverage = subtable
+                            .checked_add(usize::from(
+                                read_u16(self.bytes, subtable + 4)
+                                    .ok_or(TrueTypeError::BadTableDirectory)?,
+                            ))
+                            .ok_or(TrueTypeError::BadTableDirectory)?;
+                        let Some(mark_index) =
+                            gsub_coverage_index(self.bytes, mark_coverage, table_end, mark)?
+                        else {
+                            continue;
+                        };
+                        let Some(base_index) =
+                            gsub_coverage_index(self.bytes, base_coverage, table_end, base)?
+                        else {
+                            continue;
+                        };
+                        let class_count = usize::from(
+                            read_u16(self.bytes, subtable + 6)
+                                .ok_or(TrueTypeError::BadTableDirectory)?,
+                        );
+                        let mark_array = subtable
+                            .checked_add(usize::from(
+                                read_u16(self.bytes, subtable + 8)
+                                    .ok_or(TrueTypeError::BadTableDirectory)?,
+                            ))
+                            .ok_or(TrueTypeError::BadTableDirectory)?;
+                        let base_array = subtable
+                            .checked_add(usize::from(
+                                read_u16(self.bytes, subtable + 10)
+                                    .ok_or(TrueTypeError::BadTableDirectory)?,
+                            ))
+                            .ok_or(TrueTypeError::BadTableDirectory)?;
+                        if class_count == 0 || class_count > 32 {
+                            return Err(TrueTypeError::TooLarge);
+                        }
+                        if mark_array.checked_add(2).is_none_or(|end| end > table_end)
+                            || base_array.checked_add(2).is_none_or(|end| end > table_end)
+                        {
+                            return Err(TrueTypeError::BadTableDirectory);
+                        }
+                        let mark_count = usize::from(
+                            read_u16(self.bytes, mark_array)
+                                .ok_or(TrueTypeError::BadTableDirectory)?,
+                        );
+                        let base_count = usize::from(
+                            read_u16(self.bytes, base_array)
+                                .ok_or(TrueTypeError::BadTableDirectory)?,
+                        );
+                        if mark_count > 128 || base_count > 128 || mark_index >= mark_count {
+                            return Err(TrueTypeError::TooLarge);
+                        }
+                        let mark_record = mark_array
+                            .checked_add(
+                                2usize
+                                    .checked_add(
+                                        mark_index.checked_mul(4).ok_or(TrueTypeError::TooLarge)?,
+                                    )
+                                    .ok_or(TrueTypeError::TooLarge)?,
+                            )
+                            .ok_or(TrueTypeError::TooLarge)?;
+                        if mark_record.checked_add(4).is_none_or(|end| end > table_end)
+                            || base_index >= base_count
+                        {
+                            return Err(TrueTypeError::BadTableDirectory);
+                        }
+                        let mark_class = usize::from(
+                            read_u16(self.bytes, mark_record)
+                                .ok_or(TrueTypeError::BadTableDirectory)?,
+                        );
+                        if mark_class >= class_count {
+                            return Err(TrueTypeError::TooLarge);
+                        }
+                        let base_anchor_record = base_array
+                            .checked_add(
+                                2usize
+                                    .checked_add(
+                                        base_index
+                                            .checked_mul(class_count)
+                                            .and_then(|value| value.checked_mul(2))
+                                            .and_then(|value| value.checked_add(mark_class * 2))
+                                            .ok_or(TrueTypeError::TooLarge)?,
+                                    )
+                                    .ok_or(TrueTypeError::TooLarge)?,
+                            )
+                            .ok_or(TrueTypeError::TooLarge)?;
+                        let mark_anchor = mark_array
+                            .checked_add(usize::from(
+                                read_u16(self.bytes, mark_record + 2)
+                                    .ok_or(TrueTypeError::BadTableDirectory)?,
+                            ))
+                            .ok_or(TrueTypeError::BadTableDirectory)?;
+                        let base_anchor_offset = read_u16(self.bytes, base_anchor_record)
+                            .ok_or(TrueTypeError::BadTableDirectory)?;
+                        if base_anchor_offset == 0 {
+                            continue;
+                        }
+                        let base_anchor = base_array
+                            .checked_add(usize::from(base_anchor_offset))
+                            .ok_or(TrueTypeError::BadTableDirectory)?;
+                        let Some((mark_x, mark_y)) =
+                            gpos_anchor_coordinates(self, mark_anchor, ppem, table_end, mark)?
+                        else {
+                            continue;
+                        };
+                        let Some((base_x, base_y)) =
+                            gpos_anchor_coordinates(self, base_anchor, ppem, table_end, base)?
+                        else {
+                            continue;
+                        };
+                        return Ok(Some((base_x - mark_x, base_y - mark_y)));
+                    }
+                }
+            }
+            Ok(None)
+        }
+
+        fn gpos_mark_to_mark_adjustment(
+            &self,
+            first: u16,
+            second: u16,
+            script_tag: Option<[u8; 4]>,
+            language_tag: Option<[u8; 4]>,
+            ppem: Option<u16>,
+        ) -> Result<Option<(i32, i32)>, TrueTypeError> {
+            let Some((table, length)) = self.gpos else {
+                return Ok(None);
+            };
+            let table_end = table
+                .checked_add(length)
+                .ok_or(TrueTypeError::BadTableDirectory)?;
+            if length < 10 || table_end > self.bytes.len() {
+                return Err(TrueTypeError::BadTableDirectory);
+            }
+            let feature_base = table
+                .checked_add(usize::from(
+                    read_u16(self.bytes, table + 6).ok_or(TrueTypeError::BadTableDirectory)?,
+                ))
+                .ok_or(TrueTypeError::BadTableDirectory)?;
+            let (feature_indices, feature_index_count, feature_count) =
+                gpos_selected_feature_indices(
+                    self.bytes,
+                    table,
+                    table_end,
+                    script_tag,
+                    language_tag,
+                )?;
+            let lookup_base = table
+                .checked_add(usize::from(
+                    read_u16(self.bytes, table + 8).ok_or(TrueTypeError::BadTableDirectory)?,
+                ))
+                .ok_or(TrueTypeError::BadTableDirectory)?;
+            let lookup_count = usize::from(
+                read_u16(self.bytes, lookup_base).ok_or(TrueTypeError::BadTableDirectory)?,
+            );
+            if lookup_count > 128 {
+                return Err(TrueTypeError::TooLarge);
+            }
+            for feature_index in feature_indices.iter().copied().take(feature_index_count) {
+                let feature_index = usize::from(feature_index);
+                if feature_index >= feature_count {
+                    return Err(TrueTypeError::BadTableDirectory);
+                }
+                let record = feature_base + 2 + feature_index * 6;
+                if self
+                    .bytes
+                    .get(record..record + 4)
+                    .ok_or(TrueTypeError::BadTableDirectory)?
+                    != b"mkmk"
+                {
+                    continue;
+                }
+                let feature = feature_base
+                    .checked_add(usize::from(
+                        read_u16(self.bytes, record + 4).ok_or(TrueTypeError::BadTableDirectory)?,
+                    ))
+                    .ok_or(TrueTypeError::BadTableDirectory)?;
+                let feature_lookup_count = usize::from(
+                    read_u16(self.bytes, feature + 2).ok_or(TrueTypeError::BadTableDirectory)?,
+                );
+                if feature_lookup_count > 32
+                    || feature
+                        .checked_add(
+                            4usize
+                                .checked_add(
+                                    feature_lookup_count
+                                        .checked_mul(2)
+                                        .ok_or(TrueTypeError::TooLarge)?,
+                                )
+                                .ok_or(TrueTypeError::TooLarge)?,
+                        )
+                        .is_none_or(|end| end > table_end)
+                {
+                    return Err(TrueTypeError::TooLarge);
+                }
+                for item in 0..feature_lookup_count {
+                    let selected = usize::from(
+                        read_u16(self.bytes, feature + 4 + item * 2)
+                            .ok_or(TrueTypeError::BadTableDirectory)?,
+                    );
+                    if selected >= lookup_count {
+                        return Err(TrueTypeError::BadTableDirectory);
+                    }
+                    let lookup = lookup_base
+                        .checked_add(usize::from(
+                            read_u16(self.bytes, lookup_base + 2 + selected * 2)
+                                .ok_or(TrueTypeError::BadTableDirectory)?,
+                        ))
+                        .ok_or(TrueTypeError::BadTableDirectory)?;
+                    let Some((is_extension, extension_subtable)) =
+                        gpos_attachment_lookup(self.bytes, lookup, 6, table_end)?
+                    else {
+                        continue;
+                    };
+                    let subtable_count = if is_extension {
+                        1
+                    } else {
+                        usize::from(
+                            read_u16(self.bytes, lookup + 4)
+                                .ok_or(TrueTypeError::BadTableDirectory)?,
+                        )
+                    };
+                    if subtable_count > 32 {
+                        return Err(TrueTypeError::TooLarge);
+                    }
+                    for subtable_index in 0..subtable_count {
+                        let subtable = if is_extension {
+                            extension_subtable
+                        } else {
+                            lookup
+                                .checked_add(usize::from(
+                                    read_u16(self.bytes, lookup + 6 + subtable_index * 2)
+                                        .ok_or(TrueTypeError::BadTableDirectory)?,
+                                ))
+                                .ok_or(TrueTypeError::BadTableDirectory)?
+                        };
+                        if subtable.checked_add(12).is_none_or(|end| end > table_end)
+                            || read_u16(self.bytes, subtable) != Some(1)
+                        {
+                            continue;
+                        }
+                        let first_coverage = subtable
+                            .checked_add(usize::from(
+                                read_u16(self.bytes, subtable + 2)
+                                    .ok_or(TrueTypeError::BadTableDirectory)?,
+                            ))
+                            .ok_or(TrueTypeError::BadTableDirectory)?;
+                        let second_coverage = subtable
+                            .checked_add(usize::from(
+                                read_u16(self.bytes, subtable + 4)
+                                    .ok_or(TrueTypeError::BadTableDirectory)?,
+                            ))
+                            .ok_or(TrueTypeError::BadTableDirectory)?;
+                        let Some(first_index) =
+                            gsub_coverage_index(self.bytes, first_coverage, table_end, first)?
+                        else {
+                            continue;
+                        };
+                        let Some(second_index) =
+                            gsub_coverage_index(self.bytes, second_coverage, table_end, second)?
+                        else {
+                            continue;
+                        };
+                        let class_count = usize::from(
+                            read_u16(self.bytes, subtable + 6)
+                                .ok_or(TrueTypeError::BadTableDirectory)?,
+                        );
+                        if class_count == 0 || class_count > 32 {
+                            return Err(TrueTypeError::TooLarge);
+                        }
+                        let first_array = subtable
+                            .checked_add(usize::from(
+                                read_u16(self.bytes, subtable + 8)
+                                    .ok_or(TrueTypeError::BadTableDirectory)?,
+                            ))
+                            .ok_or(TrueTypeError::BadTableDirectory)?;
+                        let second_array = subtable
+                            .checked_add(usize::from(
+                                read_u16(self.bytes, subtable + 10)
+                                    .ok_or(TrueTypeError::BadTableDirectory)?,
+                            ))
+                            .ok_or(TrueTypeError::BadTableDirectory)?;
+                        if first_array.checked_add(2).is_none_or(|end| end > table_end)
+                            || second_array
+                                .checked_add(2)
+                                .is_none_or(|end| end > table_end)
+                        {
+                            return Err(TrueTypeError::BadTableDirectory);
+                        }
+                        let first_count = usize::from(
+                            read_u16(self.bytes, first_array)
+                                .ok_or(TrueTypeError::BadTableDirectory)?,
+                        );
+                        let second_count = usize::from(
+                            read_u16(self.bytes, second_array)
+                                .ok_or(TrueTypeError::BadTableDirectory)?,
+                        );
+                        if first_count > 128 || second_count > 128 || first_index >= first_count {
+                            return Err(TrueTypeError::TooLarge);
+                        }
+                        let first_record = first_array
+                            .checked_add(
+                                2usize
+                                    .checked_add(
+                                        first_index
+                                            .checked_mul(4)
+                                            .ok_or(TrueTypeError::TooLarge)?,
+                                    )
+                                    .ok_or(TrueTypeError::TooLarge)?,
+                            )
+                            .ok_or(TrueTypeError::TooLarge)?;
+                        if first_record
+                            .checked_add(4)
+                            .is_none_or(|end| end > table_end)
+                            || second_index >= second_count
+                        {
+                            return Err(TrueTypeError::BadTableDirectory);
+                        }
+                        let class = usize::from(
+                            read_u16(self.bytes, first_record)
+                                .ok_or(TrueTypeError::BadTableDirectory)?,
+                        );
+                        if class >= class_count {
+                            return Err(TrueTypeError::TooLarge);
+                        }
+                        let second_record = second_array
+                            .checked_add(
+                                2usize
+                                    .checked_add(
+                                        second_index
+                                            .checked_mul(class_count)
+                                            .and_then(|value| value.checked_add(class))
+                                            .and_then(|value| value.checked_mul(2))
+                                            .ok_or(TrueTypeError::TooLarge)?,
+                                    )
+                                    .ok_or(TrueTypeError::TooLarge)?,
+                            )
+                            .ok_or(TrueTypeError::TooLarge)?;
+                        let first_anchor = first_array
+                            .checked_add(usize::from(
+                                read_u16(self.bytes, first_record + 2)
+                                    .ok_or(TrueTypeError::BadTableDirectory)?,
+                            ))
+                            .ok_or(TrueTypeError::BadTableDirectory)?;
+                        let second_offset = read_u16(self.bytes, second_record)
+                            .ok_or(TrueTypeError::BadTableDirectory)?;
+                        if second_offset == 0 {
+                            continue;
+                        }
+                        let second_anchor = second_array
+                            .checked_add(usize::from(second_offset))
+                            .ok_or(TrueTypeError::BadTableDirectory)?;
+                        let Some((first_x, first_y)) =
+                            gpos_anchor_coordinates(self, first_anchor, ppem, table_end, first)?
+                        else {
+                            continue;
+                        };
+                        let Some((second_x, second_y)) =
+                            gpos_anchor_coordinates(self, second_anchor, ppem, table_end, second)?
+                        else {
+                            continue;
+                        };
+                        return Ok(Some((first_x - second_x, first_y - second_y)));
+                    }
+                }
+            }
+            Ok(None)
+        }
+
+        fn gpos_cursive_adjustment(
+            &self,
+            left: u16,
+            right: u16,
+            script_tag: Option<[u8; 4]>,
+            language_tag: Option<[u8; 4]>,
+            ppem: Option<u16>,
+        ) -> Result<Option<(i32, i32)>, TrueTypeError> {
+            let Some((table, length)) = self.gpos else {
+                return Ok(None);
+            };
+            let table_end = table
+                .checked_add(length)
+                .ok_or(TrueTypeError::BadTableDirectory)?;
+            if length < 10 || table_end > self.bytes.len() {
+                return Err(TrueTypeError::BadTableDirectory);
+            }
+            let feature_base = table
+                .checked_add(usize::from(
+                    read_u16(self.bytes, table + 6).ok_or(TrueTypeError::BadTableDirectory)?,
+                ))
+                .ok_or(TrueTypeError::BadTableDirectory)?;
+            let (feature_indices, feature_index_count, feature_count) =
+                gpos_selected_feature_indices(
+                    self.bytes,
+                    table,
+                    table_end,
+                    script_tag,
+                    language_tag,
+                )?;
+            let lookup_base = table
+                .checked_add(usize::from(
+                    read_u16(self.bytes, table + 8).ok_or(TrueTypeError::BadTableDirectory)?,
+                ))
+                .ok_or(TrueTypeError::BadTableDirectory)?;
+            let lookup_count = usize::from(
+                read_u16(self.bytes, lookup_base).ok_or(TrueTypeError::BadTableDirectory)?,
+            );
+            if lookup_count > 128
+                || feature_base
+                    .checked_add(
+                        2usize
+                            .checked_add(
+                                feature_count
+                                    .checked_mul(6)
+                                    .ok_or(TrueTypeError::TooLarge)?,
+                            )
+                            .ok_or(TrueTypeError::TooLarge)?,
+                    )
+                    .is_none_or(|end| end > table_end)
+                || lookup_base
+                    .checked_add(
+                        2usize
+                            .checked_add(
+                                lookup_count.checked_mul(2).ok_or(TrueTypeError::TooLarge)?,
+                            )
+                            .ok_or(TrueTypeError::TooLarge)?,
+                    )
+                    .is_none_or(|end| end > table_end)
+            {
+                return Err(TrueTypeError::TooLarge);
+            }
+            for feature_index in feature_indices.iter().copied().take(feature_index_count) {
+                let feature_index = usize::from(feature_index);
+                if feature_index >= feature_count {
+                    return Err(TrueTypeError::BadTableDirectory);
+                }
+                let record = feature_base + 2 + feature_index * 6;
+                if self
+                    .bytes
+                    .get(record..record + 4)
+                    .ok_or(TrueTypeError::BadTableDirectory)?
+                    != b"curs"
+                {
+                    continue;
+                }
+                let feature = feature_base
+                    .checked_add(usize::from(
+                        read_u16(self.bytes, record + 4).ok_or(TrueTypeError::BadTableDirectory)?,
+                    ))
+                    .ok_or(TrueTypeError::BadTableDirectory)?;
+                let count = usize::from(
+                    read_u16(self.bytes, feature + 2).ok_or(TrueTypeError::BadTableDirectory)?,
+                );
+                if count > 32
+                    || feature
+                        .checked_add(
+                            4usize
+                                .checked_add(count.checked_mul(2).ok_or(TrueTypeError::TooLarge)?)
+                                .ok_or(TrueTypeError::TooLarge)?,
+                        )
+                        .is_none_or(|end| end > table_end)
+                {
+                    return Err(TrueTypeError::TooLarge);
+                }
+                for item in 0..count {
+                    let selected = usize::from(
+                        read_u16(self.bytes, feature + 4 + item * 2)
+                            .ok_or(TrueTypeError::BadTableDirectory)?,
+                    );
+                    if selected >= lookup_count {
+                        return Err(TrueTypeError::BadTableDirectory);
+                    }
+                    let lookup = lookup_base
+                        .checked_add(usize::from(
+                            read_u16(self.bytes, lookup_base + 2 + selected * 2)
+                                .ok_or(TrueTypeError::BadTableDirectory)?,
+                        ))
+                        .ok_or(TrueTypeError::BadTableDirectory)?;
+                    let Some((is_extension, extension_subtable)) =
+                        gpos_attachment_lookup(self.bytes, lookup, 3, table_end)?
+                    else {
+                        continue;
+                    };
+                    let subtable_count = if is_extension {
+                        1
+                    } else {
+                        usize::from(
+                            read_u16(self.bytes, lookup + 4)
+                                .ok_or(TrueTypeError::BadTableDirectory)?,
+                        )
+                    };
+                    if subtable_count > 32 {
+                        return Err(TrueTypeError::TooLarge);
+                    }
+                    for subtable_index in 0..subtable_count {
+                        let subtable = if is_extension {
+                            extension_subtable
+                        } else {
+                            lookup
+                                .checked_add(usize::from(
+                                    read_u16(self.bytes, lookup + 6 + subtable_index * 2)
+                                        .ok_or(TrueTypeError::BadTableDirectory)?,
+                                ))
+                                .ok_or(TrueTypeError::BadTableDirectory)?
+                        };
+                        if subtable.checked_add(6).is_none_or(|end| end > table_end)
+                            || read_u16(self.bytes, subtable) != Some(1)
+                        {
+                            continue;
+                        }
+                        let coverage = subtable
+                            .checked_add(usize::from(
+                                read_u16(self.bytes, subtable + 2)
+                                    .ok_or(TrueTypeError::BadTableDirectory)?,
+                            ))
+                            .ok_or(TrueTypeError::BadTableDirectory)?;
+                        let Some(left_index) =
+                            gsub_coverage_index(self.bytes, coverage, table_end, left)?
+                        else {
+                            continue;
+                        };
+                        let Some(right_index) =
+                            gsub_coverage_index(self.bytes, coverage, table_end, right)?
+                        else {
+                            continue;
+                        };
+                        let count = usize::from(
+                            read_u16(self.bytes, subtable + 4)
+                                .ok_or(TrueTypeError::BadTableDirectory)?,
+                        );
+                        if count > 128 || left_index >= count || right_index >= count {
+                            return Err(TrueTypeError::TooLarge);
+                        }
+                        let records_end = subtable
+                            .checked_add(
+                                6usize
+                                    .checked_add(
+                                        count.checked_mul(4).ok_or(TrueTypeError::TooLarge)?,
+                                    )
+                                    .ok_or(TrueTypeError::TooLarge)?,
+                            )
+                            .ok_or(TrueTypeError::TooLarge)?;
+                        if records_end > table_end {
+                            return Err(TrueTypeError::BadTableDirectory);
+                        }
+                        let left_record = subtable + 6 + left_index * 4;
+                        let right_record = subtable + 6 + right_index * 4;
+                        let exit_offset = read_u16(self.bytes, left_record + 2)
+                            .ok_or(TrueTypeError::BadTableDirectory)?;
+                        let entry_offset = read_u16(self.bytes, right_record)
+                            .ok_or(TrueTypeError::BadTableDirectory)?;
+                        if exit_offset == 0 || entry_offset == 0 {
+                            continue;
+                        }
+                        let exit = subtable
+                            .checked_add(usize::from(exit_offset))
+                            .ok_or(TrueTypeError::BadTableDirectory)?;
+                        let entry = subtable
+                            .checked_add(usize::from(entry_offset))
+                            .ok_or(TrueTypeError::BadTableDirectory)?;
+                        let Some((exit_x, exit_y)) =
+                            gpos_anchor_coordinates(self, exit, ppem, table_end, left)?
+                        else {
+                            continue;
+                        };
+                        let Some((entry_x, entry_y)) =
+                            gpos_anchor_coordinates(self, entry, ppem, table_end, right)?
+                        else {
+                            continue;
+                        };
+                        return Ok(Some((exit_x - entry_x, exit_y - entry_y)));
+                    }
+                }
+            }
+            Ok(None)
+        }
+
+        fn apply_gpos_adjustments(
+            &self,
+            output: &mut [ShapedGlyph],
+            count: usize,
+            scale: i64,
+            script_tag: Option<[u8; 4]>,
+            language_tag: Option<[u8; 4]>,
+            ppem: Option<u16>,
+        ) -> Result<(), TrueTypeError> {
+            let units = i64::from(self.units_per_em.max(1));
+            for index in 0..count.saturating_sub(1) {
+                let first = output[index].glyph_id;
+                let second = output[index + 1].glyph_id;
+                let Some((x_adjustment, y_adjustment)) = self.gpos_mark_to_mark_adjustment(
+                    first,
+                    second,
+                    script_tag,
+                    language_tag,
+                    ppem,
+                )?
+                else {
+                    continue;
+                };
+                let x_adjustment = (i64::from(x_adjustment) * scale)
+                    .div_euclid(units)
+                    .clamp(i64::from(i32::MIN), i64::from(i32::MAX))
+                    as i32;
+                let y_adjustment = (i64::from(y_adjustment) * scale)
+                    .div_euclid(units)
+                    .clamp(i64::from(i32::MIN), i64::from(i32::MAX))
+                    as i32;
+                output[index + 1].origin.x =
+                    output[index + 1].origin.x.saturating_add(x_adjustment);
+                output[index + 1].origin.y =
+                    output[index + 1].origin.y.saturating_add(y_adjustment);
+            }
+            for index in 0..count.saturating_sub(1) {
+                let left = output[index].glyph_id;
+                let right = output[index + 1].glyph_id;
+                let Some((x_placement, y_placement, x_advance, y_advance)) =
+                    self.gpos_pair_adjustment(left, right, script_tag, language_tag, ppem)?
+                else {
+                    continue;
+                };
+                let x_placement = (i64::from(x_placement) * scale)
+                    .div_euclid(units)
+                    .clamp(i64::from(i32::MIN), i64::from(i32::MAX))
+                    as i32;
+                let y_placement = (i64::from(y_placement) * scale)
+                    .div_euclid(units)
+                    .clamp(i64::from(i32::MIN), i64::from(i32::MAX))
+                    as i32;
+                let x_advance = (i64::from(x_advance) * scale)
+                    .div_euclid(units)
+                    .clamp(i64::from(i32::MIN), i64::from(i32::MAX))
+                    as i32;
+                let y_advance = (i64::from(y_advance) * scale)
+                    .div_euclid(units)
+                    .clamp(i64::from(i32::MIN), i64::from(i32::MAX))
+                    as i32;
+                output[index].origin.x = output[index].origin.x.saturating_add(x_placement);
+                output[index].origin.y = output[index].origin.y.saturating_add(y_placement);
+                output[index].advance = output[index].advance.saturating_add(x_advance);
+                for following in output.iter_mut().take(count).skip(index + 1) {
+                    following.origin.x = following.origin.x.saturating_add(x_advance);
+                    following.origin.y = following.origin.y.saturating_add(y_advance);
+                }
+            }
+            for index in 0..count {
+                let glyph = output[index].glyph_id;
+                let Some((x_placement, y_placement, x_advance, y_advance)) =
+                    self.gpos_pair_adjustment(glyph, u16::MAX, script_tag, language_tag, ppem)?
+                else {
+                    continue;
+                };
+                let x_placement = (i64::from(x_placement) * scale)
+                    .div_euclid(units)
+                    .clamp(i64::from(i32::MIN), i64::from(i32::MAX))
+                    as i32;
+                let y_placement = (i64::from(y_placement) * scale)
+                    .div_euclid(units)
+                    .clamp(i64::from(i32::MIN), i64::from(i32::MAX))
+                    as i32;
+                let x_advance = (i64::from(x_advance) * scale)
+                    .div_euclid(units)
+                    .clamp(i64::from(i32::MIN), i64::from(i32::MAX))
+                    as i32;
+                let y_advance = (i64::from(y_advance) * scale)
+                    .div_euclid(units)
+                    .clamp(i64::from(i32::MIN), i64::from(i32::MAX))
+                    as i32;
+                output[index].origin.x = output[index].origin.x.saturating_add(x_placement);
+                output[index].origin.y = output[index].origin.y.saturating_add(y_placement);
+                output[index].advance = output[index].advance.saturating_add(x_advance);
+                for following in output.iter_mut().take(count).skip(index + 1) {
+                    following.origin.x = following.origin.x.saturating_add(x_advance);
+                    following.origin.y = following.origin.y.saturating_add(y_advance);
+                }
+            }
+            for index in 0..count.saturating_sub(1) {
+                let ligature = output[index].glyph_id;
+                let mark = output[index + 1].glyph_id;
+                let Some((x_adjustment, y_adjustment)) = self.gpos_mark_to_ligature_adjustment(
+                    ligature,
+                    mark,
+                    script_tag,
+                    language_tag,
+                    ppem,
+                )?
+                else {
+                    continue;
+                };
+                let x_adjustment = (i64::from(x_adjustment) * scale)
+                    .div_euclid(units)
+                    .clamp(i64::from(i32::MIN), i64::from(i32::MAX))
+                    as i32;
+                let y_adjustment = (i64::from(y_adjustment) * scale)
+                    .div_euclid(units)
+                    .clamp(i64::from(i32::MIN), i64::from(i32::MAX))
+                    as i32;
+                output[index + 1].origin.x =
+                    output[index + 1].origin.x.saturating_add(x_adjustment);
+                output[index + 1].origin.y =
+                    output[index + 1].origin.y.saturating_add(y_adjustment);
+            }
+            for index in 0..count.saturating_sub(1) {
+                let base = output[index].glyph_id;
+                let mark = output[index + 1].glyph_id;
+                let Some((x_adjustment, y_adjustment)) =
+                    self.gpos_mark_to_base_adjustment(base, mark, script_tag, language_tag, ppem)?
+                else {
+                    continue;
+                };
+                let x_adjustment = (i64::from(x_adjustment) * scale)
+                    .div_euclid(units)
+                    .clamp(i64::from(i32::MIN), i64::from(i32::MAX))
+                    as i32;
+                let y_adjustment = (i64::from(y_adjustment) * scale)
+                    .div_euclid(units)
+                    .clamp(i64::from(i32::MIN), i64::from(i32::MAX))
+                    as i32;
+                output[index + 1].origin.x =
+                    output[index + 1].origin.x.saturating_add(x_adjustment);
+                output[index + 1].origin.y =
+                    output[index + 1].origin.y.saturating_add(y_adjustment);
+            }
+            for index in 0..count.saturating_sub(1) {
+                let left = output[index].glyph_id;
+                let right = output[index + 1].glyph_id;
+                let Some((x_adjustment, y_adjustment)) =
+                    self.gpos_cursive_adjustment(left, right, script_tag, language_tag, ppem)?
+                else {
+                    continue;
+                };
+                let x_adjustment = (i64::from(x_adjustment) * scale)
+                    .div_euclid(units)
+                    .clamp(i64::from(i32::MIN), i64::from(i32::MAX))
+                    as i32;
+                let y_adjustment = (i64::from(y_adjustment) * scale)
+                    .div_euclid(units)
+                    .clamp(i64::from(i32::MIN), i64::from(i32::MAX))
+                    as i32;
+                output[index + 1].origin.x =
+                    output[index + 1].origin.x.saturating_add(x_adjustment);
+                output[index + 1].origin.y =
+                    output[index + 1].origin.y.saturating_add(y_adjustment);
+            }
+            Ok(())
+        }
+
+        /// Apply bounded OpenType liga/rlig substitutions and emit shaped
+        /// glyph IDs with scaled advances. Fonts without those features fall
+        /// back to one glyph per character; malformed tables fail closed.
+        pub fn shape_text_ligatures(
+            &self,
+            text: &str,
+            origin: Point,
+            scale: u16,
+            output: &mut [ShapedGlyph],
+        ) -> Result<usize, TrueTypeError> {
+            self.shape_text_ligatures_with_options(
+                text,
+                origin,
+                scale,
+                TextShapingOptions::default(),
+                output,
+            )
+        }
+
+        /// Apply GSUB and GPOS with an explicit ppem for device deltas.
+        pub fn shape_text_ligatures_with_ppem(
+            &self,
+            text: &str,
+            origin: Point,
+            scale: u16,
+            ppem: u16,
+            output: &mut [ShapedGlyph],
+        ) -> Result<usize, TrueTypeError> {
+            self.shape_text_ligatures_with_options(
+                text,
+                origin,
+                scale,
+                TextShapingOptions {
+                    ppem: Some(ppem),
+                    ..TextShapingOptions::default()
+                },
+                output,
+            )
+        }
+
+        /// Apply GSUB ligatures selected by the default language system of a
+        /// bounded OpenType script record.
+        pub fn shape_text_ligatures_with_script(
+            &self,
+            text: &str,
+            origin: Point,
+            scale: u16,
+            script_tag: [u8; 4],
+            output: &mut [ShapedGlyph],
+        ) -> Result<usize, TrueTypeError> {
+            self.shape_text_ligatures_with_options(
+                text,
+                origin,
+                scale,
+                TextShapingOptions {
+                    script_tag: Some(script_tag),
+                    ..TextShapingOptions::default()
+                },
+                output,
+            )
+        }
+
+        /// Apply script-scoped GSUB and GPOS with an explicit ppem for
+        /// device-table deltas.
+        pub fn shape_text_ligatures_with_script_and_ppem(
+            &self,
+            text: &str,
+            origin: Point,
+            scale: u16,
+            script_tag: [u8; 4],
+            ppem: u16,
+            output: &mut [ShapedGlyph],
+        ) -> Result<usize, TrueTypeError> {
+            self.shape_text_ligatures_with_options(
+                text,
+                origin,
+                scale,
+                TextShapingOptions {
+                    script_tag: Some(script_tag),
+                    ppem: Some(ppem),
+                    ..TextShapingOptions::default()
+                },
+                output,
+            )
+        }
+
+        /// Apply GSUB and GPOS using a named language system within a
+        /// bounded OpenType script record.
+        pub fn shape_text_ligatures_with_script_language(
+            &self,
+            text: &str,
+            origin: Point,
+            scale: u16,
+            script_tag: [u8; 4],
+            language_tag: [u8; 4],
+            output: &mut [ShapedGlyph],
+        ) -> Result<usize, TrueTypeError> {
+            self.shape_text_ligatures_with_options(
+                text,
+                origin,
+                scale,
+                TextShapingOptions {
+                    script_tag: Some(script_tag),
+                    language_tag: Some(language_tag),
+                    ..TextShapingOptions::default()
+                },
+                output,
+            )
+        }
+
+        /// Apply GSUB/GPOS using explicit script, language-system and ppem
+        /// options.
+        pub fn shape_text_ligatures_with_options(
+            &self,
+            text: &str,
+            origin: Point,
+            scale: u16,
+            options: TextShapingOptions,
+            output: &mut [ShapedGlyph],
+        ) -> Result<usize, TrueTypeError> {
+            self.shape_text_ligatures_with_device_ppem(text, origin, scale, options, output)
+        }
+
+        fn shape_text_ligatures_with_device_ppem(
+            &self,
+            text: &str,
+            origin: Point,
+            scale: u16,
+            options: TextShapingOptions,
+            output: &mut [ShapedGlyph],
+        ) -> Result<usize, TrueTypeError> {
+            let mut glyphs = [0u16; 128];
+            let mut characters = ['\0'; 128];
+            let mut input_count = 0usize;
+            for character in text.chars() {
+                if input_count == glyphs.len() {
+                    return Err(TrueTypeError::TooLarge);
+                }
+                glyphs[input_count] = self
+                    .glyph_index(character)
+                    .ok_or(TrueTypeError::UnsupportedGlyph)?;
+                characters[input_count] = character;
+                input_count += 1;
+            }
+            let scale = i64::from(scale.max(1));
+            let units = i64::from(self.units_per_em.max(1));
+            let mut cursor = origin.x;
+            let mut input = 0usize;
+            let mut output_count = 0usize;
+            while input < input_count {
+                if output_count == output.len() {
+                    return Err(TrueTypeError::TooLarge);
+                }
+                let (glyph, consumed) = self.gsub_substitution_pipeline(
+                    &glyphs,
+                    input,
+                    options.script_tag,
+                    options.language_tag,
+                )?;
+                let advance = self
+                    .horizontal_metric(usize::from(glyph))
+                    .ok_or(TrueTypeError::BadTableDirectory)?
+                    .0;
+                let pixels = (i64::from(advance) * scale)
+                    .div_euclid(units)
+                    .clamp(1, i64::from(i32::MAX)) as i32;
+                output[output_count] = ShapedGlyph {
+                    glyph_id: glyph,
+                    source: characters[input],
+                    source_count: u8::try_from(consumed).map_err(|_| TrueTypeError::TooLarge)?,
+                    origin: Point::new(cursor, origin.y),
+                    advance: pixels,
+                };
+                cursor = cursor.saturating_add(pixels);
+                input += consumed;
+                output_count += 1;
+            }
+            self.apply_gpos_adjustments(
+                output,
+                output_count,
+                scale,
+                options.script_tag,
+                options.language_tag,
+                options.ppem,
+            )?;
+            Ok(output_count)
+        }
+
+        /// Apply GSUB ligatures while deriving advances from bounded gvar
+        /// phantom metrics at the supplied normalized coordinates.
+        pub fn shape_text_ligatures_with_variation(
+            &self,
+            text: &str,
+            origin: Point,
+            scale: u16,
+            normalized_coordinates: &[i16],
+            output: &mut [ShapedGlyph],
+        ) -> Result<usize, TrueTypeError> {
+            let mut glyphs = [0u16; 128];
+            let mut characters = ['\0'; 128];
+            let mut input_count = 0usize;
+            for character in text.chars() {
+                if input_count == glyphs.len() {
+                    return Err(TrueTypeError::TooLarge);
+                }
+                glyphs[input_count] = self
+                    .glyph_index(character)
+                    .ok_or(TrueTypeError::UnsupportedGlyph)?;
+                characters[input_count] = character;
+                input_count += 1;
+            }
+            let scale = i64::from(scale.max(1));
+            let units = i64::from(self.units_per_em.max(1));
+            let mut cursor = origin.x;
+            let mut input = 0usize;
+            let mut output_count = 0usize;
+            while input < input_count {
+                if output_count == output.len() {
+                    return Err(TrueTypeError::TooLarge);
+                }
+                let (glyph, consumed) =
+                    self.gsub_substitution_pipeline(&glyphs, input, None, None)?;
+                let advance =
+                    self.advance_width_glyph_with_variation(glyph, normalized_coordinates)?;
+                let pixels = (i64::from(advance) * scale)
+                    .div_euclid(units)
+                    .clamp(1, i64::from(i32::MAX)) as i32;
+                output[output_count] = ShapedGlyph {
+                    glyph_id: glyph,
+                    source: characters[input],
+                    source_count: u8::try_from(consumed).map_err(|_| TrueTypeError::TooLarge)?,
+                    origin: Point::new(cursor, origin.y),
+                    advance: pixels,
+                };
+                cursor = cursor.saturating_add(pixels);
+                input += consumed;
+                output_count += 1;
+            }
+            self.apply_gpos_adjustments(output, output_count, scale, None, None, None)?;
+            Ok(output_count)
+        }
+
+        /// Shape and rasterize one bounded single-line run, preserving GSUB
+        /// glyph IDs through the outline pipeline.
+        pub fn render_shaped_text(
+            &self,
+            text: &str,
+            origin: Point,
+            scale: u16,
+            color: Color,
+            renderer: &mut Renderer<'_, '_>,
+        ) -> Result<usize, TrueTypeError> {
+            let mut shaped = [ShapedGlyph {
+                glyph_id: 0,
+                source: '\0',
+                source_count: 0,
+                origin: Point::new(0, 0),
+                advance: 0,
+            }; 128];
+            let count = self.shape_text_ligatures(text, origin, scale, &mut shaped)?;
+            for glyph in shaped.iter().take(count) {
+                self.render_glyph_id(glyph.glyph_id, glyph.origin, scale, color, renderer)?;
+            }
+            Ok(count)
+        }
+
+        /// Shape and rasterize with normalized variation coordinates carried
+        /// through both metrics and direct glyph-ID outlines.
+        pub fn render_shaped_text_with_variation(
+            &self,
+            text: &str,
+            origin: Point,
+            scale: u16,
+            normalized_coordinates: &[i16],
+            color: Color,
+            renderer: &mut Renderer<'_, '_>,
+        ) -> Result<usize, TrueTypeError> {
+            let mut shaped = [ShapedGlyph {
+                glyph_id: 0,
+                source: '\0',
+                source_count: 0,
+                origin: Point::new(0, 0),
+                advance: 0,
+            }; 128];
+            let count = self.shape_text_ligatures_with_variation(
+                text,
+                origin,
+                scale,
+                normalized_coordinates,
+                &mut shaped,
+            )?;
+            for glyph in shaped.iter().take(count) {
+                self.render_glyph_id_with_variation(
+                    glyph.glyph_id,
+                    glyph.origin,
+                    scale,
+                    normalized_coordinates,
+                    color,
+                    renderer,
+                )?;
+            }
+            Ok(count)
+        }
+
+        /// Lay out text with explicit newline and character-wrap handling.
+        /// The caller supplies the line height and maximum width in pixels.
+        pub fn layout_text_box(
+            &self,
+            text: &str,
+            origin: Point,
+            max_width: i32,
+            line_height: i32,
+            scale: u16,
+            output: &mut [GlyphPlacement],
+        ) -> Result<usize, TrueTypeError> {
+            if max_width <= 0 || line_height <= 0 {
+                return Err(TrueTypeError::BadTableDirectory);
+            }
+            let scale = i64::from(scale.max(1));
+            let units = i64::from(self.units_per_em.max(1));
+            let right = origin.x.saturating_add(max_width);
+            let mut cursor_x = origin.x;
+            let mut cursor_y = origin.y;
+            let mut previous = None;
+            let mut count = 0;
+            for character in text.chars() {
+                if character == '\n' {
+                    cursor_x = origin.x;
+                    cursor_y = cursor_y.saturating_add(line_height);
+                    previous = None;
+                    continue;
+                }
+                let advance = self
+                    .advance_width(character)
+                    .ok_or(TrueTypeError::UnsupportedGlyph)?;
+                let pixels = (i64::from(advance) * scale)
+                    .div_euclid(units)
+                    .clamp(1, i64::from(i32::MAX)) as i32;
+                let kern_pixels = previous
+                    .and_then(|left| self.kerning(left, character))
+                    .map(|kern| {
+                        ((i64::from(kern) * scale).div_euclid(units))
+                            .clamp(i64::from(i32::MIN), i64::from(i32::MAX))
+                            as i32
+                    })
+                    .unwrap_or(0);
+                let proposed = cursor_x.saturating_add(kern_pixels);
+                if proposed != origin.x && proposed.saturating_add(pixels) > right {
+                    cursor_x = origin.x;
+                    cursor_y = cursor_y.saturating_add(line_height);
+                } else {
+                    cursor_x = proposed;
+                }
+                if count >= output.len() {
+                    return Err(TrueTypeError::TooLarge);
+                }
+                output[count] = GlyphPlacement {
+                    character,
+                    origin: Point::new(cursor_x, cursor_y),
+                    advance: pixels,
+                };
+                cursor_x = cursor_x.saturating_add(pixels);
+                previous = Some(character);
+                count += 1;
+            }
+            Ok(count)
+        }
+
+        /// Lay out text without splitting words at spaces. A word wider than
+        /// the box is kept intact, matching bounded terminal-style behavior.
+        pub fn layout_text_word_box(
+            &self,
+            text: &str,
+            origin: Point,
+            max_width: i32,
+            line_height: i32,
+            scale: u16,
+            output: &mut [GlyphPlacement],
+        ) -> Result<usize, TrueTypeError> {
+            if max_width <= 0 || line_height <= 0 {
+                return Err(TrueTypeError::BadTableDirectory);
+            }
+            let scale = i64::from(scale.max(1));
+            let units = i64::from(self.units_per_em.max(1));
+            let right = origin.x.saturating_add(max_width);
+            let mut cursor_x = origin.x;
+            let mut cursor_y = origin.y;
+            let mut previous = None;
+            let mut count = 0;
+            let mut offset = 0;
+            while offset < text.len() {
+                let character = text[offset..]
+                    .chars()
+                    .next()
+                    .ok_or(TrueTypeError::BadTableDirectory)?;
+                let character_len = character.len_utf8();
+                if character == '\n' {
+                    cursor_x = origin.x;
+                    cursor_y = cursor_y.saturating_add(line_height);
+                    previous = None;
+                    offset += character_len;
+                    continue;
+                }
+                if character == ' ' {
+                    let advance = self
+                        .advance_width(character)
+                        .ok_or(TrueTypeError::UnsupportedGlyph)?;
+                    let pixels = (i64::from(advance) * scale)
+                        .div_euclid(units)
+                        .clamp(1, i64::from(i32::MAX)) as i32;
+                    if cursor_x != origin.x && cursor_x.saturating_add(pixels) > right {
+                        cursor_x = origin.x;
+                        cursor_y = cursor_y.saturating_add(line_height);
+                        previous = None;
+                    } else {
+                        if count >= output.len() {
+                            return Err(TrueTypeError::TooLarge);
+                        }
+                        output[count] = GlyphPlacement {
+                            character,
+                            origin: Point::new(cursor_x, cursor_y),
+                            advance: pixels,
+                        };
+                        cursor_x = cursor_x.saturating_add(pixels);
+                        previous = Some(character);
+                        count += 1;
+                    }
+                    offset += character_len;
+                    continue;
+                }
+                let word_start = offset;
+                let mut word_end = offset;
+                let mut word_width = 0i32;
+                let mut word_previous = None;
+                while word_end < text.len() {
+                    let word_character = text[word_end..]
+                        .chars()
+                        .next()
+                        .ok_or(TrueTypeError::BadTableDirectory)?;
+                    if word_character == ' ' || word_character == '\n' {
+                        break;
+                    }
+                    let advance = self
+                        .advance_width(word_character)
+                        .ok_or(TrueTypeError::UnsupportedGlyph)?;
+                    if let Some(left) = word_previous
+                        && let Some(kern) = self.kerning(left, word_character)
+                    {
+                        word_width = word_width.saturating_add(
+                            ((i64::from(kern) * scale).div_euclid(units))
+                                .clamp(i64::from(i32::MIN), i64::from(i32::MAX))
+                                as i32,
+                        );
+                    }
+                    word_width = word_width.saturating_add(
+                        ((i64::from(advance) * scale).div_euclid(units))
+                            .clamp(1, i64::from(i32::MAX)) as i32,
+                    );
+                    word_previous = Some(word_character);
+                    word_end += word_character.len_utf8();
+                }
+                if cursor_x != origin.x && cursor_x.saturating_add(word_width) > right {
+                    cursor_x = origin.x;
+                    cursor_y = cursor_y.saturating_add(line_height);
+                    previous = None;
+                }
+                while offset < word_end {
+                    let word_character = text[offset..]
+                        .chars()
+                        .next()
+                        .ok_or(TrueTypeError::BadTableDirectory)?;
+                    let advance = self
+                        .advance_width(word_character)
+                        .ok_or(TrueTypeError::UnsupportedGlyph)?;
+                    let kern_pixels = previous
+                        .and_then(|left| self.kerning(left, word_character))
+                        .map(|kern| {
+                            ((i64::from(kern) * scale).div_euclid(units))
+                                .clamp(i64::from(i32::MIN), i64::from(i32::MAX))
+                                as i32
+                        })
+                        .unwrap_or(0);
+                    cursor_x = cursor_x.saturating_add(kern_pixels);
+                    let pixels = ((i64::from(advance) * scale).div_euclid(units))
+                        .clamp(1, i64::from(i32::MAX)) as i32;
+                    if count >= output.len() {
+                        return Err(TrueTypeError::TooLarge);
+                    }
+                    output[count] = GlyphPlacement {
+                        character: word_character,
+                        origin: Point::new(cursor_x, cursor_y),
+                        advance: pixels,
+                    };
+                    cursor_x = cursor_x.saturating_add(pixels);
+                    previous = Some(word_character);
+                    count += 1;
+                    offset += word_character.len_utf8();
+                }
+                if word_start == word_end {
+                    return Err(TrueTypeError::BadTableDirectory);
+                }
+            }
+            Ok(count)
+        }
+
+        /// Lay out and rasterize a single-line string through the bounded
+        /// antialiased glyph renderer.
+        pub fn render_text(
+            &self,
+            text: &str,
+            origin: Point,
+            scale: u16,
+            color: Color,
+            renderer: &mut Renderer<'_, '_>,
+        ) -> Result<usize, TrueTypeError> {
+            let mut placements = [GlyphPlacement {
+                character: '\0',
+                origin: Point::new(0, 0),
+                advance: 0,
+            }; 128];
+            let count = self.layout_text(text, origin, scale, &mut placements)?;
+            for placement in placements.iter().take(count) {
+                self.render_glyph(
+                    placement.character,
+                    placement.origin,
+                    scale,
+                    color,
+                    renderer,
+                )?;
+            }
+            Ok(count)
+        }
+
+        /// Render a single-line string, falling back to the shared bitmap
+        /// font when this face does not map or cannot outline a character.
+        /// `bitmap_scale` is independently bounded by the bitmap renderer.
+        pub fn render_text_with_bitmap_fallback(
+            &self,
+            text: &str,
+            origin: Point,
+            scale: u16,
+            bitmap_scale: usize,
+            color: Color,
+            renderer: &mut Renderer<'_, '_>,
+        ) -> Result<usize, TrueTypeError> {
+            let outline_scale = i64::from(scale.max(1));
+            let units = i64::from(self.units_per_em.max(1));
+            let mut cursor_x = origin.x;
+            let mut count = 0;
+            for character in text.chars() {
+                if character == '\n' {
+                    return Err(TrueTypeError::TooLarge);
+                }
+                let mut encoded = [0u8; 4];
+                let encoded = character.encode_utf8(&mut encoded);
+                let advance = self.advance_width(character);
+                let mut used_outline = false;
+                if advance.is_some() && self.glyph_index(character).is_some() {
+                    match self.render_glyph(
+                        character,
+                        Point::new(cursor_x, origin.y),
+                        scale,
+                        color,
+                        renderer,
+                    ) {
+                        Ok(_) => used_outline = true,
+                        Err(TrueTypeError::UnsupportedGlyph) => {}
+                        Err(error) => return Err(error),
+                    }
+                }
+                if used_outline {
+                    let pixels = (i64::from(advance.unwrap_or(0)) * outline_scale)
+                        .div_euclid(units)
+                        .clamp(1, i64::from(i32::MAX)) as i32;
+                    cursor_x = cursor_x.saturating_add(pixels);
+                } else {
+                    renderer.text_scaled(cursor_x, origin.y, encoded, color, bitmap_scale);
+                    cursor_x = cursor_x.saturating_add(
+                        crate::font::ADVANCE.saturating_mul(bitmap_scale.clamp(1, 16) as i32),
+                    );
+                }
+                count += 1;
+            }
+            Ok(count)
+        }
+
+        /// Return the glyph ID selected by the validated format-4 cmap.
+        /// Non-BMP code points and unmapped values return `None`.
+        pub fn glyph_index(&self, character: char) -> Option<u16> {
+            let code = u32::from(character);
+            if let Some((base, length)) = self.cmap12 {
+                let groups = usize::try_from(read_u32(self.bytes, base + 12)?).ok()?;
+                let groups_end = base.checked_add(16)?.checked_add(groups.checked_mul(12)?)?;
+                if length >= 16 && groups_end <= base.checked_add(length)? {
+                    for group in 0..groups {
+                        let entry = base + 16 + group * 12;
+                        let start = read_u32(self.bytes, entry)?;
+                        let end = read_u32(self.bytes, entry + 4)?;
+                        if code < start {
+                            break;
+                        }
+                        if code <= end {
+                            let glyph =
+                                read_u32(self.bytes, entry + 8)?.checked_add(code - start)?;
+                            return u16::try_from(glyph)
+                                .ok()
+                                .filter(|glyph| *glyph < self.glyph_count);
+                        }
+                    }
+                }
+            }
+            if code > u32::from(u16::MAX) {
+                return None;
+            }
+            let code = code as u16;
+            let (base, cmap4_length) = self.cmap4?;
+            let segment_count = usize::from(read_u16(self.bytes, base + 6)?) / 2;
+            let end_codes = base.checked_add(14)?;
+            let reserved_pad = end_codes.checked_add(segment_count.checked_mul(2)?)?;
+            if reserved_pad.checked_add(2)? > base + cmap4_length {
+                return None;
+            }
+            let start_codes = reserved_pad + 2;
+            let deltas = start_codes.checked_add(segment_count.checked_mul(2)?)?;
+            let range_offsets = deltas.checked_add(segment_count.checked_mul(2)?)?;
+            for segment in 0..segment_count {
+                let end = read_u16(self.bytes, end_codes + segment * 2)?;
+                if code > end {
+                    continue;
+                }
+                let start = read_u16(self.bytes, start_codes + segment * 2)?;
+                if code < start {
+                    return None;
+                }
+                let delta = read_i16(self.bytes, deltas + segment * 2)?;
+                let range = read_u16(self.bytes, range_offsets + segment * 2)?;
+                let glyph = if range == 0 {
+                    code.wrapping_add(delta as u16)
+                } else {
+                    let location = range_offsets
+                        .checked_add(segment * 2)?
+                        .checked_add(usize::from(range))?
+                        .checked_add(usize::from(code - start) * 2)?;
+                    let raw = read_u16(self.bytes, location)?;
+                    if raw == 0 {
+                        0
+                    } else {
+                        raw.wrapping_add(delta as u16)
+                    }
+                };
+                return (glyph < self.glyph_count).then_some(glyph);
+            }
+            None
+        }
+
+        pub const fn table_span(&self) -> (usize, usize) {
+            (self.cmap_offset, self.cmap_length)
+        }
+    }
+
+    fn read_u16(bytes: &[u8], offset: usize) -> Option<u16> {
+        Some(u16::from_be_bytes([
+            *bytes.get(offset)?,
+            *bytes.get(offset + 1)?,
+        ]))
+    }
+
+    fn read_i16(bytes: &[u8], offset: usize) -> Option<i16> {
+        Some(i16::from_be_bytes([
+            *bytes.get(offset)?,
+            *bytes.get(offset + 1)?,
+        ]))
+    }
+
+    fn read_i32(bytes: &[u8], offset: usize) -> Option<i32> {
+        Some(i32::from_be_bytes([
+            *bytes.get(offset)?,
+            *bytes.get(offset + 1)?,
+            *bytes.get(offset + 2)?,
+            *bytes.get(offset + 3)?,
+        ]))
+    }
+
+    fn read_u32(bytes: &[u8], offset: usize) -> Option<u32> {
+        Some(u32::from_be_bytes([
+            *bytes.get(offset)?,
+            *bytes.get(offset + 1)?,
+            *bytes.get(offset + 2)?,
+            *bytes.get(offset + 3)?,
+        ]))
+    }
+
+    fn layout_lang_sys(
+        bytes: &[u8],
+        script_table: usize,
+        language_tag: Option<[u8; 4]>,
+        table_end: usize,
+    ) -> Result<Option<usize>, TrueTypeError> {
+        if script_table
+            .checked_add(4)
+            .is_none_or(|end| end > table_end)
+        {
+            return Err(TrueTypeError::BadTableDirectory);
+        }
+        let default_offset =
+            usize::from(read_u16(bytes, script_table).ok_or(TrueTypeError::BadTableDirectory)?);
+        let language_count =
+            usize::from(read_u16(bytes, script_table + 2).ok_or(TrueTypeError::BadTableDirectory)?);
+        if language_count > 32
+            || script_table
+                .checked_add(
+                    4usize
+                        .checked_add(
+                            language_count
+                                .checked_mul(6)
+                                .ok_or(TrueTypeError::TooLarge)?,
+                        )
+                        .ok_or(TrueTypeError::TooLarge)?,
+                )
+                .is_none_or(|end| end > table_end)
+        {
+            return Err(TrueTypeError::TooLarge);
+        }
+        let language_offset = if let Some(language_tag) = language_tag {
+            let mut selected = None;
+            for index in 0..language_count {
+                let record = script_table + 4 + index * 6;
+                if bytes
+                    .get(record..record + 4)
+                    .ok_or(TrueTypeError::BadTableDirectory)?
+                    == language_tag
+                {
+                    selected = Some(usize::from(
+                        read_u16(bytes, record + 4).ok_or(TrueTypeError::BadTableDirectory)?,
+                    ));
+                    break;
+                }
+            }
+            let Some(selected) = selected else {
+                return Ok(None);
+            };
+            selected
+        } else {
+            if default_offset == 0 {
+                return Ok(None);
+            }
+            default_offset
+        };
+        let lang_sys = script_table
+            .checked_add(language_offset)
+            .ok_or(TrueTypeError::BadTableDirectory)?;
+        if lang_sys.checked_add(6).is_none_or(|end| end > table_end) {
+            return Err(TrueTypeError::BadTableDirectory);
+        }
+        Ok(Some(lang_sys))
+    }
+
+    fn gsub_single_lookup(
+        bytes: &[u8],
+        lookup_table: usize,
+        glyph: u16,
+        table_end: usize,
+    ) -> Result<Option<u16>, TrueTypeError> {
+        if lookup_table
+            .checked_add(6)
+            .is_none_or(|end| end > table_end)
+        {
+            return Err(TrueTypeError::BadTableDirectory);
+        }
+        if read_u16(bytes, lookup_table) != Some(1) {
+            return Ok(None);
+        }
+        let count =
+            usize::from(read_u16(bytes, lookup_table + 4).ok_or(TrueTypeError::BadTableDirectory)?);
+        if count > 32
+            || lookup_table
+                .checked_add(
+                    6usize
+                        .checked_add(count.checked_mul(2).ok_or(TrueTypeError::TooLarge)?)
+                        .ok_or(TrueTypeError::TooLarge)?,
+                )
+                .is_none_or(|end| end > table_end)
+        {
+            return Err(TrueTypeError::TooLarge);
+        }
+        for index in 0..count {
+            let subtable = lookup_table
+                .checked_add(usize::from(
+                    read_u16(bytes, lookup_table + 6 + index * 2)
+                        .ok_or(TrueTypeError::BadTableDirectory)?,
+                ))
+                .ok_or(TrueTypeError::BadTableDirectory)?;
+            if subtable.checked_add(6).is_none_or(|end| end > table_end) {
+                return Err(TrueTypeError::BadTableDirectory);
+            }
+            let format = read_u16(bytes, subtable).ok_or(TrueTypeError::BadTableDirectory)?;
+            let coverage = subtable
+                .checked_add(usize::from(
+                    read_u16(bytes, subtable + 2).ok_or(TrueTypeError::BadTableDirectory)?,
+                ))
+                .ok_or(TrueTypeError::BadTableDirectory)?;
+            let Some(coverage_index) = gsub_coverage_index(bytes, coverage, table_end, glyph)?
+            else {
+                continue;
+            };
+            let substitute = match format {
+                1 => {
+                    let delta = i32::from(
+                        read_i16(bytes, subtable + 4).ok_or(TrueTypeError::BadTableDirectory)?,
+                    );
+                    let value = i32::from(glyph) + delta;
+                    u16::try_from(value).map_err(|_| TrueTypeError::BadTableDirectory)?
+                }
+                2 => {
+                    let count = usize::from(
+                        read_u16(bytes, subtable + 4).ok_or(TrueTypeError::BadTableDirectory)?,
+                    );
+                    if count > 128 || coverage_index >= count {
+                        return Err(TrueTypeError::TooLarge);
+                    }
+                    let end = subtable
+                        .checked_add(
+                            6usize
+                                .checked_add(count.checked_mul(2).ok_or(TrueTypeError::TooLarge)?)
+                                .ok_or(TrueTypeError::TooLarge)?,
+                        )
+                        .ok_or(TrueTypeError::TooLarge)?;
+                    if end > table_end {
+                        return Err(TrueTypeError::BadTableDirectory);
+                    }
+                    read_u16(bytes, subtable + 6 + coverage_index * 2)
+                        .ok_or(TrueTypeError::BadTableDirectory)?
+                }
+                _ => return Err(TrueTypeError::UnsupportedCmap),
+            };
+            return Ok(Some(substitute));
+        }
+        Ok(None)
+    }
+
+    fn gsub_single_subtable(
+        bytes: &[u8],
+        subtable: usize,
+        glyph: u16,
+        table_end: usize,
+    ) -> Result<Option<u16>, TrueTypeError> {
+        if subtable.checked_add(6).is_none_or(|end| end > table_end) {
+            return Err(TrueTypeError::BadTableDirectory);
+        }
+        let format = read_u16(bytes, subtable).ok_or(TrueTypeError::BadTableDirectory)?;
+        let coverage = subtable
+            .checked_add(usize::from(
+                read_u16(bytes, subtable + 2).ok_or(TrueTypeError::BadTableDirectory)?,
+            ))
+            .ok_or(TrueTypeError::BadTableDirectory)?;
+        let Some(coverage_index) = gsub_coverage_index(bytes, coverage, table_end, glyph)? else {
+            return Ok(None);
+        };
+        match format {
+            1 => {
+                let delta = i32::from(
+                    read_i16(bytes, subtable + 4).ok_or(TrueTypeError::BadTableDirectory)?,
+                );
+                let substitute = i32::from(glyph) + delta;
+                Ok(Some(
+                    u16::try_from(substitute).map_err(|_| TrueTypeError::BadTableDirectory)?,
+                ))
+            }
+            2 => {
+                let count = usize::from(
+                    read_u16(bytes, subtable + 4).ok_or(TrueTypeError::BadTableDirectory)?,
+                );
+                if count > 128 || coverage_index >= count {
+                    return Err(TrueTypeError::TooLarge);
+                }
+                let end = subtable
+                    .checked_add(
+                        6usize
+                            .checked_add(count.checked_mul(2).ok_or(TrueTypeError::TooLarge)?)
+                            .ok_or(TrueTypeError::TooLarge)?,
+                    )
+                    .ok_or(TrueTypeError::TooLarge)?;
+                if end > table_end {
+                    return Err(TrueTypeError::BadTableDirectory);
+                }
+                Ok(Some(
+                    read_u16(bytes, subtable + 6 + coverage_index * 2)
+                        .ok_or(TrueTypeError::BadTableDirectory)?,
+                ))
+            }
+            _ => Ok(None),
+        }
+    }
+
+    fn gsub_ligature_subtable(
+        bytes: &[u8],
+        subtable: usize,
+        glyphs: &[u16],
+        position: usize,
+        table_end: usize,
+    ) -> Result<Option<(u16, usize)>, TrueTypeError> {
+        if subtable.checked_add(6).is_none_or(|end| end > table_end)
+            || read_u16(bytes, subtable) != Some(1)
+        {
+            return Ok(None);
+        }
+        let coverage = subtable
+            .checked_add(usize::from(
+                read_u16(bytes, subtable + 2).ok_or(TrueTypeError::BadTableDirectory)?,
+            ))
+            .ok_or(TrueTypeError::BadTableDirectory)?;
+        let Some(coverage_index) =
+            gsub_coverage_index(bytes, coverage, table_end, glyphs[position])?
+        else {
+            return Ok(None);
+        };
+        let set_count =
+            usize::from(read_u16(bytes, subtable + 4).ok_or(TrueTypeError::BadTableDirectory)?);
+        if coverage_index >= set_count
+            || set_count > 128
+            || subtable
+                .checked_add(
+                    6usize
+                        .checked_add(set_count.checked_mul(2).ok_or(TrueTypeError::TooLarge)?)
+                        .ok_or(TrueTypeError::TooLarge)?,
+                )
+                .is_none_or(|end| end > table_end)
+        {
+            return Err(TrueTypeError::TooLarge);
+        }
+        let set = subtable
+            .checked_add(usize::from(
+                read_u16(bytes, subtable + 6 + coverage_index * 2)
+                    .ok_or(TrueTypeError::BadTableDirectory)?,
+            ))
+            .ok_or(TrueTypeError::BadTableDirectory)?;
+        if set.checked_add(2).is_none_or(|end| end > table_end) {
+            return Err(TrueTypeError::BadTableDirectory);
+        }
+        let ligature_count =
+            usize::from(read_u16(bytes, set).ok_or(TrueTypeError::BadTableDirectory)?);
+        if ligature_count > 64
+            || set
+                .checked_add(
+                    2usize
+                        .checked_add(
+                            ligature_count
+                                .checked_mul(2)
+                                .ok_or(TrueTypeError::TooLarge)?,
+                        )
+                        .ok_or(TrueTypeError::TooLarge)?,
+                )
+                .is_none_or(|end| end > table_end)
+        {
+            return Err(TrueTypeError::TooLarge);
+        }
+        for ligature_index in 0..ligature_count {
+            let ligature = set
+                .checked_add(usize::from(
+                    read_u16(bytes, set + 2 + ligature_index * 2)
+                        .ok_or(TrueTypeError::BadTableDirectory)?,
+                ))
+                .ok_or(TrueTypeError::BadTableDirectory)?;
+            if ligature.checked_add(4).is_none_or(|end| end > table_end) {
+                return Err(TrueTypeError::BadTableDirectory);
+            }
+            let ligature_glyph =
+                read_u16(bytes, ligature).ok_or(TrueTypeError::BadTableDirectory)?;
+            let component_count =
+                usize::from(read_u16(bytes, ligature + 2).ok_or(TrueTypeError::BadTableDirectory)?);
+            let component_bytes = (component_count.saturating_sub(1))
+                .checked_mul(2)
+                .ok_or(TrueTypeError::TooLarge)?;
+            if !(2..=32).contains(&component_count)
+                || ligature
+                    .checked_add(
+                        4usize
+                            .checked_add(component_bytes)
+                            .ok_or(TrueTypeError::TooLarge)?,
+                    )
+                    .is_none_or(|end| end > table_end)
+            {
+                return Err(TrueTypeError::TooLarge);
+            }
+            let Some(end_position) = position.checked_add(component_count) else {
+                return Err(TrueTypeError::TooLarge);
+            };
+            if end_position > glyphs.len() {
+                continue;
+            }
+            let mut matches = true;
+            for component in 1..component_count {
+                if read_u16(bytes, ligature + 4 + (component - 1) * 2)
+                    != Some(glyphs[position + component])
+                {
+                    matches = false;
+                    break;
+                }
+            }
+            if matches {
+                return Ok(Some((ligature_glyph, component_count)));
+            }
+        }
+        Ok(None)
+    }
+
+    fn gsub_chaining_class_substitution(
+        bytes: &[u8],
+        lookup_table: usize,
+        lookup_base: usize,
+        glyphs: &[u16],
+        position: usize,
+        table_end: usize,
+        extension: Option<(usize, u16)>,
+    ) -> Result<Option<u16>, TrueTypeError> {
+        if lookup_table
+            .checked_add(6)
+            .is_none_or(|end| end > table_end)
+            || (extension.is_none() && read_u16(bytes, lookup_table) != Some(6))
+        {
+            return Ok(None);
+        }
+        let lookup_count =
+            usize::from(read_u16(bytes, lookup_base).ok_or(TrueTypeError::BadTableDirectory)?);
+        let subtable_count = if extension.is_some() {
+            1
+        } else {
+            usize::from(read_u16(bytes, lookup_table + 4).ok_or(TrueTypeError::BadTableDirectory)?)
+        };
+        if lookup_count > 128 || subtable_count > 32 {
+            return Err(TrueTypeError::TooLarge);
+        }
+        let lookup_end = lookup_base
+            .checked_add(
+                2usize
+                    .checked_add(lookup_count.checked_mul(2).ok_or(TrueTypeError::TooLarge)?)
+                    .ok_or(TrueTypeError::TooLarge)?,
+            )
+            .ok_or(TrueTypeError::TooLarge)?;
+        let subtable_end = if let Some((subtable, _)) = extension {
+            subtable.checked_add(2).ok_or(TrueTypeError::TooLarge)?
+        } else {
+            lookup_table
+                .checked_add(
+                    6usize
+                        .checked_add(
+                            subtable_count
+                                .checked_mul(2)
+                                .ok_or(TrueTypeError::TooLarge)?,
+                        )
+                        .ok_or(TrueTypeError::TooLarge)?,
+                )
+                .ok_or(TrueTypeError::TooLarge)?
+        };
+        if lookup_end > table_end || subtable_end > table_end {
+            return Err(TrueTypeError::BadTableDirectory);
+        }
+        for subtable_index in 0..subtable_count {
+            let subtable = if let Some((subtable, _)) = extension {
+                subtable
+            } else {
+                lookup_table
+                    .checked_add(usize::from(
+                        read_u16(bytes, lookup_table + 6 + subtable_index * 2)
+                            .ok_or(TrueTypeError::BadTableDirectory)?,
+                    ))
+                    .ok_or(TrueTypeError::BadTableDirectory)?
+            };
+            if subtable.checked_add(12).is_none_or(|end| end > table_end)
+                || extension.is_some_and(|(_, kind)| kind != 6)
+                || read_u16(bytes, subtable) != Some(2)
+            {
+                continue;
+            }
+            let coverage = subtable
+                .checked_add(usize::from(
+                    read_u16(bytes, subtable + 2).ok_or(TrueTypeError::BadTableDirectory)?,
+                ))
+                .ok_or(TrueTypeError::BadTableDirectory)?;
+            if gsub_coverage_index(bytes, coverage, table_end, glyphs[position])?.is_none() {
+                continue;
+            }
+            let backtrack_definition = subtable
+                .checked_add(usize::from(
+                    read_u16(bytes, subtable + 4).ok_or(TrueTypeError::BadTableDirectory)?,
+                ))
+                .ok_or(TrueTypeError::BadTableDirectory)?;
+            let input_definition = subtable
+                .checked_add(usize::from(
+                    read_u16(bytes, subtable + 6).ok_or(TrueTypeError::BadTableDirectory)?,
+                ))
+                .ok_or(TrueTypeError::BadTableDirectory)?;
+            let lookahead_definition = subtable
+                .checked_add(usize::from(
+                    read_u16(bytes, subtable + 8).ok_or(TrueTypeError::BadTableDirectory)?,
+                ))
+                .ok_or(TrueTypeError::BadTableDirectory)?;
+            let class_set_count = usize::from(
+                read_u16(bytes, subtable + 10).ok_or(TrueTypeError::BadTableDirectory)?,
+            );
+            if class_set_count > 128
+                || subtable
+                    .checked_add(
+                        12usize
+                            .checked_add(
+                                class_set_count
+                                    .checked_mul(2)
+                                    .ok_or(TrueTypeError::TooLarge)?,
+                            )
+                            .ok_or(TrueTypeError::TooLarge)?,
+                    )
+                    .is_none_or(|end| end > table_end)
+            {
+                return Err(TrueTypeError::TooLarge);
+            }
+            let current_class = usize::from(gpos_class_index(
+                bytes,
+                input_definition,
+                glyphs[position],
+                table_end,
+            )?);
+            if current_class >= class_set_count {
+                continue;
+            }
+            let class_set_offset = usize::from(
+                read_u16(bytes, subtable + 12 + current_class * 2)
+                    .ok_or(TrueTypeError::BadTableDirectory)?,
+            );
+            if class_set_offset == 0 {
+                continue;
+            }
+            let class_set = subtable
+                .checked_add(class_set_offset)
+                .ok_or(TrueTypeError::BadTableDirectory)?;
+            if class_set.checked_add(2).is_none_or(|end| end > table_end) {
+                return Err(TrueTypeError::BadTableDirectory);
+            }
+            let rule_count =
+                usize::from(read_u16(bytes, class_set).ok_or(TrueTypeError::BadTableDirectory)?);
+            if rule_count > 64
+                || class_set
+                    .checked_add(
+                        2usize
+                            .checked_add(rule_count.checked_mul(2).ok_or(TrueTypeError::TooLarge)?)
+                            .ok_or(TrueTypeError::TooLarge)?,
+                    )
+                    .is_none_or(|end| end > table_end)
+            {
+                return Err(TrueTypeError::TooLarge);
+            }
+            for rule_index in 0..rule_count {
+                let rule = class_set
+                    .checked_add(usize::from(
+                        read_u16(bytes, class_set + 2 + rule_index * 2)
+                            .ok_or(TrueTypeError::BadTableDirectory)?,
+                    ))
+                    .ok_or(TrueTypeError::BadTableDirectory)?;
+                let mut cursor = rule;
+                let backtrack_count =
+                    usize::from(read_u16(bytes, cursor).ok_or(TrueTypeError::BadTableDirectory)?);
+                cursor += 2;
+                if backtrack_count > 16
+                    || cursor
+                        .checked_add(
+                            backtrack_count
+                                .checked_mul(2)
+                                .ok_or(TrueTypeError::TooLarge)?,
+                        )
+                        .is_none_or(|end| end > table_end)
+                {
+                    return Err(TrueTypeError::TooLarge);
+                }
+                let backtrack_start = cursor;
+                cursor += backtrack_count * 2;
+                let mut matches = true;
+                for index in 0..backtrack_count {
+                    let Some(glyph_position) = position.checked_sub(index + 1) else {
+                        matches = false;
+                        break;
+                    };
+                    let expected = read_u16(bytes, backtrack_start + index * 2)
+                        .ok_or(TrueTypeError::BadTableDirectory)?;
+                    if usize::from(gpos_class_index(
+                        bytes,
+                        backtrack_definition,
+                        glyphs[glyph_position],
+                        table_end,
+                    )?) != usize::from(expected)
+                    {
+                        matches = false;
+                        break;
+                    }
+                }
+                if !matches {
+                    continue;
+                }
+                let input_count =
+                    usize::from(read_u16(bytes, cursor).ok_or(TrueTypeError::BadTableDirectory)?);
+                cursor += 2;
+                if !(1..=16).contains(&input_count)
+                    || position
+                        .checked_add(input_count)
+                        .is_none_or(|end| end > glyphs.len())
+                {
+                    return Err(TrueTypeError::TooLarge);
+                }
+                for index in 1..input_count {
+                    let expected = read_u16(bytes, cursor + (index - 1) * 2)
+                        .ok_or(TrueTypeError::BadTableDirectory)?;
+                    let actual = gpos_class_index(
+                        bytes,
+                        input_definition,
+                        glyphs[position + index],
+                        table_end,
+                    )?;
+                    if actual != expected {
+                        matches = false;
+                        break;
+                    }
+                }
+                cursor = cursor
+                    .checked_add(
+                        (input_count - 1)
+                            .checked_mul(2)
+                            .ok_or(TrueTypeError::TooLarge)?,
+                    )
+                    .ok_or(TrueTypeError::TooLarge)?;
+                if !matches {
+                    continue;
+                }
+                let lookahead_count =
+                    usize::from(read_u16(bytes, cursor).ok_or(TrueTypeError::BadTableDirectory)?);
+                cursor += 2;
+                if lookahead_count > 16 {
+                    return Err(TrueTypeError::TooLarge);
+                }
+                for index in 0..lookahead_count {
+                    let Some(glyph_position) = position
+                        .checked_add(input_count)
+                        .and_then(|value| value.checked_add(index))
+                    else {
+                        matches = false;
+                        break;
+                    };
+                    if glyph_position >= glyphs.len() {
+                        matches = false;
+                        break;
+                    }
+                    let expected = read_u16(bytes, cursor + index * 2)
+                        .ok_or(TrueTypeError::BadTableDirectory)?;
+                    let actual = gpos_class_index(
+                        bytes,
+                        lookahead_definition,
+                        glyphs[glyph_position],
+                        table_end,
+                    )?;
+                    if actual != expected {
+                        matches = false;
+                        break;
+                    }
+                }
+                cursor = cursor
+                    .checked_add(
+                        lookahead_count
+                            .checked_mul(2)
+                            .ok_or(TrueTypeError::TooLarge)?,
+                    )
+                    .ok_or(TrueTypeError::TooLarge)?;
+                if !matches {
+                    continue;
+                }
+                let substitution_count =
+                    usize::from(read_u16(bytes, cursor).ok_or(TrueTypeError::BadTableDirectory)?);
+                cursor += 2;
+                if substitution_count > 16
+                    || cursor
+                        .checked_add(
+                            substitution_count
+                                .checked_mul(4)
+                                .ok_or(TrueTypeError::TooLarge)?,
+                        )
+                        .is_none_or(|end| end > table_end)
+                {
+                    return Err(TrueTypeError::TooLarge);
+                }
+                for index in 0..substitution_count {
+                    let record = cursor + index * 4;
+                    let sequence_index = usize::from(
+                        read_u16(bytes, record).ok_or(TrueTypeError::BadTableDirectory)?,
+                    );
+                    let nested_lookup = usize::from(
+                        read_u16(bytes, record + 2).ok_or(TrueTypeError::BadTableDirectory)?,
+                    );
+                    if sequence_index != 0 || nested_lookup >= lookup_count {
+                        continue;
+                    }
+                    let nested_table = lookup_base
+                        .checked_add(usize::from(
+                            read_u16(bytes, lookup_base + 2 + nested_lookup * 2)
+                                .ok_or(TrueTypeError::BadTableDirectory)?,
+                        ))
+                        .ok_or(TrueTypeError::BadTableDirectory)?;
+                    if let Some(substitute) =
+                        gsub_single_lookup(bytes, nested_table, glyphs[position], table_end)?
+                    {
+                        return Ok(Some(substitute));
+                    }
+                }
+            }
+        }
+        Ok(None)
+    }
+
+    fn gsub_contextual_class_substitution(
+        bytes: &[u8],
+        lookup_table: usize,
+        lookup_base: usize,
+        glyphs: &[u16],
+        position: usize,
+        table_end: usize,
+        extension: Option<(usize, u16)>,
+    ) -> Result<Option<u16>, TrueTypeError> {
+        if lookup_table
+            .checked_add(6)
+            .is_none_or(|end| end > table_end)
+            || (extension.is_none() && read_u16(bytes, lookup_table) != Some(5))
+        {
+            return Ok(None);
+        }
+        let lookup_count =
+            usize::from(read_u16(bytes, lookup_base).ok_or(TrueTypeError::BadTableDirectory)?);
+        let subtable_count = if extension.is_some() {
+            1
+        } else {
+            usize::from(read_u16(bytes, lookup_table + 4).ok_or(TrueTypeError::BadTableDirectory)?)
+        };
+        if lookup_count > 128 || subtable_count > 32 {
+            return Err(TrueTypeError::TooLarge);
+        }
+        let lookup_end = lookup_base
+            .checked_add(
+                2usize
+                    .checked_add(lookup_count.checked_mul(2).ok_or(TrueTypeError::TooLarge)?)
+                    .ok_or(TrueTypeError::TooLarge)?,
+            )
+            .ok_or(TrueTypeError::TooLarge)?;
+        let subtable_end = if let Some((subtable, _)) = extension {
+            subtable.checked_add(2).ok_or(TrueTypeError::TooLarge)?
+        } else {
+            lookup_table
+                .checked_add(
+                    6usize
+                        .checked_add(
+                            subtable_count
+                                .checked_mul(2)
+                                .ok_or(TrueTypeError::TooLarge)?,
+                        )
+                        .ok_or(TrueTypeError::TooLarge)?,
+                )
+                .ok_or(TrueTypeError::TooLarge)?
+        };
+        if lookup_end > table_end || subtable_end > table_end {
+            return Err(TrueTypeError::BadTableDirectory);
+        }
+        for subtable_index in 0..subtable_count {
+            let subtable = if let Some((subtable, _)) = extension {
+                subtable
+            } else {
+                lookup_table
+                    .checked_add(usize::from(
+                        read_u16(bytes, lookup_table + 6 + subtable_index * 2)
+                            .ok_or(TrueTypeError::BadTableDirectory)?,
+                    ))
+                    .ok_or(TrueTypeError::BadTableDirectory)?
+            };
+            if subtable.checked_add(8).is_none_or(|end| end > table_end)
+                || extension.is_some_and(|(_, kind)| kind != 5)
+                || read_u16(bytes, subtable) != Some(2)
+            {
+                continue;
+            }
+            let coverage = subtable
+                .checked_add(usize::from(
+                    read_u16(bytes, subtable + 2).ok_or(TrueTypeError::BadTableDirectory)?,
+                ))
+                .ok_or(TrueTypeError::BadTableDirectory)?;
+            if gsub_coverage_index(bytes, coverage, table_end, glyphs[position])?.is_none() {
+                continue;
+            }
+            let class_definition = subtable
+                .checked_add(usize::from(
+                    read_u16(bytes, subtable + 4).ok_or(TrueTypeError::BadTableDirectory)?,
+                ))
+                .ok_or(TrueTypeError::BadTableDirectory)?;
+            let class_set_count =
+                usize::from(read_u16(bytes, subtable + 6).ok_or(TrueTypeError::BadTableDirectory)?);
+            if class_set_count > 128
+                || subtable
+                    .checked_add(
+                        8usize
+                            .checked_add(
+                                class_set_count
+                                    .checked_mul(2)
+                                    .ok_or(TrueTypeError::TooLarge)?,
+                            )
+                            .ok_or(TrueTypeError::TooLarge)?,
+                    )
+                    .is_none_or(|end| end > table_end)
+            {
+                return Err(TrueTypeError::TooLarge);
+            }
+            let class = usize::from(gpos_class_index(
+                bytes,
+                class_definition,
+                glyphs[position],
+                table_end,
+            )?);
+            if class >= class_set_count {
+                continue;
+            }
+            let class_set_offset = usize::from(
+                read_u16(bytes, subtable + 8 + class * 2)
+                    .ok_or(TrueTypeError::BadTableDirectory)?,
+            );
+            if class_set_offset == 0 {
+                continue;
+            }
+            let class_set = subtable
+                .checked_add(class_set_offset)
+                .ok_or(TrueTypeError::BadTableDirectory)?;
+            if class_set.checked_add(2).is_none_or(|end| end > table_end) {
+                return Err(TrueTypeError::BadTableDirectory);
+            }
+            let rule_count =
+                usize::from(read_u16(bytes, class_set).ok_or(TrueTypeError::BadTableDirectory)?);
+            if rule_count > 64
+                || class_set
+                    .checked_add(
+                        2usize
+                            .checked_add(rule_count.checked_mul(2).ok_or(TrueTypeError::TooLarge)?)
+                            .ok_or(TrueTypeError::TooLarge)?,
+                    )
+                    .is_none_or(|end| end > table_end)
+            {
+                return Err(TrueTypeError::TooLarge);
+            }
+            for rule_index in 0..rule_count {
+                let rule = class_set
+                    .checked_add(usize::from(
+                        read_u16(bytes, class_set + 2 + rule_index * 2)
+                            .ok_or(TrueTypeError::BadTableDirectory)?,
+                    ))
+                    .ok_or(TrueTypeError::BadTableDirectory)?;
+                if rule.checked_add(4).is_none_or(|end| end > table_end) {
+                    return Err(TrueTypeError::BadTableDirectory);
+                }
+                let glyph_count =
+                    usize::from(read_u16(bytes, rule).ok_or(TrueTypeError::BadTableDirectory)?);
+                let substitution_count =
+                    usize::from(read_u16(bytes, rule + 2).ok_or(TrueTypeError::BadTableDirectory)?);
+                if !(1..=16).contains(&glyph_count) || substitution_count > 16 {
+                    return Err(TrueTypeError::TooLarge);
+                }
+                let input_classes = rule + 4;
+                let records = input_classes
+                    .checked_add(
+                        (glyph_count - 1)
+                            .checked_mul(2)
+                            .ok_or(TrueTypeError::TooLarge)?,
+                    )
+                    .ok_or(TrueTypeError::TooLarge)?;
+                let rule_end = records
+                    .checked_add(
+                        substitution_count
+                            .checked_mul(4)
+                            .ok_or(TrueTypeError::TooLarge)?,
+                    )
+                    .ok_or(TrueTypeError::TooLarge)?;
+                if rule_end > table_end
+                    || position
+                        .checked_add(glyph_count)
+                        .is_none_or(|end| end > glyphs.len())
+                {
+                    return Err(TrueTypeError::BadTableDirectory);
+                }
+                let mut matches = true;
+                for input_index in 1..glyph_count {
+                    let expected = read_u16(bytes, input_classes + (input_index - 1) * 2)
+                        .ok_or(TrueTypeError::BadTableDirectory)?;
+                    let actual = gpos_class_index(
+                        bytes,
+                        class_definition,
+                        glyphs[position + input_index],
+                        table_end,
+                    )?;
+                    if actual != expected {
+                        matches = false;
+                        break;
+                    }
+                }
+                if !matches {
+                    continue;
+                }
+                for substitution_index in 0..substitution_count {
+                    let record = records + substitution_index * 4;
+                    let sequence_index = usize::from(
+                        read_u16(bytes, record).ok_or(TrueTypeError::BadTableDirectory)?,
+                    );
+                    let nested_lookup = usize::from(
+                        read_u16(bytes, record + 2).ok_or(TrueTypeError::BadTableDirectory)?,
+                    );
+                    if sequence_index != 0 || nested_lookup >= lookup_count {
+                        continue;
+                    }
+                    let nested_table = lookup_base
+                        .checked_add(usize::from(
+                            read_u16(bytes, lookup_base + 2 + nested_lookup * 2)
+                                .ok_or(TrueTypeError::BadTableDirectory)?,
+                        ))
+                        .ok_or(TrueTypeError::BadTableDirectory)?;
+                    if let Some(substitute) =
+                        gsub_single_lookup(bytes, nested_table, glyphs[position], table_end)?
+                    {
+                        return Ok(Some(substitute));
+                    }
+                }
+            }
+        }
+        Ok(None)
+    }
+
+    fn gsub_contextual_substitution(
+        bytes: &[u8],
+        lookup_table: usize,
+        lookup_base: usize,
+        glyphs: &[u16],
+        position: usize,
+        table_end: usize,
+        extension: Option<(usize, u16)>,
+    ) -> Result<Option<u16>, TrueTypeError> {
+        if lookup_table
+            .checked_add(6)
+            .is_none_or(|end| end > table_end)
+            || (extension.is_none()
+                && read_u16(bytes, lookup_table) != Some(5)
+                && read_u16(bytes, lookup_table) != Some(6))
+        {
+            return Ok(None);
+        }
+        let lookup_count =
+            usize::from(read_u16(bytes, lookup_base).ok_or(TrueTypeError::BadTableDirectory)?);
+        let subtable_count = if extension.is_some() {
+            1
+        } else {
+            usize::from(read_u16(bytes, lookup_table + 4).ok_or(TrueTypeError::BadTableDirectory)?)
+        };
+        if lookup_count > 128 || subtable_count > 32 {
+            return Err(TrueTypeError::TooLarge);
+        }
+        let lookup_end = lookup_base
+            .checked_add(
+                2usize
+                    .checked_add(lookup_count.checked_mul(2).ok_or(TrueTypeError::TooLarge)?)
+                    .ok_or(TrueTypeError::TooLarge)?,
+            )
+            .ok_or(TrueTypeError::TooLarge)?;
+        let subtable_end = if let Some((subtable, _)) = extension {
+            subtable.checked_add(2).ok_or(TrueTypeError::TooLarge)?
+        } else {
+            lookup_table
+                .checked_add(
+                    6usize
+                        .checked_add(
+                            subtable_count
+                                .checked_mul(2)
+                                .ok_or(TrueTypeError::TooLarge)?,
+                        )
+                        .ok_or(TrueTypeError::TooLarge)?,
+                )
+                .ok_or(TrueTypeError::TooLarge)?
+        };
+        if lookup_end > table_end || subtable_end > table_end {
+            return Err(TrueTypeError::BadTableDirectory);
+        }
+        for subtable_index in 0..subtable_count {
+            let subtable = if let Some((subtable, _)) = extension {
+                subtable
+            } else {
+                lookup_table
+                    .checked_add(usize::from(
+                        read_u16(bytes, lookup_table + 6 + subtable_index * 2)
+                            .ok_or(TrueTypeError::BadTableDirectory)?,
+                    ))
+                    .ok_or(TrueTypeError::BadTableDirectory)?
+            };
+            let expected_type = if let Some((_, extension_type)) = extension {
+                extension_type
+            } else {
+                read_u16(bytes, lookup_table).unwrap_or(0)
+            };
+            if subtable.checked_add(2).is_none_or(|end| end > table_end)
+                || expected_type != 5 && expected_type != 6
+                || read_u16(bytes, subtable) != Some(3)
+            {
+                continue;
+            }
+            let mut cursor = subtable + 2;
+            let backtrack_count =
+                usize::from(read_u16(bytes, cursor).ok_or(TrueTypeError::BadTableDirectory)?);
+            cursor += 2;
+            if backtrack_count > 16 {
+                return Err(TrueTypeError::TooLarge);
+            }
+            let backtrack_start = cursor;
+            cursor = cursor
+                .checked_add(
+                    backtrack_count
+                        .checked_mul(2)
+                        .ok_or(TrueTypeError::TooLarge)?,
+                )
+                .ok_or(TrueTypeError::TooLarge)?;
+            let input_count =
+                usize::from(read_u16(bytes, cursor).ok_or(TrueTypeError::BadTableDirectory)?);
+            cursor += 2;
+            if !(1..=16).contains(&input_count) {
+                return Err(TrueTypeError::TooLarge);
+            }
+            let input_start = cursor;
+            cursor = cursor
+                .checked_add(input_count.checked_mul(2).ok_or(TrueTypeError::TooLarge)?)
+                .ok_or(TrueTypeError::TooLarge)?;
+            let lookahead_count =
+                usize::from(read_u16(bytes, cursor).ok_or(TrueTypeError::BadTableDirectory)?);
+            cursor += 2;
+            if lookahead_count > 16 {
+                return Err(TrueTypeError::TooLarge);
+            }
+            let lookahead_start = cursor;
+            cursor = cursor
+                .checked_add(
+                    lookahead_count
+                        .checked_mul(2)
+                        .ok_or(TrueTypeError::TooLarge)?,
+                )
+                .ok_or(TrueTypeError::TooLarge)?;
+            let record_count =
+                usize::from(read_u16(bytes, cursor).ok_or(TrueTypeError::BadTableDirectory)?);
+            cursor += 2;
+            if record_count > 16
+                || cursor
+                    .checked_add(record_count.checked_mul(4).ok_or(TrueTypeError::TooLarge)?)
+                    .is_none_or(|end| end > table_end)
+            {
+                return Err(TrueTypeError::TooLarge);
+            }
+            let mut matches = true;
+            for index in 0..backtrack_count {
+                let Some(glyph_position) = position.checked_sub(index + 1) else {
+                    matches = false;
+                    break;
+                };
+                let coverage = subtable
+                    .checked_add(usize::from(
+                        read_u16(bytes, backtrack_start + index * 2)
+                            .ok_or(TrueTypeError::BadTableDirectory)?,
+                    ))
+                    .ok_or(TrueTypeError::BadTableDirectory)?;
+                if gsub_coverage_index(bytes, coverage, table_end, glyphs[glyph_position])?
+                    .is_none()
+                {
+                    matches = false;
+                    break;
+                }
+            }
+            if !matches {
+                continue;
+            }
+            if position
+                .checked_add(input_count)
+                .is_none_or(|end| end > glyphs.len())
+            {
+                continue;
+            }
+            matches = true;
+            for index in 0..input_count {
+                let coverage = subtable
+                    .checked_add(usize::from(
+                        read_u16(bytes, input_start + index * 2)
+                            .ok_or(TrueTypeError::BadTableDirectory)?,
+                    ))
+                    .ok_or(TrueTypeError::BadTableDirectory)?;
+                if gsub_coverage_index(bytes, coverage, table_end, glyphs[position + index])?
+                    .is_none()
+                {
+                    matches = false;
+                    break;
+                }
+            }
+            if !matches {
+                continue;
+            }
+            for index in 0..lookahead_count {
+                let Some(glyph_position) = position
+                    .checked_add(input_count)
+                    .and_then(|value| value.checked_add(index))
+                else {
+                    matches = false;
+                    break;
+                };
+                if glyph_position >= glyphs.len() {
+                    matches = false;
+                    break;
+                }
+                let coverage = subtable
+                    .checked_add(usize::from(
+                        read_u16(bytes, lookahead_start + index * 2)
+                            .ok_or(TrueTypeError::BadTableDirectory)?,
+                    ))
+                    .ok_or(TrueTypeError::BadTableDirectory)?;
+                if gsub_coverage_index(bytes, coverage, table_end, glyphs[glyph_position])?
+                    .is_none()
+                {
+                    matches = false;
+                    break;
+                }
+            }
+            if !matches {
+                continue;
+            }
+            let record_count_start = cursor - 2;
+            for index in 0..record_count {
+                let record = record_count_start + 2 + index * 4;
+                let sequence_index =
+                    usize::from(read_u16(bytes, record).ok_or(TrueTypeError::BadTableDirectory)?);
+                let nested_lookup = usize::from(
+                    read_u16(bytes, record + 2).ok_or(TrueTypeError::BadTableDirectory)?,
+                );
+                if sequence_index != 0 || nested_lookup >= lookup_count {
+                    continue;
+                }
+                let nested_table = lookup_base
+                    .checked_add(usize::from(
+                        read_u16(bytes, lookup_base + 2 + nested_lookup * 2)
+                            .ok_or(TrueTypeError::BadTableDirectory)?,
+                    ))
+                    .ok_or(TrueTypeError::BadTableDirectory)?;
+                if let Some(substitute) =
+                    gsub_single_lookup(bytes, nested_table, glyphs[position], table_end)?
+                {
+                    return Ok(Some(substitute));
+                }
+            }
+        }
+        Ok(None)
+    }
+
+    fn gsub_coverage_index(
+        bytes: &[u8],
+        coverage: usize,
+        table_end: usize,
+        glyph: u16,
+    ) -> Result<Option<usize>, TrueTypeError> {
+        let format = read_u16(bytes, coverage).ok_or(TrueTypeError::BadTableDirectory)?;
+        match format {
+            1 => {
+                let count = usize::from(
+                    read_u16(bytes, coverage + 2).ok_or(TrueTypeError::BadTableDirectory)?,
+                );
+                let end = coverage
+                    .checked_add(
+                        4usize
+                            .checked_add(count.checked_mul(2).ok_or(TrueTypeError::TooLarge)?)
+                            .ok_or(TrueTypeError::TooLarge)?,
+                    )
+                    .ok_or(TrueTypeError::TooLarge)?;
+                if count > 128 || end > table_end {
+                    return Err(TrueTypeError::TooLarge);
+                }
+                for index in 0..count {
+                    if read_u16(bytes, coverage + 4 + index * 2) == Some(glyph) {
+                        return Ok(Some(index));
+                    }
+                }
+                Ok(None)
+            }
+            2 => {
+                let count = usize::from(
+                    read_u16(bytes, coverage + 2).ok_or(TrueTypeError::BadTableDirectory)?,
+                );
+                let end = coverage
+                    .checked_add(
+                        4usize
+                            .checked_add(count.checked_mul(6).ok_or(TrueTypeError::TooLarge)?)
+                            .ok_or(TrueTypeError::TooLarge)?,
+                    )
+                    .ok_or(TrueTypeError::TooLarge)?;
+                if count > 128 || end > table_end {
+                    return Err(TrueTypeError::TooLarge);
+                }
+                let glyph = u32::from(glyph);
+                for index in 0..count {
+                    let range = coverage + 4 + index * 6;
+                    let start =
+                        u32::from(read_u16(bytes, range).ok_or(TrueTypeError::BadTableDirectory)?);
+                    let end_glyph = u32::from(
+                        read_u16(bytes, range + 2).ok_or(TrueTypeError::BadTableDirectory)?,
+                    );
+                    if (start..=end_glyph).contains(&glyph) {
+                        let first = usize::from(
+                            read_u16(bytes, range + 4).ok_or(TrueTypeError::BadTableDirectory)?,
+                        );
+                        return Ok(first.checked_add(
+                            usize::try_from(glyph - start).map_err(|_| TrueTypeError::TooLarge)?,
+                        ));
+                    }
+                }
+                Ok(None)
+            }
+            _ => Err(TrueTypeError::UnsupportedCmap),
+        }
+    }
+
+    fn gpos_selected_feature_indices(
+        bytes: &[u8],
+        table: usize,
+        table_end: usize,
+        script_tag: Option<[u8; 4]>,
+        language_tag: Option<[u8; 4]>,
+    ) -> Result<([u16; 64], usize, usize), TrueTypeError> {
+        let feature_base = table
+            .checked_add(usize::from(
+                read_u16(bytes, table + 6).ok_or(TrueTypeError::BadTableDirectory)?,
+            ))
+            .ok_or(TrueTypeError::BadTableDirectory)?;
+        if feature_base
+            .checked_add(2)
+            .is_none_or(|end| end > table_end)
+        {
+            return Err(TrueTypeError::BadTableDirectory);
+        }
+        let feature_count =
+            usize::from(read_u16(bytes, feature_base).ok_or(TrueTypeError::BadTableDirectory)?);
+        if feature_count > 64
+            || feature_base
+                .checked_add(
+                    2usize
+                        .checked_add(
+                            feature_count
+                                .checked_mul(6)
+                                .ok_or(TrueTypeError::TooLarge)?,
+                        )
+                        .ok_or(TrueTypeError::TooLarge)?,
+                )
+                .is_none_or(|end| end > table_end)
+        {
+            return Err(TrueTypeError::TooLarge);
+        }
+        let mut indices = [0u16; 64];
+        let mut count = 0usize;
+        if let Some(script_tag) = script_tag {
+            let script_offset =
+                usize::from(read_u16(bytes, table + 4).ok_or(TrueTypeError::BadTableDirectory)?);
+            if script_offset == 0 {
+                return Ok((indices, 0, feature_count));
+            }
+            let script_list = table
+                .checked_add(script_offset)
+                .ok_or(TrueTypeError::BadTableDirectory)?;
+            if script_list.checked_add(2).is_none_or(|end| end > table_end) {
+                return Err(TrueTypeError::BadTableDirectory);
+            }
+            let script_count =
+                usize::from(read_u16(bytes, script_list).ok_or(TrueTypeError::BadTableDirectory)?);
+            if script_count > 32
+                || script_list
+                    .checked_add(
+                        2usize
+                            .checked_add(
+                                script_count.checked_mul(6).ok_or(TrueTypeError::TooLarge)?,
+                            )
+                            .ok_or(TrueTypeError::TooLarge)?,
+                    )
+                    .is_none_or(|end| end > table_end)
+            {
+                return Err(TrueTypeError::TooLarge);
+            }
+            let mut selected_script = None;
+            for item in 0..script_count {
+                let record = script_list + 2 + item * 6;
+                if bytes
+                    .get(record..record + 4)
+                    .ok_or(TrueTypeError::BadTableDirectory)?
+                    == script_tag
+                {
+                    selected_script = Some(
+                        script_list
+                            .checked_add(usize::from(
+                                read_u16(bytes, record + 4)
+                                    .ok_or(TrueTypeError::BadTableDirectory)?,
+                            ))
+                            .ok_or(TrueTypeError::BadTableDirectory)?,
+                    );
+                    break;
+                }
+            }
+            let Some(script_table) = selected_script else {
+                return Ok((indices, 0, feature_count));
+            };
+            let Some(lang_sys) = layout_lang_sys(bytes, script_table, language_tag, table_end)?
+            else {
+                return Ok((indices, 0, feature_count));
+            };
+            let required = read_u16(bytes, lang_sys + 2).ok_or(TrueTypeError::BadTableDirectory)?;
+            let lang_count =
+                usize::from(read_u16(bytes, lang_sys + 4).ok_or(TrueTypeError::BadTableDirectory)?);
+            if lang_count > 63
+                || lang_sys
+                    .checked_add(
+                        6usize
+                            .checked_add(lang_count.checked_mul(2).ok_or(TrueTypeError::TooLarge)?)
+                            .ok_or(TrueTypeError::TooLarge)?,
+                    )
+                    .is_none_or(|end| end > table_end)
+            {
+                return Err(TrueTypeError::TooLarge);
+            }
+            if required != u16::MAX {
+                indices[count] = required;
+                count += 1;
+            }
+            for item in 0..lang_count {
+                indices[count] = read_u16(bytes, lang_sys + 6 + item * 2)
+                    .ok_or(TrueTypeError::BadTableDirectory)?;
+                count += 1;
+            }
+        } else {
+            for item in 0..feature_count {
+                indices[count] = u16::try_from(item).map_err(|_| TrueTypeError::TooLarge)?;
+                count += 1;
+            }
+        }
+        Ok((indices, count, feature_count))
+    }
+
+    fn gpos_attachment_lookup(
+        bytes: &[u8],
+        lookup: usize,
+        expected_type: u16,
+        table_end: usize,
+    ) -> Result<Option<(bool, usize)>, TrueTypeError> {
+        if lookup.checked_add(8).is_none_or(|end| end > table_end) {
+            return Err(TrueTypeError::BadTableDirectory);
+        }
+        let lookup_type = read_u16(bytes, lookup).ok_or(TrueTypeError::BadTableDirectory)?;
+        if lookup_type == expected_type {
+            return Ok(Some((false, lookup)));
+        }
+        if lookup_type != 9 {
+            return Ok(None);
+        }
+        let extension = lookup
+            .checked_add(usize::from(
+                read_u16(bytes, lookup + 6).ok_or(TrueTypeError::BadTableDirectory)?,
+            ))
+            .ok_or(TrueTypeError::BadTableDirectory)?;
+        if extension.checked_add(8).is_none_or(|end| end > table_end) {
+            return Err(TrueTypeError::BadTableDirectory);
+        }
+        if read_u16(bytes, extension) != Some(1)
+            || read_u16(bytes, extension + 2) != Some(expected_type)
+        {
+            return Ok(None);
+        }
+        let nested = extension
+            .checked_add(
+                usize::try_from(
+                    read_u32(bytes, extension + 4).ok_or(TrueTypeError::BadTableDirectory)?,
+                )
+                .map_err(|_| TrueTypeError::TooLarge)?,
+            )
+            .ok_or(TrueTypeError::BadTableDirectory)?;
+        if nested.checked_add(6).is_none_or(|end| end > table_end) {
+            return Err(TrueTypeError::BadTableDirectory);
+        }
+        Ok(Some((true, nested)))
+    }
+
+    #[derive(Clone, Copy)]
+    struct GposContextOptions {
+        script_tag: Option<[u8; 4]>,
+        language_tag: Option<[u8; 4]>,
+        ppem: Option<u16>,
+    }
+
+    fn gpos_contextual_single_adjustment(
+        bytes: &[u8],
+        table: usize,
+        table_end: usize,
+        left: u16,
+        right: u16,
+        options: GposContextOptions,
+    ) -> Result<Option<(i32, i32, i32, i32)>, TrueTypeError> {
+        let (feature_indices, feature_index_count, feature_count) = gpos_selected_feature_indices(
+            bytes,
+            table,
+            table_end,
+            options.script_tag,
+            options.language_tag,
+        )?;
+        let lookup_base = table
+            .checked_add(usize::from(
+                read_u16(bytes, table + 8).ok_or(TrueTypeError::BadTableDirectory)?,
+            ))
+            .ok_or(TrueTypeError::BadTableDirectory)?;
+        let lookup_count =
+            usize::from(read_u16(bytes, lookup_base).ok_or(TrueTypeError::BadTableDirectory)?);
+        if lookup_count > 128
+            || lookup_base
+                .checked_add(
+                    2usize
+                        .checked_add(lookup_count.checked_mul(2).ok_or(TrueTypeError::TooLarge)?)
+                        .ok_or(TrueTypeError::TooLarge)?,
+                )
+                .is_none_or(|end| end > table_end)
+        {
+            return Err(TrueTypeError::TooLarge);
+        }
+        for feature_index in feature_indices.iter().copied().take(feature_index_count) {
+            let feature_index = usize::from(feature_index);
+            if feature_index >= feature_count {
+                return Err(TrueTypeError::BadTableDirectory);
+            }
+            let feature_record = table
+                .checked_add(usize::from(
+                    read_u16(bytes, table + 6).ok_or(TrueTypeError::BadTableDirectory)?,
+                ))
+                .and_then(|base| base.checked_add(2 + feature_index * 6))
+                .ok_or(TrueTypeError::BadTableDirectory)?;
+            let feature_base = feature_record
+                .checked_sub(2 + feature_index * 6)
+                .ok_or(TrueTypeError::BadTableDirectory)?;
+            let feature = feature_base
+                .checked_add(usize::from(
+                    read_u16(bytes, feature_record + 4).ok_or(TrueTypeError::BadTableDirectory)?,
+                ))
+                .ok_or(TrueTypeError::BadTableDirectory)?;
+            if feature.checked_add(4).is_none_or(|end| end > table_end) {
+                return Err(TrueTypeError::BadTableDirectory);
+            }
+            let lookup_total =
+                usize::from(read_u16(bytes, feature + 2).ok_or(TrueTypeError::BadTableDirectory)?);
+            if lookup_total > 32
+                || feature
+                    .checked_add(
+                        4usize
+                            .checked_add(
+                                lookup_total.checked_mul(2).ok_or(TrueTypeError::TooLarge)?,
+                            )
+                            .ok_or(TrueTypeError::TooLarge)?,
+                    )
+                    .is_none_or(|end| end > table_end)
+            {
+                return Err(TrueTypeError::TooLarge);
+            }
+            for item in 0..lookup_total {
+                let selected = usize::from(
+                    read_u16(bytes, feature + 4 + item * 2)
+                        .ok_or(TrueTypeError::BadTableDirectory)?,
+                );
+                if selected >= lookup_count {
+                    return Err(TrueTypeError::BadTableDirectory);
+                }
+                let lookup = lookup_base
+                    .checked_add(usize::from(
+                        read_u16(bytes, lookup_base + 2 + selected * 2)
+                            .ok_or(TrueTypeError::BadTableDirectory)?,
+                    ))
+                    .ok_or(TrueTypeError::BadTableDirectory)?;
+                if lookup.checked_add(6).is_none_or(|end| end > table_end)
+                    || read_u16(bytes, lookup) != Some(7)
+                {
+                    continue;
+                }
+                let subtable_count = usize::from(
+                    read_u16(bytes, lookup + 4).ok_or(TrueTypeError::BadTableDirectory)?,
+                );
+                if subtable_count > 32 {
+                    return Err(TrueTypeError::TooLarge);
+                }
+                for subtable_index in 0..subtable_count {
+                    let subtable = lookup
+                        .checked_add(usize::from(
+                            read_u16(bytes, lookup + 6 + subtable_index * 2)
+                                .ok_or(TrueTypeError::BadTableDirectory)?,
+                        ))
+                        .ok_or(TrueTypeError::BadTableDirectory)?;
+                    if subtable.checked_add(4).is_none_or(|end| end > table_end)
+                        || read_u16(bytes, subtable) != Some(3)
+                    {
+                        continue;
+                    }
+                    let backtrack_count = usize::from(
+                        read_u16(bytes, subtable + 2).ok_or(TrueTypeError::BadTableDirectory)?,
+                    );
+                    if backtrack_count != 0 {
+                        continue;
+                    }
+                    let input_count_offset = subtable
+                        .checked_add(4)
+                        .ok_or(TrueTypeError::BadTableDirectory)?;
+                    let input_count = usize::from(
+                        read_u16(bytes, input_count_offset)
+                            .ok_or(TrueTypeError::BadTableDirectory)?,
+                    );
+                    if input_count != 2 {
+                        continue;
+                    }
+                    let input_offsets = input_count_offset
+                        .checked_add(2)
+                        .ok_or(TrueTypeError::BadTableDirectory)?;
+                    let lookahead_count_offset = input_offsets
+                        .checked_add(input_count * 2)
+                        .ok_or(TrueTypeError::BadTableDirectory)?;
+                    let lookahead_count = usize::from(
+                        read_u16(bytes, lookahead_count_offset)
+                            .ok_or(TrueTypeError::BadTableDirectory)?,
+                    );
+                    if lookahead_count != 0 {
+                        continue;
+                    }
+                    let record_count_offset = lookahead_count_offset
+                        .checked_add(2)
+                        .ok_or(TrueTypeError::BadTableDirectory)?;
+                    let record_count = usize::from(
+                        read_u16(bytes, record_count_offset)
+                            .ok_or(TrueTypeError::BadTableDirectory)?,
+                    );
+                    if record_count > 8
+                        || record_count_offset
+                            .checked_add(
+                                2usize
+                                    .checked_add(
+                                        record_count
+                                            .checked_mul(4)
+                                            .ok_or(TrueTypeError::TooLarge)?,
+                                    )
+                                    .ok_or(TrueTypeError::TooLarge)?,
+                            )
+                            .is_none_or(|end| end > table_end)
+                    {
+                        return Err(TrueTypeError::TooLarge);
+                    }
+                    let first_coverage = subtable
+                        .checked_add(usize::from(
+                            read_u16(bytes, input_offsets)
+                                .ok_or(TrueTypeError::BadTableDirectory)?,
+                        ))
+                        .ok_or(TrueTypeError::BadTableDirectory)?;
+                    let second_coverage = subtable
+                        .checked_add(usize::from(
+                            read_u16(bytes, input_offsets + 2)
+                                .ok_or(TrueTypeError::BadTableDirectory)?,
+                        ))
+                        .ok_or(TrueTypeError::BadTableDirectory)?;
+                    if gsub_coverage_index(bytes, first_coverage, table_end, left)?.is_none()
+                        || gsub_coverage_index(bytes, second_coverage, table_end, right)?.is_none()
+                    {
+                        continue;
+                    }
+                    for record_index in 0..record_count {
+                        let record = record_count_offset + 2 + record_index * 4;
+                        if read_u16(bytes, record) != Some(0) {
+                            continue;
+                        }
+                        let nested_index = usize::from(
+                            read_u16(bytes, record + 2).ok_or(TrueTypeError::BadTableDirectory)?,
+                        );
+                        if nested_index >= lookup_count {
+                            return Err(TrueTypeError::BadTableDirectory);
+                        }
+                        let nested_lookup = lookup_base
+                            .checked_add(usize::from(
+                                read_u16(bytes, lookup_base + 2 + nested_index * 2)
+                                    .ok_or(TrueTypeError::BadTableDirectory)?,
+                            ))
+                            .ok_or(TrueTypeError::BadTableDirectory)?;
+                        let Some((is_extension, nested_target)) =
+                            gpos_attachment_lookup(bytes, nested_lookup, 1, table_end)?
+                        else {
+                            continue;
+                        };
+                        let nested_count = if is_extension {
+                            1
+                        } else {
+                            usize::from(
+                                read_u16(bytes, nested_lookup + 4)
+                                    .ok_or(TrueTypeError::BadTableDirectory)?,
+                            )
+                        };
+                        if nested_count > 32 {
+                            return Err(TrueTypeError::TooLarge);
+                        }
+                        for nested_subtable_index in 0..nested_count {
+                            let nested_subtable = if is_extension {
+                                nested_target
+                            } else {
+                                nested_lookup
+                                    .checked_add(usize::from(
+                                        read_u16(
+                                            bytes,
+                                            nested_lookup + 6 + nested_subtable_index * 2,
+                                        )
+                                        .ok_or(TrueTypeError::BadTableDirectory)?,
+                                    ))
+                                    .ok_or(TrueTypeError::BadTableDirectory)?
+                            };
+                            if nested_subtable
+                                .checked_add(6)
+                                .is_none_or(|end| end > table_end)
+                                || read_u16(bytes, nested_subtable) != Some(1)
+                            {
+                                continue;
+                            }
+                            let coverage = nested_subtable
+                                .checked_add(usize::from(
+                                    read_u16(bytes, nested_subtable + 2)
+                                        .ok_or(TrueTypeError::BadTableDirectory)?,
+                                ))
+                                .ok_or(TrueTypeError::BadTableDirectory)?;
+                            let Some(coverage_index) =
+                                gsub_coverage_index(bytes, coverage, table_end, left)?
+                            else {
+                                continue;
+                            };
+                            let value_format = read_u16(bytes, nested_subtable + 4)
+                                .ok_or(TrueTypeError::BadTableDirectory)?;
+                            let record = if read_u16(bytes, nested_subtable) == Some(1) {
+                                nested_subtable + 6
+                            } else {
+                                let count = usize::from(
+                                    read_u16(bytes, nested_subtable + 6)
+                                        .ok_or(TrueTypeError::BadTableDirectory)?,
+                                );
+                                let record_size = gpos_value_record_size(value_format)?;
+                                if count > 128 || coverage_index >= count {
+                                    return Err(TrueTypeError::TooLarge);
+                                }
+                                nested_subtable
+                                    .checked_add(
+                                        8usize
+                                            .checked_add(
+                                                coverage_index
+                                                    .checked_mul(record_size)
+                                                    .ok_or(TrueTypeError::TooLarge)?,
+                                            )
+                                            .ok_or(TrueTypeError::TooLarge)?,
+                                    )
+                                    .ok_or(TrueTypeError::TooLarge)?
+                            };
+                            return Ok(Some(gpos_value_adjustment(
+                                bytes,
+                                record,
+                                value_format,
+                                table_end,
+                                table,
+                                options.ppem,
+                            )?));
+                        }
+                    }
+                }
+            }
+        }
+        Ok(None)
+    }
+
+    fn gpos_anchor_coordinates(
+        face: &TrueTypeFace<'_>,
+        anchor: usize,
+        ppem: Option<u16>,
+        table_end: usize,
+        glyph: u16,
+    ) -> Result<Option<(i32, i32)>, TrueTypeError> {
+        let bytes = face.bytes;
+        if anchor.checked_add(6).is_none_or(|end| end > table_end) {
+            return Err(TrueTypeError::BadTableDirectory);
+        }
+        let format = read_u16(bytes, anchor).ok_or(TrueTypeError::BadTableDirectory)?;
+        let mut x = i32::from(read_i16(bytes, anchor + 2).ok_or(TrueTypeError::BadTableDirectory)?);
+        let mut y = i32::from(read_i16(bytes, anchor + 4).ok_or(TrueTypeError::BadTableDirectory)?);
+        match format {
+            1 => Ok(Some((x, y))),
+            2 => {
+                if anchor.checked_add(8).is_none_or(|end| end > table_end) {
+                    return Err(TrueTypeError::BadTableDirectory);
+                }
+                let point_index = usize::from(
+                    read_u16(bytes, anchor + 6).ok_or(TrueTypeError::BadTableDirectory)?,
+                );
+                let mut points = [OutlinePoint {
+                    x: 0,
+                    y: 0,
+                    on_curve: false,
+                    contour_end: false,
+                }; 128];
+                let point_count = face.outline_points_glyph(glyph, &mut points)?;
+                if point_index >= point_count {
+                    return Err(TrueTypeError::BadTableDirectory);
+                }
+                Ok(Some((
+                    i32::from(points[point_index].x),
+                    i32::from(points[point_index].y),
+                )))
+            }
+            3 => {
+                if anchor.checked_add(10).is_none_or(|end| end > table_end) {
+                    return Err(TrueTypeError::BadTableDirectory);
+                }
+                let x_device = usize::from(
+                    read_u16(bytes, anchor + 6).ok_or(TrueTypeError::BadTableDirectory)?,
+                );
+                let y_device = usize::from(
+                    read_u16(bytes, anchor + 8).ok_or(TrueTypeError::BadTableDirectory)?,
+                );
+                if let Some(ppem) = ppem {
+                    if x_device != 0 {
+                        x = x.saturating_add(gpos_device_delta(
+                            bytes,
+                            anchor
+                                .checked_add(x_device)
+                                .ok_or(TrueTypeError::BadTableDirectory)?,
+                            ppem,
+                            table_end,
+                        )?);
+                    }
+                    if y_device != 0 {
+                        y = y.saturating_add(gpos_device_delta(
+                            bytes,
+                            anchor
+                                .checked_add(y_device)
+                                .ok_or(TrueTypeError::BadTableDirectory)?,
+                            ppem,
+                            table_end,
+                        )?);
+                    }
+                }
+                Ok(Some((x, y)))
+            }
+            _ => Ok(None),
+        }
+    }
+
+    fn gpos_value_record_size(format: u16) -> Result<usize, TrueTypeError> {
+        let fields = usize::try_from(format.count_ones()).map_err(|_| TrueTypeError::TooLarge)?;
+        fields.checked_mul(2).ok_or(TrueTypeError::TooLarge)
+    }
+
+    fn gpos_value_adjustment(
+        bytes: &[u8],
+        start: usize,
+        format: u16,
+        table_end: usize,
+        table_base: usize,
+        ppem: Option<u16>,
+    ) -> Result<(i32, i32, i32, i32), TrueTypeError> {
+        let mut cursor = start;
+        let mut x_placement = 0i32;
+        let mut y_placement = 0i32;
+        let mut x_advance = 0i32;
+        let mut y_advance = 0i32;
+        for bit in 0..16 {
+            if format & (1 << bit) == 0 {
+                continue;
+            }
+            if cursor.checked_add(2).is_none_or(|end| end > table_end) {
+                return Err(TrueTypeError::BadTableDirectory);
+            }
+            let value = if bit < 4 {
+                i32::from(read_i16(bytes, cursor).ok_or(TrueTypeError::BadTableDirectory)?)
+            } else {
+                let offset =
+                    usize::from(read_u16(bytes, cursor).ok_or(TrueTypeError::BadTableDirectory)?);
+                let ppem = ppem.ok_or(TrueTypeError::UnsupportedVariation)?;
+                let device = table_base
+                    .checked_add(offset)
+                    .ok_or(TrueTypeError::BadTableDirectory)?;
+                gpos_device_delta(bytes, device, ppem, table_end)?
+            };
+            match bit {
+                0 | 4 => x_placement = x_placement.saturating_add(value),
+                1 | 5 => y_placement = y_placement.saturating_add(value),
+                2 | 6 => x_advance = x_advance.saturating_add(value),
+                3 | 7 => y_advance = y_advance.saturating_add(value),
+                _ => {}
+            }
+            cursor += 2;
+        }
+        Ok((x_placement, y_placement, x_advance, y_advance))
+    }
+
+    fn gpos_device_delta(
+        bytes: &[u8],
+        device: usize,
+        ppem: u16,
+        table_end: usize,
+    ) -> Result<i32, TrueTypeError> {
+        if device.checked_add(6).is_none_or(|end| end > table_end) {
+            return Err(TrueTypeError::BadTableDirectory);
+        }
+        let start = read_u16(bytes, device).ok_or(TrueTypeError::BadTableDirectory)?;
+        let end = read_u16(bytes, device + 2).ok_or(TrueTypeError::BadTableDirectory)?;
+        let format = read_u16(bytes, device + 4).ok_or(TrueTypeError::BadTableDirectory)?;
+        if start > end || ppem < start || ppem > end {
+            return Ok(0);
+        }
+        let index = usize::from(ppem - start);
+        let bits = match format {
+            1 => 2,
+            2 => 4,
+            3 => 8,
+            _ => return Err(TrueTypeError::UnsupportedVariation),
+        };
+        let per_word = 16 / bits;
+        let word = device
+            .checked_add(6)
+            .and_then(|offset| offset.checked_add((index / per_word) * 2))
+            .ok_or(TrueTypeError::TooLarge)?;
+        if word.checked_add(2).is_none_or(|end| end > table_end) {
+            return Err(TrueTypeError::BadTableDirectory);
+        }
+        let raw = u32::from(read_u16(bytes, word).ok_or(TrueTypeError::BadTableDirectory)?);
+        let shift = (per_word - 1 - index % per_word) * bits;
+        let mask = (1u32 << bits) - 1;
+        let value = (raw >> shift) & mask;
+        let sign = 1u32 << (bits - 1);
+        if value & sign != 0 {
+            Ok(i32::try_from(value).map_err(|_| TrueTypeError::TooLarge)? - (1i32 << bits))
+        } else {
+            i32::try_from(value).map_err(|_| TrueTypeError::TooLarge)
+        }
+    }
+
+    fn gpos_class_index(
+        bytes: &[u8],
+        definition: usize,
+        glyph: u16,
+        table_end: usize,
+    ) -> Result<u16, TrueTypeError> {
+        match read_u16(bytes, definition).ok_or(TrueTypeError::BadTableDirectory)? {
+            1 => {
+                let start =
+                    read_u16(bytes, definition + 2).ok_or(TrueTypeError::BadTableDirectory)?;
+                let count = usize::from(
+                    read_u16(bytes, definition + 4).ok_or(TrueTypeError::BadTableDirectory)?,
+                );
+                let end = definition
+                    .checked_add(
+                        6usize
+                            .checked_add(count.checked_mul(2).ok_or(TrueTypeError::TooLarge)?)
+                            .ok_or(TrueTypeError::TooLarge)?,
+                    )
+                    .ok_or(TrueTypeError::TooLarge)?;
+                if count > 128 || end > table_end {
+                    return Err(TrueTypeError::TooLarge);
+                }
+                let index = usize::from(glyph.saturating_sub(start));
+                if glyph < start || index >= count {
+                    Ok(0)
+                } else {
+                    read_u16(bytes, definition + 6 + index * 2)
+                        .ok_or(TrueTypeError::BadTableDirectory)
+                }
+            }
+            2 => {
+                let count = usize::from(
+                    read_u16(bytes, definition + 2).ok_or(TrueTypeError::BadTableDirectory)?,
+                );
+                let end = definition
+                    .checked_add(
+                        4usize
+                            .checked_add(count.checked_mul(6).ok_or(TrueTypeError::TooLarge)?)
+                            .ok_or(TrueTypeError::TooLarge)?,
+                    )
+                    .ok_or(TrueTypeError::TooLarge)?;
+                if count > 128 || end > table_end {
+                    return Err(TrueTypeError::TooLarge);
+                }
+                for index in 0..count {
+                    let range = definition + 4 + index * 6;
+                    let start = read_u16(bytes, range).ok_or(TrueTypeError::BadTableDirectory)?;
+                    let end_glyph =
+                        read_u16(bytes, range + 2).ok_or(TrueTypeError::BadTableDirectory)?;
+                    if (start..=end_glyph).contains(&glyph) {
+                        return read_u16(bytes, range + 4).ok_or(TrueTypeError::BadTableDirectory);
+                    }
+                }
+                Ok(0)
+            }
+            _ => Err(TrueTypeError::UnsupportedCmap),
+        }
+    }
+
+    fn find_table(bytes: &[u8], table_count: usize, tag: [u8; 4]) -> Option<(usize, usize)> {
+        for index in 0..table_count {
+            let record = 12usize.checked_add(index.checked_mul(16)?)?;
+            if bytes.get(record..record + 4)? != tag {
+                continue;
+            }
+            let offset = usize::try_from(read_u32(bytes, record + 8)?).ok()?;
+            let length = usize::try_from(read_u32(bytes, record + 12)?).ok()?;
+            if offset.checked_add(length)? <= bytes.len() {
+                return Some((offset, length));
+            }
+            return None;
+        }
+        None
+    }
+
+    impl Rect {
+        pub const fn new(x: i32, y: i32, width: usize, height: usize) -> Self {
+            Self {
+                x,
+                y,
+                width,
+                height,
+            }
+        }
+
+        pub const fn is_empty(self) -> bool {
+            self.width == 0 || self.height == 0
+        }
+
+        pub fn intersect(self, other: Self) -> Self {
+            let left = self.x.max(other.x);
+            let top = self.y.max(other.y);
+            let right = self
+                .x
+                .saturating_add(i32::try_from(self.width).unwrap_or(i32::MAX))
+                .min(
+                    other
+                        .x
+                        .saturating_add(i32::try_from(other.width).unwrap_or(i32::MAX)),
+                );
+            let bottom = self
+                .y
+                .saturating_add(i32::try_from(self.height).unwrap_or(i32::MAX))
+                .min(
+                    other
+                        .y
+                        .saturating_add(i32::try_from(other.height).unwrap_or(i32::MAX)),
+                );
+            if right <= left || bottom <= top {
+                return Self::new(0, 0, 0, 0);
+            }
+            Self::new(left, top, (right - left) as usize, (bottom - top) as usize)
+        }
+    }
+
+    /// A projected 3D vertex. Coordinates are in the target Canvas space;
+    /// `depth` is compared front-to-back by the software depth buffer.
+    #[derive(Clone, Copy, PartialEq, Eq, Debug)]
+    pub struct Vertex3 {
+        pub x: i32,
+        pub y: i32,
+        pub depth: u16,
+        pub color: Color,
+    }
+
+    impl Vertex3 {
+        pub const fn new(x: i32, y: i32, depth: u16, color: Color) -> Self {
+            Self { x, y, depth, color }
+        }
+    }
+
+    /// Caller-owned depth storage paired with a Canvas. Keeping it outside
+    /// Renderer makes lifetime and memory ownership explicit for future GPU
+    /// targets, while retaining a bounded software fallback today.
+    pub struct DepthBuffer<'a> {
+        values: &'a mut [u16],
+        x: i32,
+        y: i32,
+        width: usize,
+        height: usize,
+    }
+
+    impl<'a> DepthBuffer<'a> {
+        pub fn new(
+            values: &'a mut [u16],
+            x: i32,
+            y: i32,
+            width: usize,
+            height: usize,
+        ) -> Option<Self> {
+            let length = width.checked_mul(height)?;
+            values.get_mut(..length)?;
+            Some(Self {
+                values,
+                x,
+                y,
+                width,
+                height,
+            })
+        }
+
+        pub fn clear(&mut self, depth: u16) {
+            self.values.fill(depth);
+        }
+
+        fn test_and_set(&mut self, x: i32, y: i32, depth: u16) -> bool {
+            let Some(column) = usize::try_from(x.saturating_sub(self.x)).ok() else {
+                return false;
+            };
+            let Some(row) = usize::try_from(y.saturating_sub(self.y)).ok() else {
+                return false;
+            };
+            if column >= self.width || row >= self.height {
+                return false;
+            }
+            let slot = &mut self.values[row * self.width + column];
+            if depth >= *slot {
+                return false;
+            }
+            *slot = depth;
+            true
+        }
+    }
+
+    /// The first WovenGraphics renderer: a safe, clipped software renderer
+    /// over a caller-owned Canvas. A later display driver can consume the same
+    /// pixel stream without changing application scene code.
+    pub struct Renderer<'canvas, 'pixels> {
+        canvas: &'canvas mut crate::Canvas<'pixels>,
+    }
+
+    impl<'canvas, 'pixels> Renderer<'canvas, 'pixels> {
+        pub fn new(canvas: &'canvas mut crate::Canvas<'pixels>) -> Self {
+            Self { canvas }
+        }
+
+        pub fn fill(&mut self, rect: Rect, color: Color) {
+            self.canvas
+                .fill_rect(rect.x, rect.y, rect.width, rect.height, color.packed());
+        }
+
+        pub fn blend(&mut self, rect: Rect, color: Color, opacity: u8) {
+            self.canvas.blend_rect(
+                rect.x,
+                rect.y,
+                rect.width,
+                rect.height,
+                color.packed(),
+                opacity,
+            );
+        }
+
+        /// Fill a rounded rectangle with opaque colour. Radius is clamped to
+        /// half the shorter dimension before rasterization.
+        pub fn rounded_rect(&mut self, rect: Rect, radius: usize, color: Color) {
+            self.rounded_rect_blended(rect, radius, color, u8::MAX);
+        }
+
+        /// Fill a rounded rectangle with source-over alpha. Iteration is
+        /// clipped to the Canvas before any per-pixel corner calculation.
+        pub fn rounded_rect_blended(
+            &mut self,
+            rect: Rect,
+            radius: usize,
+            color: Color,
+            opacity: u8,
+        ) {
+            if rect.is_empty() {
+                return;
+            }
+            let radius = radius.min(rect.width.min(rect.height) / 2);
+            let Some((column, row, columns, rows)) =
+                self.canvas.clip(rect.x, rect.y, rect.width, rect.height)
+            else {
+                return;
+            };
+            let right = rect.x.saturating_add(rect.width.saturating_sub(1) as i32);
+            let bottom = rect.y.saturating_add(rect.height.saturating_sub(1) as i32);
+            let r = radius as i64;
+            let r2 = r * r;
+            for canvas_row in row..row + rows {
+                let y = self.canvas.y + canvas_row as i32;
+                for canvas_column in column..column + columns {
+                    let x = self.canvas.x + canvas_column as i32;
+                    let corner_x = if x < rect.x.saturating_add(radius as i32) {
+                        rect.x.saturating_add(radius as i32)
+                    } else if x > right.saturating_sub(radius as i32) {
+                        right.saturating_sub(radius as i32)
+                    } else {
+                        x
+                    };
+                    let corner_y = if y < rect.y.saturating_add(radius as i32) {
+                        rect.y.saturating_add(radius as i32)
+                    } else if y > bottom.saturating_sub(radius as i32) {
+                        bottom.saturating_sub(radius as i32)
+                    } else {
+                        y
+                    };
+                    let dx = i64::from(x) - i64::from(corner_x);
+                    let dy = i64::from(y) - i64::from(corner_y);
+                    if dx * dx + dy * dy <= r2 {
+                        self.canvas.blend_pixel(x, y, color.packed(), opacity);
+                    }
+                }
+            }
+        }
+
+        /// Fill a rectangle with a clipped top-to-bottom colour gradient.
+        pub fn vertical_gradient(&mut self, rect: Rect, top: Color, bottom: Color) {
+            if rect.is_empty() {
+                return;
+            }
+            let last = rect.height.saturating_sub(1).max(1) as u32;
+            for row in 0..rect.height {
+                let t = (row as u32 * 255 / last) as u8;
+                let color = Color::rgb(
+                    lerp(top.red, bottom.red, t),
+                    lerp(top.green, bottom.green, t),
+                    lerp(top.blue, bottom.blue, t),
+                );
+                for column in 0..rect.width {
+                    self.canvas
+                        .set(rect.x + column as i32, rect.y + row as i32, color.packed());
+                }
+            }
+        }
+
+        /// Fill a clipped left-to-right colour gradient.
+        pub fn horizontal_gradient(&mut self, rect: Rect, left: Color, right: Color) {
+            if rect.is_empty() {
+                return;
+            }
+            let last = rect.width.saturating_sub(1).max(1) as u32;
+            for column in 0..rect.width {
+                let t = (column as u32 * 255 / last) as u8;
+                let color = Color::rgb(
+                    lerp(left.red, right.red, t),
+                    lerp(left.green, right.green, t),
+                    lerp(left.blue, right.blue, t),
+                );
+                for row in 0..rect.height {
+                    self.canvas
+                        .set(rect.x + column as i32, rect.y + row as i32, color.packed());
+                }
+            }
+        }
+
+        /// Draw a one-pixel rectangle outline, clipped by the Canvas.
+        pub fn stroke(&mut self, rect: Rect, color: Color) {
+            if rect.is_empty() {
+                return;
+            }
+            self.fill(Rect::new(rect.x, rect.y, rect.width, 1), color);
+            self.fill(
+                Rect::new(rect.x, rect.y + rect.height as i32 - 1, rect.width, 1),
+                color,
+            );
+            self.fill(Rect::new(rect.x, rect.y, 1, rect.height), color);
+            self.fill(
+                Rect::new(rect.x + rect.width as i32 - 1, rect.y, 1, rect.height),
+                color,
+            );
+        }
+
+        /// Blit a bounded row-major image into the Canvas. Invalid dimensions
+        /// or a short source leave the target unchanged and return `false`.
+        pub fn image(
+            &mut self,
+            x: i32,
+            y: i32,
+            width: usize,
+            height: usize,
+            pixels: &[u32],
+        ) -> bool {
+            let Some(length) = width.checked_mul(height) else {
+                return false;
+            };
+            let Some(source) = pixels.get(..length) else {
+                return false;
+            };
+            for row in 0..height {
+                for column in 0..width {
+                    self.canvas.set(
+                        x + column as i32,
+                        y + row as i32,
+                        source[row * width + column],
+                    );
+                }
+            }
+            true
+        }
+
+        /// Blit a bounded row-major image with uniform source-over opacity.
+        /// Invalid dimensions or a short source leave the target unchanged.
+        pub fn image_blended(
+            &mut self,
+            x: i32,
+            y: i32,
+            width: usize,
+            height: usize,
+            pixels: &[u32],
+            opacity: u8,
+        ) -> bool {
+            let Some(length) = width.checked_mul(height) else {
+                return false;
+            };
+            let Some(source) = pixels.get(..length) else {
+                return false;
+            };
+            for row in 0..height {
+                for column in 0..width {
+                    self.canvas.blend_pixel(
+                        x + column as i32,
+                        y + row as i32,
+                        source[row * width + column],
+                        opacity,
+                    );
+                }
+            }
+            true
+        }
+
+        /// Fill a transformed rectangle as two clipped triangles. This keeps
+        /// transforms a scene-level concern while using the same safe Canvas
+        /// pixel boundary as every other WovenGraphics primitive.
+        pub fn transformed_rect(&mut self, rect: Rect, transform: Transform, color: Color) {
+            if rect.is_empty() {
+                return;
+            }
+            let (x0, y0) = transform.map(rect.x, rect.y);
+            let (x1, y1) = transform.map(rect.x + rect.width as i32, rect.y);
+            let (x2, y2) = transform.map(rect.x + rect.width as i32, rect.y + rect.height as i32);
+            let (x3, y3) = transform.map(rect.x, rect.y + rect.height as i32);
+            self.fill_triangle([(x0, y0), (x1, y1), (x2, y2)], color);
+            self.fill_triangle([(x0, y0), (x2, y2), (x3, y3)], color);
+        }
+
+        fn fill_triangle(&mut self, points: [(i32, i32); 3], color: Color) {
+            let [(ax, ay), (bx, by), (cx, cy)] = points;
+            let area = edge(ax, ay, bx, by, cx, cy);
+            if area == 0 {
+                return;
+            }
+            let min_x = ax.min(bx).min(cx);
+            let max_x = ax.max(bx).max(cx);
+            let min_y = ay.min(by).min(cy);
+            let max_y = ay.max(by).max(cy);
+            let positive = area > 0;
+            for y in min_y..=max_y {
+                for x in min_x..=max_x {
+                    let first = edge(bx, by, cx, cy, x, y);
+                    let second = edge(cx, cy, ax, ay, x, y);
+                    let third = edge(ax, ay, bx, by, x, y);
+                    let inside = if positive {
+                        first >= 0 && second >= 0 && third >= 0
+                    } else {
+                        first <= 0 && second <= 0 && third <= 0
+                    };
+                    if inside {
+                        self.canvas.set(x, y, color.packed());
+                    }
+                }
+            }
+        }
+
+        /// Rasterize a clipped, flat-colour triangle with a caller-owned
+        /// front-to-back depth buffer. This is the first software 3D path;
+        /// projected vertices can later be supplied by a GPU backend without
+        /// changing the scene-facing WovenGraphics types.
+        pub fn triangle_3d(
+            &mut self,
+            depth: &mut DepthBuffer<'_>,
+            first: Vertex3,
+            second: Vertex3,
+            third: Vertex3,
+        ) {
+            let area = edge(first.x, first.y, second.x, second.y, third.x, third.y);
+            if area == 0 {
+                return;
+            }
+            let min_x = first.x.min(second.x).min(third.x);
+            let max_x = first.x.max(second.x).max(third.x);
+            let min_y = first.y.min(second.y).min(third.y);
+            let max_y = first.y.max(second.y).max(third.y);
+            let positive = area > 0;
+            for y in min_y..=max_y {
+                for x in min_x..=max_x {
+                    let first_edge = edge(second.x, second.y, third.x, third.y, x, y);
+                    let second_edge = edge(third.x, third.y, first.x, first.y, x, y);
+                    let third_edge = edge(first.x, first.y, second.x, second.y, x, y);
+                    let inside = if positive {
+                        first_edge >= 0 && second_edge >= 0 && third_edge >= 0
+                    } else {
+                        first_edge <= 0 && second_edge <= 0 && third_edge <= 0
+                    };
+                    if !inside {
+                        continue;
+                    }
+                    let depth_value = ((i64::from(first.depth) * first_edge.abs()
+                        + i64::from(second.depth) * second_edge.abs()
+                        + i64::from(third.depth) * third_edge.abs())
+                        / area.abs())
+                    .min(i64::from(u16::MAX)) as u16;
+                    if depth.test_and_set(x, y, depth_value) {
+                        let red = interpolate_channel(
+                            first.color.red,
+                            second.color.red,
+                            third.color.red,
+                            first_edge.abs(),
+                            second_edge.abs(),
+                            third_edge.abs(),
+                            area.abs(),
+                        );
+                        let green = interpolate_channel(
+                            first.color.green,
+                            second.color.green,
+                            third.color.green,
+                            first_edge.abs(),
+                            second_edge.abs(),
+                            third_edge.abs(),
+                            area.abs(),
+                        );
+                        let blue = interpolate_channel(
+                            first.color.blue,
+                            second.color.blue,
+                            third.color.blue,
+                            first_edge.abs(),
+                            second_edge.abs(),
+                            third_edge.abs(),
+                            area.abs(),
+                        );
+                        self.canvas.set(x, y, Color::rgb(red, green, blue).packed());
+                    }
+                }
+            }
+        }
+
+        pub fn text(&mut self, x: i32, y: i32, text: &str, color: Color) {
+            self.canvas.draw_text(x, y, text, color.packed());
+        }
+
+        /// Draw text centered in a logical rectangle using the shared font's
+        /// bounded metrics. Text remains clipped by the Canvas boundary.
+        pub fn text_centered(&mut self, rect: Rect, text: &str, color: Color) {
+            self.text_centered_scaled(rect, text, color, 1);
+        }
+
+        /// Center text using a bounded integer glyph scale.
+        pub fn text_centered_scaled(&mut self, rect: Rect, text: &str, color: Color, scale: usize) {
+            let metrics = Font::DEFAULT.measure_scaled(text, scale);
+            let x = rect.x + rect.width.saturating_sub(metrics.width) as i32 / 2;
+            let y = rect.y + rect.height.saturating_sub(metrics.height) as i32 / 2;
+            self.text_scaled(x, y, text, color, scale);
+        }
+
+        /// Draw the shared bitmap font with an integer pixel scale. This is a
+        /// bounded nearest-neighbour raster operation and preserves the same
+        /// replacement-glyph behavior as the unscaled path.
+        pub fn text_scaled(&mut self, x: i32, y: i32, text: &str, color: Color, scale: usize) {
+            let scale = scale.clamp(1, 16);
+            let mut cursor_x = x;
+            let mut cursor_y = y;
+            for character in text.chars() {
+                if character == '\n' {
+                    cursor_x = x;
+                    cursor_y += crate::font::LINE_HEIGHT.saturating_mul(scale as i32);
+                    continue;
+                }
+                for (row, bits) in crate::font::glyph(character).iter().enumerate() {
+                    for column in 0..crate::font::WIDTH {
+                        if bits & (1 << (crate::font::WIDTH - 1 - column)) == 0 {
+                            continue;
+                        }
+                        self.fill(
+                            Rect::new(
+                                cursor_x + column as i32 * scale as i32,
+                                cursor_y + row as i32 * scale as i32,
+                                scale,
+                                scale,
+                            ),
+                            color,
+                        );
+                    }
+                }
+                cursor_x += crate::font::ADVANCE.saturating_mul(scale as i32);
+            }
+        }
+
+        /// Draw UTF-8 text with deterministic character wrapping inside a
+        /// clipped rectangle. Wrapping is allocation-free and uses the same
+        /// replacement glyph and integer scale as `text_scaled`.
+        pub fn text_box(&mut self, rect: Rect, text: &str, color: Color, scale: usize) -> usize {
+            if rect.is_empty() {
+                return 0;
+            }
+            let scale = scale.clamp(1, 16);
+            let advance = crate::font::ADVANCE.saturating_mul(scale as i32);
+            let line_height = crate::font::LINE_HEIGHT.saturating_mul(scale as i32);
+            let right = rect.x.saturating_add(rect.width.saturating_sub(1) as i32);
+            let bottom = rect.y.saturating_add(rect.height.saturating_sub(1) as i32);
+            let mut cursor_x = rect.x;
+            let mut cursor_y = rect.y;
+            let mut lines: usize = 1;
+            for character in text.chars() {
+                if character == '\n'
+                    || cursor_x > rect.x && cursor_x.saturating_add(advance - 1) > right
+                {
+                    cursor_x = rect.x;
+                    cursor_y = cursor_y.saturating_add(line_height);
+                    lines = lines.saturating_add(1);
+                    if character == '\n' {
+                        continue;
+                    }
+                }
+                if cursor_y.saturating_add(crate::font::HEIGHT as i32 * scale as i32 - 1) > bottom {
+                    break;
+                }
+                let mut encoded = [0u8; 4];
+                let glyph = character.encode_utf8(&mut encoded);
+                self.text_scaled(cursor_x, cursor_y, glyph, color, scale);
+                cursor_x = cursor_x.saturating_add(advance);
+            }
+            lines
+        }
+
+        /// Stroke every segment in a bounded path with a clipped integer line
+        /// rasterizer. Closed paths add the final segment back to the origin.
+        pub fn stroke_path(&mut self, path: &Path, color: Color) {
+            let points = path.points();
+            if points.len() < 2 {
+                return;
+            }
+            for pair in points.windows(2) {
+                self.stroke_line(pair[0], pair[1], color);
+            }
+            if path.closed {
+                self.stroke_line(points[points.len() - 1], points[0], color);
+            }
+        }
+
+        pub fn stroke_compound_path(&mut self, path: &CompoundPath, color: Color) {
+            for contour in path.paths() {
+                self.stroke_path(contour, color);
+            }
+        }
+
+        /// Fill a closed path with an even-odd winding rule. The scan is
+        /// clipped to the Canvas before iterating, so hostile or merely large
+        /// scene coordinates cannot turn a bounded surface into unbounded
+        /// work. Returns `false` for an open or too-short path.
+        pub fn fill_path(&mut self, path: &Path, color: Color) -> bool {
+            self.fill_path_blended(path, color, u8::MAX)
+        }
+
+        /// Fill a closed path with uniform alpha using the same source-over
+        /// formula as rectangle and compositor blending.
+        pub fn fill_path_blended(&mut self, path: &Path, color: Color, opacity: u8) -> bool {
+            let points = path.points();
+            if points.len() < 3 || !path.closed {
+                return false;
+            }
+            let mut min_x = points[0].x;
+            let mut max_x = points[0].x;
+            let mut min_y = points[0].y;
+            let mut max_y = points[0].y;
+            for point in &points[1..] {
+                min_x = min_x.min(point.x);
+                max_x = max_x.max(point.x);
+                min_y = min_y.min(point.y);
+                max_y = max_y.max(point.y);
+            }
+            let canvas_max_x = self
+                .canvas
+                .x
+                .saturating_add(self.canvas.width.saturating_sub(1) as i32);
+            let canvas_max_y = self
+                .canvas
+                .y
+                .saturating_add(self.canvas.height.saturating_sub(1) as i32);
+            min_x = min_x.max(self.canvas.x);
+            max_x = max_x.min(canvas_max_x);
+            min_y = min_y.max(self.canvas.y);
+            max_y = max_y.min(canvas_max_y);
+            if min_x > max_x || min_y > max_y {
+                return true;
+            }
+            for y in min_y..=max_y {
+                for x in min_x..=max_x {
+                    let mut inside = false;
+                    for index in 0..points.len() {
+                        let first = points[index];
+                        let second = points[(index + 1) % points.len()];
+                        if (first.y > y) != (second.y > y) {
+                            let numerator = (i64::from(y) - i64::from(first.y))
+                                * (i64::from(second.x) - i64::from(first.x));
+                            let denominator = i64::from(second.y) - i64::from(first.y);
+                            let intersection = i64::from(first.x) + numerator / denominator;
+                            if i64::from(x) < intersection {
+                                inside = !inside;
+                            }
+                        }
+                    }
+                    if inside {
+                        self.canvas.blend_pixel(x, y, color.packed(), opacity);
+                    }
+                }
+            }
+            true
+        }
+
+        /// Fill a closed path with deterministic 4x4 supersampled coverage.
+        pub fn fill_path_antialiased(&mut self, path: &Path, color: Color) -> bool {
+            self.fill_path_antialiased_blended(path, color, u8::MAX)
+        }
+
+        pub fn fill_path_antialiased_blended(
+            &mut self,
+            path: &Path,
+            color: Color,
+            opacity: u8,
+        ) -> bool {
+            let points = path.points();
+            if points.len() < 3 || !path.closed {
+                return false;
+            }
+            let (mut min_x, mut max_x, mut min_y, mut max_y) = path_bounds(points);
+            min_x = min_x.saturating_sub(1).max(self.canvas.x);
+            max_x = max_x.saturating_add(1).min(
+                self.canvas
+                    .x
+                    .saturating_add(self.canvas.width.saturating_sub(1) as i32),
+            );
+            min_y = min_y.saturating_sub(1).max(self.canvas.y);
+            max_y = max_y.saturating_add(1).min(
+                self.canvas
+                    .y
+                    .saturating_add(self.canvas.height.saturating_sub(1) as i32),
+            );
+            if min_x > max_x || min_y > max_y {
+                return true;
+            }
+            for y in min_y..=max_y {
+                for x in min_x..=max_x {
+                    let coverage = path_coverage(points, x, y);
+                    if coverage != 0 {
+                        self.canvas.blend_pixel(
+                            x,
+                            y,
+                            color.packed(),
+                            combine_opacity(opacity, coverage),
+                        );
+                    }
+                }
+            }
+            true
+        }
+
+        pub fn fill_compound_path(&mut self, path: &CompoundPath, color: Color) -> bool {
+            self.fill_compound_path_blended(path, color, u8::MAX)
+        }
+
+        pub fn fill_compound_path_blended(
+            &mut self,
+            path: &CompoundPath,
+            color: Color,
+            opacity: u8,
+        ) -> bool {
+            let mut contours: [Option<&Path>; MAX_CONTOURS] = [None; MAX_CONTOURS];
+            let mut contour_count = 0;
+            for contour in path.paths() {
+                if contour.points().len() >= 3 && contour.closed && contour_count < MAX_CONTOURS {
+                    contours[contour_count] = Some(contour);
+                    contour_count += 1;
+                }
+            }
+            if contour_count == 0 {
+                return false;
+            }
+            let first = match contours[0] {
+                Some(contour) => contour,
+                None => return false,
+            };
+            let mut min_x = first.points()[0].x;
+            let mut max_x = min_x;
+            let mut min_y = first.points()[0].y;
+            let mut max_y = min_y;
+            for contour in contours.iter().take(contour_count).flatten() {
+                for point in contour.points() {
+                    min_x = min_x.min(point.x);
+                    max_x = max_x.max(point.x);
+                    min_y = min_y.min(point.y);
+                    max_y = max_y.max(point.y);
+                }
+            }
+            let canvas_max_x = self
+                .canvas
+                .x
+                .saturating_add(self.canvas.width.saturating_sub(1) as i32);
+            let canvas_max_y = self
+                .canvas
+                .y
+                .saturating_add(self.canvas.height.saturating_sub(1) as i32);
+            min_x = min_x.max(self.canvas.x);
+            max_x = max_x.min(canvas_max_x);
+            min_y = min_y.max(self.canvas.y);
+            max_y = max_y.min(canvas_max_y);
+            if min_x > max_x || min_y > max_y {
+                return true;
+            }
+            for y in min_y..=max_y {
+                for x in min_x..=max_x {
+                    let mut inside = false;
+                    for contour in contours.iter().take(contour_count).flatten() {
+                        let points = contour.points();
+                        for index in 0..points.len() {
+                            let first = points[index];
+                            let second = points[(index + 1) % points.len()];
+                            if (first.y > y) != (second.y > y) {
+                                let numerator = (i64::from(y) - i64::from(first.y))
+                                    * (i64::from(second.x) - i64::from(first.x));
+                                let denominator = i64::from(second.y) - i64::from(first.y);
+                                let intersection = i64::from(first.x) + numerator / denominator;
+                                if i64::from(x) < intersection {
+                                    inside = !inside;
+                                }
+                            }
+                        }
+                    }
+                    if inside {
+                        self.canvas.blend_pixel(x, y, color.packed(), opacity);
+                    }
+                }
+            }
+            true
+        }
+
+        pub fn fill_compound_path_antialiased(
+            &mut self,
+            path: &CompoundPath,
+            color: Color,
+        ) -> bool {
+            self.fill_compound_path_antialiased_blended(path, color, u8::MAX)
+        }
+
+        pub fn fill_compound_path_antialiased_blended(
+            &mut self,
+            path: &CompoundPath,
+            color: Color,
+            opacity: u8,
+        ) -> bool {
+            let contours = path.paths();
+            let contour_count = contours.len();
+            if contour_count == 0
+                || path
+                    .paths()
+                    .iter()
+                    .any(|contour| contour.points().len() < 3 || !contour.closed)
+            {
+                return false;
+            }
+            let (mut min_x, mut max_x, mut min_y, mut max_y) = path_bounds(contours[0].points());
+            for contour in contours.iter().skip(1) {
+                let (left, right, top, bottom) = path_bounds(contour.points());
+                min_x = min_x.min(left);
+                max_x = max_x.max(right);
+                min_y = min_y.min(top);
+                max_y = max_y.max(bottom);
+            }
+            min_x = min_x.saturating_sub(1).max(self.canvas.x);
+            max_x = max_x.saturating_add(1).min(
+                self.canvas
+                    .x
+                    .saturating_add(self.canvas.width.saturating_sub(1) as i32),
+            );
+            min_y = min_y.saturating_sub(1).max(self.canvas.y);
+            max_y = max_y.saturating_add(1).min(
+                self.canvas
+                    .y
+                    .saturating_add(self.canvas.height.saturating_sub(1) as i32),
+            );
+            if min_x > max_x || min_y > max_y {
+                return true;
+            }
+            for y in min_y..=max_y {
+                for x in min_x..=max_x {
+                    let mut covered = 0u8;
+                    for sample_y in 0..4 {
+                        for sample_x in 0..4 {
+                            let point_x = i64::from(x) * 16 + i64::from(sample_x * 4 + 2);
+                            let point_y = i64::from(y) * 16 + i64::from(sample_y * 4 + 2);
+                            let inside = contours.iter().fold(false, |inside, contour| {
+                                inside ^ path_contains_sample(contour.points(), point_x, point_y)
+                            });
+                            if inside {
+                                covered += 1;
+                            }
+                        }
+                    }
+                    if covered != 0 {
+                        self.canvas.blend_pixel(
+                            x,
+                            y,
+                            color.packed(),
+                            combine_opacity(opacity, covered.saturating_mul(16)),
+                        );
+                    }
+                }
+            }
+            true
+        }
+
+        fn stroke_line(&mut self, first: Point, second: Point, color: Color) {
+            let mut x = first.x;
+            let mut y = first.y;
+            let dx = (i64::from(second.x) - i64::from(first.x)).abs();
+            let sx = if first.x < second.x { 1 } else { -1 };
+            let dy = -(i64::from(second.y) - i64::from(first.y)).abs();
+            let sy = if first.y < second.y { 1 } else { -1 };
+            let mut error = dx + dy;
+            loop {
+                self.canvas.set(x, y, color.packed());
+                if x == second.x && y == second.y {
+                    break;
+                }
+                let twice = error * 2;
+                if twice >= dy {
+                    error += dy;
+                    x += sx;
+                }
+                if twice <= dx {
+                    error += dx;
+                    y += sy;
+                }
+            }
+        }
+    }
+
+    fn path_bounds(points: &[Point]) -> (i32, i32, i32, i32) {
+        let mut min_x = points[0].x;
+        let mut max_x = min_x;
+        let mut min_y = points[0].y;
+        let mut max_y = min_y;
+        for point in &points[1..] {
+            min_x = min_x.min(point.x);
+            max_x = max_x.max(point.x);
+            min_y = min_y.min(point.y);
+            max_y = max_y.max(point.y);
+        }
+        (min_x, max_x, min_y, max_y)
+    }
+
+    fn path_contains_sample(points: &[Point], sample_x: i64, sample_y: i64) -> bool {
+        let mut inside = false;
+        for index in 0..points.len() {
+            let first = points[index];
+            let second = points[(index + 1) % points.len()];
+            let first_y = i64::from(first.y) * 16;
+            let second_y = i64::from(second.y) * 16;
+            if (first_y > sample_y) != (second_y > sample_y) {
+                let numerator =
+                    (sample_y - first_y) * (i64::from(second.x) - i64::from(first.x)) * 16;
+                let denominator = second_y - first_y;
+                let intersection = i64::from(first.x) * 16 + numerator / denominator;
+                if sample_x < intersection {
+                    inside = !inside;
+                }
+            }
+        }
+        inside
+    }
+
+    fn path_coverage(points: &[Point], x: i32, y: i32) -> u8 {
+        let mut covered = 0u8;
+        for sample_y in 0..4 {
+            for sample_x in 0..4 {
+                let point_x = i64::from(x) * 16 + i64::from(sample_x * 4 + 2);
+                let point_y = i64::from(y) * 16 + i64::from(sample_y * 4 + 2);
+                if path_contains_sample(points, point_x, point_y) {
+                    covered += 1;
+                }
+            }
+        }
+        covered.saturating_mul(16)
+    }
+
+    fn combine_opacity(opacity: u8, coverage: u8) -> u8 {
+        ((u16::from(opacity) * u16::from(coverage) + 127) / 255) as u8
+    }
+
+    pub use crate::{Canvas, GraphicsSurface};
+
     #[derive(Clone, Copy, PartialEq, Eq, Debug)]
     pub struct Surface(pub u64);
+
+    const fn lerp(start: u8, end: u8, amount: u8) -> u8 {
+        let start = start as u16;
+        let end = end as u16;
+        ((start * (255 - amount) as u16 + end * amount as u16 + 127) / 255) as u8
+    }
+
+    fn edge(ax: i32, ay: i32, bx: i32, by: i32, px: i32, py: i32) -> i64 {
+        i64::from(bx - ax) * i64::from(py - ay) - i64::from(by - ay) * i64::from(px - ax)
+    }
+
+    fn interpolate_channel(
+        first: u8,
+        second: u8,
+        third: u8,
+        first_weight: i64,
+        second_weight: i64,
+        third_weight: i64,
+        total: i64,
+    ) -> u8 {
+        ((i64::from(first) * first_weight
+            + i64::from(second) * second_weight
+            + i64::from(third) * third_weight
+            + total / 2)
+            / total)
+            .min(i64::from(u8::MAX)) as u8
+    }
 }
 pub mod notifications {
     #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -1123,7 +9683,10 @@ pub fn event_close(handle: u64) -> Result<(), Error> {
 /// Wait on up to eight timer/event objects. The source records are copied by
 /// the kernel before registration; no userspace pointer is retained while the
 /// task sleeps.
-pub fn wait_any_objects(sources: &[WaitObject], deadline: Option<time::Ticks>) -> Result<u64, Error> {
+pub fn wait_any_objects(
+    sources: &[WaitObject],
+    deadline: Option<time::Ticks>,
+) -> Result<u64, Error> {
     if sources.is_empty() || sources.len() > 8 {
         return Err(Error::Failed);
     }
@@ -1137,7 +9700,11 @@ pub fn wait_any_objects(sources: &[WaitObject], deadline: Option<time::Ticks>) -
     }
     // SAFETY: `packed` is live and readable for the duration of the syscall.
     check(unsafe {
-        syscall::wait_any_objects(packed.as_ptr(), sources.len() as u64, deadline.unwrap_or(u64::MAX))
+        syscall::wait_any_objects(
+            packed.as_ptr(),
+            sources.len() as u64,
+            deadline.unwrap_or(u64::MAX),
+        )
     })
 }
 
@@ -1362,6 +9929,12 @@ impl<'a> Canvas<'a> {
     pub fn set(&mut self, x: i32, y: i32, color: u32) {
         if let Some(index) = self.index(x, y) {
             self.pixels[index] = color & 0x00ff_ffff;
+        }
+    }
+
+    pub fn blend_pixel(&mut self, x: i32, y: i32, color: u32, opacity: u8) {
+        if let Some(index) = self.index(x, y) {
+            self.pixels[index] = blend(color, self.pixels[index], opacity) & 0x00ff_ffff;
         }
     }
 
@@ -1853,8 +10426,13 @@ fn decode_event(result: u64) -> Result<Option<InputEvent>, Error> {
             button: payload as u8,
             pressed: (payload >> 8) & 1 != 0,
         },
-        9 => InputEvent::Scroll { vertical: payload as u16 as i16 },
-        10 => InputEvent::PointerAbsolute { x: payload as u16, y: (payload >> 16) as u16 },
+        9 => InputEvent::Scroll {
+            vertical: payload as u16 as i16,
+        },
+        10 => InputEvent::PointerAbsolute {
+            x: payload as u16,
+            y: (payload >> 16) as u16,
+        },
         11 => InputEvent::Touch {
             contact: payload as u8,
             active: (payload >> 8) & 1 != 0,
@@ -1867,7 +10445,10 @@ fn decode_event(result: u64) -> Result<Option<InputEvent>, Error> {
             pressure: ((payload >> 32) & 0x3ff) as u16,
             touching: (payload >> 48) & 1 != 0,
         },
-        13 => InputEvent::GameController { control: payload as u16, value: (payload >> 16) as u16 as i16 },
+        13 => InputEvent::GameController {
+            control: payload as u16,
+            value: (payload >> 16) as u16 as i16,
+        },
         _ => return Err(Error::Failed),
     }))
 }
@@ -1990,11 +10571,30 @@ pub fn restart() -> Result<u64, Error> {
 
 pub fn compositor_outputs() -> Result<([Output; 4], usize), Error> {
     let mut bytes = [0u8; 64];
-    let count = check(unsafe { syscall::invoke(syscall::GRAPHICS_COMPOSITOR_OUTPUTS, bytes.as_mut_ptr() as u64, 0, 0) })?;
+    let count = check(unsafe {
+        syscall::invoke(
+            syscall::GRAPHICS_COMPOSITOR_OUTPUTS,
+            bytes.as_mut_ptr() as u64,
+            0,
+            0,
+        )
+    })?;
     let mut outputs = [Output::default(); 4];
     for (output, chunk) in outputs.iter_mut().zip(bytes.as_chunks::<16>().0) {
-        let field = |index: usize| u32::from_le_bytes([chunk[index], chunk[index + 1], chunk[index + 2], chunk[index + 3]]);
-        *output = Output { x: field(0), y: field(4), width: field(8), height: field(12) };
+        let field = |index: usize| {
+            u32::from_le_bytes([
+                chunk[index],
+                chunk[index + 1],
+                chunk[index + 2],
+                chunk[index + 3],
+            ])
+        };
+        *output = Output {
+            x: field(0),
+            y: field(4),
+            width: field(8),
+            height: field(12),
+        };
     }
     Ok((outputs, (count as usize).min(4)))
 }
@@ -2028,13 +10628,21 @@ pub fn audio_info() -> Result<AudioInfo, Error> {
 /// Play interleaved 16-bit little-endian stereo PCM at the output's sample
 /// rate; returns once it has finished. Needs the AudioPlayback capability.
 pub fn audio_play(pcm: &[u8]) -> Result<usize, Error> {
-    check(unsafe { syscall::invoke(syscall::AUDIO_PLAY, pcm.as_ptr() as u64, pcm.len() as u64, 0) })
-        .map(|played| played as usize)
+    check(unsafe {
+        syscall::invoke(
+            syscall::AUDIO_PLAY,
+            pcm.as_ptr() as u64,
+            pcm.len() as u64,
+            0,
+        )
+    })
+    .map(|played| played as usize)
 }
 
 /// Set the output volume, 0-100 (0 mutes); returns the amplifier gain set.
 pub fn audio_set_volume(percent: u8) -> Result<u8, Error> {
-    check(unsafe { syscall::invoke(syscall::AUDIO_SET_VOLUME, u64::from(percent), 0, 0) }).map(|gain| gain as u8)
+    check(unsafe { syscall::invoke(syscall::AUDIO_SET_VOLUME, u64::from(percent), 0, 0) })
+        .map(|gain| gain as u8)
 }
 
 pub fn secret_store(secret: &[u8]) -> Result<u64, Error> {
@@ -2369,6 +10977,2238 @@ pub fn format_u64(mut value: u64, buffer: &mut [u8]) -> &[u8] {
 // these run on the build machine.
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn wovengraphics_colors_pack_and_rectangles_clip() {
+        use crate::graphics::{Color, Rect};
+
+        assert_eq!(Color::TITLE.packed(), crate::rgb(40, 220, 230));
+        let clipped = Rect::new(4, 5, 10, 8).intersect(Rect::new(8, 9, 10, 10));
+        assert_eq!(clipped, Rect::new(8, 9, 6, 4));
+        assert!(Rect::new(0, 0, 0, 4).is_empty());
+    }
+
+    #[test]
+    fn wovengraphics_renderer_clips_gradient_stroke_and_image() {
+        use crate::graphics::{Color, Rect, Renderer};
+
+        let mut pixels = [0u32; 16];
+        {
+            let mut canvas = Canvas::new(&mut pixels, 0, 0, 4, 4).unwrap();
+            let mut renderer = Renderer::new(&mut canvas);
+            renderer.vertical_gradient(Rect::new(-1, -1, 6, 6), Color::BLACK, Color::WHITE);
+            renderer.stroke(Rect::new(0, 0, 4, 4), Color::TITLE);
+            assert!(renderer.image(1, 1, 2, 2, &[Color::WHITE.packed(); 4]));
+            assert!(renderer.image_blended(10, 10, 1, 1, &[Color::BLACK.packed()], 128));
+            assert!(!renderer.image(0, 0, 2, 2, &[Color::BLACK.packed(); 3]));
+        }
+        assert_eq!(pixels[0], Color::TITLE.packed());
+        assert_eq!(pixels[5], Color::WHITE.packed());
+        assert_eq!(pixels[10], Color::WHITE.packed());
+        assert_eq!(pixels[15], Color::TITLE.packed());
+    }
+
+    #[test]
+    fn wovengraphics_horizontal_gradient_reaches_both_edges() {
+        use crate::graphics::{Color, Rect, Renderer};
+
+        let mut pixels = [0u32; 9];
+        {
+            let mut canvas = Canvas::new(&mut pixels, 0, 0, 3, 3).unwrap();
+            Renderer::new(&mut canvas).horizontal_gradient(
+                Rect::new(-1, 0, 5, 3),
+                Color::BLACK,
+                Color::WHITE,
+            );
+        }
+        assert_eq!(pixels[0], Color::rgb(63, 63, 63).packed());
+        assert_eq!(pixels[2], Color::rgb(191, 191, 191).packed());
+        assert_eq!(pixels[6], Color::rgb(63, 63, 63).packed());
+        assert_eq!(pixels[8], Color::rgb(191, 191, 191).packed());
+    }
+
+    #[test]
+    fn wovengraphics_software_3d_depth_rejects_far_triangles() {
+        use crate::graphics::{Color, DepthBuffer, Renderer, Vertex3};
+
+        let mut pixels = [0u32; 16];
+        let mut depths = [u16::MAX; 16];
+        {
+            let mut canvas = Canvas::new(&mut pixels, 0, 0, 4, 4).unwrap();
+            let mut depth = DepthBuffer::new(&mut depths, 0, 0, 4, 4).unwrap();
+            let mut renderer = Renderer::new(&mut canvas);
+            renderer.triangle_3d(
+                &mut depth,
+                Vertex3::new(0, 0, 10, Color::WHITE),
+                Vertex3::new(3, 0, 10, Color::WHITE),
+                Vertex3::new(0, 3, 10, Color::WHITE),
+            );
+            renderer.triangle_3d(
+                &mut depth,
+                Vertex3::new(0, 0, 20, Color::BLACK),
+                Vertex3::new(3, 0, 20, Color::BLACK),
+                Vertex3::new(0, 3, 20, Color::BLACK),
+            );
+        }
+        assert_eq!(pixels[0], Color::WHITE.packed());
+    }
+
+    #[test]
+    fn wovengraphics_software_3d_interpolates_vertex_colour() {
+        use crate::graphics::{Color, DepthBuffer, Renderer, Vertex3};
+
+        let mut pixels = [0u32; 25];
+        let mut depths = [u16::MAX; 25];
+        {
+            let mut canvas = Canvas::new(&mut pixels, 0, 0, 5, 5).unwrap();
+            let mut depth = DepthBuffer::new(&mut depths, 0, 0, 5, 5).unwrap();
+            let mut renderer = Renderer::new(&mut canvas);
+            renderer.triangle_3d(
+                &mut depth,
+                Vertex3::new(0, 0, 1, Color::rgb(255, 0, 0)),
+                Vertex3::new(4, 0, 1, Color::rgb(0, 255, 0)),
+                Vertex3::new(0, 4, 1, Color::rgb(0, 0, 255)),
+            );
+        }
+        let center = pixels[6];
+        assert_ne!(center, 0);
+        assert!(center != Color::rgb(255, 0, 0).packed());
+        assert!(center != Color::rgb(0, 255, 0).packed());
+        assert!(center != Color::rgb(0, 0, 255).packed());
+    }
+
+    #[test]
+    fn wovengraphics_transformed_rect_is_clipped_and_filled() {
+        use crate::graphics::{Color, Rect, Renderer, Transform};
+
+        let mut pixels = [0u32; 36];
+        {
+            let mut canvas = Canvas::new(&mut pixels, 0, 0, 6, 6).unwrap();
+            let mut renderer = Renderer::new(&mut canvas);
+            renderer.transformed_rect(
+                Rect::new(-2, 1, 5, 3),
+                Transform::new(1 << 16, 1 << 15, 0, 1 << 16, 0, 0),
+                Color::TITLE,
+            );
+        }
+        assert!(pixels.iter().any(|pixel| *pixel == Color::TITLE.packed()));
+        assert_eq!(pixels[35], 0);
+    }
+
+    #[test]
+    fn wovengraphics_font_metrics_use_shared_fallback_and_lines() {
+        use crate::graphics::Font;
+
+        let metrics = Font::DEFAULT.measure("AB\n☃");
+        assert_eq!(metrics.width, crate::font::text_width("AB\n☃"));
+        assert_eq!(metrics.lines, 2);
+        assert_eq!(metrics.height, 2 * crate::font::LINE_HEIGHT as usize);
+    }
+
+    #[test]
+    fn wovengraphics_truetype_face_validates_tables_and_maps_bmp_cmap4() {
+        use crate::graphics::{TrueTypeError, TrueTypeFace};
+
+        let mut bytes = [0u8; 320];
+        let put16 = |bytes: &mut [u8], offset: usize, value: u16| {
+            bytes[offset..offset + 2].copy_from_slice(&value.to_be_bytes());
+        };
+        let put32 = |bytes: &mut [u8], offset: usize, value: u32| {
+            bytes[offset..offset + 4].copy_from_slice(&value.to_be_bytes());
+        };
+        put32(&mut bytes, 0, 0x0001_0000);
+        put16(&mut bytes, 4, 5);
+        for (record, (tag, offset, length)) in [
+            (*b"head", 100u32, 20u32),
+            (*b"maxp", 120u32, 6u32),
+            (*b"cmap", 126u32, 44u32),
+            (*b"hhea", 170u32, 36u32),
+            (*b"hmtx", 206u32, 8u32),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let base = 12 + record * 16;
+            bytes[base..base + 4].copy_from_slice(&tag);
+            put32(&mut bytes, base + 8, offset);
+            put32(&mut bytes, base + 12, length);
+        }
+        put16(&mut bytes, 118, 1000);
+        put16(&mut bytes, 124, 10);
+        put16(&mut bytes, 204, 2);
+        put16(&mut bytes, 206, 500);
+        put16(&mut bytes, 210, 700);
+        put16(&mut bytes, 126, 0);
+        put16(&mut bytes, 128, 1);
+        put16(&mut bytes, 130, 3);
+        put16(&mut bytes, 132, 1);
+        put32(&mut bytes, 134, 12);
+        put16(&mut bytes, 138, 4);
+        put16(&mut bytes, 140, 32);
+        put16(&mut bytes, 142, 0);
+        put16(&mut bytes, 144, 4);
+        put16(&mut bytes, 146, 0);
+        put16(&mut bytes, 148, 0);
+        put16(&mut bytes, 152, 0x0041);
+        put16(&mut bytes, 154, 0xffff);
+        put16(&mut bytes, 156, 0);
+        put16(&mut bytes, 158, 0x0041);
+        put16(&mut bytes, 160, 0xffff);
+        put16(&mut bytes, 162, 0xffc2);
+        put16(&mut bytes, 164, 1);
+        put16(&mut bytes, 166, 0);
+        put16(&mut bytes, 168, 0);
+
+        let face = TrueTypeFace::from_bytes(&bytes).unwrap();
+        assert_eq!(face.units_per_em(), 1000);
+        assert_eq!(face.glyph_count(), 10);
+        assert_eq!(face.glyph_index('A'), Some(3));
+        assert_eq!(face.advance_width('A'), Some(700));
+        assert_eq!(face.kerning('A', 'A'), None);
+        let mut axes = [crate::graphics::VariationAxis {
+            tag: [0; 4],
+            minimum: 0,
+            default: 0,
+            maximum: 0,
+        }; 1];
+        assert_eq!(face.variation_axes(&mut axes).unwrap(), 0);
+        assert_eq!(face.glyph_index('B'), None);
+        assert_eq!(face.glyph_index('\u{1f600}'), None);
+        assert_eq!(face.table_span(), (126, 44));
+        assert!(matches!(
+            TrueTypeFace::from_bytes(b"not-a-font"),
+            Err(TrueTypeError::TooSmall)
+        ));
+    }
+
+    #[test]
+    fn wovengraphics_truetype_face_decodes_bounded_outline_and_composite() {
+        use crate::graphics::{OutlinePoint, TrueTypeFace};
+
+        let mut bytes = [0u8; 430];
+        let put16_raw = |bytes: &mut [u8], offset: usize, value: u16| {
+            bytes[offset..offset + 2].copy_from_slice(&value.to_be_bytes());
+        };
+        let put16 = |bytes: &mut [u8], offset: usize, value: u16| {
+            put16_raw(bytes, offset + 24, value);
+        };
+        let put_i16 = |bytes: &mut [u8], offset: usize, value: i16| {
+            let offset = offset + 24;
+            bytes[offset..offset + 2].copy_from_slice(&value.to_be_bytes());
+        };
+        let put32_raw = |bytes: &mut [u8], offset: usize, value: u32| {
+            bytes[offset..offset + 4].copy_from_slice(&value.to_be_bytes());
+        };
+        let put32 = |bytes: &mut [u8], offset: usize, value: u32| {
+            put32_raw(bytes, offset + 24, value);
+        };
+        put32_raw(&mut bytes, 0, 0x0001_0000);
+        put16_raw(&mut bytes, 4, 8);
+        for (record, (tag, offset, length)) in [
+            (*b"head", 124u32, 52u32),
+            (*b"maxp", 176u32, 6u32),
+            (*b"cmap", 182u32, 44u32),
+            (*b"hhea", 226u32, 36u32),
+            (*b"hmtx", 262u32, 8u32),
+            (*b"loca", 270u32, 10u32),
+            (*b"glyf", 280u32, 56u32),
+            (*b"gvar", 336u32, 46u32),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let base = 12 + record * 16;
+            bytes[base..base + 4].copy_from_slice(&tag);
+            put32_raw(&mut bytes, base + 8, offset);
+            put32_raw(&mut bytes, base + 12, length);
+        }
+        put16(&mut bytes, 118, 1000);
+        put_i16(&mut bytes, 150, 0);
+        put16(&mut bytes, 156, 4);
+        put16(&mut bytes, 236, 2);
+        put16(&mut bytes, 238, 500);
+        put16(&mut bytes, 242, 700);
+        put16(&mut bytes, 160, 1);
+        put16(&mut bytes, 162, 3);
+        put16(&mut bytes, 164, 1);
+        put32(&mut bytes, 166, 12);
+        put16(&mut bytes, 170, 4);
+        put16(&mut bytes, 172, 32);
+        put16(&mut bytes, 176, 4);
+        put16(&mut bytes, 184, 0x0041);
+        put16(&mut bytes, 186, 0xffff);
+        put16(&mut bytes, 190, 0x0041);
+        put16(&mut bytes, 192, 0xffff);
+        put_i16(&mut bytes, 194, -62);
+        put_i16(&mut bytes, 196, 1);
+        put16(&mut bytes, 198, 0);
+        put16(&mut bytes, 200, 0);
+        for (index, value) in [0, 0, 0, 15, 28].into_iter().enumerate() {
+            put16(&mut bytes, 246 + index * 2, value);
+        }
+        put_i16(&mut bytes, 256, 1);
+        put16(&mut bytes, 266, 2);
+        put16(&mut bytes, 268, 0);
+        bytes[294..297].copy_from_slice(&[1, 1, 1]);
+        put_i16(&mut bytes, 273, 0);
+        put_i16(&mut bytes, 275, 100);
+        put_i16(&mut bytes, 277, -100);
+        put_i16(&mut bytes, 279, 0);
+        put_i16(&mut bytes, 281, 0);
+        put_i16(&mut bytes, 283, 100);
+        put_i16(&mut bytes, 286, -1);
+        put16(&mut bytes, 296, 0x0023);
+        put16(&mut bytes, 298, 2);
+        put_i16(&mut bytes, 300, 0);
+        put_i16(&mut bytes, 302, 0);
+        put16(&mut bytes, 304, 0x0001);
+        put16(&mut bytes, 306, 2);
+        put_i16(&mut bytes, 308, 1);
+        put_i16(&mut bytes, 310, 0);
+
+        put32_raw(&mut bytes, 336, 0x0001_0000);
+        put16_raw(&mut bytes, 340, 1);
+        put16_raw(&mut bytes, 342, 0);
+        put32_raw(&mut bytes, 344, 20);
+        put16_raw(&mut bytes, 348, 4);
+        put16_raw(&mut bytes, 350, 0);
+        put32_raw(&mut bytes, 352, 30);
+        for index in 0..=3 {
+            put16_raw(&mut bytes, 356 + index * 2, 0);
+        }
+        put16_raw(&mut bytes, 364, 8);
+        put16_raw(&mut bytes, 366, 1);
+        put16_raw(&mut bytes, 368, 8);
+        put16_raw(&mut bytes, 370, 0x8000);
+        put_i16(&mut bytes, 372, 0x4000);
+        bytes[374] = 0x05;
+        bytes[375..381].copy_from_slice(&[10, 20, 0, 0, 0, 0]);
+        bytes[381] = 0x45;
+
+        let face = TrueTypeFace::from_bytes(&bytes).unwrap();
+        let mut points = [OutlinePoint {
+            x: 0,
+            y: 0,
+            on_curve: false,
+            contour_end: false,
+        }; 6];
+        assert_eq!(face.outline_points('A', &mut points).unwrap(), 6);
+        let base_points = points;
+        let mut glyph_points = [OutlinePoint {
+            x: 0,
+            y: 0,
+            on_curve: false,
+            contour_end: false,
+        }; 6];
+        assert_eq!(face.outline_points_glyph(3, &mut glyph_points).unwrap(), 6);
+        assert_eq!(glyph_points, points);
+        assert_eq!(
+            points[0],
+            OutlinePoint {
+                x: 0,
+                y: 0,
+                on_curve: true,
+                contour_end: false
+            }
+        );
+        assert_eq!(
+            points[1],
+            OutlinePoint {
+                x: 100,
+                y: 0,
+                on_curve: true,
+                contour_end: false
+            }
+        );
+        assert_eq!(
+            points[2],
+            OutlinePoint {
+                x: 0,
+                y: 100,
+                on_curve: true,
+                contour_end: true
+            }
+        );
+        let mut varied_points = [OutlinePoint {
+            x: 0,
+            y: 0,
+            on_curve: false,
+            contour_end: false,
+        }; 6];
+        assert_eq!(
+            face.glyph_variation_data(3).unwrap().map(<[u8]>::len),
+            Some(16)
+        );
+        assert_eq!(
+            face.outline_points_with_variation('A', &[0x4000], &mut varied_points)
+                .unwrap(),
+            6
+        );
+        for (index, (base, varied)) in base_points.iter().zip(varied_points.iter()).enumerate() {
+            let expected_delta = if index < 3 { 10 } else { 20 };
+            assert_eq!(varied.x, base.x + expected_delta);
+            assert_eq!(varied.y, base.y);
+        }
+        let mut path = crate::graphics::Path::new();
+        assert_eq!(
+            face.outline_contour('A', 0, crate::graphics::Point::new(10, 20), 100, &mut path)
+                .unwrap(),
+            3
+        );
+        assert_eq!(path.len(), 3);
+        let mut compound = crate::graphics::CompoundPath::new();
+        assert_eq!(
+            face.outline_compound('A', crate::graphics::Point::new(10, 20), 100, &mut compound)
+                .unwrap(),
+            2
+        );
+        assert_eq!(compound.len(), 2);
+        let mut pixels = [0u32; 20 * 20];
+        {
+            let mut canvas = Canvas::new(&mut pixels, 0, 0, 20, 20).unwrap();
+            let mut renderer = crate::graphics::Renderer::new(&mut canvas);
+            assert_eq!(
+                face.render_glyph(
+                    'A',
+                    crate::graphics::Point::new(2, 15),
+                    100,
+                    crate::graphics::Color::WHITE,
+                    &mut renderer,
+                )
+                .unwrap(),
+                2
+            );
+            assert_eq!(
+                face.render_glyph_id(
+                    3,
+                    crate::graphics::Point::new(2, 15),
+                    100,
+                    crate::graphics::Color::WHITE,
+                    &mut renderer,
+                )
+                .unwrap(),
+                2
+            );
+            assert_eq!(
+                face.render_glyph_id_with_variation(
+                    3,
+                    crate::graphics::Point::new(2, 15),
+                    100,
+                    &[0x4000],
+                    crate::graphics::Color::WHITE,
+                    &mut renderer,
+                )
+                .unwrap(),
+                2
+            );
+            assert_eq!(
+                face.render_shaped_text(
+                    "AA",
+                    crate::graphics::Point::new(2, 15),
+                    100,
+                    crate::graphics::Color::WHITE,
+                    &mut renderer,
+                )
+                .unwrap(),
+                2
+            );
+        }
+        assert!(pixels.iter().any(|pixel| *pixel != 0));
+        let mut placements = [crate::graphics::GlyphPlacement {
+            character: '\0',
+            origin: crate::graphics::Point::new(0, 0),
+            advance: 0,
+        }; 2];
+        assert_eq!(
+            face.layout_text(
+                "AA",
+                crate::graphics::Point::new(2, 15),
+                10,
+                &mut placements,
+            )
+            .unwrap(),
+            2
+        );
+        assert_eq!(placements[0].origin.x, 2);
+        assert_eq!(placements[1].origin.x, 9);
+        let mut rtl = [crate::graphics::GlyphPlacement {
+            character: '\0',
+            origin: crate::graphics::Point::new(0, 0),
+            advance: 0,
+        }; 2];
+        assert_eq!(
+            face.layout_text_direction(
+                "AA",
+                crate::graphics::Point::new(2, 15),
+                10,
+                crate::graphics::TextDirection::Rtl,
+                &mut rtl,
+            )
+            .unwrap(),
+            2
+        );
+        assert_eq!(rtl[0].origin.x, 9);
+        assert_eq!(rtl[1].origin.x, 2);
+        assert_eq!(
+            crate::graphics::TextDirection::classify('\u{05d0}'),
+            Some(crate::graphics::TextDirection::Rtl)
+        );
+        assert_eq!(
+            crate::graphics::TextDirection::classify('A'),
+            Some(crate::graphics::TextDirection::Ltr)
+        );
+        assert_eq!(crate::graphics::TextDirection::classify('-'), None);
+        let mut bidi = [crate::graphics::GlyphPlacement {
+            character: '\0',
+            origin: crate::graphics::Point::new(0, 0),
+            advance: 0,
+        }; 2];
+        assert_eq!(
+            face.layout_text_bidi(
+                "AA",
+                crate::graphics::Point::new(2, 15),
+                10,
+                crate::graphics::TextDirection::Rtl,
+                &mut bidi,
+            )
+            .unwrap(),
+            2
+        );
+        assert_eq!(bidi[0].origin.x, 2);
+        assert_eq!(bidi[1].origin.x, 9);
+        let mut wrapped = [crate::graphics::GlyphPlacement {
+            character: '\0',
+            origin: crate::graphics::Point::new(0, 0),
+            advance: 0,
+        }; 2];
+        assert_eq!(
+            face.layout_text_box(
+                "AA",
+                crate::graphics::Point::new(2, 15),
+                10,
+                12,
+                10,
+                &mut wrapped,
+            )
+            .unwrap(),
+            2
+        );
+        assert_eq!(wrapped[0].origin, crate::graphics::Point::new(2, 15));
+        assert_eq!(wrapped[1].origin, crate::graphics::Point::new(2, 27));
+        let mut whole_word = [crate::graphics::GlyphPlacement {
+            character: '\0',
+            origin: crate::graphics::Point::new(0, 0),
+            advance: 0,
+        }; 2];
+        assert_eq!(
+            face.layout_text_word_box(
+                "AA",
+                crate::graphics::Point::new(2, 15),
+                10,
+                12,
+                10,
+                &mut whole_word,
+            )
+            .unwrap(),
+            2
+        );
+        assert_eq!(whole_word[1].origin.y, 15);
+        let mut fallback_pixels = [0u32; 32 * 16];
+        {
+            let mut canvas = Canvas::new(&mut fallback_pixels, 0, 0, 32, 16).unwrap();
+            let mut renderer = crate::graphics::Renderer::new(&mut canvas);
+            assert_eq!(
+                face.render_text_with_bitmap_fallback(
+                    "AB",
+                    crate::graphics::Point::new(2, 12),
+                    10,
+                    1,
+                    crate::graphics::Color::WHITE,
+                    &mut renderer,
+                )
+                .unwrap(),
+                2
+            );
+        }
+        assert!(fallback_pixels.iter().any(|pixel| *pixel != 0));
+    }
+
+    #[test]
+    fn wovengraphics_truetype_face_maps_non_bmp_cmap12_groups() {
+        use crate::graphics::TrueTypeFace;
+
+        let mut bytes = [0u8; 340];
+        let put16 = |bytes: &mut [u8], offset: usize, value: u16| {
+            bytes[offset..offset + 2].copy_from_slice(&value.to_be_bytes());
+        };
+        let put32 = |bytes: &mut [u8], offset: usize, value: u32| {
+            bytes[offset..offset + 4].copy_from_slice(&value.to_be_bytes());
+        };
+        put32(&mut bytes, 0, 0x0001_0000);
+        put16(&mut bytes, 4, 5);
+        for (record, (tag, offset, length)) in [
+            (*b"head", 100u32, 20u32),
+            (*b"maxp", 120u32, 6u32),
+            (*b"cmap", 126u32, 40u32),
+            (*b"hhea", 166u32, 36u32),
+            (*b"hmtx", 202u32, 8u32),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let base = 12 + record * 16;
+            bytes[base..base + 4].copy_from_slice(&tag);
+            put32(&mut bytes, base + 8, offset);
+            put32(&mut bytes, base + 12, length);
+        }
+        put16(&mut bytes, 118, 1000);
+        put16(&mut bytes, 124, 10);
+        put16(&mut bytes, 200, 2);
+        put16(&mut bytes, 202, 500);
+        put16(&mut bytes, 206, 700);
+        put16(&mut bytes, 126, 0);
+        put16(&mut bytes, 128, 1);
+        put16(&mut bytes, 130, 3);
+        put16(&mut bytes, 132, 10);
+        put32(&mut bytes, 134, 12);
+        put16(&mut bytes, 138, 12);
+        put16(&mut bytes, 140, 0);
+        put32(&mut bytes, 142, 28);
+        put32(&mut bytes, 146, 0);
+        put32(&mut bytes, 150, 1);
+        put32(&mut bytes, 154, 0x1f600);
+        put32(&mut bytes, 158, 0x1f600);
+        put32(&mut bytes, 162, 3);
+
+        let face = TrueTypeFace::from_bytes(&bytes).unwrap();
+        assert_eq!(face.glyph_index('\u{1f600}'), Some(3));
+        assert_eq!(face.glyph_index('A'), None);
+        assert_eq!(face.advance_width('\u{1f600}'), Some(700));
+    }
+
+    #[test]
+    fn wovengraphics_truetype_face_applies_bounded_gsub_ligature() {
+        use crate::graphics::{Point, ShapedGlyph, TrueTypeFace};
+
+        let mut bytes = [0u8; 400];
+        let put16 = |bytes: &mut [u8], offset: usize, value: u16| {
+            bytes[offset..offset + 2].copy_from_slice(&value.to_be_bytes());
+        };
+        let put_i16 = |bytes: &mut [u8], offset: usize, value: i16| {
+            bytes[offset..offset + 2].copy_from_slice(&value.to_be_bytes());
+        };
+        let put32 = |bytes: &mut [u8], offset: usize, value: u32| {
+            bytes[offset..offset + 4].copy_from_slice(&value.to_be_bytes());
+        };
+        put32(&mut bytes, 0, 0x0001_0000);
+        put16(&mut bytes, 4, 6);
+        for (record, (tag, offset, length)) in [
+            (*b"head", 108u32, 52u32),
+            (*b"maxp", 160u32, 6u32),
+            (*b"cmap", 166u32, 44u32),
+            (*b"hhea", 210u32, 36u32),
+            (*b"hmtx", 246u32, 16u32),
+            (*b"GSUB", 262u32, 110u32),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let base = 12 + record * 16;
+            bytes[base..base + 4].copy_from_slice(&tag);
+            put32(&mut bytes, base + 8, offset);
+            put32(&mut bytes, base + 12, length);
+        }
+        put16(&mut bytes, 126, 1000);
+        put16(&mut bytes, 158, 0);
+        put16(&mut bytes, 164, 4);
+        put16(&mut bytes, 244, 4);
+        for (index, advance) in [500, 500, 500, 1000].into_iter().enumerate() {
+            put16(&mut bytes, 246 + index * 4, advance);
+        }
+        put16(&mut bytes, 166, 0);
+        put16(&mut bytes, 168, 1);
+        put16(&mut bytes, 170, 3);
+        put32(&mut bytes, 174, 12);
+        put16(&mut bytes, 178, 4);
+        put16(&mut bytes, 180, 32);
+        put16(&mut bytes, 182, 0);
+        put16(&mut bytes, 184, 4);
+        put16(&mut bytes, 186, 4);
+        put16(&mut bytes, 188, 1);
+        put16(&mut bytes, 190, 0);
+        put16(&mut bytes, 192, 67);
+        put16(&mut bytes, 194, 0xffff);
+        put16(&mut bytes, 196, 0);
+        put16(&mut bytes, 198, 65);
+        put16(&mut bytes, 200, 0xffff);
+        put_i16(&mut bytes, 202, -64);
+        put_i16(&mut bytes, 204, 1);
+        put16(&mut bytes, 206, 0);
+        put16(&mut bytes, 208, 0);
+
+        put32(&mut bytes, 262, 0x0001_0000);
+        put16(&mut bytes, 266, 72);
+        put16(&mut bytes, 268, 10);
+        put16(&mut bytes, 270, 30);
+        put16(&mut bytes, 272, 1);
+        bytes[274..278].copy_from_slice(b"liga");
+        put16(&mut bytes, 278, 8);
+        put16(&mut bytes, 280, 0);
+        put16(&mut bytes, 282, 1);
+        put16(&mut bytes, 284, 0);
+        put16(&mut bytes, 292, 1);
+        put16(&mut bytes, 294, 4);
+        put16(&mut bytes, 296, 4);
+        put16(&mut bytes, 298, 0);
+        put16(&mut bytes, 300, 1);
+        put16(&mut bytes, 302, 8);
+        put16(&mut bytes, 304, 1);
+        put16(&mut bytes, 306, 24);
+        put16(&mut bytes, 308, 1);
+        put16(&mut bytes, 310, 10);
+        put16(&mut bytes, 314, 1);
+        put16(&mut bytes, 316, 8);
+        put16(&mut bytes, 322, 3);
+        put16(&mut bytes, 324, 2);
+        put16(&mut bytes, 326, 2);
+        put16(&mut bytes, 328, 1);
+        put16(&mut bytes, 330, 1);
+        put16(&mut bytes, 332, 1);
+        put16(&mut bytes, 334, 1);
+        bytes[336..340].copy_from_slice(b"DFLT");
+        put16(&mut bytes, 340, 10);
+        put16(&mut bytes, 344, 10);
+        put16(&mut bytes, 346, 1);
+        bytes[348..352].copy_from_slice(b"TRK ");
+        put16(&mut bytes, 352, 18);
+        put16(&mut bytes, 354, 0);
+        put16(&mut bytes, 356, u16::MAX);
+        put16(&mut bytes, 358, 1);
+        put16(&mut bytes, 360, 0);
+        put16(&mut bytes, 362, 0);
+        put16(&mut bytes, 364, u16::MAX);
+        put16(&mut bytes, 366, 1);
+        put16(&mut bytes, 368, 0);
+        assert_eq!(u16::from_be_bytes([bytes[328], bytes[329]]), 1);
+        assert_eq!(u16::from_be_bytes([bytes[170], bytes[171]]), 3);
+        assert_eq!(u16::from_be_bytes([bytes[178], bytes[179]]), 4);
+        assert_eq!(u16::from_be_bytes([bytes[180], bytes[181]]), 32);
+
+        let face = TrueTypeFace::from_bytes(&bytes).unwrap();
+        let mut output = [ShapedGlyph {
+            glyph_id: 0,
+            source: '\0',
+            source_count: 0,
+            origin: Point::new(0, 0),
+            advance: 0,
+        }; 2];
+        assert_eq!(
+            face.shape_text_ligatures("AB", Point::new(2, 15), 10, &mut output)
+                .unwrap(),
+            1
+        );
+        assert_eq!(output[0].glyph_id, 3);
+        let mut single_bytes = bytes;
+        put32(&mut single_bytes, 104, 64);
+        put32(&mut single_bytes, 262, 0x0001_0000);
+        put16(&mut single_bytes, 266, 0);
+        put16(&mut single_bytes, 268, 10);
+        put16(&mut single_bytes, 270, 36);
+        put16(&mut single_bytes, 272, 1);
+        single_bytes[274..278].copy_from_slice(b"smcp");
+        put16(&mut single_bytes, 278, 8);
+        put16(&mut single_bytes, 280, 0);
+        put16(&mut single_bytes, 282, 1);
+        put16(&mut single_bytes, 284, 0);
+        put16(&mut single_bytes, 298, 1);
+        put16(&mut single_bytes, 300, 4);
+        put16(&mut single_bytes, 302, 1);
+        put16(&mut single_bytes, 304, 0);
+        put16(&mut single_bytes, 306, 1);
+        put16(&mut single_bytes, 308, 8);
+        put16(&mut single_bytes, 310, 2);
+        put16(&mut single_bytes, 312, 10);
+        put16(&mut single_bytes, 314, 1);
+        put16(&mut single_bytes, 316, 3);
+        put16(&mut single_bytes, 320, 1);
+        put16(&mut single_bytes, 322, 1);
+        put16(&mut single_bytes, 324, 1);
+        let single_face = TrueTypeFace::from_bytes(&single_bytes).unwrap();
+        assert_eq!(
+            single_face
+                .shape_text_ligatures("A", Point::new(2, 15), 10, &mut output)
+                .unwrap(),
+            1
+        );
+        assert_eq!(output[0].glyph_id, 3);
+        assert_eq!(output[0].source_count, 1);
+        let mut context_bytes = single_bytes;
+        put32(&mut context_bytes, 104, 116);
+        put32(&mut context_bytes, 262, 0x0001_0000);
+        put16(&mut context_bytes, 266, 0);
+        put16(&mut context_bytes, 268, 10);
+        put16(&mut context_bytes, 270, 36);
+        put16(&mut context_bytes, 272, 1);
+        context_bytes[274..278].copy_from_slice(b"calt");
+        put16(&mut context_bytes, 278, 8);
+        put16(&mut context_bytes, 280, 0);
+        put16(&mut context_bytes, 282, 1);
+        put16(&mut context_bytes, 284, 0);
+        put16(&mut context_bytes, 298, 2);
+        put16(&mut context_bytes, 300, 6);
+        put16(&mut context_bytes, 302, 54);
+        put16(&mut context_bytes, 304, 5);
+        put16(&mut context_bytes, 306, 0);
+        put16(&mut context_bytes, 308, 1);
+        put16(&mut context_bytes, 310, 8);
+        put16(&mut context_bytes, 312, 3);
+        put16(&mut context_bytes, 314, 1);
+        put16(&mut context_bytes, 316, 20);
+        put16(&mut context_bytes, 318, 1);
+        put16(&mut context_bytes, 320, 26);
+        put16(&mut context_bytes, 322, 1);
+        put16(&mut context_bytes, 324, 32);
+        put16(&mut context_bytes, 326, 1);
+        put16(&mut context_bytes, 328, 0);
+        put16(&mut context_bytes, 330, 1);
+        put16(&mut context_bytes, 332, 1);
+        put16(&mut context_bytes, 334, 1);
+        put16(&mut context_bytes, 336, 1);
+        put16(&mut context_bytes, 338, 1);
+        put16(&mut context_bytes, 340, 1);
+        put16(&mut context_bytes, 342, 2);
+        put16(&mut context_bytes, 344, 1);
+        put16(&mut context_bytes, 346, 1);
+        put16(&mut context_bytes, 348, 3);
+        put16(&mut context_bytes, 350, 1);
+        put16(&mut context_bytes, 352, 1);
+        put16(&mut context_bytes, 354, 0);
+        put16(&mut context_bytes, 356, 1);
+        put16(&mut context_bytes, 358, 8);
+        put16(&mut context_bytes, 360, 2);
+        put16(&mut context_bytes, 362, 10);
+        put16(&mut context_bytes, 364, 1);
+        put16(&mut context_bytes, 366, 3);
+        put16(&mut context_bytes, 370, 1);
+        put16(&mut context_bytes, 372, 1);
+        put16(&mut context_bytes, 374, 2);
+        let context_face = TrueTypeFace::from_bytes(&context_bytes).unwrap();
+        let mut context_output = [ShapedGlyph {
+            glyph_id: 0,
+            source: '\0',
+            source_count: 0,
+            origin: Point::new(0, 0),
+            advance: 0,
+        }; 3];
+        let context_count = context_face
+            .shape_text_ligatures("ABC", Point::new(2, 15), 10, &mut context_output)
+            .unwrap();
+        assert_eq!(context_count, 3);
+        assert_eq!(context_output[1].glyph_id, 3);
+        assert_eq!(context_output[1].source, 'B');
+        let mut chain_bytes = context_bytes;
+        put16(&mut chain_bytes, 304, 6);
+        let chain_face = TrueTypeFace::from_bytes(&chain_bytes).unwrap();
+        let mut chain_output = [ShapedGlyph {
+            glyph_id: 0,
+            source: '\0',
+            source_count: 0,
+            origin: Point::new(0, 0),
+            advance: 0,
+        }; 3];
+        assert_eq!(
+            chain_face
+                .shape_text_ligatures("ABC", Point::new(2, 15), 10, &mut chain_output)
+                .unwrap(),
+            3
+        );
+        assert_eq!(chain_output[1].glyph_id, 3);
+        let mut class_bytes = single_bytes;
+        put32(&mut class_bytes, 104, 138);
+        put32(&mut class_bytes, 262, 0x0001_0000);
+        put16(&mut class_bytes, 266, 0);
+        put16(&mut class_bytes, 268, 10);
+        put16(&mut class_bytes, 270, 36);
+        put16(&mut class_bytes, 272, 1);
+        class_bytes[274..278].copy_from_slice(b"calt");
+        put16(&mut class_bytes, 278, 8);
+        put16(&mut class_bytes, 280, 0);
+        put16(&mut class_bytes, 282, 1);
+        put16(&mut class_bytes, 284, 0);
+        put16(&mut class_bytes, 298, 2);
+        put16(&mut class_bytes, 300, 6);
+        put16(&mut class_bytes, 302, 78);
+        put16(&mut class_bytes, 304, 5);
+        put16(&mut class_bytes, 306, 0);
+        put16(&mut class_bytes, 308, 1);
+        put16(&mut class_bytes, 310, 8);
+        put16(&mut class_bytes, 312, 2);
+        put16(&mut class_bytes, 314, 40);
+        put16(&mut class_bytes, 316, 46);
+        put16(&mut class_bytes, 318, 1);
+        put16(&mut class_bytes, 320, 12);
+        put16(&mut class_bytes, 324, 1);
+        put16(&mut class_bytes, 326, 8);
+        put16(&mut class_bytes, 332, 2);
+        put16(&mut class_bytes, 334, 1);
+        put16(&mut class_bytes, 336, 1);
+        put16(&mut class_bytes, 338, 0);
+        put16(&mut class_bytes, 340, 1);
+        put16(&mut class_bytes, 352, 1);
+        put16(&mut class_bytes, 354, 1);
+        put16(&mut class_bytes, 356, 1);
+        put16(&mut class_bytes, 358, 1);
+        put16(&mut class_bytes, 360, 1);
+        put16(&mut class_bytes, 362, 2);
+        put16(&mut class_bytes, 364, 0);
+        put16(&mut class_bytes, 366, 1);
+        put16(&mut class_bytes, 376, 1);
+        put16(&mut class_bytes, 378, 0);
+        put16(&mut class_bytes, 380, 1);
+        put16(&mut class_bytes, 382, 8);
+        put16(&mut class_bytes, 384, 2);
+        put16(&mut class_bytes, 386, 10);
+        put16(&mut class_bytes, 388, 1);
+        put16(&mut class_bytes, 390, 3);
+        put16(&mut class_bytes, 394, 1);
+        put16(&mut class_bytes, 396, 1);
+        put16(&mut class_bytes, 398, 1);
+        let class_face = TrueTypeFace::from_bytes(&class_bytes).unwrap();
+        let mut class_output = [ShapedGlyph {
+            glyph_id: 0,
+            source: '\0',
+            source_count: 0,
+            origin: Point::new(0, 0),
+            advance: 0,
+        }; 2];
+        assert_eq!(
+            class_face
+                .shape_text_ligatures("AB", Point::new(2, 15), 10, &mut class_output)
+                .unwrap(),
+            2
+        );
+        assert_eq!(class_output[0].glyph_id, 3);
+        let mut extension_class_bytes = [0u8; 512];
+        extension_class_bytes[..class_bytes.len()].copy_from_slice(&class_bytes);
+        extension_class_bytes[420..508].copy_from_slice(&class_bytes[312..400]);
+        put32(&mut extension_class_bytes, 104, 250);
+        put16(&mut extension_class_bytes, 304, 7);
+        put16(&mut extension_class_bytes, 312, 1);
+        put16(&mut extension_class_bytes, 314, 5);
+        put32(&mut extension_class_bytes, 316, 108);
+        let extension_class_face = TrueTypeFace::from_bytes(&extension_class_bytes).unwrap();
+        let mut extension_class_output = [ShapedGlyph {
+            glyph_id: 0,
+            source: '\0',
+            source_count: 0,
+            origin: Point::new(0, 0),
+            advance: 0,
+        }; 2];
+        assert_eq!(
+            extension_class_face
+                .shape_text_ligatures("AB", Point::new(2, 15), 10, &mut extension_class_output)
+                .unwrap(),
+            2
+        );
+        assert_eq!(extension_class_output[0].glyph_id, 3);
+        let mut class_chain_bytes = [0u8; 480];
+        class_chain_bytes[..single_bytes.len()].copy_from_slice(&single_bytes);
+        put32(&mut class_chain_bytes, 104, 210);
+        put32(&mut class_chain_bytes, 262, 0x0001_0000);
+        put16(&mut class_chain_bytes, 266, 0);
+        put16(&mut class_chain_bytes, 268, 10);
+        put16(&mut class_chain_bytes, 270, 36);
+        put16(&mut class_chain_bytes, 272, 1);
+        class_chain_bytes[274..278].copy_from_slice(b"calt");
+        put16(&mut class_chain_bytes, 278, 8);
+        put16(&mut class_chain_bytes, 280, 0);
+        put16(&mut class_chain_bytes, 282, 1);
+        put16(&mut class_chain_bytes, 284, 0);
+        put16(&mut class_chain_bytes, 298, 2);
+        put16(&mut class_chain_bytes, 300, 6);
+        put16(&mut class_chain_bytes, 302, 62);
+        put16(&mut class_chain_bytes, 304, 6);
+        put16(&mut class_chain_bytes, 306, 0);
+        put16(&mut class_chain_bytes, 308, 1);
+        put16(&mut class_chain_bytes, 310, 8);
+        put16(&mut class_chain_bytes, 312, 2);
+        put16(&mut class_chain_bytes, 314, 100);
+        put16(&mut class_chain_bytes, 316, 112);
+        put16(&mut class_chain_bytes, 318, 124);
+        put16(&mut class_chain_bytes, 320, 136);
+        put16(&mut class_chain_bytes, 322, 1);
+        put16(&mut class_chain_bytes, 324, 14);
+        put16(&mut class_chain_bytes, 326, 1);
+        put16(&mut class_chain_bytes, 328, 8);
+        put16(&mut class_chain_bytes, 334, 1);
+        put16(&mut class_chain_bytes, 336, 1);
+        put16(&mut class_chain_bytes, 338, 1);
+        put16(&mut class_chain_bytes, 340, 1);
+        put16(&mut class_chain_bytes, 342, 1);
+        put16(&mut class_chain_bytes, 344, 1);
+        put16(&mut class_chain_bytes, 346, 0);
+        put16(&mut class_chain_bytes, 348, 1);
+        put16(&mut class_chain_bytes, 360, 1);
+        put16(&mut class_chain_bytes, 362, 0);
+        put16(&mut class_chain_bytes, 364, 1);
+        put16(&mut class_chain_bytes, 366, 8);
+        put16(&mut class_chain_bytes, 368, 2);
+        put16(&mut class_chain_bytes, 370, 10);
+        put16(&mut class_chain_bytes, 372, 1);
+        put16(&mut class_chain_bytes, 374, 3);
+        put16(&mut class_chain_bytes, 378, 1);
+        put16(&mut class_chain_bytes, 380, 1);
+        put16(&mut class_chain_bytes, 382, 2);
+        put16(&mut class_chain_bytes, 412, 1);
+        put16(&mut class_chain_bytes, 414, 1);
+        put16(&mut class_chain_bytes, 416, 2);
+        put16(&mut class_chain_bytes, 424, 1);
+        put16(&mut class_chain_bytes, 426, 1);
+        put16(&mut class_chain_bytes, 428, 3);
+        put16(&mut class_chain_bytes, 430, 1);
+        put16(&mut class_chain_bytes, 432, 0);
+        put16(&mut class_chain_bytes, 434, 1);
+        put16(&mut class_chain_bytes, 436, 1);
+        put16(&mut class_chain_bytes, 438, 1);
+        put16(&mut class_chain_bytes, 440, 3);
+        put16(&mut class_chain_bytes, 442, 0);
+        put16(&mut class_chain_bytes, 444, 0);
+        put16(&mut class_chain_bytes, 446, 0);
+        put16(&mut class_chain_bytes, 448, 1);
+        put16(&mut class_chain_bytes, 450, 1);
+        put16(&mut class_chain_bytes, 452, 3);
+        put16(&mut class_chain_bytes, 454, 1);
+        put16(&mut class_chain_bytes, 456, 0);
+        put16(&mut class_chain_bytes, 458, 1);
+        let class_chain_face = TrueTypeFace::from_bytes(&class_chain_bytes).unwrap();
+        let mut class_chain_output = [ShapedGlyph {
+            glyph_id: 0,
+            source: '\0',
+            source_count: 0,
+            origin: Point::new(0, 0),
+            advance: 0,
+        }; 3];
+        assert_eq!(
+            class_chain_face
+                .shape_text_ligatures("ABC", Point::new(2, 15), 10, &mut class_chain_output)
+                .unwrap(),
+            3
+        );
+        assert_eq!(class_chain_output[1].glyph_id, 3);
+        let mut extension_class_chain_bytes = [0u8; 600];
+        extension_class_chain_bytes[..class_chain_bytes.len()].copy_from_slice(&class_chain_bytes);
+        extension_class_chain_bytes[450..598].copy_from_slice(&class_chain_bytes[312..460]);
+        put32(&mut extension_class_chain_bytes, 104, 338);
+        put16(&mut extension_class_chain_bytes, 304, 7);
+        put16(&mut extension_class_chain_bytes, 312, 1);
+        put16(&mut extension_class_chain_bytes, 314, 6);
+        put32(&mut extension_class_chain_bytes, 316, 138);
+        let extension_class_chain_face =
+            TrueTypeFace::from_bytes(&extension_class_chain_bytes).unwrap();
+        let mut extension_class_chain_output = [ShapedGlyph {
+            glyph_id: 0,
+            source: '\0',
+            source_count: 0,
+            origin: Point::new(0, 0),
+            advance: 0,
+        }; 3];
+        assert_eq!(
+            extension_class_chain_face
+                .shape_text_ligatures(
+                    "ABC",
+                    Point::new(2, 15),
+                    10,
+                    &mut extension_class_chain_output,
+                )
+                .unwrap(),
+            3
+        );
+        assert_eq!(extension_class_chain_output[1].glyph_id, 3);
+        let mut pipeline_bytes = single_bytes;
+        put32(&mut pipeline_bytes, 104, 100);
+        put32(&mut pipeline_bytes, 262, 0x0001_0000);
+        put16(&mut pipeline_bytes, 266, 0);
+        put16(&mut pipeline_bytes, 268, 10);
+        put16(&mut pipeline_bytes, 270, 36);
+        put16(&mut pipeline_bytes, 272, 1);
+        pipeline_bytes[274..278].copy_from_slice(b"smcp");
+        put16(&mut pipeline_bytes, 278, 8);
+        put16(&mut pipeline_bytes, 280, 0);
+        put16(&mut pipeline_bytes, 282, 2);
+        put16(&mut pipeline_bytes, 284, 0);
+        put16(&mut pipeline_bytes, 286, 1);
+        put16(&mut pipeline_bytes, 298, 2);
+        put16(&mut pipeline_bytes, 300, 6);
+        put16(&mut pipeline_bytes, 302, 32);
+        put16(&mut pipeline_bytes, 304, 1);
+        put16(&mut pipeline_bytes, 306, 0);
+        put16(&mut pipeline_bytes, 308, 1);
+        put16(&mut pipeline_bytes, 310, 8);
+        put16(&mut pipeline_bytes, 312, 2);
+        put16(&mut pipeline_bytes, 314, 10);
+        put16(&mut pipeline_bytes, 316, 1);
+        put16(&mut pipeline_bytes, 318, 2);
+        put16(&mut pipeline_bytes, 322, 1);
+        put16(&mut pipeline_bytes, 324, 1);
+        put16(&mut pipeline_bytes, 326, 1);
+        put16(&mut pipeline_bytes, 330, 1);
+        put16(&mut pipeline_bytes, 332, 0);
+        put16(&mut pipeline_bytes, 334, 1);
+        put16(&mut pipeline_bytes, 336, 8);
+        put16(&mut pipeline_bytes, 338, 2);
+        put16(&mut pipeline_bytes, 340, 10);
+        put16(&mut pipeline_bytes, 342, 1);
+        put16(&mut pipeline_bytes, 344, 3);
+        put16(&mut pipeline_bytes, 348, 1);
+        put16(&mut pipeline_bytes, 350, 1);
+        put16(&mut pipeline_bytes, 352, 2);
+        let pipeline_face = TrueTypeFace::from_bytes(&pipeline_bytes).unwrap();
+        let mut pipeline_output = [ShapedGlyph {
+            glyph_id: 0,
+            source: '\0',
+            source_count: 0,
+            origin: Point::new(0, 0),
+            advance: 0,
+        }; 1];
+        assert_eq!(
+            pipeline_face
+                .shape_text_ligatures("A", Point::new(2, 15), 10, &mut pipeline_output)
+                .unwrap(),
+            1
+        );
+        assert_eq!(pipeline_output[0].glyph_id, 3);
+        let mut extension_bytes = pipeline_bytes;
+        put16(&mut extension_bytes, 304, 7);
+        put16(&mut extension_bytes, 312, 1);
+        put16(&mut extension_bytes, 314, 1);
+        put32(&mut extension_bytes, 316, 8);
+        put16(&mut extension_bytes, 320, 2);
+        put16(&mut extension_bytes, 322, 8);
+        put16(&mut extension_bytes, 324, 1);
+        put16(&mut extension_bytes, 326, 2);
+        put16(&mut extension_bytes, 328, 1);
+        put16(&mut extension_bytes, 330, 1);
+        put16(&mut extension_bytes, 332, 1);
+        let extension_face = TrueTypeFace::from_bytes(&extension_bytes).unwrap();
+        let mut extension_output = [ShapedGlyph {
+            glyph_id: 0,
+            source: '\0',
+            source_count: 0,
+            origin: Point::new(0, 0),
+            advance: 0,
+        }; 1];
+        assert_eq!(
+            extension_face
+                .shape_text_ligatures("A", Point::new(2, 15), 10, &mut extension_output)
+                .unwrap(),
+            1
+        );
+        assert_eq!(extension_output[0].glyph_id, 3);
+        let mut extension_ligature_bytes = pipeline_bytes;
+        put16(&mut extension_ligature_bytes, 304, 7);
+        put16(&mut extension_ligature_bytes, 312, 1);
+        put16(&mut extension_ligature_bytes, 314, 4);
+        put32(&mut extension_ligature_bytes, 316, 8);
+        put16(&mut extension_ligature_bytes, 320, 1);
+        put16(&mut extension_ligature_bytes, 322, 8);
+        put16(&mut extension_ligature_bytes, 324, 1);
+        put16(&mut extension_ligature_bytes, 326, 14);
+        put16(&mut extension_ligature_bytes, 328, 1);
+        put16(&mut extension_ligature_bytes, 330, 1);
+        put16(&mut extension_ligature_bytes, 332, 1);
+        put16(&mut extension_ligature_bytes, 334, 1);
+        put16(&mut extension_ligature_bytes, 336, 6);
+        put16(&mut extension_ligature_bytes, 340, 9);
+        put16(&mut extension_ligature_bytes, 342, 2);
+        put16(&mut extension_ligature_bytes, 344, 2);
+        let extension_ligature_face = TrueTypeFace::from_bytes(&extension_ligature_bytes).unwrap();
+        let mut extension_ligature_output = [ShapedGlyph {
+            glyph_id: 0,
+            source: '\0',
+            source_count: 0,
+            origin: Point::new(0, 0),
+            advance: 0,
+        }; 2];
+        assert_eq!(
+            extension_ligature_face
+                .shape_text_ligatures("AB", Point::new(2, 15), 10, &mut extension_ligature_output)
+                .unwrap(),
+            1
+        );
+        assert_eq!(extension_ligature_output[0].glyph_id, 9);
+        let mut extension_contextual_bytes = pipeline_bytes;
+        put32(&mut extension_contextual_bytes, 104, 138);
+        put16(&mut extension_contextual_bytes, 302, 52);
+        put16(&mut extension_contextual_bytes, 304, 7);
+        put16(&mut extension_contextual_bytes, 312, 1);
+        put16(&mut extension_contextual_bytes, 314, 5);
+        put32(&mut extension_contextual_bytes, 316, 8);
+        put16(&mut extension_contextual_bytes, 320, 3);
+        put16(&mut extension_contextual_bytes, 322, 0);
+        put16(&mut extension_contextual_bytes, 324, 2);
+        put16(&mut extension_contextual_bytes, 326, 52);
+        put16(&mut extension_contextual_bytes, 328, 58);
+        put16(&mut extension_contextual_bytes, 330, 0);
+        put16(&mut extension_contextual_bytes, 332, 1);
+        put16(&mut extension_contextual_bytes, 334, 0);
+        put16(&mut extension_contextual_bytes, 336, 1);
+        put16(&mut extension_contextual_bytes, 350, 1);
+        put16(&mut extension_contextual_bytes, 352, 0);
+        put16(&mut extension_contextual_bytes, 354, 1);
+        put16(&mut extension_contextual_bytes, 356, 8);
+        put16(&mut extension_contextual_bytes, 358, 2);
+        put16(&mut extension_contextual_bytes, 360, 8);
+        put16(&mut extension_contextual_bytes, 362, 1);
+        put16(&mut extension_contextual_bytes, 364, 3);
+        put16(&mut extension_contextual_bytes, 366, 1);
+        put16(&mut extension_contextual_bytes, 368, 1);
+        put16(&mut extension_contextual_bytes, 370, 1);
+        put16(&mut extension_contextual_bytes, 372, 1);
+        put16(&mut extension_contextual_bytes, 374, 1);
+        put16(&mut extension_contextual_bytes, 376, 2);
+        put16(&mut extension_contextual_bytes, 378, 1);
+        put16(&mut extension_contextual_bytes, 380, 1);
+        put16(&mut extension_contextual_bytes, 382, 2);
+        let extension_contextual_face =
+            TrueTypeFace::from_bytes(&extension_contextual_bytes).unwrap();
+        let mut extension_contextual_output = [ShapedGlyph {
+            glyph_id: 0,
+            source: '\0',
+            source_count: 0,
+            origin: Point::new(0, 0),
+            advance: 0,
+        }; 2];
+        assert_eq!(
+            extension_contextual_face
+                .shape_text_ligatures(
+                    "AB",
+                    Point::new(2, 15),
+                    10,
+                    &mut extension_contextual_output,
+                )
+                .unwrap(),
+            2
+        );
+        assert_eq!(extension_contextual_output[0].glyph_id, 3);
+        assert_eq!(
+            face.shape_text_ligatures_with_script_language(
+                "AB",
+                Point::new(2, 15),
+                10,
+                *b"DFLT",
+                *b"TRK ",
+                &mut output,
+            )
+            .unwrap(),
+            1
+        );
+        assert_eq!(
+            face.shape_text_ligatures_with_script_language(
+                "AB",
+                Point::new(2, 15),
+                10,
+                *b"DFLT",
+                *b"MISS",
+                &mut output,
+            )
+            .unwrap(),
+            2
+        );
+        assert_eq!(output[0].source_count, 1);
+        assert_eq!(output[0].origin, Point::new(2, 15));
+        assert_eq!(output[0].advance, 5);
+        assert_eq!(
+            face.shape_text_ligatures_with_script(
+                "AB",
+                Point::new(2, 15),
+                10,
+                *b"DFLT",
+                &mut output,
+            )
+            .unwrap(),
+            1
+        );
+        assert_eq!(output[0].glyph_id, 3);
+    }
+
+    #[test]
+    fn wovengraphics_truetype_face_applies_bounded_gpos_pair_adjustment() {
+        use crate::graphics::{Point, ShapedGlyph, TrueTypeFace};
+
+        let mut bytes = [0u8; 420];
+        let put16 = |bytes: &mut [u8], offset: usize, value: u16| {
+            bytes[offset..offset + 2].copy_from_slice(&value.to_be_bytes());
+        };
+        let put_i16 = |bytes: &mut [u8], offset: usize, value: i16| {
+            bytes[offset..offset + 2].copy_from_slice(&value.to_be_bytes());
+        };
+        let put32 = |bytes: &mut [u8], offset: usize, value: u32| {
+            bytes[offset..offset + 4].copy_from_slice(&value.to_be_bytes());
+        };
+        put32(&mut bytes, 0, 0x0001_0000);
+        put16(&mut bytes, 4, 6);
+        for (record, (tag, offset, length)) in [
+            (*b"head", 108u32, 52u32),
+            (*b"maxp", 160u32, 6u32),
+            (*b"cmap", 166u32, 44u32),
+            (*b"hhea", 210u32, 36u32),
+            (*b"hmtx", 246u32, 12u32),
+            (*b"GPOS", 258u32, 156u32),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let base = 12 + record * 16;
+            bytes[base..base + 4].copy_from_slice(&tag);
+            put32(&mut bytes, base + 8, offset);
+            put32(&mut bytes, base + 12, length);
+        }
+        put16(&mut bytes, 126, 1000);
+        put16(&mut bytes, 164, 3);
+        put16(&mut bytes, 244, 3);
+        for (index, advance) in [500, 500, 500].into_iter().enumerate() {
+            put16(&mut bytes, 246 + index * 4, advance);
+        }
+        put16(&mut bytes, 166, 0);
+        put16(&mut bytes, 168, 1);
+        put16(&mut bytes, 170, 3);
+        put16(&mut bytes, 172, 1);
+        put32(&mut bytes, 174, 12);
+        put16(&mut bytes, 178, 4);
+        put16(&mut bytes, 180, 32);
+        put16(&mut bytes, 182, 0);
+        put16(&mut bytes, 184, 4);
+        put16(&mut bytes, 186, 4);
+        put16(&mut bytes, 188, 1);
+        put16(&mut bytes, 190, 0);
+        put16(&mut bytes, 192, 66);
+        put16(&mut bytes, 194, 0xffff);
+        put16(&mut bytes, 196, 0);
+        put16(&mut bytes, 198, 65);
+        put16(&mut bytes, 200, 0xffff);
+        put_i16(&mut bytes, 202, -64);
+        put_i16(&mut bytes, 204, 1);
+        put16(&mut bytes, 206, 0);
+        put16(&mut bytes, 208, 0);
+
+        put32(&mut bytes, 258, 0x0001_0000);
+        put16(&mut bytes, 262, 120);
+        put16(&mut bytes, 264, 10);
+        put16(&mut bytes, 266, 30);
+        put16(&mut bytes, 268, 1);
+        bytes[270..274].copy_from_slice(b"kern");
+        put16(&mut bytes, 274, 8);
+        put16(&mut bytes, 276, 0);
+        put16(&mut bytes, 278, 1);
+        put16(&mut bytes, 280, 0);
+        put16(&mut bytes, 288, 1);
+        put16(&mut bytes, 290, 4);
+        put16(&mut bytes, 292, 2);
+        put16(&mut bytes, 294, 0);
+        put16(&mut bytes, 296, 1);
+        put16(&mut bytes, 298, 8);
+        put16(&mut bytes, 300, 2);
+        put16(&mut bytes, 302, 64);
+        put16(&mut bytes, 304, 0x0017);
+        put16(&mut bytes, 306, 0);
+        put16(&mut bytes, 308, 48);
+        put16(&mut bytes, 310, 56);
+        put16(&mut bytes, 312, 2);
+        put16(&mut bytes, 314, 2);
+        put16(&mut bytes, 316, 0);
+        put16(&mut bytes, 318, 0);
+        put16(&mut bytes, 320, 0);
+        put16(&mut bytes, 322, 0);
+        put16(&mut bytes, 324, 0);
+        put16(&mut bytes, 326, 0);
+        put16(&mut bytes, 328, 0);
+        put16(&mut bytes, 330, 0);
+        put16(&mut bytes, 332, 0);
+        put16(&mut bytes, 334, 0);
+        put16(&mut bytes, 336, 0);
+        put16(&mut bytes, 338, 0);
+        put16(&mut bytes, 340, 0);
+        put16(&mut bytes, 342, 100);
+        put_i16(&mut bytes, 344, -80);
+        put16(&mut bytes, 346, 112);
+        put16(&mut bytes, 348, 1);
+        put16(&mut bytes, 350, 1);
+        put16(&mut bytes, 352, 1);
+        put16(&mut bytes, 354, 1);
+        put16(&mut bytes, 356, 1);
+        put16(&mut bytes, 358, 2);
+        put16(&mut bytes, 360, 1);
+        put16(&mut bytes, 362, 1);
+        put16(&mut bytes, 364, 1);
+        put16(&mut bytes, 366, 1);
+        put16(&mut bytes, 368, 1);
+        put16(&mut bytes, 370, 10);
+        put16(&mut bytes, 372, 10);
+        put16(&mut bytes, 374, 3);
+        put16(&mut bytes, 376, 0x0100);
+        put16(&mut bytes, 378, 1);
+        bytes[380..384].copy_from_slice(b"DFLT");
+        put16(&mut bytes, 384, 10);
+        put16(&mut bytes, 388, 10);
+        put16(&mut bytes, 390, 1);
+        bytes[392..396].copy_from_slice(b"TRK ");
+        put16(&mut bytes, 396, 18);
+        put16(&mut bytes, 398, 0);
+        put16(&mut bytes, 400, u16::MAX);
+        put16(&mut bytes, 402, 1);
+        put16(&mut bytes, 404, 0);
+        put16(&mut bytes, 406, 0);
+        put16(&mut bytes, 408, u16::MAX);
+        put16(&mut bytes, 410, 1);
+        put16(&mut bytes, 412, 0);
+
+        let face = TrueTypeFace::from_bytes(&bytes).unwrap();
+        let mut shaped = [ShapedGlyph {
+            glyph_id: 0,
+            source: '\0',
+            source_count: 0,
+            origin: Point::new(0, 0),
+            advance: 0,
+        }; 2];
+        assert_eq!(
+            face.shape_text_ligatures("AB", Point::new(2, 15), 10, &mut shaped),
+            Err(crate::graphics::TrueTypeError::UnsupportedVariation)
+        );
+        assert_eq!(
+            face.shape_text_ligatures_with_ppem("AB", Point::new(2, 15), 1000, 10, &mut shaped)
+                .unwrap(),
+            2
+        );
+        assert_eq!(shaped[0].origin, Point::new(3, 115));
+        assert_eq!(
+            face.shape_text_ligatures_with_options(
+                "AB",
+                Point::new(2, 15),
+                1000,
+                crate::graphics::TextShapingOptions {
+                    script_tag: Some(*b"DFLT"),
+                    language_tag: Some(*b"TRK "),
+                    ppem: Some(10),
+                },
+                &mut shaped,
+            )
+            .unwrap(),
+            2
+        );
+        assert_eq!(shaped[0].origin, Point::new(3, 115));
+        assert_eq!(
+            face.shape_text_ligatures_with_options(
+                "AB",
+                Point::new(2, 15),
+                1000,
+                crate::graphics::TextShapingOptions {
+                    script_tag: Some(*b"DFLT"),
+                    language_tag: Some(*b"MISS"),
+                    ppem: Some(10),
+                },
+                &mut shaped,
+            )
+            .unwrap(),
+            2
+        );
+        assert_eq!(shaped[0].origin, Point::new(2, 15));
+        assert_eq!(shaped[0].advance, 500);
+        assert_eq!(shaped[1].origin, Point::new(502, 15));
+        assert_eq!(
+            face.shape_text_ligatures_with_script_and_ppem(
+                "AB",
+                Point::new(2, 15),
+                1000,
+                *b"DFLT",
+                10,
+                &mut shaped,
+            )
+            .unwrap(),
+            2
+        );
+        assert_eq!(shaped[0].origin, Point::new(3, 115));
+        let mut contextual_gpos_bytes = bytes;
+        put32(&mut contextual_gpos_bytes, 104, 102);
+        contextual_gpos_bytes[270..274].copy_from_slice(b"calt");
+        put16(&mut contextual_gpos_bytes, 288, 2);
+        put16(&mut contextual_gpos_bytes, 290, 8);
+        put16(&mut contextual_gpos_bytes, 292, 48);
+        put16(&mut contextual_gpos_bytes, 296, 7);
+        put16(&mut contextual_gpos_bytes, 298, 0);
+        put16(&mut contextual_gpos_bytes, 300, 1);
+        put16(&mut contextual_gpos_bytes, 302, 8);
+        put16(&mut contextual_gpos_bytes, 304, 3);
+        put16(&mut contextual_gpos_bytes, 306, 0);
+        put16(&mut contextual_gpos_bytes, 308, 2);
+        put16(&mut contextual_gpos_bytes, 310, 20);
+        put16(&mut contextual_gpos_bytes, 312, 26);
+        put16(&mut contextual_gpos_bytes, 314, 0);
+        put16(&mut contextual_gpos_bytes, 316, 1);
+        put16(&mut contextual_gpos_bytes, 318, 0);
+        put16(&mut contextual_gpos_bytes, 320, 1);
+        put16(&mut contextual_gpos_bytes, 324, 1);
+        put16(&mut contextual_gpos_bytes, 326, 1);
+        put16(&mut contextual_gpos_bytes, 328, 1);
+        put16(&mut contextual_gpos_bytes, 330, 1);
+        put16(&mut contextual_gpos_bytes, 332, 1);
+        put16(&mut contextual_gpos_bytes, 334, 2);
+        put16(&mut contextual_gpos_bytes, 336, 1);
+        put16(&mut contextual_gpos_bytes, 338, 0);
+        put16(&mut contextual_gpos_bytes, 340, 1);
+        put16(&mut contextual_gpos_bytes, 342, 8);
+        put16(&mut contextual_gpos_bytes, 344, 1);
+        put16(&mut contextual_gpos_bytes, 346, 10);
+        put16(&mut contextual_gpos_bytes, 348, 4);
+        put_i16(&mut contextual_gpos_bytes, 350, 25);
+        put16(&mut contextual_gpos_bytes, 354, 1);
+        put16(&mut contextual_gpos_bytes, 356, 1);
+        put16(&mut contextual_gpos_bytes, 358, 1);
+        let contextual_gpos_face = TrueTypeFace::from_bytes(&contextual_gpos_bytes).unwrap();
+        assert_eq!(
+            contextual_gpos_face
+                .shape_text_ligatures("AB", Point::new(2, 15), 1000, &mut shaped)
+                .unwrap(),
+            2
+        );
+        assert_eq!(shaped[0].advance, 525);
+        assert_eq!(shaped[1].origin, Point::new(527, 15));
+        let mut single_adjustment_bytes = [0u8; 420];
+        single_adjustment_bytes.copy_from_slice(&bytes);
+        put32(&mut single_adjustment_bytes, 104, 156);
+        put16(&mut single_adjustment_bytes, 278, 2);
+        put16(&mut single_adjustment_bytes, 280, 0);
+        put16(&mut single_adjustment_bytes, 282, 1);
+        put16(&mut single_adjustment_bytes, 288, 2);
+        put16(&mut single_adjustment_bytes, 290, 8);
+        put16(&mut single_adjustment_bytes, 292, 56);
+        put16(&mut single_adjustment_bytes, 296, 1);
+        put16(&mut single_adjustment_bytes, 298, 0);
+        put16(&mut single_adjustment_bytes, 300, 1);
+        put16(&mut single_adjustment_bytes, 302, 8);
+        put16(&mut single_adjustment_bytes, 304, 1);
+        put16(&mut single_adjustment_bytes, 306, 10);
+        put16(&mut single_adjustment_bytes, 308, 4);
+        put_i16(&mut single_adjustment_bytes, 310, 50);
+        put16(&mut single_adjustment_bytes, 314, 1);
+        put16(&mut single_adjustment_bytes, 316, 1);
+        put16(&mut single_adjustment_bytes, 318, 1);
+        put16(&mut single_adjustment_bytes, 344, 1);
+        put16(&mut single_adjustment_bytes, 346, 0);
+        put16(&mut single_adjustment_bytes, 348, 1);
+        put16(&mut single_adjustment_bytes, 350, 8);
+        put16(&mut single_adjustment_bytes, 352, 1);
+        put16(&mut single_adjustment_bytes, 354, 10);
+        put16(&mut single_adjustment_bytes, 356, 4);
+        put_i16(&mut single_adjustment_bytes, 358, 25);
+        put16(&mut single_adjustment_bytes, 362, 1);
+        put16(&mut single_adjustment_bytes, 364, 1);
+        put16(&mut single_adjustment_bytes, 366, 1);
+        let single_adjustment_face = TrueTypeFace::from_bytes(&single_adjustment_bytes).unwrap();
+        assert_eq!(
+            single_adjustment_face
+                .shape_text_ligatures_with_ppem("AB", Point::new(2, 15), 1000, 10, &mut shaped)
+                .unwrap(),
+            2
+        );
+        assert_eq!(shaped[0].advance, 575);
+        assert_eq!(shaped[1].origin, Point::new(577, 15));
+        let mut mark_bytes = bytes;
+        put32(&mut mark_bytes, 104, 94);
+        mark_bytes[270..274].copy_from_slice(b"mark");
+        put16(&mut mark_bytes, 292, 4);
+        put16(&mut mark_bytes, 294, 0);
+        put16(&mut mark_bytes, 296, 1);
+        put16(&mut mark_bytes, 298, 8);
+        put16(&mut mark_bytes, 300, 1);
+        put16(&mut mark_bytes, 302, 12);
+        put16(&mut mark_bytes, 304, 20);
+        put16(&mut mark_bytes, 306, 1);
+        put16(&mut mark_bytes, 308, 26);
+        put16(&mut mark_bytes, 310, 40);
+        put16(&mut mark_bytes, 312, 1);
+        put16(&mut mark_bytes, 314, 1);
+        put16(&mut mark_bytes, 316, 2);
+        put16(&mut mark_bytes, 320, 1);
+        put16(&mut mark_bytes, 322, 1);
+        put16(&mut mark_bytes, 324, 1);
+        put16(&mut mark_bytes, 326, 1);
+        put16(&mut mark_bytes, 328, 0);
+        put16(&mut mark_bytes, 330, 6);
+        put16(&mut mark_bytes, 332, 1);
+        put_i16(&mut mark_bytes, 334, 0);
+        put_i16(&mut mark_bytes, 336, 0);
+        put16(&mut mark_bytes, 340, 1);
+        put16(&mut mark_bytes, 342, 4);
+        put16(&mut mark_bytes, 344, 1);
+        put_i16(&mut mark_bytes, 346, 100);
+        put_i16(&mut mark_bytes, 348, 200);
+        let mark_face = TrueTypeFace::from_bytes(&mark_bytes).unwrap();
+        assert_eq!(
+            mark_face
+                .shape_text_ligatures("AB", Point::new(2, 15), 1000, &mut shaped)
+                .unwrap(),
+            2
+        );
+        assert_eq!(shaped[1].origin, Point::new(602, 215));
+        assert_eq!(shaped[1].advance, 500);
+        let mut mark_script_bytes = mark_bytes;
+        put32(&mut mark_script_bytes, 104, 156);
+        let mark_script_face = TrueTypeFace::from_bytes(&mark_script_bytes).unwrap();
+        assert_eq!(
+            mark_script_face
+                .shape_text_ligatures_with_options(
+                    "AB",
+                    Point::new(2, 15),
+                    1000,
+                    crate::graphics::TextShapingOptions {
+                        script_tag: Some(*b"DFLT"),
+                        language_tag: Some(*b"MISS"),
+                        ppem: None,
+                    },
+                    &mut shaped,
+                )
+                .unwrap(),
+            2
+        );
+        assert_eq!(shaped[1].origin, Point::new(502, 15));
+        let mut mark_ligature_bytes = mark_bytes;
+        put32(&mut mark_ligature_bytes, 104, 100);
+        put16(&mut mark_ligature_bytes, 292, 5);
+        put16(&mut mark_ligature_bytes, 300, 1);
+        put16(&mut mark_ligature_bytes, 302, 12);
+        put16(&mut mark_ligature_bytes, 304, 20);
+        put16(&mut mark_ligature_bytes, 306, 1);
+        put16(&mut mark_ligature_bytes, 308, 26);
+        put16(&mut mark_ligature_bytes, 310, 40);
+        put16(&mut mark_ligature_bytes, 340, 1);
+        put16(&mut mark_ligature_bytes, 342, 4);
+        put16(&mut mark_ligature_bytes, 344, 1);
+        put16(&mut mark_ligature_bytes, 346, 8);
+        put16(&mut mark_ligature_bytes, 352, 1);
+        put_i16(&mut mark_ligature_bytes, 354, 100);
+        put_i16(&mut mark_ligature_bytes, 356, 200);
+        let mark_ligature_face = TrueTypeFace::from_bytes(&mark_ligature_bytes).unwrap();
+        assert_eq!(
+            mark_ligature_face
+                .shape_text_ligatures("AB", Point::new(2, 15), 1000, &mut shaped)
+                .unwrap(),
+            2
+        );
+        assert_eq!(shaped[1].origin, Point::new(602, 215));
+        let mut mark_format3_bytes = mark_bytes;
+        put32(&mut mark_format3_bytes, 104, 120);
+        put16(&mut mark_format3_bytes, 332, 3);
+        put16(&mut mark_format3_bytes, 338, 0);
+        put16(&mut mark_format3_bytes, 340, 0);
+        put16(&mut mark_format3_bytes, 310, 60);
+        put16(&mut mark_format3_bytes, 360, 1);
+        put16(&mut mark_format3_bytes, 362, 4);
+        put16(&mut mark_format3_bytes, 364, 3);
+        put_i16(&mut mark_format3_bytes, 366, 100);
+        put_i16(&mut mark_format3_bytes, 368, 200);
+        put16(&mut mark_format3_bytes, 370, 0);
+        put16(&mut mark_format3_bytes, 372, 0);
+        let mark_format3_face = TrueTypeFace::from_bytes(&mark_format3_bytes).unwrap();
+        assert_eq!(
+            mark_format3_face
+                .shape_text_ligatures("AB", Point::new(2, 15), 1000, &mut shaped)
+                .unwrap(),
+            2
+        );
+        assert_eq!(shaped[1].origin, Point::new(602, 215));
+        let mut cursive_bytes = bytes;
+        put32(&mut cursive_bytes, 104, 78);
+        cursive_bytes[270..274].copy_from_slice(b"curs");
+        put16(&mut cursive_bytes, 292, 3);
+        put16(&mut cursive_bytes, 294, 0);
+        put16(&mut cursive_bytes, 296, 1);
+        put16(&mut cursive_bytes, 298, 8);
+        put16(&mut cursive_bytes, 300, 1);
+        put16(&mut cursive_bytes, 302, 16);
+        put16(&mut cursive_bytes, 304, 2);
+        put16(&mut cursive_bytes, 306, 0);
+        put16(&mut cursive_bytes, 308, 24);
+        put16(&mut cursive_bytes, 310, 30);
+        put16(&mut cursive_bytes, 312, 0);
+        put16(&mut cursive_bytes, 316, 1);
+        put16(&mut cursive_bytes, 318, 2);
+        put16(&mut cursive_bytes, 320, 1);
+        put16(&mut cursive_bytes, 322, 2);
+        put16(&mut cursive_bytes, 324, 1);
+        put_i16(&mut cursive_bytes, 326, 100);
+        put_i16(&mut cursive_bytes, 328, 200);
+        put16(&mut cursive_bytes, 330, 1);
+        put_i16(&mut cursive_bytes, 332, 50);
+        put_i16(&mut cursive_bytes, 334, 100);
+        let cursive_face = TrueTypeFace::from_bytes(&cursive_bytes).unwrap();
+        assert_eq!(
+            cursive_face
+                .shape_text_ligatures("AB", Point::new(2, 15), 1000, &mut shaped)
+                .unwrap(),
+            2
+        );
+        assert_eq!(shaped[1].origin, Point::new(552, 115));
+        assert_eq!(shaped[1].advance, 500);
+        let mut mark_mark_bytes = bytes;
+        put32(&mut mark_mark_bytes, 104, 94);
+        mark_mark_bytes[270..274].copy_from_slice(b"mkmk");
+        put16(&mut mark_mark_bytes, 292, 6);
+        put16(&mut mark_mark_bytes, 294, 0);
+        put16(&mut mark_mark_bytes, 296, 1);
+        put16(&mut mark_mark_bytes, 298, 8);
+        put16(&mut mark_mark_bytes, 300, 1);
+        put16(&mut mark_mark_bytes, 302, 12);
+        put16(&mut mark_mark_bytes, 304, 20);
+        put16(&mut mark_mark_bytes, 306, 1);
+        put16(&mut mark_mark_bytes, 308, 26);
+        put16(&mut mark_mark_bytes, 310, 40);
+        put16(&mut mark_mark_bytes, 312, 1);
+        put16(&mut mark_mark_bytes, 314, 1);
+        put16(&mut mark_mark_bytes, 316, 2);
+        put16(&mut mark_mark_bytes, 320, 1);
+        put16(&mut mark_mark_bytes, 322, 1);
+        put16(&mut mark_mark_bytes, 324, 2);
+        put16(&mut mark_mark_bytes, 326, 1);
+        put16(&mut mark_mark_bytes, 328, 0);
+        put16(&mut mark_mark_bytes, 330, 6);
+        put16(&mut mark_mark_bytes, 332, 1);
+        put_i16(&mut mark_mark_bytes, 334, 0);
+        put_i16(&mut mark_mark_bytes, 336, 0);
+        put16(&mut mark_mark_bytes, 340, 1);
+        put16(&mut mark_mark_bytes, 342, 4);
+        put16(&mut mark_mark_bytes, 344, 1);
+        put_i16(&mut mark_mark_bytes, 346, 100);
+        put_i16(&mut mark_mark_bytes, 348, 200);
+        let mark_mark_face = TrueTypeFace::from_bytes(&mark_mark_bytes).unwrap();
+        assert_eq!(
+            mark_mark_face
+                .shape_text_ligatures("BB", Point::new(2, 15), 1000, &mut shaped)
+                .unwrap(),
+            2
+        );
+        assert_eq!(shaped[1].origin, Point::new(402, -185));
+        assert_eq!(shaped[1].advance, 500);
+        let mut extension_bytes = [0u8; 520];
+        extension_bytes[..bytes.len()].copy_from_slice(&bytes);
+        extension_bytes[390..504].copy_from_slice(&bytes[300..414]);
+        put32(&mut extension_bytes, 104, 246);
+        put16(&mut extension_bytes, 292, 9);
+        put16(&mut extension_bytes, 300, 1);
+        put16(&mut extension_bytes, 302, 2);
+        put32(&mut extension_bytes, 304, 90);
+        let extension_face = TrueTypeFace::from_bytes(&extension_bytes).unwrap();
+        assert_eq!(
+            extension_face
+                .shape_text_ligatures_with_ppem("AB", Point::new(2, 15), 1000, 10, &mut shaped)
+                .unwrap(),
+            2
+        );
+        assert_eq!(shaped[0].origin, Point::new(3, 115));
+        let mut extension_mark_bytes = [0u8; 520];
+        extension_mark_bytes[..mark_bytes.len()].copy_from_slice(&mark_bytes);
+        extension_mark_bytes[390..440].copy_from_slice(&mark_bytes[300..350]);
+        put32(&mut extension_mark_bytes, 104, 246);
+        put16(&mut extension_mark_bytes, 292, 9);
+        put16(&mut extension_mark_bytes, 300, 1);
+        put16(&mut extension_mark_bytes, 302, 4);
+        put32(&mut extension_mark_bytes, 304, 90);
+        let extension_mark_face = TrueTypeFace::from_bytes(&extension_mark_bytes).unwrap();
+        assert_eq!(
+            extension_mark_face
+                .shape_text_ligatures("AB", Point::new(2, 15), 1000, &mut shaped)
+                .unwrap(),
+            2
+        );
+        assert_eq!(shaped[1].origin, Point::new(602, 215));
+    }
+
+    #[test]
+    fn wovengraphics_truetype_face_reads_fvar_axis_metadata() {
+        use crate::graphics::{TrueTypeFace, VariationAxis};
+
+        let mut bytes = [0u8; 340];
+        let put16 = |bytes: &mut [u8], offset: usize, value: u16| {
+            bytes[offset..offset + 2].copy_from_slice(&value.to_be_bytes());
+        };
+        let put32 = |bytes: &mut [u8], offset: usize, value: u32| {
+            bytes[offset..offset + 4].copy_from_slice(&value.to_be_bytes());
+        };
+        let put_i32 = |bytes: &mut [u8], offset: usize, value: i32| {
+            bytes[offset..offset + 4].copy_from_slice(&value.to_be_bytes());
+        };
+        put32(&mut bytes, 0, 0x0001_0000);
+        put16(&mut bytes, 4, 7);
+        for (record, (tag, offset, length)) in [
+            (*b"head", 120u32, 20u32),
+            (*b"maxp", 140u32, 6u32),
+            (*b"cmap", 146u32, 40u32),
+            (*b"hhea", 186u32, 36u32),
+            (*b"hmtx", 222u32, 8u32),
+            (*b"fvar", 230u32, 36u32),
+            (*b"gvar", 266u32, 48u32),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let base = 12 + record * 16;
+            bytes[base..base + 4].copy_from_slice(&tag);
+            put32(&mut bytes, base + 8, offset);
+            put32(&mut bytes, base + 12, length);
+        }
+        put16(&mut bytes, 138, 1000);
+        put16(&mut bytes, 144, 10);
+        put16(&mut bytes, 184, 2);
+        put16(&mut bytes, 220, 2);
+        put16(&mut bytes, 222, 500);
+        put16(&mut bytes, 226, 700);
+        put16(&mut bytes, 146, 0);
+        put16(&mut bytes, 148, 1);
+        put16(&mut bytes, 150, 3);
+        put16(&mut bytes, 152, 10);
+        put32(&mut bytes, 154, 12);
+        put16(&mut bytes, 158, 12);
+        put32(&mut bytes, 162, 28);
+        put32(&mut bytes, 166, 0);
+        put32(&mut bytes, 170, 1);
+        put32(&mut bytes, 174, 0x1f600);
+        put32(&mut bytes, 178, 0x1f600);
+        put32(&mut bytes, 182, 3);
+        put16(&mut bytes, 230, 1);
+        put16(&mut bytes, 232, 0);
+        put16(&mut bytes, 238, 16);
+        put16(&mut bytes, 242, 1);
+        put16(&mut bytes, 244, 20);
+        bytes[246..250].copy_from_slice(b"wght");
+        put_i32(&mut bytes, 250, 0x0000_8000);
+        put_i32(&mut bytes, 254, 0x0001_0000);
+        put_i32(&mut bytes, 258, 0x0002_0000);
+        put32(&mut bytes, 266, 0x0001_0000);
+        put16(&mut bytes, 270, 1);
+        put16(&mut bytes, 272, 0);
+        put32(&mut bytes, 274, 20);
+        put16(&mut bytes, 278, 10);
+        put16(&mut bytes, 280, 0);
+        put32(&mut bytes, 282, 42);
+        for index in 0..=3 {
+            put16(&mut bytes, 286 + index * 2, 0);
+        }
+        for index in 4..=10 {
+            put16(&mut bytes, 286 + index * 2, 1);
+        }
+        bytes[308..310].copy_from_slice(&[0xaa, 0xbb]);
+
+        let face = TrueTypeFace::from_bytes(&bytes).unwrap();
+        let mut axes = [VariationAxis {
+            tag: [0; 4],
+            minimum: 0,
+            default: 0,
+            maximum: 0,
+        }];
+        assert_eq!(face.variation_axes(&mut axes).unwrap(), 1);
+        assert_eq!(axes[0].tag, *b"wght");
+        assert_eq!(axes[0].minimum, 0x0000_8000);
+        assert_eq!(axes[0].default, 0x0001_0000);
+        assert_eq!(axes[0].maximum, 0x0002_0000);
+        assert_eq!(face.glyph_variation_data(0).unwrap(), Some(&[][..]));
+        assert_eq!(
+            face.glyph_variation_data(3).unwrap(),
+            Some(&[0xaa, 0xbb][..])
+        );
+    }
+
+    #[test]
+    fn wovengraphics_truetype_face_applies_simple_gvar_tuple() {
+        use crate::graphics::{OutlinePoint, TrueTypeFace};
+
+        let mut bytes = [0u8; 400];
+        let put16 = |bytes: &mut [u8], offset: usize, value: u16| {
+            bytes[offset..offset + 2].copy_from_slice(&value.to_be_bytes());
+        };
+        let put_i16 = |bytes: &mut [u8], offset: usize, value: i16| {
+            bytes[offset..offset + 2].copy_from_slice(&value.to_be_bytes());
+        };
+        let put32 = |bytes: &mut [u8], offset: usize, value: u32| {
+            bytes[offset..offset + 4].copy_from_slice(&value.to_be_bytes());
+        };
+        put32(&mut bytes, 0, 0x0001_0000);
+        put16(&mut bytes, 4, 8);
+        for (record, (tag, offset, length)) in [
+            (*b"head", 140u32, 52u32),
+            (*b"maxp", 192u32, 6u32),
+            (*b"cmap", 198u32, 44u32),
+            (*b"hhea", 242u32, 36u32),
+            (*b"hmtx", 278u32, 4u32),
+            (*b"loca", 282u32, 4u32),
+            (*b"glyf", 286u32, 48u32),
+            (*b"gvar", 334u32, 48u32),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let base = 12 + record * 16;
+            bytes[base..base + 4].copy_from_slice(&tag);
+            put32(&mut bytes, base + 8, offset);
+            put32(&mut bytes, base + 12, length);
+        }
+        put16(&mut bytes, 158, 1000);
+        put16(&mut bytes, 190, 0);
+        put16(&mut bytes, 196, 1);
+        put16(&mut bytes, 276, 1);
+        put16(&mut bytes, 278, 500);
+        put16(&mut bytes, 282, 0);
+        put16(&mut bytes, 284, 24);
+
+        put16(&mut bytes, 198, 0);
+        put16(&mut bytes, 200, 1);
+        put16(&mut bytes, 202, 3);
+        put16(&mut bytes, 204, 1);
+        put32(&mut bytes, 206, 12);
+        put16(&mut bytes, 210, 4);
+        put16(&mut bytes, 212, 32);
+        put16(&mut bytes, 214, 0);
+        put16(&mut bytes, 216, 4);
+        put16(&mut bytes, 218, 4);
+        put16(&mut bytes, 220, 1);
+        put16(&mut bytes, 222, 0);
+        put16(&mut bytes, 224, 65);
+        put16(&mut bytes, 226, 0xffff);
+        put16(&mut bytes, 228, 0);
+        put16(&mut bytes, 230, 65);
+        put16(&mut bytes, 232, 0xffff);
+        put_i16(&mut bytes, 234, -65);
+        put_i16(&mut bytes, 236, 1);
+        put16(&mut bytes, 238, 0);
+        put16(&mut bytes, 240, 0);
+
+        put_i16(&mut bytes, 286, 1);
+        put_i16(&mut bytes, 288, 0);
+        put_i16(&mut bytes, 290, 0);
+        put_i16(&mut bytes, 292, 10);
+        put_i16(&mut bytes, 294, 10);
+        put16(&mut bytes, 296, 2);
+        put16(&mut bytes, 298, 26);
+        bytes[300..326].copy_from_slice(&[
+            0xb0, 0, 0x43, 0x58, 0xb0, 0, 0xb0, 42, 0x42, 0x1b, 0xb0, 0, 0xb0, 99, 0x42, 0x59,
+            0xb0, 0, 0x43, 0x21, 0xb0, 0, 0xb0, 0, 0x3f, 0x22,
+        ]);
+        bytes[326..329].copy_from_slice(&[0x31, 0x33, 0x27]);
+        bytes[329..331].copy_from_slice(&[10, 10]);
+        bytes[331] = 10;
+
+        put32(&mut bytes, 334, 0x0001_0000);
+        put16(&mut bytes, 338, 1);
+        put16(&mut bytes, 340, 0);
+        put32(&mut bytes, 342, 20);
+        put16(&mut bytes, 346, 1);
+        put16(&mut bytes, 348, 0);
+        put32(&mut bytes, 350, 24);
+        put16(&mut bytes, 354, 0);
+        put16(&mut bytes, 356, 12);
+        put16(&mut bytes, 358, 0x8001);
+        put16(&mut bytes, 360, 0);
+        put16(&mut bytes, 362, 10);
+        put16(&mut bytes, 364, 0xc000);
+        put_i16(&mut bytes, 366, 0x4000);
+        put_i16(&mut bytes, 368, 0x0000);
+        put_i16(&mut bytes, 370, 0x4000);
+        bytes[372] = 0x06;
+        bytes[373..380].copy_from_slice(&[10, 10, 10, 2, 12, 0, 0]);
+        bytes[380] = 0x40;
+        bytes[381] = 0x45;
+
+        let face = TrueTypeFace::from_bytes(&bytes).unwrap();
+        let mut points = [OutlinePoint {
+            x: 0,
+            y: 0,
+            on_curve: false,
+            contour_end: false,
+        }; 3];
+        assert_eq!(
+            face.outline_points_with_variation('A', &[0x4000], &mut points)
+                .unwrap(),
+            3
+        );
+        assert_eq!([points[0].x, points[1].x, points[2].x], [10, 20, 10]);
+        assert_eq!([points[0].y, points[1].y, points[2].y], [0, 0, 10]);
+        assert_eq!(
+            face.advance_width_with_variation('A', &[0x4000]).unwrap(),
+            510
+        );
+        assert_eq!(
+            face.advance_width_glyph_with_variation(0, &[0x4000])
+                .unwrap(),
+            510
+        );
+        assert_eq!(
+            face.outline_points_with_variation('A', &[0x2000], &mut points)
+                .unwrap(),
+            3
+        );
+        assert_eq!([points[0].x, points[1].x, points[2].x], [5, 15, 5]);
+        assert_eq!(
+            face.advance_width_with_variation('A', &[0x2000]).unwrap(),
+            505
+        );
+        let mut instructions = [0u8; 26];
+        assert_eq!(face.glyph_hint_program('A', &mut instructions).unwrap(), 26);
+        assert_eq!(
+            &instructions[..26],
+            &[
+                0xb0, 0, 0x43, 0x58, 0xb0, 0, 0xb0, 42, 0x42, 0x1b, 0xb0, 0, 0xb0, 99, 0x42, 0x59,
+                0xb0, 0, 0x43, 0x21, 0xb0, 0, 0xb0, 0, 0x3f, 0x22
+            ]
+        );
+        let mut hint_state = crate::graphics::HintState::default();
+        let mut hinted_points = points;
+        assert!(matches!(
+            face.execute_glyph_hints('A', &mut hinted_points, &mut hint_state),
+            Err(crate::graphics::TrueTypeError::UnsupportedHinting)
+        ));
+        assert!(matches!(
+            face.execute_glyph_hints_with_cvt('A', &mut hinted_points, &[42], &mut hint_state,),
+            Err(crate::graphics::TrueTypeError::UnsupportedHinting)
+        ));
+        let mut storage = [0i32; 1];
+        storage[0] = 1;
+        assert_eq!(
+            face.execute_glyph_hints_with_resources(
+                'A',
+                &mut hinted_points,
+                &[42],
+                &mut storage,
+                &mut hint_state,
+            )
+            .unwrap(),
+            26
+        );
+        assert_eq!(storage[0], 42);
+        assert!(hint_state.round_to_grid);
+        assert_eq!(hint_state.stack_depth, 0);
+        assert_eq!(hinted_points[0].x, 42);
+        storage[0] = 0;
+        hinted_points = points;
+        hint_state = crate::graphics::HintState::default();
+        assert_eq!(
+            face.execute_glyph_hints_with_resources(
+                'A',
+                &mut hinted_points,
+                &[42],
+                &mut storage,
+                &mut hint_state,
+            )
+            .unwrap(),
+            26
+        );
+        assert_eq!(storage[0], 99);
+        assert_eq!(hinted_points[0].x, 42);
+        let mut pixels = [0u32; 20 * 20];
+        {
+            let mut canvas = Canvas::new(&mut pixels, 0, 0, 20, 20).unwrap();
+            let mut renderer = crate::graphics::Renderer::new(&mut canvas);
+            assert_eq!(
+                face.render_shaped_text_with_variation(
+                    "A",
+                    crate::graphics::Point::new(2, 15),
+                    100,
+                    &[0x4000],
+                    crate::graphics::Color::WHITE,
+                    &mut renderer,
+                )
+                .unwrap(),
+                1
+            );
+        }
+        assert!(pixels.iter().any(|pixel| *pixel != 0));
+    }
+
+    #[test]
+    fn wovengraphics_scaled_font_is_bounded_and_rasterizes_blocks() {
+        use crate::graphics::{Color, Font, Renderer};
+
+        assert_eq!(
+            Font::DEFAULT.measure_scaled("A", 0).width,
+            crate::font::WIDTH
+        );
+        assert_eq!(
+            Font::DEFAULT.measure_scaled("A", 100).width,
+            crate::font::text_width("A") * 16
+        );
+        let mut pixels = [0u32; 64];
+        {
+            let mut canvas = Canvas::new(&mut pixels, 0, 0, 8, 8).unwrap();
+            let mut renderer = Renderer::new(&mut canvas);
+            renderer.text_scaled(0, 0, "A", Color::WHITE, 2);
+        }
+        assert_eq!(pixels[2], Color::WHITE.packed());
+        assert_eq!(pixels[3], Color::WHITE.packed());
+        assert_eq!(pixels[10], Color::WHITE.packed());
+        assert_eq!(pixels[11], Color::WHITE.packed());
+    }
+
+    #[test]
+    fn wovengraphics_paths_stroke_and_close_with_bounded_storage() {
+        use crate::graphics::{Color, Path, Point, Renderer};
+
+        let mut path = Path::new();
+        assert!(path.move_to(Point::new(-1, 1)));
+        assert!(path.line_to(Point::new(3, 1)));
+        assert!(path.line_to(Point::new(3, 3)));
+        assert!(path.close());
+        assert!(!path.line_to(Point::new(0, 0)));
+        let mut pixels = [0u32; 16];
+        {
+            let mut canvas = Canvas::new(&mut pixels, 0, 0, 4, 4).unwrap();
+            Renderer::new(&mut canvas).stroke_path(&path, Color::TITLE);
+        }
+        assert_eq!(pixels[5], Color::TITLE.packed());
+        assert_eq!(pixels[3 * 4 + 3], Color::TITLE.packed());
+    }
+
+    #[test]
+    fn wovengraphics_quadratic_path_flattens_deterministically_and_is_atomic() {
+        use crate::graphics::{Path, Point};
+
+        let mut path = Path::new();
+        assert!(path.move_to(Point::new(0, 0)));
+        assert!(path.quadratic_to(Point::new(8, 16), Point::new(16, 0)));
+        for index in 0..57 {
+            assert!(path.line_to(Point::new(index, 0)));
+        }
+        assert!(!path.quadratic_to(Point::new(24, 16), Point::new(32, 0)));
+    }
+
+    #[test]
+    fn wovengraphics_fill_path_clips_closed_polygon() {
+        use crate::graphics::{Color, Path, Point, Renderer};
+
+        let mut path = Path::new();
+        assert!(path.move_to(Point::new(-2, 0)));
+        assert!(path.line_to(Point::new(5, 0)));
+        assert!(path.line_to(Point::new(1, 5)));
+        assert!(path.close());
+        let mut pixels = [0u32; 16];
+        {
+            let mut canvas = Canvas::new(&mut pixels, 0, 0, 4, 4).unwrap();
+            assert!(Renderer::new(&mut canvas).fill_path(&path, Color::TITLE));
+        }
+        assert!(pixels.iter().any(|pixel| *pixel == Color::TITLE.packed()));
+        assert_eq!(pixels.len(), 16);
+    }
+
+    #[test]
+    fn wovengraphics_fill_path_blends_source_over_canvas() {
+        use crate::graphics::{Color, Path, Point, Renderer};
+
+        let mut path = Path::new();
+        assert!(path.move_to(Point::new(0, 0)));
+        assert!(path.line_to(Point::new(2, 0)));
+        assert!(path.line_to(Point::new(0, 2)));
+        assert!(path.close());
+        let mut pixels = [Color::BLACK.packed(); 4];
+        {
+            let mut canvas = Canvas::new(&mut pixels, 0, 0, 2, 2).unwrap();
+            assert!(Renderer::new(&mut canvas).fill_path_blended(&path, Color::WHITE, 128));
+        }
+        assert_eq!(
+            pixels[0],
+            blend(Color::WHITE.packed(), Color::BLACK.packed(), 128)
+        );
+    }
+
+    #[test]
+    fn wovengraphics_antialiased_path_uses_partial_coverage() {
+        use crate::graphics::{Color, Path, Point, Renderer};
+
+        let mut path = Path::new();
+        assert!(path.move_to(Point::new(0, 0)));
+        assert!(path.line_to(Point::new(4, 0)));
+        assert!(path.line_to(Point::new(0, 4)));
+        assert!(path.close());
+        let mut pixels = [Color::BLACK.packed(); 25];
+        {
+            let mut canvas = Canvas::new(&mut pixels, 0, 0, 5, 5).unwrap();
+            assert!(Renderer::new(&mut canvas).fill_path_antialiased(&path, Color::WHITE));
+        }
+        assert!(
+            pixels
+                .iter()
+                .any(|pixel| *pixel != Color::BLACK.packed() && *pixel != Color::WHITE.packed())
+        );
+    }
+
+    #[test]
+    fn wovengraphics_compound_path_uses_even_odd_holes() {
+        use crate::graphics::{Color, CompoundPath, Path, Point, Renderer};
+
+        let mut outer = Path::new();
+        assert!(outer.move_to(Point::new(0, 0)));
+        assert!(outer.line_to(Point::new(5, 0)));
+        assert!(outer.line_to(Point::new(5, 5)));
+        assert!(outer.line_to(Point::new(0, 5)));
+        assert!(outer.close());
+        let mut inner = Path::new();
+        assert!(inner.move_to(Point::new(1, 1)));
+        assert!(inner.line_to(Point::new(4, 1)));
+        assert!(inner.line_to(Point::new(4, 4)));
+        assert!(inner.line_to(Point::new(1, 4)));
+        assert!(inner.close());
+        let mut compound = CompoundPath::new();
+        assert!(compound.push(outer));
+        assert!(compound.push(inner));
+        let mut pixels = [Color::BLACK.packed(); 25];
+        {
+            let mut canvas = Canvas::new(&mut pixels, 0, 0, 5, 5).unwrap();
+            assert!(Renderer::new(&mut canvas).fill_compound_path(&compound, Color::WHITE));
+        }
+        assert_eq!(pixels[0], Color::WHITE.packed());
+        assert_eq!(pixels[2 * 5 + 2], Color::BLACK.packed());
+    }
+
+    #[test]
+    fn wovengraphics_text_box_wraps_and_clips() {
+        use crate::graphics::{Color, Rect, Renderer};
+
+        let mut pixels = [0u32; 144];
+        {
+            let mut canvas = Canvas::new(&mut pixels, 0, 0, 8, 18).unwrap();
+            let lines = Renderer::new(&mut canvas).text_box(
+                Rect::new(0, 0, 8, 18),
+                "ABCD",
+                Color::WHITE,
+                1,
+            );
+            assert_eq!(lines, 3);
+        }
+        assert!(pixels.iter().any(|pixel| *pixel == Color::WHITE.packed()));
+    }
+
+    #[test]
+    fn wovengraphics_rounded_rect_keeps_corners_clipped_and_blended() {
+        use crate::graphics::{Color, Rect, Renderer};
+
+        let mut pixels = [Color::BLACK.packed(); 25];
+        {
+            let mut canvas = Canvas::new(&mut pixels, 0, 0, 5, 5).unwrap();
+            Renderer::new(&mut canvas).rounded_rect_blended(
+                Rect::new(-1, -1, 6, 6),
+                2,
+                Color::WHITE,
+                128,
+            );
+        }
+        assert_eq!(
+            pixels[0],
+            blend(Color::WHITE.packed(), Color::BLACK.packed(), 128)
+        );
+        assert_eq!(
+            pixels[2],
+            blend(Color::WHITE.packed(), Color::BLACK.packed(), 128)
+        );
+        assert_eq!(
+            pixels[12],
+            blend(Color::WHITE.packed(), Color::BLACK.packed(), 128)
+        );
+    }
+
     use super::*;
 
     #[test]
@@ -2678,8 +13518,9 @@ mod tests {
         assert_eq!(
             abc,
             [
-                0xba, 0x78, 0x16, 0xbf, 0x8f, 0x01, 0xcf, 0xea, 0x41, 0x41, 0x40, 0xde, 0x5d, 0xae, 0x22, 0x23,
-                0xb0, 0x03, 0x61, 0xa3, 0x96, 0x17, 0x7a, 0x9c, 0xb4, 0x10, 0xff, 0x61, 0xf2, 0x00, 0x15, 0xad,
+                0xba, 0x78, 0x16, 0xbf, 0x8f, 0x01, 0xcf, 0xea, 0x41, 0x41, 0x40, 0xde, 0x5d, 0xae,
+                0x22, 0x23, 0xb0, 0x03, 0x61, 0xa3, 0x96, 0x17, 0x7a, 0x9c, 0xb4, 0x10, 0xff, 0x61,
+                0xf2, 0x00, 0x15, 0xad,
             ]
         );
         let empty = accounts::hash_pin(b"", b"");
@@ -2702,19 +13543,22 @@ mod tests {
         // A trailing CR is tolerated; malformed lines are refused.
         assert!(accounts::Account::parse(std::format!("{line}\r").as_bytes()).is_some());
         let refused = [
-            "ada:0102feff",                       // no hash
-            ":0102feff:00",                       // no name
-            "a:b:c:d",                            // too many fields
-            "ada::00",                            // empty salt
-            "ada:010:00",                         // odd salt hex
-            "ada:0102feff:zz",                    // not hex
-            "this-name-is-too-long:00:00",        // name over 16
+            "ada:0102feff",                // no hash
+            ":0102feff:00",                // no name
+            "a:b:c:d",                     // too many fields
+            "ada::00",                     // empty salt
+            "ada:010:00",                  // odd salt hex
+            "ada:0102feff:zz",             // not hex
+            "this-name-is-too-long:00:00", // name over 16
         ];
         for bad in refused {
             assert!(accounts::Account::parse(bad.as_bytes()).is_none(), "{bad}");
         }
         let short_hash = std::format!("ada:0102feff:{}", &line[13..line.len() - 2]);
-        assert!(accounts::Account::parse(short_hash.as_bytes()).is_none(), "31-byte hash");
+        assert!(
+            accounts::Account::parse(short_hash.as_bytes()).is_none(),
+            "31-byte hash"
+        );
     }
 
     #[test]

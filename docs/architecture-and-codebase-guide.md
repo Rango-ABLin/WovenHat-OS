@@ -1,5 +1,377 @@
 # WovenHat OS Architecture & Codebase Guide
 
+## Graphics contextual GPOS update (2026-10-19)
+
+The bounded contextual positioning path recognizes format-3 records with two
+input coverages and no backtrack/lookahead, then applies a nested type-1
+format-1 adjustment to the first input. Nested extension wrappers are
+validated through the shared lookup resolver; broader nested pair/context
+composition is intentionally not implied.
+
+## Graphics GPOS mark-to-ligature update (2026-10-19)
+
+Lookup type 5 format 1 decodes mark arrays and bounded ligature component
+records, resolving the selected class anchor against the mark anchor. The
+current shaped-glyph representation does not encode a following mark's target
+component, so the implementation selects the final ligature component; a
+future cluster/component-carrying ABI can refine that choice.
+
+## Graphics GPOS attachment extension update (2026-10-19)
+
+Attachment lookup paths accept type-9 extension wrappers only when the
+extension format and nested lookup type match the requested mark-to-base,
+mark-to-mark or cursive path. The nested subtable offset and all enclosing
+bounds are checked before decoding.
+
+## Graphics GPOS script/LangSys attachment update (2026-10-19)
+
+Mark-to-base, mark-to-mark and cursive positioning share a bounded feature
+selector that resolves the requested script and LangSys records, including
+required features. An absent script or language produces no attachment;
+default shaping enumerates the feature list as before.
+
+## Graphics GPOS lookup composition update (2026-10-19)
+
+Selected `kern` lookups are evaluated in declared order. Matching single and
+pair value records accumulate with saturating placement/advance arithmetic;
+single and pair queries remain separated by the internal sentinel, and every
+lookup/subtable path retains bounded validation.
+
+## Graphics GPOS outline-resolved anchor update (2026-10-19)
+
+Format-2 anchors resolve their contour-point index through `outline_points_glyph`
+before attachment deltas are applied. Point count, glyph outline and table
+bounds are checked, and missing or malformed outlines fail closed.
+
+## Graphics GPOS attachment anchor update (2026-10-19)
+
+Format-3 anchor decoding, including optional ppem device deltas, is shared by
+mark-to-base, mark-to-mark and cursive attachment. Format-2 contour-point
+anchors use the bounded outline decoder.
+
+## Graphics GPOS format-3 anchor update (2026-10-19)
+
+Mark-to-base anchor decoding supports format 3 with optional ppem device
+deltas. Format 1 remains coordinate-only; format 2 contour-point anchors use
+the bounded glyph outline points.
+
+## Graphics GPOS mark-to-mark update (2026-10-19)
+
+GPOS type-6 format-1 `mkmk` records now connect a second mark to a first mark
+using validated class-matched anchors. The shaping pass applies the first
+anchor minus second anchor delta to the second mark origin while retaining its
+advance; alternate anchor formats remain outside this slice.
+
+## Graphics GPOS cursive update (2026-10-19)
+
+GPOS type-3 format-1 cursive records now connect adjacent covered glyphs using
+validated entry/exit anchors. The right glyph receives the exit-minus-entry
+origin delta and retains its advance; other attachment and anchor formats are
+outside this slice.
+
+## Graphics GPOS mark-to-base update (2026-10-19)
+
+The shaping pass recognizes GPOS type-4 format-1 mark-to-base records in
+`mark` and `mkmk` features. It validates coverage, class and anchor arrays,
+then applies base-minus-mark anchor deltas to the mark origin while retaining
+its advance. Other attachment and anchor formats remain outside this slice.
+
+## Graphics GPOS single-adjustment update (2026-10-19)
+
+GPOS type-1 format-1/2 subtables now produce bounded placement and advance
+adjustments through the existing value-record/device-table decoder. The
+shaping pass applies the result per glyph and shifts following origins by
+advance deltas; attachment and other positioning lookup types remain outside
+this slice.
+
+## Graphics GPOS extension update (2026-10-19)
+
+The GPOS shaping path unwraps type 9 extension records for nested type-2 pair
+positioning subtables. The existing format-1/format-2 value-record parser and
+device-table ppem handling are reused after validating the extension offset;
+other positioning lookup types remain fail-closed.
+
+## Graphics GSUB extension class update (2026-10-19)
+
+Type 7 extension records for lookup types 5 and 6 can now route format-2
+class-based contextual/chaining subtables through the existing checked class
+matchers. The extension path preserves bounded class definitions, rules and
+nested lookup references; malformed data remains fail-closed.
+
+## Graphics GSUB extension contextual update (2026-10-19)
+
+Type 7 extension records for lookup types 5 and 6 can unwrap bounded format-3
+contextual/chaining subtables and route them through the existing coverage
+matcher. Nested lookup references remain bounded by the active lookup list;
+class-based extension forms remain fail-closed until separately implemented.
+
+## Graphics GSUB extension ligature update (2026-10-19)
+
+Type 7 extension records can now unwrap bounded type-4 ligature subtables in
+addition to type-1 single substitutions. Matching returns the consumed
+component count to the shaping pipeline; malformed or unsupported extension
+forms remain fail-closed.
+
+## Graphics GSUB extension update (2026-10-19)
+
+The bounded GSUB shaping path unwraps type 7 extension records for nested
+single substitutions, validating the extension offset and the nested format 1
+or 2 coverage/substitute data before applying it. Other extension lookup types
+remain fail-closed until separately implemented.
+
+## Graphics GSUB composition update (2026-10-19)
+
+The shaping path runs selected GSUB results through an eight-pass bounded
+local pipeline. A single substitution can therefore feed the next selected
+lookup, while ligature consumption ends the local sequence and repeated
+no-op/cycle behavior cannot run indefinitely. Complete OpenType lookup
+ordering, broader nested composition and hardware GPU acceleration remain
+outside this slice.
+
+## Graphics class-based chaining GSUB update (2026-10-19)
+
+GSUB lookup type 6 format 2 now validates separate backtrack, input and
+lookahead class definitions and applies matching chain rules with a nested
+type-1 substitution at sequence index zero. Class-set, rule, sequence, lookup
+and glyph ranges are bounded. Broader nested lookup composition, complete
+feature ordering and hardware GPU acceleration remain outside this slice.
+
+## Graphics chaining GSUB update (2026-10-19)
+
+GSUB lookup type 6 format 3 now shares the bounded backtrack/input/lookahead
+coverage matcher with contextual shaping. A matching chaining record can
+invoke a nested type-1 substitution at sequence index zero; all table and
+glyph ranges are validated. Class-based chaining, broader nested lookup
+composition, complete feature ordering and hardware GPU acceleration remain
+outside this slice.
+
+## Graphics class-based contextual GSUB update (2026-10-19)
+
+GSUB lookup type 5 format 2 now supports checked class-definition lookup,
+class-set rule selection, subsequent input-class matching and a nested type-1
+substitution at sequence index zero. Rule, class-set, nested-lookup and glyph
+ranges are bounded. Chaining substitution, complete feature ordering and
+hardware GPU acceleration remain outside this slice.
+
+## Graphics contextual GSUB update (2026-10-19)
+
+The bounded GSUB path supports contextual lookup type 5 format 3 coverage
+matching across backtrack, input and lookahead glyphs. A matching record may
+invoke a nested type-1 single substitution at sequence index zero; all
+coverage, sequence, lookup and glyph ranges are validated. Class-based/contextual
+formats 1/2, chaining substitution, complete feature ordering and hardware GPU
+acceleration remain outside this slice.
+
+## Graphics GSUB single-substitution update (2026-10-19)
+
+The bounded GSUB path accepts lookup type 1 formats 1 and 2 for selected
+Script/LangSys features (`ccmp`, `locl`, `smcp`, `subs`, `sups`, `case`, and
+`cpsp`). Coverage indexes, format-2 substitute arrays and resulting glyph IDs
+are range-checked before a shaped glyph is emitted. Contextual/chaining GSUB,
+complete feature ordering and hardware GPU acceleration remain outside this
+slice.
+
+## Graphics named LangSys update (2026-10-19)
+
+`TextShapingOptions` carries optional ScriptList and named LangSys tags plus
+the ppem needed by device tables. The shaping path resolves the requested
+language record with checked bounds for both GSUB `liga`/`rlig` and GPOS
+`kern`; a missing language record does not silently use the default or another
+language. Contextual/complex GSUB/GPOS, broader script data and hardware GPU
+acceleration remain outside this slice.
+
+## Graphics script-scoped GPOS update (2026-10-19)
+
+The script-aware shaping path now passes the selected ScriptList/default
+LangSys through GPOS `kern` pair lookup selection as well as GSUB. The
+`shape_text_ligatures_with_script_and_ppem` entry point makes both the script
+tag and ppem required when device deltas are needed. Missing scripts do not
+fall back to another script. Named language systems, contextual/complex
+GSUB/GPOS and hardware GPU acceleration remain outside this slice.
+
+## Graphics GSUB script-selection update (2026-10-19)
+
+`TrueTypeFace::shape_text_ligatures_with_script` selects a requested ScriptList
+record and its default LangSys before resolving bounded `liga`/`rlig` feature
+records and type-1 lookups. It does not fall back to another script when the
+requested tag is absent. The legacy shaping API retains its existing feature
+list behavior. Language-specific LangSys selection, GPOS script scoping,
+contextual/complex GSUB and hardware GPU acceleration remain outside this
+slice.
+
+## Graphics GPOS device-table update (2026-10-18)
+
+`TrueTypeFace::shape_text_ligatures_with_ppem` is the explicit ppem-aware
+entry point for GPOS device records. Formats 1, 2 and 3 are decoded with
+checked ranges and signed packed deltas; each delta augments its matching
+x/y-placement or x/y-advance value before the existing font-unit scaling and
+origin propagation. The no-ppem shaping path returns a fail-closed error when
+a device record is encountered. Variation-index device semantics, full script
+shaping and hardware GPU acceleration remain outside this slice.
+
+## Graphics GPOS y-value update (2026-10-18)
+
+GPOS pair records now carry bounded y-placement and y-advance values through
+the shaped glyph origin path, with font-unit-to-pixel scaling and propagation
+to following origins. Device-table deltas and full vertical layout semantics
+are not implied; the QEMU/VirGL hardware presentation boundary is unchanged.
+
+## Graphics GPOS class positioning update (2026-10-18)
+
+GPOS pair positioning now supports bounded format-2 class matrices in addition
+to format 1 pair sets. Class-definition formats 1/2 and matrix dimensions are
+validated before applying scaled x adjustments; unsupported value/device
+semantics remain fail-closed. Full script shaping and the QEMU/VirGL hardware
+presentation boundary are unchanged.
+
+## Graphics GPOS positioning update (2026-10-18)
+
+The shaped text path optionally follows the GPOS `kern` feature to type-2
+pair-positioning format 1 and applies bounded x-placement/x-advance records in
+scaled pixels. Unsupported lookup/value formats remain fail-closed; full GPOS
+device tables and script shaping are not implied. The QEMU/VirGL hardware
+presentation boundary is unchanged.
+
+## Graphics variation-aware shaping update (2026-10-18)
+
+Shaped glyph IDs can now carry normalized gvar coordinates through metric
+calculation, outline construction and antialiased rasterization. The base path
+does not apply variation deltas; the variation path applies them once and
+validates coordinate/table bounds. Full script shaping and the QEMU/VirGL
+hardware presentation boundary remain separate.
+
+## Graphics shaped-glyph raster update (2026-10-18)
+
+The font boundary now supports direct glyph-ID outline decoding and
+antialiased rasterization, with `render_shaped_text` carrying GSUB-selected
+IDs from shaping into the renderer. Unicode-character wrappers remain intact;
+variation-aware shaped rasterization and full script shaping are not implied.
+The QEMU/VirGL hardware presentation boundary is unchanged.
+
+## Graphics GSUB shaping update (2026-10-18)
+
+The borrowed TrueType/OpenType boundary now exposes `ShapedGlyph` and a
+bounded GSUB ligature path. It follows `liga`/`rlig` feature records to type-1
+ligature lookups, validates coverage and component sequences, and derives the
+selected glyph's horizontal metric. It does not yet rasterize arbitrary shaped
+glyph IDs or implement full script shaping; the QEMU/VirGL hardware boundary
+is unchanged.
+
+## Graphics directional text update (2026-10-18)
+
+`TrueTypeFace::layout_text_bidi` resolves bounded strong RTL/LTR runs and
+neutral characters before emitting visual placements. `TextDirection::classify`
+recognizes common RTL blocks and Unicode alphanumerics; punctuation and
+combining marks remain neutral. Full UAX#9, script shaping, and OpenType
+feature application are not implied, and the QEMU/VirGL hardware boundary is
+unchanged.
+
+## Graphics hint control-flow update (2026-10-18)
+
+The bounded TrueType interpreter now recognizes `IF`/`ELSE`/`EIF` and
+relative `JMPR`/`JROT`/`JROF`. Branch scanning is instruction-span-aware so
+immediate PUSH data cannot be mistaken for opcodes; nesting and jump targets
+are bounded by the copied program, and malformed control flow fails closed.
+Function calls, full projection math and hint interpolation are not implied.
+
+## Graphics storage/CVT hint update (2026-10-18)
+
+The bounded hint interpreter exposes caller-owned CVT and storage resources:
+`MIAP`/`MDAP` validate point and CVT indices, while `WS`/`RS` validate storage
+indices. Missing resources and unsupported instructions fail closed; the
+software renderer and QEMU/VirGL presentation boundary are unchanged.
+
+## Graphics CVT hint update (2026-10-18)
+
+The bounded hint interpreter now supports `MDAP` point selection and `MIAP`
+placement from caller-owned CVT values along the active freedom axis. Missing
+CVT data and unsupported hint resources fail closed; software rendering and
+the QEMU/VirGL presentation boundary are unchanged.
+
+## Graphics hint-state execution update (2026-10-18)
+
+The font boundary now executes a bounded coordinate-independent hint subset
+covering vector selection, rounding state, stack primitives and PUSHB/PUSHW.
+Point movement, storage, CVT and control flow fail closed; the software
+renderer and QEMU/VirGL presentation boundary are unchanged.
+
+## Graphics hinting boundary (2026-10-18)
+
+`TrueTypeFace::glyph_hint_program` provides a bounded, validated copy of
+simple-glyph instruction bytes; execution is deliberately absent, and
+composite programs fail closed. The software raster path and QEMU/VirGL
+presentation boundary remain unchanged.
+
+## Graphics phantom metrics update (2026-10-18)
+
+`TrueTypeFace::advance_width_with_variation` retains simple-glyph phantom
+points while applying `gvar` deltas, deriving varied advance width from the
+right and left phantom positions. Incomplete legacy LSB storage preserves the
+base advance path and fails closed for variation metrics; QEMU/VirGL output is
+unchanged.
+
+## Graphics composite variation update (2026-10-18)
+
+Composite `gvar` processing now treats packed variation point numbers as
+component indices, recursively applies nested component variation, and shifts
+each bounded component output range by its checked X/Y delta. Phantom metrics
+and hinting remain outside this renderer boundary; QEMU/VirGL presentation is
+unchanged.
+
+## Graphics shared-point variation update (2026-10-18)
+
+Simple-glyph `gvar` tuples may now use a checked glyph-level packed shared
+point set, including its all-points form. Composite variation remains
+unsupported and fails closed; the QEMU/VirGL hardware presentation boundary
+is unchanged.
+
+## Graphics variation update (2026-10-18)
+
+The simple-glyph `gvar` path now supports embedded-peak intermediate regions
+using checked start/peak/end ranges and piecewise normalized F2DOT14 scalar
+blending. Shared-point sets and composite variation still fail closed; the
+QEMU/VirGL hardware presentation boundary is unchanged.
+
+## Graphics font variation boundary (2026-10-18)
+
+`libwoven::graphics::TrueTypeFace::outline_points_with_variation` applies
+embedded-peak `gvar` tuples to simple glyph points using normalized F2DOT14
+coordinates. Composite glyph variation, intermediate regions and shared-point
+sets fail closed until separately implemented; the compositor and QEMU/VirGL
+hardware boundary are unchanged.
+
+## Graphics backend boundary (2026-10-18)
+
+The kernel VirtIO-GPU path keeps the existing software/2D scanout as the
+accepted fallback. Its Stage 20.14 VIRGL probe negotiates optional resource
+blobs, creates bounded context/resource command streams, and can encode a
+surface/framebuffer/RGBA-clear sequence. QEMU's default GL device accepts the
+transport path but does not accept the tested 3D resource through classic
+`SET_SCANOUT`; its opt-in guest blob path is not accepted by the VirGL context.
+Blob-backed presentation therefore remains capability-gated and unclaimed
+until a visual QEMU frame is verified.
+
+## Live boot log startup candidate (2026-10-16; physical retry correction 2026-10-17)
+
+Production boot queues Stage 13.19 USB live-log setup immediately before
+attempting to start the Stage 20.15 WovenShell session. File creation and the
+initial FAT flush run in a background I/O service, because they may take time
+on physical USB media. The worker is queued even before USB enumeration is
+visible and retries discovery/setup failures. Physical USB enumeration now
+also retries every 300 timer ticks until a storage device is actually
+published; this covers devices that settle after the first probe and avoids
+the existing-HID fast path suppressing later mass-storage discovery. The
+acceptance self-test retains the synchronous start path. Focused Clippy and
+Stage 13.18/13.19 QEMU gates pass, but physical USB boot still returned no
+`LOGS/BOOT0001.TXT` on two sticks; serial capture remains required. See the
+[startup audit](audit-live-boot-log-startup-2026-10-16.md).
+
+Driver bring-up and xHCI initialization now emit phase checkpoints before
+potentially long waits. Serial transmit polling is bounded in all builds, with
+log bytes retained in the in-memory ring even if no UART responds. This does
+not make a USB log possible while xHCI is hung; external serial capture is
+needed for a permanently stalled controller.
+
 ## Stages 1–10 release evidence integrity (2026-10-16)
 
 Memory, storage, live-network and Stage 6 hotplug QEMU gates share
@@ -575,9 +947,108 @@ configuration reads use the existing ECAM/legacy address-selection access.
 It is an inventory aid and never radio acceptance. See the
 [AX201 machine audit](audit-ax201-machine-2026-09-24.md).
 
+## AX201 integrated 22000 activation boundary (2026-10-17)
+
+The AX201 owner increment adds `Ax201Driver` in `wifi_firmware.rs`. It is a
+single lifecycle owner for the validated API-77 runtime image, copied
+LMAC/UMAC/paging DMA, context-info DMA, startup state, ALIVE transition and
+stop teardown. The firmware input is an explicit named provider source whose
+filename must be `iwlwifi-QuZ-a0-hr-b0-77.ucode`; the external bytes are copied
+before the source may be released. `Ax201QueueOwner` allocates the 22000 MQ
+RX free/used/status rings, command ring and one RX buffer per 512-entry MQ
+free descriptor,
+and startup refuses to proceed without attaching it. The concrete adapter
+programs the RFH free/used/status queue bases, resets their device cursors, and
+rings the MQ RX shadow write-index PRPH doorbell at `0x1c80` before
+`CPU_INIT_RUN`.
+On reclaim, every device-produced AX201 used completion is checked for a
+bounded rbid before any RX copy, preserving the DMA ownership boundary for
+malformed completions and teardown. The free ring uses 16-byte transfer
+descriptors; the used ring uses 32-byte completion descriptors.
+The command ring uses the 22000 `iwl_tfh_tfd` 256-byte stride (25 TB slots plus
+header/padding), rather than a legacy 128-byte descriptor assumption.
+The context-info command-queue size is encoded as `TFD_QUEUE_CB_SIZE`
+(`ilog2(entries) - 3`, `2` for the 32-entry ring); it is kept distinct from the ring's descriptor
+count used for indexing and bounds checks.
+The owner also exposes a bounded four-outstanding host-command path: it
+copies the 4-byte short or 8-byte wide header and payload into kernel-owned
+DMA, writes one 10-byte transfer-buffer entry in the 256-byte TFD, uses
+command queue 9, and retains that payload until a matching response sequence
+retires it. This is transport plumbing only; the physical probe sends no
+speculative firmware command before the device's real ALIVE is observed.
+The TFD is emitted by a shared checked encoder that bounds the 25 transfer
+buffers, rejects zero lengths and addresses outside the 36-bit transport
+range, and is covered by the queue-owner self-test before DMA publication.
+The physical probe is invoked only after the normal IDT/APIC boundary is
+initialized; it enables PCI memory/bus mastering, binds the identity-specific
+AX201 MSI vector, enables CSR RX causes, services the deferred IRQ boundary,
+and orders CSR/MSI disable before restoring the PCI command register.
+Once ALIVE is observed, the physical probe uses the API-defined statistics
+command (`0x9c`) as a bounded command/response smoke test, with periodic
+notifications disabled. It reports that result separately from radio scan and
+association qualification.
+The firmware owner also exposes typed scan-control boundaries for the API
+configuration and abort commands and for scan-complete notifications. These
+encode/parse checks are strict about group, command, version, UID, and payload
+size. It also emits the explicit API-17 passive UMAC request for at most 67
+channels and validates the variable-length per-iteration result records.
+Direct-SSID active probing remains fail-closed until probe-frame and MAC/PHY
+context setup are implemented; these boundaries do not claim radio results.
+The scan session owner retains one active UID, requires that UID for abort and
+unsolicited completion handling, and clears it only on a matching completion.
+This is the cancellation/generation boundary for the scan command path.
+The AX201 boundary also exposes a checked API-1 PHY context encoder and
+submission method. Its 40-byte packed layout validates channel, band, and
+width before DMA publication. It is deliberately not part of the physical
+probe sequence yet: MAC context, binding context, command status, and
+quiescent teardown must precede radio-command activation.
+The boundary now also contains the fixed managed-station MAC record and API-2
+binding record. Physical activation submits those records only after ALIVE and
+accepts them only through the generic zero-status response parser; timeouts,
+unsolicited packets, and nonzero firmware status do not advance the sequence.
+Once all three contexts acknowledge successfully, the physical path submits a
+bounded passive scan on channels 1/6/11 and routes only UID-matching
+iteration/completion notifications to the scan owner. A timeout attempts the
+matching abort before teardown; active/direct-SSID probing and association are
+separate later boundaries.
+Physical startup reads the Intel `CSR_HW_REV` register at BAR offset `0x28`
+for context-info `version.mac_id`; the PCI revision byte is not substituted.
+It also reads the six-byte CSR MAC identity from `0x380/0x384` for the
+activation diagnostic, while leaving radio/network qualification separate.
+The inventory-only probe reports this register as well, but keeps its
+read-only/no-DMA boundary.
+`Intel22000MmioIo` accepts the 22000 24-bit PRPH address field
+needed by AX201's `UREG_CPU_INIT_RUN` (`0x00a05c44`). Stage 13.10AE/AF/AG
+passes in the Stage 13.9 1/2/4-CPU matrix. This is still synthetic: the owner
+has no normal-boot attachment, physical ALIVE, queue-doorbell, interrupt,
+recovery or radio evidence.
+
+The Intel AX201 identity `8086:A0F0` shares the Intel 22000 CSR, DMA
+context-info, firmware-startup and deferred-interrupt contracts already
+implemented for the AX200-family path, but uses a separate integrated
+firmware profile and MSI admission function. AX201 admission is therefore
+explicit and cannot fall through the AX200 identity check. Firmware loading,
+physical ALIVE proof, real queue activation, teardown/recovery and radio
+qualification remain separate gates.
+
+The AX201 owner now also has a distinct bounded data-TX ring: 32 hardware
+TFD slots and up to four owned encoded payloads. A payload is published only
+after its queue ID is checked against Intel's management (5–8) or data
+(10–30) DQA ranges, and is
+retained until an exact queue/index completion is decoded. The driver exposes
+this boundary is now exercised by the physical probe's post-ALIVE DQA and
+queue-allocation handshake. A tested management-frame submission still
+requires an explicit frame/peer policy and returned hardware TX evidence.
+
 ## Physical Wi-Fi firmware prerequisite (2026-09-24)
 
-The preceding increment targeted AX200; AX201 support is not enabled.
+The selected machine's AX201 PCI identity (`8086:A0F0`) is represented in the
+Wi-Fi binding table as `ActivationReady`. Classification records the exact
+family and integrated `iwlwifi-QuZ-a0-hr-b0` API-77 profile. The shared
+22000 CSR path accepts AX201, while the AX201-specific MSI contract remains
+identity-specific and cannot reuse the AX200 binding by accident. No firmware
+blob is embedded or loaded; native firmware transfer, DMA, interrupt,
+teardown and RF work remain prerequisites for physical activation.
 `wifi_ax200_image.rs` preflights runtime LMAC/UMAC/paging region ordering,
 payload size and total DMA capacity. `Intel22000DmaContextInfo::from_runtime_firmware`
 uses that plan to copy payloads into independently owned DMA buffers. Failure
@@ -699,12 +1170,12 @@ qualification.
 | `capability.rs`, `wovenguard.rs`, `audit.rs`, `permission.rs`, `secret_vault.rs`, `signed_app.rs`, `secure_boot.rs`, `boot_measurement.rs`, `entropy.rs` | Authority, domains, resource policy, runtime permission decisions, volatile WovenVault handles, signed applications, software signed-kernel handoff, boot measurement, security-ledger recording/read ABI, and entropy support |
 | `ipc.rs`, `pipe.rs` | IPC objects, endpoint/message operations and byte pipes |
 | `device.rs`, `keyboard.rs`, `mouse.rs`, `serial.rs`, `console.rs`, `terminal.rs`, `shell.rs` | Device registry, input (keyboard and PS/2 mouse both decode and publish at IRQ time), diagnostics and command interfaces |
-| `graphics.rs`, `gui.rs` | Existing framebuffer/GUI support; not the future compositor |
+| `graphics.rs`, `gui.rs` | Kernel colour definitions and legacy framebuffer/GUI support; the userspace WovenGraphics abstraction lives in `libwoven::graphics` and feeds the existing compositor surface ABI. The userspace renderer also exposes bounded rounded panels, alpha-aware image blits, `Path` geometry with clipped opaque/alpha strokes and fills plus four-segment quadratic flattening, bounded eight-contour `CompoundPath` even-odd fills and strokes with integer 4x4 antialiasing, clipped vertical and horizontal gradients, deterministic signed-16.16 affine `Transform` values for clipped transformed rectangles, a shared-glyph `Font`/`TextMetrics` provider for bounded layout, wrapping and integer scaling, and a borrowed `TrueTypeFace` metadata/cmap/advance-metrics boundary with BMP format-4 and non-BMP format-12 lookup, bounded `fvar` axis metadata, validated borrowed `gvar` glyph-payload slices, simple and XY/transform/point-matched composite `glyf`/`loca` outlines, compound-path assembly, antialiased glyph raster entry point, advance-based text layout with optional legacy kerning, bounded character and word-level text-box line breaking, explicit LTR/RTL placement and shared bitmap fallback; `gvar` tuple delta application, hint execution, modern shaping, bidi and scripts remain open |
 | `rtc.rs` | CMOS real-time clock (UTC), behind the `ClockRead` syscall |
 | `font.rs`, `display.rs` | 5×7 ASCII font (also compiled into libwoven); `Surface` (opaque `blit`, `blit_region` for exposed-region redraw, uniform-opacity `blend`, `write_pixels` for client uploads), bounded `Damage` (regions that form exactly a rectangle merge; a full list collapses to one bounding box) and the single format-resolving presentation path (`present_scaled`, integer display scale, each row converted once and copied to the physical rows it covers; `present` is scale 1; `Surface::scaled_row` serves the virtio-gpu heads) |
 | `user_graphics.rs`, `compositor.rs` | Owner-tagged, generation-checked client surfaces (syscalls 98–101, 104), up to 1920×1200 within a 4 MB per-process and 16 MB system pixel budget, behind a preemption lock (not interrupts-off) with allocation and freeing outside it and the kernel-held compositor surface they are blitted onto (102–103); `blit` snapshots under the registry lock and releases it before taking the compositor lock, so the two rank-10 locks never nest. Presentation borrows the framebuffer through `terminal::with_framebuffer` (lock order compositor → terminal), and display ownership suppresses terminal rendering while the compositor presents. Userspace reaches the compositor only with `DisplayIo` and the single-holder lease (syscalls 105–106), released on exit; every client token is bound to the calling process before the registry sees it. A presenting holder also takes input focus: `woven_input` routes events to its private bounded queue (syscall 107, `InputIo`) until it exits; syscall 108 sleeps for the next event with a single registered waiter woken by `publish` after `FOCUS` is released (lock order scheduler → compositor → FOCUS). A client may share one of its surfaces with one process (syscall 109); the lease holder composites it with syscall 110, authorised by the slot's grant rather than the token. Syscall 111 sleeps over input and the pid mailbox at once; `ipc::send` wakes the mailbox's single waiter after releasing the IPC lock. Clients declare damage on their surfaces (syscall 112); the holder sleeps on it via `WaitAny` and copies only the damaged region (syscall 113). The boot compositor is sized to the framebuffer (clamped to 1920×1200), and every framebuffer writer, including the boot `Console`, goes through the terminal lock. Stacking, raise and per-window focus are window-manager policy in userspace (Stage 19.11), built on the lease, focus, `WaitAny`, shared surfaces and IPC |
 | `panic.rs`, `benchmark.rs` | Failure reporting and existing benchmark support |
-| `libwoven/`, `apps/hello`, `apps/hello-gui`, `apps/woven-shell` | The userspace API (one thin wrapper per syscall, plus `Canvas` software rendering, the shared kernel font, and a fixed-point `Spring` for animation, and `accounts`, local accounts held as a salt and `SHA-256(salt || PIN)`) and the Ring-3 programs. Each app is its own crate with a large-code-model `link.x` (whose `.l*` sections must be placed explicitly) and a `build.rs` that relinks when it changes. `woven-shell` is the desktop, with four workspaces (per-workspace stacks, a taskbar switcher, F3/F4): it holds the compositor lease and recomposes exposed rectangles from its own software layers and clients' shared surfaces (region blits, syscalls 120–121), hosting applications over an IPC protocol (`WOPN`, `TRAY`, `NOTE`, `WCLS`, and `WSIZ`/`WRSZ` for resizing; `libwoven::layout` tiles them); shadows and other translucent layers use region blends (syscalls 200–201), and text, borders and the pointer are overlays copied with a keyed blit that skips the transparent key (syscall 202), so nothing is read back from the screen. With `--accounts` it starts at a sign-in screen, and its lock screen asks for the signed-in account's PIN. A user stack is 8 KiB (`UserStack::SIZE`), so the shell keeps its tile buffer and desktop state in statics (.bss), never in `main`'s frame |
+| `libwoven/`, `apps/hello`, `apps/hello-gui`, `apps/woven-shell` | The userspace API (one thin wrapper per syscall, plus the typed `graphics::{Color, Rect, Renderer}` WovenGraphics boundary, `Canvas` software rendering, caller-owned `DepthBuffer`/`Vertex3` software 3D triangles, the shared kernel font, and a fixed-point `Spring` for animation, and `accounts`, local accounts held as a salt and `SHA-256(salt || PIN)`) and the Ring-3 programs. Each app is its own crate with a large-code-model `link.x` (whose `.l*` sections must be placed explicitly) and a `build.rs` that relinks when it changes. `woven-shell` is the desktop, with four workspaces (per-workspace stacks, a taskbar switcher, F3/F4): it holds the compositor lease and recomposes exposed rectangles from its own software layers and clients' shared surfaces (region blits, syscalls 120–121), hosting applications over an IPC protocol (`WOPN`, `TRAY`, `NOTE`, `WCLS`, and `WSIZ`/`WRSZ` for resizing; `libwoven::layout` tiles them); shadows and other translucent layers use region blends (syscalls 200–201), and text, borders and the pointer are overlays copied with a keyed blit that skips the transparent key (syscall 202), so nothing is read back from the screen. With `--accounts` it starts at a sign-in screen, and its lock screen asks for the signed-in account's PIN. A user stack is 8 KiB (`UserStack::SIZE`), so the shell keeps its tile buffer and desktop state in statics (.bss), never in `main`'s frame. The kernel's feature-gated VirtIO-GPU test path separately uses a bounded `VirglStream` encoder for checked VIRGL command framing; it is transport validation only until a visible GPU frame is accepted |
 | `tests/`, `scripts/`, `run-stage*-acceptance.ps1` | Host regressions, QEMU orchestration and stage preservation gates |
 
 ## Stage 6 filesystem concurrency boundary
