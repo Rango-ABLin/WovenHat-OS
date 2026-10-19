@@ -1,5 +1,16 @@
 # Stage status
 
+## Graphics track - bounded contextual GPOS sequence-index-1 pair positioning (2026-10-19)
+
+Two-input contextual GPOS format-3 records targeting sequence index one can
+now dispatch bounded nested type-2 format-1 pair positioning using the next
+shaped glyph as the pair partner. Coverage, pair-set and partner availability
+remain checked; nested pair positioning for later input indices and broader
+contextual semantics remain separate boundaries. The 42-test `libwoven` suite,
+warning-denying library/kernel/workspace Clippy, formatting, and Stage 19.2
+compositor visual acceptance passed on 1/2/4 CPUs. Hardware GPU acceleration
+remains a separate boundary.
+
 ## Graphics track - bounded five-input contextual GPOS positioning (2026-10-19)
 
 Contextual GPOS format-3 subtables with five input coverages now apply

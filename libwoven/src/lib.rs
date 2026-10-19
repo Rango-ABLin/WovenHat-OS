@@ -5291,9 +5291,8 @@ pub mod graphics {
             for index in 0..count.saturating_sub(1) {
                 let left = output[index].glyph_id;
                 let right = output[index + 1].glyph_id;
-                let context = (index > 0)
-                    .then(|| output[index - 1].glyph_id)
-                    .zip((index + 2 < count).then(|| output[index + 2].glyph_id));
+                let previous = (index > 0).then(|| output[index - 1].glyph_id);
+                let next = (index + 2 < count).then(|| output[index + 2].glyph_id);
                 let Some((x_placement, y_placement, x_advance, y_advance)) = self
                     .gpos_contextual_adjustment(
                         left,
@@ -5302,8 +5301,8 @@ pub mod graphics {
                             script_tag,
                             language_tag,
                             ppem,
-                            previous: context.map(|value| value.0),
-                            next: context.map(|value| value.1),
+                            previous,
+                            next,
                             third: None,
                             fourth: None,
                             fifth: None,
@@ -8017,9 +8016,17 @@ pub mod graphics {
                                 continue;
                             }
                             if nested_type == 2 {
-                                if options.input_count != 2 || options.target_sequence_index != 0 {
+                                if options.input_count != 2 || options.target_sequence_index > 1 {
                                     continue;
                                 }
+                                let pair_right = if options.target_sequence_index == 0 {
+                                    right
+                                } else {
+                                    let Some(next) = options.next else {
+                                        continue;
+                                    };
+                                    next
+                                };
                                 if nested_subtable
                                     .checked_add(10)
                                     .is_none_or(|end| end > table_end)
@@ -8090,7 +8097,7 @@ pub mod graphics {
                                 }
                                 for pair_index in 0..pair_count {
                                     let pair_record = pair_set + 2 + pair_index * record_size;
-                                    if read_u16(bytes, pair_record) != Some(right) {
+                                    if read_u16(bytes, pair_record) != Some(pair_right) {
                                         continue;
                                     }
                                     let adjustment = gpos_value_adjustment(
@@ -13048,6 +13055,22 @@ mod tests {
         );
         assert_eq!(shaped[0].advance, 525);
         assert_eq!(shaped[1].origin, Point::new(527, 15));
+        let mut contextual_pair_second_bytes = contextual_pair_bytes;
+        put16(&mut contextual_pair_second_bytes, 318, 1);
+        put16(&mut contextual_pair_second_bytes, 374, 2);
+        let contextual_pair_second_face =
+            TrueTypeFace::from_bytes(&contextual_pair_second_bytes).unwrap();
+        let mut shaped_pair_second = [shaped[0]; 3];
+        assert_eq!(
+            contextual_pair_second_face
+                .shape_text_ligatures("ABB", Point::new(2, 15), 1000, &mut shaped_pair_second)
+                .unwrap(),
+            3
+        );
+        assert_eq!(shaped_pair_second[0].advance, 500);
+        assert_eq!(shaped_pair_second[1].origin, Point::new(502, 15));
+        assert_eq!(shaped_pair_second[1].advance, 525);
+        assert_eq!(shaped_pair_second[2].origin, Point::new(1027, 15));
         let mut contextual_multi_bytes = contextual_gpos_bytes;
         put32(&mut contextual_multi_bytes, 104, 148);
         put16(&mut contextual_multi_bytes, 288, 3);

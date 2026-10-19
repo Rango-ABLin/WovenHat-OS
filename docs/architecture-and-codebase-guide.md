@@ -1,5 +1,12 @@
 # WovenHat OS Architecture & Codebase Guide
 
+## Graphics contextual GPOS sequence-index-1 pair update (2026-10-19)
+
+The bounded two-input contextual dispatcher can apply a nested type-2 pair
+lookup to sequence index one, using the following shaped glyph as its checked
+pair partner and propagating the resulting adjustment from that target.
+Nested pair targets beyond index one remain outside this path.
+
 ## Graphics five-input contextual GPOS update (2026-10-19)
 
 The bounded format-3 dispatcher supports five input coverages and can apply
