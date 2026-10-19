@@ -1,5 +1,11 @@
 # Agent coordination (Claude Code and Codex)
 
+**Codex graphics-track WovenSettings resize (2026-10-19):**
+WovenSettings now negotiates bounded `WSIZ/WRSZ` replacement surfaces with a
+480×320 loader-safe Canvas cap. Its QMP resize gate passed on 1/2/4 CPUs with
+evidence in `audit-artifacts/settings-desktop-{1,2,4}cpu-*`. The app remains
+read-only; pointer controls and hardware GPU presentation remain out of scope.
+
 **Codex graphics-track bounded WSIZ/WRSZ resize (2026-10-19):**
 WovenShell now allows a five-second replacement grace period. Calculator and
 Terminal negotiate replacement shared surfaces, clamp requests to 480×320 to
@@ -83,8 +89,9 @@ entries; controls, WSIZ, and hardware GPU presentation remain out of scope.
 identity, UTC clock, and compositor geometry. The production catalog now
 passes `--gui %p`; the shared desktop QEMU harness launches it from F1 and
 passed on 1/2/4 CPUs, with evidence in
-`audit-artifacts/settings-desktop-{1,2,4}cpu-*`. Controls, WSIZ, and hardware
-GPU presentation remain outside this slice.
+`audit-artifacts/settings-desktop-{1,2,4}cpu-*`. Controls, pointer widgets,
+and hardware GPU presentation remain outside this slice; bounded WSIZ/WRSZ is
+covered by the newer Settings resize slice.
 
 **Codex graphics-track WovenFiles visual acceptance (2026-10-19):**
 `scripts/test-files-desktop-qemu.py` now covers the packaged client through

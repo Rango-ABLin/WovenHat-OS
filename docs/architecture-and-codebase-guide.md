@@ -1,5 +1,12 @@
 # WovenHat OS Architecture & Codebase Guide
 
+## Graphics WovenSettings bounded resize (2026-10-19)
+
+`apps/woven-settings/src/gui.rs` now handles `WSIZ` with a loader-safe static
+480×320 Canvas target, publishes a shared replacement surface with `WRSZ`, and
+redraws after the resize. The QMP resize gate passed on 1/2/4 CPUs. Settings
+remains read-only; pointer controls and hardware GPU output are not implied.
+
 ## Graphics bounded WSIZ/WRSZ resize negotiation (2026-10-19)
 
 WovenShell allows five seconds for a client replacement surface to arrive.
@@ -94,7 +101,8 @@ uses a static full-window Canvas buffer, displays identity/UTC/display data,
 shares its `GraphicsSurface` with WovenShell, and follows the same WOPN/WCLS
 lifecycle as the other clients. The catalog supplies `--gui %p`. The shared
 QMP visual harness accepts `--app settings` and passed on 1/2/4 CPUs. No
-interactive controls, WSIZ resize handling, or hardware GPU output is implied.
+interactive controls, pointer widgets, or hardware GPU output is implied;
+bounded WSIZ/WRSZ handling is covered by the newer Settings resize section.
 
 ## Graphics WovenFiles QEMU visual acceptance (2026-10-19)
 

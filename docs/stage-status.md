@@ -1,5 +1,16 @@
 # Stage status
 
+## Graphics track - WovenSettings bounded resize (2026-10-19)
+
+WovenSettings now handles `WSIZ` by creating and sharing a replacement Canvas
+surface, sending `WRSZ` before the bounded pixel upload, and clamping requests
+to the loader-safe 480×320 render target. The shared QMP `--exercise-resize`
+gate passed on 1/2/4 CPUs with evidence under
+`audit-artifacts/settings-desktop-{1,2,4}cpu-*`.
+
+Settings remains read-only: settings controls, pointer widgets, and hardware
+GPU presentation are not claimed.
+
 ## Graphics track - bounded WSIZ/WRSZ resize negotiation (2026-10-19)
 
 WovenShell now gives the resize handshake a five-second bounded grace period,
@@ -146,8 +157,9 @@ F1 desktop launcher and compares before/after QEMU screendumps. Visual
 acceptance passed on 1/2/4 CPUs with evidence under
 `audit-artifacts/settings-desktop-{1,2,4}cpu-*`.
 
-This slice is intentionally read-only: settings controls, resize (`WSIZ`),
-and hardware GPU presentation are not claimed. The existing software/2D
+This slice is intentionally read-only: settings controls, pointer widgets,
+and hardware GPU presentation are not claimed. Its bounded resize path is
+covered by the newer WovenSettings slice above. The existing software/2D
 compositor remains the accepted QEMU path.
 
 ## Graphics track - WovenFiles live launcher/screenshot acceptance (2026-10-19)
