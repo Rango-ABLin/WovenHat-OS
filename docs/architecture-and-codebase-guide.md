@@ -1,5 +1,13 @@
 # WovenHat OS Architecture & Codebase Guide
 
+## Graphics WovenImages client (2026-10-19)
+
+`apps/woven-images/src/gui.rs` adds a bounded image-workspace preview using a
+static Canvas buffer and the WovenShell WOPN/WCLS lifecycle; the catalog
+supplies `--gui %p`. The shared QMP launcher/screendump gate passed on 1/2/4
+CPUs. Image decoding and input-driven selection are not implemented; the
+existing bounded `--list`/`--info` CLI remains authoritative.
+
 ## Graphics WovenEditor client (2026-10-19)
 
 `apps/woven-editor/src/gui.rs` adds a bounded read-only workspace preview

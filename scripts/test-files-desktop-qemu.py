@@ -57,7 +57,7 @@ def main():
     parser.add_argument('--qemu', default=shutil.which('qemu-system-x86_64') or r'C:\Program Files\qemu\qemu-system-x86_64.exe')
     parser.add_argument('--firmware', type=Path)
     parser.add_argument('--cpus', type=int, choices=(1, 2, 4), default=1)
-    parser.add_argument('--app', choices=('files', 'settings', 'monitor', 'security', 'editor'), default='files')
+    parser.add_argument('--app', choices=('files', 'settings', 'monitor', 'security', 'editor', 'images'), default='files')
     args = parser.parse_args()
     app = {
         'files': ('files', 'WovenFiles', 'woven-files'),
@@ -65,6 +65,7 @@ def main():
         'monitor': ('monitor', 'WovenMonitor', 'woven-monitor'),
         'security': ('security', 'WovenSecurity', 'woven-security'),
         'editor': ('editor', 'WovenEditor', 'woven-editor'),
+        'images': ('images', 'WovenImages', 'woven-images'),
     }[args.app]
     root = Path(__file__).resolve().parents[1]
     qemu = Path(args.qemu)

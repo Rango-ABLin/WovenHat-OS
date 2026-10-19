@@ -1,5 +1,12 @@
 # Agent coordination (Claude Code and Codex)
 
+**Codex graphics-track WovenImages client (2026-10-19):**
+`apps/woven-images/src/gui.rs` adds a bounded read-only image-workspace
+preview and the catalog now passes `--gui %p`. The shared QMP desktop gate
+launches it from F1 and passed on 1/2/4 CPUs, with evidence in
+`audit-artifacts/images-desktop-{1,2,4}cpu-*`. Decoding, selection, editing,
+WSIZ, and hardware GPU presentation remain out of scope.
+
 **Codex graphics-track WovenEditor client (2026-10-19):**
 `apps/woven-editor/src/gui.rs` adds a read-only bounded `/mnt` workspace
 preview and the catalog now passes `--gui %p`. The shared QMP desktop gate

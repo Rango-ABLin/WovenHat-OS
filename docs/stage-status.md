@@ -1,5 +1,19 @@
 # Stage status
 
+## Graphics track - WovenImages desktop client (2026-10-19)
+
+WovenImages now has a bounded `--gui <shell-pid>` client path. It renders a
+Canvas-backed `/mnt` image-workspace summary, lists supported header families,
+shares the surface, opens it with `WOPN`, and waits for `WCLS`. The production
+catalog passes the shell PID. The shared
+`scripts/test-files-desktop-qemu.py --app images` launcher/screendump gate
+passed on 1/2/4 CPUs with evidence under
+`audit-artifacts/images-desktop-{1,2,4}cpu-*`.
+
+This is a workspace preview only: PNG/JPEG/GIF/BMP decoding, image selection,
+editing controls, resize (`WSIZ`), and hardware GPU presentation remain
+unclaimed. Existing bounded `--list`/`--info` CLI behavior is preserved.
+
 ## Graphics track - WovenEditor desktop client (2026-10-19)
 
 WovenEditor now has a bounded `--gui <shell-pid>` client path. It renders a

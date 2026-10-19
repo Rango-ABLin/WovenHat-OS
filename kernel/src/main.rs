@@ -5235,7 +5235,7 @@ fn install_production_system_apps() -> bool {
             image: SYSTEM_APP_IMAGES,
             binary_path: "/bin/wovenhat-images",
             catalog_path: "/share/applications/woven-images.app",
-            catalog: b"Name=WovenImages\nExec=/bin/wovenhat-images\n",
+            catalog: b"Name=WovenImages\nExec=/bin/wovenhat-images --gui %p\n",
         },
         App {
             name: "woven-update",
