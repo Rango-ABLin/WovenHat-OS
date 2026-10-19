@@ -1,5 +1,13 @@
 # Agent coordination (Claude Code and Codex)
 
+**Codex graphics-track WovenEditor pointer control acceptance (2026-10-19):**
+WovenEditor now has a bounded local `Refresh` button. A forwarded `WPBT`
+release inside x=250..329, y=170..189 re-reads the read-only bounded `/mnt`
+workspace summary, increments a visible counter, and repaints. The production
+QEMU gate passed on 1/2/4 CPUs with `--app editor --exercise-client-click`;
+evidence is under `audit-artifacts/editor-desktop-{1,2,4}cpu-*`. The CLI write
+path is unchanged; USB HID and hardware GPU presentation remain separate.
+
 **Codex graphics-track WovenSecurity pointer control acceptance (2026-10-19):**
 WovenSecurity now has a bounded local `Refresh` button. A forwarded `WPBT`
 release inside x=250..329, y=145..164 re-reads the read-only bounded audit

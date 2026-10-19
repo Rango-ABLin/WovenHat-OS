@@ -1,5 +1,20 @@
 # Stage status
 
+## Graphics track - WovenEditor pointer control acceptance (2026-10-19)
+
+WovenEditor now presents a bounded, read-only `Refresh` control at local
+client coordinates x=250..329, y=170..189. A primary-button release forwarded
+as `WPBT` within that rectangle re-reads the bounded `/mnt` workspace summary
+and increments a visible refresh counter. The production QEMU gate
+`scripts/test-files-desktop-qemu.py --app editor --exercise-client-click`
+passed on 1/2/4 CPUs. Evidence is under
+`audit-artifacts/editor-desktop-{1,2,4}cpu-*`.
+
+This accepts a seventh functional client control without enabling desktop file
+mutation; the existing CLI write path remains separate. Remaining clients
+still have pointer feedback rather than accepted functional controls; USB HID
+qualification and hardware GPU presentation remain open.
+
 ## Graphics track - WovenSecurity pointer control acceptance (2026-10-19)
 
 WovenSecurity now presents a bounded, read-only `Refresh` control at local
