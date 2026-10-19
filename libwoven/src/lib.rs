@@ -11810,8 +11810,9 @@ pub struct Canvas<'a> {
 
 fn coordinate_extent_fits(origin: i32, extent: usize) -> bool {
     extent == 0
-        || i128::from(origin) + i128::try_from(extent.saturating_sub(1)).unwrap_or(i128::MAX)
-            <= i128::from(i32::MAX)
+        || (extent <= i32::MAX as usize
+            && i128::from(origin) + i128::try_from(extent.saturating_sub(1)).unwrap_or(i128::MAX)
+                <= i128::from(i32::MAX))
 }
 
 impl<'a> Canvas<'a> {
@@ -15948,6 +15949,7 @@ mod tests {
         );
         assert!(Canvas::new(&mut pixels, i32::MAX, 0, 2, 1).is_none());
         assert!(Canvas::new(&mut pixels, 0, i32::MAX, 1, 2).is_none());
+        assert!(Canvas::new(&mut pixels, i32::MIN, 0, i32::MAX as usize + 1, 1).is_none());
         let canvas = Canvas::new(&mut pixels, 0, 0, 2, 2).unwrap();
         assert_eq!(canvas.pixels().len(), 4, "only the rectangle is exposed");
     }

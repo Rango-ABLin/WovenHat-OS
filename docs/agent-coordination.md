@@ -43,6 +43,13 @@ The 55-test `libwoven` suite, warning-denying library/kernel/workspace
 Clippy, formatting, and Stage 19.2 compositor visual acceptance on 1/2/4 CPUs
 passed. Hardware GPU acceleration remains open.
 
+**Codex graphics-track bounded surface dimension casts (2026-10-19):** Canvas
+and DepthBuffer cap each accepted non-empty dimension at `i32::MAX`, matching
+the internal offset conversions. The 55-test `libwoven` suite,
+warning-denying library/kernel/workspace Clippy, formatting, and Stage 19.2
+compositor visual acceptance on 1/2/4 CPUs passed. Hardware GPU acceleration
+remains open.
+
 **Codex graphics-track bounded Canvas text origins (2026-10-19):** the shared
 `Canvas::draw_text` path now saturates glyph and newline cursor arithmetic
 before clipped writes. The 55-test `libwoven` suite, warning-denying

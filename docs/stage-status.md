@@ -44,6 +44,15 @@ clipping. The 55-test `libwoven` suite, warning-denying library/kernel/
 workspace Clippy, formatting, and Stage 19.2 compositor visual acceptance
 passed on 1/2/4 CPUs. Hardware GPU acceleration remains a separate boundary.
 
+## Graphics track - bounded surface dimension casts (2026-10-19)
+
+Canvas and DepthBuffer now cap each accepted non-empty dimension at
+`i32::MAX`, in addition to checking the far coordinate. This matches the
+internal `usize`-to-`i32` offset conversions used by shader and raster loops.
+The 55-test `libwoven` suite, warning-denying library/kernel/workspace
+Clippy, formatting, and Stage 19.2 compositor visual acceptance passed on
+1/2/4 CPUs. Hardware GPU acceleration remains a separate boundary.
+
 ## Graphics track - bounded Canvas text origins (2026-10-19)
 
 The shared `Canvas::draw_text` path now saturates glyph and newline cursor

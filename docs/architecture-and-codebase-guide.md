@@ -6,6 +6,12 @@ The shared kernel font’s `text_width` and `line_count` use saturating
 accumulation, so WovenGraphics measurement remains defined for arbitrarily
 long UTF-8 input before layout applies its own bounded drawing rules.
 
+## Graphics surface dimension update (2026-10-19)
+
+Canvas and DepthBuffer reject non-empty dimensions above `i32::MAX`, matching
+the coordinate type used by their internal pixel-offset conversions in
+addition to checking the far edge.
+
 ## Graphics Canvas text-origin update (2026-10-19)
 
 `Canvas::draw_text` saturates cursor movement, glyph origins, and newline
