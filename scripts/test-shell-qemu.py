@@ -37,7 +37,8 @@ def normal_boot_serial_errors(log: str, system_apps: bool) -> list[str]:
     if system_apps:
         for marker in ('[APPS] 10 signed applications installed',
                        '[SESSION] WovenShell desktop started',
-                       '[SESSION] diagnostic console'):
+                       '[SESSION] diagnostic console',
+                       '[SESSION] back to the desktop'):
             if marker not in log:
                 errors.append(f'Missing system-apps marker: {marker}')
     if '[SMP] acknowledged TLB shootdowns: PASSED' not in log:
@@ -194,6 +195,20 @@ def main():
                     if process.poll() is not None or time.monotonic() > deadline:
                         raise RuntimeError('Keyboard/SMP shell command failed; inspect shell-regression logs')
                     time.sleep(0.1)
+                if args.system_apps:
+                    # Return to the graphical desktop through real QMP keyboard
+                    # input after verifying the diagnostic console's SMP path.
+                    execute('send-key', {'keys': [{'type': 'qcode', 'data': 'f12'}], 'hold-time': 40})
+                    deadline = time.monotonic() + 30
+                    while '[SESSION] back to the desktop' not in serial.read_text(errors='replace'):
+                        if process.poll() is not None or time.monotonic() > deadline:
+                            raise RuntimeError('F12 did not return focus to WovenShell')
+                        time.sleep(0.1)
+                    time.sleep(1)
+                    restored = out / 'desktop-after-f12-return.ppm'
+                    execute('screendump', {'filename': str(restored)})
+                    if not restored.is_file() or restored.stat().st_size == 0:
+                        raise RuntimeError('No restored-desktop framebuffer was captured')
                 # Check the complete serial trace, not just the positive marker
                 # that ended the polling loop. A panic after boot is a failure.
                 evidence = serial.read_text(errors='replace')
