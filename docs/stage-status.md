@@ -1,5 +1,16 @@
 # Stage status
 
+## Graphics track - WovenUpdate bounded resize (2026-10-19)
+
+WovenUpdate now handles `WSIZ` by creating and sharing a replacement Canvas
+surface, publishing `WRSZ` before the bounded upload, and clamping requests to
+the loader-safe 480×320 render target. The QMP `--exercise-resize` gate passed
+on 1/2/4 CPUs with evidence under
+`audit-artifacts/update-desktop-{1,2,4}cpu-*`.
+
+Update remains a read-only, non-mutating preflight; pointer widgets and
+hardware GPU presentation are not claimed.
+
 ## Graphics track - WovenImages bounded resize (2026-10-19)
 
 WovenImages now handles `WSIZ` by creating and sharing a replacement Canvas
@@ -132,8 +143,9 @@ production catalog `--gui %p` entries. The shared
 The slice also raises WovenShell's bounded catalog capacity from 8 to 10,
 matching the ten signed production apps; this prevents alphabetical loading
 from silently dropping Update and Terminal. Update remains preflight-only and
-Store remains read-only: no package mutation, controls, WSIZ resize, or
-hardware GPU presentation is claimed.
+Store remains read-only: no package mutation, controls, pointer widgets, or
+hardware GPU presentation is claimed. Update resize is covered by the newer
+WovenUpdate slice above.
 
 ## Graphics track - WovenImages desktop client (2026-10-19)
 
@@ -251,8 +263,8 @@ CPUs.
 
 **Limits.** WovenTerminal has bounded text input and resize preview but
 remains CLI/interactive for full command execution. Calculator has bounded
-input and resize preview. Files, Update, and Store have desktop previews but
-still lack resize and broader controls/input;
+input and resize preview. Files and Store have desktop previews but still lack
+resize and broader controls/input;
 hardware GPU presentation is not claimed.
 
 ## Graphics track - WovenFiles desktop client foundation (2026-10-19)

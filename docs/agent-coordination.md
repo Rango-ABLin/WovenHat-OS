@@ -1,5 +1,12 @@
 # Agent coordination (Claude Code and Codex)
 
+**Codex graphics-track WovenUpdate resize (2026-10-19):**
+WovenUpdate now negotiates bounded `WSIZ/WRSZ` replacement surfaces with a
+480×320 loader-safe Canvas cap. Its QMP resize gate passed on 1/2/4 CPUs with
+evidence in `audit-artifacts/update-desktop-{1,2,4}cpu-*`. The client remains
+preflight-only and non-mutating; pointer widgets and hardware GPU presentation
+remain out of scope.
+
 **Codex graphics-track WovenImages resize (2026-10-19):**
 WovenImages now negotiates bounded `WSIZ/WRSZ` replacement surfaces with a
 480×320 loader-safe Canvas cap. Its QMP resize gate passed on 1/2/4 CPUs with
@@ -81,7 +88,8 @@ on 1/2/4 CPUs; evidence is in
 `audit-artifacts/{update,store}-desktop-{1,2,4}cpu-*`. WovenShell's catalog
 capacity was raised from 8 to 10 so all signed production apps remain
 launchable. Update is preflight-only, Store is non-mutating, and controls,
-WSIZ, and hardware GPU presentation remain out of scope.
+pointer widgets, and hardware GPU presentation remain out of scope; bounded
+WSIZ/WRSZ is covered by the newer Update resize slice.
 
 **Codex graphics-track WovenImages client (2026-10-19):**
 `apps/woven-images/src/gui.rs` adds a bounded read-only image-workspace

@@ -1,5 +1,14 @@
 # WovenHat OS Architecture & Codebase Guide
 
+## Graphics WovenUpdate bounded resize (2026-10-19)
+
+`apps/woven-update/src/gui.rs` now handles `WSIZ` by creating and sharing a
+replacement surface, publishing `WRSZ` before the bounded Canvas upload, and
+clamping requests to a loader-safe 480×320 static render target. The QEMU
+resize gate passed on 1/2/4 CPUs. Update remains preflight-only and
+non-mutating; pointer widgets and hardware GPU output remain separate
+boundaries.
+
 ## Graphics WovenImages bounded resize (2026-10-19)
 
 `apps/woven-images/src/gui.rs` now handles `WSIZ` by creating and sharing a
@@ -92,7 +101,8 @@ their production catalog entries pass `--gui %p`. The shared QMP visual gate
 passed both clients on 1/2/4 CPUs. WovenShell `MAX_APPS` is 10, matching the
 ten signed production descriptors so alphabetical loading does not drop
 Update or Terminal. Update performs no installation and Store performs no
-mutation; no controls, WSIZ resize, or hardware GPU output is implied.
+mutation; no controls, pointer widgets, or hardware GPU output is implied.
+Bounded WSIZ/WRSZ for Update is covered by the newer Update resize section.
 
 ## Graphics WovenImages client (2026-10-19)
 
