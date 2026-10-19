@@ -1,5 +1,19 @@
 # Stage status
 
+## Graphics track - WovenMonitor pointer control acceptance (2026-10-19)
+
+WovenMonitor now presents a bounded, read-only `Refresh` control at local
+client coordinates x=250..329, y=170..189. A primary-button release forwarded
+as `WPBT` within that rectangle re-reads the clock/display/storage snapshot
+and increments a visible refresh counter. The production QEMU gate
+`scripts/test-files-desktop-qemu.py --app monitor --exercise-client-click`
+passed on 1/2/4 CPUs. Evidence is under
+`audit-artifacts/monitor-desktop-{1,2,4}cpu-*`.
+
+This accepts a fifth functional client control without adding mutation;
+remaining clients still have pointer feedback rather than accepted functional
+controls. USB HID qualification and hardware GPU presentation remain open.
+
 ## Graphics track - WovenTerminal pointer control acceptance (2026-10-19)
 
 WovenTerminal now presents a bounded, preview-only `Clear` control at local

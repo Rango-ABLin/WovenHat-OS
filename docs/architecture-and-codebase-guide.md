@@ -1,5 +1,14 @@
 # WovenHat OS Architecture & Codebase Guide
 
+## Graphics WovenMonitor pointer control (2026-10-19)
+
+WovenMonitor renders a bounded `Refresh` button in its 360x220 surface at
+local x=250..329 and y=170..189. On a primary-button release in that
+rectangle, it re-reads its clock/display/storage snapshot, increments a
+saturating refresh counter, and repaints. The control is read-only. QEMU
+visual acceptance passed on 1/2/4 CPUs; USB HID and hardware GPU qualification
+remain separate.
+
 ## Graphics WovenTerminal pointer control (2026-10-19)
 
 WovenTerminal renders a bounded `Clear` button in its 360x220 preview surface

@@ -1,5 +1,14 @@
 # Agent coordination (Claude Code and Codex)
 
+**Codex graphics-track WovenMonitor pointer control acceptance (2026-10-19):**
+WovenMonitor now has a bounded local `Refresh` button. A forwarded `WPBT`
+release inside x=250..329, y=170..189 re-reads the read-only
+clock/display/storage snapshot, increments a visible counter, and repaints.
+The production QEMU gate passed on 1/2/4 CPUs with `--app monitor
+--exercise-client-click`; evidence is under
+`audit-artifacts/monitor-desktop-{1,2,4}cpu-*`. USB HID and hardware GPU
+presentation remain separate.
+
 **Codex graphics-track WovenTerminal pointer control acceptance (2026-10-19):**
 WovenTerminal now has a bounded local `Clear` button. A forwarded `WPBT`
 release inside x=250..329, y=170..189 clears only the preview input and
