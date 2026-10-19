@@ -22,6 +22,7 @@ import time
 
 READY = '[S20.14] ready for capture'
 VIRGL_READY = '[S20.14] VIRGL context/resource/command lifecycle PASS'
+VIRGL_2D_READY = '[S20.14] VIRGL 2D scanout ready'
 PASS_MARKER = '[S20.14] two monitors: PASSED'
 WIDTH, HEIGHT = 640, 400
 
@@ -114,7 +115,11 @@ def main():
                         help='use QEMU virtio-gpu-gl-pci and exercise VIRGL discovery')
     parser.add_argument('--blob', action='store_true',
                         help='also enable QEMU resource-blob probing (experimental)')
+    parser.add_argument('--capture-virgl-2d', action='store_true',
+                        help='capture and verify the conventional 2D scanout on a GL-capable device')
     args = parser.parse_args()
+    if args.capture_virgl_2d and not args.virgl:
+        parser.error('--capture-virgl-2d requires --virgl')
     root = Path(__file__).resolve().parents[1]
     qemu = Path(args.qemu)
     firmware = args.firmware or qemu.parent / 'share' / 'edk2-x86_64-code.fd'
@@ -155,9 +160,10 @@ def main():
                     errors.append('timeout')
                     break
                 log = serial.read_text(errors='replace') if serial.exists() else ''
-                if not captured and ((args.virgl and VIRGL_READY in log) or (not args.virgl and READY in log)):
+                ready = (VIRGL_2D_READY if args.capture_virgl_2d else VIRGL_READY) if args.virgl else READY
+                if not captured and ready in log:
                     captured = True
-                    if not args.virgl:
+                    if not args.virgl or args.capture_virgl_2d:
                         for head in (0, 1):
                             qmp('screendump', filename=str(out / f'head{head}.ppm'), device='gpu0', head=head)
                 time.sleep(0.2)
@@ -176,6 +182,14 @@ def main():
     if args.virgl:
         if VIRGL_READY not in log:
             errors.append(f'missing {VIRGL_READY!r}')
+        if args.capture_virgl_2d:
+            if VIRGL_2D_READY not in log:
+                errors.append(f'missing {VIRGL_2D_READY!r}')
+            path = out / 'head0.ppm'
+            if path.exists():
+                errors += head_errors(0, path)
+            else:
+                errors.append('no capture of VIRGL 2D head 0')
     elif captured:
         for head in (0, 1):
             path = out / f'head{head}.ppm'

@@ -1,5 +1,13 @@
 # Agent coordination (Claude Code and Codex)
 
+**Codex graphics-track VirGL 2D-on-GL scanout boundary (2026-10-19):** The
+stage 20.14 lifecycle gate passes on 1/2/4 CPUs. A capability-gated follow-on
+probe attempts a conventional 2D resource, known-gradient fill, and present
+on the GL-capable QEMU device; QEMU rejects `SET_SCANOUT` with
+`Device(4611)` (`0x1203`). This is boundary evidence, not visible GPU-frame
+acceptance. Software/2D presentation remains the accepted fallback; physical
+GPU and USB HID qualification remain open.
+
 **Codex graphics-track functional-control completion and VirGL boundary
 revalidation (2026-10-19):** All ten packaged desktop clients now have a
 bounded functional pointer control accepted on QEMU 1/2/4-CPU runs, with

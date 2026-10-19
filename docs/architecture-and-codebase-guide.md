@@ -1,5 +1,16 @@
 # WovenHat OS Architecture & Codebase Guide
 
+## Graphics track - VirGL 2D-on-GL scanout boundary (2026-10-19)
+
+The stage 20.14 VirGL probe now separates lifecycle acceptance from visible
+scanout. After capability/context/resource/command validation, it attempts to
+bind a conventional 2D resource, fill the known gradient, and present it.
+QEMU rejects `SET_SCANOUT` with `Device(4611)` (`0x1203`) on the tested
+GL-capable device. The probe therefore logs an unavailable capability and
+keeps the lifecycle gate passing; it does not claim a GPU-backed frame. The
+software/2D virtio-gpu path remains the authoritative fallback until a visible
+GPU frame is accepted on a supported device.
+
 ## Graphics track completion boundary (2026-10-19)
 
 The ten packaged desktop clients now each have a QEMU-accepted bounded

@@ -865,9 +865,39 @@ pub fn self_test() -> bool {
         crate::serial::write_line(format_args!(
             "[S20.14] VIRGL context/resource/command lifecycle PASS"
         ));
-        // The GL-capable device does not guarantee the legacy 2D scanout
-        // resource path used by the two-monitor pixel test. Stop after the
-        // verified VIRGL discovery/lifecycle slice in that configuration.
+        // Exercise the conventional 2D resource path on the GL-capable
+        // device as a separate visible-scanout probe. This does not claim
+        // that the 3D resource can be scanned out; it verifies that a
+        // software-rendered frame can still be presented when the device
+        // advertises VIRGL.
+        if let Err(error) = gpu.set_mode(0, WIDTH, HEIGHT) {
+            crate::serial::write_line(format_args!(
+                "[S20.14] VIRGL 2D scanout unavailable: {error:?}"
+            ));
+            return true;
+        }
+        let mut row = [0u32; WIDTH as usize];
+        for y in 0..HEIGHT {
+            for (x, pixel) in row.iter_mut().enumerate() {
+                let x = x as u32;
+                *pixel = ((x * 255 / (WIDTH - 1)) << 16) | ((y * 255 / (HEIGHT - 1)) << 8) | 0x40;
+            }
+            if let Some(head) = gpu.heads[0].as_mut() {
+                head.write_row(0, y, &row);
+            } else {
+                return step("VIRGL 2D scanout backing", false);
+            }
+        }
+        if let Err(error) = gpu.present(0) {
+            crate::serial::write_line(format_args!(
+                "[S20.14] VIRGL 2D scanout unavailable: {error:?}"
+            ));
+            return true;
+        }
+        crate::serial::write_line(format_args!(
+            "[S20.14] VIRGL 2D scanout ready {}x{}",
+            WIDTH, HEIGHT
+        ));
         return true;
     }
     match gpu.display_info() {

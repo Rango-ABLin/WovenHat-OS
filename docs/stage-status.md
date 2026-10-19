@@ -1,5 +1,16 @@
 # Stage status
 
+## Graphics track - VirGL 2D-on-GL scanout boundary (2026-10-19)
+
+The VirGL capability/context/resource/command lifecycle still passes on QEMU
+1/2/4-CPU runs. A follow-on probe now attempts the conventional 2D resource
+and presents the known gradient on the GL-capable device. QEMU rejects that
+`SET_SCANOUT` operation with `Device(4611)` (`0x1203`), so this is preserved as
+boundary evidence rather than a visible GPU-backed-frame acceptance. The probe
+is capability-gated and does not invalidate the ordinary VirGL lifecycle gate.
+Software/2D virtio-gpu presentation remains the accepted fallback; physical
+GPU and USB HID qualification remain separate hardware-dependent gates.
+
 ## Graphics track - functional controls complete; GPU boundary revalidated (2026-10-19)
 
 All ten packaged desktop clients now have an accepted bounded functional
