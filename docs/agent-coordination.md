@@ -1,5 +1,13 @@
 # Agent coordination (Claude Code and Codex)
 
+**Codex graphics-track bounded key protocol (2026-10-19):**
+WovenShell now forwards Enter and Backspace as `WKEY` plus bounded key codes;
+WovenTerminal redraws its shared Canvas after ASCII edits, Backspace, and
+Enter. The extended QMP gate passed on 1/2/4 CPUs with before/after input
+evidence under `audit-artifacts/terminal-desktop-{1,2,4}cpu-*`. Desktop
+command execution, pointer widgets, WSIZ, and hardware GPU presentation are
+still out of scope; `--interactive` remains the full CLI path.
+
 **Codex graphics-track WovenCalculator acceptance (2026-10-19):**
 The existing bounded Canvas/WOPN calculator client is now covered by the
 shared QMP desktop gate on 1/2/4 CPUs, with evidence in

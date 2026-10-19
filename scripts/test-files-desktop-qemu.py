@@ -185,6 +185,14 @@ def main():
         # The client logs immediately after WOPN; allow the compositor's
         # event-driven repaint to reach the framebuffer before capture.
         time.sleep(2)
+        input_baseline = None
+        if args.app == 'terminal':
+            input_baseline = out / 'woven-terminal-before-input.ppm'
+            command_qmp('screendump', {'filename': str(input_baseline)})
+            for key in ['h', 'e', 'l', 'l', 'o', 'backspace', 'p', 'ret']:
+                command_qmp('send-key', {'keys': [{'type': 'qcode', 'data': key}], 'hold-time': 160})
+                time.sleep(0.3)
+            time.sleep(2)
         capture = out / f'woven-{app[0]}.ppm'
         command_qmp('screendump', {'filename': str(capture)})
         time.sleep(0.5)
@@ -195,6 +203,13 @@ def main():
         changed = sum(left != right for left, right in zip(before, pixels)) // 3
         if changed < 1000:
             raise RuntimeError(f'{app[1]} capture did not change the presented desktop: {width}x{height}, changed_pixels={changed}')
+        if input_baseline is not None:
+            input_width, input_height, input_pixels = ppm_pixels(input_baseline)
+            if (input_width, input_height) != (width, height):
+                raise RuntimeError('terminal input capture dimensions changed')
+            input_changed = sum(left != right for left, right in zip(input_pixels, pixels)) // 3
+            if input_changed < 100:
+                raise RuntimeError(f'{app[1]} input did not change its presented surface: changed_pixels={input_changed}')
         command_qmp('quit')
         sock.close()
     except Exception as error:  # noqa: BLE001 - preserve acceptance evidence

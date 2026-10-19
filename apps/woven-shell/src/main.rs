@@ -30,7 +30,9 @@
 //! A surface is accepted only if the sender owns it: the token names its
 //! owner, and the kernel enforces that name on every operation. A window or
 //! icon goes away when its surface does, normally because its owner exited.
-//! Keystrokes go to the focused window's owner as one-byte messages.
+//! ASCII keystrokes go to the focused window's owner as one-byte messages.
+//! Enter and Backspace use the bounded `WKEY` message (`WKEY`, code), keeping
+//! special keys distinguishable from text without exposing input authority.
 //!
 //! A new window fades in: its opacity follows a [`Spring`] from 0 to 255,
 //! and its title bar, client area and shadow are composed at that opacity.
@@ -290,6 +292,8 @@ const FRAME_PERIOD: u64 = libwoven::time::TICKS_PER_SECOND / 4;
 const RESIZE_GRACE: u64 = libwoven::time::TICKS_PER_SECOND;
 /// The frame clock while something animates: 20 ms.
 const ANIMATION_PERIOD: u64 = 2;
+const KEY_ENTER: u8 = 1;
+const KEY_BACKSPACE: u8 = 2;
 
 /// The one tile buffer, in .bss rather than on the stack.
 struct TileBuffer(UnsafeCell<[u32; TILE_PIXELS]>);
@@ -2077,6 +2081,18 @@ impl Desktop {
             InputEvent::Key(Key::F2) => self.toggle_tiling(),
             InputEvent::Key(Key::F3) => self.switch_workspace((self.workspace + 1) % WORKSPACES),
             InputEvent::Key(Key::F4) => self.move_focused_to_next_workspace(),
+            InputEvent::Key(Key::Enter) => {
+                if let Some(window) = self.focused().and_then(|slot| self.windows[slot]) {
+                    let _ = libwoven::message_send(window.owner, &[b'W', b'K', b'E', b'Y', KEY_ENTER]);
+                }
+                empty
+            }
+            InputEvent::Key(Key::Backspace) => {
+                if let Some(window) = self.focused().and_then(|slot| self.windows[slot]) {
+                    let _ = libwoven::message_send(window.owner, &[b'W', b'K', b'E', b'Y', KEY_BACKSPACE]);
+                }
+                empty
+            }
             InputEvent::Key(Key::Char(character)) if character.is_ascii() => {
                 if let Some(window) = self.focused().and_then(|slot| self.windows[slot]) {
                     let _ = libwoven::message_send(window.owner, &[character as u8]);

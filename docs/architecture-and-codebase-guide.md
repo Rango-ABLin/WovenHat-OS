@@ -1,5 +1,14 @@
 # WovenHat OS Architecture & Codebase Guide
 
+## Graphics bounded key protocol and Terminal input (2026-10-19)
+
+WovenShell keeps ASCII text as one-byte owner messages and forwards Enter and
+Backspace as `WKEY` plus a bounded key code to the focused owner. The Terminal
+GUI consumes those messages and redraws its shared Canvas surface after
+bounded edits; the QMP gate verifies pre/post input pixels on 1/2/4 CPUs.
+Desktop command execution, pointer widgets, WSIZ resize, and hardware GPU
+output remain separate work.
+
 ## Graphics WovenCalculator desktop acceptance (2026-10-19)
 
 The existing `apps/woven-calculator/src/main.rs` Canvas/WOPN client is covered

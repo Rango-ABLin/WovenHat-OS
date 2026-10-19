@@ -32,9 +32,31 @@ fn stroke_rect(canvas: &mut Canvas<'_>, x: i32, y: i32, width: usize, height: us
     canvas.fill_rect(x + width as i32 - 1, y, 1, height, color);
 }
 
-/// Open a read-only terminal preview through WovenShell. The existing
-/// `--interactive` CLI remains the interactive terminal until the desktop
-/// key-forwarding contract grows enter/backspace support.
+const MAX_INPUT: usize = 48;
+
+fn draw(canvas: &mut Canvas<'_>, line: &[u8], status: &[u8]) {
+    canvas.fill_rect(0, 0, WIDTH as usize, HEIGHT as usize, BACKGROUND);
+    canvas.fill_rect(PANEL_X, PANEL_Y, PANEL_WIDTH, PANEL_HEIGHT, PANEL);
+    stroke_rect(canvas, PANEL_X, PANEL_Y, PANEL_WIDTH, PANEL_HEIGHT, ACCENT);
+    canvas.draw_text(PANEL_X + 10, PANEL_Y + 8, "WovenTerminal", TEXT);
+    canvas.draw_text(PANEL_X + 10, PANEL_Y + 38, "> help", ACCENT);
+    canvas.draw_text(PANEL_X + 10, PANEL_Y + 58, "WovenTerminal commands:", TEXT);
+    canvas.draw_text(PANEL_X + 10, PANEL_Y + 78, "ls PATH", TEXT);
+    canvas.draw_text(PANEL_X + 10, PANEL_Y + 94, "cat PATH", TEXT);
+    canvas.draw_text(PANEL_X + 10, PANEL_Y + 110, "calc EXPR", TEXT);
+    canvas.draw_text(PANEL_X + 10, PANEL_Y + 142, ">", ACCENT);
+    if let Ok(text) = core::str::from_utf8(line) {
+        canvas.draw_text(PANEL_X + 20, PANEL_Y + 142, text, ACCENT);
+    }
+    if let Ok(text) = core::str::from_utf8(status) {
+        canvas.draw_text(PANEL_X + 10, PANEL_Y + 158, text, TEXT);
+    }
+    canvas.draw_text(PANEL_X + 10, PANEL_Y + 174, "Enter submits; Backspace edits", MUTED);
+}
+
+/// Open a terminal preview through WovenShell. ASCII input, Enter, and
+/// Backspace are accepted through the bounded shell key protocol; the
+/// existing `--interactive` CLI remains available for full command I/O.
 pub fn run(shell: Option<&[u8]>) -> ! {
     let Some(shell) = shell.and_then(parse_u64).map(libwoven::process::Id) else {
         fail(7)
@@ -44,17 +66,9 @@ pub fn run(shell: Option<&[u8]>) -> ! {
     let pixels = unsafe { &mut *CANVAS_PIXELS.0.get() };
     let mut canvas = Canvas::new(pixels, 0, 0, WIDTH as usize, HEIGHT as usize)
         .unwrap_or_else(|| fail(2));
-    canvas.fill_rect(0, 0, WIDTH as usize, HEIGHT as usize, BACKGROUND);
-    canvas.fill_rect(PANEL_X, PANEL_Y, PANEL_WIDTH, PANEL_HEIGHT, PANEL);
-    stroke_rect(&mut canvas, PANEL_X, PANEL_Y, PANEL_WIDTH, PANEL_HEIGHT, ACCENT);
-    canvas.draw_text(PANEL_X + 10, PANEL_Y + 8, "WovenTerminal", TEXT);
-    canvas.draw_text(PANEL_X + 10, PANEL_Y + 38, "> help", ACCENT);
-    canvas.draw_text(PANEL_X + 10, PANEL_Y + 58, "WovenTerminal commands:", TEXT);
-    canvas.draw_text(PANEL_X + 10, PANEL_Y + 78, "ls PATH", TEXT);
-    canvas.draw_text(PANEL_X + 10, PANEL_Y + 94, "cat PATH", TEXT);
-    canvas.draw_text(PANEL_X + 10, PANEL_Y + 110, "calc EXPR", TEXT);
-    canvas.draw_text(PANEL_X + 10, PANEL_Y + 142, "> _", ACCENT);
-    canvas.draw_text(PANEL_X + 10, PANEL_Y + 174, "CLI --interactive for input", MUTED);
+    let line = [0u8; MAX_INPUT];
+    let status: &[u8] = b"Ready for a bounded command preview";
+    draw(&mut canvas, &line, status);
     if window.write_canvas(&canvas).is_err() {
         fail(3)
     }
@@ -73,13 +87,54 @@ pub fn run(shell: Option<&[u8]>) -> ! {
     }
     let _ = libwoven::print("WovenTerminal: window opened\n");
     let mut message = [0u8; 64];
+    let mut line = [0u8; MAX_INPUT];
+    let mut length = 0usize;
+    let mut status: &[u8] = b"Ready for a bounded command preview";
     loop {
         if libwoven::wait_any(libwoven::wait::MESSAGE, None).is_err() {
             fail(6)
         }
-        if let Ok((length, sender)) = libwoven::message_receive(&mut message) {
-            if sender == shell && message.get(..length.min(4)) == Some(&b"WCLS"[..]) {
+        if let Ok((message_length, sender)) = libwoven::message_receive(&mut message) {
+            if sender != shell {
+                continue;
+            }
+            if message.get(..message_length.min(4)) == Some(&b"WCLS"[..]) {
                 break;
+            }
+            if message.get(..4) == Some(&b"WKEY"[..]) && message_length >= 5 {
+                match message[4] {
+                    1 => {
+                        status = b"Command submitted to terminal preview";
+                        length = 0;
+                    }
+                    2 => {
+                        length = length.saturating_sub(1);
+                        status = b"Editing command preview";
+                    }
+                    _ => {}
+                }
+                // Redraw after every bounded edit; the shared surface keeps
+                // the compositor's ownership and lifecycle unchanged.
+                let pixels = unsafe { &mut *CANVAS_PIXELS.0.get() };
+                let Some(mut canvas) = Canvas::new(pixels, 0, 0, WIDTH as usize, HEIGHT as usize) else {
+                    fail(8)
+                };
+                draw(&mut canvas, &line[..length], status);
+                if window.write_canvas(&canvas).is_err() {
+                    fail(9)
+                }
+            } else if message_length == 1 && message[0].is_ascii_graphic() && length < MAX_INPUT {
+                line[length] = message[0];
+                length += 1;
+                status = b"Editing command preview";
+                let pixels = unsafe { &mut *CANVAS_PIXELS.0.get() };
+                let Some(mut canvas) = Canvas::new(pixels, 0, 0, WIDTH as usize, HEIGHT as usize) else {
+                    fail(10)
+                };
+                draw(&mut canvas, &line[..length], status);
+                if window.write_canvas(&canvas).is_err() {
+                    fail(11)
+                }
             }
         }
     }

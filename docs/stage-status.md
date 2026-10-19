@@ -1,5 +1,19 @@
 # Stage status
 
+## Graphics track - bounded desktop key protocol and Terminal input (2026-10-19)
+
+WovenShell now forwards Enter and Backspace to the focused window as bounded
+`WKEY` messages, while preserving one-byte ASCII forwarding and compositor
+ownership. WovenTerminal consumes the protocol to render bounded text edits
+and submission state on its shared Canvas surface. The extended
+`scripts/test-files-desktop-qemu.py --app terminal` gate captures before and
+after input frames and passed on 1/2/4 CPUs with evidence under
+`audit-artifacts/terminal-desktop-{1,2,4}cpu-*`.
+
+This slice does not claim terminal command execution from the desktop, pointer
+widgets, `WSIZ` resize handling, or hardware GPU presentation; the existing
+`--interactive` CLI remains the full command-I/O path.
+
 ## Graphics track - WovenCalculator desktop acceptance (2026-10-19)
 
 WovenCalculator's existing bounded Canvas/WOPN client is now covered by the
@@ -150,11 +164,11 @@ borders, panel colour and text placement. `cargo clippy --all-targets -- -D
 warnings` and `scripts/test-shell-qemu.py --hardware-demo` pass on 1/2/4
 CPUs.
 
-**Limits.** WovenTerminal remains CLI/interactive by design, while Calculator,
-Files, Settings, Monitor, Security, Editor, Images, Update, and Store have
-desktop preview clients. These preview clients still lack desktop
-controls/input and `WSIZ` resize paths; hardware GPU presentation is not
-claimed.
+**Limits.** WovenTerminal has bounded text input preview but remains
+CLI/interactive for full command execution. Calculator, Files, Settings,
+Monitor, Security, Editor, Images, Update, and Store have desktop preview
+clients. Desktop controls, broader input, and `WSIZ` resize paths remain
+incomplete; hardware GPU presentation is not claimed.
 
 ## Graphics track - WovenFiles desktop client foundation (2026-10-19)
 
