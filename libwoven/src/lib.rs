@@ -3197,6 +3197,7 @@ pub mod graphics {
                             && extension_type != 4
                             && extension_type != 5
                             && extension_type != 6
+                            && extension_type != 8
                         {
                             continue;
                         }
@@ -3259,6 +3260,17 @@ pub mod graphics {
                                     position,
                                     feature_end,
                                     Some((subtable, extension_type)),
+                                )?
+                            {
+                                return Ok(Some((substitute, 1)));
+                            }
+                            if extension_type == 8
+                                && let Some(substitute) = gsub_reverse_chaining_substitution(
+                                    self.bytes,
+                                    subtable,
+                                    glyphs,
+                                    position,
+                                    feature_end,
                                 )?
                             {
                                 return Ok(Some((substitute, 1)));
@@ -3328,7 +3340,7 @@ pub mod graphics {
                     }
                     continue;
                 }
-                if lookup_type != 1 && lookup_type != 3 && lookup_type != 4 {
+                if lookup_type != 1 && lookup_type != 3 && lookup_type != 4 && lookup_type != 8 {
                     continue;
                 }
                 let subtable_count = usize::from(
@@ -3362,6 +3374,18 @@ pub mod graphics {
                             self.bytes,
                             subtable,
                             glyphs[position],
+                            feature_end,
+                        )? {
+                            return Ok(Some((substitute, 1)));
+                        }
+                        continue;
+                    }
+                    if lookup_type == 8 {
+                        if let Some(substitute) = gsub_reverse_chaining_substitution(
+                            self.bytes,
+                            subtable,
+                            glyphs,
+                            position,
                             feature_end,
                         )? {
                             return Ok(Some((substitute, 1)));
@@ -6669,6 +6693,129 @@ pub mod graphics {
         }
         Ok(Some(
             read_u16(bytes, set + 2).ok_or(TrueTypeError::BadTableDirectory)?,
+        ))
+    }
+
+    pub(crate) fn gsub_reverse_chaining_substitution(
+        bytes: &[u8],
+        subtable: usize,
+        glyphs: &[u16],
+        position: usize,
+        table_end: usize,
+    ) -> Result<Option<u16>, TrueTypeError> {
+        if subtable.checked_add(4).is_none_or(|end| end > table_end)
+            || read_u16(bytes, subtable) != Some(1)
+        {
+            return Ok(None);
+        }
+        let coverage = subtable
+            .checked_add(usize::from(
+                read_u16(bytes, subtable + 2).ok_or(TrueTypeError::BadTableDirectory)?,
+            ))
+            .ok_or(TrueTypeError::BadTableDirectory)?;
+        let Some(coverage_index) =
+            gsub_coverage_index(bytes, coverage, table_end, glyphs[position])?
+        else {
+            return Ok(None);
+        };
+        let mut cursor = subtable + 4;
+        let backtrack_count =
+            usize::from(read_u16(bytes, cursor).ok_or(TrueTypeError::BadTableDirectory)?);
+        cursor += 2;
+        if backtrack_count > 16
+            || cursor
+                .checked_add(
+                    backtrack_count
+                        .checked_mul(2)
+                        .ok_or(TrueTypeError::TooLarge)?,
+                )
+                .is_none_or(|end| end > table_end)
+        {
+            return Err(TrueTypeError::TooLarge);
+        }
+        let backtrack_start = cursor;
+        cursor = cursor
+            .checked_add(
+                backtrack_count
+                    .checked_mul(2)
+                    .ok_or(TrueTypeError::TooLarge)?,
+            )
+            .ok_or(TrueTypeError::TooLarge)?;
+        let lookahead_count =
+            usize::from(read_u16(bytes, cursor).ok_or(TrueTypeError::BadTableDirectory)?);
+        cursor += 2;
+        if lookahead_count > 16
+            || cursor
+                .checked_add(
+                    lookahead_count
+                        .checked_mul(2)
+                        .ok_or(TrueTypeError::TooLarge)?,
+                )
+                .is_none_or(|end| end > table_end)
+        {
+            return Err(TrueTypeError::TooLarge);
+        }
+        let lookahead_start = cursor;
+        cursor = cursor
+            .checked_add(
+                lookahead_count
+                    .checked_mul(2)
+                    .ok_or(TrueTypeError::TooLarge)?,
+            )
+            .ok_or(TrueTypeError::TooLarge)?;
+        let substitute_count =
+            usize::from(read_u16(bytes, cursor).ok_or(TrueTypeError::BadTableDirectory)?);
+        if substitute_count > 128 || coverage_index >= substitute_count {
+            return Err(TrueTypeError::TooLarge);
+        }
+        let substitute_start = cursor.checked_add(2).ok_or(TrueTypeError::TooLarge)?;
+        let substitute_end = substitute_start
+            .checked_add(
+                substitute_count
+                    .checked_mul(2)
+                    .ok_or(TrueTypeError::TooLarge)?,
+            )
+            .ok_or(TrueTypeError::TooLarge)?;
+        if substitute_end > table_end {
+            return Err(TrueTypeError::BadTableDirectory);
+        }
+        for index in 0..backtrack_count {
+            let Some(glyph_position) = position.checked_sub(index + 1) else {
+                return Ok(None);
+            };
+            let coverage = subtable
+                .checked_add(usize::from(
+                    read_u16(bytes, backtrack_start + index * 2)
+                        .ok_or(TrueTypeError::BadTableDirectory)?,
+                ))
+                .ok_or(TrueTypeError::BadTableDirectory)?;
+            if gsub_coverage_index(bytes, coverage, table_end, glyphs[glyph_position])?.is_none() {
+                return Ok(None);
+            }
+        }
+        for index in 0..lookahead_count {
+            let Some(glyph_position) = position
+                .checked_add(1)
+                .and_then(|value| value.checked_add(index))
+            else {
+                return Ok(None);
+            };
+            if glyph_position >= glyphs.len() {
+                return Ok(None);
+            }
+            let coverage = subtable
+                .checked_add(usize::from(
+                    read_u16(bytes, lookahead_start + index * 2)
+                        .ok_or(TrueTypeError::BadTableDirectory)?,
+                ))
+                .ok_or(TrueTypeError::BadTableDirectory)?;
+            if gsub_coverage_index(bytes, coverage, table_end, glyphs[glyph_position])?.is_none() {
+                return Ok(None);
+            }
+        }
+        Ok(Some(
+            read_u16(bytes, substitute_start + coverage_index * 2)
+                .ok_or(TrueTypeError::BadTableDirectory)?,
         ))
     }
 
@@ -13769,6 +13916,58 @@ mod tests {
         put16(&mut bytes, 20, 0);
         assert_eq!(
             crate::graphics::gsub_alternate_subtable(&bytes, 0, 7, bytes.len()),
+            Err(crate::graphics::TrueTypeError::TooLarge)
+        );
+    }
+
+    #[test]
+    fn wovengraphics_gsub_reverse_chaining_substitution_is_bounded() {
+        let mut bytes = [0u8; 38];
+        let put16 = |bytes: &mut [u8], offset: usize, value: u16| {
+            bytes[offset..offset + 2].copy_from_slice(&value.to_be_bytes());
+        };
+        put16(&mut bytes, 0, 1);
+        put16(&mut bytes, 2, 32);
+        put16(&mut bytes, 4, 1);
+        put16(&mut bytes, 6, 20);
+        put16(&mut bytes, 8, 1);
+        put16(&mut bytes, 10, 26);
+        put16(&mut bytes, 12, 1);
+        put16(&mut bytes, 14, 9);
+        for (offset, glyph) in [(20, 4), (26, 6), (32, 5)] {
+            put16(&mut bytes, offset, 1);
+            put16(&mut bytes, offset + 2, 1);
+            put16(&mut bytes, offset + 4, glyph);
+        }
+        assert_eq!(
+            crate::graphics::gsub_reverse_chaining_substitution(
+                &bytes,
+                0,
+                &[4, 5, 6],
+                1,
+                bytes.len(),
+            ),
+            Ok(Some(9))
+        );
+        assert_eq!(
+            crate::graphics::gsub_reverse_chaining_substitution(
+                &bytes,
+                0,
+                &[4, 5, 8],
+                1,
+                bytes.len(),
+            ),
+            Ok(None)
+        );
+        put16(&mut bytes, 4, 17);
+        assert_eq!(
+            crate::graphics::gsub_reverse_chaining_substitution(
+                &bytes,
+                0,
+                &[4, 5, 6],
+                1,
+                bytes.len(),
+            ),
             Err(crate::graphics::TrueTypeError::TooLarge)
         );
     }
