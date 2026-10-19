@@ -8225,6 +8225,30 @@ pub mod graphics {
                 }
                 continue;
             }
+            let pair_right = match options.target_sequence_index {
+                0 => Some(right),
+                1 if input_count >= 3 => options.third,
+                1 => options.next,
+                2 if input_count >= 4 => options.fourth,
+                2 => options.next,
+                3 if input_count >= 5 => options.fifth,
+                3 => options.next,
+                4 => options.next,
+                _ => None,
+            };
+            if let Some(adjustment) = gpos_contextual_chaining_apply_single_records(
+                bytes,
+                record_count_offset,
+                table_bounds,
+                lookup_bounds,
+                GposContextRecordTarget {
+                    target_glyph,
+                    pair_right,
+                },
+                options,
+            )? {
+                return Ok(Some(adjustment));
+            }
             let record_count = usize::from(
                 read_u16(bytes, record_count_offset).ok_or(TrueTypeError::BadTableDirectory)?,
             );
@@ -14323,6 +14347,31 @@ mod tests {
         );
         assert_eq!(shaped[0].advance, 500);
         assert_eq!(shaped[1].advance, 525);
+        let mut contextual_glyph_pair_bytes = contextual_glyph_bytes;
+        put32(&mut contextual_glyph_pair_bytes, 104, 120);
+        put16(&mut contextual_glyph_pair_bytes, 336, 2);
+        put16(&mut contextual_glyph_pair_bytes, 344, 1);
+        put16(&mut contextual_glyph_pair_bytes, 346, 26);
+        put16(&mut contextual_glyph_pair_bytes, 348, 4);
+        put16(&mut contextual_glyph_pair_bytes, 350, 0);
+        put16(&mut contextual_glyph_pair_bytes, 352, 1);
+        put16(&mut contextual_glyph_pair_bytes, 354, 18);
+        put16(&mut contextual_glyph_pair_bytes, 362, 1);
+        put16(&mut contextual_glyph_pair_bytes, 364, 2);
+        put_i16(&mut contextual_glyph_pair_bytes, 366, 25);
+        put16(&mut contextual_glyph_pair_bytes, 370, 1);
+        put16(&mut contextual_glyph_pair_bytes, 372, 1);
+        put16(&mut contextual_glyph_pair_bytes, 374, 1);
+        let contextual_glyph_pair_face =
+            TrueTypeFace::from_bytes(&contextual_glyph_pair_bytes).unwrap();
+        assert_eq!(
+            contextual_glyph_pair_face
+                .shape_text_ligatures("AB", Point::new(2, 15), 1000, &mut shaped)
+                .unwrap(),
+            2
+        );
+        assert_eq!(shaped[0].advance, 525);
+        assert_eq!(shaped[1].origin, Point::new(527, 15));
         let mut contextual_extension_bytes = [0u8; 512];
         contextual_extension_bytes[..contextual_gpos_bytes.len()]
             .copy_from_slice(&contextual_gpos_bytes);

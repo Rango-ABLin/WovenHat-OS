@@ -1,5 +1,15 @@
 # Stage status
 
+## Graphics track - bounded chaining format-1 nested pair positioning (2026-10-19)
+
+Nested lookup-2 format-1 pair positioning is now available from GPOS chaining
+format 1 through the shared checked nested-record path. Target glyph coverage,
+partner selection, pair-set offsets, value-record sizes and table extents are
+validated; malformed or unsupported stateful nested lookups fail closed. The
+42-test `libwoven` suite, warning-denying library/kernel/workspace Clippy,
+formatting, and Stage 19.2 compositor visual acceptance passed on 1/2/4 CPUs.
+Hardware GPU acceleration remains a separate boundary.
+
 ## Graphics track - bounded chaining format-1 target sequence positioning (2026-10-19)
 
 Nested single-positioning records under GPOS chaining format 1 now resolve

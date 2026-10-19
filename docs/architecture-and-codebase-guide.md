@@ -1,5 +1,12 @@
 # WovenHat OS Architecture & Codebase Guide
 
+## Graphics contextual GPOS format-1 pair update (2026-10-19)
+
+The chaining format-1 path now shares the checked nested lookup-2 format-1
+pair-positioning implementation with chaining format 2. Target coverage,
+partner glyph, pair-set and value-record bounds are validated before applying
+the first-glyph adjustment.
+
 ## Graphics contextual GPOS format-1 target update (2026-10-19)
 
 The bounded chaining format-1 path keeps first-input coverage matching separate
