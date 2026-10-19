@@ -1,5 +1,49 @@
 # Stage status
 
+## WovenCalculator desktop window (2026-10-19)
+
+The Stage 19 catalog apps (woven-calculator, woven-settings, etc.) have been
+CLI-only diagnostic binaries since Stage 19: the app catalog's `Exec=` lines
+never passed `--gui`, and `woven-calculator`'s existing `run_gui()` dead code
+called `surface.present()` directly -- the single-authority compositor
+pattern, which an ordinary launched process cannot use (no `DisplayIo`
+capability). WovenShell is the sole compositor-authority holder; client apps
+must use the `share_with()` + `WOPN` IPC protocol `hello-gui
+--desktop-client` already exercises (Stage 20.1-20.15).
+
+`woven-calculator` is now wired to that protocol: `--gui <shell-pid>` (the
+catalog's `Exec=/bin/wovenhat-calculator --gui %p`) draws its panel, shares
+the surface with the shell, sends `WOPN`, and waits for `WCLS` to close.
+Fixing this also exposed a real latent bug in the original dead code: its
+108 KB scratch pixel buffer was a stack local on an 8 KiB task stack, causing
+a page fault the moment the path was actually exercised. It now lives in
+`.bss` via the same `UnsafeCell`-backed static pattern hello-gui's audio
+buffer uses.
+
+**Evidence.** A live QMP-driven session (sign in as `ada`, F1, type `calc`,
+Enter) shows a real "Calculator" window with WovenShell's title bar, close
+control and taskbar entry, and correct content ("Expression: 2 + 2",
+"Result: 4"). `cargo clippy -p wovenhat-kernel --target x86_64-unknown-none
+--features hardware-demo -- -D warnings`, `cargo clippy --all-targets -- -D
+warnings`, and `scripts/test-shell-qemu.py --hardware-demo` all pass on
+1/2/4 CPUs.
+
+**Limits.** No `WSIZ` (resize) handling yet, so the shell's resize-grip
+affordance is non-functional for this window; no interactive input (buttons,
+keypad) -- it displays a fixed `2 + 2` expression. The other nine Stage 19
+catalog apps (woven-files, woven-settings, woven-monitor, woven-security,
+woven-editor, woven-images, woven-update, woven-store, woven-terminal) are
+still CLI-only and would need the same `share_with()`/`WOPN` treatment.
+
+## Graphics track - widened path-fill intersections (2026-10-19)
+
+WovenGraphics ordinary, compound, and supersampled path containment now use
+`i128` edge-intersection arithmetic. Valid `i32` path coordinates cannot
+overflow during clipped scan conversion. The 52-test `libwoven` suite,
+warning-denying library/kernel/workspace Clippy, formatting, and Stage 19.2
+compositor visual acceptance passed on 1/2/4 CPUs. Hardware GPU acceleration
+remains a separate boundary.
+
 ## Graphics track - bounded path stroke rasterization (2026-10-19)
 
 WovenGraphics path segments now use widened integer Cohen-Sutherland

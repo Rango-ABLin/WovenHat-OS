@@ -10252,11 +10252,11 @@ pub mod graphics {
                         let first = points[index];
                         let second = points[(index + 1) % points.len()];
                         if (first.y > y) != (second.y > y) {
-                            let numerator = (i64::from(y) - i64::from(first.y))
-                                * (i64::from(second.x) - i64::from(first.x));
-                            let denominator = i64::from(second.y) - i64::from(first.y);
-                            let intersection = i64::from(first.x) + numerator / denominator;
-                            if i64::from(x) < intersection {
+                            let numerator = (i128::from(y) - i128::from(first.y))
+                                * (i128::from(second.x) - i128::from(first.x));
+                            let denominator = i128::from(second.y) - i128::from(first.y);
+                            let intersection = i128::from(first.x) + numerator / denominator;
+                            if i128::from(x) < intersection {
                                 inside = !inside;
                             }
                         }
@@ -10367,11 +10367,11 @@ pub mod graphics {
                             let first = points[index];
                             let second = points[(index + 1) % points.len()];
                             if (first.y > y) != (second.y > y) {
-                                let numerator = (i64::from(y) - i64::from(first.y))
-                                    * (i64::from(second.x) - i64::from(first.x));
-                                let denominator = i64::from(second.y) - i64::from(first.y);
-                                let intersection = i64::from(first.x) + numerator / denominator;
-                                if i64::from(x) < intersection {
+                                let numerator = (i128::from(y) - i128::from(first.y))
+                                    * (i128::from(second.x) - i128::from(first.x));
+                                let denominator = i128::from(second.y) - i128::from(first.y);
+                                let intersection = i128::from(first.x) + numerator / denominator;
+                                if i128::from(x) < intersection {
                                     inside = !inside;
                                 }
                             }
@@ -10433,8 +10433,8 @@ pub mod graphics {
                     let mut covered = 0u8;
                     for sample_y in 0..4 {
                         for sample_x in 0..4 {
-                            let point_x = i64::from(x) * 16 + i64::from(sample_x * 4 + 2);
-                            let point_y = i64::from(y) * 16 + i64::from(sample_y * 4 + 2);
+                            let point_x = i128::from(x) * 16 + i128::from(sample_x * 4 + 2);
+                            let point_y = i128::from(y) * 16 + i128::from(sample_y * 4 + 2);
                             let inside = contours.iter().fold(false, |inside, contour| {
                                 inside ^ path_contains_sample(contour.points(), point_x, point_y)
                             });
@@ -10509,18 +10509,18 @@ pub mod graphics {
         (min_x, max_x, min_y, max_y)
     }
 
-    fn path_contains_sample(points: &[Point], sample_x: i64, sample_y: i64) -> bool {
+    fn path_contains_sample(points: &[Point], sample_x: i128, sample_y: i128) -> bool {
         let mut inside = false;
         for index in 0..points.len() {
             let first = points[index];
             let second = points[(index + 1) % points.len()];
-            let first_y = i64::from(first.y) * 16;
-            let second_y = i64::from(second.y) * 16;
+            let first_y = i128::from(first.y) * 16;
+            let second_y = i128::from(second.y) * 16;
             if (first_y > sample_y) != (second_y > sample_y) {
                 let numerator =
-                    (sample_y - first_y) * (i64::from(second.x) - i64::from(first.x)) * 16;
+                    (sample_y - first_y) * (i128::from(second.x) - i128::from(first.x)) * 16;
                 let denominator = second_y - first_y;
-                let intersection = i64::from(first.x) * 16 + numerator / denominator;
+                let intersection = i128::from(first.x) * 16 + numerator / denominator;
                 if sample_x < intersection {
                     inside = !inside;
                 }
@@ -10533,8 +10533,8 @@ pub mod graphics {
         let mut covered = 0u8;
         for sample_y in 0..4 {
             for sample_x in 0..4 {
-                let point_x = i64::from(x) * 16 + i64::from(sample_x * 4 + 2);
-                let point_y = i64::from(y) * 16 + i64::from(sample_y * 4 + 2);
+                let point_x = i128::from(x) * 16 + i128::from(sample_x * 4 + 2);
+                let point_y = i128::from(y) * 16 + i128::from(sample_y * 4 + 2);
                 if path_contains_sample(points, point_x, point_y) {
                     covered += 1;
                 }
@@ -15677,6 +15677,23 @@ mod tests {
         }
         assert!(pixels.iter().any(|pixel| *pixel == Color::TITLE.packed()));
         assert_eq!(pixels.len(), 16);
+    }
+
+    #[test]
+    fn wovengraphics_fill_path_widens_extreme_intersections() {
+        use crate::graphics::{Color, Path, Point, Renderer};
+
+        let mut path = Path::new();
+        assert!(path.move_to(Point::new(i32::MIN, i32::MIN)));
+        assert!(path.line_to(Point::new(i32::MAX, i32::MAX)));
+        assert!(path.line_to(Point::new(i32::MAX, i32::MIN)));
+        assert!(path.close());
+        let mut pixels = [0u32; 16];
+        {
+            let mut canvas = Canvas::new(&mut pixels, 0, 0, 4, 4).unwrap();
+            assert!(Renderer::new(&mut canvas).fill_path(&path, Color::TITLE));
+        }
+        assert!(pixels.iter().any(|pixel| *pixel == Color::TITLE.packed()));
     }
 
     #[test]

@@ -1,5 +1,11 @@
 # WovenHat OS Architecture & Codebase Guide
 
+## Graphics path-fill arithmetic update (2026-10-19)
+
+Path scan conversion and supersampled compound containment use `i128`
+intersections for `i32` scene coordinates. Canvas clipping remains the work
+bound, while edge arithmetic no longer overflows before the clip.
+
 ## Graphics path stroke update (2026-10-19)
 
 `Renderer::stroke_line` clips each segment to the Canvas with widened integer

@@ -1,5 +1,26 @@
 # Agent coordination (Claude Code and Codex)
 
+**Claude Code: woven-calculator wired to a real desktop window (2026-10-19):**
+touched `kernel/src/main.rs` (only the `install_production_system_apps`
+catalog entry for woven-calculator, not the separate `stage19-app-catalog-test`
+self-test's copy) and `apps/woven-calculator/src/main.rs`. See
+[docs/stage-status.md](stage-status.md#wovencalculator-desktop-window-2026-10-19)
+for the full writeup. Short version: `--gui %p` + the `share_with()`/`WOPN`
+protocol now opens a real titled window on the WovenShell desktop, verified
+with a live QMP screendump. Also fixed a latent stack-overflow bug (a 108 KB
+buffer that was a stack local) while doing so. `cargo clippy --all-targets`,
+the kernel `hardware-demo` feature Clippy, and
+`scripts/test-shell-qemu.py --hardware-demo` all pass on 1/2/4 CPUs. The
+other nine Stage 19 catalog apps are still CLI-only and are open follow-up
+work, not started.
+
+**Codex graphics-track widened path-fill intersections (2026-10-19):**
+ordinary, compound, and supersampled path containment now use `i128`
+edge-intersection arithmetic, preventing overflow for valid extreme `i32`
+coordinates. The 52-test `libwoven` suite, warning-denying
+library/kernel/workspace Clippy, formatting, and Stage 19.2 compositor visual
+acceptance on 1/2/4 CPUs passed. Hardware GPU acceleration remains open.
+
 **Codex graphics-track bounded path stroke rasterization (2026-10-19):** path
 segments now use widened integer Cohen-Sutherland clipping before Bresenham,
 so extreme endpoints cannot cause unbounded walks. The 51-test `libwoven`
