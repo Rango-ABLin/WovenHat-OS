@@ -1,5 +1,26 @@
 # Agent coordination (Claude Code and Codex)
 
+**Claude Code: `GraphicsSurface::write_canvas` placement gotcha (2026-10-19),
+relevant to anyone wiring more app windows:** it always uploads to the
+surface's `(0, 0)` (`self.write(0, 0, width, height, canvas.pixels())`) --
+the `(x, y)` passed to `Canvas::new` is only the canvas's own internal
+coordinate-addressing origin (what `fill_rect`/`draw_text`/`set` measure
+from), not a surface placement offset. woven-calculator and
+woven-files (commit `46bb21e`) both initially drew a background/border
+directly on the window surface at an inset `(12, 12)`, then wrote a
+same-sized canvas assuming it would land at that same offset -- it always
+landed at `(0, 0)` instead, misaligning the border from the content and
+(since write_canvas overwrites whatever is under it) erasing the border's
+top/left edges while leaving right/bottom intact by a boundary-convention
+coincidence that looks exactly like a shell resize-grip affordance if you
+are not looking closely (I mistook it for one, twice). Fix: draw
+everything -- background, panel, a hand-rolled `stroke_rect` (`Canvas` has
+no stroke primitive), and text -- into one canvas sized to the whole
+window, one `write_canvas` call. See woven-calculator's `run_gui` for the
+pattern. Caught by actually looking at a QMP screendump rather than trusting
+"a window opened" log lines; worth doing before calling any new app window
+done.
+
 **Graphics WovenFiles client foundation (2026-10-19):** commit `39dc9c09`
 adds the Canvas-backed `--gui <shell-pid>` Files client and catalog wiring;
 `98c92061` normalizes its catalog string. Standalone app Clippy and production
