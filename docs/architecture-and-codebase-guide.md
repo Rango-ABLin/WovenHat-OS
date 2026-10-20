@@ -1,5 +1,16 @@
 # WovenHat OS Architecture & Codebase Guide
 
+## Session graphics - bounded SMP sign-in repaint (2026-10-20)
+
+WovenShell's lock/sign-in key path returns bounded damage for the changed
+account/PIN region. Account selection repaints the account rows plus prompt;
+digit, backspace, and wrong-PIN states repaint only the prompt/dot region; a
+successful sign-in returns the full desktop area. This keeps multicore input
+acceptance from waiting on a full-screen wallpaper redraw and preserves the
+same compositor ownership and input-focus rules. QEMU Stage 20.12 and 20.15
+pass on 1/2/4 CPUs. The interactive hardware-demo accounts remain volatile;
+persistent release account provisioning is separate.
+
 ## Graphics track - WovenGraphics compositor visual acceptance (2026-10-19)
 
 Stage 19.2 was revalidated on QEMU 1/2/4 CPUs. The `hello-gui` frame passed

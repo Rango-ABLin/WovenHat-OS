@@ -1,5 +1,11 @@
 # Agent coordination (Claude Code and Codex)
 
+**Codex session/SMP sign-in repaint fix accepted (2026-10-20):** WovenShell
+now repaints only the changed account/PIN region for lock-screen keys instead
+of its full wallpaper. Stage 20.12 sign-in and Stage 20.15 session gates pass
+on QEMU 1/2/4 CPUs. The hardware-demo login accounts are still volatile;
+persistent release account installation is the next slice.
+
 **Codex graphics-track WovenGraphics compositor visual acceptance revalidated
 (2026-10-19):** Stage 19.2 passed on QEMU 1/2/4 CPUs. The compositor accepted
 the WovenGraphics visual, 2D, and software 3D frames, and retained-window,

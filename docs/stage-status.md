@@ -1,5 +1,19 @@
 # Stage status
 
+## Graphics/session track - SMP sign-in repaint fix accepted (2026-10-20)
+
+The WovenShell lock/sign-in path now limits key-driven repaint damage to the
+account/PIN regions instead of redrawing the full 1280x800 wallpaper for every
+key. This removes the multicore timing failure in the Stage 20.12 visual
+assertion: sign-in, wrong-PIN refusal, successful account selection, lock,
+unlock, and terminal return now pass on QEMU 1/2/4 CPUs. Stage 20.15 also
+passes on 1/2/4 CPUs for session focus, launcher visibility, F12 console
+handoff, return to the desktop, Quick Settings, and guest power-off.
+
+The current interactive `hardware-demo` boot still provisions `ada/1234` and
+`lin/9876` into volatile VFS state. Persistent release account installation
+remains the next session slice.
+
 ## Graphics track - WovenGraphics compositor frame revalidated (2026-10-19)
 
 The authoritative Stage 19.2 compositor acceptance passed on QEMU 1/2/4

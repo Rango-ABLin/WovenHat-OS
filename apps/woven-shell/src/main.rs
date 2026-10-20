@@ -943,6 +943,20 @@ impl Desktop {
         Area::new(0, 0, self.desktop_width, self.height)
     }
 
+    /// The lock-screen account rows and PIN prompt are the only pixels that
+    /// change while choosing an account. Keeping this damage bounded avoids
+    /// repainting the full 1280x800 wallpaper for every key on SMP boots.
+    fn lock_account_area(&self) -> Area {
+        let middle = self.height / 2;
+        self.screen().intersect(Area::new(0, middle - 50, self.desktop_width, 80))
+    }
+
+    /// The prompt and masked PIN dots change independently of the wallpaper.
+    fn lock_input_area(&self) -> Area {
+        let middle = self.height / 2;
+        self.screen().intersect(Area::new(0, middle - 8, self.desktop_width, 32))
+    }
+
     fn taskbar_top(&self) -> i32 {
         self.height - TASKBAR_HEIGHT
     }
@@ -1379,18 +1393,21 @@ impl Desktop {
                     self.entry[self.entry_length] = digit as u8;
                     self.entry_length += 1;
                 }
+                self.lock_input_area()
             }
             Key::Backspace => {
                 if self.entry_length > 0 {
                     self.entry_length -= 1;
                     self.entry[self.entry_length] = 0;
                 }
+                self.lock_input_area()
             }
             Key::Tab if self.mode == LockMode::SignIn => {
                 let count = self.accounts.iter().flatten().count().max(1);
                 self.chosen = (self.chosen + 1) % count;
                 self.forget_entry();
                 self.prompt = LockPrompt::Enter;
+                self.lock_account_area()
             }
             Key::Enter => {
                 if libwoven::ticks() < self.lockout_until {
@@ -1416,10 +1433,14 @@ impl Desktop {
                     }
                 }
                 self.forget_entry();
+                if self.locked {
+                    self.lock_input_area()
+                } else {
+                    self.screen()
+                }
             }
-            _ => return Area::new(0, 0, 0, 0),
+            _ => Area::new(0, 0, 0, 0),
         }
-        self.screen()
     }
 
     fn render_qs(&self, canvas: &mut Canvas<'_>) {
