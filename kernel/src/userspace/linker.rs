@@ -20,6 +20,7 @@ pub(super) fn compiler_loader_self_test() -> bool {
 
 const LIBRARY_START: u64 = USER_REGION_START + 0x1000_0000;
 const LIBRARY_STRIDE: u64 = 0x0100_0000;
+const LIFECYCLE_TRAMPOLINE: u64 = USER_REGION_START + 0x0d_0000;
 
 struct LinkImage<'a> {
     name: Option<Vec<u8>>,
@@ -263,6 +264,7 @@ pub(super) fn load_with_geometry(
             destructors: [0; elf::MAX_SCOPE_IMAGES * elf::MAX_LIFECYCLE_FUNCTIONS],
             destructor_count: 0,
             destructor_pending: false,
+            lifecycle_trampoline: 0,
         },
         stack_mapped: false,
         template_mapped: None,
@@ -316,6 +318,35 @@ pub(super) fn load_with_geometry(
             .ok()?;
         }
     }
+    if LIFECYCLE_TRAMPOLINE >= mmap_base
+        || pending.space.mappings[..pending.space.mapping_count]
+            .iter()
+            .any(|mapping| {
+                LIFECYCLE_TRAMPOLINE < mapping.start() + mapping.size() as u64
+                    && mapping.start() < LIFECYCLE_TRAMPOLINE + 4096
+            })
+        || pending.space.mapping_count == MAX_IMAGE_MAPPINGS
+    {
+        return None;
+    }
+    let trampoline = UserMapping::new(LIFECYCLE_TRAMPOLINE, 4096, false, true)?;
+    paging::map_user_range_in_inactive(page_table, LIFECYCLE_TRAMPOLINE, 4096, true, false)
+        .ok()?;
+    paging::zero_user_range_in(page_table, LIFECYCLE_TRAMPOLINE, 4096).ok()?;
+    // The exit continuation preserves the status in callee-saved R12 while
+    // destructors run, then re-enters the normal exit syscall path.
+    let trampoline_code = [
+        0x4c, 0x89, 0xe7, // mov rdi,r12
+        0xb8, 0x03, 0, 0, 0, // mov eax, SYS_EXIT
+        0xcd, 0x80, // int 0x80
+        0x0f, 0x0b, // ud2 if the syscall unexpectedly returns
+    ];
+    paging::write_user_bytes(page_table, LIFECYCLE_TRAMPOLINE, &trampoline_code).ok()?;
+    paging::protect_user_range_in_inactive(page_table, LIFECYCLE_TRAMPOLINE, 4096, false, true)
+        .ok()?;
+    pending.space.mappings[pending.space.mapping_count] = trampoline;
+    pending.space.mapping_count += 1;
+    pending.space.lifecycle_trampoline = LIFECYCLE_TRAMPOLINE;
     // No writable executable page exists during relocation: pages are RW/NX
     // until every fixup is applied, then transitioned to their final W^X mode.
     for linked in &images {

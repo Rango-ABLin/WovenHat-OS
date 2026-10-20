@@ -1616,6 +1616,83 @@ pub fn spawn_user_process(
     Ok((process_id, context))
 }
 
+/// Redirect one normal user exit through the image destructors. The callback
+/// chain runs entirely in Ring 3 and returns through the loader-owned exit
+/// trampoline, which re-enters this syscall with the original status held in
+/// callee-saved R12. A second exit request, an abnormal termination, or an
+/// image without destructors takes the ordinary teardown path.
+pub fn begin_user_destructor_exit(
+    frame: *const crate::syscall::UserForkFrame,
+    exit_code: i32,
+) -> bool {
+    if frame.is_null() {
+        return false;
+    }
+    let frame = unsafe { &mut *(frame as *mut crate::syscall::UserForkFrame) };
+    let Some(retry_rip) = frame.rip.checked_sub(2) else {
+        return false;
+    };
+    let mut processes = process_table_lock();
+    let Some(process) = processes
+        .iter_mut()
+        .flatten()
+        .find(|process| process.id.as_u64() == current_process_id())
+    else {
+        return false;
+    };
+    let Some(address_space) = process.address_space.as_mut() else {
+        return false;
+    };
+    if address_space.destructor_pending || address_space.destructor_count == 0 {
+        return false;
+    }
+    if address_space.lifecycle_trampoline == 0
+        || !address_space.contains_executable(address_space.lifecycle_trampoline)
+        || frame.rsp < address_space.stack_base
+    {
+        return false;
+    }
+    let mut syscall_bytes = [0u8; 2];
+    if crate::paging::read_user_bytes_in(address_space.paging(), retry_rip, &mut syscall_bytes)
+        .is_err()
+        || syscall_bytes != [0xcd, 0x80]
+    {
+        return false;
+    }
+    let Some(chain_size) = address_space.destructor_count.checked_mul(8) else {
+        return false;
+    };
+    let Some(chain_start) = frame.rsp.checked_sub(chain_size as u64) else {
+        return false;
+    };
+    if chain_start < address_space.stack_base
+        || chain_start + chain_size as u64 > address_space.stack_base + userspace::UserStack::SIZE as u64
+    {
+        return false;
+    }
+    for index in 0..address_space.destructor_count {
+        let next = address_space
+            .destructors
+            .get(index + 1)
+            .copied()
+            .unwrap_or(address_space.lifecycle_trampoline);
+        if crate::paging::write_user_bytes(
+            address_space.paging(),
+            chain_start + index as u64 * 8,
+            &next.to_le_bytes(),
+        )
+        .is_err()
+        {
+            return false;
+        }
+    }
+    address_space.destructor_pending = true;
+    frame.r12 = exit_code as i64 as u64;
+    frame.rip = address_space.destructors[0];
+    frame.rsp = chain_start;
+    true
+}
+
 /// Create a scheduler-backed thread in the current process.
 ///
 /// The entry point must already be inside an RX ELF segment.  The stack is a

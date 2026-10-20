@@ -2437,7 +2437,13 @@ pub extern "C" fn wovenhat_syscall_dispatch(
             crate::task::yield_now();
             0
         }
-        value if value == Number::Exit as u64 => crate::task::exit_current_process(arg0 as i32),
+        value if value == Number::Exit as u64 => {
+            if crate::task::begin_user_destructor_exit(frame, arg0 as i32) {
+                0
+            } else {
+                crate::task::exit_current_process(arg0 as i32)
+            }
+        }
         value if value == Number::ThreadCreate as u64 => {
             crate::task::create_user_thread(arg0, arg1)
                 .map(|id| id.raw())

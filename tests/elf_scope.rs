@@ -214,6 +214,54 @@ fn tls_fixture() -> Vec<u8> {
     bytes
 }
 
+fn lifecycle_fixture() -> Vec<u8> {
+    let mut bytes = fixture(&[]);
+    put64(&mut bytes, 152, 12 * 16);
+    put64(&mut bytes, 160, 12 * 16);
+    put64(&mut bytes, DYNAMIC + 5 * 16, 12); // DT_INIT
+    put64(&mut bytes, DYNAMIC + 5 * 16 + 8, BASE + 0x20);
+    put64(&mut bytes, DYNAMIC + 6 * 16, 13); // DT_FINI
+    put64(&mut bytes, DYNAMIC + 6 * 16 + 8, BASE + 0x40);
+    put64(&mut bytes, DYNAMIC + 7 * 16, 25); // DT_INIT_ARRAY
+    put64(&mut bytes, DYNAMIC + 7 * 16 + 8, BASE + 0x380);
+    put64(&mut bytes, DYNAMIC + 8 * 16, 27); // DT_INIT_ARRAYSZ
+    put64(&mut bytes, DYNAMIC + 8 * 16 + 8, 16);
+    put64(&mut bytes, DYNAMIC + 9 * 16, 26); // DT_FINI_ARRAY
+    put64(&mut bytes, DYNAMIC + 9 * 16 + 8, BASE + 0x390);
+    put64(&mut bytes, DYNAMIC + 10 * 16, 28); // DT_FINI_ARRAYSZ
+    put64(&mut bytes, DYNAMIC + 10 * 16 + 8, 16);
+    put64(&mut bytes, 0x1380, BASE + 0x60);
+    put64(&mut bytes, 0x1388, BASE + 0x80);
+    put64(&mut bytes, 0x1390, BASE + 0xa0);
+    put64(&mut bytes, 0x1398, BASE + 0xc0);
+    bytes
+}
+
+#[test]
+fn lifecycle_metadata_is_bounded_and_relocated() {
+    let bytes = lifecycle_fixture();
+    let image = image(&bytes);
+    let lifecycle = image.lifecycle();
+    assert_eq!(lifecycle.init_count, 3);
+    assert_eq!(lifecycle.init[0], BASE + 0x20);
+    assert_eq!(lifecycle.init[1], BASE + 0x60);
+    assert_eq!(lifecycle.init[2], BASE + 0x80);
+    assert_eq!(lifecycle.fini_count, 3);
+    assert_eq!(lifecycle.fini[0], BASE + 0xc0);
+    assert_eq!(lifecycle.fini[1], BASE + 0xa0);
+    assert_eq!(lifecycle.fini[2], BASE + 0x40);
+    let relocated = image.relocated(0x30_000).unwrap().lifecycle();
+    assert_eq!(relocated.init[1], BASE + 0x30_060);
+    assert_eq!(relocated.fini[2], BASE + 0x30_040);
+}
+
+#[test]
+fn lifecycle_metadata_rejects_non_executable_callbacks() {
+    let mut bytes = lifecycle_fixture();
+    put64(&mut bytes, 0x1388, BASE + 0x1000);
+    assert!(matches!(elf::parse(&bytes), Err(elf::Error::InvalidSegment)));
+}
+
 fn plt_fixture() -> Vec<u8> {
     let mut bytes = fixture(&[]);
     bytes.resize(0x2200, 0);

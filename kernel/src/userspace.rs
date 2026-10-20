@@ -21,7 +21,8 @@ pub fn compiler_tls_self_test() -> bool {
     tls_acceptance::run()
 }
 
-const MAX_IMAGE_MAPPINGS: usize = crate::config::MAX_ELF_SEGMENTS * crate::elf::MAX_SCOPE_IMAGES;
+const MAX_IMAGE_MAPPINGS: usize =
+    crate::config::MAX_ELF_SEGMENTS * crate::elf::MAX_SCOPE_IMAGES + 1;
 use crate::paging;
 
 pub use crate::config::MAX_ANONYMOUS_MAPPINGS;
@@ -4573,16 +4574,18 @@ impl InitialTls {
 #[derive(Clone, Copy)]
 pub struct AddressSpace {
     paging: paging::AddressSpace,
-    stack_base: u64,
+    pub(crate) stack_base: u64,
     mmap_base: u64,
     mappings: [UserMapping; MAX_IMAGE_MAPPINGS],
     mapping_count: usize,
     relro: Option<(u64, usize)>,
     library_relro: [Option<(u64, usize)>; crate::elf::MAX_NEEDED_LIBRARIES],
     tls: Option<InitialTls>,
-    destructors: [u64; crate::elf::MAX_SCOPE_IMAGES * crate::elf::MAX_LIFECYCLE_FUNCTIONS],
-    destructor_count: usize,
-    destructor_pending: bool,
+    pub(crate) destructors:
+        [u64; crate::elf::MAX_SCOPE_IMAGES * crate::elf::MAX_LIFECYCLE_FUNCTIONS],
+    pub(crate) destructor_count: usize,
+    pub(crate) destructor_pending: bool,
+    pub(crate) lifecycle_trampoline: u64,
 }
 
 impl AddressSpace {
@@ -4610,6 +4613,10 @@ impl AddressSpace {
     /// Return the static initial-exec TLS image range, if this image has one.
     pub fn tls_range(self) -> Option<(u64, usize)> {
         self.tls.map(InitialTls::range)
+    }
+
+    pub fn lifecycle_trampoline(self) -> u64 {
+        self.lifecycle_trampoline
     }
 
     /// Returns whether `address` falls in a logically writable mapping
@@ -5791,6 +5798,7 @@ pub fn clone_address_space(
         destructors: source.destructors,
         destructor_count: source.destructor_count,
         destructor_pending: source.destructor_pending,
+        lifecycle_trampoline: source.lifecycle_trampoline,
     };
     let mut completed = [(0_u64, 0_usize); MAX_IMAGE_MAPPINGS + 3 + MAX_ANONYMOUS_MAPPINGS * 16];
     let mut completed_count = 0;
@@ -6139,6 +6147,7 @@ pub fn shared_disk_mmap_self_test() -> bool {
             destructors: [0; crate::elf::MAX_SCOPE_IMAGES * crate::elf::MAX_LIFECYCLE_FUNCTIONS],
             destructor_count: 0,
             destructor_pending: false,
+            lifecycle_trampoline: 0,
         };
         let anchor = USER_MMAP_START + 15 * USER_MMAP_STRIDE;
         if paging::map_user_range_in(root, anchor, 4096, false, false).is_err() {
@@ -6198,6 +6207,7 @@ pub fn disk_unlink_mmap_self_test() -> bool {
             destructors: [0; crate::elf::MAX_SCOPE_IMAGES * crate::elf::MAX_LIFECYCLE_FUNCTIONS],
             destructor_count: 0,
             destructor_pending: false,
+            lifecycle_trampoline: 0,
         };
         let anchor = USER_MMAP_START + 15 * USER_MMAP_STRIDE;
         if paging::map_user_range_in(root, anchor, 4096, false, false).is_err() {
@@ -6248,6 +6258,7 @@ pub fn shared_file_mmap_self_test() -> bool {
         destructors: [0; crate::elf::MAX_SCOPE_IMAGES * crate::elf::MAX_LIFECYCLE_FUNCTIONS],
         destructor_count: 0,
         destructor_pending: false,
+        lifecycle_trampoline: 0,
     };
     let anchor = USER_MMAP_START + 15 * USER_MMAP_STRIDE;
     if paging::map_user_range_in(root, anchor, 4096, false, false).is_err() {
@@ -6338,6 +6349,7 @@ pub fn lazy_file_mmap_self_test() -> bool {
         destructors: [0; crate::elf::MAX_SCOPE_IMAGES * crate::elf::MAX_LIFECYCLE_FUNCTIONS],
         destructor_count: 0,
         destructor_pending: false,
+        lifecycle_trampoline: 0,
     };
     // Keep a teardown anchor while sparse mapping pages are removed individually.
     let anchor = USER_MMAP_START + 15 * USER_MMAP_STRIDE;
@@ -6429,6 +6441,7 @@ pub fn private_lazy_swap_self_test() -> bool {
         destructors: [0; crate::elf::MAX_SCOPE_IMAGES * crate::elf::MAX_LIFECYCLE_FUNCTIONS],
         destructor_count: 0,
         destructor_pending: false,
+        lifecycle_trampoline: 0,
     };
     let anchor = USER_MMAP_START + 15 * USER_MMAP_STRIDE;
     if paging::map_user_range_in(root, anchor, 4096, false, false).is_err() {
@@ -6504,6 +6517,7 @@ pub fn file_mmap_self_test() -> bool {
         destructors: [0; crate::elf::MAX_SCOPE_IMAGES * crate::elf::MAX_LIFECYCLE_FUNCTIONS],
         destructor_count: 0,
         destructor_pending: false,
+        lifecycle_trampoline: 0,
     };
     let _ = crate::vfs::seek(file, 3);
     let Some(mapping) = map_file_private(space, 0, file, 0, DATA.len(), false) else {
