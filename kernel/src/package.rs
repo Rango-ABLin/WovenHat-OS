@@ -86,3 +86,33 @@ pub fn verification_self_test() -> bool {
     bytes[HEADER_LEN + MANIFEST.len()] ^= 1;
     verify(&bytes) == Err(VerificationError::InvalidSignature)
 }
+
+pub fn store_self_test() -> bool {
+    let mut dependencies = [&[][..]; libwoven::package::MAX_DEPENDENCIES];
+    let core = b"core";
+    dependencies[0] = core;
+    let app = libwoven::package::Manifest {
+        name: b"app",
+        version: 1,
+        capabilities: 2,
+        dependencies,
+        dependency_count: 1,
+    };
+    let core_manifest = libwoven::package::Manifest {
+        name: core,
+        version: 1,
+        capabilities: 1,
+        dependencies: [&[][..]; libwoven::package::MAX_DEPENDENCIES],
+        dependency_count: 0,
+    };
+    let mut transaction = libwoven::store::Store::new(0x3).transaction();
+    if transaction.install(&app, [2; 32]) != Err(libwoven::store::Error::MissingDependency)
+        || transaction.install(&core_manifest, [1; 32]).is_err()
+        || transaction.install(&app, [2; 32]).is_err()
+        || transaction.remove(core).is_ok()
+    {
+        return false;
+    }
+    let committed = transaction.commit();
+    committed.count() == 2
+}

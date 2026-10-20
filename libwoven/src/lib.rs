@@ -24,6 +24,7 @@ pub mod process {
 }
 
 pub mod package;
+pub mod store;
 
 #[cfg(test)]
 #[path = "../../kernel/src/exit_status.rs"]

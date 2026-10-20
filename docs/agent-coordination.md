@@ -31,6 +31,14 @@ host/freestanding warning-denying Clippy gates passed. Evidence is under
 `target/wovenfs-device-scratch-{1,2,4}cpu`. No physical USB write was
 performed.
 
+**Codex: Stage 21.3 bounded WovenStore transactions (2026-10-20):**
+`libwoven::store` now provides a fixed-capacity catalog transaction core with
+capability-mask enforcement, dependency presence checks, monotonic updates,
+dependent-protected removal, and explicit commit/rollback snapshots. Host
+tests, host/freestanding warning-denying Clippy, and QEMU acceptance passed on
+1/2/4 CPUs. Persistent WovenFS publication and service/IPC ownership are still
+open. No physical USB write was performed.
+
 **Codex: bounded update A/B state and signed envelope increment (2026-10-20):**
 `kernel/src/update.rs` now stages only newer, bounded candidates in the
 inactive slot, verifies version-1 `WUPD` metadata/image coverage under the

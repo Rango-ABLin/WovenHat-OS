@@ -10,7 +10,7 @@ from pathlib import Path
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--cpus", type=int, choices=(1, 2, 4), default=1)
-    parser.add_argument("--stage", type=int, choices=(1, 2), default=1)
+    parser.add_argument("--stage", type=int, choices=(1, 2, 3), default=1)
     parser.add_argument("--timeout", type=float, default=240)
     parser.add_argument(
         "--qemu",
@@ -50,7 +50,11 @@ def main() -> int:
     marker = (
         "[S21.1] WovenPackages parser: PASSED"
         if args.stage == 1
-        else "[S21.2] WovenPackages signature: PASSED"
+        else (
+            "[S21.2] WovenPackages signature: PASSED"
+            if args.stage == 2
+            else "[S21.3] WovenStore transaction: PASSED"
+        )
     )
     if result != 33 or marker not in log:
         print(f"Stage 21.{args.stage} failed (exit {result}). Evidence: {out}", file=sys.stderr)

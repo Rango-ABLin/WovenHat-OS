@@ -141,7 +141,11 @@ mod task;
 mod terminal;
 #[cfg(feature = "qemu-test")]
 mod update;
-#[cfg(any(feature = "stage21-1-test", feature = "stage21-2-test"))]
+#[cfg(any(
+    feature = "stage21-1-test",
+    feature = "stage21-2-test",
+    feature = "stage21-3-test"
+))]
 mod package;
 #[allow(dead_code)]
 mod thread;
@@ -4409,6 +4413,16 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
             qemu_test_exit_failure();
         }
         serial::write_line(format_args!("[S21.2] WovenPackages signature: PASSED"));
+        qemu_test_exit_success();
+    }
+
+    #[cfg(feature = "stage21-3-test")]
+    {
+        if !package::store_self_test() {
+            serial::write_line(format_args!("[S21.3] WovenStore transaction: FAILED"));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!("[S21.3] WovenStore transaction: PASSED"));
         qemu_test_exit_success();
     }
     #[cfg(feature = "stage27-2-test")]

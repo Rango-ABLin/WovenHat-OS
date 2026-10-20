@@ -1159,6 +1159,16 @@ trust-root model as signed applications. The kernel Stage 21.2 verifier checks
 this digest before a future package service may install anything; producer
 output alone does not grant installation authority.
 
+`libwoven/src/store.rs` is the bounded WovenStore transaction core. A store has
+32 catalog slots and an explicit allowed-capability mask. Each transaction
+works on a copied catalog and can install a newer version, reject stale or
+duplicate versions, require already-installed dependencies, reject undeclared
+capabilities, and refuse removal while another entry depends on the target.
+Only `commit` publishes the working snapshot; `rollback` returns the original
+snapshot. This is deliberately independent of storage I/O: the future package
+service must authenticate WPKG first, then persist the committed catalog and
+payload files through capability-gated WovenFS transactions.
+
 The feature-gated `stage19-app-catalog-test` now exercises the install-plan
 boundary for all ten accepted packages together. It verifies each WAPP,
 rejects a mutation, installs and reads each package back through the VFS,

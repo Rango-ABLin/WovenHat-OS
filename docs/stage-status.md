@@ -2969,6 +2969,20 @@ verified all 505 frozen inputs and sixty stress logs. See the compiler-PIE
 audit. Compiler TLS, general dynamic linking, merged-tree, release and hardware
 qualification remain open.
 
+## Stage 21.3 bounded WovenStore transaction core (2026-10-20)
+
+`libwoven::store` now implements a fixed-capacity catalog transaction core.
+It enforces a sandbox capability mask, requires dependencies before install,
+allows only monotonic version updates, protects dependencies from removal, and
+provides explicit commit/rollback snapshots. Host tests, host/freestanding
+warning-denying Clippy, and the Stage 21.3 QEMU gate passed on 1/2/4 CPUs.
+Evidence is recorded in
+`docs/audit-stage21-3-wovenstore-transactions-2026-10-20.md`.
+
+The core is not yet persistent: WovenFS publication, payload/catalog atomicity
+across reboot, package service ownership/IPC, and physical USB qualification
+remain open.
+
 **Compiler main-image local-exec TLS accepted (2026-10-16):** checked Variant-II layout, a mapped TCB
 self pointer and an immutable post-relocation template fix the retained
 compiler FS/guard fault. Host parser/layout tests and first expanded Ring-3
