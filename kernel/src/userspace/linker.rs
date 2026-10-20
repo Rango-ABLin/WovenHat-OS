@@ -401,36 +401,40 @@ fn relocate(
     scope: &SymbolScope<'_>,
     page_table: paging::AddressSpace,
 ) -> Option<()> {
-    let Some(dynamic) = linked
-        .image
-        .dynamic()
-        .filter(|dynamic| dynamic.rela_size != 0)
-    else {
+    let Some(dynamic) = linked.image.dynamic() else {
         return Some(());
     };
-    let end = dynamic.rela_file_offset.checked_add(dynamic.rela_size)?;
-    for entry in linked
-        .bytes
-        .get(dynamic.rela_file_offset..end)?
-        .chunks_exact(dynamic.rela_entry_size)
-    {
-        let target = u64::from_le_bytes(entry[..8].try_into().ok()?)
-            .checked_add(linked.image.load_bias())?;
-        let info = u64::from_le_bytes(entry[8..16].try_into().ok()?);
-        let addend = i64::from_le_bytes(entry[16..24].try_into().ok()?);
-        let value = match info as u32 {
-            elf::R_X86_64_RELATIVE if info >> 32 == 0 => linked.image.load_bias(),
-            elf::R_X86_64_64 | elf::R_X86_64_GLOB_DAT | elf::R_X86_64_JUMP_SLOT => linked
-                .image
-                .relocation_symbol_value(&linked.bytes, (info >> 32) as usize, scope)?,
-            _ => return None,
-        };
-        let value = if addend >= 0 {
-            value.checked_add(addend as u64)?
-        } else {
-            value.checked_sub(addend.unsigned_abs())?
-        };
-        paging::write_user_bytes(page_table, target, &value.to_le_bytes()).ok()?;
+    for (offset, size) in [
+        (dynamic.rela_file_offset, dynamic.rela_size),
+        (dynamic.plt_rela_file_offset, dynamic.plt_rela_size),
+    ] {
+        if size == 0 {
+            continue;
+        }
+        let end = offset.checked_add(size)?;
+        for entry in linked
+            .bytes
+            .get(offset..end)?
+            .chunks_exact(dynamic.rela_entry_size)
+        {
+            let target = u64::from_le_bytes(entry[..8].try_into().ok()?)
+                .checked_add(linked.image.load_bias())?;
+            let info = u64::from_le_bytes(entry[8..16].try_into().ok()?);
+            let addend = i64::from_le_bytes(entry[16..24].try_into().ok()?);
+            let value = match info as u32 {
+                elf::R_X86_64_RELATIVE if info >> 32 == 0 => linked.image.load_bias(),
+                elf::R_X86_64_64 | elf::R_X86_64_GLOB_DAT | elf::R_X86_64_JUMP_SLOT => linked
+                    .image
+                    .relocation_symbol_value(&linked.bytes, (info >> 32) as usize, scope)?,
+                _ => return None,
+            };
+            let value = if addend >= 0 {
+                value.checked_add(addend as u64)?
+            } else {
+                value.checked_sub(addend.unsigned_abs())?
+            };
+            paging::write_user_bytes(page_table, target, &value.to_le_bytes()).ok()?;
+        }
     }
     Some(())
 }
