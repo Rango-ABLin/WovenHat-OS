@@ -439,7 +439,7 @@ pub(super) fn run() -> bool {
         .ok()?;
         if !step(
             "transitive graph and cross-image relocation",
-            program.address_space.mapping_count == 6
+            program.address_space.mapping_count == 7
                 && u64::from_le_bytes(address) == LIBRARY_START + 0x20
                 && program
                     .address_space
