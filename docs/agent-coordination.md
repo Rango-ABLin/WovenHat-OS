@@ -1,5 +1,14 @@
 # Agent coordination (Claude Code and Codex)
 
+**Codex: WovenPackage IPC protocol foundation (2026-10-20):** `libwoven`
+now defines bounded version-1 `WPKI` request/response frames for install,
+remove, rollback, and query operations. Paths reject traversal and oversized or
+invalid bytes; package payloads stay out of the IPC frame and remain owned by
+the authenticated storage boundary. The 66-test library suite and host
+warning-denying Clippy pass. A broker implementation, QEMU Ring-3 exercise,
+and physical USB qualification remain open. No physical USB write was
+performed.
+
 **Codex: Stage 22.2 handle-addressed IPC transport (2026-10-20):** endpoint
 capabilities returned by service discovery are now usable from userspace via
 capability-gated nonblocking send/receive syscalls 215–216 and typed

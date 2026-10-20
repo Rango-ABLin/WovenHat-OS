@@ -24,6 +24,7 @@ pub mod process {
 }
 
 pub mod package;
+pub mod package_ipc;
 pub mod store;
 
 #[cfg(test)]

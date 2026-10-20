@@ -1250,6 +1250,15 @@ service layer can build event-driven retry/wait behavior on the existing
 blocking kernel primitives. `libwoven` exposes both operations. The next
 boundary is a versioned WovenPackage service protocol and a real Ring-3 broker.
 
+`libwoven::package_ipc` is the first protocol layer. Its `WPKI` v1 request
+frame carries an operation, request identifier, and validated package path;
+responses carry the identifier, bounded status, and value. Install, remove,
+rollback, and query are explicit operations. Package bytes do not travel in
+the fixed IPC message, avoiding a second unverified payload path. The codec is
+allocation-free and covered by host tests; the next acceptance must exercise
+the codec from a real Ring-3 broker and connect each operation to the existing
+authenticated WovenPackage transactions.
+
 The feature-gated `stage19-app-catalog-test` now exercises the install-plan
 boundary for all ten accepted packages together. It verifies each WAPP,
 rejects a mutation, installs and reads each package back through the VFS,

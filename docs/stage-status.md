@@ -1,5 +1,19 @@
 # Stage status
 
+## WovenPackage IPC protocol foundation (2026-10-20)
+
+`libwoven::package_ipc` defines a bounded version-1 `WPKI` control protocol
+for install, remove, rollback, and query requests plus fixed-size responses.
+It validates operation/version/length fields and rejects traversal segments,
+invalid path bytes, and oversized frames. Package bytes are intentionally not
+copied into IPC messages; the future broker resolves authenticated storage
+objects through its own service authority. The 66-test `libwoven` suite,
+warning-denying host Clippy, and diff checks pass.
+
+This is a protocol foundation, not a completed service. A Ring-3 broker and
+client, service startup/ownership wiring, a QEMU userspace exercise, and
+physical USB qualification remain required.
+
 ## Stage 22.2 handle-addressed IPC transport (2026-10-20)
 
 Discovered service capabilities are now usable by Ring-3 callers. Syscall 215
