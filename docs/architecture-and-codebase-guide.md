@@ -1,5 +1,17 @@
 # WovenHat OS Architecture & Codebase Guide
 
+## Persistent session account import (2026-10-20)
+
+The hardware-demo/session boot path checks the read-only mounted FAT32 view at
+`/mnt/etc/wovenhat/accounts` before starting WovenShell. When present, the
+bounded salted-hash account file is read into a heap buffer, minimally
+validated (`name:salt-hex:hash-hex`, with the shared size limits), and copied
+read-only to `/etc/wovenhat/accounts`. A malformed, oversized, or non-file
+source fails closed; a missing source permits only the explicitly disposable
+QEMU demo-account fallback. This keeps persistent account installation ahead
+of session creation without storing PINs or making the shell trust malformed
+input.
+
 ## Session track - packaged app launch regression acceptance (2026-10-20)
 
 After the SMP sign-in repaint fix, the production WovenCalculator package was

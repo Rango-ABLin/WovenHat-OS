@@ -1,5 +1,18 @@
 # Stage status
 
+## Session track - persistent account import implemented (2026-10-20)
+
+Hardware-demo boot now checks the mounted FAT32 volume for
+`/mnt/etc/wovenhat/accounts`. A bounded, syntax-checked salted-hash file is
+copied read-only into `/etc/wovenhat/accounts` before WovenShell starts, so a
+release image can carry its login accounts on persistent storage. Missing
+accounts retain the disposable QEMU demo fallback (`ada/1234`, `lin/9876`),
+while an invalid or oversized persistent file fails closed. The existing
+Stage 20.12 sign-in acceptance passed on QEMU 1/2/4 CPUs after this change.
+
+This slice does not add account creation, password change, credential
+rotation, or a secure password KDF; those remain release-hardening work.
+
 ## Session track - production app launch revalidated after SMP fix (2026-10-20)
 
 The production packaged WovenCalculator path was rerun after the bounded

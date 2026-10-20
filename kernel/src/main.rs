@@ -1581,7 +1581,7 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         }
 
         #[cfg(feature = "hardware-demo")]
-        if !install_hardware_demo_accounts() {
+        if !install_persistent_accounts() || !install_hardware_demo_accounts() {
             serial::write_line(format_args!("[DEMO] account provisioning failed"));
             halt();
         }
@@ -5342,6 +5342,79 @@ fn install_production_system_apps() -> bool {
         installed
     ));
     true
+}
+
+#[cfg(feature = "hardware-demo")]
+fn install_persistent_accounts() -> bool {
+    const SOURCE: &str = "/mnt/etc/wovenhat/accounts";
+    const TARGET: &str = "/etc/wovenhat/accounts";
+
+    let source = match vfs::stat(SOURCE) {
+        Ok(stat) if stat.kind == vfs::NodeKind::File => stat,
+        Ok(_) => {
+            serial::write_line(format_args!(
+                "[SESSION] persistent accounts path is not a file"
+            ));
+            return false;
+        }
+        Err(vfs::Error::NotFound) => return true,
+        Err(_) => return false,
+    };
+    if source.size == 0 || source.size > vfs::NODE_CAPACITY {
+        serial::write_line(format_args!(
+            "[SESSION] persistent accounts file has invalid size: {}",
+            source.size
+        ));
+        return false;
+    }
+
+    let mut data = alloc::vec![0u8; source.size];
+    let Ok(read) = vfs::read_all(SOURCE, &mut data) else {
+        serial::write_line(format_args!("[SESSION] persistent accounts read failed"));
+        return false;
+    };
+    if read != source.size || !has_valid_account_line(&data) {
+        serial::write_line(format_args!(
+            "[SESSION] persistent accounts file contains no valid account"
+        ));
+        return false;
+    }
+    for directory in ["/etc", "/etc/wovenhat"] {
+        match vfs::mkdir(directory) {
+            Ok(()) | Err(vfs::Error::AlreadyExists) => {}
+            Err(_) => return false,
+        }
+    }
+    if vfs::create_read_only(TARGET, &data).is_err() {
+        return false;
+    }
+    serial::write_line(format_args!(
+        "[SESSION] persistent accounts imported from {}",
+        SOURCE
+    ));
+    true
+}
+
+#[cfg(feature = "hardware-demo")]
+fn has_valid_account_line(data: &[u8]) -> bool {
+    data.split(|byte| *byte == b'\n').any(|line| {
+        let line = line.strip_suffix(b"\r").unwrap_or(line);
+        let mut fields = line.split(|byte| *byte == b':');
+        let (Some(name), Some(salt), Some(hash)) = (fields.next(), fields.next(), fields.next())
+        else {
+            return false;
+        };
+        fields.next().is_none()
+            && !name.is_empty()
+            && name.len() <= 16
+            && name.iter().all(|byte| (b' '..=b'~').contains(byte))
+            && !salt.is_empty()
+            && salt.len() <= 64
+            && salt.len().is_multiple_of(2)
+            && salt.iter().all(u8::is_ascii_hexdigit)
+            && hash.len() == 64
+            && hash.iter().all(u8::is_ascii_hexdigit)
+    })
 }
 
 #[cfg(feature = "hardware-demo")]

@@ -1,5 +1,13 @@
 # Agent coordination (Claude Code and Codex)
 
+**Codex persistent session account import accepted (2026-10-20):** The
+hardware-demo boot now imports a bounded, valid salted-hash account file from
+`/mnt/etc/wovenhat/accounts` into the read-only session path before WovenShell
+starts, fails closed for malformed persistent credentials, and preserves the
+disposable fallback only when the persistent file is absent. Host tests,
+warning-denying kernel Clippy, and Stage 20.12 sign-in passed on QEMU 1/2/4
+CPUs. Account creation, rotation, and a stronger password KDF remain open.
+
 **Codex packaged app launch regression revalidated (2026-10-20):** The
 production WovenCalculator package launched through the logged-in WovenShell,
 changed the presented frame, and activated its bounded control on QEMU 1/2/4
