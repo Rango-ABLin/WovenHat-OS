@@ -1300,6 +1300,29 @@ The service-enabled kernel task stack is 256 KiB. This is an explicit resource
 budget for the bounded WovenStore/WovenFS transaction call chain and is
 validated by the stack canary on the focused 1/2/4-CPU acceptance gate.
 
+## Stage 23.1 controlled WovenAI broker boundary (2026-10-20)
+
+`libwoven::ai_ipc` defines the `WAI1` control protocol with fixed headers,
+UTF-8 input validation, a 224-byte input ceiling, and fixed-size responses.
+`apps/woven-ai` is a Ring-3 service that publishes `woven.ai`. Its `Describe`
+operation returns the broker ABI version; `Complete` returns `NoProvider` until
+Stage 23.2/23.3 supplies a local or external provider. This keeps the first
+AI increment honest: a broker exists, but no model execution is claimed.
+
+Syscall 218 is the controlled client entry point. It requires both
+`Capability::Ipc` and `Capability::Ai` before copying and sending the bounded
+request to a discovered endpoint. The acceptance probe runs as a normal user
+process whose declared package capabilities include exactly `Ipc` and `Ai`;
+the broker runs as a least-privilege service with `Ipc` only. The WovenGuard
+user ceiling permits `Ai`, while the SystemService ceiling deliberately does
+not, preventing accidental AI authority from being inherited by unrelated
+services.
+
+The accepted 1/2/4-CPU gate proves service publication, capability-gated
+request delivery, ABI response correlation, explicit no-provider behavior,
+and teardown. It does not provide model inference, file/network/secret/device
+access, assistant actions, or physical hardware qualification.
+
 The feature-gated `stage19-app-catalog-test` now exercises the install-plan
 boundary for all ten accepted packages together. It verifies each WAPP,
 rejects a mutation, installs and reads each package back through the VFS,

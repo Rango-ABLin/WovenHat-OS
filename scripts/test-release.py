@@ -72,7 +72,7 @@ def main():
         run(f'{suite}-4-release', [sys.executable, f'scripts/test-{suite}-qemu.py', '--cpus', '4', '--release'] + options)
     run('build-release', ['cargo', 'build', '--release'])
     run('shell-smoke', [sys.executable, 'scripts/test-shell-qemu.py'] + options)
-    app_directories = ('woven-calculator', 'woven-terminal', 'woven-files', 'woven-monitor', 'woven-settings', 'woven-security', 'woven-editor', 'woven-images', 'woven-update', 'woven-store', 'woven-package')
+    app_directories = ('woven-calculator', 'woven-terminal', 'woven-files', 'woven-monitor', 'woven-settings', 'woven-security', 'woven-editor', 'woven-images', 'woven-update', 'woven-store', 'woven-package', 'woven-ai')
     for app in app_directories:
         run(
             f'lint-app-{app}',
@@ -111,6 +111,12 @@ def main():
                 '--cpus',
                 str(cpus),
             ]
+            + transaction_options,
+        )
+    for cpus in (1, 2, 4):
+        run(
+            f'woven-ai-broker-{cpus}',
+            [sys.executable, 'scripts/test-stage23-1-ai-broker.py', '--cpus', str(cpus)]
             + transaction_options,
         )
     run('system-apps-boot', [sys.executable, 'scripts/test-shell-qemu.py', '--system-apps'] + options)

@@ -24,6 +24,7 @@ pub mod process {
 }
 pub mod package;
 pub mod package_ipc;
+pub mod ai_ipc;
 pub mod store;
 
 #[cfg(test)]
@@ -11284,6 +11285,7 @@ pub mod syscall {
     pub const IPC_MESSAGE_SEND: u64 = 215;
     pub const IPC_MESSAGE_RECEIVE: u64 = 216;
     pub const PACKAGE_TRANSACTION: u64 = 217;
+    pub const AI_MESSAGE_SEND: u64 = 218;
     pub const MESSAGE_SEND: u64 = 11;
     pub const MESSAGE_RECEIVE: u64 = 12;
 
@@ -12327,6 +12329,16 @@ pub fn package_transaction(operation: package_ipc::Operation, path: &str) -> Res
             path.len() as u64,
         )
     })
+}
+
+/// Send a bounded WovenAI request. The kernel requires both `Ipc` and `Ai`
+/// capability before the request can reach the broker.
+pub fn ai_message_send(endpoint: u64, bytes: &[u8]) -> Result<(), Error> {
+    // SAFETY: the pointer and length describe `bytes`.
+    check(unsafe {
+        syscall::invoke(syscall::AI_MESSAGE_SEND, endpoint, bytes.as_ptr() as u64, bytes.len() as u64)
+    })
+    .map(|_| ())
 }
 
 /// Take the compositor lease.

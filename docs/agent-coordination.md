@@ -1,5 +1,16 @@
 # Agent coordination (Claude Code and Codex)
 
+**Codex: Stage 23.1 controlled WovenAI broker accepted (2026-10-20):**
+`libwoven::ai_ipc` and syscall 218 define a bounded `WAI1` request path that
+requires both `Ipc` and `Ai` capability. The signed Ring-3 `apps/woven-ai`
+broker publishes `woven.ai`, reports its ABI, and explicitly returns
+`NoProvider` for completion until later provider stages. The user-domain probe
+passed the dedicated QEMU gate on 1/2/4 CPUs; host/freestanding Clippy, the
+69-test library suite, app lint, Python checks, and Stage 21 feature lints are
+green. Evidence is under the three `audit-artifacts/stage23.1-*` directories
+listed in `docs/stage-status.md`. No model/provider or physical USB claim is
+made; no physical USB write was performed.
+
 **Codex: Stage 22.5 userspace WovenPackage transactions accepted (2026-10-20):**
 syscall 217 now gives the signed Ring-3 `woven-package` broker a bounded,
 capability-gated install/remove/rollback authority over authenticated native

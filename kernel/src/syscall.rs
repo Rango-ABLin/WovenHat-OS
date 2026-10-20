@@ -403,6 +403,10 @@ pub enum Number {
     /// operation, source/name path pointer, path length -> catalog count
     #[cfg(any(feature = "stage22-5-test", feature = "system-apps"))]
     PackageTransaction = 217,
+    /// endpoint handle, bounded WAI1 request pointer, request length -> 0;
+    /// requires both Ipc and Ai capability
+    #[cfg(any(feature = "stage23-1-test", feature = "system-apps"))]
+    AiMessageSend = 218,
 }
 
 pub fn entry_address() -> u64 {
@@ -938,6 +942,16 @@ fn sys_ipc_message_send(raw_handle: u64, user_buffer: u64, length: u64) -> u64 {
     }
     crate::ipc::send_handle(crate::task::current_process_id(), handle, &buffer[..length])
         .map_or(SYSCALL_ERROR, |()| 0)
+}
+
+#[cfg(any(feature = "stage23-1-test", feature = "system-apps"))]
+fn sys_ai_message_send(raw_handle: u64, user_buffer: u64, length: u64) -> u64 {
+    if !crate::task::current_has(crate::capability::Capability::Ipc)
+        || !crate::task::current_has(crate::capability::Capability::Ai)
+    {
+        return SYSCALL_ERROR;
+    }
+    sys_ipc_message_send(raw_handle, user_buffer, length)
 }
 
 fn sys_ipc_message_receive(raw_handle: u64, user_buffer: u64, capacity: u64) -> u64 {
@@ -2607,6 +2621,8 @@ pub extern "C" fn wovenhat_syscall_dispatch(
         value if value == Number::PackageTransaction as u64 => {
             sys_package_transaction(arg0, arg1, arg2)
         }
+        #[cfg(any(feature = "stage23-1-test", feature = "system-apps"))]
+        value if value == Number::AiMessageSend as u64 => sys_ai_message_send(arg0, arg1, arg2),
         value if value == Number::Getuid as u64 => {
             IO_COMPLETIONS.fetch_or(IO_GETUID, Ordering::Release);
             u64::from(crate::task::current_credentials().uid)

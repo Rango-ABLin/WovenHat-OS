@@ -808,6 +808,13 @@ Security ──────┘
 
 Applications request AI capabilities through controlled IPC.
 
+The first boundary must be a bounded Ring-3 WovenAI broker with a versioned
+control protocol and a kernel syscall that requires both `Ipc` and `Ai`
+capability. The broker may describe its ABI and report that no provider is
+installed, but it must not claim model execution, file access, network access,
+secret access, or device access until later provider and security stages are
+accepted.
+
 23.2 — Local Models
 
 Support local inference where hardware permits.

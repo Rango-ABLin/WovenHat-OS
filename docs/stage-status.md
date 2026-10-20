@@ -1,5 +1,30 @@
 # Stage status
 
+## Stage 23.1 controlled WovenAI broker boundary (2026-10-20)
+
+`libwoven::ai_ipc` now defines the bounded version-1 `WAI1` request/response
+protocol. The Ring-3 `apps/woven-ai` service publishes `woven.ai`, answers a
+broker-ABI description request, and explicitly reports `NoProvider` for
+completion requests; it does not imply that a model or provider exists. A
+dedicated syscall 218 requires both `Ipc` and `Ai` capability before sending a
+WAI1 request. The acceptance probe is launched in the normal user domain with
+an explicit `Ai` declaration, while the broker itself has only `Ipc`.
+
+The dedicated gate in `scripts/test-stage23-1-ai-broker.py` passed with exit 33
+and `[S23.1] WovenAI broker: PASSED` on 1/2/4 CPUs. The 69-test `libwoven`
+suite, Stage 23.1 freestanding Clippy, host all-targets Clippy, broker app
+Clippy, Python validation, and all Stage 21 feature lints pass. Evidence is
+preserved under:
+`audit-artifacts/stage23.1-1cpu-1792522717245706600`,
+`audit-artifacts/stage23.1-2cpu-1792522745744098400`, and
+`audit-artifacts/stage23.1-4cpu-1792522775899902400`.
+
+This is only the controlled broker boundary. Local model execution, provider
+plugins, cloud credentials, semantic search, assistant actions, and AI
+security-monitor policy remain later roadmap stages. The broker has no
+implicit file, camera, microphone, network, secret, application, or device
+authority; no physical USB qualification was performed.
+
 ## Stage 22.5 userspace WovenPackage transaction authority (2026-10-20)
 
 The signed Ring-3 `apps/woven-package` broker now executes install, remove,

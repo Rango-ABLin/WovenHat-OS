@@ -1641,7 +1641,8 @@ pub fn spawn_user_process_with_sandbox(
     feature = "stage21-8-test",
     feature = "stage21-9-test",
     feature = "stage21-10-test",
-    feature = "stage21-11-test"
+    feature = "stage21-11-test",
+    feature = "stage23-1-test"
 ))]
 pub fn spawn_user_process_with_package_capabilities(
     name: &'static str,
@@ -1653,7 +1654,20 @@ pub fn spawn_user_process_with_package_capabilities(
         let _ = userspace::destroy(program.address_space);
         return Err(ProcessError::Full);
     };
-    spawn_user_process_with_sandbox(name, program, profile)
+    let result = spawn_user_process_with_sandbox(name, program, profile);
+    if let Ok((process_id, context)) = result {
+        let mut scheduler = SCHEDULER.lock();
+        if let Some(task) = scheduler
+            .tasks
+            .iter_mut()
+            .find(|task| task.process_id == process_id)
+        {
+            task.capabilities = capabilities;
+            return Ok((process_id, context));
+        }
+        return Err(ProcessError::Full);
+    }
+    result
 }
 
 /// Redirect one normal user exit through the image destructors. The callback
@@ -2105,6 +2119,7 @@ pub fn exit_current_thread(exit_code: i32) -> ! {
     feature = "stage20-15-test",
     feature = "stage22-3-test",
     feature = "stage22-5-test",
+    feature = "stage23-1-test",
     feature = "system-apps"
 ))]
 pub fn spawn_user_system_service(
