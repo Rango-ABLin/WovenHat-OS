@@ -14,6 +14,7 @@ const MCFG_HEADER_LENGTH: usize = SDT_HEADER_LENGTH + 8;
 const MCFG_ALLOCATION_LENGTH: usize = 16;
 pub const MAX_MCFG_ALLOCATIONS: usize = 8;
 const MAX_AML_TABLES: usize = 16;
+const TPM2_TABLE_LENGTH: usize = SDT_HEADER_LENGTH + 16;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Error {
@@ -96,6 +97,16 @@ pub struct McfgAllocation {
     pub end_bus: u8,
 }
 
+/// Validated location and interface advertised by the firmware TPM2 table.
+/// Presence is inventory only; callers must still perform an authenticated
+/// TPM protocol exchange before treating any result as a trust root.
+#[derive(Clone, Copy, Default, PartialEq, Eq)]
+pub struct Tpm2Info {
+    pub platform_class: u16,
+    pub control_area: u64,
+    pub start_method: u32,
+}
+
 #[derive(Clone, Copy, Default, PartialEq, Eq)]
 struct AmlTable {
     address: u64,
@@ -142,6 +153,7 @@ pub struct Summary {
     pub pci_root_resources: [PciRootResource; MAX_PCI_ROOT_RESOURCES],
     pub pci_root_resource_count: usize,
     pub truncated: bool,
+    pub tpm2: Option<Tpm2Info>,
 }
 
 pub fn discover(
@@ -271,6 +283,22 @@ pub fn discover(
                     summary.truncated = true;
                 }
             }
+            b"TPM2" => {
+                let mut tpm2 = [0_u8; TPM2_TABLE_LENGTH];
+                read_physical(
+                    physical_offset,
+                    table_address,
+                    &mut tpm2,
+                    regions,
+                )?;
+                if let Some(info) = parse_tpm2(&tpm2) {
+                    summary.tpm2 = Some(info);
+                } else {
+                    // A malformed TPM table is never a trust source. Keep
+                    // the rest of ACPI usable for non-security devices.
+                    summary.truncated = true;
+                }
+            }
             _ => {}
         }
     }
@@ -321,6 +349,21 @@ pub fn discover(
         });
     *POWER.lock() = Some(summary.power);
     Ok(summary)
+}
+
+fn parse_tpm2(bytes: &[u8; TPM2_TABLE_LENGTH]) -> Option<Tpm2Info> {
+    if &bytes[..4] != b"TPM2"
+        || (u32::from_le_bytes(bytes[4..8].try_into().ok()?) as usize) < TPM2_TABLE_LENGTH
+    {
+        return None;
+    }
+    let control_area = u64::from_le_bytes(bytes[40..48].try_into().ok()?);
+    let start_method = u32::from_le_bytes(bytes[48..52].try_into().ok()?);
+    (control_area != 0).then_some(Tpm2Info {
+        platform_class: u16::from_le_bytes(bytes[36..38].try_into().ok()?),
+        control_area,
+        start_method,
+    })
 }
 
 fn parse_fadt(
@@ -1630,6 +1673,20 @@ pub fn self_test() -> bool {
     let checksum_rejected =
         validate_rsdp_v1(&rsdp[..RSDP_V1_LENGTH]) == Err(Error::InvalidChecksum);
 
+    let mut tpm2 = [0_u8; TPM2_TABLE_LENGTH];
+    tpm2[..4].copy_from_slice(b"TPM2");
+    tpm2[4..8].copy_from_slice(&(TPM2_TABLE_LENGTH as u32).to_le_bytes());
+    tpm2[40..48].copy_from_slice(&0xfed4_0000_u64.to_le_bytes());
+    tpm2[48..52].copy_from_slice(&6_u32.to_le_bytes());
+    let tpm2_valid = parse_tpm2(&tpm2)
+        == Some(Tpm2Info {
+            platform_class: 0,
+            control_area: 0xfed4_0000,
+            start_method: 6,
+        });
+    tpm2[40..48].fill(0);
+    let tpm2_zero_address_rejected = parse_tpm2(&tpm2).is_none();
+
     let mut topology = Summary {
         local_apic_address: 0xfee0_0000,
         ..Summary::default()
@@ -1801,6 +1858,8 @@ pub fn self_test() -> bool {
 
     valid
         && checksum_rejected
+        && tpm2_valid
+        && tpm2_zero_address_rejected
         && topology_valid
         && malformed_rejected
         && srat_valid

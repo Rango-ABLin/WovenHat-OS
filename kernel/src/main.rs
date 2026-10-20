@@ -482,6 +482,16 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
                 summary.numa_domains,
                 summary.truncated as u8,
             ));
+            if let Some(tpm2) = summary.tpm2 {
+                serial::write_line(format_args!(
+                    "[TPM] ACPI TPM2 present control={:#x} start_method={}",
+                    tpm2.control_area, tpm2.start_method
+                ));
+            } else {
+                serial::write_line(format_args!(
+                    "[TPM] ACPI TPM2 unavailable; hardware credential root not provisioned"
+                ));
+            }
         }
         Err(_) => console.println("ACPI TABLES: UNAVAILABLE"),
     }

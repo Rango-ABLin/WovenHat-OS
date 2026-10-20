@@ -1,5 +1,16 @@
 # WovenHat OS Architecture & Codebase Guide
 
+### Stage 24.17 - TPM2 platform discovery boundary
+
+`hal::acpi` validates and retains the bounded TPM2 ACPI descriptor
+(`platform_class`, `control_area`, and `start_method`). Boot inventory reports
+presence only; it never treats an address or a table as authenticated hardware
+evidence. Missing or malformed TPM2 data therefore cannot silently downgrade
+the identity or volume-crypto trust boundary. The next implementation must
+add serialized TPM CRB command transport, response authentication and
+timeouts, PCR/attestation verification, and sealed credential-root
+provisioning before identity credentials may rely on the device.
+
 ### Stage 24.16 - durable/configurable lockout policy
 
 `Authority` stores a bounded failed-authentication threshold (1..=32) in the

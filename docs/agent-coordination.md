@@ -1,5 +1,17 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - Stage 24.17 (2026-10-21)
+
+Added the validated ACPI TPM2 discovery boundary. The parser checks the
+firmware table shape and non-zero control-area address, records the advertised
+start method, self-tests malformed/zero-address rejection, and logs explicit
+TPM availability at boot. The signed 1/2/4-CPU system-app gates, host tests,
+all-targets Clippy, and production system-apps Clippy pass. Evidence is in
+`docs/audit-stage24-17-tpm2-platform-inventory-2026-10-21.md`; USB was not
+modified. This does not claim hardware-backed credentials: CRB transport,
+attestation/PCR verification, sealed-root provisioning, and physical TPM
+qualification remain the next work.
+
 ## Codex - Stage 24.16 (2026-10-21)
 
 Implemented and accepted durable/configurable identity lockout policy. An

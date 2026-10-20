@@ -2,7 +2,14 @@ WovenHat OS — Stage 10.7 → Version 1.0 Master Roadmap
 Phase I — Finish the asynchronous kernel foundation
 Stage 10.7 — Asynchronous TCP
 
-Stage 24.15 - Administration mutation UI
+Stage 24.17 - TPM2 platform discovery boundary
+
+Implemented validated ACPI TPM2 discovery and explicit boot inventory. Missing
+or malformed firmware data fails closed as a trust source; it cannot be
+mistaken for hardware-backed identity. Host, Clippy, and signed 1/2/4-CPU
+acceptance pass. TPM CRB transport, attestation/PCR verification, sealed
+credential-root provisioning, recovery, and physical qualification remain
+open.
 
 Stage 24.16 - Durable/configurable lockout policy
 
