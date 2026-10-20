@@ -1623,6 +1623,11 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
             serial::write_line(format_args!("[APPS] production catalog install failed"));
             halt();
         }
+        #[cfg(feature = "system-apps")]
+        if !start_production_system_services() {
+            serial::write_line(format_args!("[SERVICES] production service startup failed"));
+            halt();
+        }
         console.println("BOOT LOADER [4/7]: system files ready");
 
         match network::init() {
@@ -5451,7 +5456,7 @@ const SYSTEM_APP_UPDATE: &[u8] = include_bytes!(env!("WOVENHAT_UPDATE_IMAGE"));
 #[cfg(any(feature = "stage19-app-catalog-test", feature = "system-apps"))]
 const SYSTEM_APP_STORE: &[u8] = include_bytes!(env!("WOVENHAT_STORE_IMAGE"));
 
-#[cfg(feature = "stage22-3-test")]
+#[cfg(any(feature = "stage22-3-test", feature = "system-apps"))]
 const PACKAGE_SERVICE_IMAGE: &[u8] = include_bytes!(env!("WOVENHAT_PACKAGE_IMAGE"));
 
 #[cfg(feature = "stage22-3-test")]
@@ -5564,6 +5569,48 @@ fn stage22_3_package_service_self_test() -> bool {
         task::yield_now();
     }
     true
+}
+
+#[cfg(feature = "system-apps")]
+fn start_production_system_services() -> bool {
+    let capabilities = capability::CapabilitySet::only(capability::Capability::Ipc)
+        .with(capability::Capability::FileRead);
+    let Some(program) = userspace::load_elf_with_argv_verified(
+        PACKAGE_SERVICE_IMAGE,
+        &["/bin/woven-package", "--service"],
+    ) else {
+        serial::write_line(format_args!("[SERVICES] woven-package load failed"));
+        return false;
+    };
+    let Ok((pid, _, _)) = task::spawn_user_system_service(
+        "woven-package",
+        program,
+        capabilities,
+    )
+    else {
+        serial::write_line(format_args!("[SERVICES] woven-package spawn failed"));
+        return false;
+    };
+    let deadline = timer::ticks().wrapping_add(500);
+    loop {
+        if let Ok(info) = ipc::service_info(b"woven.package") {
+            if info.owner == pid.as_u64() && info.client_rights == 1 {
+                serial::write_line(format_args!(
+                    "[SERVICES] woven-package published as pid {}",
+                    pid.as_u64()
+                ));
+                return true;
+            }
+        }
+        if task::process_exited(pid)
+            || timer::ticks().wrapping_sub(deadline) < u64::MAX / 2
+        {
+            let _ = task::kill_process(pid.as_u64(), 9);
+            serial::write_line(format_args!("[SERVICES] woven-package publication failed"));
+            return false;
+        }
+        task::yield_now();
+    }
 }
 
 #[cfg(feature = "system-apps")]

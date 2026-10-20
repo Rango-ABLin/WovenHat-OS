@@ -1,5 +1,19 @@
 # Stage status
 
+## Stage 22.4 production WovenPackage startup (2026-10-20)
+
+The production `system-apps` build now includes the signed Ring-3
+`apps/woven-package` image through `WOVENHAT_PACKAGE_IMAGE`. Boot starts the
+service after the signed ten-application catalog is installed and requires a
+bounded `woven.package` publication owned by the spawned PID before continuing.
+The production shell/PS2/IOAPIC QMP gate passed on 1/2/4 CPUs, with separate
+preserved logs under `target/shell-regression-{1,2,4}cpu`.
+
+This closes production startup and image packaging for the broker, but not the
+package transaction authority: install, remove, and rollback still return an
+explicit storage status until a userspace payload/transaction ABI is defined.
+Physical USB qualification remains open.
+
 ## Stage 22.3 Ring-3 WovenPackage broker boundary (2026-10-20)
 
 The new `apps/woven-package` signed Ring-3 service publishes the bounded

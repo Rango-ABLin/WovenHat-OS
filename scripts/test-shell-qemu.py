@@ -70,6 +70,13 @@ def main():
         build_env['WOVENHAT_IMAGES_IMAGE'] = str(packages['woven-images'])
         build_env['WOVENHAT_UPDATE_IMAGE'] = str(packages['woven-update'])
         build_env['WOVENHAT_STORE_IMAGE'] = str(packages['woven-store'])
+        package_service = subprocess.check_output(
+            [sys.executable, str(root / 'scripts' / 'build-package-service.py')],
+            cwd=root,
+            env=package_env,
+            text=True,
+        ).strip()
+        build_env['WOVENHAT_PACKAGE_IMAGE'] = package_service
         build_env.setdefault('WOVENHAT_APP_TRUSTED_PUBLIC_KEY_HEX', test_public_key)
         build_env['WOVENHAT_SHELL_IMAGE'] = str(build_woven_shell(root))
         feature_arguments = ['--features', 'hardware-demo' if args.hardware_demo else 'system-apps']
@@ -89,7 +96,7 @@ def main():
     image = subprocess.check_output(
         cargo_command + ['run', '--quiet', '--release'] + feature_arguments + target_arguments + ['--', '--print-image'],
         cwd=root, env=build_env, text=True).strip()
-    out = root / 'target' / 'shell-regression'
+    out = root / 'target' / f'shell-regression-{args.cpus}cpu'
     out.mkdir(parents=True, exist_ok=True)
     serial = out / 'serial.log'
     serial.write_text('')
@@ -118,6 +125,8 @@ def main():
                 time.sleep(0.1)
             if args.system_apps and '[APPS] 10 signed applications installed' not in serial.read_text(errors='replace'):
                 raise RuntimeError('Production system-app catalog was not installed; inspect shell-regression logs')
+            if args.system_apps and '[SERVICES] woven-package published as pid ' not in serial.read_text(errors='replace'):
+                raise RuntimeError('WovenPackage production service was not published; inspect shell-regression logs')
             if args.hardware_demo and '[DEMO] sample accounts installed in volatile VFS (ada, lin)' not in serial.read_text(errors='replace'):
                 raise RuntimeError('Hardware-demo accounts were not provisioned; inspect shell-regression logs')
             time.sleep(1)

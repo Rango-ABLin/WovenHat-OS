@@ -1,5 +1,13 @@
 # Agent coordination (Claude Code and Codex)
 
+**Codex: Stage 22.4 production WovenPackage startup (2026-10-20):**
+`system-apps` now packages the signed `apps/woven-package` image, injects it
+through `WOVENHAT_PACKAGE_IMAGE`, and starts it after the production catalog is
+installed. Boot requires publication of `woven.package` by the spawned PID;
+the production shell/QMP gate passed on 1/2/4 CPUs. The broker remains
+read/query-only: install, remove, and rollback still require a complete
+userspace payload/transaction authority. No physical USB write was performed.
+
 **Codex: Stage 22.3 Ring-3 WovenPackage broker boundary (2026-10-20):**
 `apps/woven-package` is a signed no-std Ring-3 service that publishes
 `woven.package`, receives `WPKI` requests over a discovered endpoint, and

@@ -72,7 +72,7 @@ def main():
         run(f'{suite}-4-release', [sys.executable, f'scripts/test-{suite}-qemu.py', '--cpus', '4', '--release'] + options)
     run('build-release', ['cargo', 'build', '--release'])
     run('shell-smoke', [sys.executable, 'scripts/test-shell-qemu.py'] + options)
-    app_directories = ('woven-calculator', 'woven-terminal', 'woven-files', 'woven-monitor', 'woven-settings', 'woven-security', 'woven-editor', 'woven-images', 'woven-update', 'woven-store')
+    app_directories = ('woven-calculator', 'woven-terminal', 'woven-files', 'woven-monitor', 'woven-settings', 'woven-security', 'woven-editor', 'woven-images', 'woven-update', 'woven-store', 'woven-package')
     for app in app_directories:
         run(
             f'lint-app-{app}',
@@ -121,6 +121,12 @@ def main():
         }[item['id']]
         system_app_env[variable] = str(system_app_output / item['package'])
     system_app_env['WOVENHAT_SHELL_IMAGE'] = str(build_woven_shell(root))
+    system_app_env['WOVENHAT_PACKAGE_IMAGE'] = str(Path(subprocess.check_output(
+        [sys.executable, 'scripts/build-package-service.py'],
+        cwd=root,
+        env=system_app_env,
+        text=True,
+    ).strip()))
     image = Path(subprocess.check_output(
         ['cargo', 'run', '--quiet', '--release', '--features', 'system-apps', '--', '--print-image'],
         cwd=root, env=system_app_env, text=True).strip())

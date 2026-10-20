@@ -1637,7 +1637,6 @@ pub fn spawn_user_process_with_sandbox(
 /// declaration is converted to a WovenGuard profile before the address space
 /// is published; a package can never inherit the caller's broader profile.
 #[cfg(any(
-    feature = "system-apps",
     feature = "stage21-7-test",
     feature = "stage21-8-test",
     feature = "stage21-9-test",

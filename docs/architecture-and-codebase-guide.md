@@ -1272,7 +1272,9 @@ The service exits only through normal teardown in the fixture; the kernel reaps
 it and unregisters its service owner before acceptance completes.
 
 The current dispatch implements a bounded storage-backed existence query through
-the userspace directory authority.
+the userspace directory authority. In `system-apps` boots, the signed service
+image is injected by `WOVENHAT_PACKAGE_IMAGE`, spawned after catalog install,
+and publication is required before boot proceeds.
 Install, remove, and rollback return a distinct storage-authority status rather
 than pretending to mutate packages. The next Stage 22 increment must expose a
 capability-gated userspace storage/package transaction API, connect those

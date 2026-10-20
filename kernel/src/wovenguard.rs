@@ -393,7 +393,6 @@ pub const fn default_sandbox(domain: SecurityDomain) -> SandboxProfile {
 /// default file/device/service policies are narrowed to the declared coarse
 /// capabilities so an omitted declaration cannot silently inherit authority.
 #[cfg(any(
-    feature = "system-apps",
     feature = "stage21-7-test",
     feature = "stage21-8-test",
     feature = "stage21-9-test",

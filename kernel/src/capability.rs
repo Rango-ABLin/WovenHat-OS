@@ -116,7 +116,6 @@ impl CapabilitySet {
     }
 
     #[cfg(any(
-        feature = "system-apps",
         feature = "stage21-7-test",
         feature = "stage21-8-test",
         feature = "stage21-9-test",
