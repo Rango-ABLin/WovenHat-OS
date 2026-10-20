@@ -23,11 +23,11 @@ disposable QEMU ATA image; no physical USB is written.
   --features stage21-6-test -- -D warnings`: passed.
 - `cargo clippy --all-targets -- -D warnings`: passed.
 - Stage 21.6 QEMU passed with exit 33 on 1 CPU, evidence
-  `audit-artifacts/stage21.6-1cpu`.
+  `audit-artifacts/stage21.6-1cpu-1792515029512587600`.
 - Stage 21.6 QEMU passed with exit 33 on 2 CPUs, evidence
-  `audit-artifacts/stage21.6-2cpu`.
+  `audit-artifacts/stage21.6-2cpu-1792515043566058500`.
 - Stage 21.6 QEMU passed with exit 33 on 4 CPUs, evidence
-  `audit-artifacts/stage21.6-4cpu`.
+  `audit-artifacts/stage21.6-4cpu-1792515057767369300`.
 
 ## Remaining acceptance prerequisites
 

@@ -3,6 +3,7 @@ import argparse
 import shutil
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 
@@ -27,7 +28,7 @@ def main() -> int:
         cwd=root,
         text=True,
     ).strip()
-    out = root / "audit-artifacts" / f"stage21.6-{args.cpus}cpu"
+    out = root / "audit-artifacts" / f"stage21.6-{args.cpus}cpu-{time.time_ns()}"
     out.mkdir(parents=True, exist_ok=True)
     disk = out / "woven-store.img"
     with disk.open("wb") as handle:
