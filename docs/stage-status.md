@@ -1,5 +1,19 @@
 # Stage status
 
+## Stage 11 eager PLT RELA relocation support (2026-10-20)
+
+The ELF parser and production graph loader now support bounded `DT_JMPREL`
+metadata encoded as `DT_RELA`. The loader validates the file-backed table,
+entry size, relocation types, symbol indices and writable non-executable
+targets, then applies PLT RELA entries eagerly before W^X and RELRO. Lazy
+binding, legacy `DT_REL`, versioned/weak symbols, constructors/destructors and
+library TLS remain explicitly outside this increment.
+
+Validation: 25 ELF tests, warning-denying freestanding Stage 11.5 Clippy,
+warning-denying host Clippy, and Stage 11.5 QEMU acceptance on 1/2/4 CPUs all
+passed with exit 33. This is a bounded Stage 11 increment; the full inherited
+release chain and remaining loader interoperability work are still required.
+
 ## Stage 11 ASLR arena/guard overlap corrected (2026-10-20)
 
 The production userspace loader now plans the complete mmap arena, optional

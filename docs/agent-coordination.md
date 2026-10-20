@@ -2431,6 +2431,15 @@ and a retained report before it can close a production gap.
 
 ## Codex: owned work
 
+**Eager PLT RELA increment (2026-10-20):** `elf.rs` and the graph loader now
+accept and eagerly apply bounded file-backed `DT_JMPREL` RELA entries,
+including `R_X86_64_JUMP_SLOT`, with writable-target and fail-closed metadata
+validation. The 25 ELF tests, host/freestanding warning-denying Clippy and
+Stage 11.5 QEMU gates on 1/2/4 CPUs passed. Audit:
+`docs/audit-stage11-plt-rela-2026-10-20.md`. Legacy `DT_REL`, symbol
+versioning/weak binding, constructors/destructors, lazy binding and library
+TLS remain open.
+
 **ASLR arena/guard correction (2026-10-20):** the userspace graph loader now
 checks the complete mmap arena plus optional static-TLS reservation before
 placing the stack guard and stack. The forced Stage `11.2-aslr` regression

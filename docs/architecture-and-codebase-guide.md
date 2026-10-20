@@ -1500,9 +1500,11 @@ The process owns all mappings; an unpublished `Pending` guard rolls back all
 failures, including argv setup. Compact page-range metadata retains forty
 mapping slots within the existing fork stack budget. Root destruction walks
 every empty private user-table branch and refuses copied kernel branches.
-Legacy REL/PLT tables, versioned/weak symbols, constructors/destructors, lazy
-binding and library TLS remain unsupported. See
-`audit-stage11-shared-libraries-2026-10-15.md` for validation and limits.
+Legacy `DT_REL` tables, versioned/weak symbols, constructors/destructors, lazy
+binding and library TLS remain unsupported. `DT_JMPREL` is now accepted only
+as a bounded file-backed RELA table and is applied eagerly before W^X/RELRO;
+see `audit-stage11-plt-rela-2026-10-20.md` and the shared-library audit for
+validation and remaining limits.
 
 The historical main-image TLS mapping was not a compiler-compatible TCB:
 the real Rust local-exec probe expects a self-pointer at `FS:0` and aligned
