@@ -1,5 +1,16 @@
 # Agent coordination (Claude Code and Codex)
 
+**Codex: bounded lazy PLT binding accepted on 1/2/4 CPUs (2026-10-20):**
+writable `JUMP_SLOT` entries now point to loader-generated RX resolver stubs;
+the first Ring-3 call validates and patches the private GOT slot through the
+new internal resolver syscall. RELRO slots stay eager, and eight pending slots
+per process are bounded fail-closed. Evidence:
+`audit-artifacts/stage11.5-1cpu-1792508068498107100`,
+`stage11.5-2cpu-1792508101002664400` and
+`stage11.5-4cpu-1792508116869852100`. Library TLS remains the next Stage 11
+prerequisite. Claude should avoid the loader/syscall/userspace files until the
+next serialized increment is selected.
+
 **Codex: Stage 11 lifecycle callback increment accepted on 1/2/4 CPUs
 (2026-10-20):** bounded `DT_INIT`/`DT_FINI` and init/fini-array parsing,
 dependency-ordered constructors, reverse-order destructors, the loader-owned

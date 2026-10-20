@@ -1,5 +1,23 @@
 # Stage status
 
+## Stage 11 lazy PLT binding (2026-10-20)
+
+Writable PLT `JUMP_SLOT` entries now start with loader-generated RX resolver
+stubs instead of eagerly resolved targets. The first Ring-3 call supplies the
+GOT slot through the stub; the kernel validates it, breaks COW when required,
+and patches the private slot before jumping to the target. RELRO slots remain
+eager and over-capacity bindings fail closed.
+
+Validation: 33 ELF tests, warning-denying host/freestanding Clippy, 11 Python
+harness tests, and Stage 11.5 QEMU acceptance passed on 1/2/4 CPUs. The signed
+fixture verifies an unresolved writable PLT slot before execution and a
+successful first-call resolution/teardown afterward. Evidence:
+`audit-artifacts/stage11.5-1cpu-1792508068498107100`,
+`stage11.5-2cpu-1792508101002664400` and
+`stage11.5-4cpu-1792508116869852100`.
+
+The process carries eight bounded lazy bindings; library TLS remains open.
+
 ## Stage 11 lifecycle callbacks (2026-10-20)
 
 The bounded ELF loader now validates `DT_INIT`, `DT_FINI`, `DT_INIT_ARRAY`

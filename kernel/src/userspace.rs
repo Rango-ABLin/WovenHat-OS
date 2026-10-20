@@ -23,6 +23,7 @@ pub fn compiler_tls_self_test() -> bool {
 
 const MAX_IMAGE_MAPPINGS: usize =
     crate::config::MAX_ELF_SEGMENTS * crate::elf::MAX_SCOPE_IMAGES + 1;
+pub(crate) const MAX_LAZY_BINDINGS: usize = 8;
 use crate::paging;
 
 pub use crate::config::MAX_ANONYMOUS_MAPPINGS;
@@ -4565,6 +4566,16 @@ struct InitialTls {
     file_size: usize,
 }
 
+#[derive(Clone, Copy)]
+pub(crate) struct LazyBinding {
+    pub(crate) slot: u64,
+    pub(crate) target: u64,
+}
+
+impl LazyBinding {
+    pub(crate) const EMPTY: Self = Self { slot: 0, target: 0 };
+}
+
 impl InitialTls {
     fn range(self) -> (u64, usize) {
         (self.start, self.layout.mapping_size)
@@ -4586,6 +4597,8 @@ pub struct AddressSpace {
     pub(crate) destructor_count: usize,
     pub(crate) destructor_pending: bool,
     pub(crate) lifecycle_trampoline: u64,
+    pub(crate) lazy_bindings: [LazyBinding; MAX_LAZY_BINDINGS],
+    pub(crate) lazy_binding_count: usize,
 }
 
 impl AddressSpace {
@@ -5795,6 +5808,8 @@ pub fn clone_address_space(
         destructor_count: source.destructor_count,
         destructor_pending: source.destructor_pending,
         lifecycle_trampoline: source.lifecycle_trampoline,
+        lazy_bindings: source.lazy_bindings,
+        lazy_binding_count: source.lazy_binding_count,
     };
     let mut completed = [(0_u64, 0_usize); MAX_IMAGE_MAPPINGS + 3 + MAX_ANONYMOUS_MAPPINGS * 16];
     let mut completed_count = 0;
@@ -6144,6 +6159,8 @@ pub fn shared_disk_mmap_self_test() -> bool {
             destructor_count: 0,
             destructor_pending: false,
             lifecycle_trampoline: 0,
+            lazy_bindings: [LazyBinding::EMPTY; MAX_LAZY_BINDINGS],
+            lazy_binding_count: 0,
         };
         let anchor = USER_MMAP_START + 15 * USER_MMAP_STRIDE;
         if paging::map_user_range_in(root, anchor, 4096, false, false).is_err() {
@@ -6204,6 +6221,8 @@ pub fn disk_unlink_mmap_self_test() -> bool {
             destructor_count: 0,
             destructor_pending: false,
             lifecycle_trampoline: 0,
+            lazy_bindings: [LazyBinding::EMPTY; MAX_LAZY_BINDINGS],
+            lazy_binding_count: 0,
         };
         let anchor = USER_MMAP_START + 15 * USER_MMAP_STRIDE;
         if paging::map_user_range_in(root, anchor, 4096, false, false).is_err() {
@@ -6255,6 +6274,8 @@ pub fn shared_file_mmap_self_test() -> bool {
         destructor_count: 0,
         destructor_pending: false,
         lifecycle_trampoline: 0,
+        lazy_bindings: [LazyBinding::EMPTY; MAX_LAZY_BINDINGS],
+        lazy_binding_count: 0,
     };
     let anchor = USER_MMAP_START + 15 * USER_MMAP_STRIDE;
     if paging::map_user_range_in(root, anchor, 4096, false, false).is_err() {
@@ -6346,6 +6367,8 @@ pub fn lazy_file_mmap_self_test() -> bool {
         destructor_count: 0,
         destructor_pending: false,
         lifecycle_trampoline: 0,
+        lazy_bindings: [LazyBinding::EMPTY; MAX_LAZY_BINDINGS],
+        lazy_binding_count: 0,
     };
     // Keep a teardown anchor while sparse mapping pages are removed individually.
     let anchor = USER_MMAP_START + 15 * USER_MMAP_STRIDE;
@@ -6438,6 +6461,8 @@ pub fn private_lazy_swap_self_test() -> bool {
         destructor_count: 0,
         destructor_pending: false,
         lifecycle_trampoline: 0,
+        lazy_bindings: [LazyBinding::EMPTY; MAX_LAZY_BINDINGS],
+        lazy_binding_count: 0,
     };
     let anchor = USER_MMAP_START + 15 * USER_MMAP_STRIDE;
     if paging::map_user_range_in(root, anchor, 4096, false, false).is_err() {
@@ -6514,6 +6539,8 @@ pub fn file_mmap_self_test() -> bool {
         destructor_count: 0,
         destructor_pending: false,
         lifecycle_trampoline: 0,
+        lazy_bindings: [LazyBinding::EMPTY; MAX_LAZY_BINDINGS],
+        lazy_binding_count: 0,
     };
     let _ = crate::vfs::seek(file, 3);
     let Some(mapping) = map_file_private(space, 0, file, 0, DATA.len(), false) else {

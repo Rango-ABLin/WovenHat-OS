@@ -349,6 +349,9 @@ pub enum Number {
     ThreadGetTls = 135,
     /// thread handle, exit status -> 0 or ERROR; cancels an owned sibling
     ThreadCancel = 136,
+    /// Internal ELF PLT resolver: the entry stub supplies the GOT slot in R11
+    /// and receives the validated target address in RAX.
+    LazyBind = 137,
     /// own handle, packed destination and opacity (x | y<<24 | opacity<<56,
     /// x and y 24-bit signed, bits 48..56 zero), packed source region -> 0 or
     /// ERROR
@@ -2482,6 +2485,9 @@ pub extern "C" fn wovenhat_syscall_dispatch(
             .unwrap_or(SYSCALL_ERROR),
         value if value == Number::ThreadCancel as u64 => {
             crate::task::cancel_user_thread(arg0, arg1 as i32).map_or(SYSCALL_ERROR, |_| 0)
+        }
+        value if value == Number::LazyBind as u64 => {
+            crate::task::resolve_lazy_binding(frame)
         }
         value if value == Number::Getpid as u64 => crate::task::current_process_id(),
         value if value == Number::Waitpid as u64 => match crate::task::wait_process(arg0) {

@@ -1517,8 +1517,10 @@ resolved by exact requested version; see
 validated. Constructors run before initial Ring-3 entry, while destructors
 run in reverse dependency order through a mapped RX trampoline; teardown uses
 a prebuilt stack return chain and transactional process-table/paging lock
-ordering. Lazy binding and library TLS remain unsupported. See
-`audit-stage11-lifecycle-2026-10-20.md`.
+ordering. Writable PLT `JUMP_SLOT` entries use bounded loader-generated RX
+resolver stubs and a checked kernel first-call patch path; RELRO slots remain
+eager. See `audit-stage11-lifecycle-2026-10-20.md` and
+`audit-stage11-lazy-binding-2026-10-20.md`. Library TLS remains unsupported.
 
 The historical main-image TLS mapping was not a compiler-compatible TCB:
 the real Rust local-exec probe expects a self-pointer at `FS:0` and aligned

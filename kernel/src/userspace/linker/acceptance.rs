@@ -32,8 +32,8 @@ fn fixture(kind: usize) -> Option<Vec<u8>> {
             4,
             0x1100,
             base + 0x100,
-            if matches!(kind, 6..=9) { 0x100 } else { 0xc0 },
-            if matches!(kind, 6..=9) { 0x100 } else { 0xc0 },
+            if matches!(kind, 6..=10) { 0x100 } else { 0xc0 },
+            if matches!(kind, 6..=10) { 0x100 } else { 0xc0 },
         ),
         (232, 0x6474_e552, 4, 0, base + 0x1000, 0, 0x1000),
     ] {
@@ -144,7 +144,7 @@ fn fixture(kind: usize) -> Option<Vec<u8>> {
     write_u16(
         &mut elf,
         0x121e,
-        u16::from(kind != 0 && kind != 3 && kind != 4 && kind != 5 && kind != 6),
+        u16::from(!matches!(kind, 0 | 3 | 4 | 5 | 6)),
     )?;
     write_u64(
         &mut elf,
@@ -370,6 +370,15 @@ pub(super) fn run() -> bool {
     let Some(lifecycle_main) = fixture(8) else {
         return false;
     };
+    let Some(mut lazy_main) = fixture(4) else {
+        return false;
+    };
+    if write_u32(&mut lazy_main, 232, 0).is_none() {
+        return false;
+    }
+    if write_u64(&mut lazy_main, 0x1388, (1_u64 << 32) | 7).is_none() {
+        return false;
+    }
     if crate::vfs::stat("/lib/scope.so").is_ok() || crate::vfs::stat("/lib/base.so").is_ok() {
         return false;
     }
@@ -516,6 +525,43 @@ pub(super) fn run() -> bool {
         if !step(
             "Ring-3 import call and owner teardown",
             status == Ok(42) && after_frames == frames,
+        ) {
+            return None;
+        }
+        let Some(lazy_program) = load(&lazy_main, &["lazy-test"]) else {
+            step("lazy PLT load", false);
+            return None;
+        };
+        if !step("lazy PLT load", true) {
+            let _ = destroy(lazy_program.address_space);
+            return None;
+        }
+        let mut lazy_address = [0; 8];
+        paging::read_user_bytes_in(
+            lazy_program.address_space.paging,
+            USER_REGION_START + 0x1000,
+            &mut lazy_address,
+        )
+        .ok()?;
+        if !step(
+            "lazy PLT slot remains unresolved before first call",
+            lazy_program.address_space.lazy_binding_count == 1
+                && u64::from_le_bytes(lazy_address) == LAZY_TRAMPOLINE_BASE,
+        ) {
+            let _ = destroy(lazy_program.address_space);
+            return None;
+        }
+        let (lazy_pid, _) = crate::task::spawn_user_process("lazy-test", lazy_program).ok()?;
+        let lazy_start = crate::timer::ticks();
+        while !crate::task::process_exited(lazy_pid) {
+            if crate::timer::ticks().wrapping_sub(lazy_start) > 500 {
+                return None;
+            }
+            crate::task::yield_now();
+        }
+        if !step(
+            "lazy PLT first-call resolution and teardown",
+            crate::task::wait_process(lazy_pid.as_u64()) == Ok(42),
         ) {
             return None;
         }

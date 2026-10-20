@@ -1701,6 +1701,41 @@ pub fn begin_user_destructor_exit(
     true
 }
 
+/// Resolve one loader-owned lazy PLT slot. The userspace entry stub passes the
+/// slot address in callee-saved syscall register R11; the bounded table was
+/// constructed from verified signed image metadata before process publication.
+/// The target is patched through the active-user copy path so a forked process
+/// breaks COW before mutating its private GOT.
+pub fn resolve_lazy_binding(frame: *const crate::syscall::UserForkFrame) -> u64 {
+    if frame.is_null() {
+        return u64::MAX;
+    }
+    let slot = unsafe { (*frame).r11 };
+    let Some((address_space, target)) = ({
+        let processes = process_table_lock();
+        processes
+            .iter()
+            .flatten()
+            .find(|process| process.id.as_u64() == current_process_id())
+            .and_then(|process| {
+                let space = process.address_space?;
+                space.lazy_bindings[..space.lazy_binding_count]
+                    .iter()
+                    .find(|binding| binding.slot == slot)
+                    .map(|binding| (space, binding.target))
+            })
+    }) else {
+        return u64::MAX;
+    };
+    if !address_space.contains_executable(target)
+        || slot & 7 != 0
+        || crate::paging::copy_to_current_user(slot, &target.to_le_bytes()).is_err()
+    {
+        return u64::MAX;
+    }
+    target
+}
+
 /// Create a scheduler-backed thread in the current process.
 ///
 /// The entry point must already be inside an RX ELF segment.  The stack is a

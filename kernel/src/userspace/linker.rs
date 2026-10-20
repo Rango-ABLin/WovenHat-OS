@@ -21,6 +21,8 @@ pub(super) fn compiler_loader_self_test() -> bool {
 const LIBRARY_START: u64 = USER_REGION_START + 0x1000_0000;
 const LIBRARY_STRIDE: u64 = 0x0100_0000;
 const LIFECYCLE_TRAMPOLINE: u64 = USER_REGION_START + 0x0d_0000;
+const LAZY_TRAMPOLINE_BASE: u64 = LIFECYCLE_TRAMPOLINE + 0x100;
+const LAZY_TRAMPOLINE_STRIDE: u64 = 32;
 
 struct LinkImage<'a> {
     name: Option<Vec<u8>>,
@@ -267,6 +269,8 @@ pub(super) fn load_with_geometry(
             destructor_count: 0,
             destructor_pending: false,
             lifecycle_trampoline: 0,
+            lazy_bindings: [LazyBinding::EMPTY; MAX_LAZY_BINDINGS],
+            lazy_binding_count: 0,
         },
         stack_mapped: false,
         template_mapped: None,
@@ -344,16 +348,32 @@ pub(super) fn load_with_geometry(
         0x0f, 0x0b, // ud2 if the syscall unexpectedly returns
     ];
     paging::write_user_bytes(page_table, LIFECYCLE_TRAMPOLINE, &trampoline_code).ok()?;
-    paging::protect_user_range_in_inactive(page_table, LIFECYCLE_TRAMPOLINE, 4096, false, true)
-        .ok()?;
     pending.space.mappings[pending.space.mapping_count] = trampoline;
     pending.space.mapping_count += 1;
     pending.space.lifecycle_trampoline = LIFECYCLE_TRAMPOLINE;
     // No writable executable page exists during relocation: pages are RW/NX
     // until every fixup is applied, then transitioned to their final W^X mode.
     for linked in &images {
-        relocate(linked, &scope, page_table)?;
+        relocate(linked, &scope, page_table, &mut pending.space)?;
     }
+    for (index, binding) in pending.space.lazy_bindings
+        [..pending.space.lazy_binding_count]
+        .iter()
+        .copied()
+        .enumerate()
+    {
+        let trampoline = LAZY_TRAMPOLINE_BASE
+            .checked_add((index as u64).checked_mul(LAZY_TRAMPOLINE_STRIDE)?)?;
+        let mut code = [0u8; 24];
+        code[0..2].copy_from_slice(&[0x49, 0xbb]); // mov r11, slot
+        code[2..10].copy_from_slice(&binding.slot.to_le_bytes());
+        code[10..15].copy_from_slice(&[0xb8, 137, 0, 0, 0]); // SYS_LAZY_BIND
+        code[15..17].copy_from_slice(&[0xcd, 0x80]);
+        code[17..19].copy_from_slice(&[0xff, 0xe0]); // jmp rax
+        paging::write_user_bytes(page_table, trampoline, &code).ok()?;
+    }
+    paging::protect_user_range_in_inactive(page_table, LIFECYCLE_TRAMPOLINE, 4096, false, true)
+        .ok()?;
     for linked in &images {
         for segment in linked.image.segments() {
             paging::protect_user_range_in_inactive(
@@ -526,13 +546,14 @@ fn relocate(
     linked: &LinkImage<'_>,
     scope: &SymbolScope<'_>,
     page_table: paging::AddressSpace,
+    space: &mut AddressSpace,
 ) -> Option<()> {
     let Some(dynamic) = linked.image.dynamic() else {
         return Some(());
     };
-    for (offset, size) in [
-        (dynamic.rela_file_offset, dynamic.rela_size),
-        (dynamic.plt_rela_file_offset, dynamic.plt_rela_size),
+    for (offset, size, is_plt) in [
+        (dynamic.rela_file_offset, dynamic.rela_size, false),
+        (dynamic.plt_rela_file_offset, dynamic.plt_rela_size, true),
     ] {
         if size == 0 {
             continue;
@@ -541,7 +562,11 @@ fn relocate(
         for entry in linked
             .bytes
             .get(offset..end)?
-            .chunks_exact(dynamic.rela_entry_size)
+            .chunks_exact(if is_plt {
+                elf::RELA_ENTRY_SIZE
+            } else {
+                dynamic.rela_entry_size
+            })
         {
             let target = u64::from_le_bytes(entry[..8].try_into().ok()?)
                 .checked_add(linked.image.load_bias())?;
@@ -562,6 +587,14 @@ fn relocate(
                 value.checked_add(addend as u64)?
             } else {
                 value.checked_sub(addend.unsigned_abs())?
+            };
+            let value = if is_plt
+                && info as u32 == elf::R_X86_64_JUMP_SLOT
+                && lazy_slot_allowed(*space, target)
+            {
+                register_lazy_binding(space, target, value)?
+            } else {
+                value
             };
             paging::write_user_bytes(page_table, target, &value.to_le_bytes()).ok()?;
         }
@@ -590,6 +623,13 @@ fn relocate(
                 value.checked_add(addend as u64)?
             } else {
                 value.checked_sub(addend.unsigned_abs())?
+            };
+            let value = if info as u32 == elf::R_X86_64_JUMP_SLOT
+                && lazy_slot_allowed(*space, target)
+            {
+                register_lazy_binding(space, target, value)?
+            } else {
+                value
             };
             paging::write_user_bytes(page_table, target, &value.to_le_bytes()).ok()?;
         }
@@ -621,8 +661,38 @@ fn relocate(
             } else {
                 value.checked_sub(addend.unsigned_abs())?
             };
+            let value = if info as u32 == elf::R_X86_64_JUMP_SLOT
+                && lazy_slot_allowed(*space, target)
+            {
+                register_lazy_binding(space, target, value)?
+            } else {
+                value
+            };
             paging::write_user_bytes(page_table, target, &value.to_le_bytes()).ok()?;
         }
     }
     Some(())
+}
+
+fn lazy_slot_allowed(space: AddressSpace, slot: u64) -> bool {
+    space.mappings[..space.mapping_count].iter().any(|mapping| {
+        mapping.writable
+            && slot >= mapping.start()
+            && slot.checked_add(8).is_some_and(|end| end <= mapping.start() + mapping.size() as u64)
+            && !space
+                .relro
+                .into_iter()
+                .chain(space.library_relro.into_iter().flatten())
+                .any(|(start, size)| slot < start + size as u64 && start < slot + 8)
+    })
+}
+
+fn register_lazy_binding(space: &mut AddressSpace, slot: u64, target: u64) -> Option<u64> {
+    if space.lazy_binding_count == MAX_LAZY_BINDINGS {
+        return None;
+    }
+    let index = space.lazy_binding_count;
+    space.lazy_bindings[index] = LazyBinding { slot, target };
+    space.lazy_binding_count += 1;
+    LAZY_TRAMPOLINE_BASE.checked_add((index as u64).checked_mul(LAZY_TRAMPOLINE_STRIDE)?)
 }
