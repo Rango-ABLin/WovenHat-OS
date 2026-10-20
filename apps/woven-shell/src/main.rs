@@ -1501,11 +1501,11 @@ impl Desktop {
                     let kernel_authenticated = match self.mode {
                         LockMode::SignIn => {
                             match self.accounts[self.chosen] {
-                                Some(account) if account.verify(&self.entry[..self.entry_length]) => {
-                                    let (_, digest) = account.credential_material();
+                                Some(account) => {
+                                    let digest = account.password_digest(&self.entry[..self.entry_length]);
                                     match libwoven::identity::session_open_verified(
                                         account.name(),
-                                        digest,
+                                        &digest,
                                     ) {
                                         Ok(session) => {
                                             self.kernel_session = Some(session);
@@ -1515,19 +1515,16 @@ impl Desktop {
                                     }
                                 }
                                 None => false,
-                                Some(_) => false,
                             }
                         }
                         LockMode::Lock => match (
                             self.kernel_session,
                             self.session.and_then(|index| self.accounts[index]),
                         ) {
-                            (Some(session), Some(account))
-                                if account.verify(&self.entry[..self.entry_length]) => {
-                                    let (_, digest) = account.credential_material();
-                                    libwoven::identity::session_unlock_verified(session, digest)
-                                        .is_ok()
-                                }
+                            (Some(session), Some(account)) => {
+                                let digest = account.password_digest(&self.entry[..self.entry_length]);
+                                libwoven::identity::session_unlock_verified(session, &digest).is_ok()
+                            }
                             _ => false,
                         },
                         LockMode::ChangePin => true,

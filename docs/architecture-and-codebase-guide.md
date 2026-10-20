@@ -1,5 +1,14 @@
 # WovenHat OS Architecture & Codebase Guide
 
+### Stage 24.10 — kernel identity lockout/rate limiting
+
+`identity_runtime` keeps a fixed per-account failure table. Five failed
+password or verified-digest attempts impose a five-second tick-based cooldown;
+successful authentication clears the entry. The table is reset when a new
+authority is installed and fails closed if capacity is exhausted. WovenShell
+derives a candidate digest for each PIN entry so the kernel sees failed login
+manager attempts.
+
 ### Stage 24.9 — live PIN rotation consistency
 
 The account-change syscall updates the owner-bound live `Authority` and the

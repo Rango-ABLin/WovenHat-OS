@@ -1,5 +1,14 @@
 # Agent coordination (Claude Code and Codex)
 
+**Codex: Stage 24.10 kernel identity lockout/rate limiting accepted (2026-10-20):**
+
+Plaintext and verified-digest identity authentication now share a bounded
+five-failure/five-second cooldown with success reset and fail-closed table
+exhaustion. Host, feature-gate, and signed system-app 1/2/4-CPU gates pass;
+evidence is under `stage24.10-lockout-*`. Durable/configurable lockout,
+administration, malformed telemetry, hardware credentials, release-key
+provisioning, and physical qualification remain open.
+
 **Codex: Stage 24.9 live PIN rotation consistency accepted (2026-10-20):**
 
 PIN rotation now keeps the owner-bound kernel authority, trusted account file,

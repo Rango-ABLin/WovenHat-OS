@@ -1,5 +1,21 @@
 # Stage status
 
+## Stage 24.10 kernel identity lockout/rate limiting (2026-10-20)
+
+The owner-bound identity runtime now rate-limits both plaintext and verified
+digest authentication. Five failures impose a bounded five-second cooldown;
+success resets the account state. WovenShell sends candidate digests to the
+kernel for every entered PIN, so the policy covers the trusted login-manager
+path. The 86-test suite, host/feature-gate Clippy, system-apps Clippy, diff
+check, and signed system-apps 1/2/4-CPU gates pass. Evidence is under:
+`audit-artifacts/stage24.10-lockout-1cpu-1792533000000000000`,
+`audit-artifacts/stage24.10-lockout-2cpu-1792533000000000000`, and
+`audit-artifacts/stage24.10-lockout-4cpu-1792533000000000000`.
+
+Runtime lockout state is not yet durable or administrator-configurable. Account
+administration, malformed-request telemetry, hardware credentials, release-key
+provisioning, and physical qualification remain open.
+
 ## Stage 24.9 live PIN rotation consistency (2026-10-20)
 
 PIN rotation now updates the live kernel authority, the trusted account file,

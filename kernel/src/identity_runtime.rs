@@ -6,6 +6,7 @@
 //! userspace identity syscalls.
 
 use libwoven::identity::{Authority, Error as IdentityError, SessionId, SessionView};
+use core::sync::atomic::{AtomicBool, Ordering};
 
 use crate::irq_lock::IrqMutex;
 
@@ -23,16 +24,33 @@ pub(crate) enum Error {
 struct Binding {
     session: SessionId,
     owner: u64,
+    name: [u8; libwoven::accounts::MAX_NAME],
+    name_len: usize,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct LockoutEntry {
+    name: [u8; libwoven::accounts::MAX_NAME],
+    name_len: usize,
+    failures: u8,
+    locked_until: u64,
 }
 
 const MAX_BINDINGS: usize = libwoven::identity::MAX_SESSIONS;
+const MAX_LOCKOUT_FAILURES: u8 = 5;
+const LOCKOUT_TICKS: u64 = 500;
 static AUTHORITY: IrqMutex<Option<Authority>> = IrqMutex::with_rank(None, 4);
 static BINDINGS: IrqMutex<[Option<Binding>; MAX_BINDINGS]> =
     IrqMutex::with_rank([None; MAX_BINDINGS], 5);
+static LOCKOUTS: IrqMutex<[Option<LockoutEntry>; libwoven::identity::MAX_USERS]> =
+    IrqMutex::with_rank([None; libwoven::identity::MAX_USERS], 6);
+static LOCKOUT_SATURATED: AtomicBool = AtomicBool::new(false);
 
 pub(crate) fn install(authority: Authority) {
     *AUTHORITY.lock() = Some(authority);
     BINDINGS.lock().fill(None);
+    LOCKOUTS.lock().fill(None);
+    LOCKOUT_SATURATED.store(false, Ordering::Release);
 }
 
 #[cfg(feature = "system-apps")]
@@ -140,6 +158,7 @@ pub(crate) fn release_owner(owner: u64) {
 }
 
 pub(crate) fn open(owner: u64, name: &[u8], password: &[u8]) -> Result<SessionId, Error> {
+    check_lockout(name)?;
     let binding_slot = BINDINGS
         .lock()
         .iter()
@@ -148,13 +167,19 @@ pub(crate) fn open(owner: u64, name: &[u8], password: &[u8]) -> Result<SessionId
     let (session, view) = {
         let mut authority = AUTHORITY.lock();
         let authority = authority.as_mut().ok_or(Error::NotReady)?;
-        let session = authority
-            .open_named_session(name, password)
-            .map_err(Error::Identity)?;
+        let session = match authority.open_named_session(name, password) {
+            Ok(session) => session,
+            Err(IdentityError::WrongPassword) => {
+                note_failure(name);
+                return Err(Error::Identity(IdentityError::WrongPassword));
+            }
+            Err(error) => return Err(Error::Identity(error)),
+        };
         let view = authority.view(session).map_err(Error::Identity)?;
         (session, view)
     };
-    BINDINGS.lock()[binding_slot] = Some(Binding { session, owner });
+    clear_failures(name);
+    BINDINGS.lock()[binding_slot] = Some(binding(session, owner, name));
     if apply_view(owner, view).is_err() {
         let _ = close(owner, session);
         return Err(Error::Task);
@@ -167,6 +192,7 @@ pub(crate) fn open_digest(
     name: &[u8],
     digest: &[u8; 32],
 ) -> Result<SessionId, Error> {
+    check_lockout(name)?;
     let binding_slot = BINDINGS
         .lock()
         .iter()
@@ -175,13 +201,19 @@ pub(crate) fn open_digest(
     let (session, view) = {
         let mut authority = AUTHORITY.lock();
         let authority = authority.as_mut().ok_or(Error::NotReady)?;
-        let session = authority
-            .open_named_session_digest(name, digest)
-            .map_err(Error::Identity)?;
+        let session = match authority.open_named_session_digest(name, digest) {
+            Ok(session) => session,
+            Err(IdentityError::WrongPassword) => {
+                note_failure(name);
+                return Err(Error::Identity(IdentityError::WrongPassword));
+            }
+            Err(error) => return Err(Error::Identity(error)),
+        };
         let view = authority.view(session).map_err(Error::Identity)?;
         (session, view)
     };
-    BINDINGS.lock()[binding_slot] = Some(Binding { session, owner });
+    clear_failures(name);
+    BINDINGS.lock()[binding_slot] = Some(binding(session, owner, name));
     if apply_view(owner, view).is_err() {
         let _ = close(owner, session);
         return Err(Error::Task);
@@ -202,14 +234,21 @@ pub(crate) fn lock(owner: u64, session: SessionId) -> Result<(), Error> {
 
 pub(crate) fn unlock(owner: u64, session: SessionId, password: &[u8]) -> Result<(), Error> {
     let binding = owned_binding(owner, session)?;
+    check_lockout(&binding.name[..binding.name_len])?;
     let view = {
         let mut authority = AUTHORITY.lock();
         let authority = authority.as_mut().ok_or(Error::NotReady)?;
-        authority
-            .unlock(binding.session, password)
-            .map_err(Error::Identity)?;
+        match authority.unlock(binding.session, password) {
+            Ok(()) => {}
+            Err(IdentityError::WrongPassword) => {
+                note_failure(&binding.name[..binding.name_len]);
+                return Err(Error::Identity(IdentityError::WrongPassword));
+            }
+            Err(error) => return Err(Error::Identity(error)),
+        }
         authority.view(binding.session).map_err(Error::Identity)?
     };
+    clear_failures(&binding.name[..binding.name_len]);
     apply_view(owner, view)
 }
 
@@ -219,14 +258,21 @@ pub(crate) fn unlock_digest(
     digest: &[u8; 32],
 ) -> Result<(), Error> {
     let binding = owned_binding(owner, session)?;
+    check_lockout(&binding.name[..binding.name_len])?;
     let view = {
         let mut authority = AUTHORITY.lock();
         let authority = authority.as_mut().ok_or(Error::NotReady)?;
-        authority
-            .unlock_digest(binding.session, digest)
-            .map_err(Error::Identity)?;
+        match authority.unlock_digest(binding.session, digest) {
+            Ok(()) => {}
+            Err(IdentityError::WrongPassword) => {
+                note_failure(&binding.name[..binding.name_len]);
+                return Err(Error::Identity(IdentityError::WrongPassword));
+            }
+            Err(error) => return Err(Error::Identity(error)),
+        }
         authority.view(binding.session).map_err(Error::Identity)?
     };
+    clear_failures(&binding.name[..binding.name_len]);
     apply_view(owner, view)
 }
 
@@ -278,6 +324,81 @@ fn owned_binding(owner: u64, session: SessionId) -> Result<Binding, Error> {
         .ok_or(Error::Owner)
 }
 
+fn binding(session: SessionId, owner: u64, name: &[u8]) -> Binding {
+    let mut stored = [0u8; libwoven::accounts::MAX_NAME];
+    stored[..name.len()].copy_from_slice(name);
+    Binding {
+        session,
+        owner,
+        name: stored,
+        name_len: name.len(),
+    }
+}
+
+fn check_lockout(name: &[u8]) -> Result<(), Error> {
+    let now = crate::timer::ticks();
+    if LOCKOUT_SATURATED.load(Ordering::Acquire) {
+        return Err(Error::Identity(IdentityError::Locked));
+    }
+    let mut lockouts = LOCKOUTS.lock();
+    let Some(entry) = lockouts
+        .iter_mut()
+        .flatten()
+        .find(|entry| entry.name[..entry.name_len] == *name)
+    else {
+        return Ok(());
+    };
+    if entry.locked_until > now {
+        return Err(Error::Identity(IdentityError::Locked));
+    }
+    if entry.locked_until != 0 {
+        entry.failures = 0;
+        entry.locked_until = 0;
+    }
+    Ok(())
+}
+
+fn note_failure(name: &[u8]) {
+    let now = crate::timer::ticks();
+    let mut lockouts = LOCKOUTS.lock();
+    let entry = if let Some(entry) = lockouts
+        .iter_mut()
+        .flatten()
+        .find(|entry| entry.name[..entry.name_len] == *name)
+    {
+        entry
+    } else if let Some(slot) = lockouts.iter_mut().find(|entry| entry.is_none()) {
+        let mut stored = [0u8; libwoven::accounts::MAX_NAME];
+        stored[..name.len()].copy_from_slice(name);
+        *slot = Some(LockoutEntry {
+            name: stored,
+            name_len: name.len(),
+            failures: 0,
+            locked_until: 0,
+        });
+        slot.as_mut().expect("just initialized lockout entry")
+    } else {
+        LOCKOUT_SATURATED.store(true, Ordering::Release);
+        return;
+    };
+    entry.failures = entry.failures.saturating_add(1);
+    if entry.failures >= MAX_LOCKOUT_FAILURES {
+        entry.locked_until = now.saturating_add(LOCKOUT_TICKS);
+    }
+}
+
+fn clear_failures(name: &[u8]) {
+    if let Some(entry) = LOCKOUTS
+        .lock()
+        .iter_mut()
+        .flatten()
+        .find(|entry| entry.name[..entry.name_len] == *name)
+    {
+        entry.failures = 0;
+        entry.locked_until = 0;
+    }
+}
+
 fn apply_view(owner: u64, view: SessionView) -> Result<(), Error> {
     if view.id.0 == 0 || crate::task::current_process_id() != owner {
         return Err(Error::Task);
@@ -293,6 +414,25 @@ fn apply_view(owner: u64, view: SessionView) -> Result<(), Error> {
 
 #[cfg(any(feature = "stage24-4-test", feature = "stage24-5-test"))]
 pub(crate) fn self_test() -> bool {
+    let mut authority = Authority::new();
+    let Ok(group) = authority.add_group(b"users") else {
+        return false;
+    };
+    if authority
+        .add_administrator(b"alice", group, b"salt", b"1234")
+        .is_err()
+    {
+        return false;
+    }
+    install(authority);
+    for _ in 0..MAX_LOCKOUT_FAILURES {
+        if !matches!(open(1, b"alice", b"wrong"), Err(Error::Identity(IdentityError::WrongPassword))) {
+            return false;
+        }
+    }
+    if !matches!(open(1, b"alice", b"1234"), Err(Error::Identity(IdentityError::Locked))) {
+        return false;
+    }
     let mut authority = Authority::new();
     let Ok(group) = authority.add_group(b"users") else {
         return false;

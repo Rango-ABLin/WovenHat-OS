@@ -914,6 +914,14 @@ session open/lock/unlock/elevation/close framing and safe userspace wrappers.
 The gate proves parser/ABI behavior only; runtime loading, live Ring-3 login,
 teardown, auditing, lockout, and shell migration remain open.
 
+Stage 24.10 kernel identity lockout/rate limiting accepted (2026-10-20):
+plaintext and verified-digest authentication share a bounded five-failure,
+five-second cooldown policy, with success reset and fail-closed table
+exhaustion. Host, feature-gate, and 1/2/4-CPU signed system-app gates pass.
+Durable/configurable lockout state, account administration, malformed-request
+telemetry, hardware credentials, release-key provisioning, and physical
+qualification remain open.
+
 Stage 24.9 live PIN rotation accepted (2026-10-20): the account-change path
 updates the owner-bound kernel authority, trusted account file, and shell cache
 with rollback on file failure; host, feature-gate, and 1/2/4-CPU gates pass.

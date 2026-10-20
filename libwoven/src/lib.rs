@@ -13452,12 +13452,19 @@ pub mod accounts {
         /// Whether `pin` is this account's PIN. The comparison of the two
         /// hashes takes the same time wherever they differ.
         pub fn verify(&self, pin: &[u8]) -> bool {
-            let candidate = hash_pin(&self.salt[..self.salt_length], pin);
+            let candidate = self.password_digest(pin);
             let mut difference = 0u8;
             for (a, b) in candidate.iter().zip(&self.hash) {
                 difference |= a ^ b;
             }
             difference == 0
+        }
+
+        /// Derive the bounded candidate digest for the trusted kernel login
+        /// manager. The digest is not the stored credential and is only
+        /// handed to the kernel for constant-time comparison.
+        pub fn password_digest(&self, pin: &[u8]) -> [u8; 32] {
+            hash_pin(&self.salt[..self.salt_length], pin)
         }
     }
 
