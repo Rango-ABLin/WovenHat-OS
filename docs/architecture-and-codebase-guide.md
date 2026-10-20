@@ -1160,9 +1160,11 @@ allocation-free two-slot transition object: staged candidates must advance the
 generation and fit the bounded image/digest contract; activation records the
 next boot without replacing the known-good slot; three failed attempts mark
 the candidate bad and roll back; and only an explicit post-boot health result
-commits the new active slot. This is metadata policy only. Signature
-verification, service ownership, durable WovenFS records, power-loss recovery,
-installer integration, and physical qualification remain required.
+commits the new active slot. Its bounded version-1 `WUPD` envelope verifies
+the immutable manifest and image digest under a domain-separated Ed25519
+signature before admission. Service ownership, durable WovenFS records,
+power-loss recovery, installer integration, and physical qualification remain
+required.
 
 
 The repository release chain passed on the current tree, including warning-

@@ -102,11 +102,12 @@ test session.
    implemented graph, permission and teardown contract.
 5. Close the native WovenFS mount/write-through policy and recovery evidence
    on a deliberately selected non-boot device.
-6. The bounded A/B update transition is now implemented and accepted in
-   `docs/audit-stage27-1-update-ab-state-2026-10-20.md`. Still add service-owned
-   capability provisioning, signed update envelopes, durable records,
-   power-loss/recovery evidence, and installer integration before calling the
-   desktop/application stages complete.
+6. The bounded A/B update transition and signed `WUPD` envelope verification
+   are implemented and accepted in
+   `docs/audit-stage27-1-update-ab-state-2026-10-20.md`. Still add
+   service-owned capability provisioning, durable records, power-loss/recovery
+   evidence, and installer integration before calling the desktop/application
+   stages complete.
 7. Re-run the inherited 1/2/4-CPU matrix and release chain after each accepted
    increment; commit each accepted increment separately.
 

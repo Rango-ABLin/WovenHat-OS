@@ -14,8 +14,13 @@
   success report.
 
 The transition object is allocation-free and bounded to two slots. The
-privileged update service must still verify signatures and persist each record
-atomically on WovenFS; this increment does not claim those integrations.
+package boundary now also accepts only a bounded version-1 `WUPD` envelope:
+the manifest generation, declared image length, image digest, and exact image
+bytes are covered by a domain-separated SHA-256 digest and verified with the
+kernel-provisioned Ed25519 trust root before a candidate is admitted. A
+metadata tamper self-test changes the signed generation and is rejected. The
+privileged update service must still persist each state record atomically on
+WovenFS; this increment does not claim that service integration.
 
 ## Validation
 
@@ -23,15 +28,18 @@ atomically on WovenFS; this increment does not claim those integrations.
 - `cargo clippy --all-targets -- -D warnings` passed.
 - `cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage27-1-test -- -D warnings` passed.
 - Dedicated QEMU acceptance passed with exit 33:
-  - `audit-artifacts/stage27.1-1cpu-1792511854725230900`
-  - `audit-artifacts/stage27.1-2cpu-1792511867378290600`
-  - `audit-artifacts/stage27.1-4cpu-1792511882178827400`
+  - `audit-artifacts/stage27.1-1cpu-1792512141099830700`
+  - `audit-artifacts/stage27.1-2cpu-1792512158205516300`
+  - `audit-artifacts/stage27.1-4cpu-1792512173673074900`
+
+An earlier signed-envelope run failed its signature assertion; the recorded
+diagnostic evidence was retained, the test trust seed was corrected to match
+the repository's provisioned public key, and the fresh matrix above passed.
 
 ## Limits and next work
 
-The state machine is not persistent storage, an update daemon, a signature
-manifest verifier, an installer, or a power-loss proof. Next work must bind it
-to a privileged service, a signed update envelope, durable A/B records, and
-recovery boot evidence. Physical USB qualification remains separately blocked
-until the selected device is explicitly authorized for erasure in an elevated
-session.
+The state machine and envelope verifier are not persistent storage, an update
+daemon, an installer, or a power-loss proof. Next work must bind them to a
+privileged service, durable A/B records, and recovery boot evidence. Physical
+USB qualification remains separately blocked until the selected device is
+explicitly authorized for erasure in an elevated session.
