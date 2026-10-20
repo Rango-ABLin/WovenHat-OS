@@ -2431,6 +2431,16 @@ and a retained report before it can close a production gap.
 
 ## Codex: owned work
 
+**ASLR arena/guard correction (2026-10-20):** the userspace graph loader now
+checks the complete mmap arena plus optional static-TLS reservation before
+placing the stack guard and stack. The forced Stage `11.2-aslr` regression
+that previously wrote through the guard now passes on 1/2/4 CPUs. The change
+is limited to `kernel/src/userspace.rs`, `userspace/linker.rs` and the guarded
+ASLR fixture; it does not touch the frozen thread-generation files. The
+focused gate is accepted as a bounded increment, while the inherited release
+chain, broader loader interoperability and physical qualification remain
+required before Stage 11 or production closure.
+
 **Validated loader increment:** `kernel/src/userspace/linker.rs`, ELF shared
 object parsing and dependency resolution, address-space mapping/RELRO metadata,
 loader fixtures and `tests/elf_scope.rs`. Signed `/lib` dependencies are being

@@ -1,5 +1,21 @@
 # Stage status
 
+## Stage 11 ASLR arena/guard overlap corrected (2026-10-20)
+
+The production userspace loader now plans the complete mmap arena, optional
+static-TLS reservation, stack guard and user stack as disjoint checked ranges.
+Previously, the highest mmap slot could contain the guard for a low forced
+stack draw; the Stage `11.2-aslr` fixture reproduced this by writing the guard
+and exiting 99 instead of faulting. The planner now raises the requested stack
+base above the arena and TLS reservation, preserving the requested draw as a
+lower bound and rejecting layouts that exceed the library window.
+
+Validation: kernel check, warning-denying freestanding Stage 11 ASLR Clippy,
+warning-denying host Clippy and the dedicated Stage `11.2-aslr` QEMU gate all
+passed on 1/2/4 CPUs (exit 33). This is an accepted bounded increment, not
+full Stage 11 or production readiness; broader loader interoperability,
+release-chain preservation and physical qualification remain open.
+
 ## Diagnostic shell no longer overwrites a slow-starting WovenShell session; waits and reports instead (2026-10-20)
 
 The previous fix (below) made `session::start()`'s outcome visible on

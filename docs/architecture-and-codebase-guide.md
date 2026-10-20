@@ -1389,13 +1389,14 @@ write-through audit.
 
 ## Stage 11.2 scheduler-backed thread ownership (2026-10-14)
 
-ASLR geometry CPU regression (2026-10-16): the private graph-loader geometry
-seam exercises supported production draws without changing the userspace ABI
-or normal randomization. Stage `11.2-aslr` fills all sixteen 64 KiB mmap slots
-before writing the prevalidated stack guard. Stack draw 16 / mmap draw 0
-currently exits 99, proving the guard became writable; required fault -11 is
-not met. This failing gate is evidence, not a planner correction or acceptance.
-See the ASLR geometry audit. Both its call site and module are feature guarded.
+ASLR geometry correction (2026-10-20): the graph-loader keeps the independent
+random draws but passes them through a checked reservation boundary. The full
+sixteen-slot mmap arena, optional static-TLS/template reservation, one-page
+guard and user stack are disjoint; a requested stack draw is raised above the
+arena when necessary. The Stage `11.2-aslr` forced stack=16/mmap=0 regression
+now faults on the guard and passes on 1/2/4 CPUs. The planner is internal and
+does not change the userspace ABI. Broader ASLR entropy/arena qualification
+and physical-hardware validation remain release work.
 
 Bounded main-image local-exec TLS accepted (2026-10-16): `InitialTls` records a checked
 Variant-II layout and an independently tracked RO/NX post-relocation template.
