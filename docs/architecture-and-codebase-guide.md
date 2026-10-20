@@ -1176,7 +1176,7 @@ returns `MissingDependency` for cycles or absent dependencies. The transaction
 does not publish until the caller commits, so a failed batch cannot expose a
 partial catalog.
 
-The catalog record codec uses `WSTC` version 1 and a fixed per-entry layout;
+The catalog record codec uses `WSTC` version 2 and a fixed per-entry layout;
 the record carries the allowed capability mask, entry count, exact byte length,
 all bounded dependency metadata, and an FNV-1a-style 32-bit checksum over the
 header and entries. It is intentionally a codec, not a storage write: the
@@ -1207,6 +1207,12 @@ another install, recovery removes prepared chunks unless a committed intent is
 already represented by the catalog at the same package version; it then clears
 the intent. This closes the tested orphan-cleanup window without claiming that
 multi-package or power-loss recovery across every catalog mutation is complete.
+
+Stage 21.9 extends WSTC entries with application/resource chunk counts and
+extends WPKJ with the superseded generation. Updates reclaim the old
+generation only after the new catalog is durable. Removal commits the catalog
+first, then removes the exact recorded chunks; recovery keeps the old payload
+if the catalog is still old and cleans it if the removal already committed.
 
 The feature-gated `stage19-app-catalog-test` now exercises the install-plan
 boundary for all ten accepted packages together. It verifies each WAPP,

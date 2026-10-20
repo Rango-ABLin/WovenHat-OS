@@ -19,17 +19,22 @@ const RESOURCE_DIRECTORY: &str = "/wfs/packages/resources";
 const MAX_CHUNKS: usize = (libwoven::package::MAX_APPLICATION_BYTES as usize).div_ceil(crate::wfs::MAX_FILE_SIZE);
 const JOURNAL_MAGIC: [u8; 4] = *b"WPKJ";
 const JOURNAL_VERSION: u16 = 1;
-const JOURNAL_PREPARED: u8 = 1;
-const JOURNAL_COMMITTED: u8 = 2;
-const JOURNAL_BYTES: usize = 4 + 2 + 1 + 1 + libwoven::package::MAX_NAME_BYTES + 8 + 4 + 4 + 4;
+const JOURNAL_INSTALL_PREPARED: u8 = 1;
+const JOURNAL_INSTALL_COMMITTED: u8 = 2;
+const JOURNAL_REMOVE_PREPARED: u8 = 3;
+const JOURNAL_REMOVE_COMMITTED: u8 = 4;
+const JOURNAL_BYTES: usize = 4 + 2 + 1 + 1 + libwoven::package::MAX_NAME_BYTES + 8 + 8 + 4 + 4 + 4 + 4 + 4;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct InstallJournal {
     name: [u8; libwoven::package::MAX_NAME_BYTES],
     name_len: u8,
     version: u64,
+    old_version: u64,
     application_chunks: u32,
     resource_chunks: u32,
+    old_application_chunks: u32,
+    old_resource_chunks: u32,
     state: u8,
 }
 
@@ -88,9 +93,15 @@ fn encode_journal(journal: InstallJournal) -> [u8; JOURNAL_BYTES] {
     cursor += journal.name.len();
     bytes[cursor..cursor + 8].copy_from_slice(&journal.version.to_le_bytes());
     cursor += 8;
+    bytes[cursor..cursor + 8].copy_from_slice(&journal.old_version.to_le_bytes());
+    cursor += 8;
     bytes[cursor..cursor + 4].copy_from_slice(&journal.application_chunks.to_le_bytes());
     cursor += 4;
     bytes[cursor..cursor + 4].copy_from_slice(&journal.resource_chunks.to_le_bytes());
+    cursor += 4;
+    bytes[cursor..cursor + 4].copy_from_slice(&journal.old_application_chunks.to_le_bytes());
+    cursor += 4;
+    bytes[cursor..cursor + 4].copy_from_slice(&journal.old_resource_chunks.to_le_bytes());
     cursor += 4;
     let checksum = journal_checksum(&bytes[..cursor]);
     bytes[cursor..cursor + 4].copy_from_slice(&checksum.to_le_bytes());
@@ -108,7 +119,13 @@ fn decode_journal(bytes: &[u8]) -> Option<InstallJournal> {
     }
     let state = bytes[6];
     let name_len = bytes[7] as usize;
-    if !matches!(state, JOURNAL_PREPARED | JOURNAL_COMMITTED)
+    if !matches!(
+        state,
+        JOURNAL_INSTALL_PREPARED
+            | JOURNAL_INSTALL_COMMITTED
+            | JOURNAL_REMOVE_PREPARED
+            | JOURNAL_REMOVE_COMMITTED
+    )
         || name_len == 0
         || name_len > libwoven::package::MAX_NAME_BYTES
     {
@@ -120,15 +137,24 @@ fn decode_journal(bytes: &[u8]) -> Option<InstallJournal> {
     let mut cursor = 8 + name_capacity;
     let version = u64::from_le_bytes(bytes[cursor..cursor + 8].try_into().ok()?);
     cursor += 8;
+    let old_version = u64::from_le_bytes(bytes[cursor..cursor + 8].try_into().ok()?);
+    cursor += 8;
     let application_chunks = u32::from_le_bytes(bytes[cursor..cursor + 4].try_into().ok()?);
     cursor += 4;
     let resource_chunks = u32::from_le_bytes(bytes[cursor..cursor + 4].try_into().ok()?);
+    cursor += 4;
+    let old_application_chunks = u32::from_le_bytes(bytes[cursor..cursor + 4].try_into().ok()?);
+    cursor += 4;
+    let old_resource_chunks = u32::from_le_bytes(bytes[cursor..cursor + 4].try_into().ok()?);
     Some(InstallJournal {
         name,
         name_len: name_len as u8,
         version,
+        old_version,
         application_chunks,
         resource_chunks,
+        old_application_chunks,
+        old_resource_chunks,
         state,
     })
 }
@@ -171,23 +197,56 @@ pub fn recover(
         return Err(Error::Storage);
     };
     let name = journal_name(&journal)?;
-    let keep = journal.state == JOURNAL_COMMITTED
-        && current
-            .entry(name.as_bytes())
-            .is_some_and(|entry| entry.version == journal.version);
-    if !keep {
+    let current_version = current.entry(name.as_bytes()).map(|entry| entry.version);
+    let install_current = current_version == Some(journal.version);
+    if matches!(journal.state, JOURNAL_INSTALL_PREPARED | JOURNAL_INSTALL_COMMITTED) {
+        if install_current {
+            remove_chunks(
+                APPLICATION_DIRECTORY,
+                name,
+                journal.old_version,
+                journal.old_application_chunks as usize,
+                now,
+            );
+            remove_chunks(
+                RESOURCE_DIRECTORY,
+                name,
+                journal.old_version,
+                journal.old_resource_chunks as usize,
+                now,
+            );
+        } else {
+            remove_chunks(
+                APPLICATION_DIRECTORY,
+                name,
+                journal.version,
+                journal.application_chunks as usize,
+                now,
+            );
+            remove_chunks(
+                RESOURCE_DIRECTORY,
+                name,
+                journal.version,
+                journal.resource_chunks as usize,
+                now,
+            );
+        }
+    } else if journal.state == JOURNAL_REMOVE_PREPARED && current_version == Some(journal.version) {
+        // The catalog has not committed the removal yet; the old payload is
+        // still authoritative and must survive recovery.
+    } else {
         remove_chunks(
             APPLICATION_DIRECTORY,
             name,
             journal.version,
-            journal.application_chunks as usize,
+            journal.old_application_chunks as usize,
             now,
         );
         remove_chunks(
             RESOURCE_DIRECTORY,
             name,
             journal.version,
-            journal.resource_chunks as usize,
+            journal.old_resource_chunks as usize,
             now,
         );
     }
@@ -236,14 +295,19 @@ pub fn install(
     ensure_directory(RESOURCE_DIRECTORY, now)?;
     let mut transaction = current.transaction();
     let application_digest: [u8; 32] = Sha256::digest(package.application).into();
-    transaction
-        .install(&package.manifest, application_digest)
-        .map_err(Error::Package)?;
     let application_chunks = package
         .application
         .len()
         .div_ceil(crate::wfs::MAX_FILE_SIZE);
     let resource_chunks = package.resources.len().div_ceil(crate::wfs::MAX_FILE_SIZE);
+    transaction
+        .install_with_sizes(
+            &package.manifest,
+            application_digest,
+            application_chunks as u32,
+            resource_chunks as u32,
+        )
+        .map_err(Error::Package)?;
     if application_chunks > MAX_CHUNKS || resource_chunks > MAX_CHUNKS {
         return Err(Error::TooManyChunks);
     }
@@ -255,7 +319,14 @@ pub fn install(
         version: package.manifest.version,
         application_chunks: application_chunks as u32,
         resource_chunks: resource_chunks as u32,
-        state: JOURNAL_PREPARED,
+        state: JOURNAL_INSTALL_PREPARED,
+        old_version: current.entry(name.as_bytes()).map_or(0, |entry| entry.version),
+        old_application_chunks: current
+            .entry(name.as_bytes())
+            .map_or(0, |entry| entry.application_chunks),
+        old_resource_chunks: current
+            .entry(name.as_bytes())
+            .map_or(0, |entry| entry.resource_chunks),
     };
     // The intent must be durable before payload publication begins.
     if write_journal(authority, journal, now).is_err() {
@@ -317,9 +388,23 @@ pub fn install(
         return Err(Error::Storage);
     }
     let committed = InstallJournal {
-        state: JOURNAL_COMMITTED,
+        state: JOURNAL_INSTALL_COMMITTED,
         ..journal
     };
+    remove_chunks(
+        APPLICATION_DIRECTORY,
+        name,
+        journal.old_version,
+        journal.old_application_chunks as usize,
+        now,
+    );
+    remove_chunks(
+        RESOURCE_DIRECTORY,
+        name,
+        journal.old_version,
+        journal.old_resource_chunks as usize,
+        now,
+    );
     if write_journal(authority, committed, now).is_err() {
         return Err(Error::Storage);
     }
@@ -327,7 +412,49 @@ pub fn install(
     Ok(updated)
 }
 
-#[cfg(feature = "stage21-7-test")]
+/// Remove one installed package with a catalog-first, crash-recoverable commit.
+pub fn remove(
+    authority: &crate::wfs::AuthorizedWfsWriter,
+    current: &libwoven::store::Store,
+    name: &[u8],
+    now: u64,
+) -> Result<libwoven::store::Store, Error> {
+    let current = recover(authority, current, now)?;
+    let entry = current.entry(name).ok_or(Error::Package(libwoven::store::Error::AlreadyAbsent))?;
+    let name = str::from_utf8(name).map_err(|_| Error::InvalidName)?;
+    let mut transaction = current.transaction();
+    transaction.remove(name.as_bytes()).map_err(Error::Package)?;
+    let mut journal_name = [0u8; libwoven::package::MAX_NAME_BYTES];
+    journal_name[..name.len()].copy_from_slice(name.as_bytes());
+    let journal = InstallJournal {
+        name: journal_name,
+        name_len: name.len() as u8,
+        version: entry.version,
+        old_version: entry.version,
+        application_chunks: 0,
+        resource_chunks: 0,
+        old_application_chunks: entry.application_chunks,
+        old_resource_chunks: entry.resource_chunks,
+        state: JOURNAL_REMOVE_PREPARED,
+    };
+    write_journal(authority, journal, now)?;
+    let updated = transaction.commit();
+    let mut record = [0u8; libwoven::store::MAX_RECORD_BYTES];
+    let length = updated.encode_record(&mut record).map_err(Error::Catalog)?;
+    crate::wfs::write_vfs_path_durable(authority, CATALOG_PATH, &record[..length], now)
+        .map_err(|_| Error::Storage)?;
+    remove_chunks(APPLICATION_DIRECTORY, name, entry.version, entry.application_chunks as usize, now);
+    remove_chunks(RESOURCE_DIRECTORY, name, entry.version, entry.resource_chunks as usize, now);
+    write_journal(
+        authority,
+        InstallJournal { state: JOURNAL_REMOVE_COMMITTED, ..journal },
+        now,
+    )?;
+    clear_journal(authority, now);
+    Ok(updated)
+}
+
+#[cfg(any(feature = "stage21-7-test", feature = "stage21-9-test"))]
 pub fn self_test() -> bool {
     const MANIFEST: [u8; 22] = [
         4, b'c', b'o', b'r', b'e', 1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0,
@@ -383,7 +510,7 @@ pub fn self_test() -> bool {
         && application[..3] == *b"ELF"
 }
 
-#[cfg(feature = "stage21-8-test")]
+#[cfg(any(feature = "stage21-8-test", feature = "stage21-9-test"))]
 pub fn recovery_self_test() -> bool {
     if !crate::wfs::format_ata(64) {
         return false;
@@ -408,9 +535,12 @@ pub fn recovery_self_test() -> bool {
         name,
         name_len: 5,
         version: 1,
+        old_version: 0,
         application_chunks: 1,
         resource_chunks: 0,
-        state: JOURNAL_PREPARED,
+        old_application_chunks: 0,
+        old_resource_chunks: 0,
+        state: JOURNAL_INSTALL_PREPARED,
     };
     if write_journal(&authority, journal, 1).is_err() {
         return false;
@@ -421,6 +551,37 @@ pub fn recovery_self_test() -> bool {
     let mut out = [0u8; crate::wfs::MAX_FILE_SIZE];
     matches!(
         crate::wfs::read_vfs_path_durable(path, &mut out),
+        Err(crate::wfs::Error::NotFound)
+    )
+}
+
+#[cfg(feature = "stage21-9-test")]
+pub fn update_remove_self_test() -> bool {
+    if !self_test() {
+        return false;
+    }
+    let Some(authority) = crate::update::UpdateState::authorized_writer() else {
+        return false;
+    };
+    let mut record = [0u8; libwoven::store::MAX_RECORD_BYTES];
+    let Ok(length) = crate::wfs::read_vfs_path_durable(CATALOG_PATH, &mut record) else {
+        return false;
+    };
+    let Ok(current) = libwoven::store::Store::decode_record(&record[..length]) else {
+        return false;
+    };
+    let Ok(updated) = remove(&authority, &current, b"core", 2) else {
+        return false;
+    };
+    if updated.contains(b"core") {
+        return false;
+    }
+    let mut application = [0u8; crate::wfs::MAX_FILE_SIZE];
+    matches!(
+        crate::wfs::read_vfs_path_durable(
+            "/wfs/packages/apps/core-v1-0000.bin",
+            &mut application,
+        ),
         Err(crate::wfs::Error::NotFound)
     )
 }

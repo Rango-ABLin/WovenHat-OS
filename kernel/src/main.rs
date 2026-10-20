@@ -141,10 +141,15 @@ mod compositor;
     feature = "stage21-5-test",
     feature = "stage21-6-test",
     feature = "stage21-7-test",
-    feature = "stage21-8-test"
+    feature = "stage21-8-test",
+    feature = "stage21-9-test"
 ))]
 mod package;
-#[cfg(any(feature = "stage21-7-test", feature = "stage21-8-test"))]
+#[cfg(any(
+    feature = "stage21-7-test",
+    feature = "stage21-8-test",
+    feature = "stage21-9-test"
+))]
 mod package_service;
 #[cfg(any(feature = "stage12-3-test", feature = "stage12-5-test"))]
 mod storage_manager;
@@ -2786,7 +2791,8 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         not(feature = "stage15-2-test"),
         not(feature = "stage21-6-test"),
         not(feature = "stage21-7-test"),
-        not(feature = "stage21-8-test")
+        not(feature = "stage21-8-test"),
+        not(feature = "stage21-9-test")
     ))]
     match storage::live_mutation_self_test() {
         storage::LiveMutationTestStatus::Passed => {
@@ -4324,7 +4330,8 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         not(feature = "stage27-2-test"),
         not(feature = "stage21-6-test"),
         not(feature = "stage21-7-test"),
-        not(feature = "stage21-8-test")
+        not(feature = "stage21-8-test"),
+        not(feature = "stage21-9-test")
     ))]
     {
         if !wfs::stage15_2_self_test() {
@@ -4480,6 +4487,15 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
             qemu_test_exit_failure();
         }
         serial::write_line(format_args!("[S21.8] WovenPackage recovery: PASSED"));
+        qemu_test_exit_success();
+    }
+    #[cfg(feature = "stage21-9-test")]
+    {
+        if !package_service::update_remove_self_test() {
+            serial::write_line(format_args!("[S21.9] WovenPackage update/remove: FAILED"));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!("[S21.9] WovenPackage update/remove: PASSED"));
         qemu_test_exit_success();
     }
     #[cfg(feature = "stage27-2-test")]

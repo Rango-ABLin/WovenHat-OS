@@ -8,9 +8,9 @@ use crate::package::{MAX_DEPENDENCIES, MAX_NAME_BYTES, Manifest};
 
 pub const MAX_INSTALLED: usize = 32;
 pub const RECORD_MAGIC: [u8; 4] = *b"WSTC";
-pub const RECORD_VERSION: u16 = 1;
+pub const RECORD_VERSION: u16 = 2;
 const RECORD_HEADER: usize = 4 + 2 + 2 + 8 + 4;
-const ENTRY_BYTES: usize = 1 + MAX_NAME_BYTES + 8 + 8 + 32 + 1 + MAX_DEPENDENCIES * (1 + MAX_NAME_BYTES);
+const ENTRY_BYTES: usize = 1 + MAX_NAME_BYTES + 8 + 8 + 32 + 4 + 4 + 1 + MAX_DEPENDENCIES * (1 + MAX_NAME_BYTES);
 pub const MAX_RECORD_BYTES: usize = RECORD_HEADER + MAX_INSTALLED * ENTRY_BYTES + 4;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -44,6 +44,8 @@ pub struct Entry {
     pub version: u64,
     pub capabilities: u64,
     pub application_digest: [u8; 32],
+    pub application_chunks: u32,
+    pub resource_chunks: u32,
     dependencies: [[u8; MAX_NAME_BYTES]; MAX_DEPENDENCIES],
     dependency_lengths: [u8; MAX_DEPENDENCIES],
     dependency_count: u8,
@@ -116,6 +118,10 @@ impl Store {
             cursor += 8;
             out[cursor..cursor + 32].copy_from_slice(&entry.application_digest);
             cursor += 32;
+            out[cursor..cursor + 4].copy_from_slice(&entry.application_chunks.to_le_bytes());
+            cursor += 4;
+            out[cursor..cursor + 4].copy_from_slice(&entry.resource_chunks.to_le_bytes());
+            cursor += 4;
             out[cursor] = entry.dependency_count;
             cursor += 1;
             for index in 0..MAX_DEPENDENCIES {
@@ -185,6 +191,10 @@ impl Store {
             let mut application_digest = [0u8; 32];
             application_digest.copy_from_slice(&bytes[cursor..cursor + 32]);
             cursor += 32;
+            let application_chunks = u32::from_le_bytes(bytes[cursor..cursor + 4].try_into().unwrap());
+            cursor += 4;
+            let resource_chunks = u32::from_le_bytes(bytes[cursor..cursor + 4].try_into().unwrap());
+            cursor += 4;
             let dependency_count = bytes[cursor] as usize;
             cursor += 1;
             if dependency_count > MAX_DEPENDENCIES {
@@ -215,6 +225,8 @@ impl Store {
                 version,
                 capabilities,
                 application_digest,
+                application_chunks,
+                resource_chunks,
                 dependencies,
                 dependency_lengths,
                 dependency_count: dependency_count as u8,
@@ -251,6 +263,8 @@ impl Store {
         &mut self,
         manifest: &Manifest<'_>,
         application_digest: [u8; 32],
+        application_chunks: u32,
+        resource_chunks: u32,
     ) -> Result<(), Error> {
         if manifest.name.is_empty() || manifest.name.len() > MAX_NAME_BYTES {
             return Err(Error::InvalidName);
@@ -300,6 +314,8 @@ impl Store {
             version: manifest.version,
             capabilities: manifest.capabilities,
             application_digest,
+            application_chunks,
+            resource_chunks,
             dependencies,
             dependency_lengths,
             dependency_count: manifest.dependency_count as u8,
@@ -331,7 +347,18 @@ impl Transaction {
         manifest: &Manifest<'_>,
         application_digest: [u8; 32],
     ) -> Result<(), Error> {
-        self.working.install(manifest, application_digest)
+        self.install_with_sizes(manifest, application_digest, 0, 0)
+    }
+
+    pub fn install_with_sizes(
+        &mut self,
+        manifest: &Manifest<'_>,
+        application_digest: [u8; 32],
+        application_chunks: u32,
+        resource_chunks: u32,
+    ) -> Result<(), Error> {
+        self.working
+            .install(manifest, application_digest, application_chunks, resource_chunks)
     }
 
     pub fn remove(&mut self, name: &[u8]) -> Result<(), Error> {

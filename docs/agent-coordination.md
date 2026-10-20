@@ -1,5 +1,14 @@
 # Agent coordination (Claude Code and Codex)
 
+**Codex: Stage 21.9 WovenPackage update/removal transactions (2026-10-20):**
+WSTC v2 persists application/resource chunk counts. WPKJ now retains incoming
+and superseded generations, so updates reclaim old payloads only after durable
+catalog publication. Removal is catalog-first and journaled; recovery preserves
+old payloads if removal did not commit and cleans exact chunks after commit.
+Stage 21.9 passed on 1/2/4 CPUs, and Stage 21.6/7/8 regression gates passed on
+1/2/4 CPUs after the record/journal ABI changes. No physical USB write was
+performed.
+
 **Codex: Stage 21.1 bounded WovenPackages envelope (2026-10-20):** `libwoven`
 now parses a bounded version-1 `WPKG` envelope containing a manifest,
 application bytes, resources, and a fixed 64-byte signature field. Manifest

@@ -2252,6 +2252,22 @@ Multi-package recovery, persistent update/removal transactions, full power-loss
 injection, userspace package-service IPC, and physical USB qualification remain
 open.
 
+## Stage 21.9 WovenPackage update/removal transactions (2026-10-20)
+
+WSTC v2 now records bounded application/resource chunk counts. WPKJ records
+both the incoming and superseded generation, allowing recovery to reclaim old
+payloads only after the new catalog is durable. Package removal uses a
+catalog-first journaled commit and deletes the exact recorded chunks; recovery
+keeps old payloads when the catalog was not committed and removes them when it
+was. The Stage 21.9 disposable ATA QEMU gate passed on 1/2/4 CPUs, and the
+Stage 21.6/21.7/21.8 regression gates passed again on 1/2/4 CPUs after the ABI
+and journal changes. Evidence is under timestamped `audit-artifacts`
+directories. Host and affected freestanding warning-denying Clippy passed.
+
+Multi-package recovery, power-loss injection at every boundary, userspace
+package-service IPC/ownership, rollback, sandbox enforcement, and physical USB
+qualification remain open.
+
 ## Graphics track - bounded quadratic paths (2026-10-18)
 
 `Path::quadratic_to` now flattens quadratic Bézier segments into four
