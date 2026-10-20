@@ -11273,6 +11273,7 @@ pub mod syscall {
     pub const AUDIO_SET_VOLUME: u64 = 205;
     pub const GRAPHICS_COMPOSITOR_OUTPUTS: u64 = 207;
     pub const POWER_CONTROL: u64 = 209;
+    pub const ACCOUNTS_CHANGE_PIN: u64 = 210;
     pub const MESSAGE_SEND: u64 = 11;
     pub const MESSAGE_RECEIVE: u64 = 12;
 
@@ -13211,6 +13212,9 @@ pub mod accounts {
 
     pub const MAX_NAME: usize = 16;
     pub const MAX_SALT: usize = 32;
+    /// Must match `apps/woven-shell`'s own `MAX_PIN` and
+    /// `kernel::accounts::MAX_PIN`.
+    pub const MAX_PIN: usize = 16;
     /// Work factor for [`hash_pin`]. NIST SP 800-132 recommends at least
     /// 10,000; this keeps a wide margin while staying fast enough (tens of
     /// milliseconds, software-only, no AES-NI-style acceleration needed) for
@@ -13305,6 +13309,40 @@ pub mod accounts {
             }
             difference == 0
         }
+    }
+
+    /// Change a local account's own PIN: `name` must already have an
+    /// account and `old_pin` must verify against it. Needs `AccountManage`
+    /// (the desktop session only); every other account's line is left
+    /// unchanged.
+    pub fn change_pin(name: &[u8], old_pin: &[u8], new_pin: &[u8]) -> Result<(), crate::Error> {
+        if name.is_empty()
+            || name.len() > MAX_NAME
+            || old_pin.len() > MAX_PIN
+            || new_pin.len() > MAX_PIN
+        {
+            return Err(crate::Error::Failed);
+        }
+        let mut packed = [0u8; 3 + MAX_NAME + 2 * MAX_PIN];
+        let mut offset = 0;
+        for field in [name, old_pin, new_pin] {
+            packed[offset] = field.len() as u8;
+            offset += 1;
+            packed[offset..offset + field.len()].copy_from_slice(field);
+            offset += field.len();
+        }
+        // SAFETY: `packed` is a local, bounded, stack-owned buffer; its
+        // length is `offset`, computed from the same field lengths just
+        // copied into it.
+        crate::check(unsafe {
+            crate::syscall::invoke(
+                crate::syscall::ACCOUNTS_CHANGE_PIN,
+                packed.as_ptr() as u64,
+                offset as u64,
+                0,
+            )
+        })
+        .map(|_| ())
     }
 }
 

@@ -386,6 +386,7 @@ impl Image {
         self.segments().any(|segment| {
             segment.executable
                 && value >= segment.virtual_address
+                && value < segment.virtual_address + segment.memory_size as u64
                 && value.checked_add(size).is_some_and(|end| {
                     end <= segment.virtual_address + segment.memory_size as u64
                 })
@@ -1147,12 +1148,18 @@ fn parse_image(bytes: &[u8], shared: bool) -> Result<Image, Error> {
                         }
                     }
                     27 => {
-                        init_array_count = usize::try_from(value)
-                            .map_err(|_| Error::InvalidSegment)?;
+                        let size = usize::try_from(value).map_err(|_| Error::InvalidSegment)?;
+                        if !size.is_multiple_of(8) {
+                            return Err(Error::InvalidSegment);
+                        }
+                        init_array_count = size / 8;
                     }
                     28 => {
-                        fini_array_count = usize::try_from(value)
-                            .map_err(|_| Error::InvalidSegment)?;
+                        let size = usize::try_from(value).map_err(|_| Error::InvalidSegment)?;
+                        if !size.is_multiple_of(8) {
+                            return Err(Error::InvalidSegment);
+                        }
+                        fini_array_count = size / 8;
                     }
                     // Common metadata tags do not affect relocation of a
                     // symbol-free static PIE and are intentionally ignored.

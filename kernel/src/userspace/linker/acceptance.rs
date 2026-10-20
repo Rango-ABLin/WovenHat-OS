@@ -8,7 +8,7 @@ const SEED: [u8; 32] = [
 ];
 
 fn fixture(kind: usize) -> Option<Vec<u8>> {
-    let base = if matches!(kind, 0 | 3 | 4 | 5 | 6) {
+    let base = if matches!(kind, 0 | 3 | 4 | 5 | 6 | 8) {
         USER_REGION_START
     } else {
         0
@@ -32,8 +32,8 @@ fn fixture(kind: usize) -> Option<Vec<u8>> {
             4,
             0x1100,
             base + 0x100,
-            if matches!(kind, 6 | 7) { 0x100 } else { 0xc0 },
-            if matches!(kind, 6 | 7) { 0x100 } else { 0xc0 },
+            if matches!(kind, 6..=9) { 0x100 } else { 0xc0 },
+            if matches!(kind, 6..=9) { 0x100 } else { 0xc0 },
         ),
         (232, 0x6474_e552, 4, 0, base + 0x1000, 0, 0x1000),
     ] {
@@ -59,7 +59,17 @@ fn fixture(kind: usize) -> Option<Vec<u8>> {
     } else {
         tags.extend([(7, base + 0x380), (8, 24), (9, 24)]);
     }
-    if kind == 6 {
+    if kind == 8 || kind == 9 {
+        tags.truncate(5);
+        tags.extend([
+            (12, base + 0x60),
+            (13, base + 0x80),
+            (25, base + 0x380),
+            (27, 16),
+            (26, base + 0x390),
+            (28, 16),
+        ]);
+    } else if kind == 6 {
         tags.extend([
             (0x6fff_fff0, base + 0x3a0),
             (0x6fff_fffe, base + 0x3b0),
@@ -72,8 +82,10 @@ fn fixture(kind: usize) -> Option<Vec<u8>> {
             (0x6fff_fffd, 1),
         ]);
     }
-    if matches!(kind, 0 | 3 | 4 | 5 | 6) {
+    if matches!(kind, 0 | 3 | 4 | 5 | 6 | 8) {
         tags.push((1, 8));
+    } else if kind == 9 {
+        tags.push((14, 8));
     } else {
         tags.push((14, if matches!(kind, 1 | 7) { 8 } else { 17 }));
         if matches!(kind, 1 | 7) {
@@ -133,26 +145,73 @@ fn fixture(kind: usize) -> Option<Vec<u8>> {
         },
     )?;
     write_u64(&mut elf, 0x1228, 6)?;
-    write_u64(&mut elf, 0x1380, base + 0x1000)?;
-    write_u64(
-        &mut elf,
-        0x1388,
-        if matches!(kind, 0 | 3 | 4 | 5 | 6) {
-            (1_u64 << 32) | 1
-        } else {
-            8
-        },
-    )?;
+    if matches!(kind, 8 | 9) {
+        write_u64(&mut elf, 0x1380, base + 0x60)?;
+        write_u64(&mut elf, 0x1388, 0)?;
+        write_u64(&mut elf, 0x1390, base + 0x80)?;
+        write_u64(&mut elf, 0x1398, 0)?;
+    } else {
+        write_u64(&mut elf, 0x1380, base + 0x1000)?;
+        write_u64(
+            &mut elf,
+            0x1388,
+            if matches!(kind, 0 | 3 | 4 | 5 | 6) {
+                (1_u64 << 32) | 1
+            } else {
+                8
+            },
+        )?;
+    }
     if kind == 3 || kind == 4 {
         write_u64(&mut elf, 0x1390, 0)?;
     } else {
         write_u64(
             &mut elf,
             0x1390,
-            if matches!(kind, 0 | 5 | 6) { 0 } else { 0x20 },
+            if matches!(kind, 0 | 5 | 6 | 8) { 0 } else { 0x20 },
         )?;
     }
-    if matches!(kind, 0 | 3 | 4 | 5 | 6) {
+    if kind == 8 {
+        let main_code = [
+            0xbf, 42, 0, 0, 0, // exit status after lifecycle callbacks
+            0xb8, 3, 0, 0, 0,
+            0xcd, 0x80,
+            0x0f, 0x0b,
+        ];
+        elf[0x1000..0x1000 + main_code.len()].copy_from_slice(&main_code);
+        let mut init_code = [0x48, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0xc6, 0x00, 0xa5, 0xc3];
+        init_code[2..10].copy_from_slice(&(base + 0x1000).to_le_bytes());
+        elf[0x1060..0x1060 + init_code.len()].copy_from_slice(&init_code);
+        let mut fini_code = [
+            0x48, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, // marker address
+            0x80, 0x38, 0xa5, // cmp byte [rax], 0xa5
+            0x49, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, // D address
+            0x49, 0xb9, 0, 0, 0, 0, 0, 0, 0, 0, // X address
+            0x4d, 0x0f, 0x45, 0xc1, // cmovne r8, r9
+            0xb8, 2, 0, 0, 0, // open
+            0x48, 0xbf, 0, 0, 0, 0, 0, 0, 0, 0, // path
+            0xbe, 14, 0, 0, 0,
+            0xcd, 0x80,
+            0x49, 0x89, 0xc2, // mov r10, rax
+            0xb8, 1, 0, 0, 0,
+            0x4c, 0x89, 0xd7, // mov rdi, r10
+            0x4c, 0x89, 0xc6, // mov rsi, r8
+            0xba, 1, 0, 0, 0,
+            0xcd, 0x80,
+            0xb8, 6, 0, 0, 0,
+            0x4c, 0x89, 0xd7,
+            0xcd, 0x80,
+            0xc3,
+        ];
+        fini_code[2..10].copy_from_slice(&(base + 0x1000).to_le_bytes());
+        fini_code[15..23].copy_from_slice(&(base + 0x13df).to_le_bytes());
+        fini_code[25..33].copy_from_slice(&(base + 0x13e0).to_le_bytes());
+        fini_code[44..52].copy_from_slice(&(base + 0x13d0).to_le_bytes());
+        elf[0x1080..0x1080 + fini_code.len()].copy_from_slice(&fini_code);
+        elf[0x13d0..0x13de].copy_from_slice(b"/tmp/lifecycle");
+        elf[0x13df] = b'D';
+        elf[0x13e0] = b'X';
+    } else if matches!(kind, 0 | 3 | 4 | 5 | 6) {
         // movabs rax, GOT; call [rax]; exit(rax). The call crosses images in
         // Ring 3; no kernel shortcut invokes the library implementation.
         let code = [
@@ -295,6 +354,9 @@ pub(super) fn run() -> bool {
         return false;
     };
     let Some(versioned_scope) = fixture(7) else {
+        return false;
+    };
+    let Some(lifecycle_main) = fixture(8) else {
         return false;
     };
     if crate::vfs::stat("/lib/scope.so").is_ok() || crate::vfs::stat("/lib/base.so").is_ok() {
@@ -580,6 +642,37 @@ pub(super) fn run() -> bool {
         ) {
             return None;
         }
+        if crate::vfs::stat("/tmp/lifecycle").is_ok() {
+            crate::vfs::remove("/tmp/lifecycle").ok()?;
+        }
+        crate::vfs::write_file("/tmp/lifecycle", &[]).ok()?;
+        let lifecycle_program = load(&lifecycle_main, &["lifecycle-test"])?;
+        if !step(
+            "constructors scheduled before Ring-3 entry",
+            lifecycle_program.initial_entry == USER_REGION_START + 0x60,
+        ) {
+            return None;
+        }
+        let (lifecycle_pid, _) =
+            crate::task::spawn_user_process("lifecycle-test", lifecycle_program).ok()?;
+        let lifecycle_start = crate::timer::ticks();
+        while !crate::task::process_exited(lifecycle_pid) {
+            if crate::timer::ticks().wrapping_sub(lifecycle_start) > 500 {
+                return None;
+            }
+            crate::task::yield_now();
+        }
+        let mut lifecycle_bytes = [0; 4];
+        let lifecycle_written = crate::vfs::read_all("/tmp/lifecycle", &mut lifecycle_bytes)
+            .ok()
+            .is_some_and(|length| length == 1 && lifecycle_bytes[0] == b'D');
+        if !step(
+            "constructors/destructors Ring-3 execution and teardown",
+            crate::task::wait_process(lifecycle_pid.as_u64()) == Ok(42) && lifecycle_written,
+        ) {
+            return None;
+        }
+        crate::vfs::remove("/tmp/lifecycle").ok()?;
         crate::vfs::remove("/lib/scope.so").ok()?;
         owned_scope = false;
         crate::vfs::create_read_only("/lib/scope.so", &package(&library)).ok()?;

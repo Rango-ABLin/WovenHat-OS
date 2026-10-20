@@ -2654,6 +2654,7 @@ pub extern "C" fn wovenhat_syscall_dispatch(
         value if value == Number::AudioSetVolume as u64 => sys_audio_set_volume(arg0),
         value if value == Number::GraphicsCompositorOutputs as u64 => sys_compositor_outputs(arg0),
         value if value == Number::PowerControl as u64 => sys_power_control(arg0),
+        value if value == Number::AccountsChangePin as u64 => sys_accounts_change_pin(arg0, arg1),
         _ => u64::MAX,
     };
 
@@ -2979,6 +2980,62 @@ fn sys_power_control(action: u64) -> u64 {
         crate::power::Error::AcpiModeRefused => 2,
         crate::power::Error::StillRunning => 3,
     }
+}
+
+/// Pull one `[len u8][bytes]` field (`len <= max`) from the front of
+/// `packed`, returning it and the remainder.
+fn split_length_prefixed(packed: &[u8], max: usize) -> Option<(&[u8], &[u8])> {
+    let (&length, rest) = packed.split_first()?;
+    let length = length as usize;
+    if length > max || length > rest.len() {
+        return None;
+    }
+    Some(rest.split_at(length))
+}
+
+/// Change a local account's own PIN. The buffer packs `[name_len u8][name]
+/// [old_pin_len u8][old_pin][new_pin_len u8][new_pin]`. Requires
+/// AccountManage, which only the desktop session holds; every attempt is in
+/// the security ledger, but never the PINs themselves.
+fn sys_accounts_change_pin(user_buffer: u64, length: u64) -> u64 {
+    const MAX_BUFFER: usize = 3 + crate::accounts::MAX_NAME + 2 * crate::accounts::MAX_PIN;
+    let actor = crate::task::current_task_id().as_u64();
+    if !crate::task::current_has(crate::capability::Capability::AccountManage) {
+        crate::audit::record(actor, crate::audit::Action::AccountChangePin, 0, false);
+        return SYSCALL_ERROR;
+    }
+    let Ok(length) = usize::try_from(length) else {
+        return SYSCALL_ERROR;
+    };
+    if length == 0 || length > MAX_BUFFER {
+        crate::audit::record(actor, crate::audit::Action::AccountChangePin, 0, false);
+        return SYSCALL_ERROR;
+    }
+    let mut buffer = [0u8; MAX_BUFFER];
+    if crate::paging::copy_from_current_user(user_buffer, &mut buffer[..length]).is_err() {
+        crate::audit::record(actor, crate::audit::Action::AccountChangePin, 0, false);
+        return SYSCALL_ERROR;
+    }
+    let packed = &buffer[..length];
+    let parsed = split_length_prefixed(packed, crate::accounts::MAX_NAME).and_then(
+        |(name, rest)| {
+            let (old_pin, rest) = split_length_prefixed(rest, crate::accounts::MAX_PIN)?;
+            let (new_pin, rest) = split_length_prefixed(rest, crate::accounts::MAX_PIN)?;
+            rest.is_empty().then_some((name, old_pin, new_pin))
+        },
+    );
+    let Some((name, old_pin, new_pin)) = parsed else {
+        crate::audit::record(actor, crate::audit::Action::AccountChangePin, 0, false);
+        return SYSCALL_ERROR;
+    };
+    let result = crate::accounts::change_pin(name, old_pin, new_pin);
+    crate::audit::record(
+        actor,
+        crate::audit::Action::AccountChangePin,
+        0,
+        result.is_ok(),
+    );
+    result.map_or(SYSCALL_ERROR, |()| 0)
 }
 
 /// The compositor surface's size and display scale. Requires `DisplayIo` and

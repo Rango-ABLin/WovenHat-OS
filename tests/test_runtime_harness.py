@@ -80,6 +80,8 @@ class RuntimeAcceptanceTests(unittest.TestCase):
         self.assertTrue(any('weak symbol Ring-3 execution and teardown' in marker for marker in required))
         self.assertTrue(any('versioned symbol runtime resolution' in marker for marker in required))
         self.assertTrue(any('versioned symbol Ring-3 execution and teardown' in marker for marker in required))
+        self.assertTrue(any('constructors scheduled before Ring-3 entry' in marker for marker in required))
+        self.assertTrue(any('constructors/destructors Ring-3 execution and teardown' in marker for marker in required))
         self.assertTrue(any('tampered signature rejected' in marker for marker in required))
         self.assertTrue(any('argv failure rollback' in marker for marker in required))
         for missing in required:

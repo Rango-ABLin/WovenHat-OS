@@ -4615,10 +4615,6 @@ impl AddressSpace {
         self.tls.map(InitialTls::range)
     }
 
-    pub fn lifecycle_trampoline(self) -> u64 {
-        self.lifecycle_trampoline
-    }
-
     /// Returns whether `address` falls in a logically writable mapping
     /// (ELF segment, user stack, or anonymous region tracked by the process).
     pub fn is_logically_writable(

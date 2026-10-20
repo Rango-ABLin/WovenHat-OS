@@ -14,7 +14,7 @@ use pbkdf2::pbkdf2_hmac;
 use sha2::Sha256;
 
 pub const ACCOUNTS_PATH: &str = "/etc/wovenhat/accounts";
-const MAX_NAME: usize = 16;
+pub(crate) const MAX_NAME: usize = 16;
 const MAX_SALT: usize = 32;
 const SALT_BYTES: usize = 16;
 const HASH_BYTES: usize = 32;
