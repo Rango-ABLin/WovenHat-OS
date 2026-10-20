@@ -146,6 +146,62 @@ fn image(bytes: &[u8]) -> elf::Image {
     elf::parse(bytes).unwrap_or_else(|error| panic!("fixture parse error: {error:?}"))
 }
 
+fn versioned_definition_fixture() -> Vec<u8> {
+    let mut bytes = fixture(&[]);
+    put64(&mut bytes, 152, 9 * 16);
+    put64(&mut bytes, 160, 9 * 16);
+    bytes[0x1312..0x1317].copy_from_slice(b"VER_1");
+    bytes[0x1317] = 0;
+    put64(&mut bytes, DYNAMIC + 5 * 16, 0x6fff_fff0); // DT_VERSYM
+    put64(&mut bytes, DYNAMIC + 5 * 16 + 8, BASE + 0x340);
+    put64(&mut bytes, DYNAMIC + 6 * 16, 0x6fff_fffc); // DT_VERDEF
+    put64(&mut bytes, DYNAMIC + 6 * 16 + 8, BASE + 0x350);
+    put64(&mut bytes, DYNAMIC + 7 * 16, 0x6fff_fffd); // DT_VERDEFNUM
+    put64(&mut bytes, DYNAMIC + 7 * 16 + 8, 1);
+    put16(&mut bytes, 0x1340, 0);
+    put16(&mut bytes, 0x1342, 2);
+    put16(&mut bytes, 0x1350, 1);
+    put16(&mut bytes, 0x1352, 0);
+    put16(&mut bytes, 0x1354, 2);
+    put16(&mut bytes, 0x1356, 1);
+    put32(&mut bytes, 0x1358, 0);
+    put32(&mut bytes, 0x135c, 20);
+    put32(&mut bytes, 0x1360, 0);
+    put32(&mut bytes, 0x1364, 18);
+    put32(&mut bytes, 0x1368, 0);
+    put64(&mut bytes, DYNAMIC + 2 * 16 + 8, 24);
+    bytes
+}
+
+fn versioned_requirement_fixture() -> Vec<u8> {
+    let mut bytes = fixture(&[8]);
+    put64(&mut bytes, 152, 10 * 16);
+    put64(&mut bytes, 160, 10 * 16);
+    bytes[0x1312..0x1317].copy_from_slice(b"VER_1");
+    bytes[0x1317] = 0;
+    put64(&mut bytes, DYNAMIC + 6 * 16, 0x6fff_fff0); // DT_VERSYM
+    put64(&mut bytes, DYNAMIC + 6 * 16 + 8, BASE + 0x340);
+    put64(&mut bytes, DYNAMIC + 7 * 16, 0x6fff_fffe); // DT_VERNEED
+    put64(&mut bytes, DYNAMIC + 7 * 16 + 8, BASE + 0x350);
+    put64(&mut bytes, DYNAMIC + 8 * 16, 0x6fff_ffff); // DT_VERNEEDNUM
+    put64(&mut bytes, DYNAMIC + 8 * 16 + 8, 1);
+    put16(&mut bytes, 0x1340, 0);
+    put16(&mut bytes, 0x1342, 2);
+    put16(&mut bytes, 0x1350, 1);
+    put16(&mut bytes, 0x1352, 1);
+    put32(&mut bytes, 0x1354, 8);
+    put32(&mut bytes, 0x1358, 16);
+    put32(&mut bytes, 0x135c, 0);
+    put32(&mut bytes, 0x1360, 0);
+    put16(&mut bytes, 0x1364, 0);
+    put16(&mut bytes, 0x1366, 2);
+    put32(&mut bytes, 0x1368, 18);
+    put32(&mut bytes, 0x136c, 0);
+    put64(&mut bytes, DYNAMIC + 2 * 16 + 8, 24);
+    put16(&mut bytes, SYMBOL + 6, 0);
+    bytes
+}
+
 fn tls_fixture() -> Vec<u8> {
     let mut bytes = fixture(&[]);
     put16(&mut bytes, 56, 3);
@@ -515,6 +571,28 @@ fn weak_exports_are_fallbacks_and_undefined_weak_imports_resolve_to_zero() {
     assert_eq!(
         undefined.relocation_symbol_value(&undefined_bytes, 1, &scope),
         Some(0)
+    );
+}
+
+#[test]
+fn versioned_definitions_and_requirements_resolve_by_name() {
+    let definition_bytes = versioned_definition_fixture();
+    let definition = elf::parse(&definition_bytes)
+        .unwrap_or_else(|error| panic!("definition fixture: {error:?}"));
+    let dynamic = definition.dynamic().expect("versioned dynamic metadata");
+    assert_eq!(dynamic.verdef_count, 1);
+    assert_eq!(definition.defined_global_symbol(&definition_bytes, b"export"), None);
+
+    let requirement_bytes = versioned_requirement_fixture();
+    let requirement = elf::parse(&requirement_bytes)
+        .unwrap_or_else(|error| panic!("requirement fixture: {error:?}"));
+    let mut scope = elf::SymbolScope::new(&requirement, &requirement_bytes);
+    assert!(scope
+        .add_dependency(b"a.so", &definition, &definition_bytes)
+        .is_ok());
+    assert_eq!(
+        requirement.relocation_symbol_value(&requirement_bytes, 1, &scope),
+        Some(BASE + 0x20)
     );
 }
 

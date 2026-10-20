@@ -81,6 +81,14 @@ pub struct DynamicImage {
     pub needed_offsets: [u64; MAX_NEEDED_LIBRARIES],
     pub needed_count: usize,
     pub soname_offset: Option<u64>,
+    pub versym_address: u64,
+    pub versym_file_offset: usize,
+    pub verdef_address: u64,
+    pub verdef_file_offset: usize,
+    pub verdef_count: usize,
+    pub verneed_address: u64,
+    pub verneed_file_offset: usize,
+    pub verneed_count: usize,
 }
 
 pub struct Image {
@@ -214,19 +222,20 @@ impl Image {
             dynamic,
             u64::from(u32::from_le_bytes(symbol[..4].try_into().ok()?)),
         )?;
+        let (version, _) = self.symbol_version(bytes, index, section != 0)?;
         if section == 0 {
             if visibility != 0 || name.is_empty() || !matches!(binding, 1 | 2) {
                 return None;
             }
             return if binding == 2 {
-                Some(scope.resolve(name).unwrap_or(0))
+                Some(scope.resolve_versioned(name, version).unwrap_or(0))
             } else {
-                scope.resolve(name)
+                scope.resolve_versioned(name, version)
             };
         }
         let local = self.defined_symbol_value(bytes, index)?;
         if matches!(binding, 1 | 2) && visibility == 0 {
-            scope.resolve(name)
+            scope.resolve_versioned(name, version)
         } else {
             Some(local)
         }
@@ -256,11 +265,33 @@ impl Image {
         self.contains_symbol(value, size).then_some(value)
     }
 
+    fn symbol_version<'a>(
+        &self,
+        bytes: &'a [u8],
+        index: usize,
+        defined: bool,
+    ) -> Option<(Option<&'a [u8]>, bool)> {
+        let dynamic = self.dynamic?;
+        if dynamic.versym_address == 0 {
+            return Some((None, false));
+        }
+        let offset = dynamic
+            .versym_file_offset
+            .checked_add(index.checked_mul(2)?)?;
+        let raw = u16::from_le_bytes(bytes.get(offset..offset.checked_add(2)?)?.try_into().ok()?);
+        let version_index = raw & 0x7fff;
+        if version_index <= 1 {
+            return Some((None, raw & 0x8000 != 0));
+        }
+        let name = version_name_by_index(bytes, dynamic, self, version_index, defined)?;
+        Some((Some(name), raw & 0x8000 != 0))
+    }
+
     /// Resolve one defined global symbol within this image. Undefined symbols,
     /// local-only symbols and malformed names never escape the loader boundary.
     #[cfg(test)]
     pub fn defined_global_symbol(&self, bytes: &[u8], name: &[u8]) -> Option<u64> {
-        self.defined_global_symbol_kind(bytes, name)
+        self.defined_global_symbol_kind(bytes, name, None)
             .map(|(value, _)| value)
     }
 
@@ -268,6 +299,7 @@ impl Image {
         &self,
         bytes: &[u8],
         name: &[u8],
+        requested_version: Option<&[u8]>,
     ) -> Option<(u64, bool)> {
         if name.is_empty() || name.contains(&0) {
             return None;
@@ -290,6 +322,10 @@ impl Image {
                 continue;
             }
             if dynamic_string(bytes, dynamic, name_offset)? != name {
+                continue;
+            }
+            let (version, hidden) = self.symbol_version(bytes, index, true)?;
+            if hidden || version != requested_version {
                 continue;
             }
             if let Some(value) = self.defined_symbol_value(bytes, index) {
@@ -461,18 +497,28 @@ impl<'a> SymbolScope<'a> {
 
     /// Resolve an exact exported global symbol in main-image-first scope.
     pub fn resolve(&self, name: &[u8]) -> Option<u64> {
+        self.resolve_versioned(name, None)
+    }
+
+    fn resolve_versioned(&self, name: &[u8], version: Option<&[u8]>) -> Option<u64> {
         self.validate_dependencies().ok()?;
         self.images[..self.count]
             .iter()
             .flatten()
-            .filter_map(|entry| entry.image.defined_global_symbol_kind(entry.bytes, name))
+            .filter_map(|entry| {
+                entry
+                    .image
+                    .defined_global_symbol_kind(entry.bytes, name, version)
+            })
             .find_map(|(value, strong)| strong.then_some(value))
             .or_else(|| {
                 self.images[..self.count]
                     .iter()
                     .flatten()
                     .filter_map(|entry| {
-                        entry.image.defined_global_symbol_kind(entry.bytes, name)
+                        entry
+                            .image
+                            .defined_global_symbol_kind(entry.bytes, name, version)
                     })
                     .find_map(|(value, strong)| (!strong).then_some(value))
             })
@@ -489,6 +535,297 @@ fn dynamic_string(bytes: &[u8], dynamic: DynamicImage, offset: u64) -> Option<&[
     let string = bytes.get(start..end)?;
     let length = string.iter().position(|byte| *byte == 0)?;
     Some(&string[..length])
+}
+
+fn version_file_offset(
+    image: &Image,
+    bytes: &[u8],
+    address: u64,
+    size: usize,
+) -> Result<usize, Error> {
+    let end = address
+        .checked_add(size as u64)
+        .ok_or(Error::InvalidSegment)?;
+    let segment = image
+        .segments()
+        .find(|segment| {
+            let file_end = segment
+                .virtual_address
+                .saturating_add(segment.file_size as u64);
+            segment.virtual_address <= address && end <= file_end
+        })
+        .ok_or(Error::InvalidSegment)?;
+    let offset = segment
+        .file_offset
+        .checked_add((address - segment.virtual_address) as usize)
+        .ok_or(Error::InvalidSegment)?;
+    if offset.checked_add(size).filter(|end| *end <= bytes.len()).is_none() {
+        return Err(Error::Truncated);
+    }
+    Ok(offset)
+}
+
+fn validate_version_tables(bytes: &[u8], image: &mut Image) -> Result<(), Error> {
+    let Some(mut dynamic) = image.dynamic else {
+        return Ok(());
+    };
+    let has_versions = dynamic.versym_address != 0
+        || dynamic.verdef_address != 0
+        || dynamic.verdef_count != 0
+        || dynamic.verneed_address != 0
+        || dynamic.verneed_count != 0;
+    if !has_versions {
+        return Ok(());
+    }
+    if dynamic.symbol_count == 0 || dynamic.versym_address == 0 {
+        return Err(Error::InvalidSegment);
+    }
+    let versym_size = dynamic
+        .symbol_count
+        .checked_mul(2)
+        .ok_or(Error::InvalidSegment)?;
+    dynamic.versym_file_offset =
+        version_file_offset(image, bytes, dynamic.versym_address, versym_size)?;
+
+    if dynamic.verdef_count == 0 {
+        if dynamic.verdef_address != 0 {
+            return Err(Error::InvalidSegment);
+        }
+    } else {
+        if dynamic.verdef_address == 0 || dynamic.verdef_count > MAX_DYNAMIC_SYMBOLS {
+            return Err(Error::InvalidSegment);
+        }
+        dynamic.verdef_file_offset =
+            version_file_offset(image, bytes, dynamic.verdef_address, 20)?;
+        let mut cursor = dynamic.verdef_address;
+        for index in 0..dynamic.verdef_count {
+            let offset = version_file_offset(image, bytes, cursor, 20)?;
+            let version = u16::from_le_bytes(bytes[offset..offset + 2].try_into().unwrap());
+            let version_index =
+                u16::from_le_bytes(bytes[offset + 4..offset + 6].try_into().unwrap());
+            let aux = u32::from_le_bytes(bytes[offset + 12..offset + 16].try_into().unwrap());
+            let next = u32::from_le_bytes(bytes[offset + 16..offset + 20].try_into().unwrap());
+            if version != 1 || version_index < 2 || aux == 0 {
+                return Err(Error::InvalidSegment);
+            }
+            let aux_address = cursor
+                .checked_add(aux as u64)
+                .ok_or(Error::InvalidSegment)?;
+            let aux_offset = version_file_offset(image, bytes, aux_address, 8)?;
+            let name = u32::from_le_bytes(bytes[aux_offset..aux_offset + 4].try_into().unwrap());
+            if dynamic_string(bytes, dynamic, name as u64)
+                .filter(|name| !name.is_empty())
+                .is_none()
+            {
+                return Err(Error::InvalidSegment);
+            }
+            if next == 0 {
+                if index + 1 != dynamic.verdef_count {
+                    return Err(Error::InvalidSegment);
+                }
+            } else {
+                cursor = cursor
+                    .checked_add(next as u64)
+                    .ok_or(Error::InvalidSegment)?;
+            }
+        }
+    }
+
+    if dynamic.verneed_count == 0 {
+        if dynamic.verneed_address != 0 {
+            return Err(Error::InvalidSegment);
+        }
+    } else {
+        if dynamic.verneed_address == 0 || dynamic.verneed_count > MAX_DYNAMIC_SYMBOLS {
+            return Err(Error::InvalidSegment);
+        }
+        dynamic.verneed_file_offset =
+            version_file_offset(image, bytes, dynamic.verneed_address, 16)?;
+        let mut cursor = dynamic.verneed_address;
+        for index in 0..dynamic.verneed_count {
+            let offset = version_file_offset(image, bytes, cursor, 16)?;
+            let version = u16::from_le_bytes(bytes[offset..offset + 2].try_into().unwrap());
+            let count = u16::from_le_bytes(bytes[offset + 2..offset + 4].try_into().unwrap());
+            let file = u32::from_le_bytes(bytes[offset + 4..offset + 8].try_into().unwrap());
+            let aux = u32::from_le_bytes(bytes[offset + 8..offset + 12].try_into().unwrap());
+            let next = u32::from_le_bytes(bytes[offset + 12..offset + 16].try_into().unwrap());
+            if version != 1 || count == 0 || aux == 0 {
+                return Err(Error::InvalidSegment);
+            }
+            if dynamic_string(bytes, dynamic, file as u64)
+                .filter(|name| !name.is_empty())
+                .is_none()
+            {
+                return Err(Error::InvalidSegment);
+            }
+            let mut aux_cursor = cursor
+                .checked_add(aux as u64)
+                .ok_or(Error::InvalidSegment)?;
+            for aux_index in 0..count {
+                let aux_offset = version_file_offset(image, bytes, aux_cursor, 16)?;
+                let version_index =
+                    u16::from_le_bytes(bytes[aux_offset + 8..aux_offset + 10].try_into().unwrap());
+                let name = u32::from_le_bytes(bytes[aux_offset + 12..aux_offset + 16].try_into().unwrap());
+                if version_index < 2
+                    || dynamic_string(bytes, dynamic, name as u64)
+                        .filter(|name| !name.is_empty())
+                        .is_none()
+                {
+                    return Err(Error::InvalidSegment);
+                }
+                let aux_next =
+                    u32::from_le_bytes(bytes[aux_offset + 4..aux_offset + 8].try_into().unwrap());
+                if aux_next == 0 && aux_index + 1 != count {
+                    return Err(Error::InvalidSegment);
+                }
+                if aux_next != 0 {
+                    aux_cursor = aux_cursor
+                        .checked_add(aux_next as u64)
+                        .ok_or(Error::InvalidSegment)?;
+                }
+            }
+            if next == 0 {
+                if index + 1 != dynamic.verneed_count {
+                    return Err(Error::InvalidSegment);
+                }
+            } else {
+                cursor = cursor
+                    .checked_add(next as u64)
+                    .ok_or(Error::InvalidSegment)?;
+            }
+        }
+    }
+    for index in 0..dynamic.symbol_count {
+        let offset = dynamic
+            .versym_file_offset
+            .checked_add(index.checked_mul(2).ok_or(Error::InvalidSegment)?)
+            .ok_or(Error::InvalidSegment)?;
+        let version =
+            u16::from_le_bytes(bytes[offset..offset + 2].try_into().unwrap()) & 0x7fff;
+        if version > 1 && !version_index_exists(bytes, dynamic, image, version)? {
+            return Err(Error::InvalidSegment);
+        }
+    }
+    image.dynamic = Some(dynamic);
+    Ok(())
+}
+
+fn version_index_exists(
+    bytes: &[u8],
+    dynamic: DynamicImage,
+    image: &Image,
+    wanted: u16,
+) -> Result<bool, Error> {
+    if dynamic.verdef_count != 0 {
+        let mut cursor = dynamic.verdef_address;
+        for index in 0..dynamic.verdef_count {
+            let offset = version_file_offset(image, bytes, cursor, 20)?;
+            let value = u16::from_le_bytes(bytes[offset + 4..offset + 6].try_into().unwrap());
+            if value == wanted {
+                return Ok(true);
+            }
+            let next = u32::from_le_bytes(bytes[offset + 16..offset + 20].try_into().unwrap());
+            if next == 0 {
+                if index + 1 != dynamic.verdef_count {
+                    return Err(Error::InvalidSegment);
+                }
+            } else {
+                cursor = cursor
+                    .checked_add(next as u64)
+                    .ok_or(Error::InvalidSegment)?;
+            }
+        }
+    }
+    if dynamic.verneed_count != 0 {
+        let mut cursor = dynamic.verneed_address;
+        for index in 0..dynamic.verneed_count {
+            let offset = version_file_offset(image, bytes, cursor, 16)?;
+            let count = u16::from_le_bytes(bytes[offset + 2..offset + 4].try_into().unwrap());
+            let aux = u32::from_le_bytes(bytes[offset + 8..offset + 12].try_into().unwrap());
+            let mut aux_cursor = cursor
+                .checked_add(aux as u64)
+                .ok_or(Error::InvalidSegment)?;
+            for _ in 0..count {
+                let aux_offset = version_file_offset(image, bytes, aux_cursor, 16)?;
+                let value =
+                    u16::from_le_bytes(bytes[aux_offset + 8..aux_offset + 10].try_into().unwrap());
+                if value == wanted {
+                    return Ok(true);
+                }
+                let next = u32::from_le_bytes(bytes[aux_offset + 4..aux_offset + 8].try_into().unwrap());
+                if next != 0 {
+                    aux_cursor = aux_cursor
+                        .checked_add(next as u64)
+                        .ok_or(Error::InvalidSegment)?;
+                }
+            }
+            let next = u32::from_le_bytes(bytes[offset + 12..offset + 16].try_into().unwrap());
+            if next == 0 {
+                if index + 1 != dynamic.verneed_count {
+                    return Err(Error::InvalidSegment);
+                }
+            } else {
+                cursor = cursor
+                    .checked_add(next as u64)
+                    .ok_or(Error::InvalidSegment)?;
+            }
+        }
+    }
+    Ok(false)
+}
+
+fn version_name_by_index<'a>(
+    bytes: &'a [u8],
+    dynamic: DynamicImage,
+    image: &Image,
+    wanted: u16,
+    defined: bool,
+) -> Option<&'a [u8]> {
+    if defined {
+        let mut cursor = dynamic.verdef_address;
+        for _ in 0..dynamic.verdef_count {
+            let offset = version_file_offset(image, bytes, cursor, 20).ok()?;
+            let index = u16::from_le_bytes(bytes[offset + 4..offset + 6].try_into().ok()?);
+            if index == wanted {
+                let aux = u32::from_le_bytes(bytes[offset + 12..offset + 16].try_into().ok()?);
+                let aux_offset = version_file_offset(
+                    image,
+                    bytes,
+                    cursor.checked_add(aux as u64)?,
+                    8,
+                )
+                .ok()?;
+                let name = u32::from_le_bytes(bytes[aux_offset..aux_offset + 4].try_into().ok()?);
+                return dynamic_string(bytes, dynamic, name as u64);
+            }
+            let next = u32::from_le_bytes(bytes[offset + 16..offset + 20].try_into().ok()?);
+            cursor = cursor.checked_add(next as u64)?;
+        }
+    } else {
+        let mut cursor = dynamic.verneed_address;
+        for _ in 0..dynamic.verneed_count {
+            let offset = version_file_offset(image, bytes, cursor, 16).ok()?;
+            let count = u16::from_le_bytes(bytes[offset + 2..offset + 4].try_into().ok()?);
+            let aux = u32::from_le_bytes(bytes[offset + 8..offset + 12].try_into().ok()?);
+            let mut aux_cursor = cursor.checked_add(aux as u64)?;
+            for _ in 0..count {
+                let aux_offset = version_file_offset(image, bytes, aux_cursor, 16).ok()?;
+                let index =
+                    u16::from_le_bytes(bytes[aux_offset + 8..aux_offset + 10].try_into().ok()?);
+                if index == wanted {
+                    let name =
+                        u32::from_le_bytes(bytes[aux_offset + 12..aux_offset + 16].try_into().ok()?);
+                    return dynamic_string(bytes, dynamic, name as u64);
+                }
+                let next =
+                    u32::from_le_bytes(bytes[aux_offset + 4..aux_offset + 8].try_into().ok()?);
+                aux_cursor = aux_cursor.checked_add(next as u64)?;
+            }
+            let next = u32::from_le_bytes(bytes[offset + 12..offset + 16].try_into().ok()?);
+            cursor = cursor.checked_add(next as u64)?;
+        }
+    }
+    None
 }
 
 pub fn parse(bytes: &[u8]) -> Result<Image, Error> {
@@ -602,6 +939,11 @@ fn parse_image(bytes: &[u8], shared: bool) -> Result<Image, Error> {
             let mut needed_offsets = [0; MAX_NEEDED_LIBRARIES];
             let mut needed_count = 0;
             let mut soname_offset = None;
+            let mut versym_address = None;
+            let mut verdef_address = None;
+            let mut verdef_count = 0usize;
+            let mut verneed_address = None;
+            let mut verneed_count = 0usize;
             let dynamic_bytes = &bytes[file_offset..file_end];
             let mut terminated = false;
             let mut debug_seen = false;
@@ -711,8 +1053,26 @@ fn parse_image(bytes: &[u8], shared: bool) -> Result<Image, Error> {
                     }
                     // Common metadata tags do not affect relocation of a
                     // symbol-free static PIE and are intentionally ignored.
-                    0x6fff_fff0 | 0x6fff_fffc | 0x6fff_fffd | 0x6fff_fffe | 0x6fff_ffff => {
-                        return Err(Error::Unsupported);
+                    0x6fff_fff0 => {
+                        if versym_address.replace(value).is_some() {
+                            return Err(Error::InvalidSegment);
+                        }
+                    }
+                    0x6fff_fffc => {
+                        if verdef_address.replace(value).is_some() {
+                            return Err(Error::InvalidSegment);
+                        }
+                    }
+                    0x6fff_fffd => {
+                        verdef_count = usize::try_from(value).map_err(|_| Error::InvalidSegment)?;
+                    }
+                    0x6fff_fffe => {
+                        if verneed_address.replace(value).is_some() {
+                            return Err(Error::InvalidSegment);
+                        }
+                    }
+                    0x6fff_ffff => {
+                        verneed_count = usize::try_from(value).map_err(|_| Error::InvalidSegment)?;
                     }
                     3 | 30 | 0x6fff_fff9 | 0x6fff_fffb => {}
                     _ => return Err(Error::Unsupported),
@@ -800,6 +1160,14 @@ fn parse_image(bytes: &[u8], shared: bool) -> Result<Image, Error> {
                     needed_offsets,
                     needed_count,
                     soname_offset,
+                    versym_address: versym_address.unwrap_or(0),
+                    versym_file_offset: 0,
+                    verdef_address: verdef_address.unwrap_or(0),
+                    verdef_file_offset: 0,
+                    verdef_count,
+                    verneed_address: verneed_address.unwrap_or(0),
+                    verneed_file_offset: 0,
+                    verneed_count,
                 });
                 // Resolve the virtual relocation table to its file-backed
                 // bytes after all PT_LOAD headers have been collected.
@@ -851,6 +1219,14 @@ fn parse_image(bytes: &[u8], shared: bool) -> Result<Image, Error> {
                     needed_offsets,
                     needed_count,
                     soname_offset,
+                    versym_address: versym_address.unwrap_or(0),
+                    versym_file_offset: 0,
+                    verdef_address: verdef_address.unwrap_or(0),
+                    verdef_file_offset: 0,
+                    verdef_count,
+                    verneed_address: verneed_address.unwrap_or(0),
+                    verneed_file_offset: 0,
+                    verneed_count,
                 });
             }
             continue;
@@ -1365,6 +1741,7 @@ fn parse_image(bytes: &[u8], shared: bool) -> Result<Image, Error> {
             }
         }
         image.dynamic = Some(dynamic);
+        validate_version_tables(bytes, &mut image)?;
     }
     if let Some((relro_start, relro_size)) = image.relro {
         let relro_end = relro_start
