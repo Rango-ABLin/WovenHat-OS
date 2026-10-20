@@ -115,6 +115,14 @@ impl Credential {
         }
         difference == 0
     }
+
+    fn verify_digest(&self, digest: &[u8; 32]) -> bool {
+        let mut difference = 0u8;
+        for (candidate, stored) in digest.iter().zip(self.hash.iter()) {
+            difference |= candidate ^ stored;
+        }
+        difference == 0
+    }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -222,12 +230,41 @@ impl Authority {
         self.add_user_with_role(name, gid, salt, password, true)
     }
 
+    /// Import an already-derived credential without accepting plaintext.
+    pub fn add_stored_user(
+        &mut self,
+        name: &[u8],
+        gid: GroupId,
+        salt: &[u8],
+        hash: &[u8; 32],
+        administrator: bool,
+    ) -> Result<UserId, Error> {
+        let (salt, salt_len) = bounded_salt(salt)?;
+        self.add_user_with_credential(
+            name,
+            gid,
+            Credential { salt, salt_len, hash: *hash },
+            administrator,
+        )
+    }
+
     fn add_user_with_role(
         &mut self,
         name: &[u8],
         gid: GroupId,
         salt: &[u8],
         password: &[u8],
+        administrator: bool,
+    ) -> Result<UserId, Error> {
+        let credential = Credential::new(salt, password)?;
+        self.add_user_with_credential(name, gid, credential, administrator)
+    }
+
+    fn add_user_with_credential(
+        &mut self,
+        name: &[u8],
+        gid: GroupId,
+        credential: Credential,
         administrator: bool,
     ) -> Result<UserId, Error> {
         let (name, name_len) = bounded_name(name)?;
@@ -252,7 +289,6 @@ impl Authority {
             .iter()
             .position(Option::is_none)
             .ok_or(Error::Full)?;
-        let credential = Credential::new(salt, password)?;
         let id = UserId(self.next_user);
         self.next_user = self.next_user.checked_add(1).ok_or(Error::Full)?;
         self.users[slot] = Some(User {
@@ -307,6 +343,42 @@ impl Authority {
         self.open_session(user, password)
     }
 
+    /// Open a session after a trusted login manager has verified the PIN.
+    /// The authority still compares the supplied digest to its own record.
+    pub fn open_named_session_digest(
+        &mut self,
+        name: &[u8],
+        digest: &[u8; 32],
+    ) -> Result<SessionId, Error> {
+        let user = self
+            .users
+            .iter()
+            .flatten()
+            .find(|user| user.name[..user.name_len] == *name)
+            .ok_or(Error::NotFound)?;
+        if !user.credential.verify_digest(digest) {
+            return Err(Error::WrongPassword);
+        }
+        self.open_session_unchecked(user.id)
+    }
+
+    fn open_session_unchecked(&mut self, user: UserId) -> Result<SessionId, Error> {
+        let slot = self
+            .sessions
+            .iter()
+            .position(Option::is_none)
+            .ok_or(Error::Full)?;
+        let id = SessionId(self.next_session);
+        self.next_session = self.next_session.checked_add(1).ok_or(Error::Full)?;
+        self.sessions[slot] = Some(Session {
+            id,
+            user,
+            state: SessionState::Active,
+            elevated: false,
+        });
+        Ok(id)
+    }
+
     pub fn lock(&mut self, session: SessionId) -> Result<(), Error> {
         let session = self.find_session_mut(session).ok_or(Error::NotFound)?;
         session.state = SessionState::Locked;
@@ -321,6 +393,21 @@ impl Authority {
             .ok_or(Error::NotFound)?
             .credential
             .verify(password)
+        {
+            return Err(Error::WrongPassword);
+        }
+        let session = self.find_session_mut(session).ok_or(Error::NotFound)?;
+        session.state = SessionState::Active;
+        Ok(())
+    }
+
+    pub fn unlock_digest(&mut self, session: SessionId, digest: &[u8; 32]) -> Result<(), Error> {
+        let user = self.find_session(session).ok_or(Error::NotFound)?.user;
+        if !self
+            .find_user(user)
+            .ok_or(Error::NotFound)?
+            .credential
+            .verify_digest(digest)
         {
             return Err(Error::WrongPassword);
         }
@@ -694,6 +781,31 @@ pub fn session_open(name: &[u8], password: &[u8]) -> Result<SessionId, crate::Er
     .map(SessionId)
 }
 
+/// Open an account session using a digest verified by the trusted login
+/// manager. The kernel still compares it against its authority record.
+pub fn session_open_verified(
+    name: &[u8],
+    digest: &[u8; 32],
+) -> Result<SessionId, crate::Error> {
+    if name.is_empty() || name.len() > MAX_NAME {
+        return Err(crate::Error::Failed);
+    }
+    let mut packed = [0u8; 1 + MAX_NAME + 32];
+    packed[0] = name.len() as u8;
+    packed[1..1 + name.len()].copy_from_slice(name);
+    packed[1 + name.len()..1 + name.len() + 32].copy_from_slice(digest);
+    let length = 1 + name.len() + 32;
+    crate::check(unsafe {
+        crate::syscall::invoke(
+            crate::syscall::IDENTITY_OPEN_VERIFIED,
+            packed.as_ptr() as u64,
+            length as u64,
+            0,
+        )
+    })
+    .map(SessionId)
+}
+
 pub fn session_lock(session: SessionId) -> Result<(), crate::Error> {
     // SAFETY: integer-only syscall; the kernel owner-binds the token.
     crate::check(unsafe {
@@ -730,6 +842,23 @@ pub fn session_unlock(session: SessionId, password: &[u8]) -> Result<(), crate::
     session_password_action(crate::syscall::IDENTITY_UNLOCK, session, password)
 }
 
+pub fn session_unlock_verified(
+    session: SessionId,
+    digest: &[u8; 32],
+) -> Result<(), crate::Error> {
+    let mut packed = [0u8; 32];
+    packed.copy_from_slice(digest);
+    crate::check(unsafe {
+        crate::syscall::invoke(
+            crate::syscall::IDENTITY_UNLOCK_VERIFIED,
+            session.0,
+            packed.as_ptr() as u64,
+            packed.len() as u64,
+        )
+    })
+    .map(|_| ())
+}
+
 pub fn session_elevate(session: SessionId, password: &[u8]) -> Result<(), crate::Error> {
     session_password_action(crate::syscall::IDENTITY_ELEVATE, session, password)
 }
@@ -760,6 +889,15 @@ fn bounded_name(input: &[u8]) -> Result<([u8; MAX_NAME], usize), Error> {
     let mut name = [0; MAX_NAME];
     name[..input.len()].copy_from_slice(input);
     Ok((name, input.len()))
+}
+
+fn bounded_salt(input: &[u8]) -> Result<([u8; MAX_SALT_BYTES], usize), Error> {
+    if input.is_empty() || input.len() > MAX_SALT_BYTES {
+        return Err(Error::Invalid);
+    }
+    let mut salt = [0u8; MAX_SALT_BYTES];
+    salt[..input.len()].copy_from_slice(input);
+    Ok((salt, input.len()))
 }
 
 #[cfg(test)]
@@ -830,6 +968,20 @@ mod tests {
             Err(Error::Full)
         );
         assert!(authority.open_session(user, b"1234").is_ok());
+    }
+
+    #[test]
+    fn stored_credential_import_authenticates_without_plaintext() {
+        let mut authority = Authority::new();
+        let group = authority.add_group(b"users").unwrap();
+        let salt = b"account-file-salt";
+        let digest = hash_pin(salt, b"1234");
+        let user = authority
+            .add_stored_user(b"ada", group, salt, &digest, false)
+            .unwrap();
+        let session = authority.open_session(user, b"1234").unwrap();
+        assert_eq!(authority.view(session).unwrap().uid, 1000);
+        assert_eq!(authority.open_session(user, b"wrong"), Err(Error::WrongPassword));
     }
 
     #[test]

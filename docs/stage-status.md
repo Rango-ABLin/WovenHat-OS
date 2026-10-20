@@ -1,5 +1,26 @@
 # Stage status
 
+## Stage 24.6 live WovenIdentity runtime and WovenShell login (2026-10-20)
+
+The system-apps boot imports bounded `/etc/wovenhat/accounts` records into a
+fresh kernel `Authority` before WovenShell starts. WovenShell verifies the PIN
+once and uses capability-gated verified-digest syscalls 224 and 225; the
+kernel compares the digest to its own authority before binding credentials to
+the shell process. Lock, unlock, owner validation, and process-exit
+reclamation are live. The harness synchronizes login input to the shell's
+`desktop ready` marker.
+
+The 85-test `libwoven` suite, host Clippy, Stage 24.5 freestanding Clippy,
+system-apps freestanding Clippy, and diff check pass. The signed
+system-app/hardware-demo shell gate passes on 1/2/4 CPUs. Evidence is under:
+`audit-artifacts/stage24.6-live-1cpu-1792530000000000000`,
+`audit-artifacts/stage24.6-live-2cpu-1792530000000000000`, and
+`audit-artifacts/stage24.6-live-4cpu-1792530000000000000`.
+
+WID2 runtime recovery, account administration, PIN rotation, lockout/rate
+limiting, identity audit events, and hardware-backed credentials remain open;
+this is not a complete production identity subsystem.
+
 ## Stage 24.5 bounded WovenIdentity syscall ABI (2026-10-20)
 
 The WovenHat ABI now reserves syscalls 219–223 for identity session open,

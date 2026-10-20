@@ -427,6 +427,10 @@ pub enum Number {
     /// session -> 0; owner-bound close
     #[cfg(any(feature = "stage24-5-test", feature = "system-apps"))]
     IdentityClose = 223,
+    #[cfg(feature = "system-apps")]
+    IdentityOpenVerified = 224,
+    #[cfg(feature = "system-apps")]
+    IdentityUnlockVerified = 225,
 }
 
 pub fn entry_address() -> u64 {
@@ -2904,6 +2908,14 @@ pub extern "C" fn wovenhat_syscall_dispatch(
         }
         #[cfg(any(feature = "stage24-5-test", feature = "system-apps"))]
         value if value == Number::IdentityClose as u64 => sys_identity_close(arg0),
+        #[cfg(feature = "system-apps")]
+        value if value == Number::IdentityOpenVerified as u64 => {
+            sys_identity_open_verified(arg0, arg1)
+        }
+        #[cfg(feature = "system-apps")]
+        value if value == Number::IdentityUnlockVerified as u64 => {
+            sys_identity_unlock_verified(arg0, arg1, arg2)
+        }
         _ => u64::MAX,
     };
 
@@ -3345,6 +3357,55 @@ fn sys_identity_close(session: u64) -> u64 {
     crate::identity_runtime::close(
         crate::task::current_process_id(),
         libwoven::identity::SessionId(session),
+    )
+    .map_or(SYSCALL_ERROR, |_| 0)
+}
+
+#[cfg(feature = "system-apps")]
+fn sys_identity_open_verified(user_buffer: u64, length: u64) -> u64 {
+    const MAX_BUFFER: usize = 1 + crate::accounts::MAX_NAME + 32;
+    if !crate::task::current_has(crate::capability::Capability::AccountManage) {
+        return SYSCALL_ERROR;
+    }
+    let Ok(length) = usize::try_from(length) else {
+        return SYSCALL_ERROR;
+    };
+    if length == 0 || length > MAX_BUFFER {
+        return SYSCALL_ERROR;
+    }
+    let mut buffer = [0u8; MAX_BUFFER];
+    if crate::paging::copy_from_current_user(user_buffer, &mut buffer[..length]).is_err() {
+        return SYSCALL_ERROR;
+    }
+    let Some((name, rest)) = crate::identity_runtime::parse_length_prefixed(
+        &buffer[..length],
+        crate::accounts::MAX_NAME,
+    ) else {
+        return SYSCALL_ERROR;
+    };
+    let Ok(digest) = rest.try_into() else {
+        return SYSCALL_ERROR;
+    };
+    crate::identity_runtime::open_digest(crate::task::current_process_id(), name, &digest)
+        .map(|session| session.0)
+        .unwrap_or(SYSCALL_ERROR)
+}
+
+#[cfg(feature = "system-apps")]
+fn sys_identity_unlock_verified(session: u64, user_buffer: u64, length: u64) -> u64 {
+    if !crate::task::current_has(crate::capability::Capability::AccountManage)
+        || length != 32
+    {
+        return SYSCALL_ERROR;
+    }
+    let mut digest = [0u8; 32];
+    if crate::paging::copy_from_current_user(user_buffer, &mut digest).is_err() {
+        return SYSCALL_ERROR;
+    }
+    crate::identity_runtime::unlock_digest(
+        crate::task::current_process_id(),
+        libwoven::identity::SessionId(session),
+        &digest,
     )
     .map_or(SYSCALL_ERROR, |_| 0)
 }

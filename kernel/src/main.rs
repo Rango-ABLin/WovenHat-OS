@@ -93,7 +93,11 @@ mod hid;
 mod interrupts;
 #[cfg(feature = "stage24-3-test")]
 mod identity_storage;
-#[cfg(any(feature = "stage24-4-test", feature = "stage24-5-test"))]
+#[cfg(any(
+    feature = "stage24-4-test",
+    feature = "stage24-5-test",
+    feature = "system-apps"
+))]
 mod identity_runtime;
 mod ipc;
 mod irq_lock;

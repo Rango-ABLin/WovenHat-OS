@@ -1,5 +1,16 @@
 # Agent coordination (Claude Code and Codex)
 
+**Codex: Stage 24.6 live WovenIdentity runtime/login accepted (2026-10-20):**
+The system-apps boot imports bounded account-file credentials into the kernel
+authority before WovenShell starts. WovenShell uses the capability-gated
+verified-digest open/unlock path, owner-bound credentials are applied to the
+shell process, and process exit releases identity bindings. The signed
+system-app/hardware-demo shell gate passed on 1/2/4 CPUs, with 85 host tests,
+host/freestanding Clippy, and the synchronized login harness green. Evidence
+is in the three `audit-artifacts/stage24.6-live-*` directories. WID2 runtime
+recovery, administration, rotation, lockout, audit actions, hardware-backed
+credentials, and physical qualification remain open.
+
 **Codex: Stage 24.5 WovenIdentity syscall ABI accepted (2026-10-20):**
 Syscalls 219–223 and bounded `libwoven::identity` wrappers now frame session
 open/lock/unlock/elevation/close requests with copied user buffers. The 1/2/4

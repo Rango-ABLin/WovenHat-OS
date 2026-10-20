@@ -156,8 +156,15 @@ def main():
                         if process.poll() is not None or time.monotonic() > deadline:
                             raise RuntimeError('The desktop session did not start; inspect shell-regression logs')
                         time.sleep(0.1)
-                    time.sleep(2)
                     if args.hardware_demo:
+                        deadline = time.monotonic() + 60
+                        while 'woven-shell: desktop ready' not in serial.read_text(errors='replace'):
+                            if process.poll() is not None or time.monotonic() > deadline:
+                                raise RuntimeError('The desktop did not become input-ready; inspect shell-regression logs')
+                            time.sleep(0.1)
+                        # Let the compositor publish the shell's input focus
+                        # after its first frame before injecting the PIN.
+                        time.sleep(1)
                         for key in ['1', '2', '3', '4', 'ret']:
                             execute('send-key', {'keys': [{'type': 'qcode', 'data': key}], 'hold-time': 80})
                             time.sleep(0.12)

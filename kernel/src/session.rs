@@ -23,6 +23,7 @@ pub enum Error {
     /// The shell image is not a loadable program.
     Image,
     Spawn,
+    Identity,
 }
 
 #[cfg(any(feature = "system-apps", feature = "stage20-15-test"))]
@@ -43,6 +44,10 @@ pub const CAPABILITIES: CapabilitySet = CapabilitySet::only(Capability::Console)
 /// Start WovenShell from `image` as the session. With accounts, it opens
 /// at the sign-in screen.
 pub fn start(image: &[u8], accounts: Option<&str>) -> Result<u64, Error> {
+    #[cfg(feature = "system-apps")]
+    if let Some(path) = accounts {
+        crate::identity_runtime::load_accounts_file(path).map_err(|_| Error::Identity)?;
+    }
     let program = match accounts {
         Some(path) => {
             crate::userspace::load_elf_with_argv(image, &["/bin/woven-shell", "--accounts", path])

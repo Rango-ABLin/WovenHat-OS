@@ -1,5 +1,16 @@
 # WovenHat OS Architecture & Codebase Guide
 
+### Stage 24.6 — live WovenIdentity runtime and WovenShell login
+
+`kernel/src/identity_runtime.rs` loads bounded account-file records into a
+fresh authority before the production session is spawned. WovenShell owns the
+interactive PIN verification; its `AccountManage` capability gates the
+verified-digest open/unlock syscalls 224–225, and the kernel compares the
+digest against its own stored credential before applying the owner-bound
+process UID/GID. `task::exit_current_process` releases all bindings owned by
+the exiting process before scheduler teardown. Authenticated WID2 recovery,
+lockout, auditing, and PIN rotation remain separate prerequisites.
+
 ### Stage 24.5 — WovenIdentity syscall ABI
 
 Syscalls 219–223 are additive identity calls: open, lock, unlock, elevate, and

@@ -11297,6 +11297,8 @@ pub mod syscall {
     pub const IDENTITY_UNLOCK: u64 = 221;
     pub const IDENTITY_ELEVATE: u64 = 222;
     pub const IDENTITY_CLOSE: u64 = 223;
+    pub const IDENTITY_OPEN_VERIFIED: u64 = 224;
+    pub const IDENTITY_UNLOCK_VERIFIED: u64 = 225;
     pub const MESSAGE_SEND: u64 = 11;
     pub const MESSAGE_RECEIVE: u64 = 12;
 
@@ -13430,6 +13432,11 @@ pub mod accounts {
 
         pub fn name(&self) -> &[u8] {
             &self.name[..self.name_length]
+        }
+
+        /// Return stored credential material without exposing plaintext.
+        pub fn credential_material(&self) -> (&[u8], &[u8; 32]) {
+            (&self.salt[..self.salt_length], &self.hash)
         }
 
         /// Whether `pin` is this account's PIN. The comparison of the two

@@ -102,8 +102,8 @@
 //! Tab chooses the account, digits enter its PIN, Enter signs in, with the
 //! same masking and lockout as the lock screen. Once signed in, the
 //! account's name is shown in the taskbar, and the lock screen asks for that
-//! account's PIN. Every process still runs with the same kernel credentials:
-//! per-user sessions need the kernel to start processes as another user.
+//! account's PIN. The kernel identity service owns the authenticated session
+//! and applies its credentials to this process.
 //!
 //! # Monitors
 //!
@@ -889,6 +889,8 @@ struct Desktop {
     chosen: usize,
     /// The account signed in, if any.
     session: Option<usize>,
+    /// Kernel-owned authentication token for the signed-in account.
+    kernel_session: Option<libwoven::identity::SessionId>,
     /// Which step of changing the signed-in account's PIN is active, under
     /// `LockMode::ChangePin`.
     change_pin: Option<ChangePinStep>,
@@ -951,6 +953,7 @@ impl Desktop {
         accounts: [None; MAX_ACCOUNTS],
         chosen: 0,
         session: None,
+        kernel_session: None,
         change_pin: None,
         change_pin_old: [0; MAX_PIN],
         change_pin_old_length: 0,
@@ -1391,6 +1394,12 @@ impl Desktop {
 
     fn lock(&mut self) -> Area {
         let _ = self.close_panels();
+        if let Some(session) = self.kernel_session {
+            if libwoven::identity::session_lock(session).is_err() {
+                log(&[b"woven-shell: kernel identity lock failed"]);
+                return self.screen();
+            }
+        }
         self.locked = true;
         self.mode = LockMode::Lock;
         self.forget_entry();
@@ -1484,7 +1493,52 @@ impl Desktop {
             Key::Enter => {
                 if libwoven::ticks() < self.lockout_until {
                     self.prompt = LockPrompt::LockedOut;
-                } else if self.pin_matches() {
+                } else if match self.mode {
+                    LockMode::SignIn | LockMode::Lock
+                        if self.accounts.iter().any(Option::is_some) => true,
+                    _ => self.pin_matches(),
+                } {
+                    let kernel_authenticated = match self.mode {
+                        LockMode::SignIn => {
+                            match self.accounts[self.chosen] {
+                                Some(account) if account.verify(&self.entry[..self.entry_length]) => {
+                                    let (_, digest) = account.credential_material();
+                                    match libwoven::identity::session_open_verified(
+                                        account.name(),
+                                        digest,
+                                    ) {
+                                        Ok(session) => {
+                                            self.kernel_session = Some(session);
+                                            true
+                                        }
+                                        Err(_) => false,
+                                    }
+                                }
+                                None => false,
+                                Some(_) => false,
+                            }
+                        }
+                        LockMode::Lock => match (
+                            self.kernel_session,
+                            self.session.and_then(|index| self.accounts[index]),
+                        ) {
+                            (Some(session), Some(account))
+                                if account.verify(&self.entry[..self.entry_length]) => {
+                                    let (_, digest) = account.credential_material();
+                                    libwoven::identity::session_unlock_verified(session, digest)
+                                        .is_ok()
+                                }
+                            _ => false,
+                        },
+                        LockMode::ChangePin => true,
+                    };
+                    if !kernel_authenticated {
+                        self.failures += 1;
+                        self.prompt = LockPrompt::Wrong;
+                        log(&[b"woven-shell: kernel identity rejected PIN"]);
+                        self.forget_entry();
+                        return self.lock_input_area();
+                    }
                     self.locked = false;
                     self.failures = 0;
                     if self.mode == LockMode::SignIn {

@@ -5,7 +5,7 @@
 //! caller must already hold the kernel-only StorageIo authority. Sessions are
 //! never written to disk.
 
-use libwoven::identity::{Authority, Error as IdentityError, SNAPSHOT_BYTES};
+use libwoven::identity::{Authority, SNAPSHOT_BYTES};
 
 const PATHS: [&str; 2] = ["/wfs/identity-state-a", "/wfs/identity-state-b"];
 const RECORD_BYTES: usize = 4 + 8 + SNAPSHOT_BYTES + 4;
@@ -101,6 +101,7 @@ pub fn load(output: &mut [u8; SNAPSHOT_BYTES]) -> Result<u64, RecordError> {
     Ok(record.0)
 }
 
+#[cfg(feature = "stage24-3-test")]
 pub fn durable_self_test() -> bool {
     fn fail(reason: &str) -> bool {
         crate::serial::write_line(format_args!("[S24.3] {}", reason));
