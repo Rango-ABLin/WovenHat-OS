@@ -141,6 +141,8 @@ mod task;
 mod terminal;
 #[cfg(feature = "qemu-test")]
 mod update;
+#[cfg(feature = "stage21-1-test")]
+mod package;
 #[allow(dead_code)]
 mod thread;
 mod timer;
@@ -4388,6 +4390,15 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
             qemu_test_exit_failure();
         }
         serial::write_line(format_args!("[S27.1] update A/B rollback: PASSED"));
+        qemu_test_exit_success();
+    }
+    #[cfg(feature = "stage21-1-test")]
+    {
+        if !package::self_test() {
+            serial::write_line(format_args!("[S21.1] WovenPackages parser: FAILED"));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!("[S21.1] WovenPackages parser: PASSED"));
         qemu_test_exit_success();
     }
     #[cfg(feature = "stage27-2-test")]

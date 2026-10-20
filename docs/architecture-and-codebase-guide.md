@@ -1134,6 +1134,22 @@ and `/share/applications` catalog artifacts in one install-plan manifest. The
 manifest is consumed by the feature-gated multi-package RAM installer; the
 remaining roadmap applications and full GUI integration remain open.
 
+## Stage 21.1 WovenPackages bounded envelope
+
+`libwoven/src/package.rs` defines the first WovenPackages boundary as a
+version-1 `WPKG` envelope. Its fixed header carries bounded manifest,
+application, and resource lengths followed by a 64-byte signature field. The
+manifest is length-prefixed and bounded to 4096 bytes; names are limited to 48
+safe ASCII bytes, dependencies to 16 entries, applications to 64 MiB, and
+resources to 16 MiB. Parsing checks magic/version, arithmetic overflow, exact
+total length, manifest structure, names, dependency count, and nonzero package
+version before exposing borrowed payload slices. The parser preserves the
+signature bytes and immutable signed-prefix view, but deliberately does not
+claim cryptographic authentication: the package service must verify the
+signature over its defined envelope domain before installation. No package
+producer, persistent installer, update/removal transaction, sandbox launcher,
+or trust-root policy is implied by this parser increment.
+
 The feature-gated `stage19-app-catalog-test` now exercises the install-plan
 boundary for all ten accepted packages together. It verifies each WAPP,
 rejects a mutation, installs and reads each package back through the VFS,

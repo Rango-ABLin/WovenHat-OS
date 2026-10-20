@@ -1,5 +1,16 @@
 # Agent coordination (Claude Code and Codex)
 
+**Codex: Stage 21.1 bounded WovenPackages envelope (2026-10-20):** `libwoven`
+now parses a bounded version-1 `WPKG` envelope containing a manifest,
+application bytes, resources, and a fixed 64-byte signature field. Manifest
+names/dependencies, lengths, counts, and total size are validated before any
+payload slice is exposed. The kernel feature-gated self-test passed host tests,
+warning-denying host/freestanding Clippy, and dedicated QEMU acceptance on
+1/2/4 CPUs. This parser intentionally does not authenticate signatures or
+install/mutate packages; producer, trust-root validation, WovenStore lifecycle,
+and package service ownership remain the next Stage 21 slices. No physical USB
+write was performed.
+
 **Codex: native WovenFS VFS lifecycle increment (2026-10-20):** `/wfs`
 publication now serializes mount/unmount with native mutations, removes stale
 cached descendants and invalidates open descriptions on remount, and rejects

@@ -175,9 +175,11 @@ stage20-13-test = ["qemu-test"]
 stage20-14-test = ["qemu-test"]
 # The desktop across two monitors.
 stage20-14b-test = ["qemu-test"]
+stage21-1-test = ["qemu-test"]
 stage1-5-test = ["qemu-test"]
 
 [dependencies]
+libwoven = { path = "../libwoven" }
 bootloader_api = "0.11.17"
 x86_64 = "0.15.5"
 spin = "0.10"

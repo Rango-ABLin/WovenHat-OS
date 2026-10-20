@@ -1087,6 +1087,7 @@ dependencies = [
  "bootloader_api",
  "ed25519-compact",
  "hmac",
+ "libwoven",
  "pbkdf2",
  "poly1305",
  "sha1",

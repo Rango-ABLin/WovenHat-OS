@@ -6391,6 +6391,22 @@ with `Capability::StorageIo` can obtain the private WovenFS writer token.
 This does not yet constitute the long-lived userspace update daemon or its
 IPC/syscall protocol.
 
+## Stage 21.1 bounded WovenPackages envelope (2026-10-20)
+
+The new `libwoven::package` parser accepts only bounded version-1 `WPKG`
+envelopes with a structurally valid manifest, application, resource payload,
+and fixed signature field. It rejects truncation, bad magic/version, overflow,
+length mismatch, invalid names, and excessive dependencies before returning
+borrowed payload slices. Host workspace tests, host `-D warnings` Clippy,
+freestanding kernel `stage21-1-test` `-D warnings` Clippy, and the dedicated
+QEMU gate passed on 1/2/4 CPUs. Evidence is recorded in
+`docs/audit-stage21-1-wovenpackages-2026-10-20.md` and the corresponding
+`audit-artifacts/stage21.1-*` directories.
+
+This is a parser/format foundation only. Signature authentication, package
+production, persistent WovenStore installation, updates, removal, rollback,
+sandbox declaration enforcement, and a service/IPC boundary remain open.
+
 # Stage 15 native WovenFS VFS lifecycle (2026-10-20)
 
 The native WovenFS adapter now owns the `/wfs` publication lifecycle. Mount

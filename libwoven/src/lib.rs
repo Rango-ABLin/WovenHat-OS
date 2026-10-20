@@ -23,6 +23,8 @@ pub mod process {
     pub struct Id(pub u64);
 }
 
+pub mod package;
+
 #[cfg(test)]
 #[path = "../../kernel/src/exit_status.rs"]
 mod kernel_exit_status;
