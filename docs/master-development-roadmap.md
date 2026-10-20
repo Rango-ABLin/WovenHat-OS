@@ -892,6 +892,12 @@ authorization-broker integration, lockout policy, administration UI, and
 hardware-backed credentials remain open; do not treat this foundation as a
 complete production identity implementation.
 
+Stage 24.2 authenticated snapshot accepted (2026-10-20): users, groups,
+administrator roles, profiles, salts, and password digests have a bounded
+authenticated `WID1` representation; sessions are intentionally excluded.
+Kernel-authorized durable filesystem writes/recovery, key management,
+credential rotation, lockout, and task/session integration remain open.
+
 Implement:
 
 local users

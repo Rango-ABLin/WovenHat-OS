@@ -1,5 +1,27 @@
 # Stage status
 
+## Stage 24.2 authenticated WovenIdentity snapshot (2026-10-20)
+
+`libwoven::identity` now encodes users, groups, administrator roles, profile
+names, salts, and password digests into a fixed-size `WID1` snapshot with an
+FNV-1a integrity check. Decoding is fail-closed and transactional: malformed,
+duplicate, out-of-range, tampered, or non-zero-padding records are rejected
+without changing an existing authority. Active sessions are never serialized,
+so reboot cannot restore authentication state.
+
+The dedicated gate passed with exit 33 and
+`[S24.2] WovenIdentity snapshot: PASSED` on 1/2/4 CPUs. The 84-test
+`libwoven` suite, Stage 24.2 freestanding Clippy, host all-targets Clippy,
+Python validation, and `git diff --check` pass. Evidence is preserved under:
+`audit-artifacts/stage24.2-1cpu-1792526063075640900`,
+`audit-artifacts/stage24.2-2cpu-1792526104893458300`, and
+`audit-artifacts/stage24.2-4cpu-1792526146509891500`.
+
+This is the authenticated storage format, not yet durable filesystem
+integration: the kernel still needs authorized atomic writes/recovery, record
+key management, credential rotation, lockout/rate limiting, and task/session
+credential integration.
+
 ## Stage 24.1 bounded WovenIdentity core (2026-10-20)
 
 `libwoven::identity` provides a fixed-capacity local identity authority for

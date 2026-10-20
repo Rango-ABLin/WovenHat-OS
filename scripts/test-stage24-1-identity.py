@@ -12,6 +12,7 @@ import time
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--cpus", type=int, choices=(1, 2, 4), default=1)
+    parser.add_argument("--stage", type=int, choices=(1, 2), default=1)
     parser.add_argument(
         "--qemu",
         default=shutil.which("qemu-system-x86_64")
@@ -36,7 +37,7 @@ def main() -> int:
                 "run",
                 "--quiet",
                 "--features",
-                "stage24-1-test",
+                f"stage24-{args.stage}-test",
                 "--",
                 "--print-image",
             ],
@@ -45,7 +46,7 @@ def main() -> int:
             text=True,
         ).strip()
     )
-    out = root / "audit-artifacts" / f"stage24.1-{args.cpus}cpu-{time.time_ns()}"
+    out = root / "audit-artifacts" / f"stage24.{args.stage}-{args.cpus}cpu-{time.time_ns()}"
     out.mkdir(parents=True)
     serial = out / "serial.log"
     command = [
@@ -85,12 +86,16 @@ def main() -> int:
         print(f"Stage 24.1 timed out. Evidence: {out}", file=sys.stderr)
         return 1
     serial_text = serial.read_text(errors="replace") if serial.exists() else ""
-    marker = "[S24.1] WovenIdentity core: PASSED"
+    marker = (
+        "[S24.1] WovenIdentity core: PASSED"
+        if args.stage == 1
+        else "[S24.2] WovenIdentity snapshot: PASSED"
+    )
     if result != 33 or marker not in serial_text:
-        print(f"Stage 24.1 failed (exit {result}). Evidence: {out}", file=sys.stderr)
+        print(f"Stage 24.{args.stage} failed (exit {result}). Evidence: {out}", file=sys.stderr)
         print(serial_text[-8000:], file=sys.stderr)
         return 1
-    print(f"Stage 24.1 PASS ({args.cpus} CPU, exit 33). Evidence: {out}")
+    print(f"Stage 24.{args.stage} PASS ({args.cpus} CPU, exit 33). Evidence: {out}")
     return 0
 
 

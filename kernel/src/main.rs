@@ -4649,6 +4649,15 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         serial::write_line(format_args!("[S24.1] WovenIdentity core: PASSED"));
         qemu_test_exit_success();
     }
+    #[cfg(feature = "stage24-2-test")]
+    {
+        if !stage24_identity_snapshot_self_test() {
+            serial::write_line(format_args!("[S24.2] WovenIdentity snapshot: FAILED"));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!("[S24.2] WovenIdentity snapshot: PASSED"));
+        qemu_test_exit_success();
+    }
     #[cfg(feature = "stage27-2-test")]
     {
         if !update::durable_self_test() {
@@ -6406,6 +6415,51 @@ fn stage24_identity_self_test() -> bool {
     }
     if authority.view(session).map_or(true, |view| view.uid != 0 || !view.elevated) {
         return fail("elevated credentials were not reflected");
+    }
+    true
+}
+
+#[cfg(feature = "stage24-2-test")]
+fn stage24_identity_snapshot_self_test() -> bool {
+    use libwoven::identity::{Authority, Error, UserProfile, SNAPSHOT_BYTES};
+
+    fn fail(reason: &str) -> bool {
+        serial::write_line(format_args!("[S24.2] {}", reason));
+        false
+    }
+
+    let mut authority = Authority::new();
+    let Ok(group) = authority.add_group(b"users") else {
+        return fail("group creation failed");
+    };
+    let Ok(user) = authority.add_administrator(b"alice", group, b"qemu-salt", b"1234") else {
+        return fail("user creation failed");
+    };
+    if authority
+        .set_profile(user, UserProfile::new(b"Alice Example").unwrap())
+        .is_err()
+    {
+        return fail("profile update failed");
+    }
+    let Ok(session) = authority.open_session(user, b"1234") else {
+        return fail("session creation failed");
+    };
+    let mut snapshot = [0u8; SNAPSHOT_BYTES];
+    if authority.encode_snapshot(&mut snapshot) != Ok(SNAPSHOT_BYTES) {
+        return fail("snapshot encoding failed");
+    }
+    let mut restored = match Authority::decode_snapshot(&snapshot) {
+        Ok(authority) => authority,
+        Err(_) => return fail("snapshot decoding failed"),
+    };
+    if restored.view(session) != Err(Error::NotFound)
+        || restored.open_session(user, b"1234").is_err()
+    {
+        return fail("session state was incorrectly persisted");
+    }
+    snapshot[SNAPSHOT_BYTES - 1] ^= 1;
+    if !matches!(Authority::decode_snapshot(&snapshot), Err(Error::Corrupt)) {
+        return fail("tampered snapshot was accepted");
     }
     true
 }

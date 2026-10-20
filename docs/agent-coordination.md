@@ -1,5 +1,13 @@
 # Agent coordination (Claude Code and Codex)
 
+**Codex: Stage 24.2 authenticated WovenIdentity snapshot accepted (2026-10-20):**
+`libwoven::identity` encodes users/groups/roles/profiles/credential digests in
+fixed-size authenticated `WID1` records and never serializes sessions. The
+1/2/4-CPU gate, 84 host tests, warning-denying Clippy, Python validation, and
+diff check pass. Evidence is under the three `audit-artifacts/stage24.2-*`
+directories listed in `docs/stage-status.md`. Authorized filesystem recovery,
+credential rotation, lockout, and task/session integration remain open.
+
 **Codex: Stage 24.1 WovenIdentity policy core accepted (2026-10-20):**
 `libwoven::identity` adds bounded users, groups, PBKDF2 credentials, sessions,
 profiles, lock/unlock, and password-confirmed elevation. The 1/2/4-CPU gate,

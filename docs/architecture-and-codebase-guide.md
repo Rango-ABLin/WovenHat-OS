@@ -1,5 +1,16 @@
 # WovenHat OS Architecture & Codebase Guide
 
+### Stage 24.2 — WovenIdentity authenticated snapshot
+
+`Authority::encode_snapshot` and `decode_snapshot` use the fixed-size `WID1`
+format defined by `libwoven::identity::SNAPSHOT_BYTES`. Records include only
+identity policy state: users, groups, administrator roles, profile display
+names, salts, and password digests. A checksum covers the complete padded
+record; decoding validates counts, names, IDs, memberships, padding, and
+duplicates before publishing a fresh authority. Sessions are deliberately
+absent from the format. The kernel must still provide authorized atomic
+filesystem persistence, recovery/key management, rotation, and task binding.
+
 ### Stage 24.1 — WovenIdentity policy core
 
 `libwoven/src/identity.rs` is the allocation-free local identity policy core.

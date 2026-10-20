@@ -14,6 +14,12 @@ pub const MAX_GROUP_MEMBERS: usize = 8;
 pub const MAX_SESSIONS: usize = 16;
 pub const MAX_PROFILE_BYTES: usize = 64;
 pub const MAX_SALT_BYTES: usize = 32;
+pub const SNAPSHOT_BYTES: usize = 4
+    + 1
+    + 1
+    + MAX_USERS * (4 + 4 + 4 + 1 + MAX_NAME + 1 + MAX_SALT_BYTES + 32 + 1 + 1 + MAX_PROFILE_BYTES)
+    + MAX_GROUPS * (4 + 1 + MAX_NAME + MAX_GROUP_MEMBERS * 4)
+    + 4;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct UserId(pub u32);
@@ -33,6 +39,8 @@ pub enum Error {
     Locked,
     WrongPassword,
     Unauthorized,
+    BufferTooSmall,
+    Corrupt,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -350,6 +358,174 @@ impl Authority {
         })
     }
 
+    /// Encode users and groups into an authenticated fixed-size snapshot.
+    /// Active sessions are intentionally excluded: authentication never
+    /// survives a reboot. The checksum is FNV-1a over the header and records.
+    pub fn encode_snapshot(&self, output: &mut [u8]) -> Result<usize, Error> {
+        if output.len() < SNAPSHOT_BYTES {
+            return Err(Error::BufferTooSmall);
+        }
+        let position = {
+            let mut writer = SnapshotWriter::new(output);
+            writer.bytes(b"WID1")?;
+            writer.u8(1)?;
+            writer.u8(self.users.iter().flatten().count() as u8)?;
+            writer.u8(self.groups.iter().flatten().count() as u8)?;
+            writer.u8(0)?;
+            for user in self.users.iter().flatten() {
+                writer.u32(user.id.0)?;
+                writer.u32(user.uid)?;
+                writer.u32(user.gid.0)?;
+                writer.u8(user.name_len as u8)?;
+                writer.fixed(&user.name)?;
+                writer.u8(user.credential.salt_len as u8)?;
+                writer.fixed(&user.credential.salt)?;
+                writer.fixed(&user.credential.hash)?;
+                writer.u8(u8::from(user.administrator))?;
+                writer.u8(user.profile.display_name_len as u8)?;
+                writer.fixed(&user.profile.display_name)?;
+            }
+            for group in self.groups.iter().flatten() {
+                writer.u32(group.id.0)?;
+                writer.u8(group.name_len as u8)?;
+                writer.fixed(&group.name)?;
+                for member in group.members {
+                    writer.u32(member.map_or(0, |user| user.0))?;
+                }
+            }
+            writer.position
+        };
+        output[position..SNAPSHOT_BYTES - 4].fill(0);
+        let checksum = fnv1a(&output[..SNAPSHOT_BYTES - 4]);
+        output[SNAPSHOT_BYTES - 4..].copy_from_slice(&checksum.to_le_bytes());
+        Ok(SNAPSHOT_BYTES)
+    }
+
+    /// Decode and authenticate a snapshot into a fresh authority. No existing
+    /// authority state is changed when validation fails.
+    pub fn decode_snapshot(input: &[u8]) -> Result<Self, Error> {
+        if input.len() != SNAPSHOT_BYTES {
+            return Err(Error::Corrupt);
+        }
+        let stored_checksum = u32::from_le_bytes(input[SNAPSHOT_BYTES - 4..].try_into().unwrap());
+        if fnv1a(&input[..SNAPSHOT_BYTES - 4]) != stored_checksum {
+            return Err(Error::Corrupt);
+        }
+        let mut reader = SnapshotReader::new(&input[..SNAPSHOT_BYTES - 4]);
+        if reader.bytes(4)? != b"WID1" || reader.u8()? != 1 {
+            return Err(Error::Corrupt);
+        }
+        let user_count = reader.u8()? as usize;
+        let group_count = reader.u8()? as usize;
+        if reader.u8()? != 0 || user_count > MAX_USERS || group_count > MAX_GROUPS {
+            return Err(Error::Corrupt);
+        }
+        let mut authority = Self::new();
+        for slot in 0..user_count {
+            let id = UserId(reader.u32()?);
+            let uid = reader.u32()?;
+            let gid = GroupId(reader.u32()?);
+            let name_len = reader.u8()? as usize;
+            let name = read_fixed::<MAX_NAME>(&mut reader)?;
+            let salt_len = reader.u8()? as usize;
+            let salt = read_fixed::<MAX_SALT_BYTES>(&mut reader)?;
+            let hash = read_fixed::<32>(&mut reader)?;
+            let administrator = match reader.u8()? {
+                0 => false,
+                1 => true,
+                _ => return Err(Error::Corrupt),
+            };
+            let profile_len = reader.u8()? as usize;
+            let profile_name = read_fixed::<MAX_PROFILE_BYTES>(&mut reader)?;
+            if id.0 == 0
+                || uid == 0
+                || gid.0 == 0
+                || bounded_name(&name[..name_len]).is_err()
+                || salt_len == 0
+                || salt_len > MAX_SALT_BYTES
+                || profile_len > MAX_PROFILE_BYTES
+                || !profile_name[..profile_len]
+                    .iter()
+                    .all(|byte| (b' '..=b'~').contains(byte))
+                || authority.find_user(id).is_some()
+                || authority.users[..slot]
+                    .iter()
+                    .flatten()
+                    .any(|user| user.name[..user.name_len] == name[..name_len])
+            {
+                return Err(Error::Corrupt);
+            }
+            let mut profile = UserProfile::EMPTY;
+            profile.display_name[..profile_len].copy_from_slice(&profile_name[..profile_len]);
+            profile.display_name_len = profile_len;
+            authority.users[slot] = Some(User {
+                id,
+                uid,
+                gid,
+                name,
+                name_len,
+                credential: Credential {
+                    salt,
+                    salt_len,
+                    hash,
+                },
+                profile,
+                administrator,
+            });
+            authority.next_user = authority.next_user.max(id.0.saturating_add(1));
+        }
+        // Groups are serialized after users, but users reference group IDs.
+        // Decode them into temporary slots first, then validate memberships.
+        for slot in 0..group_count {
+            let id = GroupId(reader.u32()?);
+            let name_len = reader.u8()? as usize;
+            let name = read_fixed::<MAX_NAME>(&mut reader)?;
+            let mut members = [None; MAX_GROUP_MEMBERS];
+            for member in &mut members {
+                let raw = reader.u32()?;
+                *member = (raw != 0).then_some(UserId(raw));
+            }
+            if id.0 == 0
+                || bounded_name(&name[..name_len]).is_err()
+                || authority.find_group(id).is_some()
+                || authority.groups[..slot]
+                    .iter()
+                    .flatten()
+                    .any(|group| group.name[..group.name_len] == name[..name_len])
+            {
+                return Err(Error::Corrupt);
+            }
+            authority.groups[slot] = Some(Group {
+                id,
+                name,
+                name_len,
+                members,
+            });
+            authority.next_group = authority.next_group.max(id.0.saturating_add(1));
+        }
+        if reader
+            .bytes(SNAPSHOT_BYTES - 4 - reader.position)?
+            .iter()
+            .any(|byte| *byte != 0)
+            || reader.position != SNAPSHOT_BYTES - 4
+            || authority
+                .users
+                .iter()
+                .flatten()
+                .any(|user| authority.find_group(user.gid).is_none())
+            || authority.groups.iter().flatten().any(|group| {
+                group
+                    .members
+                    .iter()
+                    .flatten()
+                    .any(|member| authority.find_user(*member).is_none())
+            })
+        {
+            return Err(Error::Corrupt);
+        }
+        Ok(authority)
+    }
+
     fn add_member(&mut self, gid: GroupId, user: UserId) -> Result<(), Error> {
         let group = self.find_group_mut(gid).ok_or(Error::NotFound)?;
         let slot = group
@@ -393,6 +569,87 @@ impl Authority {
             .flatten()
             .find(|session| session.id == id)
     }
+}
+
+struct SnapshotWriter<'a> {
+    output: &'a mut [u8],
+    position: usize,
+}
+
+impl SnapshotWriter<'_> {
+    const fn new(output: &mut [u8]) -> SnapshotWriter<'_> {
+        SnapshotWriter {
+            output,
+            position: 0,
+        }
+    }
+
+    fn bytes(&mut self, bytes: &[u8]) -> Result<(), Error> {
+        self.fixed(bytes)
+    }
+
+    fn fixed(&mut self, bytes: &[u8]) -> Result<(), Error> {
+        let end = self
+            .position
+            .checked_add(bytes.len())
+            .ok_or(Error::BufferTooSmall)?;
+        if end > self.output.len() {
+            return Err(Error::BufferTooSmall);
+        }
+        self.output[self.position..end].copy_from_slice(bytes);
+        self.position = end;
+        Ok(())
+    }
+
+    fn u8(&mut self, value: u8) -> Result<(), Error> {
+        self.fixed(&[value])
+    }
+    fn u32(&mut self, value: u32) -> Result<(), Error> {
+        self.fixed(&value.to_le_bytes())
+    }
+}
+
+struct SnapshotReader<'a> {
+    input: &'a [u8],
+    position: usize,
+}
+
+impl SnapshotReader<'_> {
+    const fn new(input: &[u8]) -> SnapshotReader<'_> {
+        SnapshotReader { input, position: 0 }
+    }
+
+    fn bytes(&mut self, length: usize) -> Result<&[u8], Error> {
+        let end = self.position.checked_add(length).ok_or(Error::Corrupt)?;
+        if end > self.input.len() {
+            return Err(Error::Corrupt);
+        }
+        let bytes = &self.input[self.position..end];
+        self.position = end;
+        Ok(bytes)
+    }
+
+    fn u8(&mut self) -> Result<u8, Error> {
+        Ok(*self.bytes(1)?.first().ok_or(Error::Corrupt)?)
+    }
+    fn u32(&mut self) -> Result<u32, Error> {
+        Ok(u32::from_le_bytes(
+            self.bytes(4)?.try_into().map_err(|_| Error::Corrupt)?,
+        ))
+    }
+}
+
+fn read_fixed<const N: usize>(reader: &mut SnapshotReader<'_>) -> Result<[u8; N], Error> {
+    reader.bytes(N)?.try_into().map_err(|_| Error::Corrupt)
+}
+
+fn fnv1a(bytes: &[u8]) -> u32 {
+    let mut hash = 0x811c9dc5u32;
+    for byte in bytes {
+        hash ^= u32::from(*byte);
+        hash = hash.wrapping_mul(0x01000193);
+    }
+    hash
 }
 
 impl Default for Authority {
@@ -483,5 +740,31 @@ mod tests {
             Err(Error::Full)
         );
         assert!(authority.open_session(user, b"1234").is_ok());
+    }
+
+    #[test]
+    fn snapshot_round_trip_excludes_sessions_and_rejects_tampering() {
+        let mut authority = Authority::new();
+        let group = authority.add_group(b"users").unwrap();
+        let user = authority
+            .add_administrator(b"alice", group, b"salt", b"1234")
+            .unwrap();
+        authority
+            .set_profile(user, UserProfile::new(b"Alice Example").unwrap())
+            .unwrap();
+        assert!(authority.open_session(user, b"1234").is_ok());
+        let mut snapshot = [0u8; SNAPSHOT_BYTES];
+        assert_eq!(
+            authority.encode_snapshot(&mut snapshot).unwrap(),
+            SNAPSHOT_BYTES
+        );
+        let mut restored = Authority::decode_snapshot(&snapshot).unwrap();
+        assert_eq!(restored.view(SessionId(1)), Err(Error::NotFound));
+        assert!(restored.open_session(user, b"1234").is_ok());
+        snapshot[SNAPSHOT_BYTES - 1] ^= 1;
+        assert!(matches!(
+            Authority::decode_snapshot(&snapshot),
+            Err(Error::Corrupt)
+        ));
     }
 }
