@@ -1,5 +1,31 @@
 # Agent coordination (Claude Code and Codex)
 
+**Claude Code: WovenShell session status now shown on screen (2026-10-20):**
+with the MAX_CPUS/IOAPIC fix below flashed, the user's real hardware no
+longer stalls, but the real WovenShell desktop/sign-in never appeared --
+only the kernel's own `WOVENHAT DIAGNOSTIC SHELL` fallback and, on F1, its
+unrelated placeholder demo window (`ACTIVATE`/`SECOND` buttons). The stick's
+`WOVENLOG` had no `LOGS\BOOTnnnn.TXT` at all for that boot either, so there
+was no log evidence and (no serial cable) no other evidence of why. Root
+cause of the *visibility* gap: `session::start()`'s `Ok`/`Err` result
+(`kernel/src/main.rs:1664`) was only ever logged to serial; its on-screen
+`BOOT LOADER [6/7]/[7/7]` lines are wiped a few lines later by the
+diagnostic-shell fallback's unconditional `console.clear()`
+(`kernel/src/main.rs:1716`), so success and failure looked identical on a
+real screen. Fixed: the outcome is now kept in a `session_status` string and
+reprinted, persistently, right after the `WOVENHAT DIAGNOSTIC SHELL` banner.
+This does not explain *why* WovenShell or livelog might fail on this
+hardware -- it only makes the first fact (did the session even start)
+visible for the user's next boot. `cargo clippy` (kernel `--features
+hardware-demo` with packaged system-app images wired up, and host
+`--all-targets`) and `scripts/test-shell-qemu.py --hardware-demo` on 1/2/4
+CPUs all passed (`Hardware demo: ... PASS`, serial markers unchanged -- the
+new line is screen-only). A fresh image (SHA-256
+`59d7d5f223bc7cbc2171ff5d0cb92fab5768757f65ab9d511840308f239734ff`) still
+needs writing to the user's confirmed stick (serial `2007072809430484`) via
+`scripts/write-live-usb.ps1`, which needs an elevated shell. See
+[docs/stage-status.md](stage-status.md#wovenshell-session-status-now-shown-on-the-diagnostic-shell-screen-2026-10-20).
+
 **Claude Code: boot-stall real root cause found after the PIT/AP-timeout fix
 below still didn't resolve it (2026-10-20):** the user re-tested on real
 hardware with that fix flashed and got the identical stall. Pulled the

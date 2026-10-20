@@ -1655,13 +1655,24 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
 
         // Stage 20.15: the WovenShell desktop is the session; F12 shows this
         // diagnostic console instead.
+        //
+        // The outcome is kept in `session_status` and shown again on the
+        // diagnostic-shell banner below: the progress lines printed here are
+        // wiped by that banner's `console.clear()` a moment later, which on
+        // real hardware (no serial cable, no WOVENLOG yet at this point)
+        // left a session that failed to start indistinguishable from one
+        // that is simply running behind the compositor.
+        #[cfg(feature = "system-apps")]
+        let session_status;
+        #[cfg(not(feature = "system-apps"))]
+        let session_status = alloc::string::String::new();
         #[cfg(feature = "system-apps")]
         {
             console.println("BOOT LOADER [6/7]: starting WovenShell desktop");
             let accounts = vfs::stat("/etc/wovenhat/accounts")
                 .is_ok()
                 .then_some("/etc/wovenhat/accounts");
-            match session::start(WOVEN_SHELL_IMAGE, accounts) {
+            session_status = match session::start(WOVEN_SHELL_IMAGE, accounts) {
                 Ok(pid) => {
                     serial::write_line(format_args!(
                         "[SESSION] WovenShell desktop started as pid {}",
@@ -1669,11 +1680,16 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
                     ));
                     console.println("DESKTOP SESSION: STARTED (F12 SWITCHES TO THIS CONSOLE)");
                     console.println("BOOT LOADER [7/7]: desktop ready");
+                    alloc::format!("SESSION: started as pid {pid} (F12 shows the desktop)")
                 }
                 Err(error) => {
-                    serial::write_line(format_args!("[SESSION] desktop not started: {:?}", error))
+                    serial::write_line(format_args!(
+                        "[SESSION] desktop not started: {:?}",
+                        error
+                    ));
+                    alloc::format!("SESSION: NOT STARTED ({error:?})")
                 }
-            }
+            };
         }
 
         serial::write_line(format_args!(
@@ -1715,6 +1731,9 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         // Start in the diagnostic shell. F1 toggles to the graphical desktop.
         console.clear();
         console.println("WOVENHAT DIAGNOSTIC SHELL (F1 TO OPEN DESKTOP)");
+        if !session_status.is_empty() {
+            console.println(&session_status);
+        }
         shell.print_prompt(&mut console);
 
         let mut userspace_was_foreground = false;

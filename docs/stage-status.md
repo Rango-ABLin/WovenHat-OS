@@ -1,5 +1,48 @@
 # Stage status
 
+## WovenShell session status now shown on the diagnostic-shell screen (2026-10-20)
+
+The user re-tested the MAX_CPUS/IOAPIC fix below on real hardware: the boot
+no longer stalls, but the desktop never came up -- the screen showed
+`WOVENHAT DIAGNOSTIC SHELL (F1 TO OPEN DESKTOP)`, and F1 opened only the
+kernel's own placeholder demo window (`ACTIVATE`/`SECOND` buttons,
+`kernel/src/main.rs` around line 1700), never WovenShell's real sign-in
+desktop. Pulling the stick's `WOVENLOG` after that boot found no
+`LOGS\BOOTnnnn.TXT` at all -- `livelog::start_deferred()` never wrote
+anything on this boot either, so there was zero on-disk evidence and, with
+no serial cable, zero other evidence of why.
+
+The code already distinguishes `session::start()`'s `Ok`/`Err` outcome, but
+only logs it to serial (`kernel/src/main.rs:1664-1676`): on screen, the
+`BOOT LOADER [6/7]/[7/7]` progress lines it prints are wiped a moment later
+by the unconditional `console.clear()` that starts the diagnostic-shell
+fallback (`kernel/src/main.rs:1716`), so a failed session and a session
+quietly running behind the compositor looked identical on a real screen.
+
+Fixed in `kernel/src/main.rs`: the session outcome is now also kept in a
+`session_status` string (`"SESSION: started as pid N ..."` or `"SESSION: NOT
+STARTED (Image|Spawn)"`) and printed again, persistently, right after the
+`WOVENHAT DIAGNOSTIC SHELL` banner -- it is no longer wiped, so the next
+real-hardware boot will say on screen whether WovenShell actually started,
+and why not if it didn't. This does not yet explain *why* `session::start`
+might fail or why `livelog` wrote nothing on that boot; it only makes the
+first one visible without a serial cable, which is the prerequisite for
+diagnosing either from the screen alone.
+
+Validation: `cargo clippy -p wovenhat-kernel --target x86_64-unknown-none
+--features hardware-demo -- -D warnings` (with the packaged system-app
+images wired up the way `scripts/test-shell-qemu.py --hardware-demo` does)
+passed; host `cargo clippy --all-targets -- -D warnings` passed;
+`scripts/test-shell-qemu.py --hardware-demo` passed on QEMU 1/2/4 CPUs,
+`Hardware demo: sign-in + 10 applications + desktop + PS/2 IOAPIC + smptest:
+PASS` on each, with no change to the serial markers the gate checks (the new
+line is screen-only). A fresh image (SHA-256
+`59d7d5f223bc7cbc2171ff5d0cb92fab5768757f65ab9d511840308f239734ff`) is
+queued to write to the user's confirmed stick (serial `2007072809430484`,
+Win32_DiskDrive size 518192640) via `scripts/write-live-usb.ps1`, which
+needs an elevated shell this session does not have. Not yet re-tested on
+the reporting user's physical machine.
+
 ## Boot-stall real root cause: MAX_CPUS=4 rejected real topologies; IOAPIC-count relaxed; panics now shown on screen (2026-10-20)
 
 The user re-tested the stick with the PIT/AP-timeout fix below flashed and
