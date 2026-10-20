@@ -443,6 +443,8 @@ pub enum Number {
     IdentityAdminRemoveMember = 230,
     #[cfg(feature = "system-apps")]
     IdentityAdminQuery = 231,
+    #[cfg(feature = "system-apps")]
+    IdentityAdminSetLockout = 232,
 }
 
 pub fn entry_address() -> u64 {
@@ -2952,6 +2954,10 @@ pub extern "C" fn wovenhat_syscall_dispatch(
         value if value == Number::IdentityAdminQuery as u64 => {
             sys_identity_admin_query(arg0, arg1, arg2)
         }
+        #[cfg(feature = "system-apps")]
+        value if value == Number::IdentityAdminSetLockout as u64 => {
+            sys_identity_admin_set_lockout(arg0)
+        }
         _ => u64::MAX,
     };
 
@@ -3672,6 +3678,26 @@ fn sys_identity_admin_query(user_output: u64, capacity: u64, kind: u64) -> u64 {
     }
     crate::audit::record(actor, crate::audit::Action::IdentityAdminQuery, u64::from(kind), true);
     length as u64
+}
+
+#[cfg(feature = "system-apps")]
+fn sys_identity_admin_set_lockout(failures: u64) -> u64 {
+    let actor = crate::task::current_task_id().as_u64();
+    let Ok(failures) = u8::try_from(failures) else {
+        crate::audit::record(actor, crate::audit::Action::IdentityAdminSetLockout, 0, false);
+        return SYSCALL_ERROR;
+    };
+    let result = crate::identity_runtime::admin_set_lockout(
+        crate::task::current_process_id(),
+        failures,
+    );
+    crate::audit::record(
+        actor,
+        crate::audit::Action::IdentityAdminSetLockout,
+        u64::from(failures),
+        result.is_ok(),
+    );
+    result.map_or(SYSCALL_ERROR, |_| 0)
 }
 
 /// The compositor surface's size and display scale. Requires `DisplayIo` and

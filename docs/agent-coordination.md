@@ -1,5 +1,19 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - Stage 24.16 (2026-10-21)
+
+Implemented and accepted durable/configurable identity lockout policy. An
+elevated owner-bound administrator can set the failed-authentication threshold
+from 1 through 32 through WovenSecurity; syscall 232 and audit action 37 carry
+the operation. WID1 snapshots remain backward-readable and new WID2 authority
+snapshots persist the policy in the existing reserved header byte. Runtime
+authentication applies it while retaining the bounded five-second cooldown.
+89 host tests, affected Clippy gates, focused UI QEMU, and signed
+system-apps 1/2/4-CPU acceptance pass. Evidence is in
+`docs/audit-stage24-16-durable-lockout-policy-2026-10-21.md`; USB was not
+modified. Next work is hardware credentials, malformed telemetry,
+release-key provisioning, and physical qualification.
+
 ## Codex - Stage 24.15 (2026-10-21)
 
 Implemented and accepted the complete WovenSecurity mutation-management UI:

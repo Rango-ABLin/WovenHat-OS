@@ -63,6 +63,8 @@ pub enum Action {
     IdentityAdminRemoveMember,
     #[allow(dead_code)]
     IdentityAdminQuery,
+    #[allow(dead_code)]
+    IdentityAdminSetLockout,
 }
 
 /// One immutable security-ledger record.

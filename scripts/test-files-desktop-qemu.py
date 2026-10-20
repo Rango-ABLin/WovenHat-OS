@@ -218,7 +218,8 @@ def main():
                             'WovenSecurity administrator directory did not open')
             # Exercise every mutation-management UI path against the bounded
             # demo authority: create a group/user, add and remove membership,
-            # then delete the temporary user.
+            # then delete the temporary user and update the durable lockout
+            # policy through the same administrator UI.
             send_keys(['g', 's', 't', 'a', 'f', 'f', 'ret'])
             wait_for_marker('WovenSecurity: group added', 'WovenSecurity group mutation failed')
             send_keys(['u', 'b', 'o', 'b', 'ret', '5', '6', '7', '8', 'ret'])
@@ -229,6 +230,9 @@ def main():
             wait_for_marker('WovenSecurity: membership removed', 'WovenSecurity membership-remove failed')
             send_keys(['d', '1', '0', '0', '2', 'ret'])
             wait_for_marker('WovenSecurity: user deleted', 'WovenSecurity delete-user failed')
+            send_keys(['l', '2', 'ret'])
+            wait_for_marker('WovenSecurity: lockout policy updated',
+                            'WovenSecurity lockout-policy mutation failed')
         # The client logs immediately after WOPN; allow the compositor's
         # event-driven repaint to reach the framebuffer before capture.
         time.sleep(2)

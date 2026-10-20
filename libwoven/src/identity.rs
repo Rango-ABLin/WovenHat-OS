@@ -14,6 +14,8 @@ pub const MAX_GROUP_MEMBERS: usize = 8;
 pub const MAX_SESSIONS: usize = 16;
 pub const MAX_PROFILE_BYTES: usize = 64;
 pub const MAX_SALT_BYTES: usize = 32;
+pub const DEFAULT_LOCKOUT_FAILURES: u8 = 5;
+pub const MAX_LOCKOUT_FAILURES: u8 = 32;
 pub const ADMIN_QUERY_USERS: u8 = 0;
 pub const ADMIN_QUERY_GROUPS: u8 = 1;
 pub const ADMIN_QUERY_VERSION: u8 = 1;
@@ -303,6 +305,7 @@ pub struct Authority {
     next_user: u32,
     next_group: u32,
     next_session: u64,
+    lockout_failures: u8,
 }
 
 impl Authority {
@@ -314,6 +317,7 @@ impl Authority {
             next_user: 1000,
             next_group: 1000,
             next_session: 1,
+            lockout_failures: DEFAULT_LOCKOUT_FAILURES,
         }
     }
 
@@ -510,6 +514,27 @@ impl Authority {
     ) -> Result<UserId, Error> {
         self.require_administrator(session)?;
         self.add_user_with_role(name, gid, salt, password, administrator)
+    }
+
+    /// Return the durable maximum failed-authentication count before the
+    /// kernel imposes its bounded cooldown.
+    pub fn lockout_failures(&self) -> u8 {
+        self.lockout_failures
+    }
+
+    /// Change the lockout threshold through an active elevated administrator
+    /// session. The cooldown duration remains a kernel time-base policy.
+    pub fn admin_set_lockout_failures(
+        &mut self,
+        session: SessionId,
+        failures: u8,
+    ) -> Result<(), Error> {
+        self.require_administrator(session)?;
+        if !(1..=MAX_LOCKOUT_FAILURES).contains(&failures) {
+            return Err(Error::Invalid);
+        }
+        self.lockout_failures = failures;
+        Ok(())
     }
 
     /// Add a group only from an active, elevated administrator session.
@@ -820,10 +845,10 @@ impl Authority {
         let position = {
             let mut writer = SnapshotWriter::new(output);
             writer.bytes(b"WID1")?;
-            writer.u8(1)?;
+            writer.u8(2)?;
             writer.u8(self.users.iter().flatten().count() as u8)?;
             writer.u8(self.groups.iter().flatten().count() as u8)?;
-            writer.u8(0)?;
+            writer.u8(self.lockout_failures)?;
             for user in self.users.iter().flatten() {
                 writer.u32(user.id.0)?;
                 writer.u32(user.uid)?;
@@ -864,15 +889,23 @@ impl Authority {
             return Err(Error::Corrupt);
         }
         let mut reader = SnapshotReader::new(&input[..SNAPSHOT_BYTES - 4]);
-        if reader.bytes(4)? != b"WID1" || reader.u8()? != 1 {
+        if reader.bytes(4)? != b"WID1" {
             return Err(Error::Corrupt);
         }
+        let version = reader.u8()?;
         let user_count = reader.u8()? as usize;
         let group_count = reader.u8()? as usize;
-        if reader.u8()? != 0 || user_count > MAX_USERS || group_count > MAX_GROUPS {
+        let lockout_failures = reader.u8()?;
+        let lockout_failures = match version {
+            1 if lockout_failures == 0 => DEFAULT_LOCKOUT_FAILURES,
+            2 if (1..=MAX_LOCKOUT_FAILURES).contains(&lockout_failures) => lockout_failures,
+            _ => return Err(Error::Corrupt),
+        };
+        if user_count > MAX_USERS || group_count > MAX_GROUPS {
             return Err(Error::Corrupt);
         }
         let mut authority = Self::new();
+        authority.lockout_failures = lockout_failures;
         for slot in 0..user_count {
             let id = UserId(reader.u32()?);
             let uid = reader.u32()?;
@@ -1296,6 +1329,22 @@ pub fn admin_remove_group_member(user: UserId, group: GroupId) -> Result<(), cra
     .map(|_| ())
 }
 
+/// Set the durable maximum failed-authentication count before cooldown.
+pub fn admin_set_lockout_failures(failures: u8) -> Result<(), crate::Error> {
+    if !(1..=MAX_LOCKOUT_FAILURES).contains(&failures) {
+        return Err(crate::Error::Failed);
+    }
+    crate::check(unsafe {
+        crate::syscall::invoke(
+            crate::syscall::IDENTITY_ADMIN_SET_LOCKOUT,
+            u64::from(failures),
+            0,
+            0,
+        )
+    })
+    .map(|_| ())
+}
+
 /// Query bounded non-secret account or group records. The kernel requires the
 /// calling process to hold an active elevated administrator identity session.
 pub fn admin_query(
@@ -1531,6 +1580,35 @@ mod tests {
         assert!(authority
             .admin_query(session, ADMIN_QUERY_USERS, &mut [0; ADMIN_USER_RECORD_BYTES])
             .is_err());
+    }
+
+    #[test]
+    fn administrator_lockout_policy_is_bounded_and_durable() {
+        let mut authority = Authority::new();
+        let group = authority.add_group(b"users").unwrap();
+        let admin = authority
+            .add_administrator(b"admin", group, b"salt", b"1234")
+            .unwrap();
+        let session = authority.open_session(admin, b"1234").unwrap();
+        assert_eq!(authority.lockout_failures(), DEFAULT_LOCKOUT_FAILURES);
+        assert_eq!(
+            authority.admin_set_lockout_failures(session, 2),
+            Err(Error::Unauthorized)
+        );
+        authority.elevate(session, b"1234").unwrap();
+        assert_eq!(
+            authority.admin_set_lockout_failures(session, 0),
+            Err(Error::Invalid)
+        );
+        assert_eq!(
+            authority.admin_set_lockout_failures(session, MAX_LOCKOUT_FAILURES + 1),
+            Err(Error::Invalid)
+        );
+        authority.admin_set_lockout_failures(session, 2).unwrap();
+        let mut snapshot = [0; SNAPSHOT_BYTES];
+        authority.encode_snapshot(&mut snapshot).unwrap();
+        let restored = Authority::decode_snapshot(&snapshot).unwrap();
+        assert_eq!(restored.lockout_failures(), 2);
     }
 
     #[test]

@@ -1,5 +1,22 @@
 # Stage status
 
+## Stage 24.16 durable/configurable lockout policy (2026-10-21)
+
+The bounded identity authority now persists an administrator-selected failed-
+authentication threshold from 1 through 32. WID1 snapshots remain readable;
+new snapshots use the existing reserved header byte for version 2 policy data.
+The owner-bound elevated administrator session exposes this operation through
+WovenSecurity and audit action 37/syscall 232. Runtime authentication applies
+the persisted threshold while retaining the fixed five-second cooldown and
+fail-closed behavior. Host tests (89), all affected warning-denying Clippy
+gates, focused WovenSecurity QEMU, and signed system-apps 1/2/4-CPU gates
+pass. Evidence is under
+`audit-artifacts/stage24.16-lockout-policy-20261021`.
+
+Hardware credentials, malformed-request telemetry, release-key provisioning,
+and physical qualification remain open. The no-disk hardware-demo fallback is
+test-only; production durable publication remains fail-closed.
+
 ## Stage 24.15 administration mutation UI (2026-10-21)
 
 WovenSecurity now exposes bounded add-user, add-group, add/remove-membership,

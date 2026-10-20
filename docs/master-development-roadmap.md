@@ -4,6 +4,17 @@ Stage 10.7 — Asynchronous TCP
 
 Stage 24.15 - Administration mutation UI
 
+Stage 24.16 - Durable/configurable lockout policy
+
+Implemented the bounded persisted failed-authentication threshold (1..=32),
+backward-readable WID1 snapshots, syscall 232/audit action 37, runtime policy
+application, and the WovenSecurity administrator editor. Host, Clippy,
+focused UI QEMU, and signed 1/2/4-CPU acceptance pass. Hardware credentials,
+malformed-request telemetry, release-key provisioning, and physical
+qualification remain open.
+
+Stage 24.15 - Administration mutation UI
+
 Implemented the complete bounded WovenSecurity mutation flow: add user, add
 group, add/remove supplementary membership, and delete inactive user. Focused
 UI and signed 1/2/4-CPU acceptance pass. The disposable hardware-demo image

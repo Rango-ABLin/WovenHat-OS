@@ -37,7 +37,6 @@ struct LockoutEntry {
 }
 
 const MAX_BINDINGS: usize = libwoven::identity::MAX_SESSIONS;
-const MAX_LOCKOUT_FAILURES: u8 = 5;
 const LOCKOUT_TICKS: u64 = 500;
 static AUTHORITY: IrqMutex<Option<Authority>> = IrqMutex::with_rank(None, 4);
 static BINDINGS: IrqMutex<[Option<Binding>; MAX_BINDINGS]> =
@@ -273,6 +272,22 @@ pub(crate) fn admin_query(owner: u64, kind: u8, output: &mut [u8]) -> Result<usi
 }
 
 #[cfg(feature = "system-apps")]
+pub(crate) fn admin_set_lockout(owner: u64, failures: u8) -> Result<(), Error> {
+    let session = owner_session(owner)?;
+    let mut authority = AUTHORITY.lock();
+    let authority = authority.as_mut().ok_or(Error::NotReady)?;
+    let previous = *authority;
+    authority
+        .admin_set_lockout_failures(session, failures)
+        .map_err(Error::Identity)?;
+    if persist_authority(authority).is_err() {
+        *authority = previous;
+        return Err(Error::Storage);
+    }
+    Ok(())
+}
+
+#[cfg(feature = "system-apps")]
 fn persist_authority(authority: &Authority) -> Result<(), Error> {
     let mut snapshot = [0u8; libwoven::identity::SNAPSHOT_BYTES];
     authority
@@ -328,7 +343,7 @@ pub(crate) fn open(owner: u64, name: &[u8], password: &[u8]) -> Result<SessionId
         let session = match authority.open_named_session(name, password) {
             Ok(session) => session,
             Err(IdentityError::WrongPassword) => {
-                note_failure(name);
+                note_failure(name, authority.lockout_failures());
                 return Err(Error::Identity(IdentityError::WrongPassword));
             }
             Err(error) => return Err(Error::Identity(error)),
@@ -362,7 +377,7 @@ pub(crate) fn open_digest(
         let session = match authority.open_named_session_digest(name, digest) {
             Ok(session) => session,
             Err(IdentityError::WrongPassword) => {
-                note_failure(name);
+                note_failure(name, authority.lockout_failures());
                 return Err(Error::Identity(IdentityError::WrongPassword));
             }
             Err(error) => return Err(Error::Identity(error)),
@@ -399,7 +414,10 @@ pub(crate) fn unlock(owner: u64, session: SessionId, password: &[u8]) -> Result<
         match authority.unlock(binding.session, password) {
             Ok(()) => {}
             Err(IdentityError::WrongPassword) => {
-                note_failure(&binding.name[..binding.name_len]);
+                note_failure(
+                    &binding.name[..binding.name_len],
+                    authority.lockout_failures(),
+                );
                 return Err(Error::Identity(IdentityError::WrongPassword));
             }
             Err(error) => return Err(Error::Identity(error)),
@@ -423,7 +441,10 @@ pub(crate) fn unlock_digest(
         match authority.unlock_digest(binding.session, digest) {
             Ok(()) => {}
             Err(IdentityError::WrongPassword) => {
-                note_failure(&binding.name[..binding.name_len]);
+                note_failure(
+                    &binding.name[..binding.name_len],
+                    authority.lockout_failures(),
+                );
                 return Err(Error::Identity(IdentityError::WrongPassword));
             }
             Err(error) => return Err(Error::Identity(error)),
@@ -527,7 +548,7 @@ fn check_lockout(name: &[u8]) -> Result<(), Error> {
     Ok(())
 }
 
-fn note_failure(name: &[u8]) {
+fn note_failure(name: &[u8], threshold: u8) {
     let now = crate::timer::ticks();
     let mut lockouts = LOCKOUTS.lock();
     let entry = if let Some(entry) = lockouts
@@ -551,7 +572,7 @@ fn note_failure(name: &[u8]) {
         return;
     };
     entry.failures = entry.failures.saturating_add(1);
-    if entry.failures >= MAX_LOCKOUT_FAILURES {
+    if entry.failures >= threshold {
         entry.locked_until = now.saturating_add(LOCKOUT_TICKS);
     }
 }
@@ -594,7 +615,7 @@ pub(crate) fn self_test() -> bool {
         return false;
     }
     install(authority);
-    for _ in 0..MAX_LOCKOUT_FAILURES {
+    for _ in 0..libwoven::identity::DEFAULT_LOCKOUT_FAILURES {
         if !matches!(open(1, b"alice", b"wrong"), Err(Error::Identity(IdentityError::WrongPassword))) {
             return false;
         }

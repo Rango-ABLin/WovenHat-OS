@@ -1,5 +1,17 @@
 # WovenHat OS Architecture & Codebase Guide
 
+### Stage 24.16 - durable/configurable lockout policy
+
+`Authority` stores a bounded failed-authentication threshold (1..=32) in the
+existing WID1 reserved header byte. Version 1 snapshots decode with the
+default threshold for compatibility; version 2 snapshots persist the selected
+value. Syscall 232 and audit action 37 update the policy only through an
+owner-bound elevated administrator session. The runtime reads the authority
+policy for plaintext and digest authentication, preserving the fixed
+five-second cooldown and fail-closed lockout table. WovenSecurity exposes a
+fixed-buffer decimal editor. Hardware-demo-only volatile persistence is
+explicitly excluded from production behavior.
+
 ### Stage 24.15 - administration mutation UI
 
 WovenSecurity drives all existing bounded identity mutations from one

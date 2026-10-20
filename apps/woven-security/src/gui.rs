@@ -32,6 +32,7 @@ const MODE_ADD_MEMBER_GROUP: u8 = 9;
 const MODE_REMOVE_MEMBER_USER: u8 = 10;
 const MODE_REMOVE_MEMBER_GROUP: u8 = 11;
 const MODE_DELETE_USER: u8 = 12;
+const MODE_SET_LOCKOUT: u8 = 13;
 
 #[derive(Clone, Copy)]
 struct AdminRow {
@@ -256,6 +257,7 @@ fn draw_admin(canvas: &mut Canvas<'_>, admin: &AdminUi) {
                 ("Group ID", &admin.input[..admin.input_length])
             }
             MODE_DELETE_USER => ("Delete user ID", &admin.input[..admin.input_length]),
+            MODE_SET_LOCKOUT => ("Max failures (1-32)", &admin.input[..admin.input_length]),
             _ => ("Administrator access", &[] as &[u8]),
         };
         canvas.draw_text(PANEL_X + 10, PANEL_Y + 60, prompt, TEXT);
@@ -285,7 +287,7 @@ fn draw_admin(canvas: &mut Canvas<'_>, admin: &AdminUi) {
     }
     draw_number(canvas, PANEL_X + 10, PANEL_Y + 150, "Users ", admin.user_count as u64, &mut digits);
     draw_number(canvas, PANEL_X + 110, PANEL_Y + 150, "Groups ", admin.group_count as u64, &mut digits);
-    canvas.draw_text(PANEL_X + 10, PANEL_Y + 168, "U user G group M add R remove D delete", TEXT);
+    canvas.draw_text(PANEL_X + 10, PANEL_Y + 168, "U user G group M/R member D delete L lockout", TEXT);
 }
 
 fn refresh_admin(ui: &mut AdminUi) -> bool {
@@ -458,6 +460,22 @@ fn finish_delete_user(ui: &mut AdminUi) {
     }
 }
 
+fn finish_set_lockout(ui: &mut AdminUi) {
+    let Some(failures) = parse_u32(&ui.input[..ui.input_length]) else {
+        mutation_failed(ui, "WovenSecurity: lockout policy rejected\n");
+        return;
+    };
+    let Ok(failures) = u8::try_from(failures) else {
+        mutation_failed(ui, "WovenSecurity: lockout policy rejected\n");
+        return;
+    };
+    if libwoven::identity::admin_set_lockout_failures(failures).is_ok() {
+        mutation_refresh(ui, "WovenSecurity: lockout policy updated\n");
+    } else {
+        mutation_failed(ui, "WovenSecurity: lockout policy rejected\n");
+    }
+}
+
 fn render(
     window: &GraphicsSurface,
     pointer: Option<(u16, u16)>,
@@ -580,6 +598,7 @@ pub fn run(shell: Option<&[u8]>) -> ! {
                         finish_group_member_second(&mut admin, add)
                     }
                     1 if admin.mode == MODE_DELETE_USER => finish_delete_user(&mut admin),
+                    1 if admin.mode == MODE_SET_LOCKOUT => finish_set_lockout(&mut admin),
                     2 if admin.mode == MODE_AUTH_NAME => {
                         admin.name_length = admin.name_length.saturating_sub(1)
                     }
@@ -595,6 +614,7 @@ pub fn run(shell: Option<&[u8]>) -> ! {
                             | MODE_REMOVE_MEMBER_USER
                             | MODE_REMOVE_MEMBER_GROUP
                             | MODE_DELETE_USER
+                            | MODE_SET_LOCKOUT
                     ) => admin.input_length = admin.input_length.saturating_sub(1),
                     _ => {}
                 }
@@ -617,6 +637,7 @@ pub fn run(shell: Option<&[u8]>) -> ! {
                     b'm' => admin.begin_input(MODE_ADD_MEMBER_USER),
                     b'r' => admin.begin_input(MODE_REMOVE_MEMBER_USER),
                     b'd' => admin.begin_input(MODE_DELETE_USER),
+                    b'l' => admin.begin_input(MODE_SET_LOCKOUT),
                     _ => {}
                 }
                 if !render(&window, pointer, pointer_pressed, refresh_count, &admin) { fail(8) }
@@ -639,6 +660,7 @@ pub fn run(shell: Option<&[u8]>) -> ! {
                         | MODE_REMOVE_MEMBER_USER
                         | MODE_REMOVE_MEMBER_GROUP
                         | MODE_DELETE_USER
+                        | MODE_SET_LOCKOUT
                 ) && admin.input_length < admin.input.len()
                     && (admin.mode == MODE_ADD_USER_NAME
                         || admin.mode == MODE_ADD_GROUP_NAME
