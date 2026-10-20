@@ -251,19 +251,26 @@ fn eager_plt_rela_metadata_is_bounded_and_file_backed() {
 
 #[test]
 fn plt_rela_requires_rela_encoding_and_writable_targets() {
-    let mut wrong_encoding = plt_fixture();
-    put64(&mut wrong_encoding, DYNAMIC + 6 * 16 + 8, 17);
-    assert!(matches!(
-        elf::parse(&wrong_encoding),
-        Err(elf::Error::Unsupported)
-    ));
-
     let mut read_only_target = plt_fixture();
     put64(&mut read_only_target, 0x2000, BASE + 0x20);
     assert!(matches!(
         elf::parse(&read_only_target),
         Err(elf::Error::InvalidSegment)
     ));
+}
+
+#[test]
+fn eager_plt_rel_metadata_is_bounded_and_file_backed() {
+    let mut bytes = plt_fixture();
+    put64(&mut bytes, DYNAMIC + 5 * 16 + 8, 16); // DT_PLTRELSZ
+    put64(&mut bytes, DYNAMIC + 6 * 16 + 8, 17); // DT_PLTREL = DT_REL
+    put64(&mut bytes, 0x2020, 0x10); // signed in-place addend
+    let parsed = image(&bytes);
+    let dynamic = parsed.dynamic().expect("dynamic metadata");
+    assert_eq!(dynamic.plt_rel_size, 16);
+    assert_eq!(dynamic.plt_rel_entry_size, 16);
+    assert_eq!(dynamic.plt_rel_file_offset, 0x2000);
+    assert_eq!(dynamic.plt_rel_address, BASE + 0x1000);
 }
 
 #[test]
