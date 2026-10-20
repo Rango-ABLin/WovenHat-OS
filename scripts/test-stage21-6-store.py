@@ -10,7 +10,7 @@ from pathlib import Path
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--cpus", type=int, choices=(1, 2, 4), default=1)
-    parser.add_argument("--stage", type=int, choices=(6, 7, 8, 9, 10, 11), default=6)
+    parser.add_argument("--stage", type=int, choices=(6, 7, 8, 9, 10, 11, 22), default=6)
     parser.add_argument("--size-mib", type=int, default=16)
     parser.add_argument("--timeout", type=float, default=240)
     parser.add_argument(
@@ -24,7 +24,7 @@ def main() -> int:
     firmware = qemu.parent / "share" / "edk2-x86_64-code.fd"
     if not qemu.is_file() or not firmware.is_file():
         parser.error("Set --qemu or install QEMU with its OVMF firmware.")
-    feature = f"stage21-{args.stage}-test"
+    feature = "stage22-1-test" if args.stage == 22 else f"stage21-{args.stage}-test"
     image = subprocess.check_output(
         ["cargo", "run", "--quiet", "--features", feature, "--", "--print-image"],
         cwd=root,
@@ -46,6 +46,7 @@ def main() -> int:
         "-device", "virtio-blk-pci,drive=boot,bootindex=1",
         "-drive", f"if=ide,index=0,format=raw,file={disk}",
     ]
+    stage_label = "22.1" if args.stage == 22 else f"21.{args.stage}"
     try:
         with (out / "qemu.log").open("w") as output:
             result = subprocess.run(
@@ -53,35 +54,24 @@ def main() -> int:
                 timeout=args.timeout,
             ).returncode
     except subprocess.TimeoutExpired:
-        print(f"Stage 21.{args.stage} timed out. Evidence: {out}", file=sys.stderr)
+        print(f"Stage {stage_label} timed out. Evidence: {out}", file=sys.stderr)
         return 1
     log = serial.read_text(errors="replace") if serial.exists() else ""
-    marker = (
-        "[S21.6] WovenStore persistence: PASSED"
-        if args.stage == 6
-        else (
-            "[S21.7] WovenPackage install: PASSED"
-            if args.stage == 7
-            else (
-                "[S21.8] WovenPackage recovery: PASSED"
-                if args.stage == 8
-                else (
-                    "[S21.9] WovenPackage update/remove: PASSED"
-                    if args.stage == 9
-                    else (
-                        "[S21.10] WovenPackage rollback: PASSED"
-                        if args.stage == 10
-                        else "[S21.11] WovenPackage sandbox: PASSED"
-                    )
-                )
-            )
-        )
-    )
+    markers = {
+        6: "[S21.6] WovenStore persistence: PASSED",
+        7: "[S21.7] WovenPackage install: PASSED",
+        8: "[S21.8] WovenPackage recovery: PASSED",
+        9: "[S21.9] WovenPackage update/remove: PASSED",
+        10: "[S21.10] WovenPackage rollback: PASSED",
+        11: "[S21.11] WovenPackage sandbox: PASSED",
+        22: "[S22.1] service IPC ABI: PASSED",
+    }
+    marker = markers[args.stage]
     if result != 33 or marker not in log:
-        print(f"Stage 21.{args.stage} failed (exit {result}). Evidence: {out}", file=sys.stderr)
+        print(f"Stage {stage_label} failed (exit {result}). Evidence: {out}", file=sys.stderr)
         print(log[-4000:], file=sys.stderr)
         return 1
-    print(f"Stage 21.{args.stage} PASS ({args.cpus} CPU, exit 33). Evidence: {out}")
+    print(f"Stage {stage_label} PASS ({args.cpus} CPU, exit 33). Evidence: {out}")
     return 0
 
 

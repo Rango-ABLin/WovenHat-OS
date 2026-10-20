@@ -1,5 +1,27 @@
 # Stage status
 
+## Stage 22.1 userspace service IPC ABI (2026-10-20)
+
+The IPC service registry now has a userspace ABI: syscall 211 creates an
+owner-bound endpoint, while syscalls 212–214 publish, unpublish, and discover
+bounded service names. Each operation requires `Capability::Ipc`; service names
+are copied from userspace before registry access, handles are returned as
+process-local values, and the existing registry enforces owner teardown,
+rights, namespace isolation, and endpoint lifetime. `libwoven` exposes typed
+wrappers for all four operations.
+
+Host `libwoven` tests (63), warning-denying host/freestanding Clippy, and the
+dedicated QEMU gate passed on 1/2/4 CPUs. The first attempt is preserved as
+`audit-artifacts/stage21.22-1cpu-1792516996924333800`; it failed before the
+new marker because the feature did not inherit the required WovenFS gate, so
+the feature graph and inherited self-test guards were corrected before the
+accepted rerun. Accepted evidence is recorded in
+`docs/audit-stage22-1-userspace-service-ipc-2026-10-20.md`.
+
+This increment proves the kernel registry and syscall/library ABI boundary;
+it does not yet claim a long-lived Ring-3 WovenPackage broker/client,
+service-specific protocols, or physical USB qualification.
+
 ## Stage 11 shared-library TLS implementation (2026-10-20)
 
 The loader now plans a bounded combined TLS block across the main image and

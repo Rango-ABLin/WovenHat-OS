@@ -1224,6 +1224,23 @@ profile before publishing the new address space and destroys invalid images.
 This is the kernel launch boundary; a long-lived userspace WovenPackage IPC
 broker still needs to be built above it.
 
+## Stage 22.1 userspace service IPC ABI (2026-10-20)
+
+The service registry's first userspace boundary is now explicit. Syscall 211
+creates an endpoint owned by the calling process. Syscalls 212–214 publish,
+unpublish, and discover a bounded service name; all four require
+`Capability::Ipc`. The publish argument carries the endpoint handle and
+client-rights mask, while the kernel validates the raw handle, copies the
+service name from userspace before taking the IPC registry lock, and returns
+only process-local handles. `libwoven` provides typed wrappers that preserve
+the kernel's error sentinel contract.
+
+The accepted QEMU probe exercises the underlying registry's owner cleanup,
+rights filtering, namespace isolation, and endpoint lifetime behavior on 1, 2,
+and 4 CPUs. The ABI is groundwork for moving WovenPackage ownership out of the
+kernel; a long-lived Ring-3 broker/client, service-specific message protocol,
+and physical hardware qualification remain open.
+
 The feature-gated `stage19-app-catalog-test` now exercises the install-plan
 boundary for all ten accepted packages together. It verifies each WAPP,
 rejects a mutation, installs and reads each package back through the VFS,

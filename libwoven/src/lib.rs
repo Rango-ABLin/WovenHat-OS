@@ -11277,6 +11277,10 @@ pub mod syscall {
     pub const GRAPHICS_COMPOSITOR_OUTPUTS: u64 = 207;
     pub const POWER_CONTROL: u64 = 209;
     pub const ACCOUNTS_CHANGE_PIN: u64 = 210;
+    pub const IPC_ENDPOINT_CREATE: u64 = 211;
+    pub const IPC_SERVICE_PUBLISH: u64 = 212;
+    pub const IPC_SERVICE_UNPUBLISH: u64 = 213;
+    pub const IPC_SERVICE_DISCOVER: u64 = 214;
     pub const MESSAGE_SEND: u64 = 11;
     pub const MESSAGE_RECEIVE: u64 = 12;
 
@@ -11822,6 +11826,36 @@ pub mod syscall {
             | (u64::from(height) << 48);
         unsafe { invoke(GRAPHICS_SURFACE_STROKE, handle, packed, u64::from(color)) }
     }
+
+    /// # Safety
+    /// Must be called from WovenHat userspace.
+    pub unsafe fn ipc_endpoint_create() -> u64 {
+        unsafe { invoke(IPC_ENDPOINT_CREATE, 0, 0, 0) }
+    }
+
+    /// # Safety
+    /// `name` must be readable for `name_len` bytes.
+    pub unsafe fn ipc_service_publish(
+        name: *const u8,
+        name_len: usize,
+        client_rights: u8,
+        endpoint: u64,
+    ) -> u64 {
+        let packed = (name_len as u64) | (u64::from(client_rights) << 32);
+        unsafe { invoke(IPC_SERVICE_PUBLISH, name as u64, packed, endpoint) }
+    }
+
+    /// # Safety
+    /// `name` must be readable for `name_len` bytes.
+    pub unsafe fn ipc_service_unpublish(name: *const u8, name_len: usize) -> u64 {
+        unsafe { invoke(IPC_SERVICE_UNPUBLISH, name as u64, name_len as u64, 0) }
+    }
+
+    /// # Safety
+    /// `name` must be readable for `name_len` bytes.
+    pub unsafe fn ipc_service_discover(name: *const u8, name_len: usize) -> u64 {
+        unsafe { invoke(IPC_SERVICE_DISCOVER, name as u64, name_len as u64, 0) }
+    }
 }
 
 /// Pack a colour into the kernel's `0x00RRGGBB` representation.
@@ -12220,6 +12254,29 @@ pub fn message_receive(buffer: &mut [u8]) -> Result<(usize, process::Id), Error>
     let result =
         unsafe { syscall::message_receive(buffer.as_mut_ptr(), buffer.len(), &mut sender) };
     check(result).map(|length| (length as usize, process::Id(sender)))
+}
+
+pub fn ipc_endpoint_create() -> Result<u64, Error> {
+    // SAFETY: argument-free syscall.
+    check(unsafe { syscall::ipc_endpoint_create() })
+}
+
+pub fn ipc_service_publish(name: &[u8], client_rights: u8, endpoint: u64) -> Result<(), Error> {
+    // SAFETY: the pointer and length describe `name`.
+    check(unsafe {
+        syscall::ipc_service_publish(name.as_ptr(), name.len(), client_rights, endpoint)
+    })
+    .map(|_| ())
+}
+
+pub fn ipc_service_unpublish(name: &[u8]) -> Result<(), Error> {
+    // SAFETY: the pointer and length describe `name`.
+    check(unsafe { syscall::ipc_service_unpublish(name.as_ptr(), name.len()) }).map(|_| ())
+}
+
+pub fn ipc_service_discover(name: &[u8]) -> Result<u64, Error> {
+    // SAFETY: the pointer and length describe `name`.
+    check(unsafe { syscall::ipc_service_discover(name.as_ptr(), name.len()) })
 }
 
 /// Take the compositor lease.

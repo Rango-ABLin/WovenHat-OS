@@ -60,6 +60,10 @@ impl Handle {
         self.0
     }
 
+    pub const fn from_u32(raw: u32) -> Self {
+        Self(raw)
+    }
+
     const fn from_parts(slot: usize, generation: u32) -> Self {
         Self((generation << 8) | ((slot as u32) + 1))
     }

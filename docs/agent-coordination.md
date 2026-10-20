@@ -1,5 +1,16 @@
 # Agent coordination (Claude Code and Codex)
 
+**Codex: Stage 22.1 userspace service IPC ABI (2026-10-20):** the kernel now
+publishes endpoint creation plus capability-gated service publish, unpublish,
+and discovery syscalls (211–214), with bounded copied service names and typed
+`libwoven` wrappers. The existing owner/lifetime/rights/namespace registry
+probe is exposed through a dedicated Stage 22.1 acceptance gate. Host tests,
+warning-denying host/freestanding Clippy, and QEMU passed on 1/2/4 CPUs.
+Evidence is in `docs/audit-stage22-1-userspace-service-ipc-2026-10-20.md` and
+the `audit-artifacts/stage21.22-*` directories. A long-lived WovenPackage
+broker/client fixture and physical USB qualification remain open. No physical
+USB write was performed.
+
 **Codex: Stage 21.9 WovenPackage update/removal transactions (2026-10-20):**
 WSTC v2 persists application/resource chunk counts. WPKJ now retains incoming
 and superseded generations, so updates reclaim old payloads only after durable

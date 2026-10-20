@@ -387,6 +387,14 @@ pub enum Number {
     /// against it, `new_pin` is empty or too long, or the caller lacks
     /// AccountManage (the desktop session only).
     AccountsChangePin = 210,
+    /// -> process-local endpoint handle, or ERROR
+    IpcEndpointCreate = 211,
+    /// name ptr, packed name length|client rights<<32, endpoint handle -> 0
+    IpcServicePublish = 212,
+    /// name ptr, name length -> 0
+    IpcServiceUnpublish = 213,
+    /// name ptr, name length -> process-local client handle, or ERROR
+    IpcServiceDiscover = 214,
 }
 
 pub fn entry_address() -> u64 {
@@ -807,6 +815,66 @@ fn sys_message_receive(user_buffer: u64, capacity: u64, user_sender: u64) -> u64
             Err(_) => return SYSCALL_ERROR,
         }
     }
+}
+
+fn copy_service_name(user_name: u64, length: u64) -> Option<([u8; crate::config::MAX_IPC_SERVICE_NAME], usize)> {
+    let length = usize::try_from(length).ok()?;
+    if length == 0 || length > crate::config::MAX_IPC_SERVICE_NAME {
+        return None;
+    }
+    let mut name = [0u8; crate::config::MAX_IPC_SERVICE_NAME];
+    crate::paging::copy_from_current_user(user_name, &mut name[..length]).ok()?;
+    Some((name, length))
+}
+
+fn sys_ipc_endpoint_create() -> u64 {
+    if !crate::task::current_has(crate::capability::Capability::Ipc) {
+        return SYSCALL_ERROR;
+    }
+    crate::ipc::create_endpoint_object(crate::task::current_process_id())
+        .map_or(SYSCALL_ERROR, |handle| u64::from(handle.as_u32()))
+}
+
+fn sys_ipc_service_publish(user_name: u64, packed: u64, raw_handle: u64) -> u64 {
+    if !crate::task::current_has(crate::capability::Capability::Ipc)
+        || raw_handle > u64::from(u32::MAX)
+    {
+        return SYSCALL_ERROR;
+    }
+    let name_length = packed & 0xffff_ffff;
+    let client_rights = (packed >> 32) as u8;
+    let Some((name, length)) = copy_service_name(user_name, name_length) else {
+        return SYSCALL_ERROR;
+    };
+    crate::ipc::publish_service(
+        crate::task::current_process_id(),
+        &name[..length],
+        crate::ipc::Handle::from_u32(raw_handle as u32),
+        client_rights,
+    )
+    .map_or(SYSCALL_ERROR, |()| 0)
+}
+
+fn sys_ipc_service_unpublish(user_name: u64, length: u64) -> u64 {
+    if !crate::task::current_has(crate::capability::Capability::Ipc) {
+        return SYSCALL_ERROR;
+    }
+    let Some((name, length)) = copy_service_name(user_name, length) else {
+        return SYSCALL_ERROR;
+    };
+    crate::ipc::unpublish_service(crate::task::current_process_id(), &name[..length])
+        .map_or(SYSCALL_ERROR, |()| 0)
+}
+
+fn sys_ipc_service_discover(user_name: u64, length: u64) -> u64 {
+    if !crate::task::current_has(crate::capability::Capability::Ipc) {
+        return SYSCALL_ERROR;
+    }
+    let Some((name, length)) = copy_service_name(user_name, length) else {
+        return SYSCALL_ERROR;
+    };
+    crate::ipc::discover_service(crate::task::current_process_id(), &name[..length])
+        .map_or(SYSCALL_ERROR, |handle| u64::from(handle.as_u32()))
 }
 
 fn sys_pipe() -> u64 {
@@ -2424,6 +2492,16 @@ pub extern "C" fn wovenhat_syscall_dispatch(
         value if value == Number::Fork as u64 => sys_fork(frame),
         value if value == Number::MessageSend as u64 => sys_message_send(arg0, arg1, arg2),
         value if value == Number::MessageReceive as u64 => sys_message_receive(arg0, arg1, arg2),
+        value if value == Number::IpcEndpointCreate as u64 => sys_ipc_endpoint_create(),
+        value if value == Number::IpcServicePublish as u64 => {
+            sys_ipc_service_publish(arg0, arg1, arg2)
+        }
+        value if value == Number::IpcServiceUnpublish as u64 => {
+            sys_ipc_service_unpublish(arg0, arg1)
+        }
+        value if value == Number::IpcServiceDiscover as u64 => {
+            sys_ipc_service_discover(arg0, arg1)
+        }
         value if value == Number::Getuid as u64 => {
             IO_COMPLETIONS.fetch_or(IO_GETUID, Ordering::Release);
             u64::from(crate::task::current_credentials().uid)
