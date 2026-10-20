@@ -207,6 +207,13 @@ pub(super) fn load_with_geometry(
 ) -> Option<UserProgram> {
     let images = prepare(bytes, candidate_bias)?;
     let main = images.first()?;
+    if main
+        .image
+        .dynamic()
+        .is_some_and(|dynamic| dynamic.rel_size != 0)
+    {
+        crate::serial::write_line(format_args!("[S11.5] DT_REL image prepared"));
+    }
     let mut scope = SymbolScope::new(&main.image, &main.bytes);
     for image in &images[1..] {
         scope
@@ -297,10 +304,27 @@ pub(super) fn load_with_geometry(
             .ok()?;
         }
     }
+    if main
+        .image
+        .dynamic()
+        .is_some_and(|dynamic| dynamic.rel_size != 0)
+    {
+        crate::serial::write_line(format_args!("[S11.5] DT_REL mappings ready"));
+    }
     // No writable executable page exists during relocation: pages are RW/NX
     // until every fixup is applied, then transitioned to their final W^X mode.
-    for linked in &images {
-        relocate(linked, &scope, page_table)?;
+    for (index, linked) in images.iter().enumerate() {
+        if relocate(linked, &scope, page_table).is_none() {
+            if index == 0
+                && linked
+                    .image
+                    .dynamic()
+                    .is_some_and(|dynamic| dynamic.rel_size != 0)
+            {
+                crate::serial::write_line(format_args!("[S11.5] DT_REL relocation failed"));
+            }
+            return None;
+        }
     }
     for linked in &images {
         for segment in linked.image.segments() {
