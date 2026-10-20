@@ -14,6 +14,14 @@ pub const MAX_GROUP_MEMBERS: usize = 8;
 pub const MAX_SESSIONS: usize = 16;
 pub const MAX_PROFILE_BYTES: usize = 64;
 pub const MAX_SALT_BYTES: usize = 32;
+pub const ADMIN_QUERY_USERS: u8 = 0;
+pub const ADMIN_QUERY_GROUPS: u8 = 1;
+pub const ADMIN_QUERY_VERSION: u8 = 1;
+pub const ADMIN_QUERY_HEADER_BYTES: usize = 4;
+pub const ADMIN_USER_RECORD_BYTES: usize = 4 + 4 + 4 + 1 + 1 + MAX_NAME;
+pub const ADMIN_GROUP_RECORD_BYTES: usize = 4 + 1 + MAX_NAME + 1 + MAX_GROUP_MEMBERS * 4;
+pub const ADMIN_QUERY_MAX_BYTES: usize = ADMIN_QUERY_HEADER_BYTES
+    + MAX_USERS * ADMIN_GROUP_RECORD_BYTES;
 pub const SNAPSHOT_BYTES: usize = 4
     + 1
     + 1
@@ -161,6 +169,130 @@ pub struct SessionView {
     pub gid: GroupId,
     pub state: SessionState,
     pub elevated: bool,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct AdminUserRecord {
+    pub id: UserId,
+    pub uid: u32,
+    pub gid: GroupId,
+    pub administrator: bool,
+    name: [u8; MAX_NAME],
+    name_len: usize,
+}
+
+impl AdminUserRecord {
+    pub fn name(&self) -> &[u8] {
+        &self.name[..self.name_len]
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct AdminGroupRecord {
+    pub id: GroupId,
+    name: [u8; MAX_NAME],
+    name_len: usize,
+    pub members: [Option<UserId>; MAX_GROUP_MEMBERS],
+}
+
+impl AdminGroupRecord {
+    pub fn name(&self) -> &[u8] {
+        &self.name[..self.name_len]
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct AdminQuery<'a> {
+    kind: u8,
+    records: &'a [u8],
+    count: usize,
+}
+
+impl<'a> AdminQuery<'a> {
+    pub fn decode(input: &'a [u8]) -> Result<Self, Error> {
+        if input.len() < ADMIN_QUERY_HEADER_BYTES
+            || input[0] != ADMIN_QUERY_VERSION
+            || input[1] > ADMIN_QUERY_GROUPS
+        {
+            return Err(Error::Corrupt);
+        }
+        let kind = input[1];
+        let count = u16::from_le_bytes([input[2], input[3]]) as usize;
+        let record_bytes = if kind == ADMIN_QUERY_USERS {
+            ADMIN_USER_RECORD_BYTES
+        } else {
+            ADMIN_GROUP_RECORD_BYTES
+        };
+        if count > MAX_USERS.max(MAX_GROUPS)
+            || ADMIN_QUERY_HEADER_BYTES
+                .checked_add(count.checked_mul(record_bytes).ok_or(Error::Corrupt)?)
+                != Some(input.len())
+        {
+            return Err(Error::Corrupt);
+        }
+        Ok(Self {
+            kind,
+            records: &input[ADMIN_QUERY_HEADER_BYTES..],
+            count,
+        })
+    }
+
+    pub const fn kind(&self) -> u8 {
+        self.kind
+    }
+
+    pub const fn len(&self) -> usize {
+        self.count
+    }
+
+    pub const fn is_empty(&self) -> bool {
+        self.count == 0
+    }
+
+    pub fn user(&self, index: usize) -> Option<AdminUserRecord> {
+        if self.kind != ADMIN_QUERY_USERS || index >= self.count {
+            return None;
+        }
+        let start = index * ADMIN_USER_RECORD_BYTES;
+        let record = self.records.get(start..start + ADMIN_USER_RECORD_BYTES)?;
+        let name_len = record[13] as usize;
+        if name_len > MAX_NAME || record[12] > 1 {
+            return None;
+        }
+        Some(AdminUserRecord {
+            id: UserId(u32::from_le_bytes(record[0..4].try_into().ok()?)),
+            uid: u32::from_le_bytes(record[4..8].try_into().ok()?),
+            gid: GroupId(u32::from_le_bytes(record[8..12].try_into().ok()?)),
+            administrator: record[12] != 0,
+            name: record[14..14 + MAX_NAME].try_into().ok()?,
+            name_len,
+        })
+    }
+
+    pub fn group(&self, index: usize) -> Option<AdminGroupRecord> {
+        if self.kind != ADMIN_QUERY_GROUPS || index >= self.count {
+            return None;
+        }
+        let start = index * ADMIN_GROUP_RECORD_BYTES;
+        let record = self.records.get(start..start + ADMIN_GROUP_RECORD_BYTES)?;
+        let name_len = record[4] as usize;
+        let member_count = record[5 + MAX_NAME] as usize;
+        if name_len > MAX_NAME || member_count > MAX_GROUP_MEMBERS {
+            return None;
+        }
+        let mut members = [None; MAX_GROUP_MEMBERS];
+        for (index, member) in members.iter_mut().enumerate() {
+            let offset = 6 + MAX_NAME + index * 4;
+            let id = u32::from_le_bytes(record[offset..offset + 4].try_into().ok()?);
+            *member = (id != 0).then_some(UserId(id));
+        }
+        Some(AdminGroupRecord {
+            id: GroupId(u32::from_le_bytes(record[0..4].try_into().ok()?)),
+            name: record[5..5 + MAX_NAME].try_into().ok()?,
+            name_len,
+            members,
+        })
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -428,6 +560,58 @@ impl Authority {
             .ok_or(Error::NotFound)?;
         group.members[slot] = None;
         Ok(())
+    }
+
+    /// Encode non-secret account or group records for an elevated administrator.
+    /// Credentials, profiles, and active session tokens never cross this
+    /// boundary. The output is a bounded versioned record list.
+    pub fn admin_query(
+        &self,
+        session: SessionId,
+        kind: u8,
+        output: &mut [u8],
+    ) -> Result<usize, Error> {
+        self.require_administrator(session)?;
+        let (record_bytes, count) = match kind {
+            ADMIN_QUERY_USERS => (ADMIN_USER_RECORD_BYTES, self.users.iter().flatten().count()),
+            ADMIN_QUERY_GROUPS => (ADMIN_GROUP_RECORD_BYTES, self.groups.iter().flatten().count()),
+            _ => return Err(Error::Invalid),
+        };
+        let required = ADMIN_QUERY_HEADER_BYTES
+            .checked_add(count.checked_mul(record_bytes).ok_or(Error::BufferTooSmall)?)
+            .ok_or(Error::BufferTooSmall)?;
+        if output.len() < required {
+            return Err(Error::BufferTooSmall);
+        }
+        let mut writer = SnapshotWriter::new(&mut output[..required]);
+        writer.u8(ADMIN_QUERY_VERSION)?;
+        writer.u8(kind)?;
+        writer.fixed(&(count as u16).to_le_bytes())?;
+        match kind {
+            ADMIN_QUERY_USERS => {
+                for user in self.users.iter().flatten() {
+                    writer.u32(user.id.0)?;
+                    writer.u32(user.uid)?;
+                    writer.u32(user.gid.0)?;
+                    writer.u8(u8::from(user.administrator))?;
+                    writer.u8(user.name_len as u8)?;
+                    writer.fixed(&user.name)?;
+                }
+            }
+            ADMIN_QUERY_GROUPS => {
+                for group in self.groups.iter().flatten() {
+                    writer.u32(group.id.0)?;
+                    writer.u8(group.name_len as u8)?;
+                    writer.fixed(&group.name)?;
+                    writer.u8(group.members.iter().flatten().count() as u8)?;
+                    for member in group.members {
+                        writer.u32(member.map_or(0, |user| user.0))?;
+                    }
+                }
+            }
+            _ => return Err(Error::Invalid),
+        }
+        Ok(required)
     }
 
     /// Delete an account only from an active, elevated administrator session.
@@ -1112,6 +1296,29 @@ pub fn admin_remove_group_member(user: UserId, group: GroupId) -> Result<(), cra
     .map(|_| ())
 }
 
+/// Query bounded non-secret account or group records. The kernel requires the
+/// calling process to hold an active elevated administrator identity session.
+pub fn admin_query(
+    kind: u8,
+    output: &mut [u8; ADMIN_QUERY_MAX_BYTES],
+) -> Result<AdminQuery<'_>, crate::Error> {
+    if kind > ADMIN_QUERY_GROUPS {
+        return Err(crate::Error::Failed);
+    }
+    let length = crate::check(unsafe {
+        crate::syscall::invoke(
+            crate::syscall::IDENTITY_ADMIN_QUERY,
+            output.as_mut_ptr() as u64,
+            output.len() as u64,
+            u64::from(kind),
+        )
+    })
+    .map_err(|_| crate::Error::Failed)?;
+    let length = usize::try_from(length).map_err(|_| crate::Error::Failed)?;
+    AdminQuery::decode(output.get(..length).ok_or(crate::Error::Failed)?)
+        .map_err(|_| crate::Error::Failed)
+}
+
 pub fn session_close(session: SessionId) -> Result<(), crate::Error> {
     // SAFETY: integer-only syscall; the kernel owner-binds the token.
     crate::check(unsafe {
@@ -1297,6 +1504,33 @@ mod tests {
         authority.close_session(created_session).unwrap();
         authority.admin_delete_user(admin_session, created).unwrap();
         assert_eq!(authority.group_id(b"staff"), Ok(staff));
+    }
+
+    #[test]
+    fn administrative_query_exposes_only_bounded_non_secret_records() {
+        let mut authority = Authority::new();
+        let group = authority.add_group(b"users").unwrap();
+        let admin = authority
+            .add_administrator(b"admin", group, b"salt", b"1234")
+            .unwrap();
+        let session = authority.open_session(admin, b"1234").unwrap();
+        assert_eq!(
+            authority.admin_query(session, ADMIN_QUERY_USERS, &mut [0; ADMIN_QUERY_MAX_BYTES]),
+            Err(Error::Unauthorized)
+        );
+        authority.elevate(session, b"1234").unwrap();
+        let mut bytes = [0; ADMIN_QUERY_MAX_BYTES];
+        let length = authority
+            .admin_query(session, ADMIN_QUERY_USERS, &mut bytes)
+            .unwrap();
+        let query = AdminQuery::decode(&bytes[..length]).unwrap();
+        let user = query.user(0).unwrap();
+        assert_eq!(user.name(), b"admin");
+        assert!(user.administrator);
+        assert_eq!(query.user(1), None);
+        assert!(authority
+            .admin_query(session, ADMIN_QUERY_USERS, &mut [0; ADMIN_USER_RECORD_BYTES])
+            .is_err());
     }
 
     #[test]

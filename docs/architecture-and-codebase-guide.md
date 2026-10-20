@@ -1,5 +1,17 @@
 # WovenHat OS Architecture & Codebase Guide
 
+### Stage 24.14 - bounded administration query UI
+
+`libwoven::identity::AdminQuery` decodes a fixed version/kind/count wire
+format for bounded user and group records. The kernel exposes syscall 231
+through the owner-bound identity runtime; it requires an elevated
+administrator session and copies only bounded non-secret records to userspace.
+WovenSecurity owns the session and clears its PIN buffer on close or failure,
+then renders a fixed-size directory. The query is deliberately separate from
+the mutation capability gate because the signed WovenSecurity process uses the
+identity elevation proof as its authorization boundary; mutation syscalls keep
+their existing capability checks.
+
 ### Stage 24.13 - group membership administration
 
 `Authority` exposes bounded add/remove operations for supplementary group membership. The owner-bound runtime authorizes syscalls 229-230, persists the updated WID2 authority, and restores the prior live authority if publication fails. Primary-group removal is prohibited; audit actions distinguish the two mutations. UI/query integration and physical qualification remain separate.

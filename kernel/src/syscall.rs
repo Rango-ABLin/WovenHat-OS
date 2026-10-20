@@ -441,6 +441,8 @@ pub enum Number {
     IdentityAdminAddMember = 229,
     #[cfg(feature = "system-apps")]
     IdentityAdminRemoveMember = 230,
+    #[cfg(feature = "system-apps")]
+    IdentityAdminQuery = 231,
 }
 
 pub fn entry_address() -> u64 {
@@ -2946,6 +2948,10 @@ pub extern "C" fn wovenhat_syscall_dispatch(
         value if value == Number::IdentityAdminRemoveMember as u64 => {
             sys_identity_admin_group_member(arg0, arg1, false)
         }
+        #[cfg(feature = "system-apps")]
+        value if value == Number::IdentityAdminQuery as u64 => {
+            sys_identity_admin_query(arg0, arg1, arg2)
+        }
         _ => u64::MAX,
     };
 
@@ -3637,6 +3643,43 @@ fn sys_identity_admin_group_member(user: u64, group: u64, add: bool) -> u64 {
         result.is_ok(),
     );
     result.map_or(SYSCALL_ERROR, |_| 0)
+}
+
+#[cfg(feature = "system-apps")]
+fn sys_identity_admin_query(user_output: u64, capacity: u64, kind: u64) -> u64 {
+    const MAX_OUTPUT: usize = libwoven::identity::ADMIN_QUERY_MAX_BYTES;
+    let actor = crate::task::current_task_id().as_u64();
+    let Ok(capacity) = usize::try_from(capacity) else {
+        crate::audit::record(actor, crate::audit::Action::IdentityAdminQuery, kind, false);
+        return SYSCALL_ERROR;
+    };
+    let Ok(kind) = u8::try_from(kind) else {
+        crate::audit::record(actor, crate::audit::Action::IdentityAdminQuery, 0, false);
+        return SYSCALL_ERROR;
+    };
+    if capacity == 0
+        || capacity > MAX_OUTPUT
+        || kind > libwoven::identity::ADMIN_QUERY_GROUPS
+    {
+        crate::audit::record(actor, crate::audit::Action::IdentityAdminQuery, u64::from(kind), false);
+        return SYSCALL_ERROR;
+    }
+    let mut output = [0u8; MAX_OUTPUT];
+    let result = crate::identity_runtime::admin_query(
+        crate::task::current_process_id(),
+        kind,
+        &mut output[..capacity],
+    );
+    let Ok(length) = result else {
+        crate::audit::record(actor, crate::audit::Action::IdentityAdminQuery, u64::from(kind), false);
+        return SYSCALL_ERROR;
+    };
+    if crate::paging::copy_to_current_user(user_output, &output[..length]).is_err() {
+        crate::audit::record(actor, crate::audit::Action::IdentityAdminQuery, u64::from(kind), false);
+        return SYSCALL_ERROR;
+    }
+    crate::audit::record(actor, crate::audit::Action::IdentityAdminQuery, u64::from(kind), true);
+    length as u64
 }
 
 /// The compositor surface's size and display scale. Requires `DisplayIo` and

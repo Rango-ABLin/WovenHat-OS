@@ -1,5 +1,17 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - Stage 24.14 (2026-10-21)
+
+Implemented and accepted the bounded identity administration query ABI and
+WovenSecurity directory UI. Syscall 231 and audit action 36 expose only fixed,
+non-secret user/group records to an elevated owner-bound administrator
+session. Host tests, all Clippy gates, focused WovenSecurity QEMU, and signed
+system-apps 1/2/4-CPU acceptance pass. Evidence is recorded in
+`docs/audit-stage24-14-admin-query-ui-2026-10-21.md`; the USB device was not
+modified. Next work is mutation-management UI followed by configurable
+lockout, hardware credentials, malformed telemetry, release-key provisioning,
+and physical qualification.
+
 ## Codex - Stage 24.13 (2026-10-21)
 
 Implemented bounded elevated-admin supplementary group membership mutation: syscalls 229-230, audit actions 34-35, duplicate/full/unknown checks, primary-group protection, WID2 persistence, and live rollback. Host tests, host and production Clippy, diff check, and signed system-apps 1/2/4-CPU acceptance pass. Evidence and limits are recorded in `docs/audit-stage24-13-group-membership-2026-10-21.md`; physical USB was not modified. Next work is administration UI/query integration and remaining release qualification blockers.

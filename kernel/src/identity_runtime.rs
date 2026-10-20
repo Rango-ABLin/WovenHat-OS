@@ -74,7 +74,13 @@ pub(crate) fn load_accounts_file(path: &str) -> Result<(), Error> {
         let account = libwoven::accounts::Account::parse(line).ok_or(Error::Storage)?;
         let (salt, hash) = account.credential_material();
         authority
-            .add_stored_user(account.name(), group, salt, hash, false)
+            .add_stored_user(
+                account.name(),
+                group,
+                salt,
+                hash,
+                cfg!(feature = "hardware-demo") && count == 0,
+            )
             .map_err(Error::Identity)?;
         count += 1;
     }
@@ -236,6 +242,17 @@ pub(crate) fn admin_group_member(
         return Err(Error::Storage);
     }
     Ok(())
+}
+
+#[cfg(feature = "system-apps")]
+pub(crate) fn admin_query(owner: u64, kind: u8, output: &mut [u8]) -> Result<usize, Error> {
+    let session = owner_session(owner)?;
+    let authority = AUTHORITY.lock();
+    authority
+        .as_ref()
+        .ok_or(Error::NotReady)?
+        .admin_query(session, kind, output)
+        .map_err(Error::Identity)
 }
 
 #[cfg(feature = "system-apps")]

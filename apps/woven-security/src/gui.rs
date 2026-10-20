@@ -19,6 +19,74 @@ const PANEL_HEIGHT: usize = 176;
 const MAX_EVENTS: u64 = 16;
 const MAX_SURFACE_WIDTH: usize = 480;
 const MAX_SURFACE_HEIGHT: usize = 320;
+const MAX_ADMIN_ROWS: usize = 16;
+
+#[derive(Clone, Copy)]
+struct AdminRow {
+    name: [u8; libwoven::accounts::MAX_NAME],
+    length: usize,
+    administrator: bool,
+}
+
+impl AdminRow {
+    const EMPTY: Self = Self {
+        name: [0; libwoven::accounts::MAX_NAME],
+        length: 0,
+        administrator: false,
+    };
+}
+
+#[derive(Clone, Copy)]
+struct AdminUi {
+    mode: u8,
+    session: Option<libwoven::identity::SessionId>,
+    name: [u8; libwoven::accounts::MAX_NAME],
+    name_length: usize,
+    pin: [u8; libwoven::accounts::MAX_PIN],
+    pin_length: usize,
+    users: [AdminRow; MAX_ADMIN_ROWS],
+    groups: [AdminRow; MAX_ADMIN_ROWS],
+    user_count: usize,
+    group_count: usize,
+}
+
+impl AdminUi {
+    const EMPTY: Self = Self {
+        mode: 0,
+        session: None,
+        name: [0; libwoven::accounts::MAX_NAME],
+        name_length: 0,
+        pin: [0; libwoven::accounts::MAX_PIN],
+        pin_length: 0,
+        users: [AdminRow::EMPTY; MAX_ADMIN_ROWS],
+        groups: [AdminRow::EMPTY; MAX_ADMIN_ROWS],
+        user_count: 0,
+        group_count: 0,
+    };
+
+    fn clear_secret(&mut self) {
+        for byte in &mut self.pin {
+            // SAFETY: volatile clearing prevents the compiler from eliding
+            // removal of the administrator credential from this UI state.
+            unsafe { core::ptr::write_volatile(byte, 0) };
+        }
+        self.pin_length = 0;
+    }
+
+    fn close(&mut self) {
+        if let Some(session) = self.session.take() {
+            let _ = libwoven::identity::session_close(session);
+        }
+        self.clear_secret();
+        self.name.fill(0);
+        self.name_length = 0;
+        self.users = [AdminRow::EMPTY; MAX_ADMIN_ROWS];
+        self.groups = [AdminRow::EMPTY; MAX_ADMIN_ROWS];
+        self.user_count = 0;
+        self.group_count = 0;
+        self.mode = 0;
+    }
+}
 
 struct PixelBuffer(core::cell::UnsafeCell<[u32; MAX_SURFACE_WIDTH * MAX_SURFACE_HEIGHT]>);
 
@@ -71,11 +139,19 @@ fn draw_security(
     pointer: Option<(u16, u16)>,
     pressed: bool,
     refresh_count: u32,
+    admin: &AdminUi,
 ) {
     canvas.fill_rect(0, 0, canvas.width(), canvas.height(), BACKGROUND);
     canvas.fill_rect(PANEL_X, PANEL_Y, PANEL_WIDTH, PANEL_HEIGHT, PANEL);
     stroke_rect(canvas, PANEL_X, PANEL_Y, PANEL_WIDTH, PANEL_HEIGHT, ACCENT);
     canvas.draw_text(PANEL_X + 10, PANEL_Y + 8, "WovenSecurity", TEXT);
+    if admin.mode != 0 {
+        draw_admin(canvas, admin);
+        if let Some((x, y)) = pointer {
+            canvas.fill_rect(i32::from(x).saturating_sub(2), i32::from(y).saturating_sub(2), 5, 5, if pressed { TEXT } else { POINTER_MARKER });
+        }
+        return;
+    }
     canvas.draw_text(PANEL_X + 10, PANEL_Y + 36, "Current identity", ACCENT);
     let mut digits = [0u8; 20];
     // SAFETY: argument-free identity query.
@@ -111,11 +187,125 @@ fn draw_security(
     }
 }
 
+fn draw_admin(canvas: &mut Canvas<'_>, admin: &AdminUi) {
+    if admin.mode == 4 {
+        canvas.draw_text(PANEL_X + 10, PANEL_Y + 48, "Administrator access denied", TEXT);
+        canvas.draw_text(PANEL_X + 10, PANEL_Y + 82, "Press A to try again", TEXT);
+        return;
+    }
+    if admin.mode < 3 {
+        canvas.draw_text(PANEL_X + 10, PANEL_Y + 36, "Administrator access", ACCENT);
+        let prompt = if admin.mode == 1 { "Account name" } else { "Administrator PIN" };
+        canvas.draw_text(PANEL_X + 10, PANEL_Y + 60, prompt, TEXT);
+        let mut field = [b' '; libwoven::accounts::MAX_PIN];
+        let source = if admin.mode == 1 {
+            &admin.name[..admin.name_length]
+        } else {
+            for byte in field.iter_mut().take(admin.pin_length) {
+                *byte = b'*';
+            }
+            &field[..admin.pin_length]
+        };
+        let text = core::str::from_utf8(source).unwrap_or("");
+        canvas.draw_text(PANEL_X + 10, PANEL_Y + 82, text, TEXT);
+        canvas.draw_text(PANEL_X + 10, PANEL_Y + 116, "Enter: continue", TEXT);
+        return;
+    }
+    canvas.draw_text(PANEL_X + 10, PANEL_Y + 36, "Administrator directory", ACCENT);
+    canvas.draw_text(PANEL_X + 10, PANEL_Y + 52, "Users", ACCENT);
+    for (row, item) in admin.users.iter().take(5).enumerate() {
+        let name = core::str::from_utf8(&item.name[..item.length]).unwrap_or("?");
+        canvas.draw_text(PANEL_X + 10, PANEL_Y + 68 + row as i32 * 14, name, TEXT);
+        if item.administrator {
+            canvas.draw_text(PANEL_X + 125, PANEL_Y + 68 + row as i32 * 14, "admin", ACCENT);
+        }
+    }
+    canvas.draw_text(PANEL_X + 190, PANEL_Y + 52, "Groups", ACCENT);
+    for (row, item) in admin.groups.iter().take(5).enumerate() {
+        let name = core::str::from_utf8(&item.name[..item.length]).unwrap_or("?");
+        canvas.draw_text(PANEL_X + 190, PANEL_Y + 68 + row as i32 * 14, name, TEXT);
+    }
+    let mut digits = [0u8; 20];
+    draw_number(canvas, PANEL_X + 10, PANEL_Y + 150, "Users ", admin.user_count as u64, &mut digits);
+    draw_number(canvas, PANEL_X + 110, PANEL_Y + 150, "Groups ", admin.group_count as u64, &mut digits);
+    canvas.draw_text(PANEL_X + 10, PANEL_Y + 168, "A: re-authenticate", TEXT);
+}
+
+fn refresh_admin(ui: &mut AdminUi) -> bool {
+    let mut bytes = [0u8; libwoven::identity::ADMIN_QUERY_MAX_BYTES];
+    let Ok(users) = libwoven::identity::admin_query(
+        libwoven::identity::ADMIN_QUERY_USERS,
+        &mut bytes,
+    ) else {
+        return false;
+    };
+    ui.users = [AdminRow::EMPTY; MAX_ADMIN_ROWS];
+    ui.user_count = users.len().min(MAX_ADMIN_ROWS);
+    for index in 0..ui.user_count {
+        let Some(user) = users.user(index) else { return false };
+        let row = &mut ui.users[index];
+        row.length = user.name().len();
+        row.name[..row.length].copy_from_slice(user.name());
+        row.administrator = user.administrator;
+    }
+    let Ok(groups) = libwoven::identity::admin_query(
+        libwoven::identity::ADMIN_QUERY_GROUPS,
+        &mut bytes,
+    ) else {
+        return false;
+    };
+    ui.groups = [AdminRow::EMPTY; MAX_ADMIN_ROWS];
+    ui.group_count = groups.len().min(MAX_ADMIN_ROWS);
+    for index in 0..ui.group_count {
+        let Some(group) = groups.group(index) else { return false };
+        let row = &mut ui.groups[index];
+        row.length = group.name().len();
+        row.name[..row.length].copy_from_slice(group.name());
+    }
+    true
+}
+
+fn begin_admin(ui: &mut AdminUi) {
+    let _ = libwoven::print("WovenSecurity: administrator authentication\n");
+    if ui.name_length == 0 || ui.pin_length == 0 {
+        ui.mode = 4;
+        ui.clear_secret();
+        return;
+    }
+    let Ok(session) = libwoven::identity::session_open(
+        &ui.name[..ui.name_length],
+        &ui.pin[..ui.pin_length],
+    ) else {
+        let _ = libwoven::print("WovenSecurity: administrator open denied\n");
+        ui.mode = 4;
+        ui.clear_secret();
+        return;
+    };
+    if libwoven::identity::session_elevate(session, &ui.pin[..ui.pin_length]).is_err() {
+        let _ = libwoven::print("WovenSecurity: administrator elevation denied\n");
+        let _ = libwoven::identity::session_close(session);
+        ui.clear_secret();
+        ui.mode = 4;
+        return;
+    }
+    ui.clear_secret();
+    ui.session = Some(session);
+    if refresh_admin(ui) {
+        ui.mode = 3;
+        let _ = libwoven::print("WovenSecurity: administrator directory ready\n");
+    } else {
+        let _ = libwoven::print("WovenSecurity: administrator query denied\n");
+        ui.close();
+        ui.mode = 4;
+    }
+}
+
 fn render(
     window: &GraphicsSurface,
     pointer: Option<(u16, u16)>,
     pressed: bool,
     refresh_count: u32,
+    admin: &AdminUi,
 ) -> bool {
     let pixels = unsafe { &mut *CANVAS_PIXELS.0.get() };
     let Some(mut canvas) = Canvas::new(
@@ -127,7 +317,7 @@ fn render(
     ) else {
         return false;
     };
-    draw_security(&mut canvas, pointer, pressed, refresh_count);
+    draw_security(&mut canvas, pointer, pressed, refresh_count, admin);
     window.write_canvas(&canvas).is_ok()
 }
 
@@ -146,7 +336,8 @@ pub fn run(shell: Option<&[u8]>) -> ! {
         fail(7)
     };
     let mut window = GraphicsSurface::create(WIDTH, HEIGHT).unwrap_or_else(|_| fail(1));
-    if !render(&window, None, false, 0) {
+    let mut admin = AdminUi::EMPTY;
+    if !render(&window, None, false, 0, &admin) {
         fail(3)
     }
     if window.share_with(shell).is_err() {
@@ -176,6 +367,7 @@ pub fn run(shell: Option<&[u8]>) -> ! {
                 continue;
             }
             if message.get(..length.min(4)) == Some(&b"WCLS"[..]) {
+                admin.close();
                 break;
             }
             if message.get(..4) == Some(&b"WSIZ"[..]) && length == 8 {
@@ -183,7 +375,7 @@ pub fn run(shell: Option<&[u8]>) -> ! {
                 let height = u32::from(u16::from_le_bytes([message[6], message[7]])).min(MAX_SURFACE_HEIGHT as u32);
                 if let Ok(resized) = GraphicsSurface::create(width, height) {
                     if resized.share_with(shell).is_ok() && send_resize(&resized, shell) {
-                        if render(&resized, pointer, pointer_pressed, refresh_count) {
+                        if render(&resized, pointer, pointer_pressed, refresh_count, &admin) {
                             let previous = core::mem::replace(&mut window, resized);
                             drop(previous);
                             let _ = libwoven::print("WovenSecurity: window resized\n");
@@ -196,7 +388,7 @@ pub fn run(shell: Option<&[u8]>) -> ! {
                 }
             } else if message.get(..4) == Some(&b"WPMV"[..]) && length == 8 {
                 pointer = Some((u16::from_le_bytes([message[4], message[5]]), u16::from_le_bytes([message[6], message[7]])));
-                if !render(&window, pointer, pointer_pressed, refresh_count) { fail(8) }
+                if !render(&window, pointer, pointer_pressed, refresh_count, &admin) { fail(8) }
                 let _ = libwoven::print("WovenSecurity: pointer updated\n");
             } else if message.get(..4) == Some(&b"WPBT"[..]) && length == 10 && message[4] == 0 {
                 pointer_pressed = message[5] != 0;
@@ -212,8 +404,37 @@ pub fn run(shell: Option<&[u8]>) -> ! {
                     refresh_count = refresh_count.saturating_add(1);
                     let _ = libwoven::print("WovenSecurity: pointer refreshed\n");
                 }
-                if !render(&window, pointer, pointer_pressed, refresh_count) { fail(8) }
+                if !render(&window, pointer, pointer_pressed, refresh_count, &admin) { fail(8) }
                 let _ = libwoven::print("WovenSecurity: pointer updated\n");
+            } else if message.get(..4) == Some(&b"WKEY"[..]) && length >= 5 {
+                match message[4] {
+                    1 if admin.mode == 1 => admin.mode = 2,
+                    1 if admin.mode == 2 => begin_admin(&mut admin),
+                    2 if admin.mode == 1 => admin.name_length = admin.name_length.saturating_sub(1),
+                    2 if admin.mode == 2 => admin.pin_length = admin.pin_length.saturating_sub(1),
+                    _ => {}
+                }
+                if !render(&window, pointer, pointer_pressed, refresh_count, &admin) { fail(8) }
+            } else if length == 1
+                && message[0] == b'a'
+                && matches!(admin.mode, 0 | 3 | 4)
+            {
+                if admin.mode == 0 {
+                    admin.mode = 1;
+                } else if admin.mode == 3 || admin.mode == 4 {
+                    admin.close();
+                    admin.mode = 1;
+                }
+                if !render(&window, pointer, pointer_pressed, refresh_count, &admin) { fail(8) }
+            } else if length == 1 && message[0].is_ascii_graphic() {
+                if admin.mode == 1 && admin.name_length < admin.name.len() {
+                    admin.name[admin.name_length] = message[0];
+                    admin.name_length += 1;
+                } else if admin.mode == 2 && admin.pin_length < admin.pin.len() && message[0].is_ascii_digit() {
+                    admin.pin[admin.pin_length] = message[0];
+                    admin.pin_length += 1;
+                }
+                if !render(&window, pointer, pointer_pressed, refresh_count, &admin) { fail(8) }
             }
         }
     }

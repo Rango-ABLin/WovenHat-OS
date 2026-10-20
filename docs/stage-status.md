@@ -1,5 +1,21 @@
 # Stage status
 
+## Stage 24.14 bounded administration query UI (2026-10-21)
+
+WovenSecurity now authenticates an elevated owner-bound administrator session
+and displays bounded non-secret user/group directory records through query
+syscall 231 and audit action 36. The query ABI has fixed framing and capacity;
+salts, hashes, PINs, and session credentials are excluded. The hardware-demo
+fixture promotes only its first volatile demo account for this test path; the
+production account loader does not promote accounts. The 88-test host suite,
+all warning-denying Clippy gates, diff check, focused WovenSecurity QEMU UI
+acceptance, and signed system-apps 1/2/4-CPU gates pass. Evidence is under
+`audit-artifacts/stage24.14-admin-query-ui-20261021`.
+
+Mutation-management UI, configurable durable lockout, hardware credentials,
+malformed-request telemetry, release-key provisioning, and physical
+qualification remain open.
+
 ## Stage 24.13 group membership administration (2026-10-21)
 
 Elevated administrators can add and remove bounded supplementary group membership through syscalls 229-230. Duplicate membership, unknown identities, full groups, and primary-group removal are rejected; changes publish through WID2 with live rollback on persistence failure. The 87-test host suite, warning-denying host and production Clippy gates, diff check, and signed system-apps 1/2/4-CPU gates pass. Evidence is under `audit-artifacts/stage24.13-group-membership-{1,2,4}cpu-1792534800000000000`.

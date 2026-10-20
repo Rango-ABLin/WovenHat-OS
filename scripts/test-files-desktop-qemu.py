@@ -61,11 +61,14 @@ def main():
     parser.add_argument('--exercise-pointer', action='store_true', help='exercise the desktop PS/2 pointer cursor path with relative motion and a click')
     parser.add_argument('--exercise-client-pointer', action='store_true', help='exercise client pointer forwarding through the desktop PS/2 path')
     parser.add_argument('--exercise-client-click', action='store_true', help='exercise a bounded client control through forwarded PS/2 pointer input')
+    parser.add_argument('--exercise-admin', action='store_true', help='exercise WovenSecurity administrator authentication and directory query')
     args = parser.parse_args()
     if args.exercise_resize and args.app not in ('calculator', 'terminal', 'settings', 'monitor', 'security', 'editor', 'images', 'update', 'store', 'files'):
         parser.error('--exercise-resize currently supports calculator, terminal, settings, monitor, security, editor, images, update, store, and files only')
     if args.exercise_client_click and args.app not in ('calculator', 'settings', 'files', 'terminal', 'monitor', 'security', 'editor', 'images', 'update', 'store'):
         parser.error('--exercise-client-click currently supports the packaged desktop clients only')
+    if args.exercise_admin and args.app != 'security':
+        parser.error('--exercise-admin currently supports only WovenSecurity')
     app = {
         'calculator': ('calculator', 'WovenCalculator', 'woven-calculator', 'calculator'),
         'files': ('files', 'WovenFiles', 'woven-files', 'files'),
@@ -97,6 +100,10 @@ def main():
     manifest = json.loads((output / 'manifest.json').read_text(encoding='utf-8'))
     packages = {item['id']: output / item['package'] for item in manifest['apps']}
     env = os.environ.copy()
+    env['WOVENHAT_PACKAGE_IMAGE'] = subprocess.check_output(
+        [sys.executable, str(root / 'scripts' / 'build-package-service.py')],
+        cwd=root, env=package_env, text=True,
+    ).strip()
     env.update({
         'WOVENHAT_CALCULATOR_IMAGE': str(packages['woven-calculator']),
         'WOVENHAT_TERMINAL_IMAGE': str(packages['woven-terminal']),
@@ -189,6 +196,19 @@ def main():
             if process.poll() is not None or time.monotonic() > deadline:
                 raise RuntimeError(f'{app[1]} did not open a desktop window')
             time.sleep(0.1)
+        if args.exercise_admin:
+            # Let the first shortcut repaint and settle focus before sending
+            # the account name.  The shell forwards one message per key;
+            # pacing keeps the bounded application queue event-driven rather
+            # than relying on back-to-back QMP input being lossless.
+            time.sleep(0.8)
+            for key in ['a', 'a', 'd', 'a', 'ret', '1', '2', '3', '4', 'ret']:
+                command_qmp('send-key', {'keys': [{'type': 'qcode', 'data': key}], 'hold-time': 120})
+                time.sleep(0.7)
+            while 'WovenSecurity: administrator directory ready' not in serial.read_text(errors='replace'):
+                if process.poll() is not None or time.monotonic() > deadline:
+                    raise RuntimeError('WovenSecurity administrator directory did not open')
+                time.sleep(0.1)
         # The client logs immediately after WOPN; allow the compositor's
         # event-driven repaint to reach the framebuffer before capture.
         time.sleep(2)
