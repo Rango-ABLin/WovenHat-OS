@@ -202,13 +202,33 @@ def main():
             # pacing keeps the bounded application queue event-driven rather
             # than relying on back-to-back QMP input being lossless.
             time.sleep(0.8)
-            for key in ['a', 'a', 'd', 'a', 'ret', '1', '2', '3', '4', 'ret']:
-                command_qmp('send-key', {'keys': [{'type': 'qcode', 'data': key}], 'hold-time': 120})
-                time.sleep(0.7)
-            while 'WovenSecurity: administrator directory ready' not in serial.read_text(errors='replace'):
-                if process.poll() is not None or time.monotonic() > deadline:
-                    raise RuntimeError('WovenSecurity administrator directory did not open')
-                time.sleep(0.1)
+            def send_keys(keys):
+                for key in keys:
+                    command_qmp('send-key', {'keys': [{'type': 'qcode', 'data': key}], 'hold-time': 120})
+                    time.sleep(0.7)
+
+            def wait_for_marker(marker, description):
+                while marker not in serial.read_text(errors='replace'):
+                    if process.poll() is not None or time.monotonic() > deadline:
+                        raise RuntimeError(description)
+                    time.sleep(0.1)
+
+            send_keys(['a', 'a', 'd', 'a', 'ret', '1', '2', '3', '4', 'ret'])
+            wait_for_marker('WovenSecurity: administrator directory ready',
+                            'WovenSecurity administrator directory did not open')
+            # Exercise every mutation-management UI path against the bounded
+            # demo authority: create a group/user, add and remove membership,
+            # then delete the temporary user.
+            send_keys(['g', 's', 't', 'a', 'f', 'f', 'ret'])
+            wait_for_marker('WovenSecurity: group added', 'WovenSecurity group mutation failed')
+            send_keys(['u', 'b', 'o', 'b', 'ret', '5', '6', '7', '8', 'ret'])
+            wait_for_marker('WovenSecurity: user added', 'WovenSecurity user mutation failed')
+            send_keys(['m', '1', '0', '0', '2', 'ret', '1', '0', '0', '1', 'ret'])
+            wait_for_marker('WovenSecurity: membership added', 'WovenSecurity membership-add failed')
+            send_keys(['r', '1', '0', '0', '2', 'ret', '1', '0', '0', '1', 'ret'])
+            wait_for_marker('WovenSecurity: membership removed', 'WovenSecurity membership-remove failed')
+            send_keys(['d', '1', '0', '0', '2', 'ret'])
+            wait_for_marker('WovenSecurity: user deleted', 'WovenSecurity delete-user failed')
         # The client logs immediately after WOPN; allow the compositor's
         # event-driven repaint to reach the framebuffer before capture.
         time.sleep(2)

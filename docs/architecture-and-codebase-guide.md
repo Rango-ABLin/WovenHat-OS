@@ -1,5 +1,17 @@
 # WovenHat OS Architecture & Codebase Guide
 
+### Stage 24.15 - administration mutation UI
+
+WovenSecurity drives all existing bounded identity mutations from one
+owner-bound elevated session: user/group creation, supplementary membership
+add/remove, and inactive-user deletion. Prompts use fixed buffers and decimal
+ID parsing; successful operations refresh the query directory. The identity
+runtime, rather than the desktop-only `AccountManage` capability, authorizes
+these mutations because the signed security application is a normal userspace
+process. Runtime owner/elevation checks remain mandatory for every operation.
+The `hardware-demo` feature permits volatile acceptance when no WovenFS volume
+exists; production publication remains durable and fail-closed.
+
 ### Stage 24.14 - bounded administration query UI
 
 `libwoven::identity::AdminQuery` decodes a fixed version/kind/count wire

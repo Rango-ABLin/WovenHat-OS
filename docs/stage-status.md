@@ -1,5 +1,21 @@
 # Stage status
 
+## Stage 24.15 administration mutation UI (2026-10-21)
+
+WovenSecurity now exposes bounded add-user, add-group, add/remove-membership,
+and inactive-user deletion flows after administrator elevation. Directory
+records display stable IDs for subsequent operations. The identity runtime
+remains the authorization boundary; every mutation requires an owner-bound
+elevated administrator session. The no-disk hardware-demo fixture has an
+explicit volatile fallback, while production builds require durable WID2 and
+trusted account-file publication. The 88-test host suite, all relevant
+warning-denying Clippy gates, focused mutation UI QEMU acceptance, and signed
+system-apps 1/2/4-CPU gates pass. Evidence is under
+`audit-artifacts/stage24.15-admin-mutation-ui-20261021`.
+
+Durable/configurable lockout, hardware credentials, malformed-request
+telemetry, release-key provisioning, and physical qualification remain open.
+
 ## Stage 24.14 bounded administration query UI (2026-10-21)
 
 WovenSecurity now authenticates an elevated owner-bound administrator session

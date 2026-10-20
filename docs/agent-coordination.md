@@ -1,5 +1,19 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - Stage 24.15 (2026-10-21)
+
+Implemented and accepted the complete WovenSecurity mutation-management UI:
+add user, add group, add/remove supplementary membership, and delete inactive
+user. Stable IDs are displayed, operations refresh the bounded directory, and
+the owner-bound elevated identity session remains the authorization boundary.
+The no-disk hardware-demo path has an explicit volatile-only fallback;
+production durable publication remains fail-closed. Host tests, all Clippy
+gates, focused mutation QEMU, and signed system-apps 1/2/4-CPU acceptance
+pass. Evidence is in `docs/audit-stage24-15-admin-mutation-ui-2026-10-21.md`;
+the USB device was not modified. Next work is durable/configurable lockout,
+then hardware credentials, malformed telemetry, release-key provisioning, and
+physical qualification.
+
 ## Codex - Stage 24.14 (2026-10-21)
 
 Implemented and accepted the bounded identity administration query ABI and

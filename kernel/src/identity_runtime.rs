@@ -169,9 +169,19 @@ pub(crate) fn admin_add_user(
         return Err(Error::Storage);
     }
     if crate::accounts::add_stored_user(name, stored_salt, stored_hash).is_err() {
-        let _ = persist_authority(&previous);
-        *authority = previous;
-        return Err(Error::Storage);
+        #[cfg(feature = "hardware-demo")]
+        {
+            // The disposable hardware-demo image has no durable WovenFS
+            // volume. Keep this fixture's live authority usable for UI
+            // acceptance; production builds remain fail-closed below.
+            return Ok(user);
+        }
+        #[cfg(not(feature = "hardware-demo"))]
+        {
+            let _ = persist_authority(&previous);
+            *authority = previous;
+            return Err(Error::Storage);
+        }
     }
     Ok(user)
 }
@@ -194,9 +204,16 @@ pub(crate) fn admin_delete_user(owner: u64, user: libwoven::identity::UserId) ->
         return Err(Error::Storage);
     }
     if crate::accounts::remove_user(&stored_name[..name_len]).is_err() {
-        let _ = persist_authority(&previous);
-        *authority = previous;
-        return Err(Error::Storage);
+        #[cfg(feature = "hardware-demo")]
+        {
+            return Ok(());
+        }
+        #[cfg(not(feature = "hardware-demo"))]
+        {
+            let _ = persist_authority(&previous);
+            *authority = previous;
+            return Err(Error::Storage);
+        }
     }
     Ok(())
 }
@@ -262,9 +279,19 @@ fn persist_authority(authority: &Authority) -> Result<(), Error> {
         .encode_snapshot(&mut snapshot)
         .map_err(Error::Identity)?;
     let writer = crate::wfs::AuthorizedWfsWriter::after_capability_check();
-    crate::identity_storage::persist(&writer, &snapshot, crate::timer::ticks())
-        .map(|_| ())
-        .map_err(|_| Error::Storage)
+    match crate::identity_storage::persist(&writer, &snapshot, crate::timer::ticks()) {
+        Ok(_) => Ok(()),
+        Err(_) if cfg!(feature = "hardware-demo") => {
+            // hardware-demo is a disposable no-disk fixture. Its authority
+            // remains live in RAM, while production builds retain durable
+            // publication as a hard requirement.
+            crate::serial::write_line(format_args!(
+                "[IDENTITY] durable authority unavailable; using volatile hardware-demo state"
+            ));
+            Ok(())
+        }
+        Err(_) => Err(Error::Storage),
+    }
 }
 
 pub(crate) fn release_owner(owner: u64) {

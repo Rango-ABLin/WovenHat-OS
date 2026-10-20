@@ -2,6 +2,14 @@ WovenHat OS — Stage 10.7 → Version 1.0 Master Roadmap
 Phase I — Finish the asynchronous kernel foundation
 Stage 10.7 — Asynchronous TCP
 
+Stage 24.15 - Administration mutation UI
+
+Implemented the complete bounded WovenSecurity mutation flow: add user, add
+group, add/remove supplementary membership, and delete inactive user. Focused
+UI and signed 1/2/4-CPU acceptance pass. The disposable hardware-demo image
+uses volatile state only when no WovenFS volume exists; production remains
+durable and fail-closed.
+
 Stage 24.14 - Bounded administration query UI
 
 Implemented the bounded identity user/group query ABI, audit action 36, and
@@ -15,7 +23,7 @@ Stage 24.13 - Group membership administration
 
 Implemented bounded elevated-admin supplementary group membership mutation (syscalls 229-230), with duplicate/full/unknown identity checks, primary-group protection, WID2 publication, rollback, and security-ledger actions. Host, Clippy, and signed 1/2/4-CPU acceptance pass.
 
-Next prerequisites are mutation-management UI, configurable lockout policy, hardware credentials, malformed-request telemetry, release-key provisioning, and physical qualification.
+Next prerequisites are durable/configurable lockout policy, hardware credentials, malformed-request telemetry, release-key provisioning, and physical qualification.
 
 Current stage
 

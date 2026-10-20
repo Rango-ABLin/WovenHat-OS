@@ -20,9 +20,22 @@ const MAX_EVENTS: u64 = 16;
 const MAX_SURFACE_WIDTH: usize = 480;
 const MAX_SURFACE_HEIGHT: usize = 320;
 const MAX_ADMIN_ROWS: usize = 16;
+const MODE_AUTH_NAME: u8 = 1;
+const MODE_AUTH_PIN: u8 = 2;
+const MODE_DIRECTORY: u8 = 3;
+const MODE_ACCESS_DENIED: u8 = 4;
+const MODE_ADD_USER_NAME: u8 = 5;
+const MODE_ADD_USER_PIN: u8 = 6;
+const MODE_ADD_GROUP_NAME: u8 = 7;
+const MODE_ADD_MEMBER_USER: u8 = 8;
+const MODE_ADD_MEMBER_GROUP: u8 = 9;
+const MODE_REMOVE_MEMBER_USER: u8 = 10;
+const MODE_REMOVE_MEMBER_GROUP: u8 = 11;
+const MODE_DELETE_USER: u8 = 12;
 
 #[derive(Clone, Copy)]
 struct AdminRow {
+    id: u32,
     name: [u8; libwoven::accounts::MAX_NAME],
     length: usize,
     administrator: bool,
@@ -30,6 +43,7 @@ struct AdminRow {
 
 impl AdminRow {
     const EMPTY: Self = Self {
+        id: 0,
         name: [0; libwoven::accounts::MAX_NAME],
         length: 0,
         administrator: false,
@@ -44,6 +58,9 @@ struct AdminUi {
     name_length: usize,
     pin: [u8; libwoven::accounts::MAX_PIN],
     pin_length: usize,
+    input: [u8; libwoven::accounts::MAX_NAME],
+    input_length: usize,
+    pending_id: u32,
     users: [AdminRow; MAX_ADMIN_ROWS],
     groups: [AdminRow; MAX_ADMIN_ROWS],
     user_count: usize,
@@ -58,6 +75,9 @@ impl AdminUi {
         name_length: 0,
         pin: [0; libwoven::accounts::MAX_PIN],
         pin_length: 0,
+        input: [0; libwoven::accounts::MAX_NAME],
+        input_length: 0,
+        pending_id: 0,
         users: [AdminRow::EMPTY; MAX_ADMIN_ROWS],
         groups: [AdminRow::EMPTY; MAX_ADMIN_ROWS],
         user_count: 0,
@@ -80,11 +100,25 @@ impl AdminUi {
         self.clear_secret();
         self.name.fill(0);
         self.name_length = 0;
+        self.input.fill(0);
+        self.input_length = 0;
+        self.pending_id = 0;
         self.users = [AdminRow::EMPTY; MAX_ADMIN_ROWS];
         self.groups = [AdminRow::EMPTY; MAX_ADMIN_ROWS];
         self.user_count = 0;
         self.group_count = 0;
         self.mode = 0;
+    }
+
+    fn clear_input(&mut self) {
+        self.input.fill(0);
+        self.input_length = 0;
+    }
+
+    fn begin_input(&mut self, mode: u8) {
+        self.clear_input();
+        self.pending_id = 0;
+        self.mode = mode;
     }
 }
 
@@ -188,24 +222,43 @@ fn draw_security(
 }
 
 fn draw_admin(canvas: &mut Canvas<'_>, admin: &AdminUi) {
-    if admin.mode == 4 {
+    if admin.mode == MODE_ACCESS_DENIED {
         canvas.draw_text(PANEL_X + 10, PANEL_Y + 48, "Administrator access denied", TEXT);
         canvas.draw_text(PANEL_X + 10, PANEL_Y + 82, "Press A to try again", TEXT);
         return;
     }
-    if admin.mode < 3 {
+    if admin.mode != MODE_DIRECTORY {
         canvas.draw_text(PANEL_X + 10, PANEL_Y + 36, "Administrator access", ACCENT);
-        let prompt = if admin.mode == 1 { "Account name" } else { "Administrator PIN" };
-        canvas.draw_text(PANEL_X + 10, PANEL_Y + 60, prompt, TEXT);
-        let mut field = [b' '; libwoven::accounts::MAX_PIN];
-        let source = if admin.mode == 1 {
-            &admin.name[..admin.name_length]
-        } else {
-            for byte in field.iter_mut().take(admin.pin_length) {
-                *byte = b'*';
+        let (prompt, source) = match admin.mode {
+            MODE_AUTH_NAME => ("Account name", &admin.name[..admin.name_length]),
+            MODE_AUTH_PIN | MODE_ADD_USER_PIN => {
+                let mut field = [b' '; libwoven::accounts::MAX_PIN];
+                for byte in field.iter_mut().take(admin.pin_length) {
+                    *byte = b'*';
+                }
+                let text = core::str::from_utf8(&field[..admin.pin_length]).unwrap_or("");
+                canvas.draw_text(PANEL_X + 10, PANEL_Y + 82, text, TEXT);
+                let prompt = if admin.mode == MODE_AUTH_PIN {
+                    "Administrator PIN"
+                } else {
+                    "New user PIN"
+                };
+                canvas.draw_text(PANEL_X + 10, PANEL_Y + 60, prompt, TEXT);
+                canvas.draw_text(PANEL_X + 10, PANEL_Y + 116, "Enter: continue", TEXT);
+                return;
             }
-            &field[..admin.pin_length]
+            MODE_ADD_USER_NAME => ("New user name", &admin.input[..admin.input_length]),
+            MODE_ADD_GROUP_NAME => ("New group name", &admin.input[..admin.input_length]),
+            MODE_ADD_MEMBER_USER | MODE_REMOVE_MEMBER_USER => {
+                ("User ID", &admin.input[..admin.input_length])
+            }
+            MODE_ADD_MEMBER_GROUP | MODE_REMOVE_MEMBER_GROUP => {
+                ("Group ID", &admin.input[..admin.input_length])
+            }
+            MODE_DELETE_USER => ("Delete user ID", &admin.input[..admin.input_length]),
+            _ => ("Administrator access", &[] as &[u8]),
         };
+        canvas.draw_text(PANEL_X + 10, PANEL_Y + 60, prompt, TEXT);
         let text = core::str::from_utf8(source).unwrap_or("");
         canvas.draw_text(PANEL_X + 10, PANEL_Y + 82, text, TEXT);
         canvas.draw_text(PANEL_X + 10, PANEL_Y + 116, "Enter: continue", TEXT);
@@ -213,22 +266,26 @@ fn draw_admin(canvas: &mut Canvas<'_>, admin: &AdminUi) {
     }
     canvas.draw_text(PANEL_X + 10, PANEL_Y + 36, "Administrator directory", ACCENT);
     canvas.draw_text(PANEL_X + 10, PANEL_Y + 52, "Users", ACCENT);
+    let mut digits = [0u8; 20];
     for (row, item) in admin.users.iter().take(5).enumerate() {
         let name = core::str::from_utf8(&item.name[..item.length]).unwrap_or("?");
-        canvas.draw_text(PANEL_X + 10, PANEL_Y + 68 + row as i32 * 14, name, TEXT);
+        let y = PANEL_Y + 68 + row as i32 * 14;
+        draw_number(canvas, PANEL_X + 10, y, "", u64::from(item.id), &mut digits);
+        canvas.draw_text(PANEL_X + 40, y, name, TEXT);
         if item.administrator {
-            canvas.draw_text(PANEL_X + 125, PANEL_Y + 68 + row as i32 * 14, "admin", ACCENT);
+            canvas.draw_text(PANEL_X + 140, y, "admin", ACCENT);
         }
     }
     canvas.draw_text(PANEL_X + 190, PANEL_Y + 52, "Groups", ACCENT);
     for (row, item) in admin.groups.iter().take(5).enumerate() {
         let name = core::str::from_utf8(&item.name[..item.length]).unwrap_or("?");
-        canvas.draw_text(PANEL_X + 190, PANEL_Y + 68 + row as i32 * 14, name, TEXT);
+        let y = PANEL_Y + 68 + row as i32 * 14;
+        draw_number(canvas, PANEL_X + 190, y, "", u64::from(item.id), &mut digits);
+        canvas.draw_text(PANEL_X + 220, y, name, TEXT);
     }
-    let mut digits = [0u8; 20];
     draw_number(canvas, PANEL_X + 10, PANEL_Y + 150, "Users ", admin.user_count as u64, &mut digits);
     draw_number(canvas, PANEL_X + 110, PANEL_Y + 150, "Groups ", admin.group_count as u64, &mut digits);
-    canvas.draw_text(PANEL_X + 10, PANEL_Y + 168, "A: re-authenticate", TEXT);
+    canvas.draw_text(PANEL_X + 10, PANEL_Y + 168, "U user G group M add R remove D delete", TEXT);
 }
 
 fn refresh_admin(ui: &mut AdminUi) -> bool {
@@ -244,6 +301,7 @@ fn refresh_admin(ui: &mut AdminUi) -> bool {
     for index in 0..ui.user_count {
         let Some(user) = users.user(index) else { return false };
         let row = &mut ui.users[index];
+        row.id = user.id.0;
         row.length = user.name().len();
         row.name[..row.length].copy_from_slice(user.name());
         row.administrator = user.administrator;
@@ -259,6 +317,7 @@ fn refresh_admin(ui: &mut AdminUi) -> bool {
     for index in 0..ui.group_count {
         let Some(group) = groups.group(index) else { return false };
         let row = &mut ui.groups[index];
+        row.id = group.id.0;
         row.length = group.name().len();
         row.name[..row.length].copy_from_slice(group.name());
     }
@@ -297,6 +356,105 @@ fn begin_admin(ui: &mut AdminUi) {
         let _ = libwoven::print("WovenSecurity: administrator query denied\n");
         ui.close();
         ui.mode = 4;
+    }
+}
+
+fn mutation_failed(ui: &mut AdminUi, message: &'static str) {
+    let _ = libwoven::print(message);
+    ui.clear_input();
+    ui.clear_secret();
+    ui.mode = MODE_DIRECTORY;
+}
+
+fn mutation_refresh(ui: &mut AdminUi, message: &'static str) {
+    let _ = libwoven::print(message);
+    ui.clear_input();
+    ui.clear_secret();
+    if !refresh_admin(ui) {
+        ui.close();
+        ui.mode = MODE_ACCESS_DENIED;
+    } else {
+        ui.mode = MODE_DIRECTORY;
+    }
+}
+
+fn finish_add_user(ui: &mut AdminUi) {
+    if ui.input_length == 0 || ui.pin_length == 0 {
+        mutation_failed(ui, "WovenSecurity: add user rejected\n");
+        return;
+    }
+    if libwoven::identity::admin_add_user(
+        &ui.input[..ui.input_length],
+        &ui.pin[..ui.pin_length],
+        false,
+    )
+    .is_ok()
+    {
+        mutation_refresh(ui, "WovenSecurity: user added\n");
+    } else {
+        mutation_failed(ui, "WovenSecurity: add user rejected\n");
+    }
+}
+
+fn finish_add_group(ui: &mut AdminUi) {
+    if ui.input_length == 0 {
+        mutation_failed(ui, "WovenSecurity: add group rejected\n");
+        return;
+    }
+    if libwoven::identity::admin_add_group(&ui.input[..ui.input_length]).is_ok() {
+        mutation_refresh(ui, "WovenSecurity: group added\n");
+    } else {
+        mutation_failed(ui, "WovenSecurity: add group rejected\n");
+    }
+}
+
+fn finish_group_member(ui: &mut AdminUi, add: bool) {
+    let Some(user) = parse_u32(&ui.input[..ui.input_length]) else {
+        mutation_failed(ui, "WovenSecurity: membership rejected\n");
+        return;
+    };
+    ui.pending_id = user;
+    ui.clear_input();
+    ui.mode = if add { MODE_ADD_MEMBER_GROUP } else { MODE_REMOVE_MEMBER_GROUP };
+}
+
+fn finish_group_member_second(ui: &mut AdminUi, add: bool) {
+    let Some(group_or_user) = parse_u32(&ui.input[..ui.input_length]) else {
+        mutation_failed(ui, "WovenSecurity: membership rejected\n");
+        return;
+    };
+    let (user, group) = (
+        libwoven::identity::UserId(ui.pending_id),
+        libwoven::identity::GroupId(group_or_user),
+    );
+    let result = if add {
+        libwoven::identity::admin_add_group_member(user, group)
+    } else {
+        libwoven::identity::admin_remove_group_member(user, group)
+    };
+    if result.is_ok() {
+        mutation_refresh(
+            ui,
+            if add {
+                "WovenSecurity: membership added\n"
+            } else {
+                "WovenSecurity: membership removed\n"
+            },
+        );
+    } else {
+        mutation_failed(ui, "WovenSecurity: membership rejected\n");
+    }
+}
+
+fn finish_delete_user(ui: &mut AdminUi) {
+    let Some(user) = parse_u32(&ui.input[..ui.input_length]) else {
+        mutation_failed(ui, "WovenSecurity: delete user rejected\n");
+        return;
+    };
+    if libwoven::identity::admin_delete_user(libwoven::identity::UserId(user)).is_ok() {
+        mutation_refresh(ui, "WovenSecurity: user deleted\n");
+    } else {
+        mutation_failed(ui, "WovenSecurity: delete user rejected\n");
     }
 }
 
@@ -408,10 +566,36 @@ pub fn run(shell: Option<&[u8]>) -> ! {
                 let _ = libwoven::print("WovenSecurity: pointer updated\n");
             } else if message.get(..4) == Some(&b"WKEY"[..]) && length >= 5 {
                 match message[4] {
-                    1 if admin.mode == 1 => admin.mode = 2,
-                    1 if admin.mode == 2 => begin_admin(&mut admin),
-                    2 if admin.mode == 1 => admin.name_length = admin.name_length.saturating_sub(1),
-                    2 if admin.mode == 2 => admin.pin_length = admin.pin_length.saturating_sub(1),
+                    1 if admin.mode == MODE_AUTH_NAME => admin.mode = MODE_AUTH_PIN,
+                    1 if admin.mode == MODE_AUTH_PIN => begin_admin(&mut admin),
+                    1 if admin.mode == MODE_ADD_USER_NAME => admin.mode = MODE_ADD_USER_PIN,
+                    1 if admin.mode == MODE_ADD_USER_PIN => finish_add_user(&mut admin),
+                    1 if admin.mode == MODE_ADD_GROUP_NAME => finish_add_group(&mut admin),
+                    1 if matches!(admin.mode, MODE_ADD_MEMBER_USER | MODE_REMOVE_MEMBER_USER) => {
+                        let add = admin.mode == MODE_ADD_MEMBER_USER;
+                        finish_group_member(&mut admin, add)
+                    }
+                    1 if matches!(admin.mode, MODE_ADD_MEMBER_GROUP | MODE_REMOVE_MEMBER_GROUP) => {
+                        let add = admin.mode == MODE_ADD_MEMBER_GROUP;
+                        finish_group_member_second(&mut admin, add)
+                    }
+                    1 if admin.mode == MODE_DELETE_USER => finish_delete_user(&mut admin),
+                    2 if admin.mode == MODE_AUTH_NAME => {
+                        admin.name_length = admin.name_length.saturating_sub(1)
+                    }
+                    2 if admin.mode == MODE_AUTH_PIN || admin.mode == MODE_ADD_USER_PIN => {
+                        admin.pin_length = admin.pin_length.saturating_sub(1)
+                    }
+                    2 if matches!(
+                        admin.mode,
+                        MODE_ADD_USER_NAME
+                            | MODE_ADD_GROUP_NAME
+                            | MODE_ADD_MEMBER_USER
+                            | MODE_ADD_MEMBER_GROUP
+                            | MODE_REMOVE_MEMBER_USER
+                            | MODE_REMOVE_MEMBER_GROUP
+                            | MODE_DELETE_USER
+                    ) => admin.input_length = admin.input_length.saturating_sub(1),
                     _ => {}
                 }
                 if !render(&window, pointer, pointer_pressed, refresh_count, &admin) { fail(8) }
@@ -420,19 +604,48 @@ pub fn run(shell: Option<&[u8]>) -> ! {
                 && matches!(admin.mode, 0 | 3 | 4)
             {
                 if admin.mode == 0 {
-                    admin.mode = 1;
-                } else if admin.mode == 3 || admin.mode == 4 {
+                    admin.mode = MODE_AUTH_NAME;
+                } else if admin.mode == MODE_DIRECTORY || admin.mode == MODE_ACCESS_DENIED {
                     admin.close();
-                    admin.mode = 1;
+                    admin.mode = MODE_AUTH_NAME;
+                }
+                if !render(&window, pointer, pointer_pressed, refresh_count, &admin) { fail(8) }
+            } else if length == 1 && admin.mode == MODE_DIRECTORY {
+                match message[0] {
+                    b'u' => admin.begin_input(MODE_ADD_USER_NAME),
+                    b'g' => admin.begin_input(MODE_ADD_GROUP_NAME),
+                    b'm' => admin.begin_input(MODE_ADD_MEMBER_USER),
+                    b'r' => admin.begin_input(MODE_REMOVE_MEMBER_USER),
+                    b'd' => admin.begin_input(MODE_DELETE_USER),
+                    _ => {}
                 }
                 if !render(&window, pointer, pointer_pressed, refresh_count, &admin) { fail(8) }
             } else if length == 1 && message[0].is_ascii_graphic() {
-                if admin.mode == 1 && admin.name_length < admin.name.len() {
+                if admin.mode == MODE_AUTH_NAME && admin.name_length < admin.name.len() {
                     admin.name[admin.name_length] = message[0];
                     admin.name_length += 1;
-                } else if admin.mode == 2 && admin.pin_length < admin.pin.len() && message[0].is_ascii_digit() {
+                } else if (admin.mode == MODE_AUTH_PIN || admin.mode == MODE_ADD_USER_PIN)
+                    && admin.pin_length < admin.pin.len()
+                    && message[0].is_ascii_digit()
+                {
                     admin.pin[admin.pin_length] = message[0];
                     admin.pin_length += 1;
+                } else if matches!(
+                    admin.mode,
+                    MODE_ADD_USER_NAME
+                        | MODE_ADD_GROUP_NAME
+                        | MODE_ADD_MEMBER_USER
+                        | MODE_ADD_MEMBER_GROUP
+                        | MODE_REMOVE_MEMBER_USER
+                        | MODE_REMOVE_MEMBER_GROUP
+                        | MODE_DELETE_USER
+                ) && admin.input_length < admin.input.len()
+                    && (admin.mode == MODE_ADD_USER_NAME
+                        || admin.mode == MODE_ADD_GROUP_NAME
+                        || message[0].is_ascii_digit())
+                {
+                    admin.input[admin.input_length] = message[0];
+                    admin.input_length += 1;
                 }
                 if !render(&window, pointer, pointer_pressed, refresh_count, &admin) { fail(8) }
             }
@@ -454,4 +667,9 @@ fn parse_u64(text: &[u8]) -> Option<u64> {
         value = value.checked_mul(10)?.checked_add(u64::from(digit - b'0'))?;
     }
     Some(value)
+}
+
+fn parse_u32(text: &[u8]) -> Option<u32> {
+    let value = parse_u64(text)?;
+    u32::try_from(value).ok()
 }

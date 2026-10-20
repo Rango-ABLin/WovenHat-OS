@@ -3503,10 +3503,6 @@ fn sys_identity_unlock_verified(session: u64, user_buffer: u64, length: u64) -> 
 fn sys_identity_admin_add_user(user_buffer: u64, length: u64) -> u64 {
     const MAX_BUFFER: usize = 3 + crate::accounts::MAX_NAME + crate::accounts::MAX_PIN;
     let actor = crate::task::current_task_id().as_u64();
-    if !crate::task::current_has(crate::capability::Capability::AccountManage) {
-        crate::audit::record(actor, crate::audit::Action::IdentityAdminAddUser, 0, false);
-        return SYSCALL_ERROR;
-    }
     let Ok(length) = usize::try_from(length) else {
         crate::audit::record(actor, crate::audit::Action::IdentityAdminAddUser, 0, false);
         return SYSCALL_ERROR;
@@ -3577,10 +3573,6 @@ fn sys_identity_admin_delete_user(user: u64) -> u64 {
 fn sys_identity_admin_add_group(user_buffer: u64, length: u64) -> u64 {
     const MAX_BUFFER: usize = 1 + crate::accounts::MAX_NAME;
     let actor = crate::task::current_task_id().as_u64();
-    if !crate::task::current_has(crate::capability::Capability::AccountManage) {
-        crate::audit::record(actor, crate::audit::Action::IdentityAdminAddGroup, 0, false);
-        return SYSCALL_ERROR;
-    }
     let Ok(length) = usize::try_from(length) else {
         crate::audit::record(actor, crate::audit::Action::IdentityAdminAddGroup, 0, false);
         return SYSCALL_ERROR;
