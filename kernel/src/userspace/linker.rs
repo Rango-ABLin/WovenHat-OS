@@ -437,6 +437,10 @@ fn relocate(
         }
     }
     if dynamic.rel_size != 0 {
+        crate::serial::write_line(format_args!(
+            "[S11.5] DT_REL apply size={} offset={:#x}",
+            dynamic.rel_size, dynamic.rel_file_offset
+        ));
         let end = dynamic.rel_file_offset.checked_add(dynamic.rel_size)?;
         for entry in linked
             .bytes
@@ -447,13 +451,29 @@ fn relocate(
                 .checked_add(linked.image.load_bias())?;
             let info = u64::from_le_bytes(entry[8..16].try_into().ok()?);
             let mut addend_bytes = [0; 8];
-            paging::read_user_bytes_in(page_table, target, &mut addend_bytes).ok()?;
+            if paging::read_user_bytes_in(page_table, target, &mut addend_bytes).is_err() {
+                crate::serial::write_line(format_args!(
+                    "[S11.5] DT_REL addend read failed target={target:#x}"
+                ));
+                return None;
+            }
             let addend = i64::from_le_bytes(addend_bytes);
             let value = match info as u32 {
                 elf::R_X86_64_RELATIVE if info >> 32 == 0 => linked.image.load_bias(),
-                elf::R_X86_64_64 | elf::R_X86_64_GLOB_DAT | elf::R_X86_64_JUMP_SLOT => linked
-                    .image
-                    .relocation_symbol_value(&linked.bytes, (info >> 32) as usize, scope)?,
+                elf::R_X86_64_64 | elf::R_X86_64_GLOB_DAT | elf::R_X86_64_JUMP_SLOT => {
+                    let Some(value) = linked.image.relocation_symbol_value(
+                        &linked.bytes,
+                        (info >> 32) as usize,
+                        scope,
+                    ) else {
+                        crate::serial::write_line(format_args!(
+                            "[S11.5] DT_REL symbol resolution failed index={}",
+                            info >> 32
+                        ));
+                        return None;
+                    };
+                    value
+                }
                 _ => return None,
             };
             let value = if addend >= 0 {
@@ -461,7 +481,12 @@ fn relocate(
             } else {
                 value.checked_sub(addend.unsigned_abs())?
             };
-            paging::write_user_bytes(page_table, target, &value.to_le_bytes()).ok()?;
+            if paging::write_user_bytes(page_table, target, &value.to_le_bytes()).is_err() {
+                crate::serial::write_line(format_args!(
+                    "[S11.5] DT_REL result write failed target={target:#x}"
+                ));
+                return None;
+            }
         }
     }
     Some(())
