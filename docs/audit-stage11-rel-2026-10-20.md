@@ -26,9 +26,16 @@ binding is introduced.
   `stage11.5-2cpu-1792501867464427000` and
   `stage11.5-4cpu-1792501878849660600`.
 
-The QEMU Stage 11.5 fixture is the inherited RELA/shared-loader path; the
-new REL-specific coverage is parser-backed host coverage and is not claimed
-as an independent runtime REL fixture.
+The Stage 11.5 QEMU harness now includes a dedicated signed DT_REL executable
+fixture. It verifies the relocated target, executes the imported function in
+Ring 3, and checks owner teardown. The required markers passed on 1/2/4 CPUs:
+
+- `[S11.5] shared libraries DT_REL runtime relocation: PASSED`
+- `[S11.5] shared libraries DT_REL Ring-3 execution and teardown: PASSED`
+
+Evidence is retained under `audit-artifacts/stage11.5-1cpu-1792502825772958300`,
+`stage11.5-2cpu-1792502960229582900` and
+`stage11.5-4cpu-1792502998392183900`.
 
 ## Limits
 
