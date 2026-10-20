@@ -1849,7 +1849,7 @@ fn live_batch_recovery_self_test() -> Result<(), &'static str> {
                       expected_metadata_b: fat32::FileMetadata|
      -> Result<(), &'static str> {
         let mut disk = block_io::primary_ata();
-        // Heap, not stack. TASK_STACK_SIZE is 128 KiB and vfs::NODE_CAPACITY is
+        // Heap, not stack. TASK_STACK_SIZE is 256 KiB and vfs::NODE_CAPACITY is
         // 64 KiB, so two of these as locals would consume the entire task stack
         // before this frame's own overhead or the callee's. The journal record
         // buffer in read_data_journal_record is heap-allocated for the same
@@ -2261,7 +2261,7 @@ pub fn persist_path(path: &str) -> Result<(), PersistError> {
     }
 
     // Heap, not stack. This function needs two NODE_CAPACITY buffers live at
-    // once, and NODE_CAPACITY is 64 KiB against a 128 KiB TASK_STACK_SIZE, so
+    // once, and NODE_CAPACITY is 64 KiB against a 256 KiB TASK_STACK_SIZE, so
     // as locals they would occupy the entire task stack with no margin for this
     // frame or any callee.
     let mut data = alloc::vec![0_u8; vfs::NODE_CAPACITY];

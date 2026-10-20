@@ -8,10 +8,11 @@ template, creates a fresh mutable TLS/TCB per process, and resolves the
 toolchain's shared-object TLS relocation. Standard Stage 11.5 acceptance
 passes on 1/2/4 CPUs; host tests and warning-denying Clippy pass.
 
-The compiler-fixture acceptance remains open because its feature-specific
-kernel build reaches a preserved stack-canary failure in the paired-userspace
-baseline before the compiler loader block. See the audit file above; the
-explicit PT_TLS marker is required before acceptance.
+The compiler-fixture acceptance now passes on 1/2/4 CPUs, including the exact
+signed Rust/LLD shared PIE, shared-library PT_TLS relocation, per-process
+template initialization, nonzero-bias load, and owner teardown. The fix uses
+the ELF `STT_TLS` symbol type with a non-undefined section index; the kernel
+task stack reservation is 256 KiB. See the audit file above for evidence.
 
 ## Stage 11 lazy PLT binding (2026-10-20)
 
@@ -29,7 +30,8 @@ successful first-call resolution/teardown afterward. Evidence:
 `stage11.5-2cpu-1792508101002664400` and
 `stage11.5-4cpu-1792508116869852100`.
 
-The process carries eight bounded lazy bindings; library TLS remains open.
+The process carries eight bounded lazy bindings; the subsequent shared-library
+TLS correction is accepted in the Stage 11 audit above.
 
 ## Stage 11 lifecycle callbacks (2026-10-20)
 

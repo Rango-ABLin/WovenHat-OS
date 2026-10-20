@@ -4427,13 +4427,7 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         qemu_test_exit_success();
     }
     #[cfg(feature = "stage11-compiler-test")]
-    {
-        if !userspace::compiler_loader_self_test() {
-            serial::write_line(format_args!("[S11.COMPILER] signed toolchain PIE: FAILED"));
-            qemu_test_exit_failure();
-        }
-        serial::write_line(format_args!("[S11.COMPILER] signed toolchain PIE: PASSED"));
-    }
+    run_compiler_loader_gate();
     #[cfg(feature = "stage11-5-test")]
     {
         if !userspace::elf_loader_self_test() || !userspace::shared_library_self_test() {
@@ -5156,6 +5150,16 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     loop {
         x86_64::instructions::hlt();
     }
+}
+
+#[cfg(feature = "stage11-compiler-test")]
+#[inline(never)]
+fn run_compiler_loader_gate() {
+    if !userspace::compiler_loader_self_test() {
+        serial::write_line(format_args!("[S11.COMPILER] signed toolchain PIE: FAILED"));
+        qemu_test_exit_failure();
+    }
+    serial::write_line(format_args!("[S11.COMPILER] signed toolchain PIE: PASSED"));
 }
 
 #[cfg(feature = "qemu-test")]

@@ -161,8 +161,9 @@ Explicitly **not** done, and not claimed:
   qualification.
 - Multi-node NUMA, non-contiguous physical CPU hotplug, and APIC IDs above 255.
 - Stateful connection tracking and NAT.
-- Dynamic linking, shared libraries, and TLS image allocation in the ELF
-  loader.
+- Physical release qualification of the dynamic-linking/shared-library/TLS
+  path on real hardware; bounded QEMU/compiler acceptance is complete, while
+  physical qualification remains a later production gate.
 - Measured key provisioning, persistent key storage, and key rotation policy
   for encrypted volumes.
 

@@ -1,11 +1,12 @@
 # Agent coordination (Claude Code and Codex)
 
-Codex implemented the shared-library PT_TLS loader path on 2026-10-20:
-combined template planning, per-process TCB initialization, TLS symbol scope,
-and TPOFF64 relocation are in the working tree. Standard Stage 11.5 acceptance
-passes on 1/2/4 CPUs. The compiler-fixture gate remains open due to a
-preserved feature-specific stack-canary failure before its test block; see
-`docs/audit-stage11-library-tls-2026-10-20.md` before claiming acceptance.
+Codex implemented and accepted the shared-library PT_TLS loader path on
+2026-10-20: combined template planning, per-process TCB initialization, TLS
+symbol scope, and TPOFF64 relocation are in the working tree. Standard and
+compiler-fixture Stage 11.5 acceptance passes on 1/2/4 CPUs. Toolchain TLS
+symbols are recognized by `STT_TLS` with a non-undefined section index, and
+the per-task kernel stack reservation is 256 KiB. See
+`docs/audit-stage11-library-tls-2026-10-20.md` for exact evidence.
 
 Read-only physical preflight on 2026-10-20 found the attached target as a
 15,726,400,000-byte VendorCo ProductCode USB disk with no partitions, separate

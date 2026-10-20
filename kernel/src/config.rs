@@ -18,7 +18,7 @@ pub const MAX_FILE_DESCRIPTORS: usize = 16;
 /// Kernel stack size reserved for each task (bytes).
 // Debug fork copies bounded process metadata and walks sparse mappings.
 // Reserve room for nested calls and fault population on the same entry stack.
-pub const TASK_STACK_SIZE: usize = 4096 * 32;
+pub const TASK_STACK_SIZE: usize = 4096 * 64;
 
 /// Maximum IPC endpoints (one per process is typical).
 pub const MAX_IPC_ENDPOINTS: usize = 32;

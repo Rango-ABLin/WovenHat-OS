@@ -14,20 +14,23 @@ and a TPOFF64 relocation.
 - `cargo test --workspace`: passed.
 - Freestanding Stage 11.5 and host warning-denying Clippy: passed.
 - Stage 11.5 QEMU acceptance passed on 1, 2, and 4 CPUs. Evidence:
-  `audit-artifacts/stage11.5-1cpu-1792508930356487700`,
-  `audit-artifacts/stage11.5-2cpu-1792509071141370400`,
-  `audit-artifacts/stage11.5-4cpu-1792509098193013900`.
+  `audit-artifacts/stage11.5-1cpu-1792510954965696000`,
+  `audit-artifacts/stage11.5-2cpu-1792510968884579900`,
+  `audit-artifacts/stage11.5-4cpu-1792510982932216800`.
+- The exact compiler-fixture gate passed on 1, 2, and 4 CPUs. Evidence:
+  `audit-artifacts/stage11.5-compiler-1cpu-1792510865272847800`,
+  `audit-artifacts/stage11.5-compiler-2cpu-1792510895456748200`,
+  `audit-artifacts/stage11.5-compiler-4cpu-1792510921851793300`.
+- `cargo test --workspace`, host Clippy, and freestanding compiler-feature
+  Clippy with the generated fixture paths all passed.
 
-The compiler-fixture gate is not accepted: `--stage 11.5-compiler --cpus 1`
-still hits the existing kernel task stack-canary failure during the paired
-userspace baseline before reaching the compiler loader block. Evidence is
-preserved at `audit-artifacts/stage11.5-compiler-1cpu-1792509025622559400`.
-No assertion or timeout was weakened. The gate now requires an explicit PT_TLS
-marker when that prerequisite stack regression is repaired.
+The compiler gate initially exposed a fixed-capacity kernel stack defect and
+an incorrect ELF TLS-symbol discriminator. The stack reservation is now 256
+KiB, and TLS symbols are recognized by `STT_TLS` with a non-undefined section
+index. No assertion or timeout was weakened.
 
-## Remaining acceptance work
+## Acceptance result
 
-Repair the feature-specific stack-canary regression, rerun the compiler gate
-on 1/2/4 CPUs, and confirm the PT_TLS marker plus per-process template and
-teardown behavior. Until then, shared-library TLS is implemented but remains
-open as a production roadmap gate.
+Stage 11 shared-library TLS is accepted for the current roadmap gate. Broader
+physical-hardware qualification and later production-release requirements
+remain governed by their later roadmap stages.

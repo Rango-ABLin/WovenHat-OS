@@ -10,7 +10,7 @@ const PT_GNU_RELRO: u32 = 0x6474_e552;
 const PF_EXECUTE: u32 = 1;
 const PF_WRITE: u32 = 2;
 const ELF_MACHINE_X86_64: u16 = 0x3e;
-const SHN_TLS: u16 = 0xfff2;
+const STT_TLS: u8 = 6;
 const USER_ADDRESS_LIMIT: u64 = 0x0000_8000_0000_0000;
 const PAGE_SIZE: u64 = 4096;
 pub const R_X86_64_RELATIVE: u32 = 8;
@@ -312,7 +312,7 @@ impl Image {
             .symtab_file_offset
             .checked_add(index.checked_mul(24)?)?;
         let symbol = bytes.get(offset..offset.checked_add(24)?)?;
-        if u16::from_le_bytes(symbol[6..8].try_into().ok()?) != SHN_TLS {
+        if symbol[4] & 0xf != STT_TLS || u16::from_le_bytes(symbol[6..8].try_into().ok()?) == 0 {
             return None;
         }
         let value = u64::from_le_bytes(symbol[8..16].try_into().ok()?);
@@ -341,7 +341,7 @@ impl Image {
             .checked_add(index.checked_mul(24)?)?;
         let symbol = bytes.get(offset..offset.checked_add(24)?)?;
         let section = u16::from_le_bytes(symbol[6..8].try_into().ok()?);
-        if section == SHN_TLS {
+        if symbol[4] & 0xf == STT_TLS && section != 0 {
             return Some((self.defined_tls_symbol_value(bytes, index)?, None));
         }
         if section != 0 {

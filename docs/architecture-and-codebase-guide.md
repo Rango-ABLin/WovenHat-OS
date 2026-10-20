@@ -1407,16 +1407,27 @@ updated together. Expanded compiler fork/cancel/capacity/owner-exit and biased
 pointer-initializer execution passes on every online CPU in 1/2/4-CPU boots;
 full session 37505 passed with 515 unchanged inputs, seventeen feature lints,
 nine focused and twenty-one inherited boots, plus sixty stress logs. See the
-implementation audit for scope: pure-BSS runtime and broader/library TLS remain
-open, as does the separate production-ASLR arena-overlap finding. Later older
-TLS-pending statements in this section describe the pre-correction baseline.
+implementation audit for scope: pure-BSS runtime remains open, as does the
+separate production-ASLR arena-overlap finding. Later older TLS-pending
+statements in this section describe the pre-correction baseline.
 
 Compiler shared-PIE correction accepted (2026-10-15): ELF parsing explicitly
 accepts a single inert null DT_DEBUG entry, rejecting nonzero addresses and
 duplicates. The new opt-in compiler gate executes exact signed Rust/LLD output
 through the graph loader before requiring every original Stage 11.5 check.
 Session 73596 passed full host/lint and inherited 1/2/4-CPU preservation with
-all 505 inputs unchanged. Compiler TLS remains open. See the compiler-PIE audit.
+all 505 inputs unchanged. The later shared-library TLS correction below closes
+the compiler-fixture TLS gate; see the compiler-PIE audit for the historical
+scope.
+
+Shared-library TLS correction accepted (2026-10-20): the graph loader now
+recognizes compiler-emitted TLS symbols by `STT_TLS` and their ordinary
+non-undefined section index, rather than treating `SHN_COMMON` as a TLS
+section. Combined main/library PT_TLS planning, immutable templates, per-
+process TCB initialization, TPOFF64 relocation, and exact signed Rust/LLD
+compiler fixtures pass on 1/2/4 CPUs. The task stack reservation is 256 KiB
+to cover the compiler-enabled kernel path. Physical hardware qualification is
+still a later production stage.
 
 Accepted loader placement correction (2026-10-15): the validated ELF kind now
 selects main-image placement. ET_EXEC ignores an offered ASLR delta; ET_DYN
@@ -1425,7 +1436,9 @@ are preserved. A nonzero-candidate compiled static fixture and a biased PIC
 probe pass on 1/2/4 CPUs. Full host/lint, exact Stage 10.7 and Stage 10.8–11.5
 preservation passed in session 62865, exit 0, with all 500 inputs unchanged.
 See the executable-placement audit and Claude's source policy `6f02202d`.
-Compiler TLS remains open; this does not qualify a new release or full stage.
+The compiler TLS gate was subsequently closed by the shared-library TLS
+correction recorded above; this historical placement entry alone did not
+qualify a new release or full stage.
 
 Accepted foundation/status corrections (2026-10-15): user-mapping ancestors
 are explicitly writable while leaves retain W^X/RELRO/COW policy, including
