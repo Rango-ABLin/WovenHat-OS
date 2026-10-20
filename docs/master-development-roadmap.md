@@ -2,6 +2,14 @@ WovenHat OS — Stage 10.7 → Version 1.0 Master Roadmap
 Phase I — Finish the asynchronous kernel foundation
 Stage 10.7 — Asynchronous TCP
 
+Stage 24.19 - Bounded PCR evidence read
+
+Implemented bounded SHA-256 PCR_Read framing and validation plus a PCR7 boot
+inventory probe. Host, Clippy, and signed 1/2/4-CPU acceptance pass. PCR
+state is not trusted by presence alone; expected-policy provisioning, signed
+quotes, attestation-key validation, sealed credential-root provisioning,
+recovery, and physical qualification remain open.
+
 Stage 24.18 - Bounded TPM2 CRB probe
 
 Implemented a serialized, bounded CRB `GetRandom` probe on the validated TPM2

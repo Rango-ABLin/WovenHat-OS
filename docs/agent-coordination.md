@@ -1,5 +1,17 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - Stage 24.19 (2026-10-21)
+
+Added bounded SHA-256 PCR_Read construction/parsing on the CRB transport and a
+boot PCR7 inventory probe. Response code, size, selection, algorithm, digest
+count, and 32-byte digest bounds are checked; the digest is wiped after the
+short inventory prefix is logged. Host tests, all-targets and affected
+feature Clippy, and signed system-apps 1/2/4-CPU acceptance pass. Evidence is
+in `docs/audit-stage24-19-pcr-evidence-2026-10-21.md`; USB was not modified.
+PCR evidence is not authentication: policy provisioning, signed quotes,
+attestation-key validation, sealed-root provisioning, recovery, and physical
+TPM qualification remain open.
+
 ## Codex - Stage 24.18 (2026-10-21)
 
 Implemented the bounded TPM2 CRB `GetRandom` probe on top of the Stage 24.17

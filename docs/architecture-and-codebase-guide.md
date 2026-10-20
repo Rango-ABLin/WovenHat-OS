@@ -1,5 +1,14 @@
 # WovenHat OS Architecture & Codebase Guide
 
+### Stage 24.19 - bounded PCR evidence read
+
+The TPM2 transport constructs a single SHA-256 `PCR_Read` selection and
+accepts only one requested PCR, one SHA-256 selection, one 32-byte digest, and
+an exact bounded response frame. Boot reads PCR 7 only for inventory and wipes
+the digest after logging a short prefix. A PCR read is not an attestation:
+credential decisions still require a provisioned expected policy or verified
+TPM quote bound to the signed boot measurement.
+
 ### Stage 24.18 - bounded TPM2 CRB probe
 
 `tpm2` serializes one polling CRB `GetRandom` transaction after validated ACPI

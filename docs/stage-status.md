@@ -1,5 +1,19 @@
 # Stage status
 
+## Stage 24.19 bounded PCR evidence read (2026-10-21)
+
+The TPM2 layer now constructs and parses a bounded SHA-256 PCR_Read exchange,
+including the selected PCR index, hash algorithm, digest count/length, TPM
+response code, and response-size checks. Boot probes PCR 7 only when a valid
+TPM2 descriptor exists and wipes the returned digest after inventory logging.
+Host tests (89), all-targets and affected feature Clippy, and signed
+system-apps 1/2/4-CPU acceptance pass. Evidence is under
+`audit-artifacts/stage24.19-pcr-evidence-20261021`.
+
+PCR reads are evidence, not authentication: no provisioned expected policy,
+signed TPM quote, attestation-key validation, or sealed credential root exists
+yet. Those remain required before identity credentials can depend on PCR state.
+
 ## Stage 24.18 bounded TPM2 CRB probe (2026-10-21)
 
 The validated TPM2 descriptor now feeds a serialized CRB `GetRandom` probe.

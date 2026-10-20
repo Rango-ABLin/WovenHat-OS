@@ -505,6 +505,17 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
                     )),
                 }
                 random.fill(0);
+                let mut pcr7 = [0_u8; 32];
+                match tpm2::read_pcr_sha256(tpm2, 7, &mut pcr7) {
+                    Ok(()) => serial::write_line(format_args!(
+                        "[TPM] PCR7 SHA-256 read passed prefix={:02x}{:02x}{:02x}{:02x}",
+                        pcr7[0], pcr7[1], pcr7[2], pcr7[3]
+                    )),
+                    Err(error) => serial::write_line(format_args!(
+                        "[TPM] PCR7 read unavailable: {error:?}"
+                    )),
+                }
+                pcr7.fill(0);
             } else {
                 serial::write_line(format_args!(
                     "[TPM] ACPI TPM2 unavailable; hardware credential root not provisioned"
