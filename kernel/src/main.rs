@@ -6191,7 +6191,7 @@ fn stage23_ai_capability_security_self_test() -> bool {
 
 #[cfg(feature = "stage23-5-test")]
 fn stage23_semantic_search_self_test() -> bool {
-    use libwoven::semantic_search::{Entry, Hit, Index, Kind, MAX_HITS};
+    use libwoven::semantic_search::{Entry, Error, Hit, Index, Kind, MAX_ENCODED_BYTES, MAX_HITS};
 
     fn fail(reason: &str) -> bool {
         serial::write_line(format_args!("[S23.5] {}", reason));
@@ -6222,6 +6222,28 @@ fn stage23_semantic_search_self_test() -> bool {
     let count = index.search(b"TERMINAL", &mut hits);
     if count != 2 || hits[0].id != 1 || hits[1].id != 6 {
         return fail("case-insensitive search mismatch");
+    }
+    if !index.insert(Entry::new_owned(7, 99, Kind::Message, b"private system note").unwrap()) {
+        return fail("private entry insertion failed");
+    }
+    if index.search_for(8, b"private", &mut hits) != 0
+        || index.search_for(7, b"private", &mut hits) != 1
+    {
+        return fail("owner privacy filter mismatch");
+    }
+    let mut snapshot = [0u8; MAX_ENCODED_BYTES];
+    let Ok(length) = index.encode(&mut snapshot) else {
+        return fail("search snapshot encoding failed");
+    };
+    let Ok(restored) = Index::decode(&snapshot[..length]) else {
+        return fail("search snapshot decoding failed");
+    };
+    if restored.search_for(7, b"private", &mut hits) != 1 {
+        return fail("search snapshot privacy mismatch");
+    }
+    snapshot[10] ^= 1;
+    if !matches!(Index::decode(&snapshot[..length]), Err(Error::BadChecksum)) {
+        return fail("search snapshot checksum was not enforced");
     }
     true
 }

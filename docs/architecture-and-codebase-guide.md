@@ -1373,9 +1373,11 @@ application, file, setting, message, document, and command entries. Titles
 are UTF-8 validated and normalized into bounded ASCII terms. Search ranks by
 the number of covered query terms, with stable insertion-order tie handling;
 there is no unbounded heap, model embedding, or implicit filesystem scan.
-The current acceptance proves the codec/index/scorer boundary only. Durable
-ingestion, per-user privacy filtering, incremental updates, richer language
-normalization, and a user-facing service remain separate work.
+Entries carry an owner and private entries are filtered unless the query owner
+matches. The WSI1 fixed-format snapshot includes an FNV-1a checksum and
+round-trips through bounded storage; upsert and removal never expose a partial
+index. Source adapters, ranking evaluation, and a user-facing service remain
+separate work.
 
 The feature-gated `stage19-app-catalog-test` now exercises the install-plan
 boundary for all ten accepted packages together. It verifies each WAPP,

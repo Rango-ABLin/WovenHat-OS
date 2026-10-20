@@ -9,17 +9,19 @@ terms; query hits are scored by term coverage and ranked stably. The index is
 capped at 32 entries, 12 terms per entry, 16 bytes per term, and 8 results.
 
 The dedicated gate passed with exit 33 and
-`[S23.5] WovenAI semantic search: PASSED` on 1/2/4 CPUs. The 75-test
+`[S23.5] WovenAI semantic search: PASSED` on 1/2/4 CPUs. The 76-test
 `libwoven` suite, Stage 23.5 freestanding Clippy, host all-targets Clippy,
 Python validation, and `git diff --check` pass. Evidence is preserved under:
-`audit-artifacts/stage23.5-1cpu-1792524344872274900`,
-`audit-artifacts/stage23.5-2cpu-1792524361998697900`, and
-`audit-artifacts/stage23.5-4cpu-1792524375592482200`.
+`audit-artifacts/stage23.5-1cpu-1792524571689446000`,
+`audit-artifacts/stage23.5-2cpu-1792524589227010700`, and
+`audit-artifacts/stage23.5-4cpu-1792524606220735100`.
 
-This is the bounded index/scoring foundation, not a complete production
-filesystem/message ingestion pipeline or vector-embedding runtime. Durable
-index updates, privacy filtering, ranking quality, and user-facing search
-service integration remain required before release readiness.
+The index now supports owner-scoped privacy filtering, bounded upsert/removal,
+and an authenticated fixed-format snapshot for durable reload. It is still not
+a complete production filesystem/message ingestion pipeline or vector-
+embedding runtime. Source adapters, ranking quality evaluation, and
+user-facing search service integration remain required before release
+readiness.
 
 ## Stage 23.4 WovenAI capability security (2026-10-20)
 

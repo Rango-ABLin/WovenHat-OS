@@ -12,6 +12,20 @@ pub const MAX_TERM_BYTES: usize = 16;
 pub const MAX_TITLE_BYTES: usize = 48;
 pub const MAX_QUERY_BYTES: usize = 128;
 pub const MAX_HITS: usize = 8;
+const MAGIC: [u8; 4] = *b"WSI1";
+const VERSION: u8 = 1;
+const ENTRY_ENCODED_LEN: usize = 8 + 8 + 1 + 1 + MAX_TITLE_BYTES;
+pub const MAX_ENCODED_BYTES: usize = 8 + MAX_ENTRIES * ENTRY_ENCODED_LEN;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Error {
+    TooShort,
+    BadMagic,
+    BadVersion,
+    BadLength,
+    BadChecksum,
+    InvalidEntry,
+}
 
 #[repr(u8)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -24,9 +38,26 @@ pub enum Kind {
     Command = 6,
 }
 
+impl Kind {
+    fn decode(value: u8) -> Option<Self> {
+        match value {
+            1 => Some(Self::Application),
+            2 => Some(Self::File),
+            3 => Some(Self::Setting),
+            4 => Some(Self::Message),
+            5 => Some(Self::Document),
+            6 => Some(Self::Command),
+            _ => None,
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Entry {
     pub id: u64,
+    /// Owner 0 is public metadata; nonzero owners are visible only to that
+    /// owner when queried through `Index::search_for`.
+    pub owner: u64,
     pub kind: Kind,
     pub title: [u8; MAX_TITLE_BYTES],
     pub title_len: u8,
@@ -37,8 +68,13 @@ pub struct Entry {
 
 impl Entry {
     pub fn new(id: u64, kind: Kind, title: &[u8]) -> Option<Self> {
+        Self::new_owned(0, id, kind, title)
+    }
+
+    pub fn new_owned(owner: u64, id: u64, kind: Kind, title: &[u8]) -> Option<Self> {
         let mut entry = Self {
             id,
+            owner,
             kind,
             title: [0; MAX_TITLE_BYTES],
             title_len: 0,
@@ -119,9 +155,43 @@ impl Index {
         true
     }
 
+    pub fn upsert(&mut self, entry: Entry) -> bool {
+        if let Some(position) = self.entries[..self.length]
+            .iter()
+            .position(|existing| existing.is_some_and(|value| value.id == entry.id && value.owner == entry.owner))
+        {
+            self.entries[position] = Some(entry);
+            true
+        } else {
+            self.insert(entry)
+        }
+    }
+
+    pub fn remove(&mut self, owner: u64, id: u64) -> bool {
+        let Some(position) = self.entries[..self.length]
+            .iter()
+            .position(|existing| existing.is_some_and(|value| value.id == id && value.owner == owner))
+        else {
+            return false;
+        };
+        for index in position + 1..self.length {
+            self.entries[index - 1] = self.entries[index];
+        }
+        self.length -= 1;
+        self.entries[self.length] = None;
+        true
+    }
+
     pub fn search(&self, query: &[u8], output: &mut [Hit; MAX_HITS]) -> usize {
+        self.search_for(0, query, output)
+    }
+
+    pub fn search_for(&self, owner: u64, query: &[u8], output: &mut [Hit; MAX_HITS]) -> usize {
         let mut count = 0;
         for entry in self.entries[..self.length].iter().flatten() {
+            if entry.owner != 0 && entry.owner != owner {
+                continue;
+            }
             let score = entry.matches(query);
             if score == 0 {
                 continue;
@@ -146,6 +216,71 @@ impl Index {
             }
         }
         count
+    }
+
+    pub fn encode(&self, output: &mut [u8; MAX_ENCODED_BYTES]) -> Result<usize, Error> {
+        output[..4].copy_from_slice(&MAGIC);
+        output[4] = VERSION;
+        output[5] = 0;
+        output[6..8].copy_from_slice(&(self.length as u16).to_le_bytes());
+        let mut cursor = 8;
+        for entry in self.entries[..self.length].iter().flatten() {
+            output[cursor..cursor + 8].copy_from_slice(&entry.id.to_le_bytes());
+            output[cursor + 8..cursor + 16].copy_from_slice(&entry.owner.to_le_bytes());
+            output[cursor + 16] = entry.kind as u8;
+            output[cursor + 17] = entry.title_len;
+            output[cursor + 18..cursor + 18 + MAX_TITLE_BYTES].copy_from_slice(&entry.title);
+            cursor += ENTRY_ENCODED_LEN;
+        }
+        let checksum = checksum(&output[..cursor]);
+        output[cursor..cursor + 8].copy_from_slice(&checksum.to_le_bytes());
+        Ok(cursor + 8)
+    }
+
+    pub fn decode(bytes: &[u8]) -> Result<Self, Error> {
+        if bytes.len() < 16 {
+            return Err(Error::TooShort);
+        }
+        if bytes[..4] != MAGIC {
+            return Err(Error::BadMagic);
+        }
+        if bytes[4] != VERSION {
+            return Err(Error::BadVersion);
+        }
+        let count = u16::from_le_bytes([bytes[6], bytes[7]]) as usize;
+        if count > MAX_ENTRIES {
+            return Err(Error::BadLength);
+        }
+        let total = 8 + count * ENTRY_ENCODED_LEN + 8;
+        if total != bytes.len() {
+            return Err(Error::BadLength);
+        }
+        let expected = u64::from_le_bytes(bytes[total - 8..].try_into().unwrap());
+        if checksum(&bytes[..total - 8]) != expected {
+            return Err(Error::BadChecksum);
+        }
+        let mut index = Self::new();
+        let mut cursor = 8;
+        for _ in 0..count {
+            let id = u64::from_le_bytes(bytes[cursor..cursor + 8].try_into().unwrap());
+            let owner = u64::from_le_bytes(bytes[cursor + 8..cursor + 16].try_into().unwrap());
+            let Some(kind) = Kind::decode(bytes[cursor + 16]) else {
+                return Err(Error::InvalidEntry);
+            };
+            let title_len = bytes[cursor + 17] as usize;
+            if title_len > MAX_TITLE_BYTES {
+                return Err(Error::InvalidEntry);
+            }
+            let title = &bytes[cursor + 18..cursor + 18 + title_len];
+            let Some(entry) = Entry::new_owned(owner, id, kind, title) else {
+                return Err(Error::InvalidEntry);
+            };
+            if !index.insert(entry) {
+                return Err(Error::BadLength);
+            }
+            cursor += ENTRY_ENCODED_LEN;
+        }
+        Ok(index)
     }
 }
 
@@ -212,9 +347,18 @@ fn copy_normalized(input: &[u8], output: &mut [u8]) -> Option<usize> {
     Some(input.len())
 }
 
+fn checksum(bytes: &[u8]) -> u64 {
+    let mut value = 0xcbf29ce484222325u64;
+    for byte in bytes {
+        value ^= u64::from(*byte);
+        value = value.wrapping_mul(0x100000001b3);
+    }
+    value
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{Entry, Index, Kind, Hit, MAX_HITS};
+    use super::{Entry, Error, Index, Kind, Hit, MAX_ENCODED_BYTES, MAX_HITS};
 
     fn entry(id: u64, kind: Kind, title: &[u8]) -> Entry {
         Entry::new(id, kind, title).unwrap()
@@ -241,5 +385,21 @@ mod tests {
             assert!(index.insert(entry(id, Kind::Document, b"document")));
         }
         assert!(!index.insert(entry(100, Kind::Document, b"overflow")));
+    }
+
+    #[test]
+    fn private_entries_are_owner_scoped_and_snapshots_are_authenticated() {
+        let mut index = Index::new();
+        assert!(index.insert(Entry::new_owned(7, 1, Kind::Message, b"private note").unwrap()));
+        assert!(index.insert(Entry::new(2, Kind::Document, b"public note").unwrap()));
+        let mut hits = [Hit { id: 0, kind: Kind::File, score: 0 }; MAX_HITS];
+        assert_eq!(index.search_for(8, b"private", &mut hits), 0);
+        assert_eq!(index.search_for(7, b"private", &mut hits), 1);
+        let mut bytes = [0; MAX_ENCODED_BYTES];
+        let length = index.encode(&mut bytes).unwrap();
+        let decoded = Index::decode(&bytes[..length]).unwrap();
+        assert_eq!(decoded.search_for(7, b"note", &mut hits), 2);
+        bytes[10] ^= 1;
+        assert!(matches!(Index::decode(&bytes[..length]), Err(Error::BadChecksum)));
     }
 }
