@@ -139,6 +139,8 @@ mod swap;
 mod syscall;
 mod task;
 mod terminal;
+#[cfg(feature = "qemu-test")]
+mod update;
 #[allow(dead_code)]
 mod thread;
 mod timer;
@@ -4374,6 +4376,15 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
             qemu_test_exit_failure();
         }
         serial::write_line(format_args!("[S15.9] exploit mitigations: PASSED"));
+        qemu_test_exit_success();
+    }
+    #[cfg(feature = "stage27-1-test")]
+    {
+        if !update::self_test() {
+            serial::write_line(format_args!("[S27.1] update A/B rollback: FAILED"));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!("[S27.1] update A/B rollback: PASSED"));
         qemu_test_exit_success();
     }
     #[cfg(feature = "stage15-1-test")]

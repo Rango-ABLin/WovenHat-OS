@@ -1153,6 +1153,18 @@ power-loss rollback, and key lifecycle policy remain open.
 
 ## Release validation (2026-10-14)
 
+## Update/recovery track — bounded A/B activation state (2026-10-20)
+
+`kernel/src/update.rs` is the first Stage 27 increment. It provides an
+allocation-free two-slot transition object: staged candidates must advance the
+generation and fit the bounded image/digest contract; activation records the
+next boot without replacing the known-good slot; three failed attempts mark
+the candidate bad and roll back; and only an explicit post-boot health result
+commits the new active slot. This is metadata policy only. Signature
+verification, service ownership, durable WovenFS records, power-loss recovery,
+installer integration, and physical qualification remain required.
+
+
 The repository release chain passed on the current tree, including warning-
 denying kernel/host Clippy, all host integration tests, 1/2/4-CPU debug
 memory/storage/network gates, legacy PIC, 4-CPU release gates, release build,

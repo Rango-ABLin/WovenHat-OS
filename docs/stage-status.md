@@ -6358,6 +6358,18 @@ bounded-capacity refusal into a generic failure.
 
 
 
+# Stage 27.1 bounded update A/B state (2026-10-20)
+
+`kernel/src/update.rs` now provides the bounded two-slot activation state
+machine. It rejects generation rollback and malformed candidates, keeps the
+known-good slot active until a health check succeeds, and rolls back after
+three failed boot attempts. Host tests, host/freestanding warning-denying
+Clippy, and dedicated QEMU acceptance passed on 1/2/4 CPUs. Evidence is in
+`docs/audit-stage27-1-update-ab-state-2026-10-20.md`.
+
+This does not yet implement signed update envelopes, privileged service
+ownership, durable A/B records, power-loss recovery, or installation.
+
 # Stage 15 native WovenFS VFS lifecycle (2026-10-20)
 
 The native WovenFS adapter now owns the `/wfs` publication lifecycle. Mount

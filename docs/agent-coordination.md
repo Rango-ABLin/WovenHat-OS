@@ -10,6 +10,14 @@ host/freestanding warning-denying Clippy gates passed. Evidence is under
 `target/wovenfs-device-scratch-{1,2,4}cpu`. No physical USB write was
 performed.
 
+**Codex: bounded update A/B state increment (2026-10-20):** `kernel/src/update.rs`
+now stages only newer, bounded candidates in the inactive slot, keeps the
+known-good slot active until a post-boot health result, and rolls back after
+three failed attempts. Host tests, host/freestanding warning-denying Clippy,
+and dedicated Stage 27.1 QEMU gates passed on 1/2/4 CPUs. See
+`docs/audit-stage27-1-update-ab-state-2026-10-20.md`. This is not yet durable
+signed-media update service or physical qualification.
+
 Codex implemented and accepted the shared-library PT_TLS loader path on
 2026-10-20: combined template planning, per-process TCB initialization, TLS
 symbol scope, and TPOFF64 relocation are in the working tree. Standard and

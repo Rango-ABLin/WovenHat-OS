@@ -99,6 +99,7 @@ stage15-6-test = ["qemu-test"]
 stage15-7-test = ["qemu-test"]
 stage15-8-test = ["qemu-test"]
 stage15-9-test = ["qemu-test"]
+stage27-1-test = ["qemu-test"]
 # An application built outside the kernel, loaded from the filesystem.
 stage16-1-test = ["qemu-test"]
 # Three signed system applications installed through one bounded catalog plan.
