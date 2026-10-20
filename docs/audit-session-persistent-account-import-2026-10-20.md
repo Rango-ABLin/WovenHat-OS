@@ -20,10 +20,11 @@ source fails closed before the desktop session starts.
 - Stage 20.12 sign-in QEMU acceptance — passed on 1 CPU; evidence in `target/woven-shell-sign-in-1cpu`.
 - Stage 20.12 sign-in QEMU acceptance — passed on 2 CPUs; evidence in `target/woven-shell-sign-in-2cpu`.
 - Stage 20.12 sign-in QEMU acceptance — passed on 4 CPUs; evidence in `target/woven-shell-sign-in-4cpu`.
+- Isolated interactive QEMU boot with `target/qemu-account-fixture.img` — passed; serial reported `[SESSION] persistent accounts imported from /mnt/etc/wovenhat/accounts`, `[DEMO] existing accounts preserved; demo accounts not installed`, and WovenShell startup. The fixture account is `persistent`/`2468`.
 
 ## Limits
 
 This slice does not implement account creation, password change or rotation,
 credential-store integrity protection, or a memory-hard password KDF. The
-persistent fixture was not installed into the shared developer disk, so that
-disk remains unchanged for interactive testing.
+persistent fixture is disposable and was not installed into the shared
+developer disk, so that disk remains unchanged for interactive testing.

@@ -13,6 +13,13 @@ Stage 20.12 sign-in acceptance passed on QEMU 1/2/4 CPUs after this change.
 This slice does not add account creation, password change, credential
 rotation, or a secure password KDF; those remain release-hardening work.
 
+An isolated FAT32 fixture was also booted interactively in QEMU with
+`/mnt/etc/wovenhat/accounts`. The serial log reported the persistent import,
+skipped demo-account installation, and started WovenShell; the shared
+`wovenhat-disk.img` was not modified. The fixture generator is
+`scripts/create-account-fixture.py` and provisions the test account
+`persistent`/`2468`.
+
 ## Session track - production app launch revalidated after SMP fix (2026-10-20)
 
 The production packaged WovenCalculator path was rerun after the bounded
