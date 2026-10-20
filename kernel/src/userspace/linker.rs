@@ -382,11 +382,14 @@ pub(super) fn load_with_geometry(
     paging::map_user_range_in_inactive(page_table, stack_base, stack.size, true, false).ok()?;
     pending.stack_mapped = true;
     paging::zero_user_range_in(page_table, stack_base, stack.size).ok()?;
+    crate::serial::write_line(format_args!("[S11.5] ver-debug stack-ready"));
     if !paging::user_range_is_unmapped_in(page_table, stack.guard_base, UserStack::GUARD_SIZE)
         || !paging::user_range_has_protection_in(page_table, stack.base, stack.size, true, false)
     {
+        crate::serial::write_line(format_args!("[S11.5] ver-debug stack-invariant-failed"));
         return None;
     }
+    crate::serial::write_line(format_args!("[S11.5] ver-debug stack-invariant-ok"));
     let stack_top = setup_argv_stack(page_table, stack, args)?;
     let program = UserProgram {
         image: UserImage {
