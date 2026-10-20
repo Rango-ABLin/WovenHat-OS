@@ -172,6 +172,7 @@ fn plt_fixture() -> Vec<u8> {
     put64(&mut bytes, 216, 0x200);
     put64(&mut bytes, 224, 0x1000);
     put64(&mut bytes, 152, 10 * 16);
+    put64(&mut bytes, 160, 10 * 16);
     put64(&mut bytes, DYNAMIC + 5 * 16, 2); // DT_PLTRELSZ
     put64(&mut bytes, DYNAMIC + 5 * 16 + 8, 24);
     put64(&mut bytes, DYNAMIC + 6 * 16, 20); // DT_PLTREL = DT_RELA
