@@ -21,7 +21,7 @@ const REL_ENTRY_SIZE: usize = 16;
 const MAX_RELATIVE_RELOCATIONS: usize = 4096;
 const MAX_DYNAMIC_SYMBOLS: usize = 4096;
 const MAX_DYNAMIC_STRING_TABLE: usize = 64 * 1024;
-pub const MAX_LIFECYCLE_FUNCTIONS: usize = 32;
+pub const MAX_LIFECYCLE_FUNCTIONS: usize = 4;
 pub const MAX_NEEDED_LIBRARIES: usize = 4;
 
 /// A bounded dynamic-linker scope. The main image is searched first, followed

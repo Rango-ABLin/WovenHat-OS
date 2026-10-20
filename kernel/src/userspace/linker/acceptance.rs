@@ -45,6 +45,17 @@ fn fixture(kind: usize) -> Option<Vec<u8>> {
         write_u64(&mut elf, offset + 40, memory_size)?;
         write_u64(&mut elf, offset + 48, 0x1000)?;
     }
+    if matches!(kind, 8 | 9) {
+        // Keep the lifecycle marker in a writable BSS page outside the
+        // fixture's RELRO range.
+        write_u32(&mut elf, 232, 1)?;
+        write_u32(&mut elf, 236, 6)?;
+        write_u64(&mut elf, 240, 0x1000)?;
+        write_u64(&mut elf, 248, base + 0x2000)?;
+        write_u64(&mut elf, 264, 0)?;
+        write_u64(&mut elf, 272, 0x1000)?;
+        write_u64(&mut elf, 280, 0x1000)?;
+    }
     let mut tags = alloc::vec![
         (4, base + 0x280),
         (5, base + 0x300),
@@ -180,7 +191,7 @@ fn fixture(kind: usize) -> Option<Vec<u8>> {
         ];
         elf[0x1000..0x1000 + main_code.len()].copy_from_slice(&main_code);
         let mut init_code = [0x48, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0xc6, 0x00, 0xa5, 0xc3];
-        init_code[2..10].copy_from_slice(&(base + 0x1000).to_le_bytes());
+        init_code[2..10].copy_from_slice(&(base + 0x2000).to_le_bytes());
         elf[0x1060..0x1060 + init_code.len()].copy_from_slice(&init_code);
         let mut fini_code = [
             0x48, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, // marker address
@@ -193,7 +204,7 @@ fn fixture(kind: usize) -> Option<Vec<u8>> {
             0xbe, 14, 0, 0, 0,
             0xcd, 0x80,
             0x49, 0x89, 0xc2, // mov r10, rax
-            0xb8, 1, 0, 0, 0,
+            0xb8, 10, 0, 0, 0, // file_write
             0x4c, 0x89, 0xd7, // mov rdi, r10
             0x4c, 0x89, 0xc6, // mov rsi, r8
             0xba, 1, 0, 0, 0,
@@ -203,10 +214,10 @@ fn fixture(kind: usize) -> Option<Vec<u8>> {
             0xcd, 0x80,
             0xc3,
         ];
-        fini_code[2..10].copy_from_slice(&(base + 0x1000).to_le_bytes());
-        fini_code[15..23].copy_from_slice(&(base + 0x13df).to_le_bytes());
-        fini_code[25..33].copy_from_slice(&(base + 0x13e0).to_le_bytes());
-        fini_code[44..52].copy_from_slice(&(base + 0x13d0).to_le_bytes());
+        fini_code[2..10].copy_from_slice(&(base + 0x2000).to_le_bytes());
+        fini_code[15..23].copy_from_slice(&(base + 0x3df).to_le_bytes());
+        fini_code[25..33].copy_from_slice(&(base + 0x3e0).to_le_bytes());
+        fini_code[44..52].copy_from_slice(&(base + 0x3d0).to_le_bytes());
         elf[0x1080..0x1080 + fini_code.len()].copy_from_slice(&fini_code);
         elf[0x13d0..0x13de].copy_from_slice(b"/tmp/lifecycle");
         elf[0x13df] = b'D';

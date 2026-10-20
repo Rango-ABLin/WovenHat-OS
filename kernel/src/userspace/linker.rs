@@ -206,22 +206,24 @@ pub(super) fn load_with_geometry(
 ) -> Option<UserProgram> {
     let images = prepare(bytes, candidate_bias)?;
     let main = images.first()?;
-    let mut init_functions = [0u64; elf::MAX_SCOPE_IMAGES * elf::MAX_LIFECYCLE_FUNCTIONS];
-    let mut init_count = 0usize;
-    let mut fini_functions = [0u64; elf::MAX_SCOPE_IMAGES * elf::MAX_LIFECYCLE_FUNCTIONS];
-    let mut fini_count = 0usize;
+    let mut init_functions = Vec::new();
+    let mut fini_functions = Vec::new();
     for image in &images {
         let lifecycle = image.image.lifecycle();
         for function in lifecycle.init[..lifecycle.init_count].iter().copied() {
-            *init_functions.get_mut(init_count)? = function;
-            init_count += 1;
+            if init_functions.len() == elf::MAX_SCOPE_IMAGES * elf::MAX_LIFECYCLE_FUNCTIONS {
+                return None;
+            }
+            init_functions.push(function);
         }
     }
     for image in images.iter().rev() {
         let lifecycle = image.image.lifecycle();
         for function in lifecycle.fini[..lifecycle.fini_count].iter().copied() {
-            *fini_functions.get_mut(fini_count)? = function;
-            fini_count += 1;
+            if fini_functions.len() == elf::MAX_SCOPE_IMAGES * elf::MAX_LIFECYCLE_FUNCTIONS {
+                return None;
+            }
+            fini_functions.push(function);
         }
     }
     let mut scope = SymbolScope::new(&main.image, &main.bytes);
@@ -436,10 +438,16 @@ pub(super) fn load_with_geometry(
         stack,
         stack_top,
         main.image.entry,
-        &init_functions[..init_count],
+        &init_functions,
     )?;
-    pending.space.destructors[..fini_count].copy_from_slice(&fini_functions[..fini_count]);
-    pending.space.destructor_count = fini_count;
+    setup_destructor_stack(
+        page_table,
+        stack,
+        pending.space.lifecycle_trampoline,
+        &fini_functions,
+    )?;
+    pending.space.destructors[..fini_functions.len()].copy_from_slice(&fini_functions);
+    pending.space.destructor_count = fini_functions.len();
     let program = UserProgram {
         image: UserImage {
             entry: main.image.entry,
@@ -485,6 +493,33 @@ fn setup_lifecycle_stack(
         let _ = function;
     }
     Some((init_functions[0], chain_start))
+}
+
+fn setup_destructor_stack(
+    page_table: paging::AddressSpace,
+    stack: UserStack,
+    trampoline: u64,
+    fini_functions: &[u64],
+) -> Option<u64> {
+    if fini_functions.is_empty() {
+        return Some(0);
+    }
+    let chain_size = fini_functions.len().checked_mul(core::mem::size_of::<u64>())?;
+    let chain_start = stack
+        .base
+        .checked_add((UserStack::SIZE / 2) as u64)?
+        .checked_sub(chain_size as u64)?;
+    for (index, function) in fini_functions.iter().copied().enumerate() {
+        let next = fini_functions.get(index + 1).copied().unwrap_or(trampoline);
+        paging::write_user_bytes(
+            page_table,
+            chain_start + index as u64 * 8,
+            &next.to_le_bytes(),
+        )
+        .ok()?;
+        let _ = function;
+    }
+    Some(chain_start)
 }
 
 fn relocate(

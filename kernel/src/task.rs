@@ -1632,20 +1632,23 @@ pub fn begin_user_destructor_exit(
     let Some(retry_rip) = frame.rip.checked_sub(2) else {
         return false;
     };
-    let mut processes = process_table_lock();
-    let Some(process) = processes
-        .iter_mut()
-        .flatten()
-        .find(|process| process.id.as_u64() == current_process_id())
-    else {
-        return false;
+    let address_space = {
+        let processes = process_table_lock();
+        let Some(process) = processes
+            .iter()
+            .flatten()
+            .find(|process| process.id.as_u64() == current_process_id())
+        else {
+            return false;
+        };
+        let Some(address_space) = process.address_space else {
+            return false;
+        };
+        if address_space.destructor_pending || address_space.destructor_count == 0 {
+            return false;
+        }
+        address_space
     };
-    let Some(address_space) = process.address_space.as_mut() else {
-        return false;
-    };
-    if address_space.destructor_pending || address_space.destructor_count == 0 {
-        return false;
-    }
     if address_space.lifecycle_trampoline == 0
         || !address_space.contains_executable(address_space.lifecycle_trampoline)
         || frame.rsp < address_space.stack_base
@@ -1662,7 +1665,11 @@ pub fn begin_user_destructor_exit(
     let Some(chain_size) = address_space.destructor_count.checked_mul(8) else {
         return false;
     };
-    let Some(chain_start) = frame.rsp.checked_sub(chain_size as u64) else {
+    let Some(chain_start) = address_space
+        .stack_base
+        .checked_add((userspace::UserStack::SIZE / 2) as u64)
+        .and_then(|middle| middle.checked_sub(chain_size as u64))
+    else {
         return false;
     };
     if chain_start < address_space.stack_base
@@ -1670,23 +1677,24 @@ pub fn begin_user_destructor_exit(
     {
         return false;
     }
-    for index in 0..address_space.destructor_count {
-        let next = address_space
-            .destructors
-            .get(index + 1)
-            .copied()
-            .unwrap_or(address_space.lifecycle_trampoline);
-        if crate::paging::write_user_bytes(
-            address_space.paging(),
-            chain_start + index as u64 * 8,
-            &next.to_le_bytes(),
-        )
-        .is_err()
-        {
-            return false;
-        }
+    let mut processes = process_table_lock();
+    let Some(process) = processes
+        .iter_mut()
+        .flatten()
+        .find(|process| process.id.as_u64() == current_process_id())
+    else {
+        return false;
+    };
+    let Some(current_space) = process.address_space.as_mut() else {
+        return false;
+    };
+    if current_space.paging().root_address() != address_space.paging().root_address()
+        || current_space.destructor_pending
+        || current_space.destructor_count != address_space.destructor_count
+    {
+        return false;
     }
-    address_space.destructor_pending = true;
+    current_space.destructor_pending = true;
     frame.r12 = exit_code as i64 as u64;
     frame.rip = address_space.destructors[0];
     frame.rsp = chain_start;
