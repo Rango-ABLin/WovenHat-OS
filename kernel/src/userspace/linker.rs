@@ -44,9 +44,20 @@ fn library_path(name: &[u8]) -> Option<alloc::string::String> {
 }
 
 fn prepare(bytes: &[u8], candidate_bias: u64) -> Option<Vec<LinkImage<'_>>> {
-    let main = elf::parse(bytes)
-        .ok()?
-        .relocated_for_execution(candidate_bias)?;
+    let parsed = match elf::parse(bytes) {
+        Ok(image) => image,
+        Err(error) => {
+            crate::serial::write_line(format_args!("[S11.5] temporary main parse error={error:?}"));
+            return None;
+        }
+    };
+    let main = match parsed.relocated_for_execution(candidate_bias) {
+        Some(image) => image,
+        None => {
+            crate::serial::write_line(format_args!("[S11.5] temporary main relocation failed"));
+            return None;
+        }
+    };
     let mut images = Vec::with_capacity(elf::MAX_SCOPE_IMAGES);
     images.push(LinkImage {
         name: None,
@@ -234,6 +245,7 @@ pub(super) fn load_with_geometry(
     let stack = UserStack::new(stack_base);
     let mmap_end = mmap_base.checked_add(MAX_ANONYMOUS_MAPPINGS as u64 * USER_MMAP_STRIDE)?;
     let page_table = paging::create_user_address_space(main.image.entry)?;
+    crate::serial::write_line(format_args!("[S11.5] temporary address space created"));
     let mut pending = Pending {
         space: AddressSpace {
             paging: page_table,
@@ -276,31 +288,46 @@ pub(super) fn load_with_geometry(
                 segment.writable,
                 segment.executable,
             )?;
-            paging::map_user_range_in_inactive(
+            if paging::map_user_range_in_inactive(
                 page_table,
                 segment.mapping_start,
                 segment.mapping_size,
                 true,
                 false,
             )
-            .ok()?;
+            .is_err()
+            {
+                crate::serial::write_line(format_args!("[S11.5] temporary map failed image={index}"));
+                return None;
+            }
             pending.space.mappings[pending.space.mapping_count] = mapping;
             pending.space.mapping_count += 1;
-            paging::zero_user_range_in(page_table, segment.mapping_start, segment.mapping_size)
-                .ok()?;
+            if paging::zero_user_range_in(page_table, segment.mapping_start, segment.mapping_size)
+                .is_err()
+            {
+                crate::serial::write_line(format_args!("[S11.5] temporary zero failed image={index}"));
+                return None;
+            }
             let file_end = segment.file_offset.checked_add(segment.file_size)?;
-            paging::write_user_bytes(
+            if paging::write_user_bytes(
                 page_table,
                 segment.virtual_address,
                 linked.bytes.get(segment.file_offset..file_end)?,
             )
-            .ok()?;
+            .is_err()
+            {
+                crate::serial::write_line(format_args!("[S11.5] temporary write failed image={index}"));
+                return None;
+            }
         }
     }
     // No writable executable page exists during relocation: pages are RW/NX
     // until every fixup is applied, then transitioned to their final W^X mode.
     for linked in &images {
-        relocate(linked, &scope, page_table)?;
+        if relocate(linked, &scope, page_table).is_none() {
+            crate::serial::write_line(format_args!("[S11.5] temporary relocation failed image={}", linked.name.as_deref().map_or("main", |_| "library")));
+            return None;
+        }
     }
     for linked in &images {
         for segment in linked.image.segments() {

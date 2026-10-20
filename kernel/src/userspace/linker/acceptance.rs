@@ -295,11 +295,6 @@ pub(super) fn run() -> bool {
             &mut address,
         )
         .ok()?;
-        crate::serial::write_line(format_args!(
-            "[S11.5] DT_REL value={:#x} expected={:#x}",
-            u64::from_le_bytes(rel_address),
-            LIBRARY_START + 0x20
-        ));
         if !step(
             "transitive graph and cross-image relocation",
             program.address_space.mapping_count == 6
@@ -382,6 +377,11 @@ pub(super) fn run() -> bool {
             &mut rel_address,
         )
         .ok()?;
+        crate::serial::write_line(format_args!(
+            "[S11.5] DT_REL value={:#x} expected={:#x}",
+            u64::from_le_bytes(rel_address),
+            LIBRARY_START + 0x20
+        ));
         if !step(
             "DT_REL runtime relocation",
             u64::from_le_bytes(rel_address) == LIBRARY_START + 0x20,
