@@ -97,7 +97,8 @@
 //!
 //! With `--accounts <file>` the shell starts at a sign-in screen. The file
 //! holds one local account per line, `name:salt-hex:hash-hex`, the hash
-//! being `SHA-256(salt || PIN)` (see `libwoven::accounts`); no PIN is stored.
+//! being `PBKDF2-HMAC-SHA256(PIN, salt, PBKDF2_ITERATIONS)` (see
+//! `libwoven::accounts`); no PIN is stored.
 //! Tab chooses the account, digits enter its PIN, Enter signs in, with the
 //! same masking and lockout as the lock screen. Once signed in, the
 //! account's name is shown in the taskbar, and the lock screen asks for that

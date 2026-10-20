@@ -295,6 +295,11 @@ pub(super) fn run() -> bool {
             &mut address,
         )
         .ok()?;
+        crate::serial::write_line(format_args!(
+            "[S11.5] DT_REL value={:#x} expected={:#x}",
+            u64::from_le_bytes(rel_address),
+            LIBRARY_START + 0x20
+        ));
         if !step(
             "transitive graph and cross-image relocation",
             program.address_space.mapping_count == 6
@@ -366,7 +371,10 @@ pub(super) fn run() -> bool {
         ) {
             return None;
         }
-        let rel_program = load(&rel_main, &["rel-test"])?;
+        let Some(rel_program) = load(&rel_main, &["rel-test"]) else {
+            step("DT_REL runtime relocation", false);
+            return None;
+        };
         let mut rel_address = [0; 8];
         paging::read_user_bytes_in(
             rel_program.address_space.paging,

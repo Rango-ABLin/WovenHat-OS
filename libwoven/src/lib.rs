@@ -16840,20 +16840,38 @@ mod tests {
     }
 
     #[test]
-    fn pin_hash_is_sha256_of_salt_then_pin() {
-        // FIPS 180-2 test vectors, split across salt and PIN.
-        let abc = accounts::hash_pin(b"a", b"bc");
-        assert_eq!(
-            abc,
-            [
-                0xba, 0x78, 0x16, 0xbf, 0x8f, 0x01, 0xcf, 0xea, 0x41, 0x41, 0x40, 0xde, 0x5d, 0xae,
-                0x22, 0x23, 0xb0, 0x03, 0x61, 0xa3, 0x96, 0x17, 0x7a, 0x9c, 0xb4, 0x10, 0xff, 0x61,
-                0xf2, 0x00, 0x15, 0xad,
-            ]
+    fn pin_hash_is_pbkdf2_hmac_sha256() {
+        use pbkdf2::pbkdf2_hmac;
+        use sha2::{Digest, Sha256};
+
+        // Matches a reference PBKDF2-HMAC-SHA256 computation at the same
+        // iteration count, not a one-round SHA-256 (and not some other
+        // count): this is what would silently regress to plain SHA-256, or
+        // to an accidentally-reduced work factor, if someone "simplified"
+        // `hash_pin` later.
+        let mut reference = [0u8; 32];
+        pbkdf2_hmac::<Sha256>(b"bc", b"a", accounts::PBKDF2_ITERATIONS, &mut reference);
+        assert_eq!(accounts::hash_pin(b"a", b"bc"), reference);
+        let mut one_round = Sha256::new();
+        one_round.update(b"a");
+        one_round.update(b"bc");
+        let one_round: [u8; 32] = one_round.finalize().into();
+        assert_ne!(
+            accounts::hash_pin(b"a", b"bc"),
+            one_round,
+            "work factor was not applied"
         );
-        let empty = accounts::hash_pin(b"", b"");
-        assert_eq!(empty[..4], [0xe3, 0xb0, 0xc4, 0x42]);
-        assert_eq!(empty[28..], [0x78, 0x52, 0xb8, 0x55]);
+
+        // Deterministic, and distinguishes both inputs.
+        assert_eq!(accounts::hash_pin(b"a", b"bc"), accounts::hash_pin(b"a", b"bc"));
+        assert_ne!(accounts::hash_pin(b"a", b"bc"), accounts::hash_pin(b"a", b"bd"));
+        assert_ne!(accounts::hash_pin(b"a", b"bc"), accounts::hash_pin(b"z", b"bc"));
+
+        // Empty salt and PIN still hash deterministically to something
+        // distinct from a non-empty input, rather than panicking or
+        // short-circuiting to a fixed value.
+        assert_eq!(accounts::hash_pin(b"", b""), accounts::hash_pin(b"", b""));
+        assert_ne!(accounts::hash_pin(b"", b""), accounts::hash_pin(b"a", b"bc"));
     }
 
     #[test]

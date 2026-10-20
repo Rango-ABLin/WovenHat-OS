@@ -5505,19 +5505,23 @@ fn has_valid_account_line(data: &[u8]) -> bool {
 
 #[cfg(feature = "hardware-demo")]
 fn install_hardware_demo_accounts() -> bool {
-    use sha2::{Digest, Sha256};
+    // Must match libwoven::accounts::{hash_pin, PBKDF2_ITERATIONS}: the
+    // kernel cannot depend on libwoven (a userspace-only crate), so the
+    // account line format and its hash are reimplemented here, on the write
+    // side only -- WovenShell (via libwoven) does every read-side `verify`.
+    use pbkdf2::pbkdf2_hmac;
+    use sha2::Sha256;
+    const PBKDF2_ITERATIONS: u32 = 100_000;
 
     fn account_line(name: &str, salt: &[u8], pin: &[u8]) -> alloc::string::String {
-        let mut hasher = Sha256::new();
-        hasher.update(salt);
-        hasher.update(pin);
-        let digest = hasher.finalize();
+        let mut hash = [0u8; 32];
+        pbkdf2_hmac::<Sha256>(pin, salt, PBKDF2_ITERATIONS, &mut hash);
         let mut line = alloc::format!("{name}:");
         for byte in salt {
             line.push_str(&alloc::format!("{byte:02x}"));
         }
         line.push(':');
-        for byte in digest {
+        for byte in hash {
             line.push_str(&alloc::format!("{byte:02x}"));
         }
         line.push('\n');
@@ -6780,7 +6784,7 @@ fn stage20_13_self_test() -> bool {
 #[cfg(feature = "stage20-12-test")]
 fn stage20_12_self_test() -> bool {
     use crate::display::{blend_pixel, rgb, Surface};
-    use sha2::{Digest, Sha256};
+    use sha2::Sha256;
 
     const WALLPAPER_TOP: u32 = rgb(18, 42, 74);
     const WALLPAPER_BOTTOM: u32 = rgb(64, 28, 88);
@@ -6842,18 +6846,17 @@ fn stage20_12_self_test() -> bool {
     fn keys(codes: &[u8]) -> bool {
         codes.iter().all(|&code| mouse::keyboard_loopback(code))
     }
-    /// One accounts-file line: `name:salt-hex:SHA-256(salt || pin)-hex`.
+    /// One accounts-file line: `name:salt-hex:hash-hex`. Must match
+    /// `libwoven::accounts::{hash_pin, PBKDF2_ITERATIONS}`.
     fn account_line(name: &str, salt: &[u8], pin: &[u8]) -> alloc::string::String {
-        let mut hasher = Sha256::new();
-        hasher.update(salt);
-        hasher.update(pin);
-        let digest = hasher.finalize();
+        let mut hash = [0u8; 32];
+        pbkdf2::pbkdf2_hmac::<Sha256>(pin, salt, 100_000, &mut hash);
         let mut line = alloc::format!("{name}:");
         for byte in salt {
             line.push_str(&alloc::format!("{byte:02x}"));
         }
         line.push(':');
-        for byte in digest {
+        for byte in hash {
             line.push_str(&alloc::format!("{byte:02x}"));
         }
         line.push('\n');
