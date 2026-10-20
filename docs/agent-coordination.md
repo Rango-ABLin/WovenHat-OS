@@ -1,5 +1,15 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - Stage 24.20 (2026-10-21)
+
+Added a fixed-size signed `TPP1` PCR policy envelope. It binds one PCR index
+and SHA-256 digest, verifies the caller-provisioned Ed25519 policy key, and
+rejects malformed, tampered, or mismatched PCR evidence. Host tests, affected
+Clippy gates, and signed system-apps 1/2/4-CPU acceptance pass. Evidence is in
+`docs/audit-stage24-20-signed-pcr-policy-2026-10-21.md`; USB was not modified.
+Policy provisioning, TPM quotes/attestation-key verification, sealed identity
+roots, recovery, and physical TPM qualification remain open.
+
 ## Codex - Stage 24.19 (2026-10-21)
 
 Added bounded SHA-256 PCR_Read construction/parsing on the CRB transport and a

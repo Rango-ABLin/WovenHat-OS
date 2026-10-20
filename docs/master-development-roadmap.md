@@ -2,6 +2,14 @@ WovenHat OS — Stage 10.7 → Version 1.0 Master Roadmap
 Phase I — Finish the asynchronous kernel foundation
 Stage 10.7 — Asynchronous TCP
 
+Stage 24.20 - Signed PCR policy boundary
+
+Implemented a fixed-size signed PCR policy envelope with caller-provisioned
+Ed25519 trust, exact PCR/digest binding, and fail-closed signature/tamper/
+mismatch checks. Host, Clippy, and signed 1/2/4-CPU acceptance pass. Runtime
+policy provisioning, TPM quote verification, sealed credential roots,
+recovery, and physical qualification remain open.
+
 Stage 24.19 - Bounded PCR evidence read
 
 Implemented bounded SHA-256 PCR_Read framing and validation plus a PCR7 boot

@@ -1,5 +1,18 @@
 # Stage status
 
+## Stage 24.20 signed PCR policy boundary (2026-10-21)
+
+The TPM layer now validates a fixed-size signed PCR policy envelope. The
+provisioned signing key is supplied by the trusted caller, the envelope binds
+one PCR index and one SHA-256 digest, and Ed25519 signature/tamper/mismatch
+checks fail closed. The QEMU codec self-test, host tests (89), all-targets and
+affected feature Clippy, and signed system-apps 1/2/4-CPU acceptance pass.
+Evidence is under `audit-artifacts/stage24.20-signed-pcr-policy-20261021`.
+
+This authenticates policy provenance only; no release policy is provisioned
+yet, no TPM quote/attestation key is verified, and no identity credential is
+sealed to the policy. Those remain the next hardware-credential prerequisites.
+
 ## Stage 24.19 bounded PCR evidence read (2026-10-21)
 
 The TPM2 layer now constructs and parses a bounded SHA-256 PCR_Read exchange,

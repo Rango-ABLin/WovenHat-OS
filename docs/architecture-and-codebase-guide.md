@@ -1,5 +1,14 @@
 # WovenHat OS Architecture & Codebase Guide
 
+### Stage 24.20 - signed PCR policy boundary
+
+`verify_signed_pcr_policy` accepts only a fixed `TPP1` envelope containing one
+PCR index, one SHA-256 expected digest, and a signature over the complete
+policy header/digest. The trusted key is caller-provisioned and never read
+from the envelope. Signature failure, malformed bounds, and PCR mismatch are
+fatal to the policy decision. The boundary does not provision a policy,
+verify a TPM quote, or seal identity credentials.
+
 ### Stage 24.19 - bounded PCR evidence read
 
 The TPM2 transport constructs a single SHA-256 `PCR_Read` selection and

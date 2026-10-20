@@ -31,6 +31,10 @@ const TPM_CC_PCR_READ: u32 = 0x0000_017e;
 const TPM_ALG_SHA256: u16 = 0x000b;
 const TPM_RC_SUCCESS: u32 = 0;
 const MAX_BUFFER_BYTES: usize = 0xf80;
+const PCR_POLICY_MAGIC: [u8; 4] = *b"TPP1";
+const PCR_POLICY_VERSION: u16 = 1;
+const PCR_POLICY_SIGNED_BYTES: usize = 44;
+pub const PCR_POLICY_BYTES: usize = PCR_POLICY_SIGNED_BYTES + 64;
 // The probe runs before timer IRQs are enabled, so this bound must not depend
 // on the kernel tick counter. It is deliberately finite even for a wedged
 // device or malformed firmware descriptor.
@@ -46,6 +50,9 @@ pub enum Error {
     Timeout,
     MalformedResponse,
     Device(u32),
+    InvalidPolicy,
+    PolicySignature,
+    PolicyMismatch,
 }
 
 static TRANSACTION: spin::Mutex<()> = spin::Mutex::new(());
@@ -163,6 +170,39 @@ fn decode_pcr_read(response: &[u8], pcr: u8, output: &mut [u8; 32]) -> Result<()
     }
     output.copy_from_slice(&response[30..62]);
     Ok(())
+}
+
+/// Verify a signed PCR policy and compare its expected digest with a device
+/// read. The caller supplies the provisioned policy-signing key; no key from
+/// the TPM packet can create authority. This is a policy boundary, not yet a
+/// sealed credential-root operation.
+#[allow(dead_code)]
+pub fn verify_signed_pcr_policy(
+    envelope: &[u8],
+    trusted_key: &[u8; 32],
+    actual: &[u8; 32],
+) -> Result<u8, Error> {
+    if envelope.len() != PCR_POLICY_BYTES
+        || envelope[..4] != PCR_POLICY_MAGIC
+        || u16::from_be_bytes(envelope[4..6].try_into().unwrap()) != PCR_POLICY_VERSION
+        || u16::from_be_bytes(envelope[6..8].try_into().unwrap())
+            != PCR_POLICY_SIGNED_BYTES as u16
+        || envelope[9..12] != [0; 3]
+    {
+        return Err(Error::InvalidPolicy);
+    }
+    let pcr = envelope[8];
+    if pcr >= 24 {
+        return Err(Error::InvalidPolicy);
+    }
+    let mut signature = [0_u8; 64];
+    signature.copy_from_slice(&envelope[PCR_POLICY_SIGNED_BYTES..]);
+    crate::signed_app::verify(&envelope[..PCR_POLICY_SIGNED_BYTES], trusted_key, &signature)
+        .map_err(|_| Error::PolicySignature)?;
+    if &envelope[12..44] != actual {
+        return Err(Error::PolicyMismatch);
+    }
+    Ok(pcr)
 }
 
 /// Read one SHA-256 PCR through the bounded CRB transport. A PCR read is
@@ -303,5 +343,25 @@ pub fn self_test() -> bool {
         return false;
     }
     pcr_response[20] = 2;
-    decode_pcr_read(&pcr_response, 7, &mut pcr) == Err(Error::MalformedResponse)
+    if decode_pcr_read(&pcr_response, 7, &mut pcr) != Err(Error::MalformedResponse) {
+        return false;
+    }
+    let pair = ed25519_compact::KeyPair::from_seed(ed25519_compact::Seed::new([0x42; 32]));
+    let mut policy = [0_u8; PCR_POLICY_BYTES];
+    policy[..4].copy_from_slice(&PCR_POLICY_MAGIC);
+    policy[4..6].copy_from_slice(&PCR_POLICY_VERSION.to_be_bytes());
+    policy[6..8].copy_from_slice(&(PCR_POLICY_SIGNED_BYTES as u16).to_be_bytes());
+    policy[8] = 7;
+    policy[12..44].fill(0x3c);
+    let signature = pair.sk.sign(&policy[..PCR_POLICY_SIGNED_BYTES], None);
+    policy[PCR_POLICY_SIGNED_BYTES..].copy_from_slice(&*signature);
+    let mut public_key = [0_u8; 32];
+    public_key.copy_from_slice(&*pair.pk);
+    let actual = [0x3c; 32];
+    if verify_signed_pcr_policy(&policy, &public_key, &actual) != Ok(7) {
+        return false;
+    }
+    policy[12] ^= 1;
+    verify_signed_pcr_policy(&policy, &public_key, &actual)
+        == Err(Error::PolicySignature)
 }
