@@ -1,5 +1,16 @@
 # WovenHat OS Architecture & Codebase Guide
 
+### Stage 24.4 — owner-bound kernel identity seam
+
+`kernel/src/identity_runtime.rs` keeps fixed session bindings `(SessionId,
+process_id)` separate from `PROCESS_TABLE`. It validates ownership before every
+state change and releases the identity lock before calling the crate-only
+`task::set_current_credentials` setter. A failed application closes the
+authority session and removes its binding. This stage preserves the existing
+`getuid/getgid` syscall ABI but intentionally does not expose new syscalls;
+the next slice must add bounded user-pointer framing, durable snapshot loading,
+exit/reap cleanup, audit actions, and WovenShell integration.
+
 ### Stage 24.3 — kernel-authorized identity storage
 
 `kernel/src/identity_storage.rs` is the narrow storage adapter. It accepts the

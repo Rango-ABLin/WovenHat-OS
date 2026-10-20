@@ -1,5 +1,13 @@
 # Agent coordination (Claude Code and Codex)
 
+**Codex: Stage 24.4 owner-bound kernel identity seam accepted (2026-10-20):**
+The kernel now has a fixed owner/session binding table and a crate-only process
+credential setter; cross-owner and no-live-process paths fail closed. The
+1/2/4-CPU gate, warning-denying Clippy, host all-targets Clippy, Python checks,
+and diff check pass. Evidence is under the three `audit-artifacts/stage24.4-*`
+directories listed in `docs/stage-status.md`. Userspace syscall framing,
+durable runtime loading, exit reclamation, and shell integration remain open.
+
 **Codex: Stage 24.3 WovenIdentity durable storage accepted (2026-10-20):**
 The kernel StorageIo-authorized WovenFS adapter persists authenticated `WID2`
 dual-copy records and recovers the newest valid generation. The corrected

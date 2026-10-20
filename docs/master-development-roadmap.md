@@ -903,6 +903,12 @@ recovers authenticated dual-copy `WID2` identity records through the
 StorageIo-authorized native WovenFS path. User-facing persistence, key
 management, rotation, lockout, and task binding remain open.
 
+Stage 24.4 owner-bound kernel identity seam accepted (2026-10-20): fixed
+process-owned session bindings and a crate-only credential application seam
+are present, with fail-closed cleanup when no live owner exists. Userspace
+syscalls, durable runtime loading, exit reclamation, lockout, and shell
+integration remain open.
+
 Implement:
 
 local users

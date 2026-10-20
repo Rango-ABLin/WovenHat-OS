@@ -2890,6 +2890,25 @@ pub fn process_credentials(id: ProcessId) -> Option<Credentials> {
         .map(|process| process.credentials)
 }
 
+/// Replace the calling process's effective identity after a kernel identity
+/// authority has authenticated and owner-bound the session. This is crate
+/// visible so no userspace path can manufacture credentials; callers must not
+/// invoke it without first validating an identity session and audit decision.
+#[cfg(feature = "stage24-4-test")]
+pub(crate) fn set_current_credentials(credentials: Credentials) -> bool {
+    let process_id = current_process_id();
+    let mut processes = process_table_lock();
+    let Some(process) = processes
+        .iter_mut()
+        .flatten()
+        .find(|process| process.id.as_u64() == process_id)
+    else {
+        return false;
+    };
+    process.credentials = credentials;
+    true
+}
+
 pub fn may_ipc_with(receiver: u64) -> bool {
     let sender = current_credentials();
     let Some(receiver) = process_credentials(ProcessId(receiver)) else {

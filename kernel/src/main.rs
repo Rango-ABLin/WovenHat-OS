@@ -93,6 +93,8 @@ mod hid;
 mod interrupts;
 #[cfg(feature = "stage24-3-test")]
 mod identity_storage;
+#[cfg(feature = "stage24-4-test")]
+mod identity_runtime;
 mod ipc;
 mod irq_lock;
 mod journal;
@@ -4668,6 +4670,15 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
             qemu_test_exit_failure();
         }
         serial::write_line(format_args!("[S24.3] WovenIdentity durable storage: PASSED"));
+        qemu_test_exit_success();
+    }
+    #[cfg(feature = "stage24-4-test")]
+    {
+        if !identity_runtime::self_test() {
+            serial::write_line(format_args!("[S24.4] WovenIdentity task binding: FAILED"));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!("[S24.4] WovenIdentity task binding: PASSED"));
         qemu_test_exit_success();
     }
     #[cfg(feature = "stage27-2-test")]

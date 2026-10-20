@@ -1,5 +1,28 @@
 # Stage status
 
+## Stage 24.4 owner-bound kernel identity seam (2026-10-20)
+
+`kernel/src/identity_runtime.rs` introduces the kernel seam between the
+accepted identity authority and process credentials. Session tokens are kept
+in a fixed binding table with an owner process ID; lock, unlock, elevation,
+and close reject tokens owned by another process. Credential application is
+performed only after releasing the identity lock and only through a crate-only
+task setter, preserving the existing `getuid/getgid` ABI and lock ordering.
+If no live process owner exists, opening a session fails closed and cleans up
+the authority session and binding.
+
+The dedicated gate passed with exit 33 and
+`[S24.4] WovenIdentity task binding: PASSED` on 1/2/4 CPUs. The corrected
+evidence is preserved under:
+`audit-artifacts/stage24.4-1cpu-1792526710240384400`,
+`audit-artifacts/stage24.4-2cpu-1792526744522828500`, and
+`audit-artifacts/stage24.4-4cpu-1792526778145524000`.
+
+This is not yet the userspace identity interface: syscall framing, loading the
+durable snapshot into the runtime, process-exit binding reclamation, login
+manager integration, lockout/rate limiting, and administrative policy remain
+required before production identity can be claimed.
+
 ## Stage 24.3 kernel-authorized WovenIdentity durable storage (2026-10-20)
 
 The kernel now provides a StorageIo-authorized WovenFS adapter for identity

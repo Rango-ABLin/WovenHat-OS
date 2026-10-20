@@ -295,6 +295,18 @@ impl Authority {
         Ok(id)
     }
 
+    /// Authenticate a local account by its bounded display name.
+    pub fn open_named_session(&mut self, name: &[u8], password: &[u8]) -> Result<SessionId, Error> {
+        let user = self
+            .users
+            .iter()
+            .flatten()
+            .find(|user| user.name[..user.name_len] == *name)
+            .ok_or(Error::NotFound)?
+            .id;
+        self.open_session(user, password)
+    }
+
     pub fn lock(&mut self, session: SessionId) -> Result<(), Error> {
         let session = self.find_session_mut(session).ok_or(Error::NotFound)?;
         session.state = SessionState::Locked;
