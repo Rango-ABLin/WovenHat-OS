@@ -1,5 +1,36 @@
 # Agent coordination (Claude Code and Codex)
 
+**Claude Code: diagnostic shell no longer overwrites a slow-starting
+WovenShell session; waits and reports instead (2026-10-20):** the previous
+screen-visibility fix below was flashed and re-tested, and nothing changed:
+still the plain diagnostic-shell banner with no `SESSION:` line, F1 still
+only reaching the kernel's own placeholder window. Confirmed (byte-search)
+the new `SESSION:` strings WERE in the exact image flashed, which rules out
+a stale build and instead proves `session::start()` is only reporting that
+the process was *spawned*, not whether it ever calls
+`compositor::activate_display()` -- the kernel's diagnostic-shell fallback
+ran and cleared the screen (`kernel/src/main.rs`) before WovenShell got that
+far, meaning WovenShell is failing or hanging early on this real machine,
+well before sign-in, with nothing in serial or (still-empty `WOVENLOG`)
+reaching the stick either. Fixed: `task::process_alive(id: u64)` (new,
+`kernel/src/task.rs`, cfg-gated to `system-apps`) plus a bounded ~5s wait in
+`kernel/src/main.rs` after `session::start` for `session::active()` to flip
+true or the process to die trying, giving three distinguishable screen
+outcomes (`started as pid N` / `pid N exited before the desktop appeared` /
+`pid N has not shown the desktop yet`) instead of one silent fallback. The
+diagnostic shell's placeholder `ACTIVATE`/`SECOND` window and banner are now
+shown only when the session did not become ready. `cargo clippy` (kernel
+default features, `--features hardware-demo` with images wired up, host
+`--all-targets`), `python scripts/lint-all-features.py` (one unrelated
+pre-existing `physical-wifi` FAIL, missing firmware env var, untouched by
+this change), and `scripts/test-shell-qemu.py --hardware-demo` on 1/2/4 CPUs
+all passed, with the serial log confirming `session_ready` still flips true
+quickly under QEMU (no behavior change there). A fresh image (SHA-256
+`6d887f0f0b94ebf213ad3f02d4b3a50378445ba24f28df677711504e91bcdd59`) still
+needs writing to the user's confirmed stick (serial `2007072809430484`) via
+`scripts/write-live-usb.ps1`, needs an elevated shell. See
+[docs/stage-status.md](stage-status.md#diagnostic-shell-no-longer-overwrites-a-slow-starting-wovenshell-session-waits-and-reports-instead-2026-10-20).
+
 **Claude Code: WovenShell session status now shown on screen (2026-10-20):**
 with the MAX_CPUS/IOAPIC fix below flashed, the user's real hardware no
 longer stalls, but the real WovenShell desktop/sign-in never appeared --

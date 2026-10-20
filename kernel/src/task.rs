@@ -2268,6 +2268,18 @@ pub fn process_exited(id: ProcessId) -> bool {
         .is_some_and(|process| process.state == ProcessState::Exited)
 }
 
+/// Whether the process named by the raw id `id` is in the table and has not
+/// exited. For a caller that only has the id as `u64` (e.g. across a module
+/// boundary that erases [`ProcessId`], such as [`crate::session::start`]'s
+/// return value) and so cannot compare against a [`ProcessId`] directly.
+#[cfg(feature = "system-apps")]
+pub fn process_alive(id: u64) -> bool {
+    process_table_lock()
+        .iter()
+        .flatten()
+        .any(|process| process.id.as_u64() == id && process.state != ProcessState::Exited)
+}
+
 /// Whether `id` names a task that still exists and has not died. Task ids are
 /// never reused, so a false answer is final.
 pub fn task_live(id: TaskId) -> bool {

@@ -1656,16 +1656,26 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         // Stage 20.15: the WovenShell desktop is the session; F12 shows this
         // diagnostic console instead.
         //
-        // The outcome is kept in `session_status` and shown again on the
-        // diagnostic-shell banner below: the progress lines printed here are
-        // wiped by that banner's `console.clear()` a moment later, which on
-        // real hardware (no serial cable, no WOVENLOG yet at this point)
-        // left a session that failed to start indistinguishable from one
-        // that is simply running behind the compositor.
+        // `session::start` only reports whether the process was spawned, not
+        // whether it ever reaches `compositor::activate_display()` -- a
+        // crash or a hang right after spawn looks identical to "running
+        // behind the compositor" from here. So this also waits, briefly and
+        // boundedly, for `session::active()` to confirm the desktop actually
+        // took the screen (or for the process to have already died trying),
+        // and keeps the outcome in `session_ready`/`session_status`. The
+        // diagnostic-shell fallback below is only ever shown when
+        // `!session_ready`: showing it unconditionally, as before, meant its
+        // `console.clear()` silently overwrote a successfully-started
+        // desktop's frame on any boot slow enough for the race to go the
+        // other way, which real hardware (unlike QEMU) apparently is.
         #[cfg(feature = "system-apps")]
         let session_status;
         #[cfg(not(feature = "system-apps"))]
         let session_status = alloc::string::String::new();
+        #[cfg(feature = "system-apps")]
+        let mut session_ready = false;
+        #[cfg(not(feature = "system-apps"))]
+        let session_ready = false;
         #[cfg(feature = "system-apps")]
         {
             console.println("BOOT LOADER [6/7]: starting WovenShell desktop");
@@ -1678,9 +1688,47 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
                         "[SESSION] WovenShell desktop started as pid {}",
                         pid
                     ));
-                    console.println("DESKTOP SESSION: STARTED (F12 SWITCHES TO THIS CONSOLE)");
-                    console.println("BOOT LOADER [7/7]: desktop ready");
-                    alloc::format!("SESSION: started as pid {pid} (F12 shows the desktop)")
+                    // Up to ~5s (100 Hz ticks), the same bounded-wait pattern
+                    // as the stage self-tests' local `until` helpers: no
+                    // assumption that this boot thread can sleep, only that
+                    // it can yield.
+                    const WAIT_TICKS: u64 = 500;
+                    let start = timer::ticks();
+                    loop {
+                        if session::active().is_some() {
+                            session_ready = true;
+                            break;
+                        }
+                        if !task::process_alive(pid) {
+                            break;
+                        }
+                        if timer::ticks().wrapping_sub(start) > WAIT_TICKS {
+                            break;
+                        }
+                        task::yield_now();
+                    }
+                    if session_ready {
+                        console.println(
+                            "DESKTOP SESSION: STARTED (F12 SWITCHES TO THIS CONSOLE)",
+                        );
+                        console.println("BOOT LOADER [7/7]: desktop ready");
+                        alloc::format!("SESSION: started as pid {pid} (F12 shows the desktop)")
+                    } else if !task::process_alive(pid) {
+                        serial::write_line(format_args!(
+                            "[SESSION] pid {} exited before taking the display",
+                            pid
+                        ));
+                        alloc::format!("SESSION: pid {pid} exited before the desktop appeared")
+                    } else {
+                        serial::write_line(format_args!(
+                            "[SESSION] pid {} has not taken the display after {}ms",
+                            pid,
+                            WAIT_TICKS * 10
+                        ));
+                        alloc::format!(
+                            "SESSION: pid {pid} has not shown the desktop yet (still running)"
+                        )
+                    }
                 }
                 Err(error) => {
                     serial::write_line(format_args!(
@@ -1711,7 +1759,6 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
             None => console.println("USERSPACE INIT+SH: IMAGE FAILED"),
         }
 
-        console.println("");
         let mut desktop = gui::Desktop::new(graphics::Color::DARK_BLUE);
         let mut window = gui::Window::new(gui::Rect::new(80, 80, 480, 280), "WOVENHAT DESKTOP");
         window.add_button(gui::Button::new(
@@ -1728,13 +1775,22 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         let mut shell = Shell::new();
         let mut desktop_active = false;
 
-        // Start in the diagnostic shell. F1 toggles to the graphical desktop.
-        console.clear();
-        console.println("WOVENHAT DIAGNOSTIC SHELL (F1 TO OPEN DESKTOP)");
-        if !session_status.is_empty() {
-            console.println(&session_status);
+        // This placeholder desktop and the diagnostic-shell banner below are
+        // a developer-only fallback for when WovenShell did not take the
+        // screen itself (`!session_ready`): a real user who gets this far
+        // never asked for an ACTIVATE/SECOND test window, so it is never
+        // shown once the desktop session is confirmed up. F12 still reaches
+        // the kernel's own diagnostic console either way (`woven_input`
+        // dispatches it to `session::toggle_console()` ahead of this loop).
+        if !session_ready {
+            console.println("");
+            console.clear();
+            console.println("WOVENHAT DIAGNOSTIC SHELL (F1 TO OPEN DESKTOP)");
+            if !session_status.is_empty() {
+                console.println(&session_status);
+            }
+            shell.print_prompt(&mut console);
         }
-        shell.print_prompt(&mut console);
 
         let mut userspace_was_foreground = false;
         loop {

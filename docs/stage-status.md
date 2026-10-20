@@ -1,5 +1,84 @@
 # Stage status
 
+## Diagnostic shell no longer overwrites a slow-starting WovenShell session; waits and reports instead (2026-10-20)
+
+The previous fix (below) made `session::start()`'s outcome visible on
+screen, but the user re-flashed and re-tested and reported no change at all:
+still straight to the plain `WOVENHAT DIAGNOSTIC SHELL (F1 TO OPEN DESKTOP)`
+banner, with no `SESSION:` line, and F1 still only reaches the kernel's own
+`ACTIVATE`/`SECOND` placeholder window -- never WovenShell's real sign-in
+desktop, even though the new `SESSION:` line was confirmed present in the
+exact image flashed (byte-searched the `.img` for the literal string).
+
+Root cause: `session::start()` only reports whether the process was
+*spawned*; it says nothing about whether that process ever reaches
+`compositor::activate_display()`, which is a syscall WovenShell itself
+issues once its own init runs far enough. The former code treated `Ok(pid)`
+as the end of the story and immediately fell through to building and
+showing the diagnostic shell unconditionally (`kernel/src/main.rs`, the
+`console.clear()` + banner that follows). Whenever `with_text_framebuffer`
+sees `terminal::display_owned == true` it already turns every console draw
+into a no-op (`kernel/src/terminal.rs:372-387`), so if WovenShell had won
+that race the diagnostic banner would have silently failed to draw and the
+user would have seen WovenShell's own frame instead. The user reported
+seeing the diagnostic banner text itself, which proves the opposite: on
+this real machine, WovenShell had *not* taken the display by the time that
+code ran, i.e. it is failing or hanging early, well before sign-in, in a way
+that produces no serial output and (confirmed by a still-empty `WOVENLOG`
+after this boot) nothing on the stick either.
+
+Fixed in `kernel/src/main.rs` and `kernel/src/task.rs`:
+
+- Added `task::process_alive(id: u64)` (cfg-gated to `feature = "system-apps"`,
+  its only caller): whether a process named by its raw id is in the process
+  table and has not exited, for a caller on the far side of the
+  `ProcessId`-erasing boundary `session::start`'s `Result<u64, Error>`
+  return already has.
+- After `session::start` returns `Ok(pid)`, the boot thread now waits up to
+  ~5s (500 ticks, the same bounded `timer::ticks()` + `task::yield_now()`
+  busy-wait pattern the stage self-tests' local `until` helpers already use
+  elsewhere in this file -- no new assumption that this thread can sleep,
+  only that it can yield) for `session::active()` to confirm the display was
+  actually taken, or for `task::process_alive(pid)` to go false (the process
+  died trying). The result is three-way, not two: **ready** (desktop up),
+  **exited** (crashed/exited before showing anything), or **still running,
+  not shown yet** (hung or just slow) -- each with its own `SESSION:` status
+  line.
+- The diagnostic shell's placeholder `ACTIVATE`/`SECOND` desktop, its banner,
+  and its `console.clear()` are now only shown when `!session_ready`. A real
+  user who gets as far as a working WovenShell desktop is never shown a
+  developer test window; F12 still reaches the kernel's diagnostic console
+  either way, since that path (`woven_input::publish` →
+  `session::toggle_console()`) runs ahead of and independent of this loop.
+
+This does not yet explain *why* WovenShell fails or hangs before sign-in on
+this specific machine -- only the fallback's silence, which it no longer is.
+The next real boot will say, on screen, one of: started as pid N; pid N
+exited before the desktop appeared; or pid N has not shown the desktop yet
+(still running) -- which narrows the real bug to "crashes" vs. "hangs" vs.
+"never gets input/display resources it needs," each a different next step.
+
+Validation: `cargo clippy -p wovenhat-kernel --target x86_64-unknown-none`
+(default features), `--features hardware-demo` (with the packaged
+system-app images wired up the way `scripts/test-shell-qemu.py
+--hardware-demo` does), and host `cargo clippy --all-targets -- -D
+warnings` all passed. `python scripts/lint-all-features.py` passed for
+every feature touching `session`/`task` (several others report
+`needs-image`, which is a pre-existing gap in supplying their embedded-app
+env vars, not a compile failure); the one genuine `FAIL` it found
+(`physical-wifi`, missing `WOVENHAT_AX201_FIRMWARE`) is pre-existing and
+unrelated -- that feature touches none of the lines changed here.
+`scripts/test-shell-qemu.py --hardware-demo` passed on QEMU 1/2/4 CPUs,
+`Hardware demo: sign-in + 10 applications + desktop + PS/2 IOAPIC +
+smptest: PASS` on each, with the serial log showing no
+`has not taken the display`/`exited before` lines -- confirming
+`session_ready` still flips true quickly under QEMU and the gate's behavior
+is unchanged there. A fresh image (SHA-256
+`6d887f0f0b94ebf213ad3f02d4b3a50378445ba24f28df677711504e91bcdd59`) is
+queued to write to the user's confirmed stick (serial `2007072809430484`,
+Win32_DiskDrive size 518192640) via `scripts/write-live-usb.ps1`. Not yet
+re-tested on the reporting user's physical machine.
+
 ## WovenShell session status now shown on the diagnostic-shell screen (2026-10-20)
 
 The user re-tested the MAX_CPUS/IOAPIC fix below on real hardware: the boot
