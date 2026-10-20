@@ -4449,6 +4449,25 @@ pub fn setup_argv_stack(
 const USER_MMAP_START: u64 = USER_REGION_START + 0x0e_0000;
 const USER_MMAP_STRIDE: u64 = 0x10_000;
 const USER_MMAP_MAX_SIZE: usize = USER_MMAP_STRIDE as usize;
+const USER_MMAP_ARENA_SIZE: u64 = MAX_ANONYMOUS_MAPPINGS as u64 * USER_MMAP_STRIDE;
+
+/// Keep the mmap arena, optional TLS reservation, guard page and stack
+/// disjoint. Independent ASLR draws must not be allowed to overlap.
+fn plan_stack_base(requested: u64, mmap_base: u64, tls_size: u64) -> Option<u64> {
+    if !requested.is_multiple_of(ASLR_PAGE)
+        || !mmap_base.is_multiple_of(ASLR_PAGE)
+        || !tls_size.is_multiple_of(ASLR_PAGE)
+    {
+        return None;
+    }
+    let mmap_end = mmap_base.checked_add(USER_MMAP_ARENA_SIZE)?;
+    let floor = mmap_end
+        .checked_add(tls_size)?
+        .checked_add(UserStack::GUARD_SIZE as u64)?;
+    let stack_base = requested.max(floor);
+    let stack_top = stack_base.checked_add(UserStack::SIZE as u64)?;
+    (stack_top <= USER_REGION_START + 0x1000_0000).then_some(stack_base)
+}
 
 fn page_align_up(value: u64) -> Option<u64> {
     value.checked_add(4095).map(|value| value & !4095)

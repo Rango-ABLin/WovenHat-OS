@@ -214,6 +214,23 @@ pub(super) fn load_with_geometry(
             .ok()?;
     }
     scope.validate_dependencies().ok()?;
+    let tls_reservation = match main.image.tls() {
+        Some(tls) => {
+            let layout = tls_layout::Layout::new(
+                tls.file_size,
+                tls.memory_size,
+                tls.alignment,
+                tls.virtual_address,
+                USER_MMAP_MAX_SIZE,
+            )?;
+            let template_size = usize::try_from(page_align_up(tls.file_size as u64)?).ok()?;
+            let total = layout.mapping_size.checked_add(template_size)?;
+            Some((layout, template_size, total))
+        }
+        None => None,
+    };
+    let tls_size = tls_reservation.map_or(0, |(_, _, size)| size as u64);
+    let stack_base = plan_stack_base(stack_base, mmap_base, tls_size)?;
     let stack = UserStack::new(stack_base);
     let mmap_end = mmap_base.checked_add(MAX_ANONYMOUS_MAPPINGS as u64 * USER_MMAP_STRIDE)?;
     let page_table = paging::create_user_address_space(main.image.entry)?;
@@ -301,15 +318,7 @@ pub(super) fn load_with_geometry(
         }
     }
     let tls_base = if let Some(tls) = main.image.tls() {
-        let layout = tls_layout::Layout::new(
-            tls.file_size,
-            tls.memory_size,
-            tls.alignment,
-            tls.virtual_address,
-            USER_MMAP_MAX_SIZE,
-        )?;
-        let template_size = usize::try_from(page_align_up(tls.file_size as u64)?).ok()?;
-        let total = layout.mapping_size.checked_add(template_size)?;
+        let (layout, template_size, total) = tls_reservation?;
         let template_start = stack.guard_base.checked_sub(total as u64)?;
         let start = template_start.checked_add(template_size as u64)?;
         if template_start < mmap_end

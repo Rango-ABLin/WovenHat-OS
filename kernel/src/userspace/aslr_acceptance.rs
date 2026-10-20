@@ -32,8 +32,10 @@ fn guard_fixture(mmap_base: u64, guard: u64) -> Option<alloc::vec::Vec<u8>> {
 pub(super) fn run() -> bool {
     // A supported production pair: stack draw 16, mmap draw 0. The final
     // slot ends exactly at the old stack base, without touching mapped stack.
-    let stack_base = USER_REGION_START + 0x1e_0000;
-    let guard = USER_REGION_START + 0x1d_f000;
+    // The complete 16-slot mmap arena ends at 0x1e_0000.  The guard must be
+    // above that arena, not inside its final 64 KiB slot.
+    let stack_base = USER_REGION_START + 0x1e_1000;
+    let guard = USER_REGION_START + 0x1e_0000;
     let mmap_base = USER_REGION_START + 0xe_0000;
     let Some(bytes) = guard_fixture(mmap_base, guard) else {
         return false;
