@@ -21,7 +21,8 @@ the per-task kernel stack reservation is 256 KiB. See
 Read-only physical preflight on 2026-10-20 found the attached target as a
 15,726,400,000-byte VendorCo ProductCode USB disk with no partitions, separate
 from the boot NVMe disk, on an HP Pavilion x360 host with an Intel AX201.
-Evidence is in `docs/audit-physical-usb-preflight-2026-10-20.md`. No raw write,
+The read-only inventory was repeated at
+`audit-artifacts/physical-host-20261020-175342-269/host.json`. No raw write,
 format, partition change, or physical boot was performed; those next steps
 require Administrator access and explicit confirmation because the test
 scripts erase the target disk.

@@ -26,4 +26,6 @@ before installing a release image; `scripts/test-wovenfs-physical.ps1` also
 clears the selected disk before passing it through to QEMU. Neither action was
 performed during this preflight.
 
-Evidence: `audit-artifacts/physical-host-20261020-171457-651/host.json`.
+The read-only preflight was repeated on 2026-10-20 and found the same target
+identity and non-elevated host state. Current evidence:
+`audit-artifacts/physical-host-20261020-175342-269/host.json`.
