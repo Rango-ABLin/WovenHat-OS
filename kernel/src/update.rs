@@ -16,6 +16,11 @@ const UPDATE_RECORD_HEADER_LEN: usize = 18;
 const UPDATE_SLOT_RECORD_LEN: usize = 50;
 pub const UPDATE_RECORD_LEN: usize =
     UPDATE_RECORD_HEADER_LEN + SLOT_COUNT * UPDATE_SLOT_RECORD_LEN + 4;
+#[cfg(not(test))]
+pub const UPDATE_RECORD_PATHS: [&str; 2] = [
+    "/wfs/update-state-a",
+    "/wfs/update-state-b",
+];
 
 #[cfg(not(test))]
 pub const UPDATE_PACKAGE_MAGIC: [u8; 4] = *b"WUPD";
@@ -70,6 +75,8 @@ pub enum Error {
     DigestMismatch,
     #[cfg(not(test))]
     InvalidSignature,
+    #[cfg(not(test))]
+    Storage,
     MalformedRecord,
     RecordChecksumMismatch,
     InvalidRecord,
@@ -301,6 +308,41 @@ impl UpdateState {
             (Err(_), Err(_)) => Err(Error::InvalidRecord),
         }
     }
+
+/// Issue the update writer authority only to a task carrying the storage
+/// capability. The private WovenFS token cannot be constructed by userspace.
+#[cfg(any(feature = "stage15-2-test", feature = "stage27-2-test"))]
+pub fn authorized_writer() -> Option<crate::wfs::AuthorizedWfsWriter> {
+    crate::task::current_has(crate::capability::Capability::StorageIo)
+        .then(crate::wfs::AuthorizedWfsWriter::after_capability_check)
+}
+
+/// Persist one complete update-state copy through the native WovenFS journal.
+#[cfg(any(feature = "stage15-2-test", feature = "stage27-2-test"))]
+pub fn persist_record_copy(
+    authority: &crate::wfs::AuthorizedWfsWriter,
+    copy: usize,
+    sequence: u64,
+    state: &UpdateState,
+    now: u64,
+) -> Result<(), Error> {
+    let path = UPDATE_RECORD_PATHS
+        .get(copy)
+        .ok_or(Error::InvalidRecord)?;
+    let mut record = [0u8; UPDATE_RECORD_LEN];
+    state.encode_record(sequence, &mut record)?;
+    crate::wfs::write_vfs_path_durable(authority, path, &record, now)
+        .map_err(|_| Error::Storage)
+}
+
+/// Read one complete update-state copy through the native WovenFS journal.
+#[cfg(any(feature = "stage15-2-test", feature = "stage27-2-test"))]
+pub fn read_record_copy(copy: usize, out: &mut [u8; UPDATE_RECORD_LEN]) -> Result<usize, Error> {
+    let path = UPDATE_RECORD_PATHS
+        .get(copy)
+        .ok_or(Error::InvalidRecord)?;
+    crate::wfs::read_vfs_path_durable(path, out).map_err(|_| Error::Storage)
+}
 
     fn is_valid(&self) -> bool {
         if self.active >= SLOT_COUNT
@@ -537,20 +579,16 @@ pub fn durable_self_test() -> bool {
     if !crate::wfs::format_ata(64) {
         return false;
     }
-    let authority = crate::wfs::AuthorizedWfsWriter::after_capability_check();
+    let Some(authority) = UpdateState::authorized_writer() else {
+        return false;
+    };
     let Ok(mut state) = UpdateState::new(10, 1024, [1; 32]) else {
         return false;
     };
     let mut first = [0u8; UPDATE_RECORD_LEN];
     let mut second = [0u8; UPDATE_RECORD_LEN];
     if state.encode_record(1, &mut first).is_err()
-        || crate::wfs::write_vfs_path_durable(
-            &authority,
-            "/wfs/update-state-a",
-            &first,
-            1,
-        )
-        .is_err()
+        || UpdateState::persist_record_copy(&authority, 0, 1, &state, 1).is_err()
     {
         return false;
     }
@@ -561,21 +599,14 @@ pub fn durable_self_test() -> bool {
     let mut pending = state;
     if pending.activate_candidate(slot).is_err()
         || pending.encode_record(2, &mut second).is_err()
-        || crate::wfs::write_vfs_path_durable(
-            &authority,
-            "/wfs/update-state-b",
-            &second,
-            2,
-        )
-        .is_err()
+        || UpdateState::persist_record_copy(&authority, 1, 2, &pending, 2).is_err()
     {
         return false;
     }
     let mut read_a = [0u8; UPDATE_RECORD_LEN];
     let mut read_b = [0u8; UPDATE_RECORD_LEN];
-    if crate::wfs::read_vfs_path_durable("/wfs/update-state-a", &mut read_a) != Ok(UPDATE_RECORD_LEN)
-        || crate::wfs::read_vfs_path_durable("/wfs/update-state-b", &mut read_b)
-            != Ok(UPDATE_RECORD_LEN)
+    if UpdateState::read_record_copy(0, &mut read_a) != Ok(UPDATE_RECORD_LEN)
+        || UpdateState::read_record_copy(1, &mut read_b) != Ok(UPDATE_RECORD_LEN)
     {
         return false;
     }

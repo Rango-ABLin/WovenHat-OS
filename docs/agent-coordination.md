@@ -27,6 +27,11 @@ remounts and verifies them, selects the newest valid sequence, and falls back
 after newer-copy corruption. Scratch-disk QEMU passed on 1/2/4 CPUs. Evidence
 is in the Stage 27.1/27.2 audit; no physical USB write was performed.
 
+The update record helper now issues its private WovenFS writer token only
+after checking the current task's `StorageIo` capability. This is the accepted
+authority boundary exercised by the Stage 27.2 gate; a long-lived userspace
+daemon and IPC protocol remain unimplemented.
+
 Codex implemented and accepted the shared-library PT_TLS loader path on
 2026-10-20: combined template planning, per-process TCB initialization, TLS
 symbol scope, and TPOFF64 relocation are in the working tree. Standard and

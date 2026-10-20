@@ -6386,6 +6386,11 @@ CPUs; evidence is in
 Long-lived service lifecycle, power-loss injection/recovery, installer and
 boot-slot integration, and physical qualification remain open.
 
+The record adapter now has a capability-gated service boundary: only a task
+with `Capability::StorageIo` can obtain the private WovenFS writer token.
+This does not yet constitute the long-lived userspace update daemon or its
+IPC/syscall protocol.
+
 # Stage 15 native WovenFS VFS lifecycle (2026-10-20)
 
 The native WovenFS adapter now owns the `/wfs` publication lifecycle. Mount

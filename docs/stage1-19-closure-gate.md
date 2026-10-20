@@ -105,9 +105,9 @@ test session.
 6. The bounded A/B update transition, signed `WUPD` envelope verification, and
    scratch-device durable `WUAB` record acceptance are implemented and
    accepted in `docs/audit-stage27-1-update-ab-state-2026-10-20.md`. Still add
-   a long-lived service lifecycle, power-loss/recovery evidence, boot-slot and
-   installer integration before calling the desktop/application stages
-   complete.
+   a long-lived service lifecycle and IPC protocol, power-loss/recovery
+   evidence, boot-slot and installer integration before calling the
+   desktop/application stages complete.
 7. Re-run the inherited 1/2/4-CPU matrix and release chain after each accepted
    increment; commit each accepted increment separately.
 

@@ -81,3 +81,13 @@ gate was rerun successfully on 1/2/4 CPUs:
 - `audit-artifacts/stage27.1-1cpu-1792512964891684100`
 - `audit-artifacts/stage27.1-2cpu-1792512978915669200`
 - `audit-artifacts/stage27.1-4cpu-1792512993391527100`
+
+## Capability-gated service boundary (2026-10-20)
+
+The native record adapter now issues `AuthorizedWfsWriter` only when the
+current kernel task carries `Capability::StorageIo`; the token's constructor
+is private to the kernel crate. Update record commit/read helpers consume that
+token and map WovenFS failures to the update boundary. Stage 27.2's live gate
+exercises this authority path before committing either copy. This is a
+service-ownership boundary, not yet a complete userspace daemon or a new
+userspace syscall/API.

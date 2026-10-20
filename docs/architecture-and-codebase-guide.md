@@ -1177,6 +1177,13 @@ fails closed when both copies are invalid or tied. This proves durable record
 handling on the accepted ATA/WovenFS scratch path, but not power-loss timing,
 boot-slot installation, or a complete userspace update daemon.
 
+The update service boundary is capability-gated: `update::authorized_writer`
+checks the current task for `Capability::StorageIo`, and only then receives
+the private `wfs::AuthorizedWfsWriter` token. Commit/read helpers accept that
+token rather than a path-only authority. The current acceptance invokes this
+from the kernel test service; production still needs a long-lived userspace
+service lifecycle and an IPC/syscall protocol that delegates this authority.
+
 
 The repository release chain passed on the current tree, including warning-
 denying kernel/host Clippy, all host integration tests, 1/2/4-CPU debug
