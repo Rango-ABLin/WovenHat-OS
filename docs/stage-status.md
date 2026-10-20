@@ -1,5 +1,26 @@
 # Stage status
 
+## Stage 23.7 advisory WovenAI security monitor (2026-10-20)
+
+`libwoven::ai_monitor` provides bounded explanations over existing
+`security::AuditEvent` records. It classifies denied WovenGuard/sandbox events,
+sensitive grants/stores, process faults, and ordinary records into fixed-size
+findings capped at 16 entries with 64-byte explanations. It has no
+capability-grant, revoke, enforcement, or device-control API; WovenGuard
+remains the only enforcement authority.
+
+The dedicated gate passed with exit 33 and
+`[S23.7] WovenAI security monitor: PASSED` on 1/2/4 CPUs. The 80-test
+`libwoven` suite, Stage 23.7 freestanding Clippy, host all-targets Clippy,
+Python validation, and `git diff --check` pass. Evidence is preserved under:
+`audit-artifacts/stage23.7-1cpu-1792525067904963600`,
+`audit-artifacts/stage23.7-2cpu-1792525085640869300`, and
+`audit-artifacts/stage23.7-4cpu-1792525103539579600`.
+
+This is an advisory event-summary contract, not a complete anomaly detector,
+monitor UI, alert transport, or automated response system. Any future AI
+recommendation must still be evaluated by deterministic WovenGuard policy.
+
 ## Stage 23.6 WovenAssistant permissioned action planner (2026-10-20)
 
 `libwoven::ai_assistant` defines bounded plans with seven explicit action

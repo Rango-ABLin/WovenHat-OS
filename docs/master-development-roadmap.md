@@ -878,6 +878,9 @@ AI can explain suspicious activity, but WovenGuard remains the actual enforcemen
 
 That distinction is important: AI advises; deterministic kernel/security policy enforces.
 
+Stage 23.7 acceptance therefore permits advisory summaries only; anomaly
+detection, notification UX, and response automation cannot bypass WovenGuard.
+
 Phase XV — Accounts and Identity
 Stage 24 — WovenIdentity
 

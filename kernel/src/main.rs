@@ -4631,6 +4631,15 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         serial::write_line(format_args!("[S23.6] WovenAssistant actions: PASSED"));
         qemu_test_exit_success();
     }
+    #[cfg(feature = "stage23-7-test")]
+    {
+        if !stage23_security_monitor_self_test() {
+            serial::write_line(format_args!("[S23.7] WovenAI security monitor: FAILED"));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!("[S23.7] WovenAI security monitor: PASSED"));
+        qemu_test_exit_success();
+    }
     #[cfg(feature = "stage27-2-test")]
     {
         if !update::durable_self_test() {
@@ -6302,6 +6311,45 @@ fn stage23_assistant_action_self_test() -> bool {
         != Err(Error::PermissionDenied)
     {
         return fail("read permission mismatch");
+    }
+    true
+}
+
+#[cfg(feature = "stage23-7-test")]
+fn stage23_security_monitor_self_test() -> bool {
+    use libwoven::ai_monitor::{explain, Monitor, Severity};
+    use libwoven::security::{AuditAction, AuditEvent};
+
+    fn fail(reason: &str) -> bool {
+        serial::write_line(format_args!("[S23.7] {}", reason));
+        false
+    }
+    let denied = AuditEvent {
+        sequence: 17,
+        tick: 2,
+        cpu: 0,
+        action: AuditAction::WovenGuardDeny,
+        actor: 10,
+        target: 20,
+        detail: 30,
+        allowed: false,
+    };
+    let finding = explain(&denied);
+    if finding.severity != Severity::Warning
+        || finding.allowed
+        || &finding.explanation[..finding.explanation_len as usize]
+            != b"WovenGuard denied an authority request"
+    {
+        return fail("denial explanation mismatch");
+    }
+    let mut monitor = Monitor::new();
+    for _ in 0..libwoven::ai_monitor::MAX_FINDINGS {
+        if !monitor.observe(&denied) {
+            return fail("monitor capacity rejected a bounded event");
+        }
+    }
+    if monitor.observe(&denied) || monitor.get(0).is_none() {
+        return fail("monitor capacity/enumeration mismatch");
     }
     true
 }

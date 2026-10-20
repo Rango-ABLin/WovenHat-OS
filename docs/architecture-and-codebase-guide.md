@@ -1389,6 +1389,15 @@ through the existing permission broker and capability policy before invoking a
 platform API. Cancellation, owner teardown, audit ordering, and generation-
 safe permission handles remain executor requirements.
 
+## Stage 23.7 advisory WovenAI security monitor (2026-10-20)
+
+`libwoven::ai_monitor` consumes copied audit events and emits fixed-size
+severity/explanation findings. It is intentionally unable to grant, revoke,
+or enforce capabilities; it has no executor or device API. WovenGuard and the
+existing audit ledger remain authoritative. Process faults and denied sandbox
+events receive stronger advisory severity, while the monitor preserves the
+original `allowed` bit rather than rewriting policy decisions.
+
 The feature-gated `stage19-app-catalog-test` now exercises the install-plan
 boundary for all ten accepted packages together. It verifies each WAPP,
 rejects a mutation, installs and reads each package back through the VFS,

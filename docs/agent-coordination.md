@@ -1,5 +1,13 @@
 # Agent coordination (Claude Code and Codex)
 
+**Codex: Stage 23.7 advisory WovenAI security monitor accepted (2026-10-20):**
+`libwoven::ai_monitor` summarizes copied audit events into bounded findings and
+has no authority-changing API. The 1/2/4-CPU gate, 80 host tests,
+warning-denying Clippy, and Python checks pass. Evidence is under the three
+`audit-artifacts/stage23.7-*` directories listed in `docs/stage-status.md`.
+Anomaly detection, UI, notification, and automated response remain advisory
+follow-up work; no physical hardware claim is made.
+
 **Codex: Stage 23.6 WovenAssistant permissioned action planner accepted (2026-10-20):**
 `libwoven::ai_assistant` adds fixed-size action plans, explicit permission
 mapping, target validation, and confirmation for side effects. The 1/2/4-CPU
