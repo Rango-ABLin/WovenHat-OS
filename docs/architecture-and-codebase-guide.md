@@ -1150,6 +1150,15 @@ signature over its defined envelope domain before installation. No package
 producer, persistent installer, update/removal transaction, sandbox launcher,
 or trust-root policy is implied by this parser increment.
 
+`tools/wpkg-packager` is the producer boundary for WPKG v1. It preserves the
+existing WAPP producer and accepts an ELF, package name/version, capability
+bitmap, bounded dependency list, and optional resource files. The signature is
+Ed25519 over `SHA-256("WOVENHAT-WPKG-V1" || immutable_header_prefix ||
+manifest || application || resources)`, using the same provisioned application
+trust-root model as signed applications. The kernel Stage 21.2 verifier checks
+this digest before a future package service may install anything; producer
+output alone does not grant installation authority.
+
 The feature-gated `stage19-app-catalog-test` now exercises the install-plan
 boundary for all ten accepted packages together. It verifies each WAPP,
 rejects a mutation, installs and reads each package back through the VFS,

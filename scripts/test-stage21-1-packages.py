@@ -1,4 +1,4 @@
-"""Run the bounded WovenPackages parser acceptance on 1/2/4 CPUs."""
+"""Run bounded WovenPackages parser or signature acceptance on 1/2/4 CPUs."""
 import argparse
 import shutil
 import subprocess
@@ -10,6 +10,7 @@ from pathlib import Path
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--cpus", type=int, choices=(1, 2, 4), default=1)
+    parser.add_argument("--stage", type=int, choices=(1, 2), default=1)
     parser.add_argument("--timeout", type=float, default=240)
     parser.add_argument(
         "--qemu",
@@ -22,12 +23,13 @@ def main() -> int:
     firmware = qemu.parent / "share" / "edk2-x86_64-code.fd"
     if not qemu.is_file() or not firmware.is_file():
         parser.error("Set --qemu or install QEMU with its OVMF firmware.")
+    feature = f"stage21-{args.stage}-test"
     image = subprocess.check_output(
-        ["cargo", "run", "--quiet", "--features", "stage21-1-test", "--", "--print-image"],
+        ["cargo", "run", "--quiet", "--features", feature, "--", "--print-image"],
         cwd=root,
         text=True,
     ).strip()
-    out = root / "audit-artifacts" / f"stage21.1-{args.cpus}cpu-{time.time_ns()}"
+    out = root / "audit-artifacts" / f"stage21.{args.stage}-{args.cpus}cpu-{time.time_ns()}"
     out.mkdir(parents=True, exist_ok=True)
     serial = out / "serial.log"
     command = [
@@ -42,15 +44,19 @@ def main() -> int:
         result = subprocess.run(command, cwd=root, stdout=subprocess.DEVNULL,
                                 stderr=subprocess.STDOUT, timeout=args.timeout).returncode
     except subprocess.TimeoutExpired:
-        print(f"Stage 21.1 timed out. Evidence: {out}", file=sys.stderr)
+        print(f"Stage 21.{args.stage} timed out. Evidence: {out}", file=sys.stderr)
         return 1
     log = serial.read_text(errors="replace") if serial.exists() else ""
-    marker = "[S21.1] WovenPackages parser: PASSED"
+    marker = (
+        "[S21.1] WovenPackages parser: PASSED"
+        if args.stage == 1
+        else "[S21.2] WovenPackages signature: PASSED"
+    )
     if result != 33 or marker not in log:
-        print(f"Stage 21.1 failed (exit {result}). Evidence: {out}", file=sys.stderr)
+        print(f"Stage 21.{args.stage} failed (exit {result}). Evidence: {out}", file=sys.stderr)
         print(log[-4000:], file=sys.stderr)
         return 1
-    print(f"Stage 21.1 PASS ({args.cpus} CPU, exit 33). Evidence: {out}")
+    print(f"Stage 21.{args.stage} PASS ({args.cpus} CPU, exit 33). Evidence: {out}")
     return 0
 
 

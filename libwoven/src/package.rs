@@ -2,8 +2,9 @@
 //!
 //! The parser is allocation-free and does not authenticate a package by
 //! itself. The kernel/package service must verify the returned signature over
-//! the immutable header prefix, manifest, application and resource bytes with
-//! the provisioned trust root before installation.
+//! a domain-separated SHA-256 digest of the immutable header prefix, manifest,
+//! application and resource bytes with the provisioned trust root before
+//! installation.
 
 pub const MAGIC: [u8; 4] = *b"WPKG";
 pub const VERSION: u16 = 1;

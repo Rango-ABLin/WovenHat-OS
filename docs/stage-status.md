@@ -6407,6 +6407,20 @@ This is a parser/format foundation only. Signature authentication, package
 production, persistent WovenStore installation, updates, removal, rollback,
 sandbox declaration enforcement, and a service/IPC boundary remain open.
 
+## Stage 21.2 WovenPackages producer and authentication (2026-10-20)
+
+`tools/wpkg-packager` now produces bounded WPKG v1 envelopes from ELF input,
+manifest metadata, dependencies, capabilities, and optional resources. The
+signature covers a domain-separated SHA-256 digest of the immutable envelope;
+the kernel verifier checks it against the provisioned application trust root
+and rejects payload tampering. Tool tests/Clippy, kernel warning-denying
+Clippy, and the dedicated QEMU gate passed on 1/2/4 CPUs. Evidence is recorded
+in `docs/audit-stage21-2-wpkg-authentication-2026-10-20.md`.
+
+Persistent WovenStore installation, update/removal transactions, rollback,
+sandbox declaration enforcement, service/IPC ownership, and physical USB
+qualification remain open.
+
 # Stage 15 native WovenFS VFS lifecycle (2026-10-20)
 
 The native WovenFS adapter now owns the `/wfs` publication lifecycle. Mount

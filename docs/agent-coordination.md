@@ -11,6 +11,16 @@ install/mutate packages; producer, trust-root validation, WovenStore lifecycle,
 and package service ownership remain the next Stage 21 slices. No physical USB
 write was performed.
 
+**Codex: Stage 21.2 WovenPackages producer and signature gate (2026-10-20):**
+`tools/wpkg-packager` now emits deterministic WPKG v1 envelopes with bounded
+manifest metadata, ELF application bytes, optional resources, dependencies,
+capabilities, and a domain-separated SHA-256/Ed25519 signature. The kernel
+verifies that digest against its provisioned application trust root and rejects
+payload tampering. Host tool tests/Clippy, kernel `-D warnings`, and QEMU
+signature acceptance passed on 1/2/4 CPUs. Persistent installation, rollback,
+sandbox enforcement, and service ownership remain open. No physical USB write
+was performed.
+
 **Codex: native WovenFS VFS lifecycle increment (2026-10-20):** `/wfs`
 publication now serializes mount/unmount with native mutations, removes stale
 cached descendants and invalidates open descriptions on remount, and rejects
