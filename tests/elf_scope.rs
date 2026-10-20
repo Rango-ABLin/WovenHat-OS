@@ -157,6 +157,64 @@ fn tls_fixture() -> Vec<u8> {
     bytes
 }
 
+fn plt_fixture() -> Vec<u8> {
+    let mut bytes = fixture(&[]);
+    bytes.resize(0x2200, 0);
+    put16(&mut bytes, 56, 3);
+    // A separate writable PT_LOAD contains the eager PLT relocation target
+    // and the file-backed JMPREL table.
+    put32(&mut bytes, 176, 1);
+    put32(&mut bytes, 180, 6);
+    put64(&mut bytes, 184, 0x2000);
+    put64(&mut bytes, 192, BASE + 0x1000);
+    put64(&mut bytes, 208, 0x100);
+    put64(&mut bytes, 216, 0x100);
+    put64(&mut bytes, 224, 0x1000);
+    put64(&mut bytes, 152, 10 * 16);
+    put64(&mut bytes, DYNAMIC + 5 * 16, 2); // DT_PLTRELSZ
+    put64(&mut bytes, DYNAMIC + 5 * 16 + 8, 24);
+    put64(&mut bytes, DYNAMIC + 6 * 16, 20); // DT_PLTREL = DT_RELA
+    put64(&mut bytes, DYNAMIC + 6 * 16 + 8, 7);
+    put64(&mut bytes, DYNAMIC + 7 * 16, 23); // DT_JMPREL
+    put64(&mut bytes, DYNAMIC + 7 * 16 + 8, BASE + 0x1000);
+    put64(&mut bytes, DYNAMIC + 8 * 16, 9); // DT_RELAENT
+    put64(&mut bytes, DYNAMIC + 8 * 16 + 8, 24);
+    put64(&mut bytes, 0x2000, BASE + 0x1020);
+    put64(
+        &mut bytes,
+        0x2008,
+        (1_u64 << 32) | elf::R_X86_64_JUMP_SLOT as u64,
+    );
+    bytes
+}
+
+#[test]
+fn eager_plt_rela_metadata_is_bounded_and_file_backed() {
+    let bytes = plt_fixture();
+    let parsed = image(&bytes);
+    let dynamic = parsed.dynamic().expect("dynamic metadata");
+    assert_eq!(dynamic.plt_rela_size, 24);
+    assert_eq!(dynamic.plt_rela_file_offset, 0x2000);
+    assert_eq!(dynamic.plt_rela_address, BASE + 0x1000);
+}
+
+#[test]
+fn plt_rela_requires_rela_encoding_and_writable_targets() {
+    let mut wrong_encoding = plt_fixture();
+    put64(&mut wrong_encoding, DYNAMIC + 6 * 16 + 8, 17);
+    assert!(matches!(
+        elf::parse(&wrong_encoding),
+        Err(elf::Error::Unsupported)
+    ));
+
+    let mut read_only_target = plt_fixture();
+    put64(&mut read_only_target, 0x2000, BASE + 0x20);
+    assert!(matches!(
+        elf::parse(&read_only_target),
+        Err(elf::Error::InvalidSegment)
+    ));
+}
+
 #[test]
 fn tls_source_congruence_and_address_survive_image_relocation() {
     let bytes = tls_fixture();
@@ -381,30 +439,22 @@ fn dependency_order_and_duplicate_needed_are_checked() {
     let library_bytes = fixture(&[]);
     let library = image(&library_bytes);
     let mut scope = elf::SymbolScope::new(&main, &main_bytes);
-    assert!(
-        scope
-            .add_dependency(b"b.so", &library, &library_bytes)
-            .is_ok()
-    );
-    assert!(
-        scope
-            .add_dependency(b"a.so", &library, &library_bytes)
-            .is_ok()
-    );
+    assert!(scope
+        .add_dependency(b"b.so", &library, &library_bytes)
+        .is_ok());
+    assert!(scope
+        .add_dependency(b"a.so", &library, &library_bytes)
+        .is_ok());
     assert!(scope.validate_dependencies().is_err());
     let duplicate_bytes = fixture(&[8, 8]);
     let duplicate = image(&duplicate_bytes);
     let mut scope = elf::SymbolScope::new(&duplicate, &duplicate_bytes);
-    assert!(
-        scope
-            .add_dependency(b"a.so", &library, &library_bytes)
-            .is_ok()
-    );
-    assert!(
-        scope
-            .add_dependency(b"b.so", &library, &library_bytes)
-            .is_ok()
-    );
+    assert!(scope
+        .add_dependency(b"a.so", &library, &library_bytes)
+        .is_ok());
+    assert!(scope
+        .add_dependency(b"b.so", &library, &library_bytes)
+        .is_ok());
     assert!(scope.validate_dependencies().is_err());
 }
 

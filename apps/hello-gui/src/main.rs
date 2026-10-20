@@ -661,38 +661,7 @@ fn damage_compositor() -> ! {
     if libwoven::ticks().wrapping_sub(slept_at) >= WAKE_DEADLINE_TICKS {
         fail(111);
     }
-    let damage_result = libwoven::compositor_blit_damage(token, CLIENT_X, CLIENT_Y);
-    {
-        let mut digits = [0u8; 20];
-        match damage_result {
-            Ok(Some(Region { x, y, width, height })) => {
-                let _ = libwoven::print("DEBUG damage region x=");
-                let _ =
-                    libwoven::write(libwoven::syscall::STDOUT, libwoven::format_u64(x as u64, &mut digits));
-                let _ = libwoven::print(" y=");
-                let _ =
-                    libwoven::write(libwoven::syscall::STDOUT, libwoven::format_u64(y as u64, &mut digits));
-                let _ = libwoven::print(" w=");
-                let _ = libwoven::write(
-                    libwoven::syscall::STDOUT,
-                    libwoven::format_u64(width as u64, &mut digits),
-                );
-                let _ = libwoven::print(" h=");
-                let _ = libwoven::write(
-                    libwoven::syscall::STDOUT,
-                    libwoven::format_u64(height as u64, &mut digits),
-                );
-                let _ = libwoven::print("\n");
-            }
-            Ok(None) => {
-                let _ = libwoven::print("DEBUG damage region None\n");
-            }
-            Err(_) => {
-                let _ = libwoven::print("DEBUG damage region Err\n");
-            }
-        }
-    }
-    match damage_result {
+    match libwoven::compositor_blit_damage(token, CLIENT_X, CLIENT_Y) {
         Ok(Some(Region { x: 10, y: 5, width: 4, height: 3 })) => {}
         _ => fail(108),
     }

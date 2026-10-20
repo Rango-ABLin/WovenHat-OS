@@ -264,30 +264,36 @@ pub fn create(owner: u64, width: u32, height: u32) -> Result<Handle, Error> {
 }
 
 /// Fill a rectangle in the surface named by `handle`.
+///
+/// Does not mark damage: Stage 19.9's accepted contract is that a client
+/// opts in to exposing what it drew by calling [`mark_damage`] (via the
+/// `damage` syscall) itself, so it may draw privately (e.g. preparing a
+/// frame) without every draw call being implicitly visible to a compositor
+/// watching for damage. Every packaged app instead draws into its own
+/// offscreen `Canvas` and uploads the whole thing with [`write_pixels`],
+/// which does mark damage -- that is the one path real apps need auto-marked
+/// (see the 2026-10-19 "register client surface damage" commit), and it does
+/// not carry this one's private-drawing contract.
 pub fn fill_rect(handle: Handle, rect: Rect, color: u32) -> Result<(), Error> {
-    let touched = with_registry(|registry| {
+    with_registry(|registry| {
         let surface = registry.resolve_mut(handle)?;
-        Ok(surface.fill_rect(rect, color))
-    })?;
-    if !touched.is_empty() {
-        mark_damage(handle, touched)?;
-    }
-    Ok(())
+        surface.fill_rect(rect, color);
+        Ok(())
+    })
 }
 
-/// Stroke a rectangle outline in the surface named by `handle`.
+/// Stroke a rectangle outline in the surface named by `handle`. Does not mark
+/// damage; see [`fill_rect`].
 pub fn stroke_rect(handle: Handle, rect: Rect, color: u32) -> Result<(), Error> {
-    let touched = with_registry(|registry| {
+    with_registry(|registry| {
         let surface = registry.resolve_mut(handle)?;
-        Ok(surface.stroke_rect(rect, color))
-    })?;
-    if !touched.is_empty() {
-        mark_damage(handle, touched)?;
-    }
-    Ok(())
+        surface.stroke_rect(rect, color);
+        Ok(())
+    })
 }
 
-/// Draw `text` into the surface at `(x, y)`.
+/// Draw `text` into the surface at `(x, y)`. Does not mark damage; see
+/// [`fill_rect`].
 ///
 /// No syscall exposes this yet, because the three-register ABI cannot carry a
 /// handle, coordinates, a user pointer, a length, and a colour at the same
@@ -295,14 +301,11 @@ pub fn stroke_rect(handle: Handle, rect: Rect, color: u32) -> Result<(), Error> 
 /// so for now the function is reachable only from the Stage 18.1 self-test.
 #[cfg_attr(not(feature = "stage18-1-test"), allow(dead_code))]
 pub fn draw_text(handle: Handle, x: i32, y: i32, text: &str, color: u32) -> Result<(), Error> {
-    let touched = with_registry(|registry| {
+    with_registry(|registry| {
         let surface = registry.resolve_mut(handle)?;
-        Ok(surface.draw_text(x, y, text, color))
-    })?;
-    if !touched.is_empty() {
-        mark_damage(handle, touched)?;
-    }
-    Ok(())
+        surface.draw_text(x, y, text, color);
+        Ok(())
+    })
 }
 
 /// Produce a stand-alone copy of the surface named by `handle`.
