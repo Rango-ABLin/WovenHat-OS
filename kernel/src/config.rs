@@ -17,8 +17,18 @@ pub const MAX_FILE_DESCRIPTORS: usize = 16;
 
 /// Kernel stack size reserved for each task (bytes).
 // Debug fork copies bounded process metadata and walks sparse mappings.
-// Reserve room for nested calls and fault population on the same entry stack.
-pub const TASK_STACK_SIZE: usize = 4096 * 64;
+// The package authority also carries two bounded WovenStore snapshots while
+// crossing the native WovenFS boundary, so service-enabled builds reserve the
+// larger stack explicitly rather than allowing a transaction to overrun the
+// canary-protected 64-KiB baseline.
+pub const TASK_STACK_SIZE: usize = if cfg!(any(
+    feature = "stage22-5-test",
+    feature = "system-apps"
+)) {
+    4096 * 256
+} else {
+    4096 * 64
+};
 
 /// Maximum IPC endpoints (one per process is typical).
 pub const MAX_IPC_ENDPOINTS: usize = 32;

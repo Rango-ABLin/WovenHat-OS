@@ -98,6 +98,21 @@ def main():
             f'system-app-catalog-{cpus}',
             [sys.executable, 'scripts/test-system-app-catalog-qemu.py', '--cpus', str(cpus)] + options,
         )
+    transaction_options = []
+    for key in ('qemu', 'firmware'):
+        if getattr(args, key):
+            transaction_options.extend([f'--{key}', getattr(args, key)])
+    for cpus in (1, 2, 4):
+        run(
+            f'woven-package-transactions-{cpus}',
+            [
+                sys.executable,
+                'scripts/test-stage22-5-package-transactions.py',
+                '--cpus',
+                str(cpus),
+            ]
+            + transaction_options,
+        )
     run('system-apps-boot', [sys.executable, 'scripts/test-shell-qemu.py', '--system-apps'] + options)
     system_app_output = root / 'target' / 'system-apps' / '0.8.0'
     system_app_manifest = json.loads((system_app_output / 'manifest.json').read_text(encoding='utf-8'))

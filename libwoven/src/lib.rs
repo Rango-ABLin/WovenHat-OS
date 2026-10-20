@@ -22,7 +22,6 @@ pub mod process {
     #[derive(Clone, Copy, PartialEq, Eq, Debug)]
     pub struct Id(pub u64);
 }
-
 pub mod package;
 pub mod package_ipc;
 pub mod store;
@@ -11284,6 +11283,7 @@ pub mod syscall {
     pub const IPC_SERVICE_DISCOVER: u64 = 214;
     pub const IPC_MESSAGE_SEND: u64 = 215;
     pub const IPC_MESSAGE_RECEIVE: u64 = 216;
+    pub const PACKAGE_TRANSACTION: u64 = 217;
     pub const MESSAGE_SEND: u64 = 11;
     pub const MESSAGE_RECEIVE: u64 = 12;
 
@@ -12311,6 +12311,22 @@ pub fn ipc_message_receive(endpoint: u64, buffer: &mut [u8]) -> Result<(usize, p
     let sender = u64::from_le_bytes(buffer[..8].try_into().unwrap());
     buffer.copy_within(8..length, 0);
     Ok((length - 8, process::Id(sender)))
+}
+
+/// Run a package transaction through the authenticated WovenPackage authority.
+/// The path identifies a broker-visible source/name; package bytes remain out
+/// of the fixed-size IPC message.
+pub fn package_transaction(operation: package_ipc::Operation, path: &str) -> Result<u64, Error> {
+    // SAFETY: the path pointer and length describe immutable caller-owned
+    // storage for the duration of this synchronous syscall.
+    check(unsafe {
+        syscall::invoke(
+            syscall::PACKAGE_TRANSACTION,
+            operation as u64,
+            path.as_ptr() as u64,
+            path.len() as u64,
+        )
+    })
 }
 
 /// Take the compositor lease.

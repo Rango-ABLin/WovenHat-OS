@@ -1,5 +1,34 @@
 # Stage status
 
+## Stage 22.5 userspace WovenPackage transaction authority (2026-10-20)
+
+The signed Ring-3 `apps/woven-package` broker now executes install, remove,
+and rollback requests through syscall 217. The syscall validates the operation
+and bounded source path, requires `FileRead`, `FileWrite`, and `StorageIo`,
+and issues the private native WovenFS writer only after those checks. Package
+bytes stay out of IPC frames: install resolves a broker-owned VFS source,
+verifies the WPKG envelope, and commits the existing authenticated,
+journaled/chunked package publication path. Remove and rollback use the same
+durable catalog and recovery records.
+
+The focused gate in `scripts/test-stage22-5-package-transactions.py` formats a
+disposable ATA/WovenFS volume, installs a signed fixture, verifies the durable
+catalog, removes it, rolls back, and verifies restoration. It passed with exit
+33 and `[S22.5] WovenPackage transactions: PASSED` on 1, 2, and 4 CPUs. The
+freestanding Stage 22.5 Clippy gate, host all-targets Clippy, 66-test
+`libwoven` suite, app build/signing, and Python syntax validation also pass.
+Evidence is preserved under:
+`audit-artifacts/stage22.5-1cpu-1792521732550569700`,
+`audit-artifacts/stage22.5-2cpu-1792521764182836500`, and
+`audit-artifacts/stage22.5-4cpu-1792521793861888600`.
+
+The implementation remains deliberately bounded: source paths use the normal
+512-byte syscall limit, one source package is limited by the 64 KiB VFS node
+capacity, catalogs use the fixed WovenStore record ceiling, and payloads are
+published in native WovenFS chunks. Larger ingress, key rotation, update-daemon
+ownership, power-loss timing, and physical USB qualification remain open
+follow-up work; this acceptance does not claim whole-OS release readiness.
+
 ## Stage 22.4 production WovenPackage startup (2026-10-20)
 
 The production `system-apps` build now includes the signed Ring-3
@@ -9,9 +38,8 @@ bounded `woven.package` publication owned by the spawned PID before continuing.
 The production shell/PS2/IOAPIC QMP gate passed on 1/2/4 CPUs, with separate
 preserved logs under `target/shell-regression-{1,2,4}cpu`.
 
-This closes production startup and image packaging for the broker, but not the
-package transaction authority: install, remove, and rollback still return an
-explicit storage status until a userspace payload/transaction ABI is defined.
+This closes production startup and image packaging for the broker. Stage 22.5
+now supplies the bounded userspace transaction authority described above.
 Physical USB qualification remains open.
 
 ## Stage 22.3 Ring-3 WovenPackage broker boundary (2026-10-20)

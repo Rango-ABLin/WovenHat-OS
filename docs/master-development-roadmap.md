@@ -778,6 +778,16 @@ IPC becomes the backbone.
 
 This keeps the kernel smaller and makes components independently replaceable.
 
+22.5 — WovenPackage transaction authority
+
+Move package mutation authority to the Ring-3 WovenPackage broker. The broker
+must use bounded IPC control frames, resolve package sources through its own
+VFS namespace, require explicit read/write/storage capabilities, authenticate
+WPKG envelopes before mutation, and commit install, removal, rollback, and
+recovery through durable WovenFS catalog/journal records. Acceptance requires
+the transaction path on 1/2/4 CPUs; physical USB qualification and complete
+update-daemon ownership remain separate release prerequisites.
+
 Phase XIV — AI-Native WovenHat
 Stage 23 — WovenAI
 

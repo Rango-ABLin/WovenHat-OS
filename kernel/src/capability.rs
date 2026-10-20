@@ -120,7 +120,9 @@ impl CapabilitySet {
         feature = "stage21-8-test",
         feature = "stage21-9-test",
         feature = "stage21-10-test",
-        feature = "stage21-11-test"
+        feature = "stage21-11-test",
+        feature = "stage22-5-test",
+        feature = "system-apps"
     ))]
     pub const fn from_bits(bits: u64) -> Self {
         Self { bits }

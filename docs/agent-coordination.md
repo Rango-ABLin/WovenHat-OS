@@ -1,5 +1,18 @@
 # Agent coordination (Claude Code and Codex)
 
+**Codex: Stage 22.5 userspace WovenPackage transactions accepted (2026-10-20):**
+syscall 217 now gives the signed Ring-3 `woven-package` broker a bounded,
+capability-gated install/remove/rollback authority over authenticated native
+WovenFS records. The broker resolves package sources through VFS, so package
+bytes remain outside IPC frames; durable catalog, journal, chunk, rollback,
+and recovery paths are exercised. The dedicated Stage 22.5 QEMU gate passed
+on 1/2/4 CPUs with exit 33, and host/freestanding Clippy plus the 66-test
+`libwoven` suite passed. Evidence is under the three
+`audit-artifacts/stage22.5-*` directories listed in `docs/stage-status.md`.
+The service stack budget is 256 KiB. Larger source ingress, update-daemon
+ownership, key rotation, power-loss timing, and physical USB qualification
+remain open; no physical USB write was performed.
+
 **Codex: Stage 22.4 production WovenPackage startup (2026-10-20):**
 `system-apps` now packages the signed `apps/woven-package` image, injects it
 through `WOVENHAT_PACKAGE_IMAGE`, and starts it after the production catalog is

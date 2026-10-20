@@ -60,7 +60,12 @@ fn dispatch(bytes: &[u8]) -> Response {
     };
     let (status, value) = match request.operation {
         Operation::Query => query_storage(request.path),
-        Operation::Install | Operation::Remove | Operation::Rollback => (STATUS_STORAGE, 0),
+        operation @ (Operation::Install | Operation::Remove | Operation::Rollback) => {
+            match libwoven::package_transaction(operation, core::str::from_utf8(request.path).unwrap_or("")) {
+                Ok(value) => (STATUS_OK, value),
+                Err(_) => (STATUS_STORAGE, 0),
+            }
+        }
     };
     Response { request_id: request.request_id, status, value }
 }

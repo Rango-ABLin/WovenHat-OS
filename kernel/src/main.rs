@@ -144,7 +144,9 @@ mod compositor;
     feature = "stage21-8-test",
     feature = "stage21-9-test",
     feature = "stage21-10-test",
-    feature = "stage21-11-test"
+    feature = "stage21-11-test",
+    feature = "stage22-5-test",
+    feature = "system-apps"
 ))]
 mod package;
 #[cfg(any(
@@ -152,7 +154,9 @@ mod package;
     feature = "stage21-8-test",
     feature = "stage21-9-test",
     feature = "stage21-10-test",
-    feature = "stage21-11-test"
+    feature = "stage21-11-test",
+    feature = "stage22-5-test",
+    feature = "system-apps"
 ))]
 mod package_service;
 #[cfg(any(feature = "stage12-3-test", feature = "stage12-5-test"))]
@@ -2806,7 +2810,8 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         not(feature = "stage21-11-test"),
         not(feature = "stage22-1-test"),
         not(feature = "stage22-2-test"),
-        not(feature = "stage22-3-test")
+        not(feature = "stage22-3-test"),
+        not(feature = "stage22-5-test")
     ))]
     match storage::live_mutation_self_test() {
         storage::LiveMutationTestStatus::Passed => {
@@ -4350,7 +4355,8 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         not(feature = "stage21-11-test"),
         not(feature = "stage22-1-test"),
         not(feature = "stage22-2-test"),
-        not(feature = "stage22-3-test")
+        not(feature = "stage22-3-test"),
+        not(feature = "stage22-5-test")
     ))]
     {
         if !wfs::stage15_2_self_test() {
@@ -4560,6 +4566,15 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
             qemu_test_exit_failure();
         }
         serial::write_line(format_args!("[S22.3] WovenPackage broker: PASSED"));
+        qemu_test_exit_success();
+    }
+    #[cfg(feature = "stage22-5-test")]
+    {
+        if !stage22_5_package_transaction_self_test() {
+            serial::write_line(format_args!("[S22.5] WovenPackage transactions: FAILED"));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!("[S22.5] WovenPackage transactions: PASSED"));
         qemu_test_exit_success();
     }
     #[cfg(feature = "stage27-2-test")]
@@ -5456,8 +5471,15 @@ const SYSTEM_APP_UPDATE: &[u8] = include_bytes!(env!("WOVENHAT_UPDATE_IMAGE"));
 #[cfg(any(feature = "stage19-app-catalog-test", feature = "system-apps"))]
 const SYSTEM_APP_STORE: &[u8] = include_bytes!(env!("WOVENHAT_STORE_IMAGE"));
 
-#[cfg(any(feature = "stage22-3-test", feature = "system-apps"))]
+#[cfg(any(
+    feature = "stage22-3-test",
+    feature = "stage22-5-test",
+    feature = "system-apps"
+))]
 const PACKAGE_SERVICE_IMAGE: &[u8] = include_bytes!(env!("WOVENHAT_PACKAGE_IMAGE"));
+
+#[cfg(feature = "stage22-5-test")]
+const PACKAGE_TRANSACTION_FIXTURE: &[u8] = include_bytes!(env!("WOVENHAT_PACKAGE_FIXTURE"));
 
 #[cfg(feature = "stage22-3-test")]
 fn stage22_3_package_service_self_test() -> bool {
@@ -5571,10 +5593,183 @@ fn stage22_3_package_service_self_test() -> bool {
     true
 }
 
+#[cfg(feature = "stage22-5-test")]
+fn stage22_5_package_transaction_self_test() -> bool {
+    use libwoven::package_ipc::{Operation, Request, Response};
+
+    fn fail(reason: &str) -> bool {
+        serial::write_line(format_args!("[S22.5] {}", reason));
+        false
+    }
+
+    fn request(
+        pid: task::ProcessId,
+        handle: ipc::Handle,
+        operation: Operation,
+        request_id: u64,
+        path: &'static [u8],
+    ) -> Option<Response> {
+        let request = Request {
+            operation,
+            request_id,
+            path,
+        };
+        let mut bytes = crate::heap::try_filled(0u8, libwoven::package_ipc::MAX_MESSAGE_BYTES)?;
+        let length = request.encode(&mut bytes).ok()?;
+        ipc::send_handle(pid.as_u64(), handle, &bytes[..length]).ok()?;
+        let deadline = timer::ticks().wrapping_add(500);
+        loop {
+            if task::process_exited(pid) {
+                return None;
+            }
+            if let Ok((message, serial)) = ipc::peek(pid.as_u64()) {
+                let response = Response::decode(message.payload()).ok();
+                let _ = ipc::receive_if(pid.as_u64(), serial);
+                return response;
+            }
+            if timer::ticks().wrapping_sub(deadline) < u64::MAX / 2 {
+                return None;
+            }
+            task::yield_now();
+        }
+    }
+
+    if !wfs::format_ata(64) {
+        return fail("native WovenFS format failed");
+    }
+    if vfs::write_file("/tmp/woven-package-fixture.wpkg", PACKAGE_TRANSACTION_FIXTURE).is_err() {
+        return fail("package fixture source write failed");
+    }
+    let Ok(verified) = signed_app::verify_package(PACKAGE_SERVICE_IMAGE) else {
+        return fail("broker signature rejected");
+    };
+    if elf::parse(verified.bytes()).is_err() {
+        return fail("broker ELF rejected");
+    }
+    let Some(program) = userspace::load_elf_with_argv_verified(
+        PACKAGE_SERVICE_IMAGE,
+        &["/bin/woven-package", "--service"],
+    ) else {
+        return fail("broker loader rejected");
+    };
+    let capabilities = capability::CapabilitySet::only(capability::Capability::Ipc)
+        .with(capability::Capability::FileRead)
+        .with(capability::Capability::FileWrite)
+        .with(capability::Capability::StorageIo);
+    let Ok((pid, _, _)) = task::spawn_user_system_service("woven-package", program, capabilities)
+    else {
+        return fail("broker spawn failed");
+    };
+    let deadline = timer::ticks().wrapping_add(500);
+    let published = loop {
+        if let Ok(info) = ipc::service_info(b"woven.package") {
+            if info.owner == pid.as_u64() && info.client_rights == 1 {
+                break true;
+            }
+        }
+        if timer::ticks().wrapping_sub(deadline) < u64::MAX / 2 {
+            break false;
+        }
+        task::yield_now();
+    };
+    if !published {
+        let _ = task::kill_process(pid.as_u64(), 9);
+        return fail("broker service was not published");
+    }
+    let Ok(client_handle) = ipc::discover_service(pid.as_u64(), b"woven.package") else {
+        let _ = task::kill_process(pid.as_u64(), 9);
+        return fail("service discovery failed");
+    };
+    let Some(response) = request(
+        pid,
+        client_handle,
+        Operation::Install,
+        0x22_05_01,
+        b"/tmp/woven-package-fixture.wpkg",
+    ) else {
+        let _ = task::kill_process(pid.as_u64(), 9);
+        return fail("install response timeout");
+    };
+    if response.status != 0 || response.value != 1 {
+        let _ = task::kill_process(pid.as_u64(), 9);
+        return fail("install response mismatch");
+    }
+    let Some(mut record) = crate::heap::try_filled(0u8, libwoven::store::MAX_RECORD_BYTES) else {
+        let _ = task::kill_process(pid.as_u64(), 9);
+        return fail("catalog buffer allocation failed");
+    };
+    let Ok(length) = wfs::read_vfs_path_durable("/wfs/packages/catalog.wstc", &mut record) else {
+        let _ = task::kill_process(pid.as_u64(), 9);
+        return fail("installed catalog read failed");
+    };
+    let Ok(installed) = libwoven::store::Store::decode_record(&record[..length]) else {
+        let _ = task::kill_process(pid.as_u64(), 9);
+        return fail("installed catalog decode failed");
+    };
+    if installed.entry(b"fixture").is_none() {
+        let _ = task::kill_process(pid.as_u64(), 9);
+        return fail("installed catalog entry missing");
+    }
+    let Some(response) = request(pid, client_handle, Operation::Remove, 0x22_05_02, b"/fixture") else {
+        let _ = task::kill_process(pid.as_u64(), 9);
+        return fail("remove response timeout");
+    };
+    if response.status != 0 || response.value != 0 {
+        let _ = task::kill_process(pid.as_u64(), 9);
+        return fail("remove response mismatch");
+    }
+    let Ok(length) = wfs::read_vfs_path_durable("/wfs/packages/catalog.wstc", &mut record) else {
+        let _ = task::kill_process(pid.as_u64(), 9);
+        return fail("removed catalog read failed");
+    };
+    let Ok(removed) = libwoven::store::Store::decode_record(&record[..length]) else {
+        let _ = task::kill_process(pid.as_u64(), 9);
+        return fail("removed catalog decode failed");
+    };
+    if removed.entry(b"fixture").is_some() {
+        let _ = task::kill_process(pid.as_u64(), 9);
+        return fail("remove left catalog entry");
+    }
+    let Some(response) = request(pid, client_handle, Operation::Rollback, 0x22_05_03, b"/rollback") else {
+        let _ = task::kill_process(pid.as_u64(), 9);
+        return fail("rollback response timeout");
+    };
+    if response.status != 0 || response.value != 1 {
+        let _ = task::kill_process(pid.as_u64(), 9);
+        return fail("rollback response mismatch");
+    }
+    let Ok(length) = wfs::read_vfs_path_durable("/wfs/packages/catalog.wstc", &mut record) else {
+        let _ = task::kill_process(pid.as_u64(), 9);
+        return fail("rollback catalog read failed");
+    };
+    let Ok(restored) = libwoven::store::Store::decode_record(&record[..length]) else {
+        let _ = task::kill_process(pid.as_u64(), 9);
+        return fail("rollback catalog decode failed");
+    };
+    if restored.entry(b"fixture").is_none() {
+        let _ = task::kill_process(pid.as_u64(), 9);
+        return fail("rollback did not restore catalog entry");
+    }
+    let _ = task::kill_process(pid.as_u64(), 9);
+    let cleanup_deadline = timer::ticks().wrapping_add(500);
+    while !task::process_exited(pid) {
+        if timer::ticks().wrapping_sub(cleanup_deadline) < u64::MAX / 2 {
+            return fail("broker teardown timed out");
+        }
+        task::yield_now();
+    }
+    if task::wait_process(pid.as_u64()).is_err() {
+        return fail("broker reap failed");
+    }
+    true
+}
+
 #[cfg(feature = "system-apps")]
 fn start_production_system_services() -> bool {
     let capabilities = capability::CapabilitySet::only(capability::Capability::Ipc)
-        .with(capability::Capability::FileRead);
+        .with(capability::Capability::FileRead)
+        .with(capability::Capability::FileWrite)
+        .with(capability::Capability::StorageIo);
     let Some(program) = userspace::load_elf_with_argv_verified(
         PACKAGE_SERVICE_IMAGE,
         &["/bin/woven-package", "--service"],

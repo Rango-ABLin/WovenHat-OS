@@ -400,6 +400,9 @@ pub enum Number {
     /// endpoint handle, output buffer, capacity -> message length; the output
     /// starts with the sender process id as a little-endian u64.
     IpcMessageReceive = 216,
+    /// operation, source/name path pointer, path length -> catalog count
+    #[cfg(any(feature = "stage22-5-test", feature = "system-apps"))]
+    PackageTransaction = 217,
 }
 
 pub fn entry_address() -> u64 {
@@ -576,6 +579,34 @@ fn sys_open(user_path: u64, length: u64) -> u64 {
         }
         Err(_) => SYSCALL_ERROR,
     }
+}
+
+#[cfg(any(feature = "stage22-5-test", feature = "system-apps"))]
+fn sys_package_transaction(operation: u64, user_path: u64, length: u64) -> u64 {
+    if !matches!(operation, 1..=3)
+        || !crate::task::current_has(crate::capability::Capability::FileRead)
+        || !crate::task::current_has(crate::capability::Capability::FileWrite)
+        || !crate::task::current_has(crate::capability::Capability::StorageIo)
+    {
+        return SYSCALL_ERROR;
+    }
+    let Ok(length) = usize::try_from(length) else {
+        return SYSCALL_ERROR;
+    };
+    if length == 0 || length > MAX_PATH_SIZE {
+        return SYSCALL_ERROR;
+    }
+    let Some(mut path) = crate::heap::try_filled(0u8, MAX_PATH_SIZE) else {
+        return SYSCALL_ERROR;
+    };
+    if crate::paging::copy_from_current_user(user_path, &mut path[..length]).is_err() {
+        return SYSCALL_ERROR;
+    }
+    let Ok(path) = core::str::from_utf8(&path[..length]) else {
+        return SYSCALL_ERROR;
+    };
+    crate::package_service::transact(operation as u8, path, crate::timer::ticks())
+        .unwrap_or(SYSCALL_ERROR)
 }
 
 /// `stat(path)` → packed result:
@@ -2571,6 +2602,10 @@ pub extern "C" fn wovenhat_syscall_dispatch(
         }
         value if value == Number::IpcMessageReceive as u64 => {
             sys_ipc_message_receive(arg0, arg1, arg2)
+        }
+        #[cfg(any(feature = "stage22-5-test", feature = "system-apps"))]
+        value if value == Number::PackageTransaction as u64 => {
+            sys_package_transaction(arg0, arg1, arg2)
         }
         value if value == Number::Getuid as u64 => {
             IO_COMPLETIONS.fetch_or(IO_GETUID, Ordering::Release);

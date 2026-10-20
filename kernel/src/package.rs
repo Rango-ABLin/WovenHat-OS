@@ -1,7 +1,10 @@
-use libwoven::package::{self, HEADER_LEN, MAGIC, VERSION};
+use libwoven::package::{self, HEADER_LEN};
+#[cfg(any(feature = "stage21-1-test", feature = "stage21-2-test"))]
+use libwoven::package::{MAGIC, VERSION};
 use sha2::{Digest, Sha256};
 
 const SIGNATURE_DOMAIN: &[u8] = b"WOVENHAT-WPKG-V1";
+#[cfg(feature = "stage21-2-test")]
 const TEST_SEED: [u8; 32] = [
     0x9d, 0x61, 0xb1, 0x9d, 0xef, 0xfd, 0x5a, 0x60, 0xba, 0x84, 0x4a, 0xf4, 0x92, 0xec, 0x2c, 0xc4,
     0x44, 0x49, 0xc5, 0x69, 0x7b, 0x32, 0x69, 0x19, 0x70, 0x3b, 0xac, 0x03, 0x1c, 0xae, 0x7f, 0x60,
@@ -33,6 +36,7 @@ pub fn verify(bytes: &[u8]) -> Result<package::Package<'_>, VerificationError> {
     Ok(parsed)
 }
 
+#[cfg(feature = "stage21-1-test")]
 pub fn self_test() -> bool {
     const MANIFEST: [u8; 27] = [
         4, b'd', b'e', b'm', b'o', 1, 0, 0, 0, 0, 0, 0, 0, 5, 0, 0, 0, 0, 0, 0, 0, 1, 4, b'c',
@@ -61,6 +65,7 @@ pub fn self_test() -> bool {
     package::parse(&bytes) == Err(package::Error::BadMagic)
 }
 
+#[cfg(feature = "stage21-2-test")]
 pub fn verification_self_test() -> bool {
     const MANIFEST: [u8; 27] = [
         4, b'd', b'e', b'm', b'o', 1, 0, 0, 0, 0, 0, 0, 0, 5, 0, 0, 0, 0, 0, 0, 0, 1, 4, b'c',
@@ -90,6 +95,7 @@ pub fn verification_self_test() -> bool {
     verify(&bytes) == Err(VerificationError::InvalidSignature)
 }
 
+#[cfg(feature = "stage21-3-test")]
 pub fn store_self_test() -> bool {
     let mut dependencies = [&[][..]; libwoven::package::MAX_DEPENDENCIES];
     let core = b"core";
@@ -120,6 +126,7 @@ pub fn store_self_test() -> bool {
     committed.count() == 2
 }
 
+#[cfg(feature = "stage21-4-test")]
 pub fn batch_self_test() -> bool {
     let dependency = libwoven::package::Manifest {
         name: b"core",
@@ -151,6 +158,7 @@ pub fn batch_self_test() -> bool {
     transaction.install_batch(&requests).is_ok() && transaction.commit().count() == 2
 }
 
+#[cfg(feature = "stage21-5-test")]
 pub fn record_self_test() -> bool {
     let manifest = libwoven::package::Manifest {
         name: b"core",

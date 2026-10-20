@@ -1855,7 +1855,9 @@ pub fn unlink_vfs_path(path: &str, now: u64) -> Result<(), Error> {
     any(
         feature = "stage15-2-test",
         feature = "stage27-2-test",
-        feature = "stage21-6-test"
+        feature = "stage21-6-test",
+        feature = "stage22-5-test",
+        feature = "system-apps"
     )
 ))]
 pub fn write_vfs_path_durable(
@@ -1887,7 +1889,9 @@ pub fn write_vfs_path_durable(
     any(
         feature = "stage15-2-test",
         feature = "stage27-2-test",
-        feature = "stage21-6-test"
+        feature = "stage21-6-test",
+        feature = "stage22-5-test",
+        feature = "system-apps"
     )
 ))]
 pub fn read_vfs_path_durable(path: &str, out: &mut [u8]) -> Result<usize, Error> {
@@ -2060,7 +2064,9 @@ fn import_wfs_directory<D: crate::block::BlockDevice>(
 #[cfg(any(
     feature = "stage15-2-test",
     feature = "stage27-2-test",
-    feature = "stage21-6-test"
+    feature = "stage21-6-test",
+    feature = "stage22-5-test",
+    feature = "system-apps"
 ))]
 pub struct AuthorizedWfsWriter {
     _private: (),
@@ -2069,7 +2075,9 @@ pub struct AuthorizedWfsWriter {
 #[cfg(any(
     feature = "stage15-2-test",
     feature = "stage27-2-test",
-    feature = "stage21-6-test"
+    feature = "stage21-6-test",
+    feature = "stage22-5-test",
+    feature = "system-apps"
 ))]
 impl AuthorizedWfsWriter {
     pub(crate) const fn after_capability_check() -> Self {
