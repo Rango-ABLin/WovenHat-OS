@@ -137,8 +137,9 @@ mod compositor;
     feature = "stage21-1-test",
     feature = "stage21-2-test",
     feature = "stage21-3-test",
-    feature = "stage21-4-test"
-    , feature = "stage21-5-test"
+    feature = "stage21-4-test",
+    feature = "stage21-5-test",
+    feature = "stage21-6-test"
 ))]
 mod package;
 #[cfg(any(feature = "stage12-3-test", feature = "stage12-5-test"))]
@@ -2777,7 +2778,7 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     // against it would fail on a disk it was never given. Every other
     // configuration, including the storage gate that owns this assertion, still
     // runs it unchanged.
-    #[cfg(not(feature = "stage15-2-test"))]
+    #[cfg(all(not(feature = "stage15-2-test"), not(feature = "stage21-6-test")))]
     match storage::live_mutation_self_test() {
         storage::LiveMutationTestStatus::Passed => {
             serial::write_line(format_args!(
@@ -4309,7 +4310,11 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         }
         qemu_test_exit_success();
     }
-    #[cfg(all(feature = "stage15-2-test", not(feature = "stage27-2-test")))]
+    #[cfg(all(
+        feature = "stage15-2-test",
+        not(feature = "stage27-2-test"),
+        not(feature = "stage21-6-test")
+    ))]
     {
         if !wfs::stage15_2_self_test() {
             serial::write_line(format_args!("[S15.2] WovenFS physical device: FAILED"));
@@ -4437,6 +4442,15 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
             qemu_test_exit_failure();
         }
         serial::write_line(format_args!("[S21.5] WovenStore record: PASSED"));
+        qemu_test_exit_success();
+    }
+    #[cfg(feature = "stage21-6-test")]
+    {
+        if !package::durable_self_test() {
+            serial::write_line(format_args!("[S21.6] WovenStore persistence: FAILED"));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!("[S21.6] WovenStore persistence: PASSED"));
         qemu_test_exit_success();
     }
     #[cfg(feature = "stage27-2-test")]

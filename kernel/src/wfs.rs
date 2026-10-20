@@ -28,7 +28,12 @@ pub const FORMAT_VERSION: u16 = 1;
 /// LBA per block and must fit in a single sector alongside its header.
 pub const MAX_TXN_BLOCKS: usize = 32;
 /// Descriptor sector + staged data sectors + commit sector.
-#[cfg(any(test, feature = "stage15-1-test", feature = "stage15-2-test"))]
+#[cfg(any(
+    test,
+    feature = "stage15-1-test",
+    feature = "stage15-2-test",
+    feature = "stage21-6-test"
+))]
 pub const JOURNAL_BLOCKS: u32 = MAX_TXN_BLOCKS as u32 + 2;
 
 pub const INODE_SIZE: usize = 128;
@@ -250,7 +255,12 @@ impl DirEntry {
             && &self.name[..name.len()] == name.as_bytes()
     }
 
-    #[cfg(any(test, feature = "stage15-1-test", feature = "stage15-2-test"))]
+    #[cfg(any(
+        test,
+        feature = "stage15-1-test",
+        feature = "stage15-2-test",
+        feature = "stage21-6-test"
+    ))]
     pub fn name_str(&self) -> &str {
         let len = usize::from(self.name_len).min(MAX_NAME);
         core::str::from_utf8(&self.name[..len]).unwrap_or("")
@@ -311,7 +321,12 @@ impl Transaction {
         }
     }
 
-    #[cfg(any(test, feature = "stage15-1-test", feature = "stage15-2-test"))]
+    #[cfg(any(
+        test,
+        feature = "stage15-1-test",
+        feature = "stage15-2-test",
+        feature = "stage21-6-test"
+    ))]
     pub const fn len(&self) -> usize {
         self.len
     }
@@ -371,7 +386,12 @@ pub struct Volume<D: BlockDevice> {
 }
 
 /// Derive geometry from a device size.
-#[cfg(any(test, feature = "stage15-1-test", feature = "stage15-2-test"))]
+#[cfg(any(
+    test,
+    feature = "stage15-1-test",
+    feature = "stage15-2-test",
+    feature = "stage21-6-test"
+))]
 fn plan(total_blocks: u64, inode_count: u32) -> Result<SuperBlock, Error> {
     let journal_start = 2;
     let journal_blocks = JOURNAL_BLOCKS;
@@ -454,7 +474,12 @@ impl<D: BlockDevice> Volume<D> {
     /// written last, so a crash part-way through leaves no valid superblock and
     /// the volume reads as unformatted rather than as a filesystem with garbage
     /// metadata.
-    #[cfg(any(test, feature = "stage15-1-test", feature = "stage15-2-test"))]
+    #[cfg(any(
+        test,
+        feature = "stage15-1-test",
+        feature = "stage15-2-test",
+        feature = "stage21-6-test"
+    ))]
     pub fn format(mut device: D, inode_count: u32) -> Result<Self, Error> {
         let total = device.sector_count();
         if total < 16 || inode_count == 0 {
@@ -1827,7 +1852,11 @@ pub fn unlink_vfs_path(path: &str, now: u64) -> Result<(), Error> {
 /// re-reading the checksum-verified native volume after every commit.
 #[cfg(all(
     not(test),
-    any(feature = "stage15-2-test", feature = "stage27-2-test")
+    any(
+        feature = "stage15-2-test",
+        feature = "stage27-2-test",
+        feature = "stage21-6-test"
+    )
 ))]
 pub fn write_vfs_path_durable(
     _authority: &AuthorizedWfsWriter,
@@ -1855,7 +1884,11 @@ pub fn write_vfs_path_durable(
 /// filesystem checksum and inode bounds checked by the mount path.
 #[cfg(all(
     not(test),
-    any(feature = "stage15-2-test", feature = "stage27-2-test")
+    any(
+        feature = "stage15-2-test",
+        feature = "stage27-2-test",
+        feature = "stage21-6-test"
+    )
 ))]
 pub fn read_vfs_path_durable(path: &str, out: &mut [u8]) -> Result<usize, Error> {
     let _mutation = MUTATION.lock();
@@ -2024,12 +2057,20 @@ fn import_wfs_directory<D: crate::block::BlockDevice>(
 
 /// Explicit authority for native WovenFS mutations. Must be issued only after
 /// a WovenGuard capability check by the kernel-side caller.
-#[cfg(any(feature = "stage15-2-test", feature = "stage27-2-test"))]
+#[cfg(any(
+    feature = "stage15-2-test",
+    feature = "stage27-2-test",
+    feature = "stage21-6-test"
+))]
 pub struct AuthorizedWfsWriter {
     _private: (),
 }
 
-#[cfg(any(feature = "stage15-2-test", feature = "stage27-2-test"))]
+#[cfg(any(
+    feature = "stage15-2-test",
+    feature = "stage27-2-test",
+    feature = "stage21-6-test"
+))]
 impl AuthorizedWfsWriter {
     pub(crate) const fn after_capability_check() -> Self {
         Self { _private: () }
@@ -2133,7 +2174,11 @@ pub fn vfs_unlink_through(
 ///
 /// Destructive, and gated behind the Stage 15.2 acceptance feature so it can
 /// only run in a test boot against a scratch disk.
-#[cfg(any(feature = "stage15-2-test", feature = "stage27-2-test"))]
+#[cfg(any(
+    feature = "stage15-2-test",
+    feature = "stage27-2-test",
+    feature = "stage21-6-test"
+))]
 pub fn format_ata(inode_count: u32) -> bool {
     crate::ata::with_primary_master(|disk| match Volume::format(disk, inode_count) {
         Ok(_) => true,

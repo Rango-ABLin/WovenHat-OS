@@ -175,3 +175,40 @@ pub fn record_self_test() -> bool {
     libwoven::store::Store::decode_record(&record[..length])
         == Err(libwoven::store::RecordError::BadChecksum)
 }
+
+#[cfg(feature = "stage21-6-test")]
+pub fn durable_self_test() -> bool {
+    if !crate::wfs::format_ata(64) {
+        return false;
+    }
+    let Some(authority) = crate::update::UpdateState::authorized_writer() else {
+        return false;
+    };
+    let manifest = libwoven::package::Manifest {
+        name: b"core",
+        version: 1,
+        capabilities: 1,
+        dependencies: [&[][..]; libwoven::package::MAX_DEPENDENCIES],
+        dependency_count: 0,
+    };
+    let mut transaction = libwoven::store::Store::new(1).transaction();
+    if transaction.install(&manifest, [9; 32]).is_err() {
+        return false;
+    }
+    let store = transaction.commit();
+    let mut record = [0u8; libwoven::store::MAX_RECORD_BYTES];
+    let Ok(length) = store.encode_record(&mut record) else {
+        return false;
+    };
+    let path = "/wfs/packages/catalog.wstc";
+    if crate::wfs::mkdir_vfs_path("/wfs/packages", 1).is_err()
+        || crate::wfs::write_vfs_path_durable(&authority, path, &record[..length], 2).is_err()
+    {
+        return false;
+    }
+    let mut readback = [0u8; libwoven::store::MAX_RECORD_BYTES];
+    let Ok(read_length) = crate::wfs::read_vfs_path_durable(path, &mut readback) else {
+        return false;
+    };
+    libwoven::store::Store::decode_record(&readback[..read_length]) == Ok(store)
+}

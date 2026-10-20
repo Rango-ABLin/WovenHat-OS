@@ -1183,6 +1183,14 @@ header and entries. It is intentionally a codec, not a storage write: the
 package service must commit it through the authorized WovenFS writer and
 validate the decoded record before publishing the catalog.
 
+Stage 21.6’s kernel probe writes `/wfs/packages/catalog.wstc` only after
+`UpdateState::authorized_writer` confirms the current task has
+`Capability::StorageIo`. It uses native WovenFS journaled path writes and
+direct checksum-verified readback, so the tested boundary does not rely on a
+stale VFS cache. The current probe persists only catalog metadata; application
+payload/resource publication and a long-lived WovenPackage service still need
+their own transaction and recovery design.
+
 The feature-gated `stage19-app-catalog-test` now exercises the install-plan
 boundary for all ten accepted packages together. It verifies each WAPP,
 rejects a mutation, installs and reads each package back through the VFS,

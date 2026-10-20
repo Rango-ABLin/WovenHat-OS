@@ -311,7 +311,11 @@ impl UpdateState {
 
 /// Issue the update writer authority only to a task carrying the storage
 /// capability. The private WovenFS token cannot be constructed by userspace.
-#[cfg(any(feature = "stage15-2-test", feature = "stage27-2-test"))]
+#[cfg(any(
+    feature = "stage15-2-test",
+    feature = "stage27-2-test",
+    feature = "stage21-6-test"
+))]
 pub fn authorized_writer() -> Option<crate::wfs::AuthorizedWfsWriter> {
     crate::task::current_has(crate::capability::Capability::StorageIo)
         .then(crate::wfs::AuthorizedWfsWriter::after_capability_check)

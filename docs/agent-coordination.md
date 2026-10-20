@@ -54,6 +54,15 @@ dependencies. Host tests, host/freestanding warning-denying Clippy, and QEMU
 acceptance passed on 1/2/4 CPUs. Native WovenFS publication and service
 ownership remain the next slice. No physical USB write was performed.
 
+**Codex: Stage 21.6 native WovenFS catalog persistence (2026-10-20):**
+Stage 21.6 now uses the capability-gated native WovenFS writer to create the
+package catalog directory, persist a checksummed `WSTC` record, read it back
+through the remounted native volume, and decode it. The feature graph reuses
+the Stage 15.2 scratch-volume prerequisite while suppressing unrelated earlier
+exit blocks. Disposable ATA QEMU acceptance passed on 1/2/4 CPUs. Package
+payload publication, crash/power-loss recovery, service IPC, and physical USB
+qualification remain open. No physical USB write was performed.
+
 **Codex: bounded update A/B state and signed envelope increment (2026-10-20):**
 `kernel/src/update.rs` now stages only newer, bounded candidates in the
 inactive slot, verifies version-1 `WUPD` metadata/image coverage under the

@@ -2214,6 +2214,18 @@ and QEMU acceptance passed on 1/2/4 CPUs. Evidence is recorded in
 The record is not yet wired to native WovenFS publication; crash/power-loss
 service integration, IPC authority, and physical USB qualification remain open.
 
+## Stage 21.6 native WovenFS catalog persistence (2026-10-20)
+
+The package catalog record is now persisted through the capability-gated native
+WovenFS writer at `/wfs/packages/catalog.wstc`, read back from the mounted
+volume, and decoded after journaled commit. The Stage 21.6 disposable ATA QEMU
+gate passed on 1/2/4 CPUs. Evidence is under `audit-artifacts/stage21.6-{1,2,4}cpu`;
+host/freestanding warning-denying Clippy also passed.
+
+This does not yet publish package payload/resource files atomically with the
+catalog, recover interrupted install/update/remove transactions, or provide a
+long-lived service/IPC boundary. Physical USB qualification remains open.
+
 ## Graphics track - bounded quadratic paths (2026-10-18)
 
 `Path::quadratic_to` now flattens quadratic Bézier segments into four
