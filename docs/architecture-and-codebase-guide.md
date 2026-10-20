@@ -1512,8 +1512,13 @@ and is applied eagerly before W^X/RELRO; see
 `audit-stage11-plt-rel-2026-10-20.md`. Weak definitions and SysV versioned
 symbol tables (`DT_VERSYM`, `DT_VERDEF` and `DT_VERNEED`) are bounded and
 resolved by exact requested version; see
-`audit-stage11-symbol-versioning-2026-10-20.md`. Constructors/destructors,
-lazy binding and library TLS remain unsupported.
+`audit-stage11-symbol-versioning-2026-10-20.md`. Lifecycle metadata
+(`DT_INIT`, `DT_FINI`, and both array forms) is bounded and executable-range
+validated. Constructors run before initial Ring-3 entry, while destructors
+run in reverse dependency order through a mapped RX trampoline; teardown uses
+a prebuilt stack return chain and transactional process-table/paging lock
+ordering. Lazy binding and library TLS remain unsupported. See
+`audit-stage11-lifecycle-2026-10-20.md`.
 
 The historical main-image TLS mapping was not a compiler-compatible TCB:
 the real Rust local-exec probe expects a self-pointer at `FS:0` and aligned

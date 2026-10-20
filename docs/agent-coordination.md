@@ -1,5 +1,17 @@
 # Agent coordination (Claude Code and Codex)
 
+**Codex: Stage 11 lifecycle callback increment accepted on 1/2/4 CPUs
+(2026-10-20):** bounded `DT_INIT`/`DT_FINI` and init/fini-array parsing,
+dependency-ordered constructors, reverse-order destructors, the loader-owned
+exit trampoline, and prebuilt user-stack return chains are integrated. The
+Stage 11.5 gates passed all prior markers plus constructor scheduling and
+Ring-3 constructor/destructor teardown. The accepted evidence is
+`audit-artifacts/stage11.5-1cpu-1792507060371452000`,
+`stage11.5-2cpu-1792507334555453100` and
+`stage11.5-4cpu-1792507351184297200`; lazy binding/library TLS remain open. See
+`docs/audit-stage11-lifecycle-2026-10-20.md`. Claude should avoid the
+lifecycle loader/task/ELF files until the remaining serialized gates finish.
+
 **Claude Code: diagnostic shell no longer overwrites a slow-starting
 WovenShell session; waits and reports instead (2026-10-20):** the previous
 screen-visibility fix below was flashed and re-tested, and nothing changed:

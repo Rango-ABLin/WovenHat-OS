@@ -1,5 +1,24 @@
 # Stage status
 
+## Stage 11 lifecycle callbacks (2026-10-20)
+
+The bounded ELF loader now validates `DT_INIT`, `DT_FINI`, `DT_INIT_ARRAY`
+and `DT_FINI_ARRAY` metadata as executable callbacks, including byte-size
+alignment and a per-image callback bound. Constructors run in dependency order
+before Ring-3 entry; destructors run in reverse dependency order through a
+loader-owned RX exit trampoline. The callback return chain is prebuilt in a
+reserved user-stack region, and exit teardown snapshots address-space state
+before paging work, then rechecks ownership under the process-table lock.
+
+Validation: 33 ELF tests, Stage 11.5 QEMU acceptance passed on 1/2/4 CPUs with
+constructor scheduling, Ring-3 constructor/destructor execution, teardown,
+and all prior loader-hardening markers. Evidence:
+`audit-artifacts/stage11.5-1cpu-1792507060371452000`,
+`stage11.5-2cpu-1792507334555453100` and
+`stage11.5-4cpu-1792507351184297200`.
+
+Lazy binding and library TLS remain prerequisites before full Stage 11 closure.
+
 ## Stage 11 versioned symbol tables (2026-10-20)
 
 The bounded ELF loader now accepts SysV `DT_VERSYM`, `DT_VERDEF` and
