@@ -1504,12 +1504,11 @@ every empty private user-table branch and refuses copied kernel branches.
 validates `DT_RELSZ`/`DT_RELENT`, reads the signed addend from the already
 mapped relocation target and applies it before W^X/RELRO. The Stage 11.5
 acceptance fixture covers relocation, Ring-3 execution and owner teardown on
-1/2/4 CPUs. PLT REL, versioned/
-weak symbols, constructors/destructors, lazy binding and library TLS remain
-unsupported. `DT_JMPREL` is accepted only
-as a bounded file-backed RELA table and is applied eagerly before W^X/RELRO;
-see `audit-stage11-plt-rela-2026-10-20.md` and the shared-library audit for
-validation and remaining limits.
+1/2/4 CPUs. `DT_JMPREL` is accepted as bounded file-backed RELA or legacy REL
+and is applied eagerly before W^X/RELRO; see
+`audit-stage11-plt-rela-2026-10-20.md` and
+`audit-stage11-plt-rel-2026-10-20.md`. Versioned/weak symbols,
+constructors/destructors, lazy binding and library TLS remain unsupported.
 
 The historical main-image TLS mapping was not a compiler-compatible TCB:
 the real Rust local-exec probe expects a self-pointer at `FS:0` and aligned

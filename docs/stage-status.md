@@ -1,5 +1,23 @@
 # Stage status
 
+## Stage 11 eager PLT DT_REL relocation support (2026-10-20)
+
+The graph loader now accepts legacy `DT_JMPREL` tables encoded as `DT_REL`.
+`DT_PLTRELSZ`, `DT_PLTREL == DT_REL` and the fixed 16-byte entry format are
+validated as bounded file-backed metadata; each target must be writable and
+non-executable. Addends are read from the mapped target and applied using the
+same checked relocation and symbol-scope rules as ordinary DT_REL.
+
+Validation: 28 ELF tests, kernel check, warning-denying freestanding and host
+Clippy, and Stage 11.5 QEMU acceptance passed on 1/2/4 CPUs with dedicated
+relocation, Ring-3 execution and teardown markers. Evidence:
+`audit-artifacts/stage11.5-1cpu-1792503297814943600`,
+`stage11.5-2cpu-1792503342880325200` and
+`stage11.5-4cpu-1792503373152819300`.
+
+Versioned/weak symbol semantics, constructors/destructors, lazy binding and
+library TLS remain open.
+
 ## Stage 11 bounded DT_REL loader support (2026-10-20)
 
 The ELF loader now validates and applies ordinary `DT_REL` tables with
@@ -15,8 +33,8 @@ cross-image import in Ring 3, and tears down cleanly. Evidence:
 `audit-artifacts/stage11.5-1cpu-1792502825772958300`,
 `stage11.5-2cpu-1792502960229582900` and
 `stage11.5-4cpu-1792502998392183900`.
-PLT REL, symbol versioning/weak binding, constructors/destructors, lazy
-binding and library TLS remain open.
+Symbol versioning/weak binding, constructors/destructors, lazy binding and
+library TLS remain open.
 
 ## Stage 11 eager PLT RELA relocation support (2026-10-20)
 
@@ -29,8 +47,9 @@ library TLS remain explicitly outside this increment.
 
 Validation: 25 ELF tests, warning-denying freestanding Stage 11.5 Clippy,
 warning-denying host Clippy, and Stage 11.5 QEMU acceptance on 1/2/4 CPUs all
-passed with exit 33. This is a bounded Stage 11 increment; the full inherited
-release chain and remaining loader interoperability work are still required.
+passed with exit 33. Legacy PLT REL is accepted in the follow-up above. This
+is a bounded Stage 11 increment; the full inherited release chain and
+remaining loader interoperability work are still required.
 
 ## Stage 11 ASLR arena/guard overlap corrected (2026-10-20)
 

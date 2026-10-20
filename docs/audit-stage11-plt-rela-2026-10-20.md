@@ -29,7 +29,8 @@ tables, unsupported relocation types and read-only targets fail closed.
 
 ## Limits
 
-This does not implement legacy `DT_REL`, versioned/weak symbol semantics,
-lazy binding, constructors/destructors, library TLS or the complete dynamic
-linker ABI. It is an accepted bounded increment, not full Stage 11 or
-production readiness.
+Legacy `DT_JMPREL`/`DT_REL` is covered by the separate
+`audit-stage11-plt-rel-2026-10-20.md` increment. Versioned/weak symbol
+semantics, lazy binding, constructors/destructors, library TLS and the
+complete dynamic linker ABI remain outside this audit. This is an accepted
+bounded increment, not full Stage 11 or production readiness.

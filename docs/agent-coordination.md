@@ -2431,6 +2431,14 @@ and a retained report before it can close a production gap.
 
 ## Codex: owned work
 
+**Eager PLT REL increment (2026-10-20):** legacy `DT_JMPREL` encoded as
+`DT_REL` is now bounded, file-backed and eagerly applied from signed in-memory
+addends with writable/NX target validation. The 28 ELF tests, kernel check,
+warning-denying host/freestanding Clippy and dedicated Stage 11.5 runtime
+fixture passed on 1/2/4 CPUs, including Ring-3 execution and teardown.
+Audit: `docs/audit-stage11-plt-rel-2026-10-20.md`. Versioned/weak symbols,
+constructors/destructors, lazy binding and library TLS remain open.
+
 **Bounded DT_REL increment (2026-10-20):** ordinary `DT_REL` tables now have
 checked parser metadata, file-backed target validation and eager loader
 application using the signed addend read from the mapped private target. The

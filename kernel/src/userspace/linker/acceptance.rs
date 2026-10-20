@@ -68,11 +68,19 @@ fn fixture(kind: usize) -> Option<Vec<u8>> {
     write_u32(&mut elf, 0x1284, 2)?;
     write_u32(&mut elf, 0x1218, 1)?;
     elf[0x121c] = 0x12;
-    write_u16(&mut elf, 0x121e, u16::from(kind != 0 && kind != 3 && kind != 4))?;
+    write_u16(
+        &mut elf,
+        0x121e,
+        u16::from(kind != 0 && kind != 3 && kind != 4),
+    )?;
     write_u64(
         &mut elf,
         0x1220,
-        if kind == 0 || kind == 3 || kind == 4 { 0 } else { 0x20 },
+        if kind == 0 || kind == 3 || kind == 4 {
+            0
+        } else {
+            0x20
+        },
     )?;
     write_u64(&mut elf, 0x1228, 6)?;
     write_u64(&mut elf, 0x1380, base + 0x1000)?;
@@ -425,7 +433,8 @@ pub(super) fn run() -> bool {
             let _ = destroy(plt_rel_program.address_space);
             return None;
         }
-        let (plt_rel_pid, _) = crate::task::spawn_user_process("plt-rel-test", plt_rel_program).ok()?;
+        let (plt_rel_pid, _) = crate::task::spawn_user_process("plt-rel-test", plt_rel_program)
+            .ok()?;
         let plt_rel_start = crate::timer::ticks();
         while !crate::task::process_exited(plt_rel_pid) {
             if crate::timer::ticks().wrapping_sub(plt_rel_start) > 500 {

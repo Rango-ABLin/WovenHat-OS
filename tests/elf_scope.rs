@@ -274,6 +274,26 @@ fn eager_plt_rel_metadata_is_bounded_and_file_backed() {
 }
 
 #[test]
+fn plt_rel_rejects_bad_size_and_read_only_targets() {
+    let mut wrong_size = plt_fixture();
+    put64(&mut wrong_size, DYNAMIC + 5 * 16 + 8, 24);
+    put64(&mut wrong_size, DYNAMIC + 6 * 16 + 8, 17);
+    assert!(matches!(
+        elf::parse(&wrong_size),
+        Err(elf::Error::InvalidSegment)
+    ));
+
+    let mut read_only_target = plt_fixture();
+    put64(&mut read_only_target, DYNAMIC + 5 * 16 + 8, 16);
+    put64(&mut read_only_target, DYNAMIC + 6 * 16 + 8, 17);
+    put64(&mut read_only_target, 0x2000, BASE + 0x20);
+    assert!(matches!(
+        elf::parse(&read_only_target),
+        Err(elf::Error::InvalidSegment)
+    ));
+}
+
+#[test]
 fn tls_source_congruence_and_address_survive_image_relocation() {
     let bytes = tls_fixture();
     let parsed = image(&bytes);
