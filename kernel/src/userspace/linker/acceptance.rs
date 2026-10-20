@@ -8,7 +8,11 @@ const SEED: [u8; 32] = [
 ];
 
 fn fixture(kind: usize) -> Option<Vec<u8>> {
-    let base = if kind == 0 { USER_REGION_START } else { 0 };
+    let base = if kind == 0 || kind == 3 {
+        USER_REGION_START
+    } else {
+        0
+    };
     let mut elf = alloc::vec![0; 0x1400];
     elf[..7].copy_from_slice(b"\x7fELF\x02\x01\x01");
     write_u16(&mut elf, 16, 3)?;
@@ -377,11 +381,6 @@ pub(super) fn run() -> bool {
             &mut rel_address,
         )
         .ok()?;
-        crate::serial::write_line(format_args!(
-            "[S11.5] DT_REL value={:#x} expected={:#x}",
-            u64::from_le_bytes(rel_address),
-            LIBRARY_START + 0x20
-        ));
         if !step(
             "DT_REL runtime relocation",
             u64::from_le_bytes(rel_address) == LIBRARY_START + 0x20,
