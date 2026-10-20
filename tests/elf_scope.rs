@@ -493,6 +493,32 @@ fn undefined_imports_use_scope_and_protected_definitions_bind_locally() {
 }
 
 #[test]
+fn weak_exports_are_fallbacks_and_undefined_weak_imports_resolve_to_zero() {
+    let mut weak_bytes = fixture(&[8]);
+    weak_bytes[SYMBOL + 4] = 0x22; // STB_WEAK | STT_FUNC
+    let weak = image(&weak_bytes);
+    assert_eq!(weak.defined_global_symbol(&weak_bytes, b"export"), Some(BASE + 0x20));
+
+    let strong_bytes = fixture(&[]);
+    let strong = image(&strong_bytes);
+    let mut scope = elf::SymbolScope::new(&weak, &weak_bytes);
+    assert!(scope
+        .add_dependency(b"a.so", &strong, &strong_bytes)
+        .is_ok());
+    assert_eq!(scope.resolve(b"export"), Some(BASE + 0x20));
+
+    let mut undefined_bytes = fixture(&[]);
+    undefined_bytes[SYMBOL + 4] = 0x22; // STB_WEAK | STT_FUNC
+    put16(&mut undefined_bytes, SYMBOL + 6, 0); // undefined weak import
+    let undefined = image(&undefined_bytes);
+    let scope = elf::SymbolScope::new(&undefined, &undefined_bytes);
+    assert_eq!(
+        undefined.relocation_symbol_value(&undefined_bytes, 1, &scope),
+        Some(0)
+    );
+}
+
+#[test]
 fn versioned_metadata_is_rejected_before_unversioned_resolution() {
     for tag in [
         0x6fff_fff0,

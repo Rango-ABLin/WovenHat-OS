@@ -206,7 +206,7 @@ impl Image {
         let binding = symbol[4] >> 4;
         let visibility = symbol[5] & 3;
         let section = u16::from_le_bytes(symbol[6..8].try_into().ok()?);
-        if !matches!(binding, 0 | 1) || !matches!(symbol[4] & 0xf, 0..=2) {
+        if !matches!(binding, 0..=2) || !matches!(symbol[4] & 0xf, 0..=2) {
             return None;
         }
         let name = dynamic_string(
@@ -215,12 +215,17 @@ impl Image {
             u64::from(u32::from_le_bytes(symbol[..4].try_into().ok()?)),
         )?;
         if section == 0 {
-            return (binding == 1 && visibility == 0 && !name.is_empty())
-                .then(|| scope.resolve(name))
-                .flatten();
+            if visibility != 0 || name.is_empty() || !matches!(binding, 1 | 2) {
+                return None;
+            }
+            return if binding == 2 {
+                Some(scope.resolve(name).unwrap_or(0))
+            } else {
+                scope.resolve(name)
+            };
         }
         let local = self.defined_symbol_value(bytes, index)?;
-        if binding == 1 && visibility == 0 {
+        if matches!(binding, 1 | 2) && visibility == 0 {
             scope.resolve(name)
         } else {
             Some(local)
@@ -253,7 +258,17 @@ impl Image {
 
     /// Resolve one defined global symbol within this image. Undefined symbols,
     /// local-only symbols and malformed names never escape the loader boundary.
+    #[cfg(test)]
     pub fn defined_global_symbol(&self, bytes: &[u8], name: &[u8]) -> Option<u64> {
+        self.defined_global_symbol_kind(bytes, name)
+            .map(|(value, _)| value)
+    }
+
+    fn defined_global_symbol_kind(
+        &self,
+        bytes: &[u8],
+        name: &[u8],
+    ) -> Option<(u64, bool)> {
         if name.is_empty() || name.contains(&0) {
             return None;
         }
@@ -261,6 +276,7 @@ impl Image {
         if dynamic.symbol_count == 0 || dynamic.symtab_entry_size != 24 {
             return None;
         }
+        let mut weak = None;
         for index in 1..dynamic.symbol_count {
             let symbol_offset = dynamic
                 .symtab_file_offset
@@ -270,19 +286,20 @@ impl Image {
             let name_offset = u32::from_le_bytes(symbol[..4].try_into().ok()?) as u64;
             let binding = symbol[4] >> 4;
             let visibility = symbol[5] & 3;
-            // STB_GLOBAL is the only binding exported by this first scope
-            // implementation. STB_WEAK/versioned symbols remain unsupported.
-            if binding != 1 || !matches!(visibility, 0 | 3) {
+            if !matches!(binding, 1 | 2) || !matches!(visibility, 0 | 3) {
                 continue;
             }
             if dynamic_string(bytes, dynamic, name_offset)? != name {
                 continue;
             }
             if let Some(value) = self.defined_symbol_value(bytes, index) {
-                return Some(value);
+                if binding == 1 {
+                    return Some((value, true));
+                }
+                weak = Some((value, false));
             }
         }
-        None
+        weak
     }
 
     fn contains_symbol(&self, value: u64, size: u64) -> bool {
@@ -448,7 +465,17 @@ impl<'a> SymbolScope<'a> {
         self.images[..self.count]
             .iter()
             .flatten()
-            .find_map(|entry| entry.image.defined_global_symbol(entry.bytes, name))
+            .filter_map(|entry| entry.image.defined_global_symbol_kind(entry.bytes, name))
+            .find_map(|(value, strong)| strong.then_some(value))
+            .or_else(|| {
+                self.images[..self.count]
+                    .iter()
+                    .flatten()
+                    .filter_map(|entry| {
+                        entry.image.defined_global_symbol_kind(entry.bytes, name)
+                    })
+                    .find_map(|(value, strong)| (!strong).then_some(value))
+            })
     }
 }
 
