@@ -1,5 +1,25 @@
 # Stage status
 
+## Stage 11 weak symbol binding support (2026-10-20)
+
+The bounded symbol scope now accepts `STB_WEAK` definitions as fallbacks
+behind strong definitions. Default-visible weak definitions participate in
+normal interposition, while undefined weak imports resolve to zero when no
+definition exists. Relocation resolution preserves the existing visibility,
+symbol-bounds, W^X and transactional teardown rules; version-table metadata
+continues to fail closed.
+
+Validation: 30 ELF tests, kernel check, warning-denying freestanding and host
+Clippy, and Stage 11.5 QEMU acceptance passed on 1/2/4 CPUs. The signed
+runtime fixture resolves a weak cross-image import, executes it in Ring 3,
+and verifies teardown. Evidence:
+`audit-artifacts/stage11.5-1cpu-1792504013870714100`,
+`stage11.5-2cpu-1792504112883675500` and
+`stage11.5-4cpu-1792504158087902300`.
+
+Versioned symbol tables, constructors/destructors, lazy binding and library
+TLS remain open.
+
 ## Stage 11 eager PLT DT_REL relocation support (2026-10-20)
 
 The graph loader now accepts legacy `DT_JMPREL` tables encoded as `DT_REL`.
@@ -15,8 +35,8 @@ relocation, Ring-3 execution and teardown markers. Evidence:
 `stage11.5-2cpu-1792503342880325200` and
 `stage11.5-4cpu-1792503373152819300`.
 
-Versioned/weak symbol semantics, constructors/destructors, lazy binding and
-library TLS remain open.
+Versioned symbol tables, constructors/destructors, lazy binding and library
+TLS remain open.
 
 ## Stage 11 bounded DT_REL loader support (2026-10-20)
 

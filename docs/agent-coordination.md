@@ -2431,6 +2431,14 @@ and a retained report before it can close a production gap.
 
 ## Codex: owned work
 
+**Weak symbol binding increment (2026-10-20):** the bounded ELF scope now
+accepts default-visible `STB_WEAK` definitions as fallbacks, prefers strong
+definitions for interposition, and resolves undefined weak imports to zero.
+Thirty ELF tests, kernel check, warning-denying host/freestanding Clippy and
+the signed weak-import Ring-3 fixture passed on 1/2/4 CPUs. Audit:
+`docs/audit-stage11-weak-symbols-2026-10-20.md`. Versioned symbol tables,
+constructors/destructors, lazy binding and library TLS remain open.
+
 **Eager PLT REL increment (2026-10-20):** legacy `DT_JMPREL` encoded as
 `DT_REL` is now bounded, file-backed and eagerly applied from signed in-memory
 addends with writable/NX target validation. The 28 ELF tests, kernel check,
