@@ -93,10 +93,8 @@ pub struct DynamicImage {
     pub init_address: u64,
     pub fini_address: u64,
     pub init_array_address: u64,
-    pub init_array_file_offset: usize,
     pub init_array_count: usize,
     pub fini_array_address: u64,
-    pub fini_array_file_offset: usize,
     pub fini_array_count: usize,
 }
 
@@ -1276,10 +1274,8 @@ fn parse_image(bytes: &[u8], shared: bool) -> Result<Image, Error> {
                     init_address: init_address.unwrap_or(0),
                     fini_address: fini_address.unwrap_or(0),
                     init_array_address: init_array_address.unwrap_or(0),
-                    init_array_file_offset: 0,
                     init_array_count,
                     fini_array_address: fini_array_address.unwrap_or(0),
-                    fini_array_file_offset: 0,
                     fini_array_count,
                 });
                 // Resolve the virtual relocation table to its file-backed
@@ -1343,10 +1339,8 @@ fn parse_image(bytes: &[u8], shared: bool) -> Result<Image, Error> {
                     init_address: init_address.unwrap_or(0),
                     fini_address: fini_address.unwrap_or(0),
                     init_array_address: init_array_address.unwrap_or(0),
-                    init_array_file_offset: 0,
                     init_array_count,
                     fini_array_address: fini_array_address.unwrap_or(0),
-                    fini_array_file_offset: 0,
                     fini_array_count,
                 });
             }

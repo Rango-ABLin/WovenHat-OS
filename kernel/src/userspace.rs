@@ -4580,6 +4580,9 @@ pub struct AddressSpace {
     relro: Option<(u64, usize)>,
     library_relro: [Option<(u64, usize)>; crate::elf::MAX_NEEDED_LIBRARIES],
     tls: Option<InitialTls>,
+    destructors: [u64; crate::elf::MAX_SCOPE_IMAGES * crate::elf::MAX_LIFECYCLE_FUNCTIONS],
+    destructor_count: usize,
+    destructor_pending: bool,
 }
 
 impl AddressSpace {
@@ -4655,6 +4658,7 @@ impl AddressSpace {
 #[derive(Clone, Copy)]
 pub struct UserProgram {
     pub image: UserImage,
+    pub initial_entry: u64,
     pub stack: UserStack,
     pub address_space: AddressSpace,
     pub tls_base: u64,
@@ -5784,6 +5788,9 @@ pub fn clone_address_space(
         relro: source.relro,
         library_relro: source.library_relro,
         tls: source.tls,
+        destructors: source.destructors,
+        destructor_count: source.destructor_count,
+        destructor_pending: source.destructor_pending,
     };
     let mut completed = [(0_u64, 0_usize); MAX_IMAGE_MAPPINGS + 3 + MAX_ANONYMOUS_MAPPINGS * 16];
     let mut completed_count = 0;
@@ -6129,6 +6136,9 @@ pub fn shared_disk_mmap_self_test() -> bool {
             relro: None,
             library_relro: [None; crate::elf::MAX_NEEDED_LIBRARIES],
             tls: None,
+            destructors: [0; crate::elf::MAX_SCOPE_IMAGES * crate::elf::MAX_LIFECYCLE_FUNCTIONS],
+            destructor_count: 0,
+            destructor_pending: false,
         };
         let anchor = USER_MMAP_START + 15 * USER_MMAP_STRIDE;
         if paging::map_user_range_in(root, anchor, 4096, false, false).is_err() {
@@ -6185,6 +6195,9 @@ pub fn disk_unlink_mmap_self_test() -> bool {
             relro: None,
             library_relro: [None; crate::elf::MAX_NEEDED_LIBRARIES],
             tls: None,
+            destructors: [0; crate::elf::MAX_SCOPE_IMAGES * crate::elf::MAX_LIFECYCLE_FUNCTIONS],
+            destructor_count: 0,
+            destructor_pending: false,
         };
         let anchor = USER_MMAP_START + 15 * USER_MMAP_STRIDE;
         if paging::map_user_range_in(root, anchor, 4096, false, false).is_err() {
@@ -6232,6 +6245,9 @@ pub fn shared_file_mmap_self_test() -> bool {
         relro: None,
         library_relro: [None; crate::elf::MAX_NEEDED_LIBRARIES],
         tls: None,
+        destructors: [0; crate::elf::MAX_SCOPE_IMAGES * crate::elf::MAX_LIFECYCLE_FUNCTIONS],
+        destructor_count: 0,
+        destructor_pending: false,
     };
     let anchor = USER_MMAP_START + 15 * USER_MMAP_STRIDE;
     if paging::map_user_range_in(root, anchor, 4096, false, false).is_err() {
@@ -6319,6 +6335,9 @@ pub fn lazy_file_mmap_self_test() -> bool {
         relro: None,
         library_relro: [None; crate::elf::MAX_NEEDED_LIBRARIES],
         tls: None,
+        destructors: [0; crate::elf::MAX_SCOPE_IMAGES * crate::elf::MAX_LIFECYCLE_FUNCTIONS],
+        destructor_count: 0,
+        destructor_pending: false,
     };
     // Keep a teardown anchor while sparse mapping pages are removed individually.
     let anchor = USER_MMAP_START + 15 * USER_MMAP_STRIDE;
@@ -6407,6 +6426,9 @@ pub fn private_lazy_swap_self_test() -> bool {
         relro: None,
         library_relro: [None; crate::elf::MAX_NEEDED_LIBRARIES],
         tls: None,
+        destructors: [0; crate::elf::MAX_SCOPE_IMAGES * crate::elf::MAX_LIFECYCLE_FUNCTIONS],
+        destructor_count: 0,
+        destructor_pending: false,
     };
     let anchor = USER_MMAP_START + 15 * USER_MMAP_STRIDE;
     if paging::map_user_range_in(root, anchor, 4096, false, false).is_err() {
@@ -6479,6 +6501,9 @@ pub fn file_mmap_self_test() -> bool {
         relro: None,
         library_relro: [None; crate::elf::MAX_NEEDED_LIBRARIES],
         tls: None,
+        destructors: [0; crate::elf::MAX_SCOPE_IMAGES * crate::elf::MAX_LIFECYCLE_FUNCTIONS],
+        destructor_count: 0,
+        destructor_pending: false,
     };
     let _ = crate::vfs::seek(file, 3);
     let Some(mapping) = map_file_private(space, 0, file, 0, DATA.len(), false) else {

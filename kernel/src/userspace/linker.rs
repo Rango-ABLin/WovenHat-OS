@@ -205,6 +205,24 @@ pub(super) fn load_with_geometry(
 ) -> Option<UserProgram> {
     let images = prepare(bytes, candidate_bias)?;
     let main = images.first()?;
+    let mut init_functions = [0u64; elf::MAX_SCOPE_IMAGES * elf::MAX_LIFECYCLE_FUNCTIONS];
+    let mut init_count = 0usize;
+    let mut fini_functions = [0u64; elf::MAX_SCOPE_IMAGES * elf::MAX_LIFECYCLE_FUNCTIONS];
+    let mut fini_count = 0usize;
+    for image in &images {
+        let lifecycle = image.image.lifecycle();
+        for function in lifecycle.init[..lifecycle.init_count].iter().copied() {
+            *init_functions.get_mut(init_count)? = function;
+            init_count += 1;
+        }
+    }
+    for image in images.iter().rev() {
+        let lifecycle = image.image.lifecycle();
+        for function in lifecycle.fini[..lifecycle.fini_count].iter().copied() {
+            *fini_functions.get_mut(fini_count)? = function;
+            fini_count += 1;
+        }
+    }
     let mut scope = SymbolScope::new(&main.image, &main.bytes);
     for image in &images[1..] {
         scope
@@ -242,6 +260,9 @@ pub(super) fn load_with_geometry(
             relro: main.image.relro(),
             library_relro: [None; elf::MAX_NEEDED_LIBRARIES],
             tls: None,
+            destructors: [0; elf::MAX_SCOPE_IMAGES * elf::MAX_LIFECYCLE_FUNCTIONS],
+            destructor_count: 0,
+            destructor_pending: false,
         },
         stack_mapped: false,
         template_mapped: None,
@@ -379,19 +400,60 @@ pub(super) fn load_with_geometry(
         return None;
     }
     let stack_top = setup_argv_stack(page_table, stack, args)?;
+    let (initial_entry, initial_stack) = setup_lifecycle_stack(
+        page_table,
+        stack,
+        stack_top,
+        main.image.entry,
+        &init_functions[..init_count],
+    )?;
+    pending.space.destructors[..fini_count].copy_from_slice(&fini_functions[..fini_count]);
+    pending.space.destructor_count = fini_count;
     let program = UserProgram {
         image: UserImage {
             entry: main.image.entry,
-            stack_top,
+            stack_top: initial_stack,
             image_size: bytes.len() as u64,
             load_segments: pending.space.mapping_count,
         },
+        initial_entry,
         stack,
         address_space: pending.space,
         tls_base,
     };
     pending.committed = true;
     Some(program)
+}
+
+fn setup_lifecycle_stack(
+    page_table: paging::AddressSpace,
+    stack: UserStack,
+    stack_top: u64,
+    main_entry: u64,
+    init_functions: &[u64],
+) -> Option<(u64, u64)> {
+    if init_functions.is_empty() {
+        return Some((main_entry, stack_top));
+    }
+    let chain_size = init_functions.len().checked_mul(core::mem::size_of::<u64>())?;
+    let chain_start = stack_top.checked_sub(chain_size as u64)?;
+    if chain_start < stack.base {
+        return None;
+    }
+    for (index, function) in init_functions.iter().copied().enumerate() {
+        let next = init_functions
+            .get(index + 1)
+            .copied()
+            .unwrap_or(main_entry);
+        paging::write_user_bytes(
+            page_table,
+            chain_start + index as u64 * 8,
+            &next.to_le_bytes(),
+        )
+        .ok()?;
+        let _ = function;
+    }
+    Some((init_functions[0], chain_start))
 }
 
 fn relocate(

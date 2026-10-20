@@ -1565,7 +1565,7 @@ pub fn spawn_user_process(
 
     let parent = ProcessId(current_process_id());
     let context = prepare_user_context_with_tls(
-        program.image.entry as usize,
+        program.initial_entry as usize,
         program.image.stack_top as usize,
         program.tls_base,
     );
@@ -1961,7 +1961,7 @@ pub fn spawn_user_system_service(
 
     let parent = ProcessId(current_process_id());
     let context = prepare_user_context_with_tls(
-        program.image.entry as usize,
+        program.initial_entry as usize,
         program.image.stack_top as usize,
         program.tls_base,
     );
@@ -2035,7 +2035,7 @@ pub fn spawn_multicore_user_process(
 
     let parent = ProcessId(current_process_id());
     let context = prepare_user_context_with_tls(
-        program.image.entry as usize,
+        program.initial_entry as usize,
         program.image.stack_top as usize,
         program.tls_base,
     );
@@ -2129,7 +2129,7 @@ pub fn spawn_pinned_user_process_on(
 
     let parent = ProcessId(current_process_id());
     let context = prepare_user_context_with_tls(
-        program.image.entry as usize,
+        program.initial_entry as usize,
         program.image.stack_top as usize,
         program.tls_base,
     );
@@ -2210,7 +2210,7 @@ pub fn spawn_migratable_user_probe(
 
     let parent = ProcessId(current_process_id());
     let context = prepare_user_context_with_tls(
-        program.image.entry as usize,
+        program.initial_entry as usize,
         program.image.stack_top as usize,
         program.tls_base,
     );
@@ -2903,7 +2903,7 @@ pub fn exec_current(program: userspace::UserProgram) -> ! {
     assert!(program.image.is_valid(), "exec received an invalid image");
     x86_64::instructions::interrupts::disable();
     let context = prepare_user_context_with_tls(
-        program.image.entry as usize,
+        program.initial_entry as usize,
         program.image.stack_top as usize,
         program.tls_base,
     );
