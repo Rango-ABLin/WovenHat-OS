@@ -4640,6 +4640,15 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         serial::write_line(format_args!("[S23.7] WovenAI security monitor: PASSED"));
         qemu_test_exit_success();
     }
+    #[cfg(feature = "stage24-1-test")]
+    {
+        if !stage24_identity_self_test() {
+            serial::write_line(format_args!("[S24.1] WovenIdentity core: FAILED"));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!("[S24.1] WovenIdentity core: PASSED"));
+        qemu_test_exit_success();
+    }
     #[cfg(feature = "stage27-2-test")]
     {
         if !update::durable_self_test() {
@@ -6350,6 +6359,53 @@ fn stage23_security_monitor_self_test() -> bool {
     }
     if monitor.observe(&denied) || monitor.get(0).is_none() {
         return fail("monitor capacity/enumeration mismatch");
+    }
+    true
+}
+
+#[cfg(feature = "stage24-1-test")]
+fn stage24_identity_self_test() -> bool {
+    use libwoven::identity::{Authority, Error, SessionState, UserProfile};
+
+    fn fail(reason: &str) -> bool {
+        serial::write_line(format_args!("[S24.1] {}", reason));
+        false
+    }
+
+    let mut authority = Authority::new();
+    let Ok(group) = authority.add_group(b"users") else {
+        return fail("group creation failed");
+    };
+    let Ok(user) = authority.add_user(b"alice", group, b"qemu-salt", b"1234") else {
+        return fail("user creation failed");
+    };
+    let Ok(profile) = UserProfile::new(b"Alice Example") else {
+        return fail("profile validation failed");
+    };
+    if authority.set_profile(user, profile).is_err() {
+        return fail("profile update failed");
+    }
+    if authority.open_session(user, b"wrong") != Err(Error::WrongPassword) {
+        return fail("wrong password was accepted");
+    }
+    let Ok(session) = authority.open_session(user, b"1234") else {
+        return fail("session creation failed");
+    };
+    let Ok(view) = authority.view(session) else {
+        return fail("session view failed");
+    };
+    if view.uid != 1000 || view.state != SessionState::Active || view.elevated {
+        return fail("initial session state mismatch");
+    }
+    if authority.lock(session).is_err()
+        || authority.elevate(session, b"1234") != Err(Error::Locked)
+        || authority.unlock(session, b"1234").is_err()
+        || authority.elevate(session, b"1234").is_err()
+    {
+        return fail("lock/unlock/elevation lifecycle failed");
+    }
+    if authority.view(session).map_or(true, |view| view.uid != 0 || !view.elevated) {
+        return fail("elevated credentials were not reflected");
     }
     true
 }

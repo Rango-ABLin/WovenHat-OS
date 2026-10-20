@@ -1,5 +1,28 @@
 # Stage status
 
+## Stage 24.1 bounded WovenIdentity core (2026-10-20)
+
+`libwoven::identity` provides a fixed-capacity local identity authority for
+users, groups, PBKDF2-HMAC-SHA256 credentials, sessions, lock/unlock state,
+user profiles, and explicit password-confirmed privilege elevation. User,
+group, session, name, salt, and profile capacities are compile-time bounded;
+password comparisons are constant-time over the stored digest, and elevation
+resets on lock. The module is policy-only: it does not yet switch kernel task
+credentials or persist the identity database.
+
+The dedicated gate passed with exit 33 and
+`[S24.1] WovenIdentity core: PASSED` on 1/2/4 CPUs. The 82-test `libwoven`
+suite, Stage 24.1 freestanding Clippy, Python validation, and `git diff --check`
+pass. Evidence is preserved under:
+`audit-artifacts/stage24.1-1cpu-1792525338640464600`,
+`audit-artifacts/stage24.1-2cpu-1792525397795034600`, and
+`audit-artifacts/stage24.1-4cpu-1792525454630403900`.
+
+This is the identity policy foundation, not a production identity subsystem:
+kernel task/session integration, durable credential storage and recovery,
+group authorization in the capability broker, account administration UI,
+lockout/rate limiting, and hardware-backed credentials remain required.
+
 ## Stage 23.7 advisory WovenAI security monitor (2026-10-20)
 
 `libwoven::ai_monitor` provides bounded explanations over existing

@@ -30,6 +30,7 @@ pub mod ai_model;
 pub mod ai_assistant;
 pub mod ai_monitor;
 pub mod semantic_search;
+pub mod identity;
 pub mod store;
 
 #[cfg(test)]

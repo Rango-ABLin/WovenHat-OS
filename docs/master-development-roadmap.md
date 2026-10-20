@@ -884,6 +884,14 @@ detection, notification UX, and response automation cannot bypass WovenGuard.
 Phase XV — Accounts and Identity
 Stage 24 — WovenIdentity
 
+Stage 24.1 foundation accepted (2026-10-20): `libwoven::identity` provides a
+bounded local users/groups/session policy core with PBKDF2 credentials,
+profiles, lock/unlock, and password-confirmed elevation. The gate passes on
+1/2/4 CPUs. Kernel credential switching, durable identity persistence,
+authorization-broker integration, lockout policy, administration UI, and
+hardware-backed credentials remain open; do not treat this foundation as a
+complete production identity implementation.
+
 Implement:
 
 local users

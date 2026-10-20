@@ -1,5 +1,17 @@
 # WovenHat OS Architecture & Codebase Guide
 
+### Stage 24.1 — WovenIdentity policy core
+
+`libwoven/src/identity.rs` is the allocation-free local identity policy core.
+`Authority` owns fixed-capacity users, groups, and sessions; `Credential`
+stores only a PBKDF2-HMAC-SHA256 digest and salt; sessions explicitly track
+active/locked state and elevation. Lock always clears elevation, unlock and
+elevation require the account password, and names/profiles/capacities are
+validated before state mutation. This module is intentionally not a kernel
+credential switch or durable database. The next identity stage must integrate
+it with generation-safe task credentials, authenticated durable storage,
+capability authorization, lockout/rate limiting, and the login UI.
+
 ## Persistent session account import (2026-10-20)
 
 The hardware-demo/session boot path checks the read-only mounted FAT32 view at
