@@ -1,5 +1,15 @@
 # WovenHat OS Architecture & Codebase Guide
 
+### Stage 24.3 — kernel-authorized identity storage
+
+`kernel/src/identity_storage.rs` is the narrow storage adapter. It accepts the
+kernel-only `AuthorizedWfsWriter`, validates the `WID1` snapshot, and writes a
+fixed `WID2` wrapper to `/wfs/identity-state-a` or `-b`. The wrapper carries a
+non-zero generation and checksum; recovery ignores missing/corrupt copies and
+chooses the newest valid one, while equal generations fail closed. The QEMU
+gate uses a disposable IDE image and leaves external media untouched. This
+adapter does not serialize sessions or perform task credential binding.
+
 ### Stage 24.2 — WovenIdentity authenticated snapshot
 
 `Authority::encode_snapshot` and `decode_snapshot` use the fixed-size `WID1`

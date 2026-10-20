@@ -898,6 +898,11 @@ authenticated `WID1` representation; sessions are intentionally excluded.
 Kernel-authorized durable filesystem writes/recovery, key management,
 credential rotation, lockout, and task/session integration remain open.
 
+Stage 24.3 durable storage accepted (2026-10-20): the kernel writes and
+recovers authenticated dual-copy `WID2` identity records through the
+StorageIo-authorized native WovenFS path. User-facing persistence, key
+management, rotation, lockout, and task binding remain open.
+
 Implement:
 
 local users

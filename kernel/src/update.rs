@@ -315,6 +315,7 @@ impl UpdateState {
     feature = "stage15-2-test",
     feature = "stage27-2-test",
     feature = "stage21-6-test"
+    , feature = "stage24-3-test"
 ))]
 pub fn authorized_writer() -> Option<crate::wfs::AuthorizedWfsWriter> {
     crate::task::current_has(crate::capability::Capability::StorageIo)

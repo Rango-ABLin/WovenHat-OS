@@ -1,5 +1,13 @@
 # Agent coordination (Claude Code and Codex)
 
+**Codex: Stage 24.3 WovenIdentity durable storage accepted (2026-10-20):**
+The kernel StorageIo-authorized WovenFS adapter persists authenticated `WID2`
+dual-copy records and recovers the newest valid generation. The corrected
+1/2/4-CPU gate passes; the failed missing-disk harness run is preserved and
+documented. Evidence is under the three `audit-artifacts/stage24.3-*`
+directories listed in `docs/stage-status.md`. User-facing persistence, key
+management, rotation, lockout, and task binding remain open.
+
 **Codex: Stage 24.2 authenticated WovenIdentity snapshot accepted (2026-10-20):**
 `libwoven::identity` encodes users/groups/roles/profiles/credential digests in
 fixed-size authenticated `WID1` records and never serializes sessions. The

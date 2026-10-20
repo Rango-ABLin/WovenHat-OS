@@ -91,6 +91,8 @@ mod heap;
 #[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
 mod hid;
 mod interrupts;
+#[cfg(feature = "stage24-3-test")]
+mod identity_storage;
 mod ipc;
 mod irq_lock;
 mod journal;
@@ -2811,7 +2813,8 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         not(feature = "stage22-1-test"),
         not(feature = "stage22-2-test"),
         not(feature = "stage22-3-test"),
-        not(feature = "stage22-5-test")
+        not(feature = "stage22-5-test"),
+        not(feature = "stage24-3-test")
     ))]
     match storage::live_mutation_self_test() {
         storage::LiveMutationTestStatus::Passed => {
@@ -4656,6 +4659,15 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
             qemu_test_exit_failure();
         }
         serial::write_line(format_args!("[S24.2] WovenIdentity snapshot: PASSED"));
+        qemu_test_exit_success();
+    }
+    #[cfg(feature = "stage24-3-test")]
+    {
+        if !identity_storage::durable_self_test() {
+            serial::write_line(format_args!("[S24.3] WovenIdentity durable storage: FAILED"));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!("[S24.3] WovenIdentity durable storage: PASSED"));
         qemu_test_exit_success();
     }
     #[cfg(feature = "stage27-2-test")]

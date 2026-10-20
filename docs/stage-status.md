@@ -1,5 +1,28 @@
 # Stage status
 
+## Stage 24.3 kernel-authorized WovenIdentity durable storage (2026-10-20)
+
+The kernel now provides a StorageIo-authorized WovenFS adapter for identity
+snapshots. It writes `WID2` records to two fixed native paths with a monotonic
+generation and wrapper checksum, selects the newest valid copy on recovery,
+and validates the inner authenticated `WID1` snapshot before writing or
+returning it. The launcher attaches a disposable IDE image for this destructive
+storage gate; the user USB is not touched.
+
+The dedicated gate passed with exit 33 and
+`[S24.3] WovenIdentity durable storage: PASSED` on 1/2/4 CPUs. The corrected
+evidence is preserved under:
+`audit-artifacts/stage24.3-1cpu-1792526461019999200`,
+`audit-artifacts/stage24.3-2cpu-1792526482958590800`, and
+`audit-artifacts/stage24.3-4cpu-1792526505203409200`.
+
+The earlier failed attempt is retained at
+`audit-artifacts/stage24.3-1cpu-1792526354775283900`; it exposed the missing
+scratch-disk harness configuration and was fixed without weakening assertions.
+This stage does not yet expose user-facing persistence, key management,
+credential rotation, lockout/rate limiting, or bind restored identities to
+running kernel tasks.
+
 ## Stage 24.2 authenticated WovenIdentity snapshot (2026-10-20)
 
 `libwoven::identity` now encodes users, groups, administrator roles, profile

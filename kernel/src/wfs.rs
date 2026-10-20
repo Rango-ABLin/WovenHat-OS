@@ -33,6 +33,7 @@ pub const MAX_TXN_BLOCKS: usize = 32;
     feature = "stage15-1-test",
     feature = "stage15-2-test",
     feature = "stage21-6-test"
+    , feature = "stage24-3-test"
 ))]
 pub const JOURNAL_BLOCKS: u32 = MAX_TXN_BLOCKS as u32 + 2;
 
@@ -390,7 +391,8 @@ pub struct Volume<D: BlockDevice> {
     test,
     feature = "stage15-1-test",
     feature = "stage15-2-test",
-    feature = "stage21-6-test"
+    feature = "stage21-6-test",
+    feature = "stage24-3-test"
 ))]
 fn plan(total_blocks: u64, inode_count: u32) -> Result<SuperBlock, Error> {
     let journal_start = 2;
@@ -433,7 +435,12 @@ fn inode_location(sb: &SuperBlock, inode: u64) -> (u64, usize) {
 
 /// Direct, unjournalled metadata write. Only `format` may use this, before any
 /// superblock exists to make the volume mountable.
-#[cfg(any(test, feature = "stage15-1-test", feature = "stage15-2-test"))]
+#[cfg(any(
+    test,
+    feature = "stage15-1-test",
+    feature = "stage15-2-test",
+    feature = "stage24-3-test"
+))]
 fn write_inode_raw<D: BlockDevice>(
     device: &mut D,
     sb: &SuperBlock,
@@ -448,7 +455,12 @@ fn write_inode_raw<D: BlockDevice>(
     Ok(())
 }
 
-#[cfg(any(test, feature = "stage15-1-test", feature = "stage15-2-test"))]
+#[cfg(any(
+    test,
+    feature = "stage15-1-test",
+    feature = "stage15-2-test",
+    feature = "stage24-3-test"
+))]
 fn set_bitmap_raw<D: BlockDevice>(
     device: &mut D,
     sb: &SuperBlock,
@@ -478,7 +490,8 @@ impl<D: BlockDevice> Volume<D> {
         test,
         feature = "stage15-1-test",
         feature = "stage15-2-test",
-        feature = "stage21-6-test"
+        feature = "stage21-6-test",
+        feature = "stage24-3-test"
     ))]
     pub fn format(mut device: D, inode_count: u32) -> Result<Self, Error> {
         let total = device.sector_count();
@@ -495,7 +508,7 @@ impl<D: BlockDevice> Volume<D> {
             match result {
                 Ok(()) => Ok(()),
                 Err(_) => {
-                    #[cfg(feature = "stage15-2-test")]
+                    #[cfg(any(feature = "stage15-2-test", feature = "stage24-3-test"))]
                     crate::serial::write_line(format_args!(
                         "[S15.2] format io error: phase {} lba {}",
                         phase, lba
@@ -608,12 +621,22 @@ impl<D: BlockDevice> Volume<D> {
         Ok(volume)
     }
 
-    #[cfg(any(test, feature = "stage15-1-test", feature = "stage15-2-test"))]
+    #[cfg(any(
+        test,
+        feature = "stage15-1-test",
+        feature = "stage15-2-test",
+        feature = "stage24-3-test"
+    ))]
     pub const fn super_block(&self) -> &SuperBlock {
         &self.super_block
     }
 
-    #[cfg(any(test, feature = "stage15-1-test", feature = "stage15-2-test"))]
+    #[cfg(any(
+        test,
+        feature = "stage15-1-test",
+        feature = "stage15-2-test",
+        feature = "stage24-3-test"
+    ))]
     pub fn into_device(self) -> D {
         self.device
     }
@@ -1856,6 +1879,7 @@ pub fn unlink_vfs_path(path: &str, now: u64) -> Result<(), Error> {
         feature = "stage15-2-test",
         feature = "stage27-2-test",
         feature = "stage21-6-test",
+        feature = "stage24-3-test",
         feature = "stage22-5-test",
         feature = "system-apps"
     )
@@ -1890,6 +1914,7 @@ pub fn write_vfs_path_durable(
         feature = "stage15-2-test",
         feature = "stage27-2-test",
         feature = "stage21-6-test",
+        feature = "stage24-3-test",
         feature = "stage22-5-test",
         feature = "system-apps"
     )
@@ -2065,6 +2090,7 @@ fn import_wfs_directory<D: crate::block::BlockDevice>(
     feature = "stage15-2-test",
     feature = "stage27-2-test",
     feature = "stage21-6-test",
+        feature = "stage24-3-test",
     feature = "stage22-5-test",
     feature = "system-apps"
 ))]
@@ -2076,6 +2102,7 @@ pub struct AuthorizedWfsWriter {
     feature = "stage15-2-test",
     feature = "stage27-2-test",
     feature = "stage21-6-test",
+        feature = "stage24-3-test",
     feature = "stage22-5-test",
     feature = "system-apps"
 ))]
@@ -2185,7 +2212,8 @@ pub fn vfs_unlink_through(
 #[cfg(any(
     feature = "stage15-2-test",
     feature = "stage27-2-test",
-    feature = "stage21-6-test"
+    feature = "stage21-6-test",
+    feature = "stage24-3-test"
 ))]
 pub fn format_ata(inode_count: u32) -> bool {
     crate::ata::with_primary_master(|disk| match Volume::format(disk, inode_count) {
