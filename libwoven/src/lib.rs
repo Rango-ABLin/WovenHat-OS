@@ -13203,13 +13203,25 @@ pub fn close(descriptor: u64) -> Result<(), Error> {
 }
 
 /// Local accounts for the login manager: a name, a random salt and
-/// `SHA-256(salt || PIN)`, one per line of an accounts file:
-/// `name:salt-hex:hash-hex`. No PIN is ever stored.
+/// `PBKDF2-HMAC-SHA256(PIN, salt, PBKDF2_ITERATIONS)`, one per line of an
+/// accounts file: `name:salt-hex:hash-hex`. No PIN is ever stored.
 pub mod accounts {
-    use sha2::{Digest, Sha256};
+    use pbkdf2::pbkdf2_hmac;
+    use sha2::Sha256;
 
     pub const MAX_NAME: usize = 16;
     pub const MAX_SALT: usize = 32;
+    /// Work factor for [`hash_pin`]. NIST SP 800-132 recommends at least
+    /// 10,000; this keeps a wide margin while staying fast enough (tens of
+    /// milliseconds, software-only, no AES-NI-style acceleration needed) for
+    /// sign-in to feel instant on commodity hardware. The account line format
+    /// does not record an iteration count, so this is a global constant, not
+    /// a per-account parameter: changing it stops every hash already on disk
+    /// from verifying, since it would be re-derived with a different work
+    /// factor than it was created with. Raising it later means re-hashing
+    /// every account, which needs the plaintext PIN and so forces each one
+    /// through a password reset, not a silent migration.
+    pub const PBKDF2_ITERATIONS: u32 = 100_000;
 
     /// One account, as read from its line.
     #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -13221,12 +13233,11 @@ pub mod accounts {
         hash: [u8; 32],
     }
 
-    /// `SHA-256(salt || pin)`.
+    /// `PBKDF2-HMAC-SHA256(pin, salt, PBKDF2_ITERATIONS)`.
     pub fn hash_pin(salt: &[u8], pin: &[u8]) -> [u8; 32] {
-        let mut hasher = Sha256::new();
-        hasher.update(salt);
-        hasher.update(pin);
-        hasher.finalize().into()
+        let mut out = [0u8; 32];
+        pbkdf2_hmac::<Sha256>(pin, salt, PBKDF2_ITERATIONS, &mut out);
+        out
     }
 
     fn hex_digit(byte: u8) -> Option<u8> {

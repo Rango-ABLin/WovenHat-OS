@@ -207,13 +207,6 @@ pub(super) fn load_with_geometry(
 ) -> Option<UserProgram> {
     let images = prepare(bytes, candidate_bias)?;
     let main = images.first()?;
-    if main
-        .image
-        .dynamic()
-        .is_some_and(|dynamic| dynamic.rel_size != 0)
-    {
-        crate::serial::write_line(format_args!("[S11.5] DT_REL image prepared"));
-    }
     let mut scope = SymbolScope::new(&main.image, &main.bytes);
     for image in &images[1..] {
         scope
@@ -277,31 +270,55 @@ pub(super) fn load_with_geometry(
             {
                 return None;
             }
-            let mapping = UserMapping::new(
+            let Some(mapping) = UserMapping::new(
                 segment.mapping_start,
                 segment.mapping_size,
                 segment.writable,
                 segment.executable,
-            )?;
-            paging::map_user_range_in_inactive(
+            ) else {
+                crate::serial::write_line(format_args!("[S11.5] DT_REL mapping descriptor failed"));
+                return None;
+            };
+            if paging::map_user_range_in_inactive(
                 page_table,
                 segment.mapping_start,
                 segment.mapping_size,
                 true,
                 false,
             )
-            .ok()?;
+            .is_err()
+            {
+                crate::serial::write_line(format_args!(
+                    "[S11.5] DT_REL map failed start={:#x} size={}",
+                    segment.mapping_start, segment.mapping_size
+                ));
+                return None;
+            }
             pending.space.mappings[pending.space.mapping_count] = mapping;
             pending.space.mapping_count += 1;
-            paging::zero_user_range_in(page_table, segment.mapping_start, segment.mapping_size)
-                .ok()?;
+            if paging::zero_user_range_in(page_table, segment.mapping_start, segment.mapping_size)
+                .is_err()
+            {
+                crate::serial::write_line(format_args!(
+                    "[S11.5] DT_REL zero failed start={:#x}",
+                    segment.mapping_start
+                ));
+                return None;
+            }
             let file_end = segment.file_offset.checked_add(segment.file_size)?;
-            paging::write_user_bytes(
+            if paging::write_user_bytes(
                 page_table,
                 segment.virtual_address,
                 linked.bytes.get(segment.file_offset..file_end)?,
             )
-            .ok()?;
+            .is_err()
+            {
+                crate::serial::write_line(format_args!(
+                    "[S11.5] DT_REL copy failed start={:#x}",
+                    segment.virtual_address
+                ));
+                return None;
+            }
         }
     }
     if main

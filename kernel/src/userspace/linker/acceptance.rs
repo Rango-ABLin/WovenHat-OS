@@ -305,41 +305,6 @@ pub(super) fn run() -> bool {
         ) {
             return None;
         }
-        let Some(rel_program) = load(&rel_main, &["rel-test"]) else {
-            crate::serial::write_line(format_args!(
-                "[S11.5] DT_REL load failed parse={:?}",
-                elf::parse(&rel_main).err()
-            ));
-            return None;
-        };
-        let mut rel_address = [0; 8];
-        paging::read_user_bytes_in(
-            rel_program.address_space.paging,
-            USER_REGION_START + 0x1000,
-            &mut rel_address,
-        )
-        .ok()?;
-        if !step(
-            "DT_REL runtime relocation",
-            u64::from_le_bytes(rel_address) == LIBRARY_START + 0x20,
-        ) {
-            let _ = destroy(rel_program.address_space);
-            return None;
-        }
-        let (rel_pid, _) = crate::task::spawn_user_process("rel-test", rel_program).ok()?;
-        let rel_start = crate::timer::ticks();
-        while !crate::task::process_exited(rel_pid) {
-            if crate::timer::ticks().wrapping_sub(rel_start) > 500 {
-                return None;
-            }
-            crate::task::yield_now();
-        }
-        if !step(
-            "DT_REL Ring-3 execution and teardown",
-            crate::task::wait_process(rel_pid.as_u64()) == Ok(42),
-        ) {
-            return None;
-        }
         let mut relro_ok = true;
         let kernel_page = (crate::task::yield_now as *const () as u64) & !4095;
         relro_ok &= paging::destroy_user_address_space(
@@ -398,6 +363,35 @@ pub(super) fn run() -> bool {
         if !step(
             "Ring-3 import call and owner teardown",
             status == Ok(42) && after_frames == frames,
+        ) {
+            return None;
+        }
+        let rel_program = load(&rel_main, &["rel-test"])?;
+        let mut rel_address = [0; 8];
+        paging::read_user_bytes_in(
+            rel_program.address_space.paging,
+            USER_REGION_START + 0x1000,
+            &mut rel_address,
+        )
+        .ok()?;
+        if !step(
+            "DT_REL runtime relocation",
+            u64::from_le_bytes(rel_address) == LIBRARY_START + 0x20,
+        ) {
+            let _ = destroy(rel_program.address_space);
+            return None;
+        }
+        let (rel_pid, _) = crate::task::spawn_user_process("rel-test", rel_program).ok()?;
+        let rel_start = crate::timer::ticks();
+        while !crate::task::process_exited(rel_pid) {
+            if crate::timer::ticks().wrapping_sub(rel_start) > 500 {
+                return None;
+            }
+            crate::task::yield_now();
+        }
+        if !step(
+            "DT_REL Ring-3 execution and teardown",
+            crate::task::wait_process(rel_pid.as_u64()) == Ok(42),
         ) {
             return None;
         }
