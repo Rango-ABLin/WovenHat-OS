@@ -4622,6 +4622,15 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         serial::write_line(format_args!("[S23.5] WovenAI semantic search: PASSED"));
         qemu_test_exit_success();
     }
+    #[cfg(feature = "stage23-6-test")]
+    {
+        if !stage23_assistant_action_self_test() {
+            serial::write_line(format_args!("[S23.6] WovenAssistant actions: FAILED"));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!("[S23.6] WovenAssistant actions: PASSED"));
+        qemu_test_exit_success();
+    }
     #[cfg(feature = "stage27-2-test")]
     {
         if !update::durable_self_test() {
@@ -6244,6 +6253,55 @@ fn stage23_semantic_search_self_test() -> bool {
     snapshot[10] ^= 1;
     if !matches!(Index::decode(&snapshot[..length]), Err(Error::BadChecksum)) {
         return fail("search snapshot checksum was not enforced");
+    }
+    true
+}
+
+#[cfg(feature = "stage23-6-test")]
+fn stage23_assistant_action_self_test() -> bool {
+    use libwoven::ai_assistant::{Action, ActionKind, Error, Plan};
+    use libwoven::Permission;
+
+    fn fail(reason: &str) -> bool {
+        serial::write_line(format_args!("[S23.6] {}", reason));
+        false
+    }
+    let mut plan = Plan::new();
+    let Ok(write_index) = plan.push(Action::new(ActionKind::WriteFile, b"/home/note.txt").unwrap())
+    else {
+        return fail("write action insertion failed");
+    };
+    let Ok(read_index) = plan.push(Action::new(ActionKind::ReadFile, b"/home/note.txt").unwrap())
+    else {
+        return fail("read action insertion failed");
+    };
+    if plan.authorize(write_index, &[Permission::FilesystemWrite], false)
+        != Err(Error::ConfirmationRequired)
+    {
+        return fail("write confirmation was not required");
+    }
+    if plan.authorize(write_index, &[Permission::FilesystemRead], true)
+        != Err(Error::PermissionDenied)
+    {
+        return fail("write permission was not denied");
+    }
+    if plan
+        .authorize(write_index, &[Permission::FilesystemWrite], true)
+        .is_err()
+    {
+        return fail("permitted write was rejected");
+    }
+    if plan
+        .authorize(read_index, &[Permission::FilesystemRead], false)
+        .is_err()
+    {
+        return fail("permitted read was rejected");
+    }
+    if plan
+        .authorize(read_index, &[Permission::FilesystemWrite], true)
+        != Err(Error::PermissionDenied)
+    {
+        return fail("read permission mismatch");
     }
     true
 }

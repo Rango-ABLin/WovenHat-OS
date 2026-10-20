@@ -1,5 +1,14 @@
 # Agent coordination (Claude Code and Codex)
 
+**Codex: Stage 23.6 WovenAssistant permissioned action planner accepted (2026-10-20):**
+`libwoven::ai_assistant` adds fixed-size action plans, explicit permission
+mapping, target validation, and confirmation for side effects. The 1/2/4-CPU
+gate, 78 host tests, warning-denying Clippy, and Python checks pass. Evidence
+is under the three `audit-artifacts/stage23.6-*` directories listed in
+`docs/stage-status.md`. The planner has no executor/UI; permission-broker
+integration, cancellation, audit presentation, and confirmation UX remain
+open. No physical hardware claim is made.
+
 **Codex: Stage 23.5 bounded semantic search core accepted (2026-10-20):**
 `libwoven::semantic_search` indexes all six roadmap search kinds with fixed
 capacity, UTF-8 validation, owner-scoped privacy, authenticated snapshots,

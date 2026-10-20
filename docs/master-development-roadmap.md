@@ -867,6 +867,11 @@ ranking remain explicit acceptance work rather than implicit capabilities.
 
 System assistant capable of executing permitted OS actions.
 
+The accepted foundation is a bounded action planner with explicit permission
+and confirmation checks. The user-facing permission broker, audit-visible
+confirmation flow, cancellation, and platform executors remain required for
+the complete assistant stage.
+
 23.7 — AI Security Monitor
 
 AI can explain suspicious activity, but WovenGuard remains the actual enforcement mechanism.

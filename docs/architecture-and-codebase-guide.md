@@ -1379,6 +1379,16 @@ round-trips through bounded storage; upsert and removal never expose a partial
 index. Source adapters, ranking evaluation, and a user-facing service remain
 separate work.
 
+## Stage 23.6 WovenAssistant permissioned action planner (2026-10-20)
+
+`libwoven::ai_assistant` stores at most eight fixed-size actions, rejects
+empty/oversized/non-UTF-8/NUL-containing targets, maps each action to an
+explicit `Permission`, and requires confirmation for side effects. The planner
+never calls an OS executor; the eventual assistant service must pass its result
+through the existing permission broker and capability policy before invoking a
+platform API. Cancellation, owner teardown, audit ordering, and generation-
+safe permission handles remain executor requirements.
+
 The feature-gated `stage19-app-catalog-test` now exercises the install-plan
 boundary for all ten accepted packages together. It verifies each WAPP,
 rejects a mutation, installs and reads each package back through the VFS,

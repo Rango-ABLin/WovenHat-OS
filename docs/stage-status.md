@@ -1,5 +1,26 @@
 # Stage status
 
+## Stage 23.6 WovenAssistant permissioned action planner (2026-10-20)
+
+`libwoven::ai_assistant` defines bounded plans with seven explicit action
+classes: application launch, file read/write, settings, messages, commands,
+and network requests. Every action maps to a named permission, side-effecting
+actions require confirmation, targets are validated UTF-8 without NUL bytes,
+and plans are capped at eight actions.
+
+The dedicated gate passed with exit 33 and
+`[S23.6] WovenAssistant actions: PASSED` on 1/2/4 CPUs. The 78-test
+`libwoven` suite, Stage 23.6 freestanding Clippy, host all-targets Clippy,
+Python validation, and `git diff --check` pass. Evidence is preserved under:
+`audit-artifacts/stage23.6-1cpu-1792524840375472300`,
+`audit-artifacts/stage23.6-2cpu-1792524861370942600`, and
+`audit-artifacts/stage23.6-4cpu-1792524875749738800`.
+
+This is the permissioned action contract, not yet a complete assistant UI or
+platform executor. Permission-broker integration, audit presentation, user
+confirmation UX, cancellation, and actual application/file execution remain
+required before claiming a production assistant.
+
 ## Stage 23.5 bounded semantic search core (2026-10-20)
 
 `libwoven::semantic_search` now provides a fixed-capacity, allocation-free

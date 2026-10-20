@@ -196,6 +196,7 @@ stage23-2-test = ["qemu-test"]
 stage23-3-test = ["qemu-test"]
 stage23-4-test = ["qemu-test"]
 stage23-5-test = ["qemu-test"]
+stage23-6-test = ["qemu-test"]
 stage1-5-test = ["qemu-test"]
 
 [dependencies]
