@@ -6374,6 +6374,18 @@ The fixed-size `WUAB` snapshot codec and checksum validation are now present,
 but the service-owned dual-copy WovenFS commit and power-loss acceptance are
 still open.
 
+## Stage 27.2 durable update records (2026-10-20)
+
+The update record boundary now commits exact-length dual-copy `WUAB` snapshots
+through native WovenFS on a disposable ATA-backed scratch image. It remounts,
+reads both copies, selects the newest valid sequence, and falls back to the
+older copy after checksum corruption. The dedicated QEMU gate passed on 1/2/4
+CPUs; evidence is in
+`docs/audit-stage27-1-update-ab-state-2026-10-20.md`.
+
+Long-lived service lifecycle, power-loss injection/recovery, installer and
+boot-slot integration, and physical qualification remain open.
+
 # Stage 15 native WovenFS VFS lifecycle (2026-10-20)
 
 The native WovenFS adapter now owns the `/wfs` publication lifecycle. Mount

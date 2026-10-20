@@ -57,3 +57,20 @@ fn durable_record_round_trip_and_checksum_rejection() {
         Err(Error::RecordChecksumMismatch)
     );
 }
+
+#[test]
+fn dual_copy_selection_uses_newest_valid_record() {
+    let state = UpdateState::new(10, 128, [1; 32]).unwrap();
+    let mut first = [0u8; UPDATE_RECORD_LEN];
+    let mut second = [0u8; UPDATE_RECORD_LEN];
+    state.encode_record(1, &mut first).unwrap();
+    state.encode_record(2, &mut second).unwrap();
+    assert_eq!(UpdateState::select_record(&first, &second).unwrap().0, 2);
+    second[UPDATE_RECORD_LEN - 1] ^= 1;
+    assert_eq!(UpdateState::select_record(&first, &second).unwrap().0, 1);
+    first[UPDATE_RECORD_LEN - 1] ^= 1;
+    assert_eq!(
+        UpdateState::select_record(&first, &second),
+        Err(Error::InvalidRecord)
+    );
+}

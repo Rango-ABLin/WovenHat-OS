@@ -52,3 +52,32 @@ daemon, an installer, or a power-loss proof. Next work must bind them to a
 privileged service, durable A/B records, and recovery boot evidence. Physical
 USB qualification remains separately blocked until the selected device is
 explicitly authorized for erasure in an elevated session.
+
+## Stage 27.2 durable record acceptance (2026-10-20)
+
+The durable boundary now writes exact-length `WUAB` records through the native
+WovenFS ATA transaction path. The acceptance formats a disposable scratch
+volume, commits two records, remounts and reads both records, selects the
+newest valid sequence, and falls back to the older record after corrupting the
+newer copy. The update service owns the authority token in this gate; no user
+VFS cache is used for record selection.
+
+Validation passed with exit 33:
+
+- `audit-artifacts/stage27.2-1cpu`
+- `audit-artifacts/stage27.2-2cpu`
+- `audit-artifacts/stage27.2-4cpu`
+
+The dedicated script uses only disposable scratch images. No physical USB
+write, format, partition change, or boot was performed.
+
+Stage 27.2 still does not provide a long-lived userspace update daemon,
+power-loss injection/recovery across every commit boundary, installer/boot
+slot integration, or physical-media qualification.
+
+After the Stage 27.2 feature and WovenFS changes, the inherited Stage 27.1
+gate was rerun successfully on 1/2/4 CPUs:
+
+- `audit-artifacts/stage27.1-1cpu-1792512964891684100`
+- `audit-artifacts/stage27.1-2cpu-1792512978915669200`
+- `audit-artifacts/stage27.1-4cpu-1792512993391527100`

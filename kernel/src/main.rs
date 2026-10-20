@@ -4306,7 +4306,10 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         }
         qemu_test_exit_success();
     }
-    #[cfg(feature = "stage15-2-test")]
+    #[cfg(all(
+        feature = "stage15-2-test",
+        not(feature = "stage27-2-test")
+    ))]
     {
         if !wfs::stage15_2_self_test() {
             serial::write_line(format_args!("[S15.2] WovenFS physical device: FAILED"));
@@ -4385,6 +4388,15 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
             qemu_test_exit_failure();
         }
         serial::write_line(format_args!("[S27.1] update A/B rollback: PASSED"));
+        qemu_test_exit_success();
+    }
+    #[cfg(feature = "stage27-2-test")]
+    {
+        if !update::durable_self_test() {
+            serial::write_line(format_args!("[S27.2] durable update records: FAILED"));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!("[S27.2] durable update records: PASSED"));
         qemu_test_exit_success();
     }
     #[cfg(feature = "stage15-1-test")]

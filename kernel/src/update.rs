@@ -284,6 +284,24 @@ impl UpdateState {
         Ok((sequence, state))
     }
 
+    /// Select the newest valid copy of a durable dual-copy record. A single
+    /// valid copy is sufficient for recovery; equal sequences are rejected so
+    /// the service cannot silently choose divergent metadata.
+    pub fn select_record(
+        first: &[u8],
+        second: &[u8],
+    ) -> Result<(u64, Self), Error> {
+        let left = Self::decode_record(first);
+        let right = Self::decode_record(second);
+        match (left, right) {
+            (Ok(left), Err(_)) | (Err(_), Ok(left)) => Ok(left),
+            (Ok(left), Ok(right)) if left.0 > right.0 => Ok(left),
+            (Ok(left), Ok(right)) if right.0 > left.0 => Ok(right),
+            (Ok(_), Ok(_)) => Err(Error::InvalidRecord),
+            (Err(_), Err(_)) => Err(Error::InvalidRecord),
+        }
+    }
+
     fn is_valid(&self) -> bool {
         if self.active >= SLOT_COUNT
             || self.slots[self.active].state != SlotState::Active
@@ -512,4 +530,61 @@ pub fn self_test() -> bool {
     let verified = verify_package(&package).is_ok();
     package[8] ^= 1;
     verified && verify_package(&package) == Err(Error::InvalidSignature)
+}
+
+#[cfg(feature = "stage27-2-test")]
+pub fn durable_self_test() -> bool {
+    if !crate::wfs::format_ata(64) {
+        return false;
+    }
+    let authority = crate::wfs::AuthorizedWfsWriter::after_capability_check();
+    let Ok(mut state) = UpdateState::new(10, 1024, [1; 32]) else {
+        return false;
+    };
+    let mut first = [0u8; UPDATE_RECORD_LEN];
+    let mut second = [0u8; UPDATE_RECORD_LEN];
+    if state.encode_record(1, &mut first).is_err()
+        || crate::wfs::write_vfs_path_durable(
+            &authority,
+            "/wfs/update-state-a",
+            &first,
+            1,
+        )
+        .is_err()
+    {
+        return false;
+    }
+    let baseline = state;
+    let Ok(slot) = state.stage_candidate(11, 2048, [2; 32]) else {
+        return false;
+    };
+    let mut pending = state;
+    if pending.activate_candidate(slot).is_err()
+        || pending.encode_record(2, &mut second).is_err()
+        || crate::wfs::write_vfs_path_durable(
+            &authority,
+            "/wfs/update-state-b",
+            &second,
+            2,
+        )
+        .is_err()
+    {
+        return false;
+    }
+    let mut read_a = [0u8; UPDATE_RECORD_LEN];
+    let mut read_b = [0u8; UPDATE_RECORD_LEN];
+    if crate::wfs::read_vfs_path_durable("/wfs/update-state-a", &mut read_a) != Ok(UPDATE_RECORD_LEN)
+        || crate::wfs::read_vfs_path_durable("/wfs/update-state-b", &mut read_b)
+            != Ok(UPDATE_RECORD_LEN)
+    {
+        return false;
+    }
+    let Ok((sequence, restored)) = UpdateState::select_record(&read_a, &read_b) else {
+        return false;
+    };
+    if sequence != 2 || restored.pending_slot() != Some(slot) {
+        return false;
+    }
+    read_b[UPDATE_RECORD_LEN - 1] ^= 1;
+    UpdateState::select_record(&read_a, &read_b) == Ok((1, baseline))
 }

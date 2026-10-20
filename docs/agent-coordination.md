@@ -21,6 +21,12 @@ QEMU gates passed on 1/2/4 CPUs. See
 `docs/audit-stage27-1-update-ab-state-2026-10-20.md`. This is not yet a
 durable update service or physical qualification.
 
+**Codex: durable update records (2026-10-20):** Stage 27.2 now commits exact-
+length `WUAB` copies through the capability-issued native WovenFS ATA path,
+remounts and verifies them, selects the newest valid sequence, and falls back
+after newer-copy corruption. Scratch-disk QEMU passed on 1/2/4 CPUs. Evidence
+is in the Stage 27.1/27.2 audit; no physical USB write was performed.
+
 Codex implemented and accepted the shared-library PT_TLS loader path on
 2026-10-20: combined template planning, per-process TCB initialization, TLS
 symbol scope, and TPOFF64 relocation are in the working tree. Standard and

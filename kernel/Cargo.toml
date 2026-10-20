@@ -100,6 +100,9 @@ stage15-7-test = ["qemu-test"]
 stage15-8-test = ["qemu-test"]
 stage15-9-test = ["qemu-test"]
 stage27-1-test = ["qemu-test"]
+# Durable update records use the accepted native WovenFS device transaction
+# boundary; the Stage 27.2 gate runs before the inherited Stage 15.2 exit.
+stage27-2-test = ["qemu-test", "stage15-2-test"]
 # An application built outside the kernel, loaded from the filesystem.
 stage16-1-test = ["qemu-test"]
 # Three signed system applications installed through one bounded catalog plan.

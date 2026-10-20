@@ -1169,6 +1169,14 @@ The state object also exposes a fixed-size `WUAB` record codec with a sequence
 and CRC-32. It rejects malformed or inconsistent snapshots and is intended for
 dual-copy service commits; it does not perform storage I/O itself.
 
+The Stage 27.2 native adapter in `wfs.rs` supplies the next boundary: a
+capability-issued update writer commits exact-length state files through the
+serialized WovenFS mutation path, and a direct native reader verifies them
+after remount. `update::select_record` chooses the highest valid sequence and
+fails closed when both copies are invalid or tied. This proves durable record
+handling on the accepted ATA/WovenFS scratch path, but not power-loss timing,
+boot-slot installation, or a complete userspace update daemon.
+
 
 The repository release chain passed on the current tree, including warning-
 denying kernel/host Clippy, all host integration tests, 1/2/4-CPU debug

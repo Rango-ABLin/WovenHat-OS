@@ -1822,6 +1822,51 @@ pub fn unlink_vfs_path(path: &str, now: u64) -> Result<(), Error> {
     with_ata_volume(|volume| volume.unlink_path(&native, now)).unwrap_or(Err(Error::Device))
 }
 
+/// Commit an exact-length internal service file to native WovenFS. This path
+/// deliberately bypasses the user VFS cache: update records are selected by
+/// re-reading the checksum-verified native volume after every commit.
+#[cfg(all(
+    not(test),
+    any(feature = "stage15-2-test", feature = "stage27-2-test")
+))]
+pub fn write_vfs_path_durable(
+    _authority: &AuthorizedWfsWriter,
+    path: &str,
+    bytes: &[u8],
+    now: u64,
+) -> Result<(), Error> {
+    let _mutation = MUTATION.lock();
+    let native = checked_vfs_path(path)?;
+    if bytes.len() > MAX_FILE_SIZE {
+        return Err(Error::TooLarge);
+    }
+    with_ata_volume(|volume| {
+        let inode = match volume.resolve_path(&native) {
+            Ok(inode) => inode,
+            Err(Error::NotFound) => volume.create_path(&native, 0o600, now)?,
+            Err(error) => return Err(error),
+        };
+        volume.write_file(inode, bytes, now)
+    })
+    .unwrap_or(Err(Error::Device))
+}
+
+/// Read an internal service file directly from native WovenFS, with the
+/// filesystem checksum and inode bounds checked by the mount path.
+#[cfg(all(
+    not(test),
+    any(feature = "stage15-2-test", feature = "stage27-2-test")
+))]
+pub fn read_vfs_path_durable(path: &str, out: &mut [u8]) -> Result<usize, Error> {
+    let _mutation = MUTATION.lock();
+    let native = checked_vfs_path(path)?;
+    with_ata_volume(|volume| {
+        let inode = volume.resolve_path(&native)?;
+        volume.read_file(inode, out)
+    })
+    .unwrap_or(Err(Error::Device))
+}
+
 #[cfg(not(test))]
 pub fn mkdir_vfs_path(path: &str, now: u64) -> Result<(), Error> {
     let _mutation = MUTATION.lock();
@@ -1979,12 +2024,12 @@ fn import_wfs_directory<D: crate::block::BlockDevice>(
 
 /// Explicit authority for native WovenFS mutations. Must be issued only after
 /// a WovenGuard capability check by the kernel-side caller.
-#[cfg(feature = "stage15-2-test")]
+#[cfg(any(feature = "stage15-2-test", feature = "stage27-2-test"))]
 pub struct AuthorizedWfsWriter {
     _private: (),
 }
 
-#[cfg(feature = "stage15-2-test")]
+#[cfg(any(feature = "stage15-2-test", feature = "stage27-2-test"))]
 impl AuthorizedWfsWriter {
     pub(crate) const fn after_capability_check() -> Self {
         Self { _private: () }
@@ -2088,7 +2133,7 @@ pub fn vfs_unlink_through(
 ///
 /// Destructive, and gated behind the Stage 15.2 acceptance feature so it can
 /// only run in a test boot against a scratch disk.
-#[cfg(feature = "stage15-2-test")]
+#[cfg(any(feature = "stage15-2-test", feature = "stage27-2-test"))]
 pub fn format_ata(inode_count: u32) -> bool {
     crate::ata::with_primary_master(|disk| match Volume::format(disk, inode_count) {
         Ok(_) => true,
