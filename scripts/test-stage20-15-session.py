@@ -23,6 +23,25 @@ import time
 CLICK = '[S20.15] clicking Power off'
 
 
+def prepare_firmware_vars(template: Path | None, output: Path) -> Path | None:
+    """Never boot QEMU against the shared writable firmware template."""
+    if template is None:
+        return None
+    if not template.is_file():
+        raise FileNotFoundError(f'OVMF VARS template does not exist: {template}')
+    copy = output / 'OVMF_VARS.fd'
+    shutil.copyfile(template, copy)
+    return copy
+
+
+def firmware_drives(code: Path, vars_copy: Path | None) -> list[str]:
+    """CODE is readonly unit 0; only a private VARS copy may be writable."""
+    drives = ['-drive', f'if=pflash,unit=0,format=raw,readonly=on,file={code}']
+    if vars_copy is not None:
+        drives += ['-drive', f'if=pflash,unit=1,format=raw,file={vars_copy}']
+    return drives
+
+
 def serial_has_fatal_evidence(log: str) -> bool:
     """Reject panic and security failures anywhere in guest serial evidence."""
     normalized = log.lower()
@@ -36,6 +55,8 @@ def main():
     parser.add_argument('--cpus', type=int, choices=(1, 2, 4), default=1)
     parser.add_argument('--qemu', default=shutil.which('qemu-system-x86_64') or r'C:\Program Files\qemu\qemu-system-x86_64.exe')
     parser.add_argument('--firmware', type=Path)
+    parser.add_argument('--firmware-vars', type=Path,
+                        help='matching OVMF VARS template, copied per QEMU run')
     parser.add_argument('--timeout', type=float, default=300)
     args = parser.parse_args()
     root = Path(__file__).resolve().parents[1]
@@ -43,8 +64,11 @@ def main():
     firmware = args.firmware or qemu.parent / 'share' / 'edk2-x86_64-code.fd'
     if not qemu.is_file() or not firmware.is_file():
         parser.error('QEMU and firmware files must exist')
+    if args.firmware_vars is not None and not args.firmware_vars.is_file():
+        parser.error('OVMF VARS template must exist')
     out = root / 'audit-artifacts' / f'stage20.15-{args.cpus}cpu-{time.time_ns()}'
-    out.mkdir(parents=True)
+    out.mkdir(parents=True, exist_ok=False)
+    vars_copy = prepare_firmware_vars(args.firmware_vars, out)
     env = dict(os.environ)
     for app, variable, binary in (('woven-shell', 'WOVENHAT_SHELL_IMAGE', 'wovenhat-woven-shell'),
                                   ('hello-gui', 'WOVENHAT_HELLO_GUI_IMAGE', 'wovenhat-hello-gui')):
@@ -65,7 +89,7 @@ def main():
     command = [str(qemu), '-accel', 'tcg,tb-size=128', '-machine', 'q35', '-m', '256M', '-smp', str(args.cpus),
                '-display', 'none', '-serial', f'file:{serial}',
                '-device', 'isa-debug-exit,iobase=0xf4,iosize=0x04',
-               '-drive', f'if=pflash,format=raw,readonly=on,file={firmware}',
+               *firmware_drives(firmware, vars_copy),
                '-drive', f'if=none,id=boot,format=raw,readonly=on,file={build.stdout.strip()}',
                '-device', 'virtio-blk-pci,drive=boot,bootindex=1']
     flags = subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
