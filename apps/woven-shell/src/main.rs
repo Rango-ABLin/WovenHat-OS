@@ -1656,6 +1656,12 @@ impl Desktop {
                     return self.lock_input_area();
                 }
                 let name = self.session.and_then(|index| self.accounts[index]);
+                let session_name = name.map(|account| {
+                    let mut value = [0u8; libwoven::accounts::MAX_NAME];
+                    let length = account.name().len();
+                    value[..length].copy_from_slice(account.name());
+                    (value, length)
+                });
                 let result = name.map(|account| {
                     let mut buffer = [0u8; libwoven::accounts::MAX_NAME];
                     let length = account.name().len();
@@ -1672,6 +1678,15 @@ impl Desktop {
                 self.locked = false;
                 self.mode = LockMode::Lock;
                 let succeeded = matches!(result, Some(Ok(())));
+                if succeeded {
+                    self.accounts = [None; MAX_ACCOUNTS];
+                    load_accounts("/etc/wovenhat/accounts", &mut self.accounts);
+                    self.session = session_name.and_then(|(value, length)| {
+                        self.accounts.iter().position(|account| {
+                            account.is_some_and(|account| account.name() == &value[..length])
+                        })
+                    });
+                }
                 let message: &[u8] = match result {
                     Some(Ok(())) => b"PIN changed",
                     Some(Err(_)) => b"Could not change PIN",

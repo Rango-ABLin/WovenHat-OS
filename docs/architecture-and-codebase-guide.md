@@ -1,5 +1,12 @@
 # WovenHat OS Architecture & Codebase Guide
 
+### Stage 24.9 — live PIN rotation consistency
+
+The account-change syscall updates the owner-bound live `Authority` and the
+trusted account file together. It generates a fresh salt, verifies the old
+credential, and rolls the live authority back if the file rewrite fails.
+WovenShell reloads its bounded account cache after a successful change.
+
 ### Stage 24.8 — WID2 runtime recovery
 
 System-apps startup calls the native `identity_storage::load` adapter before

@@ -86,6 +86,38 @@ pub(crate) fn load_durable_or_accounts(path: &str) -> Result<(), Error> {
     load_accounts_file(path)
 }
 
+#[cfg(feature = "system-apps")]
+pub(crate) fn change_pin(
+    owner: u64,
+    name: &[u8],
+    old_pin: &[u8],
+    new_pin: &[u8],
+) -> Result<(), Error> {
+    if !BINDINGS.lock().iter().flatten().any(|binding| binding.owner == owner) {
+        return Err(Error::Owner);
+    }
+    let mut salt = [0u8; 16];
+    for chunk in salt.chunks_mut(8) {
+        chunk.copy_from_slice(&crate::entropy::random_u64().to_le_bytes()[..chunk.len()]);
+    }
+    {
+        let mut authority = AUTHORITY.lock();
+        authority
+            .as_mut()
+            .ok_or(Error::NotReady)?
+            .change_password(name, old_pin, &salt, new_pin)
+            .map_err(Error::Identity)?;
+    }
+    if crate::accounts::change_pin(name, old_pin, new_pin).is_ok() {
+        return Ok(());
+    }
+    let mut authority = AUTHORITY.lock();
+    if let Some(authority) = authority.as_mut() {
+        let _ = authority.change_password(name, new_pin, &salt, old_pin);
+    }
+    Err(Error::Storage)
+}
+
 pub(crate) fn release_owner(owner: u64) {
     let mut sessions = [None; MAX_BINDINGS];
     let mut count = 0;

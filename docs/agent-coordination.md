@@ -1,5 +1,14 @@
 # Agent coordination (Claude Code and Codex)
 
+**Codex: Stage 24.9 live PIN rotation consistency accepted (2026-10-20):**
+
+PIN rotation now keeps the owner-bound kernel authority, trusted account file,
+and WovenShell cache consistent, with rollback on file failure. The 86-test,
+feature-gate, and signed system-app 1/2/4-CPU gates pass; evidence is under
+`stage24.9-pin-rotation-*`. Administration, lockout/rate limiting, malformed
+telemetry, hardware credentials, release-key provisioning, and physical
+qualification remain open.
+
 **Codex: Stage 24.8 WID2 runtime recovery accepted (2026-10-20):**
 
 System-apps boot prefers the newest authenticated native WID2 snapshot and

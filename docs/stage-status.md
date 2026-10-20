@@ -1,5 +1,21 @@
 # Stage status
 
+## Stage 24.9 live PIN rotation consistency (2026-10-20)
+
+PIN rotation now updates the live kernel authority, the trusted account file,
+and WovenShell's bounded account cache consistently. A failed file rewrite
+rolls the in-memory credential back. The 86-test host suite, host Clippy,
+Stage 24.5 Clippy, system-apps Clippy, diff check, and signed system-apps
+1/2/4-CPU shell gates pass. Evidence is under:
+`audit-artifacts/stage24.9-pin-rotation-1cpu-1792532400000000000`,
+`audit-artifacts/stage24.9-pin-rotation-2cpu-1792532400000000000`, and
+`audit-artifacts/stage24.9-pin-rotation-4cpu-1792532400000000000`.
+
+The fixture does not drive the PIN-change UI; rotation-specific proof is the
+bounded authority test plus the integrated kernel/shell path. Administration,
+lockout/rate limiting, malformed-request telemetry, hardware credentials,
+release-key provisioning, and physical qualification remain open.
+
 ## Stage 24.8 WID2 runtime recovery (2026-10-20)
 
 System-apps startup now prefers the newest valid authenticated WID2 snapshot

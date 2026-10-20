@@ -914,6 +914,13 @@ session open/lock/unlock/elevation/close framing and safe userspace wrappers.
 The gate proves parser/ABI behavior only; runtime loading, live Ring-3 login,
 teardown, auditing, lockout, and shell migration remain open.
 
+Stage 24.9 live PIN rotation accepted (2026-10-20): the account-change path
+updates the owner-bound kernel authority, trusted account file, and shell cache
+with rollback on file failure; host, feature-gate, and 1/2/4-CPU gates pass.
+Account administration/deletion, lockout/rate limiting, malformed-request
+telemetry, hardware credentials, release-key provisioning, and physical
+qualification remain open.
+
 Stage 24.8 WID2 runtime recovery accepted (2026-10-20): system-apps startup
 prefers the newest authenticated native WID2 snapshot and falls back safely to
 the bounded account file when no durable copy exists. Stage 24.3 native

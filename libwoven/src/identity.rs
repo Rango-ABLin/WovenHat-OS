@@ -248,6 +248,33 @@ impl Authority {
         )
     }
 
+    /// Replace one user's credential after verifying the current password.
+    /// The caller supplies the new bounded salt so the policy core remains
+    /// deterministic and does not depend on a platform RNG.
+    pub fn change_password(
+        &mut self,
+        name: &[u8],
+        old_password: &[u8],
+        salt: &[u8],
+        new_password: &[u8],
+    ) -> Result<(), Error> {
+        let user = self
+            .users
+            .iter()
+            .flatten()
+            .find(|user| user.name[..user.name_len] == *name)
+            .copied()
+            .ok_or(Error::NotFound)?;
+        if !user.credential.verify(old_password) {
+            return Err(Error::WrongPassword);
+        }
+        let credential = Credential::new(salt, new_password)?;
+        self.find_user_mut(user.id)
+            .ok_or(Error::NotFound)?
+            .credential = credential;
+        Ok(())
+    }
+
     fn add_user_with_role(
         &mut self,
         name: &[u8],
@@ -982,6 +1009,28 @@ mod tests {
         let session = authority.open_session(user, b"1234").unwrap();
         assert_eq!(authority.view(session).unwrap().uid, 1000);
         assert_eq!(authority.open_session(user, b"wrong"), Err(Error::WrongPassword));
+    }
+
+    #[test]
+    fn password_rotation_is_atomic_and_invalidates_old_password() {
+        let mut authority = Authority::new();
+        let group = authority.add_group(b"users").unwrap();
+        authority
+            .add_user(b"ada", group, b"old-salt", b"1234")
+            .unwrap();
+        assert_eq!(
+            authority.change_password(b"ada", b"wrong", b"new-salt", b"5678"),
+            Err(Error::WrongPassword)
+        );
+        assert!(authority
+            .change_password(b"ada", b"1234", b"new-salt", b"5678")
+            .is_ok());
+        let session = authority.open_named_session(b"ada", b"5678").unwrap();
+        assert_eq!(
+            authority.open_named_session(b"ada", b"1234"),
+            Err(Error::WrongPassword)
+        );
+        assert_eq!(authority.view(session).unwrap().uid, 1000);
     }
 
     #[test]

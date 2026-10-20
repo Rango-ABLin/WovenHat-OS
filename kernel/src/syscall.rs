@@ -3289,6 +3289,14 @@ fn sys_accounts_change_pin(user_buffer: u64, length: u64) -> u64 {
         crate::audit::record(actor, crate::audit::Action::AccountChangePin, 0, false);
         return SYSCALL_ERROR;
     };
+    #[cfg(feature = "system-apps")]
+    let result = crate::identity_runtime::change_pin(
+        crate::task::current_process_id(),
+        name,
+        old_pin,
+        new_pin,
+    );
+    #[cfg(not(feature = "system-apps"))]
     let result = crate::accounts::change_pin(name, old_pin, new_pin);
     crate::audit::record(
         actor,
