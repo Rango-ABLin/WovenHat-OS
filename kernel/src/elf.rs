@@ -10,12 +10,17 @@ const PT_GNU_RELRO: u32 = 0x6474_e552;
 const PF_EXECUTE: u32 = 1;
 const PF_WRITE: u32 = 2;
 const ELF_MACHINE_X86_64: u16 = 0x3e;
+const SHN_TLS: u16 = 0xfff2;
 const USER_ADDRESS_LIMIT: u64 = 0x0000_8000_0000_0000;
 const PAGE_SIZE: u64 = 4096;
 pub const R_X86_64_RELATIVE: u32 = 8;
 pub const R_X86_64_64: u32 = 1;
 pub const R_X86_64_GLOB_DAT: u32 = 6;
 pub const R_X86_64_JUMP_SLOT: u32 = 7;
+pub const R_X86_64_DTPMOD64: u32 = 16;
+pub const R_X86_64_DTPOFF64: u32 = 17;
+pub const R_X86_64_TPOFF64: u32 = 18;
+pub const R_X86_64_TPOFF32: u32 = 23;
 pub const RELA_ENTRY_SIZE: usize = 24;
 const REL_ENTRY_SIZE: usize = 16;
 const MAX_RELATIVE_RELOCATIONS: usize = 4096;
@@ -292,6 +297,57 @@ impl Image {
             u64::from_le_bytes(symbol[8..16].try_into().ok()?).checked_add(self.load_bias)?;
         let size = u64::from_le_bytes(symbol[16..24].try_into().ok()?);
         self.contains_symbol(value, size).then_some(value)
+    }
+
+    /// Return a TLS symbol's offset within this image's PT_TLS block. TLS
+    /// symbols are never exposed through the ordinary code/data resolver.
+    pub fn defined_tls_symbol_value(&self, bytes: &[u8], index: usize) -> Option<u64> {
+        let dynamic = self.dynamic?;
+        let tls = self.tls?;
+        if index == 0 || index >= dynamic.symbol_count || dynamic.symtab_entry_size != 24 {
+            return None;
+        }
+        let offset = dynamic
+            .symtab_file_offset
+            .checked_add(index.checked_mul(24)?)?;
+        let symbol = bytes.get(offset..offset.checked_add(24)?)?;
+        if u16::from_le_bytes(symbol[6..8].try_into().ok()?) != SHN_TLS {
+            return None;
+        }
+        let value = u64::from_le_bytes(symbol[8..16].try_into().ok()?);
+        let size = u64::from_le_bytes(symbol[16..24].try_into().ok()?);
+        let end = value.checked_add(size)?;
+        (value >= tls.virtual_address
+            && end <= tls.virtual_address.checked_add(tls.memory_size as u64)? )
+            .then_some(value - tls.virtual_address)
+    }
+
+    pub fn tls_symbol_resolution(
+        &self,
+        bytes: &[u8],
+        index: usize,
+        scope: &SymbolScope<'_>,
+    ) -> Option<(u64, Option<usize>)> {
+        let dynamic = self.dynamic?;
+        if index == 0 || index >= dynamic.symbol_count || dynamic.symtab_entry_size != 24 {
+            return None;
+        }
+        let offset = dynamic
+            .symtab_file_offset
+            .checked_add(index.checked_mul(24)?)?;
+        let symbol = bytes.get(offset..offset.checked_add(24)?)?;
+        let section = u16::from_le_bytes(symbol[6..8].try_into().ok()?);
+        if section == SHN_TLS {
+            return Some((self.defined_tls_symbol_value(bytes, index)?, None));
+        }
+        if section != 0 {
+            return None;
+        }
+        let name_offset = u32::from_le_bytes(symbol[..4].try_into().ok()?);
+        let name = dynamic_string(bytes, dynamic, u64::from(name_offset))?;
+        let (version, _) = self.symbol_version(bytes, index, false)?;
+        let (value, image_index) = scope.resolve_tls(name, version)?;
+        Some((value, Some(image_index)))
     }
 
     fn symbol_version<'a>(
@@ -591,6 +647,38 @@ impl<'a> SymbolScope<'a> {
                     })
                     .find_map(|(value, strong)| (!strong).then_some(value))
             })
+    }
+
+    fn resolve_tls(&self, name: &[u8], version: Option<&[u8]>) -> Option<(u64, usize)> {
+        self.validate_dependencies().ok()?;
+        for (image_index, entry) in self.images[..self.count].iter().flatten().enumerate() {
+            let dynamic = entry.image.dynamic()?;
+            for index in 1..dynamic.symbol_count {
+                let offset = dynamic
+                    .symtab_file_offset
+                    .checked_add(index.checked_mul(dynamic.symtab_entry_size)?)?;
+                let symbol = entry.bytes.get(offset..offset.checked_add(24)?)?;
+                if symbol[4] >> 4 != 1 && symbol[4] >> 4 != 2 {
+                    continue;
+                }
+                let name_offset = u32::from_le_bytes(symbol[..4].try_into().ok()?);
+                if dynamic_string(entry.bytes, dynamic, u64::from(name_offset))? != name {
+                    continue;
+                }
+                let (found_version, hidden) = entry.image.symbol_version(
+                    entry.bytes,
+                    index,
+                    true,
+                )?;
+                if hidden || found_version != version {
+                    continue;
+                }
+                if let Some(value) = entry.image.defined_tls_symbol_value(entry.bytes, index) {
+                    return Some((value, image_index));
+                }
+            }
+        }
+        None
     }
 }
 
@@ -1548,7 +1636,14 @@ fn parse_image(bytes: &[u8], shared: bool) -> Result<Image, Error> {
                 let symbol = info >> 32;
                 if !matches!(
                     relocation_type,
-                    R_X86_64_RELATIVE | R_X86_64_64 | R_X86_64_GLOB_DAT | R_X86_64_JUMP_SLOT
+                    R_X86_64_RELATIVE
+                        | R_X86_64_64
+                        | R_X86_64_GLOB_DAT
+                        | R_X86_64_JUMP_SLOT
+                        | R_X86_64_DTPMOD64
+                        | R_X86_64_DTPOFF64
+                        | R_X86_64_TPOFF64
+                        | R_X86_64_TPOFF32
                 ) {
                     return Err(Error::Unsupported);
                 }
@@ -1604,7 +1699,14 @@ fn parse_image(bytes: &[u8], shared: bool) -> Result<Image, Error> {
                 let symbol = info >> 32;
                 if !matches!(
                     relocation_type,
-                    R_X86_64_RELATIVE | R_X86_64_64 | R_X86_64_GLOB_DAT | R_X86_64_JUMP_SLOT
+                    R_X86_64_RELATIVE
+                        | R_X86_64_64
+                        | R_X86_64_GLOB_DAT
+                        | R_X86_64_JUMP_SLOT
+                        | R_X86_64_DTPMOD64
+                        | R_X86_64_DTPOFF64
+                        | R_X86_64_TPOFF64
+                        | R_X86_64_TPOFF32
                 ) {
                     return Err(Error::Unsupported);
                 }
@@ -1660,7 +1762,14 @@ fn parse_image(bytes: &[u8], shared: bool) -> Result<Image, Error> {
                 let symbol = info >> 32;
                 if !matches!(
                     relocation_type,
-                    R_X86_64_RELATIVE | R_X86_64_64 | R_X86_64_GLOB_DAT | R_X86_64_JUMP_SLOT
+                    R_X86_64_RELATIVE
+                        | R_X86_64_64
+                        | R_X86_64_GLOB_DAT
+                        | R_X86_64_JUMP_SLOT
+                        | R_X86_64_DTPMOD64
+                        | R_X86_64_DTPOFF64
+                        | R_X86_64_TPOFF64
+                        | R_X86_64_TPOFF32
                 ) {
                     return Err(Error::Unsupported);
                 }
@@ -1716,7 +1825,14 @@ fn parse_image(bytes: &[u8], shared: bool) -> Result<Image, Error> {
                 let symbol = info >> 32;
                 if !matches!(
                     relocation_type,
-                    R_X86_64_RELATIVE | R_X86_64_64 | R_X86_64_GLOB_DAT | R_X86_64_JUMP_SLOT
+                    R_X86_64_RELATIVE
+                        | R_X86_64_64
+                        | R_X86_64_GLOB_DAT
+                        | R_X86_64_JUMP_SLOT
+                        | R_X86_64_DTPMOD64
+                        | R_X86_64_DTPOFF64
+                        | R_X86_64_TPOFF64
+                        | R_X86_64_TPOFF32
                 ) {
                     return Err(Error::Unsupported);
                 }

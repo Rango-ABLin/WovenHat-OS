@@ -30,6 +30,84 @@ struct LinkImage<'a> {
     image: Image,
 }
 
+#[derive(Clone, Copy)]
+struct TlsPlan {
+    layout: tls_layout::Layout,
+    template_size: usize,
+    total: usize,
+    tpoffs: [i64; elf::MAX_SCOPE_IMAGES],
+    present: [bool; elf::MAX_SCOPE_IMAGES],
+}
+
+fn align_up(value: usize, alignment: usize) -> Option<usize> {
+    value.checked_add(alignment - 1).map(|v| v & !(alignment - 1))
+}
+
+fn plan_tls(images: &[LinkImage<'_>]) -> Option<Option<TlsPlan>> {
+    let main_tls = images.first()?.image.tls();
+    let mut image_offsets = [0usize; elf::MAX_SCOPE_IMAGES];
+    let mut present = [false; elf::MAX_SCOPE_IMAGES];
+    let mut library_prefix = 0usize;
+    for (index, image) in images.iter().enumerate().skip(1) {
+        let Some(tls) = image.image.tls() else {
+            continue;
+        };
+        let alignment = usize::try_from(tls.alignment).ok()?;
+        library_prefix = align_up(library_prefix, alignment.max(8))?;
+        let image_offset = library_prefix;
+        library_prefix = library_prefix.checked_add(tls.memory_size)?;
+        image_offsets[index] = image_offset;
+        present[index] = true;
+    }
+    let (main_image_offset, main_thread_pointer_offset) = if let Some(tls) = main_tls {
+        let main_layout = tls_layout::Layout::new(
+            tls.file_size,
+            tls.memory_size,
+            tls.alignment,
+            tls.virtual_address,
+            USER_MMAP_MAX_SIZE,
+        )?;
+        (
+            library_prefix.checked_add(main_layout.image_offset)?,
+            library_prefix.checked_add(main_layout.thread_pointer_offset)?,
+        )
+    } else {
+        (library_prefix, align_up(library_prefix, 8)?)
+    };
+    if let Some(_tls) = main_tls {
+        image_offsets[0] = main_image_offset;
+        present[0] = true;
+    }
+    if !present.iter().any(|present| *present) {
+        return Some(None);
+    }
+    let mapping_size = align_up(main_thread_pointer_offset.checked_add(8)?, 4096)?;
+    if mapping_size > USER_MMAP_MAX_SIZE {
+        return None;
+    }
+    let layout = tls_layout::Layout {
+        image_offset: main_image_offset,
+        thread_pointer_offset: main_thread_pointer_offset,
+        mapping_size,
+    };
+    let mut tpoffs = [0i64; elf::MAX_SCOPE_IMAGES];
+    for (index, image_offset) in image_offsets.iter().copied().enumerate() {
+        if !present[index] {
+            continue;
+        }
+        tpoffs[index] = i64::try_from(image_offset)
+            .ok()?
+            .checked_sub(i64::try_from(main_thread_pointer_offset).ok()?)?;
+    }
+    Some(Some(TlsPlan {
+        layout,
+        template_size: mapping_size,
+        total: mapping_size.checked_mul(2)?,
+        tpoffs,
+        present,
+    }))
+}
+
 fn library_path(name: &[u8]) -> Option<alloc::string::String> {
     if name.is_empty()
         || name.len() > 128
@@ -96,9 +174,6 @@ fn prepare(bytes: &[u8], candidate_bias: u64) -> Option<Vec<LinkImage<'_>>> {
                 .bytes()
                 .to_vec();
             let image = elf::parse_shared(&payload).ok()?;
-            if image.tls().is_some() {
-                return None;
-            }
             if image
                 .dynamic()
                 .is_some_and(|dynamic| dynamic.soname_offset.is_some())
@@ -235,22 +310,8 @@ pub(super) fn load_with_geometry(
             .ok()?;
     }
     scope.validate_dependencies().ok()?;
-    let tls_reservation = match main.image.tls() {
-        Some(tls) => {
-            let layout = tls_layout::Layout::new(
-                tls.file_size,
-                tls.memory_size,
-                tls.alignment,
-                tls.virtual_address,
-                USER_MMAP_MAX_SIZE,
-            )?;
-            let template_size = usize::try_from(page_align_up(tls.file_size as u64)?).ok()?;
-            let total = layout.mapping_size.checked_add(template_size)?;
-            Some((layout, template_size, total))
-        }
-        None => None,
-    };
-    let tls_size = tls_reservation.map_or(0, |(_, _, size)| size as u64);
+    let tls_reservation = plan_tls(&images)?;
+    let tls_size = tls_reservation.map_or(0, |plan| plan.total as u64);
     let stack_base = plan_stack_base(stack_base, mmap_base, tls_size)?;
     let stack = UserStack::new(stack_base);
     let mmap_end = mmap_base.checked_add(MAX_ANONYMOUS_MAPPINGS as u64 * USER_MMAP_STRIDE)?;
@@ -353,8 +414,21 @@ pub(super) fn load_with_geometry(
     pending.space.lifecycle_trampoline = LIFECYCLE_TRAMPOLINE;
     // No writable executable page exists during relocation: pages are RW/NX
     // until every fixup is applied, then transitioned to their final W^X mode.
+    let tls_tpoffs = tls_reservation.map_or([0; elf::MAX_SCOPE_IMAGES], |plan| plan.tpoffs);
+    let tls_present = tls_reservation.map_or([false; elf::MAX_SCOPE_IMAGES], |plan| plan.present);
     for linked in &images {
-        relocate(linked, &scope, page_table, &mut pending.space)?;
+        let image_index = images
+            .iter()
+            .position(|candidate| core::ptr::eq(candidate, linked))?;
+        relocate(
+            linked,
+            image_index,
+            &scope,
+            page_table,
+            &mut pending.space,
+            &tls_tpoffs,
+            &tls_present,
+        )?;
     }
     for (index, binding) in pending.space.lazy_bindings
         [..pending.space.lazy_binding_count]
@@ -389,9 +463,10 @@ pub(super) fn load_with_geometry(
             paging::protect_user_range_in_inactive(page_table, start, size, false, false).ok()?;
         }
     }
-    let tls_base = if let Some(tls) = main.image.tls() {
-        let (layout, template_size, total) = tls_reservation?;
-        let template_start = stack.guard_base.checked_sub(total as u64)?;
+    let tls_base = if let Some(plan) = tls_reservation {
+        let layout = plan.layout;
+        let template_size = plan.template_size;
+        let template_start = stack.guard_base.checked_sub(plan.total as u64)?;
         let start = template_start.checked_add(template_size as u64)?;
         if template_start < mmap_end
             || pending.space.mappings[..pending.space.mapping_count]
@@ -414,14 +489,22 @@ pub(super) fn load_with_geometry(
             .ok()?;
             pending.template_mapped = Some((template_start, template_size));
             paging::zero_user_range_in(page_table, template_start, template_size).ok()?;
-            // Capture post-relocation initialization bytes from the validated
-            // PT_LOAD source, not raw ELF or the mutable first thread's TLS.
-            copy_tls_bytes(
-                page_table,
-                tls.virtual_address,
-                template_start,
-                tls.file_size,
-            )?;
+            for (index, image) in images.iter().enumerate() {
+                let Some(tls) = image.image.tls() else {
+                    continue;
+                };
+                if !plan.present[index] {
+                    return None;
+                }
+                let image_offset = i64::try_from(layout.thread_pointer_offset).ok()?
+                    .checked_add(plan.tpoffs[index])?;
+                copy_tls_bytes(
+                    page_table,
+                    tls.virtual_address,
+                    template_start.checked_add(u64::try_from(image_offset).ok()?)?,
+                    tls.file_size,
+                )?;
+            }
             paging::protect_user_range_in_inactive(
                 page_table,
                 template_start,
@@ -437,7 +520,7 @@ pub(super) fn load_with_geometry(
             start,
             layout,
             template: pending.template_mapped,
-            file_size: tls.file_size,
+            template_size,
         };
         pending.space.tls = Some(initial);
         initialize_tls(page_table, start, initial)?
@@ -544,9 +627,12 @@ fn setup_destructor_stack(
 
 fn relocate(
     linked: &LinkImage<'_>,
+    image_index: usize,
     scope: &SymbolScope<'_>,
     page_table: paging::AddressSpace,
     space: &mut AddressSpace,
+    tls_tpoffs: &[i64; elf::MAX_SCOPE_IMAGES],
+    tls_present: &[bool; elf::MAX_SCOPE_IMAGES],
 ) -> Option<()> {
     let Some(dynamic) = linked.image.dynamic() else {
         return Some(());
@@ -581,6 +667,18 @@ fn relocate(
                         scope,
                     )?
                 }
+                elf::R_X86_64_DTPMOD64
+                | elf::R_X86_64_DTPOFF64
+                | elf::R_X86_64_TPOFF64
+                | elf::R_X86_64_TPOFF32 => tls_relocation_value(
+                    linked,
+                    image_index,
+                    (info >> 32) as usize,
+                    info as u32,
+                    scope,
+                    tls_tpoffs,
+                    tls_present,
+                )?,
                 _ => return None,
             };
             let value = if addend >= 0 {
@@ -596,7 +694,7 @@ fn relocate(
             } else {
                 value
             };
-            paging::write_user_bytes(page_table, target, &value.to_le_bytes()).ok()?;
+            write_relocation_value(page_table, target, value, info as u32)?;
         }
     }
     if dynamic.rel_size != 0 {
@@ -617,6 +715,18 @@ fn relocate(
                 elf::R_X86_64_64 | elf::R_X86_64_GLOB_DAT | elf::R_X86_64_JUMP_SLOT => linked
                     .image
                     .relocation_symbol_value(&linked.bytes, (info >> 32) as usize, scope)?,
+                elf::R_X86_64_DTPMOD64
+                | elf::R_X86_64_DTPOFF64
+                | elf::R_X86_64_TPOFF64
+                | elf::R_X86_64_TPOFF32 => tls_relocation_value(
+                    linked,
+                    image_index,
+                    (info >> 32) as usize,
+                    info as u32,
+                    scope,
+                    tls_tpoffs,
+                    tls_present,
+                )?,
                 _ => return None,
             };
             let value = if addend >= 0 {
@@ -631,7 +741,7 @@ fn relocate(
             } else {
                 value
             };
-            paging::write_user_bytes(page_table, target, &value.to_le_bytes()).ok()?;
+            write_relocation_value(page_table, target, value, info as u32)?;
         }
     }
     if dynamic.plt_rel_size != 0 {
@@ -654,6 +764,18 @@ fn relocate(
                 elf::R_X86_64_64 | elf::R_X86_64_GLOB_DAT | elf::R_X86_64_JUMP_SLOT => linked
                     .image
                     .relocation_symbol_value(&linked.bytes, (info >> 32) as usize, scope)?,
+                elf::R_X86_64_DTPMOD64
+                | elf::R_X86_64_DTPOFF64
+                | elf::R_X86_64_TPOFF64
+                | elf::R_X86_64_TPOFF32 => tls_relocation_value(
+                    linked,
+                    image_index,
+                    (info >> 32) as usize,
+                    info as u32,
+                    scope,
+                    tls_tpoffs,
+                    tls_present,
+                )?,
                 _ => return None,
             };
             let value = if addend >= 0 {
@@ -668,10 +790,52 @@ fn relocate(
             } else {
                 value
             };
-            paging::write_user_bytes(page_table, target, &value.to_le_bytes()).ok()?;
+            write_relocation_value(page_table, target, value, info as u32)?;
         }
     }
     Some(())
+}
+
+fn tls_relocation_value(
+    linked: &LinkImage<'_>,
+    image_index: usize,
+    symbol_index: usize,
+    relocation_type: u32,
+    scope: &SymbolScope<'_>,
+    tpoffs: &[i64; elf::MAX_SCOPE_IMAGES],
+    present: &[bool; elf::MAX_SCOPE_IMAGES],
+) -> Option<u64> {
+    let (symbol_offset, provider) = linked
+        .image
+        .tls_symbol_resolution(&linked.bytes, symbol_index, scope)?;
+    let module_index = provider.unwrap_or(image_index);
+    if !present.get(module_index).copied().unwrap_or(false) {
+        return None;
+    }
+    let tpoff = *tpoffs.get(module_index)?;
+    match relocation_type {
+        elf::R_X86_64_DTPMOD64 => Some((module_index + 1) as u64),
+        elf::R_X86_64_DTPOFF64 => Some(symbol_offset),
+        elf::R_X86_64_TPOFF64 | elf::R_X86_64_TPOFF32 => {
+            let value = tpoff.checked_add(i64::try_from(symbol_offset).ok()?)?;
+            Some(value as u64)
+        }
+        _ => None,
+    }
+}
+
+fn write_relocation_value(
+    page_table: paging::AddressSpace,
+    target: u64,
+    value: u64,
+    relocation_type: u32,
+) -> Option<()> {
+    if relocation_type == elf::R_X86_64_TPOFF32 {
+        let value = i32::try_from(value as i64).ok()?;
+        paging::write_user_bytes(page_table, target, &value.to_le_bytes()).ok()
+    } else {
+        paging::write_user_bytes(page_table, target, &value.to_le_bytes()).ok()
+    }
 }
 
 fn lazy_slot_allowed(space: AddressSpace, slot: u64) -> bool {

@@ -4471,9 +4471,6 @@ fn plan_stack_base(requested: u64, mmap_base: u64, tls_size: u64) -> Option<u64>
     (stack_top <= USER_REGION_START + 0x1000_0000).then_some(stack_base)
 }
 
-fn page_align_up(value: u64) -> Option<u64> {
-    value.checked_add(4095).map(|value| value & !4095)
-}
 const USER_MMAP_PAGES: usize = USER_MMAP_MAX_SIZE / 4096;
 const _: () = assert!(
     USER_MMAP_START + MAX_ANONYMOUS_MAPPINGS as u64 * USER_MMAP_STRIDE
@@ -4563,7 +4560,7 @@ struct InitialTls {
     start: u64,
     layout: tls_layout::Layout,
     template: Option<(u64, usize)>,
-    file_size: usize,
+    template_size: usize,
 }
 
 #[derive(Clone, Copy)]
@@ -5462,10 +5459,10 @@ fn initialize_tls(space: paging::AddressSpace, start: u64, tls: InitialTls) -> O
         copy_tls_bytes(
             space,
             template,
-            start.checked_add(tls.layout.image_offset as u64)?,
-            tls.file_size,
+            start,
+            tls.template_size,
         )?;
-    } else if tls.file_size != 0 {
+    } else if tls.template_size != 0 {
         return None;
     }
     let pointer = start.checked_add(tls.layout.thread_pointer_offset as u64)?;

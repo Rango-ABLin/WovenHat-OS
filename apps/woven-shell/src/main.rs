@@ -255,7 +255,7 @@ const CENTER_WIDTH: i32 = 164;
 const CENTER_TITLE: &str = "Notifications";
 const CENTER_CLEAR: &str = "Clear";
 const QS_TITLE: &str = "Quick Settings";
-const QS_ROWS: usize = 6;
+const QS_ROWS: usize = 7;
 
 /// How dark the lock screen makes the wallpaper behind it.
 const LOCK_DIM: u8 = 160;
@@ -267,11 +267,24 @@ const PIN_LOCKOUT: u64 = 5 * libwoven::time::TICKS_PER_SECOND;
 /// Accounts the sign-in screen offers.
 const MAX_ACCOUNTS: usize = 4;
 
-/// Whether the locked screen is the sign-in screen or the lock screen.
+/// Whether the locked screen is the sign-in screen, the lock screen, or the
+/// signed-in account changing its own PIN.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum LockMode {
     SignIn,
     Lock,
+    ChangePin,
+}
+
+/// A step of `LockMode::ChangePin`, in order.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ChangePinStep {
+    /// Verify the account's current PIN.
+    Current,
+    /// Collect the new PIN.
+    New,
+    /// Collect it again, and only proceed if the two match.
+    Confirm,
 }
 
 /// What the lock screen's prompt says.
@@ -876,6 +889,18 @@ struct Desktop {
     chosen: usize,
     /// The account signed in, if any.
     session: Option<usize>,
+    /// Which step of changing the signed-in account's PIN is active, under
+    /// `LockMode::ChangePin`.
+    change_pin: Option<ChangePinStep>,
+    /// The current PIN, verified at the `Current` step and kept only long
+    /// enough to reach the `Confirm` step; wiped once the change completes,
+    /// fails, or is cancelled.
+    change_pin_old: [u8; MAX_PIN],
+    change_pin_old_length: usize,
+    /// The new PIN typed at the `New` step, kept to compare against the
+    /// `Confirm` step's entry.
+    change_pin_new: [u8; MAX_PIN],
+    change_pin_new_length: usize,
     pointer: (i32, i32),
     pointer_visible: bool,
     /// The window being dragged, and where in it the pointer took hold.
@@ -926,6 +951,11 @@ impl Desktop {
         accounts: [None; MAX_ACCOUNTS],
         chosen: 0,
         session: None,
+        change_pin: None,
+        change_pin_old: [0; MAX_PIN],
+        change_pin_old_length: 0,
+        change_pin_new: [0; MAX_PIN],
+        change_pin_new_length: 0,
         pointer: (0, 0),
         pointer_visible: false,
         drag: None,
@@ -1306,6 +1336,7 @@ impl Desktop {
             if self.dnd { "Do not disturb: On" } else { "Do not disturb: Off" },
             if self.tiled { "Tiling: On" } else { "Tiling: Off" },
             "Lock screen",
+            "Change PIN",
         ]
     }
 
@@ -1328,16 +1359,27 @@ impl Desktop {
                 let text = core::str::from_utf8(&line[..2 + account.name().len()]).unwrap_or("");
                 canvas.draw_text(centred(text), middle - 46 + index as i32 * 10, text, TEXT);
             }
+        } else if self.mode == LockMode::ChangePin {
+            canvas.draw_text(centred("Change PIN"), middle - 34, "Change PIN", TEXT);
         } else {
             canvas.draw_text(centred("Locked"), middle - 34, "Locked", TEXT);
             let (bytes, length) = clock_text(self.time, false);
             let clock = core::str::from_utf8(&bytes[..length]).unwrap_or("");
             canvas.draw_text(centred(clock), middle - 20, clock, TEXT);
         }
-        let prompt = match self.prompt {
-            LockPrompt::Enter => "Enter PIN",
-            LockPrompt::Wrong => "Wrong PIN",
-            LockPrompt::LockedOut => "Try again shortly",
+        let prompt = if self.mode == LockMode::ChangePin && self.prompt == LockPrompt::Enter {
+            match self.change_pin {
+                Some(ChangePinStep::Current) => "Current PIN",
+                Some(ChangePinStep::New) => "New PIN",
+                Some(ChangePinStep::Confirm) => "Confirm new PIN",
+                None => "Enter PIN",
+            }
+        } else {
+            match self.prompt {
+                LockPrompt::Enter => "Enter PIN",
+                LockPrompt::Wrong => "Wrong PIN",
+                LockPrompt::LockedOut => "Try again shortly",
+            }
         };
         canvas.draw_text(centred(prompt), middle - 4, prompt, TEXT);
         let dots = self.entry_length as i32;
@@ -1357,6 +1399,27 @@ impl Desktop {
         self.screen()
     }
 
+    /// Enter `LockMode::ChangePin` for the signed-in account, from Quick
+    /// Settings. A toast, not the lock screen, reports the `--pin`-only case
+    /// (no persistent account to update) since there is nothing to prompt
+    /// for.
+    fn start_change_pin(&mut self) -> Area {
+        let dirty = self.close_panels();
+        if self.session.is_none() {
+            let mut text = [0u8; 32];
+            let length = label(b"No account signed in", TOAST_CHARS, &mut text);
+            self.toast = Some(Toast { text, length, until: libwoven::ticks() + TOAST_TICKS });
+            return dirty.union(self.toast_area());
+        }
+        self.locked = true;
+        self.mode = LockMode::ChangePin;
+        self.change_pin = Some(ChangePinStep::Current);
+        self.forget_entry();
+        self.prompt = LockPrompt::Enter;
+        log(&[b"woven-shell: change pin started"]);
+        self.screen()
+    }
+
     /// Wipe the typed digits.
     fn forget_entry(&mut self) {
         for byte in &mut self.entry {
@@ -1368,11 +1431,12 @@ impl Desktop {
     }
 
     /// Check the typed digits: against the chosen account when signing in,
-    /// the signed-in account when locked, or else the `--pin` PIN.
+    /// the signed-in account when locked or confirming its current PIN to
+    /// change it, or else the `--pin` PIN.
     fn pin_matches(&self) -> bool {
         let account = match self.mode {
             LockMode::SignIn => Some(self.chosen),
-            LockMode::Lock => self.session,
+            LockMode::Lock | LockMode::ChangePin => self.session,
         };
         if let Some(account) = account.and_then(|index| self.accounts[index]) {
             return account.verify(&self.entry[..self.entry_length]);
@@ -1400,6 +1464,12 @@ impl Desktop {
                 if self.entry_length > 0 {
                     self.entry_length -= 1;
                     self.entry[self.entry_length] = 0;
+                } else if self.mode == LockMode::ChangePin {
+                    // Backspace on an empty entry cancels: there is no other
+                    // key bound to "leave this screen without changing
+                    // anything", and the alternative is simply leaving it
+                    // through a successful step instead.
+                    return self.cancel_change_pin();
                 }
                 self.lock_input_area()
             }
@@ -1410,6 +1480,7 @@ impl Desktop {
                 self.prompt = LockPrompt::Enter;
                 self.lock_account_area()
             }
+            Key::Enter if self.mode == LockMode::ChangePin => self.change_pin_enter(),
             Key::Enter => {
                 if libwoven::ticks() < self.lockout_until {
                     self.prompt = LockPrompt::LockedOut;
@@ -1441,6 +1512,127 @@ impl Desktop {
                 }
             }
             _ => Area::new(0, 0, 0, 0),
+        }
+    }
+
+    /// Securely wipe the stashed current PIN.
+    fn wipe_change_pin_old(&mut self) {
+        for byte in &mut self.change_pin_old {
+            // SAFETY: a valid, aligned byte of our own array; volatile so the
+            // wipe is not optimised away.
+            unsafe { core::ptr::write_volatile(byte, 0) };
+        }
+        self.change_pin_old_length = 0;
+    }
+
+    /// Securely wipe the stashed new PIN.
+    fn wipe_change_pin_new(&mut self) {
+        for byte in &mut self.change_pin_new {
+            // SAFETY: as `wipe_change_pin_old`.
+            unsafe { core::ptr::write_volatile(byte, 0) };
+        }
+        self.change_pin_new_length = 0;
+    }
+
+    /// Leave `LockMode::ChangePin` without changing anything.
+    fn cancel_change_pin(&mut self) -> Area {
+        self.wipe_change_pin_old();
+        self.wipe_change_pin_new();
+        self.change_pin = None;
+        self.locked = false;
+        self.mode = LockMode::Lock;
+        log(&[b"woven-shell: pin change cancelled"]);
+        self.screen()
+    }
+
+    /// Enter at the active `ChangePin` step: verify the current PIN, collect
+    /// the new one, collect it again, and on a matching confirmation, call
+    /// `libwoven::accounts::change_pin` and report the result as a toast.
+    fn change_pin_enter(&mut self) -> Area {
+        match self.change_pin {
+            Some(ChangePinStep::Current) => {
+                if libwoven::ticks() < self.lockout_until {
+                    self.prompt = LockPrompt::LockedOut;
+                    self.forget_entry();
+                    return self.lock_input_area();
+                }
+                if self.pin_matches() {
+                    self.failures = 0;
+                    self.change_pin_old[..self.entry_length]
+                        .copy_from_slice(&self.entry[..self.entry_length]);
+                    self.change_pin_old_length = self.entry_length;
+                    self.change_pin = Some(ChangePinStep::New);
+                    self.prompt = LockPrompt::Enter;
+                } else {
+                    self.failures += 1;
+                    self.prompt = LockPrompt::Wrong;
+                    if self.failures >= PIN_ATTEMPTS {
+                        self.failures = 0;
+                        self.lockout_until = libwoven::ticks() + PIN_LOCKOUT;
+                        self.prompt = LockPrompt::LockedOut;
+                    }
+                }
+                self.forget_entry();
+                self.lock_input_area()
+            }
+            Some(ChangePinStep::New) => {
+                // An empty new PIN is refused silently rather than accepted
+                // as "no PIN": Enter on nothing just does nothing here.
+                if self.entry_length == 0 {
+                    return self.lock_input_area();
+                }
+                self.change_pin_new[..self.entry_length]
+                    .copy_from_slice(&self.entry[..self.entry_length]);
+                self.change_pin_new_length = self.entry_length;
+                self.change_pin = Some(ChangePinStep::Confirm);
+                self.prompt = LockPrompt::Enter;
+                self.forget_entry();
+                self.lock_input_area()
+            }
+            Some(ChangePinStep::Confirm) => {
+                let matches = self.entry_length == self.change_pin_new_length
+                    && self.entry[..self.entry_length] == self.change_pin_new[..self.change_pin_new_length];
+                self.forget_entry();
+                if !matches {
+                    // Does not match: back to entering the new PIN, keeping
+                    // the already-verified current one.
+                    self.wipe_change_pin_new();
+                    self.change_pin = Some(ChangePinStep::New);
+                    self.prompt = LockPrompt::Wrong;
+                    return self.lock_input_area();
+                }
+                let name = self.session.and_then(|index| self.accounts[index]);
+                let result = name.map(|account| {
+                    let mut buffer = [0u8; libwoven::accounts::MAX_NAME];
+                    let length = account.name().len();
+                    buffer[..length].copy_from_slice(account.name());
+                    libwoven::accounts::change_pin(
+                        &buffer[..length],
+                        &self.change_pin_old[..self.change_pin_old_length],
+                        &self.change_pin_new[..self.change_pin_new_length],
+                    )
+                });
+                self.wipe_change_pin_old();
+                self.wipe_change_pin_new();
+                self.change_pin = None;
+                self.locked = false;
+                self.mode = LockMode::Lock;
+                let succeeded = matches!(result, Some(Ok(())));
+                let message: &[u8] = match result {
+                    Some(Ok(())) => b"PIN changed",
+                    Some(Err(_)) => b"Could not change PIN",
+                    None => b"No account signed in",
+                };
+                let mut text = [0u8; 32];
+                let length = label(message, TOAST_CHARS, &mut text);
+                self.toast = Some(Toast { text, length, until: libwoven::ticks() + TOAST_TICKS });
+                log(&[
+                    b"woven-shell: pin change ",
+                    if succeeded { b"succeeded" } else { b"failed" },
+                ]);
+                self.screen()
+            }
+            None => self.lock_input_area(),
         }
     }
 
@@ -2055,6 +2247,7 @@ impl Desktop {
                         }
                         4 => self.toggle_tiling(),
                         5 => self.lock(),
+                        6 => self.start_change_pin(),
                         _ => empty,
                     };
                 }
