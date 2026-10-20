@@ -1271,6 +1271,10 @@ A normal boot with no ATA volume mounted does this after driver bring-up:
 `storage.rs` no longer refers to the ATA driver directly.
 
 **Still ATA-only.** WovenFS (`wfs.rs`) remains on the ATA primary master.
+Its `/wfs` VFS publication is serialized by a rank-5 mutation lock. Mount and
+unmount invalidate cached descendants and stale open descriptions before a
+fresh journal-replayed import; syscall paths fail closed while unpublished.
+The authorized native adapter may still prepare a volume before publication.
 
 ## Stage 13.13 USB keyboards and mice (2026-10-14)
 

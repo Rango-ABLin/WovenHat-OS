@@ -11,6 +11,8 @@
 //! capacity, eight direct blocks per inode, and no heap allocation.
 
 use crate::block::{BlockDevice, Error as BlockError, SECTOR_SIZE};
+#[cfg(not(test))]
+use core::sync::atomic::{AtomicBool, Ordering};
 
 #[cfg(not(test))]
 use alloc::string::String;
@@ -1701,6 +1703,12 @@ pub enum MountOutcome {
 static MUTATION: crate::irq_lock::PreemptMutex<()> =
     crate::irq_lock::PreemptMutex::with_rank((), 5);
 
+/// True only while the native volume is published in the `/wfs` namespace.
+/// Native adapter calls may probe a volume before publication, but generic VFS
+/// operations must fail closed after unmount and during a failed remount.
+#[cfg(not(test))]
+static VFS_MOUNTED: AtomicBool = AtomicBool::new(false);
+
 /// Run `operation` against the ATA primary master mounted as WovenFS.
 ///
 /// The volume is mounted for the duration of the call and dropped afterwards,
@@ -2102,6 +2110,14 @@ pub fn format_ata(inode_count: u32) -> bool {
 /// durability path that is not there.
 #[cfg(feature = "stage15-2-test")]
 pub fn mount_ata_into_vfs() -> MountOutcome {
+    let _mutation = MUTATION.lock();
+    VFS_MOUNTED.store(false, Ordering::Release);
+    // Invalidate every cached child before importing the new volume.  This is
+    // essential when the same mount point is reused after a failed or stale
+    // remount; an existing VFS name must never mask current disk contents.
+    if crate::vfs::unpublish_children(MOUNT_POINT).is_err() {
+        return MountOutcome::Failed;
+    }
     let Some(result) = crate::ata::with_primary_master(|disk| {
         let mut volume = match Volume::mount(disk) {
             Ok(volume) => volume,
@@ -2134,11 +2150,35 @@ pub fn mount_ata_into_vfs() -> MountOutcome {
         {
             return MountOutcome::Failed;
         }
+        VFS_MOUNTED.store(true, Ordering::Release);
         MountOutcome::Mounted(imported)
     }) else {
         return MountOutcome::NoDevice;
     };
     result
+}
+
+/// Unpublish the native WovenFS namespace and invalidate all open child
+/// descriptions.  The disk is not modified; a later mount replays its
+/// journal and republishes a fresh namespace.
+#[cfg(feature = "stage15-2-test")]
+pub fn unmount_vfs() -> Result<usize, Error> {
+    let _mutation = MUTATION.lock();
+    VFS_MOUNTED.store(false, Ordering::Release);
+    crate::vfs::unpublish_children(MOUNT_POINT).map_err(|_| Error::Device)
+}
+
+/// Report whether the `/wfs` namespace is currently published for syscall
+/// access.  The authorized native adapter deliberately remains usable while
+/// preparing a volume before publication.
+#[cfg(not(test))]
+pub fn vfs_mounted() -> bool {
+    VFS_MOUNTED.load(Ordering::Acquire)
+}
+
+#[cfg(test)]
+pub fn vfs_mounted() -> bool {
+    true
 }
 
 /// Stage 15.2 acceptance: WovenFS on a real block device, through the ATA
@@ -2443,6 +2483,23 @@ pub fn stage15_2_self_test() -> bool {
         && crate::vfs::read_all("/wfs/docs/note.txt", &mut vfs_buffer) == Ok(nested.len())
         && vfs_buffer[..nested.len()] == *nested;
     if !step("read both files through the VFS", vfs_read) {
+        return false;
+    }
+
+    // Unmount must invalidate open descriptions and the cached namespace;
+    // remount must then publish freshly journal-replayed contents.
+    let stale = crate::vfs::open("/wfs/alpha.txt");
+    let unmounted = unmount_vfs().is_ok();
+    let stale_rejected = stale
+        .is_ok_and(|id| crate::vfs::read(id, &mut vfs_buffer).is_err());
+    let remounted = mount_ata_into_vfs() == MountOutcome::Mounted(3);
+    let fresh_read = crate::vfs::read_all("/wfs/alpha.txt", &mut vfs_buffer)
+        == Ok(alpha.len())
+        && vfs_buffer[..alpha.len()] == *alpha;
+    if !step(
+        "unmount invalidates handles and remount refreshes the VFS",
+        unmounted && stale_rejected && remounted && fresh_read,
+    ) {
         return false;
     }
 

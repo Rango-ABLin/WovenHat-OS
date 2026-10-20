@@ -1,5 +1,15 @@
 # Agent coordination (Claude Code and Codex)
 
+**Codex: native WovenFS VFS lifecycle increment (2026-10-20):** `/wfs`
+publication now serializes mount/unmount with native mutations, removes stale
+cached descendants and invalidates open descriptions on remount, and rejects
+generic syscall access while unpublished. The authorized native adapter
+remains available before publication. Stage 15.2 scratch-device QEMU passed
+with the stale-handle/remount assertion on 1/2/4 CPUs; host tests and both
+host/freestanding warning-denying Clippy gates passed. Evidence is under
+`target/wovenfs-device-scratch-{1,2,4}cpu`. No physical USB write was
+performed.
+
 Codex implemented and accepted the shared-library PT_TLS loader path on
 2026-10-20: combined template planning, per-process TCB initialization, TLS
 symbol scope, and TPOFF64 relocation are in the working tree. Standard and

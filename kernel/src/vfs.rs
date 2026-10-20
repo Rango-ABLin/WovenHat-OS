@@ -1480,6 +1480,37 @@ where
     }
 }
 
+/// Remove all published descendants of `prefix` and invalidate open
+/// descriptions that refer to them.  This is the namespace side of an
+/// unmount: disk-backed paths must never survive a remount and accidentally
+/// read from a different volume generation.  The mount owner is responsible
+/// for serializing this operation with backend I/O.
+#[cfg(feature = "stage15-2-test")]
+pub fn unpublish_children(prefix: &str) -> Result<usize, Error> {
+    validate_absolute_path(prefix)?;
+    let mut registry = REGISTRY.lock();
+    let mut removed = 0usize;
+    for index in 0..registry.nodes.len() {
+        let remove = {
+            let node = &registry.nodes[index];
+            node.occupied
+                && node.path_str() != prefix
+                && node.path_str().starts_with(prefix)
+                && node.path_str().as_bytes().get(prefix.len()) == Some(&b'/')
+        };
+        if !remove {
+            continue;
+        }
+        registry.generations[index] = registry.generations[index]
+            .checked_add(1)
+            .ok_or(Error::Full)?;
+        registry.nodes[index] = Node::empty();
+        registry.versions[index] = registry.versions[index].wrapping_add(1);
+        removed += 1;
+    }
+    Ok(removed)
+}
+
 pub fn node_count() -> usize {
     REGISTRY.lock().count()
 }

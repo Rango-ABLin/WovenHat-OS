@@ -6358,3 +6358,14 @@ bounded-capacity refusal into a generic failure.
 
 
 
+# Stage 15 native WovenFS VFS lifecycle (2026-10-20)
+
+The native WovenFS adapter now owns the `/wfs` publication lifecycle. Mount
+and unmount are serialized with journal mutations; remount invalidates cached
+descendants and open descriptions before importing fresh contents, and generic
+syscall access fails closed while unpublished. The stale-handle/remount
+acceptance passed on scratch ATA images under QEMU with 1/2/4 CPUs. Host tests,
+host Clippy, and freestanding `stage15-2-test` Clippy passed. This is a
+bounded software increment: physical flash, power-loss, and replacement of
+the FAT32 system volume remain open.
+

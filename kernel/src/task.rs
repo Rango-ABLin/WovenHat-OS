@@ -3640,6 +3640,9 @@ pub fn open_current(path: &str) -> Result<u64, FileError> {
         return Err(FileError::PermissionDenied);
     }
     let path = resolve_path_for_current(path)?;
+    if path.starts_with("/wfs/") && !crate::wfs::vfs_mounted() {
+        return Err(FileError::NotFound);
+    }
     if !authorize_current_file_path(&path, false) {
         return Err(FileError::PermissionDenied);
     }
@@ -3781,6 +3784,11 @@ pub fn read_current(descriptor: u64, buffer: &mut [u8]) -> Result<usize, FileErr
             if !current_file_access_allowed(Capability::FileRead, scope, false) {
                 return Err(FileError::PermissionDenied);
             }
+            if vfs::open_file_path_starts_with(id, "/wfs/").unwrap_or(false)
+                && !crate::wfs::vfs_mounted()
+            {
+                return Err(FileError::NotFound);
+            }
             vfs::read(id, buffer).map_err(|_| FileError::BadDescriptor)
         }
         FdKind::PipeRead(id) => crate::pipe::read(id, buffer).map_err(|_| FileError::BadDescriptor),
@@ -3808,6 +3816,11 @@ pub fn write_current(descriptor: u64, buffer: &[u8]) -> Result<usize, FileError>
         FdKind::File { id, scope } => {
             if !current_file_access_allowed(Capability::FileWrite, scope, true) {
                 return Err(FileError::PermissionDenied);
+            }
+            if vfs::open_file_path_starts_with(id, "/wfs/").unwrap_or(false)
+                && !crate::wfs::vfs_mounted()
+            {
+                return Err(FileError::NotFound);
             }
             let mut path_bytes = [0u8; crate::config::MAX_PATH_SIZE];
             let (path_length, offset) = vfs::file_path_and_offset(id, &mut path_bytes)
@@ -4014,6 +4027,9 @@ pub fn stat_path(path: &str) -> Result<vfs::Stat, FileError> {
         return Err(FileError::PermissionDenied);
     }
     let path = resolve_path_for_current(path)?;
+    if path.starts_with("/wfs/") && !crate::wfs::vfs_mounted() {
+        return Err(FileError::NotFound);
+    }
     if !authorize_current_file_path(&path, false) {
         return Err(FileError::PermissionDenied);
     }
@@ -4026,6 +4042,9 @@ pub fn readdir_path(path: &str, index: usize) -> Result<vfs::DirEntry, FileError
         return Err(FileError::PermissionDenied);
     }
     let path = resolve_path_for_current(path)?;
+    if path.starts_with("/wfs/") && !crate::wfs::vfs_mounted() {
+        return Err(FileError::NotFound);
+    }
     if !authorize_current_file_path(&path, false) {
         return Err(FileError::PermissionDenied);
     }
@@ -4038,6 +4057,9 @@ pub fn mkdir_path(path: &str) -> Result<(), FileError> {
         return Err(FileError::PermissionDenied);
     }
     let path = resolve_path_for_current(path)?;
+    if path.starts_with("/wfs/") && !crate::wfs::vfs_mounted() {
+        return Err(FileError::NotFound);
+    }
     if !authorize_current_file_path(&path, true) {
         return Err(FileError::PermissionDenied);
     }
@@ -5919,6 +5941,9 @@ pub fn unlink_current(path: &str) -> Result<(), FileError> {
         return Err(FileError::PermissionDenied);
     }
     let path = resolve_path_for_current(path)?;
+    if path.starts_with("/wfs/") && !crate::wfs::vfs_mounted() {
+        return Err(FileError::NotFound);
+    }
     if !authorize_current_file_path(&path, true) {
         return Err(FileError::PermissionDenied);
     }
@@ -5943,6 +5968,13 @@ pub fn rename_current(old: &str, new: &str) -> Result<(), FileError> {
     }
     let old = resolve_path_for_current(old)?;
     let new = resolve_path_for_current(new)?;
+    if (old.starts_with("/wfs/") || new.starts_with("/wfs/"))
+        && (!old.starts_with("/wfs/")
+            || !new.starts_with("/wfs/")
+            || !crate::wfs::vfs_mounted())
+    {
+        return Err(FileError::NotFound);
+    }
     if !authorize_current_file_path(&old, true) || !authorize_current_file_path(&new, true) {
         return Err(FileError::PermissionDenied);
     }

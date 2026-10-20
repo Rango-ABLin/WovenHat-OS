@@ -29,7 +29,7 @@ Missing evidence is **blocked**, not inferred from an older green run.
 | 1–5 | Software gates and bounded storage transactions pass | Native storage/DMA matrix, arbitrary-size/full-volume rollback, torn-write and unclean-shutdown qualification |
 | 6 | Bounded SMP, TLB, hotplug and lock foundations pass in QEMU | General multicore stress, NUMA/high-APIC-ID and physical hotplug qualification, broader priority-inheritance/low-memory evidence |
 | 7–10 | Core isolation, corrected COW ancestors/child-wait authority/status, IPC with permanent exhausted-handle-slot retirement, capabilities, networking, completion and timer foundations pass bounded gates | Complete signals, dynamic userspace runtime, broader driver/hardware qualification and full cancellation stress |
-| 11 | Processes, scheduler-backed threads, signed wait/join results, join/cancel/teardown, permanent exhausted-thread-record retirement, fixed-ET_EXEC/nonzero-PIE placement, real signed compiler shared-PIE execution, deterministic ASLR candidates, W^X, RELRO, bounded main-image and shared-library TLS, lifecycle callbacks, REL/PLT tables, symbol versioning, weak symbols, and bounded signed shared-object graph loading with cross-image relocation | Production ASLR arena/guard geometry, pure-BSS runtime and broader TLS models, general untested toolchain interoperability, and physical qualification |
+| 11 | Processes, scheduler-backed threads, signed wait/join results, join/cancel/teardown, permanent exhausted-thread-record retirement, fixed-ET_EXEC/nonzero-PIE placement, real signed compiler shared-PIE execution, deterministic ASLR candidates, corrected bounded ASLR arena/guard geometry, W^X, RELRO, bounded main-image and shared-library TLS, lifecycle callbacks, REL/PLT tables, symbol versioning, weak symbols, and bounded signed shared-object graph loading with cross-image relocation | Pure-BSS runtime and broader TLS models, entropy/stress qualification, general untested toolchain interoperability, and physical qualification |
 | 12 | Typed VFS, metadata, crypto, snapshots and mount boundaries pass bounded gates | Native WovenFS as the mounted system filesystem, durable crash/power-loss evidence, full rollback and persistent key provisioning |
 | 13 | QEMU driver/input/storage/audio/HID foundations pass their accepted gates | Native PCIe/NVMe/AHCI/xHCI/HDA/Wi-Fi/Bluetooth/input qualification, hotplug and fault recovery |
 | 14 | Bounded IPv4/IPv6, DHCP/DNS, sockets and firewall paths pass QEMU gates | Live IPv6 socket lifecycle, routing/policy breadth and physical NIC/radio qualification |
@@ -94,8 +94,10 @@ test session.
    Main-image compiler local-exec TLS/TCB, shared-library PT_TLS/TPOFF64, and
    fresh child-template initialization are accepted after the final compiler
    fixture passed on every online CPU in 1/2/4-CPU boots. See the compiler-TLS
-   and shared-library audits. Production ASLR arena/guard geometry is the next
-   prerequisite; pure-BSS runtime and broader TLS models remain unqualified.
+   and shared-library audits. The bounded ASLR arena/guard geometry correction
+   is also accepted with dedicated 1/2/4-CPU evidence. Pure-BSS runtime,
+   broader TLS models, entropy/stress qualification, and physical validation
+   remain unqualified.
    See the shared-library audit for the exact
    implemented graph, permission and teardown contract.
 5. Close the native WovenFS mount/write-through policy and recovery evidence
@@ -155,7 +157,10 @@ passes. It is the release decision record for the current branch.
 
 ### Known blocking defects / evidence gaps
 - Latest observed PR #42 release-validation rerun failed; inspect workflow steps that mutate `storage_manager.rs` and fix at the actual failing source before reacceptance.
-- WovenFS native `wfs.rs` is not established as a production VFS mount; legacy `wovenfs.rs` metadata is not a substitute.
+- WovenFS native `wfs.rs` now has a bounded writable VFS adapter with explicit
+  publication/unmount invalidation and 1/2/4-CPU scratch-device evidence, but
+  it is not yet the mounted system filesystem and has no physical flash or
+  power-loss qualification.
 - WovenGuard enforcement and revocation coverage is not established across all boundary types.
 - Real device qualification, full installer/recovery/update path and production application toolchain remain unproven.
 - The connected `master` is older than the user's reported Stage 19.7 tree. **Do not merge older patches over newer code without comparison.**
@@ -193,7 +198,12 @@ Decision: BLOCKED | VERIFIED | CLOSED
 
 ### Stage 15.2 native WovenFS integration findings
 - `kernel/src/wfs.rs` implements a genuine journaled on-disk `Volume` with format, mount, create, read, write and unlink primitives.
-- `mount_ata_into_vfs()` imports root-directory entries into `/wfs` using `vfs::create_read_only`. It is gated by `stage15-2-test` and explicitly documents that VFS write-back is a later stage.
+- `mount_ata_into_vfs()` imports validated entries into `/wfs` and owns a
+  serialized publication lifecycle. Remount invalidates cached descendants and
+  open descriptions before importing the fresh journal-replayed tree.
 - Existing import treats `AlreadyExists` as imported without refreshing contents; a remount must not silently retain stale cached data. Define mount namespace ownership and unmount/refresh semantics before enabling write-back.
 - `with_ata_volume()` mounts for the duration of a closure, but this is not an end-to-end VFS-backed writable mount.
-- **Required next patch:** implement an authorized VFS backend adapter with create/read/write/unlink, explicit mount ownership and teardown; exercise reboot/remount, stale handles, failure injection and crash recovery in the normal VFS path. Do not claim this functionality exists yet.
+- **Remaining evidence:** exercise reboot/remount, stale handles, failure
+  injection and crash recovery on the normal VFS path, then qualify a selected
+  non-boot physical device. The bounded software adapter and mount lifecycle
+  are implemented; this does not close the hardware or system-filesystem gate.
