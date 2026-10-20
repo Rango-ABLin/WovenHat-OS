@@ -1558,7 +1558,23 @@ pub fn spawn_user_process(
     name: &'static str,
     program: userspace::UserProgram,
 ) -> Result<(ProcessId, UserTaskContext), ProcessError> {
+    spawn_user_process_with_sandbox(
+        name,
+        program,
+        wovenguard::default_sandbox(wovenguard::SecurityDomain::User),
+    )
+}
+
+pub fn spawn_user_process_with_sandbox(
+    name: &'static str,
+    program: userspace::UserProgram,
+    sandbox_profile: wovenguard::SandboxProfile,
+) -> Result<(ProcessId, UserTaskContext), ProcessError> {
     if !program.image.is_valid() {
+        let _ = userspace::destroy(program.address_space);
+        return Err(ProcessError::Full);
+    }
+    if !sandbox_profile.is_valid_for(wovenguard::SecurityDomain::User) {
         let _ = userspace::destroy(program.address_space);
         return Err(ProcessError::Full);
     }
@@ -1611,9 +1627,34 @@ pub fn spawn_user_process(
         program.address_space.paging(),
     );
     scheduler.tasks[task_slot].process_id = process_id;
+    scheduler.tasks[task_slot].sandbox_profile = sandbox_profile;
     scheduler.task_count += 1;
     processes[process_slot] = Some(process);
     Ok((process_id, context))
+}
+
+/// Launch a signed package under its declared user-domain sandbox. The
+/// declaration is converted to a WovenGuard profile before the address space
+/// is published; a package can never inherit the caller's broader profile.
+#[cfg(any(
+    feature = "system-apps",
+    feature = "stage21-7-test",
+    feature = "stage21-8-test",
+    feature = "stage21-9-test",
+    feature = "stage21-10-test",
+    feature = "stage21-11-test"
+))]
+pub fn spawn_user_process_with_package_capabilities(
+    name: &'static str,
+    program: userspace::UserProgram,
+    declared_capabilities: u64,
+) -> Result<(ProcessId, UserTaskContext), ProcessError> {
+    let capabilities = CapabilitySet::from_bits(declared_capabilities);
+    let Some(profile) = wovenguard::package_sandbox(capabilities) else {
+        let _ = userspace::destroy(program.address_space);
+        return Err(ProcessError::Full);
+    };
+    spawn_user_process_with_sandbox(name, program, profile)
 }
 
 /// Redirect one normal user exit through the image destructors. The callback

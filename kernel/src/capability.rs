@@ -115,6 +115,18 @@ impl CapabilitySet {
         self.bits
     }
 
+    #[cfg(any(
+        feature = "system-apps",
+        feature = "stage21-7-test",
+        feature = "stage21-8-test",
+        feature = "stage21-9-test",
+        feature = "stage21-10-test",
+        feature = "stage21-11-test"
+    ))]
+    pub const fn from_bits(bits: u64) -> Self {
+        Self { bits }
+    }
+
     pub const fn contains(self, capability: Capability) -> bool {
         self.bits & capability.bit() != 0
     }

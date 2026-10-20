@@ -47,7 +47,16 @@ pub enum Error {
     Storage,
     Catalog(libwoven::store::RecordError),
     Package(libwoven::store::Error),
+    SandboxDenied,
     TooManyChunks,
+}
+
+pub fn sandbox_for_entry(
+    entry: &libwoven::store::Entry,
+) -> Option<crate::wovenguard::SandboxProfile> {
+    crate::wovenguard::package_sandbox(crate::capability::CapabilitySet::from_bits(
+        entry.capabilities,
+    ))
 }
 
 fn package_name<'a>(package: &'a Package<'a>) -> Result<&'a str, Error> {
@@ -439,6 +448,13 @@ pub fn install(
 ) -> Result<libwoven::store::Store, Error> {
     let current = recover(authority, current, now)?;
     let name = package_name(package)?;
+    if crate::wovenguard::package_sandbox(crate::capability::CapabilitySet::from_bits(
+        package.manifest.capabilities,
+    ))
+    .is_none()
+    {
+        return Err(Error::SandboxDenied);
+    }
     ensure_directory("/wfs/packages", now)?;
     ensure_directory(APPLICATION_DIRECTORY, now)?;
     ensure_directory(RESOURCE_DIRECTORY, now)?;
@@ -611,6 +627,7 @@ pub fn rollback(
     feature = "stage21-7-test",
     feature = "stage21-9-test",
     feature = "stage21-10-test"
+    , feature = "stage21-11-test"
 ))]
 pub fn self_test() -> bool {
     const MANIFEST: [u8; 22] = [
@@ -671,6 +688,7 @@ pub fn self_test() -> bool {
     feature = "stage21-8-test",
     feature = "stage21-9-test",
     feature = "stage21-10-test"
+    , feature = "stage21-11-test"
 ))]
 pub fn recovery_self_test() -> bool {
     if !crate::wfs::format_ata(64) {
@@ -716,7 +734,11 @@ pub fn recovery_self_test() -> bool {
     )
 }
 
-#[cfg(any(feature = "stage21-9-test", feature = "stage21-10-test"))]
+#[cfg(any(
+    feature = "stage21-9-test",
+    feature = "stage21-10-test",
+    feature = "stage21-11-test"
+))]
 pub fn update_remove_self_test() -> bool {
     if !self_test() {
         return false;
@@ -748,4 +770,32 @@ pub fn update_remove_self_test() -> bool {
 #[cfg(feature = "stage21-10-test")]
 pub fn rollback_self_test() -> bool {
     update_remove_self_test()
+}
+
+#[cfg(feature = "stage21-11-test")]
+pub fn sandbox_self_test() -> bool {
+    if !self_test() {
+        return false;
+    }
+    let mut record = [0u8; libwoven::store::MAX_RECORD_BYTES];
+    let Ok(length) = crate::wfs::read_vfs_path_durable(CATALOG_PATH, &mut record) else {
+        return false;
+    };
+    let Ok(current) = libwoven::store::Store::decode_record(&record[..length]) else {
+        return false;
+    };
+    let Some(entry) = current.entry(b"core") else {
+        return false;
+    };
+    let Some(profile) = sandbox_for_entry(&entry) else {
+        return false;
+    };
+    profile.allows(crate::capability::Capability::Console)
+        && !profile.allows(crate::capability::Capability::FileRead)
+        && profile.allows_service_discover(crate::wovenguard::ServiceClass::Application)
+        && !profile.allows_service_discover(crate::wovenguard::ServiceClass::Storage)
+        && crate::wovenguard::package_sandbox(
+            crate::capability::CapabilitySet::only(crate::capability::Capability::InterruptControl),
+        )
+        .is_none()
 }

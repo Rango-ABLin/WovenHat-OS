@@ -2280,6 +2280,21 @@ Multi-package rollback, power-loss injection at every boundary, sandbox
 enforcement, userspace package-service IPC/ownership, and physical USB
 qualification remain open.
 
+## Stage 21.11 WovenPackage sandbox launch boundary (2026-10-20)
+
+Package capability declarations now produce an immutable WovenGuard user
+profile before launch. Declarations outside the user-domain ceiling are
+rejected; file access is narrowed to system/temporary/mounted/home scopes,
+device policy follows declared device capabilities, and service discovery is
+limited to application-class services. The profile-aware spawn path destroys
+invalid images before address-space publication. The Stage 21.11 disposable
+ATA QEMU gate passed on 1/2/4 CPUs; host and freestanding warning-denying
+Clippy plus the 63-test `libwoven` suite passed.
+
+This closes the package launch-policy boundary but not a complete userspace
+WovenPackage IPC broker, multi-package power-loss recovery, or physical USB
+qualification.
+
 ## Graphics track - bounded quadratic paths (2026-10-18)
 
 `Path::quadratic_to` now flattens quadratic Bézier segments into four

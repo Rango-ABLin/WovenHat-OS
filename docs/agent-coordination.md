@@ -15,6 +15,13 @@ restore intent, and replays rollback idempotently. Garbage collection retires
 only generations that are neither active nor the retained rollback generation.
 Stage 21.10 passed on 1/2/4 CPUs. No physical USB write was performed.
 
+**Codex: Stage 21.11 WovenPackage sandbox launch boundary (2026-10-20):**
+package capability declarations now derive a restrictive WovenGuard profile;
+invalid declarations are rejected before address-space publication, and the
+profile-aware spawn path destroys invalid images. Stage 21.11 passed on 1/2/4
+CPUs. A userspace WovenPackage IPC broker and physical USB qualification remain
+open. No physical USB write was performed.
+
 **Codex: Stage 21.1 bounded WovenPackages envelope (2026-10-20):** `libwoven`
 now parses a bounded version-1 `WPKG` envelope containing a manifest,
 application bytes, resources, and a fixed 64-byte signature field. Manifest

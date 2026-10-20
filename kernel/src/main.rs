@@ -143,14 +143,16 @@ mod compositor;
     feature = "stage21-7-test",
     feature = "stage21-8-test",
     feature = "stage21-9-test",
-    feature = "stage21-10-test"
+    feature = "stage21-10-test",
+    feature = "stage21-11-test"
 ))]
 mod package;
 #[cfg(any(
     feature = "stage21-7-test",
     feature = "stage21-8-test",
     feature = "stage21-9-test",
-    feature = "stage21-10-test"
+    feature = "stage21-10-test",
+    feature = "stage21-11-test"
 ))]
 mod package_service;
 #[cfg(any(feature = "stage12-3-test", feature = "stage12-5-test"))]
@@ -2795,7 +2797,8 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         not(feature = "stage21-7-test"),
         not(feature = "stage21-8-test"),
         not(feature = "stage21-9-test"),
-        not(feature = "stage21-10-test")
+        not(feature = "stage21-10-test"),
+        not(feature = "stage21-11-test")
     ))]
     match storage::live_mutation_self_test() {
         storage::LiveMutationTestStatus::Passed => {
@@ -4335,7 +4338,8 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         not(feature = "stage21-7-test"),
         not(feature = "stage21-8-test"),
         not(feature = "stage21-9-test"),
-        not(feature = "stage21-10-test")
+        not(feature = "stage21-10-test"),
+        not(feature = "stage21-11-test")
     ))]
     {
         if !wfs::stage15_2_self_test() {
@@ -4509,6 +4513,15 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
             qemu_test_exit_failure();
         }
         serial::write_line(format_args!("[S21.10] WovenPackage rollback: PASSED"));
+        qemu_test_exit_success();
+    }
+    #[cfg(feature = "stage21-11-test")]
+    {
+        if !package_service::sandbox_self_test() {
+            serial::write_line(format_args!("[S21.11] WovenPackage sandbox: FAILED"));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!("[S21.11] WovenPackage sandbox: PASSED"));
         qemu_test_exit_success();
     }
     #[cfg(feature = "stage27-2-test")]

@@ -10,7 +10,7 @@ from pathlib import Path
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--cpus", type=int, choices=(1, 2, 4), default=1)
-    parser.add_argument("--stage", type=int, choices=(6, 7, 8, 9, 10), default=6)
+    parser.add_argument("--stage", type=int, choices=(6, 7, 8, 9, 10, 11), default=6)
     parser.add_argument("--size-mib", type=int, default=16)
     parser.add_argument("--timeout", type=float, default=240)
     parser.add_argument(
@@ -68,7 +68,11 @@ def main() -> int:
                 else (
                     "[S21.9] WovenPackage update/remove: PASSED"
                     if args.stage == 9
-                    else "[S21.10] WovenPackage rollback: PASSED"
+                    else (
+                        "[S21.10] WovenPackage rollback: PASSED"
+                        if args.stage == 10
+                        else "[S21.11] WovenPackage sandbox: PASSED"
+                    )
                 )
             )
         )

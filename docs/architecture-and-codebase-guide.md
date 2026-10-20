@@ -1215,6 +1215,15 @@ the previous payload remains available, and a checksummed rollback intent makes
 restoration idempotent. The next transaction garbage-collects only generations
 that are neither active nor the retained rollback generation.
 
+Stage 21.11 turns package capability declarations into launch authority.
+`wovenguard::package_sandbox` rejects capabilities outside the user-domain
+ceiling, narrows file access to system/temporary/mounted/home scopes, maps
+declared device classes, and permits only application-class service discovery.
+`task::spawn_user_process_with_package_capabilities` applies that immutable
+profile before publishing the new address space and destroys invalid images.
+This is the kernel launch boundary; a long-lived userspace WovenPackage IPC
+broker still needs to be built above it.
+
 The feature-gated `stage19-app-catalog-test` now exercises the install-plan
 boundary for all ten accepted packages together. It verifies each WAPP,
 rejects a mutation, installs and reads each package back through the VFS,
