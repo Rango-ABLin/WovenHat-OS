@@ -91,7 +91,7 @@ mod heap;
 #[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
 mod hid;
 mod interrupts;
-#[cfg(feature = "stage24-3-test")]
+#[cfg(any(feature = "stage24-3-test", feature = "system-apps"))]
 mod identity_storage;
 #[cfg(any(
     feature = "stage24-4-test",

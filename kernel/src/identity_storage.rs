@@ -26,6 +26,7 @@ fn checksum(bytes: &[u8]) -> u32 {
     value
 }
 
+#[cfg(feature = "stage24-3-test")]
 fn encode(sequence: u64, snapshot: &[u8; SNAPSHOT_BYTES], output: &mut [u8; RECORD_BYTES]) {
     output[..4].copy_from_slice(&MAGIC);
     output[4..12].copy_from_slice(&sequence.to_le_bytes());
@@ -55,6 +56,7 @@ fn read_copy(index: usize, output: &mut [u8; RECORD_BYTES]) -> Result<usize, Rec
     crate::wfs::read_vfs_path_durable(PATHS[index], output).map_err(|_| RecordError::Storage)
 }
 
+#[cfg(feature = "stage24-3-test")]
 pub fn persist(
     authority: &crate::wfs::AuthorizedWfsWriter,
     snapshot: &[u8; SNAPSHOT_BYTES],

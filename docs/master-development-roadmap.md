@@ -914,6 +914,13 @@ session open/lock/unlock/elevation/close framing and safe userspace wrappers.
 The gate proves parser/ABI behavior only; runtime loading, live Ring-3 login,
 teardown, auditing, lockout, and shell migration remain open.
 
+Stage 24.8 WID2 runtime recovery accepted (2026-10-20): system-apps startup
+prefers the newest authenticated native WID2 snapshot and falls back safely to
+the bounded account file when no durable copy exists. Stage 24.3 native
+storage, host, system-apps, and 1/2/4-CPU gates pass. Hardware credential roots,
+administration/rotation, lockout/rate limiting, malformed-request telemetry,
+release-key provisioning, and physical qualification remain open.
+
 Stage 24.7 identity audit actions accepted (2026-10-20): valid identity open,
 lock, unlock, elevation, and close outcomes are recorded in the kernel security
 ledger and decoded through stable public action IDs 26–30. Host, freestanding,

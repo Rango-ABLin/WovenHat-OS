@@ -1,5 +1,13 @@
 # WovenHat OS Architecture & Codebase Guide
 
+### Stage 24.8 — WID2 runtime recovery
+
+System-apps startup calls the native `identity_storage::load` adapter before
+WovenShell starts. The newest checksum-valid WID2 copy is decoded into a fresh
+`libwoven::identity::Authority`; invalid or missing durable records fail closed
+to the bounded account-file bootstrap. No session state is persisted or
+restored by this path.
+
 ### Stage 24.7 — WovenIdentity audit actions
 
 Identity syscalls record valid open, lock, unlock, elevation, and close

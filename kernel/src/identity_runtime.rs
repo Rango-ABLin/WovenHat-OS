@@ -71,6 +71,21 @@ pub(crate) fn load_accounts_file(path: &str) -> Result<(), Error> {
     Ok(())
 }
 
+#[cfg(feature = "system-apps")]
+pub(crate) fn load_durable_or_accounts(path: &str) -> Result<(), Error> {
+    let mut snapshot = [0u8; libwoven::identity::SNAPSHOT_BYTES];
+    if let Ok(sequence) = crate::identity_storage::load(&mut snapshot) {
+        let authority = Authority::decode_snapshot(&snapshot).map_err(Error::Identity)?;
+        install(authority);
+        crate::serial::write_line(format_args!(
+            "[IDENTITY] loaded durable WID2 snapshot sequence={}",
+            sequence
+        ));
+        return Ok(());
+    }
+    load_accounts_file(path)
+}
+
 pub(crate) fn release_owner(owner: u64) {
     let mut sessions = [None; MAX_BINDINGS];
     let mut count = 0;

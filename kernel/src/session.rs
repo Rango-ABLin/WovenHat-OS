@@ -46,7 +46,7 @@ pub const CAPABILITIES: CapabilitySet = CapabilitySet::only(Capability::Console)
 pub fn start(image: &[u8], accounts: Option<&str>) -> Result<u64, Error> {
     #[cfg(feature = "system-apps")]
     if let Some(path) = accounts {
-        crate::identity_runtime::load_accounts_file(path).map_err(|_| Error::Identity)?;
+        crate::identity_runtime::load_durable_or_accounts(path).map_err(|_| Error::Identity)?;
     }
     let program = match accounts {
         Some(path) => {

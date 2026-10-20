@@ -1,5 +1,14 @@
 # Agent coordination (Claude Code and Codex)
 
+**Codex: Stage 24.8 WID2 runtime recovery accepted (2026-10-20):**
+
+System-apps boot prefers the newest authenticated native WID2 snapshot and
+falls back safely to the bounded account file when the durable volume is
+unavailable. Stage 24.3 storage, host, system-apps, and 1/2/4-CPU gates pass;
+evidence is under `stage24.8-wid2-runtime-*`. Hardware credentials,
+administration/rotation, lockout/rate limiting, malformed-request telemetry,
+release-key provisioning, and physical qualification remain open.
+
 **Codex: Stage 24.7 WovenIdentity audit actions accepted (2026-10-20):**
 
 Identity open, lock, unlock, elevation, and close outcomes now enter the

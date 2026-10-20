@@ -1,5 +1,23 @@
 # Stage status
 
+## Stage 24.8 WID2 runtime recovery (2026-10-20)
+
+System-apps startup now prefers the newest valid authenticated WID2 snapshot
+from native WovenFS and falls back to the bounded account file when no durable
+copy is present. Snapshot decoding is bounded, sessions are excluded, and the
+native read path is fail-closed. Stage 24.3 Clippy, host tests/Clippy,
+system-apps Clippy, diff check, and the signed system-apps shell gate on 1/2/4
+CPUs pass. Evidence is under:
+`audit-artifacts/stage24.8-wid2-runtime-1cpu-1792531800000000000`,
+`audit-artifacts/stage24.8-wid2-runtime-2cpu-1792531800000000000`, and
+`audit-artifacts/stage24.8-wid2-runtime-4cpu-1792531800000000000`.
+
+The QEMU fixture has no ATA WovenFS disk, so the durable branch is covered by
+the Stage 24.3 native self-test and the live gate covers the safe fallback.
+Administration/rotation, lockout/rate limiting, malformed-request telemetry,
+hardware credentials, real release-key provisioning, and physical
+USB/power-loss qualification remain open.
+
 ## Stage 24.7 WovenIdentity audit actions (2026-10-20)
 
 Identity open, lock, unlock, elevation, and close outcomes now enter the
