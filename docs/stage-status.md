@@ -1,5 +1,36 @@
 # Stage status
 
+## Heap-crash root cause fixed: fallible compositor surface allocation
+## (2026-10-20)
+
+The `KERNEL ALLOC ERROR: layout size=4096000 align=4` crash found during
+live interactive desktop testing (see the 2026-10-19 entry below) is
+root-caused and fixed. `compositor::rescale_to` -- run on every display-
+scale change -- and four `user_graphics.rs` surface-copy helpers run on
+every blit (`snapshot`, `snapshot_region`, `snapshot_shared`,
+`take_damage_shared`) used the panicking `Surface::new` instead of the
+fallible `Surface::try_new`, which exists in the same module for exactly
+this reason (`user_graphics.rs`'s own `create` syscall path already used
+it correctly). At display scale 1 on a 1280x800 framebuffer, the scale-
+change surface is exactly 4,096,000 bytes, matching the crash signature.
+On allocation failure these paths now return a new `Error::OutOfMemory`
+variant (both `compositor::Error` and `user_graphics::Error`) instead of
+invoking the kernel's global `alloc_error_handler`.
+
+**Evidence.** `scripts/test-hello-gui-compositor-qemu.py --stage 19.14`
+(display scaling, repeatedly rescales) and `--stage 19.11` (window
+stacking, exercises the snapshot helpers) pass on 1/2/4 CPUs.
+`scripts/test-shell-qemu.py --hardware-demo` passes on 1/2/4 CPUs. Kernel
+`hardware-demo`-feature Clippy and workspace `--all-targets` Clippy are
+clean.
+
+**Not fixed, and not this bug:** `--stage 19.9` (damage compositing) fails
+with `[S19.9] damage rules FAIL`, reproducible at HEAD without this fix
+applied (isolated via `git stash` on just the `user_graphics.rs` side of
+the change). Logged in `docs/agent-coordination.md` as a separate,
+pre-existing regression for whoever has been in the recent
+damage/compositing commits to pick up.
+
 ## Session track - persistent account import implemented (2026-10-20)
 
 Hardware-demo boot now checks the mounted FAT32 volume for
