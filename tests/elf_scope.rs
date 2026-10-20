@@ -58,7 +58,8 @@ fn null_debug_rendezvous_metadata_is_inert() {
     put64(&mut bytes, 152, 7 * 16);
     put64(&mut bytes, 160, 7 * 16);
     put64(&mut bytes, DYNAMIC + 5 * 16, 21);
-    let parsed = image(&bytes);
+    let parsed =
+        elf::parse(&bytes).unwrap_or_else(|error| panic!("fixture parse error: {error:?}"));
     assert_eq!(parsed.entry, BASE);
     assert_eq!(
         parsed.defined_global_symbol(&bytes, b"export"),
@@ -142,7 +143,7 @@ fn fixture(dependencies: &[u64]) -> Vec<u8> {
 }
 
 fn image(bytes: &[u8]) -> elf::Image {
-    elf::parse(bytes).unwrap_or_else(|_| panic!("fixture must parse"))
+    elf::parse(bytes).unwrap_or_else(|error| panic!("fixture parse error: {error:?}"))
 }
 
 fn tls_fixture() -> Vec<u8> {
@@ -167,8 +168,8 @@ fn plt_fixture() -> Vec<u8> {
     put32(&mut bytes, 180, 6);
     put64(&mut bytes, 184, 0x2000);
     put64(&mut bytes, 192, BASE + 0x1000);
-    put64(&mut bytes, 208, 0x100);
-    put64(&mut bytes, 216, 0x100);
+    put64(&mut bytes, 208, 0x200);
+    put64(&mut bytes, 216, 0x200);
     put64(&mut bytes, 224, 0x1000);
     put64(&mut bytes, 152, 10 * 16);
     put64(&mut bytes, DYNAMIC + 5 * 16, 2); // DT_PLTRELSZ

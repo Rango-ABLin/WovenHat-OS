@@ -86,7 +86,7 @@ pub struct Image {
     position_independent: bool,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Error {
     Truncated,
     InvalidHeader,
@@ -663,7 +663,7 @@ fn parse_image(bytes: &[u8], shared: bool) -> Result<Image, Error> {
                 return Err(Error::InvalidSegment);
             }
             if rela_size == 0 {
-                if rela_address.is_some() || rela_entry_size != 0 {
+                if rela_address.is_some() || (rela_entry_size != 0 && plt_rela_size == 0) {
                     return Err(Error::InvalidSegment);
                 }
             } else {
