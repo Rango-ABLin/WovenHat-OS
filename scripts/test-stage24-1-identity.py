@@ -12,7 +12,7 @@ import time
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--cpus", type=int, choices=(1, 2, 4), default=1)
-    parser.add_argument("--stage", type=int, choices=(1, 2, 3, 4), default=1)
+    parser.add_argument("--stage", type=int, choices=(1, 2, 3, 4, 5), default=1)
     parser.add_argument(
         "--qemu",
         default=shutil.which("qemu-system-x86_64")
@@ -98,8 +98,10 @@ def main() -> int:
         marker = "[S24.2] WovenIdentity snapshot: PASSED"
     elif args.stage == 3:
         marker = "[S24.3] WovenIdentity durable storage: PASSED"
-    else:
+    elif args.stage == 4:
         marker = "[S24.4] WovenIdentity task binding: PASSED"
+    else:
+        marker = "[S24.5] WovenIdentity syscall ABI: PASSED"
     if result != 33 or marker not in serial_text:
         print(f"Stage 24.{args.stage} failed (exit {result}). Evidence: {out}", file=sys.stderr)
         print(serial_text[-8000:], file=sys.stderr)

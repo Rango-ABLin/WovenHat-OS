@@ -1,5 +1,26 @@
 # Stage status
 
+## Stage 24.5 bounded WovenIdentity syscall ABI (2026-10-20)
+
+The WovenHat ABI now reserves syscalls 219–223 for identity session open,
+lock, unlock, elevation, and close. Requests use bounded length-prefixed
+buffers; the kernel copies them before parsing or authentication, rejects
+truncation/empty/oversized fields, and returns the existing error sentinel on
+failure. `libwoven::identity` provides safe wrappers that keep request bytes on
+the caller's bounded stack and never retain password pointers.
+
+The dedicated gate passed with exit 33 and
+`[S24.5] WovenIdentity syscall ABI: PASSED` on 1/2/4 CPUs. The 84-test
+`libwoven` suite, Stage 24.5 freestanding Clippy, host all-targets Clippy,
+Python validation, and `git diff --check` pass. Evidence is preserved under:
+`audit-artifacts/stage24.5-1cpu-1792526996850760700`,
+`audit-artifacts/stage24.5-2cpu-1792527013189914600`, and
+`audit-artifacts/stage24.5-4cpu-1792527027362429900`.
+
+This stage proves the bounded ABI and parser only. Durable snapshot loading
+into the runtime, a live Ring-3 login fixture, process-exit reclamation, audit
+events, lockout/rate limiting, and WovenShell migration remain required.
+
 ## Stage 24.4 owner-bound kernel identity seam (2026-10-20)
 
 `kernel/src/identity_runtime.rs` introduces the kernel seam between the

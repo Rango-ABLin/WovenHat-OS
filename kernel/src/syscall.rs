@@ -412,6 +412,21 @@ pub enum Number {
         feature = "system-apps"
     ))]
     AiMessageSend = 218,
+    /// identity open buffer `[name_len][name][password_len][password]` -> session
+    #[cfg(any(feature = "stage24-5-test", feature = "system-apps"))]
+    IdentityOpen = 219,
+    /// session -> 0; owner-bound lock
+    #[cfg(any(feature = "stage24-5-test", feature = "system-apps"))]
+    IdentityLock = 220,
+    /// session, password buffer `[length][password]`, length -> 0
+    #[cfg(any(feature = "stage24-5-test", feature = "system-apps"))]
+    IdentityUnlock = 221,
+    /// session, password buffer `[length][password]`, length -> 0
+    #[cfg(any(feature = "stage24-5-test", feature = "system-apps"))]
+    IdentityElevate = 222,
+    /// session -> 0; owner-bound close
+    #[cfg(any(feature = "stage24-5-test", feature = "system-apps"))]
+    IdentityClose = 223,
 }
 
 pub fn entry_address() -> u64 {
@@ -2875,6 +2890,20 @@ pub extern "C" fn wovenhat_syscall_dispatch(
         value if value == Number::GraphicsCompositorOutputs as u64 => sys_compositor_outputs(arg0),
         value if value == Number::PowerControl as u64 => sys_power_control(arg0),
         value if value == Number::AccountsChangePin as u64 => sys_accounts_change_pin(arg0, arg1),
+        #[cfg(any(feature = "stage24-5-test", feature = "system-apps"))]
+        value if value == Number::IdentityOpen as u64 => sys_identity_open(arg0, arg1),
+        #[cfg(any(feature = "stage24-5-test", feature = "system-apps"))]
+        value if value == Number::IdentityLock as u64 => sys_identity_lock(arg0),
+        #[cfg(any(feature = "stage24-5-test", feature = "system-apps"))]
+        value if value == Number::IdentityUnlock as u64 => {
+            sys_identity_password_action(arg0, arg1, arg2, false)
+        }
+        #[cfg(any(feature = "stage24-5-test", feature = "system-apps"))]
+        value if value == Number::IdentityElevate as u64 => {
+            sys_identity_password_action(arg0, arg1, arg2, true)
+        }
+        #[cfg(any(feature = "stage24-5-test", feature = "system-apps"))]
+        value if value == Number::IdentityClose as u64 => sys_identity_close(arg0),
         _ => u64::MAX,
     };
 
@@ -3256,6 +3285,68 @@ fn sys_accounts_change_pin(user_buffer: u64, length: u64) -> u64 {
         result.is_ok(),
     );
     result.map_or(SYSCALL_ERROR, |()| 0)
+}
+
+#[cfg(any(feature = "stage24-5-test", feature = "system-apps"))]
+fn sys_identity_open(user_buffer: u64, length: u64) -> u64 {
+    const MAX_BUFFER: usize = 2 + crate::accounts::MAX_NAME + crate::accounts::MAX_PIN;
+    let Ok(length) = usize::try_from(length) else {
+        return SYSCALL_ERROR;
+    };
+    if length == 0 || length > MAX_BUFFER {
+        return SYSCALL_ERROR;
+    }
+    let mut buffer = [0u8; MAX_BUFFER];
+    if crate::paging::copy_from_current_user(user_buffer, &mut buffer[..length]).is_err() {
+        return SYSCALL_ERROR;
+    }
+    let Some((name, password)) = crate::identity_runtime::parse_open_buffer(&buffer[..length])
+    else {
+        return SYSCALL_ERROR;
+    };
+    crate::identity_runtime::open(crate::task::current_process_id(), name, password)
+        .map(|session| session.0)
+        .unwrap_or(SYSCALL_ERROR)
+}
+
+#[cfg(any(feature = "stage24-5-test", feature = "system-apps"))]
+fn sys_identity_lock(session: u64) -> u64 {
+    crate::identity_runtime::lock(crate::task::current_process_id(), libwoven::identity::SessionId(session))
+        .map_or(SYSCALL_ERROR, |_| 0)
+}
+
+#[cfg(any(feature = "stage24-5-test", feature = "system-apps"))]
+fn sys_identity_password_action(session: u64, user_buffer: u64, length: u64, elevate: bool) -> u64 {
+    const MAX_BUFFER: usize = 1 + crate::accounts::MAX_PIN;
+    let Ok(length) = usize::try_from(length) else {
+        return SYSCALL_ERROR;
+    };
+    if length == 0 || length > MAX_BUFFER {
+        return SYSCALL_ERROR;
+    }
+    let mut buffer = [0u8; MAX_BUFFER];
+    if crate::paging::copy_from_current_user(user_buffer, &mut buffer[..length]).is_err() {
+        return SYSCALL_ERROR;
+    }
+    let Some(password) = crate::identity_runtime::parse_password_buffer(&buffer[..length]) else {
+        return SYSCALL_ERROR;
+    };
+    let owner = crate::task::current_process_id();
+    let result = if elevate {
+        crate::identity_runtime::elevate(owner, libwoven::identity::SessionId(session), password)
+    } else {
+        crate::identity_runtime::unlock(owner, libwoven::identity::SessionId(session), password)
+    };
+    result.map_or(SYSCALL_ERROR, |_| 0)
+}
+
+#[cfg(any(feature = "stage24-5-test", feature = "system-apps"))]
+fn sys_identity_close(session: u64) -> u64 {
+    crate::identity_runtime::close(
+        crate::task::current_process_id(),
+        libwoven::identity::SessionId(session),
+    )
+    .map_or(SYSCALL_ERROR, |_| 0)
 }
 
 /// The compositor surface's size and display scale. Requires `DisplayIo` and

@@ -158,3 +158,26 @@ pub(crate) fn self_test() -> bool {
     matches!(open(1, b"alice", b"1234"), Err(Error::Task))
         && matches!(lock(1, SessionId(1)), Err(Error::Owner))
 }
+
+pub(crate) fn parse_open_buffer(buffer: &[u8]) -> Option<(&[u8], &[u8])> {
+    let (&name_len, rest) = buffer.split_first()?;
+    let name_len = name_len as usize;
+    let (name, rest) = rest.split_at_checked(name_len)?;
+    let (&password_len, rest) = rest.split_first()?;
+    let password_len = password_len as usize;
+    let (password, rest) = rest.split_at_checked(password_len)?;
+    (rest.is_empty()
+        && !name.is_empty()
+        && name.len() <= libwoven::accounts::MAX_NAME
+        && !password.is_empty()
+        && password.len() <= libwoven::accounts::MAX_PIN)
+        .then_some((name, password))
+}
+
+pub(crate) fn parse_password_buffer(buffer: &[u8]) -> Option<&[u8]> {
+    let (&length, rest) = buffer.split_first()?;
+    let length = length as usize;
+    let (password, rest) = rest.split_at_checked(length)?;
+    (rest.is_empty() && !password.is_empty() && password.len() <= libwoven::accounts::MAX_PIN)
+        .then_some(password)
+}

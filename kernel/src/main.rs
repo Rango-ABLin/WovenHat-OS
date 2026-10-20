@@ -93,7 +93,7 @@ mod hid;
 mod interrupts;
 #[cfg(feature = "stage24-3-test")]
 mod identity_storage;
-#[cfg(feature = "stage24-4-test")]
+#[cfg(any(feature = "stage24-4-test", feature = "stage24-5-test"))]
 mod identity_runtime;
 mod ipc;
 mod irq_lock;
@@ -4681,6 +4681,15 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         serial::write_line(format_args!("[S24.4] WovenIdentity task binding: PASSED"));
         qemu_test_exit_success();
     }
+    #[cfg(feature = "stage24-5-test")]
+    {
+        if !stage24_identity_syscall_frame_self_test() {
+            serial::write_line(format_args!("[S24.5] WovenIdentity syscall ABI: FAILED"));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!("[S24.5] WovenIdentity syscall ABI: PASSED"));
+        qemu_test_exit_success();
+    }
     #[cfg(feature = "stage27-2-test")]
     {
         if !update::durable_self_test() {
@@ -6485,6 +6494,29 @@ fn stage24_identity_snapshot_self_test() -> bool {
         return fail("tampered snapshot was accepted");
     }
     true
+}
+
+#[cfg(feature = "stage24-5-test")]
+fn stage24_identity_syscall_frame_self_test() -> bool {
+    let valid_open = [5, b'a', b'l', b'i', b'c', b'e', 4, b'1', b'2', b'3', b'4'];
+    let Some((name, password)) = identity_runtime::parse_open_buffer(&valid_open) else {
+        return false;
+    };
+    if name != b"alice" || password != b"1234" {
+        return false;
+    }
+    let malformed = [5, b'a', b'l', b'i', b'c', b'e', 4, b'1'];
+    if identity_runtime::parse_open_buffer(&malformed).is_some() {
+        return false;
+    }
+    let valid_password = [4, b'1', b'2', b'3', b'4'];
+    let Some(password) = identity_runtime::parse_password_buffer(&valid_password) else {
+        return false;
+    };
+    if password != b"1234" {
+        return false;
+    }
+    identity_runtime::parse_password_buffer(&[0]).is_none()
 }
 
 #[cfg(feature = "system-apps")]

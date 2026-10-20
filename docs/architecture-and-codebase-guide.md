@@ -1,5 +1,15 @@
 # WovenHat OS Architecture & Codebase Guide
 
+### Stage 24.5 — WovenIdentity syscall ABI
+
+Syscalls 219–223 are additive identity calls: open, lock, unlock, elevate, and
+close. Open carries `[name_len][name][password_len][password]`; password
+actions carry `[length][password]`. Kernel handlers reject bounded-buffer
+violations before calling `identity_runtime`, and the `libwoven::identity`
+wrappers construct exact-length stack buffers. The ABI does not retain user
+pointers. Runtime snapshot loading, live Ring-3 exercise, teardown reclamation,
+audit, lockout, and shell migration are intentionally later acceptance slices.
+
 ### Stage 24.4 — owner-bound kernel identity seam
 
 `kernel/src/identity_runtime.rs` keeps fixed session bindings `(SessionId,

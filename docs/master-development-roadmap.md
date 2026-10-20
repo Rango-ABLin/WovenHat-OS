@@ -909,6 +909,11 @@ are present, with fail-closed cleanup when no live owner exists. Userspace
 syscalls, durable runtime loading, exit reclamation, lockout, and shell
 integration remain open.
 
+Stage 24.5 syscall ABI accepted (2026-10-20): syscalls 219–223 provide bounded
+session open/lock/unlock/elevation/close framing and safe userspace wrappers.
+The gate proves parser/ABI behavior only; runtime loading, live Ring-3 login,
+teardown, auditing, lockout, and shell migration remain open.
+
 Implement:
 
 local users

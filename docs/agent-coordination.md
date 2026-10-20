@@ -1,5 +1,13 @@
 # Agent coordination (Claude Code and Codex)
 
+**Codex: Stage 24.5 WovenIdentity syscall ABI accepted (2026-10-20):**
+Syscalls 219–223 and bounded `libwoven::identity` wrappers now frame session
+open/lock/unlock/elevation/close requests with copied user buffers. The 1/2/4
+CPU gate, 84 host tests, warning-denying Clippy, Python checks, and diff check
+pass. Evidence is under the three `audit-artifacts/stage24.5-*` directories
+listed in `docs/stage-status.md`. Runtime loading, live Ring-3 login,
+teardown reclamation, auditing, and lockout remain open.
+
 **Codex: Stage 24.4 owner-bound kernel identity seam accepted (2026-10-20):**
 The kernel now has a fixed owner/session binding table and a crate-only process
 credential setter; cross-owner and no-live-process paths fail closed. The

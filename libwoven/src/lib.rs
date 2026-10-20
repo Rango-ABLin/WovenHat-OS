@@ -11292,6 +11292,11 @@ pub mod syscall {
     pub const IPC_MESSAGE_RECEIVE: u64 = 216;
     pub const PACKAGE_TRANSACTION: u64 = 217;
     pub const AI_MESSAGE_SEND: u64 = 218;
+    pub const IDENTITY_OPEN: u64 = 219;
+    pub const IDENTITY_LOCK: u64 = 220;
+    pub const IDENTITY_UNLOCK: u64 = 221;
+    pub const IDENTITY_ELEVATE: u64 = 222;
+    pub const IDENTITY_CLOSE: u64 = 223;
     pub const MESSAGE_SEND: u64 = 11;
     pub const MESSAGE_RECEIVE: u64 = 12;
 

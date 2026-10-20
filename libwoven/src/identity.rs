@@ -664,6 +664,84 @@ fn fnv1a(bytes: &[u8]) -> u32 {
     hash
 }
 
+/// Open a kernel-owned identity session using a bounded copied request.
+pub fn session_open(name: &[u8], password: &[u8]) -> Result<SessionId, crate::Error> {
+    if name.is_empty()
+        || name.len() > MAX_NAME
+        || password.is_empty()
+        || password.len() > MAX_PIN
+    {
+        return Err(crate::Error::Failed);
+    }
+    let mut packed = [0u8; 2 + MAX_NAME + MAX_PIN];
+    packed[0] = name.len() as u8;
+    packed[1..1 + name.len()].copy_from_slice(name);
+    let password_offset = 1 + name.len();
+    packed[password_offset] = password.len() as u8;
+    packed[password_offset + 1..password_offset + 1 + password.len()]
+        .copy_from_slice(password);
+    let length = password_offset + 1 + password.len();
+    // SAFETY: `packed` is a bounded stack buffer whose exact initialized
+    // length is passed to the kernel.
+    crate::check(unsafe {
+        crate::syscall::invoke(
+            crate::syscall::IDENTITY_OPEN,
+            packed.as_ptr() as u64,
+            length as u64,
+            0,
+        )
+    })
+    .map(SessionId)
+}
+
+pub fn session_lock(session: SessionId) -> Result<(), crate::Error> {
+    // SAFETY: integer-only syscall; the kernel owner-binds the token.
+    crate::check(unsafe {
+        crate::syscall::invoke(crate::syscall::IDENTITY_LOCK, session.0, 0, 0)
+    })
+    .map(|_| ())
+}
+
+fn session_password_action(
+    syscall: u64,
+    session: SessionId,
+    password: &[u8],
+) -> Result<(), crate::Error> {
+    if password.is_empty() || password.len() > MAX_PIN {
+        return Err(crate::Error::Failed);
+    }
+    let mut packed = [0u8; 1 + MAX_PIN];
+    packed[0] = password.len() as u8;
+    packed[1..1 + password.len()].copy_from_slice(password);
+    // SAFETY: `packed` is a bounded stack buffer with an exact initialized
+    // length, and the kernel copies it before using the password.
+    crate::check(unsafe {
+        crate::syscall::invoke(
+            syscall,
+            session.0,
+            packed.as_ptr() as u64,
+            1 + password.len() as u64,
+        )
+    })
+    .map(|_| ())
+}
+
+pub fn session_unlock(session: SessionId, password: &[u8]) -> Result<(), crate::Error> {
+    session_password_action(crate::syscall::IDENTITY_UNLOCK, session, password)
+}
+
+pub fn session_elevate(session: SessionId, password: &[u8]) -> Result<(), crate::Error> {
+    session_password_action(crate::syscall::IDENTITY_ELEVATE, session, password)
+}
+
+pub fn session_close(session: SessionId) -> Result<(), crate::Error> {
+    // SAFETY: integer-only syscall; the kernel owner-binds the token.
+    crate::check(unsafe {
+        crate::syscall::invoke(crate::syscall::IDENTITY_CLOSE, session.0, 0, 0)
+    })
+    .map(|_| ())
+}
+
 impl Default for Authority {
     fn default() -> Self {
         Self::new()

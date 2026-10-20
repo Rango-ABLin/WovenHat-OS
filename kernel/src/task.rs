@@ -2894,7 +2894,7 @@ pub fn process_credentials(id: ProcessId) -> Option<Credentials> {
 /// authority has authenticated and owner-bound the session. This is crate
 /// visible so no userspace path can manufacture credentials; callers must not
 /// invoke it without first validating an identity session and audit decision.
-#[cfg(feature = "stage24-4-test")]
+#[cfg(any(feature = "stage24-4-test", feature = "stage24-5-test"))]
 pub(crate) fn set_current_credentials(credentials: Credentials) -> bool {
     let process_id = current_process_id();
     let mut processes = process_table_lock();
