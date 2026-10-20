@@ -4613,6 +4613,15 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         serial::write_line(format_args!("[S23.4] WovenAI capability security: PASSED"));
         qemu_test_exit_success();
     }
+    #[cfg(feature = "stage23-5-test")]
+    {
+        if !stage23_semantic_search_self_test() {
+            serial::write_line(format_args!("[S23.5] WovenAI semantic search: FAILED"));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!("[S23.5] WovenAI semantic search: PASSED"));
+        qemu_test_exit_success();
+    }
     #[cfg(feature = "stage27-2-test")]
     {
         if !update::durable_self_test() {
@@ -6176,6 +6185,43 @@ fn stage23_ai_capability_security_self_test() -> bool {
         if system.contains(capability) {
             return fail("system-service ceiling grants sensitive AI authority");
         }
+    }
+    true
+}
+
+#[cfg(feature = "stage23-5-test")]
+fn stage23_semantic_search_self_test() -> bool {
+    use libwoven::semantic_search::{Entry, Hit, Index, Kind, MAX_HITS};
+
+    fn fail(reason: &str) -> bool {
+        serial::write_line(format_args!("[S23.5] {}", reason));
+        false
+    }
+    let mut index = Index::new();
+    let entries = [
+        (1, Kind::Application, b"Woven Terminal".as_slice()),
+        (2, Kind::File, b"network design document".as_slice()),
+        (3, Kind::Setting, b"network privacy settings".as_slice()),
+        (4, Kind::Message, b"message from the team".as_slice()),
+        (5, Kind::Document, b"production release guide".as_slice()),
+        (6, Kind::Command, b"open terminal".as_slice()),
+    ];
+    for (id, kind, title) in entries {
+        let Some(entry) = Entry::new(id, kind, title) else {
+            return fail("bounded entry construction failed");
+        };
+        if !index.insert(entry) {
+            return fail("bounded index insertion failed");
+        }
+    }
+    let mut hits = [Hit { id: 0, kind: Kind::File, score: 0 }; MAX_HITS];
+    let count = index.search(b"network settings", &mut hits);
+    if count != 2 || hits[0].id != 3 || hits[0].score != 2 || hits[1].id != 2 {
+        return fail("semantic ranking mismatch");
+    }
+    let count = index.search(b"TERMINAL", &mut hits);
+    if count != 2 || hits[0].id != 1 || hits[1].id != 6 {
+        return fail("case-insensitive search mismatch");
     }
     true
 }

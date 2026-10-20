@@ -859,6 +859,10 @@ Settings
 Messages
 Documents
 Commands
+
+Stage 23.5 begins with a bounded fixed-capacity index and deterministic term
+scoring; ingestion, privacy filtering, durable updates, and richer semantic
+ranking remain explicit acceptance work rather than implicit capabilities.
 23.6 — Woven Assistant
 
 System assistant capable of executing permitted OS actions.

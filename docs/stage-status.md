@@ -1,5 +1,26 @@
 # Stage status
 
+## Stage 23.5 bounded semantic search core (2026-10-20)
+
+`libwoven::semantic_search` now provides a fixed-capacity, allocation-free
+search index covering the roadmap's application, file, setting, message,
+document, and command kinds. UTF-8 titles are normalized into bounded ASCII
+terms; query hits are scored by term coverage and ranked stably. The index is
+capped at 32 entries, 12 terms per entry, 16 bytes per term, and 8 results.
+
+The dedicated gate passed with exit 33 and
+`[S23.5] WovenAI semantic search: PASSED` on 1/2/4 CPUs. The 75-test
+`libwoven` suite, Stage 23.5 freestanding Clippy, host all-targets Clippy,
+Python validation, and `git diff --check` pass. Evidence is preserved under:
+`audit-artifacts/stage23.5-1cpu-1792524344872274900`,
+`audit-artifacts/stage23.5-2cpu-1792524361998697900`, and
+`audit-artifacts/stage23.5-4cpu-1792524375592482200`.
+
+This is the bounded index/scoring foundation, not a complete production
+filesystem/message ingestion pipeline or vector-embedding runtime. Durable
+index updates, privacy filtering, ranking quality, and user-facing search
+service integration remain required before release readiness.
+
 ## Stage 23.4 WovenAI capability security (2026-10-20)
 
 The Stage 23.4 WovenGuard gate makes the AI security contract explicit and

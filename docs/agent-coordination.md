@@ -1,5 +1,14 @@
 # Agent coordination (Claude Code and Codex)
 
+**Codex: Stage 23.5 bounded semantic search core accepted (2026-10-20):**
+`libwoven::semantic_search` indexes all six roadmap search kinds with fixed
+capacity, UTF-8 validation, normalized terms, stable coverage ranking, and no
+allocation. The 1/2/4-CPU gate, 75 host tests, warning-denying Clippy, and
+Python checks pass. Evidence is under the three `audit-artifacts/stage23.5-*`
+directories listed in `docs/stage-status.md`. Durable ingestion, privacy
+filtering, and a user-facing search service remain open; no physical hardware
+claim is made.
+
 **Codex: Stage 23.4 WovenAI capability security accepted (2026-10-20):**
 The WovenGuard acceptance gate proves local `Ipc + Ai` has no file, network,
 secret, camera, microphone, USB, or device access; cloud `Secrets + NetworkIo`

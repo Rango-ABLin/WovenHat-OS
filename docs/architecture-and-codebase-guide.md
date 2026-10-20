@@ -1366,6 +1366,17 @@ The SystemService domain ceiling excludes `Ai`, `Secrets`, camera, and
 microphone authority. These checks ensure a model receives only declared
 capabilities and cannot widen its authority through the broker.
 
+## Stage 23.5 bounded semantic search core (2026-10-20)
+
+`libwoven::semantic_search` is an allocation-free fixed-capacity index for
+application, file, setting, message, document, and command entries. Titles
+are UTF-8 validated and normalized into bounded ASCII terms. Search ranks by
+the number of covered query terms, with stable insertion-order tie handling;
+there is no unbounded heap, model embedding, or implicit filesystem scan.
+The current acceptance proves the codec/index/scorer boundary only. Durable
+ingestion, per-user privacy filtering, incremental updates, richer language
+normalization, and a user-facing service remain separate work.
+
 The feature-gated `stage19-app-catalog-test` now exercises the install-plan
 boundary for all ten accepted packages together. It verifies each WAPP,
 rejects a mutation, installs and reads each package back through the VFS,
