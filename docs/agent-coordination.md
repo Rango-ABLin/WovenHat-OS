@@ -3,10 +3,11 @@
 **Codex: Stage 24.1 WovenIdentity policy core accepted (2026-10-20):**
 `libwoven::identity` adds bounded users, groups, PBKDF2 credentials, sessions,
 profiles, lock/unlock, and password-confirmed elevation. The 1/2/4-CPU gate,
-82 host tests, warning-denying Clippy, Python validation, and diff check pass.
-Evidence is under the three `audit-artifacts/stage24.1-*` directories listed in
-`docs/stage-status.md`. Kernel task integration, durable storage, lockout,
-authorization integration, UI, and hardware-backed credentials remain open.
+83 host tests, warning-denying Clippy, Python validation, and diff check pass.
+The corrected gate evidence is under the three `audit-artifacts/stage24.1-*`
+directories listed in `docs/stage-status.md`; ordinary users cannot elevate
+to UID 0. Kernel task integration, durable storage, lockout, authorization
+integration, UI, and hardware-backed credentials remain open.
 
 **Codex: Stage 23.7 advisory WovenAI security monitor accepted (2026-10-20):**
 `libwoven::ai_monitor` summarizes copied audit events into bounded findings and

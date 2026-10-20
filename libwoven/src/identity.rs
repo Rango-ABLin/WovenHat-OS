@@ -118,6 +118,7 @@ struct User {
     name_len: usize,
     credential: Credential,
     profile: UserProfile,
+    administrator: bool,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -200,8 +201,30 @@ impl Authority {
         salt: &[u8],
         password: &[u8],
     ) -> Result<UserId, Error> {
+        self.add_user_with_role(name, gid, salt, password, false)
+    }
+
+    pub fn add_administrator(
+        &mut self,
+        name: &[u8],
+        gid: GroupId,
+        salt: &[u8],
+        password: &[u8],
+    ) -> Result<UserId, Error> {
+        self.add_user_with_role(name, gid, salt, password, true)
+    }
+
+    fn add_user_with_role(
+        &mut self,
+        name: &[u8],
+        gid: GroupId,
+        salt: &[u8],
+        password: &[u8],
+        administrator: bool,
+    ) -> Result<UserId, Error> {
         let (name, name_len) = bounded_name(name)?;
         if self.find_group(gid).is_none()
+            || !self.group_has_member_slot(gid)
             || self
                 .users
                 .iter()
@@ -210,6 +233,8 @@ impl Authority {
         {
             return Err(if self.find_group(gid).is_none() {
                 Error::NotFound
+            } else if !self.group_has_member_slot(gid) {
+                Error::Full
             } else {
                 Error::AlreadyExists
             });
@@ -230,6 +255,7 @@ impl Authority {
             name_len,
             credential,
             profile: UserProfile::EMPTY,
+            administrator,
         });
         self.add_member(gid, id)?;
         Ok(id)
@@ -289,6 +315,9 @@ impl Authority {
             return Err(Error::Locked);
         }
         let user = self.find_user(current.user).ok_or(Error::NotFound)?;
+        if !user.administrator {
+            return Err(Error::Unauthorized);
+        }
         if !user.credential.verify(password) {
             return Err(Error::WrongPassword);
         }
@@ -330,6 +359,11 @@ impl Authority {
             .ok_or(Error::Full)?;
         group.members[slot] = Some(user);
         Ok(())
+    }
+
+    fn group_has_member_slot(&self, gid: GroupId) -> bool {
+        self.find_group(gid)
+            .is_some_and(|group| group.members.iter().any(Option::is_none))
     }
 
     fn find_user(&self, id: UserId) -> Option<&User> {
@@ -390,7 +424,7 @@ mod tests {
         let mut authority = Authority::new();
         let group = authority.add_group(b"users").unwrap();
         let user = authority
-            .add_user(b"alice", group, b"salt", b"1234")
+            .add_administrator(b"alice", group, b"salt", b"1234")
             .unwrap();
         authority
             .set_profile(user, UserProfile::new(b"Alice Example").unwrap())
@@ -422,5 +456,32 @@ mod tests {
             Err(Error::AlreadyExists)
         );
         assert_eq!(authority.add_group(b"bad:name"), Err(Error::Invalid));
+    }
+
+    #[test]
+    fn ordinary_users_cannot_elevate_and_full_groups_do_not_partially_create() {
+        let mut authority = Authority::new();
+        let group = authority.add_group(b"users").unwrap();
+        let user = authority
+            .add_user(b"alice", group, b"salt", b"1234")
+            .unwrap();
+        let session = authority.open_session(user, b"1234").unwrap();
+        assert_eq!(
+            authority.elevate(session, b"1234"),
+            Err(Error::Unauthorized)
+        );
+        for index in 1..MAX_GROUP_MEMBERS {
+            let mut name = [b'a'; MAX_NAME];
+            name[0] = b'a' + index as u8;
+            let length = 1;
+            authority
+                .add_user(&name[..length], group, b"salt", b"1234")
+                .unwrap();
+        }
+        assert_eq!(
+            authority.add_user(b"overflow", group, b"salt", b"1234"),
+            Err(Error::Full)
+        );
+        assert!(authority.open_session(user, b"1234").is_ok());
     }
 }

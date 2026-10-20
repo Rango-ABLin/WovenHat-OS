@@ -6376,7 +6376,7 @@ fn stage24_identity_self_test() -> bool {
     let Ok(group) = authority.add_group(b"users") else {
         return fail("group creation failed");
     };
-    let Ok(user) = authority.add_user(b"alice", group, b"qemu-salt", b"1234") else {
+    let Ok(user) = authority.add_administrator(b"alice", group, b"qemu-salt", b"1234") else {
         return fail("user creation failed");
     };
     let Ok(profile) = UserProfile::new(b"Alice Example") else {

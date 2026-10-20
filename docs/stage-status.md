@@ -13,10 +13,12 @@ credentials or persist the identity database.
 The dedicated gate passed with exit 33 and
 `[S24.1] WovenIdentity core: PASSED` on 1/2/4 CPUs. The 82-test `libwoven`
 suite, Stage 24.1 freestanding Clippy, Python validation, and `git diff --check`
-pass. Evidence is preserved under:
-`audit-artifacts/stage24.1-1cpu-1792525338640464600`,
-`audit-artifacts/stage24.1-2cpu-1792525397795034600`, and
-`audit-artifacts/stage24.1-4cpu-1792525454630403900`.
+pass. A security review also requires elevation to be an explicit administrator
+role; ordinary users cannot become UID 0, and full-group insertion is atomic.
+The corrected gate evidence is preserved under:
+`audit-artifacts/stage24.1-1cpu-1792525654517891200`,
+`audit-artifacts/stage24.1-2cpu-1792525721415869300`, and
+`audit-artifacts/stage24.1-4cpu-1792525782428769900`.
 
 This is the identity policy foundation, not a production identity subsystem:
 kernel task/session integration, durable credential storage and recovery,
