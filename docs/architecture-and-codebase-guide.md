@@ -1509,9 +1509,11 @@ strong definitions win interposition, and undefined weak imports resolve to
 zero. `DT_JMPREL` is accepted as bounded file-backed RELA or legacy REL
 and is applied eagerly before W^X/RELRO; see
 `audit-stage11-plt-rela-2026-10-20.md` and
-`audit-stage11-plt-rel-2026-10-20.md`. Versioned/weak symbols,
-versioned symbol tables, constructors/destructors, lazy binding and library TLS
-remain unsupported.
+`audit-stage11-plt-rel-2026-10-20.md`. Weak definitions and SysV versioned
+symbol tables (`DT_VERSYM`, `DT_VERDEF` and `DT_VERNEED`) are bounded and
+resolved by exact requested version; see
+`audit-stage11-symbol-versioning-2026-10-20.md`. Constructors/destructors,
+lazy binding and library TLS remain unsupported.
 
 The historical main-image TLS mapping was not a compiler-compatible TCB:
 the real Rust local-exec probe expects a self-pointer at `FS:0` and aligned

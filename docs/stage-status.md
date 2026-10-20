@@ -1,5 +1,24 @@
 # Stage status
 
+## Stage 11 versioned symbol tables (2026-10-20)
+
+The bounded ELF loader now accepts SysV `DT_VERSYM`, `DT_VERDEF` and
+`DT_VERNEED` metadata. File-backed version records, auxiliary links, version
+indices and names are validated before use; definitions and imports resolve
+only when their requested version matches. Relocated images shift dynamic
+metadata addresses consistently, and malformed or truncated records fail
+closed.
+
+Validation: 31 ELF tests, workspace tests, kernel check, warning-denying
+freestanding and host Clippy, and Stage 11.5 QEMU acceptance passed on 1/2/4
+CPUs. The signed runtime fixture resolves a versioned cross-image import,
+executes it in Ring 3, and verifies teardown. Evidence:
+`audit-artifacts/stage11.5-1cpu-1792505125207763300`,
+`stage11.5-2cpu-1792505299339871100` and
+`stage11.5-4cpu-1792505368683688700`.
+
+Constructors/destructors, lazy binding and library TLS remain open.
+
 ## Stage 11 weak symbol binding support (2026-10-20)
 
 The bounded symbol scope now accepts `STB_WEAK` definitions as fallbacks
@@ -17,8 +36,7 @@ and verifies teardown. Evidence:
 `stage11.5-2cpu-1792504112883675500` and
 `stage11.5-4cpu-1792504158087902300`.
 
-Versioned symbol tables, constructors/destructors, lazy binding and library
-TLS remain open.
+Constructors/destructors, lazy binding and library TLS remain open.
 
 ## Stage 11 eager PLT DT_REL relocation support (2026-10-20)
 

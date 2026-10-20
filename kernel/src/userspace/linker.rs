@@ -204,7 +204,6 @@ pub(super) fn load_with_geometry(
     mmap_base: u64,
 ) -> Option<UserProgram> {
     let images = prepare(bytes, candidate_bias)?;
-    crate::serial::write_line(format_args!("[S11.5] ver-debug prepared={}", images.len()));
     let main = images.first()?;
     let mut scope = SymbolScope::new(&main.image, &main.bytes);
     for image in &images[1..] {
@@ -299,15 +298,8 @@ pub(super) fn load_with_geometry(
     // No writable executable page exists during relocation: pages are RW/NX
     // until every fixup is applied, then transitioned to their final W^X mode.
     for linked in &images {
-        if relocate(linked, &scope, page_table).is_none() {
-            crate::serial::write_line(format_args!(
-                "[S11.5] ver-debug relocation-failed image={}",
-                linked.name.as_deref().map_or("main", |_| "library")
-            ));
-            return None;
-        }
+        relocate(linked, &scope, page_table)?;
     }
-    crate::serial::write_line(format_args!("[S11.5] ver-debug relocation-complete"));
     for linked in &images {
         for segment in linked.image.segments() {
             paging::protect_user_range_in_inactive(
@@ -323,7 +315,6 @@ pub(super) fn load_with_geometry(
             paging::protect_user_range_in_inactive(page_table, start, size, false, false).ok()?;
         }
     }
-    crate::serial::write_line(format_args!("[S11.5] ver-debug protection-complete"));
     let tls_base = if let Some(tls) = main.image.tls() {
         let (layout, template_size, total) = tls_reservation?;
         let template_start = stack.guard_base.checked_sub(total as u64)?;
@@ -382,14 +373,11 @@ pub(super) fn load_with_geometry(
     paging::map_user_range_in_inactive(page_table, stack_base, stack.size, true, false).ok()?;
     pending.stack_mapped = true;
     paging::zero_user_range_in(page_table, stack_base, stack.size).ok()?;
-    crate::serial::write_line(format_args!("[S11.5] ver-debug stack-ready"));
     if !paging::user_range_is_unmapped_in(page_table, stack.guard_base, UserStack::GUARD_SIZE)
         || !paging::user_range_has_protection_in(page_table, stack.base, stack.size, true, false)
     {
-        crate::serial::write_line(format_args!("[S11.5] ver-debug stack-invariant-failed"));
         return None;
     }
-    crate::serial::write_line(format_args!("[S11.5] ver-debug stack-invariant-ok"));
     let stack_top = setup_argv_stack(page_table, stack, args)?;
     let program = UserProgram {
         image: UserImage {

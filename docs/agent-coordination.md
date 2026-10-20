@@ -2431,6 +2431,14 @@ and a retained report before it can close a production gap.
 
 ## Codex: owned work
 
+**Versioned symbol table increment (2026-10-20):** bounded `DT_VERSYM`,
+`DT_VERDEF` and `DT_VERNEED` parsing and exact version-aware scope resolution
+are implemented for definitions and imports. The 31 ELF tests, workspace
+tests, warning-denying kernel/host Clippy and signed Ring-3 runtime fixture
+passed on 1/2/4 CPUs, including teardown. Audit:
+`docs/audit-stage11-symbol-versioning-2026-10-20.md`. Constructors/destructors,
+lazy binding and library TLS remain open.
+
 **Weak symbol binding increment (2026-10-20):** the bounded ELF scope now
 accepts default-visible `STB_WEAK` definitions as fallbacks, prefers strong
 definitions for interposition, and resolves undefined weak imports to zero.

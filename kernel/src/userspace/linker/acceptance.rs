@@ -146,7 +146,11 @@ fn fixture(kind: usize) -> Option<Vec<u8>> {
     if kind == 3 || kind == 4 {
         write_u64(&mut elf, 0x1390, 0)?;
     } else {
-        write_u64(&mut elf, 0x1390, if kind == 0 || kind == 5 { 0 } else { 0x20 })?;
+        write_u64(
+            &mut elf,
+            0x1390,
+            if matches!(kind, 0 | 5 | 6) { 0 } else { 0x20 },
+        )?;
     }
     if matches!(kind, 0 | 3 | 4 | 5 | 6) {
         // movabs rax, GOT; call [rax]; exit(rax). The call crosses images in
