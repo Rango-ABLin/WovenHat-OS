@@ -1,5 +1,11 @@
 # Stage status
 
+## Stage 24.13 group membership administration (2026-10-21)
+
+Elevated administrators can add and remove bounded supplementary group membership through syscalls 229-230. Duplicate membership, unknown identities, full groups, and primary-group removal are rejected; changes publish through WID2 with live rollback on persistence failure. The 87-test host suite, warning-denying host and production Clippy gates, diff check, and signed system-apps 1/2/4-CPU gates pass. Evidence is under `audit-artifacts/stage24.13-group-membership-{1,2,4}cpu-1792534800000000000`.
+
+Administration UI/query APIs, durable/configurable lockout, hardware credentials, malformed-request telemetry, release-key provisioning, and physical qualification remain open.
+
 ## Stage 24.12 durable identity administration (2026-10-20)
 
 Administrative mutations now publish through WID2 and synchronize the trusted

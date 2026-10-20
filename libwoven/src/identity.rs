@@ -386,6 +386,50 @@ impl Authority {
         self.add_group(name)
     }
 
+    pub fn admin_add_group_member(
+        &mut self,
+        session: SessionId,
+        user: UserId,
+        gid: GroupId,
+    ) -> Result<(), Error> {
+        self.require_administrator(session)?;
+        if self.find_user(user).is_none() || self.find_group(gid).is_none() {
+            return Err(Error::NotFound);
+        }
+        let group = self.find_group_mut(gid).ok_or(Error::NotFound)?;
+        if group.members.iter().flatten().any(|member| *member == user) {
+            return Err(Error::AlreadyExists);
+        }
+        let slot = group
+            .members
+            .iter()
+            .position(Option::is_none)
+            .ok_or(Error::Full)?;
+        group.members[slot] = Some(user);
+        Ok(())
+    }
+
+    pub fn admin_remove_group_member(
+        &mut self,
+        session: SessionId,
+        user: UserId,
+        gid: GroupId,
+    ) -> Result<(), Error> {
+        self.require_administrator(session)?;
+        let account = self.find_user(user).ok_or(Error::NotFound)?;
+        if account.gid == gid {
+            return Err(Error::Invalid);
+        }
+        let group = self.find_group_mut(gid).ok_or(Error::NotFound)?;
+        let slot = group
+            .members
+            .iter()
+            .position(|member| *member == Some(user))
+            .ok_or(Error::NotFound)?;
+        group.members[slot] = None;
+        Ok(())
+    }
+
     /// Delete an account only from an active, elevated administrator session.
     /// Active sessions and the administrator's own account cannot be removed.
     pub fn admin_delete_user(
@@ -1044,6 +1088,30 @@ pub fn admin_add_group(name: &[u8]) -> Result<GroupId, crate::Error> {
     .map(|value| GroupId(value as u32))
 }
 
+pub fn admin_add_group_member(user: UserId, group: GroupId) -> Result<(), crate::Error> {
+    crate::check(unsafe {
+        crate::syscall::invoke(
+            crate::syscall::IDENTITY_ADMIN_ADD_MEMBER,
+            user.0 as u64,
+            group.0 as u64,
+            0,
+        )
+    })
+    .map(|_| ())
+}
+
+pub fn admin_remove_group_member(user: UserId, group: GroupId) -> Result<(), crate::Error> {
+    crate::check(unsafe {
+        crate::syscall::invoke(
+            crate::syscall::IDENTITY_ADMIN_REMOVE_MEMBER,
+            user.0 as u64,
+            group.0 as u64,
+            0,
+        )
+    })
+    .map(|_| ())
+}
+
 pub fn session_close(session: SessionId) -> Result<(), crate::Error> {
     // SAFETY: integer-only syscall; the kernel owner-binds the token.
     crate::check(unsafe {
@@ -1209,6 +1277,17 @@ mod tests {
         let staff = authority.admin_add_group(admin_session, b"staff").unwrap();
         let created = authority
             .admin_add_user(admin_session, b"lin", staff, b"salt3", b"9999", false)
+            .unwrap();
+        assert_eq!(
+            authority.admin_add_group_member(admin_session, ordinary, staff),
+            Ok(())
+        );
+        assert_eq!(
+            authority.admin_remove_group_member(admin_session, ordinary, group),
+            Err(Error::Invalid)
+        );
+        authority
+            .admin_remove_group_member(admin_session, ordinary, staff)
             .unwrap();
         let created_session = authority.open_session(created, b"9999").unwrap();
         assert_eq!(

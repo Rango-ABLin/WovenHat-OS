@@ -1,5 +1,9 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - Stage 24.13 (2026-10-21)
+
+Implemented bounded elevated-admin supplementary group membership mutation: syscalls 229-230, audit actions 34-35, duplicate/full/unknown checks, primary-group protection, WID2 persistence, and live rollback. Host tests, host and production Clippy, diff check, and signed system-apps 1/2/4-CPU acceptance pass. Evidence and limits are recorded in `docs/audit-stage24-13-group-membership-2026-10-21.md`; physical USB was not modified. Next work is administration UI/query integration and remaining release qualification blockers.
+
 **Codex: Stage 24.12 durable identity administration accepted (2026-10-20):**
 
 Admin user/group mutations now publish through WID2 and synchronize the

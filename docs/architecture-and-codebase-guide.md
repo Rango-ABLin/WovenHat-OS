@@ -1,5 +1,9 @@
 # WovenHat OS Architecture & Codebase Guide
 
+### Stage 24.13 - group membership administration
+
+`Authority` exposes bounded add/remove operations for supplementary group membership. The owner-bound runtime authorizes syscalls 229-230, persists the updated WID2 authority, and restores the prior live authority if publication fails. Primary-group removal is prohibited; audit actions distinguish the two mutations. UI/query integration and physical qualification remain separate.
+
 ### Stage 24.12 — durable identity administration
 
 Admin mutations publish the new authority through WID2 and synchronize the

@@ -437,6 +437,10 @@ pub enum Number {
     IdentityAdminDeleteUser = 227,
     #[cfg(feature = "system-apps")]
     IdentityAdminAddGroup = 228,
+    #[cfg(feature = "system-apps")]
+    IdentityAdminAddMember = 229,
+    #[cfg(feature = "system-apps")]
+    IdentityAdminRemoveMember = 230,
 }
 
 pub fn entry_address() -> u64 {
@@ -2934,6 +2938,14 @@ pub extern "C" fn wovenhat_syscall_dispatch(
         value if value == Number::IdentityAdminAddGroup as u64 => {
             sys_identity_admin_add_group(arg0, arg1)
         }
+        #[cfg(feature = "system-apps")]
+        value if value == Number::IdentityAdminAddMember as u64 => {
+            sys_identity_admin_group_member(arg0, arg1, true)
+        }
+        #[cfg(feature = "system-apps")]
+        value if value == Number::IdentityAdminRemoveMember as u64 => {
+            sys_identity_admin_group_member(arg0, arg1, false)
+        }
         _ => u64::MAX,
     };
 
@@ -3598,6 +3610,33 @@ fn sys_identity_admin_add_group(user_buffer: u64, length: u64) -> u64 {
         result.is_ok(),
     );
     result.map(|group| group.0 as u64).unwrap_or(SYSCALL_ERROR)
+}
+
+#[cfg(feature = "system-apps")]
+fn sys_identity_admin_group_member(user: u64, group: u64, add: bool) -> u64 {
+    let actor = crate::task::current_task_id().as_u64();
+    let action = if add {
+        crate::audit::Action::IdentityAdminAddMember
+    } else {
+        crate::audit::Action::IdentityAdminRemoveMember
+    };
+    let (Ok(user), Ok(group)) = (u32::try_from(user), u32::try_from(group)) else {
+        crate::audit::record(actor, action, 0, false);
+        return SYSCALL_ERROR;
+    };
+    let result = crate::identity_runtime::admin_group_member(
+        crate::task::current_process_id(),
+        libwoven::identity::UserId(user),
+        libwoven::identity::GroupId(group),
+        add,
+    );
+    crate::audit::record(
+        actor,
+        action,
+        (u64::from(group) << 32) | u64::from(user),
+        result.is_ok(),
+    );
+    result.map_or(SYSCALL_ERROR, |_| 0)
 }
 
 /// The compositor surface's size and display scale. Requires `DisplayIo` and

@@ -206,6 +206,8 @@ pub mod security {
         IdentityAdminAddUser = 31,
         IdentityAdminDeleteUser = 32,
         IdentityAdminAddGroup = 33,
+        IdentityAdminAddMember = 34,
+        IdentityAdminRemoveMember = 35,
     }
 
     #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -11295,6 +11297,8 @@ pub mod syscall {
     pub const IDENTITY_ADMIN_ADD_USER: u64 = 226;
     pub const IDENTITY_ADMIN_DELETE_USER: u64 = 227;
     pub const IDENTITY_ADMIN_ADD_GROUP: u64 = 228;
+    pub const IDENTITY_ADMIN_ADD_MEMBER: u64 = 229;
+    pub const IDENTITY_ADMIN_REMOVE_MEMBER: u64 = 230;
     pub const IPC_ENDPOINT_CREATE: u64 = 211;
     pub const IPC_SERVICE_PUBLISH: u64 = 212;
     pub const IPC_SERVICE_UNPUBLISH: u64 = 213;
@@ -13287,6 +13291,8 @@ pub fn audit_read(offset: u64) -> Result<Option<security::AuditEvent>, Error> {
         31 => security::AuditAction::IdentityAdminAddUser,
         32 => security::AuditAction::IdentityAdminDeleteUser,
         33 => security::AuditAction::IdentityAdminAddGroup,
+        34 => security::AuditAction::IdentityAdminAddMember,
+        35 => security::AuditAction::IdentityAdminRemoveMember,
         _ => return Err(Error::Failed),
     };
     Ok(Some(security::AuditEvent {

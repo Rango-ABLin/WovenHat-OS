@@ -215,6 +215,30 @@ pub(crate) fn admin_add_group(
 }
 
 #[cfg(feature = "system-apps")]
+pub(crate) fn admin_group_member(
+    owner: u64,
+    user: libwoven::identity::UserId,
+    group: libwoven::identity::GroupId,
+    add: bool,
+) -> Result<(), Error> {
+    let session = owner_session(owner)?;
+    let mut authority = AUTHORITY.lock();
+    let authority = authority.as_mut().ok_or(Error::NotReady)?;
+    let previous = *authority;
+    let result = if add {
+        authority.admin_add_group_member(session, user, group)
+    } else {
+        authority.admin_remove_group_member(session, user, group)
+    };
+    result.map_err(Error::Identity)?;
+    if persist_authority(authority).is_err() {
+        *authority = previous;
+        return Err(Error::Storage);
+    }
+    Ok(())
+}
+
+#[cfg(feature = "system-apps")]
 fn persist_authority(authority: &Authority) -> Result<(), Error> {
     let mut snapshot = [0u8; libwoven::identity::SNAPSHOT_BYTES];
     authority

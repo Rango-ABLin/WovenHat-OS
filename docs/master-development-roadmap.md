@@ -2,6 +2,12 @@ WovenHat OS — Stage 10.7 → Version 1.0 Master Roadmap
 Phase I — Finish the asynchronous kernel foundation
 Stage 10.7 — Asynchronous TCP
 
+Stage 24.13 - Group membership administration
+
+Implemented bounded elevated-admin supplementary group membership mutation (syscalls 229-230), with duplicate/full/unknown identity checks, primary-group protection, WID2 publication, rollback, and security-ledger actions. Host, Clippy, and signed 1/2/4-CPU acceptance pass.
+
+Next prerequisites are the administration UI/query surface, configurable lockout policy, hardware credentials, malformed-request telemetry, release-key provisioning, and physical qualification.
+
 Current stage
 
 Complete:
