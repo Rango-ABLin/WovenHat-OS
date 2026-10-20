@@ -389,6 +389,25 @@ impl Image {
             }
             return None;
         }
+        if let Some(dynamic) = self.dynamic.as_mut() {
+            for address in [
+                &mut dynamic.dynamic_address,
+                &mut dynamic.rela_address,
+                &mut dynamic.rel_address,
+                &mut dynamic.plt_rela_address,
+                &mut dynamic.plt_rel_address,
+                &mut dynamic.strtab_address,
+                &mut dynamic.symtab_address,
+                &mut dynamic.hash_address,
+                &mut dynamic.versym_address,
+                &mut dynamic.verdef_address,
+                &mut dynamic.verneed_address,
+            ] {
+                if *address != 0 {
+                    *address = (*address).checked_add(delta)?;
+                }
+            }
+        }
         for (index, segment) in self.segments[..self.segment_count]
             .iter()
             .flatten()
@@ -664,8 +683,8 @@ fn validate_version_tables(bytes: &[u8], image: &mut Image) -> Result<(), Error>
             for aux_index in 0..count {
                 let aux_offset = version_file_offset(image, bytes, aux_cursor, 16)?;
                 let version_index =
-                    u16::from_le_bytes(bytes[aux_offset + 8..aux_offset + 10].try_into().unwrap());
-                let name = u32::from_le_bytes(bytes[aux_offset + 12..aux_offset + 16].try_into().unwrap());
+                    u16::from_le_bytes(bytes[aux_offset + 6..aux_offset + 8].try_into().unwrap());
+                let name = u32::from_le_bytes(bytes[aux_offset + 8..aux_offset + 12].try_into().unwrap());
                 if version_index < 2
                     || dynamic_string(bytes, dynamic, name as u64)
                         .filter(|name| !name.is_empty())
@@ -674,7 +693,7 @@ fn validate_version_tables(bytes: &[u8], image: &mut Image) -> Result<(), Error>
                     return Err(Error::InvalidSegment);
                 }
                 let aux_next =
-                    u32::from_le_bytes(bytes[aux_offset + 4..aux_offset + 8].try_into().unwrap());
+                    u32::from_le_bytes(bytes[aux_offset + 12..aux_offset + 16].try_into().unwrap());
                 if aux_next == 0 && aux_index + 1 != count {
                     return Err(Error::InvalidSegment);
                 }
@@ -748,11 +767,11 @@ fn version_index_exists(
             for _ in 0..count {
                 let aux_offset = version_file_offset(image, bytes, aux_cursor, 16)?;
                 let value =
-                    u16::from_le_bytes(bytes[aux_offset + 8..aux_offset + 10].try_into().unwrap());
+                    u16::from_le_bytes(bytes[aux_offset + 6..aux_offset + 8].try_into().unwrap());
                 if value == wanted {
                     return Ok(true);
                 }
-                let next = u32::from_le_bytes(bytes[aux_offset + 4..aux_offset + 8].try_into().unwrap());
+                let next = u32::from_le_bytes(bytes[aux_offset + 12..aux_offset + 16].try_into().unwrap());
                 if next != 0 {
                     aux_cursor = aux_cursor
                         .checked_add(next as u64)
@@ -811,14 +830,14 @@ fn version_name_by_index<'a>(
             for _ in 0..count {
                 let aux_offset = version_file_offset(image, bytes, aux_cursor, 16).ok()?;
                 let index =
-                    u16::from_le_bytes(bytes[aux_offset + 8..aux_offset + 10].try_into().ok()?);
+                    u16::from_le_bytes(bytes[aux_offset + 6..aux_offset + 8].try_into().ok()?);
                 if index == wanted {
                     let name =
-                        u32::from_le_bytes(bytes[aux_offset + 12..aux_offset + 16].try_into().ok()?);
+                        u32::from_le_bytes(bytes[aux_offset + 8..aux_offset + 12].try_into().ok()?);
                     return dynamic_string(bytes, dynamic, name as u64);
                 }
                 let next =
-                    u32::from_le_bytes(bytes[aux_offset + 4..aux_offset + 8].try_into().ok()?);
+                    u32::from_le_bytes(bytes[aux_offset + 12..aux_offset + 16].try_into().ok()?);
                 aux_cursor = aux_cursor.checked_add(next as u64)?;
             }
             let next = u32::from_le_bytes(bytes[offset + 12..offset + 16].try_into().ok()?);

@@ -8,7 +8,7 @@ const SEED: [u8; 32] = [
 ];
 
 fn fixture(kind: usize) -> Option<Vec<u8>> {
-    let base = if kind == 0 || kind == 3 || kind == 4 || kind == 5 {
+    let base = if matches!(kind, 0 | 3 | 4 | 5 | 6) {
         USER_REGION_START
     } else {
         0
@@ -26,7 +26,15 @@ fn fixture(kind: usize) -> Option<Vec<u8>> {
     for (offset, typ, flags, file_offset, address, file_size, memory_size) in [
         (64, 1, 5, 0x1000, base, 0x400, 0x1000),
         (120, 1, 6, 0, base + 0x1000, 0, 0x1000),
-        (176, 2, 4, 0x1100, base + 0x100, 0xc0, 0xc0),
+        (
+            176,
+            2,
+            4,
+            0x1100,
+            base + 0x100,
+            if matches!(kind, 6 | 7) { 0x100 } else { 0xc0 },
+            if matches!(kind, 6 | 7) { 0x100 } else { 0xc0 },
+        ),
         (232, 0x6474_e552, 4, 0, base + 0x1000, 0, 0x1000),
     ] {
         write_u32(&mut elf, offset, typ)?;
@@ -51,11 +59,24 @@ fn fixture(kind: usize) -> Option<Vec<u8>> {
     } else {
         tags.extend([(7, base + 0x380), (8, 24), (9, 24)]);
     }
-    if kind == 0 || kind == 3 || kind == 4 || kind == 5 {
+    if kind == 6 {
+        tags.extend([
+            (0x6fff_fff0, base + 0x3a0),
+            (0x6fff_fffe, base + 0x3b0),
+            (0x6fff_ffff, 1),
+        ]);
+    } else if kind == 7 {
+        tags.extend([
+            (0x6fff_fff0, base + 0x3a0),
+            (0x6fff_fffc, base + 0x3b0),
+            (0x6fff_fffd, 1),
+        ]);
+    }
+    if matches!(kind, 0 | 3 | 4 | 5 | 6) {
         tags.push((1, 8));
     } else {
-        tags.push((14, if kind == 1 { 8 } else { 17 }));
-        if kind == 1 {
+        tags.push((14, if matches!(kind, 1 | 7) { 8 } else { 17 }));
+        if matches!(kind, 1 | 7) {
             tags.push((1, 17));
         }
     }
@@ -64,6 +85,35 @@ fn fixture(kind: usize) -> Option<Vec<u8>> {
         write_u64(&mut elf, 0x1108 + index * 16, value)?;
     }
     elf[0x1300..0x1319].copy_from_slice(b"\0answer\0scope.so\0base.so\0");
+    if matches!(kind, 6 | 7) {
+        elf[0x1319..0x131e].copy_from_slice(b"VER_1");
+        elf[0x131e] = 0;
+        write_u64(&mut elf, 0x1128, 31)?;
+        write_u16(&mut elf, 0x13a0, 0)?;
+        write_u16(&mut elf, 0x13a2, 2)?;
+        if kind == 6 {
+            write_u16(&mut elf, 0x13b0, 1)?;
+            write_u16(&mut elf, 0x13b2, 1)?;
+            write_u32(&mut elf, 0x13b4, 8)?;
+            write_u32(&mut elf, 0x13b8, 16)?;
+            write_u32(&mut elf, 0x13bc, 0)?;
+            write_u32(&mut elf, 0x13c0, 0)?;
+            write_u16(&mut elf, 0x13c4, 0)?;
+            write_u16(&mut elf, 0x13c6, 2)?;
+            write_u32(&mut elf, 0x13c8, 25)?;
+            write_u32(&mut elf, 0x13cc, 0)?;
+        } else {
+            write_u16(&mut elf, 0x13b0, 1)?;
+            write_u16(&mut elf, 0x13b2, 0)?;
+            write_u16(&mut elf, 0x13b4, 2)?;
+            write_u16(&mut elf, 0x13b6, 1)?;
+            write_u32(&mut elf, 0x13b8, 0)?;
+            write_u32(&mut elf, 0x13bc, 20)?;
+            write_u32(&mut elf, 0x13c0, 0)?;
+            write_u32(&mut elf, 0x13c4, 25)?;
+            write_u32(&mut elf, 0x13c8, 0)?;
+        }
+    }
     write_u32(&mut elf, 0x1280, 1)?;
     write_u32(&mut elf, 0x1284, 2)?;
     write_u32(&mut elf, 0x1218, 1)?;
@@ -71,12 +121,12 @@ fn fixture(kind: usize) -> Option<Vec<u8>> {
     write_u16(
         &mut elf,
         0x121e,
-        u16::from(kind != 0 && kind != 3 && kind != 4 && kind != 5),
+        u16::from(kind != 0 && kind != 3 && kind != 4 && kind != 5 && kind != 6),
     )?;
     write_u64(
         &mut elf,
         0x1220,
-        if kind == 0 || kind == 3 || kind == 4 || kind == 5 {
+        if matches!(kind, 0 | 3 | 4 | 5 | 6) {
             0
         } else {
             0x20
@@ -87,7 +137,7 @@ fn fixture(kind: usize) -> Option<Vec<u8>> {
     write_u64(
         &mut elf,
         0x1388,
-        if kind == 0 || kind == 3 || kind == 4 || kind == 5 {
+        if matches!(kind, 0 | 3 | 4 | 5 | 6) {
             (1_u64 << 32) | 1
         } else {
             8
@@ -98,7 +148,7 @@ fn fixture(kind: usize) -> Option<Vec<u8>> {
     } else {
         write_u64(&mut elf, 0x1390, if kind == 0 || kind == 5 { 0 } else { 0x20 })?;
     }
-    if kind == 0 || kind == 3 || kind == 4 || kind == 5 {
+    if matches!(kind, 0 | 3 | 4 | 5 | 6) {
         // movabs rax, GOT; call [rax]; exit(rax). The call crosses images in
         // Ring 3; no kernel shortcut invokes the library implementation.
         let code = [
@@ -235,6 +285,12 @@ pub(super) fn run() -> bool {
         return false;
     };
     let Some(weak_main) = fixture(5) else {
+        return false;
+    };
+    let Some(versioned_main) = fixture(6) else {
+        return false;
+    };
+    let Some(versioned_scope) = fixture(7) else {
         return false;
     };
     if crate::vfs::stat("/lib/scope.so").is_ok() || crate::vfs::stat("/lib/base.so").is_ok() {
@@ -483,6 +539,47 @@ pub(super) fn run() -> bool {
         ) {
             return None;
         }
+        crate::vfs::remove("/lib/scope.so").ok()?;
+        owned_scope = false;
+        crate::vfs::create_read_only("/lib/scope.so", &package(&versioned_scope)).ok()?;
+        owned_scope = true;
+        let Some(versioned_program) = load(&versioned_main, &["versioned-test"]) else {
+            step("versioned symbol runtime resolution", false);
+            return None;
+        };
+        let mut versioned_address = [0; 8];
+        paging::read_user_bytes_in(
+            versioned_program.address_space.paging,
+            USER_REGION_START + 0x1000,
+            &mut versioned_address,
+        )
+        .ok()?;
+        if !step(
+            "versioned symbol runtime resolution",
+            u64::from_le_bytes(versioned_address) == LIBRARY_START + 0x20,
+        ) {
+            let _ = destroy(versioned_program.address_space);
+            return None;
+        }
+        let (versioned_pid, _) =
+            crate::task::spawn_user_process("versioned-test", versioned_program).ok()?;
+        let versioned_start = crate::timer::ticks();
+        while !crate::task::process_exited(versioned_pid) {
+            if crate::timer::ticks().wrapping_sub(versioned_start) > 500 {
+                return None;
+            }
+            crate::task::yield_now();
+        }
+        if !step(
+            "versioned symbol Ring-3 execution and teardown",
+            crate::task::wait_process(versioned_pid.as_u64()) == Ok(42),
+        ) {
+            return None;
+        }
+        crate::vfs::remove("/lib/scope.so").ok()?;
+        owned_scope = false;
+        crate::vfs::create_read_only("/lib/scope.so", &package(&library)).ok()?;
+        owned_scope = true;
         let mut unresolved = main.clone();
         unresolved[0x1301..0x1307].copy_from_slice(b"absent");
         if !step(

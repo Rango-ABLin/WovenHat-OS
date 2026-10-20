@@ -161,6 +161,8 @@ def required_markers(stage, cpus):
             '[S11.5] shared libraries DT_JMPREL DT_REL Ring-3 execution and teardown: PASSED',
             '[S11.5] shared libraries weak symbol runtime resolution: PASSED',
             '[S11.5] shared libraries weak symbol Ring-3 execution and teardown: PASSED',
+            '[S11.5] shared libraries versioned symbol runtime resolution: PASSED',
+            '[S11.5] shared libraries versioned symbol Ring-3 execution and teardown: PASSED',
             '[S11.5] shared libraries unresolved import rollback: PASSED',
             '[S11.5] shared libraries argv failure rollback: PASSED',
         ])
