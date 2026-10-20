@@ -151,20 +151,48 @@ pub(crate) fn admin_add_user(
     let mut authority = AUTHORITY.lock();
     let authority = authority.as_mut().ok_or(Error::NotReady)?;
     let group = authority.group_id(b"users").map_err(Error::Identity)?;
-    authority
+    let previous = *authority;
+    let user = authority
         .admin_add_user(session, name, group, &salt, password, administrator)
-        .map_err(Error::Identity)
+        .map_err(Error::Identity)?;
+    let (stored_salt, stored_hash) = authority
+        .credential_material(name)
+        .map_err(Error::Identity)?;
+    if persist_authority(authority).is_err() {
+        *authority = previous;
+        return Err(Error::Storage);
+    }
+    if crate::accounts::add_stored_user(name, stored_salt, stored_hash).is_err() {
+        let _ = persist_authority(&previous);
+        *authority = previous;
+        return Err(Error::Storage);
+    }
+    Ok(user)
 }
 
 #[cfg(feature = "system-apps")]
 pub(crate) fn admin_delete_user(owner: u64, user: libwoven::identity::UserId) -> Result<(), Error> {
     let session = owner_session(owner)?;
     let mut authority = AUTHORITY.lock();
+    let authority = authority.as_mut().ok_or(Error::NotReady)?;
+    let previous = *authority;
+    let name = authority.user_name(user).map_err(Error::Identity)?;
+    let mut stored_name = [0u8; libwoven::accounts::MAX_NAME];
+    let name_len = name.len();
+    stored_name[..name_len].copy_from_slice(name);
     authority
-        .as_mut()
-        .ok_or(Error::NotReady)?
         .admin_delete_user(session, user)
-        .map_err(Error::Identity)
+        .map_err(Error::Identity)?;
+    if persist_authority(authority).is_err() {
+        *authority = previous;
+        return Err(Error::Storage);
+    }
+    if crate::accounts::remove_user(&stored_name[..name_len]).is_err() {
+        let _ = persist_authority(&previous);
+        *authority = previous;
+        return Err(Error::Storage);
+    }
+    Ok(())
 }
 
 #[cfg(feature = "system-apps")]
@@ -174,11 +202,28 @@ pub(crate) fn admin_add_group(
 ) -> Result<libwoven::identity::GroupId, Error> {
     let session = owner_session(owner)?;
     let mut authority = AUTHORITY.lock();
-    authority
-        .as_mut()
-        .ok_or(Error::NotReady)?
+    let authority = authority.as_mut().ok_or(Error::NotReady)?;
+    let previous = *authority;
+    let group = authority
         .admin_add_group(session, name)
-        .map_err(Error::Identity)
+        .map_err(Error::Identity)?;
+    if persist_authority(authority).is_err() {
+        *authority = previous;
+        return Err(Error::Storage);
+    }
+    Ok(group)
+}
+
+#[cfg(feature = "system-apps")]
+fn persist_authority(authority: &Authority) -> Result<(), Error> {
+    let mut snapshot = [0u8; libwoven::identity::SNAPSHOT_BYTES];
+    authority
+        .encode_snapshot(&mut snapshot)
+        .map_err(Error::Identity)?;
+    let writer = crate::wfs::AuthorizedWfsWriter::after_capability_check();
+    crate::identity_storage::persist(&writer, &snapshot, crate::timer::ticks())
+        .map(|_| ())
+        .map_err(|_| Error::Storage)
 }
 
 pub(crate) fn release_owner(owner: u64) {

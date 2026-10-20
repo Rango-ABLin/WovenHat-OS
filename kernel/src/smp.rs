@@ -1634,17 +1634,29 @@ fn migration_stress_test() {
 
     let jobs = online_count() * 4;
     let mut ids = [None; MAX_CPUS * 4];
-    x86_64::instructions::interrupts::without_interrupts(|| {
-        for id in ids.iter_mut().take(jobs) {
+    // Coverage probes have exited, but their scheduler slots are reclaimed
+    // by a later scheduling pass. Wait for that bounded reclamation instead
+    // of racing the fixed task table; the stress workload itself remains
+    // unchanged and still fails hard if capacity cannot be recovered.
+    let slot_deadline = crate::timer::ticks() + 500;
+    for id in ids.iter_mut().take(jobs) {
+        loop {
             // SAFETY: Atomic-only probe; no CPU-local pointer or unsafe service
             // is retained across yield points. Starting every probe on CPU 0
             // deliberately creates migration pressure.
-            *id = Some(
-                unsafe { task::spawn_migratable_on(0, "migration-stress", migration_stress_probe) }
-                    .expect("migration stress slots"),
-            );
+            match unsafe { task::spawn_migratable_on(0, "migration-stress", migration_stress_probe) }
+            {
+                Ok(task_id) => {
+                    *id = Some(task_id);
+                    break;
+                }
+                Err(task::SpawnError::Full) if crate::timer::ticks() < slot_deadline => {
+                    task::yield_now();
+                }
+                Err(error) => panic!("migration stress slots: {:?}", error),
+            }
         }
-    });
+    }
 
     let mut migrations = 0usize;
     let deadline = crate::timer::ticks() + 500;

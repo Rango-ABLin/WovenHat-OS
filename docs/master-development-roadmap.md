@@ -914,6 +914,13 @@ session open/lock/unlock/elevation/close framing and safe userspace wrappers.
 The gate proves parser/ABI behavior only; runtime loading, live Ring-3 login,
 teardown, auditing, lockout, and shell migration remain open.
 
+Stage 24.12 durable identity administration accepted (2026-10-20): admin user
+and group mutations publish through WID2 and synchronize the trusted account
+file with rollback on failure; the SMP stress-slot race is fixed. Host,
+feature-gate, and 1/2/4-CPU signed system-app gates pass. Group membership,
+UI integration, configurable lockout, hardware credentials, malformed
+telemetry, release-key provisioning, and physical qualification remain open.
+
 Stage 24.11 bounded identity administration ABI accepted (2026-10-20):
 elevated administrator sessions can add users, delete inactive users, and add
 groups through bounded syscalls 226–228 with stable audit actions 31–33. Host,

@@ -1,5 +1,15 @@
 # Agent coordination (Claude Code and Codex)
 
+**Codex: Stage 24.12 durable identity administration accepted (2026-10-20):**
+
+Admin user/group mutations now publish through WID2 and synchronize the
+trusted account file, with rollback on failure. The bounded scheduler-slot
+reclamation fix removes the prior 4-CPU migration-test race. Host,
+feature-gate, and signed system-app 1/2/4-CPU gates pass; evidence is under
+`stage24.12-admin-persistence-*`. Membership administration, UI, configurable
+lockout, hardware credentials, malformed telemetry, release-key provisioning,
+and physical qualification remain open.
+
 **Codex: Stage 24.11 bounded identity administration ABI accepted (2026-10-20):**
 
 Elevated administrator sessions can add users, delete inactive users, and add

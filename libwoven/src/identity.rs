@@ -163,6 +163,7 @@ pub struct SessionView {
     pub elevated: bool,
 }
 
+#[derive(Clone, Copy)]
 pub struct Authority {
     users: [Option<User>; MAX_USERS],
     groups: [Option<Group>; MAX_GROUPS],
@@ -345,6 +346,24 @@ impl Authority {
             .find(|group| group.name[..group.name_len] == *name)
             .map(|group| group.id)
             .ok_or(Error::NotFound)
+    }
+
+    pub fn user_name(&self, user: UserId) -> Result<&[u8], Error> {
+        let user = self.find_user(user).ok_or(Error::NotFound)?;
+        Ok(&user.name[..user.name_len])
+    }
+
+    pub fn credential_material(&self, name: &[u8]) -> Result<(&[u8], &[u8; 32]), Error> {
+        let user = self
+            .users
+            .iter()
+            .flatten()
+            .find(|user| user.name[..user.name_len] == *name)
+            .ok_or(Error::NotFound)?;
+        Ok((
+            &user.credential.salt[..user.credential.salt_len],
+            &user.credential.hash,
+        ))
     }
 
     /// Create a user only from an active, elevated administrator session.

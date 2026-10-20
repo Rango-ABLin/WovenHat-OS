@@ -1,5 +1,20 @@
 # Stage status
 
+## Stage 24.12 durable identity administration (2026-10-20)
+
+Administrative mutations now publish through WID2 and synchronize the trusted
+account file, with rollback on publication failure. The scheduler migration
+self-test waits boundedly for coverage-probe slot reclamation, removing the
+prior 4-CPU slot race. The 87-test suite, all warning-denying Clippy gates,
+diff check, and signed system-apps 1/2/4-CPU gates pass. Evidence is under:
+`audit-artifacts/stage24.12-admin-persistence-1cpu-1792534200000000000`,
+`audit-artifacts/stage24.12-admin-persistence-2cpu-1792534200000000000`, and
+`audit-artifacts/stage24.12-admin-persistence-4cpu-1792534200000000000`.
+
+Group membership administration, UI integration, durable/configurable
+lockout, hardware credentials, malformed telemetry, release-key provisioning,
+and physical qualification remain open.
+
 ## Stage 24.11 bounded identity administration ABI (2026-10-20)
 
 Elevated administrator sessions can now add users, delete inactive users, and

@@ -172,3 +172,77 @@ pub fn change_pin(name: &[u8], old_pin: &[u8], new_pin: &[u8]) -> Result<(), Err
     }
     crate::vfs::overwrite_trusted(ACCOUNTS_PATH, rewritten.as_bytes()).map_err(|_| Error::Io)
 }
+
+/// Add an already-derived account credential to the trusted account file.
+/// The password never enters this module; only bounded salt and digest bytes
+/// produced by the identity authority are accepted.
+#[cfg(feature = "system-apps")]
+pub fn add_stored_user(name: &[u8], salt: &[u8], hash: &[u8; 32]) -> Result<(), Error> {
+    if name.is_empty() || name.len() > MAX_NAME || salt.is_empty() || salt.len() > MAX_SALT {
+        return Err(Error::InvalidPin);
+    }
+    let stat = crate::vfs::stat(ACCOUNTS_PATH).map_err(|_| Error::NotFound)?;
+    if stat.kind != crate::vfs::NodeKind::File || stat.size == 0 || stat.size > crate::vfs::NODE_CAPACITY {
+        return Err(Error::Io);
+    }
+    let mut data = alloc::vec![0u8; stat.size];
+    if crate::vfs::read_all(ACCOUNTS_PATH, &mut data) != Ok(stat.size) {
+        return Err(Error::Io);
+    }
+    let mut rewritten = alloc::string::String::new();
+    for line in data.split(|byte| *byte == b'\n') {
+        if line.is_empty() {
+            continue;
+        }
+        let parsed = parse_line(line).ok_or(Error::Io)?;
+        if parsed.name == name {
+            return Err(Error::Io);
+        }
+        rewritten.push_str(core::str::from_utf8(line).map_err(|_| Error::Io)?);
+        rewritten.push('\n');
+    }
+    rewritten.push_str(core::str::from_utf8(name).map_err(|_| Error::Io)?);
+    rewritten.push(':');
+    push_hex(&mut rewritten, salt);
+    rewritten.push(':');
+    push_hex(&mut rewritten, hash);
+    rewritten.push('\n');
+    if rewritten.len() > crate::vfs::NODE_CAPACITY {
+        return Err(Error::Io);
+    }
+    crate::vfs::overwrite_trusted(ACCOUNTS_PATH, rewritten.as_bytes()).map_err(|_| Error::Io)
+}
+
+/// Remove an inactive account from the trusted account file.
+#[cfg(feature = "system-apps")]
+pub fn remove_user(name: &[u8]) -> Result<(), Error> {
+    if name.is_empty() || name.len() > MAX_NAME {
+        return Err(Error::NotFound);
+    }
+    let stat = crate::vfs::stat(ACCOUNTS_PATH).map_err(|_| Error::NotFound)?;
+    if stat.kind != crate::vfs::NodeKind::File || stat.size == 0 || stat.size > crate::vfs::NODE_CAPACITY {
+        return Err(Error::Io);
+    }
+    let mut data = alloc::vec![0u8; stat.size];
+    if crate::vfs::read_all(ACCOUNTS_PATH, &mut data) != Ok(stat.size) {
+        return Err(Error::Io);
+    }
+    let mut found = false;
+    let mut rewritten = alloc::string::String::new();
+    for line in data.split(|byte| *byte == b'\n') {
+        if line.is_empty() {
+            continue;
+        }
+        let parsed = parse_line(line).ok_or(Error::Io)?;
+        if parsed.name == name {
+            found = true;
+            continue;
+        }
+        rewritten.push_str(core::str::from_utf8(line).map_err(|_| Error::Io)?);
+        rewritten.push('\n');
+    }
+    if !found || rewritten.is_empty() {
+        return Err(if found { Error::Io } else { Error::NotFound });
+    }
+    crate::vfs::overwrite_trusted(ACCOUNTS_PATH, rewritten.as_bytes()).map_err(|_| Error::Io)
+}

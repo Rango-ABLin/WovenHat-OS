@@ -1,5 +1,12 @@
 # WovenHat OS Architecture & Codebase Guide
 
+### Stage 24.12 — durable identity administration
+
+Admin mutations publish the new authority through WID2 and synchronize the
+trusted account file. The runtime retains a copy of the previous authority
+and attempts WID2 rollback if file publication fails. The SMP migration test
+waits for coverage-probe task reclamation before allocating stress slots.
+
 ### Stage 24.11 — bounded identity administration ABI
 
 Syscalls 226–228 expose add-user, delete-user, and add-group operations to
