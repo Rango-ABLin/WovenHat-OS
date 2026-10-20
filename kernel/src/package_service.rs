@@ -13,7 +13,9 @@ use libwoven::package::Package;
 use sha2::{Digest, Sha256};
 
 const CATALOG_PATH: &str = "/wfs/packages/catalog.wstc";
+const PREVIOUS_CATALOG_PATH: &str = "/wfs/packages/catalog.previous.wstc";
 const JOURNAL_PATH: &str = "/wfs/packages/install.wpkj";
+const ROLLBACK_PATH: &str = "/wfs/packages/rollback.wrbk";
 const APPLICATION_DIRECTORY: &str = "/wfs/packages/apps";
 const RESOURCE_DIRECTORY: &str = "/wfs/packages/resources";
 const MAX_CHUNKS: usize = (libwoven::package::MAX_APPLICATION_BYTES as usize).div_ceil(crate::wfs::MAX_FILE_SIZE);
@@ -24,6 +26,7 @@ const JOURNAL_INSTALL_COMMITTED: u8 = 2;
 const JOURNAL_REMOVE_PREPARED: u8 = 3;
 const JOURNAL_REMOVE_COMMITTED: u8 = 4;
 const JOURNAL_BYTES: usize = 4 + 2 + 1 + 1 + libwoven::package::MAX_NAME_BYTES + 8 + 8 + 4 + 4 + 4 + 4 + 4;
+const ROLLBACK_BYTES: usize = libwoven::store::MAX_RECORD_BYTES + 4;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct InstallJournal {
@@ -180,12 +183,158 @@ fn clear_journal(authority: &crate::wfs::AuthorizedWfsWriter, now: u64) {
     let _ = authority;
 }
 
+fn encode_store(
+    store: &libwoven::store::Store,
+    out: &mut [u8; libwoven::store::MAX_RECORD_BYTES],
+) -> Result<usize, Error> {
+    store.encode_record(out).map_err(Error::Catalog)
+}
+
+fn write_catalog(
+    authority: &crate::wfs::AuthorizedWfsWriter,
+    path: &str,
+    store: &libwoven::store::Store,
+    now: u64,
+) -> Result<(), Error> {
+    let mut record = [0u8; libwoven::store::MAX_RECORD_BYTES];
+    let length = encode_store(store, &mut record)?;
+    crate::wfs::write_vfs_path_durable(authority, path, &record[..length], now)
+        .map_err(|_| Error::Storage)
+}
+
+fn prepare_rollback(
+    authority: &crate::wfs::AuthorizedWfsWriter,
+    current: &libwoven::store::Store,
+    now: u64,
+) -> Result<(), Error> {
+    let mut previous_record = [0u8; libwoven::store::MAX_RECORD_BYTES];
+    match crate::wfs::read_vfs_path_durable(PREVIOUS_CATALOG_PATH, &mut previous_record) {
+        Ok(length) => {
+            let previous = libwoven::store::Store::decode_record(&previous_record[..length])
+                .map_err(Error::Catalog)?;
+            for index in 0..libwoven::store::MAX_INSTALLED {
+                let Some(entry) = previous.entry_at(index) else {
+                    continue;
+                };
+                let same_generation = current
+                    .entry(&entry.name[..entry.name_len as usize])
+                    .is_some_and(|current_entry| current_entry.version == entry.version);
+                if !same_generation {
+                    let name = str::from_utf8(&entry.name[..entry.name_len as usize])
+                        .map_err(|_| Error::InvalidName)?;
+                    remove_chunks(
+                        APPLICATION_DIRECTORY,
+                        name,
+                        entry.version,
+                        entry.application_chunks as usize,
+                        now,
+                    );
+                    remove_chunks(
+                        RESOURCE_DIRECTORY,
+                        name,
+                        entry.version,
+                        entry.resource_chunks as usize,
+                        now,
+                    );
+                }
+            }
+        }
+        Err(crate::wfs::Error::NotFound) => {}
+        Err(_) => return Err(Error::Storage),
+    }
+    write_catalog(authority, PREVIOUS_CATALOG_PATH, current, now)
+}
+
+fn write_rollback_intent(
+    authority: &crate::wfs::AuthorizedWfsWriter,
+    target: &libwoven::store::Store,
+    now: u64,
+) -> Result<(), Error> {
+    let mut bytes = [0u8; ROLLBACK_BYTES];
+    let length = encode_store(target, (&mut bytes[..libwoven::store::MAX_RECORD_BYTES]).try_into().unwrap())?;
+    let checksum = journal_checksum(&bytes[..length]);
+    bytes[length..length + 4].copy_from_slice(&checksum.to_le_bytes());
+    crate::wfs::write_vfs_path_durable(authority, ROLLBACK_PATH, &bytes[..length + 4], now)
+        .map_err(|_| Error::Storage)
+}
+
+fn read_rollback_intent(
+    record: &mut [u8; libwoven::store::MAX_RECORD_BYTES],
+) -> Result<libwoven::store::Store, Error> {
+    let mut bytes = [0u8; ROLLBACK_BYTES];
+    let length = crate::wfs::read_vfs_path_durable(ROLLBACK_PATH, &mut bytes)
+        .map_err(|_| Error::Storage)?;
+    if !(24..=ROLLBACK_BYTES).contains(&length) {
+        return Err(Error::Storage);
+    }
+    let record_length = u32::from_le_bytes(bytes[16..20].try_into().unwrap()) as usize;
+    if record_length + 4 != length
+        || journal_checksum(&bytes[..record_length])
+            != u32::from_le_bytes(bytes[record_length..length].try_into().unwrap())
+    {
+        return Err(Error::Storage);
+    }
+    record[..record_length].copy_from_slice(&bytes[..record_length]);
+    libwoven::store::Store::decode_record(&record[..record_length]).map_err(Error::Catalog)
+}
+
+fn clear_rollback(authority: &crate::wfs::AuthorizedWfsWriter, now: u64) {
+    let _ = crate::wfs::unlink_vfs_path(ROLLBACK_PATH, now);
+    let _ = authority;
+}
+
+fn restore_previous(
+    authority: &crate::wfs::AuthorizedWfsWriter,
+    current: &libwoven::store::Store,
+    target: &libwoven::store::Store,
+    now: u64,
+) -> Result<(), Error> {
+    write_catalog(authority, CATALOG_PATH, target, now)?;
+    for index in 0..libwoven::store::MAX_INSTALLED {
+        let Some(entry) = current.entry_at(index) else {
+            continue;
+        };
+        let same_generation = target
+            .entry(&entry.name[..entry.name_len as usize])
+            .is_some_and(|target_entry| target_entry.version == entry.version);
+        if !same_generation {
+            let name = str::from_utf8(&entry.name[..entry.name_len as usize])
+                .map_err(|_| Error::InvalidName)?;
+            remove_chunks(
+                APPLICATION_DIRECTORY,
+                name,
+                entry.version,
+                entry.application_chunks as usize,
+                now,
+            );
+            remove_chunks(
+                RESOURCE_DIRECTORY,
+                name,
+                entry.version,
+                entry.resource_chunks as usize,
+                now,
+            );
+        }
+    }
+    Ok(())
+}
+
 /// Recover a prior install intent before accepting another package.
 pub fn recover(
     authority: &crate::wfs::AuthorizedWfsWriter,
     current: &libwoven::store::Store,
     now: u64,
 ) -> Result<libwoven::store::Store, Error> {
+    let mut rollback_record = [0u8; libwoven::store::MAX_RECORD_BYTES];
+    match crate::wfs::read_vfs_path_durable(ROLLBACK_PATH, &mut [0u8; ROLLBACK_BYTES]) {
+        Ok(_) => {
+            let target = read_rollback_intent(&mut rollback_record)?;
+            restore_previous(authority, current, &target, now)?;
+            clear_rollback(authority, now);
+        }
+        Err(crate::wfs::Error::NotFound) => {}
+        Err(_) => return Err(Error::Storage),
+    }
     let mut bytes = [0u8; JOURNAL_BYTES];
     let length = match crate::wfs::read_vfs_path_durable(JOURNAL_PATH, &mut bytes) {
         Ok(length) => length,
@@ -293,6 +442,7 @@ pub fn install(
     ensure_directory("/wfs/packages", now)?;
     ensure_directory(APPLICATION_DIRECTORY, now)?;
     ensure_directory(RESOURCE_DIRECTORY, now)?;
+    prepare_rollback(authority, &current, now)?;
     let mut transaction = current.transaction();
     let application_digest: [u8; 32] = Sha256::digest(package.application).into();
     let application_chunks = package
@@ -391,20 +541,6 @@ pub fn install(
         state: JOURNAL_INSTALL_COMMITTED,
         ..journal
     };
-    remove_chunks(
-        APPLICATION_DIRECTORY,
-        name,
-        journal.old_version,
-        journal.old_application_chunks as usize,
-        now,
-    );
-    remove_chunks(
-        RESOURCE_DIRECTORY,
-        name,
-        journal.old_version,
-        journal.old_resource_chunks as usize,
-        now,
-    );
     if write_journal(authority, committed, now).is_err() {
         return Err(Error::Storage);
     }
@@ -422,6 +558,7 @@ pub fn remove(
     let current = recover(authority, current, now)?;
     let entry = current.entry(name).ok_or(Error::Package(libwoven::store::Error::AlreadyAbsent))?;
     let name = str::from_utf8(name).map_err(|_| Error::InvalidName)?;
+    prepare_rollback(authority, &current, now)?;
     let mut transaction = current.transaction();
     transaction.remove(name.as_bytes()).map_err(Error::Package)?;
     let mut journal_name = [0u8; libwoven::package::MAX_NAME_BYTES];
@@ -443,8 +580,6 @@ pub fn remove(
     let length = updated.encode_record(&mut record).map_err(Error::Catalog)?;
     crate::wfs::write_vfs_path_durable(authority, CATALOG_PATH, &record[..length], now)
         .map_err(|_| Error::Storage)?;
-    remove_chunks(APPLICATION_DIRECTORY, name, entry.version, entry.application_chunks as usize, now);
-    remove_chunks(RESOURCE_DIRECTORY, name, entry.version, entry.resource_chunks as usize, now);
     write_journal(
         authority,
         InstallJournal { state: JOURNAL_REMOVE_COMMITTED, ..journal },
@@ -454,7 +589,29 @@ pub fn remove(
     Ok(updated)
 }
 
-#[cfg(any(feature = "stage21-7-test", feature = "stage21-9-test"))]
+/// Restore the most recent durable package catalog generation.
+pub fn rollback(
+    authority: &crate::wfs::AuthorizedWfsWriter,
+    current: &libwoven::store::Store,
+    now: u64,
+) -> Result<libwoven::store::Store, Error> {
+    let current = recover(authority, current, now)?;
+    let mut previous_record = [0u8; libwoven::store::MAX_RECORD_BYTES];
+    let length = crate::wfs::read_vfs_path_durable(PREVIOUS_CATALOG_PATH, &mut previous_record)
+        .map_err(|_| Error::Storage)?;
+    let target = libwoven::store::Store::decode_record(&previous_record[..length])
+        .map_err(Error::Catalog)?;
+    write_rollback_intent(authority, &target, now)?;
+    restore_previous(authority, &current, &target, now)?;
+    clear_rollback(authority, now);
+    Ok(target)
+}
+
+#[cfg(any(
+    feature = "stage21-7-test",
+    feature = "stage21-9-test",
+    feature = "stage21-10-test"
+))]
 pub fn self_test() -> bool {
     const MANIFEST: [u8; 22] = [
         4, b'c', b'o', b'r', b'e', 1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0,
@@ -510,7 +667,11 @@ pub fn self_test() -> bool {
         && application[..3] == *b"ELF"
 }
 
-#[cfg(any(feature = "stage21-8-test", feature = "stage21-9-test"))]
+#[cfg(any(
+    feature = "stage21-8-test",
+    feature = "stage21-9-test",
+    feature = "stage21-10-test"
+))]
 pub fn recovery_self_test() -> bool {
     if !crate::wfs::format_ata(64) {
         return false;
@@ -555,7 +716,7 @@ pub fn recovery_self_test() -> bool {
     )
 }
 
-#[cfg(feature = "stage21-9-test")]
+#[cfg(any(feature = "stage21-9-test", feature = "stage21-10-test"))]
 pub fn update_remove_self_test() -> bool {
     if !self_test() {
         return false;
@@ -573,15 +734,18 @@ pub fn update_remove_self_test() -> bool {
     let Ok(updated) = remove(&authority, &current, b"core", 2) else {
         return false;
     };
-    if updated.contains(b"core") {
+    if updated.contains(b"core") || rollback(&authority, &updated, 3).is_err() {
         return false;
     }
     let mut application = [0u8; crate::wfs::MAX_FILE_SIZE];
-    matches!(
-        crate::wfs::read_vfs_path_durable(
-            "/wfs/packages/apps/core-v1-0000.bin",
-            &mut application,
-        ),
-        Err(crate::wfs::Error::NotFound)
-    )
+    crate::wfs::read_vfs_path_durable(
+        "/wfs/packages/apps/core-v1-0000.bin",
+        &mut application,
+    ) == Ok(3)
+        && application[..3] == *b"ELF"
+}
+
+#[cfg(feature = "stage21-10-test")]
+pub fn rollback_self_test() -> bool {
+    update_remove_self_test()
 }

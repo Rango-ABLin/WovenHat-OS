@@ -244,6 +244,10 @@ impl Store {
         self.find(name).and_then(|index| self.entries[index])
     }
 
+    pub fn entry_at(&self, index: usize) -> Option<Entry> {
+        self.entries.get(index).copied().flatten()
+    }
+
     pub fn transaction(&self) -> Transaction {
         Transaction {
             original: *self,

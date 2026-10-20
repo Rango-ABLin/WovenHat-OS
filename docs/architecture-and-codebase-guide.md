@@ -1209,10 +1209,11 @@ the intent. This closes the tested orphan-cleanup window without claiming that
 multi-package or power-loss recovery across every catalog mutation is complete.
 
 Stage 21.9 extends WSTC entries with application/resource chunk counts and
-extends WPKJ with the superseded generation. Updates reclaim the old
-generation only after the new catalog is durable. Removal commits the catalog
-first, then removes the exact recorded chunks; recovery keeps the old payload
-if the catalog is still old and cleans it if the removal already committed.
+extends WPKJ with the superseded generation. Stage 21.10 adds one bounded
+rollback generation: the previous catalog is durable before a new transaction,
+the previous payload remains available, and a checksummed rollback intent makes
+restoration idempotent. The next transaction garbage-collects only generations
+that are neither active nor the retained rollback generation.
 
 The feature-gated `stage19-app-catalog-test` now exercises the install-plan
 boundary for all ten accepted packages together. It verifies each WAPP,

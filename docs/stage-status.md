@@ -2255,17 +2255,29 @@ open.
 ## Stage 21.9 WovenPackage update/removal transactions (2026-10-20)
 
 WSTC v2 now records bounded application/resource chunk counts. WPKJ records
-both the incoming and superseded generation, allowing recovery to reclaim old
-payloads only after the new catalog is durable. Package removal uses a
-catalog-first journaled commit and deletes the exact recorded chunks; recovery
-keeps old payloads when the catalog was not committed and removes them when it
-was. The Stage 21.9 disposable ATA QEMU gate passed on 1/2/4 CPUs, and the
+both the incoming and superseded generation. Package removal uses a
+catalog-first journaled commit while the prior generation remains available
+for the bounded rollback window. The Stage 21.9 disposable ATA QEMU gate
+passed on 1/2/4 CPUs, and the
 Stage 21.6/21.7/21.8 regression gates passed again on 1/2/4 CPUs after the ABI
 and journal changes. Evidence is under timestamped `audit-artifacts`
 directories. Host and affected freestanding warning-denying Clippy passed.
 
-Multi-package recovery, power-loss injection at every boundary, userspace
-package-service IPC/ownership, rollback, sandbox enforcement, and physical USB
+Multi-package recovery, power-loss injection at every boundary, sandbox
+enforcement, userspace package-service IPC/ownership, and physical USB
+qualification remain open.
+
+## Stage 21.10 WovenPackage bounded rollback (2026-10-20)
+
+The package service now persists one previous WSTC catalog generation before
+each install or removal. It retains the corresponding payload generation,
+records rollback intent in a checksummed WRBK record, restores the catalog and
+payload authority idempotently, and retires only generations no longer active
+or rollback-capable. The Stage 21.10 disposable ATA QEMU gate passed on 1/2/4
+CPUs; host tests and warning-denying host/freestanding Clippy passed.
+
+Multi-package rollback, power-loss injection at every boundary, sandbox
+enforcement, userspace package-service IPC/ownership, and physical USB
 qualification remain open.
 
 ## Graphics track - bounded quadratic paths (2026-10-18)

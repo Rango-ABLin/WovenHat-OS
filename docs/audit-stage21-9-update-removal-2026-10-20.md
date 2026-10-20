@@ -9,9 +9,12 @@ intent record carries both the incoming and superseded generation.
 ## Implemented contract
 
 - WSTC v2 records application and resource chunk counts per entry.
-- Updates journal the old generation and reclaim it only after catalog commit.
-- Removal writes a prepared intent, commits the catalog, removes exact chunks,
-  and records the committed state before clearing the intent.
+- Updates journal the old generation and retain it for the bounded rollback
+  window; later transactions reclaim it when it is no longer active or
+  rollback-capable.
+- Removal writes a prepared intent, commits the catalog, and records the
+  committed state before clearing the intent; payload cleanup is bounded by
+  the rollback-generation policy.
 - Recovery preserves the old generation when a removal did not reach catalog
   commit and cleans it when the catalog already reflects removal.
 - Existing install and recovery behavior remains compatible with the new
@@ -33,6 +36,6 @@ intent record carries both the incoming and superseded generation.
 ## Remaining acceptance prerequisites
 
 This is not full package-production acceptance. Multi-package recovery,
-power-loss injection at every boundary, userspace service/IPC ownership,
-rollback, sandbox enforcement, and physical USB qualification remain open.
+power-loss injection at every boundary, sandbox enforcement, userspace
+service/IPC ownership, and physical USB qualification remain open.
 No physical USB write was performed.

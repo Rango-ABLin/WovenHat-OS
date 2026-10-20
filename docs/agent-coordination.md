@@ -9,6 +9,12 @@ Stage 21.9 passed on 1/2/4 CPUs, and Stage 21.6/7/8 regression gates passed on
 1/2/4 CPUs after the record/journal ABI changes. No physical USB write was
 performed.
 
+**Codex: Stage 21.10 WovenPackage bounded rollback (2026-10-20):** the package
+service persists one previous WSTC catalog/payload generation, journals WRBK
+restore intent, and replays rollback idempotently. Garbage collection retires
+only generations that are neither active nor the retained rollback generation.
+Stage 21.10 passed on 1/2/4 CPUs. No physical USB write was performed.
+
 **Codex: Stage 21.1 bounded WovenPackages envelope (2026-10-20):** `libwoven`
 now parses a bounded version-1 `WPKG` envelope containing a manifest,
 application bytes, resources, and a fixed 64-byte signature field. Manifest
