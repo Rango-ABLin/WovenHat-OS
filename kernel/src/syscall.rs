@@ -397,7 +397,8 @@ pub enum Number {
     IpcServiceDiscover = 214,
     /// endpoint handle, message ptr, message length -> 0
     IpcMessageSend = 215,
-    /// endpoint handle, output buffer, capacity -> message length
+    /// endpoint handle, output buffer, capacity -> message length; the output
+    /// starts with the sender process id as a little-endian u64.
     IpcMessageReceive = 216,
 }
 
@@ -918,19 +919,26 @@ fn sys_ipc_message_receive(raw_handle: u64, user_buffer: u64, capacity: u64) -> 
     let Ok(capacity) = usize::try_from(capacity) else {
         return SYSCALL_ERROR;
     };
-    if capacity > crate::ipc::MAX_MESSAGE_SIZE {
+    if capacity < core::mem::size_of::<u64>()
+        || capacity > crate::ipc::MAX_MESSAGE_SIZE + core::mem::size_of::<u64>()
+    {
         return SYSCALL_ERROR;
     }
     let message = match crate::ipc::receive_handle(crate::task::current_process_id(), handle) {
         Ok(message) => message,
         Err(_) => return SYSCALL_ERROR,
     };
-    if message.payload().len() > capacity
-        || crate::paging::copy_to_current_user(user_buffer, message.payload()).is_err()
-    {
+    let output_length = core::mem::size_of::<u64>().saturating_add(message.payload().len());
+    if output_length > capacity {
         return SYSCALL_ERROR;
     }
-    message.payload().len() as u64
+    let mut output = [0u8; crate::ipc::MAX_MESSAGE_SIZE + core::mem::size_of::<u64>()];
+    output[..8].copy_from_slice(&message.sender.to_le_bytes());
+    output[8..output_length].copy_from_slice(message.payload());
+    if crate::paging::copy_to_current_user(user_buffer, &output[..output_length]).is_err() {
+        return SYSCALL_ERROR;
+    }
+    output_length as u64
 }
 
 fn sys_pipe() -> u64 {

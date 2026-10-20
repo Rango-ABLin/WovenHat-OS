@@ -18,7 +18,9 @@ physical USB qualification remain required.
 
 Discovered service capabilities are now usable by Ring-3 callers. Syscall 215
 copies a bounded message and sends it to a caller-owned endpoint handle; syscall
-216 receives from a handle into a validated userspace buffer. Both require
+216 receives from a handle into a validated userspace buffer, prefixing the
+sender process ID so a broker can route a response through the existing
+capability-gated process mailbox. Both require
 `Capability::Ipc`, preserve the nonblocking queue contract, and fail closed on
 invalid handles, oversized messages, missing rights, or copy faults.
 `libwoven` exposes typed send/receive wrappers. The Stage 22.2 QEMU gate passed

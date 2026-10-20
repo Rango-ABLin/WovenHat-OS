@@ -37,6 +37,14 @@ Stage 22.2 transport evidence:
 - `audit-artifacts/stage21.22-2cpu-1792517311818527300`
 - `audit-artifacts/stage21.22-4cpu-1792517324885076600`
 
+The receive ABI was subsequently hardened to prefix each copied message with
+the sender process ID, which is required for a broker to route responses using
+the existing mailbox syscall. The corrected ABI passed the affected matrix:
+
+- `audit-artifacts/stage21.22-1cpu-1792517632981988900`
+- `audit-artifacts/stage21.22-2cpu-1792517647927733400`
+- `audit-artifacts/stage21.22-4cpu-1792517661629792600`
+
 ## Failed attempt retained
 
 The first 1-CPU attempt is preserved at

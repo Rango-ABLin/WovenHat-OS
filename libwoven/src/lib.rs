@@ -12261,7 +12261,8 @@ pub fn message_send(receiver: process::Id, bytes: &[u8]) -> Result<(), Error> {
     check(result).map(|_| ())
 }
 
-/// Take the next message, returning its length and sender. Fails when no
+/// Take the next handle-addressed message, returning its length and sender.
+/// The first eight bytes of the caller buffer are reserved for the sender. Fails when no
 /// message is queued, or when it does not fit in `buffer`.
 pub fn message_receive(buffer: &mut [u8]) -> Result<(usize, process::Id), Error> {
     let mut sender = 0u64;
@@ -12299,10 +12300,17 @@ pub fn ipc_message_send(endpoint: u64, bytes: &[u8]) -> Result<(), Error> {
     check(unsafe { syscall::ipc_message_send(endpoint, bytes.as_ptr(), bytes.len()) }).map(|_| ())
 }
 
-pub fn ipc_message_receive(endpoint: u64, buffer: &mut [u8]) -> Result<usize, Error> {
+pub fn ipc_message_receive(endpoint: u64, buffer: &mut [u8]) -> Result<(usize, process::Id), Error> {
     // SAFETY: the pointer and length describe writable `buffer` storage.
-    check(unsafe { syscall::ipc_message_receive(endpoint, buffer.as_mut_ptr(), buffer.len()) })
-        .map(|length| length as usize)
+    let length = check(unsafe {
+        syscall::ipc_message_receive(endpoint, buffer.as_mut_ptr(), buffer.len())
+    })? as usize;
+    if length < 8 {
+        return Err(Error::Failed);
+    }
+    let sender = u64::from_le_bytes(buffer[..8].try_into().unwrap());
+    buffer.copy_within(8..length, 0);
+    Ok((length - 8, process::Id(sender)))
 }
 
 /// Take the compositor lease.
