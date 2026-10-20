@@ -7,6 +7,14 @@ passes on 1/2/4 CPUs. The compiler-fixture gate remains open due to a
 preserved feature-specific stack-canary failure before its test block; see
 `docs/audit-stage11-library-tls-2026-10-20.md` before claiming acceptance.
 
+Read-only physical preflight on 2026-10-20 found the attached target as a
+15,726,400,000-byte VendorCo ProductCode USB disk with no partitions, separate
+from the boot NVMe disk, on an HP Pavilion x360 host with an Intel AX201.
+Evidence is in `docs/audit-physical-usb-preflight-2026-10-20.md`. No raw write,
+format, partition change, or physical boot was performed; those next steps
+require Administrator access and explicit confirmation because the test
+scripts erase the target disk.
+
 **User directive (2026-10-20): finish and clean up all software, coordinate
 between agents, and scope a "fully 3D" graphics direction.** The user
 reaffirmed full standing authorization for both agents (see
