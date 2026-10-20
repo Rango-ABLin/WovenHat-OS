@@ -1,5 +1,20 @@
 # Stage status
 
+## Stage 24.11 bounded identity administration ABI (2026-10-20)
+
+Elevated administrator sessions can now add users, delete inactive users, and
+add groups through bounded syscalls 226–228. Self-deletion and deletion of
+accounts with active sessions are refused. The 87-test host suite, host and
+kernel Clippy gates, system-apps Clippy, diff check, and signed system-apps
+1/2/4-CPU shell gates pass. Evidence is under:
+`audit-artifacts/stage24.11-admin-abi-1cpu-1792533600000000000`,
+`audit-artifacts/stage24.11-admin-abi-2cpu-1792533600000000000`, and
+`audit-artifacts/stage24.11-admin-abi-4cpu-1792533600000000000`.
+
+Persistence to account/WID2 storage, group membership mutation/deletion, and
+an administration UI remain open; this is not yet a complete administration
+release gate.
+
 ## Stage 24.10 kernel identity lockout/rate limiting (2026-10-20)
 
 The owner-bound identity runtime now rate-limits both plaintext and verified

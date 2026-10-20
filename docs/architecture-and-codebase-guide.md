@@ -1,5 +1,14 @@
 # WovenHat OS Architecture & Codebase Guide
 
+### Stage 24.11 — bounded identity administration ABI
+
+Syscalls 226–228 expose add-user, delete-user, and add-group operations to
+the trusted elevated administrator session. Requests are copied into bounded
+buffers; the policy rejects ordinary callers, self-deletion, and deletion of
+accounts with active sessions. Actions are recorded in the security ledger.
+The current slice changes the live authority only; durable account/WID2
+publication and UI integration remain separate work.
+
 ### Stage 24.10 — kernel identity lockout/rate limiting
 
 `identity_runtime` keeps a fixed per-account failure table. Five failed

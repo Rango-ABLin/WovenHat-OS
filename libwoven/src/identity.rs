@@ -337,6 +337,85 @@ impl Authority {
         Ok(())
     }
 
+    /// Resolve a bounded group name for an administrative caller.
+    pub fn group_id(&self, name: &[u8]) -> Result<GroupId, Error> {
+        self.groups
+            .iter()
+            .flatten()
+            .find(|group| group.name[..group.name_len] == *name)
+            .map(|group| group.id)
+            .ok_or(Error::NotFound)
+    }
+
+    /// Create a user only from an active, elevated administrator session.
+    pub fn admin_add_user(
+        &mut self,
+        session: SessionId,
+        name: &[u8],
+        gid: GroupId,
+        salt: &[u8],
+        password: &[u8],
+        administrator: bool,
+    ) -> Result<UserId, Error> {
+        self.require_administrator(session)?;
+        self.add_user_with_role(name, gid, salt, password, administrator)
+    }
+
+    /// Add a group only from an active, elevated administrator session.
+    pub fn admin_add_group(&mut self, session: SessionId, name: &[u8]) -> Result<GroupId, Error> {
+        self.require_administrator(session)?;
+        self.add_group(name)
+    }
+
+    /// Delete an account only from an active, elevated administrator session.
+    /// Active sessions and the administrator's own account cannot be removed.
+    pub fn admin_delete_user(
+        &mut self,
+        session: SessionId,
+        target: UserId,
+    ) -> Result<(), Error> {
+        let administrator = self.require_administrator(session)?;
+        if administrator == target {
+            return Err(Error::Unauthorized);
+        }
+        if self
+            .sessions
+            .iter()
+            .flatten()
+            .any(|active| active.user == target)
+        {
+            return Err(Error::Locked);
+        }
+        if self.find_user(target).is_none() {
+            return Err(Error::NotFound);
+        }
+        for group in self.groups.iter_mut().flatten() {
+            for member in &mut group.members {
+                if *member == Some(target) {
+                    *member = None;
+                }
+            }
+        }
+        let slot = self
+            .users
+            .iter()
+            .position(|user| user.is_some_and(|user| user.id == target))
+            .ok_or(Error::NotFound)?;
+        self.users[slot] = None;
+        Ok(())
+    }
+
+    fn require_administrator(&self, session: SessionId) -> Result<UserId, Error> {
+        let current = self.find_session(session).ok_or(Error::NotFound)?;
+        if current.state != SessionState::Active || !current.elevated {
+            return Err(Error::Unauthorized);
+        }
+        let user = self.find_user(current.user).ok_or(Error::NotFound)?;
+        user.administrator
+            .then_some(user.id)
+            .ok_or(Error::Unauthorized)
+    }
+
     pub fn open_session(&mut self, user: UserId, password: &[u8]) -> Result<SessionId, Error> {
         let account = self.find_user(user).ok_or(Error::NotFound)?;
         if !account.credential.verify(password) {
@@ -890,6 +969,62 @@ pub fn session_elevate(session: SessionId, password: &[u8]) -> Result<(), crate:
     session_password_action(crate::syscall::IDENTITY_ELEVATE, session, password)
 }
 
+/// Add a regular or administrator account through the elevated identity
+/// session. The kernel assigns the account to the bounded `users` group.
+pub fn admin_add_user(
+    name: &[u8],
+    password: &[u8],
+    administrator: bool,
+) -> Result<UserId, crate::Error> {
+    if name.is_empty() || name.len() > MAX_NAME || password.is_empty() || password.len() > MAX_PIN {
+        return Err(crate::Error::Failed);
+    }
+    let mut packed = [0u8; 3 + MAX_NAME + MAX_PIN];
+    let mut offset = 0;
+    for field in [name, password] {
+        packed[offset] = field.len() as u8;
+        offset += 1;
+        packed[offset..offset + field.len()].copy_from_slice(field);
+        offset += field.len();
+    }
+    packed[offset] = u8::from(administrator);
+    offset += 1;
+    crate::check(unsafe {
+        crate::syscall::invoke(
+            crate::syscall::IDENTITY_ADMIN_ADD_USER,
+            packed.as_ptr() as u64,
+            offset as u64,
+            0,
+        )
+    })
+    .map(|value| UserId(value as u32))
+}
+
+pub fn admin_delete_user(user: UserId) -> Result<(), crate::Error> {
+    crate::check(unsafe {
+        crate::syscall::invoke(crate::syscall::IDENTITY_ADMIN_DELETE_USER, user.0 as u64, 0, 0)
+    })
+    .map(|_| ())
+}
+
+pub fn admin_add_group(name: &[u8]) -> Result<GroupId, crate::Error> {
+    if name.is_empty() || name.len() > MAX_NAME {
+        return Err(crate::Error::Failed);
+    }
+    let mut packed = [0u8; 1 + MAX_NAME];
+    packed[0] = name.len() as u8;
+    packed[1..1 + name.len()].copy_from_slice(name);
+    crate::check(unsafe {
+        crate::syscall::invoke(
+            crate::syscall::IDENTITY_ADMIN_ADD_GROUP,
+            packed.as_ptr() as u64,
+            (1 + name.len()) as u64,
+            0,
+        )
+    })
+    .map(|value| GroupId(value as u32))
+}
+
 pub fn session_close(session: SessionId) -> Result<(), crate::Error> {
     // SAFETY: integer-only syscall; the kernel owner-binds the token.
     crate::check(unsafe {
@@ -1031,6 +1166,39 @@ mod tests {
             Err(Error::WrongPassword)
         );
         assert_eq!(authority.view(session).unwrap().uid, 1000);
+    }
+
+    #[test]
+    fn administrative_user_and_group_changes_require_elevated_admin() {
+        let mut authority = Authority::new();
+        let group = authority.add_group(b"users").unwrap();
+        let admin = authority
+            .add_administrator(b"admin", group, b"salt", b"1234")
+            .unwrap();
+        let ordinary = authority.add_user(b"ada", group, b"salt2", b"5678").unwrap();
+        let admin_session = authority.open_session(admin, b"1234").unwrap();
+        let ordinary_session = authority.open_session(ordinary, b"5678").unwrap();
+        assert_eq!(
+            authority.admin_add_group(ordinary_session, b"staff"),
+            Err(Error::Unauthorized)
+        );
+        assert_eq!(
+            authority.admin_add_user(ordinary_session, b"lin", group, b"salt3", b"9999", false),
+            Err(Error::Unauthorized)
+        );
+        authority.elevate(admin_session, b"1234").unwrap();
+        let staff = authority.admin_add_group(admin_session, b"staff").unwrap();
+        let created = authority
+            .admin_add_user(admin_session, b"lin", staff, b"salt3", b"9999", false)
+            .unwrap();
+        let created_session = authority.open_session(created, b"9999").unwrap();
+        assert_eq!(
+            authority.admin_delete_user(admin_session, created),
+            Err(Error::Locked)
+        );
+        authority.close_session(created_session).unwrap();
+        authority.admin_delete_user(admin_session, created).unwrap();
+        assert_eq!(authority.group_id(b"staff"), Ok(staff));
     }
 
     #[test]

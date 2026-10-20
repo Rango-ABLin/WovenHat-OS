@@ -914,6 +914,13 @@ session open/lock/unlock/elevation/close framing and safe userspace wrappers.
 The gate proves parser/ABI behavior only; runtime loading, live Ring-3 login,
 teardown, auditing, lockout, and shell migration remain open.
 
+Stage 24.11 bounded identity administration ABI accepted (2026-10-20):
+elevated administrator sessions can add users, delete inactive users, and add
+groups through bounded syscalls 226–228 with stable audit actions 31–33. Host,
+feature-gate, and 1/2/4-CPU signed system-app gates pass. Durable account/WID2
+publication, group membership mutation/deletion, and administration UI remain
+open.
+
 Stage 24.10 kernel identity lockout/rate limiting accepted (2026-10-20):
 plaintext and verified-digest authentication share a bounded five-failure,
 five-second cooldown policy, with success reset and fail-closed table

@@ -203,6 +203,9 @@ pub mod security {
         IdentityUnlock = 28,
         IdentityElevate = 29,
         IdentityClose = 30,
+        IdentityAdminAddUser = 31,
+        IdentityAdminDeleteUser = 32,
+        IdentityAdminAddGroup = 33,
     }
 
     #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -11289,6 +11292,9 @@ pub mod syscall {
     pub const GRAPHICS_COMPOSITOR_OUTPUTS: u64 = 207;
     pub const POWER_CONTROL: u64 = 209;
     pub const ACCOUNTS_CHANGE_PIN: u64 = 210;
+    pub const IDENTITY_ADMIN_ADD_USER: u64 = 226;
+    pub const IDENTITY_ADMIN_DELETE_USER: u64 = 227;
+    pub const IDENTITY_ADMIN_ADD_GROUP: u64 = 228;
     pub const IPC_ENDPOINT_CREATE: u64 = 211;
     pub const IPC_SERVICE_PUBLISH: u64 = 212;
     pub const IPC_SERVICE_UNPUBLISH: u64 = 213;
@@ -13278,6 +13284,9 @@ pub fn audit_read(offset: u64) -> Result<Option<security::AuditEvent>, Error> {
         28 => security::AuditAction::IdentityUnlock,
         29 => security::AuditAction::IdentityElevate,
         30 => security::AuditAction::IdentityClose,
+        31 => security::AuditAction::IdentityAdminAddUser,
+        32 => security::AuditAction::IdentityAdminDeleteUser,
+        33 => security::AuditAction::IdentityAdminAddGroup,
         _ => return Err(Error::Failed),
     };
     Ok(Some(security::AuditEvent {

@@ -51,6 +51,12 @@ pub enum Action {
     IdentityElevate,
     #[allow(dead_code)]
     IdentityClose,
+    #[allow(dead_code)]
+    IdentityAdminAddUser,
+    #[allow(dead_code)]
+    IdentityAdminDeleteUser,
+    #[allow(dead_code)]
+    IdentityAdminAddGroup,
 }
 
 /// One immutable security-ledger record.

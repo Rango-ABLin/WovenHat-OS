@@ -431,6 +431,12 @@ pub enum Number {
     IdentityOpenVerified = 224,
     #[cfg(feature = "system-apps")]
     IdentityUnlockVerified = 225,
+    #[cfg(feature = "system-apps")]
+    IdentityAdminAddUser = 226,
+    #[cfg(feature = "system-apps")]
+    IdentityAdminDeleteUser = 227,
+    #[cfg(feature = "system-apps")]
+    IdentityAdminAddGroup = 228,
 }
 
 pub fn entry_address() -> u64 {
@@ -2916,6 +2922,18 @@ pub extern "C" fn wovenhat_syscall_dispatch(
         value if value == Number::IdentityUnlockVerified as u64 => {
             sys_identity_unlock_verified(arg0, arg1, arg2)
         }
+        #[cfg(feature = "system-apps")]
+        value if value == Number::IdentityAdminAddUser as u64 => {
+            sys_identity_admin_add_user(arg0, arg1)
+        }
+        #[cfg(feature = "system-apps")]
+        value if value == Number::IdentityAdminDeleteUser as u64 => {
+            sys_identity_admin_delete_user(arg0)
+        }
+        #[cfg(feature = "system-apps")]
+        value if value == Number::IdentityAdminAddGroup as u64 => {
+            sys_identity_admin_add_group(arg0, arg1)
+        }
         _ => u64::MAX,
     };
 
@@ -3461,6 +3479,125 @@ fn sys_identity_unlock_verified(session: u64, user_buffer: u64, length: u64) -> 
         result.is_ok(),
     );
     result.map_or(SYSCALL_ERROR, |_| 0)
+}
+
+#[cfg(feature = "system-apps")]
+fn sys_identity_admin_add_user(user_buffer: u64, length: u64) -> u64 {
+    const MAX_BUFFER: usize = 3 + crate::accounts::MAX_NAME + crate::accounts::MAX_PIN;
+    let actor = crate::task::current_task_id().as_u64();
+    if !crate::task::current_has(crate::capability::Capability::AccountManage) {
+        crate::audit::record(actor, crate::audit::Action::IdentityAdminAddUser, 0, false);
+        return SYSCALL_ERROR;
+    }
+    let Ok(length) = usize::try_from(length) else {
+        crate::audit::record(actor, crate::audit::Action::IdentityAdminAddUser, 0, false);
+        return SYSCALL_ERROR;
+    };
+    if length == 0 || length > MAX_BUFFER {
+        crate::audit::record(actor, crate::audit::Action::IdentityAdminAddUser, 0, false);
+        return SYSCALL_ERROR;
+    }
+    let mut buffer = [0u8; MAX_BUFFER];
+    if crate::paging::copy_from_current_user(user_buffer, &mut buffer[..length]).is_err() {
+        crate::audit::record(actor, crate::audit::Action::IdentityAdminAddUser, 0, false);
+        return SYSCALL_ERROR;
+    }
+    let Some((name, rest)) = crate::identity_runtime::parse_length_prefixed(
+        &buffer[..length],
+        crate::accounts::MAX_NAME,
+    ) else {
+        crate::audit::record(actor, crate::audit::Action::IdentityAdminAddUser, 0, false);
+        return SYSCALL_ERROR;
+    };
+    let Some((password, rest)) = crate::identity_runtime::parse_length_prefixed(
+        rest,
+        crate::accounts::MAX_PIN,
+    ) else {
+        crate::audit::record(actor, crate::audit::Action::IdentityAdminAddUser, 0, false);
+        return SYSCALL_ERROR;
+    };
+    if rest.len() != 1 {
+        crate::audit::record(actor, crate::audit::Action::IdentityAdminAddUser, 0, false);
+        return SYSCALL_ERROR;
+    }
+    let result = crate::identity_runtime::admin_add_user(
+        crate::task::current_process_id(),
+        name,
+        password,
+        rest[0] != 0,
+    );
+    crate::audit::record(
+        actor,
+        crate::audit::Action::IdentityAdminAddUser,
+        0,
+        result.is_ok(),
+    );
+    result.map(|user| user.0 as u64).unwrap_or(SYSCALL_ERROR)
+}
+
+#[cfg(feature = "system-apps")]
+fn sys_identity_admin_delete_user(user: u64) -> u64 {
+    let actor = crate::task::current_task_id().as_u64();
+    let Ok(user) = u32::try_from(user) else {
+        crate::audit::record(actor, crate::audit::Action::IdentityAdminDeleteUser, 0, false);
+        return SYSCALL_ERROR;
+    };
+    let result = crate::identity_runtime::admin_delete_user(
+        crate::task::current_process_id(),
+        libwoven::identity::UserId(user),
+    );
+    crate::audit::record(
+        actor,
+        crate::audit::Action::IdentityAdminDeleteUser,
+        u64::from(user),
+        result.is_ok(),
+    );
+    result.map_or(SYSCALL_ERROR, |_| 0)
+}
+
+#[cfg(feature = "system-apps")]
+fn sys_identity_admin_add_group(user_buffer: u64, length: u64) -> u64 {
+    const MAX_BUFFER: usize = 1 + crate::accounts::MAX_NAME;
+    let actor = crate::task::current_task_id().as_u64();
+    if !crate::task::current_has(crate::capability::Capability::AccountManage) {
+        crate::audit::record(actor, crate::audit::Action::IdentityAdminAddGroup, 0, false);
+        return SYSCALL_ERROR;
+    }
+    let Ok(length) = usize::try_from(length) else {
+        crate::audit::record(actor, crate::audit::Action::IdentityAdminAddGroup, 0, false);
+        return SYSCALL_ERROR;
+    };
+    if length == 0 || length > MAX_BUFFER {
+        crate::audit::record(actor, crate::audit::Action::IdentityAdminAddGroup, 0, false);
+        return SYSCALL_ERROR;
+    }
+    let mut buffer = [0u8; MAX_BUFFER];
+    if crate::paging::copy_from_current_user(user_buffer, &mut buffer[..length]).is_err() {
+        crate::audit::record(actor, crate::audit::Action::IdentityAdminAddGroup, 0, false);
+        return SYSCALL_ERROR;
+    }
+    let Some((name, rest)) = crate::identity_runtime::parse_length_prefixed(
+        &buffer[..length],
+        crate::accounts::MAX_NAME,
+    ) else {
+        crate::audit::record(actor, crate::audit::Action::IdentityAdminAddGroup, 0, false);
+        return SYSCALL_ERROR;
+    };
+    if !rest.is_empty() {
+        crate::audit::record(actor, crate::audit::Action::IdentityAdminAddGroup, 0, false);
+        return SYSCALL_ERROR;
+    }
+    let result = crate::identity_runtime::admin_add_group(
+        crate::task::current_process_id(),
+        name,
+    );
+    crate::audit::record(
+        actor,
+        crate::audit::Action::IdentityAdminAddGroup,
+        0,
+        result.is_ok(),
+    );
+    result.map(|group| group.0 as u64).unwrap_or(SYSCALL_ERROR)
 }
 
 /// The compositor surface's size and display scale. Requires `DisplayIo` and

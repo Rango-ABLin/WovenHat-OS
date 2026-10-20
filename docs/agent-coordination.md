@@ -1,5 +1,14 @@
 # Agent coordination (Claude Code and Codex)
 
+**Codex: Stage 24.11 bounded identity administration ABI accepted (2026-10-20):**
+
+Elevated administrator sessions can add users, delete inactive users, and add
+groups through bounded syscalls 226–228. Self-deletion and active-session
+deletion are refused; audit IDs 31–33 are stable. Host, feature-gate, and
+signed system-app 1/2/4-CPU gates pass; evidence is under
+`stage24.11-admin-abi-*`. Durable publication, membership mutation/deletion,
+and administration UI remain open.
+
 **Codex: Stage 24.10 kernel identity lockout/rate limiting accepted (2026-10-20):**
 
 Plaintext and verified-digest identity authentication now share a bounded

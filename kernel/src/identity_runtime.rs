@@ -136,6 +136,51 @@ pub(crate) fn change_pin(
     Err(Error::Storage)
 }
 
+#[cfg(feature = "system-apps")]
+pub(crate) fn admin_add_user(
+    owner: u64,
+    name: &[u8],
+    password: &[u8],
+    administrator: bool,
+) -> Result<libwoven::identity::UserId, Error> {
+    let session = owner_session(owner)?;
+    let mut salt = [0u8; 16];
+    for chunk in salt.chunks_mut(8) {
+        chunk.copy_from_slice(&crate::entropy::random_u64().to_le_bytes()[..chunk.len()]);
+    }
+    let mut authority = AUTHORITY.lock();
+    let authority = authority.as_mut().ok_or(Error::NotReady)?;
+    let group = authority.group_id(b"users").map_err(Error::Identity)?;
+    authority
+        .admin_add_user(session, name, group, &salt, password, administrator)
+        .map_err(Error::Identity)
+}
+
+#[cfg(feature = "system-apps")]
+pub(crate) fn admin_delete_user(owner: u64, user: libwoven::identity::UserId) -> Result<(), Error> {
+    let session = owner_session(owner)?;
+    let mut authority = AUTHORITY.lock();
+    authority
+        .as_mut()
+        .ok_or(Error::NotReady)?
+        .admin_delete_user(session, user)
+        .map_err(Error::Identity)
+}
+
+#[cfg(feature = "system-apps")]
+pub(crate) fn admin_add_group(
+    owner: u64,
+    name: &[u8],
+) -> Result<libwoven::identity::GroupId, Error> {
+    let session = owner_session(owner)?;
+    let mut authority = AUTHORITY.lock();
+    authority
+        .as_mut()
+        .ok_or(Error::NotReady)?
+        .admin_add_group(session, name)
+        .map_err(Error::Identity)
+}
+
 pub(crate) fn release_owner(owner: u64) {
     let mut sessions = [None; MAX_BINDINGS];
     let mut count = 0;
@@ -321,6 +366,17 @@ fn owned_binding(owner: u64, session: SessionId) -> Result<Binding, Error> {
         .flatten()
         .find(|binding| binding.session == session && binding.owner == owner)
         .copied()
+        .ok_or(Error::Owner)
+}
+
+#[cfg(feature = "system-apps")]
+fn owner_session(owner: u64) -> Result<SessionId, Error> {
+    BINDINGS
+        .lock()
+        .iter()
+        .flatten()
+        .find(|binding| binding.owner == owner)
+        .map(|binding| binding.session)
         .ok_or(Error::Owner)
 }
 
