@@ -9,7 +9,8 @@
 
 use crate::irq_lock::PreemptMutex as Mutex;
 use bootloader_api::info::{FrameBufferInfo, PixelFormat};
-use core::sync::atomic::{AtomicU64, Ordering};
+use core::fmt::Write as _;
+use core::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 
 use crate::console::glyph;
 
@@ -254,8 +255,92 @@ impl State {
 static TERMINAL: Mutex<State> = Mutex::with_rank(State::empty(), 10);
 static FOREGROUND_PID: AtomicU64 = AtomicU64::new(NO_FOREGROUND);
 
+// A panic must never take TERMINAL's lock: it may already be held by this
+// CPU, including by the very code that is panicking, and this lock is not
+// reentrant. Keep a separate, lock-free snapshot of the raw framebuffer for
+// the panic handler instead. `init` runs once, early, before SMP starts, so
+// writing this plain global there and only ever reading it afterward needs
+// no further synchronization beyond the ready flag's Acquire/Release pair.
+static PANIC_FB_READY: AtomicBool = AtomicBool::new(false);
+static PANIC_FB_PTR: AtomicUsize = AtomicUsize::new(0);
+static PANIC_FB_LEN: AtomicUsize = AtomicUsize::new(0);
+static mut PANIC_FB_INFO: Option<FrameBufferInfo> = None;
+
 pub fn init(buffer: &mut [u8], info: FrameBufferInfo) {
+    if !PANIC_FB_READY.load(Ordering::Acquire) {
+        PANIC_FB_PTR.store(buffer.as_mut_ptr() as usize, Ordering::Relaxed);
+        PANIC_FB_LEN.store(buffer.len(), Ordering::Relaxed);
+        // SAFETY: `init` is only ever called once, during single-threaded
+        // boot before any AP starts, so there is no concurrent writer.
+        unsafe {
+            PANIC_FB_INFO = Some(info);
+        }
+        PANIC_FB_READY.store(true, Ordering::Release);
+    }
     TERMINAL.lock().init(buffer, info);
+}
+
+struct PanicWriter<'a> {
+    buffer: &'a mut [u8],
+    info: FrameBufferInfo,
+    x: usize,
+    y: usize,
+    scale: usize,
+}
+
+impl core::fmt::Write for PanicWriter<'_> {
+    fn write_str(&mut self, s: &str) -> core::fmt::Result {
+        for c in s.chars() {
+            if c == '\n' || self.x + 6 * self.scale >= self.info.width {
+                self.x = 8;
+                self.y += 9 * self.scale;
+                if c == '\n' {
+                    continue;
+                }
+            }
+            if self.y + 8 * self.scale >= self.info.height {
+                return Ok(());
+            }
+            crate::console::draw_char(self.buffer, self.info, self.x, self.y, self.scale, c);
+            self.x += 6 * self.scale;
+        }
+        Ok(())
+    }
+}
+
+/// Put the panic message on screen too, not just serial: this kernel's
+/// panics otherwise only ever reach a serial port, which real hardware
+/// usually has nothing attached to, so a panic before `livelog` starts
+/// (which mirrors the serial log to the USB stick) previously looked like a
+/// silent, permanent freeze with no way to diagnose it. Never takes
+/// TERMINAL's lock; see the snapshot comment above. Best-effort: does
+/// nothing before the framebuffer is known, and a torn frame if another CPU
+/// is still drawing is an accepted cosmetic risk for a path that only runs
+/// once, immediately before a permanent halt.
+pub fn panic_screen(message: &dyn core::fmt::Display) {
+    if !PANIC_FB_READY.load(Ordering::Acquire) {
+        return;
+    }
+    let ptr = PANIC_FB_PTR.load(Ordering::Relaxed) as *mut u8;
+    let len = PANIC_FB_LEN.load(Ordering::Relaxed);
+    if ptr.is_null() || len == 0 {
+        return;
+    }
+    // SAFETY: `ptr`/`len` describe the bootloader's framebuffer mapping,
+    // resident for the kernel's lifetime, the same mapping `with_framebuffer`
+    // uses. `PANIC_FB_READY` being true means `init` already wrote
+    // `PANIC_FB_INFO` and will never write it again.
+    let buffer = unsafe { core::slice::from_raw_parts_mut(ptr, len) };
+    let info = unsafe { PANIC_FB_INFO }.expect("PANIC_FB_READY implies PANIC_FB_INFO is set");
+    crate::console::fill(&mut *buffer, info, 0, 0, info.width, info.height);
+    let mut writer = PanicWriter {
+        buffer: &mut *buffer,
+        info,
+        x: 8,
+        y: 8,
+        scale: 2,
+    };
+    let _ = write!(writer, "KERNEL PANIC\n\n{message}");
 }
 
 pub fn write_bytes(bytes: &[u8]) {

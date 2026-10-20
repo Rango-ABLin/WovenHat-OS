@@ -1,5 +1,60 @@
 # Stage status
 
+## Boot-stall real root cause: MAX_CPUS=4 rejected real topologies; IOAPIC-count relaxed; panics now shown on screen (2026-10-20)
+
+The user re-tested the stick with the PIT/AP-timeout fix below flashed and
+reported the identical stall at "BOOT: starting CPU and interrupt setup".
+Pulling the `WOVENLOG` log from the stick showed no `LOGS\BOOTnnnn.TXT` at
+all, confirming the failure happens before `livelog::start_deferred()` is
+ever reached -- i.e. still inside or immediately around `smp::start()`,
+consistent with but not explained by the earlier fix.
+
+Found two further hardware-topology asserts in `smp::start()`, both fatal,
+silent (serial-only) panics hit before any AP, PS/2, or livelog setup:
+
+- `assert!(!topology.truncated && topology.processor_count <= MAX_CPUS, ...)`.
+  `MAX_CPUS` is a compile-time constant fixed at 4. Any real machine with
+  more than 4 logical processors -- the overwhelming majority of modern
+  laptops and desktops, since even a plain hyperthreaded quad-core reports
+  8 -- hit this immediately, before the PIT-timing or AP-SIPI code this
+  session's earlier fix touched was ever reached. None of the QEMU gates
+  catch this because they only ever run at exactly 1, 2, or 4 CPUs.
+- `assert_eq!(topology.io_apics, 1, "one IOAPIC required")`. Some real
+  boards report more than one IOAPIC in their ACPI MADT (for example one
+  behind a PCIe root complex); `hal::acpi::update_madt_summary` already
+  only ever records the first IOAPIC's address/GSI base regardless of how
+  many exist, so the extra ones were never going to be used anyway.
+
+Fixed in `kernel/src/smp.rs`: a topology reporting more processors than
+`MAX_CPUS` now boots with the first `MAX_CPUS` (the BSP plus whichever APs
+the bring-up loop finds first, which now stops once every slot is filled
+instead of indexing past the end of the per-CPU arrays) and logs the rest,
+instead of refusing to boot. The IOAPIC check now accepts `>= 1` instead of
+requiring exactly `1`.
+
+Also added, since this class of bug is otherwise undiagnosable on hardware
+with no serial cable attached: `kernel::terminal::panic_screen`, called from
+`kernel_panic` alongside the existing serial report, draws the panic message
+directly on the framebuffer without ever taking `TERMINAL`'s lock (a panic
+must not try to take a lock it might already hold). `console::draw_char` and
+`console::fill` are now `pub(crate)` so `terminal.rs` can reuse them. A
+one-time, lock-free snapshot of the raw framebuffer pointer/geometry is
+taken in `terminal::init` (single-threaded, pre-SMP) for this purpose.
+
+Validation: kernel target check and `cargo clippy -p wovenhat-kernel
+--target x86_64-unknown-none` passed; host `cargo clippy --all-targets --
+-D warnings` passed; `scripts/test-shell-qemu.py --hardware-demo` passed on
+QEMU 1/2/4 CPUs with `online=4 expected=4` and no new warning lines (QEMU is
+configured at exactly 4 CPUs and one IOAPIC, so neither new code path
+triggers there -- no behavior change under QEMU). A fresh hardware-demo
+image (SHA-256 `f8bd474e3658d8a81b38d6e02c8ddff2d9270fb541d377638f360574d4e595ae`)
+was written to the user-confirmed USB `USB2.0 Flash Disk USB Device`
+(serial `2007072809430484`) and read back byte-for-byte matching; the 488
+MiB `WOVENLOG` partition was recreated. Not yet re-tested on the reporting
+user's physical machine -- that is the next step, and this time, if it
+still fails, either the stick's `WOVENLOG` log or the screen itself (now
+that panics are shown there) should actually say why.
+
 ## Boot-stall follow-up: cached PIT-unavailable result, non-fatal AP timeout (2026-10-20)
 
 The user reported that, even after the "Boot stall hardening" flash below, a

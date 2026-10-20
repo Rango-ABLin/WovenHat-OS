@@ -777,10 +777,27 @@ pub fn start(topology: Option<crate::hal::acpi::Summary>, offset: u64) {
     if !topology.apic || topology.processor_count == 0 {
         return;
     }
-    assert!(
-        !topology.truncated && topology.processor_count <= MAX_CPUS,
-        "unsupported CPU topology"
-    );
+    // Real hardware frequently reports more logical processors than this
+    // kernel's static per-CPU arrays (`MAX_CPUS`) are sized for -- nearly
+    // any modern multi-core or hyperthreaded machine exceeds the
+    // deliberately small `MAX_CPUS` default. Requiring an exact fit used to
+    // be a fatal, silent (serial-only) panic at the very start of CPU
+    // bring-up, before any AP, PS/2, or livelog setup -- indistinguishable
+    // on a real screen from the boot simply hanging right after "starting
+    // CPU and interrupt setup". The AP loop below already self-limits to
+    // `MAX_CPUS` slots (the BSP plus up to `MAX_CPUS - 1` APs it finds in
+    // `topology.processor_ids`), so boot with that subset and log the rest
+    // instead of refusing to boot at all. `topology.truncated` only means
+    // the firmware reported even more processors than the 16-entry
+    // `hal::acpi::Summary` could track in the first place, which is already
+    // far more than `MAX_CPUS` and does not affect the processors actually
+    // used here.
+    if topology.truncated || topology.processor_count > MAX_CPUS {
+        serial::write_line(format_args!(
+            "[SMP] topology reports {} processors (truncated={}), more than MAX_CPUS={MAX_CPUS}; using the first {MAX_CPUS}",
+            topology.processor_count, topology.truncated
+        ));
+    }
     X2APIC_REQUESTED.store(
         topology.processor_ids[..topology.processor_count]
             .iter()
@@ -809,7 +826,18 @@ pub fn start(topology: Option<crate::hal::acpi::Summary>, offset: u64) {
         "LAPIC timer calibration"
     );
     // Route only keyboard input through IOAPIC; each CPU has its own LAPIC timer.
-    assert_eq!(topology.io_apics, 1, "one IOAPIC required");
+    //
+    // Some real hardware reports more than one IOAPIC in its ACPI MADT (a
+    // second one behind a PCIe root complex, for example), which this used
+    // to treat as fatal even though it is irrelevant here: `hal::acpi`'s
+    // summary only ever records the first IOAPIC's address/GSI base (see
+    // `update_madt_summary`), the one conventionally covering the legacy ISA
+    // IRQs this code actually routes, regardless of how many others exist.
+    // Requiring exactly one turned a benign topology difference into a
+    // silent (serial-only) panic early in `start`, before any AP, PS/2, or
+    // livelog setup -- indistinguishable on a real screen from the boot
+    // simply hanging at "starting CPU and interrupt setup".
+    assert!(topology.io_apics >= 1, "at least one IOAPIC required");
     let io = paging::map_mmio(u64::from(topology.io_apic_address)).expect("IOAPIC mapping");
     let max = (io_read(io, 1) >> 16) & 0xff;
     for pin in 0..=max {
@@ -917,6 +945,13 @@ pub fn start(topology: Option<crate::hal::acpi::Summary>, offset: u64) {
             for id in &topology.processor_ids[..topology.processor_count] {
                 if *id == IDS[0].load(Ordering::Relaxed) {
                     continue;
+                }
+                // Stop once every AP slot this build supports is either
+                // filled or attempted; a topology with more real processors
+                // than `MAX_CPUS` is handled above by using only this many,
+                // not by growing these fixed-size per-CPU arrays.
+                if cpu >= MAX_CPUS {
+                    break;
                 }
                 IDS[cpu].store(*id, Ordering::Release);
                 let domain = topology.processor_ids[..topology.processor_count]

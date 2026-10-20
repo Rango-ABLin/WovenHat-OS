@@ -1,5 +1,39 @@
 # Agent coordination (Claude Code and Codex)
 
+**Claude Code: boot-stall real root cause found after the PIT/AP-timeout fix
+below still didn't resolve it (2026-10-20):** the user re-tested on real
+hardware with that fix flashed and got the identical stall. Pulled the
+stick's `WOVENLOG` -- empty, no `LOGS\BOOTnnnn.TXT` at all, confirming the
+failure is still before `livelog::start_deferred()` runs, i.e. inside or
+immediately around `smp::start()`. Found the real cause: `smp::start()` had
+`assert!(!topology.truncated && topology.processor_count <= MAX_CPUS, ...)`,
+and `MAX_CPUS` is a compile-time 4. Any real machine with more than 4
+logical processors -- most modern hardware, since even a plain hyperthreaded
+quad-core reports 8 -- hits this fatal, serial-only (so invisible on a real
+screen) panic immediately, before the PIT-timing/AP-SIPI code the earlier
+fix touched is ever reached. None of the QEMU gates catch it because they
+only run at exactly 1/2/4 CPUs. Also found and relaxed a second,
+narrower one: `assert_eq!(topology.io_apics, 1, ...)`, which some real
+boards fail despite `hal::acpi` already only ever using the first IOAPIC
+regardless of how many exist. Fixed in `kernel/src/smp.rs`: boot with the
+first `MAX_CPUS` processors (BSP + whatever APs fit) instead of refusing to
+boot, and accept `io_apics >= 1`. Also added `kernel::terminal::panic_screen`
+(called from `panic::kernel_panic`) so panics show on the framebuffer too,
+not only serial, without ever taking `TERMINAL`'s lock -- this whole bug
+class was undiagnosable blind on hardware with no serial cable, and now
+isn't. `cargo clippy -p wovenhat-kernel --target x86_64-unknown-none`, host
+`cargo clippy --all-targets -- -D warnings`, and `scripts/test-shell-qemu.py
+--hardware-demo` on 1/2/4 CPUs all passed with `online=4 expected=4` and no
+new warning lines -- zero behavior change under QEMU, since it's always
+configured at exactly 4 CPUs and 1 IOAPIC. A fresh image (SHA-256
+`f8bd474e3658d8a81b38d6e02c8ddff2d9270fb541d377638f360574d4e595ae`) is
+written to the user's confirmed stick (serial `2007072809430484`), read back
+byte-for-byte matching. See
+[docs/stage-status.md](stage-status.md#boot-stall-real-root-cause-max_cpus4-rejected-real-topologies-ioapic-count-relaxed-panics-now-shown-on-screen-2026-10-20)
+for the full writeup. Not yet re-tested on the user's hardware -- if it
+fails again, the screen itself should now say why, or the stick's
+`WOVENLOG` will have a boot log this time if it got far enough to matter.
+
 **Claude Code: boot-stall still reported after the flash below -- found and
 fixed the real cause (2026-10-20):** the user reported the hang at "BOOT:
 starting CPU and interrupt setup" persisted on their physical hardware after
