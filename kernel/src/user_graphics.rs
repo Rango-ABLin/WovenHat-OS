@@ -59,6 +59,8 @@ pub enum Error {
     SystemFull,
     /// Requested dimensions exceed the caps.
     OutOfRange,
+    /// The copy this call makes could not be allocated.
+    OutOfMemory,
 }
 
 /// A handle packing slot, generation and owner.
@@ -313,7 +315,7 @@ pub fn draw_text(handle: Handle, x: i32, y: i32, text: &str, color: u32) -> Resu
 pub fn snapshot(handle: Handle) -> Result<Surface, Error> {
     with_registry(|registry| {
         let surface = registry.resolve_mut(handle)?;
-        let mut copy = Surface::new(surface.width(), surface.height());
+        let mut copy = Surface::try_new(surface.width(), surface.height()).ok_or(Error::OutOfMemory)?;
         copy.blit(surface, 0, 0);
         Ok(copy)
     })
@@ -343,7 +345,7 @@ pub fn snapshot_region(
         }
         let surface = registry.resolve_mut(handle)?;
         let clipped = region.intersect(surface.bounds());
-        let mut copy = Surface::new(clipped.width, clipped.height);
+        let mut copy = Surface::try_new(clipped.width, clipped.height).ok_or(Error::OutOfMemory)?;
         copy.blit_region(surface, clipped, 0, 0);
         Ok((clipped, copy))
     })
@@ -376,7 +378,7 @@ pub fn snapshot_shared(handle: Handle, grantee: u64) -> Result<Surface, Error> {
             return Err(Error::InvalidHandle);
         }
         let surface = registry.resolve_mut(handle)?;
-        let mut copy = Surface::new(surface.width(), surface.height());
+        let mut copy = Surface::try_new(surface.width(), surface.height()).ok_or(Error::OutOfMemory)?;
         copy.blit(surface, 0, 0);
         Ok(copy)
     })
@@ -432,7 +434,7 @@ pub fn take_damage_shared(handle: Handle, grantee: u64) -> Result<Option<(Rect, 
             .surface
             .as_ref()
             .expect("resolved above");
-        let mut copy = Surface::new(region.width, region.height);
+        let mut copy = Surface::try_new(region.width, region.height).ok_or(Error::OutOfMemory)?;
         for row in 0..region.height as i32 {
             for column in 0..region.width as i32 {
                 if let Some(color) = source.pixel(region.x + column, region.y + row) {
