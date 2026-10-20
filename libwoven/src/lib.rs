@@ -198,6 +198,11 @@ pub mod security {
         SandboxDeviceAccess = 23,
         SecretStore = 24,
         SecretRevoke = 25,
+        IdentityOpen = 26,
+        IdentityLock = 27,
+        IdentityUnlock = 28,
+        IdentityElevate = 29,
+        IdentityClose = 30,
     }
 
     #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -13268,6 +13273,11 @@ pub fn audit_read(offset: u64) -> Result<Option<security::AuditEvent>, Error> {
         23 => security::AuditAction::SandboxDeviceAccess,
         24 => security::AuditAction::SecretStore,
         25 => security::AuditAction::SecretRevoke,
+        26 => security::AuditAction::IdentityOpen,
+        27 => security::AuditAction::IdentityLock,
+        28 => security::AuditAction::IdentityUnlock,
+        29 => security::AuditAction::IdentityElevate,
+        30 => security::AuditAction::IdentityClose,
         _ => return Err(Error::Failed),
     };
     Ok(Some(security::AuditEvent {

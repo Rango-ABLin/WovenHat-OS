@@ -1,5 +1,21 @@
 # Stage status
 
+## Stage 24.7 WovenIdentity audit actions (2026-10-20)
+
+Identity open, lock, unlock, elevation, and close outcomes now enter the
+kernel security ledger. Stable public audit action IDs 26–30 are decoded by
+`libwoven::audit_read`. The host 85-test suite, host Clippy, Stage 24.5
+freestanding Clippy, system-apps freestanding Clippy, diff check, and the
+signed system-apps shell gate on 1/2/4 CPUs pass. Evidence is under:
+`audit-artifacts/stage24.7-identity-audit-1cpu-1792531200000000000`,
+`audit-artifacts/stage24.7-identity-audit-2cpu-1792531200000000000`, and
+`audit-artifacts/stage24.7-identity-audit-4cpu-1792531200000000000`.
+
+Malformed user-buffer requests return before an identity operation is formed
+and are not yet separate audit events. WID2 runtime recovery, administration,
+PIN rotation, lockout/rate limiting, hardware-backed credentials, and physical
+USB/power-loss qualification remain release prerequisites.
+
 ## Stage 24.6 live WovenIdentity runtime and WovenShell login (2026-10-20)
 
 The system-apps boot imports bounded `/etc/wovenhat/accounts` records into a

@@ -3316,15 +3316,29 @@ fn sys_identity_open(user_buffer: u64, length: u64) -> u64 {
     else {
         return SYSCALL_ERROR;
     };
-    crate::identity_runtime::open(crate::task::current_process_id(), name, password)
-        .map(|session| session.0)
-        .unwrap_or(SYSCALL_ERROR)
+    let result = crate::identity_runtime::open(crate::task::current_process_id(), name, password);
+    crate::audit::record(
+        crate::task::current_task_id().as_u64(),
+        crate::audit::Action::IdentityOpen,
+        0,
+        result.is_ok(),
+    );
+    result.map(|session| session.0).unwrap_or(SYSCALL_ERROR)
 }
 
 #[cfg(any(feature = "stage24-5-test", feature = "system-apps"))]
 fn sys_identity_lock(session: u64) -> u64 {
-    crate::identity_runtime::lock(crate::task::current_process_id(), libwoven::identity::SessionId(session))
-        .map_or(SYSCALL_ERROR, |_| 0)
+    let result = crate::identity_runtime::lock(
+        crate::task::current_process_id(),
+        libwoven::identity::SessionId(session),
+    );
+    crate::audit::record(
+        crate::task::current_task_id().as_u64(),
+        crate::audit::Action::IdentityLock,
+        session,
+        result.is_ok(),
+    );
+    result.map_or(SYSCALL_ERROR, |_| 0)
 }
 
 #[cfg(any(feature = "stage24-5-test", feature = "system-apps"))]
@@ -3349,16 +3363,32 @@ fn sys_identity_password_action(session: u64, user_buffer: u64, length: u64, ele
     } else {
         crate::identity_runtime::unlock(owner, libwoven::identity::SessionId(session), password)
     };
+    crate::audit::record(
+        crate::task::current_task_id().as_u64(),
+        if elevate {
+            crate::audit::Action::IdentityElevate
+        } else {
+            crate::audit::Action::IdentityUnlock
+        },
+        session,
+        result.is_ok(),
+    );
     result.map_or(SYSCALL_ERROR, |_| 0)
 }
 
 #[cfg(any(feature = "stage24-5-test", feature = "system-apps"))]
 fn sys_identity_close(session: u64) -> u64 {
-    crate::identity_runtime::close(
+    let result = crate::identity_runtime::close(
         crate::task::current_process_id(),
         libwoven::identity::SessionId(session),
-    )
-    .map_or(SYSCALL_ERROR, |_| 0)
+    );
+    crate::audit::record(
+        crate::task::current_task_id().as_u64(),
+        crate::audit::Action::IdentityClose,
+        session,
+        result.is_ok(),
+    );
+    result.map_or(SYSCALL_ERROR, |_| 0)
 }
 
 #[cfg(feature = "system-apps")]
@@ -3386,9 +3416,18 @@ fn sys_identity_open_verified(user_buffer: u64, length: u64) -> u64 {
     let Ok(digest) = rest.try_into() else {
         return SYSCALL_ERROR;
     };
-    crate::identity_runtime::open_digest(crate::task::current_process_id(), name, &digest)
-        .map(|session| session.0)
-        .unwrap_or(SYSCALL_ERROR)
+    let result = crate::identity_runtime::open_digest(
+        crate::task::current_process_id(),
+        name,
+        &digest,
+    );
+    crate::audit::record(
+        crate::task::current_task_id().as_u64(),
+        crate::audit::Action::IdentityOpen,
+        0,
+        result.is_ok(),
+    );
+    result.map(|session| session.0).unwrap_or(SYSCALL_ERROR)
 }
 
 #[cfg(feature = "system-apps")]
@@ -3402,12 +3441,18 @@ fn sys_identity_unlock_verified(session: u64, user_buffer: u64, length: u64) -> 
     if crate::paging::copy_from_current_user(user_buffer, &mut digest).is_err() {
         return SYSCALL_ERROR;
     }
-    crate::identity_runtime::unlock_digest(
+    let result = crate::identity_runtime::unlock_digest(
         crate::task::current_process_id(),
         libwoven::identity::SessionId(session),
         &digest,
-    )
-    .map_or(SYSCALL_ERROR, |_| 0)
+    );
+    crate::audit::record(
+        crate::task::current_task_id().as_u64(),
+        crate::audit::Action::IdentityUnlock,
+        session,
+        result.is_ok(),
+    );
+    result.map_or(SYSCALL_ERROR, |_| 0)
 }
 
 /// The compositor surface's size and display scale. Requires `DisplayIo` and

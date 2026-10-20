@@ -914,6 +914,13 @@ session open/lock/unlock/elevation/close framing and safe userspace wrappers.
 The gate proves parser/ABI behavior only; runtime loading, live Ring-3 login,
 teardown, auditing, lockout, and shell migration remain open.
 
+Stage 24.7 identity audit actions accepted (2026-10-20): valid identity open,
+lock, unlock, elevation, and close outcomes are recorded in the kernel security
+ledger and decoded through stable public action IDs 26–30. Host, freestanding,
+and 1/2/4-CPU signed system-app gates pass. Malformed-request telemetry,
+durable WID2 runtime recovery, account administration, PIN rotation,
+lockout/rate limiting, and hardware-backed credentials remain open.
+
 Stage 24.6 live runtime/login accepted (2026-10-20): the system-apps boot
 imports bounded account-file credentials into the kernel authority, WovenShell
 performs live account sign-in and lock/unlock through owner-bound sessions,

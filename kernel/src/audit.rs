@@ -41,6 +41,16 @@ pub enum Action {
     PowerControl,
     /// A local account's PIN was changed (or the attempt was refused).
     AccountChangePin,
+    #[allow(dead_code)]
+    IdentityOpen,
+    #[allow(dead_code)]
+    IdentityLock,
+    #[allow(dead_code)]
+    IdentityUnlock,
+    #[allow(dead_code)]
+    IdentityElevate,
+    #[allow(dead_code)]
+    IdentityClose,
 }
 
 /// One immutable security-ledger record.

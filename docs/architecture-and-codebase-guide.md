@@ -1,5 +1,14 @@
 # WovenHat OS Architecture & Codebase Guide
 
+### Stage 24.7 — WovenIdentity audit actions
+
+Identity syscalls record valid open, lock, unlock, elevation, and close
+outcomes through `kernel::audit`. `libwoven::audit_read` maps the stable
+action IDs 26–30 to the public security ABI. The ledger records the calling
+task, session target where applicable, and whether the operation was allowed.
+Malformed buffer handling remains fail-closed before an operation is formed;
+separate malformed-request telemetry is still a follow-up.
+
 ### Stage 24.6 — live WovenIdentity runtime and WovenShell login
 
 `kernel/src/identity_runtime.rs` loads bounded account-file records into a

@@ -1,5 +1,15 @@
 # Agent coordination (Claude Code and Codex)
 
+**Codex: Stage 24.7 WovenIdentity audit actions accepted (2026-10-20):**
+
+Identity open, lock, unlock, elevation, and close outcomes now enter the
+kernel security ledger and decode through public action IDs 26–30. Host,
+feature-gate, and signed system-app 1/2/4-CPU acceptance passed; evidence is
+under the `stage24.7-identity-audit-*` audit-artifact directories. Malformed
+buffer telemetry, WID2 runtime recovery, account administration/rotation,
+lockout/rate limiting, hardware credentials, and physical release tests remain
+open.
+
 **Codex: Stage 24.6 live WovenIdentity runtime/login accepted (2026-10-20):**
 The system-apps boot imports bounded account-file credentials into the kernel
 authority before WovenShell starts. WovenShell uses the capability-gated
