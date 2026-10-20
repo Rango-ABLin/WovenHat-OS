@@ -8,7 +8,7 @@ const SEED: [u8; 32] = [
 ];
 
 fn fixture(kind: usize) -> Option<Vec<u8>> {
-    let base = if kind == 0 || kind == 3 || kind == 4 {
+    let base = if kind == 0 || kind == 3 || kind == 4 || kind == 5 {
         USER_REGION_START
     } else {
         0
@@ -51,7 +51,7 @@ fn fixture(kind: usize) -> Option<Vec<u8>> {
     } else {
         tags.extend([(7, base + 0x380), (8, 24), (9, 24)]);
     }
-    if kind == 0 || kind == 3 || kind == 4 {
+    if kind == 0 || kind == 3 || kind == 4 || kind == 5 {
         tags.push((1, 8));
     } else {
         tags.push((14, if kind == 1 { 8 } else { 17 }));
@@ -71,12 +71,16 @@ fn fixture(kind: usize) -> Option<Vec<u8>> {
     write_u16(
         &mut elf,
         0x121e,
-        u16::from(kind != 0 && kind != 3 && kind != 4),
+        if kind == 5 {
+            2
+        } else {
+            u16::from(kind != 0 && kind != 3 && kind != 4)
+        },
     )?;
     write_u64(
         &mut elf,
         0x1220,
-        if kind == 0 || kind == 3 || kind == 4 {
+        if kind == 0 || kind == 3 || kind == 4 || kind == 5 {
             0
         } else {
             0x20
@@ -87,7 +91,7 @@ fn fixture(kind: usize) -> Option<Vec<u8>> {
     write_u64(
         &mut elf,
         0x1388,
-        if kind == 0 || kind == 3 || kind == 4 {
+        if kind == 0 || kind == 3 || kind == 4 || kind == 5 {
             (1_u64 << 32) | 1
         } else {
             8
@@ -96,9 +100,9 @@ fn fixture(kind: usize) -> Option<Vec<u8>> {
     if kind == 3 || kind == 4 {
         write_u64(&mut elf, 0x1390, 0)?;
     } else {
-        write_u64(&mut elf, 0x1390, if kind == 0 { 0 } else { 0x20 })?;
+        write_u64(&mut elf, 0x1390, if kind == 0 || kind == 5 { 0 } else { 0x20 })?;
     }
-    if kind == 0 || kind == 3 || kind == 4 {
+    if kind == 0 || kind == 3 || kind == 4 || kind == 5 {
         // movabs rax, GOT; call [rax]; exit(rax). The call crosses images in
         // Ring 3; no kernel shortcut invokes the library implementation.
         let code = [
@@ -232,6 +236,9 @@ pub(super) fn run() -> bool {
         return false;
     };
     let Some(plt_rel_main) = fixture(4) else {
+        return false;
+    };
+    let Some(weak_main) = fixture(5) else {
         return false;
     };
     if crate::vfs::stat("/lib/scope.so").is_ok() || crate::vfs::stat("/lib/base.so").is_ok() {
@@ -445,6 +452,43 @@ pub(super) fn run() -> bool {
         if !step(
             "DT_JMPREL DT_REL Ring-3 execution and teardown",
             crate::task::wait_process(plt_rel_pid.as_u64()) == Ok(42),
+        ) {
+            return None;
+        }
+        let Some(weak_program) = load(&weak_main, &["weak-test"]) else {
+            step("weak symbol runtime resolution", false);
+            return None;
+        };
+        let mut weak_address = [0; 8];
+        paging::read_user_bytes_in(
+            weak_program.address_space.paging,
+            USER_REGION_START + 0x1000,
+            &mut weak_address,
+        )
+        .ok()?;
+        crate::serial::write_line(format_args!(
+            "[S11.5] weak value={:#x} expected={:#x}",
+            u64::from_le_bytes(weak_address),
+            LIBRARY_START + 0x20
+        ));
+        if !step(
+            "weak symbol runtime resolution",
+            u64::from_le_bytes(weak_address) == LIBRARY_START + 0x20,
+        ) {
+            let _ = destroy(weak_program.address_space);
+            return None;
+        }
+        let (weak_pid, _) = crate::task::spawn_user_process("weak-test", weak_program).ok()?;
+        let weak_start = crate::timer::ticks();
+        while !crate::task::process_exited(weak_pid) {
+            if crate::timer::ticks().wrapping_sub(weak_start) > 500 {
+                return None;
+            }
+            crate::task::yield_now();
+        }
+        if !step(
+            "weak symbol Ring-3 execution and teardown",
+            crate::task::wait_process(weak_pid.as_u64()) == Ok(42),
         ) {
             return None;
         }

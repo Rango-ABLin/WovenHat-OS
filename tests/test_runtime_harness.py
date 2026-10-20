@@ -76,6 +76,8 @@ class RuntimeAcceptanceTests(unittest.TestCase):
         self.assertTrue(any('DT_REL Ring-3 execution and teardown' in marker for marker in required))
         self.assertTrue(any('DT_JMPREL DT_REL runtime relocation' in marker for marker in required))
         self.assertTrue(any('DT_JMPREL DT_REL Ring-3 execution and teardown' in marker for marker in required))
+        self.assertTrue(any('weak symbol runtime resolution' in marker for marker in required))
+        self.assertTrue(any('weak symbol Ring-3 execution and teardown' in marker for marker in required))
         self.assertTrue(any('tampered signature rejected' in marker for marker in required))
         self.assertTrue(any('argv failure rollback' in marker for marker in required))
         for missing in required:
