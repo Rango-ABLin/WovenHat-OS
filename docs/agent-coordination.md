@@ -1,5 +1,17 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - Stage 24.18 (2026-10-21)
+
+Implemented the bounded TPM2 CRB `GetRandom` probe on top of the Stage 24.17
+ACPI descriptor. It serializes one transaction, validates interface and
+buffer registers, rejects fatal/bad/timeout responses, uses a fixed poll bound
+before timer IRQs exist, and wipes probe bytes. Host tests, all-targets and
+affected feature Clippy, and signed system-apps 1/2/4-CPU acceptance pass.
+Evidence is in `docs/audit-stage24-18-tpm2-crb-probe-2026-10-21.md`; USB was
+not modified. This is not hardware-backed identity: authenticated
+attestation/PCR verification, sealed-root provisioning, recovery, and physical
+TPM qualification remain open.
+
 ## Codex - Stage 24.17 (2026-10-21)
 
 Added the validated ACPI TPM2 discovery boundary. The parser checks the

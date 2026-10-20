@@ -173,6 +173,7 @@ mod swap;
 mod syscall;
 mod task;
 mod terminal;
+mod tpm2;
 #[allow(dead_code)]
 mod thread;
 mod timer;
@@ -420,6 +421,13 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     serial::write_line(format_args!(
         "[S15.6] software measurement primitive: PASSED"
     ));
+    #[cfg(feature = "qemu-test")]
+    if !tpm2::self_test() {
+        serial::write_line(format_args!("[TPM] CRB codec: FAILED"));
+        qemu_test_exit_failure();
+    }
+    #[cfg(feature = "qemu-test")]
+    serial::write_line(format_args!("[TPM] CRB codec: PASSED"));
     let _kernel_measurement = physical_memory_offset.and_then(|offset| {
         let measurement = boot_measurement::measure_kernel(boot_info, offset);
         if let Some(measurement) = measurement {
@@ -487,6 +495,16 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
                     "[TPM] ACPI TPM2 present control={:#x} start_method={}",
                     tpm2.control_area, tpm2.start_method
                 ));
+                let mut random = [0_u8; 16];
+                match tpm2::get_random(tpm2, &mut random) {
+                    Ok(length) => serial::write_line(format_args!(
+                        "[TPM] CRB GetRandom probe passed bytes={length}"
+                    )),
+                    Err(error) => serial::write_line(format_args!(
+                        "[TPM] CRB GetRandom probe unavailable: {error:?}"
+                    )),
+                }
+                random.fill(0);
             } else {
                 serial::write_line(format_args!(
                     "[TPM] ACPI TPM2 unavailable; hardware credential root not provisioned"

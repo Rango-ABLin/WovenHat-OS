@@ -1,15 +1,21 @@
 # WovenHat OS Architecture & Codebase Guide
 
+### Stage 24.18 - bounded TPM2 CRB probe
+
+`tpm2` serializes one polling CRB `GetRandom` transaction after validated ACPI
+discovery. It validates the CRB interface type, fixed-size command and
+response buffer capacities/addresses, fatal status, response code and length,
+and uses a finite iteration timeout because early boot has no timer IRQs. The
+probe output is wiped and is not a credential root. PCR/attestation validation
+and sealed credential provisioning remain separate trust-boundary work.
+
 ### Stage 24.17 - TPM2 platform discovery boundary
 
 `hal::acpi` validates and retains the bounded TPM2 ACPI descriptor
 (`platform_class`, `control_area`, and `start_method`). Boot inventory reports
-presence only; it never treats an address or a table as authenticated hardware
-evidence. Missing or malformed TPM2 data therefore cannot silently downgrade
-the identity or volume-crypto trust boundary. The next implementation must
-add serialized TPM CRB command transport, response authentication and
-timeouts, PCR/attestation verification, and sealed credential-root
-provisioning before identity credentials may rely on the device.
+presence only; it never treats an address or table as authenticated hardware
+evidence. Missing or malformed TPM2 data cannot silently downgrade the
+identity or volume-crypto trust boundary.
 
 ### Stage 24.16 - durable/configurable lockout policy
 

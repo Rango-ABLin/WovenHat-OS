@@ -1,18 +1,32 @@
 # Stage status
 
+## Stage 24.18 bounded TPM2 CRB probe (2026-10-21)
+
+The validated TPM2 descriptor now feeds a serialized CRB `GetRandom` probe.
+The transport checks the CRB interface, command/response capacities and
+addresses, fatal status, bounded pre-interrupt polling, response code/length,
+and wipes probe output. Random bytes are never persisted or promoted to a
+credential root. Host tests (89), all-targets and affected feature Clippy, and
+signed system-apps 1/2/4-CPU acceptance pass. Evidence is under
+`audit-artifacts/stage24.18-tpm2-crb-probe-20261021`.
+
+Authenticated PCR/attestation evidence, sealed credential-root provisioning,
+recovery, and physical TPM qualification remain required.
+
 ## Stage 24.17 TPM2 platform discovery boundary (2026-10-21)
 
 ACPI discovery now validates the TPM2 table length, control-area address, and
 advertised start method, retains the bounded platform record, and emits an
 explicit boot inventory line. A missing or malformed table is never treated
-as a credential root; the kernel reports hardware credentials as unavailable
-and continues only where the existing non-hardware path permits. The ACPI
-self-test, 89-test host suite, all-targets Clippy, production system-apps
-Clippy, and signed system-apps 1/2/4-CPU gates pass. Evidence is under
+as a credential root; the
+kernel reports hardware credentials as unavailable and continues only where
+the existing non-hardware path permits. The ACPI self-test, 89-test host
+suite, all-targets Clippy, production system-apps Clippy, and signed
+system-apps 1/2/4-CPU gates pass. Evidence is under
 `audit-artifacts/stage24.17-tpm2-platform-inventory-20261021`.
 
 This is an integration boundary, not completion of hardware-backed identity.
-TPM CRB command transport, authenticated PCR/attestation evidence, sealed
+TPM command transport, authenticated PCR/attestation evidence, sealed
 credential-root provisioning, recovery, and physical TPM qualification remain
 required before production credentials can depend on hardware.
 

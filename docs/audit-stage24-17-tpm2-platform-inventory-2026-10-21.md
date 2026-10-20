@@ -30,8 +30,8 @@ Status: accepted as an integration boundary
 ## Explicitly incomplete
 
 This stage does not claim hardware-backed identity. The next implementation
-must provide serialized TPM CRB transport with bounded timeouts and ownership,
-validate TPM responses and PCR/attestation evidence against a provisioned
-policy, and implement sealed credential-root provisioning/recovery. A TPM
+must provide CRB transport, validate PCR/attestation evidence against a
+provisioned policy, and implement sealed credential-root
+provisioning/recovery. A TPM
 query on the Windows host required Administrator elevation, so no physical
 TPM result was asserted from the host. Physical qualification remains open.

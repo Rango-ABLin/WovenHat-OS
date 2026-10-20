@@ -2,12 +2,21 @@ WovenHat OS — Stage 10.7 → Version 1.0 Master Roadmap
 Phase I — Finish the asynchronous kernel foundation
 Stage 10.7 — Asynchronous TCP
 
+Stage 24.18 - Bounded TPM2 CRB probe
+
+Implemented a serialized, bounded CRB `GetRandom` probe on the validated TPM2
+descriptor. Interface/buffer checks, fatal status, fixed pre-interrupt poll
+timeout, response validation, and output wiping pass the host/Clippy and
+signed 1/2/4-CPU gates. Random output is not a stable credential root;
+attestation, sealed provisioning, recovery, and physical qualification remain
+open.
+
 Stage 24.17 - TPM2 platform discovery boundary
 
-Implemented validated ACPI TPM2 discovery and explicit boot inventory. Missing
-or malformed firmware data fails closed as a trust source; it cannot be
-mistaken for hardware-backed identity. Host, Clippy, and signed 1/2/4-CPU
-acceptance pass. TPM CRB transport, attestation/PCR verification, sealed
+Implemented validated ACPI TPM2 discovery and explicit boot inventory.
+Missing or malformed firmware data fails closed as a trust source and cannot
+be mistaken for hardware-backed identity. Host, Clippy, and signed 1/2/4-CPU
+acceptance pass. CRB transport, attestation/PCR verification, sealed
 credential-root provisioning, recovery, and physical qualification remain
 open.
 
