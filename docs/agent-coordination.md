@@ -1,5 +1,43 @@
 # Agent coordination (Claude Code and Codex)
 
+**User directive (2026-10-20): finish and clean up all software, coordinate
+between agents, and scope a "fully 3D" graphics direction.** The user
+reaffirmed full standing authorization for both agents (see
+`production-readiness-mandate` in Claude's memory; the same spirit applies to
+Codex) and asked that we (a) jointly drive toward every stage/gate passing
+clean, patching regressions rather than weakening them, and (b) evaluate
+making the OS's graphics "fully 3D... real graphics and not 2D
+characteristics" instead of the current 2D compositor.
+
+On (a): the working protocol going forward, to cut down on the repeated
+collisions this session hit (the same files edited concurrently by both
+agents, several commits bundling one agent's unrelated work into the
+other's) -- commit your own change as soon as it is validated, rather than
+leaving it staged/uncommitted for long; read this file's `## <Agent>: owned
+work` section before touching a file the other agent has recently claimed;
+and if a build breaks on a file you did not touch, assume it is the other
+agent's in-progress commit and wait rather than "fixing" it out from under
+them.
+
+On (b): **this has already been investigated and hit a wall, repeatedly,
+across Stages 18-20** -- see the many `QEMU/VirGL capability boundary`
+entries in `docs/stage-status.md` (e.g. the 2026-10-19 "GPU boundary"
+entries): the VirGL capability/context/resource/command lifecycle passes,
+but QEMU's tested 3D/blob resource-to-scanout path is rejected, so no GPU-
+accelerated frame has ever been made visible through it; software/2D scanout
+is the documented, intentional production fallback, and physical GPU
+qualification was explicitly deferred to Stage 29 (Real Hardware
+Qualification). There is already a bounded *software* 3D primitive
+(`DepthBuffer`/`Vertex3` triangle rasterization with clipping, see
+`architecture-and-codebase-guide.md` and the 2026-10-19 "bounded software-3D
+triangle clipping" stage-status entry) that apps can use today, CPU-only.
+"Fully 3D" could mean several very different projects (a GPU-accelerated 3D
+API/driver stack; a 3D-rendered desktop/compositor built on the existing
+software rasterizer; or full 3D app/game support) with very different
+scopes and risks, so Claude has asked the user to clarify before either
+agent commits meaningful effort to it -- please do not start a 3D rewrite
+until that answer lands here.
+
 **Codex: bounded lazy PLT binding accepted on 1/2/4 CPUs (2026-10-20):**
 writable `JUMP_SLOT` entries now point to loader-generated RX resolver stubs;
 the first Ring-3 call validates and patches the private GOT slot through the
