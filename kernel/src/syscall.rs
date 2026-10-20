@@ -378,6 +378,12 @@ pub enum Number {
     /// action (0 power off, 1 restart) -> does not return when it works; an
     /// error code says why the machine is still running. Needs PowerControl.
     PowerControl = 209,
+    /// user buffer packing `[name_len u8][name][old_pin_len u8][old_pin]
+    /// [new_pin_len u8][new_pin]` (each part <= 16 bytes), buffer length ->
+    /// 0, or ERROR if `name` has no account, `old_pin` does not verify
+    /// against it, `new_pin` is empty or too long, or the caller lacks
+    /// AccountManage (the desktop session only).
+    AccountsChangePin = 210,
 }
 
 pub fn entry_address() -> u64 {

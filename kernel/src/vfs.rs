@@ -448,6 +448,32 @@ impl Registry {
         self.insert(path, data, true).map(|_| ())
     }
 
+    /// As `write_file`, but for an existing file only, and without the
+    /// `writable`/`access_allowed` gate `write_file` enforces. See
+    /// `vfs::overwrite_trusted`.
+    fn overwrite_trusted(&mut self, path: &str, data: &[u8]) -> Result<(), Error> {
+        validate_absolute_path(path)?;
+        if data.len() > NODE_CAPACITY {
+            return Err(Error::Full);
+        }
+        let index = self
+            .nodes
+            .iter()
+            .position(|n| n.matches(path))
+            .ok_or(Error::NotFound)?;
+        let node = &mut self.nodes[index];
+        if node.kind != NodeKind::File {
+            return Err(Error::AlreadyExists);
+        }
+        node.backing = None;
+        node.data.fill(0);
+        node.data[..data.len()].copy_from_slice(data);
+        node.length = data.len();
+        self.versions[index] = self.versions[index].wrapping_add(1);
+        crate::file_frames::replace(index, self.generations[index], data);
+        Ok(())
+    }
+
     fn stat(&self, path: &str) -> Result<Stat, Error> {
         validate_absolute_path(path)?;
         let node = self
@@ -786,6 +812,20 @@ pub fn write_file(path: &str, data: &[u8]) -> Result<(), Error> {
         crate::storage::mark_mnt_dirty();
     }
     result
+}
+
+/// Overwrite an existing file's bytes regardless of its `writable` flag or
+/// the caller's uid/gid/mode.
+///
+/// Kernel-internal only: never reachable from any syscall. For code that
+/// deliberately created a file non-writable to keep ordinary processes from
+/// overwriting it directly (such as `/etc/wovenhat/accounts`, whose own
+/// authorization is a PIN hash check, not a file permission bit) but that
+/// must still update it once the kernel has authorized the change itself.
+/// Refuses a path that does not already exist as a file: this replaces
+/// bytes, it does not create or remove entries.
+pub(crate) fn overwrite_trusted(path: &str, data: &[u8]) -> Result<(), Error> {
+    REGISTRY.lock().overwrite_trusted(path, data)
 }
 
 /// Validate removal without mutating the registry.

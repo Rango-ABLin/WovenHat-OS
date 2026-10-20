@@ -39,6 +39,8 @@ pub enum Action {
     AudioPlay,
     /// Power off (detail 0) or restart (detail 1) requested.
     PowerControl,
+    /// A local account's PIN was changed (or the attempt was refused).
+    AccountChangePin,
 }
 
 /// One immutable security-ledger record.

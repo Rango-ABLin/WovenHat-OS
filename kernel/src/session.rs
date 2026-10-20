@@ -27,7 +27,8 @@ pub enum Error {
 
 #[cfg(any(feature = "system-apps", feature = "stage20-15-test"))]
 /// What the session may do: draw, take input, talk to applications, read
-/// the catalog, launch applications, play sound, and turn the machine off.
+/// the catalog, launch applications, play sound, turn the machine off, and
+/// change the signed-in account's own PIN.
 pub const CAPABILITIES: CapabilitySet = CapabilitySet::only(Capability::Console)
     .with(Capability::DisplayIo)
     .with(Capability::InputIo)
@@ -35,7 +36,8 @@ pub const CAPABILITIES: CapabilitySet = CapabilitySet::only(Capability::Console)
     .with(Capability::FileRead)
     .with(Capability::ProcessCreate)
     .with(Capability::AudioPlayback)
-    .with(Capability::PowerControl);
+    .with(Capability::PowerControl)
+    .with(Capability::AccountManage);
 
 #[cfg(any(feature = "system-apps", feature = "stage20-15-test"))]
 /// Start WovenShell from `image` as the session. With accounts, it opens

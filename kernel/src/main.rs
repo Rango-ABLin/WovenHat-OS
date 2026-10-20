@@ -18,6 +18,7 @@ extern crate alloc;
 #[cfg(any(feature = "physical-probe", feature = "physical-wifi"))]
 mod physical_probe;
 
+mod accounts;
 #[cfg(any(
     not(feature = "qemu-test"),
     feature = "stage13-12-test",

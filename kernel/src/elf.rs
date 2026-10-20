@@ -21,6 +21,7 @@ const REL_ENTRY_SIZE: usize = 16;
 const MAX_RELATIVE_RELOCATIONS: usize = 4096;
 const MAX_DYNAMIC_SYMBOLS: usize = 4096;
 const MAX_DYNAMIC_STRING_TABLE: usize = 64 * 1024;
+pub const MAX_LIFECYCLE_FUNCTIONS: usize = 32;
 pub const MAX_NEEDED_LIBRARIES: usize = 4;
 
 /// A bounded dynamic-linker scope. The main image is searched first, followed
@@ -89,6 +90,31 @@ pub struct DynamicImage {
     pub verneed_address: u64,
     pub verneed_file_offset: usize,
     pub verneed_count: usize,
+    pub init_address: u64,
+    pub fini_address: u64,
+    pub init_array_address: u64,
+    pub init_array_file_offset: usize,
+    pub init_array_count: usize,
+    pub fini_array_address: u64,
+    pub fini_array_file_offset: usize,
+    pub fini_array_count: usize,
+}
+
+#[derive(Clone, Copy)]
+pub struct Lifecycle {
+    pub init: [u64; MAX_LIFECYCLE_FUNCTIONS],
+    pub init_count: usize,
+    pub fini: [u64; MAX_LIFECYCLE_FUNCTIONS],
+    pub fini_count: usize,
+}
+
+impl Lifecycle {
+    const EMPTY: Self = Self {
+        init: [0; MAX_LIFECYCLE_FUNCTIONS],
+        init_count: 0,
+        fini: [0; MAX_LIFECYCLE_FUNCTIONS],
+        fini_count: 0,
+    };
 }
 
 pub struct Image {
@@ -98,6 +124,7 @@ pub struct Image {
     relro: Option<(u64, usize)>,
     tls: Option<TlsImage>,
     dynamic: Option<DynamicImage>,
+    lifecycle: Lifecycle,
     load_bias: u64,
     // ET_EXEC retains absolute addresses; only ET_DYN accepts an ASLR bias.
     position_independent: bool,
@@ -173,6 +200,10 @@ impl Image {
 
     pub const fn dynamic(&self) -> Option<DynamicImage> {
         self.dynamic
+    }
+
+    pub const fn lifecycle(&self) -> Lifecycle {
+        self.lifecycle
     }
 
     pub const fn load_bias(&self) -> u64 {
@@ -353,6 +384,16 @@ impl Image {
         })
     }
 
+    fn contains_executable(&self, value: u64, size: u64) -> bool {
+        self.segments().any(|segment| {
+            segment.executable
+                && value >= segment.virtual_address
+                && value.checked_add(size).is_some_and(|end| {
+                    end <= segment.virtual_address + segment.memory_size as u64
+                })
+        })
+    }
+
     /// Relocate every load segment and the entry by one page-aligned delta.
     /// The parser's W^X, overlap and file-range checks remain in force, while
     /// this second pass rechecks user bounds after the randomized placement.
@@ -402,11 +443,21 @@ impl Image {
                 &mut dynamic.versym_address,
                 &mut dynamic.verdef_address,
                 &mut dynamic.verneed_address,
+                &mut dynamic.init_address,
+                &mut dynamic.fini_address,
+                &mut dynamic.init_array_address,
+                &mut dynamic.fini_array_address,
             ] {
                 if *address != 0 {
                     *address = (*address).checked_add(delta)?;
                 }
             }
+        }
+        for entry in self.lifecycle.init[..self.lifecycle.init_count].iter_mut() {
+            *entry = entry.checked_add(delta)?;
+        }
+        for entry in self.lifecycle.fini[..self.lifecycle.fini_count].iter_mut() {
+            *entry = entry.checked_add(delta)?;
         }
         for (index, segment) in self.segments[..self.segment_count]
             .iter()
@@ -900,6 +951,7 @@ fn parse_image(bytes: &[u8], shared: bool) -> Result<Image, Error> {
         relro: None,
         tls: None,
         dynamic: None,
+        lifecycle: Lifecycle::EMPTY,
         load_bias: 0,
         position_independent: elf_type == 3,
     };
@@ -963,6 +1015,12 @@ fn parse_image(bytes: &[u8], shared: bool) -> Result<Image, Error> {
             let mut verdef_count = 0usize;
             let mut verneed_address = None;
             let mut verneed_count = 0usize;
+            let mut init_address = None;
+            let mut fini_address = None;
+            let mut init_array_address = None;
+            let mut init_array_count = 0usize;
+            let mut fini_array_address = None;
+            let mut fini_array_count = 0usize;
             let dynamic_bytes = &bytes[file_offset..file_end];
             let mut terminated = false;
             let mut debug_seen = false;
@@ -1069,6 +1127,34 @@ fn parse_image(bytes: &[u8], shared: bool) -> Result<Image, Error> {
                         if plt_address.replace(value).is_some() {
                             return Err(Error::InvalidSegment);
                         }
+                    }
+                    12 => {
+                        if init_address.replace(value).is_some() {
+                            return Err(Error::InvalidSegment);
+                        }
+                    }
+                    13 => {
+                        if fini_address.replace(value).is_some() {
+                            return Err(Error::InvalidSegment);
+                        }
+                    }
+                    25 => {
+                        if init_array_address.replace(value).is_some() {
+                            return Err(Error::InvalidSegment);
+                        }
+                    }
+                    26 => {
+                        if fini_array_address.replace(value).is_some() {
+                            return Err(Error::InvalidSegment);
+                        }
+                    }
+                    27 => {
+                        init_array_count = usize::try_from(value)
+                            .map_err(|_| Error::InvalidSegment)?;
+                    }
+                    28 => {
+                        fini_array_count = usize::try_from(value)
+                            .map_err(|_| Error::InvalidSegment)?;
                     }
                     // Common metadata tags do not affect relocation of a
                     // symbol-free static PIE and are intentionally ignored.
@@ -1187,6 +1273,14 @@ fn parse_image(bytes: &[u8], shared: bool) -> Result<Image, Error> {
                     verneed_address: verneed_address.unwrap_or(0),
                     verneed_file_offset: 0,
                     verneed_count,
+                    init_address: init_address.unwrap_or(0),
+                    fini_address: fini_address.unwrap_or(0),
+                    init_array_address: init_array_address.unwrap_or(0),
+                    init_array_file_offset: 0,
+                    init_array_count,
+                    fini_array_address: fini_array_address.unwrap_or(0),
+                    fini_array_file_offset: 0,
+                    fini_array_count,
                 });
                 // Resolve the virtual relocation table to its file-backed
                 // bytes after all PT_LOAD headers have been collected.
@@ -1246,6 +1340,14 @@ fn parse_image(bytes: &[u8], shared: bool) -> Result<Image, Error> {
                     verneed_address: verneed_address.unwrap_or(0),
                     verneed_file_offset: 0,
                     verneed_count,
+                    init_address: init_address.unwrap_or(0),
+                    fini_address: fini_address.unwrap_or(0),
+                    init_array_address: init_array_address.unwrap_or(0),
+                    init_array_file_offset: 0,
+                    init_array_count,
+                    fini_array_address: fini_array_address.unwrap_or(0),
+                    fini_array_file_offset: 0,
+                    fini_array_count,
                 });
             }
             continue;
@@ -1761,6 +1863,7 @@ fn parse_image(bytes: &[u8], shared: bool) -> Result<Image, Error> {
         }
         image.dynamic = Some(dynamic);
         validate_version_tables(bytes, &mut image)?;
+        image.lifecycle = validate_lifecycle(bytes, &mut image)?;
     }
     if let Some((relro_start, relro_size)) = image.relro {
         let relro_end = relro_start
@@ -1778,6 +1881,110 @@ fn parse_image(bytes: &[u8], shared: bool) -> Result<Image, Error> {
         }
     }
     Ok(image)
+}
+
+fn validate_lifecycle(bytes: &[u8], image: &mut Image) -> Result<Lifecycle, Error> {
+    let dynamic = image.dynamic.ok_or(Error::InvalidSegment)?;
+    let mut lifecycle = Lifecycle::EMPTY;
+    if dynamic.init_address != 0 {
+        if !image.contains_executable(dynamic.init_address, 0) {
+            return Err(Error::InvalidSegment);
+        }
+        lifecycle.init[0] = dynamic.init_address;
+        lifecycle.init_count = 1;
+    }
+    if dynamic.init_array_count != 0 {
+        if dynamic.init_array_address == 0
+            || dynamic.init_array_count > MAX_LIFECYCLE_FUNCTIONS - lifecycle.init_count
+        {
+            return Err(Error::InvalidSegment);
+        }
+        let (offset, _) = lifecycle_table_file_range(
+            bytes,
+            image,
+            dynamic.init_array_address,
+            dynamic.init_array_count,
+        )?;
+        for index in 0..dynamic.init_array_count {
+            let entry = read_u64(bytes, offset + index * 8)?;
+            if entry != 0 {
+                if !image.contains_executable(entry, 0) {
+                    return Err(Error::InvalidSegment);
+                }
+                lifecycle.init[lifecycle.init_count] = entry;
+                lifecycle.init_count += 1;
+            }
+        }
+    } else if dynamic.init_array_address != 0 {
+        return Err(Error::InvalidSegment);
+    }
+    let mut fini_count = 0;
+    if dynamic.fini_array_count != 0 {
+        if dynamic.fini_array_address == 0
+            || dynamic.fini_array_count > MAX_LIFECYCLE_FUNCTIONS
+        {
+            return Err(Error::InvalidSegment);
+        }
+        let (offset, _) = lifecycle_table_file_range(
+            bytes,
+            image,
+            dynamic.fini_array_address,
+            dynamic.fini_array_count,
+        )?;
+        for index in (0..dynamic.fini_array_count).rev() {
+            let entry = read_u64(bytes, offset + index * 8)?;
+            if entry != 0 {
+                if !image.contains_executable(entry, 0) {
+                    return Err(Error::InvalidSegment);
+                }
+                if fini_count == MAX_LIFECYCLE_FUNCTIONS {
+                    return Err(Error::InvalidSegment);
+                }
+                lifecycle.fini[fini_count] = entry;
+                fini_count += 1;
+            }
+        }
+    } else if dynamic.fini_array_address != 0 {
+        return Err(Error::InvalidSegment);
+    }
+    if dynamic.fini_address != 0 {
+        if fini_count == MAX_LIFECYCLE_FUNCTIONS
+            || !image.contains_executable(dynamic.fini_address, 0)
+        {
+            return Err(Error::InvalidSegment);
+        }
+        lifecycle.fini[fini_count] = dynamic.fini_address;
+        fini_count += 1;
+    }
+    lifecycle.fini_count = fini_count;
+    Ok(lifecycle)
+}
+
+fn lifecycle_table_file_range(
+    bytes: &[u8],
+    image: &Image,
+    address: u64,
+    count: usize,
+) -> Result<(usize, usize), Error> {
+    let size = count.checked_mul(8).ok_or(Error::InvalidSegment)?;
+    let end = address
+        .checked_add(size as u64)
+        .ok_or(Error::InvalidSegment)?;
+    let segment = image
+        .segments()
+        .find(|segment| {
+            let file_end = segment.virtual_address.saturating_add(segment.file_size as u64);
+            segment.virtual_address <= address && end <= file_end
+        })
+        .ok_or(Error::InvalidSegment)?;
+    let offset = segment
+        .file_offset
+        .checked_add((address - segment.virtual_address) as usize)
+        .ok_or(Error::InvalidSegment)?;
+    if offset.checked_add(size).filter(|end| *end <= bytes.len()).is_none() {
+        return Err(Error::Truncated);
+    }
+    Ok((offset, size))
 }
 
 fn read_u16(bytes: &[u8], offset: usize) -> Result<u16, Error> {
