@@ -12,7 +12,7 @@ import time
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--cpus", type=int, choices=(1, 2, 4), default=1)
-    parser.add_argument("--stage", type=int, choices=(1, 2), default=1)
+    parser.add_argument("--stage", type=int, choices=(1, 2, 3), default=1)
     parser.add_argument(
         "--qemu",
         default=shutil.which("qemu-system-x86_64")
@@ -124,11 +124,12 @@ def main() -> int:
         print(f"Stage 23.{args.stage} timed out. Evidence: {out}", file=sys.stderr)
         return 1
     serial_text = serial.read_text(errors="replace") if serial.exists() else ""
-    marker = (
-        "[S23.1] WovenAI broker: PASSED"
-        if args.stage == 1
-        else "[S23.2] WovenAI local provider: PASSED"
-    )
+    if args.stage == 1:
+        marker = "[S23.1] WovenAI broker: PASSED"
+    elif args.stage == 2:
+        marker = "[S23.2] WovenAI local provider: PASSED"
+    else:
+        marker = "[S23.3] WovenAI cloud provider: PASSED"
     if result != 33 or marker not in serial_text:
         print(f"Stage 23.{args.stage} failed (exit {result}). Evidence: {out}", file=sys.stderr)
         print(serial_text[-8000:], file=sys.stderr)

@@ -401,6 +401,7 @@ pub const fn default_sandbox(domain: SecurityDomain) -> SandboxProfile {
     feature = "stage22-5-test",
     feature = "stage23-1-test",
     feature = "stage23-2-test",
+    feature = "stage23-3-test",
     feature = "system-apps"
 ))]
 pub const fn package_sandbox(capabilities: CapabilitySet) -> Option<SandboxProfile> {

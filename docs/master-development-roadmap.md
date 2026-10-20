@@ -826,7 +826,10 @@ neural inference capability.
 
 23.3 — Cloud Models
 
-Provider plugins, but credentials stay in WovenVault.
+Provider plugins, but credentials stay in WovenVault. The accepted foundation
+is a separate Ring-3 provider ABI with broker delegation and owner-bound vault
+credentials; real HTTPS/TLS endpoint support, provisioning, retry, quota, and
+availability policy must be accepted as provider hardening before release.
 
 23.4 — AI Capability Security
 

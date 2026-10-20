@@ -408,6 +408,7 @@ pub enum Number {
     #[cfg(any(
         feature = "stage23-1-test",
         feature = "stage23-2-test",
+        feature = "stage23-3-test",
         feature = "system-apps"
     ))]
     AiMessageSend = 218,
@@ -951,6 +952,7 @@ fn sys_ipc_message_send(raw_handle: u64, user_buffer: u64, length: u64) -> u64 {
 #[cfg(any(
     feature = "stage23-1-test",
     feature = "stage23-2-test",
+    feature = "stage23-3-test",
     feature = "system-apps"
 ))]
 fn sys_ai_message_send(raw_handle: u64, user_buffer: u64, length: u64) -> u64 {
@@ -2632,6 +2634,7 @@ pub extern "C" fn wovenhat_syscall_dispatch(
         #[cfg(any(
             feature = "stage23-1-test",
             feature = "stage23-2-test",
+            feature = "stage23-3-test",
             feature = "system-apps"
         ))]
         value if value == Number::AiMessageSend as u64 => sys_ai_message_send(arg0, arg1, arg2),

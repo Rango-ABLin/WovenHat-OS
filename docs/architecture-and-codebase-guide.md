@@ -1339,6 +1339,22 @@ release-safe local inference baseline, not a claim of general neural-model
 support. Larger model formats and accelerator backends require later bounded
 provider stages and their own acceptance gates.
 
+## Stage 23.3 WovenAI provider-plugin boundary (2026-10-20)
+
+`libwoven::ai_provider` defines a provider descriptor and result flags over
+the existing bounded WAI1 frames. `apps/woven-ai --cloud-plugin` is a separate
+Ring-3 provider process; `apps/woven-ai --cloud` is a broker mode that forwards
+requests to the discovered provider. The broker has only `Ipc`. The provider
+is the only process holding `Secrets`, and reads its owner-bound WovenVault
+handle locally; no credential bytes enter a WAI1 frame or broker memory.
+
+The accepted fixture also declares `NetworkIo` so a future provider can attach
+its own bounded transport, but this stage intentionally does not pretend that
+an offline deterministic fixture is an HTTPS/TLS cloud implementation. Real
+endpoint configuration, TLS validation, credential provisioning, retries,
+quotas, and billing/availability policy require a subsequent provider
+hardening gate.
+
 The feature-gated `stage19-app-catalog-test` now exercises the install-plan
 boundary for all ten accepted packages together. It verifies each WAPP,
 rejects a mutation, installs and reads each package back through the VFS,

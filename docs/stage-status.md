@@ -1,5 +1,30 @@
 # Stage status
 
+## Stage 23.3 WovenAI provider-plugin boundary (2026-10-20)
+
+`libwoven::ai_provider` defines the bounded provider-plugin contract. A cloud
+provider is a separate Ring-3 process published as `woven.ai.cloud`; the
+WovenAI broker delegates versioned WAI1 requests to it without copying or
+passing credential bytes. The provider owns its generation-safe WovenVault
+handle and returns only a bounded descriptor or result. Provider capability
+authority is explicit: the acceptance fixture receives `Ipc`, `Secrets`, and
+`NetworkIo`, while the broker receives only `Ipc`.
+
+The Stage 23.3 gate passed with exit 33 and
+`[S23.3] WovenAI cloud provider: PASSED` on 1/2/4 CPUs. It proves provider
+publication, broker delegation, vault-backed credential use, capability denial
+for an unauthorized client, response correlation, and teardown. Evidence is
+preserved under:
+`audit-artifacts/stage23.3-1cpu-1792523642289709300`,
+`audit-artifacts/stage23.3-2cpu-1792523675601682100`, and
+`audit-artifacts/stage23.3-4cpu-1792523708187643800`.
+
+This acceptance uses a deterministic offline provider fixture. It does not
+claim arbitrary cloud API compatibility, HTTPS/TLS transport, endpoint
+configuration, credential provisioning UX, rate limiting, billing controls,
+or physical network qualification. Those are required before a real cloud
+provider can be called production-ready.
+
 ## Stage 23.2 bounded WovenAI local provider (2026-10-20)
 
 `libwoven::ai_model` now defines the explicit model ABI and a deterministic,

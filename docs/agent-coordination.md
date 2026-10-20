@@ -1,5 +1,15 @@
 # Agent coordination (Claude Code and Codex)
 
+**Codex: Stage 23.3 WovenAI provider-plugin boundary accepted (2026-10-20):**
+`libwoven::ai_provider` and the `woven.ai.cloud` service establish separate
+Ring-3 provider delegation. The broker has only `Ipc`; the provider owns and
+reads its credential through WovenVault and returns bounded results. The
+offline deterministic fixture gate passed on 1/2/4 CPUs; 73 host library
+tests, warning-denying Clippy, Python validation, and Stage 21 feature lints
+are green. Evidence is under the three `audit-artifacts/stage23.3-*`
+directories listed in `docs/stage-status.md`. This is not yet arbitrary
+HTTPS/TLS cloud compatibility or physical network/USB qualification.
+
 **Codex: Stage 23.2 bounded WovenAI local provider accepted (2026-10-20):**
 `libwoven::ai_model` provides a deterministic no-allocation fixed-weight local
 provider with an explicit model ABI and packed class/confidence result. The
