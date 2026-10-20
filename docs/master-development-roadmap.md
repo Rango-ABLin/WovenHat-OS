@@ -817,7 +817,12 @@ accepted.
 
 23.2 — Local Models
 
-Support local inference where hardware permits.
+Support local inference where hardware permits. The first accepted provider is
+the bounded, deterministic Ring-3 local provider: fixed integer weights,
+bounded UTF-8 input, no allocation, an explicit model ABI, and no implicit
+file, network, secret, or device access. Larger model formats and hardware
+acceleration remain separate provider work; this stage must not imply general
+neural inference capability.
 
 23.3 — Cloud Models
 

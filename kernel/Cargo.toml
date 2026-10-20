@@ -192,6 +192,7 @@ stage22-3-test = ["qemu-test", "stage15-2-test"]
 # Ring-3 WovenPackage mutations use the accepted native WovenFS authority.
 stage22-5-test = ["qemu-test", "stage15-2-test"]
 stage23-1-test = ["qemu-test"]
+stage23-2-test = ["qemu-test"]
 stage1-5-test = ["qemu-test"]
 
 [dependencies]

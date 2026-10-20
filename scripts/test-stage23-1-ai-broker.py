@@ -1,4 +1,4 @@
-"""Run the bounded Stage 23.1 WovenAI broker and capability-gated client gate."""
+"""Run the bounded Stage 23.1/23.2 WovenAI acceptance gate."""
 
 import argparse
 import os
@@ -12,6 +12,7 @@ import time
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--cpus", type=int, choices=(1, 2, 4), default=1)
+    parser.add_argument("--stage", type=int, choices=(1, 2), default=1)
     parser.add_argument(
         "--qemu",
         default=shutil.which("qemu-system-x86_64")
@@ -73,7 +74,7 @@ def main() -> int:
                 "run",
                 "--quiet",
                 "--features",
-                "stage23-1-test",
+                f"stage23-{args.stage}-test",
                 "--",
                 "--print-image",
             ],
@@ -83,7 +84,7 @@ def main() -> int:
         ).strip()
     )
 
-    out = root / "audit-artifacts" / f"stage23.1-{args.cpus}cpu-{time.time_ns()}"
+    out = root / "audit-artifacts" / f"stage23.{args.stage}-{args.cpus}cpu-{time.time_ns()}"
     out.mkdir(parents=True)
     serial = out / "serial.log"
     command = [
@@ -120,15 +121,19 @@ def main() -> int:
                 timeout=args.timeout,
             ).returncode
     except subprocess.TimeoutExpired:
-        print(f"Stage 23.1 timed out. Evidence: {out}", file=sys.stderr)
+        print(f"Stage 23.{args.stage} timed out. Evidence: {out}", file=sys.stderr)
         return 1
     serial_text = serial.read_text(errors="replace") if serial.exists() else ""
-    marker = "[S23.1] WovenAI broker: PASSED"
+    marker = (
+        "[S23.1] WovenAI broker: PASSED"
+        if args.stage == 1
+        else "[S23.2] WovenAI local provider: PASSED"
+    )
     if result != 33 or marker not in serial_text:
-        print(f"Stage 23.1 failed (exit {result}). Evidence: {out}", file=sys.stderr)
+        print(f"Stage 23.{args.stage} failed (exit {result}). Evidence: {out}", file=sys.stderr)
         print(serial_text[-8000:], file=sys.stderr)
         return 1
-    print(f"Stage 23.1 PASS ({args.cpus} CPU, exit 33). Evidence: {out}")
+    print(f"Stage 23.{args.stage} PASS ({args.cpus} CPU, exit 33). Evidence: {out}")
     return 0
 
 

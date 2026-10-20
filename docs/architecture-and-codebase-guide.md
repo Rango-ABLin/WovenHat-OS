@@ -1323,6 +1323,22 @@ request delivery, ABI response correlation, explicit no-provider behavior,
 and teardown. It does not provide model inference, file/network/secret/device
 access, assistant actions, or physical hardware qualification.
 
+## Stage 23.2 bounded WovenAI local provider (2026-10-20)
+
+`libwoven::ai_model` is the first provider implementation. It is intentionally
+bounded and deterministic: fixed integer weights, a fixed feature vocabulary,
+no allocation, ASCII-insensitive matching, and a packed class/confidence
+result. Its `MODEL_ABI` is advertised in the local broker's `Describe` value
+alongside `LOCAL_PROVIDER_FLAG`; the normal broker descriptor remains the
+Stage 23.1 broker ABI.
+
+The provider runs in Ring 3 inside `apps/woven-ai` and receives only the WAI1
+request bytes already validated by the protocol. It has no model-file loader,
+filesystem, network, secret, device, or hardware-accelerator path. This is a
+release-safe local inference baseline, not a claim of general neural-model
+support. Larger model formats and accelerator backends require later bounded
+provider stages and their own acceptance gates.
+
 The feature-gated `stage19-app-catalog-test` now exercises the install-plan
 boundary for all ten accepted packages together. It verifies each WAPP,
 rejects a mutation, installs and reads each package back through the VFS,

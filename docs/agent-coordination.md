@@ -1,5 +1,15 @@
 # Agent coordination (Claude Code and Codex)
 
+**Codex: Stage 23.2 bounded WovenAI local provider accepted (2026-10-20):**
+`libwoven::ai_model` provides a deterministic no-allocation fixed-weight local
+provider with an explicit model ABI and packed class/confidence result. The
+Ring-3 broker advertises the model ABI only in local-provider mode; normal mode
+retains the Stage 23.1 no-provider behavior. The dedicated QEMU gate passed on
+1/2/4 CPUs, with 71 host library tests and warning-denying Clippy gates green.
+Evidence is under the three `audit-artifacts/stage23.2-*` directories listed
+in `docs/stage-status.md`. This does not claim general neural inference,
+hardware acceleration, or physical USB qualification; no USB write occurred.
+
 **Codex: Stage 23.1 controlled WovenAI broker accepted (2026-10-20):**
 `libwoven::ai_ipc` and syscall 218 define a bounded `WAI1` request path that
 requires both `Ipc` and `Ai` capability. The signed Ring-3 `apps/woven-ai`

@@ -1,5 +1,28 @@
 # Stage status
 
+## Stage 23.2 bounded WovenAI local provider (2026-10-20)
+
+`libwoven::ai_model` now defines the explicit model ABI and a deterministic,
+no-allocation local provider with fixed integer weights. It consumes the
+existing bounded WAI1 UTF-8 input, classifies a fixed feature vocabulary, and
+returns a packed class/confidence result. The broker's `Describe` response
+advertises both the local-provider flag and model ABI; normal broker mode still
+returns `NoProvider`.
+
+The dedicated Stage 23.2 gate passed with exit 33 and
+`[S23.2] WovenAI local provider: PASSED` on 1/2/4 CPUs. The 71-test
+`libwoven` suite, Stage 23.1 and 23.2 freestanding Clippy, host all-targets
+Clippy, broker app Clippy, and Python validation pass. Evidence is preserved
+under:
+`audit-artifacts/stage23.2-1cpu-1792523271142588200`,
+`audit-artifacts/stage23.2-2cpu-1792523298416240400`, and
+`audit-artifacts/stage23.2-4cpu-1792523326958053700`.
+
+This is a bounded software provider, not a general neural runtime. Model
+files, larger tensors, hardware acceleration, cloud credentials, semantic
+search, assistant actions, and AI security-monitor policy remain later stages.
+No physical USB qualification or USB write was performed.
+
 ## Stage 23.1 controlled WovenAI broker boundary (2026-10-20)
 
 `libwoven::ai_ipc` now defines the bounded version-1 `WAI1` request/response

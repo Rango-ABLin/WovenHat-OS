@@ -4579,11 +4579,20 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     }
     #[cfg(feature = "stage23-1-test")]
     {
-        if !stage23_1_ai_broker_self_test() {
+        if !stage23_ai_broker_self_test(false) {
             serial::write_line(format_args!("[S23.1] WovenAI broker: FAILED"));
             qemu_test_exit_failure();
         }
         serial::write_line(format_args!("[S23.1] WovenAI broker: PASSED"));
+        qemu_test_exit_success();
+    }
+    #[cfg(feature = "stage23-2-test")]
+    {
+        if !stage23_ai_broker_self_test(true) {
+            serial::write_line(format_args!("[S23.2] WovenAI local provider: FAILED"));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!("[S23.2] WovenAI local provider: PASSED"));
         qemu_test_exit_success();
     }
     #[cfg(feature = "stage27-2-test")]
@@ -5490,9 +5499,9 @@ const PACKAGE_SERVICE_IMAGE: &[u8] = include_bytes!(env!("WOVENHAT_PACKAGE_IMAGE
 #[cfg(feature = "stage22-5-test")]
 const PACKAGE_TRANSACTION_FIXTURE: &[u8] = include_bytes!(env!("WOVENHAT_PACKAGE_FIXTURE"));
 
-#[cfg(feature = "stage23-1-test")]
+#[cfg(any(feature = "stage23-1-test", feature = "stage23-2-test"))]
 const AI_SERVICE_IMAGE: &[u8] = include_bytes!(env!("WOVENHAT_AI_IMAGE"));
-#[cfg(feature = "stage23-1-test")]
+#[cfg(any(feature = "stage23-1-test", feature = "stage23-2-test"))]
 const AI_PROBE_IMAGE: &[u8] = include_bytes!(env!("WOVENHAT_AI_PROBE_IMAGE"));
 
 #[cfg(feature = "stage22-3-test")]
@@ -5778,10 +5787,10 @@ fn stage22_5_package_transaction_self_test() -> bool {
     true
 }
 
-#[cfg(feature = "stage23-1-test")]
-fn stage23_1_ai_broker_self_test() -> bool {
+#[cfg(any(feature = "stage23-1-test", feature = "stage23-2-test"))]
+fn stage23_ai_broker_self_test(local_provider: bool) -> bool {
     fn fail(reason: &str) -> bool {
-        serial::write_line(format_args!("[S23.1] {}", reason));
+        serial::write_line(format_args!("[S23] {}", reason));
         false
     }
     let Ok(verified) = signed_app::verify_package(AI_SERVICE_IMAGE) else {
@@ -5790,10 +5799,12 @@ fn stage23_1_ai_broker_self_test() -> bool {
     if elf::parse(verified.bytes()).is_err() {
         return fail("broker ELF rejected");
     }
-    let Some(service_program) = userspace::load_elf_with_argv_verified(
-        AI_SERVICE_IMAGE,
-        &["/bin/woven-ai"],
-    ) else {
+    let service_args: &[&str] = if local_provider {
+        &["/bin/woven-ai", "--local"]
+    } else {
+        &["/bin/woven-ai"]
+    };
+    let Some(service_program) = userspace::load_elf_with_argv_verified(AI_SERVICE_IMAGE, service_args) else {
         return fail("broker load failed");
     };
     let Ok((service_pid, _, _)) = task::spawn_user_system_service(
@@ -5826,10 +5837,12 @@ fn stage23_1_ai_broker_self_test() -> bool {
         let _ = task::kill_process(service_pid.as_u64(), 9);
         return fail("probe ELF rejected");
     }
-    let Some(denied_program) = userspace::load_elf_with_argv_verified(
-        AI_PROBE_IMAGE,
-        &["/bin/woven-ai", "--probe"],
-    ) else {
+    let denied_args: &[&str] = if local_provider {
+        &["/bin/woven-ai", "--probe-local"]
+    } else {
+        &["/bin/woven-ai", "--probe"]
+    };
+    let Some(denied_program) = userspace::load_elf_with_argv_verified(AI_PROBE_IMAGE, denied_args) else {
         let _ = task::kill_process(service_pid.as_u64(), 9);
         return fail("denied probe load failed");
     };
@@ -5854,10 +5867,7 @@ fn stage23_1_ai_broker_self_test() -> bool {
         let _ = task::kill_process(service_pid.as_u64(), 9);
         return fail("Ai capability denial was not enforced");
     }
-    let Some(probe_program) = userspace::load_elf_with_argv_verified(
-        AI_PROBE_IMAGE,
-        &["/bin/woven-ai", "--probe"],
-    ) else {
+    let Some(probe_program) = userspace::load_elf_with_argv_verified(AI_PROBE_IMAGE, denied_args) else {
         let _ = task::kill_process(service_pid.as_u64(), 9);
         return fail("probe load failed");
     };
