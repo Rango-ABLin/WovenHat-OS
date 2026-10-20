@@ -1,5 +1,11 @@
 # Agent coordination (Claude Code and Codex)
 
+**Codex packaged app launch regression revalidated (2026-10-20):** The
+production WovenCalculator package launched through the logged-in WovenShell,
+changed the presented frame, and activated its bounded control on QEMU 1/2/4
+CPUs after the SMP repaint fix. The other nine client gates remain accepted;
+persistent release account provisioning is next.
+
 **Codex session/SMP sign-in repaint fix accepted (2026-10-20):** WovenShell
 now repaints only the changed account/PIN region for lock-screen keys instead
 of its full wallpaper. Stage 20.12 sign-in and Stage 20.15 session gates pass

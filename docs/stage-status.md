@@ -1,5 +1,14 @@
 # Stage status
 
+## Session track - production app launch revalidated after SMP fix (2026-10-20)
+
+The production packaged WovenCalculator path was rerun after the bounded
+lock-screen repaint change. The hardware-demo boot signed in through the
+launcher, opened the Calculator window, presented a changed desktop frame,
+and exercised its bounded control successfully on QEMU 1/2/4 CPUs. Existing
+per-client 1/2/4-CPU acceptance remains authoritative for the other nine
+packaged clients; no client code changed in this fix.
+
 ## Graphics/session track - SMP sign-in repaint fix accepted (2026-10-20)
 
 The WovenShell lock/sign-in path now limits key-driven repaint damage to the

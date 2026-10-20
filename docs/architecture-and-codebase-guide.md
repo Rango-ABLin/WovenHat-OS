@@ -1,5 +1,13 @@
 # WovenHat OS Architecture & Codebase Guide
 
+## Session track - packaged app launch regression acceptance (2026-10-20)
+
+After the SMP sign-in repaint fix, the production WovenCalculator package was
+launched through WovenShell and its bounded pointer control was exercised on
+QEMU 1/2/4 CPUs with changed-frame evidence. The remaining packaged clients
+retain their earlier 1/2/4-CPU acceptance; the shell change is confined to
+lock-screen damage selection. Persistent account provisioning remains open.
+
 ## Session graphics - bounded SMP sign-in repaint (2026-10-20)
 
 WovenShell's lock/sign-in key path returns bounded damage for the changed
