@@ -1,5 +1,15 @@
 # Agent coordination (Claude Code and Codex)
 
+**Codex: Stage 22.3 Ring-3 WovenPackage broker boundary (2026-10-20):**
+`apps/woven-package` is a signed no-std Ring-3 service that publishes
+`woven.package`, receives `WPKI` requests over a discovered endpoint, and
+routes correlated responses through the sender mailbox. The dedicated QEMU
+fixture passed on 1/2/4 CPUs, including service teardown/reaping. App and
+workspace warning-denying Clippy plus the 66-test library suite passed.
+Mutation dispatch remains explicitly storage-authority gated and is not yet
+implemented; physical USB qualification remains open. No physical USB write
+was performed.
+
 **Codex: WovenPackage IPC protocol foundation (2026-10-20):** `libwoven`
 now defines bounded version-1 `WPKI` request/response frames for install,
 remove, rollback, and query operations. Paths reject traversal and oversized or

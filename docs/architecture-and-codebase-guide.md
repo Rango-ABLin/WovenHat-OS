@@ -1261,6 +1261,23 @@ allocation-free and covered by host tests; the next acceptance must exercise
 the codec from a real Ring-3 broker and connect each operation to the existing
 authenticated WovenPackage transactions.
 
+## Stage 22.3 Ring-3 WovenPackage broker boundary (2026-10-20)
+
+`apps/woven-package` is a signed external ELF service, not kernel code. It
+creates and publishes `woven.package` with `Capability::Ipc`, receives
+`WPKI` requests through the discovered endpoint, and routes responses using
+the sender process ID prefixed by the handle-receive ABI. Request and response
+buffers live in static bounded storage because WovenHat user stacks are small.
+The service exits only through normal teardown in the fixture; the kernel reaps
+it and unregisters its service owner before acceptance completes.
+
+The current dispatch intentionally implements only the query protocol proof.
+Install, remove, and rollback return a distinct storage-authority status rather
+than pretending to mutate packages. The next Stage 22 increment must expose a
+capability-gated userspace storage/package transaction API, connect those
+operations to the existing authenticated WovenFS records, and add production
+system-service startup wiring.
+
 The feature-gated `stage19-app-catalog-test` now exercises the install-plan
 boundary for all ten accepted packages together. It verifies each WAPP,
 rejects a mutation, installs and reads each package back through the VFS,

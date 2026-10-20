@@ -2800,7 +2800,8 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         not(feature = "stage21-10-test"),
         not(feature = "stage21-11-test"),
         not(feature = "stage22-1-test"),
-        not(feature = "stage22-2-test")
+        not(feature = "stage22-2-test"),
+        not(feature = "stage22-3-test")
     ))]
     match storage::live_mutation_self_test() {
         storage::LiveMutationTestStatus::Passed => {
@@ -4343,7 +4344,8 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         not(feature = "stage21-10-test"),
         not(feature = "stage21-11-test"),
         not(feature = "stage22-1-test"),
-        not(feature = "stage22-2-test")
+        not(feature = "stage22-2-test"),
+        not(feature = "stage22-3-test")
     ))]
     {
         if !wfs::stage15_2_self_test() {
@@ -4544,6 +4546,15 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
             qemu_test_exit_failure();
         }
         serial::write_line(format_args!("[S22.2] handle IPC ABI: PASSED"));
+        qemu_test_exit_success();
+    }
+    #[cfg(feature = "stage22-3-test")]
+    {
+        if !stage22_3_package_service_self_test() {
+            serial::write_line(format_args!("[S22.3] WovenPackage broker: FAILED"));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!("[S22.3] WovenPackage broker: PASSED"));
         qemu_test_exit_success();
     }
     #[cfg(feature = "stage27-2-test")]
@@ -5439,6 +5450,118 @@ const SYSTEM_APP_IMAGES: &[u8] = include_bytes!(env!("WOVENHAT_IMAGES_IMAGE"));
 const SYSTEM_APP_UPDATE: &[u8] = include_bytes!(env!("WOVENHAT_UPDATE_IMAGE"));
 #[cfg(any(feature = "stage19-app-catalog-test", feature = "system-apps"))]
 const SYSTEM_APP_STORE: &[u8] = include_bytes!(env!("WOVENHAT_STORE_IMAGE"));
+
+#[cfg(feature = "stage22-3-test")]
+const PACKAGE_SERVICE_IMAGE: &[u8] = include_bytes!(env!("WOVENHAT_PACKAGE_IMAGE"));
+
+#[cfg(feature = "stage22-3-test")]
+fn stage22_3_package_service_self_test() -> bool {
+    use libwoven::package_ipc::{Operation, Request, Response};
+
+    fn fail(reason: &str) -> bool {
+        serial::write_line(format_args!("[S22.3] {}", reason));
+        false
+    }
+
+    let Ok(verified) = signed_app::verify_package(PACKAGE_SERVICE_IMAGE) else {
+        return fail("broker signature rejected");
+    };
+    if elf::parse(verified.bytes()).is_err() {
+        return fail("broker ELF rejected");
+    }
+    let Some(program) = userspace::load_elf_with_argv_verified(
+        PACKAGE_SERVICE_IMAGE,
+        &["/bin/woven-package", "--service"],
+    ) else {
+        return fail("broker loader rejected");
+    };
+    let capabilities = capability::CapabilitySet::only(capability::Capability::Ipc)
+        .with(capability::Capability::FileRead);
+    let Ok((pid, _, _)) = task::spawn_user_system_service(
+        "woven-package",
+        program,
+        capabilities,
+    ) else {
+        return fail("broker spawn failed");
+    };
+    let deadline = timer::ticks().wrapping_add(500);
+    let published = loop {
+        if let Ok(info) = ipc::service_info(b"woven.package") {
+            if info.owner == pid.as_u64() && info.client_rights == 1 {
+                break true;
+            }
+        }
+        if timer::ticks().wrapping_sub(deadline) < u64::MAX / 2 {
+            break false;
+        }
+        task::yield_now();
+    };
+    if !published {
+        let _ = task::kill_process(pid.as_u64(), 9);
+        return fail("broker service was not published");
+    }
+    let Ok(client_handle) = ipc::discover_service(pid.as_u64(), b"woven.package")
+    else {
+        let _ = task::kill_process(pid.as_u64(), 9);
+        return fail("service discovery failed");
+    };
+    let request = Request {
+        operation: Operation::Query,
+        request_id: 0x22_03,
+        path: b"/wfs/packages/catalog.wstc",
+    };
+    let mut bytes = [0u8; libwoven::package_ipc::MAX_MESSAGE_BYTES];
+    let Ok(length) = request.encode(&mut bytes) else {
+        let _ = task::kill_process(pid.as_u64(), 9);
+        return fail("request encoding failed");
+    };
+    if ipc::send_handle(pid.as_u64(), client_handle, &bytes[..length]).is_err() {
+        let _ = task::kill_process(pid.as_u64(), 9);
+        return fail("request send failed");
+    }
+    let deadline = timer::ticks().wrapping_add(500);
+    let mut response_ok = false;
+    loop {
+        if task::process_exited(pid) {
+            return fail("broker exited while handling request");
+        }
+        if let Ok((message, serial)) = ipc::peek(pid.as_u64()) {
+            if let Ok(response) = Response::decode(message.payload()) {
+                response_ok = response.request_id == request.request_id
+                    && response.status == 0
+                    && response.value == request.path.len() as u64;
+            }
+            let _ = ipc::receive_if(pid.as_u64(), serial);
+            break;
+        }
+        if timer::ticks().wrapping_sub(deadline) < u64::MAX / 2 {
+            break;
+        }
+        task::yield_now();
+    }
+    let _ = task::kill_process(pid.as_u64(), 9);
+    let cleanup_deadline = timer::ticks().wrapping_add(500);
+    while !task::process_exited(pid) {
+        if timer::ticks().wrapping_sub(cleanup_deadline) < u64::MAX / 2 {
+            return fail("broker teardown timed out");
+        }
+        task::yield_now();
+    }
+    if task::wait_process(pid.as_u64()).is_err() {
+        return fail("broker reap failed");
+    }
+    if !response_ok {
+        return fail("broker response mismatch or timeout");
+    }
+    let service_deadline = timer::ticks().wrapping_add(500);
+    while ipc::service_info(b"woven.package").is_ok() {
+        if timer::ticks().wrapping_sub(service_deadline) < u64::MAX / 2 {
+            return fail("broker service cleanup timed out");
+        }
+        task::yield_now();
+    }
+    true
+}
 
 #[cfg(feature = "system-apps")]
 fn install_production_system_apps() -> bool {
