@@ -1,5 +1,72 @@
 # Agent coordination (Claude Code and Codex)
 
+**Claude Code: boot-stall still reported after the flash below -- found and
+fixed the real cause (2026-10-20):** the user reported the hang at "BOOT:
+starting CPU and interrupt setup" persisted on their physical hardware after
+the Codex boot-stall image two entries below was already flashed. Root cause:
+`smp::delay_10ms`'s port-0x80 fallback bounded one call to ~5 s, but re-ran
+the full "is the PIT there" probe on *every* call rather than remembering the
+answer -- AP bring-up calls it roughly a dozen times, so a dead PIT gate
+turned into tens of seconds of a static screen, not a true hang but
+indistinguishable from one. Also found: an AP that never answers SIPI hits
+`assert!(..., "AP startup timeout")`, a fatal panic that this kernel only
+ever writes to serial (never the on-screen console), and which fires before
+`livelog::start_deferred()` has even queued -- so on real hardware with no
+serial cable attached, that failure mode is a genuinely silent, undiagnosable
+freeze with nothing on screen and nothing reaching the stick's `WOVENLOG`.
+Fixed both in `kernel/src/smp.rs`: a cached `PIT_UNAVAILABLE` flag so only the
+first probe pays the ~5 s cost, and AP timeout now degrades to "continue
+without this CPU" (logged to serial) instead of halting the whole boot.
+`cargo clippy -p wovenhat-kernel --target x86_64-unknown-none` (default
+features), host `cargo clippy --all-targets -- -D warnings`, and
+`scripts/test-shell-qemu.py --hardware-demo` on 1/2/4 CPUs all passed, with
+`online=4 expected=4` and no AP-timeout/PIT-fallback lines on the 4-CPU
+serial log -- confirming zero behavior change under QEMU (its PIT always
+answers), so this only changes anything on hardware where the PIT or an AP
+actually misbehaves. See
+[docs/stage-status.md](stage-status.md#boot-stall-follow-up-cached-pit-unavailable-result-non-fatal-ap-timeout-2026-10-20)
+for the full writeup. Not yet re-validated on the reporting user's physical
+machine -- that's the next step, and it would help a lot to get the
+`WOVENLOG` `LOGS/BOOTnnnn.TXT` from a prior failed boot off that stick if
+still available, to confirm against ground truth rather than static analysis
+alone.
+
+**Codex boot-stall image refreshed (2026-10-20):** The guarded writer flashed
+the rebuilt image containing the bounded SMP/PIT fallback and boot sub-markers
+to the user-confirmed USB `USB2.0 Flash Disk USB Device`, serial
+`2007072809430484`, as PhysicalDrive1. The 13,697,024 image bytes read back
+with SHA-256
+`ac9f8058a0fdc8f64ea6f3547f1f4dbce4e963e75b1a457b22d0591f9151bfc3`; the
+remaining 488 MiB FAT32 `WOVENLOG` partition was recreated. Evidence:
+`audit-artifacts/hardware-demo-usb-write-20261020-boot-stall-fix.txt`.
+
+**Codex boot stall hardening (2026-10-20):** Normal boots now expose
+post-graphics sub-progress for CPU/AP startup, PS/2 probing, interrupt enable,
+and service-worker/async-I/O startup. SMP's PIT channel-2 settle delay now has
+a bounded port-0x80 fallback when firmware leaves the speaker gate unavailable,
+so a physical machine cannot spend the delay timeout on every SIPI. Target
+kernel check, host all-targets warning-denying Clippy, and hardware-demo QEMU
+acceptance passed on 1/2/4 CPUs. The direct feature Clippy command remains
+dependent on generated packaged-app environment variables and was run through
+the acceptance launcher instead.
+
+**Codex hardware-demo USB refresh (2026-10-20):** The updated 13,697,024-byte
+hardware-demo image, including the visible boot-loader progress markers, was
+written to the user-confirmed USB `USB2.0 Flash Disk USB Device`, serial
+`2007072809430484`. The guarded writer matched the raw device identity, wrote
+the image to PhysicalDrive1, read it back with matching SHA-256
+`da97e3399aa31f33dec19979d280c49bf224b792ac053e5f4a771f4e9a88a674`, and
+recreated the remaining 488 MiB FAT32 `WOVENLOG` partition. Evidence:
+`audit-artifacts/hardware-demo-usb-write-20261020-loader.txt`.
+
+**Codex boot-loader feedback (2026-10-20):** Normal boots now show visible
+`BOOT LOADER [n/7]` framebuffer progress after heap initialization, through
+graphics setup, workers, storage, system apps, devices, WovenShell startup,
+and desktop readiness. This addresses the apparent freeze after
+`KERNEL HEAP: CAPACITY/FRAGMENTATION OK`; the boot path and acceptance
+behavior are unchanged. Host `cargo clippy --all-targets -- -D warnings` and
+the hardware-demo QEMU shell gate passed on 1 CPU.
+
 **Claude Code: found and fixed the heap-crash known issue (2026-10-19
 entry below) -- and found a separate, pre-existing [S19.9] regression while
 verifying it (2026-10-20):**

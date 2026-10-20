@@ -1438,6 +1438,8 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         // registry blits onto, sized to the framebuffer. Deferred to here
         // because its allocation needs a mapped heap.
         compositor::init_for_display();
+        console.println("BOOT LOADER [1/7]: graphics surface ready");
+        console.println("BOOT: starting CPU and interrupt setup");
     } else {
         console.println("KERNEL HEAP: SELF TEST FAILED");
         halt();
@@ -1505,6 +1507,7 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         }
 
         smp::start(acpi.ok(), physical_memory_offset.unwrap());
+        console.println("BOOT: CPUs online; probing PS/2 mouse");
         // Interrupts are still off: the mouse's command responses must not be
         // taken by an IRQ handler.
         let mouse_present = mouse::init();
@@ -1517,6 +1520,7 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
             }
         }
         x86_64::instructions::interrupts::enable();
+        console.println("BOOT: interrupts enabled; starting service workers");
         #[cfg(feature = "physical-wifi")]
         physical_probe::run_ax201_activation(&mut console, acpi.as_ref().ok());
         if !block_io::start_worker() {
@@ -1534,6 +1538,7 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
             console.println("ASYNC NETWORK WORKER: START FAILED");
             halt();
         }
+        console.println("BOOT: service workers ready; checking async I/O");
         if !block_io::async_completion_self_test() {
             console.println("BLOCK I/O COMPLETION: FAILED");
             halt();
@@ -1542,6 +1547,7 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
             console.println("PAGER: START FAILED");
             halt();
         }
+        console.println("BOOT LOADER [2/7]: scheduler and I/O ready");
 
         let ata_sectors = ata::init();
         if let Some(sectors) = ata_sectors {
@@ -1575,6 +1581,7 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
                 "[FS] FAT32 mount failed; continuing with RAM VFS"
             )),
         }
+        console.println("BOOT LOADER [3/7]: storage checked");
 
         for dir in ["/etc", "/var", "/home", "/tmp"] {
             let _ = vfs::mkdir(dir);
@@ -1591,6 +1598,7 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
             serial::write_line(format_args!("[APPS] production catalog install failed"));
             halt();
         }
+        console.println("BOOT LOADER [4/7]: system files ready");
 
         match network::init() {
             Ok(()) => serial::write_line(format_args!(
@@ -1627,6 +1635,7 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         if let Ok(heads) = compositor::attach_gpu_outputs() {
             serial::write_line(format_args!("[DISPLAY] virtio-gpu: {} monitors", heads));
         }
+        console.println("BOOT LOADER [5/7]: devices ready");
         // Without an ATA disk, mount the first ready NVMe or AHCI disk.
         if !storage::mnt_mounted() {
             if let Some((root, name)) = drivers::storage_root(&driver_report) {
@@ -1648,6 +1657,7 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         // diagnostic console instead.
         #[cfg(feature = "system-apps")]
         {
+            console.println("BOOT LOADER [6/7]: starting WovenShell desktop");
             let accounts = vfs::stat("/etc/wovenhat/accounts")
                 .is_ok()
                 .then_some("/etc/wovenhat/accounts");
@@ -1658,6 +1668,7 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
                         pid
                     ));
                     console.println("DESKTOP SESSION: STARTED (F12 SWITCHES TO THIS CONSOLE)");
+                    console.println("BOOT LOADER [7/7]: desktop ready");
                 }
                 Err(error) => {
                     serial::write_line(format_args!("[SESSION] desktop not started: {:?}", error))

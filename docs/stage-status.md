@@ -1,5 +1,82 @@
 # Stage status
 
+## Boot-stall follow-up: cached PIT-unavailable result, non-fatal AP timeout (2026-10-20)
+
+The user reported that, even after the "Boot stall hardening" flash below, a
+real machine still appeared to hang (very slowly, not instantly) at "BOOT:
+starting CPU and interrupt setup". Root cause: the bounded port-0x80 fallback
+in `smp::delay_10ms` only bounded a *single* call to ~5 s before falling
+back -- it re-ran that whole ~5 s "is the PIT there" probe on *every* call,
+and AP bring-up calls it up to roughly a dozen times on `MAX_CPUS` hardware.
+On firmware where the PIT channel-2/speaker gate never responds, that is
+tens of seconds of a static screen with no progress indicator, which reads
+as a hang even though it was technically bounded.
+
+Fix in `kernel/src/smp.rs`: a `PIT_UNAVAILABLE` flag now caches the result
+after the first probe, so only that first `delay_10ms` call pays the ~5 s
+cost; every later call during AP bring-up goes straight to the fast
+port-0x80 fallback. Also hardened: an AP that never responds to SIPI no
+longer hits `assert!(..., "AP startup timeout")`, which is a fatal panic
+visible only on the (unconnected, on real hardware) serial port -- the
+on-screen console never shows panics, so this previously looked exactly
+like a permanent silent hang with zero way to diagnose it, and it happens
+before `livelog::start_deferred()` has even queued, so it would not reach
+the stick's `WOVENLOG` either. Boot now continues with whichever CPUs did
+come online (the BSP is always present) and logs the skipped APIC ID to
+serial instead.
+
+Validation: kernel target check and `cargo clippy -p wovenhat-kernel
+--target x86_64-unknown-none` (default features) passed; host `cargo clippy
+--all-targets -- -D warnings` passed; `scripts/test-shell-qemu.py
+--hardware-demo` passed on QEMU 1/2/4 CPUs with `online=4 expected=4` and no
+AP-timeout or PIT-fallback lines in the serial log (QEMU's PIT works, so
+neither new code path triggers there -- this is a no-op on the existing
+QEMU gates and only changes behavior on real hardware where the PIT/speaker
+gate or an AP is actually unavailable). Not yet re-validated on the
+reporting user's physical hardware; that is the next step.
+
+## Boot-stall fix flashed (2026-10-20)
+
+The rebuilt 13,697,024-byte hardware-demo image was written to the confirmed
+USB target `USB2.0 Flash Disk USB Device`, serial `2007072809430484`, and read
+back with matching SHA-256
+`ac9f8058a0fdc8f64ea6f3547f1f4dbce4e963e75b1a457b22d0591f9151bfc3`. The
+remaining 488 MiB FAT32 `WOVENLOG` partition was recreated. Evidence is in
+`audit-artifacts/hardware-demo-usb-write-20261020-boot-stall-fix.txt`.
+
+## Boot stall hardening (2026-10-20)
+
+Normal boot now shows sub-progress after the graphics marker while it brings
+up CPUs, probes PS/2, enables interrupts, and starts service workers. The SMP
+PIT channel-2 settle delay has a bounded port-0x80 fallback for firmware where
+the speaker gate does not signal after UEFI handoff. This prevents repeated
+SIPI delays from appearing as a multi-minute freeze on physical hardware.
+
+Validation: target kernel check passed; host `cargo clippy --all-targets --
+-D warnings` passed; and the hardware-demo shell gate passed on QEMU 1/2/4
+CPUs. The direct hardware-demo feature Clippy invocation cannot run without
+the generated packaged-app environment variables, so the packaged acceptance
+launcher supplied those inputs for the authoritative build.
+
+## Hardware-demo USB refreshed (2026-10-20)
+
+The user-confirmed USB `USB2.0 Flash Disk USB Device` (serial
+`2007072809430484`) now contains the updated hardware-demo image with visible
+boot-loader progress. The guarded writer verified the exact physical device,
+read back all 13,697,024 image bytes with matching SHA-256, and recreated the
+remaining 488 MiB FAT32 `WOVENLOG` partition. Evidence is preserved in
+`audit-artifacts/hardware-demo-usb-write-20261020-loader.txt`.
+
+## Boot loader progress feedback (2026-10-20)
+
+Normal interactive boots now print visible `BOOT LOADER [n/7]` progress on the
+framebuffer after heap setup. The markers cover graphics-surface creation,
+scheduler/I/O startup, storage probing, system-file installation, device
+startup, WovenShell launch, and desktop readiness. This makes the compositor
+allocation gap observable instead of leaving the framebuffer unchanged while
+the normal boot path continues. The change does not alter the diagnostic or
+QEMU self-test sequence.
+
 ## Heap-crash root cause fixed: fallible compositor surface allocation
 ## (2026-10-20)
 

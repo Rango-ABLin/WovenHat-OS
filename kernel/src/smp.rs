@@ -687,25 +687,57 @@ pub fn reschedule_ipi_count() -> u64 {
     RESCHEDULE_IPIS.load(Ordering::Relaxed)
 }
 // PIT channel 2 provides a hardware interval independent of IRQ enable state.
+// Some physical firmware leaves the speaker/PIT gate unavailable after UEFI
+// handoff. Keep the delay bounded there as well: AP startup must never turn a
+// missing legacy timer into a multi-second spin for every SIPI.
+//
+// Once unavailable, it stays unavailable for the rest of this boot: it is a
+// static firmware trait, not a transient glitch. AP bring-up calls this once
+// per INIT/SIPI step per AP (up to roughly a dozen times on `MAX_CPUS`
+// hardware), so re-running the full ~5 s "is the PIT there" probe on every
+// call turned a missing PIT into a boot that looked hung for tens of seconds
+// at "starting CPU and interrupt setup" even though it was bounded. Caching
+// the answer after the first call means only that first call pays the probe;
+// every later call goes straight to the fast port-0x80 fallback.
+static PIT_UNAVAILABLE: AtomicBool = AtomicBool::new(false);
 fn delay_10ms() {
     use x86_64::instructions::port::Port;
     unsafe {
-        let mut speaker = Port::<u8>::new(0x61);
-        let saved = speaker.read();
-        speaker.write(saved & !3);
-        Port::<u8>::new(0x43).write(0xb0);
-        Port::<u8>::new(0x42).write(11932u16 as u8);
-        Port::<u8>::new(0x42).write((11932u16 >> 8) as u8);
-        speaker.write((saved & !2) | 1);
-        let start = core::arch::x86_64::_rdtsc();
-        while speaker.read() & 0x20 == 0 {
-            assert!(
-                core::arch::x86_64::_rdtsc().wrapping_sub(start) < 5_000_000_000,
-                "PIT calibration timeout"
-            );
-            core::hint::spin_loop();
+        if !PIT_UNAVAILABLE.load(Ordering::Relaxed) {
+            let mut speaker = Port::<u8>::new(0x61);
+            let saved = speaker.read();
+            speaker.write(saved & !3);
+            Port::<u8>::new(0x43).write(0xb0);
+            Port::<u8>::new(0x42).write(11932u16 as u8);
+            Port::<u8>::new(0x42).write((11932u16 >> 8) as u8);
+            speaker.write((saved & !2) | 1);
+            let start = core::arch::x86_64::_rdtsc();
+            let mut pit_ready = false;
+            while speaker.read() & 0x20 == 0 {
+                if core::arch::x86_64::_rdtsc().wrapping_sub(start) >= 5_000_000_000 {
+                    break;
+                }
+                core::hint::spin_loop();
+            }
+            if speaker.read() & 0x20 != 0 {
+                pit_ready = true;
+            }
+            speaker.write(saved);
+            if pit_ready {
+                return;
+            }
+            PIT_UNAVAILABLE.store(true, Ordering::Relaxed);
+            serial::write_line(format_args!(
+                "[SMP] PIT channel-2 settle unavailable; using port-0x80 delay fallback for the remaining boot"
+            ));
         }
-        speaker.write(saved);
+        // Port 0x80 is the architectural legacy I/O delay port. Four reads
+        // are used elsewhere for a short device delay; repeat it enough
+        // times to retain an approximate 10 ms APIC settle delay without
+        // depending on the PIT speaker gate.
+        for _ in 0..2_500 {
+            asm!("out 0x80, al", in("al") 0u8, options(nomem, nostack));
+        }
     }
 }
 fn start_timer() {
@@ -911,8 +943,21 @@ pub fn start(topology: Option<crate::hal::acpi::Summary>, offset: u64) {
                     }
                     delay_10ms();
                 }
-                assert!(ONLINE[cpu].load(Ordering::Acquire), "AP startup timeout");
-                cpu += 1;
+                // A real machine's firmware/topology can promise an APIC ID
+                // that never answers SIPI (seen on some physical hardware,
+                // never reproduced in QEMU). Treat that the same way a
+                // missing topology is already treated above: boot with
+                // fewer CPUs rather than making one unresponsive AP a fatal,
+                // silent (serial-only) panic that strands the user before
+                // the live-log worker has even started. The BSP (cpu 0) is
+                // unaffected, and this slot is simply not counted.
+                if ONLINE[cpu].load(Ordering::Acquire) {
+                    cpu += 1;
+                } else {
+                    serial::write_line(format_args!(
+                        "[SMP] AP startup timeout apic_id={id} slot={cpu}; continuing without this CPU"
+                    ));
+                }
             }
             COUNT.store(cpu, Ordering::Release);
         }
