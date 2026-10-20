@@ -726,6 +726,13 @@ pub fn damage_self_test() -> bool {
         return false;
     };
     let _ = fill_rect(surface, Rect::new(0, 0, 10, 10), rgb(1, 1, 1));
+    // fill_rect itself now marks the whole surface damaged (so a client's
+    // draw actually reaches the compositor); drain that setup damage before
+    // testing this function's own mark_damage calls below, which is the
+    // only way to clear pending damage without a real client in the loop.
+    let _ = share(surface, Some(grantee));
+    let _ = take_damage_shared(surface, grantee);
+    let _ = share(surface, None);
     // Damage is clipped to the surface, unioned, and readable only through a
     // grant; taking it clears it.
     let ok_unshared = mark_damage(surface, Rect::new(8, 8, 5, 5)).is_ok()
