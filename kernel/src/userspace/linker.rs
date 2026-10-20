@@ -421,9 +421,13 @@ fn relocate(
             let addend = i64::from_le_bytes(entry[16..24].try_into().ok()?);
             let value = match info as u32 {
                 elf::R_X86_64_RELATIVE if info >> 32 == 0 => linked.image.load_bias(),
-                elf::R_X86_64_64 | elf::R_X86_64_GLOB_DAT | elf::R_X86_64_JUMP_SLOT => linked
-                    .image
-                    .relocation_symbol_value(&linked.bytes, (info >> 32) as usize, scope)?,
+                elf::R_X86_64_64 | elf::R_X86_64_GLOB_DAT | elf::R_X86_64_JUMP_SLOT => {
+                    linked.image.relocation_symbol_value(
+                        &linked.bytes,
+                        (info >> 32) as usize,
+                        scope,
+                    )?
+                }
                 _ => return None,
             };
             let value = if addend >= 0 {

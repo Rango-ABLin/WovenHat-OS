@@ -67,15 +67,11 @@ fn fixture(kind: usize) -> Option<Vec<u8>> {
     write_u32(&mut elf, 0x1280, 1)?;
     write_u32(&mut elf, 0x1284, 2)?;
     write_u32(&mut elf, 0x1218, 1)?;
-    elf[0x121c] = 0x12;
+    elf[0x121c] = if kind == 5 { 0x22 } else { 0x12 };
     write_u16(
         &mut elf,
         0x121e,
-        if kind == 5 {
-            2
-        } else {
-            u16::from(kind != 0 && kind != 3 && kind != 4)
-        },
+        u16::from(kind != 0 && kind != 3 && kind != 4 && kind != 5),
     )?;
     write_u64(
         &mut elf,
@@ -466,11 +462,6 @@ pub(super) fn run() -> bool {
             &mut weak_address,
         )
         .ok()?;
-        crate::serial::write_line(format_args!(
-            "[S11.5] weak value={:#x} expected={:#x}",
-            u64::from_le_bytes(weak_address),
-            LIBRARY_START + 0x20
-        ));
         if !step(
             "weak symbol runtime resolution",
             u64::from_le_bytes(weak_address) == LIBRARY_START + 0x20,
