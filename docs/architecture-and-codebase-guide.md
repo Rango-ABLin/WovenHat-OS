@@ -1241,6 +1241,15 @@ and 4 CPUs. The ABI is groundwork for moving WovenPackage ownership out of the
 kernel; a long-lived Ring-3 broker/client, service-specific message protocol,
 and physical hardware qualification remain open.
 
+Stage 22.2 adds the usable message path. Syscall 215 copies a bounded payload
+from userspace and calls the existing handle-addressed IPC send path; syscall
+216 receives one queued payload after validating the caller's endpoint rights,
+capacity, and output range. The receive ABI is deliberately nonblocking and
+returns the payload length, matching the established queue contract; a later
+service layer can build event-driven retry/wait behavior on the existing
+blocking kernel primitives. `libwoven` exposes both operations. The next
+boundary is a versioned WovenPackage service protocol and a real Ring-3 broker.
+
 The feature-gated `stage19-app-catalog-test` now exercises the install-plan
 boundary for all ten accepted packages together. It verifies each WAPP,
 rejects a mutation, installs and reads each package back through the VFS,

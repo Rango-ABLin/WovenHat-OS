@@ -395,6 +395,10 @@ pub enum Number {
     IpcServiceUnpublish = 213,
     /// name ptr, name length -> process-local client handle, or ERROR
     IpcServiceDiscover = 214,
+    /// endpoint handle, message ptr, message length -> 0
+    IpcMessageSend = 215,
+    /// endpoint handle, output buffer, capacity -> message length
+    IpcMessageReceive = 216,
 }
 
 pub fn entry_address() -> u64 {
@@ -875,6 +879,58 @@ fn sys_ipc_service_discover(user_name: u64, length: u64) -> u64 {
     };
     crate::ipc::discover_service(crate::task::current_process_id(), &name[..length])
         .map_or(SYSCALL_ERROR, |handle| u64::from(handle.as_u32()))
+}
+
+fn raw_ipc_handle(raw: u64) -> Option<crate::ipc::Handle> {
+    u32::try_from(raw)
+        .ok()
+        .map(crate::ipc::Handle::from_u32)
+}
+
+fn sys_ipc_message_send(raw_handle: u64, user_buffer: u64, length: u64) -> u64 {
+    if !crate::task::current_has(crate::capability::Capability::Ipc) {
+        return SYSCALL_ERROR;
+    }
+    let Some(handle) = raw_ipc_handle(raw_handle) else {
+        return SYSCALL_ERROR;
+    };
+    let Ok(length) = usize::try_from(length) else {
+        return SYSCALL_ERROR;
+    };
+    if length > crate::ipc::MAX_MESSAGE_SIZE {
+        return SYSCALL_ERROR;
+    }
+    let mut buffer = [0u8; crate::ipc::MAX_MESSAGE_SIZE];
+    if crate::paging::copy_from_current_user(user_buffer, &mut buffer[..length]).is_err() {
+        return SYSCALL_ERROR;
+    }
+    crate::ipc::send_handle(crate::task::current_process_id(), handle, &buffer[..length])
+        .map_or(SYSCALL_ERROR, |()| 0)
+}
+
+fn sys_ipc_message_receive(raw_handle: u64, user_buffer: u64, capacity: u64) -> u64 {
+    if !crate::task::current_has(crate::capability::Capability::Ipc) {
+        return SYSCALL_ERROR;
+    }
+    let Some(handle) = raw_ipc_handle(raw_handle) else {
+        return SYSCALL_ERROR;
+    };
+    let Ok(capacity) = usize::try_from(capacity) else {
+        return SYSCALL_ERROR;
+    };
+    if capacity > crate::ipc::MAX_MESSAGE_SIZE {
+        return SYSCALL_ERROR;
+    }
+    let message = match crate::ipc::receive_handle(crate::task::current_process_id(), handle) {
+        Ok(message) => message,
+        Err(_) => return SYSCALL_ERROR,
+    };
+    if message.payload().len() > capacity
+        || crate::paging::copy_to_current_user(user_buffer, message.payload()).is_err()
+    {
+        return SYSCALL_ERROR;
+    }
+    message.payload().len() as u64
 }
 
 fn sys_pipe() -> u64 {
@@ -2501,6 +2557,12 @@ pub extern "C" fn wovenhat_syscall_dispatch(
         }
         value if value == Number::IpcServiceDiscover as u64 => {
             sys_ipc_service_discover(arg0, arg1)
+        }
+        value if value == Number::IpcMessageSend as u64 => {
+            sys_ipc_message_send(arg0, arg1, arg2)
+        }
+        value if value == Number::IpcMessageReceive as u64 => {
+            sys_ipc_message_receive(arg0, arg1, arg2)
         }
         value if value == Number::Getuid as u64 => {
             IO_COMPLETIONS.fetch_or(IO_GETUID, Ordering::Release);

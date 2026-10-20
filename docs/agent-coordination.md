@@ -1,5 +1,14 @@
 # Agent coordination (Claude Code and Codex)
 
+**Codex: Stage 22.2 handle-addressed IPC transport (2026-10-20):** endpoint
+capabilities returned by service discovery are now usable from userspace via
+capability-gated nonblocking send/receive syscalls 215–216 and typed
+`libwoven` wrappers. The inherited handle queue probe passed on 1/2/4 CPUs;
+host tests and warning-denying Clippy also passed. Evidence is in the
+`audit-artifacts/stage21.22-*` directories. A concrete WovenPackage broker
+protocol and physical USB qualification remain open. No physical USB write
+was performed.
+
 **Codex: Stage 22.1 userspace service IPC ABI (2026-10-20):** the kernel now
 publishes endpoint creation plus capability-gated service publish, unpublish,
 and discovery syscalls (211–214), with bounded copied service names and typed

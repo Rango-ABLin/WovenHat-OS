@@ -1,5 +1,20 @@
 # Stage status
 
+## Stage 22.2 handle-addressed IPC transport (2026-10-20)
+
+Discovered service capabilities are now usable by Ring-3 callers. Syscall 215
+copies a bounded message and sends it to a caller-owned endpoint handle; syscall
+216 receives from a handle into a validated userspace buffer. Both require
+`Capability::Ipc`, preserve the nonblocking queue contract, and fail closed on
+invalid handles, oversized messages, missing rights, or copy faults.
+`libwoven` exposes typed send/receive wrappers. The Stage 22.2 QEMU gate passed
+on 1/2/4 CPUs; host tests and warning-denying host/freestanding Clippy passed.
+
+This closes the basic userspace transport needed by service clients. It does
+not yet define or implement the WovenPackage request protocol, a long-lived
+Ring-3 package broker, blocking service-call convenience APIs, or physical USB
+qualification.
+
 ## Stage 22.1 userspace service IPC ABI (2026-10-20)
 
 The IPC service registry now has a userspace ABI: syscall 211 creates an

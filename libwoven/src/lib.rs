@@ -11281,6 +11281,8 @@ pub mod syscall {
     pub const IPC_SERVICE_PUBLISH: u64 = 212;
     pub const IPC_SERVICE_UNPUBLISH: u64 = 213;
     pub const IPC_SERVICE_DISCOVER: u64 = 214;
+    pub const IPC_MESSAGE_SEND: u64 = 215;
+    pub const IPC_MESSAGE_RECEIVE: u64 = 216;
     pub const MESSAGE_SEND: u64 = 11;
     pub const MESSAGE_RECEIVE: u64 = 12;
 
@@ -11856,6 +11858,18 @@ pub mod syscall {
     pub unsafe fn ipc_service_discover(name: *const u8, name_len: usize) -> u64 {
         unsafe { invoke(IPC_SERVICE_DISCOVER, name as u64, name_len as u64, 0) }
     }
+
+    /// # Safety
+    /// `buffer` must be readable for `length` bytes.
+    pub unsafe fn ipc_message_send(endpoint: u64, buffer: *const u8, length: usize) -> u64 {
+        unsafe { invoke(IPC_MESSAGE_SEND, endpoint, buffer as u64, length as u64) }
+    }
+
+    /// # Safety
+    /// `buffer` must be writable for `capacity` bytes.
+    pub unsafe fn ipc_message_receive(endpoint: u64, buffer: *mut u8, capacity: usize) -> u64 {
+        unsafe { invoke(IPC_MESSAGE_RECEIVE, endpoint, buffer as u64, capacity as u64) }
+    }
 }
 
 /// Pack a colour into the kernel's `0x00RRGGBB` representation.
@@ -12277,6 +12291,17 @@ pub fn ipc_service_unpublish(name: &[u8]) -> Result<(), Error> {
 pub fn ipc_service_discover(name: &[u8]) -> Result<u64, Error> {
     // SAFETY: the pointer and length describe `name`.
     check(unsafe { syscall::ipc_service_discover(name.as_ptr(), name.len()) })
+}
+
+pub fn ipc_message_send(endpoint: u64, bytes: &[u8]) -> Result<(), Error> {
+    // SAFETY: the pointer and length describe `bytes`.
+    check(unsafe { syscall::ipc_message_send(endpoint, bytes.as_ptr(), bytes.len()) }).map(|_| ())
+}
+
+pub fn ipc_message_receive(endpoint: u64, buffer: &mut [u8]) -> Result<usize, Error> {
+    // SAFETY: the pointer and length describe writable `buffer` storage.
+    check(unsafe { syscall::ipc_message_receive(endpoint, buffer.as_mut_ptr(), buffer.len()) })
+        .map(|length| length as usize)
 }
 
 /// Take the compositor lease.

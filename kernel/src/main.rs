@@ -2799,7 +2799,8 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         not(feature = "stage21-9-test"),
         not(feature = "stage21-10-test"),
         not(feature = "stage21-11-test"),
-        not(feature = "stage22-1-test")
+        not(feature = "stage22-1-test"),
+        not(feature = "stage22-2-test")
     ))]
     match storage::live_mutation_self_test() {
         storage::LiveMutationTestStatus::Passed => {
@@ -4341,7 +4342,8 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         not(feature = "stage21-9-test"),
         not(feature = "stage21-10-test"),
         not(feature = "stage21-11-test"),
-        not(feature = "stage22-1-test")
+        not(feature = "stage22-1-test"),
+        not(feature = "stage22-2-test")
     ))]
     {
         if !wfs::stage15_2_self_test() {
@@ -4533,6 +4535,15 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
             qemu_test_exit_failure();
         }
         serial::write_line(format_args!("[S22.1] service IPC ABI: PASSED"));
+        qemu_test_exit_success();
+    }
+    #[cfg(feature = "stage22-2-test")]
+    {
+        if !ipc::stage8_2_runtime_probe() {
+            serial::write_line(format_args!("[S22.2] handle IPC ABI: FAILED"));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!("[S22.2] handle IPC ABI: PASSED"));
         qemu_test_exit_success();
     }
     #[cfg(feature = "stage27-2-test")]

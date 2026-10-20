@@ -187,6 +187,7 @@ stage21-9-test = ["qemu-test", "stage15-2-test"]
 stage21-10-test = ["qemu-test", "stage15-2-test"]
 stage21-11-test = ["qemu-test", "stage15-2-test"]
 stage22-1-test = ["qemu-test", "stage15-2-test"]
+stage22-2-test = ["qemu-test", "stage15-2-test"]
 stage1-5-test = ["qemu-test"]
 
 [dependencies]
