@@ -2239,6 +2239,19 @@ This is not yet a complete package manager: multi-package crash recovery,
 persistent update/removal transactions, package-service userspace IPC, and
 physical USB qualification remain open.
 
+## Stage 21.8 WovenPackage install-intent recovery (2026-10-20)
+
+The package service now persists a checksummed `WPKJ` prepared/committed intent
+around payload publication. Recovery reconciles the intent with the WSTC
+catalog and removes orphaned application/resource chunks from interrupted
+prepared installs. The disposable ATA QEMU recovery gate passed on 1/2/4 CPUs;
+host/freestanding warning-denying Clippy passed. Evidence is recorded in
+`docs/audit-stage21-8-package-recovery-2026-10-20.md`.
+
+Multi-package recovery, persistent update/removal transactions, full power-loss
+injection, userspace package-service IPC, and physical USB qualification remain
+open.
+
 ## Graphics track - bounded quadratic paths (2026-10-18)
 
 `Path::quadratic_to` now flattens quadratic Bézier segments into four

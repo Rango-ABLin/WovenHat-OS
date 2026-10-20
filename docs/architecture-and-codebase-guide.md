@@ -1200,6 +1200,14 @@ destroying the old payload first. Any chunk or catalog error removes chunks
 created by the attempt. The current service is a kernel-side acceptance
 boundary; long-lived userspace ownership and IPC are still separate work.
 
+Stage 21.8 adds `/wfs/packages/install.wpkj`, a fixed-size checksummed intent
+record. The service writes `Prepared` before payload chunks, writes the catalog,
+then marks the intent `Committed` and removes the journal. On startup or before
+another install, recovery removes prepared chunks unless a committed intent is
+already represented by the catalog at the same package version; it then clears
+the intent. This closes the tested orphan-cleanup window without claiming that
+multi-package or power-loss recovery across every catalog mutation is complete.
+
 The feature-gated `stage19-app-catalog-test` now exercises the install-plan
 boundary for all ten accepted packages together. It verifies each WAPP,
 rejects a mutation, installs and reads each package back through the VFS,

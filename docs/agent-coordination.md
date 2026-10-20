@@ -73,6 +73,14 @@ and preserved an unreachable earlier Stage 15.2 exit block; the feature guard
 was corrected before acceptance. Multi-package crash recovery, update/removal
 service IPC, and physical USB qualification remain open.
 
+**Codex: Stage 21.8 WovenPackage install-intent recovery (2026-10-20):**
+The package service now persists a checksummed `WPKJ` prepared/committed intent
+around payload publication. Recovery reconciles the intent with the catalog,
+removes orphaned chunks from interrupted prepared installs, and clears the
+journal before accepting another install. The recovery gate passed on 1/2/4
+CPUs with disposable ATA images. Multi-package recovery, update/removal
+transactions, service IPC, and physical USB qualification remain open.
+
 **Codex: bounded update A/B state and signed envelope increment (2026-10-20):**
 `kernel/src/update.rs` now stages only newer, bounded candidates in the
 inactive slot, verifies version-1 `WUPD` metadata/image coverage under the

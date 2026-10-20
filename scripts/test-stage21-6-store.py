@@ -10,7 +10,7 @@ from pathlib import Path
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--cpus", type=int, choices=(1, 2, 4), default=1)
-    parser.add_argument("--stage", type=int, choices=(6, 7), default=6)
+    parser.add_argument("--stage", type=int, choices=(6, 7, 8), default=6)
     parser.add_argument("--size-mib", type=int, default=16)
     parser.add_argument("--timeout", type=float, default=240)
     parser.add_argument(
@@ -59,7 +59,11 @@ def main() -> int:
     marker = (
         "[S21.6] WovenStore persistence: PASSED"
         if args.stage == 6
-        else "[S21.7] WovenPackage install: PASSED"
+        else (
+            "[S21.7] WovenPackage install: PASSED"
+            if args.stage == 7
+            else "[S21.8] WovenPackage recovery: PASSED"
+        )
     )
     if result != 33 or marker not in log:
         print(f"Stage 21.{args.stage} failed (exit {result}). Evidence: {out}", file=sys.stderr)
