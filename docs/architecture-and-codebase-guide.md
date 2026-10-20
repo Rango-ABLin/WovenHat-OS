@@ -1191,6 +1191,15 @@ stale VFS cache. The current probe persists only catalog metadata; application
 payload/resource publication and a long-lived WovenPackage service still need
 their own transaction and recovery design.
 
+Stage 21.7 adds the first payload publication path. `package_service::install`
+receives a package only after `package::verify`, derives the application
+digest, stages bounded chunks below `/wfs/packages/apps` and
+`/wfs/packages/resources`, then writes the WSTC catalog. Chunk names include
+package name and version, so an update can stage a new generation without
+destroying the old payload first. Any chunk or catalog error removes chunks
+created by the attempt. The current service is a kernel-side acceptance
+boundary; long-lived userspace ownership and IPC are still separate work.
+
 The feature-gated `stage19-app-catalog-test` now exercises the install-plan
 boundary for all ten accepted packages together. It verifies each WAPP,
 rejects a mutation, installs and reads each package back through the VFS,

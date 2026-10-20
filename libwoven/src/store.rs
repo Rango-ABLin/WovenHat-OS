@@ -228,6 +228,10 @@ impl Store {
         self.find(name).is_some()
     }
 
+    pub fn entry(&self, name: &[u8]) -> Option<Entry> {
+        self.find(name).and_then(|index| self.entries[index])
+    }
+
     pub fn transaction(&self) -> Transaction {
         Transaction {
             original: *self,

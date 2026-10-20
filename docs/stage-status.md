@@ -2226,6 +2226,19 @@ This does not yet publish package payload/resource files atomically with the
 catalog, recover interrupted install/update/remove transactions, or provide a
 long-lived service/IPC boundary. Physical USB qualification remains open.
 
+## Stage 21.7 authenticated WovenPackage payload publication (2026-10-20)
+
+The kernel package service now publishes authenticated WPKG application and
+resource payloads as bounded, versioned WovenFS chunks and commits the WSTC
+catalog only after the chunks are durable. A failed chunk/catalog write cleans
+up chunks created by that attempt. The disposable ATA QEMU gate passed on
+1/2/4 CPUs; host/freestanding warning-denying Clippy passed. Evidence is
+recorded in `docs/audit-stage21-7-package-publication-2026-10-20.md`.
+
+This is not yet a complete package manager: multi-package crash recovery,
+persistent update/removal transactions, package-service userspace IPC, and
+physical USB qualification remain open.
+
 ## Graphics track - bounded quadratic paths (2026-10-18)
 
 `Path::quadratic_to` now flattens quadratic Bézier segments into four

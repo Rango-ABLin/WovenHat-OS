@@ -63,6 +63,16 @@ exit blocks. Disposable ATA QEMU acceptance passed on 1/2/4 CPUs. Package
 payload publication, crash/power-loss recovery, service IPC, and physical USB
 qualification remain open. No physical USB write was performed.
 
+**Codex: Stage 21.7 authenticated WovenPackage payload publication
+(2026-10-20):** `kernel/src/package_service.rs` now accepts only an already
+authenticated WPKG, writes versioned application/resource chunks through the
+capability-gated native WovenFS writer, and commits the catalog record only
+after payload durability; failures remove chunks written by that attempt. A
+disposable ATA package-install gate passed on 1/2/4 CPUs. The first run exposed
+and preserved an unreachable earlier Stage 15.2 exit block; the feature guard
+was corrected before acceptance. Multi-package crash recovery, update/removal
+service IPC, and physical USB qualification remain open.
+
 **Codex: bounded update A/B state and signed envelope increment (2026-10-20):**
 `kernel/src/update.rs` now stages only newer, bounded candidates in the
 inactive slot, verifies version-1 `WUPD` metadata/image coverage under the
