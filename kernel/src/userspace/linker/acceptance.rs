@@ -8,7 +8,7 @@ const SEED: [u8; 32] = [
 ];
 
 fn fixture(kind: usize) -> Option<Vec<u8>> {
-    let base = if kind == 0 || kind == 3 {
+    let base = if kind == 0 || kind == 3 || kind == 4 {
         USER_REGION_START
     } else {
         0
@@ -46,10 +46,12 @@ fn fixture(kind: usize) -> Option<Vec<u8>> {
     ];
     if kind == 3 {
         tags.extend([(17, base + 0x380), (18, 16), (19, 16)]);
+    } else if kind == 4 {
+        tags.extend([(2, 16), (20, 17), (23, base + 0x380)]);
     } else {
         tags.extend([(7, base + 0x380), (8, 24), (9, 24)]);
     }
-    if kind == 0 || kind == 3 {
+    if kind == 0 || kind == 3 || kind == 4 {
         tags.push((1, 8));
     } else {
         tags.push((14, if kind == 1 { 8 } else { 17 }));
@@ -66,29 +68,29 @@ fn fixture(kind: usize) -> Option<Vec<u8>> {
     write_u32(&mut elf, 0x1284, 2)?;
     write_u32(&mut elf, 0x1218, 1)?;
     elf[0x121c] = 0x12;
-    write_u16(&mut elf, 0x121e, u16::from(kind != 0 && kind != 3))?;
+    write_u16(&mut elf, 0x121e, u16::from(kind != 0 && kind != 3 && kind != 4))?;
     write_u64(
         &mut elf,
         0x1220,
-        if kind == 0 || kind == 3 { 0 } else { 0x20 },
+        if kind == 0 || kind == 3 || kind == 4 { 0 } else { 0x20 },
     )?;
     write_u64(&mut elf, 0x1228, 6)?;
     write_u64(&mut elf, 0x1380, base + 0x1000)?;
     write_u64(
         &mut elf,
         0x1388,
-        if kind == 0 || kind == 3 {
+        if kind == 0 || kind == 3 || kind == 4 {
             (1_u64 << 32) | 1
         } else {
             8
         },
     )?;
-    if kind == 3 {
+    if kind == 3 || kind == 4 {
         write_u64(&mut elf, 0x1390, 0)?;
     } else {
         write_u64(&mut elf, 0x1390, if kind == 0 { 0 } else { 0x20 })?;
     }
-    if kind == 0 || kind == 3 {
+    if kind == 0 || kind == 3 || kind == 4 {
         // movabs rax, GOT; call [rax]; exit(rax). The call crosses images in
         // Ring 3; no kernel shortcut invokes the library implementation.
         let code = [
@@ -219,6 +221,9 @@ pub(super) fn run() -> bool {
         return false;
     };
     let Some(rel_main) = fixture(3) else {
+        return false;
+    };
+    let Some(plt_rel_main) = fixture(4) else {
         return false;
     };
     if crate::vfs::stat("/lib/scope.so").is_ok() || crate::vfs::stat("/lib/base.so").is_ok() {
@@ -399,6 +404,38 @@ pub(super) fn run() -> bool {
         if !step(
             "DT_REL Ring-3 execution and teardown",
             crate::task::wait_process(rel_pid.as_u64()) == Ok(42),
+        ) {
+            return None;
+        }
+        let Some(plt_rel_program) = load(&plt_rel_main, &["plt-rel-test"]) else {
+            step("DT_JMPREL DT_REL runtime relocation", false);
+            return None;
+        };
+        let mut plt_rel_address = [0; 8];
+        paging::read_user_bytes_in(
+            plt_rel_program.address_space.paging,
+            USER_REGION_START + 0x1000,
+            &mut plt_rel_address,
+        )
+        .ok()?;
+        if !step(
+            "DT_JMPREL DT_REL runtime relocation",
+            u64::from_le_bytes(plt_rel_address) == LIBRARY_START + 0x20,
+        ) {
+            let _ = destroy(plt_rel_program.address_space);
+            return None;
+        }
+        let (plt_rel_pid, _) = crate::task::spawn_user_process("plt-rel-test", plt_rel_program).ok()?;
+        let plt_rel_start = crate::timer::ticks();
+        while !crate::task::process_exited(plt_rel_pid) {
+            if crate::timer::ticks().wrapping_sub(plt_rel_start) > 500 {
+                return None;
+            }
+            crate::task::yield_now();
+        }
+        if !step(
+            "DT_JMPREL DT_REL Ring-3 execution and teardown",
+            crate::task::wait_process(plt_rel_pid.as_u64()) == Ok(42),
         ) {
             return None;
         }

@@ -726,7 +726,9 @@ fn parse_image(bytes: &[u8], shared: bool) -> Result<Image, Error> {
                 }
             }
             if rela_size == 0 {
-                if rela_address.is_some() || (rela_entry_size != 0 && plt_rela_size == 0) {
+                if rela_address.is_some()
+                    || (rela_entry_size != 0 && plt_rela_size == 0 && plt_rel_size == 0)
+                {
                     return Err(Error::InvalidSegment);
                 }
             } else {
