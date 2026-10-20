@@ -17,6 +17,7 @@ pub const R_X86_64_64: u32 = 1;
 pub const R_X86_64_GLOB_DAT: u32 = 6;
 pub const R_X86_64_JUMP_SLOT: u32 = 7;
 const RELA_ENTRY_SIZE: usize = 24;
+const REL_ENTRY_SIZE: usize = 16;
 const MAX_RELATIVE_RELOCATIONS: usize = 4096;
 const MAX_DYNAMIC_SYMBOLS: usize = 4096;
 const MAX_DYNAMIC_STRING_TABLE: usize = 64 * 1024;
@@ -57,6 +58,10 @@ pub struct DynamicImage {
     pub rela_file_offset: usize,
     pub rela_size: usize,
     pub rela_entry_size: usize,
+    pub rel_address: u64,
+    pub rel_file_offset: usize,
+    pub rel_size: usize,
+    pub rel_entry_size: usize,
     pub plt_rela_address: u64,
     pub plt_rela_file_offset: usize,
     pub plt_rela_size: usize,
@@ -550,6 +555,9 @@ fn parse_image(bytes: &[u8], shared: bool) -> Result<Image, Error> {
             let mut rela_address = None;
             let mut rela_size = 0usize;
             let mut rela_entry_size = 0usize;
+            let mut rel_address = None;
+            let mut rel_size = 0usize;
+            let mut rel_entry_size = 0usize;
             let mut plt_rela_size = 0usize;
             let mut plt_rela_address = None;
             let mut plt_rela_kind = None;
@@ -598,7 +606,7 @@ fn parse_image(bytes: &[u8], shared: bool) -> Result<Image, Error> {
                         }
                         debug_seen = true;
                     }
-                    15 | 16 | 17 | 18 | 19 | 22 | 29 => {
+                    15 | 16 | 22 | 29 => {
                         // Dependencies, symbol-based relocation tables, and
                         // text-relocation requests need a dynamic linker or
                         // shared-library authority that the kernel does not
@@ -616,6 +624,16 @@ fn parse_image(bytes: &[u8], shared: bool) -> Result<Image, Error> {
                     8 => rela_size = usize::try_from(value).map_err(|_| Error::InvalidSegment)?,
                     9 => {
                         rela_entry_size =
+                            usize::try_from(value).map_err(|_| Error::InvalidSegment)?;
+                    }
+                    17 => {
+                        if rel_address.replace(value).is_some() {
+                            return Err(Error::InvalidSegment);
+                        }
+                    }
+                    18 => rel_size = usize::try_from(value).map_err(|_| Error::InvalidSegment)?,
+                    19 => {
+                        rel_entry_size =
                             usize::try_from(value).map_err(|_| Error::InvalidSegment)?;
                     }
                     10 => {
@@ -681,6 +699,10 @@ fn parse_image(bytes: &[u8], shared: bool) -> Result<Image, Error> {
                     rela_file_offset: 0,
                     rela_size,
                     rela_entry_size,
+                    rel_address: rel_address.unwrap_or(0),
+                    rel_file_offset: 0,
+                    rel_size,
+                    rel_entry_size,
                     plt_rela_address: plt_rela_address.unwrap_or(0),
                     plt_rela_file_offset: 0,
                     plt_rela_size,
@@ -701,6 +723,17 @@ fn parse_image(bytes: &[u8], shared: bool) -> Result<Image, Error> {
                 // bytes after all PT_LOAD headers have been collected.
                 let _ = (rela_address, virtual_address);
             }
+            if rel_size == 0 {
+                if rel_address.is_some() || rel_entry_size != 0 {
+                    return Err(Error::InvalidSegment);
+                }
+            } else if rel_address.is_none()
+                || rel_entry_size != REL_ENTRY_SIZE
+                || !rel_size.is_multiple_of(rel_entry_size)
+                || rel_size / rel_entry_size > MAX_RELATIVE_RELOCATIONS
+            {
+                return Err(Error::InvalidSegment);
+            }
             if image.dynamic.is_none() {
                 image.dynamic = Some(DynamicImage {
                     dynamic_address: virtual_address,
@@ -709,6 +742,10 @@ fn parse_image(bytes: &[u8], shared: bool) -> Result<Image, Error> {
                     rela_file_offset: 0,
                     rela_size: 0,
                     rela_entry_size: 0,
+                    rel_address: rel_address.unwrap_or(0),
+                    rel_file_offset: 0,
+                    rel_size,
+                    rel_entry_size,
                     plt_rela_address: plt_rela_address.unwrap_or(0),
                     plt_rela_file_offset: 0,
                     plt_rela_size,
@@ -973,6 +1010,62 @@ fn parse_image(bytes: &[u8], shared: bool) -> Result<Image, Error> {
             let (rela_entries, _) =
                 bytes[dynamic.plt_rela_file_offset..rela_end].as_chunks::<RELA_ENTRY_SIZE>();
             for entry in rela_entries {
+                let target = u64::from_le_bytes(entry[..8].try_into().unwrap());
+                let info = u64::from_le_bytes(entry[8..16].try_into().unwrap());
+                let relocation_type = info as u32;
+                let symbol = info >> 32;
+                if !matches!(
+                    relocation_type,
+                    R_X86_64_RELATIVE | R_X86_64_64 | R_X86_64_GLOB_DAT | R_X86_64_JUMP_SLOT
+                ) {
+                    return Err(Error::Unsupported);
+                }
+                if relocation_type == R_X86_64_RELATIVE && symbol != 0 {
+                    return Err(Error::InvalidSegment);
+                }
+                if relocation_type != R_X86_64_RELATIVE && symbol == 0 {
+                    return Err(Error::InvalidSegment);
+                }
+                let target_end = target.checked_add(8).ok_or(Error::InvalidSegment)?;
+                let writable_target = image.segments().any(|segment| {
+                    let end = segment
+                        .virtual_address
+                        .saturating_add(segment.memory_size as u64);
+                    segment.writable
+                        && !segment.executable
+                        && segment.virtual_address <= target
+                        && target_end <= end
+                });
+                if !writable_target {
+                    return Err(Error::InvalidSegment);
+                }
+            }
+        }
+        if dynamic.rel_size != 0 {
+            let rel_end = dynamic
+                .rel_address
+                .checked_add(dynamic.rel_size as u64)
+                .ok_or(Error::InvalidSegment)?;
+            let Some(segment) = image.segments().find(|segment| {
+                let segment_file_end = segment
+                    .virtual_address
+                    .saturating_add(segment.file_size as u64);
+                segment.virtual_address <= dynamic.rel_address && rel_end <= segment_file_end
+            }) else {
+                return Err(Error::InvalidSegment);
+            };
+            dynamic.rel_file_offset = segment
+                .file_offset
+                .checked_add((dynamic.rel_address - segment.virtual_address) as usize)
+                .ok_or(Error::InvalidSegment)?;
+            let rel_end = dynamic
+                .rel_file_offset
+                .checked_add(dynamic.rel_size)
+                .filter(|end| *end <= bytes.len())
+                .ok_or(Error::Truncated)?;
+            let (rel_entries, _) =
+                bytes[dynamic.rel_file_offset..rel_end].as_chunks::<REL_ENTRY_SIZE>();
+            for entry in rel_entries {
                 let target = u64::from_le_bytes(entry[..8].try_into().unwrap());
                 let info = u64::from_le_bytes(entry[8..16].try_into().unwrap());
                 let relocation_type = info as u32;

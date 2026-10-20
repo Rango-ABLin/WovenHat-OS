@@ -1500,8 +1500,11 @@ The process owns all mappings; an unpublished `Pending` guard rolls back all
 failures, including argv setup. Compact page-range metadata retains forty
 mapping slots within the existing fork stack budget. Root destruction walks
 every empty private user-table branch and refuses copied kernel branches.
-Legacy `DT_REL` tables, versioned/weak symbols, constructors/destructors, lazy
-binding and library TLS remain unsupported. `DT_JMPREL` is now accepted only
+`DT_REL` tables are now accepted as a separate bounded eager path: the loader
+validates `DT_RELSZ`/`DT_RELENT`, reads the signed addend from the already
+mapped relocation target and applies it before W^X/RELRO. PLT REL, versioned/
+weak symbols, constructors/destructors, lazy binding and library TLS remain
+unsupported. `DT_JMPREL` is accepted only
 as a bounded file-backed RELA table and is applied eagerly before W^X/RELRO;
 see `audit-stage11-plt-rela-2026-10-20.md` and the shared-library audit for
 validation and remaining limits.

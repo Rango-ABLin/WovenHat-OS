@@ -1,5 +1,20 @@
 # Stage status
 
+## Stage 11 bounded DT_REL loader support (2026-10-20)
+
+The ELF loader now validates and applies ordinary `DT_REL` tables with
+`DT_RELSZ` and `DT_RELENT == 16`. REL addends are read only from the mapped
+private relocation target, interpreted as signed 64-bit values, and applied
+under the same relocation-type, symbol, bounds and writable/non-executable
+checks as RELA. Malformed tables and read-only targets fail closed.
+
+Validation: 27 ELF tests, kernel check, warning-denying freestanding and host
+Clippy, and inherited Stage 11.5 QEMU acceptance on 1/2/4 CPUs passed. The
+QEMU fixture remains RELA-based; REL-specific coverage is parser-backed host
+coverage, so a dedicated runtime REL fixture remains an explicit follow-up.
+PLT REL, symbol versioning/weak binding, constructors/destructors, lazy
+binding and library TLS remain open.
+
 ## Stage 11 eager PLT RELA relocation support (2026-10-20)
 
 The ELF parser and production graph loader now support bounded `DT_JMPREL`

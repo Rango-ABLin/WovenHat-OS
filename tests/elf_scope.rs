@@ -190,6 +190,55 @@ fn plt_fixture() -> Vec<u8> {
     bytes
 }
 
+fn rel_fixture() -> Vec<u8> {
+    let mut bytes = plt_fixture();
+    put64(&mut bytes, 152, 9 * 16);
+    put64(&mut bytes, 160, 9 * 16);
+    put64(&mut bytes, DYNAMIC + 5 * 16, 17); // DT_REL
+    put64(&mut bytes, DYNAMIC + 5 * 16 + 8, BASE + 0x1000);
+    put64(&mut bytes, DYNAMIC + 6 * 16, 18); // DT_RELSZ
+    put64(&mut bytes, DYNAMIC + 6 * 16 + 8, 16);
+    put64(&mut bytes, DYNAMIC + 7 * 16, 19); // DT_RELENT
+    put64(&mut bytes, DYNAMIC + 7 * 16 + 8, 16);
+    put64(&mut bytes, DYNAMIC + 8 * 16, 0);
+    put64(&mut bytes, DYNAMIC + 8 * 16 + 8, 0);
+    put64(&mut bytes, 0x2000, BASE + 0x1020);
+    put64(
+        &mut bytes,
+        0x2008,
+        (1_u64 << 32) | elf::R_X86_64_JUMP_SLOT as u64,
+    );
+    put64(&mut bytes, 0x2020, 0x10);
+    bytes
+}
+
+#[test]
+fn eager_rel_metadata_is_bounded_and_file_backed() {
+    let bytes = rel_fixture();
+    let parsed = image(&bytes);
+    let dynamic = parsed.dynamic().expect("dynamic metadata");
+    assert_eq!(dynamic.rel_size, 16);
+    assert_eq!(dynamic.rel_entry_size, 16);
+    assert_eq!(dynamic.rel_file_offset, 0x2000);
+}
+
+#[test]
+fn rel_rejects_wrong_entry_size_and_read_only_targets() {
+    let mut wrong_entry_size = rel_fixture();
+    put64(&mut wrong_entry_size, DYNAMIC + 7 * 16 + 8, 24);
+    assert!(matches!(
+        elf::parse(&wrong_entry_size),
+        Err(elf::Error::InvalidSegment)
+    ));
+
+    let mut read_only_target = rel_fixture();
+    put64(&mut read_only_target, 0x2000, BASE + 0x20);
+    assert!(matches!(
+        elf::parse(&read_only_target),
+        Err(elf::Error::InvalidSegment)
+    ));
+}
+
 #[test]
 fn eager_plt_rela_metadata_is_bounded_and_file_backed() {
     let bytes = plt_fixture();

@@ -2431,6 +2431,16 @@ and a retained report before it can close a production gap.
 
 ## Codex: owned work
 
+**Bounded DT_REL increment (2026-10-20):** ordinary `DT_REL` tables now have
+checked parser metadata, file-backed target validation and eager loader
+application using the signed addend read from the mapped private target. The
+27 ELF tests, kernel check, warning-denying Clippy and inherited Stage 11.5
+1/2/4-CPU QEMU gates passed. Audit:
+`docs/audit-stage11-rel-2026-10-20.md`. The current QEMU fixture is still
+RELA-based; a dedicated runtime REL fixture remains open, along with PLT REL,
+symbol versioning/weak binding, constructors/destructors, lazy binding and
+library TLS.
+
 **Eager PLT RELA increment (2026-10-20):** `elf.rs` and the graph loader now
 accept and eagerly apply bounded file-backed `DT_JMPREL` RELA entries,
 including `R_X86_64_JUMP_SLOT`, with writable-target and fail-closed metadata
