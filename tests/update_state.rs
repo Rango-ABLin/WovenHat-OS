@@ -1,7 +1,7 @@
 #[path = "../kernel/src/update.rs"]
 mod update;
 
-use update::{BootDecision, Error, SlotState, UpdateState};
+use update::{BootDecision, Error, SlotState, UpdateState, UPDATE_RECORD_LEN};
 
 #[test]
 fn candidate_activation_is_a_bounded_ab_transaction() {
@@ -38,4 +38,22 @@ fn malformed_candidates_never_enter_a_slot() {
     assert_eq!(state.stage_candidate(2, 0, [2; 32]), Err(Error::InvalidImage));
     assert_eq!(state.stage_candidate(2, 1, [0; 32]), Err(Error::InvalidImage));
     assert_eq!(state.slot(1).unwrap().state, SlotState::Empty);
+}
+
+#[test]
+fn durable_record_round_trip_and_checksum_rejection() {
+    let mut state = UpdateState::new(10, 128, [1; 32]).unwrap();
+    let slot = state.stage_candidate(11, 256, [2; 32]).unwrap();
+    state.activate_candidate(slot).unwrap();
+    let mut record = [0u8; UPDATE_RECORD_LEN];
+    state.encode_record(41, &mut record).unwrap();
+    let (sequence, restored) = UpdateState::decode_record(&record).unwrap();
+    assert_eq!(sequence, 41);
+    assert_eq!(restored.active_slot(), state.active_slot());
+    assert_eq!(restored.pending_slot(), state.pending_slot());
+    record[18] ^= 1;
+    assert_eq!(
+        UpdateState::decode_record(&record),
+        Err(Error::RecordChecksumMismatch)
+    );
 }

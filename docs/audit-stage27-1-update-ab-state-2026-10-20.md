@@ -22,6 +22,12 @@ metadata tamper self-test changes the signed generation and is rejected. The
 privileged update service must still persist each state record atomically on
 WovenFS; this increment does not claim that service integration.
 
+The state object also has a fixed-size `WUAB` record codec. It serializes the
+two slots, active/pending selectors, and a monotonic record sequence with a
+CRC-32. Decode rejects wrong magic/version/length, invalid slot invariants,
+invalid attempts, and checksum failures. This is the record boundary for a
+future service-owned dual-copy commit; it does not itself perform device I/O.
+
 ## Validation
 
 - `cargo test --workspace` passed, including `tests/update_state.rs`.
@@ -31,6 +37,9 @@ WovenFS; this increment does not claim that service integration.
   - `audit-artifacts/stage27.1-1cpu-1792512141099830700`
   - `audit-artifacts/stage27.1-2cpu-1792512158205516300`
   - `audit-artifacts/stage27.1-4cpu-1792512173673074900`
+  - `audit-artifacts/stage27.1-1cpu-1792512350452245500`
+  - `audit-artifacts/stage27.1-2cpu-1792512351912529200`
+  - `audit-artifacts/stage27.1-4cpu-1792512368502642400`
 
 An earlier signed-envelope run failed its signature assertion; the recorded
 diagnostic evidence was retained, the test trust seed was corrected to match

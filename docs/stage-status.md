@@ -6370,6 +6370,9 @@ dedicated QEMU acceptance passed on 1/2/4 CPUs. Evidence is in
 
 This does not yet implement privileged service ownership, durable A/B records,
 power-loss recovery, or installation.
+The fixed-size `WUAB` snapshot codec and checksum validation are now present,
+but the service-owned dual-copy WovenFS commit and power-loss acceptance are
+still open.
 
 # Stage 15 native WovenFS VFS lifecycle (2026-10-20)
 

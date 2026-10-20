@@ -1165,6 +1165,9 @@ the immutable manifest and image digest under a domain-separated Ed25519
 signature before admission. Service ownership, durable WovenFS records,
 power-loss recovery, installer integration, and physical qualification remain
 required.
+The state object also exposes a fixed-size `WUAB` record codec with a sequence
+and CRC-32. It rejects malformed or inconsistent snapshots and is intended for
+dual-copy service commits; it does not perform storage I/O itself.
 
 
 The repository release chain passed on the current tree, including warning-

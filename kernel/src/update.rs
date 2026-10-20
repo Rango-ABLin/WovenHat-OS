@@ -10,6 +10,12 @@
 pub const SLOT_COUNT: usize = 2;
 pub const MAX_IMAGE_BYTES: u64 = 64 * 1024 * 1024;
 pub const MAX_BOOT_ATTEMPTS: u8 = 3;
+pub const UPDATE_RECORD_MAGIC: [u8; 4] = *b"WUAB";
+pub const UPDATE_RECORD_VERSION: u16 = 1;
+const UPDATE_RECORD_HEADER_LEN: usize = 18;
+const UPDATE_SLOT_RECORD_LEN: usize = 50;
+pub const UPDATE_RECORD_LEN: usize =
+    UPDATE_RECORD_HEADER_LEN + SLOT_COUNT * UPDATE_SLOT_RECORD_LEN + 4;
 
 #[cfg(not(test))]
 pub const UPDATE_PACKAGE_MAGIC: [u8; 4] = *b"WUPD";
@@ -64,6 +70,9 @@ pub enum Error {
     DigestMismatch,
     #[cfg(not(test))]
     InvalidSignature,
+    MalformedRecord,
+    RecordChecksumMismatch,
+    InvalidRecord,
 }
 
 #[cfg(not(test))]
@@ -142,7 +151,7 @@ pub enum BootDecision {
     RolledBack(usize),
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct UpdateState {
     slots: [SlotMetadata; SLOT_COUNT],
     active: usize,
@@ -185,6 +194,113 @@ impl UpdateState {
             Some(self.slots[index])
         } else {
             None
+        }
+    }
+
+    /// Encode one complete state snapshot for an atomic durable record.
+    ///
+    /// The caller must commit the whole record through the storage service and
+    /// use a monotonically increasing sequence. The CRC protects selection of
+    /// a torn/corrupt copy; it is not an authenticity boundary.
+    pub fn encode_record(
+        &self,
+        sequence: u64,
+        out: &mut [u8; UPDATE_RECORD_LEN],
+    ) -> Result<(), Error> {
+        if sequence == 0 || !self.is_valid() {
+            return Err(Error::InvalidRecord);
+        }
+        out.fill(0);
+        out[..4].copy_from_slice(&UPDATE_RECORD_MAGIC);
+        out[4..6].copy_from_slice(&UPDATE_RECORD_VERSION.to_le_bytes());
+        out[6..8].copy_from_slice(&(UPDATE_RECORD_LEN as u16).to_le_bytes());
+        out[8..16].copy_from_slice(&sequence.to_le_bytes());
+        out[16] = self.active as u8;
+        out[17] = self.pending.map_or(0xff, |slot| slot as u8);
+        let mut offset = UPDATE_RECORD_HEADER_LEN;
+        for slot in self.slots {
+            out[offset..offset + 8].copy_from_slice(&slot.generation.to_le_bytes());
+            out[offset + 8..offset + 16].copy_from_slice(&slot.image_length.to_le_bytes());
+            out[offset + 16..offset + 48].copy_from_slice(&slot.digest);
+            out[offset + 48] = slot.state as u8;
+            out[offset + 49] = slot.boot_attempts;
+            offset += UPDATE_SLOT_RECORD_LEN;
+        }
+        let checksum = crc32(&out[..UPDATE_RECORD_LEN - 4]);
+        out[UPDATE_RECORD_LEN - 4..].copy_from_slice(&checksum.to_le_bytes());
+        Ok(())
+    }
+
+    /// Decode a complete state snapshot. The returned sequence is selected by
+    /// the storage service only after comparing it with the alternate record.
+    pub fn decode_record(bytes: &[u8]) -> Result<(u64, Self), Error> {
+        if bytes.len() != UPDATE_RECORD_LEN
+            || bytes[..4] != UPDATE_RECORD_MAGIC
+            || u16::from_le_bytes([bytes[4], bytes[5]]) != UPDATE_RECORD_VERSION
+            || usize::from(u16::from_le_bytes([bytes[6], bytes[7]])) != UPDATE_RECORD_LEN
+        {
+            return Err(Error::MalformedRecord);
+        }
+        let expected = u32::from_le_bytes(bytes[UPDATE_RECORD_LEN - 4..].try_into().unwrap());
+        if crc32(&bytes[..UPDATE_RECORD_LEN - 4]) != expected {
+            return Err(Error::RecordChecksumMismatch);
+        }
+        let sequence = u64::from_le_bytes(bytes[8..16].try_into().unwrap());
+        if sequence == 0 || bytes[16] as usize >= SLOT_COUNT {
+            return Err(Error::InvalidRecord);
+        }
+        let pending = match bytes[17] {
+            0xff => None,
+            value if (value as usize) < SLOT_COUNT => Some(value as usize),
+            _ => return Err(Error::InvalidRecord),
+        };
+        let mut slots = [SlotMetadata::EMPTY; SLOT_COUNT];
+        let mut offset = UPDATE_RECORD_HEADER_LEN;
+        for slot in &mut slots {
+            slot.generation = u64::from_le_bytes(bytes[offset..offset + 8].try_into().unwrap());
+            slot.image_length =
+                u64::from_le_bytes(bytes[offset + 8..offset + 16].try_into().unwrap());
+            slot.digest.copy_from_slice(&bytes[offset + 16..offset + 48]);
+            slot.state = match bytes[offset + 48] {
+                0 => SlotState::Empty,
+                1 => SlotState::Ready,
+                2 => SlotState::Active,
+                3 => SlotState::Staged,
+                4 => SlotState::Pending,
+                5 => SlotState::Bad,
+                _ => return Err(Error::InvalidRecord),
+            };
+            slot.boot_attempts = bytes[offset + 49];
+            offset += UPDATE_SLOT_RECORD_LEN;
+        }
+        let state = Self {
+            slots,
+            active: bytes[16] as usize,
+            pending,
+        };
+        if !state.is_valid() {
+            return Err(Error::InvalidRecord);
+        }
+        Ok((sequence, state))
+    }
+
+    fn is_valid(&self) -> bool {
+        if self.active >= SLOT_COUNT
+            || self.slots[self.active].state != SlotState::Active
+            || self.slots.iter().filter(|slot| slot.state == SlotState::Active).count() != 1
+        {
+            return false;
+        }
+        for slot in self.slots {
+            if slot.boot_attempts > MAX_BOOT_ATTEMPTS
+                || (slot.state != SlotState::Empty && !valid_image(slot.image_length, &slot.digest))
+            {
+                return false;
+            }
+        }
+        match self.pending {
+            Some(slot) => slot != self.active && self.slots[slot].state == SlotState::Pending,
+            None => !self.slots.iter().any(|slot| slot.state == SlotState::Pending),
         }
     }
 
@@ -296,6 +412,25 @@ const fn valid_image(image_length: u64, digest: &[u8; 32]) -> bool {
     false
 }
 
+const fn crc32(bytes: &[u8]) -> u32 {
+    let mut crc = u32::MAX;
+    let mut index = 0;
+    while index < bytes.len() {
+        crc ^= bytes[index] as u32;
+        let mut bit = 0;
+        while bit < 8 {
+            crc = if crc & 1 != 0 {
+                (crc >> 1) ^ 0xedb8_8320
+            } else {
+                crc >> 1
+            };
+            bit += 1;
+        }
+        index += 1;
+    }
+    !crc
+}
+
 #[cfg(feature = "qemu-test")]
 pub fn self_test() -> bool {
     let digest_a = [1; 32];
@@ -331,6 +466,21 @@ pub fn self_test() -> bool {
         && state.slot(slot).is_some_and(|entry| entry.state == SlotState::Active)
         && state.slot(0).is_some_and(|entry| entry.state == SlotState::Ready);
     if !state_ok {
+        return false;
+    }
+
+    let mut record = [0u8; UPDATE_RECORD_LEN];
+    let Ok(()) = state.encode_record(7, &mut record) else {
+        return false;
+    };
+    let Ok((sequence, restored)) = UpdateState::decode_record(&record) else {
+        return false;
+    };
+    if sequence != 7 || restored.active_slot() != state.active_slot() {
+        return false;
+    }
+    record[UPDATE_RECORD_HEADER_LEN] ^= 1;
+    if UpdateState::decode_record(&record) != Err(Error::RecordChecksumMismatch) {
         return false;
     }
 

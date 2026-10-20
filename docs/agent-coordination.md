@@ -13,8 +13,9 @@ performed.
 **Codex: bounded update A/B state and signed envelope increment (2026-10-20):**
 `kernel/src/update.rs` now stages only newer, bounded candidates in the
 inactive slot, verifies version-1 `WUPD` metadata/image coverage under the
-provisioned Ed25519 trust root, keeps the known-good slot active until a
-post-boot health result, and rolls back after three failed attempts. Host
+provisioned Ed25519 trust root, serializes validated `WUAB` snapshots with a
+sequence/CRC boundary, keeps the known-good slot active until a post-boot
+health result, and rolls back after three failed attempts. Host
 tests, host/freestanding warning-denying Clippy, and dedicated Stage 27.1
 QEMU gates passed on 1/2/4 CPUs. See
 `docs/audit-stage27-1-update-ab-state-2026-10-20.md`. This is not yet a
