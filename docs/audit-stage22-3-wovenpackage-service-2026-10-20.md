@@ -10,8 +10,10 @@ the Stage 22 IPC ABI.
 
 - Added `apps/woven-package`, a signed no-std service image.
 - The service publishes `woven.package` with `Capability::Ipc`.
-- The fixture discovers the service, sends a versioned `WPKI` query, validates
-  the response request ID/status/value, and reaps the process.
+- The fixture creates a bounded `/tmp/vfs-self-test` record through the kernel
+  VFS, discovers the service, sends a versioned `WPKI` query for that record,
+  validates the correlated request ID, status, and existence value, and reaps
+  the process.
 - The receive ABI carries the sender PID; the broker uses the existing mailbox
   send path for the response.
 - Service buffers are static bounded allocations, not user-stack allocations.
@@ -28,14 +30,16 @@ the Stage 22 IPC ABI.
 - Stage 22.3 QEMU: passed on 1 CPU (exit 33), 2 CPUs (exit 33), and 4 CPUs
   (exit 33).
 - Evidence:
-  - `audit-artifacts/stage22.3-1cpu-1792518878417244900`
-  - `audit-artifacts/stage22.3-2cpu-1792518903678229000`
-  - `audit-artifacts/stage22.3-4cpu-1792518929724634300`
+  - `audit-artifacts/stage22.3-1cpu-1792519316113927900`
+  - `audit-artifacts/stage22.3-2cpu-1792519342386172500`
+  - `audit-artifacts/stage22.3-4cpu-1792519366024822100`
 
 ## Limits
 
-The broker's query dispatch is an end-to-end protocol proof. Install, remove,
-and rollback deliberately return a storage-authority status until a userspace
+The broker's query is an end-to-end protocol and storage-authority existence
+proof.
+Install, remove, and rollback deliberately return a storage-authority status
+until a userspace
 storage/package transaction API is available. Production system-app startup
 wiring and physical USB qualification remain open. Earlier failed attempts,
 including the preserved disk-full build failure and broker request-routing

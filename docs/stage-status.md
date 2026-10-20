@@ -4,14 +4,16 @@
 
 The new `apps/woven-package` signed Ring-3 service publishes the bounded
 `woven.package` endpoint, receives a real `WPKI` query request through service
-discovery, and sends a correlated `WPKI` response to the sender mailbox. Its
+discovery, consults the capability-gated userspace directory authority, and
+sends a correlated `WPKI` response to the sender mailbox. Its
 buffers are static bounded storage rather than stack allocations, and process
 reaping removes the published service. The dedicated Stage 22.3 fixture passed
 on 1/2/4 CPUs. App Clippy, host/freestanding warning-denying Clippy, the
 66-test `libwoven` suite, and diff checks passed.
 
 This closes the real broker transport/lifecycle boundary, but not the full
-package manager: query currently proves protocol dispatch, while install,
+package manager: query now proves bounded storage-backed existence checks, while
+install,
 remove, and rollback return an explicit storage-authority status until a
 userspace storage service/API is implemented. The broker is accepted as a
 service fixture, not yet started by every production system-app boot. Physical

@@ -5477,6 +5477,9 @@ fn stage22_3_package_service_self_test() -> bool {
     };
     let capabilities = capability::CapabilitySet::only(capability::Capability::Ipc)
         .with(capability::Capability::FileRead);
+    if vfs::write_file("/tmp/vfs-self-test", b"package-query-fixture").is_err() {
+        return fail("query fixture storage write failed");
+    }
     let Ok((pid, _, _)) = task::spawn_user_system_service(
         "woven-package",
         program,
@@ -5508,7 +5511,7 @@ fn stage22_3_package_service_self_test() -> bool {
     let request = Request {
         operation: Operation::Query,
         request_id: 0x22_03,
-        path: b"/wfs/packages/catalog.wstc",
+        path: b"/tmp/vfs-self-test",
     };
     let mut bytes = [0u8; libwoven::package_ipc::MAX_MESSAGE_BYTES];
     let Ok(length) = request.encode(&mut bytes) else {
@@ -5529,7 +5532,7 @@ fn stage22_3_package_service_self_test() -> bool {
             if let Ok(response) = Response::decode(message.payload()) {
                 response_ok = response.request_id == request.request_id
                     && response.status == 0
-                    && response.value == request.path.len() as u64;
+                    && response.value == 1;
             }
             let _ = ipc::receive_if(pid.as_u64(), serial);
             break;

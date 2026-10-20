@@ -12,6 +12,7 @@ const SERVICE_NAME: &[u8] = b"woven.package";
 const CLIENT_SEND: u8 = 1;
 const STATUS_OK: u16 = 0;
 const STATUS_BAD_REQUEST: u16 = 1;
+const STATUS_NOT_FOUND: u16 = 2;
 const STATUS_STORAGE: u16 = 3;
 const REQUEST_CAPACITY: usize = 256;
 
@@ -58,10 +59,34 @@ fn dispatch(bytes: &[u8]) -> Response {
         return Response { request_id: 0, status: STATUS_BAD_REQUEST, value: 0 };
     };
     let (status, value) = match request.operation {
-        Operation::Query => (STATUS_OK, request.path.len() as u64),
+        Operation::Query => query_storage(request.path),
         Operation::Install | Operation::Remove | Operation::Rollback => (STATUS_STORAGE, 0),
     };
     Response { request_id: request.request_id, status, value }
+}
+
+fn query_storage(path: &[u8]) -> (u16, u64) {
+    let Some(separator) = path.iter().rposition(|byte| *byte == b'/') else {
+        return (STATUS_BAD_REQUEST, 0);
+    };
+    let parent = if separator == 0 { b"/" } else { &path[..separator] };
+    let Ok(parent) = core::str::from_utf8(parent) else {
+        return (STATUS_NOT_FOUND, 0);
+    };
+    let leaf = &path[separator + 1..];
+    if leaf.is_empty() {
+        return (STATUS_BAD_REQUEST, 0);
+    }
+    let mut name = [0u8; libwoven::MAX_NAME];
+    for index in 0..128 {
+        let Ok((length, directory)) = libwoven::read_dir(parent, index, &mut name) else {
+            break;
+        };
+        if !directory && &name[..length] == leaf {
+            return (STATUS_OK, 1);
+        }
+    }
+    (STATUS_NOT_FOUND, 0)
 }
 
 #[panic_handler]
