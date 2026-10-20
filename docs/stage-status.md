@@ -1,5 +1,18 @@
 # Stage status
 
+## Stage 11 shared-library TLS implementation (2026-10-20)
+
+The loader now plans a bounded combined TLS block across the main image and
+shared libraries, copies immutable PT_TLS initializers into a read-only
+template, creates a fresh mutable TLS/TCB per process, and resolves the
+toolchain's shared-object TLS relocation. Standard Stage 11.5 acceptance
+passes on 1/2/4 CPUs; host tests and warning-denying Clippy pass.
+
+The compiler-fixture acceptance remains open because its feature-specific
+kernel build reaches a preserved stack-canary failure in the paired-userspace
+baseline before the compiler loader block. See the audit file above; the
+explicit PT_TLS marker is required before acceptance.
+
 ## Stage 11 lazy PLT binding (2026-10-20)
 
 Writable PLT `JUMP_SLOT` entries now start with loader-generated RX resolver

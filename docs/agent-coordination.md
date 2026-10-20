@@ -1,5 +1,12 @@
 # Agent coordination (Claude Code and Codex)
 
+Codex implemented the shared-library PT_TLS loader path on 2026-10-20:
+combined template planning, per-process TCB initialization, TLS symbol scope,
+and TPOFF64 relocation are in the working tree. Standard Stage 11.5 acceptance
+passes on 1/2/4 CPUs. The compiler-fixture gate remains open due to a
+preserved feature-specific stack-canary failure before its test block; see
+`docs/audit-stage11-library-tls-2026-10-20.md` before claiming acceptance.
+
 **User directive (2026-10-20): finish and clean up all software, coordinate
 between agents, and scope a "fully 3D" graphics direction.** The user
 reaffirmed full standing authorization for both agents (see

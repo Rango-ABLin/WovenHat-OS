@@ -5370,6 +5370,7 @@ pub fn shared_library_self_test() -> bool {
 }
 
 #[cfg(feature = "stage11-compiler-test")]
+#[inline(never)]
 pub fn compiler_loader_self_test() -> bool {
     linker::compiler_loader_self_test()
 }

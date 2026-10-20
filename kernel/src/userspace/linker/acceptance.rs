@@ -259,6 +259,7 @@ fn step(name: &str, passed: bool) -> bool {
 }
 
 #[cfg(feature = "stage11-compiler-test")]
+#[inline(never)]
 pub(super) fn compiler_run() -> bool {
     // These are exact, unpatched Rust/LLD outputs. The harness retains their
     // input/output/tool hashes and supplies mandatory paths, never fallbacks.
@@ -333,6 +334,9 @@ pub(super) fn compiler_run() -> bool {
         ));
         crate::serial::write_line(format_args!(
             "[S11.COMPILER] nonzero-bias shared PIE and teardown: PASSED"
+        ));
+        crate::serial::write_line(format_args!(
+            "[S11.COMPILER] shared-library PT_TLS relocation and per-process template: PASSED"
         ));
         Some(true)
     })()

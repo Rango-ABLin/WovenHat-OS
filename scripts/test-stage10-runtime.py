@@ -140,6 +140,8 @@ def required_markers(stage, cpus):
             '[S11.2] threads/TLS/join: PASSED',
         ])
     if stage == '11.5-compiler':
+        required.append('[S11.COMPILER] shared-library PT_TLS relocation and per-process template: PASSED')
+    if stage == '11.5-compiler':
         required.extend([
             '[S11.COMPILER] actual shared import and exact owner teardown: PASSED',
             '[S11.COMPILER] nonzero-bias shared PIE and teardown: PASSED',

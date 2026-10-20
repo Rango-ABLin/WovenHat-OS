@@ -7,10 +7,12 @@ No Cargo acceptance chain, QEMU, signing key or physical device is involved.
 
 `manifest.json` pins source and ELF hashes, the compiler version and the full
 command record. The ELF files are not patched after linking. The shared PIE
-imports `woven_answer` from `libwoven-demo.so`; the static TLS executable uses
-a real volatile compiler-generated local-exec access. Both should exit 42 when
-executed by the ordinary WovenHat loader. This is the test's required outcome,
-not a claim that the current kernel passes it. `tls-threads-demo` additionally
+imports `woven_answer` from `libwoven-demo.so`; that shared object contains
+PT_TLS, a TLS initializer, and a real TPOFF64 access. The static TLS executable
+uses a real volatile compiler-generated local-exec access. Both should exit 42
+when executed by the ordinary WovenHat loader. This is the test's required
+outcome, not a claim that the current kernel passes the compiler gate.
+`tls-threads-demo` additionally
 checks zero-fill, 64-byte alignment, two freshly initialized child threads,
 private mutations and preservation of the main thread's changed values.
 Thread join uses the existing event-driven blocking syscall, not busy waiting.

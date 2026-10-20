@@ -9,11 +9,13 @@ use alloc::{borrow::Cow, vec::Vec};
 mod acceptance;
 
 #[cfg(feature = "stage11-5-test")]
+#[inline(never)]
 pub(super) fn shared_library_self_test() -> bool {
     acceptance::run()
 }
 
 #[cfg(feature = "stage11-compiler-test")]
+#[inline(never)]
 pub(super) fn compiler_loader_self_test() -> bool {
     acceptance::compiler_run()
 }
@@ -35,13 +37,13 @@ struct TlsPlan {
     layout: tls_layout::Layout,
     template_size: usize,
     total: usize,
-    library_prefix: usize,
 }
 
 fn align_up(value: usize, alignment: usize) -> Option<usize> {
     value.checked_add(alignment - 1).map(|v| v & !(alignment - 1))
 }
 
+#[inline(never)]
 fn plan_tls(images: &[LinkImage<'_>]) -> Option<Option<TlsPlan>> {
     let main_tls = images.first()?.image.tls();
     let mut library_prefix = 0usize;
@@ -84,10 +86,10 @@ fn plan_tls(images: &[LinkImage<'_>]) -> Option<Option<TlsPlan>> {
         layout,
         template_size: mapping_size,
         total: mapping_size.checked_mul(2)?,
-        library_prefix,
     }))
 }
 
+#[inline(never)]
 fn tls_image_offset(images: &[LinkImage<'_>], index: usize) -> Option<usize> {
     if index == 0 {
         let tls = images.first()?.image.tls()?;
@@ -118,7 +120,8 @@ fn tls_image_offset(images: &[LinkImage<'_>], index: usize) -> Option<usize> {
     None
 }
 
-fn tls_tpoff(images: &[LinkImage<'_>], index: usize, plan: TlsPlan) -> Option<i64> {
+#[inline(never)]
+fn tls_tpoff(images: &[LinkImage<'_>], index: usize, plan: &TlsPlan) -> Option<i64> {
     i64::try_from(tls_image_offset(images, index)?)
         .ok()?
         .checked_sub(i64::try_from(plan.layout.thread_pointer_offset).ok()?)
@@ -430,17 +433,14 @@ pub(super) fn load_with_geometry(
     pending.space.lifecycle_trampoline = LIFECYCLE_TRAMPOLINE;
     // No writable executable page exists during relocation: pages are RW/NX
     // until every fixup is applied, then transitioned to their final W^X mode.
-    for linked in &images {
-        let image_index = images
-            .iter()
-            .position(|candidate| core::ptr::eq(candidate, linked))?;
+    for (image_index, linked) in images.iter().enumerate() {
         relocate(
             linked,
             image_index,
             &scope,
             page_table,
             &mut pending.space,
-            tls_reservation,
+            tls_reservation.as_ref(),
             &images,
         )?;
     }
@@ -635,13 +635,14 @@ fn setup_destructor_stack(
     Some(chain_start)
 }
 
+#[inline(never)]
 fn relocate(
     linked: &LinkImage<'_>,
     image_index: usize,
     scope: &SymbolScope<'_>,
     page_table: paging::AddressSpace,
     space: &mut AddressSpace,
-    tls_plan: Option<TlsPlan>,
+    tls_plan: Option<&TlsPlan>,
     images: &[LinkImage<'_>],
 ) -> Option<()> {
     let Some(dynamic) = linked.image.dynamic() else {
@@ -680,6 +681,7 @@ fn relocate(
                 elf::R_X86_64_DTPMOD64
                 | elf::R_X86_64_DTPOFF64
                 | elf::R_X86_64_TPOFF64
+                | elf::R_X86_64_GOTTPOFF
                 | elf::R_X86_64_TPOFF32 => tls_relocation_value(
                     linked,
                     image_index,
@@ -728,6 +730,7 @@ fn relocate(
                 elf::R_X86_64_DTPMOD64
                 | elf::R_X86_64_DTPOFF64
                 | elf::R_X86_64_TPOFF64
+                | elf::R_X86_64_GOTTPOFF
                 | elf::R_X86_64_TPOFF32 => tls_relocation_value(
                     linked,
                     image_index,
@@ -777,6 +780,7 @@ fn relocate(
                 elf::R_X86_64_DTPMOD64
                 | elf::R_X86_64_DTPOFF64
                 | elf::R_X86_64_TPOFF64
+                | elf::R_X86_64_GOTTPOFF
                 | elf::R_X86_64_TPOFF32 => tls_relocation_value(
                     linked,
                     image_index,
@@ -806,13 +810,14 @@ fn relocate(
     Some(())
 }
 
+#[inline(never)]
 fn tls_relocation_value(
     linked: &LinkImage<'_>,
     image_index: usize,
     symbol_index: usize,
     relocation_type: u32,
     scope: &SymbolScope<'_>,
-    tls_plan: Option<TlsPlan>,
+    tls_plan: Option<&TlsPlan>,
     images: &[LinkImage<'_>],
 ) -> Option<u64> {
     let (symbol_offset, provider) = linked
@@ -824,7 +829,7 @@ fn tls_relocation_value(
     match relocation_type {
         elf::R_X86_64_DTPMOD64 => Some((module_index + 1) as u64),
         elf::R_X86_64_DTPOFF64 => Some(symbol_offset),
-        elf::R_X86_64_TPOFF64 | elf::R_X86_64_TPOFF32 => {
+        elf::R_X86_64_TPOFF64 | elf::R_X86_64_GOTTPOFF | elf::R_X86_64_TPOFF32 => {
             let value = tpoff.checked_add(i64::try_from(symbol_offset).ok()?)?;
             Some(value as u64)
         }

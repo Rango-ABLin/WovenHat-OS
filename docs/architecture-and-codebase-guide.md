@@ -1520,7 +1520,11 @@ a prebuilt stack return chain and transactional process-table/paging lock
 ordering. Writable PLT `JUMP_SLOT` entries use bounded loader-generated RX
 resolver stubs and a checked kernel first-call patch path; RELRO slots remain
 eager. See `audit-stage11-lifecycle-2026-10-20.md` and
-`audit-stage11-lazy-binding-2026-10-20.md`. Library TLS remains unsupported.
+`audit-stage11-lazy-binding-2026-10-20.md`. The loader now constructs a
+combined immutable PT_TLS template for the main image and shared libraries,
+then gives each process a fresh mutable TLS/TCB copy and resolves shared TLS
+relocations. The compiler-fixture gate remains open pending its preserved
+feature-specific stack-canary failure.
 
 The historical main-image TLS mapping was not a compiler-compatible TCB:
 the real Rust local-exec probe expects a self-pointer at `FS:0` and aligned

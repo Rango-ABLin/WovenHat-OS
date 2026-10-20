@@ -20,6 +20,7 @@ pub const R_X86_64_JUMP_SLOT: u32 = 7;
 pub const R_X86_64_DTPMOD64: u32 = 16;
 pub const R_X86_64_DTPOFF64: u32 = 17;
 pub const R_X86_64_TPOFF64: u32 = 18;
+pub const R_X86_64_GOTTPOFF: u32 = 22;
 pub const R_X86_64_TPOFF32: u32 = 23;
 pub const RELA_ENTRY_SIZE: usize = 24;
 const REL_ENTRY_SIZE: usize = 16;
@@ -317,9 +318,12 @@ impl Image {
         let value = u64::from_le_bytes(symbol[8..16].try_into().ok()?);
         let size = u64::from_le_bytes(symbol[16..24].try_into().ok()?);
         let end = value.checked_add(size)?;
-        (value >= tls.virtual_address
-            && end <= tls.virtual_address.checked_add(tls.memory_size as u64)? )
-            .then_some(value - tls.virtual_address)
+        if value >= tls.virtual_address
+            && end <= tls.virtual_address.checked_add(tls.memory_size as u64)?
+        {
+            return Some(value - tls.virtual_address);
+        }
+        (end <= tls.memory_size as u64).then_some(value)
     }
 
     pub fn tls_symbol_resolution(
@@ -1643,6 +1647,7 @@ fn parse_image(bytes: &[u8], shared: bool) -> Result<Image, Error> {
                         | R_X86_64_DTPMOD64
                         | R_X86_64_DTPOFF64
                         | R_X86_64_TPOFF64
+                        | R_X86_64_GOTTPOFF
                         | R_X86_64_TPOFF32
                 ) {
                     return Err(Error::Unsupported);
@@ -1706,6 +1711,7 @@ fn parse_image(bytes: &[u8], shared: bool) -> Result<Image, Error> {
                         | R_X86_64_DTPMOD64
                         | R_X86_64_DTPOFF64
                         | R_X86_64_TPOFF64
+                        | R_X86_64_GOTTPOFF
                         | R_X86_64_TPOFF32
                 ) {
                     return Err(Error::Unsupported);
@@ -1769,6 +1775,7 @@ fn parse_image(bytes: &[u8], shared: bool) -> Result<Image, Error> {
                         | R_X86_64_DTPMOD64
                         | R_X86_64_DTPOFF64
                         | R_X86_64_TPOFF64
+                        | R_X86_64_GOTTPOFF
                         | R_X86_64_TPOFF32
                 ) {
                     return Err(Error::Unsupported);
@@ -1832,6 +1839,7 @@ fn parse_image(bytes: &[u8], shared: bool) -> Result<Image, Error> {
                         | R_X86_64_DTPMOD64
                         | R_X86_64_DTPOFF64
                         | R_X86_64_TPOFF64
+                        | R_X86_64_GOTTPOFF
                         | R_X86_64_TPOFF32
                 ) {
                     return Err(Error::Unsupported);
