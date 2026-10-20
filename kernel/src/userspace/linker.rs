@@ -35,8 +35,7 @@ struct TlsPlan {
     layout: tls_layout::Layout,
     template_size: usize,
     total: usize,
-    tpoffs: [i64; elf::MAX_SCOPE_IMAGES],
-    present: [bool; elf::MAX_SCOPE_IMAGES],
+    library_prefix: usize,
 }
 
 fn align_up(value: usize, alignment: usize) -> Option<usize> {
@@ -45,19 +44,14 @@ fn align_up(value: usize, alignment: usize) -> Option<usize> {
 
 fn plan_tls(images: &[LinkImage<'_>]) -> Option<Option<TlsPlan>> {
     let main_tls = images.first()?.image.tls();
-    let mut image_offsets = [0usize; elf::MAX_SCOPE_IMAGES];
-    let mut present = [false; elf::MAX_SCOPE_IMAGES];
     let mut library_prefix = 0usize;
-    for (index, image) in images.iter().enumerate().skip(1) {
+    for image in images.iter().skip(1) {
         let Some(tls) = image.image.tls() else {
             continue;
         };
         let alignment = usize::try_from(tls.alignment).ok()?;
         library_prefix = align_up(library_prefix, alignment.max(8))?;
-        let image_offset = library_prefix;
         library_prefix = library_prefix.checked_add(tls.memory_size)?;
-        image_offsets[index] = image_offset;
-        present[index] = true;
     }
     let (main_image_offset, main_thread_pointer_offset) = if let Some(tls) = main_tls {
         let main_layout = tls_layout::Layout::new(
@@ -74,11 +68,7 @@ fn plan_tls(images: &[LinkImage<'_>]) -> Option<Option<TlsPlan>> {
     } else {
         (library_prefix, align_up(library_prefix, 8)?)
     };
-    if let Some(_tls) = main_tls {
-        image_offsets[0] = main_image_offset;
-        present[0] = true;
-    }
-    if !present.iter().any(|present| *present) {
+    if main_tls.is_none() && library_prefix == 0 {
         return Some(None);
     }
     let mapping_size = align_up(main_thread_pointer_offset.checked_add(8)?, 4096)?;
@@ -90,22 +80,48 @@ fn plan_tls(images: &[LinkImage<'_>]) -> Option<Option<TlsPlan>> {
         thread_pointer_offset: main_thread_pointer_offset,
         mapping_size,
     };
-    let mut tpoffs = [0i64; elf::MAX_SCOPE_IMAGES];
-    for (index, image_offset) in image_offsets.iter().copied().enumerate() {
-        if !present[index] {
-            continue;
-        }
-        tpoffs[index] = i64::try_from(image_offset)
-            .ok()?
-            .checked_sub(i64::try_from(main_thread_pointer_offset).ok()?)?;
-    }
     Some(Some(TlsPlan {
         layout,
         template_size: mapping_size,
         total: mapping_size.checked_mul(2)?,
-        tpoffs,
-        present,
+        library_prefix,
     }))
+}
+
+fn tls_image_offset(images: &[LinkImage<'_>], index: usize) -> Option<usize> {
+    if index == 0 {
+        let tls = images.first()?.image.tls()?;
+        let main_layout = tls_layout::Layout::new(
+            tls.file_size,
+            tls.memory_size,
+            tls.alignment,
+            tls.virtual_address,
+            USER_MMAP_MAX_SIZE,
+        )?;
+        let mut prefix = 0usize;
+        for image in images.iter().skip(1) {
+            let Some(tls) = image.image.tls() else { continue };
+            prefix = align_up(prefix, usize::try_from(tls.alignment).ok()?.max(8))?;
+            prefix = prefix.checked_add(tls.memory_size)?;
+        }
+        return prefix.checked_add(main_layout.image_offset);
+    }
+    let mut offset = 0usize;
+    for (image_index, image) in images.iter().enumerate().skip(1) {
+        let Some(tls) = image.image.tls() else { continue };
+        offset = align_up(offset, usize::try_from(tls.alignment).ok()?.max(8))?;
+        if image_index == index {
+            return Some(offset);
+        }
+        offset = offset.checked_add(tls.memory_size)?;
+    }
+    None
+}
+
+fn tls_tpoff(images: &[LinkImage<'_>], index: usize, plan: TlsPlan) -> Option<i64> {
+    i64::try_from(tls_image_offset(images, index)?)
+        .ok()?
+        .checked_sub(i64::try_from(plan.layout.thread_pointer_offset).ok()?)
 }
 
 fn library_path(name: &[u8]) -> Option<alloc::string::String> {
@@ -414,8 +430,6 @@ pub(super) fn load_with_geometry(
     pending.space.lifecycle_trampoline = LIFECYCLE_TRAMPOLINE;
     // No writable executable page exists during relocation: pages are RW/NX
     // until every fixup is applied, then transitioned to their final W^X mode.
-    let tls_tpoffs = tls_reservation.map_or([0; elf::MAX_SCOPE_IMAGES], |plan| plan.tpoffs);
-    let tls_present = tls_reservation.map_or([false; elf::MAX_SCOPE_IMAGES], |plan| plan.present);
     for linked in &images {
         let image_index = images
             .iter()
@@ -426,8 +440,8 @@ pub(super) fn load_with_geometry(
             &scope,
             page_table,
             &mut pending.space,
-            &tls_tpoffs,
-            &tls_present,
+            tls_reservation,
+            &images,
         )?;
     }
     for (index, binding) in pending.space.lazy_bindings
@@ -493,15 +507,11 @@ pub(super) fn load_with_geometry(
                 let Some(tls) = image.image.tls() else {
                     continue;
                 };
-                if !plan.present[index] {
-                    return None;
-                }
-                let image_offset = i64::try_from(layout.thread_pointer_offset).ok()?
-                    .checked_add(plan.tpoffs[index])?;
+                let image_offset = tls_image_offset(&images, index)?;
                 copy_tls_bytes(
                     page_table,
                     tls.virtual_address,
-                    template_start.checked_add(u64::try_from(image_offset).ok()?)?,
+                    template_start.checked_add(image_offset as u64)?,
                     tls.file_size,
                 )?;
             }
@@ -631,8 +641,8 @@ fn relocate(
     scope: &SymbolScope<'_>,
     page_table: paging::AddressSpace,
     space: &mut AddressSpace,
-    tls_tpoffs: &[i64; elf::MAX_SCOPE_IMAGES],
-    tls_present: &[bool; elf::MAX_SCOPE_IMAGES],
+    tls_plan: Option<TlsPlan>,
+    images: &[LinkImage<'_>],
 ) -> Option<()> {
     let Some(dynamic) = linked.image.dynamic() else {
         return Some(());
@@ -676,8 +686,8 @@ fn relocate(
                     (info >> 32) as usize,
                     info as u32,
                     scope,
-                    tls_tpoffs,
-                    tls_present,
+                    tls_plan,
+                    images,
                 )?,
                 _ => return None,
             };
@@ -724,8 +734,8 @@ fn relocate(
                     (info >> 32) as usize,
                     info as u32,
                     scope,
-                    tls_tpoffs,
-                    tls_present,
+                    tls_plan,
+                    images,
                 )?,
                 _ => return None,
             };
@@ -773,8 +783,8 @@ fn relocate(
                     (info >> 32) as usize,
                     info as u32,
                     scope,
-                    tls_tpoffs,
-                    tls_present,
+                    tls_plan,
+                    images,
                 )?,
                 _ => return None,
             };
@@ -802,17 +812,15 @@ fn tls_relocation_value(
     symbol_index: usize,
     relocation_type: u32,
     scope: &SymbolScope<'_>,
-    tpoffs: &[i64; elf::MAX_SCOPE_IMAGES],
-    present: &[bool; elf::MAX_SCOPE_IMAGES],
+    tls_plan: Option<TlsPlan>,
+    images: &[LinkImage<'_>],
 ) -> Option<u64> {
     let (symbol_offset, provider) = linked
         .image
         .tls_symbol_resolution(&linked.bytes, symbol_index, scope)?;
     let module_index = provider.unwrap_or(image_index);
-    if !present.get(module_index).copied().unwrap_or(false) {
-        return None;
-    }
-    let tpoff = *tpoffs.get(module_index)?;
+    let plan = tls_plan?;
+    let tpoff = tls_tpoff(images, module_index, plan)?;
     match relocation_type {
         elf::R_X86_64_DTPMOD64 => Some((module_index + 1) as u64),
         elf::R_X86_64_DTPOFF64 => Some(symbol_offset),
