@@ -133,23 +133,24 @@ mod storage;
 // themselves must not chain: each Stage 12 self-test block ends the boot, so
 // enabling 12.3 from 12.5 would exit before the 12.5 block ran.
 mod compositor;
+#[cfg(any(
+    feature = "stage21-1-test",
+    feature = "stage21-2-test",
+    feature = "stage21-3-test",
+    feature = "stage21-4-test"
+))]
+mod package;
 #[cfg(any(feature = "stage12-3-test", feature = "stage12-5-test"))]
 mod storage_manager;
 mod swap;
 mod syscall;
 mod task;
 mod terminal;
-#[cfg(feature = "qemu-test")]
-mod update;
-#[cfg(any(
-    feature = "stage21-1-test",
-    feature = "stage21-2-test",
-    feature = "stage21-3-test"
-))]
-mod package;
 #[allow(dead_code)]
 mod thread;
 mod timer;
+#[cfg(feature = "qemu-test")]
+mod update;
 #[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
 mod usb_msc;
 mod user_address;
@@ -1717,9 +1718,7 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
                         task::yield_now();
                     }
                     if session_ready {
-                        console.println(
-                            "DESKTOP SESSION: STARTED (F12 SWITCHES TO THIS CONSOLE)",
-                        );
+                        console.println("DESKTOP SESSION: STARTED (F12 SWITCHES TO THIS CONSOLE)");
                         console.println("BOOT LOADER [7/7]: desktop ready");
                         alloc::format!("SESSION: started as pid {pid} (F12 shows the desktop)")
                     } else if !task::process_alive(pid) {
@@ -1740,10 +1739,7 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
                     }
                 }
                 Err(error) => {
-                    serial::write_line(format_args!(
-                        "[SESSION] desktop not started: {:?}",
-                        error
-                    ));
+                    serial::write_line(format_args!("[SESSION] desktop not started: {:?}", error));
                     alloc::format!("SESSION: NOT STARTED ({error:?})")
                 }
             };
@@ -4312,10 +4308,7 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         }
         qemu_test_exit_success();
     }
-    #[cfg(all(
-        feature = "stage15-2-test",
-        not(feature = "stage27-2-test")
-    ))]
+    #[cfg(all(feature = "stage15-2-test", not(feature = "stage27-2-test")))]
     {
         if !wfs::stage15_2_self_test() {
             serial::write_line(format_args!("[S15.2] WovenFS physical device: FAILED"));
@@ -4423,6 +4416,16 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
             qemu_test_exit_failure();
         }
         serial::write_line(format_args!("[S21.3] WovenStore transaction: PASSED"));
+        qemu_test_exit_success();
+    }
+
+    #[cfg(feature = "stage21-4-test")]
+    {
+        if !package::batch_self_test() {
+            serial::write_line(format_args!("[S21.4] WovenStore batch: FAILED"));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!("[S21.4] WovenStore batch: PASSED"));
         qemu_test_exit_success();
     }
     #[cfg(feature = "stage27-2-test")]

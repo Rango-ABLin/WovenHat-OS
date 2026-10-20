@@ -2189,6 +2189,19 @@ The API intentionally selects one contour because multi-contour fill/hole
 semantics are not yet part of `Path`; compound glyphs, shaping and antialiasing
 remain open.
 
+## Stage 21.4 WovenStore dependency-ordered batches (2026-10-20)
+
+WovenStore transactions now accept bounded package batches in arbitrary input
+order and resolve dependencies through repeated bounded passes. Missing or
+cyclic dependencies fail without committing a partial catalog, while the
+existing capability policy, monotonic update, dependent-removal, and explicit
+rollback rules remain active. Host tests, warning-denying Clippy, and QEMU
+acceptance passed on 1/2/4 CPUs. Evidence is recorded in
+`docs/audit-stage21-4-wovenstore-batches-2026-10-20.md`.
+
+Persistent WovenFS publication, power-loss recovery, service/IPC authority,
+and physical USB qualification remain open.
+
 ## Graphics track - bounded quadratic paths (2026-10-18)
 
 `Path::quadratic_to` now flattens quadratic Bézier segments into four

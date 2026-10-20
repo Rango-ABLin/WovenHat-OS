@@ -16904,15 +16904,27 @@ mod tests {
         );
 
         // Deterministic, and distinguishes both inputs.
-        assert_eq!(accounts::hash_pin(b"a", b"bc"), accounts::hash_pin(b"a", b"bc"));
-        assert_ne!(accounts::hash_pin(b"a", b"bc"), accounts::hash_pin(b"a", b"bd"));
-        assert_ne!(accounts::hash_pin(b"a", b"bc"), accounts::hash_pin(b"z", b"bc"));
+        assert_eq!(
+            accounts::hash_pin(b"a", b"bc"),
+            accounts::hash_pin(b"a", b"bc")
+        );
+        assert_ne!(
+            accounts::hash_pin(b"a", b"bc"),
+            accounts::hash_pin(b"a", b"bd")
+        );
+        assert_ne!(
+            accounts::hash_pin(b"a", b"bc"),
+            accounts::hash_pin(b"z", b"bc")
+        );
 
         // Empty salt and PIN still hash deterministically to something
         // distinct from a non-empty input, rather than panicking or
         // short-circuiting to a fixed value.
         assert_eq!(accounts::hash_pin(b"", b""), accounts::hash_pin(b"", b""));
-        assert_ne!(accounts::hash_pin(b"", b""), accounts::hash_pin(b"a", b"bc"));
+        assert_ne!(
+            accounts::hash_pin(b"", b""),
+            accounts::hash_pin(b"a", b"bc")
+        );
     }
 
     #[test]

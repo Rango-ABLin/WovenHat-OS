@@ -4,7 +4,7 @@
 //! must authenticate the WPKG envelope before converting its manifest into an
 //! install request. Persistent WovenFS publication remains above this core.
 
-use crate::package::{Manifest, MAX_DEPENDENCIES, MAX_NAME_BYTES};
+use crate::package::{MAX_DEPENDENCIES, MAX_NAME_BYTES, Manifest};
 
 pub const MAX_INSTALLED: usize = 32;
 
@@ -45,6 +45,12 @@ pub struct Transaction {
     working: Store,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct InstallRequest<'a> {
+    pub manifest: &'a Manifest<'a>,
+    pub application_digest: [u8; 32],
+}
+
 impl Store {
     pub const fn new(allowed_capabilities: u64) -> Self {
         Self {
@@ -71,11 +77,17 @@ impl Store {
 
     fn find(&self, name: &[u8]) -> Option<usize> {
         self.entries.iter().position(|entry| {
-            entry.is_some_and(|entry| entry.name_len as usize == name.len() && entry.name[..name.len()] == *name)
+            entry.is_some_and(|entry| {
+                entry.name_len as usize == name.len() && entry.name[..name.len()] == *name
+            })
         })
     }
 
-    fn install(&mut self, manifest: &Manifest<'_>, application_digest: [u8; 32]) -> Result<(), Error> {
+    fn install(
+        &mut self,
+        manifest: &Manifest<'_>,
+        application_digest: [u8; 32],
+    ) -> Result<(), Error> {
         if manifest.name.is_empty() || manifest.name.len() > MAX_NAME_BYTES {
             return Err(Error::InvalidName);
         }
@@ -97,7 +109,11 @@ impl Store {
             }
             index
         } else {
-            let index = self.entries.iter().position(Option::is_none).ok_or(Error::Full)?;
+            let index = self
+                .entries
+                .iter()
+                .position(Option::is_none)
+                .ok_or(Error::Full)?;
             self.count += 1;
             index
         };
@@ -105,7 +121,12 @@ impl Store {
         name[..manifest.name.len()].copy_from_slice(manifest.name);
         let mut dependencies = [[0u8; MAX_NAME_BYTES]; MAX_DEPENDENCIES];
         let mut dependency_lengths = [0u8; MAX_DEPENDENCIES];
-        for (index, dependency) in manifest.dependencies.iter().take(manifest.dependency_count).enumerate() {
+        for (index, dependency) in manifest
+            .dependencies
+            .iter()
+            .take(manifest.dependency_count)
+            .enumerate()
+        {
             dependencies[index][..dependency.len()].copy_from_slice(dependency);
             dependency_lengths[index] = dependency.len() as u8;
         }
@@ -125,7 +146,12 @@ impl Store {
     fn remove(&mut self, name: &[u8]) -> Result<(), Error> {
         let index = self.find(name).ok_or(Error::AlreadyAbsent)?;
         if self.entries.iter().flatten().any(|entry| {
-            entry.dependencies.iter().zip(entry.dependency_lengths).take(entry.dependency_count as usize).any(|(dependency, length)| dependency[..length as usize] == *name)
+            entry
+                .dependencies
+                .iter()
+                .zip(entry.dependency_lengths)
+                .take(entry.dependency_count as usize)
+                .any(|(dependency, length)| dependency[..length as usize] == *name)
         }) {
             return Err(Error::DependencyInUse);
         }
@@ -136,12 +162,51 @@ impl Store {
 }
 
 impl Transaction {
-    pub fn install(&mut self, manifest: &Manifest<'_>, application_digest: [u8; 32]) -> Result<(), Error> {
+    pub fn install(
+        &mut self,
+        manifest: &Manifest<'_>,
+        application_digest: [u8; 32],
+    ) -> Result<(), Error> {
         self.working.install(manifest, application_digest)
     }
 
     pub fn remove(&mut self, name: &[u8]) -> Result<(), Error> {
         self.working.remove(name)
+    }
+
+    /// Install a bounded batch in dependency order. The working catalog is
+    /// unchanged if any request fails; the caller still chooses commit versus
+    /// rollback after all requests succeed.
+    pub fn install_batch(&mut self, requests: &[InstallRequest<'_>]) -> Result<(), Error> {
+        if requests.len() > MAX_INSTALLED {
+            return Err(Error::Full);
+        }
+        let mut pending = [false; MAX_INSTALLED];
+        for slot in pending.iter_mut().take(requests.len()) {
+            *slot = true;
+        }
+        let mut remaining = requests.len();
+        while remaining != 0 {
+            let mut progress = false;
+            for index in 0..requests.len() {
+                if !pending[index] {
+                    continue;
+                }
+                match self.install(requests[index].manifest, requests[index].application_digest) {
+                    Ok(()) => {
+                        pending[index] = false;
+                        remaining -= 1;
+                        progress = true;
+                    }
+                    Err(Error::MissingDependency) => {}
+                    Err(error) => return Err(error),
+                }
+            }
+            if !progress {
+                return Err(Error::MissingDependency);
+            }
+        }
+        Ok(())
     }
 
     pub fn commit(self) -> Store {
@@ -162,7 +227,12 @@ mod tests {
     use super::{Error, Store};
     use crate::package::Manifest;
 
-    fn manifest<'a>(name: &'a [u8], version: u64, capabilities: u64, dependency: Option<&'a [u8]>) -> Manifest<'a> {
+    fn manifest<'a>(
+        name: &'a [u8],
+        version: u64,
+        capabilities: u64,
+        dependency: Option<&'a [u8]>,
+    ) -> Manifest<'a> {
         let mut dependencies = [&[][..]; crate::package::MAX_DEPENDENCIES];
         let dependency_count = if let Some(value) = dependency {
             dependencies[0] = value;
@@ -182,11 +252,20 @@ mod tests {
     #[test]
     fn installs_updates_and_removes_with_dependency_protection() {
         let mut transaction = Store::new(0x3).transaction();
-        transaction.install(&manifest(b"core", 1, 1, None), [1; 32]).unwrap();
-        transaction.install(&manifest(b"app", 1, 2, Some(b"core")), [2; 32]).unwrap();
+        transaction
+            .install(&manifest(b"core", 1, 1, None), [1; 32])
+            .unwrap();
+        transaction
+            .install(&manifest(b"app", 1, 2, Some(b"core")), [2; 32])
+            .unwrap();
         assert_eq!(transaction.remove(b"core"), Err(Error::DependencyInUse));
-        assert_eq!(transaction.install(&manifest(b"app", 1, 2, Some(b"core")), [3; 32]), Err(Error::Outdated));
-        transaction.install(&manifest(b"app", 2, 2, Some(b"core")), [4; 32]).unwrap();
+        assert_eq!(
+            transaction.install(&manifest(b"app", 1, 2, Some(b"core")), [3; 32]),
+            Err(Error::Outdated)
+        );
+        transaction
+            .install(&manifest(b"app", 2, 2, Some(b"core")), [4; 32])
+            .unwrap();
         let store = transaction.commit();
         assert_eq!(store.count(), 2);
     }
@@ -195,8 +274,34 @@ mod tests {
     fn missing_dependencies_capabilities_and_rollback_are_bounded() {
         let store = Store::new(1);
         let mut transaction = store.transaction();
-        assert_eq!(transaction.install(&manifest(b"app", 1, 1, Some(b"core")), [0; 32]), Err(Error::MissingDependency));
-        assert_eq!(transaction.install(&manifest(b"wide", 1, 2, None), [0; 32]), Err(Error::CapabilityDenied));
+        assert_eq!(
+            transaction.install(&manifest(b"app", 1, 1, Some(b"core")), [0; 32]),
+            Err(Error::MissingDependency)
+        );
+        assert_eq!(
+            transaction.install(&manifest(b"wide", 1, 2, None), [0; 32]),
+            Err(Error::CapabilityDenied)
+        );
         assert_eq!(transaction.rollback(), store);
+    }
+
+    #[test]
+    fn batch_resolution_accepts_reverse_dependency_order_atomically() {
+        let dependency = manifest(b"core", 1, 1, None);
+        let application = manifest(b"app", 1, 1, Some(b"core"));
+        let requests = [
+            super::InstallRequest {
+                manifest: &application,
+                application_digest: [2; 32],
+            },
+            super::InstallRequest {
+                manifest: &dependency,
+                application_digest: [1; 32],
+            },
+        ];
+        let store = Store::new(1);
+        let mut transaction = store.transaction();
+        transaction.install_batch(&requests).unwrap();
+        assert_eq!(transaction.commit().count(), 2);
     }
 }

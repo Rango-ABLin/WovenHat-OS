@@ -1169,6 +1169,13 @@ snapshot. This is deliberately independent of storage I/O: the future package
 service must authenticate WPKG first, then persist the committed catalog and
 payload files through capability-gated WovenFS transactions.
 
+`Transaction::install_batch` resolves up to the catalog capacity of requests
+with bounded repeated passes. A request blocked only by a missing dependency
+is deferred; any other error aborts immediately, and a pass with no progress
+returns `MissingDependency` for cycles or absent dependencies. The transaction
+does not publish until the caller commits, so a failed batch cannot expose a
+partial catalog.
+
 The feature-gated `stage19-app-catalog-test` now exercises the install-plan
 boundary for all ten accepted packages together. It verifies each WAPP,
 rejects a mutation, installs and reads each package back through the VFS,

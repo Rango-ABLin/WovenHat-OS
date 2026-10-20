@@ -117,7 +117,9 @@ pub fn parse(bytes: &[u8]) -> Result<Package<'_>, Error> {
     }
     let app_len = usize::try_from(application_len).map_err(|_| Error::BadLength)?;
     let resource_len = usize::try_from(resources_len).map_err(|_| Error::BadLength)?;
-    let manifest_end = HEADER_LEN.checked_add(manifest_len).ok_or(Error::BadLength)?;
+    let manifest_end = HEADER_LEN
+        .checked_add(manifest_len)
+        .ok_or(Error::BadLength)?;
     let app_end = manifest_end.checked_add(app_len).ok_or(Error::BadLength)?;
     let resource_end = app_end.checked_add(resource_len).ok_or(Error::BadLength)?;
     if resource_end != bytes.len() {
@@ -138,9 +140,9 @@ pub fn parse(bytes: &[u8]) -> Result<Package<'_>, Error> {
 fn validate_name(name: &[u8]) -> Result<(), Error> {
     if name.is_empty()
         || name.len() > MAX_NAME_BYTES
-        || name.iter().any(|byte| {
-            !matches!(*byte, b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'.' | b'_' | b'-')
-        })
+        || name.iter().any(
+            |byte| !matches!(*byte, b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'.' | b'_' | b'-'),
+        )
     {
         return Err(Error::BadName);
     }
@@ -149,14 +151,20 @@ fn validate_name(name: &[u8]) -> Result<(), Error> {
 
 fn read_u64(bytes: &[u8], cursor: &mut usize) -> Result<u64, Error> {
     let end = cursor.checked_add(8).ok_or(Error::BadManifest)?;
-    let value = u64::from_le_bytes(bytes.get(*cursor..end).ok_or(Error::BadManifest)?.try_into().unwrap());
+    let value = u64::from_le_bytes(
+        bytes
+            .get(*cursor..end)
+            .ok_or(Error::BadManifest)?
+            .try_into()
+            .unwrap(),
+    );
     *cursor = end;
     Ok(value)
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{parse, Error, HEADER_LEN, MAGIC, VERSION};
+    use super::{Error, HEADER_LEN, MAGIC, VERSION, parse};
 
     fn valid_package() -> Vec<u8> {
         let manifest = [
@@ -168,7 +176,8 @@ mod tests {
         ];
         let application = b"ELF";
         let resources = b"resource";
-        let mut package = vec![0u8; HEADER_LEN + manifest.len() + application.len() + resources.len()];
+        let mut package =
+            vec![0u8; HEADER_LEN + manifest.len() + application.len() + resources.len()];
         package[..4].copy_from_slice(&MAGIC);
         package[4..6].copy_from_slice(&VERSION.to_le_bytes());
         package[6..8].copy_from_slice(&(HEADER_LEN as u16).to_le_bytes());

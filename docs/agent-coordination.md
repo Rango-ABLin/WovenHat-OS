@@ -39,6 +39,13 @@ tests, host/freestanding warning-denying Clippy, and QEMU acceptance passed on
 1/2/4 CPUs. Persistent WovenFS publication and service/IPC ownership are still
 open. No physical USB write was performed.
 
+**Codex: Stage 21.4 bounded WovenStore batch resolution (2026-10-20):**
+WovenStore transactions now resolve a bounded batch in dependency order,
+including reverse-ordered input, while retaining copy-on-write commit/rollback
+semantics. Host tests, host/freestanding warning-denying Clippy, and QEMU
+acceptance passed on 1/2/4 CPUs. Persistent WovenFS publication and package
+service IPC remain open. No physical USB write was performed.
+
 **Codex: bounded update A/B state and signed envelope increment (2026-10-20):**
 `kernel/src/update.rs` now stages only newer, bounded candidates in the
 inactive slot, verifies version-1 `WUPD` metadata/image coverage under the
