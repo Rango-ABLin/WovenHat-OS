@@ -46,6 +46,14 @@ semantics. Host tests, host/freestanding warning-denying Clippy, and QEMU
 acceptance passed on 1/2/4 CPUs. Persistent WovenFS publication and package
 service IPC remain open. No physical USB write was performed.
 
+**Codex: Stage 21.5 durable WovenStore record codec (2026-10-20):**
+WovenStore now has a fixed-layout `WSTC` v1 catalog record with bounded entry
+count, capability policy, dependency metadata, and a checksum. Decode rejects
+bad magic/version/length/checksum, invalid names, duplicate entries, and bad
+dependencies. Host tests, host/freestanding warning-denying Clippy, and QEMU
+acceptance passed on 1/2/4 CPUs. Native WovenFS publication and service
+ownership remain the next slice. No physical USB write was performed.
+
 **Codex: bounded update A/B state and signed envelope increment (2026-10-20):**
 `kernel/src/update.rs` now stages only newer, bounded candidates in the
 inactive slot, verifies version-1 `WUPD` metadata/image coverage under the

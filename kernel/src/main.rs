@@ -138,6 +138,7 @@ mod compositor;
     feature = "stage21-2-test",
     feature = "stage21-3-test",
     feature = "stage21-4-test"
+    , feature = "stage21-5-test"
 ))]
 mod package;
 #[cfg(any(feature = "stage12-3-test", feature = "stage12-5-test"))]
@@ -4426,6 +4427,16 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
             qemu_test_exit_failure();
         }
         serial::write_line(format_args!("[S21.4] WovenStore batch: PASSED"));
+        qemu_test_exit_success();
+    }
+
+    #[cfg(feature = "stage21-5-test")]
+    {
+        if !package::record_self_test() {
+            serial::write_line(format_args!("[S21.5] WovenStore record: FAILED"));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!("[S21.5] WovenStore record: PASSED"));
         qemu_test_exit_success();
     }
     #[cfg(feature = "stage27-2-test")]

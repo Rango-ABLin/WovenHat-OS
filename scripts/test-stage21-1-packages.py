@@ -10,7 +10,7 @@ from pathlib import Path
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--cpus", type=int, choices=(1, 2, 4), default=1)
-    parser.add_argument("--stage", type=int, choices=(1, 2, 3, 4), default=1)
+    parser.add_argument("--stage", type=int, choices=(1, 2, 3, 4, 5), default=1)
     parser.add_argument("--timeout", type=float, default=240)
     parser.add_argument(
         "--qemu",
@@ -56,7 +56,11 @@ def main() -> int:
             else (
                 "[S21.3] WovenStore transaction: PASSED"
                 if args.stage == 3
-                else "[S21.4] WovenStore batch: PASSED"
+                else (
+                    "[S21.4] WovenStore batch: PASSED"
+                    if args.stage == 4
+                    else "[S21.5] WovenStore record: PASSED"
+                )
             )
         )
     )

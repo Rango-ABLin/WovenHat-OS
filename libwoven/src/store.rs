@@ -7,6 +7,11 @@
 use crate::package::{MAX_DEPENDENCIES, MAX_NAME_BYTES, Manifest};
 
 pub const MAX_INSTALLED: usize = 32;
+pub const RECORD_MAGIC: [u8; 4] = *b"WSTC";
+pub const RECORD_VERSION: u16 = 1;
+const RECORD_HEADER: usize = 4 + 2 + 2 + 8 + 4;
+const ENTRY_BYTES: usize = 1 + MAX_NAME_BYTES + 8 + 8 + 32 + 1 + MAX_DEPENDENCIES * (1 + MAX_NAME_BYTES);
+pub const MAX_RECORD_BYTES: usize = RECORD_HEADER + MAX_INSTALLED * ENTRY_BYTES + 4;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Error {
@@ -18,6 +23,18 @@ pub enum Error {
     DependencyInUse,
     AlreadyAbsent,
     Outdated,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RecordError {
+    TooSmall,
+    BadMagic,
+    BadVersion,
+    BadLength,
+    BadChecksum,
+    BadName,
+    BadDependency,
+    Duplicate,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -62,6 +79,149 @@ impl Store {
 
     pub const fn count(&self) -> usize {
         self.count
+    }
+
+    /// Encode a fixed-layout, checksummed catalog record for durable storage.
+    pub fn encode_record(&self, out: &mut [u8]) -> Result<usize, RecordError> {
+        let length = RECORD_HEADER
+            .checked_add(
+                self.count
+                    .checked_mul(ENTRY_BYTES)
+                    .ok_or(RecordError::BadLength)?,
+            )
+            .and_then(|length| length.checked_add(4))
+            .ok_or(RecordError::BadLength)?;
+        if out.len() < length {
+            return Err(RecordError::TooSmall);
+        }
+        let mut cursor = 0;
+        out[cursor..cursor + 4].copy_from_slice(&RECORD_MAGIC);
+        cursor += 4;
+        out[cursor..cursor + 2].copy_from_slice(&RECORD_VERSION.to_le_bytes());
+        cursor += 2;
+        out[cursor..cursor + 2].copy_from_slice(&(self.count as u16).to_le_bytes());
+        cursor += 2;
+        out[cursor..cursor + 8].copy_from_slice(&self.allowed_capabilities.to_le_bytes());
+        cursor += 8;
+        out[cursor..cursor + 4].copy_from_slice(&(length as u32).to_le_bytes());
+        cursor += 4;
+        for entry in self.entries.iter().flatten() {
+            out[cursor] = entry.name_len;
+            cursor += 1;
+            out[cursor..cursor + MAX_NAME_BYTES].copy_from_slice(&entry.name);
+            cursor += MAX_NAME_BYTES;
+            out[cursor..cursor + 8].copy_from_slice(&entry.version.to_le_bytes());
+            cursor += 8;
+            out[cursor..cursor + 8].copy_from_slice(&entry.capabilities.to_le_bytes());
+            cursor += 8;
+            out[cursor..cursor + 32].copy_from_slice(&entry.application_digest);
+            cursor += 32;
+            out[cursor] = entry.dependency_count;
+            cursor += 1;
+            for index in 0..MAX_DEPENDENCIES {
+                out[cursor] = entry.dependency_lengths[index];
+                cursor += 1;
+                out[cursor..cursor + MAX_NAME_BYTES].copy_from_slice(&entry.dependencies[index]);
+                cursor += MAX_NAME_BYTES;
+            }
+        }
+        let value = checksum(&out[..cursor]);
+        out[cursor..cursor + 4].copy_from_slice(&value.to_le_bytes());
+        Ok(length)
+    }
+
+    /// Decode and validate a complete durable catalog record.
+    pub fn decode_record(bytes: &[u8]) -> Result<Self, RecordError> {
+        if bytes.len() < RECORD_HEADER + 4 {
+            return Err(RecordError::TooSmall);
+        }
+        if bytes[..4] != RECORD_MAGIC {
+            return Err(RecordError::BadMagic);
+        }
+        if u16::from_le_bytes(bytes[4..6].try_into().unwrap()) != RECORD_VERSION {
+            return Err(RecordError::BadVersion);
+        }
+        let count = u16::from_le_bytes(bytes[6..8].try_into().unwrap()) as usize;
+        if count > MAX_INSTALLED {
+            return Err(RecordError::BadLength);
+        }
+        let allowed_capabilities = u64::from_le_bytes(bytes[8..16].try_into().unwrap());
+        let length = u32::from_le_bytes(bytes[16..20].try_into().unwrap()) as usize;
+        let expected = RECORD_HEADER
+            .checked_add(count.checked_mul(ENTRY_BYTES).ok_or(RecordError::BadLength)?)
+            .and_then(|value| value.checked_add(4))
+            .ok_or(RecordError::BadLength)?;
+        if length != expected || bytes.len() != expected {
+            return Err(RecordError::BadLength);
+        }
+        let stored_checksum = u32::from_le_bytes(bytes[expected - 4..].try_into().unwrap());
+        if checksum(&bytes[..expected - 4]) != stored_checksum {
+            return Err(RecordError::BadChecksum);
+        }
+        let mut store = Self::new(allowed_capabilities);
+        let mut cursor = RECORD_HEADER;
+        for _ in 0..count {
+            let name_len = bytes[cursor] as usize;
+            cursor += 1;
+            if name_len == 0 || name_len > MAX_NAME_BYTES {
+                return Err(RecordError::BadName);
+            }
+            let mut name = [0u8; MAX_NAME_BYTES];
+            name.copy_from_slice(&bytes[cursor..cursor + MAX_NAME_BYTES]);
+            if !valid_name(&name[..name_len]) {
+                return Err(RecordError::BadName);
+            }
+            if store.find(&name[..name_len]).is_some() {
+                return Err(RecordError::Duplicate);
+            }
+            cursor += MAX_NAME_BYTES;
+            let version = u64::from_le_bytes(bytes[cursor..cursor + 8].try_into().unwrap());
+            cursor += 8;
+            if version == 0 {
+                return Err(RecordError::BadLength);
+            }
+            let capabilities = u64::from_le_bytes(bytes[cursor..cursor + 8].try_into().unwrap());
+            cursor += 8;
+            let mut application_digest = [0u8; 32];
+            application_digest.copy_from_slice(&bytes[cursor..cursor + 32]);
+            cursor += 32;
+            let dependency_count = bytes[cursor] as usize;
+            cursor += 1;
+            if dependency_count > MAX_DEPENDENCIES {
+                return Err(RecordError::BadDependency);
+            }
+            let mut dependencies = [[0u8; MAX_NAME_BYTES]; MAX_DEPENDENCIES];
+            let mut dependency_lengths = [0u8; MAX_DEPENDENCIES];
+            for index in 0..MAX_DEPENDENCIES {
+                let dependency_length = bytes[cursor] as usize;
+                cursor += 1;
+                dependencies[index].copy_from_slice(&bytes[cursor..cursor + MAX_NAME_BYTES]);
+                cursor += MAX_NAME_BYTES;
+                if index < dependency_count {
+                    if dependency_length == 0
+                        || dependency_length > MAX_NAME_BYTES
+                        || !valid_name(&dependencies[index][..dependency_length])
+                    {
+                        return Err(RecordError::BadDependency);
+                    }
+                    dependency_lengths[index] = dependency_length as u8;
+                } else if dependency_length != 0 {
+                    return Err(RecordError::BadDependency);
+                }
+            }
+            store.entries[store.count] = Some(Entry {
+                name,
+                name_len: name_len as u8,
+                version,
+                capabilities,
+                application_digest,
+                dependencies,
+                dependency_lengths,
+                dependency_count: dependency_count as u8,
+            });
+            store.count += 1;
+        }
+        Ok(store)
     }
 
     pub fn contains(&self, name: &[u8]) -> bool {
@@ -222,6 +382,23 @@ const fn name_len(name: &[u8]) -> u8 {
     name.len() as u8
 }
 
+fn valid_name(name: &[u8]) -> bool {
+    !name.is_empty()
+        && name.len() <= MAX_NAME_BYTES
+        && name.iter().all(|byte| {
+            matches!(*byte, b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'.' | b'_' | b'-')
+        })
+}
+
+fn checksum(bytes: &[u8]) -> u32 {
+    let mut value = 0x811c9dc5u32;
+    for byte in bytes {
+        value ^= u32::from(*byte);
+        value = value.wrapping_mul(0x01000193);
+    }
+    value
+}
+
 #[cfg(test)]
 mod tests {
     use super::{Error, Store};
@@ -303,5 +480,22 @@ mod tests {
         let mut transaction = store.transaction();
         transaction.install_batch(&requests).unwrap();
         assert_eq!(transaction.commit().count(), 2);
+    }
+
+    #[test]
+    fn durable_record_round_trip_and_checksum_rejection() {
+        let mut transaction = Store::new(0x3).transaction();
+        transaction
+            .install(&manifest(b"core", 1, 1, None), [1; 32])
+            .unwrap();
+        let store = transaction.commit();
+        let mut bytes = [0u8; super::MAX_RECORD_BYTES];
+        let length = store.encode_record(&mut bytes).unwrap();
+        assert_eq!(Store::decode_record(&bytes[..length]), Ok(store));
+        bytes[length - 1] ^= 1;
+        assert_eq!(
+            Store::decode_record(&bytes[..length]),
+            Err(super::RecordError::BadChecksum)
+        );
     }
 }

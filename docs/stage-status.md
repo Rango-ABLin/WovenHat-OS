@@ -2202,6 +2202,18 @@ acceptance passed on 1/2/4 CPUs. Evidence is recorded in
 Persistent WovenFS publication, power-loss recovery, service/IPC authority,
 and physical USB qualification remain open.
 
+## Stage 21.5 durable WovenStore record codec (2026-10-20)
+
+WovenStore now defines a bounded checksummed `WSTC` v1 catalog record codec.
+It round-trips capability policy, package versions, application digests, and
+dependency metadata, and rejects corruption, malformed lengths, invalid names,
+duplicates, and invalid dependency fields. Host tests, warning-denying Clippy,
+and QEMU acceptance passed on 1/2/4 CPUs. Evidence is recorded in
+`docs/audit-stage21-5-wovenstore-records-2026-10-20.md`.
+
+The record is not yet wired to native WovenFS publication; crash/power-loss
+service integration, IPC authority, and physical USB qualification remain open.
+
 ## Graphics track - bounded quadratic paths (2026-10-18)
 
 `Path::quadratic_to` now flattens quadratic Bézier segments into four

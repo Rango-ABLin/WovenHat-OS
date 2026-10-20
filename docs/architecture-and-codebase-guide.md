@@ -1176,6 +1176,13 @@ returns `MissingDependency` for cycles or absent dependencies. The transaction
 does not publish until the caller commits, so a failed batch cannot expose a
 partial catalog.
 
+The catalog record codec uses `WSTC` version 1 and a fixed per-entry layout;
+the record carries the allowed capability mask, entry count, exact byte length,
+all bounded dependency metadata, and an FNV-1a-style 32-bit checksum over the
+header and entries. It is intentionally a codec, not a storage write: the
+package service must commit it through the authorized WovenFS writer and
+validate the decoded record before publishing the catalog.
+
 The feature-gated `stage19-app-catalog-test` now exercises the install-plan
 boundary for all ten accepted packages together. It verifies each WAPP,
 rejects a mutation, installs and reads each package back through the VFS,

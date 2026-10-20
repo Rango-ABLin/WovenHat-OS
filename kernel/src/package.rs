@@ -150,3 +150,28 @@ pub fn batch_self_test() -> bool {
     let mut transaction = libwoven::store::Store::new(1).transaction();
     transaction.install_batch(&requests).is_ok() && transaction.commit().count() == 2
 }
+
+pub fn record_self_test() -> bool {
+    let manifest = libwoven::package::Manifest {
+        name: b"core",
+        version: 1,
+        capabilities: 1,
+        dependencies: [&[][..]; libwoven::package::MAX_DEPENDENCIES],
+        dependency_count: 0,
+    };
+    let mut transaction = libwoven::store::Store::new(1).transaction();
+    if transaction.install(&manifest, [7; 32]).is_err() {
+        return false;
+    }
+    let store = transaction.commit();
+    let mut record = [0u8; libwoven::store::MAX_RECORD_BYTES];
+    let Ok(length) = store.encode_record(&mut record) else {
+        return false;
+    };
+    if libwoven::store::Store::decode_record(&record[..length]) != Ok(store) {
+        return false;
+    }
+    record[length - 1] ^= 1;
+    libwoven::store::Store::decode_record(&record[..length])
+        == Err(libwoven::store::RecordError::BadChecksum)
+}
