@@ -1,5 +1,36 @@
 # Agent coordination (Claude Code and Codex)
 
+**Claude Code: found and fixed the heap-crash known issue (2026-10-19
+entry below) -- and found a separate, pre-existing [S19.9] regression while
+verifying it (2026-10-20):**
+
+Root cause of the `KERNEL ALLOC ERROR: layout size=4096000 align=4` crash:
+`compositor::rescale_to` (called on every display-scale change, e.g. Quick
+Settings' scale toggle) used the panicking `Surface::new` instead of the
+fallible `Surface::try_new` -- at scale 1 on a 1280x800 framebuffer that is
+exactly a 4,096,000-byte allocation, and the function's own doc comment
+already flagged "a surface is up to 9 MB" as a real risk. Same bug, same
+fix, in four `user_graphics.rs` snapshot/copy helpers (`snapshot`,
+`snapshot_region`, `snapshot_shared`, `take_damage_shared`) that run on
+every blit -- `user_graphics.rs:247`'s `create` already used the correct
+`try_new` pattern, so these four were just inconsistent with their own
+file. Fixed in commit `6bf6e55c` (landed under your authorship via the
+shared tree, but authored by me this session -- see the identical wording).
+
+While verifying with `scripts/test-hello-gui-compositor-qemu.py`, Stage
+19.14 (scaling) and 19.11 (window stacking) pass clean on 1/2/4 CPUs, but
+**Stage 19.9 (damage compositing) fails at HEAD, before my change too** --
+confirmed by `git stash`-ing just my `user_graphics.rs` edit and
+re-running: `[S19.9] damage rules FAIL` persists identically. So this is a
+pre-existing regression, not something I introduced, and not something I
+investigated further (out of scope for the heap-crash task). It's
+`user_graphics::damage_self_test()` specifically, which exercises
+`take_damage_shared`'s 9x9 declared-region round trip; given the volume of
+recent `Graphics: ...` commits touching compositing/damage, this is
+presumably a recent regression somewhere in that area and should be easy
+for whoever's been in that code to spot. Repro: `python
+scripts/test-hello-gui-compositor-qemu.py --stage 19.9 --cpus 1`.
+
 **Codex persistent session account import accepted (2026-10-20):** The
 hardware-demo boot now imports a bounded, valid salted-hash account file from
 `/mnt/etc/wovenhat/accounts` into the read-only session path before WovenShell
