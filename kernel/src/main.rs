@@ -4604,6 +4604,15 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         serial::write_line(format_args!("[S23.3] WovenAI cloud provider: PASSED"));
         qemu_test_exit_success();
     }
+    #[cfg(feature = "stage23-4-test")]
+    {
+        if !stage23_ai_capability_security_self_test() {
+            serial::write_line(format_args!("[S23.4] WovenAI capability security: FAILED"));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!("[S23.4] WovenAI capability security: PASSED"));
+        qemu_test_exit_success();
+    }
     #[cfg(feature = "stage27-2-test")]
     {
         if !update::durable_self_test() {
@@ -6093,6 +6102,80 @@ fn stage23_cloud_provider_self_test() -> bool {
         || task::wait_process(provider_pid.as_u64()).is_err()
     {
         return fail("cloud provider reap failed");
+    }
+    true
+}
+
+#[cfg(feature = "stage23-4-test")]
+fn stage23_ai_capability_security_self_test() -> bool {
+    use capability::{Capability, CapabilitySet};
+    use wovenguard::{
+        authorize_device_access, domain_ceiling, package_sandbox, DeviceClass, SecurityDomain,
+    };
+
+    fn fail(reason: &str) -> bool {
+        serial::write_line(format_args!("[S23.4] {}", reason));
+        false
+    }
+    let local = CapabilitySet::only(Capability::Ipc).with(Capability::Ai);
+    let Some(local_sandbox) = package_sandbox(local) else {
+        return fail("local AI profile rejected");
+    };
+    for capability in [
+        Capability::FileRead,
+        Capability::FileWrite,
+        Capability::NetworkIo,
+        Capability::Secrets,
+        Capability::Camera,
+        Capability::Microphone,
+        Capability::Usb,
+    ] {
+        if local.contains(capability) || local_sandbox.allows(capability) {
+            return fail("local AI profile widened a forbidden capability");
+        }
+    }
+    for device in [
+        DeviceClass::Network,
+        DeviceClass::Storage,
+        DeviceClass::Display,
+        DeviceClass::Input,
+        DeviceClass::Generic,
+    ] {
+        if local_sandbox.allows_device(device)
+            || authorize_device_access(local, local_sandbox, device).allowed
+        {
+            return fail("local AI profile exposed a device");
+        }
+    }
+    let cloud = local
+        .with(Capability::Secrets)
+        .with(Capability::NetworkIo);
+    let Some(cloud_sandbox) = package_sandbox(cloud) else {
+        return fail("cloud AI profile rejected");
+    };
+    if !cloud_sandbox.allows(Capability::Secrets)
+        || !cloud_sandbox.allows_device(DeviceClass::Network)
+        || !authorize_device_access(cloud, cloud_sandbox, DeviceClass::Network).allowed
+    {
+        return fail("explicit cloud capabilities were not preserved");
+    }
+    for capability in [
+        Capability::FileRead,
+        Capability::FileWrite,
+        Capability::Camera,
+        Capability::Microphone,
+        Capability::Usb,
+    ] {
+        if cloud.contains(capability) || cloud_sandbox.allows(capability) {
+            return fail("cloud AI profile widened a forbidden capability");
+        }
+    }
+    let system = domain_ceiling(SecurityDomain::SystemService);
+    for capability in [Capability::Ai, Capability::Secrets, Capability::Camera, Capability::Microphone]
+    {
+        if system.contains(capability) {
+            return fail("system-service ceiling grants sensitive AI authority");
+        }
     }
     true
 }

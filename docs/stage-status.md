@@ -1,5 +1,26 @@
 # Stage status
 
+## Stage 23.4 WovenAI capability security (2026-10-20)
+
+The Stage 23.4 WovenGuard gate makes the AI security contract explicit and
+auditable. A local AI profile is limited to `Ipc + Ai` and receives no file,
+network, secret, camera, microphone, USB, or device policy. A cloud provider
+profile adds only the explicitly requested `Secrets + NetworkIo` authorities;
+the broker remains `Ipc`-only. The SystemService domain ceiling rejects `Ai`,
+`Secrets`, camera, and microphone authority, preventing accidental inheritance
+by unrelated system services.
+
+The dedicated gate passed with exit 33 and
+`[S23.4] WovenAI capability security: PASSED` on 1/2/4 CPUs. Evidence is
+preserved under:
+`audit-artifacts/stage23.4-1cpu-1792524134603006000`,
+`audit-artifacts/stage23.4-2cpu-1792524151189661900`, and
+`audit-artifacts/stage23.4-4cpu-1792524165773461400`.
+
+This proves WovenGuard capability and device-policy narrowing; it does not
+claim real cloud HTTPS/TLS integration, semantic search, assistant actions,
+or physical hardware qualification.
+
 ## Stage 23.3 WovenAI provider-plugin boundary (2026-10-20)
 
 `libwoven::ai_provider` defines the bounded provider-plugin contract. A cloud

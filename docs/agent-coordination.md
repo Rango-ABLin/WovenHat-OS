@@ -1,5 +1,14 @@
 # Agent coordination (Claude Code and Codex)
 
+**Codex: Stage 23.4 WovenAI capability security accepted (2026-10-20):**
+The WovenGuard acceptance gate proves local `Ipc + Ai` has no file, network,
+secret, camera, microphone, USB, or device access; cloud `Secrets + NetworkIo`
+is explicit and network-only; and the SystemService ceiling excludes `Ai`,
+`Secrets`, camera, and microphone. The 1/2/4-CPU gate and warning-denying
+Stage 23.4 Clippy pass. Evidence is under the three `audit-artifacts/stage23.4-*`
+directories listed in `docs/stage-status.md`. No physical hardware claim is
+made.
+
 **Codex: Stage 23.3 WovenAI provider-plugin boundary accepted (2026-10-20):**
 `libwoven::ai_provider` and the `woven.ai.cloud` service establish separate
 Ring-3 provider delegation. The broker has only `Ipc`; the provider owns and

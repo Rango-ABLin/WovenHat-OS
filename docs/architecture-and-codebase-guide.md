@@ -1355,6 +1355,17 @@ endpoint configuration, TLS validation, credential provisioning, retries,
 quotas, and billing/availability policy require a subsequent provider
 hardening gate.
 
+## Stage 23.4 WovenAI capability security (2026-10-20)
+
+The AI security gate uses the same WovenGuard `package_sandbox` and device
+authorization path as every other Ring-3 package. The local profile is
+`Ipc + Ai` only; its file masks and device mask are empty. The cloud profile
+explicitly adds `Secrets + NetworkIo`, which produces a network-only device
+mask and still has no file, camera, microphone, USB, or generic-device access.
+The SystemService domain ceiling excludes `Ai`, `Secrets`, camera, and
+microphone authority. These checks ensure a model receives only declared
+capabilities and cannot widen its authority through the broker.
+
 The feature-gated `stage19-app-catalog-test` now exercises the install-plan
 boundary for all ten accepted packages together. It verifies each WAPP,
 rejects a mutation, installs and reads each package back through the VFS,

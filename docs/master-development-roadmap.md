@@ -844,6 +844,11 @@ network
 
 It receives explicit WovenGuard capabilities.
 
+Stage 23.4 acceptance requires the local and provider profiles to narrow
+authority through WovenGuard file/device policy; no model inherits secrets,
+files, camera, microphone, USB, applications, or network access without an
+explicit package capability declaration.
+
 23.5 — Semantic Search
 
 Search:
