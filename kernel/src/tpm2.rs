@@ -44,6 +44,12 @@ const TPM_CC_NV_READ: u32 = 0x0000_014e;
 const TPM_CC_NV_DEFINE_SPACE: u32 = 0x0000_012a;
 const TPM_ALG_SHA256: u16 = 0x000b;
 #[allow(dead_code)]
+const TPM_ALG_RSASSA: u16 = 0x0014;
+#[allow(dead_code)]
+const TPM_ALG_RSAPSS: u16 = 0x0016;
+#[allow(dead_code)]
+const TPM_ALG_ECDSA: u16 = 0x0018;
+#[allow(dead_code)]
 const TPM_ST_ATTEST_QUOTE: u16 = 0x8018;
 #[allow(dead_code)]
 const TPM_GENERATED_VALUE: u32 = 0xff54_4347;
@@ -102,6 +108,16 @@ pub struct QuoteAttestation {
     pub pcr_digest: [u8; 32],
     pub clock: u64,
     pub firmware_version: u64,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct QuoteSignature {
+    pub algorithm: u16,
+    pub hash_algorithm: u16,
+    pub first_length: u16,
+    pub first: [u8; 512],
+    pub second_length: u16,
+    pub second: [u8; 72],
 }
 
 /// Validate the public metadata of the fixed-size NV object reserved for the
@@ -238,6 +254,59 @@ pub fn decode_quote_attestation(
         clock,
         firmware_version,
     })
+}
+
+/// Parse the bounded TPMT_SIGNATURE shape accompanying a quote. This checks
+/// only supported SHA-256 scheme encodings; it deliberately does not claim
+/// RSA/ECC cryptographic verification until a validated signing public key is
+/// available from the physical TPM provisioning path.
+#[allow(dead_code)]
+pub fn decode_quote_signature(
+    signature: &[u8],
+) -> Result<(QuoteSignature, usize), Error> {
+    if signature.len() < 4 {
+        return Err(Error::MalformedResponse);
+    }
+    let algorithm = u16::from_be_bytes(signature[..2].try_into().unwrap());
+    let hash_algorithm = u16::from_be_bytes(signature[2..4].try_into().unwrap());
+    if hash_algorithm != TPM_ALG_SHA256 {
+        return Err(Error::InvalidPolicy);
+    }
+    let mut parsed = QuoteSignature {
+        algorithm,
+        hash_algorithm,
+        first_length: 0,
+        first: [0_u8; 512],
+        second_length: 0,
+        second: [0_u8; 72],
+    };
+    let mut offset = 4;
+    match algorithm {
+        TPM_ALG_RSASSA | TPM_ALG_RSAPSS => {
+            let length = u16::from_be_bytes(quote_take(signature, &mut offset, 2)?.try_into().unwrap()) as usize;
+            if length == 0 || length > 512 {
+                return Err(Error::MalformedResponse);
+            }
+            parsed.first[..length].copy_from_slice(quote_take(signature, &mut offset, length)?);
+            parsed.first_length = length as u16;
+        }
+        TPM_ALG_ECDSA => {
+            let r_length = u16::from_be_bytes(quote_take(signature, &mut offset, 2)?.try_into().unwrap()) as usize;
+            if r_length == 0 || r_length > 72 {
+                return Err(Error::MalformedResponse);
+            }
+            parsed.first[..r_length].copy_from_slice(quote_take(signature, &mut offset, r_length)?);
+            parsed.first_length = r_length as u16;
+            let s_length = u16::from_be_bytes(quote_take(signature, &mut offset, 2)?.try_into().unwrap()) as usize;
+            if s_length == 0 || s_length > 72 {
+                return Err(Error::MalformedResponse);
+            }
+            parsed.second[..s_length].copy_from_slice(quote_take(signature, &mut offset, s_length)?);
+            parsed.second_length = s_length as u16;
+        }
+        _ => return Err(Error::UnsupportedInterface),
+    }
+    Ok((parsed, offset))
 }
 // The probe runs before timer IRQs are enabled, so this bound must not depend
 // on the kernel tick counter. It is deliberately finite even for a wedged
@@ -1194,6 +1263,38 @@ pub fn self_test() -> bool {
             quote[10] ^= 1;
             if decode_quote_attestation(&quote, &quote_nonce, 7, &expected_quote_digest)
                 != Err(Error::PolicyMismatch)
+            {
+                return false;
+            }
+            let mut rsa_signature = [0_u8; 262];
+            rsa_signature[..2].copy_from_slice(&TPM_ALG_RSASSA.to_be_bytes());
+            rsa_signature[2..4].copy_from_slice(&TPM_ALG_SHA256.to_be_bytes());
+            rsa_signature[4..6].copy_from_slice(&256_u16.to_be_bytes());
+            rsa_signature[6..].fill(0xa5);
+            let Ok((rsa, rsa_size)) = decode_quote_signature(&rsa_signature) else {
+                return false;
+            };
+            if rsa_size != 262
+                || rsa.algorithm != TPM_ALG_RSASSA
+                || rsa.hash_algorithm != TPM_ALG_SHA256
+                || rsa.first_length != 256
+            {
+                return false;
+            }
+            let mut ecdsa_signature = [0_u8; 12];
+            ecdsa_signature[..2].copy_from_slice(&TPM_ALG_ECDSA.to_be_bytes());
+            ecdsa_signature[2..4].copy_from_slice(&TPM_ALG_SHA256.to_be_bytes());
+            ecdsa_signature[4..6].copy_from_slice(&2_u16.to_be_bytes());
+            ecdsa_signature[6..8].fill(0x11);
+            ecdsa_signature[8..10].copy_from_slice(&2_u16.to_be_bytes());
+            ecdsa_signature[10..12].fill(0x22);
+            let Ok((ecdsa, ecdsa_size)) = decode_quote_signature(&ecdsa_signature) else {
+                return false;
+            };
+            if ecdsa_size != 12
+                || ecdsa.algorithm != TPM_ALG_ECDSA
+                || ecdsa.first_length != 2
+                || ecdsa.second_length != 2
             {
                 return false;
             }

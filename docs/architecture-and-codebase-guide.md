@@ -1,5 +1,13 @@
 # WovenHat OS Architecture & Codebase Guide
 
+### Stage 24.30 - bounded TPM quote signature framing
+
+`decode_quote_signature` validates the bounded `TPMT_SIGNATURE` scheme and
+SHA-256 hash selector, then parses exact-size RSA (RSASSA/RSAPSS) or ECDSA
+components. It reports the consumed frame length but deliberately performs
+no public-key or cryptographic verification; callers must not treat framing
+as attestation.
+
 ### Stage 24.29 - bounded TPM quote attestation parsing
 
 `decode_quote_attestation` validates the bounded `TPMS_ATTEST` quote shape,

@@ -1,5 +1,15 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - Stage 24.30 (2026-10-21)
+
+Added bounded TPM2 quote-signature framing for SHA-256 RSASSA, RSAPSS, and
+ECDSA schemes with exact component bounds and consumed-length reporting.
+Executable QEMU self-test, host tests, affected Clippy gates, and signed
+system-apps 1/2/4-CPU acceptance pass. Evidence is in
+`docs/audit-stage24-30-quote-signature-shape-2026-10-21.md`; USB remains
+untouched. Public-key/signature verification, recovery, and physical TPM
+qualification remain open.
+
 ## Codex - Stage 24.29 (2026-10-21)
 
 Added bounded TPM2 quote-attestation parsing. It binds generated-value magic,

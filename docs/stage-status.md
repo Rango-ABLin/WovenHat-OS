@@ -1,5 +1,18 @@
 # Stage status
 
+## Stage 24.30 bounded TPM quote signature framing (2026-10-21)
+
+The TPM2 layer now parses bounded `TPMT_SIGNATURE` shapes for SHA-256
+RSASSA, RSAPSS, and ECDSA quote schemes, including exact RSA or ECDSA
+component bounds and consumed-length reporting. The executable QEMU
+self-test, host tests (89), all-targets and affected feature Clippy, and
+signed system-apps 1/2/4-CPU acceptance pass. Evidence is under
+`audit-artifacts/stage24.30-quote-signature-shape-20261021`.
+
+This is framing only: it does not verify a TPM public key, RSA/ECC signature,
+or quote-to-key binding. Physical TPM attestation, recovery, and release
+qualification remain required.
+
 ## Stage 24.29 bounded TPM quote attestation parsing (2026-10-21)
 
 The TPM2 layer now parses a bounded `TPMS_ATTEST` quote structure and binds
