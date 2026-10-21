@@ -1,5 +1,43 @@
 # Stage status
 
+## Stage 30 boot-stage timing, and a real fix it found immediately (2026-10-21)
+
+First slice of performance-engineering tooling (Stage 30): the existing
+`BOOT LOADER [n/7]` progress markers are now timestamped (`kernel/src/main.rs`'s
+new `boot_stage` helper and `BOOT_STAGE_CLOCK`), logging the tick delta since
+the previous marker (or boot start, for the first) as `[BOOT PROFILE]` to
+serial. Coarse (10 ms resolution, 100 Hz ticks) but immediately useful.
+
+The first run found demo-account PBKDF2 hashing (2 accounts x 100,000
+iterations, force-soft SHA-256 -- this kernel never uses a hardware SHA
+extension) consuming 4241 of a ~4350-tick hardware-demo boot -- effectively
+the entire boot, hidden inside what the unprofiled boot just called "system
+files ready". Fixed in `install_hardware_demo_accounts`: `ada`/`1234` and
+`lin`/`9876` are fixed, public demo credentials (not secrets), so their
+salt and hash are now precomputed once rather than recomputed by calling
+`pbkdf2_hmac` on every single boot of every test run. Re-measured at 2
+ticks for the same stage. The precomputed hash was verified correct the
+only way that matters: the hardware-demo QEMU gate's own sign-in step
+(typing `1234` and reading `woven-shell: signed in: ada` back) still
+passes.
+
+This does not touch the general sign-in/change-PIN verify path, which
+still computes PBKDF2 at the same iteration count on every real sign-in
+attempt (that credential is live-typed, so there is nothing to
+precompute). Whether that cost matters in practice is an open question,
+not a conclusion this measurement supports: tick counts under a CPU-bound
+software loop running inside QEMU's TCG emulation do not necessarily map
+1:1 to real wall-clock time, and the interactive sign-in/Change-PIN QEMU
+gates have been passing within their deadlines throughout this session.
+Lowering `PBKDF2_ITERATIONS` would trade security margin for speed, so
+that stays an explicit decision for the user rather than something to
+change unilaterally from a single ambiguous measurement.
+
+Validation: kernel clippy (default features) and host `cargo clippy
+--all-targets -- -D warnings` passed; `cargo test -p libwoven` (95 tests)
+passed; `scripts/test-shell-qemu.py --hardware-demo` and `--system-apps`
+both passed on 1/2/4 CPUs.
+
 ## Stage 25.2 - CPU idle capability boundary (2026-10-21)
 
 The CPU HAL now reports architectural idle capabilities through syscall 236
