@@ -1,5 +1,15 @@
 # WovenHat OS Architecture & Codebase Guide
 
+### Stage 24.50 - hardware credential decision
+
+`authorize_hardware_credential` derives a domain-separated quote nonce from an
+active `CredentialRootLease`, the lease generation, and a bounded identity
+context. It then delegates to `authorize_quote`, preserving signed TAN1
+attestation-Name binding, TPM ReadPublic Name binding, nonce/PCR checks, and
+RSA/ECC verification. Only a `CredentialDecision` carrying the root generation
+and verified attestation is returned; root material is never exposed. A
+rotated or revoked lease cannot authorize a decision.
+
 ### Stage 24.49 - credential-root lifecycle
 
 `CredentialRootLease` is a non-copyable kernel-owned lease around the

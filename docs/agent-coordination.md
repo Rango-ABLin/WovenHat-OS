@@ -1,5 +1,15 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - Stage 24.50 (2026-10-21)
+
+Added the hardware credential decision boundary. A bounded identity context is
+combined with the active credential-root generation to derive the quote nonce;
+the existing signed Name, ReadPublic, PCR, and signature checks must all pass
+before a generation-tagged decision is returned. Revoked roots fail closed.
+Host, Clippy, memory QEMU, and signed system-apps 1/2/4-CPU gates pass. Live
+physical TPM and identity-session consumption remain open. USB remains
+untouched.
+
 ## Codex - Stage 24.49 (2026-10-21)
 
 Added a generation-tagged, non-copyable credential-root lease with validated

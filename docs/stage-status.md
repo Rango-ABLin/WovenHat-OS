@@ -1,5 +1,20 @@
 # Stage status
 
+## Stage 24.50 hardware credential decision boundary (2026-10-21)
+
+The TPM layer now binds a hardware credential decision to the active
+credential-root lease. It derives the exact 32-byte quote challenge from the
+root generation and bounded identity context, then requires the existing
+signed TAN1 Name, ReadPublic binding, PCR evidence, and cryptographic quote
+verification before returning a generation-tagged decision. Inactive or
+revoked roots fail before quote authorization. Host tests (89), all-targets
+and affected feature Clippy, executable QEMU, and signed system-apps 1/2/4-
+CPU acceptance pass. Evidence is under
+`audit-artifacts/stage24.50-hardware-credential-decision-20261021`.
+
+Live physical TPM quote success, identity-session consumption of the decision,
+reboot recovery, and physical qualification remain required.
+
 ## Stage 24.49 credential-root lifecycle (2026-10-21)
 
 The TPM2 layer now owns a generation-tagged kernel credential-root lease.

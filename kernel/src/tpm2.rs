@@ -1053,6 +1053,70 @@ pub fn authorize_quote(request: QuoteAuthorizationRequest<'_>) -> Result<QuoteAt
     }
     Ok(attestation)
 }
+
+/// Hardware credential evidence whose challenge is derived from the active
+/// credential-root generation. The result contains no root material and is
+/// valid only for the generation that produced it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct CredentialDecision {
+    root_generation: u64,
+    attestation: QuoteAttestation,
+}
+
+impl CredentialDecision {
+    #[allow(dead_code)]
+    pub fn root_generation(self) -> u64 {
+        self.root_generation
+    }
+
+    #[allow(dead_code)]
+    pub fn attestation(self) -> QuoteAttestation {
+        self.attestation
+    }
+}
+
+/// All inputs required for a hardware-backed identity decision. The identity
+/// context is copied into a root-derived challenge, so a quote for another
+/// account or operation cannot be replayed for this decision.
+pub struct HardwareCredentialRequest<'a> {
+    pub name_policy: &'a [u8],
+    pub trusted_policy_key: &'a [u8; 32],
+    pub public: &'a AttestationPublic,
+    pub quote: &'a [u8],
+    pub signature: &'a [u8],
+    pub identity_context: &'a [u8],
+    pub expected_pcr: u8,
+    pub expected_digest: &'a [u8; 32],
+}
+
+/// Make the credential decision only after the active root derives the exact
+/// quote challenge and the existing fail-closed quote authorization succeeds.
+/// Root rotation/revocation is checked before any evidence is accepted.
+#[allow(dead_code)]
+pub fn authorize_hardware_credential(
+    root: &CredentialRootLease,
+    request: HardwareCredentialRequest<'_>,
+) -> Result<CredentialDecision, Error> {
+    if !root.active {
+        return Err(Error::InvalidPolicy);
+    }
+    let mut expected_nonce = [0_u8; 32];
+    root.derive(request.identity_context, &mut expected_nonce)?;
+    let attestation = authorize_quote(QuoteAuthorizationRequest {
+        name_policy: request.name_policy,
+        trusted_policy_key: request.trusted_policy_key,
+        public: request.public,
+        quote: request.quote,
+        signature: request.signature,
+        expected_nonce: &expected_nonce,
+        expected_pcr: request.expected_pcr,
+        expected_digest: request.expected_digest,
+    })?;
+    Ok(CredentialDecision {
+        root_generation: root.generation,
+        attestation,
+    })
+}
 // The probe runs before timer IRQs are enabled, so this bound must not depend
 // on the kernel tick counter. It is deliberately finite even for a wedged
 // device or malformed firmware descriptor.
@@ -3329,6 +3393,47 @@ pub fn self_test() -> bool {
                 expected_pcr: 7,
                 expected_digest: &expected_quote_digest,
             }) != Err(Error::CredentialMismatch)
+            {
+                return false;
+            }
+            let Ok(mut decision_root) = provision_credential_root(
+                &public,
+                0x0150_0000,
+                &expected_policy,
+                &expected_root,
+            ) else {
+                return false;
+            };
+            if authorize_hardware_credential(
+                &decision_root,
+                HardwareCredentialRequest {
+                    name_policy: &name_policy,
+                    trusted_policy_key: &policy_key,
+                    public: &parsed_public,
+                    quote: &quote,
+                    signature: &[],
+                    identity_context: b"alice",
+                    expected_pcr: 7,
+                    expected_digest: &expected_quote_digest,
+                },
+            ) != Err(Error::CredentialMismatch)
+                || revoke_credential_root(&mut decision_root).is_err()
+            {
+                return false;
+            }
+            if authorize_hardware_credential(
+                &decision_root,
+                HardwareCredentialRequest {
+                    name_policy: &name_policy,
+                    trusted_policy_key: &policy_key,
+                    public: &parsed_public,
+                    quote: &quote,
+                    signature: &[],
+                    identity_context: b"alice",
+                    expected_pcr: 7,
+                    expected_digest: &expected_quote_digest,
+                },
+            ) != Err(Error::InvalidPolicy)
             {
                 return false;
             }
