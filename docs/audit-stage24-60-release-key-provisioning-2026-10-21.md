@@ -16,8 +16,9 @@ public key and rejects a mismatched trusted public key.
 
 ## Verification
 
-- `scripts/test-release-key-provisioning.py`: passed; missing-seed production
-  invocation rejected, matching explicit-key invocation succeeded.
+- `scripts/test-release-key-provisioning.py`: passed; missing-seed and
+  mismatched-public-key production invocations rejected, matching explicit-key
+  invocation succeeded.
 - `cargo fmt --manifest-path tools/wapp-packager/Cargo.toml`: passed.
 - `cargo clippy --manifest-path tools/wapp-packager/Cargo.toml -- -D warnings`:
   passed.

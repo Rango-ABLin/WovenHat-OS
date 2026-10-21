@@ -38,6 +38,12 @@ def main():
         packaged = run(root, source, output, accepted)
         if packaged.returncode != 0 or not output.is_file():
             raise SystemExit(packaged.stderr or "production packager rejected matching release keys")
+
+        mismatched = dict(accepted)
+        mismatched["WOVENHAT_APP_TRUSTED_PUBLIC_KEY_HEX"] = "00" * 32
+        rejected_mismatch = run(root, source, output, mismatched)
+        if rejected_mismatch.returncode == 0 or "application signing key mismatch" not in rejected_mismatch.stderr:
+            raise SystemExit("production packager accepted a mismatched trusted public key")
     print("Release-key provisioning boundary: PASS")
 
 
