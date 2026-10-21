@@ -44,6 +44,10 @@ const TPM_CC_NV_READ: u32 = 0x0000_014e;
 const TPM_CC_NV_DEFINE_SPACE: u32 = 0x0000_012a;
 const TPM_ALG_SHA256: u16 = 0x000b;
 #[allow(dead_code)]
+const TPM_ST_ATTEST_QUOTE: u16 = 0x8018;
+#[allow(dead_code)]
+const TPM_GENERATED_VALUE: u32 = 0xff54_4347;
+#[allow(dead_code)]
 const TPM_ALG_NULL: u16 = 0x0010;
 #[allow(dead_code)]
 const TPM_SESS_POLICY: u8 = 0x01;
@@ -88,6 +92,16 @@ pub struct PolicyCommandResponse {
     pub nonce_tpm_length: u8,
     pub nonce_tpm: [u8; 32],
     pub attributes: u8,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct QuoteAttestation {
+    pub nonce_length: u8,
+    pub nonce: [u8; 32],
+    pub pcr: u8,
+    pub pcr_digest: [u8; 32],
+    pub clock: u64,
+    pub firmware_version: u64,
 }
 
 /// Validate the public metadata of the fixed-size NV object reserved for the
@@ -141,6 +155,89 @@ pub fn validate_credential_root_readback(
         return Err(Error::CredentialMismatch);
     }
     Ok(())
+}
+
+fn quote_take<'a>(bytes: &'a [u8], offset: &mut usize, length: usize) -> Result<&'a [u8], Error> {
+    let end = offset.checked_add(length).ok_or(Error::MalformedResponse)?;
+    if end > bytes.len() {
+        return Err(Error::MalformedResponse);
+    }
+    let value = &bytes[*offset..end];
+    *offset = end;
+    Ok(value)
+}
+
+/// Parse a TPM2 quote attestation and bind its nonce, PCR selection, and
+/// digest to caller-supplied expectations. The returned structure is evidence
+/// only: the TPM signing key and quote signature must still be authenticated
+/// before any credential decision.
+#[allow(dead_code)]
+pub fn decode_quote_attestation(
+    quote: &[u8],
+    expected_nonce: &[u8],
+    expected_pcr: u8,
+    expected_digest: &[u8; 32],
+) -> Result<QuoteAttestation, Error> {
+    if expected_nonce.is_empty() || expected_nonce.len() > 32 || expected_pcr >= 24 {
+        return Err(Error::InvalidPolicy);
+    }
+    let mut offset = 0;
+    let magic = u32::from_be_bytes(quote_take(quote, &mut offset, 4)?.try_into().unwrap());
+    let structure = u16::from_be_bytes(quote_take(quote, &mut offset, 2)?.try_into().unwrap());
+    if magic != TPM_GENERATED_VALUE || structure != TPM_ST_ATTEST_QUOTE {
+        return Err(Error::MalformedResponse);
+    }
+    let signer_length = u16::from_be_bytes(quote_take(quote, &mut offset, 2)?.try_into().unwrap()) as usize;
+    if signer_length > 64 {
+        return Err(Error::MalformedResponse);
+    }
+    quote_take(quote, &mut offset, signer_length)?;
+    let nonce_length = u16::from_be_bytes(quote_take(quote, &mut offset, 2)?.try_into().unwrap()) as usize;
+    if nonce_length != expected_nonce.len()
+        || quote_take(quote, &mut offset, nonce_length)? != expected_nonce
+    {
+        return Err(Error::PolicyMismatch);
+    }
+    let clock = u64::from_be_bytes(quote_take(quote, &mut offset, 8)?.try_into().unwrap());
+    quote_take(quote, &mut offset, 4)?;
+    quote_take(quote, &mut offset, 4)?;
+    quote_take(quote, &mut offset, 1)?;
+    let firmware_version = u64::from_be_bytes(quote_take(quote, &mut offset, 8)?.try_into().unwrap());
+    let selection_count = u32::from_be_bytes(quote_take(quote, &mut offset, 4)?.try_into().unwrap());
+    if selection_count != 1
+        || u16::from_be_bytes(quote_take(quote, &mut offset, 2)?.try_into().unwrap()) != TPM_ALG_SHA256
+        || quote_take(quote, &mut offset, 1)?[0] != 3
+    {
+        return Err(Error::MalformedResponse);
+    }
+    let selected = quote_take(quote, &mut offset, 3)?;
+    let selected_byte = usize::from(expected_pcr / 8);
+    if selected[0] != if selected_byte == 0 { 1 << (expected_pcr % 8) } else { 0 }
+        || selected[1] != if selected_byte == 1 { 1 << (expected_pcr % 8) } else { 0 }
+        || selected[2] != if selected_byte == 2 { 1 << (expected_pcr % 8) } else { 0 }
+    {
+        return Err(Error::PolicyMismatch);
+    }
+    let digest_length = u16::from_be_bytes(quote_take(quote, &mut offset, 2)?.try_into().unwrap()) as usize;
+    if digest_length != 32 {
+        return Err(Error::MalformedResponse);
+    }
+    let digest_slice = quote_take(quote, &mut offset, 32)?;
+    let mut pcr_digest = [0_u8; 32];
+    pcr_digest.copy_from_slice(digest_slice);
+    if pcr_digest != *expected_digest || offset != quote.len() {
+        return Err(Error::PolicyMismatch);
+    }
+    let mut nonce = [0_u8; 32];
+    nonce[..nonce_length].copy_from_slice(expected_nonce);
+    Ok(QuoteAttestation {
+        nonce_length: nonce_length as u8,
+        nonce,
+        pcr: expected_pcr,
+        pcr_digest,
+        clock,
+        firmware_version,
+    })
 }
 // The probe runs before timer IRQs are enabled, so this bound must not depend
 // on the kernel tick counter. It is deliberately finite even for a wedged
@@ -1060,6 +1157,43 @@ pub fn self_test() -> bool {
                 &expected_root,
                 &altered_root,
             ) != Err(Error::CredentialMismatch)
+            {
+                return false;
+            }
+            let mut quote = [0_u8; 95];
+            let quote_nonce = [0x33; 16];
+            quote[..4].copy_from_slice(&TPM_GENERATED_VALUE.to_be_bytes());
+            quote[4..6].copy_from_slice(&TPM_ST_ATTEST_QUOTE.to_be_bytes());
+            quote[6..8].copy_from_slice(&0_u16.to_be_bytes());
+            quote[8..10].copy_from_slice(&(quote_nonce.len() as u16).to_be_bytes());
+            quote[10..26].copy_from_slice(&quote_nonce);
+            quote[26..34].copy_from_slice(&123_u64.to_be_bytes());
+            quote[43..51].copy_from_slice(&456_u64.to_be_bytes());
+            quote[51..55].copy_from_slice(&1_u32.to_be_bytes());
+            quote[55..57].copy_from_slice(&TPM_ALG_SHA256.to_be_bytes());
+            quote[57] = 3;
+            quote[58] = 0x80;
+            quote[61..63].copy_from_slice(&32_u16.to_be_bytes());
+            quote[63..95].fill(0x3c);
+            let expected_quote_digest = [0x3c; 32];
+            let Ok(attestation) = decode_quote_attestation(
+                &quote,
+                &quote_nonce,
+                7,
+                &expected_quote_digest,
+            ) else {
+                return false;
+            };
+            if attestation.nonce_length != quote_nonce.len() as u8
+                || attestation.pcr != 7
+                || attestation.clock != 123
+                || attestation.firmware_version != 456
+            {
+                return false;
+            }
+            quote[10] ^= 1;
+            if decode_quote_attestation(&quote, &quote_nonce, 7, &expected_quote_digest)
+                != Err(Error::PolicyMismatch)
             {
                 return false;
             }

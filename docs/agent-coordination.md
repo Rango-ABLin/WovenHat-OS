@@ -1,5 +1,16 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - Stage 24.29 (2026-10-21)
+
+Added bounded TPM2 quote-attestation parsing. It binds generated-value magic,
+quote type, qualifying nonce, one SHA-256 PCR selection, and exact PCR digest
+to caller expectations while retaining no secret material. Executable QEMU
+self-test, host tests, affected Clippy gates, and signed system-apps 1/2/4-
+CPU acceptance pass. Evidence is in
+`docs/audit-stage24-29-quote-attestation-2026-10-21.md`; USB remains
+untouched. Quote-key/signature verification, recovery, and physical TPM
+qualification remain open.
+
 ## Codex - Stage 24.28 (2026-10-21)
 
 Added the fail-closed credential-root read-back promotion boundary. It

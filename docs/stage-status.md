@@ -1,5 +1,19 @@
 # Stage status
 
+## Stage 24.29 bounded TPM quote attestation parsing (2026-10-21)
+
+The TPM2 layer now parses a bounded `TPMS_ATTEST` quote structure and binds
+its generated-value magic, quote type, qualifying nonce, single SHA-256 PCR
+selection, and 32-byte PCR digest to caller expectations. Clock and firmware
+metadata are retained only in the returned evidence structure. The executable
+QEMU self-test, host tests (89), all-targets and affected feature Clippy, and
+signed system-apps 1/2/4-CPU acceptance pass. Evidence is under
+`audit-artifacts/stage24.29-quote-attestation-20261021`.
+
+This parses evidence only; no TPM signing key or quote signature is verified,
+and no quote can authorize credentials by itself. Physical TPM attestation,
+signature verification, recovery, and release qualification remain required.
+
 ## Stage 24.28 credential-root read-back promotion boundary (2026-10-21)
 
 The TPM2 layer now validates a credential-root promotion decision as one

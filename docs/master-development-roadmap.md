@@ -2,6 +2,13 @@ WovenHat OS — Stage 10.7 → Version 1.0 Master Roadmap
 Phase I — Finish the asynchronous kernel foundation
 Stage 10.7 — Asynchronous TCP
 
+Stage 24.29 - Bounded TPM quote attestation parsing
+
+Implemented bounded TPM quote parsing and nonce/PCR-digest binding. The
+executable QEMU self-test, host tests, Clippy, and signed 1/2/4-CPU
+acceptance pass. Quote signature/key verification, live physical TPM
+attestation, recovery, and release qualification remain required.
+
 Stage 24.28 - Credential-root read-back promotion boundary
 
 Implemented combined NV metadata and constant-time exact-value validation

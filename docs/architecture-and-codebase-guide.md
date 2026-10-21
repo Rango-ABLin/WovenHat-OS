@@ -1,5 +1,13 @@
 # WovenHat OS Architecture & Codebase Guide
 
+### Stage 24.29 - bounded TPM quote attestation parsing
+
+`decode_quote_attestation` validates the bounded `TPMS_ATTEST` quote shape,
+generated-value magic, quote type, qualifying nonce, one SHA-256 PCR
+selection, and exact 32-byte digest. It returns quote evidence but does not
+authenticate the signing key or signature; those checks remain mandatory
+before trust decisions.
+
 ### Stage 24.28 - credential-root read-back promotion boundary
 
 `validate_credential_root_readback` first validates the complete NV public
