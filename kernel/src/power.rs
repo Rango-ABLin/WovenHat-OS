@@ -38,6 +38,8 @@ pub enum PrepareError {
     NoSuspend,
     /// A bound driver refused quiescence.
     DriverRefused,
+    /// The low-memory wake image could not be installed.
+    TrampolineUnavailable,
 }
 
 /// Driver-quiescence preparation for a future S3 transition. Construction
@@ -49,7 +51,7 @@ pub enum PrepareError {
 )]
 pub struct SuspendPreparation {
     plan: crate::driver::SuspendPlan,
-    wake_page: u64,
+    trampoline: crate::smp::WakeTrampoline,
 }
 
 /// Quiesce the current driver set if firmware advertises S3. This boundary is
@@ -66,13 +68,17 @@ pub fn prepare_suspend() -> Result<SuspendPreparation, PrepareError> {
     if power.pm1a_control == 0 || power.s3.is_none() || !acpi_mode(power) {
         return Err(PrepareError::NoSuspend);
     }
-    let Some(wake_page) = crate::smp::wake_page() else {
+    if crate::smp::wake_page().is_none() {
         return Err(PrepareError::NoSuspend);
-    };
+    }
     let Some(plan) = crate::driver::suspend_all() else {
         return Err(PrepareError::DriverRefused);
     };
-    Ok(SuspendPreparation { plan, wake_page })
+    let Some(trampoline) = crate::smp::install_wake_trampoline(wake_entry as *const () as u64) else {
+        let _ = crate::driver::resume_all(plan);
+        return Err(PrepareError::TrampolineUnavailable);
+    };
+    Ok(SuspendPreparation { plan, trampoline })
 }
 
 /// Abort a prepared suspend and restore drivers in reverse order.
@@ -81,7 +87,30 @@ pub fn prepare_suspend() -> Result<SuspendPreparation, PrepareError> {
     reason = "future S3 transition rollback calls this on failed entry or wake"
 )]
 pub fn abort_suspend(preparation: SuspendPreparation) -> bool {
-    crate::driver::resume_all(preparation.plan)
+    let trampoline_released = crate::smp::release_wake_trampoline(preparation.trampoline);
+    trampoline_released && crate::driver::resume_all(preparation.plan)
+}
+
+#[expect(
+    dead_code,
+    reason = "entered by the future firmware wake path after S3 resume"
+)]
+extern "C" fn wake_entry() -> ! {
+    x86_64::instructions::interrupts::disable();
+    crate::gdt::init();
+    crate::interrupts::init();
+    crate::serial::write_line(format_args!("[POWER] firmware wake trampoline reached"));
+    loop {
+        x86_64::instructions::hlt();
+    }
+}
+
+#[cfg(feature = "stage25-7-test")]
+pub fn wake_trampoline_self_test() -> bool {
+    let Some(trampoline) = crate::smp::install_wake_trampoline(wake_entry as *const () as u64) else {
+        return false;
+    };
+    crate::smp::release_wake_trampoline(trampoline)
 }
 
 /// Turn the machine off. Returns only if it is still running.

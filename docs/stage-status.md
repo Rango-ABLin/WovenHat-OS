@@ -1,5 +1,19 @@
 # Stage status
 
+## Stage 25.7 - wake-trampoline staging (2026-10-21)
+
+The proven AP transition image can now be staged on the reserved low wake
+page with a private identity-mapped root, dedicated wake stack, and entry
+point. Page-table ownership is transactional: abort releases the image and
+restores drivers. The guarded stage25-7 QEMU test passed on 1/2/4 CPUs.
+
+Evidence is in `docs/audit-stage25-7-wake-trampoline-2026-10-21.md` and the
+retained `audit-artifacts/stage25.7-*` directories.
+
+This does not claim FACS vector installation, CPU-state save/restore,
+secondary-CPU coordination, S3 entry, firmware wake, or physical
+suspend/resume qualification.
+
 ## Stage 25.6 - low-memory wake-page reservation (2026-10-21)
 
 SMP preparation now reserves a distinct usable page below 640 KiB for the

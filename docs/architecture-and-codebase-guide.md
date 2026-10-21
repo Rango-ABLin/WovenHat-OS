@@ -3550,3 +3550,18 @@ cannot be handed to unrelated allocations. If no second suitable page exists,
 address in the private preparation token. The page is not executable yet:
 trampoline construction, FACS vector ownership, CPU-state preservation, and
 the S3 transition remain later boundaries.
+
+## Stage 25.7 wake-trampoline staging
+
+`smp::install_wake_trampoline` reuses the bounded `ap_start.S` real-mode to
+long-mode image. It clones the current kernel root, installs a private
+identity map for the low transition, patches the reserved wake page, and
+points the image at a dedicated aligned stack and wake entry. The returned
+`WakeTrampoline` owns the three allocated page-table frames; release attempts
+all three frames rather than short-circuiting teardown.
+
+`power::prepare_suspend` stages this image only after driver quiescence and
+rolls back drivers if staging fails. No FACS write occurs in this boundary.
+The wake entry currently reinitializes GDT/interrupt foundations and parks;
+register/CPU-state restore, secondary-CPU restart, FACS vector installation,
+and S3 entry remain required before exposing a suspend action.

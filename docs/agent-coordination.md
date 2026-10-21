@@ -123,6 +123,16 @@ state save/restore, secondary-CPU coordination, S3 entry, and firmware wake
 remain open. See
 `docs/audit-stage25-6-low-wake-page-2026-10-21.md`.
 
+## Codex - Stage 25.7 wake-trampoline staging (2026-10-21)
+
+The shared branch now stages the existing AP real-mode-to-long-mode image on
+the reserved S3 wake page with a private identity-mapped root, dedicated wake
+stack, and transactional page-table ownership. The guarded QEMU self-test
+passes on 1/2/4 CPUs and performs no S3 or FACS write. CPU/register-state
+restore, secondary-CPU coordination, vector installation, S3 entry, and
+physical suspend qualification remain open. See
+`docs/audit-stage25-7-wake-trampoline-2026-10-21.md`.
+
 ## Codex - Stage 24.60 release-key provisioning (2026-10-21)
 
 Production WAPP packaging now requires explicit signing-seed and trusted

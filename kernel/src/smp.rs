@@ -63,6 +63,10 @@ struct Stack(UnsafeCell<[u8; 131072]>);
 // Each AP exclusively owns its bootstrap stack for its entire lifetime.
 unsafe impl Sync for Stack {}
 static STACKS: [Stack; MAX_CPUS] = [const { Stack(UnsafeCell::new([0; 131072])) }; MAX_CPUS];
+#[repr(align(16))]
+struct WakeStack(UnsafeCell<[u8; 16384]>);
+unsafe impl Sync for WakeStack {}
+static WAKE_STACK: WakeStack = WakeStack(UnsafeCell::new([0; 16384]));
 global_asm!(include_str!("ap_start.S"));
 unsafe extern "C" {
     static ap_start: u8;
@@ -74,6 +78,113 @@ unsafe extern "C" {
     static ap_far: u8;
     static ap_long: u8;
     static ap_gdt: u8;
+}
+
+#[derive(Clone, Copy)]
+pub(crate) struct WakeTrampoline {
+    root: u64,
+    pdpt: u64,
+    pd: u64,
+}
+
+/// Clone the kernel root into a low-memory identity-mapped root and install
+/// the existing AP transition image on the reserved wake page. The image is
+/// not published to firmware here; the caller owns the returned page-table
+/// frames and must either retain or release them transactionally.
+pub(crate) fn install_wake_trampoline(entry: u64) -> Option<WakeTrampoline> {
+    let page = wake_page()?;
+    let offset = paging::physical_memory_offset()?;
+    let real_root = paging::kernel_address_space()?.root_address();
+    let root = memory::allocate_frame()?.start_address().as_u64();
+    let Some(pdpt_frame) = memory::allocate_frame() else {
+        let _ = memory::deallocate_frame(x86_64::structures::paging::PhysFrame::from_start_address(
+            x86_64::PhysAddr::new(root),
+        ).ok()?);
+        return None;
+    };
+    let pdpt = pdpt_frame.start_address().as_u64();
+    let Some(pd_frame) = memory::allocate_frame() else {
+        let _ = memory::deallocate_frame(pdpt_frame);
+        let _ = memory::deallocate_frame(x86_64::structures::paging::PhysFrame::from_start_address(
+            x86_64::PhysAddr::new(root),
+        ).ok()?);
+        return None;
+    };
+    let pd = pd_frame.start_address().as_u64();
+    if root >= 1u64 << 32 {
+        let _ = memory::deallocate_frame(pd_frame);
+        let _ = memory::deallocate_frame(pdpt_frame);
+        let _ = memory::deallocate_frame(x86_64::structures::paging::PhysFrame::from_start_address(
+            x86_64::PhysAddr::new(root),
+        ).ok()?);
+        return None;
+    }
+    let (base, size) = unsafe {
+        let base = &ap_start as *const u8 as usize;
+        let size = &ap_end as *const u8 as usize - base;
+        (base, size)
+    };
+    if size >= 4096 {
+        let _ = memory::deallocate_frame(pd_frame);
+        let _ = memory::deallocate_frame(pdpt_frame);
+        let _ = memory::deallocate_frame(x86_64::structures::paging::PhysFrame::from_start_address(
+            x86_64::PhysAddr::new(root),
+        ).ok()?);
+        return None;
+    }
+    // SAFETY: the bootloader's physical-memory mapping covers the validated
+    // allocator frames and reserved low page. The copied root is private and
+    // the wake image is not reachable by firmware until a later commit step.
+    unsafe {
+        core::ptr::copy_nonoverlapping(
+            (offset + real_root) as *const u8,
+            (offset + root) as *mut u8,
+            4096,
+        );
+        let table = &mut *((offset + root) as *mut PageTable);
+        let flags = x86_64::structures::paging::PageTableFlags::PRESENT
+            | x86_64::structures::paging::PageTableFlags::WRITABLE;
+        table[0].set_addr(x86_64::PhysAddr::new(pdpt), flags);
+        core::ptr::write_bytes((offset + pdpt) as *mut u8, 0, 4096);
+        core::ptr::write_bytes((offset + pd) as *mut u8, 0, 4096);
+        (&mut *((offset + pdpt) as *mut PageTable))[0]
+            .set_addr(x86_64::PhysAddr::new(pd), flags);
+        (&mut *((offset + pd) as *mut PageTable))[0].set_addr(
+            x86_64::PhysAddr::new(0),
+            flags | x86_64::structures::paging::PageTableFlags::HUGE_PAGE,
+        );
+        core::ptr::copy_nonoverlapping(base as *const u8, (offset + page) as *mut u8, size);
+        let patch = |symbol: *const u8| (offset + page + symbol as u64 - base as u64) as *mut u8;
+        patch(&ap_root).cast::<u64>().write_unaligned(root);
+        patch(&ap_entry).cast::<u64>().write_unaligned(entry);
+        patch(&ap_stack)
+            .cast::<u64>()
+            .write_unaligned(WAKE_STACK.0.get() as u64 + 16384);
+        patch(&ap_gdt_ptr)
+            .add(2)
+            .cast::<u32>()
+            .write_unaligned((page + &ap_gdt as *const u8 as u64 - base as u64) as u32);
+        patch(&ap_far)
+            .cast::<u32>()
+            .write_unaligned((page + &ap_long as *const u8 as u64 - base as u64) as u32);
+    }
+    Some(WakeTrampoline { root, pdpt, pd })
+}
+
+pub(crate) fn release_wake_trampoline(trampoline: WakeTrampoline) -> bool {
+    let root = x86_64::structures::paging::PhysFrame::from_start_address(
+        x86_64::PhysAddr::new(trampoline.root),
+    );
+    let pdpt = x86_64::structures::paging::PhysFrame::from_start_address(
+        x86_64::PhysAddr::new(trampoline.pdpt),
+    );
+    let pd = x86_64::structures::paging::PhysFrame::from_start_address(
+        x86_64::PhysAddr::new(trampoline.pd),
+    );
+    let root_released = root.is_ok_and(memory::deallocate_frame);
+    let pdpt_released = pdpt.is_ok_and(memory::deallocate_frame);
+    let pd_released = pd.is_ok_and(memory::deallocate_frame);
+    root_released && pdpt_released && pd_released
 }
 
 pub fn cpu_index() -> usize {

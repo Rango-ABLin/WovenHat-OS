@@ -1411,6 +1411,13 @@ future S3 wake trampoline, separate from the AP startup page and unavailable
 to the general allocator. This does not write trampoline code, install a FACS
 waking vector, enter S3, or handle firmware wake.
 
+Stage 25.7 - wake-trampoline staging
+
+Accepted bounded slice: stage the existing AP transition image on the reserved
+low page with a private identity map, dedicated stack, and transactional
+page-table ownership. This does not install the FACS vector, save CPU state,
+enter S3, or handle firmware wake.
+
 ACPI poweroff
 reboot
 sleep

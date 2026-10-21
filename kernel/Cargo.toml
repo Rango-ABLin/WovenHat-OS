@@ -79,6 +79,7 @@ stage13-20-test = ["qemu-test", "stage13-12-test"]
 stage13-20b-test = ["qemu-test", "stage13-20-test"]
 # The WovenShell desktop as the session: F12 console, power off.
 stage20-15-test = ["qemu-test", "stage13-12-test"]
+stage25-7-test = ["qemu-test"]
 # Deterministic Change-PIN UI acceptance uses the production identity/session
 # capability boundary and the same kernel-injected pointer/keyboard path as
 # the earlier desktop tests.
