@@ -1,5 +1,20 @@
 # Stage status
 
+## Stage 24.23 bounded TPM policy-session framing (2026-10-21)
+
+The TPM2 layer now frames a policy `StartAuthSession` request with bounded
+caller nonce, null salt/bind handles, null symmetric protection, and SHA-256
+policy hashing. It parses the returned session handle and TPM nonce with exact
+response bounds. The executable QEMU self-test, host tests (89), all-targets
+and affected feature Clippy, and signed system-apps 1/2/4-CPU acceptance
+pass. Evidence is under
+`audit-artifacts/stage24.23-policy-session-20261021`.
+
+This does not authorize an NV command, create an object, transmit credential
+bytes, or validate a TPM quote. The session lifecycle, policy command
+transcript, sealed-root provisioning, recovery, and physical TPM
+qualification remain required.
+
 ## Stage 24.22 credential-root NV policy validation (2026-10-21)
 
 The TPM2 layer now validates the public metadata of the reserved

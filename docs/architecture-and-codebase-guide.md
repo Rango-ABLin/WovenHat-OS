@@ -1,5 +1,14 @@
 # WovenHat OS Architecture & Codebase Guide
 
+### Stage 24.23 - bounded TPM policy-session framing
+
+`encode_policy_session_start` constructs a bounded no-session
+`StartAuthSession` request for a policy session using null TPM/bind handles,
+caller-supplied nonce, null symmetric protection, and SHA-256. The response
+decoder requires a nonzero session handle and exact bounded TPM nonce. This
+is transport framing only; it does not authorize an NV operation or expose a
+credential root.
+
 ### Stage 24.22 - credential-root NV policy validation
 
 `validate_credential_root_nv` checks an already-decoded NV public area against

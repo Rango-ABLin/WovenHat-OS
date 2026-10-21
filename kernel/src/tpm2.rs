@@ -30,7 +30,15 @@ const TPM_CC_GET_RANDOM: u32 = 0x0000_017b;
 const TPM_CC_PCR_READ: u32 = 0x0000_017e;
 #[allow(dead_code)]
 const TPM_CC_NV_READ_PUBLIC: u32 = 0x0000_0169;
+#[allow(dead_code)]
+const TPM_CC_START_AUTH_SESSION: u32 = 0x0000_0176;
 const TPM_ALG_SHA256: u16 = 0x000b;
+#[allow(dead_code)]
+const TPM_ALG_NULL: u16 = 0x0010;
+#[allow(dead_code)]
+const TPM_SESS_POLICY: u8 = 0x01;
+#[allow(dead_code)]
+const TPM_RH_NULL: u32 = 0x4000_0007;
 const TPM_RC_SUCCESS: u32 = 0;
 const TPMA_NV_OWNERWRITE: u32 = 1 << 1;
 const TPMA_NV_AUTHWRITE: u32 = 1 << 2;
@@ -50,6 +58,13 @@ pub struct NvPublic {
     pub auth_policy_length: u8,
     pub auth_policy: [u8; 32],
     pub data_size: u16,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PolicySession {
+    pub handle: u32,
+    pub nonce_tpm_length: u8,
+    pub nonce_tpm: [u8; 32],
 }
 
 /// Validate the public metadata of the fixed-size NV object reserved for the
@@ -192,6 +207,55 @@ fn encode_nv_read_public(index: u32, output: &mut [u8; 14]) {
     output[2..6].copy_from_slice(&14_u32.to_be_bytes());
     output[6..10].copy_from_slice(&TPM_CC_NV_READ_PUBLIC.to_be_bytes());
     output[10..14].copy_from_slice(&index.to_be_bytes());
+}
+
+#[allow(dead_code)]
+fn encode_policy_session_start(nonce_caller: &[u8], output: &mut [u8; 95]) -> Result<usize, Error> {
+    if nonce_caller.len() > 32 {
+        return Err(Error::InvalidDescriptor);
+    }
+    let command_size = 27usize.saturating_add(nonce_caller.len());
+    output.fill(0);
+    output[..2].copy_from_slice(&TPM_ST_NO_SESSIONS.to_be_bytes());
+    output[2..6].copy_from_slice(&(command_size as u32).to_be_bytes());
+    output[6..10].copy_from_slice(&TPM_CC_START_AUTH_SESSION.to_be_bytes());
+    output[10..14].copy_from_slice(&TPM_RH_NULL.to_be_bytes());
+    output[14..18].copy_from_slice(&TPM_RH_NULL.to_be_bytes());
+    output[18..20].copy_from_slice(&(nonce_caller.len() as u16).to_be_bytes());
+    let nonce_end = 20 + nonce_caller.len();
+    output[20..nonce_end].copy_from_slice(nonce_caller);
+    output[nonce_end..nonce_end + 2].copy_from_slice(&0_u16.to_be_bytes());
+    output[nonce_end + 2] = TPM_SESS_POLICY;
+    output[nonce_end + 3..nonce_end + 5].copy_from_slice(&TPM_ALG_NULL.to_be_bytes());
+    output[nonce_end + 5..nonce_end + 7].copy_from_slice(&TPM_ALG_SHA256.to_be_bytes());
+    Ok(command_size)
+}
+
+#[allow(dead_code)]
+pub fn decode_policy_session_start(response: &[u8]) -> Result<PolicySession, Error> {
+    if response.len() < 16 {
+        return Err(Error::MalformedResponse);
+    }
+    let response_size = u32::from_be_bytes(response[2..6].try_into().unwrap()) as usize;
+    let response_code = u32::from_be_bytes(response[6..10].try_into().unwrap());
+    if response_size < 16 || response_size > response.len() {
+        return Err(Error::MalformedResponse);
+    }
+    if response_code != TPM_RC_SUCCESS {
+        return Err(Error::Device(response_code));
+    }
+    let handle = u32::from_be_bytes(response[10..14].try_into().unwrap());
+    let nonce_length = u16::from_be_bytes(response[14..16].try_into().unwrap()) as usize;
+    if handle == 0 || nonce_length > 32 || 16usize.saturating_add(nonce_length) != response_size {
+        return Err(Error::MalformedResponse);
+    }
+    let mut nonce_tpm = [0_u8; 32];
+    nonce_tpm[..nonce_length].copy_from_slice(&response[16..16 + nonce_length]);
+    Ok(PolicySession {
+        handle,
+        nonce_tpm_length: nonce_length as u8,
+        nonce_tpm,
+    })
 }
 
 #[allow(dead_code)]
@@ -503,4 +567,32 @@ pub fn self_test() -> bool {
         && public.attributes == 0x0200_0008
         && public.auth_policy_length == 32
         && public.data_size == 32
+        && {
+            let mut session_command = [0_u8; 95];
+            let caller_nonce = [0x33; 16];
+            let Ok(session_size) = encode_policy_session_start(&caller_nonce, &mut session_command) else {
+                return false;
+            };
+            if session_size != 43
+                || u32::from_be_bytes(session_command[6..10].try_into().unwrap())
+                    != TPM_CC_START_AUTH_SESSION
+                || u32::from_be_bytes(session_command[10..14].try_into().unwrap()) != TPM_RH_NULL
+                || session_command[38] != TPM_SESS_POLICY
+                || u16::from_be_bytes(session_command[39..41].try_into().unwrap()) != TPM_ALG_NULL
+                || u16::from_be_bytes(session_command[41..43].try_into().unwrap()) != TPM_ALG_SHA256
+            {
+                return false;
+            }
+            let mut session_response = [0_u8; 32];
+            session_response[2..6].copy_from_slice(&32_u32.to_be_bytes());
+            session_response[10..14].copy_from_slice(&0x0300_0000_u32.to_be_bytes());
+            session_response[14..16].copy_from_slice(&16_u16.to_be_bytes());
+            session_response[16..32].fill(0x77);
+            let Ok(session) = decode_policy_session_start(&session_response) else {
+                return false;
+            };
+            session.handle == 0x0300_0000
+                && session.nonce_tpm_length == 16
+                && session.nonce_tpm[..16] == [0x77; 16]
+        }
 }

@@ -1,5 +1,16 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - Stage 24.23 (2026-10-21)
+
+Added bounded TPM2 policy-session `StartAuthSession` framing and response
+validation, including caller nonce bounds, null salt/bind/symmetric fields,
+SHA-256 policy hashing, nonzero session handle, and exact TPM nonce framing.
+The executable QEMU self-test, host tests, affected Clippy gates, and signed
+system-apps 1/2/4-CPU acceptance pass. Evidence is in
+`docs/audit-stage24-23-policy-session-2026-10-21.md`; USB remains untouched.
+NV authorization, policy-command transcripts, sealed-root provisioning,
+quote verification, recovery, and physical TPM qualification remain open.
+
 ## Codex - Stage 24.22 (2026-10-21)
 
 Added fail-closed validation for the credential-root NV public metadata. The
