@@ -1,5 +1,14 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - Stage 24.47 (2026-10-21)
+
+Implemented bounded TPM policy-session response-nonce refresh. Quote response
+authorization areas are fully validated; password sessions may return an empty
+nonce, while policy-session quotes must return a bounded nonce that the managed
+lease retains before one-shot invalidation. Host, Clippy, memory QEMU, and
+signed system-apps 1/2/4-CPU gates pass. Physical TPM execution and
+qualification remain open. USB remains untouched.
+
 ## Codex - Stage 24.46 (2026-10-21)
 
 Integrated fail-closed boot recovery for durable TPM policy-session contexts:

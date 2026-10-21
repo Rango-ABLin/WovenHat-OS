@@ -1,5 +1,14 @@
 # WovenHat OS Architecture & Codebase Guide
 
+### Stage 24.47 - TPM policy-session nonce refresh
+
+`TPM2_Quote` response decoding now validates the complete authorization area,
+including bounded response nonce and HMAC lengths. `QuoteExecution` exposes
+the response TPM nonce. Password-session quotes may return an empty nonce;
+policy-session quotes require a non-empty refreshed nonce. The managed lease
+copies that nonce before marking the quote one-shot stale, preserving the
+updated session state for custody or cleanup without granting another quote.
+
 ### Stage 24.46 - boot-time TPM context recovery
 
 System-apps boot captures the discovered TPM2 handle before the ACPI summary is

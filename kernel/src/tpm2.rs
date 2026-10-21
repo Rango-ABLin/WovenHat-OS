@@ -380,6 +380,11 @@ pub struct QuoteExecution {
     pub quote: [u8; 1024],
     pub signature_length: u16,
     pub signature: [u8; 768],
+    /// TPM's refreshed nonce for the authorization session. Password-session
+    /// quotes legitimately return an empty nonce; policy-session callers must
+    /// require and retain a non-empty value before reusing the lease.
+    pub response_nonce_tpm_length: u8,
+    pub response_nonce_tpm: [u8; 32],
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1098,12 +1103,27 @@ fn decode_quote_response(
     output.signature[..signature_length]
         .copy_from_slice(&response[signature_start..parameter_end]);
     let auth = &response[parameter_end..];
-    if auth.len() != 5 || u16::from_be_bytes(auth[..2].try_into().unwrap()) != 0 || auth[2] != 0 {
+    if auth.len() < 5 {
         return Err(Error::MalformedResponse);
     }
-    if u16::from_be_bytes(auth[3..5].try_into().unwrap()) != 0 {
+    let nonce_length = u16::from_be_bytes(auth[..2].try_into().unwrap()) as usize;
+    if nonce_length > 32 || 2usize.saturating_add(nonce_length).saturating_add(3) > auth.len() {
         return Err(Error::MalformedResponse);
     }
+    let attributes = 2 + nonce_length;
+    let hmac_length = u16::from_be_bytes(auth[attributes + 1..attributes + 3].try_into().unwrap())
+        as usize;
+    if hmac_length > 64
+        || attributes
+            .saturating_add(3)
+            .saturating_add(hmac_length)
+            != auth.len()
+    {
+        return Err(Error::MalformedResponse);
+    }
+    output.response_nonce_tpm_length = nonce_length as u8;
+    output.response_nonce_tpm.fill(0);
+    output.response_nonce_tpm[..nonce_length].copy_from_slice(&auth[2..attributes]);
     output.quote_length = quote_length as u16;
     output.signature_length = signature_length as u16;
     Ok(())
@@ -1133,6 +1153,8 @@ fn execute_quote(
         quote: [0; 1024],
         signature_length: 0,
         signature: [0; 768],
+        response_nonce_tpm_length: 0,
+        response_nonce_tpm: [0; 32],
     };
     decode_quote_response(&response[..response_size], &mut output)?;
     Ok(output)
@@ -1179,14 +1201,18 @@ pub fn quote_with_policy_session(
     if session.session_handle == TPM_RS_PW || session.hmac.len() != 32 {
         return Err(Error::InvalidPolicy);
     }
-    execute_quote(
+    let output = execute_quote(
         info,
         signing_handle,
         qualifying_data,
         pcr,
         scheme,
         session,
-    )
+    )?;
+    if output.response_nonce_tpm_length == 0 {
+        return Err(Error::MalformedResponse);
+    }
+    Ok(output)
 }
 
 fn quote_parameter_digest(
@@ -1349,10 +1375,21 @@ pub fn quote_with_managed_policy_session(
         attributes,
         auth_value,
     );
-    if result.is_ok() {
-        lease.nonce_stale = true;
+    let mut output = result?;
+    let nonce_length = usize::from(output.response_nonce_tpm_length);
+    if nonce_length == 0 || nonce_length > lease.session.nonce_tpm.len() {
+        return Err(Error::MalformedResponse);
     }
-    result
+    lease.session.nonce_tpm.fill(0);
+    lease.session.nonce_tpm[..nonce_length]
+        .copy_from_slice(&output.response_nonce_tpm[..nonce_length]);
+    lease.session.nonce_tpm_length = output.response_nonce_tpm_length;
+    // The refreshed nonce is retained in the lease for diagnostics and any
+    // subsequent custody operation, but quote authority is one-shot.
+    lease.nonce_stale = true;
+    output.response_nonce_tpm[..nonce_length]
+        .copy_from_slice(&lease.session.nonce_tpm[..nonce_length]);
+    Ok(output)
 }
 
 fn decode_get_random(response: &[u8], output: &mut [u8]) -> Result<usize, Error> {
@@ -2491,12 +2528,37 @@ pub fn self_test() -> bool {
         quote: [0; 1024],
         signature_length: 0,
         signature: [0; 768],
+        response_nonce_tpm_length: 0,
+        response_nonce_tpm: [0; 32],
     };
     if decode_quote_response(&quote_response, &mut quote_output).is_err()
         || quote_output.quote_length != 95
         || quote_output.signature_length != 262
+        || quote_output.response_nonce_tpm_length != 0
         || quote_output.quote[..95] != [0x41; 95]
         || quote_output.signature[..262] != quote_response[111..373]
+    {
+        return false;
+    }
+    let mut policy_quote_response = [0_u8; 386];
+    policy_quote_response[..quote_response.len()].copy_from_slice(&quote_response);
+    policy_quote_response[2..6].copy_from_slice(&386_u32.to_be_bytes());
+    policy_quote_response[373..375].copy_from_slice(&4_u16.to_be_bytes());
+    policy_quote_response[375..379].fill(0x55);
+    policy_quote_response[379] = TPMA_SESSION_CONTINUE_SESSION;
+    policy_quote_response[380..382].copy_from_slice(&4_u16.to_be_bytes());
+    policy_quote_response[382..386].fill(0xaa);
+    let mut policy_quote_output = QuoteExecution {
+        quote_length: 0,
+        quote: [0; 1024],
+        signature_length: 0,
+        signature: [0; 768],
+        response_nonce_tpm_length: 0,
+        response_nonce_tpm: [0; 32],
+    };
+    if decode_quote_response(&policy_quote_response, &mut policy_quote_output).is_err()
+        || policy_quote_output.response_nonce_tpm_length != 4
+        || policy_quote_output.response_nonce_tpm[..4] != [0x55; 4]
     {
         return false;
     }

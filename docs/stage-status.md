@@ -1,5 +1,20 @@
 # Stage status
 
+## Stage 24.47 TPM policy-session nonce refresh (2026-10-21)
+
+Policy-session quote responses now parse the TPM authorization area and retain
+the refreshed TPM nonce. The password-session path still accepts an empty
+nonce, while the non-password policy path rejects one. Managed quote leases
+copy the refreshed nonce before becoming one-shot stale, so a later lifecycle
+operation cannot accidentally derive authorization from an old nonce. Host
+tests (89), all-targets and affected feature Clippy, executable QEMU, and
+signed system-apps 1/2/4-CPU acceptance pass. Evidence is under
+`audit-artifacts/stage24.47-tpm-session-nonce-refresh-20261021`.
+
+Live physical TPM session execution, durable custody authorization,
+provisioned-key lifecycle, credential decisions, recovery, and physical
+qualification remain required.
+
 ## Stage 24.46 boot-time TPM context recovery (2026-10-21)
 
 After WovenFS mount, system-apps boot now treats the newest validated `TPS1`

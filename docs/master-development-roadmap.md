@@ -2,6 +2,16 @@ WovenHat OS — Stage 10.7 → Version 1.0 Master Roadmap
 Phase I — Finish the asynchronous kernel foundation
 Stage 10.7 — Asynchronous TCP
 
+Stage 24.47 - TPM policy-session nonce refresh
+
+Implemented strict TPM quote authorization-area decoding and managed lease
+nonce refresh. Password-session responses may have an empty nonce; policy
+session responses must return a bounded nonce, which is retained before the
+one-shot lease becomes stale. Host tests, Clippy, executable QEMU, and signed
+1/2/4-CPU acceptance pass. Physical TPM execution, durable custody
+authorization, key lifecycle, credential decisions, recovery, qualification,
+and release readiness remain required.
+
 Stage 24.45 - Durable TPM context custody boundary
 
 Implemented versioned dual-copy WovenFS custody for opaque TPM policy-session
