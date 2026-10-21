@@ -22,6 +22,28 @@ pub struct IdleCapabilities {
     pub invariant_tsc: bool,
 }
 
+/// CPUID-reported frequency information. This is inventory only; it does not
+/// select a P-state or write any frequency-control MSR.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct FrequencyInfo {
+    pub base_mhz: u32,
+    pub maximum_mhz: u32,
+    pub bus_mhz: u32,
+}
+
+pub fn frequency_info() -> Option<FrequencyInfo> {
+    let basic_max = __cpuid(0).eax;
+    if basic_max < 0x16 {
+        return None;
+    }
+    let result = __cpuid(0x16);
+    (result.eax != 0 || result.ebx != 0 || result.ecx != 0).then_some(FrequencyInfo {
+        base_mhz: result.eax,
+        maximum_mhz: result.ebx,
+        bus_mhz: result.ecx,
+    })
+}
+
 pub fn idle_capabilities() -> IdleCapabilities {
     let basic_max = __cpuid(0).eax;
     let basic = (basic_max >= FEATURE_INFO).then(|| __cpuid(FEATURE_INFO));

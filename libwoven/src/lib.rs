@@ -11481,6 +11481,7 @@ pub mod syscall {
     pub const POWER_CONTROL: u64 = 209;
     pub const POWER_CAPABILITIES: u64 = 235;
     pub const CPU_IDLE_CAPABILITIES: u64 = 236;
+    pub const CPU_FREQUENCY_INFO: u64 = 237;
     pub const ACCOUNTS_CHANGE_PIN: u64 = 210;
     pub const IDENTITY_ADMIN_ADD_USER: u64 = 226;
     pub const IDENTITY_ADMIN_DELETE_USER: u64 = 227;
@@ -13384,6 +13385,35 @@ pub fn cpu_idle_capabilities() -> Result<CpuIdleCapabilities, Error> {
     })
 }
 
+/// CPUID-reported frequency inventory. This query performs no frequency
+/// transition and may return `None` when the firmware omits leaf 0x16.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct CpuFrequencyInfo {
+    pub base_mhz: u32,
+    pub maximum_mhz: u32,
+    pub bus_mhz: u32,
+}
+
+pub fn cpu_frequency_info() -> Result<Option<CpuFrequencyInfo>, Error> {
+    let mut bytes = [0u8; 13];
+    check(unsafe {
+        syscall::invoke(
+            syscall::CPU_FREQUENCY_INFO,
+            bytes.as_mut_ptr() as u64,
+            bytes.len() as u64,
+            0,
+        )
+    })?;
+    if bytes[0] == 0 {
+        return Ok(None);
+    }
+    Ok(Some(CpuFrequencyInfo {
+        base_mhz: u32::from_le_bytes(bytes[1..5].try_into().unwrap_or([0; 4])),
+        maximum_mhz: u32::from_le_bytes(bytes[5..9].try_into().unwrap_or([0; 4])),
+        bus_mhz: u32::from_le_bytes(bytes[9..13].try_into().unwrap_or([0; 4])),
+    }))
+}
+
 pub fn compositor_outputs() -> Result<([Output; 4], usize), Error> {
     let mut bytes = [0u8; 64];
     let count = check(unsafe {
@@ -13800,6 +13830,16 @@ pub fn read_dir(
 pub fn ticks() -> time::Ticks {
     // SAFETY: getticks takes no pointers.
     unsafe { syscall::ticks() }
+}
+
+/// The CPU's timestamp counter: free-running cycles, not calibrated to any
+/// time unit, but fine-grained enough to benchmark something as cheap as a
+/// syscall round trip, which `ticks` (100 Hz) is not. No kernel involvement:
+/// `RDTSC` is a plain instruction, not a syscall, and this kernel never sets
+/// `CR4.TSD` to restrict it to Ring 0.
+pub fn cycles() -> u64 {
+    // SAFETY: RDTSC has no side effects and is permitted in Ring 3 here.
+    unsafe { core::arch::x86_64::_rdtsc() }
 }
 
 /// Yield the remainder of this time slice.

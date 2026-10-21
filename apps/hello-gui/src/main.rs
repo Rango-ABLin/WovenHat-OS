@@ -61,6 +61,13 @@
 //! any already-accepted compositor path; it exists to validate the
 //! rendering pipeline end to end before that wiring is attempted.
 //!
+//! With `--syscall-benchmark` it is a standalone performance-engineering
+//! micro-benchmark (Stage 30): 1000 round trips of the cheapest syscall
+//! (`current_pid`, no pointers, no capability check) timed with the CPU's
+//! own cycle counter (`RDTSC`, not the 100 Hz tick clock, which cannot
+//! resolve a single syscall). Reports min/average/max cycles; needs no
+//! capability beyond an ordinary process's own, so it runs unprivileged.
+//!
 //! With `--probe <handle>` it runs as an ordinary process and checks that the
 //! kernel refuses it everything it has no authority for: every compositor
 //! operation, and every operation on the surface `<handle>`, which belongs to
@@ -200,6 +207,51 @@ fn fail(code: u64) -> ! {
     libwoven::exit(code)
 }
 
+const SYSCALL_BENCHMARK_ITERATIONS: u64 = 1000;
+
+/// Standalone syscall-latency micro-benchmark (Stage 30 performance
+/// engineering): time `SYSCALL_BENCHMARK_ITERATIONS` round trips of
+/// `current_pid` (the cheapest syscall this ABI has: no pointers, no
+/// capability check, just the caller's own id) with the CPU's free-running
+/// cycle counter. Reports min/average/max cycles and exits PASSED as long
+/// as the counter advanced at all -- a benchmark reports numbers, it does
+/// not enforce a would-be-brittle latency threshold across unlike machines.
+fn syscall_benchmark() -> ! {
+    let mut min = u64::MAX;
+    let mut max = 0u64;
+    let mut total: u128 = 0;
+    for _ in 0..SYSCALL_BENCHMARK_ITERATIONS {
+        let start = libwoven::cycles();
+        let _ = libwoven::current_pid();
+        let elapsed = libwoven::cycles().wrapping_sub(start);
+        min = min.min(elapsed);
+        max = max.max(elapsed);
+        total += u128::from(elapsed);
+    }
+    let average = (total / u128::from(SYSCALL_BENCHMARK_ITERATIONS)) as u64;
+    let mut digits = [0u8; 20];
+    let _ = libwoven::print("hello-gui: syscall benchmark (current_pid) min=");
+    let _ =
+        libwoven::write(libwoven::syscall::STDOUT, libwoven::format_u64(min, &mut digits));
+    let _ = libwoven::print(" avg=");
+    let _ = libwoven::write(
+        libwoven::syscall::STDOUT,
+        libwoven::format_u64(average, &mut digits),
+    );
+    let _ = libwoven::print(" max=");
+    let _ = libwoven::write(libwoven::syscall::STDOUT, libwoven::format_u64(max, &mut digits));
+    let _ = libwoven::print(" cycles\n");
+    // The only sanity check a benchmark can make without being a brittle
+    // threshold: the counter genuinely advanced. A reading of exactly zero
+    // across 1000 samples would mean RDTSC (or the syscall path itself) is
+    // not doing anything, not that this machine is merely fast.
+    if average == 0 {
+        fail(320);
+    }
+    let _ = libwoven::print("hello-gui: syscall benchmark: PASSED\n");
+    libwoven::exit(0)
+}
+
 fn main(args: Args) -> ! {
     match args.get(1) {
         Some(b"--audio") => audio(),
@@ -218,6 +270,7 @@ fn main(args: Args) -> ! {
         Some(b"--desktop-client") => desktop_client(&args),
         Some(b"--wm-client") => wm_client(&args),
         Some(b"--3d-chrome-demo") => three_d_chrome_demo(),
+        Some(b"--syscall-benchmark") => syscall_benchmark(),
         Some(_) => fail(250),
         None => run(Input::None),
     }
