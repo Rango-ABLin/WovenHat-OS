@@ -23,6 +23,13 @@ The required gates passed:
   - 2 CPUs: `audit-artifacts/stage25.15-2cpu-1792579392886205500`
   - 4 CPUs: `audit-artifacts/stage25.15-4cpu-1792579413003466500`
 
+The retained prior-stage compatibility gate was also rerun after the shared
+commit integration:
+
+- Stage 25.14, 1 CPU: `audit-artifacts/stage25.14-1cpu-1792579508247837200`
+- Stage 25.14, 2 CPUs: `audit-artifacts/stage25.14-2cpu-1792579565826183400`
+- Stage 25.14, 4 CPUs: `audit-artifacts/stage25.14-4cpu-1792579583277334400`
+
 The focused QEMU test does not issue S3; it verifies record ownership and
 invalid-pointer rejection only.
 
