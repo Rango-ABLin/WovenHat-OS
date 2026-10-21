@@ -1,5 +1,19 @@
 # Stage status
 
+## Stage 24.56 signed TPM broker record generator (2026-10-21)
+
+Added `tools/tpm-broker-config`, a warning-clean host tool that emits the
+fixed 182-byte signed `TCB1` broker policy record from explicit NV index,
+attestation handle, quote scheme, PCR, digest, Name, and NV-policy inputs.
+It requires a dedicated TPM policy signing seed and matching trusted public
+key; it never falls back to a development key. Synthetic generation passed,
+while missing-key and invalid-index negative controls were rejected. Evidence
+is under `audit-artifacts/stage24.56-tpm-broker-record-generator-20261021`.
+
+This tool generates policy only; it does not provision a TPM, read the USB,
+or write an OS image. Physical TPM provisioning, live quote qualification,
+reboot recovery, and hardware qualification remain required.
+
 ## Stage 24.55 physical TPM readiness preflight (2026-10-21)
 
 Added `scripts/test-physical-tpm-readiness.ps1`, a read-only host preflight

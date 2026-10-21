@@ -2,6 +2,12 @@ WovenHat OS — Stage 10.7 → Version 1.0 Master Roadmap
 Phase I — Finish the asynchronous kernel foundation
 Stage 10.7 — Asynchronous TCP
 
+Stage 24.56 - Signed TPM broker record generator
+Added the warning-clean `tools/tpm-broker-config` release tool. It validates
+production bounds and emits a fixed signed `TCB1` policy record only with an
+explicit matching TPM policy signing seed and trusted public key; no
+development-key fallback or device I/O exists.
+
 Stage 24.55 - Physical TPM readiness preflight
 Added a read-only host preflight for TPM visibility/readiness, emulation,
 signed broker-record presence, and removable-disk safety. The observed machine

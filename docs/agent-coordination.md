@@ -1,5 +1,13 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - Stage 24.56 (2026-10-21)
+
+Added `tools/tpm-broker-config` to construct signed 182-byte `TCB1` policy
+records. It requires matching explicit signing seed/public-key environment
+values, rejects missing keys and invalid production bounds, and has no
+development fallback. Synthetic positive and negative controls passed. No
+TPM or USB write occurred.
+
 ## Codex - Stage 24.55 (2026-10-21)
 
 Added and ran the read-only physical TPM readiness preflight. It found one

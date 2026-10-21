@@ -1,5 +1,13 @@
 # WovenHat OS Architecture & Codebase Guide
 
+### Stage 24.56 - signed TPM broker record generator
+
+`tools/tpm-broker-config` is the release-side constructor for the fixed
+`TCB1` policy record. It requires the dedicated TPM policy signing seed and
+matching trusted public key in environment variables, validates production
+bounds before signing, and emits exactly 182 bytes. It has no development-key
+fallback and contains no TPM I/O or disk-writing path.
+
 ### Stage 24.55 - physical TPM readiness preflight
 
 The read-only PowerShell preflight records host TPM visibility, readiness,
