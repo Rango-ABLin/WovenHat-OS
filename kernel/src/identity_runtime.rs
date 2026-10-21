@@ -135,7 +135,7 @@ pub(crate) fn change_pin(
             .change_password(name, old_pin, &salt, new_pin)
             .map_err(Error::Identity)?;
     }
-    if crate::accounts::change_pin(name, old_pin, new_pin).is_ok() {
+    if crate::accounts::change_pin_with_salt(name, old_pin, new_pin, &salt).is_ok() {
         return Ok(());
     }
     let mut authority = AUTHORITY.lock();

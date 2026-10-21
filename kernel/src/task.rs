@@ -2119,6 +2119,7 @@ pub fn exit_current_thread(exit_code: i32) -> ! {
     feature = "stage20-13-test",
     feature = "stage20-14b-test",
     feature = "stage20-15-test",
+    feature = "stage20-16-test",
     feature = "stage22-3-test",
     feature = "stage22-5-test",
     feature = "stage23-1-test",

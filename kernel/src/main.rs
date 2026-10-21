@@ -4399,6 +4399,15 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         serial::write_line(format_args!("[S19.3] compositor presentation: PASSED"));
         qemu_test_exit_success();
     }
+    #[cfg(feature = "stage20-16-test")]
+    {
+        if !stage20_16_self_test() {
+            serial::write_line(format_args!("[S20.16] textured 3D chrome demo: FAILED"));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!("[S20.16] textured 3D chrome demo: PASSED"));
+        qemu_test_exit_success();
+    }
     #[cfg(feature = "stage19-2-test")]
     {
         if !stage19_2_self_test() {
@@ -7283,7 +7292,8 @@ fn stage16_1_self_test() -> bool {
     feature = "stage13-15-test",
     feature = "stage20-13-test",
     feature = "stage20-14b-test",
-    feature = "stage20-15-test"
+    feature = "stage20-15-test",
+    feature = "stage20-16-test",
 ))]
 const HELLO_GUI_IMAGE: &[u8] = include_bytes!(env!("WOVENHAT_HELLO_GUI_IMAGE"));
 
@@ -7313,7 +7323,8 @@ const HELLO_GUI_IMAGE: &[u8] = include_bytes!(env!("WOVENHAT_HELLO_GUI_IMAGE"));
     feature = "stage20-9-test",
     feature = "stage20-10-test",
     feature = "stage20-11-test",
-    feature = "stage20-12-test"
+    feature = "stage20-12-test",
+    feature = "stage20-16-test",
 ))]
 fn display_client_capabilities() -> capability::CapabilitySet {
     capability::CapabilitySet::only(capability::Capability::Console)
@@ -7345,7 +7356,8 @@ fn display_client_capabilities() -> capability::CapabilitySet {
     feature = "stage20-9-test",
     feature = "stage20-10-test",
     feature = "stage20-11-test",
-    feature = "stage20-12-test"
+    feature = "stage20-12-test",
+    feature = "stage20-16-test",
 ))]
 fn run_hello_gui(
     image: &[u8],
@@ -7472,7 +7484,8 @@ fn stage13_15_self_test() -> bool {
     feature = "stage20-12-test",
     feature = "stage13-15-test",
     feature = "stage20-13-test",
-    feature = "stage20-14b-test"
+    feature = "stage20-14b-test",
+    feature = "stage20-16-test",
 ))]
 fn spawn_hello_gui(
     image: &[u8],
@@ -7516,7 +7529,8 @@ fn spawn_hello_gui(
     feature = "stage20-12-test",
     feature = "stage13-15-test",
     feature = "stage20-13-test",
-    feature = "stage20-14b-test"
+    feature = "stage20-14b-test",
+    feature = "stage20-16-test",
 ))]
 fn wait_hello_gui(pid: task::ProcessId) -> Option<(task::ProcessId, Result<i32, task::WaitError>)> {
     let start = timer::ticks();
@@ -8164,7 +8178,6 @@ fn stage24_59_change_pin_self_test() -> bool {
         0x07, 0x09, 0x1c, // new 68
         0x07, 0x09, 0x1c, // confirm 68
     ]);
-    let _ = step("Change PIN keys injected", change_keys);
     let changed = change_keys && until(1000, || !line(middle - 34, "Change PIN"));
     if !step("new PIN accepted and desktop restored", changed) {
         return false;
@@ -8175,19 +8188,17 @@ fn stage24_59_change_pin_self_test() -> bool {
         return false;
     }
     let lock_row = (width - 4 - 164 + 28, top - 2 - (7 * 14 + 2) + 1 + 5 * 14 + 7);
-    let locked = move_by(button.0 + 8 - width / 2, button.1 + 8 - middle)
-        && click()
+    let qs_reopened = move_by(button.0 + 8 - change_row.0, button.1 + 8 - change_row.1) && click();
+    let locked = qs_reopened
         && move_by(lock_row.0 - (button.0 + 8), lock_row.1 - (button.1 + 8))
         && click()
         && until(1000, || line(middle - 34, "Locked"));
-    let _ = step("lock screen opens", locked);
-    let old_keys = locked && keys(&[0x02, 0x03, 0x04, 0x05, 0x1c]);
-    let _ = step("old PIN keys injected", old_keys);
-    let old_refused = old_keys && until(500, || line(middle - 4, "Wrong PIN"));
-    let _ = step("old PIN rejected", old_refused);
-    let new_keys = old_refused && keys(&[0x07, 0x09, 0x1c]);
-    let _ = step("new PIN keys injected", new_keys);
-    let new_works = new_keys && until(1000, || !line(middle - 34, "Locked"));
+    let old_refused = locked
+        && keys(&[0x02, 0x03, 0x04, 0x05, 0x1c])
+        && until(500, || line(middle - 4, "Wrong PIN"));
+    let new_works = old_refused
+        && keys(&[0x07, 0x09, 0x1c])
+        && until(1000, || !line(middle - 34, "Locked"));
     if !step("old PIN is refused and new PIN unlocks", new_works) {
         return false;
     }
@@ -13167,6 +13178,69 @@ fn stage19_2_self_test() -> bool {
     step(
         "owner slots released on exit",
         crate::user_graphics::count_for(pid.as_u64()) == 0,
+    )
+}
+
+/// Acceptance for the standalone textured-3D-chrome proof of concept
+/// (`hello-gui --3d-chrome-demo`): a userspace program renders chrome
+/// offscreen, projects it through a perspective camera as a texture-mapped
+/// 3D quad (not a flat blit), and presents it. The app verifies its own
+/// render from userspace; this self-test re-reads the compositor from
+/// kernel space to confirm nothing unwound between app exit and the gate
+/// check, the same reasoning `stage19_2_self_test` uses.
+#[cfg(feature = "stage20-16-test")]
+fn stage20_16_self_test() -> bool {
+    fn step(name: &str, ok: bool) -> bool {
+        serial::write_line(format_args!(
+            "[S20.16] {} {}",
+            name,
+            if ok { "PASS" } else { "FAIL" }
+        ));
+        ok
+    }
+
+    if elf::parse(HELLO_GUI_IMAGE).is_err() {
+        return step("elf accepted by the loader", false);
+    }
+    if !step(
+        "install into the filesystem",
+        vfs::create_read_only("/bin/hello-gui", HELLO_GUI_IMAGE).is_ok(),
+    ) {
+        return false;
+    }
+    let mut readback = alloc::vec![0u8; HELLO_GUI_IMAGE.len()];
+    if !step(
+        "filesystem round-trip",
+        vfs::read_all("/bin/hello-gui", &mut readback) == Ok(HELLO_GUI_IMAGE.len())
+            && readback[..] == HELLO_GUI_IMAGE[..],
+    ) {
+        return false;
+    }
+    let Some((_pid, exit_status)) =
+        run_hello_gui(&readback, &["/bin/hello-gui", "--3d-chrome-demo"], true)
+    else {
+        return step(
+            "load, spawn with display authority, run to completion",
+            false,
+        );
+    };
+    let status = match exit_status {
+        Ok(code) => code as i64,
+        Err(_) => -1,
+    };
+    serial::write_line(format_args!("[S20.16] exit status {}", status));
+    if !step("application exits zero", exit_status == Ok(0)) {
+        return false;
+    }
+
+    // The near (left) edge of the projected quad, away from its label, must
+    // still show the chrome's own fill colour -- the same location and
+    // colour `three_d_chrome_demo` already checked from userspace, re-read
+    // from kernel space to confirm the compositor retained it after exit.
+    const CHROME_FILL: u32 = crate::display::rgb(40, 220, 230);
+    step(
+        "compositor retained the textured 3D quad after app exit",
+        crate::compositor::pixel(65, 22) == Ok(CHROME_FILL),
     )
 }
 

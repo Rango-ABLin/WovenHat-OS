@@ -179,6 +179,8 @@ stage20-13-test = ["qemu-test"]
 stage20-14-test = ["qemu-test"]
 # The desktop across two monitors.
 stage20-14b-test = ["qemu-test"]
+# Standalone proof of concept: hello-gui --3d-chrome-demo.
+stage20-16-test = ["qemu-test"]
 stage21-1-test = ["qemu-test"]
 stage21-2-test = ["qemu-test"]
 stage21-3-test = ["qemu-test"]

@@ -114,8 +114,24 @@ fn fresh_salt() -> [u8; SALT_BYTES] {
 /// `old_pin` must verify against the account's current hash first; every
 /// other account's line is left byte-for-byte unchanged.
 pub fn change_pin(name: &[u8], old_pin: &[u8], new_pin: &[u8]) -> Result<(), Error> {
+    let salt = fresh_salt();
+    change_pin_with_salt(name, old_pin, new_pin, &salt)
+}
+
+/// Rewrite one account's credential with a caller-provided kernel-owned salt.
+/// The salt is bounded and public; the caller uses this variant when another
+/// kernel credential authority must commit the identical credential material.
+pub(crate) fn change_pin_with_salt(
+    name: &[u8],
+    old_pin: &[u8],
+    new_pin: &[u8],
+    salt: &[u8],
+) -> Result<(), Error> {
     if new_pin.is_empty() || new_pin.len() > MAX_PIN {
         return Err(Error::InvalidPin);
+    }
+    if salt.is_empty() || salt.len() > MAX_SALT {
+        return Err(Error::Io);
     }
     let stat = crate::vfs::stat(ACCOUNTS_PATH).map_err(|_| Error::NotFound)?;
     if stat.kind != crate::vfs::NodeKind::File
@@ -152,11 +168,10 @@ pub fn change_pin(name: &[u8], old_pin: &[u8], new_pin: &[u8]) -> Result<(), Err
                     return Err(Error::WrongPin);
                 }
                 found = true;
-                let salt = fresh_salt();
-                let new_hash = hash_pin(&salt, new_pin);
+                let new_hash = hash_pin(salt, new_pin);
                 rewritten.push_str(core::str::from_utf8(name).unwrap_or(""));
                 rewritten.push(':');
-                push_hex(&mut rewritten, &salt);
+                push_hex(&mut rewritten, salt);
                 rewritten.push(':');
                 push_hex(&mut rewritten, &new_hash);
                 rewritten.push('\n');

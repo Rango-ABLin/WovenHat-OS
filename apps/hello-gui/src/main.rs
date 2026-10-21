@@ -52,6 +52,15 @@
 //! and exits once the shell forwards it its key, or asks it to close. `c`
 //! opens a window larger than the old 320×240 surface cap.
 //!
+//! With `--3d-chrome-demo` it is a standalone proof of concept for a
+//! textured 3D desktop: it renders a small title-bar-like strip into an
+//! offscreen Canvas exactly as WovenShell's own chrome does today, then
+//! projects it through a perspective `Camera` as a tilted, texture-mapped
+//! quad (two `textured_triangle_3d` calls) instead of blitting it flat,
+//! before presenting the result normally. It does not touch WovenShell or
+//! any already-accepted compositor path; it exists to validate the
+//! rendering pipeline end to end before that wiring is attempted.
+//!
 //! With `--probe <handle>` it runs as an ordinary process and checks that the
 //! kernel refuses it everything it has no authority for: every compositor
 //! operation, and every operation on the surface `<handle>`, which belongs to
@@ -63,7 +72,7 @@
 use core::panic::PanicInfo;
 
 use libwoven::{
-    graphics::{Color, DepthBuffer, Path, Point, Rect, Renderer, Transform, Vertex3},
+    graphics::{Camera, Color, DepthBuffer, Path, Point, Rect, Renderer, Transform, Vertex3, Vertex3Tex},
     rgb, syscall, Args, GraphicsSurface,
 };
 
@@ -208,6 +217,7 @@ fn main(args: Args) -> ! {
         Some(b"--scaled-compositor") => scaled_compositor(),
         Some(b"--desktop-client") => desktop_client(&args),
         Some(b"--wm-client") => wm_client(&args),
+        Some(b"--3d-chrome-demo") => three_d_chrome_demo(),
         Some(_) => fail(250),
         None => run(Input::None),
     }
@@ -390,6 +400,138 @@ fn run(input: Input) -> ! {
     drop(surface);
     let _ = libwoven::print("hello-gui: surface released\n");
 
+    libwoven::exit(0)
+}
+
+const CHROME_WIDTH: usize = 64;
+const CHROME_HEIGHT: usize = 16;
+const CHROME_FILL: u32 = rgb(40, 220, 230);
+
+/// The 3D chrome demo's buffers: a 200x120 u32 canvas plus a matching u16
+/// depth buffer is ~67 KiB, far over the 8 KiB user stack, so (like
+/// `AUDIO_PCM` above) these live in .bss instead.
+struct ChromeDemoBuffers {
+    chrome: core::cell::UnsafeCell<[u32; CHROME_WIDTH * CHROME_HEIGHT]>,
+    pixels: core::cell::UnsafeCell<[u32; WIDTH as usize * HEIGHT as usize]>,
+    depth: core::cell::UnsafeCell<[u16; WIDTH as usize * HEIGHT as usize]>,
+}
+
+// SAFETY: hello-gui is single-threaded and three_d_chrome_demo takes the
+// only reference to each field.
+unsafe impl Sync for ChromeDemoBuffers {}
+
+static CHROME_DEMO: ChromeDemoBuffers = ChromeDemoBuffers {
+    chrome: core::cell::UnsafeCell::new([0; CHROME_WIDTH * CHROME_HEIGHT]),
+    pixels: core::cell::UnsafeCell::new([0; WIDTH as usize * HEIGHT as usize]),
+    depth: core::cell::UnsafeCell::new([u16::MAX; WIDTH as usize * HEIGHT as usize]),
+};
+
+/// Standalone proof of concept for textured 3D chrome: render a small
+/// title-bar-like strip offscreen, project it through a perspective
+/// `Camera` as a tilted, texture-mapped quad, and present the result. Does
+/// not touch WovenShell or any already-accepted compositor path.
+fn three_d_chrome_demo() -> ! {
+    // 1. The "chrome": exactly what a flat 2D title bar would be -- a fill
+    //    and a label -- drawn into its own offscreen Canvas, unconnected to
+    //    any compositor surface. This is the thing the 3D stage below
+    //    projects; it never changes based on how it will be displayed.
+    // SAFETY: single-threaded; this is the only live reference.
+    let chrome_pixels = unsafe { &mut *CHROME_DEMO.chrome.get() };
+    let mut chrome = match libwoven::Canvas::new(chrome_pixels, 0, 0, CHROME_WIDTH, CHROME_HEIGHT) {
+        Some(canvas) => canvas,
+        None => fail(300),
+    };
+    {
+        let mut renderer = Renderer::new(&mut chrome);
+        renderer.fill(Rect::new(0, 0, CHROME_WIDTH, CHROME_HEIGHT), Color::rgb(40, 220, 230));
+        renderer.text(4, 4, "3D", Color::BLACK);
+    }
+
+    // 2. Project the chrome's four corners through a perspective camera: the
+    //    left edge stays at z=0 while the right edge recedes to z=40<<16, so
+    //    the quad visibly narrows toward the right -- real perspective, not
+    //    a flat blit scaled down.
+    let camera = Camera::new(90 << 16, 70 << 16, 100, 30);
+    let (Some(top_left), Some(top_right), Some(bottom_left), Some(bottom_right)) = (
+        camera.project(-30 << 16, -8 << 16, 0),
+        camera.project(30 << 16, -8 << 16, 40 << 16),
+        camera.project(-30 << 16, 8 << 16, 0),
+        camera.project(30 << 16, 8 << 16, 40 << 16),
+    ) else {
+        fail(301)
+    };
+    let vertex = |(x, y, depth): (i32, i32, u16), u: u8, v: u8| Vertex3Tex::new(x, y, depth, u, v);
+
+    // SAFETY: single-threaded; this is the only live reference.
+    let pixels = unsafe { &mut *CHROME_DEMO.pixels.get() };
+    let mut canvas = match libwoven::Canvas::new(pixels, 0, 0, WIDTH as usize, HEIGHT as usize) {
+        Some(canvas) => canvas,
+        None => fail(302),
+    };
+    canvas.fill_rect(0, 0, WIDTH as usize, HEIGHT as usize, BACKGROUND);
+    // SAFETY: single-threaded; this is the only live reference.
+    let depth_values = unsafe { &mut *CHROME_DEMO.depth.get() };
+    let mut depth = match DepthBuffer::new(depth_values, 0, 0, WIDTH as usize, HEIGHT as usize) {
+        Some(depth) => depth,
+        None => fail(303),
+    };
+    depth.clear(u16::MAX);
+    {
+        let mut renderer = Renderer::new(&mut canvas);
+        renderer.textured_triangle_3d(
+            &mut depth,
+            vertex(top_left, 0, 0),
+            vertex(top_right, 255, 0),
+            vertex(bottom_left, 0, 255),
+            &chrome,
+        );
+        renderer.textured_triangle_3d(
+            &mut depth,
+            vertex(top_right, 255, 0),
+            vertex(bottom_right, 255, 255),
+            vertex(bottom_left, 0, 255),
+            &chrome,
+        );
+    }
+    let _ = libwoven::print("hello-gui: 3d chrome projected\n");
+
+    // 3. Verify by reading back pixels, the same kernel-contract-test
+    //    reasoning as `run`'s step 4: well outside the projected quad, the
+    //    background must be untouched; well inside its near (left) edge,
+    //    away from where the label is drawn, the chrome's own fill colour
+    //    must have been sampled, proving the texture (not a flat colour)
+    //    reached the screen.
+    match canvas.get(10, 10) {
+        Some(color) if color == BACKGROUND => {}
+        _ => fail(304),
+    }
+    match canvas.get(65, 22) {
+        Some(color) if color == CHROME_FILL => {}
+        _ => fail(305),
+    }
+
+    // 4. Upload and present normally: everything from here on is the same
+    //    ordinary 2D path every other mode uses.
+    let surface = match GraphicsSurface::create(WIDTH, HEIGHT) {
+        Ok(surface) => surface,
+        Err(_) => fail(306),
+    };
+    if surface.write(0, 0, WIDTH as u16, HEIGHT as u16, canvas.pixels()).is_err() {
+        fail(307);
+    }
+    if libwoven::compositor_claim().is_err() {
+        fail(308);
+    }
+    if surface.present(0, 0).is_err() {
+        fail(309);
+    }
+    match libwoven::compositor_present() {
+        Ok(written) if written > 0 => {}
+        Ok(_) => fail(310),
+        Err(_) => fail(311),
+    }
+    let _ = libwoven::print("hello-gui: 3d chrome demo: PASSED\n");
+    drop(surface);
     libwoven::exit(0)
 }
 
