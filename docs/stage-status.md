@@ -15,6 +15,13 @@ The affected static gates now pass: signed production kernel Clippy,
 all-targets warning-denying Clippy, and `cargo test --all`. Repository-wide
 format checking remains open because it reports pre-existing diffs.
 
+## Physical qualification readiness rerun (2026-10-21)
+
+The read-only preflight again found one safe USB candidate but no accessible
+TPM, no `swtpm` backend, and no signed physical provisioning record. No raw
+disk or TPM state was accessed or changed. Evidence is recorded in
+`docs/audit-physical-qualification-rerun-2026-10-21.md`.
+
 ## Stage 10.7 release-chain revalidation (2026-10-21)
 
 The full Windows chain passed host regressions, warning-denying host Clippy,

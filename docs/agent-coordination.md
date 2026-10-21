@@ -11,6 +11,11 @@ formatting check still reports pre-existing repository-wide diffs. Signed
 production kernel Clippy, all-targets Clippy, and host tests now pass. Physical
 USB and TPM qualification remain open.
 
+The 2026-10-21 09:37 read-only physical readiness rerun found one safe USB
+candidate but no accessible TPM, no `swtpm`, and no signed physical broker
+record. No disk or TPM state was changed; evidence is in
+`docs/audit-physical-qualification-rerun-2026-10-21.md`.
+
 ## Codex - Stage 10.7 release-chain revalidation (2026-10-21)
 
 The full `RUN-STAGE10.7.ps1` chain passed host regressions, host Clippy,
