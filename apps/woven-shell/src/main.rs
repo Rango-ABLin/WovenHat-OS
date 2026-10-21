@@ -256,7 +256,7 @@ const CENTER_WIDTH: i32 = 164;
 const CENTER_TITLE: &str = "Notifications";
 const CENTER_CLEAR: &str = "Clear";
 const QS_TITLE: &str = "Quick Settings";
-const QS_ROWS: usize = 9;
+const QS_ROWS: usize = 10;
 
 /// How dark the lock screen makes the wallpaper behind it.
 const LOCK_DIM: u8 = 160;
@@ -981,6 +981,10 @@ struct Desktop {
     /// panel, perspective-projected). Defaults to off, which keeps every
     /// already-accepted gate's pixel-exact 2D rendering unchanged.
     three_d: bool,
+    /// Accessibility: skip the window-open fade-in animation, appearing at
+    /// full opacity immediately. Defaults to off, matching
+    /// `libwoven::accessibility::Settings::reduced_motion`'s own default.
+    reduced_motion: bool,
     locked: bool,
     /// The PIN and its length, if one was given.
     pin: Option<([u8; MAX_PIN], usize)>,
@@ -1051,6 +1055,7 @@ impl Desktop {
         scale: 1,
         language: libwoven::i18n::Language::English,
         three_d: false,
+        reduced_motion: false,
         locked: false,
         pin: None,
         entry: [0; MAX_PIN],
@@ -1454,6 +1459,7 @@ impl Desktop {
                 libwoven::i18n::Language::Chichewa => "Language: Chichewa",
             },
             if self.three_d { "3D Desktop: On" } else { "3D Desktop: Off" },
+            if self.reduced_motion { "Reduced Motion: On" } else { "Reduced Motion: Off" },
         ]
     }
 
@@ -2326,7 +2332,10 @@ impl Desktop {
         let mut title = [0u8; MAX_TITLE];
         let title_length = (message.len() - 16).min(MAX_TITLE);
         title[..title_length].copy_from_slice(&message[16..16 + title_length]);
-        let mut fade = Spring::new(0);
+        // Reduced motion: appear at full opacity immediately rather than
+        // animate in, matching libwoven::accessibility::Settings's own
+        // "duration 0" convention for this preference.
+        let mut fade = Spring::new(if self.reduced_motion { i32::from(u8::MAX) } else { 0 });
         fade.set_target(i32::from(u8::MAX));
         let window = Window {
             owner,
@@ -2597,6 +2606,11 @@ impl Desktop {
                             // Every open window's title bar also renders
                             // differently in 3D mode, not just this panel.
                             panel.union(self.screen())
+                        }
+                        9 => {
+                            self.reduced_motion = !self.reduced_motion;
+                            log(if self.reduced_motion { &[b"woven-shell: reduced motion on"] } else { &[b"woven-shell: reduced motion off"] });
+                            panel
                         }
                         _ => empty,
                     };

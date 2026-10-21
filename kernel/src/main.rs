@@ -8191,7 +8191,7 @@ fn stage20_15_self_test() -> bool {
     // and Language were appended after Lock screen, so only the row-count
     // term needs updating).
     let button = (width - 54 - 5 * 20, top + 4);
-    let power_row = (width - 4 - 164 + 28, top - 2 - (10 * 14 + 2) + 1 + 14 + 7);
+    let power_row = (width - 4 - 164 + 28, top - 2 - (11 * 14 + 2) + 1 + 14 + 7);
     let (px, py) = (width / 2, height / 2);
     let opened = move_by(button.0 + 8 - px, button.1 + 8 - py) && click();
     if !step(
@@ -8428,7 +8428,7 @@ fn stage24_59_change_pin_self_test() -> bool {
     // row-count term needs updating, not the row index.
     let change_row = (
         width - 4 - 164 + 28,
-        top - 2 - (9 * 14 + 2) + 1 + 6 * 14 + 7,
+        top - 2 - (10 * 14 + 2) + 1 + 6 * 14 + 7,
     );
     let opened = move_by(button.0 + 8 - width / 2, button.1 + 8 - middle)
         && click()
@@ -8462,7 +8462,7 @@ fn stage24_59_change_pin_self_test() -> bool {
     // "Lock screen", so only the row-count term needs updating.
     let lock_row = (
         width - 4 - 164 + 28,
-        top - 2 - (9 * 14 + 2) + 1 + 5 * 14 + 7,
+        top - 2 - (10 * 14 + 2) + 1 + 5 * 14 + 7,
     );
     let qs_reopened = move_by(button.0 + 8 - change_row.0, button.1 + 8 - change_row.1) && click();
     let locked = qs_reopened
@@ -8942,7 +8942,7 @@ fn stage20_12_self_test() -> bool {
     // updating, not the row index.
     let lock_row = (
         width - 4 - 164 + 28,
-        top - 2 - (9 * 14 + 2) + 1 + 5 * 14 + 7,
+        top - 2 - (10 * 14 + 2) + 1 + 5 * 14 + 7,
     );
     let (px, py) = (width / 2, height / 2);
     let locked = move_by(button.0 + 8 - px, button.1 + 8 - py)
@@ -9154,7 +9154,7 @@ fn stage20_11_self_test() -> bool {
     let button = (width - 54 - 5 * 20 + 8, top + 12);
     let lock_row = (
         width - 4 - 164 + 28,
-        top - 2 - (9 * 14 + 2) + 1 + 5 * 14 + 7,
+        top - 2 - (10 * 14 + 2) + 1 + 5 * 14 + 7,
     );
     let (mut px, mut py) = (width / 2, height / 2);
     let lock = |px: &mut i32, py: &mut i32| {
@@ -9348,12 +9348,12 @@ fn stage20_10_self_test() -> bool {
     fn panel(
         width: i32,
         height: i32,
-        rows: [&str; 9],
+        rows: [&str; 10],
         beneath: impl Fn(i32, i32) -> u32,
         pointer: (i32, i32),
     ) -> bool {
         let top = height - 24;
-        let h = 10 * 14 + 2;
+        let h = 11 * 14 + 2;
         let (x0, y0) = (width - 4 - 164, top - 2 - h);
         let mut image = Surface::new(164, h as usize);
         let bounds = image.bounds();
@@ -9428,7 +9428,7 @@ fn stage20_10_self_test() -> bool {
     // pixels apart: Power off and Restart (Stage 20.15), then the toggles at
     // rows 3-5 under the title, and Lock screen.
     let button = (width - 54 - 5 * 20, top + 4);
-    let panel_y = top - 2 - (10 * 14 + 2);
+    let panel_y = top - 2 - (11 * 14 + 2);
     let row = |index: i32| (width - 4 - 164 + 28, panel_y + 1 + (1 + index) * 14 + 7);
     let wall = move |x: i32, y: i32| wallpaper(x, y, height);
 
@@ -9449,6 +9449,7 @@ fn stage20_10_self_test() -> bool {
                     "Change PIN",
                     "Language: English",
                     "3D Desktop: Off",
+                    "Reduced Motion: Off",
                 ],
                 wall,
                 (button.0 + 8, button.1 + 8),
@@ -9478,6 +9479,7 @@ fn stage20_10_self_test() -> bool {
                     "Change PIN",
                     "Language: English",
                     "3D Desktop: Off",
+                    "Reduced Motion: Off",
                 ],
                 wall,
                 (dx, dy),
@@ -9527,6 +9529,7 @@ fn stage20_10_self_test() -> bool {
                         "Change PIN",
                         "Language: English",
                         "3D Desktop: Off",
+                        "Reduced Motion: Off",
                     ],
                     |_, _| QUIET,
                     (tx, ty),
@@ -9563,6 +9566,7 @@ fn stage20_10_self_test() -> bool {
                     "Change PIN",
                     "Language: English",
                     "3D Desktop: Off",
+                    "Reduced Motion: Off",
                 ],
                 |x, y| wallpaper(x, y, full.1),
                 (sx, sy),
@@ -9575,7 +9579,7 @@ fn stage20_10_self_test() -> bool {
     // Back to 2x through the panel's scale row at the 1x geometry.
     let back_row = (
         full.0 - 4 - 164 + 28,
-        (full.1 - 24) - 2 - (10 * 14 + 2) + 1 + 3 * 14 + 7,
+        (full.1 - 24) - 2 - (11 * 14 + 2) + 1 + 3 * 14 + 7,
     );
     let restored = move_by(back_row.0 - px, back_row.1 - py)
         && click()
@@ -9713,7 +9717,7 @@ fn stage20_17_self_test() -> bool {
     };
     let (width, height) = (width as i32, height as i32);
     let top = height - 24;
-    const QS_ROWS: i32 = 9;
+    const QS_ROWS: i32 = 10;
     const PANEL_ROW: i32 = 14;
     const CENTER_WIDTH: i32 = 164;
     let panel_height = (1 + QS_ROWS) * PANEL_ROW + 2;
@@ -9896,7 +9900,7 @@ fn stage20_18_self_test() -> bool {
         return false;
     }
 
-    const QS_ROWS: i32 = 9;
+    const QS_ROWS: i32 = 10;
     const PANEL_ROW: i32 = 14;
     const CENTER_WIDTH: i32 = 164;
     let button = (width - 54 - 5 * 20, top + 4);
