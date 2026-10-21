@@ -3477,3 +3477,13 @@ registrations on every return path. Manual-reset events support four bounded
 task waiters and broadcast wakeups; one-shot timers retain one consuming task
 waiter so expiry is not duplicated. See [the ABI contract](wait-any-objects-abi.md)
 and [the Stage 19.8 audit](audit-stage19-8-timer-event-wait-2026-10-15.md).
+
+## Stage 25.1 ACPI power capability boundary
+
+`kernel/src/hal/acpi.rs` retains the discovered `_S5` types and now records
+optional `_S3` sleep types in `Power`. Syscall 235 reports fixed capability
+bytes for power-off, suspend, and restart; it requires `PowerControl`, audits
+the query, and copies only after validating the userspace destination.
+`libwoven::power_capabilities` is the corresponding typed wrapper. This ABI
+does not initiate a power transition: S3 entry/restore, driver quiescing,
+wake-source policy, and hardware qualification remain separate work.

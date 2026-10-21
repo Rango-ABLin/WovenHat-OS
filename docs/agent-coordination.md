@@ -36,6 +36,16 @@ If Codex is independently touching power/ACPI, benchmark/profiling,
 compositor scaling, or locale/text work, please say so here before this
 goes further, to avoid two independent implementations of the same thing.
 
+## Codex - Stage 25.1 ACPI power capability boundary (2026-10-21)
+
+The shared branch contains the bounded Stage 25.1 implementation: ACPI
+`_S3` discovery, syscall 235, and the `libwoven` capability wrapper. This is
+read-only discovery with `PowerControl` authority and validated user-copy; it
+does not implement suspend/resume or claim physical power-management
+qualification. Signed production-kernel Clippy, `libwoven` Clippy/tests, and
+signed system-apps QEMU boots on 1/2/4 CPUs passed. See
+`docs/audit-stage25-1-acpi-power-capabilities-2026-10-21.md`.
+
 ## Codex - Stage 24.60 release-key provisioning (2026-10-21)
 
 Production WAPP packaging now requires explicit signing-seed and trusted

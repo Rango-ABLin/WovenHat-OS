@@ -1362,6 +1362,14 @@ enterprise identity
 Phase XVI — Power and Hardware Management
 Stage 25 — Power Management
 
+Stage 25.1 - ACPI power capability boundary
+
+Accepted bounded slice: discover firmware `_S3` sleep types alongside `_S5`
+and expose a privileged, read-only capability query (syscall 235 and the
+`libwoven` wrapper). This does not perform suspend/resume; driver save/restore,
+wake-source handling, and physical qualification remain prerequisites for the
+later sleep/wake implementation.
+
 Implement:
 
 ACPI poweroff

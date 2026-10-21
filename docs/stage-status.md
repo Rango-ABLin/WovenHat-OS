@@ -1,5 +1,22 @@
 # Stage status
 
+## Stage 25.1 - ACPI power capability boundary (2026-10-21)
+
+The kernel now discovers firmware `_S3` sleep types alongside the existing
+`_S5` power-off types and exposes a read-only capability query through syscall
+235 and the `libwoven::power_capabilities` wrapper. The query requires
+`PowerControl`, validates the userspace output range, records an audit event,
+and reports power-off, suspend, and restart capability without performing a
+transition.
+
+Signed production-kernel Clippy, `libwoven` warning-denying Clippy and tests
+(95 tests), and signed system-apps QEMU boots on 1/2/4 CPUs pass. Evidence is
+in `docs/audit-stage25-1-acpi-power-capabilities-2026-10-21.md`.
+
+This is a capability boundary only. It does not claim S3 suspend/resume,
+driver quiescing, wake-source policy, battery/thermal/lid reporting, or
+physical hardware qualification.
+
 ## Stage 24.60 — release-key provisioning boundary (2026-10-21)
 
 Production WAPP packaging now requires explicit signing-seed and trusted
