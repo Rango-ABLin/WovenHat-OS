@@ -3878,3 +3878,13 @@ now compiled for every kernel feature configuration. The driver module carries
 the existing bounded dead-code expectation for QEMU-only builds. The prior
 `stage19-2-test` warning-denying Clippy gate passes again; no driver capability
 or hardware path is enabled by this compile-time repair.
+
+**Independently re-verified (Claude, 2026-10-21):** Confirmed `5543b7f4`
+resolves the regression flagged above. `cargo clippy -p wovenhat-kernel
+--target x86_64-unknown-none -- -D warnings` (default features) is clean with
+no output; `--features stage19-2-test` no longer hits `E0433` (driver error
+gone); `--features stage20-15-test` only hits the expected
+`WOVENHAT_HELLO_GUI_IMAGE`/`WOVENHAT_SHELL_IMAGE` missing-build-env errors
+that the QEMU test harness normally sets, unrelated to this fix; and
+`scripts/test-hello-gui-compositor-qemu.py --stage 19.2 --cpus 1` is a full
+PASS. Treating this item as closed.
