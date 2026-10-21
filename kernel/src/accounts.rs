@@ -16,6 +16,8 @@ use sha2::Sha256;
 pub const ACCOUNTS_PATH: &str = "/etc/wovenhat/accounts";
 pub(crate) const MAX_NAME: usize = 16;
 const MAX_SALT: usize = 32;
+/// Only `fresh_salt` below uses this; see its own `system-apps` gate.
+#[cfg(not(feature = "system-apps"))]
 const SALT_BYTES: usize = 16;
 const HASH_BYTES: usize = 32;
 /// Must match `apps/woven-shell`'s `MAX_PIN`.
@@ -102,6 +104,12 @@ fn parse_line(line: &[u8]) -> Option<Line<'_>> {
 /// else timer/stack-mixed) fallback, which this crate otherwise reserves for
 /// non-cryptographic use, is adequate here specifically because this value
 /// is never secret.
+///
+/// Only `change_pin` below uses this directly: under `system-apps`, the
+/// identity authority (`identity_runtime::change_pin`) generates its own
+/// salt and calls `change_pin_with_salt` instead, so this one and `change_pin`
+/// are only reachable in the minimal, no-identity-authority build.
+#[cfg(not(feature = "system-apps"))]
 fn fresh_salt() -> [u8; SALT_BYTES] {
     let mut salt = [0u8; SALT_BYTES];
     for chunk in salt.chunks_mut(8) {
@@ -113,6 +121,7 @@ fn fresh_salt() -> [u8; SALT_BYTES] {
 /// Change `name`'s PIN from `old_pin` to `new_pin` in the accounts file.
 /// `old_pin` must verify against the account's current hash first; every
 /// other account's line is left byte-for-byte unchanged.
+#[cfg(not(feature = "system-apps"))]
 pub fn change_pin(name: &[u8], old_pin: &[u8], new_pin: &[u8]) -> Result<(), Error> {
     let salt = fresh_salt();
     change_pin_with_salt(name, old_pin, new_pin, &salt)
