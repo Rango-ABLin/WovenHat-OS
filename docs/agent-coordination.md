@@ -3973,3 +3973,64 @@ build is already running, wait for it to finish first. project-level cleanup
 `audit-artifacts/` has no more large raw `.img` files left to compress, and
 `target`/`apps/*/target` are already cleared -- so the next spike has to be
 avoided rather than cleaned up after.
+
+**Stage 26.5 lock-screen i18n wiring, plus four bugs patched along the way
+(Claude, 2026-10-21):** Wired `libwoven::i18n::Catalog` into WovenShell's
+actual lock screen (`render_lock` in `apps/woven-shell/src/main.rs`): a new
+Quick Settings "Language" row toggles `Desktop.language` between English and
+Chichewa (default English, byte-identical to the prior literals, so no
+existing gate's rendering changes unless the toggle is used). Translated
+strings: sign-in/locked/change-PIN titles and every PIN prompt. This is the
+first real consumer of the Stage 26.5 foundation Codex built -- the library
+existed but nothing used it before this.
+
+Bugs found and fixed while wiring this in and bumping `QS_ROWS` 7->8:
+1. A stack-overflow risk building the Catalog by value before moving it into
+   a static (fixed by filling an already-`.bss`-resident `Catalog::new()` in
+   place -- Codex independently found and fixed the identical issue in
+   `9df7ba5c`, which landed over mine; both converged on the same shape).
+2. Four hardcoded QS-panel pixel/click-geometry formulas in `kernel/src/main.rs`
+   (`stage20-10-test`'s `panel()`/`row()`/`back_row`, `stage20-11-test` and
+   `stage24-59-test`'s `lock_row`/`change_row`/`power_row`) were stale from
+   before "Tiling" and "Change PIN" were added, assuming a 5- or 7-row panel;
+   now updated for 8 rows. These were latent, pre-existing breaks that a
+   fresh click simply never landed on the wrong row badly enough to fail
+   until an 8th row pushed the drift past the tolerance.
+3. `LockMode::Lock`'s kernel-authentication check in `lock_key()` rejected
+   every unlock when no account was ever signed in (pure `--pin`-only mode,
+   used by several self-tests): `pin_matches()` already verifies the entry
+   against `self.pin` in that mode, but the later match had no `(None, None)`
+   arm and always returned `false`. Fixed with an explicit `(None, None) =>
+   true` arm (pre-existing regression, not caused by the i18n change, but
+   only ever reached once the geometry fixes let `stage20-11-test` run this
+   far for the first time).
+4. `hello-gui`'s `--desktop-client` test mode treated any message it didn't
+   recognize as fatal, including `WPMV` (pointer-move) broadcasts the shell
+   sends to whatever window is under the pointer regardless of whether that
+   window asked for them. Fixed by ignoring `WPMV` like the existing
+   `WSIZ`/`WCLS` handling.
+
+Verified: `stage20-10-test`, `stage20-11-test`, `stage24-59-test` pass on
+1/2/4 CPUs (re-verifying 24.59 now); default-feature and `stage19-2-test`
+kernel Clippy are clean; `cargo test -p libwoven` passes.
+
+**Separate, pre-existing bug found, not fixed (Claude, 2026-10-21):**
+`stage20_12_self_test` ("ada's PIN is refused for lin" / "lin's PIN signs
+in") writes `/etc/wovenhat/accounts` straight to the VFS and spawns
+WovenShell with `--accounts`, but nothing in that path ever calls
+`identity_runtime::load_accounts_file` to load those credentials into the
+kernel's `AUTHORITY` (that function is `#[cfg(feature = "system-apps")]`
+only, and `stage20-12-test` doesn't enable it). Every
+`session_open_verified` call therefore hits `Error::NotReady`, which the UI
+can't distinguish from a wrong PIN -- so "ada's PIN is refused" passes
+vacuously (anything is "refused") while "lin's PIN signs in" can never pass
+(nothing can ever succeed). This is unrelated to the i18n/geometry work
+above and looks like it predates the kernel identity/session system
+(the self-test may have been written against an older, purely-userspace PIN
+check). Confirmed via kernel-side tracing, not a timing issue -- I tried
+widening the relevant `until(...)` timeouts first and they made no
+difference, which is what led to finding the real cause. Left unfixed:
+the real fix is adding a call to load the written file into `AUTHORITY`
+(widening `load_accounts_file`'s gate or adding a `stage20-12-test`-specific
+loader) and I didn't want to touch the identity/session boundary you've been
+actively extending without flagging it here first.
