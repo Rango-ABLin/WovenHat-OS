@@ -1,5 +1,13 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - Stage 24.55 (2026-10-21)
+
+Added and ran the read-only physical TPM readiness preflight. It found one
+non-system USB candidate (Disk 1), no accessible/ready TPM, and no swtpm
+backend. The report explicitly proves no raw-disk open, disk-state change,
+media write, or TPM provisioning. This is not physical qualification; USB
+remains untouched.
+
 ## Codex - Stage 24.54 (2026-10-21)
 
 Bound credential-root leases to their validated NV metadata and made broker

@@ -2,6 +2,12 @@ WovenHat OS — Stage 10.7 → Version 1.0 Master Roadmap
 Phase I — Finish the asynchronous kernel foundation
 Stage 10.7 — Asynchronous TCP
 
+Stage 24.55 - Physical TPM readiness preflight
+Added a read-only host preflight for TPM visibility/readiness, emulation,
+signed broker-record presence, and removable-disk safety. The observed machine
+has no accessible TPM or software TPM backend; physical qualification is not
+claimed and no media was changed.
+
 Stage 24.54 - Kernel-derived TPM authorization secret
 Bound credential-root leases to the validated NV index and policy, rejected
 metadata-changing rotations, and derived the attestation authorization value

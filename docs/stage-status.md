@@ -1,5 +1,19 @@
 # Stage status
 
+## Stage 24.55 physical TPM readiness preflight (2026-10-21)
+
+Added `scripts/test-physical-tpm-readiness.ps1`, a read-only host preflight
+that records TPM visibility/readiness, QEMU/swtpm availability, signed broker
+record presence, and removable-disk identity/safety. The run found one safe
+USB candidate (Disk 1) but no accessible TPM and no software TPM backend.
+Evidence is under
+`audit-artifacts/physical-tpm-readiness-20261021-063402`.
+
+This is a readiness report, not physical qualification. No raw disk was
+opened, no disk state changed, and no media or TPM state was written. An
+administrator TPM query, a provisioned physical TPM, and live hardware gates
+remain required.
+
 ## Stage 24.54 kernel-derived TPM authorization secret (2026-10-21)
 
 Credential-root leases now retain the validated NV index and policy binding.

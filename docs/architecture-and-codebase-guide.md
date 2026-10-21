@@ -1,5 +1,13 @@
 # WovenHat OS Architecture & Codebase Guide
 
+### Stage 24.55 - physical TPM readiness preflight
+
+The read-only PowerShell preflight records host TPM visibility, readiness,
+software-emulation availability, signed broker-record presence, and removable
+disk identity. It explicitly reports raw-disk access, disk-state mutation,
+media writes, and TPM provisioning as false; its result cannot be interpreted
+as a hardware qualification pass.
+
 ### Stage 24.54 - kernel-derived TPM authorization secret
 
 `CredentialRootLease` now retains its validated NV index and policy binding;
