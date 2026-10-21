@@ -1,5 +1,15 @@
 # WovenHat OS Architecture & Codebase Guide
 
+### Stage 24.58 - physical TPM broker boot activation
+
+The system-app boot path now activates the physical broker only after loading
+and revalidating both signed policy records, reading the configured attestation
+public area, obtaining a fresh TPM caller nonce, and promoting the PCR-bound
+credential root through the Stage 24.57 read boundary. Any missing record,
+invalid metadata, TPM error, or cleanup failure leaves the broker absent while
+the desktop continues. A live TPM is still required to qualify the success
+branch.
+
 ### Stage 24.57 - physical TPM credential-root read boundary
 
 `kernel/src/tpm2.rs` now provides the bounded physical read path that validates

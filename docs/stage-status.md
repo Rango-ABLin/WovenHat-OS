@@ -1,5 +1,22 @@
 # Stage status
 
+## Stage 24.58 physical TPM broker boot activation (2026-10-21)
+
+Integrated the signed broker records and Stage 24.57 TPM root-read boundary
+into the system-app boot path. When a live TPM is present, boot now
+revalidates the signed policy records, reads the attestation public key,
+obtains a fresh TPM nonce, promotes the policy/PCR-bound NV credential root,
+and installs the kernel-owned broker. Every failure leaves hardware
+credentials disabled; no TPM or storage error blocks the desktop. Host tests,
+warning-denying all-target and system-app Clippy, and exact-tree memory plus
+signed system-app acceptance on 1/2/4 CPUs pass. Evidence is under
+`audit-artifacts/stage24.58-tpm-broker-boot-activation-20261021`.
+
+QEMU has no live TPM, and all three boots therefore exercised the required
+fail-closed path. Physical TPM activation, live credential login, reboot
+recovery, and hardware qualification remain open release gates. The attached
+USB was not opened or modified.
+
 ## Stage 24.57 physical TPM credential-root read boundary (2026-10-21)
 
 Added the kernel-side read-only handoff for the signed credential-root record:

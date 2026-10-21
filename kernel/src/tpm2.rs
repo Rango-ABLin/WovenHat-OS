@@ -775,6 +775,47 @@ pub fn boot_credential_broker_config(
     true
 }
 
+/// Activate the physical TPM credential broker from the signed records that
+/// were accepted during this boot. The TPM supplies both the one-use policy
+/// session nonce and the credential root; no root or authorization value is
+/// accepted from storage or userspace. Any failure leaves the broker absent.
+#[cfg(feature = "system-apps")]
+pub fn activate_provisioned_hardware_credential_broker(info: Tpm2Info) -> Result<(), Error> {
+    let config = load_credential_broker_config_at_boot()?;
+    let _attestation_name = load_attestation_name_policy_at_boot()?;
+    let mut name_policy = [0_u8; ATTESTATION_NAME_POLICY_BYTES];
+    if !boot_attestation_name_policy(&mut name_policy) {
+        return Err(Error::Storage);
+    }
+    let public = read_attestation_public(info, config.signing_handle)?;
+    let mut nonce_caller = [0_u8; 32];
+    let random_length = get_random(info, &mut nonce_caller)?;
+    if random_length != nonce_caller.len() {
+        nonce_caller.fill(0);
+        name_policy.fill(0);
+        return Err(Error::MalformedResponse);
+    }
+    let root = match provision_credential_root_from_tpm(info, &config, &nonce_caller) {
+        Ok(root) => root,
+        Err(error) => {
+            nonce_caller.fill(0);
+            name_policy.fill(0);
+            return Err(error);
+        }
+    };
+    nonce_caller.fill(0);
+    let result = install_provisioned_hardware_credential_broker(
+        info,
+        root,
+        &config,
+        public,
+        &name_policy,
+        &crate::signed_app::TRUSTED_PUBLIC_KEY,
+    );
+    name_policy.fill(0);
+    result
+}
+
 /// Verify an ECDSA P-256/SHA-256 quote signature against the exact
 /// `TPMS_ATTEST` bytes. TPM ECDSA components must be canonical 32-byte
 /// integers for this curve; shorter or oversized TPM2B values are rejected.

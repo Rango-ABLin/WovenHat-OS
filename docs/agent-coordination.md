@@ -1,5 +1,14 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - Stage 24.58 (2026-10-21)
+
+Integrated signed broker-record validation and physical TPM credential-root
+promotion into boot. A live TPM now supplies the attestation public area and a
+fresh caller nonce before the kernel installs the broker; any failure keeps
+hardware credentials disabled without blocking the desktop. Host, Clippy,
+memory, and signed system-app gates passed on 1/2/4 CPUs. QEMU exercised the
+no-TPM fail-closed branch. Physical TPM qualification remains required.
+
 ## Codex - Stage 24.57 (2026-10-21)
 
 Added the physical TPM credential-root read boundary: bounded NV public
