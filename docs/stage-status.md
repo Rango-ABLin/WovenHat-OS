@@ -1,5 +1,19 @@
 # Stage status
 
+## Stage 24.37 fail-closed TPM quote authorization integration (2026-10-21)
+
+The TPM2 layer now combines signed expected-Name policy verification,
+`ReadPublic` Name binding, nonce/PCR attestation validation, signature-shape
+validation, and RSA/ECC cryptographic verification in one structured
+authorization request. A caller cannot substitute a different key or skip an
+earlier binding step. Host tests (89), all-targets and affected feature
+Clippy, executable QEMU, and signed system-apps 1/2/4-CPU acceptance pass.
+Evidence is under
+`audit-artifacts/stage24.37-quote-authorization-integration-20261021`.
+
+Boot-time policy loading, live TPM execution, credential decision integration,
+recovery, and physical TPM qualification remain required.
+
 ## Stage 24.36 durable signed TPM Name policy boundary (2026-10-21)
 
 The signed TAN1 attestation-Name policy now has a journal-backed WovenFS

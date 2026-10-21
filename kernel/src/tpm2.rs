@@ -515,6 +515,55 @@ pub fn decode_quote_signature(
     }
     Ok((parsed, offset))
 }
+
+/// Authorize one TPM quote only when every independent binding agrees:
+/// signed expected Name, validated `ReadPublic` Name, nonce/PCR evidence, and
+/// cryptographic quote signature. No caller-supplied key can bypass the Name
+/// policy because the key is selected from the validated public-area result.
+pub struct QuoteAuthorizationRequest<'a> {
+    pub name_policy: &'a [u8],
+    pub trusted_policy_key: &'a [u8; 32],
+    pub public: &'a AttestationPublic,
+    pub quote: &'a [u8],
+    pub signature: &'a [u8],
+    pub expected_nonce: &'a [u8],
+    pub expected_pcr: u8,
+    pub expected_digest: &'a [u8; 32],
+}
+
+#[allow(dead_code)]
+pub fn authorize_quote(request: QuoteAuthorizationRequest<'_>) -> Result<QuoteAttestation, Error> {
+    let expected_name = verify_signed_attestation_name_policy(
+        request.name_policy,
+        request.trusted_policy_key,
+    )?;
+    let key = bind_attestation_public_name(request.public, &expected_name)?;
+    let attestation = decode_quote_attestation(
+        request.quote,
+        request.expected_nonce,
+        request.expected_pcr,
+        request.expected_digest,
+    )?;
+    let (signature, consumed) = decode_quote_signature(request.signature)?;
+    if consumed != request.signature.len() {
+        return Err(Error::MalformedResponse);
+    }
+    match key {
+        AttestationPublicKey::Rsa(public_key) => {
+            if signature.algorithm != TPM_ALG_RSASSA && signature.algorithm != TPM_ALG_RSAPSS {
+                return Err(Error::InvalidPolicy);
+            }
+            verify_quote_rsa_sha256(request.quote, &signature, &public_key)?;
+        }
+        AttestationPublicKey::EccP256(public_key) => {
+            if signature.algorithm != TPM_ALG_ECDSA {
+                return Err(Error::InvalidPolicy);
+            }
+            verify_quote_ecc_p256_sha256(request.quote, &signature, &public_key)?;
+        }
+    }
+    Ok(attestation)
+}
 // The probe runs before timer IRQs are enabled, so this bound must not depend
 // on the kernel tick counter. It is deliberately finite even for a wedged
 // device or malformed firmware descriptor.
@@ -1835,6 +1884,19 @@ pub fn self_test() -> bool {
                 return false;
             };
             if policy_name[..2] != TPM_ALG_SHA256.to_be_bytes() || policy_name[2..] != [0x22; 32] {
+                return false;
+            }
+            if authorize_quote(QuoteAuthorizationRequest {
+                name_policy: &name_policy,
+                trusted_policy_key: &policy_key,
+                public: &parsed_public,
+                quote: &quote,
+                signature: &[],
+                expected_nonce: &quote_nonce,
+                expected_pcr: 7,
+                expected_digest: &expected_quote_digest,
+            }) != Err(Error::CredentialMismatch)
+            {
                 return false;
             }
             name_policy[42] ^= 1;

@@ -2,6 +2,14 @@ WovenHat OS — Stage 10.7 → Version 1.0 Master Roadmap
 Phase I — Finish the asynchronous kernel foundation
 Stage 10.7 — Asynchronous TCP
 
+Stage 24.37 - Fail-closed TPM quote authorization integration
+
+Implemented one structured authorization path binding signed TPM identity,
+ReadPublic key, quote nonce/PCR evidence, and RSA/ECC signature verification.
+The executable QEMU self-test, host tests, Clippy, and signed 1/2/4-CPU
+acceptance pass. Boot loading, live TPM execution, credential decisions,
+recovery, physical qualification, and release readiness remain required.
+
 Stage 24.36 - Durable signed TPM Name policy boundary
 
 Implemented journal-backed WovenFS persistence and revalidated reads for the

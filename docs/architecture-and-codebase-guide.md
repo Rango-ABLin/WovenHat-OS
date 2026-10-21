@@ -1,5 +1,13 @@
 # WovenHat OS Architecture & Codebase Guide
 
+### Stage 24.37 - fail-closed TPM quote authorization integration
+
+`authorize_quote` requires a signed TAN1 policy, a `ReadPublic` result whose
+Name matches it, expected nonce/PCR evidence, a fully consumed TPM signature
+frame, and the matching RSA or P-256 verifier. The structured request keeps
+these inputs explicit and the function returns no authorization on any
+mismatch. It is an authorization primitive, not yet a boot-time policy hook.
+
 ### Stage 24.36 - durable signed TPM Name policy boundary
 
 `persist_attestation_name_policy` validates TAN1 before committing the exact

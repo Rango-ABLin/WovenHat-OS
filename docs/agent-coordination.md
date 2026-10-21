@@ -1,5 +1,15 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - Stage 24.37 (2026-10-21)
+
+Added the fail-closed `authorize_quote` integration: signed expected Name,
+validated ReadPublic identity, quote nonce/PCR binding, signature framing,
+and RSA/ECC cryptographic verification must all succeed. Static gates,
+executable QEMU, and signed system-apps 1/2/4-CPU acceptance pass. Evidence
+is in `docs/audit-stage24-37-quote-authorization-integration-2026-10-21.md`;
+USB remains untouched. Boot loading, live TPM execution, credential
+authorization, recovery, and physical qualification remain open.
+
 ## Codex - Stage 24.36 (2026-10-21)
 
 Added journal-backed WovenFS persistence/read APIs for the signed TAN1 TPM
