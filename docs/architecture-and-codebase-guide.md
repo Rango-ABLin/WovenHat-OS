@@ -3537,3 +3537,16 @@ nonzero, and FACS version. The query requires `PowerControl`, validates the
 userspace destination, and performs no firmware or PM1 writes. Wake-trampoline
 allocation, FACS vector ownership/installation, CPU save/restore, and S3 entry
 remain separate prerequisites.
+
+## Stage 25.6 low-memory wake-page reservation
+
+`smp::prepare` reserves the existing AP startup page and a second distinct
+usable page below 640 KiB before the frame allocator starts. The allocator
+already excludes low memory, so both reservations remain firmware-safe and
+cannot be handed to unrelated allocations. If no second suitable page exists,
+`smp::wake_page` reports unavailable instead of aliasing the AP page.
+
+`power::prepare_suspend` requires this reservation and carries its physical
+address in the private preparation token. The page is not executable yet:
+trampoline construction, FACS vector ownership, CPU-state preservation, and
+the S3 transition remain later boundaries.

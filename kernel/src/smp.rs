@@ -35,6 +35,7 @@ static LAPIC: AtomicU64 = AtomicU64::new(0);
 static X2APIC_REQUESTED: AtomicBool = AtomicBool::new(false);
 static X2APIC_ACTIVE: AtomicBool = AtomicBool::new(false);
 static BOOT_PAGE: AtomicU64 = AtomicU64::new(0);
+static WAKE_PAGE: AtomicU64 = AtomicU64::new(0);
 static COUNT: AtomicUsize = AtomicUsize::new(1);
 static IOAPIC: AtomicU64 = AtomicU64::new(0);
 static TIMER_COUNT: AtomicU32 = AtomicU32::new(1_000_000);
@@ -537,6 +538,15 @@ pub fn topology_domains() -> u16 {
 pub fn x2apic_active() -> bool {
     X2APIC_ACTIVE.load(Ordering::Acquire)
 }
+
+/// A firmware-reachable low-memory page reserved before the frame allocator
+/// starts. It is distinct from the AP startup page and is never returned to
+/// the general allocator.
+pub fn wake_page() -> Option<u64> {
+    let page = WAKE_PAGE.load(Ordering::Acquire);
+    (page != 0).then_some(page)
+}
+
 pub fn prepare(regions: &[MemoryRegion]) {
     IDS[0].store(__cpuid(1).ebx >> 24, Ordering::Relaxed);
     DOMAINS[0].store(0, Ordering::Release);
@@ -547,12 +557,26 @@ pub fn prepare(regions: &[MemoryRegion]) {
             continue;
         };
         let start = aligned & !4095;
-        if region.kind == MemoryRegionKind::Usable
-            && start
-                .checked_add(4096)
-                .is_some_and(|end| end <= region.end.min(0xa0000))
-        {
+        if region.kind != MemoryRegionKind::Usable {
+            continue;
+        }
+        let limit = region.end.min(0xa0000);
+        if !start.checked_add(4096).is_some_and(|end| end <= limit) {
+            continue;
+        }
+        if BOOT_PAGE.load(Ordering::Relaxed) == 0 {
             BOOT_PAGE.store(start, Ordering::Relaxed);
+            // Prefer a second page from the same usable range. If the range
+            // contains only one page, the next usable range supplies it.
+            if start
+                .checked_add(8192)
+                .is_some_and(|end| end <= limit)
+            {
+                WAKE_PAGE.store(start + 4096, Ordering::Relaxed);
+                break;
+            }
+        } else if WAKE_PAGE.load(Ordering::Relaxed) == 0 {
+            WAKE_PAGE.store(start, Ordering::Relaxed);
             break;
         }
     }

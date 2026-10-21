@@ -113,6 +113,16 @@ state is modified. Wake-trampoline allocation, vector installation, CPU
 save/restore, S3 entry, and physical firmware qualification remain open. See
 `docs/audit-stage25-5-facs-wake-capabilities-2026-10-21.md`.
 
+## Codex - Stage 25.6 low-memory wake-page reservation (2026-10-21)
+
+The shared branch now reserves a distinct usable page below 640 KiB for the
+future S3 wake trampoline, separate from the AP startup page and excluded from
+the general allocator. Suspend preparation requires and retains that page's
+physical address. No trampoline bytes or FACS vector are written yet; CPU
+state save/restore, secondary-CPU coordination, S3 entry, and firmware wake
+remain open. See
+`docs/audit-stage25-6-low-wake-page-2026-10-21.md`.
+
 ## Codex - Stage 24.60 release-key provisioning (2026-10-21)
 
 Production WAPP packaging now requires explicit signing-seed and trusted

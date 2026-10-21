@@ -49,6 +49,7 @@ pub enum PrepareError {
 )]
 pub struct SuspendPreparation {
     plan: crate::driver::SuspendPlan,
+    wake_page: u64,
 }
 
 /// Quiesce the current driver set if firmware advertises S3. This boundary is
@@ -65,10 +66,13 @@ pub fn prepare_suspend() -> Result<SuspendPreparation, PrepareError> {
     if power.pm1a_control == 0 || power.s3.is_none() || !acpi_mode(power) {
         return Err(PrepareError::NoSuspend);
     }
+    let Some(wake_page) = crate::smp::wake_page() else {
+        return Err(PrepareError::NoSuspend);
+    };
     let Some(plan) = crate::driver::suspend_all() else {
         return Err(PrepareError::DriverRefused);
     };
-    Ok(SuspendPreparation { plan })
+    Ok(SuspendPreparation { plan, wake_page })
 }
 
 /// Abort a prepared suspend and restore drivers in reverse order.

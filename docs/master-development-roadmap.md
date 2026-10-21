@@ -1404,6 +1404,13 @@ S3/FACS/waking-vector readiness through a privileged read-only query (syscall
 CPU, or PM1 state is written; wake-trampoline and actual sleep/wake work
 remain prerequisites.
 
+Stage 25.6 - low-memory wake-page reservation
+
+Accepted bounded slice: reserve a distinct usable page below 640 KiB for the
+future S3 wake trampoline, separate from the AP startup page and unavailable
+to the general allocator. This does not write trampoline code, install a FACS
+waking vector, enter S3, or handle firmware wake.
+
 ACPI poweroff
 reboot
 sleep

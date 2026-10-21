@@ -1,5 +1,16 @@
 # Stage status
 
+## Stage 25.6 - low-memory wake-page reservation (2026-10-21)
+
+SMP preparation now reserves a distinct usable page below 640 KiB for the
+future S3 wake trampoline, separate from the AP startup page and excluded from
+the general frame allocator. Suspend preparation refuses to proceed if that
+page is unavailable and carries its physical address internally.
+
+The page is reserved only; no code is written and no FACS waking vector is
+modified. Evidence and limits are recorded in
+`docs/audit-stage25-6-low-wake-page-2026-10-21.md`.
+
 ## Stage 25.5 - ACPI FACS wake-capability boundary (2026-10-21)
 
 ACPI discovery now validates the FADT-referenced FACS signature, minimum
