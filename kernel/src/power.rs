@@ -28,6 +28,10 @@ pub enum Error {
     StillRunning,
 }
 
+#[expect(
+    dead_code,
+    reason = "used by the future S3 transition boundary after wake-vector support lands"
+)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PrepareError {
     /// Firmware did not advertise S3 or no PM1a control block was found.
@@ -39,6 +43,10 @@ pub enum PrepareError {
 /// Driver-quiescence preparation for a future S3 transition. Construction
 /// performs no SLP_EN write; the plan must be explicitly resumed or consumed
 /// by a later transition implementation.
+#[expect(
+    dead_code,
+    reason = "held between S3 driver quiescence and the future transition entry"
+)]
 pub struct SuspendPreparation {
     plan: crate::driver::SuspendPlan,
 }
@@ -46,6 +54,10 @@ pub struct SuspendPreparation {
 /// Quiesce the current driver set if firmware advertises S3. This boundary is
 /// deliberately separate from entering S3 so wake-vector and per-CPU resume
 /// work can be completed before any hardware transition is exposed.
+#[expect(
+    dead_code,
+    reason = "future S3 transition calls this after wake-vector and CPU coordination"
+)]
 pub fn prepare_suspend() -> Result<SuspendPreparation, PrepareError> {
     let Some(power) = crate::hal::acpi::power() else {
         return Err(PrepareError::NoSuspend);
@@ -60,6 +72,10 @@ pub fn prepare_suspend() -> Result<SuspendPreparation, PrepareError> {
 }
 
 /// Abort a prepared suspend and restore drivers in reverse order.
+#[expect(
+    dead_code,
+    reason = "future S3 transition rollback calls this on failed entry or wake"
+)]
 pub fn abort_suspend(preparation: SuspendPreparation) -> bool {
     crate::driver::resume_all(preparation.plan)
 }
