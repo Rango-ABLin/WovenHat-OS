@@ -1,5 +1,20 @@
 # Stage status
 
+## Stage 30.5 - scheduler yield-latency micro-benchmark (2026-10-21)
+
+Added a `hello-gui --scheduler-benchmark` mode: 1000 round trips of
+`yield_now`, timed with `libwoven::cycles()`. With no other runnable
+process contending for this CPU, the scheduler always re-selects the same
+task immediately, so this measures the voluntary-yield path's own overhead
+(syscall entry, run-queue bookkeeping, syscall exit) rather than a context
+switch to different process state -- a true cross-process context-switch
+benchmark is a separate, larger undertaking (needs a ping-pong pair of
+processes). Validated on 1/2/4 CPUs via `stage30-5-test`: ~578,000-582,000
+cycles min (~687,000-748,000 average) under QEMU TCG -- noticeably more
+than the Stage 30.1 bare syscall baseline (~25,000-30,000 cycles),
+consistent with the scheduler doing real run-queue/priority bookkeeping on
+every yield rather than just validating and returning.
+
 ## Stage 30.4 - compositor frame-present-latency micro-benchmark (2026-10-21)
 
 Added a `hello-gui --compositor-benchmark` mode: 500 round trips of
