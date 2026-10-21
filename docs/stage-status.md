@@ -1,5 +1,19 @@
 # Stage status
 
+## Stage 24.49 credential-root lifecycle (2026-10-21)
+
+The TPM2 layer now owns a generation-tagged kernel credential-root lease.
+Installation requires validated NV metadata and exact policy-bound readback;
+zero roots are rejected. Rotation validates the replacement before wiping the
+old root and advancing the generation, derivation exposes only bounded
+context-derived material, and explicit revocation wipes the root and makes the
+lease unusable. Host tests (89), all-targets and affected feature Clippy,
+executable QEMU, and signed system-apps 1/2/4-CPU acceptance pass. Evidence is
+under `audit-artifacts/stage24.49-credential-root-lifecycle-20261021`.
+
+Live TPM NV define/write/read execution, provisioned-key persistence policy,
+credential decisions, recovery, and physical qualification remain required.
+
 ## Stage 24.48 TPM custody authorization boundary (2026-10-21)
 
 TPM policy-session custody now requires a kernel-owned authority token in

@@ -2,6 +2,14 @@ WovenHat OS — Stage 10.7 → Version 1.0 Master Roadmap
 Phase I — Finish the asynchronous kernel foundation
 Stage 10.7 — Asynchronous TCP
 
+Stage 24.49 - Credential-root lifecycle
+
+Implemented a generation-tagged, non-copyable kernel credential-root lease
+with validated installation, transactional rotation, bounded derivation, and
+explicit zeroizing revocation. Host tests, Clippy, executable QEMU, and signed
+1/2/4-CPU acceptance pass. Live TPM NV execution, credential decisions,
+recovery, qualification, and release readiness remain required.
+
 Stage 24.48 - TPM custody authorization boundary
 
 Implemented a private-construction kernel custody token for TPM policy-session

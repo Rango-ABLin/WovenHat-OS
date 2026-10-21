@@ -1,5 +1,13 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - Stage 24.49 (2026-10-21)
+
+Added a generation-tagged, non-copyable credential-root lease with validated
+installation, transactional rotation, bounded HMAC derivation, explicit
+revocation, and zeroization on lifecycle teardown. Host, Clippy, memory QEMU,
+and signed system-apps 1/2/4-CPU gates pass. Live TPM NV execution and
+physical qualification remain open. USB remains untouched.
+
 ## Codex - Stage 24.48 (2026-10-21)
 
 Added the kernel-owned TPM custody authorization token. TPM context

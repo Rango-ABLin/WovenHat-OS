@@ -1,5 +1,14 @@
 # WovenHat OS Architecture & Codebase Guide
 
+### Stage 24.49 - credential-root lifecycle
+
+`CredentialRootLease` is a non-copyable kernel-owned lease around the
+policy-validated 32-byte root. It carries a monotonic generation and active
+state, wipes material on drop/revoke/rotation, rejects zero roots, and offers
+only bounded HMAC derivation with a domain separator and generation. Rotation
+is transactional: validation and generation allocation happen before the old
+root is cleared; failed validation leaves the current lease unchanged.
+
 ### Stage 24.48 - TPM custody authorization
 
 `PolicySessionCustodyAuthority` is a private-construction, generation-tagged

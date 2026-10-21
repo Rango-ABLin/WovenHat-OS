@@ -141,6 +141,7 @@ pub struct PolicySession {
 }
 
 static NEXT_POLICY_SESSION_GENERATION: AtomicU64 = AtomicU64::new(1);
+static NEXT_CREDENTIAL_ROOT_GENERATION: AtomicU64 = AtomicU64::new(1);
 
 /// Owned lifecycle state for one TPM policy session. A successful quote marks
 /// the nonce stale so the same session cannot be reused for another authority
@@ -728,6 +729,126 @@ fn constant_time_equal(left: &[u8; 32], right: &[u8; 32]) -> bool {
         difference |= left[index] ^ right[index];
     }
     difference == 0
+}
+
+/// A kernel-owned credential root lease. The root is never returned to
+/// userspace; callers may only use it through bounded derivation. Replacing
+/// or dropping the lease wipes the previous root before the new authority is
+/// considered active.
+pub struct CredentialRootLease {
+    root: [u8; 32],
+    generation: u64,
+    active: bool,
+}
+
+impl Drop for CredentialRootLease {
+    fn drop(&mut self) {
+        self.root.fill(0);
+        self.active = false;
+    }
+}
+
+impl CredentialRootLease {
+    #[allow(dead_code)]
+    pub fn generation(&self) -> u64 {
+        self.generation
+    }
+
+    #[allow(dead_code)]
+    pub fn is_active(&self) -> bool {
+        self.active
+    }
+
+    /// Derive bounded credential material without exposing the NV root.
+    #[allow(dead_code)]
+    pub fn derive(&self, context: &[u8], output: &mut [u8; 32]) -> Result<(), Error> {
+        if !self.active || context.len() > 64 {
+            return Err(Error::InvalidPolicy);
+        }
+        let generation = self.generation.to_be_bytes();
+        hmac_sha256(
+            &self.root,
+            &[b"WOVENHAT-CREDENTIAL-ROOT-V1", &generation, context],
+            output,
+        )
+    }
+}
+
+/// Install a root only after the TPM public metadata and exact policy-bound
+/// NV readback have both passed validation. Zero roots are never accepted.
+#[allow(dead_code)]
+pub fn provision_credential_root(
+    public: &NvPublic,
+    expected_index: u32,
+    expected_policy: &[u8; 32],
+    root: &[u8; 32],
+) -> Result<CredentialRootLease, Error> {
+    if root.iter().all(|byte| *byte == 0) {
+        return Err(Error::CredentialMismatch);
+    }
+    validate_credential_root_readback(
+        public,
+        expected_index,
+        expected_policy,
+        root,
+        root,
+    )?;
+    let generation = NEXT_CREDENTIAL_ROOT_GENERATION.fetch_add(1, Ordering::Relaxed);
+    if generation == 0 {
+        return Err(Error::Storage);
+    }
+    Ok(CredentialRootLease {
+        root: *root,
+        generation,
+        active: true,
+    })
+}
+
+/// Rotate the root in place only after the replacement has passed the same
+/// metadata/readback checks. A failed rotation leaves the current lease
+/// active and unchanged; a successful one wipes the old root and advances the
+/// generation before publishing the replacement.
+#[allow(dead_code)]
+pub fn rotate_credential_root(
+    current: &mut CredentialRootLease,
+    public: &NvPublic,
+    expected_index: u32,
+    expected_policy: &[u8; 32],
+    replacement: &[u8; 32],
+) -> Result<u64, Error> {
+    if !current.active || replacement.iter().all(|byte| *byte == 0) {
+        return Err(Error::InvalidPolicy);
+    }
+    validate_credential_root_readback(
+        public,
+        expected_index,
+        expected_policy,
+        replacement,
+        replacement,
+    )?;
+    if constant_time_equal(&current.root, replacement) {
+        return Err(Error::CredentialMismatch);
+    }
+    let generation = NEXT_CREDENTIAL_ROOT_GENERATION.fetch_add(1, Ordering::Relaxed);
+    if generation == 0 {
+        return Err(Error::Storage);
+    }
+    current.root.fill(0);
+    current.root.copy_from_slice(replacement);
+    current.generation = generation;
+    Ok(generation)
+}
+
+/// Revoke a root and wipe its material. Revocation is explicit and cannot
+/// silently recreate a generation-tagged lease.
+#[allow(dead_code)]
+pub fn revoke_credential_root(current: &mut CredentialRootLease) -> Result<(), Error> {
+    if !current.active {
+        return Err(Error::InvalidPolicy);
+    }
+    current.root.fill(0);
+    current.active = false;
+    Ok(())
 }
 
 /// Validate the exact value returned by a policy-authorized NV read before a
@@ -2921,6 +3042,50 @@ pub fn self_test() -> bool {
                 &expected_root,
                 &altered_root,
             ) != Err(Error::CredentialMismatch)
+            {
+                return false;
+            }
+            if !matches!(
+                provision_credential_root(&public, 0x0150_0000, &expected_policy, &[0; 32]),
+                Err(Error::CredentialMismatch)
+            ) {
+                return false;
+            }
+            let Ok(mut root_lease) = provision_credential_root(
+                &public,
+                0x0150_0000,
+                &expected_policy,
+                &expected_root,
+            ) else {
+                return false;
+            };
+            let initial_generation = root_lease.generation();
+            let mut derived = [0_u8; 32];
+            if !root_lease.is_active()
+                || root_lease.derive(b"identity", &mut derived).is_err()
+                || derived == expected_root
+            {
+                return false;
+            }
+            let replacement_root = [0xa7; 32];
+            let Ok(rotated_generation) = rotate_credential_root(
+                &mut root_lease,
+                &public,
+                0x0150_0000,
+                &expected_policy,
+                &replacement_root,
+            ) else {
+                return false;
+            };
+            if rotated_generation <= initial_generation
+                || root_lease.derive(b"identity", &mut derived).is_err()
+            {
+                return false;
+            }
+            if revoke_credential_root(&mut root_lease).is_err()
+                || root_lease.is_active()
+                || root_lease.derive(b"identity", &mut derived) != Err(Error::InvalidPolicy)
+                || revoke_credential_root(&mut root_lease) != Err(Error::InvalidPolicy)
             {
                 return false;
             }
