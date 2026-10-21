@@ -10,6 +10,32 @@ const AES_NI: u32 = 1 << 25;
 const AVX: u32 = 1 << 28;
 const RDRAND: u32 = 1 << 30;
 const PAE: u32 = 1 << 6;
+const MONITOR_MWAIT: u32 = 1 << 3;
+const INVARIANT_TSC: u32 = 1 << 8;
+
+/// Architectural idle mechanisms that can be reported without changing CPU
+/// state. The scheduler currently uses only the interrupt-safe HLT path.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct IdleCapabilities {
+    pub hlt: bool,
+    pub monitor_mwait: bool,
+    pub invariant_tsc: bool,
+}
+
+pub fn idle_capabilities() -> IdleCapabilities {
+    let basic_max = __cpuid(0).eax;
+    let basic = (basic_max >= FEATURE_INFO).then(|| __cpuid(FEATURE_INFO));
+    let extended_max = __cpuid(0x8000_0000).eax;
+    let invariant_tsc = (extended_max >= 0x8000_0007)
+        && (__cpuid(0x8000_0007).edx & INVARIANT_TSC != 0);
+    IdleCapabilities {
+        // HLT is part of the baseline x86 execution environment used by this
+        // kernel; it is not a firmware or MSR-controlled optional feature.
+        hlt: true,
+        monitor_mwait: basic.is_some_and(|value| value.ecx & MONITOR_MWAIT != 0),
+        invariant_tsc,
+    }
+}
 
 pub fn detect_vendor() -> CpuVendor {
     let vendor = vendor_string();

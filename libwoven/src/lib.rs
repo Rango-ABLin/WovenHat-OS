@@ -11480,6 +11480,7 @@ pub mod syscall {
     pub const GRAPHICS_COMPOSITOR_OUTPUTS: u64 = 207;
     pub const POWER_CONTROL: u64 = 209;
     pub const POWER_CAPABILITIES: u64 = 235;
+    pub const CPU_IDLE_CAPABILITIES: u64 = 236;
     pub const ACCOUNTS_CHANGE_PIN: u64 = 210;
     pub const IDENTITY_ADMIN_ADD_USER: u64 = 226;
     pub const IDENTITY_ADMIN_DELETE_USER: u64 = 227;
@@ -13355,6 +13356,31 @@ pub fn power_capabilities() -> Result<PowerCapabilities, Error> {
         power_off: bytes[0] != 0,
         suspend: bytes[1] != 0,
         restart: bytes[2] != 0,
+    })
+}
+
+/// Architectural CPU idle primitives. This query performs no idle action.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct CpuIdleCapabilities {
+    pub hlt: bool,
+    pub monitor_mwait: bool,
+    pub invariant_tsc: bool,
+}
+
+pub fn cpu_idle_capabilities() -> Result<CpuIdleCapabilities, Error> {
+    let mut bytes = [0u8; 3];
+    check(unsafe {
+        syscall::invoke(
+            syscall::CPU_IDLE_CAPABILITIES,
+            bytes.as_mut_ptr() as u64,
+            bytes.len() as u64,
+            0,
+        )
+    })?;
+    Ok(CpuIdleCapabilities {
+        hlt: bytes[0] != 0,
+        monitor_mwait: bytes[1] != 0,
+        invariant_tsc: bytes[2] != 0,
     })
 }
 

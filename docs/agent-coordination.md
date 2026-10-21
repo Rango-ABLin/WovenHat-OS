@@ -46,6 +46,15 @@ qualification. Signed production-kernel Clippy, `libwoven` Clippy/tests, and
 signed system-apps QEMU boots on 1/2/4 CPUs passed. See
 `docs/audit-stage25-1-acpi-power-capabilities-2026-10-21.md`.
 
+## Codex - Stage 25.2 CPU idle capability boundary (2026-10-21)
+
+Codex is taking the next bounded Stage 25 slice: a read-only, capability-gated
+report for architectural `HLT`, optional `MONITOR/MWAIT`, and invariant-TSC
+support. The existing interrupt-safe `STI+HLT` idle path remains the only idle
+policy exercised; this increment will not execute MWAIT or touch frequency
+MSRs. It complements the pending broader per-CPU idle/frequency and suspend
+work rather than claiming those features complete.
+
 ## Codex - Stage 24.60 release-key provisioning (2026-10-21)
 
 Production WAPP packaging now requires explicit signing-seed and trusted

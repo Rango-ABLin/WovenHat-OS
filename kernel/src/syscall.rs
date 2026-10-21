@@ -390,6 +390,9 @@ pub enum Number {
     /// output `[power_off, suspend, restart]` capability bytes, length -> 0.
     /// Requires PowerControl; no transition is performed.
     PowerCapabilities = 235,
+    /// output `[hlt, monitor_mwait, invariant_tsc]` capability bytes, length -> 0.
+    /// Requires PowerControl; no CPU state is changed.
+    CpuIdleCapabilities = 236,
     /// -> process-local endpoint handle, or ERROR
     IpcEndpointCreate = 211,
     /// name ptr, packed name length|client rights<<32, endpoint handle -> 0
@@ -2912,6 +2915,9 @@ pub extern "C" fn wovenhat_syscall_dispatch(
         value if value == Number::GraphicsCompositorOutputs as u64 => sys_compositor_outputs(arg0),
         value if value == Number::PowerControl as u64 => sys_power_control(arg0),
         value if value == Number::PowerCapabilities as u64 => sys_power_capabilities(arg0, arg1),
+        value if value == Number::CpuIdleCapabilities as u64 => {
+            sys_cpu_idle_capabilities(arg0, arg1)
+        }
         value if value == Number::AccountsChangePin as u64 => sys_accounts_change_pin(arg0, arg1),
         #[cfg(any(feature = "stage24-5-test", feature = "system-apps"))]
         value if value == Number::IdentityOpen as u64 => sys_identity_open(arg0, arg1),
@@ -3314,6 +3320,28 @@ fn sys_power_capabilities(user_buffer: u64, length: u64) -> u64 {
         u8::from(power.s5.is_some()),
         u8::from(power.s3.is_some()),
         1,
+    ];
+    if crate::paging::copy_to_current_user(user_buffer, &result).is_err() {
+        return SYSCALL_ERROR;
+    }
+    0
+}
+
+/// Report CPU idle primitives without executing an idle instruction or
+/// changing per-CPU state. The fixed three-byte result is copied only after
+/// validating the userspace range.
+fn sys_cpu_idle_capabilities(user_buffer: u64, length: u64) -> u64 {
+    let actor = crate::task::current_task_id().as_u64();
+    let allowed = crate::task::current_has(crate::capability::Capability::PowerControl);
+    crate::audit::record(actor, crate::audit::Action::PowerControl, 3, allowed);
+    if !allowed || length < 3 {
+        return SYSCALL_ERROR;
+    }
+    let capabilities = crate::hal::cpu::idle_capabilities();
+    let result = [
+        u8::from(capabilities.hlt),
+        u8::from(capabilities.monitor_mwait),
+        u8::from(capabilities.invariant_tsc),
     ];
     if crate::paging::copy_to_current_user(user_buffer, &result).is_err() {
         return SYSCALL_ERROR;
