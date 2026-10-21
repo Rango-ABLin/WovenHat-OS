@@ -1052,6 +1052,21 @@ pub fn decode_policy_session_start(response: &[u8]) -> Result<PolicySession, Err
     })
 }
 
+/// Start a TPM policy session through the serialized CRB transport. The
+/// caller nonce is copied into the bounded command and the returned TPM nonce
+/// must be retained for any later session-HMAC calculation.
+#[allow(dead_code)]
+pub fn start_policy_session(
+    info: Tpm2Info,
+    nonce_caller: &[u8],
+) -> Result<PolicySession, Error> {
+    let mut command = [0_u8; 95];
+    let command_size = encode_policy_session_start(nonce_caller, &mut command)?;
+    let mut response = [0_u8; MAX_BUFFER_BYTES];
+    let response_size = execute(info, &command[..command_size], &mut response)?;
+    decode_policy_session_start(&response[..response_size])
+}
+
 #[allow(dead_code)]
 fn encode_policy_pcr(
     session_handle: u32,
@@ -1074,6 +1089,24 @@ fn encode_policy_pcr(
     output[54] = 3;
     output[55 + usize::from(pcr / 8)] = 1 << (pcr % 8);
     Ok(())
+}
+
+/// Extend a live policy session with a SHA-256 PCR assertion. This command
+/// changes TPM session state but returns no credential authority; the caller
+/// must retain the session handle and obtain/derive the updated session
+/// material before using it to authorize `TPM2_Quote`.
+#[allow(dead_code)]
+pub fn apply_policy_pcr(
+    info: Tpm2Info,
+    session_handle: u32,
+    pcr: u8,
+    expected_digest: &[u8; 32],
+) -> Result<(), Error> {
+    let mut command = [0_u8; 58];
+    encode_policy_pcr(session_handle, pcr, expected_digest, &mut command)?;
+    let mut response = [0_u8; 16];
+    let response_size = execute(info, &command, &mut response)?;
+    decode_policy_command_response(&response[..response_size])
 }
 
 #[allow(dead_code)]

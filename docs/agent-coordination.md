@@ -1,5 +1,14 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - Stage 24.41 (2026-10-21)
+
+Added live CRB wrappers for `TPM2_StartAuthSession` policy sessions and
+`TPM2_PolicyPCR` transcript steps. Returned handles/nonces and exact success
+responses are bounded and validated. Static gates, executable QEMU, and
+signed system-apps 1/2/4-CPU acceptance pass. Session-state refresh,
+HMAC derivation, credential decisions, recovery, and physical qualification
+remain open. USB remains untouched.
+
 ## Codex - Stage 24.40 (2026-10-21)
 
 Extended `TPM2_Quote` with explicit non-password policy-session framing:

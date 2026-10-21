@@ -1,5 +1,14 @@
 # WovenHat OS Architecture & Codebase Guide
 
+### Stage 24.41 - live policy-session transcript execution
+
+`start_policy_session` executes `TPM2_StartAuthSession` with bounded caller
+nonce input and validates the returned session handle/TPM nonce.
+`apply_policy_pcr` executes the bounded SHA-256 `TPM2_PolicyPCR` transcript
+step and accepts only an exact successful response. These are state-changing
+TPM operations, not credential authority; later work must refresh session
+state and derive the quote authorization HMAC.
+
 ### Stage 24.40 - policy-session TPM2 Quote framing
 
 `QuoteSessionAuth` carries a non-password session handle, caller nonce,

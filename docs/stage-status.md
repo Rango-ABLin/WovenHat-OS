@@ -1,5 +1,20 @@
 # Stage status
 
+## Stage 24.41 live policy-session transcript execution (2026-10-21)
+
+The TPM2 layer now executes bounded `StartAuthSession` policy sessions and
+`PolicyPCR` assertions through the serialized CRB transport. Session startup
+validates the returned handle and bounded TPM nonce; PolicyPCR validates the
+PCR index and expected SHA-256 digest before issuing the command and requires
+an exact successful response. Host tests (89), all-targets and affected
+feature Clippy, executable QEMU, and signed system-apps 1/2/4-CPU acceptance
+pass. Evidence is under
+`audit-artifacts/stage24.41-live-policy-session-20261021`.
+
+The returned TPM session nonce is not yet refreshed to the caller after each
+PolicyPCR state transition, and session-HMAC derivation, quote authorization,
+credential decisions, recovery, and physical qualification remain required.
+
 ## Stage 24.40 policy-session TPM2 Quote framing (2026-10-21)
 
 The quote transport now accepts a caller-established non-password policy
