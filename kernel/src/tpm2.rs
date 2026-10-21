@@ -947,7 +947,7 @@ pub fn quote_with_policy_session(
     scheme: QuoteSigningScheme,
     session: QuoteSessionAuth<'_>,
 ) -> Result<QuoteExecution, Error> {
-    if session.session_handle == TPM_RS_PW {
+    if session.session_handle == TPM_RS_PW || session.hmac.len() != 32 {
         return Err(Error::InvalidPolicy);
     }
     execute_quote(
@@ -957,6 +957,138 @@ pub fn quote_with_policy_session(
         pcr,
         scheme,
         session,
+    )
+}
+
+fn quote_parameter_digest(
+    signing_handle: u32,
+    qualifying_data: &[u8],
+    pcr: u8,
+    scheme: QuoteSigningScheme,
+) -> Result<[u8; 32], Error> {
+    if signing_handle == 0 || qualifying_data.len() > 32 || pcr >= 24 {
+        return Err(Error::InvalidDescriptor);
+    }
+    let scheme_algorithm = match scheme {
+        QuoteSigningScheme::RsaSsa => TPM_ALG_RSASSA,
+        QuoteSigningScheme::RsaPss => TPM_ALG_RSAPSS,
+        QuoteSigningScheme::Ecdsa => TPM_ALG_ECDSA,
+    };
+    let mut parameters = [0_u8; 64];
+    let mut offset = 0;
+    parameters[offset..offset + 2].copy_from_slice(&(qualifying_data.len() as u16).to_be_bytes());
+    offset += 2;
+    parameters[offset..offset + qualifying_data.len()].copy_from_slice(qualifying_data);
+    offset += qualifying_data.len();
+    parameters[offset..offset + 2].copy_from_slice(&scheme_algorithm.to_be_bytes());
+    parameters[offset + 2..offset + 4].copy_from_slice(&TPM_ALG_SHA256.to_be_bytes());
+    offset += 4;
+    parameters[offset..offset + 4].copy_from_slice(&1_u32.to_be_bytes());
+    parameters[offset + 4..offset + 6].copy_from_slice(&TPM_ALG_SHA256.to_be_bytes());
+    parameters[offset + 6] = 3;
+    parameters[offset + 7 + usize::from(pcr / 8)] = 1 << (pcr % 8);
+    offset += 10;
+    let mut digest = Sha256::new();
+    digest.update(TPM_CC_QUOTE.to_be_bytes());
+    digest.update(signing_handle.to_be_bytes());
+    digest.update(&parameters[..offset]);
+    Ok(digest.finalize().into())
+}
+
+fn hmac_sha256(key: &[u8], parts: &[&[u8]], output: &mut [u8; 32]) -> Result<(), Error> {
+    if key.len() > 64 {
+        return Err(Error::InvalidDescriptor);
+    }
+    let mut inner_pad = [0x36_u8; 64];
+    let mut outer_pad = [0x5c_u8; 64];
+    for (index, byte) in key.iter().enumerate() {
+        inner_pad[index] ^= *byte;
+        outer_pad[index] ^= *byte;
+    }
+    let mut inner = Sha256::new();
+    inner.update(inner_pad);
+    for part in parts {
+        inner.update(part);
+    }
+    let inner_digest = inner.finalize();
+    let mut outer = Sha256::new();
+    outer.update(outer_pad);
+    outer.update(inner_digest);
+    output.copy_from_slice(&outer.finalize());
+    Ok(())
+}
+
+/// Derive the SHA-256 authorization HMAC for a quote issued by a policy
+/// session started without salt or bind. The caller supplies the signing
+/// object's auth value; no key material is read from the TPM wire response.
+#[allow(dead_code)]
+#[allow(clippy::too_many_arguments)]
+pub fn derive_quote_session_hmac(
+    session: &PolicySession,
+    signing_handle: u32,
+    qualifying_data: &[u8],
+    pcr: u8,
+    scheme: QuoteSigningScheme,
+    nonce_caller: &[u8],
+    attributes: u8,
+    auth_value: &[u8],
+) -> Result<[u8; 32], Error> {
+    if session.handle == 0
+        || session.nonce_tpm_length as usize > session.nonce_tpm.len()
+        || nonce_caller.len() > 32
+        || auth_value.len() > 64
+    {
+        return Err(Error::InvalidDescriptor);
+    }
+    let cp_hash = quote_parameter_digest(signing_handle, qualifying_data, pcr, scheme)?;
+    let nonce_tpm = &session.nonce_tpm[..session.nonce_tpm_length as usize];
+    let message = [
+        cp_hash.as_slice(),
+        nonce_tpm,
+        nonce_caller,
+        core::slice::from_ref(&attributes),
+    ];
+    let mut hmac = [0_u8; 32];
+    hmac_sha256(auth_value, &message, &mut hmac)?;
+    Ok(hmac)
+}
+
+/// Derive and use a policy-session quote HMAC in one bounded operation.
+#[allow(dead_code)]
+#[allow(clippy::too_many_arguments)]
+pub fn quote_with_derived_policy_hmac(
+    info: Tpm2Info,
+    signing_handle: u32,
+    qualifying_data: &[u8],
+    pcr: u8,
+    scheme: QuoteSigningScheme,
+    session: &PolicySession,
+    nonce_caller: &[u8],
+    attributes: u8,
+    auth_value: &[u8],
+) -> Result<QuoteExecution, Error> {
+    let hmac = derive_quote_session_hmac(
+        session,
+        signing_handle,
+        qualifying_data,
+        pcr,
+        scheme,
+        nonce_caller,
+        attributes,
+        auth_value,
+    )?;
+    quote_with_policy_session(
+        info,
+        signing_handle,
+        qualifying_data,
+        pcr,
+        scheme,
+        QuoteSessionAuth {
+            session_handle: session.handle,
+            nonce_caller,
+            attributes,
+            hmac: &hmac,
+        },
     )
 }
 
@@ -1783,6 +1915,41 @@ pub fn self_test() -> bool {
         || policy_quote_command[77..93] != quote_nonce
         || u16::from_be_bytes(policy_quote_command[93..95].try_into().unwrap()) != TPM_ALG_ECDSA
     {
+        return false;
+    }
+    let synthetic_session = PolicySession {
+        handle: 0x0300_0000,
+        nonce_tpm_length: 16,
+        nonce_tpm: [0x77; 32],
+    };
+    let auth_value = [0x33; 16];
+    let Ok(derived_hmac) = derive_quote_session_hmac(
+        &synthetic_session,
+        0x8101_0001,
+        &quote_nonce,
+        7,
+        QuoteSigningScheme::Ecdsa,
+        &policy_nonce,
+        TPMA_SESSION_CONTINUE_SESSION,
+        &auth_value,
+    ) else {
+        return false;
+    };
+    let mut altered_auth = auth_value;
+    altered_auth[0] ^= 1;
+    let Ok(altered_hmac) = derive_quote_session_hmac(
+        &synthetic_session,
+        0x8101_0001,
+        &quote_nonce,
+        7,
+        QuoteSigningScheme::Ecdsa,
+        &policy_nonce,
+        TPMA_SESSION_CONTINUE_SESSION,
+        &altered_auth,
+    ) else {
+        return false;
+    };
+    if derived_hmac == altered_hmac || derived_hmac == [0; 32] {
         return false;
     }
     let mut quote_response = [0_u8; 378];

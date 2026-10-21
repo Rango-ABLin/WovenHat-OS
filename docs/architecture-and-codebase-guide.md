@@ -1,5 +1,14 @@
 # WovenHat OS Architecture & Codebase Guide
 
+### Stage 24.42 - policy-session quote HMAC derivation
+
+`derive_quote_session_hmac` hashes the exact Quote command code, handle, and
+parameters, then computes SHA-256 HMAC over cpHash, the session TPM nonce,
+caller nonce, and attributes using the caller-supplied key auth value.
+`quote_with_derived_policy_hmac` sends that result through the non-password
+session quote boundary. This is intentionally scoped to null-salt/null-bind
+sessions and does not read or invent key material.
+
 ### Stage 24.41 - live policy-session transcript execution
 
 `start_policy_session` executes `TPM2_StartAuthSession` with bounded caller

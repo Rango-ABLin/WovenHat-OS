@@ -1,5 +1,21 @@
 # Stage status
 
+## Stage 24.42 policy-session quote HMAC derivation (2026-10-21)
+
+The TPM2 layer now derives a SHA-256 quote authorization HMAC from the
+TPM2_Quote command cpHash, returned session nonce, caller nonce, session
+attributes, and caller-supplied attestation-key auth value. The authenticated
+quote wrapper uses that derived HMAC and rejects non-32-byte policy-session
+HMACs or password-session downgrade. Host tests (89), all-targets and
+affected feature Clippy, executable QEMU, and signed system-apps 1/2/4-CPU
+acceptance pass. Evidence is under
+`audit-artifacts/stage24.42-policy-session-hmac-20261021`.
+
+The implementation is limited to the null-salt/null-bind session shape
+created by the current StartAuthSession path. Session-state refresh,
+provisioned-key lifecycle, credential decisions, recovery, and physical
+qualification remain required.
+
 ## Stage 24.41 live policy-session transcript execution (2026-10-21)
 
 The TPM2 layer now executes bounded `StartAuthSession` policy sessions and

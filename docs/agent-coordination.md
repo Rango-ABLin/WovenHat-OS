@@ -1,5 +1,15 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - Stage 24.42 (2026-10-21)
+
+Added bounded SHA-256 Quote cpHash/HMAC derivation for the current null-salt,
+null-bind policy-session shape, including session TPM nonce, caller nonce,
+attributes, and caller-supplied auth value. The derived HMAC flows through
+the non-password quote API, which rejects password downgrade. Static gates,
+executable QEMU, and signed system-apps 1/2/4-CPU acceptance pass. Session
+refresh, key lifecycle, credential decisions, recovery, and physical
+qualification remain open. USB remains untouched.
+
 ## Codex - Stage 24.41 (2026-10-21)
 
 Added live CRB wrappers for `TPM2_StartAuthSession` policy sessions and
