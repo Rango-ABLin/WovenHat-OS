@@ -104,7 +104,7 @@ pub fn stage_package(package: &[u8], now: u64) -> Result<usize, Error> {
     if package.len() > crate::wfs::MAX_FILE_SIZE {
         return Err(Error::ImageTooLarge);
     }
-    let candidate = super::verify_package(package).map_err(Error::Package)?;
+    let candidate = crate::update::verify_package(package).map_err(Error::Package)?;
     if candidate.image.len() > crate::wfs::MAX_FILE_SIZE {
         return Err(Error::ImageTooLarge);
     }
