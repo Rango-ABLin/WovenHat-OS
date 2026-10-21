@@ -23,7 +23,7 @@ The serial and QEMU logs are preserved in
 
 ## Limits and next prerequisites
 
-This stage closes the password-change gap only. Account creation remains
-unimplemented. Physical TPM activation, real-device reboot recovery, and
-hardware/USB qualification remain open release gates; this work performed no
-USB writes.
+This stage closes the password-change gap. Account creation was previously
+accepted in Stage 24.15. Physical TPM activation, real-device reboot recovery,
+and hardware/USB qualification remain open release gates; this work performed
+no USB writes.

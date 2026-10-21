@@ -58,9 +58,9 @@ system apps, host all-target Clippy, 95 `libwoven` tests, and the Stage 24.59
 QEMU gate on 1/2/4 CPUs. Evidence is under
 `audit-artifacts/stage24.59-change-pin-20261021`.
 
-This closes the password-change gap. Account creation and physical TPM/USB
-qualification remain separate release prerequisites; no USB media was
-modified.
+This closes the password-change gap. Account creation was already accepted in
+Stage 24.15; physical TPM/USB qualification remains a separate release
+prerequisite. No USB media was modified.
 
 ## Change-PIN kernel primitive and WovenShell UI (2026-10-20/21)
 
