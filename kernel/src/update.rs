@@ -18,6 +18,8 @@ pub const UPDATE_RECORD_LEN: usize =
     UPDATE_RECORD_HEADER_LEN + SLOT_COUNT * UPDATE_SLOT_RECORD_LEN + 4;
 #[cfg(not(test))]
 pub const UPDATE_RECORD_PATHS: [&str; 2] = ["/wfs/update-state-a", "/wfs/update-state-b"];
+#[cfg(not(test))]
+pub const UPDATE_SLOT_PATHS: [&str; 2] = ["/wfs/update-slot-a", "/wfs/update-slot-b"];
 
 #[cfg(not(test))]
 pub const UPDATE_PACKAGE_MAGIC: [u8; 4] = *b"WUPD";
@@ -74,6 +76,8 @@ pub enum Error {
     InvalidSignature,
     #[cfg(not(test))]
     Storage,
+    #[cfg(not(test))]
+    RecordMissing,
     MalformedRecord,
     RecordChecksumMismatch,
     InvalidRecord,
@@ -306,7 +310,9 @@ impl UpdateState {
         feature = "stage15-2-test",
         feature = "stage27-2-test",
         feature = "stage21-6-test",
-        feature = "stage24-3-test"
+        feature = "stage24-3-test",
+        feature = "stage27-5-test",
+        feature = "system-apps"
     ))]
     pub fn authorized_writer() -> Option<crate::wfs::AuthorizedWfsWriter> {
         crate::task::current_has(crate::capability::Capability::StorageIo)
@@ -314,7 +320,12 @@ impl UpdateState {
     }
 
     /// Persist one complete update-state copy through the native WovenFS journal.
-    #[cfg(any(feature = "stage15-2-test", feature = "stage27-2-test"))]
+    #[cfg(any(
+        feature = "stage15-2-test",
+        feature = "stage27-2-test",
+        feature = "stage27-5-test",
+        feature = "system-apps"
+    ))]
     pub fn persist_record_copy(
         authority: &crate::wfs::AuthorizedWfsWriter,
         copy: usize,
@@ -330,13 +341,21 @@ impl UpdateState {
     }
 
     /// Read one complete update-state copy through the native WovenFS journal.
-    #[cfg(any(feature = "stage15-2-test", feature = "stage27-2-test"))]
+    #[cfg(any(
+        feature = "stage15-2-test",
+        feature = "stage27-2-test",
+        feature = "stage27-5-test",
+        feature = "system-apps"
+    ))]
     pub fn read_record_copy(
         copy: usize,
         out: &mut [u8; UPDATE_RECORD_LEN],
     ) -> Result<usize, Error> {
         let path = UPDATE_RECORD_PATHS.get(copy).ok_or(Error::InvalidRecord)?;
-        crate::wfs::read_vfs_path_durable(path, out).map_err(|_| Error::Storage)
+        crate::wfs::read_vfs_path_durable(path, out).map_err(|error| match error {
+            crate::wfs::Error::NotFound => Error::RecordMissing,
+            _ => Error::Storage,
+        })
     }
 
     fn is_valid(&self) -> bool {

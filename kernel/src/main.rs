@@ -164,8 +164,10 @@ mod terminal;
 mod thread;
 mod timer;
 mod tpm2;
-#[cfg(feature = "qemu-test")]
+#[cfg(any(feature = "qemu-test", feature = "system-apps"))]
 mod update;
+#[cfg(any(feature = "qemu-test", feature = "system-apps"))]
+mod update_service;
 #[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
 mod usb_msc;
 mod user_address;
@@ -4862,6 +4864,15 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
             qemu_test_exit_failure();
         }
         serial::write_line(format_args!("[S27.2] durable update records: PASSED"));
+        qemu_test_exit_success();
+    }
+    #[cfg(feature = "stage27-5-test")]
+    {
+        if !update_service::self_test() {
+            serial::write_line(format_args!("[S27.5] update service: FAILED"));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!("[S27.5] update service: PASSED"));
         qemu_test_exit_success();
     }
     #[cfg(feature = "stage15-1-test")]

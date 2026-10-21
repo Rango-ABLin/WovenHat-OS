@@ -400,6 +400,9 @@ pub enum Number {
     /// output `[s3, facs, wake32, wake64, facs_version]`, length -> 0.
     /// Requires PowerControl; no suspend state is changed.
     SuspendResumeCapabilities = 238,
+    /// operation, source pointer/slot, source length -> bounded update result
+    #[cfg(any(feature = "stage27-5-test", feature = "system-apps"))]
+    UpdateTransaction = 239,
     /// -> process-local endpoint handle, or ERROR
     IpcEndpointCreate = 211,
     /// name ptr, packed name length|client rights<<32, endpoint handle -> 0
@@ -668,6 +671,50 @@ fn sys_package_transaction(operation: u64, user_path: u64, length: u64) -> u64 {
     };
     crate::package_service::transact(operation as u8, path, crate::timer::ticks())
         .unwrap_or(SYSCALL_ERROR)
+}
+
+#[cfg(any(feature = "stage27-5-test", feature = "system-apps"))]
+fn sys_update_transaction(operation: u64, source_or_slot: u64, length: u64) -> u64 {
+    if !matches!(operation, 1..=5)
+        || !crate::task::current_has(crate::capability::Capability::FileRead)
+        || !crate::task::current_has(crate::capability::Capability::FileWrite)
+        || !crate::task::current_has(crate::capability::Capability::StorageIo)
+    {
+        return SYSCALL_ERROR;
+    }
+    let now = crate::timer::ticks();
+    match operation as u8 {
+        crate::update_service::OP_STAGE => {
+            let Ok(length) = usize::try_from(length) else {
+                return SYSCALL_ERROR;
+            };
+            if length == 0 || length > MAX_PATH_SIZE {
+                return SYSCALL_ERROR;
+            }
+            let mut path = [0u8; MAX_PATH_SIZE];
+            if crate::paging::copy_from_current_user(source_or_slot, &mut path[..length]).is_err() {
+                return SYSCALL_ERROR;
+            }
+            let Ok(path) = core::str::from_utf8(&path[..length]) else {
+                return SYSCALL_ERROR;
+            };
+            crate::update_service::transact(operation as u8, Some(path), 0, now)
+                .unwrap_or(SYSCALL_ERROR)
+        }
+        crate::update_service::OP_ACTIVATE
+        | crate::update_service::OP_BOOT_SUCCEEDED
+        | crate::update_service::OP_BOOT_FAILED => {
+            let Ok(slot) = usize::try_from(source_or_slot) else {
+                return SYSCALL_ERROR;
+            };
+            crate::update_service::transact(operation as u8, None, slot, now)
+                .unwrap_or(SYSCALL_ERROR)
+        }
+        crate::update_service::OP_QUERY => {
+            crate::update_service::transact(operation as u8, None, 0, now).unwrap_or(SYSCALL_ERROR)
+        }
+        _ => SYSCALL_ERROR,
+    }
 }
 
 /// `stat(path)` → packed result:
@@ -2679,6 +2726,10 @@ pub extern "C" fn wovenhat_syscall_dispatch(
         #[cfg(any(feature = "stage22-5-test", feature = "system-apps"))]
         value if value == Number::PackageTransaction as u64 => {
             sys_package_transaction(arg0, arg1, arg2)
+        }
+        #[cfg(any(feature = "stage27-5-test", feature = "system-apps"))]
+        value if value == Number::UpdateTransaction as u64 => {
+            sys_update_transaction(arg0, arg1, arg2)
         }
         #[cfg(any(
             feature = "stage23-1-test",

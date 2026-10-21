@@ -11486,6 +11486,7 @@ pub mod syscall {
     pub const CPU_IDLE_CAPABILITIES: u64 = 236;
     pub const CPU_FREQUENCY_INFO: u64 = 237;
     pub const SUSPEND_RESUME_CAPABILITIES: u64 = 238;
+    pub const UPDATE_TRANSACTION: u64 = 239;
     pub const ACCOUNTS_CHANGE_PIN: u64 = 210;
     pub const IDENTITY_ADMIN_ADD_USER: u64 = 226;
     pub const IDENTITY_ADMIN_DELETE_USER: u64 = 227;
@@ -12564,6 +12565,23 @@ pub fn package_transaction(operation: package_ipc::Operation, path: &str) -> Res
             path.len() as u64,
         )
     })
+}
+
+/// Run one capability-gated WovenUpdate lifecycle transaction. For `Stage`,
+/// `source` is the immutable `/updates/` candidate path and `slot` is ignored;
+/// lifecycle operations use `slot` and require an empty source.
+pub fn update_transaction(
+    operation: update_ipc::Operation,
+    slot: u8,
+    source: &str,
+) -> Result<u64, Error> {
+    let (arg1, arg2) = if operation == update_ipc::Operation::Stage {
+        (source.as_ptr() as u64, source.len() as u64)
+    } else {
+        (u64::from(slot), 0)
+    };
+    // SAFETY: the source pointer is borrowed only for this synchronous syscall.
+    check(unsafe { syscall::invoke(syscall::UPDATE_TRANSACTION, operation as u64, arg1, arg2) })
 }
 
 /// Send a bounded WovenAI request. The kernel requires both `Ipc` and `Ai`
