@@ -1509,7 +1509,7 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         // registry blits onto, sized to the framebuffer. Deferred to here
         // because its allocation needs a mapped heap.
         compositor::init_for_display();
-        console.println("BOOT LOADER [1/7]: graphics surface ready");
+        boot_stage(&mut console, "BOOT LOADER [1/7]: graphics surface ready");
         console.println("BOOT: starting CPU and interrupt setup");
     } else {
         console.println("KERNEL HEAP: SELF TEST FAILED");
@@ -1625,7 +1625,7 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
             console.println("PAGER: START FAILED");
             halt();
         }
-        console.println("BOOT LOADER [2/7]: scheduler and I/O ready");
+        boot_stage(&mut console, "BOOT LOADER [2/7]: scheduler and I/O ready");
 
         let ata_sectors = ata::init();
         if let Some(sectors) = ata_sectors {
@@ -1659,7 +1659,7 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
                 "[FS] FAT32 mount failed; continuing with RAM VFS"
             )),
         }
-        console.println("BOOT LOADER [3/7]: storage checked");
+        boot_stage(&mut console, "BOOT LOADER [3/7]: storage checked");
 
         for dir in ["/etc", "/var", "/home", "/tmp"] {
             let _ = vfs::mkdir(dir);
@@ -1679,23 +1679,35 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
             ));
             halt();
         }
+        // Sub-stage timing within [3/7]->[4/7]: this span was found (boot
+        // profiling, Stage 30) to dominate the whole boot -- 4323 of a
+        // ~4350-tick total boot under QEMU TCG -- and PBKDF2 account hashing
+        // (100,000 iterations, forced software-only SHA-256, no hardware
+        // extension this kernel ever uses) is the leading suspect, so its
+        // own sub-stage is split out to confirm or rule that out directly
+        // rather than by inference.
         #[cfg(feature = "hardware-demo")]
-        if !install_hardware_demo_accounts() {
-            serial::write_line(format_args!("[DEMO] account provisioning failed"));
-            halt();
+        {
+            if !install_hardware_demo_accounts() {
+                serial::write_line(format_args!("[DEMO] account provisioning failed"));
+                halt();
+            }
+            boot_stage(&mut console, "BOOT LOADER [3.1/7]: demo accounts hashed");
         }
 
         #[cfg(feature = "system-apps")]
-        if !install_production_system_apps() {
-            serial::write_line(format_args!("[APPS] production catalog install failed"));
-            halt();
+        {
+            if !install_production_system_apps() {
+                serial::write_line(format_args!("[APPS] production catalog install failed"));
+                halt();
+            }
+            boot_stage(&mut console, "BOOT LOADER [3.2/7]: system app catalog installed");
+            if !start_production_system_services() {
+                serial::write_line(format_args!("[SERVICES] production service startup failed"));
+                halt();
+            }
         }
-        #[cfg(feature = "system-apps")]
-        if !start_production_system_services() {
-            serial::write_line(format_args!("[SERVICES] production service startup failed"));
-            halt();
-        }
-        console.println("BOOT LOADER [4/7]: system files ready");
+        boot_stage(&mut console, "BOOT LOADER [4/7]: system files ready");
 
         match network::init() {
             Ok(()) => serial::write_line(format_args!(
@@ -1732,7 +1744,7 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         if let Ok(heads) = compositor::attach_gpu_outputs() {
             serial::write_line(format_args!("[DISPLAY] virtio-gpu: {} monitors", heads));
         }
-        console.println("BOOT LOADER [5/7]: devices ready");
+        boot_stage(&mut console, "BOOT LOADER [5/7]: devices ready");
         // Without an ATA disk, mount the first ready NVMe or AHCI disk.
         if !storage::mnt_mounted() {
             if let Some((root, name)) = drivers::storage_root(&driver_report) {
@@ -1836,7 +1848,7 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         let session_ready = false;
         #[cfg(feature = "system-apps")]
         {
-            console.println("BOOT LOADER [6/7]: starting WovenShell desktop");
+            boot_stage(&mut console, "BOOT LOADER [6/7]: starting WovenShell desktop");
             let accounts = vfs::stat("/etc/wovenhat/accounts")
                 .is_ok()
                 .then_some("/etc/wovenhat/accounts");
@@ -1867,7 +1879,7 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
                     }
                     if session_ready {
                         console.println("DESKTOP SESSION: STARTED (F12 SWITCHES TO THIS CONSOLE)");
-                        console.println("BOOT LOADER [7/7]: desktop ready");
+                        boot_stage(&mut console, "BOOT LOADER [7/7]: desktop ready");
                         alloc::format!("SESSION: started as pid {pid} (F12 shows the desktop)")
                     } else if !task::process_alive(pid) {
                         serial::write_line(format_args!(
@@ -13354,6 +13366,27 @@ fn stage18_2_self_test() -> bool {
         "owner slots released on exit",
         crate::user_graphics::count_for(pid.as_u64()) == 0,
     )
+}
+
+/// Boot-stage timing (Stage 30 boot profiling -- "fast boot" is a named
+/// target). Ticks are 100 Hz, so this is coarse (10 ms resolution) but
+/// enough to see which stage of a slow boot is the slow one. The first call
+/// measures from tick 0 (the timer's own start), which is what "time to the
+/// first stage" should mean anyway.
+static BOOT_STAGE_CLOCK: AtomicU64 = AtomicU64::new(0);
+
+/// Print `label` on screen exactly as the unprofiled call did, and log how
+/// many ticks elapsed since the previous call (or boot start, for the
+/// first) to serial as `[BOOT PROFILE]`.
+fn boot_stage(console: &mut Console, label: &str) {
+    let now = timer::ticks();
+    let previous = BOOT_STAGE_CLOCK.swap(now, Ordering::AcqRel);
+    console.println(label);
+    serial::write_line(format_args!(
+        "[BOOT PROFILE] {} (+{} ticks)",
+        label,
+        now.saturating_sub(previous)
+    ));
 }
 
 /// Stop the machine after an unrecoverable boot or validation error.

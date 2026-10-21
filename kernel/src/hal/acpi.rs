@@ -1763,6 +1763,14 @@ pub fn self_test() -> bool {
         });
     let aml_name_valid = aml_name_seg(b"_CRS", 0) == Ok((*b"_CRS", 4));
     let aml_name_rejects_lower = aml_name_seg(b"_crs", 0) == Err(Error::InvalidSignature);
+    // A bounded AML fixture for the sleep-state objects. The package contains
+    // two byte constants, matching the ACPI `_S3`/`_S5` sleep-type shape.
+    let aml_sleep_fixture = [
+        0x08, b'_', b'S', b'3', b'_', 0x12, 0x07, 0x02, 0x0a, 0x03, 0x0a, 0x04,
+    ];
+    let aml_sleep_discovery = aml_sleep(&aml_sleep_fixture, 3) == Some((3, 4))
+        && aml_sleep(&aml_sleep_fixture, 5).is_none()
+        && aml_sleep(&aml_sleep_fixture, 4).is_none();
 
     let mut template = [0_u8; 44];
     template[0] = 0x87;
@@ -1876,6 +1884,7 @@ pub fn self_test() -> bool {
         && aml_pkg_bounds
         && aml_name_valid
         && aml_name_rejects_lower
+        && aml_sleep_discovery
         && resource_template_valid
         && missing_end_tag_rejected
         && transactional_decode
