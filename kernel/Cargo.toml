@@ -194,6 +194,7 @@ stage20-14b-test = ["qemu-test"]
 stage20-16-test = ["qemu-test"]
 # Stage 20.17: the 3D desktop mode's Quick Settings panel.
 stage20-17-test = ["qemu-test"]
+stage20-18-test = ["qemu-test"]
 # Standalone proof of concept: hello-gui --syscall-benchmark.
 stage30-1-test = ["qemu-test"]
 # Standalone proof of concept: hello-gui --ipc-benchmark.

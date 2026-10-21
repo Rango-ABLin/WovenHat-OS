@@ -137,7 +137,7 @@
 use core::cell::UnsafeCell;
 use core::panic::PanicInfo;
 
-use libwoven::graphics::{Camera, DepthBuffer, Renderer, Vertex3Tex};
+use libwoven::graphics::{Camera, DepthBuffer, Renderer, Vertex3, Vertex3Tex};
 use libwoven::layout::{self, Frame};
 use libwoven::{
     blend, font, process, rgb, wait, Args, Canvas, DateTime, FrameEvent, GraphicsSurface,
@@ -2089,10 +2089,14 @@ impl Desktop {
         before.union(self.center_area()).union(self.taskbar())
     }
 
-    fn render_title(window: &Window, focused: bool, canvas: &mut Canvas<'_>) {
+    fn render_title(window: &Window, focused: bool, canvas: &mut Canvas<'_>, three_d: bool) {
         let area = window.title_area();
         let fill = if focused { TITLE_ACTIVE } else { TITLE_INACTIVE };
-        canvas.fill_rect(area.x, area.y, area.width as usize, area.height as usize, fill);
+        if three_d {
+            Self::render_title_3d(area, fill, canvas);
+        } else {
+            canvas.fill_rect(area.x, area.y, area.width as usize, area.height as usize, fill);
+        }
         let close = window.close_area();
         if !close.is_empty() {
             canvas.fill_rect(close.x, close.y, close.width as usize, close.height as usize, CLOSE_FILL);
@@ -2104,6 +2108,57 @@ impl Desktop {
         let length = label(&window.title[..window.title_length], chars, &mut buffer);
         let text = core::str::from_utf8(&buffer[..length]).unwrap_or("");
         canvas.draw_text(area.x + 4, area.y + 4, text, TEXT);
+    }
+
+    /// A window's title-bar fill, perspective-projected as a card tilted
+    /// back in 3D (bottom edge anchored, top edge receded and narrowed),
+    /// instead of flat. Flat-colour, not textured -- unlike the Quick
+    /// Settings panel, there is no bounded-size offscreen render to sample,
+    /// since a title bar's width is the window's own and windows can be
+    /// much wider than `QS_PANEL_TEXTURE` is sized for. The flat colour is
+    /// filled first so any gap between the narrowed top edge and the
+    /// original flat footprint still shows a sensible colour (the window's
+    /// own fill) rather than whatever this tile's shared scratch buffer
+    /// held from an unrelated previous repaint.
+    fn render_title_3d(area: Area, fill: u32, canvas: &mut Canvas<'_>) {
+        canvas.fill_rect(area.x, area.y, area.width as usize, area.height as usize, fill);
+        let half_width = (area.width / 2) << 16;
+        let half_height = ((area.height - 1) << 16) / 2;
+        const DISTANCE: i32 = 200 << 16;
+        const TILT_DEPTH: i32 = 20 << 16;
+        let camera = Camera::new(
+            DISTANCE,
+            DISTANCE,
+            area.x + area.width / 2,
+            area.y + area.height / 2,
+        );
+        let (Some(top_left), Some(top_right), Some(bottom_left), Some(bottom_right)) = (
+            camera.project(-half_width, -half_height, TILT_DEPTH),
+            camera.project(half_width, -half_height, TILT_DEPTH),
+            camera.project(-half_width, half_height, 0),
+            camera.project(half_width, half_height, 0),
+        ) else {
+            return;
+        };
+        let color = libwoven::graphics::Color::rgb(
+            (fill >> 16) as u8,
+            (fill >> 8) as u8,
+            fill as u8,
+        );
+        let vertex = |(x, y, depth): (i32, i32, u16)| Vertex3::new(x, y, depth, color);
+
+        // SAFETY: single-threaded; this is the only live reference, and it
+        // does not outlive this call.
+        let depth_values = unsafe { &mut *QS_DEPTH.0.get() };
+        let Some(mut depth) =
+            DepthBuffer::new(depth_values, canvas.x(), canvas.y(), canvas.width(), canvas.height())
+        else {
+            return;
+        };
+        depth.clear(u16::MAX);
+        let mut renderer = Renderer::new(canvas);
+        renderer.triangle_3d(&mut depth, vertex(top_left), vertex(top_right), vertex(bottom_left));
+        renderer.triangle_3d(&mut depth, vertex(top_right), vertex(bottom_right), vertex(bottom_left));
     }
 
     /// The toast's overlay: border and text over its blended background.
@@ -2180,9 +2235,9 @@ impl Desktop {
             if !title.is_empty() {
                 let active = Some(slot) == focused;
                 if alpha == u8::MAX {
-                    painter.draw(title, |canvas| Self::render_title(window, active, canvas));
+                    painter.draw(title, |canvas| Self::render_title(window, active, canvas, self.three_d));
                 } else {
-                    painter.draw_blended(title, alpha, |canvas| Self::render_title(window, active, canvas));
+                    painter.draw_blended(title, alpha, |canvas| Self::render_title(window, active, canvas, self.three_d));
                 }
             }
             let body = window.body().intersect(area);
@@ -2539,7 +2594,9 @@ impl Desktop {
                         8 => {
                             self.three_d = !self.three_d;
                             log(if self.three_d { &[b"woven-shell: 3D desktop on"] } else { &[b"woven-shell: 3D desktop off"] });
-                            panel
+                            // Every open window's title bar also renders
+                            // differently in 3D mode, not just this panel.
+                            panel.union(self.screen())
                         }
                         _ => empty,
                     };

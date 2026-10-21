@@ -26,6 +26,7 @@ STAGES={
     '20.13': ('stage20-13-test', '[S20.13] workspaces: PASSED', 'woven-shell-workspaces', 'workspaces'),
     '24.59': ('stage24-59-test', '[S24.59] Change-PIN flow: PASSED', 'woven-shell-change-pin', 'Change-PIN flow'),
     '20.17': ('stage20-17-test', '[S20.17] 3D desktop Quick Settings: PASSED', 'woven-shell-3d', '3D desktop Quick Settings'),
+    '20.18': ('stage20-18-test', '[S20.18] 3D desktop title bars: PASSED', 'woven-shell-3d-title', '3D desktop title bars'),
 }
 
 def app_build_env(app_dir):
@@ -91,7 +92,7 @@ def main():
             [sys.executable, str(root / 'scripts' / 'build-package-service.py')],
             cwd=root, env=package_env, text=True,
         ).strip()
-    if a.stage in ('20.2','20.3','20.4','20.5','20.6','20.7','20.8','20.9','20.10','20.11','20.12','20.13'):
+    if a.stage in ('20.2','20.3','20.4','20.5','20.6','20.7','20.8','20.9','20.10','20.11','20.12','20.13','20.18'):
         gui_dir=root/'apps'/'hello-gui'
         if subprocess.run(['cargo','build','--release'],cwd=gui_dir,env=app_build_env(gui_dir)).returncode: return 1
         env['WOVENHAT_HELLO_GUI_IMAGE']=str(gui_dir/'target'/'x86_64-unknown-none'/'release'/'wovenhat-hello-gui')
