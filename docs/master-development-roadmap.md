@@ -1388,6 +1388,14 @@ maximum, and bus MHz inventory through a privileged read-only query (syscall
 written; governor policy, thermal interaction, and physical validation remain
 later work.
 
+Stage 25.4 - bounded suspend preparation
+
+Accepted bounded slice: add a reversible preparation transaction that checks
+ACPI S3 capability, quiesces bound drivers in deterministic order, and rolls
+back in reverse order when a driver refuses. This does not write `SLP_EN`,
+enter S3, install a wake vector, coordinate CPU resume, or expose a suspend
+syscall; those remain prerequisites for the actual sleep/wake implementation.
+
 ACPI poweroff
 reboot
 sleep

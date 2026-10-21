@@ -1,5 +1,20 @@
 # Stage status
 
+## Stage 25.4 - bounded suspend preparation (2026-10-21)
+
+Accepted bounded preparation slice: the driver registry can quiesce all bound
+drivers transactionally and roll back in reverse order when a hook refuses.
+The power layer requires ACPI PM1a, `_S3`, and ACPI mode before returning a
+private preparation token; abort restores drivers in reverse order.
+
+Production-kernel and host warning-denying Clippy, the full `cargo test --all`
+suite, and signed system-apps QEMU acceptance on 1/2/4 CPUs passed. Evidence
+is in `docs/audit-stage25-4-suspend-preparation-2026-10-21.md`.
+
+This does not claim S3 entry, wake-vector/CPU-resume handling, wake-source
+policy, a suspend syscall, device-specific save/restore, or physical
+suspend/resume qualification.
+
 ## Stage 25.3 - CPU frequency inventory boundary (2026-10-21)
 
 The CPU HAL now reads CPUID leaf `0x16` when available and exposes base,

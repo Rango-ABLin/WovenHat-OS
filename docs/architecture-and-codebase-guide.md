@@ -3506,3 +3506,19 @@ followed by base, maximum, and bus MHz values, after the `PowerControl`
 authority and userspace-copy checks. `libwoven::cpu_frequency_info` decodes
 the bounded result. This is inventory only: it does not write P-state or
 frequency-control MSRs.
+
+## Stage 25.4 bounded suspend preparation
+
+`kernel/src/driver.rs` provides `suspend_all` and `resume_all` as a bounded
+transaction around the existing per-driver suspend/resume hooks. The registry
+lock is released before any driver callback runs. Suspension follows registry
+order; refusal restores the already-suspended prefix in reverse order, and a
+successful preparation is later aborted in reverse order as well. This keeps
+hardware callbacks outside the registry lock and makes rollback deterministic.
+
+`kernel/src/power.rs` exposes the internal `prepare_suspend` and
+`abort_suspend` boundary. Preparation requires ACPI mode, a PM1a control
+block, and discovered `_S3` types. It returns a private token rather than
+claiming that sleep occurred. S3 register writes, wake-vector installation,
+CPU coordination, wake-source policy, and a userspace suspend ABI remain
+separate prerequisites.

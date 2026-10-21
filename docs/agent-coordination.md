@@ -93,6 +93,17 @@ not write frequency MSRs. Signed production Clippy, host tests, and QEMU
 1/2/4-CPU acceptance passed. Frequency scaling and governor policy remain
 unimplemented prerequisites.
 
+## Codex - Stage 25.4 bounded suspend preparation (2026-10-21)
+
+The shared branch now contains the reversible driver-quiescence preparation
+boundary. It checks ACPI S3 capability, snapshots bound drivers without
+holding the registry lock across callbacks, suspends in deterministic order,
+and rolls back in reverse order on refusal. The power layer returns a private
+preparation token and supports explicit abort/resume. This is not S3 entry:
+`SLP_EN`, wake vectors, CPU resume coordination, wake-source policy, and a
+suspend syscall remain unimplemented. See
+`docs/audit-stage25-4-suspend-preparation-2026-10-21.md`.
+
 ## Codex - Stage 24.60 release-key provisioning (2026-10-21)
 
 Production WAPP packaging now requires explicit signing-seed and trusted
