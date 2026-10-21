@@ -1,5 +1,21 @@
 # Stage status
 
+## Stage 25.11 - PM1 S3 request boundary (2026-10-21)
+
+The prepared suspend token now has an internal `enter_suspend` path that
+encodes the firmware-provided `_S3` types, writes PM1a and optional PM1b with
+`SLP_EN`, and treats a returning firmware as an explicit failure. If the
+machine remains running, vector, trampoline, secondary-CPU, and driver state
+are rolled back before returning. The guarded encoding self-test passed on
+1/2/4 CPUs.
+
+Evidence is in `docs/audit-stage25-11-pm1-s3-request-2026-10-21.md` and the
+retained `audit-artifacts/stage25.11-*` directories.
+
+The test does not issue a destructive S3 request. This stage does not claim
+CPU register restoration, firmware wake completion, a userspace suspend ABI,
+or physical suspend/resume qualification.
+
 ## Stage 25.10 - secondary-CPU suspend barrier (2026-10-21)
 
 The BSP can now transactionally evacuate and park every online secondary CPU

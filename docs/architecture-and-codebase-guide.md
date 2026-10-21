@@ -3615,3 +3615,19 @@ path restores firmware state, releases the trampoline, re-onlines every
 secondary CPU, and resumes drivers. The `stage25-10-test` feature exercises
 the barrier and exact-mask rollback on 1/2/4 CPUs. This stage does not yet
 restore registers, write PM1 S3 controls, or handle firmware wake.
+
+## Stage 25.11 PM1 S3 request boundary
+
+`power::enter_suspend` is the private transition boundary after preparation
+has committed. It validates ACPI mode and `_S3`, reads the PM1 control words,
+preserves unrelated bits, replaces only SLP_TYP, and sets SLP_EN on PM1a and
+optional PM1b. The successful hardware path transfers control to firmware and
+does not return. If firmware leaves the CPU running, the function calls the
+existing abort transaction and returns `StillRunning`; a failed rollback is
+reported as `RollbackFailed` rather than being hidden.
+
+`s3_control_self_test` validates the bounded control-word encoding and rejects
+an out-of-range sleep type without touching I/O ports. The `stage25-11-test`
+QEMU gate therefore never requests a destructive sleep transition. CPU
+register restoration, firmware wake completion, suspend policy/syscall
+exposure, and physical qualification remain separate prerequisites.

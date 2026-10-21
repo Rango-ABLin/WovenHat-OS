@@ -1440,6 +1440,15 @@ evacuate and park all online secondary CPUs, retain the exact online mask, and
 restore every parked CPU on rollback. This does not restore CPU registers,
 write PM1 S3 controls, perform firmware wake, or claim physical qualification.
 
+Stage 25.11 - PM1 S3 request boundary
+
+Accepted bounded slice: encode the validated `_S3` types and write PM1a and
+optional PM1b control words with `SLP_EN` only after the complete preparation
+transaction commits. If the machine remains running, roll back every owned
+resource and return an explicit error. The gate does not issue a destructive
+sleep request; CPU restore, firmware wake, and physical qualification remain
+later work.
+
 ACPI poweroff
 reboot
 sleep

@@ -33,6 +33,17 @@ pub enum Error {
     StillRunning,
 }
 
+/// Result of attempting the prepared S3 transition. A successful hardware
+/// transition does not return; a returned error means the machine remained
+/// running and the preparation rollback was attempted.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SuspendError {
+    NoSuspend,
+    AcpiModeRefused,
+    StillRunning,
+    RollbackFailed,
+}
+
 #[expect(
     dead_code,
     reason = "used by the future S3 transition boundary after wake-vector support lands"
@@ -136,6 +147,25 @@ fn capture_cpu_resume_context() -> CpuResumeContext {
     }
 }
 
+fn s3_control_value(current: u16, sleep_type: u8) -> Option<u16> {
+    if sleep_type > 0x7 {
+        return None;
+    }
+    Some((current & !SLP_TYP_MASK) | (u16::from(sleep_type) << SLP_TYP_SHIFT) | SLP_EN)
+}
+
+#[cfg(feature = "stage25-11-test")]
+pub fn s3_control_self_test() -> bool {
+    let current = 0xa5a5_u16;
+    let Some(value) = s3_control_value(current, 3) else {
+        return false;
+    };
+    value & SLP_TYP_MASK == 3 << SLP_TYP_SHIFT
+        && value & SLP_EN != 0
+        && value & !(SLP_TYP_MASK | SLP_EN) == current & !(SLP_TYP_MASK | SLP_EN)
+        && s3_control_value(current, 8).is_none()
+}
+
 /// Quiesce the current driver set if firmware advertises S3. This boundary is
 /// deliberately separate from entering S3 so wake-vector and per-CPU resume
 /// work can be completed before any hardware transition is exposed.
@@ -201,6 +231,78 @@ pub fn abort_suspend(preparation: SuspendPreparation) -> bool {
         && trampoline_released
         && cpus_resumed
         && crate::driver::resume_all(preparation.plan)
+}
+
+/// Request ACPI S3 after every preparation prerequisite has committed. The
+/// successful path transfers control to firmware and therefore does not return
+/// on real hardware. If firmware ignores the request, the token is rolled back
+/// before returning an explicit error; no caller may accidentally continue with
+/// drivers suspended or secondary CPUs parked.
+#[expect(
+    dead_code,
+    reason = "future privileged suspend action calls this after policy checks"
+)]
+pub fn enter_suspend(preparation: SuspendPreparation) -> Result<(), SuspendError> {
+    let Some(power) = crate::hal::acpi::power() else {
+        let _ = abort_suspend(preparation);
+        return Err(SuspendError::NoSuspend);
+    };
+    let Some((sleep_a, sleep_b)) = power.s3 else {
+        let _ = abort_suspend(preparation);
+        return Err(SuspendError::NoSuspend);
+    };
+    if power.pm1a_control == 0 || !acpi_mode(power) {
+        let _ = abort_suspend(preparation);
+        return Err(SuspendError::AcpiModeRefused);
+    }
+    last_flush();
+    x86_64::instructions::interrupts::disable();
+    // SAFETY: these are the firmware-described ACPI fixed PM1 control ports,
+    // and the sleep types were bounded by ACPI discovery.
+    let write_values = unsafe {
+        let mut pm1a = Port::<u16>::new(power.pm1a_control);
+        let pm1a_current = pm1a.read();
+        let pm1b_current = if power.pm1b_control != 0 {
+            Some(Port::<u16>::new(power.pm1b_control).read())
+        } else {
+            None
+        };
+        (s3_control_value(pm1a_current, sleep_a),
+            pm1b_current.and_then(|current| s3_control_value(current, sleep_b)))
+    };
+    let write_ok = match write_values {
+        (Some(pm1a_value), Some(pm1b_value)) if power.pm1b_control != 0 => {
+            unsafe {
+                let mut pm1b = Port::<u16>::new(power.pm1b_control);
+                pm1b.write(pm1b_value);
+                let mut pm1a = Port::<u16>::new(power.pm1a_control);
+                pm1a.write(pm1a_value);
+            }
+            true
+        }
+        (Some(pm1a_value), None) if power.pm1b_control == 0 => {
+            // SAFETY: PM1a is the validated firmware-described control port.
+            unsafe { Port::<u16>::new(power.pm1a_control).write(pm1a_value) };
+            true
+        }
+        _ => false,
+    };
+    x86_64::instructions::interrupts::enable();
+    if !write_ok {
+        let restored = abort_suspend(preparation);
+        return Err(if restored {
+            SuspendError::NoSuspend
+        } else {
+            SuspendError::RollbackFailed
+        });
+    }
+    settle();
+    let restored = abort_suspend(preparation);
+    Err(if restored {
+        SuspendError::StillRunning
+    } else {
+        SuspendError::RollbackFailed
+    })
 }
 
 #[expect(

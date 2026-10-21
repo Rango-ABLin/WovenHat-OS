@@ -160,6 +160,16 @@ barrier gate passes on 1/2/4 CPUs. CPU register restore, PM1 S3 entry,
 firmware wake, and physical qualification remain open. See
 `docs/audit-stage25-10-secondary-cpu-barrier-2026-10-21.md`.
 
+## Codex - Stage 25.11 PM1 S3 request boundary (2026-10-21)
+
+The shared branch now contains the private PM1 S3 request path. It preserves
+unrelated PM1 bits, writes bounded `_S3` sleep types plus SLP_EN only after
+preparation commits, and rolls back explicitly if firmware leaves the machine
+running. The QEMU gate tests encoding only and passes on 1/2/4 CPUs; it does
+not issue a destructive sleep request. CPU restoration, firmware wake, and
+physical qualification remain open. See
+`docs/audit-stage25-11-pm1-s3-request-2026-10-21.md`.
+
 ## Codex - Stage 24.60 release-key provisioning (2026-10-21)
 
 Production WAPP packaging now requires explicit signing-seed and trusted
