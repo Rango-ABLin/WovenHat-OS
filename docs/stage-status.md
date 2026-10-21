@@ -1,5 +1,31 @@
 # Stage status
 
+## Stage 20.17 - 3D desktop mode: Quick Settings panel (2026-10-21)
+
+WovenShell's Quick Settings panel can now render as a real, perspective-
+projected 3D card (bottom edge anchored, top edge receded and narrowed)
+instead of a flat 2D rectangle, toggled by a new "3D Desktop" row in the
+panel itself. This is the first time the `libwoven::graphics`
+`Camera`/`textured_triangle_3d` primitives (proven standalone in the Stage
+20.16 chrome demo) have been wired into WovenShell's actual, live
+compositor rather than a disconnected proof of concept.
+
+Off by default: every already-accepted gate's pixel-exact 2D rendering is
+unchanged unless a user explicitly opens Quick Settings and toggles it on.
+The flat content is rendered once into an offscreen `.bss` texture, then
+sampled by two `textured_triangle_3d` calls per tile the panel spans
+(matching the shell's existing tiled repaint architecture), with the
+panel's flat footprint repainted with wallpaper first so the narrowed top
+edge doesn't leave stale pixels from the previous frame.
+
+The Stage 20.17 QEMU gate proves a real, non-trivial transform is applied
+(the flat panel's top-left corner becomes wallpaper once 3D is toggled on,
+while the deliberately-anchored bottom-left corner is unchanged), on
+1/2/4 CPUs. It does not claim 3D rendering anywhere else in the desktop
+(window chrome, workspaces, other panels remain flat 2D), nor a
+production-tuned visual design -- the perspective amount is a first,
+reasonable choice, not a finished aesthetic.
+
 ## Stage 27.5 service-process slice - 2026-10-21
 
 `apps/woven-update` now has a bounded `--service` mode. It publishes the

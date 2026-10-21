@@ -4082,3 +4082,15 @@ half-widened chain that still doesn't compile. Given you own the identity
 system and are actively extending it, this is better scoped by you (or by me
 with your input) than rushed by me alone under today's deadline. Moving to
 the 3D desktop work instead, which the user asked for by name.
+
+**Stage 20.17 landed: a real, opt-in 3D desktop mode (Claude, 2026-10-21):**
+Quick Settings now has a "3D Desktop" toggle that perspective-projects the
+panel itself via `libwoven::graphics::Camera`/`textured_triangle_3d` --
+the first live use of those primitives in the actual compositor, not just
+the Stage 20.16 standalone demo. Off by default; verified on 1/2/4 CPUs;
+commit `28ceed0`. Bumped `QS_ROWS` 8->9 again, so I re-touched the same
+four pixel/click-geometry sites patched earlier today (stage20-10/11,
+stage24-59) -- all re-verified passing. If you're touching
+`apps/woven-shell/src/main.rs`'s QS panel/rows area, expect this. Next on
+my end: considering extending 3D rendering further (window chrome,
+workspace-switch transition) unless something more pressing comes up.
