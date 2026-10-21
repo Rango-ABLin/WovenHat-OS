@@ -72,6 +72,11 @@
 //! sends and receives a one-byte message to and from itself
 //! `IPC_BENCHMARK_ITERATIONS` times, timing each round trip the same way.
 //!
+//! With `--fs-benchmark` it times `FS_BENCHMARK_ITERATIONS` seek+write and
+//! seek+read round trips of a 256-byte payload against a scratch file the
+//! kernel self-test pre-creates, reporting write and read timings
+//! separately.
+//!
 //! With `--probe <handle>` it runs as an ordinary process and checks that the
 //! kernel refuses it everything it has no authority for: every compositor
 //! operation, and every operation on the surface `<handle>`, which belongs to
@@ -308,6 +313,73 @@ fn ipc_benchmark() -> ! {
     libwoven::exit(0)
 }
 
+const FS_BENCHMARK_ITERATIONS: u64 = 500;
+const FS_BENCHMARK_PAYLOAD: [u8; 256] = [0xa5u8; 256];
+
+/// Standalone filesystem-latency micro-benchmark (Stage 30 performance
+/// engineering): time `FS_BENCHMARK_ITERATIONS` round trips of a 256-byte
+/// `write_file`+`read` against an already-open descriptor on a scratch file
+/// the kernel self-test pre-creates. Reports write and read timings
+/// separately, since they are distinct syscalls with distinct costs; needs
+/// `FileRead`+`FileWrite` beyond an ordinary process's own.
+fn fs_benchmark() -> ! {
+    let Ok(descriptor) = libwoven::open("/tmp/fsbench") else {
+        fail(330);
+    };
+    let (mut write_min, mut write_max, mut write_total) = (u64::MAX, 0u64, 0u128);
+    let (mut read_min, mut read_max, mut read_total) = (u64::MAX, 0u64, 0u128);
+    for _ in 0..FS_BENCHMARK_ITERATIONS {
+        if libwoven::seek(descriptor, 0).is_err() {
+            fail(334);
+        }
+        let start = libwoven::cycles();
+        if libwoven::write_file(descriptor, &FS_BENCHMARK_PAYLOAD) != Ok(FS_BENCHMARK_PAYLOAD.len())
+        {
+            fail(331);
+        }
+        let elapsed = libwoven::cycles().wrapping_sub(start);
+        write_min = write_min.min(elapsed);
+        write_max = write_max.max(elapsed);
+        write_total += u128::from(elapsed);
+
+        if libwoven::seek(descriptor, 0).is_err() {
+            fail(335);
+        }
+        let mut buffer = [0u8; FS_BENCHMARK_PAYLOAD.len()];
+        let start = libwoven::cycles();
+        let Ok(length) = libwoven::read(descriptor, &mut buffer) else {
+            fail(332);
+        };
+        let elapsed = libwoven::cycles().wrapping_sub(start);
+        if length != FS_BENCHMARK_PAYLOAD.len() || buffer != FS_BENCHMARK_PAYLOAD {
+            fail(333);
+        }
+        read_min = read_min.min(elapsed);
+        read_max = read_max.max(elapsed);
+        read_total += u128::from(elapsed);
+    }
+    let write_average = (write_total / u128::from(FS_BENCHMARK_ITERATIONS)) as u64;
+    let read_average = (read_total / u128::from(FS_BENCHMARK_ITERATIONS)) as u64;
+    let mut digits = [0u8; 20];
+    let mut report = |label: &str, min: u64, average: u64, max: u64| {
+        let _ = libwoven::print(label);
+        let _ = libwoven::write(libwoven::syscall::STDOUT, libwoven::format_u64(min, &mut digits));
+        let _ = libwoven::print(" avg=");
+        let _ =
+            libwoven::write(libwoven::syscall::STDOUT, libwoven::format_u64(average, &mut digits));
+        let _ = libwoven::print(" max=");
+        let _ = libwoven::write(libwoven::syscall::STDOUT, libwoven::format_u64(max, &mut digits));
+        let _ = libwoven::print(" cycles\n");
+    };
+    report("hello-gui: fs benchmark write min=", write_min, write_average, write_max);
+    report("hello-gui: fs benchmark read min=", read_min, read_average, read_max);
+    if write_average == 0 || read_average == 0 {
+        fail(320);
+    }
+    let _ = libwoven::print("hello-gui: fs benchmark: PASSED\n");
+    libwoven::exit(0)
+}
+
 fn main(args: Args) -> ! {
     match args.get(1) {
         Some(b"--audio") => audio(),
@@ -328,6 +400,7 @@ fn main(args: Args) -> ! {
         Some(b"--3d-chrome-demo") => three_d_chrome_demo(),
         Some(b"--syscall-benchmark") => syscall_benchmark(),
         Some(b"--ipc-benchmark") => ipc_benchmark(),
+        Some(b"--fs-benchmark") => fs_benchmark(),
         Some(_) => fail(250),
         None => run(Input::None),
     }

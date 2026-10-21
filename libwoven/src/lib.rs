@@ -11597,6 +11597,12 @@ pub mod syscall {
 
     /// # Safety
     /// Must be called from WovenHat userspace.
+    pub unsafe fn lseek(descriptor: u64, offset: u64) -> u64 {
+        unsafe { invoke(LSEEK, descriptor, offset, 0) }
+    }
+
+    /// # Safety
+    /// Must be called from WovenHat userspace.
     pub unsafe fn getpid() -> u64 {
         unsafe { invoke(GETPID, 0, 0, 0) }
     }
@@ -13712,6 +13718,12 @@ pub fn open(path: &str) -> Result<u64, Error> {
 pub fn close(descriptor: u64) -> Result<(), Error> {
     // SAFETY: integer-only call.
     check(unsafe { syscall::close(descriptor) }).map(|_| ())
+}
+
+/// Move a descriptor's read/write offset to an absolute byte position.
+pub fn seek(descriptor: u64, offset: u64) -> Result<u64, Error> {
+    // SAFETY: integer-only call.
+    check(unsafe { syscall::lseek(descriptor, offset) })
 }
 
 /// Local accounts for the login manager: a name, a random salt and
