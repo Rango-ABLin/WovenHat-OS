@@ -26,6 +26,8 @@ const CONTROL_START_COMMAND: u32 = 1;
 const CONTROL_CANCEL_COMMAND: u32 = 1;
 const TPM_INTERFACE_CRB: u32 = 1;
 const TPM_ST_NO_SESSIONS: u16 = 0x8001;
+#[allow(dead_code)]
+const TPM_ST_SESSIONS: u16 = 0x0201;
 const TPM_CC_GET_RANDOM: u32 = 0x0000_017b;
 const TPM_CC_PCR_READ: u32 = 0x0000_017e;
 #[allow(dead_code)]
@@ -34,6 +36,8 @@ const TPM_CC_NV_READ_PUBLIC: u32 = 0x0000_0169;
 const TPM_CC_START_AUTH_SESSION: u32 = 0x0000_0176;
 #[allow(dead_code)]
 const TPM_CC_POLICY_PCR: u32 = 0x0000_017f;
+#[allow(dead_code)]
+const TPM_CC_NV_WRITE: u32 = 0x0000_0137;
 const TPM_ALG_SHA256: u16 = 0x000b;
 #[allow(dead_code)]
 const TPM_ALG_NULL: u16 = 0x0010;
@@ -41,6 +45,8 @@ const TPM_ALG_NULL: u16 = 0x0010;
 const TPM_SESS_POLICY: u8 = 0x01;
 #[allow(dead_code)]
 const TPM_RH_NULL: u32 = 0x4000_0007;
+#[allow(dead_code)]
+const TPMA_SESSION_CONTINUE_SESSION: u8 = 1;
 const TPM_RC_SUCCESS: u32 = 0;
 const TPMA_NV_OWNERWRITE: u32 = 1 << 1;
 const TPMA_NV_AUTHWRITE: u32 = 1 << 2;
@@ -67,6 +73,13 @@ pub struct PolicySession {
     pub handle: u32,
     pub nonce_tpm_length: u8,
     pub nonce_tpm: [u8; 32],
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PolicyCommandResponse {
+    pub nonce_tpm_length: u8,
+    pub nonce_tpm: [u8; 32],
+    pub attributes: u8,
 }
 
 /// Validate the public metadata of the fixed-size NV object reserved for the
@@ -298,6 +311,92 @@ fn decode_policy_command_response(response: &[u8]) -> Result<(), Error> {
         return Err(Error::Device(response_code));
     }
     Ok(())
+}
+
+#[allow(dead_code)]
+fn encode_nv_write_policy(
+    session_handle: u32,
+    nv_index: u32,
+    data: &[u8],
+    nonce_caller: &[u8],
+    output: &mut [u8; 128],
+) -> Result<usize, Error> {
+    if session_handle == 0
+        || data.is_empty()
+        || data.len() > 32
+        || nonce_caller.len() > 32
+    {
+        return Err(Error::InvalidDescriptor);
+    }
+    let auth_size = 9usize.saturating_add(nonce_caller.len());
+    let command_size = 35usize
+        .saturating_add(data.len())
+        .saturating_add(nonce_caller.len());
+    output.fill(0);
+    output[..2].copy_from_slice(&TPM_ST_SESSIONS.to_be_bytes());
+    output[2..6].copy_from_slice(&(command_size as u32).to_be_bytes());
+    output[6..10].copy_from_slice(&TPM_CC_NV_WRITE.to_be_bytes());
+    output[10..14].copy_from_slice(&nv_index.to_be_bytes());
+    output[14..18].copy_from_slice(&nv_index.to_be_bytes());
+    output[18..20].copy_from_slice(&(data.len() as u16).to_be_bytes());
+    output[20..20 + data.len()].copy_from_slice(data);
+    let offset = 20 + data.len();
+    output[offset..offset + 2].copy_from_slice(&0_u16.to_be_bytes());
+    output[offset + 2..offset + 6].copy_from_slice(&(auth_size as u32).to_be_bytes());
+    let auth = offset + 6;
+    output[auth..auth + 4].copy_from_slice(&session_handle.to_be_bytes());
+    output[auth + 4..auth + 6].copy_from_slice(&(nonce_caller.len() as u16).to_be_bytes());
+    output[auth + 6..auth + 6 + nonce_caller.len()].copy_from_slice(nonce_caller);
+    let attributes = auth + 6 + nonce_caller.len();
+    output[attributes] = TPMA_SESSION_CONTINUE_SESSION;
+    output[attributes + 1..attributes + 3].copy_from_slice(&0_u16.to_be_bytes());
+    Ok(command_size)
+}
+
+#[allow(dead_code)]
+pub fn decode_nv_write_policy_response(response: &[u8]) -> Result<PolicyCommandResponse, Error> {
+    if response.len() < 19 {
+        return Err(Error::MalformedResponse);
+    }
+    if u16::from_be_bytes(response[..2].try_into().unwrap()) != TPM_ST_SESSIONS {
+        return Err(Error::MalformedResponse);
+    }
+    let response_size = u32::from_be_bytes(response[2..6].try_into().unwrap()) as usize;
+    let response_code = u32::from_be_bytes(response[6..10].try_into().unwrap());
+    if response_size < 19 || response_size > response.len() {
+        return Err(Error::MalformedResponse);
+    }
+    if response_code != TPM_RC_SUCCESS {
+        return Err(Error::Device(response_code));
+    }
+    let parameter_size = u32::from_be_bytes(response[10..14].try_into().unwrap());
+    if parameter_size != 0 {
+        return Err(Error::MalformedResponse);
+    }
+    let nonce_length = u16::from_be_bytes(response[14..16].try_into().unwrap()) as usize;
+    if nonce_length > 32 {
+        return Err(Error::MalformedResponse);
+    }
+    let attributes_offset = 16 + nonce_length;
+    if attributes_offset.saturating_add(3) > response_size {
+        return Err(Error::MalformedResponse);
+    }
+    let hmac_length = u16::from_be_bytes(response[attributes_offset + 1..attributes_offset + 3].try_into().unwrap()) as usize;
+    if hmac_length > 64
+        || attributes_offset
+            .saturating_add(3)
+            .saturating_add(hmac_length)
+            != response_size
+    {
+        return Err(Error::MalformedResponse);
+    }
+    let mut nonce_tpm = [0_u8; 32];
+    nonce_tpm[..nonce_length].copy_from_slice(&response[16..attributes_offset]);
+    Ok(PolicyCommandResponse {
+        nonce_tpm_length: nonce_length as u8,
+        nonce_tpm,
+        attributes: response[attributes_offset],
+    })
 }
 
 #[allow(dead_code)]
@@ -654,6 +753,54 @@ pub fn self_test() -> bool {
                 return false;
             }
             policy_response[2..6].copy_from_slice(&9_u32.to_be_bytes());
-            decode_policy_command_response(&policy_response) == Err(Error::MalformedResponse)
+            if decode_policy_command_response(&policy_response) != Err(Error::MalformedResponse) {
+                return false;
+            }
+            let root_data = [0xa6; 32];
+            let caller_nonce = [0x44; 8];
+            let mut nv_write = [0_u8; 128];
+            let Ok(nv_write_size) = encode_nv_write_policy(
+                session.handle,
+                0x0150_0000,
+                &root_data,
+                &caller_nonce,
+                &mut nv_write,
+            ) else {
+                return false;
+            };
+            if nv_write_size != 75
+                || u16::from_be_bytes(nv_write[..2].try_into().unwrap()) != TPM_ST_SESSIONS
+                || u32::from_be_bytes(nv_write[6..10].try_into().unwrap()) != TPM_CC_NV_WRITE
+                || u32::from_be_bytes(nv_write[10..14].try_into().unwrap()) != 0x0150_0000
+                || u32::from_be_bytes(nv_write[14..18].try_into().unwrap()) != 0x0150_0000
+                || u16::from_be_bytes(nv_write[18..20].try_into().unwrap()) != 32
+                || nv_write[20..52] != root_data
+                || u16::from_be_bytes(nv_write[52..54].try_into().unwrap()) != 0
+                || u32::from_be_bytes(nv_write[54..58].try_into().unwrap()) != 17
+                || u32::from_be_bytes(nv_write[58..62].try_into().unwrap()) != session.handle
+                || u16::from_be_bytes(nv_write[62..64].try_into().unwrap()) != 8
+                || nv_write[64..72] != caller_nonce
+                || nv_write[72] != TPMA_SESSION_CONTINUE_SESSION
+                || u16::from_be_bytes(nv_write[73..75].try_into().unwrap()) != 0
+            {
+                return false;
+            }
+            let mut nv_response = [0_u8; 19];
+            nv_response[..2].copy_from_slice(&TPM_ST_SESSIONS.to_be_bytes());
+            nv_response[2..6].copy_from_slice(&19_u32.to_be_bytes());
+            nv_response[10..14].copy_from_slice(&0_u32.to_be_bytes());
+            nv_response[14..16].copy_from_slice(&0_u16.to_be_bytes());
+            nv_response[16] = TPMA_SESSION_CONTINUE_SESSION;
+            nv_response[17..19].copy_from_slice(&0_u16.to_be_bytes());
+            let Ok(auth_response) = decode_nv_write_policy_response(&nv_response) else {
+                return false;
+            };
+            if auth_response.nonce_tpm_length != 0
+                || auth_response.attributes != TPMA_SESSION_CONTINUE_SESSION
+            {
+                return false;
+            }
+            nv_response[2..6].copy_from_slice(&18_u32.to_be_bytes());
+            decode_nv_write_policy_response(&nv_response) == Err(Error::MalformedResponse)
         }
 }

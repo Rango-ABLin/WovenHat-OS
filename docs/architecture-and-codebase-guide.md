@@ -1,5 +1,14 @@
 # WovenHat OS Architecture & Codebase Guide
 
+### Stage 24.25 - policy-session NV write framing
+
+`encode_nv_write_policy` constructs a bounded sessions-tagged `NV_Write` for
+one 32-byte root payload, binding the auth handle and NV index and carrying a
+policy-session authorization area with a bounded caller nonce. The response
+decoder checks the sessions tag, TPM status, zero parameter area, bounded
+nonce/HMAC, and exact framing. It performs no TPM I/O and does not expose a
+persisted secret.
+
 ### Stage 24.24 - bounded TPM PolicyPCR transcript
 
 `encode_policy_pcr` constructs a fixed SHA-256 `PolicyPCR` command for one

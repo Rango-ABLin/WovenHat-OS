@@ -1,5 +1,20 @@
 # Stage status
 
+## Stage 24.25 policy-session NV write framing (2026-10-21)
+
+The TPM2 layer now frames a session-authorized `NV_Write` for the fixed
+32-byte credential-root payload and parses its bounded response authorization
+area. The command requires a nonzero policy session, exact NV index binding,
+bounded caller nonce, continue-session attribute, zero offset, and an empty
+HMAC for the policy-session shape. The executable QEMU self-test, host tests
+(89), all-targets and affected feature Clippy, and signed system-apps
+1/2/4-CPU acceptance pass. Evidence is under
+`audit-artifacts/stage24.25-nv-write-policy-20261021`.
+
+This does not execute a live NV write, create an index, establish owner
+authorization, persist a secret, validate a quote, or provide recovery.
+Physical TPM provisioning and release qualification remain required.
+
 ## Stage 24.24 bounded TPM PolicyPCR transcript (2026-10-21)
 
 The TPM2 layer now frames a bounded `PolicyPCR` command for the active policy

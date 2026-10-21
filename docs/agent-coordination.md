@@ -1,5 +1,17 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - Stage 24.25 (2026-10-21)
+
+Added policy-session `NV_Write` request framing and bounded response
+authorization parsing for the fixed 32-byte credential-root payload. It
+binds the session and NV index, enforces zero offset, bounded caller nonce,
+continue-session, and empty policy-session HMAC fields. Executable QEMU
+self-test, host tests, affected Clippy gates, and signed system-apps 1/2/4-
+CPU acceptance pass. Evidence is in
+`docs/audit-stage24-25-nv-write-policy-2026-10-21.md`; USB remains untouched.
+No live NV write, quote verification, recovery, or physical TPM qualification
+has occurred.
+
 ## Codex - Stage 24.24 (2026-10-21)
 
 Added bounded TPM2 `PolicyPCR` command framing and exact success-response
