@@ -1,5 +1,16 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - Stage 24.33 (2026-10-21)
+
+Added bounded `TPM2_ReadPublic` framing and attestation-key public-area
+validation. Only SHA-256-named fixed/restricted signing objects are accepted;
+RSA sizes and P-256 points are validated, with exact response bounds.
+Executable QEMU self-test, host tests, affected Clippy gates, and signed
+system-apps 1/2/4-CPU acceptance pass. Evidence is in
+`docs/audit-stage24-33-tpm-read-public-boundary-2026-10-21.md`; USB remains
+untouched. Live TPM execution, object-name binding, persistence, recovery, and
+physical TPM qualification remain open.
+
 ## Codex - Stage 24.32 (2026-10-21)
 
 Added bounded ECDSA/P-256 SHA-256 quote verification from uncompressed TPM

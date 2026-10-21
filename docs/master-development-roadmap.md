@@ -2,6 +2,14 @@ WovenHat OS — Stage 10.7 → Version 1.0 Master Roadmap
 Phase I — Finish the asynchronous kernel foundation
 Stage 10.7 — Asynchronous TCP
 
+Stage 24.33 - Bounded TPM ReadPublic attestation-key boundary
+
+Implemented bounded TPM2_ReadPublic framing and validation of SHA-256-named
+fixed/restricted signing objects with RSA or P-256 public keys. The
+executable QEMU self-test, host tests, Clippy, and signed 1/2/4-CPU
+acceptance pass. Live TPM execution, object-name binding, persistence,
+recovery, physical qualification, and release readiness remain required.
+
 Stage 24.32 - Bounded ECC/P-256 quote verification
 
 Implemented bounded ECDSA/P-256 SHA-256 verification over exact TPMS_ATTEST

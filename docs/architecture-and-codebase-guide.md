@@ -1,5 +1,14 @@
 # WovenHat OS Architecture & Codebase Guide
 
+### Stage 24.33 - bounded TPM ReadPublic attestation-key boundary
+
+`encode_read_public` and `decode_attestation_public` implement the bounded
+`TPM2_ReadPublic` command/response boundary. The decoder checks SHA-256 name
+algorithm, fixed/restricted signing attributes, RSA modulus validity or P-256
+point validity, exact TPM2B lengths, and the name/qualified-name tail. The
+transport wrapper remains serialized and fail-closed; object-name binding is
+still a higher-level responsibility.
+
 ### Stage 24.32 - bounded ECC/P-256 quote verification
 
 `verify_quote_ecc_p256_sha256` builds an uncompressed SEC1 P-256 public key

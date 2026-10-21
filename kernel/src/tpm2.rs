@@ -32,6 +32,7 @@ const TPM_ST_NO_SESSIONS: u16 = 0x8001;
 #[allow(dead_code)]
 const TPM_ST_SESSIONS: u16 = 0x0201;
 const TPM_CC_GET_RANDOM: u32 = 0x0000_017b;
+const TPM_CC_READ_PUBLIC: u32 = 0x0000_0173;
 const TPM_CC_PCR_READ: u32 = 0x0000_017e;
 #[allow(dead_code)]
 const TPM_CC_NV_READ_PUBLIC: u32 = 0x0000_0169;
@@ -52,12 +53,14 @@ const TPM_ALG_RSASSA: u16 = 0x0014;
 const TPM_ALG_RSAPSS: u16 = 0x0016;
 #[allow(dead_code)]
 const TPM_ALG_ECDSA: u16 = 0x0018;
+const TPM_ALG_RSA: u16 = 0x0001;
+const TPM_ALG_ECC: u16 = 0x0023;
+const TPM_ALG_NULL: u16 = 0x0010;
+const TPM_ECC_NIST_P256: u16 = 0x0003;
 #[allow(dead_code)]
 const TPM_ST_ATTEST_QUOTE: u16 = 0x8018;
 #[allow(dead_code)]
 const TPM_GENERATED_VALUE: u32 = 0xff54_4347;
-#[allow(dead_code)]
-const TPM_ALG_NULL: u16 = 0x0010;
 #[allow(dead_code)]
 const TPM_SESS_POLICY: u8 = 0x01;
 #[allow(dead_code)]
@@ -73,6 +76,12 @@ const TPMA_NV_OWNERWRITE: u32 = 1 << 1;
 const TPMA_NV_AUTHWRITE: u32 = 1 << 2;
 const TPMA_NV_POLICYWRITE: u32 = 1 << 3;
 const TPMA_NV_POLICY_DELETE: u32 = 1 << 22;
+const TPMA_OBJECT_FIXED_TPM: u32 = 1 << 1;
+const TPMA_OBJECT_FIXED_PARENT: u32 = 1 << 4;
+const TPMA_OBJECT_SENSITIVE_DATA_ORIGIN: u32 = 1 << 5;
+const TPMA_OBJECT_RESTRICTED: u32 = 1 << 16;
+const TPMA_OBJECT_DECRYPT: u32 = 1 << 17;
+const TPMA_OBJECT_SIGN_ENCRYPT: u32 = 1 << 18;
 const MAX_BUFFER_BYTES: usize = 0xf80;
 const PCR_POLICY_MAGIC: [u8; 4] = *b"TPP1";
 const PCR_POLICY_VERSION: u16 = 1;
@@ -137,6 +146,13 @@ pub struct QuoteRsaPublicKey {
 pub struct QuoteEccP256PublicKey {
     pub x: [u8; 32],
     pub y: [u8; 32],
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[allow(clippy::large_enum_variant)]
+pub enum AttestationPublicKey {
+    Rsa(QuoteRsaPublicKey),
+    EccP256(QuoteEccP256PublicKey),
 }
 
 /// Verify an ECDSA P-256/SHA-256 quote signature against the exact
@@ -864,6 +880,159 @@ pub fn decode_nv_read_public(response: &[u8]) -> Result<NvPublic, Error> {
     })
 }
 
+fn skip_tpm2b<'a>(bytes: &'a [u8], offset: &mut usize, maximum: usize) -> Result<&'a [u8], Error> {
+    let length = u16::from_be_bytes(quote_take(bytes, offset, 2)?.try_into().unwrap()) as usize;
+    if length > maximum {
+        return Err(Error::MalformedResponse);
+    }
+    quote_take(bytes, offset, length)
+}
+
+fn decode_public_symmetric(bytes: &[u8], offset: &mut usize) -> Result<(), Error> {
+    let algorithm = u16::from_be_bytes(quote_take(bytes, offset, 2)?.try_into().unwrap());
+    if algorithm != TPM_ALG_NULL {
+        quote_take(bytes, offset, 4)?;
+    }
+    Ok(())
+}
+
+fn validate_attestation_attributes(attributes: u32) -> Result<(), Error> {
+    let required = TPMA_OBJECT_FIXED_TPM
+        | TPMA_OBJECT_FIXED_PARENT
+        | TPMA_OBJECT_SENSITIVE_DATA_ORIGIN
+        | TPMA_OBJECT_RESTRICTED
+        | TPMA_OBJECT_SIGN_ENCRYPT;
+    if attributes & required != required || attributes & TPMA_OBJECT_DECRYPT != 0 {
+        return Err(Error::InvalidPolicy);
+    }
+    Ok(())
+}
+
+/// Decode and validate the public area returned by `TPM2_ReadPublic` for an
+/// attestation/signing object. This is a provenance boundary only: the
+/// caller must still bind the returned object name to the expected TPM object
+/// and use the object handle under a live TPM authorization policy.
+#[allow(dead_code)]
+pub fn decode_attestation_public(response: &[u8]) -> Result<AttestationPublicKey, Error> {
+    if response.len() < 18 {
+        return Err(Error::MalformedResponse);
+    }
+    let response_size = u32::from_be_bytes(response[2..6].try_into().unwrap()) as usize;
+    let response_code = u32::from_be_bytes(response[6..10].try_into().unwrap());
+    if response_size != response.len() {
+        return Err(Error::MalformedResponse);
+    }
+    if response_code != TPM_RC_SUCCESS {
+        return Err(Error::Device(response_code));
+    }
+    let public_size = u16::from_be_bytes(response[10..12].try_into().unwrap()) as usize;
+    let public_end = 12usize.saturating_add(public_size);
+    if public_size == 0 || public_end > response_size {
+        return Err(Error::MalformedResponse);
+    }
+    let public = &response[12..public_end];
+    let mut offset = 0;
+    let public_type = u16::from_be_bytes(quote_take(public, &mut offset, 2)?.try_into().unwrap());
+    let name_algorithm = u16::from_be_bytes(quote_take(public, &mut offset, 2)?.try_into().unwrap());
+    let attributes = u32::from_be_bytes(quote_take(public, &mut offset, 4)?.try_into().unwrap());
+    if name_algorithm != TPM_ALG_SHA256 {
+        return Err(Error::InvalidPolicy);
+    }
+    validate_attestation_attributes(attributes)?;
+    skip_tpm2b(public, &mut offset, 64)?;
+    let key = match public_type {
+        TPM_ALG_RSA => {
+            decode_public_symmetric(public, &mut offset)?;
+            quote_take(public, &mut offset, 4)?;
+            let key_bits = u16::from_be_bytes(quote_take(public, &mut offset, 2)?.try_into().unwrap());
+            let exponent = u32::from_be_bytes(quote_take(public, &mut offset, 4)?.try_into().unwrap());
+            if !(2048..=4096).contains(&key_bits) || key_bits % 8 != 0 {
+                return Err(Error::InvalidPolicy);
+            }
+            let modulus_length = usize::from(key_bits / 8);
+            let modulus = skip_tpm2b(public, &mut offset, 512)?;
+            if modulus.len() != modulus_length {
+                return Err(Error::InvalidPolicy);
+            }
+            let exponent_value = if exponent == 0 { 65_537 } else { exponent };
+            RsaPublicKey::new(
+                BigUint::from_bytes_be(modulus),
+                BigUint::from(exponent_value),
+            )
+            .map_err(|_| Error::InvalidPolicy)?;
+            let mut public_key = QuoteRsaPublicKey {
+                modulus_length: key_bits / 8,
+                modulus: [0; 512],
+                exponent,
+            };
+            public_key.modulus[..modulus_length].copy_from_slice(modulus);
+            AttestationPublicKey::Rsa(public_key)
+        }
+        TPM_ALG_ECC => {
+            decode_public_symmetric(public, &mut offset)?;
+            quote_take(public, &mut offset, 4)?;
+            let curve = u16::from_be_bytes(quote_take(public, &mut offset, 2)?.try_into().unwrap());
+            quote_take(public, &mut offset, 4)?;
+            if curve != TPM_ECC_NIST_P256 {
+                return Err(Error::UnsupportedInterface);
+            }
+            let x = skip_tpm2b(public, &mut offset, 32)?;
+            let y = skip_tpm2b(public, &mut offset, 32)?;
+            if x.len() != 32 || y.len() != 32 {
+                return Err(Error::InvalidPolicy);
+            }
+            let mut public_key = QuoteEccP256PublicKey { x: [0; 32], y: [0; 32] };
+            public_key.x.copy_from_slice(x);
+            public_key.y.copy_from_slice(y);
+            if VerifyingKey::from_sec1_bytes(&{
+                let mut encoded = [0_u8; 65];
+                encoded[0] = 4;
+                encoded[1..33].copy_from_slice(&public_key.x);
+                encoded[33..].copy_from_slice(&public_key.y);
+                encoded
+            })
+            .is_err()
+            {
+                return Err(Error::InvalidPolicy);
+            }
+            AttestationPublicKey::EccP256(public_key)
+        }
+        _ => return Err(Error::UnsupportedInterface),
+    };
+    if offset != public.len() {
+        return Err(Error::MalformedResponse);
+    }
+    let mut tail = public_end;
+    skip_tpm2b(response, &mut tail, 64)?;
+    skip_tpm2b(response, &mut tail, 64)?;
+    if tail != response_size {
+        return Err(Error::MalformedResponse);
+    }
+    Ok(key)
+}
+
+#[allow(dead_code)]
+fn encode_read_public(handle: u32, output: &mut [u8; 14]) -> Result<usize, Error> {
+    output[..2].copy_from_slice(&TPM_ST_NO_SESSIONS.to_be_bytes());
+    output[2..6].copy_from_slice(&14_u32.to_be_bytes());
+    output[6..10].copy_from_slice(&TPM_CC_READ_PUBLIC.to_be_bytes());
+    output[10..14].copy_from_slice(&handle.to_be_bytes());
+    Ok(output.len())
+}
+
+/// Retrieve one bounded TPM public area through the serialized CRB transport.
+#[allow(dead_code)]
+pub fn read_attestation_public(
+    info: Tpm2Info,
+    handle: u32,
+) -> Result<AttestationPublicKey, Error> {
+    let mut command = [0_u8; 14];
+    let command_size = encode_read_public(handle, &mut command)?;
+    let mut response = [0_u8; MAX_BUFFER_BYTES];
+    let response_size = execute(info, &command[..command_size], &mut response)?;
+    decode_attestation_public(&response[..response_size])
+}
+
 fn decode_pcr_read(response: &[u8], pcr: u8, output: &mut [u8; 32]) -> Result<(), Error> {
     if pcr >= 24 || response.len() < 62 {
         return Err(Error::MalformedResponse);
@@ -1489,6 +1658,33 @@ pub fn self_test() -> bool {
             if verify_quote_ecc_p256_sha256(ecc_message, &ecc_fixture_signature, &ecc_key)
                 != Err(Error::PolicySignature)
             {
+                return false;
+            }
+            let mut public_response = [0_u8; 296];
+            public_response[..2].copy_from_slice(&TPM_ST_NO_SESSIONS.to_be_bytes());
+            public_response[2..6].copy_from_slice(&296_u32.to_be_bytes());
+            public_response[6..10].copy_from_slice(&TPM_RC_SUCCESS.to_be_bytes());
+            public_response[10..12].copy_from_slice(&280_u16.to_be_bytes());
+            public_response[12..14].copy_from_slice(&TPM_ALG_RSA.to_be_bytes());
+            public_response[14..16].copy_from_slice(&TPM_ALG_SHA256.to_be_bytes());
+            public_response[16..20].copy_from_slice(&0x0005_0032_u32.to_be_bytes());
+            public_response[20..22].copy_from_slice(&0_u16.to_be_bytes());
+            public_response[22..24].copy_from_slice(&TPM_ALG_NULL.to_be_bytes());
+            public_response[24..26].copy_from_slice(&TPM_ALG_NULL.to_be_bytes());
+            public_response[26..28].copy_from_slice(&TPM_ALG_SHA256.to_be_bytes());
+            public_response[28..30].copy_from_slice(&2048_u16.to_be_bytes());
+            public_response[30..34].copy_from_slice(&0_u32.to_be_bytes());
+            public_response[34..36].copy_from_slice(&256_u16.to_be_bytes());
+            public_response[36..292].fill(0xa5);
+            public_response[291] = 1;
+            let Ok(AttestationPublicKey::Rsa(parsed_key)) = decode_attestation_public(&public_response) else {
+                return false;
+            };
+            if parsed_key.modulus_length != 256 || parsed_key.exponent != 0 {
+                return false;
+            }
+            public_response[5] = 0;
+            if decode_attestation_public(&public_response) != Err(Error::MalformedResponse) {
                 return false;
             }
             read_response[10..14].copy_from_slice(&33_u32.to_be_bytes());

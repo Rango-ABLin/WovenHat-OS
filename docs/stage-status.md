@@ -1,5 +1,20 @@
 # Stage status
 
+## Stage 24.33 bounded TPM ReadPublic attestation-key boundary (2026-10-21)
+
+The TPM2 layer now frames `TPM2_ReadPublic` and validates the returned public
+area for a fixed-TPM, fixed-parent, sensitive-origin, restricted signing
+object named with SHA-256. RSA keys are bounded to 2048-4096 bits and passed
+through RSA key validation; ECC keys are restricted to valid P-256 points.
+Malformed sizes, unsupported curves/types, decrypt-only objects, and trailing
+response bytes fail closed. Host tests (89), all-targets and affected feature
+Clippy, executable QEMU, and signed system-apps 1/2/4-CPU acceptance pass.
+Evidence is under `audit-artifacts/stage24.33-tpm-read-public-boundary-20261021`.
+
+Live TPM execution, object-name binding, attestation-key identity/persistence,
+credential authorization, recovery, and physical TPM qualification remain
+required.
+
 ## Stage 24.32 bounded ECC/P-256 quote verification (2026-10-21)
 
 The TPM2 boundary now verifies SHA-256 ECDSA/P-256 quote signatures against
