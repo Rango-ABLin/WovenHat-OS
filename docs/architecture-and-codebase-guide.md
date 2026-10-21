@@ -1,5 +1,13 @@
 # WovenHat OS Architecture & Codebase Guide
 
+### Stage 24.24 - bounded TPM PolicyPCR transcript
+
+`encode_policy_pcr` constructs a fixed SHA-256 `PolicyPCR` command for one
+validated PCR and one active nonzero policy-session handle. The response
+decoder accepts only a ten-byte successful TPM response. This establishes
+the command transcript boundary but does not perform live TPM I/O or
+authorize subsequent NV operations.
+
 ### Stage 24.23 - bounded TPM policy-session framing
 
 `encode_policy_session_start` constructs a bounded no-session

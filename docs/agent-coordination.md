@@ -1,5 +1,15 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - Stage 24.24 (2026-10-21)
+
+Added bounded TPM2 `PolicyPCR` command framing and exact success-response
+validation for one PCR and one SHA-256 digest. The executable QEMU self-test,
+host tests, affected Clippy gates, and signed system-apps 1/2/4-CPU
+acceptance pass. Evidence is in
+`docs/audit-stage24-24-policy-pcr-2026-10-21.md`; USB remains untouched.
+Live authorization, NV provisioning, quote verification, recovery, and
+physical TPM qualification remain open.
+
 ## Codex - Stage 24.23 (2026-10-21)
 
 Added bounded TPM2 policy-session `StartAuthSession` framing and response

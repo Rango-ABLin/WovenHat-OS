@@ -2,6 +2,13 @@ WovenHat OS — Stage 10.7 → Version 1.0 Master Roadmap
 Phase I — Finish the asynchronous kernel foundation
 Stage 10.7 — Asynchronous TCP
 
+Stage 24.24 - Bounded TPM PolicyPCR transcript
+
+Implemented bounded TPM2 `PolicyPCR` framing and exact response validation.
+The executable QEMU self-test, host tests, Clippy, and signed 1/2/4-CPU
+acceptance pass. Live TPM authorization, NV provisioning, quote verification,
+recovery, and physical qualification remain required.
+
 Stage 24.23 - Bounded TPM policy-session framing
 
 Implemented bounded TPM2 policy-session start framing and response parsing.

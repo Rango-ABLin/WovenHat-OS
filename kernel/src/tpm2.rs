@@ -32,6 +32,8 @@ const TPM_CC_PCR_READ: u32 = 0x0000_017e;
 const TPM_CC_NV_READ_PUBLIC: u32 = 0x0000_0169;
 #[allow(dead_code)]
 const TPM_CC_START_AUTH_SESSION: u32 = 0x0000_0176;
+#[allow(dead_code)]
+const TPM_CC_POLICY_PCR: u32 = 0x0000_017f;
 const TPM_ALG_SHA256: u16 = 0x000b;
 #[allow(dead_code)]
 const TPM_ALG_NULL: u16 = 0x0010;
@@ -256,6 +258,46 @@ pub fn decode_policy_session_start(response: &[u8]) -> Result<PolicySession, Err
         nonce_tpm_length: nonce_length as u8,
         nonce_tpm,
     })
+}
+
+#[allow(dead_code)]
+fn encode_policy_pcr(
+    session_handle: u32,
+    pcr: u8,
+    expected_digest: &[u8; 32],
+    output: &mut [u8; 58],
+) -> Result<(), Error> {
+    if session_handle == 0 || pcr >= 24 {
+        return Err(Error::InvalidDescriptor);
+    }
+    output.fill(0);
+    output[..2].copy_from_slice(&TPM_ST_NO_SESSIONS.to_be_bytes());
+    output[2..6].copy_from_slice(&58_u32.to_be_bytes());
+    output[6..10].copy_from_slice(&TPM_CC_POLICY_PCR.to_be_bytes());
+    output[10..14].copy_from_slice(&session_handle.to_be_bytes());
+    output[14..16].copy_from_slice(&32_u16.to_be_bytes());
+    output[16..48].copy_from_slice(expected_digest);
+    output[48..52].copy_from_slice(&1_u32.to_be_bytes());
+    output[52..54].copy_from_slice(&TPM_ALG_SHA256.to_be_bytes());
+    output[54] = 3;
+    output[55 + usize::from(pcr / 8)] = 1 << (pcr % 8);
+    Ok(())
+}
+
+#[allow(dead_code)]
+fn decode_policy_command_response(response: &[u8]) -> Result<(), Error> {
+    if response.len() < 10 {
+        return Err(Error::MalformedResponse);
+    }
+    let response_size = u32::from_be_bytes(response[2..6].try_into().unwrap()) as usize;
+    let response_code = u32::from_be_bytes(response[6..10].try_into().unwrap());
+    if response_size != 10 || response_size > response.len() {
+        return Err(Error::MalformedResponse);
+    }
+    if response_code != TPM_RC_SUCCESS {
+        return Err(Error::Device(response_code));
+    }
+    Ok(())
 }
 
 #[allow(dead_code)]
@@ -591,8 +633,27 @@ pub fn self_test() -> bool {
             let Ok(session) = decode_policy_session_start(&session_response) else {
                 return false;
             };
-            session.handle == 0x0300_0000
-                && session.nonce_tpm_length == 16
-                && session.nonce_tpm[..16] == [0x77; 16]
+            if session.handle != 0x0300_0000
+                || session.nonce_tpm_length != 16
+                || session.nonce_tpm[..16] != [0x77; 16]
+            {
+                return false;
+            }
+            let expected_pcr = [0x3c; 32];
+            let mut policy_pcr = [0_u8; 58];
+            if encode_policy_pcr(session.handle, 7, &expected_pcr, &mut policy_pcr).is_err()
+                || u32::from_be_bytes(policy_pcr[6..10].try_into().unwrap()) != TPM_CC_POLICY_PCR
+                || u32::from_be_bytes(policy_pcr[10..14].try_into().unwrap()) != session.handle
+                || policy_pcr[55] != 0x80
+            {
+                return false;
+            }
+            let mut policy_response = [0_u8; 10];
+            policy_response[2..6].copy_from_slice(&10_u32.to_be_bytes());
+            if decode_policy_command_response(&policy_response).is_err() {
+                return false;
+            }
+            policy_response[2..6].copy_from_slice(&9_u32.to_be_bytes());
+            decode_policy_command_response(&policy_response) == Err(Error::MalformedResponse)
         }
 }

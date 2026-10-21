@@ -1,5 +1,19 @@
 # Stage status
 
+## Stage 24.24 bounded TPM PolicyPCR transcript (2026-10-21)
+
+The TPM2 layer now frames a bounded `PolicyPCR` command for the active policy
+session, binding one PCR index to the expected 32-byte SHA-256 digest and
+validating the exact success response. The executable QEMU self-test, host
+tests (89), all-targets and affected feature Clippy, and signed
+system-apps 1/2/4-CPU acceptance pass. Evidence is under
+`audit-artifacts/stage24.24-policy-pcr-20261021`.
+
+This still does not send a live TPM command on the current QEMU platform,
+authorize NV writes, create a credential object, validate a quote, or provide
+recovery. Complete policy-session lifecycle, NV provisioning, quote
+verification, physical TPM qualification, and release custody remain open.
+
 ## Stage 24.23 bounded TPM policy-session framing (2026-10-21)
 
 The TPM2 layer now frames a policy `StartAuthSession` request with bounded
