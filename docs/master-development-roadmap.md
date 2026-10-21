@@ -2,6 +2,14 @@ WovenHat OS — Stage 10.7 → Version 1.0 Master Roadmap
 Phase I — Finish the asynchronous kernel foundation
 Stage 10.7 — Asynchronous TCP
 
+Stage 24.44 - TPM policy-session context save/load
+
+Implemented bounded `TPM2_ContextSave`/`ContextLoad`, one-use snapshots,
+lease invalidation after save, and fresh generations after load. Host tests,
+Clippy, executable QEMU, and signed 1/2/4-CPU acceptance pass. Cross-reboot
+custody, nonce refresh, key lifecycle, credential decisions, recovery,
+qualification, and release readiness remain required.
+
 Stage 24.43 - Managed TPM policy-session lifecycle
 
 Implemented generation-tagged policy-session leases, stale/active guards,

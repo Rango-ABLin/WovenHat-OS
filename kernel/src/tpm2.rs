@@ -37,6 +37,10 @@ const TPM_CC_READ_PUBLIC: u32 = 0x0000_0173;
 const TPM_CC_QUOTE: u32 = 0x0000_0158;
 #[allow(dead_code)]
 const TPM_CC_FLUSH_CONTEXT: u32 = 0x0000_0165;
+#[allow(dead_code)]
+const TPM_CC_CONTEXT_SAVE: u32 = 0x0000_0162;
+#[allow(dead_code)]
+const TPM_CC_CONTEXT_LOAD: u32 = 0x0000_0161;
 const TPM_CC_PCR_READ: u32 = 0x0000_017e;
 #[allow(dead_code)]
 const TPM_CC_NV_READ_PUBLIC: u32 = 0x0000_0169;
@@ -86,6 +90,7 @@ const TPMA_OBJECT_RESTRICTED: u32 = 1 << 16;
 const TPMA_OBJECT_DECRYPT: u32 = 1 << 17;
 const TPMA_OBJECT_SIGN_ENCRYPT: u32 = 1 << 18;
 const MAX_BUFFER_BYTES: usize = 0xf80;
+const MAX_CONTEXT_BLOB_BYTES: usize = 1024;
 const PCR_POLICY_MAGIC: [u8; 4] = *b"TPP1";
 const PCR_POLICY_VERSION: u16 = 1;
 const PCR_POLICY_SIGNED_BYTES: usize = 44;
@@ -123,6 +128,22 @@ pub struct PolicySessionLease {
     generation: u64,
     active: bool,
     nonce_stale: bool,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PolicySessionContext {
+    pub sequence: u64,
+    pub saved_handle: u32,
+    pub hierarchy: u32,
+    pub blob_length: u16,
+    pub blob: [u8; MAX_CONTEXT_BLOB_BYTES],
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PolicySessionSnapshot {
+    context: PolicySessionContext,
+    session: PolicySession,
+    consumed: bool,
 }
 
 impl PolicySessionLease {
@@ -1372,6 +1393,146 @@ pub fn flush_policy_session(
     Ok(())
 }
 
+fn encode_context_save(handle: u32, output: &mut [u8; 14]) -> Result<(), Error> {
+    if handle == 0 {
+        return Err(Error::InvalidDescriptor);
+    }
+    output[..2].copy_from_slice(&TPM_ST_NO_SESSIONS.to_be_bytes());
+    output[2..6].copy_from_slice(&14_u32.to_be_bytes());
+    output[6..10].copy_from_slice(&TPM_CC_CONTEXT_SAVE.to_be_bytes());
+    output[10..14].copy_from_slice(&handle.to_be_bytes());
+    Ok(())
+}
+
+fn decode_context_save(response: &[u8]) -> Result<PolicySessionContext, Error> {
+    if response.len() < 28
+        || u16::from_be_bytes(response[..2].try_into().unwrap()) != TPM_ST_NO_SESSIONS
+    {
+        return Err(Error::MalformedResponse);
+    }
+    let response_size = u32::from_be_bytes(response[2..6].try_into().unwrap()) as usize;
+    let response_code = u32::from_be_bytes(response[6..10].try_into().unwrap());
+    if response_size != response.len() {
+        return Err(Error::MalformedResponse);
+    }
+    if response_code != TPM_RC_SUCCESS {
+        return Err(Error::Device(response_code));
+    }
+    let sequence = u64::from_be_bytes(response[10..18].try_into().unwrap());
+    let saved_handle = u32::from_be_bytes(response[18..22].try_into().unwrap());
+    let hierarchy = u32::from_be_bytes(response[22..26].try_into().unwrap());
+    let blob_length = u16::from_be_bytes(response[26..28].try_into().unwrap()) as usize;
+    if saved_handle == 0
+        || blob_length == 0
+        || blob_length > MAX_CONTEXT_BLOB_BYTES
+        || 28usize.saturating_add(blob_length) != response_size
+    {
+        return Err(Error::MalformedResponse);
+    }
+    let mut blob = [0_u8; MAX_CONTEXT_BLOB_BYTES];
+    blob[..blob_length].copy_from_slice(&response[28..28 + blob_length]);
+    Ok(PolicySessionContext {
+        sequence,
+        saved_handle,
+        hierarchy,
+        blob_length: blob_length as u16,
+        blob,
+    })
+}
+
+fn encode_context_load(context: &PolicySessionContext, output: &mut [u8; 1052]) -> Result<usize, Error> {
+    let blob_length = usize::from(context.blob_length);
+    if context.saved_handle == 0
+        || blob_length == 0
+        || blob_length > MAX_CONTEXT_BLOB_BYTES
+    {
+        return Err(Error::InvalidDescriptor);
+    }
+    let command_size = 28usize.saturating_add(blob_length);
+    output.fill(0);
+    output[..2].copy_from_slice(&TPM_ST_NO_SESSIONS.to_be_bytes());
+    output[2..6].copy_from_slice(&(command_size as u32).to_be_bytes());
+    output[6..10].copy_from_slice(&TPM_CC_CONTEXT_LOAD.to_be_bytes());
+    output[10..18].copy_from_slice(&context.sequence.to_be_bytes());
+    output[18..22].copy_from_slice(&context.saved_handle.to_be_bytes());
+    output[22..26].copy_from_slice(&context.hierarchy.to_be_bytes());
+    output[26..28].copy_from_slice(&context.blob_length.to_be_bytes());
+    output[28..28 + blob_length].copy_from_slice(&context.blob[..blob_length]);
+    Ok(command_size)
+}
+
+fn decode_context_load(response: &[u8]) -> Result<u32, Error> {
+    if response.len() != 14
+        || u16::from_be_bytes(response[..2].try_into().unwrap()) != TPM_ST_NO_SESSIONS
+    {
+        return Err(Error::MalformedResponse);
+    }
+    let response_code = u32::from_be_bytes(response[6..10].try_into().unwrap());
+    if u32::from_be_bytes(response[2..6].try_into().unwrap()) != 14 {
+        return Err(Error::MalformedResponse);
+    }
+    if response_code != TPM_RC_SUCCESS {
+        return Err(Error::Device(response_code));
+    }
+    let handle = u32::from_be_bytes(response[10..14].try_into().unwrap());
+    if handle == 0 {
+        return Err(Error::MalformedResponse);
+    }
+    Ok(handle)
+}
+
+/// Save a live policy session. TPM ContextSave removes the loaded session;
+/// only a successful, fully validated snapshot is returned and the lease is
+/// invalidated locally.
+#[allow(dead_code)]
+pub fn save_policy_session(
+    info: Tpm2Info,
+    lease: &mut PolicySessionLease,
+) -> Result<PolicySessionSnapshot, Error> {
+    if !lease.active {
+        return Err(Error::InvalidPolicy);
+    }
+    let mut command = [0_u8; 14];
+    encode_context_save(lease.session.handle, &mut command)?;
+    let mut response = [0_u8; MAX_BUFFER_BYTES];
+    let response_size = execute(info, &command, &mut response)?;
+    let context = decode_context_save(&response[..response_size])?;
+    lease.active = false;
+    lease.nonce_stale = true;
+    Ok(PolicySessionSnapshot {
+        context,
+        session: lease.session,
+        consumed: false,
+    })
+}
+
+/// Restore a saved policy session exactly once under a fresh lease generation.
+/// A failed load leaves the snapshot available for retry.
+#[allow(dead_code)]
+pub fn load_policy_session(
+    info: Tpm2Info,
+    snapshot: &mut PolicySessionSnapshot,
+) -> Result<PolicySessionLease, Error> {
+    if snapshot.consumed {
+        return Err(Error::InvalidPolicy);
+    }
+    let mut command = [0_u8; 1052];
+    let command_size = encode_context_load(&snapshot.context, &mut command)?;
+    let mut response = [0_u8; 16];
+    let response_size = execute(info, &command[..command_size], &mut response)?;
+    let handle = decode_context_load(&response[..response_size])?;
+    snapshot.consumed = true;
+    let generation = NEXT_POLICY_SESSION_GENERATION.fetch_add(1, Ordering::Relaxed);
+    let mut session = snapshot.session;
+    session.handle = handle;
+    Ok(PolicySessionLease {
+        session,
+        generation,
+        active: true,
+        nonce_stale: false,
+    })
+}
+
 #[allow(dead_code)]
 fn decode_policy_command_response(response: &[u8]) -> Result<(), Error> {
     if response.len() < 10 {
@@ -2054,6 +2215,36 @@ pub fn self_test() -> bool {
         || u32::from_be_bytes(flush_command[10..14].try_into().unwrap()) != 0x0300_0000
         || encode_flush_context(0, &mut flush_command) != Err(Error::InvalidDescriptor)
     {
+        return false;
+    }
+    let mut context_response = [0_u8; 32];
+    context_response[..2].copy_from_slice(&TPM_ST_NO_SESSIONS.to_be_bytes());
+    context_response[2..6].copy_from_slice(&32_u32.to_be_bytes());
+    context_response[10..18].copy_from_slice(&9_u64.to_be_bytes());
+    context_response[18..22].copy_from_slice(&0x0200_0000_u32.to_be_bytes());
+    context_response[22..26].copy_from_slice(&TPM_RH_NULL.to_be_bytes());
+    context_response[26..28].copy_from_slice(&4_u16.to_be_bytes());
+    context_response[28..32].copy_from_slice(&[0xa1, 0xa2, 0xa3, 0xa4]);
+    let Ok(context) = decode_context_save(&context_response) else {
+        return false;
+    };
+    let mut context_command = [0_u8; 1052];
+    let Ok(context_command_size) = encode_context_load(&context, &mut context_command) else {
+        return false;
+    };
+    if context_command_size != 32
+        || u32::from_be_bytes(context_command[6..10].try_into().unwrap()) != TPM_CC_CONTEXT_LOAD
+        || u64::from_be_bytes(context_command[10..18].try_into().unwrap()) != 9
+        || u32::from_be_bytes(context_command[18..22].try_into().unwrap()) != 0x0200_0000
+        || context_command[28..32] != [0xa1, 0xa2, 0xa3, 0xa4]
+    {
+        return false;
+    }
+    let mut context_load_response = [0_u8; 14];
+    context_load_response[..2].copy_from_slice(&TPM_ST_NO_SESSIONS.to_be_bytes());
+    context_load_response[2..6].copy_from_slice(&14_u32.to_be_bytes());
+    context_load_response[10..14].copy_from_slice(&0x0300_0001_u32.to_be_bytes());
+    if decode_context_load(&context_load_response) != Ok(0x0300_0001) {
         return false;
     }
     let synthetic_session = PolicySession {

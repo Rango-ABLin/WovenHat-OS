@@ -1,5 +1,20 @@
 # Stage status
 
+## Stage 24.44 TPM policy-session context save/load (2026-10-21)
+
+The TPM2 layer now frames, executes, and strictly decodes `ContextSave` and
+`ContextLoad` for policy sessions. A successful save invalidates the live
+lease and returns a bounded context snapshot; a load consumes that snapshot
+exactly once and restores the session under a fresh generation. Failed loads
+leave the snapshot retryable. Host tests (89), all-targets and affected
+feature Clippy, executable QEMU, and signed system-apps 1/2/4-CPU acceptance
+pass. Evidence is under
+`audit-artifacts/stage24.44-policy-session-context-20261021`.
+
+Cross-reboot persistence custody, TPM session nonce refresh semantics,
+provisioned-key lifecycle, credential decisions, recovery, and physical
+qualification remain required.
+
 ## Stage 24.43 managed TPM policy-session lifecycle (2026-10-21)
 
 Policy sessions now have a generation-tagged kernel-owned lease. Managed

@@ -1,5 +1,14 @@
 # WovenHat OS Architecture & Codebase Guide
 
+### Stage 24.44 - TPM policy-session context save/load
+
+`save_policy_session` validates a bounded `TPMS_CONTEXT`, invalidates the
+loaded lease only after successful `ContextSave`, and returns a one-use
+snapshot. `load_policy_session` validates `ContextLoad`, consumes the
+snapshot only after success, and issues a fresh generation with the restored
+handle. Failed restore remains retryable; context storage is not yet a
+cross-reboot credential store.
+
 ### Stage 24.43 - managed TPM policy-session lifecycle
 
 `PolicySessionLease` owns one generation-tagged session handle and tracks

@@ -1,5 +1,14 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - Stage 24.44 (2026-10-21)
+
+Added bounded `TPM2_ContextSave`/`ContextLoad` for policy sessions, one-use
+snapshots, lease invalidation after save, fresh generation after load, and
+retryable failed loads. Static gates, executable QEMU, and signed
+system-apps 1/2/4-CPU acceptance pass. Cross-reboot custody, nonce refresh,
+key lifecycle, credential decisions, recovery, and physical qualification
+remain open. USB remains untouched.
+
 ## Codex - Stage 24.43 (2026-10-21)
 
 Added generation-tagged managed TPM policy-session leases, stale/active
