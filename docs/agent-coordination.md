@@ -4,10 +4,12 @@
 
 Commit `7bbcb0f8` moves bounded persistent account import into the normal
 `system-apps` boot path and keeps the hardware-demo fallback from overwriting
-an imported file. This is implemented but not yet accepted: the harness-backed
-production gate packaged all signed applications, then the nested bootloader
-build waited on a shared Cargo lock and was stopped. Do not claim the 1/2/4
-CPU production gate until it is rerun. The global formatting check also reports
+an imported file. This is implemented but not yet accepted: after the shared
+Cargo lock cleared, the root release-image build failed warning denial because
+the `accounts.rs` legacy fallback was compiled as dead code. Direct kernel
+feature compilation recognizes `system-apps`; diagnose the root artifact
+feature forwarding before changing account cfgs or weakening warnings. Do not
+claim the 1/2/4 CPU production gate. The global formatting check also reports
 pre-existing repository-wide diffs. Physical USB and TPM qualification remain
 open.
 

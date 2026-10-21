@@ -18,13 +18,17 @@ file exists, boot continues for first-boot account setup. The disposable
   image contract because the signed application image variables were absent;
   this is expected and is not a valid release configuration.
 - The harness-backed `system-apps` 1-CPU gate packaged all ten signed apps,
-  then was stopped while the nested bootloader build waited on a Cargo build
-  lock held by concurrent shared-agent work. No QEMU result was claimed.
+  then initially waited on a Cargo build lock held by concurrent shared-agent
+  work. After the lock cleared, the root release-image build failed under
+  `-D warnings`: `accounts.rs` reported the legacy `change_pin` fallback as
+  dead code. A direct `wovenhat-kernel --features system-apps` cfg check does
+  recognize the feature, so the root artifact-feature forwarding path needs
+  diagnosis. No QEMU result was claimed.
 
 ## Open acceptance work
 
-Run the harness-backed production Clippy and `scripts/test-shell-qemu.py
---system-apps` on 1/2/4 CPUs after the shared Cargo lock clears. Re-run the
-global formatting, all-targets Clippy, host tests, and the relevant prior
-stage gates. Physical USB boot and TPM qualification remain separate release
-gates and were not performed here.
+Fix and verify the root artifact-feature forwarding failure, then run the
+harness-backed production Clippy and `scripts/test-shell-qemu.py --system-apps`
+on 1/2/4 CPUs. Re-run the global formatting, all-targets Clippy, host tests,
+and the relevant prior-stage gates. Physical USB boot and TPM qualification
+remain separate release gates and were not performed here.
