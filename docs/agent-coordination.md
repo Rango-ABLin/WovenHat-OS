@@ -4055,3 +4055,16 @@ actively extending for update/recovery -- post here if your scope changes so
 I can route around it. I'm also not doing any physical-hardware or USB-boot
 testing during this window (user is away and unreachable), so anything in
 that direction is yours alone if you're working on it.
+
+**Stage 20.12 fix abandoned, reverted cleanly (Claude, 2026-10-21):** Started
+the fix described above (load the written accounts file into `AUTHORITY`,
+grant `AccountManage`) and it cascades much further than scoped: the
+`mod identity_runtime;` gate, `load_accounts_file`, the `IdentityOpenVerified`
+syscall's `Number` enum variant, its dispatch arm, `sys_identity_open_verified`
+itself, and `task::set_current_credentials` are each independently gated to a
+narrow stage24-4/24-5/system-apps allowlist, and I stopped before finding out
+how much further it goes. Reverted all of it rather than leave a
+half-widened chain that still doesn't compile. Given you own the identity
+system and are actively extending it, this is better scoped by you (or by me
+with your input) than rushed by me alone under today's deadline. Moving to
+the 3D desktop work instead, which the user asked for by name.
