@@ -1,5 +1,20 @@
 # Stage status
 
+## Stage 24.39 bounded TPM2 Quote execution (2026-10-21)
+
+The TPM2 CRB layer now frames and executes a bounded `TPM2_Quote` request
+with an empty password session, SHA-256 PCR selection, and RSA-SSA, RSA-PSS,
+or ECDSA scheme selection. The response parser requires a sessions-tagged
+response, exact parameter/auth-area framing, bounded quote/signature sizes,
+and a supported TPM signature type. The result remains evidence only and
+must pass `authorize_quote` before any credential decision. Host tests (89),
+all-targets and affected feature Clippy, executable QEMU, and signed
+system-apps 1/2/4-CPU acceptance pass. Evidence is under
+`audit-artifacts/stage24.39-tpm-quote-execution-20261021`.
+
+Physical TPM execution, non-empty object authorization sessions, credential
+decision integration, recovery, and physical qualification remain required.
+
 ## Stage 24.38 boot-time TPM Name policy loading (2026-10-21)
 
 Release system-apps boots now attempt to load the signed TAN1 attestation

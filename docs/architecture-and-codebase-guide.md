@@ -1,5 +1,15 @@
 # WovenHat OS Architecture & Codebase Guide
 
+### Stage 24.39 - bounded TPM2 Quote execution
+
+`tpm2::quote` builds a sessions-tagged `TPM2_Quote` for one bounded nonce,
+PCR selection, and explicit RSA/ECDSA scheme, executes it through the
+serialized CRB transport, and returns bounded quote/signature buffers. The
+wire result is evidence only; `authorize_quote` remains the required
+identity, nonce, PCR, and signature-verification boundary. The current
+transport uses an empty password session and therefore does not claim
+non-empty policy-session authorization.
+
 ### Stage 24.38 - boot-time TPM Name policy loading
 
 The system-apps boot path calls `tpm2::load_attestation_name_policy_at_boot`

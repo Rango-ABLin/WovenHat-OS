@@ -1,5 +1,16 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - Stage 24.39 (2026-10-21)
+
+Added bounded live `TPM2_Quote` command framing and CRB execution for
+SHA-256 PCR selection with RSA-SSA, RSA-PSS, or ECDSA schemes. The
+sessions-tagged response is strictly bounded and parsed into quote/signature
+buffers; it remains evidence until `authorize_quote` verifies identity and
+cryptography. Static gates, executable QEMU, and signed system-apps 1/2/4-
+CPU acceptance pass. Physical TPM execution, non-empty policy sessions,
+credential decisions, recovery, and qualification remain open. USB remains
+untouched.
+
 ## Codex - Stage 24.38 (2026-10-21)
 
 Integrated boot-time loading of the signed TPM TAN1 Name policy after the

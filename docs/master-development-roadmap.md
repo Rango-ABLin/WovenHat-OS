@@ -2,6 +2,16 @@ WovenHat OS — Stage 10.7 → Version 1.0 Master Roadmap
 Phase I — Finish the asynchronous kernel foundation
 Stage 10.7 — Asynchronous TCP
 
+Stage 24.39 - Bounded TPM2 Quote execution
+
+Implemented bounded sessions-tagged `TPM2_Quote` framing, CRB execution, and
+strict quote/signature response parsing for SHA-256 PCR selection. The
+result is evidence only and must pass the existing fail-closed authorization
+boundary. Host tests, Clippy, executable QEMU, and signed 1/2/4-CPU
+acceptance pass. Physical TPM execution, non-empty authorization sessions,
+credential decisions, recovery, qualification, and release readiness remain
+required.
+
 Stage 24.38 - Boot-time TPM Name policy loading
 
 Implemented the release system-apps boot hook that reads and revalidates the

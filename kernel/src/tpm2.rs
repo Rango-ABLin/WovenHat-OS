@@ -29,10 +29,11 @@ const CONTROL_START_COMMAND: u32 = 1;
 const CONTROL_CANCEL_COMMAND: u32 = 1;
 const TPM_INTERFACE_CRB: u32 = 1;
 const TPM_ST_NO_SESSIONS: u16 = 0x8001;
-#[allow(dead_code)]
 const TPM_ST_SESSIONS: u16 = 0x0201;
 const TPM_CC_GET_RANDOM: u32 = 0x0000_017b;
 const TPM_CC_READ_PUBLIC: u32 = 0x0000_0173;
+#[allow(dead_code)]
+const TPM_CC_QUOTE: u32 = 0x0000_0158;
 const TPM_CC_PCR_READ: u32 = 0x0000_017e;
 #[allow(dead_code)]
 const TPM_CC_NV_READ_PUBLIC: u32 = 0x0000_0169;
@@ -67,7 +68,6 @@ const TPM_SESS_POLICY: u8 = 0x01;
 const TPM_RH_NULL: u32 = 0x4000_0007;
 #[allow(dead_code)]
 const TPM_RH_OWNER: u32 = 0x4000_0001;
-#[allow(dead_code)]
 const TPM_RS_PW: u32 = 0x4000_0009;
 #[allow(dead_code)]
 const TPMA_SESSION_CONTINUE_SESSION: u8 = 1;
@@ -134,6 +134,23 @@ pub struct QuoteSignature {
     pub first: [u8; 512],
     pub second_length: u16,
     pub second: [u8; 72],
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[allow(dead_code)]
+pub enum QuoteSigningScheme {
+    RsaSsa,
+    RsaPss,
+    Ecdsa,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[allow(dead_code)]
+pub struct QuoteExecution {
+    pub quote_length: u16,
+    pub quote: [u8; 1024],
+    pub signature_length: u16,
+    pub signature: [u8; 768],
 }
 
 /// A TPM RSA quote-signing public key in the bounded wire representation used
@@ -682,6 +699,171 @@ fn encode_get_random(request: u16, output: &mut [u8; 12]) {
     output[2..6].copy_from_slice(&12_u32.to_be_bytes());
     output[6..10].copy_from_slice(&TPM_CC_GET_RANDOM.to_be_bytes());
     output[10..12].copy_from_slice(&request.to_be_bytes());
+}
+
+#[allow(dead_code)]
+fn encode_quote(
+    signing_handle: u32,
+    qualifying_data: &[u8],
+    pcr: u8,
+    scheme: QuoteSigningScheme,
+    output: &mut [u8; 82],
+) -> Result<usize, Error> {
+    if signing_handle == 0 || qualifying_data.len() > 32 || pcr >= 24 {
+        return Err(Error::InvalidDescriptor);
+    }
+    let scheme_algorithm = match scheme {
+        QuoteSigningScheme::RsaSsa => TPM_ALG_RSASSA,
+        QuoteSigningScheme::RsaPss => TPM_ALG_RSAPSS,
+        QuoteSigningScheme::Ecdsa => TPM_ALG_ECDSA,
+    };
+    output.fill(0);
+    output[..2].copy_from_slice(&TPM_ST_SESSIONS.to_be_bytes());
+    output[6..10].copy_from_slice(&TPM_CC_QUOTE.to_be_bytes());
+    output[10..14].copy_from_slice(&signing_handle.to_be_bytes());
+    // The password session is deliberately empty. The TPM object policy and
+    // its sign/encrypt attributes remain the authority; this session only
+    // frames the command and cannot create a credential root.
+    output[14..18].copy_from_slice(&9_u32.to_be_bytes());
+    output[18..22].copy_from_slice(&TPM_RS_PW.to_be_bytes());
+    output[22..24].copy_from_slice(&0_u16.to_be_bytes());
+    output[24] = 0;
+    output[25..27].copy_from_slice(&0_u16.to_be_bytes());
+    let mut offset = 27;
+    output[offset..offset + 2].copy_from_slice(&(qualifying_data.len() as u16).to_be_bytes());
+    offset += 2;
+    output[offset..offset + qualifying_data.len()].copy_from_slice(qualifying_data);
+    offset += qualifying_data.len();
+    output[offset..offset + 2].copy_from_slice(&scheme_algorithm.to_be_bytes());
+    output[offset + 2..offset + 4].copy_from_slice(&TPM_ALG_SHA256.to_be_bytes());
+    offset += 4;
+    output[offset..offset + 4].copy_from_slice(&1_u32.to_be_bytes());
+    output[offset + 4..offset + 6].copy_from_slice(&TPM_ALG_SHA256.to_be_bytes());
+    output[offset + 6] = 3;
+    output[offset + 7 + usize::from(pcr / 8)] = 1 << (pcr % 8);
+    offset += 10;
+    output[2..6].copy_from_slice(&(offset as u32).to_be_bytes());
+    Ok(offset)
+}
+
+#[allow(dead_code)]
+fn decode_quote_response(
+    response: &[u8],
+    output: &mut QuoteExecution,
+) -> Result<(), Error> {
+    if response.len() < 19
+        || u16::from_be_bytes(response[..2].try_into().unwrap()) != TPM_ST_SESSIONS
+    {
+        return Err(Error::MalformedResponse);
+    }
+    let response_size = u32::from_be_bytes(response[2..6].try_into().unwrap()) as usize;
+    let response_code = u32::from_be_bytes(response[6..10].try_into().unwrap());
+    if response_size != response.len() {
+        return Err(Error::MalformedResponse);
+    }
+    if response_code != TPM_RC_SUCCESS {
+        return Err(Error::Device(response_code));
+    }
+    let parameter_size = u32::from_be_bytes(response[10..14].try_into().unwrap()) as usize;
+    if parameter_size < 2 || 14usize.saturating_add(parameter_size) > response.len() {
+        return Err(Error::MalformedResponse);
+    }
+    let parameter_end = 14 + parameter_size;
+    let mut offset = 14;
+    let quote_length = u16::from_be_bytes(response[offset..offset + 2].try_into().unwrap()) as usize;
+    offset += 2;
+    if quote_length == 0 || quote_length > output.quote.len() || offset + quote_length > parameter_end {
+        return Err(Error::MalformedResponse);
+    }
+    output.quote[..quote_length].copy_from_slice(&response[offset..offset + quote_length]);
+    offset += quote_length;
+    let signature_start = offset;
+    if signature_start + 2 > parameter_end {
+        return Err(Error::MalformedResponse);
+    }
+    let signature_algorithm =
+        u16::from_be_bytes(response[signature_start..signature_start + 2].try_into().unwrap());
+    let signature_length = match signature_algorithm {
+        TPM_ALG_RSASSA | TPM_ALG_RSAPSS => {
+            if signature_start + 6 > parameter_end {
+                return Err(Error::MalformedResponse);
+            }
+            6 + u16::from_be_bytes(
+                response[signature_start + 4..signature_start + 6]
+                    .try_into()
+                    .unwrap(),
+            ) as usize
+        }
+        TPM_ALG_ECDSA => {
+            if signature_start + 6 > parameter_end {
+                return Err(Error::MalformedResponse);
+            }
+            let r_length = u16::from_be_bytes(
+                response[signature_start + 4..signature_start + 6]
+                    .try_into()
+                    .unwrap(),
+            ) as usize;
+            if signature_start + 6 + r_length + 2 > parameter_end {
+                return Err(Error::MalformedResponse);
+            }
+            8 + r_length
+                + u16::from_be_bytes(
+                    response[signature_start + 6 + r_length..signature_start + 8 + r_length]
+                        .try_into()
+                        .unwrap(),
+                ) as usize
+        }
+        _ => return Err(Error::UnsupportedInterface),
+    };
+    if signature_length == 0
+        || signature_length > output.signature.len()
+        || signature_start + signature_length != parameter_end
+    {
+        return Err(Error::MalformedResponse);
+    }
+    output.signature[..signature_length]
+        .copy_from_slice(&response[signature_start..parameter_end]);
+    let auth = &response[parameter_end..];
+    if auth.len() != 5 || u16::from_be_bytes(auth[..2].try_into().unwrap()) != 0 || auth[2] != 0 {
+        return Err(Error::MalformedResponse);
+    }
+    if u16::from_be_bytes(auth[3..5].try_into().unwrap()) != 0 {
+        return Err(Error::MalformedResponse);
+    }
+    output.quote_length = quote_length as u16;
+    output.signature_length = signature_length as u16;
+    Ok(())
+}
+
+/// Execute one bounded TPM2_Quote using an empty password session. The result
+/// is only wire evidence; callers must pass it through `authorize_quote`
+/// before using it for any credential decision.
+#[allow(dead_code)]
+pub fn quote(
+    info: Tpm2Info,
+    signing_handle: u32,
+    qualifying_data: &[u8],
+    pcr: u8,
+    scheme: QuoteSigningScheme,
+) -> Result<QuoteExecution, Error> {
+    let mut command = [0_u8; 82];
+    let command_size = encode_quote(
+        signing_handle,
+        qualifying_data,
+        pcr,
+        scheme,
+        &mut command,
+    )?;
+    let mut response = [0_u8; MAX_BUFFER_BYTES];
+    let response_size = execute(info, &command[..command_size], &mut response)?;
+    let mut output = QuoteExecution {
+        quote_length: 0,
+        quote: [0; 1024],
+        signature_length: 0,
+        signature: [0; 768],
+    };
+    decode_quote_response(&response[..response_size], &mut output)?;
+    Ok(output)
 }
 
 fn decode_get_random(response: &[u8], output: &mut [u8]) -> Result<usize, Error> {
@@ -1414,6 +1596,59 @@ pub fn self_test() -> bool {
     response[12..44].fill(0xa5);
     let mut output = [0_u8; 32];
     if decode_get_random(&response, &mut output) != Ok(32) || output != [0xa5; 32] {
+        return false;
+    }
+    let quote_nonce = [0x5a; 16];
+    let mut quote_command = [0_u8; 82];
+    let Ok(quote_command_size) = encode_quote(
+        0x8101_0001,
+        &quote_nonce,
+        7,
+        QuoteSigningScheme::RsaSsa,
+        &mut quote_command,
+    ) else {
+        return false;
+    };
+    if quote_command_size != 59
+        || u16::from_be_bytes(quote_command[..2].try_into().unwrap()) != TPM_ST_SESSIONS
+        || u32::from_be_bytes(quote_command[6..10].try_into().unwrap()) != TPM_CC_QUOTE
+        || u32::from_be_bytes(quote_command[10..14].try_into().unwrap()) != 0x8101_0001
+        || u32::from_be_bytes(quote_command[14..18].try_into().unwrap()) != 9
+        || u32::from_be_bytes(quote_command[18..22].try_into().unwrap()) != TPM_RS_PW
+        || u16::from_be_bytes(quote_command[27..29].try_into().unwrap()) != quote_nonce.len() as u16
+        || quote_command[29..45] != quote_nonce
+        || u16::from_be_bytes(quote_command[45..47].try_into().unwrap()) != TPM_ALG_RSASSA
+        || u16::from_be_bytes(quote_command[47..49].try_into().unwrap()) != TPM_ALG_SHA256
+        || u32::from_be_bytes(quote_command[49..53].try_into().unwrap()) != 1
+        || u16::from_be_bytes(quote_command[53..55].try_into().unwrap()) != TPM_ALG_SHA256
+        || quote_command[55] != 3
+        || quote_command[56] != 0x80
+    {
+        return false;
+    }
+    let mut quote_response = [0_u8; 378];
+    let quote_response_size = quote_response.len() as u32;
+    quote_response[..2].copy_from_slice(&TPM_ST_SESSIONS.to_be_bytes());
+    quote_response[2..6].copy_from_slice(&quote_response_size.to_be_bytes());
+    quote_response[10..14].copy_from_slice(&359_u32.to_be_bytes());
+    quote_response[14..16].copy_from_slice(&95_u16.to_be_bytes());
+    quote_response[16..111].fill(0x41);
+    quote_response[111..113].copy_from_slice(&TPM_ALG_RSASSA.to_be_bytes());
+    quote_response[113..115].copy_from_slice(&TPM_ALG_SHA256.to_be_bytes());
+    quote_response[115..117].copy_from_slice(&256_u16.to_be_bytes());
+    quote_response[117..373].fill(0x7e);
+    let mut quote_output = QuoteExecution {
+        quote_length: 0,
+        quote: [0; 1024],
+        signature_length: 0,
+        signature: [0; 768],
+    };
+    if decode_quote_response(&quote_response, &mut quote_output).is_err()
+        || quote_output.quote_length != 95
+        || quote_output.signature_length != 262
+        || quote_output.quote[..95] != [0x41; 95]
+        || quote_output.signature[..262] != quote_response[111..373]
+    {
         return false;
     }
     let mut pcr_command = [0_u8; 20];
