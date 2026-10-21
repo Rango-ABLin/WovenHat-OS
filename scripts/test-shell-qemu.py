@@ -127,6 +127,8 @@ def main():
                 raise RuntimeError('Production system-app catalog was not installed; inspect shell-regression logs')
             if args.system_apps and '[SERVICES] woven-package published as pid ' not in serial.read_text(errors='replace'):
                 raise RuntimeError('WovenPackage production service was not published; inspect shell-regression logs')
+            if args.system_apps and '[SERVICES] woven-update published as pid ' not in serial.read_text(errors='replace'):
+                raise RuntimeError('WovenUpdate production service was not published; inspect shell-regression logs')
             if args.hardware_demo and '[DEMO] sample accounts installed in volatile VFS (ada, lin)' not in serial.read_text(errors='replace'):
                 raise RuntimeError('Hardware-demo accounts were not provisioned; inspect shell-regression logs')
             time.sleep(1)

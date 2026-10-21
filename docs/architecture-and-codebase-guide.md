@@ -2026,10 +2026,11 @@ keeps update policy and capability authority in the kernel while giving the
 userspace daemon a stable IPC owner.
 
 The service-process slice has host tests and freestanding warning-denying
-Clippy evidence. It is not yet boot-supervised or end-to-end QEMU accepted;
-the catalog/supervisor wiring, client/server exchange, production slot
-backend, bootloader handoff, power-loss recovery, and physical qualification
-remain separate gates.
+Clippy evidence. `start_production_system_services` now starts and verifies
+both `woven-package` and `woven-update` before boot continues. The shell QEMU
+gate passed on 1/2/4 CPUs with both publication markers. The client/server
+transaction exchange, production slot backend, bootloader handoff,
+power-loss recovery, and physical qualification remain separate gates.
 
 `kernel/src/update_service.rs` is the first executable service boundary. It
 requires `FileRead`, `FileWrite`, and `StorageIo`, validates `/updates/`

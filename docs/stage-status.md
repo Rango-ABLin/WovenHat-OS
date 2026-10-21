@@ -8,12 +8,17 @@ forwards only validated operations to `libwoven::update_transaction`, and
 returns fixed-size responses. Malformed requests fail closed; package bytes do
 not cross IPC; an empty receive yields to the scheduler rather than spinning;
 and a failed response send terminates the daemon so supervision can restart it.
-The app's host tests and freestanding warning-denying Clippy pass.
+The app's host tests and freestanding warning-denying Clippy pass. The
+production `system-apps` boot path now verifies and starts both
+`woven-package` and `woven-update` with the bounded IPC, file, and storage
+capability set. The shell QEMU gate passed on 1/2/4 CPUs with both service
+publication markers; evidence is in
+`docs/audit-stage27-5-update-service-process-2026-10-21.md`.
 
-This is an integration slice, not full update-service acceptance. A boot-time
-service supervisor/catalog entry, an end-to-end QEMU client/server exchange,
-production-sized block-device slots, bootloader handoff, power-loss recovery,
-and physical USB qualification remain open.
+This is an integration slice, not full update-service acceptance. An
+end-to-end QEMU client/server exchange, production-sized block-device slots,
+bootloader handoff, power-loss recovery, and physical USB qualification
+remain open.
 
 ## Stage 27.5 - privileged update-service transaction boundary (2026-10-21)
 

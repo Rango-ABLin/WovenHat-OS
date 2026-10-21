@@ -6823,12 +6823,46 @@ fn start_production_system_services() -> bool {
                     "[SERVICES] woven-package published as pid {}",
                     pid.as_u64()
                 ));
-                return true;
+                break;
             }
         }
         if task::process_exited(pid) || timer::ticks().wrapping_sub(deadline) < u64::MAX / 2 {
             let _ = task::kill_process(pid.as_u64(), 9);
             serial::write_line(format_args!("[SERVICES] woven-package publication failed"));
+            return false;
+        }
+        task::yield_now();
+    }
+
+    let Some(program) = userspace::load_elf_with_argv_verified(
+        SYSTEM_APP_UPDATE,
+        &["/bin/wovenhat-update", "--service"],
+    ) else {
+        serial::write_line(format_args!("[SERVICES] woven-update load failed"));
+        return false;
+    };
+    let Ok((pid, _, _)) = task::spawn_user_system_service(
+        "woven-update",
+        program,
+        capabilities,
+    ) else {
+        serial::write_line(format_args!("[SERVICES] woven-update spawn failed"));
+        return false;
+    };
+    let deadline = timer::ticks().wrapping_add(500);
+    loop {
+        if let Ok(info) = ipc::service_info(b"woven.update") {
+            if info.owner == pid.as_u64() && info.client_rights == 1 {
+                serial::write_line(format_args!(
+                    "[SERVICES] woven-update published as pid {}",
+                    pid.as_u64()
+                ));
+                return true;
+            }
+        }
+        if task::process_exited(pid) || timer::ticks().wrapping_sub(deadline) < u64::MAX / 2 {
+            let _ = task::kill_process(pid.as_u64(), 9);
+            serial::write_line(format_args!("[SERVICES] woven-update publication failed"));
             return false;
         }
         task::yield_now();

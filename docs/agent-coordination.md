@@ -5,11 +5,14 @@
 `apps/woven-update --service` now owns the bounded WUDI IPC loop: it publishes
 `woven.update`, rejects malformed requests before privileged dispatch, forwards
 validated operations to `libwoven::update_transaction`, uses fixed buffers,
-yields on empty receives, and exits on an unreplyable client. Host tests and
-freestanding warning-denying Clippy pass. This is not full service acceptance:
-boot supervision/catalog wiring, an end-to-end QEMU exchange, production slot
+yields on empty receives, and exits on an unreplyable client. The production
+`system-apps` boot path now starts and verifies both `woven-package` and
+`woven-update`; the shell gate passed on 1/2/4 CPUs with both publication
+markers. Host tests and freestanding warning-denying Clippy pass. This is not
+full service acceptance: an end-to-end QEMU exchange, production slot
 storage, bootloader handoff, power-loss recovery, and physical USB
-qualification remain open. Commit: `28d1fd37`.
+qualification remain open. Commits: `28d1fd37` plus the boot integration
+slice recorded in the current commit.
 
 ## Codex - Stage 27.5 privileged update-service boundary (2026-10-21)
 
