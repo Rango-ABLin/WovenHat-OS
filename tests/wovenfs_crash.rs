@@ -423,6 +423,62 @@ fn interrupted_recovery_replays_committed_data_at_every_write_boundary() {
 }
 
 #[test]
+fn nested_namespace_and_file_contents_persist_across_repeated_remounts() {
+    // Exercise the real native directory tree and on-disk data, not a VFS
+    // cache. Every step is followed by a fresh mount and a full tree check.
+    let disk = formatted();
+    let payload: Vec<u8> = (0..1536u32).map(|n| (n % 239) as u8).collect();
+    {
+        let mut volume = Volume::mount(disk.clone()).expect("initial mount");
+        volume.mkdir_path("/docs", 0o755, 1).expect("create directory");
+        volume.mkdir_path("/docs/archive", 0o755, 2).expect("create nested directory");
+        let inode = volume
+            .create_path("/docs/archive/record.bin", 0o644, 3)
+            .expect("create nested file");
+        volume.write_file(inode, &payload, 4).expect("write contents");
+    }
+
+    for cycle in 0..5 {
+        let mut volume = mount_consistent(&disk, &format!("remount cycle {cycle}"));
+        let inode = volume
+            .resolve_path("/docs/archive/record.bin")
+            .expect("persistent nested path");
+        let mut output = vec![0u8; MAX_FILE_SIZE];
+        let len = volume.read_file(inode, &mut output).expect("persistent contents");
+        assert_eq!(&output[..len], &payload[..], "remount cycle {cycle}");
+    }
+
+    {
+        let mut volume = mount_consistent(&disk, "before rename");
+        volume
+            .rename_path("/docs/archive/record.bin", "/docs/archive/renamed.bin", 5)
+            .expect("rename file");
+    }
+    {
+        let mut volume = mount_consistent(&disk, "after rename");
+        assert_eq!(
+            volume.resolve_path("/docs/archive/record.bin"),
+            Err(Error::NotFound)
+        );
+        let inode = volume.resolve_path("/docs/archive/renamed.bin").expect("renamed file");
+        let mut output = vec![0u8; MAX_FILE_SIZE];
+        let len = volume.read_file(inode, &mut output).expect("renamed contents");
+        assert_eq!(&output[..len], &payload[..]);
+        volume.unlink_path("/docs/archive/renamed.bin", 6).expect("unlink");
+    }
+    {
+        let mut volume = mount_consistent(&disk, "after unlink");
+        assert_eq!(
+            volume.resolve_path("/docs/archive/renamed.bin"),
+            Err(Error::NotFound)
+        );
+        volume.rmdir_path("/docs/archive", 7).expect("remove empty directory");
+    }
+    let mut volume = mount_consistent(&disk, "final remount");
+    assert_eq!(volume.resolve_path("/docs/archive"), Err(Error::NotFound));
+}
+
+#[test]
 fn a_torn_journal_payload_is_rejected_by_the_commit_checksum() {
     // Flip a byte in a staged payload while leaving descriptor and commit
     // intact. The commit checksum must notice and recovery must discard the
