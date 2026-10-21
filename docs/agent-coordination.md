@@ -1,5 +1,16 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - production account provisioning implementation (2026-10-21)
+
+Commit `7bbcb0f8` moves bounded persistent account import into the normal
+`system-apps` boot path and keeps the hardware-demo fallback from overwriting
+an imported file. This is implemented but not yet accepted: the harness-backed
+production gate packaged all signed applications, then the nested bootloader
+build waited on a shared Cargo lock and was stopped. Do not claim the 1/2/4
+CPU production gate until it is rerun. The global formatting check also reports
+pre-existing repository-wide diffs. Physical USB and TPM qualification remain
+open.
+
 ## Codex - Stage 10.7 release-chain revalidation (2026-10-21)
 
 The full `RUN-STAGE10.7.ps1` chain passed host regressions, host Clippy,

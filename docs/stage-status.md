@@ -1,5 +1,16 @@
 # Stage status
 
+## Production account provisioning implementation (2026-10-21)
+
+Commit `7bbcb0f8` extends bounded persistent account import from the
+disposable `hardware-demo` profile to normal `system-apps` boots. The source
+review is complete, but the production 1/2/4-CPU acceptance gate is pending:
+the harness reached signed package creation and then encountered a shared
+Cargo build lock. See `docs/audit-production-account-provisioning-2026-10-21.md`.
+
+This is not a release acceptance claim. Physical USB boot and TPM execution
+remain open hardware qualifications.
+
 ## Stage 10.7 release-chain revalidation (2026-10-21)
 
 The full Windows chain passed host regressions, warning-denying host Clippy,
