@@ -248,6 +248,50 @@ pub fn read_attestation_name_policy(
     verify_signed_attestation_name_policy(&envelope[..length], trusted_key)
 }
 
+/// Load the provisioned attestation-object Name policy during a release boot.
+///
+/// The application release trust root is the only policy-signing key accepted
+/// by this boot integration. A missing record, malformed record, or failed
+/// signature is returned to the caller as an unavailable hardware-credential
+/// capability; no fallback identity is synthesized here.
+#[cfg(feature = "system-apps")]
+static BOOT_ATTESTATION_NAME_POLICY: spin::Mutex<Option<[u8; ATTESTATION_NAME_POLICY_BYTES]>> =
+    spin::Mutex::new(None);
+
+#[cfg(feature = "system-apps")]
+pub fn load_attestation_name_policy_at_boot() -> Result<[u8; 34], Error> {
+    let mut envelope = [0_u8; ATTESTATION_NAME_POLICY_BYTES];
+    let result = read_attestation_name_policy(
+        &crate::signed_app::TRUSTED_PUBLIC_KEY,
+        &mut envelope,
+    );
+    let mut loaded = BOOT_ATTESTATION_NAME_POLICY.lock();
+    match result {
+        Ok(name) => {
+            *loaded = Some(envelope);
+            Ok(name)
+        }
+        Err(error) => {
+            *loaded = None;
+            Err(error)
+        }
+    }
+}
+
+/// Copy the policy accepted by the boot loader for a later quote-authorizer.
+/// The caller receives no policy until the boot-time signature check passed.
+#[cfg(feature = "system-apps")]
+pub fn boot_attestation_name_policy(
+    envelope: &mut [u8; ATTESTATION_NAME_POLICY_BYTES],
+) -> bool {
+    let loaded = BOOT_ATTESTATION_NAME_POLICY.lock();
+    let Some(policy) = *loaded else {
+        return false;
+    };
+    envelope.copy_from_slice(&policy);
+    true
+}
+
 /// Verify an ECDSA P-256/SHA-256 quote signature against the exact
 /// `TPMS_ATTEST` bytes. TPM ECDSA components must be canonical 32-byte
 /// integers for this curve; shorter or oversized TPM2B values are rejected.

@@ -1,5 +1,16 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - Stage 24.38 (2026-10-21)
+
+Integrated boot-time loading of the signed TPM TAN1 Name policy after the
+durable filesystem mount attempt and before WovenShell startup. The release
+application trust root is used; absent, malformed, or tampered records leave
+hardware credentials disabled without blocking the desktop. Static gates,
+executable QEMU, and signed system-apps 1/2/4-CPU acceptance pass. Evidence
+is in `docs/audit-stage24-38-boot-tpm-policy-loader-2026-10-21.md`; USB remains
+untouched. Live TPM execution, credential decisions, recovery, and physical
+qualification remain open.
+
 ## Codex - Stage 24.37 (2026-10-21)
 
 Added the fail-closed `authorize_quote` integration: signed expected Name,

@@ -1734,6 +1734,38 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
             }
         }
 
+        // The signed TPM attestation Name policy is a release credential
+        // input. Load and revalidate it only after the durable WovenFS mount
+        // attempt; absence or invalid data leaves hardware credentials
+        // unavailable and must not block an otherwise usable desktop boot.
+        #[cfg(feature = "system-apps")]
+        match tpm2::load_attestation_name_policy_at_boot() {
+            Ok(name) => {
+                let mut accepted_policy = [0_u8; tpm2::ATTESTATION_NAME_POLICY_BYTES];
+                if !tpm2::boot_attestation_name_policy(&mut accepted_policy) {
+                    serial::write_line(format_args!(
+                        "[TPM] boot policy retention failed; hardware credentials disabled"
+                    ));
+                } else {
+                    serial::write_line(format_args!(
+                        "[TPM] signed attestation Name policy loaded alg={:#06x} digest_prefix={:02x}{:02x}{:02x}{:02x}",
+                        u16::from_be_bytes([name[0], name[1]]),
+                        name[2],
+                        name[3],
+                        name[4],
+                        name[5]
+                    ));
+                }
+                accepted_policy.fill(0);
+            }
+            Err(tpm2::Error::Storage) => serial::write_line(format_args!(
+                "[TPM] signed attestation Name policy unavailable; hardware credentials disabled"
+            )),
+            Err(error) => serial::write_line(format_args!(
+                "[TPM] signed attestation Name policy rejected: {error:?}; hardware credentials disabled"
+            )),
+        }
+
         // Stage 20.15: the WovenShell desktop is the session; F12 shows this
         // diagnostic console instead.
         //

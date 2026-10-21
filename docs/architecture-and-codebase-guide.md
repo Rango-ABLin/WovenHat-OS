@@ -1,5 +1,15 @@
 # WovenHat OS Architecture & Codebase Guide
 
+### Stage 24.38 - boot-time TPM Name policy loading
+
+The system-apps boot path calls `tpm2::load_attestation_name_policy_at_boot`
+after the durable WovenFS mount attempt and before WovenShell startup. The
+loader uses `signed_app::TRUSTED_PUBLIC_KEY`, requires the exact TAN1 record,
+and retains the verified bounded envelope in a kernel-owned slot for later
+quote authorization. It treats storage absence or validation failure as
+unavailable hardware credentials and does not synthesize a fallback identity
+or block the desktop.
+
 ### Stage 24.37 - fail-closed TPM quote authorization integration
 
 `authorize_quote` requires a signed TAN1 policy, a `ReadPublic` result whose

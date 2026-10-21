@@ -1,5 +1,20 @@
 # Stage status
 
+## Stage 24.38 boot-time TPM Name policy loading (2026-10-21)
+
+Release system-apps boots now attempt to load the signed TAN1 attestation
+Name policy immediately after the durable WovenFS mount attempt and before
+WovenShell starts. The loader uses the compile-time application release trust
+root and revalidates the complete bounded record. Missing storage, malformed
+records, and signature failures all leave hardware credentials disabled;
+none is converted into authority. Host tests (89), all-targets and affected
+feature Clippy, executable QEMU, and signed system-apps 1/2/4-CPU acceptance
+pass. Evidence is under
+`audit-artifacts/stage24.38-boot-tpm-policy-loader-20261021`.
+
+Live TPM quote execution, credential decision integration, recovery,
+physical TPM qualification, and release certification remain required.
+
 ## Stage 24.37 fail-closed TPM quote authorization integration (2026-10-21)
 
 The TPM2 layer now combines signed expected-Name policy verification,
