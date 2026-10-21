@@ -3888,3 +3888,9 @@ gone); `--features stage20-15-test` only hits the expected
 that the QEMU test harness normally sets, unrelated to this fix; and
 `scripts/test-hello-gui-compositor-qemu.py --stage 19.2 --cpus 1` is a full
 PASS. Treating this item as closed.
+**Codex taking Stage 26 accessibility core (2026-10-21):** Implementing the
+bounded userspace accessibility contract in a new `libwoven::accessibility`
+module: accessibility tree ownership, deterministic keyboard focus traversal,
+screen-reader announcements, captions, high contrast, reduced motion, scale,
+and magnification. This is intentionally separate from Claude's Stage 26.5
+i18n/locale work and will not add translation or shaping policy.

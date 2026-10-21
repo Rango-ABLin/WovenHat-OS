@@ -1,5 +1,18 @@
 # Stage status
 
+## Stage 26.1 - bounded accessibility core (2026-10-21)
+
+Added `libwoven::accessibility`, a fixed-capacity userspace contract for
+accessibility tree nodes, roles, labels, bounds, enabled/focusable state,
+deterministic keyboard focus navigation, and screen-reader focus
+announcements. It also provides bounded caption storage and settings for high
+contrast, reduced motion, scale, and magnification.
+
+The module has no unbounded allocation and does not depend on locale or text
+shaping policy. Its focused and full-workspace host gates pass all 100
+`libwoven` tests and warning-denying Clippy. Desktop-wide screen-reader integration, translated strings,
+RTL shaping, and physical accessibility-device qualification remain open.
+
 ## Stage 30.2 - IPC-latency micro-benchmark (2026-10-21)
 
 Added a `hello-gui --ipc-benchmark` mode that sends and receives a one-byte

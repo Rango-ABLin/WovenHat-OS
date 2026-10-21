@@ -1497,6 +1497,16 @@ Stage 26 — Accessibility
 
 Accessibility must be architectural rather than added at the end.
 
+Stage 26.1 - bounded accessibility core
+
+Accepted bounded slice: provide a fixed-capacity userspace accessibility tree
+with stable node identifiers, roles, labels, bounds, enabled/focusable state,
+deterministic keyboard focus traversal, and screen-reader focus announcements.
+Provide bounded captions plus settings APIs for high contrast, reduced motion,
+display scale, and magnification. This slice does not claim that every desktop
+surface is wired to a screen reader or that translations/RTL shaping are
+complete; those remain integration and Stage 26.5 prerequisites.
+
 Implement:
 
 screen reader APIs

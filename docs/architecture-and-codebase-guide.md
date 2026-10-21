@@ -3682,3 +3682,14 @@ rollback and writes `RAX = 0` before jumping to `wovenhat_syscall_resume`,
 which restores the frame and returns to the interrupted userspace caller.
 Arbitrary pointers and missing records fail closed. This structural gate does
 not certify real firmware S3 behavior.
+## Stage 26.1 bounded accessibility core
+
+`libwoven::accessibility` is the userspace-owned accessibility model. `Tree`
+stores at most 128 nodes, each with a bounded UTF-8 label, stable `NodeId`,
+role, bounds, parent, and focus/enabled state. Focus traversal is deterministic
+and wraps across enabled focusable nodes; `Announcement` snapshots the focused
+node for a screen reader without borrowing mutable UI state. `CaptionBuffer`
+stores at most eight bounded captions. `Settings` centralizes high contrast,
+reduced-motion duration policy, display scale, and magnification clamps.
+Locale, translations, shaping, compositor integration, and device-specific
+assistive technology remain separate prerequisites.

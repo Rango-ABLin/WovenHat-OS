@@ -22,6 +22,7 @@ pub mod process {
     #[derive(Clone, Copy, PartialEq, Eq, Debug)]
     pub struct Id(pub u64);
 }
+pub mod accessibility;
 pub mod ai_assistant;
 pub mod ai_ipc;
 pub mod ai_model;
