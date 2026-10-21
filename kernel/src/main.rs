@@ -4434,6 +4434,15 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         serial::write_line(format_args!("[S20.16] textured 3D chrome demo: PASSED"));
         qemu_test_exit_success();
     }
+    #[cfg(feature = "stage30-1-test")]
+    {
+        if !stage30_1_self_test() {
+            serial::write_line(format_args!("[S30.1] syscall benchmark: FAILED"));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!("[S30.1] syscall benchmark: PASSED"));
+        qemu_test_exit_success();
+    }
     #[cfg(feature = "stage19-2-test")]
     {
         if !stage19_2_self_test() {
@@ -7328,6 +7337,7 @@ fn stage16_1_self_test() -> bool {
     feature = "stage20-14b-test",
     feature = "stage20-15-test",
     feature = "stage20-16-test",
+    feature = "stage30-1-test",
 ))]
 const HELLO_GUI_IMAGE: &[u8] = include_bytes!(env!("WOVENHAT_HELLO_GUI_IMAGE"));
 
@@ -7392,6 +7402,7 @@ fn display_client_capabilities() -> capability::CapabilitySet {
     feature = "stage20-11-test",
     feature = "stage20-12-test",
     feature = "stage20-16-test",
+    feature = "stage30-1-test",
 ))]
 fn run_hello_gui(
     image: &[u8],
@@ -7520,6 +7531,7 @@ fn stage13_15_self_test() -> bool {
     feature = "stage20-13-test",
     feature = "stage20-14b-test",
     feature = "stage20-16-test",
+    feature = "stage30-1-test",
 ))]
 fn spawn_hello_gui(
     image: &[u8],
@@ -7565,6 +7577,7 @@ fn spawn_hello_gui(
     feature = "stage20-13-test",
     feature = "stage20-14b-test",
     feature = "stage20-16-test",
+    feature = "stage30-1-test",
 ))]
 fn wait_hello_gui(pid: task::ProcessId) -> Option<(task::ProcessId, Result<i32, task::WaitError>)> {
     let start = timer::ticks();
@@ -13296,6 +13309,56 @@ fn stage20_16_self_test() -> bool {
         "compositor retained the textured 3D quad after app exit",
         crate::compositor::pixel(65, 22) == Ok(CHROME_FILL),
     )
+}
+
+/// Acceptance for the standalone syscall-latency micro-benchmark
+/// (`hello-gui --syscall-benchmark`, Stage 30 performance engineering): an
+/// ordinary (no `DisplayIo`) userspace program times 1000 round trips of
+/// `current_pid` with its own cycle counter and exits zero. This gate only
+/// confirms the benchmark ran to completion and reported PASSED; the
+/// numbers themselves are a measurement, not a threshold this self-test
+/// enforces.
+#[cfg(feature = "stage30-1-test")]
+fn stage30_1_self_test() -> bool {
+    fn step(name: &str, ok: bool) -> bool {
+        serial::write_line(format_args!(
+            "[S30.1] {} {}",
+            name,
+            if ok { "PASS" } else { "FAIL" }
+        ));
+        ok
+    }
+
+    if elf::parse(HELLO_GUI_IMAGE).is_err() {
+        return step("elf accepted by the loader", false);
+    }
+    if !step(
+        "install into the filesystem",
+        vfs::create_read_only("/bin/hello-gui", HELLO_GUI_IMAGE).is_ok(),
+    ) {
+        return false;
+    }
+    let mut readback = alloc::vec![0u8; HELLO_GUI_IMAGE.len()];
+    if !step(
+        "filesystem round-trip",
+        vfs::read_all("/bin/hello-gui", &mut readback) == Ok(HELLO_GUI_IMAGE.len())
+            && readback[..] == HELLO_GUI_IMAGE[..],
+    ) {
+        return false;
+    }
+    // No DisplayIo: the benchmark needs no capability beyond an ordinary
+    // process's own, so this runs the plain `task::spawn_user_process` path.
+    let Some((_pid, exit_status)) =
+        run_hello_gui(&readback, &["/bin/hello-gui", "--syscall-benchmark"], false)
+    else {
+        return step("load and spawn as an ordinary process, run to completion", false);
+    };
+    let status = match exit_status {
+        Ok(code) => code as i64,
+        Err(_) => -1,
+    };
+    serial::write_line(format_args!("[S30.1] exit status {}", status));
+    step("application exits zero", exit_status == Ok(0))
 }
 
 /// Stage 18.2 acceptance: a userspace program allocates a surface, draws into

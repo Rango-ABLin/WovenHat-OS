@@ -23,6 +23,7 @@ STAGES={
     '19.13': ('stage19-13-test', '[S19.13] translucency and shadows: PASSED', 'hello-gui-alpha', 'translucency and shadows'),
     '19.14': ('stage19-14-test', '[S19.14] display scaling and frame pacing: PASSED', 'hello-gui-scaled', 'display scaling and frame pacing'),
     '20.16': ('stage20-16-test', '[S20.16] textured 3D chrome demo: PASSED', 'hello-gui-3d-chrome', 'textured 3D chrome demo'),
+    '30.1': ('stage30-1-test', '[S30.1] syscall benchmark: PASSED', 'hello-gui-syscall-benchmark', 'syscall latency benchmark'),
 }
 
 def app_build_env(app_dir):
