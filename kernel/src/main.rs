@@ -166,7 +166,7 @@ mod timer;
 mod tpm2;
 #[cfg(any(feature = "qemu-test", feature = "system-apps"))]
 mod update;
-#[cfg(any(feature = "qemu-test", feature = "system-apps"))]
+#[cfg(any(feature = "stage27-5-test", feature = "system-apps"))]
 mod update_service;
 #[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
 mod usb_msc;
