@@ -432,7 +432,7 @@ pub enum Number {
     #[cfg(any(feature = "stage24-5-test", feature = "system-apps"))]
     IdentityOpen = 219,
     /// session -> 0; owner-bound lock
-    #[cfg(any(feature = "stage24-5-test", feature = "system-apps"))]
+    #[cfg(any(feature = "stage20-12-test", feature = "stage24-5-test", feature = "system-apps"))]
     IdentityLock = 220,
     /// session, password buffer `[length][password]`, length -> 0
     #[cfg(any(feature = "stage24-5-test", feature = "system-apps"))]
@@ -443,9 +443,9 @@ pub enum Number {
     /// session -> 0; owner-bound close
     #[cfg(any(feature = "stage24-5-test", feature = "system-apps"))]
     IdentityClose = 223,
-    #[cfg(feature = "system-apps")]
+    #[cfg(any(feature = "stage20-12-test", feature = "system-apps"))]
     IdentityOpenVerified = 224,
-    #[cfg(feature = "system-apps")]
+    #[cfg(any(feature = "stage20-12-test", feature = "system-apps"))]
     IdentityUnlockVerified = 225,
     #[cfg(feature = "system-apps")]
     IdentityAdminAddUser = 226,
@@ -2983,7 +2983,7 @@ pub extern "C" fn wovenhat_syscall_dispatch(
         value if value == Number::AccountsChangePin as u64 => sys_accounts_change_pin(arg0, arg1),
         #[cfg(any(feature = "stage24-5-test", feature = "system-apps"))]
         value if value == Number::IdentityOpen as u64 => sys_identity_open(arg0, arg1),
-        #[cfg(any(feature = "stage24-5-test", feature = "system-apps"))]
+        #[cfg(any(feature = "stage20-12-test", feature = "stage24-5-test", feature = "system-apps"))]
         value if value == Number::IdentityLock as u64 => sys_identity_lock(arg0),
         #[cfg(any(feature = "stage24-5-test", feature = "system-apps"))]
         value if value == Number::IdentityUnlock as u64 => {
@@ -2995,11 +2995,11 @@ pub extern "C" fn wovenhat_syscall_dispatch(
         }
         #[cfg(any(feature = "stage24-5-test", feature = "system-apps"))]
         value if value == Number::IdentityClose as u64 => sys_identity_close(arg0),
-        #[cfg(feature = "system-apps")]
+        #[cfg(any(feature = "stage20-12-test", feature = "system-apps"))]
         value if value == Number::IdentityOpenVerified as u64 => {
             sys_identity_open_verified(arg0, arg1)
         }
-        #[cfg(feature = "system-apps")]
+        #[cfg(any(feature = "stage20-12-test", feature = "system-apps"))]
         value if value == Number::IdentityUnlockVerified as u64 => {
             sys_identity_unlock_verified(arg0, arg1, arg2)
         }
@@ -3579,7 +3579,7 @@ fn sys_identity_open(user_buffer: u64, length: u64) -> u64 {
     result.map(|session| session.0).unwrap_or(SYSCALL_ERROR)
 }
 
-#[cfg(any(feature = "stage24-5-test", feature = "system-apps"))]
+#[cfg(any(feature = "stage20-12-test", feature = "stage24-5-test", feature = "system-apps"))]
 fn sys_identity_lock(session: u64) -> u64 {
     let result = crate::identity_runtime::lock(
         crate::task::current_process_id(),
@@ -3674,7 +3674,7 @@ fn sys_identity_request_hardware(session: u64) -> u64 {
     result.map_or(SYSCALL_ERROR, |_| 0)
 }
 
-#[cfg(feature = "system-apps")]
+#[cfg(any(feature = "stage20-12-test", feature = "system-apps"))]
 fn sys_identity_open_verified(user_buffer: u64, length: u64) -> u64 {
     const MAX_BUFFER: usize = 1 + crate::accounts::MAX_NAME + 32;
     if !crate::task::current_has(crate::capability::Capability::AccountManage) {
@@ -3710,7 +3710,7 @@ fn sys_identity_open_verified(user_buffer: u64, length: u64) -> u64 {
     result.map(|session| session.0).unwrap_or(SYSCALL_ERROR)
 }
 
-#[cfg(feature = "system-apps")]
+#[cfg(any(feature = "stage20-12-test", feature = "system-apps"))]
 fn sys_identity_unlock_verified(session: u64, user_buffer: u64, length: u64) -> u64 {
     if !crate::task::current_has(crate::capability::Capability::AccountManage) || length != 32 {
         return SYSCALL_ERROR;

@@ -78,6 +78,7 @@ mod heap;
 #[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
 mod hid;
 #[cfg(any(
+    feature = "stage20-12-test",
     feature = "stage24-4-test",
     feature = "stage24-5-test",
     feature = "system-apps"
@@ -8826,11 +8827,18 @@ fn stage20_12_self_test() -> bool {
     if !step("accounts file written (salted hashes, no PINs)", written) {
         return false;
     }
+    if !step(
+        "accounts loaded into the kernel identity authority",
+        identity_runtime::load_accounts_file("/etc/wovenhat/accounts").is_ok(),
+    ) {
+        return false;
+    }
     let capabilities = capability::CapabilitySet::only(capability::Capability::Console)
         .with(capability::Capability::DisplayIo)
         .with(capability::Capability::InputIo)
         .with(capability::Capability::Ipc)
-        .with(capability::Capability::FileRead);
+        .with(capability::Capability::FileRead)
+        .with(capability::Capability::AccountManage);
     let Some(program) = userspace::load_elf_with_argv(
         WOVEN_SHELL_IMAGE,
         &["/bin/woven-shell", "--accounts", "/etc/wovenhat/accounts"],

@@ -56,7 +56,7 @@ pub(crate) fn install(authority: Authority) {
     LOCKOUT_SATURATED.store(false, Ordering::Release);
 }
 
-#[cfg(feature = "system-apps")]
+#[cfg(any(feature = "stage20-12-test", feature = "system-apps"))]
 pub(crate) fn load_accounts_file(path: &str) -> Result<(), Error> {
     let stat = crate::vfs::stat(path).map_err(|_| Error::Storage)?;
     if stat.size == 0 || stat.size > 16 * 1024 {

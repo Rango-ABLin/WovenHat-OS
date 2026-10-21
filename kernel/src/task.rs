@@ -2904,6 +2904,7 @@ pub fn process_credentials(id: ProcessId) -> Option<Credentials> {
 /// visible so no userspace path can manufacture credentials; callers must not
 /// invoke it without first validating an identity session and audit decision.
 #[cfg(any(
+    feature = "stage20-12-test",
     feature = "stage24-4-test",
     feature = "stage24-5-test",
     feature = "system-apps"
