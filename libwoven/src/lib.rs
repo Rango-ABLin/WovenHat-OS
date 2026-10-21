@@ -10119,6 +10119,25 @@ pub mod graphics {
         }
     }
 
+    /// A projected 3D vertex that samples a source surface instead of
+    /// carrying its own colour: `u`/`v` are normalized 0-255 across the
+    /// source's width/height, the same precision as a [`Color`] channel.
+    /// See [`Renderer::textured_triangle_3d`].
+    #[derive(Clone, Copy, PartialEq, Eq, Debug)]
+    pub struct Vertex3Tex {
+        pub x: i32,
+        pub y: i32,
+        pub depth: u16,
+        pub u: u8,
+        pub v: u8,
+    }
+
+    impl Vertex3Tex {
+        pub const fn new(x: i32, y: i32, depth: u16, u: u8, v: u8) -> Self {
+            Self { x, y, depth, u, v }
+        }
+    }
+
     /// Caller-owned depth storage paired with a Canvas. Keeping it outside
     /// Renderer makes lifetime and memory ownership explicit for future GPU
     /// targets, while retaining a bounded software fallback today.
@@ -10593,6 +10612,114 @@ pub mod graphics {
                             area.abs(),
                         );
                         self.canvas.set(x, y, Color::rgb(red, green, blue).packed());
+                    }
+                }
+            }
+        }
+
+        /// As [`Self::triangle_3d`], but each covered pixel samples `source`
+        /// (nearest-neighbour, by the affine-interpolated `u`/`v`) instead of
+        /// interpolating a flat per-vertex colour. This is how an existing
+        /// 2D surface -- a window's own rendered `Canvas`, unchanged -- becomes
+        /// one textured face of a 3D scene: the desktop projects windows as
+        /// textured planes, it does not re-render their contents in 3D.
+        pub fn textured_triangle_3d(
+            &mut self,
+            depth: &mut DepthBuffer<'_>,
+            first: Vertex3Tex,
+            second: Vertex3Tex,
+            third: Vertex3Tex,
+            source: &crate::Canvas<'_>,
+        ) {
+            let area = edge(first.x, first.y, second.x, second.y, third.x, third.y);
+            if area == 0 || source.width() == 0 || source.height() == 0 {
+                return;
+            }
+            let canvas_right = self.canvas.x.saturating_add(
+                i32::try_from(self.canvas.width.saturating_sub(1)).unwrap_or(i32::MAX),
+            );
+            let canvas_bottom = self.canvas.y.saturating_add(
+                i32::try_from(self.canvas.height.saturating_sub(1)).unwrap_or(i32::MAX),
+            );
+            let depth_right = depth
+                .x
+                .saturating_add(i32::try_from(depth.width.saturating_sub(1)).unwrap_or(i32::MAX));
+            let depth_bottom = depth
+                .y
+                .saturating_add(i32::try_from(depth.height.saturating_sub(1)).unwrap_or(i32::MAX));
+            let min_x = first
+                .x
+                .min(second.x)
+                .min(third.x)
+                .max(self.canvas.x)
+                .max(depth.x);
+            let max_x = first
+                .x
+                .max(second.x)
+                .max(third.x)
+                .min(canvas_right)
+                .min(depth_right);
+            let min_y = first
+                .y
+                .min(second.y)
+                .min(third.y)
+                .max(self.canvas.y)
+                .max(depth.y);
+            let max_y = first
+                .y
+                .max(second.y)
+                .max(third.y)
+                .min(canvas_bottom)
+                .min(depth_bottom);
+            if min_x > max_x || min_y > max_y {
+                return;
+            }
+            let positive = area > 0;
+            for y in min_y..=max_y {
+                for x in min_x..=max_x {
+                    let first_edge = edge(second.x, second.y, third.x, third.y, x, y);
+                    let second_edge = edge(third.x, third.y, first.x, first.y, x, y);
+                    let third_edge = edge(first.x, first.y, second.x, second.y, x, y);
+                    let inside = if positive {
+                        first_edge >= 0 && second_edge >= 0 && third_edge >= 0
+                    } else {
+                        first_edge <= 0 && second_edge <= 0 && third_edge <= 0
+                    };
+                    if !inside {
+                        continue;
+                    }
+                    let depth_value = ((i128::from(first.depth) * first_edge.abs()
+                        + i128::from(second.depth) * second_edge.abs()
+                        + i128::from(third.depth) * third_edge.abs())
+                        / area.abs())
+                    .min(i128::from(u16::MAX)) as u16;
+                    if !depth.test_and_set(x, y, depth_value) {
+                        continue;
+                    }
+                    let u = interpolate_channel(
+                        first.u,
+                        second.u,
+                        third.u,
+                        first_edge.abs(),
+                        second_edge.abs(),
+                        third_edge.abs(),
+                        area.abs(),
+                    );
+                    let v = interpolate_channel(
+                        first.v,
+                        second.v,
+                        third.v,
+                        first_edge.abs(),
+                        second_edge.abs(),
+                        third_edge.abs(),
+                        area.abs(),
+                    );
+                    let sample_x = source.x()
+                        + (usize::from(u) * (source.width() - 1) / 255) as i32;
+                    let sample_y = source.y()
+                        + (usize::from(v) * (source.height() - 1) / 255) as i32;
+                    if let Some(sampled) = source.get(sample_x, sample_y) {
+                        self.canvas.set(x, y, sampled);
                     }
                 }
             }
@@ -13787,6 +13914,97 @@ mod tests {
         }
         assert_eq!(pixels[0], Color::WHITE.packed());
         assert_eq!(pixels[15], 0);
+    }
+
+    #[test]
+    fn wovengraphics_textured_3d_samples_source_surface() {
+        use crate::graphics::{DepthBuffer, Renderer, Vertex3Tex};
+
+        // A 2x2 source: top-left red, the rest black, so sampling u=v=0
+        // (top-left) must read differently from sampling the far corner.
+        let mut source_pixels = [0x0000_0000u32, 0x0000_0000, 0x0000_0000, 0x0000_0000];
+        source_pixels[0] = 0x00ff_0000;
+        let source = Canvas::new(&mut source_pixels, 0, 0, 2, 2).unwrap();
+
+        let mut pixels = [0u32; 16];
+        let mut depths = [u16::MAX; 16];
+        {
+            let mut canvas = Canvas::new(&mut pixels, 0, 0, 4, 4).unwrap();
+            let mut depth = DepthBuffer::new(&mut depths, 0, 0, 4, 4).unwrap();
+            Renderer::new(&mut canvas).textured_triangle_3d(
+                &mut depth,
+                Vertex3Tex::new(0, 0, 1, 0, 0),
+                Vertex3Tex::new(3, 0, 1, 255, 0),
+                Vertex3Tex::new(0, 3, 1, 0, 255),
+                &source,
+            );
+        }
+        // The triangle's own top-left corner samples the source's top-left
+        // (u=v=0): the red pixel.
+        assert_eq!(pixels[0], 0x00ff_0000);
+        // Its second vertex (u=255, v=0) samples the source's top-right
+        // instead: black, not red, so u/v genuinely vary across the
+        // triangle rather than a flat fill.
+        assert_eq!(pixels[3], 0);
+    }
+
+    #[test]
+    fn wovengraphics_textured_3d_depth_rejects_far_triangles() {
+        use crate::graphics::{DepthBuffer, Renderer, Vertex3Tex};
+
+        let mut near_pixels = [0x00ff_ffffu32; 4];
+        let near = Canvas::new(&mut near_pixels, 0, 0, 2, 2).unwrap();
+        let mut far_pixels = [0x0000_0000u32; 4];
+        let far = Canvas::new(&mut far_pixels, 0, 0, 2, 2).unwrap();
+
+        let mut pixels = [0u32; 16];
+        let mut depths = [u16::MAX; 16];
+        {
+            let mut canvas = Canvas::new(&mut pixels, 0, 0, 4, 4).unwrap();
+            let mut depth = DepthBuffer::new(&mut depths, 0, 0, 4, 4).unwrap();
+            let mut renderer = Renderer::new(&mut canvas);
+            renderer.textured_triangle_3d(
+                &mut depth,
+                Vertex3Tex::new(0, 0, 10, 0, 0),
+                Vertex3Tex::new(3, 0, 10, 255, 0),
+                Vertex3Tex::new(0, 3, 10, 0, 255),
+                &near,
+            );
+            // Drawn after, at every covered pixel, but farther: the depth
+            // test must keep the nearer triangle's (white) pixels.
+            renderer.textured_triangle_3d(
+                &mut depth,
+                Vertex3Tex::new(0, 0, 20, 0, 0),
+                Vertex3Tex::new(3, 0, 20, 255, 0),
+                Vertex3Tex::new(0, 3, 20, 0, 255),
+                &far,
+            );
+        }
+        assert_eq!(pixels[0], 0x00ff_ffff);
+    }
+
+    #[test]
+    fn wovengraphics_textured_3d_ignores_empty_source() {
+        use crate::graphics::{DepthBuffer, Renderer, Vertex3Tex};
+
+        let mut source_pixels: [u32; 0] = [];
+        let source = Canvas::new(&mut source_pixels, 0, 0, 0, 0).unwrap();
+        let mut pixels = [0u32; 16];
+        let mut depths = [u16::MAX; 16];
+        {
+            let mut canvas = Canvas::new(&mut pixels, 0, 0, 4, 4).unwrap();
+            let mut depth = DepthBuffer::new(&mut depths, 0, 0, 4, 4).unwrap();
+            // Must not panic (divide by a zero source dimension) and must
+            // draw nothing.
+            Renderer::new(&mut canvas).textured_triangle_3d(
+                &mut depth,
+                Vertex3Tex::new(0, 0, 1, 0, 0),
+                Vertex3Tex::new(3, 0, 1, 255, 0),
+                Vertex3Tex::new(0, 3, 1, 0, 255),
+                &source,
+            );
+        }
+        assert!(pixels.iter().all(|pixel| *pixel == 0));
     }
 
     #[test]
