@@ -1,5 +1,16 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - Stage 24.26 (2026-10-21)
+
+Added bounded owner-authorized `NV_DefineSpace` framing for the fixed
+credential-root index. It encodes the password-session authorization,
+SHA-256 policy, exact attributes, and 32-byte data size without persisting
+the owner authorization. Executable QEMU self-test, host tests, affected
+Clippy gates, and signed system-apps 1/2/4-CPU acceptance pass. Evidence is
+in `docs/audit-stage24-26-nv-define-space-2026-10-21.md`; USB remains
+untouched. No live TPM provisioning, quote verification, recovery, or
+physical qualification has occurred.
+
 ## Codex - Stage 24.25 (2026-10-21)
 
 Added policy-session `NV_Write` request framing and bounded response

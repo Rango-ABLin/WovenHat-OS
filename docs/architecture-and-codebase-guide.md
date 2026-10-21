@@ -1,5 +1,13 @@
 # WovenHat OS Architecture & Codebase Guide
 
+### Stage 24.26 - bounded TPM NV definition framing
+
+`encode_nv_define_space_policy` constructs a sessions-tagged,
+owner-authorized `NV_DefineSpace` request for the fixed credential-root
+metadata. It bounds the caller-supplied owner authorization, encodes the
+32-byte SHA-256 policy and data size, and never persists the authorization or
+performs TPM I/O. Physical provisioning remains a separate release gate.
+
 ### Stage 24.25 - policy-session NV write framing
 
 `encode_nv_write_policy` constructs a bounded sessions-tagged `NV_Write` for

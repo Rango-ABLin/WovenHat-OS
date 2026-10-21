@@ -1,5 +1,20 @@
 # Stage status
 
+## Stage 24.26 bounded TPM NV definition framing (2026-10-21)
+
+The TPM2 layer now frames an owner-authorized `NV_DefineSpace` request for
+the fixed credential-root index. It bounds the owner password-session
+authorization, encodes the SHA-256 name algorithm, 32-byte policy, exact
+attributes, and 32-byte data size, and keeps the caller authorization in the
+transient command buffer only. The executable QEMU self-test, host tests
+(89), all-targets and affected feature Clippy, and signed system-apps
+1/2/4-CPU acceptance pass. Evidence is under
+`audit-artifacts/stage24.26-nv-define-space-20261021`.
+
+This does not send the command to a TPM, create an index, persist owner
+authorization, write a root, validate a quote, or provide recovery. Physical
+TPM provisioning and release qualification remain required.
+
 ## Stage 24.25 policy-session NV write framing (2026-10-21)
 
 The TPM2 layer now frames a session-authorized `NV_Write` for the fixed

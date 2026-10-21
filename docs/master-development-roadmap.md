@@ -2,6 +2,13 @@ WovenHat OS — Stage 10.7 → Version 1.0 Master Roadmap
 Phase I — Finish the asynchronous kernel foundation
 Stage 10.7 — Asynchronous TCP
 
+Stage 24.26 - Bounded TPM NV definition framing
+
+Implemented bounded owner-authorized `NV_DefineSpace` framing for the fixed
+credential-root metadata. The executable QEMU self-test, host tests, Clippy,
+and signed 1/2/4-CPU acceptance pass. Live provisioning, quote verification,
+recovery, and physical TPM qualification remain required.
+
 Stage 24.25 - Policy-session NV write framing
 
 Implemented bounded sessions-tagged `NV_Write` framing and response

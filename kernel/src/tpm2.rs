@@ -38,6 +38,8 @@ const TPM_CC_START_AUTH_SESSION: u32 = 0x0000_0176;
 const TPM_CC_POLICY_PCR: u32 = 0x0000_017f;
 #[allow(dead_code)]
 const TPM_CC_NV_WRITE: u32 = 0x0000_0137;
+#[allow(dead_code)]
+const TPM_CC_NV_DEFINE_SPACE: u32 = 0x0000_012a;
 const TPM_ALG_SHA256: u16 = 0x000b;
 #[allow(dead_code)]
 const TPM_ALG_NULL: u16 = 0x0010;
@@ -45,6 +47,10 @@ const TPM_ALG_NULL: u16 = 0x0010;
 const TPM_SESS_POLICY: u8 = 0x01;
 #[allow(dead_code)]
 const TPM_RH_NULL: u32 = 0x4000_0007;
+#[allow(dead_code)]
+const TPM_RH_OWNER: u32 = 0x4000_0001;
+#[allow(dead_code)]
+const TPM_RS_PW: u32 = 0x4000_0009;
 #[allow(dead_code)]
 const TPMA_SESSION_CONTINUE_SESSION: u8 = 1;
 const TPM_RC_SUCCESS: u32 = 0;
@@ -350,6 +356,44 @@ fn encode_nv_write_policy(
     let attributes = auth + 6 + nonce_caller.len();
     output[attributes] = TPMA_SESSION_CONTINUE_SESSION;
     output[attributes + 1..attributes + 3].copy_from_slice(&0_u16.to_be_bytes());
+    Ok(command_size)
+}
+
+#[allow(dead_code)]
+fn encode_nv_define_space_policy(
+    owner_auth: &[u8],
+    nv_index: u32,
+    attributes: u32,
+    policy: &[u8; 32],
+    output: &mut [u8; 128],
+) -> Result<usize, Error> {
+    if owner_auth.is_empty() || owner_auth.len() > 32 {
+        return Err(Error::InvalidDescriptor);
+    }
+    let authorization_size = 9usize.saturating_add(owner_auth.len());
+    let parameters = 22usize.saturating_add(authorization_size);
+    let command_size = parameters.saturating_add(2 + 48);
+    output.fill(0);
+    output[..2].copy_from_slice(&TPM_ST_SESSIONS.to_be_bytes());
+    output[2..6].copy_from_slice(&(command_size as u32).to_be_bytes());
+    output[6..10].copy_from_slice(&TPM_CC_NV_DEFINE_SPACE.to_be_bytes());
+    output[10..14].copy_from_slice(&TPM_RH_OWNER.to_be_bytes());
+    output[14..18].copy_from_slice(&nv_index.to_be_bytes());
+    output[18..22].copy_from_slice(&(authorization_size as u32).to_be_bytes());
+    output[22..26].copy_from_slice(&TPM_RS_PW.to_be_bytes());
+    output[26..28].copy_from_slice(&0_u16.to_be_bytes());
+    output[28] = 0;
+    output[29..31].copy_from_slice(&(owner_auth.len() as u16).to_be_bytes());
+    output[31..31 + owner_auth.len()].copy_from_slice(owner_auth);
+    let public = parameters;
+    output[public..public + 2].copy_from_slice(&0_u16.to_be_bytes());
+    output[public + 2..public + 4].copy_from_slice(&46_u16.to_be_bytes());
+    output[public + 4..public + 8].copy_from_slice(&nv_index.to_be_bytes());
+    output[public + 8..public + 10].copy_from_slice(&TPM_ALG_SHA256.to_be_bytes());
+    output[public + 10..public + 14].copy_from_slice(&attributes.to_be_bytes());
+    output[public + 14..public + 16].copy_from_slice(&32_u16.to_be_bytes());
+    output[public + 16..public + 48].copy_from_slice(policy);
+    output[public + 48..public + 50].copy_from_slice(&32_u16.to_be_bytes());
     Ok(command_size)
 }
 
@@ -801,6 +845,44 @@ pub fn self_test() -> bool {
                 return false;
             }
             nv_response[2..6].copy_from_slice(&18_u32.to_be_bytes());
-            decode_nv_write_policy_response(&nv_response) == Err(Error::MalformedResponse)
+            if decode_nv_write_policy_response(&nv_response) != Err(Error::MalformedResponse) {
+                return false;
+            }
+            let owner_auth = [0x99; 16];
+            let root_policy = [0x5a; 32];
+            let mut nv_define = [0_u8; 128];
+            let Ok(nv_define_size) = encode_nv_define_space_policy(
+                &owner_auth,
+                0x0150_0000,
+                0x0200_4008,
+                &root_policy,
+                &mut nv_define,
+            ) else {
+                return false;
+            };
+            if nv_define_size != 97
+                || u16::from_be_bytes(nv_define[..2].try_into().unwrap()) != TPM_ST_SESSIONS
+                || u32::from_be_bytes(nv_define[6..10].try_into().unwrap())
+                    != TPM_CC_NV_DEFINE_SPACE
+                || u32::from_be_bytes(nv_define[10..14].try_into().unwrap()) != TPM_RH_OWNER
+                || u32::from_be_bytes(nv_define[14..18].try_into().unwrap()) != 0x0150_0000
+                || u32::from_be_bytes(nv_define[18..22].try_into().unwrap()) != 25
+                || u32::from_be_bytes(nv_define[22..26].try_into().unwrap()) != TPM_RS_PW
+                || u16::from_be_bytes(nv_define[26..28].try_into().unwrap()) != 0
+                || nv_define[28] != 0
+                || u16::from_be_bytes(nv_define[29..31].try_into().unwrap()) != 16
+                || nv_define[31..47] != owner_auth
+                || u16::from_be_bytes(nv_define[47..49].try_into().unwrap()) != 0
+                || u16::from_be_bytes(nv_define[49..51].try_into().unwrap()) != 46
+                || u32::from_be_bytes(nv_define[51..55].try_into().unwrap()) != 0x0150_0000
+                || u16::from_be_bytes(nv_define[55..57].try_into().unwrap()) != TPM_ALG_SHA256
+                || u32::from_be_bytes(nv_define[57..61].try_into().unwrap()) != 0x0200_4008
+                || u16::from_be_bytes(nv_define[61..63].try_into().unwrap()) != 32
+                || nv_define[63..95] != root_policy
+                || u16::from_be_bytes(nv_define[95..97].try_into().unwrap()) != 32
+            {
+                return false;
+            }
+            true
         }
 }
