@@ -34,6 +34,7 @@ pub mod package;
 pub mod package_ipc;
 pub mod semantic_search;
 pub mod store;
+pub mod update_ipc;
 
 #[cfg(test)]
 #[path = "../../kernel/src/exit_status.rs"]

@@ -2002,6 +2002,17 @@ to the deterministic fixture key. The tool does not install or activate an
 image. Long-lived service ownership, slot storage, boot handoff, power-loss
 recovery, and physical qualification remain separate prerequisites.
 
+## Stage 27.4 bounded update IPC contract (2026-10-21)
+
+`libwoven::update_ipc` defines the future service's fixed-capacity `WUDI`
+request/response boundary. `Stage` carries a positive generation and a
+candidate path confined to `/updates/`; `Activate`, `BootSucceeded`, and
+`BootFailed` carry only slot 0 or 1; `Query` carries no mutable lifecycle
+fields. The response retains the request identifier and returns bounded
+status/value fields. No image bytes cross IPC. This contract is intentionally
+separate from the still-unimplemented capability-gated syscall, service
+ownership, durable image-slot write, and bootloader handoff.
+
 ## Release validation (2026-10-14)
 
 ## Update/recovery track — bounded A/B activation state (2026-10-20)

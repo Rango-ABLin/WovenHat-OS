@@ -1,5 +1,17 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - Stage 27.4 bounded update IPC contract (2026-10-21)
+
+Added `libwoven::update_ipc`, a fixed-capacity `WUDI` request/response ABI for
+the future privileged update daemon. It validates operation-specific
+generation/slot fields and confines candidate paths to `/updates/`; image bytes
+never cross IPC. Focused libwoven tests (113 total), Clippy, formatting, and
+diff checks pass. See
+`docs/audit-stage27-4-update-ipc-contract-2026-10-21.md`. This is only a
+protocol contract; syscall/capability integration, daemon lifecycle, durable
+slot installation, boot handoff, power-loss recovery, and physical USB
+qualification remain open.
+
 ## Codex - Stage 27.3 signed update-package producer (2026-10-21)
 
 Added `tools/wupd-packager` for the kernel's bounded version-1 `WUPD` format.

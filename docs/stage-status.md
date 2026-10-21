@@ -1,5 +1,18 @@
 # Stage status
 
+## Stage 27.4 - bounded update IPC contract (2026-10-21)
+
+Added `libwoven::update_ipc`, a fixed-capacity request/response ABI for the
+future privileged update service. It validates operation-specific generation,
+slot, and `/updates/` candidate-path rules while keeping image bytes outside
+IPC. The focused library tests now pass 113 cases and warning-denying Clippy
+passes. Evidence is in
+`docs/audit-stage27-4-update-ipc-contract-2026-10-21.md`.
+
+This is not service acceptance: syscall dispatch, capability issuance, signed
+candidate staging, durable image-slot writes, bootloader handoff, and
+power-loss recovery remain unresolved.
+
 ## Stage 27.3 - signed update-package producer (2026-10-21)
 
 Added `tools/wupd-packager`, which creates the bounded version-1 `WUPD`
