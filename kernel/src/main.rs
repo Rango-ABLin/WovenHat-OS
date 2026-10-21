@@ -6981,30 +6981,25 @@ fn has_valid_account_line(data: &[u8]) -> bool {
 
 #[cfg(feature = "hardware-demo")]
 fn install_hardware_demo_accounts() -> bool {
-    // Must match libwoven::accounts::{hash_pin, PBKDF2_ITERATIONS}: the
-    // kernel cannot depend on libwoven (a userspace-only crate), so the
-    // account line format and its hash are reimplemented here, on the write
-    // side only -- WovenShell (via libwoven) does every read-side `verify`.
-    use pbkdf2::pbkdf2_hmac;
-    use sha2::Sha256;
-    const PBKDF2_ITERATIONS: u32 = 100_000;
-
-    fn account_line(name: &str, salt: &[u8], pin: &[u8]) -> alloc::string::String {
-        let mut hash = [0u8; 32];
-        pbkdf2_hmac::<Sha256>(pin, salt, PBKDF2_ITERATIONS, &mut hash);
-        let mut line = alloc::format!("{name}:");
-        for byte in salt {
-            line.push_str(&alloc::format!("{byte:02x}"));
-        }
-        line.push(':');
-        for byte in hash {
-            line.push_str(&alloc::format!("{byte:02x}"));
-        }
-        line.push('\n');
-        line
-    }
-
+    // These two lines are `name:salt-hex:hash-hex`, matching
+    // libwoven::accounts's format and PBKDF2_ITERATIONS exactly (ada:1234
+    // and lin:9876, the same fixed demo credentials this function has
+    // always installed) -- but the hash is precomputed, not recomputed by
+    // calling pbkdf2_hmac at every single boot. Boot profiling (Stage 30)
+    // measured that recomputation (2 accounts x 100,000 iterations,
+    // force-soft SHA-256 -- this kernel never uses a hardware SHA
+    // extension) at 4241 of this demo image's ~4350-tick total boot under
+    // QEMU TCG: effectively the entire boot. These credentials are public
+    // (a disposable demo account, not a secret), so precomputing them once
+    // loses nothing: the PBKDF2 work factor still protects them exactly as
+    // before, it is simply not redone on every boot of every test run.
     const ACCOUNTS_PATH: &str = "/etc/wovenhat/accounts";
+    const ACCOUNTS: &str = concat!(
+        "ada:1122334455667788:",
+        "286eb6cda9bcda66eb2499be4bb94c44c19f4cc505d42cb7a70b7270c5da632b\n",
+        "lin:a0b1c2d3e4f50617:",
+        "cfefdcdc20fd0469dcf4c7203ee635341fe3cdc1e7102fdb51df263ad56d7f8f\n",
+    );
     match vfs::stat(ACCOUNTS_PATH) {
         Ok(_) => {
             serial::write_line(format_args!(
@@ -7022,13 +7017,7 @@ fn install_hardware_demo_accounts() -> bool {
             Err(_) => return false,
         }
     }
-    let mut accounts = account_line("ada", b"\x11\x22\x33\x44\x55\x66\x77\x88", b"1234");
-    accounts.push_str(&account_line(
-        "lin",
-        b"\xa0\xb1\xc2\xd3\xe4\xf5\x06\x17",
-        b"9876",
-    ));
-    if vfs::create_read_only(ACCOUNTS_PATH, accounts.as_bytes()).is_err() {
+    if vfs::create_read_only(ACCOUNTS_PATH, ACCOUNTS.as_bytes()).is_err() {
         return false;
     }
     serial::write_line(format_args!(
