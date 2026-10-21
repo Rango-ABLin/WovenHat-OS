@@ -1,5 +1,19 @@
 # Stage status
 
+## Stage 24.45 durable TPM context custody boundary (2026-10-21)
+
+Opaque TPM policy-session contexts now have a versioned dual-copy WovenFS
+custody record with fixed bounds, SHA-256 integrity, sequence arbitration,
+and strict session/context metadata validation. A filesystem record is only a
+retryable custody candidate; TPM `ContextLoad` remains the final authority.
+Host tests (89), all-targets and affected feature Clippy, executable QEMU,
+and signed system-apps 1/2/4-CPU acceptance pass. Evidence is under
+`audit-artifacts/stage24.45-tpm-context-custody-20261021`.
+
+Boot-time custody integration, secure storage authorization, session nonce
+refresh, provisioned-key lifecycle, credential decisions, recovery, and
+physical qualification remain required.
+
 ## Stage 24.44 TPM policy-session context save/load (2026-10-21)
 
 The TPM2 layer now frames, executes, and strictly decodes `ContextSave` and

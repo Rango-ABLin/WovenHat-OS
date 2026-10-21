@@ -1,5 +1,13 @@
 # WovenHat OS Architecture & Codebase Guide
 
+### Stage 24.45 - durable TPM context custody
+
+The bounded `TPS1` record stores only TPM-produced context bytes plus
+validated session metadata, in two journal-backed WovenFS paths with a
+monotonic commit sequence and SHA-256 integrity digest. Recovery selects one
+newest valid copy; ties and invalid copies fail closed. The record is not
+authority: `TPM2_ContextLoad` must still accept it.
+
 ### Stage 24.44 - TPM policy-session context save/load
 
 `save_policy_session` validates a bounded `TPMS_CONTEXT`, invalidates the

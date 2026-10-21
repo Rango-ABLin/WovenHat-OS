@@ -99,6 +99,29 @@ const ATTESTATION_NAME_POLICY_MAGIC: [u8; 4] = *b"TAN1";
 const ATTESTATION_NAME_POLICY_VERSION: u16 = 1;
 const ATTESTATION_NAME_POLICY_SIGNED_BYTES: usize = 42;
 pub const ATTESTATION_NAME_POLICY_BYTES: usize = ATTESTATION_NAME_POLICY_SIGNED_BYTES + 64;
+#[allow(dead_code)]
+const POLICY_SESSION_CONTEXT_MAGIC: [u8; 4] = *b"TPS1";
+#[allow(dead_code)]
+const POLICY_SESSION_CONTEXT_VERSION: u16 = 1;
+#[allow(dead_code)]
+const POLICY_SESSION_CONTEXT_RECORD_BYTES: usize = 4
+    + 2
+    + 8
+    + 8
+    + 4
+    + 4
+    + 2
+    + MAX_CONTEXT_BLOB_BYTES
+    + 4
+    + 1
+    + 32
+    + 32;
+
+#[cfg(any(feature = "stage24-3-test", feature = "system-apps"))]
+const POLICY_SESSION_CONTEXT_PATHS: [&str; 2] = [
+    "/wfs/tpm-policy-session-context-a",
+    "/wfs/tpm-policy-session-context-b",
+];
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct NvPublic {
@@ -144,6 +167,156 @@ pub struct PolicySessionSnapshot {
     context: PolicySessionContext,
     session: PolicySession,
     consumed: bool,
+}
+
+#[allow(dead_code)]
+fn encode_policy_session_context_record(
+    commit_sequence: u64,
+    snapshot: &PolicySessionSnapshot,
+    output: &mut [u8; POLICY_SESSION_CONTEXT_RECORD_BYTES],
+) -> Result<(), Error> {
+    if commit_sequence == 0
+        || snapshot.context.saved_handle == 0
+        || snapshot.context.blob_length == 0
+        || usize::from(snapshot.context.blob_length) > MAX_CONTEXT_BLOB_BYTES
+        || snapshot.session.handle == 0
+        || usize::from(snapshot.session.nonce_tpm_length) > snapshot.session.nonce_tpm.len()
+    {
+        return Err(Error::InvalidPolicy);
+    }
+    output.fill(0);
+    output[..4].copy_from_slice(&POLICY_SESSION_CONTEXT_MAGIC);
+    output[4..6].copy_from_slice(&POLICY_SESSION_CONTEXT_VERSION.to_be_bytes());
+    output[6..14].copy_from_slice(&commit_sequence.to_be_bytes());
+    output[14..22].copy_from_slice(&snapshot.context.sequence.to_be_bytes());
+    output[22..26].copy_from_slice(&snapshot.context.saved_handle.to_be_bytes());
+    output[26..30].copy_from_slice(&snapshot.context.hierarchy.to_be_bytes());
+    output[30..32].copy_from_slice(&snapshot.context.blob_length.to_be_bytes());
+    output[32..32 + MAX_CONTEXT_BLOB_BYTES].copy_from_slice(&snapshot.context.blob);
+    let session_offset = 32 + MAX_CONTEXT_BLOB_BYTES;
+    output[session_offset..session_offset + 4].copy_from_slice(&snapshot.session.handle.to_be_bytes());
+    output[session_offset + 4] = snapshot.session.nonce_tpm_length;
+    output[session_offset + 5..session_offset + 37].copy_from_slice(&snapshot.session.nonce_tpm);
+    let checksum: [u8; 32] = Sha256::digest(&output[..POLICY_SESSION_CONTEXT_RECORD_BYTES - 32]).into();
+    output[POLICY_SESSION_CONTEXT_RECORD_BYTES - 32..].copy_from_slice(&checksum);
+    Ok(())
+}
+
+#[allow(dead_code)]
+fn decode_policy_session_context_record(
+    input: &[u8; POLICY_SESSION_CONTEXT_RECORD_BYTES],
+) -> Result<(u64, PolicySessionSnapshot), Error> {
+    if input[..4] != POLICY_SESSION_CONTEXT_MAGIC
+        || u16::from_be_bytes(input[4..6].try_into().unwrap())
+            != POLICY_SESSION_CONTEXT_VERSION
+    {
+        return Err(Error::MalformedResponse);
+    }
+    let expected: [u8; 32] = Sha256::digest(&input[..POLICY_SESSION_CONTEXT_RECORD_BYTES - 32]).into();
+    if input[POLICY_SESSION_CONTEXT_RECORD_BYTES - 32..] != expected {
+        return Err(Error::CredentialMismatch);
+    }
+    let commit_sequence = u64::from_be_bytes(input[6..14].try_into().unwrap());
+    let blob_length = u16::from_be_bytes(input[30..32].try_into().unwrap()) as usize;
+    let session_offset = 32 + MAX_CONTEXT_BLOB_BYTES;
+    let nonce_length = usize::from(input[session_offset + 4]);
+    if commit_sequence == 0
+        || blob_length == 0
+        || blob_length > MAX_CONTEXT_BLOB_BYTES
+        || u32::from_be_bytes(input[22..26].try_into().unwrap()) == 0
+        || u32::from_be_bytes(input[session_offset..session_offset + 4].try_into().unwrap()) == 0
+        || nonce_length > 32
+    {
+        return Err(Error::MalformedResponse);
+    }
+    let mut blob = [0_u8; MAX_CONTEXT_BLOB_BYTES];
+    blob.copy_from_slice(&input[32..session_offset]);
+    let mut nonce_tpm = [0_u8; 32];
+    nonce_tpm.copy_from_slice(&input[session_offset + 5..session_offset + 37]);
+    Ok((
+        commit_sequence,
+        PolicySessionSnapshot {
+            context: PolicySessionContext {
+                sequence: u64::from_be_bytes(input[14..22].try_into().unwrap()),
+                saved_handle: u32::from_be_bytes(input[22..26].try_into().unwrap()),
+                hierarchy: u32::from_be_bytes(input[26..30].try_into().unwrap()),
+                blob_length: blob_length as u16,
+                blob,
+            },
+            session: PolicySession {
+                handle: u32::from_be_bytes(input[session_offset..session_offset + 4].try_into().unwrap()),
+                nonce_tpm_length: nonce_length as u8,
+                nonce_tpm,
+            },
+            consumed: false,
+        },
+    ))
+}
+
+#[cfg(any(feature = "stage24-3-test", feature = "system-apps"))]
+fn read_policy_session_context_copy(
+    index: usize,
+    output: &mut [u8; POLICY_SESSION_CONTEXT_RECORD_BYTES],
+) -> Result<(u64, PolicySessionSnapshot), Error> {
+    let length = crate::wfs::read_vfs_path_durable(POLICY_SESSION_CONTEXT_PATHS[index], output)
+        .map_err(|_| Error::Storage)?;
+    if length != POLICY_SESSION_CONTEXT_RECORD_BYTES {
+        return Err(Error::MalformedResponse);
+    }
+    decode_policy_session_context_record(output)
+}
+
+/// Persist an opaque TPM-protected policy-session context using two
+/// journal-backed copies. The filesystem record is only custody metadata;
+/// `TPM2_ContextLoad` remains the final integrity/authority check.
+#[cfg(any(feature = "stage24-3-test", feature = "system-apps"))]
+#[allow(dead_code)]
+pub fn persist_policy_session_snapshot(
+    authority: &crate::wfs::AuthorizedWfsWriter,
+    snapshot: &PolicySessionSnapshot,
+    now: u64,
+) -> Result<u64, Error> {
+    if snapshot.consumed {
+        return Err(Error::InvalidPolicy);
+    }
+    let mut first = [0_u8; POLICY_SESSION_CONTEXT_RECORD_BYTES];
+    let mut second = [0_u8; POLICY_SESSION_CONTEXT_RECORD_BYTES];
+    let left = read_policy_session_context_copy(0, &mut first).ok();
+    let right = read_policy_session_context_copy(1, &mut second).ok();
+    let sequence = left
+        .as_ref()
+        .map_or(0, |record| record.0)
+        .max(right.as_ref().map_or(0, |record| record.0))
+        .checked_add(1)
+        .ok_or(Error::Storage)?;
+    let mut record = [0_u8; POLICY_SESSION_CONTEXT_RECORD_BYTES];
+    encode_policy_session_context_record(sequence, snapshot, &mut record)?;
+    crate::wfs::write_vfs_path_durable(
+        authority,
+        POLICY_SESSION_CONTEXT_PATHS[(sequence as usize) & 1],
+        &record,
+        now,
+    )
+    .map_err(|_| Error::Storage)?;
+    Ok(sequence)
+}
+
+/// Recover the newest valid context custody record. Equal valid sequence
+/// numbers are rejected rather than arbitrarily selecting one copy.
+#[cfg(any(feature = "stage24-3-test", feature = "system-apps"))]
+#[allow(dead_code)]
+pub fn load_policy_session_snapshot() -> Result<PolicySessionSnapshot, Error> {
+    let mut first = [0_u8; POLICY_SESSION_CONTEXT_RECORD_BYTES];
+    let mut second = [0_u8; POLICY_SESSION_CONTEXT_RECORD_BYTES];
+    let left = read_policy_session_context_copy(0, &mut first).ok();
+    let right = read_policy_session_context_copy(1, &mut second).ok();
+    match (left, right) {
+        (Some(left), Some(right)) if left.0 > right.0 => Ok(left.1),
+        (Some(left), Some(right)) if right.0 > left.0 => Ok(right.1),
+        (Some(_), Some(_)) => Err(Error::Storage),
+        (Some(record), None) | (None, Some(record)) => Ok(record.1),
+        (None, None) => Err(Error::Storage),
+    }
 }
 
 impl PolicySessionLease {
@@ -2245,6 +2418,26 @@ pub fn self_test() -> bool {
     context_load_response[2..6].copy_from_slice(&14_u32.to_be_bytes());
     context_load_response[10..14].copy_from_slice(&0x0300_0001_u32.to_be_bytes());
     if decode_context_load(&context_load_response) != Ok(0x0300_0001) {
+        return false;
+    }
+    let snapshot = PolicySessionSnapshot {
+        context,
+        session: PolicySession {
+            handle: 0x0300_0001,
+            nonce_tpm_length: 16,
+            nonce_tpm: [0x77; 32],
+        },
+        consumed: false,
+    };
+    let mut context_record = [0_u8; POLICY_SESSION_CONTEXT_RECORD_BYTES];
+    if encode_policy_session_context_record(3, &snapshot, &mut context_record).is_err()
+        || decode_policy_session_context_record(&context_record).map(|record| record.0)
+            != Ok(3)
+    {
+        return false;
+    }
+    context_record[40] ^= 1;
+    if decode_policy_session_context_record(&context_record) != Err(Error::CredentialMismatch) {
         return false;
     }
     let synthetic_session = PolicySession {
