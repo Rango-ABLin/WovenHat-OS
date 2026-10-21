@@ -1418,6 +1418,13 @@ low page with a private identity map, dedicated stack, and transactional
 page-table ownership. This does not install the FACS vector, save CPU state,
 enter S3, or handle firmware wake.
 
+Stage 25.8 - CPU resume-context capture
+
+Accepted bounded slice: capture and validate the current CPU control state and
+descriptor tables in kernel-owned suspend preparation storage. This does not
+restore registers, coordinate secondary CPUs, install a FACS vector, enter S3,
+or claim firmware or physical suspend/resume qualification.
+
 ACPI poweroff
 reboot
 sleep

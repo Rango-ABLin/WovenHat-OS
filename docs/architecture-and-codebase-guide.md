@@ -3565,3 +3565,19 @@ rolls back drivers if staging fails. No FACS write occurs in this boundary.
 The wake entry currently reinitializes GDT/interrupt foundations and parks;
 register/CPU-state restore, secondary-CPU restart, FACS vector installation,
 and S3 entry remain required before exposing a suspend action.
+
+## Stage 25.8 CPU resume-context capture
+
+`power::CpuResumeContext` is kernel-owned preparation state containing CR0,
+CR3, CR4, EFER, RFLAGS, RSP, and the base/limit pairs for the GDT and IDT.
+`capture_cpu_resume_context` reads the architectural state with the existing
+privileged register access and minimal inline assembly for RFLAGS, SGDT, SIDT,
+and RSP. `valid` rejects non-long-mode paging, an unaligned CR3, non-canonical
+addresses, empty descriptor limits, or invalid required flags before a suspend
+token is returned.
+
+The `stage25-8-test` feature exercises the capture and validation path during
+boot on 1/2/4 CPUs. The token remains private to the power subsystem, and
+abort validates it before releasing the wake trampoline and resuming drivers.
+No register restore, FACS write, secondary-CPU handoff, S3 entry, or firmware
+wake is implemented by this stage.

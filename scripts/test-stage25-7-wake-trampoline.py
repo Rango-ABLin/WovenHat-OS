@@ -1,9 +1,9 @@
-"""Stage 25.7: stage and tear down the low-memory S3 wake trampoline.
+"""Run the bounded low-memory suspend/wake prerequisite QEMU gate.
 
-The guest never writes the FACS waking vector or enters S3. It installs the
-existing AP real-mode-to-long-mode image on the reserved wake page, validates
-the private page-table/stack patching path, releases the allocated tables, and
-then exits through the QEMU test device.
+The default Stage 25.7 path stages and tears down the wake trampoline. The
+feature and marker options also let later bounded suspend prerequisites reuse
+the same retained-evidence 1/2/4-CPU harness. No path writes the FACS waking
+vector or enters S3.
 """
 import argparse
 import os
@@ -17,6 +17,8 @@ import time
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--cpus', type=int, choices=(1, 2, 4), default=1)
+    parser.add_argument('--feature', default='stage25-7-test')
+    parser.add_argument('--marker', default='[S25.7] wake trampoline staging: PASSED')
     parser.add_argument('--qemu', default=shutil.which('qemu-system-x86_64') or r'C:\Program Files\qemu\qemu-system-x86_64.exe')
     parser.add_argument('--firmware', type=Path)
     parser.add_argument('--timeout', type=float, default=240)
@@ -26,13 +28,14 @@ def main():
     firmware = args.firmware or qemu.parent / 'share' / 'edk2-x86_64-code.fd'
     if not qemu.is_file() or not firmware.is_file():
         parser.error('QEMU and firmware files must exist')
-    out = root / 'audit-artifacts' / f'stage25.7-{args.cpus}cpu-{time.time_ns()}'
+    stage_tag = args.feature.removesuffix('-test').replace('-', '.')
+    out = root / 'audit-artifacts' / f'{stage_tag}-{args.cpus}cpu-{time.time_ns()}'
     out.mkdir(parents=True)
     env = os.environ.copy()
     env.setdefault('CARGO_BUILD_BUILD_DIR', str(root / '.cargo-build'))
     env.setdefault('CARGO_TARGET_DIR', str(root / 'target'))
     build = subprocess.run(
-        ['cargo', 'run', '--quiet', '--features', 'stage25-7-test', '--', '--print-image'],
+        ['cargo', 'run', '--quiet', '--features', args.feature, '--', '--print-image'],
         cwd=root, env=env, text=True, capture_output=True,
     )
     (out / 'build.log').write_text(build.stdout + build.stderr, encoding='utf-8')
@@ -57,10 +60,10 @@ def main():
             print(f'QEMU timeout; evidence: {out}', file=sys.stderr)
             return 1
     text = serial.read_text(errors='replace') if serial.exists() else ''
-    if code != 33 or '[S25.7] wake trampoline staging: PASSED' not in text:
-        print(f'Stage 25.7 failed (exit {code}); evidence: {out}', file=sys.stderr)
+    if code != 33 or args.marker not in text:
+        print(f'{args.feature} failed (exit {code}); evidence: {out}', file=sys.stderr)
         return 1
-    print(f'Stage 25.7 PASS ({args.cpus} CPU). Evidence: {out}')
+    print(f'{args.feature} PASS ({args.cpus} CPU). Evidence: {out}')
     return 0
 
 

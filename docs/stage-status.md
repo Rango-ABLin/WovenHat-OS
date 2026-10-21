@@ -1,5 +1,20 @@
 # Stage status
 
+## Stage 25.8 - CPU resume-context capture (2026-10-21)
+
+The suspend preparation token now captures the current CPU control state into
+kernel-owned storage: CR0, CR3, CR4, EFER, RFLAGS, RSP, and the GDT/IDT
+descriptors. The capture is validated for long-mode paging, canonical pointers,
+aligned CR3, descriptor limits, and required RFLAGS state before preparation
+can succeed. The guarded self-test passed on 1/2/4 CPUs.
+
+Evidence is in `docs/audit-stage25-8-cpu-resume-context-2026-10-21.md` and the
+retained `audit-artifacts/stage25.8-*` directories.
+
+This does not claim register restoration, secondary-CPU coordination, FACS
+vector installation, S3 entry, firmware wake, or physical suspend/resume
+qualification.
+
 ## Stage 25.7 - wake-trampoline staging (2026-10-21)
 
 The proven AP transition image can now be staged on the reserved low wake

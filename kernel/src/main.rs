@@ -58,7 +58,8 @@ mod display;
     feature = "stage13-7-test",
     feature = "stage13-8-test",
     feature = "stage13-9-test",
-    feature = "stage25-7-test"
+    feature = "stage25-7-test",
+    feature = "stage25-8-test"
 ))]
 mod driver;
 #[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
@@ -5637,6 +5638,15 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
             qemu_test_exit_failure();
         }
         serial::write_line(format_args!("[S25.7] wake trampoline staging: PASSED"));
+        qemu_test_exit_success();
+    }
+    #[cfg(feature = "stage25-8-test")]
+    {
+        if !power::resume_context_self_test() {
+            serial::write_line(format_args!("[S25.8] CPU resume context: FAILED"));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!("[S25.8] CPU resume context: PASSED"));
         qemu_test_exit_success();
     }
     serial::write_line(format_args!("[BOOT] ALL VALIDATIONS PASSED"));

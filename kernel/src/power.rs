@@ -8,6 +8,11 @@
 //! Before either, the live-test log on a WovenHat stick gets a last flush.
 
 use x86_64::instructions::port::Port;
+use x86_64::registers::{
+    control::{Cr0, Cr3, Cr4},
+    model_specific::Efer,
+};
+use x86_64::{structures::DescriptorTablePointer, VirtAddr};
 
 /// PM1 control: SCI_EN (ACPI mode), SLP_TYP (bits 10-12), SLP_EN.
 const SCI_EN: u16 = 1;
@@ -52,6 +57,77 @@ pub enum PrepareError {
 pub struct SuspendPreparation {
     plan: crate::driver::SuspendPlan,
     trampoline: crate::smp::WakeTrampoline,
+    context: CpuResumeContext,
+}
+
+/// CPU state that must remain available to the post-firmware wake path.
+/// Pointers are recorded as integers so this value can be copied into a
+/// firmware-independent wake record without creating Rust references to
+/// state that firmware may temporarily replace.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct CpuResumeContext {
+    pub cr0: u64,
+    pub cr3: u64,
+    pub cr4: u64,
+    pub efer: u64,
+    pub rflags: u64,
+    pub rsp: u64,
+    pub gdt_base: u64,
+    pub gdt_limit: u16,
+    pub idt_base: u64,
+    pub idt_limit: u16,
+}
+
+impl CpuResumeContext {
+    fn valid(self) -> bool {
+        const CR0_PG: u64 = 1 << 31;
+        const CR4_PAE: u64 = 1 << 5;
+        const EFER_LMA: u64 = 1 << 10;
+        self.cr0 & CR0_PG != 0
+            && self.cr4 & CR4_PAE != 0
+            && self.efer & EFER_LMA != 0
+            && self.cr3 & 0xfff == 0
+            && VirtAddr::try_new(self.rsp).is_ok()
+            && VirtAddr::try_new(self.gdt_base).is_ok()
+            && VirtAddr::try_new(self.idt_base).is_ok()
+            && self.gdt_limit != 0
+            && self.idt_limit != 0
+            && self.rflags & 2 != 0
+    }
+}
+
+fn capture_cpu_resume_context() -> CpuResumeContext {
+    let (cr3, _) = Cr3::read();
+    let mut gdt = DescriptorTablePointer {
+        limit: 0,
+        base: VirtAddr::zero(),
+    };
+    let mut idt = DescriptorTablePointer {
+        limit: 0,
+        base: VirtAddr::zero(),
+    };
+    let rsp;
+    let rflags;
+    // SAFETY: SGDT/SIDT and reading RSP are side-effect-free snapshots into
+    // kernel-owned local storage while the caller controls interrupts.
+    unsafe {
+        core::arch::asm!("sgdt [{}]", in(reg) &mut gdt, options(nostack, preserves_flags));
+        core::arch::asm!("sidt [{}]", in(reg) &mut idt, options(nostack, preserves_flags));
+        core::arch::asm!("mov {}, rsp", out(reg) rsp, options(nomem, nostack, preserves_flags));
+        core::arch::asm!("pushfq; pop {}", out(reg) rflags, options(nomem, preserves_flags));
+    }
+    CpuResumeContext {
+        cr0: Cr0::read().bits(),
+        cr3: cr3.start_address().as_u64(),
+        cr4: Cr4::read().bits(),
+        efer: Efer::read().bits(),
+        rflags,
+        rsp,
+        gdt_base: gdt.base.as_u64(),
+        gdt_limit: gdt.limit,
+        idt_base: idt.base.as_u64(),
+        idt_limit: idt.limit,
+    }
 }
 
 /// Quiesce the current driver set if firmware advertises S3. This boundary is
@@ -71,6 +147,10 @@ pub fn prepare_suspend() -> Result<SuspendPreparation, PrepareError> {
     if crate::smp::wake_page().is_none() {
         return Err(PrepareError::NoSuspend);
     }
+    let context = capture_cpu_resume_context();
+    if !context.valid() {
+        return Err(PrepareError::NoSuspend);
+    }
     let Some(plan) = crate::driver::suspend_all() else {
         return Err(PrepareError::DriverRefused);
     };
@@ -78,7 +158,11 @@ pub fn prepare_suspend() -> Result<SuspendPreparation, PrepareError> {
         let _ = crate::driver::resume_all(plan);
         return Err(PrepareError::TrampolineUnavailable);
     };
-    Ok(SuspendPreparation { plan, trampoline })
+    Ok(SuspendPreparation {
+        plan,
+        trampoline,
+        context,
+    })
 }
 
 /// Abort a prepared suspend and restore drivers in reverse order.
@@ -87,8 +171,9 @@ pub fn prepare_suspend() -> Result<SuspendPreparation, PrepareError> {
     reason = "future S3 transition rollback calls this on failed entry or wake"
 )]
 pub fn abort_suspend(preparation: SuspendPreparation) -> bool {
+    let context_valid = preparation.context.valid();
     let trampoline_released = crate::smp::release_wake_trampoline(preparation.trampoline);
-    trampoline_released && crate::driver::resume_all(preparation.plan)
+    context_valid && trampoline_released && crate::driver::resume_all(preparation.plan)
 }
 
 #[expect(
@@ -111,6 +196,11 @@ pub fn wake_trampoline_self_test() -> bool {
         return false;
     };
     crate::smp::release_wake_trampoline(trampoline)
+}
+
+#[cfg(feature = "stage25-8-test")]
+pub fn resume_context_self_test() -> bool {
+    capture_cpu_resume_context().valid()
 }
 
 /// Turn the machine off. Returns only if it is still running.
