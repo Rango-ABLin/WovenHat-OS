@@ -420,10 +420,16 @@ struct ChromeDemoBuffers {
 // only reference to each field.
 unsafe impl Sync for ChromeDemoBuffers {}
 
+// All-zero initializers: a non-zero one (`[u16::MAX; _]` for the depth
+// buffer) cannot go in .bss and is instead stored as real data in the
+// image, which is exactly what bloated the installed file past the VFS's
+// 64 KiB node cap the first time this was written. `three_d_chrome_demo`
+// already calls `depth.clear(u16::MAX)` at runtime, so the static itself
+// only ever needs to be zero.
 static CHROME_DEMO: ChromeDemoBuffers = ChromeDemoBuffers {
     chrome: core::cell::UnsafeCell::new([0; CHROME_WIDTH * CHROME_HEIGHT]),
     pixels: core::cell::UnsafeCell::new([0; WIDTH as usize * HEIGHT as usize]),
-    depth: core::cell::UnsafeCell::new([u16::MAX; WIDTH as usize * HEIGHT as usize]),
+    depth: core::cell::UnsafeCell::new([0; WIDTH as usize * HEIGHT as usize]),
 };
 
 /// Standalone proof of concept for textured 3D chrome: render a small
