@@ -1,5 +1,13 @@
 # WovenHat OS Architecture & Codebase Guide
 
+### Stage 24.34 - TPM attestation-key Name binding
+
+`decode_attestation_public` hashes the exact TPM public area and requires the
+returned SHA-256 Name to match the recomputed 34-byte value. It retains the
+bounded qualified Name, while `bind_attestation_public_name` compares that
+identity with the provisioned expected Name before returning the key. This
+does not itself provision or persist an expected identity.
+
 ### Stage 24.33 - bounded TPM ReadPublic attestation-key boundary
 
 `encode_read_public` and `decode_attestation_public` implement the bounded

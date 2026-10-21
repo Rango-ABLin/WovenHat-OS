@@ -1,5 +1,15 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - Stage 24.34 (2026-10-21)
+
+Added TPM Name recomputation and exact returned-Name validation for the
+`ReadPublic` attestation-key boundary, plus fail-closed comparison with a
+provisioned expected Name. Executable QEMU self-test, host tests, affected
+Clippy gates, and signed system-apps 1/2/4-CPU acceptance pass. Evidence is
+in `docs/audit-stage24-34-tpm-name-binding-2026-10-21.md`; USB remains
+untouched. Live retrieval, identity provisioning, quote authorization,
+recovery, and physical TPM qualification remain open.
+
 ## Codex - Stage 24.33 (2026-10-21)
 
 Added bounded `TPM2_ReadPublic` framing and attestation-key public-area

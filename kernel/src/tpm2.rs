@@ -10,7 +10,7 @@
 use crate::{hal::acpi::Tpm2Info, paging};
 use p256::ecdsa::{Signature as EcdsaSignature, VerifyingKey};
 use rsa::{pkcs1v15, pss, signature::Verifier, BigUint, RsaPublicKey};
-use sha2::Sha256;
+use sha2::{Digest, Sha256};
 
 const INTERFACE_ID: u64 = 0x30;
 const CONTROL_REQUEST: u64 = 0x40;
@@ -153,6 +153,26 @@ pub struct QuoteEccP256PublicKey {
 pub enum AttestationPublicKey {
     Rsa(QuoteRsaPublicKey),
     EccP256(QuoteEccP256PublicKey),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct AttestationPublic {
+    pub key: AttestationPublicKey,
+    pub name: [u8; 34],
+    pub qualified_name_length: u8,
+    pub qualified_name: [u8; 64],
+}
+
+/// Require the returned TPM object Name to equal the provisioned identity.
+#[allow(dead_code)]
+pub fn bind_attestation_public_name(
+    public: &AttestationPublic,
+    expected_name: &[u8; 34],
+) -> Result<AttestationPublicKey, Error> {
+    if public.name != *expected_name {
+        return Err(Error::CredentialMismatch);
+    }
+    Ok(public.key)
 }
 
 /// Verify an ECDSA P-256/SHA-256 quote signature against the exact
@@ -913,7 +933,7 @@ fn validate_attestation_attributes(attributes: u32) -> Result<(), Error> {
 /// caller must still bind the returned object name to the expected TPM object
 /// and use the object handle under a live TPM authorization policy.
 #[allow(dead_code)]
-pub fn decode_attestation_public(response: &[u8]) -> Result<AttestationPublicKey, Error> {
+pub fn decode_attestation_public(response: &[u8]) -> Result<AttestationPublic, Error> {
     if response.len() < 18 {
         return Err(Error::MalformedResponse);
     }
@@ -1003,12 +1023,28 @@ pub fn decode_attestation_public(response: &[u8]) -> Result<AttestationPublicKey
         return Err(Error::MalformedResponse);
     }
     let mut tail = public_end;
-    skip_tpm2b(response, &mut tail, 64)?;
-    skip_tpm2b(response, &mut tail, 64)?;
+    let name = skip_tpm2b(response, &mut tail, 64)?;
+    if name.len() != 34 || u16::from_be_bytes(name[..2].try_into().unwrap()) != TPM_ALG_SHA256 {
+        return Err(Error::InvalidPolicy);
+    }
+    let digest = Sha256::digest(public);
+    if name[2..] != digest[..] {
+        return Err(Error::CredentialMismatch);
+    }
+    let qualified_name = skip_tpm2b(response, &mut tail, 64)?;
     if tail != response_size {
         return Err(Error::MalformedResponse);
     }
-    Ok(key)
+    let mut parsed_name = [0_u8; 34];
+    parsed_name.copy_from_slice(name);
+    let mut parsed_qualified_name = [0_u8; 64];
+    parsed_qualified_name[..qualified_name.len()].copy_from_slice(qualified_name);
+    Ok(AttestationPublic {
+        key,
+        name: parsed_name,
+        qualified_name_length: qualified_name.len() as u8,
+        qualified_name: parsed_qualified_name,
+    })
 }
 
 #[allow(dead_code)]
@@ -1025,7 +1061,7 @@ fn encode_read_public(handle: u32, output: &mut [u8; 14]) -> Result<usize, Error
 pub fn read_attestation_public(
     info: Tpm2Info,
     handle: u32,
-) -> Result<AttestationPublicKey, Error> {
+) -> Result<AttestationPublic, Error> {
     let mut command = [0_u8; 14];
     let command_size = encode_read_public(handle, &mut command)?;
     let mut response = [0_u8; MAX_BUFFER_BYTES];
@@ -1660,9 +1696,9 @@ pub fn self_test() -> bool {
             {
                 return false;
             }
-            let mut public_response = [0_u8; 296];
+            let mut public_response = [0_u8; 330];
             public_response[..2].copy_from_slice(&TPM_ST_NO_SESSIONS.to_be_bytes());
-            public_response[2..6].copy_from_slice(&296_u32.to_be_bytes());
+            public_response[2..6].copy_from_slice(&330_u32.to_be_bytes());
             public_response[6..10].copy_from_slice(&TPM_RC_SUCCESS.to_be_bytes());
             public_response[10..12].copy_from_slice(&280_u16.to_be_bytes());
             public_response[12..14].copy_from_slice(&TPM_ALG_RSA.to_be_bytes());
@@ -1677,10 +1713,27 @@ pub fn self_test() -> bool {
             public_response[34..36].copy_from_slice(&256_u16.to_be_bytes());
             public_response[36..292].fill(0xa5);
             public_response[291] = 1;
-            let Ok(AttestationPublicKey::Rsa(parsed_key)) = decode_attestation_public(&public_response) else {
+            public_response[292..294].copy_from_slice(&34_u16.to_be_bytes());
+            let public_name_digest = Sha256::digest(&public_response[12..292]);
+            public_response[294..296].copy_from_slice(&TPM_ALG_SHA256.to_be_bytes());
+            public_response[296..328].copy_from_slice(&public_name_digest);
+            let Ok(parsed_public) = decode_attestation_public(&public_response) else {
+                return false;
+            };
+            let AttestationPublicKey::Rsa(parsed_key) = parsed_public.key else {
                 return false;
             };
             if parsed_key.modulus_length != 256 || parsed_key.exponent != 0 {
+                return false;
+            }
+            if bind_attestation_public_name(&parsed_public, &parsed_public.name).is_err() {
+                return false;
+            }
+            let mut wrong_name = parsed_public.name;
+            wrong_name[33] ^= 1;
+            if bind_attestation_public_name(&parsed_public, &wrong_name)
+                != Err(Error::CredentialMismatch)
+            {
                 return false;
             }
             public_response[5] = 0;

@@ -1,5 +1,18 @@
 # Stage status
 
+## Stage 24.34 TPM attestation-key Name binding (2026-10-21)
+
+The `TPM2_ReadPublic` boundary now recomputes the SHA-256 TPM Name from the
+exact public area, verifies the returned Name, retains the bounded qualified
+Name, and exposes a fail-closed comparison with the provisioned expected
+34-byte object Name. Host tests (89), all-targets and affected feature
+Clippy, executable QEMU, and signed system-apps 1/2/4-CPU acceptance pass.
+Evidence is under `audit-artifacts/stage24.34-tpm-name-binding-20261021`.
+
+Live TPM key retrieval, persistent object identity provisioning, quote
+authorization integration, recovery, and physical TPM qualification remain
+required.
+
 ## Stage 24.33 bounded TPM ReadPublic attestation-key boundary (2026-10-21)
 
 The TPM2 layer now frames `TPM2_ReadPublic` and validates the returned public
