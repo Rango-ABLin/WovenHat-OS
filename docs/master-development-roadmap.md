@@ -1449,6 +1449,13 @@ resource and return an explicit error. The gate does not issue a destructive
 sleep request; CPU restore, firmware wake, and physical qualification remain
 later work.
 
+Stage 25.12 - CPU resume-context restoration primitive
+
+Accepted bounded slice: restore the validated kernel-owned CPU context and
+transfer to a kernel continuation without returning through a stale firmware
+stack. This does not yet wire a persistent firmware-wake record, restore
+drivers after S3, or claim physical suspend/resume qualification.
+
 ACPI poweroff
 reboot
 sleep

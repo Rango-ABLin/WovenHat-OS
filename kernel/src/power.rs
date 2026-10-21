@@ -13,6 +13,8 @@ use x86_64::registers::{
     model_specific::Efer,
 };
 use x86_64::{structures::DescriptorTablePointer, VirtAddr};
+#[cfg(feature = "stage25-12-test")]
+use core::sync::atomic::{AtomicBool, Ordering};
 
 /// PM1 control: SCI_EN (ACPI mode), SLP_TYP (bits 10-12), SLP_EN.
 const SCI_EN: u16 = 1;
@@ -81,6 +83,7 @@ pub struct SuspendPreparation {
 /// Pointers are recorded as integers so this value can be copied into a
 /// firmware-independent wake record without creating Rust references to
 /// state that firmware may temporarily replace.
+#[repr(C)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct CpuResumeContext {
     pub cr0: u64,
@@ -144,6 +147,66 @@ fn capture_cpu_resume_context() -> CpuResumeContext {
         gdt_limit: gdt.limit,
         idt_base: idt.base.as_u64(),
         idt_limit: idt.limit,
+    }
+}
+
+/// Restore a validated architectural context and transfer control without a
+/// Rust return. The caller must have validated the context and must provide a
+/// kernel-owned continuation with the same privilege and address-space rules.
+#[expect(
+    unreachable_code,
+    reason = "Rust requires a diverging tail after noreturn inline assembly"
+)]
+#[expect(
+    dead_code,
+    reason = "consumed by the future firmware-wake continuation"
+)]
+unsafe fn restore_cpu_resume_context(
+    context: &CpuResumeContext,
+    continuation: extern "C" fn() -> !,
+) -> ! {
+    // SAFETY: the caller supplies a validated kernel-owned context. The
+    // instruction sequence disables interrupts while control registers and
+    // descriptor tables are replaced, then restores the saved flags before
+    // jumping to the kernel continuation on the saved stack.
+    unsafe {
+        core::arch::asm!(
+            "cli",
+            "mov rax, [rdi + 0]",
+            "mov cr0, rax",
+            "mov rax, [rdi + 16]",
+            "mov cr4, rax",
+            "mov rax, [rdi + 8]",
+            "mov cr3, rax",
+            "mov ecx, 0xc0000080",
+            "mov rax, [rdi + 24]",
+            "mov rdx, rax",
+            "shr rdx, 32",
+            "wrmsr",
+            "sub rsp, 32",
+            "mov ax, word ptr [rdi + 56]",
+            "mov word ptr [rsp], ax",
+            "mov rax, [rdi + 48]",
+            "mov [rsp + 2], rax",
+            "lgdt [rsp]",
+            "mov ax, word ptr [rdi + 72]",
+            "mov word ptr [rsp + 10], ax",
+            "mov rax, [rdi + 64]",
+            "mov [rsp + 12], rax",
+            "lidt [rsp + 10]",
+            "mov rax, [rdi + 40]",
+            "mov rsp, rax",
+            "mov rax, [rdi + 32]",
+            "push rax",
+            "popfq",
+            "jmp rsi",
+            in("rdi") context,
+            in("rsi") continuation,
+            options(noreturn),
+        );
+    }
+    loop {
+        core::hint::spin_loop();
     }
 }
 
@@ -330,6 +393,30 @@ pub fn wake_trampoline_self_test() -> bool {
 #[cfg(feature = "stage25-8-test")]
 pub fn resume_context_self_test() -> bool {
     capture_cpu_resume_context().valid()
+}
+
+#[cfg(feature = "stage25-12-test")]
+static RESTORE_SELF_TEST_REACHED: AtomicBool = AtomicBool::new(false);
+
+#[cfg(feature = "stage25-12-test")]
+extern "C" fn restore_self_test_continuation() -> ! {
+    RESTORE_SELF_TEST_REACHED.store(true, Ordering::Release);
+    crate::serial::write_line(format_args!("[S25.12] CPU context restore: PASSED"));
+    crate::qemu_test_exit_success();
+    loop {
+        x86_64::instructions::hlt();
+    }
+}
+
+#[cfg(feature = "stage25-12-test")]
+pub fn resume_context_restore_self_test() -> bool {
+    let context = capture_cpu_resume_context();
+    if !context.valid() {
+        return false;
+    }
+    // The continuation never returns: the restored context transfers directly
+    // to it and the QEMU test device terminates the guest.
+    unsafe { restore_cpu_resume_context(&context, restore_self_test_continuation) }
 }
 
 /// Turn the machine off. Returns only if it is still running.

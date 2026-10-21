@@ -170,6 +170,15 @@ not issue a destructive sleep request. CPU restoration, firmware wake, and
 physical qualification remain open. See
 `docs/audit-stage25-11-pm1-s3-request-2026-10-21.md`.
 
+## Codex - Stage 25.12 CPU resume-context restoration primitive (2026-10-21)
+
+The shared branch now restores validated CR0/CR3/CR4, EFER, GDT/IDT, RSP, and
+RFLAGS in a non-returning assembly path before jumping to a kernel
+continuation. The live-context self-test passes on 1/2/4 CPUs. Firmware-wake
+record ownership, driver restoration after S3, and physical qualification
+remain open. See
+`docs/audit-stage25-12-cpu-context-restore-2026-10-21.md`.
+
 ## Codex - Stage 24.60 release-key provisioning (2026-10-21)
 
 Production WAPP packaging now requires explicit signing-seed and trusted

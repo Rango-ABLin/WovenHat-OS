@@ -1,5 +1,19 @@
 # Stage status
 
+## Stage 25.12 - CPU resume-context restoration primitive (2026-10-21)
+
+The kernel now has a validated non-returning restore path that reloads CR0,
+CR3, CR4, EFER, GDT, IDT, RSP, and RFLAGS, then transfers to a
+kernel-provided continuation. The self-test restores the current context and
+continues to a QEMU success marker on 1/2/4 CPUs.
+
+Evidence is in `docs/audit-stage25-12-cpu-context-restore-2026-10-21.md` and
+the retained `audit-artifacts/stage25.12-*` directories.
+
+This proves the architectural restore primitive, not a complete firmware S3
+wake: the wake record/continuation, driver restoration after firmware wake,
+and physical suspend/resume qualification remain open.
+
 ## Stage 25.11 - PM1 S3 request boundary (2026-10-21)
 
 The prepared suspend token now has an internal `enter_suspend` path that

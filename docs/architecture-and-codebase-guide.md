@@ -3631,3 +3631,19 @@ an out-of-range sleep type without touching I/O ports. The `stage25-11-test`
 QEMU gate therefore never requests a destructive sleep transition. CPU
 register restoration, firmware wake completion, suspend policy/syscall
 exposure, and physical qualification remain separate prerequisites.
+
+## Stage 25.12 CPU resume-context restoration primitive
+
+`restore_cpu_resume_context` is a non-returning, unsafe assembly boundary
+whose caller must first validate the kernel-owned `CpuResumeContext`. With
+interrupts disabled it restores CR0, CR4, CR3, and EFER, reconstructs packed
+GDT/IDT descriptors from the fixed `#[repr(C)]` context, loads them, switches
+to the saved RSP, restores RFLAGS, and jumps to a supplied kernel continuation.
+The continuation is never reached through a Rust return from the stale
+pre-suspend call frame.
+
+The `stage25-12-test` path captures the live context, executes the full restore
+sequence, and reaches a continuation that records the marker and exits QEMU.
+This establishes the architectural primitive on 1/2/4 CPUs. A persistent
+firmware-wake record, wake-entry integration, driver restoration, and physical
+S3 qualification remain required before exposing suspend.
