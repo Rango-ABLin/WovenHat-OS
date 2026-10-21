@@ -2015,6 +2015,22 @@ ownership, durable image-slot write, and bootloader handoff.
 
 ## Stage 27.5 privileged update-service transaction boundary (2026-10-21)
 
+`apps/woven-update/src/service.rs` provides the bounded userspace service
+process slice. `--service` publishes `woven.update`, receives the fixed-size
+WUDI request, converts only the validated candidate path to UTF-8, and calls
+the kernel-owned `libwoven::update_transaction` boundary. It uses fixed
+request/response buffers, returns deterministic malformed-request and
+transaction-failure responses, yields when the nonblocking receive queue is
+empty, and exits on an unreplyable client so a supervisor can restart it. This
+keeps update policy and capability authority in the kernel while giving the
+userspace daemon a stable IPC owner.
+
+The service-process slice has host tests and freestanding warning-denying
+Clippy evidence. It is not yet boot-supervised or end-to-end QEMU accepted;
+the catalog/supervisor wiring, client/server exchange, production slot
+backend, bootloader handoff, power-loss recovery, and physical qualification
+remain separate gates.
+
 `kernel/src/update_service.rs` is the first executable service boundary. It
 requires `FileRead`, `FileWrite`, and `StorageIo`, validates `/updates/`
 source paths, verifies the signed WUPD envelope, writes the inactive slot

@@ -1,5 +1,16 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - WovenUpdate service-process slice (2026-10-21)
+
+`apps/woven-update --service` now owns the bounded WUDI IPC loop: it publishes
+`woven.update`, rejects malformed requests before privileged dispatch, forwards
+validated operations to `libwoven::update_transaction`, uses fixed buffers,
+yields on empty receives, and exits on an unreplyable client. Host tests and
+freestanding warning-denying Clippy pass. This is not full service acceptance:
+boot supervision/catalog wiring, an end-to-end QEMU exchange, production slot
+storage, bootloader handoff, power-loss recovery, and physical USB
+qualification remain open. Commit: `28d1fd37`.
+
 ## Codex - Stage 27.5 privileged update-service boundary (2026-10-21)
 
 Added the capability-gated syscall 239 and `libwoven::update_transaction`

@@ -1,5 +1,20 @@
 # Stage status
 
+## Stage 27.5 service-process slice - 2026-10-21
+
+`apps/woven-update` now has a bounded `--service` mode. It publishes the
+`woven.update` endpoint, decodes the existing fixed-size WUDI request ABI,
+forwards only validated operations to `libwoven::update_transaction`, and
+returns fixed-size responses. Malformed requests fail closed; package bytes do
+not cross IPC; an empty receive yields to the scheduler rather than spinning;
+and a failed response send terminates the daemon so supervision can restart it.
+The app's host tests and freestanding warning-denying Clippy pass.
+
+This is an integration slice, not full update-service acceptance. A boot-time
+service supervisor/catalog entry, an end-to-end QEMU client/server exchange,
+production-sized block-device slots, bootloader handoff, power-loss recovery,
+and physical USB qualification remain open.
+
 ## Stage 27.5 - privileged update-service transaction boundary (2026-10-21)
 
 Implemented the capability-gated kernel update transaction boundary and
@@ -12,10 +27,10 @@ focused kernel/libwoven Clippy and 113 libwoven host tests pass.
 
 This is not a release claim. Current WovenFS slots are single-file bounded to
 4 KiB, so the service rejects larger images instead of partially installing
-them. A long-lived WovenUpdate daemon, IPC request/response loop, block-device
-slot backend for production-sized images, bootloader handoff/boot-target
-attempt persistence, power-loss recovery, and physical USB qualification
-remain required.
+them. The daemon process and IPC loop are now present, but boot-time
+supervision/catalog wiring and end-to-end client/server acceptance remain
+required, along with block-device slot storage, bootloader handoff/boot-target
+attempt persistence, power-loss recovery, and physical USB qualification.
 
 ## Stage 27.4 - bounded update IPC contract (2026-10-21)
 
