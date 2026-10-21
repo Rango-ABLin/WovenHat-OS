@@ -7,6 +7,7 @@ use libwoven::Args;
 use wovenhat_update::{parse, Command};
 
 mod gui;
+mod service;
 
 libwoven::entry!(main);
 
@@ -19,8 +20,11 @@ fn main(args: Args) -> ! {
     let command = parse(args.get(1).unwrap_or(b"--check"));
     let status = match command {
         Command::Check => check_updates(),
+        Command::Service => service::run(),
         Command::Help => {
-            let _ = libwoven::print("WovenUpdate: --check (read-only preflight)\n");
+            let _ = libwoven::print(
+                "WovenUpdate: --check (read-only), --service (privileged IPC daemon)\n",
+            );
             0
         }
         Command::Invalid => {
