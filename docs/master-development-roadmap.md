@@ -2,6 +2,12 @@ WovenHat OS — Stage 10.7 → Version 1.0 Master Roadmap
 Phase I — Finish the asynchronous kernel foundation
 Stage 10.7 — Asynchronous TCP
 
+Stage 24.54 - Kernel-derived TPM authorization secret
+Bound credential-root leases to the validated NV index and policy, rejected
+metadata-changing rotations, and derived the attestation authorization value
+inside kernel memory during broker installation. The secret is never persisted
+or accepted from userspace.
+
 Stage 24.53 - Signed TPM broker provisioning record
 Implemented a fixed-size signed `TCB1` record for broker policy, bounded
 validation of the reserved NV index, attestation handle, quote scheme, PCR,

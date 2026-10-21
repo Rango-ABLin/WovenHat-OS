@@ -1,5 +1,14 @@
 # WovenHat OS Architecture & Codebase Guide
 
+### Stage 24.54 - kernel-derived TPM authorization secret
+
+`CredentialRootLease` now retains its validated NV index and policy binding;
+rotation must preserve both. Provisioned broker installation checks the signed
+`TCB1` fields and live attestation Name, then derives the attestation object's
+authorization value with a domain-separated root derivation. The value exists
+only in bounded kernel memory and is wiped after broker construction. No
+userspace or durable-file secret path is accepted.
+
 ### Stage 24.53 - signed TPM broker provisioning record
 
 `TCB1` is a fixed-size Ed25519-signed WovenFS record containing only broker

@@ -1,5 +1,20 @@
 # Stage status
 
+## Stage 24.54 kernel-derived TPM authorization secret (2026-10-21)
+
+Credential-root leases now retain the validated NV index and policy binding.
+Root rotation rejects metadata changes, and the physical broker can derive the
+attestation object's authorization value inside kernel memory from the active
+root. Provisioned broker installation additionally requires the signed `TCB1`
+configuration and exact attestation Name; the derived secret is wiped before
+return. Host tests (89), all-targets and affected feature Clippy, executable
+QEMU, and signed system-apps 1/2/4-CPU acceptance pass. Evidence is under
+`audit-artifacts/stage24.54-kernel-derived-tpm-secret-20261021`.
+
+No authorization secret is persisted or accepted from userspace. Physical TPM
+provisioning, live login, reboot recovery, and hardware qualification remain
+required.
+
 ## Stage 24.53 signed TPM broker provisioning record (2026-10-21)
 
 Added a bounded signed `TCB1` release record for the physical TPM broker.

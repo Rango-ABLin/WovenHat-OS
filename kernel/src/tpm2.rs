@@ -897,6 +897,8 @@ pub struct CredentialRootLease {
     root: [u8; 32],
     generation: u64,
     active: bool,
+    nv_index: u32,
+    nv_policy: [u8; 32],
 }
 
 impl Drop for CredentialRootLease {
@@ -930,6 +932,18 @@ impl CredentialRootLease {
             output,
         )
     }
+
+    /// Derive the attestation object's authorization value without exposing
+    /// the credential root or retaining a provisioning secret on disk.
+    #[allow(dead_code)]
+    fn derive_attestation_auth(&self, output: &mut [u8; 32]) -> Result<(), Error> {
+        self.derive(b"WOVENHAT-TPM-ATTESTATION-AUTH-V1", output)
+    }
+
+    #[allow(dead_code)]
+    fn matches_nv_policy(&self, index: u32, policy: &[u8; 32]) -> bool {
+        self.active && self.nv_index == index && self.nv_policy == *policy
+    }
 }
 
 /// Install a root only after the TPM public metadata and exact policy-bound
@@ -959,6 +973,8 @@ pub fn provision_credential_root(
         root: *root,
         generation,
         active: true,
+        nv_index: expected_index,
+        nv_policy: *expected_policy,
     })
 }
 
@@ -974,7 +990,11 @@ pub fn rotate_credential_root(
     expected_policy: &[u8; 32],
     replacement: &[u8; 32],
 ) -> Result<u64, Error> {
-    if !current.active || replacement.iter().all(|byte| *byte == 0) {
+    if !current.active
+        || current.nv_index != expected_index
+        || current.nv_policy != *expected_policy
+        || replacement.iter().all(|byte| *byte == 0)
+    {
         return Err(Error::InvalidPolicy);
     }
     validate_credential_root_readback(
@@ -1441,6 +1461,43 @@ pub fn install_hardware_credential_broker(
     }
     *installed = Some(broker);
     Ok(())
+}
+
+/// Install a broker from a signed release configuration and a root lease that
+/// was validated against that configuration. The attestation authorization
+/// value is derived in kernel memory and wiped before this function returns;
+/// no caller can inject or persist a replacement secret.
+#[cfg(feature = "system-apps")]
+#[allow(dead_code)]
+pub fn install_provisioned_hardware_credential_broker(
+    info: Tpm2Info,
+    root: CredentialRootLease,
+    config: &CredentialBrokerConfig,
+    public: AttestationPublic,
+    name_policy: &[u8; ATTESTATION_NAME_POLICY_BYTES],
+    trusted_policy_key: &[u8; 32],
+) -> Result<(), Error> {
+    if public.name != config.attestation_name
+        || !root.matches_nv_policy(config.root_nv_index, &config.nv_policy)
+    {
+        return Err(Error::CredentialMismatch);
+    }
+    let mut auth_value = [0_u8; 32];
+    root.derive_attestation_auth(&mut auth_value)?;
+    let broker = HardwareCredentialBroker::new(
+        info,
+        root,
+        public,
+        name_policy,
+        trusted_policy_key,
+        config.signing_handle,
+        config.scheme,
+        config.pcr,
+        &config.expected_digest,
+        &auth_value,
+    );
+    auth_value.fill(0);
+    install_hardware_credential_broker(broker?)
 }
 
 /// Request one broker decision for a kernel-owned identity session. No

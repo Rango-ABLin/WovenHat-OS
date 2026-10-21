@@ -1,5 +1,13 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - Stage 24.54 (2026-10-21)
+
+Bound credential-root leases to their validated NV metadata and made broker
+installation derive the attestation authorization value in kernel memory from
+the root. The derived value is wiped before return; no userspace or durable
+secret path exists. Host, Clippy, memory QEMU, and signed system-apps 1/2/4-
+CPU gates pass. Physical TPM provisioning and USB qualification remain open.
+
 ## Codex - Stage 24.53 (2026-10-21)
 
 Added signed fixed-size `TCB1` broker provisioning records with WovenFS
