@@ -1433,6 +1433,13 @@ values in the private preparation token, and restore them on abort. This does
 not coordinate secondary CPUs, restore CPU registers, write PM1 S3 controls,
 or claim firmware or physical suspend/resume qualification.
 
+Stage 25.10 - secondary-CPU suspend barrier
+
+Accepted bounded slice: use the existing scheduler/hotplug ownership path to
+evacuate and park all online secondary CPUs, retain the exact online mask, and
+restore every parked CPU on rollback. This does not restore CPU registers,
+write PM1 S3 controls, perform firmware wake, or claim physical qualification.
+
 ACPI poweroff
 reboot
 sleep

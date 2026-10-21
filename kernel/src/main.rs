@@ -60,7 +60,8 @@ mod display;
     feature = "stage13-9-test",
     feature = "stage25-7-test",
     feature = "stage25-8-test",
-    feature = "stage25-9-test"
+    feature = "stage25-9-test",
+    feature = "stage25-10-test"
 ))]
 mod driver;
 #[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
@@ -5657,6 +5658,15 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
             qemu_test_exit_failure();
         }
         serial::write_line(format_args!("[S25.9] FACS wake vector transaction: PASSED"));
+        qemu_test_exit_success();
+    }
+    #[cfg(feature = "stage25-10-test")]
+    {
+        if !smp::cpu_suspend_barrier_self_test() {
+            serial::write_line(format_args!("[S25.10] secondary CPU barrier: FAILED"));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!("[S25.10] secondary CPU barrier: PASSED"));
         qemu_test_exit_success();
     }
     serial::write_line(format_args!("[BOOT] ALL VALIDATIONS PASSED"));

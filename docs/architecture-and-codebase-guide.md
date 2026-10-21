@@ -3599,3 +3599,19 @@ non-32-bit target without touching firmware memory. The actual FACS write path
 is therefore part of production suspend preparation, while no suspend action
 is exposed yet. Secondary-CPU quiescence, CPU-state restoration, PM1 S3 entry,
 firmware wake, and physical qualification remain later prerequisites.
+
+## Stage 25.10 secondary-CPU suspend barrier
+
+`smp::suspend_other_cpus` is BSP-only and snapshots the exact online mask
+before requesting each online secondary CPU to evacuate scheduler-owned work
+and reach the existing offline checkpoint. It records the completed secondary
+mask in a private `CpuSuspendBarrier`; if any request fails, the completed
+prefix is restored immediately. `resume_suspended_cpus` attempts all recorded
+CPUs in reverse order and succeeds only when the original mask is restored.
+
+`power::prepare_suspend` takes this barrier after context capture, driver
+quiescence, wake-trampoline staging, and FACS vector installation. Its abort
+path restores firmware state, releases the trampoline, re-onlines every
+secondary CPU, and resumes drivers. The `stage25-10-test` feature exercises
+the barrier and exact-mask rollback on 1/2/4 CPUs. This stage does not yet
+restore registers, write PM1 S3 controls, or handle firmware wake.

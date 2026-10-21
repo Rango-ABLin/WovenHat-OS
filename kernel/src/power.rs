@@ -47,6 +47,8 @@ pub enum PrepareError {
     TrampolineUnavailable,
     /// The firmware FACS could not accept the reserved wake trampoline.
     WakeVectorUnavailable,
+    /// A secondary CPU could not reach the scheduler-safe suspend barrier.
+    CpuCoordinationUnavailable,
 }
 
 /// Driver-quiescence preparation for a future S3 transition. Construction
@@ -60,6 +62,7 @@ pub struct SuspendPreparation {
     plan: crate::driver::SuspendPlan,
     trampoline: crate::smp::WakeTrampoline,
     wake_vector: crate::hal::acpi::FacsWakeVector,
+    cpu_barrier: crate::smp::CpuSuspendBarrier,
     context: CpuResumeContext,
 }
 
@@ -168,10 +171,17 @@ pub fn prepare_suspend() -> Result<SuspendPreparation, PrepareError> {
         let _ = crate::driver::resume_all(plan);
         return Err(PrepareError::WakeVectorUnavailable);
     };
+    let Some(cpu_barrier) = crate::smp::suspend_other_cpus() else {
+        let _ = crate::hal::acpi::restore_facs_wake_vector(wake_vector);
+        let _ = crate::smp::release_wake_trampoline(trampoline);
+        let _ = crate::driver::resume_all(plan);
+        return Err(PrepareError::CpuCoordinationUnavailable);
+    };
     Ok(SuspendPreparation {
         plan,
         trampoline,
         wake_vector,
+        cpu_barrier,
         context,
     })
 }
@@ -185,9 +195,11 @@ pub fn abort_suspend(preparation: SuspendPreparation) -> bool {
     let context_valid = preparation.context.valid();
     let wake_vector_restored = crate::hal::acpi::restore_facs_wake_vector(preparation.wake_vector);
     let trampoline_released = crate::smp::release_wake_trampoline(preparation.trampoline);
+    let cpus_resumed = crate::smp::resume_suspended_cpus(preparation.cpu_barrier);
     context_valid
         && wake_vector_restored
         && trampoline_released
+        && cpus_resumed
         && crate::driver::resume_all(preparation.plan)
 }
 

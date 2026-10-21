@@ -1,5 +1,19 @@
 # Stage status
 
+## Stage 25.10 - secondary-CPU suspend barrier (2026-10-21)
+
+The BSP can now transactionally evacuate and park every online secondary CPU
+through the established scheduler-safe hotplug checkpoints, retaining the
+original online mask. A failed partial barrier restores the completed prefix;
+rollback re-onlines every parked CPU in reverse order and verifies the exact
+mask. The guarded barrier self-test passed on 1/2/4 CPUs.
+
+Evidence is in `docs/audit-stage25-10-secondary-cpu-barrier-2026-10-21.md` and
+the retained `audit-artifacts/stage25.10-*` directories.
+
+This does not claim CPU register restoration, PM1 S3 entry, firmware wake, or
+physical suspend/resume qualification.
+
 ## Stage 25.9 - transactional FACS wake-vector installation (2026-10-21)
 
 Suspend preparation now installs the reserved low wake-page address into both

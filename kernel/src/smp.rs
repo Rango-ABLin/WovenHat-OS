@@ -434,6 +434,75 @@ pub fn request_cpu_online(cpu: usize) -> bool {
     }
 }
 
+/// The BSP-owned record of secondary CPUs taken through the established
+/// scheduler-safe hotplug path for a future firmware transition.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct CpuSuspendBarrier {
+    original_mask: usize,
+    offline_mask: usize,
+}
+
+/// Evacuate and park every currently online secondary CPU. The BSP remains
+/// online to execute the firmware transition and to run rollback. Existing
+/// hotplug ownership and generation checks provide the scheduler-safe
+/// checkpoint; a partial failure immediately restores the completed prefix.
+pub(crate) fn suspend_other_cpus() -> Option<CpuSuspendBarrier> {
+    if cpu_index() != 0 {
+        return None;
+    }
+    let original_mask = online_mask();
+    let mut offline_mask = 0_usize;
+    for cpu in 1..MAX_CPUS {
+        if original_mask & (1 << cpu) == 0 {
+            continue;
+        }
+        if request_cpu_offline(cpu) {
+            offline_mask |= 1 << cpu;
+            continue;
+        }
+        let partial = CpuSuspendBarrier {
+            original_mask,
+            offline_mask,
+        };
+        let _ = resume_suspended_cpus(partial);
+        return None;
+    }
+    if online_mask() != (original_mask & 1) {
+        let partial = CpuSuspendBarrier {
+            original_mask,
+            offline_mask,
+        };
+        let _ = resume_suspended_cpus(partial);
+        return None;
+    }
+    Some(CpuSuspendBarrier {
+        original_mask,
+        offline_mask,
+    })
+}
+
+/// Reverse a CPU suspend barrier, restoring the exact online mask captured by
+/// `suspend_other_cpus`. Every requested CPU is attempted even if one wake
+/// fails, preserving bounded cleanup and an accurate boolean result.
+pub(crate) fn resume_suspended_cpus(barrier: CpuSuspendBarrier) -> bool {
+    let mut restored = true;
+    for cpu in (1..MAX_CPUS).rev() {
+        if barrier.offline_mask & (1 << cpu) != 0 && !request_cpu_online(cpu) {
+            restored = false;
+        }
+    }
+    restored && online_mask() == barrier.original_mask
+}
+
+#[cfg(feature = "stage25-10-test")]
+pub fn cpu_suspend_barrier_self_test() -> bool {
+    let Some(barrier) = suspend_other_cpus() else {
+        return false;
+    };
+    let parked = online_mask() == (barrier.original_mask & 1);
+    parked && resume_suspended_cpus(barrier) && online_mask() == barrier.original_mask
+}
+
 /// CPU-local checkpoint called by `idle_task`. On success this function never
 /// returns a second time on that CPU: the caller parks with interrupts masked.
 pub fn offline_checkpoint(cpu: usize) -> bool {

@@ -151,6 +151,15 @@ transactional abort. The guarded byte-level transaction self-test passes on
 physical wake claim is made. See
 `docs/audit-stage25-9-facs-wake-vector-2026-10-21.md`.
 
+## Codex - Stage 25.10 secondary-CPU suspend barrier (2026-10-21)
+
+The shared branch now evacuates and parks every online secondary CPU through
+the accepted scheduler/hotplug checkpoint path, retains the exact online mask,
+and restores the completed set in reverse order on rollback. The guarded
+barrier gate passes on 1/2/4 CPUs. CPU register restore, PM1 S3 entry,
+firmware wake, and physical qualification remain open. See
+`docs/audit-stage25-10-secondary-cpu-barrier-2026-10-21.md`.
+
 ## Codex - Stage 24.60 release-key provisioning (2026-10-21)
 
 Production WAPP packaging now requires explicit signing-seed and trusted
