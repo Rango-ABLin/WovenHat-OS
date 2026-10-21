@@ -1,5 +1,19 @@
 # Stage status
 
+## Stage 27.3 - signed update-package producer (2026-10-21)
+
+Added `tools/wupd-packager`, which creates the bounded version-1 `WUPD`
+envelope consumed by the kernel verifier. It validates generation and image
+limits, hashes the exact image, signs the immutable manifest and payload with
+Ed25519, and requires matching explicit signing/trusted-key inputs in release
+mode. Tool tests, warning-denying Clippy, release-key boundary checks, and the
+prior Stage 27.1 activation/rollback QEMU gate passed on 1/2/4 CPUs. Evidence
+is in `docs/audit-stage27-3-update-package-producer-2026-10-21.md`.
+
+This does not yet install images, own the durable A/B state, expose an
+update-service IPC/syscall protocol, perform bootloader slot handoff, recover
+from power loss, or qualify physical USB media.
+
 ## Stage 26.5 - bounded internationalization foundation (2026-10-21)
 
 Added `libwoven::i18n`, a fixed-capacity userspace foundation for English and

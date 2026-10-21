@@ -1991,6 +1991,17 @@ release fallback propagate this mode. Seeds never enter WAPP metadata or
 catalog files. Secret custody, rotation/revocation, and physical qualification
 remain deployment responsibilities.
 
+## Stage 27.3 signed update-package producer (2026-10-21)
+
+`tools/wupd-packager` is the producer for the kernel's version-1 `WUPD`
+envelope. It keeps the generation and image length bounded, stores the exact
+SHA-256 image digest, and signs a domain-separated digest over the immutable
+header and image with Ed25519. Release mode requires both the signing seed and
+the matching provisioned trusted public key; development fallback is limited
+to the deterministic fixture key. The tool does not install or activate an
+image. Long-lived service ownership, slot storage, boot handoff, power-loss
+recovery, and physical qualification remain separate prerequisites.
+
 ## Release validation (2026-10-14)
 
 ## Update/recovery track — bounded A/B activation state (2026-10-20)

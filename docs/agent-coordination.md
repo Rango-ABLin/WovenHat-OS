@@ -1,5 +1,17 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - Stage 27.3 signed update-package producer (2026-10-21)
+
+Added `tools/wupd-packager` for the kernel's bounded version-1 `WUPD` format.
+It signs the immutable generation/length/digest manifest and exact image,
+requires matching explicit release key material, and rejects invalid bounds.
+Tool tests, warning-denying Clippy, release-key boundary checks, and Stage
+27.1 activation/rollback QEMU passed on 1/2/4 CPUs. See
+`docs/audit-stage27-3-update-package-producer-2026-10-21.md`. This is only the
+producer boundary; the privileged update daemon, IPC/syscall lifecycle,
+boot-slot installation, power-loss recovery, and physical USB qualification
+remain open.
+
 ## Codex - physical inventory probe (2026-10-21)
 
 Ran the read-only host preflight and the existing physical-probe image smoke

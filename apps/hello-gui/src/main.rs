@@ -1394,6 +1394,14 @@ fn desktop_client(args: &Args) -> ! {
                 }
                 continue;
             }
+            // A pointer move over this window's body: the shell forwards
+            // these to whatever client is under the pointer regardless of
+            // whether it asked for them (see `forward_pointer_move`), and a
+            // desktop client that only wants its one key has nothing to do
+            // with its own pointer coordinates.
+            if sender == shell && length == 8 && &key[..4] == b"WPMV" {
+                continue;
+            }
             if sender != shell || length != 1 || key[0] != expected {
                 fail(187);
             }
