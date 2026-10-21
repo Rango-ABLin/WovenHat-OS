@@ -3663,3 +3663,12 @@ The `stage25-13-test` gate checks the empty-record invariant and canonical
 wake/continuation wiring without issuing S3. Persistent record ownership and
 rollback are implemented, but actual firmware wake and physical qualification
 remain required.
+
+## Stage 25.14 suspend admission boundary
+
+Power-control action `2` is the suspend ABI entry point. It requires the same
+`PowerControl` capability as poweroff and restart, records an audit event, and
+returns error `4` until the kernel has a task-owned resume target for the
+interrupted userspace syscall. The fail-closed path performs no suspend
+preparation or hardware writes. `libwoven::suspend` exposes this result to the
+desktop session without pretending that firmware S3 is production-ready.

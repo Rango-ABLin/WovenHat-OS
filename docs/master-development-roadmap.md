@@ -1464,6 +1464,15 @@ and transfer to a continuation that performs owned rollback and driver/CPU
 restoration. This does not claim that firmware has actually completed S3 wake
 or that physical suspend/resume is qualified.
 
+Stage 25.14 - suspend admission boundary
+
+Accepted bounded slice: add the privileged suspend action to the stable power
+ABI, but fail closed with a deterministic error until the wake path can return
+to the interrupted userspace syscall frame. The rejected request performs no
+driver quiescence, CPU parking, FACS write, or PM1 write. A later stage must
+commit a task-owned resume target and verify its return path before enabling a
+real user-facing S3 transition.
+
 ACPI poweroff
 reboot
 sleep

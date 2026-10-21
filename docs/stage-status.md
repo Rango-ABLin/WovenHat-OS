@@ -8112,3 +8112,17 @@ host Clippy, and freestanding `stage15-2-test` Clippy passed. This is a
 bounded software increment: physical flash, power-loss, and replacement of
 the FAT32 system volume remain open.
 
+## Stage 25.14 - suspend admission boundary (2026-10-21)
+
+The power ABI now recognizes action `2` as suspend for callers holding
+`PowerControl`, and `libwoven::suspend` exposes the same operation. It fails
+closed with a deterministic error because the current Stage 25.13 wake path
+returns to a kernel rollback continuation, not the interrupted userspace
+syscall frame. The rejection is audited and performs no preparation, FACS,
+CPU, or PM1 mutation. The Stage 25.14 QEMU gate verifies that admission is
+idle and the userspace resume target is explicitly unavailable.
+
+This is not physical S3 qualification and does not claim that suspend is
+available to production users. The next prerequisite is a task-owned resume
+record and a verified return path before enabling the transition.
+

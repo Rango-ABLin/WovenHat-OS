@@ -64,7 +64,8 @@ mod display;
     feature = "stage25-10-test",
     feature = "stage25-11-test",
     feature = "stage25-12-test",
-    feature = "stage25-13-test"
+    feature = "stage25-13-test",
+    feature = "stage25-14-test"
 ))]
 mod driver;
 #[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
@@ -1708,7 +1709,10 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
                 serial::write_line(format_args!("[APPS] production catalog install failed"));
                 halt();
             }
-            boot_stage(&mut console, "BOOT LOADER [3.2/7]: system app catalog installed");
+            boot_stage(
+                &mut console,
+                "BOOT LOADER [3.2/7]: system app catalog installed",
+            );
             if !start_production_system_services() {
                 serial::write_line(format_args!("[SERVICES] production service startup failed"));
                 halt();
@@ -1855,7 +1859,10 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         let session_ready = false;
         #[cfg(feature = "system-apps")]
         {
-            boot_stage(&mut console, "BOOT LOADER [6/7]: starting WovenShell desktop");
+            boot_stage(
+                &mut console,
+                "BOOT LOADER [6/7]: starting WovenShell desktop",
+            );
             let accounts = vfs::stat("/etc/wovenhat/accounts")
                 .is_ok()
                 .then_some("/etc/wovenhat/accounts");
@@ -5696,6 +5703,15 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
             qemu_test_exit_failure();
         }
         serial::write_line(format_args!("[S25.13] wake record integration: PASSED"));
+        qemu_test_exit_success();
+    }
+    #[cfg(feature = "stage25-14-test")]
+    {
+        if !power::suspend_admission_self_test() {
+            serial::write_line(format_args!("[S25.14] suspend admission: FAILED"));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!("[S25.14] suspend admission: PASSED"));
         qemu_test_exit_success();
     }
     serial::write_line(format_args!("[BOOT] ALL VALIDATIONS PASSED"));
@@ -13421,7 +13437,10 @@ fn stage30_1_self_test() -> bool {
     let Some((_pid, exit_status)) =
         run_hello_gui(&readback, &["/bin/hello-gui", "--syscall-benchmark"], false)
     else {
-        return step("load and spawn as an ordinary process, run to completion", false);
+        return step(
+            "load and spawn as an ordinary process, run to completion",
+            false,
+        );
     };
     let status = match exit_status {
         Ok(code) => code as i64,

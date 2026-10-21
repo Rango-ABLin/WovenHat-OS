@@ -378,8 +378,9 @@ pub enum Number {
     /// monitors, left to right in surface coordinates. Requires DisplayIo and
     /// the lease. (208 is reserved for audio recording.)
     GraphicsCompositorOutputs = 207,
-    /// action (0 power off, 1 restart) -> does not return when it works; an
-    /// error code says why the machine is still running. Needs PowerControl.
+    /// action (0 power off, 1 restart, 2 suspend) -> does not return when it
+    /// works; an error code says why the machine is still running or why
+    /// suspend is not yet safely resumable. Needs PowerControl.
     PowerControl = 209,
     /// user buffer packing `[name_len u8][name][old_pin_len u8][old_pin]
     /// [new_pin_len u8][new_pin]` (each part <= 16 bytes), buffer length ->
@@ -2924,9 +2925,7 @@ pub extern "C" fn wovenhat_syscall_dispatch(
         value if value == Number::CpuIdleCapabilities as u64 => {
             sys_cpu_idle_capabilities(arg0, arg1)
         }
-        value if value == Number::CpuFrequencyInfo as u64 => {
-            sys_cpu_frequency_info(arg0, arg1)
-        }
+        value if value == Number::CpuFrequencyInfo as u64 => sys_cpu_frequency_info(arg0, arg1),
         value if value == Number::SuspendResumeCapabilities as u64 => {
             sys_suspend_resume_capabilities(arg0, arg1)
         }
@@ -3301,10 +3300,20 @@ fn pack_compositor_info(width: u32, height: u32, scale: u32) -> u64 {
 fn sys_power_control(action: u64) -> u64 {
     let actor = crate::task::current_task_id().as_u64();
     let allowed =
-        crate::task::current_has(crate::capability::Capability::PowerControl) && action <= 1;
+        crate::task::current_has(crate::capability::Capability::PowerControl) && action <= 2;
     crate::audit::record(actor, crate::audit::Action::PowerControl, action, allowed);
     if !allowed {
         return SYSCALL_ERROR;
+    }
+    if action == 2 {
+        // The kernel wake path currently restores a kernel continuation that
+        // owns rollback, not the interrupted userspace syscall frame. Refuse
+        // the transition until a task-safe return target is committed; do not
+        // leave drivers, CPUs, or firmware state partially prepared.
+        crate::serial::write_line(format_args!(
+            "[POWER] suspend denied: no safe userspace resume target"
+        ));
+        return 4;
     }
     if action == 1 {
         crate::power::reboot();

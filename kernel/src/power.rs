@@ -7,14 +7,14 @@
 //! controller, then the chipset reset port, and finally a triple fault.
 //! Before either, the live-test log on a WovenHat stick gets a last flush.
 
+#[cfg(feature = "stage25-12-test")]
+use core::sync::atomic::{AtomicBool, Ordering};
 use x86_64::instructions::port::Port;
 use x86_64::registers::{
     control::{Cr0, Cr3, Cr4},
     model_specific::Efer,
 };
 use x86_64::{structures::DescriptorTablePointer, VirtAddr};
-#[cfg(feature = "stage25-12-test")]
-use core::sync::atomic::{AtomicBool, Ordering};
 
 /// PM1 control: SCI_EN (ACPI mode), SLP_TYP (bits 10-12), SLP_EN.
 const SCI_EN: u16 = 1;
@@ -84,6 +84,12 @@ pub struct SuspendPreparation {
 /// boundary. It is never populated from userspace and is consumed only by the
 /// wake continuation or an explicit failed-entry rollback.
 static PENDING_SUSPEND: spin::Mutex<Option<SuspendPreparation>> = spin::Mutex::new(None);
+
+/// A suspend request cannot yet be returned to the interrupted userspace
+/// syscall after firmware wake. Keep this admission decision explicit and
+/// testable so capability reporting and the syscall boundary cannot drift.
+#[cfg(feature = "stage25-14-test")]
+const USER_RESUME_TARGET_READY: bool = false;
 
 /// CPU state that must remain available to the post-firmware wake path.
 /// Pointers are recorded as integers so this value can be copied into a
@@ -259,7 +265,8 @@ pub fn prepare_suspend() -> Result<SuspendPreparation, PrepareError> {
     let Some(plan) = crate::driver::suspend_all() else {
         return Err(PrepareError::DriverRefused);
     };
-    let Some(trampoline) = crate::smp::install_wake_trampoline(wake_entry as *const () as u64) else {
+    let Some(trampoline) = crate::smp::install_wake_trampoline(wake_entry as *const () as u64)
+    else {
         let _ = crate::driver::resume_all(plan);
         return Err(PrepareError::TrampolineUnavailable);
     };
@@ -303,10 +310,7 @@ pub fn abort_suspend(preparation: SuspendPreparation) -> bool {
 }
 
 fn abort_pending_suspend() -> bool {
-    PENDING_SUSPEND
-        .lock()
-        .take()
-        .is_some_and(abort_suspend)
+    PENDING_SUSPEND.lock().take().is_some_and(abort_suspend)
 }
 
 /// Request ACPI S3 after every preparation prerequisite has committed. The
@@ -324,7 +328,10 @@ pub fn enter_suspend(preparation: SuspendPreparation) -> Result<(), SuspendError
         let _ = abort_suspend(preparation);
         return Err(SuspendError::NoSuspend);
     }
-    let preparation = SuspendPreparation { context, ..preparation };
+    let preparation = SuspendPreparation {
+        context,
+        ..preparation
+    };
     {
         let mut pending = PENDING_SUSPEND.lock();
         if pending.is_some() {
@@ -367,8 +374,10 @@ pub fn enter_suspend(preparation: SuspendPreparation) -> Result<(), SuspendError
         } else {
             None
         };
-        (s3_control_value(pm1a_current, sleep_a),
-            pm1b_current.and_then(|current| s3_control_value(current, sleep_b)))
+        (
+            s3_control_value(pm1a_current, sleep_a),
+            pm1b_current.and_then(|current| s3_control_value(current, sleep_b)),
+        )
     };
     let write_ok = match write_values {
         (Some(pm1a_value), Some(pm1b_value)) if power.pm1b_control != 0 => {
@@ -421,7 +430,10 @@ extern "C" fn wake_resume_continuation() -> ! {
     reason = "entered by the future firmware wake path after S3 resume"
 )]
 extern "C" fn wake_entry() -> ! {
-    let context = PENDING_SUSPEND.lock().as_ref().map(|pending| pending.context);
+    let context = PENDING_SUSPEND
+        .lock()
+        .as_ref()
+        .map(|pending| pending.context);
     if let Some(context) = context {
         // SAFETY: the pending record is kernel-owned and was validated before
         // PM1 S3 entry; the continuation performs the owned rollback.
@@ -443,9 +455,15 @@ pub fn wake_record_self_test() -> bool {
         && VirtAddr::try_new(wake_resume_continuation as *const () as u64).is_ok()
 }
 
+#[cfg(feature = "stage25-14-test")]
+pub fn suspend_admission_self_test() -> bool {
+    !USER_RESUME_TARGET_READY && PENDING_SUSPEND.lock().is_none()
+}
+
 #[cfg(feature = "stage25-7-test")]
 pub fn wake_trampoline_self_test() -> bool {
-    let Some(trampoline) = crate::smp::install_wake_trampoline(wake_entry as *const () as u64) else {
+    let Some(trampoline) = crate::smp::install_wake_trampoline(wake_entry as *const () as u64)
+    else {
         return false;
     };
     crate::smp::release_wake_trampoline(trampoline)

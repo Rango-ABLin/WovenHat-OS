@@ -111,12 +111,16 @@ pub(crate) fn install_facs_wake_vector(target: u64) -> Option<FacsWakeVector> {
     // SAFETY: the same validated FACS fields are written back as volatile
     // firmware-visible values; interrupts cannot interleave this transaction.
     x86_64::instructions::interrupts::without_interrupts(|| unsafe {
-        (address as *mut u32).add(3).write_volatile(u32::from_le_bytes(
-            bytes[12..16].try_into().expect("fixed FACS field"),
-        ));
-        (address as *mut u64).add(3).write_volatile(u64::from_le_bytes(
-            bytes[24..32].try_into().expect("fixed FACS field"),
-        ));
+        (address as *mut u32)
+            .add(3)
+            .write_volatile(u32::from_le_bytes(
+                bytes[12..16].try_into().expect("fixed FACS field"),
+            ));
+        (address as *mut u64)
+            .add(3)
+            .write_volatile(u64::from_le_bytes(
+                bytes[24..32].try_into().expect("fixed FACS field"),
+            ));
     });
     Some(FacsWakeVector {
         address: facs.address,
@@ -154,8 +158,7 @@ pub fn facs_wake_vector_self_test() -> bool {
     let Some((previous_32, previous_64)) = patch_facs_vectors(&mut bytes, 0x0008_0000) else {
         return false;
     };
-    let installed = read_u32(&bytes, 12) == 0x0008_0000
-        && read_u64(&bytes, 24) == 0x0008_0000;
+    let installed = read_u32(&bytes, 12) == 0x0008_0000 && read_u64(&bytes, 24) == 0x0008_0000;
     bytes[12..16].copy_from_slice(&previous_32.to_le_bytes());
     bytes[24..32].copy_from_slice(&previous_64.to_le_bytes());
     installed
@@ -594,11 +597,7 @@ fn read_fadt_power(
     Ok(())
 }
 
-fn read_facs(
-    physical_offset: u64,
-    address: u64,
-    regions: &[MemoryRegion],
-) -> Option<Facs> {
+fn read_facs(physical_offset: u64, address: u64, regions: &[MemoryRegion]) -> Option<Facs> {
     let mut header = [0_u8; 8];
     read_physical(physical_offset, address, &mut header, regions).ok()?;
     let length = read_u32(&header, 4);

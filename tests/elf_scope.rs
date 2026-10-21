@@ -259,7 +259,10 @@ fn lifecycle_metadata_is_bounded_and_relocated() {
 fn lifecycle_metadata_rejects_non_executable_callbacks() {
     let mut bytes = lifecycle_fixture();
     put64(&mut bytes, 0x1388, BASE + 0x1000);
-    assert!(matches!(elf::parse(&bytes), Err(elf::Error::InvalidSegment)));
+    assert!(matches!(
+        elf::parse(&bytes),
+        Err(elf::Error::InvalidSegment)
+    ));
 }
 
 fn plt_fixture() -> Vec<u8> {
@@ -601,14 +604,19 @@ fn weak_exports_are_fallbacks_and_undefined_weak_imports_resolve_to_zero() {
     let mut weak_bytes = fixture(&[8]);
     weak_bytes[SYMBOL + 4] = 0x22; // STB_WEAK | STT_FUNC
     let weak = image(&weak_bytes);
-    assert_eq!(weak.defined_global_symbol(&weak_bytes, b"export"), Some(BASE + 0x20));
+    assert_eq!(
+        weak.defined_global_symbol(&weak_bytes, b"export"),
+        Some(BASE + 0x20)
+    );
 
     let strong_bytes = fixture(&[]);
     let strong = image(&strong_bytes);
     let mut scope = elf::SymbolScope::new(&weak, &weak_bytes);
-    assert!(scope
-        .add_dependency(b"a.so", &strong, &strong_bytes)
-        .is_ok());
+    assert!(
+        scope
+            .add_dependency(b"a.so", &strong, &strong_bytes)
+            .is_ok()
+    );
     assert_eq!(scope.resolve(b"export"), Some(BASE + 0x20));
 
     let mut undefined_bytes = fixture(&[]);
@@ -629,15 +637,20 @@ fn versioned_definitions_and_requirements_resolve_by_name() {
         .unwrap_or_else(|error| panic!("definition fixture: {error:?}"));
     let dynamic = definition.dynamic().expect("versioned dynamic metadata");
     assert_eq!(dynamic.verdef_count, 1);
-    assert_eq!(definition.defined_global_symbol(&definition_bytes, b"export"), None);
+    assert_eq!(
+        definition.defined_global_symbol(&definition_bytes, b"export"),
+        None
+    );
 
     let requirement_bytes = versioned_requirement_fixture();
     let requirement = elf::parse(&requirement_bytes)
         .unwrap_or_else(|error| panic!("requirement fixture: {error:?}"));
     let mut scope = elf::SymbolScope::new(&requirement, &requirement_bytes);
-    assert!(scope
-        .add_dependency(b"a.so", &definition, &definition_bytes)
-        .is_ok());
+    assert!(
+        scope
+            .add_dependency(b"a.so", &definition, &definition_bytes)
+            .is_ok()
+    );
     assert_eq!(
         requirement.relocation_symbol_value(&requirement_bytes, 1, &scope),
         Some(BASE + 0x20)
@@ -669,22 +682,30 @@ fn dependency_order_and_duplicate_needed_are_checked() {
     let library_bytes = fixture(&[]);
     let library = image(&library_bytes);
     let mut scope = elf::SymbolScope::new(&main, &main_bytes);
-    assert!(scope
-        .add_dependency(b"b.so", &library, &library_bytes)
-        .is_ok());
-    assert!(scope
-        .add_dependency(b"a.so", &library, &library_bytes)
-        .is_ok());
+    assert!(
+        scope
+            .add_dependency(b"b.so", &library, &library_bytes)
+            .is_ok()
+    );
+    assert!(
+        scope
+            .add_dependency(b"a.so", &library, &library_bytes)
+            .is_ok()
+    );
     assert!(scope.validate_dependencies().is_err());
     let duplicate_bytes = fixture(&[8, 8]);
     let duplicate = image(&duplicate_bytes);
     let mut scope = elf::SymbolScope::new(&duplicate, &duplicate_bytes);
-    assert!(scope
-        .add_dependency(b"a.so", &library, &library_bytes)
-        .is_ok());
-    assert!(scope
-        .add_dependency(b"b.so", &library, &library_bytes)
-        .is_ok());
+    assert!(
+        scope
+            .add_dependency(b"a.so", &library, &library_bytes)
+            .is_ok()
+    );
+    assert!(
+        scope
+            .add_dependency(b"b.so", &library, &library_bytes)
+            .is_ok()
+    );
     assert!(scope.validate_dependencies().is_err());
 }
 

@@ -97,26 +97,29 @@ pub(crate) fn install_wake_trampoline(entry: u64) -> Option<WakeTrampoline> {
     let real_root = paging::kernel_address_space()?.root_address();
     let root = memory::allocate_frame()?.start_address().as_u64();
     let Some(pdpt_frame) = memory::allocate_frame() else {
-        let _ = memory::deallocate_frame(x86_64::structures::paging::PhysFrame::from_start_address(
-            x86_64::PhysAddr::new(root),
-        ).ok()?);
+        let _ = memory::deallocate_frame(
+            x86_64::structures::paging::PhysFrame::from_start_address(x86_64::PhysAddr::new(root))
+                .ok()?,
+        );
         return None;
     };
     let pdpt = pdpt_frame.start_address().as_u64();
     let Some(pd_frame) = memory::allocate_frame() else {
         let _ = memory::deallocate_frame(pdpt_frame);
-        let _ = memory::deallocate_frame(x86_64::structures::paging::PhysFrame::from_start_address(
-            x86_64::PhysAddr::new(root),
-        ).ok()?);
+        let _ = memory::deallocate_frame(
+            x86_64::structures::paging::PhysFrame::from_start_address(x86_64::PhysAddr::new(root))
+                .ok()?,
+        );
         return None;
     };
     let pd = pd_frame.start_address().as_u64();
     if root >= 1u64 << 32 {
         let _ = memory::deallocate_frame(pd_frame);
         let _ = memory::deallocate_frame(pdpt_frame);
-        let _ = memory::deallocate_frame(x86_64::structures::paging::PhysFrame::from_start_address(
-            x86_64::PhysAddr::new(root),
-        ).ok()?);
+        let _ = memory::deallocate_frame(
+            x86_64::structures::paging::PhysFrame::from_start_address(x86_64::PhysAddr::new(root))
+                .ok()?,
+        );
         return None;
     }
     let (base, size) = unsafe {
@@ -127,9 +130,10 @@ pub(crate) fn install_wake_trampoline(entry: u64) -> Option<WakeTrampoline> {
     if size >= 4096 {
         let _ = memory::deallocate_frame(pd_frame);
         let _ = memory::deallocate_frame(pdpt_frame);
-        let _ = memory::deallocate_frame(x86_64::structures::paging::PhysFrame::from_start_address(
-            x86_64::PhysAddr::new(root),
-        ).ok()?);
+        let _ = memory::deallocate_frame(
+            x86_64::structures::paging::PhysFrame::from_start_address(x86_64::PhysAddr::new(root))
+                .ok()?,
+        );
         return None;
     }
     // SAFETY: the bootloader's physical-memory mapping covers the validated
@@ -147,8 +151,7 @@ pub(crate) fn install_wake_trampoline(entry: u64) -> Option<WakeTrampoline> {
         table[0].set_addr(x86_64::PhysAddr::new(pdpt), flags);
         core::ptr::write_bytes((offset + pdpt) as *mut u8, 0, 4096);
         core::ptr::write_bytes((offset + pd) as *mut u8, 0, 4096);
-        (&mut *((offset + pdpt) as *mut PageTable))[0]
-            .set_addr(x86_64::PhysAddr::new(pd), flags);
+        (&mut *((offset + pdpt) as *mut PageTable))[0].set_addr(x86_64::PhysAddr::new(pd), flags);
         (&mut *((offset + pd) as *mut PageTable))[0].set_addr(
             x86_64::PhysAddr::new(0),
             flags | x86_64::structures::paging::PageTableFlags::HUGE_PAGE,
@@ -172,15 +175,15 @@ pub(crate) fn install_wake_trampoline(entry: u64) -> Option<WakeTrampoline> {
 }
 
 pub(crate) fn release_wake_trampoline(trampoline: WakeTrampoline) -> bool {
-    let root = x86_64::structures::paging::PhysFrame::from_start_address(
-        x86_64::PhysAddr::new(trampoline.root),
-    );
-    let pdpt = x86_64::structures::paging::PhysFrame::from_start_address(
-        x86_64::PhysAddr::new(trampoline.pdpt),
-    );
-    let pd = x86_64::structures::paging::PhysFrame::from_start_address(
-        x86_64::PhysAddr::new(trampoline.pd),
-    );
+    let root = x86_64::structures::paging::PhysFrame::from_start_address(x86_64::PhysAddr::new(
+        trampoline.root,
+    ));
+    let pdpt = x86_64::structures::paging::PhysFrame::from_start_address(x86_64::PhysAddr::new(
+        trampoline.pdpt,
+    ));
+    let pd = x86_64::structures::paging::PhysFrame::from_start_address(x86_64::PhysAddr::new(
+        trampoline.pd,
+    ));
     let root_released = root.is_ok_and(memory::deallocate_frame);
     let pdpt_released = pdpt.is_ok_and(memory::deallocate_frame);
     let pd_released = pd.is_ok_and(memory::deallocate_frame);
@@ -748,10 +751,7 @@ pub fn prepare(regions: &[MemoryRegion]) {
             BOOT_PAGE.store(start, Ordering::Relaxed);
             // Prefer a second page from the same usable range. If the range
             // contains only one page, the next usable range supplies it.
-            if start
-                .checked_add(8192)
-                .is_some_and(|end| end <= limit)
-            {
+            if start.checked_add(8192).is_some_and(|end| end <= limit) {
                 WAKE_PAGE.store(start + 4096, Ordering::Relaxed);
                 break;
             }

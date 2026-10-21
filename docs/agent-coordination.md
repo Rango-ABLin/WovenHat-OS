@@ -3812,3 +3812,15 @@ The full Stage 13.9 1/2/4-CPU chain passed again. Upstream review found that
 context-info default queue, so no speculative post-ALIVE command path was
 added. RX completion reclaim is now wired into the physical poller and covered
 by the queue-owner self-test. Physical boot/ALIVE evidence is still pending.
+**Stage 25.14 (Codex, 2026-10-21):** The power ABI now accepts suspend as
+action 2 for the privileged desktop capability, and `libwoven::suspend` is
+available. It fails closed with error 4 because Stage 25.13 restores only a
+kernel rollback continuation, not the interrupted userspace syscall frame.
+No preparation or hardware write occurs on rejection. Physical S3
+qualification remains explicitly pending.
+
+Stage 25.14 focused acceptance passed on 1/2/4 CPUs. Evidence is recorded in
+`docs/audit-stage25-14-suspend-admission-2026-10-21.md` and the three
+`audit-artifacts/stage25.14-*` directories. The stage remains a fail-closed
+ABI boundary; physical S3 and userspace return-path qualification are not
+claimed.

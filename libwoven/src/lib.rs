@@ -13336,6 +13336,15 @@ pub fn restart() -> Result<u64, Error> {
     check(unsafe { syscall::invoke(syscall::POWER_CONTROL, 1, 0, 0) })
 }
 
+/// Request suspend. The kernel currently rejects this request with a
+/// deterministic failure until it can restore the interrupted userspace
+/// syscall frame after firmware wake. No hardware state is changed on
+/// rejection. Needs PowerControl (the desktop session).
+pub fn suspend() -> Result<u64, Error> {
+    // SAFETY: integer-only call.
+    check(unsafe { syscall::invoke(syscall::POWER_CONTROL, 2, 0, 0) })
+}
+
 /// Firmware-advertised power transitions. This query performs no transition.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct PowerCapabilities {

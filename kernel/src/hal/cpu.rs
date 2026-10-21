@@ -48,8 +48,8 @@ pub fn idle_capabilities() -> IdleCapabilities {
     let basic_max = __cpuid(0).eax;
     let basic = (basic_max >= FEATURE_INFO).then(|| __cpuid(FEATURE_INFO));
     let extended_max = __cpuid(0x8000_0000).eax;
-    let invariant_tsc = (extended_max >= 0x8000_0007)
-        && (__cpuid(0x8000_0007).edx & INVARIANT_TSC != 0);
+    let invariant_tsc =
+        (extended_max >= 0x8000_0007) && (__cpuid(0x8000_0007).edx & INVARIANT_TSC != 0);
     IdleCapabilities {
         // HLT is part of the baseline x86 execution environment used by this
         // kernel; it is not a firmware or MSR-controlled optional feature.
