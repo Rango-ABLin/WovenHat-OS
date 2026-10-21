@@ -26,6 +26,8 @@ public key and rejects a mismatched trusted public key.
   were generated.
 - `python scripts/build-package-service.py --production`: passed with the
   same explicit acceptance fixture.
+- `package-release.py` now always regenerates the catalog in production mode,
+  preventing a stale test-key catalog from being copied into a release.
 - `git diff --check`: passed.
 
 ## Limits
