@@ -1,5 +1,15 @@
 # WovenHat OS Architecture & Codebase Guide
 
+### Stage 24.57 - physical TPM credential-root read boundary
+
+`kernel/src/tpm2.rs` now provides the bounded physical read path that validates
+the configured NV public area, starts and PCR-binds a managed policy session,
+performs an authenticated read at offset zero, refreshes the TPM nonce, and
+flushes the session on every exit. The 32-byte root remains kernel-local and is
+wiped before the validated `CredentialRootLease` is returned. This boundary is
+implemented and host/QEMU validated, but a real TPM execution is still needed
+before release qualification.
+
 ### Stage 24.56 - signed TPM broker record generator
 
 `tools/tpm-broker-config` is the release-side constructor for the fixed

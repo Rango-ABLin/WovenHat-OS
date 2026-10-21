@@ -2,6 +2,12 @@ WovenHat OS — Stage 10.7 → Version 1.0 Master Roadmap
 Phase I — Finish the asynchronous kernel foundation
 Stage 10.7 — Asynchronous TCP
 
+Stage 24.57 - Physical TPM credential-root read boundary
+Implemented the bounded kernel path that validates the configured NV public
+area, applies the PCR policy, performs authenticated policy-session NV Read,
+refreshes the nonce, and flushes/wipes all transient state. Physical TPM
+execution and hardware qualification remain release gates.
+
 Stage 24.56 - Signed TPM broker record generator
 Added the warning-clean `tools/tpm-broker-config` release tool. It validates
 production bounds and emits a fixed signed `TCB1` policy record only with an

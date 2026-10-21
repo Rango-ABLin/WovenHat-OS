@@ -1,5 +1,23 @@
 # Stage status
 
+## Stage 24.57 physical TPM credential-root read boundary (2026-10-21)
+
+Added the kernel-side read-only handoff for the signed credential-root record:
+bounded `NV_ReadPublic`, PCR-policy session application, authenticated
+policy-session `NV_Read`, refreshed TPM nonce handling, and mandatory session
+flush/secret wiping before promoting the root into a `CredentialRootLease`.
+The path is fail-closed on malformed metadata, invalid bounds, stale session
+state, or TPM errors and does not expose TPM authorization material to
+userspace. Host tests (89), warning-denying all-target and affected kernel
+feature Clippy, and exact-tree memory plus signed system-app acceptance on
+1/2/4 CPUs pass. Evidence is under
+`audit-artifacts/stage24.57-tpm-credential-root-read-20261021`.
+
+No live TPM is available in this environment, so physical NV provisioning,
+PCR-policy execution against a real TPM, reboot persistence, and hardware
+qualification remain open release gates. The attached USB was not opened or
+modified.
+
 ## Stage 24.56 signed TPM broker record generator (2026-10-21)
 
 Added `tools/tpm-broker-config`, a warning-clean host tool that emits the

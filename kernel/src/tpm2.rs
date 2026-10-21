@@ -2609,6 +2609,95 @@ fn encode_nv_read_policy(
     Ok(command_size)
 }
 
+fn encode_nv_read_policy_authenticated(
+    session_handle: u32,
+    nv_index: u32,
+    nonce_caller: &[u8],
+    attributes: u8,
+    hmac: &[u8],
+    output: &mut [u8; 128],
+) -> Result<usize, Error> {
+    if session_handle == 0
+        || session_handle == TPM_RS_PW
+        || nv_index == 0
+        || nonce_caller.len() > 32
+        || hmac.len() != 32
+    {
+        return Err(Error::InvalidDescriptor);
+    }
+    let auth_size = 9usize
+        .saturating_add(nonce_caller.len())
+        .saturating_add(hmac.len());
+    let command_size = 35usize
+        .saturating_add(nonce_caller.len())
+        .saturating_add(hmac.len());
+    output.fill(0);
+    output[..2].copy_from_slice(&TPM_ST_SESSIONS.to_be_bytes());
+    output[2..6].copy_from_slice(&(command_size as u32).to_be_bytes());
+    output[6..10].copy_from_slice(&TPM_CC_NV_READ.to_be_bytes());
+    output[10..14].copy_from_slice(&nv_index.to_be_bytes());
+    output[14..18].copy_from_slice(&nv_index.to_be_bytes());
+    output[18..20].copy_from_slice(&32_u16.to_be_bytes());
+    output[20..22].copy_from_slice(&0_u16.to_be_bytes());
+    output[22..26].copy_from_slice(&(auth_size as u32).to_be_bytes());
+    output[26..30].copy_from_slice(&session_handle.to_be_bytes());
+    output[30..32].copy_from_slice(&(nonce_caller.len() as u16).to_be_bytes());
+    let nonce_end = 32 + nonce_caller.len();
+    output[32..nonce_end].copy_from_slice(nonce_caller);
+    output[nonce_end] = attributes;
+    output[nonce_end + 1..nonce_end + 3].copy_from_slice(&(hmac.len() as u16).to_be_bytes());
+    output[nonce_end + 3..nonce_end + 3 + hmac.len()].copy_from_slice(hmac);
+    Ok(command_size)
+}
+
+fn nv_read_parameter_digest(
+    nv_index: u32,
+    size: u16,
+    offset: u16,
+) -> Result<[u8; 32], Error> {
+    if nv_index == 0 || size == 0 || size > 32 {
+        return Err(Error::InvalidDescriptor);
+    }
+    let mut digest = Sha256::new();
+    digest.update(TPM_CC_NV_READ.to_be_bytes());
+    digest.update(nv_index.to_be_bytes());
+    digest.update(nv_index.to_be_bytes());
+    digest.update(size.to_be_bytes());
+    digest.update(offset.to_be_bytes());
+    Ok(digest.finalize().into())
+}
+
+/// Derive the policy-session HMAC for a fixed-size `TPM2_NV_Read`. The
+/// caller supplies the NV auth value from a kernel-only provisioning path;
+/// the normal sealed credential-root path uses an empty NV auth value because
+/// the PCR policy is the authority.
+#[allow(dead_code)]
+pub fn derive_nv_read_session_hmac(
+    session: &PolicySession,
+    nv_index: u32,
+    nonce_caller: &[u8],
+    attributes: u8,
+    auth_value: &[u8],
+) -> Result<[u8; 32], Error> {
+    if session.handle == 0
+        || session.handle == TPM_RS_PW
+        || session.nonce_tpm_length as usize > session.nonce_tpm.len()
+        || nonce_caller.len() > 32
+        || auth_value.len() > 64
+    {
+        return Err(Error::InvalidDescriptor);
+    }
+    let cp_hash = nv_read_parameter_digest(nv_index, 32, 0)?;
+    let nonce_tpm = &session.nonce_tpm[..usize::from(session.nonce_tpm_length)];
+    let mut hmac = [0_u8; 32];
+    hmac_sha256(
+        auth_value,
+        &[cp_hash.as_slice(), nonce_tpm, nonce_caller, &[attributes]],
+        &mut hmac,
+    )?;
+    Ok(hmac)
+}
+
 #[allow(dead_code)]
 pub fn decode_nv_read_policy_response(
     response: &[u8],
@@ -2661,6 +2750,108 @@ pub fn decode_nv_read_policy_response(
     })
 }
 
+/// Execute one authenticated, policy-session `TPM2_NV_Read` for the fixed
+/// 32-byte credential root. The response nonce is retained in the live lease;
+/// callers must still flush the lease before promoting or discarding it.
+#[allow(dead_code)]
+pub fn read_nv_with_policy_session(
+    info: Tpm2Info,
+    lease: &mut PolicySessionLease,
+    nv_index: u32,
+    nonce_caller: &[u8],
+    auth_value: &[u8],
+    output: &mut [u8; 32],
+) -> Result<(), Error> {
+    let session = *lease.usable()?;
+    let attributes = TPMA_SESSION_CONTINUE_SESSION;
+    let hmac = derive_nv_read_session_hmac(
+        &session,
+        nv_index,
+        nonce_caller,
+        attributes,
+        auth_value,
+    )?;
+    let mut command = [0_u8; 128];
+    let command_size = encode_nv_read_policy_authenticated(
+        session.handle,
+        nv_index,
+        nonce_caller,
+        attributes,
+        &hmac,
+        &mut command,
+    )?;
+    let mut response = [0_u8; MAX_BUFFER_BYTES];
+    let response_size = execute(info, &command[..command_size], &mut response)?;
+    let authorization = decode_nv_read_policy_response(&response[..response_size], output)?;
+    if authorization.attributes != attributes || authorization.nonce_tpm_length == 0 {
+        return Err(Error::MalformedResponse);
+    }
+    lease.session.nonce_tpm.fill(0);
+    lease.session.nonce_tpm[..usize::from(authorization.nonce_tpm_length)]
+        .copy_from_slice(&authorization.nonce_tpm[..usize::from(authorization.nonce_tpm_length)]);
+    lease.session.nonce_tpm_length = authorization.nonce_tpm_length;
+    Ok(())
+}
+
+/// Read and promote the physical TPM credential root after validating its NV
+/// metadata and PCR policy. This path never writes the TPM and never accepts
+/// a root supplied by userspace.
+#[allow(dead_code)]
+pub fn provision_credential_root_from_tpm(
+    info: Tpm2Info,
+    config: &CredentialBrokerConfig,
+    nonce_caller: &[u8],
+) -> Result<CredentialRootLease, Error> {
+    if nonce_caller.is_empty() || nonce_caller.len() > 32 {
+        return Err(Error::InvalidDescriptor);
+    }
+    let public = read_nv_public(info, config.root_nv_index)?;
+    validate_credential_root_nv(&public, config.root_nv_index, &config.nv_policy)?;
+    let mut lease = start_managed_policy_session(info, nonce_caller)?;
+    let policy_result = apply_managed_policy_pcr(
+        info,
+        &lease,
+        config.pcr,
+        &config.expected_digest,
+    )
+    .and_then(|()| {
+        let mut root = [0_u8; 32];
+        let result = read_nv_with_policy_session(
+            info,
+            &mut lease,
+            config.root_nv_index,
+            nonce_caller,
+            &[],
+            &mut root,
+        );
+        match result {
+            Ok(()) => Ok(root),
+            Err(error) => {
+                root.fill(0);
+                Err(error)
+            }
+        }
+    });
+    let flush_result = flush_policy_session(info, &mut lease);
+    match (policy_result, flush_result) {
+        (Ok(mut root), Ok(())) => {
+            let result = provision_credential_root(
+                &public,
+                config.root_nv_index,
+                &config.nv_policy,
+                &root,
+            );
+            root.fill(0);
+            result
+        }
+        (Err(error), _) => Err(error),
+        (Ok(mut root), Err(error)) => {
+            root.fill(0);
+            Err(error)
+        }
+    }
+}
+
 #[allow(dead_code)]
 pub fn decode_nv_read_public(response: &[u8]) -> Result<NvPublic, Error> {
     if response.len() < 28 {
@@ -2705,6 +2896,21 @@ pub fn decode_nv_read_public(response: &[u8]) -> Result<NvPublic, Error> {
         auth_policy,
         data_size,
     })
+}
+
+/// Read the bounded public metadata for one NV index through the serialized
+/// CRB transport. The returned metadata is evidence only until the caller
+/// validates it against a signed broker configuration.
+#[allow(dead_code)]
+pub fn read_nv_public(info: Tpm2Info, index: u32) -> Result<NvPublic, Error> {
+    if index == 0 {
+        return Err(Error::InvalidDescriptor);
+    }
+    let mut command = [0_u8; 14];
+    encode_nv_read_public(index, &mut command);
+    let mut response = [0_u8; MAX_BUFFER_BYTES];
+    let response_size = execute(info, &command, &mut response)?;
+    decode_nv_read_public(&response[..response_size])
 }
 
 fn skip_tpm2b<'a>(bytes: &'a [u8], offset: &mut usize, maximum: usize) -> Result<&'a [u8], Error> {

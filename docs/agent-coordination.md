@@ -1,5 +1,14 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - Stage 24.57 (2026-10-21)
+
+Added the physical TPM credential-root read boundary: bounded NV public
+validation, PCR-bound policy-session authenticated NV read, nonce refresh,
+fail-closed promotion, and unconditional session cleanup/secret wiping. Host,
+Clippy, memory, and signed system-app gates passed on 1/2/4 CPUs. No live TPM
+was available, and the attached USB remains untouched; physical TPM
+qualification is still required.
+
 ## Codex - Stage 24.56 (2026-10-21)
 
 Added `tools/tpm-broker-config` to construct signed 182-byte `TCB1` policy
