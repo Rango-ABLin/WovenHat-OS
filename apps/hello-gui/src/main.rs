@@ -77,6 +77,11 @@
 //! kernel self-test pre-creates, reporting write and read timings
 //! separately.
 //!
+//! With `--compositor-benchmark` it times `COMPOSITOR_BENCHMARK_ITERATIONS`
+//! round trips of toggling one pixel of a placed window and flushing it to
+//! the framebuffer (`surface.write` + `compositor_present`), needing
+//! `DisplayIo`.
+//!
 //! With `--probe <handle>` it runs as an ordinary process and checks that the
 //! kernel refuses it everything it has no authority for: every compositor
 //! operation, and every operation on the surface `<handle>`, which belongs to
@@ -380,6 +385,69 @@ fn fs_benchmark() -> ! {
     libwoven::exit(0)
 }
 
+const COMPOSITOR_BENCHMARK_ITERATIONS: u64 = 500;
+
+/// Standalone compositor-present-latency micro-benchmark (Stage 30
+/// performance engineering): time `COMPOSITOR_BENCHMARK_ITERATIONS` round
+/// trips of changing one pixel of a placed window's surface and flushing
+/// it to the framebuffer (`surface.write` + `compositor_present`), timed
+/// with the cycle counter. A single unchanging frame would let the
+/// compositor skip undamaged work, understating real cost, so each
+/// iteration toggles a pixel to mark genuine damage. Needs `DisplayIo`.
+fn compositor_benchmark() -> ! {
+    let surface = match GraphicsSurface::create(32, 32) {
+        Ok(surface) => surface,
+        Err(_) => fail(340),
+    };
+    if surface.fill_rect(0, 0, 32, 32, BACKGROUND).is_err() {
+        fail(341);
+    }
+    if libwoven::compositor_claim().is_err() {
+        fail(342);
+    }
+    if surface.present(0, 0).is_err() {
+        fail(343);
+    }
+    if libwoven::compositor_present().is_err() {
+        fail(344);
+    }
+    let mut min = u64::MAX;
+    let mut max = 0u64;
+    let mut total: u128 = 0;
+    for iteration in 0..COMPOSITOR_BENCHMARK_ITERATIONS {
+        let toggled = if iteration % 2 == 0 { TITLE_BAR } else { BACKGROUND };
+        let start = libwoven::cycles();
+        if surface.write(0, 0, 1, 1, &[toggled]).is_err() {
+            fail(345);
+        }
+        if libwoven::compositor_present().is_err() {
+            fail(346);
+        }
+        let elapsed = libwoven::cycles().wrapping_sub(start);
+        min = min.min(elapsed);
+        max = max.max(elapsed);
+        total += u128::from(elapsed);
+    }
+    let average = (total / u128::from(COMPOSITOR_BENCHMARK_ITERATIONS)) as u64;
+    let mut digits = [0u8; 20];
+    let _ = libwoven::print("hello-gui: compositor benchmark (write+present) min=");
+    let _ =
+        libwoven::write(libwoven::syscall::STDOUT, libwoven::format_u64(min, &mut digits));
+    let _ = libwoven::print(" avg=");
+    let _ = libwoven::write(
+        libwoven::syscall::STDOUT,
+        libwoven::format_u64(average, &mut digits),
+    );
+    let _ = libwoven::print(" max=");
+    let _ = libwoven::write(libwoven::syscall::STDOUT, libwoven::format_u64(max, &mut digits));
+    let _ = libwoven::print(" cycles\n");
+    if average == 0 {
+        fail(320);
+    }
+    let _ = libwoven::print("hello-gui: compositor benchmark: PASSED\n");
+    libwoven::exit(0)
+}
+
 fn main(args: Args) -> ! {
     match args.get(1) {
         Some(b"--audio") => audio(),
@@ -401,6 +469,7 @@ fn main(args: Args) -> ! {
         Some(b"--syscall-benchmark") => syscall_benchmark(),
         Some(b"--ipc-benchmark") => ipc_benchmark(),
         Some(b"--fs-benchmark") => fs_benchmark(),
+        Some(b"--compositor-benchmark") => compositor_benchmark(),
         Some(_) => fail(250),
         None => run(Input::None),
     }
