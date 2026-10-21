@@ -376,12 +376,7 @@ fn clock_text(time: Option<DateTime>, seconds: bool) -> ([u8; 8], usize) {
     (text, if seconds { 8 } else { 5 })
 }
 
-/// The lock screen's translatable strings for `language`, built through
-/// `libwoven::i18n::Catalog` (Stage 26.5). English values are byte-for-byte
-/// the literals every already-accepted lock-screen gate expects, so the
-/// default language changes nothing; Chichewa is a best-effort demo
-/// translation, not a reviewed localization.
-fn lock_catalog(language: libwoven::i18n::Language) -> libwoven::i18n::Catalog {
+fn build_lock_catalog(language: libwoven::i18n::Language) -> libwoven::i18n::Catalog {
     use libwoven::i18n::{Catalog, Language};
     let entries: &[(&str, &str)] = match language {
         Language::English => &[
@@ -412,6 +407,33 @@ fn lock_catalog(language: libwoven::i18n::Language) -> libwoven::i18n::Catalog {
         let _ = catalog.insert(key, value);
     }
     catalog
+}
+
+/// Both lock-screen catalogs, in `.bss` rather than on the stack: each
+/// `libwoven::i18n::Catalog` is sized for `MAX_TRANSLATIONS` entries
+/// (several KiB), and the user stack is 8 KiB (see `DesktopState`).
+struct LockCatalogs(UnsafeCell<Option<(libwoven::i18n::Catalog, libwoven::i18n::Catalog)>>);
+
+// SAFETY: the shell is single-threaded, and `lock_catalog` takes the only reference.
+unsafe impl Sync for LockCatalogs {}
+
+static LOCK_CATALOGS: LockCatalogs = LockCatalogs(UnsafeCell::new(None));
+
+/// The lock screen's translatable strings for `language`, built once (lazily,
+/// into `LOCK_CATALOGS`) through `libwoven::i18n::Catalog` (Stage 26.5).
+/// English values are byte-for-byte the literals every already-accepted
+/// lock-screen gate expects, so the default language changes nothing;
+/// Chichewa is a best-effort demo translation, not a reviewed localization.
+fn lock_catalog(language: libwoven::i18n::Language) -> &'static libwoven::i18n::Catalog {
+    use libwoven::i18n::Language;
+    // SAFETY: single-threaded; no other reference to this cell is live.
+    let slot = unsafe { &mut *LOCK_CATALOGS.0.get() };
+    let (english, chichewa) = slot
+        .get_or_insert_with(|| (build_lock_catalog(Language::English), build_lock_catalog(Language::Chichewa)));
+    match language {
+        Language::English => english,
+        Language::Chichewa => chichewa,
+    }
 }
 
 /// `bytes` as text, cut to `limit` characters; anything not printable ASCII
