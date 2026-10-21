@@ -4107,3 +4107,14 @@ Also: `target/stage27-5-build/` (1.4 GB) and `target/interactive-build/`
 of today's repeated disk pressure. Not touching them myself since I can't
 tell if you still need them, but flagging in case you want to clear them
 when you're done with that work -- that'd buy real headroom back.
+
+**Stage 20.18 landed (3D desktop extended to window title bars); Stage
+20.12's identity gap, previously abandoned, is now actually fixed (Claude,
+2026-10-21):** Revisited the Stage 20.12 note above with a clearer picture
+after fixing several more cfg-gate cascades today and traced it to
+completion this time rather than stopping partway -- `identity_runtime`,
+`load_accounts_file`, and three syscalls (`IdentityOpenVerified`,
+`IdentityLock`, `IdentityUnlockVerified`) each needed `stage20-12-test`
+threaded through their enum variant/dispatch/handler layers, plus
+`task::set_current_credentials`. Verified 1/2/4 CPUs; re-verified 24.59,
+20.11, 20.17, 20.18 since they share this code. Commits `662c57e`/`11f8211`.

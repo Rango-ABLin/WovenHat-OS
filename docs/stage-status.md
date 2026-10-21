@@ -1,5 +1,28 @@
 # Stage status
 
+## Stage 20.12 fix - accounts now actually load into the kernel identity AUTHORITY (2026-10-21)
+
+`stage20_12_self_test` wrote a real accounts file to the VFS and spawned
+WovenShell with `--accounts`, but nothing in that path ever loaded those
+credentials into the kernel's `AUTHORITY`, so every sign-in/lock/unlock
+check failed with `Error::NotReady` -- indistinguishable from a wrong PIN
+at the UI layer. This was found and deliberately left unfixed earlier
+today (logged as a cascade through independently-gated syscall layers too
+deep to rush). Revisited with a clearer picture and traced the full chain
+this time: the `identity_runtime` module and `load_accounts_file`, and
+three syscalls the sign-in/lock/unlock flow exercises (`IdentityOpenVerified`,
+`IdentityLock`, `IdentityUnlockVerified`, each gated at three layers:
+enum variant, dispatch arm, handler), plus `task::set_current_credentials`.
+The self-test now also calls `load_accounts_file` after writing the
+accounts file and grants `AccountManage`.
+
+Verified on 1/2/4 CPUs: the three previously vacuous or impossible steps
+now genuinely exercise real PBKDF2-backed credential verification (ada's
+PIN is rejected via `WrongPassword`, not `NotReady`; lin's PIN signs in;
+the lock screen refuses ada's and accepts lin's). Re-verified Stage 24.59,
+20.11, 20.17, and 20.18, which share the same identity syscalls or
+adjacent code, plus host tests and clippy -- all clean.
+
 ## Stage 20.18 - 3D desktop mode extended to window title bars (2026-10-21)
 
 The "3D Desktop" toggle (Stage 20.17) now also perspective-projects every
