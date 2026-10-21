@@ -1,5 +1,67 @@
 # Stage status
 
+## Stage 20.16 — standalone textured-3D-chrome proof of concept (2026-10-21)
+
+First concrete slice of the user's "fully 3D, not 2D characteristics"
+graphics directive (see `docs/agent-coordination.md`, 2026-10-20). Three
+additive pieces, each landed and validated separately, none touching any
+already-accepted compositor or desktop path:
+
+1. `libwoven::graphics::Vertex3Tex`/`Renderer::textured_triangle_3d`: the
+   existing software-3D rasterizer (`triangle_3d`) only interpolates a flat
+   per-vertex colour; this sibling samples a source `Canvas` via
+   affine-interpolated u/v instead, which is the primitive a 3D-rendered
+   desktop needs to show a window's own rendered pixels on a tilted plane
+   rather than a solid-coloured shape. 3 new tests (correct per-corner
+   sampling, depth-test occlusion, empty-source safety).
+2. `libwoven::graphics::Camera`: a fixed-point (16.16, matching `Transform`'s
+   existing convention -- no floating-point state in freestanding
+   userspace) perspective projector from a 3D world point to the screen
+   pixel and depth value the triangle rasterizer wants. 3 new tests (origin
+   centring, perspective shrink + depth ordering, behind-camera rejection).
+3. `hello-gui --3d-chrome-demo` (`stage20-16-test`): a standalone
+   proof of concept wiring the first two together end to end -- render a
+   title-bar-like strip offscreen exactly as WovenShell's own chrome does
+   today, project it through a tilted `Camera` as a texture-mapped quad
+   instead of a flat blit, present it, and have the kernel self-test
+   re-read the compositor to confirm what was presented is really there.
+   Caught and fixed two real bugs on the way: the demo's canvas/depth
+   buffers were first stack-allocated (~67 KiB against an 8 KiB user
+   stack -- an immediate page fault) and, once moved to static `.bss`, the
+   depth buffer's non-zero initial fill turned out to force it into real
+   image data rather than `.bss`, bloating the installed binary past the
+   VFS's 64 KiB node cap. Both are fixed; see the two commits for detail.
+
+Validation: kernel clippy (default features and host `--all-targets`), the
+95-test `libwoven` suite, `stage20-16-test` on 1/2/4 CPUs, and the
+pre-existing Stage 19.2 hello-gui gate (confirming no regression to the
+shared binary) all passed.
+
+**Not yet done:** everything that makes this a *desktop* rather than a demo
+-- replacing WovenShell's flat blits with this projection for real window
+chrome (user explicitly chose this, "3D chrome first," over texturing real
+window bodies, which would also need a new bounded pixel-readback syscall
+window content doesn't have yet), an on/off toggle, and depth/perspective
+values tuned for an actual desktop layout rather than one fixed demo quad.
+
+## Stage 24.59 — deterministic Change-PIN acceptance (2026-10-21)
+
+Accepted. The kernel and WovenShell flow now has a dedicated deterministic
+QEMU gate covering sign-in, Quick Settings, current/new/confirmation PIN
+entry, durable account-record rotation, rejection of the old PIN, and unlock
+with the new PIN. The kernel generates one bounded salt and commits it to both
+the identity authority and account record, with rollback if the durable record
+update fails.
+
+Required checks passed: production-feature kernel Clippy with packaged signed
+system apps, host all-target Clippy, 95 `libwoven` tests, and the Stage 24.59
+QEMU gate on 1/2/4 CPUs. Evidence is under
+`audit-artifacts/stage24.59-change-pin-20261021`.
+
+This closes the password-change gap. Account creation and physical TPM/USB
+qualification remain separate release prerequisites; no USB media was
+modified.
+
 ## Change-PIN kernel primitive and WovenShell UI (2026-10-20/21)
 
 Closes "password change"/"credential rotation" from the four persistent-
@@ -34,9 +96,9 @@ unrelated to the new syscall but the thing most likely to regress from a
 failure on a loaded machine (concurrent Codex builds) that reproduced as a
 pass on immediate retry -- a timing margin in the *test*, not the feature.
 
-**Not yet done:** a dedicated, deterministic self-test of the change-PIN
-flow itself (open Quick Settings, click the new row, type old/new/confirm,
-verify the account's PIN actually changed and the old one stops working).
+The dedicated deterministic Change-PIN self-test is accepted as Stage 24.59
+above. It opens Quick Settings, enters old/new/confirmation PINs, verifies the
+durable record, rejects the old PIN after relock, and unlocks with the new PIN.
 The existing Stage 20.15-style kernel self-tests drive WovenShell through
 kernel-internal input injection rather than QMP key events specifically
 because QMP timing is flaky (as just observed); a correct test here should
