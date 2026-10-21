@@ -1,5 +1,13 @@
 # WovenHat OS Architecture & Codebase Guide
 
+### Stage 24.32 - bounded ECC/P-256 quote verification
+
+`verify_quote_ecc_p256_sha256` builds an uncompressed SEC1 P-256 public key
+from bounded TPM affine coordinates and verifies the exact quote bytes with
+ECDSA/SHA-256. It requires canonical 32-byte `r` and `s` components and
+rejects invalid points or signature mismatches. Key retrieval and TPM key
+identity validation remain caller responsibilities.
+
 ### Stage 24.31 - bounded TPM RSA quote verification
 
 `verify_quote_rsa_sha256` constructs a validated RSA public key from bounded

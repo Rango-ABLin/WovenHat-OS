@@ -8,6 +8,7 @@
 //! require authenticated PCR policy and sealed NV provisioning.
 
 use crate::{hal::acpi::Tpm2Info, paging};
+use p256::ecdsa::{Signature as EcdsaSignature, VerifyingKey};
 use rsa::{pkcs1v15, pss, signature::Verifier, BigUint, RsaPublicKey};
 use sha2::Sha256;
 
@@ -129,6 +130,45 @@ pub struct QuoteRsaPublicKey {
     pub modulus_length: u16,
     pub modulus: [u8; 512],
     pub exponent: u32,
+}
+
+/// A TPM P-256 quote-signing public key in uncompressed affine coordinates.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct QuoteEccP256PublicKey {
+    pub x: [u8; 32],
+    pub y: [u8; 32],
+}
+
+/// Verify an ECDSA P-256/SHA-256 quote signature against the exact
+/// `TPMS_ATTEST` bytes. TPM ECDSA components must be canonical 32-byte
+/// integers for this curve; shorter or oversized TPM2B values are rejected.
+#[allow(dead_code)]
+pub fn verify_quote_ecc_p256_sha256(
+    quote: &[u8],
+    signature: &QuoteSignature,
+    public_key: &QuoteEccP256PublicKey,
+) -> Result<(), Error> {
+    if signature.algorithm != TPM_ALG_ECDSA
+        || signature.hash_algorithm != TPM_ALG_SHA256
+        || signature.first_length != 32
+        || signature.second_length != 32
+    {
+        return Err(Error::InvalidPolicy);
+    }
+    let mut encoded_key = [0_u8; 65];
+    encoded_key[0] = 4;
+    encoded_key[1..33].copy_from_slice(&public_key.x);
+    encoded_key[33..].copy_from_slice(&public_key.y);
+    let verifying_key = VerifyingKey::from_sec1_bytes(&encoded_key)
+        .map_err(|_| Error::InvalidPolicy)?;
+    let mut r = [0_u8; 32];
+    r.copy_from_slice(&signature.first[..32]);
+    let mut s = [0_u8; 32];
+    s.copy_from_slice(&signature.second[..32]);
+    let signature = EcdsaSignature::from_scalars(r, s).map_err(|_| Error::MalformedResponse)?;
+    verifying_key
+        .verify(quote, &signature)
+        .map_err(|_| Error::PolicySignature)
 }
 
 /// Verify an RSA SHA-256 quote signature against the exact TPMS_ATTEST bytes.
@@ -1411,6 +1451,42 @@ pub fn self_test() -> bool {
             }
             rsa_fixture_signature.first[0] ^= 1;
             if verify_quote_rsa_sha256(rsa_message, &rsa_fixture_signature, &rsa_key)
+                != Err(Error::PolicySignature)
+            {
+                return false;
+            }
+            let ecc_message = b"WovenHat TPM quote P-256 verification fixture";
+            let ecc_key = QuoteEccP256PublicKey {
+                x: [
+                    0x6f, 0xf0, 0x3b, 0x94, 0x92, 0x41, 0xce, 0x1d, 0xad, 0xd4, 0x35, 0x19, 0xe6, 0x96, 0x0e, 0x0a,
+                    0x85, 0xb4, 0x1a, 0x69, 0xa0, 0x5c, 0x32, 0x81, 0x03, 0xaa, 0x2b, 0xce, 0x15, 0x94, 0xca, 0x16,
+                ],
+                y: [
+                    0x3c, 0x4f, 0x75, 0x3a, 0x55, 0xbf, 0x01, 0xdc, 0x53, 0xf6, 0xc0, 0xb0, 0xc7, 0xee, 0xe7, 0x8b,
+                    0x40, 0xc6, 0xff, 0x7d, 0x25, 0xa9, 0x6e, 0x22, 0x82, 0xb9, 0x89, 0xce, 0xf7, 0x1c, 0x14, 0x4a,
+                ],
+            };
+            let mut ecc_fixture_signature = QuoteSignature {
+                algorithm: TPM_ALG_ECDSA,
+                hash_algorithm: TPM_ALG_SHA256,
+                first_length: 32,
+                first: [0; 512],
+                second_length: 32,
+                second: [0; 72],
+            };
+            ecc_fixture_signature.first[..32].copy_from_slice(&[
+                0x8c, 0x0c, 0x73, 0xa8, 0x5a, 0xb1, 0x46, 0xca, 0xc5, 0xc0, 0x27, 0xf1, 0x48, 0x22, 0xa2, 0xf8,
+                0x26, 0xca, 0x3a, 0xf2, 0xbd, 0xd5, 0x67, 0xe1, 0xf3, 0x20, 0x91, 0x0e, 0x83, 0x96, 0x5b, 0x18,
+            ]);
+            ecc_fixture_signature.second[..32].copy_from_slice(&[
+                0x5a, 0x67, 0xd4, 0xc7, 0xfa, 0xd8, 0x6c, 0xcc, 0x20, 0x6e, 0xb9, 0xa6, 0xa2, 0x1d, 0xd8, 0x9f,
+                0xbc, 0xfe, 0x6b, 0x3e, 0x1c, 0xb4, 0x62, 0xd8, 0x37, 0xb1, 0xdf, 0x08, 0x83, 0x94, 0x04, 0x13,
+            ]);
+            if verify_quote_ecc_p256_sha256(ecc_message, &ecc_fixture_signature, &ecc_key).is_err() {
+                return false;
+            }
+            ecc_fixture_signature.second[0] ^= 1;
+            if verify_quote_ecc_p256_sha256(ecc_message, &ecc_fixture_signature, &ecc_key)
                 != Err(Error::PolicySignature)
             {
                 return false;

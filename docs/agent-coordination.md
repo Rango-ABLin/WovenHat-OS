@@ -1,5 +1,15 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - Stage 24.32 (2026-10-21)
+
+Added bounded ECDSA/P-256 SHA-256 quote verification from uncompressed TPM
+affine coordinates and canonical 32-byte signature components. Invalid points
+and tampering fail closed. Host tests, affected Clippy gates, executable QEMU,
+and signed system-apps 1/2/4-CPU acceptance pass. Evidence is in
+`docs/audit-stage24-32-ecc-p256-quote-verification-2026-10-21.md`; USB remains
+untouched. Live TPM key retrieval/validation, quote-key binding, recovery, and
+physical TPM qualification remain open.
+
 ## Codex - Stage 24.31 (2026-10-21)
 
 Added bounded RSA SHA-256 quote verification for RSASSA and RSAPSS using a

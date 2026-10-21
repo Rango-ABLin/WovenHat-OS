@@ -2,6 +2,14 @@ WovenHat OS — Stage 10.7 → Version 1.0 Master Roadmap
 Phase I — Finish the asynchronous kernel foundation
 Stage 10.7 — Asynchronous TCP
 
+Stage 24.32 - Bounded ECC/P-256 quote verification
+
+Implemented bounded ECDSA/P-256 SHA-256 verification over exact TPMS_ATTEST
+bytes. The executable QEMU self-test, host tests, Clippy, and signed
+1/2/4-CPU acceptance pass. Live TPM key retrieval/validation, quote-key
+binding, recovery, physical qualification, and release readiness remain
+required.
+
 Stage 24.31 - Bounded TPM RSA quote verification
 
 Implemented SHA-256 RSASSA and RSAPSS verification over exact TPMS_ATTEST

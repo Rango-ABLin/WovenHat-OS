@@ -1,5 +1,17 @@
 # Stage status
 
+## Stage 24.32 bounded ECC/P-256 quote verification (2026-10-21)
+
+The TPM2 boundary now verifies SHA-256 ECDSA/P-256 quote signatures against
+a bounded uncompressed affine public key and exact 32-byte TPM signature
+components. Invalid points, wrong scheme/hash, non-canonical component sizes,
+and tampering fail closed. Host tests (89), all-targets and affected feature
+Clippy, executable QEMU, and signed system-apps 1/2/4-CPU acceptance pass.
+Evidence is under `audit-artifacts/stage24.32-ecc-p256-quote-verification-20261021`.
+
+Live TPM public-key retrieval/validation, quote-key binding, recovery, and
+physical TPM qualification remain required.
+
 ## Stage 24.31 bounded TPM RSA quote verification (2026-10-21)
 
 The TPM2 boundary now verifies SHA-256 RSA quote signatures (RSASSA and

@@ -232,5 +232,6 @@ zeroize = { version = "1.8", default-features = false }
 ed25519-compact = { version = "2.6", default-features = false }
 sha2 = { version = "0.10.9", default-features = false, features = ["force-soft"] }
 rsa = { version = "0.9.9", default-features = false, features = ["sha2"] }
+p256 = { version = "0.13.2", default-features = false, features = ["ecdsa"] }
 [lints.rust]
 warnings = "deny"
