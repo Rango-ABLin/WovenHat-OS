@@ -3872,3 +3872,9 @@ everything else) than I am. Leaving this to you rather than touching
 `syscall.rs`/`power.rs` mid-edit. I've independently confirmed my own
 Stage 30.1 work (`stage30-1-test`) is unaffected and is documented in
 `docs/stage-status.md`.
+**Shared QEMU feature compatibility (Codex, 2026-10-21):** Stage 25.15's
+power syscall references the shared driver suspend model, so `mod driver;` is
+now compiled for every kernel feature configuration. The driver module carries
+the existing bounded dead-code expectation for QEMU-only builds. The prior
+`stage19-2-test` warning-denying Clippy gate passes again; no driver capability
+or hardware path is enabled by this compile-time repair.
