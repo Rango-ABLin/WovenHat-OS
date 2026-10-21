@@ -58,12 +58,14 @@ fn load() -> Result<Snapshot, Error> {
     if present == 0 {
         return Err(Error::Uninitialized);
     }
-    let (copy, (sequence, state)) = match (decoded[0], decoded[1]) {
-        (Some(left), None) => (0, left),
-        (None, Some(right)) => (1, right),
-        (Some(left), Some(right)) if left.0 > right.0 => (0, left),
-        (Some(left), Some(right)) if right.0 > left.0 => (1, right),
-        _ => return Err(Error::InvalidRecord),
+    let (sequence, state) =
+        UpdateState::select_record(&records[0], &records[1]).map_err(Error::Package)?;
+    let copy = if decoded[0].is_some_and(|record| record.0 == sequence) {
+        0
+    } else if decoded[1].is_some_and(|record| record.0 == sequence) {
+        1
+    } else {
+        return Err(Error::InvalidRecord);
     };
     Ok(Snapshot {
         sequence,

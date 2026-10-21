@@ -152,6 +152,7 @@ pub fn verify_package(package: &[u8]) -> Result<VerifiedCandidate<'_>, Error> {
     })
 }
 
+#[cfg(any(feature = "qemu-test", test))]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum BootDecision {
     Stable(usize),
@@ -167,6 +168,7 @@ pub struct UpdateState {
 }
 
 impl UpdateState {
+    #[cfg(any(feature = "qemu-test", test))]
     pub const fn new(generation: u64, image_length: u64, digest: [u8; 32]) -> Result<Self, Error> {
         if !valid_image(image_length, &digest) || generation == 0 {
             return Err(Error::InvalidImage);
@@ -439,6 +441,7 @@ impl UpdateState {
     /// Select the boot target. A failed boot must call `boot_failed`; after
     /// three failures the candidate is marked bad and the known-good slot is
     /// restored before the next decision is made.
+    #[cfg(any(feature = "qemu-test", test))]
     pub fn boot_target(&mut self) -> Result<BootDecision, Error> {
         let Some(slot) = self.pending else {
             return Ok(BootDecision::Stable(self.active));
