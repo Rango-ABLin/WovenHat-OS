@@ -14,9 +14,27 @@ import argparse
 import shutil
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 MARKER = '[S15.2] WovenFS physical device: PASSED'
+
+
+def wovenfs_device_errors(log: str, exit_code: int) -> list[str]:
+    """Fail closed on contradictory guest evidence, not just the PASS marker."""
+    errors = []
+    if exit_code != 33:
+        errors.append(f'Unexpected QEMU exit code: {exit_code} (expected 33)')
+    if not any(MARKER in line for line in log.splitlines()):
+        errors.append(f'Missing WovenFS acceptance marker: {MARKER}')
+    normalized = log.lower()
+    for marker in ('kernel panic', 'panicked at', 'security violation', 'security: failed'):
+        if marker in normalized:
+            errors.append(f'Guest serial contains fatal evidence: {marker}')
+    for line in log.splitlines():
+        if line.strip().startswith('[S15.2]') and ('FAILED' in line or ' FAIL' in line):
+            errors.append(f'Contradictory WovenFS failure marker: {line.strip()}')
+    return errors
 
 
 def main():
@@ -33,6 +51,8 @@ def main():
     parser.add_argument('--physical-drive', type=int,
                         help='raw physical drive number; ERASES IT, needs elevation')
     args = parser.parse_args()
+    if args.size_mib <= 0:
+        parser.error('--size-mib must be positive')
 
     root = Path(__file__).resolve().parents[1]
     qemu = Path(args.qemu)
@@ -45,8 +65,9 @@ def main():
         cwd=root, text=True).strip()
 
     label = 'physical' if args.physical_drive is not None else 'scratch'
-    out = root / 'target' / f'wovenfs-device-{label}-{args.cpus}cpu'
-    out.mkdir(parents=True, exist_ok=True)
+    # Retain each attempt independently, including failed runs and disk images.
+    out = root / 'target' / f'wovenfs-device-{label}-{args.cpus}cpu-{time.time_ns()}'
+    out.mkdir(parents=True, exist_ok=False)
     serial = out / 'serial.log'
     serial.write_text('')
 
@@ -94,8 +115,11 @@ def main():
         if '[S15.' in line:
             print('  ' + line.strip())
 
-    if result != 33 or MARKER not in log:
-        print(f'FAILED (exit {result}). Evidence: {out}', file=sys.stderr)
+    errors = wovenfs_device_errors(log, result)
+    if errors:
+        for error in errors:
+            print(f'FAILED: {error}', file=sys.stderr)
+        print(f'QEMU exit {result}. Evidence: {out}', file=sys.stderr)
         print(log[-4000:], file=sys.stderr)
         return 1
     print(f'WovenFS {label} device: PASS ({args.cpus} CPU, exit 33). Evidence: {out}')
