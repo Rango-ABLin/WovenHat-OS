@@ -87,6 +87,10 @@ const PCR_POLICY_MAGIC: [u8; 4] = *b"TPP1";
 const PCR_POLICY_VERSION: u16 = 1;
 const PCR_POLICY_SIGNED_BYTES: usize = 44;
 pub const PCR_POLICY_BYTES: usize = PCR_POLICY_SIGNED_BYTES + 64;
+const ATTESTATION_NAME_POLICY_MAGIC: [u8; 4] = *b"TAN1";
+const ATTESTATION_NAME_POLICY_VERSION: u16 = 1;
+const ATTESTATION_NAME_POLICY_SIGNED_BYTES: usize = 42;
+pub const ATTESTATION_NAME_POLICY_BYTES: usize = ATTESTATION_NAME_POLICY_SIGNED_BYTES + 64;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct NvPublic {
@@ -173,6 +177,40 @@ pub fn bind_attestation_public_name(
         return Err(Error::CredentialMismatch);
     }
     Ok(public.key)
+}
+
+/// Verify a signed, bounded expected TPM attestation-object Name policy.
+/// Finding a record in persistent storage does not grant authority: the
+/// caller must supply the provisioned Ed25519 trust root and compare the
+/// returned Name through `bind_attestation_public_name`.
+#[allow(dead_code)]
+pub fn verify_signed_attestation_name_policy(
+    envelope: &[u8],
+    trusted_key: &[u8; 32],
+) -> Result<[u8; 34], Error> {
+    if envelope.len() != ATTESTATION_NAME_POLICY_BYTES
+        || envelope[..4] != ATTESTATION_NAME_POLICY_MAGIC
+        || u16::from_be_bytes(envelope[4..6].try_into().unwrap())
+            != ATTESTATION_NAME_POLICY_VERSION
+        || u16::from_be_bytes(envelope[6..8].try_into().unwrap())
+            != ATTESTATION_NAME_POLICY_SIGNED_BYTES as u16
+    {
+        return Err(Error::InvalidPolicy);
+    }
+    let mut name = [0_u8; 34];
+    name.copy_from_slice(&envelope[8..42]);
+    if name[..2] != TPM_ALG_SHA256.to_be_bytes() {
+        return Err(Error::InvalidPolicy);
+    }
+    let mut signature = [0_u8; 64];
+    signature.copy_from_slice(&envelope[ATTESTATION_NAME_POLICY_SIGNED_BYTES..]);
+    crate::signed_app::verify(
+        &envelope[..ATTESTATION_NAME_POLICY_SIGNED_BYTES],
+        trusted_key,
+        &signature,
+    )
+    .map_err(|_| Error::PolicySignature)?;
+    Ok(name)
 }
 
 /// Verify an ECDSA P-256/SHA-256 quote signature against the exact
@@ -1738,6 +1776,34 @@ pub fn self_test() -> bool {
             }
             public_response[5] = 0;
             if decode_attestation_public(&public_response) != Err(Error::MalformedResponse) {
+                return false;
+            }
+            let mut name_policy = [0_u8; ATTESTATION_NAME_POLICY_BYTES];
+            name_policy[..4].copy_from_slice(&ATTESTATION_NAME_POLICY_MAGIC);
+            name_policy[4..6].copy_from_slice(&ATTESTATION_NAME_POLICY_VERSION.to_be_bytes());
+            name_policy[6..8].copy_from_slice(&(ATTESTATION_NAME_POLICY_SIGNED_BYTES as u16).to_be_bytes());
+            name_policy[8..10].copy_from_slice(&TPM_ALG_SHA256.to_be_bytes());
+            name_policy[10..].fill(0x22);
+            name_policy[42..106].copy_from_slice(&[
+                0x88, 0x4f, 0x4f, 0x52, 0xbc, 0x41, 0x4e, 0xf4, 0x02, 0x44, 0x56, 0x10, 0x3d, 0xa6, 0xa2, 0x95,
+                0x17, 0xf3, 0x05, 0x99, 0x6e, 0xec, 0xeb, 0x8b, 0xa6, 0x63, 0xd0, 0x3a, 0x39, 0x15, 0x1d, 0x88,
+                0x8e, 0x57, 0x3c, 0x23, 0x54, 0x77, 0x5e, 0x24, 0xa0, 0x72, 0x34, 0x44, 0xfd, 0x93, 0x70, 0x7b,
+                0x66, 0xe8, 0xa5, 0xd3, 0x81, 0x5f, 0xfb, 0x81, 0xae, 0x08, 0xbb, 0xe8, 0x42, 0xab, 0x0e, 0x03,
+            ]);
+            let policy_key = [
+                0xea, 0x4a, 0x6c, 0x63, 0xe2, 0x9c, 0x52, 0x0a, 0xbe, 0xf5, 0x50, 0x7b, 0x13, 0x2e, 0xc5, 0xf9,
+                0x95, 0x47, 0x76, 0xae, 0xbe, 0xbe, 0x7b, 0x92, 0x42, 0x1e, 0xea, 0x69, 0x14, 0x46, 0xd2, 0x2c,
+            ];
+            let Ok(policy_name) = verify_signed_attestation_name_policy(&name_policy, &policy_key) else {
+                return false;
+            };
+            if policy_name[..2] != TPM_ALG_SHA256.to_be_bytes() || policy_name[2..] != [0x22; 32] {
+                return false;
+            }
+            name_policy[42] ^= 1;
+            if verify_signed_attestation_name_policy(&name_policy, &policy_key)
+                != Err(Error::PolicySignature)
+            {
                 return false;
             }
             read_response[10..14].copy_from_slice(&33_u32.to_be_bytes());

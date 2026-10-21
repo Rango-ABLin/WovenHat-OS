@@ -1,5 +1,19 @@
 # Stage status
 
+## Stage 24.35 signed TPM attestation-Name policy (2026-10-21)
+
+The TPM2 layer now verifies a bounded, versioned Ed25519-signed policy
+envelope containing the expected 34-byte SHA-256 TPM object Name. Invalid
+headers, lengths, trust signatures, or algorithm identifiers fail closed;
+the verified Name can then feed the Stage 24.34 binding boundary. Host tests
+(89), all-targets and affected feature Clippy, executable QEMU, and signed
+system-apps 1/2/4-CPU acceptance pass. Evidence is under
+`audit-artifacts/stage24.35-signed-attestation-name-policy-20261021`.
+
+Durable record storage, live TPM retrieval, key identity provisioning,
+credential authorization, recovery, and physical TPM qualification remain
+required.
+
 ## Stage 24.34 TPM attestation-key Name binding (2026-10-21)
 
 The `TPM2_ReadPublic` boundary now recomputes the SHA-256 TPM Name from the

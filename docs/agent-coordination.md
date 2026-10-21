@@ -1,5 +1,15 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - Stage 24.35 (2026-10-21)
+
+Added the bounded TAN1 Ed25519-signed expected TPM Name policy. Header,
+algorithm, signature, and Name checks fail closed, and the result feeds the
+existing Name-binding boundary. Executable QEMU self-test, host tests,
+affected Clippy gates, and signed system-apps 1/2/4-CPU acceptance pass.
+Evidence is in `docs/audit-stage24-35-signed-attestation-name-policy-2026-10-21.md`;
+USB remains untouched. Durable storage, live retrieval, quote authorization,
+recovery, and physical TPM qualification remain open.
+
 ## Codex - Stage 24.34 (2026-10-21)
 
 Added TPM Name recomputation and exact returned-Name validation for the

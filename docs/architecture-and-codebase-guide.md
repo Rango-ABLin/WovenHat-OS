@@ -1,5 +1,13 @@
 # WovenHat OS Architecture & Codebase Guide
 
+### Stage 24.35 - signed TPM attestation-Name policy
+
+`verify_signed_attestation_name_policy` validates a fixed 106-byte TAN1
+envelope, verifies its Ed25519 signature with the caller-provisioned trust
+root, and returns only the signed SHA-256 TPM Name. It grants no authority
+from storage presence; callers must still bind the result to `ReadPublic` and
+then apply quote authorization.
+
 ### Stage 24.34 - TPM attestation-key Name binding
 
 `decode_attestation_public` hashes the exact TPM public area and requires the

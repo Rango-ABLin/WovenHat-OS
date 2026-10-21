@@ -2,6 +2,14 @@ WovenHat OS — Stage 10.7 → Version 1.0 Master Roadmap
 Phase I — Finish the asynchronous kernel foundation
 Stage 10.7 — Asynchronous TCP
 
+Stage 24.35 - Signed TPM attestation-Name policy
+
+Implemented a bounded TAN1 Ed25519-signed expected TPM Name policy feeding
+the Name-binding boundary. The executable QEMU self-test, host tests, Clippy,
+and signed 1/2/4-CPU acceptance pass. Durable storage, live TPM retrieval,
+quote authorization, recovery, physical qualification, and release readiness
+remain required.
+
 Stage 24.34 - TPM attestation-key Name binding
 
 Implemented TPM Name recomputation, returned-Name validation, and exact
