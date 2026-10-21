@@ -11,7 +11,9 @@ transition.
 
 Signed production-kernel Clippy, `libwoven` warning-denying Clippy and tests
 (95 tests), and signed system-apps QEMU boots on 1/2/4 CPUs pass. Evidence is
-in `docs/audit-stage25-1-acpi-power-capabilities-2026-10-21.md`.
+in `docs/audit-stage25-1-acpi-power-capabilities-2026-10-21.md`. The ACPI
+structural self-test also directly covers a synthetic `_S3` AML package and
+unsupported-state rejection.
 
 This is a capability boundary only. It does not claim S3 suspend/resume,
 driver quiescing, wake-source policy, battery/thermal/lid reporting, or
