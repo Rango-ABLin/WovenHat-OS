@@ -566,6 +566,31 @@ pub(crate) fn consume_pending_hardware_decision(
     consume_hardware_decision(owner, session, decision)
 }
 
+/// Ask the installed physical TPM broker to authenticate the exact account
+/// bound to this live session. The account name is copied from the kernel
+/// binding, never accepted from userspace.
+#[cfg(feature = "system-apps")]
+pub(crate) fn request_hardware_decision(
+    owner: u64,
+    session: SessionId,
+) -> Result<(), Error> {
+    let binding = owned_binding(owner, session)?;
+    {
+        let authority = AUTHORITY.lock();
+        let authority = authority.as_ref().ok_or(Error::NotReady)?;
+        let view = authority.view(binding.session).map_err(Error::Identity)?;
+        if view.state != libwoven::identity::SessionState::Active {
+            return Err(Error::Identity(IdentityError::Locked));
+        }
+    }
+    crate::tpm2::issue_hardware_credential(
+        owner,
+        session,
+        &binding.name[..binding.name_len],
+    )
+    .map_err(|_| Error::NotReady)
+}
+
 fn owned_binding(owner: u64, session: SessionId) -> Result<Binding, Error> {
     BINDINGS
         .lock()

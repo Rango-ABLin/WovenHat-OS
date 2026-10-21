@@ -1,5 +1,17 @@
 # WovenHat OS Architecture & Codebase Guide
 
+### Stage 24.52 - physical TPM credential broker boundary
+
+`HardwareCredentialBroker` owns the validated TPM descriptor, active
+credential-root lease, signed attestation policy, attestation public key,
+PCR policy, and signing authorization value. Its one-request path derives the
+account challenge, starts a fresh policy session, applies `PolicyPCR`, issues
+`TPM2_Quote`, verifies the returned quote through the existing Name/signature
+boundary, flushes the session on success or failure, and moves the resulting
+decision into the identity runtime. Syscall 234 requests the broker using the
+kernel's owner-bound account name; syscall 233 consumes the one-shot result.
+No broker is installed when physical provisioning inputs are absent.
+
 ### Stage 24.51 - identity hardware-decision consumption
 
 The TPM broker moves a verified `CredentialDecision` into a one-entry

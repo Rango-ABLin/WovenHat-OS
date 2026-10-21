@@ -1,5 +1,23 @@
 # Stage status
 
+## Stage 24.52 physical TPM credential broker boundary (2026-10-21)
+
+The kernel now owns a bounded physical TPM credential broker. It validates the
+TPM descriptor, signed attestation Name policy, attestation public key, active
+credential root, PCR selection, and signing authorization before accepting a
+broker configuration. Each request derives the account-bound challenge,
+starts and applies a fresh policy session, executes one authenticated quote,
+verifies the quote, flushes the session on every path, and publishes the
+move-only decision for syscall 233 consumption. Syscalls 234/233 and matching
+libwoven wrappers provide request/consume sequencing without exposing TPM
+material. Host tests (89), all-targets and affected feature Clippy, executable
+QEMU, and signed system-apps 1/2/4-CPU acceptance pass. Evidence is under
+`audit-artifacts/stage24.52-physical-tpm-broker-20261021`.
+
+The QEMU image has no TPM2 device and therefore installs no broker; physical
+credential login, release provisioning of the broker inputs, reboot recovery,
+and hardware qualification remain required.
+
 ## Stage 24.51 identity hardware-decision consumption (2026-10-21)
 
 Identity runtime now has a bounded kernel-only one-entry pending decision

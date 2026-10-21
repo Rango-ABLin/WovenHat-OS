@@ -1102,6 +1102,204 @@ pub struct HardwareCredentialRequest<'a> {
     pub expected_digest: &'a [u8; 32],
 }
 
+/// Kernel-owned physical TPM credential broker configuration. The broker
+/// owns the credential root and all attestation policy material; userspace can
+/// request a decision but cannot supply or receive any of these values.
+#[cfg(feature = "system-apps")]
+#[allow(dead_code)]
+pub struct HardwareCredentialBroker {
+    info: Tpm2Info,
+    root: CredentialRootLease,
+    public: AttestationPublic,
+    name_policy: [u8; ATTESTATION_NAME_POLICY_BYTES],
+    trusted_policy_key: [u8; 32],
+    signing_handle: u32,
+    scheme: QuoteSigningScheme,
+    pcr: u8,
+    expected_digest: [u8; 32],
+    auth_value: [u8; 64],
+    auth_value_length: u8,
+}
+
+#[cfg(feature = "system-apps")]
+impl HardwareCredentialBroker {
+    /// Construct the broker only from already-validated physical TPM
+    /// metadata, signed attestation policy, and an active credential root.
+    /// Provisioning is intentionally explicit; no boot-time default can grant
+    /// hardware credential authority.
+    #[allow(dead_code)]
+    #[allow(clippy::too_many_arguments)]
+    pub fn new(
+        info: Tpm2Info,
+        root: CredentialRootLease,
+        public: AttestationPublic,
+        name_policy: &[u8; ATTESTATION_NAME_POLICY_BYTES],
+        trusted_policy_key: &[u8; 32],
+        signing_handle: u32,
+        scheme: QuoteSigningScheme,
+        pcr: u8,
+        expected_digest: &[u8; 32],
+        auth_value: &[u8],
+    ) -> Result<Self, Error> {
+        if info.control_area == 0
+            || info.control_area & 0xfff != 0
+            || !matches!(info.start_method, 6 | 7)
+            || signing_handle == 0
+            || pcr >= 24
+            || !root.is_active()
+            || auth_value.is_empty()
+            || auth_value.len() > 64
+        {
+            return Err(Error::InvalidPolicy);
+        }
+        let expected_name = verify_signed_attestation_name_policy(
+            name_policy,
+            trusted_policy_key,
+        )?;
+        bind_attestation_public_name(&public, &expected_name)?;
+        let mut stored_auth_value = [0_u8; 64];
+        stored_auth_value[..auth_value.len()].copy_from_slice(auth_value);
+        Ok(Self {
+            info,
+            root,
+            public,
+            name_policy: *name_policy,
+            trusted_policy_key: *trusted_policy_key,
+            signing_handle,
+            scheme,
+            pcr,
+            expected_digest: *expected_digest,
+            auth_value: stored_auth_value,
+            auth_value_length: auth_value.len() as u8,
+        })
+    }
+
+    /// Execute one physical quote and publish its verified decision. A fresh
+    /// policy session is created per request and is flushed whether quote
+    /// authorization succeeds or fails; a session cleanup failure prevents
+    /// publication.
+    #[allow(dead_code)]
+    pub fn issue(
+        &mut self,
+        owner: u64,
+        session: libwoven::identity::SessionId,
+        identity_context: &[u8],
+    ) -> Result<(), Error> {
+        if identity_context.is_empty() || identity_context.len() > 64 {
+            return Err(Error::InvalidPolicy);
+        }
+        let mut expected_nonce = [0_u8; 32];
+        self.root.derive(identity_context, &mut expected_nonce)?;
+        let mut policy_session = match start_managed_policy_session(self.info, &expected_nonce) {
+            Ok(lease) => lease,
+            Err(error) => {
+                expected_nonce.fill(0);
+                return Err(error);
+            }
+        };
+        let policy_result = apply_managed_policy_pcr(
+            self.info,
+            &policy_session,
+            self.pcr,
+            &self.expected_digest,
+        )
+        .and_then(|()| {
+            quote_with_managed_policy_session(
+                self.info,
+                self.signing_handle,
+                &expected_nonce,
+                self.pcr,
+                self.scheme,
+                &mut policy_session,
+                &expected_nonce,
+                TPMA_SESSION_CONTINUE_SESSION,
+                &self.auth_value[..usize::from(self.auth_value_length)],
+            )
+        })
+        .and_then(|mut output| {
+            let authorization = authorize_hardware_credential(
+                &self.root,
+                HardwareCredentialRequest {
+                    name_policy: &self.name_policy,
+                    trusted_policy_key: &self.trusted_policy_key,
+                    public: &self.public,
+                    quote: &output.quote[..usize::from(output.quote_length)],
+                    signature: &output.signature[..usize::from(output.signature_length)],
+                    identity_context,
+                    expected_pcr: self.pcr,
+                    expected_digest: &self.expected_digest,
+                },
+            );
+            match authorization {
+                Ok(decision) => Ok((decision, output)),
+                Err(error) => {
+                    output.quote.fill(0);
+                    output.signature.fill(0);
+                    Err(error)
+                }
+            }
+        });
+        let flush_result = flush_policy_session(self.info, &mut policy_session);
+        expected_nonce.fill(0);
+        match (policy_result, flush_result) {
+            (Ok((decision, mut output)), Ok(())) => {
+                output.quote.fill(0);
+                output.signature.fill(0);
+                crate::identity_runtime::publish_hardware_decision(owner, session, decision)
+                    .map_err(|_| Error::Storage)
+            }
+            (Err(error), _) => Err(error),
+            (Ok((_decision, mut output)), Err(error)) => {
+                output.quote.fill(0);
+                output.signature.fill(0);
+                Err(error)
+            }
+        }
+    }
+}
+
+#[cfg(feature = "system-apps")]
+impl Drop for HardwareCredentialBroker {
+    fn drop(&mut self) {
+        self.auth_value.fill(0);
+    }
+}
+
+#[cfg(feature = "system-apps")]
+static HARDWARE_CREDENTIAL_BROKER: spin::Mutex<Option<HardwareCredentialBroker>> =
+    spin::Mutex::new(None);
+
+/// Install the one physical TPM broker for the current boot. A second
+/// installation is rejected so stale roots cannot be replaced behind an
+/// active identity session.
+#[cfg(feature = "system-apps")]
+#[allow(dead_code)]
+pub fn install_hardware_credential_broker(
+    broker: HardwareCredentialBroker,
+) -> Result<(), Error> {
+    let mut installed = HARDWARE_CREDENTIAL_BROKER.lock();
+    if installed.is_some() {
+        return Err(Error::Storage);
+    }
+    *installed = Some(broker);
+    Ok(())
+}
+
+/// Request one broker decision for a kernel-owned identity session. No
+/// userspace-supplied account name is accepted at this boundary.
+#[cfg(feature = "system-apps")]
+pub fn issue_hardware_credential(
+    owner: u64,
+    session: libwoven::identity::SessionId,
+    identity_context: &[u8],
+) -> Result<(), Error> {
+    HARDWARE_CREDENTIAL_BROKER
+        .lock()
+        .as_mut()
+        .ok_or(Error::Storage)?
+        .issue(owner, session, identity_context)
+}
+
 /// Make the credential decision only after the active root derives the exact
 /// quote challenge and the existing fail-closed quote authorization succeeds.
 /// Root rotation/revocation is checked before any evidence is accepted.

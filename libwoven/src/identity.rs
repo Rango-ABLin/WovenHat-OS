@@ -1376,6 +1376,24 @@ pub fn session_close(session: SessionId) -> Result<(), crate::Error> {
     .map(|_| ())
 }
 
+/// Request a hardware-backed credential decision for this active session.
+/// The kernel derives the account context from its owner-bound binding.
+pub fn session_request_hardware(session: SessionId) -> Result<(), crate::Error> {
+    crate::check(unsafe {
+        crate::syscall::invoke(crate::syscall::IDENTITY_REQUEST_HARDWARE, session.0, 0, 0)
+    })
+    .map(|_| ())
+}
+
+/// Consume the one-shot decision previously published by the kernel TPM
+/// broker for this session.
+pub fn session_consume_hardware(session: SessionId) -> Result<(), crate::Error> {
+    crate::check(unsafe {
+        crate::syscall::invoke(crate::syscall::IDENTITY_CONSUME_HARDWARE, session.0, 0, 0)
+    })
+    .map(|_| ())
+}
+
 impl Default for Authority {
     fn default() -> Self {
         Self::new()

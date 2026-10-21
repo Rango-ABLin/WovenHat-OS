@@ -448,6 +448,9 @@ pub enum Number {
     /// session -> consume one kernel-published TPM credential decision
     #[cfg(feature = "system-apps")]
     IdentityConsumeHardware = 233,
+    /// session -> request one physical TPM credential decision
+    #[cfg(feature = "system-apps")]
+    IdentityRequestHardware = 234,
 }
 
 pub fn entry_address() -> u64 {
@@ -2965,6 +2968,10 @@ pub extern "C" fn wovenhat_syscall_dispatch(
         value if value == Number::IdentityConsumeHardware as u64 => {
             sys_identity_consume_hardware(arg0)
         }
+        #[cfg(feature = "system-apps")]
+        value if value == Number::IdentityRequestHardware as u64 => {
+            sys_identity_request_hardware(arg0)
+        }
         _ => u64::MAX,
     };
 
@@ -3451,6 +3458,21 @@ fn sys_identity_close(session: u64) -> u64 {
 #[cfg(feature = "system-apps")]
 fn sys_identity_consume_hardware(session: u64) -> u64 {
     let result = crate::identity_runtime::consume_pending_hardware_decision(
+        crate::task::current_process_id(),
+        libwoven::identity::SessionId(session),
+    );
+    crate::audit::record(
+        crate::task::current_task_id().as_u64(),
+        crate::audit::Action::IdentityHardware,
+        session,
+        result.is_ok(),
+    );
+    result.map_or(SYSCALL_ERROR, |_| 0)
+}
+
+#[cfg(feature = "system-apps")]
+fn sys_identity_request_hardware(session: u64) -> u64 {
+    let result = crate::identity_runtime::request_hardware_decision(
         crate::task::current_process_id(),
         libwoven::identity::SessionId(session),
     );

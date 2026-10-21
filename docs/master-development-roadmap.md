@@ -2,6 +2,13 @@ WovenHat OS — Stage 10.7 → Version 1.0 Master Roadmap
 Phase I — Finish the asynchronous kernel foundation
 Stage 10.7 — Asynchronous TCP
 
+Stage 24.52 - Physical TPM credential broker boundary
+Implemented the kernel-owned broker that validates release policy inputs,
+executes one fresh TPM PolicyPCR/Quote sequence, verifies and flushes it, and
+publishes the move-only identity decision. Syscalls 234/233 and libwoven
+wrappers provide request/consume sequencing. Physical provisioning, live TPM
+login, recovery, and qualification remain required.
+
 Stage 24.51 - Identity hardware-decision consumption
 Implemented owner/session/name-bound move-only `CredentialDecision` handoff
 through syscall 233, with a bounded pending slot, one-shot generation check,

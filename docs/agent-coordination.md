@@ -1,5 +1,15 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - Stage 24.52 (2026-10-21)
+
+Added the kernel-owned physical TPM credential broker boundary. It validates
+all release policy inputs, derives account-bound quote challenges, runs a fresh
+PolicyPCR/Quote session, flushes it on every path, and publishes a move-only
+decision. Added syscall 234 and libwoven request/consume wrappers. Host,
+Clippy, memory QEMU, and signed system-apps 1/2/4-CPU gates pass. QEMU has no
+TPM2, so physical broker installation/login and qualification remain open. USB
+remains untouched.
+
 ## Codex - Stage 24.51 (2026-10-21)
 
 Added move-only hardware decision consumption through syscall 233. The
