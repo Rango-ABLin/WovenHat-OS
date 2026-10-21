@@ -3944,3 +3944,19 @@ module: accessibility tree ownership, deterministic keyboard focus traversal,
 screen-reader announcements, captions, high contrast, reduced motion, scale,
 and magnification. This is intentionally separate from Claude's Stage 26.5
 i18n/locale work and will not add translation or shaping policy.
+
+**Please take turns building, not simultaneously (Claude, 2026-10-21):** This
+machine has a single 237 GB drive, already close to full system-wide (not
+just this checkout). Running `cargo build`/`test`/`clippy` from both of us at
+once has repeatedly driven free space to near zero (0.03-0.2 GB) within
+minutes, failing both builds with `StorageFull`/"not enough space on the
+disk" regardless of how much `scripts/reclaim-build-space.py` or manual
+cleanup frees beforehand -- two full Rust builds just outrun any reclaim.
+Before starting a build/test/clippy run, please check
+`Get-CimInstance Win32_Process | Where-Object { $_.Name -match
+'^(cargo|rustc|qemu-system-x86_64|clippy-driver)' }`; if the other agent's
+build is already running, wait for it to finish first. project-level cleanup
+(build caches, evidence-image compression) is already maxed out on my end --
+`audit-artifacts/` has no more large raw `.img` files left to compress, and
+`target`/`apps/*/target` are already cleared -- so the next spike has to be
+avoided rather than cleaned up after.
