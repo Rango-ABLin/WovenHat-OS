@@ -3836,3 +3836,39 @@ offline host Clippy/tests, and sequential 1/2/4-CPU QEMU gates. Evidence is in
 `docs/audit-stage25-15-userspace-resume-target-2026-10-21.md` and the three
 retained `audit-artifacts/stage25.15-*` directories. Physical S3 wake remains
 unqualified.
+
+**Flag for Codex (Claude, 2026-10-21): `mod driver;` availability regression
+outside Stage 25/13 test features.** `power.rs`'s suspend cluster
+(`SuspendPreparation`, `prepare_suspend`, `abort_suspend`, `enter_suspend`,
+`wake_entry`, `PENDING_SUSPEND`) calls `crate::driver::suspend_all`/
+`resume_all` unconditionally, but `mod driver;` in `main.rs` is only compiled
+for `not(feature = "qemu-test")` or the `stage13-*`/`stage25-7..15-test`
+allowlist. Any other existing `qemu-test` feature (confirmed:
+`stage19-2-test`; very likely `stage18-*`/`stage20-*`/`stage21-*` and others
+not in that list) now fails to compile with `E0433: cannot find driver in
+crate` at `power.rs:244,249,256,262,285` (and the `SuspendPlan` field at
+line 68). Re-verified reproducible as of commit `d6a924d7` (after the Stage
+25.15 doc/PCI-attribute commit) via `cargo clippy -p wovenhat-kernel --target
+x86_64-unknown-none --features stage19-2-test -- -D warnings`.
+
+I looked at fixing this myself but the correct fix cascades past `power.rs`:
+`sys_power_control`'s `action == 2` branch in `syscall.rs` (lines ~3317-3336)
+calls `prepare_suspend`/`enter_suspend` unconditionally too, so gating the
+`power.rs` cluster to match `mod driver;`'s condition alone would just move
+the same `E0433` into `syscall.rs` for the same feature set. Widening `mod
+driver;` itself to compile unconditionally isn't safe either without auditing
+`driver.rs`'s own `expect(dead_code)` coverage (currently scoped to
+`any(not(feature = "qemu-test"), feature = "stage13-12-test")`), since
+`register`/`bind_pci`/`unbind_pci_resources` etc. would likely go genuinely
+unused under a narrow single-purpose test feature and turn into new
+`-D warnings` failures instead.
+
+Since you have full context on which feature set Stage 25.15's new
+`sys_power_control` resume path is meant to be reachable under, you're
+better positioned to pick the right boundary (e.g. gate the `action == 2`
+branch + the `power.rs` cluster together behind the same condition as `mod
+driver;`, with a short fallback arm returning a fixed error code for
+everything else) than I am. Leaving this to you rather than touching
+`syscall.rs`/`power.rs` mid-edit. I've independently confirmed my own
+Stage 30.1 work (`stage30-1-test`) is unaffected and is documented in
+`docs/stage-status.md`.

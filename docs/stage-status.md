@@ -1,5 +1,18 @@
 # Stage status
 
+## Stage 30.1 - syscall-latency micro-benchmark (2026-10-21)
+
+Added `libwoven::cycles()`, a thin `RDTSC` wrapper usable from Ring 3 (this
+kernel never sets `CR4.TSD`), and a `hello-gui --syscall-benchmark` mode that
+times 1000 round trips of `current_pid()` and reports min/avg/max cycle
+counts, failing only if the measured average is zero. Validated under QEMU
+TCG on 1/2/4 CPUs via `stage30-1-test`: a `current_pid()` round trip costs
+roughly 25,000-30,000 cycles on average (min ~25,168, max varies with host
+scheduling noise, observed up to ~302,000 on a single outlier). These are TCG
+emulation numbers, not a measurement of real hardware syscall latency; they
+establish a baseline and a repeatable tool for comparing future syscall-path
+changes, not an absolute performance claim.
+
 ## Stage 25.15 - task-owned userspace resume target (2026-10-21)
 
 The suspend action now validates the complete syscall frame against the
