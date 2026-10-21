@@ -1,5 +1,23 @@
 # Stage status
 
+## Stage 20.18 - 3D desktop mode extended to window title bars (2026-10-21)
+
+The "3D Desktop" toggle (Stage 20.17) now also perspective-projects every
+window's title-bar fill, not just the Quick Settings panel: flat colour,
+not textured (a title bar's width is the window's own and can exceed the
+bounded texture buffer Quick Settings uses), with the same bottom-anchored,
+top-narrowed card tilt. Found and fixed a real bug while building this:
+the toggle only marked the Quick Settings panel's own area dirty, so open
+windows never got told to repaint in the new mode and stayed flat until
+something else triggered a redraw; the toggle now marks the whole screen
+dirty too.
+
+The Stage 20.18 QEMU gate proves the same kind of non-trivial transform as
+Stage 20.17 (a window's flat title-bar top-left corner stops being the
+fill colour once 3D is toggled on, while the bottom-left stays anchored),
+on 1/2/4 CPUs. Stages 20.17, 20.10, 20.11, and 24.59 were re-verified
+clean since they share the same toggle/Quick-Settings code this touched.
+
 ## Stage 30.5 - scheduler yield-latency micro-benchmark (2026-10-21)
 
 Added a `hello-gui --scheduler-benchmark` mode: 1000 round trips of
