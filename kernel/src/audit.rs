@@ -52,6 +52,8 @@ pub enum Action {
     #[allow(dead_code)]
     IdentityClose,
     #[allow(dead_code)]
+    IdentityHardware,
+    #[allow(dead_code)]
     IdentityAdminAddUser,
     #[allow(dead_code)]
     IdentityAdminDeleteUser,

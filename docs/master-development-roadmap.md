@@ -2,6 +2,12 @@ WovenHat OS — Stage 10.7 → Version 1.0 Master Roadmap
 Phase I — Finish the asynchronous kernel foundation
 Stage 10.7 — Asynchronous TCP
 
+Stage 24.51 - Identity hardware-decision consumption
+Implemented owner/session/name-bound move-only `CredentialDecision` handoff
+through syscall 233, with a bounded pending slot, one-shot generation check,
+and audit recording. The physical TPM broker producer, physical credential
+login, reboot recovery, and hardware qualification remain prerequisites.
+
 Stage 24.50 - Hardware credential decision boundary
 
 Implemented root-generation-bound TPM quote authorization: a bounded identity

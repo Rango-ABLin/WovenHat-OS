@@ -1057,21 +1057,34 @@ pub fn authorize_quote(request: QuoteAuthorizationRequest<'_>) -> Result<QuoteAt
 /// Hardware credential evidence whose challenge is derived from the active
 /// credential-root generation. The result contains no root material and is
 /// valid only for the generation that produced it.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct CredentialDecision {
     root_generation: u64,
     attestation: QuoteAttestation,
+    context_tag: [u8; 32],
 }
 
 impl CredentialDecision {
     #[allow(dead_code)]
-    pub fn root_generation(self) -> u64 {
+    pub fn root_generation(&self) -> u64 {
         self.root_generation
     }
 
     #[allow(dead_code)]
-    pub fn attestation(self) -> QuoteAttestation {
+    pub fn attestation(&self) -> QuoteAttestation {
         self.attestation
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn matches_context(&self, context: &[u8]) -> bool {
+        if context.len() > 64 {
+            return false;
+        }
+        let mut digest = Sha256::new();
+        digest.update(b"WOVENHAT-HW-CREDENTIAL-CONTEXT-V1");
+        digest.update(context);
+        let expected: [u8; 32] = digest.finalize().into();
+        constant_time_equal(&self.context_tag, &expected)
     }
 }
 
@@ -1112,10 +1125,30 @@ pub fn authorize_hardware_credential(
         expected_pcr: request.expected_pcr,
         expected_digest: request.expected_digest,
     })?;
+    let mut context_digest = Sha256::new();
+    context_digest.update(b"WOVENHAT-HW-CREDENTIAL-CONTEXT-V1");
+    context_digest.update(request.identity_context);
     Ok(CredentialDecision {
         root_generation: root.generation,
         attestation,
+        context_tag: context_digest.finalize().into(),
     })
+}
+
+/// Complete the kernel handoff into the identity runtime. The verified
+/// decision is moved into the owner/session-bound pending slot; it is never
+/// returned through a syscall or retained by the caller.
+#[cfg(feature = "system-apps")]
+#[allow(dead_code)]
+pub(crate) fn authorize_and_publish_hardware_credential(
+    owner: u64,
+    session: libwoven::identity::SessionId,
+    root: &CredentialRootLease,
+    request: HardwareCredentialRequest<'_>,
+) -> Result<(), Error> {
+    let decision = authorize_hardware_credential(root, request)?;
+    crate::identity_runtime::publish_hardware_decision(owner, session, decision)
+        .map_err(|_| Error::Storage)
 }
 // The probe runs before timer IRQs are enabled, so this bound must not depend
 // on the kernel tick counter. It is deliberately finite even for a wedged

@@ -9,6 +9,7 @@ use libwoven::identity::{Authority, Error as IdentityError, SessionId, SessionVi
 use core::sync::atomic::{AtomicBool, Ordering};
 
 use crate::irq_lock::IrqMutex;
+use crate::tpm2::CredentialDecision;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(crate) enum Error {
@@ -26,6 +27,7 @@ struct Binding {
     owner: u64,
     name: [u8; libwoven::accounts::MAX_NAME],
     name_len: usize,
+    hardware_generation: Option<u64>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -41,6 +43,8 @@ const LOCKOUT_TICKS: u64 = 500;
 static AUTHORITY: IrqMutex<Option<Authority>> = IrqMutex::with_rank(None, 4);
 static BINDINGS: IrqMutex<[Option<Binding>; MAX_BINDINGS]> =
     IrqMutex::with_rank([None; MAX_BINDINGS], 5);
+static PENDING_HARDWARE_DECISION: IrqMutex<Option<(u64, SessionId, CredentialDecision)>> =
+    IrqMutex::with_rank(None, 7);
 static LOCKOUTS: IrqMutex<[Option<LockoutEntry>; libwoven::identity::MAX_USERS]> =
     IrqMutex::with_rank([None; libwoven::identity::MAX_USERS], 6);
 static LOCKOUT_SATURATED: AtomicBool = AtomicBool::new(false);
@@ -493,6 +497,75 @@ pub(crate) fn close(owner: u64, session: SessionId) -> Result<(), Error> {
     Ok(())
 }
 
+/// Consume one move-only TPM credential decision for an already-owned live
+/// identity session. The decision is bound to the account name used to create
+/// its challenge; it cannot be redirected to another account or process.
+/// Userspace never receives the decision object or any TPM-derived material.
+pub(crate) fn consume_hardware_decision(
+    owner: u64,
+    session: SessionId,
+    decision: CredentialDecision,
+) -> Result<(), Error> {
+    let binding = owned_binding(owner, session)?;
+    if !decision.matches_context(&binding.name[..binding.name_len]) {
+        return Err(Error::Identity(IdentityError::Unauthorized));
+    }
+    {
+        let authority = AUTHORITY.lock();
+        let authority = authority.as_ref().ok_or(Error::NotReady)?;
+        let view = authority.view(binding.session).map_err(Error::Identity)?;
+        if view.state != libwoven::identity::SessionState::Active {
+            return Err(Error::Identity(IdentityError::Locked));
+        }
+    }
+    let mut bindings = BINDINGS.lock();
+    let entry = bindings
+        .iter_mut()
+        .flatten()
+        .find(|entry| entry.session == session && entry.owner == owner)
+        .ok_or(Error::Owner)?;
+    if entry.hardware_generation.is_some() {
+        return Err(Error::Identity(IdentityError::Unauthorized));
+    }
+    entry.hardware_generation = Some(decision.root_generation());
+    Ok(())
+}
+
+/// Publish one verified decision for the owner/session that requested it.
+/// This is a kernel-internal handoff from the TPM credential broker; the
+/// pending slot is bounded to one entry and cannot be populated by userspace.
+#[allow(dead_code)]
+pub fn publish_hardware_decision(
+    owner: u64,
+    session: SessionId,
+    decision: CredentialDecision,
+) -> Result<(), Error> {
+    let mut pending = PENDING_HARDWARE_DECISION.lock();
+    if pending.is_some() {
+        return Err(Error::Full);
+    }
+    *pending = Some((owner, session, decision));
+    Ok(())
+}
+
+pub(crate) fn consume_pending_hardware_decision(
+    owner: u64,
+    session: SessionId,
+) -> Result<(), Error> {
+    let decision = {
+        let mut pending = PENDING_HARDWARE_DECISION.lock();
+        let Some((pending_owner, pending_session, decision)) = pending.take() else {
+            return Err(Error::NotReady);
+        };
+        if pending_owner != owner || pending_session != session {
+            *pending = Some((pending_owner, pending_session, decision));
+            return Err(Error::Owner);
+        }
+        decision
+    };
+    consume_hardware_decision(owner, session, decision)
+}
+
 fn owned_binding(owner: u64, session: SessionId) -> Result<Binding, Error> {
     BINDINGS
         .lock()
@@ -522,6 +595,7 @@ fn binding(session: SessionId, owner: u64, name: &[u8]) -> Binding {
         owner,
         name: stored,
         name_len: name.len(),
+        hardware_generation: None,
     }
 }
 

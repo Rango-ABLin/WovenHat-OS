@@ -1,5 +1,20 @@
 # Stage status
 
+## Stage 24.51 identity hardware-decision consumption (2026-10-21)
+
+Identity runtime now has a bounded kernel-only one-entry pending decision
+handoff. `IdentityConsumeHardware` (syscall 233) consumes a move-only,
+generation-tagged decision only for the owner/session and account name bound by
+the TPM challenge; locked sessions, wrong owners/contexts, duplicate
+consumption, and absent decisions fail closed. Host tests (89), all-targets and
+affected feature Clippy, executable QEMU, and signed system-apps 1/2/4-CPU
+acceptance pass. Evidence is under
+`audit-artifacts/stage24.51-identity-hardware-consumption-20261021`.
+
+A live physical TPM broker has not yet published a decision, and no physical
+credential login is claimed; reboot recovery and physical qualification remain
+required.
+
 ## Stage 24.50 hardware credential decision boundary (2026-10-21)
 
 The TPM layer now binds a hardware credential decision to the active

@@ -1,5 +1,15 @@
 # WovenHat OS Architecture & Codebase Guide
 
+### Stage 24.51 - identity hardware-decision consumption
+
+The TPM broker moves a verified `CredentialDecision` into a one-entry
+owner/session-bound pending slot. Syscall 233 consumes it only after exact
+session ownership, active state, account-name context tag, and one-shot
+hardware-generation checks. The decision is never copied to userspace; audit
+action `IdentityHardware` records success/failure. The
+`authorize_and_publish_hardware_credential` producer entry point is ready for
+the physical TPM broker.
+
 ### Stage 24.50 - hardware credential decision
 
 `authorize_hardware_credential` derives a domain-separated quote nonce from an

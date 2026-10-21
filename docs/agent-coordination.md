@@ -1,5 +1,13 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - Stage 24.51 (2026-10-21)
+
+Added move-only hardware decision consumption through syscall 233. The
+owner/session/name-bound pending handoff is one-entry and fail-closed for
+locked, mismatched, absent, and duplicate decisions. Host, Clippy, memory
+QEMU, and signed system-apps 1/2/4-CPU gates pass. Physical TPM broker/login
+remains open. USB remains untouched.
+
 ## Codex - Stage 24.50 (2026-10-21)
 
 Added the hardware credential decision boundary. A bounded identity context is
