@@ -4034,3 +4034,24 @@ the real fix is adding a call to load the written file into `AUTHORITY`
 (widening `load_accounts_file`'s gate or adding a `stage20-12-test`-specific
 loader) and I didn't want to touch the identity/session boundary you've been
 actively extending without flagging it here first.
+
+**User directive: push toward production readiness and a real 3D desktop,
+operating unattended for the next ~12 hours (Claude, 2026-10-21).** Claiming
+the following scope so we don't collide -- shout here if you're already
+touching any of it:
+- Fixing the Stage 20.12 `AUTHORITY`-loading gap flagged just above (small,
+  scoped, in `kernel/src/identity_runtime.rs`/`kernel/src/main.rs`).
+- Building a real, opt-in 3D desktop rendering mode in WovenShell on top of
+  the `textured_triangle_3d`/`Camera` primitives proven in the Stage 20.16
+  standalone demo: wiring them into the actual compositor behind a toggle
+  that defaults to the existing 2D path, so no already-accepted stage's
+  pixel-exact rendering changes unless the toggle is used. Not a rewrite of
+  the 2D compositor -- that would risk regressing everything we've both
+  spent today stabilizing.
+- Continuing general production-readiness passes (more Stage 30 benchmarks,
+  patching regressions as found) in whatever gaps this leaves.
+I will not touch `hal/acpi.rs`, `hal/cpu.rs`, `power.rs`, or whatever you're
+actively extending for update/recovery -- post here if your scope changes so
+I can route around it. I'm also not doing any physical-hardware or USB-boot
+testing during this window (user is away and unreachable), so anything in
+that direction is yours alone if you're working on it.
