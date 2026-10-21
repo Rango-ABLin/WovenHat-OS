@@ -10138,6 +10138,62 @@ pub mod graphics {
         }
     }
 
+    /// A perspective camera, fixed at the world origin looking down +z, that
+    /// projects a 3D point onto the Canvas a [`Vertex3`]/[`Vertex3Tex`]
+    /// needs. World coordinates are signed 16.16 fixed-point, the same
+    /// format [`Transform`] already uses in this renderer so no
+    /// floating-point state enters freestanding userspace.
+    #[derive(Clone, Copy, PartialEq, Eq, Debug)]
+    pub struct Camera {
+        /// 16.16 fixed-point: larger narrows the field of view (things
+        /// appear larger and flatter), smaller widens it.
+        pub focal_length: i32,
+        /// 16.16 fixed-point distance the camera sits behind the world
+        /// origin along z, so a scene built around z=0 is in front of it
+        /// rather than dividing by (near) zero.
+        pub distance: i32,
+        /// Screen pixel the world origin's (x=0, y=0) ray through the
+        /// camera lands on -- ordinary integer pixels, not fixed-point.
+        pub screen_x: i32,
+        pub screen_y: i32,
+    }
+
+    impl Camera {
+        pub const fn new(focal_length: i32, distance: i32, screen_x: i32, screen_y: i32) -> Self {
+            Self {
+                focal_length,
+                distance,
+                screen_x,
+                screen_y,
+            }
+        }
+
+        /// Project a 16.16 fixed-point world point to screen pixels and a
+        /// depth-buffer value (larger is farther, matching
+        /// [`DepthBuffer`]'s "smaller wins" test). `None` behind the camera.
+        pub fn project(&self, x: i32, y: i32, z: i32) -> Option<(i32, i32, u16)> {
+            let eye_z = i64::from(z.saturating_add(self.distance));
+            if eye_z <= 0 {
+                return None;
+            }
+            // real_screen = (real_x * real_focal) / real_eye_z, with every
+            // term divided by 65536 for its fixed-point scale; two of those
+            // three factors are in the numerator and one in the
+            // denominator, so exactly one 65536 remains to divide out.
+            let scale = |coordinate: i32| -> i32 {
+                (i128::from(coordinate) * i128::from(self.focal_length)
+                    / (i128::from(eye_z) * 65536))
+                    .clamp(i128::from(i32::MIN), i128::from(i32::MAX)) as i32
+            };
+            let screen_x = self.screen_x.saturating_add(scale(x));
+            let screen_y = self.screen_y.saturating_add(scale(y));
+            // A coarser (shifted-down) range than the fixed-point input is
+            // plenty for depth-buffer ordering, and keeps it in u16.
+            let depth = (eye_z >> 8).clamp(0, i64::from(u16::MAX)) as u16;
+            Some((screen_x, screen_y, depth))
+        }
+    }
+
     /// Caller-owned depth storage paired with a Canvas. Keeping it outside
     /// Renderer makes lifetime and memory ownership explicit for future GPU
     /// targets, while retaining a bounded software fallback today.
@@ -14005,6 +14061,40 @@ mod tests {
             );
         }
         assert!(pixels.iter().all(|pixel| *pixel == 0));
+    }
+
+    #[test]
+    fn wovengraphics_camera_projects_origin_to_screen_center() {
+        use crate::graphics::Camera;
+
+        let camera = Camera::new(4 << 16, 10 << 16, 100, 60);
+        let (x, y, depth) = camera.project(0, 0, 0).unwrap();
+        assert_eq!((x, y), (100, 60));
+        assert!(depth > 0);
+    }
+
+    #[test]
+    fn wovengraphics_camera_shrinks_and_deepens_with_distance() {
+        use crate::graphics::Camera;
+
+        let camera = Camera::new(4 << 16, 10 << 16, 100, 60);
+        // The same off-axis point, once at the world's z=0 plane and once
+        // much farther away: perspective must shrink it toward screen
+        // center and increase its depth value.
+        let (near_x, _, near_depth) = camera.project(20 << 16, 0, 0).unwrap();
+        let (far_x, _, far_depth) = camera.project(20 << 16, 0, 40 << 16).unwrap();
+        assert!(far_x - 100 < near_x - 100, "farther should project closer to center");
+        assert!(far_depth > near_depth, "farther should have a larger depth value");
+    }
+
+    #[test]
+    fn wovengraphics_camera_rejects_points_behind_it() {
+        use crate::graphics::Camera;
+
+        let camera = Camera::new(4 << 16, 10 << 16, 100, 60);
+        // z this far negative puts the point behind the camera, whatever is
+        // in front of the world origin (distance = 10).
+        assert!(camera.project(0, 0, -20 << 16).is_none());
     }
 
     #[test]
