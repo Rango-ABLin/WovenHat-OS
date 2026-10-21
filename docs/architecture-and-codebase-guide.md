@@ -1,5 +1,13 @@
 # WovenHat OS Architecture & Codebase Guide
 
+### Stage 24.27 - policy-session NV read-back
+
+`encode_nv_read_policy` constructs a bounded policy-session `NV_Read` for the
+fixed index, zero offset, and 32-byte value. The decoder validates the
+sessions response tag, TPM status, parameter size, bounded value, and exact
+response authorization nonce/HMAC area before copying the value to the
+caller. It performs no live I/O or credential promotion.
+
 ### Stage 24.26 - bounded TPM NV definition framing
 
 `encode_nv_define_space_policy` constructs a sessions-tagged,

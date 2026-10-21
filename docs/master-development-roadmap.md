@@ -2,6 +2,13 @@ WovenHat OS — Stage 10.7 → Version 1.0 Master Roadmap
 Phase I — Finish the asynchronous kernel foundation
 Stage 10.7 — Asynchronous TCP
 
+Stage 24.27 - Policy-session NV read-back
+
+Implemented bounded policy-session `NV_Read` framing and exact 32-byte
+read-back response validation. The executable QEMU self-test, host tests,
+Clippy, and signed 1/2/4-CPU acceptance pass. Live TPM provisioning, quote
+verification, recovery, and physical qualification remain required.
+
 Stage 24.26 - Bounded TPM NV definition framing
 
 Implemented bounded owner-authorized `NV_DefineSpace` framing for the fixed

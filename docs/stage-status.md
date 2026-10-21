@@ -1,5 +1,18 @@
 # Stage status
 
+## Stage 24.27 policy-session NV read-back (2026-10-21)
+
+The TPM2 layer now frames a policy-session `NV_Read` for exactly the fixed
+32-byte credential-root value and parses the returned parameter and session
+authorization areas with exact bounds. The executable QEMU self-test, host
+tests (89), all-targets and affected feature Clippy, and signed system-apps
+1/2/4-CPU acceptance pass. Evidence is under
+`audit-artifacts/stage24.27-nv-read-policy-20261021`.
+
+This does not issue a live read, create or write an NV index, persist a
+credential, validate a TPM quote, or provide recovery. Physical TPM
+provisioning and release qualification remain required.
+
 ## Stage 24.26 bounded TPM NV definition framing (2026-10-21)
 
 The TPM2 layer now frames an owner-authorized `NV_DefineSpace` request for

@@ -1,5 +1,16 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - Stage 24.27 (2026-10-21)
+
+Added policy-session `NV_Read` framing and exact read-back parsing for the
+fixed 32-byte credential-root value. The decoder validates sessions status,
+parameter size, bounded data, and response authorization framing. Executable
+QEMU self-test, host tests, affected Clippy gates, and signed system-apps
+1/2/4-CPU acceptance pass. Evidence is in
+`docs/audit-stage24-27-nv-read-policy-2026-10-21.md`; USB remains untouched.
+No live TPM read, quote verification, recovery, or physical qualification has
+occurred.
+
 ## Codex - Stage 24.26 (2026-10-21)
 
 Added bounded owner-authorized `NV_DefineSpace` framing for the fixed
