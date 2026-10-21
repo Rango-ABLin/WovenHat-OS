@@ -43,6 +43,21 @@ pub struct Power {
     pub s5: Option<(u8, u8)>,
     /// `\_S3` sleep types for suspend-to-RAM, when firmware advertises it.
     pub s3: Option<(u8, u8)>,
+    /// Validated FACS location and existing firmware waking vectors.
+    pub facs: Option<Facs>,
+}
+
+/// The bounded FACS fields needed before an S3 transition can be attempted.
+/// FACS is not an SDT and therefore has no checksum; its signature, length,
+/// and containing firmware memory region are still validated before this is
+/// retained.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Facs {
+    pub address: u64,
+    pub length: u32,
+    pub version: u8,
+    pub waking_vector_32: u32,
+    pub waking_vector_64: u64,
 }
 
 /// The power information found at boot.
@@ -438,6 +453,21 @@ fn read_fadt_power(
     let available = length.min(fadt.len());
     read_physical(physical_offset, address, &mut fadt[..available], regions)?;
     let port = |value: u32| u16::try_from(value).unwrap_or(0);
+    let facs_address = if available >= 140 {
+        let extended = read_u64(&fadt, 132);
+        if extended != 0 {
+            extended
+        } else {
+            u64::from(read_u32(&fadt, 36))
+        }
+    } else if available >= 40 {
+        u64::from(read_u32(&fadt, 36))
+    } else {
+        0
+    };
+    if facs_address != 0 {
+        power.facs = read_facs(physical_offset, facs_address, regions);
+    }
     if available >= 72 {
         power.smi_command = port(read_u32(&fadt, 48));
         power.acpi_enable = fadt[52];
@@ -466,6 +496,40 @@ fn read_fadt_power(
         }
     }
     Ok(())
+}
+
+fn read_facs(
+    physical_offset: u64,
+    address: u64,
+    regions: &[MemoryRegion],
+) -> Option<Facs> {
+    let mut header = [0_u8; 8];
+    read_physical(physical_offset, address, &mut header, regions).ok()?;
+    let length = read_u32(&header, 4);
+    if length < 64 {
+        return None;
+    }
+    validate_range(address, usize::try_from(length).ok()?, regions).ok()?;
+    let mut bytes = [0_u8; 64];
+    read_physical(physical_offset, address, &mut bytes, regions).ok()?;
+    parse_facs(address, &bytes)
+}
+
+fn parse_facs(address: u64, bytes: &[u8; 64]) -> Option<Facs> {
+    if &bytes[..4] != b"FACS" {
+        return None;
+    }
+    let length = read_u32(bytes, 4);
+    if length < 64 {
+        return None;
+    }
+    Some(Facs {
+        address,
+        length,
+        version: bytes[32],
+        waking_vector_32: read_u32(bytes, 12),
+        waking_vector_64: read_u64(bytes, 24),
+    })
 }
 
 /// The sleep types of `\_S5`, from `Name (_S5, Package () { a, b, ... })`
@@ -1689,6 +1753,26 @@ pub fn self_test() -> bool {
     tpm2[40..48].fill(0);
     let tpm2_zero_address_rejected = parse_tpm2(&tpm2).is_none();
 
+    let mut facs = [0_u8; 64];
+    facs[..4].copy_from_slice(b"FACS");
+    facs[4..8].copy_from_slice(&64_u32.to_le_bytes());
+    facs[12..16].copy_from_slice(&0x0009_8000_u32.to_le_bytes());
+    facs[24..32].copy_from_slice(&0x0000_0000_0009_8000_u64.to_le_bytes());
+    facs[32] = 2;
+    let facs_valid = parse_facs(0x0010_0000, &facs)
+        == Some(Facs {
+            address: 0x0010_0000,
+            length: 64,
+            version: 2,
+            waking_vector_32: 0x0009_8000,
+            waking_vector_64: 0x0000_0000_0009_8000,
+        });
+    facs[4..8].copy_from_slice(&63_u32.to_le_bytes());
+    let facs_short_rejected = parse_facs(0x0010_0000, &facs).is_none();
+    facs[4..8].copy_from_slice(&64_u32.to_le_bytes());
+    facs[..4].copy_from_slice(b"BAD!");
+    let facs_signature_rejected = parse_facs(0x0010_0000, &facs).is_none();
+
     let mut topology = Summary {
         local_apic_address: 0xfee0_0000,
         ..Summary::default()
@@ -1870,6 +1954,9 @@ pub fn self_test() -> bool {
         && checksum_rejected
         && tpm2_valid
         && tpm2_zero_address_rejected
+        && facs_valid
+        && facs_short_rejected
+        && facs_signature_rejected
         && topology_valid
         && malformed_rejected
         && srat_valid

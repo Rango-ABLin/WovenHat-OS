@@ -104,6 +104,15 @@ preparation token and supports explicit abort/resume. This is not S3 entry:
 suspend syscall remain unimplemented. See
 `docs/audit-stage25-4-suspend-preparation-2026-10-21.md`.
 
+## Codex - Stage 25.5 ACPI FACS wake-capability boundary (2026-10-21)
+
+The shared branch now validates the FADT-referenced FACS and exposes bounded
+S3/FACS/waking-vector readiness through syscall 238 and the `libwoven`
+wrapper. Firmware addresses are not exposed and no FACS, PM1, CPU, or wake
+state is modified. Wake-trampoline allocation, vector installation, CPU
+save/restore, S3 entry, and physical firmware qualification remain open. See
+`docs/audit-stage25-5-facs-wake-capabilities-2026-10-21.md`.
+
 ## Codex - Stage 24.60 release-key provisioning (2026-10-21)
 
 Production WAPP packaging now requires explicit signing-seed and trusted

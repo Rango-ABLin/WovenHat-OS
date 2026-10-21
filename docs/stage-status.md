@@ -1,5 +1,21 @@
 # Stage status
 
+## Stage 25.5 - ACPI FACS wake-capability boundary (2026-10-21)
+
+ACPI discovery now validates the FADT-referenced FACS signature, minimum
+length, firmware memory range, version, and waking-vector fields. Syscall 238
+and `libwoven::suspend_resume_capabilities` report bounded readiness flags to
+`PowerControl` callers without exposing firmware addresses or changing power
+state.
+
+Default and `system-apps` production-kernel Clippy, host all-targets Clippy,
+the full `cargo test --all` suite, and signed system-apps QEMU acceptance on
+1/2/4 CPUs passed. Evidence is in
+`docs/audit-stage25-5-facs-wake-capabilities-2026-10-21.md`.
+
+This does not claim wake-trampoline allocation, FACS vector installation,
+CPU-state save/restore, S3 entry, firmware wake, or physical qualification.
+
 ## Stage 25.4 - bounded suspend preparation (2026-10-21)
 
 Accepted bounded preparation slice: the driver registry can quiesce all bound

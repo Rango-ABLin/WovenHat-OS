@@ -3522,3 +3522,18 @@ block, and discovered `_S3` types. It returns a private token rather than
 claiming that sleep occurred. S3 register writes, wake-vector installation,
 CPU coordination, wake-source policy, and a userspace suspend ABI remain
 separate prerequisites.
+
+## Stage 25.5 ACPI FACS wake-capability boundary
+
+`hal::acpi` follows the FADT firmware-control pointer and retains a `Facs`
+record only after validating its firmware memory range, `FACS` signature, and
+minimum 64-byte length. The 64-bit X_FACS pointer is preferred over the legacy
+32-bit pointer. The record keeps the version and both waking-vector fields for
+the future transition path.
+
+Syscall 238 and `libwoven::suspend_resume_capabilities` expose only five
+bounded bytes: S3 advertised, FACS valid, 32-bit vector nonzero, 64-bit vector
+nonzero, and FACS version. The query requires `PowerControl`, validates the
+userspace destination, and performs no firmware or PM1 writes. Wake-trampoline
+allocation, FACS vector ownership/installation, CPU save/restore, and S3 entry
+remain separate prerequisites.

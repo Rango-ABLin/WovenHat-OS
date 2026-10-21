@@ -1396,6 +1396,14 @@ back in reverse order when a driver refuses. This does not write `SLP_EN`,
 enter S3, install a wake vector, coordinate CPU resume, or expose a suspend
 syscall; those remain prerequisites for the actual sleep/wake implementation.
 
+Stage 25.5 - ACPI FACS wake-capability boundary
+
+Accepted bounded slice: validate the FADT-referenced FACS and report bounded
+S3/FACS/waking-vector readiness through a privileged read-only query (syscall
+238 and the `libwoven` wrapper). No firmware address is exposed and no FACS,
+CPU, or PM1 state is written; wake-trampoline and actual sleep/wake work
+remain prerequisites.
+
 ACPI poweroff
 reboot
 sleep

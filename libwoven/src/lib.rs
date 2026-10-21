@@ -11482,6 +11482,7 @@ pub mod syscall {
     pub const POWER_CAPABILITIES: u64 = 235;
     pub const CPU_IDLE_CAPABILITIES: u64 = 236;
     pub const CPU_FREQUENCY_INFO: u64 = 237;
+    pub const SUSPEND_RESUME_CAPABILITIES: u64 = 238;
     pub const ACCOUNTS_CHANGE_PIN: u64 = 210;
     pub const IDENTITY_ADMIN_ADD_USER: u64 = 226;
     pub const IDENTITY_ADMIN_DELETE_USER: u64 = 227;
@@ -13357,6 +13358,36 @@ pub fn power_capabilities() -> Result<PowerCapabilities, Error> {
         power_off: bytes[0] != 0,
         suspend: bytes[1] != 0,
         restart: bytes[2] != 0,
+    })
+}
+
+/// Validated firmware prerequisites for a future suspend/resume transition.
+/// This query does not modify ACPI or firmware state.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct SuspendResumeCapabilities {
+    pub s3: bool,
+    pub facs: bool,
+    pub waking_vector_32: bool,
+    pub waking_vector_64: bool,
+    pub facs_version: u8,
+}
+
+pub fn suspend_resume_capabilities() -> Result<SuspendResumeCapabilities, Error> {
+    let mut bytes = [0u8; 5];
+    check(unsafe {
+        syscall::invoke(
+            syscall::SUSPEND_RESUME_CAPABILITIES,
+            bytes.as_mut_ptr() as u64,
+            bytes.len() as u64,
+            0,
+        )
+    })?;
+    Ok(SuspendResumeCapabilities {
+        s3: bytes[0] != 0,
+        facs: bytes[1] != 0,
+        waking_vector_32: bytes[2] != 0,
+        waking_vector_64: bytes[3] != 0,
+        facs_version: bytes[4],
     })
 }
 
