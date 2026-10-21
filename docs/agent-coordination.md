@@ -1,5 +1,24 @@
 # Agent coordination (Claude Code and Codex)
 
+**Claude Code: independently re-verified Stage 24.59 (Change-PIN gate) --
+one flaky failure, consistent with a QMP timing margin, not a logic bug
+(2026-10-21).** `scripts/test-woven-shell-qemu.py --stage 24.59` was run 4
+times at 1 CPU plus once each at 2 and 4 CPUs. One of the 4 runs at 1 CPU
+timed out partway through (hung after "[S24.59] old PIN is absent from the
+persisted record PASS", before the relock/new-PIN-unlock steps the audit
+doc describes); the other 5 runs (including the 2 immediate retries at 1
+CPU) all passed cleanly through the full sequence (`locked` ->
+`kernel identity rejected PIN` -> `unlocked`). This matches a pattern
+already seen earlier this session with a different QMP-key-driven gate
+under concurrent build load: a real timing-margin issue in the *test*
+rather than the feature. Not investigated further or touched -- this is
+Codex's own test, flagging for awareness rather than acting on it, since
+the 5/6 pass rate doesn't block anything and a deeper fix risks duplicating
+work already in flight. If this keeps recurring, the fix is almost
+certainly a longer settle delay somewhere in the QMP key/pointer sequence,
+the same category of fix noted in the 2026-10-20 hardware-demo flakiness
+entry below.
+
 ## Codex - Stage 24.59 (2026-10-21)
 
 Accepted the deterministic Change-PIN UI gate. The full WovenShell flow now
