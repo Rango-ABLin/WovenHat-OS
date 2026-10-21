@@ -65,7 +65,8 @@ mod display;
     feature = "stage25-11-test",
     feature = "stage25-12-test",
     feature = "stage25-13-test",
-    feature = "stage25-14-test"
+    feature = "stage25-14-test",
+    feature = "stage25-15-test"
 ))]
 mod driver;
 #[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
@@ -5712,6 +5713,15 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
             qemu_test_exit_failure();
         }
         serial::write_line(format_args!("[S25.14] suspend admission: PASSED"));
+        qemu_test_exit_success();
+    }
+    #[cfg(feature = "stage25-15-test")]
+    {
+        if !power::suspend_resume_target_self_test() {
+            serial::write_line(format_args!("[S25.15] userspace resume target: FAILED"));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!("[S25.15] userspace resume target: PASSED"));
         qemu_test_exit_success();
     }
     serial::write_line(format_args!("[BOOT] ALL VALIDATIONS PASSED"));

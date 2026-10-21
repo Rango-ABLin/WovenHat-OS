@@ -4740,6 +4740,32 @@ pub fn current_task_id() -> TaskId {
     scheduler.tasks[scheduler.current_slot[crate::smp::cpu_index()]].id
 }
 
+/// Validate that a saved syscall frame is inside the currently running task's
+/// owned kernel stack. Suspend/resume retains this frame across firmware wake;
+/// callers must never be able to supply an arbitrary pointer for that record.
+pub fn current_kernel_stack_contains(address: u64, length: usize) -> bool {
+    let Ok(length) = u64::try_from(length) else {
+        return false;
+    };
+    let scheduler = SCHEDULER.lock();
+    if scheduler.task_count == 0 {
+        return false;
+    }
+    let stack = &TASK_STACKS[scheduler.current_slot[crate::smp::cpu_index()]];
+    let start = stack.0.get() as u64;
+    let Some(end) = start
+        .checked_add(TASK_STACK_SIZE as u64)
+        .and_then(|end| end.checked_sub(16))
+    else {
+        return false;
+    };
+    address >= start + 16
+        && address <= end
+        && address
+            .checked_add(length)
+            .is_some_and(|finish| finish <= end)
+}
+
 pub fn current_task_id_if_running() -> Option<TaskId> {
     let scheduler = SCHEDULER.lock();
     if scheduler.task_count == 0 {

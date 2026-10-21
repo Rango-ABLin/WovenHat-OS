@@ -1,5 +1,18 @@
 # Stage status
 
+## Stage 25.15 - task-owned userspace resume target (2026-10-21)
+
+The suspend action now validates the complete syscall frame against the
+currently running task's kernel stack and retains its address in the committed
+preparation record. The firmware-wake continuation restores the FACS vector,
+wake trampoline, secondary CPUs, and drivers, writes a successful return value,
+and jumps through the existing syscall epilogue to `iretq` back to userspace.
+Invalid frame pointers are rejected before preparation begins.
+
+The Stage 25.15 QEMU gate checks the empty-record and invalid-pointer
+invariants on 1/2/4 CPUs. It does not issue S3; physical firmware wake and
+hardware qualification remain required.
+
 ## Stage 25.13 - persistent firmware-wake record integration (2026-10-21)
 
 Prepared suspend state is now retained in a kernel-owned pending record across

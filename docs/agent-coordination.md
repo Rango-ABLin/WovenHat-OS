@@ -3824,3 +3824,9 @@ Stage 25.14 focused acceptance passed on 1/2/4 CPUs. Evidence is recorded in
 `audit-artifacts/stage25.14-*` directories. The stage remains a fail-closed
 ABI boundary; physical S3 and userspace return-path qualification are not
 claimed.
+**Stage 25.15 (Codex, 2026-10-21):** The suspend path is being advanced from
+fail-closed admission to a task-owned resume target. The existing syscall
+frame is validated against the current task's kernel stack, retained across
+the prepared transition, and restored through `wovenhat_syscall_resume` after
+owned wake rollback. Physical S3 qualification remains pending until the
+focused verification chain passes.

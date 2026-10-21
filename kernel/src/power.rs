@@ -78,18 +78,13 @@ pub struct SuspendPreparation {
     wake_vector: crate::hal::acpi::FacsWakeVector,
     cpu_barrier: crate::smp::CpuSuspendBarrier,
     context: CpuResumeContext,
+    resume_frame: u64,
 }
 
 /// The one BSP-owned preparation record that survives the firmware transition
 /// boundary. It is never populated from userspace and is consumed only by the
 /// wake continuation or an explicit failed-entry rollback.
 static PENDING_SUSPEND: spin::Mutex<Option<SuspendPreparation>> = spin::Mutex::new(None);
-
-/// A suspend request cannot yet be returned to the interrupted userspace
-/// syscall after firmware wake. Keep this admission decision explicit and
-/// testable so capability reporting and the syscall boundary cannot drift.
-#[cfg(feature = "stage25-14-test")]
-const USER_RESUME_TARGET_READY: bool = false;
 
 /// CPU state that must remain available to the post-firmware wake path.
 /// Pointers are recorded as integers so this value can be copied into a
@@ -289,6 +284,7 @@ pub fn prepare_suspend() -> Result<SuspendPreparation, PrepareError> {
         wake_vector,
         cpu_barrier,
         context,
+        resume_frame: 0,
     })
 }
 
@@ -309,8 +305,12 @@ pub fn abort_suspend(preparation: SuspendPreparation) -> bool {
         && crate::driver::resume_all(preparation.plan)
 }
 
+fn take_pending_suspend() -> Option<SuspendPreparation> {
+    PENDING_SUSPEND.lock().take()
+}
+
 fn abort_pending_suspend() -> bool {
-    PENDING_SUSPEND.lock().take().is_some_and(abort_suspend)
+    take_pending_suspend().is_some_and(abort_suspend)
 }
 
 /// Request ACPI S3 after every preparation prerequisite has committed. The
@@ -322,7 +322,17 @@ fn abort_pending_suspend() -> bool {
     dead_code,
     reason = "future privileged suspend action calls this after policy checks"
 )]
-pub fn enter_suspend(preparation: SuspendPreparation) -> Result<(), SuspendError> {
+pub fn enter_suspend(
+    preparation: SuspendPreparation,
+    resume_frame: *mut crate::syscall::UserForkFrame,
+) -> Result<(), SuspendError> {
+    if !crate::task::current_kernel_stack_contains(
+        resume_frame as u64,
+        core::mem::size_of::<crate::syscall::UserForkFrame>(),
+    ) {
+        let _ = abort_suspend(preparation);
+        return Err(SuspendError::NoSuspend);
+    }
     let context = capture_cpu_resume_context();
     if !context.valid() {
         let _ = abort_suspend(preparation);
@@ -330,6 +340,7 @@ pub fn enter_suspend(preparation: SuspendPreparation) -> Result<(), SuspendError
     }
     let preparation = SuspendPreparation {
         context,
+        resume_frame: resume_frame as u64,
         ..preparation
     };
     {
@@ -415,13 +426,40 @@ pub fn enter_suspend(preparation: SuspendPreparation) -> Result<(), SuspendError
 }
 
 extern "C" fn wake_resume_continuation() -> ! {
-    if abort_pending_suspend() {
-        crate::serial::write_line(format_args!("[POWER] firmware wake rollback complete"));
-    } else {
+    let Some(preparation) = take_pending_suspend() else {
+        crate::serial::write_line(format_args!("[POWER] firmware wake record missing"));
+        loop {
+            x86_64::instructions::hlt();
+        }
+    };
+    let resume_frame = preparation.resume_frame;
+    if !abort_suspend(preparation) {
         crate::serial::write_line(format_args!("[POWER] firmware wake rollback FAILED"));
+        loop {
+            x86_64::instructions::hlt();
+        }
     }
-    loop {
-        x86_64::instructions::hlt();
+    let frame = resume_frame as *mut crate::syscall::UserForkFrame;
+    // SAFETY: the frame was validated against the current task's kernel stack
+    // before it was retained and the wake path runs on that same restored
+    // task stack. The successful suspend syscall returns zero after wake.
+    unsafe {
+        (*frame).rax = 0;
+        resume_userspace(frame)
+    }
+}
+
+unsafe fn resume_userspace(frame: *mut crate::syscall::UserForkFrame) -> ! {
+    // SAFETY: `frame` is the validated syscall frame retained by the pending
+    // suspend record. The existing assembly epilogue pops this exact layout
+    // and performs the privilege-checked iretq back to ring 3.
+    unsafe {
+        core::arch::asm!(
+            "mov rsp, {frame}",
+            "jmp wovenhat_syscall_resume",
+            frame = in(reg) frame,
+            options(noreturn),
+        )
     }
 }
 
@@ -453,6 +491,15 @@ pub fn wake_record_self_test() -> bool {
     PENDING_SUSPEND.lock().is_none()
         && VirtAddr::try_new(wake_entry as *const () as u64).is_ok()
         && VirtAddr::try_new(wake_resume_continuation as *const () as u64).is_ok()
+}
+
+#[cfg(feature = "stage25-15-test")]
+pub fn suspend_resume_target_self_test() -> bool {
+    PENDING_SUSPEND.lock().is_none()
+        && !crate::task::current_kernel_stack_contains(
+            u64::MAX,
+            core::mem::size_of::<crate::syscall::UserForkFrame>(),
+        )
 }
 
 #[cfg(feature = "stage25-14-test")]

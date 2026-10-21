@@ -2920,7 +2920,7 @@ pub extern "C" fn wovenhat_syscall_dispatch(
         value if value == Number::AudioPlay as u64 => sys_audio_play(arg0, arg1),
         value if value == Number::AudioSetVolume as u64 => sys_audio_set_volume(arg0),
         value if value == Number::GraphicsCompositorOutputs as u64 => sys_compositor_outputs(arg0),
-        value if value == Number::PowerControl as u64 => sys_power_control(arg0),
+        value if value == Number::PowerControl as u64 => sys_power_control(arg0, frame),
         value if value == Number::PowerCapabilities as u64 => sys_power_capabilities(arg0, arg1),
         value if value == Number::CpuIdleCapabilities as u64 => {
             sys_cpu_idle_capabilities(arg0, arg1)
@@ -3297,7 +3297,7 @@ fn pack_compositor_info(width: u32, height: u32, scale: u32) -> u64 {
 /// PowerControl, which only the desktop session holds; every request is in
 /// the security ledger. Returns only when the machine is still running:
 /// 1 no ACPI power-off, 2 the firmware refused ACPI mode, 3 ignored.
-fn sys_power_control(action: u64) -> u64 {
+fn sys_power_control(action: u64, frame: *const UserForkFrame) -> u64 {
     let actor = crate::task::current_task_id().as_u64();
     let allowed =
         crate::task::current_has(crate::capability::Capability::PowerControl) && action <= 2;
@@ -3306,14 +3306,34 @@ fn sys_power_control(action: u64) -> u64 {
         return SYSCALL_ERROR;
     }
     if action == 2 {
-        // The kernel wake path currently restores a kernel continuation that
-        // owns rollback, not the interrupted userspace syscall frame. Refuse
-        // the transition until a task-safe return target is committed; do not
-        // leave drivers, CPUs, or firmware state partially prepared.
-        crate::serial::write_line(format_args!(
-            "[POWER] suspend denied: no safe userspace resume target"
-        ));
-        return 4;
+        if frame.is_null()
+            || !crate::task::current_kernel_stack_contains(
+                frame as u64,
+                core::mem::size_of::<UserForkFrame>(),
+            )
+        {
+            return 4;
+        }
+        let preparation = match crate::power::prepare_suspend() {
+            Ok(preparation) => preparation,
+            Err(error) => {
+                return match error {
+                    crate::power::PrepareError::NoSuspend => 5,
+                    crate::power::PrepareError::DriverRefused => 6,
+                    crate::power::PrepareError::TrampolineUnavailable => 7,
+                    crate::power::PrepareError::WakeVectorUnavailable => 8,
+                    crate::power::PrepareError::CpuCoordinationUnavailable => 9,
+                }
+            }
+        };
+        return match crate::power::enter_suspend(preparation, frame as *mut UserForkFrame) {
+            Ok(()) => 0,
+            Err(crate::power::SuspendError::NoSuspend) => 5,
+            Err(crate::power::SuspendError::AcpiModeRefused) => 10,
+            Err(crate::power::SuspendError::StillRunning) => 11,
+            Err(crate::power::SuspendError::RollbackFailed) => 12,
+            Err(crate::power::SuspendError::AlreadyPending) => 13,
+        };
     }
     if action == 1 {
         crate::power::reboot();

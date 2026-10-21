@@ -1473,6 +1473,15 @@ driver quiescence, CPU parking, FACS write, or PM1 write. A later stage must
 commit a task-owned resume target and verify its return path before enabling a
 real user-facing S3 transition.
 
+Stage 25.15 - task-owned userspace resume target
+
+Accepted bounded slice: validate and retain the interrupted syscall frame on
+the current task's kernel stack, carry it through the committed S3
+preparation, and after firmware wake restore owned resources before returning
+through the existing syscall epilogue. The transition remains dependent on
+physical firmware qualification and is not accepted merely from the QEMU
+structural gate.
+
 ACPI poweroff
 reboot
 sleep

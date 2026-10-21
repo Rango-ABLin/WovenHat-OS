@@ -3672,3 +3672,13 @@ returns error `4` until the kernel has a task-owned resume target for the
 interrupted userspace syscall. The fail-closed path performs no suspend
 preparation or hardware writes. `libwoven::suspend` exposes this result to the
 desktop session without pretending that firmware S3 is production-ready.
+## Stage 25.15 task-owned userspace resume target
+
+The syscall assembly's `UserForkFrame` is the canonical saved register and
+`iretq` layout. Action `2` validates that frame against the current task's
+kernel stack before any suspend preparation, then stores its address in the
+pending record. After wake, the continuation performs the complete owned
+rollback and writes `RAX = 0` before jumping to `wovenhat_syscall_resume`,
+which restores the frame and returns to the interrupted userspace caller.
+Arbitrary pointers and missing records fail closed. This structural gate does
+not certify real firmware S3 behavior.
