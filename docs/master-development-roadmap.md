@@ -2,6 +2,13 @@ WovenHat OS — Stage 10.7 → Version 1.0 Master Roadmap
 Phase I — Finish the asynchronous kernel foundation
 Stage 10.7 — Asynchronous TCP
 
+Stage 24.59 - Deterministic Change-PIN acceptance
+Accepted the complete desktop PIN-rotation path: one kernel-owned salt is
+shared by the identity authority and durable account record, the old PIN is
+rejected after relock, and the new PIN unlocks. Production-feature Clippy,
+host tests, and QEMU 1/2/4-CPU acceptance passed. Account creation and
+physical TPM/USB qualification remain open release prerequisites.
+
 Stage 24.58 - Physical TPM broker boot activation
 Integrated signed policy validation, attestation public-key discovery, fresh
 TPM nonce generation, credential-root promotion, and broker installation into

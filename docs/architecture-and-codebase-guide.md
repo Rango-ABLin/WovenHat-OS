@@ -1,5 +1,16 @@
 # WovenHat OS Architecture & Codebase Guide
 
+### Stage 24.59 — Change-PIN credential synchronization
+
+The desktop Change-PIN path is a single kernel-authorized transaction across
+the identity authority and `/etc/wovenhat/accounts`. `kernel::accounts::change_pin`
+uses a kernel-generated bounded salt; the system-app identity runtime passes
+that same salt to `change_pin_with_salt`, so the session credential and the
+durable account record remain identical after rotation. If the durable rewrite
+fails, the identity authority is restored to its prior credential. The
+dedicated WovenShell acceptance gate covers the full UI and relock/unlock path
+on 1/2/4 CPUs.
+
 ### Stage 24.58 - physical TPM broker boot activation
 
 The system-app boot path now activates the physical broker only after loading

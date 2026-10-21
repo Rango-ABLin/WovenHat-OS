@@ -1,5 +1,17 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - Stage 24.59 (2026-10-21)
+
+Accepted the deterministic Change-PIN UI gate. The full WovenShell flow now
+passes on 1/2/4 CPUs: sign-in, Quick Settings selection, old/new/confirmation
+entry, durable record verification, old-PIN rejection, and new-PIN unlock.
+Fixed the production credential mismatch by sharing one kernel-generated salt
+between the identity authority and `/etc/wovenhat/accounts`, retaining
+rollback on storage failure. Production-feature Clippy, host all-target
+Clippy, and 95 `libwoven` tests pass. Evidence is under
+`audit-artifacts/stage24.59-change-pin-20261021`; physical TPM and USB
+qualification remain open.
+
 ## Codex - Stage 24.58 (2026-10-21)
 
 Integrated signed broker-record validation and physical TPM credential-root
