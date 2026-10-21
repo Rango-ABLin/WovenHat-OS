@@ -376,8 +376,12 @@ fn clock_text(time: Option<DateTime>, seconds: bool) -> ([u8; 8], usize) {
     (text, if seconds { 8 } else { 5 })
 }
 
-fn build_lock_catalog(language: libwoven::i18n::Language) -> libwoven::i18n::Catalog {
-    use libwoven::i18n::{Catalog, Language};
+/// Fill an already-allocated, already-zeroed catalog in place. Never builds
+/// or returns a `Catalog` by value: at `MAX_TRANSLATIONS` entries it is
+/// several KiB, and the user stack is 8 KiB (see `DesktopState`), so even a
+/// transient by-value copy on the way into a static overflowed it.
+fn fill_lock_catalog(catalog: &mut libwoven::i18n::Catalog, language: libwoven::i18n::Language) {
+    use libwoven::i18n::Language;
     let entries: &[(&str, &str)] = match language {
         Language::English => &[
             ("sign_in", "Sign in"),
@@ -402,37 +406,48 @@ fn build_lock_catalog(language: libwoven::i18n::Language) -> libwoven::i18n::Cat
             ("try_again_shortly", "Yesaninso Posachedwa"),
         ],
     };
-    let mut catalog = Catalog::new();
     for (key, value) in entries {
         let _ = catalog.insert(key, value);
     }
-    catalog
 }
 
-/// Both lock-screen catalogs, in `.bss` rather than on the stack: each
-/// `libwoven::i18n::Catalog` is sized for `MAX_TRANSLATIONS` entries
-/// (several KiB), and the user stack is 8 KiB (see `DesktopState`).
-struct LockCatalogs(UnsafeCell<Option<(libwoven::i18n::Catalog, libwoven::i18n::Catalog)>>);
+/// Both lock-screen catalogs, const-initialized to `Catalog::new()` (an
+/// all-zero value LLVM places in `.bss`, not `.data`) and filled in place on
+/// first use, so no by-value `Catalog` is ever constructed on the stack.
+struct LockCatalogs {
+    english: UnsafeCell<libwoven::i18n::Catalog>,
+    chichewa: UnsafeCell<libwoven::i18n::Catalog>,
+    built: UnsafeCell<bool>,
+}
 
 // SAFETY: the shell is single-threaded, and `lock_catalog` takes the only reference.
 unsafe impl Sync for LockCatalogs {}
 
-static LOCK_CATALOGS: LockCatalogs = LockCatalogs(UnsafeCell::new(None));
+static LOCK_CATALOGS: LockCatalogs = LockCatalogs {
+    english: UnsafeCell::new(libwoven::i18n::Catalog::new()),
+    chichewa: UnsafeCell::new(libwoven::i18n::Catalog::new()),
+    built: UnsafeCell::new(false),
+};
 
-/// The lock screen's translatable strings for `language`, built once (lazily,
-/// into `LOCK_CATALOGS`) through `libwoven::i18n::Catalog` (Stage 26.5).
+/// The lock screen's translatable strings for `language`, built once
+/// (lazily, in place) through `libwoven::i18n::Catalog` (Stage 26.5).
 /// English values are byte-for-byte the literals every already-accepted
 /// lock-screen gate expects, so the default language changes nothing;
 /// Chichewa is a best-effort demo translation, not a reviewed localization.
 fn lock_catalog(language: libwoven::i18n::Language) -> &'static libwoven::i18n::Catalog {
     use libwoven::i18n::Language;
-    // SAFETY: single-threaded; no other reference to this cell is live.
-    let slot = unsafe { &mut *LOCK_CATALOGS.0.get() };
-    let (english, chichewa) = slot
-        .get_or_insert_with(|| (build_lock_catalog(Language::English), build_lock_catalog(Language::Chichewa)));
-    match language {
-        Language::English => english,
-        Language::Chichewa => chichewa,
+    // SAFETY: single-threaded; build-once guarded by `built`, and every
+    // reference handed out is immutable.
+    unsafe {
+        if !*LOCK_CATALOGS.built.get() {
+            fill_lock_catalog(&mut *LOCK_CATALOGS.english.get(), Language::English);
+            fill_lock_catalog(&mut *LOCK_CATALOGS.chichewa.get(), Language::Chichewa);
+            *LOCK_CATALOGS.built.get() = true;
+        }
+        match language {
+            Language::English => &*LOCK_CATALOGS.english.get(),
+            Language::Chichewa => &*LOCK_CATALOGS.chichewa.get(),
+        }
     }
 }
 

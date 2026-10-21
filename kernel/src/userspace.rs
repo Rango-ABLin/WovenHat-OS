@@ -4336,7 +4336,11 @@ pub struct UserStack {
 
 impl UserStack {
     pub const GUARD_SIZE: usize = 4096;
-    pub const SIZE: usize = 4096 * 2;
+    /// The desktop and system applications keep large render/input frames
+    /// outside this stack, but 8 KiB was still too close to the boundary for
+    /// the production shell's diagnostic path. Four pages retain the guard
+    /// page while providing a bounded margin for nested userspace calls.
+    pub const SIZE: usize = 4096 * 4;
 
     pub fn new(base: u64) -> Self {
         Self {

@@ -14,6 +14,10 @@ The module intentionally does not claim normalization, full Unicode property
 data, complete normalization coverage, bidi, shaping, keyboard layouts, IMEs, or compositor/application
 integration.
 
+The bounded user stack is four pages (16 KiB) plus a guard page. The increase
+was required by the production shell diagnostic-path acceptance, which
+reproduced a user-mode stack write fault at the former 8 KiB boundary.
+
 ### Stage 24.59 — Change-PIN credential synchronization
 
 The desktop Change-PIN path is a single kernel-authorized transaction across
