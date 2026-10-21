@@ -8,11 +8,13 @@ date ordering, integer formatting including `i64::MIN`, and Unicode scalar
 validation. It also provides a transactional bounded Latin combining-mark
 normalization subset that fails closed for unsupported marks. WovenShell now
 uses bounded English/Chichewa catalogs for its lock-screen strings.
+The i18n boundary also resolves bounded strong-direction runs for common
+Latin/Hebrew/Arabic text and numbers; it does not claim full UAX#9.
 Focused and full workspace host gates are recorded in
 `docs/audit-stage26-5-i18n-foundation-2026-10-21.md`.
 
-This is not full internationalization: Unicode normalization, complete Unicode
-data, RTL/bidi ordering, script shaping, keyboard layouts, IMEs, and wiring
+This is not full internationalization: complete Unicode normalization and
+property data, full RTL/bidi ordering, script shaping, keyboard layouts, IMEs, and wiring
 every application string to a catalog remain open.
 
 The same acceptance cycle corrected a separately observed production-shell

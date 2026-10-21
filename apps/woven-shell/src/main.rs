@@ -1613,6 +1613,11 @@ impl Desktop {
                                 let digest = account.password_digest(&self.entry[..self.entry_length]);
                                 libwoven::identity::session_unlock_verified(session, &digest).is_ok()
                             }
+                            // No account ever signed in: this is the legacy
+                            // `--pin`-only mode, which has no kernel session
+                            // to re-verify against. `pin_matches()` already
+                            // checked the entry above against `self.pin`.
+                            (None, None) => true,
                             _ => false,
                         },
                         LockMode::ChangePin => true,

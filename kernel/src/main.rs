@@ -8808,10 +8808,14 @@ fn stage20_12_self_test() -> bool {
         return false;
     }
 
-    // Lock through Quick Settings: the lock screen wants lin's PIN.
+    // Lock through Quick Settings: the lock screen wants lin's PIN. Row 5 of
+    // 8 ("Lock screen"): this geometry was stale at QS_ROWS=5/row 4, from
+    // before Tiling moved "Lock screen" to row 5 -- Change PIN and Language
+    // were both appended after it since, so only the row-count term needed
+    // updating, not the row index.
     let lock_row = (
         width - 4 - 164 + 28,
-        top - 2 - (5 * 14 + 2) + 1 + 4 * 14 + 7,
+        top - 2 - (8 * 14 + 2) + 1 + 5 * 14 + 7,
     );
     let (px, py) = (width / 2, height / 2);
     let locked = move_by(button.0 + 8 - px, button.1 + 8 - py)
@@ -9016,11 +9020,14 @@ fn stage20_11_self_test() -> bool {
             && compositor::pixel(45, 45) == Ok(dim(45, 45))
     };
 
-    // Quick Settings: the button, then its last row, "Lock screen".
+    // Quick Settings: the button, then row 5 of 8, "Lock screen" (this
+    // geometry was stale at QS_ROWS=5/row 4, from before Tiling moved
+    // "Lock screen" to row 5; Change PIN and Language were both appended
+    // after it since, so only the row-count term needed updating).
     let button = (width - 54 - 5 * 20 + 8, top + 12);
     let lock_row = (
         width - 4 - 164 + 28,
-        top - 2 - (5 * 14 + 2) + 1 + 4 * 14 + 7,
+        top - 2 - (8 * 14 + 2) + 1 + 5 * 14 + 7,
     );
     let (mut px, mut py) = (width / 2, height / 2);
     let lock = |px: &mut i32, py: &mut i32| {

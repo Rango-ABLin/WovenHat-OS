@@ -10,8 +10,12 @@ supported locale order; `format_integer` writes into caller-owned storage; and
 `validate_scalars` rejects surrogate and out-of-range Unicode scalar values.
 `normalize_latin_nfc` adds a transactional, caller-buffered subset for common
 Latin combining marks and rejects unsupported combining sequences.
-The module intentionally does not claim normalization, full Unicode property
-data, complete normalization coverage, bidi, shaping, keyboard layouts, IMEs, or compositor/application
+`resolve_bidi_runs` provides caller-buffered strong-direction runs for common
+Latin, Hebrew, Arabic, and numeric text; it deliberately does not claim the
+full Unicode Bidirectional Algorithm.
+The module intentionally does not claim complete normalization, full Unicode
+property data, full UAX#9 bidi, shaping, keyboard layouts, IMEs, or
+compositor/application
 integration.
 
 WovenShell keeps its English and Chichewa lock-screen catalogs in static

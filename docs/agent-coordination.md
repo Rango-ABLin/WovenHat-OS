@@ -22,6 +22,10 @@ Its first production QEMU run exposed a user-mode write fault at the former
 8 KiB shell stack boundary; `UserStack::SIZE` is now 16 KiB plus the guard
 page, and corrected system-app acceptance passes on 1/2/4 CPUs.
 
+Codex is extending the same bounded i18n boundary with strong-direction runs
+for common Latin/Hebrew/Arabic text and numbers. This is a caller-buffered
+UAX#9 subset; full bidi, shaping, keyboard layouts, and IMEs remain separate.
+
 **Claude Code: starting Stages 25/26/26.5/30 (Power, Accessibility, i18n,
 Performance), in that priority order, after closing the production
 account-provisioning gap (2026-10-21).** User directive: build these out as

@@ -7,15 +7,17 @@ identifiers, bounded translation catalog insertion/lookup, Gregorian date
 validation and locale-aware date ordering, caller-buffer integer formatting,
 and Unicode scalar validation.
 The follow-up adds a transactional Latin combining-mark normalization subset;
-unsupported combining sequences fail closed.
+unsupported combining sequences fail closed. The latest follow-up adds a
+caller-buffered strong-direction run resolver for common Latin/Hebrew/Arabic
+text and numbers; it is explicitly not full UAX#9.
 
 ## Verification
 
 - `cargo fmt --all -- --check` passed.
-- `cargo test --offline -p libwoven` passed: 107 tests, including seven new
+- `cargo test --offline -p libwoven` passed: 109 tests, including nine new
   i18n tests.
 - `cargo clippy --offline -p libwoven --all-targets -- -D warnings` passed.
-- `cargo test --offline --all` passed: 107 `libwoven` tests and all workspace
+- `cargo test --offline --all` passed: 109 `libwoven` tests and all workspace
   integration suites passed.
 - `cargo clippy --offline --all-targets -- -D warnings` passed for the full
   workspace.
@@ -37,7 +39,7 @@ self-test of its own.
 ## Limits
 
 This is not full internationalization. Complete Unicode normalization and
-property data, bidi/RTL ordering, script shaping, keyboard layouts, IMEs, and
+property data, full bidi/RTL ordering, script shaping, keyboard layouts, IMEs, and
 translated application catalogs remain open prerequisites. The WovenShell
 lock screen now consumes bounded English/Chichewa catalogs, but this is not
 application-wide translation coverage or reviewed localization.

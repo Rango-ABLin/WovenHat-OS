@@ -1,8 +1,9 @@
 //! Bounded internationalization primitives for userspace.
 //!
 //! This module deliberately stops at the data and formatting boundary. It
-//! does not implement Unicode normalization, bidi, shaping, keyboard layouts,
-//! or IMEs; those require compositor/input integration and remain later
+//! does not implement complete Unicode normalization, full UAX#9 bidi,
+//! shaping, keyboard layouts, or IMEs; those require compositor/input
+//! integration and remain later
 //! acceptance work.
 
 #![allow(clippy::cast_possible_truncation)]
@@ -60,6 +61,90 @@ impl Locale {
 pub enum Direction {
     LeftToRight,
     RightToLeft,
+}
+
+pub const MAX_BIDI_RUNS: usize = 256;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BidiClass {
+    LeftToRight,
+    RightToLeft,
+    EuropeanNumber,
+    Neutral,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct BidiRun {
+    pub start: usize,
+    pub length: usize,
+    pub direction: Direction,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BidiError {
+    InvalidScalar(UnicodeError),
+    OutputTooSmall,
+}
+
+/// Classify the bounded set of strong ranges used by the first text path.
+/// Unknown valid scalars remain neutral and are never guessed as RTL.
+pub const fn bidi_class(scalar: u32) -> BidiClass {
+    match scalar {
+        0x30..=0x39 => BidiClass::EuropeanNumber,
+        0x0590..=0x08ff | 0xfb1d..=0xfdff | 0xfe70..=0xfeff | 0x1ee00..=0x1eeff => {
+            BidiClass::RightToLeft
+        }
+        0x0041..=0x005a | 0x0061..=0x007a | 0x00c0..=0x02af | 0x0370..=0x052f => {
+            BidiClass::LeftToRight
+        }
+        _ => BidiClass::Neutral,
+    }
+}
+
+/// Resolve bounded logical-direction runs into caller-owned storage.
+///
+/// Neutrals and European numbers inherit the most recent strong direction;
+/// leading neutrals use left-to-right. This is intentionally a small strong
+/// run resolver, not the full Unicode Bidirectional Algorithm: embeddings,
+/// overrides, isolates, paired brackets, and mirroring remain later work.
+pub fn resolve_bidi_runs(input: &[u32], output: &mut [BidiRun]) -> Result<usize, BidiError> {
+    validate_scalars(input).map_err(BidiError::InvalidScalar)?;
+    if input.is_empty() {
+        return Ok(0);
+    }
+    let mut run_count = 0;
+    let mut run_start = 0;
+    let mut current = Direction::LeftToRight;
+    for (index, &scalar) in input.iter().enumerate() {
+        let class = bidi_class(scalar);
+        let direction = match class {
+            BidiClass::RightToLeft => Direction::RightToLeft,
+            BidiClass::LeftToRight => Direction::LeftToRight,
+            BidiClass::EuropeanNumber | BidiClass::Neutral => current,
+        };
+        if index != run_start && direction != current {
+            if run_count >= output.len() || run_count >= MAX_BIDI_RUNS {
+                return Err(BidiError::OutputTooSmall);
+            }
+            output[run_count] = BidiRun {
+                start: run_start,
+                length: index - run_start,
+                direction: current,
+            };
+            run_count += 1;
+            run_start = index;
+        }
+        current = direction;
+    }
+    if run_count >= output.len() || run_count >= MAX_BIDI_RUNS {
+        return Err(BidiError::OutputTooSmall);
+    }
+    output[run_count] = BidiRun {
+        start: run_start,
+        length: input.len() - run_start,
+        direction: current,
+    };
+    Ok(run_count + 1)
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -478,6 +563,69 @@ mod tests {
             })
         );
         assert_eq!(output, [0xfeed_u32; 2]);
+    }
+
+    #[test]
+    fn bidi_runs_resolve_common_rtl_and_ltr_segments_boundedly() {
+        let input = [
+            b'A' as u32,
+            b' ' as u32,
+            0x05d0,
+            0x05d1,
+            b' ' as u32,
+            b'B' as u32,
+        ];
+        let mut runs = [BidiRun {
+            start: 0,
+            length: 0,
+            direction: Direction::LeftToRight,
+        }; 4];
+        let used = resolve_bidi_runs(&input, &mut runs).unwrap();
+        assert_eq!(used, 3);
+        assert_eq!(
+            runs[0],
+            BidiRun {
+                start: 0,
+                length: 2,
+                direction: Direction::LeftToRight
+            }
+        );
+        assert_eq!(
+            runs[1],
+            BidiRun {
+                start: 2,
+                length: 3,
+                direction: Direction::RightToLeft
+            }
+        );
+        assert_eq!(
+            runs[2],
+            BidiRun {
+                start: 5,
+                length: 1,
+                direction: Direction::LeftToRight
+            }
+        );
+    }
+
+    #[test]
+    fn bidi_runs_fail_closed_for_invalid_scalars_and_small_output() {
+        let mut runs = [BidiRun {
+            start: 0,
+            length: 0,
+            direction: Direction::LeftToRight,
+        }; 1];
+        assert_eq!(
+            resolve_bidi_runs(&[0xd800], &mut runs),
+            Err(BidiError::InvalidScalar(UnicodeError {
+                index: 0,
+                value: 0xd800
+            }))
+        );
+        assert_eq!(
+            resolve_bidi_runs(&[b'a' as u32, 0x05d0], &mut []),
+            Err(BidiError::OutputTooSmall)
+        );
     }
 
     #[test]
