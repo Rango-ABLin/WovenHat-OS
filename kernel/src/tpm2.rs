@@ -3298,11 +3298,18 @@ pub fn self_test() -> bool {
         control_area: 0x1000,
         start_method: 6,
     };
-    if authorize_policy_session_custody(custody_info).is_err()
-        || authorize_policy_session_custody(Tpm2Info {
-            control_area: 0x1001,
-            ..custody_info
-        }) != Err(Error::InvalidDescriptor)
+    #[cfg(feature = "system-apps")]
+    if authorize_policy_session_custody(custody_info) != Err(Error::InvalidPolicy) {
+        return false;
+    }
+    #[cfg(not(feature = "system-apps"))]
+    if authorize_policy_session_custody(custody_info).is_err() {
+        return false;
+    }
+    if authorize_policy_session_custody(Tpm2Info {
+        control_area: 0x1001,
+        ..custody_info
+    }) != Err(Error::InvalidDescriptor)
     {
         return false;
     }

@@ -460,7 +460,7 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     ));
 
     let hardware = hal::init(acpi.as_ref().ok());
-    #[cfg(feature = "system-apps")]
+    #[cfg(all(feature = "system-apps", not(feature = "qemu-test")))]
     let tpm_info = acpi.as_ref().ok().and_then(|summary| summary.tpm2);
     if !hal::acpi::self_test() {
         console.println("ACPI PARSER: VALIDATION FAILED");
@@ -4155,6 +4155,15 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
             qemu_test_exit_failure();
         }
         serial::write_line(format_args!("[S20.14] two monitors: PASSED"));
+        qemu_test_exit_success();
+    }
+    #[cfg(feature = "stage24-59-test")]
+    {
+        if !stage24_59_change_pin_self_test() {
+            serial::write_line(format_args!("[S24.59] Change-PIN flow: FAILED"));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!("[S24.59] Change-PIN flow: PASSED"));
         qemu_test_exit_success();
     }
     #[cfg(feature = "stage20-13-test")]
@@ -7942,6 +7951,248 @@ fn stage20_15_self_test() -> bool {
         task::yield_now();
     }
     step("the machine turned off from the desktop", false)
+}
+
+/// Stage 24.59 acceptance: the Change-PIN flow through the real WovenShell UI.
+///
+/// This uses the production identity/session capability boundary, kernel-
+/// injected pointer and keyboard input, and the account-file boundary. It
+/// proves that the old PIN is rejected after the change and the new PIN works
+/// after the shell reloads its account record.
+#[cfg(feature = "stage24-59-test")]
+fn stage24_59_change_pin_self_test() -> bool {
+    use crate::display::{blend_pixel, rgb, Surface};
+    use pbkdf2::pbkdf2_hmac;
+    use sha2::Sha256;
+
+    const WALLPAPER_TOP: u32 = rgb(18, 42, 74);
+    const WALLPAPER_BOTTOM: u32 = rgb(64, 28, 88);
+    const WHITE: u32 = rgb(255, 255, 255);
+    const BLACK: u32 = rgb(0, 0, 0);
+    const UNSET: u32 = 0x0100_0000;
+
+    fn step(name: &str, ok: bool) -> bool {
+        serial::write_line(format_args!(
+            "[S24.59] {} {}",
+            name,
+            if ok { "PASS" } else { "FAIL" }
+        ));
+        ok
+    }
+    fn until(limit: u64, condition: impl Fn() -> bool) -> bool {
+        let start = timer::ticks();
+        loop {
+            if condition() {
+                return true;
+            }
+            if timer::ticks().wrapping_sub(start) > limit {
+                return false;
+            }
+            task::yield_now();
+        }
+    }
+    fn packet(dx: i16, screen_dy: i16, left: bool) -> bool {
+        let dy = -screen_dy;
+        let flags =
+            0x08 | u8::from(left) | if dx < 0 { 0x10 } else { 0 } | if dy < 0 { 0x20 } else { 0 };
+        [flags, dx as u8, dy as u8].into_iter().all(mouse::loopback)
+    }
+    fn move_by(mut dx: i32, mut dy: i32) -> bool {
+        while dx != 0 || dy != 0 {
+            let (sx, sy) = (dx.clamp(-100, 100), dy.clamp(-100, 100));
+            if !packet(sx as i16, sy as i16, false) {
+                return false;
+            }
+            dx -= sx;
+            dy -= sy;
+        }
+        true
+    }
+    fn click() -> bool {
+        packet(0, 0, true) && packet(0, 0, false)
+    }
+    fn keys(codes: &[u8]) -> bool {
+        codes.iter().all(|&code| mouse::keyboard_loopback(code))
+    }
+    fn wallpaper(x: i32, y: i32, height: i32) -> u32 {
+        let span = (height - 1).max(1);
+        let t = (y.clamp(0, span) * 255 / span) as u8;
+        let base = blend_pixel(WALLPAPER_BOTTOM, WALLPAPER_TOP, t);
+        if x % 32 == 0 || y % 32 == 0 {
+            blend_pixel(WHITE, base, 28)
+        } else {
+            base
+        }
+    }
+    fn account_line(name: &str, salt: &[u8], pin: &[u8]) -> alloc::string::String {
+        let mut hash = [0_u8; 32];
+        pbkdf2_hmac::<Sha256>(pin, salt, 100_000, &mut hash);
+        let mut line = alloc::format!("{name}:");
+        for byte in salt {
+            line.push_str(&alloc::format!("{byte:02x}"));
+        }
+        line.push(':');
+        for byte in hash {
+            line.push_str(&alloc::format!("{byte:02x}"));
+        }
+        line.push('\n');
+        line
+    }
+    fn hex(byte: u8) -> Option<u8> {
+        match byte {
+            b'0'..=b'9' => Some(byte - b'0'),
+            b'a'..=b'f' => Some(byte - b'a' + 10),
+            b'A'..=b'F' => Some(byte - b'A' + 10),
+            _ => None,
+        }
+    }
+    fn file_accepts(pin: &[u8]) -> bool {
+        let Ok(stat) = vfs::stat("/etc/wovenhat/accounts") else { return false };
+        let mut data = alloc::vec![0_u8; stat.size];
+        if vfs::read_all("/etc/wovenhat/accounts", &mut data) != Ok(stat.size) {
+            return false;
+        }
+        let Some(line) = data
+            .split(|byte| *byte == b'\n')
+            .find(|line| line.starts_with(b"ada:"))
+        else {
+            return false;
+        };
+        let mut fields = line.split(|byte| *byte == b':');
+        let (Some(name), Some(salt_text), Some(hash_text)) =
+            (fields.next(), fields.next(), fields.next())
+        else {
+            return false;
+        };
+        if name != b"ada"
+            || fields.next().is_some()
+            || salt_text.len() % 2 != 0
+            || hash_text.len() != 64
+        {
+            return false;
+        }
+        let mut salt = [0_u8; 32];
+        if salt_text.len() / 2 > salt.len() {
+            return false;
+        }
+        for (index, pair) in salt_text.chunks(2).enumerate() {
+            let (Some(high), Some(low)) = (hex(pair[0]), hex(pair[1])) else { return false };
+            salt[index] = (high << 4) | low;
+        }
+        let mut expected = [0_u8; 32];
+        pbkdf2_hmac::<Sha256>(pin, &salt[..salt_text.len() / 2], 100_000, &mut expected);
+        for (index, pair) in hash_text.chunks(2).enumerate() {
+            let (Some(high), Some(low)) = (hex(pair[0]), hex(pair[1])) else { return false };
+            if expected[index] != ((high << 4) | low) {
+                return false;
+            }
+        }
+        true
+    }
+
+    let mut file = account_line("ada", b"\x11\x22\x33\x44\x55\x66\x77\x88", b"1234");
+    file.push_str(&account_line("lin", b"\xa0\xb1\xc2\xd3\xe4\xf5\x06\x17", b"9876"));
+    let written = (vfs::stat("/etc").is_ok() || vfs::mkdir("/etc").is_ok())
+        && vfs::mkdir("/etc/wovenhat").is_ok()
+        && vfs::create_read_only("/etc/wovenhat/accounts", file.as_bytes()).is_ok();
+    if !step("accounts fixture written", written) {
+        return false;
+    }
+    let Ok(shell) = session::start(WOVEN_SHELL_IMAGE, Some("/etc/wovenhat/accounts")) else {
+        return step("identity-capable shell started", false);
+    };
+    if !step(
+        "shell took the display and input focus",
+        until(3000, || {
+            compositor::holder() == Some(shell)
+                && compositor::is_presenting()
+                && session::active() == Some(shell)
+        }),
+    ) {
+        return false;
+    }
+    let Some((width, height)) = compositor::dimensions() else {
+        return step("desktop geometry", false);
+    };
+    let (width, height) = (width as i32, height as i32);
+    let top = height - 24;
+    let middle = height / 2;
+    let line = |y0: i32, text: &str| {
+        let x0 = (width - crate::font::text_width(text) as i32) / 2;
+        let mut mask = Surface::new(width as usize, 7);
+        let bounds = mask.bounds();
+        mask.fill_rect(bounds, UNSET);
+        mask.draw_text(x0, 0, text, WHITE);
+        (y0..y0 + 7).all(|y| {
+            (0..width).all(|x| {
+                let expected = if mask.pixel(x, y - y0) == Some(WHITE) {
+                    WHITE
+                } else {
+                    blend_pixel(BLACK, wallpaper(x, y, height), 160)
+                };
+                compositor::pixel(x, y) == Ok(expected)
+            })
+        })
+    };
+    if !step(
+        "ada sign-in prompt rendered",
+        until(1000, || line(middle - 60, "Sign in") && line(middle - 4, "Enter PIN")),
+    ) {
+        return false;
+    }
+    if !step(
+        "ada signs in",
+        keys(&[0x02, 0x03, 0x04, 0x05, 0x1c])
+            && until(1000, || !line(middle - 60, "Sign in")),
+    ) {
+        return false;
+    }
+    let button = (width - 54 - 5 * 20, top + 4);
+    let change_row = (width - 4 - 164 + 28, top - 2 - (7 * 14 + 2) + 1 + 6 * 14 + 7);
+    let opened = move_by(button.0 + 8 - width / 2, button.1 + 8 - middle)
+        && click()
+        && until(1000, compositor::presented);
+    let chosen = opened
+        && move_by(change_row.0 - (button.0 + 8), change_row.1 - (button.1 + 8))
+        && click()
+        && until(1000, || line(middle - 34, "Change PIN"));
+    if !step("Quick Settings Change PIN opens", chosen) {
+        return false;
+    }
+    let change_keys = keys(&[
+        0x02, 0x03, 0x04, 0x05, 0x1c, // current 1234
+        0x07, 0x09, 0x1c, // new 68
+        0x07, 0x09, 0x1c, // confirm 68
+    ]);
+    let _ = step("Change PIN keys injected", change_keys);
+    let changed = change_keys && until(1000, || !line(middle - 34, "Change PIN"));
+    if !step("new PIN accepted and desktop restored", changed) {
+        return false;
+    }
+    if !step("old PIN is absent from the persisted record", !file_accepts(b"1234"))
+        || !step("new PIN is present in the persisted record", file_accepts(b"68"))
+    {
+        return false;
+    }
+    let lock_row = (width - 4 - 164 + 28, top - 2 - (7 * 14 + 2) + 1 + 5 * 14 + 7);
+    let locked = move_by(button.0 + 8 - width / 2, button.1 + 8 - middle)
+        && click()
+        && move_by(lock_row.0 - (button.0 + 8), lock_row.1 - (button.1 + 8))
+        && click()
+        && until(1000, || line(middle - 34, "Locked"));
+    let _ = step("lock screen opens", locked);
+    let old_keys = locked && keys(&[0x02, 0x03, 0x04, 0x05, 0x1c]);
+    let _ = step("old PIN keys injected", old_keys);
+    let old_refused = old_keys && until(500, || line(middle - 4, "Wrong PIN"));
+    let _ = step("old PIN rejected", old_refused);
+    let new_keys = old_refused && keys(&[0x07, 0x09, 0x1c]);
+    let _ = step("new PIN keys injected", new_keys);
+    let new_works = new_keys && until(1000, || !line(middle - 34, "Locked"));
+    if !step("old PIN is refused and new PIN unlocks", new_works) {
+        return false;
+    }
+    let _ = task::kill_process(shell, 9);
+    true
 }
 
 /// Stage 20.13 acceptance: workspaces. With real i8042 input the kernel

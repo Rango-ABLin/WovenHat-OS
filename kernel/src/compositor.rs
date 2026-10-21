@@ -399,7 +399,7 @@ pub fn attach_gpu_outputs() -> Result<usize, Error> {
 }
 
 /// Whether everything drawn has reached the display.
-#[cfg(feature = "stage20-14b-test")]
+#[cfg(any(feature = "stage20-14b-test", feature = "stage24-59-test"))]
 pub fn presented() -> bool {
     STATE
         .lock()
