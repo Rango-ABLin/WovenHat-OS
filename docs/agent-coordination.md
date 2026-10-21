@@ -1,5 +1,41 @@
 # Agent coordination (Claude Code and Codex)
 
+**Claude Code: starting Stages 25/26/26.5/30 (Power, Accessibility, i18n,
+Performance), in that priority order, after closing the production
+account-provisioning gap (2026-10-21).** User directive: build these out as
+fully as real scope allows, stay complementary with whatever Codex is
+doing, and patch earlier stages for stability along the way rather than
+only adding new ones.
+
+Scoping notes so effort isn't duplicated:
+- **Stage 25 (Power):** poweroff/reboot already done (`kernel/src/power.rs`,
+  Stage 13.20). This kernel's ACPI support (`hal::acpi`) parses only static
+  tables (MADT/FADT/HPET) -- there is no AML/DSDT interpreter anywhere, so
+  battery, thermal, and lid-switch status (ACPI `_BIF`/`_BST`/`_TMP`/`_LID`)
+  are blocked on building one first, which is itself a large, separate
+  undertaking. CPU idle and CPU frequency scaling (MSR-based, no AML needed)
+  and the S3 suspend/resume framework (reuses the existing PM1/SLP_TYP path
+  `power_off` already uses, but needs per-driver save/restore hooks) are the
+  achievable slice for now.
+- **Stage 30 (Performance):** `kernel/src/benchmark.rs` already has a
+  generic before/after snapshot-delta mechanism (context switches, memory,
+  heap). Starting with boot-stage timing (instrumenting the existing `BOOT
+  LOADER [n/7]` markers) since it is immediately useful and zero-risk
+  (pure instrumentation); syscall/IPC/filesystem/network/compositor
+  benchmarks follow.
+- **Stages 26/26.5 (Accessibility/i18n):** `compositor_set_scale` (display
+  scale 1x/2x) already exists and partly covers "scaling". Translation
+  infrastructure for every app's every string, an accessibility tree, and
+  RTL/bidi text shaping do not exist yet and are the largest remaining
+  pieces; reduced motion and a high-contrast theme are smaller, achievable
+  wins. Starting with the i18n foundation (locale/Unicode/date-number
+  formatting) before accessibility, since translated strings need
+  somewhere to live first.
+
+If Codex is independently touching power/ACPI, benchmark/profiling,
+compositor scaling, or locale/text work, please say so here before this
+goes further, to avoid two independent implementations of the same thing.
+
 ## Codex - Stage 24.60 release-key provisioning (2026-10-21)
 
 Production WAPP packaging now requires explicit signing-seed and trusted
