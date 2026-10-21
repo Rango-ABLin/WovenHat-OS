@@ -1,5 +1,20 @@
 # Stage status
 
+## Stage 25.13 - persistent firmware-wake record integration (2026-10-21)
+
+Prepared suspend state is now retained in a kernel-owned pending record across
+the PM1 transition boundary. The low-memory wake entry consumes the saved CPU
+context through the Stage 25.12 restore primitive and transfers to a
+continuation that restores the FACS vector, trampoline, secondary CPUs, and
+drivers. The guarded integration gate passed on 1/2/4 CPUs.
+
+Evidence is in `docs/audit-stage25-13-wake-record-2026-10-21.md` and the
+retained `audit-artifacts/stage25.13-*` directories.
+
+The QEMU gate validates record ownership and continuation wiring without
+issuing S3. Actual firmware wake and physical suspend/resume qualification
+remain unproven.
+
 ## Stage 25.12 - CPU resume-context restoration primitive (2026-10-21)
 
 The kernel now has a validated non-returning restore path that reloads CR0,

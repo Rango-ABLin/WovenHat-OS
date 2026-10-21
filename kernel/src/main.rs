@@ -63,7 +63,8 @@ mod display;
     feature = "stage25-9-test",
     feature = "stage25-10-test",
     feature = "stage25-11-test",
-    feature = "stage25-12-test"
+    feature = "stage25-12-test",
+    feature = "stage25-13-test"
 ))]
 mod driver;
 #[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
@@ -5687,6 +5688,15 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
             qemu_test_exit_failure();
         }
         qemu_test_exit_failure();
+    }
+    #[cfg(feature = "stage25-13-test")]
+    {
+        if !power::wake_record_self_test() {
+            serial::write_line(format_args!("[S25.13] wake record integration: FAILED"));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!("[S25.13] wake record integration: PASSED"));
+        qemu_test_exit_success();
     }
     serial::write_line(format_args!("[BOOT] ALL VALIDATIONS PASSED"));
     #[cfg(feature = "qemu-test")]

@@ -179,6 +179,16 @@ record ownership, driver restoration after S3, and physical qualification
 remain open. See
 `docs/audit-stage25-12-cpu-context-restore-2026-10-21.md`.
 
+## Codex - Stage 25.13 persistent firmware-wake record integration (2026-10-21)
+
+The shared branch now retains the committed suspend token in a single
+kernel-owned pending record, refreshes the immediate pre-transition CPU
+context, and routes the low-memory wake entry through context restoration into
+owned vector/trampoline/CPU/driver rollback. The non-destructive integration
+gate passes on 1/2/4 CPUs. Actual firmware wake and physical qualification
+remain open. See
+`docs/audit-stage25-13-wake-record-2026-10-21.md`.
+
 ## Codex - Stage 24.60 release-key provisioning (2026-10-21)
 
 Production WAPP packaging now requires explicit signing-seed and trusted

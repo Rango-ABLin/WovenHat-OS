@@ -3647,3 +3647,19 @@ sequence, and reaches a continuation that records the marker and exits QEMU.
 This establishes the architectural primitive on 1/2/4 CPUs. A persistent
 firmware-wake record, wake-entry integration, driver restoration, and physical
 S3 qualification remain required before exposing suspend.
+
+## Stage 25.13 persistent firmware-wake record integration
+
+`PENDING_SUSPEND` is a single kernel-owned slot populated only after the
+prepared token is refreshed with the context captured immediately before the
+PM1 request. `enter_suspend` rejects a second pending transition and takes the
+slot back for every pre-transition failure. After firmware wake,
+`wake_entry` snapshots the stored context and invokes the Stage 25.12
+non-returning restore primitive. Its continuation consumes the pending token
+and calls `abort_suspend`, which restores the FACS vector, releases the wake
+trampoline, re-onlines secondary CPUs, and resumes drivers.
+
+The `stage25-13-test` gate checks the empty-record invariant and canonical
+wake/continuation wiring without issuing S3. Persistent record ownership and
+rollback are implemented, but actual firmware wake and physical qualification
+remain required.

@@ -44,6 +44,7 @@ pub enum SuspendError {
     AcpiModeRefused,
     StillRunning,
     RollbackFailed,
+    AlreadyPending,
 }
 
 #[expect(
@@ -78,6 +79,11 @@ pub struct SuspendPreparation {
     cpu_barrier: crate::smp::CpuSuspendBarrier,
     context: CpuResumeContext,
 }
+
+/// The one BSP-owned preparation record that survives the firmware transition
+/// boundary. It is never populated from userspace and is consumed only by the
+/// wake continuation or an explicit failed-entry rollback.
+static PENDING_SUSPEND: spin::Mutex<Option<SuspendPreparation>> = spin::Mutex::new(None);
 
 /// CPU state that must remain available to the post-firmware wake path.
 /// Pointers are recorded as integers so this value can be copied into a
@@ -296,6 +302,13 @@ pub fn abort_suspend(preparation: SuspendPreparation) -> bool {
         && crate::driver::resume_all(preparation.plan)
 }
 
+fn abort_pending_suspend() -> bool {
+    PENDING_SUSPEND
+        .lock()
+        .take()
+        .is_some_and(abort_suspend)
+}
+
 /// Request ACPI S3 after every preparation prerequisite has committed. The
 /// successful path transfers control to firmware and therefore does not return
 /// on real hardware. If firmware ignores the request, the token is rolled back
@@ -306,17 +319,41 @@ pub fn abort_suspend(preparation: SuspendPreparation) -> bool {
     reason = "future privileged suspend action calls this after policy checks"
 )]
 pub fn enter_suspend(preparation: SuspendPreparation) -> Result<(), SuspendError> {
-    let Some(power) = crate::hal::acpi::power() else {
+    let context = capture_cpu_resume_context();
+    if !context.valid() {
         let _ = abort_suspend(preparation);
         return Err(SuspendError::NoSuspend);
+    }
+    let preparation = SuspendPreparation { context, ..preparation };
+    {
+        let mut pending = PENDING_SUSPEND.lock();
+        if pending.is_some() {
+            drop(pending);
+            let _ = abort_suspend(preparation);
+            return Err(SuspendError::AlreadyPending);
+        }
+        *pending = Some(preparation);
+    }
+    let Some(power) = crate::hal::acpi::power() else {
+        return Err(if abort_pending_suspend() {
+            SuspendError::NoSuspend
+        } else {
+            SuspendError::RollbackFailed
+        });
     };
     let Some((sleep_a, sleep_b)) = power.s3 else {
-        let _ = abort_suspend(preparation);
-        return Err(SuspendError::NoSuspend);
+        return Err(if abort_pending_suspend() {
+            SuspendError::NoSuspend
+        } else {
+            SuspendError::RollbackFailed
+        });
     };
     if power.pm1a_control == 0 || !acpi_mode(power) {
-        let _ = abort_suspend(preparation);
-        return Err(SuspendError::AcpiModeRefused);
+        return Err(if abort_pending_suspend() {
+            SuspendError::AcpiModeRefused
+        } else {
+            SuspendError::RollbackFailed
+        });
     }
     last_flush();
     x86_64::instructions::interrupts::disable();
@@ -352,7 +389,7 @@ pub fn enter_suspend(preparation: SuspendPreparation) -> Result<(), SuspendError
     };
     x86_64::instructions::interrupts::enable();
     if !write_ok {
-        let restored = abort_suspend(preparation);
+        let restored = abort_pending_suspend();
         return Err(if restored {
             SuspendError::NoSuspend
         } else {
@@ -360,7 +397,7 @@ pub fn enter_suspend(preparation: SuspendPreparation) -> Result<(), SuspendError
         });
     }
     settle();
-    let restored = abort_suspend(preparation);
+    let restored = abort_pending_suspend();
     Err(if restored {
         SuspendError::StillRunning
     } else {
@@ -368,18 +405,42 @@ pub fn enter_suspend(preparation: SuspendPreparation) -> Result<(), SuspendError
     })
 }
 
+extern "C" fn wake_resume_continuation() -> ! {
+    if abort_pending_suspend() {
+        crate::serial::write_line(format_args!("[POWER] firmware wake rollback complete"));
+    } else {
+        crate::serial::write_line(format_args!("[POWER] firmware wake rollback FAILED"));
+    }
+    loop {
+        x86_64::instructions::hlt();
+    }
+}
+
 #[expect(
     dead_code,
     reason = "entered by the future firmware wake path after S3 resume"
 )]
 extern "C" fn wake_entry() -> ! {
+    let context = PENDING_SUSPEND.lock().as_ref().map(|pending| pending.context);
+    if let Some(context) = context {
+        // SAFETY: the pending record is kernel-owned and was validated before
+        // PM1 S3 entry; the continuation performs the owned rollback.
+        unsafe { restore_cpu_resume_context(&context, wake_resume_continuation) }
+    }
     x86_64::instructions::interrupts::disable();
     crate::gdt::init();
     crate::interrupts::init();
-    crate::serial::write_line(format_args!("[POWER] firmware wake trampoline reached"));
+    crate::serial::write_line(format_args!("[POWER] wake without pending suspend record"));
     loop {
         x86_64::instructions::hlt();
     }
+}
+
+#[cfg(feature = "stage25-13-test")]
+pub fn wake_record_self_test() -> bool {
+    PENDING_SUSPEND.lock().is_none()
+        && VirtAddr::try_new(wake_entry as *const () as u64).is_ok()
+        && VirtAddr::try_new(wake_resume_continuation as *const () as u64).is_ok()
 }
 
 #[cfg(feature = "stage25-7-test")]

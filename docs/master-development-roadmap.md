@@ -1456,6 +1456,14 @@ transfer to a kernel continuation without returning through a stale firmware
 stack. This does not yet wire a persistent firmware-wake record, restore
 drivers after S3, or claim physical suspend/resume qualification.
 
+Stage 25.13 - persistent firmware-wake record integration
+
+Accepted bounded slice: retain the committed suspend preparation in a
+kernel-owned record, restore its CPU context from the low-memory wake entry,
+and transfer to a continuation that performs owned rollback and driver/CPU
+restoration. This does not claim that firmware has actually completed S3 wake
+or that physical suspend/resume is qualified.
+
 ACPI poweroff
 reboot
 sleep
