@@ -99,6 +99,11 @@ const ATTESTATION_NAME_POLICY_MAGIC: [u8; 4] = *b"TAN1";
 const ATTESTATION_NAME_POLICY_VERSION: u16 = 1;
 const ATTESTATION_NAME_POLICY_SIGNED_BYTES: usize = 42;
 pub const ATTESTATION_NAME_POLICY_BYTES: usize = ATTESTATION_NAME_POLICY_SIGNED_BYTES + 64;
+const CREDENTIAL_BROKER_CONFIG_MAGIC: [u8; 4] = *b"TCB1";
+const CREDENTIAL_BROKER_CONFIG_VERSION: u16 = 1;
+const CREDENTIAL_BROKER_CONFIG_SIGNED_BYTES: usize = 118;
+pub const CREDENTIAL_BROKER_CONFIG_BYTES: usize = CREDENTIAL_BROKER_CONFIG_SIGNED_BYTES + 64;
+pub const CREDENTIAL_ROOT_NV_INDEX: u32 = 0x0150_0000;
 #[allow(dead_code)]
 const POLICY_SESSION_CONTEXT_MAGIC: [u8; 4] = *b"TPS1";
 #[allow(dead_code)]
@@ -131,6 +136,82 @@ pub struct NvPublic {
     pub auth_policy_length: u8,
     pub auth_policy: [u8; 32],
     pub data_size: u16,
+}
+
+/// Signed release policy for the physical TPM credential broker. Secret
+/// authorization values are deliberately excluded and must arrive through a
+/// separate kernel-only provisioning path.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct CredentialBrokerConfig {
+    pub root_nv_index: u32,
+    pub signing_handle: u32,
+    pub scheme: QuoteSigningScheme,
+    pub pcr: u8,
+    pub expected_digest: [u8; 32],
+    pub attestation_name: [u8; 34],
+    pub nv_policy: [u8; 32],
+}
+
+/// Decode and authenticate one bounded `TCB1` release provisioning record.
+/// Signature verification precedes returning any policy fields to a caller.
+#[allow(dead_code)]
+pub fn decode_credential_broker_config(
+    envelope: &[u8; CREDENTIAL_BROKER_CONFIG_BYTES],
+    trusted_key: &[u8; 32],
+) -> Result<CredentialBrokerConfig, Error> {
+    if envelope[..4] != CREDENTIAL_BROKER_CONFIG_MAGIC
+        || u16::from_be_bytes(envelope[4..6].try_into().unwrap())
+            != CREDENTIAL_BROKER_CONFIG_VERSION
+        || u16::from_be_bytes(envelope[6..8].try_into().unwrap())
+            != CREDENTIAL_BROKER_CONFIG_SIGNED_BYTES as u16
+        || envelope[18..20] != [0; 2]
+    {
+        return Err(Error::InvalidPolicy);
+    }
+    let mut signature = [0_u8; 64];
+    signature.copy_from_slice(&envelope[CREDENTIAL_BROKER_CONFIG_SIGNED_BYTES..]);
+    crate::signed_app::verify(
+        &envelope[..CREDENTIAL_BROKER_CONFIG_SIGNED_BYTES],
+        trusted_key,
+        &signature,
+    )
+    .map_err(|_| Error::PolicySignature)?;
+    let root_nv_index = u32::from_be_bytes(envelope[8..12].try_into().unwrap());
+    let signing_handle = u32::from_be_bytes(envelope[12..16].try_into().unwrap());
+    let scheme = match envelope[16] {
+        0 => QuoteSigningScheme::RsaSsa,
+        1 => QuoteSigningScheme::RsaPss,
+        2 => QuoteSigningScheme::Ecdsa,
+        _ => return Err(Error::UnsupportedInterface),
+    };
+    let pcr = envelope[17];
+    if root_nv_index != CREDENTIAL_ROOT_NV_INDEX || signing_handle == 0 || pcr >= 24 {
+        return Err(Error::InvalidPolicy);
+    }
+    let mut expected_digest = [0_u8; 32];
+    expected_digest.copy_from_slice(&envelope[20..52]);
+    if expected_digest.iter().all(|byte| *byte == 0) {
+        return Err(Error::InvalidPolicy);
+    }
+    let mut attestation_name = [0_u8; 34];
+    attestation_name.copy_from_slice(&envelope[52..86]);
+    if attestation_name[..2] != TPM_ALG_SHA256.to_be_bytes() {
+        return Err(Error::InvalidPolicy);
+    }
+    let mut nv_policy = [0_u8; 32];
+    nv_policy.copy_from_slice(&envelope[86..118]);
+    if nv_policy.iter().all(|byte| *byte == 0) {
+        return Err(Error::InvalidPolicy);
+    }
+    Ok(CredentialBrokerConfig {
+        root_nv_index,
+        signing_handle,
+        scheme,
+        pcr,
+        expected_digest,
+        attestation_name,
+        nv_policy,
+    })
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -541,6 +622,9 @@ pub fn verify_signed_attestation_name_policy(
 #[cfg(any(feature = "stage24-3-test", feature = "system-apps"))]
 const ATTESTATION_NAME_POLICY_PATH: &str = "/wfs/tpm-attestation-name-policy";
 
+#[cfg(any(feature = "stage24-3-test", feature = "system-apps"))]
+const CREDENTIAL_BROKER_CONFIG_PATH: &str = "/wfs/tpm-credential-broker-config";
+
 /// Persist a signed attestation Name policy through the journal-backed WovenFS
 /// writer. Signature verification happens before the durable mutation, so an
 /// invalid policy can never replace a valid record.
@@ -573,6 +657,38 @@ pub fn read_attestation_name_policy(
     verify_signed_attestation_name_policy(&envelope[..length], trusted_key)
 }
 
+/// Persist a signed physical broker configuration through the journal-backed
+/// WovenFS writer. The record contains policy only; no authorization secret is
+/// accepted or written by this API.
+#[cfg(any(feature = "stage24-3-test", feature = "system-apps"))]
+#[allow(dead_code)]
+pub fn persist_credential_broker_config(
+    authority: &crate::wfs::AuthorizedWfsWriter,
+    envelope: &[u8; CREDENTIAL_BROKER_CONFIG_BYTES],
+    trusted_key: &[u8; 32],
+    now: u64,
+) -> Result<(), Error> {
+    decode_credential_broker_config(envelope, trusted_key)?;
+    crate::wfs::write_vfs_path_durable(authority, CREDENTIAL_BROKER_CONFIG_PATH, envelope, now)
+        .map_err(|_| Error::Storage)
+}
+
+/// Read and authenticate the durable physical broker configuration. A valid
+/// file length never bypasses the signed-record check.
+#[cfg(any(feature = "stage24-3-test", feature = "system-apps"))]
+#[allow(dead_code)]
+pub fn read_credential_broker_config(
+    trusted_key: &[u8; 32],
+    envelope: &mut [u8; CREDENTIAL_BROKER_CONFIG_BYTES],
+) -> Result<CredentialBrokerConfig, Error> {
+    let length = crate::wfs::read_vfs_path_durable(CREDENTIAL_BROKER_CONFIG_PATH, envelope)
+        .map_err(|_| Error::Storage)?;
+    if length != CREDENTIAL_BROKER_CONFIG_BYTES {
+        return Err(Error::MalformedResponse);
+    }
+    decode_credential_broker_config(envelope, trusted_key)
+}
+
 /// Load the provisioned attestation-object Name policy during a release boot.
 ///
 /// The application release trust root is the only policy-signing key accepted
@@ -582,6 +698,10 @@ pub fn read_attestation_name_policy(
 #[cfg(feature = "system-apps")]
 static BOOT_ATTESTATION_NAME_POLICY: spin::Mutex<Option<[u8; ATTESTATION_NAME_POLICY_BYTES]>> =
     spin::Mutex::new(None);
+
+#[cfg(feature = "system-apps")]
+static BOOT_CREDENTIAL_BROKER_CONFIG:
+    spin::Mutex<Option<[u8; CREDENTIAL_BROKER_CONFIG_BYTES]>> = spin::Mutex::new(None);
 
 #[cfg(feature = "system-apps")]
 pub fn load_attestation_name_policy_at_boot() -> Result<[u8; 34], Error> {
@@ -614,6 +734,44 @@ pub fn boot_attestation_name_policy(
         return false;
     };
     envelope.copy_from_slice(&policy);
+    true
+}
+
+/// Load and retain the signed broker policy for a later physical TPM
+/// installer. This records policy availability only; it does not create a
+/// credential root or enable hardware login.
+#[cfg(feature = "system-apps")]
+#[allow(dead_code)]
+pub fn load_credential_broker_config_at_boot() -> Result<CredentialBrokerConfig, Error> {
+    let mut envelope = [0_u8; CREDENTIAL_BROKER_CONFIG_BYTES];
+    let result = read_credential_broker_config(
+        &crate::signed_app::TRUSTED_PUBLIC_KEY,
+        &mut envelope,
+    );
+    let mut loaded = BOOT_CREDENTIAL_BROKER_CONFIG.lock();
+    match result {
+        Ok(config) => {
+            *loaded = Some(envelope);
+            Ok(config)
+        }
+        Err(error) => {
+            *loaded = None;
+            Err(error)
+        }
+    }
+}
+
+/// Copy the boot-accepted broker policy without exposing storage authority.
+#[cfg(feature = "system-apps")]
+#[allow(dead_code)]
+pub fn boot_credential_broker_config(
+    envelope: &mut [u8; CREDENTIAL_BROKER_CONFIG_BYTES],
+) -> bool {
+    let loaded = BOOT_CREDENTIAL_BROKER_CONFIG.lock();
+    let Some(config) = *loaded else {
+        return false;
+    };
+    envelope.copy_from_slice(&config);
     true
 }
 
@@ -2825,6 +2983,12 @@ pub fn get_random(info: Tpm2Info, output: &mut [u8]) -> Result<usize, Error> {
 
 #[cfg(feature = "qemu-test")]
 pub fn self_test() -> bool {
+    let invalid_broker_config = [0_u8; CREDENTIAL_BROKER_CONFIG_BYTES];
+    if decode_credential_broker_config(&invalid_broker_config, &[0_u8; 32])
+        != Err(Error::InvalidPolicy)
+    {
+        return false;
+    }
     let custody_info = Tpm2Info {
         platform_class: 0,
         control_area: 0x1000,

@@ -2,6 +2,12 @@ WovenHat OS — Stage 10.7 → Version 1.0 Master Roadmap
 Phase I — Finish the asynchronous kernel foundation
 Stage 10.7 — Asynchronous TCP
 
+Stage 24.53 - Signed TPM broker provisioning record
+Implemented a fixed-size signed `TCB1` record for broker policy, bounded
+validation of the reserved NV index, attestation handle, quote scheme, PCR,
+expected digest, attestation Name, and NV policy, plus WovenFS persistence and
+boot revalidation. Authorization secrets remain outside durable storage.
+
 Stage 24.52 - Physical TPM credential broker boundary
 Implemented the kernel-owned broker that validates release policy inputs,
 executes one fresh TPM PolicyPCR/Quote sequence, verifies and flushes it, and

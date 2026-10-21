@@ -1,5 +1,14 @@
 # WovenHat OS Architecture & Codebase Guide
 
+### Stage 24.53 - signed TPM broker provisioning record
+
+`TCB1` is a fixed-size Ed25519-signed WovenFS record containing only broker
+policy: the reserved credential-root NV index, attestation handle, quote
+scheme, PCR and expected digest, attestation Name, and NV policy. The parser
+verifies the signature and all bounds before returning fields. Boot retention
+revalidates the record and does not create a root or enable login; authorization
+secrets are intentionally not persisted in this record.
+
 ### Stage 24.52 - physical TPM credential broker boundary
 
 `HardwareCredentialBroker` owns the validated TPM descriptor, active

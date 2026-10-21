@@ -1,5 +1,13 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - Stage 24.53 (2026-10-21)
+
+Added signed fixed-size `TCB1` broker provisioning records with WovenFS
+persistence and boot revalidation. Policy fields are authenticated and bounded;
+authorization secrets are excluded from storage. Host, Clippy, memory QEMU,
+and signed system-apps 1/2/4-CPU gates pass. No physical TPM or USB write was
+performed.
+
 ## Codex - Stage 24.52 (2026-10-21)
 
 Added the kernel-owned physical TPM credential broker boundary. It validates

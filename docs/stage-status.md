@@ -1,5 +1,20 @@
 # Stage status
 
+## Stage 24.53 signed TPM broker provisioning record (2026-10-21)
+
+Added a bounded signed `TCB1` release record for the physical TPM broker.
+The record authenticates the reserved NV index, attestation handle, quote
+scheme, PCR, expected PCR digest, attestation Name, and NV policy before any
+field is returned. WovenFS persistence and boot-time revalidation are
+available, while authorization secrets remain excluded from durable storage.
+Host tests (89), all-targets and affected feature Clippy, executable QEMU, and
+signed system-apps 1/2/4-CPU acceptance pass. Evidence is under
+`audit-artifacts/stage24.53-signed-tpm-provisioning-20261021`.
+
+The QEMU image has no TPM2 device and no provisioning record, so the broker
+remains uninstalled. Physical TPM provisioning, secret injection, live login,
+reboot recovery, and hardware qualification remain required.
+
 ## Stage 24.52 physical TPM credential broker boundary (2026-10-21)
 
 The kernel now owns a bounded physical TPM credential broker. It validates the
