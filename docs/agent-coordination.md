@@ -1,5 +1,14 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - physical inventory probe (2026-10-21)
+
+Ran the read-only host preflight and the existing physical-probe image smoke
+gate on 1/2/4 configured QEMU CPUs. All three inventory boots passed and
+retained serial/QMP/screenshot/hash evidence. The attached USB candidate was
+only inventoried; no disk was opened, mounted, formatted, written, or imaged.
+This does not claim native hardware or physical USB/Wi-Fi acceptance. See
+`docs/audit-physical-probe-2026-10-21.md`.
+
 **Claude Code: starting Stages 25/26/26.5/30 (Power, Accessibility, i18n,
 Performance), in that priority order, after closing the production
 account-provisioning gap (2026-10-21).** User directive: build these out as
