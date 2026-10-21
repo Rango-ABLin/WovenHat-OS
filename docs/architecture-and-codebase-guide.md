@@ -1,5 +1,15 @@
 # WovenHat OS Architecture & Codebase Guide
 
+### Stage 24.46 - boot-time TPM context recovery
+
+System-apps boot captures the discovered TPM2 handle before the ACPI summary is
+consumed. After native WovenFS publication and signed TAN1 policy loading, it
+loads the newest validated `TPS1` context candidate, calls TPM2 `ContextLoad`,
+and immediately calls `FlushContext`. This is deliberately a custody/recovery
+probe only: until a credential-authority consumer is integrated, every path
+keeps hardware credentials disabled. Storage-only records, missing TPMs,
+malformed records, failed loads, and cleanup failures cannot create authority.
+
 ### Stage 24.45 - durable TPM context custody
 
 The bounded `TPS1` record stores only TPM-produced context bytes plus

@@ -460,6 +460,8 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     ));
 
     let hardware = hal::init(acpi.as_ref().ok());
+    #[cfg(feature = "system-apps")]
+    let tpm_info = acpi.as_ref().ok().and_then(|summary| summary.tpm2);
     if !hal::acpi::self_test() {
         console.println("ACPI PARSER: VALIDATION FAILED");
         halt();
@@ -1764,6 +1766,38 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
             Err(error) => serial::write_line(format_args!(
                 "[TPM] signed attestation Name policy rejected: {error:?}; hardware credentials disabled"
             )),
+        }
+
+        // A durable context is only a recovery candidate. Require a live TPM
+        // ContextLoad and immediately flush the restored session until the
+        // boot authority consumer is integrated; no filesystem record alone
+        // can create hardware credential authority.
+        #[cfg(feature = "system-apps")]
+        {
+        match (tpm_info, tpm2::load_policy_session_snapshot()) {
+            (None, _) => serial::write_line(format_args!(
+                "[TPM] context recovery unavailable; no live TPM; hardware credentials disabled"
+            )),
+            (Some(_), Err(tpm2::Error::Storage)) => serial::write_line(format_args!(
+                "[TPM] no durable policy-session context; hardware credentials disabled"
+            )),
+            (Some(_), Err(error)) => serial::write_line(format_args!(
+                "[TPM] durable policy-session context rejected: {error:?}; hardware credentials disabled"
+            )),
+            (Some(info), Ok(mut snapshot)) => match tpm2::load_policy_session(info, &mut snapshot) {
+                Err(error) => serial::write_line(format_args!(
+                    "[TPM] policy-session ContextLoad rejected: {error:?}; hardware credentials disabled"
+                )),
+                Ok(mut lease) => match tpm2::flush_policy_session(info, &mut lease) {
+                    Ok(()) => serial::write_line(format_args!(
+                        "[TPM] durable policy-session context recovered and flushed; authority remains disabled"
+                    )),
+                    Err(error) => serial::write_line(format_args!(
+                        "[TPM] recovered policy-session cleanup failed: {error:?}; hardware credentials disabled"
+                    )),
+                },
+            },
+        }
         }
 
         // Stage 20.15: the WovenShell desktop is the session; F12 shows this

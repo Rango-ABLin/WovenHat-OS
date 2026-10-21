@@ -1,5 +1,21 @@
 # Stage status
 
+## Stage 24.46 boot-time TPM context recovery (2026-10-21)
+
+After WovenFS mount, system-apps boot now treats the newest validated `TPS1`
+record as a recovery candidate, requires a live TPM `ContextLoad`, and flushes
+the restored lease immediately because no credential-authority consumer is
+enabled yet. Missing storage, absent TPM hardware, invalid records, failed
+loads, and cleanup failures all leave hardware credentials disabled. Host
+tests, all-targets and affected feature Clippy, executable QEMU, and signed
+system-apps 1/2/4-CPU acceptance pass. Evidence is under
+`audit-artifacts/stage24.46-boot-tpm-context-recovery-20261021`.
+
+The QEMU environment has no durable TPM context, so physical cross-reboot
+restore remains unproven. Secure storage authorization, nonce refresh,
+provisioned-key lifecycle, credential decisions, recovery policy, and physical
+qualification remain required.
+
 ## Stage 24.45 durable TPM context custody boundary (2026-10-21)
 
 Opaque TPM policy-session contexts now have a versioned dual-copy WovenFS

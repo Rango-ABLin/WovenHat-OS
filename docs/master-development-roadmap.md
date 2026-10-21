@@ -1152,6 +1152,15 @@ detection, notification UX, and response automation cannot bypass WovenGuard.
 Phase XV — Accounts and Identity
 Stage 24 — WovenIdentity
 
+Stage 24.46 boot-time TPM context recovery accepted (2026-10-21): after
+WovenFS mount, system-apps boot treats the newest validated `TPS1` record as a
+candidate only, requires live TPM2 `ContextLoad`, and flushes the restored
+lease while hardware credential authority remains disabled. Missing, invalid,
+or rejected custody fails closed. Host, Clippy, memory QEMU, and signed
+system-apps 1/2/4-CPU gates pass. Physical cross-reboot restore, secure
+storage authorization, nonce refresh, provisioned-key lifecycle, credential
+decisions, and physical qualification remain open.
+
 Stage 24.1 foundation accepted (2026-10-20): `libwoven::identity` provides a
 bounded local users/groups/session policy core with PBKDF2 credentials,
 profiles, lock/unlock, and password-confirmed elevation. The gate passes on

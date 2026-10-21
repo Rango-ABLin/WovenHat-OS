@@ -1,5 +1,14 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - Stage 24.46 (2026-10-21)
+
+Integrated fail-closed boot recovery for durable TPM policy-session contexts:
+after WovenFS mount, system-apps selects the newest validated custody record,
+requires live TPM `ContextLoad`, and flushes the restored lease while hardware
+credential authority remains disabled. Host, Clippy, memory QEMU, and signed
+system-apps 1/2/4-CPU gates pass. QEMU has no durable TPM context, so physical
+cross-reboot restore and qualification remain open. USB remains untouched.
+
 ## Codex - Stage 24.45 (2026-10-21)
 
 Added versioned dual-copy WovenFS custody for opaque TPM policy-session
