@@ -1,5 +1,17 @@
 # Stage status
 
+## Stage 26.5 - bounded internationalization foundation (2026-10-21)
+
+Added `libwoven::i18n`, a fixed-capacity userspace foundation for English and
+Chichewa locale identifiers, bounded translation catalog lookup, locale-aware
+date ordering, integer formatting including `i64::MIN`, and Unicode scalar
+validation. Focused and full workspace host gates are recorded in
+`docs/audit-stage26-5-i18n-foundation-2026-10-21.md`.
+
+This is not full internationalization: Unicode normalization, complete Unicode
+data, RTL/bidi ordering, script shaping, keyboard layouts, IMEs, and wiring
+every application string to a catalog remain open.
+
 ## Stage 26.1 - bounded accessibility core (2026-10-21)
 
 Added `libwoven::accessibility`, a fixed-capacity userspace contract for

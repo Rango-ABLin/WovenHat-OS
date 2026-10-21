@@ -1533,6 +1533,12 @@ IMEs
 This also creates a path for excellent African-language support, including Chichewa.
 
 Phase XVIII — Updates and Recovery
+Stage 26.5 bounded foundation slice: provide fixed-capacity locale
+identifiers and translation lookup, locale-aware date ordering, bounded
+integer formatting, and Unicode scalar validation. This does not complete
+Unicode normalization, RTL/bidi, shaping, keyboard layouts, IMEs, or
+application-wide translation integration.
+
 Stage 27 — WovenUpdate
 
 Updates should be:

@@ -28,6 +28,7 @@ pub mod ai_ipc;
 pub mod ai_model;
 pub mod ai_monitor;
 pub mod ai_provider;
+pub mod i18n;
 pub mod identity;
 pub mod package;
 pub mod package_ipc;

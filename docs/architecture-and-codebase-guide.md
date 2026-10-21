@@ -1,5 +1,17 @@
 # WovenHat OS Architecture & Codebase Guide
 
+### Stage 26.5 - bounded internationalization foundation
+
+`libwoven::i18n` is the bounded userspace foundation for locale-sensitive
+presentation. `Locale` identifies language and region without heap storage;
+`Catalog` stores at most 32 fixed-size key/value translations and replaces
+entries atomically; `Date` validates Gregorian month lengths and formats the
+supported locale order; `format_integer` writes into caller-owned storage; and
+`validate_scalars` rejects surrogate and out-of-range Unicode scalar values.
+The module intentionally does not claim normalization, full Unicode property
+data, bidi, shaping, keyboard layouts, IMEs, or compositor/application
+integration.
+
 ### Stage 24.59 — Change-PIN credential synchronization
 
 The desktop Change-PIN path is a single kernel-authorized transaction across

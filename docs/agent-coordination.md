@@ -9,6 +9,14 @@ only inventoried; no disk was opened, mounted, formatted, written, or imaged.
 This does not claim native hardware or physical USB/Wi-Fi acceptance. See
 `docs/audit-physical-probe-2026-10-21.md`.
 
+## Codex - Stage 26.5 bounded internationalization foundation (2026-10-21)
+
+No Stage 26.5 source or acceptance evidence was present in the shared tree,
+so Codex is taking the first bounded foundation slice: locale identifiers,
+fixed-capacity translation lookup, date/number formatting, and Unicode scalar
+validation in `libwoven::i18n`. This stays below the unresolved normalization,
+RTL/bidi, shaping, keyboard-layout, IME, and application-integration work.
+
 **Claude Code: starting Stages 25/26/26.5/30 (Power, Accessibility, i18n,
 Performance), in that priority order, after closing the production
 account-provisioning gap (2026-10-21).** User directive: build these out as
