@@ -10,9 +10,21 @@ existing syscall epilogue to the interrupted userspace caller.
 
 ## Verification
 
-The required build, Clippy, host-test, and 1/2/4-CPU acceptance results will be
-recorded here after the Stage 25.15 tree passes. The focused QEMU test does not
-issue S3; it verifies record ownership and invalid-pointer rejection only.
+The required gates passed:
+
+- `cargo fmt --all -- --check` and `git diff --check` passed.
+- `cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage25-15-test -- -D warnings` passed.
+- `cargo clippy --offline --all-targets -- -D warnings` passed.
+- `cargo build --offline -p wovenhat-kernel --target x86_64-unknown-none` passed.
+- `cargo test --offline --all` passed: 95 library tests plus all integration
+  and doc-test targets.
+- Focused QEMU gate passed sequentially:
+  - 1 CPU: `audit-artifacts/stage25.15-1cpu-1792579335112039300`
+  - 2 CPUs: `audit-artifacts/stage25.15-2cpu-1792579392886205500`
+  - 4 CPUs: `audit-artifacts/stage25.15-4cpu-1792579413003466500`
+
+The focused QEMU test does not issue S3; it verifies record ownership and
+invalid-pointer rejection only.
 
 ## Limits
 

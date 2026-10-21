@@ -3830,3 +3830,9 @@ frame is validated against the current task's kernel stack, retained across
 the prepared transition, and restored through `wovenhat_syscall_resume` after
 owned wake rollback. Physical S3 qualification remains pending until the
 focused verification chain passes.
+
+Stage 25.15 passed the required freestanding build, warning-denying Clippy,
+offline host Clippy/tests, and sequential 1/2/4-CPU QEMU gates. Evidence is in
+`docs/audit-stage25-15-userspace-resume-target-2026-10-21.md` and the three
+retained `audit-artifacts/stage25.15-*` directories. Physical S3 wake remains
+unqualified.

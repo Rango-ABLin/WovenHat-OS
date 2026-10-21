@@ -47,10 +47,6 @@ pub enum SuspendError {
     AlreadyPending,
 }
 
-#[expect(
-    dead_code,
-    reason = "used by the future S3 transition boundary after wake-vector support lands"
-)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PrepareError {
     /// Firmware did not advertise S3 or no PM1a control block was found.
@@ -68,10 +64,6 @@ pub enum PrepareError {
 /// Driver-quiescence preparation for a future S3 transition. Construction
 /// performs no SLP_EN write; the plan must be explicitly resumed or consumed
 /// by a later transition implementation.
-#[expect(
-    dead_code,
-    reason = "held between S3 driver quiescence and the future transition entry"
-)]
 pub struct SuspendPreparation {
     plan: crate::driver::SuspendPlan,
     trampoline: crate::smp::WakeTrampoline,
@@ -164,10 +156,6 @@ fn capture_cpu_resume_context() -> CpuResumeContext {
     unreachable_code,
     reason = "Rust requires a diverging tail after noreturn inline assembly"
 )]
-#[expect(
-    dead_code,
-    reason = "consumed by the future firmware-wake continuation"
-)]
 unsafe fn restore_cpu_resume_context(
     context: &CpuResumeContext,
     continuation: extern "C" fn() -> !,
@@ -239,10 +227,6 @@ pub fn s3_control_self_test() -> bool {
 /// Quiesce the current driver set if firmware advertises S3. This boundary is
 /// deliberately separate from entering S3 so wake-vector and per-CPU resume
 /// work can be completed before any hardware transition is exposed.
-#[expect(
-    dead_code,
-    reason = "future S3 transition calls this after wake-vector and CPU coordination"
-)]
 pub fn prepare_suspend() -> Result<SuspendPreparation, PrepareError> {
     let Some(power) = crate::hal::acpi::power() else {
         return Err(PrepareError::NoSuspend);
@@ -289,10 +273,6 @@ pub fn prepare_suspend() -> Result<SuspendPreparation, PrepareError> {
 }
 
 /// Abort a prepared suspend and restore drivers in reverse order.
-#[expect(
-    dead_code,
-    reason = "future S3 transition rollback calls this on failed entry or wake"
-)]
 pub fn abort_suspend(preparation: SuspendPreparation) -> bool {
     let context_valid = preparation.context.valid();
     let wake_vector_restored = crate::hal::acpi::restore_facs_wake_vector(preparation.wake_vector);
@@ -318,10 +298,6 @@ fn abort_pending_suspend() -> bool {
 /// on real hardware. If firmware ignores the request, the token is rolled back
 /// before returning an explicit error; no caller may accidentally continue with
 /// drivers suspended or secondary CPUs parked.
-#[expect(
-    dead_code,
-    reason = "future privileged suspend action calls this after policy checks"
-)]
 pub fn enter_suspend(
     preparation: SuspendPreparation,
     resume_frame: *mut crate::syscall::UserForkFrame,
@@ -463,10 +439,6 @@ unsafe fn resume_userspace(frame: *mut crate::syscall::UserForkFrame) -> ! {
     }
 }
 
-#[expect(
-    dead_code,
-    reason = "entered by the future firmware wake path after S3 resume"
-)]
 extern "C" fn wake_entry() -> ! {
     let context = PENDING_SUSPEND
         .lock()
@@ -504,7 +476,7 @@ pub fn suspend_resume_target_self_test() -> bool {
 
 #[cfg(feature = "stage25-14-test")]
 pub fn suspend_admission_self_test() -> bool {
-    !USER_RESUME_TARGET_READY && PENDING_SUSPEND.lock().is_none()
+    PENDING_SUSPEND.lock().is_none()
 }
 
 #[cfg(feature = "stage25-7-test")]

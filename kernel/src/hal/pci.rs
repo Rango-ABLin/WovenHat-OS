@@ -1381,20 +1381,6 @@ pub struct PowerCheckpoint {
 /// Disable I/O, memory, and bus-master decoding for an owned function and
 /// return the exact command value for resume. Configuration access is kept
 /// outside the topology lock to preserve lock order.
-#[cfg_attr(
-    not(any(
-        feature = "stage13-1-test",
-        feature = "stage13-2-test",
-        feature = "stage13-3-test",
-        feature = "stage13-4-test",
-        feature = "stage13-5-test",
-        feature = "stage13-6-test",
-        feature = "stage13-7-test",
-        feature = "stage13-8-test",
-        feature = "stage13-9-test"
-    )),
-    expect(dead_code, reason = "used by production PCI suspend/resume")
-)]
 pub fn suspend_owned(
     function: topology::FunctionHandle,
     owner: u32,
@@ -1444,20 +1430,6 @@ pub fn suspend_owned(
 }
 
 /// Restore a previously checkpointed PCI command value for an owned function.
-#[cfg_attr(
-    not(any(
-        feature = "stage13-1-test",
-        feature = "stage13-2-test",
-        feature = "stage13-3-test",
-        feature = "stage13-4-test",
-        feature = "stage13-5-test",
-        feature = "stage13-6-test",
-        feature = "stage13-7-test",
-        feature = "stage13-8-test",
-        feature = "stage13-9-test"
-    )),
-    expect(dead_code, reason = "used by production PCI suspend/resume")
-)]
 pub fn resume_owned(
     function: topology::FunctionHandle,
     owner: u32,
