@@ -3,11 +3,9 @@
 ## Production account provisioning implementation (2026-10-21)
 
 Commit `7bbcb0f8` extends bounded persistent account import from the
-disposable `hardware-demo` profile to normal `system-apps` boots. The source
-review is complete, but the production acceptance gate currently fails in the
-root release-image build because the kernel artifact's expected `system-apps`
-cfg is not reaching the `accounts.rs` compilation unit; warning denial reports
-the legacy fallback as dead code. See
+disposable `hardware-demo` profile to normal `system-apps` boots. The shared
+cfg correction for the legacy fallback is now exercised by signed production
+image acceptance, which passes on 1/2/4 CPUs. See
 `docs/audit-production-account-provisioning-2026-10-21.md`.
 
 This is not a release acceptance claim. Physical USB boot and TPM execution
