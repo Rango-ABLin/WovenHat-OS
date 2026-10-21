@@ -4524,7 +4524,8 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         not(feature = "stage22-1-test"),
         not(feature = "stage22-2-test"),
         not(feature = "stage22-3-test"),
-        not(feature = "stage22-5-test")
+        not(feature = "stage22-5-test"),
+        not(feature = "stage27-5-test")
     ))]
     {
         if !wfs::stage15_2_self_test() {

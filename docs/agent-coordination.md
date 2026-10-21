@@ -1,5 +1,18 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - Stage 27.5 privileged update-service boundary (2026-10-21)
+
+Added the capability-gated syscall 239 and `libwoven::update_transaction`
+wrapper around `kernel/src/update_service.rs`. The service verifies signed
+WUPD packages, writes a bounded inactive slot before dual-copy WUAB metadata,
+and implements activation/boot-failure/boot-success/query lifecycle
+transitions. The Stage 27.5 QEMU gate passes on 1/2/4 CPUs; focused
+warning-denying kernel/libwoven Clippy and 113 libwoven host tests pass. The
+4 KiB WovenFS file bound is enforced fail-closed, so production-sized block
+slot storage, daemon IPC loop, bootloader handoff, power-loss recovery, and
+physical USB qualification are still open. Evidence is in
+`docs/audit-stage27-5-update-service-2026-10-21.md`.
+
 ## Codex - Stage 27.4 bounded update IPC contract (2026-10-21)
 
 Added `libwoven::update_ipc`, a fixed-capacity `WUDI` request/response ABI for

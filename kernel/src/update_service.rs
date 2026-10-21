@@ -196,15 +196,18 @@ pub fn self_test() -> bool {
     use sha2::{Digest, Sha256};
 
     if !crate::wfs::format_ata(64) {
+        crate::serial::write_line(format_args!("[S27.5] format failed"));
         return false;
     }
     let Some(writer) = UpdateState::authorized_writer() else {
+        crate::serial::write_line(format_args!("[S27.5] authority failed"));
         return false;
     };
     let Ok(initial) = UpdateState::new(1, 19, [1; 32]) else {
         return false;
     };
     if UpdateState::persist_record_copy(&writer, 0, 1, &initial, 1).is_err() {
+        crate::serial::write_line(format_args!("[S27.5] initial record failed"));
         return false;
     }
     const SEED: [u8; 32] = [
@@ -231,15 +234,28 @@ pub fn self_test() -> bool {
         .sign(signed.finalize(), None);
     package[56..120].copy_from_slice(&*signature);
     let Ok(slot) = stage_package(&package, 2) else {
+        crate::serial::write_line(format_args!("[S27.5] stage failed"));
         return false;
     };
-    if activate(slot, 3).is_err() || query() != Ok(0x0100 | slot as u64) {
+    let activated = activate(slot, 3);
+    let observed = query();
+    if activated.is_err() || observed != Ok(((slot + 1) as u64) << 8) {
+        crate::serial::write_line(format_args!(
+            "[S27.5] activate={:?} query={:?} slot={}",
+            activated, observed, slot
+        ));
+        crate::serial::write_line(format_args!("[S27.5] activate/query failed"));
         return false;
     }
     if boot_succeeded(slot, 4).is_err() || query() != Ok(slot as u64) {
+        crate::serial::write_line(format_args!("[S27.5] commit/query failed"));
         return false;
     }
     let mut image_read = [0u8; crate::wfs::MAX_FILE_SIZE];
-    crate::wfs::read_vfs_path_durable(UPDATE_SLOT_PATHS[slot], &mut image_read) == Ok(image.len())
-        && &image_read[..image.len()] == image
+    let read_ok = crate::wfs::read_vfs_path_durable(UPDATE_SLOT_PATHS[slot], &mut image_read)
+        == Ok(image.len());
+    if !read_ok {
+        crate::serial::write_line(format_args!("[S27.5] slot read failed"));
+    }
+    read_ok && &image_read[..image.len()] == image
 }

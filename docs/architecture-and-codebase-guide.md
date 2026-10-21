@@ -2013,6 +2013,25 @@ status/value fields. No image bytes cross IPC. This contract is intentionally
 separate from the still-unimplemented capability-gated syscall, service
 ownership, durable image-slot write, and bootloader handoff.
 
+## Stage 27.5 privileged update-service transaction boundary (2026-10-21)
+
+`kernel/src/update_service.rs` is the first executable service boundary. It
+requires `FileRead`, `FileWrite`, and `StorageIo`, validates `/updates/`
+source paths, verifies the signed WUPD envelope, writes the inactive slot
+before publishing the next WUAB record copy, and exposes activation,
+boot-success, boot-failure, and query lifecycle operations through syscall 239
+and the `libwoven::update_transaction` wrapper. Record loading accepts one
+valid copy for recovery, chooses the highest sequence when both are valid, and
+rejects equal or unusable copies.
+
+The Stage 27.5 QEMU gate (`scripts/test-stage27-5-update-service.py`) passes
+on 1/2/4 CPUs and retains serial/QEMU/disk evidence. The gate uses a signed
+small image because current WovenFS `MAX_FILE_SIZE` is 4 KiB. The service
+therefore rejects larger images explicitly; it does not claim a production
+boot-slot backend. The long-lived WovenUpdate userspace daemon, full IPC loop,
+multi-file/block-device image store, bootloader target/attempt handoff,
+power-loss injection/recovery, and physical USB qualification remain open.
+
 ## Release validation (2026-10-14)
 
 ## Update/recovery track — bounded A/B activation state (2026-10-20)

@@ -1,5 +1,22 @@
 # Stage status
 
+## Stage 27.5 - privileged update-service transaction boundary (2026-10-21)
+
+Implemented the capability-gated kernel update transaction boundary and
+syscall 239. Signed WUPD packages are verified before staging; the inactive
+slot is written before its WUAB metadata copy is published; dual-copy state is
+selected by sequence with fail-closed corruption/tie handling; activation,
+boot-failure, boot-success, and bounded query operations are exposed through
+`libwoven`. The Stage 27.5 executable QEMU gate passes on 1/2/4 CPUs, and the
+focused kernel/libwoven Clippy and 113 libwoven host tests pass.
+
+This is not a release claim. Current WovenFS slots are single-file bounded to
+4 KiB, so the service rejects larger images instead of partially installing
+them. A long-lived WovenUpdate daemon, IPC request/response loop, block-device
+slot backend for production-sized images, bootloader handoff/boot-target
+attempt persistence, power-loss recovery, and physical USB qualification
+remain required.
+
 ## Stage 27.4 - bounded update IPC contract (2026-10-21)
 
 Added `libwoven::update_ipc`, a fixed-capacity request/response ABI for the
