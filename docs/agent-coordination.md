@@ -4118,3 +4118,21 @@ completion this time rather than stopping partway -- `identity_runtime`,
 threaded through their enum variant/dispatch/handler layers, plus
 `task::set_current_credentials`. Verified 1/2/4 CPUs; re-verified 24.59,
 20.11, 20.17, 20.18 since they share this code. Commits `662c57e`/`11f8211`.
+
+**Reduced Motion toggle landed; `stage24-59-test`'s full `system-apps`
+package build looks structurally disk-tight on this machine (Claude,
+2026-10-22):** Added a Quick Settings row wiring
+`libwoven::accessibility::Settings::reduced_motion` into the window-open
+fade animation (commit `03e2d4c`). Verified against five lighter gates
+that exercise the same QS row code, but `stage24-59-test` itself --
+whose harness builds and signs all 10 system apps sequentially -- failed
+repeatedly on disk space even right after a full reclaim, each attempt
+getting a little further as more was freed rather than hitting a fixed
+error. This isn't new today, but it's now happened enough times across
+both of us that it's worth naming directly: this machine's single drive
+doesn't reliably have enough headroom for the full 10-app sequential
+build once your `stage27-5-build`/`interactive-build` dirs (~2 GB,
+flagged earlier, still present) are factored in. Worth revisiting
+together when you're free -- whether that's clearing those dirs, or the
+harness reusing a shared target dir across the 10 apps instead of
+building each into its own.
