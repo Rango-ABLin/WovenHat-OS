@@ -3307,6 +3307,7 @@ fn sys_power_control(action: u64) -> u64 {
         crate::power::Error::NoAcpi => 1,
         crate::power::Error::AcpiModeRefused => 2,
         crate::power::Error::StillRunning => 3,
+        crate::power::Error::NoSuspend | crate::power::Error::DriverRefused => 4,
     }
 }
 

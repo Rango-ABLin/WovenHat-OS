@@ -26,6 +26,38 @@ pub enum Error {
     AcpiModeRefused,
     /// The request was made and the machine kept running.
     StillRunning,
+    /// Firmware did not advertise S3 or no PM1a control block was found.
+    NoSuspend,
+    /// A bound driver refused quiescence.
+    DriverRefused,
+}
+
+/// Driver-quiescence preparation for a future S3 transition. Construction
+/// performs no SLP_EN write; the plan must be explicitly resumed or consumed
+/// by a later transition implementation.
+pub struct SuspendPreparation {
+    plan: crate::driver::SuspendPlan,
+}
+
+/// Quiesce the current driver set if firmware advertises S3. This boundary is
+/// deliberately separate from entering S3 so wake-vector and per-CPU resume
+/// work can be completed before any hardware transition is exposed.
+pub fn prepare_suspend() -> Result<SuspendPreparation, Error> {
+    let Some(power) = crate::hal::acpi::power() else {
+        return Err(Error::NoSuspend);
+    };
+    if power.pm1a_control == 0 || power.s3.is_none() || !acpi_mode(power) {
+        return Err(Error::NoSuspend);
+    }
+    let Some(plan) = crate::driver::suspend_all() else {
+        return Err(Error::DriverRefused);
+    };
+    Ok(SuspendPreparation { plan })
+}
+
+/// Abort a prepared suspend and restore drivers in reverse order.
+pub fn abort_suspend(preparation: SuspendPreparation) -> bool {
+    crate::driver::resume_all(preparation.plan)
 }
 
 /// Turn the machine off. Returns only if it is still running.
