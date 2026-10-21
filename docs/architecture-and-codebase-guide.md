@@ -1952,6 +1952,18 @@ the deterministic test key explicitly; production provisioning must replace
 it. The current publication is RAM-backed at boot, so persistent update,
 power-loss rollback, and key lifecycle policy remain open.
 
+## Stage 24.60 release-key provisioning boundary
+
+`tools/wapp-packager` has two explicit modes. Test/development invocations may
+use the deterministic fixture seed; production invocations are marked with
+`WOVENHAT_APP_RELEASE_MODE=1` and fail closed unless both
+`WOVENHAT_APP_SIGNING_SEED_HEX` and `WOVENHAT_APP_TRUSTED_PUBLIC_KEY_HEX` are
+present. The packager derives the public key from the signing seed and rejects
+any mismatch. `package-system-apps.py`, `build-package-service.py`, and the
+release fallback propagate this mode. Seeds never enter WAPP metadata or
+catalog files. Secret custody, rotation/revocation, and physical qualification
+remain deployment responsibilities.
+
 ## Release validation (2026-10-14)
 
 ## Update/recovery track — bounded A/B activation state (2026-10-20)

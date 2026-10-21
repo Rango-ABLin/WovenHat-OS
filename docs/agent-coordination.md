@@ -1,5 +1,15 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - Stage 24.60 release-key provisioning (2026-10-21)
+
+Production WAPP packaging now requires explicit signing-seed and trusted
+public-key environment inputs; the deterministic development seed is available
+only outside production mode. The catalog/package-service launchers propagate
+the mode, and the negative/positive packager test, warning-denying packager
+Clippy, and explicit-key production packaging pass. Evidence is in
+`docs/audit-stage24-60-release-key-provisioning-2026-10-21.md`. Real secret
+custody and physical TPM/USB qualification remain open.
+
 ## Codex - production account provisioning implementation (2026-10-21)
 
 Commit `7bbcb0f8` moves bounded persistent account import into the normal

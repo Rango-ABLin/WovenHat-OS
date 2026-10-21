@@ -135,7 +135,13 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", type=Path, help="output directory (default: target/system-apps/<version>)")
     parser.add_argument("--version", default="0.8.0", help="catalog version")
+    parser.add_argument("--production", action="store_true",
+                        help="require explicit release signing seed and trusted public key")
     args = parser.parse_args()
+    if args.production:
+        for variable in ("WOVENHAT_APP_SIGNING_SEED_HEX", "WOVENHAT_APP_TRUSTED_PUBLIC_KEY_HEX"):
+            if not os.environ.get(variable):
+                raise SystemExit(f"--production requires {variable}")
     root = Path(__file__).resolve().parents[1]
     output = args.output or root / "target" / "system-apps" / args.version
     output = output.resolve()
@@ -166,6 +172,8 @@ def main() -> int:
             package_env = dict(os.environ)
             package_env.pop("CARGO_BUILD_BUILD_DIR", None)
             package_env["CARGO_TARGET_DIR"] = str(packager_target)
+            if args.production:
+                package_env["WOVENHAT_APP_RELEASE_MODE"] = "1"
             run(
                 ["cargo", "run", "--quiet", "--manifest-path", str(packager_manifest), "--", str(elf), str(package)],
                 cwd=root,

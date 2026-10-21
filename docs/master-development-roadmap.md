@@ -1246,6 +1246,12 @@ detection, notification UX, and response automation cannot bypass WovenGuard.
 Phase XV — Accounts and Identity
 Stage 24 — WovenIdentity
 
+Stage 24.60 - Release-key provisioning boundary
+Production WAPP catalogs and the package service require explicit release
+signing and trusted public-key inputs; development-key fallback is limited to
+non-production packaging. The packager derives and checks the public key, and
+release packaging propagates the fail-closed production mode.
+
 Stage 24.46 boot-time TPM context recovery accepted (2026-10-21): after
 WovenFS mount, system-apps boot treats the newest validated `TPS1` record as a
 candidate only, requires live TPM2 `ContextLoad`, and flushes the restored

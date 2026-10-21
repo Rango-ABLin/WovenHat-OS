@@ -9,7 +9,13 @@ import subprocess
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--output", type=Path)
+    parser.add_argument("--production", action="store_true",
+                        help="require explicit release signing seed and trusted public key")
     args = parser.parse_args()
+    if args.production:
+        for variable in ("WOVENHAT_APP_SIGNING_SEED_HEX", "WOVENHAT_APP_TRUSTED_PUBLIC_KEY_HEX"):
+            if not os.environ.get(variable):
+                raise SystemExit(f"--production requires {variable}")
     root = Path(__file__).resolve().parents[1]
     app = root / "apps" / "woven-package"
     output = args.output or root / "target" / "system-apps" / "0.8.0" / "packages" / "woven-package.wapp"
@@ -29,6 +35,8 @@ def main() -> int:
     packager_env = dict(os.environ)
     packager_env.pop("CARGO_BUILD_BUILD_DIR", None)
     packager_env["CARGO_TARGET_DIR"] = str(root / "target" / "wapp-packager")
+    if args.production:
+        packager_env["WOVENHAT_APP_RELEASE_MODE"] = "1"
     subprocess.run(
         [
             "cargo",

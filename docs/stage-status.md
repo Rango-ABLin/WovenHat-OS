@@ -1,5 +1,17 @@
 # Stage status
 
+## Stage 24.60 — release-key provisioning boundary (2026-10-21)
+
+Production WAPP packaging now requires explicit signing-seed and trusted
+public-key inputs; only non-production/test packaging may use the deterministic
+development key. The production catalog and package-service launchers propagate
+the fail-closed mode. Negative and positive packager tests, packager Clippy,
+and explicit production catalog/service packaging pass. Evidence is in
+`docs/audit-stage24-60-release-key-provisioning-2026-10-21.md`.
+
+This does not claim custody of a real release secret or physical release
+qualification.
+
 ## Production account provisioning implementation (2026-10-21)
 
 Commit `7bbcb0f8` extends bounded persistent account import from the

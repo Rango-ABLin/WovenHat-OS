@@ -67,8 +67,11 @@ base, user stack base and anonymous-mmap arena. The `qemu-test` feature keeps
 these offsets at zero so acceptance boots remain reproducible; kernel addresses
 are unaffected.
 
-Signed execution and boot handoff use separate trust roots. Release builds
-must provision `WOVENHAT_APP_TRUSTED_PUBLIC_KEY_HEX` for WAPP application
+Signed execution and boot handoff use separate trust roots. Production WAPP
+packaging now fails closed unless both `WOVENHAT_APP_SIGNING_SEED_HEX` and the
+matching `WOVENHAT_APP_TRUSTED_PUBLIC_KEY_HEX` are provisioned; the
+deterministic development seed is limited to test packaging. Release builds
+must also provision `WOVENHAT_APP_TRUSTED_PUBLIC_KEY_HEX` for WAPP application
 packages and both `WOVENHAT_BOOT_SIGNING_SEED_HEX` and the matching
 `WOVENHAT_BOOT_TRUSTED_PUBLIC_KEY_HEX` for the signed kernel handoff. The
 builders fail closed on missing or mismatched release values; test features
