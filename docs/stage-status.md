@@ -1,5 +1,48 @@
 # Stage status
 
+## Change-PIN kernel primitive and WovenShell UI (2026-10-20/21)
+
+Closes "password change"/"credential rotation" from the four persistent-
+accounts gaps flagged 2026-10-20 (account creation is still open).
+
+Kernel: a new `Capability::AccountManage` (desktop-session-only, same
+pattern as `PowerControl`; added to `SecurityDomain::SystemService`'s
+WovenGuard ceiling and `session::CAPABILITIES`), a new syscall
+(`AccountsChangePin`) whose only effect is `kernel::accounts::change_pin`:
+read `/etc/wovenhat/accounts`, verify the caller-supplied current PIN by
+PBKDF2 against the named account's stored hash, and if it matches, rewrite
+just that one line (fresh salt, new hash) through a new
+`vfs::overwrite_trusted` that bypasses the file's own `writable = false` --
+every other account's line is left byte for byte unchanged. No syscall
+exposes a generic write to this path; the PIN check is the only
+authorization. `libwoven::accounts::change_pin` wraps the syscall for apps.
+
+UI: WovenShell's Quick Settings panel gained a seventh row, "Change PIN",
+reusing the lock screen's existing masked-digit-entry widget under a new
+`LockMode::ChangePin` (current PIN -> new PIN -> confirm; Backspace on an
+empty entry cancels without changing anything) rather than building a
+second input widget. Both stashed PINs are wiped (volatile writes) the
+moment they are no longer needed, success or failure.
+
+Validation: kernel clippy (default features, `--features hardware-demo`
+with the packaged apps wired up, and the `apps/woven-shell` crate on its
+own) all clean; `cargo test -p libwoven` (57 tests, including the PBKDF2
+and `Account::parse`/`verify` tests) and host `cargo clippy --all-targets`
+clean. `scripts/test-shell-qemu.py --hardware-demo` (the real sign-in path,
+unrelated to the new syscall but the thing most likely to regress from a
+`Desktop` struct size/field change) passed on 1/2/4 CPUs, after one flaky
+failure on a loaded machine (concurrent Codex builds) that reproduced as a
+pass on immediate retry -- a timing margin in the *test*, not the feature.
+
+**Not yet done:** a dedicated, deterministic self-test of the change-PIN
+flow itself (open Quick Settings, click the new row, type old/new/confirm,
+verify the account's PIN actually changed and the old one stops working).
+The existing Stage 20.15-style kernel self-tests drive WovenShell through
+kernel-internal input injection rather than QMP key events specifically
+because QMP timing is flaky (as just observed); a correct test here should
+follow that pattern, not add another QMP-driven gate. This is the next
+concrete follow-up if work returns to this feature.
+
 ## Stage 24.58 physical TPM broker boot activation (2026-10-21)
 
 Integrated the signed broker records and Stage 24.57 TPM root-read boundary
