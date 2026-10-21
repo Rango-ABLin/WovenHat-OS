@@ -8,8 +8,10 @@ presentation. `Locale` identifies language and region without heap storage;
 entries atomically; `Date` validates Gregorian month lengths and formats the
 supported locale order; `format_integer` writes into caller-owned storage; and
 `validate_scalars` rejects surrogate and out-of-range Unicode scalar values.
+`normalize_latin_nfc` adds a transactional, caller-buffered subset for common
+Latin combining marks and rejects unsupported combining sequences.
 The module intentionally does not claim normalization, full Unicode property
-data, bidi, shaping, keyboard layouts, IMEs, or compositor/application
+data, complete normalization coverage, bidi, shaping, keyboard layouts, IMEs, or compositor/application
 integration.
 
 ### Stage 24.59 — Change-PIN credential synchronization

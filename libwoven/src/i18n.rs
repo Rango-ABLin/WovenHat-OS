@@ -171,6 +171,101 @@ pub fn validate_scalars(values: &[u32]) -> Result<(), UnicodeError> {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum NormalizationError {
+    InvalidScalar(UnicodeError),
+    OutputTooSmall,
+    UnsupportedCombiningMark { index: usize, value: u32 },
+}
+
+/// Normalize the bounded Latin combining-mark subset used by the initial UI.
+///
+/// The function is transactional: it validates the entire input and only
+/// writes the output after each item is known to be representable. Unsupported
+/// marks fail closed instead of being silently reordered or dropped.
+pub fn normalize_latin_nfc(input: &[u32], output: &mut [u32]) -> Result<usize, NormalizationError> {
+    if output.len() < input.len() {
+        return Err(NormalizationError::OutputTooSmall);
+    }
+    validate_scalars(input).map_err(NormalizationError::InvalidScalar)?;
+    let mut normalized = [0u32; MAX_NORMALIZATION_SCALARS];
+    if input.len() > MAX_NORMALIZATION_SCALARS {
+        return Err(NormalizationError::OutputTooSmall);
+    }
+    let mut length = 0;
+    for (index, &scalar) in input.iter().enumerate() {
+        if is_combining_mark(scalar) {
+            if length == 0 {
+                return Err(NormalizationError::UnsupportedCombiningMark {
+                    index,
+                    value: scalar,
+                });
+            }
+            let Some(composed) = compose_latin(normalized[length - 1], scalar) else {
+                return Err(NormalizationError::UnsupportedCombiningMark {
+                    index,
+                    value: scalar,
+                });
+            };
+            normalized[length - 1] = composed;
+        } else {
+            normalized[length] = scalar;
+            length += 1;
+        }
+    }
+    output[..length].copy_from_slice(&normalized[..length]);
+    Ok(length)
+}
+
+pub const MAX_NORMALIZATION_SCALARS: usize = 256;
+
+const fn is_combining_mark(value: u32) -> bool {
+    matches!(value, 0x0300..=0x036F)
+}
+
+const fn compose_latin(base: u32, mark: u32) -> Option<u32> {
+    let composed = match (base, mark) {
+        (0x41, 0x0301) => 0x00C1,
+        (0x45, 0x0301) => 0x00C9,
+        (0x49, 0x0301) => 0x00CD,
+        (0x4F, 0x0301) => 0x00D3,
+        (0x55, 0x0301) => 0x00DA,
+        (0x61, 0x0301) => 0x00E1,
+        (0x65, 0x0301) => 0x00E9,
+        (0x69, 0x0301) => 0x00ED,
+        (0x6F, 0x0301) => 0x00F3,
+        (0x75, 0x0301) => 0x00FA,
+        (0x41, 0x0308) => 0x00C4,
+        (0x45, 0x0308) => 0x00CB,
+        (0x49, 0x0308) => 0x00CF,
+        (0x4F, 0x0308) => 0x00D6,
+        (0x55, 0x0308) => 0x00DC,
+        (0x61, 0x0308) => 0x00E4,
+        (0x65, 0x0308) => 0x00EB,
+        (0x69, 0x0308) => 0x00EF,
+        (0x6F, 0x0308) => 0x00F6,
+        (0x75, 0x0308) => 0x00FC,
+        (0x4E, 0x0303) => 0x00D1,
+        (0x6E, 0x0303) => 0x00F1,
+        (0x43, 0x0327) => 0x00C7,
+        (0x63, 0x0327) => 0x00E7,
+        (0x41, 0x030A) => 0x00C5,
+        (0x61, 0x030A) => 0x00E5,
+        (0x41, 0x0300) => 0x00C0,
+        (0x45, 0x0300) => 0x00C8,
+        (0x49, 0x0300) => 0x00CC,
+        (0x4F, 0x0300) => 0x00D2,
+        (0x55, 0x0300) => 0x00D9,
+        (0x61, 0x0300) => 0x00E0,
+        (0x65, 0x0300) => 0x00E8,
+        (0x69, 0x0300) => 0x00EC,
+        (0x6F, 0x0300) => 0x00F2,
+        (0x75, 0x0300) => 0x00F9,
+        _ => return None,
+    };
+    Some(composed)
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct UnicodeError {
     pub index: usize,
     pub value: u32,
@@ -361,6 +456,28 @@ mod tests {
                 value: 0x11_0000
             })
         );
+    }
+
+    #[test]
+    fn latin_normalization_composes_supported_marks_transactionally() {
+        let input = [b'c' as u32, 0x0327, b'a' as u32, 0x0301];
+        let mut output = [0u32; 4];
+        let used = normalize_latin_nfc(&input, &mut output).unwrap();
+        assert_eq!(&output[..used], &[0x00E7, 0x00E1]);
+    }
+
+    #[test]
+    fn latin_normalization_rejects_unsupported_marks() {
+        let input = [b'a' as u32, 0x0304];
+        let mut output = [0xfeed_u32; 2];
+        assert_eq!(
+            normalize_latin_nfc(&input, &mut output),
+            Err(NormalizationError::UnsupportedCombiningMark {
+                index: 1,
+                value: 0x0304
+            })
+        );
+        assert_eq!(output, [0xfeed_u32; 2]);
     }
 
     #[test]

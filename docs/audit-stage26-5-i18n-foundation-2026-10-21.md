@@ -6,11 +6,14 @@ This increment adds `libwoven::i18n`: fixed-size English and Chichewa locale
 identifiers, bounded translation catalog insertion/lookup, Gregorian date
 validation and locale-aware date ordering, caller-buffer integer formatting,
 and Unicode scalar validation.
+The follow-up adds a transactional Latin combining-mark normalization subset;
+unsupported combining sequences fail closed.
 
 ## Verification
 
 - `cargo fmt --all -- --check` passed.
-- `cargo test --offline -p libwoven` passed, including five new i18n tests.
+- `cargo test --offline -p libwoven` passed: 107 tests, including seven new
+  i18n tests.
 - `cargo clippy --offline -p libwoven --all-targets -- -D warnings` passed.
 - `cargo test --offline --all` passed: 105 `libwoven` tests and all workspace
   integration suites passed.

@@ -255,7 +255,7 @@ const CENTER_WIDTH: i32 = 164;
 const CENTER_TITLE: &str = "Notifications";
 const CENTER_CLEAR: &str = "Clear";
 const QS_TITLE: &str = "Quick Settings";
-const QS_ROWS: usize = 7;
+const QS_ROWS: usize = 8;
 
 /// How dark the lock screen makes the wallpaper behind it.
 const LOCK_DIM: u8 = 160;
@@ -374,6 +374,44 @@ fn clock_text(time: Option<DateTime>, seconds: bool) -> ([u8; 8], usize) {
         None => *b"--:--:--",
     };
     (text, if seconds { 8 } else { 5 })
+}
+
+/// The lock screen's translatable strings for `language`, built through
+/// `libwoven::i18n::Catalog` (Stage 26.5). English values are byte-for-byte
+/// the literals every already-accepted lock-screen gate expects, so the
+/// default language changes nothing; Chichewa is a best-effort demo
+/// translation, not a reviewed localization.
+fn lock_catalog(language: libwoven::i18n::Language) -> libwoven::i18n::Catalog {
+    use libwoven::i18n::{Catalog, Language};
+    let entries: &[(&str, &str)] = match language {
+        Language::English => &[
+            ("sign_in", "Sign in"),
+            ("locked", "Locked"),
+            ("change_pin", "Change PIN"),
+            ("current_pin", "Current PIN"),
+            ("new_pin", "New PIN"),
+            ("confirm_new_pin", "Confirm new PIN"),
+            ("enter_pin", "Enter PIN"),
+            ("wrong_pin", "Wrong PIN"),
+            ("try_again_shortly", "Try again shortly"),
+        ],
+        Language::Chichewa => &[
+            ("sign_in", "Lowani"),
+            ("locked", "Yatsekedwa"),
+            ("change_pin", "Sinthani PIN"),
+            ("current_pin", "PIN Yamakono"),
+            ("new_pin", "PIN Yatsopano"),
+            ("confirm_new_pin", "Tsimikizani PIN Yatsopano"),
+            ("enter_pin", "Lowetsani PIN"),
+            ("wrong_pin", "PIN Yolakwika"),
+            ("try_again_shortly", "Yesaninso Posachedwa"),
+        ],
+    };
+    let mut catalog = Catalog::new();
+    for (key, value) in entries {
+        let _ = catalog.insert(key, value);
+    }
+    catalog
 }
 
 /// `bytes` as text, cut to `limit` characters; anything not printable ASCII
@@ -874,6 +912,10 @@ struct Desktop {
     dnd: bool,
     /// The display scale the shell set.
     scale: u32,
+    /// The lock screen's language. Defaults to English, which keeps the
+    /// exact strings every already-accepted lock-screen gate expects;
+    /// Quick Settings can switch it to Chichewa.
+    language: libwoven::i18n::Language,
     locked: bool,
     /// The PIN and its length, if one was given.
     pin: Option<([u8; MAX_PIN], usize)>,
@@ -942,6 +984,7 @@ impl Desktop {
         qs_open: false,
         dnd: false,
         scale: 1,
+        language: libwoven::i18n::Language::English,
         locked: false,
         pin: None,
         entry: [0; MAX_PIN],
@@ -1340,6 +1383,10 @@ impl Desktop {
             if self.tiled { "Tiling: On" } else { "Tiling: Off" },
             "Lock screen",
             "Change PIN",
+            match self.language {
+                libwoven::i18n::Language::English => "Language: English",
+                libwoven::i18n::Language::Chichewa => "Language: Chichewa",
+            },
         ]
     }
 
@@ -1350,9 +1397,11 @@ impl Desktop {
         canvas.shade(|x, y| blend(rgb(0, 0, 0), wallpaper(x, y, height), LOCK_DIM));
         let middle = self.height / 2;
         let centred = |text: &str| (self.width - font::text_width(text) as i32) / 2;
+        let catalog = lock_catalog(self.language);
         if self.mode == LockMode::SignIn {
-            // "Sign in", then the accounts, the chosen one marked.
-            canvas.draw_text(centred("Sign in"), middle - 60, "Sign in", TEXT);
+            // The sign-in prompt, then the accounts, the chosen one marked.
+            let text = catalog.lookup("sign_in", "Sign in");
+            canvas.draw_text(centred(text), middle - 60, text, TEXT);
             for (index, account) in self.accounts.iter().flatten().enumerate() {
                 let mut line = [b' '; 2 + libwoven::accounts::MAX_NAME];
                 if index == self.chosen {
@@ -1363,25 +1412,27 @@ impl Desktop {
                 canvas.draw_text(centred(text), middle - 46 + index as i32 * 10, text, TEXT);
             }
         } else if self.mode == LockMode::ChangePin {
-            canvas.draw_text(centred("Change PIN"), middle - 34, "Change PIN", TEXT);
+            let text = catalog.lookup("change_pin", "Change PIN");
+            canvas.draw_text(centred(text), middle - 34, text, TEXT);
         } else {
-            canvas.draw_text(centred("Locked"), middle - 34, "Locked", TEXT);
+            let text = catalog.lookup("locked", "Locked");
+            canvas.draw_text(centred(text), middle - 34, text, TEXT);
             let (bytes, length) = clock_text(self.time, false);
             let clock = core::str::from_utf8(&bytes[..length]).unwrap_or("");
             canvas.draw_text(centred(clock), middle - 20, clock, TEXT);
         }
         let prompt = if self.mode == LockMode::ChangePin && self.prompt == LockPrompt::Enter {
             match self.change_pin {
-                Some(ChangePinStep::Current) => "Current PIN",
-                Some(ChangePinStep::New) => "New PIN",
-                Some(ChangePinStep::Confirm) => "Confirm new PIN",
-                None => "Enter PIN",
+                Some(ChangePinStep::Current) => catalog.lookup("current_pin", "Current PIN"),
+                Some(ChangePinStep::New) => catalog.lookup("new_pin", "New PIN"),
+                Some(ChangePinStep::Confirm) => catalog.lookup("confirm_new_pin", "Confirm new PIN"),
+                None => catalog.lookup("enter_pin", "Enter PIN"),
             }
         } else {
             match self.prompt {
-                LockPrompt::Enter => "Enter PIN",
-                LockPrompt::Wrong => "Wrong PIN",
-                LockPrompt::LockedOut => "Try again shortly",
+                LockPrompt::Enter => catalog.lookup("enter_pin", "Enter PIN"),
+                LockPrompt::Wrong => catalog.lookup("wrong_pin", "Wrong PIN"),
+                LockPrompt::LockedOut => catalog.lookup("try_again_shortly", "Try again shortly"),
             }
         };
         canvas.draw_text(centred(prompt), middle - 4, prompt, TEXT);
@@ -2314,6 +2365,14 @@ impl Desktop {
                         4 => self.toggle_tiling(),
                         5 => self.lock(),
                         6 => self.start_change_pin(),
+                        7 => {
+                            self.language = match self.language {
+                                libwoven::i18n::Language::English => libwoven::i18n::Language::Chichewa,
+                                libwoven::i18n::Language::Chichewa => libwoven::i18n::Language::English,
+                            };
+                            log(&[b"woven-shell: language toggled"]);
+                            panel
+                        }
                         _ => empty,
                     };
                 }
