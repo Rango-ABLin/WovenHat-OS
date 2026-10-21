@@ -472,7 +472,7 @@ fn nested_namespace_and_file_contents_persist_across_repeated_remounts() {
             volume.resolve_path("/docs/archive/renamed.bin"),
             Err(Error::NotFound)
         );
-        volume.rmdir_path("/docs/archive", 7).expect("remove empty directory");
+        volume.unlink_path("/docs/archive", 7).expect("remove empty directory");
     }
     let mut volume = mount_consistent(&disk, "final remount");
     assert_eq!(volume.resolve_path("/docs/archive"), Err(Error::NotFound));
