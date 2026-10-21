@@ -1,5 +1,14 @@
 # WovenHat OS Architecture & Codebase Guide
 
+### Stage 24.40 - policy-session TPM2 Quote framing
+
+`QuoteSessionAuth` carries a non-password session handle, caller nonce,
+attributes, and bounded HMAC into the `TPM2_Quote` authorization area. The
+policy-session API rejects the password-session handle, while the lower-level
+encoder preserves explicit caller material and does not manufacture an HMAC.
+Session creation, PolicyPCR, and cryptographic HMAC derivation remain
+separate prerequisites.
+
 ### Stage 24.39 - bounded TPM2 Quote execution
 
 `tpm2::quote` builds a sessions-tagged `TPM2_Quote` for one bounded nonce,

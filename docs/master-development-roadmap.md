@@ -2,6 +2,16 @@ WovenHat OS — Stage 10.7 → Version 1.0 Master Roadmap
 Phase I — Finish the asynchronous kernel foundation
 Stage 10.7 — Asynchronous TCP
 
+Stage 24.40 - Policy-session TPM2 Quote framing
+
+Extended bounded `TPM2_Quote` execution with explicit non-password policy
+session authorization framing. Caller-provided session handle, nonce,
+attributes, and HMAC are bounded and preserved; password-session downgrade is
+rejected. Host tests, Clippy, executable QEMU, and signed 1/2/4-CPU
+acceptance pass. Session creation, PolicyPCR execution, HMAC derivation,
+credential decisions, recovery, qualification, and release readiness remain
+required.
+
 Stage 24.39 - Bounded TPM2 Quote execution
 
 Implemented bounded sessions-tagged `TPM2_Quote` framing, CRB execution, and

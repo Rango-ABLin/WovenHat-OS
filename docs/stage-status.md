@@ -1,5 +1,20 @@
 # Stage status
 
+## Stage 24.40 policy-session TPM2 Quote framing (2026-10-21)
+
+The quote transport now accepts a caller-established non-password policy
+session, including its TPM session handle, caller nonce, attributes, and
+bounded authorization HMAC. The encoder places that authorization area in
+the TPM command before parameters and rejects a `TPM_RS_PW` downgrade. The
+existing empty-password wrapper remains available only for objects configured
+for that mode. Host tests (89), all-targets and affected feature Clippy,
+executable QEMU, and signed system-apps 1/2/4-CPU acceptance pass. Evidence
+is under `audit-artifacts/stage24.40-policy-session-quote-20261021`.
+
+Policy-session creation, PolicyPCR execution, HMAC derivation from provisioned
+authorization material, credential decision integration, recovery, and
+physical qualification remain required.
+
 ## Stage 24.39 bounded TPM2 Quote execution (2026-10-21)
 
 The TPM2 CRB layer now frames and executes a bounded `TPM2_Quote` request

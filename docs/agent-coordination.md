@@ -1,5 +1,14 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - Stage 24.40 (2026-10-21)
+
+Extended `TPM2_Quote` with explicit non-password policy-session framing:
+session handle, caller nonce, attributes, and bounded HMAC are carried before
+the quote parameters, and password-session downgrade is rejected. Static
+gates, executable QEMU, and signed system-apps 1/2/4-CPU acceptance pass.
+Session creation, PolicyPCR execution, HMAC derivation, credential decisions,
+recovery, and physical qualification remain open. USB remains untouched.
+
 ## Codex - Stage 24.39 (2026-10-21)
 
 Added bounded live `TPM2_Quote` command framing and CRB execution for
