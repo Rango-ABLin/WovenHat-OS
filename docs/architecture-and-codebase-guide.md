@@ -1,5 +1,12 @@
 # WovenHat OS Architecture & Codebase Guide
 
+### Stage 24.28 - credential-root read-back promotion boundary
+
+`validate_credential_root_readback` first validates the complete NV public
+metadata and then compares the expected and returned 32-byte root with a
+constant-time loop. It returns no key and retains no state; callers may only
+promote after this decision and independent authorization/attestation checks.
+
 ### Stage 24.27 - policy-session NV read-back
 
 `encode_nv_read_policy` constructs a bounded policy-session `NV_Read` for the

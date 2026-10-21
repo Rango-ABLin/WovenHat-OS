@@ -1,5 +1,16 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - Stage 24.28 (2026-10-21)
+
+Added the fail-closed credential-root read-back promotion boundary. It
+combines complete NV metadata validation with constant-time exact comparison
+of the expected and returned 32-byte root; mismatch returns a dedicated
+credential error and no value is retained. Executable QEMU self-test, host
+tests, affected Clippy gates, and signed system-apps 1/2/4-CPU acceptance
+pass. Evidence is in
+`docs/audit-stage24-28-credential-root-readback-2026-10-21.md`; USB remains
+untouched. Live TPM trust, quote verification, and recovery remain open.
+
 ## Codex - Stage 24.27 (2026-10-21)
 
 Added policy-session `NV_Read` framing and exact read-back parsing for the

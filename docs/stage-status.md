@@ -1,5 +1,19 @@
 # Stage status
 
+## Stage 24.28 credential-root read-back promotion boundary (2026-10-21)
+
+The TPM2 layer now validates a credential-root promotion decision as one
+constant-time exact-match operation: the decoded NV public metadata must match
+the expected index and PCR policy, and the returned 32-byte value must match
+the caller-provisioned root. Metadata or value mismatch fails closed with no
+promotion. The executable QEMU self-test, host tests (89), all-targets and
+affected feature Clippy, and signed system-apps 1/2/4-CPU acceptance pass.
+Evidence is under `audit-artifacts/stage24.28-credential-root-readback-20261021`.
+
+This does not persist or expose the root, execute a live TPM read, validate a
+TPM quote, provide crash recovery, or establish physical hardware trust.
+Those remain release prerequisites.
+
 ## Stage 24.27 policy-session NV read-back (2026-10-21)
 
 The TPM2 layer now frames a policy-session `NV_Read` for exactly the fixed

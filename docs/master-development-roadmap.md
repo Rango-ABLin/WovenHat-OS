@@ -2,6 +2,14 @@ WovenHat OS — Stage 10.7 → Version 1.0 Master Roadmap
 Phase I — Finish the asynchronous kernel foundation
 Stage 10.7 — Asynchronous TCP
 
+Stage 24.28 - Credential-root read-back promotion boundary
+
+Implemented combined NV metadata and constant-time exact-value validation
+before credential-root promotion. The executable QEMU self-test, host tests,
+Clippy, and signed 1/2/4-CPU acceptance pass. Live TPM trust, quote
+verification, crash recovery, physical qualification, and release custody
+remain required.
+
 Stage 24.27 - Policy-session NV read-back
 
 Implemented bounded policy-session `NV_Read` framing and exact 32-byte

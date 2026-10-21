@@ -116,6 +116,32 @@ pub fn validate_credential_root_nv(
     }
     Ok(())
 }
+
+fn constant_time_equal(left: &[u8; 32], right: &[u8; 32]) -> bool {
+    let mut difference = 0_u8;
+    for index in 0..32 {
+        difference |= left[index] ^ right[index];
+    }
+    difference == 0
+}
+
+/// Validate the exact value returned by a policy-authorized NV read before a
+/// caller promotes it to a credential root. Metadata and value are checked as
+/// one decision; this function does not retain or expose either value.
+#[allow(dead_code)]
+pub fn validate_credential_root_readback(
+    public: &NvPublic,
+    expected_index: u32,
+    expected_policy: &[u8; 32],
+    expected_root: &[u8; 32],
+    actual_root: &[u8; 32],
+) -> Result<(), Error> {
+    validate_credential_root_nv(public, expected_index, expected_policy)?;
+    if !constant_time_equal(expected_root, actual_root) {
+        return Err(Error::CredentialMismatch);
+    }
+    Ok(())
+}
 // The probe runs before timer IRQs are enabled, so this bound must not depend
 // on the kernel tick counter. It is deliberately finite even for a wedged
 // device or malformed firmware descriptor.
@@ -134,6 +160,7 @@ pub enum Error {
     InvalidPolicy,
     PolicySignature,
     PolicyMismatch,
+    CredentialMismatch,
 }
 
 static TRANSACTION: spin::Mutex<()> = spin::Mutex::new(());
@@ -1009,6 +1036,30 @@ pub fn self_test() -> bool {
             if read_data != [0xa6; 32]
                 || read_auth.nonce_tpm_length != 0
                 || read_auth.attributes != TPMA_SESSION_CONTINUE_SESSION
+            {
+                return false;
+            }
+            let expected_root = [0xa6; 32];
+            if validate_credential_root_readback(
+                &public,
+                0x0150_0000,
+                &expected_policy,
+                &expected_root,
+                &read_data,
+            )
+            .is_err()
+            {
+                return false;
+            }
+            let mut altered_root = read_data;
+            altered_root[0] ^= 1;
+            if validate_credential_root_readback(
+                &public,
+                0x0150_0000,
+                &expected_policy,
+                &expected_root,
+                &altered_root,
+            ) != Err(Error::CredentialMismatch)
             {
                 return false;
             }
