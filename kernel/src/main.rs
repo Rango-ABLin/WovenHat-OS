@@ -46,28 +46,6 @@ mod console;
 mod deadline;
 mod device;
 mod display;
-#[cfg(any(
-    not(feature = "qemu-test"),
-    feature = "stage13-12-test",
-    feature = "stage13-1-test",
-    feature = "stage13-2-test",
-    feature = "stage13-3-test",
-    feature = "stage13-4-test",
-    feature = "stage13-5-test",
-    feature = "stage13-6-test",
-    feature = "stage13-7-test",
-    feature = "stage13-8-test",
-    feature = "stage13-9-test",
-    feature = "stage25-7-test",
-    feature = "stage25-8-test",
-    feature = "stage25-9-test",
-    feature = "stage25-10-test",
-    feature = "stage25-11-test",
-    feature = "stage25-12-test",
-    feature = "stage25-13-test",
-    feature = "stage25-14-test",
-    feature = "stage25-15-test"
-))]
 mod driver;
 #[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
 mod drivers;

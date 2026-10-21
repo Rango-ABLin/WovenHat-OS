@@ -1,10 +1,7 @@
 //! Bounded WovenDriver manager: discovery, matching, binding, and power state.
-#![cfg_attr(
-    any(not(feature = "qemu-test"), feature = "stage13-12-test"),
-    expect(
-        dead_code,
-        reason = "production binds through register_pci/bind_pci/unbind_pci_resources; power, interrupt and hotplug paths are exercised by the Stage 13.1/13.2 gates until production drivers call them"
-    )
+#![expect(
+    dead_code,
+    reason = "production binds through register_pci/bind_pci/unbind_pci_resources; QEMU feature gates compile the shared suspend model without bringing up production hardware"
 )]
 use crate::device::DeviceKind;
 use crate::irq_lock::IrqMutex as Mutex;
