@@ -11,6 +11,10 @@ image acceptance, which passes on 1/2/4 CPUs. See
 This is not a release acceptance claim. Physical USB boot and TPM execution
 remain open hardware qualifications.
 
+The affected static gates now pass: signed production kernel Clippy,
+all-targets warning-denying Clippy, and `cargo test --all`. Repository-wide
+format checking remains open because it reports pre-existing diffs.
+
 ## Stage 10.7 release-chain revalidation (2026-10-21)
 
 The full Windows chain passed host regressions, warning-denying host Clippy,

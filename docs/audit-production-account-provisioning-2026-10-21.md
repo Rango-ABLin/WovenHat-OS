@@ -24,10 +24,15 @@ file exists, boot continues for first-boot account setup. The disposable
   CPUs. Each run packaged all ten signed applications and verified normal
   release shell boot, PS/2/IOAPIC input, and the SMP smoke path. Evidence is
   in `target/shell-regression-{1,2,4}cpu` and the captured retry logs.
+- Signed-image production kernel Clippy with `-D warnings`: passed.
+- `cargo clippy --all-targets -- -D warnings`: passed.
+- `cargo test --all`: passed.
+- `git diff --check`: passed.
 
 ## Open acceptance work
 
-Run production Clippy with the signed image environment, plus the global
-formatting, all-targets Clippy, host tests, and relevant prior-stage gates.
-Physical USB boot and TPM qualification remain separate release gates and were
-not performed here.
+The repository-wide `cargo fmt --all -- --check` still reports pre-existing
+formatting diffs outside this slice and must be resolved or explicitly
+qualified before a release claim. Relevant prior-stage gates still need to be
+rerun as part of the complete release chain. Physical USB boot and TPM
+qualification remain separate release gates and were not performed here.

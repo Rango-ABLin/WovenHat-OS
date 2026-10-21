@@ -7,9 +7,9 @@ Commit `7bbcb0f8` moves bounded persistent account import into the normal
 an imported file. Signed production image acceptance now passes on 1/2/4 CPUs
 after the legacy fallback was cfg-gated away from `system-apps`; the gate
 verified release shell boot, PS/2/IOAPIC input, and SMP smoke. The global
-formatting check still reports pre-existing repository-wide diffs. Production
-Clippy with signed image variables, host/all-targets checks, and physical USB
-and TPM qualification remain open.
+formatting check still reports pre-existing repository-wide diffs. Signed
+production kernel Clippy, all-targets Clippy, and host tests now pass. Physical
+USB and TPM qualification remain open.
 
 ## Codex - Stage 10.7 release-chain revalidation (2026-10-21)
 
