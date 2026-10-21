@@ -192,6 +192,8 @@ stage20-14b-test = ["qemu-test"]
 stage20-16-test = ["qemu-test"]
 # Standalone proof of concept: hello-gui --syscall-benchmark.
 stage30-1-test = ["qemu-test"]
+# Standalone proof of concept: hello-gui --ipc-benchmark.
+stage30-2-test = ["qemu-test"]
 stage21-1-test = ["qemu-test"]
 stage21-2-test = ["qemu-test"]
 stage21-3-test = ["qemu-test"]

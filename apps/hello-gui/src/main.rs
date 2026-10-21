@@ -68,6 +68,10 @@
 //! resolve a single syscall). Reports min/average/max cycles; needs no
 //! capability beyond an ordinary process's own, so it runs unprivileged.
 //!
+//! With `--ipc-benchmark` it is the same kind of micro-benchmark for IPC: it
+//! sends and receives a one-byte message to and from itself
+//! `IPC_BENCHMARK_ITERATIONS` times, timing each round trip the same way.
+//!
 //! With `--probe <handle>` it runs as an ordinary process and checks that the
 //! kernel refuses it everything it has no authority for: every compositor
 //! operation, and every operation on the surface `<handle>`, which belongs to
@@ -252,6 +256,58 @@ fn syscall_benchmark() -> ! {
     libwoven::exit(0)
 }
 
+const IPC_BENCHMARK_ITERATIONS: u64 = 1000;
+
+/// Standalone IPC-latency micro-benchmark (Stage 30 performance engineering):
+/// time `IPC_BENCHMARK_ITERATIONS` round trips of a one-byte message this
+/// process sends to and receives from itself (permitted: `may_ipc_with`
+/// allows same-uid IPC, and a process shares its own uid). This isolates the
+/// enqueue/copy/dequeue cost of `message_send`+`message_receive` without the
+/// scheduling noise a second process would add. Reports min/average/max
+/// cycles; needs no capability beyond an ordinary process's own `Ipc`.
+fn ipc_benchmark() -> ! {
+    let self_pid = libwoven::current_pid();
+    let payload = [0x5au8];
+    let mut min = u64::MAX;
+    let mut max = 0u64;
+    let mut total: u128 = 0;
+    for _ in 0..IPC_BENCHMARK_ITERATIONS {
+        let mut buffer = [0u8; 1];
+        let start = libwoven::cycles();
+        if libwoven::message_send(self_pid, &payload).is_err() {
+            fail(321);
+        }
+        let Ok((length, sender)) = libwoven::message_receive(&mut buffer) else {
+            fail(322);
+        };
+        let elapsed = libwoven::cycles().wrapping_sub(start);
+        if length != 1 || buffer[0] != payload[0] || sender != self_pid {
+            fail(323);
+        }
+        min = min.min(elapsed);
+        max = max.max(elapsed);
+        total += u128::from(elapsed);
+    }
+    let average = (total / u128::from(IPC_BENCHMARK_ITERATIONS)) as u64;
+    let mut digits = [0u8; 20];
+    let _ = libwoven::print("hello-gui: ipc benchmark (self send+receive) min=");
+    let _ =
+        libwoven::write(libwoven::syscall::STDOUT, libwoven::format_u64(min, &mut digits));
+    let _ = libwoven::print(" avg=");
+    let _ = libwoven::write(
+        libwoven::syscall::STDOUT,
+        libwoven::format_u64(average, &mut digits),
+    );
+    let _ = libwoven::print(" max=");
+    let _ = libwoven::write(libwoven::syscall::STDOUT, libwoven::format_u64(max, &mut digits));
+    let _ = libwoven::print(" cycles\n");
+    if average == 0 {
+        fail(320);
+    }
+    let _ = libwoven::print("hello-gui: ipc benchmark: PASSED\n");
+    libwoven::exit(0)
+}
+
 fn main(args: Args) -> ! {
     match args.get(1) {
         Some(b"--audio") => audio(),
@@ -271,6 +327,7 @@ fn main(args: Args) -> ! {
         Some(b"--wm-client") => wm_client(&args),
         Some(b"--3d-chrome-demo") => three_d_chrome_demo(),
         Some(b"--syscall-benchmark") => syscall_benchmark(),
+        Some(b"--ipc-benchmark") => ipc_benchmark(),
         Some(_) => fail(250),
         None => run(Input::None),
     }
