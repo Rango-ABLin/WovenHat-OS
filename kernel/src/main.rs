@@ -1665,8 +1665,22 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
             let _ = vfs::mkdir(dir);
         }
 
+        // Persistent accounts (from a provisioned `/mnt/etc/wovenhat/accounts`)
+        // are a production concern, not a hardware-demo-only one: a real
+        // release image has no other way to carry real sign-in accounts.
+        // Finding none is not a failure (`install_persistent_accounts`
+        // returns `true` for that case) -- a machine with no accounts yet
+        // boots to an accounts-less session, which is what a first-boot
+        // setup step is for.
+        #[cfg(feature = "system-apps")]
+        if !install_persistent_accounts() {
+            serial::write_line(format_args!(
+                "[SESSION] persistent account provisioning failed"
+            ));
+            halt();
+        }
         #[cfg(feature = "hardware-demo")]
-        if !install_persistent_accounts() || !install_hardware_demo_accounts() {
+        if !install_hardware_demo_accounts() {
             serial::write_line(format_args!("[DEMO] account provisioning failed"));
             halt();
         }
@@ -6861,7 +6875,7 @@ fn install_production_system_apps() -> bool {
     true
 }
 
-#[cfg(feature = "hardware-demo")]
+#[cfg(feature = "system-apps")]
 fn install_persistent_accounts() -> bool {
     const SOURCE: &str = "/mnt/etc/wovenhat/accounts";
     const TARGET: &str = "/etc/wovenhat/accounts";
@@ -6912,7 +6926,7 @@ fn install_persistent_accounts() -> bool {
     true
 }
 
-#[cfg(feature = "hardware-demo")]
+#[cfg(feature = "system-apps")]
 fn has_valid_account_line(data: &[u8]) -> bool {
     data.split(|byte| *byte == b'\n').any(|line| {
         let line = line.strip_suffix(b"\r").unwrap_or(line);
