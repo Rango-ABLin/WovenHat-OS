@@ -322,7 +322,7 @@ unsafe impl Sync for TileBuffer {}
 
 static TILE: TileBuffer = TileBuffer(UnsafeCell::new([0; TILE_PIXELS]));
 
-/// The desktop's state, in .bss too: the user stack is 8 KiB, and the state
+/// The desktop's state, in .bss too: the user stack is 16 KiB, and the state
 /// built in `main`'s frame, with the catalog loader's on top, overflowed it.
 struct DesktopState(UnsafeCell<Desktop>);
 
@@ -378,7 +378,7 @@ fn clock_text(time: Option<DateTime>, seconds: bool) -> ([u8; 8], usize) {
 
 /// Fill an already-allocated, already-zeroed catalog in place. Never builds
 /// or returns a `Catalog` by value: at `MAX_TRANSLATIONS` entries it is
-/// several KiB, and the user stack is 8 KiB (see `DesktopState`), so even a
+/// several KiB, and the user stack is 16 KiB (see `DesktopState`), so even a
 /// transient by-value copy on the way into a static overflowed it.
 fn fill_lock_catalog(catalog: &mut libwoven::i18n::Catalog, language: libwoven::i18n::Language) {
     use libwoven::i18n::Language;

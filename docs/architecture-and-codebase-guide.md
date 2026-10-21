@@ -14,6 +14,11 @@ The module intentionally does not claim normalization, full Unicode property
 data, complete normalization coverage, bidi, shaping, keyboard layouts, IMEs, or compositor/application
 integration.
 
+WovenShell keeps its English and Chichewa lock-screen catalogs in static
+storage and fills them in place on first use; this avoids copying the several-
+KiB catalog through the userspace stack. It is a bounded integration example,
+not a claim that every desktop string is translated.
+
 The bounded user stack is four pages (16 KiB) plus a guard page. The increase
 was required by the production shell diagnostic-path acceptance, which
 reproduced a user-mode stack write fault at the former 8 KiB boundary.
@@ -2747,6 +2752,10 @@ qualification.
 [Stage status](stage-status.md) records which gates have actually passed.
 
 ## Repository map
+
+The production user stack is 16 KiB plus a 4 KiB guard page. Older repository
+map wording that says 8 KiB is historical and is superseded by
+`userspace::UserStack::SIZE`.
 
 | Files | Responsibility |
 | --- | --- |

@@ -17,6 +17,11 @@ fixed-capacity translation lookup, date/number formatting, and Unicode scalar
 validation in `libwoven::i18n`. This stays below the unresolved normalization,
 RTL/bidi, shaping, keyboard-layout, IME, and application-integration work.
 
+The follow-up added a fail-closed Latin combining-mark normalization subset.
+Its first production QEMU run exposed a user-mode write fault at the former
+8 KiB shell stack boundary; `UserStack::SIZE` is now 16 KiB plus the guard
+page, and corrected system-app acceptance passes on 1/2/4 CPUs.
+
 **Claude Code: starting Stages 25/26/26.5/30 (Power, Accessibility, i18n,
 Performance), in that priority order, after closing the production
 account-provisioning gap (2026-10-21).** User directive: build these out as
