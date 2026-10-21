@@ -1,5 +1,19 @@
 # Stage status
 
+## Stage 24.36 durable signed TPM Name policy boundary (2026-10-21)
+
+The signed TAN1 attestation-Name policy now has a journal-backed WovenFS
+storage boundary. Writes verify the Ed25519 policy before mutation; reads
+require the exact 106-byte record size and reverify the signature before
+returning a Name. The API is feature-gated to accepted durable-storage and
+production system-app configurations. Host tests (89), all-targets and
+affected feature Clippy, executable QEMU, and signed system-apps 1/2/4-CPU
+acceptance pass. Evidence is under
+`audit-artifacts/stage24.36-durable-attestation-name-policy-20261021`.
+
+Physical provisioning, live TPM retrieval, boot-time policy loading, quote
+authorization, recovery, and physical TPM qualification remain required.
+
 ## Stage 24.35 signed TPM attestation-Name policy (2026-10-21)
 
 The TPM2 layer now verifies a bounded, versioned Ed25519-signed policy

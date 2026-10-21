@@ -213,6 +213,41 @@ pub fn verify_signed_attestation_name_policy(
     Ok(name)
 }
 
+#[cfg(any(feature = "stage24-3-test", feature = "system-apps"))]
+const ATTESTATION_NAME_POLICY_PATH: &str = "/wfs/tpm-attestation-name-policy";
+
+/// Persist a signed attestation Name policy through the journal-backed WovenFS
+/// writer. Signature verification happens before the durable mutation, so an
+/// invalid policy can never replace a valid record.
+#[cfg(any(feature = "stage24-3-test", feature = "system-apps"))]
+#[allow(dead_code)]
+pub fn persist_attestation_name_policy(
+    authority: &crate::wfs::AuthorizedWfsWriter,
+    envelope: &[u8],
+    trusted_key: &[u8; 32],
+    now: u64,
+) -> Result<(), Error> {
+    verify_signed_attestation_name_policy(envelope, trusted_key)?;
+    crate::wfs::write_vfs_path_durable(authority, ATTESTATION_NAME_POLICY_PATH, envelope, now)
+        .map_err(|_| Error::Storage)
+}
+
+/// Read and revalidate the durable attestation Name policy. Storage presence
+/// or a valid file length never bypasses the signature check.
+#[cfg(any(feature = "stage24-3-test", feature = "system-apps"))]
+#[allow(dead_code)]
+pub fn read_attestation_name_policy(
+    trusted_key: &[u8; 32],
+    envelope: &mut [u8; ATTESTATION_NAME_POLICY_BYTES],
+) -> Result<[u8; 34], Error> {
+    let length = crate::wfs::read_vfs_path_durable(ATTESTATION_NAME_POLICY_PATH, envelope)
+        .map_err(|_| Error::Storage)?;
+    if length != ATTESTATION_NAME_POLICY_BYTES {
+        return Err(Error::MalformedResponse);
+    }
+    verify_signed_attestation_name_policy(&envelope[..length], trusted_key)
+}
+
 /// Verify an ECDSA P-256/SHA-256 quote signature against the exact
 /// `TPMS_ATTEST` bytes. TPM ECDSA components must be canonical 32-byte
 /// integers for this curve; shorter or oversized TPM2B values are rejected.
@@ -499,6 +534,8 @@ pub enum Error {
     PolicySignature,
     PolicyMismatch,
     CredentialMismatch,
+    #[allow(dead_code)]
+    Storage,
 }
 
 static TRANSACTION: spin::Mutex<()> = spin::Mutex::new(());

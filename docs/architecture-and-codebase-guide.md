@@ -1,5 +1,13 @@
 # WovenHat OS Architecture & Codebase Guide
 
+### Stage 24.36 - durable signed TPM Name policy boundary
+
+`persist_attestation_name_policy` validates TAN1 before committing the exact
+record through journal-backed `write_vfs_path_durable`; the read path accepts
+only the exact bounded length and revalidates the Ed25519 signature. The
+functions are guarded by the durable-storage/system-app feature set so lower
+stages cannot accidentally acquire the dependency.
+
 ### Stage 24.35 - signed TPM attestation-Name policy
 
 `verify_signed_attestation_name_policy` validates a fixed 106-byte TAN1

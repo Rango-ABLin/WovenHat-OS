@@ -1,5 +1,15 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - Stage 24.36 (2026-10-21)
+
+Added journal-backed WovenFS persistence/read APIs for the signed TAN1 TPM
+Name policy. Writes verify before mutation; reads enforce length and verify
+again. Static gates, executable QEMU policy self-test, and signed system-apps
+1/2/4-CPU acceptance pass. Evidence is in
+`docs/audit-stage24-36-durable-attestation-name-policy-2026-10-21.md`; USB
+remains untouched. Physical provisioning, boot loading, live TPM trust, quote
+authorization, recovery, and hardware qualification remain open.
+
 ## Codex - Stage 24.35 (2026-10-21)
 
 Added the bounded TAN1 Ed25519-signed expected TPM Name policy. Header,
