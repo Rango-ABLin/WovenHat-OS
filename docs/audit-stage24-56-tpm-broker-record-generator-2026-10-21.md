@@ -21,6 +21,9 @@ Date: 2026-10-21
 - Synthetic positive generation: passed, 182-byte output.
 - Missing signing-key negative control: rejected with exit 2.
 - Invalid NV-index negative control: rejected with exit 2.
+- Exact-tree memory QEMU 1 CPU: passed, exit 33.
+- Exact-tree signed system-app hardware demo 1/2/4 CPUs: passed, including
+  sign-in, ten applications, desktop, PS/2, IOAPIC, and smptest.
 - The existing Stage 24.55 read-only preflight remained unchanged; no TPM or
   USB state was modified.
 - Evidence is preserved under
