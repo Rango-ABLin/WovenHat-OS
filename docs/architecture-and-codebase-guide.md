@@ -3497,3 +3497,12 @@ and copies three capability bytes without executing an idle instruction.
 `libwoven::cpu_idle_capabilities` is the typed wrapper. The current scheduler
 continues to use the established interrupt-safe `STI+HLT` sequence; no MWAIT
 or frequency MSR is enabled by this ABI.
+
+## Stage 25.3 CPU frequency inventory boundary
+
+`kernel/src/hal/cpu.rs` reads CPUID leaf `0x16` only when the basic CPUID
+maximum leaf advertises it. Syscall 237 returns an explicit availability byte
+followed by base, maximum, and bus MHz values, after the `PowerControl`
+authority and userspace-copy checks. `libwoven::cpu_frequency_info` decodes
+the bounded result. This is inventory only: it does not write P-state or
+frequency-control MSRs.

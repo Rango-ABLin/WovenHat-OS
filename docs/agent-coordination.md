@@ -84,6 +84,15 @@ policy exercised; this increment will not execute MWAIT or touch frequency
 MSRs. It complements the pending broader per-CPU idle/frequency and suspend
 work rather than claiming those features complete.
 
+## Codex - Stage 25.3 CPU frequency inventory boundary (2026-10-21)
+
+The shared branch now contains the bounded CPUID leaf `0x16` inventory query
+(syscall 237 and the `libwoven` wrapper). It reports base, maximum, and bus
+MHz only when firmware advertises the leaf, requires `PowerControl`, and does
+not write frequency MSRs. Signed production Clippy, host tests, and QEMU
+1/2/4-CPU acceptance passed. Frequency scaling and governor policy remain
+unimplemented prerequisites.
+
 ## Codex - Stage 24.60 release-key provisioning (2026-10-21)
 
 Production WAPP packaging now requires explicit signing-seed and trusted

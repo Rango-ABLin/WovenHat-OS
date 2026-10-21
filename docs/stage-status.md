@@ -1,5 +1,20 @@
 # Stage status
 
+## Stage 25.3 - CPU frequency inventory boundary (2026-10-21)
+
+The CPU HAL now reads CPUID leaf `0x16` when available and exposes base,
+maximum, and bus MHz inventory through syscall 237 and
+`libwoven::cpu_frequency_info`. The query is `PowerControl`-gated, audited,
+validates the 13-byte userspace result, and performs no P-state or MSR write.
+It returns an explicit unavailable result when firmware omits the leaf.
+
+Signed production-kernel Clippy, `libwoven` Clippy/tests, and signed
+system-apps QEMU acceptance on 1/2/4 CPUs pass. Evidence is in
+`docs/audit-stage25-3-cpu-frequency-inventory-2026-10-21.md`.
+
+This does not claim frequency scaling, governor policy, thermal throttling, or
+physical frequency validation.
+
 ## Stage 30 boot-stage timing, and a real fix it found immediately (2026-10-21)
 
 First slice of performance-engineering tooling (Stage 30): the existing

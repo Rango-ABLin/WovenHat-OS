@@ -1380,6 +1380,14 @@ remain later work.
 
 Implement:
 
+Stage 25.3 - CPU frequency inventory boundary
+
+Accepted bounded slice: read CPUID leaf `0x16` when present and expose base,
+maximum, and bus MHz inventory through a privileged read-only query (syscall
+237 and the `libwoven` wrapper). No P-state or frequency-control MSR is
+written; governor policy, thermal interaction, and physical validation remain
+later work.
+
 ACPI poweroff
 reboot
 sleep
