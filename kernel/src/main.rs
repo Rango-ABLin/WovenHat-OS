@@ -1774,27 +1774,34 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         // can create hardware credential authority.
         #[cfg(feature = "system-apps")]
         {
-        match (tpm_info, tpm2::load_policy_session_snapshot()) {
-            (None, _) => serial::write_line(format_args!(
+        match tpm_info {
+            None => serial::write_line(format_args!(
                 "[TPM] context recovery unavailable; no live TPM; hardware credentials disabled"
             )),
-            (Some(_), Err(tpm2::Error::Storage)) => serial::write_line(format_args!(
-                "[TPM] no durable policy-session context; hardware credentials disabled"
-            )),
-            (Some(_), Err(error)) => serial::write_line(format_args!(
-                "[TPM] durable policy-session context rejected: {error:?}; hardware credentials disabled"
-            )),
-            (Some(info), Ok(mut snapshot)) => match tpm2::load_policy_session(info, &mut snapshot) {
+            Some(info) => match tpm2::authorize_policy_session_custody(info) {
                 Err(error) => serial::write_line(format_args!(
-                    "[TPM] policy-session ContextLoad rejected: {error:?}; hardware credentials disabled"
+                    "[TPM] custody authorization unavailable: {error:?}; hardware credentials disabled"
                 )),
-                Ok(mut lease) => match tpm2::flush_policy_session(info, &mut lease) {
-                    Ok(()) => serial::write_line(format_args!(
-                        "[TPM] durable policy-session context recovered and flushed; authority remains disabled"
+                Ok(custody) => match tpm2::load_policy_session_snapshot(&custody) {
+                    Err(tpm2::Error::Storage) => serial::write_line(format_args!(
+                        "[TPM] no durable policy-session context; hardware credentials disabled"
                     )),
                     Err(error) => serial::write_line(format_args!(
-                        "[TPM] recovered policy-session cleanup failed: {error:?}; hardware credentials disabled"
+                        "[TPM] durable policy-session context rejected: {error:?}; hardware credentials disabled"
                     )),
+                    Ok(mut snapshot) => match tpm2::load_policy_session(info, &mut snapshot) {
+                        Err(error) => serial::write_line(format_args!(
+                            "[TPM] policy-session ContextLoad rejected: {error:?}; hardware credentials disabled"
+                        )),
+                        Ok(mut lease) => match tpm2::flush_policy_session(info, &mut lease) {
+                            Ok(()) => serial::write_line(format_args!(
+                                "[TPM] durable policy-session context recovered and flushed; authority remains disabled"
+                            )),
+                            Err(error) => serial::write_line(format_args!(
+                                "[TPM] recovered policy-session cleanup failed: {error:?}; hardware credentials disabled"
+                            )),
+                        },
+                    },
                 },
             },
         }

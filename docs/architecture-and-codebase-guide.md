@@ -1,5 +1,14 @@
 # WovenHat OS Architecture & Codebase Guide
 
+### Stage 24.48 - TPM custody authorization
+
+`PolicySessionCustodyAuthority` is a private-construction, generation-tagged
+kernel token. Issuance validates the CRB control-area alignment/start method
+and, on release system-apps boots, requires that the signed TAN1 policy was
+retained successfully. Both TPM context persistence and recovery require this
+token in addition to `AuthorizedWfsWriter`, preventing ordinary storage
+authority from treating TPM context files as credential custody.
+
 ### Stage 24.47 - TPM policy-session nonce refresh
 
 `TPM2_Quote` response decoding now validates the complete authorization area,

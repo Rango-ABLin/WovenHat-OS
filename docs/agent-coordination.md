@@ -1,5 +1,14 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - Stage 24.48 (2026-10-21)
+
+Added the kernel-owned TPM custody authorization token. TPM context
+persistence/recovery now requires both this token and the WovenFS writer;
+issuance requires a validated live CRB descriptor and an accepted signed TAN1
+policy on release boots. Host, Clippy, memory QEMU, and signed system-apps
+1/2/4-CPU gates pass. Physical TPM execution and qualification remain open.
+USB remains untouched.
+
 ## Codex - Stage 24.47 (2026-10-21)
 
 Implemented bounded TPM policy-session response-nonce refresh. Quote response

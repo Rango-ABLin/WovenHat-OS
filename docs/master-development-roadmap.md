@@ -2,6 +2,16 @@ WovenHat OS — Stage 10.7 → Version 1.0 Master Roadmap
 Phase I — Finish the asynchronous kernel foundation
 Stage 10.7 — Asynchronous TCP
 
+Stage 24.48 - TPM custody authorization boundary
+
+Implemented a private-construction kernel custody token for TPM policy-session
+contexts. Issuance requires a validated live CRB descriptor and an accepted
+signed TAN1 policy on release boots; context persistence and recovery require
+the token in addition to WovenFS storage authority. Host tests, Clippy,
+executable QEMU, and signed 1/2/4-CPU acceptance pass. Physical TPM execution,
+key lifecycle, credential decisions, recovery, qualification, and release
+readiness remain required.
+
 Stage 24.47 - TPM policy-session nonce refresh
 
 Implemented strict TPM quote authorization-area decoding and managed lease

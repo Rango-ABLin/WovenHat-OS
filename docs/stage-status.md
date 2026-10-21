@@ -1,5 +1,19 @@
 # Stage status
 
+## Stage 24.48 TPM custody authorization boundary (2026-10-21)
+
+TPM policy-session custody now requires a kernel-owned authority token in
+addition to the ordinary WovenFS writer. The token is issued only after a
+validated live CRB descriptor and an accepted boot-time signed TAN1 policy;
+the durable context loader requires it as well. Invalid descriptors and
+storage-only callers fail before custody I/O. Host tests (89), all-targets and
+affected feature Clippy, executable QEMU, and signed system-apps 1/2/4-CPU
+acceptance pass. Evidence is under
+`audit-artifacts/stage24.48-tpm-custody-authorization-20261021`.
+
+TPM physical execution, provisioned-key lifecycle, credential decisions,
+recovery, and physical qualification remain required.
+
 ## Stage 24.47 TPM policy-session nonce refresh (2026-10-21)
 
 Policy-session quote responses now parse the TPM authorization area and retain

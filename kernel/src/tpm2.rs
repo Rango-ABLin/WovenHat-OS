@@ -169,6 +169,62 @@ pub struct PolicySessionSnapshot {
     consumed: bool,
 }
 
+/// Kernel-owned authority for persisting or recovering TPM policy-session
+/// custody. A normal `StorageIo` writer is intentionally insufficient: the
+/// caller must first pass the boot-retained signed attestation policy and
+/// provide a validated live TPM descriptor.
+#[cfg(any(
+    feature = "qemu-test",
+    feature = "stage24-3-test",
+    feature = "system-apps"
+))]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PolicySessionCustodyAuthority {
+    control_area: u64,
+    generation: u64,
+}
+
+#[cfg(any(
+    feature = "qemu-test",
+    feature = "stage24-3-test",
+    feature = "system-apps"
+))]
+static NEXT_CUSTODY_AUTHORITY_GENERATION: AtomicU64 = AtomicU64::new(1);
+
+/// Issue the private custody authority only after validating the live TPM
+/// descriptor and, in a release boot, confirming that a signed TAN1 policy was
+/// accepted. The returned token cannot be constructed by userspace or by a
+/// storage-only caller.
+#[cfg(any(
+    feature = "qemu-test",
+    feature = "stage24-3-test",
+    feature = "system-apps"
+))]
+#[allow(dead_code)]
+pub fn authorize_policy_session_custody(
+    info: Tpm2Info,
+) -> Result<PolicySessionCustodyAuthority, Error> {
+    if info.control_area == 0 || info.control_area & 0xfff != 0 || !matches!(info.start_method, 6 | 7)
+    {
+        return Err(Error::InvalidDescriptor);
+    }
+    #[cfg(feature = "system-apps")]
+    {
+        let loaded = BOOT_ATTESTATION_NAME_POLICY.lock();
+        if loaded.is_none() {
+            return Err(Error::InvalidPolicy);
+        }
+    }
+    let generation = NEXT_CUSTODY_AUTHORITY_GENERATION.fetch_add(1, Ordering::Relaxed);
+    if generation == 0 {
+        return Err(Error::Storage);
+    }
+    Ok(PolicySessionCustodyAuthority {
+        control_area: info.control_area,
+        generation,
+    })
+}
+
 #[allow(dead_code)]
 fn encode_policy_session_context_record(
     commit_sequence: u64,
@@ -273,9 +329,13 @@ fn read_policy_session_context_copy(
 #[allow(dead_code)]
 pub fn persist_policy_session_snapshot(
     authority: &crate::wfs::AuthorizedWfsWriter,
+    custody: &PolicySessionCustodyAuthority,
     snapshot: &PolicySessionSnapshot,
     now: u64,
 ) -> Result<u64, Error> {
+    if custody.control_area == 0 || custody.generation == 0 {
+        return Err(Error::InvalidPolicy);
+    }
     if snapshot.consumed {
         return Err(Error::InvalidPolicy);
     }
@@ -305,7 +365,12 @@ pub fn persist_policy_session_snapshot(
 /// numbers are rejected rather than arbitrarily selecting one copy.
 #[cfg(any(feature = "stage24-3-test", feature = "system-apps"))]
 #[allow(dead_code)]
-pub fn load_policy_session_snapshot() -> Result<PolicySessionSnapshot, Error> {
+pub fn load_policy_session_snapshot(
+    custody: &PolicySessionCustodyAuthority,
+) -> Result<PolicySessionSnapshot, Error> {
+    if custody.control_area == 0 || custody.generation == 0 {
+        return Err(Error::InvalidPolicy);
+    }
     let mut first = [0_u8; POLICY_SESSION_CONTEXT_RECORD_BYTES];
     let mut second = [0_u8; POLICY_SESSION_CONTEXT_RECORD_BYTES];
     let left = read_policy_session_context_copy(0, &mut first).ok();
@@ -2344,6 +2409,19 @@ pub fn get_random(info: Tpm2Info, output: &mut [u8]) -> Result<usize, Error> {
 
 #[cfg(feature = "qemu-test")]
 pub fn self_test() -> bool {
+    let custody_info = Tpm2Info {
+        platform_class: 0,
+        control_area: 0x1000,
+        start_method: 6,
+    };
+    if authorize_policy_session_custody(custody_info).is_err()
+        || authorize_policy_session_custody(Tpm2Info {
+            control_area: 0x1001,
+            ..custody_info
+        }) != Err(Error::InvalidDescriptor)
+    {
+        return false;
+    }
     let mut command = [0_u8; 12];
     encode_get_random(32, &mut command);
     if u16::from_be_bytes(command[..2].try_into().unwrap()) != TPM_ST_NO_SESSIONS
