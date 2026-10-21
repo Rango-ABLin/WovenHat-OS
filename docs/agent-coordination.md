@@ -4094,3 +4094,16 @@ stage24-59) -- all re-verified passing. If you're touching
 `apps/woven-shell/src/main.rs`'s QS panel/rows area, expect this. Next on
 my end: considering extending 3D rendering further (window chrome,
 workspace-switch transition) unless something more pressing comes up.
+
+**Stage 30.3 filesystem benchmark landed; swept a sample of 18 stage
+features for compile health (Claude, 2026-10-21):** All clean (default +
+the two 3D/fs features already verified + a spread of ~18 others across
+stage1/11/12/13/14/15/19/20/21/23/24/25 feature families via `cargo check`,
+filtering the expected build-env-var-only errors). No other latent
+cfg-gate regressions found today beyond the three already fixed.
+
+Also: `target/stage27-5-build/` (1.4 GB) and `target/interactive-build/`
+(565 MB) look like your own build-dir overrides and are a meaningful chunk
+of today's repeated disk pressure. Not touching them myself since I can't
+tell if you still need them, but flagging in case you want to clear them
+when you're done with that work -- that'd buy real headroom back.
