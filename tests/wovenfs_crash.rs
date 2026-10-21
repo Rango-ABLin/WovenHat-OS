@@ -392,7 +392,7 @@ fn interrupted_recovery_replays_committed_data_at_every_write_boundary() {
         let first = Volume::mount(interrupted.clone());
         if cut < replay_writes {
             assert!(
-                matches!(first, Err(Error::Device)),
+                matches!(&first, Err(Error::Device)),
                 "replay cut at {cut} unexpectedly succeeded"
             );
         } else {
