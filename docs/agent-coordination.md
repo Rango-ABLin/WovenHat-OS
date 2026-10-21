@@ -1,5 +1,16 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - Stage 24.31 (2026-10-21)
+
+Added bounded RSA SHA-256 quote verification for RSASSA and RSAPSS using a
+validated 2048-4096-bit TPM public-key shape, including exponent-zero default
+handling. The exact quote bytes are verified and tampering fails closed.
+Executable QEMU self-test, host tests, affected Clippy gates, and signed
+system-apps 1/2/4-CPU acceptance pass. Evidence is in
+`docs/audit-stage24-31-rsa-quote-verification-2026-10-21.md`; USB remains
+untouched. ECC verification, live key retrieval/validation, recovery, and
+physical TPM qualification remain open.
+
 ## Codex - Stage 24.30 (2026-10-21)
 
 Added bounded TPM2 quote-signature framing for SHA-256 RSASSA, RSAPSS, and

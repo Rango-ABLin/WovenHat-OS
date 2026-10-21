@@ -1,5 +1,13 @@
 # WovenHat OS Architecture & Codebase Guide
 
+### Stage 24.31 - bounded TPM RSA quote verification
+
+`verify_quote_rsa_sha256` constructs a validated RSA public key from bounded
+TPM modulus/exponent fields and verifies RSASSA or RSAPSS SHA-256 signatures
+over the exact quote bytes. The TPM exponent value zero is normalized to
+65537. This boundary authenticates only when its caller has independently
+validated the TPM public key; it does not retrieve or provision that key.
+
 ### Stage 24.30 - bounded TPM quote signature framing
 
 `decode_quote_signature` validates the bounded `TPMT_SIGNATURE` scheme and

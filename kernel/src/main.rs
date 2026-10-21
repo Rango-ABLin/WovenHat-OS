@@ -421,13 +421,6 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     serial::write_line(format_args!(
         "[S15.6] software measurement primitive: PASSED"
     ));
-    #[cfg(feature = "qemu-test")]
-    if !tpm2::self_test() {
-        serial::write_line(format_args!("[TPM] CRB codec: FAILED"));
-        qemu_test_exit_failure();
-    }
-    #[cfg(feature = "qemu-test")]
-    serial::write_line(format_args!("[TPM] CRB codec: PASSED"));
     let _kernel_measurement = physical_memory_offset.and_then(|offset| {
         let measurement = boot_measurement::measure_kernel(boot_info, offset);
         if let Some(measurement) = measurement {
@@ -1520,6 +1513,13 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         console.println("KERNEL HEAP: SELF TEST FAILED");
         halt();
     }
+    #[cfg(feature = "qemu-test")]
+    if !tpm2::self_test() {
+        serial::write_line(format_args!("[TPM] CRB codec: FAILED"));
+        qemu_test_exit_failure();
+    }
+    #[cfg(feature = "qemu-test")]
+    serial::write_line(format_args!("[TPM] CRB codec: PASSED"));
     #[cfg(feature = "qemu-test")]
     if !heap::live_metadata_self_test() {
         serial::write_line(format_args!("[S6.HEAP] unbounded live metadata: FAILED"));

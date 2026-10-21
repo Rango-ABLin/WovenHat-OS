@@ -1,5 +1,20 @@
 # Stage status
 
+## Stage 24.31 bounded TPM RSA quote verification (2026-10-21)
+
+The TPM2 boundary now verifies SHA-256 RSA quote signatures (RSASSA and
+RSASSA-PSS) against a caller-supplied, bounded 2048-4096-bit public key,
+including TPM's exponent-zero default of 65537. Verification is performed
+against the exact `TPMS_ATTEST` bytes and fails closed on malformed keys,
+wrong scheme/hash, or signature mismatch. The self-test was moved after heap
+initialization because the audited verifier allocates. Host tests (89),
+all-targets and affected feature Clippy, executable QEMU, and signed
+system-apps 1/2/4-CPU acceptance pass. Evidence is under
+`audit-artifacts/stage24.31-rsa-quote-verification-20261021`.
+
+ECC quote verification, live TPM public-key retrieval/validation, recovery,
+and physical TPM qualification remain required.
+
 ## Stage 24.30 bounded TPM quote signature framing (2026-10-21)
 
 The TPM2 layer now parses bounded `TPMT_SIGNATURE` shapes for SHA-256
