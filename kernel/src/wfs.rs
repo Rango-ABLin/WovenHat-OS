@@ -32,8 +32,8 @@ pub const MAX_TXN_BLOCKS: usize = 32;
     test,
     feature = "stage15-1-test",
     feature = "stage15-2-test",
-    feature = "stage21-6-test"
-    , feature = "stage24-3-test"
+    feature = "stage21-6-test",
+    feature = "stage24-3-test"
 ))]
 pub const JOURNAL_BLOCKS: u32 = MAX_TXN_BLOCKS as u32 + 2;
 
@@ -2090,7 +2090,7 @@ fn import_wfs_directory<D: crate::block::BlockDevice>(
     feature = "stage15-2-test",
     feature = "stage27-2-test",
     feature = "stage21-6-test",
-        feature = "stage24-3-test",
+    feature = "stage24-3-test",
     feature = "stage22-5-test",
     feature = "system-apps"
 ))]
@@ -2102,7 +2102,7 @@ pub struct AuthorizedWfsWriter {
     feature = "stage15-2-test",
     feature = "stage27-2-test",
     feature = "stage21-6-test",
-        feature = "stage24-3-test",
+    feature = "stage24-3-test",
     feature = "stage22-5-test",
     feature = "system-apps"
 ))]
@@ -2616,11 +2616,9 @@ pub fn stage15_2_self_test() -> bool {
     // remount must then publish freshly journal-replayed contents.
     let stale = crate::vfs::open("/wfs/alpha.txt");
     let unmounted = unmount_vfs().is_ok();
-    let stale_rejected = stale
-        .is_ok_and(|id| crate::vfs::read(id, &mut vfs_buffer).is_err());
+    let stale_rejected = stale.is_ok_and(|id| crate::vfs::read(id, &mut vfs_buffer).is_err());
     let remounted = mount_ata_into_vfs() == MountOutcome::Mounted(3);
-    let fresh_read = crate::vfs::read_all("/wfs/alpha.txt", &mut vfs_buffer)
-        == Ok(alpha.len())
+    let fresh_read = crate::vfs::read_all("/wfs/alpha.txt", &mut vfs_buffer) == Ok(alpha.len())
         && vfs_buffer[..alpha.len()] == *alpha;
     if !step(
         "unmount invalidates handles and remount refreshes the VFS",

@@ -21,10 +21,8 @@ pub const MAX_FILE_DESCRIPTORS: usize = 16;
 // crossing the native WovenFS boundary, so service-enabled builds reserve the
 // larger stack explicitly rather than allowing a transaction to overrun the
 // canary-protected 64-KiB baseline.
-pub const TASK_STACK_SIZE: usize = if cfg!(any(
-    feature = "stage22-5-test",
-    feature = "system-apps"
-)) {
+pub const TASK_STACK_SIZE: usize = if cfg!(any(feature = "stage22-5-test", feature = "system-apps"))
+{
     4096 * 256
 } else {
     4096 * 64

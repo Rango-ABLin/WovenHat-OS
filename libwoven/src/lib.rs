@@ -22,15 +22,15 @@ pub mod process {
     #[derive(Clone, Copy, PartialEq, Eq, Debug)]
     pub struct Id(pub u64);
 }
+pub mod ai_assistant;
+pub mod ai_ipc;
+pub mod ai_model;
+pub mod ai_monitor;
+pub mod ai_provider;
+pub mod identity;
 pub mod package;
 pub mod package_ipc;
-pub mod ai_ipc;
-pub mod ai_provider;
-pub mod ai_model;
-pub mod ai_assistant;
-pub mod ai_monitor;
 pub mod semantic_search;
-pub mod identity;
 pub mod store;
 
 #[cfg(test)]
@@ -10770,10 +10770,10 @@ pub mod graphics {
                         third_edge.abs(),
                         area.abs(),
                     );
-                    let sample_x = source.x()
-                        + (usize::from(u) * (source.width() - 1) / 255) as i32;
-                    let sample_y = source.y()
-                        + (usize::from(v) * (source.height() - 1) / 255) as i32;
+                    let sample_x =
+                        source.x() + (usize::from(u) * (source.width() - 1) / 255) as i32;
+                    let sample_y =
+                        source.y() + (usize::from(v) * (source.height() - 1) / 255) as i32;
                     if let Some(sampled) = source.get(sample_x, sample_y) {
                         self.canvas.set(x, y, sampled);
                     }
@@ -11479,6 +11479,7 @@ pub mod syscall {
     pub const AUDIO_SET_VOLUME: u64 = 205;
     pub const GRAPHICS_COMPOSITOR_OUTPUTS: u64 = 207;
     pub const POWER_CONTROL: u64 = 209;
+    pub const POWER_CAPABILITIES: u64 = 235;
     pub const ACCOUNTS_CHANGE_PIN: u64 = 210;
     pub const IDENTITY_ADMIN_ADD_USER: u64 = 226;
     pub const IDENTITY_ADMIN_DELETE_USER: u64 = 227;
@@ -12089,7 +12090,14 @@ pub mod syscall {
     /// # Safety
     /// `buffer` must be writable for `capacity` bytes.
     pub unsafe fn ipc_message_receive(endpoint: u64, buffer: *mut u8, capacity: usize) -> u64 {
-        unsafe { invoke(IPC_MESSAGE_RECEIVE, endpoint, buffer as u64, capacity as u64) }
+        unsafe {
+            invoke(
+                IPC_MESSAGE_RECEIVE,
+                endpoint,
+                buffer as u64,
+                capacity as u64,
+            )
+        }
     }
 }
 
@@ -12520,7 +12528,10 @@ pub fn ipc_message_send(endpoint: u64, bytes: &[u8]) -> Result<(), Error> {
     check(unsafe { syscall::ipc_message_send(endpoint, bytes.as_ptr(), bytes.len()) }).map(|_| ())
 }
 
-pub fn ipc_message_receive(endpoint: u64, buffer: &mut [u8]) -> Result<(usize, process::Id), Error> {
+pub fn ipc_message_receive(
+    endpoint: u64,
+    buffer: &mut [u8],
+) -> Result<(usize, process::Id), Error> {
     // SAFETY: the pointer and length describe writable `buffer` storage.
     let length = check(unsafe {
         syscall::ipc_message_receive(endpoint, buffer.as_mut_ptr(), buffer.len())
@@ -12554,7 +12565,12 @@ pub fn package_transaction(operation: package_ipc::Operation, path: &str) -> Res
 pub fn ai_message_send(endpoint: u64, bytes: &[u8]) -> Result<(), Error> {
     // SAFETY: the pointer and length describe `bytes`.
     check(unsafe {
-        syscall::invoke(syscall::AI_MESSAGE_SEND, endpoint, bytes.as_ptr() as u64, bytes.len() as u64)
+        syscall::invoke(
+            syscall::AI_MESSAGE_SEND,
+            endpoint,
+            bytes.as_ptr() as u64,
+            bytes.len() as u64,
+        )
     })
     .map(|_| ())
 }
@@ -13315,6 +13331,31 @@ pub fn power_off() -> Result<u64, Error> {
 pub fn restart() -> Result<u64, Error> {
     // SAFETY: integer-only call.
     check(unsafe { syscall::invoke(syscall::POWER_CONTROL, 1, 0, 0) })
+}
+
+/// Firmware-advertised power transitions. This query performs no transition.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct PowerCapabilities {
+    pub power_off: bool,
+    pub suspend: bool,
+    pub restart: bool,
+}
+
+pub fn power_capabilities() -> Result<PowerCapabilities, Error> {
+    let mut bytes = [0u8; 3];
+    check(unsafe {
+        syscall::invoke(
+            syscall::POWER_CAPABILITIES,
+            bytes.as_mut_ptr() as u64,
+            bytes.len() as u64,
+            0,
+        )
+    })?;
+    Ok(PowerCapabilities {
+        power_off: bytes[0] != 0,
+        suspend: bytes[1] != 0,
+        restart: bytes[2] != 0,
+    })
 }
 
 pub fn compositor_outputs() -> Result<([Output; 4], usize), Error> {
@@ -14083,8 +14124,14 @@ mod tests {
         // center and increase its depth value.
         let (near_x, _, near_depth) = camera.project(20 << 16, 0, 0).unwrap();
         let (far_x, _, far_depth) = camera.project(20 << 16, 0, 40 << 16).unwrap();
-        assert!(far_x - 100 < near_x - 100, "farther should project closer to center");
-        assert!(far_depth > near_depth, "farther should have a larger depth value");
+        assert!(
+            far_x - 100 < near_x - 100,
+            "farther should project closer to center"
+        );
+        assert!(
+            far_depth > near_depth,
+            "farther should have a larger depth value"
+        );
     }
 
     #[test]

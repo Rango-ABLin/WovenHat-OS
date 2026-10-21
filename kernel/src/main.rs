@@ -90,15 +90,15 @@ mod hda;
 mod heap;
 #[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
 mod hid;
-mod interrupts;
-#[cfg(any(feature = "stage24-3-test", feature = "system-apps"))]
-mod identity_storage;
 #[cfg(any(
     feature = "stage24-4-test",
     feature = "stage24-5-test",
     feature = "system-apps"
 ))]
 mod identity_runtime;
+#[cfg(any(feature = "stage24-3-test", feature = "system-apps"))]
+mod identity_storage;
+mod interrupts;
 mod ipc;
 mod irq_lock;
 mod journal;
@@ -173,10 +173,10 @@ mod swap;
 mod syscall;
 mod task;
 mod terminal;
-mod tpm2;
 #[allow(dead_code)]
 mod thread;
 mod timer;
+mod tpm2;
 #[cfg(feature = "qemu-test")]
 mod update;
 #[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
@@ -506,9 +506,9 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
                         "[TPM] PCR7 SHA-256 read passed prefix={:02x}{:02x}{:02x}{:02x}",
                         pcr7[0], pcr7[1], pcr7[2], pcr7[3]
                     )),
-                    Err(error) => serial::write_line(format_args!(
-                        "[TPM] PCR7 read unavailable: {error:?}"
-                    )),
+                    Err(error) => {
+                        serial::write_line(format_args!("[TPM] PCR7 read unavailable: {error:?}"))
+                    }
                 }
                 pcr7.fill(0);
             } else {
@@ -1778,7 +1778,7 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         // can create hardware credential authority.
         #[cfg(feature = "system-apps")]
         {
-        match tpm_info {
+            match tpm_info {
             None => serial::write_line(format_args!(
                 "[TPM] context recovery unavailable; no live TPM; hardware credentials disabled"
             )),
@@ -4804,10 +4804,14 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     #[cfg(feature = "stage24-3-test")]
     {
         if !identity_storage::durable_self_test() {
-            serial::write_line(format_args!("[S24.3] WovenIdentity durable storage: FAILED"));
+            serial::write_line(format_args!(
+                "[S24.3] WovenIdentity durable storage: FAILED"
+            ));
             qemu_test_exit_failure();
         }
-        serial::write_line(format_args!("[S24.3] WovenIdentity durable storage: PASSED"));
+        serial::write_line(format_args!(
+            "[S24.3] WovenIdentity durable storage: PASSED"
+        ));
         qemu_test_exit_success();
     }
     #[cfg(feature = "stage24-4-test")]
@@ -5771,11 +5775,8 @@ fn stage22_3_package_service_self_test() -> bool {
     if vfs::write_file("/tmp/vfs-self-test", b"package-query-fixture").is_err() {
         return fail("query fixture storage write failed");
     }
-    let Ok((pid, _, _)) = task::spawn_user_system_service(
-        "woven-package",
-        program,
-        capabilities,
-    ) else {
+    let Ok((pid, _, _)) = task::spawn_user_system_service("woven-package", program, capabilities)
+    else {
         return fail("broker spawn failed");
     };
     let deadline = timer::ticks().wrapping_add(500);
@@ -5794,8 +5795,7 @@ fn stage22_3_package_service_self_test() -> bool {
         let _ = task::kill_process(pid.as_u64(), 9);
         return fail("broker service was not published");
     }
-    let Ok(client_handle) = ipc::discover_service(pid.as_u64(), b"woven.package")
-    else {
+    let Ok(client_handle) = ipc::discover_service(pid.as_u64(), b"woven.package") else {
         let _ = task::kill_process(pid.as_u64(), 9);
         return fail("service discovery failed");
     };
@@ -5901,7 +5901,12 @@ fn stage22_5_package_transaction_self_test() -> bool {
     if !wfs::format_ata(64) {
         return fail("native WovenFS format failed");
     }
-    if vfs::write_file("/tmp/woven-package-fixture.wpkg", PACKAGE_TRANSACTION_FIXTURE).is_err() {
+    if vfs::write_file(
+        "/tmp/woven-package-fixture.wpkg",
+        PACKAGE_TRANSACTION_FIXTURE,
+    )
+    .is_err()
+    {
         return fail("package fixture source write failed");
     }
     let Ok(verified) = signed_app::verify_package(PACKAGE_SERVICE_IMAGE) else {
@@ -5974,7 +5979,13 @@ fn stage22_5_package_transaction_self_test() -> bool {
         let _ = task::kill_process(pid.as_u64(), 9);
         return fail("installed catalog entry missing");
     }
-    let Some(response) = request(pid, client_handle, Operation::Remove, 0x22_05_02, b"/fixture") else {
+    let Some(response) = request(
+        pid,
+        client_handle,
+        Operation::Remove,
+        0x22_05_02,
+        b"/fixture",
+    ) else {
         let _ = task::kill_process(pid.as_u64(), 9);
         return fail("remove response timeout");
     };
@@ -5994,7 +6005,13 @@ fn stage22_5_package_transaction_self_test() -> bool {
         let _ = task::kill_process(pid.as_u64(), 9);
         return fail("remove left catalog entry");
     }
-    let Some(response) = request(pid, client_handle, Operation::Rollback, 0x22_05_03, b"/rollback") else {
+    let Some(response) = request(
+        pid,
+        client_handle,
+        Operation::Rollback,
+        0x22_05_03,
+        b"/rollback",
+    ) else {
         let _ = task::kill_process(pid.as_u64(), 9);
         return fail("rollback response timeout");
     };
@@ -6049,7 +6066,9 @@ fn stage23_ai_broker_self_test(local_provider: bool) -> bool {
     } else {
         &["/bin/woven-ai"]
     };
-    let Some(service_program) = userspace::load_elf_with_argv_verified(AI_SERVICE_IMAGE, service_args) else {
+    let Some(service_program) =
+        userspace::load_elf_with_argv_verified(AI_SERVICE_IMAGE, service_args)
+    else {
         return fail("broker load failed");
     };
     let Ok((service_pid, _, _)) = task::spawn_user_system_service(
@@ -6066,8 +6085,7 @@ fn stage23_ai_broker_self_test(local_provider: bool) -> bool {
                 break;
             }
         }
-        if task::process_exited(service_pid)
-            || timer::ticks().wrapping_sub(deadline) < u64::MAX / 2
+        if task::process_exited(service_pid) || timer::ticks().wrapping_sub(deadline) < u64::MAX / 2
         {
             let _ = task::kill_process(service_pid.as_u64(), 9);
             return fail("broker publication failed");
@@ -6087,7 +6105,8 @@ fn stage23_ai_broker_self_test(local_provider: bool) -> bool {
     } else {
         &["/bin/woven-ai", "--probe"]
     };
-    let Some(denied_program) = userspace::load_elf_with_argv_verified(AI_PROBE_IMAGE, denied_args) else {
+    let Some(denied_program) = userspace::load_elf_with_argv_verified(AI_PROBE_IMAGE, denied_args)
+    else {
         let _ = task::kill_process(service_pid.as_u64(), 9);
         return fail("denied probe load failed");
     };
@@ -6112,7 +6131,8 @@ fn stage23_ai_broker_self_test(local_provider: bool) -> bool {
         let _ = task::kill_process(service_pid.as_u64(), 9);
         return fail("Ai capability denial was not enforced");
     }
-    let Some(probe_program) = userspace::load_elf_with_argv_verified(AI_PROBE_IMAGE, denied_args) else {
+    let Some(probe_program) = userspace::load_elf_with_argv_verified(AI_PROBE_IMAGE, denied_args)
+    else {
         let _ = task::kill_process(service_pid.as_u64(), 9);
         return fail("probe load failed");
     };
@@ -6198,10 +6218,9 @@ fn stage23_cloud_provider_self_test() -> bool {
         }
         task::yield_now();
     }
-    let Some(broker_program) = userspace::load_elf_with_argv_verified(
-        AI_SERVICE_IMAGE,
-        &["/bin/woven-ai", "--cloud"],
-    ) else {
+    let Some(broker_program) =
+        userspace::load_elf_with_argv_verified(AI_SERVICE_IMAGE, &["/bin/woven-ai", "--cloud"])
+    else {
         let _ = task::kill_process(provider_pid.as_u64(), 9);
         return fail("cloud broker load failed");
     };
@@ -6239,10 +6258,9 @@ fn stage23_cloud_provider_self_test() -> bool {
         let _ = task::kill_process(provider_pid.as_u64(), 9);
         return fail("cloud probe ELF rejected");
     }
-    let Some(denied_program) = userspace::load_elf_with_argv_verified(
-        AI_PROBE_IMAGE,
-        &["/bin/woven-ai", "--probe-cloud"],
-    ) else {
+    let Some(denied_program) =
+        userspace::load_elf_with_argv_verified(AI_PROBE_IMAGE, &["/bin/woven-ai", "--probe-cloud"])
+    else {
         let _ = task::kill_process(broker_pid.as_u64(), 9);
         let _ = task::kill_process(provider_pid.as_u64(), 9);
         return fail("denied cloud probe load failed");
@@ -6271,10 +6289,9 @@ fn stage23_cloud_provider_self_test() -> bool {
         let _ = task::kill_process(provider_pid.as_u64(), 9);
         return fail("cloud Ai capability denial was not enforced");
     }
-    let Some(probe_program) = userspace::load_elf_with_argv_verified(
-        AI_PROBE_IMAGE,
-        &["/bin/woven-ai", "--probe-cloud"],
-    ) else {
+    let Some(probe_program) =
+        userspace::load_elf_with_argv_verified(AI_PROBE_IMAGE, &["/bin/woven-ai", "--probe-cloud"])
+    else {
         let _ = task::kill_process(broker_pid.as_u64(), 9);
         let _ = task::kill_process(provider_pid.as_u64(), 9);
         return fail("cloud probe load failed");
@@ -6362,9 +6379,7 @@ fn stage23_ai_capability_security_self_test() -> bool {
             return fail("local AI profile exposed a device");
         }
     }
-    let cloud = local
-        .with(Capability::Secrets)
-        .with(Capability::NetworkIo);
+    let cloud = local.with(Capability::Secrets).with(Capability::NetworkIo);
     let Some(cloud_sandbox) = package_sandbox(cloud) else {
         return fail("cloud AI profile rejected");
     };
@@ -6386,8 +6401,12 @@ fn stage23_ai_capability_security_self_test() -> bool {
         }
     }
     let system = domain_ceiling(SecurityDomain::SystemService);
-    for capability in [Capability::Ai, Capability::Secrets, Capability::Camera, Capability::Microphone]
-    {
+    for capability in [
+        Capability::Ai,
+        Capability::Secrets,
+        Capability::Camera,
+        Capability::Microphone,
+    ] {
         if system.contains(capability) {
             return fail("system-service ceiling grants sensitive AI authority");
         }
@@ -6420,7 +6439,11 @@ fn stage23_semantic_search_self_test() -> bool {
             return fail("bounded index insertion failed");
         }
     }
-    let mut hits = [Hit { id: 0, kind: Kind::File, score: 0 }; MAX_HITS];
+    let mut hits = [Hit {
+        id: 0,
+        kind: Kind::File,
+        score: 0,
+    }; MAX_HITS];
     let count = index.search(b"network settings", &mut hits);
     if count != 2 || hits[0].id != 3 || hits[0].score != 2 || hits[1].id != 2 {
         return fail("semantic ranking mismatch");
@@ -6494,8 +6517,7 @@ fn stage23_assistant_action_self_test() -> bool {
     {
         return fail("permitted read was rejected");
     }
-    if plan
-        .authorize(read_index, &[Permission::FilesystemWrite], true)
+    if plan.authorize(read_index, &[Permission::FilesystemWrite], true)
         != Err(Error::PermissionDenied)
     {
         return fail("read permission mismatch");
@@ -6583,7 +6605,10 @@ fn stage24_identity_self_test() -> bool {
     {
         return fail("lock/unlock/elevation lifecycle failed");
     }
-    if authority.view(session).map_or(true, |view| view.uid != 0 || !view.elevated) {
+    if authority
+        .view(session)
+        .map_or(true, |view| view.uid != 0 || !view.elevated)
+    {
         return fail("elevated credentials were not reflected");
     }
     true
@@ -6670,11 +6695,7 @@ fn start_production_system_services() -> bool {
         serial::write_line(format_args!("[SERVICES] woven-package load failed"));
         return false;
     };
-    let Ok((pid, _, _)) = task::spawn_user_system_service(
-        "woven-package",
-        program,
-        capabilities,
-    )
+    let Ok((pid, _, _)) = task::spawn_user_system_service("woven-package", program, capabilities)
     else {
         serial::write_line(format_args!("[SERVICES] woven-package spawn failed"));
         return false;
@@ -6690,9 +6711,7 @@ fn start_production_system_services() -> bool {
                 return true;
             }
         }
-        if task::process_exited(pid)
-            || timer::ticks().wrapping_sub(deadline) < u64::MAX / 2
-        {
+        if task::process_exited(pid) || timer::ticks().wrapping_sub(deadline) < u64::MAX / 2 {
             let _ = task::kill_process(pid.as_u64(), 9);
             serial::write_line(format_args!("[SERVICES] woven-package publication failed"));
             return false;
@@ -8075,7 +8094,9 @@ fn stage24_59_change_pin_self_test() -> bool {
         }
     }
     fn file_accepts(pin: &[u8]) -> bool {
-        let Ok(stat) = vfs::stat("/etc/wovenhat/accounts") else { return false };
+        let Ok(stat) = vfs::stat("/etc/wovenhat/accounts") else {
+            return false;
+        };
         let mut data = alloc::vec![0_u8; stat.size];
         if vfs::read_all("/etc/wovenhat/accounts", &mut data) != Ok(stat.size) {
             return false;
@@ -8104,13 +8125,17 @@ fn stage24_59_change_pin_self_test() -> bool {
             return false;
         }
         for (index, pair) in salt_text.chunks(2).enumerate() {
-            let (Some(high), Some(low)) = (hex(pair[0]), hex(pair[1])) else { return false };
+            let (Some(high), Some(low)) = (hex(pair[0]), hex(pair[1])) else {
+                return false;
+            };
             salt[index] = (high << 4) | low;
         }
         let mut expected = [0_u8; 32];
         pbkdf2_hmac::<Sha256>(pin, &salt[..salt_text.len() / 2], 100_000, &mut expected);
         for (index, pair) in hash_text.chunks(2).enumerate() {
-            let (Some(high), Some(low)) = (hex(pair[0]), hex(pair[1])) else { return false };
+            let (Some(high), Some(low)) = (hex(pair[0]), hex(pair[1])) else {
+                return false;
+            };
             if expected[index] != ((high << 4) | low) {
                 return false;
             }
@@ -8119,7 +8144,11 @@ fn stage24_59_change_pin_self_test() -> bool {
     }
 
     let mut file = account_line("ada", b"\x11\x22\x33\x44\x55\x66\x77\x88", b"1234");
-    file.push_str(&account_line("lin", b"\xa0\xb1\xc2\xd3\xe4\xf5\x06\x17", b"9876"));
+    file.push_str(&account_line(
+        "lin",
+        b"\xa0\xb1\xc2\xd3\xe4\xf5\x06\x17",
+        b"9876",
+    ));
     let written = (vfs::stat("/etc").is_ok() || vfs::mkdir("/etc").is_ok())
         && vfs::mkdir("/etc/wovenhat").is_ok()
         && vfs::create_read_only("/etc/wovenhat/accounts", file.as_bytes()).is_ok();
@@ -8164,19 +8193,23 @@ fn stage24_59_change_pin_self_test() -> bool {
     };
     if !step(
         "ada sign-in prompt rendered",
-        until(1000, || line(middle - 60, "Sign in") && line(middle - 4, "Enter PIN")),
+        until(1000, || {
+            line(middle - 60, "Sign in") && line(middle - 4, "Enter PIN")
+        }),
     ) {
         return false;
     }
     if !step(
         "ada signs in",
-        keys(&[0x02, 0x03, 0x04, 0x05, 0x1c])
-            && until(1000, || !line(middle - 60, "Sign in")),
+        keys(&[0x02, 0x03, 0x04, 0x05, 0x1c]) && until(1000, || !line(middle - 60, "Sign in")),
     ) {
         return false;
     }
     let button = (width - 54 - 5 * 20, top + 4);
-    let change_row = (width - 4 - 164 + 28, top - 2 - (7 * 14 + 2) + 1 + 6 * 14 + 7);
+    let change_row = (
+        width - 4 - 164 + 28,
+        top - 2 - (7 * 14 + 2) + 1 + 6 * 14 + 7,
+    );
     let opened = move_by(button.0 + 8 - width / 2, button.1 + 8 - middle)
         && click()
         && until(1000, compositor::presented);
@@ -8196,12 +8229,19 @@ fn stage24_59_change_pin_self_test() -> bool {
     if !step("new PIN accepted and desktop restored", changed) {
         return false;
     }
-    if !step("old PIN is absent from the persisted record", !file_accepts(b"1234"))
-        || !step("new PIN is present in the persisted record", file_accepts(b"68"))
-    {
+    if !step(
+        "old PIN is absent from the persisted record",
+        !file_accepts(b"1234"),
+    ) || !step(
+        "new PIN is present in the persisted record",
+        file_accepts(b"68"),
+    ) {
         return false;
     }
-    let lock_row = (width - 4 - 164 + 28, top - 2 - (7 * 14 + 2) + 1 + 5 * 14 + 7);
+    let lock_row = (
+        width - 4 - 164 + 28,
+        top - 2 - (7 * 14 + 2) + 1 + 5 * 14 + 7,
+    );
     let qs_reopened = move_by(button.0 + 8 - change_row.0, button.1 + 8 - change_row.1) && click();
     let locked = qs_reopened
         && move_by(lock_row.0 - (button.0 + 8), lock_row.1 - (button.1 + 8))
@@ -8210,9 +8250,8 @@ fn stage24_59_change_pin_self_test() -> bool {
     let old_refused = locked
         && keys(&[0x02, 0x03, 0x04, 0x05, 0x1c])
         && until(500, || line(middle - 4, "Wrong PIN"));
-    let new_works = old_refused
-        && keys(&[0x07, 0x09, 0x1c])
-        && until(1000, || !line(middle - 34, "Locked"));
+    let new_works =
+        old_refused && keys(&[0x07, 0x09, 0x1c]) && until(1000, || !line(middle - 34, "Locked"));
     if !step("old PIN is refused and new PIN unlocks", new_works) {
         return false;
     }

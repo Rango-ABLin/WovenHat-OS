@@ -17,10 +17,7 @@ const UPDATE_SLOT_RECORD_LEN: usize = 50;
 pub const UPDATE_RECORD_LEN: usize =
     UPDATE_RECORD_HEADER_LEN + SLOT_COUNT * UPDATE_SLOT_RECORD_LEN + 4;
 #[cfg(not(test))]
-pub const UPDATE_RECORD_PATHS: [&str; 2] = [
-    "/wfs/update-state-a",
-    "/wfs/update-state-b",
-];
+pub const UPDATE_RECORD_PATHS: [&str; 2] = ["/wfs/update-state-a", "/wfs/update-state-b"];
 
 #[cfg(not(test))]
 pub const UPDATE_PACKAGE_MAGIC: [u8; 4] = *b"WUPD";
@@ -166,11 +163,7 @@ pub struct UpdateState {
 }
 
 impl UpdateState {
-    pub const fn new(
-        generation: u64,
-        image_length: u64,
-        digest: [u8; 32],
-    ) -> Result<Self, Error> {
+    pub const fn new(generation: u64, image_length: u64, digest: [u8; 32]) -> Result<Self, Error> {
         if !valid_image(image_length, &digest) || generation == 0 {
             return Err(Error::InvalidImage);
         }
@@ -267,7 +260,8 @@ impl UpdateState {
             slot.generation = u64::from_le_bytes(bytes[offset..offset + 8].try_into().unwrap());
             slot.image_length =
                 u64::from_le_bytes(bytes[offset + 8..offset + 16].try_into().unwrap());
-            slot.digest.copy_from_slice(&bytes[offset + 16..offset + 48]);
+            slot.digest
+                .copy_from_slice(&bytes[offset + 16..offset + 48]);
             slot.state = match bytes[offset + 48] {
                 0 => SlotState::Empty,
                 1 => SlotState::Ready,
@@ -294,10 +288,7 @@ impl UpdateState {
     /// Select the newest valid copy of a durable dual-copy record. A single
     /// valid copy is sufficient for recovery; equal sequences are rejected so
     /// the service cannot silently choose divergent metadata.
-    pub fn select_record(
-        first: &[u8],
-        second: &[u8],
-    ) -> Result<(u64, Self), Error> {
+    pub fn select_record(first: &[u8], second: &[u8]) -> Result<(u64, Self), Error> {
         let left = Self::decode_record(first);
         let right = Self::decode_record(second);
         match (left, right) {
@@ -309,50 +300,54 @@ impl UpdateState {
         }
     }
 
-/// Issue the update writer authority only to a task carrying the storage
-/// capability. The private WovenFS token cannot be constructed by userspace.
-#[cfg(any(
-    feature = "stage15-2-test",
-    feature = "stage27-2-test",
-    feature = "stage21-6-test"
-    , feature = "stage24-3-test"
-))]
-pub fn authorized_writer() -> Option<crate::wfs::AuthorizedWfsWriter> {
-    crate::task::current_has(crate::capability::Capability::StorageIo)
-        .then(crate::wfs::AuthorizedWfsWriter::after_capability_check)
-}
+    /// Issue the update writer authority only to a task carrying the storage
+    /// capability. The private WovenFS token cannot be constructed by userspace.
+    #[cfg(any(
+        feature = "stage15-2-test",
+        feature = "stage27-2-test",
+        feature = "stage21-6-test",
+        feature = "stage24-3-test"
+    ))]
+    pub fn authorized_writer() -> Option<crate::wfs::AuthorizedWfsWriter> {
+        crate::task::current_has(crate::capability::Capability::StorageIo)
+            .then(crate::wfs::AuthorizedWfsWriter::after_capability_check)
+    }
 
-/// Persist one complete update-state copy through the native WovenFS journal.
-#[cfg(any(feature = "stage15-2-test", feature = "stage27-2-test"))]
-pub fn persist_record_copy(
-    authority: &crate::wfs::AuthorizedWfsWriter,
-    copy: usize,
-    sequence: u64,
-    state: &UpdateState,
-    now: u64,
-) -> Result<(), Error> {
-    let path = UPDATE_RECORD_PATHS
-        .get(copy)
-        .ok_or(Error::InvalidRecord)?;
-    let mut record = [0u8; UPDATE_RECORD_LEN];
-    state.encode_record(sequence, &mut record)?;
-    crate::wfs::write_vfs_path_durable(authority, path, &record, now)
-        .map_err(|_| Error::Storage)
-}
+    /// Persist one complete update-state copy through the native WovenFS journal.
+    #[cfg(any(feature = "stage15-2-test", feature = "stage27-2-test"))]
+    pub fn persist_record_copy(
+        authority: &crate::wfs::AuthorizedWfsWriter,
+        copy: usize,
+        sequence: u64,
+        state: &UpdateState,
+        now: u64,
+    ) -> Result<(), Error> {
+        let path = UPDATE_RECORD_PATHS.get(copy).ok_or(Error::InvalidRecord)?;
+        let mut record = [0u8; UPDATE_RECORD_LEN];
+        state.encode_record(sequence, &mut record)?;
+        crate::wfs::write_vfs_path_durable(authority, path, &record, now)
+            .map_err(|_| Error::Storage)
+    }
 
-/// Read one complete update-state copy through the native WovenFS journal.
-#[cfg(any(feature = "stage15-2-test", feature = "stage27-2-test"))]
-pub fn read_record_copy(copy: usize, out: &mut [u8; UPDATE_RECORD_LEN]) -> Result<usize, Error> {
-    let path = UPDATE_RECORD_PATHS
-        .get(copy)
-        .ok_or(Error::InvalidRecord)?;
-    crate::wfs::read_vfs_path_durable(path, out).map_err(|_| Error::Storage)
-}
+    /// Read one complete update-state copy through the native WovenFS journal.
+    #[cfg(any(feature = "stage15-2-test", feature = "stage27-2-test"))]
+    pub fn read_record_copy(
+        copy: usize,
+        out: &mut [u8; UPDATE_RECORD_LEN],
+    ) -> Result<usize, Error> {
+        let path = UPDATE_RECORD_PATHS.get(copy).ok_or(Error::InvalidRecord)?;
+        crate::wfs::read_vfs_path_durable(path, out).map_err(|_| Error::Storage)
+    }
 
     fn is_valid(&self) -> bool {
         if self.active >= SLOT_COUNT
             || self.slots[self.active].state != SlotState::Active
-            || self.slots.iter().filter(|slot| slot.state == SlotState::Active).count() != 1
+            || self
+                .slots
+                .iter()
+                .filter(|slot| slot.state == SlotState::Active)
+                .count()
+                != 1
         {
             return false;
         }
@@ -365,7 +360,10 @@ pub fn read_record_copy(copy: usize, out: &mut [u8; UPDATE_RECORD_LEN]) -> Resul
         }
         match self.pending {
             Some(slot) => slot != self.active && self.slots[slot].state == SlotState::Pending,
-            None => !self.slots.iter().any(|slot| slot.state == SlotState::Pending),
+            None => !self
+                .slots
+                .iter()
+                .any(|slot| slot.state == SlotState::Pending),
         }
     }
 
@@ -528,8 +526,12 @@ pub fn self_test() -> bool {
         && state.boot_target() == Ok(BootDecision::Attempt { slot, attempt: 1 })
         && state.boot_succeeded(slot).is_ok()
         && state.active_slot() == slot
-        && state.slot(slot).is_some_and(|entry| entry.state == SlotState::Active)
-        && state.slot(0).is_some_and(|entry| entry.state == SlotState::Ready);
+        && state
+            .slot(slot)
+            .is_some_and(|entry| entry.state == SlotState::Active)
+        && state
+            .slot(0)
+            .is_some_and(|entry| entry.state == SlotState::Ready);
     if !state_ok {
         return false;
     }
@@ -552,9 +554,9 @@ pub fn self_test() -> bool {
     use ed25519_compact::{KeyPair, Seed};
     use sha2::{Digest, Sha256};
     const SEED: [u8; 32] = [
-        0x9d, 0x61, 0xb1, 0x9d, 0xef, 0xfd, 0x5a, 0x60, 0xba, 0x84, 0x4a, 0xf4, 0x92, 0xec,
-        0x2c, 0xc4, 0x44, 0x49, 0xc5, 0x69, 0x7b, 0x32, 0x69, 0x19, 0x70, 0x3b, 0xac, 0x03,
-        0x1c, 0xae, 0x7f, 0x60,
+        0x9d, 0x61, 0xb1, 0x9d, 0xef, 0xfd, 0x5a, 0x60, 0xba, 0x84, 0x4a, 0xf4, 0x92, 0xec, 0x2c,
+        0xc4, 0x44, 0x49, 0xc5, 0x69, 0x7b, 0x32, 0x69, 0x19, 0x70, 0x3b, 0xac, 0x03, 0x1c, 0xae,
+        0x7f, 0x60,
     ];
     let image = b"signed-update-image";
     let mut package = [0u8; UPDATE_PACKAGE_HEADER_LEN + 19];

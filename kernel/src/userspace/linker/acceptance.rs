@@ -179,15 +179,17 @@ fn fixture(kind: usize) -> Option<Vec<u8>> {
         write_u64(
             &mut elf,
             0x1390,
-            if matches!(kind, 0 | 5 | 6 | 8) { 0 } else { 0x20 },
+            if matches!(kind, 0 | 5 | 6 | 8) {
+                0
+            } else {
+                0x20
+            },
         )?;
     }
     if kind == 8 {
         let main_code = [
             0xbf, 42, 0, 0, 0, // exit status after lifecycle callbacks
-            0xb8, 3, 0, 0, 0,
-            0xcd, 0x80,
-            0x0f, 0x0b,
+            0xb8, 3, 0, 0, 0, 0xcd, 0x80, 0x0f, 0x0b,
         ];
         elf[0x1000..0x1000 + main_code.len()].copy_from_slice(&main_code);
         let mut init_code = [0x48, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0xc6, 0x00, 0xa5, 0xc3];
@@ -201,18 +203,11 @@ fn fixture(kind: usize) -> Option<Vec<u8>> {
             0x4d, 0x0f, 0x45, 0xc1, // cmovne r8, r9
             0xb8, 2, 0, 0, 0, // open
             0x48, 0xbf, 0, 0, 0, 0, 0, 0, 0, 0, // path
-            0xbe, 14, 0, 0, 0,
-            0xcd, 0x80,
-            0x49, 0x89, 0xc2, // mov r10, rax
+            0xbe, 14, 0, 0, 0, 0xcd, 0x80, 0x49, 0x89, 0xc2, // mov r10, rax
             0xb8, 10, 0, 0, 0, // file_write
             0x4c, 0x89, 0xd7, // mov rdi, r10
             0x4c, 0x89, 0xc6, // mov rsi, r8
-            0xba, 1, 0, 0, 0,
-            0xcd, 0x80,
-            0xb8, 6, 0, 0, 0,
-            0x4c, 0x89, 0xd7,
-            0xcd, 0x80,
-            0xc3,
+            0xba, 1, 0, 0, 0, 0xcd, 0x80, 0xb8, 6, 0, 0, 0, 0x4c, 0x89, 0xd7, 0xcd, 0x80, 0xc3,
         ];
         fini_code[2..10].copy_from_slice(&(base + 0x2000).to_le_bytes());
         fini_code[15..23].copy_from_slice(&(base + 0x3df).to_le_bytes());
@@ -619,8 +614,8 @@ pub(super) fn run() -> bool {
             let _ = destroy(plt_rel_program.address_space);
             return None;
         }
-        let (plt_rel_pid, _) = crate::task::spawn_user_process("plt-rel-test", plt_rel_program)
-            .ok()?;
+        let (plt_rel_pid, _) =
+            crate::task::spawn_user_process("plt-rel-test", plt_rel_program).ok()?;
         let plt_rel_start = crate::timer::ticks();
         while !crate::task::process_exited(plt_rel_pid) {
             if crate::timer::ticks().wrapping_sub(plt_rel_start) > 500 {

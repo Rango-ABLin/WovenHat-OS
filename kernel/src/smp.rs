@@ -1644,8 +1644,9 @@ fn migration_stress_test() {
             // SAFETY: Atomic-only probe; no CPU-local pointer or unsafe service
             // is retained across yield points. Starting every probe on CPU 0
             // deliberately creates migration pressure.
-            match unsafe { task::spawn_migratable_on(0, "migration-stress", migration_stress_probe) }
-            {
+            match unsafe {
+                task::spawn_migratable_on(0, "migration-stress", migration_stress_probe)
+            } {
                 Ok(task_id) => {
                     *id = Some(task_id);
                     break;

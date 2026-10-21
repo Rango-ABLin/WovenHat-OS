@@ -206,7 +206,10 @@ pub fn add_stored_user(name: &[u8], salt: &[u8], hash: &[u8; 32]) -> Result<(), 
         return Err(Error::InvalidPin);
     }
     let stat = crate::vfs::stat(ACCOUNTS_PATH).map_err(|_| Error::NotFound)?;
-    if stat.kind != crate::vfs::NodeKind::File || stat.size == 0 || stat.size > crate::vfs::NODE_CAPACITY {
+    if stat.kind != crate::vfs::NodeKind::File
+        || stat.size == 0
+        || stat.size > crate::vfs::NODE_CAPACITY
+    {
         return Err(Error::Io);
     }
     let mut data = alloc::vec![0u8; stat.size];
@@ -244,7 +247,10 @@ pub fn remove_user(name: &[u8]) -> Result<(), Error> {
         return Err(Error::NotFound);
     }
     let stat = crate::vfs::stat(ACCOUNTS_PATH).map_err(|_| Error::NotFound)?;
-    if stat.kind != crate::vfs::NodeKind::File || stat.size == 0 || stat.size > crate::vfs::NODE_CAPACITY {
+    if stat.kind != crate::vfs::NodeKind::File
+        || stat.size == 0
+        || stat.size > crate::vfs::NODE_CAPACITY
+    {
         return Err(Error::Io);
     }
     let mut data = alloc::vec![0u8; stat.size];

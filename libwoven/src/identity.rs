@@ -22,8 +22,8 @@ pub const ADMIN_QUERY_VERSION: u8 = 1;
 pub const ADMIN_QUERY_HEADER_BYTES: usize = 4;
 pub const ADMIN_USER_RECORD_BYTES: usize = 4 + 4 + 4 + 1 + 1 + MAX_NAME;
 pub const ADMIN_GROUP_RECORD_BYTES: usize = 4 + 1 + MAX_NAME + 1 + MAX_GROUP_MEMBERS * 4;
-pub const ADMIN_QUERY_MAX_BYTES: usize = ADMIN_QUERY_HEADER_BYTES
-    + MAX_USERS * ADMIN_GROUP_RECORD_BYTES;
+pub const ADMIN_QUERY_MAX_BYTES: usize =
+    ADMIN_QUERY_HEADER_BYTES + MAX_USERS * ADMIN_GROUP_RECORD_BYTES;
 pub const SNAPSHOT_BYTES: usize = 4
     + 1
     + 1
@@ -380,7 +380,11 @@ impl Authority {
         self.add_user_with_credential(
             name,
             gid,
-            Credential { salt, salt_len, hash: *hash },
+            Credential {
+                salt,
+                salt_len,
+                hash: *hash,
+            },
             administrator,
         )
     }
@@ -599,11 +603,18 @@ impl Authority {
         self.require_administrator(session)?;
         let (record_bytes, count) = match kind {
             ADMIN_QUERY_USERS => (ADMIN_USER_RECORD_BYTES, self.users.iter().flatten().count()),
-            ADMIN_QUERY_GROUPS => (ADMIN_GROUP_RECORD_BYTES, self.groups.iter().flatten().count()),
+            ADMIN_QUERY_GROUPS => (
+                ADMIN_GROUP_RECORD_BYTES,
+                self.groups.iter().flatten().count(),
+            ),
             _ => return Err(Error::Invalid),
         };
         let required = ADMIN_QUERY_HEADER_BYTES
-            .checked_add(count.checked_mul(record_bytes).ok_or(Error::BufferTooSmall)?)
+            .checked_add(
+                count
+                    .checked_mul(record_bytes)
+                    .ok_or(Error::BufferTooSmall)?,
+            )
             .ok_or(Error::BufferTooSmall)?;
         if output.len() < required {
             return Err(Error::BufferTooSmall);
@@ -641,11 +652,7 @@ impl Authority {
 
     /// Delete an account only from an active, elevated administrator session.
     /// Active sessions and the administrator's own account cannot be removed.
-    pub fn admin_delete_user(
-        &mut self,
-        session: SessionId,
-        target: UserId,
-    ) -> Result<(), Error> {
+    pub fn admin_delete_user(&mut self, session: SessionId, target: UserId) -> Result<(), Error> {
         let administrator = self.require_administrator(session)?;
         if administrator == target {
             return Err(Error::Unauthorized);
@@ -1139,11 +1146,7 @@ fn fnv1a(bytes: &[u8]) -> u32 {
 
 /// Open a kernel-owned identity session using a bounded copied request.
 pub fn session_open(name: &[u8], password: &[u8]) -> Result<SessionId, crate::Error> {
-    if name.is_empty()
-        || name.len() > MAX_NAME
-        || password.is_empty()
-        || password.len() > MAX_PIN
-    {
+    if name.is_empty() || name.len() > MAX_NAME || password.is_empty() || password.len() > MAX_PIN {
         return Err(crate::Error::Failed);
     }
     let mut packed = [0u8; 2 + MAX_NAME + MAX_PIN];
@@ -1151,8 +1154,7 @@ pub fn session_open(name: &[u8], password: &[u8]) -> Result<SessionId, crate::Er
     packed[1..1 + name.len()].copy_from_slice(name);
     let password_offset = 1 + name.len();
     packed[password_offset] = password.len() as u8;
-    packed[password_offset + 1..password_offset + 1 + password.len()]
-        .copy_from_slice(password);
+    packed[password_offset + 1..password_offset + 1 + password.len()].copy_from_slice(password);
     let length = password_offset + 1 + password.len();
     // SAFETY: `packed` is a bounded stack buffer whose exact initialized
     // length is passed to the kernel.
@@ -1169,10 +1171,7 @@ pub fn session_open(name: &[u8], password: &[u8]) -> Result<SessionId, crate::Er
 
 /// Open an account session using a digest verified by the trusted login
 /// manager. The kernel still compares it against its authority record.
-pub fn session_open_verified(
-    name: &[u8],
-    digest: &[u8; 32],
-) -> Result<SessionId, crate::Error> {
+pub fn session_open_verified(name: &[u8], digest: &[u8; 32]) -> Result<SessionId, crate::Error> {
     if name.is_empty() || name.len() > MAX_NAME {
         return Err(crate::Error::Failed);
     }
@@ -1194,10 +1193,8 @@ pub fn session_open_verified(
 
 pub fn session_lock(session: SessionId) -> Result<(), crate::Error> {
     // SAFETY: integer-only syscall; the kernel owner-binds the token.
-    crate::check(unsafe {
-        crate::syscall::invoke(crate::syscall::IDENTITY_LOCK, session.0, 0, 0)
-    })
-    .map(|_| ())
+    crate::check(unsafe { crate::syscall::invoke(crate::syscall::IDENTITY_LOCK, session.0, 0, 0) })
+        .map(|_| ())
 }
 
 fn session_password_action(
@@ -1228,10 +1225,7 @@ pub fn session_unlock(session: SessionId, password: &[u8]) -> Result<(), crate::
     session_password_action(crate::syscall::IDENTITY_UNLOCK, session, password)
 }
 
-pub fn session_unlock_verified(
-    session: SessionId,
-    digest: &[u8; 32],
-) -> Result<(), crate::Error> {
+pub fn session_unlock_verified(session: SessionId, digest: &[u8; 32]) -> Result<(), crate::Error> {
     let mut packed = [0u8; 32];
     packed.copy_from_slice(digest);
     crate::check(unsafe {
@@ -1282,7 +1276,12 @@ pub fn admin_add_user(
 
 pub fn admin_delete_user(user: UserId) -> Result<(), crate::Error> {
     crate::check(unsafe {
-        crate::syscall::invoke(crate::syscall::IDENTITY_ADMIN_DELETE_USER, user.0 as u64, 0, 0)
+        crate::syscall::invoke(
+            crate::syscall::IDENTITY_ADMIN_DELETE_USER,
+            user.0 as u64,
+            0,
+            0,
+        )
     })
     .map(|_| ())
 }
@@ -1370,10 +1369,8 @@ pub fn admin_query(
 
 pub fn session_close(session: SessionId) -> Result<(), crate::Error> {
     // SAFETY: integer-only syscall; the kernel owner-binds the token.
-    crate::check(unsafe {
-        crate::syscall::invoke(crate::syscall::IDENTITY_CLOSE, session.0, 0, 0)
-    })
-    .map(|_| ())
+    crate::check(unsafe { crate::syscall::invoke(crate::syscall::IDENTITY_CLOSE, session.0, 0, 0) })
+        .map(|_| ())
 }
 
 /// Request a hardware-backed credential decision for this active session.
@@ -1504,7 +1501,10 @@ mod tests {
             .unwrap();
         let session = authority.open_session(user, b"1234").unwrap();
         assert_eq!(authority.view(session).unwrap().uid, 1000);
-        assert_eq!(authority.open_session(user, b"wrong"), Err(Error::WrongPassword));
+        assert_eq!(
+            authority.open_session(user, b"wrong"),
+            Err(Error::WrongPassword)
+        );
     }
 
     #[test]
@@ -1518,9 +1518,11 @@ mod tests {
             authority.change_password(b"ada", b"wrong", b"new-salt", b"5678"),
             Err(Error::WrongPassword)
         );
-        assert!(authority
-            .change_password(b"ada", b"1234", b"new-salt", b"5678")
-            .is_ok());
+        assert!(
+            authority
+                .change_password(b"ada", b"1234", b"new-salt", b"5678")
+                .is_ok()
+        );
         let session = authority.open_named_session(b"ada", b"5678").unwrap();
         assert_eq!(
             authority.open_named_session(b"ada", b"1234"),
@@ -1536,7 +1538,9 @@ mod tests {
         let admin = authority
             .add_administrator(b"admin", group, b"salt", b"1234")
             .unwrap();
-        let ordinary = authority.add_user(b"ada", group, b"salt2", b"5678").unwrap();
+        let ordinary = authority
+            .add_user(b"ada", group, b"salt2", b"5678")
+            .unwrap();
         let admin_session = authority.open_session(admin, b"1234").unwrap();
         let ordinary_session = authority.open_session(ordinary, b"5678").unwrap();
         assert_eq!(
@@ -1595,9 +1599,15 @@ mod tests {
         assert_eq!(user.name(), b"admin");
         assert!(user.administrator);
         assert_eq!(query.user(1), None);
-        assert!(authority
-            .admin_query(session, ADMIN_QUERY_USERS, &mut [0; ADMIN_USER_RECORD_BYTES])
-            .is_err());
+        assert!(
+            authority
+                .admin_query(
+                    session,
+                    ADMIN_QUERY_USERS,
+                    &mut [0; ADMIN_USER_RECORD_BYTES]
+                )
+                .is_err()
+        );
     }
 
     #[test]

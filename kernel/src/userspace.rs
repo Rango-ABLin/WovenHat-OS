@@ -5457,12 +5457,7 @@ fn copy_tls_bytes(
 fn initialize_tls(space: paging::AddressSpace, start: u64, tls: InitialTls) -> Option<u64> {
     paging::zero_user_range_in(space, start, tls.layout.mapping_size).ok()?;
     if let Some((template, _)) = tls.template {
-        copy_tls_bytes(
-            space,
-            template,
-            start,
-            tls.template_size,
-        )?;
+        copy_tls_bytes(space, template, start, tls.template_size)?;
     } else if tls.template_size != 0 {
         return None;
     }

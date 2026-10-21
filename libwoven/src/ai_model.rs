@@ -75,7 +75,7 @@ fn contains(input: &[u8], needle: &[u8]) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{encode_result, infer, CLASS_GREETING, CLASS_HELP, CLASS_STATUS};
+    use super::{CLASS_GREETING, CLASS_HELP, CLASS_STATUS, encode_result, infer};
 
     #[test]
     fn fixed_model_classifies_bounded_features() {

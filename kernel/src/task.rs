@@ -1729,7 +1729,8 @@ pub fn begin_user_destructor_exit(
         return false;
     };
     if chain_start < address_space.stack_base
-        || chain_start + chain_size as u64 > address_space.stack_base + userspace::UserStack::SIZE as u64
+        || chain_start + chain_size as u64
+            > address_space.stack_base + userspace::UserStack::SIZE as u64
     {
         return false;
     }
@@ -6060,9 +6061,7 @@ pub fn rename_current(old: &str, new: &str) -> Result<(), FileError> {
     let old = resolve_path_for_current(old)?;
     let new = resolve_path_for_current(new)?;
     if (old.starts_with("/wfs/") || new.starts_with("/wfs/"))
-        && (!old.starts_with("/wfs/")
-            || !new.starts_with("/wfs/")
-            || !crate::wfs::vfs_mounted())
+        && (!old.starts_with("/wfs/") || !new.starts_with("/wfs/") || !crate::wfs::vfs_mounted())
     {
         return Err(FileError::NotFound);
     }

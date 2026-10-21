@@ -23,7 +23,7 @@ pub const fn result(value: u64) -> u64 {
 
 #[cfg(test)]
 mod tests {
-    use super::{descriptor, result, CLOUD_PROVIDER_FLAG, CLOUD_RESULT_FLAG, PROVIDER_ABI};
+    use super::{CLOUD_PROVIDER_FLAG, CLOUD_RESULT_FLAG, PROVIDER_ABI, descriptor, result};
 
     #[test]
     fn descriptor_identifies_the_cloud_provider_contract() {
@@ -35,4 +35,3 @@ mod tests {
         assert_eq!(result(0x1234), CLOUD_RESULT_FLAG | 0x1234);
     }
 }
-

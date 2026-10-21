@@ -447,9 +447,9 @@ impl Image {
             segment.executable
                 && value >= segment.virtual_address
                 && value < segment.virtual_address + segment.memory_size as u64
-                && value.checked_add(size).is_some_and(|end| {
-                    end <= segment.virtual_address + segment.memory_size as u64
-                })
+                && value
+                    .checked_add(size)
+                    .is_some_and(|end| end <= segment.virtual_address + segment.memory_size as u64)
         })
     }
 
@@ -669,11 +669,8 @@ impl<'a> SymbolScope<'a> {
                 if dynamic_string(entry.bytes, dynamic, u64::from(name_offset))? != name {
                     continue;
                 }
-                let (found_version, hidden) = entry.image.symbol_version(
-                    entry.bytes,
-                    index,
-                    true,
-                )?;
+                let (found_version, hidden) =
+                    entry.image.symbol_version(entry.bytes, index, true)?;
                 if hidden || found_version != version {
                     continue;
                 }
@@ -720,7 +717,11 @@ fn version_file_offset(
         .file_offset
         .checked_add((address - segment.virtual_address) as usize)
         .ok_or(Error::InvalidSegment)?;
-    if offset.checked_add(size).filter(|end| *end <= bytes.len()).is_none() {
+    if offset
+        .checked_add(size)
+        .filter(|end| *end <= bytes.len())
+        .is_none()
+    {
         return Err(Error::Truncated);
     }
     Ok(offset)
@@ -756,8 +757,7 @@ fn validate_version_tables(bytes: &[u8], image: &mut Image) -> Result<(), Error>
         if dynamic.verdef_address == 0 || dynamic.verdef_count > MAX_DYNAMIC_SYMBOLS {
             return Err(Error::InvalidSegment);
         }
-        dynamic.verdef_file_offset =
-            version_file_offset(image, bytes, dynamic.verdef_address, 20)?;
+        dynamic.verdef_file_offset = version_file_offset(image, bytes, dynamic.verdef_address, 20)?;
         let mut cursor = dynamic.verdef_address;
         for index in 0..dynamic.verdef_count {
             let offset = version_file_offset(image, bytes, cursor, 20)?;
@@ -826,7 +826,8 @@ fn validate_version_tables(bytes: &[u8], image: &mut Image) -> Result<(), Error>
                 let aux_offset = version_file_offset(image, bytes, aux_cursor, 16)?;
                 let version_index =
                     u16::from_le_bytes(bytes[aux_offset + 6..aux_offset + 8].try_into().unwrap());
-                let name = u32::from_le_bytes(bytes[aux_offset + 8..aux_offset + 12].try_into().unwrap());
+                let name =
+                    u32::from_le_bytes(bytes[aux_offset + 8..aux_offset + 12].try_into().unwrap());
                 if version_index < 2
                     || dynamic_string(bytes, dynamic, name as u64)
                         .filter(|name| !name.is_empty())
@@ -861,8 +862,7 @@ fn validate_version_tables(bytes: &[u8], image: &mut Image) -> Result<(), Error>
             .versym_file_offset
             .checked_add(index.checked_mul(2).ok_or(Error::InvalidSegment)?)
             .ok_or(Error::InvalidSegment)?;
-        let version =
-            u16::from_le_bytes(bytes[offset..offset + 2].try_into().unwrap()) & 0x7fff;
+        let version = u16::from_le_bytes(bytes[offset..offset + 2].try_into().unwrap()) & 0x7fff;
         if version > 1 && !version_index_exists(bytes, dynamic, image, version)? {
             return Err(Error::InvalidSegment);
         }
@@ -913,7 +913,8 @@ fn version_index_exists(
                 if value == wanted {
                     return Ok(true);
                 }
-                let next = u32::from_le_bytes(bytes[aux_offset + 12..aux_offset + 16].try_into().unwrap());
+                let next =
+                    u32::from_le_bytes(bytes[aux_offset + 12..aux_offset + 16].try_into().unwrap());
                 if next != 0 {
                     aux_cursor = aux_cursor
                         .checked_add(next as u64)
@@ -949,13 +950,8 @@ fn version_name_by_index<'a>(
             let index = u16::from_le_bytes(bytes[offset + 4..offset + 6].try_into().ok()?);
             if index == wanted {
                 let aux = u32::from_le_bytes(bytes[offset + 12..offset + 16].try_into().ok()?);
-                let aux_offset = version_file_offset(
-                    image,
-                    bytes,
-                    cursor.checked_add(aux as u64)?,
-                    8,
-                )
-                .ok()?;
+                let aux_offset =
+                    version_file_offset(image, bytes, cursor.checked_add(aux as u64)?, 8).ok()?;
                 let name = u32::from_le_bytes(bytes[aux_offset..aux_offset + 4].try_into().ok()?);
                 return dynamic_string(bytes, dynamic, name as u64);
             }
@@ -1274,7 +1270,8 @@ fn parse_image(bytes: &[u8], shared: bool) -> Result<Image, Error> {
                         }
                     }
                     0x6fff_ffff => {
-                        verneed_count = usize::try_from(value).map_err(|_| Error::InvalidSegment)?;
+                        verneed_count =
+                            usize::try_from(value).map_err(|_| Error::InvalidSegment)?;
                     }
                     3 | 30 | 0x6fff_fff9 | 0x6fff_fffb => {}
                     _ => return Err(Error::Unsupported),
@@ -2045,9 +2042,7 @@ fn validate_lifecycle(bytes: &[u8], image: &mut Image) -> Result<Lifecycle, Erro
     }
     let mut fini_count = 0;
     if dynamic.fini_array_count != 0 {
-        if dynamic.fini_array_address == 0
-            || dynamic.fini_array_count > MAX_LIFECYCLE_FUNCTIONS
-        {
+        if dynamic.fini_array_address == 0 || dynamic.fini_array_count > MAX_LIFECYCLE_FUNCTIONS {
             return Err(Error::InvalidSegment);
         }
         let (offset, _) = lifecycle_table_file_range(
@@ -2098,7 +2093,9 @@ fn lifecycle_table_file_range(
     let segment = image
         .segments()
         .find(|segment| {
-            let file_end = segment.virtual_address.saturating_add(segment.file_size as u64);
+            let file_end = segment
+                .virtual_address
+                .saturating_add(segment.file_size as u64);
             segment.virtual_address <= address && end <= file_end
         })
         .ok_or(Error::InvalidSegment)?;
@@ -2106,7 +2103,11 @@ fn lifecycle_table_file_range(
         .file_offset
         .checked_add((address - segment.virtual_address) as usize)
         .ok_or(Error::InvalidSegment)?;
-    if offset.checked_add(size).filter(|end| *end <= bytes.len()).is_none() {
+    if offset
+        .checked_add(size)
+        .filter(|end| *end <= bytes.len())
+        .is_none()
+    {
         return Err(Error::Truncated);
     }
     Ok((offset, size))

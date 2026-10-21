@@ -34,9 +34,10 @@ pub fn explain(event: &crate::security::AuditEvent) -> Finding {
             (Severity::Warning, b"WovenGuard denied an authority request")
         }
         (crate::security::AuditAction::SecretStore, true)
-        | (crate::security::AuditAction::CapabilityGrant, true) => {
-            (Severity::Notice, b"Sensitive authority was granted or stored")
-        }
+        | (crate::security::AuditAction::CapabilityGrant, true) => (
+            Severity::Notice,
+            b"Sensitive authority was granted or stored",
+        ),
         (crate::security::AuditAction::ProcessFault, _) => {
             (Severity::Critical, b"A process fault was recorded")
         }
@@ -90,7 +91,7 @@ impl Default for Monitor {
 
 #[cfg(test)]
 mod tests {
-    use super::{explain, Monitor, Severity};
+    use super::{Monitor, Severity, explain};
     use crate::security::{AuditAction, AuditEvent};
 
     fn event(action: AuditAction, allowed: bool) -> AuditEvent {
@@ -111,7 +112,10 @@ mod tests {
         let finding = explain(&event(AuditAction::WovenGuardDeny, false));
         assert_eq!(finding.severity, Severity::Warning);
         assert!(!finding.allowed);
-        assert_eq!(&finding.explanation[..finding.explanation_len as usize], b"WovenGuard denied an authority request");
+        assert_eq!(
+            &finding.explanation[..finding.explanation_len as usize],
+            b"WovenGuard denied an authority request"
+        );
     }
 
     #[test]

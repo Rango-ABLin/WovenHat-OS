@@ -5,8 +5,8 @@
 //! identity lock is released. It is the kernel seam used by the forthcoming
 //! userspace identity syscalls.
 
-use libwoven::identity::{Authority, Error as IdentityError, SessionId, SessionView};
 use core::sync::atomic::{AtomicBool, Ordering};
+use libwoven::identity::{Authority, Error as IdentityError, SessionId, SessionView};
 
 use crate::irq_lock::IrqMutex;
 use crate::tpm2::CredentialDecision;
@@ -120,7 +120,12 @@ pub(crate) fn change_pin(
     old_pin: &[u8],
     new_pin: &[u8],
 ) -> Result<(), Error> {
-    if !BINDINGS.lock().iter().flatten().any(|binding| binding.owner == owner) {
+    if !BINDINGS
+        .lock()
+        .iter()
+        .flatten()
+        .any(|binding| binding.owner == owner)
+    {
         return Err(Error::Owner);
     }
     let mut salt = [0u8; 16];
@@ -364,11 +369,7 @@ pub(crate) fn open(owner: u64, name: &[u8], password: &[u8]) -> Result<SessionId
     Ok(session)
 }
 
-pub(crate) fn open_digest(
-    owner: u64,
-    name: &[u8],
-    digest: &[u8; 32],
-) -> Result<SessionId, Error> {
+pub(crate) fn open_digest(owner: u64, name: &[u8], digest: &[u8; 32]) -> Result<SessionId, Error> {
     check_lockout(name)?;
     let binding_slot = BINDINGS
         .lock()
@@ -570,10 +571,7 @@ pub(crate) fn consume_pending_hardware_decision(
 /// bound to this live session. The account name is copied from the kernel
 /// binding, never accepted from userspace.
 #[cfg(feature = "system-apps")]
-pub(crate) fn request_hardware_decision(
-    owner: u64,
-    session: SessionId,
-) -> Result<(), Error> {
+pub(crate) fn request_hardware_decision(owner: u64, session: SessionId) -> Result<(), Error> {
     let binding = owned_binding(owner, session)?;
     {
         let authority = AUTHORITY.lock();
@@ -583,12 +581,8 @@ pub(crate) fn request_hardware_decision(
             return Err(Error::Identity(IdentityError::Locked));
         }
     }
-    crate::tpm2::issue_hardware_credential(
-        owner,
-        session,
-        &binding.name[..binding.name_len],
-    )
-    .map_err(|_| Error::NotReady)
+    crate::tpm2::issue_hardware_credential(owner, session, &binding.name[..binding.name_len])
+        .map_err(|_| Error::NotReady)
 }
 
 fn owned_binding(owner: u64, session: SessionId) -> Result<Binding, Error> {
@@ -715,11 +709,17 @@ pub(crate) fn self_test() -> bool {
     }
     install(authority);
     for _ in 0..libwoven::identity::DEFAULT_LOCKOUT_FAILURES {
-        if !matches!(open(1, b"alice", b"wrong"), Err(Error::Identity(IdentityError::WrongPassword))) {
+        if !matches!(
+            open(1, b"alice", b"wrong"),
+            Err(Error::Identity(IdentityError::WrongPassword))
+        ) {
             return false;
         }
     }
-    if !matches!(open(1, b"alice", b"1234"), Err(Error::Identity(IdentityError::Locked))) {
+    if !matches!(
+        open(1, b"alice", b"1234"),
+        Err(Error::Identity(IdentityError::Locked))
+    ) {
         return false;
     }
     let mut authority = Authority::new();
@@ -763,10 +763,7 @@ pub(crate) fn parse_password_buffer(buffer: &[u8]) -> Option<&[u8]> {
         .then_some(password)
 }
 
-pub(crate) fn parse_length_prefixed(
-    buffer: &[u8],
-    maximum: usize,
-) -> Option<(&[u8], &[u8])> {
+pub(crate) fn parse_length_prefixed(buffer: &[u8], maximum: usize) -> Option<(&[u8], &[u8])> {
     let (&length, rest) = buffer.split_first()?;
     let length = length as usize;
     if length == 0 || length > maximum || length > rest.len() {

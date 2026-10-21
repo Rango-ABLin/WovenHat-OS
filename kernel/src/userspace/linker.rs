@@ -40,7 +40,9 @@ struct TlsPlan {
 }
 
 fn align_up(value: usize, alignment: usize) -> Option<usize> {
-    value.checked_add(alignment - 1).map(|v| v & !(alignment - 1))
+    value
+        .checked_add(alignment - 1)
+        .map(|v| v & !(alignment - 1))
 }
 
 #[inline(never)]
@@ -102,7 +104,9 @@ fn tls_image_offset(images: &[LinkImage<'_>], index: usize) -> Option<usize> {
         )?;
         let mut prefix = 0usize;
         for image in images.iter().skip(1) {
-            let Some(tls) = image.image.tls() else { continue };
+            let Some(tls) = image.image.tls() else {
+                continue;
+            };
             prefix = align_up(prefix, usize::try_from(tls.alignment).ok()?.max(8))?;
             prefix = prefix.checked_add(tls.memory_size)?;
         }
@@ -110,7 +114,9 @@ fn tls_image_offset(images: &[LinkImage<'_>], index: usize) -> Option<usize> {
     }
     let mut offset = 0usize;
     for (image_index, image) in images.iter().enumerate().skip(1) {
-        let Some(tls) = image.image.tls() else { continue };
+        let Some(tls) = image.image.tls() else {
+            continue;
+        };
         offset = align_up(offset, usize::try_from(tls.alignment).ok()?.max(8))?;
         if image_index == index {
             return Some(offset);
@@ -144,7 +150,9 @@ fn library_path(name: &[u8]) -> Option<alloc::string::String> {
 }
 
 fn prepare(bytes: &[u8], candidate_bias: u64) -> Option<Vec<LinkImage<'_>>> {
-    let main = elf::parse(bytes).ok()?.relocated_for_execution(candidate_bias)?;
+    let main = elf::parse(bytes)
+        .ok()?
+        .relocated_for_execution(candidate_bias)?;
     let mut images = Vec::with_capacity(elf::MAX_SCOPE_IMAGES);
     images.push(LinkImage {
         name: None,
@@ -416,8 +424,7 @@ pub(super) fn load_with_geometry(
         return None;
     }
     let trampoline = UserMapping::new(LIFECYCLE_TRAMPOLINE, 4096, false, true)?;
-    paging::map_user_range_in_inactive(page_table, LIFECYCLE_TRAMPOLINE, 4096, true, false)
-        .ok()?;
+    paging::map_user_range_in_inactive(page_table, LIFECYCLE_TRAMPOLINE, 4096, true, false).ok()?;
     paging::zero_user_range_in(page_table, LIFECYCLE_TRAMPOLINE, 4096).ok()?;
     // The exit continuation preserves the status in callee-saved R12 while
     // destructors run, then re-enters the normal exit syscall path.
@@ -444,8 +451,7 @@ pub(super) fn load_with_geometry(
             &images,
         )?;
     }
-    for (index, binding) in pending.space.lazy_bindings
-        [..pending.space.lazy_binding_count]
+    for (index, binding) in pending.space.lazy_bindings[..pending.space.lazy_binding_count]
         .iter()
         .copied()
         .enumerate()
@@ -587,16 +593,15 @@ fn setup_lifecycle_stack(
     if init_functions.is_empty() {
         return Some((main_entry, stack_top));
     }
-    let chain_size = init_functions.len().checked_mul(core::mem::size_of::<u64>())?;
+    let chain_size = init_functions
+        .len()
+        .checked_mul(core::mem::size_of::<u64>())?;
     let chain_start = stack_top.checked_sub(chain_size as u64)?;
     if chain_start < stack.base {
         return None;
     }
     for (index, function) in init_functions.iter().copied().enumerate() {
-        let next = init_functions
-            .get(index + 1)
-            .copied()
-            .unwrap_or(main_entry);
+        let next = init_functions.get(index + 1).copied().unwrap_or(main_entry);
         paging::write_user_bytes(
             page_table,
             chain_start + index as u64 * 8,
@@ -617,7 +622,9 @@ fn setup_destructor_stack(
     if fini_functions.is_empty() {
         return Some(0);
     }
-    let chain_size = fini_functions.len().checked_mul(core::mem::size_of::<u64>())?;
+    let chain_size = fini_functions
+        .len()
+        .checked_mul(core::mem::size_of::<u64>())?;
     let chain_start = stack
         .base
         .checked_add((UserStack::SIZE / 2) as u64)?
@@ -656,28 +663,20 @@ fn relocate(
             continue;
         }
         let end = offset.checked_add(size)?;
-        for entry in linked
-            .bytes
-            .get(offset..end)?
-            .chunks_exact(if is_plt {
-                elf::RELA_ENTRY_SIZE
-            } else {
-                dynamic.rela_entry_size
-            })
-        {
+        for entry in linked.bytes.get(offset..end)?.chunks_exact(if is_plt {
+            elf::RELA_ENTRY_SIZE
+        } else {
+            dynamic.rela_entry_size
+        }) {
             let target = u64::from_le_bytes(entry[..8].try_into().ok()?)
                 .checked_add(linked.image.load_bias())?;
             let info = u64::from_le_bytes(entry[8..16].try_into().ok()?);
             let addend = i64::from_le_bytes(entry[16..24].try_into().ok()?);
             let value = match info as u32 {
                 elf::R_X86_64_RELATIVE if info >> 32 == 0 => linked.image.load_bias(),
-                elf::R_X86_64_64 | elf::R_X86_64_GLOB_DAT | elf::R_X86_64_JUMP_SLOT => {
-                    linked.image.relocation_symbol_value(
-                        &linked.bytes,
-                        (info >> 32) as usize,
-                        scope,
-                    )?
-                }
+                elf::R_X86_64_64 | elf::R_X86_64_GLOB_DAT | elf::R_X86_64_JUMP_SLOT => linked
+                    .image
+                    .relocation_symbol_value(&linked.bytes, (info >> 32) as usize, scope)?,
                 elf::R_X86_64_DTPMOD64
                 | elf::R_X86_64_DTPOFF64
                 | elf::R_X86_64_TPOFF64
@@ -747,13 +746,12 @@ fn relocate(
             } else {
                 value.checked_sub(addend.unsigned_abs())?
             };
-            let value = if info as u32 == elf::R_X86_64_JUMP_SLOT
-                && lazy_slot_allowed(*space, target)
-            {
-                register_lazy_binding(space, target, value)?
-            } else {
-                value
-            };
+            let value =
+                if info as u32 == elf::R_X86_64_JUMP_SLOT && lazy_slot_allowed(*space, target) {
+                    register_lazy_binding(space, target, value)?
+                } else {
+                    value
+                };
             write_relocation_value(page_table, target, value, info as u32)?;
         }
     }
@@ -797,13 +795,12 @@ fn relocate(
             } else {
                 value.checked_sub(addend.unsigned_abs())?
             };
-            let value = if info as u32 == elf::R_X86_64_JUMP_SLOT
-                && lazy_slot_allowed(*space, target)
-            {
-                register_lazy_binding(space, target, value)?
-            } else {
-                value
-            };
+            let value =
+                if info as u32 == elf::R_X86_64_JUMP_SLOT && lazy_slot_allowed(*space, target) {
+                    register_lazy_binding(space, target, value)?
+                } else {
+                    value
+                };
             write_relocation_value(page_table, target, value, info as u32)?;
         }
     }
@@ -820,9 +817,10 @@ fn tls_relocation_value(
     tls_plan: Option<&TlsPlan>,
     images: &[LinkImage<'_>],
 ) -> Option<u64> {
-    let (symbol_offset, provider) = linked
-        .image
-        .tls_symbol_resolution(&linked.bytes, symbol_index, scope)?;
+    let (symbol_offset, provider) =
+        linked
+            .image
+            .tls_symbol_resolution(&linked.bytes, symbol_index, scope)?;
     let module_index = provider.unwrap_or(image_index);
     let plan = tls_plan?;
     let tpoff = tls_tpoff(images, module_index, plan)?;
@@ -855,7 +853,9 @@ fn lazy_slot_allowed(space: AddressSpace, slot: u64) -> bool {
     space.mappings[..space.mapping_count].iter().any(|mapping| {
         mapping.writable
             && slot >= mapping.start()
-            && slot.checked_add(8).is_some_and(|end| end <= mapping.start() + mapping.size() as u64)
+            && slot
+                .checked_add(8)
+                .is_some_and(|end| end <= mapping.start() + mapping.size() as u64)
             && !space
                 .relro
                 .into_iter()

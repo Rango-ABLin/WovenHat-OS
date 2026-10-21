@@ -10,7 +10,8 @@ pub const MAX_INSTALLED: usize = 32;
 pub const RECORD_MAGIC: [u8; 4] = *b"WSTC";
 pub const RECORD_VERSION: u16 = 2;
 const RECORD_HEADER: usize = 4 + 2 + 2 + 8 + 4;
-const ENTRY_BYTES: usize = 1 + MAX_NAME_BYTES + 8 + 8 + 32 + 4 + 4 + 1 + MAX_DEPENDENCIES * (1 + MAX_NAME_BYTES);
+const ENTRY_BYTES: usize =
+    1 + MAX_NAME_BYTES + 8 + 8 + 32 + 4 + 4 + 1 + MAX_DEPENDENCIES * (1 + MAX_NAME_BYTES);
 pub const MAX_RECORD_BYTES: usize = RECORD_HEADER + MAX_INSTALLED * ENTRY_BYTES + 4;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -154,7 +155,11 @@ impl Store {
         let allowed_capabilities = u64::from_le_bytes(bytes[8..16].try_into().unwrap());
         let length = u32::from_le_bytes(bytes[16..20].try_into().unwrap()) as usize;
         let expected = RECORD_HEADER
-            .checked_add(count.checked_mul(ENTRY_BYTES).ok_or(RecordError::BadLength)?)
+            .checked_add(
+                count
+                    .checked_mul(ENTRY_BYTES)
+                    .ok_or(RecordError::BadLength)?,
+            )
             .and_then(|value| value.checked_add(4))
             .ok_or(RecordError::BadLength)?;
         if length != expected || bytes.len() != expected {
@@ -191,7 +196,8 @@ impl Store {
             let mut application_digest = [0u8; 32];
             application_digest.copy_from_slice(&bytes[cursor..cursor + 32]);
             cursor += 32;
-            let application_chunks = u32::from_le_bytes(bytes[cursor..cursor + 4].try_into().unwrap());
+            let application_chunks =
+                u32::from_le_bytes(bytes[cursor..cursor + 4].try_into().unwrap());
             cursor += 4;
             let resource_chunks = u32::from_le_bytes(bytes[cursor..cursor + 4].try_into().unwrap());
             cursor += 4;
@@ -361,8 +367,12 @@ impl Transaction {
         application_chunks: u32,
         resource_chunks: u32,
     ) -> Result<(), Error> {
-        self.working
-            .install(manifest, application_digest, application_chunks, resource_chunks)
+        self.working.install(
+            manifest,
+            application_digest,
+            application_chunks,
+            resource_chunks,
+        )
     }
 
     pub fn remove(&mut self, name: &[u8]) -> Result<(), Error> {
@@ -420,9 +430,9 @@ const fn name_len(name: &[u8]) -> u8 {
 fn valid_name(name: &[u8]) -> bool {
     !name.is_empty()
         && name.len() <= MAX_NAME_BYTES
-        && name.iter().all(|byte| {
-            matches!(*byte, b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'.' | b'_' | b'-')
-        })
+        && name.iter().all(
+            |byte| matches!(*byte, b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'.' | b'_' | b'-'),
+        )
 }
 
 fn checksum(bytes: &[u8]) -> u32 {

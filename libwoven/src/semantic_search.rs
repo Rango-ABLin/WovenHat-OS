@@ -96,9 +96,8 @@ impl Entry {
                 let length = offset - start;
                 if length <= MAX_TERM_BYTES {
                     let index = entry.term_count as usize;
-                    for (destination, source) in entry.terms[index]
-                        .iter_mut()
-                        .zip(&title[start..offset])
+                    for (destination, source) in
+                        entry.terms[index].iter_mut().zip(&title[start..offset])
                     {
                         *destination = source.to_ascii_lowercase();
                     }
@@ -156,10 +155,9 @@ impl Index {
     }
 
     pub fn upsert(&mut self, entry: Entry) -> bool {
-        if let Some(position) = self.entries[..self.length]
-            .iter()
-            .position(|existing| existing.is_some_and(|value| value.id == entry.id && value.owner == entry.owner))
-        {
+        if let Some(position) = self.entries[..self.length].iter().position(|existing| {
+            existing.is_some_and(|value| value.id == entry.id && value.owner == entry.owner)
+        }) {
             self.entries[position] = Some(entry);
             true
         } else {
@@ -168,10 +166,9 @@ impl Index {
     }
 
     pub fn remove(&mut self, owner: u64, id: u64) -> bool {
-        let Some(position) = self.entries[..self.length]
-            .iter()
-            .position(|existing| existing.is_some_and(|value| value.id == id && value.owner == owner))
-        else {
+        let Some(position) = self.entries[..self.length].iter().position(|existing| {
+            existing.is_some_and(|value| value.id == id && value.owner == owner)
+        }) else {
             return false;
         };
         for index in position + 1..self.length {
@@ -358,7 +355,7 @@ fn checksum(bytes: &[u8]) -> u64 {
 
 #[cfg(test)]
 mod tests {
-    use super::{Entry, Error, Index, Kind, Hit, MAX_ENCODED_BYTES, MAX_HITS};
+    use super::{Entry, Error, Hit, Index, Kind, MAX_ENCODED_BYTES, MAX_HITS};
 
     fn entry(id: u64, kind: Kind, title: &[u8]) -> Entry {
         Entry::new(id, kind, title).unwrap()
@@ -369,7 +366,11 @@ mod tests {
         let mut index = Index::new();
         assert!(index.insert(entry(1, Kind::Application, b"Woven Terminal")));
         assert!(index.insert(entry(2, Kind::Command, b"Open Terminal Settings")));
-        let mut hits = [Hit { id: 0, kind: Kind::File, score: 0 }; MAX_HITS];
+        let mut hits = [Hit {
+            id: 0,
+            kind: Kind::File,
+            score: 0,
+        }; MAX_HITS];
         let count = index.search(b"terminal settings", &mut hits);
         assert_eq!(count, 2);
         assert_eq!(hits[0].id, 2);
@@ -392,7 +393,11 @@ mod tests {
         let mut index = Index::new();
         assert!(index.insert(Entry::new_owned(7, 1, Kind::Message, b"private note").unwrap()));
         assert!(index.insert(Entry::new(2, Kind::Document, b"public note").unwrap()));
-        let mut hits = [Hit { id: 0, kind: Kind::File, score: 0 }; MAX_HITS];
+        let mut hits = [Hit {
+            id: 0,
+            kind: Kind::File,
+            score: 0,
+        }; MAX_HITS];
         assert_eq!(index.search_for(8, b"private", &mut hits), 0);
         assert_eq!(index.search_for(7, b"private", &mut hits), 1);
         let mut bytes = [0; MAX_ENCODED_BYTES];
@@ -400,6 +405,9 @@ mod tests {
         let decoded = Index::decode(&bytes[..length]).unwrap();
         assert_eq!(decoded.search_for(7, b"note", &mut hits), 2);
         bytes[10] ^= 1;
-        assert!(matches!(Index::decode(&bytes[..length]), Err(Error::BadChecksum)));
+        assert!(matches!(
+            Index::decode(&bytes[..length]),
+            Err(Error::BadChecksum)
+        ));
     }
 }

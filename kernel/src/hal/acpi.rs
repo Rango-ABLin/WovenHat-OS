@@ -41,6 +41,8 @@ pub struct Power {
     pub reset: Option<(u8, u64, u8)>,
     /// `\_S5` sleep types for PM1a and PM1b.
     pub s5: Option<(u8, u8)>,
+    /// `\_S3` sleep types for suspend-to-RAM, when firmware advertises it.
+    pub s3: Option<(u8, u8)>,
 }
 
 /// The power information found at boot.
@@ -285,12 +287,7 @@ pub fn discover(
             }
             b"TPM2" => {
                 let mut tpm2 = [0_u8; TPM2_TABLE_LENGTH];
-                read_physical(
-                    physical_offset,
-                    table_address,
-                    &mut tpm2,
-                    regions,
-                )?;
+                read_physical(physical_offset, table_address, &mut tpm2, regions)?;
                 if let Some(info) = parse_tpm2(&tpm2) {
                     summary.tpm2 = Some(info);
                 } else {
@@ -335,18 +332,21 @@ pub fn discover(
         address: summary.dsdt_address,
         length: summary.dsdt_length,
     });
-    summary.power.s5 = dsdt
-        .into_iter()
-        .chain(
-            summary.aml_tables[..summary.aml_table_count]
-                .iter()
-                .copied(),
-        )
-        .find_map(|table| {
-            aml_table_body(physical_offset, table, regions)
-                .ok()
-                .and_then(aml_s5)
-        });
+    let find_sleep = |state| {
+        dsdt.into_iter()
+            .chain(
+                summary.aml_tables[..summary.aml_table_count]
+                    .iter()
+                    .copied(),
+            )
+            .find_map(|table| {
+                aml_table_body(physical_offset, table, regions)
+                    .ok()
+                    .and_then(|body| aml_sleep(body, state))
+            })
+    };
+    summary.power.s5 = find_sleep(5);
+    summary.power.s3 = find_sleep(3);
     *POWER.lock() = Some(summary.power);
     Ok(summary)
 }
@@ -471,7 +471,12 @@ fn read_fadt_power(
 /// The sleep types of `\_S5`, from `Name (_S5, Package () { a, b, ... })`
 /// anywhere in a definition block. Each element may be Zero, One, or a
 /// byte, word or dword constant.
-fn aml_s5(body: &[u8]) -> Option<(u8, u8)> {
+fn aml_sleep(body: &[u8], state: u8) -> Option<(u8, u8)> {
+    let name = match state {
+        3 => *b"_S3_",
+        5 => *b"_S5_",
+        _ => return None,
+    };
     fn integer(bytes: &[u8], offset: usize) -> Option<(u64, usize)> {
         match *bytes.get(offset)? {
             0x00 => Some((0, 1)),
@@ -494,10 +499,7 @@ fn aml_s5(body: &[u8]) -> Option<(u8, u8)> {
         }
     }
     let mut start = 0;
-    while let Some(found) = body[start..]
-        .windows(4)
-        .position(|window| window == b"_S5_")
-    {
+    while let Some(found) = body[start..].windows(4).position(|window| window == name) {
         let at = start + found;
         start = at + 4;
         // NameOp, optionally with a root prefix, before the name.

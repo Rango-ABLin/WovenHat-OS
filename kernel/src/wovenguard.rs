@@ -419,27 +419,36 @@ pub const fn package_sandbox(capabilities: CapabilitySet) -> Option<SandboxProfi
             0
         },
         if capabilities.contains(Capability::FileWrite) {
-            FilePolicy::scope_mask(FileScope::Temporary)
-                | FilePolicy::scope_mask(FileScope::Home)
+            FilePolicy::scope_mask(FileScope::Temporary) | FilePolicy::scope_mask(FileScope::Home)
         } else {
             0
         },
     );
     let mut devices = DevicePolicy::NONE;
     if capabilities.contains(Capability::NetworkIo) {
-        devices = DevicePolicy { mask: devices.mask | DeviceClass::Network.bit() };
+        devices = DevicePolicy {
+            mask: devices.mask | DeviceClass::Network.bit(),
+        };
     }
     if capabilities.contains(Capability::StorageIo) {
-        devices = DevicePolicy { mask: devices.mask | DeviceClass::Storage.bit() };
+        devices = DevicePolicy {
+            mask: devices.mask | DeviceClass::Storage.bit(),
+        };
     }
     if capabilities.contains(Capability::DisplayIo) {
-        devices = DevicePolicy { mask: devices.mask | DeviceClass::Display.bit() };
+        devices = DevicePolicy {
+            mask: devices.mask | DeviceClass::Display.bit(),
+        };
     }
     if capabilities.contains(Capability::InputIo) {
-        devices = DevicePolicy { mask: devices.mask | DeviceClass::Input.bit() };
+        devices = DevicePolicy {
+            mask: devices.mask | DeviceClass::Input.bit(),
+        };
     }
     if capabilities.contains(Capability::DeviceIo) {
-        devices = DevicePolicy { mask: devices.mask | DeviceClass::Generic.bit() };
+        devices = DevicePolicy {
+            mask: devices.mask | DeviceClass::Generic.bit(),
+        };
     }
     Some(
         SandboxProfile::new(0x2100, capabilities)

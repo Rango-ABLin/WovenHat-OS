@@ -109,18 +109,8 @@ const POLICY_SESSION_CONTEXT_MAGIC: [u8; 4] = *b"TPS1";
 #[allow(dead_code)]
 const POLICY_SESSION_CONTEXT_VERSION: u16 = 1;
 #[allow(dead_code)]
-const POLICY_SESSION_CONTEXT_RECORD_BYTES: usize = 4
-    + 2
-    + 8
-    + 8
-    + 4
-    + 4
-    + 2
-    + MAX_CONTEXT_BLOB_BYTES
-    + 4
-    + 1
-    + 32
-    + 32;
+const POLICY_SESSION_CONTEXT_RECORD_BYTES: usize =
+    4 + 2 + 8 + 8 + 4 + 4 + 2 + MAX_CONTEXT_BLOB_BYTES + 4 + 1 + 32 + 32;
 
 #[cfg(any(feature = "stage24-3-test", feature = "system-apps"))]
 const POLICY_SESSION_CONTEXT_PATHS: [&str; 2] = [
@@ -286,7 +276,9 @@ static NEXT_CUSTODY_AUTHORITY_GENERATION: AtomicU64 = AtomicU64::new(1);
 pub fn authorize_policy_session_custody(
     info: Tpm2Info,
 ) -> Result<PolicySessionCustodyAuthority, Error> {
-    if info.control_area == 0 || info.control_area & 0xfff != 0 || !matches!(info.start_method, 6 | 7)
+    if info.control_area == 0
+        || info.control_area & 0xfff != 0
+        || !matches!(info.start_method, 6 | 7)
     {
         return Err(Error::InvalidDescriptor);
     }
@@ -332,10 +324,12 @@ fn encode_policy_session_context_record(
     output[30..32].copy_from_slice(&snapshot.context.blob_length.to_be_bytes());
     output[32..32 + MAX_CONTEXT_BLOB_BYTES].copy_from_slice(&snapshot.context.blob);
     let session_offset = 32 + MAX_CONTEXT_BLOB_BYTES;
-    output[session_offset..session_offset + 4].copy_from_slice(&snapshot.session.handle.to_be_bytes());
+    output[session_offset..session_offset + 4]
+        .copy_from_slice(&snapshot.session.handle.to_be_bytes());
     output[session_offset + 4] = snapshot.session.nonce_tpm_length;
     output[session_offset + 5..session_offset + 37].copy_from_slice(&snapshot.session.nonce_tpm);
-    let checksum: [u8; 32] = Sha256::digest(&output[..POLICY_SESSION_CONTEXT_RECORD_BYTES - 32]).into();
+    let checksum: [u8; 32] =
+        Sha256::digest(&output[..POLICY_SESSION_CONTEXT_RECORD_BYTES - 32]).into();
     output[POLICY_SESSION_CONTEXT_RECORD_BYTES - 32..].copy_from_slice(&checksum);
     Ok(())
 }
@@ -345,12 +339,12 @@ fn decode_policy_session_context_record(
     input: &[u8; POLICY_SESSION_CONTEXT_RECORD_BYTES],
 ) -> Result<(u64, PolicySessionSnapshot), Error> {
     if input[..4] != POLICY_SESSION_CONTEXT_MAGIC
-        || u16::from_be_bytes(input[4..6].try_into().unwrap())
-            != POLICY_SESSION_CONTEXT_VERSION
+        || u16::from_be_bytes(input[4..6].try_into().unwrap()) != POLICY_SESSION_CONTEXT_VERSION
     {
         return Err(Error::MalformedResponse);
     }
-    let expected: [u8; 32] = Sha256::digest(&input[..POLICY_SESSION_CONTEXT_RECORD_BYTES - 32]).into();
+    let expected: [u8; 32] =
+        Sha256::digest(&input[..POLICY_SESSION_CONTEXT_RECORD_BYTES - 32]).into();
     if input[POLICY_SESSION_CONTEXT_RECORD_BYTES - 32..] != expected {
         return Err(Error::CredentialMismatch);
     }
@@ -362,7 +356,11 @@ fn decode_policy_session_context_record(
         || blob_length == 0
         || blob_length > MAX_CONTEXT_BLOB_BYTES
         || u32::from_be_bytes(input[22..26].try_into().unwrap()) == 0
-        || u32::from_be_bytes(input[session_offset..session_offset + 4].try_into().unwrap()) == 0
+        || u32::from_be_bytes(
+            input[session_offset..session_offset + 4]
+                .try_into()
+                .unwrap(),
+        ) == 0
         || nonce_length > 32
     {
         return Err(Error::MalformedResponse);
@@ -382,7 +380,11 @@ fn decode_policy_session_context_record(
                 blob,
             },
             session: PolicySession {
-                handle: u32::from_be_bytes(input[session_offset..session_offset + 4].try_into().unwrap()),
+                handle: u32::from_be_bytes(
+                    input[session_offset..session_offset + 4]
+                        .try_into()
+                        .unwrap(),
+                ),
                 nonce_tpm_length: nonce_length as u8,
                 nonce_tpm,
             },
@@ -596,8 +598,7 @@ pub fn verify_signed_attestation_name_policy(
 ) -> Result<[u8; 34], Error> {
     if envelope.len() != ATTESTATION_NAME_POLICY_BYTES
         || envelope[..4] != ATTESTATION_NAME_POLICY_MAGIC
-        || u16::from_be_bytes(envelope[4..6].try_into().unwrap())
-            != ATTESTATION_NAME_POLICY_VERSION
+        || u16::from_be_bytes(envelope[4..6].try_into().unwrap()) != ATTESTATION_NAME_POLICY_VERSION
         || u16::from_be_bytes(envelope[6..8].try_into().unwrap())
             != ATTESTATION_NAME_POLICY_SIGNED_BYTES as u16
     {
@@ -700,16 +701,14 @@ static BOOT_ATTESTATION_NAME_POLICY: spin::Mutex<Option<[u8; ATTESTATION_NAME_PO
     spin::Mutex::new(None);
 
 #[cfg(feature = "system-apps")]
-static BOOT_CREDENTIAL_BROKER_CONFIG:
-    spin::Mutex<Option<[u8; CREDENTIAL_BROKER_CONFIG_BYTES]>> = spin::Mutex::new(None);
+static BOOT_CREDENTIAL_BROKER_CONFIG: spin::Mutex<Option<[u8; CREDENTIAL_BROKER_CONFIG_BYTES]>> =
+    spin::Mutex::new(None);
 
 #[cfg(feature = "system-apps")]
 pub fn load_attestation_name_policy_at_boot() -> Result<[u8; 34], Error> {
     let mut envelope = [0_u8; ATTESTATION_NAME_POLICY_BYTES];
-    let result = read_attestation_name_policy(
-        &crate::signed_app::TRUSTED_PUBLIC_KEY,
-        &mut envelope,
-    );
+    let result =
+        read_attestation_name_policy(&crate::signed_app::TRUSTED_PUBLIC_KEY, &mut envelope);
     let mut loaded = BOOT_ATTESTATION_NAME_POLICY.lock();
     match result {
         Ok(name) => {
@@ -726,9 +725,7 @@ pub fn load_attestation_name_policy_at_boot() -> Result<[u8; 34], Error> {
 /// Copy the policy accepted by the boot loader for a later quote-authorizer.
 /// The caller receives no policy until the boot-time signature check passed.
 #[cfg(feature = "system-apps")]
-pub fn boot_attestation_name_policy(
-    envelope: &mut [u8; ATTESTATION_NAME_POLICY_BYTES],
-) -> bool {
+pub fn boot_attestation_name_policy(envelope: &mut [u8; ATTESTATION_NAME_POLICY_BYTES]) -> bool {
     let loaded = BOOT_ATTESTATION_NAME_POLICY.lock();
     let Some(policy) = *loaded else {
         return false;
@@ -744,10 +741,8 @@ pub fn boot_attestation_name_policy(
 #[allow(dead_code)]
 pub fn load_credential_broker_config_at_boot() -> Result<CredentialBrokerConfig, Error> {
     let mut envelope = [0_u8; CREDENTIAL_BROKER_CONFIG_BYTES];
-    let result = read_credential_broker_config(
-        &crate::signed_app::TRUSTED_PUBLIC_KEY,
-        &mut envelope,
-    );
+    let result =
+        read_credential_broker_config(&crate::signed_app::TRUSTED_PUBLIC_KEY, &mut envelope);
     let mut loaded = BOOT_CREDENTIAL_BROKER_CONFIG.lock();
     match result {
         Ok(config) => {
@@ -764,9 +759,7 @@ pub fn load_credential_broker_config_at_boot() -> Result<CredentialBrokerConfig,
 /// Copy the boot-accepted broker policy without exposing storage authority.
 #[cfg(feature = "system-apps")]
 #[allow(dead_code)]
-pub fn boot_credential_broker_config(
-    envelope: &mut [u8; CREDENTIAL_BROKER_CONFIG_BYTES],
-) -> bool {
+pub fn boot_credential_broker_config(envelope: &mut [u8; CREDENTIAL_BROKER_CONFIG_BYTES]) -> bool {
     let loaded = BOOT_CREDENTIAL_BROKER_CONFIG.lock();
     let Some(config) = *loaded else {
         return false;
@@ -836,8 +829,8 @@ pub fn verify_quote_ecc_p256_sha256(
     encoded_key[0] = 4;
     encoded_key[1..33].copy_from_slice(&public_key.x);
     encoded_key[33..].copy_from_slice(&public_key.y);
-    let verifying_key = VerifyingKey::from_sec1_bytes(&encoded_key)
-        .map_err(|_| Error::InvalidPolicy)?;
+    let verifying_key =
+        VerifyingKey::from_sec1_bytes(&encoded_key).map_err(|_| Error::InvalidPolicy)?;
     let mut r = [0_u8; 32];
     r.copy_from_slice(&signature.first[..32]);
     let mut s = [0_u8; 32];
@@ -880,15 +873,15 @@ pub fn verify_quote_rsa_sha256(
     let signature_bytes = &signature.first[..signature_length];
     if signature.algorithm == TPM_ALG_RSASSA {
         let verifying_key = pkcs1v15::VerifyingKey::<Sha256>::new(key);
-        let parsed = pkcs1v15::Signature::try_from(signature_bytes)
-            .map_err(|_| Error::MalformedResponse)?;
+        let parsed =
+            pkcs1v15::Signature::try_from(signature_bytes).map_err(|_| Error::MalformedResponse)?;
         verifying_key
             .verify(quote, &parsed)
             .map_err(|_| Error::PolicySignature)
     } else {
         let verifying_key = pss::VerifyingKey::<Sha256>::new(key);
-        let parsed = pss::Signature::try_from(signature_bytes)
-            .map_err(|_| Error::MalformedResponse)?;
+        let parsed =
+            pss::Signature::try_from(signature_bytes).map_err(|_| Error::MalformedResponse)?;
         verifying_key
             .verify(quote, &parsed)
             .map_err(|_| Error::PolicySignature)
@@ -999,13 +992,7 @@ pub fn provision_credential_root(
     if root.iter().all(|byte| *byte == 0) {
         return Err(Error::CredentialMismatch);
     }
-    validate_credential_root_readback(
-        public,
-        expected_index,
-        expected_policy,
-        root,
-        root,
-    )?;
+    validate_credential_root_readback(public, expected_index, expected_policy, root, root)?;
     let generation = NEXT_CREDENTIAL_ROOT_GENERATION.fetch_add(1, Ordering::Relaxed);
     if generation == 0 {
         return Err(Error::Storage);
@@ -1118,12 +1105,14 @@ pub fn decode_quote_attestation(
     if magic != TPM_GENERATED_VALUE || structure != TPM_ST_ATTEST_QUOTE {
         return Err(Error::MalformedResponse);
     }
-    let signer_length = u16::from_be_bytes(quote_take(quote, &mut offset, 2)?.try_into().unwrap()) as usize;
+    let signer_length =
+        u16::from_be_bytes(quote_take(quote, &mut offset, 2)?.try_into().unwrap()) as usize;
     if signer_length > 64 {
         return Err(Error::MalformedResponse);
     }
     quote_take(quote, &mut offset, signer_length)?;
-    let nonce_length = u16::from_be_bytes(quote_take(quote, &mut offset, 2)?.try_into().unwrap()) as usize;
+    let nonce_length =
+        u16::from_be_bytes(quote_take(quote, &mut offset, 2)?.try_into().unwrap()) as usize;
     if nonce_length != expected_nonce.len()
         || quote_take(quote, &mut offset, nonce_length)? != expected_nonce
     {
@@ -1133,23 +1122,42 @@ pub fn decode_quote_attestation(
     quote_take(quote, &mut offset, 4)?;
     quote_take(quote, &mut offset, 4)?;
     quote_take(quote, &mut offset, 1)?;
-    let firmware_version = u64::from_be_bytes(quote_take(quote, &mut offset, 8)?.try_into().unwrap());
-    let selection_count = u32::from_be_bytes(quote_take(quote, &mut offset, 4)?.try_into().unwrap());
+    let firmware_version =
+        u64::from_be_bytes(quote_take(quote, &mut offset, 8)?.try_into().unwrap());
+    let selection_count =
+        u32::from_be_bytes(quote_take(quote, &mut offset, 4)?.try_into().unwrap());
     if selection_count != 1
-        || u16::from_be_bytes(quote_take(quote, &mut offset, 2)?.try_into().unwrap()) != TPM_ALG_SHA256
+        || u16::from_be_bytes(quote_take(quote, &mut offset, 2)?.try_into().unwrap())
+            != TPM_ALG_SHA256
         || quote_take(quote, &mut offset, 1)?[0] != 3
     {
         return Err(Error::MalformedResponse);
     }
     let selected = quote_take(quote, &mut offset, 3)?;
     let selected_byte = usize::from(expected_pcr / 8);
-    if selected[0] != if selected_byte == 0 { 1 << (expected_pcr % 8) } else { 0 }
-        || selected[1] != if selected_byte == 1 { 1 << (expected_pcr % 8) } else { 0 }
-        || selected[2] != if selected_byte == 2 { 1 << (expected_pcr % 8) } else { 0 }
+    if selected[0]
+        != if selected_byte == 0 {
+            1 << (expected_pcr % 8)
+        } else {
+            0
+        }
+        || selected[1]
+            != if selected_byte == 1 {
+                1 << (expected_pcr % 8)
+            } else {
+                0
+            }
+        || selected[2]
+            != if selected_byte == 2 {
+                1 << (expected_pcr % 8)
+            } else {
+                0
+            }
     {
         return Err(Error::PolicyMismatch);
     }
-    let digest_length = u16::from_be_bytes(quote_take(quote, &mut offset, 2)?.try_into().unwrap()) as usize;
+    let digest_length =
+        u16::from_be_bytes(quote_take(quote, &mut offset, 2)?.try_into().unwrap()) as usize;
     if digest_length != 32 {
         return Err(Error::MalformedResponse);
     }
@@ -1176,9 +1184,7 @@ pub fn decode_quote_attestation(
 /// RSA/ECC cryptographic verification until a validated signing public key is
 /// available from the physical TPM provisioning path.
 #[allow(dead_code)]
-pub fn decode_quote_signature(
-    signature: &[u8],
-) -> Result<(QuoteSignature, usize), Error> {
+pub fn decode_quote_signature(signature: &[u8]) -> Result<(QuoteSignature, usize), Error> {
     if signature.len() < 4 {
         return Err(Error::MalformedResponse);
     }
@@ -1198,7 +1204,9 @@ pub fn decode_quote_signature(
     let mut offset = 4;
     match algorithm {
         TPM_ALG_RSASSA | TPM_ALG_RSAPSS => {
-            let length = u16::from_be_bytes(quote_take(signature, &mut offset, 2)?.try_into().unwrap()) as usize;
+            let length =
+                u16::from_be_bytes(quote_take(signature, &mut offset, 2)?.try_into().unwrap())
+                    as usize;
             if length == 0 || length > 512 {
                 return Err(Error::MalformedResponse);
             }
@@ -1206,17 +1214,25 @@ pub fn decode_quote_signature(
             parsed.first_length = length as u16;
         }
         TPM_ALG_ECDSA => {
-            let r_length = u16::from_be_bytes(quote_take(signature, &mut offset, 2)?.try_into().unwrap()) as usize;
+            let r_length =
+                u16::from_be_bytes(quote_take(signature, &mut offset, 2)?.try_into().unwrap())
+                    as usize;
             if r_length == 0 || r_length > 72 {
                 return Err(Error::MalformedResponse);
             }
             parsed.first[..r_length].copy_from_slice(quote_take(signature, &mut offset, r_length)?);
             parsed.first_length = r_length as u16;
-            let s_length = u16::from_be_bytes(quote_take(signature, &mut offset, 2)?.try_into().unwrap()) as usize;
+            let s_length =
+                u16::from_be_bytes(quote_take(signature, &mut offset, 2)?.try_into().unwrap())
+                    as usize;
             if s_length == 0 || s_length > 72 {
                 return Err(Error::MalformedResponse);
             }
-            parsed.second[..s_length].copy_from_slice(quote_take(signature, &mut offset, s_length)?);
+            parsed.second[..s_length].copy_from_slice(quote_take(
+                signature,
+                &mut offset,
+                s_length,
+            )?);
             parsed.second_length = s_length as u16;
         }
         _ => return Err(Error::UnsupportedInterface),
@@ -1241,10 +1257,8 @@ pub struct QuoteAuthorizationRequest<'a> {
 
 #[allow(dead_code)]
 pub fn authorize_quote(request: QuoteAuthorizationRequest<'_>) -> Result<QuoteAttestation, Error> {
-    let expected_name = verify_signed_attestation_name_policy(
-        request.name_policy,
-        request.trusted_policy_key,
-    )?;
+    let expected_name =
+        verify_signed_attestation_name_policy(request.name_policy, request.trusted_policy_key)?;
     let key = bind_attestation_public_name(request.public, &expected_name)?;
     let attestation = decode_quote_attestation(
         request.quote,
@@ -1371,10 +1385,7 @@ impl HardwareCredentialBroker {
         {
             return Err(Error::InvalidPolicy);
         }
-        let expected_name = verify_signed_attestation_name_policy(
-            name_policy,
-            trusted_policy_key,
-        )?;
+        let expected_name = verify_signed_attestation_name_policy(name_policy, trusted_policy_key)?;
         bind_attestation_public_name(&public, &expected_name)?;
         let mut stored_auth_value = [0_u8; 64];
         stored_auth_value[..auth_value.len()].copy_from_slice(auth_value);
@@ -1416,48 +1427,44 @@ impl HardwareCredentialBroker {
                 return Err(error);
             }
         };
-        let policy_result = apply_managed_policy_pcr(
-            self.info,
-            &policy_session,
-            self.pcr,
-            &self.expected_digest,
-        )
-        .and_then(|()| {
-            quote_with_managed_policy_session(
-                self.info,
-                self.signing_handle,
-                &expected_nonce,
-                self.pcr,
-                self.scheme,
-                &mut policy_session,
-                &expected_nonce,
-                TPMA_SESSION_CONTINUE_SESSION,
-                &self.auth_value[..usize::from(self.auth_value_length)],
-            )
-        })
-        .and_then(|mut output| {
-            let authorization = authorize_hardware_credential(
-                &self.root,
-                HardwareCredentialRequest {
-                    name_policy: &self.name_policy,
-                    trusted_policy_key: &self.trusted_policy_key,
-                    public: &self.public,
-                    quote: &output.quote[..usize::from(output.quote_length)],
-                    signature: &output.signature[..usize::from(output.signature_length)],
-                    identity_context,
-                    expected_pcr: self.pcr,
-                    expected_digest: &self.expected_digest,
-                },
-            );
-            match authorization {
-                Ok(decision) => Ok((decision, output)),
-                Err(error) => {
-                    output.quote.fill(0);
-                    output.signature.fill(0);
-                    Err(error)
-                }
-            }
-        });
+        let policy_result =
+            apply_managed_policy_pcr(self.info, &policy_session, self.pcr, &self.expected_digest)
+                .and_then(|()| {
+                    quote_with_managed_policy_session(
+                        self.info,
+                        self.signing_handle,
+                        &expected_nonce,
+                        self.pcr,
+                        self.scheme,
+                        &mut policy_session,
+                        &expected_nonce,
+                        TPMA_SESSION_CONTINUE_SESSION,
+                        &self.auth_value[..usize::from(self.auth_value_length)],
+                    )
+                })
+                .and_then(|mut output| {
+                    let authorization = authorize_hardware_credential(
+                        &self.root,
+                        HardwareCredentialRequest {
+                            name_policy: &self.name_policy,
+                            trusted_policy_key: &self.trusted_policy_key,
+                            public: &self.public,
+                            quote: &output.quote[..usize::from(output.quote_length)],
+                            signature: &output.signature[..usize::from(output.signature_length)],
+                            identity_context,
+                            expected_pcr: self.pcr,
+                            expected_digest: &self.expected_digest,
+                        },
+                    );
+                    match authorization {
+                        Ok(decision) => Ok((decision, output)),
+                        Err(error) => {
+                            output.quote.fill(0);
+                            output.signature.fill(0);
+                            Err(error)
+                        }
+                    }
+                });
         let flush_result = flush_policy_session(self.info, &mut policy_session);
         expected_nonce.fill(0);
         match (policy_result, flush_result) {
@@ -1493,9 +1500,7 @@ static HARDWARE_CREDENTIAL_BROKER: spin::Mutex<Option<HardwareCredentialBroker>>
 /// active identity session.
 #[cfg(feature = "system-apps")]
 #[allow(dead_code)]
-pub fn install_hardware_credential_broker(
-    broker: HardwareCredentialBroker,
-) -> Result<(), Error> {
+pub fn install_hardware_credential_broker(broker: HardwareCredentialBroker) -> Result<(), Error> {
     let mut installed = HARDWARE_CREDENTIAL_BROKER.lock();
     if installed.is_some() {
         return Err(Error::Storage);
@@ -1763,10 +1768,7 @@ fn encode_quote(
 }
 
 #[allow(dead_code)]
-fn decode_quote_response(
-    response: &[u8],
-    output: &mut QuoteExecution,
-) -> Result<(), Error> {
+fn decode_quote_response(response: &[u8], output: &mut QuoteExecution) -> Result<(), Error> {
     if response.len() < 19
         || u16::from_be_bytes(response[..2].try_into().unwrap()) != TPM_ST_SESSIONS
     {
@@ -1786,9 +1788,13 @@ fn decode_quote_response(
     }
     let parameter_end = 14 + parameter_size;
     let mut offset = 14;
-    let quote_length = u16::from_be_bytes(response[offset..offset + 2].try_into().unwrap()) as usize;
+    let quote_length =
+        u16::from_be_bytes(response[offset..offset + 2].try_into().unwrap()) as usize;
     offset += 2;
-    if quote_length == 0 || quote_length > output.quote.len() || offset + quote_length > parameter_end {
+    if quote_length == 0
+        || quote_length > output.quote.len()
+        || offset + quote_length > parameter_end
+    {
         return Err(Error::MalformedResponse);
     }
     output.quote[..quote_length].copy_from_slice(&response[offset..offset + quote_length]);
@@ -1797,8 +1803,11 @@ fn decode_quote_response(
     if signature_start + 2 > parameter_end {
         return Err(Error::MalformedResponse);
     }
-    let signature_algorithm =
-        u16::from_be_bytes(response[signature_start..signature_start + 2].try_into().unwrap());
+    let signature_algorithm = u16::from_be_bytes(
+        response[signature_start..signature_start + 2]
+            .try_into()
+            .unwrap(),
+    );
     let signature_length = match signature_algorithm {
         TPM_ALG_RSASSA | TPM_ALG_RSAPSS => {
             if signature_start + 6 > parameter_end {
@@ -1837,8 +1846,7 @@ fn decode_quote_response(
     {
         return Err(Error::MalformedResponse);
     }
-    output.signature[..signature_length]
-        .copy_from_slice(&response[signature_start..parameter_end]);
+    output.signature[..signature_length].copy_from_slice(&response[signature_start..parameter_end]);
     let auth = &response[parameter_end..];
     if auth.len() < 5 {
         return Err(Error::MalformedResponse);
@@ -1848,14 +1856,9 @@ fn decode_quote_response(
         return Err(Error::MalformedResponse);
     }
     let attributes = 2 + nonce_length;
-    let hmac_length = u16::from_be_bytes(auth[attributes + 1..attributes + 3].try_into().unwrap())
-        as usize;
-    if hmac_length > 64
-        || attributes
-            .saturating_add(3)
-            .saturating_add(hmac_length)
-            != auth.len()
-    {
+    let hmac_length =
+        u16::from_be_bytes(auth[attributes + 1..attributes + 3].try_into().unwrap()) as usize;
+    if hmac_length > 64 || attributes.saturating_add(3).saturating_add(hmac_length) != auth.len() {
         return Err(Error::MalformedResponse);
     }
     output.response_nonce_tpm_length = nonce_length as u8;
@@ -1938,14 +1941,7 @@ pub fn quote_with_policy_session(
     if session.session_handle == TPM_RS_PW || session.hmac.len() != 32 {
         return Err(Error::InvalidPolicy);
     }
-    let output = execute_quote(
-        info,
-        signing_handle,
-        qualifying_data,
-        pcr,
-        scheme,
-        session,
-    )?;
+    let output = execute_quote(info, signing_handle, qualifying_data, pcr, scheme, session)?;
     if output.response_nonce_tpm_length == 0 {
         return Err(Error::MalformedResponse);
     }
@@ -2225,10 +2221,7 @@ pub fn decode_policy_session_start(response: &[u8]) -> Result<PolicySession, Err
 /// caller nonce is copied into the bounded command and the returned TPM nonce
 /// must be retained for any later session-HMAC calculation.
 #[allow(dead_code)]
-pub fn start_policy_session(
-    info: Tpm2Info,
-    nonce_caller: &[u8],
-) -> Result<PolicySession, Error> {
+pub fn start_policy_session(info: Tpm2Info, nonce_caller: &[u8]) -> Result<PolicySession, Error> {
     let mut command = [0_u8; 95];
     let command_size = encode_policy_session_start(nonce_caller, &mut command)?;
     let mut response = [0_u8; MAX_BUFFER_BYTES];
@@ -2323,10 +2316,7 @@ fn encode_flush_context(handle: u32, output: &mut [u8; 14]) -> Result<(), Error>
 /// Flush a managed TPM policy session. Failure leaves the token active so a
 /// caller can retry cleanup; success irreversibly invalidates its token.
 #[allow(dead_code)]
-pub fn flush_policy_session(
-    info: Tpm2Info,
-    lease: &mut PolicySessionLease,
-) -> Result<(), Error> {
+pub fn flush_policy_session(info: Tpm2Info, lease: &mut PolicySessionLease) -> Result<(), Error> {
     if !lease.active {
         return Err(Error::InvalidPolicy);
     }
@@ -2387,12 +2377,12 @@ fn decode_context_save(response: &[u8]) -> Result<PolicySessionContext, Error> {
     })
 }
 
-fn encode_context_load(context: &PolicySessionContext, output: &mut [u8; 1052]) -> Result<usize, Error> {
+fn encode_context_load(
+    context: &PolicySessionContext,
+    output: &mut [u8; 1052],
+) -> Result<usize, Error> {
     let blob_length = usize::from(context.blob_length);
-    if context.saved_handle == 0
-        || blob_length == 0
-        || blob_length > MAX_CONTEXT_BLOB_BYTES
-    {
+    if context.saved_handle == 0 || blob_length == 0 || blob_length > MAX_CONTEXT_BLOB_BYTES {
         return Err(Error::InvalidDescriptor);
     }
     let command_size = 28usize.saturating_add(blob_length);
@@ -2504,11 +2494,7 @@ fn encode_nv_write_policy(
     nonce_caller: &[u8],
     output: &mut [u8; 128],
 ) -> Result<usize, Error> {
-    if session_handle == 0
-        || data.is_empty()
-        || data.len() > 32
-        || nonce_caller.len() > 32
-    {
+    if session_handle == 0 || data.is_empty() || data.len() > 32 || nonce_caller.len() > 32 {
         return Err(Error::InvalidDescriptor);
     }
     let auth_size = 9usize.saturating_add(nonce_caller.len());
@@ -2602,7 +2588,11 @@ pub fn decode_nv_write_policy_response(response: &[u8]) -> Result<PolicyCommandR
     if attributes_offset.saturating_add(3) > response_size {
         return Err(Error::MalformedResponse);
     }
-    let hmac_length = u16::from_be_bytes(response[attributes_offset + 1..attributes_offset + 3].try_into().unwrap()) as usize;
+    let hmac_length = u16::from_be_bytes(
+        response[attributes_offset + 1..attributes_offset + 3]
+            .try_into()
+            .unwrap(),
+    ) as usize;
     if hmac_length > 64
         || attributes_offset
             .saturating_add(3)
@@ -2691,11 +2681,7 @@ fn encode_nv_read_policy_authenticated(
     Ok(command_size)
 }
 
-fn nv_read_parameter_digest(
-    nv_index: u32,
-    size: u16,
-    offset: u16,
-) -> Result<[u8; 32], Error> {
+fn nv_read_parameter_digest(nv_index: u32, size: u16, offset: u16) -> Result<[u8; 32], Error> {
     if nv_index == 0 || size == 0 || size > 32 {
         return Err(Error::InvalidDescriptor);
     }
@@ -2772,12 +2758,9 @@ pub fn decode_nv_read_policy_response(
         return Err(Error::MalformedResponse);
     }
     let attributes = auth + 2 + nonce_length;
-    let hmac_length = u16::from_be_bytes(response[attributes + 1..attributes + 3].try_into().unwrap()) as usize;
-    if hmac_length > 64
-        || attributes
-            .saturating_add(3)
-            .saturating_add(hmac_length)
-            != response_size
+    let hmac_length =
+        u16::from_be_bytes(response[attributes + 1..attributes + 3].try_into().unwrap()) as usize;
+    if hmac_length > 64 || attributes.saturating_add(3).saturating_add(hmac_length) != response_size
     {
         return Err(Error::MalformedResponse);
     }
@@ -2805,13 +2788,8 @@ pub fn read_nv_with_policy_session(
 ) -> Result<(), Error> {
     let session = *lease.usable()?;
     let attributes = TPMA_SESSION_CONTINUE_SESSION;
-    let hmac = derive_nv_read_session_hmac(
-        &session,
-        nv_index,
-        nonce_caller,
-        attributes,
-        auth_value,
-    )?;
+    let hmac =
+        derive_nv_read_session_hmac(&session, nv_index, nonce_caller, attributes, auth_value)?;
     let mut command = [0_u8; 128];
     let command_size = encode_nv_read_policy_authenticated(
         session.handle,
@@ -2849,39 +2827,30 @@ pub fn provision_credential_root_from_tpm(
     let public = read_nv_public(info, config.root_nv_index)?;
     validate_credential_root_nv(&public, config.root_nv_index, &config.nv_policy)?;
     let mut lease = start_managed_policy_session(info, nonce_caller)?;
-    let policy_result = apply_managed_policy_pcr(
-        info,
-        &lease,
-        config.pcr,
-        &config.expected_digest,
-    )
-    .and_then(|()| {
-        let mut root = [0_u8; 32];
-        let result = read_nv_with_policy_session(
-            info,
-            &mut lease,
-            config.root_nv_index,
-            nonce_caller,
-            &[],
-            &mut root,
-        );
-        match result {
-            Ok(()) => Ok(root),
-            Err(error) => {
-                root.fill(0);
-                Err(error)
+    let policy_result = apply_managed_policy_pcr(info, &lease, config.pcr, &config.expected_digest)
+        .and_then(|()| {
+            let mut root = [0_u8; 32];
+            let result = read_nv_with_policy_session(
+                info,
+                &mut lease,
+                config.root_nv_index,
+                nonce_caller,
+                &[],
+                &mut root,
+            );
+            match result {
+                Ok(()) => Ok(root),
+                Err(error) => {
+                    root.fill(0);
+                    Err(error)
+                }
             }
-        }
-    });
+        });
     let flush_result = flush_policy_session(info, &mut lease);
     match (policy_result, flush_result) {
         (Ok(mut root), Ok(())) => {
-            let result = provision_credential_root(
-                &public,
-                config.root_nv_index,
-                &config.nv_policy,
-                &root,
-            );
+            let result =
+                provision_credential_root(&public, config.root_nv_index, &config.nv_policy, &root);
             root.fill(0);
             result
         }
@@ -2924,8 +2893,13 @@ pub fn decode_nv_read_public(response: &[u8]) -> Result<NvPublic, Error> {
     }
     let mut auth_policy = [0_u8; 32];
     auth_policy[..policy_length].copy_from_slice(&body[12..12 + policy_length]);
-    let data_size = u16::from_be_bytes(body[12 + policy_length..14 + policy_length].try_into().unwrap());
-    let name_length = u16::from_be_bytes(response[public_end..public_end + 2].try_into().unwrap()) as usize;
+    let data_size = u16::from_be_bytes(
+        body[12 + policy_length..14 + policy_length]
+            .try_into()
+            .unwrap(),
+    );
+    let name_length =
+        u16::from_be_bytes(response[public_end..public_end + 2].try_into().unwrap()) as usize;
     if public_end.saturating_add(2).saturating_add(name_length) != response_size {
         return Err(Error::MalformedResponse);
     }
@@ -3007,7 +2981,8 @@ pub fn decode_attestation_public(response: &[u8]) -> Result<AttestationPublic, E
     let public = &response[12..public_end];
     let mut offset = 0;
     let public_type = u16::from_be_bytes(quote_take(public, &mut offset, 2)?.try_into().unwrap());
-    let name_algorithm = u16::from_be_bytes(quote_take(public, &mut offset, 2)?.try_into().unwrap());
+    let name_algorithm =
+        u16::from_be_bytes(quote_take(public, &mut offset, 2)?.try_into().unwrap());
     let attributes = u32::from_be_bytes(quote_take(public, &mut offset, 4)?.try_into().unwrap());
     if name_algorithm != TPM_ALG_SHA256 {
         return Err(Error::InvalidPolicy);
@@ -3018,8 +2993,10 @@ pub fn decode_attestation_public(response: &[u8]) -> Result<AttestationPublic, E
         TPM_ALG_RSA => {
             decode_public_symmetric(public, &mut offset)?;
             quote_take(public, &mut offset, 4)?;
-            let key_bits = u16::from_be_bytes(quote_take(public, &mut offset, 2)?.try_into().unwrap());
-            let exponent = u32::from_be_bytes(quote_take(public, &mut offset, 4)?.try_into().unwrap());
+            let key_bits =
+                u16::from_be_bytes(quote_take(public, &mut offset, 2)?.try_into().unwrap());
+            let exponent =
+                u32::from_be_bytes(quote_take(public, &mut offset, 4)?.try_into().unwrap());
             if !(2048..=4096).contains(&key_bits) || key_bits % 8 != 0 {
                 return Err(Error::InvalidPolicy);
             }
@@ -3055,7 +3032,10 @@ pub fn decode_attestation_public(response: &[u8]) -> Result<AttestationPublic, E
             if x.len() != 32 || y.len() != 32 {
                 return Err(Error::InvalidPolicy);
             }
-            let mut public_key = QuoteEccP256PublicKey { x: [0; 32], y: [0; 32] };
+            let mut public_key = QuoteEccP256PublicKey {
+                x: [0; 32],
+                y: [0; 32],
+            };
             public_key.x.copy_from_slice(x);
             public_key.y.copy_from_slice(y);
             if VerifyingKey::from_sec1_bytes(&{
@@ -3112,10 +3092,7 @@ fn encode_read_public(handle: u32, output: &mut [u8; 14]) -> Result<usize, Error
 
 /// Retrieve one bounded TPM public area through the serialized CRB transport.
 #[allow(dead_code)]
-pub fn read_attestation_public(
-    info: Tpm2Info,
-    handle: u32,
-) -> Result<AttestationPublic, Error> {
+pub fn read_attestation_public(info: Tpm2Info, handle: u32) -> Result<AttestationPublic, Error> {
     let mut command = [0_u8; 14];
     let command_size = encode_read_public(handle, &mut command)?;
     let mut response = [0_u8; MAX_BUFFER_BYTES];
@@ -3165,8 +3142,7 @@ pub fn verify_signed_pcr_policy(
     if envelope.len() != PCR_POLICY_BYTES
         || envelope[..4] != PCR_POLICY_MAGIC
         || u16::from_be_bytes(envelope[4..6].try_into().unwrap()) != PCR_POLICY_VERSION
-        || u16::from_be_bytes(envelope[6..8].try_into().unwrap())
-            != PCR_POLICY_SIGNED_BYTES as u16
+        || u16::from_be_bytes(envelope[6..8].try_into().unwrap()) != PCR_POLICY_SIGNED_BYTES as u16
         || envelope[9..12] != [0; 3]
     {
         return Err(Error::InvalidPolicy);
@@ -3177,8 +3153,12 @@ pub fn verify_signed_pcr_policy(
     }
     let mut signature = [0_u8; 64];
     signature.copy_from_slice(&envelope[PCR_POLICY_SIGNED_BYTES..]);
-    crate::signed_app::verify(&envelope[..PCR_POLICY_SIGNED_BYTES], trusted_key, &signature)
-        .map_err(|_| Error::PolicySignature)?;
+    crate::signed_app::verify(
+        &envelope[..PCR_POLICY_SIGNED_BYTES],
+        trusted_key,
+        &signature,
+    )
+    .map_err(|_| Error::PolicySignature)?;
     if &envelope[12..44] != actual {
         return Err(Error::PolicyMismatch);
     }
@@ -3198,7 +3178,9 @@ pub fn read_pcr_sha256(info: Tpm2Info, pcr: u8, output: &mut [u8; 32]) -> Result
 
 fn buffer_mapping(control: u64, address: u64, length: usize) -> Result<u64, Error> {
     let address = if address == 0 {
-        control.checked_add(DATA_BUFFER).ok_or(Error::BufferUnavailable)?
+        control
+            .checked_add(DATA_BUFFER)
+            .ok_or(Error::BufferUnavailable)?
     } else {
         address
     };
@@ -3213,7 +3195,11 @@ fn buffer_mapping(control: u64, address: u64, length: usize) -> Result<u64, Erro
         .ok_or(Error::BufferUnavailable)
 }
 
-fn execute(info: Tpm2Info, command_bytes: &[u8], response_bytes: &mut [u8]) -> Result<usize, Error> {
+fn execute(
+    info: Tpm2Info,
+    command_bytes: &[u8],
+    response_bytes: &mut [u8],
+) -> Result<usize, Error> {
     if info.control_area & 0xfff != 0
         || !matches!(info.start_method, 6 | 7)
         || command_bytes.is_empty()
@@ -3240,7 +3226,11 @@ fn execute(info: Tpm2Info, command_bytes: &[u8], response_bytes: &mut [u8]) -> R
     {
         return Err(Error::BufferUnavailable);
     }
-    let command = buffer_mapping(info.control_area, read_u64(mapped, COMMAND_ADDRESS), command_bytes.len())?;
+    let command = buffer_mapping(
+        info.control_area,
+        read_u64(mapped, COMMAND_ADDRESS),
+        command_bytes.len(),
+    )?;
     let response = buffer_mapping(
         info.control_area,
         read_u64(mapped, RESPONSE_ADDRESS),
@@ -3437,8 +3427,7 @@ pub fn self_test() -> bool {
     };
     let mut context_record = [0_u8; POLICY_SESSION_CONTEXT_RECORD_BYTES];
     if encode_policy_session_context_record(3, &snapshot, &mut context_record).is_err()
-        || decode_policy_session_context_record(&context_record).map(|record| record.0)
-            != Ok(3)
+        || decode_policy_session_context_record(&context_record).map(|record| record.0) != Ok(3)
     {
         return false;
     }
@@ -3618,7 +3607,8 @@ pub fn self_test() -> bool {
         && {
             let mut session_command = [0_u8; 95];
             let caller_nonce = [0x33; 16];
-            let Ok(session_size) = encode_policy_session_start(&caller_nonce, &mut session_command) else {
+            let Ok(session_size) = encode_policy_session_start(&caller_nonce, &mut session_command)
+            else {
                 return false;
             };
             if session_size != 43
@@ -3748,12 +3738,9 @@ pub fn self_test() -> bool {
             }
             let read_nonce = [0x55; 8];
             let mut nv_read = [0_u8; 96];
-            let Ok(nv_read_size) = encode_nv_read_policy(
-                session.handle,
-                0x0150_0000,
-                &read_nonce,
-                &mut nv_read,
-            ) else {
+            let Ok(nv_read_size) =
+                encode_nv_read_policy(session.handle, 0x0150_0000, &read_nonce, &mut nv_read)
+            else {
                 return false;
             };
             if nv_read_size != 43
@@ -3782,7 +3769,8 @@ pub fn self_test() -> bool {
             read_response[50] = TPMA_SESSION_CONTINUE_SESSION;
             read_response[51..53].copy_from_slice(&0_u16.to_be_bytes());
             let mut read_data = [0_u8; 32];
-            let Ok(read_auth) = decode_nv_read_policy_response(&read_response, &mut read_data) else {
+            let Ok(read_auth) = decode_nv_read_policy_response(&read_response, &mut read_data)
+            else {
                 return false;
             };
             if read_data != [0xa6; 32]
@@ -3821,12 +3809,9 @@ pub fn self_test() -> bool {
             ) {
                 return false;
             }
-            let Ok(mut root_lease) = provision_credential_root(
-                &public,
-                0x0150_0000,
-                &expected_policy,
-                &expected_root,
-            ) else {
+            let Ok(mut root_lease) =
+                provision_credential_root(&public, 0x0150_0000, &expected_policy, &expected_root)
+            else {
                 return false;
             };
             let initial_generation = root_lease.generation();
@@ -3875,12 +3860,9 @@ pub fn self_test() -> bool {
             quote[61..63].copy_from_slice(&32_u16.to_be_bytes());
             quote[63..95].fill(0x3c);
             let expected_quote_digest = [0x3c; 32];
-            let Ok(attestation) = decode_quote_attestation(
-                &quote,
-                &quote_nonce,
-                7,
-                &expected_quote_digest,
-            ) else {
+            let Ok(attestation) =
+                decode_quote_attestation(&quote, &quote_nonce, 7, &expected_quote_digest)
+            else {
                 return false;
             };
             if attestation.nonce_length != quote_nonce.len() as u8
@@ -3935,22 +3917,25 @@ pub fn self_test() -> bool {
                 exponent: 65_537,
             };
             rsa_key.modulus[..256].copy_from_slice(&[
-                    0xbd, 0x77, 0x2e, 0x1b, 0x39, 0x72, 0x8a, 0x8b, 0x5f, 0x3e, 0x1c, 0xe2, 0x35, 0x2c, 0xbb, 0xaa,
-                    0xad, 0x67, 0x7f, 0x2d, 0x3d, 0xcd, 0xe6, 0x37, 0xe6, 0x18, 0x1c, 0x90, 0xee, 0xc7, 0x52, 0xc1,
-                    0x04, 0x0c, 0x4f, 0xe9, 0xb1, 0x80, 0xd8, 0x91, 0xeb, 0x89, 0xc4, 0x3e, 0x72, 0x39, 0xa5, 0x4e,
-                    0xaf, 0x21, 0x2c, 0x2f, 0xe4, 0x58, 0xe5, 0x44, 0xd2, 0x8a, 0x8f, 0x6a, 0xa3, 0x7f, 0xb7, 0xc6,
-                    0xeb, 0x3c, 0xbc, 0x23, 0xb0, 0x5f, 0x63, 0xf1, 0xce, 0x46, 0x9f, 0x8d, 0xfa, 0x9f, 0x51, 0x69,
-                    0xa9, 0x4b, 0xe9, 0x32, 0x2f, 0x9b, 0x09, 0xb0, 0xca, 0xf8, 0x49, 0x0f, 0x3f, 0x64, 0x13, 0x19,
-                    0x83, 0xce, 0x17, 0x9c, 0xe7, 0xae, 0x69, 0x7b, 0x6e, 0x42, 0x18, 0xd0, 0xaa, 0x91, 0xe4, 0x7f,
-                    0x3b, 0x2d, 0x84, 0xdd, 0x65, 0xd1, 0x1b, 0xd1, 0xc9, 0x9c, 0xc1, 0x84, 0x69, 0x0b, 0x8a, 0xfb,
-                    0xa4, 0x6f, 0x91, 0xe8, 0xc4, 0xe5, 0x8d, 0xb6, 0x9e, 0xc5, 0x66, 0x45, 0xe8, 0x85, 0x30, 0x86,
-                    0xff, 0xe7, 0xba, 0xd7, 0x1f, 0x18, 0xda, 0xda, 0xfe, 0x5b, 0x4f, 0xd0, 0x43, 0x1a, 0xf4, 0x42,
-                    0xc5, 0x6b, 0x64, 0x8e, 0x18, 0x53, 0x67, 0xa1, 0x13, 0x02, 0xbe, 0xe3, 0x1d, 0x2d, 0xee, 0x96,
-                    0xba, 0xdb, 0x15, 0x1d, 0x14, 0xec, 0x4d, 0x51, 0x11, 0x7e, 0x89, 0x38, 0x4a, 0x3e, 0xda, 0xe7,
-                    0xae, 0x14, 0x6d, 0x53, 0x57, 0x7c, 0x98, 0xf3, 0x4b, 0x1b, 0xda, 0xe4, 0x4e, 0x21, 0x94, 0x3b,
-                    0x7c, 0x73, 0x76, 0x47, 0xf9, 0xc4, 0xf5, 0xe5, 0x61, 0x1c, 0x87, 0xcd, 0x8f, 0xeb, 0x56, 0xcf,
-                    0x9c, 0x3a, 0x5f, 0x74, 0x46, 0x0d, 0x6a, 0x75, 0x26, 0xe3, 0x1f, 0x59, 0x5e, 0x4d, 0x8e, 0x03,
-                    0xc9, 0x25, 0x58, 0x3e, 0xea, 0x7a, 0x88, 0x15, 0xae, 0x78, 0xd5, 0x21, 0x19, 0xf0, 0x9d, 0xf7,
+                0xbd, 0x77, 0x2e, 0x1b, 0x39, 0x72, 0x8a, 0x8b, 0x5f, 0x3e, 0x1c, 0xe2, 0x35, 0x2c,
+                0xbb, 0xaa, 0xad, 0x67, 0x7f, 0x2d, 0x3d, 0xcd, 0xe6, 0x37, 0xe6, 0x18, 0x1c, 0x90,
+                0xee, 0xc7, 0x52, 0xc1, 0x04, 0x0c, 0x4f, 0xe9, 0xb1, 0x80, 0xd8, 0x91, 0xeb, 0x89,
+                0xc4, 0x3e, 0x72, 0x39, 0xa5, 0x4e, 0xaf, 0x21, 0x2c, 0x2f, 0xe4, 0x58, 0xe5, 0x44,
+                0xd2, 0x8a, 0x8f, 0x6a, 0xa3, 0x7f, 0xb7, 0xc6, 0xeb, 0x3c, 0xbc, 0x23, 0xb0, 0x5f,
+                0x63, 0xf1, 0xce, 0x46, 0x9f, 0x8d, 0xfa, 0x9f, 0x51, 0x69, 0xa9, 0x4b, 0xe9, 0x32,
+                0x2f, 0x9b, 0x09, 0xb0, 0xca, 0xf8, 0x49, 0x0f, 0x3f, 0x64, 0x13, 0x19, 0x83, 0xce,
+                0x17, 0x9c, 0xe7, 0xae, 0x69, 0x7b, 0x6e, 0x42, 0x18, 0xd0, 0xaa, 0x91, 0xe4, 0x7f,
+                0x3b, 0x2d, 0x84, 0xdd, 0x65, 0xd1, 0x1b, 0xd1, 0xc9, 0x9c, 0xc1, 0x84, 0x69, 0x0b,
+                0x8a, 0xfb, 0xa4, 0x6f, 0x91, 0xe8, 0xc4, 0xe5, 0x8d, 0xb6, 0x9e, 0xc5, 0x66, 0x45,
+                0xe8, 0x85, 0x30, 0x86, 0xff, 0xe7, 0xba, 0xd7, 0x1f, 0x18, 0xda, 0xda, 0xfe, 0x5b,
+                0x4f, 0xd0, 0x43, 0x1a, 0xf4, 0x42, 0xc5, 0x6b, 0x64, 0x8e, 0x18, 0x53, 0x67, 0xa1,
+                0x13, 0x02, 0xbe, 0xe3, 0x1d, 0x2d, 0xee, 0x96, 0xba, 0xdb, 0x15, 0x1d, 0x14, 0xec,
+                0x4d, 0x51, 0x11, 0x7e, 0x89, 0x38, 0x4a, 0x3e, 0xda, 0xe7, 0xae, 0x14, 0x6d, 0x53,
+                0x57, 0x7c, 0x98, 0xf3, 0x4b, 0x1b, 0xda, 0xe4, 0x4e, 0x21, 0x94, 0x3b, 0x7c, 0x73,
+                0x76, 0x47, 0xf9, 0xc4, 0xf5, 0xe5, 0x61, 0x1c, 0x87, 0xcd, 0x8f, 0xeb, 0x56, 0xcf,
+                0x9c, 0x3a, 0x5f, 0x74, 0x46, 0x0d, 0x6a, 0x75, 0x26, 0xe3, 0x1f, 0x59, 0x5e, 0x4d,
+                0x8e, 0x03, 0xc9, 0x25, 0x58, 0x3e, 0xea, 0x7a, 0x88, 0x15, 0xae, 0x78, 0xd5, 0x21,
+                0x19, 0xf0, 0x9d, 0xf7,
             ]);
             let mut rsa_fixture_signature = QuoteSignature {
                 algorithm: TPM_ALG_RSASSA,
@@ -3961,22 +3946,25 @@ pub fn self_test() -> bool {
                 second: [0; 72],
             };
             rsa_fixture_signature.first[..256].copy_from_slice(&[
-                0x72, 0xb7, 0x76, 0x94, 0x98, 0x46, 0x01, 0x9a, 0xd3, 0xa0, 0xd2, 0xf5, 0x16, 0x0c, 0x2e, 0xcc,
-                0x43, 0xb3, 0x30, 0xe9, 0xea, 0x84, 0x1b, 0x24, 0x87, 0x97, 0xc3, 0x1e, 0x7a, 0xe1, 0x81, 0x65,
-                0x25, 0x3f, 0x3f, 0x6c, 0x63, 0x88, 0x9d, 0xca, 0x3d, 0x77, 0x6e, 0xab, 0x94, 0x7f, 0xbf, 0x99,
-                0x1f, 0x07, 0x14, 0xb1, 0x64, 0x9b, 0x71, 0x0d, 0xb1, 0xef, 0x32, 0x62, 0xfd, 0x71, 0xe6, 0x86,
-                0xc4, 0xd8, 0xc9, 0x64, 0x52, 0xd7, 0xd0, 0x85, 0x9b, 0x96, 0x26, 0xbc, 0x05, 0x60, 0x59, 0x3c,
-                0x48, 0x5b, 0x49, 0x13, 0xe3, 0x56, 0xc0, 0xcb, 0x6d, 0x7f, 0xfc, 0xd1, 0xc5, 0x63, 0x3b, 0xa7,
-                0x86, 0x27, 0x88, 0x8a, 0x36, 0x73, 0x1b, 0x1a, 0x8d, 0xa8, 0xfc, 0x61, 0x3a, 0x21, 0x86, 0x0a,
-                0xfb, 0xe4, 0xbf, 0x52, 0x50, 0x6a, 0x03, 0x64, 0x83, 0xd8, 0x51, 0xaa, 0xd1, 0x12, 0x17, 0x04,
-                0x67, 0x5c, 0x16, 0x14, 0x72, 0x02, 0x3c, 0xb6, 0xd9, 0x6e, 0x06, 0xe7, 0xf6, 0x03, 0x94, 0x7b,
-                0xf5, 0x86, 0x9f, 0xd0, 0x10, 0xeb, 0xb6, 0x5c, 0x8d, 0xc3, 0x2d, 0x08, 0x4f, 0xfa, 0xb9, 0xcb,
-                0x81, 0x4a, 0x9a, 0x09, 0xff, 0x70, 0x16, 0x7d, 0x15, 0x2a, 0x96, 0x47, 0x61, 0xbf, 0xf1, 0x11,
-                0x0d, 0xe7, 0xe0, 0x2a, 0x9d, 0xdc, 0xcc, 0x19, 0x5f, 0x72, 0x66, 0xd4, 0x24, 0x0a, 0x93, 0xaa,
-                0x6b, 0xb0, 0x3e, 0x5f, 0xa9, 0x4e, 0x79, 0x44, 0x68, 0xf7, 0x5b, 0xff, 0x6c, 0xb6, 0x5e, 0x1c,
-                0xa4, 0xc7, 0x17, 0x75, 0xbc, 0x58, 0xfc, 0x4a, 0xb1, 0xb4, 0x60, 0x61, 0x2a, 0x37, 0x3e, 0x31,
-                0x90, 0x55, 0xc6, 0x5f, 0xcd, 0x2d, 0x09, 0x2a, 0x94, 0x58, 0x2a, 0x49, 0x57, 0x91, 0xfd, 0x2b,
-                0xb4, 0x46, 0xd6, 0xbd, 0x07, 0x54, 0x04, 0x5c, 0xfe, 0x17, 0x68, 0x29, 0x18, 0x56, 0x7d, 0x1c,
+                0x72, 0xb7, 0x76, 0x94, 0x98, 0x46, 0x01, 0x9a, 0xd3, 0xa0, 0xd2, 0xf5, 0x16, 0x0c,
+                0x2e, 0xcc, 0x43, 0xb3, 0x30, 0xe9, 0xea, 0x84, 0x1b, 0x24, 0x87, 0x97, 0xc3, 0x1e,
+                0x7a, 0xe1, 0x81, 0x65, 0x25, 0x3f, 0x3f, 0x6c, 0x63, 0x88, 0x9d, 0xca, 0x3d, 0x77,
+                0x6e, 0xab, 0x94, 0x7f, 0xbf, 0x99, 0x1f, 0x07, 0x14, 0xb1, 0x64, 0x9b, 0x71, 0x0d,
+                0xb1, 0xef, 0x32, 0x62, 0xfd, 0x71, 0xe6, 0x86, 0xc4, 0xd8, 0xc9, 0x64, 0x52, 0xd7,
+                0xd0, 0x85, 0x9b, 0x96, 0x26, 0xbc, 0x05, 0x60, 0x59, 0x3c, 0x48, 0x5b, 0x49, 0x13,
+                0xe3, 0x56, 0xc0, 0xcb, 0x6d, 0x7f, 0xfc, 0xd1, 0xc5, 0x63, 0x3b, 0xa7, 0x86, 0x27,
+                0x88, 0x8a, 0x36, 0x73, 0x1b, 0x1a, 0x8d, 0xa8, 0xfc, 0x61, 0x3a, 0x21, 0x86, 0x0a,
+                0xfb, 0xe4, 0xbf, 0x52, 0x50, 0x6a, 0x03, 0x64, 0x83, 0xd8, 0x51, 0xaa, 0xd1, 0x12,
+                0x17, 0x04, 0x67, 0x5c, 0x16, 0x14, 0x72, 0x02, 0x3c, 0xb6, 0xd9, 0x6e, 0x06, 0xe7,
+                0xf6, 0x03, 0x94, 0x7b, 0xf5, 0x86, 0x9f, 0xd0, 0x10, 0xeb, 0xb6, 0x5c, 0x8d, 0xc3,
+                0x2d, 0x08, 0x4f, 0xfa, 0xb9, 0xcb, 0x81, 0x4a, 0x9a, 0x09, 0xff, 0x70, 0x16, 0x7d,
+                0x15, 0x2a, 0x96, 0x47, 0x61, 0xbf, 0xf1, 0x11, 0x0d, 0xe7, 0xe0, 0x2a, 0x9d, 0xdc,
+                0xcc, 0x19, 0x5f, 0x72, 0x66, 0xd4, 0x24, 0x0a, 0x93, 0xaa, 0x6b, 0xb0, 0x3e, 0x5f,
+                0xa9, 0x4e, 0x79, 0x44, 0x68, 0xf7, 0x5b, 0xff, 0x6c, 0xb6, 0x5e, 0x1c, 0xa4, 0xc7,
+                0x17, 0x75, 0xbc, 0x58, 0xfc, 0x4a, 0xb1, 0xb4, 0x60, 0x61, 0x2a, 0x37, 0x3e, 0x31,
+                0x90, 0x55, 0xc6, 0x5f, 0xcd, 0x2d, 0x09, 0x2a, 0x94, 0x58, 0x2a, 0x49, 0x57, 0x91,
+                0xfd, 0x2b, 0xb4, 0x46, 0xd6, 0xbd, 0x07, 0x54, 0x04, 0x5c, 0xfe, 0x17, 0x68, 0x29,
+                0x18, 0x56, 0x7d, 0x1c,
             ]);
             if verify_quote_rsa_sha256(rsa_message, &rsa_fixture_signature, &rsa_key).is_err() {
                 return false;
@@ -3990,12 +3978,14 @@ pub fn self_test() -> bool {
             let ecc_message = b"WovenHat TPM quote P-256 verification fixture";
             let ecc_key = QuoteEccP256PublicKey {
                 x: [
-                    0x6f, 0xf0, 0x3b, 0x94, 0x92, 0x41, 0xce, 0x1d, 0xad, 0xd4, 0x35, 0x19, 0xe6, 0x96, 0x0e, 0x0a,
-                    0x85, 0xb4, 0x1a, 0x69, 0xa0, 0x5c, 0x32, 0x81, 0x03, 0xaa, 0x2b, 0xce, 0x15, 0x94, 0xca, 0x16,
+                    0x6f, 0xf0, 0x3b, 0x94, 0x92, 0x41, 0xce, 0x1d, 0xad, 0xd4, 0x35, 0x19, 0xe6,
+                    0x96, 0x0e, 0x0a, 0x85, 0xb4, 0x1a, 0x69, 0xa0, 0x5c, 0x32, 0x81, 0x03, 0xaa,
+                    0x2b, 0xce, 0x15, 0x94, 0xca, 0x16,
                 ],
                 y: [
-                    0x3c, 0x4f, 0x75, 0x3a, 0x55, 0xbf, 0x01, 0xdc, 0x53, 0xf6, 0xc0, 0xb0, 0xc7, 0xee, 0xe7, 0x8b,
-                    0x40, 0xc6, 0xff, 0x7d, 0x25, 0xa9, 0x6e, 0x22, 0x82, 0xb9, 0x89, 0xce, 0xf7, 0x1c, 0x14, 0x4a,
+                    0x3c, 0x4f, 0x75, 0x3a, 0x55, 0xbf, 0x01, 0xdc, 0x53, 0xf6, 0xc0, 0xb0, 0xc7,
+                    0xee, 0xe7, 0x8b, 0x40, 0xc6, 0xff, 0x7d, 0x25, 0xa9, 0x6e, 0x22, 0x82, 0xb9,
+                    0x89, 0xce, 0xf7, 0x1c, 0x14, 0x4a,
                 ],
             };
             let mut ecc_fixture_signature = QuoteSignature {
@@ -4007,14 +3997,17 @@ pub fn self_test() -> bool {
                 second: [0; 72],
             };
             ecc_fixture_signature.first[..32].copy_from_slice(&[
-                0x8c, 0x0c, 0x73, 0xa8, 0x5a, 0xb1, 0x46, 0xca, 0xc5, 0xc0, 0x27, 0xf1, 0x48, 0x22, 0xa2, 0xf8,
-                0x26, 0xca, 0x3a, 0xf2, 0xbd, 0xd5, 0x67, 0xe1, 0xf3, 0x20, 0x91, 0x0e, 0x83, 0x96, 0x5b, 0x18,
+                0x8c, 0x0c, 0x73, 0xa8, 0x5a, 0xb1, 0x46, 0xca, 0xc5, 0xc0, 0x27, 0xf1, 0x48, 0x22,
+                0xa2, 0xf8, 0x26, 0xca, 0x3a, 0xf2, 0xbd, 0xd5, 0x67, 0xe1, 0xf3, 0x20, 0x91, 0x0e,
+                0x83, 0x96, 0x5b, 0x18,
             ]);
             ecc_fixture_signature.second[..32].copy_from_slice(&[
-                0x5a, 0x67, 0xd4, 0xc7, 0xfa, 0xd8, 0x6c, 0xcc, 0x20, 0x6e, 0xb9, 0xa6, 0xa2, 0x1d, 0xd8, 0x9f,
-                0xbc, 0xfe, 0x6b, 0x3e, 0x1c, 0xb4, 0x62, 0xd8, 0x37, 0xb1, 0xdf, 0x08, 0x83, 0x94, 0x04, 0x13,
+                0x5a, 0x67, 0xd4, 0xc7, 0xfa, 0xd8, 0x6c, 0xcc, 0x20, 0x6e, 0xb9, 0xa6, 0xa2, 0x1d,
+                0xd8, 0x9f, 0xbc, 0xfe, 0x6b, 0x3e, 0x1c, 0xb4, 0x62, 0xd8, 0x37, 0xb1, 0xdf, 0x08,
+                0x83, 0x94, 0x04, 0x13,
             ]);
-            if verify_quote_ecc_p256_sha256(ecc_message, &ecc_fixture_signature, &ecc_key).is_err() {
+            if verify_quote_ecc_p256_sha256(ecc_message, &ecc_fixture_signature, &ecc_key).is_err()
+            {
                 return false;
             }
             ecc_fixture_signature.second[0] ^= 1;
@@ -4070,20 +4063,24 @@ pub fn self_test() -> bool {
             let mut name_policy = [0_u8; ATTESTATION_NAME_POLICY_BYTES];
             name_policy[..4].copy_from_slice(&ATTESTATION_NAME_POLICY_MAGIC);
             name_policy[4..6].copy_from_slice(&ATTESTATION_NAME_POLICY_VERSION.to_be_bytes());
-            name_policy[6..8].copy_from_slice(&(ATTESTATION_NAME_POLICY_SIGNED_BYTES as u16).to_be_bytes());
+            name_policy[6..8]
+                .copy_from_slice(&(ATTESTATION_NAME_POLICY_SIGNED_BYTES as u16).to_be_bytes());
             name_policy[8..10].copy_from_slice(&TPM_ALG_SHA256.to_be_bytes());
             name_policy[10..].fill(0x22);
             name_policy[42..106].copy_from_slice(&[
-                0x88, 0x4f, 0x4f, 0x52, 0xbc, 0x41, 0x4e, 0xf4, 0x02, 0x44, 0x56, 0x10, 0x3d, 0xa6, 0xa2, 0x95,
-                0x17, 0xf3, 0x05, 0x99, 0x6e, 0xec, 0xeb, 0x8b, 0xa6, 0x63, 0xd0, 0x3a, 0x39, 0x15, 0x1d, 0x88,
-                0x8e, 0x57, 0x3c, 0x23, 0x54, 0x77, 0x5e, 0x24, 0xa0, 0x72, 0x34, 0x44, 0xfd, 0x93, 0x70, 0x7b,
-                0x66, 0xe8, 0xa5, 0xd3, 0x81, 0x5f, 0xfb, 0x81, 0xae, 0x08, 0xbb, 0xe8, 0x42, 0xab, 0x0e, 0x03,
+                0x88, 0x4f, 0x4f, 0x52, 0xbc, 0x41, 0x4e, 0xf4, 0x02, 0x44, 0x56, 0x10, 0x3d, 0xa6,
+                0xa2, 0x95, 0x17, 0xf3, 0x05, 0x99, 0x6e, 0xec, 0xeb, 0x8b, 0xa6, 0x63, 0xd0, 0x3a,
+                0x39, 0x15, 0x1d, 0x88, 0x8e, 0x57, 0x3c, 0x23, 0x54, 0x77, 0x5e, 0x24, 0xa0, 0x72,
+                0x34, 0x44, 0xfd, 0x93, 0x70, 0x7b, 0x66, 0xe8, 0xa5, 0xd3, 0x81, 0x5f, 0xfb, 0x81,
+                0xae, 0x08, 0xbb, 0xe8, 0x42, 0xab, 0x0e, 0x03,
             ]);
             let policy_key = [
-                0xea, 0x4a, 0x6c, 0x63, 0xe2, 0x9c, 0x52, 0x0a, 0xbe, 0xf5, 0x50, 0x7b, 0x13, 0x2e, 0xc5, 0xf9,
-                0x95, 0x47, 0x76, 0xae, 0xbe, 0xbe, 0x7b, 0x92, 0x42, 0x1e, 0xea, 0x69, 0x14, 0x46, 0xd2, 0x2c,
+                0xea, 0x4a, 0x6c, 0x63, 0xe2, 0x9c, 0x52, 0x0a, 0xbe, 0xf5, 0x50, 0x7b, 0x13, 0x2e,
+                0xc5, 0xf9, 0x95, 0x47, 0x76, 0xae, 0xbe, 0xbe, 0x7b, 0x92, 0x42, 0x1e, 0xea, 0x69,
+                0x14, 0x46, 0xd2, 0x2c,
             ];
-            let Ok(policy_name) = verify_signed_attestation_name_policy(&name_policy, &policy_key) else {
+            let Ok(policy_name) = verify_signed_attestation_name_policy(&name_policy, &policy_key)
+            else {
                 return false;
             };
             if policy_name[..2] != TPM_ALG_SHA256.to_be_bytes() || policy_name[2..] != [0x22; 32] {
@@ -4102,12 +4099,9 @@ pub fn self_test() -> bool {
             {
                 return false;
             }
-            let Ok(mut decision_root) = provision_credential_root(
-                &public,
-                0x0150_0000,
-                &expected_policy,
-                &expected_root,
-            ) else {
+            let Ok(mut decision_root) =
+                provision_credential_root(&public, 0x0150_0000, &expected_policy, &expected_root)
+            else {
                 return false;
             };
             if authorize_hardware_credential(

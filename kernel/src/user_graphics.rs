@@ -318,7 +318,8 @@ pub fn draw_text(handle: Handle, x: i32, y: i32, text: &str, color: u32) -> Resu
 pub fn snapshot(handle: Handle) -> Result<Surface, Error> {
     with_registry(|registry| {
         let surface = registry.resolve_mut(handle)?;
-        let mut copy = Surface::try_new(surface.width(), surface.height()).ok_or(Error::OutOfMemory)?;
+        let mut copy =
+            Surface::try_new(surface.width(), surface.height()).ok_or(Error::OutOfMemory)?;
         copy.blit(surface, 0, 0);
         Ok(copy)
     })
@@ -381,7 +382,8 @@ pub fn snapshot_shared(handle: Handle, grantee: u64) -> Result<Surface, Error> {
             return Err(Error::InvalidHandle);
         }
         let surface = registry.resolve_mut(handle)?;
-        let mut copy = Surface::try_new(surface.width(), surface.height()).ok_or(Error::OutOfMemory)?;
+        let mut copy =
+            Surface::try_new(surface.width(), surface.height()).ok_or(Error::OutOfMemory)?;
         copy.blit(surface, 0, 0);
         Ok(copy)
     })

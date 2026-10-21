@@ -146,7 +146,7 @@ impl Default for Plan {
 
 #[cfg(test)]
 mod tests {
-    use super::{Action, ActionKind, Error, Plan, MAX_ACTIONS};
+    use super::{Action, ActionKind, Error, MAX_ACTIONS, Plan};
     use crate::Permission;
 
     #[test]
@@ -159,9 +159,10 @@ mod tests {
             plan.authorize(index, &[Permission::FilesystemWrite], false),
             Err(Error::ConfirmationRequired)
         );
-        assert!(plan
-            .authorize(index, &[Permission::FilesystemWrite], true)
-            .is_ok());
+        assert!(
+            plan.authorize(index, &[Permission::FilesystemWrite], true)
+                .is_ok()
+        );
         assert_eq!(
             plan.authorize(index, &[Permission::FilesystemRead], true),
             Err(Error::PermissionDenied)
@@ -170,7 +171,10 @@ mod tests {
 
     #[test]
     fn action_and_plan_bounds_are_fail_closed() {
-        assert_eq!(Action::new(ActionKind::RunCommand, b""), Err(Error::EmptyTarget));
+        assert_eq!(
+            Action::new(ActionKind::RunCommand, b""),
+            Err(Error::EmptyTarget)
+        );
         assert_eq!(
             Action::new(ActionKind::RunCommand, &[b'a'; super::MAX_TARGET_BYTES + 1]),
             Err(Error::TargetTooLong)

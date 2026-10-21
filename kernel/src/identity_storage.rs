@@ -65,12 +65,12 @@ pub fn persist(
     Authority::decode_snapshot(snapshot).map_err(|_| RecordError::Invalid)?;
     let mut first = [0u8; RECORD_BYTES];
     let mut second = [0u8; RECORD_BYTES];
-    let left = read_copy(0, &mut first).ok().and_then(|length| {
-        (length == RECORD_BYTES).then(|| decode(&first)).flatten()
-    });
-    let right = read_copy(1, &mut second).ok().and_then(|length| {
-        (length == RECORD_BYTES).then(|| decode(&second)).flatten()
-    });
+    let left = read_copy(0, &mut first)
+        .ok()
+        .and_then(|length| (length == RECORD_BYTES).then(|| decode(&first)).flatten());
+    let right = read_copy(1, &mut second)
+        .ok()
+        .and_then(|length| (length == RECORD_BYTES).then(|| decode(&second)).flatten());
     let sequence = left
         .map_or(0, |record| record.0)
         .max(right.map_or(0, |record| record.0))
@@ -86,12 +86,12 @@ pub fn persist(
 pub fn load(output: &mut [u8; SNAPSHOT_BYTES]) -> Result<u64, RecordError> {
     let mut first = [0u8; RECORD_BYTES];
     let mut second = [0u8; RECORD_BYTES];
-    let left = read_copy(0, &mut first).ok().and_then(|length| {
-        (length == RECORD_BYTES).then(|| decode(&first)).flatten()
-    });
-    let right = read_copy(1, &mut second).ok().and_then(|length| {
-        (length == RECORD_BYTES).then(|| decode(&second)).flatten()
-    });
+    let left = read_copy(0, &mut first)
+        .ok()
+        .and_then(|length| (length == RECORD_BYTES).then(|| decode(&first)).flatten());
+    let right = read_copy(1, &mut second)
+        .ok()
+        .and_then(|length| (length == RECORD_BYTES).then(|| decode(&second)).flatten());
     let record = match (left, right) {
         (Some(left), Some(right)) if left.0 > right.0 => left,
         (Some(left), Some(right)) if right.0 > left.0 => right,
@@ -126,8 +126,7 @@ pub fn durable_self_test() -> bool {
         return fail("administrator creation failed");
     }
     let mut snapshot = [0u8; SNAPSHOT_BYTES];
-    if policy.encode_snapshot(&mut snapshot).is_err()
-        || persist(&authority, &snapshot, 1) != Ok(1)
+    if policy.encode_snapshot(&mut snapshot).is_err() || persist(&authority, &snapshot, 1) != Ok(1)
     {
         return fail("initial snapshot write failed");
     }

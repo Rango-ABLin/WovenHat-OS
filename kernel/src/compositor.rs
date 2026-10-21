@@ -540,7 +540,8 @@ fn rescale_to(scale: u32, holder: Option<u64>) -> Result<(u32, u32), Error> {
     // replaces (freed only after the swap below). A scale change the
     // allocator cannot currently satisfy must refuse cleanly, not crash the
     // kernel the way the global allocator's own error handler would.
-    let mut surface = Surface::try_new(width as usize, height as usize).ok_or(Error::OutOfMemory)?;
+    let mut surface =
+        Surface::try_new(width as usize, height as usize).ok_or(Error::OutOfMemory)?;
     let previous = {
         let mut guard = STATE.lock();
         let state = guard.as_mut().ok_or(Error::NotReady)?;
