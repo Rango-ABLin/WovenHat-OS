@@ -1,5 +1,16 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - Stage 24.21 (2026-10-21)
+
+Added bounded TPM2 `NV_ReadPublic` request/response framing. The parser
+validates response status and lengths, public-area structure, authorization
+policy bounds, data size, and exact trailing Name framing; it returns only
+non-secret metadata. Host tests, affected Clippy gates, and signed
+system-apps 1/2/4-CPU acceptance pass. Evidence is in
+`docs/audit-stage24-21-nv-public-metadata-2026-10-21.md`; the attached USB
+was not modified. Live NV authorization, writes, sealed-root provisioning,
+recovery, quote verification, and physical TPM qualification remain open.
+
 ## Codex - Stage 24.20 (2026-10-21)
 
 Added a fixed-size signed `TPP1` PCR policy envelope. It binds one PCR index

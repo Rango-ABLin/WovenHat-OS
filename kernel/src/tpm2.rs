@@ -28,6 +28,8 @@ const TPM_INTERFACE_CRB: u32 = 1;
 const TPM_ST_NO_SESSIONS: u16 = 0x8001;
 const TPM_CC_GET_RANDOM: u32 = 0x0000_017b;
 const TPM_CC_PCR_READ: u32 = 0x0000_017e;
+#[allow(dead_code)]
+const TPM_CC_NV_READ_PUBLIC: u32 = 0x0000_0169;
 const TPM_ALG_SHA256: u16 = 0x000b;
 const TPM_RC_SUCCESS: u32 = 0;
 const MAX_BUFFER_BYTES: usize = 0xf80;
@@ -35,6 +37,16 @@ const PCR_POLICY_MAGIC: [u8; 4] = *b"TPP1";
 const PCR_POLICY_VERSION: u16 = 1;
 const PCR_POLICY_SIGNED_BYTES: usize = 44;
 pub const PCR_POLICY_BYTES: usize = PCR_POLICY_SIGNED_BYTES + 64;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct NvPublic {
+    pub index: u32,
+    pub name_algorithm: u16,
+    pub attributes: u32,
+    pub auth_policy_length: u8,
+    pub auth_policy: [u8; 32],
+    pub data_size: u16,
+}
 // The probe runs before timer IRQs are enabled, so this bound must not depend
 // on the kernel tick counter. It is deliberately finite even for a wedged
 // device or malformed firmware descriptor.
@@ -141,6 +153,60 @@ fn encode_pcr_read(pcr: u8, output: &mut [u8; 20]) -> Result<(), Error> {
     output[16] = 3;
     output[17 + usize::from(pcr / 8)] = 1 << (pcr % 8);
     Ok(())
+}
+
+#[allow(dead_code)]
+fn encode_nv_read_public(index: u32, output: &mut [u8; 14]) {
+    output[..2].copy_from_slice(&TPM_ST_NO_SESSIONS.to_be_bytes());
+    output[2..6].copy_from_slice(&14_u32.to_be_bytes());
+    output[6..10].copy_from_slice(&TPM_CC_NV_READ_PUBLIC.to_be_bytes());
+    output[10..14].copy_from_slice(&index.to_be_bytes());
+}
+
+#[allow(dead_code)]
+pub fn decode_nv_read_public(response: &[u8]) -> Result<NvPublic, Error> {
+    if response.len() < 28 {
+        return Err(Error::MalformedResponse);
+    }
+    let response_size = u32::from_be_bytes(response[2..6].try_into().unwrap()) as usize;
+    let response_code = u32::from_be_bytes(response[6..10].try_into().unwrap());
+    if response_size < 28 || response_size > response.len() {
+        return Err(Error::MalformedResponse);
+    }
+    if response_code != TPM_RC_SUCCESS {
+        return Err(Error::Device(response_code));
+    }
+    let public_size = u16::from_be_bytes(response[10..12].try_into().unwrap()) as usize;
+    if public_size < 14 || 12usize.saturating_add(public_size) > response_size {
+        return Err(Error::MalformedResponse);
+    }
+    let public_end = 12 + public_size;
+    if public_end.saturating_add(2) > response_size {
+        return Err(Error::MalformedResponse);
+    }
+    let body = &response[12..public_end];
+    let index = u32::from_be_bytes(body[..4].try_into().unwrap());
+    let name_algorithm = u16::from_be_bytes(body[4..6].try_into().unwrap());
+    let attributes = u32::from_be_bytes(body[6..10].try_into().unwrap());
+    let policy_length = u16::from_be_bytes(body[10..12].try_into().unwrap()) as usize;
+    if policy_length > 32 || 12usize.saturating_add(policy_length).saturating_add(2) != body.len() {
+        return Err(Error::MalformedResponse);
+    }
+    let mut auth_policy = [0_u8; 32];
+    auth_policy[..policy_length].copy_from_slice(&body[12..12 + policy_length]);
+    let data_size = u16::from_be_bytes(body[12 + policy_length..14 + policy_length].try_into().unwrap());
+    let name_length = u16::from_be_bytes(response[public_end..public_end + 2].try_into().unwrap()) as usize;
+    if public_end.saturating_add(2).saturating_add(name_length) != response_size {
+        return Err(Error::MalformedResponse);
+    }
+    Ok(NvPublic {
+        index,
+        name_algorithm,
+        attributes,
+        auth_policy_length: policy_length as u8,
+        auth_policy,
+        data_size,
+    })
 }
 
 fn decode_pcr_read(response: &[u8], pcr: u8, output: &mut [u8; 32]) -> Result<(), Error> {
@@ -362,6 +428,29 @@ pub fn self_test() -> bool {
         return false;
     }
     policy[12] ^= 1;
-    verify_signed_pcr_policy(&policy, &public_key, &actual)
-        == Err(Error::PolicySignature)
+    if verify_signed_pcr_policy(&policy, &public_key, &actual) != Err(Error::PolicySignature) {
+        return false;
+    }
+    let mut nv_command = [0_u8; 14];
+    encode_nv_read_public(0x0150_0000, &mut nv_command);
+    if u32::from_be_bytes(nv_command[6..10].try_into().unwrap()) != TPM_CC_NV_READ_PUBLIC {
+        return false;
+    }
+    let mut nv_response = [0_u8; 28];
+    nv_response[2..6].copy_from_slice(&28_u32.to_be_bytes());
+    nv_response[10..12].copy_from_slice(&14_u16.to_be_bytes());
+    nv_response[12..16].copy_from_slice(&0x0150_0000_u32.to_be_bytes());
+    nv_response[16..18].copy_from_slice(&TPM_ALG_SHA256.to_be_bytes());
+    nv_response[18..22].copy_from_slice(&0x0200_0000_u32.to_be_bytes());
+    nv_response[22..24].copy_from_slice(&0_u16.to_be_bytes());
+    nv_response[24..26].copy_from_slice(&32_u16.to_be_bytes());
+    nv_response[26..28].copy_from_slice(&0_u16.to_be_bytes());
+    let Ok(public) = decode_nv_read_public(&nv_response) else {
+        return false;
+    };
+    public.index == 0x0150_0000
+        && public.name_algorithm == TPM_ALG_SHA256
+        && public.attributes == 0x0200_0000
+        && public.auth_policy_length == 0
+        && public.data_size == 32
 }

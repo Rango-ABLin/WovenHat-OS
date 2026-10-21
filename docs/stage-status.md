@@ -1,5 +1,21 @@
 # Stage status
 
+## Stage 24.21 bounded TPM NV public metadata (2026-10-21)
+
+The TPM2 layer now frames `NV_ReadPublic` for a caller-selected index and
+parses only a bounded NV public area: index, name algorithm, attributes,
+bounded authorization-policy bytes, data size, and exact response framing.
+The codec is read-only and carries no secret material; malformed sizes,
+status codes, policy lengths, and trailing-name framing fail closed. Host
+tests (89), all-targets and affected feature Clippy, and signed
+system-apps 1/2/4-CPU acceptance pass. Evidence is under
+`audit-artifacts/stage24.21-nv-public-20261021`.
+
+This does not issue a live NV transaction, create or authorize an NV index,
+write a credential, seal a root, validate a TPM quote, or provide recovery.
+Those remain required before hardware-backed identity can be enabled. The
+attached USB was inventory-only and was not written, formatted, or mounted.
+
 ## Stage 24.20 signed PCR policy boundary (2026-10-21)
 
 The TPM layer now validates a fixed-size signed PCR policy envelope. The

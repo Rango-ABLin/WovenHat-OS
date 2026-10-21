@@ -2,6 +2,14 @@ WovenHat OS — Stage 10.7 → Version 1.0 Master Roadmap
 Phase I — Finish the asynchronous kernel foundation
 Stage 10.7 — Asynchronous TCP
 
+Stage 24.21 - Bounded TPM NV public metadata
+
+Implemented bounded, metadata-only `NV_ReadPublic` framing and validation.
+Host tests, Clippy, and signed 1/2/4-CPU acceptance pass. No NV index is
+created or written, no authorization session is implemented, and no secret or
+credential root is exposed. Policy-bound sealing, quote verification,
+recovery, physical TPM qualification, and release signing remain required.
+
 Stage 24.20 - Signed PCR policy boundary
 
 Implemented a fixed-size signed PCR policy envelope with caller-provisioned

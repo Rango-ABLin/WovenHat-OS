@@ -1,5 +1,15 @@
 # WovenHat OS Architecture & Codebase Guide
 
+### Stage 24.21 - bounded TPM NV public metadata
+
+`tpm2::encode_nv_read_public` frames a no-session `NV_ReadPublic` request
+and `decode_nv_read_public` accepts only an exact bounded response containing
+the NV index, name algorithm, attributes, at most 32 policy bytes, data size,
+and a bounded trailing Name field. It is metadata-only: no NV authorization,
+write, secret read, sealing, or credential-root promotion is performed. A
+live TPM transaction and policy-bound sealed provisioning remain future
+trust-boundary work.
+
 ### Stage 24.20 - signed PCR policy boundary
 
 `verify_signed_pcr_policy` accepts only a fixed `TPP1` envelope containing one
