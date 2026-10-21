@@ -1,5 +1,22 @@
 # Stage status
 
+## Stage 30.2 - IPC-latency micro-benchmark (2026-10-21)
+
+Added a `hello-gui --ipc-benchmark` mode that sends and receives a one-byte
+message to and from its own process id 1000 times (same-uid self-IPC is
+permitted by `may_ipc_with`), timing each round trip with
+`libwoven::cycles()`. Validated under QEMU TCG on 1/2/4 CPUs via
+`stage30-2-test`: a self send+receive round trip costs roughly 400,000-740,000
+cycles on average (1 CPU: min 408,481/avg 566,714/max 9,008,594; 2 CPU: min
+356,574/avg 559,584/max 9,388,518; 4 CPU: min 487,630/avg 738,264/max
+17,016,406) -- an order of magnitude more than the Stage 30.1 `current_pid`
+baseline, consistent with IPC doing a buffer copy, a queue transaction, and
+an audit-ledger write per message versus `current_pid`'s pointer-free,
+capability-free path. These are TCG emulation numbers from a single process
+talking to itself, not cross-process latency or real hardware timing; they
+establish a comparable baseline and a repeatable tool, not an absolute
+performance claim.
+
 ## Stage 30.1 - syscall-latency micro-benchmark (2026-10-21)
 
 Added `libwoven::cycles()`, a thin `RDTSC` wrapper usable from Ring 3 (this
