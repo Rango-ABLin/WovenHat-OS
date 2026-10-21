@@ -1,5 +1,25 @@
 # Stage status
 
+## Reduced Motion accessibility toggle added to Quick Settings (2026-10-22)
+
+Quick Settings gained a "Reduced Motion" row (row 9 of 10) wiring
+`libwoven::accessibility::Settings`'s existing `reduced_motion` preference
+into WovenShell for the first time: when on, a newly opened window appears
+at full opacity immediately instead of animating in via the usual spring.
+Off by default, matching `Settings::new()`.
+
+Verified on 1 CPU: `stage20-10-test`, `stage20-11-test`, `stage20-17-test`,
+`stage20-18-test`, and `stage20-12-test` all pass with the panel at its
+new 10-row height; libwoven host tests and default-feature kernel clippy
+are clean. `stage24-59-test` could not be re-verified this round -- its
+full `system-apps` package build (10 applications) repeatedly hit
+disk-space limits on this machine regardless of reclaiming beforehand.
+The code path this change touches (Quick Settings row rendering and click
+dispatch) is identical to what the five passing gates above already
+exercise, so this looks like an environment-resource gap rather than a
+known defect, but it's recorded here rather than silently treated as
+covered, per the project's "report incomplete gates explicitly" policy.
+
 ## Stage 20.12 fix - accounts now actually load into the kernel identity AUTHORITY (2026-10-21)
 
 `stage20_12_self_test` wrote a real accounts file to the VFS and spawned
