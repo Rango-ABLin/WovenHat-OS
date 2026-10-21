@@ -1,5 +1,18 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - Stage 10.7 release-chain revalidation (2026-10-21)
+
+The full `RUN-STAGE10.7.ps1` chain passed host regressions, host Clippy,
+host tests, Stage 7.5/7.6 preservation, networking, and all preserved Stage
+8 through Stage 10.6 markers. Its first Stage 10.7 image build stopped only
+because the volume reached zero free space while compiling; no code failure
+was reported. After removing the orphaned task-owned QEMU and disposable
+`.cargo-build` output, the isolated Stage 10.7 TCP gate passed on 1/2/4 CPUs,
+including two TX exchanges, RX, and FIN/EOF. Evidence remains under
+`target/stage10-7-regression-{1,2,4}-debug`; no source changes were made for
+this revalidation. An unrelated `kernel/src/main.rs` account-provisioning
+edit was observed and preserved uncommitted.
+
 **Claude Code: independently re-verified Stage 24.59 (Change-PIN gate) --
 one flaky failure, consistent with a QMP timing margin, not a logic bug
 (2026-10-21).** `scripts/test-woven-shell-qemu.py --stage 24.59` was run 4

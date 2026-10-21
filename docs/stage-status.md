@@ -1,5 +1,16 @@
 # Stage status
 
+## Stage 10.7 release-chain revalidation (2026-10-21)
+
+The full Windows chain passed host regressions, warning-denying host Clippy,
+host tests, Stage 7.5/7.6 preservation, networking, and all preserved Stage
+8 through Stage 10.6 markers. Its first Stage 10.7 image build hit a volume
+`no space on device` failure; after disposable build cleanup, the isolated
+Stage 10.7 TCP gate passed on 1/2/4 CPUs with two TX exchanges, RX, and
+FIN/EOF. This was a validation-only rerun with no source changes. Evidence is
+under `docs/audit-stage10-7-release-rerun-2026-10-21.md` and the preserved
+serial logs in `target/stage10-7-regression-{1,2,4}-debug`.
+
 ## Stage 20.16 — standalone textured-3D-chrome proof of concept (2026-10-21)
 
 First concrete slice of the user's "fully 3D, not 2D characteristics"
