@@ -82,6 +82,10 @@
 //! the framebuffer (`surface.write` + `compositor_present`), needing
 //! `DisplayIo`.
 //!
+//! With `--scheduler-benchmark` it times `SCHEDULER_BENCHMARK_ITERATIONS`
+//! round trips of `yield_now`, measuring the voluntary-yield path's own
+//! overhead when no other process contends for the CPU.
+//!
 //! With `--probe <handle>` it runs as an ordinary process and checks that the
 //! kernel refuses it everything it has no authority for: every compositor
 //! operation, and every operation on the surface `<handle>`, which belongs to
@@ -448,6 +452,48 @@ fn compositor_benchmark() -> ! {
     libwoven::exit(0)
 }
 
+const SCHEDULER_BENCHMARK_ITERATIONS: u64 = 1000;
+
+/// Standalone scheduler-latency micro-benchmark (Stage 30 performance
+/// engineering): time `SCHEDULER_BENCHMARK_ITERATIONS` round trips of
+/// `yield_now` with the cycle counter. With no other runnable process
+/// contending for this CPU, the scheduler always re-selects this task
+/// immediately, so this measures the voluntary-yield path's own overhead
+/// (syscall entry, run-queue bookkeeping, syscall exit) rather than a
+/// context switch to different process state; needs no capability beyond
+/// an ordinary process's own.
+fn scheduler_benchmark() -> ! {
+    let mut min = u64::MAX;
+    let mut max = 0u64;
+    let mut total: u128 = 0;
+    for _ in 0..SCHEDULER_BENCHMARK_ITERATIONS {
+        let start = libwoven::cycles();
+        libwoven::yield_now();
+        let elapsed = libwoven::cycles().wrapping_sub(start);
+        min = min.min(elapsed);
+        max = max.max(elapsed);
+        total += u128::from(elapsed);
+    }
+    let average = (total / u128::from(SCHEDULER_BENCHMARK_ITERATIONS)) as u64;
+    let mut digits = [0u8; 20];
+    let _ = libwoven::print("hello-gui: scheduler benchmark (yield_now) min=");
+    let _ =
+        libwoven::write(libwoven::syscall::STDOUT, libwoven::format_u64(min, &mut digits));
+    let _ = libwoven::print(" avg=");
+    let _ = libwoven::write(
+        libwoven::syscall::STDOUT,
+        libwoven::format_u64(average, &mut digits),
+    );
+    let _ = libwoven::print(" max=");
+    let _ = libwoven::write(libwoven::syscall::STDOUT, libwoven::format_u64(max, &mut digits));
+    let _ = libwoven::print(" cycles\n");
+    if average == 0 {
+        fail(320);
+    }
+    let _ = libwoven::print("hello-gui: scheduler benchmark: PASSED\n");
+    libwoven::exit(0)
+}
+
 fn main(args: Args) -> ! {
     match args.get(1) {
         Some(b"--audio") => audio(),
@@ -470,6 +516,7 @@ fn main(args: Args) -> ! {
         Some(b"--ipc-benchmark") => ipc_benchmark(),
         Some(b"--fs-benchmark") => fs_benchmark(),
         Some(b"--compositor-benchmark") => compositor_benchmark(),
+        Some(b"--scheduler-benchmark") => scheduler_benchmark(),
         Some(_) => fail(250),
         None => run(Input::None),
     }
