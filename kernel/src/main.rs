@@ -7369,6 +7369,7 @@ const HELLO_GUI_IMAGE: &[u8] = include_bytes!(env!("WOVENHAT_HELLO_GUI_IMAGE"));
     feature = "stage20-11-test",
     feature = "stage20-12-test",
     feature = "stage20-16-test",
+    feature = "stage30-1-test",
 ))]
 fn display_client_capabilities() -> capability::CapabilitySet {
     capability::CapabilitySet::only(capability::Capability::Console)
