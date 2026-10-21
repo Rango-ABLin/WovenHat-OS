@@ -1,5 +1,16 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - Stage 24.22 (2026-10-21)
+
+Added fail-closed validation for the credential-root NV public metadata. The
+boundary checks the expected index, SHA-256 name algorithm, 32-byte data size,
+32-byte PCR policy, policy-authorized writes, and rejects owner/object writes
+and policy deletion. Host tests, affected Clippy gates, and signed
+system-apps 1/2/4-CPU acceptance pass. Evidence is in
+`docs/audit-stage24-22-credential-root-policy-2026-10-21.md`; USB remains
+untouched. NV creation, authorization sessions, credential writes, quote
+verification, recovery, and physical TPM qualification remain open.
+
 ## Codex - Stage 24.21 (2026-10-21)
 
 Added bounded TPM2 `NV_ReadPublic` request/response framing. The parser

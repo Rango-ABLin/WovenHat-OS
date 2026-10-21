@@ -1,5 +1,14 @@
 # WovenHat OS Architecture & Codebase Guide
 
+### Stage 24.22 - credential-root NV policy validation
+
+`validate_credential_root_nv` checks an already-decoded NV public area against
+the expected index and caller-provisioned 32-byte PCR policy. It requires a
+32-byte SHA-256-named value, policy-authorized writes, and rejects owner or
+object authorization writes and policy deletion. The function never performs
+NV I/O and never exposes credential bytes; authorization sessions, object
+creation, and policy-bound provisioning remain separate work.
+
 ### Stage 24.21 - bounded TPM NV public metadata
 
 `tpm2::encode_nv_read_public` frames a no-session `NV_ReadPublic` request

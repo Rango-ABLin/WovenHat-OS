@@ -2,6 +2,14 @@ WovenHat OS — Stage 10.7 → Version 1.0 Master Roadmap
 Phase I — Finish the asynchronous kernel foundation
 Stage 10.7 — Asynchronous TCP
 
+Stage 24.22 - Credential-root NV policy validation
+
+Implemented fail-closed validation of the reserved NV credential-root
+metadata against the expected index and PCR policy. Host tests, Clippy, and
+signed 1/2/4-CPU acceptance pass. This does not create, authorize, read, or
+write an NV object; authorization sessions, sealed provisioning, quote
+verification, recovery, and physical qualification remain required.
+
 Stage 24.21 - Bounded TPM NV public metadata
 
 Implemented bounded, metadata-only `NV_ReadPublic` framing and validation.

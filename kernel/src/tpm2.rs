@@ -32,6 +32,10 @@ const TPM_CC_PCR_READ: u32 = 0x0000_017e;
 const TPM_CC_NV_READ_PUBLIC: u32 = 0x0000_0169;
 const TPM_ALG_SHA256: u16 = 0x000b;
 const TPM_RC_SUCCESS: u32 = 0;
+const TPMA_NV_OWNERWRITE: u32 = 1 << 1;
+const TPMA_NV_AUTHWRITE: u32 = 1 << 2;
+const TPMA_NV_POLICYWRITE: u32 = 1 << 3;
+const TPMA_NV_POLICY_DELETE: u32 = 1 << 22;
 const MAX_BUFFER_BYTES: usize = 0xf80;
 const PCR_POLICY_MAGIC: [u8; 4] = *b"TPP1";
 const PCR_POLICY_VERSION: u16 = 1;
@@ -46,6 +50,33 @@ pub struct NvPublic {
     pub auth_policy_length: u8,
     pub auth_policy: [u8; 32],
     pub data_size: u16,
+}
+
+/// Validate the public metadata of the fixed-size NV object reserved for the
+/// credential root. This boundary proves only that an already-discovered
+/// object has the intended policy and cannot be rewritten through ordinary
+/// owner or object authorization; it does not create, write, or read it.
+#[allow(dead_code)]
+pub fn validate_credential_root_nv(
+    public: &NvPublic,
+    expected_index: u32,
+    expected_policy: &[u8; 32],
+) -> Result<(), Error> {
+    if public.index != expected_index
+        || public.name_algorithm != TPM_ALG_SHA256
+        || public.data_size != 32
+        || public.auth_policy_length != 32
+        || public.auth_policy != *expected_policy
+    {
+        return Err(Error::PolicyMismatch);
+    }
+    if public.attributes & (TPMA_NV_OWNERWRITE | TPMA_NV_AUTHWRITE) != 0
+        || public.attributes & TPMA_NV_POLICYWRITE == 0
+        || public.attributes & TPMA_NV_POLICY_DELETE != 0
+    {
+        return Err(Error::InvalidPolicy);
+    }
+    Ok(())
 }
 // The probe runs before timer IRQs are enabled, so this bound must not depend
 // on the kernel tick counter. It is deliberately finite even for a wedged
@@ -436,21 +467,40 @@ pub fn self_test() -> bool {
     if u32::from_be_bytes(nv_command[6..10].try_into().unwrap()) != TPM_CC_NV_READ_PUBLIC {
         return false;
     }
-    let mut nv_response = [0_u8; 28];
-    nv_response[2..6].copy_from_slice(&28_u32.to_be_bytes());
-    nv_response[10..12].copy_from_slice(&14_u16.to_be_bytes());
+    let mut nv_response = [0_u8; 60];
+    nv_response[2..6].copy_from_slice(&60_u32.to_be_bytes());
+    nv_response[10..12].copy_from_slice(&46_u16.to_be_bytes());
     nv_response[12..16].copy_from_slice(&0x0150_0000_u32.to_be_bytes());
     nv_response[16..18].copy_from_slice(&TPM_ALG_SHA256.to_be_bytes());
-    nv_response[18..22].copy_from_slice(&0x0200_0000_u32.to_be_bytes());
-    nv_response[22..24].copy_from_slice(&0_u16.to_be_bytes());
-    nv_response[24..26].copy_from_slice(&32_u16.to_be_bytes());
-    nv_response[26..28].copy_from_slice(&0_u16.to_be_bytes());
+    nv_response[18..22].copy_from_slice(&0x0200_0008_u32.to_be_bytes());
+    let expected_policy = [0x5a; 32];
+    nv_response[22..24].copy_from_slice(&32_u16.to_be_bytes());
+    nv_response[24..56].fill(0x5a);
+    nv_response[56..58].copy_from_slice(&32_u16.to_be_bytes());
+    nv_response[58..60].copy_from_slice(&0_u16.to_be_bytes());
     let Ok(public) = decode_nv_read_public(&nv_response) else {
         return false;
     };
+    if validate_credential_root_nv(&public, 0x0150_0000, &expected_policy).is_err() {
+        return false;
+    }
+    let mut altered = public;
+    altered.attributes |= TPMA_NV_OWNERWRITE;
+    if validate_credential_root_nv(&altered, 0x0150_0000, &expected_policy)
+        != Err(Error::InvalidPolicy)
+    {
+        return false;
+    }
+    altered = public;
+    altered.auth_policy[0] ^= 1;
+    if validate_credential_root_nv(&altered, 0x0150_0000, &expected_policy)
+        != Err(Error::PolicyMismatch)
+    {
+        return false;
+    }
     public.index == 0x0150_0000
         && public.name_algorithm == TPM_ALG_SHA256
-        && public.attributes == 0x0200_0000
-        && public.auth_policy_length == 0
+        && public.attributes == 0x0200_0008
+        && public.auth_policy_length == 32
         && public.data_size == 32
 }

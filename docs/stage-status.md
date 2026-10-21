@@ -1,5 +1,20 @@
 # Stage status
 
+## Stage 24.22 credential-root NV policy validation (2026-10-21)
+
+The TPM2 layer now validates the public metadata of the reserved
+credential-root NV object against a caller-provisioned index and signed PCR
+policy digest. It requires SHA-256 naming, a 32-byte value, a 32-byte policy,
+policy-authorized writes, and rejects ordinary owner/object writes and policy
+deletion. Host tests (89), all-targets and affected feature Clippy, and
+signed system-apps 1/2/4-CPU acceptance pass. Evidence is under
+`audit-artifacts/stage24.22-credential-root-policy-20261021`.
+
+This is still a validation boundary: it does not create an NV index, open an
+authorization session, write or read credential bytes, or prove a TPM quote.
+Sealed-root provisioning, recovery, physical TPM qualification, and release
+key custody remain required.
+
 ## Stage 24.21 bounded TPM NV public metadata (2026-10-21)
 
 The TPM2 layer now frames `NV_ReadPublic` for a caller-selected index and
