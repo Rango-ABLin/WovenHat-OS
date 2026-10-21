@@ -25,6 +25,7 @@ STAGES={
     '20.12': ('stage20-12-test', '[S20.12] sign-in: PASSED', 'woven-shell-sign-in', 'sign-in'),
     '20.13': ('stage20-13-test', '[S20.13] workspaces: PASSED', 'woven-shell-workspaces', 'workspaces'),
     '24.59': ('stage24-59-test', '[S24.59] Change-PIN flow: PASSED', 'woven-shell-change-pin', 'Change-PIN flow'),
+    '20.17': ('stage20-17-test', '[S20.17] 3D desktop Quick Settings: PASSED', 'woven-shell-3d', '3D desktop Quick Settings'),
 }
 
 def app_build_env(app_dir):

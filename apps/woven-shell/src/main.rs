@@ -137,6 +137,7 @@
 use core::cell::UnsafeCell;
 use core::panic::PanicInfo;
 
+use libwoven::graphics::{Camera, DepthBuffer, Renderer, Vertex3Tex};
 use libwoven::layout::{self, Frame};
 use libwoven::{
     blend, font, process, rgb, wait, Args, Canvas, DateTime, FrameEvent, GraphicsSurface,
@@ -255,7 +256,7 @@ const CENTER_WIDTH: i32 = 164;
 const CENTER_TITLE: &str = "Notifications";
 const CENTER_CLEAR: &str = "Clear";
 const QS_TITLE: &str = "Quick Settings";
-const QS_ROWS: usize = 8;
+const QS_ROWS: usize = 9;
 
 /// How dark the lock screen makes the wallpaper behind it.
 const LOCK_DIM: u8 = 160;
@@ -321,6 +322,29 @@ struct TileBuffer(UnsafeCell<[u32; TILE_PIXELS]>);
 unsafe impl Sync for TileBuffer {}
 
 static TILE: TileBuffer = TileBuffer(UnsafeCell::new([0; TILE_PIXELS]));
+
+/// The Quick Settings panel's maximum pixel footprint, flat-rendered once
+/// per repaint into this offscreen texture, then sampled by the 3D desktop
+/// mode's perspective projection. `.bss`, not the stack, for the same reason
+/// as `TILE`.
+const QS_PANEL_MAX_HEIGHT: usize = (1 + QS_ROWS) * PANEL_ROW as usize + 2;
+const QS_PANEL_PIXELS: usize = CENTER_WIDTH as usize * QS_PANEL_MAX_HEIGHT;
+
+struct QsPanelTexture(UnsafeCell<[u32; QS_PANEL_PIXELS]>);
+
+// SAFETY: the shell is single-threaded, and `render_qs_3d` takes the only reference.
+unsafe impl Sync for QsPanelTexture {}
+
+static QS_PANEL_TEXTURE: QsPanelTexture = QsPanelTexture(UnsafeCell::new([0; QS_PANEL_PIXELS]));
+
+/// A depth buffer sized for one `TILE`-sized render pass, reused (and
+/// cleared) for each tile the 3D Quick Settings panel is painted into.
+struct QsDepthBuffer(UnsafeCell<[u16; TILE_PIXELS]>);
+
+// SAFETY: the shell is single-threaded, and `render_qs_3d` takes the only reference.
+unsafe impl Sync for QsDepthBuffer {}
+
+static QS_DEPTH: QsDepthBuffer = QsDepthBuffer(UnsafeCell::new([0; TILE_PIXELS]));
 
 /// The desktop's state, in .bss too: the user stack is 16 KiB, and the state
 /// built in `main`'s frame, with the catalog loader's on top, overflowed it.
@@ -953,6 +977,10 @@ struct Desktop {
     /// exact strings every already-accepted lock-screen gate expects;
     /// Quick Settings can switch it to Chichewa.
     language: libwoven::i18n::Language,
+    /// Whether the desktop renders in 3D (currently: the Quick Settings
+    /// panel, perspective-projected). Defaults to off, which keeps every
+    /// already-accepted gate's pixel-exact 2D rendering unchanged.
+    three_d: bool,
     locked: bool,
     /// The PIN and its length, if one was given.
     pin: Option<([u8; MAX_PIN], usize)>,
@@ -1022,6 +1050,7 @@ impl Desktop {
         dnd: false,
         scale: 1,
         language: libwoven::i18n::Language::English,
+        three_d: false,
         locked: false,
         pin: None,
         entry: [0; MAX_PIN],
@@ -1424,6 +1453,7 @@ impl Desktop {
                 libwoven::i18n::Language::English => "Language: English",
                 libwoven::i18n::Language::Chichewa => "Language: Chichewa",
             },
+            if self.three_d { "3D Desktop: On" } else { "3D Desktop: Off" },
         ]
     }
 
@@ -1795,8 +1825,12 @@ impl Desktop {
         }
     }
 
-    fn render_qs(&self, canvas: &mut Canvas<'_>) {
-        let area = self.qs_area();
+    /// The Quick Settings panel's content -- border, title fill, title text,
+    /// and every row -- drawn at `area`'s own position in `canvas`. Used
+    /// both for the ordinary flat 2D panel and, rendered once at local
+    /// origin into an offscreen texture, as the source the 3D mode's
+    /// perspective projection samples.
+    fn paint_qs_content(&self, canvas: &mut Canvas<'_>, area: Area) {
         let (x, y) = (area.x, area.y);
         outline(canvas, area, ACCENT);
         canvas.fill_rect(x + 1, y + 1, (area.width - 2) as usize, PANEL_ROW as usize, START_FILL);
@@ -1804,6 +1838,93 @@ impl Desktop {
         for (row, text) in self.qs_rows().iter().enumerate() {
             canvas.draw_text(x + 6, y + 1 + (1 + row as i32) * PANEL_ROW + 4, text, TEXT);
         }
+    }
+
+    fn render_qs(&self, canvas: &mut Canvas<'_>) {
+        let area = self.qs_area();
+        if self.three_d {
+            self.render_qs_3d(canvas, area);
+        } else {
+            self.paint_qs_content(canvas, area);
+        }
+    }
+
+    /// The Quick Settings panel, perspective-projected as a card tilted back
+    /// in 3D (its bottom edge stays put; its top edge recedes and narrows)
+    /// instead of blitted flat. The flat content is rendered once into
+    /// `QS_PANEL_TEXTURE` at local origin, then sampled by two
+    /// `textured_triangle_3d` calls per tile `canvas` this is invoked for
+    /// (the Quick Settings area spans several `TILE_HEIGHT`-tall tiles);
+    /// each call clips to its own `canvas`/depth bounds, so painting the
+    /// full projected quad on every tile is safe and only the tile's own
+    /// pixels are touched.
+    fn render_qs_3d(&self, canvas: &mut Canvas<'_>, area: Area) {
+        // SAFETY: single-threaded; this is the only live reference, and it
+        // does not outlive this call.
+        let texture_pixels = unsafe { &mut *QS_PANEL_TEXTURE.0.get() };
+        let Some(mut texture) =
+            Canvas::new(texture_pixels, 0, 0, area.width as usize, area.height as usize)
+        else {
+            return self.paint_qs_content(canvas, area);
+        };
+        self.paint_qs_content(&mut texture, Area::new(0, 0, area.width, area.height));
+
+        let half_width = (area.width / 2) << 16;
+        // `area.height - 1`, not `area.height`: the bottom edge is meant to
+        // land exactly on the panel's last pixel row (an inclusive bound),
+        // not one row past it (the exclusive size `area.height` would give).
+        let half_height = ((area.height - 1) << 16) / 2;
+        const DISTANCE: i32 = 200 << 16;
+        const TILT_DEPTH: i32 = 70 << 16;
+        let camera = Camera::new(
+            DISTANCE, // focal_length == distance: the (closest) bottom edge
+            // keeps its original flat scale; only the receding top edge
+            // narrows.
+            DISTANCE,
+            area.x + area.width / 2,
+            area.y + area.height / 2,
+        );
+        let (Some(top_left), Some(top_right), Some(bottom_left), Some(bottom_right)) = (
+            camera.project(-half_width, -half_height, TILT_DEPTH),
+            camera.project(half_width, -half_height, TILT_DEPTH),
+            camera.project(-half_width, half_height, 0),
+            camera.project(half_width, half_height, 0),
+        ) else {
+            return self.paint_qs_content(canvas, area);
+        };
+        let vertex = |(x, y, depth): (i32, i32, u16), u: u8, v: u8| Vertex3Tex::new(x, y, depth, u, v);
+
+        // SAFETY: single-threaded; this is the only live reference, and it
+        // does not outlive this call.
+        let depth_values = unsafe { &mut *QS_DEPTH.0.get() };
+        let Some(mut depth) =
+            DepthBuffer::new(depth_values, canvas.x(), canvas.y(), canvas.width(), canvas.height())
+        else {
+            return self.paint_qs_content(canvas, area);
+        };
+        depth.clear(u16::MAX);
+        // The projected quad is narrower than the flat panel's footprint at
+        // its receded top edge, so the corners it no longer covers would
+        // otherwise still show whatever the previous frame drew there (the
+        // flat panel, if 3D mode was just switched on) rather than the real
+        // desktop background underneath.
+        let height = self.height;
+        canvas.shade(|x, y| wallpaper(x, y, height));
+        let mut renderer = Renderer::new(canvas);
+        renderer.textured_triangle_3d(
+            &mut depth,
+            vertex(top_left, 0, 0),
+            vertex(top_right, 255, 0),
+            vertex(bottom_left, 0, 255),
+            &texture,
+        );
+        renderer.textured_triangle_3d(
+            &mut depth,
+            vertex(top_right, 255, 0),
+            vertex(bottom_right, 255, 255),
+            vertex(bottom_left, 0, 255),
+            &texture,
+        );
     }
 
     /// Close whichever panel is open. Returns the area to repaint.
@@ -2413,6 +2534,11 @@ impl Desktop {
                                 libwoven::i18n::Language::Chichewa => libwoven::i18n::Language::English,
                             };
                             log(&[b"woven-shell: language toggled"]);
+                            panel
+                        }
+                        8 => {
+                            self.three_d = !self.three_d;
+                            log(if self.three_d { &[b"woven-shell: 3D desktop on"] } else { &[b"woven-shell: 3D desktop off"] });
                             panel
                         }
                         _ => empty,

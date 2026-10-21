@@ -4429,6 +4429,15 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         serial::write_line(format_args!("[S20.16] textured 3D chrome demo: PASSED"));
         qemu_test_exit_success();
     }
+    #[cfg(feature = "stage20-17-test")]
+    {
+        if !stage20_17_self_test() {
+            serial::write_line(format_args!("[S20.17] 3D desktop Quick Settings: FAILED"));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!("[S20.17] 3D desktop Quick Settings: PASSED"));
+        qemu_test_exit_success();
+    }
     #[cfg(feature = "stage30-1-test")]
     {
         if !stage30_1_self_test() {
@@ -7741,6 +7750,7 @@ fn wait_hello_gui(pid: task::ProcessId) -> Option<(task::ProcessId, Result<i32, 
     feature = "stage20-13-test",
     feature = "stage20-14b-test",
     feature = "stage20-15-test",
+    feature = "stage20-17-test",
     feature = "system-apps"
 ))]
 const WOVEN_SHELL_IMAGE: &[u8] = include_bytes!(env!("WOVENHAT_SHELL_IMAGE"));
@@ -8123,7 +8133,7 @@ fn stage20_15_self_test() -> bool {
     // and Language were appended after Lock screen, so only the row-count
     // term needs updating).
     let button = (width - 54 - 5 * 20, top + 4);
-    let power_row = (width - 4 - 164 + 28, top - 2 - (9 * 14 + 2) + 1 + 14 + 7);
+    let power_row = (width - 4 - 164 + 28, top - 2 - (10 * 14 + 2) + 1 + 14 + 7);
     let (px, py) = (width / 2, height / 2);
     let opened = move_by(button.0 + 8 - px, button.1 + 8 - py) && click();
     if !step(
@@ -8360,7 +8370,7 @@ fn stage24_59_change_pin_self_test() -> bool {
     // row-count term needs updating, not the row index.
     let change_row = (
         width - 4 - 164 + 28,
-        top - 2 - (8 * 14 + 2) + 1 + 6 * 14 + 7,
+        top - 2 - (9 * 14 + 2) + 1 + 6 * 14 + 7,
     );
     let opened = move_by(button.0 + 8 - width / 2, button.1 + 8 - middle)
         && click()
@@ -8394,7 +8404,7 @@ fn stage24_59_change_pin_self_test() -> bool {
     // "Lock screen", so only the row-count term needs updating.
     let lock_row = (
         width - 4 - 164 + 28,
-        top - 2 - (8 * 14 + 2) + 1 + 5 * 14 + 7,
+        top - 2 - (9 * 14 + 2) + 1 + 5 * 14 + 7,
     );
     let qs_reopened = move_by(button.0 + 8 - change_row.0, button.1 + 8 - change_row.1) && click();
     let locked = qs_reopened
@@ -8867,7 +8877,7 @@ fn stage20_12_self_test() -> bool {
     // updating, not the row index.
     let lock_row = (
         width - 4 - 164 + 28,
-        top - 2 - (8 * 14 + 2) + 1 + 5 * 14 + 7,
+        top - 2 - (9 * 14 + 2) + 1 + 5 * 14 + 7,
     );
     let (px, py) = (width / 2, height / 2);
     let locked = move_by(button.0 + 8 - px, button.1 + 8 - py)
@@ -9079,7 +9089,7 @@ fn stage20_11_self_test() -> bool {
     let button = (width - 54 - 5 * 20 + 8, top + 12);
     let lock_row = (
         width - 4 - 164 + 28,
-        top - 2 - (8 * 14 + 2) + 1 + 5 * 14 + 7,
+        top - 2 - (9 * 14 + 2) + 1 + 5 * 14 + 7,
     );
     let (mut px, mut py) = (width / 2, height / 2);
     let lock = |px: &mut i32, py: &mut i32| {
@@ -9273,12 +9283,12 @@ fn stage20_10_self_test() -> bool {
     fn panel(
         width: i32,
         height: i32,
-        rows: [&str; 8],
+        rows: [&str; 9],
         beneath: impl Fn(i32, i32) -> u32,
         pointer: (i32, i32),
     ) -> bool {
         let top = height - 24;
-        let h = 9 * 14 + 2;
+        let h = 10 * 14 + 2;
         let (x0, y0) = (width - 4 - 164, top - 2 - h);
         let mut image = Surface::new(164, h as usize);
         let bounds = image.bounds();
@@ -9353,7 +9363,7 @@ fn stage20_10_self_test() -> bool {
     // pixels apart: Power off and Restart (Stage 20.15), then the toggles at
     // rows 3-5 under the title, and Lock screen.
     let button = (width - 54 - 5 * 20, top + 4);
-    let panel_y = top - 2 - (9 * 14 + 2);
+    let panel_y = top - 2 - (10 * 14 + 2);
     let row = |index: i32| (width - 4 - 164 + 28, panel_y + 1 + (1 + index) * 14 + 7);
     let wall = move |x: i32, y: i32| wallpaper(x, y, height);
 
@@ -9373,6 +9383,7 @@ fn stage20_10_self_test() -> bool {
                     "Lock screen",
                     "Change PIN",
                     "Language: English",
+                    "3D Desktop: Off",
                 ],
                 wall,
                 (button.0 + 8, button.1 + 8),
@@ -9401,6 +9412,7 @@ fn stage20_10_self_test() -> bool {
                     "Lock screen",
                     "Change PIN",
                     "Language: English",
+                    "3D Desktop: Off",
                 ],
                 wall,
                 (dx, dy),
@@ -9449,6 +9461,7 @@ fn stage20_10_self_test() -> bool {
                         "Lock screen",
                         "Change PIN",
                         "Language: English",
+                        "3D Desktop: Off",
                     ],
                     |_, _| QUIET,
                     (tx, ty),
@@ -9484,6 +9497,7 @@ fn stage20_10_self_test() -> bool {
                     "Lock screen",
                     "Change PIN",
                     "Language: English",
+                    "3D Desktop: Off",
                 ],
                 |x, y| wallpaper(x, y, full.1),
                 (sx, sy),
@@ -9496,7 +9510,7 @@ fn stage20_10_self_test() -> bool {
     // Back to 2x through the panel's scale row at the 1x geometry.
     let back_row = (
         full.0 - 4 - 164 + 28,
-        (full.1 - 24) - 2 - (9 * 14 + 2) + 1 + 3 * 14 + 7,
+        (full.1 - 24) - 2 - (10 * 14 + 2) + 1 + 3 * 14 + 7,
     );
     let restored = move_by(back_row.0 - px, back_row.1 - py)
         && click()
@@ -9526,6 +9540,173 @@ fn stage20_10_self_test() -> bool {
     }
     if task::kill_process(shell.as_u64(), 9).is_err()
         || !until(1000, || task::process_exited(shell))
+    {
+        return step("shell killed", false);
+    }
+    let _ = task::wait_process(shell.as_u64());
+    step(
+        "display returned to the terminal",
+        compositor::holder().is_none() && !compositor::is_presenting(),
+    )
+}
+
+/// Stage 20.17 acceptance: the 3D desktop mode's Quick Settings panel.
+///
+/// Toggling "3D Desktop" perspective-projects the panel (its bottom edge
+/// anchored, its top edge receded and narrowed) instead of blitting it
+/// flat. The kernel checks:
+/// - the flat panel's top-left corner is exactly where the 2D layout says;
+/// - after toggling 3D on, that same pixel is no longer panel content --
+///   the real (narrowed) top edge has moved inward, so wallpaper shows
+///   through -- while the panel's bottom-left corner, which the projection
+///   deliberately keeps anchored, is unchanged.
+///
+/// This does not claim the perspective math is pixel-perfect, only that a
+/// real, non-trivial 3D transform is applied and the content is still the
+/// same panel (same bottom anchor), not a different drawing.
+#[cfg(feature = "stage20-17-test")]
+fn stage20_17_self_test() -> bool {
+    use crate::display::rgb;
+    const ACCENT: u32 = rgb(90, 140, 220);
+    const WALLPAPER_TOP: u32 = rgb(18, 42, 74);
+    const WALLPAPER_BOTTOM: u32 = rgb(64, 28, 88);
+    const WHITE: u32 = rgb(255, 255, 255);
+
+    fn step(name: &str, ok: bool) -> bool {
+        serial::write_line(format_args!(
+            "[S20.17] {} {}",
+            name,
+            if ok { "PASS" } else { "FAIL" }
+        ));
+        ok
+    }
+    fn until(limit: u64, condition: impl Fn() -> bool) -> bool {
+        let start = timer::ticks();
+        loop {
+            if condition() {
+                return true;
+            }
+            if timer::ticks().wrapping_sub(start) > limit {
+                return false;
+            }
+            task::yield_now();
+        }
+    }
+    fn packet(dx: i16, screen_dy: i16, left: bool) -> bool {
+        let dy = -screen_dy;
+        let flags =
+            0x08 | u8::from(left) | if dx < 0 { 0x10 } else { 0 } | if dy < 0 { 0x20 } else { 0 };
+        [flags, dx as u8, dy as u8].into_iter().all(mouse::loopback)
+    }
+    fn move_by(mut dx: i32, mut dy: i32) -> bool {
+        while dx != 0 || dy != 0 {
+            let (sx, sy) = (dx.clamp(-100, 100), dy.clamp(-100, 100));
+            if !packet(sx as i16, sy as i16, false) {
+                return false;
+            }
+            dx -= sx;
+            dy -= sy;
+        }
+        true
+    }
+    fn click() -> bool {
+        packet(0, 0, true) && packet(0, 0, false)
+    }
+    fn wallpaper(x: i32, y: i32, height: i32) -> u32 {
+        let span = (height - 1).max(1);
+        let t = (y.clamp(0, span) * 255 / span) as u8;
+        let base = crate::display::blend_pixel(WALLPAPER_BOTTOM, WALLPAPER_TOP, t);
+        if x % 32 == 0 || y % 32 == 0 {
+            crate::display::blend_pixel(WHITE, base, 28)
+        } else {
+            base
+        }
+    }
+
+    let capabilities = capability::CapabilitySet::only(capability::Capability::Console)
+        .with(capability::Capability::DisplayIo)
+        .with(capability::Capability::InputIo)
+        .with(capability::Capability::Ipc);
+    let Some(program) = userspace::load_elf_with_argv(WOVEN_SHELL_IMAGE, &["/bin/woven-shell"])
+    else {
+        return step("shell image loads", false);
+    };
+    let Ok((shell, _, _)) = task::spawn_user_system_service("woven-shell", program, capabilities)
+    else {
+        return step("shell spawned", false);
+    };
+    if !step(
+        "shell took the display",
+        until(3000, || {
+            compositor::holder() == Some(shell.as_u64()) && compositor::is_presenting()
+        }),
+    ) {
+        return false;
+    }
+    let Some((width, height)) = compositor::dimensions() else {
+        return step("desktop geometry", false);
+    };
+    let (width, height) = (width as i32, height as i32);
+    let top = height - 24;
+    const QS_ROWS: i32 = 9;
+    const PANEL_ROW: i32 = 14;
+    const CENTER_WIDTH: i32 = 164;
+    let panel_height = (1 + QS_ROWS) * PANEL_ROW + 2;
+    let (panel_x, panel_y) = (width - 4 - CENTER_WIDTH, top - 2 - panel_height);
+
+    let button = (width - 54 - 5 * 20, top + 4);
+    let (mut px, mut py) = (width / 2, height / 2);
+    let opened = move_by(button.0 + 8 - px, button.1 + 8 - py)
+        && click()
+        && until(1000, || compositor::pixel(panel_x, panel_y) == Ok(ACCENT));
+    (px, py) = (button.0 + 8, button.1 + 8);
+    if !step("the flat panel's top-left corner is exactly where expected", opened) {
+        return false;
+    }
+
+    // The panel spans several tiles; the top-left check above only proves
+    // the first has rendered. Wait for the last one (the bottom-left
+    // corner) too before treating the flat panel as fully settled.
+    if !step(
+        "the flat panel's bottom-left corner settles before toggling 3D",
+        until(1000, || {
+            compositor::pixel(panel_x, panel_y + panel_height - 1) == Ok(ACCENT)
+        }),
+    ) {
+        return false;
+    }
+    let bottom_left_before = compositor::pixel(panel_x, panel_y + panel_height - 1);
+
+    // Row 8 of 9, "3D Desktop".
+    let toggle_row = (
+        width - 4 - CENTER_WIDTH + 28,
+        top - 2 - (QS_ROWS * PANEL_ROW + 2) + 1 + 8 * PANEL_ROW + 7,
+    );
+    let toggled = move_by(toggle_row.0 - px, toggle_row.1 - py) && click();
+    if !step("the 3D Desktop row is reachable and clicked", toggled) {
+        return false;
+    }
+    let projected = until(1000, || {
+        compositor::pixel(panel_x, panel_y) == Ok(wallpaper(panel_x, panel_y, height))
+    });
+    if !step(
+        "3D mode narrows the top edge: the old top-left corner is now wallpaper",
+        projected,
+    ) {
+        return false;
+    }
+    let anchored = bottom_left_before == Ok(ACCENT)
+        && until(1000, || {
+            compositor::pixel(panel_x, panel_y + panel_height - 1) == bottom_left_before
+        });
+    if !step(
+        "3D mode keeps the bottom edge anchored: the bottom-left corner is unchanged",
+        anchored,
+    ) {
+        return false;
+    }
+
+    if task::kill_process(shell.as_u64(), 9).is_err() || !until(1000, || task::process_exited(shell))
     {
         return step("shell killed", false);
     }
