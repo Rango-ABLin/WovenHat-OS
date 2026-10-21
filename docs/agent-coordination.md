@@ -1,5 +1,14 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - Stage 24.43 (2026-10-21)
+
+Added generation-tagged managed TPM policy-session leases, stale/active
+guards, one-shot quote consumption, and retryable `TPM2_FlushContext`
+cleanup. Static gates, executable QEMU, and signed system-apps 1/2/4-CPU
+acceptance pass. Context save/load, nonce refresh, key lifecycle, credential
+decisions, recovery, and physical qualification remain open. USB remains
+untouched.
+
 ## Codex - Stage 24.42 (2026-10-21)
 
 Added bounded SHA-256 Quote cpHash/HMAC derivation for the current null-salt,

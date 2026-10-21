@@ -1,5 +1,14 @@
 # WovenHat OS Architecture & Codebase Guide
 
+### Stage 24.43 - managed TPM policy-session lifecycle
+
+`PolicySessionLease` owns one generation-tagged session handle and tracks
+active/nonce-stale state. Managed PolicyPCR and quote operations require a
+usable lease; a successful quote marks it stale, while `flush_policy_session`
+performs `TPM2_FlushContext` and invalidates it only after exact success.
+Cleanup failures preserve the active token for retry, preventing silent
+stale-handle reuse.
+
 ### Stage 24.42 - policy-session quote HMAC derivation
 
 `derive_quote_session_hmac` hashes the exact Quote command code, handle, and

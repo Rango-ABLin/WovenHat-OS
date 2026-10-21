@@ -1,5 +1,20 @@
 # Stage status
 
+## Stage 24.43 managed TPM policy-session lifecycle (2026-10-21)
+
+Policy sessions now have a generation-tagged kernel-owned lease. Managed
+transcript and quote helpers reject inactive or nonce-stale leases; a
+successful quote consumes the lease for authority reuse, and a successful
+`FlushContext` irreversibly invalidates it. Flush failures leave the lease
+active for bounded retry. Host tests (89), all-targets and affected feature
+Clippy, executable QEMU, and signed system-apps 1/2/4-CPU acceptance pass.
+Evidence is under
+`audit-artifacts/stage24.43-managed-policy-session-20261021`.
+
+TPM context save/load, session nonce refresh after every authenticated TPM
+command, provisioned-key lifecycle, credential decisions, recovery, and
+physical qualification remain required.
+
 ## Stage 24.42 policy-session quote HMAC derivation (2026-10-21)
 
 The TPM2 layer now derives a SHA-256 quote authorization HMAC from the

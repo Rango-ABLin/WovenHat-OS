@@ -8,6 +8,7 @@
 //! require authenticated PCR policy and sealed NV provisioning.
 
 use crate::{hal::acpi::Tpm2Info, paging};
+use core::sync::atomic::{AtomicU64, Ordering};
 use p256::ecdsa::{Signature as EcdsaSignature, VerifyingKey};
 use rsa::{pkcs1v15, pss, signature::Verifier, BigUint, RsaPublicKey};
 use sha2::{Digest, Sha256};
@@ -34,6 +35,8 @@ const TPM_CC_GET_RANDOM: u32 = 0x0000_017b;
 const TPM_CC_READ_PUBLIC: u32 = 0x0000_0173;
 #[allow(dead_code)]
 const TPM_CC_QUOTE: u32 = 0x0000_0158;
+#[allow(dead_code)]
+const TPM_CC_FLUSH_CONTEXT: u32 = 0x0000_0165;
 const TPM_CC_PCR_READ: u32 = 0x0000_017e;
 #[allow(dead_code)]
 const TPM_CC_NV_READ_PUBLIC: u32 = 0x0000_0169;
@@ -107,6 +110,38 @@ pub struct PolicySession {
     pub handle: u32,
     pub nonce_tpm_length: u8,
     pub nonce_tpm: [u8; 32],
+}
+
+static NEXT_POLICY_SESSION_GENERATION: AtomicU64 = AtomicU64::new(1);
+
+/// Owned lifecycle state for one TPM policy session. A successful quote marks
+/// the nonce stale so the same session cannot be reused for another authority
+/// decision without an explicit lifecycle operation.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PolicySessionLease {
+    session: PolicySession,
+    generation: u64,
+    active: bool,
+    nonce_stale: bool,
+}
+
+impl PolicySessionLease {
+    #[allow(dead_code)]
+    pub fn generation(self) -> u64 {
+        self.generation
+    }
+
+    #[allow(dead_code)]
+    pub fn is_active(self) -> bool {
+        self.active
+    }
+
+    fn usable(&self) -> Result<&PolicySession, Error> {
+        if !self.active || self.nonce_stale {
+            return Err(Error::InvalidPolicy);
+        }
+        Ok(&self.session)
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1092,6 +1127,40 @@ pub fn quote_with_derived_policy_hmac(
     )
 }
 
+/// Issue one quote through a managed policy-session token. A successful quote
+/// consumes the token's nonce for authority purposes; callers must flush the
+/// session before starting another lifecycle.
+#[allow(dead_code)]
+#[allow(clippy::too_many_arguments)]
+pub fn quote_with_managed_policy_session(
+    info: Tpm2Info,
+    signing_handle: u32,
+    qualifying_data: &[u8],
+    pcr: u8,
+    scheme: QuoteSigningScheme,
+    lease: &mut PolicySessionLease,
+    nonce_caller: &[u8],
+    attributes: u8,
+    auth_value: &[u8],
+) -> Result<QuoteExecution, Error> {
+    let session = *lease.usable()?;
+    let result = quote_with_derived_policy_hmac(
+        info,
+        signing_handle,
+        qualifying_data,
+        pcr,
+        scheme,
+        &session,
+        nonce_caller,
+        attributes,
+        auth_value,
+    );
+    if result.is_ok() {
+        lease.nonce_stale = true;
+    }
+    result
+}
+
 fn decode_get_random(response: &[u8], output: &mut [u8]) -> Result<usize, Error> {
     if response.len() < 12 {
         return Err(Error::MalformedResponse);
@@ -1199,6 +1268,24 @@ pub fn start_policy_session(
     decode_policy_session_start(&response[..response_size])
 }
 
+/// Start a policy session with an owned lifecycle token. The generation is
+/// never reused by the kernel until the atomic counter wraps, and the token is
+/// required by the managed transcript/quote helpers.
+#[allow(dead_code)]
+pub fn start_managed_policy_session(
+    info: Tpm2Info,
+    nonce_caller: &[u8],
+) -> Result<PolicySessionLease, Error> {
+    let session = start_policy_session(info, nonce_caller)?;
+    let generation = NEXT_POLICY_SESSION_GENERATION.fetch_add(1, Ordering::Relaxed);
+    Ok(PolicySessionLease {
+        session,
+        generation,
+        active: true,
+        nonce_stale: false,
+    })
+}
+
 #[allow(dead_code)]
 fn encode_policy_pcr(
     session_handle: u32,
@@ -1239,6 +1326,50 @@ pub fn apply_policy_pcr(
     let mut response = [0_u8; 16];
     let response_size = execute(info, &command, &mut response)?;
     decode_policy_command_response(&response[..response_size])
+}
+
+/// Apply `PolicyPCR` through a managed session token. A stale or flushed token
+/// cannot be reused for a later authorization operation.
+#[allow(dead_code)]
+pub fn apply_managed_policy_pcr(
+    info: Tpm2Info,
+    lease: &PolicySessionLease,
+    pcr: u8,
+    expected_digest: &[u8; 32],
+) -> Result<(), Error> {
+    let session = lease.usable()?;
+    apply_policy_pcr(info, session.handle, pcr, expected_digest)
+}
+
+fn encode_flush_context(handle: u32, output: &mut [u8; 14]) -> Result<(), Error> {
+    if handle == 0 {
+        return Err(Error::InvalidDescriptor);
+    }
+    output[..2].copy_from_slice(&TPM_ST_NO_SESSIONS.to_be_bytes());
+    output[2..6].copy_from_slice(&14_u32.to_be_bytes());
+    output[6..10].copy_from_slice(&TPM_CC_FLUSH_CONTEXT.to_be_bytes());
+    output[10..14].copy_from_slice(&handle.to_be_bytes());
+    Ok(())
+}
+
+/// Flush a managed TPM policy session. Failure leaves the token active so a
+/// caller can retry cleanup; success irreversibly invalidates its token.
+#[allow(dead_code)]
+pub fn flush_policy_session(
+    info: Tpm2Info,
+    lease: &mut PolicySessionLease,
+) -> Result<(), Error> {
+    if !lease.active {
+        return Err(Error::InvalidPolicy);
+    }
+    let mut command = [0_u8; 14];
+    encode_flush_context(lease.session.handle, &mut command)?;
+    let mut response = [0_u8; 16];
+    let response_size = execute(info, &command, &mut response)?;
+    decode_policy_command_response(&response[..response_size])?;
+    lease.active = false;
+    lease.nonce_stale = true;
+    Ok(())
 }
 
 #[allow(dead_code)]
@@ -1914,6 +2045,14 @@ pub fn self_test() -> bool {
         || u16::from_be_bytes(policy_quote_command[75..77].try_into().unwrap()) != 16
         || policy_quote_command[77..93] != quote_nonce
         || u16::from_be_bytes(policy_quote_command[93..95].try_into().unwrap()) != TPM_ALG_ECDSA
+    {
+        return false;
+    }
+    let mut flush_command = [0_u8; 14];
+    if encode_flush_context(0x0300_0000, &mut flush_command).is_err()
+        || u32::from_be_bytes(flush_command[6..10].try_into().unwrap()) != TPM_CC_FLUSH_CONTEXT
+        || u32::from_be_bytes(flush_command[10..14].try_into().unwrap()) != 0x0300_0000
+        || encode_flush_context(0, &mut flush_command) != Err(Error::InvalidDescriptor)
     {
         return false;
     }
