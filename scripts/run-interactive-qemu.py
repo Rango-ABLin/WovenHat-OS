@@ -54,6 +54,17 @@ def main():
         output = root / 'target' / 'system-apps' / '0.8.0'
         manifest = json.loads((output / 'manifest.json').read_text(encoding='utf-8'))
         packages = {item['id']: output / item['package'] for item in manifest['apps']}
+        # The production kernel embeds the signed WovenPackage service image
+        # separately from the ten catalog applications. Build it here so the
+        # interactive launcher is self-contained and does not depend on a
+        # caller-prepared WOVENHAT_PACKAGE_IMAGE environment variable.
+        package_service = subprocess.check_output(
+            [sys.executable, str(root / 'scripts' / 'build-package-service.py')],
+            cwd=root,
+            env=package_env,
+            text=True,
+        ).strip()
+        build_env['WOVENHAT_PACKAGE_IMAGE'] = package_service
         build_env['WOVENHAT_CALCULATOR_IMAGE'] = str(packages['woven-calculator'])
         build_env['WOVENHAT_TERMINAL_IMAGE'] = str(packages['woven-terminal'])
         build_env['WOVENHAT_FILES_IMAGE'] = str(packages['woven-files'])
