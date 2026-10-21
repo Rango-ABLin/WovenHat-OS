@@ -1370,6 +1370,14 @@ and expose a privileged, read-only capability query (syscall 235 and the
 wake-source handling, and physical qualification remain prerequisites for the
 later sleep/wake implementation.
 
+Stage 25.2 - CPU idle capability boundary
+
+Accepted bounded slice: report architectural `HLT`, optional `MONITOR/MWAIT`,
+and invariant-TSC support through a privileged read-only query (syscall 236
+and the `libwoven` wrapper). The scheduler remains on the tested `STI+HLT`
+path; MWAIT, frequency MSRs, deep C-state policy, and residency accounting
+remain later work.
+
 Implement:
 
 ACPI poweroff

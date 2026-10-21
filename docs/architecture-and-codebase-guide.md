@@ -3487,3 +3487,13 @@ the query, and copies only after validating the userspace destination.
 `libwoven::power_capabilities` is the corresponding typed wrapper. This ABI
 does not initiate a power transition: S3 entry/restore, driver quiescing,
 wake-source policy, and hardware qualification remain separate work.
+
+## Stage 25.2 CPU idle capability boundary
+
+`kernel/src/hal/cpu.rs` reads only CPUID leaves to report `HLT`, optional
+`MONITOR/MWAIT`, and invariant-TSC support. Syscall 236 applies the
+`PowerControl` authority boundary, audits the read, validates the destination,
+and copies three capability bytes without executing an idle instruction.
+`libwoven::cpu_idle_capabilities` is the typed wrapper. The current scheduler
+continues to use the established interrupt-safe `STI+HLT` sequence; no MWAIT
+or frequency MSR is enabled by this ABI.

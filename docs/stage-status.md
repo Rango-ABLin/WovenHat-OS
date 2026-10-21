@@ -1,5 +1,21 @@
 # Stage status
 
+## Stage 25.2 - CPU idle capability boundary (2026-10-21)
+
+The CPU HAL now reports architectural idle capabilities through syscall 236
+and `libwoven::cpu_idle_capabilities`: baseline `HLT`, optional
+`MONITOR/MWAIT`, and invariant-TSC support. The query requires `PowerControl`,
+validates the userspace output range, records an audit event, and changes no
+CPU state. The scheduler continues to use only its existing interrupt-safe
+`STI+HLT` idle path.
+
+Production-kernel Clippy, `libwoven` Clippy/tests, and signed system-apps
+QEMU acceptance on 1/2/4 CPUs pass. Evidence is in
+`docs/audit-stage25-2-cpu-idle-capabilities-2026-10-21.md`.
+
+This does not claim MWAIT execution, frequency scaling, deep C-state policy,
+per-CPU residency accounting, or suspend/resume.
+
 ## Stage 25.1 - ACPI power capability boundary (2026-10-21)
 
 The kernel now discovers firmware `_S3` sleep types alongside the existing
