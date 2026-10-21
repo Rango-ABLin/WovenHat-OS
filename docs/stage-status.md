@@ -1,5 +1,19 @@
 # Stage status
 
+## Stage 30.4 - compositor frame-present-latency micro-benchmark (2026-10-21)
+
+Added a `hello-gui --compositor-benchmark` mode: 500 round trips of
+toggling one pixel of a placed window and flushing it to the framebuffer
+(`surface.write` + `compositor_present`), timed with `libwoven::cycles()`.
+Each iteration alternates the pixel's colour so the compositor cannot skip
+the frame as undamaged, which would understate real cost. Validated on
+1/2/4 CPUs via `stage30-4-test`: ~338,000-353,000 cycles min (~416,000-
+456,000 average) under QEMU TCG, roughly comparable to the Stage 30.3
+filesystem-write cost. This is a single-pixel, single-window worst-case
+floor, not a measurement of full-desktop frame time with many windows and
+damage regions, and it is a TCG emulation number, not real hardware or
+real display refresh timing.
+
 ## Stage 30.3 - filesystem-latency micro-benchmark (2026-10-21)
 
 Added a `hello-gui --fs-benchmark` mode and a `libwoven::seek` wrapper
