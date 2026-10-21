@@ -45,6 +45,8 @@ pub enum PrepareError {
     DriverRefused,
     /// The low-memory wake image could not be installed.
     TrampolineUnavailable,
+    /// The firmware FACS could not accept the reserved wake trampoline.
+    WakeVectorUnavailable,
 }
 
 /// Driver-quiescence preparation for a future S3 transition. Construction
@@ -57,6 +59,7 @@ pub enum PrepareError {
 pub struct SuspendPreparation {
     plan: crate::driver::SuspendPlan,
     trampoline: crate::smp::WakeTrampoline,
+    wake_vector: crate::hal::acpi::FacsWakeVector,
     context: CpuResumeContext,
 }
 
@@ -158,9 +161,17 @@ pub fn prepare_suspend() -> Result<SuspendPreparation, PrepareError> {
         let _ = crate::driver::resume_all(plan);
         return Err(PrepareError::TrampolineUnavailable);
     };
+    let Some(wake_vector) = crate::hal::acpi::install_facs_wake_vector(
+        crate::smp::wake_page().expect("wake page checked before preparation"),
+    ) else {
+        let _ = crate::smp::release_wake_trampoline(trampoline);
+        let _ = crate::driver::resume_all(plan);
+        return Err(PrepareError::WakeVectorUnavailable);
+    };
     Ok(SuspendPreparation {
         plan,
         trampoline,
+        wake_vector,
         context,
     })
 }
@@ -172,8 +183,12 @@ pub fn prepare_suspend() -> Result<SuspendPreparation, PrepareError> {
 )]
 pub fn abort_suspend(preparation: SuspendPreparation) -> bool {
     let context_valid = preparation.context.valid();
+    let wake_vector_restored = crate::hal::acpi::restore_facs_wake_vector(preparation.wake_vector);
     let trampoline_released = crate::smp::release_wake_trampoline(preparation.trampoline);
-    context_valid && trampoline_released && crate::driver::resume_all(preparation.plan)
+    context_valid
+        && wake_vector_restored
+        && trampoline_released
+        && crate::driver::resume_all(preparation.plan)
 }
 
 #[expect(

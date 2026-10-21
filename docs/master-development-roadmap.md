@@ -1425,6 +1425,14 @@ descriptor tables in kernel-owned suspend preparation storage. This does not
 restore registers, coordinate secondary CPUs, install a FACS vector, enter S3,
 or claim firmware or physical suspend/resume qualification.
 
+Stage 25.9 - transactional FACS wake-vector installation
+
+Accepted bounded slice: install the reserved low wake-page address in the
+validated 32-bit and 64-bit FACS waking-vector fields, retain their previous
+values in the private preparation token, and restore them on abort. This does
+not coordinate secondary CPUs, restore CPU registers, write PM1 S3 controls,
+or claim firmware or physical suspend/resume qualification.
+
 ACPI poweroff
 reboot
 sleep

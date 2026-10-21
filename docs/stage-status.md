@@ -1,5 +1,19 @@
 # Stage status
 
+## Stage 25.9 - transactional FACS wake-vector installation (2026-10-21)
+
+Suspend preparation now installs the reserved low wake-page address into both
+validated FACS waking-vector fields and retains the previous values in the
+private preparation token. Abort restores both firmware fields before
+releasing the trampoline and resuming drivers. The guarded transaction
+self-test passed on 1/2/4 CPUs.
+
+Evidence is in `docs/audit-stage25-9-facs-wake-vector-2026-10-21.md` and the
+retained `audit-artifacts/stage25.9-*` directories.
+
+This does not claim secondary-CPU coordination, CPU register restoration,
+PM1 S3 entry, firmware wake, or physical suspend/resume qualification.
+
 ## Stage 25.8 - CPU resume-context capture (2026-10-21)
 
 The suspend preparation token now captures the current CPU control state into

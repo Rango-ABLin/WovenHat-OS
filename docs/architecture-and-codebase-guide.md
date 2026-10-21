@@ -3581,3 +3581,21 @@ boot on 1/2/4 CPUs. The token remains private to the power subsystem, and
 abort validates it before releasing the wake trampoline and resuming drivers.
 No register restore, FACS write, secondary-CPU handoff, S3 entry, or firmware
 wake is implemented by this stage.
+
+## Stage 25.9 transactional FACS wake-vector installation
+
+`hal::acpi::install_facs_wake_vector` uses the discovery-validated direct
+physical map to write the reserved low wake-page address to the fixed 32-bit
+and 64-bit FACS waking-vector fields. It first copies the prior values into a
+private `FacsWakeVector` owner token; `restore_facs_wake_vector` writes those
+values back during abort. A small lock serializes firmware-field mutations,
+and the fixed writes run with interrupts disabled. The power preparation
+transaction installs the vector only after driver quiescence, trampoline
+staging, and CPU-context validation; any failure releases the trampoline and
+resumes drivers.
+
+The `stage25-9-test` feature tests the patch/restore transaction and rejects a
+non-32-bit target without touching firmware memory. The actual FACS write path
+is therefore part of production suspend preparation, while no suspend action
+is exposed yet. Secondary-CPU quiescence, CPU-state restoration, PM1 S3 entry,
+firmware wake, and physical qualification remain later prerequisites.

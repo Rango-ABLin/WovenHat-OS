@@ -142,6 +142,15 @@ coordination, FACS vector installation, S3 entry, and physical qualification
 remain open. See
 `docs/audit-stage25-8-cpu-resume-context-2026-10-21.md`.
 
+## Codex - Stage 25.9 transactional FACS wake-vector installation (2026-10-21)
+
+The shared branch now installs the reserved low wake-page address into both
+validated FACS waking-vector fields and retains the original values for
+transactional abort. The guarded byte-level transaction self-test passes on
+1/2/4 CPUs. No suspend action, PM1 S3 write, secondary-CPU handoff, or
+physical wake claim is made. See
+`docs/audit-stage25-9-facs-wake-vector-2026-10-21.md`.
+
 ## Codex - Stage 24.60 release-key provisioning (2026-10-21)
 
 Production WAPP packaging now requires explicit signing-seed and trusted

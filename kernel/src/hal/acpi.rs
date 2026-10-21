@@ -62,10 +62,106 @@ pub struct Facs {
 
 /// The power information found at boot.
 static POWER: spin::Mutex<Option<Power>> = spin::Mutex::new(None);
+static FACS_WAKE_LOCK: spin::Mutex<()> = spin::Mutex::new(());
 
 /// What ACPI discovery found about power-off and reset, if it ran.
 pub fn power() -> Option<Power> {
     *POWER.lock()
+}
+
+/// Ownership token for the FACS waking-vector mutation. The previous values
+/// are retained so an aborted suspend can restore firmware state exactly.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct FacsWakeVector {
+    address: u64,
+    previous_32: u32,
+    previous_64: u64,
+}
+
+fn patch_facs_vectors(bytes: &mut [u8; 64], target: u64) -> Option<(u32, u64)> {
+    let target_32 = u32::try_from(target).ok()?;
+    let previous_32 = read_u32(bytes, 12);
+    let previous_64 = read_u64(bytes, 24);
+    bytes[12..16].copy_from_slice(&target_32.to_le_bytes());
+    bytes[24..32].copy_from_slice(&target.to_le_bytes());
+    Some((previous_32, previous_64))
+}
+
+/// Install both ACPI waking-vector forms to the same low physical trampoline.
+/// The FACS was range-validated during discovery; the direct physical map is
+/// used only for these fixed, volatile firmware fields.
+pub(crate) fn install_facs_wake_vector(target: u64) -> Option<FacsWakeVector> {
+    if target == 0 || target & 0xfff != 0 {
+        return None;
+    }
+    let power = power()?;
+    let facs = power.facs?;
+    let offset = crate::paging::physical_memory_offset()?;
+    let address = offset.checked_add(facs.address)?;
+    let _guard = FACS_WAKE_LOCK.lock();
+    let mut bytes = [0_u8; 64];
+    // SAFETY: discovery validated the complete 64-byte FACS range and the
+    // direct map is the bootloader-provided mapping of firmware memory.
+    unsafe {
+        for (index, byte) in bytes.iter_mut().enumerate() {
+            *byte = (address as *const u8).add(index).read_volatile();
+        }
+    }
+    let (previous_32, previous_64) = patch_facs_vectors(&mut bytes, target)?;
+    // SAFETY: the same validated FACS fields are written back as volatile
+    // firmware-visible values; interrupts cannot interleave this transaction.
+    x86_64::instructions::interrupts::without_interrupts(|| unsafe {
+        (address as *mut u32).add(3).write_volatile(u32::from_le_bytes(
+            bytes[12..16].try_into().expect("fixed FACS field"),
+        ));
+        (address as *mut u64).add(3).write_volatile(u64::from_le_bytes(
+            bytes[24..32].try_into().expect("fixed FACS field"),
+        ));
+    });
+    Some(FacsWakeVector {
+        address: facs.address,
+        previous_32,
+        previous_64,
+    })
+}
+
+pub(crate) fn restore_facs_wake_vector(vector: FacsWakeVector) -> bool {
+    let Some(offset) = crate::paging::physical_memory_offset() else {
+        return false;
+    };
+    let Some(address) = offset.checked_add(vector.address) else {
+        return false;
+    };
+    let _guard = FACS_WAKE_LOCK.lock();
+    // SAFETY: the token was created only after discovery validated this FACS
+    // range; restore uses the exact two fields captured by that token.
+    x86_64::instructions::interrupts::without_interrupts(|| unsafe {
+        (address as *mut u32)
+            .add(3)
+            .write_volatile(vector.previous_32);
+        (address as *mut u64)
+            .add(3)
+            .write_volatile(vector.previous_64);
+    });
+    true
+}
+
+#[cfg(feature = "stage25-9-test")]
+pub fn facs_wake_vector_self_test() -> bool {
+    let mut bytes = [0_u8; 64];
+    bytes[12..16].copy_from_slice(&0x0009_8000_u32.to_le_bytes());
+    bytes[24..32].copy_from_slice(&0x0000_0000_0009_8000_u64.to_le_bytes());
+    let Some((previous_32, previous_64)) = patch_facs_vectors(&mut bytes, 0x0008_0000) else {
+        return false;
+    };
+    let installed = read_u32(&bytes, 12) == 0x0008_0000
+        && read_u64(&bytes, 24) == 0x0008_0000;
+    bytes[12..16].copy_from_slice(&previous_32.to_le_bytes());
+    bytes[24..32].copy_from_slice(&previous_64.to_le_bytes());
+    installed
+        && read_u32(&bytes, 12) == 0x0009_8000
+        && read_u64(&bytes, 24) == 0x0009_8000
+        && patch_facs_vectors(&mut bytes, 0x1_0000_0000).is_none()
 }
 
 #[derive(Clone, Copy, Default)]
