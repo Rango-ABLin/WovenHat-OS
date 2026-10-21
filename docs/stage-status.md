@@ -1,5 +1,21 @@
 # Stage status
 
+## Stage 30.3 - filesystem-latency micro-benchmark (2026-10-21)
+
+Added a `hello-gui --fs-benchmark` mode and a `libwoven::seek` wrapper
+(`syscall::lseek` didn't have one yet). It times 500 seek+write and
+seek+read round trips of a 256-byte payload against a kernel-pre-created
+scratch file, reporting write and read separately since they're distinct
+syscalls with distinct costs. Validated on 1/2/4 CPUs via `stage30-3-test`:
+write averages ~515,000-586,000 cycles, read averages ~300,000-366,000
+cycles under QEMU TCG (both roughly an order of magnitude more than the
+Stage 30.1 syscall baseline and comparable to the Stage 30.2 IPC baseline,
+consistent with filesystem writes going through VFS node lookup, access
+checks, and a full buffer copy per call). These are TCG emulation numbers
+for the in-RAM VFS path, not real disk I/O latency or native hardware
+timing; they establish a baseline and a repeatable tool, not an absolute
+performance claim.
+
 ## Stage 20.17 - 3D desktop mode: Quick Settings panel (2026-10-21)
 
 WovenShell's Quick Settings panel can now render as a real, perspective-
