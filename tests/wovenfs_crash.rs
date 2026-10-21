@@ -355,6 +355,74 @@ fn replay_is_idempotent() {
 }
 
 #[test]
+fn interrupted_recovery_replays_committed_data_at_every_write_boundary() {
+    // The existing crash tests cut power during a transaction. This second
+    // dimension cuts power AGAIN during mount-time journal replay, including
+    // after some home-location sectors were restored but before retirement.
+    let payload: Vec<u8> = (0..1500u32).map(|index| (index % 241) as u8).collect();
+    let base = formatted();
+    let inode = {
+        let mut volume = Volume::mount(base.clone()).expect("mount baseline");
+        volume.create(1, "recover.bin", 0o644, 1).expect("create");
+        volume.lookup(1, "recover.bin").expect("lookup").inode
+    };
+    let full_writes = write_count(&base, |volume| {
+        volume.write_file(inode, &payload, 2).expect("write");
+    });
+    assert!(full_writes > 3, "expected a journaled multi-sector write");
+
+    // Refuse the final journal-retirement write: commit, home writes and
+    // checkpoint are on disk, but replay still sees the committed descriptor.
+    let pending = base.fork(Some(full_writes - 1));
+    let mut volume = Volume::mount(pending.clone()).expect("mount before write");
+    assert_eq!(
+        volume.write_file(inode, &payload, 2),
+        Err(Error::Device),
+        "the simulated final write must fail"
+    );
+    drop(volume);
+
+    let replay_probe = pending.fork(None);
+    Volume::mount(replay_probe.clone()).expect("uninterrupted recovery");
+    let replay_writes = replay_probe.writes();
+    assert!(replay_writes > 1, "expected home writes and journal retirement");
+
+    for cut in 0..=replay_writes {
+        let interrupted = pending.fork(Some(cut));
+        let first = Volume::mount(interrupted.clone());
+        if cut < replay_writes {
+            assert!(
+                matches!(first, Err(Error::Device)),
+                "replay cut at {cut} unexpectedly succeeded"
+            );
+        } else {
+            assert!(first.is_ok(), "replay with all writes allowed failed");
+        }
+        drop(first);
+
+        // The second recovery gets a fresh power-on write budget.
+        let settled = interrupted.fork(None);
+        let mut recovered = mount_consistent(&settled, &format!("replay cut at {cut}"));
+        let mut output = vec![0u8; MAX_FILE_SIZE];
+        let count = recovered.read_file(inode, &mut output).expect("recovered read");
+        assert_eq!(
+            &output[..count],
+            &payload[..],
+            "replay cut at {cut} lost committed data"
+        );
+        drop(recovered);
+
+        let after_recovery = settled.sectors();
+        Volume::mount(settled.clone()).expect("idempotent third mount");
+        assert_eq!(
+            settled.sectors(),
+            after_recovery,
+            "replay cut at {cut} changed disk on a subsequent mount"
+        );
+    }
+}
+
+#[test]
 fn a_torn_journal_payload_is_rejected_by_the_commit_checksum() {
     // Flip a byte in a staged payload while leaving descriptor and commit
     // intact. The commit checksum must notice and recovery must discard the
