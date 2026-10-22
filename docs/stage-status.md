@@ -6,6 +6,12 @@ The GUI now performs a bounded IPC inventory request against the supervised
 service when it opens, displaying target-service availability without gaining
 storage authority.
 
+The signed catalog containing this client passes on 1/2/4 CPUs. The exact
+rebuilt ISO is `audit-artifacts/stage28-gui-service.iso`, SHA-256
+`1280f2ce834ef3f8b7581b4b02ff3219ed156936cbe200b00fa188126cabeeec`; exact
+OVMF/QEMU boot gates pass on 1/2/4 CPUs with serial evidence in the matching
+`stage28-gui-service-{1cpu,2cpu,4cpu}.log` files.
+
 Added `libwoven::installer_ipc`, a fixed-capacity versioned WIP/WOP request
 and response ABI, and a separate `woven-installer --service` daemon. The
 kernel starts it as a `SystemService` with IPC, file, and storage authority

@@ -5,6 +5,10 @@
 The graphical installer now discovers `sys.storage.installer` and sends a
 bounded read-only inventory request on GUI startup. It displays only service
 availability; no disk handle or mutation authority is passed to the GUI.
+The updated signed catalog passes on 1/2/4 CPUs, and exact ISO
+`audit-artifacts/stage28-gui-service.iso` (SHA-256
+`1280f2ce834ef3f8b7581b4b02ff3219ed156936cbe200b00fa188126cabeeec`) passes
+OVMF/QEMU on 1/2/4 CPUs.
 
 Added the fixed-capacity versioned `libwoven::installer_ipc` WIP/WOP ABI and
 the separate `woven-installer --service` daemon. Production system startup
