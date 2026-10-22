@@ -1,5 +1,18 @@
 # WovenHat OS Architecture & Codebase Guide
 
+### Stage 28 - WovenInstaller package/catalog wiring
+
+The existing `scripts/package-system-apps.py` release boundary includes the
+freestanding `apps/woven-installer` ELF as a signed WAPP package and emits
+`packages/woven-installer.wapp`, `catalog/woven-installer.app`, and a manifest
+record with the stable `/bin/wovenhat-installer` install path. Its metadata
+declares an empty capability set, `privileged: false`, and
+`interface: display-only`; the packager rejects forbidden install, disk,
+partition, format, and bootloader capabilities before publication. The
+catalog wiring is packaging-only: it does not grant authority, alter kernel
+recovery, install the app in the system-apps boot path, or establish QEMU
+acceptance.
+
 ### Stage 28 - disposable UEFI boot artifact preparation and verifier
 
 `scripts/prepare-uefi-boot-artifact.py` is a disjoint, file-image-only

@@ -1,5 +1,20 @@
 # Stage status
 
+## Stage 28 WovenInstaller package/catalog wiring - 2026-10-22
+
+The existing signed system-app packaging path now builds and signs
+`apps/woven-installer`, publishes it as `packages/woven-installer.wapp`, and
+adds the stable `/bin/wovenhat-installer` install path and catalog entry to
+the manifest. The entry is explicitly non-privileged with an empty
+capability set and `display-only` interface metadata. Fail-closed metadata
+validation rejects install, disk, partition, format, and bootloader
+capabilities; the ten existing app entries are unchanged.
+
+Focused packaging tests, Python compilation, freestanding release build, and
+warning-denying freestanding Clippy pass. This slice does not modify kernel
+recovery code and does not claim system-apps QEMU acceptance; the new image
+is not yet integrated into the kernel boot catalog.
+
 ## Stage 28 bounded WovenInstaller Ring-3 application shell - 2026-10-22
 
 Added the disjoint `apps/woven-installer` no-std Ring-3 shell. It consumes a

@@ -1,5 +1,16 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - Stage 28 system-app packaging/catalog wiring for WovenInstaller (2026-10-22)
+
+Extended `scripts/package-system-apps.py` with the existing
+`apps/woven-installer` image as an eleventh signed WAPP package. Its stable
+install path and catalog `Exec` are `/bin/wovenhat-installer`; the manifest
+also records an empty capability set, `privileged: false`, and
+`interface: display-only`. Metadata validation rejects forbidden install,
+disk, partition, format, and bootloader capabilities before building or
+publishing. Existing ten app entries are preserved. This does not modify
+kernel recovery code and does not claim system-apps QEMU acceptance.
+
 ## Codex - Stage 28 bounded WovenInstaller Ring-3 application shell (2026-10-22)
 
 Added the disjoint `apps/woven-installer` freestanding application. It parses
