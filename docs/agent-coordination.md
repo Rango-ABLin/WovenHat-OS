@@ -1,5 +1,19 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - Stage 28 ISO9660/El Torito UEFI artifact and QEMU gate (2026-10-22)
+
+Added the file-only `scripts/build-uefi-iso.py` and
+`scripts/test-uefi-iso-qemu.py`. The builder extracts the source image's
+standard EFI System Partition, accepts the current FAT16 bootloader image and
+FAT32 disposable images, emits a UEFI-platform El Torito catalog, and writes
+the ISO transactionally. The QEMU gate runs only the exact regular ISO with
+OVMF, preserves serial evidence, and reports firmware/kernel handoff separately
+from later self-test failures. The generated ISO reached the WovenHat kernel in
+QEMU; the selected stale debug image later reported an app-catalog self-test
+failure. Physical disks, the Windows disk, the USB, and the backup disk were
+not accessed. Focused smoke, Python compilation, and diff checks pass; pytest
+is unavailable in the current Python environment.
+
 ## Codex - Stage 28 disposable-image end-to-end acceptance harness (2026-10-22)
 
 Added only `scripts/test-stage28-disposable-acceptance.py`, its focused tests,

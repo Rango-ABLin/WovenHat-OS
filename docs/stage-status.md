@@ -1,5 +1,21 @@
 # Stage status
 
+## Stage 28 ISO9660/El Torito UEFI artifact and QEMU gate - 2026-10-22
+
+Added `scripts/build-uefi-iso.py`, which extracts the verified EFI System
+Partition from a regular GPT WovenHat image and builds a transactional
+ISO9660/El Torito image with an EFI-platform boot catalog. FAT16 and FAT32
+ESPs are accepted because the current bootloader image is FAT16. Device-like,
+protected, symlink, and physical-media paths are refused. Added
+`scripts/test-uefi-iso-qemu.py` to boot the exact ISO with caller-supplied OVMF,
+preserve serial output, and distinguish firmware/kernel handoff from later
+self-test failures.
+
+The generated ISO booted in QEMU using the installed OVMF firmware and reached
+`UEFI bootloader started`, `TRACE: exiting boot services`, and kernel output.
+The selected existing debug image then reported an app-catalog self-test
+failure, so this is not a full release gate. No physical disks were accessed.
+
 ## Stage 24.59 disk-pressure gap closed (Claude, 2026-10-22)
 
 `stage24-59-test`'s full `system-apps` package build, previously flagged in
