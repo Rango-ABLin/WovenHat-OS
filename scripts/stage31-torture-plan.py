@@ -22,20 +22,31 @@ SUITES = (
     ("network", "scripts/test-network-qemu.py"),
     ("security", "scripts/test-security-qemu.py"),
     ("shell", "scripts/test-shell-qemu.py"),
+    ("recovery", "scripts/test-stage27-5-recovery.py"),
+    ("update-service", "scripts/test-stage27-5-update-service.py"),
 )
+SUITE_CPU_SUPPORT = {
+    "memory": REQUESTED_CPUS,
+    "storage": REQUESTED_CPUS,
+    "network": REQUESTED_CPUS,
+    "security": REQUESTED_CPUS,
+    "shell": REQUESTED_CPUS,
+    "recovery": (1, 2, 4),
+    "update-service": (1, 2, 4),
+}
 
 
 def build_plan(cpus: tuple[int, ...] = REQUESTED_CPUS) -> dict[str, Any]:
     jobs = []
     for cpu_count in cpus:
         for suite, script in SUITES:
-            supported = cpu_count in SUPPORTED_CPUS
+            supported = cpu_count in SUITE_CPU_SUPPORT[suite]
             jobs.append({
                 "id": f"{suite}-{cpu_count}cpu",
                 "suite": suite,
                 "cpus": cpu_count,
                 "status": "pending" if supported else "blocked",
-                "reason": None if supported else "CPU profile is not supported by the harness",
+                "reason": None if supported else "CPU profile is not supported by this suite's harness",
                 "command": (["python", script, "--cpus", str(cpu_count)]
                             if supported else None),
                 "evidence": None,
@@ -73,7 +84,7 @@ def validate_plan(plan: Any) -> list[str]:
         cpu_count = job.get("cpus")
         if cpu_count not in REQUESTED_CPUS:
             errors.append(f"{prefix}.cpus is unsupported")
-        expected_blocked = cpu_count not in SUPPORTED_CPUS
+        expected_blocked = cpu_count not in SUITE_CPU_SUPPORT.get(job.get("suite"), ())
         if (job.get("status") == "blocked") != expected_blocked:
             errors.append(f"{prefix}.status does not match CPU support")
         if expected_blocked and job.get("command") is not None:
