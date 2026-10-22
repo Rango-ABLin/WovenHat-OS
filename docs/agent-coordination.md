@@ -1,5 +1,14 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - Stage 31 packet-corruption boundary (2026-10-22)
+
+Added `scripts/test-stage31-packet-corruption.py` around the live network
+QEMU harness. The deterministic malformed ICMPv6 checksum/NDP ingress boundary
+passed on 1/2/4 CPUs with host UDP/TCP and SMP markers. The planner records
+`partial-stage31-checksum-boundary`; randomized corruption across all receive
+protocols remains open. Evidence is under
+`audit-artifacts/stage31-packet-corruption-{1,2,4}cpu`.
+
 ## Codex - Repair stale IPC capacity regression probe (2026-10-22)
 
 The complete host test run found the source-extraction IPC allocator probe

@@ -39,7 +39,7 @@ FAULT_SCENARIOS = {
     "filesystem-disk-full": "covered-wovenfs-host",
     "filesystem-randomized-crash": "covered-wovenfs-host",
     "service-lifecycle": "covered-signed-update-service-1-2-4cpu",
-    "packet-corruption": "open",
+    "packet-corruption": "partial-stage31-checksum-boundary",
     "driver-crash": "open",
     "process-crash": "covered-stage31-qemu-process-crash",
     "sudden-shutdown": "open",

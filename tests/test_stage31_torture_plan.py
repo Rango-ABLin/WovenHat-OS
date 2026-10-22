@@ -57,7 +57,7 @@ class Stage31TorturePlanTests(unittest.TestCase):
         self.assertEqual(plan["randomized_fault_injection"], "partial-wovenfs-host-only")
         self.assertEqual(scenarios["filesystem-disk-full"], "covered-wovenfs-host")
         self.assertEqual(scenarios["service-lifecycle"], "covered-signed-update-service-1-2-4cpu")
-        self.assertEqual(scenarios["packet-corruption"], "open")
+        self.assertEqual(scenarios["packet-corruption"], "partial-stage31-checksum-boundary")
         self.assertEqual(scenarios["driver-crash"], "open")
         self.assertEqual(scenarios["process-crash"], "covered-stage31-qemu-process-crash")
         self.assertEqual(scenarios["sudden-shutdown"], "open")

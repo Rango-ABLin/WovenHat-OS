@@ -1,5 +1,14 @@
 # Stage status
 
+## Stage 31 packet-corruption boundary - 2026-10-22
+
+The dedicated packet-corruption wrapper now runs the real network QEMU gate
+with ICMPv6 checksum and NDP ingress hardening enabled. Deterministic malformed
+checksum rejection passed on 1/2/4 CPUs, with host UDP/TCP and final SMP
+markers also passing. This is recorded as partial coverage only; randomized
+corruption across the complete receive stack remains open. Evidence is under
+`audit-artifacts/stage31-packet-corruption-{1,2,4}cpu`.
+
 ## Host regression repair - IPC capacity probe - 2026-10-22
 
 The full host suite caught a stale `scripts/test-ipc-handle-generation.py`

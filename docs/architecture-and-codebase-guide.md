@@ -4093,6 +4093,11 @@ reap only the faulting process with status `-11`, and leave the kernel alive
 to emit the QEMU success marker. This does not imply driver or service
 supervision; those require their own owner and restart acceptance.
 
+The Stage 31 packet-corruption boundary runs the Stage 14.2 ICMPv6 checksum
+and NDP ingress-hardening probes through the live network QEMU harness on
+1/2/4 CPUs. It proves deterministic malformed-checksum rejection, not a
+randomized corruption campaign over every receive protocol.
+
 `scripts/test-stage31-repeated-boots.py` is the repeatability boundary for
 those suites. It serializes child harnesses because they use fixed ports and
 shared target paths, snapshots each run before evaluating its exit status, and
