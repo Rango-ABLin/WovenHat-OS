@@ -18,7 +18,7 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-SUITES = ("memory", "storage", "network", "security", "shell", "recovery")
+SUITES = ("memory", "storage", "network", "security", "shell", "recovery", "update-service")
 CPUS = (1, 2, 4, 8, 16)
 
 
@@ -27,9 +27,13 @@ def build_command(suite: str, cpus: int, timeout: int) -> list[str]:
         raise ValueError(f"unknown suite: {suite}")
     if cpus not in CPUS:
         raise ValueError(f"unsupported CPU count: {cpus}")
-    if suite == "recovery" and cpus not in (1, 2, 4):
-        raise ValueError("the recovery gate currently supports only 1/2/4 CPUs")
-    script = "scripts/test-stage27-5-recovery.py" if suite == "recovery" else f"scripts/test-{suite}-qemu.py"
+    if suite in ("recovery", "update-service") and cpus not in (1, 2, 4):
+        raise ValueError(f"the {suite} gate currently supports only 1/2/4 CPUs")
+    scripts = {
+        "recovery": "scripts/test-stage27-5-recovery.py",
+        "update-service": "scripts/test-stage27-5-update-service.py",
+    }
+    script = scripts.get(suite, f"scripts/test-{suite}-qemu.py")
     command = [sys.executable, script, "--cpus", str(cpus)]
     if suite != "shell":
         command.extend(("--timeout", str(timeout)))
@@ -55,6 +59,8 @@ def evidence_sources(suite: str, cpus: int) -> list[Path]:
         path = ROOT / "audit-artifacts" / f"woven-security-{cpus}cpu"
     elif suite == "recovery":
         path = ROOT / "audit-artifacts" / f"stage27.5-recovery-{cpus}cpu"
+    elif suite == "update-service":
+        path = ROOT / "audit-artifacts" / f"stage27.5-{cpus}cpu"
     elif suite == "network":
         path = ROOT / "target" / f"network-regression-{cpus}-debug"
     else:

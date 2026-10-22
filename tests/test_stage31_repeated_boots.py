@@ -27,6 +27,13 @@ class Stage31RepeatedBootsTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             MODULE.build_command("recovery", 8, 300)
 
+    def test_update_service_uses_signed_service_gate_and_cpu_limit(self):
+        command = MODULE.build_command("update-service", 4, 300)
+        self.assertIn("scripts/test-stage27-5-update-service.py", command)
+        self.assertEqual(command[-2:], ["--timeout", "300"])
+        with self.assertRaises(ValueError):
+            MODULE.build_command("update-service", 16, 300)
+
     def test_invalid_suite_and_cpu_are_rejected(self):
         with self.assertRaises(ValueError):
             MODULE.build_command("unknown", 1, 300)
