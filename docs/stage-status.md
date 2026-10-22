@@ -44,6 +44,16 @@ payload, and checks filesystem consistency. The complete host suite passes 16
 tests. This is filesystem-level disk-full evidence; whole-kernel low-RAM,
 device-fault, and physical-media exhaustion coverage remain open.
 
+## Stage 31 low-resource ATA/WovenFS device slice - 2026-10-22
+
+The existing Stage 15.2 QEMU ATA/WovenFS gate passed against disposable 4 MiB
+scratch images at both 1 and 4 CPUs, including format, durable writes,
+remount, VFS authority/isolation, unlink, and exit 33. Evidence is retained
+under the two `target/wovenfs-device-scratch-*` directories recorded in the
+dedicated audit. This is emulated scratch-device evidence; physical media
+exhaustion, block-device faults, and whole-kernel low-RAM qualification remain
+open.
+
 ## WovenShell desktop: 3D mode extended to every floating panel and the lock screen - 2026-10-22
 
 Continuing the wallpaper/taskbar 3D work: the launcher panel, Notification

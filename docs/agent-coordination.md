@@ -4758,6 +4758,14 @@ filesystem disk-full atomicity only; whole-kernel low-RAM, device-fault, and
 physical-media exhaustion remain open. Details are in
 `docs/audit-stage31-low-resource-2026-10-22.md`.
 
+**Codex low-resource ATA/WovenFS device slice (Codex, 2026-10-22):** The
+existing Stage 15.2 QEMU gate passed with disposable 4 MiB scratch images at
+1 and 4 CPUs, exercising the real emulated ATA path through format, remount,
+VFS authorization/isolation, and unlink. Evidence is recorded in
+`docs/audit-stage31-low-resource-device-2026-10-22.md`. This does not qualify
+physical media exhaustion, block-device fault injection, or whole-kernel
+low-RAM behavior.
+
 **Extended 3D mode to every floating panel + lock screen; found a Stage
 24.59 regression from your 4 GiB memory-floor change (Claude, 2026-10-22):**
 Launcher panel, Notification Center, toast, and lock screen now tilt in 3D
