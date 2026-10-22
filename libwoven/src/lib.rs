@@ -10143,6 +10143,25 @@ pub mod graphics {
         }
     }
 
+    /// A projected 3D vertex that carries the source-space coordinate a
+    /// procedural sampler should see at this corner, instead of a fixed
+    /// colour or a texture's normalized `u`/`v`. See
+    /// [`Renderer::procedural_triangle_3d`].
+    #[derive(Clone, Copy, PartialEq, Eq, Debug)]
+    pub struct Vertex3Field {
+        pub x: i32,
+        pub y: i32,
+        pub depth: u16,
+        pub source_x: i32,
+        pub source_y: i32,
+    }
+
+    impl Vertex3Field {
+        pub const fn new(x: i32, y: i32, depth: u16, source_x: i32, source_y: i32) -> Self {
+            Self { x, y, depth, source_x, source_y }
+        }
+    }
+
     /// A perspective camera, fixed at the world origin looking down +z, that
     /// projects a 3D point onto the Canvas a [`Vertex3`]/[`Vertex3Tex`]
     /// needs. World coordinates are signed 16.16 fixed-point, the same
@@ -10786,6 +10805,110 @@ pub mod graphics {
             }
         }
 
+        /// As [`Self::triangle_3d`], but each covered pixel's colour comes
+        /// from `sample(source_x, source_y)` at the affine-interpolated
+        /// source coordinate, instead of an interpolated flat colour or a
+        /// texture lookup. This projects content defined by a pure function
+        /// of position -- such as the desktop wallpaper, which varies over
+        /// the whole screen and would be far too large to pre-render into a
+        /// fixed-size offscreen texture -- onto a tilted 3D plane without
+        /// ever storing a full-resolution copy of it.
+        pub fn procedural_triangle_3d(
+            &mut self,
+            depth: &mut DepthBuffer<'_>,
+            first: Vertex3Field,
+            second: Vertex3Field,
+            third: Vertex3Field,
+            sample: impl Fn(i32, i32) -> u32,
+        ) {
+            let area = edge(first.x, first.y, second.x, second.y, third.x, third.y);
+            if area == 0 {
+                return;
+            }
+            let canvas_right = self.canvas.x.saturating_add(
+                i32::try_from(self.canvas.width.saturating_sub(1)).unwrap_or(i32::MAX),
+            );
+            let canvas_bottom = self.canvas.y.saturating_add(
+                i32::try_from(self.canvas.height.saturating_sub(1)).unwrap_or(i32::MAX),
+            );
+            let depth_right = depth
+                .x
+                .saturating_add(i32::try_from(depth.width.saturating_sub(1)).unwrap_or(i32::MAX));
+            let depth_bottom = depth
+                .y
+                .saturating_add(i32::try_from(depth.height.saturating_sub(1)).unwrap_or(i32::MAX));
+            let min_x = first
+                .x
+                .min(second.x)
+                .min(third.x)
+                .max(self.canvas.x)
+                .max(depth.x);
+            let max_x = first
+                .x
+                .max(second.x)
+                .max(third.x)
+                .min(canvas_right)
+                .min(depth_right);
+            let min_y = first
+                .y
+                .min(second.y)
+                .min(third.y)
+                .max(self.canvas.y)
+                .max(depth.y);
+            let max_y = first
+                .y
+                .max(second.y)
+                .max(third.y)
+                .min(canvas_bottom)
+                .min(depth_bottom);
+            if min_x > max_x || min_y > max_y {
+                return;
+            }
+            let positive = area > 0;
+            for y in min_y..=max_y {
+                for x in min_x..=max_x {
+                    let first_edge = edge(second.x, second.y, third.x, third.y, x, y);
+                    let second_edge = edge(third.x, third.y, first.x, first.y, x, y);
+                    let third_edge = edge(first.x, first.y, second.x, second.y, x, y);
+                    let inside = if positive {
+                        first_edge >= 0 && second_edge >= 0 && third_edge >= 0
+                    } else {
+                        first_edge <= 0 && second_edge <= 0 && third_edge <= 0
+                    };
+                    if !inside {
+                        continue;
+                    }
+                    let depth_value = ((i128::from(first.depth) * first_edge.abs()
+                        + i128::from(second.depth) * second_edge.abs()
+                        + i128::from(third.depth) * third_edge.abs())
+                        / area.abs())
+                    .min(i128::from(u16::MAX)) as u16;
+                    if !depth.test_and_set(x, y, depth_value) {
+                        continue;
+                    }
+                    let source_x = interpolate_coordinate(
+                        first.source_x,
+                        second.source_x,
+                        third.source_x,
+                        first_edge.abs(),
+                        second_edge.abs(),
+                        third_edge.abs(),
+                        area.abs(),
+                    );
+                    let source_y = interpolate_coordinate(
+                        first.source_y,
+                        second.source_y,
+                        third.source_y,
+                        first_edge.abs(),
+                        second_edge.abs(),
+                        third_edge.abs(),
+                        area.abs(),
+                    );
+                    self.canvas.set(x, y, sample(source_x, source_y));
+                }
+            }
+        }
+
         pub fn text(&mut self, x: i32, y: i32, text: &str, color: Color) {
             self.canvas.draw_text(x, y, text, color.packed());
         }
@@ -11371,6 +11494,26 @@ pub mod graphics {
             + total / 2)
             / total)
             .min(i128::from(u8::MAX)) as u8
+    }
+
+    /// As [`interpolate_channel`], but for a full-precision signed source
+    /// coordinate instead of an 8-bit colour channel.
+    fn interpolate_coordinate(
+        first: i32,
+        second: i32,
+        third: i32,
+        first_weight: i128,
+        second_weight: i128,
+        third_weight: i128,
+        total: i128,
+    ) -> i32 {
+        if total == 0 {
+            return first;
+        }
+        let sum = i128::from(first) * first_weight
+            + i128::from(second) * second_weight
+            + i128::from(third) * third_weight;
+        ((sum + total / 2) / total).clamp(i128::from(i32::MIN), i128::from(i32::MAX)) as i32
     }
 }
 pub mod notifications {

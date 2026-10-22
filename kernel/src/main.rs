@@ -9901,6 +9901,82 @@ fn stage20_17_self_test() -> bool {
         }
     }
 
+    /// Independently recomputes the wallpaper colour at a screen pixel once
+    /// the whole desktop background is 3D-projected as a floor receding
+    /// into the distance (bottom edge at `height` anchored, top edge at `0`
+    /// receded and narrowed) -- the same transform
+    /// `render_desktop_background` applies, reimplemented from scratch
+    /// (camera projection, triangle rasterization, barycentric source-
+    /// coordinate interpolation) so this test catches real divergence
+    /// rather than trusting shared code. `None` means the point falls in
+    /// the narrow gap neither projected triangle covers, where the flat
+    /// formula applies instead (painted first, underneath).
+    fn projected_wallpaper(x: i32, y: i32, width: i32, height: i32) -> Option<u32> {
+        fn edge(ax: i32, ay: i32, bx: i32, by: i32, px: i32, py: i32) -> i64 {
+            i64::from(bx - ax) * i64::from(py - ay) - i64::from(by - ay) * i64::from(px - ax)
+        }
+        fn project(screen_x: i32, screen_y: i32, wx: i64, wy: i64, wz: i64) -> Option<(i32, i32)> {
+            const FOCAL: i64 = 200 << 16;
+            const DISTANCE: i64 = 200 << 16;
+            let eye_z = wz + DISTANCE;
+            if eye_z <= 0 {
+                return None;
+            }
+            let scale = |c: i64| -> i64 { c * FOCAL / (eye_z * 65536) };
+            Some((
+                screen_x.saturating_add(scale(wx) as i32),
+                screen_y.saturating_add(scale(wy) as i32),
+            ))
+        }
+        fn interpolate(a: i64, b: i64, c: i64, wa: i64, wb: i64, wc: i64, total: i64) -> i64 {
+            if total == 0 {
+                return a;
+            }
+            (a * wa + b * wb + c * wc + total / 2) / total
+        }
+        const TILT_DEPTH: i64 = 70 << 16;
+        let half_width = i64::from(width / 2) << 16;
+        let half_height = (i64::from(height - 1) << 16) / 2;
+        let (cx, cy) = (width / 2, height / 2);
+        let top_left = project(cx, cy, -half_width, -half_height, TILT_DEPTH)?;
+        let top_right = project(cx, cy, half_width, -half_height, TILT_DEPTH)?;
+        let bottom_left = project(cx, cy, -half_width, half_height, 0)?;
+        let bottom_right = project(cx, cy, half_width, half_height, 0)?;
+        let barycentric = |a: (i32, i32), b: (i32, i32), c: (i32, i32)| -> Option<(i64, i64, i64)> {
+            let area = edge(a.0, a.1, b.0, b.1, c.0, c.1);
+            if area == 0 {
+                return None;
+            }
+            let wa = edge(b.0, b.1, c.0, c.1, x, y);
+            let wb = edge(c.0, c.1, a.0, a.1, x, y);
+            let wc = edge(a.0, a.1, b.0, b.1, x, y);
+            let inside = if area > 0 {
+                wa >= 0 && wb >= 0 && wc >= 0
+            } else {
+                wa <= 0 && wb <= 0 && wc <= 0
+            };
+            if inside {
+                Some((wa.abs(), wb.abs(), wc.abs()))
+            } else {
+                None
+            }
+        };
+        let (w, h) = (i64::from(width), i64::from(height));
+        if let Some((wa, wb, wc)) = barycentric(top_left, top_right, bottom_left) {
+            let total = wa + wb + wc;
+            let sx = interpolate(0, w, 0, wa, wb, wc, total) as i32;
+            let sy = interpolate(0, 0, h, wa, wb, wc, total) as i32;
+            return Some(wallpaper(sx, sy, height));
+        }
+        if let Some((wa, wb, wc)) = barycentric(top_right, bottom_right, bottom_left) {
+            let total = wa + wb + wc;
+            let sx = interpolate(w, w, 0, wa, wb, wc, total) as i32;
+            let sy = interpolate(0, h, h, wa, wb, wc, total) as i32;
+            return Some(wallpaper(sx, sy, height));
+        }
+        None
+    }
+
     let capabilities = capability::CapabilitySet::only(capability::Capability::Console)
         .with(capability::Capability::DisplayIo)
         .with(capability::Capability::InputIo)
@@ -9964,8 +10040,11 @@ fn stage20_17_self_test() -> bool {
     if !step("the 3D Desktop row is reachable and clicked", toggled) {
         return false;
     }
+    let expected_wallpaper = |x: i32, y: i32| {
+        projected_wallpaper(x, y, width, height).unwrap_or_else(|| wallpaper(x, y, height))
+    };
     let projected = until(1000, || {
-        compositor::pixel(panel_x, panel_y) == Ok(wallpaper(panel_x, panel_y, height))
+        compositor::pixel(panel_x, panel_y) == Ok(expected_wallpaper(panel_x, panel_y))
     });
     if !step(
         "3D mode narrows the top edge: the old top-left corner is now wallpaper",

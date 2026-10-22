@@ -137,7 +137,7 @@
 use core::cell::UnsafeCell;
 use core::panic::PanicInfo;
 
-use libwoven::graphics::{Camera, DepthBuffer, Renderer, Vertex3, Vertex3Tex};
+use libwoven::graphics::{Camera, DepthBuffer, Renderer, Vertex3, Vertex3Field, Vertex3Tex};
 use libwoven::layout::{self, Frame};
 use libwoven::{
     blend, font, process, rgb, wait, Args, Canvas, DateTime, FrameEvent, GraphicsSurface,
@@ -360,14 +360,33 @@ unsafe impl Sync for QsPanelTexture {}
 
 static QS_PANEL_TEXTURE: QsPanelTexture = QsPanelTexture(UnsafeCell::new([0; QS_PANEL_PIXELS]));
 
-/// A depth buffer sized for one `TILE`-sized render pass, reused (and
-/// cleared) for each tile the 3D Quick Settings panel is painted into.
-struct QsDepthBuffer(UnsafeCell<[u16; TILE_PIXELS]>);
+/// The taskbar's maximum pixel footprint, flat-rendered once per repaint
+/// into this offscreen texture, then sampled by the 3D desktop mode's
+/// perspective projection. `MAX_TASKBAR_WIDTH` mirrors the kernel
+/// compositor's own `MAX_WIDTH` bound (two 1280-pixel monitors side by
+/// side), since the taskbar spans the primary monitor's full width.
+const MAX_TASKBAR_WIDTH: usize = 2560;
+const TASKBAR_PIXELS: usize = MAX_TASKBAR_WIDTH * TASKBAR_HEIGHT as usize;
 
-// SAFETY: the shell is single-threaded, and `render_qs_3d` takes the only reference.
-unsafe impl Sync for QsDepthBuffer {}
+struct TaskbarTexture(UnsafeCell<[u32; TASKBAR_PIXELS]>);
 
-static QS_DEPTH: QsDepthBuffer = QsDepthBuffer(UnsafeCell::new([0; TILE_PIXELS]));
+// SAFETY: the shell is single-threaded, and `render_taskbar_3d` takes the
+// only reference.
+unsafe impl Sync for TaskbarTexture {}
+
+static TASKBAR_TEXTURE: TaskbarTexture = TaskbarTexture(UnsafeCell::new([0; TASKBAR_PIXELS]));
+
+/// A depth buffer sized for one `TILE`-sized render pass, shared by every 3D
+/// surface (the Quick Settings panel, title bars, the wallpaper, and so on):
+/// each one clears it before use and none holds it across a call, so they
+/// never need their own copy.
+struct TileDepthBuffer(UnsafeCell<[u16; TILE_PIXELS]>);
+
+// SAFETY: the shell is single-threaded, and each 3D render function takes
+// the only reference, for the duration of that call only.
+unsafe impl Sync for TileDepthBuffer {}
+
+static TILE_DEPTH_3D: TileDepthBuffer = TileDepthBuffer(UnsafeCell::new([0; TILE_PIXELS]));
 
 /// The desktop's state, in .bss too: the user stack is 16 KiB, and the state
 /// built in `main`'s frame, with the catalog loader's on top, overflowed it.
@@ -1393,14 +1412,92 @@ impl Desktop {
         self.switch_workspace(target)
     }
 
+    /// The desktop background: the wallpaper, as a flat fill in 2D mode or,
+    /// in 3D mode, perspective-projected as a floor receding into the
+    /// distance -- the near edge, at the bottom of the screen, stays
+    /// anchored; the far edge, at the top, recedes and narrows. This can
+    /// span the whole virtual desktop, far larger than any fixed-size
+    /// offscreen texture, so 3D mode samples the wallpaper procedurally via
+    /// [`libwoven::graphics::Renderer::procedural_triangle_3d`] instead of
+    /// texturing a pre-rendered copy.
+    fn render_desktop_background(&self, canvas: &mut Canvas<'_>) {
+        let height = self.height;
+        if !self.three_d {
+            canvas.shade(|x, y| wallpaper(x, y, height));
+            return;
+        }
+        let width = self.desktop_width;
+        let half_width = (width / 2) << 16;
+        let half_height = ((height - 1) << 16) / 2;
+        const DISTANCE: i32 = 200 << 16;
+        const TILT_DEPTH: i32 = 70 << 16;
+        let camera = Camera::new(DISTANCE, DISTANCE, width / 2, height / 2);
+        let (Some(top_left), Some(top_right), Some(bottom_left), Some(bottom_right)) = (
+            camera.project(-half_width, -half_height, TILT_DEPTH),
+            camera.project(half_width, -half_height, TILT_DEPTH),
+            camera.project(-half_width, half_height, 0),
+            camera.project(half_width, half_height, 0),
+        ) else {
+            canvas.shade(|x, y| wallpaper(x, y, height));
+            return;
+        };
+        let vertex = |(x, y, depth): (i32, i32, u16), source_x: i32, source_y: i32| {
+            Vertex3Field::new(x, y, depth, source_x, source_y)
+        };
+        // SAFETY: single-threaded; this is the only live reference, and it
+        // does not outlive this call.
+        let depth_values = unsafe { &mut *TILE_DEPTH_3D.0.get() };
+        let Some(mut depth) =
+            DepthBuffer::new(depth_values, canvas.x(), canvas.y(), canvas.width(), canvas.height())
+        else {
+            canvas.shade(|x, y| wallpaper(x, y, height));
+            return;
+        };
+        depth.clear(u16::MAX);
+        // The projected quad narrows at its receded top edge, so the
+        // corners it no longer covers still need a sensible background.
+        canvas.shade(|x, y| wallpaper(x, y, height));
+        let mut renderer = Renderer::new(canvas);
+        renderer.procedural_triangle_3d(
+            &mut depth,
+            vertex(top_left, 0, 0),
+            vertex(top_right, width, 0),
+            vertex(bottom_left, 0, height),
+            |x, y| wallpaper(x, y, height),
+        );
+        renderer.procedural_triangle_3d(
+            &mut depth,
+            vertex(top_right, width, 0),
+            vertex(bottom_right, width, height),
+            vertex(bottom_left, 0, height),
+            |x, y| wallpaper(x, y, height),
+        );
+    }
+
     /// The desktop layer: wallpaper and taskbar, with its start button,
     /// window entries and clock.
     fn render_desktop(&self, canvas: &mut Canvas<'_>) {
-        let height = self.height;
-        canvas.shade(|x, y| wallpaper(x, y, height));
+        self.render_desktop_background(canvas);
+        if self.three_d {
+            self.render_taskbar_3d(canvas);
+        } else {
+            self.paint_taskbar_content(canvas);
+        }
+    }
 
+    /// The taskbar's content -- its translucent fill, accent top border,
+    /// start button, window entries, clock, workspace switcher, account
+    /// name, Quick Settings button, and unread badge -- drawn at its own
+    /// real screen position in `canvas`. Used both for the ordinary flat
+    /// 2D taskbar and, rendered once into an offscreen texture at that same
+    /// position (so every `self.taskbar_top()`-based Area in here lands in
+    /// the texture exactly where it would on screen), as the source the 3D
+    /// mode's perspective projection samples.
+    fn paint_taskbar_content(&self, canvas: &mut Canvas<'_>) {
         let top = self.taskbar_top();
         let width = self.width as usize;
+        let height = self.height;
+        canvas.shade(|x, y| wallpaper(x, y, height));
         canvas.blend_rect(0, top, width, TASKBAR_HEIGHT as usize, TASKBAR, TASKBAR_OPACITY);
         canvas.fill_rect(0, top, width, 1, ACCENT);
 
@@ -1465,6 +1562,77 @@ impl Desktop {
             let digit = [b'0' + self.unread.min(9) as u8];
             canvas.draw_text(badge.x + 3, badge.y + 2, core::str::from_utf8(&digit).unwrap_or("?"), TEXT);
         }
+    }
+
+    /// The taskbar, perspective-projected as a card tilted back in 3D (its
+    /// bottom edge -- the bottom of the screen -- stays put; its top edge
+    /// recedes and narrows slightly, a shallower tilt than the desktop
+    /// floor since it is a much thinner strip) instead of blitted flat.
+    /// The flat content is rendered once into `TASKBAR_TEXTURE` at the
+    /// taskbar's own real position (see [`Self::paint_taskbar_content`]),
+    /// then sampled by two `textured_triangle_3d` calls per tile `canvas`
+    /// this is invoked for.
+    fn render_taskbar_3d(&self, canvas: &mut Canvas<'_>) {
+        let top = self.taskbar_top();
+        let width = self.width;
+        // SAFETY: single-threaded; this is the only live reference, and it
+        // does not outlive this call.
+        let texture_pixels = unsafe { &mut *TASKBAR_TEXTURE.0.get() };
+        let Some(mut texture) = Canvas::new(
+            texture_pixels,
+            0,
+            top,
+            width as usize,
+            TASKBAR_HEIGHT as usize,
+        ) else {
+            return self.paint_taskbar_content(canvas);
+        };
+        self.paint_taskbar_content(&mut texture);
+
+        let half_width = (width / 2) << 16;
+        let half_height = ((TASKBAR_HEIGHT - 1) << 16) / 2;
+        const DISTANCE: i32 = 200 << 16;
+        const TILT_DEPTH: i32 = 30 << 16;
+        let camera = Camera::new(DISTANCE, DISTANCE, width / 2, top + TASKBAR_HEIGHT / 2);
+        let (Some(top_left), Some(top_right), Some(bottom_left), Some(bottom_right)) = (
+            camera.project(-half_width, -half_height, TILT_DEPTH),
+            camera.project(half_width, -half_height, TILT_DEPTH),
+            camera.project(-half_width, half_height, 0),
+            camera.project(half_width, half_height, 0),
+        ) else {
+            return self.paint_taskbar_content(canvas);
+        };
+        let vertex = |(x, y, depth): (i32, i32, u16), u: u8, v: u8| Vertex3Tex::new(x, y, depth, u, v);
+
+        // SAFETY: single-threaded; this is the only live reference, and it
+        // does not outlive this call.
+        let depth_values = unsafe { &mut *TILE_DEPTH_3D.0.get() };
+        let Some(mut depth) =
+            DepthBuffer::new(depth_values, canvas.x(), canvas.y(), canvas.width(), canvas.height())
+        else {
+            return self.paint_taskbar_content(canvas);
+        };
+        depth.clear(u16::MAX);
+        // The projected quad is narrower than the flat taskbar's footprint
+        // at its receded top edge, so the sliver it no longer covers still
+        // needs the real desktop background (itself 3D-projected, since 3D
+        // mode is already on here) rather than stale tile content.
+        self.render_desktop_background(canvas);
+        let mut renderer = Renderer::new(canvas);
+        renderer.textured_triangle_3d(
+            &mut depth,
+            vertex(top_left, 0, 0),
+            vertex(top_right, 255, 0),
+            vertex(bottom_left, 0, 255),
+            &texture,
+        );
+        renderer.textured_triangle_3d(
+            &mut depth,
+            vertex(top_right, 255, 0),
+            vertex(bottom_right, 255, 255),
+            vertex(bottom_left, 0, 255),
+            &texture,
+        );
     }
 
     /// The Quick Settings button, left of the tray's last icon slot.
@@ -1941,7 +2109,7 @@ impl Desktop {
 
         // SAFETY: single-threaded; this is the only live reference, and it
         // does not outlive this call.
-        let depth_values = unsafe { &mut *QS_DEPTH.0.get() };
+        let depth_values = unsafe { &mut *TILE_DEPTH_3D.0.get() };
         let Some(mut depth) =
             DepthBuffer::new(depth_values, canvas.x(), canvas.y(), canvas.width(), canvas.height())
         else {
@@ -1952,9 +2120,9 @@ impl Desktop {
         // its receded top edge, so the corners it no longer covers would
         // otherwise still show whatever the previous frame drew there (the
         // flat panel, if 3D mode was just switched on) rather than the real
-        // desktop background underneath.
-        let height = self.height;
-        canvas.shade(|x, y| wallpaper(x, y, height));
+        // desktop background underneath -- itself 3D-projected, since 3D
+        // mode is already on here.
+        self.render_desktop_background(canvas);
         let mut renderer = Renderer::new(canvas);
         renderer.textured_triangle_3d(
             &mut depth,
@@ -2194,7 +2362,7 @@ impl Desktop {
 
         // SAFETY: single-threaded; this is the only live reference, and it
         // does not outlive this call.
-        let depth_values = unsafe { &mut *QS_DEPTH.0.get() };
+        let depth_values = unsafe { &mut *TILE_DEPTH_3D.0.get() };
         let Some(mut depth) =
             DepthBuffer::new(depth_values, canvas.x(), canvas.y(), canvas.width(), canvas.height())
         else {
