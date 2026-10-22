@@ -3866,3 +3866,14 @@ stores at most eight bounded captions. `Settings` centralizes high contrast,
 reduced-motion duration policy, display scale, and magnification clamps.
 Locale, translations, shaping, compositor integration, and device-specific
 assistive technology remain separate prerequisites.
+
+## Stage 28 disposable file-backed installation executor
+
+`scripts/execute-file-install.py` is deliberately outside the production
+installer path. It accepts only the validated plan JSON and an explicitly
+supplied regular non-symlink file, binds the target identity to the file's
+pre-install digest, and writes a deterministic mock filesystem payload through
+same-directory temporary files and atomic replacement. A retained backup
+allows verification or injected-failure rollback. Device paths, protected
+identities, mounting, formatting, partitioning, bootloader installation, and
+physical media are outside this boundary.

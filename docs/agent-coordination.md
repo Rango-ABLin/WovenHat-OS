@@ -1,5 +1,15 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - Stage 28 disposable file-backed installation executor (2026-10-22)
+
+Added the disjoint `scripts/execute-file-install.py` and
+`tests/test_file_install_executor.py`. It consumes a validated installer plan,
+requires a regular non-symlink file, binds the plan to the image digest, and
+atomically replaces the disposable image with a deterministic mock filesystem
+payload. It supports verification and injected-failure rollback. No prior
+installer slice was modified; no physical device, mount, format, partition,
+bootloader, or Windows device path is supported. This is not real installation.
+
 ## Codex - Stage 28 immutable installer-plan validator (2026-10-22)
 
 Added the disjoint `scripts/validate-installer-plan.py` and

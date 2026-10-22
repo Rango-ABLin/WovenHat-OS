@@ -1,5 +1,19 @@
 # Stage status
 
+## Stage 28 disposable file-backed installation executor - 2026-10-22
+
+Added `scripts/execute-file-install.py` as a test-only transaction boundary.
+It requires a validated installer plan and an explicitly supplied regular
+non-symlink image, binds the plan identity to the image's pre-install digest,
+rejects device/protected identities, and atomically replaces the image with a
+bounded deterministic mock filesystem payload. Injected failures and payload
+verification failures restore the original image.
+
+Focused tests cover success, deterministic digest verification, symlink and
+protected-identity refusal, digest mismatch, and rollback before/after atomic
+replacement. This is not real installation: no physical device, mount,
+format, partition, bootloader, or bootable image operation is implemented.
+
 ## Stage 28 immutable installer-plan validator - 2026-10-22
 
 Added `scripts/validate-installer-plan.py` as a dry-run, file-free planning
