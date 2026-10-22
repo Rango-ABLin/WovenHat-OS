@@ -1,5 +1,20 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - Stage 24.59 low-memory closure (2026-10-22)
+
+The 256 MiB Change-PIN fixture first exposed a bootstrap heap sizing defect:
+the proportional heap stopped at 2,473,984 bytes while the compositor needed a
+4,096,000-byte surface. `kernel/src/heap.rs` now reserves the bounded 8 MiB
+bootstrap ceiling whenever available frames can afford it, retaining the
+proportional policy below that threshold. `cargo test -p wovenhat-kernel` and
+format checks pass, and the complete Stage 24.59 QEMU gate passes on 1 CPU.
+
+Claude's in-flight 3D desktop implementation remains opt-in by default until
+its full pixel-exact acceptance matrix is completed; the Change-PIN gate
+passes with the accepted flat default. The shared `kernel/src/main.rs` and
+`apps/woven-shell/src/main.rs` changes remain uncommitted for Claude's ongoing
+integration review.
+
 ## Codex - 16-CPU SMP and bounded-capacity expansion (2026-10-22)
 
 Raised `smp::MAX_CPUS` to 16 and expanded task/process/file-descriptor/IPC

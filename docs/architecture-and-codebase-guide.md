@@ -3048,7 +3048,9 @@ The global heap's metadata guard is rank 50 and disables local interrupts
 during allocation and deallocation. Boot-time heap page mapping occurs before
 acquiring that guard, preserving the paging (10) to heap (50) order. Its eager
 mapped size is one sixteenth of available physical memory, clamped to 256 KiB
-through 8 MiB. The allocator retains alignment padding with each allocation
+through 8 MiB; when the memory map can afford the complete 8 MiB bound, the
+full bound is reserved so the boot compositor's large surfaces cannot fail on
+the retained low-memory regression fixtures. The allocator retains alignment padding with each allocation
 and coalesces freed intervals. Kernel range mapping rolls back newly mapped
 pages on a partial failure. Runtime growth maps 256 KiB chunks only after
 releasing the heap guard; the boundary is published under that guard after

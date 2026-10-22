@@ -1,5 +1,16 @@
 # Stage status
 
+## Stage 24.59 low-memory regression closure - 2026-10-22
+
+The 256 MiB Change-PIN regression fixture initially exhausted the proportional
+bootstrap heap before the compositor's large surface allocation. The heap now
+reserves its bounded 8 MiB bootstrap ceiling when available frames can afford
+it, while preserving proportional sizing below that threshold and bounded
+runtime growth. The complete Stage 24.59 QEMU gate passed on 1 CPU, including
+sign-in, Change-PIN rotation, durable-record checks, relock, old-PIN rejection,
+and new-PIN unlock. Evidence and limits are recorded in
+`docs/audit-stage24-59-low-memory-2026-10-22.md`.
+
 ## Stage 31 repeated recovery-service lifecycle slice - 2026-10-22
 
 The sequential `scripts/test-stage31-repeated-boots.py` runner now supports

@@ -20,6 +20,20 @@ const PAGE_SIZE: usize = 4096;
 const GROW_CHUNK: usize = 256 * 1024;
 const LOW_WATER: usize = 1024 * 1024;
 
+fn initial_boot_size(remaining_frames: usize) -> usize {
+    let proportional = remaining_frames.saturating_mul(PAGE_SIZE) / 16;
+    let size = if remaining_frames >= MAX_BOOT_SIZE / PAGE_SIZE {
+        // The boot compositor can own a multi-megabyte framebuffer surface.
+        // Reserve the complete bounded bootstrap heap whenever the physical
+        // map can afford it; otherwise a proportional heap can fail before
+        // runtime growth is available to the earliest boot allocations.
+        MAX_BOOT_SIZE
+    } else {
+        proportional.clamp(MIN_SIZE, MAX_BOOT_SIZE)
+    };
+    size & !(PAGE_SIZE - 1)
+}
+
 #[cfg(not(test))]
 static GROW_OWNER: AtomicUsize = AtomicUsize::new(0);
 #[cfg(not(test))]
@@ -371,8 +385,7 @@ pub fn init() -> Result<(), InitError> {
     // Eager mapping keeps allocation independent of paging's lower-ranked lock,
     // including allocations made from within other kernel critical sections.
     let frames = usize::try_from(memory::stats().remaining_frames).unwrap_or(usize::MAX);
-    let budget = frames.saturating_mul(PAGE_SIZE) / 16;
-    let size = budget.clamp(MIN_SIZE, MAX_BOOT_SIZE) & !(PAGE_SIZE - 1);
+    let size = initial_boot_size(frames);
     // Map pages before taking the rank-50 heap guard. Paging is rank 10.
     paging::map_range(START, size).map_err(|_| InitError::Paging)?;
     HEAP.lock().init(size)
@@ -654,6 +667,18 @@ fn align_up(value: usize, alignment: usize) -> Option<usize> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn bootstrap_heap_reserves_full_bound_when_frames_can_afford_it() {
+        assert_eq!(
+            super::initial_boot_size(super::MAX_BOOT_SIZE / super::PAGE_SIZE),
+            super::MAX_BOOT_SIZE
+        );
+        assert!(
+            super::initial_boot_size(super::MAX_BOOT_SIZE / super::PAGE_SIZE - 1)
+                < super::MAX_BOOT_SIZE
+        );
+    }
+
     #[test]
     fn try_filled_returns_buffer_or_none() {
         let filled = super::try_filled(7u8, 4096).expect("small allocation");
