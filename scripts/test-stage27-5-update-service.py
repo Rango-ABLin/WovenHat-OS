@@ -1,5 +1,6 @@
 """Run the bounded privileged update-service acceptance on 1/2/4 CPUs."""
 import argparse
+import os
 import shutil
 import subprocess
 import sys
@@ -22,9 +23,37 @@ def main() -> int:
     firmware = qemu.parent / "share" / "edk2-x86_64-code.fd"
     if not qemu.is_file() or not firmware.is_file():
         parser.error("Set --qemu or install QEMU with its OVMF firmware.")
+    env = dict(os.environ)
+    env["CARGO_INCREMENTAL"] = "0"
+    app = root / "apps" / "woven-update"
+    app_env = dict(env)
+    app_env["CARGO_TARGET_DIR"] = str(app / "target")
+    subprocess.run(
+        ["cargo", "build", "--release", "--target", "x86_64-unknown-none"],
+        cwd=app,
+        env=app_env,
+        check=True,
+    )
+    elf = app / "target" / "x86_64-unknown-none" / "release" / "wovenhat-update"
+    package = root / "target" / "woven-update.wapp"
+    package.parent.mkdir(parents=True, exist_ok=True)
+    package_env = dict(env)
+    package_env["CARGO_TARGET_DIR"] = str(root / "target" / "wapp-packager")
+    subprocess.run(
+        [
+            "cargo", "run", "--quiet", "--manifest-path",
+            str(root / "tools" / "wapp-packager" / "Cargo.toml"), "--",
+            str(elf), str(package),
+        ],
+        cwd=root,
+        env=package_env,
+        check=True,
+    )
+    env["WOVENHAT_UPDATE_IMAGE"] = str(package)
     image = subprocess.check_output(
         ["cargo", "run", "--quiet", "--features", "stage27-5-test", "--", "--print-image"],
         cwd=root,
+        env=env,
         text=True,
     ).strip()
     out = root / "audit-artifacts" / f"stage27.5-{args.cpus}cpu"

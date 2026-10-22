@@ -1,5 +1,17 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - Stage 27.5 end-to-end WovenUpdate IPC acceptance (2026-10-22)
+
+The signed `woven-update --service` image is now exercised through its real
+Ring-3 IPC endpoint. The kernel acceptance client discovers `woven.update`,
+checks a valid Query response after the direct transaction fixture, checks a
+deterministic malformed-frame response, and reaps the service. The 1/2/4-CPU
+QEMU gate, app tests, freestanding app Clippy, stage27-5 kernel Clippy, and
+workspace all-target warning-denying Clippy pass. The daemon buffer is aligned
+to the kernel's 256-byte IPC transport cap. Production-sized slots, bootloader
+handoff, power-loss recovery, installer, and physical qualification remain
+open.
+
 ## Codex - WovenUpdate service-process slice (2026-10-21)
 
 `apps/woven-update --service` now owns the bounded WUDI IPC loop: it publishes

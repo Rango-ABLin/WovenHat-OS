@@ -2013,6 +2013,18 @@ status/value fields. No image bytes cross IPC. This contract is intentionally
 separate from the still-unimplemented capability-gated syscall, service
 ownership, durable image-slot write, and bootloader handoff.
 
+## Stage 27.5 end-to-end WovenUpdate IPC acceptance (2026-10-22)
+
+The Stage 27.5 acceptance image packages the signed `woven-update` ELF and
+loads it through the normal verified userspace path. The kernel acceptance
+client discovers `woven.update`, sends a valid WUDI Query through the real
+service endpoint, checks the activated-slot response, sends a truncated frame,
+checks the fixed bad-request response, and then tears down the service. The
+1/2/4-CPU gates pass. The daemon receive buffer is 256 bytes because the
+kernel IPC syscall caps one transport message at 256 bytes; WUDI's larger
+codec bound remains useful for parser validation but cannot bypass that
+transport limit.
+
 ## Stage 27.5 privileged update-service transaction boundary (2026-10-21)
 
 `apps/woven-update/src/service.rs` provides the bounded userspace service
@@ -2028,9 +2040,10 @@ userspace daemon a stable IPC owner.
 The service-process slice has host tests and freestanding warning-denying
 Clippy evidence. `start_production_system_services` now starts and verifies
 both `woven-package` and `woven-update` before boot continues. The shell QEMU
-gate passed on 1/2/4 CPUs with both publication markers. The client/server
-transaction exchange, production slot backend, bootloader handoff,
-power-loss recovery, and physical qualification remain separate gates.
+gate passed on 1/2/4 CPUs with both publication markers, and the dedicated
+Stage 27.5 gate proves the client/server exchange. The production slot
+backend, bootloader handoff, power-loss recovery, and physical qualification
+remain separate gates.
 
 `kernel/src/update_service.rs` is the first executable service boundary. It
 requires `FileRead`, `FileWrite`, and `StorageIo`, validates `/updates/`

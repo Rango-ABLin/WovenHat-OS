@@ -4774,7 +4774,7 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         serial::write_line(format_args!("[S22.2] handle IPC ABI: PASSED"));
         qemu_test_exit_success();
     }
-    #[cfg(feature = "stage22-3-test")]
+    #[cfg(all(feature = "stage22-3-test", not(feature = "stage27-5-test")))]
     {
         if !stage22_3_package_service_self_test() {
             serial::write_line(format_args!("[S22.3] WovenPackage broker: FAILED"));
@@ -4917,6 +4917,10 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     {
         if !update_service::self_test() {
             serial::write_line(format_args!("[S27.5] update service: FAILED"));
+            qemu_test_exit_failure();
+        }
+        if !update_service::service_ipc_self_test(SYSTEM_APP_UPDATE) {
+            serial::write_line(format_args!("[S27.5] update service IPC: FAILED"));
             qemu_test_exit_failure();
         }
         serial::write_line(format_args!("[S27.5] update service: PASSED"));
@@ -5882,13 +5886,17 @@ const SYSTEM_APP_SECURITY: &[u8] = include_bytes!(env!("WOVENHAT_SECURITY_IMAGE"
 const SYSTEM_APP_EDITOR: &[u8] = include_bytes!(env!("WOVENHAT_EDITOR_IMAGE"));
 #[cfg(any(feature = "stage19-app-catalog-test", feature = "system-apps"))]
 const SYSTEM_APP_IMAGES: &[u8] = include_bytes!(env!("WOVENHAT_IMAGES_IMAGE"));
-#[cfg(any(feature = "stage19-app-catalog-test", feature = "system-apps"))]
+#[cfg(any(
+    feature = "stage19-app-catalog-test",
+    feature = "stage27-5-test",
+    feature = "system-apps"
+))]
 const SYSTEM_APP_UPDATE: &[u8] = include_bytes!(env!("WOVENHAT_UPDATE_IMAGE"));
 #[cfg(any(feature = "stage19-app-catalog-test", feature = "system-apps"))]
 const SYSTEM_APP_STORE: &[u8] = include_bytes!(env!("WOVENHAT_STORE_IMAGE"));
 
 #[cfg(any(
-    feature = "stage22-3-test",
+    all(feature = "stage22-3-test", not(feature = "stage27-5-test")),
     feature = "stage22-5-test",
     feature = "system-apps"
 ))]
@@ -5910,7 +5918,7 @@ const AI_SERVICE_IMAGE: &[u8] = include_bytes!(env!("WOVENHAT_AI_IMAGE"));
 ))]
 const AI_PROBE_IMAGE: &[u8] = include_bytes!(env!("WOVENHAT_AI_PROBE_IMAGE"));
 
-#[cfg(feature = "stage22-3-test")]
+#[cfg(all(feature = "stage22-3-test", not(feature = "stage27-5-test")))]
 fn stage22_3_package_service_self_test() -> bool {
     use libwoven::package_ipc::{Operation, Request, Response};
 
@@ -6887,11 +6895,8 @@ fn start_production_system_services() -> bool {
         serial::write_line(format_args!("[SERVICES] woven-update load failed"));
         return false;
     };
-    let Ok((pid, _, _)) = task::spawn_user_system_service(
-        "woven-update",
-        program,
-        capabilities,
-    ) else {
+    let Ok((pid, _, _)) = task::spawn_user_system_service("woven-update", program, capabilities)
+    else {
         serial::write_line(format_args!("[SERVICES] woven-update spawn failed"));
         return false;
     };

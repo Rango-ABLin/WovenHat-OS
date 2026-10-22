@@ -261,3 +261,179 @@ pub fn self_test() -> bool {
     }
     read_ok && &image_read[..image.len()] == image
 }
+
+/// Exercise the signed Ring-3 WovenUpdate daemon through its real service
+/// endpoint. The direct transaction self-test above establishes the durable
+/// record and candidate state; this acceptance proves the userspace decode,
+/// capability-gated query, malformed-request response, and teardown path.
+#[cfg(feature = "stage27-5-test")]
+pub fn service_ipc_self_test(update_image: &[u8]) -> bool {
+    use libwoven::update_ipc::{Operation, Request, Response, NO_SLOT};
+
+    const STATUS_OK: u16 = 0;
+    const STATUS_BAD_REQUEST: u16 = 1;
+
+    fn fail(reason: &str) -> bool {
+        crate::serial::write_line(format_args!("[S27.5] IPC {}", reason));
+        false
+    }
+
+    fn reap(pid: crate::task::ProcessId) -> bool {
+        let _ = crate::task::kill_process(pid.as_u64(), 9);
+        let deadline = crate::timer::ticks().wrapping_add(500);
+        while !crate::task::process_exited(pid) {
+            if crate::timer::ticks().wrapping_sub(deadline) < u64::MAX / 2 {
+                return false;
+            }
+            crate::task::yield_now();
+        }
+        crate::task::wait_process(pid.as_u64()).is_ok()
+    }
+
+    fn exchange(
+        pid: crate::task::ProcessId,
+        handle: crate::ipc::Handle,
+        bytes: &[u8],
+        expected: Response,
+    ) -> bool {
+        if crate::ipc::send_handle(pid.as_u64(), handle, bytes).is_err() {
+            crate::serial::write_line(format_args!("[S27.5] IPC send failed"));
+            return false;
+        }
+        let deadline = crate::timer::ticks().wrapping_add(500);
+        loop {
+            if crate::task::process_exited(pid) {
+                crate::serial::write_line(format_args!(
+                    "[S27.5] IPC daemon exited before response"
+                ));
+                return false;
+            }
+            if let Ok((message, serial)) = crate::ipc::peek(pid.as_u64()) {
+                let decoded = Response::decode(message.payload()).ok();
+                let _ = crate::ipc::receive_if(pid.as_u64(), serial);
+                if decoded != Some(expected) {
+                    crate::serial::write_line(format_args!(
+                        "[S27.5] IPC response len={} decoded={:?} expected={:?}",
+                        message.payload().len(),
+                        decoded,
+                        expected
+                    ));
+                }
+                return decoded == Some(expected);
+            }
+            if crate::timer::ticks().wrapping_sub(deadline) < u64::MAX / 2 {
+                let waiting = crate::ipc::waiter_counts(pid.as_u64(), handle)
+                    .map(|counts| counts.0 == 1)
+                    .unwrap_or(false);
+                crate::serial::write_line(format_args!(
+                    "[S27.5] IPC response timeout exited={} pending={} receive_waiting={}",
+                    crate::task::process_exited(pid),
+                    crate::ipc::message_pending(pid.as_u64()),
+                    waiting
+                ));
+                return false;
+            }
+            crate::task::yield_now();
+        }
+    }
+
+    let Ok(verified) = crate::signed_app::verify_package(update_image) else {
+        return fail("signed app verification failed");
+    };
+    if crate::elf::parse(verified.bytes()).is_err() {
+        return fail("signed app ELF validation failed");
+    }
+    let Some(program) = crate::userspace::load_elf_with_argv_verified(
+        update_image,
+        &["/bin/wovenhat-update", "--service"],
+    ) else {
+        return fail("daemon load failed");
+    };
+    let capabilities = crate::capability::CapabilitySet::only(crate::capability::Capability::Ipc)
+        .with(crate::capability::Capability::FileRead)
+        .with(crate::capability::Capability::FileWrite)
+        .with(crate::capability::Capability::StorageIo);
+    let Ok((pid, _, _)) =
+        crate::task::spawn_user_system_service("woven-update", program, capabilities)
+    else {
+        return fail("daemon spawn failed");
+    };
+
+    let deadline = crate::timer::ticks().wrapping_add(500);
+    let published = loop {
+        if let Ok(info) = crate::ipc::service_info(b"woven.update") {
+            if info.owner == pid.as_u64() && info.client_rights == 1 {
+                break true;
+            }
+        }
+        if crate::task::process_exited(pid)
+            || crate::timer::ticks().wrapping_sub(deadline) < u64::MAX / 2
+        {
+            break false;
+        }
+        crate::task::yield_now();
+    };
+    if !published {
+        let _ = reap(pid);
+        return fail("daemon publication failed");
+    }
+    let Ok(client_handle) = crate::ipc::discover_service(pid.as_u64(), b"woven.update") else {
+        let _ = reap(pid);
+        return fail("daemon discovery failed");
+    };
+
+    let query = Request {
+        operation: Operation::Query,
+        request_id: 0x27_05_01,
+        generation: 0,
+        slot: NO_SLOT,
+        source: b"",
+    };
+    let mut request_bytes = [0u8; libwoven::update_ipc::MAX_MESSAGE_BYTES];
+    let Ok(query_length) = query.encode(&mut request_bytes) else {
+        let _ = reap(pid);
+        return fail("query encoding failed");
+    };
+    if !exchange(
+        pid,
+        client_handle,
+        &request_bytes[..query_length],
+        Response {
+            request_id: query.request_id,
+            status: STATUS_OK,
+            // Query packs the active slot in bits 0..=7 and pending slot + 1
+            // in bits 8..=15. The direct self-test activates slot 1 before
+            // the daemon is spawned, with no pending candidate.
+            value: 1,
+        },
+    ) {
+        let _ = reap(pid);
+        return fail("query response mismatch");
+    }
+
+    // A truncated WUDI frame must be answered without reaching syscall 239.
+    if !exchange(
+        pid,
+        client_handle,
+        b"WUDI",
+        Response {
+            request_id: 0,
+            status: STATUS_BAD_REQUEST,
+            value: 0,
+        },
+    ) {
+        let _ = reap(pid);
+        return fail("malformed response mismatch");
+    }
+    if !reap(pid) {
+        return fail("daemon teardown/reap failed");
+    }
+    let deadline = crate::timer::ticks().wrapping_add(500);
+    while crate::ipc::service_info(b"woven.update").is_ok() {
+        if crate::timer::ticks().wrapping_sub(deadline) < u64::MAX / 2 {
+            return fail("daemon service cleanup timed out");
+        }
+        crate::task::yield_now();
+    }
+    true
+}

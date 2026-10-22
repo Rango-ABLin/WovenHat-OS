@@ -14,7 +14,11 @@ const CLIENT_SEND: u8 = 1;
 const STATUS_OK: u16 = 0;
 const STATUS_BAD_REQUEST: u16 = 1;
 const STATUS_TRANSACTION_FAILED: u16 = 2;
-const REQUEST_CAPACITY: usize = update_ipc::MAX_MESSAGE_BYTES;
+// The WUDI codec is independently bounded at 4 KiB, but the kernel IPC
+// transport currently caps one message at 256 bytes. Keep the receive buffer
+// within the syscall ABI so the daemon can actually receive requests; longer
+// candidates remain rejected by the bounded request encoder before transport.
+const REQUEST_CAPACITY: usize = 256;
 
 static mut REQUEST_BYTES: [u8; REQUEST_CAPACITY] = [0u8; REQUEST_CAPACITY];
 static mut RESPONSE_BYTES: [u8; Response::ENCODED_LEN] = [0u8; Response::ENCODED_LEN];

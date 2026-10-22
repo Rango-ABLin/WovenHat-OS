@@ -1,5 +1,24 @@
 # Stage status
 
+## Stage 27.5 end-to-end WovenUpdate IPC acceptance - 2026-10-22
+
+The Stage 27.5 QEMU gate now builds the signed `woven-update` Ring-3 image,
+starts the real `--service` daemon, discovers `woven.update`, sends a valid
+WUDI Query, verifies the activated-slot response, sends a truncated malformed
+frame, verifies the deterministic bad-request response, and reaps the daemon.
+The 1/2/4-CPU gates pass with exit 33. The daemon receive buffer is aligned to
+the kernel's 256-byte IPC transport limit; the larger codec bound remains a
+parser bound and oversized transport requests fail closed.
+
+Host app tests, freestanding app Clippy, stage27-5 kernel Clippy, and
+workspace all-target warning-denying Clippy pass. Evidence is recorded in
+`docs/audit-stage27-5-update-ipc-2026-10-22.md` and the retained
+`audit-artifacts/stage27.5-{1,2,4}cpu` directories.
+
+This closes the daemon IPC exchange gate only. Production-sized block-device
+slots, bootloader target/attempt handoff, power-loss injection/recovery,
+WovenRecovery, installer integration, and physical qualification remain open.
+
 ## Reduced Motion accessibility toggle added to Quick Settings (2026-10-22)
 
 Quick Settings gained a "Reduced Motion" row (row 9 of 10) wiring
@@ -147,8 +166,8 @@ capability set. The shell QEMU gate passed on 1/2/4 CPUs with both service
 publication markers; evidence is in
 `docs/audit-stage27-5-update-service-process-2026-10-21.md`.
 
-This is an integration slice, not full update-service acceptance. An
-end-to-end QEMU client/server exchange, production-sized block-device slots,
+The dedicated Stage 27.5 gate now proves the client/server exchange. This is
+not full update/recovery acceptance: production-sized block-device slots,
 bootloader handoff, power-loss recovery, and physical USB qualification
 remain open.
 
