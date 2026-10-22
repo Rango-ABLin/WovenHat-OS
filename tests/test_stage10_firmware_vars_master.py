@@ -35,12 +35,14 @@ class Stage10FirmwareVarsTests(unittest.TestCase):
             self.assertEqual(template.read_bytes(), b"original")
 
     def test_code_readonly_and_vars_writable_separate_units(self):
-        drives = RUNTIME.firmware_drives(Path("CODE.fd"), Path("run/OVMF_VARS.fd"))
+        code = Path("CODE.fd")
+        vars_copy = Path("run/OVMF_VARS.fd")
+        drives = RUNTIME.firmware_drives(code, vars_copy)
         self.assertEqual(drives, [
-            "-drive", "if=pflash,unit=0,format=raw,readonly=on,file=CODE.fd",
-            "-drive", "if=pflash,unit=1,format=raw,file=run/OVMF_VARS.fd",
+            "-drive", f"if=pflash,unit=0,format=raw,readonly=on,file={code}",
+            "-drive", f"if=pflash,unit=1,format=raw,file={vars_copy}",
         ])
-        self.assertNotIn("readonly=on,file=run/OVMF_VARS.fd", " ".join(drives))
+        self.assertNotIn(f"readonly=on,file={vars_copy}", " ".join(drives))
 
     def test_invalid_template_does_not_create_vars_copy(self):
         with tempfile.TemporaryDirectory() as tmp:
