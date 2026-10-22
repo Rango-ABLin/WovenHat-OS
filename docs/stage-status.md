@@ -1,5 +1,14 @@
 # Stage status
 
+## Stage 31 memory and storage suite execution - 2026-10-22
+
+Executed the torture-plan memory and storage suites on 1/2/4 CPUs. All six
+runs passed with exit 33. Evidence is retained in
+`target/memory-regression-{1,2,4}-debug/` and
+`target/storage-regression-{1,2,4}-debug/`. Network, security, shell,
+failure-injection, low-resource, restart, and repeated-boot rows remain open;
+8/16-CPU rows remain blocked by the current harness capability.
+
 ## Stage 31 torture-plan boundary - 2026-10-22
 
 Added `scripts/stage31-torture-plan.py` and focused tests. The planner makes

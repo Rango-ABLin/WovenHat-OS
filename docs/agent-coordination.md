@@ -1,5 +1,13 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - Stage 31 memory/storage execution (2026-10-22)
+
+The bounded torture plan's memory and storage suites passed on 1/2/4 CPUs
+(six runs, exit 33). Fresh serial evidence remains under the corresponding
+`target/memory-regression-*` and `target/storage-regression-*` directories.
+No 8/16-CPU claim is made; network/security/shell and failure-injection rows
+are still pending.
+
 ## Codex - Stage 31 bounded torture-plan boundary (2026-10-22)
 
 Added `scripts/stage31-torture-plan.py` and
