@@ -39,7 +39,8 @@ fn record(byte: u8) {
 #[cfg(any(
     not(feature = "qemu-test"),
     feature = "stage13-12-test",
-    feature = "stage27-5-recovery-test"
+    feature = "stage27-5-recovery-test",
+    feature = "system-apps"
 ))]
 pub fn log_position() -> usize {
     LOG_HEAD.load(Ordering::Acquire)
@@ -52,7 +53,8 @@ pub fn log_position() -> usize {
 #[cfg(any(
     not(feature = "qemu-test"),
     feature = "stage13-12-test",
-    feature = "stage27-5-recovery-test"
+    feature = "stage27-5-recovery-test",
+    feature = "system-apps"
 ))]
 pub fn read_log(from: usize, out: &mut [u8]) -> (usize, usize) {
     let head = LOG_HEAD.load(Ordering::Acquire);
