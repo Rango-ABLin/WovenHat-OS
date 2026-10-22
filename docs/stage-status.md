@@ -10,6 +10,10 @@ an installer-specific regression, but it prevents a fresh 1/2/4-CPU QEMU
 acceptance claim until the shared QEMU/runtime failure is resolved. No native
 physical disk was accessed; the kernel RamDisk transaction remains the only
 destructive-install execution evidence.
+The read-only host preflight at
+`audit-artifacts/physical-host-20261022-131154-963/host.json` found one
+boot/system NVMe disk, no disposable target, and a non-elevated Windows
+session; it therefore correctly performed no native-disk test.
 
 ## Stage 28 kernel-backed physical installation transaction - 2026-10-22
 

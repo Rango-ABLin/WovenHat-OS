@@ -9,6 +9,11 @@ pre-installer control commit (`099780ca`) shows this is a shared QEMU/runtime
 failure rather than the installer transaction. The installer feature Clippy,
 RamDisk transaction, host tests, and disposable Stage 28 chain remain green;
 no native disk was accessed and no historical evidence was removed.
+The read-only host preflight recorded one boot/system NVMe disk and a
+non-elevated Windows session in
+`audit-artifacts/physical-host-20261022-131154-963/host.json`; no safe
+disposable physical target was available, so no native-disk write was
+attempted.
 
 ## Codex - Stage 28 kernel-backed physical installation transaction (2026-10-22)
 
