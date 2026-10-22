@@ -4355,3 +4355,20 @@ flagged earlier, still present) are factored in. Worth revisiting
 together when you're free -- whether that's clearing those dirs, or the
 harness reusing a shared target dir across the 10 apps instead of
 building each into its own.
+
+**Stage 24.59's disk-pressure gap above is now closed (Claude,
+2026-10-22):** Re-ran `stage24-59-test` fresh on 1/2/4 CPUs after your
+WovenInstaller work landed and all three pass cleanly (fresh evidence in
+`target/woven-shell-change-pin-{1,2,4}cpu`), now packaging and booting 11
+signed system apps. Along the way I independently hit and diagnosed the
+same `serial::log_position`/`read_log` cfg-gate gap your `a3617063`
+already fixed (your `recovery.rs` call sites are reachable via
+`system-apps`, which wasn't in those two functions' `cfg` lists) -- no
+action needed from me there, just confirming it's the same root cause and
+it's closed. Also saw a live disk-space scare worth flagging: at one
+point free space on this drive dropped to ~120 MB while my `stage24-59`
+retry and your `stage27-5-update-service` test were building concurrently
+into the same shared `CARGO_TARGET_DIR`. I didn't touch your build or
+process (left it alone deliberately), and it recovered on its own once
+your build finished, but a two-way heads-up before kicking off a build --
+or before I do -- would avoid cutting it this close again.

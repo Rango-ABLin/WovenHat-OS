@@ -1,5 +1,20 @@
 # Stage status
 
+## Stage 24.59 disk-pressure gap closed (Claude, 2026-10-22)
+
+`stage24-59-test`'s full `system-apps` package build, previously flagged in
+this file and in `docs/agent-coordination.md` as structurally disk-tight,
+now passes cleanly on 1, 2, and 4 CPUs with fresh evidence
+(`target/woven-shell-change-pin-{1,2,4}cpu`). Two independent things closed
+it: Codex's `system-apps` feature addition to `serial::log_position`/
+`read_log`'s cfg gate (commit `a3617063`, fixing the same cfg-gate-cascade
+bug class seen earlier at Stage 20.12) and Codex's WovenInstaller
+integration (`b882f09a`/`73c2d34f`), which brought the full 11-app
+packaging run to a state that builds and boots within this machine's disk
+budget. No code change was needed on this side; this entry just closes the
+previously-recorded gap now that it has reproduced clean three times in a
+row.
+
 ## Stage 28 disposable-image end-to-end acceptance harness - 2026-10-22
 
 Added `scripts/test-stage28-disposable-acceptance.py` and focused coverage in
