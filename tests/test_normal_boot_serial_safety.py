@@ -14,6 +14,7 @@ DESKTOP = ('[BOOT] desktop-first runtime ready\n'
            '[APPS] 10 signed applications installed\n'
            '[SESSION] WovenShell desktop started as pid 2\n'
            '[SESSION] diagnostic console\n'
+           '[SESSION] back to the desktop\n'
            '[SMP] acknowledged TLB shootdowns: PASSED\n')
 
 
