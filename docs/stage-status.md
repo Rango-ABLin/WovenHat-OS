@@ -11,6 +11,26 @@ pass. The supported memory, storage, network, security, and shell suites now
 pass on 1/2/4/8/16 CPUs; the 16-CPU storage and shell runs need an extended
 host TCG wall-clock budget but complete successfully.
 
+## Stage 31 reliability evidence slices - 2026-10-22
+
+The sequential `scripts/test-stage31-repeated-boots.py` harness passed a
+ten-boot 1-CPU memory sample. Each iteration has independent command, result,
+serial, and QEMU evidence under
+`audit-artifacts/stage31-repeated/memory-1cpu/run-*`; the harness stops on the
+first timeout or non-zero result and never runs the fixed-port suites in
+parallel.
+
+The WovenFS host crash-recovery gate also samples 64 deterministic randomized
+write cut points with remount/replay verification, while retaining the
+exhaustive all-cut tests. The existing Stage 27.5 durable-recovery QEMU gate
+passed on 1/2/4 CPUs with exit 33; evidence remains under
+`audit-artifacts/stage27.5-recovery-{1,2,4}cpu`.
+
+These are evidence and infrastructure slices, not completion of Stage 31:
+the large-count matrix, randomized device faults, low-resource/loss cases,
+driver/service restart, sudden-shutdown recovery, and native qualification
+remain open.
+
 ## 4 GiB production memory floor and scalable memory telemetry - 2026-10-22
 
 Defined the supported production minimum as 4 GiB through
