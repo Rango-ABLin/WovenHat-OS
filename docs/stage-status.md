@@ -1,5 +1,20 @@
 # Stage status
 
+## Stage 28 disposable file-image layout builder and verifier - 2026-10-22
+
+Added `scripts/build-file-image-layout.py` and focused coverage in
+`tests/test_file_image_layout.py`. The builder requires an existing regular
+non-symlink file and an explicit test-harness authorization, then writes a
+deterministic GPT-like image containing a protective MBR, primary/backup GPT
+headers and entries, an aligned ESP region, aligned plan data regions, and
+checksummed metadata. Verification checks signatures, metadata integrity,
+capacity, alignment, bounds, and overlap.
+
+Physical/device/protected paths, symlinks, missing files, and unauthorized
+images fail closed. This is disposable-image preparation only: it does not
+partition real media, mount or format filesystems, write bootloaders, access
+hardware, or claim production installation support.
+
 ## Stage 28 bounded installer UI/state model - 2026-10-22
 
 Added `scripts/installer-ui-model.py`, a pure immutable state-transition model

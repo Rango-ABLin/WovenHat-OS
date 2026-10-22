@@ -1,5 +1,21 @@
 # WovenHat OS Architecture & Codebase Guide
 
+### Stage 28 - disposable file-image layout builder and verifier
+
+`scripts/build-file-image-layout.py` is an isolated, test-only preparation
+boundary. It accepts a validated `woveninstaller-plan-v1` document and an
+already-created regular file only when `--test-harness-created` is explicitly
+provided. Device, physical-drive, protected, symlink, missing, unaligned, or
+out-of-bound targets fail closed.
+
+The deterministic image layout reserves sector 0 for a protective MBR, sectors
+1-33 and their backup for GPT-like headers/entries, aligns an 8 MiB ESP and
+the plan's data regions to 1 MiB boundaries, and records canonical metadata
+with a SHA-256 checksum. The verifier rechecks both GPT signatures, metadata,
+partition bounds/alignment, and sorted-region overlap. It performs no device
+I/O, partition API calls, mounts, formatting, bootloader writes, or hardware
+access; it is not production installation.
+
 ### Stage 28 - bounded installer UI/state model
 
 `scripts/installer-ui-model.py`

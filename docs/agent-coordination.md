@@ -1,5 +1,16 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - Stage 28 disposable file-image layout builder and verifier (2026-10-22)
+
+Added the disjoint `scripts/build-file-image-layout.py` module and
+`tests/test_file_image_layout.py`. It consumes a validated dry-run plan and an
+explicitly test-harness-created regular file, emits a deterministic protective
+MBR/GPT-like layout with aligned ESP/data regions and checksummed metadata,
+and verifies bounds, alignment, and overlap. It refuses symlinks,
+physical/protected paths, missing authorization, and non-file targets. This is
+disposable-image preparation only: no real partitioning, mounts, formatting,
+bootloader writes, or hardware access are implemented.
+
 ## Codex - Stage 28 bounded installer UI/state model (2026-10-22)
 
 Added the disjoint `scripts/installer-ui-model.py` pure state machine and
