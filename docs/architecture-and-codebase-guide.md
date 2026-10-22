@@ -4062,6 +4062,15 @@ bootability, hardware qualification, or release certification.
 
 # SMP scalability and supported resource floor
 
+## Service restart qualification boundary
+
+The signed Stage 27.5 update-service gate now proves a full orderly restart
+cycle: process teardown, service-registry cleanup, signed image reload, fresh
+process publication, new capability discovery, request handling, and second
+teardown. This is an acceptance boundary, not yet a production supervisor;
+automatic crash detection, bounded retry/backoff, driver restart ownership,
+and power-loss recovery remain separate designs.
+
 ## Input delivery and backpressure
 
 `kernel/src/woven_input.rs` is the bounded fan-in queue for keyboard, pointer,

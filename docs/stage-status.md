@@ -1,5 +1,16 @@
 # Stage status
 
+## Stage 31 signed service restart slice - 2026-10-22
+
+The Stage 27.5 signed `woven-update` acceptance now kills and reaps the first
+daemon, verifies endpoint cleanup, reloads the signed image, respawns it,
+verifies fresh endpoint ownership and capability discovery, services a query,
+and tears it down again. The 1-CPU QEMU gate passed with exit 33 and emitted
+`[S27.5] IPC daemon restart/republication: PASSED`. This is service-restart
+qualification only; generic supervision, driver restart, sudden shutdown,
+randomized full-stack faults, and native hardware certification remain open.
+Details are in `docs/audit-stage31-service-restart-2026-10-22.md`.
+
 ## Input queue reliability slice - 2026-10-22
 
 The shared WovenInput queue now coalesces adjacent pointer motion and, when

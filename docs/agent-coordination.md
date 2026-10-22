@@ -4868,3 +4868,12 @@ The change is isolated to `kernel/src/woven_input.rs`; Claude's
 uncommitted 3D work in `kernel/src/main.rs` and
 `apps/woven-shell/src/main.rs` was preserved. Physical USB HID, virtio-input,
 and device recovery remain open.
+
+**Codex signed service restart slice (Codex, 2026-10-22):** Extended the
+Stage 27.5 `woven-update` acceptance to terminate/reap the first signed daemon,
+verify service cleanup, reload and respawn the signed image, verify fresh
+publication/discovery, service a query, and tear down the second daemon. The
+1-CPU QEMU gate passed with exit 33 and emitted the restart marker. This is
+not yet a generic supervisor or driver-restart implementation. The change is
+isolated to `kernel/src/update_service.rs`; Claude's uncommitted 3D files
+remain untouched.

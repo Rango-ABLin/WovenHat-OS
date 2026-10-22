@@ -435,5 +435,77 @@ pub fn service_ipc_self_test(update_image: &[u8]) -> bool {
         }
         crate::task::yield_now();
     }
+
+    // Restart the signed daemon after an orderly crash/teardown boundary.
+    // Reloading the verified image is intentional: a restart must not reuse
+    // stale process state or an old endpoint capability.
+    let Some(restarted_program) = crate::userspace::load_elf_with_argv_verified(
+        update_image,
+        &["/bin/wovenhat-update", "--service"],
+    ) else {
+        return fail("daemon restart load failed");
+    };
+    let Ok((restarted_pid, _, _)) = crate::task::spawn_user_system_service(
+        "woven-update",
+        restarted_program,
+        capabilities,
+    ) else {
+        return fail("daemon restart spawn failed");
+    };
+    let restart_deadline = crate::timer::ticks().wrapping_add(500);
+    let republished = loop {
+        if let Ok(info) = crate::ipc::service_info(b"woven.update") {
+            if info.owner == restarted_pid.as_u64() && info.client_rights == 1 {
+                break true;
+            }
+        }
+        if crate::task::process_exited(restarted_pid)
+            || crate::timer::ticks().wrapping_sub(restart_deadline) < u64::MAX / 2
+        {
+            break false;
+        }
+        crate::task::yield_now();
+    };
+    if !republished {
+        let _ = reap(restarted_pid);
+        return fail("daemon restart publication failed");
+    }
+    let Ok(restarted_handle) = crate::ipc::discover_service(
+        restarted_pid.as_u64(),
+        b"woven.update",
+    ) else {
+        let _ = reap(restarted_pid);
+        return fail("daemon restart discovery failed");
+    };
+    let Ok(restart_query_length) = query.encode(&mut request_bytes) else {
+        let _ = reap(restarted_pid);
+        return fail("daemon restart query encoding failed");
+    };
+    if !exchange(
+        restarted_pid,
+        restarted_handle,
+        &request_bytes[..restart_query_length],
+        Response {
+            request_id: query.request_id,
+            status: STATUS_OK,
+            value: 1,
+        },
+    ) {
+        let _ = reap(restarted_pid);
+        return fail("daemon restart query mismatch");
+    }
+    if !reap(restarted_pid) {
+        return fail("daemon restart teardown/reap failed");
+    }
+    let restart_cleanup_deadline = crate::timer::ticks().wrapping_add(500);
+    while crate::ipc::service_info(b"woven.update").is_ok() {
+        if crate::timer::ticks().wrapping_sub(restart_cleanup_deadline) < u64::MAX / 2 {
+            return fail("daemon restart service cleanup timed out");
+        }
+        crate::task::yield_now();
+    }
+    crate::serial::write_line(format_args!(
+        "[S27.5] IPC daemon restart/republication: PASSED"
+    ));
     true
 }
