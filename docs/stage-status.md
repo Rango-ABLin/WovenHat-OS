@@ -14,6 +14,15 @@ the local branch is not pushed. Machine-readable evidence is under
 `audit-artifacts/maturity/20261022-cycle0/`. No production-readiness claim is
 made.
 
+The authoritative local release validator also reproduced a 4-CPU storage
+boot timeout after the S10.2 async-completion marker. The same timeout was
+reproduced from a clean detached worktree at the audited baseline, so it is
+an inherited P0-04 storage/SMP blocker rather than an effect of Claude's
+uncommitted graphics work. The timeout and serial logs are preserved under
+`target/release-validation/storage-4-debug.log` and
+`target/storage-regression-4-debug/serial.log`; the release gate was not
+weakened or extended.
+
 ## GFX-01 hybrid graphics baseline - 2026-10-22
 
 Applied the supplied Hybrid Graphics Architecture direction at GFX-01 only.

@@ -14,6 +14,15 @@ SECOND-REVIEW-PENDING because no authorized Claude review result was available.
 Physical power-loss, native hardware, TPM, and secure-boot qualification
 remain open. No destructive hardware operation was performed.
 
+The local release validator then failed at `storage-4-debug` with a 4-CPU
+boot timeout after the S10.2 async-completion marker. The identical failure
+was reproduced from clean detached worktree `target/clean-baseline-35bd0d4`,
+so this is an inherited P0-04 storage/SMP blocker and not attributable to
+Claude's uncommitted graphics changes. Logs remain under
+`target/release-validation/storage-4-debug.log` and
+`target/storage-regression-4-debug/serial.log`; no timeout or assertion was
+weakened.
+
 ## Codex - Accept GFX-01 baseline and repair 3D taskbar footprint (2026-10-22)
 
 Applied the supplied hybrid-graphics direction at GFX-01: the versioned
