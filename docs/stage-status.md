@@ -24,12 +24,15 @@ uncommitted graphics work. The timeout and serial logs are preserved under
 weakened or extended.
 
 Temporary serial tracing localized the stall to the live FAT32 directory-growth
-workload's ATA/cache path. Across repeated 4-CPU runs, the stop moved among
-old-file reads and metadata/data journal operations, with no rejected worker
-event signal. Pinning the worker and forcing post-probe direct I/O reproduced
-the timeout, so worker placement/queueing alone is not the cause; the shared
-ATA/cache/SMP interaction remains unresolved. All tracing and experiments were
-removed after diagnosis, and the shared Claude worktree remains untouched.
+workload's ATA/cache path, and some failing runs stop at the handoff immediately
+after S10.2 before reaching the storage boundary. Across repeated 4-CPU runs,
+the stop moved among the post-S10.2 scheduler handoff, old-file reads, and
+metadata/data journal operations, with no rejected worker event signal.
+Pinning the worker and forcing post-probe direct I/O reproduced the timeout, so
+worker placement/queueing alone is not the cause; the scheduler/task-lifecycle
+handoff and shared ATA/cache interaction remain unresolved. All tracing and
+experiments were removed after diagnosis, and the shared Claude worktree
+remains untouched.
 
 ## GFX-01 hybrid graphics baseline - 2026-10-22
 

@@ -24,13 +24,15 @@ Claude's uncommitted graphics changes. Logs remain under
 weakened.
 
 Temporary tracing localized the stall to the live FAT32 directory-growth
-workload's ATA/cache path. Repeated 4-CPU runs stopped at different old-file
-read or metadata/data-journal operations, with no rejected worker event signal.
-Pinning the worker and forcing post-probe direct I/O reproduced the timeout, so
-worker placement/queueing alone is not the cause. The shared ATA/cache/SMP
-interaction remains unresolved; all tracing and experiments were removed and
-no speculative filesystem change was made. Claude's dirty files remain
-untouched.
+workload's ATA/cache path, while some runs stop at the handoff immediately
+after S10.2 before reaching the storage boundary. Repeated 4-CPU runs stopped
+at different post-S10.2 scheduler, old-file-read, or metadata/data-journal
+points, with no rejected worker event signal. Pinning the worker and forcing
+post-probe direct I/O reproduced the timeout, so worker placement/queueing
+alone is not the cause. The scheduler/task-lifecycle handoff and shared
+ATA/cache/SMP interaction remain unresolved; all tracing and experiments were
+removed and no speculative filesystem change was made. Claude's dirty files
+remain untouched.
 
 ## Codex - Accept GFX-01 baseline and repair 3D taskbar footprint (2026-10-22)
 
