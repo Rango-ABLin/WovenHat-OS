@@ -1,5 +1,19 @@
 # Stage status
 
+## Full-system maturity Cycle 0 - 2026-10-22
+
+The full-system mandate was read and a protected audit branch was created at
+`codex/maturity-audit-20261022` from `35bd0d45`. The shared Claude changes in
+`apps/woven-shell/src/main.rs` and `kernel/src/main.rs` remain dirty and are
+preserved. Fresh Stage 11.2-ASLR randomized guard-fault acceptance passes on
+1/2/4 CPUs. Fresh WovenFS scratch-device acceptance passes on 1/2/4 CPUs, and
+the host crash-injection suite passes all 16 tests. Physical power-loss,
+native hardware, TPM, and secure-boot qualification remain open. The latest
+remote GitHub Actions kernel run is red in core-foundation and drivers-radio;
+the local branch is not pushed. Machine-readable evidence is under
+`audit-artifacts/maturity/20261022-cycle0/`. No production-readiness claim is
+made.
+
 ## GFX-01 hybrid graphics baseline - 2026-10-22
 
 Applied the supplied Hybrid Graphics Architecture direction at GFX-01 only.

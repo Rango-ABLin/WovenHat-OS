@@ -1,5 +1,19 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - Full-system maturity Cycle 0 audit (2026-10-22)
+
+Read the seven-page full-system maturity mandate and created protected branch
+`codex/maturity-audit-20261022` at audited HEAD `35bd0d45`. Fresh P0-01
+Stage 11.2-ASLR acceptance passed on 1/2/4 CPUs. Fresh P0-02 WovenFS
+scratch-device acceptance passed on 1/2/4 CPUs and `wovenfs_crash` passed all
+16 host tests. The latest remote CI run is still red in core-foundation and
+drivers-radio/Wi-Fi; it is on an earlier remote SHA and this branch is not
+pushed. Machine-readable reports are in
+`audit-artifacts/maturity/20261022-cycle0/`. Claude independent review is
+SECOND-REVIEW-PENDING because no authorized Claude review result was available.
+Physical power-loss, native hardware, TPM, and secure-boot qualification
+remain open. No destructive hardware operation was performed.
+
 ## Codex - Accept GFX-01 baseline and repair 3D taskbar footprint (2026-10-22)
 
 Applied the supplied hybrid-graphics direction at GFX-01: the versioned
