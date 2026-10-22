@@ -14,6 +14,14 @@ remain the next implementation increment. Normal system-apps boot passed on
 1 CPU with the new publication marker, and the signed eleven-app catalog
 gate remained green.
 
+The service ABI now validates compact plans without allocation: target sector
+identity/capacity, FAT32 selection, minimum partition geometry, username,
+timezone, keyboard, network mode, and explicit destructive confirmation are
+checked before a request can reach the future write transaction. `Validate`
+returns success for a valid plan when inventory is available; `Install` still
+returns not-ready because the physical GPT/FAT32/EFI transaction is not yet
+implemented in the kernel service.
+
 ## Stage 28 graphical installer frontend and current ISO gate - 2026-10-22
 
 `apps/woven-installer` now has a bounded `--gui` mode using the established

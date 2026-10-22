@@ -1,8 +1,8 @@
 //! Privileged installer authority boundary.
 //!
-//! This daemon is deliberately separate from the graphical process. Until the
-//! kernel-backed physical target transaction is integrated, every operation
-//! returns a deterministic not-ready response and performs no device I/O.
+//! This daemon is deliberately separate from the graphical process. It can
+//! inventory the selected target and validate a bounded plan; physical writes
+//! remain fail-closed until the kernel-backed transaction is integrated.
 
 use libwoven::installer_ipc::{self, Operation, Request, Response};
 use libwoven::process;
@@ -57,8 +57,15 @@ fn dispatch(bytes: &[u8]) -> Response {
             Ok(sectors) => (installer_ipc::STATUS_READY, 5, sectors),
             Err(_) => (installer_ipc::STATUS_TARGET_UNAVAILABLE, 0, 0),
         },
-        Operation::Validate | Operation::Install | Operation::Cancel =>
-            (installer_ipc::STATUS_NOT_READY, 0, 0),
+        Operation::Validate | Operation::Install => match libwoven::installer_inventory() {
+            Ok(sectors) => match installer_ipc::validate_plan(request.plan, sectors, request.operation == Operation::Install) {
+                Ok(()) if request.operation == Operation::Validate => (installer_ipc::STATUS_READY, 10, 0),
+                Ok(()) => (installer_ipc::STATUS_NOT_READY, 10, 0),
+                Err(_) => (installer_ipc::STATUS_INVALID_PLAN, 0, 0),
+            },
+            Err(_) => (installer_ipc::STATUS_TARGET_UNAVAILABLE, 0, 0),
+        },
+        Operation::Cancel => (installer_ipc::STATUS_NOT_READY, 0, 0),
     };
     Response { request_id: request.request_id, status, progress, value }
 }

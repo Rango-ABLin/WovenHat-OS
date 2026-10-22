@@ -13,6 +13,11 @@ eleven-app catalog gate, and normal system-apps boot passed on 1 CPU. Physical
 transaction execution and service-client integration remain open for the next
 slice.
 
+The service ABI now also validates compact plans and explicit destructive
+confirmation: target capacity, FAT32 geometry, user, timezone, keyboard, and
+network mode are bounded and fail closed. `Install` remains not-ready until
+the physical transaction is integrated.
+
 ## Codex - Stage 28 graphical installer ISO gate (2026-10-22)
 
 Added the bounded GUI mode to `apps/woven-installer` using the existing
