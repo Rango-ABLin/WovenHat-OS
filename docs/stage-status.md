@@ -26,6 +26,12 @@ exhaustive all-cut tests. The existing Stage 27.5 durable-recovery QEMU gate
 passed on 1/2/4 CPUs with exit 33; evidence remains under
 `audit-artifacts/stage27.5-recovery-{1,2,4}cpu`.
 
+The network harness now has an opt-in `--link-loss` fault mode using QMP to
+take the QEMU `net0` link down and back up after the UDP path passes. The
+guest recovered the host TCP round trip and all final SMP markers on 1 and 4
+CPUs. This is a virtio/QEMU link-flap boundary, not physical NIC loss or a
+complete randomized packet-corruption campaign.
+
 These are evidence and infrastructure slices, not completion of Stage 31:
 the large-count matrix, randomized device faults, low-resource/loss cases,
 driver/service restart, sudden-shutdown recovery, and native qualification

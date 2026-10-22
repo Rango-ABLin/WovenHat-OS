@@ -1,5 +1,6 @@
 """Run live DHCP/DNS/ICMP/UDP/TCP regressions against QEMU user networking."""
 import argparse
+import json
 import os
 from pathlib import Path
 import shutil
@@ -72,6 +73,42 @@ def tcp_round_trip(port):
     raise RuntimeError(f"TCP host-forward connection failed: {last_error}")
 
 
+def qmp_command(port, execute, arguments=None):
+    """Execute one QMP command and fail closed on an error response."""
+    with socket.create_connection(("127.0.0.1", port), timeout=4) as sock:
+        sock.settimeout(4)
+        # QEMU sends a JSON greeting before accepting commands.
+        greeting = b""
+        while b"\n" not in greeting:
+            greeting += sock.recv(4096)
+        sock.sendall(b'{"execute":"qmp_capabilities"}\n')
+        capabilities = json.loads(_qmp_line(sock))
+        if "error" in capabilities:
+            raise RuntimeError(f"QMP capabilities failed: {capabilities}")
+        request = {"execute": execute}
+        if arguments is not None:
+            request["arguments"] = arguments
+        sock.sendall((json.dumps(request) + "\n").encode())
+        response = json.loads(_qmp_line(sock))
+        if "error" in response:
+            raise RuntimeError(f"QMP {execute} failed: {response}")
+        return response
+
+
+def _qmp_line(sock):
+    response = b""
+    while b"\n" not in response:
+        response += sock.recv(4096)
+    line, _, _ = response.partition(b"\n")
+    return line.decode("utf-8")
+
+
+def flap_link(port):
+    qmp_command(port, "set_link", {"name": "net0", "up": False})
+    time.sleep(0.5)
+    qmp_command(port, "set_link", {"name": "net0", "up": True})
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--qemu', default=shutil.which('qemu-system-x86_64') or r'C:\Program Files\qemu\qemu-system-x86_64.exe')
@@ -81,6 +118,11 @@ def main():
     parser.add_argument('--timeout', type=float, default=240)
     parser.add_argument('--release', action='store_true')
     parser.add_argument('--feature', default='network-test')
+    parser.add_argument(
+        '--link-loss',
+        action='store_true',
+        help='flap the QEMU virtio-net link after UDP and require TCP recovery',
+    )
     args = parser.parse_args()
 
     root = Path(__file__).resolve().parents[1]
@@ -109,6 +151,7 @@ def main():
         shutil.copyfile(firmware_vars, vars_copy)
     tcp_port = reserve_tcp_port()
     udp_port = reserve_udp_port()
+    qmp_port = reserve_tcp_port() if args.link_loss else None
 
     netdev = (
         f'user,id=net0,'
@@ -125,6 +168,7 @@ def main():
         '-device', 'virtio-blk-pci,drive=boot,bootindex=1',
         '-device', 'virtio-net-pci,netdev=net0,disable-modern=on',
         '-netdev', netdev,
+        *(['-qmp', f'tcp:127.0.0.1:{qmp_port},server=on,wait=off'] if qmp_port is not None else []),
     ]
     flags = subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
     qemu_log = out / 'qemu.log'
@@ -169,6 +213,11 @@ def main():
                 ('[NETTEST] UDP: TIMEOUT', '[NETTEST] runtime regression: FAILED'),
             )
             print('      UDP: PASS', flush=True)
+
+            if args.link_loss:
+                print('      Injecting QEMU virtio-net link loss and recovery...', flush=True)
+                flap_link(qmp_port)
+                print('      Link loss/recovery: PASS', flush=True)
 
             print('[5/6] Verifying host <-> WovenHat TCP round trip...', flush=True)
             wait_for_marker(

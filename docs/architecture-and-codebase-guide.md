@@ -4102,6 +4102,12 @@ The durable recovery acceptance remains a separate executable QEMU boundary:
 verifies the recovery protocol on disposable media. Its current evidence
 passes at 1/2/4 CPUs; it must not be conflated with native power-loss or
 physical-media qualification.
+
+For Stage 31 network-loss evidence, `scripts/test-network-qemu.py --link-loss`
+adds a QMP control channel, issues `set_link` down/up for the named `net0`
+device after the UDP proof, and then requires the existing TCP echo and final
+guest markers. The QMP channel is opt-in and the normal network matrix is
+unchanged; a QMP error, guest exit, timeout, or missing marker fails closed.
 ## Stage 29 hardware qualification report boundary
 
 `scripts/qualify-hardware-report.py` is the report-only boundary for the
