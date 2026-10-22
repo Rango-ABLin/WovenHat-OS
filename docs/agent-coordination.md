@@ -1,5 +1,16 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - Stage 28 supervised installer-service boundary (2026-10-22)
+
+Added the fixed-capacity versioned `libwoven::installer_ipc` WIP/WOP ABI and
+the separate `woven-installer --service` daemon. Production system startup
+now launches it with IPC/file/storage authority and verifies publication as
+`sys.storage.installer`; the GUI remains non-privileged. The current daemon
+fails closed with explicit `not-ready` responses and does no device I/O. App
+tests, 118 libwoven tests, warning-denying Clippy, the signed eleven-app
+catalog gate, and normal system-apps boot passed on 1 CPU. Physical target
+inventory and execution remain open for the next slice.
+
 ## Codex - Stage 28 graphical installer ISO gate (2026-10-22)
 
 Added the bounded GUI mode to `apps/woven-installer` using the existing

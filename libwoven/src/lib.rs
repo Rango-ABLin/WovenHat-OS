@@ -30,6 +30,7 @@ pub mod ai_monitor;
 pub mod ai_provider;
 pub mod i18n;
 pub mod identity;
+pub mod installer_ipc;
 pub mod package;
 pub mod package_ipc;
 pub mod semantic_search;

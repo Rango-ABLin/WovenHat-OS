@@ -1,5 +1,18 @@
 # Stage status
 
+## Stage 28 supervised installer-service boundary - 2026-10-22
+
+Added `libwoven::installer_ipc`, a fixed-capacity versioned WIP/WOP request
+and response ABI, and a separate `woven-installer --service` daemon. The
+kernel starts it as a `SystemService` with IPC, file, and storage authority
+and verifies publication under `sys.storage.installer`. The graphical
+installer remains a separate non-privileged presentation process. The service
+currently returns explicit `not-ready` responses and performs no device I/O;
+target inventory, physical transaction execution, and service-client wiring
+remain the next implementation increment. Normal system-apps boot passed on
+1 CPU with the new publication marker, and the signed eleven-app catalog
+gate remained green.
+
 ## Stage 28 graphical installer frontend and current ISO gate - 2026-10-22
 
 `apps/woven-installer` now has a bounded `--gui` mode using the established

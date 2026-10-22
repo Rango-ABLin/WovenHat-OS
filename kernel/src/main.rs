@@ -7020,12 +7020,43 @@ fn start_production_system_services() -> bool {
                     "[SERVICES] woven-update published as pid {}",
                     pid.as_u64()
                 ));
-                return true;
+                break;
             }
         }
         if task::process_exited(pid) || timer::ticks().wrapping_sub(deadline) < u64::MAX / 2 {
             let _ = task::kill_process(pid.as_u64(), 9);
             serial::write_line(format_args!("[SERVICES] woven-update publication failed"));
+            return false;
+        }
+        task::yield_now();
+    }
+
+    let Some(program) = userspace::load_elf_with_argv_verified(
+        SYSTEM_APP_INSTALLER,
+        &["/bin/wovenhat-installer", "--service"],
+    ) else {
+        serial::write_line(format_args!("[SERVICES] woven-installer load failed"));
+        return false;
+    };
+    let Ok((pid, _, _)) = task::spawn_user_system_service("woven-installer", program, capabilities)
+    else {
+        serial::write_line(format_args!("[SERVICES] woven-installer spawn failed"));
+        return false;
+    };
+    let deadline = timer::ticks().wrapping_add(500);
+    loop {
+        if let Ok(info) = ipc::service_info(b"sys.storage.installer") {
+            if info.owner == pid.as_u64() && info.client_rights == 1 {
+                serial::write_line(format_args!(
+                    "[SERVICES] woven-installer published as pid {}",
+                    pid.as_u64()
+                ));
+                return true;
+            }
+        }
+        if task::process_exited(pid) || timer::ticks().wrapping_sub(deadline) < u64::MAX / 2 {
+            let _ = task::kill_process(pid.as_u64(), 9);
+            serial::write_line(format_args!("[SERVICES] woven-installer publication failed"));
             return false;
         }
         task::yield_now();

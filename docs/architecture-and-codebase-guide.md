@@ -4003,7 +4003,13 @@ The binary's only output path is the existing bounded stdout/stderr API. The
 progress and success screens are deliberately non-operative and print
 `install_action=unavailable (fail-closed)`. A future graphical frontend or
 installer executor must be integrated through a separately reviewed authority
-boundary; this shell cannot be used to infer disk or bootloader support.
+boundary; this shell cannot be used to infer disk or bootloader support. The
+current authority boundary is `libwoven::installer_ipc` and the supervised
+`woven-installer --service` process, published as `sys.storage.installer`.
+The service has a bounded request/response ABI and currently fails closed with
+`not-ready` responses until kernel-backed target inventory and transactions
+are implemented. Publication is therefore not evidence of physical disk
+support.
 
 # Stage 28 disposable acceptance composition
 

@@ -6,6 +6,8 @@ use core::panic::PanicInfo;
 use libwoven::{rgb, Args, Canvas, GraphicsSurface};
 use wovenhat_installer::{Screen, State};
 
+mod service;
+
 libwoven::entry!(main);
 
 const EXIT_OK: u64 = 0;
@@ -36,6 +38,9 @@ static CANVAS_PIXELS: PixelBuffer =
     PixelBuffer(core::cell::UnsafeCell::new([0; MAX_GUI_WIDTH * MAX_GUI_HEIGHT]));
 
 fn main(args: Args) -> ! {
+    if args.get(1) == Some(b"--service") {
+        service::run();
+    }
     if args.get(1) == Some(b"--gui") {
         run_gui(args.get(2), args.get(3));
     }
