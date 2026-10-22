@@ -1,5 +1,26 @@
 # Stage status
 
+## Stage 28 graphical installer frontend and current ISO gate - 2026-10-22
+
+`apps/woven-installer` now has a bounded `--gui` mode using the established
+WOPN/shared-surface compositor protocol. It renders all validated installer
+states, handles bounded resize/pointer/close messages, and has no disk,
+filesystem, bootloader, network, or destructive authority. The render buffer
+was kept at 320x240 so the eleven-app loader gate retains its memory margin.
+
+The updated signed eleven-app catalog passes QEMU on 1/2/4 CPUs. The exact
+current ISO was generated as
+`audit-artifacts/stage28-wovenhat-installer-gui.iso` and passes the exact ISO
+OVMF/QEMU gate on 1/2/4 CPUs. ISO SHA-256:
+`58f1b6c63049b8c0128cd60e2f5812ab0fb7bb4d75849b408bb2cbb7fdc4173e`.
+Serial evidence is retained in the matching `stage28-wovenhat-installer-gui-
+{1cpu,2cpu,4cpu}.log` files.
+
+The GUI remains a presentation process. A privileged installer service that
+performs target-disk discovery, physical partitioning/formatting, bootloader
+handoff, account provisioning, and network configuration is not yet present;
+physical installation and hardware qualification remain open.
+
 ## Stage 28 real chained disk-install transaction - 2026-10-22
 
 Added `scripts/execute-disk-install.py`, which chains the existing GPT layout
@@ -35,6 +56,13 @@ qualification, or release certification. It does not yet replace
 `execute-file-install.py`'s established mock-executor contract (left
 unchanged) or wire this real path into the Stage 28 release packager/ISO
 pipeline.
+
+The end-to-end Stage 28 disposable acceptance harness now invokes this real
+transaction for the final image, verifies the embedded settings by reading
+the FAT32 directory entry and cluster back, and injects rollback failures
+after layout, format, and EFI steps. The old mock executor remains covered
+separately for compatibility, but is no longer the final-image acceptance
+path.
 
 Unrelated, pre-existing and confirmed to predate this change: one test in
 `tests/test_stage10_firmware_vars_master.py` fails on this Windows host over

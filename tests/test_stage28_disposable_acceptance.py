@@ -15,7 +15,7 @@ class Stage28DisposableAcceptanceTests(unittest.TestCase):
     def test_complete_pipeline_reports_all_digests_and_fail_closed_limits(self):
         result = MODULE.run_acceptance()
         self.assertTrue(result["valid"])
-        self.assertEqual(result["pipeline"], "planner-layout-fat32-efi-executor")
+        self.assertEqual(result["pipeline"], "planner-real-layout-fat32-efi-executor")
         self.assertEqual(result["physical_access"], "none")
         self.assertEqual(result["release_certification"], "not-performed")
         self.assertRegex(result["image_sha256"], r"^[0-9a-f]{64}$")
@@ -26,6 +26,9 @@ class Stage28DisposableAcceptanceTests(unittest.TestCase):
         self.assertRegex(result["efi"]["artifact_sha256"], r"^[0-9a-f]{64}$")
         self.assertRegex(result["executor"]["manifest_sha256"], r"^[0-9a-f]{64}$")
         self.assertTrue(result["executor"]["rollback_verified"])
+        self.assertRegex(result["disk_executor"]["manifest_sha256"], r"^[0-9a-f]{64}$")
+        self.assertTrue(result["disk_executor"]["rollback_verified"])
+        self.assertTrue(result["disk_executor"]["settings_readback_verified"])
 
     def test_repeated_runs_are_deterministic(self):
         first = MODULE.run_acceptance()
@@ -35,6 +38,7 @@ class Stage28DisposableAcceptanceTests(unittest.TestCase):
         for section, key in (("layout", "metadata_sha256"), ("filesystem", "image_sha256"), ("efi", "artifact_sha256")):
             self.assertEqual(first[section][key], second[section][key])
         self.assertEqual(first["executor"]["manifest_sha256"], second["executor"]["manifest_sha256"])
+        self.assertEqual(first["disk_executor"]["manifest_sha256"], second["disk_executor"]["manifest_sha256"])
         self.assertEqual(len(first["manifest_sha256"]), hashlib.sha256(b"x").digest_size * 2)
 
 

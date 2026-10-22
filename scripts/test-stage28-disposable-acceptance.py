@@ -42,6 +42,7 @@ layout = _load("stage28_layout", "build-file-image-layout.py")
 filesystem = _load("stage28_filesystem", "format-file-image-fs.py")
 efi = _load("stage28_efi", "prepare-uefi-boot-artifact.py")
 executor = _load("stage28_executor", "execute-file-install.py")
+disk_executor = _load("stage28_disk_executor", "execute-disk-install.py")
 
 
 def _digest(path: Path) -> str:
@@ -132,21 +133,35 @@ def run_acceptance() -> dict[str, Any]:
         _assert_rollback(executor.execute, executor_rollback_image, plan_path,
                          failures=("before-replace", "after-replace"))
 
-        layout_result = layout.build(image, plan_path, harness_created=True)
-        _assert_rollback(filesystem.format_image, image, plan_path,
-                         failures=("before-write", "after-write", "after-verify"), harness_created=True)
-        filesystem_result = filesystem.format_image(image, plan_path, harness_created=True)
-        _assert_rollback(efi.prepare, image, plan_path,
-                         failures=("before-write", "after-write", "after-verify"), harness_created=True,
-                         extra={"fixture": True})
-        efi_result = efi.prepare(image, plan_path, fixture=True, harness_created=True)
+        real_rollback_image = root / "disk-executor-rollback.img"
+        real_rollback_image.write_bytes(image.read_bytes())
+        pristine = real_rollback_image.read_bytes()
+        for failure in ("after-layout", "after-format", "after-efi"):
+            try:
+                disk_executor.execute(real_rollback_image, plan_path, fixture=True,
+                                      inject_failure=failure)
+            except Exception as exc:
+                if "injected failure" not in str(exc):
+                    raise AssertionError(f"unexpected {failure} error: {exc}") from exc
+            else:
+                raise AssertionError(f"{failure} did not fail")
+            if real_rollback_image.read_bytes() != pristine:
+                raise AssertionError(f"{failure} did not restore the image")
+            if list(root.glob(".disk-executor-rollback.img.*")):
+                raise AssertionError(f"{failure} left a transaction backup")
 
-        final_layout = layout.verify(image, plan_path)
-        final_filesystem = filesystem.verify(image, plan_path)
-        final_efi = efi.verify(image, plan_path)
+        real_result = disk_executor.execute(image, plan_path, fixture=True)
+        if not real_result["success"] or not real_result["verified"]:
+            raise AssertionError("real disk-install transaction was not verified")
+        final_layout = real_result["layout"]
+        final_filesystem = real_result["filesystem"]
+        final_efi = real_result["efi"]
+        installed_settings = filesystem.read_installed_settings(image, plan_path)
+        if installed_settings != raw_input["settings"]:
+            raise AssertionError("real disk-install transaction settings readback mismatch")
         manifest = {
             "schema": "woven-stage28-disposable-acceptance-v1",
-            "mode": "disposable-file-image-test-only",
+            "mode": "disposable-file-image-real-transaction-test-only",
             "physical_access": "none",
             "mounts": "none",
             "layout_sha256": final_layout["metadata_sha256"],
@@ -157,6 +172,9 @@ def run_acceptance() -> dict[str, Any]:
             "executor_manifest_sha256": executor_manifest_digest,
             "executor_image_sha256": executor_image_digest,
             "executor_rollback_verified": True,
+            "disk_executor_manifest_sha256": hashlib.sha256(_canonical(real_result["manifest"])).hexdigest(),
+            "disk_executor_rollback_verified": True,
+            "settings_readback_verified": True,
             "formatter_rollback_verified": True,
             "efi_rollback_verified": True,
             "bootability": "not-qualified",
@@ -167,7 +185,7 @@ def run_acceptance() -> dict[str, Any]:
         manifest_digest = _digest(manifest_path)
         result = {
             "valid": True,
-            "pipeline": "planner-layout-fat32-efi-executor",
+            "pipeline": "planner-real-layout-fat32-efi-executor",
             "image_sha256": _digest(image),
             "layout": final_layout,
             "filesystem": final_filesystem,
@@ -177,11 +195,16 @@ def run_acceptance() -> dict[str, Any]:
                 "manifest_sha256": executor_manifest_digest,
                 "rollback_verified": True,
             },
+            "disk_executor": {
+                "manifest_sha256": hashlib.sha256(_canonical(real_result["manifest"])).hexdigest(),
+                "rollback_verified": True,
+                "settings_readback_verified": True,
+            },
             "manifest_sha256": manifest_digest,
             "physical_access": "none",
             "release_certification": "not-performed",
         }
-        if layout_result["valid"] is not True or filesystem_result["valid"] is not True or efi_result["valid"] is not True:
+        if final_layout["valid"] is not True or final_filesystem["valid"] is not True or final_efi["valid"] is not True:
             raise AssertionError("pipeline component did not report valid")
         return result
 

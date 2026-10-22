@@ -1,5 +1,31 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - Stage 28 graphical installer ISO gate (2026-10-22)
+
+Added the bounded GUI mode to `apps/woven-installer` using the existing
+WOPN/shared-surface protocol. It renders validated installer states and
+handles resize/pointer/close messages without installation authority. The
+updated eleven-app catalog passes on 1/2/4 CPUs. The exact current ISO
+`audit-artifacts/stage28-wovenhat-installer-gui.iso` passes OVMF/QEMU on
+1/2/4 CPUs with SHA-256
+`58f1b6c63049b8c0128cd60e2f5812ab0fb7bb4d75849b408bb2cbb7fdc4173e`.
+The disposable acceptance harness now uses the real chained transaction and
+verifies settings readback/rollback. The GUI is still authority-free; the
+privileged physical installer service and hardware qualification remain open.
+
+## Codex - Stage 28 graphical WovenInstaller frontend and real transaction gate (2026-10-22)
+
+The disposable Stage 28 acceptance harness now uses
+`execute-disk-install.py` for the final image, verifies settings readback from
+the formatted FAT32 root directory, and checks rollback after layout, format,
+and EFI failures. The legacy mock executor remains separately covered.
+`apps/woven-installer --gui <shell-pid> <snapshot>` now renders the validated
+installer screens through the existing WOPN/shared-surface compositor
+protocol, handles bounded resize/pointer/close messages, and remains
+authority-free: it cannot access disks or perform installation. App check and
+Clippy pass; full physical installation and privileged installer-service
+integration remain open.
+
 ## Codex - Stage 28 exact ISO artifact gate (2026-10-22)
 
 The exact validated Stage 19 image with eleven signed applications was

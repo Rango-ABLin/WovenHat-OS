@@ -3991,10 +3991,13 @@ disk, bootloader, or hardware qualification is involved.
 `apps/woven-installer` is a freestanding Ring-3 presentation adapter for the
 validated installer state model. Its input is a bounded semicolon-separated
 snapshot with an explicit `validated=1` marker, a plan field, and the state
-model's screen names. It stores borrowed caller bytes only; it performs no
-external I/O and has no access to installation authority. Parser validation
-rejects unknown/duplicate fields, control characters, overlong text, invalid
-progress, unvalidated plans, and screen-specific missing prerequisites.
+model's screen names. The default mode is text; `--gui` uses the existing
+WOPN/shared-surface protocol to render a bounded resizable installer window
+and handle pointer close events. It stores borrowed caller bytes only; it
+performs no external I/O and has no access to installation authority. Parser
+validation rejects unknown/duplicate fields, control characters, overlong
+text, invalid progress, unvalidated plans, and screen-specific missing
+prerequisites.
 
 The binary's only output path is the existing bounded stdout/stderr API. The
 progress and success screens are deliberately non-operative and print

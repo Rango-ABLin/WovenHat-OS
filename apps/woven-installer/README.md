@@ -2,8 +2,11 @@
 
 `wovenhat-installer` is the bounded Stage 28 Ring-3 application shell. It
 accepts a compact snapshot of the already validated installer UI/state model
-and renders a deterministic textual fallback for welcome, target, partition
-review, settings, progress, cancellation, failure, and success screens.
+and renders welcome, target, partition review, settings, progress,
+cancellation, failure, and success screens. The default mode is a deterministic
+text renderer; `--gui <shell-pid> <snapshot>` opens a compositor window using
+the existing WOPN/shared-surface protocol and supports bounded resize,
+pointer, and close handling.
 
 The snapshot must contain `validated=1` and a `plan` field. All fields are
 bounded and reject control characters, duplicate keys, unknown keys, invalid
@@ -18,5 +21,7 @@ Example:
 screen=progress;target=USB fixture;plan=validated;settings=UTC;progress=42;confirmed=0;validated=1;message=review
 ```
 
-This slice is not graphical installation, physical-disk installation, or a
-QEMU boot claim. It is a freestanding app build and parser/rendering boundary.
+The GUI is intentionally authority-free: it cannot discover disks, partition,
+format, install a bootloader, create accounts, configure networking, or write
+physical media. Those operations must be performed by a separately reviewed
+installer service using the validated plan and transaction boundary.

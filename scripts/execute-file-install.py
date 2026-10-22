@@ -131,6 +131,22 @@ def _verify(path: Path, expected_manifest: dict[str, Any], payload: bytes) -> st
     return _sha256(path)
 
 
+def _restore_backup(backup: Path, target: Path) -> None:
+    """Restore a same-directory backup across Windows replace semantics."""
+    try:
+        os.replace(backup, target)
+    except PermissionError:
+        # Some Windows filesystem filters reject replacing an existing file
+        # immediately after the atomic swap. The target is not open here;
+        # unlinking that newly installed file and renaming the same-directory
+        # backup preserves the transaction's fail-closed rollback invariant.
+        try:
+            target.unlink()
+        except FileNotFoundError:
+            pass
+        os.replace(backup, target)
+
+
 def execute(image: Path, plan_file: Path, inject_failure: str | None = None) -> dict[str, Any]:
     """Atomically install the mock payload, restoring the original on failure."""
     target = _regular_image(image)
@@ -165,7 +181,7 @@ def execute(image: Path, plan_file: Path, inject_failure: str | None = None) -> 
         return {"success": True, "verified": True, "manifest": manifest, "image_sha256": digest, "rollback": False}
     except Exception as exc:
         if backup_ready and backup is not None and target.exists():
-            os.replace(backup, target)
+            _restore_backup(backup, target)
             backup = None
         raise ExecutionError(str(exc)) from exc
     finally:
