@@ -115,6 +115,7 @@ def main():
         'WOVENHAT_IMAGES_IMAGE': str(packages['woven-images']),
         'WOVENHAT_UPDATE_IMAGE': str(packages['woven-update']),
         'WOVENHAT_STORE_IMAGE': str(packages['woven-store']),
+        'WOVENHAT_INSTALLER_IMAGE': str(packages['woven-installer']),
         'WOVENHAT_SHELL_IMAGE': str(build_shell(root)),
         'WOVENHAT_APP_TRUSTED_PUBLIC_KEY_HEX': test_key,
     })

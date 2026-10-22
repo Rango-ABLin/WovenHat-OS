@@ -84,6 +84,7 @@ def main():
             'woven-images': 'WOVENHAT_IMAGES_IMAGE',
             'woven-update': 'WOVENHAT_UPDATE_IMAGE',
             'woven-store': 'WOVENHAT_STORE_IMAGE',
+            'woven-installer': 'WOVENHAT_INSTALLER_IMAGE',
         }
         for item in manifest['apps']:
             env[variables[item['id']]] = str(output / item['package'])

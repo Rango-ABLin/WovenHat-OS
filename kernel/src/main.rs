@@ -6004,6 +6004,8 @@ const SYSTEM_APP_UPDATE: &[u8] = include_bytes!(env!("WOVENHAT_UPDATE_IMAGE"));
 const RECOVERY_APP_IMAGE: &[u8] = include_bytes!(env!("WOVENHAT_RECOVERY_IMAGE"));
 #[cfg(any(feature = "stage19-app-catalog-test", feature = "system-apps"))]
 const SYSTEM_APP_STORE: &[u8] = include_bytes!(env!("WOVENHAT_STORE_IMAGE"));
+#[cfg(any(feature = "stage19-app-catalog-test", feature = "system-apps"))]
+const SYSTEM_APP_INSTALLER: &[u8] = include_bytes!(env!("WOVENHAT_INSTALLER_IMAGE"));
 
 #[cfg(any(
     all(feature = "stage22-3-test", not(feature = "stage27-5-test")),
@@ -7111,6 +7113,13 @@ fn install_production_system_apps() -> bool {
             catalog_path: "/share/applications/woven-store.app",
             catalog: b"Name=WovenStore\nExec=/bin/wovenhat-store --gui %p\n",
         },
+        App {
+            name: "woven-installer",
+            image: SYSTEM_APP_INSTALLER,
+            binary_path: "/bin/wovenhat-installer",
+            catalog_path: "/share/applications/woven-installer.app",
+            catalog: b"Name=WovenInstaller\nExec=/bin/wovenhat-installer\n",
+        },
     ];
     // Verify and parse all packages before changing the VFS. A malformed or
     // untrusted package therefore cannot leave a partially published catalog.
@@ -7409,6 +7418,13 @@ fn stage19_app_catalog_self_test() -> bool {
             catalog_path: "/share/applications/woven-store.app",
             catalog: b"Name=WovenStore\nExec=/bin/wovenhat-store\n",
         },
+        App {
+            name: "woven-installer",
+            image: SYSTEM_APP_INSTALLER,
+            binary_path: "/bin/wovenhat-installer",
+            catalog_path: "/share/applications/woven-installer.app",
+            catalog: b"Name=WovenInstaller\nExec=/bin/wovenhat-installer\n",
+        },
     ];
     fn step(name: &str, ok: bool) -> bool {
         serial::write_line(format_args!(
@@ -7474,7 +7490,7 @@ fn stage19_app_catalog_self_test() -> bool {
             return false;
         }
     }
-    step("ten signed applications installed", true)
+    step("eleven signed applications installed", true)
 }
 
 /// Stage 16.1 acceptance: an application built outside the kernel is installed

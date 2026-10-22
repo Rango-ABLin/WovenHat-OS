@@ -75,6 +75,7 @@ def main():
         build_env['WOVENHAT_IMAGES_IMAGE'] = str(packages['woven-images'])
         build_env['WOVENHAT_UPDATE_IMAGE'] = str(packages['woven-update'])
         build_env['WOVENHAT_STORE_IMAGE'] = str(packages['woven-store'])
+        build_env['WOVENHAT_INSTALLER_IMAGE'] = str(packages['woven-installer'])
         build_env.setdefault('WOVENHAT_APP_TRUSTED_PUBLIC_KEY_HEX', test_public_key)
         build_env['WOVENHAT_SHELL_IMAGE'] = str(build_woven_shell(root))
         feature_arguments = ['--features', args.mode]

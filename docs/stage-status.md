@@ -1,5 +1,22 @@
 # Stage status
 
+## Stage 28 WovenInstaller production system-app integration - 2026-10-22
+
+The signed `woven-installer.wapp` is embedded in the kernel's production
+`system-apps` and Stage 19 catalog-test images through
+`WOVENHAT_INSTALLER_IMAGE`. Production catalog publication adds the read-only
+`/bin/wovenhat-installer` entry and
+`/share/applications/woven-installer.app`; the installer remains a display-only
+Ring-3 application with no capabilities or privileged authority. Existing ten
+entries and their paths are preserved. All system-app QEMU launchers and the
+release validation environment now provide the eleventh image.
+
+Focused packaging tests, Python compilation, catalog-image build, and
+warning-denying production `system-apps` kernel Clippy pass. The Stage 19
+catalog QEMU gate passes on 1/2/4 CPUs with the eleven-app marker; evidence is
+under `audit-artifacts/system-app-catalog-{1,2,4}cpu`. This slice performs no
+physical-disk access.
+
 ## Stage 28 WovenInstaller package/catalog wiring - 2026-10-22
 
 The existing signed system-app packaging path now builds and signs
@@ -11,9 +28,8 @@ validation rejects install, disk, partition, format, and bootloader
 capabilities; the ten existing app entries are unchanged.
 
 Focused packaging tests, Python compilation, freestanding release build, and
-warning-denying freestanding Clippy pass. This slice does not modify kernel
-recovery code and does not claim system-apps QEMU acceptance; the new image
-is not yet integrated into the kernel boot catalog.
+warning-denying freestanding Clippy pass. Kernel integration is recorded in
+the production system-app integration entry above.
 
 ## Stage 28 bounded WovenInstaller Ring-3 application shell - 2026-10-22
 

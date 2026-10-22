@@ -1,5 +1,18 @@
 # WovenHat OS Architecture & Codebase Guide
 
+### Stage 28 - WovenInstaller production system-app integration
+
+The production `system-apps` and Stage 19 catalog-test kernel images embed the
+signed package supplied through `WOVENHAT_INSTALLER_IMAGE`. The kernel verifies
+the package with the same signed-app boundary as the existing ten entries and
+publishes it read-only at `/bin/wovenhat-installer` with a catalog descriptor at
+`/share/applications/woven-installer.app`. The catalog entry carries no
+capability grant and is not privileged; it is only a bounded display adapter.
+The system-app, release, interactive, desktop, shell, and catalog-test launchers
+all map the eleventh manifest record to this environment variable. This is
+catalog/image integration, not destructive installation or physical-media
+support.
+
 ### Stage 28 - WovenInstaller package/catalog wiring
 
 The existing `scripts/package-system-apps.py` release boundary includes the
@@ -9,9 +22,8 @@ record with the stable `/bin/wovenhat-installer` install path. Its metadata
 declares an empty capability set, `privileged: false`, and
 `interface: display-only`; the packager rejects forbidden install, disk,
 partition, format, and bootloader capabilities before publication. The
-catalog wiring is packaging-only: it does not grant authority, alter kernel
-recovery, install the app in the system-apps boot path, or establish QEMU
-acceptance.
+package metadata is deliberately authority-free. Kernel installation and image
+embedding are documented in the production integration section above.
 
 ### Stage 28 - disposable UEFI boot artifact preparation and verifier
 

@@ -147,6 +147,7 @@ def main():
         build_env['WOVENHAT_IMAGES_IMAGE'] = str(packages['woven-images'])
         build_env['WOVENHAT_UPDATE_IMAGE'] = str(packages['woven-update'])
         build_env['WOVENHAT_STORE_IMAGE'] = str(packages['woven-store'])
+        build_env['WOVENHAT_INSTALLER_IMAGE'] = str(packages['woven-installer'])
         package_service = subprocess.check_output(
             [sys.executable, str(root / 'scripts' / 'build-package-service.py')],
             cwd=root,

@@ -1,5 +1,19 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - Stage 28 WovenInstaller production system-app integration (2026-10-22)
+
+Embedded the eleventh signed `woven-installer.wapp` package into the kernel's
+production `system-apps` and Stage 19 catalog-test image through
+`WOVENHAT_INSTALLER_IMAGE`. The production catalog now publishes the stable
+read-only `/bin/wovenhat-installer` and
+`/share/applications/woven-installer.app`; no capabilities are granted and the
+existing ten entries are unchanged. Added the image mapping to release,
+system-app catalog, shell, interactive, and desktop build launchers. Physical
+disks were not accessed. Focused packaging, catalog-image, and production
+system-app Clippy checks pass. The Stage 19 catalog QEMU gate passes on 1/2/4
+CPUs with the eleven-app marker; evidence is under
+`audit-artifacts/system-app-catalog-{1,2,4}cpu`.
+
 ## Codex - Stage 28 system-app packaging/catalog wiring for WovenInstaller (2026-10-22)
 
 Extended `scripts/package-system-apps.py` with the existing
