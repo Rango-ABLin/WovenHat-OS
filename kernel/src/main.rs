@@ -4981,6 +4981,43 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         serial::write_line(format_args!("[S27.5] recovery environment: PASSED"));
         qemu_test_exit_success();
     }
+    #[cfg(feature = "stage31-process-crash-test")]
+    {
+        let Some(program) = userspace::create_stage31_process_crash_process() else {
+            serial::write_line(format_args!(
+                "[S31.PROCESS-CRASH] probe image: FAILED"
+            ));
+            qemu_test_exit_failure();
+        };
+        let Ok((pid, _context)) = task::spawn_user_process("stage31-crash-probe", program) else {
+            serial::write_line(format_args!(
+                "[S31.PROCESS-CRASH] probe spawn: FAILED"
+            ));
+            qemu_test_exit_failure();
+        };
+        let deadline = timer::ticks().wrapping_add(3000);
+        while !task::process_exited(pid) {
+            if timer::ticks().wrapping_sub(deadline) < u64::MAX / 2 {
+                serial::write_line(format_args!(
+                    "[S31.PROCESS-CRASH] probe wait: TIMEOUT"
+                ));
+                qemu_test_exit_failure();
+            }
+            task::yield_now();
+        }
+        let status = task::wait_process(pid.as_u64()).ok();
+        if status != Some(-11) {
+            serial::write_line(format_args!(
+                "[S31.PROCESS-CRASH] fault status: FAILED status={:?}",
+                status
+            ));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!(
+            "[S31.PROCESS-CRASH] faulting process contained and reaped: PASSED status=-11"
+        ));
+        qemu_test_exit_success();
+    }
     #[cfg(feature = "stage15-1-test")]
     {
         if !wfs::stage15_1_self_test() {
