@@ -1,8 +1,9 @@
+"""Host tests for the disposable UEFI ISO builder (unittest, like the rest of tests/)."""
 import importlib.util
 import struct
+import tempfile
+import unittest
 from pathlib import Path
-
-import pytest
 
 
 ROOT = Path(__file__).parents[1]
@@ -31,29 +32,41 @@ def _source(path: Path) -> None:
     path.write_bytes(image)
 
 
-def test_builds_el_torito_iso_from_disposable_gpt(tmp_path: Path) -> None:
-    source = tmp_path / "source.img"
-    output = tmp_path / "wovenhat.iso"
-    _source(source)
-    result = MODULE.build_iso(source, output)
-    raw = output.read_bytes()
-    assert result["format"] == "ISO9660-El-Torito-UEFI"
-    assert raw[16 * 2048 + 1 : 16 * 2048 + 6] == b"CD001"
-    assert raw[17 * 2048 + 1 : 17 * 2048 + 6] == b"CD001"
-    assert raw[19 * 2048 + 1 : 19 * 2048 + 6] == b"CD001"
-    assert raw[20 * 2048 + 32] == 0x91
-    assert raw[21 * 2048 + 510 : 21 * 2048 + 512] == b"\x55\xaa"
+class UefiIsoBuilderTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.tmp_path = Path(self._tmp.name)
+
+    def tearDown(self) -> None:
+        self._tmp.cleanup()
+
+    def test_builds_el_torito_iso_from_disposable_gpt(self) -> None:
+        source = self.tmp_path / "source.img"
+        output = self.tmp_path / "wovenhat.iso"
+        _source(source)
+        result = MODULE.build_iso(source, output)
+        raw = output.read_bytes()
+        self.assertEqual(result["format"], "ISO9660-El-Torito-UEFI")
+        self.assertEqual(raw[16 * 2048 + 1 : 16 * 2048 + 6], b"CD001")
+        self.assertEqual(raw[17 * 2048 + 1 : 17 * 2048 + 6], b"CD001")
+        # Volume descriptor set terminator (type 255) closes the set at LBA 18.
+        self.assertEqual(raw[18 * 2048], 255)
+        self.assertEqual(raw[18 * 2048 + 1 : 18 * 2048 + 6], b"CD001")
+        self.assertEqual(raw[20 * 2048 + 32], 0x91)
+        self.assertEqual(raw[21 * 2048 + 510 : 21 * 2048 + 512], b"\x55\xaa")
+
+    def test_refuses_protected_paths(self) -> None:
+        source = self.tmp_path / "source.img"
+        _source(source)
+        with self.assertRaisesRegex(MODULE.IsoError, "protected"):
+            MODULE.build_iso(source, self.tmp_path / "backup-disk.iso")
+
+    def test_refuses_missing_esp(self) -> None:
+        source = self.tmp_path / "source.img"
+        source.write_bytes(b"\0" * (256 * 512))
+        with self.assertRaisesRegex(MODULE.IsoError, "GPT header"):
+            MODULE.build_iso(source, self.tmp_path / "out.iso")
 
 
-def test_refuses_protected_paths(tmp_path: Path) -> None:
-    source = tmp_path / "source.img"
-    _source(source)
-    with pytest.raises(MODULE.IsoError, match="protected"):
-        MODULE.build_iso(source, tmp_path / "backup-disk.iso")
-
-
-def test_refuses_missing_esp(tmp_path: Path) -> None:
-    source = tmp_path / "source.img"
-    source.write_bytes(b"\0" * (256 * 512))
-    with pytest.raises(MODULE.IsoError, match="GPT header"):
-        MODULE.build_iso(source, tmp_path / "out.iso")
+if __name__ == "__main__":
+    unittest.main()

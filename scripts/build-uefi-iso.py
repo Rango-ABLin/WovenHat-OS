@@ -80,8 +80,11 @@ def _extract_esp(source: Path) -> bytes:
         raise IsoError("EFI System Partition could not be read completely")
     if esp[510:512] != b"\x55\xaa":
         raise IsoError("EFI System Partition lacks a FAT boot signature")
-    fat_type = esp[54:62].rstrip(b" ")
-    if fat_type not in (b"FAT16", b"FAT32"):
+    # The BPB file-system-type label sits at offset 54 for FAT12/16 and at
+    # offset 82 for FAT32 (after the FAT32 extended BPB fields).
+    fat16 = esp[54:62].rstrip(b" ") == b"FAT16"
+    fat32 = esp[82:90].rstrip(b" ") == b"FAT32"
+    if not (fat16 or fat32):
         raise IsoError("EFI System Partition is not FAT16 or FAT32")
     boot_name_seen = (b"BOOTX64.EFI" in esp.upper()
                       or b"BOOTX64 EFI" in esp.upper())
