@@ -2,6 +2,10 @@
 
 ## Codex - Stage 28 supervised installer-service boundary (2026-10-22)
 
+The graphical installer now discovers `sys.storage.installer` and sends a
+bounded read-only inventory request on GUI startup. It displays only service
+availability; no disk handle or mutation authority is passed to the GUI.
+
 Added the fixed-capacity versioned `libwoven::installer_ipc` WIP/WOP ABI and
 the separate `woven-installer --service` daemon. Production system startup
 now launches it with IPC/file/storage authority and verifies publication as

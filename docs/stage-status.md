@@ -2,6 +2,10 @@
 
 ## Stage 28 supervised installer-service boundary - 2026-10-22
 
+The GUI now performs a bounded IPC inventory request against the supervised
+service when it opens, displaying target-service availability without gaining
+storage authority.
+
 Added `libwoven::installer_ipc`, a fixed-capacity versioned WIP/WOP request
 and response ABI, and a separate `woven-installer --service` daemon. The
 kernel starts it as a `SystemService` with IPC, file, and storage authority

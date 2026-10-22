@@ -4,6 +4,7 @@
 use core::panic::PanicInfo;
 
 use libwoven::{rgb, Args, Canvas, GraphicsSurface};
+use libwoven::installer_ipc::{self, Operation, Request, Response};
 use wovenhat_installer::{Screen, State};
 
 mod service;
@@ -36,6 +37,12 @@ unsafe impl Sync for PixelBuffer {}
 
 static CANVAS_PIXELS: PixelBuffer =
     PixelBuffer(core::cell::UnsafeCell::new([0; MAX_GUI_WIDTH * MAX_GUI_HEIGHT]));
+
+#[derive(Clone, Copy)]
+enum InventoryStatus {
+    Unavailable,
+    Available,
+}
 
 fn main(args: Args) -> ! {
     if args.get(1) == Some(b"--service") {
@@ -74,7 +81,8 @@ fn run_gui(shell_arg: Option<&[u8]>, snapshot: Option<&[u8]>) -> ! {
         Ok(window) => window,
         Err(_) => libwoven::exit(3),
     };
-    if !render_gui(&window, state, None, false) || window.share_with(shell).is_err() {
+    let inventory = request_inventory();
+    if !render_gui(&window, state, inventory, None, false) || window.share_with(shell).is_err() {
         libwoven::exit(4)
     }
     const TITLE: &[u8] = b"WovenInstaller";
@@ -109,7 +117,7 @@ fn run_gui(shell_arg: Option<&[u8]>, snapshot: Option<&[u8]>) -> ! {
             let height = u32::from(u16::from_le_bytes([message[6], message[7]])).min(MAX_GUI_HEIGHT as u32);
             if let Ok(resized) = GraphicsSurface::create(width, height) {
                 if resized.share_with(shell).is_ok() && send_resize(&resized, shell)
-                    && render_gui(&resized, state, pointer, pressed)
+                    && render_gui(&resized, state, inventory, pointer, pressed)
                 {
                     let previous = core::mem::replace(&mut window, resized);
                     drop(previous);
@@ -122,7 +130,7 @@ fn run_gui(shell_arg: Option<&[u8]>, snapshot: Option<&[u8]>) -> ! {
                 u16::from_le_bytes([message[4], message[5]]),
                 u16::from_le_bytes([message[6], message[7]]),
             ));
-            let _ = render_gui(&window, state, pointer, pressed);
+            let _ = render_gui(&window, state, inventory, pointer, pressed);
             continue;
         }
         if message.get(..4) == Some(&b"WPBT"[..]) && length == 10 && message[4] == 0 {
@@ -135,14 +143,20 @@ fn run_gui(shell_arg: Option<&[u8]>, snapshot: Option<&[u8]>) -> ! {
                 let _ = libwoven::message_send(shell, b"WCLS");
                 break;
             }
-            let _ = render_gui(&window, state, pointer, pressed);
+            let _ = render_gui(&window, state, inventory, pointer, pressed);
         }
     }
     drop(window);
     libwoven::exit(EXIT_OK)
 }
 
-fn render_gui(window: &GraphicsSurface, state: State<'_>, pointer: Option<(u16, u16)>, pressed: bool) -> bool {
+fn render_gui(
+    window: &GraphicsSurface,
+    state: State<'_>,
+    inventory: InventoryStatus,
+    pointer: Option<(u16, u16)>,
+    pressed: bool,
+) -> bool {
     let pixels = unsafe { &mut *CANVAS_PIXELS.0.get() };
     let Some(mut canvas) = Canvas::new(
         pixels,
@@ -160,6 +174,11 @@ fn render_gui(window: &GraphicsSurface, state: State<'_>, pointer: Option<(u16, 
     let (title, detail) = screen_text(state.screen);
     canvas.draw_text(42, 82, title, ACCENT);
     canvas.draw_text(42, 103, detail, MUTED);
+    let target_status = match inventory {
+        InventoryStatus::Available => "Target service: available",
+        InventoryStatus::Unavailable => "Target service: unavailable",
+    };
+    canvas.draw_text(42, 124, target_status, MUTED);
     draw_field(&mut canvas, 42, 140, "Target", state.target);
     draw_field(&mut canvas, 42, 166, "Plan", state.plan);
     draw_field(&mut canvas, 42, 192, "Settings", state.settings);
@@ -178,6 +197,36 @@ fn render_gui(window: &GraphicsSurface, state: State<'_>, pointer: Option<(u16, 
         canvas.fill_rect(i32::from(x).saturating_sub(1), i32::from(y).saturating_sub(1), 3, 3, ACCENT);
     }
     window.write_canvas(&canvas).is_ok()
+}
+
+fn request_inventory() -> InventoryStatus {
+    let Ok(service) = libwoven::ipc_service_discover(installer_ipc::SERVICE_NAME) else {
+        return InventoryStatus::Unavailable;
+    };
+    let request = Request { operation: Operation::Inventory, request_id: 1, plan: b"" };
+    let mut bytes = [0u8; installer_ipc::MAX_MESSAGE_BYTES];
+    let Ok(length) = request.encode(&mut bytes) else {
+        return InventoryStatus::Unavailable;
+    };
+    if libwoven::ipc_message_send(service, &bytes[..length]).is_err() {
+        return InventoryStatus::Unavailable;
+    }
+    let mut response = [0u8; Response::ENCODED_LEN];
+    for _ in 0..32 {
+        if let Ok((length, _sender)) = libwoven::message_receive(&mut response) {
+            if let Ok(response) = Response::decode(&response[..length]) {
+                return if response.request_id == request.request_id
+                    && response.status == installer_ipc::STATUS_READY
+                {
+                    InventoryStatus::Available
+                } else {
+                    InventoryStatus::Unavailable
+                };
+            }
+        }
+        libwoven::yield_now();
+    }
+    InventoryStatus::Unavailable
 }
 
 fn draw_field(canvas: &mut Canvas<'_>, x: i32, y: i32, label: &str, value: &[u8]) {
