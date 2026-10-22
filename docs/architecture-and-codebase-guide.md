@@ -4069,8 +4069,9 @@ the established `display`, `compositor`, and `virtio_gpu` modules. It defines
 typed surface/fence/output identities, bounded damage presentation, renderer
 operations, display modes, and backend recovery errors without allocating a
 second surface registry or changing scanout ownership. The kernel compositor
-and capability boundary remain authoritative. GFX-02 renderer migration is
-blocked until the current Stage 20.14b graphics acceptance matrix is green.
+and capability boundary remain authoritative. The affected Stage 20.14b
+graphics acceptance matrix is now green on 1/2/4 CPUs; GFX-02 renderer
+migration is the next separately gated implementation stage.
 
 ## Driver restart qualification boundary
 
