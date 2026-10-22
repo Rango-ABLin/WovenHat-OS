@@ -342,11 +342,15 @@ pub fn self_test() -> bool {
 }
 
 fn layout_self_test() -> bool {
-    let mut disk = RamDisk::<8192>::new();
-    let Ok(layout) = write_layout(&mut disk, 256, 512) else {
+    // Keep the 4 MiB disposable medium off the small boot/test stack. A
+    // stack allocation here can triple-fault before the GPT marker appears.
+    let Some(mut disk) = RamDisk::<8192>::boxed_zeroed() else {
         return false;
     };
-    let Ok(partitions) = fat_partitions(&mut disk) else {
+    let Ok(layout) = write_layout(&mut *disk, 256, 512) else {
+        return false;
+    };
+    let Ok(partitions) = fat_partitions(&mut *disk) else {
         return false;
     };
     partitions.len() == 2

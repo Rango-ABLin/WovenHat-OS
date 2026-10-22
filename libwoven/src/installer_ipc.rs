@@ -5,6 +5,9 @@
 
 pub const MAX_MESSAGE_BYTES: usize = 256;
 pub const MAX_PLAN_BYTES: usize = 192;
+pub const INSTALLER_ESP_SECTORS: u64 = 70_000;
+pub const INSTALLER_GPT_TAIL_SECTORS: u64 = 4_096;
+pub const INSTALLER_MIN_DATA_SECTORS: u64 = 70_000;
 pub const SERVICE_NAME: &[u8] = b"sys.storage.installer";
 pub const STATUS_READY: u16 = 0;
 pub const STATUS_BAD_REQUEST: u16 = 1;
@@ -108,7 +111,11 @@ pub fn validate_plan(plan: &[u8], target_sectors: u64, require_confirmation: boo
     if filesystem.is_none() || username.is_none() || password.is_none() || timezone.is_none() || keyboard.is_none() || network.is_none() {
         return Err(PlanError::MissingField);
     }
-    if target != target_sectors || partition < 32_768 || partition > target.saturating_sub(2_048) {
+    let minimum_target_sectors = INSTALLER_ESP_SECTORS + INSTALLER_GPT_TAIL_SECTORS;
+    if target != target_sectors
+        || partition < INSTALLER_MIN_DATA_SECTORS
+        || partition > target.saturating_sub(minimum_target_sectors)
+    {
         return Err(PlanError::Capacity);
     }
     if require_confirmation && !confirmed {
@@ -235,9 +242,9 @@ mod tests {
 
     #[test]
     fn validates_capacity_and_install_confirmation() {
-        let plan = b"target-sectors=100000;partition-sectors=50000;filesystem=fat32;user=banda;password=change-me;timezone=UTC;keyboard=us;network=disabled";
-        assert!(validate_plan(plan, 100000, false).is_ok());
-        assert_eq!(validate_plan(plan, 100000, true), Err(super::PlanError::Confirmation));
-        assert!(validate_plan(b"target-sectors=100000;partition-sectors=1000;filesystem=fat32;user=banda;password=change-me;timezone=UTC;keyboard=us;network=disabled", 100000, false).is_err());
+        let plan = b"target-sectors=150000;partition-sectors=70000;filesystem=fat32;user=banda;password=change-me;timezone=UTC;keyboard=us;network=disabled";
+        assert!(validate_plan(plan, 150000, false).is_ok());
+        assert_eq!(validate_plan(plan, 150000, true), Err(super::PlanError::Confirmation));
+        assert!(validate_plan(b"target-sectors=150000;partition-sectors=1000;filesystem=fat32;user=banda;password=change-me;timezone=UTC;keyboard=us;network=disabled", 150000, false).is_err());
     }
 }

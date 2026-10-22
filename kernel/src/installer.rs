@@ -14,7 +14,7 @@ use crate::{
     block_io, fat32, gpt, partition::PartitionDevice,
 };
 
-const ESP_SECTORS: u64 = 70_000;
+const ESP_SECTORS: u64 = libwoven::installer_ipc::INSTALLER_ESP_SECTORS;
 const MAX_ARTIFACT_BYTES: usize = 4 * 1024 * 1024;
 const MAX_DIRECTORY_BYTES: usize = 512 * 1024;
 
@@ -24,7 +24,8 @@ pub enum Error {
     InvalidPlan,
     Block,
     Gpt,
-    Fat,
+    FatEsp,
+    FatData,
     Artifact,
     Provisioning,
 }
@@ -57,10 +58,10 @@ fn install_on_device(device: &mut dyn BlockDevice, plan_bytes: &[u8]) -> Result<
     let mut target = device;
     let target_sectors = target.sector_count();
     let plan = parse_plan(plan_bytes, target_sectors)?;
-    if plan.data_sectors < 32_768
+    if plan.data_sectors < libwoven::installer_ipc::INSTALLER_MIN_DATA_SECTORS
         || ESP_SECTORS
             .checked_add(plan.data_sectors)
-            .and_then(|sectors| sectors.checked_add(4096))
+            .and_then(|sectors| sectors.checked_add(libwoven::installer_ipc::INSTALLER_GPT_TAIL_SECTORS))
             .is_none_or(|minimum| minimum > target_sectors)
     {
         return Err(Error::InvalidPlan);
@@ -92,14 +93,14 @@ fn install_on_device(device: &mut dyn BlockDevice, plan_bytes: &[u8]) -> Result<
     };
     {
         let mut esp = PartitionDevice::new(&mut target, esp_partition).map_err(|_| Error::Gpt)?;
-        let esp_volume = fat32::format(&mut esp, b"WOVEN EFI  ").map_err(|_| Error::Fat)?;
+        let esp_volume = fat32::format(&mut esp, b"WOVEN EFI  ").map_err(|_| Error::FatEsp)?;
         fat32::create_path_file(&mut esp, esp_volume, "EFI/BOOT/BOOTX64.EFI", &artifact)
             .map_err(|_| Error::Artifact)?;
         esp.flush().map_err(|_| Error::Block)?;
     }
 
     let mut data = PartitionDevice::new(&mut target, data_partition).map_err(|_| Error::Gpt)?;
-    let data_volume = fat32::format(&mut data, b"WOVENHAT   ").map_err(|_| Error::Fat)?;
+    let data_volume = fat32::format(&mut data, b"WOVENHAT   ").map_err(|_| Error::FatData)?;
     let user = core::str::from_utf8(&plan.user[..plan.user_len]).map_err(|_| Error::Provisioning)?;
     let timezone = core::str::from_utf8(&plan.timezone[..plan.timezone_len]).map_err(|_| Error::Provisioning)?;
     let keyboard = core::str::from_utf8(&plan.keyboard[..plan.keyboard_len]).map_err(|_| Error::Provisioning)?;
@@ -346,69 +347,120 @@ fn short_name(name: &[u8]) -> Option<[u8; 11]> {
 }
 
 #[cfg(feature = "stage28-installer-test")]
-pub fn self_test() -> bool {
-    use alloc::boxed::Box;
-    use crate::block::RamDisk;
+struct InstallerProbeDisk {
+    sectors: u64,
+    written: Vec<(u64, [u8; SECTOR_SIZE])>,
+}
 
-    const SECTORS: usize = 110_000;
-    let mut disk = Box::new(RamDisk::<SECTORS>::new());
-    let Ok(layout) = gpt::write_layout(&mut *disk, ESP_SECTORS, 32_768) else {
-        return false;
+#[cfg(feature = "stage28-installer-test")]
+impl InstallerProbeDisk {
+    fn new(sectors: u64) -> Self {
+        Self { sectors, written: Vec::with_capacity(4096) }
+    }
+}
+
+#[cfg(feature = "stage28-installer-test")]
+impl BlockDevice for InstallerProbeDisk {
+    fn sector_count(&self) -> u64 {
+        self.sectors
+    }
+
+    fn read_sector(&mut self, lba: u64, sector: &mut [u8]) -> Result<(), crate::block::Error> {
+        if sector.len() != SECTOR_SIZE || lba >= self.sectors {
+            return Err(crate::block::Error::OutOfBounds);
+        }
+        sector.fill(0);
+        if let Some((_, data)) = self.written.iter().find(|(stored, _)| *stored == lba) {
+            sector.copy_from_slice(data);
+        }
+        Ok(())
+    }
+
+    fn write_sector(&mut self, lba: u64, sector: &[u8]) -> Result<(), crate::block::Error> {
+        if sector.len() != SECTOR_SIZE || lba >= self.sectors {
+            return Err(crate::block::Error::OutOfBounds);
+        }
+        if let Some((_, data)) = self.written.iter_mut().find(|(stored, _)| *stored == lba) {
+            data.copy_from_slice(sector);
+            return Ok(());
+        }
+        if self.written.len() >= 4096 {
+            return Err(crate::block::Error::DeviceFault);
+        }
+        let mut data = [0_u8; SECTOR_SIZE];
+        data.copy_from_slice(sector);
+        self.written.push((lba, data));
+        Ok(())
+    }
+}
+
+#[cfg(feature = "stage28-installer-test")]
+pub fn self_test() -> bool {
+    fn fail(step: &str) -> bool {
+        crate::serial::write_line(format_args!("[STAGE28 INSTALLER] self-test failure: {step}"));
+        false
+    }
+
+    const SECTORS: usize = 150_000;
+    let mut disk = InstallerProbeDisk::new(SECTORS as u64);
+    let Ok(layout) = gpt::write_layout(&mut disk, ESP_SECTORS, 32_768) else {
+        return fail("source GPT layout");
     };
     let esp_partition = crate::partition::Partition { start_lba: layout.esp_start_lba, sectors: layout.esp_sectors, kind: 0xee };
     {
-        let Ok(mut esp) = PartitionDevice::new(&mut *disk, esp_partition) else {
-            return false;
+        let Ok(mut esp) = PartitionDevice::new(&mut disk, esp_partition) else {
+            return fail("source ESP view");
         };
         let Ok(volume) = fat32::format(&mut esp, b"WOVEN EFI  ") else {
-            return false;
+            return fail("source ESP format");
         };
         if fat32::create_path_file(&mut esp, volume, "EFI/BOOT/BOOTX64.EFI", b"stage28-efi").is_err() {
-            return false;
+            return fail("source EFI file");
         }
     }
 
-    let plan = b"target-sectors=110000;partition-sectors=32768;filesystem=fat32;user=installer;password=change-me;timezone=UTC;keyboard=us;network=disabled;confirmed=1";
-    if install_on_device(&mut *disk, plan).is_err() {
+    let plan = b"target-sectors=150000;partition-sectors=70000;filesystem=fat32;user=installer;password=change-me;timezone=UTC;keyboard=us;network=disabled;confirmed=1";
+    if let Err(error) = install_on_device(&mut disk, plan) {
+        crate::serial::write_line(format_args!("[STAGE28 INSTALLER] install error: {error:?}"));
         return false;
     }
-    let Ok(partitions) = gpt::fat_partitions(&mut *disk) else {
-        return false;
+    let Ok(partitions) = gpt::fat_partitions(&mut disk) else {
+        return fail("installed GPT parse");
     };
     if partitions.len() != 2 {
-        return false;
+        return fail("installed GPT partition count");
     }
     {
-        let Ok(mut installed_esp) = PartitionDevice::new(&mut *disk, partitions[0]) else {
-            return false;
+        let Ok(mut installed_esp) = PartitionDevice::new(&mut disk, partitions[0]) else {
+            return fail("installed ESP view");
         };
         let Ok(esp_volume) = fat32::mount(&mut installed_esp) else {
-            return false;
+            return fail("installed ESP mount");
         };
         let Ok(efi_entry) = fat32::resolve_path(&mut installed_esp, esp_volume, "EFI/BOOT/BOOTX64.EFI") else {
-            return false;
+            return fail("installed EFI path");
         };
         let mut efi = [0_u8; 32];
         let Ok(efi_len) = fat32::read_file(&mut installed_esp, esp_volume, efi_entry, &mut efi) else {
-            return false;
+            return fail("installed EFI read");
         };
         if &efi[..efi_len] != b"stage28-efi" {
-            return false;
+            return fail("installed EFI bytes");
         }
     }
 
-    let Ok(mut data) = PartitionDevice::new(&mut *disk, partitions[1]) else {
-        return false;
+    let Ok(mut data) = PartitionDevice::new(&mut disk, partitions[1]) else {
+        return fail("installed data view");
     };
     let Ok(data_volume) = fat32::mount(&mut data) else {
-        return false;
+        return fail("installed data mount");
     };
     let Ok(settings_entry) = fat32::resolve_path(&mut data, data_volume, "etc/wovenhat/settings.json") else {
-        return false;
+        return fail("installed settings path");
     };
     let mut settings = [0_u8; 256];
     let Ok(settings_len) = fat32::read_file(&mut data, data_volume, settings_entry, &mut settings) else {
-        return false;
+        return fail("installed settings read");
     };
     core::str::from_utf8(&settings[..settings_len]).is_ok_and(|value| value.contains("installer"))
 }
