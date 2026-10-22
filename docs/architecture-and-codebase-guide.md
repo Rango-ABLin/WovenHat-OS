@@ -3988,6 +3988,19 @@ protected/device identities are rejected. No mount, partition API, physical
 disk, bootloader, or hardware qualification is involved.
 # Stage 28 WovenInstaller shell boundary
 
+## Stage 28 real UEFI artifact ingress
+
+`scripts/extract-uefi-boot-artifact.py` is a read-only file-backed ingress
+boundary for the real payload produced by the UEFI build. It checks the GPT
+EFI System Partition, parses bounded FAT16/FAT32 directory chains, and emits
+only the exact case-insensitive `EFI/BOOT/BOOTX64.EFI` file. It rejects
+symlinks, protected/device-like paths, invalid geometry, loops, and payloads
+over four MiB. The emitted regular file may be passed to
+`scripts/execute-disk-install.py --artifact` for disposable transaction
+coverage. It performs no mount, device I/O, firmware call, or hardware
+qualification; the supervised service continues to fail closed for physical
+installation.
+
 `apps/woven-installer` is a freestanding Ring-3 presentation adapter for the
 validated installer state model. Its input is a bounded semicolon-separated
 snapshot with an explicit `validated=1` marker, a plan field, and the state
