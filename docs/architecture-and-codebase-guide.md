@@ -4091,12 +4091,17 @@ shared target paths, snapshots each run before evaluating its exit status, and
 fails closed on a timeout or non-zero result. It has bounded `--count` and
 `--timeout` inputs, supports all five suites and 1/2/4/8/16 CPU profiles, and
 does not claim a repeated-boot pass until every requested iteration completes.
-
 The host `tests/wovenfs_crash.rs` recovery model now adds a deterministic
 xorshift schedule over 64 write-failure cut points, with a second remount
 check after every sample. The test accepts only the complete pre-transaction
 or complete post-transaction payload, preserving the journal's atomicity
 contract while exercising a non-sequential failure order.
+
+The durable recovery acceptance remains a separate executable QEMU boundary:
+`scripts/test-stage27-5-recovery.py` provisions its signed recovery app and
+verifies the recovery protocol on disposable media. Its current evidence
+passes at 1/2/4 CPUs; it must not be conflated with native power-loss or
+physical-media qualification.
 ## Stage 29 hardware qualification report boundary
 
 `scripts/qualify-hardware-report.py` is the report-only boundary for the

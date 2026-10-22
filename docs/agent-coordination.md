@@ -4709,8 +4709,12 @@ sequential repeated-boot evidence runner in
 1-CPU memory sample passed with per-run serial/QEMU evidence preserved under
 `audit-artifacts/stage31-repeated/`. This is harness infrastructure, not a
 claim that the thousands-boot, fault-injection, or recovery gates are closed.
-
 The WovenFS crash suite also gained 64 deterministic randomized write-cut
 samples with replay verification; `cargo test --test wovenfs_crash` now passes
 15 tests. This is host filesystem fault coverage only and does not close
 physical power-loss, driver restart, or the complete Stage 31 matrix.
+
+The existing Stage 27.5 durable-recovery QEMU gate was rerun on 1/2/4 CPUs
+with exit 33; evidence is retained in
+`audit-artifacts/stage27.5-recovery-{1,2,4}cpu`. This is regression evidence,
+not a claim of physical sudden-power-loss qualification.

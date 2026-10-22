@@ -31,6 +31,12 @@ partial sizes or torn payloads. Its exhaustive all-cut tests remain unchanged;
 this is additional host fault coverage, not proof of physical power-loss or
 driver restart behavior.
 
+The existing Stage 27.5 durable-recovery QEMU gate also passed on 1/2/4 CPUs
+with exit 33. Evidence remains in
+`audit-artifacts/stage27.5-recovery-{1,2,4}cpu`; this validates the accepted
+recovery path under the current tree but does not extend it to 8/16-CPU or
+physical sudden-power-loss qualification.
+
 ## 4 GiB production memory floor and scalable memory telemetry - 2026-10-22
 
 Defined the supported production minimum as 4 GiB through
@@ -9046,4 +9052,18 @@ idle and the userspace resume target is explicitly unavailable.
 This is not physical S3 qualification and does not claim that suspend is
 available to production users. The next prerequisite is a task-owned resume
 record and a verified return path before enabling the transition.
+
+## Stage 31 repeated-boot evidence harness - 2026-10-22
+
+Added `scripts/test-stage31-repeated-boots.py`, a sequential fail-closed
+wrapper for the existing memory, storage, network, security, and shell QEMU
+suites. It preserves the child command, combined output, exit/timeout result,
+and the suite's serial/QEMU evidence in a unique `run-NNNN` directory before
+stopping on the first failure. The fixed-port and shared-target harnesses are
+therefore never run concurrently.
+
+The initial two-boot memory sample passed on one CPU. This validates the
+runner and evidence contract only; Stage 31 still requires the planned
+large-count matrix, randomized fault injection, low-resource/loss scenarios,
+restart/crash recovery, sudden-shutdown recovery, and broader CPU profiles.
 
