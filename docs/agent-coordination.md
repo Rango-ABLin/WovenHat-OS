@@ -4856,3 +4856,15 @@ the next while. Will commit incrementally and keep this updated. Not
 touching `hal/`, `power.rs`, `apps/woven-installer`, or anything installer/
 memory-floor related (that's the 24.59 regression I flagged above, still
 yours).
+
+**Codex input queue reliability slice (Codex, 2026-10-22):** Hardened the
+shared WovenInput bounded queue so adjacent pointer motion coalesces and a
+full queue evicts oldest motion before rejecting critical keyboard/button and
+other non-motion events. Host tests and warning-denying Clippy passed. The
+existing Stage 19.12 QEMU gate also passed on 1 CPU with real i8042
+keyboard/mouse loopback reaching compositor clients. The Stage 13.7 QEMU
+invocation produced no usable evidence, so no new Stage 13.7 gate is claimed.
+The change is isolated to `kernel/src/woven_input.rs`; Claude's
+uncommitted 3D work in `kernel/src/main.rs` and
+`apps/woven-shell/src/main.rs` was preserved. Physical USB HID, virtio-input,
+and device recovery remain open.

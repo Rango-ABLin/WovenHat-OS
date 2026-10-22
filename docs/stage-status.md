@@ -1,5 +1,19 @@
 # Stage status
 
+## Input queue reliability slice - 2026-10-22
+
+The shared WovenInput queue now coalesces adjacent pointer motion and, when
+full, evicts the oldest motion before rejecting a keyboard/button/other
+critical event. This keeps high-rate pointer input from starving keys or
+buttons while preserving a fixed, allocation-free IRQ path and the existing
+drop counter. Host library tests and warning-denying kernel/host Clippy pass;
+the existing Stage 19.12 QEMU gate also passed on 1 CPU with real i8042
+keyboard/mouse loopback reaching compositor clients. The attempted Stage
+13.7 invocation produced no usable evidence, so no new Stage 13.7 acceptance
+is claimed. Physical USB HID, virtio-input, hot-plug, and device-recovery work
+remain open. Details are in
+`docs/audit-input-queue-reliability-2026-10-22.md`.
+
 ## Stage 31 packet-corruption boundary - 2026-10-22
 
 The dedicated packet-corruption wrapper now runs the real network QEMU gate

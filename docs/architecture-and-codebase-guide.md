@@ -4062,6 +4062,18 @@ bootability, hardware qualification, or release certification.
 
 # SMP scalability and supported resource floor
 
+## Input delivery and backpressure
+
+`kernel/src/woven_input.rs` is the bounded fan-in queue for keyboard, pointer,
+and future HID sources. IRQ publishers never allocate or sleep. Adjacent
+relative pointer motion is coalesced with saturating deltas; when capacity is
+exhausted, the oldest queued motion may be evicted to admit a critical event.
+If the queue contains no evictable motion, publication fails and the bounded
+drop counter records the loss. This policy protects keyboard and button
+delivery without pretending that an unbounded input stream can be lossless.
+The current live hardware path is PS/2; USB HID and virtio-input remain
+separate driver/qualification stages.
+
 The current static SMP control plane supports up to 16 online CPUs through
 `kernel/src/smp.rs::MAX_CPUS`. A topology larger than that is deliberately
 bounded and must be rejected or reported as truncated; it is not silently

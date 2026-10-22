@@ -97,6 +97,45 @@ impl Queue {
     }
 
     fn push(&mut self, event: Event) -> bool {
+        // Pointer motion is a lossy stream: when several moves are waiting,
+        // retaining their sum is equivalent to delivering them individually
+        // and prevents a busy compositor from starving keys and buttons.
+        if let Event::PointerMove { dx, dy } = event {
+            if self.count != 0 {
+                let last = (self.write + INPUT_QUEUE_CAPACITY - 1) % INPUT_QUEUE_CAPACITY;
+                if let Some(Event::PointerMove {
+                    dx: queued_dx,
+                    dy: queued_dy,
+                }) = self.events[last].as_mut()
+                {
+                    *queued_dx = queued_dx.saturating_add(dx);
+                    *queued_dy = queued_dy.saturating_add(dy);
+                    return true;
+                }
+            }
+        }
+        if self.count == INPUT_QUEUE_CAPACITY {
+            // Motion must never consume the last available slot for a key or
+            // button. Evict the oldest queued motion before rejecting a
+            // critical event. The queue is bounded at 128 entries, so this
+            // short in-place shift is deterministic and does not allocate.
+            if !matches!(event, Event::PointerMove { .. }) {
+                if let Some(offset) = (0..self.count).find(|&offset| {
+                    let index = (self.read + offset) % INPUT_QUEUE_CAPACITY;
+                    matches!(self.events[index], Some(Event::PointerMove { .. }))
+                }) {
+                    for shift in offset..self.count - 1 {
+                        let from = (self.read + shift + 1) % INPUT_QUEUE_CAPACITY;
+                        let to = (self.read + shift) % INPUT_QUEUE_CAPACITY;
+                        self.events[to] = self.events[from];
+                    }
+                    let last = (self.write + INPUT_QUEUE_CAPACITY - 1) % INPUT_QUEUE_CAPACITY;
+                    self.events[last] = None;
+                    self.write = last;
+                    self.count -= 1;
+                }
+            }
+        }
         if self.count == INPUT_QUEUE_CAPACITY {
             self.dropped = self.dropped.saturating_add(1);
             return false;
@@ -352,6 +391,20 @@ pub fn dropped_events() -> u64 {
 
 #[cfg(feature = "stage13-7-test")]
 pub fn self_test() -> bool {
+    let mut local = Queue::new();
+    if !local.push(Event::PointerMove { dx: 120, dy: 120 })
+        || !local.push(Event::PointerMove { dx: 120, dy: -120 })
+        || local.pop() != Some(Event::PointerMove { dx: 240, dy: 0 })
+    {
+        return false;
+    }
+    for _ in 0..INPUT_QUEUE_CAPACITY / 2 {
+        let _ = local.push(Event::PointerMove { dx: 1, dy: 0 });
+        let _ = local.push(Event::Key(Key::Char('x')));
+    }
+    if !local.push(Event::Key(Key::Char('k'))) || local.pop() != Some(Event::Key(Key::Char('x'))) {
+        return false;
+    }
     {
         let mut q = QUEUE.lock();
         *q = Queue::new();
