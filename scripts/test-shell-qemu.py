@@ -46,6 +46,57 @@ def normal_boot_serial_errors(log: str, system_apps: bool) -> list[str]:
     return errors
 
 
+
+def validate_desktop_frame(path: Path) -> tuple[int, int]:
+    """Require a complete, non-uniform QEMU P6 framebuffer capture.
+
+    A successful screendump command can still capture a blank screen. Keep
+    the PPM as evidence and fail the normal desktop boot acceptance if it
+    contains no visible content.
+    """
+    data = path.read_bytes()
+    # QEMU's screendump uses binary P6 with an optional comment in its header.
+    offset = 0
+    tokens = []
+    while len(tokens) < 4:
+        while offset < len(data) and data[offset] in b' \t\r\n':
+            offset += 1
+        if offset < len(data) and data[offset] == ord('#'):
+            end = data.find(b'\n', offset)
+            if end < 0:
+                raise ValueError('Unterminated PPM header comment')
+            offset = end + 1
+            continue
+        start = offset
+        while offset < len(data) and data[offset] not in b' \t\r\n#':
+            offset += 1
+        if start == offset:
+            raise ValueError('Incomplete PPM header')
+        tokens.append(data[start:offset])
+    try:
+        magic, width_raw, height_raw, maximum_raw = tokens
+        width, height, maximum = int(width_raw), int(height_raw), int(maximum_raw)
+    except ValueError as error:
+        raise ValueError('Invalid PPM dimensions or color depth') from error
+    if magic != b'P6' or width < 64 or height < 64 or maximum != 255:
+        raise ValueError('Invalid QEMU desktop framebuffer format or dimensions')
+    if offset >= len(data) or data[offset] not in b' \t\r\n':
+        raise ValueError('Missing PPM pixel separator')
+    # Exactly one delimiter follows maxval; further bytes are pixel content
+    # and may legitimately start with whitespace.
+    if data[offset:offset + 2] == b'\r\n':
+        offset += 2
+    else:
+        offset += 1
+    pixels = data[offset:]
+    if len(pixels) != width * height * 3:
+        raise ValueError('Truncated or oversized desktop framebuffer')
+    first = pixels[:3]
+    if all(pixels[index:index + 3] == first for index in range(0, len(pixels), 3)):
+        raise ValueError('Desktop framebuffer is a uniform blank image')
+    return width, height
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--qemu', default=shutil.which('qemu-system-x86_64') or r'C:\Program Files\qemu\qemu-system-x86_64.exe')
@@ -181,6 +232,11 @@ def main():
                     execute('screendump', {'filename': str(screenshot)})
                     if not screenshot.is_file() or screenshot.stat().st_size == 0:
                         raise RuntimeError('No pre-diagnostic display screenshot was captured')
+                    try:
+                        frame_width, frame_height = validate_desktop_frame(screenshot)
+                    except ValueError as error:
+                        raise RuntimeError(f'Invalid pre-F12 desktop framebuffer: {error}') from error
+                    print(f'Normal desktop first-frame evidence: {frame_width}x{frame_height}', flush=True)
                     execute('send-key', {'keys': [{'type': 'qcode', 'data': 'f12'}], 'hold-time': 40})
                     deadline = time.monotonic() + 30
                     while '[SESSION] diagnostic console' not in serial.read_text(errors='replace'):
