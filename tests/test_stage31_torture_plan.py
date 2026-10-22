@@ -50,3 +50,14 @@ class Stage31TorturePlanTests(unittest.TestCase):
         plan = MODULE.build_plan((1,))
         plan["jobs"][0]["suite"] = "unknown"
         self.assertTrue(MODULE.validate_plan(plan))
+
+    def test_fault_scenario_map_is_explicit_and_fail_closed(self):
+        plan = MODULE.build_plan((1,))
+        scenarios = plan["fault_scenarios"]
+        self.assertEqual(plan["randomized_fault_injection"], "partial-wovenfs-host-only")
+        self.assertEqual(scenarios["filesystem-disk-full"], "covered-wovenfs-host")
+        self.assertEqual(scenarios["service-lifecycle"], "covered-signed-update-service-1-2-4cpu")
+        self.assertEqual(scenarios["packet-corruption"], "open")
+        self.assertEqual(scenarios["driver-crash"], "open")
+        self.assertEqual(scenarios["process-crash"], "open")
+        self.assertEqual(scenarios["sudden-shutdown"], "open")

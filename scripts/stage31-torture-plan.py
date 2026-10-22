@@ -34,6 +34,17 @@ SUITE_CPU_SUPPORT = {
     "recovery": (1, 2, 4),
     "update-service": (1, 2, 4),
 }
+FAULT_SCENARIOS = {
+    "network-loss": "covered-emulated-virtio-link-flap",
+    "filesystem-disk-full": "covered-wovenfs-host",
+    "filesystem-randomized-crash": "covered-wovenfs-host",
+    "service-lifecycle": "covered-signed-update-service-1-2-4cpu",
+    "packet-corruption": "open",
+    "driver-crash": "open",
+    "process-crash": "open",
+    "sudden-shutdown": "open",
+    "whole-kernel-low-ram": "open",
+}
 
 
 def build_plan(cpus: tuple[int, ...] = REQUESTED_CPUS) -> dict[str, Any]:
@@ -54,7 +65,8 @@ def build_plan(cpus: tuple[int, ...] = REQUESTED_CPUS) -> dict[str, Any]:
     return {
         "schema": "wovenhat.stage31-torture-plan/v1",
         "fail_closed": True,
-        "randomized_fault_injection": "not-enabled",
+        "randomized_fault_injection": "partial-wovenfs-host-only",
+        "fault_scenarios": FAULT_SCENARIOS,
         "requested_cpu_counts": list(cpus),
         "supported_cpu_counts": list(SUPPORTED_CPUS),
         "suites": [suite for suite, _ in SUITES],
