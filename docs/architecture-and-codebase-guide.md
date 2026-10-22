@@ -4071,6 +4071,9 @@ rescan. This is the reusable teardown/rebind boundary. Automatic recovery
 after a driver crash still needs a supervisor policy, device-specific reset
 and replay rules, and hardware evidence.
 
+The Stage 31 planner reports this as partial driver-crash coverage rather than
+as a crash-recovery pass; the distinction is intentional.
+
 ## Service restart qualification boundary
 
 The signed Stage 27.5 update-service gate now proves a full orderly restart

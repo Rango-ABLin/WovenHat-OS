@@ -10,6 +10,10 @@ leases, and completes generation-safe rescan. The 1-CPU gate passed with exit
 crash supervision or native hardware certification. Details are in
 `docs/audit-stage31-driver-restart-2026-10-22.md`.
 
+The Stage 31 torture planner now records driver-crash coverage as
+`partial-stage13-2-explicit-rebind`: explicit rebind and teardown are covered,
+but automatic recovery after an injected driver crash is still open.
+
 ## Stage 31 signed service restart slice - 2026-10-22
 
 The Stage 27.5 signed `woven-update` acceptance now kills and reaps the first
