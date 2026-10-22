@@ -14,11 +14,10 @@ host TCG wall-clock budget but complete successfully.
 ## Stage 31 reliability evidence slices - 2026-10-22
 
 The sequential `scripts/test-stage31-repeated-boots.py` harness passed a
-ten-boot 1-CPU memory sample. Each iteration has independent command, result,
-serial, and QEMU evidence under
-`audit-artifacts/stage31-repeated/memory-1cpu/run-*`; the harness stops on the
-first timeout or non-zero result and never runs the fixed-port suites in
-parallel.
+ten-boot 1-CPU memory sample and three-boot samples on both 2 and 4 CPUs.
+Each iteration has independent command, result, serial, and QEMU evidence
+under `audit-artifacts/stage31-repeated/`; the harness stops on the first
+timeout or non-zero result and never runs the fixed-port suites in parallel.
 
 The WovenFS host crash-recovery gate also samples 64 deterministic randomized
 write cut points with remount/replay verification, while retaining the

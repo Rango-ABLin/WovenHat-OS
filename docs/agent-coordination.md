@@ -4706,10 +4706,10 @@ before any production-readiness claim.
 **Codex Stage 31 reliability slice (Codex, 2026-10-22):** Added the
 sequential repeated-boot evidence runner in
 `scripts/test-stage31-repeated-boots.py` plus focused Python tests. A ten-boot
-1-CPU memory sample passed with per-run serial/QEMU evidence preserved under
-`audit-artifacts/stage31-repeated/memory-1cpu/run-*`. This is harness
-infrastructure and a small repeatability sample, not a claim that the
-thousands-boot, fault-injection, or recovery gates are closed.
+1-CPU memory sample and three-boot 2/4-CPU samples passed with per-run
+serial/QEMU evidence preserved under `audit-artifacts/stage31-repeated/`.
+This is harness infrastructure and a small repeatability sample, not a claim
+that the thousands-boot, fault-injection, or recovery gates are closed.
 The WovenFS crash suite also gained 64 deterministic randomized write-cut
 samples with replay verification; `cargo test --test wovenfs_crash` now passes
 15 tests. This is host filesystem fault coverage only and does not close
