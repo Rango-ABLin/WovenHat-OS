@@ -28,7 +28,7 @@ passed on 1/2/4 CPUs with exit 33; evidence remains under
 
 The network harness now has an opt-in `--link-loss` fault mode using QMP to
 take the QEMU `net0` link down and back up after the UDP path passes. The
-guest recovered the host TCP round trip and all final SMP markers on 1 and 4
+guest recovered the host TCP round trip and all final SMP markers on 1/2/4/8/16
 CPUs. This is a virtio/QEMU link-flap boundary, not physical NIC loss or a
 complete randomized packet-corruption campaign.
 

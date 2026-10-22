@@ -11,12 +11,16 @@ Passing commands:
 ```text
 python scripts/test-network-qemu.py --cpus 1 --timeout 300 --link-loss
 python scripts/test-network-qemu.py --cpus 4 --timeout 300 --link-loss
+python scripts/test-network-qemu.py --cpus 8 --timeout 600 --link-loss
+python scripts/test-network-qemu.py --cpus 16 --timeout 900 --link-loss
 ```
 
 Evidence is retained in:
 
 - `target/network-regression-1-debug/serial.log`
 - `target/network-regression-4-debug/serial.log`
+- `target/network-regression-8-debug/serial.log`
+- `target/network-regression-16-debug/serial.log`
 
 This slice proves recovery from an emulated virtio link flap. It does not
 qualify physical NIC loss, packet corruption, Wi-Fi recovery, driver restart,

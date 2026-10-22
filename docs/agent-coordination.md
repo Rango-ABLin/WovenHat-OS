@@ -4722,7 +4722,7 @@ with exit 33; evidence is retained in
 not a claim of physical sudden-power-loss qualification.
 
 The network-loss slice is also implemented: the QEMU network harness now
-supports an opt-in QMP virtio link flap. `--link-loss` passed on 1 and 4 CPUs,
-including TCP recovery and final SMP markers. It remains emulated link-loss
-evidence; packet corruption, physical NIC loss, and full restart coverage are
-still open.
+supports an opt-in QMP virtio link flap. `--link-loss` passed on 1/2/4/8/16
+CPUs, including TCP recovery and final SMP markers. It remains emulated
+link-loss evidence; packet corruption, physical NIC loss, and full restart
+coverage are still open.
