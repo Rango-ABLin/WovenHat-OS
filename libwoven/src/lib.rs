@@ -35,6 +35,7 @@ pub mod package_ipc;
 pub mod semantic_search;
 pub mod store;
 pub mod update_ipc;
+pub mod recovery;
 
 #[cfg(test)]
 #[path = "../../kernel/src/exit_status.rs"]
@@ -11487,6 +11488,7 @@ pub mod syscall {
     pub const CPU_FREQUENCY_INFO: u64 = 237;
     pub const SUSPEND_RESUME_CAPABILITIES: u64 = 238;
     pub const UPDATE_TRANSACTION: u64 = 239;
+    pub const RECOVERY_QUERY: u64 = 240;
     pub const ACCOUNTS_CHANGE_PIN: u64 = 210;
     pub const IDENTITY_ADMIN_ADD_USER: u64 = 226;
     pub const IDENTITY_ADMIN_DELETE_USER: u64 = 227;

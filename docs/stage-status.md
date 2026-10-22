@@ -1,5 +1,26 @@
 # Stage status
 
+## Stage 27.5 bounded WovenRecovery environment foundation - 2026-10-22
+
+WovenRecovery now has a signed Ring-3 system application, a dedicated
+capability, and a boot-mode authorization gate. Its fixed ABI exposes bounded
+status, filesystem-check, and serial-log reads. Reset and reinstall are
+fail-closed admission checks only: they return an explicit not-implemented
+result and do not mutate storage. The QEMU acceptance exercises unauthorized
+reset, authorized status/log access, both admission paths, and the check
+unavailable path without claiming destructive recovery is complete.
+
+The 1/2/4-CPU QEMU gates pass with exit 33. Recovery app Clippy, kernel
+feature Clippy, workspace all-target warning-denying Clippy, and 115 libwoven
+host tests pass. Evidence is retained in
+`audit-artifacts/stage27.5-recovery-{1,2,4}cpu` and documented in
+`docs/audit-stage27-5-recovery-environment-2026-10-22.md`.
+
+This closes only the bounded recovery-environment foundation. Destructive
+reset/reinstall execution, production update-slot sizing, bootloader handoff,
+power-loss recovery, installer integration, and physical qualification remain
+open before release certification.
+
 ## Stage 27.5 end-to-end WovenUpdate IPC acceptance - 2026-10-22
 
 The Stage 27.5 QEMU gate now builds the signed `woven-update` Ring-3 image,

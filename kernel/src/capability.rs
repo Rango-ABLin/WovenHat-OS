@@ -32,6 +32,9 @@ pub enum Capability {
     /// Change a local account's own PIN: the desktop session only. Never
     /// granted to applications; see `accounts::change_pin`.
     AccountManage = 26,
+    /// Enter the kernel-authorized recovery environment. This is not granted
+    /// to ordinary applications; the boot-mode admission check is separate.
+    Recovery = 27,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -78,6 +81,7 @@ impl CapabilitySet {
             .with(Capability::AudioPlayback)
             .with(Capability::PowerControl)
             .with(Capability::AccountManage)
+            .with(Capability::Recovery)
     }
 
     pub const fn userspace() -> Self {
@@ -151,7 +155,7 @@ impl CapabilitySet {
 }
 
 impl Capability {
-    pub const COUNT: usize = 27;
+    pub const COUNT: usize = 28;
     pub const ALL: [Capability; Self::COUNT] = [
         Capability::Console,
         Capability::TimerRead,
@@ -180,6 +184,7 @@ impl Capability {
         Capability::AudioPlayback,
         Capability::PowerControl,
         Capability::AccountManage,
+        Capability::Recovery,
     ];
 
     pub const fn index(self) -> usize {

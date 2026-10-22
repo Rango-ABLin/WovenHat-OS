@@ -403,6 +403,9 @@ pub enum Number {
     /// operation, source pointer/slot, source length -> bounded update result
     #[cfg(any(feature = "stage27-5-test", feature = "system-apps"))]
     UpdateTransaction = 239,
+    /// bounded Stage 27.5 recovery query/admission ABI
+    #[cfg(any(feature = "stage27-5-recovery-test", feature = "system-apps"))]
+    RecoveryQuery = 240,
     /// -> process-local endpoint handle, or ERROR
     IpcEndpointCreate = 211,
     /// name ptr, packed name length|client rights<<32, endpoint handle -> 0
@@ -714,6 +717,64 @@ fn sys_update_transaction(operation: u64, source_or_slot: u64, length: u64) -> u
             crate::update_service::transact(operation as u8, None, 0, now).unwrap_or(SYSCALL_ERROR)
         }
         _ => SYSCALL_ERROR,
+    }
+}
+
+#[cfg(any(feature = "stage27-5-recovery-test", feature = "system-apps"))]
+fn sys_recovery_query(operation: u64, user_buffer_or_offset: u64, user_offset: u64) -> u64 {
+    if !matches!(
+        operation,
+        crate::recovery::OP_STATUS
+            | crate::recovery::OP_FILESYSTEM_CHECK
+            | crate::recovery::OP_LOG_READ
+            | crate::recovery::OP_RESET_ADMISSION
+            | crate::recovery::OP_REINSTALL_ADMISSION
+    ) {
+        return crate::recovery::ADMISSION_DENIED;
+    }
+    if !crate::task::current_has(crate::capability::Capability::Recovery)
+        || !crate::recovery::boot_mode_authorized()
+    {
+        return crate::recovery::ADMISSION_DENIED;
+    }
+    match operation {
+        crate::recovery::OP_STATUS => {
+            let mut bytes = [0u8; crate::recovery::STATUS_BYTES];
+            crate::recovery::encode_status(&mut bytes);
+            if crate::paging::copy_to_current_user(user_buffer_or_offset, &bytes).is_err() {
+                return SYSCALL_ERROR;
+            }
+            0
+        }
+        crate::recovery::OP_FILESYSTEM_CHECK => {
+            let Ok(report) = crate::storage::fscheck_mnt() else {
+                return SYSCALL_ERROR;
+            };
+            let mut bytes = [0u8; crate::recovery::CHECK_BYTES];
+            crate::recovery::encode_check(&report, &mut bytes);
+            if crate::paging::copy_to_current_user(user_buffer_or_offset, &bytes).is_err() {
+                return SYSCALL_ERROR;
+            }
+            0
+        }
+        crate::recovery::OP_LOG_READ => {
+            let Ok(offset) = usize::try_from(user_offset) else {
+                return SYSCALL_ERROR;
+            };
+            let mut bytes = [0u8; crate::recovery::MAX_LOG_READ];
+            let (_, count) = crate::serial::read_log(offset, &mut bytes);
+            if crate::paging::copy_to_current_user(user_buffer_or_offset, &bytes[..count]).is_err()
+            {
+                return SYSCALL_ERROR;
+            }
+            count as u64
+        }
+        crate::recovery::OP_RESET_ADMISSION | crate::recovery::OP_REINSTALL_ADMISSION => {
+            // Admission is intentionally separate from execution. No reset,
+            // reinstall, snapshot restore, or boot repair is performed here.
+            crate::recovery::ADMISSION_NOT_IMPLEMENTED
+        }
+        _ => crate::recovery::ADMISSION_DENIED,
     }
 }
 
@@ -2730,6 +2791,10 @@ pub extern "C" fn wovenhat_syscall_dispatch(
         #[cfg(any(feature = "stage27-5-test", feature = "system-apps"))]
         value if value == Number::UpdateTransaction as u64 => {
             sys_update_transaction(arg0, arg1, arg2)
+        }
+        #[cfg(any(feature = "stage27-5-recovery-test", feature = "system-apps"))]
+        value if value == Number::RecoveryQuery as u64 => {
+            sys_recovery_query(arg0, arg1, arg2)
         }
         #[cfg(any(
             feature = "stage23-1-test",

@@ -36,7 +36,11 @@ fn record(byte: u8) {
 }
 
 /// Bytes logged since boot.
-#[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
+#[cfg(any(
+    not(feature = "qemu-test"),
+    feature = "stage13-12-test",
+    feature = "stage27-5-recovery-test"
+))]
 pub fn log_position() -> usize {
     LOG_HEAD.load(Ordering::Acquire)
 }
@@ -45,7 +49,11 @@ pub fn log_position() -> usize {
 /// position actually copied from (later than `from` when older bytes have
 /// been overwritten) and the number of bytes copied. A byte being written
 /// concurrently may read as its predecessor; readers re-read the tail.
-#[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
+#[cfg(any(
+    not(feature = "qemu-test"),
+    feature = "stage13-12-test",
+    feature = "stage27-5-recovery-test"
+))]
 pub fn read_log(from: usize, out: &mut [u8]) -> (usize, usize) {
     let head = LOG_HEAD.load(Ordering::Acquire);
     let start = from.max(head.saturating_sub(LOG_BYTES)).min(head);

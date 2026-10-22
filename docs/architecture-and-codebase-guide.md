@@ -1,5 +1,22 @@
 # WovenHat OS Architecture & Codebase Guide
 
+### Stage 27.5 - WovenRecovery bounded environment
+
+`kernel/src/recovery.rs` defines the fixed-size recovery ABI. Syscall 240 is
+available only to a task holding `Capability::Recovery` and only while the
+kernel recovery boot-mode gate is authorized. Status, filesystem-check, and
+serial-log results are copied through caller-owned bounded buffers; malformed
+lengths and unauthorized mode fail closed. Reset and reinstall currently
+return an explicit admission-not-implemented value and have no storage side
+effects.
+
+`apps/woven-recovery` is packaged and signature-checked as a normal WAPP
+system application. The QEMU recovery gate runs it in both unauthorized and
+authorized modes. Its check command reports unavailable when no checkable
+filesystem is mounted rather than fabricating success. The foundation does
+not yet provide destructive reset/reinstall, installer orchestration, or
+bootloader update handoff.
+
 ### Stage 26.5 - bounded internationalization foundation
 
 `libwoven::i18n` is the bounded userspace foundation for locale-sensitive

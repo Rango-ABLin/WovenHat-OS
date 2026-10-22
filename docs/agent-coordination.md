@@ -1,5 +1,21 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - bounded WovenRecovery environment foundation (2026-10-22)
+
+Added the signed `wovenhat-recovery` Ring-3 application, Recovery capability,
+boot-mode authorization gate, fixed status/filesystem-check/log ABI, and
+fail-closed reset/reinstall admission results. The 1/2/4-CPU QEMU gates,
+recovery app Clippy, recovery-feature kernel Clippy, workspace all-target
+Clippy, and 115 libwoven host tests pass. Reset/reinstall remain explicitly
+unimplemented and do not write storage. Evidence is in
+`docs/audit-stage27-5-recovery-environment-2026-10-22.md`.
+
+The recovery acceptance uses a deterministic user-region PIE bias because
+QEMU test builds intentionally make the ASLR draw zero; this preserves the
+production loader and avoids accepting an image mapped below the user region.
+The next prerequisites remain destructive recovery semantics, installer
+integration, boot handoff/power-loss testing, and physical qualification.
+
 ## Codex - Stage 27.5 end-to-end WovenUpdate IPC acceptance (2026-10-22)
 
 The signed `woven-update --service` image is now exercised through its real
