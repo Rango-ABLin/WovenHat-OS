@@ -265,14 +265,35 @@ def main():
                     execute('screendump', {'filename': str(restored)})
                     if not restored.is_file() or restored.stat().st_size == 0:
                         raise RuntimeError('No restored-desktop framebuffer was captured')
+                    try:
+                        validate_desktop_frame(restored)
+                    except ValueError as error:
+                        raise RuntimeError(f'Invalid restored desktop framebuffer: {error}') from error
                 # Check the complete serial trace, not just the positive marker
                 # that ended the polling loop. A panic after boot is a failure.
                 evidence = serial.read_text(errors='replace')
                 failures = normal_boot_serial_errors(evidence, args.system_apps)
                 if failures:
                     raise RuntimeError('; '.join(failures))
-                execute('quit')
-            process.wait(timeout=5)
+                # With -no-reboot a guest crash also exits QEMU with status 0,
+                # so the guest must still be running when the harness quits.
+                if process.poll() is not None:
+                    raise RuntimeError('QEMU exited before the harness requested quit')
+                try:
+                    execute('quit')
+                except (ConnectionResetError, BrokenPipeError, json.JSONDecodeError):
+                    # QEMU can tear down the QMP socket before its 'quit'
+                    # reply is read (observed: reset with QEMU still alive,
+                    # then a clean exit). Completion is proven below by the
+                    # exit status and a final serial check, not by the reply.
+                    pass
+            exit_status = process.wait(timeout=5)
+            if exit_status != 0:
+                raise RuntimeError(f'QEMU exited with status {exit_status} after quit')
+            # The guest ran until QEMU stopped; re-check everything it logged.
+            failures = normal_boot_serial_errors(serial.read_text(errors='replace'), args.system_apps)
+            if failures:
+                raise RuntimeError('; '.join(failures))
         finally:
             if process.poll() is None:
                 process.kill()
