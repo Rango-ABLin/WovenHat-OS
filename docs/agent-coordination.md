@@ -1,5 +1,16 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - Stage 28 ISO capability probe (2026-10-22)
+
+Added the disjoint, file-only `scripts/probe-installer-iso.py` and focused
+`tests/test_installer_iso_probe.py`; the completed package-installer files were
+not modified. The probe fails closed and reports the exact current blockers:
+no supported ISO builder is installed, the existing pipeline emits a GPT UEFI
+disk image rather than an ISO-native layout, and no verifiable EFI boot tree
+was supplied. It never mounts, writes an ISO, or accesses physical media.
+Six focused tests (including the unchanged package-installer tests) and Python
+compilation checks pass. No ISO support or QEMU ISO acceptance is claimed.
+
 ## Codex - Stage 28 bounded WovenInstaller file-artifact slice (2026-10-22)
 
 Added `scripts/package-installer.py` and focused host coverage in

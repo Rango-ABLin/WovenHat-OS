@@ -1,5 +1,22 @@
 # Stage status
 
+## Stage 28 ISO capability probe - 2026-10-22
+
+Added `scripts/probe-installer-iso.py` with focused host coverage in
+`tests/test_installer_iso_probe.py`. The probe is file-only and fail-closed: it
+checks the GPT UEFI image shape, searches for an ISO builder, verifies a
+file-backed `EFI/BOOT/BOOTX64.EFI` tree when supplied, and emits no artifact.
+It never mounts a filesystem, accesses a physical disk, or claims ISO support.
+
+The current machine is blocked because no `xorriso`, `mkisofs`, `genisoimage`,
+or `oscdimg` executable is available; the existing build pipeline emits a GPT
+UEFI disk image rather than an ISO-native El Torito layout; and no extracted
+EFI boot tree was available for verification. The probe's qualification rule
+requires generating an artifact and booting that exact artifact in QEMU before
+ISO support can be claimed. Three probe tests, the unchanged three installer
+tests, and Python compilation checks pass. No ISO was generated and no QEMU ISO
+gate was run.
+
 ## Stage 28 WovenInstaller bounded file-artifact slice - 2026-10-22
 
 Added `scripts/package-installer.py` as a non-destructive boundary around the

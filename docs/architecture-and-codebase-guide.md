@@ -1,5 +1,17 @@
 # WovenHat OS Architecture & Codebase Guide
 
+### Stage 28 - ISO capability probe (unvalidated)
+
+`scripts/probe-installer-iso.py` is a read-only capability probe, not an ISO
+builder. It validates only file-backed inputs: the source must have a
+protective MBR and primary GPT header, a supplied EFI tree must contain a
+non-empty `EFI/BOOT/BOOTX64.EFI`, and one of the supported ISO builders must be
+discoverable in `PATH`. Missing prerequisites are reported as explicit
+blockers and the process exits non-zero. The probe never mounts an image,
+opens a physical disk, or writes an artifact. Even when prerequisites are
+present it reports `ready-for-build-validation`, not support; support requires
+booting the exact generated ISO in QEMU.
+
 ### Stage 28 - WovenInstaller bounded file-artifact boundary
 
 `scripts/package-installer.py` is the first installer-stage boundary. It
