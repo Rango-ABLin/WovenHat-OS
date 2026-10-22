@@ -4089,11 +4089,10 @@ acceptance requirements.
 those suites. It serializes child harnesses because they use fixed ports and
 shared target paths, snapshots each run before evaluating its exit status, and
 fails closed on a timeout or non-zero result. It has bounded `--count` and
-`--timeout` inputs, supports all five suites and 1/2/4/8/16 CPU profiles, and
-supports the five functional suites plus the Stage 27.5 `recovery` suite;
-the functional suites support 1/2/4/8/16 CPU profiles, while recovery is
-limited to its existing 1/2/4 CPU gate. It does not claim a repeated-boot
-pass until every requested iteration completes.
+`--timeout` inputs, supports the five functional suites on 1/2/4/8/16 CPU
+profiles, and supports the Stage 27.5 `recovery` and `update-service` suites
+on their existing 1/2/4 CPU profiles. It does not claim a repeated-boot pass
+until every requested iteration completes.
 The host `tests/wovenfs_crash.rs` recovery model now adds a deterministic
 xorshift schedule over 64 write-failure cut points, with a second remount
 check after every sample. The test accepts only the complete pre-transaction

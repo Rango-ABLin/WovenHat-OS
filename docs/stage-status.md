@@ -14,6 +14,18 @@ supervisor or automatic restart implementation. Driver restart, physical
 power-loss, packet corruption, and the full Stage 31 fault/repetition matrix
 remain open.
 
+## Stage 31 repeated signed update-service lifecycle slice - 2026-10-22
+
+The repeated runner now also invokes the signed Stage 27.5
+`woven-update --service` gate. Two sequential 1-CPU runs passed, followed by
+one-run profiles at 2 and 4 CPUs; per-run package, serial, QEMU, and result
+evidence is retained under `audit-artifacts/stage31-repeated/`.
+
+This proves repeatable service publication, request handling, malformed-request
+rejection, and orderly teardown across the supported service SMP profiles. It
+does not prove automatic restart after a crash, driver restart, sudden power
+loss, or native hardware behavior.
+
 ## WovenShell desktop: 3D mode extended to every floating panel and the lock screen - 2026-10-22
 
 Continuing the wallpaper/taskbar 3D work: the launcher panel, Notification

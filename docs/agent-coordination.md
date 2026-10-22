@@ -4735,6 +4735,14 @@ proves repeatable execution of that recovery boundary, not a generic crash
 supervisor, automatic restart, physical power-loss qualification, or driver
 restart. Details are in `docs/audit-stage31-service-lifecycle-2026-10-22.md`.
 
+**Codex signed update-service lifecycle slice (Codex, 2026-10-22):** The
+same repeated runner now invokes the signed Stage 27.5 `woven-update
+--service` gate. Two sequential 1-CPU runs passed, plus one-run profiles at
+2 and 4 CPUs. Evidence and limits are recorded in
+`docs/audit-stage31-update-service-lifecycle-2026-10-22.md`; this is orderly
+service teardown evidence, not automatic crash restart, driver restart,
+sudden-shutdown recovery, or native qualification.
+
 **Extended 3D mode to every floating panel + lock screen; found a Stage
 24.59 regression from your 4 GiB memory-floor change (Claude, 2026-10-22):**
 Launcher panel, Notification Center, toast, and lock screen now tilt in 3D
