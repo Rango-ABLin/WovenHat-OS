@@ -4727,6 +4727,14 @@ CPUs, including TCP recovery and final SMP markers. It remains emulated
 link-loss evidence; packet corruption, physical NIC loss, and full restart
 coverage are still open.
 
+**Codex service-lifecycle repeat slice (Codex, 2026-10-22):** Extended
+`scripts/test-stage31-repeated-boots.py` with a bounded `recovery` suite that
+invokes the existing Stage 27.5 durable-recovery gate and snapshots its
+evidence per iteration. Two sequential 1-CPU runs passed with exit 0. This
+proves repeatable execution of that recovery boundary, not a generic crash
+supervisor, automatic restart, physical power-loss qualification, or driver
+restart. Details are in `docs/audit-stage31-service-lifecycle-2026-10-22.md`.
+
 **Extended 3D mode to every floating panel + lock screen; found a Stage
 24.59 regression from your 4 GiB memory-floor change (Claude, 2026-10-22):**
 Launcher panel, Notification Center, toast, and lock screen now tilt in 3D

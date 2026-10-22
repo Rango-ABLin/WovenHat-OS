@@ -20,6 +20,13 @@ class Stage31RepeatedBootsTests(unittest.TestCase):
         self.assertNotIn("--timeout", command)
         self.assertEqual(command[-2:], ["--cpus", "8"])
 
+    def test_recovery_uses_recovery_gate_and_cpu_limit(self):
+        command = MODULE.build_command("recovery", 2, 300)
+        self.assertIn("scripts/test-stage27-5-recovery.py", command)
+        self.assertEqual(command[-2:], ["--timeout", "300"])
+        with self.assertRaises(ValueError):
+            MODULE.build_command("recovery", 8, 300)
+
     def test_invalid_suite_and_cpu_are_rejected(self):
         with self.assertRaises(ValueError):
             MODULE.build_command("unknown", 1, 300)

@@ -1,5 +1,19 @@
 # Stage status
 
+## Stage 31 repeated recovery-service lifecycle slice - 2026-10-22
+
+The sequential `scripts/test-stage31-repeated-boots.py` runner now supports
+the existing Stage 27.5 durable-recovery gate as a `recovery` suite. Two
+back-to-back 1-CPU runs passed with exit 0; per-run command, result, output,
+and copied recovery evidence are retained under
+`audit-artifacts/stage31-repeated/recovery-1cpu/`. The suite is bounded to
+the existing 1/2/4-CPU recovery profiles.
+
+This is repeatable service startup/teardown evidence, not a generic crash
+supervisor or automatic restart implementation. Driver restart, physical
+power-loss, packet corruption, and the full Stage 31 fault/repetition matrix
+remain open.
+
 ## WovenShell desktop: 3D mode extended to every floating panel and the lock screen - 2026-10-22
 
 Continuing the wallpaper/taskbar 3D work: the launcher panel, Notification
