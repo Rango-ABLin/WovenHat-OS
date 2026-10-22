@@ -61,6 +61,14 @@ class DiskInstallExecutorTests(unittest.TestCase):
         self.assertEqual(data[510:512], b"\x55\xaa")
         self.assertEqual(data[512:520], b"EFI PART")
 
+    def test_explicit_real_artifact_is_verified_through_the_transaction(self):
+        artifact = self.root / "BOOTX64.EFI"
+        artifact.write_bytes(b"MZ" + bytes(range(251)))
+        result = MODULE.execute(self.image, self.plan, artifact=artifact)
+        self.assertTrue(result["verified"])
+        self.assertEqual(result["efi"]["artifact_bytes"], artifact.stat().st_size)
+        self.assertEqual(result["efi"]["artifact_sha256"], hashlib.sha256(artifact.read_bytes()).hexdigest())
+
     def test_settings_are_embedded_and_read_back_from_the_real_volume(self):
         MODULE.execute(self.image, self.plan)
         settings = MODULE.filesystem.read_installed_settings(self.image, self.plan)
