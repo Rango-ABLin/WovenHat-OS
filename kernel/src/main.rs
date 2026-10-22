@@ -5997,7 +5997,10 @@ const SYSTEM_APP_IMAGES: &[u8] = include_bytes!(env!("WOVENHAT_IMAGES_IMAGE"));
     feature = "system-apps"
 ))]
 const SYSTEM_APP_UPDATE: &[u8] = include_bytes!(env!("WOVENHAT_UPDATE_IMAGE"));
-#[cfg(any(feature = "stage27-5-recovery-test", feature = "system-apps"))]
+// Only the Stage 27.5 recovery gate embeds this image. Production
+// `system-apps` builds do not use it, and their harnesses do not set
+// WOVENHAT_RECOVERY_IMAGE, so it must not be required there.
+#[cfg(feature = "stage27-5-recovery-test")]
 const RECOVERY_APP_IMAGE: &[u8] = include_bytes!(env!("WOVENHAT_RECOVERY_IMAGE"));
 #[cfg(any(feature = "stage19-app-catalog-test", feature = "system-apps"))]
 const SYSTEM_APP_STORE: &[u8] = include_bytes!(env!("WOVENHAT_STORE_IMAGE"));
