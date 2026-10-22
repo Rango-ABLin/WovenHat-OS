@@ -1,5 +1,21 @@
 # Stage status
 
+## Stage 28 WovenInstaller bounded file-artifact slice - 2026-10-22
+
+Added `scripts/package-installer.py` as a non-destructive boundary around the
+existing `build.rs` UEFI disk-image output. It consumes the release-validation
+image record or an explicitly supplied file image, verifies the recorded
+SHA-256 (when present), checks sector alignment and protective-MBR/GPT
+signatures, copies the image into a new output directory, and emits a stable
+`installer-manifest.json` plus `SHA256SUMS`. Metadata identifies QEMU and USB
+file-image use, while recording that ISO generation and physical-disk writes
+are not implemented.
+
+Focused host tests pass (3 tests). This is not Stage 28 acceptance: graphical
+installation, disk detection, partitioning, ISO generation, target-disk
+installation, rollback, and physical boot qualification remain open. No
+physical disk was accessed.
+
 ## Stage 27.5 bounded WovenRecovery environment foundation - 2026-10-22
 
 WovenRecovery now has a signed Ring-3 system application, a dedicated

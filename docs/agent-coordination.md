@@ -1,5 +1,15 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - Stage 28 bounded WovenInstaller file-artifact slice (2026-10-22)
+
+Added `scripts/package-installer.py` and focused host coverage in
+`tests/test_package_installer.py`. The packager consumes the existing
+release-validation manifest or an explicit file-backed UEFI image, verifies
+the digest and protective-MBR/GPT shape, copies to a new directory, and emits
+`installer-manifest.json` and `SHA256SUMS`. It performs no physical-disk I/O,
+partitioning, formatting, ISO generation, or installation. Three focused host
+tests pass. Do not edit this slice concurrently without recording ownership.
+
 ## Codex - bounded WovenRecovery environment foundation (2026-10-22)
 
 Added the signed `wovenhat-recovery` Ring-3 application, Recovery capability,

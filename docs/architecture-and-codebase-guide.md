@@ -1,5 +1,17 @@
 # WovenHat OS Architecture & Codebase Guide
 
+### Stage 28 - WovenInstaller bounded file-artifact boundary
+
+`scripts/package-installer.py` is the first installer-stage boundary. It
+consumes the existing `build.rs` UEFI disk image and its release-validation
+SHA-256 record, or an explicitly named file image, and writes only a new
+file-backed artifact directory. It validates sector alignment and the
+protective-MBR/GPT signatures before copying, then records the artifact,
+digest, media targets, and deliberately unimplemented ISO/physical-disk
+operations in `installer-manifest.json` and `SHA256SUMS`. It must not be
+extended to discover or write disks without a separate safety review and
+acceptance gate.
+
 ### Stage 27.5 - WovenRecovery bounded environment
 
 `kernel/src/recovery.rs` defines the fixed-size recovery ABI. Syscall 240 is
