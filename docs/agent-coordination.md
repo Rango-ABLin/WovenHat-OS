@@ -4702,3 +4702,10 @@ Claude-owned in-progress edits remain uncommitted in
 or modify them. The repository still needs the remaining Stage 31
 fault/recovery matrix, native hardware qualification, and later roadmap stages
 before any production-readiness claim.
+
+**Codex Stage 31 reliability slice (Codex, 2026-10-22):** Added the
+sequential repeated-boot evidence runner in
+`scripts/test-stage31-repeated-boots.py` plus focused Python tests. A two-boot
+1-CPU memory sample passed with per-run serial/QEMU evidence preserved under
+`audit-artifacts/stage31-repeated/`. This is harness infrastructure, not a
+claim that the thousands-boot, fault-injection, or recovery gates are closed.

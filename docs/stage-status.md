@@ -11,6 +11,20 @@ pass. The supported memory, storage, network, security, and shell suites now
 pass on 1/2/4/8/16 CPUs; the 16-CPU storage and shell runs need an extended
 host TCG wall-clock budget but complete successfully.
 
+## Stage 31 repeated-boot evidence harness - 2026-10-22
+
+Added `scripts/test-stage31-repeated-boots.py`, a sequential fail-closed
+wrapper for the existing memory, storage, network, security, and shell QEMU
+suites. It preserves each child command, combined output, exit/timeout result,
+and suite serial/QEMU evidence under a unique `run-NNNN` directory before
+stopping on the first failure. The fixed-port and shared-target harnesses are
+therefore never run concurrently.
+
+The initial two-boot memory sample passed on one CPU. This validates the
+runner and evidence contract only; Stage 31 still requires the planned
+large-count matrix, randomized fault injection, low-resource/loss scenarios,
+restart/crash recovery, and sudden-shutdown recovery.
+
 ## 4 GiB production memory floor and scalable memory telemetry - 2026-10-22
 
 Defined the supported production minimum as 4 GiB through

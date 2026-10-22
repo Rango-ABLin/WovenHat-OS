@@ -4084,6 +4084,13 @@ false host timeouts. Guest completion markers, SMP assertions, and exit status
 remain mandatory. Failure injection, low-resource recovery, restart, sudden
 shutdown, repeated-boot, and native hardware qualification are separate open
 acceptance requirements.
+
+`scripts/test-stage31-repeated-boots.py` is the repeatability boundary for
+those suites. It serializes child harnesses because they use fixed ports and
+shared target paths, snapshots each run before evaluating its exit status, and
+fails closed on a timeout or non-zero result. It has bounded `--count` and
+`--timeout` inputs, supports all five suites and 1/2/4/8/16 CPU profiles, and
+does not claim a repeated-boot pass until every requested iteration completes.
 ## Stage 29 hardware qualification report boundary
 
 `scripts/qualify-hardware-report.py` is the report-only boundary for the
