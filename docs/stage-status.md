@@ -1,5 +1,16 @@
 # Stage status
 
+## Stage 28 acceptance audit - 2026-10-22
+
+The installer feature and disposable transaction gates are green, but the
+current storage QEMU harness does not reach its normal acceptance marker: both
+the current tree and a clean pre-installer control worktree stop after
+`[S6.MEMORY] reclaimed overflow/double-free: PASSED` and exit 0. This is not
+an installer-specific regression, but it prevents a fresh 1/2/4-CPU QEMU
+acceptance claim until the shared QEMU/runtime failure is resolved. No native
+physical disk was accessed; the kernel RamDisk transaction remains the only
+destructive-install execution evidence.
+
 ## Stage 28 kernel-backed physical installation transaction - 2026-10-22
 
 The supervised installer service now reaches syscall 242, whose kernel

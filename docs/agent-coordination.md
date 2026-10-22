@@ -1,5 +1,15 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - Stage 28 acceptance audit control result (2026-10-22)
+
+The normal storage QEMU gate currently stops after
+`[S6.MEMORY] reclaimed overflow/double-free: PASSED`, exits 0, and emits no
+acceptance marker. Reproducing the same result in a clean worktree at the
+pre-installer control commit (`099780ca`) shows this is a shared QEMU/runtime
+failure rather than the installer transaction. The installer feature Clippy,
+RamDisk transaction, host tests, and disposable Stage 28 chain remain green;
+no native disk was accessed and no historical evidence was removed.
+
 ## Codex - Stage 28 kernel-backed physical installation transaction (2026-10-22)
 
 Completed the privileged installer path: syscall 242 now validates the
