@@ -1,5 +1,15 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - Stage 28 kernel FAT32 formatter primitive (2026-10-22)
+
+Added `kernel::fat32::format` for the existing FAT32 parser's supported
+geometry. It writes the boot sector, FSInfo and backup records, dual FATs,
+and an initialized root cluster, then remounts for verification. A sparse
+probe is included in the existing FAT32 self-test. Kernel/host warning-denying
+Clippy and the normal system-apps 1-CPU QEMU gate passed. Composition with the
+GPT writer, target selection, EFI payload, rollback, and service transaction
+remains open.
+
 ## Codex - Stage 28 kernel GPT layout writer (2026-10-22)
 
 Added `kernel::gpt::write_layout`, a bounded writer for protective MBR,

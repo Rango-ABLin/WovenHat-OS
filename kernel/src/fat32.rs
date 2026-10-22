@@ -167,6 +167,104 @@ pub struct CheckReport {
     pub fs_info_free_count: Option<u32>,
     pub fs_info_matches: bool,
 }
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct FormatGeometry {
+    sectors_per_cluster: u8,
+    fat_size: u32,
+    cluster_count: u32,
+}
+
+/// Format a writable partition as the bounded FAT32 variant understood by
+/// this kernel. The operation writes only filesystem metadata and the empty
+/// root cluster; callers own partition selection and any transaction/rollback
+/// policy around this primitive.
+pub fn format(device: &mut impl BlockDevice, label: &[u8; 11]) -> Result<Volume, Error> {
+    if device.is_read_only() {
+        return Err(Error::ReadOnly);
+    }
+    let total_sectors = u32::try_from(device.sector_count()).map_err(|_| Error::UnsupportedGeometry)?;
+    let geometry = format_geometry(total_sectors).ok_or(Error::UnsupportedGeometry)?;
+    let reserved = 32_u32;
+    let first_fat = u64::from(reserved);
+    let first_data = first_fat + 2 * u64::from(geometry.fat_size);
+    let root_lba = first_data;
+    let mut sector = [0_u8; SECTOR_SIZE];
+    sector[0..3].copy_from_slice(&[0xeb, 0x58, 0x90]);
+    sector[3..11].copy_from_slice(b"WOVENHAT");
+    sector[11..13].copy_from_slice(&(SECTOR_SIZE as u16).to_le_bytes());
+    sector[13] = geometry.sectors_per_cluster;
+    sector[14..16].copy_from_slice(&(reserved as u16).to_le_bytes());
+    sector[16] = 2;
+    sector[17..19].copy_from_slice(&0_u16.to_le_bytes());
+    sector[19..21].copy_from_slice(&0_u16.to_le_bytes());
+    sector[21] = 0xf8;
+    sector[22..24].copy_from_slice(&0_u16.to_le_bytes());
+    sector[24..26].copy_from_slice(&63_u16.to_le_bytes());
+    sector[26..28].copy_from_slice(&255_u16.to_le_bytes());
+    sector[28..32].copy_from_slice(&0_u32.to_le_bytes());
+    sector[32..36].copy_from_slice(&total_sectors.to_le_bytes());
+    sector[36..40].copy_from_slice(&geometry.fat_size.to_le_bytes());
+    sector[40..42].copy_from_slice(&0x0080_u16.to_le_bytes());
+    sector[42] = 0;
+    sector[44..48].copy_from_slice(&2_u32.to_le_bytes());
+    sector[48..50].copy_from_slice(&1_u16.to_le_bytes());
+    sector[50..52].copy_from_slice(&6_u16.to_le_bytes());
+    sector[64] = 0x80;
+    sector[66] = 0x29;
+    sector[67..71].copy_from_slice(&0x574f_5645_u32.to_le_bytes());
+    sector[71..82].copy_from_slice(label);
+    sector[82..90].copy_from_slice(b"FAT32   ");
+    sector[510..512].copy_from_slice(&[0x55, 0xaa]);
+    device.write_sector(0, &sector).map_err(Error::Block)?;
+
+    let mut fs_info = [0_u8; SECTOR_SIZE];
+    write_u32(&mut fs_info, 0, FSINFO_LEAD_SIGNATURE);
+    write_u32(&mut fs_info, 484, FSINFO_STRUCT_SIGNATURE);
+    write_u32(&mut fs_info, FSINFO_FREE_COUNT_OFFSET, geometry.cluster_count - 1);
+    write_u32(&mut fs_info, FSINFO_NEXT_FREE_OFFSET, 3);
+    write_u32(&mut fs_info, 508, FSINFO_TRAIL_SIGNATURE);
+    device.write_sector(1, &fs_info).map_err(Error::Block)?;
+    device.write_sector(6, &sector).map_err(Error::Block)?;
+    device.write_sector(7, &fs_info).map_err(Error::Block)?;
+
+    for fat in 0..2_u64 {
+        let fat_start = first_fat + fat * u64::from(geometry.fat_size);
+        sector.fill(0);
+        write_u32(&mut sector, 0, 0x0fff_fff8);
+        write_u32(&mut sector, 4, FAT32_END_MIN);
+        write_u32(&mut sector, 8, FAT32_END_MIN);
+        device.write_sector(fat_start, &sector).map_err(Error::Block)?;
+        sector.fill(0);
+        for offset in 1..geometry.fat_size {
+            device.write_sector(fat_start + u64::from(offset), &sector).map_err(Error::Block)?;
+        }
+    }
+    sector.fill(0);
+    for offset in 0..u64::from(geometry.sectors_per_cluster) {
+        device.write_sector(root_lba + offset, &sector).map_err(Error::Block)?;
+    }
+    device.flush().map_err(Error::Block)?;
+    mount(device)
+}
+
+fn format_geometry(total_sectors: u32) -> Option<FormatGeometry> {
+    for sectors_per_cluster in [1_u8, 2, 4, 8, 16, 32, 64, 128] {
+        let data_sectors = total_sectors.checked_sub(32)?;
+        let mut fat_size = 1_u32;
+        for _ in 0..4 {
+            let clusters = data_sectors.checked_sub(fat_size.checked_mul(2)?)?
+                / u32::from(sectors_per_cluster);
+            fat_size = clusters.checked_add(2)?.checked_mul(4)?.div_ceil(SECTOR_SIZE as u32);
+        }
+        let cluster_count = data_sectors.checked_sub(fat_size.checked_mul(2)?)?
+            / u32::from(sectors_per_cluster);
+        if (FAT32_MIN_CLUSTERS..=0x0fff_ffef).contains(&cluster_count) {
+            return Some(FormatGeometry { sectors_per_cluster, fat_size, cluster_count });
+        }
+    }
+    None
+}
 pub fn mount(device: &mut impl BlockDevice) -> Result<Volume, Error> {
     let mut sector = [0_u8; SECTOR_SIZE];
     device.read_sector(0, &mut sector).map_err(Error::Block)?;
@@ -3459,6 +3557,62 @@ pub fn self_test() -> bool {
         && overwrite_rollback_self_test()
         && directory_extension_rollback_self_test()
         && sector_write_fault_injection_self_test()
+        && format_self_test()
+}
+
+struct FormatProbeDisk {
+    boot: [u8; SECTOR_SIZE],
+    fs_info: [u8; SECTOR_SIZE],
+    backup_fs_info: [u8; SECTOR_SIZE],
+}
+
+impl FormatProbeDisk {
+    const TOTAL_SECTORS: u64 = 70_000;
+}
+
+impl BlockDevice for FormatProbeDisk {
+    fn sector_count(&self) -> u64 {
+        Self::TOTAL_SECTORS
+    }
+
+    fn read_sector(&mut self, lba: u64, sector: &mut [u8]) -> Result<(), BlockError> {
+        if sector.len() != SECTOR_SIZE || lba >= Self::TOTAL_SECTORS {
+            return Err(BlockError::OutOfBounds);
+        }
+        sector.fill(0);
+        match lba {
+            0 => sector.copy_from_slice(&self.boot),
+            1 => sector.copy_from_slice(&self.fs_info),
+            7 => sector.copy_from_slice(&self.backup_fs_info),
+            _ => {}
+        }
+        Ok(())
+    }
+
+    fn write_sector(&mut self, lba: u64, sector: &[u8]) -> Result<(), BlockError> {
+        if sector.len() != SECTOR_SIZE || lba >= Self::TOTAL_SECTORS {
+            return Err(BlockError::OutOfBounds);
+        }
+        match lba {
+            0 => self.boot.copy_from_slice(sector),
+            1 => self.fs_info.copy_from_slice(sector),
+            7 => self.backup_fs_info.copy_from_slice(sector),
+            _ => {}
+        }
+        Ok(())
+    }
+}
+
+fn format_self_test() -> bool {
+    let mut disk = FormatProbeDisk {
+        boot: [0; SECTOR_SIZE],
+        fs_info: [0; SECTOR_SIZE],
+        backup_fs_info: [0; SECTOR_SIZE],
+    };
+    let Ok(volume) = format(&mut disk, b"WOVENHAT   ") else {
+        return false;
+    };
+    mount(&mut disk) == Ok(volume)
 }
 
 fn range_self_test() -> bool {

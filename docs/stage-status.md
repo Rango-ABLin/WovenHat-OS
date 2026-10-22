@@ -1,5 +1,17 @@
 # Stage status
 
+## Stage 28 kernel FAT32 formatter primitive - 2026-10-22
+
+Added `kernel::fat32::format`, which computes bounded FAT32 geometry and
+writes a mount-valid boot sector, FSInfo and backup records, both FAT copies,
+and an empty root cluster. It refuses read-only devices and rejects volumes
+outside the parser's supported cluster range. A sparse formatter probe is now
+part of the existing FAT32 boot self-test; kernel/host warning-denying Clippy
+and the normal system-apps 1-CPU QEMU gate pass.
+
+The formatter is not yet composed with the GPT writer, EFI payload ingress,
+target-selection policy, or installer service transaction/rollback.
+
 ## Stage 28 kernel GPT layout writer - 2026-10-22
 
 Added the first reusable kernel-side installation primitive:
