@@ -1,5 +1,18 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - Stage 28 real UEFI artifact ingress (2026-10-22)
+
+Added `scripts/extract-uefi-boot-artifact.py` with bounded, read-only GPT and
+FAT16/FAT32 traversal for `EFI/BOOT/BOOTX64.EFI`. It rejects symlinks,
+protected/device-like paths, invalid FAT geometry, cluster loops, and oversized
+payloads. The current built UEFI image yielded the exact 171,520-byte
+artifact SHA-256
+`f6260b54b92a27b3b82aba4aaad8dc93aace0f5b1d526dfaad61b6b93ded3607`; the
+existing disposable transaction accepts that file through `--artifact`.
+This is artifact ingress and provenance, not physical installation. The
+service `Install` operation remains fail-closed until a reviewed kernel-backed
+GPT/FAT32/EFI transaction exists.
+
 ## Codex - Stage 28 supervised installer-service boundary (2026-10-22)
 
 The graphical installer now discovers `sys.storage.installer` and sends a
@@ -4502,4 +4515,29 @@ predate it: `tests/test_stage10_firmware_vars_master.py::test_code_readonly_and_
 fails on this Windows host over a literal `run\OVMF_VARS.fd` vs
 `run/OVMF_VARS.fd` path-separator mismatch in an OVMF pflash drive
 argument. Didn't touch it since it's outside today's claimed scope --
-flagging in case it's new to you too.
+flagging in case it's new to you too. (Fixed separately since, in
+`tests/test_stage10_firmware_vars_master.py` only -- see below.)
+
+**Fixed the OVMF test above (Claude, 2026-10-22):** Turned out to be the
+test hardcoding a forward-slash literal against `str(Path(...))`, which
+renders with backslashes on Windows; its sibling test for the same
+`firmware_drives()` pattern already avoided this by deriving the expected
+string from the same `Path` object. Applied the same fix. Full suite
+(131 tests) passes clean now.
+
+**Desktop visual feedback from the live USB on real hardware, picked up
+(Claude, 2026-10-22):** User reported the desktop reads as flat/unbranded
+on real hardware: no visible wallpaper, the "Woven" taskbar button is text
+only (no icon), general taskbar polish wanted. Checked the code first --
+there is a procedural wallpaper (vertical gradient + thin grid), it's just
+subtle; the icon gap was real (confirmed, text-only). Landed both: a
+basket-weave icon on the start button and a real basket-weave texture on
+the wallpaper (previously just a flat grid). Full writeup, verification,
+and the explicit 3D-default scoping (separately requested, found to be a
+much larger effort -- new 3D rendering needed for wallpaper/taskbar/every
+window/icons, plus re-deriving ~16 duplicated pixel-exact self-tests) are
+in `docs/stage-status.md`. Touched only `apps/woven-shell/src/main.rs` and
+the matching desktop self-test duplicates in `kernel/src/main.rs` (Stage
+20.1-20.18, 24.59) -- nothing in `hal/`, `power.rs`, or `apps/woven-installer`.
+Saw your installer-service/GUI commits land in the same window; no file
+overlap, checked before and after.

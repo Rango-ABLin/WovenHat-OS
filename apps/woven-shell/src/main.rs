@@ -149,9 +149,12 @@ libwoven::entry!(main);
 /// Wallpaper gradient, top to bottom.
 const WALLPAPER_TOP: u32 = rgb(18, 42, 74);
 const WALLPAPER_BOTTOM: u32 = rgb(64, 28, 88);
-/// The weave: a faint light grid every `WEAVE_PITCH` pixels.
+/// The weave: `WEAVE_PITCH`-sized blocks alternately tinted light and dark,
+/// basket-weave style, with a thin highlight seam at each block boundary.
 const WEAVE: u32 = rgb(255, 255, 255);
-const WEAVE_OPACITY: u8 = 28;
+const WEAVE_OPACITY: u8 = 36;
+const WEAVE_SHADE: u32 = rgb(0, 0, 0);
+const WEAVE_TINT_OPACITY: u8 = 18;
 const WEAVE_PITCH: i32 = 32;
 
 const TASKBAR_HEIGHT: i32 = 24;
@@ -163,6 +166,26 @@ const START_WIDTH: usize = 44;
 const START_HEIGHT: usize = 16;
 const START_FILL: u32 = rgb(52, 96, 180);
 const START_LABEL: &str = "Woven";
+/// The WovenStart icon: a basket-weave glyph, two shades suggesting strands
+/// crossing over and under. `A` is the strand that is on top, `D` the one
+/// beneath it; `.` is transparent (the button fill shows through).
+const START_ICON: [&[u8; 8]; 8] = [
+    b"AA..AA..",
+    b"AA..AA..",
+    b"..DD..DD",
+    b"..DD..DD",
+    b"AA..AA..",
+    b"AA..AA..",
+    b"..DD..DD",
+    b"..DD..DD",
+];
+const START_ICON_SIZE: i32 = 8;
+const START_ICON_A: u32 = rgb(235, 225, 190);
+const START_ICON_D: u32 = rgb(165, 125, 70);
+/// Left margin from the button's edge to the icon, chosen so it clears the
+/// background-fill sample point Stage 20.1's self-test reads at `(6, top+6)`.
+const START_ICON_MARGIN: i32 = 3;
+const START_ICON_GAP: i32 = 2;
 const TEXT: u32 = rgb(255, 255, 255);
 /// Clock text is right-aligned this far from the right edge.
 const CLOCK_MARGIN: i32 = 6;
@@ -372,15 +395,19 @@ fn log(parts: &[&[u8]]) {
 }
 
 /// Wallpaper colour at `(x, y)` on a screen `height` pixels tall: a vertical
-/// gradient with a faint grid woven over it.
+/// gradient with a basket-weave texture over it, alternating light and dark
+/// `WEAVE_PITCH`-sized blocks with a thin highlight seam between them.
 fn wallpaper(x: i32, y: i32, height: i32) -> u32 {
     let span = (height - 1).max(1);
     let t = (y.clamp(0, span) * 255 / span) as u8;
     let base = blend(WALLPAPER_BOTTOM, WALLPAPER_TOP, t);
+    let over = (x / WEAVE_PITCH + y / WEAVE_PITCH) % 2 == 0;
+    let tint = if over { WEAVE } else { WEAVE_SHADE };
+    let woven = blend(tint, base, WEAVE_TINT_OPACITY);
     if x % WEAVE_PITCH == 0 || y % WEAVE_PITCH == 0 {
-        blend(WEAVE, base, WEAVE_OPACITY)
+        blend(WEAVE, woven, WEAVE_OPACITY)
     } else {
-        base
+        woven
     }
 }
 
@@ -1378,7 +1405,19 @@ impl Desktop {
         canvas.fill_rect(0, top, width, 1, ACCENT);
 
         canvas.fill_rect(START_X, top + 4, START_WIDTH, START_HEIGHT, START_FILL);
-        let label_x = START_X + (START_WIDTH - font::text_width(START_LABEL)) as i32 / 2;
+        let icon_x = START_X + START_ICON_MARGIN;
+        let icon_y = top + 4 + (START_HEIGHT as i32 - START_ICON_SIZE) / 2;
+        for (row, line) in START_ICON.iter().enumerate() {
+            for (column, cell) in line.iter().enumerate() {
+                let color = match cell {
+                    b'A' => START_ICON_A,
+                    b'D' => START_ICON_D,
+                    _ => continue,
+                };
+                canvas.set(icon_x + column as i32, icon_y + row as i32, color);
+            }
+        }
+        let label_x = icon_x + START_ICON_SIZE + START_ICON_GAP;
         canvas.draw_text(label_x, self.text_y(), START_LABEL, TEXT);
 
         let focused = self.focused();

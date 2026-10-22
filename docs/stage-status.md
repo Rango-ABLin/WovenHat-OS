@@ -1,5 +1,56 @@
 # Stage status
 
+## Stage 28 real UEFI artifact ingress - 2026-10-22
+
+Added `scripts/extract-uefi-boot-artifact.py`, a read-only FAT16/FAT32 parser
+that locates the first GPT EFI System Partition and extracts the exact
+`EFI/BOOT/BOOTX64.EFI` bytes without mounting or opening a device. The built
+UEFI image was exercised through this boundary; it produced a 171,520-byte
+artifact with SHA-256
+`f6260b54b92a27b3b82aba4aaad8dc93aace0f5b1d526dfaad61b6b93ded3607`.
+The artifact can now be supplied explicitly to the disposable transaction's
+existing `--artifact` input, replacing its deterministic fixture for an
+artifact-backed test run. This improves artifact provenance only; it does not
+qualify physical installation, bootloader handoff on hardware, or release
+certification, and the supervised service still returns `Install` not-ready.
+
+## WovenShell desktop: start-button icon and basket-weave wallpaper - 2026-10-22
+
+Addressed real-hardware feedback that the desktop read as flat and
+unbranded: the taskbar's "Woven" launcher button previously had no icon at
+all (text only), and the wallpaper was a plain vertical gradient with a
+single faint grid line. The button now draws a small basket-weave glyph
+(two shades suggesting strands crossing over and under) to the left of its
+label, and the wallpaper gradient now carries an actual basket-weave
+texture: alternating light/dark `WEAVE_PITCH`-sized blocks with a thin
+highlight seam at each boundary, rather than a flat grid.
+
+Both changes are additive, 2D, and keep every existing color/geometry
+constant that other code depends on (`START_FILL`, `START_X`,
+`START_WIDTH`, `START_HEIGHT`, `WALLPAPER_TOP/BOTTOM`) unchanged; only what
+is drawn inside the button and the wallpaper's per-pixel formula changed.
+The kernel independently re-derives both for every desktop self-test
+(`wallpaper()` is duplicated once per stage, by this codebase's existing
+convention, so each self-test catches real regressions rather than trusting
+shared code) -- all 16 duplicates across Stage 20.1-20.18 and Stage 24.59
+were updated in lockstep, plus the one self-test that checks the start
+button pixel-exact (Stage 20.1) now also re-derives the icon.
+
+Verified: `python scripts/lint-all-features.py --only stage20` and
+`--only stage24-59` both report every affected feature `ok`/`needs-image`
+(no FAIL) under warning-denying Clippy, `host --all-targets` passes, and
+QEMU self-tests for Stage 20.1 (1/2/4 CPUs, the one exercising both
+changes), Stage 20.13, Stage 20.17 (3D Quick Settings, which also renders
+the new wallpaper), and Stage 24.59 (1 CPU) all pass.
+
+This is still a software-rendered 2D desktop; 3D rendering remains limited
+to the Quick Settings panel and window title bars, off by default. Making
+3D the actual default desktop look is a separate, much larger follow-on
+effort: it needs new 3D rendering for the wallpaper, taskbar, every window
+beyond its title bar, and icons (none of which has any 3D path today), plus
+re-deriving every one of the pixel-exact self-tests above for a 3D-default
+initial state. Scoped but not started.
+
 ## Stage 28 supervised installer-service boundary - 2026-10-22
 
 The GUI now performs a bounded IPC inventory request against the supervised
