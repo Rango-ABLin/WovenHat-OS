@@ -9,6 +9,11 @@ the envelope, and emits:
 - `catalog/<id>.app`, the bounded WovenStart `Name=`/`Exec=` descriptor; and
 - `manifest.json`, containing install paths, byte counts, and SHA-256 hashes.
 
+The Stage 28 `woven-installer` entry is published at the stable
+`/bin/wovenhat-installer` path with `capabilities: []`, `privileged: false`,
+and `interface: display-only`. It is presentation-only and receives no
+installation authority.
+
 Run it from the repository root:
 
 ```text

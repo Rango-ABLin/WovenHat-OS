@@ -169,6 +169,8 @@ mod tpm2;
 mod update;
 #[cfg(any(feature = "stage27-5-test", feature = "system-apps"))]
 mod update_service;
+#[cfg(any(feature = "stage27-5-recovery-test", feature = "system-apps"))]
+mod recovery;
 #[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
 mod usb_msc;
 mod user_address;
@@ -2974,6 +2976,7 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         not(feature = "stage22-2-test"),
         not(feature = "stage22-3-test"),
         not(feature = "stage22-5-test"),
+        not(feature = "stage27-5-recovery-test"),
         not(feature = "stage24-3-test")
     ))]
     match storage::live_mutation_self_test() {
@@ -4956,6 +4959,15 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         serial::write_line(format_args!("[S27.5] update service: PASSED"));
         qemu_test_exit_success();
     }
+    #[cfg(feature = "stage27-5-recovery-test")]
+    {
+        if !stage27_5_recovery_self_test(RECOVERY_APP_IMAGE) {
+            serial::write_line(format_args!("[S27.5] recovery environment: FAILED"));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!("[S27.5] recovery environment: PASSED"));
+        qemu_test_exit_success();
+    }
     #[cfg(feature = "stage15-1-test")]
     {
         if !wfs::stage15_1_self_test() {
@@ -5822,6 +5834,69 @@ fn run_compiler_loader_gate() {
     serial::write_line(format_args!("[S11.COMPILER] signed toolchain PIE: PASSED"));
 }
 
+#[cfg(feature = "stage27-5-recovery-test")]
+fn stage27_5_recovery_self_test(image: &[u8]) -> bool {
+    use capability::{Capability, CapabilitySet};
+
+    fn run(image: &[u8], command: &str, capabilities: CapabilitySet) -> Option<i32> {
+        let Some(program) = userspace::load_elf_with_argv_verified_at_bias(
+            image,
+            &["/bin/wovenhat-recovery", command],
+            0x0000_4000_0000_0000,
+        ) else {
+            serial::write_line(format_args!("[S27.5] recovery {} load failed", command));
+            return None;
+        };
+        let Ok((pid, _, _)) = task::spawn_user_system_service("woven-recovery", program, capabilities)
+        else {
+            serial::write_line(format_args!("[S27.5] recovery {} spawn failed", command));
+            return None;
+        };
+        loop {
+            match task::wait_process(pid.as_u64()) {
+                Ok(status) => return Some(status),
+                Err(task::WaitError::StillRunning) => task::yield_now(),
+                Err(task::WaitError::NoSuchChild) => return None,
+            }
+        }
+    }
+
+    let capabilities = CapabilitySet::only(Capability::Recovery)
+        .with(Capability::Console)
+        .with(Capability::FileRead);
+
+    recovery::set_test_boot_mode(false);
+    let unauthorized_reset = run(image, "reset", capabilities);
+    serial::write_line(format_args!(
+        "[S27.5] recovery reset unauthorized status={}",
+        unauthorized_reset.unwrap_or(-1)
+    ));
+    if unauthorized_reset != Some(3) {
+        return false;
+    }
+    recovery::set_test_boot_mode(true);
+    let status = run(image, "status", capabilities);
+    serial::write_line(format_args!("[S27.5] recovery status command={}", status.unwrap_or(-1)));
+    let logs = run(image, "logs", capabilities);
+    serial::write_line(format_args!("[S27.5] recovery logs command={}", logs.unwrap_or(-1)));
+    let reset = run(image, "reset", capabilities);
+    serial::write_line(format_args!("[S27.5] recovery reset command={}", reset.unwrap_or(-1)));
+    let reinstall = run(image, "reinstall", capabilities);
+    serial::write_line(format_args!(
+        "[S27.5] recovery reinstall command={}",
+        reinstall.unwrap_or(-1)
+    ));
+    if status != Some(0) || logs != Some(0) || reset != Some(4) || reinstall != Some(4) {
+        return false;
+    }
+    // QEMU's recovery fixture may not have a mounted FAT32 primary volume;
+    // either a real check or an explicit unavailable result is acceptable,
+    // but a fabricated success is not.
+    let check = run(image, "check", capabilities);
+    serial::write_line(format_args!("[S27.5] recovery check command={}", check.unwrap_or(-1)));
+    matches!(check, Some(0) | Some(4))
+}
+
 #[cfg(feature = "qemu-test")]
 fn qemu_test_exit_success() {
     unsafe {
@@ -5922,8 +5997,15 @@ const SYSTEM_APP_IMAGES: &[u8] = include_bytes!(env!("WOVENHAT_IMAGES_IMAGE"));
     feature = "system-apps"
 ))]
 const SYSTEM_APP_UPDATE: &[u8] = include_bytes!(env!("WOVENHAT_UPDATE_IMAGE"));
+// Only the Stage 27.5 recovery gate embeds this image. Production
+// `system-apps` builds do not use it, and their harnesses do not set
+// WOVENHAT_RECOVERY_IMAGE, so it must not be required there.
+#[cfg(feature = "stage27-5-recovery-test")]
+const RECOVERY_APP_IMAGE: &[u8] = include_bytes!(env!("WOVENHAT_RECOVERY_IMAGE"));
 #[cfg(any(feature = "stage19-app-catalog-test", feature = "system-apps"))]
 const SYSTEM_APP_STORE: &[u8] = include_bytes!(env!("WOVENHAT_STORE_IMAGE"));
+#[cfg(any(feature = "stage19-app-catalog-test", feature = "system-apps"))]
+const SYSTEM_APP_INSTALLER: &[u8] = include_bytes!(env!("WOVENHAT_INSTALLER_IMAGE"));
 
 #[cfg(any(
     all(feature = "stage22-3-test", not(feature = "stage27-5-test")),
@@ -7031,6 +7113,13 @@ fn install_production_system_apps() -> bool {
             catalog_path: "/share/applications/woven-store.app",
             catalog: b"Name=WovenStore\nExec=/bin/wovenhat-store --gui %p\n",
         },
+        App {
+            name: "woven-installer",
+            image: SYSTEM_APP_INSTALLER,
+            binary_path: "/bin/wovenhat-installer",
+            catalog_path: "/share/applications/woven-installer.app",
+            catalog: b"Name=WovenInstaller\nExec=/bin/wovenhat-installer\n",
+        },
     ];
     // Verify and parse all packages before changing the VFS. A malformed or
     // untrusted package therefore cannot leave a partially published catalog.
@@ -7329,6 +7418,13 @@ fn stage19_app_catalog_self_test() -> bool {
             catalog_path: "/share/applications/woven-store.app",
             catalog: b"Name=WovenStore\nExec=/bin/wovenhat-store\n",
         },
+        App {
+            name: "woven-installer",
+            image: SYSTEM_APP_INSTALLER,
+            binary_path: "/bin/wovenhat-installer",
+            catalog_path: "/share/applications/woven-installer.app",
+            catalog: b"Name=WovenInstaller\nExec=/bin/wovenhat-installer\n",
+        },
     ];
     fn step(name: &str, ok: bool) -> bool {
         serial::write_line(format_args!(
@@ -7394,7 +7490,7 @@ fn stage19_app_catalog_self_test() -> bool {
             return false;
         }
     }
-    step("ten signed applications installed", true)
+    step("eleven signed applications installed", true)
 }
 
 /// Stage 16.1 acceptance: an application built outside the kernel is installed
@@ -8935,7 +9031,16 @@ fn stage20_12_self_test() -> bool {
     ) {
         return false;
     }
+    // WovenShell hashes the PIN (100,000-iteration PBKDF2) in Ring-3 before
+    // the kernel verifies it, which takes 300-450 ticks under QEMU TCG and
+    // longer on a loaded CI runner. Wait for the kernel to record the
+    // attempt's outcome, then give the screen its usual bound to show it.
+    // PIN_CHECK_TICKS is only a liveness cap; the event gates progress.
+    const PIN_CHECK_TICKS: u64 = 6000;
+    let failures = || identity_runtime::failure_count(b"lin");
+    let before = failures();
     let refused = keys(&[0x02, 0x03, 0x04, 0x05, 0x1c])
+        && until(PIN_CHECK_TICKS, || failures() > before)
         && until(500, || sign_in("  ada", "> lin", "Wrong PIN"));
     if !step("ada's PIN is refused for lin", refused) {
         return false;
@@ -8962,7 +9067,10 @@ fn stage20_12_self_test() -> bool {
             })
         })
     };
-    let signed_in = keys(&[0x0a, 0x09, 0x08, 0x07, 0x1c]) && until(1000, name_shown);
+    // A successful verification clears lin's recorded failures.
+    let signed_in = keys(&[0x0a, 0x09, 0x08, 0x07, 0x1c])
+        && until(PIN_CHECK_TICKS, || failures() == 0)
+        && until(1000, name_shown);
     if !step(
         "lin's PIN signs in; lin's name is on the taskbar",
         signed_in,
@@ -8989,8 +9097,10 @@ fn stage20_12_self_test() -> bool {
         });
     let lock_checks = locked
         && keys(&[0x02, 0x03, 0x04, 0x05, 0x1c])
+        && until(PIN_CHECK_TICKS, || failures() > 0)
         && until(500, || line(middle - 4, "Wrong PIN"))
         && keys(&[0x0a, 0x09, 0x08, 0x07, 0x1c])
+        && until(PIN_CHECK_TICKS, || failures() == 0)
         && until(1000, name_shown);
     if !step(
         "the lock screen refuses ada's PIN and takes lin's",

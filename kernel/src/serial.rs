@@ -36,7 +36,12 @@ fn record(byte: u8) {
 }
 
 /// Bytes logged since boot.
-#[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
+#[cfg(any(
+    not(feature = "qemu-test"),
+    feature = "stage13-12-test",
+    feature = "stage27-5-recovery-test",
+    feature = "system-apps"
+))]
 pub fn log_position() -> usize {
     LOG_HEAD.load(Ordering::Acquire)
 }
@@ -45,7 +50,12 @@ pub fn log_position() -> usize {
 /// position actually copied from (later than `from` when older bytes have
 /// been overwritten) and the number of bytes copied. A byte being written
 /// concurrently may read as its predecessor; readers re-read the tail.
-#[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
+#[cfg(any(
+    not(feature = "qemu-test"),
+    feature = "stage13-12-test",
+    feature = "stage27-5-recovery-test",
+    feature = "system-apps"
+))]
 pub fn read_log(from: usize, out: &mut [u8]) -> (usize, usize) {
     let head = LOG_HEAD.load(Ordering::Acquire);
     let start = from.max(head.saturating_sub(LOG_BYTES)).min(head);
@@ -56,23 +66,83 @@ pub fn read_log(from: usize, out: &mut [u8]) -> (usize, usize) {
     (start, count)
 }
 
+/// CPU (index + 1) currently writing a log record; 0 when free.
+///
+/// Every public writer holds this for its whole record, so a task preempted
+/// mid-line, or another CPU logging at the same time, cannot splice its bytes
+/// into the middle of someone else's line. Gates parse marker lines from the
+/// serial log, and a spliced line reads as a missing marker.
+///
+/// This is deliberately not a ranked kernel mutex: the kernel logs while
+/// holding many other locks, from any context, and the log must never be the
+/// reason the kernel stops. So the lock is held with interrupts disabled (no
+/// same-CPU IRQ can contend), a writer re-entering on the CPU that already
+/// holds it (an exception or panic mid-line) proceeds without waiting, and a
+/// writer that cannot get it within [`LINE_LOCK_SPIN_LIMIT`] writes anyway.
+static LINE_OWNER: AtomicUsize = AtomicUsize::new(0);
+/// Last byte sent to the port (a newline before any). A kernel line that would
+/// otherwise continue a userspace write left without its newline (a shell
+/// prompt, say) starts on a fresh line instead, so marker lines always begin
+/// at column 0.
+static LAST_BYTE: AtomicU8 = AtomicU8::new(b'\n');
+/// Bounded wait for [`LINE_OWNER`]: far longer than any one record takes to
+/// transmit, short enough that a wedged holder cannot hang the kernel.
+const LINE_LOCK_SPIN_LIMIT: u32 = 1 << 24;
+
+fn with_line_lock(write: impl FnOnce()) {
+    x86_64::instructions::interrupts::without_interrupts(|| {
+        let me = crate::smp::lock_cpu_index() + 1;
+        if LINE_OWNER.load(Ordering::Acquire) == me {
+            write();
+            return;
+        }
+        let mut spins = 0u32;
+        let acquired = loop {
+            if LINE_OWNER
+                .compare_exchange_weak(0, me, Ordering::Acquire, Ordering::Relaxed)
+                .is_ok()
+            {
+                break true;
+            }
+            spins += 1;
+            if spins == LINE_LOCK_SPIN_LIMIT {
+                break false;
+            }
+            core::hint::spin_loop();
+        };
+        write();
+        if acquired {
+            LINE_OWNER.store(0, Ordering::Release);
+        }
+    });
+}
+
 pub fn write_fmt(arguments: fmt::Arguments<'_>) {
-    let _ = SerialPort.write_fmt(arguments);
+    with_line_lock(|| {
+        let _ = SerialPort.write_fmt(arguments);
+    });
 }
 
 pub fn write_line(arguments: fmt::Arguments<'_>) {
-    let _ = SerialPort.write_fmt(arguments);
-    let _ = SerialPort.write_str("\n");
+    with_line_lock(|| {
+        if LAST_BYTE.load(Ordering::Relaxed) != b'\n' {
+            let _ = SerialPort.write_str("\n");
+        }
+        let _ = SerialPort.write_fmt(arguments);
+        let _ = SerialPort.write_str("\n");
+    });
 }
 
 pub fn write_bytes(bytes: &[u8]) {
-    let mut port = SerialPort;
-    for &byte in bytes {
-        if byte == b'\n' {
-            port.write_byte(b'\r');
+    with_line_lock(|| {
+        let mut port = SerialPort;
+        for &byte in bytes {
+            if byte == b'\n' {
+                port.write_byte(b'\r');
+            }
+            port.write_byte(byte);
         }
-        port.write_byte(byte);
-    }
+    });
 }
 struct SerialPort;
 
@@ -95,6 +165,7 @@ impl SerialPort {
         // The line ending's carriage return is for terminals, not the log.
         if byte != b'\r' {
             record(byte);
+            LAST_BYTE.store(byte, Ordering::Relaxed);
         }
         let mut polls = 0u16;
         while unsafe { inb(COM1 + 5) } & LINE_STATUS_TRANSMITTER_EMPTY == 0 {

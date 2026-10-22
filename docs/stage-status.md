@@ -1,5 +1,280 @@
 # Stage status
 
+## Stage 28 ISO9660/El Torito UEFI artifact and QEMU gate - 2026-10-22
+
+Added `scripts/build-uefi-iso.py`, which extracts the verified EFI System
+Partition from a regular GPT WovenHat image and builds a transactional
+ISO9660/El Torito image with an EFI-platform boot catalog. FAT16 and FAT32
+ESPs are accepted because the current bootloader image is FAT16. Device-like,
+protected, symlink, and physical-media paths are refused. Added
+`scripts/test-uefi-iso-qemu.py` to boot the exact ISO with caller-supplied OVMF,
+preserve serial output, and distinguish firmware/kernel handoff from later
+self-test failures.
+
+The generated ISO booted in QEMU using the installed OVMF firmware and reached
+`UEFI bootloader started`, `TRACE: exiting boot services`, and kernel output.
+The selected existing debug image then reported an app-catalog self-test
+failure, so this is not a full release gate. No physical disks were accessed.
+The catalog harness now supports `--image-path-output`, making the exact image
+used by its validated QEMU run available to downstream ISO generation instead
+of relying on target-directory timestamp selection.
+
+The exact-path flow was rerun successfully: Stage 19 catalog QEMU passed with
+all eleven signed applications, the emitted image was converted to an ISO, and
+that exact ISO reached the same eleven-application PASS marker in OVMF/QEMU.
+When the source ESP exceeds El Torito's 65536-sector field, the builder only
+accepts an all-zero discarded tail and rewrites the bounded FAT total-sector
+field; non-zero truncation is refused.
+
+## Stage 24.59 disk-pressure gap closed (Claude, 2026-10-22)
+
+`stage24-59-test`'s full `system-apps` package build, previously flagged in
+this file and in `docs/agent-coordination.md` as structurally disk-tight,
+now passes cleanly on 1, 2, and 4 CPUs with fresh evidence
+(`target/woven-shell-change-pin-{1,2,4}cpu`). Two independent things closed
+it: Codex's `system-apps` feature addition to `serial::log_position`/
+`read_log`'s cfg gate (commit `a3617063`, fixing the same cfg-gate-cascade
+bug class seen earlier at Stage 20.12) and Codex's WovenInstaller
+integration (`b882f09a`/`73c2d34f`), which brought the full 11-app
+packaging run to a state that builds and boots within this machine's disk
+budget. No code change was needed on this side; this entry just closes the
+previously-recorded gap now that it has reproduced clean three times in a
+row.
+
+## Stage 28 disposable-image end-to-end acceptance harness - 2026-10-22
+
+Added `scripts/test-stage28-disposable-acceptance.py` and focused coverage in
+`tests/test_stage28_disposable_acceptance.py`. The harness creates a new
+temporary regular file, validates a canonical plan, exercises the existing
+file-backed executor including success and both injected rollback paths, then
+assembles and verifies the final disposable GPT-like image, FAT32-compatible
+data region, EFI artifact, and deterministic acceptance-manifest digests.
+It never accesses physical/device paths or mounts anything. The executor is
+kept on a separate disposable copy because its established whole-file mock
+filesystem replacement is not a partition-preserving installation operation.
+
+This is not physical installation, bootability qualification, hardware
+qualification, ISO generation, or release certification.
+
+## Stage 28 WovenInstaller production system-app integration - 2026-10-22
+
+The signed `woven-installer.wapp` is embedded in the kernel's production
+`system-apps` and Stage 19 catalog-test images through
+`WOVENHAT_INSTALLER_IMAGE`. Production catalog publication adds the read-only
+`/bin/wovenhat-installer` entry and
+`/share/applications/woven-installer.app`; the installer remains a display-only
+Ring-3 application with no capabilities or privileged authority. Existing ten
+entries and their paths are preserved. All system-app QEMU launchers and the
+release validation environment now provide the eleventh image.
+
+Focused packaging tests, Python compilation, catalog-image build, and
+warning-denying production `system-apps` kernel Clippy pass. The Stage 19
+catalog QEMU gate passes on 1/2/4 CPUs with the eleven-app marker; evidence is
+under `audit-artifacts/system-app-catalog-{1,2,4}cpu`. This slice performs no
+physical-disk access.
+
+## Stage 28 WovenInstaller package/catalog wiring - 2026-10-22
+
+The existing signed system-app packaging path now builds and signs
+`apps/woven-installer`, publishes it as `packages/woven-installer.wapp`, and
+adds the stable `/bin/wovenhat-installer` install path and catalog entry to
+the manifest. The entry is explicitly non-privileged with an empty
+capability set and `display-only` interface metadata. Fail-closed metadata
+validation rejects install, disk, partition, format, and bootloader
+capabilities; the ten existing app entries are unchanged.
+
+Focused packaging tests, Python compilation, freestanding release build, and
+warning-denying freestanding Clippy pass. Kernel integration is recorded in
+the production system-app integration entry above.
+
+## Stage 28 bounded WovenInstaller Ring-3 application shell - 2026-10-22
+
+Added the disjoint `apps/woven-installer` no-std Ring-3 shell. It consumes a
+compact snapshot of the validated installer UI/state model and renders bounded
+welcome, target, partition-review, settings, progress, cancelling, cancelled,
+failure, and success screens through the deterministic textual fallback.
+Unknown fields, duplicate keys, control characters, invalid progress, missing
+prerequisites, and snapshots without `validated=1` fail closed. Progress and
+success are presentation states only; the output always identifies the install
+action as unavailable, and the app has no disk, partition, filesystem,
+bootloader, network, or subprocess path.
+
+The three host parser tests, freestanding `x86_64-unknown-none` release build,
+freestanding warning-denying Clippy, formatting check, and diff check pass.
+No QEMU gate is claimed: the app is not embedded into the kernel by this
+disjoint-only slice, so booting it in QEMU would not test the new behavior.
+Physical installation and release certification remain open.
+
+## Stage 28 disposable UEFI boot artifact preparation and verifier - 2026-10-22
+
+Added `scripts/prepare-uefi-boot-artifact.py` with focused coverage in
+`tests/test_uefi_boot_artifact.py`. It consumes the prior disposable layout,
+locates its single ESP, and writes a bounded, checksummed envelope containing
+the exact `EFI/BOOT/BOOTX64.EFI` path and artifact bytes. It accepts either an
+explicit regular artifact file or a deterministic fixture. Writes are limited
+to the ESP and transactional rollback restores the complete ESP after injected
+failures.
+
+The envelope is a test-only file-image record, not a mounted FAT directory.
+Physical/device paths, symlinks, mounts, firmware flashing, bootloader
+installation, and hardware access fail closed. Artifact size is bounded to
+4 MiB. Verification reports `bootability: not-qualified`; no kernel
+bootability or QEMU boot acceptance is claimed. The Stage 28 focused chain,
+Python compilation, and diff checks pass.
+
+## Stage 28 disposable file-image filesystem formatter/verifier - 2026-10-22
+
+Added `scripts/format-file-image-fs.py` with focused coverage in
+`tests/test_file_image_filesystem.py`. The formatter consumes the prior
+layout builder's checksummed metadata and writes only its single data region.
+It emits deterministic FAT32-compatible metadata: BPB, backup boot sector,
+FSInfo and backup FSInfo, two matching FATs, reserved entries, root-cluster
+entry, and the fixed `WOVENHAT` label. Verification checks sector geometry,
+region bounds, FAT bounds/copies, auxiliary-sector pointers, signatures,
+determinism, and identity metadata.
+
+The operation is transactional for the disposable image: before/after-write
+and after-verification injected failures restore the original data region
+byte-for-byte. Symlinks, device/protected identities, missing authorization,
+multiple data regions, real mounts, and physical installation fail closed.
+The 34-test Stage 28 focused chain, Python compilation, and diff checks pass.
+This is not physical installation, bootloader formatting, hardware
+qualification, or release certification.
+
+## Stage 28 disposable file-image layout builder and verifier - 2026-10-22
+
+Added `scripts/build-file-image-layout.py` and focused coverage in
+`tests/test_file_image_layout.py`. The builder requires an existing regular
+non-symlink file and an explicit test-harness authorization, then writes a
+deterministic GPT-like image containing a protective MBR, primary/backup GPT
+headers and entries, an aligned ESP region, aligned plan data regions, and
+checksummed metadata. Verification checks signatures, metadata integrity,
+capacity, alignment, bounds, and overlap.
+
+Physical/device/protected paths, symlinks, missing files, and unauthorized
+images fail closed. This is disposable-image preparation only: it does not
+partition real media, mount or format filesystems, write bootloaders, access
+hardware, or claim production installation support.
+
+## Stage 28 bounded installer UI/state model - 2026-10-22
+
+Added `scripts/installer-ui-model.py`, a pure immutable state-transition model
+for the welcome, target-selection, partition-plan review, user/timezone/
+keyboard/network settings, progress, cancellation, success, and failure
+screens. It accepts only bounded caller-provided summaries: ordinary text is
+limited to 128 characters, error messages to 256, progress messages to 128,
+and progress is an integer in the inclusive range 0..100.
+
+The model requires a safe, unambiguous target summary, enforces the ordered
+screen flow, requires `confirm_install` with `confirmed: true` before any
+progress or success event, and rejects backward progress. Cancellation must
+complete through a separate cancellation state; cancelled and failure states
+are terminal and reject all further events. The model performs no disk or
+filesystem I/O and invokes no partition, format, bootloader, subprocess, or
+graphical UI operation.
+
+Focused host tests and Python compilation/diff checks pass. This is only a UI
+state model: no graphical installer, real installation executor, target-disk
+access, partitioning, formatting, bootloader installation, rollback, or ISO
+support is claimed.
+
+## Stage 28 disposable file-backed installation executor - 2026-10-22
+
+Added `scripts/execute-file-install.py` as a test-only transaction boundary.
+It requires a validated installer plan and an explicitly supplied regular
+non-symlink image, binds the plan identity to the image's pre-install digest,
+rejects device/protected identities, and atomically replaces the image with a
+bounded deterministic mock filesystem payload. Injected failures and payload
+verification failures restore the original image.
+
+Focused tests cover success, deterministic digest verification, symlink and
+protected-identity refusal, digest mismatch, and rollback before/after atomic
+replacement. This is not real installation: no physical device, mount,
+format, partition, bootloader, or bootable image operation is implemented.
+
+## Stage 28 immutable installer-plan validator - 2026-10-22
+
+Added `scripts/validate-installer-plan.py` as a dry-run, file-free planning
+boundary. It accepts an explicit target path/serial identity, a supplied disk
+inventory snapshot, bounded sector-aligned partition sizes, filesystem choice,
+and normalized user/timezone/keyboard/network settings. It rejects protected
+or ambiguous targets, overflow, insufficient capacity, and invalid fields,
+then emits deterministic canonical JSON with explicit no-I/O and
+not-implemented operation markers.
+
+The validator and its focused tests never open a device, invoke discovery,
+partition, format, install, or write a bootloader. This slice does not claim
+installation support or Stage 28 acceptance.
+
+## Stage 28 read-only target-disk inventory and safety classification - 2026-10-22
+
+Added `scripts/inventory-target-disks.py` with fixture-driven parsing for
+normalized records, PowerShell `Get-Disk` JSON, and Linux `lsblk -J` JSON.
+The report can identify a uniquely marked Windows system/boot disk and marks
+removable, USB, external, and backup-labelled disks as protected candidates.
+It fails closed on missing or duplicate serials, invalid capacity, missing
+path/number, or ambiguous system-disk identity. The parser and CLI only read
+caller-supplied files; they do not execute discovery commands or touch devices.
+
+Five focused tests and Python compilation checks pass. This remains an
+inventory/classification boundary only: no target selection, partitioning,
+formatting, installation, ISO generation, or hardware qualification is
+claimed.
+
+## Stage 28 ISO capability probe - 2026-10-22
+
+Added `scripts/probe-installer-iso.py` with focused host coverage in
+`tests/test_installer_iso_probe.py`. The probe is file-only and fail-closed: it
+checks the GPT UEFI image shape, searches for an ISO builder, verifies a
+file-backed `EFI/BOOT/BOOTX64.EFI` tree when supplied, and emits no artifact.
+It never mounts a filesystem, accesses a physical disk, or claims ISO support.
+
+The current machine is blocked because no `xorriso`, `mkisofs`, `genisoimage`,
+or `oscdimg` executable is available; the existing build pipeline emits a GPT
+UEFI disk image rather than an ISO-native El Torito layout; and no extracted
+EFI boot tree was available for verification. The probe's qualification rule
+requires generating an artifact and booting that exact artifact in QEMU before
+ISO support can be claimed. Three probe tests, the unchanged three installer
+tests, and Python compilation checks pass. No ISO was generated and no QEMU ISO
+gate was run.
+
+## Stage 28 WovenInstaller bounded file-artifact slice - 2026-10-22
+
+Added `scripts/package-installer.py` as a non-destructive boundary around the
+existing `build.rs` UEFI disk-image output. It consumes the release-validation
+image record or an explicitly supplied file image, verifies the recorded
+SHA-256 (when present), checks sector alignment and protective-MBR/GPT
+signatures, copies the image into a new output directory, and emits a stable
+`installer-manifest.json` plus `SHA256SUMS`. Metadata identifies QEMU and USB
+file-image use, while recording that ISO generation and physical-disk writes
+are not implemented.
+
+Focused host tests pass (3 tests). This is not Stage 28 acceptance: graphical
+installation, disk detection, partitioning, ISO generation, target-disk
+installation, rollback, and physical boot qualification remain open. No
+physical disk was accessed.
+
+## Stage 27.5 bounded WovenRecovery environment foundation - 2026-10-22
+
+WovenRecovery now has a signed Ring-3 system application, a dedicated
+capability, and a boot-mode authorization gate. Its fixed ABI exposes bounded
+status, filesystem-check, and serial-log reads. Reset and reinstall are
+fail-closed admission checks only: they return an explicit not-implemented
+result and do not mutate storage. The QEMU acceptance exercises unauthorized
+reset, authorized status/log access, both admission paths, and the check
+unavailable path without claiming destructive recovery is complete.
+
+The 1/2/4-CPU QEMU gates pass with exit 33. Recovery app Clippy, kernel
+feature Clippy, workspace all-target warning-denying Clippy, and 115 libwoven
+host tests pass. Evidence is retained in
+`audit-artifacts/stage27.5-recovery-{1,2,4}cpu` and documented in
+`docs/audit-stage27-5-recovery-environment-2026-10-22.md`.
+
+This closes only the bounded recovery-environment foundation. Destructive
+reset/reinstall execution, production update-slot sizing, bootloader handoff,
+power-loss recovery, installer integration, and physical qualification remain
+open before release certification.
+
 ## Stage 27.5 end-to-end WovenUpdate IPC acceptance - 2026-10-22
 
 The Stage 27.5 QEMU gate now builds the signed `woven-update` Ring-3 image,

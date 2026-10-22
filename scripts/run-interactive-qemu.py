@@ -30,7 +30,7 @@ def main():
     parser.add_argument('--cpus', type=int, choices=(1, 2, 4), default=2)
     parser.add_argument('--mem', default='512M')
     parser.add_argument('--mode', choices=('hardware-demo', 'system-apps', 'plain'), default='hardware-demo',
-                         help='hardware-demo (default): full desktop + demo sign-in (ada/1234, lin/9876) + 10 apps; '
+                         help='hardware-demo (default): full desktop + demo sign-in (ada/1234, lin/9876) + all signed system apps; '
                               'system-apps: production app catalog, no demo accounts; plain: base kernel only')
     parser.add_argument('--disk', type=Path, help='persistent FAT32 data disk (default: wovenhat-disk.img at repo root)')
     args = parser.parse_args()
@@ -75,6 +75,7 @@ def main():
         build_env['WOVENHAT_IMAGES_IMAGE'] = str(packages['woven-images'])
         build_env['WOVENHAT_UPDATE_IMAGE'] = str(packages['woven-update'])
         build_env['WOVENHAT_STORE_IMAGE'] = str(packages['woven-store'])
+        build_env['WOVENHAT_INSTALLER_IMAGE'] = str(packages['woven-installer'])
         build_env.setdefault('WOVENHAT_APP_TRUSTED_PUBLIC_KEY_HEX', test_public_key)
         build_env['WOVENHAT_SHELL_IMAGE'] = str(build_woven_shell(root))
         feature_arguments = ['--features', args.mode]

@@ -20,8 +20,18 @@ def build_woven_shell(root):
     subprocess.run(['cargo', 'build', '--release'], cwd=app_dir, env=env, check=True)
     return app_dir / 'target' / 'x86_64-unknown-none' / 'release' / 'wovenhat-woven-shell'
 
-def normal_boot_serial_errors(log: str, system_apps: bool) -> list[str]:
-    """Reject fatal evidence even when all positive boot markers appeared."""
+def apps_installed_marker(app_count: int) -> str:
+    """Kernel marker for a fully installed signed system-app catalog."""
+    return f'[APPS] {app_count} signed applications installed'
+
+
+def normal_boot_serial_errors(log: str, system_apps: bool, app_count: int | None = None) -> list[str]:
+    """Reject fatal evidence even when all positive boot markers appeared.
+
+    `app_count` is the number of applications in the packaged catalog
+    manifest; it is required for a system-apps boot, so the expected install
+    marker follows the catalog instead of a hard-coded count.
+    """
     errors = []
     normalized = log.lower()
     for marker in ('kernel panic', 'panicked at', 'security violation', 'security: failed'):
@@ -35,7 +45,9 @@ def normal_boot_serial_errors(log: str, system_apps: bool) -> list[str]:
     if expected not in log:
         errors.append(f'Missing normal boot marker: {expected}')
     if system_apps:
-        for marker in ('[APPS] 10 signed applications installed',
+        if app_count is None:
+            raise ValueError('a system-apps boot needs the packaged app count')
+        for marker in (apps_installed_marker(app_count),
                        '[SESSION] WovenShell desktop started',
                        '[SESSION] diagnostic console',
                        '[SESSION] back to the desktop'):
@@ -122,6 +134,7 @@ def main():
     # installer inherits dedicated project-local subdirectories.
     build_env = os.environ.copy()
     feature_arguments = []
+    app_count = None
     if args.system_apps:
         # Acceptance only: production images must replace this deterministic
         # root with a provisioned release public key.
@@ -137,6 +150,7 @@ def main():
         output = root / 'target' / 'system-apps' / '0.8.0'
         manifest = json.loads((output / 'manifest.json').read_text(encoding='utf-8'))
         packages = {item['id']: output / item['package'] for item in manifest['apps']}
+        app_count = len(manifest['apps'])
         build_env['WOVENHAT_CALCULATOR_IMAGE'] = str(packages['woven-calculator'])
         build_env['WOVENHAT_TERMINAL_IMAGE'] = str(packages['woven-terminal'])
         build_env['WOVENHAT_FILES_IMAGE'] = str(packages['woven-files'])
@@ -147,6 +161,7 @@ def main():
         build_env['WOVENHAT_IMAGES_IMAGE'] = str(packages['woven-images'])
         build_env['WOVENHAT_UPDATE_IMAGE'] = str(packages['woven-update'])
         build_env['WOVENHAT_STORE_IMAGE'] = str(packages['woven-store'])
+        build_env['WOVENHAT_INSTALLER_IMAGE'] = str(packages['woven-installer'])
         package_service = subprocess.check_output(
             [sys.executable, str(root / 'scripts' / 'build-package-service.py')],
             cwd=root,
@@ -206,7 +221,7 @@ def main():
                 if process.poll() is not None or time.monotonic() > deadline:
                     raise RuntimeError('Normal boot failed; inspect shell-regression logs')
                 time.sleep(0.1)
-            if args.system_apps and '[APPS] 10 signed applications installed' not in serial.read_text(errors='replace'):
+            if args.system_apps and apps_installed_marker(app_count) not in serial.read_text(errors='replace'):
                 raise RuntimeError('Production system-app catalog was not installed; inspect shell-regression logs')
             if args.system_apps and '[SERVICES] woven-package published as pid ' not in serial.read_text(errors='replace'):
                 raise RuntimeError('WovenPackage production service was not published; inspect shell-regression logs')
@@ -306,7 +321,7 @@ def main():
                 # Check the complete serial trace, not just the positive marker
                 # that ended the polling loop. A panic after boot is a failure.
                 evidence = serial.read_text(errors='replace')
-                failures = normal_boot_serial_errors(evidence, args.system_apps)
+                failures = normal_boot_serial_errors(evidence, args.system_apps, app_count)
                 if failures:
                     raise RuntimeError('; '.join(failures))
                 # With -no-reboot a guest crash also exits QEMU with status 0,
@@ -325,7 +340,7 @@ def main():
             if exit_status != 0:
                 raise RuntimeError(f'QEMU exited with status {exit_status} after quit')
             # The guest ran until QEMU stopped; re-check everything it logged.
-            failures = normal_boot_serial_errors(serial.read_text(errors='replace'), args.system_apps)
+            failures = normal_boot_serial_errors(serial.read_text(errors='replace'), args.system_apps, app_count)
             if failures:
                 raise RuntimeError('; '.join(failures))
         finally:
@@ -333,7 +348,7 @@ def main():
                 process.kill()
                 process.wait(timeout=5)
     if args.hardware_demo:
-        print('Hardware demo: sign-in + 10 applications + desktop + PS/2 IOAPIC + smptest: PASS')
+        print(f'Hardware demo: sign-in + {app_count} applications + desktop + PS/2 IOAPIC + smptest: PASS')
     else:
         print('Normal release shell + PS/2 IOAPIC + smptest: PASS')
     print('Serial log:', serial)

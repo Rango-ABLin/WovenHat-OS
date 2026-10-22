@@ -87,7 +87,11 @@ pub const fn domain_ceiling(domain: SecurityDomain) -> CapabilitySet {
             .with(Capability::PowerControl)
             // The desktop session changes a signed-in account's own PIN;
             // applications never can. See `accounts::change_pin`.
-            .with(Capability::AccountManage),
+            .with(Capability::AccountManage)
+            // Recovery is never part of a normal service's requested set;
+            // keeping it in the system-service ceiling permits the kernel's
+            // future recovery boot path to delegate it explicitly.
+            .with(Capability::Recovery),
         SecurityDomain::User => CapabilitySet::userspace_ceiling(),
         SecurityDomain::Restricted => CapabilitySet::only(Capability::TimerRead),
     }

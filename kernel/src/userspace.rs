@@ -5304,6 +5304,7 @@ fn is_kernel_trusted_executable(path: &str) -> bool {
         "/bin/init"
             | "/bin/sh"
             | "/bin/woven-shell"
+            | "/bin/wovenhat-recovery"
             | "/bin/hello-gui"
             | "/bin/true"
             | "/bin/false"
@@ -5346,6 +5347,16 @@ pub fn load_elf_with_argv_verified(bytes: &[u8], args: &[&str]) -> Option<UserPr
     } else {
         None
     }
+}
+
+#[cfg(feature = "stage27-5-recovery-test")]
+pub fn load_elf_with_argv_verified_at_bias(
+    bytes: &[u8],
+    args: &[&str],
+    bias: u64,
+) -> Option<UserProgram> {
+    let verified = crate::signed_app::verify_package(bytes).ok()?;
+    linker::load_with_candidate_bias(verified.bytes(), args, bias)
 }
 
 pub fn load_elf(bytes: &[u8]) -> Option<UserProgram> {

@@ -18,10 +18,10 @@ required |= {f'{suite}-{cpus}-debug' for suite in ('memory', 'storage') for cpus
 required |= {f'{suite}-4-release' for suite in ('memory', 'storage')}
 apps = ('woven-calculator', 'woven-terminal', 'woven-files', 'woven-monitor',
         'woven-settings', 'woven-security', 'woven-editor', 'woven-images',
-        'woven-update', 'woven-store')
+        'woven-update', 'woven-store', 'woven-installer')
 required |= {f'lint-app-{app}' for app in apps}
 required |= {f'{app.removeprefix("woven-")}-{cpus}'
-             for app in apps if app not in ('woven-calculator', 'woven-terminal', 'woven-files')
+             for app in apps if app not in ('woven-calculator', 'woven-terminal', 'woven-files', 'woven-installer')
              for cpus in (1, 2, 4)}
 required |= {f'system-app-catalog-{cpus}' for cpus in (1, 2, 4)}
 required.add('system-apps-boot')

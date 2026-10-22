@@ -1,5 +1,163 @@
 # WovenHat OS Architecture & Codebase Guide
 
+### Stage 28 - WovenInstaller production system-app integration
+
+The production `system-apps` and Stage 19 catalog-test kernel images embed the
+signed package supplied through `WOVENHAT_INSTALLER_IMAGE`. The kernel verifies
+the package with the same signed-app boundary as the existing ten entries and
+publishes it read-only at `/bin/wovenhat-installer` with a catalog descriptor at
+`/share/applications/woven-installer.app`. The catalog entry carries no
+capability grant and is not privileged; it is only a bounded display adapter.
+The system-app, release, interactive, desktop, shell, and catalog-test launchers
+all map the eleventh manifest record to this environment variable. This is
+catalog/image integration, not destructive installation or physical-media
+support.
+
+### Stage 28 - WovenInstaller package/catalog wiring
+
+The existing `scripts/package-system-apps.py` release boundary includes the
+freestanding `apps/woven-installer` ELF as a signed WAPP package and emits
+`packages/woven-installer.wapp`, `catalog/woven-installer.app`, and a manifest
+record with the stable `/bin/wovenhat-installer` install path. Its metadata
+declares an empty capability set, `privileged: false`, and
+`interface: display-only`; the packager rejects forbidden install, disk,
+partition, format, and bootloader capabilities before publication. The
+package metadata is deliberately authority-free. Kernel installation and image
+embedding are documented in the production integration section above.
+
+### Stage 28 - disposable UEFI boot artifact preparation and verifier
+
+`scripts/prepare-uefi-boot-artifact.py` is a disjoint, file-image-only
+boundary layered over the verified layout metadata. It requires one ESP and
+writes only that region. The envelope stores canonical metadata for the fixed
+UEFI fallback path `EFI/BOOT/BOOTX64.EFI`, the exact payload length, SHA-256,
+ESP-relative payload bounds, and the artifact bytes. The verifier rechecks the
+magic, JSON bounds, fixed path, size limit, payload containment, digest, and
+zero-filled tail. A deterministic fixture is available for repeatable tests;
+explicit source files must be regular, non-symlink files and are capped at
+4 MiB.
+
+The write transaction snapshots the entire ESP, fsyncs the new bytes, verifies
+the result, and restores the snapshot for injected failures. This envelope is
+not a FAT filesystem directory entry and does not invoke a mount, partitioner,
+firmware API, or bootloader installer. It does not parse PE/COFF signatures,
+validate Secure Boot signatures, hand off to firmware, or prove that the
+WovenHat kernel boots. The result is deliberately marked
+`bootability: not-qualified` until an independently generated artifact is
+booted and evidenced in QEMU.
+
+### Stage 28 - disposable file-image layout builder and verifier
+
+`scripts/build-file-image-layout.py` is an isolated, test-only preparation
+boundary. It accepts a validated `woveninstaller-plan-v1` document and an
+already-created regular file only when `--test-harness-created` is explicitly
+provided. Device, physical-drive, protected, symlink, missing, unaligned, or
+out-of-bound targets fail closed.
+
+The deterministic image layout reserves sector 0 for a protective MBR, sectors
+1-33 and their backup for GPT-like headers/entries, aligns an 8 MiB ESP and
+the plan's data regions to 1 MiB boundaries, and records canonical metadata
+with a SHA-256 checksum. The verifier rechecks both GPT signatures, metadata,
+partition bounds/alignment, and sorted-region overlap. It performs no device
+I/O, partition API calls, mounts, formatting, bootloader writes, or hardware
+access; it is not production installation.
+
+### Stage 28 - bounded installer UI/state model
+
+`scripts/installer-ui-model.py`
+is a pure Python state machine for the future WovenInstaller presentation
+layer. `InstallerState` contains only serializable screen, bounded summary,
+progress, confirmation, and error fields; it owns no device, file, process, or
+kernel handles. The legal flow is:
+
+`welcome -> target-selection -> partition-review -> settings -> progress`
+
+with cancellation from each active pre-terminal screen through
+`cancelling -> cancelled`, and fail-closed error transitions to `failure`.
+Success is legal only after explicit confirmation and 100 percent progress.
+Terminal cancelled, success, and failure states reject all events, so retrying
+requires a newly constructed state rather than an implicit continuation.
+
+The model bounds ordinary summaries to 128 characters, error messages to 256,
+progress messages to 128, rejects control characters, requires a caller to
+assert that a selected target is safe and unambiguous, and requires a literal
+`confirmed: true` event before progress can advance. This confirmation is an
+admission boundary for a future destructive executor; the current model does
+not execute or authorize any operation. It performs no disk discovery or
+access, filesystem work, partitioning, formatting, bootloader installation,
+subprocess invocation, graphical rendering, or installation.
+
+### Stage 28 - immutable installer-plan validator
+
+`scripts/validate-installer-plan.py` consumes only caller-supplied JSON. The
+target must match exactly one inventory record by path and serial; system,
+boot, removable, read-only, backup, external, and USB-labelled targets are
+protected. Partition requests are bounded, sector-aligned, counted, and kept
+below the target capacity with a fixed one-MiB reservation.
+
+The validator normalizes a small explicit filesystem, user, timezone,
+keyboard, and DHCP/static-network schema and renders sorted-key canonical JSON.
+Its operation markers explicitly state that disk I/O, formatting,
+partitioning, and installation are not requested or implemented. No device
+path is opened and no host command is called.
+
+### Stage 28 - read-only target-disk inventory and safety classification
+
+`scripts/inventory-target-disks.py` is a pure parser/classifier for supplied
+JSON output. It supports normalized records plus the common JSON shapes of
+PowerShell `Get-Disk` and Linux `lsblk -J`; it never invokes either command.
+The normalized record retains path/number, serial, capacity, transport,
+removable, and system/boot flags. Classification protects removable and
+backup-labelled candidates and exposes a system disk only when exactly one
+record is marked system or boot.
+
+Stable identity is mandatory: every record needs a path or number, a serial,
+and a positive capacity, and serials must be unique. Any missing, duplicate,
+or ambiguous value makes `safe_target_selection` false. This boundary is
+read-only and informational; later installer work must add an independently
+reviewed target-selection policy before any partitioning or write operation.
+
+### Stage 28 - ISO capability probe (unvalidated)
+
+`scripts/probe-installer-iso.py` is a read-only capability probe, not an ISO
+builder. It validates only file-backed inputs: the source must have a
+protective MBR and primary GPT header, a supplied EFI tree must contain a
+non-empty `EFI/BOOT/BOOTX64.EFI`, and one of the supported ISO builders must be
+discoverable in `PATH`. Missing prerequisites are reported as explicit
+blockers and the process exits non-zero. The probe never mounts an image,
+opens a physical disk, or writes an artifact. Even when prerequisites are
+present it reports `ready-for-build-validation`, not support; support requires
+booting the exact generated ISO in QEMU.
+
+### Stage 28 - WovenInstaller bounded file-artifact boundary
+
+`scripts/package-installer.py` is the first installer-stage boundary. It
+consumes the existing `build.rs` UEFI disk image and its release-validation
+SHA-256 record, or an explicitly named file image, and writes only a new
+file-backed artifact directory. It validates sector alignment and the
+protective-MBR/GPT signatures before copying, then records the artifact,
+digest, media targets, and deliberately unimplemented ISO/physical-disk
+operations in `installer-manifest.json` and `SHA256SUMS`. It must not be
+extended to discover or write disks without a separate safety review and
+acceptance gate.
+
+### Stage 27.5 - WovenRecovery bounded environment
+
+`kernel/src/recovery.rs` defines the fixed-size recovery ABI. Syscall 240 is
+available only to a task holding `Capability::Recovery` and only while the
+kernel recovery boot-mode gate is authorized. Status, filesystem-check, and
+serial-log results are copied through caller-owned bounded buffers; malformed
+lengths and unauthorized mode fail closed. Reset and reinstall currently
+return an explicit admission-not-implemented value and have no storage side
+effects.
+
+`apps/woven-recovery` is packaged and signature-checked as a normal WAPP
+system application. The QEMU recovery gate runs it in both unauthorized and
+authorized modes. Its check command reports unavailable when no checkable
+filesystem is mounted rather than fabricating success. The foundation does
+not yet provide destructive reset/reinstall, installer orchestration, or
+bootloader update handoff.
+
 ### Stage 26.5 - bounded internationalization foundation
 
 `libwoven::i18n` is the bounded userspace foundation for locale-sensitive
@@ -3795,3 +3953,63 @@ stores at most eight bounded captions. `Settings` centralizes high contrast,
 reduced-motion duration policy, display scale, and magnification clamps.
 Locale, translations, shaping, compositor integration, and device-specific
 assistive technology remain separate prerequisites.
+
+## Stage 28 disposable file-backed installation executor
+
+`scripts/execute-file-install.py` is deliberately outside the production
+installer path. It accepts only the validated plan JSON and an explicitly
+supplied regular non-symlink file, binds the target identity to the file's
+pre-install digest, and writes a deterministic mock filesystem payload through
+same-directory temporary files and atomic replacement. A retained backup
+allows verification or injected-failure rollback. Device paths, protected
+identities, mounting, formatting, partitioning, bootloader installation, and
+physical media are outside this boundary.
+
+## Stage 28 disposable file-image filesystem formatter/verifier
+
+`scripts/format-file-image-fs.py` consumes the layout builder's checksummed
+metadata and requires exactly one aligned `data` region. Its bounded format is
+FAT32-compatible with 512-byte sectors, one-sector clusters, 32 reserved
+sectors, two FAT copies, FSInfo at sector 1, backup boot/FSInfo sectors at 6/7,
+root cluster 2, and a deterministic `WOVENHAT` volume label. The formatter
+constructs the complete region in memory and writes no bytes outside that
+partition; verification rejects invalid geometry, bounds, copies, signatures,
+or nondeterministic metadata.
+
+The file-image transaction snapshots the selected region and restores it after
+any injected pre-write, post-write, or post-verification failure. The input
+must be an explicitly harness-created regular non-symlink file and all
+protected/device identities are rejected. No mount, partition API, physical
+disk, bootloader, or hardware qualification is involved.
+# Stage 28 WovenInstaller shell boundary
+
+`apps/woven-installer` is a freestanding Ring-3 presentation adapter for the
+validated installer state model. Its input is a bounded semicolon-separated
+snapshot with an explicit `validated=1` marker, a plan field, and the state
+model's screen names. It stores borrowed caller bytes only; it performs no
+external I/O and has no access to installation authority. Parser validation
+rejects unknown/duplicate fields, control characters, overlong text, invalid
+progress, unvalidated plans, and screen-specific missing prerequisites.
+
+The binary's only output path is the existing bounded stdout/stderr API. The
+progress and success screens are deliberately non-operative and print
+`install_action=unavailable (fail-closed)`. A future graphical frontend or
+installer executor must be integrated through a separately reviewed authority
+boundary; this shell cannot be used to infer disk or bootloader support.
+
+# Stage 28 disposable acceptance composition
+
+The end-to-end disposable-image gate lives in
+`scripts/test-stage28-disposable-acceptance.py`. It imports the established
+Stage 28 Python boundaries without modifying them: plan validation, GPT-like
+file-image layout, FAT32-compatible data-region formatting, EFI artifact
+preparation, and file-backed executor transactions. Every image is created as
+a new bounded regular temporary file; no device path, mount, partitioning
+command, or physical media is reachable.
+
+The executor is intentionally tested on a copy because its contract atomically
+replaces a whole file with a mock filesystem payload. The final image therefore
+uses the layout/formatter/EFI path and records separate executor and final-image
+digests. The harness verifies deterministic output and byte-for-byte rollback
+after injected failures. It does not establish physical installation,
+bootability, hardware qualification, or release certification.

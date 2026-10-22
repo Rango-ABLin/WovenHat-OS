@@ -15,6 +15,8 @@ def main() -> int:
     parser.add_argument("--qemu", default=shutil.which("qemu-system-x86_64") or r"C:\Program Files\qemu\qemu-system-x86_64.exe")
     parser.add_argument("--firmware", type=Path)
     parser.add_argument("--firmware-vars", type=Path, help="matching writable OVMF VARS template")
+    parser.add_argument("--image-path-output", type=Path,
+                        help="write the exact validated boot-image path for downstream gates")
     args = parser.parse_args()
     root = Path(__file__).resolve().parents[1]
     qemu = Path(args.qemu)
@@ -44,6 +46,7 @@ def main() -> int:
     env["WOVENHAT_IMAGES_IMAGE"] = str(output / by_id["woven-images"]["package"])
     env["WOVENHAT_UPDATE_IMAGE"] = str(output / by_id["woven-update"]["package"])
     env["WOVENHAT_STORE_IMAGE"] = str(output / by_id["woven-store"]["package"])
+    env["WOVENHAT_INSTALLER_IMAGE"] = str(output / by_id["woven-installer"]["package"])
     env.setdefault("CARGO_BUILD_BUILD_DIR", str(root / ".cargo-build"))
     env.setdefault("CARGO_TARGET_DIR", str(root / "target"))
     boot = subprocess.run(
@@ -58,6 +61,14 @@ def main() -> int:
         print(boot.stdout, boot.stderr)
         return boot.returncode
 
+    boot_image = Path(boot.stdout.strip())
+    if not boot_image.is_file() or boot_image.is_symlink():
+        print(f"catalog build did not produce a regular boot image: {boot_image}")
+        return 1
+    if args.image_path_output is not None:
+        args.image_path_output.parent.mkdir(parents=True, exist_ok=True)
+        args.image_path_output.write_text(str(boot_image.resolve()) + "\n", encoding="utf-8")
+
     out = root / "audit-artifacts" / f"system-app-catalog-{args.cpus}cpu"
     out.mkdir(parents=True, exist_ok=True)
     serial = out / "serial.log"
@@ -71,7 +82,7 @@ def main() -> int:
         "-no-reboot", "-device", "isa-debug-exit,iobase=0xf4,iosize=0x04",
         "-drive", f"if=pflash,unit=0,format=raw,readonly=on,file={firmware}",
         *(["-drive", f"if=pflash,unit=1,format=raw,file={vars_copy}"] if vars_copy is not None else []),
-        "-drive", f"if=none,id=boot,format=raw,readonly=on,file={boot.stdout.strip()}",
+        "-drive", f"if=none,id=boot,format=raw,readonly=on,file={boot_image}",
         "-device", "virtio-blk-pci,drive=boot,bootindex=1",
     ]
     try:
@@ -81,7 +92,7 @@ def main() -> int:
         print(f"QEMU timeout; evidence: {out}")
         return 1
     text = serial.read_text(errors="replace") if serial.exists() else ""
-    if code != 33 or "[S19-APP] ten signed applications installed PASS" not in text:
+    if code != 33 or "[S19-APP] eleven signed applications installed PASS" not in text:
         print(f"system app catalog failed (exit {code}); evidence: {out}")
         return 1
     print(f"system app catalog: PASS ({args.cpus} CPU, exit 33). Evidence: {out}")

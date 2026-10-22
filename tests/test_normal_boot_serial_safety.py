@@ -8,10 +8,13 @@ SPEC = importlib.util.spec_from_file_location('shell_qemu', SCRIPT)
 SHELL = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(SHELL)
 
+# Any catalog size works; the harness reads the real one from the packaged
+# system-app manifest.
+APPS = 11
 BASE = ('[BOOT] shell-first runtime ready\n'
         '[SMP] acknowledged TLB shootdowns: PASSED\n')
 DESKTOP = ('[BOOT] desktop-first runtime ready\n'
-           '[APPS] 10 signed applications installed\n'
+           f'[APPS] {APPS} signed applications installed\n'
            '[SESSION] WovenShell desktop started as pid 2\n'
            '[SESSION] diagnostic console\n'
            '[SESSION] back to the desktop\n'
@@ -23,23 +26,28 @@ class NormalBootSerialSafetyTests(unittest.TestCase):
         self.assertEqual(SHELL.normal_boot_serial_errors(BASE, False), [])
 
     def test_desktop_success(self):
-        self.assertEqual(SHELL.normal_boot_serial_errors(DESKTOP, True), [])
+        self.assertEqual(SHELL.normal_boot_serial_errors(DESKTOP, True, APPS), [])
 
     def test_fatal_evidence_after_positive_markers(self):
         for marker in ('KERNEL PANIC', 'panicked at', 'SECURITY VIOLATION', 'security: failed'):
             with self.subTest(marker=marker):
-                self.assertTrue(SHELL.normal_boot_serial_errors(DESKTOP + marker, True))
+                self.assertTrue(SHELL.normal_boot_serial_errors(DESKTOP + marker, True, APPS))
 
     def test_contradictory_failure_after_positive_markers(self):
         for marker in ('[BOOT] FAILED', '[SESSION] desktop FAIL',
                        '[APPS] installation FAILED', '[SMP] shootdown FAILED'):
             with self.subTest(marker=marker):
-                self.assertTrue(SHELL.normal_boot_serial_errors(DESKTOP + marker + '\\n', True))
+                self.assertTrue(SHELL.normal_boot_serial_errors(DESKTOP + marker + '\\n', True, APPS))
 
     def test_missing_desktop_and_diagnostic_evidence(self):
-        self.assertTrue(SHELL.normal_boot_serial_errors(BASE, True))
+        self.assertTrue(SHELL.normal_boot_serial_errors(BASE, True, APPS))
         self.assertTrue(SHELL.normal_boot_serial_errors(
-            DESKTOP.replace('[SESSION] diagnostic console', ''), True))
+            DESKTOP.replace('[SESSION] diagnostic console', ''), True, APPS))
+
+    def test_install_marker_follows_catalog_size(self):
+        self.assertTrue(SHELL.normal_boot_serial_errors(DESKTOP, True, APPS + 1))
+        with self.assertRaises(ValueError):
+            SHELL.normal_boot_serial_errors(DESKTOP, True)
 
     def test_missing_keyboard_smp_evidence(self):
         self.assertTrue(SHELL.normal_boot_serial_errors(

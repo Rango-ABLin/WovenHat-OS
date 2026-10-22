@@ -91,7 +91,44 @@ APPS = (
         "install_path": "/bin/wovenhat-store",
         "exec": "/bin/wovenhat-store",
     },
+    {
+        "id": "woven-installer",
+        "directory": "woven-installer",
+        "binary": "wovenhat-installer",
+        "display_name": "WovenInstaller",
+        "install_path": "/bin/wovenhat-installer",
+        "exec": "/bin/wovenhat-installer",
+        # This is intentionally a display-only Ring-3 shell.  An empty
+        # capability declaration is part of the catalog contract: installation
+        # authority belongs to a future, separately reviewed service.
+        "capabilities": (),
+        "privileged": False,
+        "interface": "display-only",
+    },
 )
+
+FORBIDDEN_CAPABILITIES = frozenset({
+    "install", "disk", "partition", "format", "bootloader",
+})
+
+
+def validate_app_definition(app: dict[str, object]) -> None:
+    """Validate catalog metadata before any app build or publication."""
+    install_path = app.get("install_path")
+    if not isinstance(install_path, str) or not install_path.startswith("/bin/"):
+        raise RuntimeError(f"invalid install path for {app.get('id')!r}")
+    if install_path != f"/bin/{app.get('binary')}":
+        raise RuntimeError(f"install path does not match binary for {app.get('id')!r}")
+    capabilities = app.get("capabilities", ())
+    if not isinstance(capabilities, (tuple, list)):
+        raise RuntimeError(f"invalid capabilities for {app.get('id')!r}")
+    if FORBIDDEN_CAPABILITIES.intersection(capabilities):
+        raise RuntimeError(f"forbidden installer capability for {app.get('id')!r}")
+    if app.get("id") == "woven-installer":
+        if capabilities or app.get("privileged") is not False:
+            raise RuntimeError("woven-installer must remain non-privileged")
+        if app.get("interface") != "display-only":
+            raise RuntimeError("woven-installer must remain display-only")
 
 
 def sha256(path: Path) -> str:
@@ -156,6 +193,7 @@ def main() -> int:
     with tempfile.TemporaryDirectory(prefix="wovenhat-system-apps-") as temporary:
         temporary_root = Path(temporary)
         for app in APPS:
+            validate_app_definition(app)
             app_root = root / "apps" / app["directory"]
             env = dict(os.environ)
             env.pop("CARGO_BUILD_BUILD_DIR", None)
@@ -188,7 +226,7 @@ def main() -> int:
                 encoding="ascii",
                 newline="\n",
             )
-            records.append({
+            record = {
                 "id": app["id"],
                 "name": app["display_name"],
                 "binary": app["binary"],
@@ -199,7 +237,16 @@ def main() -> int:
                 "package_bytes": package_info["package_bytes"],
                 "catalog": f"catalog/{descriptor.name}",
                 "catalog_sha256": sha256(descriptor),
-            })
+            }
+            # Keep the established records byte-for-byte compatible while
+            # publishing the new app's explicit least-privilege contract.
+            if app["id"] == "woven-installer":
+                record.update({
+                    "capabilities": [],
+                    "privileged": False,
+                    "interface": "display-only",
+                })
+            records.append(record)
 
     manifest = {
         "format": "WovenHat system-app install plan",
