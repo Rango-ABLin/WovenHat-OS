@@ -360,6 +360,49 @@ unsafe impl Sync for QsPanelTexture {}
 
 static QS_PANEL_TEXTURE: QsPanelTexture = QsPanelTexture(UnsafeCell::new([0; QS_PANEL_PIXELS]));
 
+/// The launcher panel's maximum pixel footprint (every catalog entry
+/// matching, `MAX_APPS` rows), flat-rendered once per repaint into this
+/// offscreen texture, then sampled by the 3D desktop mode's perspective
+/// projection.
+const LAUNCHER_PANEL_MAX_HEIGHT: usize = (2 + MAX_APPS) * PANEL_ROW as usize + 2;
+const LAUNCHER_PANEL_PIXELS: usize = PANEL_WIDTH as usize * LAUNCHER_PANEL_MAX_HEIGHT;
+
+struct LauncherPanelTexture(UnsafeCell<[u32; LAUNCHER_PANEL_PIXELS]>);
+
+// SAFETY: the shell is single-threaded, and `render_panel_3d` takes the
+// only reference.
+unsafe impl Sync for LauncherPanelTexture {}
+
+static LAUNCHER_PANEL_TEXTURE: LauncherPanelTexture =
+    LauncherPanelTexture(UnsafeCell::new([0; LAUNCHER_PANEL_PIXELS]));
+
+/// The Notification Center's maximum pixel footprint (`MAX_NOTES` rows),
+/// flat-rendered once per repaint into this offscreen texture, then
+/// sampled by the 3D desktop mode's perspective projection.
+const CENTER_MAX_HEIGHT: usize = (1 + MAX_NOTES) * PANEL_ROW as usize + 2;
+const CENTER_PIXELS: usize = CENTER_WIDTH as usize * CENTER_MAX_HEIGHT;
+
+struct CenterTexture(UnsafeCell<[u32; CENTER_PIXELS]>);
+
+// SAFETY: the shell is single-threaded, and `render_center_3d` takes the
+// only reference.
+unsafe impl Sync for CenterTexture {}
+
+static CENTER_TEXTURE: CenterTexture = CenterTexture(UnsafeCell::new([0; CENTER_PIXELS]));
+
+/// The toast's fixed pixel footprint, flat-rendered once per repaint into
+/// this offscreen texture, then sampled by the 3D desktop mode's
+/// perspective projection.
+const TOAST_PIXELS: usize = TOAST_WIDTH as usize * TOAST_HEIGHT as usize;
+
+struct ToastTexture(UnsafeCell<[u32; TOAST_PIXELS]>);
+
+// SAFETY: the shell is single-threaded, and `render_toast_3d` takes the
+// only reference.
+unsafe impl Sync for ToastTexture {}
+
+static TOAST_TEXTURE: ToastTexture = ToastTexture(UnsafeCell::new([0; TOAST_PIXELS]));
+
 /// The taskbar's maximum pixel footprint, flat-rendered once per repaint
 /// into this offscreen texture, then sampled by the 3D desktop mode's
 /// perspective projection. `MAX_TASKBAR_WIDTH` mirrors the kernel
@@ -1219,10 +1262,13 @@ impl Desktop {
         Area::new(PANEL_X, self.taskbar_top() - 2 - height, PANEL_WIDTH, height)
     }
 
-    /// The panel's overlay: border, title row, selection and text. Its
-    /// background is blended separately, so what lies beneath shows through.
-    fn render_panel(&self, canvas: &mut Canvas<'_>) {
-        let area = self.panel_area();
+    /// The panel's overlay: border, title row, selection and text, drawn at
+    /// `area`'s own position in `canvas`. Used both for the ordinary flat
+    /// 2D panel and, rendered once at local origin into an offscreen
+    /// texture, as the source the 3D mode's perspective projection samples.
+    /// Its background is blended separately, so what lies beneath shows
+    /// through.
+    fn paint_panel_content(&self, canvas: &mut Canvas<'_>, area: Area) {
         let (x, y) = (area.x, area.y);
         let inner = (area.width - 2) as usize;
         outline(canvas, area, ACCENT);
@@ -1249,6 +1295,83 @@ impl Desktop {
             let text = core::str::from_utf8(app.name()).unwrap_or("?");
             canvas.draw_text(x + 6, row_y + 4, text, TEXT);
         }
+    }
+
+    fn render_panel(&self, canvas: &mut Canvas<'_>) {
+        let area = self.panel_area();
+        if self.three_d {
+            self.render_panel_3d(canvas, area);
+        } else {
+            self.paint_panel_content(canvas, area);
+        }
+    }
+
+    /// The launcher panel, perspective-projected as a card tilted back in
+    /// 3D (its bottom edge stays put; its top edge recedes and narrows)
+    /// instead of blitted flat. Same technique as
+    /// [`Self::render_qs_3d`]: the flat content is rendered once into
+    /// `LAUNCHER_PANEL_TEXTURE` at local origin, then sampled by two
+    /// `textured_triangle_3d` calls per tile `canvas` this is invoked for.
+    fn render_panel_3d(&self, canvas: &mut Canvas<'_>, area: Area) {
+        // SAFETY: single-threaded; this is the only live reference, and it
+        // does not outlive this call.
+        let texture_pixels = unsafe { &mut *LAUNCHER_PANEL_TEXTURE.0.get() };
+        let Some(mut texture) =
+            Canvas::new(texture_pixels, 0, 0, area.width as usize, area.height as usize)
+        else {
+            return self.paint_panel_content(canvas, area);
+        };
+        self.paint_panel_content(&mut texture, Area::new(0, 0, area.width, area.height));
+
+        let half_width = (area.width / 2) << 16;
+        let half_height = ((area.height - 1) << 16) / 2;
+        const DISTANCE: i32 = 200 << 16;
+        const TILT_DEPTH: i32 = 70 << 16;
+        let camera = Camera::new(
+            DISTANCE,
+            DISTANCE,
+            area.x + area.width / 2,
+            area.y + area.height / 2,
+        );
+        let (Some(top_left), Some(top_right), Some(bottom_left), Some(bottom_right)) = (
+            camera.project(-half_width, -half_height, TILT_DEPTH),
+            camera.project(half_width, -half_height, TILT_DEPTH),
+            camera.project(-half_width, half_height, 0),
+            camera.project(half_width, half_height, 0),
+        ) else {
+            return self.paint_panel_content(canvas, area);
+        };
+        let vertex = |(x, y, depth): (i32, i32, u16), u: u8, v: u8| Vertex3Tex::new(x, y, depth, u, v);
+
+        // SAFETY: single-threaded; this is the only live reference, and it
+        // does not outlive this call.
+        let depth_values = unsafe { &mut *TILE_DEPTH_3D.0.get() };
+        let Some(mut depth) =
+            DepthBuffer::new(depth_values, canvas.x(), canvas.y(), canvas.width(), canvas.height())
+        else {
+            return self.paint_panel_content(canvas, area);
+        };
+        depth.clear(u16::MAX);
+        // As in `render_qs_3d`: the projected quad is narrower than the
+        // flat panel's footprint at its receded top edge, so the corners
+        // it no longer covers still need the real desktop background
+        // rather than whatever this tile's shared scratch buffer held.
+        self.render_desktop_background(canvas);
+        let mut renderer = Renderer::new(canvas);
+        renderer.textured_triangle_3d(
+            &mut depth,
+            vertex(top_left, 0, 0),
+            vertex(top_right, 255, 0),
+            vertex(bottom_left, 0, 255),
+            &texture,
+        );
+        renderer.textured_triangle_3d(
+            &mut depth,
+            vertex(top_right, 255, 0),
+            vertex(bottom_right, 255, 255),
+            vertex(bottom_left, 0, 255),
+            &texture,
+        );
     }
 
     /// Open or close the launcher. Returns the area to repaint.
@@ -1412,20 +1535,22 @@ impl Desktop {
         self.switch_workspace(target)
     }
 
-    /// The desktop background: the wallpaper, as a flat fill in 2D mode or,
-    /// in 3D mode, perspective-projected as a floor receding into the
-    /// distance -- the near edge, at the bottom of the screen, stays
-    /// anchored; the far edge, at the top, recedes and narrows. This can
-    /// span the whole virtual desktop, far larger than any fixed-size
-    /// offscreen texture, so 3D mode samples the wallpaper procedurally via
+    /// A full-screen background, as a flat fill in 2D mode or, in 3D mode,
+    /// perspective-projected as a floor receding into the distance -- the
+    /// near edge, at the bottom of the screen, stays anchored; the far
+    /// edge, at the top, recedes and narrows. This can span the whole
+    /// virtual desktop, far larger than any fixed-size offscreen texture,
+    /// so 3D mode samples `color` procedurally via
     /// [`libwoven::graphics::Renderer::procedural_triangle_3d`] instead of
-    /// texturing a pre-rendered copy.
-    fn render_desktop_background(&self, canvas: &mut Canvas<'_>) {
-        let height = self.height;
+    /// texturing a pre-rendered copy. Shared by the desktop wallpaper and
+    /// the lock screen's dimmed wallpaper -- the two full-screen
+    /// backgrounds, differing only in their per-pixel formula.
+    fn render_floor_3d(&self, canvas: &mut Canvas<'_>, color: impl Fn(i32, i32) -> u32) {
         if !self.three_d {
-            canvas.shade(|x, y| wallpaper(x, y, height));
+            canvas.shade(&color);
             return;
         }
+        let height = self.height;
         let width = self.desktop_width;
         let half_width = (width / 2) << 16;
         let half_height = ((height - 1) << 16) / 2;
@@ -1438,7 +1563,7 @@ impl Desktop {
             camera.project(-half_width, half_height, 0),
             camera.project(half_width, half_height, 0),
         ) else {
-            canvas.shade(|x, y| wallpaper(x, y, height));
+            canvas.shade(&color);
             return;
         };
         let vertex = |(x, y, depth): (i32, i32, u16), source_x: i32, source_y: i32| {
@@ -1450,28 +1575,34 @@ impl Desktop {
         let Some(mut depth) =
             DepthBuffer::new(depth_values, canvas.x(), canvas.y(), canvas.width(), canvas.height())
         else {
-            canvas.shade(|x, y| wallpaper(x, y, height));
+            canvas.shade(&color);
             return;
         };
         depth.clear(u16::MAX);
         // The projected quad narrows at its receded top edge, so the
         // corners it no longer covers still need a sensible background.
-        canvas.shade(|x, y| wallpaper(x, y, height));
+        canvas.shade(&color);
         let mut renderer = Renderer::new(canvas);
         renderer.procedural_triangle_3d(
             &mut depth,
             vertex(top_left, 0, 0),
             vertex(top_right, width, 0),
             vertex(bottom_left, 0, height),
-            |x, y| wallpaper(x, y, height),
+            &color,
         );
         renderer.procedural_triangle_3d(
             &mut depth,
             vertex(top_right, width, 0),
             vertex(bottom_right, width, height),
             vertex(bottom_left, 0, height),
-            |x, y| wallpaper(x, y, height),
+            &color,
         );
+    }
+
+    /// The desktop background: the wallpaper.
+    fn render_desktop_background(&self, canvas: &mut Canvas<'_>) {
+        let height = self.height;
+        self.render_floor_3d(canvas, |x, y| wallpaper(x, y, height));
     }
 
     /// The desktop layer: wallpaper and taskbar, with its start button,
@@ -1674,7 +1805,7 @@ impl Desktop {
     /// prompt, and a masked dot per digit typed, all centred.
     fn render_lock(&self, canvas: &mut Canvas<'_>) {
         let height = self.height;
-        canvas.shade(|x, y| blend(rgb(0, 0, 0), wallpaper(x, y, height), LOCK_DIM));
+        self.render_floor_3d(canvas, |x, y| blend(rgb(0, 0, 0), wallpaper(x, y, height), LOCK_DIM));
         let middle = self.height / 2;
         let centred = |text: &str| (self.width - font::text_width(text) as i32) / 2;
         let catalog = lock_catalog(self.language);
@@ -2235,9 +2366,11 @@ impl Desktop {
     }
 
     /// The Notification Center's overlay: border, title row with Clear, and
-    /// one row per remembered notification.
-    fn render_center(&self, canvas: &mut Canvas<'_>) {
-        let area = self.center_area();
+    /// one row per remembered notification, drawn at `area`'s own position
+    /// in `canvas`. Used both for the ordinary flat 2D panel and, rendered
+    /// once at local origin into an offscreen texture, as the source the 3D
+    /// mode's perspective projection samples.
+    fn paint_center_content(&self, canvas: &mut Canvas<'_>, area: Area) {
         let (x, y) = (area.x, area.y);
         outline(canvas, area, ACCENT);
         canvas.fill_rect(x + 1, y + 1, (area.width - 2) as usize, PANEL_ROW as usize, START_FILL);
@@ -2253,6 +2386,78 @@ impl Desktop {
         if !any {
             canvas.draw_text(x + 6, y + 1 + PANEL_ROW + 4, "No notifications", TEXT);
         }
+    }
+
+    fn render_center(&self, canvas: &mut Canvas<'_>) {
+        let area = self.center_area();
+        if self.three_d {
+            self.render_center_3d(canvas, area);
+        } else {
+            self.paint_center_content(canvas, area);
+        }
+    }
+
+    /// The Notification Center, perspective-projected as a card tilted back
+    /// in 3D, the same technique as [`Self::render_qs_3d`]: the flat
+    /// content is rendered once into `CENTER_TEXTURE` at local origin, then
+    /// sampled by two `textured_triangle_3d` calls per tile `canvas` this
+    /// is invoked for.
+    fn render_center_3d(&self, canvas: &mut Canvas<'_>, area: Area) {
+        // SAFETY: single-threaded; this is the only live reference, and it
+        // does not outlive this call.
+        let texture_pixels = unsafe { &mut *CENTER_TEXTURE.0.get() };
+        let Some(mut texture) =
+            Canvas::new(texture_pixels, 0, 0, area.width as usize, area.height as usize)
+        else {
+            return self.paint_center_content(canvas, area);
+        };
+        self.paint_center_content(&mut texture, Area::new(0, 0, area.width, area.height));
+
+        let half_width = (area.width / 2) << 16;
+        let half_height = ((area.height - 1) << 16) / 2;
+        const DISTANCE: i32 = 200 << 16;
+        const TILT_DEPTH: i32 = 70 << 16;
+        let camera = Camera::new(
+            DISTANCE,
+            DISTANCE,
+            area.x + area.width / 2,
+            area.y + area.height / 2,
+        );
+        let (Some(top_left), Some(top_right), Some(bottom_left), Some(bottom_right)) = (
+            camera.project(-half_width, -half_height, TILT_DEPTH),
+            camera.project(half_width, -half_height, TILT_DEPTH),
+            camera.project(-half_width, half_height, 0),
+            camera.project(half_width, half_height, 0),
+        ) else {
+            return self.paint_center_content(canvas, area);
+        };
+        let vertex = |(x, y, depth): (i32, i32, u16), u: u8, v: u8| Vertex3Tex::new(x, y, depth, u, v);
+
+        // SAFETY: single-threaded; this is the only live reference, and it
+        // does not outlive this call.
+        let depth_values = unsafe { &mut *TILE_DEPTH_3D.0.get() };
+        let Some(mut depth) =
+            DepthBuffer::new(depth_values, canvas.x(), canvas.y(), canvas.width(), canvas.height())
+        else {
+            return self.paint_center_content(canvas, area);
+        };
+        depth.clear(u16::MAX);
+        self.render_desktop_background(canvas);
+        let mut renderer = Renderer::new(canvas);
+        renderer.textured_triangle_3d(
+            &mut depth,
+            vertex(top_left, 0, 0),
+            vertex(top_right, 255, 0),
+            vertex(bottom_left, 0, 255),
+            &texture,
+        );
+        renderer.textured_triangle_3d(
+            &mut depth,
+            vertex(top_right, 255, 0),
+            vertex(bottom_right, 255, 255),
+            vertex(bottom_left, 0, 255),
+            &texture,
+        );
     }
 
     /// Open or close the Notification Center. Opening it closes the
@@ -2374,12 +2579,87 @@ impl Desktop {
         renderer.triangle_3d(&mut depth, vertex(top_right), vertex(bottom_right), vertex(bottom_left));
     }
 
-    /// The toast's overlay: border and text over its blended background.
-    fn render_toast(&self, toast: &Toast, canvas: &mut Canvas<'_>) {
-        let area = self.toast_area();
+    /// The toast's overlay: border and text over its blended background,
+    /// drawn at `area`'s own position in `canvas`. Used both for the
+    /// ordinary flat 2D toast and, rendered once at local origin into an
+    /// offscreen texture, as the source the 3D mode's perspective
+    /// projection samples.
+    fn paint_toast_content(&self, toast: &Toast, canvas: &mut Canvas<'_>, area: Area) {
         outline(canvas, area, ACCENT);
         let text = core::str::from_utf8(&toast.text[..toast.length]).unwrap_or("");
         canvas.draw_text(area.x + 6, area.y + 8, text, TEXT);
+    }
+
+    fn render_toast(&self, toast: &Toast, canvas: &mut Canvas<'_>) {
+        let area = self.toast_area();
+        if self.three_d {
+            self.render_toast_3d(toast, canvas, area);
+        } else {
+            self.paint_toast_content(toast, canvas, area);
+        }
+    }
+
+    /// The toast, perspective-projected as a card tilted back in 3D, the
+    /// same technique as [`Self::render_qs_3d`]: the flat content is
+    /// rendered once into `TOAST_TEXTURE` at local origin, then sampled by
+    /// two `textured_triangle_3d` calls per tile `canvas` this is invoked
+    /// for.
+    fn render_toast_3d(&self, toast: &Toast, canvas: &mut Canvas<'_>, area: Area) {
+        // SAFETY: single-threaded; this is the only live reference, and it
+        // does not outlive this call.
+        let texture_pixels = unsafe { &mut *TOAST_TEXTURE.0.get() };
+        let Some(mut texture) =
+            Canvas::new(texture_pixels, 0, 0, area.width as usize, area.height as usize)
+        else {
+            return self.paint_toast_content(toast, canvas, area);
+        };
+        self.paint_toast_content(toast, &mut texture, Area::new(0, 0, area.width, area.height));
+
+        let half_width = (area.width / 2) << 16;
+        let half_height = ((area.height - 1) << 16) / 2;
+        const DISTANCE: i32 = 200 << 16;
+        const TILT_DEPTH: i32 = 30 << 16;
+        let camera = Camera::new(
+            DISTANCE,
+            DISTANCE,
+            area.x + area.width / 2,
+            area.y + area.height / 2,
+        );
+        let (Some(top_left), Some(top_right), Some(bottom_left), Some(bottom_right)) = (
+            camera.project(-half_width, -half_height, TILT_DEPTH),
+            camera.project(half_width, -half_height, TILT_DEPTH),
+            camera.project(-half_width, half_height, 0),
+            camera.project(half_width, half_height, 0),
+        ) else {
+            return self.paint_toast_content(toast, canvas, area);
+        };
+        let vertex = |(x, y, depth): (i32, i32, u16), u: u8, v: u8| Vertex3Tex::new(x, y, depth, u, v);
+
+        // SAFETY: single-threaded; this is the only live reference, and it
+        // does not outlive this call.
+        let depth_values = unsafe { &mut *TILE_DEPTH_3D.0.get() };
+        let Some(mut depth) =
+            DepthBuffer::new(depth_values, canvas.x(), canvas.y(), canvas.width(), canvas.height())
+        else {
+            return self.paint_toast_content(toast, canvas, area);
+        };
+        depth.clear(u16::MAX);
+        self.render_desktop_background(canvas);
+        let mut renderer = Renderer::new(canvas);
+        renderer.textured_triangle_3d(
+            &mut depth,
+            vertex(top_left, 0, 0),
+            vertex(top_right, 255, 0),
+            vertex(bottom_left, 0, 255),
+            &texture,
+        );
+        renderer.textured_triangle_3d(
+            &mut depth,
+            vertex(top_right, 255, 0),
+            vertex(bottom_right, 255, 255),
+            vertex(bottom_left, 0, 255),
+            &texture,
+        );
     }
 
     /// The pointer, as an overlay: its transparent cells stay on the key.
