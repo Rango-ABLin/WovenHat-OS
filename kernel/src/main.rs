@@ -9031,7 +9031,16 @@ fn stage20_12_self_test() -> bool {
     ) {
         return false;
     }
+    // WovenShell hashes the PIN (100,000-iteration PBKDF2) in Ring-3 before
+    // the kernel verifies it, which takes 300-450 ticks under QEMU TCG and
+    // longer on a loaded CI runner. Wait for the kernel to record the
+    // attempt's outcome, then give the screen its usual bound to show it.
+    // PIN_CHECK_TICKS is only a liveness cap; the event gates progress.
+    const PIN_CHECK_TICKS: u64 = 6000;
+    let failures = || identity_runtime::failure_count(b"lin");
+    let before = failures();
     let refused = keys(&[0x02, 0x03, 0x04, 0x05, 0x1c])
+        && until(PIN_CHECK_TICKS, || failures() > before)
         && until(500, || sign_in("  ada", "> lin", "Wrong PIN"));
     if !step("ada's PIN is refused for lin", refused) {
         return false;
@@ -9058,7 +9067,10 @@ fn stage20_12_self_test() -> bool {
             })
         })
     };
-    let signed_in = keys(&[0x0a, 0x09, 0x08, 0x07, 0x1c]) && until(1000, name_shown);
+    // A successful verification clears lin's recorded failures.
+    let signed_in = keys(&[0x0a, 0x09, 0x08, 0x07, 0x1c])
+        && until(PIN_CHECK_TICKS, || failures() == 0)
+        && until(1000, name_shown);
     if !step(
         "lin's PIN signs in; lin's name is on the taskbar",
         signed_in,
@@ -9085,8 +9097,10 @@ fn stage20_12_self_test() -> bool {
         });
     let lock_checks = locked
         && keys(&[0x02, 0x03, 0x04, 0x05, 0x1c])
+        && until(PIN_CHECK_TICKS, || failures() > 0)
         && until(500, || line(middle - 4, "Wrong PIN"))
         && keys(&[0x0a, 0x09, 0x08, 0x07, 0x1c])
+        && until(PIN_CHECK_TICKS, || failures() == 0)
         && until(1000, name_shown);
     if !step(
         "the lock screen refuses ada's PIN and takes lin's",

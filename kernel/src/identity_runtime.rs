@@ -670,6 +670,19 @@ fn note_failure(name: &[u8], threshold: u8) {
     }
 }
 
+/// Wrong-PIN attempts currently recorded for `name`. Stage 20.12 waits on
+/// this to know a verification finished, rather than racing a fixed delay
+/// against a 100,000-iteration PBKDF2 running under emulation.
+#[cfg(feature = "stage20-12-test")]
+pub(crate) fn failure_count(name: &[u8]) -> u8 {
+    LOCKOUTS
+        .lock()
+        .iter()
+        .flatten()
+        .find(|entry| entry.name[..entry.name_len] == *name)
+        .map_or(0, |entry| entry.failures)
+}
+
 fn clear_failures(name: &[u8]) {
     if let Some(entry) = LOCKOUTS
         .lock()
