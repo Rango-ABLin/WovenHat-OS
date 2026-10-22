@@ -16,7 +16,15 @@ class HarnessRegression(unittest.TestCase):
                 self.assertIn("shutil.copyfile(firmware_vars, vars_copy)", source)
                 self.assertIn("if=pflash,unit=0,format=raw,readonly=on", source)
                 self.assertIn("if=pflash,unit=1,format=raw,file=", source)
-                self.assertIn("code != 33", source)
+                if name == "monitor":
+                    # Assert the exit contract through the actual validator, not
+                    # the obsolete literal string in the harness source.
+                    monitor = runpy.run_path(str(ROOT / "scripts" / "test-monitor-qemu.py"))
+                    marker = "[S16.1] out-of-kernel application: PASSED"
+                    self.assertFalse(monitor["validate_monitor_result"](35, marker))
+                    self.assertTrue(monitor["validate_monitor_result"](33, marker))
+                else:
+                    self.assertIn("code != 33", source)
                 self.assertIn("[S16.1] out-of-kernel application: PASSED", source)
 
     def test_hid_qmp_disconnect_never_bypasses_acceptance(self):

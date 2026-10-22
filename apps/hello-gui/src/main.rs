@@ -1542,7 +1542,10 @@ fn desktop_client(args: &Args) -> ! {
 
     // Exactly our key, from the shell.
     let deadline = libwoven::ticks() + 6000;
-    let mut key = [0u8; 8];
+    // Room for the largest shell message this client must skip (WPBT is 10
+    // bytes). A message larger than the buffer is refused and stays queued,
+    // so an undersized buffer would spin on it and never see the key.
+    let mut key = [0u8; 16];
     loop {
         match libwoven::wait_any(libwoven::wait::MESSAGE, Some(deadline)) {
             Ok(0) | Err(_) => fail(188),
@@ -1589,6 +1592,13 @@ fn desktop_client(args: &Args) -> ! {
             // desktop client that only wants its one key has nothing to do
             // with its own pointer coordinates.
             if sender == shell && length == 8 && &key[..4] == b"WPMV" {
+                continue;
+            }
+            // Likewise a primary-button edge: a click in the body captures
+            // the pointer and the shell forwards the press and release
+            // (`forward_pointer_button`). Focus is the shell's job; this
+            // client still waits for its key.
+            if sender == shell && length == 10 && &key[..4] == b"WPBT" {
                 continue;
             }
             if sender != shell || length != 1 || key[0] != expected {

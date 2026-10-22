@@ -11,6 +11,45 @@ workspace all-target warning-denying Clippy pass. The daemon buffer is aligned
 to the kernel's 256-byte IPC transport cap. Production-sized slots, bootloader
 handoff, power-loss recovery, installer, and physical qualification remain
 open.
+## Claude Code - master merged back into phase2 for PR #107 (2026-10-22)
+
+`master` gained 24 commits after #76 (desktop-first boot, per-run QEMU
+evidence isolation, fail-closed boot/WovenFS evidence tests). Merging it into
+`phase2` conflicted in three files, resolved as:
+
+- `kernel/src/main.rs`: phase2's bounded wait for the desktop to take the
+  display (`session_ready`, `session_status`, boot-stage banners) is kept;
+  master's `desktop_session_started` gate is defined from it (spawned and
+  either presented or still alive). That gate keeps master's behavior: on a
+  desktop-first boot, `/bin/sh` is not spawned and the kernel does not poll
+  the keyboard while the compositor presents. Boot markers are master's
+  `[BOOT] desktop-first runtime ready` / `shell-first runtime ready`.
+- `scripts/test-release.py`: phase2's package/AI gates plus master's
+  1/2/4-CPU `system-apps-boot` loop.
+- `scripts/test-shell-qemu.py`: master's unique per-run evidence directory
+  and pre-F12 screenshot, after phase2's hardware-demo sign-in.
+
+**Stage 20.1 regression fixed in the same PR (user chose 128 KiB):**
+`desktop-userspace` failed at `[S20.1] install into the filesystem FAIL`
+because the WovenShell image is 81,752 bytes, over the 64 KiB
+`VFS_NODE_CAPACITY` (also the exec image limit). It was 65,368 bytes before
+`d946a28` (Stage 26.5 i18n, 73,560) and grew with Stages 20.17/20.18.
+
+- `VFS_NODE_CAPACITY` is now 128 KiB.
+- The four NODE_CAPACITY buffers that were kernel-stack locals
+  (`vfs::materialize_disk_node`, two journal-recovery paths and batch
+  persistence in `storage.rs`) are heap-allocated, like their neighbours.
+- Runtime node resets use in-place `Node::reset`/`reset_directory` instead
+  of building a NODE_CAPACITY temporary.
+- The three self-test scratch registries use unranked zero-initialized
+  `spin::Mutex` statics, so they live in `.bss` instead of `.data`.
+- Net effect on the debug `stage20-1-test` kernel: the ELF shrinks from
+  49.6 MB to 41.0 MB (well under the 64 MiB boot-measurement bound), but
+  `.data` + `.bss` grows from about 27.9 MB to 44.7 MB of RAM.
+- On-disk journals: WDJ1/WDJ2 readers accept records up to the new bound,
+  so existing smaller records still recover. A record written with a file
+  over 64 KiB cannot be recovered by an older kernel.
+- **Agents:** keep any new NODE_CAPACITY buffer on the heap.
 
 ## Codex - WovenUpdate service-process slice (2026-10-21)
 
