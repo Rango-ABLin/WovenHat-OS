@@ -1066,9 +1066,11 @@ struct Desktop {
     /// exact strings every already-accepted lock-screen gate expects;
     /// Quick Settings can switch it to Chichewa.
     language: libwoven::i18n::Language,
-    /// Whether the desktop renders in 3D (currently: the Quick Settings
-    /// panel, perspective-projected). Defaults to off, which keeps every
-    /// already-accepted gate's pixel-exact 2D rendering unchanged.
+    /// Whether the desktop renders in 3D: the wallpaper and lock screen as
+    /// a receding floor, the taskbar, title bars, and every floating panel
+    /// (Quick Settings, launcher, Notification Center, toast) as tilted
+    /// cards. Defaults to off until the pixel-exact 3D acceptance matrix is
+    /// complete; Quick Settings can enable it for supported sessions.
     three_d: bool,
     /// Accessibility: skip the window-open fade-in animation, appearing at
     /// full opacity immediately. Defaults to off, matching
