@@ -15,6 +15,16 @@ The generated ISO booted in QEMU using the installed OVMF firmware and reached
 `UEFI bootloader started`, `TRACE: exiting boot services`, and kernel output.
 The selected existing debug image then reported an app-catalog self-test
 failure, so this is not a full release gate. No physical disks were accessed.
+The catalog harness now supports `--image-path-output`, making the exact image
+used by its validated QEMU run available to downstream ISO generation instead
+of relying on target-directory timestamp selection.
+
+The exact-path flow was rerun successfully: Stage 19 catalog QEMU passed with
+all eleven signed applications, the emitted image was converted to an ISO, and
+that exact ISO reached the same eleven-application PASS marker in OVMF/QEMU.
+When the source ESP exceeds El Torito's 65536-sector field, the builder only
+accepts an all-zero discarded tail and rewrites the bounded FAT total-sector
+field; non-zero truncation is refused.
 
 ## Stage 24.59 disk-pressure gap closed (Claude, 2026-10-22)
 

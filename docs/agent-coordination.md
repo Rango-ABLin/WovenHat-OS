@@ -12,7 +12,15 @@ from later self-test failures. The generated ISO reached the WovenHat kernel in
 QEMU; the selected stale debug image later reported an app-catalog self-test
 failure. Physical disks, the Windows disk, the USB, and the backup disk were
 not accessed. Focused smoke, Python compilation, and diff checks pass; pytest
-is unavailable in the current Python environment.
+is unavailable in the current Python environment. The catalog harness now
+emits the exact validated image path for downstream ISO generation.
+
+The exact-path rerun passed: Stage 19 catalog QEMU reached the eleven-signed-
+application PASS marker, the emitted image was converted to ISO, and the exact
+ISO reached that same marker in OVMF/QEMU for 60 seconds. ESPs larger than the
+El Torito 65536-sector field are bounded only when their discarded tail is all
+zero and the FAT total-sector field is rewritten; non-zero truncation fails
+closed.
 
 ## Codex - Stage 28 disposable-image end-to-end acceptance harness (2026-10-22)
 

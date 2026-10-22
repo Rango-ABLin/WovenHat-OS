@@ -21,6 +21,7 @@ from pathlib import Path
 
 SECTOR = 512
 ISO_SECTOR = 2048
+MAX_EL_TORITO_SECTORS = 0x10000
 GPT_HEADER_LBA = 1
 GPT_ENTRY_LBA = 2
 GPT_ENTRY_SIZE = 128
@@ -86,7 +87,22 @@ def _extract_esp(source: Path) -> bytes:
                       or b"BOOTX64 EFI" in esp.upper())
     if not boot_name_seen:
         raise IsoError("EFI System Partition does not contain BOOTX64.EFI bytes")
-    return esp
+    max_bytes = MAX_EL_TORITO_SECTORS * SECTOR
+    if len(esp) <= max_bytes:
+        return esp
+    # El Torito stores the EFI image size in a 16-bit 512-byte-sector field;
+    # zero represents exactly 65536 sectors. A bounded copy is safe only when
+    # the discarded tail is all zero and the FAT BPB is reduced accordingly.
+    if any(esp[max_bytes:]):
+        raise IsoError("EFI System Partition exceeds El Torito limit with non-zero tail")
+    bounded = bytearray(esp[:max_bytes])
+    total16 = struct.unpack_from("<H", bounded, 19)[0]
+    total32 = struct.unpack_from("<I", bounded, 32)[0]
+    original_total = total16 or total32
+    if original_total > MAX_EL_TORITO_SECTORS:
+        struct.pack_into("<H", bounded, 19, 0)
+        struct.pack_into("<I", bounded, 32, MAX_EL_TORITO_SECTORS)
+    return bytes(bounded)
 
 
 def _both_endian_u32(value: int) -> bytes:
@@ -154,7 +170,7 @@ def _catalog(boot_lba: int, boot_bytes: int) -> bytes:
     default[0] = 0x88
     default[1] = 0
     boot_sectors = boot_bytes // SECTOR
-    if boot_sectors == 0 or boot_sectors > 0x10000:
+    if boot_sectors == 0 or boot_sectors > MAX_EL_TORITO_SECTORS:
         raise IsoError("EFI boot image must contain 1-65536 512-byte sectors")
     # El Torito encodes 65536 sectors as zero in the 16-bit count field.
     struct.pack_into("<H", default, 6, 0 if boot_sectors == 0x10000 else boot_sectors)
