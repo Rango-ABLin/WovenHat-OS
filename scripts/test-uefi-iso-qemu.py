@@ -31,7 +31,7 @@ def _regular(path: Path, label: str) -> None:
 
 
 def run_gate(iso: Path, firmware: Path, qemu: Path, serial_log: Path,
-             timeout: float, markers: tuple[str, ...]) -> dict[str, object]:
+             timeout: float, markers: tuple[str, ...], cpus: int = 1) -> dict[str, object]:
     _regular(iso, "ISO")
     _regular(firmware, "OVMF firmware")
     _regular(qemu, "QEMU")
@@ -40,7 +40,7 @@ def run_gate(iso: Path, firmware: Path, qemu: Path, serial_log: Path,
     serial_log.parent.mkdir(parents=True, exist_ok=True)
     command = [
         str(qemu), "-accel", "tcg,tb-size=128", "-machine", "q35", "-m", "256M",
-        "-smp", "1", "-display", "none", "-serial", f"file:{serial_log}",
+        "-smp", str(cpus), "-display", "none", "-serial", f"file:{serial_log}",
         "-no-reboot", "-drive", f"if=pflash,unit=0,format=raw,readonly=on,file={firmware}",
         "-cdrom", str(iso), "-boot", "d",
     ]
@@ -64,6 +64,7 @@ def run_gate(iso: Path, firmware: Path, qemu: Path, serial_log: Path,
     passed = all(found.values()) and not forbidden
     result = {
         "iso": str(iso.resolve()),
+        "cpus": cpus,
         "firmware": str(firmware.resolve()),
         "qemu": str(qemu.resolve()),
         "serial_log": str(serial_log.resolve()),
@@ -86,12 +87,13 @@ def main() -> int:
     parser.add_argument("--qemu", type=Path, required=True)
     parser.add_argument("--serial-log", type=Path, required=True)
     parser.add_argument("--timeout", type=float, default=30.0)
+    parser.add_argument("--cpus", type=int, choices=(1, 2, 4), default=1)
     parser.add_argument("--marker", action="append", dest="markers")
     args = parser.parse_args()
     try:
         result = run_gate(args.iso.resolve(), args.firmware.resolve(), args.qemu.resolve(),
                           args.serial_log.resolve(), args.timeout,
-                          tuple(args.markers or DEFAULT_MARKERS))
+                          tuple(args.markers or DEFAULT_MARKERS), args.cpus)
     except (OSError, ValueError) as exc:
         parser.error(str(exc))
     print(json.dumps(result, indent=2, sort_keys=True))

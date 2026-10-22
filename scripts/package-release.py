@@ -1,5 +1,6 @@
 """Package only the image and source state recorded by the successful release gate."""
 import hashlib
+import importlib.util
 import json
 from pathlib import Path
 import shutil
@@ -51,6 +52,14 @@ out = root / 'target' / 'releases' / '0.8.0'
 out.mkdir(parents=True, exist_ok=True)
 packaged = out / 'wovenhat-os-0.8.0-uefi.img'
 shutil.copyfile(image, packaged)
+iso_builder_spec = importlib.util.spec_from_file_location(
+    'wovenhat_uefi_iso', root / 'scripts' / 'build-uefi-iso.py')
+if iso_builder_spec is None or iso_builder_spec.loader is None:
+    raise SystemExit('Unable to load the Stage 28 UEFI ISO builder.')
+iso_builder = importlib.util.module_from_spec(iso_builder_spec)
+iso_builder_spec.loader.exec_module(iso_builder)
+packaged_iso = out / 'wovenhat-os-0.8.0-uefi.iso'
+iso_builder.build_iso(packaged, packaged_iso, 'WOVENHAT')
 shutil.copyfile(root / 'docs' / 'release-0.8.0.md', out / 'RELEASE-NOTES.md')
 shutil.copyfile(report, out / 'results.json')
 system_apps = root / 'target' / 'system-apps' / '0.8.0'
@@ -61,12 +70,14 @@ if release_apps.exists():
     shutil.rmtree(release_apps)
 shutil.copytree(system_apps, release_apps)
 manifest['image'] = packaged.name
+manifest['iso'] = packaged_iso.name
+manifest['iso_sha256'] = sha(packaged_iso)
 manifest['base_commit'] = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=root, text=True).strip()
 manifest['working_tree_dirty'] = bool(subprocess.check_output(['git', 'status', '--porcelain'], cwd=root, text=True).strip())
 manifest['system_apps_manifest'] = 'system-apps/manifest.json'
 manifest['system_apps_manifest_sha256'] = sha(release_apps / 'manifest.json')
 (out / 'manifest.json').write_text(json.dumps(manifest, indent=2), encoding='utf-8')
-release_files = [packaged, out / 'RELEASE-NOTES.md', out / 'results.json', out / 'manifest.json']
+release_files = [packaged, packaged_iso, out / 'RELEASE-NOTES.md', out / 'results.json', out / 'manifest.json']
 release_files += sorted(path for path in release_apps.rglob('*') if path.is_file())
 (out / 'SHA256SUMS').write_text(
     ''.join(f"{sha(path)}  {path.relative_to(out).as_posix()}\n" for path in release_files),

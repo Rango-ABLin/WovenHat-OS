@@ -1,5 +1,26 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - Stage 28 exact ISO artifact gate (2026-10-22)
+
+The exact validated Stage 19 image with eleven signed applications was
+converted to `audit-artifacts/stage28-wovenhat-catalog.iso` and booted through
+OVMF/QEMU on 1/2/4 CPUs. All three runs reached the eleven-application PASS
+marker with no serial failure lines. The ISO SHA-256 is
+`4102e72057702dd37d2ade52d65c36a8b5bc5f01d6776114b4841c512d5af04a`.
+`test-uefi-iso-qemu.py` now accepts the required CPU matrix. This is
+file-backed QEMU qualification only; physical installation and hardware
+qualification remain open.
+
+## Codex - Stage 28 release artifact ISO packaging (2026-10-22)
+
+Wired `scripts/package-installer.py --include-iso` to the reviewed
+file-only `build-uefi-iso.py` builder. The installer manifest records the
+exact ISO artifact and SHA-256, and `SHA256SUMS` includes it. The release
+packager now emits and archives the ISO beside the UEFI disk image. Focused
+package tests, Python compilation, and diff checks pass. This does not access
+physical disks or claim hardware qualification; exact-artifact OVMF/QEMU
+acceptance remains required, and QEMU is not installed on this machine.
+
 ## Codex - Stage 28 ISO9660/El Torito UEFI artifact and QEMU gate (2026-10-22)
 
 Added the file-only `scripts/build-uefi-iso.py` and

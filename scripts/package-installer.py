@@ -8,6 +8,7 @@ machine-readable metadata and checksums.  It never opens a physical disk.
 
 import argparse
 import hashlib
+import importlib.util
 import json
 import os
 from pathlib import Path
@@ -18,6 +19,17 @@ import tempfile
 SECTOR_SIZE = 512
 GPT_SIGNATURE = b"EFI PART"
 MANIFEST_NAME = "installer-manifest.json"
+
+
+def build_iso_artifact(source: Path, output: Path, volume_id: str) -> dict[str, object]:
+    """Build the ISO through the reviewed file-only UEFI builder."""
+    builder_path = Path(__file__).with_name("build-uefi-iso.py")
+    spec = importlib.util.spec_from_file_location("wovenhat_uefi_iso", builder_path)
+    if spec is None or spec.loader is None:
+        raise ValueError("unable to load the UEFI ISO builder")
+    builder = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(builder)
+    return builder.build_iso(source, output, volume_id)
 
 
 def sha256(path: Path) -> str:
@@ -77,7 +89,8 @@ def source_image(manifest: Path | None, image: Path | None) -> tuple[Path, dict[
     }
 
 
-def package(source: Path, output: Path, source_record: dict[str, object], version: str) -> Path:
+def package(source: Path, output: Path, source_record: dict[str, object], version: str,
+            *, include_iso: bool = False, volume_id: str = "WOVENHAT") -> Path:
     if output.exists():
         raise FileExistsError(f"refusing to overwrite existing output: {output}")
     checks = validate_uefi_disk_image(source)
@@ -90,6 +103,15 @@ def package(source: Path, output: Path, source_record: dict[str, object], versio
         shutil.copyfile(source, artifact)
         if sha256(artifact) != digest:
             raise ValueError("copied artifact digest does not match source")
+        iso_record: dict[str, object] | None = None
+        if include_iso:
+            iso_path = staging / f"wovenhat-os-{version}-uefi.iso"
+            iso_record = build_iso_artifact(artifact, iso_path, volume_id)
+            iso_record = {
+                "file": iso_path.name,
+                "sha256": sha256(iso_path),
+                **iso_record,
+            }
         metadata = {
             "format": "WovenHat installer artifact",
             "format_version": 1,
@@ -104,8 +126,10 @@ def package(source: Path, output: Path, source_record: dict[str, object], versio
             "media": {
                 "qemu": "supported as a file-backed UEFI disk image",
                 "usb": "file image is ready for a separately reviewed writer",
-                "iso": "not-implemented: the existing build pipeline emits a UEFI disk image, not an ISO",
+                "iso": "included and requires exact-artifact UEFI QEMU acceptance"
+                if iso_record is not None else "not-requested",
             },
+            **({"iso_artifact": iso_record} if iso_record is not None else {}),
             "source": source_record,
             "physical_disk_access": "none",
             "destructive_partitioning": "not-implemented",
@@ -131,13 +155,17 @@ def main() -> int:
     parser.add_argument("--output", type=Path, required=True,
                         help="new output directory; existing directories are refused")
     parser.add_argument("--version", default="0.8.0")
+    parser.add_argument("--include-iso", action="store_true",
+                        help="also build the file-backed UEFI ISO artifact")
+    parser.add_argument("--iso-volume-id", default="WOVENHAT")
     args = parser.parse_args()
     try:
         source, record = source_image(
             args.validated_manifest.resolve() if args.validated_manifest else None,
             args.image,
         )
-        result = package(source, args.output.resolve(), record, args.version)
+        result = package(source, args.output.resolve(), record, args.version,
+                         include_iso=args.include_iso, volume_id=args.iso_volume_id)
     except (OSError, ValueError, json.JSONDecodeError) as error:
         parser.error(str(error))
     print(f"Packaged file-backed UEFI artifact: {result}")

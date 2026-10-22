@@ -1,5 +1,33 @@
 # Stage status
 
+## Stage 28 exact ISO artifact gate - 2026-10-22
+
+The exact validated Stage 19 catalog image containing all eleven signed
+applications was converted to
+`audit-artifacts/stage28-wovenhat-catalog.iso` and booted through OVMF/QEMU
+on 1, 2, and 4 CPUs. Each run reached the eleven-application PASS marker with
+no serial failure lines. Evidence is retained in
+`audit-artifacts/stage28-wovenhat-catalog-iso-{serial,2cpu-serial,4cpu-serial}.log`.
+The ISO builder reported SHA-256
+`4102e72057702dd37d2ade52d65c36a8b5bc5f01d6776114b4841c512d5af04a`.
+
+This qualifies the file-backed UEFI ISO/QEMU artifact path only. It does not
+qualify physical USB/disk installation, native hardware, Secure Boot, or
+release publication.
+
+## Stage 28 release artifact now includes the UEFI ISO - 2026-10-22
+
+The file-backed installer packager now has an explicit `--include-iso` path
+that uses the reviewed transactional ISO9660/El Torito builder, records the
+ISO filename/digest/format in `installer-manifest.json`, and includes it in
+`SHA256SUMS`. The release packager now emits the ISO beside the UEFI disk
+image and includes it in the release archive and manifest. Focused package
+tests, Python compilation, and diff checks pass.
+
+This closes the packaging omission only. The exact ISO still requires the
+existing OVMF/QEMU gate; this machine currently has no QEMU executable, and
+physical USB/disk installation and hardware qualification remain unclaimed.
+
 ## Stage 28 ISO9660/El Torito UEFI artifact and QEMU gate - 2026-10-22
 
 Added `scripts/build-uefi-iso.py`, which extracts the verified EFI System

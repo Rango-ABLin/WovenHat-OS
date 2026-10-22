@@ -53,6 +53,16 @@ class PackageInstallerTests(unittest.TestCase):
             with self.assertRaises(FileExistsError):
                 MODULE.package(source, output, {"input": "explicit-image"}, "test")
 
+    def test_iso_option_requires_a_real_gpt_uefi_image(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "source.img"
+            output = root / "package"
+            image(source)
+            with self.assertRaises(ValueError):
+                MODULE.package(source, output, {"input": "explicit-image"}, "test",
+                               include_iso=True)
+
 
 if __name__ == "__main__":
     unittest.main()

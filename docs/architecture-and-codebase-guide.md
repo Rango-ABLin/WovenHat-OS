@@ -131,15 +131,20 @@ booting the exact generated ISO in QEMU.
 
 ### Stage 28 - WovenInstaller bounded file-artifact boundary
 
-`scripts/package-installer.py` is the first installer-stage boundary. It
-consumes the existing `build.rs` UEFI disk image and its release-validation
-SHA-256 record, or an explicitly named file image, and writes only a new
-file-backed artifact directory. It validates sector alignment and the
-protective-MBR/GPT signatures before copying, then records the artifact,
-digest, media targets, and deliberately unimplemented ISO/physical-disk
-operations in `installer-manifest.json` and `SHA256SUMS`. It must not be
-extended to discover or write disks without a separate safety review and
-acceptance gate.
+`scripts/package-installer.py` consumes the existing `build.rs` UEFI disk
+image and its release-validation SHA-256 record, or an explicitly named file
+image, and writes only a new file-backed artifact directory. It validates
+sector alignment and the protective-MBR/GPT signatures before copying. With
+`--include-iso`, it invokes the reviewed file-only El Torito builder and adds
+the exact ISO digest and metadata to `installer-manifest.json` and
+`SHA256SUMS`. The release packager uses this same ISO path so the release
+archive cannot silently omit the bootable ISO. Neither path discovers or
+writes disks; physical-media installation remains a separate reviewed gate.
+
+`scripts/test-uefi-iso-qemu.py` boots one exact ISO artifact with caller-
+supplied OVMF and accepts the same 1/2/4 CPU matrix used by the catalog
+gates. It preserves one serial log per run and fails if a required
+firmware/kernel marker is absent or a failure marker appears.
 
 ### Stage 27.5 - WovenRecovery bounded environment
 
