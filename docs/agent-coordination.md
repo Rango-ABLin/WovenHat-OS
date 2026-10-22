@@ -1,5 +1,14 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - Stage 30 performance matrix rerun (2026-10-22)
+
+Re-ran Stage 30.1 through 30.5 on 1/2/4 CPUs. All fifteen QEMU benchmark
+gates passed with exit 33. The first 30.4 build hit host `StorageFull`; the
+repository-local reclaim utility removed only regenerable build caches and
+compressed old evidence images in place, preserving audit logs and source.
+The cycle counts remain QEMU TCG baselines and do not qualify native
+performance.
+
 ## Codex - Stage 29 hardware qualification laboratory boundary (2026-10-22)
 
 Added the read-only `scripts/qualify-hardware-report.py` manifest validator

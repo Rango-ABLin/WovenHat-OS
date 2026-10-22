@@ -1,5 +1,15 @@
 # Stage status
 
+## Stage 30 performance matrix rerun - 2026-10-22
+
+Re-ran the existing syscall, IPC, filesystem, compositor, and scheduler
+micro-benchmark gates on 1/2/4 CPUs. All fifteen runs passed with exit 33 and
+their per-run serial evidence remains under the corresponding
+`target/hello-gui-*-{1,2,4}cpu` directories. The first compositor build was
+interrupted by a full host volume (`StorageFull`); only regenerable local
+build caches were reclaimed, after which the remaining six runs passed. The
+reported cycle counts are QEMU TCG baselines, not native performance claims.
+
 ## Stage 29 hardware qualification laboratory boundary - 2026-10-22
 
 Added `scripts/qualify-hardware-report.py` and its focused test module. The
