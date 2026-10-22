@@ -16,12 +16,12 @@ class Stage31TorturePlanTests(unittest.TestCase):
         self.assertEqual(len(plan["jobs"]), 25)
         self.assertEqual(MODULE.validate_plan(plan), [])
 
-    def test_eight_and_sixteen_cpu_jobs_are_explicitly_blocked(self):
+    def test_eight_and_sixteen_cpu_jobs_are_pending(self):
         plan = MODULE.build_plan()
-        blocked = [job for job in plan["jobs"] if job["cpus"] in (8, 16)]
-        self.assertEqual(len(blocked), 10)
-        self.assertTrue(all(job["status"] == "blocked" for job in blocked))
-        self.assertTrue(all(job["command"] is None for job in blocked))
+        expanded = [job for job in plan["jobs"] if job["cpus"] in (8, 16)]
+        self.assertEqual(len(expanded), 10)
+        self.assertTrue(all(job["status"] == "pending" for job in expanded))
+        self.assertTrue(all(isinstance(job["command"], list) for job in expanded))
 
     def test_supported_jobs_are_pending_with_commands(self):
         plan = MODULE.build_plan((1, 4))

@@ -3268,7 +3268,10 @@ pub fn exit_current_process(exit_code: i32) -> ! {
                 process.exit_code = exit_code;
                 // Detach open files while PROCESS_TABLE is held, then release
                 // their VFS/pipe references after this guard is dropped.
-                detached_files = core::mem::take(&mut process.files);
+                detached_files = core::mem::replace(
+                    &mut process.files,
+                    [None; MAX_FILE_DESCRIPTORS],
+                );
                 // Keep the address space and mappings in the zombie until
                 // wait_process observes that every sibling is dead.  This is
                 // the ownership boundary that makes cross-CPU thread exit
@@ -3373,7 +3376,10 @@ pub fn wait_process(child_id: u64) -> Result<i32, WaitError> {
         if process.state != ProcessState::Exited {
             return Err(WaitError::StillRunning);
         }
-        let detached_files = core::mem::take(&mut process.files);
+        let detached_files = core::mem::replace(
+            &mut process.files,
+            [None; MAX_FILE_DESCRIPTORS],
+        );
         let exit_code = process.exit_code;
         let deferred_space = process.address_space.take().map(|address_space| {
             let mappings = core::mem::replace(
@@ -5720,7 +5726,10 @@ fn complete_process_termination(
             process.id,
             process.parent,
             process.exit_code,
-            core::mem::take(&mut process.files),
+            core::mem::replace(
+                &mut process.files,
+                [None; MAX_FILE_DESCRIPTORS],
+            ),
         )
     };
 

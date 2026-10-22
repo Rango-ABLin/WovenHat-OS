@@ -14,8 +14,8 @@ from pathlib import Path
 from typing import Any
 
 
-SUPPORTED_CPUS = (1, 2, 4)
 REQUESTED_CPUS = (1, 2, 4, 8, 16)
+SUPPORTED_CPUS = REQUESTED_CPUS
 SUITES = (
     ("memory", "scripts/test-memory-qemu.py"),
     ("storage", "scripts/test-storage-qemu.py"),
@@ -35,7 +35,7 @@ def build_plan(cpus: tuple[int, ...] = REQUESTED_CPUS) -> dict[str, Any]:
                 "suite": suite,
                 "cpus": cpu_count,
                 "status": "pending" if supported else "blocked",
-                "reason": None if supported else "QEMU acceptance harness supports only 1/2/4 CPUs",
+                "reason": None if supported else "CPU profile is not supported by the harness",
                 "command": (["python", script, "--cpus", str(cpu_count)]
                             if supported else None),
                 "evidence": None,

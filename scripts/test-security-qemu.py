@@ -9,7 +9,7 @@ import subprocess
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument('--cpus', type=int, choices=(1, 2, 4), default=1)
+    parser.add_argument('--cpus', type=int, choices=(1, 2, 4, 8, 16), default=1)
     parser.add_argument('--timeout', type=float, default=300)
     parser.add_argument('--qemu', default=shutil.which('qemu-system-x86_64') or r'C:\Program Files\qemu\qemu-system-x86_64.exe')
     parser.add_argument('--firmware', type=Path)

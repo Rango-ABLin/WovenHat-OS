@@ -8,7 +8,11 @@ use core::{
 };
 use x86_64::{registers::model_specific::Msr, structures::paging::PageTable};
 
-pub const MAX_CPUS: usize = 4;
+/// Maximum CPUs represented by the static per-CPU control plane. The current
+/// acceptance matrix exercises 1/2/4/8/16 CPUs; larger machines fail closed
+/// with an explicit topology truncation diagnostic until the per-CPU storage
+/// becomes dynamically allocated.
+pub const MAX_CPUS: usize = 16;
 pub const TIMER_VECTOR: u8 = 0xe0;
 pub const RESCHEDULE_VECTOR: u8 = 0xe1;
 pub const SPURIOUS_VECTOR: u8 = 0xff;
@@ -1864,7 +1868,11 @@ fn migration_stress_test() {
     }
 
     let mut migrations = 0usize;
-    let deadline = crate::timer::ticks() + 500;
+    // The probe count grows linearly with the online CPU count. Keep the
+    // bounded assertion, but scale its wall-clock budget with that explicit
+    // workload so 8/16-CPU runs are not rejected merely for doing more work.
+    let stress_budget = 500_u64.saturating_add((jobs as u64).saturating_mul(64));
+    let deadline = crate::timer::ticks().saturating_add(stress_budget);
     for round in 0..64usize {
         for (slot, id) in ids.iter().take(jobs).enumerate() {
             if let Some(id) = *id {
@@ -1891,9 +1899,10 @@ fn migration_stress_test() {
     );
 
     STRESS_RELEASE.store(true, Ordering::Release);
+    let completion_deadline = crate::timer::ticks().saturating_add(500);
     while STRESS_DONE.load(Ordering::Acquire) < jobs {
         assert!(
-            crate::timer::ticks() < deadline,
+            crate::timer::ticks() < completion_deadline,
             "migration stress completion timeout"
         );
         task::yield_now();

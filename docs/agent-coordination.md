@@ -1,5 +1,13 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - 16-CPU SMP and bounded-capacity expansion (2026-10-22)
+
+Raised `smp::MAX_CPUS` to 16 and expanded task/process/file-descriptor/IPC
+capacities to 128/128/64/256/64. An 8-CPU gate first exposed task-table
+exhaustion, and the repaired run then exposed a fixed migration-stress budget;
+both defects were fixed without weakening assertions. Memory/boot acceptance
+now passes at 8 and 16 CPUs. Other suite profiles remain pending.
+
 ## Codex - 4 GiB production memory floor (2026-10-22)
 
 Added the shared `MIN_SUPPORTED_RAM_BYTES`/`MIN_SUPPORTED_RAM_GIB` contract,
@@ -29,10 +37,10 @@ are still pending.
 
 Added `scripts/stage31-torture-plan.py` and
 `tests/test_stage31_torture_plan.py`. The deterministic planner enumerates
-memory/storage/network/security/shell jobs across 1/2/4/8/16 CPUs, marks
-unsupported 8/16-CPU profiles blocked with no command, and fails closed on
-plan tampering. It does not execute QEMU or claim reliability acceptance;
-executor, fault injection, and repeated-boot evidence remain open.
+memory/storage/network/security/shell jobs across 1/2/4/8/16 CPUs and fails
+closed on plan tampering. The 16-CPU control plane and memory/boot suite now
+pass at 8/16 CPUs; the other suites still need those profiles, and executor,
+fault injection, and repeated-boot evidence remain open.
 
 ## Codex - Stage 30 performance matrix rerun (2026-10-22)
 

@@ -13,7 +13,7 @@ def main():
     parser.add_argument('--qemu', default=shutil.which('qemu-system-x86_64') or r'C:\Program Files\qemu\qemu-system-x86_64.exe')
     parser.add_argument('--firmware', type=Path)
     parser.add_argument('--firmware-vars', type=Path, help='matching writable OVMF VARS template')
-    parser.add_argument('--cpus', type=int, choices=(1, 2, 4), default=2)
+    parser.add_argument('--cpus', type=int, choices=(1, 2, 4, 8, 16), default=2)
     parser.add_argument('--timeout', type=float, default=180)
     parser.add_argument('--release', action='store_true')
     args = parser.parse_args()

@@ -1,5 +1,15 @@
 # Stage status
 
+## 16-CPU SMP and bounded-capacity expansion - 2026-10-22
+
+Raised the static SMP control-plane limit from 4 to 16 CPUs and expanded the
+bounded scheduler/process/descriptor/IPC tables to 128 tasks, 128 processes,
+64 descriptors, 256 IPC objects, and 64 handles per process. The migration
+stress deadline now scales with its explicit probe workload; it does not drop
+assertions or reduce rounds. Production and host warning-denying Clippy pass.
+The 8- and 16-CPU memory/boot gates pass; other 8/16-CPU suite rows remain
+pending until separately executed.
+
 ## 4 GiB production memory floor and scalable memory telemetry - 2026-10-22
 
 Defined the supported production minimum as 4 GiB through
@@ -43,8 +53,11 @@ explicit across the roadmap's 1/2/4/8/16 CPU matrix. It marks 8/16-CPU jobs
 blocked because the current acceptance harnesses support only 1/2/4, and it
 never launches QEMU, injects faults, or treats an omitted job as passed.
 
-This is the orchestration foundation only. Stage 31 still needs a reviewed
-executor, randomized failure-injection contracts, low-resource scenarios,
+The 16-CPU control plane now compiles and the full memory/boot suite passes on
+8 and 16 CPUs after increasing bounded scheduler/process capacity and scaling
+the migration-stress budget with its explicit workload. This is still the
+orchestration foundation only: the other suites need 8/16-CPU execution,
+randomized failure-injection contracts, low-resource scenarios,
 service/driver restart coverage, and repeated-boot acceptance evidence.
 
 ## Stage 30 performance matrix rerun - 2026-10-22
