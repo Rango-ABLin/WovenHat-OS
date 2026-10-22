@@ -54,7 +54,7 @@ class Stage31TorturePlanTests(unittest.TestCase):
     def test_fault_scenario_map_is_explicit_and_fail_closed(self):
         plan = MODULE.build_plan((1,))
         scenarios = plan["fault_scenarios"]
-        self.assertEqual(plan["randomized_fault_injection"], "partial-wovenfs-host-only")
+        self.assertEqual(plan["randomized_fault_injection"], "partial-wovenfs-host-and-stage14-checksum")
         self.assertEqual(scenarios["filesystem-disk-full"], "covered-wovenfs-host")
         self.assertEqual(scenarios["service-lifecycle"], "covered-signed-update-service-1-2-4cpu")
         self.assertEqual(scenarios["packet-corruption"], "partial-stage31-checksum-boundary")

@@ -65,7 +65,7 @@ def build_plan(cpus: tuple[int, ...] = REQUESTED_CPUS) -> dict[str, Any]:
     return {
         "schema": "wovenhat.stage31-torture-plan/v1",
         "fail_closed": True,
-        "randomized_fault_injection": "partial-wovenfs-host-only",
+        "randomized_fault_injection": "partial-wovenfs-host-and-stage14-checksum",
         "fault_scenarios": FAULT_SCENARIOS,
         "requested_cpu_counts": list(cpus),
         "supported_cpu_counts": list(SUPPORTED_CPUS),
