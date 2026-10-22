@@ -1,5 +1,30 @@
 # Foundation release-validator hardening — integration pending acceptance
 
+## Latest frozen chain: FAILED, not accepted
+
+Session 71482 is terminal exit 1. Source `35d59de9` and all 861 frozen inputs
+remain unchanged. The failure is a 1-CPU live DNS timeout, after DHCP passed,
+during the exact full Stage 10.7 launcher. No timeout, assertion or network
+test is relaxed. A subsequent Windows example.com lookup returned addresses;
+an isolated dependency build also failed resolving index.crates.io. These
+observations do not establish the guest timeout's root cause or waive it.
+
+Passed before failure: build; host/production/eleven-feature warning-denying
+lint; 182 root host Rust, nineteen libwoven and 31 Python tests; three Stage
+1–5 boots; debug storage and optimized memory/storage on 1/2/4 CPUs; hotplug
+on 2/4 CPUs; and sixty inherited memory stress boots (10/30/20 on 1/2/4 CPUs).
+Independent inspection verified every one of those sixty overall pass markers.
+The later 10.8/10.9 matrix was not reached.
+
+Evidence: `audit-artifacts/foundation-release-20261016/attempt-20261016-091455-428/`,
+exact launcher `audit-artifacts/acceptance-20261016-093023-520/`, stress logs
+`stage7-6-artifacts/20261016-093026-619/`. First run 54720 remains separately
+invalidated by the concurrent merge; it is not this failure or an accepted run.
+
+The user then requested the next release patch: ATA durability is being
+developed separately on `codex/foundation-ata-flush-20261016`, retaining this
+failed baseline. Software/physical finalisation remains pending.
+
 User priority is stages 1–10 release preparation for desktops and laptops.
 The ordered requirements and unresolved delivery conditions are in
 `stage1-10-release-readiness.md`; this increment does not waive any blocker.

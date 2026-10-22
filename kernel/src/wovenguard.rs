@@ -84,7 +84,10 @@ pub const fn domain_ceiling(domain: SecurityDomain) -> CapabilitySet {
             .with(Capability::AudioPlayback)
             // The desktop session turns the machine off (Stage 20.15);
             // applications never can.
-            .with(Capability::PowerControl),
+            .with(Capability::PowerControl)
+            // The desktop session changes a signed-in account's own PIN;
+            // applications never can. See `accounts::change_pin`.
+            .with(Capability::AccountManage),
         SecurityDomain::User => CapabilitySet::userspace_ceiling(),
         SecurityDomain::Restricted => CapabilitySet::only(Capability::TimerRead),
     }
@@ -383,6 +386,79 @@ pub const fn default_sandbox(domain: SecurityDomain) -> SandboxProfile {
         SecurityDomain::User => SandboxProfile::USER_DEFAULT,
         SecurityDomain::Restricted => SandboxProfile::RESTRICTED,
     }
+}
+
+/// Derive the launch ceiling for a signed package declaration. Package
+/// declarations are never allowed to widen the normal user domain; the
+/// default file/device/service policies are narrowed to the declared coarse
+/// capabilities so an omitted declaration cannot silently inherit authority.
+#[cfg(any(
+    feature = "stage21-7-test",
+    feature = "stage21-8-test",
+    feature = "stage21-9-test",
+    feature = "stage21-10-test",
+    feature = "stage21-11-test",
+    feature = "stage22-5-test",
+    feature = "stage23-1-test",
+    feature = "stage23-2-test",
+    feature = "stage23-3-test",
+    feature = "stage23-4-test",
+    feature = "system-apps"
+))]
+pub const fn package_sandbox(capabilities: CapabilitySet) -> Option<SandboxProfile> {
+    if !capabilities.is_subset_of(CapabilitySet::userspace_ceiling()) {
+        return None;
+    }
+    let files = FilePolicy::scoped(
+        if capabilities.contains(Capability::FileRead) {
+            FilePolicy::scope_mask(FileScope::System)
+                | FilePolicy::scope_mask(FileScope::Temporary)
+                | FilePolicy::scope_mask(FileScope::Mounted)
+                | FilePolicy::scope_mask(FileScope::Home)
+        } else {
+            0
+        },
+        if capabilities.contains(Capability::FileWrite) {
+            FilePolicy::scope_mask(FileScope::Temporary) | FilePolicy::scope_mask(FileScope::Home)
+        } else {
+            0
+        },
+    );
+    let mut devices = DevicePolicy::NONE;
+    if capabilities.contains(Capability::NetworkIo) {
+        devices = DevicePolicy {
+            mask: devices.mask | DeviceClass::Network.bit(),
+        };
+    }
+    if capabilities.contains(Capability::StorageIo) {
+        devices = DevicePolicy {
+            mask: devices.mask | DeviceClass::Storage.bit(),
+        };
+    }
+    if capabilities.contains(Capability::DisplayIo) {
+        devices = DevicePolicy {
+            mask: devices.mask | DeviceClass::Display.bit(),
+        };
+    }
+    if capabilities.contains(Capability::InputIo) {
+        devices = DevicePolicy {
+            mask: devices.mask | DeviceClass::Input.bit(),
+        };
+    }
+    if capabilities.contains(Capability::DeviceIo) {
+        devices = DevicePolicy {
+            mask: devices.mask | DeviceClass::Generic.bit(),
+        };
+    }
+    Some(
+        SandboxProfile::new(0x2100, capabilities)
+            .with_service_policy(ServicePolicy::only(
+                ServiceClass::Application,
+                ServiceClass::Application,
+            ))
+            .with_file_policy(files)
+            .with_device_policy(devices),
+    )
 }
 
 /// Stage 9.5 device/resource decision.  Device classes are intentionally

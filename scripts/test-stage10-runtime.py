@@ -140,6 +140,8 @@ def required_markers(stage, cpus):
             '[S11.2] threads/TLS/join: PASSED',
         ])
     if stage == '11.5-compiler':
+        required.append('[S11.COMPILER] shared-library PT_TLS relocation and per-process template: PASSED')
+    if stage == '11.5-compiler':
         required.extend([
             '[S11.COMPILER] actual shared import and exact owner teardown: PASSED',
             '[S11.COMPILER] nonzero-bias shared PIE and teardown: PASSED',
@@ -155,6 +157,19 @@ def required_markers(stage, cpus):
             '[S11.5] shared libraries transitive graph and cross-image relocation: PASSED',
             '[S11.5] shared libraries W^X RELRO and fork preservation: PASSED',
             '[S11.5] shared libraries Ring-3 import call and owner teardown: PASSED',
+            '[S11.5] shared libraries lazy PLT slot remains unresolved before first call: PASSED',
+            '[S11.5] shared libraries lazy PLT first-call resolution and teardown: PASSED',
+            '[S11.5] shared libraries lazy PLT load: PASSED',
+            '[S11.5] shared libraries DT_REL runtime relocation: PASSED',
+            '[S11.5] shared libraries DT_REL Ring-3 execution and teardown: PASSED',
+            '[S11.5] shared libraries DT_JMPREL DT_REL runtime relocation: PASSED',
+            '[S11.5] shared libraries DT_JMPREL DT_REL Ring-3 execution and teardown: PASSED',
+            '[S11.5] shared libraries weak symbol runtime resolution: PASSED',
+            '[S11.5] shared libraries weak symbol Ring-3 execution and teardown: PASSED',
+            '[S11.5] shared libraries versioned symbol runtime resolution: PASSED',
+            '[S11.5] shared libraries versioned symbol Ring-3 execution and teardown: PASSED',
+            '[S11.5] shared libraries constructors scheduled before Ring-3 entry: PASSED',
+            '[S11.5] shared libraries constructors/destructors Ring-3 execution and teardown: PASSED',
             '[S11.5] shared libraries unresolved import rollback: PASSED',
             '[S11.5] shared libraries argv failure rollback: PASSED',
         ])

@@ -54,8 +54,8 @@ shutil.copyfile(image, packaged)
 shutil.copyfile(root / 'docs' / 'release-0.8.0.md', out / 'RELEASE-NOTES.md')
 shutil.copyfile(report, out / 'results.json')
 system_apps = root / 'target' / 'system-apps' / '0.8.0'
-if not (system_apps / 'manifest.json').is_file():
-    subprocess.run([sys.executable, str(root / 'scripts' / 'package-system-apps.py'), '--version', '0.8.0'], cwd=root, check=True)
+subprocess.run([sys.executable, str(root / 'scripts' / 'package-system-apps.py'),
+                '--version', '0.8.0', '--production'], cwd=root, check=True)
 release_apps = out / 'system-apps'
 if release_apps.exists():
     shutil.rmtree(release_apps)

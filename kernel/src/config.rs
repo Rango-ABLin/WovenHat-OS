@@ -17,8 +17,16 @@ pub const MAX_FILE_DESCRIPTORS: usize = 16;
 
 /// Kernel stack size reserved for each task (bytes).
 // Debug fork copies bounded process metadata and walks sparse mappings.
-// Reserve room for nested calls and fault population on the same entry stack.
-pub const TASK_STACK_SIZE: usize = 4096 * 32;
+// The package authority also carries two bounded WovenStore snapshots while
+// crossing the native WovenFS boundary, so service-enabled builds reserve the
+// larger stack explicitly rather than allowing a transaction to overrun the
+// canary-protected 64-KiB baseline.
+pub const TASK_STACK_SIZE: usize = if cfg!(any(feature = "stage22-5-test", feature = "system-apps"))
+{
+    4096 * 256
+} else {
+    4096 * 64
+};
 
 /// Maximum IPC endpoints (one per process is typical).
 pub const MAX_IPC_ENDPOINTS: usize = 32;
@@ -66,8 +74,11 @@ pub const MAX_IO_SIZE: usize = 1024;
 /// Maximum VFS nodes (files) that can exist simultaneously.
 pub const MAX_VFS_NODES: usize = 64;
 
-/// Capacity of each VFS node data buffer (bytes).
-pub const VFS_NODE_CAPACITY: usize = 64 * 1024;
+/// Capacity of each VFS node data buffer (bytes). This is also the largest
+/// executable image `exec` reads from the VFS. It is 128 KiB because the
+/// WovenShell image outgrew 64 KiB (81,752 bytes after Stages 26.5 and
+/// 20.17/20.18). Never put a buffer of this size on a kernel stack.
+pub const VFS_NODE_CAPACITY: usize = 128 * 1024;
 
 /// Maximum ELF loadable segments accepted by the loader.
 pub const MAX_ELF_SEGMENTS: usize = 8;

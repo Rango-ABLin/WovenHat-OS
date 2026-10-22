@@ -59,6 +59,8 @@ pub enum Error {
     SystemFull,
     /// Requested dimensions exceed the caps.
     OutOfRange,
+    /// The copy this call makes could not be allocated.
+    OutOfMemory,
 }
 
 /// A handle packing slot, generation and owner.
@@ -262,6 +264,16 @@ pub fn create(owner: u64, width: u32, height: u32) -> Result<Handle, Error> {
 }
 
 /// Fill a rectangle in the surface named by `handle`.
+///
+/// Does not mark damage: Stage 19.9's accepted contract is that a client
+/// opts in to exposing what it drew by calling [`mark_damage`] (via the
+/// `damage` syscall) itself, so it may draw privately (e.g. preparing a
+/// frame) without every draw call being implicitly visible to a compositor
+/// watching for damage. Every packaged app instead draws into its own
+/// offscreen `Canvas` and uploads the whole thing with [`write_pixels`],
+/// which does mark damage -- that is the one path real apps need auto-marked
+/// (see the 2026-10-19 "register client surface damage" commit), and it does
+/// not carry this one's private-drawing contract.
 pub fn fill_rect(handle: Handle, rect: Rect, color: u32) -> Result<(), Error> {
     with_registry(|registry| {
         let surface = registry.resolve_mut(handle)?;
@@ -270,7 +282,8 @@ pub fn fill_rect(handle: Handle, rect: Rect, color: u32) -> Result<(), Error> {
     })
 }
 
-/// Stroke a rectangle outline in the surface named by `handle`.
+/// Stroke a rectangle outline in the surface named by `handle`. Does not mark
+/// damage; see [`fill_rect`].
 pub fn stroke_rect(handle: Handle, rect: Rect, color: u32) -> Result<(), Error> {
     with_registry(|registry| {
         let surface = registry.resolve_mut(handle)?;
@@ -279,7 +292,8 @@ pub fn stroke_rect(handle: Handle, rect: Rect, color: u32) -> Result<(), Error> 
     })
 }
 
-/// Draw `text` into the surface at `(x, y)`.
+/// Draw `text` into the surface at `(x, y)`. Does not mark damage; see
+/// [`fill_rect`].
 ///
 /// No syscall exposes this yet, because the three-register ABI cannot carry a
 /// handle, coordinates, a user pointer, a length, and a colour at the same
@@ -304,7 +318,8 @@ pub fn draw_text(handle: Handle, x: i32, y: i32, text: &str, color: u32) -> Resu
 pub fn snapshot(handle: Handle) -> Result<Surface, Error> {
     with_registry(|registry| {
         let surface = registry.resolve_mut(handle)?;
-        let mut copy = Surface::new(surface.width(), surface.height());
+        let mut copy =
+            Surface::try_new(surface.width(), surface.height()).ok_or(Error::OutOfMemory)?;
         copy.blit(surface, 0, 0);
         Ok(copy)
     })
@@ -334,7 +349,7 @@ pub fn snapshot_region(
         }
         let surface = registry.resolve_mut(handle)?;
         let clipped = region.intersect(surface.bounds());
-        let mut copy = Surface::new(clipped.width, clipped.height);
+        let mut copy = Surface::try_new(clipped.width, clipped.height).ok_or(Error::OutOfMemory)?;
         copy.blit_region(surface, clipped, 0, 0);
         Ok((clipped, copy))
     })
@@ -367,7 +382,8 @@ pub fn snapshot_shared(handle: Handle, grantee: u64) -> Result<Surface, Error> {
             return Err(Error::InvalidHandle);
         }
         let surface = registry.resolve_mut(handle)?;
-        let mut copy = Surface::new(surface.width(), surface.height());
+        let mut copy =
+            Surface::try_new(surface.width(), surface.height()).ok_or(Error::OutOfMemory)?;
         copy.blit(surface, 0, 0);
         Ok(copy)
     })
@@ -423,7 +439,7 @@ pub fn take_damage_shared(handle: Handle, grantee: u64) -> Result<Option<(Rect, 
             .surface
             .as_ref()
             .expect("resolved above");
-        let mut copy = Surface::new(region.width, region.height);
+        let mut copy = Surface::try_new(region.width, region.height).ok_or(Error::OutOfMemory)?;
         for row in 0..region.height as i32 {
             for column in 0..region.width as i32 {
                 if let Some(color) = source.pixel(region.x + column, region.y + row) {
@@ -494,13 +510,16 @@ pub fn dimensions(handle: Handle) -> Result<(usize, usize), Error> {
 /// pixels, row by row. The rectangle must lie inside the surface and the
 /// buffer must match it exactly.
 pub fn write_pixels(handle: Handle, rect: Rect, bytes: &[u8]) -> Result<(), Error> {
-    with_registry(|registry| {
+    let touched = with_registry(|registry| {
         let surface = registry.resolve_mut(handle)?;
-        if surface.write_pixels(rect, bytes).is_empty() {
-            return Err(Error::OutOfRange);
+        let touched = surface.write_pixels(rect, bytes);
+        if touched.is_empty() {
+            Err(Error::OutOfRange)
+        } else {
+            Ok(touched)
         }
-        Ok(())
-    })
+    })?;
+    mark_damage(handle, touched)
 }
 
 /// Read one pixel back, so a client can verify what it drew.
@@ -712,6 +731,13 @@ pub fn damage_self_test() -> bool {
         return false;
     };
     let _ = fill_rect(surface, Rect::new(0, 0, 10, 10), rgb(1, 1, 1));
+    // fill_rect itself now marks the whole surface damaged (so a client's
+    // draw actually reaches the compositor); drain that setup damage before
+    // testing this function's own mark_damage calls below, which is the
+    // only way to clear pending damage without a real client in the loop.
+    let _ = share(surface, Some(grantee));
+    let _ = take_damage_shared(surface, grantee);
+    let _ = share(surface, None);
     // Damage is clipped to the surface, unioned, and readable only through a
     // grant; taking it clears it.
     let ok_unshared = mark_damage(surface, Rect::new(8, 8, 5, 5)).is_ok()

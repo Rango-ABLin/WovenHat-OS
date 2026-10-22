@@ -7,7 +7,7 @@ returns to the text terminal. With --stage 20.2 hello-gui is embedded too and
 runs as desktop applications: windows, taskbar entries, the tray and
 notifications, driven by real pointer and keyboard input.
 """
-import argparse, os, shutil, subprocess, sys
+import argparse, json, os, shutil, subprocess, sys
 from pathlib import Path
 APP='wovenhat-woven-shell'
 STAGES={
@@ -24,6 +24,9 @@ STAGES={
     '20.11': ('stage20-11-test', '[S20.11] lock screen: PASSED', 'woven-shell-lock', 'lock screen'),
     '20.12': ('stage20-12-test', '[S20.12] sign-in: PASSED', 'woven-shell-sign-in', 'sign-in'),
     '20.13': ('stage20-13-test', '[S20.13] workspaces: PASSED', 'woven-shell-workspaces', 'workspaces'),
+    '24.59': ('stage24-59-test', '[S24.59] Change-PIN flow: PASSED', 'woven-shell-change-pin', 'Change-PIN flow'),
+    '20.17': ('stage20-17-test', '[S20.17] 3D desktop Quick Settings: PASSED', 'woven-shell-3d', '3D desktop Quick Settings'),
+    '20.18': ('stage20-18-test', '[S20.18] 3D desktop title bars: PASSED', 'woven-shell-3d-title', '3D desktop title bars'),
 }
 
 def app_build_env(app_dir):
@@ -58,7 +61,38 @@ def main():
     image=app_dir/'target'/'x86_64-unknown-none'/'release'/APP
     env=dict(os.environ)
     env['WOVENHAT_SHELL_IMAGE']=str(image)
-    if a.stage in ('20.2','20.3','20.4','20.5','20.6','20.7','20.8','20.9','20.10','20.11','20.12','20.13'):
+    if a.stage == '24.59':
+        # The acceptance image uses the production identity/session capability
+        # boundary, so wire the same signed package set as a system-app boot.
+        test_public_key = 'd75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a'
+        package_env = dict(os.environ)
+        package_env.setdefault('WOVENHAT_APP_TRUSTED_PUBLIC_KEY_HEX', test_public_key)
+        subprocess.run(
+            [sys.executable, str(root / 'scripts' / 'package-system-apps.py'), '--version', '0.8.0'],
+            cwd=root, env=package_env, check=True,
+        )
+        output = root / 'target' / 'system-apps' / '0.8.0'
+        manifest = json.loads((output / 'manifest.json').read_text(encoding='utf-8'))
+        variables = {
+            'woven-calculator': 'WOVENHAT_CALCULATOR_IMAGE',
+            'woven-terminal': 'WOVENHAT_TERMINAL_IMAGE',
+            'woven-files': 'WOVENHAT_FILES_IMAGE',
+            'woven-monitor': 'WOVENHAT_MONITOR_IMAGE',
+            'woven-settings': 'WOVENHAT_SETTINGS_IMAGE',
+            'woven-security': 'WOVENHAT_SECURITY_IMAGE',
+            'woven-editor': 'WOVENHAT_EDITOR_IMAGE',
+            'woven-images': 'WOVENHAT_IMAGES_IMAGE',
+            'woven-update': 'WOVENHAT_UPDATE_IMAGE',
+            'woven-store': 'WOVENHAT_STORE_IMAGE',
+        }
+        for item in manifest['apps']:
+            env[variables[item['id']]] = str(output / item['package'])
+        env['WOVENHAT_APP_TRUSTED_PUBLIC_KEY_HEX'] = test_public_key
+        env['WOVENHAT_PACKAGE_IMAGE'] = subprocess.check_output(
+            [sys.executable, str(root / 'scripts' / 'build-package-service.py')],
+            cwd=root, env=package_env, text=True,
+        ).strip()
+    if a.stage in ('20.2','20.3','20.4','20.5','20.6','20.7','20.8','20.9','20.10','20.11','20.12','20.13','20.18'):
         gui_dir=root/'apps'/'hello-gui'
         if subprocess.run(['cargo','build','--release'],cwd=gui_dir,env=app_build_env(gui_dir)).returncode: return 1
         env['WOVENHAT_HELLO_GUI_IMAGE']=str(gui_dir/'target'/'x86_64-unknown-none'/'release'/'wovenhat-hello-gui')

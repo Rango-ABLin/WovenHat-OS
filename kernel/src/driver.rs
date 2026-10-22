@@ -1,10 +1,7 @@
 //! Bounded WovenDriver manager: discovery, matching, binding, and power state.
-#![cfg_attr(
-    any(not(feature = "qemu-test"), feature = "stage13-12-test"),
-    expect(
-        dead_code,
-        reason = "production binds through register_pci/bind_pci/unbind_pci_resources; power, interrupt and hotplug paths are exercised by the Stage 13.1/13.2 gates until production drivers call them"
-    )
+#![expect(
+    dead_code,
+    reason = "production binds through register_pci/bind_pci/unbind_pci_resources; QEMU feature gates compile the shared suspend model without bringing up production hardware"
 )]
 use crate::device::DeviceKind;
 use crate::irq_lock::IrqMutex as Mutex;
@@ -74,6 +71,59 @@ enum PciInterrupt {
 /// Bounded driver binding table. Device discovery happens before this lock;
 /// rank 10 therefore covers only the local binding transaction.
 static TABLE: Mutex<[Option<Entry>; MAX]> = Mutex::with_rank([None; MAX], 10);
+
+/// A successful, bounded driver-quiescence transaction. Names are static
+/// registration identities; a suspended entry cannot be unbound or rebound
+/// until this plan is resumed.
+#[derive(Clone, Copy)]
+pub struct SuspendPlan {
+    names: [&'static str; MAX],
+    count: usize,
+}
+
+/// Suspend every currently bound driver, rolling back already-suspended
+/// drivers in reverse registration order if any participant refuses. The
+/// table is sampled before any device transition so no table lock is held
+/// across driver or PCI hardware operations.
+pub fn suspend_all() -> Option<SuspendPlan> {
+    let mut names = [""; MAX];
+    let count = {
+        let table = TABLE.lock();
+        let mut count = 0;
+        for entry in table.iter().flatten() {
+            if entry.state == State::Bound {
+                if count == MAX {
+                    return None;
+                }
+                names[count] = entry.name;
+                count += 1;
+            }
+        }
+        count
+    };
+    for index in 0..count {
+        if !suspend(names[index]) {
+            for rollback in (0..index).rev() {
+                let _ = resume(names[rollback]);
+            }
+            return None;
+        }
+    }
+    Some(SuspendPlan { names, count })
+}
+
+/// Resume a previously successful suspend plan. Every participant is
+/// attempted even if one resume fails so later drivers are not abandoned
+/// silently.
+pub fn resume_all(plan: SuspendPlan) -> bool {
+    let mut restored = true;
+    for index in (0..plan.count).rev() {
+        if !resume(plan.names[index]) {
+            restored = false;
+        }
+    }
+    restored
+}
 pub fn register(name: &'static str, kind: DeviceKind) -> bool {
     register_inner(name, kind, None)
 }

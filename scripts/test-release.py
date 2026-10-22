@@ -72,7 +72,7 @@ def main():
         run(f'{suite}-4-release', [sys.executable, f'scripts/test-{suite}-qemu.py', '--cpus', '4', '--release'] + options)
     run('build-release', ['cargo', 'build', '--release'])
     run('shell-smoke', [sys.executable, 'scripts/test-shell-qemu.py'] + options)
-    app_directories = ('woven-calculator', 'woven-terminal', 'woven-files', 'woven-monitor', 'woven-settings', 'woven-security', 'woven-editor', 'woven-images', 'woven-update', 'woven-store')
+    app_directories = ('woven-calculator', 'woven-terminal', 'woven-files', 'woven-monitor', 'woven-settings', 'woven-security', 'woven-editor', 'woven-images', 'woven-update', 'woven-store', 'woven-package', 'woven-ai')
     for app in app_directories:
         run(
             f'lint-app-{app}',
@@ -97,6 +97,105 @@ def main():
         run(
             f'system-app-catalog-{cpus}',
             [sys.executable, 'scripts/test-system-app-catalog-qemu.py', '--cpus', str(cpus)] + options,
+        )
+    transaction_options = []
+    for key in ('qemu', 'firmware'):
+        if getattr(args, key):
+            transaction_options.extend([f'--{key}', getattr(args, key)])
+    for cpus in (1, 2, 4):
+        run(
+            f'woven-package-transactions-{cpus}',
+            [
+                sys.executable,
+                'scripts/test-stage22-5-package-transactions.py',
+                '--cpus',
+                str(cpus),
+            ]
+            + transaction_options,
+        )
+    for cpus in (1, 2, 4):
+        run(
+            f'woven-ai-broker-{cpus}',
+            [sys.executable, 'scripts/test-stage23-1-ai-broker.py', '--cpus', str(cpus)]
+            + transaction_options,
+        )
+    for cpus in (1, 2, 4):
+        run(
+            f'woven-ai-local-provider-{cpus}',
+            [
+                sys.executable,
+                'scripts/test-stage23-1-ai-broker.py',
+                '--stage',
+                '2',
+                '--cpus',
+                str(cpus),
+            ]
+            + transaction_options,
+        )
+    for cpus in (1, 2, 4):
+        run(
+            f'woven-ai-cloud-provider-{cpus}',
+            [
+                sys.executable,
+                'scripts/test-stage23-1-ai-broker.py',
+                '--stage',
+                '3',
+                '--cpus',
+                str(cpus),
+            ]
+            + transaction_options,
+        )
+    for cpus in (1, 2, 4):
+        run(
+            f'woven-ai-capability-security-{cpus}',
+            [
+                sys.executable,
+                'scripts/test-stage23-1-ai-broker.py',
+                '--stage',
+                '4',
+                '--cpus',
+                str(cpus),
+            ]
+            + transaction_options,
+        )
+    for cpus in (1, 2, 4):
+        run(
+            f'woven-ai-semantic-search-{cpus}',
+            [
+                sys.executable,
+                'scripts/test-stage23-1-ai-broker.py',
+                '--stage',
+                '5',
+                '--cpus',
+                str(cpus),
+            ]
+            + transaction_options,
+        )
+    for cpus in (1, 2, 4):
+        run(
+            f'woven-ai-assistant-actions-{cpus}',
+            [
+                sys.executable,
+                'scripts/test-stage23-1-ai-broker.py',
+                '--stage',
+                '6',
+                '--cpus',
+                str(cpus),
+            ]
+            + transaction_options,
+        )
+    for cpus in (1, 2, 4):
+        run(
+            f'woven-ai-security-monitor-{cpus}',
+            [
+                sys.executable,
+                'scripts/test-stage23-1-ai-broker.py',
+                '--stage',
+                '7',
+                '--cpus',
+                str(cpus),
+            ]
+            + transaction_options,
         )
     # Normal system-apps boot is a separate release path from the Stage 20.15
     # instrumented fixture; qualify session start and F12 recovery on every
@@ -128,6 +227,12 @@ def main():
         }[item['id']]
         system_app_env[variable] = str(system_app_output / item['package'])
     system_app_env['WOVENHAT_SHELL_IMAGE'] = str(build_woven_shell(root))
+    system_app_env['WOVENHAT_PACKAGE_IMAGE'] = str(Path(subprocess.check_output(
+        [sys.executable, 'scripts/build-package-service.py'],
+        cwd=root,
+        env=system_app_env,
+        text=True,
+    ).strip()))
     image = Path(subprocess.check_output(
         ['cargo', 'run', '--quiet', '--release', '--features', 'system-apps', '--', '--print-image'],
         cwd=root, env=system_app_env, text=True).strip())

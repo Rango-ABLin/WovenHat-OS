@@ -86,17 +86,30 @@ const SPECS: [Spec; COUNT] = [
         kind: DeviceKind::UsbHost,
         matcher: class(0x0c, 0x03, Some(0x30)),
         init: |device| {
-            let (_, ports, _, _) = crate::xhci::init_at(device).map_err(|error| init_error("xhci0", error))?;
+            let (_, ports, _, _) =
+                crate::xhci::init_at(device).map_err(|error| init_error("xhci0", error))?;
             // Keyboards and mice into WovenInput. Input is optional: a
             // controller whose input cannot start still serves the bus.
+            #[cfg(not(feature = "qemu-test"))]
+            match crate::xhci::start_input_deferred("xhci0") {
+                Ok(()) => crate::serial::write_line(format_args!(
+                    "[DRIVERS] xhci0 input/storage enumeration queued"
+                )),
+                Err(error) => crate::serial::write_line(format_args!(
+                    "[DRIVERS] xhci0 input/storage enumeration unavailable: {:?}",
+                    error
+                )),
+            }
+            #[cfg(feature = "qemu-test")]
             match crate::xhci::start_input("xhci0") {
                 Ok(input) => crate::serial::write_line(format_args!(
                     "[DRIVERS] xhci0 input: keyboards={} mice={} vector={:#x}",
                     input.keyboards, input.mice, input.vector
                 )),
-                Err(error) => {
-                    crate::serial::write_line(format_args!("[DRIVERS] xhci0 input unavailable: {:?}", error))
-                }
+                Err(error) => crate::serial::write_line(format_args!(
+                    "[DRIVERS] xhci0 input unavailable: {:?}",
+                    error
+                )),
             }
             Ok(u64::from(ports))
         },
@@ -114,7 +127,10 @@ const SPECS: [Spec; COUNT] = [
                     "[DRIVERS] hda0 audio: playback streams={} vector={:#x}",
                     info.playback_streams, info.vector
                 )),
-                Err(error) => crate::serial::write_line(format_args!("[DRIVERS] hda0 audio unavailable: {:?}", error)),
+                Err(error) => crate::serial::write_line(format_args!(
+                    "[DRIVERS] hda0 audio unavailable: {:?}",
+                    error
+                )),
             }
             Ok(u64::from(summary.output_streams))
         },
@@ -175,6 +191,7 @@ fn bring_up_one(spec: &Spec) -> Driver {
         result.outcome = Outcome::BindFailed;
         return result;
     }
+    crate::serial::write_line(format_args!("[DRIVERS] {} init begin", spec.name));
     result.outcome = match device_at(address).ok_or(()).and_then(spec.init) {
         Ok(value) => {
             // Listed with the other devices; a name already present (an
@@ -184,6 +201,7 @@ fn bring_up_one(spec: &Spec) -> Driver {
                 kind: spec.kind,
                 irq: None,
             });
+            crate::serial::write_line(format_args!("[DRIVERS] {} init complete", spec.name));
             Outcome::Ready(value)
         }
         Err(()) => {
@@ -199,11 +217,14 @@ fn bring_up_one(spec: &Spec) -> Driver {
 /// The first ready storage driver, as the primary block device to mount
 /// when the boot has no ATA disk (Stage 13.14).
 pub fn storage_root(report: &Report) -> Option<(crate::block_io::RootDevice, &'static str)> {
-    report.drivers.iter().find_map(|driver| match (driver.name, driver.outcome) {
-        ("nvme0", Outcome::Ready(_)) => Some((crate::block_io::RootDevice::Nvme, driver.name)),
-        ("ahci0", Outcome::Ready(_)) => Some((crate::block_io::RootDevice::Ahci, driver.name)),
-        _ => None,
-    })
+    report
+        .drivers
+        .iter()
+        .find_map(|driver| match (driver.name, driver.outcome) {
+            ("nvme0", Outcome::Ready(_)) => Some((crate::block_io::RootDevice::Nvme, driver.name)),
+            ("ahci0", Outcome::Ready(_)) => Some((crate::block_io::RootDevice::Ahci, driver.name)),
+            _ => None,
+        })
 }
 
 /// Bind and initialize every known driver once. Call after PCI discovery.
@@ -285,7 +306,11 @@ pub fn self_test() -> bool {
             }
             Outcome::AlreadyBound => false,
         };
-        let label = alloc::format!("{} {:?} matches the driver manager and registry", spec.name, driver.outcome);
+        let label = alloc::format!(
+            "{} {:?} matches the driver manager and registry",
+            spec.name,
+            driver.outcome
+        );
         ok &= step(&label, consistent);
     }
     if first.drivers[0].outcome != Outcome::Absent {
@@ -299,10 +324,14 @@ pub fn self_test() -> bool {
     }
     // A second bring-up claims nothing twice.
     let second = bring_up();
-    let idempotent = first.drivers.iter().zip(second.drivers.iter()).all(|(a, b)| match a.outcome {
-        Outcome::Ready(_) => b.outcome == Outcome::AlreadyBound && b.address == a.address,
-        other => b.outcome == other,
-    });
+    let idempotent = first
+        .drivers
+        .iter()
+        .zip(second.drivers.iter())
+        .all(|(a, b)| match a.outcome {
+            Outcome::Ready(_) => b.outcome == Outcome::AlreadyBound && b.address == a.address,
+            other => b.outcome == other,
+        });
     ok &= step("a second bring-up binds nothing twice", idempotent);
     ok
 }
@@ -315,13 +344,20 @@ pub fn self_test() -> bool {
 #[cfg(feature = "stage13-14-test")]
 pub fn storage_self_test() -> bool {
     fn step(name: &str, ok: bool) -> bool {
-        crate::serial::write_line(format_args!("[S13.14] {} {}", name, if ok { "PASS" } else { "FAIL" }));
+        crate::serial::write_line(format_args!(
+            "[S13.14] {} {}",
+            name,
+            if ok { "PASS" } else { "FAIL" }
+        ));
         ok
     }
     const PATH: &str = "/mnt/WOVEN.TXT";
     const MARKER: &[u8] = b"WovenHat 13.14: persisted through the bound storage driver\n";
 
-    if !step("no ATA disk", crate::ata::with_primary_master(|_| ()).is_none()) {
+    if !step(
+        "no ATA disk",
+        crate::ata::with_primary_master(|_| ()).is_none(),
+    ) {
         return false;
     }
     let report = bring_up();
@@ -330,16 +366,25 @@ pub fn storage_self_test() -> bool {
     };
     crate::serial::write_line(format_args!("[S13.14] root device {} ({:?})", name, root));
     crate::block_io::select_root(root);
-    let mounted = matches!(crate::storage::mount_ata_root(), crate::storage::MountStatus::Mounted(_))
-        && crate::storage::mnt_mounted();
-    if !step("the FAT32 volume mounts at /mnt from the selected device", mounted) {
+    let mounted = matches!(
+        crate::storage::mount_ata_root(),
+        crate::storage::MountStatus::Mounted(_)
+    ) && crate::storage::mnt_mounted();
+    if !step(
+        "the FAT32 volume mounts at /mnt from the selected device",
+        mounted,
+    ) {
         return false;
     }
-    let persisted = crate::vfs::write_file(PATH, MARKER).is_ok() && crate::storage::persist_path(PATH).is_ok();
+    let persisted =
+        crate::vfs::write_file(PATH, MARKER).is_ok() && crate::storage::persist_path(PATH).is_ok();
     if !step("a file is written and persisted", persisted) {
         return false;
     }
-    let remounted = matches!(crate::storage::remount_mnt(), crate::storage::MountStatus::Mounted(_));
+    let remounted = matches!(
+        crate::storage::remount_mnt(),
+        crate::storage::MountStatus::Mounted(_)
+    );
     let mut back = [0u8; 128];
     let read = crate::storage::read_disk_file(PATH, 0, &mut back[..MARKER.len()]);
     let durable = remounted && read == Ok(MARKER.len()) && &back[..MARKER.len()] == MARKER;
@@ -359,7 +404,11 @@ pub fn foreign_disk_self_test() -> bool {
     use crate::block::BlockDevice;
 
     fn step(name: &str, ok: bool) -> bool {
-        crate::serial::write_line(format_args!("[S13.17] {} {}", name, if ok { "PASS" } else { "FAIL" }));
+        crate::serial::write_line(format_args!(
+            "[S13.17] {} {}",
+            name,
+            if ok { "PASS" } else { "FAIL" }
+        ));
         ok
     }
     const FILE: &str = "/mnt/HELLO.TXT";
@@ -371,27 +420,41 @@ pub fn foreign_disk_self_test() -> bool {
         return step("a storage driver is ready", false);
     };
     crate::block_io::select_root(root);
-    let mounted = matches!(crate::storage::mount_ata_root(), crate::storage::MountStatus::Mounted(_));
+    let mounted = matches!(
+        crate::storage::mount_ata_root(),
+        crate::storage::MountStatus::Mounted(_)
+    );
     if !step("the foreign FAT32 volume mounts at /mnt", mounted) {
         return false;
     }
-    if !step("the device is not WovenHat's, so it is not writable", !crate::block_io::root_writable()) {
+    if !step(
+        "the device is not WovenHat's, so it is not writable",
+        !crate::block_io::root_writable(),
+    ) {
         return false;
     }
     let mut back = [0u8; 64];
     let read = crate::storage::read_disk_file(FILE, 0, &mut back[..CONTENT.len()]);
-    if !step("its file reads", read == Ok(CONTENT.len()) && &back[..CONTENT.len()] == CONTENT) {
+    if !step(
+        "its file reads",
+        read == Ok(CONTENT.len()) && &back[..CONTENT.len()] == CONTENT,
+    ) {
         return false;
     }
     // Every write path is attempted; each must fail.
-    let changed = crate::vfs::write_file(FILE, b"overwritten").is_ok() && crate::storage::persist_path(FILE).is_ok();
-    let created = crate::vfs::write_file("/mnt/NEW.TXT", b"new").is_ok() && crate::storage::persist_path("/mnt/NEW.TXT").is_ok();
+    let changed = crate::vfs::write_file(FILE, b"overwritten").is_ok()
+        && crate::storage::persist_path(FILE).is_ok();
+    let created = crate::vfs::write_file("/mnt/NEW.TXT", b"new").is_ok()
+        && crate::storage::persist_path("/mnt/NEW.TXT").is_ok();
     let mut disk = crate::block_io::primary_ata();
     let raw = disk.write_sector(0, &[0u8; crate::block::SECTOR_SIZE]);
     let flushed = disk.flush();
     step("changing its file is refused", !changed)
         & step("creating a file is refused", !created)
-        & step("a raw sector write is refused", raw == Err(crate::block::Error::ReadOnly))
+        & step(
+            "a raw sector write is refused",
+            raw == Err(crate::block::Error::ReadOnly),
+        )
         & step("the device reports itself read-only", disk.is_read_only())
         & step("a flush writes nothing and succeeds", flushed.is_ok())
 }

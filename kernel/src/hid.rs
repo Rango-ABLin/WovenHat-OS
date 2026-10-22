@@ -91,15 +91,37 @@ pub struct Layout {
 /// One decoded input event. Positions are scaled to 0..=ABSOLUTE_MAX.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Input {
-    Relative { dx: i16, dy: i16 },
-    Absolute { x: u16, y: u16 },
+    Relative {
+        dx: i16,
+        dy: i16,
+    },
+    Absolute {
+        x: u16,
+        y: u16,
+    },
     Wheel(i16),
     /// Button edges, 0-based (0 left, 1 right, 2 middle for pointers).
-    Button { index: u8, pressed: bool },
-    Pen { x: u16, y: u16, pressure: u16, touching: bool },
-    Touch { contact: u8, x: u16, y: u16, active: bool },
+    Button {
+        index: u8,
+        pressed: bool,
+    },
+    Pen {
+        x: u16,
+        y: u16,
+        pressure: u16,
+        touching: bool,
+    },
+    Touch {
+        contact: u8,
+        x: u16,
+        y: u16,
+        active: bool,
+    },
     /// A game-controller button (`control` = number), axis or hat change.
-    Control { control: u16, value: i16 },
+    Control {
+        control: u16,
+        value: i16,
+    },
 }
 
 #[derive(Clone, Copy, Default)]
@@ -154,8 +176,13 @@ pub fn parse(descriptor: &[u8]) -> Result<Layout, Error> {
             3 => 4,
             other => usize::from(other),
         };
-        let data = descriptor.get(index + 1..index + 1 + size).ok_or(Error::Malformed)?;
-        let unsigned = data.iter().rev().fold(0u32, |value, byte| (value << 8) | u32::from(*byte));
+        let data = descriptor
+            .get(index + 1..index + 1 + size)
+            .ok_or(Error::Malformed)?;
+        let unsigned = data
+            .iter()
+            .rev()
+            .fold(0u32, |value, byte| (value << 8) | u32::from(*byte));
         let signed = match size {
             1 => i32::from(data[0] as i8),
             2 => i32::from(i16::from_le_bytes([data[0], data[1]])),
@@ -175,7 +202,10 @@ pub fn parse(descriptor: &[u8]) -> Result<Layout, Error> {
                 if bits == 0 || bits > 32 {
                     return Err(Error::Malformed);
                 }
-                let slot = match offsets[..offset_count].iter().position(|(id, _)| *id == globals.report_id) {
+                let slot = match offsets[..offset_count]
+                    .iter()
+                    .position(|(id, _)| *id == globals.report_id)
+                {
                     Some(slot) => slot,
                     None => {
                         if offset_count == MAX_REPORT_IDS {
@@ -246,7 +276,11 @@ pub fn parse(descriptor: &[u8]) -> Result<Layout, Error> {
             (1, 0x1) => globals.logical_min = signed,
             (1, 0x2) => {
                 // A maximum is signed only when the minimum is negative.
-                globals.logical_max = if globals.logical_min < 0 { signed } else { unsigned as i32 };
+                globals.logical_max = if globals.logical_min < 0 {
+                    signed
+                } else {
+                    unsigned as i32
+                };
             }
             (1, 0x7) => globals.report_size = unsigned,
             (1, 0x8) => {
@@ -270,18 +304,30 @@ pub fn parse(descriptor: &[u8]) -> Result<Layout, Error> {
             }
             // Local items. A 4-byte usage carries its own page.
             (2, 0x0) => {
-                let usage = if size == 4 { unsigned } else { (u32::from(globals.usage_page) << 16) | unsigned };
+                let usage = if size == 4 {
+                    unsigned
+                } else {
+                    (u32::from(globals.usage_page) << 16) | unsigned
+                };
                 if usage_count < MAX_USAGES {
                     usages[usage_count] = usage;
                     usage_count += 1;
                 }
             }
             (2, 0x1) => {
-                let usage = if size == 4 { unsigned } else { (u32::from(globals.usage_page) << 16) | unsigned };
+                let usage = if size == 4 {
+                    unsigned
+                } else {
+                    (u32::from(globals.usage_page) << 16) | unsigned
+                };
                 usage_range = Some((usage, usage_range.map_or(usage, |(_, last)| last)));
             }
             (2, 0x2) => {
-                let usage = if size == 4 { unsigned } else { (u32::from(globals.usage_page) << 16) | unsigned };
+                let usage = if size == 4 {
+                    unsigned
+                } else {
+                    (u32::from(globals.usage_page) << 16) | unsigned
+                };
                 usage_range = Some((usage_range.map_or(usage, |(first, _)| first), usage));
             }
             _ => {}
@@ -291,7 +337,11 @@ pub fn parse(descriptor: &[u8]) -> Result<Layout, Error> {
     if collection_depth != 0 {
         return Err(Error::Malformed);
     }
-    Ok(Layout { application: application.ok_or(Error::Unsupported)?, report_ids, fields })
+    Ok(Layout {
+        application: application.ok_or(Error::Unsupported)?,
+        report_ids,
+        fields,
+    })
 }
 
 /// A usage (page << 16 | id) as a field meaning.
@@ -342,11 +392,13 @@ pub fn field_value(field: &Field, report: &[u8]) -> Option<i32> {
             raw |= 1 << bit;
         }
     }
-    Some(if field.logical_min < 0 && bits < 64 && raw >> (bits - 1) & 1 != 0 {
-        (raw as i64 - (1i64 << bits)) as i32
-    } else {
-        raw as i32
-    })
+    Some(
+        if field.logical_min < 0 && bits < 64 && raw >> (bits - 1) & 1 != 0 {
+            (raw as i64 - (1i64 << bits)) as i32
+        } else {
+            raw as i32
+        },
+    )
 }
 
 /// `value` within the field's logical range, scaled to 0..=max.
@@ -355,7 +407,8 @@ fn scale(field: &Field, value: i32, max: u16) -> u16 {
     if span <= 0 {
         return 0;
     }
-    let clamped = i64::from(value.clamp(field.logical_min, field.logical_max)) - i64::from(field.logical_min);
+    let clamped =
+        i64::from(value.clamp(field.logical_min, field.logical_max)) - i64::from(field.logical_min);
     (clamped * i64::from(max) / span) as u16
 }
 
@@ -372,7 +425,12 @@ pub struct Decoder {
 
 impl Decoder {
     pub const fn new(layout: Layout) -> Self {
-        Self { layout, buttons: 0, controls: [None; 8], contacts: 0 }
+        Self {
+            layout,
+            buttons: 0,
+            controls: [None; 8],
+            contacts: 0,
+        }
     }
 
     /// Decode one report (including its report-ID byte, if the device uses
@@ -387,7 +445,10 @@ impl Decoder {
             (0, report)
         };
         let fields = self.layout.fields;
-        let fields = fields.iter().flatten().filter(|field| field.report_id == id);
+        let fields = fields
+            .iter()
+            .flatten()
+            .filter(|field| field.report_id == id);
         match self.layout.application {
             Application::Mouse | Application::Pointer => self.pointer(fields, body, out),
             Application::Pen => self.pen(fields, body, out),
@@ -413,7 +474,9 @@ impl Decoder {
         let (mut dx, mut dy, mut x, mut y, mut wheel) = (0i32, 0i32, None, None, 0i32);
         let mut buttons = self.buttons;
         for field in fields {
-            let Some(value) = field_value(field, body) else { continue };
+            let Some(value) = field_value(field, body) else {
+                continue;
+            };
             match field.usage {
                 Usage::X if field.relative => dx = value,
                 Usage::Y if field.relative => dy = value,
@@ -422,14 +485,25 @@ impl Decoder {
                 Usage::Wheel => wheel = value,
                 Usage::Button(number @ 1..=32) => {
                     let mask = 1u32 << (number - 1);
-                    buttons = if value != 0 { buttons | mask } else { buttons & !mask };
+                    buttons = if value != 0 {
+                        buttons | mask
+                    } else {
+                        buttons & !mask
+                    };
                 }
                 _ => {}
             }
         }
         if dx != 0 || dy != 0 {
             let clamp = |value: i32| value.clamp(i32::from(i16::MIN), i32::from(i16::MAX)) as i16;
-            Self::push(out, &mut count, Input::Relative { dx: clamp(dx), dy: clamp(dy) });
+            Self::push(
+                out,
+                &mut count,
+                Input::Relative {
+                    dx: clamp(dx),
+                    dy: clamp(dy),
+                },
+            );
         }
         if let (Some(x), Some(y)) = (x, y) {
             Self::push(out, &mut count, Input::Absolute { x, y });
@@ -441,11 +515,23 @@ impl Decoder {
         count
     }
 
-    fn button_edges(&mut self, buttons: u32, out: &mut [Option<Input>; MAX_EVENTS], count: &mut usize) {
+    fn button_edges(
+        &mut self,
+        buttons: u32,
+        out: &mut [Option<Input>; MAX_EVENTS],
+        count: &mut usize,
+    ) {
         let changed = buttons ^ self.buttons;
         for index in 0..32u8 {
             if changed & (1 << index) != 0 {
-                Self::push(out, count, Input::Button { index, pressed: buttons & (1 << index) != 0 });
+                Self::push(
+                    out,
+                    count,
+                    Input::Button {
+                        index,
+                        pressed: buttons & (1 << index) != 0,
+                    },
+                );
             }
         }
         self.buttons = buttons;
@@ -458,9 +544,12 @@ impl Decoder {
         out: &mut [Option<Input>; MAX_EVENTS],
     ) -> usize {
         let mut count = 0;
-        let (mut x, mut y, mut pressure, mut touching, mut in_range) = (None, None, 0u16, false, true);
+        let (mut x, mut y, mut pressure, mut touching, mut in_range) =
+            (None, None, 0u16, false, true);
         for field in fields {
-            let Some(value) = field_value(field, body) else { continue };
+            let Some(value) = field_value(field, body) else {
+                continue;
+            };
             match field.usage {
                 Usage::X => x = Some(scale(field, value, ABSOLUTE_MAX)),
                 Usage::Y => y = Some(scale(field, value, ABSOLUTE_MAX)),
@@ -471,7 +560,16 @@ impl Decoder {
             }
         }
         if let (Some(x), Some(y), true) = (x, y, in_range) {
-            Self::push(out, &mut count, Input::Pen { x, y, pressure, touching });
+            Self::push(
+                out,
+                &mut count,
+                Input::Pen {
+                    x,
+                    y,
+                    pressure,
+                    touching,
+                },
+            );
         }
         count
     }
@@ -491,7 +589,9 @@ impl Decoder {
         let mut contacts = [Contact::default(); 16];
         let mut finished = 0usize;
         for field in fields {
-            let Some(value) = field_value(field, body) else { continue };
+            let Some(value) = field_value(field, body) else {
+                continue;
+            };
             let starts_next = match field.usage {
                 Usage::ContactId => current.id.is_some(),
                 Usage::TipSwitch => current.tip.is_some(),
@@ -519,13 +619,24 @@ impl Decoder {
             finished += 1;
         }
         for contact in &contacts[..finished] {
-            let (Some(x), Some(y)) = (contact.x, contact.y) else { continue };
+            let (Some(x), Some(y)) = (contact.x, contact.y) else {
+                continue;
+            };
             let id = contact.id.unwrap_or(0);
             let active = contact.tip.unwrap_or(true);
             let bit = 1u16 << (id % 16);
             // Report active contacts, and each contact's lift once.
             if active || self.contacts & bit != 0 {
-                Self::push(out, &mut count, Input::Touch { contact: id, x, y, active });
+                Self::push(
+                    out,
+                    &mut count,
+                    Input::Touch {
+                        contact: id,
+                        x,
+                        y,
+                        active,
+                    },
+                );
             }
             if active {
                 seen |= bit;
@@ -544,7 +655,9 @@ impl Decoder {
         let mut count = 0;
         let mut buttons = self.buttons;
         for field in fields {
-            let Some(value) = field_value(field, body) else { continue };
+            let Some(value) = field_value(field, body) else {
+                continue;
+            };
             let axis = match field.usage {
                 Usage::X => Some(0),
                 Usage::Y => Some(1),
@@ -568,19 +681,41 @@ impl Decoder {
                 };
                 if self.controls[axis] != Some(scaled) {
                     self.controls[axis] = Some(scaled);
-                    let control = if axis == 6 { HAT } else { AXIS_BASE + axis as u16 };
-                    Self::push(out, &mut count, Input::Control { control, value: scaled });
+                    let control = if axis == 6 {
+                        HAT
+                    } else {
+                        AXIS_BASE + axis as u16
+                    };
+                    Self::push(
+                        out,
+                        &mut count,
+                        Input::Control {
+                            control,
+                            value: scaled,
+                        },
+                    );
                 }
             } else if let Usage::Button(number @ 1..=32) = field.usage {
                 let mask = 1u32 << (number - 1);
-                buttons = if value != 0 { buttons | mask } else { buttons & !mask };
+                buttons = if value != 0 {
+                    buttons | mask
+                } else {
+                    buttons & !mask
+                };
             }
         }
         let changed = buttons ^ self.buttons;
         for index in 0..32u16 {
             if changed & (1 << index) != 0 {
                 let value = i16::from(buttons & (1 << index) != 0);
-                Self::push(out, &mut count, Input::Control { control: index + 1, value });
+                Self::push(
+                    out,
+                    &mut count,
+                    Input::Control {
+                        control: index + 1,
+                        value,
+                    },
+                );
             }
         }
         self.buttons = buttons;

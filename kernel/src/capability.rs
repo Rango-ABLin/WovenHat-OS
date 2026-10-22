@@ -29,6 +29,9 @@ pub enum Capability {
     AudioPlayback = 24,
     /// Turn the machine off or restart it: the desktop session only.
     PowerControl = 25,
+    /// Change a local account's own PIN: the desktop session only. Never
+    /// granted to applications; see `accounts::change_pin`.
+    AccountManage = 26,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -74,6 +77,7 @@ impl CapabilitySet {
             .with(Capability::Secrets)
             .with(Capability::AudioPlayback)
             .with(Capability::PowerControl)
+            .with(Capability::AccountManage)
     }
 
     pub const fn userspace() -> Self {
@@ -111,6 +115,22 @@ impl CapabilitySet {
         self.bits
     }
 
+    #[cfg(any(
+        feature = "stage21-7-test",
+        feature = "stage21-8-test",
+        feature = "stage21-9-test",
+        feature = "stage21-10-test",
+        feature = "stage21-11-test",
+        feature = "stage22-5-test",
+        feature = "stage23-1-test",
+        feature = "stage23-2-test",
+        feature = "stage23-3-test",
+        feature = "system-apps"
+    ))]
+    pub const fn from_bits(bits: u64) -> Self {
+        Self { bits }
+    }
+
     pub const fn contains(self, capability: Capability) -> bool {
         self.bits & capability.bit() != 0
     }
@@ -131,7 +151,7 @@ impl CapabilitySet {
 }
 
 impl Capability {
-    pub const COUNT: usize = 26;
+    pub const COUNT: usize = 27;
     pub const ALL: [Capability; Self::COUNT] = [
         Capability::Console,
         Capability::TimerRead,
@@ -159,6 +179,7 @@ impl Capability {
         Capability::Secrets,
         Capability::AudioPlayback,
         Capability::PowerControl,
+        Capability::AccountManage,
     ];
 
     pub const fn index(self) -> usize {

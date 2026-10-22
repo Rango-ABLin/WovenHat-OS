@@ -26,11 +26,16 @@
 //!   open a window showing a surface the sender shared with the shell.
 //! - `TRAY`, token (u64): show a 16×16 surface in the system tray.
 //! - `NOTE`, text: show a notification toast for four seconds.
+//! - `WPMV`, x (u16), y (u16): report a pointer move in client coordinates.
+//! - `WPBT`, button (u8), pressed (u8), x (u16), y (u16): report a bounded
+//!   client button edge in client coordinates.
 //!
 //! A surface is accepted only if the sender owns it: the token names its
 //! owner, and the kernel enforces that name on every operation. A window or
 //! icon goes away when its surface does, normally because its owner exited.
-//! Keystrokes go to the focused window's owner as one-byte messages.
+//! ASCII keystrokes go to the focused window's owner as one-byte messages.
+//! Enter and Backspace use the bounded `WKEY` message (`WKEY`, code), keeping
+//! special keys distinguishable from text without exposing input authority.
 //!
 //! A new window fades in: its opacity follows a [`Spring`] from 0 to 255,
 //! and its title bar, client area and shadow are composed at that opacity.
@@ -92,12 +97,13 @@
 //!
 //! With `--accounts <file>` the shell starts at a sign-in screen. The file
 //! holds one local account per line, `name:salt-hex:hash-hex`, the hash
-//! being `SHA-256(salt || PIN)` (see `libwoven::accounts`); no PIN is stored.
+//! being `PBKDF2-HMAC-SHA256(PIN, salt, PBKDF2_ITERATIONS)` (see
+//! `libwoven::accounts`); no PIN is stored.
 //! Tab chooses the account, digits enter its PIN, Enter signs in, with the
 //! same masking and lockout as the lock screen. Once signed in, the
 //! account's name is shown in the taskbar, and the lock screen asks for that
-//! account's PIN. Every process still runs with the same kernel credentials:
-//! per-user sessions need the kernel to start processes as another user.
+//! account's PIN. The kernel identity service owns the authenticated session
+//! and applies its credentials to this process.
 //!
 //! # Monitors
 //!
@@ -131,6 +137,7 @@
 use core::cell::UnsafeCell;
 use core::panic::PanicInfo;
 
+use libwoven::graphics::{Camera, DepthBuffer, Renderer, Vertex3, Vertex3Tex};
 use libwoven::layout::{self, Frame};
 use libwoven::{
     blend, font, process, rgb, wait, Args, Canvas, DateTime, FrameEvent, GraphicsSurface,
@@ -227,7 +234,10 @@ const CURSOR_HEIGHT: i32 = 10;
 
 /// The application catalog: one `*.app` file per application.
 const CATALOG: &str = "/share/applications";
-const MAX_APPS: usize = 8;
+// Production system-apps publishes ten bounded catalog entries. Keep the
+// launcher capacity aligned with that manifest so alphabetical loading does
+// not silently drop the last applications (notably Update and Terminal).
+const MAX_APPS: usize = 10;
 const MAX_APP_NAME: usize = 20;
 const MAX_EXEC: usize = 96;
 const MAX_QUERY: usize = 16;
@@ -246,7 +256,7 @@ const CENTER_WIDTH: i32 = 164;
 const CENTER_TITLE: &str = "Notifications";
 const CENTER_CLEAR: &str = "Clear";
 const QS_TITLE: &str = "Quick Settings";
-const QS_ROWS: usize = 6;
+const QS_ROWS: usize = 10;
 
 /// How dark the lock screen makes the wallpaper behind it.
 const LOCK_DIM: u8 = 160;
@@ -258,11 +268,24 @@ const PIN_LOCKOUT: u64 = 5 * libwoven::time::TICKS_PER_SECOND;
 /// Accounts the sign-in screen offers.
 const MAX_ACCOUNTS: usize = 4;
 
-/// Whether the locked screen is the sign-in screen or the lock screen.
+/// Whether the locked screen is the sign-in screen, the lock screen, or the
+/// signed-in account changing its own PIN.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum LockMode {
     SignIn,
     Lock,
+    ChangePin,
+}
+
+/// A step of `LockMode::ChangePin`, in order.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ChangePinStep {
+    /// Verify the account's current PIN.
+    Current,
+    /// Collect the new PIN.
+    New,
+    /// Collect it again, and only proceed if the two match.
+    Confirm,
 }
 
 /// What the lock screen's prompt says.
@@ -284,9 +307,13 @@ const TILE_PIXELS: usize = TILE_WIDTH * TILE_HEIGHT;
 /// timer and window liveness.
 const FRAME_PERIOD: u64 = libwoven::time::TICKS_PER_SECOND / 4;
 /// How long a resize may take before a vanished surface counts as an exit.
-const RESIZE_GRACE: u64 = libwoven::time::TICKS_PER_SECOND;
+// A resize client may need to copy a bounded replacement Canvas before its
+// WRSZ message reaches the shell on a slow, multi-CPU-free QEMU guest.
+const RESIZE_GRACE: u64 = 5 * libwoven::time::TICKS_PER_SECOND;
 /// The frame clock while something animates: 20 ms.
 const ANIMATION_PERIOD: u64 = 2;
+const KEY_ENTER: u8 = 1;
+const KEY_BACKSPACE: u8 = 2;
 
 /// The one tile buffer, in .bss rather than on the stack.
 struct TileBuffer(UnsafeCell<[u32; TILE_PIXELS]>);
@@ -296,7 +323,30 @@ unsafe impl Sync for TileBuffer {}
 
 static TILE: TileBuffer = TileBuffer(UnsafeCell::new([0; TILE_PIXELS]));
 
-/// The desktop's state, in .bss too: the user stack is 8 KiB, and the state
+/// The Quick Settings panel's maximum pixel footprint, flat-rendered once
+/// per repaint into this offscreen texture, then sampled by the 3D desktop
+/// mode's perspective projection. `.bss`, not the stack, for the same reason
+/// as `TILE`.
+const QS_PANEL_MAX_HEIGHT: usize = (1 + QS_ROWS) * PANEL_ROW as usize + 2;
+const QS_PANEL_PIXELS: usize = CENTER_WIDTH as usize * QS_PANEL_MAX_HEIGHT;
+
+struct QsPanelTexture(UnsafeCell<[u32; QS_PANEL_PIXELS]>);
+
+// SAFETY: the shell is single-threaded, and `render_qs_3d` takes the only reference.
+unsafe impl Sync for QsPanelTexture {}
+
+static QS_PANEL_TEXTURE: QsPanelTexture = QsPanelTexture(UnsafeCell::new([0; QS_PANEL_PIXELS]));
+
+/// A depth buffer sized for one `TILE`-sized render pass, reused (and
+/// cleared) for each tile the 3D Quick Settings panel is painted into.
+struct QsDepthBuffer(UnsafeCell<[u16; TILE_PIXELS]>);
+
+// SAFETY: the shell is single-threaded, and `render_qs_3d` takes the only reference.
+unsafe impl Sync for QsDepthBuffer {}
+
+static QS_DEPTH: QsDepthBuffer = QsDepthBuffer(UnsafeCell::new([0; TILE_PIXELS]));
+
+/// The desktop's state, in .bss too: the user stack is 16 KiB, and the state
 /// built in `main`'s frame, with the catalog loader's on top, overflowed it.
 struct DesktopState(UnsafeCell<Desktop>);
 
@@ -348,6 +398,81 @@ fn clock_text(time: Option<DateTime>, seconds: bool) -> ([u8; 8], usize) {
         None => *b"--:--:--",
     };
     (text, if seconds { 8 } else { 5 })
+}
+
+/// Fill an already-allocated, already-zeroed catalog in place. Never builds
+/// or returns a `Catalog` by value: at `MAX_TRANSLATIONS` entries it is
+/// several KiB, and the user stack is 16 KiB (see `DesktopState`), so even a
+/// transient by-value copy on the way into a static overflowed it.
+fn fill_lock_catalog(catalog: &mut libwoven::i18n::Catalog, language: libwoven::i18n::Language) {
+    use libwoven::i18n::Language;
+    let entries: &[(&str, &str)] = match language {
+        Language::English => &[
+            ("sign_in", "Sign in"),
+            ("locked", "Locked"),
+            ("change_pin", "Change PIN"),
+            ("current_pin", "Current PIN"),
+            ("new_pin", "New PIN"),
+            ("confirm_new_pin", "Confirm new PIN"),
+            ("enter_pin", "Enter PIN"),
+            ("wrong_pin", "Wrong PIN"),
+            ("try_again_shortly", "Try again shortly"),
+        ],
+        Language::Chichewa => &[
+            ("sign_in", "Lowani"),
+            ("locked", "Yatsekedwa"),
+            ("change_pin", "Sinthani PIN"),
+            ("current_pin", "PIN Yamakono"),
+            ("new_pin", "PIN Yatsopano"),
+            ("confirm_new_pin", "Tsimikizani PIN Yatsopano"),
+            ("enter_pin", "Lowetsani PIN"),
+            ("wrong_pin", "PIN Yolakwika"),
+            ("try_again_shortly", "Yesaninso Posachedwa"),
+        ],
+    };
+    for (key, value) in entries {
+        let _ = catalog.insert(key, value);
+    }
+}
+
+/// Both lock-screen catalogs, const-initialized to `Catalog::new()` (an
+/// all-zero value LLVM places in `.bss`, not `.data`) and filled in place on
+/// first use, so no by-value `Catalog` is ever constructed on the stack.
+struct LockCatalogs {
+    english: UnsafeCell<libwoven::i18n::Catalog>,
+    chichewa: UnsafeCell<libwoven::i18n::Catalog>,
+    built: UnsafeCell<bool>,
+}
+
+// SAFETY: the shell is single-threaded, and `lock_catalog` takes the only reference.
+unsafe impl Sync for LockCatalogs {}
+
+static LOCK_CATALOGS: LockCatalogs = LockCatalogs {
+    english: UnsafeCell::new(libwoven::i18n::Catalog::new()),
+    chichewa: UnsafeCell::new(libwoven::i18n::Catalog::new()),
+    built: UnsafeCell::new(false),
+};
+
+/// The lock screen's translatable strings for `language`, built once
+/// (lazily, in place) through `libwoven::i18n::Catalog` (Stage 26.5).
+/// English values are byte-for-byte the literals every already-accepted
+/// lock-screen gate expects, so the default language changes nothing;
+/// Chichewa is a best-effort demo translation, not a reviewed localization.
+fn lock_catalog(language: libwoven::i18n::Language) -> &'static libwoven::i18n::Catalog {
+    use libwoven::i18n::Language;
+    // SAFETY: single-threaded; build-once guarded by `built`, and every
+    // reference handed out is immutable.
+    unsafe {
+        if !*LOCK_CATALOGS.built.get() {
+            fill_lock_catalog(&mut *LOCK_CATALOGS.english.get(), Language::English);
+            fill_lock_catalog(&mut *LOCK_CATALOGS.chichewa.get(), Language::Chichewa);
+            *LOCK_CATALOGS.built.get() = true;
+        }
+        match language {
+            Language::English => &*LOCK_CATALOGS.english.get(),
+            Language::Chichewa => &*LOCK_CATALOGS.chichewa.get(),
+        }
+    }
 }
 
 /// `bytes` as text, cut to `limit` characters; anything not printable ASCII
@@ -848,6 +973,18 @@ struct Desktop {
     dnd: bool,
     /// The display scale the shell set.
     scale: u32,
+    /// The lock screen's language. Defaults to English, which keeps the
+    /// exact strings every already-accepted lock-screen gate expects;
+    /// Quick Settings can switch it to Chichewa.
+    language: libwoven::i18n::Language,
+    /// Whether the desktop renders in 3D (currently: the Quick Settings
+    /// panel, perspective-projected). Defaults to off, which keeps every
+    /// already-accepted gate's pixel-exact 2D rendering unchanged.
+    three_d: bool,
+    /// Accessibility: skip the window-open fade-in animation, appearing at
+    /// full opacity immediately. Defaults to off, matching
+    /// `libwoven::accessibility::Settings::reduced_motion`'s own default.
+    reduced_motion: bool,
     locked: bool,
     /// The PIN and its length, if one was given.
     pin: Option<([u8; MAX_PIN], usize)>,
@@ -863,10 +1000,26 @@ struct Desktop {
     chosen: usize,
     /// The account signed in, if any.
     session: Option<usize>,
+    /// Kernel-owned authentication token for the signed-in account.
+    kernel_session: Option<libwoven::identity::SessionId>,
+    /// Which step of changing the signed-in account's PIN is active, under
+    /// `LockMode::ChangePin`.
+    change_pin: Option<ChangePinStep>,
+    /// The current PIN, verified at the `Current` step and kept only long
+    /// enough to reach the `Confirm` step; wiped once the change completes,
+    /// fails, or is cancelled.
+    change_pin_old: [u8; MAX_PIN],
+    change_pin_old_length: usize,
+    /// The new PIN typed at the `New` step, kept to compare against the
+    /// `Confirm` step's entry.
+    change_pin_new: [u8; MAX_PIN],
+    change_pin_new_length: usize,
     pointer: (i32, i32),
     pointer_visible: bool,
     /// The window being dragged, and where in it the pointer took hold.
     drag: Option<(usize, i32, i32)>,
+    /// The client receiving the current primary-button click sequence.
+    pointer_capture: Option<usize>,
     /// Whether windows are tiled.
     tiled: bool,
     apps: [Option<App>; MAX_APPS],
@@ -900,6 +1053,9 @@ impl Desktop {
         qs_open: false,
         dnd: false,
         scale: 1,
+        language: libwoven::i18n::Language::English,
+        three_d: false,
+        reduced_motion: false,
         locked: false,
         pin: None,
         entry: [0; MAX_PIN],
@@ -911,9 +1067,16 @@ impl Desktop {
         accounts: [None; MAX_ACCOUNTS],
         chosen: 0,
         session: None,
+        kernel_session: None,
+        change_pin: None,
+        change_pin_old: [0; MAX_PIN],
+        change_pin_old_length: 0,
+        change_pin_new: [0; MAX_PIN],
+        change_pin_new_length: 0,
         pointer: (0, 0),
         pointer_visible: false,
         drag: None,
+        pointer_capture: None,
         tiled: false,
         apps: [None; MAX_APPS],
         app_count: 0,
@@ -926,6 +1089,20 @@ impl Desktop {
 
     fn screen(&self) -> Area {
         Area::new(0, 0, self.desktop_width, self.height)
+    }
+
+    /// The lock-screen account rows and PIN prompt are the only pixels that
+    /// change while choosing an account. Keeping this damage bounded avoids
+    /// repainting the full 1280x800 wallpaper for every key on SMP boots.
+    fn lock_account_area(&self) -> Area {
+        let middle = self.height / 2;
+        self.screen().intersect(Area::new(0, middle - 50, self.desktop_width, 80))
+    }
+
+    /// The prompt and masked PIN dots change independently of the wallpaper.
+    fn lock_input_area(&self) -> Area {
+        let middle = self.height / 2;
+        self.screen().intersect(Area::new(0, middle - 8, self.desktop_width, 32))
     }
 
     fn taskbar_top(&self) -> i32 {
@@ -1276,6 +1453,13 @@ impl Desktop {
             if self.dnd { "Do not disturb: On" } else { "Do not disturb: Off" },
             if self.tiled { "Tiling: On" } else { "Tiling: Off" },
             "Lock screen",
+            "Change PIN",
+            match self.language {
+                libwoven::i18n::Language::English => "Language: English",
+                libwoven::i18n::Language::Chichewa => "Language: Chichewa",
+            },
+            if self.three_d { "3D Desktop: On" } else { "3D Desktop: Off" },
+            if self.reduced_motion { "Reduced Motion: On" } else { "Reduced Motion: Off" },
         ]
     }
 
@@ -1286,9 +1470,11 @@ impl Desktop {
         canvas.shade(|x, y| blend(rgb(0, 0, 0), wallpaper(x, y, height), LOCK_DIM));
         let middle = self.height / 2;
         let centred = |text: &str| (self.width - font::text_width(text) as i32) / 2;
+        let catalog = lock_catalog(self.language);
         if self.mode == LockMode::SignIn {
-            // "Sign in", then the accounts, the chosen one marked.
-            canvas.draw_text(centred("Sign in"), middle - 60, "Sign in", TEXT);
+            // The sign-in prompt, then the accounts, the chosen one marked.
+            let text = catalog.lookup("sign_in", "Sign in");
+            canvas.draw_text(centred(text), middle - 60, text, TEXT);
             for (index, account) in self.accounts.iter().flatten().enumerate() {
                 let mut line = [b' '; 2 + libwoven::accounts::MAX_NAME];
                 if index == self.chosen {
@@ -1298,16 +1484,29 @@ impl Desktop {
                 let text = core::str::from_utf8(&line[..2 + account.name().len()]).unwrap_or("");
                 canvas.draw_text(centred(text), middle - 46 + index as i32 * 10, text, TEXT);
             }
+        } else if self.mode == LockMode::ChangePin {
+            let text = catalog.lookup("change_pin", "Change PIN");
+            canvas.draw_text(centred(text), middle - 34, text, TEXT);
         } else {
-            canvas.draw_text(centred("Locked"), middle - 34, "Locked", TEXT);
+            let text = catalog.lookup("locked", "Locked");
+            canvas.draw_text(centred(text), middle - 34, text, TEXT);
             let (bytes, length) = clock_text(self.time, false);
             let clock = core::str::from_utf8(&bytes[..length]).unwrap_or("");
             canvas.draw_text(centred(clock), middle - 20, clock, TEXT);
         }
-        let prompt = match self.prompt {
-            LockPrompt::Enter => "Enter PIN",
-            LockPrompt::Wrong => "Wrong PIN",
-            LockPrompt::LockedOut => "Try again shortly",
+        let prompt = if self.mode == LockMode::ChangePin && self.prompt == LockPrompt::Enter {
+            match self.change_pin {
+                Some(ChangePinStep::Current) => catalog.lookup("current_pin", "Current PIN"),
+                Some(ChangePinStep::New) => catalog.lookup("new_pin", "New PIN"),
+                Some(ChangePinStep::Confirm) => catalog.lookup("confirm_new_pin", "Confirm new PIN"),
+                None => catalog.lookup("enter_pin", "Enter PIN"),
+            }
+        } else {
+            match self.prompt {
+                LockPrompt::Enter => catalog.lookup("enter_pin", "Enter PIN"),
+                LockPrompt::Wrong => catalog.lookup("wrong_pin", "Wrong PIN"),
+                LockPrompt::LockedOut => catalog.lookup("try_again_shortly", "Try again shortly"),
+            }
         };
         canvas.draw_text(centred(prompt), middle - 4, prompt, TEXT);
         let dots = self.entry_length as i32;
@@ -1319,11 +1518,38 @@ impl Desktop {
 
     fn lock(&mut self) -> Area {
         let _ = self.close_panels();
+        if let Some(session) = self.kernel_session {
+            if libwoven::identity::session_lock(session).is_err() {
+                log(&[b"woven-shell: kernel identity lock failed"]);
+                return self.screen();
+            }
+        }
         self.locked = true;
         self.mode = LockMode::Lock;
         self.forget_entry();
         self.prompt = LockPrompt::Enter;
         log(&[b"woven-shell: locked"]);
+        self.screen()
+    }
+
+    /// Enter `LockMode::ChangePin` for the signed-in account, from Quick
+    /// Settings. A toast, not the lock screen, reports the `--pin`-only case
+    /// (no persistent account to update) since there is nothing to prompt
+    /// for.
+    fn start_change_pin(&mut self) -> Area {
+        let dirty = self.close_panels();
+        if self.session.is_none() {
+            let mut text = [0u8; 32];
+            let length = label(b"No account signed in", TOAST_CHARS, &mut text);
+            self.toast = Some(Toast { text, length, until: libwoven::ticks() + TOAST_TICKS });
+            return dirty.union(self.toast_area());
+        }
+        self.locked = true;
+        self.mode = LockMode::ChangePin;
+        self.change_pin = Some(ChangePinStep::Current);
+        self.forget_entry();
+        self.prompt = LockPrompt::Enter;
+        log(&[b"woven-shell: change pin started"]);
         self.screen()
     }
 
@@ -1338,11 +1564,12 @@ impl Desktop {
     }
 
     /// Check the typed digits: against the chosen account when signing in,
-    /// the signed-in account when locked, or else the `--pin` PIN.
+    /// the signed-in account when locked or confirming its current PIN to
+    /// change it, or else the `--pin` PIN.
     fn pin_matches(&self) -> bool {
         let account = match self.mode {
             LockMode::SignIn => Some(self.chosen),
-            LockMode::Lock => self.session,
+            LockMode::Lock | LockMode::ChangePin => self.session,
         };
         if let Some(account) = account.and_then(|index| self.accounts[index]) {
             return account.verify(&self.entry[..self.entry_length]);
@@ -1364,23 +1591,80 @@ impl Desktop {
                     self.entry[self.entry_length] = digit as u8;
                     self.entry_length += 1;
                 }
+                self.lock_input_area()
             }
             Key::Backspace => {
                 if self.entry_length > 0 {
                     self.entry_length -= 1;
                     self.entry[self.entry_length] = 0;
+                } else if self.mode == LockMode::ChangePin {
+                    // Backspace on an empty entry cancels: there is no other
+                    // key bound to "leave this screen without changing
+                    // anything", and the alternative is simply leaving it
+                    // through a successful step instead.
+                    return self.cancel_change_pin();
                 }
+                self.lock_input_area()
             }
             Key::Tab if self.mode == LockMode::SignIn => {
                 let count = self.accounts.iter().flatten().count().max(1);
                 self.chosen = (self.chosen + 1) % count;
                 self.forget_entry();
                 self.prompt = LockPrompt::Enter;
+                self.lock_account_area()
             }
+            Key::Enter if self.mode == LockMode::ChangePin => self.change_pin_enter(),
             Key::Enter => {
                 if libwoven::ticks() < self.lockout_until {
                     self.prompt = LockPrompt::LockedOut;
-                } else if self.pin_matches() {
+                } else if match self.mode {
+                    LockMode::SignIn | LockMode::Lock
+                        if self.accounts.iter().any(Option::is_some) => true,
+                    _ => self.pin_matches(),
+                } {
+                    let kernel_authenticated = match self.mode {
+                        LockMode::SignIn => {
+                            match self.accounts[self.chosen] {
+                                Some(account) => {
+                                    let digest = account.password_digest(&self.entry[..self.entry_length]);
+                                    match libwoven::identity::session_open_verified(
+                                        account.name(),
+                                        &digest,
+                                    ) {
+                                        Ok(session) => {
+                                            self.kernel_session = Some(session);
+                                            true
+                                        }
+                                        Err(_) => false,
+                                    }
+                                }
+                                None => false,
+                            }
+                        }
+                        LockMode::Lock => match (
+                            self.kernel_session,
+                            self.session.and_then(|index| self.accounts[index]),
+                        ) {
+                            (Some(session), Some(account)) => {
+                                let digest = account.password_digest(&self.entry[..self.entry_length]);
+                                libwoven::identity::session_unlock_verified(session, &digest).is_ok()
+                            }
+                            // No account ever signed in: this is the legacy
+                            // `--pin`-only mode, which has no kernel session
+                            // to re-verify against. `pin_matches()` already
+                            // checked the entry above against `self.pin`.
+                            (None, None) => true,
+                            _ => false,
+                        },
+                        LockMode::ChangePin => true,
+                    };
+                    if !kernel_authenticated {
+                        self.failures += 1;
+                        self.prompt = LockPrompt::Wrong;
+                        log(&[b"woven-shell: kernel identity rejected PIN"]);
+                        self.forget_entry();
+                        return self.lock_input_area();
+                    }
                     self.locked = false;
                     self.failures = 0;
                     if self.mode == LockMode::SignIn {
@@ -1401,14 +1685,158 @@ impl Desktop {
                     }
                 }
                 self.forget_entry();
+                if self.locked {
+                    self.lock_input_area()
+                } else {
+                    self.screen()
+                }
             }
-            _ => return Area::new(0, 0, 0, 0),
+            _ => Area::new(0, 0, 0, 0),
         }
+    }
+
+    /// Securely wipe the stashed current PIN.
+    fn wipe_change_pin_old(&mut self) {
+        for byte in &mut self.change_pin_old {
+            // SAFETY: a valid, aligned byte of our own array; volatile so the
+            // wipe is not optimised away.
+            unsafe { core::ptr::write_volatile(byte, 0) };
+        }
+        self.change_pin_old_length = 0;
+    }
+
+    /// Securely wipe the stashed new PIN.
+    fn wipe_change_pin_new(&mut self) {
+        for byte in &mut self.change_pin_new {
+            // SAFETY: as `wipe_change_pin_old`.
+            unsafe { core::ptr::write_volatile(byte, 0) };
+        }
+        self.change_pin_new_length = 0;
+    }
+
+    /// Leave `LockMode::ChangePin` without changing anything.
+    fn cancel_change_pin(&mut self) -> Area {
+        self.wipe_change_pin_old();
+        self.wipe_change_pin_new();
+        self.change_pin = None;
+        self.locked = false;
+        self.mode = LockMode::Lock;
+        log(&[b"woven-shell: pin change cancelled"]);
         self.screen()
     }
 
-    fn render_qs(&self, canvas: &mut Canvas<'_>) {
-        let area = self.qs_area();
+    /// Enter at the active `ChangePin` step: verify the current PIN, collect
+    /// the new one, collect it again, and on a matching confirmation, call
+    /// `libwoven::accounts::change_pin` and report the result as a toast.
+    fn change_pin_enter(&mut self) -> Area {
+        match self.change_pin {
+            Some(ChangePinStep::Current) => {
+                if libwoven::ticks() < self.lockout_until {
+                    self.prompt = LockPrompt::LockedOut;
+                    self.forget_entry();
+                    return self.lock_input_area();
+                }
+                if self.pin_matches() {
+                    self.failures = 0;
+                    self.change_pin_old[..self.entry_length]
+                        .copy_from_slice(&self.entry[..self.entry_length]);
+                    self.change_pin_old_length = self.entry_length;
+                    self.change_pin = Some(ChangePinStep::New);
+                    self.prompt = LockPrompt::Enter;
+                } else {
+                    self.failures += 1;
+                    self.prompt = LockPrompt::Wrong;
+                    if self.failures >= PIN_ATTEMPTS {
+                        self.failures = 0;
+                        self.lockout_until = libwoven::ticks() + PIN_LOCKOUT;
+                        self.prompt = LockPrompt::LockedOut;
+                    }
+                }
+                self.forget_entry();
+                self.lock_input_area()
+            }
+            Some(ChangePinStep::New) => {
+                // An empty new PIN is refused silently rather than accepted
+                // as "no PIN": Enter on nothing just does nothing here.
+                if self.entry_length == 0 {
+                    return self.lock_input_area();
+                }
+                self.change_pin_new[..self.entry_length]
+                    .copy_from_slice(&self.entry[..self.entry_length]);
+                self.change_pin_new_length = self.entry_length;
+                self.change_pin = Some(ChangePinStep::Confirm);
+                self.prompt = LockPrompt::Enter;
+                self.forget_entry();
+                self.lock_input_area()
+            }
+            Some(ChangePinStep::Confirm) => {
+                let matches = self.entry_length == self.change_pin_new_length
+                    && self.entry[..self.entry_length] == self.change_pin_new[..self.change_pin_new_length];
+                self.forget_entry();
+                if !matches {
+                    // Does not match: back to entering the new PIN, keeping
+                    // the already-verified current one.
+                    self.wipe_change_pin_new();
+                    self.change_pin = Some(ChangePinStep::New);
+                    self.prompt = LockPrompt::Wrong;
+                    return self.lock_input_area();
+                }
+                let name = self.session.and_then(|index| self.accounts[index]);
+                let session_name = name.map(|account| {
+                    let mut value = [0u8; libwoven::accounts::MAX_NAME];
+                    let length = account.name().len();
+                    value[..length].copy_from_slice(account.name());
+                    (value, length)
+                });
+                let result = name.map(|account| {
+                    let mut buffer = [0u8; libwoven::accounts::MAX_NAME];
+                    let length = account.name().len();
+                    buffer[..length].copy_from_slice(account.name());
+                    libwoven::accounts::change_pin(
+                        &buffer[..length],
+                        &self.change_pin_old[..self.change_pin_old_length],
+                        &self.change_pin_new[..self.change_pin_new_length],
+                    )
+                });
+                self.wipe_change_pin_old();
+                self.wipe_change_pin_new();
+                self.change_pin = None;
+                self.locked = false;
+                self.mode = LockMode::Lock;
+                let succeeded = matches!(result, Some(Ok(())));
+                if succeeded {
+                    self.accounts = [None; MAX_ACCOUNTS];
+                    load_accounts("/etc/wovenhat/accounts", &mut self.accounts);
+                    self.session = session_name.and_then(|(value, length)| {
+                        self.accounts.iter().position(|account| {
+                            account.is_some_and(|account| account.name() == &value[..length])
+                        })
+                    });
+                }
+                let message: &[u8] = match result {
+                    Some(Ok(())) => b"PIN changed",
+                    Some(Err(_)) => b"Could not change PIN",
+                    None => b"No account signed in",
+                };
+                let mut text = [0u8; 32];
+                let length = label(message, TOAST_CHARS, &mut text);
+                self.toast = Some(Toast { text, length, until: libwoven::ticks() + TOAST_TICKS });
+                log(&[
+                    b"woven-shell: pin change ",
+                    if succeeded { b"succeeded" } else { b"failed" },
+                ]);
+                self.screen()
+            }
+            None => self.lock_input_area(),
+        }
+    }
+
+    /// The Quick Settings panel's content -- border, title fill, title text,
+    /// and every row -- drawn at `area`'s own position in `canvas`. Used
+    /// both for the ordinary flat 2D panel and, rendered once at local
+    /// origin into an offscreen texture, as the source the 3D mode's
+    /// perspective projection samples.
+    fn paint_qs_content(&self, canvas: &mut Canvas<'_>, area: Area) {
         let (x, y) = (area.x, area.y);
         outline(canvas, area, ACCENT);
         canvas.fill_rect(x + 1, y + 1, (area.width - 2) as usize, PANEL_ROW as usize, START_FILL);
@@ -1416,6 +1844,93 @@ impl Desktop {
         for (row, text) in self.qs_rows().iter().enumerate() {
             canvas.draw_text(x + 6, y + 1 + (1 + row as i32) * PANEL_ROW + 4, text, TEXT);
         }
+    }
+
+    fn render_qs(&self, canvas: &mut Canvas<'_>) {
+        let area = self.qs_area();
+        if self.three_d {
+            self.render_qs_3d(canvas, area);
+        } else {
+            self.paint_qs_content(canvas, area);
+        }
+    }
+
+    /// The Quick Settings panel, perspective-projected as a card tilted back
+    /// in 3D (its bottom edge stays put; its top edge recedes and narrows)
+    /// instead of blitted flat. The flat content is rendered once into
+    /// `QS_PANEL_TEXTURE` at local origin, then sampled by two
+    /// `textured_triangle_3d` calls per tile `canvas` this is invoked for
+    /// (the Quick Settings area spans several `TILE_HEIGHT`-tall tiles);
+    /// each call clips to its own `canvas`/depth bounds, so painting the
+    /// full projected quad on every tile is safe and only the tile's own
+    /// pixels are touched.
+    fn render_qs_3d(&self, canvas: &mut Canvas<'_>, area: Area) {
+        // SAFETY: single-threaded; this is the only live reference, and it
+        // does not outlive this call.
+        let texture_pixels = unsafe { &mut *QS_PANEL_TEXTURE.0.get() };
+        let Some(mut texture) =
+            Canvas::new(texture_pixels, 0, 0, area.width as usize, area.height as usize)
+        else {
+            return self.paint_qs_content(canvas, area);
+        };
+        self.paint_qs_content(&mut texture, Area::new(0, 0, area.width, area.height));
+
+        let half_width = (area.width / 2) << 16;
+        // `area.height - 1`, not `area.height`: the bottom edge is meant to
+        // land exactly on the panel's last pixel row (an inclusive bound),
+        // not one row past it (the exclusive size `area.height` would give).
+        let half_height = ((area.height - 1) << 16) / 2;
+        const DISTANCE: i32 = 200 << 16;
+        const TILT_DEPTH: i32 = 70 << 16;
+        let camera = Camera::new(
+            DISTANCE, // focal_length == distance: the (closest) bottom edge
+            // keeps its original flat scale; only the receding top edge
+            // narrows.
+            DISTANCE,
+            area.x + area.width / 2,
+            area.y + area.height / 2,
+        );
+        let (Some(top_left), Some(top_right), Some(bottom_left), Some(bottom_right)) = (
+            camera.project(-half_width, -half_height, TILT_DEPTH),
+            camera.project(half_width, -half_height, TILT_DEPTH),
+            camera.project(-half_width, half_height, 0),
+            camera.project(half_width, half_height, 0),
+        ) else {
+            return self.paint_qs_content(canvas, area);
+        };
+        let vertex = |(x, y, depth): (i32, i32, u16), u: u8, v: u8| Vertex3Tex::new(x, y, depth, u, v);
+
+        // SAFETY: single-threaded; this is the only live reference, and it
+        // does not outlive this call.
+        let depth_values = unsafe { &mut *QS_DEPTH.0.get() };
+        let Some(mut depth) =
+            DepthBuffer::new(depth_values, canvas.x(), canvas.y(), canvas.width(), canvas.height())
+        else {
+            return self.paint_qs_content(canvas, area);
+        };
+        depth.clear(u16::MAX);
+        // The projected quad is narrower than the flat panel's footprint at
+        // its receded top edge, so the corners it no longer covers would
+        // otherwise still show whatever the previous frame drew there (the
+        // flat panel, if 3D mode was just switched on) rather than the real
+        // desktop background underneath.
+        let height = self.height;
+        canvas.shade(|x, y| wallpaper(x, y, height));
+        let mut renderer = Renderer::new(canvas);
+        renderer.textured_triangle_3d(
+            &mut depth,
+            vertex(top_left, 0, 0),
+            vertex(top_right, 255, 0),
+            vertex(bottom_left, 0, 255),
+            &texture,
+        );
+        renderer.textured_triangle_3d(
+            &mut depth,
+            vertex(top_right, 255, 0),
+            vertex(bottom_right, 255, 255),
+            vertex(bottom_left, 0, 255),
+            &texture,
+        );
     }
 
     /// Close whichever panel is open. Returns the area to repaint.
@@ -1580,10 +2095,14 @@ impl Desktop {
         before.union(self.center_area()).union(self.taskbar())
     }
 
-    fn render_title(window: &Window, focused: bool, canvas: &mut Canvas<'_>) {
+    fn render_title(window: &Window, focused: bool, canvas: &mut Canvas<'_>, three_d: bool) {
         let area = window.title_area();
         let fill = if focused { TITLE_ACTIVE } else { TITLE_INACTIVE };
-        canvas.fill_rect(area.x, area.y, area.width as usize, area.height as usize, fill);
+        if three_d {
+            Self::render_title_3d(area, fill, canvas);
+        } else {
+            canvas.fill_rect(area.x, area.y, area.width as usize, area.height as usize, fill);
+        }
         let close = window.close_area();
         if !close.is_empty() {
             canvas.fill_rect(close.x, close.y, close.width as usize, close.height as usize, CLOSE_FILL);
@@ -1595,6 +2114,57 @@ impl Desktop {
         let length = label(&window.title[..window.title_length], chars, &mut buffer);
         let text = core::str::from_utf8(&buffer[..length]).unwrap_or("");
         canvas.draw_text(area.x + 4, area.y + 4, text, TEXT);
+    }
+
+    /// A window's title-bar fill, perspective-projected as a card tilted
+    /// back in 3D (bottom edge anchored, top edge receded and narrowed),
+    /// instead of flat. Flat-colour, not textured -- unlike the Quick
+    /// Settings panel, there is no bounded-size offscreen render to sample,
+    /// since a title bar's width is the window's own and windows can be
+    /// much wider than `QS_PANEL_TEXTURE` is sized for. The flat colour is
+    /// filled first so any gap between the narrowed top edge and the
+    /// original flat footprint still shows a sensible colour (the window's
+    /// own fill) rather than whatever this tile's shared scratch buffer
+    /// held from an unrelated previous repaint.
+    fn render_title_3d(area: Area, fill: u32, canvas: &mut Canvas<'_>) {
+        canvas.fill_rect(area.x, area.y, area.width as usize, area.height as usize, fill);
+        let half_width = (area.width / 2) << 16;
+        let half_height = ((area.height - 1) << 16) / 2;
+        const DISTANCE: i32 = 200 << 16;
+        const TILT_DEPTH: i32 = 20 << 16;
+        let camera = Camera::new(
+            DISTANCE,
+            DISTANCE,
+            area.x + area.width / 2,
+            area.y + area.height / 2,
+        );
+        let (Some(top_left), Some(top_right), Some(bottom_left), Some(bottom_right)) = (
+            camera.project(-half_width, -half_height, TILT_DEPTH),
+            camera.project(half_width, -half_height, TILT_DEPTH),
+            camera.project(-half_width, half_height, 0),
+            camera.project(half_width, half_height, 0),
+        ) else {
+            return;
+        };
+        let color = libwoven::graphics::Color::rgb(
+            (fill >> 16) as u8,
+            (fill >> 8) as u8,
+            fill as u8,
+        );
+        let vertex = |(x, y, depth): (i32, i32, u16)| Vertex3::new(x, y, depth, color);
+
+        // SAFETY: single-threaded; this is the only live reference, and it
+        // does not outlive this call.
+        let depth_values = unsafe { &mut *QS_DEPTH.0.get() };
+        let Some(mut depth) =
+            DepthBuffer::new(depth_values, canvas.x(), canvas.y(), canvas.width(), canvas.height())
+        else {
+            return;
+        };
+        depth.clear(u16::MAX);
+        let mut renderer = Renderer::new(canvas);
+        renderer.triangle_3d(&mut depth, vertex(top_left), vertex(top_right), vertex(bottom_left));
+        renderer.triangle_3d(&mut depth, vertex(top_right), vertex(bottom_right), vertex(bottom_left));
     }
 
     /// The toast's overlay: border and text over its blended background.
@@ -1671,9 +2241,9 @@ impl Desktop {
             if !title.is_empty() {
                 let active = Some(slot) == focused;
                 if alpha == u8::MAX {
-                    painter.draw(title, |canvas| Self::render_title(window, active, canvas));
+                    painter.draw(title, |canvas| Self::render_title(window, active, canvas, self.three_d));
                 } else {
-                    painter.draw_blended(title, alpha, |canvas| Self::render_title(window, active, canvas));
+                    painter.draw_blended(title, alpha, |canvas| Self::render_title(window, active, canvas, self.three_d));
                 }
             }
             let body = window.body().intersect(area);
@@ -1762,7 +2332,10 @@ impl Desktop {
         let mut title = [0u8; MAX_TITLE];
         let title_length = (message.len() - 16).min(MAX_TITLE);
         title[..title_length].copy_from_slice(&message[16..16 + title_length]);
-        let mut fade = Spring::new(0);
+        // Reduced motion: appear at full opacity immediately rather than
+        // animate in, matching libwoven::accessibility::Settings's own
+        // "duration 0" convention for this preference.
+        let mut fade = Spring::new(if self.reduced_motion { i32::from(u8::MAX) } else { 0 });
         fade.set_target(i32::from(u8::MAX));
         let window = Window {
             owner,
@@ -1854,9 +2427,11 @@ impl Desktop {
             || !(1..=self.width).contains(&width)
             || !(1..=top - TITLE_HEIGHT).contains(&height)
         {
+            log(&[b"woven-shell: WRSZ rejected: token or geometry"]);
             return empty;
         }
         let Some(window) = self.windows.iter_mut().flatten().find(|window| window.owner == owner) else {
+            log(&[b"woven-shell: WRSZ rejected: owner window missing"]);
             return empty;
         };
         let before = window.footprint();
@@ -1964,9 +2539,15 @@ impl Desktop {
                 );
                 self.pointer_visible = true;
                 let moved = self.drag_to_pointer();
+                if self.drag.is_none() {
+                    self.forward_pointer_move();
+                }
                 before.union(self.cursor_area()).union(moved)
             }
             InputEvent::PointerButton { button: 0, pressed: false } => {
+                if let Some(slot) = self.pointer_capture.take() {
+                    self.forward_pointer_button(slot, false);
+                }
                 // Dropped on the left or right edge: snap to that half.
                 let Some((slot, _, _)) = self.drag.take() else { return empty };
                 let (x, _) = self.pointer;
@@ -2010,6 +2591,27 @@ impl Desktop {
                         }
                         4 => self.toggle_tiling(),
                         5 => self.lock(),
+                        6 => self.start_change_pin(),
+                        7 => {
+                            self.language = match self.language {
+                                libwoven::i18n::Language::English => libwoven::i18n::Language::Chichewa,
+                                libwoven::i18n::Language::Chichewa => libwoven::i18n::Language::English,
+                            };
+                            log(&[b"woven-shell: language toggled"]);
+                            panel
+                        }
+                        8 => {
+                            self.three_d = !self.three_d;
+                            log(if self.three_d { &[b"woven-shell: 3D desktop on"] } else { &[b"woven-shell: 3D desktop off"] });
+                            // Every open window's title bar also renders
+                            // differently in 3D mode, not just this panel.
+                            panel.union(self.screen())
+                        }
+                        9 => {
+                            self.reduced_motion = !self.reduced_motion;
+                            log(if self.reduced_motion { &[b"woven-shell: reduced motion on"] } else { &[b"woven-shell: reduced motion off"] });
+                            panel
+                        }
                         _ => empty,
                     };
                 }
@@ -2066,6 +2668,9 @@ impl Desktop {
                 }
                 if window.title_area().contains(x, y) {
                     self.drag = Some((slot, x - window.x, y - window.y));
+                } else if window.body().contains(x, y) {
+                    self.pointer_capture = Some(slot);
+                    self.forward_pointer_button(slot, true);
                 }
                 self.focus(slot)
             }
@@ -2074,6 +2679,18 @@ impl Desktop {
             InputEvent::Key(Key::F2) => self.toggle_tiling(),
             InputEvent::Key(Key::F3) => self.switch_workspace((self.workspace + 1) % WORKSPACES),
             InputEvent::Key(Key::F4) => self.move_focused_to_next_workspace(),
+            InputEvent::Key(Key::Enter) => {
+                if let Some(window) = self.focused().and_then(|slot| self.windows[slot]) {
+                    let _ = libwoven::message_send(window.owner, &[b'W', b'K', b'E', b'Y', KEY_ENTER]);
+                }
+                empty
+            }
+            InputEvent::Key(Key::Backspace) => {
+                if let Some(window) = self.focused().and_then(|slot| self.windows[slot]) {
+                    let _ = libwoven::message_send(window.owner, &[b'W', b'K', b'E', b'Y', KEY_BACKSPACE]);
+                }
+                empty
+            }
             InputEvent::Key(Key::Char(character)) if character.is_ascii() => {
                 if let Some(window) = self.focused().and_then(|slot| self.windows[slot]) {
                     let _ = libwoven::message_send(window.owner, &[character as u8]);
@@ -2082,6 +2699,41 @@ impl Desktop {
             }
             _ => empty,
         }
+    }
+
+    /// Forward a pointer move to the topmost client under the pointer. Shell
+    /// chrome, title bars and window drags remain shell-owned.
+    fn forward_pointer_move(&self) {
+        let (x, y) = self.pointer;
+        let Some(slot) = self.stack[..self.stacked].iter().rev().copied().find(|&slot| {
+            self.windows[slot].is_some_and(|window| window.body().contains(x, y))
+        }) else {
+            return;
+        };
+        let Some(window) = self.windows[slot] else { return };
+        let local_x = (x - window.x).clamp(0, window.width.saturating_sub(1)) as u16;
+        let local_y = (y - window.y).clamp(0, window.height.saturating_sub(1)) as u16;
+        let mut message = [0u8; 8];
+        message[..4].copy_from_slice(b"WPMV");
+        message[4..6].copy_from_slice(&local_x.to_le_bytes());
+        message[6..8].copy_from_slice(&local_y.to_le_bytes());
+        let _ = libwoven::message_send(window.owner, &message);
+    }
+
+    /// Forward a bounded primary-button edge to a client that owns the
+    /// pointer capture. Coordinates are clamped to the shared surface.
+    fn forward_pointer_button(&self, slot: usize, pressed: bool) {
+        let (x, y) = self.pointer;
+        let Some(window) = self.windows[slot] else { return };
+        let local_x = (x - window.x).clamp(0, window.width.saturating_sub(1)) as u16;
+        let local_y = (y - window.y).clamp(0, window.height.saturating_sub(1)) as u16;
+        let mut message = [0u8; 10];
+        message[..4].copy_from_slice(b"WPBT");
+        message[4] = 0;
+        message[5] = u8::from(pressed);
+        message[6..8].copy_from_slice(&local_x.to_le_bytes());
+        message[8..10].copy_from_slice(&local_y.to_le_bytes());
+        let _ = libwoven::message_send(window.owner, &message);
     }
 
     /// Move the dragged window under the pointer, keeping its frame on screen

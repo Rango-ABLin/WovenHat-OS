@@ -6,12 +6,17 @@ use core::panic::PanicInfo;
 use libwoven::Args;
 use wovenhat_images::{kind, parse, Command};
 
+mod gui;
+
 libwoven::entry!(main);
 
 const MAX_ENTRIES: usize = 128;
 const MAX_HEADER: usize = 32;
 
 fn main(args: Args) -> ! {
+    if args.get(1) == Some(b"--gui") {
+        gui::run(args.get(2));
+    }
     let mut raw = [&[][..]; 2];
     let mut count = 0usize;
     for index in 1..args.len() {

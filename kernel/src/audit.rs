@@ -39,6 +39,34 @@ pub enum Action {
     AudioPlay,
     /// Power off (detail 0) or restart (detail 1) requested.
     PowerControl,
+    /// A local account's PIN was changed (or the attempt was refused).
+    AccountChangePin,
+    #[allow(dead_code)]
+    IdentityOpen,
+    #[allow(dead_code)]
+    IdentityLock,
+    #[allow(dead_code)]
+    IdentityUnlock,
+    #[allow(dead_code)]
+    IdentityElevate,
+    #[allow(dead_code)]
+    IdentityClose,
+    #[allow(dead_code)]
+    IdentityHardware,
+    #[allow(dead_code)]
+    IdentityAdminAddUser,
+    #[allow(dead_code)]
+    IdentityAdminDeleteUser,
+    #[allow(dead_code)]
+    IdentityAdminAddGroup,
+    #[allow(dead_code)]
+    IdentityAdminAddMember,
+    #[allow(dead_code)]
+    IdentityAdminRemoveMember,
+    #[allow(dead_code)]
+    IdentityAdminQuery,
+    #[allow(dead_code)]
+    IdentityAdminSetLockout,
 }
 
 /// One immutable security-ledger record.

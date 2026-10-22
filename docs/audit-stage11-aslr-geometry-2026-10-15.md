@@ -1,4 +1,12 @@
-# Production-ASLR geometry — source finding, correction not implemented
+# Production-ASLR geometry — bounded correction accepted
+
+## Current decision (2026-10-20)
+
+The arena/guard overlap correction described by the original investigation is
+implemented and accepted as a bounded Stage 11.2-ASLR increment. The prior
+failure evidence below is retained as historical defect evidence; it is not the
+current implementation status. This audit does not claim full Stage 11
+closure, broader entropy qualification, or physical hardware validation.
 
 ## CPU reproduction — 2026-10-16
 

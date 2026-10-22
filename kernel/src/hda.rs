@@ -640,7 +640,9 @@ impl HdaController {
     #[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
     fn set_output_volume(&mut self, percent: u8) -> Result<u8, InitError> {
         let output = self.output.as_ref().ok_or(InitError::NotReady)?;
-        let Some((node, steps)) = output.amp else { return Ok(0) };
+        let Some((node, steps)) = output.amp else {
+            return Ok(0);
+        };
         let codec = output.codec;
         let gain = (u16::from(steps) * u16::from(percent.min(100)) / 100) as u8;
         let mute = if percent == 0 { 0x80 } else { 0 };
@@ -654,19 +656,31 @@ impl HdaController {
     #[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
     fn begin_playback(&mut self, pcm: &[u8]) -> Result<(), InitError> {
         let output = self.output.as_ref().ok_or(InitError::NotReady)?;
-        let (codec, converter, index, stream, bdl) =
-            (output.codec, output.converter, output.index, output.stream, output.bdl);
+        let (codec, converter, index, stream, bdl) = (
+            output.codec,
+            output.converter,
+            output.index,
+            output.stream,
+            output.bdl,
+        );
         let entries = pcm.len().div_ceil(4096);
         for (entry, chunk) in pcm.chunks(4096).enumerate() {
             let page = output.pages[entry];
             // SAFETY: each page is owned by this stream, mapped, 4 KiB.
             unsafe {
-                ptr::copy_nonoverlapping(chunk.as_ptr(), page.virtual_address as *mut u8, chunk.len());
+                ptr::copy_nonoverlapping(
+                    chunk.as_ptr(),
+                    page.virtual_address as *mut u8,
+                    chunk.len(),
+                );
                 let descriptor = bdl.virtual_address + entry as u64 * 16;
                 ptr::write_volatile(descriptor as *mut u64, page.physical);
                 ptr::write_volatile((descriptor + 8) as *mut u32, chunk.len() as u32);
                 // Interrupt on completion of the last buffer only.
-                ptr::write_volatile((descriptor + 12) as *mut u32, u32::from(entry + 1 == entries));
+                ptr::write_volatile(
+                    (descriptor + 12) as *mut u32,
+                    u32::from(entry + 1 == entries),
+                );
             }
         }
         compiler_fence(Ordering::Release);
@@ -683,7 +697,10 @@ impl HdaController {
         let intctl = mmio_read32(self.mmio + 0x20)?;
         mmio_write32(self.mmio + 0x20, intctl | (1 << 31) | (1 << index))?;
         // Run, with interrupt on completion.
-        mmio_write32(stream, (u32::from(PLAY_STREAM_TAG) << 20) | (1 << 2) | (1 << 1))?;
+        mmio_write32(
+            stream,
+            (u32::from(PLAY_STREAM_TAG) << 20) | (1 << 2) | (1 << 1),
+        )?;
         if mmio_read32(stream)? & (1 << 1) == 0 {
             return Err(InitError::StreamStartFailed);
         }
@@ -1084,10 +1101,13 @@ pub struct AudioInfo {
 pub fn start_output(driver: &'static str) -> Result<AudioInfo, InitError> {
     {
         let mut slot = CONTROLLER.lock();
-        slot.as_mut().ok_or(InitError::MissingController)?.prepare_output()?;
+        slot.as_mut()
+            .ok_or(InitError::MissingController)?
+            .prepare_output()?;
     }
     if AUDIO_VECTOR.load(Ordering::Acquire) == 0 {
-        let vector = match crate::driver::enable_pci_interrupt(driver, crate::smp::bsp_apic_id(), 0) {
+        let vector = match crate::driver::enable_pci_interrupt(driver, crate::smp::bsp_apic_id(), 0)
+        {
             Ok(crate::driver::PciInterruptLease::Msi(lease)) => lease.vector.vector,
             Ok(crate::driver::PciInterruptLease::Msix(lease)) => lease.vector.vector,
             Err(_) => return Err(InitError::InterruptUnavailable),
@@ -1141,12 +1161,20 @@ pub fn play(pcm: &[u8]) -> Result<usize, InitError> {
         return Err(InitError::Busy);
     }
     let result = (|| {
-        CONTROLLER.lock().as_mut().ok_or(InitError::MissingController)?.begin_playback(pcm)?;
+        CONTROLLER
+            .lock()
+            .as_mut()
+            .ok_or(InitError::MissingController)?
+            .begin_playback(pcm)?;
         // Twice the playing time, plus half a second.
         let frames = (pcm.len() / 4) as u64;
         let deadline = crate::timer::ticks() + frames * 200 / 48_000 + 50;
         loop {
-            let done = CONTROLLER.lock().as_mut().ok_or(InitError::MissingController)?.playback_done()?;
+            let done = CONTROLLER
+                .lock()
+                .as_mut()
+                .ok_or(InitError::MissingController)?
+                .playback_done()?;
             if done {
                 if crate::timer::ticks() < deadline {
                     AUDIO_ON_TIME.fetch_add(1, Ordering::Relaxed);
@@ -1172,7 +1200,11 @@ pub fn play(pcm: &[u8]) -> Result<usize, InitError> {
 
 #[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
 pub fn set_volume(percent: u8) -> Result<u8, InitError> {
-    CONTROLLER.lock().as_mut().ok_or(InitError::MissingController)?.set_output_volume(percent)
+    CONTROLLER
+        .lock()
+        .as_mut()
+        .ok_or(InitError::MissingController)?
+        .set_output_volume(percent)
 }
 
 #[cfg(feature = "stage13-15-test")]

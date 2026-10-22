@@ -34,6 +34,14 @@ or physical flash qualification.
 
 ## Validation
 
+The 2026-10-20 lifecycle increment adds explicit `/wfs` publication
+ownership. Remount invalidates cached descendants and open descriptions before
+importing the journal-replayed tree; generic syscall paths fail closed while
+unpublished, while the authorized native adapter remains usable for
+pre-publication preparation. The stale-handle/remount assertion passed on
+1/2/4-CPU scratch-device QEMU. Evidence is under
+`target/wovenfs-device-scratch-{1,2,4}cpu`.
+
 - `cargo clippy --all-targets -- -D warnings` — passed.
 - Freestanding Clippy passed for `stage11-5-test`, `stage15-1-test`, and
   `stage15-2-test` with `-D warnings`.
@@ -76,4 +84,5 @@ volume, remains open. The recursive importer is intentionally bounded to
 payload capacity. Physical qualification remains incomplete: the inserted USB
 flash disk was inventoried read-only, while the destructive harness requires
 Administrator elevation and explicit authorization to erase it. No destructive
-write was issued in this audit.
+write was issued in this audit. Scratch-device QEMU is not physical flash,
+power-loss, or boot qualification.

@@ -190,7 +190,11 @@ impl Surface {
     #[allow(dead_code)]
     pub fn scaled_row(&self, y: usize, x: usize, scale: usize, out: &mut [u32]) {
         let scale = scale.max(1);
-        let row = if y < self.height { &self.pixels[y * self.width..(y + 1) * self.width] } else { &[][..] };
+        let row = if y < self.height {
+            &self.pixels[y * self.width..(y + 1) * self.width]
+        } else {
+            &[][..]
+        };
         let (mut source, mut phase) = (x / scale, x % scale);
         for pixel in out {
             *pixel = row.get(source).copied().unwrap_or(0);
@@ -638,7 +642,12 @@ pub fn present_scaled(
                     let width = bytes.min(4);
                     for slot in staged[..count * bytes].chunks_exact_mut(bytes) {
                         let color = surface.pixels[source];
-                        let pixel = [(color >> order[0]) as u8, (color >> order[1]) as u8, (color >> order[2]) as u8, 0];
+                        let pixel = [
+                            (color >> order[0]) as u8,
+                            (color >> order[1]) as u8,
+                            (color >> order[2]) as u8,
+                            0,
+                        ];
                         slot[..width].copy_from_slice(&pixel[..width]);
                         phase += 1;
                         if phase == scale {
@@ -652,7 +661,8 @@ pub fn present_scaled(
                     // Whole pixels that fit in the mapping.
                     let fit = count.min(framebuffer.len().saturating_sub(offset) / bytes);
                     if fit > 0 && order.is_some() {
-                        framebuffer[offset..offset + fit * bytes].copy_from_slice(&staged[..fit * bytes]);
+                        framebuffer[offset..offset + fit * bytes]
+                            .copy_from_slice(&staged[..fit * bytes]);
                     }
                     written += fit;
                 }

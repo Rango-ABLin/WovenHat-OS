@@ -32,7 +32,10 @@ fn fixed_executables_ignore_even_overflowing_aslr_candidates() {
         assert_eq!(image.load_bias(), 0);
         assert_eq!(image.segments().next().unwrap().mapping_start, BASE);
     }
-    assert!(matches!(elf::parse_shared(&bytes), Err(elf::Error::InvalidHeader)));
+    assert!(matches!(
+        elf::parse_shared(&bytes),
+        Err(elf::Error::InvalidHeader)
+    ));
 }
 
 #[test]
@@ -43,7 +46,10 @@ fn position_independent_executables_keep_nonzero_aslr() {
     let image = image.relocated_for_execution(0x30_000).unwrap();
     assert_eq!(image.entry, BASE + 0x30_000);
     assert_eq!(image.load_bias(), 0x30_000);
-    assert_eq!(image.segments().next().unwrap().mapping_start, BASE + 0x30_000);
+    assert_eq!(
+        image.segments().next().unwrap().mapping_start,
+        BASE + 0x30_000
+    );
 }
 
 #[test]
@@ -52,9 +58,13 @@ fn null_debug_rendezvous_metadata_is_inert() {
     put64(&mut bytes, 152, 7 * 16);
     put64(&mut bytes, 160, 7 * 16);
     put64(&mut bytes, DYNAMIC + 5 * 16, 21);
-    let parsed = image(&bytes);
+    let parsed =
+        elf::parse(&bytes).unwrap_or_else(|error| panic!("fixture parse error: {error:?}"));
     assert_eq!(parsed.entry, BASE);
-    assert_eq!(parsed.defined_global_symbol(&bytes, b"export"), Some(BASE + 0x20));
+    assert_eq!(
+        parsed.defined_global_symbol(&bytes, b"export"),
+        Some(BASE + 0x20)
+    );
     put64(&mut bytes, 24, 0);
     assert!(elf::parse_shared(&bytes).is_ok());
 }
@@ -133,7 +143,63 @@ fn fixture(dependencies: &[u64]) -> Vec<u8> {
 }
 
 fn image(bytes: &[u8]) -> elf::Image {
-    elf::parse(bytes).unwrap_or_else(|_| panic!("fixture must parse"))
+    elf::parse(bytes).unwrap_or_else(|error| panic!("fixture parse error: {error:?}"))
+}
+
+fn versioned_definition_fixture() -> Vec<u8> {
+    let mut bytes = fixture(&[]);
+    put64(&mut bytes, 152, 9 * 16);
+    put64(&mut bytes, 160, 9 * 16);
+    bytes[0x1312..0x1317].copy_from_slice(b"VER_1");
+    bytes[0x1317] = 0;
+    put64(&mut bytes, DYNAMIC + 5 * 16, 0x6fff_fff0); // DT_VERSYM
+    put64(&mut bytes, DYNAMIC + 5 * 16 + 8, BASE + 0x340);
+    put64(&mut bytes, DYNAMIC + 6 * 16, 0x6fff_fffc); // DT_VERDEF
+    put64(&mut bytes, DYNAMIC + 6 * 16 + 8, BASE + 0x350);
+    put64(&mut bytes, DYNAMIC + 7 * 16, 0x6fff_fffd); // DT_VERDEFNUM
+    put64(&mut bytes, DYNAMIC + 7 * 16 + 8, 1);
+    put16(&mut bytes, 0x1340, 0);
+    put16(&mut bytes, 0x1342, 2);
+    put16(&mut bytes, 0x1350, 1);
+    put16(&mut bytes, 0x1352, 0);
+    put16(&mut bytes, 0x1354, 2);
+    put16(&mut bytes, 0x1356, 1);
+    put32(&mut bytes, 0x1358, 0);
+    put32(&mut bytes, 0x135c, 20);
+    put32(&mut bytes, 0x1360, 0);
+    put32(&mut bytes, 0x1364, 18);
+    put32(&mut bytes, 0x1368, 0);
+    put64(&mut bytes, DYNAMIC + 2 * 16 + 8, 24);
+    bytes
+}
+
+fn versioned_requirement_fixture() -> Vec<u8> {
+    let mut bytes = fixture(&[8]);
+    put64(&mut bytes, 152, 10 * 16);
+    put64(&mut bytes, 160, 10 * 16);
+    bytes[0x1312..0x1317].copy_from_slice(b"VER_1");
+    bytes[0x1317] = 0;
+    put64(&mut bytes, DYNAMIC + 6 * 16, 0x6fff_fff0); // DT_VERSYM
+    put64(&mut bytes, DYNAMIC + 6 * 16 + 8, BASE + 0x340);
+    put64(&mut bytes, DYNAMIC + 7 * 16, 0x6fff_fffe); // DT_VERNEED
+    put64(&mut bytes, DYNAMIC + 7 * 16 + 8, BASE + 0x350);
+    put64(&mut bytes, DYNAMIC + 8 * 16, 0x6fff_ffff); // DT_VERNEEDNUM
+    put64(&mut bytes, DYNAMIC + 8 * 16 + 8, 1);
+    put16(&mut bytes, 0x1340, 0);
+    put16(&mut bytes, 0x1342, 2);
+    put16(&mut bytes, 0x1350, 1);
+    put16(&mut bytes, 0x1352, 1);
+    put32(&mut bytes, 0x1354, 8);
+    put32(&mut bytes, 0x1358, 16);
+    put32(&mut bytes, 0x135c, 0);
+    put32(&mut bytes, 0x1360, 0);
+    put16(&mut bytes, 0x1364, 0);
+    put16(&mut bytes, 0x1366, 2);
+    put32(&mut bytes, 0x1368, 18);
+    put32(&mut bytes, 0x136c, 0);
+    put64(&mut bytes, DYNAMIC + 2 * 16 + 8, 24);
+    put16(&mut bytes, SYMBOL + 6, 0);
+    bytes
 }
 
 fn tls_fixture() -> Vec<u8> {
@@ -148,6 +214,192 @@ fn tls_fixture() -> Vec<u8> {
     bytes
 }
 
+fn lifecycle_fixture() -> Vec<u8> {
+    let mut bytes = fixture(&[]);
+    put64(&mut bytes, 152, 12 * 16);
+    put64(&mut bytes, 160, 12 * 16);
+    put64(&mut bytes, DYNAMIC + 5 * 16, 12); // DT_INIT
+    put64(&mut bytes, DYNAMIC + 5 * 16 + 8, BASE + 0x20);
+    put64(&mut bytes, DYNAMIC + 6 * 16, 13); // DT_FINI
+    put64(&mut bytes, DYNAMIC + 6 * 16 + 8, BASE + 0x40);
+    put64(&mut bytes, DYNAMIC + 7 * 16, 25); // DT_INIT_ARRAY
+    put64(&mut bytes, DYNAMIC + 7 * 16 + 8, BASE + 0x380);
+    put64(&mut bytes, DYNAMIC + 8 * 16, 27); // DT_INIT_ARRAYSZ
+    put64(&mut bytes, DYNAMIC + 8 * 16 + 8, 16);
+    put64(&mut bytes, DYNAMIC + 9 * 16, 26); // DT_FINI_ARRAY
+    put64(&mut bytes, DYNAMIC + 9 * 16 + 8, BASE + 0x390);
+    put64(&mut bytes, DYNAMIC + 10 * 16, 28); // DT_FINI_ARRAYSZ
+    put64(&mut bytes, DYNAMIC + 10 * 16 + 8, 16);
+    put64(&mut bytes, 0x1380, BASE + 0x60);
+    put64(&mut bytes, 0x1388, BASE + 0x80);
+    put64(&mut bytes, 0x1390, BASE + 0xa0);
+    put64(&mut bytes, 0x1398, BASE + 0xc0);
+    bytes
+}
+
+#[test]
+fn lifecycle_metadata_is_bounded_and_relocated() {
+    let bytes = lifecycle_fixture();
+    let image = image(&bytes);
+    let lifecycle = image.lifecycle();
+    assert_eq!(lifecycle.init_count, 3);
+    assert_eq!(lifecycle.init[0], BASE + 0x20);
+    assert_eq!(lifecycle.init[1], BASE + 0x60);
+    assert_eq!(lifecycle.init[2], BASE + 0x80);
+    assert_eq!(lifecycle.fini_count, 3);
+    assert_eq!(lifecycle.fini[0], BASE + 0xc0);
+    assert_eq!(lifecycle.fini[1], BASE + 0xa0);
+    assert_eq!(lifecycle.fini[2], BASE + 0x40);
+    let relocated = image.relocated(0x30_000).unwrap().lifecycle();
+    assert_eq!(relocated.init[1], BASE + 0x30_060);
+    assert_eq!(relocated.fini[2], BASE + 0x30_040);
+}
+
+#[test]
+fn lifecycle_metadata_rejects_non_executable_callbacks() {
+    let mut bytes = lifecycle_fixture();
+    put64(&mut bytes, 0x1388, BASE + 0x1000);
+    assert!(matches!(
+        elf::parse(&bytes),
+        Err(elf::Error::InvalidSegment)
+    ));
+}
+
+fn plt_fixture() -> Vec<u8> {
+    let mut bytes = fixture(&[]);
+    bytes.resize(0x2200, 0);
+    put16(&mut bytes, 56, 3);
+    // A separate writable PT_LOAD contains the eager PLT relocation target
+    // and the file-backed JMPREL table.
+    put32(&mut bytes, 176, 1);
+    put32(&mut bytes, 180, 6);
+    put64(&mut bytes, 184, 0x2000);
+    put64(&mut bytes, 192, BASE + 0x1000);
+    put64(&mut bytes, 208, 0x200);
+    put64(&mut bytes, 216, 0x200);
+    put64(&mut bytes, 224, 0x1000);
+    put64(&mut bytes, 152, 10 * 16);
+    put64(&mut bytes, 160, 10 * 16);
+    put64(&mut bytes, DYNAMIC + 5 * 16, 2); // DT_PLTRELSZ
+    put64(&mut bytes, DYNAMIC + 5 * 16 + 8, 24);
+    put64(&mut bytes, DYNAMIC + 6 * 16, 20); // DT_PLTREL = DT_RELA
+    put64(&mut bytes, DYNAMIC + 6 * 16 + 8, 7);
+    put64(&mut bytes, DYNAMIC + 7 * 16, 23); // DT_JMPREL
+    put64(&mut bytes, DYNAMIC + 7 * 16 + 8, BASE + 0x1000);
+    put64(&mut bytes, DYNAMIC + 8 * 16, 9); // DT_RELAENT
+    put64(&mut bytes, DYNAMIC + 8 * 16 + 8, 24);
+    put64(&mut bytes, 0x2000, BASE + 0x1020);
+    put64(
+        &mut bytes,
+        0x2008,
+        (1_u64 << 32) | elf::R_X86_64_JUMP_SLOT as u64,
+    );
+    bytes
+}
+
+fn rel_fixture() -> Vec<u8> {
+    let mut bytes = plt_fixture();
+    put64(&mut bytes, 152, 9 * 16);
+    put64(&mut bytes, 160, 9 * 16);
+    put64(&mut bytes, DYNAMIC + 5 * 16, 17); // DT_REL
+    put64(&mut bytes, DYNAMIC + 5 * 16 + 8, BASE + 0x1000);
+    put64(&mut bytes, DYNAMIC + 6 * 16, 18); // DT_RELSZ
+    put64(&mut bytes, DYNAMIC + 6 * 16 + 8, 16);
+    put64(&mut bytes, DYNAMIC + 7 * 16, 19); // DT_RELENT
+    put64(&mut bytes, DYNAMIC + 7 * 16 + 8, 16);
+    put64(&mut bytes, DYNAMIC + 8 * 16, 0);
+    put64(&mut bytes, DYNAMIC + 8 * 16 + 8, 0);
+    put64(&mut bytes, 0x2000, BASE + 0x1020);
+    put64(
+        &mut bytes,
+        0x2008,
+        (1_u64 << 32) | elf::R_X86_64_JUMP_SLOT as u64,
+    );
+    put64(&mut bytes, 0x2020, 0x10);
+    bytes
+}
+
+#[test]
+fn eager_rel_metadata_is_bounded_and_file_backed() {
+    let bytes = rel_fixture();
+    let parsed = image(&bytes);
+    let dynamic = parsed.dynamic().expect("dynamic metadata");
+    assert_eq!(dynamic.rel_size, 16);
+    assert_eq!(dynamic.rel_entry_size, 16);
+    assert_eq!(dynamic.rel_file_offset, 0x2000);
+}
+
+#[test]
+fn rel_rejects_wrong_entry_size_and_read_only_targets() {
+    let mut wrong_entry_size = rel_fixture();
+    put64(&mut wrong_entry_size, DYNAMIC + 7 * 16 + 8, 24);
+    assert!(matches!(
+        elf::parse(&wrong_entry_size),
+        Err(elf::Error::InvalidSegment)
+    ));
+
+    let mut read_only_target = rel_fixture();
+    put64(&mut read_only_target, 0x2000, BASE + 0x20);
+    assert!(matches!(
+        elf::parse(&read_only_target),
+        Err(elf::Error::InvalidSegment)
+    ));
+}
+
+#[test]
+fn eager_plt_rela_metadata_is_bounded_and_file_backed() {
+    let bytes = plt_fixture();
+    let parsed = image(&bytes);
+    let dynamic = parsed.dynamic().expect("dynamic metadata");
+    assert_eq!(dynamic.plt_rela_size, 24);
+    assert_eq!(dynamic.plt_rela_file_offset, 0x2000);
+    assert_eq!(dynamic.plt_rela_address, BASE + 0x1000);
+}
+
+#[test]
+fn plt_rela_requires_rela_encoding_and_writable_targets() {
+    let mut read_only_target = plt_fixture();
+    put64(&mut read_only_target, 0x2000, BASE + 0x20);
+    assert!(matches!(
+        elf::parse(&read_only_target),
+        Err(elf::Error::InvalidSegment)
+    ));
+}
+
+#[test]
+fn eager_plt_rel_metadata_is_bounded_and_file_backed() {
+    let mut bytes = plt_fixture();
+    put64(&mut bytes, DYNAMIC + 5 * 16 + 8, 16); // DT_PLTRELSZ
+    put64(&mut bytes, DYNAMIC + 6 * 16 + 8, 17); // DT_PLTREL = DT_REL
+    put64(&mut bytes, 0x2020, 0x10); // signed in-place addend
+    let parsed = image(&bytes);
+    let dynamic = parsed.dynamic().expect("dynamic metadata");
+    assert_eq!(dynamic.plt_rel_size, 16);
+    assert_eq!(dynamic.plt_rel_entry_size, 16);
+    assert_eq!(dynamic.plt_rel_file_offset, 0x2000);
+    assert_eq!(dynamic.plt_rel_address, BASE + 0x1000);
+}
+
+#[test]
+fn plt_rel_rejects_bad_size_and_read_only_targets() {
+    let mut wrong_size = plt_fixture();
+    put64(&mut wrong_size, DYNAMIC + 5 * 16 + 8, 24);
+    put64(&mut wrong_size, DYNAMIC + 6 * 16 + 8, 17);
+    assert!(matches!(
+        elf::parse(&wrong_size),
+        Err(elf::Error::InvalidSegment)
+    ));
+
+    let mut read_only_target = plt_fixture();
+    put64(&mut read_only_target, DYNAMIC + 5 * 16 + 8, 16);
+    put64(&mut read_only_target, DYNAMIC + 6 * 16 + 8, 17);
+    put64(&mut read_only_target, 0x2000, BASE + 0x20);
+    assert!(matches!(
+        elf::parse(&read_only_target),
+        Err(elf::Error::InvalidSegment)
+    ));
+}
+
 #[test]
 fn tls_source_congruence_and_address_survive_image_relocation() {
     let bytes = tls_fixture();
@@ -156,7 +408,15 @@ fn tls_source_congruence_and_address_survive_image_relocation() {
     assert_eq!(tls.virtual_address, BASE + 8);
     assert_eq!(tls.file_offset, 0x1008);
     assert_eq!(tls.alignment, 64);
-    assert_eq!(parsed.relocated(0x30000).unwrap().tls().unwrap().virtual_address, BASE + 0x30008);
+    assert_eq!(
+        parsed
+            .relocated(0x30000)
+            .unwrap()
+            .tls()
+            .unwrap()
+            .virtual_address,
+        BASE + 0x30008
+    );
 }
 
 #[test]
@@ -173,7 +433,13 @@ fn tls_initializer_requires_exact_file_backed_source() {
 
 #[test]
 fn tls_overflow_alignment_and_duplicate_headers_fail_closed() {
-    for (field, value) in [(192, u64::MAX), (216, u64::MAX), (224, 0), (224, 3), (224, 8192)] {
+    for (field, value) in [
+        (192, u64::MAX),
+        (216, u64::MAX),
+        (224, 0),
+        (224, 3),
+        (224, 8192),
+    ] {
         let mut bytes = tls_fixture();
         put64(&mut bytes, field, value);
         assert!(elf::parse(&bytes).is_err());
@@ -330,6 +596,64 @@ fn undefined_imports_use_scope_and_protected_definitions_bind_locally() {
     assert_eq!(
         library.relocation_symbol_value(&bytes, 1, &scope),
         Some(BASE + 0x8020)
+    );
+}
+
+#[test]
+fn weak_exports_are_fallbacks_and_undefined_weak_imports_resolve_to_zero() {
+    let mut weak_bytes = fixture(&[8]);
+    weak_bytes[SYMBOL + 4] = 0x22; // STB_WEAK | STT_FUNC
+    let weak = image(&weak_bytes);
+    assert_eq!(
+        weak.defined_global_symbol(&weak_bytes, b"export"),
+        Some(BASE + 0x20)
+    );
+
+    let strong_bytes = fixture(&[]);
+    let strong = image(&strong_bytes);
+    let mut scope = elf::SymbolScope::new(&weak, &weak_bytes);
+    assert!(
+        scope
+            .add_dependency(b"a.so", &strong, &strong_bytes)
+            .is_ok()
+    );
+    assert_eq!(scope.resolve(b"export"), Some(BASE + 0x20));
+
+    let mut undefined_bytes = fixture(&[]);
+    undefined_bytes[SYMBOL + 4] = 0x22; // STB_WEAK | STT_FUNC
+    put16(&mut undefined_bytes, SYMBOL + 6, 0); // undefined weak import
+    let undefined = image(&undefined_bytes);
+    let scope = elf::SymbolScope::new(&undefined, &undefined_bytes);
+    assert_eq!(
+        undefined.relocation_symbol_value(&undefined_bytes, 1, &scope),
+        Some(0)
+    );
+}
+
+#[test]
+fn versioned_definitions_and_requirements_resolve_by_name() {
+    let definition_bytes = versioned_definition_fixture();
+    let definition = elf::parse(&definition_bytes)
+        .unwrap_or_else(|error| panic!("definition fixture: {error:?}"));
+    let dynamic = definition.dynamic().expect("versioned dynamic metadata");
+    assert_eq!(dynamic.verdef_count, 1);
+    assert_eq!(
+        definition.defined_global_symbol(&definition_bytes, b"export"),
+        None
+    );
+
+    let requirement_bytes = versioned_requirement_fixture();
+    let requirement = elf::parse(&requirement_bytes)
+        .unwrap_or_else(|error| panic!("requirement fixture: {error:?}"));
+    let mut scope = elf::SymbolScope::new(&requirement, &requirement_bytes);
+    assert!(
+        scope
+            .add_dependency(b"a.so", &definition, &definition_bytes)
+            .is_ok()
+    );
+    assert_eq!(
+        requirement.relocation_symbol_value(&requirement_bytes, 1, &scope),
+        Some(BASE + 0x20)
     );
 }
 

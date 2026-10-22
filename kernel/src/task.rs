@@ -856,7 +856,7 @@ pub enum CapabilityError {
     UnknownTask,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SpawnError {
     Full,
     OfflineCpu,
@@ -1558,14 +1558,30 @@ pub fn spawn_user_process(
     name: &'static str,
     program: userspace::UserProgram,
 ) -> Result<(ProcessId, UserTaskContext), ProcessError> {
+    spawn_user_process_with_sandbox(
+        name,
+        program,
+        wovenguard::default_sandbox(wovenguard::SecurityDomain::User),
+    )
+}
+
+pub fn spawn_user_process_with_sandbox(
+    name: &'static str,
+    program: userspace::UserProgram,
+    sandbox_profile: wovenguard::SandboxProfile,
+) -> Result<(ProcessId, UserTaskContext), ProcessError> {
     if !program.image.is_valid() {
+        let _ = userspace::destroy(program.address_space);
+        return Err(ProcessError::Full);
+    }
+    if !sandbox_profile.is_valid_for(wovenguard::SecurityDomain::User) {
         let _ = userspace::destroy(program.address_space);
         return Err(ProcessError::Full);
     }
 
     let parent = ProcessId(current_process_id());
     let context = prepare_user_context_with_tls(
-        program.image.entry as usize,
+        program.initial_entry as usize,
         program.image.stack_top as usize,
         program.tls_base,
     );
@@ -1611,9 +1627,170 @@ pub fn spawn_user_process(
         program.address_space.paging(),
     );
     scheduler.tasks[task_slot].process_id = process_id;
+    scheduler.tasks[task_slot].sandbox_profile = sandbox_profile;
     scheduler.task_count += 1;
     processes[process_slot] = Some(process);
     Ok((process_id, context))
+}
+
+/// Launch a signed package under its declared user-domain sandbox. The
+/// declaration is converted to a WovenGuard profile before the address space
+/// is published; a package can never inherit the caller's broader profile.
+#[cfg(any(
+    feature = "stage21-7-test",
+    feature = "stage21-8-test",
+    feature = "stage21-9-test",
+    feature = "stage21-10-test",
+    feature = "stage21-11-test",
+    feature = "stage23-1-test",
+    feature = "stage23-2-test",
+    feature = "stage23-3-test"
+))]
+pub fn spawn_user_process_with_package_capabilities(
+    name: &'static str,
+    program: userspace::UserProgram,
+    declared_capabilities: u64,
+) -> Result<(ProcessId, UserTaskContext), ProcessError> {
+    let capabilities = CapabilitySet::from_bits(declared_capabilities);
+    let Some(profile) = wovenguard::package_sandbox(capabilities) else {
+        let _ = userspace::destroy(program.address_space);
+        return Err(ProcessError::Full);
+    };
+    let result = spawn_user_process_with_sandbox(name, program, profile);
+    if let Ok((process_id, context)) = result {
+        let mut scheduler = SCHEDULER.lock();
+        if let Some(task) = scheduler
+            .tasks
+            .iter_mut()
+            .find(|task| task.process_id == process_id)
+        {
+            task.capabilities = capabilities;
+            return Ok((process_id, context));
+        }
+        return Err(ProcessError::Full);
+    }
+    result
+}
+
+/// Redirect one normal user exit through the image destructors. The callback
+/// chain runs entirely in Ring 3 and returns through the loader-owned exit
+/// trampoline, which re-enters this syscall with the original status held in
+/// callee-saved R12. A second exit request, an abnormal termination, or an
+/// image without destructors takes the ordinary teardown path.
+pub fn begin_user_destructor_exit(
+    frame: *const crate::syscall::UserForkFrame,
+    exit_code: i32,
+) -> bool {
+    if frame.is_null() {
+        return false;
+    }
+    let frame = unsafe { &mut *(frame as *mut crate::syscall::UserForkFrame) };
+    let Some(retry_rip) = frame.rip.checked_sub(2) else {
+        return false;
+    };
+    let address_space = {
+        let processes = process_table_lock();
+        let Some(process) = processes
+            .iter()
+            .flatten()
+            .find(|process| process.id.as_u64() == current_process_id())
+        else {
+            return false;
+        };
+        let Some(address_space) = process.address_space else {
+            return false;
+        };
+        if address_space.destructor_pending || address_space.destructor_count == 0 {
+            return false;
+        }
+        address_space
+    };
+    if address_space.lifecycle_trampoline == 0
+        || !address_space.contains_executable(address_space.lifecycle_trampoline)
+        || frame.rsp < address_space.stack_base
+    {
+        return false;
+    }
+    let mut syscall_bytes = [0u8; 2];
+    if crate::paging::read_user_bytes_in(address_space.paging(), retry_rip, &mut syscall_bytes)
+        .is_err()
+        || syscall_bytes != [0xcd, 0x80]
+    {
+        return false;
+    }
+    let Some(chain_size) = address_space.destructor_count.checked_mul(8) else {
+        return false;
+    };
+    let Some(chain_start) = address_space
+        .stack_base
+        .checked_add((userspace::UserStack::SIZE / 2) as u64)
+        .and_then(|middle| middle.checked_sub(chain_size as u64))
+    else {
+        return false;
+    };
+    if chain_start < address_space.stack_base
+        || chain_start + chain_size as u64
+            > address_space.stack_base + userspace::UserStack::SIZE as u64
+    {
+        return false;
+    }
+    let mut processes = process_table_lock();
+    let Some(process) = processes
+        .iter_mut()
+        .flatten()
+        .find(|process| process.id.as_u64() == current_process_id())
+    else {
+        return false;
+    };
+    let Some(current_space) = process.address_space.as_mut() else {
+        return false;
+    };
+    if current_space.paging().root_address() != address_space.paging().root_address()
+        || current_space.destructor_pending
+        || current_space.destructor_count != address_space.destructor_count
+    {
+        return false;
+    }
+    current_space.destructor_pending = true;
+    frame.r12 = exit_code as i64 as u64;
+    frame.rip = address_space.destructors[0];
+    frame.rsp = chain_start;
+    true
+}
+
+/// Resolve one loader-owned lazy PLT slot. The userspace entry stub passes the
+/// slot address in callee-saved syscall register R11; the bounded table was
+/// constructed from verified signed image metadata before process publication.
+/// The target is patched through the active-user copy path so a forked process
+/// breaks COW before mutating its private GOT.
+pub fn resolve_lazy_binding(frame: *const crate::syscall::UserForkFrame) -> u64 {
+    if frame.is_null() {
+        return u64::MAX;
+    }
+    let slot = unsafe { (*frame).r11 };
+    let Some((address_space, target)) = ({
+        let processes = process_table_lock();
+        processes
+            .iter()
+            .flatten()
+            .find(|process| process.id.as_u64() == current_process_id())
+            .and_then(|process| {
+                let space = process.address_space?;
+                space.lazy_bindings[..space.lazy_binding_count]
+                    .iter()
+                    .find(|binding| binding.slot == slot)
+                    .map(|binding| (space, binding.target))
+            })
+    }) else {
+        return u64::MAX;
+    };
+    if !address_space.contains_executable(target)
+        || slot & 7 != 0
+        || crate::paging::copy_to_current_user(slot, &target.to_le_bytes()).is_err()
+    {
+        return u64::MAX;
+    }
+    target
 }
 
 /// Create a scheduler-backed thread in the current process.
@@ -1937,12 +2114,25 @@ pub fn exit_current_thread(exit_code: i32) -> ! {
     feature = "stage20-8-test",
     feature = "stage20-9-test",
     feature = "stage20-10-test",
+    feature = "stage20-18-test",
     feature = "stage20-11-test",
     feature = "stage20-12-test",
     feature = "stage13-15-test",
     feature = "stage20-13-test",
     feature = "stage20-14b-test",
     feature = "stage20-15-test",
+    feature = "stage20-16-test",
+    feature = "stage20-17-test",
+    feature = "stage30-1-test",
+    feature = "stage30-2-test",
+    feature = "stage30-3-test",
+    feature = "stage30-4-test",
+    feature = "stage30-5-test",
+    feature = "stage22-3-test",
+    feature = "stage22-5-test",
+    feature = "stage23-1-test",
+    feature = "stage23-2-test",
+    feature = "stage23-3-test",
     feature = "system-apps"
 ))]
 pub fn spawn_user_system_service(
@@ -1961,7 +2151,7 @@ pub fn spawn_user_system_service(
 
     let parent = ProcessId(current_process_id());
     let context = prepare_user_context_with_tls(
-        program.image.entry as usize,
+        program.initial_entry as usize,
         program.image.stack_top as usize,
         program.tls_base,
     );
@@ -2035,7 +2225,7 @@ pub fn spawn_multicore_user_process(
 
     let parent = ProcessId(current_process_id());
     let context = prepare_user_context_with_tls(
-        program.image.entry as usize,
+        program.initial_entry as usize,
         program.image.stack_top as usize,
         program.tls_base,
     );
@@ -2129,7 +2319,7 @@ pub fn spawn_pinned_user_process_on(
 
     let parent = ProcessId(current_process_id());
     let context = prepare_user_context_with_tls(
-        program.image.entry as usize,
+        program.initial_entry as usize,
         program.image.stack_top as usize,
         program.tls_base,
     );
@@ -2210,7 +2400,7 @@ pub fn spawn_migratable_user_probe(
 
     let parent = ProcessId(current_process_id());
     let context = prepare_user_context_with_tls(
-        program.image.entry as usize,
+        program.initial_entry as usize,
         program.image.stack_top as usize,
         program.tls_base,
     );
@@ -2266,6 +2456,18 @@ pub fn process_exited(id: ProcessId) -> bool {
         .flatten()
         .find(|process| process.id == id)
         .is_some_and(|process| process.state == ProcessState::Exited)
+}
+
+/// Whether the process named by the raw id `id` is in the table and has not
+/// exited. For a caller that only has the id as `u64` (e.g. across a module
+/// boundary that erases [`ProcessId`], such as [`crate::session::start`]'s
+/// return value) and so cannot compare against a [`ProcessId`] directly.
+#[cfg(feature = "system-apps")]
+pub fn process_alive(id: u64) -> bool {
+    process_table_lock()
+        .iter()
+        .flatten()
+        .any(|process| process.id.as_u64() == id && process.state != ProcessState::Exited)
 }
 
 /// Whether `id` names a task that still exists and has not died. Task ids are
@@ -2697,6 +2899,30 @@ pub fn process_credentials(id: ProcessId) -> Option<Credentials> {
         .map(|process| process.credentials)
 }
 
+/// Replace the calling process's effective identity after a kernel identity
+/// authority has authenticated and owner-bound the session. This is crate
+/// visible so no userspace path can manufacture credentials; callers must not
+/// invoke it without first validating an identity session and audit decision.
+#[cfg(any(
+    feature = "stage20-12-test",
+    feature = "stage24-4-test",
+    feature = "stage24-5-test",
+    feature = "system-apps"
+))]
+pub(crate) fn set_current_credentials(credentials: Credentials) -> bool {
+    let process_id = current_process_id();
+    let mut processes = process_table_lock();
+    let Some(process) = processes
+        .iter_mut()
+        .flatten()
+        .find(|process| process.id.as_u64() == process_id)
+    else {
+        return false;
+    };
+    process.credentials = credentials;
+    true
+}
+
 pub fn may_ipc_with(receiver: u64) -> bool {
     let sender = current_credentials();
     let Some(receiver) = process_credentials(ProcessId(receiver)) else {
@@ -2891,7 +3117,7 @@ pub fn exec_current(program: userspace::UserProgram) -> ! {
     assert!(program.image.is_valid(), "exec received an invalid image");
     x86_64::instructions::interrupts::disable();
     let context = prepare_user_context_with_tls(
-        program.image.entry as usize,
+        program.initial_entry as usize,
         program.image.stack_top as usize,
         program.tls_base,
     );
@@ -2939,6 +3165,12 @@ pub fn exec_current(program: userspace::UserProgram) -> ! {
 }
 pub fn exit_current_process(exit_code: i32) -> ! {
     let exiting_pid = current_process_id();
+    #[cfg(any(
+        feature = "stage24-4-test",
+        feature = "stage24-5-test",
+        feature = "system-apps"
+    ))]
+    crate::identity_runtime::release_owner(exiting_pid);
     crate::terminal::release_foreground(exiting_pid);
     crate::network::close_process_sockets(exiting_pid);
     x86_64::instructions::interrupts::disable();
@@ -2982,7 +3214,12 @@ pub fn exit_current_process(exit_code: i32) -> ! {
         for slot in 0..scheduler.tasks.len() {
             let (sibling_id, sibling_process, sibling_state, sibling_thread) = {
                 let sibling = &scheduler.tasks[slot];
-                (sibling.id, sibling.process_id.as_u64(), sibling.state, sibling.thread_id)
+                (
+                    sibling.id,
+                    sibling.process_id.as_u64(),
+                    sibling.state,
+                    sibling.thread_id,
+                )
             };
             if sibling_id == task_id || sibling_process != exiting_pid {
                 continue;
@@ -3056,7 +3293,11 @@ pub fn exit_current_process(exit_code: i32) -> ! {
         let _ = crate::thread::terminate(thread_id, exit_code);
         let _ = crate::thread::take_waiter(thread_id);
     }
-    for thread_id in retired_threads.into_iter().take(retired_thread_count).flatten() {
+    for thread_id in retired_threads
+        .into_iter()
+        .take(retired_thread_count)
+        .flatten()
+    {
         let _ = crate::thread::terminate(thread_id, exit_code);
         if let Some(waiter) = crate::thread::take_waiter(thread_id) {
             let mut scheduler = SCHEDULER.lock();
@@ -3499,6 +3740,9 @@ pub fn open_current(path: &str) -> Result<u64, FileError> {
         return Err(FileError::PermissionDenied);
     }
     let path = resolve_path_for_current(path)?;
+    if path.starts_with("/wfs/") && !crate::wfs::vfs_mounted() {
+        return Err(FileError::NotFound);
+    }
     if !authorize_current_file_path(&path, false) {
         return Err(FileError::PermissionDenied);
     }
@@ -3640,6 +3884,11 @@ pub fn read_current(descriptor: u64, buffer: &mut [u8]) -> Result<usize, FileErr
             if !current_file_access_allowed(Capability::FileRead, scope, false) {
                 return Err(FileError::PermissionDenied);
             }
+            if vfs::open_file_path_starts_with(id, "/wfs/").unwrap_or(false)
+                && !crate::wfs::vfs_mounted()
+            {
+                return Err(FileError::NotFound);
+            }
             vfs::read(id, buffer).map_err(|_| FileError::BadDescriptor)
         }
         FdKind::PipeRead(id) => crate::pipe::read(id, buffer).map_err(|_| FileError::BadDescriptor),
@@ -3667,6 +3916,11 @@ pub fn write_current(descriptor: u64, buffer: &[u8]) -> Result<usize, FileError>
         FdKind::File { id, scope } => {
             if !current_file_access_allowed(Capability::FileWrite, scope, true) {
                 return Err(FileError::PermissionDenied);
+            }
+            if vfs::open_file_path_starts_with(id, "/wfs/").unwrap_or(false)
+                && !crate::wfs::vfs_mounted()
+            {
+                return Err(FileError::NotFound);
             }
             let mut path_bytes = [0u8; crate::config::MAX_PATH_SIZE];
             let (path_length, offset) = vfs::file_path_and_offset(id, &mut path_bytes)
@@ -3873,6 +4127,9 @@ pub fn stat_path(path: &str) -> Result<vfs::Stat, FileError> {
         return Err(FileError::PermissionDenied);
     }
     let path = resolve_path_for_current(path)?;
+    if path.starts_with("/wfs/") && !crate::wfs::vfs_mounted() {
+        return Err(FileError::NotFound);
+    }
     if !authorize_current_file_path(&path, false) {
         return Err(FileError::PermissionDenied);
     }
@@ -3885,6 +4142,9 @@ pub fn readdir_path(path: &str, index: usize) -> Result<vfs::DirEntry, FileError
         return Err(FileError::PermissionDenied);
     }
     let path = resolve_path_for_current(path)?;
+    if path.starts_with("/wfs/") && !crate::wfs::vfs_mounted() {
+        return Err(FileError::NotFound);
+    }
     if !authorize_current_file_path(&path, false) {
         return Err(FileError::PermissionDenied);
     }
@@ -3897,6 +4157,9 @@ pub fn mkdir_path(path: &str) -> Result<(), FileError> {
         return Err(FileError::PermissionDenied);
     }
     let path = resolve_path_for_current(path)?;
+    if path.starts_with("/wfs/") && !crate::wfs::vfs_mounted() {
+        return Err(FileError::NotFound);
+    }
     if !authorize_current_file_path(&path, true) {
         return Err(FileError::PermissionDenied);
     }
@@ -3910,8 +4173,7 @@ pub fn mkdir_path(path: &str) -> Result<(), FileError> {
         if vfs::stat(&path).is_ok() {
             return Err(FileError::AlreadyExists);
         }
-        crate::wfs::mkdir_vfs_path(&path, crate::timer::ticks())
-            .map_err(map_wfs_file_error)?;
+        crate::wfs::mkdir_vfs_path(&path, crate::timer::ticks()).map_err(map_wfs_file_error)?;
         if let Err(error) = vfs::mkdir(&path) {
             // Native WovenFS is authoritative. If the bounded VFS registry
             // cannot publish the node, remove the just-created native entry
@@ -4483,6 +4745,32 @@ pub fn current_task_id() -> TaskId {
     let scheduler = SCHEDULER.lock();
     assert!(scheduler.task_count != 0, "scheduler not initialized");
     scheduler.tasks[scheduler.current_slot[crate::smp::cpu_index()]].id
+}
+
+/// Validate that a saved syscall frame is inside the currently running task's
+/// owned kernel stack. Suspend/resume retains this frame across firmware wake;
+/// callers must never be able to supply an arbitrary pointer for that record.
+pub fn current_kernel_stack_contains(address: u64, length: usize) -> bool {
+    let Ok(length) = u64::try_from(length) else {
+        return false;
+    };
+    let scheduler = SCHEDULER.lock();
+    if scheduler.task_count == 0 {
+        return false;
+    }
+    let stack = &TASK_STACKS[scheduler.current_slot[crate::smp::cpu_index()]];
+    let start = stack.0.get() as u64;
+    let Some(end) = start
+        .checked_add(TASK_STACK_SIZE as u64)
+        .and_then(|end| end.checked_sub(16))
+    else {
+        return false;
+    };
+    address >= start + 16
+        && address <= end
+        && address
+            .checked_add(length)
+            .is_some_and(|finish| finish <= end)
 }
 
 pub fn current_task_id_if_running() -> Option<TaskId> {
@@ -5512,7 +5800,11 @@ pub fn honor_current_termination_request() {
             (0, 0, false)
         } else {
             let task = &scheduler.tasks[scheduler.current_slot[crate::smp::cpu_index()]];
-            (task.termination_signal, task.thread_exit_code, task.thread_id.is_some())
+            (
+                task.termination_signal,
+                task.thread_exit_code,
+                task.thread_id.is_some(),
+            )
         }
     };
     if signal == u8::MAX && is_thread {
@@ -5775,6 +6067,9 @@ pub fn unlink_current(path: &str) -> Result<(), FileError> {
         return Err(FileError::PermissionDenied);
     }
     let path = resolve_path_for_current(path)?;
+    if path.starts_with("/wfs/") && !crate::wfs::vfs_mounted() {
+        return Err(FileError::NotFound);
+    }
     if !authorize_current_file_path(&path, true) {
         return Err(FileError::PermissionDenied);
     }
@@ -5799,6 +6094,11 @@ pub fn rename_current(old: &str, new: &str) -> Result<(), FileError> {
     }
     let old = resolve_path_for_current(old)?;
     let new = resolve_path_for_current(new)?;
+    if (old.starts_with("/wfs/") || new.starts_with("/wfs/"))
+        && (!old.starts_with("/wfs/") || !new.starts_with("/wfs/") || !crate::wfs::vfs_mounted())
+    {
+        return Err(FileError::NotFound);
+    }
     if !authorize_current_file_path(&old, true) || !authorize_current_file_path(&new, true) {
         return Err(FileError::PermissionDenied);
     }

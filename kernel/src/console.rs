@@ -169,7 +169,7 @@ impl Console {
     }
 }
 
-fn draw_char(
+pub(crate) fn draw_char(
     buffer: &mut [u8],
     info: FrameBufferInfo,
     x: usize,
@@ -201,7 +201,14 @@ fn draw_char(
 }
 
 /// Paint a rectangle in the console background colour.
-fn fill(buffer: &mut [u8], info: FrameBufferInfo, x: usize, y: usize, width: usize, height: usize) {
+pub(crate) fn fill(
+    buffer: &mut [u8],
+    info: FrameBufferInfo,
+    x: usize,
+    y: usize,
+    width: usize,
+    height: usize,
+) {
     for row in y..y.saturating_add(height) {
         for column in x..x.saturating_add(width) {
             pixel(buffer, info, column, row, BG_R, BG_G, BG_B);

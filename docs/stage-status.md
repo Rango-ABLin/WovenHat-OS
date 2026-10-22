@@ -1,5 +1,4708 @@
 # Stage status
 
+## Stage 27.5 end-to-end WovenUpdate IPC acceptance - 2026-10-22
+
+The Stage 27.5 QEMU gate now builds the signed `woven-update` Ring-3 image,
+starts the real `--service` daemon, discovers `woven.update`, sends a valid
+WUDI Query, verifies the activated-slot response, sends a truncated malformed
+frame, verifies the deterministic bad-request response, and reaps the daemon.
+The 1/2/4-CPU gates pass with exit 33. The daemon receive buffer is aligned to
+the kernel's 256-byte IPC transport limit; the larger codec bound remains a
+parser bound and oversized transport requests fail closed.
+
+Host app tests, freestanding app Clippy, stage27-5 kernel Clippy, and
+workspace all-target warning-denying Clippy pass. Evidence is recorded in
+`docs/audit-stage27-5-update-ipc-2026-10-22.md` and the retained
+`audit-artifacts/stage27.5-{1,2,4}cpu` directories.
+
+This closes the daemon IPC exchange gate only. Production-sized block-device
+slots, bootloader target/attempt handoff, power-loss injection/recovery,
+WovenRecovery, installer integration, and physical qualification remain open.
+
+## Reduced Motion accessibility toggle added to Quick Settings (2026-10-22)
+
+Quick Settings gained a "Reduced Motion" row (row 9 of 10) wiring
+`libwoven::accessibility::Settings`'s existing `reduced_motion` preference
+into WovenShell for the first time: when on, a newly opened window appears
+at full opacity immediately instead of animating in via the usual spring.
+Off by default, matching `Settings::new()`.
+
+Verified on 1 CPU: `stage20-10-test`, `stage20-11-test`, `stage20-17-test`,
+`stage20-18-test`, and `stage20-12-test` all pass with the panel at its
+new 10-row height; libwoven host tests and default-feature kernel clippy
+are clean. `stage24-59-test` could not be re-verified this round -- its
+full `system-apps` package build (10 applications) repeatedly hit
+disk-space limits on this machine regardless of reclaiming beforehand.
+The code path this change touches (Quick Settings row rendering and click
+dispatch) is identical to what the five passing gates above already
+exercise, so this looks like an environment-resource gap rather than a
+known defect, but it's recorded here rather than silently treated as
+covered, per the project's "report incomplete gates explicitly" policy.
+
+## Stage 20.12 fix - accounts now actually load into the kernel identity AUTHORITY (2026-10-21)
+
+`stage20_12_self_test` wrote a real accounts file to the VFS and spawned
+WovenShell with `--accounts`, but nothing in that path ever loaded those
+credentials into the kernel's `AUTHORITY`, so every sign-in/lock/unlock
+check failed with `Error::NotReady` -- indistinguishable from a wrong PIN
+at the UI layer. This was found and deliberately left unfixed earlier
+today (logged as a cascade through independently-gated syscall layers too
+deep to rush). Revisited with a clearer picture and traced the full chain
+this time: the `identity_runtime` module and `load_accounts_file`, and
+three syscalls the sign-in/lock/unlock flow exercises (`IdentityOpenVerified`,
+`IdentityLock`, `IdentityUnlockVerified`, each gated at three layers:
+enum variant, dispatch arm, handler), plus `task::set_current_credentials`.
+The self-test now also calls `load_accounts_file` after writing the
+accounts file and grants `AccountManage`.
+
+Verified on 1/2/4 CPUs: the three previously vacuous or impossible steps
+now genuinely exercise real PBKDF2-backed credential verification (ada's
+PIN is rejected via `WrongPassword`, not `NotReady`; lin's PIN signs in;
+the lock screen refuses ada's and accepts lin's). Re-verified Stage 24.59,
+20.11, 20.17, and 20.18, which share the same identity syscalls or
+adjacent code, plus host tests and clippy -- all clean.
+
+## Stage 20.18 - 3D desktop mode extended to window title bars (2026-10-21)
+
+The "3D Desktop" toggle (Stage 20.17) now also perspective-projects every
+window's title-bar fill, not just the Quick Settings panel: flat colour,
+not textured (a title bar's width is the window's own and can exceed the
+bounded texture buffer Quick Settings uses), with the same bottom-anchored,
+top-narrowed card tilt. Found and fixed a real bug while building this:
+the toggle only marked the Quick Settings panel's own area dirty, so open
+windows never got told to repaint in the new mode and stayed flat until
+something else triggered a redraw; the toggle now marks the whole screen
+dirty too.
+
+The Stage 20.18 QEMU gate proves the same kind of non-trivial transform as
+Stage 20.17 (a window's flat title-bar top-left corner stops being the
+fill colour once 3D is toggled on, while the bottom-left stays anchored),
+on 1/2/4 CPUs. Stages 20.17, 20.10, 20.11, and 24.59 were re-verified
+clean since they share the same toggle/Quick-Settings code this touched.
+
+## Stage 30.5 - scheduler yield-latency micro-benchmark (2026-10-21)
+
+Added a `hello-gui --scheduler-benchmark` mode: 1000 round trips of
+`yield_now`, timed with `libwoven::cycles()`. With no other runnable
+process contending for this CPU, the scheduler always re-selects the same
+task immediately, so this measures the voluntary-yield path's own overhead
+(syscall entry, run-queue bookkeeping, syscall exit) rather than a context
+switch to different process state -- a true cross-process context-switch
+benchmark is a separate, larger undertaking (needs a ping-pong pair of
+processes). Validated on 1/2/4 CPUs via `stage30-5-test`: ~578,000-582,000
+cycles min (~687,000-748,000 average) under QEMU TCG -- noticeably more
+than the Stage 30.1 bare syscall baseline (~25,000-30,000 cycles),
+consistent with the scheduler doing real run-queue/priority bookkeeping on
+every yield rather than just validating and returning.
+
+## Stage 30.4 - compositor frame-present-latency micro-benchmark (2026-10-21)
+
+Added a `hello-gui --compositor-benchmark` mode: 500 round trips of
+toggling one pixel of a placed window and flushing it to the framebuffer
+(`surface.write` + `compositor_present`), timed with `libwoven::cycles()`.
+Each iteration alternates the pixel's colour so the compositor cannot skip
+the frame as undamaged, which would understate real cost. Validated on
+1/2/4 CPUs via `stage30-4-test`: ~338,000-353,000 cycles min (~416,000-
+456,000 average) under QEMU TCG, roughly comparable to the Stage 30.3
+filesystem-write cost. This is a single-pixel, single-window worst-case
+floor, not a measurement of full-desktop frame time with many windows and
+damage regions, and it is a TCG emulation number, not real hardware or
+real display refresh timing.
+
+## Stage 30.3 - filesystem-latency micro-benchmark (2026-10-21)
+
+Added a `hello-gui --fs-benchmark` mode and a `libwoven::seek` wrapper
+(`syscall::lseek` didn't have one yet). It times 500 seek+write and
+seek+read round trips of a 256-byte payload against a kernel-pre-created
+scratch file, reporting write and read separately since they're distinct
+syscalls with distinct costs. Validated on 1/2/4 CPUs via `stage30-3-test`:
+write averages ~515,000-586,000 cycles, read averages ~300,000-366,000
+cycles under QEMU TCG (both roughly an order of magnitude more than the
+Stage 30.1 syscall baseline and comparable to the Stage 30.2 IPC baseline,
+consistent with filesystem writes going through VFS node lookup, access
+checks, and a full buffer copy per call). These are TCG emulation numbers
+for the in-RAM VFS path, not real disk I/O latency or native hardware
+timing; they establish a baseline and a repeatable tool, not an absolute
+performance claim.
+
+## Stage 20.17 - 3D desktop mode: Quick Settings panel (2026-10-21)
+
+WovenShell's Quick Settings panel can now render as a real, perspective-
+projected 3D card (bottom edge anchored, top edge receded and narrowed)
+instead of a flat 2D rectangle, toggled by a new "3D Desktop" row in the
+panel itself. This is the first time the `libwoven::graphics`
+`Camera`/`textured_triangle_3d` primitives (proven standalone in the Stage
+20.16 chrome demo) have been wired into WovenShell's actual, live
+compositor rather than a disconnected proof of concept.
+
+Off by default: every already-accepted gate's pixel-exact 2D rendering is
+unchanged unless a user explicitly opens Quick Settings and toggles it on.
+The flat content is rendered once into an offscreen `.bss` texture, then
+sampled by two `textured_triangle_3d` calls per tile the panel spans
+(matching the shell's existing tiled repaint architecture), with the
+panel's flat footprint repainted with wallpaper first so the narrowed top
+edge doesn't leave stale pixels from the previous frame.
+
+The Stage 20.17 QEMU gate proves a real, non-trivial transform is applied
+(the flat panel's top-left corner becomes wallpaper once 3D is toggled on,
+while the deliberately-anchored bottom-left corner is unchanged), on
+1/2/4 CPUs. It does not claim 3D rendering anywhere else in the desktop
+(window chrome, workspaces, other panels remain flat 2D), nor a
+production-tuned visual design -- the perspective amount is a first,
+reasonable choice, not a finished aesthetic.
+
+## Stage 27.5 service-process slice - 2026-10-21
+
+`apps/woven-update` now has a bounded `--service` mode. It publishes the
+`woven.update` endpoint, decodes the existing fixed-size WUDI request ABI,
+forwards only validated operations to `libwoven::update_transaction`, and
+returns fixed-size responses. Malformed requests fail closed; package bytes do
+not cross IPC; an empty receive yields to the scheduler rather than spinning;
+and a failed response send terminates the daemon so supervision can restart it.
+The app's host tests and freestanding warning-denying Clippy pass. The
+production `system-apps` boot path now verifies and starts both
+`woven-package` and `woven-update` with the bounded IPC, file, and storage
+capability set. The shell QEMU gate passed on 1/2/4 CPUs with both service
+publication markers; evidence is in
+`docs/audit-stage27-5-update-service-process-2026-10-21.md`.
+
+The dedicated Stage 27.5 gate now proves the client/server exchange. This is
+not full update/recovery acceptance: production-sized block-device slots,
+bootloader handoff, power-loss recovery, and physical USB qualification
+remain open.
+
+## Stage 27.5 - privileged update-service transaction boundary (2026-10-21)
+
+Implemented the capability-gated kernel update transaction boundary and
+syscall 239. Signed WUPD packages are verified before staging; the inactive
+slot is written before its WUAB metadata copy is published; dual-copy state is
+selected by sequence with fail-closed corruption/tie handling; activation,
+boot-failure, boot-success, and bounded query operations are exposed through
+`libwoven`. The Stage 27.5 executable QEMU gate passes on 1/2/4 CPUs, and the
+focused kernel/libwoven Clippy and 113 libwoven host tests pass.
+
+This is not a release claim. Current WovenFS slots are single-file bounded to
+4 KiB, so the service rejects larger images instead of partially installing
+them. The daemon process and IPC loop are now present, but boot-time
+supervision/catalog wiring and end-to-end client/server acceptance remain
+required, along with block-device slot storage, bootloader handoff/boot-target
+attempt persistence, power-loss recovery, and physical USB qualification.
+
+## Stage 27.4 - bounded update IPC contract (2026-10-21)
+
+Added `libwoven::update_ipc`, a fixed-capacity request/response ABI for the
+future privileged update service. It validates operation-specific generation,
+slot, and `/updates/` candidate-path rules while keeping image bytes outside
+IPC. The focused library tests now pass 113 cases and warning-denying Clippy
+passes. Evidence is in
+`docs/audit-stage27-4-update-ipc-contract-2026-10-21.md`.
+
+This is not service acceptance: syscall dispatch, capability issuance, signed
+candidate staging, durable image-slot writes, bootloader handoff, and
+power-loss recovery remain unresolved.
+
+## Stage 27.3 - signed update-package producer (2026-10-21)
+
+Added `tools/wupd-packager`, which creates the bounded version-1 `WUPD`
+envelope consumed by the kernel verifier. It validates generation and image
+limits, hashes the exact image, signs the immutable manifest and payload with
+Ed25519, and requires matching explicit signing/trusted-key inputs in release
+mode. Tool tests, warning-denying Clippy, release-key boundary checks, and the
+prior Stage 27.1 activation/rollback QEMU gate passed on 1/2/4 CPUs. Evidence
+is in `docs/audit-stage27-3-update-package-producer-2026-10-21.md`.
+
+This does not yet install images, own the durable A/B state, expose an
+update-service IPC/syscall protocol, perform bootloader slot handoff, recover
+from power loss, or qualify physical USB media.
+
+## Stage 26.5 - bounded internationalization foundation (2026-10-21)
+
+Added `libwoven::i18n`, a fixed-capacity userspace foundation for English and
+Chichewa locale identifiers, bounded translation catalog lookup, locale-aware
+date ordering, integer formatting including `i64::MIN`, and Unicode scalar
+validation. It also provides a transactional bounded Latin combining-mark
+normalization subset that fails closed for unsupported marks. WovenShell now
+uses bounded English/Chichewa catalogs for its lock-screen strings.
+The i18n boundary also resolves bounded strong-direction runs for common
+Latin/Hebrew/Arabic text and numbers; it does not claim full UAX#9.
+Focused and full workspace host gates are recorded in
+`docs/audit-stage26-5-i18n-foundation-2026-10-21.md`.
+
+This is not full internationalization: complete Unicode normalization and
+property data, full RTL/bidi ordering, script shaping, keyboard layouts, IMEs, and wiring
+every application string to a catalog remain open.
+
+The same acceptance cycle corrected a separately observed production-shell
+stack boundary: the bounded user stack is now 16 KiB plus its guard page, and
+the corrected system-app QEMU gate passes on 1/2/4 CPUs.
+
+## Stage 26.1 - bounded accessibility core (2026-10-21)
+
+Added `libwoven::accessibility`, a fixed-capacity userspace contract for
+accessibility tree nodes, roles, labels, bounds, enabled/focusable state,
+deterministic keyboard focus navigation, and screen-reader focus
+announcements. It also provides bounded caption storage and settings for high
+contrast, reduced motion, scale, and magnification.
+
+The module has no unbounded allocation and does not depend on locale or text
+shaping policy. Its focused and full-workspace host gates pass all 100
+`libwoven` tests and warning-denying Clippy. Desktop-wide screen-reader integration, translated strings,
+RTL shaping, and physical accessibility-device qualification remain open.
+
+## Stage 30.2 - IPC-latency micro-benchmark (2026-10-21)
+
+Added a `hello-gui --ipc-benchmark` mode that sends and receives a one-byte
+message to and from its own process id 1000 times (same-uid self-IPC is
+permitted by `may_ipc_with`), timing each round trip with
+`libwoven::cycles()`. Validated under QEMU TCG on 1/2/4 CPUs via
+`stage30-2-test`: a self send+receive round trip costs roughly 400,000-740,000
+cycles on average (1 CPU: min 408,481/avg 566,714/max 9,008,594; 2 CPU: min
+356,574/avg 559,584/max 9,388,518; 4 CPU: min 487,630/avg 738,264/max
+17,016,406) -- an order of magnitude more than the Stage 30.1 `current_pid`
+baseline, consistent with IPC doing a buffer copy, a queue transaction, and
+an audit-ledger write per message versus `current_pid`'s pointer-free,
+capability-free path. These are TCG emulation numbers from a single process
+talking to itself, not cross-process latency or real hardware timing; they
+establish a comparable baseline and a repeatable tool, not an absolute
+performance claim.
+
+## Stage 30.1 - syscall-latency micro-benchmark (2026-10-21)
+
+Added `libwoven::cycles()`, a thin `RDTSC` wrapper usable from Ring 3 (this
+kernel never sets `CR4.TSD`), and a `hello-gui --syscall-benchmark` mode that
+times 1000 round trips of `current_pid()` and reports min/avg/max cycle
+counts, failing only if the measured average is zero. Validated under QEMU
+TCG on 1/2/4 CPUs via `stage30-1-test`: a `current_pid()` round trip costs
+roughly 25,000-30,000 cycles on average (min ~25,168, max varies with host
+scheduling noise, observed up to ~302,000 on a single outlier). These are TCG
+emulation numbers, not a measurement of real hardware syscall latency; they
+establish a baseline and a repeatable tool for comparing future syscall-path
+changes, not an absolute performance claim.
+
+## Stage 25.15 - task-owned userspace resume target (2026-10-21)
+
+The suspend action now validates the complete syscall frame against the
+currently running task's kernel stack and retains its address in the committed
+preparation record. The firmware-wake continuation restores the FACS vector,
+wake trampoline, secondary CPUs, and drivers, writes a successful return value,
+and jumps through the existing syscall epilogue to `iretq` back to userspace.
+Invalid frame pointers are rejected before preparation begins.
+
+The Stage 25.15 QEMU gate checks the empty-record and invalid-pointer
+invariants on 1/2/4 CPUs. It does not issue S3; physical firmware wake and
+hardware qualification remain required.
+
+## Stage 25.13 - persistent firmware-wake record integration (2026-10-21)
+
+Prepared suspend state is now retained in a kernel-owned pending record across
+the PM1 transition boundary. The low-memory wake entry consumes the saved CPU
+context through the Stage 25.12 restore primitive and transfers to a
+continuation that restores the FACS vector, trampoline, secondary CPUs, and
+drivers. The guarded integration gate passed on 1/2/4 CPUs.
+
+Evidence is in `docs/audit-stage25-13-wake-record-2026-10-21.md` and the
+retained `audit-artifacts/stage25.13-*` directories.
+
+The QEMU gate validates record ownership and continuation wiring without
+issuing S3. Actual firmware wake and physical suspend/resume qualification
+remain unproven.
+
+## Stage 25.12 - CPU resume-context restoration primitive (2026-10-21)
+
+The kernel now has a validated non-returning restore path that reloads CR0,
+CR3, CR4, EFER, GDT, IDT, RSP, and RFLAGS, then transfers to a
+kernel-provided continuation. The self-test restores the current context and
+continues to a QEMU success marker on 1/2/4 CPUs.
+
+Evidence is in `docs/audit-stage25-12-cpu-context-restore-2026-10-21.md` and
+the retained `audit-artifacts/stage25.12-*` directories.
+
+This proves the architectural restore primitive, not a complete firmware S3
+wake: the wake record/continuation, driver restoration after firmware wake,
+and physical suspend/resume qualification remain open.
+
+## Stage 25.11 - PM1 S3 request boundary (2026-10-21)
+
+The prepared suspend token now has an internal `enter_suspend` path that
+encodes the firmware-provided `_S3` types, writes PM1a and optional PM1b with
+`SLP_EN`, and treats a returning firmware as an explicit failure. If the
+machine remains running, vector, trampoline, secondary-CPU, and driver state
+are rolled back before returning. The guarded encoding self-test passed on
+1/2/4 CPUs.
+
+Evidence is in `docs/audit-stage25-11-pm1-s3-request-2026-10-21.md` and the
+retained `audit-artifacts/stage25.11-*` directories.
+
+The test does not issue a destructive S3 request. This stage does not claim
+CPU register restoration, firmware wake completion, a userspace suspend ABI,
+or physical suspend/resume qualification.
+
+## Stage 25.10 - secondary-CPU suspend barrier (2026-10-21)
+
+The BSP can now transactionally evacuate and park every online secondary CPU
+through the established scheduler-safe hotplug checkpoints, retaining the
+original online mask. A failed partial barrier restores the completed prefix;
+rollback re-onlines every parked CPU in reverse order and verifies the exact
+mask. The guarded barrier self-test passed on 1/2/4 CPUs.
+
+Evidence is in `docs/audit-stage25-10-secondary-cpu-barrier-2026-10-21.md` and
+the retained `audit-artifacts/stage25.10-*` directories.
+
+This does not claim CPU register restoration, PM1 S3 entry, firmware wake, or
+physical suspend/resume qualification.
+
+## Stage 25.9 - transactional FACS wake-vector installation (2026-10-21)
+
+Suspend preparation now installs the reserved low wake-page address into both
+validated FACS waking-vector fields and retains the previous values in the
+private preparation token. Abort restores both firmware fields before
+releasing the trampoline and resuming drivers. The guarded transaction
+self-test passed on 1/2/4 CPUs.
+
+Evidence is in `docs/audit-stage25-9-facs-wake-vector-2026-10-21.md` and the
+retained `audit-artifacts/stage25.9-*` directories.
+
+This does not claim secondary-CPU coordination, CPU register restoration,
+PM1 S3 entry, firmware wake, or physical suspend/resume qualification.
+
+## Stage 25.8 - CPU resume-context capture (2026-10-21)
+
+The suspend preparation token now captures the current CPU control state into
+kernel-owned storage: CR0, CR3, CR4, EFER, RFLAGS, RSP, and the GDT/IDT
+descriptors. The capture is validated for long-mode paging, canonical pointers,
+aligned CR3, descriptor limits, and required RFLAGS state before preparation
+can succeed. The guarded self-test passed on 1/2/4 CPUs.
+
+Evidence is in `docs/audit-stage25-8-cpu-resume-context-2026-10-21.md` and the
+retained `audit-artifacts/stage25.8-*` directories.
+
+This does not claim register restoration, secondary-CPU coordination, FACS
+vector installation, S3 entry, firmware wake, or physical suspend/resume
+qualification.
+
+## Stage 25.7 - wake-trampoline staging (2026-10-21)
+
+The proven AP transition image can now be staged on the reserved low wake
+page with a private identity-mapped root, dedicated wake stack, and entry
+point. Page-table ownership is transactional: abort releases the image and
+restores drivers. The guarded stage25-7 QEMU test passed on 1/2/4 CPUs.
+
+Evidence is in `docs/audit-stage25-7-wake-trampoline-2026-10-21.md` and the
+retained `audit-artifacts/stage25.7-*` directories.
+
+This does not claim FACS vector installation, CPU-state save/restore,
+secondary-CPU coordination, S3 entry, firmware wake, or physical
+suspend/resume qualification.
+
+## Stage 25.6 - low-memory wake-page reservation (2026-10-21)
+
+SMP preparation now reserves a distinct usable page below 640 KiB for the
+future S3 wake trampoline, separate from the AP startup page and excluded from
+the general frame allocator. Suspend preparation refuses to proceed if that
+page is unavailable and carries its physical address internally.
+
+The page is reserved only; no code is written and no FACS waking vector is
+modified. Evidence and limits are recorded in
+`docs/audit-stage25-6-low-wake-page-2026-10-21.md`.
+
+## Stage 25.5 - ACPI FACS wake-capability boundary (2026-10-21)
+
+ACPI discovery now validates the FADT-referenced FACS signature, minimum
+length, firmware memory range, version, and waking-vector fields. Syscall 238
+and `libwoven::suspend_resume_capabilities` report bounded readiness flags to
+`PowerControl` callers without exposing firmware addresses or changing power
+state.
+
+Default and `system-apps` production-kernel Clippy, host all-targets Clippy,
+the full `cargo test --all` suite, and signed system-apps QEMU acceptance on
+1/2/4 CPUs passed. Evidence is in
+`docs/audit-stage25-5-facs-wake-capabilities-2026-10-21.md`.
+
+This does not claim wake-trampoline allocation, FACS vector installation,
+CPU-state save/restore, S3 entry, firmware wake, or physical qualification.
+
+## Stage 25.4 - bounded suspend preparation (2026-10-21)
+
+Accepted bounded preparation slice: the driver registry can quiesce all bound
+drivers transactionally and roll back in reverse order when a hook refuses.
+The power layer requires ACPI PM1a, `_S3`, and ACPI mode before returning a
+private preparation token; abort restores drivers in reverse order.
+
+Production-kernel and host warning-denying Clippy, the full `cargo test --all`
+suite, and signed system-apps QEMU acceptance on 1/2/4 CPUs passed. Evidence
+is in `docs/audit-stage25-4-suspend-preparation-2026-10-21.md`.
+
+This does not claim S3 entry, wake-vector/CPU-resume handling, wake-source
+policy, a suspend syscall, device-specific save/restore, or physical
+suspend/resume qualification.
+
+## Stage 25.3 - CPU frequency inventory boundary (2026-10-21)
+
+The CPU HAL now reads CPUID leaf `0x16` when available and exposes base,
+maximum, and bus MHz inventory through syscall 237 and
+`libwoven::cpu_frequency_info`. The query is `PowerControl`-gated, audited,
+validates the 13-byte userspace result, and performs no P-state or MSR write.
+It returns an explicit unavailable result when firmware omits the leaf.
+
+Signed production-kernel Clippy, `libwoven` Clippy/tests, and signed
+system-apps QEMU acceptance on 1/2/4 CPUs pass. Evidence is in
+`docs/audit-stage25-3-cpu-frequency-inventory-2026-10-21.md`.
+
+This does not claim frequency scaling, governor policy, thermal throttling, or
+physical frequency validation.
+
+## Stage 30 boot-stage timing, and a real fix it found immediately (2026-10-21)
+
+First slice of performance-engineering tooling (Stage 30): the existing
+`BOOT LOADER [n/7]` progress markers are now timestamped (`kernel/src/main.rs`'s
+new `boot_stage` helper and `BOOT_STAGE_CLOCK`), logging the tick delta since
+the previous marker (or boot start, for the first) as `[BOOT PROFILE]` to
+serial. Coarse (10 ms resolution, 100 Hz ticks) but immediately useful.
+
+The first run found demo-account PBKDF2 hashing (2 accounts x 100,000
+iterations, force-soft SHA-256 -- this kernel never uses a hardware SHA
+extension) consuming 4241 of a ~4350-tick hardware-demo boot -- effectively
+the entire boot, hidden inside what the unprofiled boot just called "system
+files ready". Fixed in `install_hardware_demo_accounts`: `ada`/`1234` and
+`lin`/`9876` are fixed, public demo credentials (not secrets), so their
+salt and hash are now precomputed once rather than recomputed by calling
+`pbkdf2_hmac` on every single boot of every test run. Re-measured at 2
+ticks for the same stage. The precomputed hash was verified correct the
+only way that matters: the hardware-demo QEMU gate's own sign-in step
+(typing `1234` and reading `woven-shell: signed in: ada` back) still
+passes.
+
+This does not touch the general sign-in/change-PIN verify path, which
+still computes PBKDF2 at the same iteration count on every real sign-in
+attempt (that credential is live-typed, so there is nothing to
+precompute). Whether that cost matters in practice is an open question,
+not a conclusion this measurement supports: tick counts under a CPU-bound
+software loop running inside QEMU's TCG emulation do not necessarily map
+1:1 to real wall-clock time, and the interactive sign-in/Change-PIN QEMU
+gates have been passing within their deadlines throughout this session.
+Lowering `PBKDF2_ITERATIONS` would trade security margin for speed, so
+that stays an explicit decision for the user rather than something to
+change unilaterally from a single ambiguous measurement.
+
+Validation: kernel clippy (default features) and host `cargo clippy
+--all-targets -- -D warnings` passed; `cargo test -p libwoven` (95 tests)
+passed; `scripts/test-shell-qemu.py --hardware-demo` and `--system-apps`
+both passed on 1/2/4 CPUs.
+
+## Stage 25.2 - CPU idle capability boundary (2026-10-21)
+
+The CPU HAL now reports architectural idle capabilities through syscall 236
+and `libwoven::cpu_idle_capabilities`: baseline `HLT`, optional
+`MONITOR/MWAIT`, and invariant-TSC support. The query requires `PowerControl`,
+validates the userspace output range, records an audit event, and changes no
+CPU state. The scheduler continues to use only its existing interrupt-safe
+`STI+HLT` idle path.
+
+Production-kernel Clippy, `libwoven` Clippy/tests, and signed system-apps
+QEMU acceptance on 1/2/4 CPUs pass. Evidence is in
+`docs/audit-stage25-2-cpu-idle-capabilities-2026-10-21.md`.
+
+This does not claim MWAIT execution, frequency scaling, deep C-state policy,
+per-CPU residency accounting, or suspend/resume.
+
+## Stage 25.1 - ACPI power capability boundary (2026-10-21)
+
+The kernel now discovers firmware `_S3` sleep types alongside the existing
+`_S5` power-off types and exposes a read-only capability query through syscall
+235 and the `libwoven::power_capabilities` wrapper. The query requires
+`PowerControl`, validates the userspace output range, records an audit event,
+and reports power-off, suspend, and restart capability without performing a
+transition.
+
+Signed production-kernel Clippy, `libwoven` warning-denying Clippy and tests
+(95 tests), and signed system-apps QEMU boots on 1/2/4 CPUs pass. Evidence is
+in `docs/audit-stage25-1-acpi-power-capabilities-2026-10-21.md`. The ACPI
+structural self-test also directly covers a synthetic `_S3` AML package and
+unsupported-state rejection.
+
+This is a capability boundary only. It does not claim S3 suspend/resume,
+driver quiescing, wake-source policy, battery/thermal/lid reporting, or
+physical hardware qualification.
+
+## Stage 24.60 — release-key provisioning boundary (2026-10-21)
+
+Production WAPP packaging now requires explicit signing-seed and trusted
+public-key inputs; only non-production/test packaging may use the deterministic
+development key. The production catalog and package-service launchers propagate
+the fail-closed mode. Negative and positive packager tests, packager Clippy,
+and explicit production catalog/service packaging pass. Evidence is in
+`docs/audit-stage24-60-release-key-provisioning-2026-10-21.md`.
+
+This does not claim custody of a real release secret or physical release
+qualification.
+
+## Production account provisioning implementation (2026-10-21)
+
+Commit `7bbcb0f8` extends bounded persistent account import from the
+disposable `hardware-demo` profile to normal `system-apps` boots. The shared
+cfg correction for the legacy fallback is now exercised by signed production
+image acceptance, which passes on 1/2/4 CPUs. See
+`docs/audit-production-account-provisioning-2026-10-21.md`.
+
+This is not a release acceptance claim. Physical USB boot and TPM execution
+remain open hardware qualifications.
+
+The affected static gates now pass: signed production kernel Clippy,
+all-targets warning-denying Clippy, and `cargo test --all`. Repository-wide
+format checking remains open because it reports pre-existing diffs.
+
+## Physical qualification readiness rerun (2026-10-21)
+
+The read-only preflight again found one safe USB candidate but no accessible
+TPM, no `swtpm` backend, and no signed physical provisioning record. No raw
+disk or TPM state was accessed or changed. Evidence is recorded in
+`docs/audit-physical-qualification-rerun-2026-10-21.md`.
+
+## Stage 10.7 release-chain revalidation (2026-10-21)
+
+The full Windows chain passed host regressions, warning-denying host Clippy,
+host tests, Stage 7.5/7.6 preservation, networking, and all preserved Stage
+8 through Stage 10.6 markers. Its first Stage 10.7 image build hit a volume
+`no space on device` failure; after disposable build cleanup, the isolated
+Stage 10.7 TCP gate passed on 1/2/4 CPUs with two TX exchanges, RX, and
+FIN/EOF. This was a validation-only rerun with no source changes. Evidence is
+under `docs/audit-stage10-7-release-rerun-2026-10-21.md` and the preserved
+serial logs in `target/stage10-7-regression-{1,2,4}-debug`.
+
+## Stage 20.16 — standalone textured-3D-chrome proof of concept (2026-10-21)
+
+First concrete slice of the user's "fully 3D, not 2D characteristics"
+graphics directive (see `docs/agent-coordination.md`, 2026-10-20). Three
+additive pieces, each landed and validated separately, none touching any
+already-accepted compositor or desktop path:
+
+1. `libwoven::graphics::Vertex3Tex`/`Renderer::textured_triangle_3d`: the
+   existing software-3D rasterizer (`triangle_3d`) only interpolates a flat
+   per-vertex colour; this sibling samples a source `Canvas` via
+   affine-interpolated u/v instead, which is the primitive a 3D-rendered
+   desktop needs to show a window's own rendered pixels on a tilted plane
+   rather than a solid-coloured shape. 3 new tests (correct per-corner
+   sampling, depth-test occlusion, empty-source safety).
+2. `libwoven::graphics::Camera`: a fixed-point (16.16, matching `Transform`'s
+   existing convention -- no floating-point state in freestanding
+   userspace) perspective projector from a 3D world point to the screen
+   pixel and depth value the triangle rasterizer wants. 3 new tests (origin
+   centring, perspective shrink + depth ordering, behind-camera rejection).
+3. `hello-gui --3d-chrome-demo` (`stage20-16-test`): a standalone
+   proof of concept wiring the first two together end to end -- render a
+   title-bar-like strip offscreen exactly as WovenShell's own chrome does
+   today, project it through a tilted `Camera` as a texture-mapped quad
+   instead of a flat blit, present it, and have the kernel self-test
+   re-read the compositor to confirm what was presented is really there.
+   Caught and fixed two real bugs on the way: the demo's canvas/depth
+   buffers were first stack-allocated (~67 KiB against an 8 KiB user
+   stack -- an immediate page fault) and, once moved to static `.bss`, the
+   depth buffer's non-zero initial fill turned out to force it into real
+   image data rather than `.bss`, bloating the installed binary past the
+   VFS's 64 KiB node cap. Both are fixed; see the two commits for detail.
+
+Validation: kernel clippy (default features and host `--all-targets`), the
+95-test `libwoven` suite, `stage20-16-test` on 1/2/4 CPUs, and the
+pre-existing Stage 19.2 hello-gui gate (confirming no regression to the
+shared binary) all passed.
+
+**Not yet done:** everything that makes this a *desktop* rather than a demo
+-- replacing WovenShell's flat blits with this projection for real window
+chrome (user explicitly chose this, "3D chrome first," over texturing real
+window bodies, which would also need a new bounded pixel-readback syscall
+window content doesn't have yet), an on/off toggle, and depth/perspective
+values tuned for an actual desktop layout rather than one fixed demo quad.
+
+## Stage 24.59 — deterministic Change-PIN acceptance (2026-10-21)
+
+Accepted. The kernel and WovenShell flow now has a dedicated deterministic
+QEMU gate covering sign-in, Quick Settings, current/new/confirmation PIN
+entry, durable account-record rotation, rejection of the old PIN, and unlock
+with the new PIN. The kernel generates one bounded salt and commits it to both
+the identity authority and account record, with rollback if the durable record
+update fails.
+
+Required checks passed: production-feature kernel Clippy with packaged signed
+system apps, host all-target Clippy, 95 `libwoven` tests, and the Stage 24.59
+QEMU gate on 1/2/4 CPUs. Evidence is under
+`audit-artifacts/stage24.59-change-pin-20261021`.
+
+This closes the password-change gap. Account creation was already accepted in
+Stage 24.15; physical TPM/USB qualification remains a separate release
+prerequisite. No USB media was modified.
+
+## Change-PIN kernel primitive and WovenShell UI (2026-10-20/21)
+
+Closes "password change"/"credential rotation" from the four persistent-
+accounts gaps flagged 2026-10-20 (account creation is still open).
+
+Kernel: a new `Capability::AccountManage` (desktop-session-only, same
+pattern as `PowerControl`; added to `SecurityDomain::SystemService`'s
+WovenGuard ceiling and `session::CAPABILITIES`), a new syscall
+(`AccountsChangePin`) whose only effect is `kernel::accounts::change_pin`:
+read `/etc/wovenhat/accounts`, verify the caller-supplied current PIN by
+PBKDF2 against the named account's stored hash, and if it matches, rewrite
+just that one line (fresh salt, new hash) through a new
+`vfs::overwrite_trusted` that bypasses the file's own `writable = false` --
+every other account's line is left byte for byte unchanged. No syscall
+exposes a generic write to this path; the PIN check is the only
+authorization. `libwoven::accounts::change_pin` wraps the syscall for apps.
+
+UI: WovenShell's Quick Settings panel gained a seventh row, "Change PIN",
+reusing the lock screen's existing masked-digit-entry widget under a new
+`LockMode::ChangePin` (current PIN -> new PIN -> confirm; Backspace on an
+empty entry cancels without changing anything) rather than building a
+second input widget. Both stashed PINs are wiped (volatile writes) the
+moment they are no longer needed, success or failure.
+
+Validation: kernel clippy (default features, `--features hardware-demo`
+with the packaged apps wired up, and the `apps/woven-shell` crate on its
+own) all clean; `cargo test -p libwoven` (57 tests, including the PBKDF2
+and `Account::parse`/`verify` tests) and host `cargo clippy --all-targets`
+clean. `scripts/test-shell-qemu.py --hardware-demo` (the real sign-in path,
+unrelated to the new syscall but the thing most likely to regress from a
+`Desktop` struct size/field change) passed on 1/2/4 CPUs, after one flaky
+failure on a loaded machine (concurrent Codex builds) that reproduced as a
+pass on immediate retry -- a timing margin in the *test*, not the feature.
+
+The dedicated deterministic Change-PIN self-test is accepted as Stage 24.59
+above. It opens Quick Settings, enters old/new/confirmation PINs, verifies the
+durable record, rejects the old PIN after relock, and unlocks with the new PIN.
+The existing Stage 20.15-style kernel self-tests drive WovenShell through
+kernel-internal input injection rather than QMP key events specifically
+because QMP timing is flaky (as just observed); a correct test here should
+follow that pattern, not add another QMP-driven gate. This is the next
+concrete follow-up if work returns to this feature.
+
+## Stage 24.58 physical TPM broker boot activation (2026-10-21)
+
+Integrated the signed broker records and Stage 24.57 TPM root-read boundary
+into the system-app boot path. When a live TPM is present, boot now
+revalidates the signed policy records, reads the attestation public key,
+obtains a fresh TPM nonce, promotes the policy/PCR-bound NV credential root,
+and installs the kernel-owned broker. Every failure leaves hardware
+credentials disabled; no TPM or storage error blocks the desktop. Host tests,
+warning-denying all-target and system-app Clippy, and exact-tree memory plus
+signed system-app acceptance on 1/2/4 CPUs pass. Evidence is under
+`audit-artifacts/stage24.58-tpm-broker-boot-activation-20261021`.
+
+QEMU has no live TPM, and all three boots therefore exercised the required
+fail-closed path. Physical TPM activation, live credential login, reboot
+recovery, and hardware qualification remain open release gates. The attached
+USB was not opened or modified.
+
+## Stage 24.57 physical TPM credential-root read boundary (2026-10-21)
+
+Added the kernel-side read-only handoff for the signed credential-root record:
+bounded `NV_ReadPublic`, PCR-policy session application, authenticated
+policy-session `NV_Read`, refreshed TPM nonce handling, and mandatory session
+flush/secret wiping before promoting the root into a `CredentialRootLease`.
+The path is fail-closed on malformed metadata, invalid bounds, stale session
+state, or TPM errors and does not expose TPM authorization material to
+userspace. Host tests (89), warning-denying all-target and affected kernel
+feature Clippy, and exact-tree memory plus signed system-app acceptance on
+1/2/4 CPUs pass. Evidence is under
+`audit-artifacts/stage24.57-tpm-credential-root-read-20261021`.
+
+No live TPM is available in this environment, so physical NV provisioning,
+PCR-policy execution against a real TPM, reboot persistence, and hardware
+qualification remain open release gates. The attached USB was not opened or
+modified.
+
+## Stage 24.56 signed TPM broker record generator (2026-10-21)
+
+Added `tools/tpm-broker-config`, a warning-clean host tool that emits the
+fixed 182-byte signed `TCB1` broker policy record from explicit NV index,
+attestation handle, quote scheme, PCR, digest, Name, and NV-policy inputs.
+It requires a dedicated TPM policy signing seed and matching trusted public
+key; it never falls back to a development key. Synthetic generation passed,
+while missing-key and invalid-index negative controls were rejected. The
+exact-tree memory and signed system-app gates pass on 1/2/4 CPUs. Evidence is
+under `audit-artifacts/stage24.56-tpm-broker-record-generator-20261021`.
+
+This tool generates policy only; it does not provision a TPM, read the USB,
+or write an OS image. Physical TPM provisioning, live quote qualification,
+reboot recovery, and hardware qualification remain required.
+
+## Stage 24.55 physical TPM readiness preflight (2026-10-21)
+
+Added `scripts/test-physical-tpm-readiness.ps1`, a read-only host preflight
+that records TPM visibility/readiness, QEMU/swtpm availability, signed broker
+record presence, and removable-disk identity/safety. The run found one safe
+USB candidate (Disk 1) but no accessible TPM and no software TPM backend.
+Evidence is under
+`audit-artifacts/physical-tpm-readiness-20261021-063402`.
+
+This is a readiness report, not physical qualification. No raw disk was
+opened, no disk state changed, and no media or TPM state was written. An
+administrator TPM query, a provisioned physical TPM, and live hardware gates
+remain required.
+
+## Stage 24.54 kernel-derived TPM authorization secret (2026-10-21)
+
+Credential-root leases now retain the validated NV index and policy binding.
+Root rotation rejects metadata changes, and the physical broker can derive the
+attestation object's authorization value inside kernel memory from the active
+root. Provisioned broker installation additionally requires the signed `TCB1`
+configuration and exact attestation Name; the derived secret is wiped before
+return. Host tests (89), all-targets and affected feature Clippy, executable
+QEMU, and signed system-apps 1/2/4-CPU acceptance pass. Evidence is under
+`audit-artifacts/stage24.54-kernel-derived-tpm-secret-20261021`.
+
+No authorization secret is persisted or accepted from userspace. Physical TPM
+provisioning, live login, reboot recovery, and hardware qualification remain
+required.
+
+## Stage 24.53 signed TPM broker provisioning record (2026-10-21)
+
+Added a bounded signed `TCB1` release record for the physical TPM broker.
+The record authenticates the reserved NV index, attestation handle, quote
+scheme, PCR, expected PCR digest, attestation Name, and NV policy before any
+field is returned. WovenFS persistence and boot-time revalidation are
+available, while authorization secrets remain excluded from durable storage.
+Host tests (89), all-targets and affected feature Clippy, executable QEMU, and
+signed system-apps 1/2/4-CPU acceptance pass. Evidence is under
+`audit-artifacts/stage24.53-signed-tpm-provisioning-20261021`.
+
+The QEMU image has no TPM2 device and no provisioning record, so the broker
+remains uninstalled. Physical TPM provisioning, secret injection, live login,
+reboot recovery, and hardware qualification remain required.
+
+## Stage 24.52 physical TPM credential broker boundary (2026-10-21)
+
+The kernel now owns a bounded physical TPM credential broker. It validates the
+TPM descriptor, signed attestation Name policy, attestation public key, active
+credential root, PCR selection, and signing authorization before accepting a
+broker configuration. Each request derives the account-bound challenge,
+starts and applies a fresh policy session, executes one authenticated quote,
+verifies the quote, flushes the session on every path, and publishes the
+move-only decision for syscall 233 consumption. Syscalls 234/233 and matching
+libwoven wrappers provide request/consume sequencing without exposing TPM
+material. Host tests (89), all-targets and affected feature Clippy, executable
+QEMU, and signed system-apps 1/2/4-CPU acceptance pass. Evidence is under
+`audit-artifacts/stage24.52-physical-tpm-broker-20261021`.
+
+The QEMU image has no TPM2 device and therefore installs no broker; physical
+credential login, release provisioning of the broker inputs, reboot recovery,
+and hardware qualification remain required.
+
+## Stage 24.51 identity hardware-decision consumption (2026-10-21)
+
+Identity runtime now has a bounded kernel-only one-entry pending decision
+handoff. `IdentityConsumeHardware` (syscall 233) consumes a move-only,
+generation-tagged decision only for the owner/session and account name bound by
+the TPM challenge; locked sessions, wrong owners/contexts, duplicate
+consumption, and absent decisions fail closed. Host tests (89), all-targets and
+affected feature Clippy, executable QEMU, and signed system-apps 1/2/4-CPU
+acceptance pass. Evidence is under
+`audit-artifacts/stage24.51-identity-hardware-consumption-20261021`.
+
+A live physical TPM broker has not yet published a decision, and no physical
+credential login is claimed; reboot recovery and physical qualification remain
+required.
+
+## Stage 24.50 hardware credential decision boundary (2026-10-21)
+
+The TPM layer now binds a hardware credential decision to the active
+credential-root lease. It derives the exact 32-byte quote challenge from the
+root generation and bounded identity context, then requires the existing
+signed TAN1 Name, ReadPublic binding, PCR evidence, and cryptographic quote
+verification before returning a generation-tagged decision. Inactive or
+revoked roots fail before quote authorization. Host tests (89), all-targets
+and affected feature Clippy, executable QEMU, and signed system-apps 1/2/4-
+CPU acceptance pass. Evidence is under
+`audit-artifacts/stage24.50-hardware-credential-decision-20261021`.
+
+Live physical TPM quote success, identity-session consumption of the decision,
+reboot recovery, and physical qualification remain required.
+
+## Stage 24.49 credential-root lifecycle (2026-10-21)
+
+The TPM2 layer now owns a generation-tagged kernel credential-root lease.
+Installation requires validated NV metadata and exact policy-bound readback;
+zero roots are rejected. Rotation validates the replacement before wiping the
+old root and advancing the generation, derivation exposes only bounded
+context-derived material, and explicit revocation wipes the root and makes the
+lease unusable. Host tests (89), all-targets and affected feature Clippy,
+executable QEMU, and signed system-apps 1/2/4-CPU acceptance pass. Evidence is
+under `audit-artifacts/stage24.49-credential-root-lifecycle-20261021`.
+
+Live TPM NV define/write/read execution, provisioned-key persistence policy,
+credential decisions, recovery, and physical qualification remain required.
+
+## Stage 24.48 TPM custody authorization boundary (2026-10-21)
+
+TPM policy-session custody now requires a kernel-owned authority token in
+addition to the ordinary WovenFS writer. The token is issued only after a
+validated live CRB descriptor and an accepted boot-time signed TAN1 policy;
+the durable context loader requires it as well. Invalid descriptors and
+storage-only callers fail before custody I/O. Host tests (89), all-targets and
+affected feature Clippy, executable QEMU, and signed system-apps 1/2/4-CPU
+acceptance pass. Evidence is under
+`audit-artifacts/stage24.48-tpm-custody-authorization-20261021`.
+
+TPM physical execution, provisioned-key lifecycle, credential decisions,
+recovery, and physical qualification remain required.
+
+## Stage 24.47 TPM policy-session nonce refresh (2026-10-21)
+
+Policy-session quote responses now parse the TPM authorization area and retain
+the refreshed TPM nonce. The password-session path still accepts an empty
+nonce, while the non-password policy path rejects one. Managed quote leases
+copy the refreshed nonce before becoming one-shot stale, so a later lifecycle
+operation cannot accidentally derive authorization from an old nonce. Host
+tests (89), all-targets and affected feature Clippy, executable QEMU, and
+signed system-apps 1/2/4-CPU acceptance pass. Evidence is under
+`audit-artifacts/stage24.47-tpm-session-nonce-refresh-20261021`.
+
+Live physical TPM session execution, durable custody authorization,
+provisioned-key lifecycle, credential decisions, recovery, and physical
+qualification remain required.
+
+## Stage 24.46 boot-time TPM context recovery (2026-10-21)
+
+After WovenFS mount, system-apps boot now treats the newest validated `TPS1`
+record as a recovery candidate, requires a live TPM `ContextLoad`, and flushes
+the restored lease immediately because no credential-authority consumer is
+enabled yet. Missing storage, absent TPM hardware, invalid records, failed
+loads, and cleanup failures all leave hardware credentials disabled. Host
+tests, all-targets and affected feature Clippy, executable QEMU, and signed
+system-apps 1/2/4-CPU acceptance pass. Evidence is under
+`audit-artifacts/stage24.46-boot-tpm-context-recovery-20261021`.
+
+The QEMU environment has no durable TPM context, so physical cross-reboot
+restore remains unproven. Secure storage authorization, nonce refresh,
+provisioned-key lifecycle, credential decisions, recovery policy, and physical
+qualification remain required.
+
+## Stage 24.45 durable TPM context custody boundary (2026-10-21)
+
+Opaque TPM policy-session contexts now have a versioned dual-copy WovenFS
+custody record with fixed bounds, SHA-256 integrity, sequence arbitration,
+and strict session/context metadata validation. A filesystem record is only a
+retryable custody candidate; TPM `ContextLoad` remains the final authority.
+Host tests (89), all-targets and affected feature Clippy, executable QEMU,
+and signed system-apps 1/2/4-CPU acceptance pass. Evidence is under
+`audit-artifacts/stage24.45-tpm-context-custody-20261021`.
+
+Boot-time custody integration, secure storage authorization, session nonce
+refresh, provisioned-key lifecycle, credential decisions, recovery, and
+physical qualification remain required.
+
+## Stage 24.44 TPM policy-session context save/load (2026-10-21)
+
+The TPM2 layer now frames, executes, and strictly decodes `ContextSave` and
+`ContextLoad` for policy sessions. A successful save invalidates the live
+lease and returns a bounded context snapshot; a load consumes that snapshot
+exactly once and restores the session under a fresh generation. Failed loads
+leave the snapshot retryable. Host tests (89), all-targets and affected
+feature Clippy, executable QEMU, and signed system-apps 1/2/4-CPU acceptance
+pass. Evidence is under
+`audit-artifacts/stage24.44-policy-session-context-20261021`.
+
+Cross-reboot persistence custody, TPM session nonce refresh semantics,
+provisioned-key lifecycle, credential decisions, recovery, and physical
+qualification remain required.
+
+## Stage 24.43 managed TPM policy-session lifecycle (2026-10-21)
+
+Policy sessions now have a generation-tagged kernel-owned lease. Managed
+transcript and quote helpers reject inactive or nonce-stale leases; a
+successful quote consumes the lease for authority reuse, and a successful
+`FlushContext` irreversibly invalidates it. Flush failures leave the lease
+active for bounded retry. Host tests (89), all-targets and affected feature
+Clippy, executable QEMU, and signed system-apps 1/2/4-CPU acceptance pass.
+Evidence is under
+`audit-artifacts/stage24.43-managed-policy-session-20261021`.
+
+TPM context save/load, session nonce refresh after every authenticated TPM
+command, provisioned-key lifecycle, credential decisions, recovery, and
+physical qualification remain required.
+
+## Stage 24.42 policy-session quote HMAC derivation (2026-10-21)
+
+The TPM2 layer now derives a SHA-256 quote authorization HMAC from the
+TPM2_Quote command cpHash, returned session nonce, caller nonce, session
+attributes, and caller-supplied attestation-key auth value. The authenticated
+quote wrapper uses that derived HMAC and rejects non-32-byte policy-session
+HMACs or password-session downgrade. Host tests (89), all-targets and
+affected feature Clippy, executable QEMU, and signed system-apps 1/2/4-CPU
+acceptance pass. Evidence is under
+`audit-artifacts/stage24.42-policy-session-hmac-20261021`.
+
+The implementation is limited to the null-salt/null-bind session shape
+created by the current StartAuthSession path. Session-state refresh,
+provisioned-key lifecycle, credential decisions, recovery, and physical
+qualification remain required.
+
+## Stage 24.41 live policy-session transcript execution (2026-10-21)
+
+The TPM2 layer now executes bounded `StartAuthSession` policy sessions and
+`PolicyPCR` assertions through the serialized CRB transport. Session startup
+validates the returned handle and bounded TPM nonce; PolicyPCR validates the
+PCR index and expected SHA-256 digest before issuing the command and requires
+an exact successful response. Host tests (89), all-targets and affected
+feature Clippy, executable QEMU, and signed system-apps 1/2/4-CPU acceptance
+pass. Evidence is under
+`audit-artifacts/stage24.41-live-policy-session-20261021`.
+
+The returned TPM session nonce is not yet refreshed to the caller after each
+PolicyPCR state transition, and session-HMAC derivation, quote authorization,
+credential decisions, recovery, and physical qualification remain required.
+
+## Stage 24.40 policy-session TPM2 Quote framing (2026-10-21)
+
+The quote transport now accepts a caller-established non-password policy
+session, including its TPM session handle, caller nonce, attributes, and
+bounded authorization HMAC. The encoder places that authorization area in
+the TPM command before parameters and rejects a `TPM_RS_PW` downgrade. The
+existing empty-password wrapper remains available only for objects configured
+for that mode. Host tests (89), all-targets and affected feature Clippy,
+executable QEMU, and signed system-apps 1/2/4-CPU acceptance pass. Evidence
+is under `audit-artifacts/stage24.40-policy-session-quote-20261021`.
+
+Policy-session creation, PolicyPCR execution, HMAC derivation from provisioned
+authorization material, credential decision integration, recovery, and
+physical qualification remain required.
+
+## Stage 24.39 bounded TPM2 Quote execution (2026-10-21)
+
+The TPM2 CRB layer now frames and executes a bounded `TPM2_Quote` request
+with an empty password session, SHA-256 PCR selection, and RSA-SSA, RSA-PSS,
+or ECDSA scheme selection. The response parser requires a sessions-tagged
+response, exact parameter/auth-area framing, bounded quote/signature sizes,
+and a supported TPM signature type. The result remains evidence only and
+must pass `authorize_quote` before any credential decision. Host tests (89),
+all-targets and affected feature Clippy, executable QEMU, and signed
+system-apps 1/2/4-CPU acceptance pass. Evidence is under
+`audit-artifacts/stage24.39-tpm-quote-execution-20261021`.
+
+Physical TPM execution, non-empty object authorization sessions, credential
+decision integration, recovery, and physical qualification remain required.
+
+## Stage 24.38 boot-time TPM Name policy loading (2026-10-21)
+
+Release system-apps boots now attempt to load the signed TAN1 attestation
+Name policy immediately after the durable WovenFS mount attempt and before
+WovenShell starts. The loader uses the compile-time application release trust
+root and revalidates the complete bounded record. Missing storage, malformed
+records, and signature failures all leave hardware credentials disabled;
+none is converted into authority. Host tests (89), all-targets and affected
+feature Clippy, executable QEMU, and signed system-apps 1/2/4-CPU acceptance
+pass. Evidence is under
+`audit-artifacts/stage24.38-boot-tpm-policy-loader-20261021`.
+
+Live TPM quote execution, credential decision integration, recovery,
+physical TPM qualification, and release certification remain required.
+
+## Stage 24.37 fail-closed TPM quote authorization integration (2026-10-21)
+
+The TPM2 layer now combines signed expected-Name policy verification,
+`ReadPublic` Name binding, nonce/PCR attestation validation, signature-shape
+validation, and RSA/ECC cryptographic verification in one structured
+authorization request. A caller cannot substitute a different key or skip an
+earlier binding step. Host tests (89), all-targets and affected feature
+Clippy, executable QEMU, and signed system-apps 1/2/4-CPU acceptance pass.
+Evidence is under
+`audit-artifacts/stage24.37-quote-authorization-integration-20261021`.
+
+Boot-time policy loading, live TPM execution, credential decision integration,
+recovery, and physical TPM qualification remain required.
+
+## Stage 24.36 durable signed TPM Name policy boundary (2026-10-21)
+
+The signed TAN1 attestation-Name policy now has a journal-backed WovenFS
+storage boundary. Writes verify the Ed25519 policy before mutation; reads
+require the exact 106-byte record size and reverify the signature before
+returning a Name. The API is feature-gated to accepted durable-storage and
+production system-app configurations. Host tests (89), all-targets and
+affected feature Clippy, executable QEMU, and signed system-apps 1/2/4-CPU
+acceptance pass. Evidence is under
+`audit-artifacts/stage24.36-durable-attestation-name-policy-20261021`.
+
+Physical provisioning, live TPM retrieval, boot-time policy loading, quote
+authorization, recovery, and physical TPM qualification remain required.
+
+## Stage 24.35 signed TPM attestation-Name policy (2026-10-21)
+
+The TPM2 layer now verifies a bounded, versioned Ed25519-signed policy
+envelope containing the expected 34-byte SHA-256 TPM object Name. Invalid
+headers, lengths, trust signatures, or algorithm identifiers fail closed;
+the verified Name can then feed the Stage 24.34 binding boundary. Host tests
+(89), all-targets and affected feature Clippy, executable QEMU, and signed
+system-apps 1/2/4-CPU acceptance pass. Evidence is under
+`audit-artifacts/stage24.35-signed-attestation-name-policy-20261021`.
+
+Durable record storage, live TPM retrieval, key identity provisioning,
+credential authorization, recovery, and physical TPM qualification remain
+required.
+
+## Stage 24.34 TPM attestation-key Name binding (2026-10-21)
+
+The `TPM2_ReadPublic` boundary now recomputes the SHA-256 TPM Name from the
+exact public area, verifies the returned Name, retains the bounded qualified
+Name, and exposes a fail-closed comparison with the provisioned expected
+34-byte object Name. Host tests (89), all-targets and affected feature
+Clippy, executable QEMU, and signed system-apps 1/2/4-CPU acceptance pass.
+Evidence is under `audit-artifacts/stage24.34-tpm-name-binding-20261021`.
+
+Live TPM key retrieval, persistent object identity provisioning, quote
+authorization integration, recovery, and physical TPM qualification remain
+required.
+
+## Stage 24.33 bounded TPM ReadPublic attestation-key boundary (2026-10-21)
+
+The TPM2 layer now frames `TPM2_ReadPublic` and validates the returned public
+area for a fixed-TPM, fixed-parent, sensitive-origin, restricted signing
+object named with SHA-256. RSA keys are bounded to 2048-4096 bits and passed
+through RSA key validation; ECC keys are restricted to valid P-256 points.
+Malformed sizes, unsupported curves/types, decrypt-only objects, and trailing
+response bytes fail closed. Host tests (89), all-targets and affected feature
+Clippy, executable QEMU, and signed system-apps 1/2/4-CPU acceptance pass.
+Evidence is under `audit-artifacts/stage24.33-tpm-read-public-boundary-20261021`.
+
+Live TPM execution, object-name binding, attestation-key identity/persistence,
+credential authorization, recovery, and physical TPM qualification remain
+required.
+
+## Stage 24.32 bounded ECC/P-256 quote verification (2026-10-21)
+
+The TPM2 boundary now verifies SHA-256 ECDSA/P-256 quote signatures against
+a bounded uncompressed affine public key and exact 32-byte TPM signature
+components. Invalid points, wrong scheme/hash, non-canonical component sizes,
+and tampering fail closed. Host tests (89), all-targets and affected feature
+Clippy, executable QEMU, and signed system-apps 1/2/4-CPU acceptance pass.
+Evidence is under `audit-artifacts/stage24.32-ecc-p256-quote-verification-20261021`.
+
+Live TPM public-key retrieval/validation, quote-key binding, recovery, and
+physical TPM qualification remain required.
+
+## Stage 24.31 bounded TPM RSA quote verification (2026-10-21)
+
+The TPM2 boundary now verifies SHA-256 RSA quote signatures (RSASSA and
+RSASSA-PSS) against a caller-supplied, bounded 2048-4096-bit public key,
+including TPM's exponent-zero default of 65537. Verification is performed
+against the exact `TPMS_ATTEST` bytes and fails closed on malformed keys,
+wrong scheme/hash, or signature mismatch. The self-test was moved after heap
+initialization because the audited verifier allocates. Host tests (89),
+all-targets and affected feature Clippy, executable QEMU, and signed
+system-apps 1/2/4-CPU acceptance pass. Evidence is under
+`audit-artifacts/stage24.31-rsa-quote-verification-20261021`.
+
+ECC quote verification, live TPM public-key retrieval/validation, recovery,
+and physical TPM qualification remain required.
+
+## Stage 24.30 bounded TPM quote signature framing (2026-10-21)
+
+The TPM2 layer now parses bounded `TPMT_SIGNATURE` shapes for SHA-256
+RSASSA, RSAPSS, and ECDSA quote schemes, including exact RSA or ECDSA
+component bounds and consumed-length reporting. The executable QEMU
+self-test, host tests (89), all-targets and affected feature Clippy, and
+signed system-apps 1/2/4-CPU acceptance pass. Evidence is under
+`audit-artifacts/stage24.30-quote-signature-shape-20261021`.
+
+This is framing only: it does not verify a TPM public key, RSA/ECC signature,
+or quote-to-key binding. Physical TPM attestation, recovery, and release
+qualification remain required.
+
+## Stage 24.29 bounded TPM quote attestation parsing (2026-10-21)
+
+The TPM2 layer now parses a bounded `TPMS_ATTEST` quote structure and binds
+its generated-value magic, quote type, qualifying nonce, single SHA-256 PCR
+selection, and 32-byte PCR digest to caller expectations. Clock and firmware
+metadata are retained only in the returned evidence structure. The executable
+QEMU self-test, host tests (89), all-targets and affected feature Clippy, and
+signed system-apps 1/2/4-CPU acceptance pass. Evidence is under
+`audit-artifacts/stage24.29-quote-attestation-20261021`.
+
+This parses evidence only; no TPM signing key or quote signature is verified,
+and no quote can authorize credentials by itself. Physical TPM attestation,
+signature verification, recovery, and release qualification remain required.
+
+## Stage 24.28 credential-root read-back promotion boundary (2026-10-21)
+
+The TPM2 layer now validates a credential-root promotion decision as one
+constant-time exact-match operation: the decoded NV public metadata must match
+the expected index and PCR policy, and the returned 32-byte value must match
+the caller-provisioned root. Metadata or value mismatch fails closed with no
+promotion. The executable QEMU self-test, host tests (89), all-targets and
+affected feature Clippy, and signed system-apps 1/2/4-CPU acceptance pass.
+Evidence is under `audit-artifacts/stage24.28-credential-root-readback-20261021`.
+
+This does not persist or expose the root, execute a live TPM read, validate a
+TPM quote, provide crash recovery, or establish physical hardware trust.
+Those remain release prerequisites.
+
+## Stage 24.27 policy-session NV read-back (2026-10-21)
+
+The TPM2 layer now frames a policy-session `NV_Read` for exactly the fixed
+32-byte credential-root value and parses the returned parameter and session
+authorization areas with exact bounds. The executable QEMU self-test, host
+tests (89), all-targets and affected feature Clippy, and signed system-apps
+1/2/4-CPU acceptance pass. Evidence is under
+`audit-artifacts/stage24.27-nv-read-policy-20261021`.
+
+This does not issue a live read, create or write an NV index, persist a
+credential, validate a TPM quote, or provide recovery. Physical TPM
+provisioning and release qualification remain required.
+
+## Stage 24.26 bounded TPM NV definition framing (2026-10-21)
+
+The TPM2 layer now frames an owner-authorized `NV_DefineSpace` request for
+the fixed credential-root index. It bounds the owner password-session
+authorization, encodes the SHA-256 name algorithm, 32-byte policy, exact
+attributes, and 32-byte data size, and keeps the caller authorization in the
+transient command buffer only. The executable QEMU self-test, host tests
+(89), all-targets and affected feature Clippy, and signed system-apps
+1/2/4-CPU acceptance pass. Evidence is under
+`audit-artifacts/stage24.26-nv-define-space-20261021`.
+
+This does not send the command to a TPM, create an index, persist owner
+authorization, write a root, validate a quote, or provide recovery. Physical
+TPM provisioning and release qualification remain required.
+
+## Stage 24.25 policy-session NV write framing (2026-10-21)
+
+The TPM2 layer now frames a session-authorized `NV_Write` for the fixed
+32-byte credential-root payload and parses its bounded response authorization
+area. The command requires a nonzero policy session, exact NV index binding,
+bounded caller nonce, continue-session attribute, zero offset, and an empty
+HMAC for the policy-session shape. The executable QEMU self-test, host tests
+(89), all-targets and affected feature Clippy, and signed system-apps
+1/2/4-CPU acceptance pass. Evidence is under
+`audit-artifacts/stage24.25-nv-write-policy-20261021`.
+
+This does not execute a live NV write, create an index, establish owner
+authorization, persist a secret, validate a quote, or provide recovery.
+Physical TPM provisioning and release qualification remain required.
+
+## Stage 24.24 bounded TPM PolicyPCR transcript (2026-10-21)
+
+The TPM2 layer now frames a bounded `PolicyPCR` command for the active policy
+session, binding one PCR index to the expected 32-byte SHA-256 digest and
+validating the exact success response. The executable QEMU self-test, host
+tests (89), all-targets and affected feature Clippy, and signed
+system-apps 1/2/4-CPU acceptance pass. Evidence is under
+`audit-artifacts/stage24.24-policy-pcr-20261021`.
+
+This still does not send a live TPM command on the current QEMU platform,
+authorize NV writes, create a credential object, validate a quote, or provide
+recovery. Complete policy-session lifecycle, NV provisioning, quote
+verification, physical TPM qualification, and release custody remain open.
+
+## Stage 24.23 bounded TPM policy-session framing (2026-10-21)
+
+The TPM2 layer now frames a policy `StartAuthSession` request with bounded
+caller nonce, null salt/bind handles, null symmetric protection, and SHA-256
+policy hashing. It parses the returned session handle and TPM nonce with exact
+response bounds. The executable QEMU self-test, host tests (89), all-targets
+and affected feature Clippy, and signed system-apps 1/2/4-CPU acceptance
+pass. Evidence is under
+`audit-artifacts/stage24.23-policy-session-20261021`.
+
+This does not authorize an NV command, create an object, transmit credential
+bytes, or validate a TPM quote. The session lifecycle, policy command
+transcript, sealed-root provisioning, recovery, and physical TPM
+qualification remain required.
+
+## Stage 24.22 credential-root NV policy validation (2026-10-21)
+
+The TPM2 layer now validates the public metadata of the reserved
+credential-root NV object against a caller-provisioned index and signed PCR
+policy digest. It requires SHA-256 naming, a 32-byte value, a 32-byte policy,
+policy-authorized writes, and rejects ordinary owner/object writes and policy
+deletion. Host tests (89), all-targets and affected feature Clippy, and
+signed system-apps 1/2/4-CPU acceptance pass. Evidence is under
+`audit-artifacts/stage24.22-credential-root-policy-20261021`.
+
+This is still a validation boundary: it does not create an NV index, open an
+authorization session, write or read credential bytes, or prove a TPM quote.
+Sealed-root provisioning, recovery, physical TPM qualification, and release
+key custody remain required.
+
+## Stage 24.21 bounded TPM NV public metadata (2026-10-21)
+
+The TPM2 layer now frames `NV_ReadPublic` for a caller-selected index and
+parses only a bounded NV public area: index, name algorithm, attributes,
+bounded authorization-policy bytes, data size, and exact response framing.
+The codec is read-only and carries no secret material; malformed sizes,
+status codes, policy lengths, and trailing-name framing fail closed. Host
+tests (89), all-targets and affected feature Clippy, and signed
+system-apps 1/2/4-CPU acceptance pass. Evidence is under
+`audit-artifacts/stage24.21-nv-public-20261021`.
+
+This does not issue a live NV transaction, create or authorize an NV index,
+write a credential, seal a root, validate a TPM quote, or provide recovery.
+Those remain required before hardware-backed identity can be enabled. The
+attached USB was inventory-only and was not written, formatted, or mounted.
+
+## Stage 24.20 signed PCR policy boundary (2026-10-21)
+
+The TPM layer now validates a fixed-size signed PCR policy envelope. The
+provisioned signing key is supplied by the trusted caller, the envelope binds
+one PCR index and one SHA-256 digest, and Ed25519 signature/tamper/mismatch
+checks fail closed. The QEMU codec self-test, host tests (89), all-targets and
+affected feature Clippy, and signed system-apps 1/2/4-CPU acceptance pass.
+Evidence is under `audit-artifacts/stage24.20-signed-pcr-policy-20261021`.
+
+This authenticates policy provenance only; no release policy is provisioned
+yet, no TPM quote/attestation key is verified, and no identity credential is
+sealed to the policy. Those remain the next hardware-credential prerequisites.
+
+## Stage 24.19 bounded PCR evidence read (2026-10-21)
+
+The TPM2 layer now constructs and parses a bounded SHA-256 PCR_Read exchange,
+including the selected PCR index, hash algorithm, digest count/length, TPM
+response code, and response-size checks. Boot probes PCR 7 only when a valid
+TPM2 descriptor exists and wipes the returned digest after inventory logging.
+Host tests (89), all-targets and affected feature Clippy, and signed
+system-apps 1/2/4-CPU acceptance pass. Evidence is under
+`audit-artifacts/stage24.19-pcr-evidence-20261021`.
+
+PCR reads are evidence, not authentication: no provisioned expected policy,
+signed TPM quote, attestation-key validation, or sealed credential root exists
+yet. Those remain required before identity credentials can depend on PCR state.
+
+## Stage 24.18 bounded TPM2 CRB probe (2026-10-21)
+
+The validated TPM2 descriptor now feeds a serialized CRB `GetRandom` probe.
+The transport checks the CRB interface, command/response capacities and
+addresses, fatal status, bounded pre-interrupt polling, response code/length,
+and wipes probe output. Random bytes are never persisted or promoted to a
+credential root. Host tests (89), all-targets and affected feature Clippy, and
+signed system-apps 1/2/4-CPU acceptance pass. Evidence is under
+`audit-artifacts/stage24.18-tpm2-crb-probe-20261021`.
+
+Authenticated PCR/attestation evidence, sealed credential-root provisioning,
+recovery, and physical TPM qualification remain required.
+
+## Stage 24.17 TPM2 platform discovery boundary (2026-10-21)
+
+ACPI discovery now validates the TPM2 table length, control-area address, and
+advertised start method, retains the bounded platform record, and emits an
+explicit boot inventory line. A missing or malformed table is never treated
+as a credential root; the
+kernel reports hardware credentials as unavailable and continues only where
+the existing non-hardware path permits. The ACPI self-test, 89-test host
+suite, all-targets Clippy, production system-apps Clippy, and signed
+system-apps 1/2/4-CPU gates pass. Evidence is under
+`audit-artifacts/stage24.17-tpm2-platform-inventory-20261021`.
+
+This is an integration boundary, not completion of hardware-backed identity.
+TPM command transport, authenticated PCR/attestation evidence, sealed
+credential-root provisioning, recovery, and physical TPM qualification remain
+required before production credentials can depend on hardware.
+
+## Stage 24.16 durable/configurable lockout policy (2026-10-21)
+
+The bounded identity authority now persists an administrator-selected failed-
+authentication threshold from 1 through 32. WID1 snapshots remain readable;
+new snapshots use the existing reserved header byte for version 2 policy data.
+The owner-bound elevated administrator session exposes this operation through
+WovenSecurity and audit action 37/syscall 232. Runtime authentication applies
+the persisted threshold while retaining the fixed five-second cooldown and
+fail-closed behavior. Host tests (89), all affected warning-denying Clippy
+gates, focused WovenSecurity QEMU, and signed system-apps 1/2/4-CPU gates
+pass. Evidence is under
+`audit-artifacts/stage24.16-lockout-policy-20261021`.
+
+Hardware credentials, malformed-request telemetry, release-key provisioning,
+and physical qualification remain open. The no-disk hardware-demo fallback is
+test-only; production durable publication remains fail-closed.
+
+## Stage 24.15 administration mutation UI (2026-10-21)
+
+WovenSecurity now exposes bounded add-user, add-group, add/remove-membership,
+and inactive-user deletion flows after administrator elevation. Directory
+records display stable IDs for subsequent operations. The identity runtime
+remains the authorization boundary; every mutation requires an owner-bound
+elevated administrator session. The no-disk hardware-demo fixture has an
+explicit volatile fallback, while production builds require durable WID2 and
+trusted account-file publication. The 88-test host suite, all relevant
+warning-denying Clippy gates, focused mutation UI QEMU acceptance, and signed
+system-apps 1/2/4-CPU gates pass. Evidence is under
+`audit-artifacts/stage24.15-admin-mutation-ui-20261021`.
+
+Durable/configurable lockout, hardware credentials, malformed-request
+telemetry, release-key provisioning, and physical qualification remain open.
+
+## Stage 24.14 bounded administration query UI (2026-10-21)
+
+WovenSecurity now authenticates an elevated owner-bound administrator session
+and displays bounded non-secret user/group directory records through query
+syscall 231 and audit action 36. The query ABI has fixed framing and capacity;
+salts, hashes, PINs, and session credentials are excluded. The hardware-demo
+fixture promotes only its first volatile demo account for this test path; the
+production account loader does not promote accounts. The 88-test host suite,
+all warning-denying Clippy gates, diff check, focused WovenSecurity QEMU UI
+acceptance, and signed system-apps 1/2/4-CPU gates pass. Evidence is under
+`audit-artifacts/stage24.14-admin-query-ui-20261021`.
+
+Mutation-management UI, configurable durable lockout, hardware credentials,
+malformed-request telemetry, release-key provisioning, and physical
+qualification remain open.
+
+## Stage 24.13 group membership administration (2026-10-21)
+
+Elevated administrators can add and remove bounded supplementary group membership through syscalls 229-230. Duplicate membership, unknown identities, full groups, and primary-group removal are rejected; changes publish through WID2 with live rollback on persistence failure. The 87-test host suite, warning-denying host and production Clippy gates, diff check, and signed system-apps 1/2/4-CPU gates pass. Evidence is under `audit-artifacts/stage24.13-group-membership-{1,2,4}cpu-1792534800000000000`.
+
+Administration UI/query APIs, durable/configurable lockout, hardware credentials, malformed-request telemetry, release-key provisioning, and physical qualification remain open.
+
+## Stage 24.12 durable identity administration (2026-10-20)
+
+Administrative mutations now publish through WID2 and synchronize the trusted
+account file, with rollback on publication failure. The scheduler migration
+self-test waits boundedly for coverage-probe slot reclamation, removing the
+prior 4-CPU slot race. The 87-test suite, all warning-denying Clippy gates,
+diff check, and signed system-apps 1/2/4-CPU gates pass. Evidence is under:
+`audit-artifacts/stage24.12-admin-persistence-1cpu-1792534200000000000`,
+`audit-artifacts/stage24.12-admin-persistence-2cpu-1792534200000000000`, and
+`audit-artifacts/stage24.12-admin-persistence-4cpu-1792534200000000000`.
+
+Group membership administration, UI integration, durable/configurable
+lockout, hardware credentials, malformed telemetry, release-key provisioning,
+and physical qualification remain open.
+
+## Stage 24.11 bounded identity administration ABI (2026-10-20)
+
+Elevated administrator sessions can now add users, delete inactive users, and
+add groups through bounded syscalls 226–228. Self-deletion and deletion of
+accounts with active sessions are refused. The 87-test host suite, host and
+kernel Clippy gates, system-apps Clippy, diff check, and signed system-apps
+1/2/4-CPU shell gates pass. Evidence is under:
+`audit-artifacts/stage24.11-admin-abi-1cpu-1792533600000000000`,
+`audit-artifacts/stage24.11-admin-abi-2cpu-1792533600000000000`, and
+`audit-artifacts/stage24.11-admin-abi-4cpu-1792533600000000000`.
+
+Persistence to account/WID2 storage, group membership mutation/deletion, and
+an administration UI remain open; this is not yet a complete administration
+release gate.
+
+## Stage 24.10 kernel identity lockout/rate limiting (2026-10-20)
+
+The owner-bound identity runtime now rate-limits both plaintext and verified
+digest authentication. Five failures impose a bounded five-second cooldown;
+success resets the account state. WovenShell sends candidate digests to the
+kernel for every entered PIN, so the policy covers the trusted login-manager
+path. The 86-test suite, host/feature-gate Clippy, system-apps Clippy, diff
+check, and signed system-apps 1/2/4-CPU gates pass. Evidence is under:
+`audit-artifacts/stage24.10-lockout-1cpu-1792533000000000000`,
+`audit-artifacts/stage24.10-lockout-2cpu-1792533000000000000`, and
+`audit-artifacts/stage24.10-lockout-4cpu-1792533000000000000`.
+
+Runtime lockout state is not yet durable or administrator-configurable. Account
+administration, malformed-request telemetry, hardware credentials, release-key
+provisioning, and physical qualification remain open.
+
+## Stage 24.9 live PIN rotation consistency (2026-10-20)
+
+PIN rotation now updates the live kernel authority, the trusted account file,
+and WovenShell's bounded account cache consistently. A failed file rewrite
+rolls the in-memory credential back. The 86-test host suite, host Clippy,
+Stage 24.5 Clippy, system-apps Clippy, diff check, and signed system-apps
+1/2/4-CPU shell gates pass. Evidence is under:
+`audit-artifacts/stage24.9-pin-rotation-1cpu-1792532400000000000`,
+`audit-artifacts/stage24.9-pin-rotation-2cpu-1792532400000000000`, and
+`audit-artifacts/stage24.9-pin-rotation-4cpu-1792532400000000000`.
+
+The fixture does not drive the PIN-change UI; rotation-specific proof is the
+bounded authority test plus the integrated kernel/shell path. Administration,
+lockout/rate limiting, malformed-request telemetry, hardware credentials,
+release-key provisioning, and physical qualification remain open.
+
+## Stage 24.8 WID2 runtime recovery (2026-10-20)
+
+System-apps startup now prefers the newest valid authenticated WID2 snapshot
+from native WovenFS and falls back to the bounded account file when no durable
+copy is present. Snapshot decoding is bounded, sessions are excluded, and the
+native read path is fail-closed. Stage 24.3 Clippy, host tests/Clippy,
+system-apps Clippy, diff check, and the signed system-apps shell gate on 1/2/4
+CPUs pass. Evidence is under:
+`audit-artifacts/stage24.8-wid2-runtime-1cpu-1792531800000000000`,
+`audit-artifacts/stage24.8-wid2-runtime-2cpu-1792531800000000000`, and
+`audit-artifacts/stage24.8-wid2-runtime-4cpu-1792531800000000000`.
+
+The QEMU fixture has no ATA WovenFS disk, so the durable branch is covered by
+the Stage 24.3 native self-test and the live gate covers the safe fallback.
+Administration/rotation, lockout/rate limiting, malformed-request telemetry,
+hardware credentials, real release-key provisioning, and physical
+USB/power-loss qualification remain open.
+
+## Stage 24.7 WovenIdentity audit actions (2026-10-20)
+
+Identity open, lock, unlock, elevation, and close outcomes now enter the
+kernel security ledger. Stable public audit action IDs 26–30 are decoded by
+`libwoven::audit_read`. The host 85-test suite, host Clippy, Stage 24.5
+freestanding Clippy, system-apps freestanding Clippy, diff check, and the
+signed system-apps shell gate on 1/2/4 CPUs pass. Evidence is under:
+`audit-artifacts/stage24.7-identity-audit-1cpu-1792531200000000000`,
+`audit-artifacts/stage24.7-identity-audit-2cpu-1792531200000000000`, and
+`audit-artifacts/stage24.7-identity-audit-4cpu-1792531200000000000`.
+
+Malformed user-buffer requests return before an identity operation is formed
+and are not yet separate audit events. WID2 runtime recovery, administration,
+PIN rotation, lockout/rate limiting, hardware-backed credentials, and physical
+USB/power-loss qualification remain release prerequisites.
+
+## Stage 24.6 live WovenIdentity runtime and WovenShell login (2026-10-20)
+
+The system-apps boot imports bounded `/etc/wovenhat/accounts` records into a
+fresh kernel `Authority` before WovenShell starts. WovenShell verifies the PIN
+once and uses capability-gated verified-digest syscalls 224 and 225; the
+kernel compares the digest to its own authority before binding credentials to
+the shell process. Lock, unlock, owner validation, and process-exit
+reclamation are live. The harness synchronizes login input to the shell's
+`desktop ready` marker.
+
+The 85-test `libwoven` suite, host Clippy, Stage 24.5 freestanding Clippy,
+system-apps freestanding Clippy, and diff check pass. The signed
+system-app/hardware-demo shell gate passes on 1/2/4 CPUs. Evidence is under:
+`audit-artifacts/stage24.6-live-1cpu-1792530000000000000`,
+`audit-artifacts/stage24.6-live-2cpu-1792530000000000000`, and
+`audit-artifacts/stage24.6-live-4cpu-1792530000000000000`.
+
+WID2 runtime recovery, account administration, PIN rotation, lockout/rate
+limiting, identity audit events, and hardware-backed credentials remain open;
+this is not a complete production identity subsystem.
+
+## Stage 24.5 bounded WovenIdentity syscall ABI (2026-10-20)
+
+The WovenHat ABI now reserves syscalls 219–223 for identity session open,
+lock, unlock, elevation, and close. Requests use bounded length-prefixed
+buffers; the kernel copies them before parsing or authentication, rejects
+truncation/empty/oversized fields, and returns the existing error sentinel on
+failure. `libwoven::identity` provides safe wrappers that keep request bytes on
+the caller's bounded stack and never retain password pointers.
+
+The dedicated gate passed with exit 33 and
+`[S24.5] WovenIdentity syscall ABI: PASSED` on 1/2/4 CPUs. The 84-test
+`libwoven` suite, Stage 24.5 freestanding Clippy, host all-targets Clippy,
+Python validation, and `git diff --check` pass. Evidence is preserved under:
+`audit-artifacts/stage24.5-1cpu-1792526996850760700`,
+`audit-artifacts/stage24.5-2cpu-1792527013189914600`, and
+`audit-artifacts/stage24.5-4cpu-1792527027362429900`.
+
+This stage proves the bounded ABI and parser only. Durable snapshot loading
+into the runtime, a live Ring-3 login fixture, process-exit reclamation, audit
+events, lockout/rate limiting, and WovenShell migration remain required.
+
+## Stage 24.4 owner-bound kernel identity seam (2026-10-20)
+
+`kernel/src/identity_runtime.rs` introduces the kernel seam between the
+accepted identity authority and process credentials. Session tokens are kept
+in a fixed binding table with an owner process ID; lock, unlock, elevation,
+and close reject tokens owned by another process. Credential application is
+performed only after releasing the identity lock and only through a crate-only
+task setter, preserving the existing `getuid/getgid` ABI and lock ordering.
+If no live process owner exists, opening a session fails closed and cleans up
+the authority session and binding.
+
+The dedicated gate passed with exit 33 and
+`[S24.4] WovenIdentity task binding: PASSED` on 1/2/4 CPUs. The corrected
+evidence is preserved under:
+`audit-artifacts/stage24.4-1cpu-1792526710240384400`,
+`audit-artifacts/stage24.4-2cpu-1792526744522828500`, and
+`audit-artifacts/stage24.4-4cpu-1792526778145524000`.
+
+This is not yet the userspace identity interface: syscall framing, loading the
+durable snapshot into the runtime, process-exit binding reclamation, login
+manager integration, lockout/rate limiting, and administrative policy remain
+required before production identity can be claimed.
+
+## Stage 24.3 kernel-authorized WovenIdentity durable storage (2026-10-20)
+
+The kernel now provides a StorageIo-authorized WovenFS adapter for identity
+snapshots. It writes `WID2` records to two fixed native paths with a monotonic
+generation and wrapper checksum, selects the newest valid copy on recovery,
+and validates the inner authenticated `WID1` snapshot before writing or
+returning it. The launcher attaches a disposable IDE image for this destructive
+storage gate; the user USB is not touched.
+
+The dedicated gate passed with exit 33 and
+`[S24.3] WovenIdentity durable storage: PASSED` on 1/2/4 CPUs. The corrected
+evidence is preserved under:
+`audit-artifacts/stage24.3-1cpu-1792526461019999200`,
+`audit-artifacts/stage24.3-2cpu-1792526482958590800`, and
+`audit-artifacts/stage24.3-4cpu-1792526505203409200`.
+
+The earlier failed attempt is retained at
+`audit-artifacts/stage24.3-1cpu-1792526354775283900`; it exposed the missing
+scratch-disk harness configuration and was fixed without weakening assertions.
+This stage does not yet expose user-facing persistence, key management,
+credential rotation, lockout/rate limiting, or bind restored identities to
+running kernel tasks.
+
+## Stage 24.2 authenticated WovenIdentity snapshot (2026-10-20)
+
+`libwoven::identity` now encodes users, groups, administrator roles, profile
+names, salts, and password digests into a fixed-size `WID1` snapshot with an
+FNV-1a integrity check. Decoding is fail-closed and transactional: malformed,
+duplicate, out-of-range, tampered, or non-zero-padding records are rejected
+without changing an existing authority. Active sessions are never serialized,
+so reboot cannot restore authentication state.
+
+The dedicated gate passed with exit 33 and
+`[S24.2] WovenIdentity snapshot: PASSED` on 1/2/4 CPUs. The 84-test
+`libwoven` suite, Stage 24.2 freestanding Clippy, host all-targets Clippy,
+Python validation, and `git diff --check` pass. Evidence is preserved under:
+`audit-artifacts/stage24.2-1cpu-1792526063075640900`,
+`audit-artifacts/stage24.2-2cpu-1792526104893458300`, and
+`audit-artifacts/stage24.2-4cpu-1792526146509891500`.
+
+This is the authenticated storage format, not yet durable filesystem
+integration: the kernel still needs authorized atomic writes/recovery, record
+key management, credential rotation, lockout/rate limiting, and task/session
+credential integration.
+
+## Stage 24.1 bounded WovenIdentity core (2026-10-20)
+
+`libwoven::identity` provides a fixed-capacity local identity authority for
+users, groups, PBKDF2-HMAC-SHA256 credentials, sessions, lock/unlock state,
+user profiles, and explicit password-confirmed privilege elevation. User,
+group, session, name, salt, and profile capacities are compile-time bounded;
+password comparisons are constant-time over the stored digest, and elevation
+resets on lock. The module is policy-only: it does not yet switch kernel task
+credentials or persist the identity database.
+
+The dedicated gate passed with exit 33 and
+`[S24.1] WovenIdentity core: PASSED` on 1/2/4 CPUs. The 82-test `libwoven`
+suite, Stage 24.1 freestanding Clippy, Python validation, and `git diff --check`
+pass. A security review also requires elevation to be an explicit administrator
+role; ordinary users cannot become UID 0, and full-group insertion is atomic.
+The corrected gate evidence is preserved under:
+`audit-artifacts/stage24.1-1cpu-1792525654517891200`,
+`audit-artifacts/stage24.1-2cpu-1792525721415869300`, and
+`audit-artifacts/stage24.1-4cpu-1792525782428769900`.
+
+This is the identity policy foundation, not a production identity subsystem:
+kernel task/session integration, durable credential storage and recovery,
+group authorization in the capability broker, account administration UI,
+lockout/rate limiting, and hardware-backed credentials remain required.
+
+## Stage 23.7 advisory WovenAI security monitor (2026-10-20)
+
+`libwoven::ai_monitor` provides bounded explanations over existing
+`security::AuditEvent` records. It classifies denied WovenGuard/sandbox events,
+sensitive grants/stores, process faults, and ordinary records into fixed-size
+findings capped at 16 entries with 64-byte explanations. It has no
+capability-grant, revoke, enforcement, or device-control API; WovenGuard
+remains the only enforcement authority.
+
+The dedicated gate passed with exit 33 and
+`[S23.7] WovenAI security monitor: PASSED` on 1/2/4 CPUs. The 80-test
+`libwoven` suite, Stage 23.7 freestanding Clippy, host all-targets Clippy,
+Python validation, and `git diff --check` pass. Evidence is preserved under:
+`audit-artifacts/stage23.7-1cpu-1792525067904963600`,
+`audit-artifacts/stage23.7-2cpu-1792525085640869300`, and
+`audit-artifacts/stage23.7-4cpu-1792525103539579600`.
+
+This is an advisory event-summary contract, not a complete anomaly detector,
+monitor UI, alert transport, or automated response system. Any future AI
+recommendation must still be evaluated by deterministic WovenGuard policy.
+
+## Stage 23.6 WovenAssistant permissioned action planner (2026-10-20)
+
+`libwoven::ai_assistant` defines bounded plans with seven explicit action
+classes: application launch, file read/write, settings, messages, commands,
+and network requests. Every action maps to a named permission, side-effecting
+actions require confirmation, targets are validated UTF-8 without NUL bytes,
+and plans are capped at eight actions.
+
+The dedicated gate passed with exit 33 and
+`[S23.6] WovenAssistant actions: PASSED` on 1/2/4 CPUs. The 78-test
+`libwoven` suite, Stage 23.6 freestanding Clippy, host all-targets Clippy,
+Python validation, and `git diff --check` pass. Evidence is preserved under:
+`audit-artifacts/stage23.6-1cpu-1792524840375472300`,
+`audit-artifacts/stage23.6-2cpu-1792524861370942600`, and
+`audit-artifacts/stage23.6-4cpu-1792524875749738800`.
+
+This is the permissioned action contract, not yet a complete assistant UI or
+platform executor. Permission-broker integration, audit presentation, user
+confirmation UX, cancellation, and actual application/file execution remain
+required before claiming a production assistant.
+
+## Stage 23.5 bounded semantic search core (2026-10-20)
+
+`libwoven::semantic_search` now provides a fixed-capacity, allocation-free
+search index covering the roadmap's application, file, setting, message,
+document, and command kinds. UTF-8 titles are normalized into bounded ASCII
+terms; query hits are scored by term coverage and ranked stably. The index is
+capped at 32 entries, 12 terms per entry, 16 bytes per term, and 8 results.
+
+The dedicated gate passed with exit 33 and
+`[S23.5] WovenAI semantic search: PASSED` on 1/2/4 CPUs. The 76-test
+`libwoven` suite, Stage 23.5 freestanding Clippy, host all-targets Clippy,
+Python validation, and `git diff --check` pass. Evidence is preserved under:
+`audit-artifacts/stage23.5-1cpu-1792524571689446000`,
+`audit-artifacts/stage23.5-2cpu-1792524589227010700`, and
+`audit-artifacts/stage23.5-4cpu-1792524606220735100`.
+
+The index now supports owner-scoped privacy filtering, bounded upsert/removal,
+and an authenticated fixed-format snapshot for durable reload. It is still not
+a complete production filesystem/message ingestion pipeline or vector-
+embedding runtime. Source adapters, ranking quality evaluation, and
+user-facing search service integration remain required before release
+readiness.
+
+## Stage 23.4 WovenAI capability security (2026-10-20)
+
+The Stage 23.4 WovenGuard gate makes the AI security contract explicit and
+auditable. A local AI profile is limited to `Ipc + Ai` and receives no file,
+network, secret, camera, microphone, USB, or device policy. A cloud provider
+profile adds only the explicitly requested `Secrets + NetworkIo` authorities;
+the broker remains `Ipc`-only. The SystemService domain ceiling rejects `Ai`,
+`Secrets`, camera, and microphone authority, preventing accidental inheritance
+by unrelated system services.
+
+The dedicated gate passed with exit 33 and
+`[S23.4] WovenAI capability security: PASSED` on 1/2/4 CPUs. Evidence is
+preserved under:
+`audit-artifacts/stage23.4-1cpu-1792524134603006000`,
+`audit-artifacts/stage23.4-2cpu-1792524151189661900`, and
+`audit-artifacts/stage23.4-4cpu-1792524165773461400`.
+
+This proves WovenGuard capability and device-policy narrowing; it does not
+claim real cloud HTTPS/TLS integration, semantic search, assistant actions,
+or physical hardware qualification.
+
+## Stage 23.3 WovenAI provider-plugin boundary (2026-10-20)
+
+`libwoven::ai_provider` defines the bounded provider-plugin contract. A cloud
+provider is a separate Ring-3 process published as `woven.ai.cloud`; the
+WovenAI broker delegates versioned WAI1 requests to it without copying or
+passing credential bytes. The provider owns its generation-safe WovenVault
+handle and returns only a bounded descriptor or result. Provider capability
+authority is explicit: the acceptance fixture receives `Ipc`, `Secrets`, and
+`NetworkIo`, while the broker receives only `Ipc`.
+
+The Stage 23.3 gate passed with exit 33 and
+`[S23.3] WovenAI cloud provider: PASSED` on 1/2/4 CPUs. It proves provider
+publication, broker delegation, vault-backed credential use, capability denial
+for an unauthorized client, response correlation, and teardown. Evidence is
+preserved under:
+`audit-artifacts/stage23.3-1cpu-1792523642289709300`,
+`audit-artifacts/stage23.3-2cpu-1792523675601682100`, and
+`audit-artifacts/stage23.3-4cpu-1792523708187643800`.
+
+This acceptance uses a deterministic offline provider fixture. It does not
+claim arbitrary cloud API compatibility, HTTPS/TLS transport, endpoint
+configuration, credential provisioning UX, rate limiting, billing controls,
+or physical network qualification. Those are required before a real cloud
+provider can be called production-ready.
+
+## Stage 23.2 bounded WovenAI local provider (2026-10-20)
+
+`libwoven::ai_model` now defines the explicit model ABI and a deterministic,
+no-allocation local provider with fixed integer weights. It consumes the
+existing bounded WAI1 UTF-8 input, classifies a fixed feature vocabulary, and
+returns a packed class/confidence result. The broker's `Describe` response
+advertises both the local-provider flag and model ABI; normal broker mode still
+returns `NoProvider`.
+
+The dedicated Stage 23.2 gate passed with exit 33 and
+`[S23.2] WovenAI local provider: PASSED` on 1/2/4 CPUs. The 71-test
+`libwoven` suite, Stage 23.1 and 23.2 freestanding Clippy, host all-targets
+Clippy, broker app Clippy, and Python validation pass. Evidence is preserved
+under:
+`audit-artifacts/stage23.2-1cpu-1792523271142588200`,
+`audit-artifacts/stage23.2-2cpu-1792523298416240400`, and
+`audit-artifacts/stage23.2-4cpu-1792523326958053700`.
+
+This is a bounded software provider, not a general neural runtime. Model
+files, larger tensors, hardware acceleration, cloud credentials, semantic
+search, assistant actions, and AI security-monitor policy remain later stages.
+No physical USB qualification or USB write was performed.
+
+## Stage 23.1 controlled WovenAI broker boundary (2026-10-20)
+
+`libwoven::ai_ipc` now defines the bounded version-1 `WAI1` request/response
+protocol. The Ring-3 `apps/woven-ai` service publishes `woven.ai`, answers a
+broker-ABI description request, and explicitly reports `NoProvider` for
+completion requests; it does not imply that a model or provider exists. A
+dedicated syscall 218 requires both `Ipc` and `Ai` capability before sending a
+WAI1 request. The acceptance probe is launched in the normal user domain with
+an explicit `Ai` declaration, while the broker itself has only `Ipc`.
+
+The dedicated gate in `scripts/test-stage23-1-ai-broker.py` passed with exit 33
+and `[S23.1] WovenAI broker: PASSED` on 1/2/4 CPUs. The 69-test `libwoven`
+suite, Stage 23.1 freestanding Clippy, host all-targets Clippy, broker app
+Clippy, Python validation, and all Stage 21 feature lints pass. Evidence is
+preserved under:
+`audit-artifacts/stage23.1-1cpu-1792522717245706600`,
+`audit-artifacts/stage23.1-2cpu-1792522745744098400`, and
+`audit-artifacts/stage23.1-4cpu-1792522775899902400`.
+
+This is only the controlled broker boundary. Local model execution, provider
+plugins, cloud credentials, semantic search, assistant actions, and AI
+security-monitor policy remain later roadmap stages. The broker has no
+implicit file, camera, microphone, network, secret, application, or device
+authority; no physical USB qualification was performed.
+
+## Stage 22.5 userspace WovenPackage transaction authority (2026-10-20)
+
+The signed Ring-3 `apps/woven-package` broker now executes install, remove,
+and rollback requests through syscall 217. The syscall validates the operation
+and bounded source path, requires `FileRead`, `FileWrite`, and `StorageIo`,
+and issues the private native WovenFS writer only after those checks. Package
+bytes stay out of IPC frames: install resolves a broker-owned VFS source,
+verifies the WPKG envelope, and commits the existing authenticated,
+journaled/chunked package publication path. Remove and rollback use the same
+durable catalog and recovery records.
+
+The focused gate in `scripts/test-stage22-5-package-transactions.py` formats a
+disposable ATA/WovenFS volume, installs a signed fixture, verifies the durable
+catalog, removes it, rolls back, and verifies restoration. It passed with exit
+33 and `[S22.5] WovenPackage transactions: PASSED` on 1, 2, and 4 CPUs. The
+freestanding Stage 22.5 Clippy gate, host all-targets Clippy, 66-test
+`libwoven` suite, app build/signing, and Python syntax validation also pass.
+Evidence is preserved under:
+`audit-artifacts/stage22.5-1cpu-1792521732550569700`,
+`audit-artifacts/stage22.5-2cpu-1792521764182836500`, and
+`audit-artifacts/stage22.5-4cpu-1792521793861888600`.
+
+The implementation remains deliberately bounded: source paths use the normal
+512-byte syscall limit, one source package is limited by the 64 KiB VFS node
+capacity, catalogs use the fixed WovenStore record ceiling, and payloads are
+published in native WovenFS chunks. Larger ingress, key rotation, update-daemon
+ownership, power-loss timing, and physical USB qualification remain open
+follow-up work; this acceptance does not claim whole-OS release readiness.
+
+## Stage 22.4 production WovenPackage startup (2026-10-20)
+
+The production `system-apps` build now includes the signed Ring-3
+`apps/woven-package` image through `WOVENHAT_PACKAGE_IMAGE`. Boot starts the
+service after the signed ten-application catalog is installed and requires a
+bounded `woven.package` publication owned by the spawned PID before continuing.
+The production shell/PS2/IOAPIC QMP gate passed on 1/2/4 CPUs, with separate
+preserved logs under `target/shell-regression-{1,2,4}cpu`.
+
+This closes production startup and image packaging for the broker. Stage 22.5
+now supplies the bounded userspace transaction authority described above.
+Physical USB qualification remains open.
+
+## Stage 22.3 Ring-3 WovenPackage broker boundary (2026-10-20)
+
+The new `apps/woven-package` signed Ring-3 service publishes the bounded
+`woven.package` endpoint, receives a real `WPKI` query request through service
+discovery, consults the capability-gated userspace directory authority, and
+sends a correlated `WPKI` response to the sender mailbox. Its
+buffers are static bounded storage rather than stack allocations, and process
+reaping removes the published service. The dedicated Stage 22.3 fixture passed
+on 1/2/4 CPUs. App Clippy, host/freestanding warning-denying Clippy, the
+66-test `libwoven` suite, and diff checks passed.
+
+This closes the real broker transport/lifecycle boundary, but not the full
+package manager: query now proves bounded storage-backed existence checks, while
+install,
+remove, and rollback return an explicit storage-authority status until a
+userspace storage service/API is implemented. The broker is accepted as a
+service fixture, not yet started by every production system-app boot. Physical
+USB qualification remains open.
+
+## WovenPackage IPC protocol foundation (2026-10-20)
+
+`libwoven::package_ipc` defines a bounded version-1 `WPKI` control protocol
+for install, remove, rollback, and query requests plus fixed-size responses.
+It validates operation/version/length fields and rejects traversal segments,
+invalid path bytes, and oversized frames. Package bytes are intentionally not
+copied into IPC messages; the future broker resolves authenticated storage
+objects through its own service authority. The 66-test `libwoven` suite,
+warning-denying host Clippy, and diff checks pass.
+
+This is a protocol foundation, not a completed service. A Ring-3 broker and
+client, service startup/ownership wiring, a QEMU userspace exercise, and
+physical USB qualification remain required.
+
+## Stage 22.2 handle-addressed IPC transport (2026-10-20)
+
+Discovered service capabilities are now usable by Ring-3 callers. Syscall 215
+copies a bounded message and sends it to a caller-owned endpoint handle; syscall
+216 receives from a handle into a validated userspace buffer, prefixing the
+sender process ID so a broker can route a response through the existing
+capability-gated process mailbox. Both require
+`Capability::Ipc`, preserve the nonblocking queue contract, and fail closed on
+invalid handles, oversized messages, missing rights, or copy faults.
+`libwoven` exposes typed send/receive wrappers. The Stage 22.2 QEMU gate passed
+on 1/2/4 CPUs; host tests and warning-denying host/freestanding Clippy passed.
+
+This closes the basic userspace transport needed by service clients. It does
+not yet define or implement the WovenPackage request protocol, a long-lived
+Ring-3 package broker, blocking service-call convenience APIs, or physical USB
+qualification.
+
+## Stage 22.1 userspace service IPC ABI (2026-10-20)
+
+The IPC service registry now has a userspace ABI: syscall 211 creates an
+owner-bound endpoint, while syscalls 212–214 publish, unpublish, and discover
+bounded service names. Each operation requires `Capability::Ipc`; service names
+are copied from userspace before registry access, handles are returned as
+process-local values, and the existing registry enforces owner teardown,
+rights, namespace isolation, and endpoint lifetime. `libwoven` exposes typed
+wrappers for all four operations.
+
+Host `libwoven` tests (63), warning-denying host/freestanding Clippy, and the
+dedicated QEMU gate passed on 1/2/4 CPUs. The first attempt is preserved as
+`audit-artifacts/stage21.22-1cpu-1792516996924333800`; it failed before the
+new marker because the feature did not inherit the required WovenFS gate, so
+the feature graph and inherited self-test guards were corrected before the
+accepted rerun. Accepted evidence is recorded in
+`docs/audit-stage22-1-userspace-service-ipc-2026-10-20.md`.
+
+This increment proves the kernel registry and syscall/library ABI boundary;
+it does not yet claim a long-lived Ring-3 WovenPackage broker/client,
+service-specific protocols, or physical USB qualification.
+
+## Stage 11 shared-library TLS implementation (2026-10-20)
+
+The loader now plans a bounded combined TLS block across the main image and
+shared libraries, copies immutable PT_TLS initializers into a read-only
+template, creates a fresh mutable TLS/TCB per process, and resolves the
+toolchain's shared-object TLS relocation. Standard Stage 11.5 acceptance
+passes on 1/2/4 CPUs; host tests and warning-denying Clippy pass.
+
+The compiler-fixture acceptance now passes on 1/2/4 CPUs, including the exact
+signed Rust/LLD shared PIE, shared-library PT_TLS relocation, per-process
+template initialization, nonzero-bias load, and owner teardown. The fix uses
+the ELF `STT_TLS` symbol type with a non-undefined section index; the kernel
+task stack reservation is 256 KiB. See the audit file above for evidence.
+
+## Stage 11 lazy PLT binding (2026-10-20)
+
+Writable PLT `JUMP_SLOT` entries now start with loader-generated RX resolver
+stubs instead of eagerly resolved targets. The first Ring-3 call supplies the
+GOT slot through the stub; the kernel validates it, breaks COW when required,
+and patches the private slot before jumping to the target. RELRO slots remain
+eager and over-capacity bindings fail closed.
+
+Validation: 33 ELF tests, warning-denying host/freestanding Clippy, 11 Python
+harness tests, and Stage 11.5 QEMU acceptance passed on 1/2/4 CPUs. The signed
+fixture verifies an unresolved writable PLT slot before execution and a
+successful first-call resolution/teardown afterward. Evidence:
+`audit-artifacts/stage11.5-1cpu-1792508068498107100`,
+`stage11.5-2cpu-1792508101002664400` and
+`stage11.5-4cpu-1792508116869852100`.
+
+The process carries eight bounded lazy bindings; the subsequent shared-library
+TLS correction is accepted in the Stage 11 audit above.
+
+## Stage 11 lifecycle callbacks (2026-10-20)
+
+The bounded ELF loader now validates `DT_INIT`, `DT_FINI`, `DT_INIT_ARRAY`
+and `DT_FINI_ARRAY` metadata as executable callbacks, including byte-size
+alignment and a per-image callback bound. Constructors run in dependency order
+before Ring-3 entry; destructors run in reverse dependency order through a
+loader-owned RX exit trampoline. The callback return chain is prebuilt in a
+reserved user-stack region, and exit teardown snapshots address-space state
+before paging work, then rechecks ownership under the process-table lock.
+
+Validation: 33 ELF tests, Stage 11.5 QEMU acceptance passed on 1/2/4 CPUs with
+constructor scheduling, Ring-3 constructor/destructor execution, teardown,
+and all prior loader-hardening markers. Evidence:
+`audit-artifacts/stage11.5-1cpu-1792507060371452000`,
+`stage11.5-2cpu-1792507334555453100` and
+`stage11.5-4cpu-1792507351184297200`.
+
+Lazy binding and library TLS remain prerequisites before full Stage 11 closure.
+
+## Stage 11 versioned symbol tables (2026-10-20)
+
+The bounded ELF loader now accepts SysV `DT_VERSYM`, `DT_VERDEF` and
+`DT_VERNEED` metadata. File-backed version records, auxiliary links, version
+indices and names are validated before use; definitions and imports resolve
+only when their requested version matches. Relocated images shift dynamic
+metadata addresses consistently, and malformed or truncated records fail
+closed.
+
+Validation: 31 ELF tests, workspace tests, kernel check, warning-denying
+freestanding and host Clippy, and Stage 11.5 QEMU acceptance passed on 1/2/4
+CPUs. The signed runtime fixture resolves a versioned cross-image import,
+executes it in Ring 3, and verifies teardown. Evidence:
+`audit-artifacts/stage11.5-1cpu-1792505125207763300`,
+`stage11.5-2cpu-1792505299339871100` and
+`stage11.5-4cpu-1792505368683688700`.
+
+Constructors/destructors, lazy binding and library TLS remain open.
+
+## Stage 11 weak symbol binding support (2026-10-20)
+
+The bounded symbol scope now accepts `STB_WEAK` definitions as fallbacks
+behind strong definitions. Default-visible weak definitions participate in
+normal interposition, while undefined weak imports resolve to zero when no
+definition exists. Relocation resolution preserves the existing visibility,
+symbol-bounds, W^X and transactional teardown rules; version-table metadata
+continues to fail closed.
+
+Validation: 30 ELF tests, kernel check, warning-denying freestanding and host
+Clippy, and Stage 11.5 QEMU acceptance passed on 1/2/4 CPUs. The signed
+runtime fixture resolves a weak cross-image import, executes it in Ring 3,
+and verifies teardown. Evidence:
+`audit-artifacts/stage11.5-1cpu-1792504013870714100`,
+`stage11.5-2cpu-1792504112883675500` and
+`stage11.5-4cpu-1792504158087902300`.
+
+Constructors/destructors, lazy binding and library TLS remain open.
+
+## Stage 11 eager PLT DT_REL relocation support (2026-10-20)
+
+The graph loader now accepts legacy `DT_JMPREL` tables encoded as `DT_REL`.
+`DT_PLTRELSZ`, `DT_PLTREL == DT_REL` and the fixed 16-byte entry format are
+validated as bounded file-backed metadata; each target must be writable and
+non-executable. Addends are read from the mapped target and applied using the
+same checked relocation and symbol-scope rules as ordinary DT_REL.
+
+Validation: 28 ELF tests, kernel check, warning-denying freestanding and host
+Clippy, and Stage 11.5 QEMU acceptance passed on 1/2/4 CPUs with dedicated
+relocation, Ring-3 execution and teardown markers. Evidence:
+`audit-artifacts/stage11.5-1cpu-1792503297814943600`,
+`stage11.5-2cpu-1792503342880325200` and
+`stage11.5-4cpu-1792503373152819300`.
+
+Versioned symbol tables, constructors/destructors, lazy binding and library
+TLS remain open.
+
+## Stage 11 bounded DT_REL loader support (2026-10-20)
+
+The ELF loader now validates and applies ordinary `DT_REL` tables with
+`DT_RELSZ` and `DT_RELENT == 16`. REL addends are read only from the mapped
+private relocation target, interpreted as signed 64-bit values, and applied
+under the same relocation-type, symbol, bounds and writable/non-executable
+checks as RELA. Malformed tables and read-only targets fail closed.
+
+Validation: 27 ELF tests, kernel check, warning-denying freestanding and host
+Clippy, and Stage 11.5 QEMU acceptance on 1/2/4 CPUs passed. The acceptance
+harness now includes a signed DT_REL executable that relocates, executes its
+cross-image import in Ring 3, and tears down cleanly. Evidence:
+`audit-artifacts/stage11.5-1cpu-1792502825772958300`,
+`stage11.5-2cpu-1792502960229582900` and
+`stage11.5-4cpu-1792502998392183900`.
+Symbol versioning/weak binding, constructors/destructors, lazy binding and
+library TLS remain open.
+
+## Stage 11 eager PLT RELA relocation support (2026-10-20)
+
+The ELF parser and production graph loader now support bounded `DT_JMPREL`
+metadata encoded as `DT_RELA`. The loader validates the file-backed table,
+entry size, relocation types, symbol indices and writable non-executable
+targets, then applies PLT RELA entries eagerly before W^X and RELRO. Lazy
+binding, legacy `DT_REL`, versioned/weak symbols, constructors/destructors and
+library TLS remain explicitly outside this increment.
+
+Validation: 25 ELF tests, warning-denying freestanding Stage 11.5 Clippy,
+warning-denying host Clippy, and Stage 11.5 QEMU acceptance on 1/2/4 CPUs all
+passed with exit 33. Legacy PLT REL is accepted in the follow-up above. This
+is a bounded Stage 11 increment; the full inherited release chain and
+remaining loader interoperability work are still required.
+
+## Stage 11 ASLR arena/guard overlap corrected (2026-10-20)
+
+The production userspace loader now plans the complete mmap arena, optional
+static-TLS reservation, stack guard and user stack as disjoint checked ranges.
+Previously, the highest mmap slot could contain the guard for a low forced
+stack draw; the Stage `11.2-aslr` fixture reproduced this by writing the guard
+and exiting 99 instead of faulting. The planner now raises the requested stack
+base above the arena and TLS reservation, preserving the requested draw as a
+lower bound and rejecting layouts that exceed the library window.
+
+Validation: kernel check, warning-denying freestanding Stage 11 ASLR Clippy,
+warning-denying host Clippy and the dedicated Stage `11.2-aslr` QEMU gate all
+passed on 1/2/4 CPUs (exit 33). This is an accepted bounded increment, not
+full Stage 11 or production readiness; broader loader interoperability,
+release-chain preservation and physical qualification remain open.
+
+## Diagnostic shell no longer overwrites a slow-starting WovenShell session; waits and reports instead (2026-10-20)
+
+The previous fix (below) made `session::start()`'s outcome visible on
+screen, but the user re-flashed and re-tested and reported no change at all:
+still straight to the plain `WOVENHAT DIAGNOSTIC SHELL (F1 TO OPEN DESKTOP)`
+banner, with no `SESSION:` line, and F1 still only reaches the kernel's own
+`ACTIVATE`/`SECOND` placeholder window -- never WovenShell's real sign-in
+desktop, even though the new `SESSION:` line was confirmed present in the
+exact image flashed (byte-searched the `.img` for the literal string).
+
+Root cause: `session::start()` only reports whether the process was
+*spawned*; it says nothing about whether that process ever reaches
+`compositor::activate_display()`, which is a syscall WovenShell itself
+issues once its own init runs far enough. The former code treated `Ok(pid)`
+as the end of the story and immediately fell through to building and
+showing the diagnostic shell unconditionally (`kernel/src/main.rs`, the
+`console.clear()` + banner that follows). Whenever `with_text_framebuffer`
+sees `terminal::display_owned == true` it already turns every console draw
+into a no-op (`kernel/src/terminal.rs:372-387`), so if WovenShell had won
+that race the diagnostic banner would have silently failed to draw and the
+user would have seen WovenShell's own frame instead. The user reported
+seeing the diagnostic banner text itself, which proves the opposite: on
+this real machine, WovenShell had *not* taken the display by the time that
+code ran, i.e. it is failing or hanging early, well before sign-in, in a way
+that produces no serial output and (confirmed by a still-empty `WOVENLOG`
+after this boot) nothing on the stick either.
+
+Fixed in `kernel/src/main.rs` and `kernel/src/task.rs`:
+
+- Added `task::process_alive(id: u64)` (cfg-gated to `feature = "system-apps"`,
+  its only caller): whether a process named by its raw id is in the process
+  table and has not exited, for a caller on the far side of the
+  `ProcessId`-erasing boundary `session::start`'s `Result<u64, Error>`
+  return already has.
+- After `session::start` returns `Ok(pid)`, the boot thread now waits up to
+  ~5s (500 ticks, the same bounded `timer::ticks()` + `task::yield_now()`
+  busy-wait pattern the stage self-tests' local `until` helpers already use
+  elsewhere in this file -- no new assumption that this thread can sleep,
+  only that it can yield) for `session::active()` to confirm the display was
+  actually taken, or for `task::process_alive(pid)` to go false (the process
+  died trying). The result is three-way, not two: **ready** (desktop up),
+  **exited** (crashed/exited before showing anything), or **still running,
+  not shown yet** (hung or just slow) -- each with its own `SESSION:` status
+  line.
+- The diagnostic shell's placeholder `ACTIVATE`/`SECOND` desktop, its banner,
+  and its `console.clear()` are now only shown when `!session_ready`. A real
+  user who gets as far as a working WovenShell desktop is never shown a
+  developer test window; F12 still reaches the kernel's diagnostic console
+  either way, since that path (`woven_input::publish` →
+  `session::toggle_console()`) runs ahead of and independent of this loop.
+
+This does not yet explain *why* WovenShell fails or hangs before sign-in on
+this specific machine -- only the fallback's silence, which it no longer is.
+The next real boot will say, on screen, one of: started as pid N; pid N
+exited before the desktop appeared; or pid N has not shown the desktop yet
+(still running) -- which narrows the real bug to "crashes" vs. "hangs" vs.
+"never gets input/display resources it needs," each a different next step.
+
+Validation: `cargo clippy -p wovenhat-kernel --target x86_64-unknown-none`
+(default features), `--features hardware-demo` (with the packaged
+system-app images wired up the way `scripts/test-shell-qemu.py
+--hardware-demo` does), and host `cargo clippy --all-targets -- -D
+warnings` all passed. `python scripts/lint-all-features.py` passed for
+every feature touching `session`/`task` (several others report
+`needs-image`, which is a pre-existing gap in supplying their embedded-app
+env vars, not a compile failure); the one genuine `FAIL` it found
+(`physical-wifi`, missing `WOVENHAT_AX201_FIRMWARE`) is pre-existing and
+unrelated -- that feature touches none of the lines changed here.
+`scripts/test-shell-qemu.py --hardware-demo` passed on QEMU 1/2/4 CPUs,
+`Hardware demo: sign-in + 10 applications + desktop + PS/2 IOAPIC +
+smptest: PASS` on each, with the serial log showing no
+`has not taken the display`/`exited before` lines -- confirming
+`session_ready` still flips true quickly under QEMU and the gate's behavior
+is unchanged there. A fresh image (SHA-256
+`6d887f0f0b94ebf213ad3f02d4b3a50378445ba24f28df677711504e91bcdd59`) is
+queued to write to the user's confirmed stick (serial `2007072809430484`,
+Win32_DiskDrive size 518192640) via `scripts/write-live-usb.ps1`. Not yet
+re-tested on the reporting user's physical machine.
+
+## WovenShell session status now shown on the diagnostic-shell screen (2026-10-20)
+
+The user re-tested the MAX_CPUS/IOAPIC fix below on real hardware: the boot
+no longer stalls, but the desktop never came up -- the screen showed
+`WOVENHAT DIAGNOSTIC SHELL (F1 TO OPEN DESKTOP)`, and F1 opened only the
+kernel's own placeholder demo window (`ACTIVATE`/`SECOND` buttons,
+`kernel/src/main.rs` around line 1700), never WovenShell's real sign-in
+desktop. Pulling the stick's `WOVENLOG` after that boot found no
+`LOGS\BOOTnnnn.TXT` at all -- `livelog::start_deferred()` never wrote
+anything on this boot either, so there was zero on-disk evidence and, with
+no serial cable, zero other evidence of why.
+
+The code already distinguishes `session::start()`'s `Ok`/`Err` outcome, but
+only logs it to serial (`kernel/src/main.rs:1664-1676`): on screen, the
+`BOOT LOADER [6/7]/[7/7]` progress lines it prints are wiped a moment later
+by the unconditional `console.clear()` that starts the diagnostic-shell
+fallback (`kernel/src/main.rs:1716`), so a failed session and a session
+quietly running behind the compositor looked identical on a real screen.
+
+Fixed in `kernel/src/main.rs`: the session outcome is now also kept in a
+`session_status` string (`"SESSION: started as pid N ..."` or `"SESSION: NOT
+STARTED (Image|Spawn)"`) and printed again, persistently, right after the
+`WOVENHAT DIAGNOSTIC SHELL` banner -- it is no longer wiped, so the next
+real-hardware boot will say on screen whether WovenShell actually started,
+and why not if it didn't. This does not yet explain *why* `session::start`
+might fail or why `livelog` wrote nothing on that boot; it only makes the
+first one visible without a serial cable, which is the prerequisite for
+diagnosing either from the screen alone.
+
+Validation: `cargo clippy -p wovenhat-kernel --target x86_64-unknown-none
+--features hardware-demo -- -D warnings` (with the packaged system-app
+images wired up the way `scripts/test-shell-qemu.py --hardware-demo` does)
+passed; host `cargo clippy --all-targets -- -D warnings` passed;
+`scripts/test-shell-qemu.py --hardware-demo` passed on QEMU 1/2/4 CPUs,
+`Hardware demo: sign-in + 10 applications + desktop + PS/2 IOAPIC + smptest:
+PASS` on each, with no change to the serial markers the gate checks (the new
+line is screen-only). A fresh image (SHA-256
+`59d7d5f223bc7cbc2171ff5d0cb92fab5768757f65ab9d511840308f239734ff`) is
+queued to write to the user's confirmed stick (serial `2007072809430484`,
+Win32_DiskDrive size 518192640) via `scripts/write-live-usb.ps1`, which
+needs an elevated shell this session does not have. Not yet re-tested on
+the reporting user's physical machine.
+
+## Boot-stall real root cause: MAX_CPUS=4 rejected real topologies; IOAPIC-count relaxed; panics now shown on screen (2026-10-20)
+
+The user re-tested the stick with the PIT/AP-timeout fix below flashed and
+reported the identical stall at "BOOT: starting CPU and interrupt setup".
+Pulling the `WOVENLOG` log from the stick showed no `LOGS\BOOTnnnn.TXT` at
+all, confirming the failure happens before `livelog::start_deferred()` is
+ever reached -- i.e. still inside or immediately around `smp::start()`,
+consistent with but not explained by the earlier fix.
+
+Found two further hardware-topology asserts in `smp::start()`, both fatal,
+silent (serial-only) panics hit before any AP, PS/2, or livelog setup:
+
+- `assert!(!topology.truncated && topology.processor_count <= MAX_CPUS, ...)`.
+  `MAX_CPUS` is a compile-time constant fixed at 4. Any real machine with
+  more than 4 logical processors -- the overwhelming majority of modern
+  laptops and desktops, since even a plain hyperthreaded quad-core reports
+  8 -- hit this immediately, before the PIT-timing or AP-SIPI code this
+  session's earlier fix touched was ever reached. None of the QEMU gates
+  catch this because they only ever run at exactly 1, 2, or 4 CPUs.
+- `assert_eq!(topology.io_apics, 1, "one IOAPIC required")`. Some real
+  boards report more than one IOAPIC in their ACPI MADT (for example one
+  behind a PCIe root complex); `hal::acpi::update_madt_summary` already
+  only ever records the first IOAPIC's address/GSI base regardless of how
+  many exist, so the extra ones were never going to be used anyway.
+
+Fixed in `kernel/src/smp.rs`: a topology reporting more processors than
+`MAX_CPUS` now boots with the first `MAX_CPUS` (the BSP plus whichever APs
+the bring-up loop finds first, which now stops once every slot is filled
+instead of indexing past the end of the per-CPU arrays) and logs the rest,
+instead of refusing to boot. The IOAPIC check now accepts `>= 1` instead of
+requiring exactly `1`.
+
+Also added, since this class of bug is otherwise undiagnosable on hardware
+with no serial cable attached: `kernel::terminal::panic_screen`, called from
+`kernel_panic` alongside the existing serial report, draws the panic message
+directly on the framebuffer without ever taking `TERMINAL`'s lock (a panic
+must not try to take a lock it might already hold). `console::draw_char` and
+`console::fill` are now `pub(crate)` so `terminal.rs` can reuse them. A
+one-time, lock-free snapshot of the raw framebuffer pointer/geometry is
+taken in `terminal::init` (single-threaded, pre-SMP) for this purpose.
+
+Validation: kernel target check and `cargo clippy -p wovenhat-kernel
+--target x86_64-unknown-none` passed; host `cargo clippy --all-targets --
+-D warnings` passed; `scripts/test-shell-qemu.py --hardware-demo` passed on
+QEMU 1/2/4 CPUs with `online=4 expected=4` and no new warning lines (QEMU is
+configured at exactly 4 CPUs and one IOAPIC, so neither new code path
+triggers there -- no behavior change under QEMU). A fresh hardware-demo
+image (SHA-256 `f8bd474e3658d8a81b38d6e02c8ddff2d9270fb541d377638f360574d4e595ae`)
+was written to the user-confirmed USB `USB2.0 Flash Disk USB Device`
+(serial `2007072809430484`) and read back byte-for-byte matching; the 488
+MiB `WOVENLOG` partition was recreated. Not yet re-tested on the reporting
+user's physical machine -- that is the next step, and this time, if it
+still fails, either the stick's `WOVENLOG` log or the screen itself (now
+that panics are shown there) should actually say why.
+
+## Boot-stall follow-up: cached PIT-unavailable result, non-fatal AP timeout (2026-10-20)
+
+The user reported that, even after the "Boot stall hardening" flash below, a
+real machine still appeared to hang (very slowly, not instantly) at "BOOT:
+starting CPU and interrupt setup". Root cause: the bounded port-0x80 fallback
+in `smp::delay_10ms` only bounded a *single* call to ~5 s before falling
+back -- it re-ran that whole ~5 s "is the PIT there" probe on *every* call,
+and AP bring-up calls it up to roughly a dozen times on `MAX_CPUS` hardware.
+On firmware where the PIT channel-2/speaker gate never responds, that is
+tens of seconds of a static screen with no progress indicator, which reads
+as a hang even though it was technically bounded.
+
+Fix in `kernel/src/smp.rs`: a `PIT_UNAVAILABLE` flag now caches the result
+after the first probe, so only that first `delay_10ms` call pays the ~5 s
+cost; every later call during AP bring-up goes straight to the fast
+port-0x80 fallback. Also hardened: an AP that never responds to SIPI no
+longer hits `assert!(..., "AP startup timeout")`, which is a fatal panic
+visible only on the (unconnected, on real hardware) serial port -- the
+on-screen console never shows panics, so this previously looked exactly
+like a permanent silent hang with zero way to diagnose it, and it happens
+before `livelog::start_deferred()` has even queued, so it would not reach
+the stick's `WOVENLOG` either. Boot now continues with whichever CPUs did
+come online (the BSP is always present) and logs the skipped APIC ID to
+serial instead.
+
+Validation: kernel target check and `cargo clippy -p wovenhat-kernel
+--target x86_64-unknown-none` (default features) passed; host `cargo clippy
+--all-targets -- -D warnings` passed; `scripts/test-shell-qemu.py
+--hardware-demo` passed on QEMU 1/2/4 CPUs with `online=4 expected=4` and no
+AP-timeout or PIT-fallback lines in the serial log (QEMU's PIT works, so
+neither new code path triggers there -- this is a no-op on the existing
+QEMU gates and only changes behavior on real hardware where the PIT/speaker
+gate or an AP is actually unavailable). Not yet re-validated on the
+reporting user's physical hardware; that is the next step.
+
+## Boot-stall fix flashed (2026-10-20)
+
+The rebuilt 13,697,024-byte hardware-demo image was written to the confirmed
+USB target `USB2.0 Flash Disk USB Device`, serial `2007072809430484`, and read
+back with matching SHA-256
+`ac9f8058a0fdc8f64ea6f3547f1f4dbce4e963e75b1a457b22d0591f9151bfc3`. The
+remaining 488 MiB FAT32 `WOVENLOG` partition was recreated. Evidence is in
+`audit-artifacts/hardware-demo-usb-write-20261020-boot-stall-fix.txt`.
+
+## Boot stall hardening (2026-10-20)
+
+Normal boot now shows sub-progress after the graphics marker while it brings
+up CPUs, probes PS/2, enables interrupts, and starts service workers. The SMP
+PIT channel-2 settle delay has a bounded port-0x80 fallback for firmware where
+the speaker gate does not signal after UEFI handoff. This prevents repeated
+SIPI delays from appearing as a multi-minute freeze on physical hardware.
+
+Validation: target kernel check passed; host `cargo clippy --all-targets --
+-D warnings` passed; and the hardware-demo shell gate passed on QEMU 1/2/4
+CPUs. The direct hardware-demo feature Clippy invocation cannot run without
+the generated packaged-app environment variables, so the packaged acceptance
+launcher supplied those inputs for the authoritative build.
+
+## Hardware-demo USB refreshed (2026-10-20)
+
+The user-confirmed USB `USB2.0 Flash Disk USB Device` (serial
+`2007072809430484`) now contains the updated hardware-demo image with visible
+boot-loader progress. The guarded writer verified the exact physical device,
+read back all 13,697,024 image bytes with matching SHA-256, and recreated the
+remaining 488 MiB FAT32 `WOVENLOG` partition. Evidence is preserved in
+`audit-artifacts/hardware-demo-usb-write-20261020-loader.txt`.
+
+## Boot loader progress feedback (2026-10-20)
+
+Normal interactive boots now print visible `BOOT LOADER [n/7]` progress on the
+framebuffer after heap setup. The markers cover graphics-surface creation,
+scheduler/I/O startup, storage probing, system-file installation, device
+startup, WovenShell launch, and desktop readiness. This makes the compositor
+allocation gap observable instead of leaving the framebuffer unchanged while
+the normal boot path continues. The change does not alter the diagnostic or
+QEMU self-test sequence.
+
+## Heap-crash root cause fixed: fallible compositor surface allocation
+## (2026-10-20)
+
+The `KERNEL ALLOC ERROR: layout size=4096000 align=4` crash found during
+live interactive desktop testing (see the 2026-10-19 entry below) is
+root-caused and fixed. `compositor::rescale_to` -- run on every display-
+scale change -- and four `user_graphics.rs` surface-copy helpers run on
+every blit (`snapshot`, `snapshot_region`, `snapshot_shared`,
+`take_damage_shared`) used the panicking `Surface::new` instead of the
+fallible `Surface::try_new`, which exists in the same module for exactly
+this reason (`user_graphics.rs`'s own `create` syscall path already used
+it correctly). At display scale 1 on a 1280x800 framebuffer, the scale-
+change surface is exactly 4,096,000 bytes, matching the crash signature.
+On allocation failure these paths now return a new `Error::OutOfMemory`
+variant (both `compositor::Error` and `user_graphics::Error`) instead of
+invoking the kernel's global `alloc_error_handler`.
+
+**Evidence.** `scripts/test-hello-gui-compositor-qemu.py --stage 19.14`
+(display scaling, repeatedly rescales) and `--stage 19.11` (window
+stacking, exercises the snapshot helpers) pass on 1/2/4 CPUs.
+`scripts/test-shell-qemu.py --hardware-demo` passes on 1/2/4 CPUs. Kernel
+`hardware-demo`-feature Clippy and workspace `--all-targets` Clippy are
+clean.
+
+**Not fixed, and not this bug:** `--stage 19.9` (damage compositing) fails
+with `[S19.9] damage rules FAIL`, reproducible at HEAD without this fix
+applied (isolated via `git stash` on just the `user_graphics.rs` side of
+the change). Logged in `docs/agent-coordination.md` as a separate,
+pre-existing regression for whoever has been in the recent
+damage/compositing commits to pick up.
+
+## Session track - persistent account import implemented (2026-10-20)
+
+Hardware-demo boot now checks the mounted FAT32 volume for
+`/mnt/etc/wovenhat/accounts`. A bounded, syntax-checked salted-hash file is
+copied read-only into `/etc/wovenhat/accounts` before WovenShell starts, so a
+release image can carry its login accounts on persistent storage. Missing
+accounts retain the disposable QEMU demo fallback (`ada/1234`, `lin/9876`),
+while an invalid or oversized persistent file fails closed. The existing
+Stage 20.12 sign-in acceptance passed on QEMU 1/2/4 CPUs after this change.
+
+This slice does not add account creation, password change, credential
+rotation, or a secure password KDF; those remain release-hardening work.
+
+An isolated FAT32 fixture was also booted interactively in QEMU with
+`/mnt/etc/wovenhat/accounts`. The serial log reported the persistent import,
+skipped demo-account installation, and started WovenShell; the shared
+`wovenhat-disk.img` was not modified. The fixture generator is
+`scripts/create-account-fixture.py` and provisions the test account
+`persistent`/`2468`.
+
+## Session track - production app launch revalidated after SMP fix (2026-10-20)
+
+The production packaged WovenCalculator path was rerun after the bounded
+lock-screen repaint change. The hardware-demo boot signed in through the
+launcher, opened the Calculator window, presented a changed desktop frame,
+and exercised its bounded control successfully on QEMU 1/2/4 CPUs. Existing
+per-client 1/2/4-CPU acceptance remains authoritative for the other nine
+packaged clients; no client code changed in this fix.
+
+## Graphics/session track - SMP sign-in repaint fix accepted (2026-10-20)
+
+The WovenShell lock/sign-in path now limits key-driven repaint damage to the
+account/PIN regions instead of redrawing the full 1280x800 wallpaper for every
+key. This removes the multicore timing failure in the Stage 20.12 visual
+assertion: sign-in, wrong-PIN refusal, successful account selection, lock,
+unlock, and terminal return now pass on QEMU 1/2/4 CPUs. Stage 20.15 also
+passes on 1/2/4 CPUs for session focus, launcher visibility, F12 console
+handoff, return to the desktop, Quick Settings, and guest power-off.
+
+The current interactive `hardware-demo` boot still provisions `ada/1234` and
+`lin/9876` into volatile VFS state. Persistent release account installation
+remains the next session slice.
+
+## Graphics track - WovenGraphics compositor frame revalidated (2026-10-19)
+
+The authoritative Stage 19.2 compositor acceptance passed on QEMU 1/2/4
+CPUs. Each run verified the WovenGraphics visual frame, the 2D frame, and the
+software 3D frame after presentation through the compositor, plus retained
+window, zero exit status, and owner teardown checks. This closes the software
+renderer/compositor visual slice; GPU-accelerated scanout remains the
+explicitly documented device-dependent boundary.
+
+## Graphics track - standard virtio-gpu 2D scanout revalidated (2026-10-19)
+
+The software/2D presentation fallback is freshly accepted on QEMU 1/2/4-CPU
+runs. Both 640x400 heads were captured through QMP and verified pixel for
+pixel against the gradient/checkerboard contract. This is the authoritative
+visible graphics path for the current release. It does not imply that the
+separate GL/VirGL device can scan out a 2D or 3D resource; that boundary is
+documented below with its preserved `Device(4611)` (`0x1203`) evidence.
+
+## Graphics track - VirGL 2D-on-GL scanout boundary (2026-10-19)
+
+The VirGL capability/context/resource/command lifecycle still passes on QEMU
+1/2/4-CPU runs. A follow-on probe now attempts the conventional 2D resource
+and presents the known gradient on the GL-capable device. QEMU rejects that
+`SET_SCANOUT` operation with `Device(4611)` (`0x1203`), so this is preserved as
+boundary evidence rather than a visible GPU-backed-frame acceptance. The probe
+is capability-gated and does not invalidate the ordinary VirGL lifecycle gate.
+Software/2D virtio-gpu presentation remains the accepted fallback; physical
+GPU and USB HID qualification remain separate hardware-dependent gates.
+
+## Graphics track - functional controls complete; GPU boundary revalidated (2026-10-19)
+
+All ten packaged desktop clients now have an accepted bounded functional
+pointer control over the PS/2-to-WovenShell-to-client path. Calculator,
+Settings, Files, Terminal, Monitor, Security, Editor, Images, Update, and
+Store each passed their production QEMU control gate on 1/2/4 CPUs, with
+serial activation markers and presented-frame deltas preserved in the client
+audit directories below.
+
+The authoritative VirGL gate was also rerun on 1/2/4 CPUs. Capability,
+context, resource, and command lifecycle passed with evidence under
+`audit-artifacts/stage20.14-{1,2,4}cpu-*`. This still does not prove a visible
+GPU-backed scanout: QEMU's tested 3D/blob presentation path remains rejected,
+so software/2D scanout is the accepted graphics fallback. Physical GPU/HID
+qualification remains a separate hardware-dependent gate.
+
+## Graphics track - WovenUpdate and WovenStore pointer controls accepted (2026-10-19)
+
+WovenUpdate now presents a bounded, read-only `Refresh` control at local
+coordinates x=250..329, y=145..164; a `WPBT` release there re-reads the
+bounded `/updates` preflight summary and increments a visible counter.
+WovenStore presents the same read-only control at x=250..329, y=170..189; a
+release there re-reads the installed catalog and increments its visible
+counter. Both production QEMU gates passed on 1/2/4 CPUs. Evidence is under
+`audit-artifacts/{update,store}-desktop-{1,2,4}cpu-*`.
+
+Together with the earlier accepted slices, all ten packaged desktop clients
+now have a bounded functional pointer control. USB HID qualification and
+hardware GPU presentation remain separate hardware-dependent gates.
+
+## Graphics track - WovenImages pointer control acceptance (2026-10-19)
+
+WovenImages now presents a bounded, read-only `Refresh` control at local
+client coordinates x=250..329, y=170..189. A primary-button release forwarded
+as `WPBT` within that rectangle re-reads the bounded `/mnt` image summary and
+increments a visible refresh counter. The production QEMU gate
+`scripts/test-files-desktop-qemu.py --app images --exercise-client-click`
+passed on 1/2/4 CPUs. Evidence is under
+`audit-artifacts/images-desktop-{1,2,4}cpu-*`.
+
+This accepts an eighth functional client control without enabling image
+decoding or mutation; the remaining clients still have pointer feedback
+rather than accepted functional controls. USB HID qualification and hardware
+GPU presentation remain open.
+
+## Graphics track - WovenEditor pointer control acceptance (2026-10-19)
+
+WovenEditor now presents a bounded, read-only `Refresh` control at local
+client coordinates x=250..329, y=170..189. A primary-button release forwarded
+as `WPBT` within that rectangle re-reads the bounded `/mnt` workspace summary
+and increments a visible refresh counter. The production QEMU gate
+`scripts/test-files-desktop-qemu.py --app editor --exercise-client-click`
+passed on 1/2/4 CPUs. Evidence is under
+`audit-artifacts/editor-desktop-{1,2,4}cpu-*`.
+
+This accepts a seventh functional client control without enabling desktop file
+mutation; the existing CLI write path remains separate. Remaining clients
+still have pointer feedback rather than accepted functional controls; USB HID
+qualification and hardware GPU presentation remain open.
+
+## Graphics track - WovenSecurity pointer control acceptance (2026-10-19)
+
+WovenSecurity now presents a bounded, read-only `Refresh` control at local
+client coordinates x=250..329, y=145..164. A primary-button release forwarded
+as `WPBT` within that rectangle re-reads the bounded audit summary and
+increments a visible refresh counter. The production QEMU gate
+`scripts/test-files-desktop-qemu.py --app security --exercise-client-click`
+passed on 1/2/4 CPUs. Evidence is under
+`audit-artifacts/security-desktop-{1,2,4}cpu-*`.
+
+This accepts a sixth functional client control without changing audit state;
+remaining clients still have pointer feedback rather than accepted functional
+controls. USB HID qualification and hardware GPU presentation remain open.
+
+## Graphics track - WovenMonitor pointer control acceptance (2026-10-19)
+
+WovenMonitor now presents a bounded, read-only `Refresh` control at local
+client coordinates x=250..329, y=170..189. A primary-button release forwarded
+as `WPBT` within that rectangle re-reads the clock/display/storage snapshot
+and increments a visible refresh counter. The production QEMU gate
+`scripts/test-files-desktop-qemu.py --app monitor --exercise-client-click`
+passed on 1/2/4 CPUs. Evidence is under
+`audit-artifacts/monitor-desktop-{1,2,4}cpu-*`.
+
+This accepts a fifth functional client control without adding mutation;
+remaining clients still have pointer feedback rather than accepted functional
+controls. USB HID qualification and hardware GPU presentation remain open.
+
+## Graphics track - WovenTerminal pointer control acceptance (2026-10-19)
+
+WovenTerminal now presents a bounded, preview-only `Clear` control at local
+client coordinates x=250..329, y=170..189. A primary-button release forwarded
+as `WPBT` within that rectangle clears the in-window command preview and
+updates its status text. The production QEMU gate
+`scripts/test-files-desktop-qemu.py --app terminal --exercise-client-click`
+passed on 1/2/4 CPUs. Evidence is under
+`audit-artifacts/terminal-desktop-{1,2,4}cpu-*`.
+
+This accepts a fourth functional client control without changing the separate
+CLI command path or adding privileged behavior. Remaining clients still have
+pointer feedback rather than accepted functional controls; USB HID
+qualification and hardware GPU presentation remain open.
+
+## Graphics track - WovenFiles pointer control acceptance (2026-10-19)
+
+WovenFiles now presents a bounded, read-only `Refresh` control at local client
+coordinates x=220..299, y=206..225. A primary-button release forwarded as
+`WPBT` within that rectangle redraws the bounded `/mnt` listing and increments
+a visible refresh counter. The production QEMU gate
+`scripts/test-files-desktop-qemu.py --app files --exercise-client-click`
+passed on 1/2/4 CPUs. Evidence is under
+`audit-artifacts/files-desktop-{1,2,4}cpu-*`.
+
+This accepts a third functional client control without adding file mutation or
+storage writes. Remaining clients still have pointer feedback rather than
+accepted functional controls; USB HID qualification and hardware GPU
+presentation remain open.
+
+## Graphics track - Settings pointer control acceptance (2026-10-19)
+
+WovenSettings now presents a bounded, non-mutating `Refresh` control at local
+client coordinates x=250..339, y=190..213. A primary-button release forwarded
+as `WPBT` within that rectangle re-reads the live identity/clock/display data
+and increments a visible refresh counter. The production QEMU gate
+`scripts/test-files-desktop-qemu.py --app settings --exercise-client-click`
+passed on 1/2/4 CPUs. Evidence is under
+`audit-artifacts/settings-desktop-{1,2,4}cpu-*`.
+
+This accepts a second functional client control without adding persistence or
+privileged mutation. Other clients still have pointer feedback rather than
+accepted functional controls; USB HID qualification and hardware GPU
+presentation remain open.
+
+## Graphics track - Calculator pointer control acceptance (2026-10-19)
+
+WovenCalculator now presents a bounded `Evaluate` control at local client
+coordinates x=150..209, y=110..127. A primary-button release forwarded as
+`WPBT` within that rectangle evaluates the current bounded expression and
+repaints the result; the button also has a pressed visual state. The
+production QEMU gate
+`scripts/test-files-desktop-qemu.py --app calculator --exercise-client-click`
+passed on 1/2/4 CPUs. Evidence is under
+`audit-artifacts/calculator-desktop-{1,2,4}cpu-*`.
+
+This accepts one functional client control over the PS/2-to-shell-to-client
+path. Other clients still have pointer feedback rather than functional
+controls; USB HID qualification and hardware GPU presentation remain open.
+
+## Graphics track - all packaged client pointer acceptance (2026-10-19)
+
+Settings, Monitor, Security, Editor, Images, Update, and Store now consume
+bounded `WPMV` motion and `WPBT` primary-button messages and draw distinct
+pointer markers. Their production QEMU client-pointer gates all passed on
+1/2/4 CPUs, verifying delivery and a presented-surface pixel delta. Evidence
+is under the corresponding
+`audit-artifacts/{settings,monitor,security,editor,images,update,store}-desktop-*`
+directories.
+
+Together with the earlier Calculator, Terminal, and Files slices, all ten
+packaged desktop clients now accept the pointer protocol. This is pointer
+delivery/visual feedback only; functional controls, USB HID qualification, and
+hardware GPU presentation remain open.
+
+## Graphics track - WovenFiles client pointer acceptance (2026-10-19)
+
+WovenFiles now consumes bounded `WPMV` motion and `WPBT` primary-button
+messages and draws a distinct pointer marker in its shared surface. The
+production QEMU gate
+`scripts/test-files-desktop-qemu.py --app files --exercise-client-pointer`
+passed on 1/2/4 CPUs, verifying delivery and a presented-surface pixel delta.
+Evidence is under `audit-artifacts/files-desktop-{1,2,4}cpu-*`.
+
+Calculator, Terminal, and Files are the accepted client-pointer consumers.
+Files remains a bounded, read-only `/mnt` listing; USB HID qualification and
+hardware GPU presentation remain open.
+
+## Graphics track - Terminal client pointer acceptance (2026-10-19)
+
+WovenTerminal now consumes the bounded `WPMV` motion and `WPBT` primary-button
+messages and draws a distinct pointer marker in its shared surface. The
+production QEMU gate
+`scripts/test-files-desktop-qemu.py --app terminal --exercise-client-pointer`
+passed on 1/2/4 CPUs, verifying delivery and a presented-surface pixel delta.
+Evidence is under `audit-artifacts/terminal-desktop-{1,2,4}cpu-*`.
+
+Calculator and Terminal are the accepted client-pointer consumers. The other
+packaged clients still need pointer widgets/controls; USB HID qualification
+and hardware GPU presentation remain open.
+
+## Graphics track - client pointer forwarding (2026-10-19)
+
+WovenShell now forwards bounded client-local pointer events after handling its
+own desktop chrome. `WPMV` carries a clamped `u16` x/y motion position and
+`WPBT` carries the primary button edge plus clamped client-local coordinates;
+title-bar drags remain shell-owned. WovenCalculator consumes the messages and
+draws a visible pointer marker.
+
+The production QEMU gate
+`scripts/test-files-desktop-qemu.py --app calculator --exercise-client-pointer`
+passed on 1/2/4 CPUs. It verifies the serial delivery marker and a presented
+Calculator surface delta. Evidence is under
+`audit-artifacts/calculator-desktop-{1,2,4}cpu-*`.
+
+Only the PS/2-to-WovenShell-to-Calculator path is accepted here. Other client
+controls, USB HID qualification, and hardware GPU presentation remain open.
+
+## Graphics track - Stage 20.4 window interaction acceptance (2026-10-19)
+
+The existing Stage 20.4 QEMU gate passed on 1/2/4 CPUs. Using real i8042
+input, it verifies that a title-bar drag moves Alpha and repaints both the old
+and new regions, the Wide close control asks its owner to exit and removes the
+window, focus and key routing remain correct, and killing the shell returns the
+display to the terminal. Evidence is under
+`tar\target\woven-shell-windows-{1,2,4}cpu`.
+
+This accepts the production WovenShell window-manager move/close path. Client
+pointer forwarding is covered for Calculator by the newer slice above; USB
+HID qualification, hardware GPU presentation, and direct QMP drag automation
+for WovenFiles remain separate.
+
+## Graphics track - desktop pointer visual acceptance (2026-10-19)
+
+The production desktop QEMU harness now supports `--exercise-pointer`. It
+injects bounded relative motion and a left click, captures before/after frames,
+and requires a material presented cursor/frame delta. The gate passed on 1/2/4
+CPUs with evidence under `audit-artifacts/files-desktop-{1,2,4}cpu-*`.
+
+This accepts the PS/2-backed software cursor overlay and existing shell
+hit-testing. USB HID pointer qualification and hardware GPU presentation
+remain explicitly unclaimed.
+
+## Graphics track - WovenFiles bounded resize (2026-10-19)
+
+WovenFiles now handles `WSIZ` by creating and sharing a replacement Canvas
+surface, publishing `WRSZ` before the bounded upload, and clamping requests to
+the loader-safe 480×320 render target. The QMP `--exercise-resize` gate passed
+on 1/2/4 CPUs with evidence under
+`audit-artifacts/files-desktop-{1,2,4}cpu-*`.
+
+The `/mnt` listing remains bounded and read-only; file-operation input,
+pointer widgets, and hardware GPU presentation are not claimed.
+
+## Graphics track - WovenStore bounded resize (2026-10-19)
+
+WovenStore now handles `WSIZ` by creating and sharing a replacement Canvas
+surface, publishing `WRSZ` before the bounded upload, and clamping requests to
+the loader-safe 480×320 render target. The QMP `--exercise-resize` gate passed
+on 1/2/4 CPUs with evidence under
+`audit-artifacts/store-desktop-{1,2,4}cpu-*`.
+
+Store remains a read-only installed-catalog view with no package mutation;
+pointer widgets and hardware GPU presentation are not claimed.
+
+## Graphics track - WovenUpdate bounded resize (2026-10-19)
+
+WovenUpdate now handles `WSIZ` by creating and sharing a replacement Canvas
+surface, publishing `WRSZ` before the bounded upload, and clamping requests to
+the loader-safe 480×320 render target. The QMP `--exercise-resize` gate passed
+on 1/2/4 CPUs with evidence under
+`audit-artifacts/update-desktop-{1,2,4}cpu-*`.
+
+Update remains a read-only, non-mutating preflight; pointer widgets and
+hardware GPU presentation are not claimed.
+
+## Graphics track - WovenImages bounded resize (2026-10-19)
+
+WovenImages now handles `WSIZ` by creating and sharing a replacement Canvas
+surface, publishing `WRSZ` before the bounded upload, and clamping requests to
+the loader-safe 480×320 render target. The QMP `--exercise-resize` gate passed
+on 1/2/4 CPUs with evidence under
+`audit-artifacts/images-desktop-{1,2,4}cpu-*`.
+
+Image decoding, selection, and editing remain outside this read-only preview;
+pointer widgets and hardware GPU presentation are not claimed.
+
+## Graphics track - WovenEditor bounded resize (2026-10-19)
+
+WovenEditor now handles `WSIZ` by creating and sharing a replacement Canvas
+surface, publishing `WRSZ` before the bounded upload, and clamping requests to
+the loader-safe 480×320 render target. The QMP `--exercise-resize` gate passed
+on 1/2/4 CPUs with evidence under
+`audit-artifacts/editor-desktop-{1,2,4}cpu-*`.
+
+The desktop client remains read-only; editor text input, editing controls,
+pointer widgets, and hardware GPU presentation are not claimed.
+
+## Graphics track - WovenSecurity bounded resize (2026-10-19)
+
+WovenSecurity now handles `WSIZ` by creating and sharing a replacement Canvas
+surface, publishing `WRSZ` before the bounded upload, and clamping requests to
+the loader-safe 480×320 render target. The QMP `--exercise-resize` gate passed
+on 1/2/4 CPUs with evidence under
+`audit-artifacts/security-desktop-{1,2,4}cpu-*`.
+
+Security remains read-only with audit display capped at 16 events; security
+controls, pointer widgets, and hardware GPU presentation are not claimed.
+
+## Graphics track - WovenMonitor bounded resize (2026-10-19)
+
+WovenMonitor now handles `WSIZ` by creating and sharing a replacement Canvas
+surface, publishing `WRSZ` before the bounded upload, and clamping requests to
+480×320. The QMP `--exercise-resize` gate passed on 1/2/4 CPUs with evidence
+under `audit-artifacts/monitor-desktop-{1,2,4}cpu-*`.
+
+Monitor remains read-only and bounded at 128 storage entries; pointer widgets
+and hardware GPU presentation are not claimed.
+
+## Graphics track - WovenSettings bounded resize (2026-10-19)
+
+WovenSettings now handles `WSIZ` by creating and sharing a replacement Canvas
+surface, sending `WRSZ` before the bounded pixel upload, and clamping requests
+to the loader-safe 480×320 render target. The shared QMP `--exercise-resize`
+gate passed on 1/2/4 CPUs with evidence under
+`audit-artifacts/settings-desktop-{1,2,4}cpu-*`.
+
+Settings remains read-only: settings controls, pointer widgets, and hardware
+GPU presentation are not claimed.
+
+## Graphics track - bounded WSIZ/WRSZ resize negotiation (2026-10-19)
+
+WovenShell now gives the resize handshake a five-second bounded grace period,
+and WovenCalculator/WovenTerminal create, share, and publish replacement
+surfaces with `WRSZ`. Their static render targets are capped at 480×320 to
+stay below the current Ring-3 image/stack layout; larger requests are clamped
+and acknowledged rather than causing an unbounded allocation. The QMP
+`--exercise-resize` gate passed both clients on 1/2/4 CPUs with before/after
+resize captures under `audit-artifacts/{calculator,terminal}-desktop-*`.
+
+Other desktop clients still need resize implementations. Pointer widgets,
+desktop command execution, and hardware GPU presentation remain separate work.
+
+## Graphics track - Canvas damage registration and Calculator input (2026-10-19)
+
+The kernel userspace-graphics write, fill, stroke, and text paths now register
+their touched rectangles as client damage. This closes the compositor update
+gap where an app could redraw its shared surface without WovenShell receiving
+a damage wakeup. WovenCalculator now uses bounded ASCII/WKEY expression input
+and redraws its result; its interaction gate passed on 1/2/4 CPUs with
+before/after evidence under `audit-artifacts/calculator-desktop-{1,2,4}cpu-*`.
+
+The existing Calculator CLI remains supported. Desktop pointer widgets and
+hardware GPU presentation remain unclaimed; resize is covered by the newer
+bounded WSIZ/WRSZ slice above.
+
+## Graphics track - bounded desktop key protocol and Terminal input (2026-10-19)
+
+WovenShell now forwards Enter and Backspace to the focused window as bounded
+`WKEY` messages, while preserving one-byte ASCII forwarding and compositor
+ownership. WovenTerminal consumes the protocol to render bounded text edits
+and submission state on its shared Canvas surface. The extended
+`scripts/test-files-desktop-qemu.py --app terminal` gate captures before and
+after input frames and passed on 1/2/4 CPUs with evidence under
+`audit-artifacts/terminal-desktop-{1,2,4}cpu-*`.
+
+This slice does not claim terminal command execution from the desktop, pointer
+widgets, or hardware GPU presentation; bounded resize is covered by the newer
+WSIZ/WRSZ slice above; the existing
+`--interactive` CLI remains the full command-I/O path.
+
+## Graphics track - WovenCalculator desktop acceptance (2026-10-19)
+
+WovenCalculator's existing bounded Canvas/WOPN client is now covered by the
+shared `scripts/test-files-desktop-qemu.py --app calculator` visual gate. The
+gate launches the production `--gui %p` catalog entry and passed on 1/2/4 CPUs
+with evidence under `audit-artifacts/calculator-desktop-{1,2,4}cpu-*`.
+
+The preview evaluates a bounded expression; CLI expression evaluation remains
+authoritative. Desktop pointer widgets and hardware GPU presentation remain
+unclaimed; Calculator input and resize are covered by newer slices above.
+
+## Graphics track - WovenTerminal desktop preview (2026-10-19)
+
+WovenTerminal now has a bounded read-only `--gui <shell-pid>` preview window
+with a static Canvas buffer, WOPN/WCLS lifecycle, and production catalog
+`--gui %p` entry. The existing `--interactive` CLI remains authoritative for
+terminal input. The shared `scripts/test-files-desktop-qemu.py --app terminal`
+visual gate passed on 1/2/4 CPUs with evidence under
+`audit-artifacts/terminal-desktop-{1,2,4}cpu-*`.
+
+This slice does not claim desktop key forwarding, command execution,
+`WSIZ` resize handling, or hardware GPU presentation.
+
+## Graphics track - WovenUpdate and WovenStore desktop clients (2026-10-19)
+
+WovenUpdate now has a read-only `--gui <shell-pid>` preflight window for the
+bounded `/updates` candidate count, and WovenStore has a read-only
+`--gui <shell-pid>` installed-catalog window for bounded application
+descriptor count. Both use full-window Canvas buffers, WOPN/WCLS, and
+production catalog `--gui %p` entries. The shared
+`scripts/test-files-desktop-qemu.py` launcher/screendump gate passed
+`--app update` and `--app store` on 1/2/4 CPUs with evidence under
+`audit-artifacts/{update,store}-desktop-{1,2,4}cpu-*`.
+
+The slice also raises WovenShell's bounded catalog capacity from 8 to 10,
+matching the ten signed production apps; this prevents alphabetical loading
+from silently dropping Update and Terminal. Update remains preflight-only and
+Store remains read-only: no package mutation, controls, pointer widgets, or
+hardware GPU presentation is claimed. Update and Store resizing are covered by
+their newer slices above.
+
+## Graphics track - WovenImages desktop client (2026-10-19)
+
+WovenImages now has a bounded `--gui <shell-pid>` client path. It renders a
+Canvas-backed `/mnt` image-workspace summary, lists supported header families,
+shares the surface, opens it with `WOPN`, and waits for `WCLS`. The production
+catalog passes the shell PID. The shared
+`scripts/test-files-desktop-qemu.py --app images` launcher/screendump gate
+passed on 1/2/4 CPUs with evidence under
+`audit-artifacts/images-desktop-{1,2,4}cpu-*`.
+
+This is a workspace preview only: PNG/JPEG/GIF/BMP decoding, image selection,
+and editing controls remain unclaimed. Its bounded resize path is covered by
+the newer WovenImages slice above. Existing bounded `--list`/`--info` CLI
+behavior is preserved.
+
+## Graphics track - WovenEditor desktop client (2026-10-19)
+
+WovenEditor now has a bounded `--gui <shell-pid>` client path. It renders a
+Canvas-backed `/mnt` workspace summary and the existing CLI view/write entry
+points, shares the surface, opens it with `WOPN`, and waits for `WCLS`. The
+production catalog passes the shell PID. The shared
+`scripts/test-files-desktop-qemu.py --app editor` launcher/screendump gate
+passed on 1/2/4 CPUs with evidence under
+`audit-artifacts/editor-desktop-{1,2,4}cpu-*`.
+
+This is a read-only desktop preview; editor text input, file editing widgets,
+pointer widgets, and hardware GPU presentation remain unclaimed. Its bounded
+resize path is covered by the newer WovenEditor slice above. The existing CLI
+retains the bounded `--view`/`--write` behavior.
+
+## Graphics track - WovenSecurity desktop client (2026-10-19)
+
+WovenSecurity now has a read-only `--gui <shell-pid>` client path. It renders
+bounded identity and audit-count data (capped at 16 events) into a full-window
+Canvas buffer, shares the surface, opens it with `WOPN`, and waits for `WCLS`.
+The production catalog passes the shell PID. The shared
+`scripts/test-files-desktop-qemu.py --app security` launcher/screendump gate
+passed on 1/2/4 CPUs with evidence under
+`audit-artifacts/security-desktop-{1,2,4}cpu-*`.
+
+This slice is intentionally read-only and bounded; no security controls,
+pointer widgets, or hardware GPU presentation are claimed. Its bounded resize
+path is covered by the newer WovenSecurity slice above.
+
+## Graphics track - WovenMonitor desktop client (2026-10-19)
+
+WovenMonitor now has a read-only `--gui <shell-pid>` client path. It renders
+bounded clock, compositor geometry, and `/mnt` storage-count data into a
+full-window Canvas buffer, shares the surface, opens it with `WOPN`, and waits
+for `WCLS`. The production catalog passes the shell PID. The shared
+`scripts/test-files-desktop-qemu.py --app monitor` launcher/screendump gate
+passed on 1/2/4 CPUs with evidence under
+`audit-artifacts/monitor-desktop-{1,2,4}cpu-*`.
+
+This slice is intentionally read-only and bounded at 128 storage entries; it
+does not claim controls, resize (`WSIZ`), or hardware GPU presentation.
+
+## Graphics track - WovenSettings desktop client (2026-10-19)
+
+WovenSettings now has a read-only `--gui <shell-pid>` client path. It renders
+bounded identity, UTC clock, and compositor geometry data into a full-window
+Canvas buffer, shares the surface, opens it with `WOPN`, and waits for `WCLS`.
+The production catalog passes the shell PID, and the shared
+`scripts/test-files-desktop-qemu.py --app settings` gate launches it from the
+F1 desktop launcher and compares before/after QEMU screendumps. Visual
+acceptance passed on 1/2/4 CPUs with evidence under
+`audit-artifacts/settings-desktop-{1,2,4}cpu-*`.
+
+This slice is intentionally read-only: settings controls, pointer widgets,
+and hardware GPU presentation are not claimed. Its bounded resize path is
+covered by the newer WovenSettings slice above. The existing software/2D
+compositor remains the accepted QEMU path.
+
+## Graphics track - WovenFiles live launcher/screenshot acceptance (2026-10-19)
+
+`scripts/test-files-desktop-qemu.py` now boots the packaged hardware-demo
+desktop, signs in through QMP PS/2 input, launches WovenFiles through the F1
+launcher query, waits for the `WOPN`/`WCLS` client lifecycle marker, and saves
+before/after QEMU screendumps. The capture dimensions must remain stable and
+the post-launch frame must materially change; serial evidence must also show
+`WovenFiles: window opened` and `woven-shell: window opened: Files`. The full
+visual acceptance passed on 1/2/4 CPUs with evidence under
+`audit-artifacts/files-desktop-{1,2,4}cpu-*`.
+
+This closes the desktop-launch visual gate for the WovenFiles client. The
+remaining client limits are unchanged: no interactive file operations, and the
+display path is still software/2D on QEMU; bounded resize is covered by the
+newer WovenFiles slice above, and no hardware GPU presentation claim is made.
+
+## WovenFiles desktop window, and a write_canvas placement bug fix in both
+## (2026-10-19)
+
+Following the WovenCalculator desktop window entry below: woven-files is
+now wired to the same `share_with()`/`WOPN` desktop-client protocol,
+showing a live `/mnt` directory listing (with an "(empty or unavailable)"
+fallback). Live QMP screendump testing of both apps then caught a real
+bug in both: `GraphicsSurface::write_canvas` always uploads to the
+surface's `(0, 0)`, not the `(x, y)` given to `Canvas::new` (that pair is
+only the canvas's own internal coordinate-addressing origin). Both apps
+had drawn a border directly on the window surface at an inset `(12, 12)`
+and separately written a same-sized canvas assuming it would land at that
+same offset; the resulting misalignment erased the border's top/left edges
+(write_canvas overwrites whatever is under it), which was first mistaken
+for a shell resize-grip affordance -- it was not. Fixed by drawing
+everything into one canvas sized to the whole window and uploading it in a
+single call. See `docs/agent-coordination.md` for the full API-trap
+writeup, since this is relevant to any further app-window work.
+
+**Evidence.** Both windows verified via live QMP-driven sessions (sign in,
+launch from the desktop launcher) with screendumps showing correct
+borders, panel colour and text placement. `cargo clippy --all-targets -- -D
+warnings` and `scripts/test-shell-qemu.py --hardware-demo` pass on 1/2/4
+CPUs.
+
+**Limits.** WovenTerminal has bounded text input and resize preview but
+remains CLI/interactive for full command execution. Calculator has bounded
+input and resize preview. Files retain no interactive file-operation controls;
+hardware GPU presentation is not claimed.
+
+## Graphics track - WovenFiles desktop client foundation (2026-10-19)
+
+`woven-files` now has a bounded `--gui <shell-pid>` client path: it renders a
+Canvas-backed `/mnt` listing into a shared surface, opens it through the
+WovenShell `WOPN` protocol, and waits for the shell's `WCLS` close message.
+The catalog entry now passes the shell PID. Standalone warning-denying app
+Clippy and production system-app packaging/normal-boot QEMU gates passed on
+1/2/4 CPUs. This is a GUI client/package acceptance, not yet a live
+interactive screenshot assertion for launching Files from the desktop; that
+visual workflow remains a follow-up.
+
+## Graphics track - GSUB multiple-substitution extension acceptance (2026-10-19)
+
+The GSUB type-2 slice now has an end-to-end regression for a type-7 extension
+wrapper as well as direct lookup coverage. Oversized replacement sequences
+fail closed before any output is emitted. The 57-test `libwoven` suite,
+warning-denying library/kernel/workspace Clippy, formatting, and Stage 19.2
+compositor visual acceptance passed on 1/2/4 CPUs. This strengthens the
+software shaping boundary; complete OpenType feature ordering and hardware GPU
+acceleration remain separate.
+
+## Graphics track - bounded GSUB multiple substitutions (2026-10-19)
+
+GSUB lookup type 2 multiple substitutions now expand one shaped input glyph
+into a checked replacement sequence capped at 16 glyphs, while the overall
+shaped output remains bounded by the caller buffer. Direct lookups and type-7
+extension wrappers use the same checked sequence parser; source metadata is
+retained on the first replacement and subsequent generated glyphs are marked
+as continuation records. The 57-test `libwoven` suite, warning-denying
+library/kernel/workspace Clippy, formatting, and Stage 19.2 compositor visual
+acceptance passed on 1/2/4 CPUs. Full OpenType feature ordering and hardware
+GPU acceleration remain separate boundaries.
+
+## Graphics backend boundary - VIRGL lifecycle rerun (2026-10-19)
+
+The capability-gated `virtio-gpu-gl-pci` probe now has fresh 1/2/4-CPU
+evidence for VIRGL capability discovery, context/resource lifecycle, and
+bounded command submission. All three runs passed under
+`audit-artifacts/stage20.14-{1,2,4}cpu-*`. This closes the transport/lifecycle
+qualification slice only: QEMU still rejects the tested 3D resource through
+classic `SET_SCANOUT`, and the blob path is not accepted by the VirGL context,
+so visible GPU-backed compositor presentation remains hardware/QEMU-bound and
+unclaimed. Software/2D scanout remains the accepted fallback.
+
+## Graphics track - bounded GSUB reverse-chaining substitutions (2026-10-19)
+
+GSUB lookup type 8 reverse-chaining substitutions now match checked backtrack
+and lookahead coverage records before selecting the bounded replacement glyph;
+direct lookups and type-7 extension wrappers use the same fail-closed path.
+Malformed coverage, guard sequences, and replacement arrays are rejected or
+ignored without unbounded work. The 57-test `libwoven` suite, warning-denying
+library/kernel/workspace Clippy, formatting, and Stage 19.2 compositor visual
+acceptance passed on 1/2/4 CPUs. Hardware GPU acceleration remains a separate
+boundary.
+
+## WovenCalculator desktop window (2026-10-19)
+
+The Stage 19 catalog apps (woven-calculator, woven-settings, etc.) have been
+CLI-only diagnostic binaries since Stage 19: the app catalog's `Exec=` lines
+never passed `--gui`, and `woven-calculator`'s existing `run_gui()` dead code
+called `surface.present()` directly -- the single-authority compositor
+pattern, which an ordinary launched process cannot use (no `DisplayIo`
+capability). WovenShell is the sole compositor-authority holder; client apps
+must use the `share_with()` + `WOPN` IPC protocol `hello-gui
+--desktop-client` already exercises (Stage 20.1-20.15).
+
+`woven-calculator` is now wired to that protocol: `--gui <shell-pid>` (the
+catalog's `Exec=/bin/wovenhat-calculator --gui %p`) draws its panel, shares
+the surface with the shell, sends `WOPN`, and waits for `WCLS` to close.
+Fixing this also exposed a real latent bug in the original dead code: its
+108 KB scratch pixel buffer was a stack local on an 8 KiB task stack, causing
+a page fault the moment the path was actually exercised. It now lives in
+`.bss` via the same `UnsafeCell`-backed static pattern hello-gui's audio
+buffer uses.
+
+**Evidence.** A live QMP-driven session (sign in as `ada`, F1, type `calc`,
+Enter) shows a real "Calculator" window with WovenShell's title bar, close
+control and taskbar entry, and correct content ("Expression: 2 + 2",
+"Result: 4"). `cargo clippy -p wovenhat-kernel --target x86_64-unknown-none
+--features hardware-demo -- -D warnings`, `cargo clippy --all-targets -- -D
+warnings`, and `scripts/test-shell-qemu.py --hardware-demo` all pass on
+1/2/4 CPUs.
+
+**Limits.** No `WSIZ` (resize) handling yet, so the shell's resize-grip
+affordance is non-functional for this window; no interactive input (buttons,
+keypad) -- it displays a fixed `2 + 2` expression. The other nine Stage 19
+catalog apps (woven-files, woven-settings, woven-monitor, woven-security,
+woven-editor, woven-images, woven-update, woven-store, woven-terminal) are
+still CLI-only and would need the same `share_with()`/`WOPN` treatment.
+
+## Graphics track - bounded GSUB alternate substitutions (2026-10-19)
+
+GSUB lookup type 3 alternate substitutions now select the first bounded
+alternate from a checked coverage/set record; extension-wrapped type 3 lookups
+use the same path. Missing coverage and empty/oversized alternate sets fail
+closed. The 56-test `libwoven` suite, warning-denying library/kernel/workspace
+Clippy, formatting, and Stage 19.2 compositor visual acceptance passed on
+1/2/4 CPUs. Hardware GPU acceleration remains a separate boundary.
+
+## Graphics track - saturating shared font metrics (2026-10-19)
+
+The shared kernel font metrics used by WovenGraphics now saturate width and
+line-count accumulation for arbitrary UTF-8 input. Normal measurements are
+unchanged, while extreme text cannot wrap metric state before renderer
+clipping. The 55-test `libwoven` suite, warning-denying library/kernel/
+workspace Clippy, formatting, and Stage 19.2 compositor visual acceptance
+passed on 1/2/4 CPUs. Hardware GPU acceleration remains a separate boundary.
+
+## Graphics track - bounded surface dimension casts (2026-10-19)
+
+Canvas and DepthBuffer now cap each accepted non-empty dimension at
+`i32::MAX`, in addition to checking the far coordinate. This matches the
+internal `usize`-to-`i32` offset conversions used by shader and raster loops.
+The 55-test `libwoven` suite, warning-denying library/kernel/workspace
+Clippy, formatting, and Stage 19.2 compositor visual acceptance passed on
+1/2/4 CPUs. Hardware GPU acceleration remains a separate boundary.
+
+## Graphics track - bounded Canvas text origins (2026-10-19)
+
+The shared `Canvas::draw_text` path now saturates glyph and newline cursor
+arithmetic before clipped writes, matching the bounded `Renderer` text path.
+Extreme text origins cannot wrap into unrelated pixels. The 55-test
+`libwoven` suite, warning-denying library/kernel/workspace Clippy, formatting,
+and Stage 19.2 compositor visual acceptance passed on 1/2/4 CPUs. Hardware GPU
+acceleration remains a separate boundary.
+
+## Graphics track - bounded surface coordinate extents (2026-10-19)
+
+Canvas and DepthBuffer constructors now reject non-empty rectangles whose
+logical right or bottom edge cannot be represented by their `i32` coordinate
+APIs. This keeps shader and raster offset arithmetic defined for every
+accepted surface. The 54-test `libwoven` suite, warning-denying
+library/kernel/workspace Clippy, formatting, and Stage 19.2 compositor visual
+acceptance passed on 1/2/4 CPUs. Hardware GPU acceleration remains a separate
+boundary.
+
+## Graphics track - bounded affine transform arithmetic (2026-10-19)
+
+WovenGraphics fixed-point scale and translation constructors now saturate
+large inputs, and affine mapping uses `i128` intermediates before clamping to
+`i32`. Extreme transform inputs therefore cannot overflow before clipped
+triangle rasterization. The 53-test `libwoven` suite, warning-denying
+library/kernel/workspace Clippy, formatting, and Stage 19.2 compositor visual
+acceptance passed on 1/2/4 CPUs. Hardware GPU acceleration remains a separate
+boundary.
+
+## Graphics track - widened path-fill intersections (2026-10-19)
+
+WovenGraphics ordinary, compound, and supersampled path containment now use
+`i128` edge-intersection arithmetic. Valid `i32` path coordinates cannot
+overflow during clipped scan conversion. The 52-test `libwoven` suite,
+warning-denying library/kernel/workspace Clippy, formatting, and Stage 19.2
+compositor visual acceptance passed on 1/2/4 CPUs. Hardware GPU acceleration
+remains a separate boundary.
+
+## Graphics track - bounded path stroke rasterization (2026-10-19)
+
+WovenGraphics path segments now use widened integer Cohen-Sutherland
+clipping before Bresenham rasterization. Extreme endpoints therefore produce
+only the Canvas-visible segment instead of an unbounded walk. The 51-test
+`libwoven` suite, warning-denying library/kernel/workspace Clippy, formatting,
+and Stage 19.2 compositor visual acceptance passed on 1/2/4 CPUs. Hardware
+GPU acceleration remains a separate boundary.
+
+## Graphics track - shared bounded path geometry (2026-10-19)
+
+Rounded rectangles and path scan conversion now use a shared saturating
+rectangle-end helper for Canvas bounds; rounded-corner radii also use checked
+conversion. Extreme radii and path geometry cannot wrap before clipped scans.
+The 50-test `libwoven` suite, warning-denying library/kernel/workspace
+Clippy, formatting, and Stage 19.2 compositor visual acceptance passed on
+1/2/4 CPUs. Hardware GPU acceleration remains a separate boundary.
+
+## Graphics track - bounded text layout (2026-10-19)
+
+WovenGraphics centered and wrapped text now derive rectangle edges with
+checked conversions, and scaled glyph placement saturates cursor arithmetic
+before clipped fills. Extreme text rectangles cannot wrap into unintended
+coordinates. The 49-test `libwoven` suite, warning-denying
+library/kernel/workspace Clippy, formatting, and Stage 19.2 compositor visual
+acceptance passed on 1/2/4 CPUs. Hardware GPU acceleration remains a separate
+boundary.
+
+## Graphics track - bounded transformed-rectangle corners (2026-10-19)
+
+Transformed rectangles now construct their far corners with checked
+`usize`-to-`i32` conversion and saturation before affine mapping. Extreme
+dimensions therefore cannot wrap before reaching the bounded triangle
+rasterizer. The 48-test `libwoven` suite, warning-denying
+library/kernel/workspace Clippy, formatting, and Stage 19.2 compositor visual
+acceptance passed on 1/2/4 CPUs. Hardware GPU acceleration remains a separate
+boundary.
+
+## Graphics track - bounded image blits (2026-10-19)
+
+WovenGraphics opaque and blended image blits now iterate only over the Canvas
+overlap and map clipped rows and columns back to the source image. Large
+off-screen images therefore cannot create software work proportional to their
+unseen area. The 47-test `libwoven` suite, warning-denying
+library/kernel/workspace Clippy, formatting, and Stage 19.2 compositor visual
+acceptance passed on 1/2/4 CPUs. Hardware GPU acceleration remains a separate
+boundary.
+
+## Graphics track - bounded stroke geometry (2026-10-19)
+
+WovenGraphics rectangle outlines now derive their far edges with checked
+`usize`-to-`i32` conversion and saturation before the existing clipped fills.
+Extreme outline dimensions therefore cannot wrap into an unintended visible
+edge. The 46-test `libwoven` suite, warning-denying library/kernel/workspace
+Clippy, formatting, and Stage 19.2 compositor visual acceptance passed on
+1/2/4 CPUs. Hardware GPU acceleration remains a separate boundary.
+
+## Graphics track - bounded gradient rasterization (2026-10-19)
+
+WovenGraphics vertical and horizontal gradients now clip iteration to the
+Canvas before calculating pixels, while interpolation remains based on the
+full logical rectangle. The shared Canvas clip arithmetic also handles
+extreme `usize` dimensions without overflow. The 45-test `libwoven` suite,
+warning-denying library/kernel/workspace Clippy, formatting, and Stage 19.2
+compositor visual acceptance passed on 1/2/4 CPUs. Hardware GPU acceleration
+remains a separate boundary.
+
+## Graphics track - bounded transformed-triangle clipping (2026-10-19)
+
+The shared 2D triangle helper used by transformed rectangles now clips its
+raster bounds to the Canvas before iterating. Extreme transformed vertices
+therefore cannot cause unbounded software loops; widened edge arithmetic and
+the existing pixel clipping remain in force. The 44-test `libwoven` suite,
+warning-denying library/kernel/workspace Clippy, formatting, and Stage 19.2
+compositor visual acceptance passed on 1/2/4 CPUs. Hardware GPU acceleration
+remains a separate boundary.
+
+## Graphics track - bounded software-3D triangle clipping (2026-10-19)
+
+The WovenGraphics software triangle path now clips raster iteration to the
+intersection of the Canvas and caller-owned depth buffer before walking pixels.
+Edge and barycentric arithmetic uses widened intermediates, so extreme
+off-screen coordinates fail safely without overflow or unbounded iteration.
+The 43-test `libwoven` suite, warning-denying library/kernel/workspace Clippy,
+formatting, and Stage 19.2 compositor visual acceptance passed on 1/2/4 CPUs.
+Hardware GPU acceleration remains a separate boundary.
+
+## Graphics track - bounded chaining format-2 target sequence positioning (2026-10-19)
+
+Nested single-positioning records under GPOS chaining format 2 now resolve
+coverage against target sequence indices beyond zero, while the outer class
+coverage remains anchored to the first input. The bounded class-rule,
+context, nested lookup and value-record checks remain enforced. The 42-test
+`libwoven` suite, warning-denying library/kernel/workspace Clippy, formatting,
+and Stage 19.2 compositor visual acceptance passed on 1/2/4 CPUs. Hardware GPU
+acceleration remains a separate boundary.
+
+## Graphics track - bounded chaining format-1 nested pair extension wrapper (2026-10-19)
+
+GPOS chaining format 1 now regression-tests a type-9 extension wrapper around
+nested lookup-2 format-1 pair positioning. Wrapper format, nested offsets,
+target coverage, partner glyph, pair-set bounds and value records remain
+checked; stateful attachment lookups fail closed. The 42-test `libwoven` suite,
+warning-denying library/kernel/workspace Clippy, formatting, and Stage 19.2
+compositor visual acceptance passed on 1/2/4 CPUs. Hardware GPU acceleration
+remains a separate boundary.
+
+## Graphics track - bounded chaining format-1 nested pair positioning (2026-10-19)
+
+Nested lookup-2 format-1 pair positioning is now available from GPOS chaining
+format 1 through the shared checked nested-record path. Target glyph coverage,
+partner selection, pair-set offsets, value-record sizes and table extents are
+validated; malformed or unsupported stateful nested lookups fail closed. The
+42-test `libwoven` suite, warning-denying library/kernel/workspace Clippy,
+formatting, and Stage 19.2 compositor visual acceptance passed on 1/2/4 CPUs.
+Hardware GPU acceleration remains a separate boundary.
+
+## Graphics track - bounded chaining format-1 target sequence positioning (2026-10-19)
+
+Nested single-positioning records under GPOS chaining format 1 now resolve
+coverage against the selected target glyph for sequence indices 0 through 4;
+the outer chaining coverage remains anchored to the first input glyph. The
+bounded glyph-rule, context and value-record checks remain unchanged. The
+42-test `libwoven` suite, warning-denying library/kernel/workspace Clippy,
+formatting, and Stage 19.2 compositor visual acceptance passed on 1/2/4 CPUs.
+Hardware GPU acceleration remains a separate boundary.
+
+## Graphics track - bounded chained class-matrix pair extension wrapper (2026-10-19)
+
+The bounded GPOS chaining class-rule path now regression-tests a type-9
+extension wrapper around nested lookup-2 format-2 class-matrix pair
+positioning. Extension format, nested offsets, class definitions, matrix
+dimensions and value-record extents remain checked; malformed or unsupported
+forms fail closed. The 42-test `libwoven` suite, warning-denying
+library/kernel/workspace Clippy, formatting, and Stage 19.2 compositor visual
+acceptance passed on 1/2/4 CPUs. Hardware GPU acceleration remains a separate
+boundary.
+
+## Graphics track - bounded contextual GPOS class-matrix pair positioning (2026-10-19)
+
+Nested lookup-2 format-2 class-matrix pair positioning is now supported from
+the bounded GPOS chaining format-2 class-rule path. Coverage, class
+definitions, matrix dimensions, pair value-record extents and the selected
+partner class are checked before applying the first-glyph adjustment; malformed
+or unsupported nested forms fail closed. The 42-test `libwoven` suite,
+warning-denying library/kernel/workspace Clippy, formatting, and Stage 19.2
+compositor visual acceptance passed on 1/2/4 CPUs. Hardware GPU acceleration
+remains a separate boundary.
+
+## Graphics track - bounded contextual GPOS class-rule pair positioning (2026-10-19)
+
+The bounded GPOS chaining format-2 class-rule path now applies nested lookup-2
+format-1 pair positioning, including checked pair-set, value-record and
+partner-glyph bounds. Direct nested pair lookups are supported; nested
+extension-wrapped pair lookups are supported through the common type-9 path.
+Other nested pair/class forms remain fail-closed. The 42-test `libwoven` suite,
+warning-denying library/kernel/workspace Clippy, formatting, and Stage 19.2
+compositor visual acceptance passed on 1/2/4 CPUs. Hardware GPU acceleration
+remains a separate boundary.
+
+## Graphics track - bounded contextual GPOS chaining format 2 (2026-10-19)
+
+GPOS lookup type 8 chaining-context format 2 now matches bounded backtrack,
+input and lookahead class rules with up to five input glyphs and two context
+classes on either side, then applies nested single-positioning lookup-1
+records through direct or type-9-wrapped lookups. Class definitions, class-set
+and record bounds are checked; unsupported nested pair/class forms fail closed.
+The 42-test `libwoven` suite, warning-denying library/kernel/workspace Clippy,
+formatting, and Stage 19.2 compositor visual acceptance passed on 1/2/4 CPUs.
+Hardware GPU acceleration remains a separate boundary.
+
+## Graphics track - bounded contextual GPOS chaining format 1 (2026-10-19)
+
+GPOS lookup type 8 chaining-context format 1 now matches bounded glyph-rule
+records with up to five input glyphs and two backtrack/lookahead glyphs, then
+applies nested single-positioning lookup-1 records, including type-9 wrappers.
+Malformed rules and unsupported nested pair/class forms fail closed. The
+42-test `libwoven` suite, warning-denying library/kernel/workspace Clippy,
+formatting, and Stage 19.2 compositor visual acceptance passed on 1/2/4 CPUs.
+Hardware GPU acceleration remains a separate boundary.
+
+## Graphics track - bounded contextual GPOS chaining format 3 (2026-10-19)
+
+GPOS lookup type 8 chaining-context format 3 now reuses the checked bounded
+contextual dispatcher, including one- to five-input records, up to two
+backtrack/lookahead coverages, nested single/pair positioning, class-pair
+matrices, and type-9 extension wrappers. Unsupported or malformed records
+remain fail-closed. The 42-test `libwoven` suite, warning-denying
+library/kernel/workspace Clippy, formatting, and Stage 19.2 compositor visual
+acceptance passed on 1/2/4 CPUs. Hardware GPU acceleration remains a separate
+boundary.
+
+## Graphics track - bounded contextual GPOS class-pair positioning (2026-10-19)
+
+Nested contextual GPOS type-2 format-2 pair positioning now supports checked
+class definitions and bounded class matrices, reusing the direct class-pair
+value-record semantics for the selected contextual target and pair partner.
+Class counts, matrix extents, coverage and table bounds remain validated;
+broader nested lookup semantics remain a separate boundary. The 42-test
+`libwoven` suite, warning-denying library/kernel/workspace Clippy, formatting,
+and Stage 19.2 compositor visual acceptance passed on 1/2/4 CPUs. Hardware GPU
+acceleration remains a separate boundary.
+
+## Graphics track - bounded contextual GPOS extension wrappers (2026-10-19)
+
+Contextual GPOS lookup dispatch now unwraps checked type-9 extension records
+that contain nested type-7 contextual subtables, reusing the bounded one- to
+five-input matching and nested single/pair positioning paths. Extension
+format, offsets and nested subtable bounds remain validated; broader lookup
+semantics remain a separate boundary. The 42-test `libwoven` suite,
+warning-denying library/kernel/workspace Clippy, formatting, and Stage 19.2
+compositor visual acceptance passed on 1/2/4 CPUs. Hardware GPU acceleration
+remains a separate boundary.
+
+## Graphics track - bounded two-coverage contextual GPOS guards (2026-10-19)
+
+Contextual GPOS format-3 matching now supports up to two checked backtrack
+coverages and two checked lookahead coverages, supplied from adjacent shaped
+glyphs at each bounded input pass. Missing neighbors fail closed; longer
+context and broader contextual lookup semantics remain separate boundaries.
+The 42-test `libwoven` suite, warning-denying library/kernel/workspace Clippy,
+formatting, and Stage 19.2 compositor visual acceptance passed on 1/2/4 CPUs.
+Hardware GPU acceleration remains a separate boundary.
+
+## Graphics track - bounded multi-input contextual GPOS pair positioning (2026-10-19)
+
+Nested type-2 format-1 pair positioning now dispatches across the bounded
+contextual input sequences: the target uses the following input glyph when it
+is present, or the next shaped glyph when the partner lies outside the matched
+sequence. Coverage, pair-set, partner availability and advance propagation
+remain checked; broader lookup semantics remain a separate boundary. The
+42-test `libwoven` suite, warning-denying library/kernel/workspace Clippy,
+formatting, and Stage 19.2 compositor visual acceptance passed on 1/2/4 CPUs;
+the 4-CPU run required one retry after an early-boot timeout and its rerun
+passed. Hardware GPU acceleration remains a separate boundary.
+
+## Graphics track - bounded contextual GPOS sequence-index-1 pair positioning (2026-10-19)
+
+Two-input contextual GPOS format-3 records targeting sequence index one can
+now dispatch bounded nested type-2 format-1 pair positioning using the next
+shaped glyph as the pair partner. Coverage, pair-set and partner availability
+remain checked; nested pair positioning for later input indices and broader
+contextual semantics remain separate boundaries. The 42-test `libwoven` suite,
+warning-denying library/kernel/workspace Clippy, formatting, and Stage 19.2
+compositor visual acceptance passed on 1/2/4 CPUs. Hardware GPU acceleration
+remains a separate boundary.
+
+## Graphics track - bounded five-input contextual GPOS positioning (2026-10-19)
+
+Contextual GPOS format-3 subtables with five input coverages now apply
+bounded nested type-1 single adjustments to sequence index four, including
+saturating advance propagation to following glyphs. One- through four-input
+paths remain supported; nested pair positioning remains limited to the
+two-input sequence-index-zero path, while longer context and broader lookup
+semantics remain separate boundaries. The 42-test `libwoven` suite,
+warning-denying library/kernel/workspace Clippy, formatting, and Stage 19.2
+compositor visual acceptance passed on 1/2/4 CPUs. Hardware GPU acceleration
+remains a separate boundary.
+
+## Graphics track - bounded four-input contextual GPOS positioning (2026-10-19)
+
+Contextual GPOS format-3 subtables with four input coverages now apply
+bounded nested type-1 single adjustments to sequence index three, including
+saturating advance propagation to following glyphs. One-, two- and three-input
+paths remain supported; nested pair positioning remains limited to the
+two-input sequence-index-zero path, while longer context and broader lookup
+semantics remain separate boundaries. The 42-test `libwoven` suite,
+warning-denying library/kernel/workspace Clippy, formatting, and Stage 19.2
+compositor visual acceptance passed on 1/2/4 CPUs. Hardware GPU acceleration
+remains a separate boundary.
+
+## Graphics track - bounded three-input contextual GPOS positioning (2026-10-19)
+
+Contextual GPOS format-3 subtables with three input coverages now apply
+bounded nested type-1 single adjustments to sequence index two, including
+saturating advance propagation to following glyphs. One- and two-input paths
+remain supported; nested pair positioning remains limited to the two-input
+sequence-index-zero path, and longer context/broader lookup semantics remain
+separate boundaries. The 42-test `libwoven` suite, warning-denying
+library/kernel/workspace Clippy, formatting, and Stage 19.2 compositor visual
+acceptance passed on 1/2/4 CPUs. Hardware GPU acceleration remains a separate
+boundary.
+
+## Graphics track - bounded single-input contextual GPOS positioning (2026-10-19)
+
+Contextual GPOS format-3 subtables with one input coverage now apply bounded
+nested type-1 single adjustments through the shaped-glyph pass, including
+saturating advance propagation and the existing adjacent backtrack/lookahead
+guards. Two-input contextual positioning remains separately bounded; nested
+pair positioning and broader contextual semantics remain separate boundaries.
+The 42-test `libwoven` suite, warning-denying library/kernel/workspace Clippy,
+formatting, and Stage 19.2 compositor visual acceptance passed on 1/2/4 CPUs.
+Hardware GPU acceleration remains a separate boundary.
+
+## Graphics track - bounded contextual GPOS sequence-index-1 positioning (2026-10-19)
+
+Contextual GPOS format-3 records targeting sequence index one now apply
+bounded nested type-1 single adjustments to the second input glyph, including
+saturating advance propagation to following glyphs. Nested type-2 pair
+positioning remains limited to sequence index zero in this path; indices beyond
+one and broader contextual dispatch remain separate boundaries. The 42-test
+`libwoven` suite, warning-denying library/kernel/workspace Clippy, formatting,
+and Stage 19.2 compositor visual acceptance passed on 1/2/4 CPUs. Hardware GPU
+acceleration remains a separate boundary.
+
+## Graphics track - bounded contextual GPOS multi-record composition (2026-10-19)
+
+Contextual GPOS format-3 records targeting sequence index zero now compose
+multiple nested type-1 single or type-2 format-1 pair adjustments with
+saturating placement/advance accumulation. Nested lookup/table bounds remain
+validated; sequence indices other than zero and broader contextual dispatch
+remain separate boundaries. The 42-test `libwoven` suite, warning-denying
+library/kernel/workspace Clippy, formatting, and Stage 19.2 compositor visual
+acceptance passed on 1/2/4 CPUs. Hardware GPU acceleration remains a separate
+boundary.
+
+## Graphics track - bounded contextual GPOS context guards (2026-10-19)
+
+The contextual GPOS format-3 path now validates and matches up to one
+backtrack and one lookahead coverage using adjacent shaped glyphs when
+available. Context-free runs remain supported, and only sequence index zero
+is dispatched to the nested single/pair lookup path. Longer context,
+multi-record dispatch and broader lookup ordering remain open. The 42-test
+`libwoven` suite, warning-denying library/kernel/workspace Clippy, formatting,
+and Stage 19.2 compositor visual acceptance passed on 1/2/4 CPUs. Hardware GPU
+acceleration remains a separate boundary.
+
+## Graphics track - nested contextual GPOS pair adjustment (2026-10-19)
+
+The bounded format-3 contextual GPOS path now accepts a nested type-2
+format-1 pair lookup in addition to nested type-1 single positioning. Two
+input coverages, sequence index zero, pair-set bounds and optional extension
+wrappers are validated. Broader contextual records, backtrack/lookahead and
+multi-record composition remain open. The 42-test `libwoven` suite,
+warning-denying library/kernel/workspace Clippy, formatting, and Stage 19.2
+compositor visual acceptance passed on 1/2/4 CPUs. Hardware GPU acceleration
+remains a separate boundary.
+
+## Graphics track - bounded contextual GPOS single adjustment (2026-10-19)
+
+GPOS lookup type 7 format 3 now matches two input coverages with no backtrack
+or lookahead and applies a nested type-1 format-1 single adjustment to the
+first input glyph; nested type-9 wrappers are accepted. Coverage, lookup
+record, sequence-index and table bounds are checked. Contextual pair/nested
+multi-record semantics remain open. The 42-test `libwoven` suite,
+warning-denying library/kernel/workspace Clippy, formatting, and Stage 19.2
+compositor visual acceptance passed on 1/2/4 CPUs. Hardware GPU acceleration
+remains a separate boundary.
+
+## Graphics track - bounded GPOS mark-to-ligature attachment (2026-10-19)
+
+GPOS lookup type 5 format 1 now resolves mark classes, ligature coverage,
+component records and anchors, including type-9 wrappers and script/LangSys
+selection. Component and anchor bounds are checked. The current shaped-glyph
+ABI has no explicit ligature-component index for a following mark, so this
+bounded path selects the final ligature component deterministically. The
+42-test `libwoven` suite, warning-denying library/kernel/workspace Clippy,
+formatting, and Stage 19.2 compositor visual acceptance passed on 1/2/4 CPUs.
+Contextual GPOS lookup types and hardware GPU acceleration remain separate
+boundaries.
+
+## Graphics track - GPOS attachment extension wrappers (2026-10-19)
+
+Bounded type-9 GPOS extension records now unwrap mark-to-base, mark-to-mark
+and cursive attachment lookups when their nested lookup type matches. Wrapper
+offsets, extension formats and nested table bounds are validated; mismatched
+wrappers fail closed. The 42-test `libwoven` suite, warning-denying
+library/kernel/workspace Clippy, formatting, and Stage 19.2 compositor visual
+acceptance passed on 1/2/4 CPUs. Broader GPOS lookup/type semantics and
+hardware GPU acceleration remain separate boundaries.
+
+## Graphics track - script/LangSys-scoped GPOS attachments (2026-10-19)
+
+Mark-to-base, mark-to-mark and cursive attachment now use the selected
+script/LangSys feature records when shaping options provide them. Missing
+scripts or languages fail closed; default shaping retains bounded all-feature
+behavior. The 42-test `libwoven` suite, warning-denying library/kernel/workspace
+Clippy, formatting, and Stage 19.2 compositor visual acceptance passed on
+1/2/4 CPUs. Broader GPOS lookup/type semantics and hardware GPU acceleration
+remain separate boundaries.
+
+## Graphics track - bounded GPOS lookup-order composition (2026-10-19)
+
+Selected `kern` GPOS single and pair adjustments now compose in lookup order
+with saturating accumulation, while query-kind filtering, table bounds and
+malformed records remain fail-closed. The 42-test `libwoven` suite,
+warning-denying library/kernel/workspace Clippy, formatting, and Stage 19.2
+compositor visual acceptance passed on 1/2/4 CPUs. Broader GPOS feature/type
+coverage and hardware GPU acceleration remain separate boundaries.
+
+## Graphics track - outline-resolved GPOS format-2 anchors (2026-10-19)
+
+GPOS format-2 anchors now resolve their referenced contour point through the
+bounded glyph outline decoder for mark-to-base, mark-to-mark and cursive
+attachment. Point indices, glyph outlines and table offsets are validated;
+malformed or unavailable outlines fail closed. The 42-test `libwoven` suite,
+warning-denying library/kernel/workspace Clippy, formatting, and Stage 19.2
+compositor visual acceptance passed on 1/2/4 CPUs. Broader GPOS lookup ordering
+and hardware GPU acceleration remain separate boundaries.
+
+## Graphics track - format-3 attachment anchors across GPOS (2026-10-19)
+
+The checked format-3 anchor decoder with optional ppem device deltas now feeds
+mark-to-base, mark-to-mark and cursive attachment paths. Format-1 and
+outline-resolved format-2 anchors remain supported across those paths. The
+42-test `libwoven` suite,
+warning-denying library/kernel/workspace Clippy, formatting, and Stage 19.2
+compositor visual acceptance passed on 1/2/4 CPUs. Broader GPOS lookup ordering
+and hardware GPU acceleration remain separate boundaries.
+
+## Graphics track - bounded GPOS format-3 anchors (2026-10-19)
+
+GPOS mark-to-base attachment now accepts format-3 anchors and applies their
+bounded x/y device-table deltas when ppem is supplied, reusing the checked
+device-delta decoder. Format-1 and outline-resolved format-2 anchors remain
+supported. The 42-test `libwoven` suite,
+warning-denying library/kernel/workspace Clippy, formatting, and Stage 19.2
+compositor visual acceptance passed on 1/2/4 CPUs. Broader GPOS lookup
+ordering and hardware GPU acceleration remain separate boundaries.
+
+## Graphics track - bounded GPOS mark-to-mark attachment (2026-10-19)
+
+GPOS lookup type 6 format 1 now supports bounded `mkmk` mark-to-mark
+attachment. Mark1/mark2 coverage, class arrays and format-1 anchors are
+validated; the second mark receives the first-anchor-minus-second-anchor delta
+without changing advances. The 42-test `libwoven` suite, warning-denying
+library/kernel/workspace Clippy, formatting, and Stage 19.2 compositor visual
+acceptance passed on 1/2/4 CPUs. Alternate anchor formats, broader GPOS lookup
+ordering and hardware GPU acceleration remain separate boundaries.
+
+## Graphics track - bounded GPOS cursive attachment (2026-10-19)
+
+GPOS lookup type 3 format 1 now supports bounded cursive entry/exit anchors
+for `curs` features. Adjacent glyphs are matched through checked coverage and
+entry/exit records; the resulting connection delta adjusts the right glyph
+origin without changing advances. The 42-test `libwoven` suite,
+warning-denying library/kernel/workspace Clippy, formatting, and Stage 19.2
+compositor visual acceptance passed on 1/2/4 CPUs. Mark-to-mark attachment,
+alternate anchor formats, broader GPOS lookup ordering and hardware GPU
+acceleration remain separate boundaries.
+
+## Graphics track - bounded GPOS mark-to-base anchors (2026-10-19)
+
+GPOS lookup type 4 format 1 now supports bounded mark-to-base attachment for
+`mark` and `mkmk` feature records. Mark/base coverage, class arrays and format
+1 anchors are validated; mark origins are adjusted without changing advances.
+The 42-test `libwoven` suite, warning-denying library/kernel/workspace
+Clippy, formatting, and Stage 19.2 compositor visual acceptance passed on
+1/2/4 CPUs. Mark-to-mark, cursive attachment, alternate anchor formats,
+broader GPOS lookup ordering and hardware GPU acceleration remain separate
+boundaries.
+
+## Graphics track - bounded GPOS single adjustments (2026-10-19)
+
+GPOS lookup type 1 now supports bounded single-adjustment formats 1 and 2,
+including placement, advance and existing ppem device-table deltas. Single
+adjustments are applied to every shaped glyph, including the final glyph, and
+advance changes propagate to following origins. Value formats, coverage,
+value-record arrays and table bounds are checked. The 42-test `libwoven`
+suite, warning-denying library/kernel/workspace Clippy, formatting, and Stage
+19.2 compositor visual acceptance passed on 1/2/4 CPUs. Mark/cursive/
+attachment positioning, broader GPOS lookup ordering and hardware GPU
+acceleration remain separate boundaries.
+
+## Graphics track - bounded GPOS pair extensions (2026-10-19)
+
+GPOS lookup type 9 now unwraps bounded extension records for nested pair
+positioning lookup type 2, including format 1 and format 2 value records and
+existing ppem device deltas. Extension offsets, nested formats and pair-table
+bounds are checked; unsupported extension forms fail closed. The 42-test
+`libwoven` suite, warning-denying library/kernel/workspace Clippy, formatting,
+and Stage 19.2 compositor visual acceptance passed on 1/2/4 CPUs. Broader
+GPOS lookup ordering, additional positioning lookup types, and hardware GPU
+acceleration remain separate boundaries.
+
+## Graphics track - bounded GSUB extension class lookups (2026-10-19)
+
+GSUB lookup type 7 now unwraps extension records for class-based contextual
+and chaining substitutions (lookup types 5 and 6, format 2), reusing the
+bounded class-definition and nested single-lookup matchers. Extension offsets,
+class sets, rules, lookup references and glyph bounds remain fail-closed. The
+42-test `libwoven` suite, warning-denying library/kernel/workspace Clippy,
+formatting, and Stage 19.2 compositor visual acceptance passed on 1/2/4 CPUs.
+Complete OpenType lookup ordering and hardware GPU acceleration remain
+separate boundaries.
+
+## Graphics track - bounded GSUB extension contextual/chaining format 3 (2026-10-19)
+
+GSUB lookup type 7 now unwraps extension records for bounded format-3
+contextual and chaining substitutions in addition to single and ligature
+lookups. Backtrack, input, lookahead coverage and nested lookup bounds reuse
+the existing fail-closed matcher. The 42-test `libwoven` suite,
+warning-denying library/kernel/workspace Clippy, formatting, and Stage 19.2
+compositor visual acceptance passed on 1/2/4 CPUs. Extension-wrapped
+class-based contextual/chaining forms, complete OpenType lookup ordering, and
+hardware GPU acceleration remain separate boundaries.
+
+## Graphics track - bounded GSUB extension ligatures (2026-10-19)
+
+GSUB lookup type 7 now unwraps bounded extension records for both single and
+ligature substitutions. Extension-wrapped ligatures preserve component
+consumption in the eight-pass shaping pipeline; extension offsets, formats,
+coverage, component and glyph bounds are checked, while other extension lookup
+types fail closed. The 42-test `libwoven` suite, warning-denying
+library/kernel/workspace Clippy, formatting, and Stage 19.2 compositor visual
+acceptance passed on 1/2/4 CPUs. Extension-wrapped contextual and chaining
+lookups, complete OpenType lookup ordering, and hardware GPU acceleration
+remain separate boundaries.
+
+## Graphics track - bounded GSUB extension lookups (2026-10-19)
+
+GSUB lookup type 7 now unwraps bounded extension records for single
+substitution lookups, allowing extension-wrapped format 1/2 substitutions to
+participate in the existing ordered shaping pipeline. Extension offsets,
+formats and nested coverage/substitute bounds are checked; unsupported
+extension lookup types fail closed. The 42-test `libwoven` suite,
+warning-denying library/kernel/workspace Clippy, formatting, and Stage 19.2
+compositor visual acceptance passed on 1/2/4 CPUs. Extension-wrapped
+contextual, chaining and ligature lookups, complete OpenType lookup ordering,
+and hardware GPU acceleration remain separate boundaries.
+
+## Graphics track - bounded GSUB feature-order composition (2026-10-19)
+
+GSUB shaping now applies selected lookup results in a bounded eight-pass
+pipeline, allowing ordered single substitutions and contextual/chaining
+results to compose instead of stopping after the first applicable lookup.
+Ligature consumption still terminates the local pipeline, and repeated
+no-op/cyclic substitutions are bounded. The 42-test `libwoven` suite,
+warning-denying library/kernel/workspace Clippy, formatting, and Stage 19.2
+compositor visual acceptance passed on 1/2/4 CPUs. Full OpenType lookup
+ordering across all lookup types, broader nested composition and hardware GPU
+acceleration remain separate boundaries.
+
+## Graphics track - bounded class-based GSUB chaining format 2 (2026-10-19)
+
+Added GSUB lookup type 6 format 2 class-based chaining. Backtrack, current
+input and lookahead class definitions are matched against bounded chain rules;
+a matching record can invoke a nested type-1 substitution at the current
+glyph. Class-set, rule, sequence, lookup and glyph bounds are checked, with
+unsupported nested forms failing closed. The 42-test `libwoven` suite,
+warning-denying library/kernel/workspace Clippy, formatting, and Stage 19.2
+compositor visual acceptance passed on 1/2/4 CPUs. Broader nested lookup
+composition, complete feature ordering and hardware GPU acceleration remain
+separate boundaries.
+
+## Graphics track - bounded GSUB chaining format 3 (2026-10-19)
+
+Added GSUB lookup type 6 format 3 chaining-context matching over bounded
+backtrack, input and lookahead coverage sequences. Matching records may invoke
+a nested type-1 substitution at the current glyph; lookup, sequence, coverage
+and glyph bounds remain checked and unsupported nested forms fail closed. The
+42-test `libwoven` suite, warning-denying library/kernel/workspace Clippy,
+formatting, and Stage 19.2 compositor visual acceptance passed on 1/2/4 CPUs.
+Class-based chaining formats 1/2, broader nested lookup composition, complete
+feature ordering and hardware GPU acceleration remain separate boundaries.
+
+## Graphics track - bounded class-based contextual GSUB format 2 (2026-10-19)
+
+Added GSUB lookup type 5 format 2 class-based contextual matching. Bounded
+class definitions select rule sets, subsequent input classes are matched, and
+a matching rule can invoke a nested type-1 substitution at the current glyph.
+Class-set, rule, nested-lookup and glyph bounds are checked; unsupported
+chaining and nested forms remain fail-closed. The 42-test `libwoven` suite,
+warning-denying library/kernel/workspace Clippy, formatting, and Stage 19.2
+compositor visual acceptance passed on 1/2/4 CPUs. Chaining substitution,
+full feature ordering and hardware GPU acceleration remain separate
+boundaries.
+
+## Graphics track - bounded contextual GSUB format 3 (2026-10-19)
+
+Added bounded GSUB contextual lookup type 5 format 3 matching for backtrack,
+input and lookahead coverage sequences. A matching substitution record can
+apply a nested type-1 single substitution to the current glyph; coverage,
+sequence, lookup and glyph bounds are checked, while unsupported nested lookup
+forms remain fail-closed. The 42-test `libwoven` suite, warning-denying
+library/kernel/workspace Clippy, formatting, and Stage 19.2 compositor visual
+acceptance passed on 1/2/4 CPUs. Class-based/contextual format 1/2, chaining
+substitution, full feature ordering and hardware GPU acceleration remain
+separate boundaries.
+
+## Graphics track - bounded GSUB single substitutions (2026-10-19)
+
+Added bounded GSUB lookup type 1 single substitutions in formats 1 and 2 for
+the selected Script/LangSys feature set, covering common features including
+`ccmp`, `locl`, `smcp`, `subs`, `sups`, `case` and `cpsp`. Coverage,
+substitute-array and glyph-range bounds are checked; unsupported lookup forms
+fail closed. The 42-test `libwoven` suite, warning-denying library/kernel/
+workspace Clippy, formatting, and Stage 19.2 compositor visual acceptance
+passed on 1/2/4 CPUs. Contextual/chaining GSUB, full feature ordering and
+hardware GPU acceleration remain separate boundaries.
+
+## Graphics track - bounded named LangSys selection (2026-10-19)
+
+Added checked named language-system selection within a requested OpenType
+script. `TextShapingOptions` makes script tag, language tag and optional ppem
+inputs explicit; GSUB `liga`/`rlig` and GPOS `kern` now use the selected
+LangSys, while an absent language tag selects no alternate feature set. The
+42-test `libwoven` suite, warning-denying library/kernel/workspace Clippy,
+formatting, and Stage 19.2 compositor visual acceptance passed on 1/2/4 CPUs.
+Contextual/complex GSUB/GPOS, broader script data and hardware GPU acceleration
+remain separate boundaries.
+
+## Graphics track - bounded script-scoped GPOS (2026-10-19)
+
+Extended script-aware shaping so the requested ScriptList/default LangSys
+scopes both GSUB `liga`/`rlig` substitutions and GPOS `kern` pair positioning.
+`shape_text_ligatures_with_script_and_ppem` makes the combined script and
+ppem inputs explicit; missing scripts select no alternate script, and all
+script, feature, lookup and device-table bounds remain checked. The 42-test
+`libwoven` suite, warning-denying library/kernel/workspace Clippy, formatting,
+and Stage 19.2 compositor visual acceptance passed on 1/2/4 CPUs. Named
+language-system selection, contextual/complex GSUB/GPOS and hardware GPU
+acceleration remain separate boundaries.
+
+## Graphics track - bounded GSUB script selection (2026-10-19)
+
+Added `shape_text_ligatures_with_script`, which resolves a requested bounded
+OpenType ScriptList record, its default language system, and the enabled
+`liga`/`rlig` features before applying type-1 ligature substitutions. Script,
+language-system, feature-index and lookup bounds are checked; the existing
+legacy shaping path remains available, and missing requested scripts produce
+no substitution rather than silently selecting another script. The 42-test
+`libwoven` suite, warning-denying library/kernel/workspace Clippy, formatting,
+and Stage 19.2 compositor visual acceptance passed on 1/2/4 CPUs. GPOS
+script-scoped selection, language-specific systems, contextual/complex GSUB,
+and hardware GPU acceleration remain separate boundaries.
+
+## Graphics track - bounded GPOS device-table deltas (2026-10-18)
+
+Added bounded ppem-aware GPOS device-table decoding for formats 1, 2 and 3.
+Device deltas are applied to the matching x/y placement or advance field and
+then scaled through the existing shaped-glyph origin path. The legacy shaping
+entry point fails closed when a device record requires ppem data; callers that
+have an explicit ppem use `shape_text_ligatures_with_ppem`. The 42-test
+`libwoven` suite, warning-denying library/kernel/workspace Clippy, formatting,
+and Stage 19.2 compositor visual acceptance passed on 1/2/4 CPUs. Complete
+script shaping, variation-index device semantics and hardware GPU acceleration
+remain separate boundaries.
+
+## Graphics track - bounded GPOS y-value positioning (2026-10-18)
+
+Extended GPOS pair adjustments to carry y-placement and y-advance fields in
+addition to x-placement/x-advance. Values are scaled from font units, applied
+to shaped glyph origins and propagated to following origins; all value-record
+and table bounds remain checked. The 42-test `libwoven` suite, warning-denying
+library/kernel/workspace Clippy, formatting, and Stage 19.2 compositor visual
+acceptance passed on 1/2/4 CPUs. Device-table deltas, complete script shaping
+and hardware GPU acceleration remain separate boundaries.
+
+## Graphics track - bounded GPOS class pair positioning (2026-10-18)
+
+Extended the optional GPOS `kern` path to pair-positioning format 2 with
+bounded class-definition formats 1/2 and class-matrix lookup. Class records
+apply scaled x-placement/x-advance adjustments to shaped runs; class counts,
+matrix extents and table bounds are checked. The 42-test `libwoven` suite,
+warning-denying library/kernel/workspace Clippy, formatting, and Stage 19.2
+compositor visual acceptance passed on 1/2/4 CPUs. Full GPOS value/device
+semantics, script shaping and hardware GPU acceleration remain separate
+boundaries.
+
+## Graphics track - bounded OpenType GPOS pair positioning (2026-10-18)
+
+Added optional GPOS `kern` feature handling for type-2 pair-positioning format
+1. The shaped run now applies checked x-placement and x-advance adjustments in
+font units, scales them to pixels, and shifts following origins; unsupported
+formats and malformed records fail closed. The 42-test `libwoven` suite,
+warning-denying library/kernel/workspace Clippy, formatting, and Stage 19.2
+compositor visual acceptance passed on 1/2/4 CPUs. Full GPOS value/device
+formats, script shaping and hardware GPU acceleration remain separate
+boundaries.
+
+## Graphics track - variation-aware shaped rasterization (2026-10-18)
+
+Extended direct glyph-ID shaping/rasterization with normalized variation
+coordinates: `advance_width_glyph_with_variation`, variation-aware outline and
+compound paths, and `render_shaped_text_with_variation` now carry bounded gvar
+metrics and outlines through GSUB-selected glyphs. Base rendering remains
+separate from gvar application so deltas are applied exactly once. The
+41-test `libwoven` suite, warning-denying library/kernel/workspace Clippy,
+formatting, and Stage 19.2 compositor visual acceptance passed on 1/2/4 CPUs.
+Full script shaping and hardware GPU acceleration remain separate boundaries.
+
+## Graphics track - shaped glyph-ID raster integration (2026-10-18)
+
+Added direct glyph-ID outline and raster entry points plus
+`TrueTypeFace::render_shaped_text`, preserving GSUB-selected glyph IDs through
+the antialiased path instead of reducing them back to Unicode characters.
+Glyph bounds, outline storage and renderer capacity remain checked. The
+41-test `libwoven` suite, warning-denying library/kernel/workspace Clippy,
+formatting, and Stage 19.2 compositor visual acceptance passed on 1/2/4 CPUs.
+Variation-aware shaped rasterization, full script shaping and hardware GPU
+acceleration remain separate boundaries.
+
+## Graphics track - bounded OpenType GSUB ligatures (2026-10-18)
+
+Added `ShapedGlyph` and `TrueTypeFace::shape_text_ligatures`, parsing bounded
+GSUB type-1 ligature substitutions linked by `liga`/`rlig` features. Coverage,
+lookup, component-count, source-span, metric and table-end limits are checked;
+fonts without those features use one glyph per character and malformed shaping
+data fails closed. The 41-test `libwoven` suite, warning-denying
+library/kernel/workspace Clippy, formatting, and Stage 19.2 compositor visual
+acceptance passed on 1/2/4 CPUs. Arbitrary shaped-glyph raster integration,
+full script shaping and hardware GPU acceleration remain separate boundaries.
+
+## Graphics track - bounded directional text runs (2026-10-18)
+
+Added `TextDirection::classify` and `TrueTypeFace::layout_text_bidi` for
+bounded strong RTL/LTR classification, neutral inheritance, and visual run
+ordering over caller-owned placements. The API explicitly does not claim the
+full Unicode Bidirectional Algorithm or script shaping. The 40-test `libwoven`
+suite, warning-denying library/kernel/workspace Clippy, formatting, and Stage
+19.2 compositor visual acceptance passed on 1/2/4 CPUs. Full UAX#9 behavior,
+OpenType shaping and hardware GPU acceleration remain separate boundaries.
+
+## Graphics track - bounded hint control flow (2026-10-18)
+
+Added instruction-span-aware `IF`/`ELSE`/`EIF` selection and bounded relative
+`JMPR`/`JROT`/`JROF` branches to the TrueType hint subset. Branch scanning
+skips PUSH payloads, validates targets and nesting, and retains the 1024-step
+execution cap; malformed or unsupported control flow fails closed. The
+40-test `libwoven` suite, warning-denying library/kernel/workspace Clippy,
+formatting, and Stage 19.2 compositor visual acceptance passed on 1/2/4 CPUs.
+Full projection math, hint interpolation/function calls, shaping and bidi
+remain separate boundaries.
+
+## Graphics track - bounded hint storage/CVT resources (2026-10-18)
+
+Added `execute_glyph_hints_with_resources` with checked caller-owned storage
+for `WS`/`RS` and CVT-backed `MIAP`/`MDAP` execution. The no-storage wrapper
+continues to fail closed when a program requests storage. The 40-test
+`libwoven` suite, warning-denying library/kernel/workspace Clippy, formatting,
+and Stage 19.2 compositor visual acceptance passed on 1/2/4 CPUs. Full
+projection math, hint interpolation/control flow, shaping and bidi remain
+separate boundaries.
+
+## Graphics track - bounded hint point/CVT execution (2026-10-18)
+
+Extended `execute_glyph_hints_with_cvt` with checked `MDAP` point selection
+and `MIAP` CVT placement along the active freedom axis. A synthetic
+`PUSHB/PUSHB/MIAP` program moves a glyph point to a caller-owned CVT value;
+the no-CVT wrapper fails closed. The 40-test `libwoven` suite, warning-denying
+library/kernel/workspace Clippy, formatting, and Stage 19.2 compositor visual
+acceptance passed on 1/2/4 CPUs. Full projection math, storage/control flow,
+hint interpolation, shaping and bidi remain separate boundaries.
+
+## Graphics track - bounded hint-state execution (2026-10-18)
+
+Added `HintState` and `TrueTypeFace::execute_glyph_hints` for a bounded
+coordinate-independent TrueType instruction subset: vector-axis selection,
+rounding-state changes, stack primitives and PUSHB/PUSHW forms. Execution is
+limited to 1024 steps and a 256-entry stack; point movement, storage, CVT and
+control-flow instructions fail closed. The 40-test `libwoven` suite,
+warning-denying library/kernel/workspace Clippy, formatting, and Stage 19.2
+compositor visual acceptance passed on 1/2/4 CPUs. Full hinting, shaping,
+bidi and GPU acceleration remain separate boundaries.
+
+## Graphics track - bounded TrueType hint-program boundary (2026-10-18)
+
+Added `TrueTypeFace::glyph_hint_program`, which validates and copies simple
+glyph instruction bytes into caller-owned storage with checked glyph bounds,
+instruction lengths and a 256-byte cap. Composite programs and instruction
+execution fail closed intentionally; the rasterizer remains deterministic and
+does not claim hinting yet. The 40-test `libwoven` suite, warning-denying
+library/kernel/workspace Clippy, formatting, and Stage 19.2 compositor visual
+acceptance passed on 1/2/4 CPUs. GPU output retains the QEMU/VirGL capability
+boundary.
+
+## Graphics track - gvar phantom-point metrics (2026-10-18)
+
+Added `TrueTypeFace::advance_width_with_variation`, retaining the four phantom
+points internally while applying simple-glyph `gvar` deltas, then deriving the
+varied advance from the right/left phantom pair. Full-strength and half-scale
+synthetic metrics are covered. The 40-test `libwoven` suite, warning-denying
+library/kernel/workspace Clippy, formatting, and Stage 19.2 compositor visual
+acceptance passed on 1/2/4 CPUs. Missing legacy LSB records preserve the
+existing base advance API and fail closed for variation metrics; hinting,
+shaping, bidi and GPU acceleration remain separate boundaries.
+
+## Graphics track - composite gvar component variation (2026-10-18)
+
+Extended variation rendering to composite glyphs using component-index
+variation deltas: nested components are decoded recursively, component output
+ranges are tracked, and each component’s bounded X/Y placement delta is applied
+before returning the flattened outline. The 40-test `libwoven` suite,
+warning-denying library/kernel/workspace Clippy, formatting, and Stage 19.2
+compositor visual acceptance passed on 1/2/4 CPUs. This follows the OpenType
+composite rule that packed variation point numbers identify components rather
+than simple-outline points; phantom metrics, hint execution, shaping and bidi
+remain separate boundaries. GPU output retains the QEMU/VirGL capability
+boundary.
+
+## Graphics track - shared-point gvar tuples (2026-10-18)
+
+Added glyph-level packed shared-point handling for `gvar` tuples, including
+the valid all-points form, with checked run expansion, point limits and tuple
+flag validation. The 40-test `libwoven` suite, warning-denying
+library/kernel/workspace Clippy, formatting, and Stage 19.2 compositor visual
+acceptance passed on 1/2/4 CPUs. Composite glyph variation, hint execution,
+shaping and bidi remain explicit follow-on boundaries; GPU output retains the
+QEMU/VirGL capability boundary.
+
+## Graphics track - intermediate gvar regions (2026-10-18)
+
+Extended simple-glyph `gvar` application to embedded-peak intermediate
+regions, with checked start/peak/end ordering and piecewise scalar blending.
+The synthetic outline fixture verifies full-strength and half-strength tuple
+application. The 40-test `libwoven` suite, warning-denying
+library/kernel/workspace Clippy, formatting, and Stage 19.2 compositor visual
+acceptance passed on 1/2/4 CPUs. Shared-point sets, composite variation,
+hinting, shaping and bidi remain explicit follow-on boundaries; GPU output
+retains the QEMU/VirGL capability boundary.
+
+## Graphics track - simple gvar tuple application (2026-10-18)
+
+Added `TrueTypeFace::outline_points_with_variation`, applying bounded embedded
+peak `gvar` tuples to simple glyph outlines at normalized F2DOT14 coordinates.
+Packed delta runs, tuple scalars, point bounds and coordinate cardinality are
+checked; composite glyphs and shared-point sets fail closed until their
+dedicated support exists. The 40-test `libwoven` suite,
+warning-denying library/kernel/workspace Clippy, formatting, and Stage 19.2
+compositor visual acceptance passed on 1/2/4 CPUs. Hint execution, complex
+shaping, bidi and GPU acceleration remain separate; GPU output retains the
+QEMU/VirGL capability boundary.
+
+## Graphics track - bounded gvar payload boundary (2026-10-18)
+
+Added `TrueTypeFace::glyph_variation_data`, validating the `gvar` version,
+axis/shared-tuple metadata, glyph-count match, offset array width, table
+extents and per-glyph slice before returning a borrowed payload. A synthetic
+fixture covers empty and non-empty glyph data. The 40-test `libwoven` suite,
+warning-denying library/kernel/workspace Clippy, formatting, and Stage 19.2
+compositor visual acceptance passed on 1/2/4 CPUs. Tuple delta application,
+hint execution, shaping and bidi remain separate slices; GPU output retains
+the QEMU/VirGL capability boundary.
+
+## Graphics track - accepted fvar axis fixture (2026-10-18)
+
+The bounded `fvar` metadata API now has a positive synthetic-font fixture
+covering the `wght` tag and checked 16.16 minimum/default/maximum values.
+The 40-test `libwoven` suite, warning-denying library/kernel/workspace
+Clippy, formatting, and Stage 19.2 compositor visual acceptance passed on
+1/2/4 CPUs. This remains metadata-only: `gvar` deltas, hint execution,
+shaping and bidi are outside this slice, and GPU output retains the QEMU/VirGL
+capability boundary.
+
+## Graphics track - bounded variable-font axis metadata (2026-10-18)
+
+Added `VariationAxis` and `TrueTypeFace::variation_axes` for checked `fvar`
+axis records and 16.16 min/default/max metadata. Missing tables return an
+empty axis set; truncated records and output overflow fail closed. This slice
+does not apply `gvar` deltas, so rendering remains on the base outline until a
+variation backend exists. The 39-test `libwoven` suite, warning-denying
+library/kernel/workspace Clippy, formatting, and Stage 19.2 compositor visual
+acceptance passed on 1/2/4 CPUs; GPU output retains the documented QEMU/VirGL
+capability boundary.
+
+## Graphics track - explicit RTL placement (2026-10-18)
+
+Added `TextDirection` and `TrueTypeFace::layout_text_direction`, providing
+deterministic bounded LTR/RTL placement from validated advances. RTL mirrors
+the produced placements but intentionally does not claim Unicode bidi
+resolution, shaping, or script behavior. The 38-test `libwoven` suite,
+warning-denying library/kernel/workspace Clippy, formatting, and Stage 19.2
+compositor visual acceptance passed on 1/2/4 CPUs. GPU output remains bounded
+by the documented QEMU/VirGL capability boundary.
+
+## Graphics track - Unicode format-12 cmap (2026-10-18)
+
+`TrueTypeFace` now accepts optional cmap format 12 groups and resolves
+non-BMP Unicode code points before falling back to the validated BMP format-4
+path. Group bounds, glyph IDs and table extents are checked; malformed data
+fails closed. A synthetic non-BMP fixture verifies mapping and advance lookup.
+The 38-test `libwoven` suite, warning-denying library/kernel/workspace Clippy,
+formatting, and Stage 19.2 compositor visual acceptance passed on 1/2/4 CPUs.
+Full script shaping, bidi and variation tables remain open; GPU output retains
+the documented QEMU/VirGL capability boundary.
+
+## Graphics track - TrueType point-matched composites (2026-10-18)
+
+Composite glyph decoding now supports both XY-offset and point-matching
+component arguments, applying component transforms before anchoring to an
+already-emitted parent point. Invalid parent/component indices fail closed;
+recursion and output remain bounded. The synthetic mapped glyph now contains
+both component forms. The 37-test `libwoven` suite, warning-denying
+library/kernel/workspace Clippy, formatting, and Stage 19.2 compositor visual
+acceptance passed on 1/2/4 CPUs. Variation deltas, hint execution, modern
+shaping and scripts remain open; GPU output retains the documented QEMU/VirGL
+capability boundary.
+
+## Graphics track - bounded TrueType composite glyphs (2026-10-18)
+
+The TrueType outline decoder now supports bounded composite glyph components
+with XY offsets, uniform/non-uniform/two-by-two transforms, recursive depth
+limits, instruction skipping and caller-buffer capacity checks. The synthetic
+mapped glyph fixture is now composite and renders through the antialiased path.
+Point-matching composite arguments, variation deltas and hint execution remain
+unsupported and fail closed. The 37-test `libwoven` suite, warning-denying
+library/kernel/workspace Clippy, formatting, and Stage 19.2 compositor visual
+acceptance passed on 1/2/4 CPUs; GPU output remains bounded by the documented
+QEMU/VirGL device capability.
+
+## Graphics track - bounded TrueType word wrapping (2026-10-18)
+
+Added `TrueTypeFace::layout_text_word_box`, preserving whole words when
+wrapping at spaces while retaining explicit newline handling, checked advances
+and optional kerning. Words wider than the box remain intact; capacity and
+malformed/unsupported input fail closed. The 37-test `libwoven` suite,
+warning-denying library/kernel/workspace Clippy, formatting, and Stage 19.2
+compositor visual acceptance passed on 1/2/4 CPUs. Script shaping, bidi,
+hinting and compound glyph components remain open; GPU output retains the
+documented QEMU/VirGL capability boundary.
+
+## Graphics track - TrueType bitmap fallback (2026-10-18)
+
+Added `TrueTypeFace::render_text_with_bitmap_fallback`: mapped glyphs use the
+validated antialiased outline pipeline, while unmapped or unsupported glyphs
+use the established bounded shared bitmap font. Mixed outline/fallback output
+is covered by the synthetic face fixture. The 37-test `libwoven` suite,
+warning-denying library/kernel/workspace Clippy, formatting, and Stage 19.2
+compositor visual acceptance passed on 1/2/4 CPUs. This remains single-line;
+modern shaping, bidi, hinting and compound glyph components remain open, and
+GPU output retains the documented QEMU/VirGL capability boundary.
+
+## Graphics track - bounded TrueType line breaking (2026-10-18)
+
+Added `TrueTypeFace::layout_text_box` for caller-owned single-line placements
+with explicit newline handling, width wrapping, line height, checked advances
+and optional kerning. Invalid dimensions, unsupported glyphs and capacity
+overflow fail closed. The 37-test `libwoven` suite, warning-denying
+library/kernel/workspace Clippy, formatting, and Stage 19.2 compositor visual
+acceptance passed on 1/2/4 CPUs. Script shaping, bidi, word-level breaking,
+hinting and fallback remain open; GPU presentation remains bounded by the
+documented QEMU/VirGL device capability.
+
+## Graphics track - optional TrueType kerning (2026-10-18)
+
+`TrueTypeFace` now recognizes optional legacy TrueType `kern` format-0
+horizontal subtables and applies checked pair adjustments during bounded
+single-line layout. Fonts without a kerning table preserve prior placement;
+malformed optional data fails closed. The 37-test `libwoven` suite,
+warning-denying library/kernel/workspace Clippy, formatting, and Stage 19.2
+compositor visual acceptance passed on 1/2/4 CPUs. Modern shaping, script
+support, line breaking and fallback remain open, and GPU presentation remains
+bounded by the documented QEMU/VirGL device capability.
+
+## Graphics track - bounded TrueType text layout (2026-10-18)
+
+Added `GlyphPlacement`, `TrueTypeFace::layout_text`, and `render_text` for
+allocation-free single-line placement and antialiased glyph rendering from
+validated `hmtx` advances. Unsupported glyphs, newlines and output overflow
+fail closed without partial layout. The 37-test `libwoven` suite,
+warning-denying library/kernel/workspace Clippy, formatting, and Stage 19.2
+compositor visual acceptance passed on 1/2/4 CPUs. Kerning, script shaping,
+line breaking, hinting and fallback remain explicit follow-on work; GPU output
+is still bounded by the documented QEMU/VirGL device capability.
+
+## Graphics track - TrueType glyph raster entry point (2026-10-18)
+
+`TrueTypeFace::render_glyph` now connects validated simple-glyph contour
+assembly to the integer-antialiased `CompoundPath` renderer. A synthetic face
+fixture proves a mapped glyph reaches a caller-owned Canvas. The 37-test
+`libwoven` suite, warning-denying library/kernel/workspace Clippy, formatting,
+and Stage 19.2 compositor visual acceptance passed on 1/2/4 CPUs. This remains
+a glyph raster entry point rather than a shaping engine: compound components,
+kerning, scripts, hinting and font fallback remain open; GPU presentation is
+still bounded by the documented QEMU/VirGL device capability.
+
+## Graphics track - bounded antialiased fills (2026-10-18)
+
+Added deterministic 4x4 supersampled coverage for `Path` and `CompoundPath`
+fills, including source-over opacity composition and even-odd holes. The
+implementation uses integer arithmetic, clips to the Canvas, and keeps work
+bounded by the raster bounds and 16 samples per pixel; `hello-gui` exercises
+the antialiased badge. The 37-test `libwoven` suite, warning-denying
+library/kernel/workspace Clippy, formatting, and Stage 19.2 compositor visual
+acceptance passed on 1/2/4 CPUs. Hardware VirGL presentation remains subject
+to the documented QEMU/device capability boundary.
+
+## Graphics track - bounded multi-contour paths (2026-10-18)
+
+Added `CompoundPath` with eight bounded closed contours, even-odd filling,
+compound stroking, and `TrueTypeFace::outline_compound` for assembling all
+simple contours of a glyph. Nested contours render as holes; overflow and
+compound TrueType components fail closed. The 36-test `libwoven` suite,
+warning-denying library/kernel/workspace Clippy, formatting, and Stage 19.2
+compositor visual acceptance passed on 1/2/4 CPUs. Hardware GPU presentation
+remains separately bounded by the previously documented QEMU VirGL/device
+capability boundary.
+
+## Graphics track - TrueType contour assembly (2026-10-18)
+
+`TrueTypeFace::outline_contour` now assembles one decoded simple-glyph contour
+into a bounded closed `Path`, mapping font units from a baseline origin and
+handling on-curve/off-curve transitions plus implied midpoints through the
+quadratic primitive. Path construction is transactional on capacity failure.
+The 35-test `libwoven` suite, warning-denying library/kernel/workspace Clippy,
+formatting, and Stage 19.2 compositor visual acceptance passed on 1/2/4 CPUs.
+The API intentionally selects one contour because multi-contour fill/hole
+semantics are not yet part of `Path`; compound glyphs, shaping and antialiasing
+remain open.
+
+## Stage 21.4 WovenStore dependency-ordered batches (2026-10-20)
+
+WovenStore transactions now accept bounded package batches in arbitrary input
+order and resolve dependencies through repeated bounded passes. Missing or
+cyclic dependencies fail without committing a partial catalog, while the
+existing capability policy, monotonic update, dependent-removal, and explicit
+rollback rules remain active. Host tests, warning-denying Clippy, and QEMU
+acceptance passed on 1/2/4 CPUs. Evidence is recorded in
+`docs/audit-stage21-4-wovenstore-batches-2026-10-20.md`.
+
+Persistent WovenFS publication, power-loss recovery, service/IPC authority,
+and physical USB qualification remain open.
+
+## Stage 21.5 durable WovenStore record codec (2026-10-20)
+
+WovenStore now defines a bounded checksummed `WSTC` v1 catalog record codec.
+It round-trips capability policy, package versions, application digests, and
+dependency metadata, and rejects corruption, malformed lengths, invalid names,
+duplicates, and invalid dependency fields. Host tests, warning-denying Clippy,
+and QEMU acceptance passed on 1/2/4 CPUs. Evidence is recorded in
+`docs/audit-stage21-5-wovenstore-records-2026-10-20.md`.
+
+The record is not yet wired to native WovenFS publication; crash/power-loss
+service integration, IPC authority, and physical USB qualification remain open.
+
+## Stage 21.6 native WovenFS catalog persistence (2026-10-20)
+
+The package catalog record is now persisted through the capability-gated native
+WovenFS writer at `/wfs/packages/catalog.wstc`, read back from the mounted
+volume, and decoded after journaled commit. The Stage 21.6 disposable ATA QEMU
+gate passed on 1/2/4 CPUs. Evidence is under `audit-artifacts/stage21.6-{1,2,4}cpu`;
+host/freestanding warning-denying Clippy also passed.
+
+This does not yet publish package payload/resource files atomically with the
+catalog, recover interrupted install/update/remove transactions, or provide a
+long-lived service/IPC boundary. Physical USB qualification remains open.
+
+## Stage 21.7 authenticated WovenPackage payload publication (2026-10-20)
+
+The kernel package service now publishes authenticated WPKG application and
+resource payloads as bounded, versioned WovenFS chunks and commits the WSTC
+catalog only after the chunks are durable. A failed chunk/catalog write cleans
+up chunks created by that attempt. The disposable ATA QEMU gate passed on
+1/2/4 CPUs; host/freestanding warning-denying Clippy passed. Evidence is
+recorded in `docs/audit-stage21-7-package-publication-2026-10-20.md`.
+
+This is not yet a complete package manager: multi-package crash recovery,
+persistent update/removal transactions, package-service userspace IPC, and
+physical USB qualification remain open.
+
+## Stage 21.8 WovenPackage install-intent recovery (2026-10-20)
+
+The package service now persists a checksummed `WPKJ` prepared/committed intent
+around payload publication. Recovery reconciles the intent with the WSTC
+catalog and removes orphaned application/resource chunks from interrupted
+prepared installs. The disposable ATA QEMU recovery gate passed on 1/2/4 CPUs;
+host/freestanding warning-denying Clippy passed. Evidence is recorded in
+`docs/audit-stage21-8-package-recovery-2026-10-20.md`.
+
+Multi-package recovery, persistent update/removal transactions, full power-loss
+injection, userspace package-service IPC, and physical USB qualification remain
+open.
+
+## Stage 21.9 WovenPackage update/removal transactions (2026-10-20)
+
+WSTC v2 now records bounded application/resource chunk counts. WPKJ records
+both the incoming and superseded generation. Package removal uses a
+catalog-first journaled commit while the prior generation remains available
+for the bounded rollback window. The Stage 21.9 disposable ATA QEMU gate
+passed on 1/2/4 CPUs, and the
+Stage 21.6/21.7/21.8 regression gates passed again on 1/2/4 CPUs after the ABI
+and journal changes. Evidence is under timestamped `audit-artifacts`
+directories. Host and affected freestanding warning-denying Clippy passed.
+
+Multi-package recovery, power-loss injection at every boundary, sandbox
+enforcement, userspace package-service IPC/ownership, and physical USB
+qualification remain open.
+
+## Stage 21.10 WovenPackage bounded rollback (2026-10-20)
+
+The package service now persists one previous WSTC catalog generation before
+each install or removal. It retains the corresponding payload generation,
+records rollback intent in a checksummed WRBK record, restores the catalog and
+payload authority idempotently, and retires only generations no longer active
+or rollback-capable. The Stage 21.10 disposable ATA QEMU gate passed on 1/2/4
+CPUs; host tests and warning-denying host/freestanding Clippy passed.
+
+Multi-package rollback, power-loss injection at every boundary, sandbox
+enforcement, userspace package-service IPC/ownership, and physical USB
+qualification remain open.
+
+## Stage 21.11 WovenPackage sandbox launch boundary (2026-10-20)
+
+Package capability declarations now produce an immutable WovenGuard user
+profile before launch. Declarations outside the user-domain ceiling are
+rejected; file access is narrowed to system/temporary/mounted/home scopes,
+device policy follows declared device capabilities, and service discovery is
+limited to application-class services. The profile-aware spawn path destroys
+invalid images before address-space publication. The Stage 21.11 disposable
+ATA QEMU gate passed on 1/2/4 CPUs; host and freestanding warning-denying
+Clippy plus the 63-test `libwoven` suite passed.
+
+This closes the package launch-policy boundary but not a complete userspace
+WovenPackage IPC broker, multi-package power-loss recovery, or physical USB
+qualification.
+
+## Graphics track - bounded quadratic paths (2026-10-18)
+
+`Path::quadratic_to` now flattens quadratic Bézier segments into four
+deterministic line segments using bounded fixed-point integer arithmetic.
+Capacity checks are atomic, and `hello-gui` exercises the curve in the visual
+frame. The 35-test `libwoven` suite, warning-denying library/kernel/workspace
+Clippy, formatting, and Stage 19.2 compositor visual acceptance passed on 1/2/4
+CPUs. This prepares curve geometry for TrueType contours; curve-aware font
+contour assembly and antialiased rasterization remain open.
+
+## Graphics track - TrueType simple outlines (2026-10-18)
+
+`TrueTypeFace` now validates optional `glyf`/`loca` storage and decodes
+bounded simple-glyph point streams into caller-owned `OutlinePoint` buffers.
+Contour endpoints, repeated flags, delta streams and short/long loca formats
+are covered; compound, oversized and malformed glyphs fail closed. The
+34-test `libwoven` suite, warning-denying Clippy, formatting, and Stage 19.2
+visual acceptance passed on 1/2/4 CPUs. Curve expansion, rasterization,
+antialiasing and shaping remain open.
+
+## Graphics track — TrueType horizontal metrics (2026-10-18)
+
+The validated `TrueTypeFace` boundary now reads `hhea`/`hmtx` horizontal
+metrics and returns checked advance widths for mapped glyphs, including the
+TrueType final-metric rule for glyphs beyond the long-metrics array. The
+33-test `libwoven` suite, warning-denying library/kernel/workspace Clippy,
+formatting, and Stage 19.2 compositor visual acceptance passed on 1/2/4 CPUs.
+Outline extraction and rasterization remain open.
+
+## Graphics track — TrueType face boundary (2026-10-18)
+
+`libwoven::graphics::TrueTypeFace` now validates a borrowed TrueType sfnt
+header, bounded `head`/`maxp`/`cmap` tables, and format-4 BMP cmap mappings
+without allocation or unsafe code. Invalid signatures, truncated directories,
+missing tables and unsupported cmap formats fail closed; the existing shared
+bitmap font remains the rendering fallback. The 33-test `libwoven` suite,
+warning-denying library/kernel/workspace Clippy, formatting, and Stage 19.2
+compositor visual acceptance passed on 1/2/4 CPUs. Outline extraction,
+antialiasing and complex shaping remain subsequent font slices because no
+font asset is bundled in the repository.
+
+## Graphics track — alpha image blits (2026-10-18)
+
+`Renderer::image_blended` now provides bounded row-major image uploads with
+uniform source-over alpha, using the same clipped Canvas blend path as panels
+and polygons. `hello-gui` exercises the alpha-aware icon upload. The 32-test
+`libwoven` suite, warning-denying library/kernel/workspace Clippy, formatting,
+and Stage 19.2 compositor visual acceptance passed on 1/2/4 CPUs.
+
+## Graphics track — rounded alpha panels (2026-10-18)
+
+`Renderer::rounded_rect` and `rounded_rect_blended` now provide bounded
+rounded-panel/button fills with Canvas clipping and the shared source-over
+alpha formula. `hello-gui` exercises a translucent rounded panel in its
+visible frame. The 32-test `libwoven` suite, warning-denying
+library/kernel/workspace Clippy, formatting, and Stage 19.2 compositor visual
+acceptance passed on 1/2/4 CPUs.
+
+## Graphics track — bounded text layout (2026-10-18)
+
+`Renderer::text_box` now wraps UTF-8 text at the available width and clips it
+to a bounded rectangle, using the shared glyph provider, replacement fallback,
+and integer scaling. `hello-gui` exercises the text-box path in its visible
+frame. The 31-test `libwoven` suite, warning-denying library/kernel/workspace
+Clippy, formatting, and Stage 19.2 compositor visual acceptance passed on
+1/2/4 CPUs. Word shaping and outline fonts remain separate font-engine work.
+
+## Graphics track — alpha-blended path fills (2026-10-18)
+
+Closed paths now support uniform source-over alpha through
+`Renderer::fill_path_blended`, sharing the Canvas blend formula used by the
+existing rectangle/compositor paths. `hello-gui` exercises a translucent
+filled polygon. The 30-test `libwoven` suite, warning-denying
+library/kernel/workspace Clippy, formatting, and Stage 19.2 compositor visual
+acceptance passed on 1/2/4 CPUs.
+
+## Graphics track — horizontal gradients (2026-10-18)
+
+`Renderer::horizontal_gradient` now complements the existing clipped vertical
+gradient, with deterministic endpoint interpolation and Canvas clipping.
+`hello-gui` exercises both directions in its visible frame. The 29-test
+`libwoven` suite, warning-denying library/kernel/workspace Clippy, formatting,
+and Stage 19.2 compositor visual acceptance passed on 1/2/4 CPUs.
+
+## Graphics track — bounded path filling (2026-10-18)
+
+Closed `Path` geometry now supports clipped even-odd filling through
+`Renderer::fill_path`, with iteration restricted to the Canvas bounds so large
+coordinates remain bounded. `hello-gui` exercises a filled polygon alongside
+the existing stroked path. The 28-test `libwoven` suite, warning-denying
+library/kernel/workspace Clippy, formatting, and Stage 19.2 compositor visual
+acceptance passed on 1/2/4 CPUs.
+
+## Graphics track — bounded paths (2026-10-18)
+
+`libwoven::graphics` now provides allocation-free bounded `Path` geometry with
+move, line and close operations, plus a clipped integer line rasterizer through
+`Renderer::stroke_path`. `hello-gui` exercises an open chevron path in its
+visible frame. The 27-test `libwoven` suite, warning-denying
+library/kernel/workspace Clippy, formatting, and Stage 19.2 compositor visual
+acceptance passed on 1/2/4 CPUs. Path filling and richer outline/font work
+remain subsequent increments.
+
+## Graphics track — integer font scaling (2026-10-18)
+
+The shared-glyph `Font` provider now supports bounded integer scaling from 1×
+through 16×. `Renderer::text_scaled` and `text_centered_scaled` rasterize
+nearest-neighbour glyph blocks through the same clipped Canvas path, preserving
+UTF-8 replacement fallback and deterministic layout. `hello-gui` exercises a
+scaled glyph in its visible frame.
+
+The 26-test `libwoven` suite, warning-denying library/kernel/workspace Clippy,
+formatting, and Stage 19.2 compositor visual acceptance passed on 1/2/4 CPUs.
+TrueType/OpenType outlines, hinting and shaping remain future font-engine
+increments.
+
+## Graphics track — shared font metrics (2026-10-18)
+
+`libwoven::graphics` now exposes a `Font` provider and `TextMetrics` backed by
+the shared kernel glyph table. Multiline UTF-8 text is measured with bounded
+replacement-glyph fallback, and `Renderer::text_centered` uses those metrics
+while retaining Canvas clipping. `hello-gui` exercises centered text in its
+visible WovenGraphics frame.
+
+The 25-test `libwoven` suite, warning-denying library/kernel/workspace Clippy,
+formatting, and Stage 19.2 compositor visual acceptance passed on 1/2/4 CPUs.
+Full TrueType/OpenType shaping and richer font fallback remain the next font
+engine increments; this slice preserves pixel identity with the compositor.
+
+## Graphics track — fixed-point transforms (2026-10-18)
+
+`libwoven::graphics` now provides a deterministic signed 16.16 `Transform`
+and `Renderer::transformed_rect`, which fills transformed rectangles as clipped
+triangles through the existing caller-owned `Canvas`. This adds scene-level
+translation, scaling and affine shear without changing the surface ABI or
+introducing unsafe code. `hello-gui` exercises the transformed primitive in
+its visible WovenGraphics frame.
+
+The 24-test `libwoven` suite, warning-denying library/kernel/workspace Clippy,
+formatting, and Stage 19.2 compositor visual acceptance passed on 1/2/4 CPUs.
+The accepted software fallback remains the display path; VirGL blob-backed
+presentation is still an explicit QEMU capability boundary documented below.
+
+## Graphics track — WovenGraphics abstraction and visual acceptance (2026-10-18)
+
+The first WovenGraphics boundary is now present in `libwoven::graphics`.
+Typed `Color` and clipped `Rect` geometry are format-independent, while
+`Renderer` draws through the existing safe software `Canvas`. The renderer
+does not own the framebuffer or bypass compositor authority; applications
+upload its bounded pixel output through the existing `GraphicsSurface` ABI.
+
+`hello-gui` now routes a visible title/content frame through this abstraction
+and emits `[S16G] WovenGraphics visual frame: PASSED`. The Stage 19.2 QEMU
+visual harness requires that marker and still verifies the compositor's
+screen pixel and retained window state. The acceptance passed on 1, 2 and 4
+CPUs with evidence under `target/hello-gui-compositor-{1,2,4}cpu/`.
+
+Host `libwoven` tests (20), warning-denying application Clippy, formatting and
+Python validation passed. This is a software-rendering abstraction and visual
+composition checkpoint; font shaping, paths/gradients, GPU acceleration,
+window policy and the physical display path remain future work. The existing
+repository Stage 16.1 application-loader gate is a separate historical
+boundary and is not relabeled by this graphics-track increment.
+
+### Graphics track - 2D primitives increment (2026-10-18)
+
+`Renderer` now also provides clipped vertical gradients, one-pixel strokes,
+and bounded row-major image blits. `hello-gui` exercises all three in its
+visible frame and emits `[S16G2] WovenGraphics 2D frame: PASSED`; the Stage
+19.2 harness requires both WovenGraphics markers. The renderer remains safe
+Rust over the existing caller-owned `Canvas`, with no new ABI or unsafe code.
+
+The 21-test `libwoven` suite, warning-denying workspace and application
+Clippy, formatting, and harness syntax checks passed. Stage 19.2 QEMU visual
+acceptance passed on 1/2/4 CPUs with evidence in
+`target/hello-gui-compositor-{1,2,4}cpu/`. Paths, font shaping, GPU backends,
+window policy, and the physical display path remain future work.
+
+### Graphics track - VirtIO-GPU capability boundary (2026-10-18)
+
+The modern VirtIO transport now retains negotiated device features. The
+VirtIO-GPU driver requests and exposes a typed capability record including
+scanout count and the optional VIRGL/3D feature bit. Existing 2D scanout
+resource creation and presentation are unchanged, and software rendering
+remains the selected fallback until a VIRGL command path exists.
+
+Kernel target Clippy with `stage20-14-test`, workspace all-target Clippy, and
+the Stage 20.14 two-monitor pixel-verified acceptance passed on 1/2/4 CPUs.
+Evidence is preserved under `audit-artifacts/stage20.14-{1,2,4}cpu-*`.
+
+The VIRGL lifecycle slice now follows the VirtIO contract for bounded context
+creation and destruction when the device advertises VIRGL. The current QEMU
+two-monitor device does not expose a VIRGL context path, so the lifecycle is
+capability-gated and the tested 2D fallback remains unchanged; no shader or
+GPU rendering claim is made yet.
+
+The driver now also reads the advertised capset count and can query bounded
+capset metadata before context creation. This prevents selecting a rendering
+protocol without a device-reported capset version and size. Stage 20.14
+remained pixel-verified on 1/2/4 CPUs after the change.
+
+The acceptance harness now has a `--virgl` mode using QEMU
+`virtio-gpu-gl-pci` with `egl-headless`. VIRGL capability discovery and
+context lifecycle passed on 1/2/4 CPUs. This is a separate discovery gate:
+resource creation, command streams, and GPU-backed compositor presentation
+are still open.
+
+The VIRGL GL-QEMU path now verifies a bounded 3D resource lifecycle:
+resource creation, context attachment, detachment, and release. This passed
+on the 1-CPU discovery run after the strict kernel Clippy checks. A valid
+VIRGL command stream and GPU-backed compositor presentation are still not
+claimed.
+
+The transport now submits the protocol-defined zero-payload VIRGL NOP command
+after resource attachment, and the GL-QEMU discovery run passes that full
+`SUBMIT_3D` framing/context-routing probe. This validates transport only; it
+does not yet render a GPU frame.
+
+The NOP packet is now produced by a bounded `VirglStream` encoder rather than
+an ad hoc raw dword. Its checked header/payload capacity is covered by the
+same 1/2/4-CPU GL-QEMU discovery gate, while visible GPU clear/draw output and
+compositor handoff remain the next acceptance boundary.
+
+The next probe now encodes a VIRGL surface, framebuffer binding, RGBA clear,
+and surface destruction in one bounded stream; GL-QEMU accepts this command
+transport sequence on 1/2/4 CPUs. A direct `SET_SCANOUT` attempt with the
+3D resource was rejected by QEMU with device status `0x1203`, so the visual
+scanout gate remains explicitly open and the accepted software/2D fallback is
+unchanged. The failed probe is preserved under
+`audit-artifacts/stage20.14-1cpu-1792313193416105600`.
+
+The next presentation probe added capability-gated VirtIO resource-blob
+creation and `SET_SCANOUT_BLOB`, with QEMU blob negotiation available through
+the harness's opt-in `--blob` flag. This QEMU build accepts guest blob
+creation, but rejects the blob as a VirGL context resource; its host-3D-plus-
+guest variant is rejected at creation. The default VIRGL gate therefore stays
+blob-disabled and passes on 1/2/4 CPUs; blob-backed visual presentation is
+still open. Retesting with QEMU's explicit `hostmem=64M` window produced the
+same `0x1200` host-3D blob-creation failure.
+
+### Graphics track - software 3D foundation (2026-10-18)
+
+`libwoven::graphics` now includes caller-owned `DepthBuffer`, projected
+`Vertex3` values, and a clipped depth-tested triangle rasterizer with
+interpolated vertex colour. `hello-gui`
+renders a small two-face software 3D frame and emits
+`[S16G3D] WovenGraphics software 3D frame: PASSED`; Stage 19.2 requires that
+marker alongside the 2D markers. The 23-test `libwoven` suite, warning-denying
+Clippy, formatting, and QEMU visual acceptance passed on 1/2/4 CPUs. This is
+deterministic software rendering, not GPU acceleration or a shader API; the
+next hardware-facing step is a VirtIO-GPU capability/backend boundary with a
+software fallback preserved.
+
+## Stage 10.7 exact Windows acceptance — passed 2026-10-18
+
+The authoritative `RUN-STAGE10.7.ps1` launcher exited 0 on the current
+working tree after regenerable build caches were reclaimed. Host acceptance,
+host lint, build, warning-denying Clippy, host tests, repeated 1-CPU memory
+regressions, Stage 7.6 2/4-CPU closure, 1/2/4-CPU host-verified network
+regressions, and isolated Stage 10.1–10.7 production boots all passed. The
+Stage 10.7 TCP gate verified connect, two transmissions, receive, and FIN/EOF
+at 1/2/4 CPUs. Full transcript and preserved serial evidence:
+`audit-artifacts/acceptance-20261018-091013-150/`.
+
+This is deterministic QEMU/host acceptance only; physical USB/UEFI boot and
+production-media qualification remain open. The shared tree still contains
+uncommitted work from both agents, so this acceptance must not be represented
+as a standalone commit until the tree is intentionally staged and reviewed.
+
+## AX201 firmware provider and physical DMA queue owner — 2026-10-17
+
+The AX201 lifecycle now accepts a named provider source and rejects a
+non-AX201 firmware filename before parsing. The exact API-77 provider name is
+`iwlwifi-QuZ-a0-hr-b0-77.ucode`; the external blob remains ignored and is not
+embedded or committed. `Ax201QueueOwner` now allocates the 22000 MQ RX
+free/used/status rings, command ring and one owned RX buffer per 512-entry MQ RX descriptor, initializes
+the free descriptors with physical addresses and buffer IDs, and feeds those
+addresses into context-info. Startup refuses to proceed without attached
+queue ownership, and teardown retains queues until explicit hardware
+quiescence. Startup also rings the Intel 22000 RFH shadow write-index doorbell
+(`0x1c80`) for the initialized 512-entry RX ring before `CPU_INIT_RUN`. Stage 13.9
+passed on 1/2/4 CPUs; kernel target and host/all-target warning-denying
+Clippy passed.
+
+The live RX reclaim path now consumes completions in device order and validates every device-produced AX201 completion
+rbid against the kernel-owned buffer table before copying data. AX201's MQ
+free descriptors are 16-byte transfer descriptors; its used completions are
+32-byte records containing the rbid/flags rather than a returned address.
+Each consumed buffer is returned to the free ring with its original physical
+address, and the physical poller rings the RFH write pointer at the
+eight-descriptor cadence.
+The bounded four-command host-command path now builds short or wide headers into owned DMA,
+writes a 256-byte 22000 TFD on command queue 9, rings the command pointer, and
+retains the payload until the matching response sequence is observed. The
+queue-owner self-test rejects stale command completions.
+The TFD construction is now a shared checked encoder: it bounds the transfer
+buffer list to 25 entries, validates 36-bit addresses and non-zero lengths,
+and is covered by the queue-owner self-test before the descriptor is published.
+The driver now also has a typed scan-control wire boundary: API-defined scan
+configuration and abort commands are encoded into owned command payloads, and
+scan-complete notifications are validated and decoded by group, command,
+versioned payload size, UID, and status fields. This is command/notification
+plumbing only; a full channel/SSID scan request and radio result are not yet
+claimed.
+The latest increment adds explicit API-17 passive and active UMAC scan-request
+encoders bounded to 67 channels. The active path owns a real broadcast probe
+template, supports up to 20 checked directed SSIDs, and sets the firmware's
+per-channel SSID-selection bits. The per-iteration completion parser checks
+the result-record count before decoding.
+The next increment adds the checked API-1 `PHY_CONTEXT_CMD` wire boundary:
+the packed 40-byte context is encoded with explicit channel, band, and width
+validation and is available through the driver command path. It is not sent by
+the physical probe yet; MAC context, binding context, command-status handling,
+and teardown sequencing must be completed before radio commands are enabled.
+The following increment adds the API-1 managed-station MAC context and API-2
+binding context encoders, plus strict generic command-response status parsing.
+The physical activation probe now submits PHY, MAC, and binding contexts in
+that order after ALIVE and requires a zero firmware status for each response.
+It still stops before scan/association and remains fail-closed on any context
+timeout or rejection.
+After those contexts succeed, it now issues a bounded API-17 active broadcast
+scan on channels 1, 6, and 11, consumes iteration/completion notifications,
+and sends the matching abort command on timeout. Directed SSIDs are supported
+by the wire encoder; association, WPA, and returned-frame ingestion remain
+unimplemented. The RX path now also decodes AX201 `REPLY_RX_MPDU_CMD`
+descriptors, validates CRC/status and MPDU bounds, and feeds valid beacon or
+probe-response frames into the bounded `Manager` scan table with bounded
+metadata-derived RSSI.
+Management-frame TX is now wire-encoded against the 22000 TX_CMD v9 layout;
+dedicated data-TX queue ownership and TX completion handling remain open.
+The final command-response reclamation correction also passed the Stage 13.9
+1/2/4-CPU chain; the retained evidence IDs are
+`stage13.9-1cpu-1792256412816237100`,
+`stage13.9-2cpu-1792256436910132400`, and
+`stage13.9-4cpu-1792256460770673800`.
+The subsequent passive-scan increment also passed on 1/2/4 CPUs with evidence
+in `stage13.9-1cpu-1792256636696324900`,
+`stage13.9-2cpu-1792256661182426300`, and
+`stage13.9-4cpu-1792258543111313700`.
+The active-probe encoder and physical call-site also pass the fresh matrix in
+`stage13.9-1cpu-1792259066847956700`,
+`stage13.9-2cpu-1792259146012605800`, and
+`stage13.9-4cpu-1792259181589741900`.
+The RX MPDU/scan-table increment also passed on 1/2/4 CPUs with evidence in
+`stage13.9-1cpu-1792259384946552100`,
+`stage13.9-2cpu-1792259451253593400`, and
+`stage13.9-4cpu-1792259489563484400`. The current physical image is
+42,008,576 bytes with SHA-256
+`f0c1d430652071c8f917169da37acc281d2493218db75390ee9253a14f286073`.
+The TX boundary increment passed on 1/2/4 CPUs with evidence in
+`stage13.9-1cpu-1792259723636441300`,
+`stage13.9-2cpu-1792259774430287500`, and
+`stage13.9-4cpu-1792259815230643000`. The current physical image is
+42,008,576 bytes with SHA-256
+`bddc86b900dfd7525cf59f7ba9917e8a7e71f6de1cd387574c20c7194828d75b`.
+The following increment adds a separate bounded AX201 data-TX queue owner:
+its 32-entry descriptor ring and encoded TX payloads are retained in owned
+DMA until the exact queue/index completion is reclaimed; only Intel's
+management queues 5–8 and data queues 10–30 are accepted, while queue 9 and
+the RX queue are rejected as TX targets. The driver exposes submit/reclaim methods,
+but physical DQA queue configuration and device-produced TX completion
+decoding remain prerequisites before the physical probe may transmit.
+Stage 13.9 passed again on 1/2/4 CPUs with evidence in
+`stage13.9-1cpu-1792260873010961800`,
+`stage13.9-2cpu-1792260907652843800`, and
+`stage13.9-4cpu-1792260941804531300`. The rebuilt physical candidate is
+43,057,152 bytes with SHA-256
+`3c8220bd850e82171863c13daed3861b92184fdeb1db74109019dec645c727bc`.
+The latest increment corrects the TX_CMD v9 field offsets to the Intel
+22000 layout, adds the 4-byte DQA-enable and 36-byte API-v3 scheduler-queue
+encoders, owns the required byte-count DMA table, and decodes bounded single-
+frame `REPLY_TX` notifications using the RX header's queue/index sequence.
+The physical probe now attempts DQA enable and scheduler queue allocation
+after ALIVE and continues only after a valid queue response; it still does not
+send an arbitrary management frame. Stage 13.9 passed again with evidence in
+`stage13.9-1cpu-1792261608259229200`,
+`stage13.9-2cpu-1792261642569914800`, and
+`stage13.9-4cpu-1792261677212040100`. The current physical candidate is
+43,057,152 bytes with SHA-256
+`60c7323329d7eeb11407384c087cd40a4cada154186036041660416202cefd29`.
+The physical path now exercises one host-owned management TX after a
+successful scan: it builds an Open-System authentication request for the
+first bounded scan result, submits corrected TX_CMD v9 through the configured
+queue, waits for `REPLY_TX`, reclaims the exact queue/index slot, and resets
+the link state without attempting association or credentials. Stage 13.9
+passed again on 1/2/4 CPUs with evidence in
+`stage13.9-1cpu-1792265662237988600`,
+`stage13.9-2cpu-1792265696327245000`, and
+`stage13.9-4cpu-1792265730806233400`. The physical candidate is
+43,057,152 bytes with SHA-256
+`20bc396f058d6b4a120fbbad5008c2c35b227d585ad11b8ba38b6df57dd233b4`.
+The authoritative Stage 13.9 acceptance was rerun after the TX probe
+increment and passed again on 1/2/4 CPUs with evidence in
+`stage13.9-1cpu-1792265958428749200`,
+`stage13.9-2cpu-1792265991087909700`, and
+`stage13.9-4cpu-1792266024653575700`. Warning-denying physical-feature and
+all-target host Clippy also pass. These are synthetic/QEMU gates; no new
+device-produced ALIVE, scan, interrupt, or `REPLY_TX` hardware evidence has
+been captured yet.
+After the documentation-contract cleanup, the full Stage 13.9 matrix passed
+again with evidence in
+`stage13.9-1cpu-1792266232912824300`,
+`stage13.9-2cpu-1792266283105118400`, and
+`stage13.9-4cpu-1792266340243916800`. The rebuilt physical candidate is
+43,057,152 bytes with SHA-256
+`ad6f4de25a53fddafee14ed30b0133a391035b081ff933d74c68139fc444bb3f`.
+The candidate was then written from an elevated PowerShell to the verified
+AX201 test USB. The writer read back the full image region with the same
+SHA-256, created the FAT32 `WOVENLOG` partition, and reported `DONE` in
+`audit-artifacts/ax201-physical-write-20261017.txt`. This is media-preparation
+evidence; the laptop still must boot the image and return its `LOGS/BOOT*.TXT`
+hardware log.
+Scan ownership is now explicit: only one UID may be active, aborts must name
+that UID, unsolicited iteration/completion notifications require the active
+UID, and a matching completion retires the session. This prevents stale scan
+notifications from changing a newer request's lifecycle.
+After ALIVE, the physical image now submits the read-only statistics command
+(`0x9c`, disabling periodic notifications) and logs whether its response
+sequence completes. It deliberately does not claim scan, association, or
+network qualification from that transport probe.
+The rebuilt physical image was written to the guarded USB target and its raw
+read-back matched SHA-256
+`5b5fd671fc67b48cc3e55cb778c5cab3cdd56cc3e92512d67657857f8eacfaf9`.
+The scan-session image was written and raw-read back again in
+`audit-artifacts/ax201-physical-activation-usb-write-scan-session-20261017.txt`.
+The PHY-context source increment built a new physical candidate image with
+SHA-256 `8774dc764c9042acbf7f9b94258014707ee91b63a8e3addb5d35a26f89bcd180`.
+Its guarded USB write was attempted but refused by the non-Administrator
+shell; the failed privilege transcript is retained in
+`audit-artifacts/ax201-physical-activation-usb-write-phy-context-20261017.txt`.
+The last successfully written image remains the scan-session image above.
+The current context-sequence candidate image is 42,008,576 bytes with SHA-256
+`bde089b3b692fc585ff6d9cda73a81a765f69aca321f9f0aed5cf8722665c312`.
+The physical startup path now reads `CSR_HW_REV` at BAR offset `0x28` for
+context-info `mac_id`; it no longer substitutes the PCI revision byte.
+Before PCI binding, the physical image also verifies the external firmware
+against the approved API-77 SHA-256
+`f866c78d5bc3b8f53964bd4c2fcfdef5b06ea94f6657e00adc570ca1b4904104`.
+The activation probe also reports the six-byte hardware MAC read from the
+reviewed CSR pair `0x380/0x384`; this is diagnostic identity only and does not
+claim radio or network qualification.
+The command-queue TFD stride is now the 22000 hardware value of 256 bytes,
+not the former 128-byte placeholder. Its context-info queue-size field now
+uses the Intel `TFD_QUEUE_CB_SIZE` encoding (`2` for the 32-entry ring),
+while ring bounds continue to use the actual 32-entry count.
+The physical activation path now enters only after IDT/APIC initialization,
+explicitly enables PCI memory decoding and bus mastering, programs the AX201
+MSI vector, enables CSR RX causes, services the deferred interrupt boundary,
+and disables MSI/CSR delivery before restoring the original PCI command word.
+Before the RX doorbell, physical startup now programs the RFH free/used/status
+queue bases and resets the device cursors; firmware remains responsible for
+enabling RX DMA. Upstream 22000 behavior was checked before adding a command
+path: the `RFH_QUEUE_CONFIG_CMD` is for additional RX queues, while this
+single-queue owner uses the context-info default queue and therefore does not
+send that command speculatively.
+
+This is still not accepted physical activation: the new queue doorbells,
+physical BAR/MSI execution, device-produced ALIVE, interrupt recovery, and
+scan/association have not yet produced a returned hardware log. The current
+USB physical image is awaiting the user's boot photograph/log; the read-only
+inventory photograph remains inventory-only.
+
+## AX201 integrated 22000 activation boundary — 2026-10-17
+
+Stage 13.10AE/AF/AG now pass on 1/2/4 CPUs. The AX201 owner validates the
+API-77 runtime container, copies LMAC/UMAC/paging payloads into owned DMA,
+configures queue addresses, publishes context-info through the 22000
+MMIO/PRPH adapter, issues `CPU_INIT_RUN`, accepts a versioned ALIVE
+notification, and has an explicit stop path that releases its DMA/context
+resources. This is still a synthetic hardware contract.
+
+The AX201 PCI identity `8086:A0F0` is now admitted to the shared Intel
+22000-family CSR path as `ActivationReady`, with the integrated
+`iwlwifi-QuZ-a0-hr-b0` API-77 firmware profile. AX201 has a distinct MSI
+binding contract and Stage 13.10AD self-test; it cannot match the AX200 MSI
+contract by accident. Stage 13.9 WovenWiFi acceptance passed on 1/2/4 CPUs,
+host/all-target Clippy passed, and the Wi-Fi TLV tests passed.
+
+This remains a driver activation boundary, not a completed radio driver. The
+tree still has no production firmware-provider/filesystem path, physical BAR
+mapping and MSI attachment for this owner, device-produced `ALIVE` proof,
+real RX/TX/command ring doorbells, interrupt teardown/recovery against the
+device, or scan, association, security and physical network tests.
+
+## Stage 10.7/release and AX201 identity increment — 2026-10-17
+
+The supplied Stage 10.7 transcript is recorded in
+[the Stage 10.7 audit](audit-stage10-7-acceptance-2026-10-17.md). The full
+serialized release validator exited 0; its report is
+`target/release-validation/results.json` and includes host lint/tests, debug
+and release 1/2/4-CPU memory/storage/network, shell, application, system-app
+and catalog checks. Stage 13.9 WovenWiFi synthetic acceptance also passed on
+1/2/4 CPUs after the AX201 identity increment.
+
+After the AX201 firmware-policy metadata was added, the full release
+validator was rerun with the local Cargo cache (`CARGO_NET_OFFLINE=true`) and
+again exited 0 with `All release gates passed`. The first online attempt's
+crates.io DNS failure was environmental and is retained in the terminal
+evidence, not treated as a code result.
+
+The selected machine's Intel AX201 `8086:A0F0` is now explicitly recognized
+as `ActivationReady`, with an explicit integrated 22000-family firmware
+profile (`iwlwifi-QuZ-a0-hr-b0`, API 77 only). The AX201-specific activation
+contract can reach PCI bus mastering/MSI only through its reviewed entry
+point; it cannot fall through the AX200 identity path. No firmware is
+embedded or loaded. Native AX201 firmware transfer, DMA queues, interrupts,
+teardown, scan, association and physical network acceptance remain open.
+
+## Physical inventory result received — 2026-10-17
+
+The returned probe photograph (`IMG_5963.jpeg`) reaches the explicit
+`PHYSICAL COMPLETE - INVENTORY ONLY` marker. It records Intel PCI inventory
+including xHCI `8086:9A13`; all five displayed xHCI ports report no connected
+device (`CCS=0`, `PED=0`, `RESET=0`, `SPEED=0`). It also reports one AX201
+target, `DMA=NOT-ACTIVATED`, and `RADIO=UNIMPLEMENTED`. This confirms the
+read-only inventory completed, but it does not qualify USB storage discovery,
+DMA, interrupts, Wi-Fi, Bluetooth, or any physical radio path. The existing
+hardware/logging blocker and serial/xHCI evidence requirement remain open.
+
+## Live boot log startup candidate (2026-10-16; physical retry correction 2026-10-17)
+
+The production boot used to synchronously scan FAT, allocate a 512 KiB log
+file, and flush USB writes before starting WovenShell. A slow physical USB
+device could therefore delay the desktop before a log file existed. Live-log
+initialization is now queued as a background I/O service immediately before
+session start, with a short scheduling delay and retry diagnostics. The Stage 13.19
+synchronous self-test path is unchanged. The exact Stage 10.7 Windows gate,
+full release-validation chain, warning-denying stage feature lints, and the
+Stage 13.19 production/test/unlabelled and Stage 20.15 desktop gates on 1/2/4
+CPUs all pass. The
+worker is queued even when USB storage is not yet enumerated, so discovery
+failures are retried rather than silently disabling logging. Physical USB
+enumeration now retries until storage is published instead of exiting after
+one not-ready probe; an existing HID interrupt worker no longer blocks later
+storage discovery. The earlier
+driver path has init-begin and xHCI phase markers; UART polling is
+bounded in all builds while preserving bytes in the in-memory log. These
+checkpoints diagnose, but cannot persist to the USB stick if xHCI itself never
+becomes usable. The validated image has been written to the authorized VendorCo
+USB device and raw-readback verified. Physical boot and returned-log inspection
+remain pending, so hardware behavior is not yet accepted. Focused Clippy,
+Stage 13.18 (1 CPU), and Stage 13.19 production (1/2/4 CPU), test and
+unlabelled (1 CPU) gates pass after the correction. See the
+[live boot startup audit](audit-live-boot-log-startup-2026-10-16.md).
+
+## Foundation preservation failure — 2026-10-16
+
+Session 71482 exited 1 on a 1-CPU live DNS timeout inside exact Stage 10.7
+preservation. Independent inspection matched all 861 frozen inputs and all
+sixty stress logs' overall pass markers. Prior focused 1/2/4-CPU foundation,
+debug/optimized storage/memory and 2/4-CPU hotplug checks passed, but this is
+not full acceptance. See the foundation validation audit. The next ATA
+durability candidate is isolated in `codex/foundation-ata-flush-20261016`;
+no unvalidated kernel patch is integrated here. Release finalisation remains
+blocked by these and the previously documented durability/hardware/guard gaps.
+
 ## Merge integration checkpoint — 2026-10-16
 
 The foundation validator preservation run was invalidated by a concurrent
@@ -223,6 +4926,20 @@ exact full Stage 10.7 and Stage 10.8–11.5 preservation. Independent inspection
 verified all 505 frozen inputs and sixty stress logs. See the compiler-PIE
 audit. Compiler TLS, general dynamic linking, merged-tree, release and hardware
 qualification remain open.
+
+## Stage 21.3 bounded WovenStore transaction core (2026-10-20)
+
+`libwoven::store` now implements a fixed-capacity catalog transaction core.
+It enforces a sandbox capability mask, requires dependencies before install,
+allows only monotonic version updates, protects dependencies from removal, and
+provides explicit commit/rollback snapshots. Host tests, host/freestanding
+warning-denying Clippy, and the Stage 21.3 QEMU gate passed on 1/2/4 CPUs.
+Evidence is recorded in
+`docs/audit-stage21-3-wovenstore-transactions-2026-10-20.md`.
+
+The core is not yet persistent: WovenFS publication, payload/catalog atomicity
+across reboot, package service ownership/IPC, and physical USB qualification
+remain open.
 
 **Compiler main-image local-exec TLS accepted (2026-10-16):** checked Variant-II layout, a mapped TCB
 self pointer and an immutable post-relocation template fix the retained
@@ -1267,7 +5984,9 @@ Negative controls, with evidence in
 Open:
 - No resize: the protocol request is in the design. No minimise or
   maximise.
-- Pointer events are still not forwarded to applications.
+- At the time of this original gate, pointer events were not forwarded to
+  applications; the later Graphics client pointer forwarding slice covers
+  Calculator.
 - The other compositor paths (whole-surface blit, blend) still copy whole
   surfaces, now under a preemption lock rather than an interrupts-off one.
 
@@ -1746,9 +6465,8 @@ Open:
   devices, and virtio-input remain open.
 - The PS/2 boot-mouse path has no IntelliMouse wheel or acceleration; report
   protocol wheel events are supported by the HID decoder.
-- The pointer position lives in the window manager. There is no cursor
-  image: drawing one is the window manager's job, and there is no hardware
-  cursor.
+- The pointer position lives in the window manager. WovenShell draws a bounded
+  software cursor overlay; there is no hardware cursor.
 
 ## Stage 19.11 — userspace window manager: stacking, raise, focus, input routing (2026-10-14)
 
@@ -3611,4 +8329,92 @@ The public `persist_paths_atomic` boundary now returns `TooLarge` for a
 bounded-capacity refusal into a generic failure.
 
 
+
+# Stage 27.1 bounded update A/B state (2026-10-20)
+
+`kernel/src/update.rs` now provides the bounded two-slot activation state
+machine and verifies bounded version-1 `WUPD` envelopes: it rejects generation
+rollback and malformed or unsigned/tampered candidates, keeps the known-good
+slot active until a health check succeeds, and rolls back after three failed
+boot attempts. Host tests, host/freestanding warning-denying Clippy, and
+dedicated QEMU acceptance passed on 1/2/4 CPUs. Evidence is in
+`docs/audit-stage27-1-update-ab-state-2026-10-20.md`.
+
+This does not yet implement privileged service ownership, durable A/B records,
+power-loss recovery, or installation.
+The fixed-size `WUAB` snapshot codec and checksum validation are now present,
+but the service-owned dual-copy WovenFS commit and power-loss acceptance are
+still open.
+
+## Stage 27.2 durable update records (2026-10-20)
+
+The update record boundary now commits exact-length dual-copy `WUAB` snapshots
+through native WovenFS on a disposable ATA-backed scratch image. It remounts,
+reads both copies, selects the newest valid sequence, and falls back to the
+older copy after checksum corruption. The dedicated QEMU gate passed on 1/2/4
+CPUs; evidence is in
+`docs/audit-stage27-1-update-ab-state-2026-10-20.md`.
+
+Long-lived service lifecycle, power-loss injection/recovery, installer and
+boot-slot integration, and physical qualification remain open.
+
+The record adapter now has a capability-gated service boundary: only a task
+with `Capability::StorageIo` can obtain the private WovenFS writer token.
+This does not yet constitute the long-lived userspace update daemon or its
+IPC/syscall protocol.
+
+## Stage 21.1 bounded WovenPackages envelope (2026-10-20)
+
+The new `libwoven::package` parser accepts only bounded version-1 `WPKG`
+envelopes with a structurally valid manifest, application, resource payload,
+and fixed signature field. It rejects truncation, bad magic/version, overflow,
+length mismatch, invalid names, and excessive dependencies before returning
+borrowed payload slices. Host workspace tests, host `-D warnings` Clippy,
+freestanding kernel `stage21-1-test` `-D warnings` Clippy, and the dedicated
+QEMU gate passed on 1/2/4 CPUs. Evidence is recorded in
+`docs/audit-stage21-1-wovenpackages-2026-10-20.md` and the corresponding
+`audit-artifacts/stage21.1-*` directories.
+
+This is a parser/format foundation only. Signature authentication, package
+production, persistent WovenStore installation, updates, removal, rollback,
+sandbox declaration enforcement, and a service/IPC boundary remain open.
+
+## Stage 21.2 WovenPackages producer and authentication (2026-10-20)
+
+`tools/wpkg-packager` now produces bounded WPKG v1 envelopes from ELF input,
+manifest metadata, dependencies, capabilities, and optional resources. The
+signature covers a domain-separated SHA-256 digest of the immutable envelope;
+the kernel verifier checks it against the provisioned application trust root
+and rejects payload tampering. Tool tests/Clippy, kernel warning-denying
+Clippy, and the dedicated QEMU gate passed on 1/2/4 CPUs. Evidence is recorded
+in `docs/audit-stage21-2-wpkg-authentication-2026-10-20.md`.
+
+Persistent WovenStore installation, update/removal transactions, rollback,
+sandbox declaration enforcement, service/IPC ownership, and physical USB
+qualification remain open.
+
+# Stage 15 native WovenFS VFS lifecycle (2026-10-20)
+
+The native WovenFS adapter now owns the `/wfs` publication lifecycle. Mount
+and unmount are serialized with journal mutations; remount invalidates cached
+descendants and open descriptions before importing fresh contents, and generic
+syscall access fails closed while unpublished. The stale-handle/remount
+acceptance passed on scratch ATA images under QEMU with 1/2/4 CPUs. Host tests,
+host Clippy, and freestanding `stage15-2-test` Clippy passed. This is a
+bounded software increment: physical flash, power-loss, and replacement of
+the FAT32 system volume remain open.
+
+## Stage 25.14 - suspend admission boundary (2026-10-21)
+
+The power ABI now recognizes action `2` as suspend for callers holding
+`PowerControl`, and `libwoven::suspend` exposes the same operation. It fails
+closed with a deterministic error because the current Stage 25.13 wake path
+returns to a kernel rollback continuation, not the interrupted userspace
+syscall frame. The rejection is audited and performs no preparation, FACS,
+CPU, or PM1 mutation. The Stage 25.14 QEMU gate verifies that admission is
+idle and the userspace resume target is explicitly unavailable.
+
+This is not physical S3 qualification and does not claim that suspend is
+available to production users. The next prerequisite is a task-owned resume
+record and a verified return path before enabling the transition.
 

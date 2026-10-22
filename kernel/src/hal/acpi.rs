@@ -14,6 +14,7 @@ const MCFG_HEADER_LENGTH: usize = SDT_HEADER_LENGTH + 8;
 const MCFG_ALLOCATION_LENGTH: usize = 16;
 pub const MAX_MCFG_ALLOCATIONS: usize = 8;
 const MAX_AML_TABLES: usize = 16;
+const TPM2_TABLE_LENGTH: usize = SDT_HEADER_LENGTH + 16;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Error {
@@ -40,14 +41,130 @@ pub struct Power {
     pub reset: Option<(u8, u64, u8)>,
     /// `\_S5` sleep types for PM1a and PM1b.
     pub s5: Option<(u8, u8)>,
+    /// `\_S3` sleep types for suspend-to-RAM, when firmware advertises it.
+    pub s3: Option<(u8, u8)>,
+    /// Validated FACS location and existing firmware waking vectors.
+    pub facs: Option<Facs>,
+}
+
+/// The bounded FACS fields needed before an S3 transition can be attempted.
+/// FACS is not an SDT and therefore has no checksum; its signature, length,
+/// and containing firmware memory region are still validated before this is
+/// retained.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Facs {
+    pub address: u64,
+    pub length: u32,
+    pub version: u8,
+    pub waking_vector_32: u32,
+    pub waking_vector_64: u64,
 }
 
 /// The power information found at boot.
 static POWER: spin::Mutex<Option<Power>> = spin::Mutex::new(None);
+static FACS_WAKE_LOCK: spin::Mutex<()> = spin::Mutex::new(());
 
 /// What ACPI discovery found about power-off and reset, if it ran.
 pub fn power() -> Option<Power> {
     *POWER.lock()
+}
+
+/// Ownership token for the FACS waking-vector mutation. The previous values
+/// are retained so an aborted suspend can restore firmware state exactly.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct FacsWakeVector {
+    address: u64,
+    previous_32: u32,
+    previous_64: u64,
+}
+
+fn patch_facs_vectors(bytes: &mut [u8; 64], target: u64) -> Option<(u32, u64)> {
+    let target_32 = u32::try_from(target).ok()?;
+    let previous_32 = read_u32(bytes, 12);
+    let previous_64 = read_u64(bytes, 24);
+    bytes[12..16].copy_from_slice(&target_32.to_le_bytes());
+    bytes[24..32].copy_from_slice(&target.to_le_bytes());
+    Some((previous_32, previous_64))
+}
+
+/// Install both ACPI waking-vector forms to the same low physical trampoline.
+/// The FACS was range-validated during discovery; the direct physical map is
+/// used only for these fixed, volatile firmware fields.
+pub(crate) fn install_facs_wake_vector(target: u64) -> Option<FacsWakeVector> {
+    if target == 0 || target & 0xfff != 0 {
+        return None;
+    }
+    let power = power()?;
+    let facs = power.facs?;
+    let offset = crate::paging::physical_memory_offset()?;
+    let address = offset.checked_add(facs.address)?;
+    let _guard = FACS_WAKE_LOCK.lock();
+    let mut bytes = [0_u8; 64];
+    // SAFETY: discovery validated the complete 64-byte FACS range and the
+    // direct map is the bootloader-provided mapping of firmware memory.
+    unsafe {
+        for (index, byte) in bytes.iter_mut().enumerate() {
+            *byte = (address as *const u8).add(index).read_volatile();
+        }
+    }
+    let (previous_32, previous_64) = patch_facs_vectors(&mut bytes, target)?;
+    // SAFETY: the same validated FACS fields are written back as volatile
+    // firmware-visible values; interrupts cannot interleave this transaction.
+    x86_64::instructions::interrupts::without_interrupts(|| unsafe {
+        (address as *mut u32)
+            .add(3)
+            .write_volatile(u32::from_le_bytes(
+                bytes[12..16].try_into().expect("fixed FACS field"),
+            ));
+        (address as *mut u64)
+            .add(3)
+            .write_volatile(u64::from_le_bytes(
+                bytes[24..32].try_into().expect("fixed FACS field"),
+            ));
+    });
+    Some(FacsWakeVector {
+        address: facs.address,
+        previous_32,
+        previous_64,
+    })
+}
+
+pub(crate) fn restore_facs_wake_vector(vector: FacsWakeVector) -> bool {
+    let Some(offset) = crate::paging::physical_memory_offset() else {
+        return false;
+    };
+    let Some(address) = offset.checked_add(vector.address) else {
+        return false;
+    };
+    let _guard = FACS_WAKE_LOCK.lock();
+    // SAFETY: the token was created only after discovery validated this FACS
+    // range; restore uses the exact two fields captured by that token.
+    x86_64::instructions::interrupts::without_interrupts(|| unsafe {
+        (address as *mut u32)
+            .add(3)
+            .write_volatile(vector.previous_32);
+        (address as *mut u64)
+            .add(3)
+            .write_volatile(vector.previous_64);
+    });
+    true
+}
+
+#[cfg(feature = "stage25-9-test")]
+pub fn facs_wake_vector_self_test() -> bool {
+    let mut bytes = [0_u8; 64];
+    bytes[12..16].copy_from_slice(&0x0009_8000_u32.to_le_bytes());
+    bytes[24..32].copy_from_slice(&0x0000_0000_0009_8000_u64.to_le_bytes());
+    let Some((previous_32, previous_64)) = patch_facs_vectors(&mut bytes, 0x0008_0000) else {
+        return false;
+    };
+    let installed = read_u32(&bytes, 12) == 0x0008_0000 && read_u64(&bytes, 24) == 0x0008_0000;
+    bytes[12..16].copy_from_slice(&previous_32.to_le_bytes());
+    bytes[24..32].copy_from_slice(&previous_64.to_le_bytes());
+    installed
+        && read_u32(&bytes, 12) == 0x0009_8000
+        && read_u64(&bytes, 24) == 0x0009_8000
+        && patch_facs_vectors(&mut bytes, 0x1_0000_0000).is_none()
 }
 
 #[derive(Clone, Copy, Default)]
@@ -96,6 +213,16 @@ pub struct McfgAllocation {
     pub end_bus: u8,
 }
 
+/// Validated location and interface advertised by the firmware TPM2 table.
+/// Presence is inventory only; callers must still perform an authenticated
+/// TPM protocol exchange before treating any result as a trust root.
+#[derive(Clone, Copy, Default, PartialEq, Eq)]
+pub struct Tpm2Info {
+    pub platform_class: u16,
+    pub control_area: u64,
+    pub start_method: u32,
+}
+
 #[derive(Clone, Copy, Default, PartialEq, Eq)]
 struct AmlTable {
     address: u64,
@@ -142,6 +269,7 @@ pub struct Summary {
     pub pci_root_resources: [PciRootResource; MAX_PCI_ROOT_RESOURCES],
     pub pci_root_resource_count: usize,
     pub truncated: bool,
+    pub tpm2: Option<Tpm2Info>,
 }
 
 pub fn discover(
@@ -271,6 +399,17 @@ pub fn discover(
                     summary.truncated = true;
                 }
             }
+            b"TPM2" => {
+                let mut tpm2 = [0_u8; TPM2_TABLE_LENGTH];
+                read_physical(physical_offset, table_address, &mut tpm2, regions)?;
+                if let Some(info) = parse_tpm2(&tpm2) {
+                    summary.tpm2 = Some(info);
+                } else {
+                    // A malformed TPM table is never a trust source. Keep
+                    // the rest of ACPI usable for non-security devices.
+                    summary.truncated = true;
+                }
+            }
             _ => {}
         }
     }
@@ -307,12 +446,38 @@ pub fn discover(
         address: summary.dsdt_address,
         length: summary.dsdt_length,
     });
-    summary.power.s5 = dsdt
-        .into_iter()
-        .chain(summary.aml_tables[..summary.aml_table_count].iter().copied())
-        .find_map(|table| aml_table_body(physical_offset, table, regions).ok().and_then(aml_s5));
+    let find_sleep = |state| {
+        dsdt.into_iter()
+            .chain(
+                summary.aml_tables[..summary.aml_table_count]
+                    .iter()
+                    .copied(),
+            )
+            .find_map(|table| {
+                aml_table_body(physical_offset, table, regions)
+                    .ok()
+                    .and_then(|body| aml_sleep(body, state))
+            })
+    };
+    summary.power.s5 = find_sleep(5);
+    summary.power.s3 = find_sleep(3);
     *POWER.lock() = Some(summary.power);
     Ok(summary)
+}
+
+fn parse_tpm2(bytes: &[u8; TPM2_TABLE_LENGTH]) -> Option<Tpm2Info> {
+    if &bytes[..4] != b"TPM2"
+        || (u32::from_le_bytes(bytes[4..8].try_into().ok()?) as usize) < TPM2_TABLE_LENGTH
+    {
+        return None;
+    }
+    let control_area = u64::from_le_bytes(bytes[40..48].try_into().ok()?);
+    let start_method = u32::from_le_bytes(bytes[48..52].try_into().ok()?);
+    (control_area != 0).then_some(Tpm2Info {
+        platform_class: u16::from_le_bytes(bytes[36..38].try_into().ok()?),
+        control_area,
+        start_method,
+    })
 }
 
 fn parse_fadt(
@@ -349,7 +514,13 @@ fn parse_fadt(
     } else {
         0
     };
-    read_fadt_power(physical_offset, address, length, regions, &mut summary.power)?;
+    read_fadt_power(
+        physical_offset,
+        address,
+        length,
+        regions,
+        &mut summary.power,
+    )?;
     let dsdt = if extended != 0 { extended } else { legacy };
     if dsdt == 0 {
         return Ok(());
@@ -381,6 +552,21 @@ fn read_fadt_power(
     let available = length.min(fadt.len());
     read_physical(physical_offset, address, &mut fadt[..available], regions)?;
     let port = |value: u32| u16::try_from(value).unwrap_or(0);
+    let facs_address = if available >= 140 {
+        let extended = read_u64(&fadt, 132);
+        if extended != 0 {
+            extended
+        } else {
+            u64::from(read_u32(&fadt, 36))
+        }
+    } else if available >= 40 {
+        u64::from(read_u32(&fadt, 36))
+    } else {
+        0
+    };
+    if facs_address != 0 {
+        power.facs = read_facs(physical_offset, facs_address, regions);
+    }
     if available >= 72 {
         power.smi_command = port(read_u32(&fadt, 48));
         power.acpi_enable = fadt[52];
@@ -395,7 +581,10 @@ fn read_fadt_power(
         }
     }
     // X_PM1a/X_PM1b_CNT_BLK: generic addresses, used when in system I/O.
-    for (offset, slot) in [(172usize, &mut power.pm1a_control), (184, &mut power.pm1b_control)] {
+    for (offset, slot) in [
+        (172usize, &mut power.pm1a_control),
+        (184, &mut power.pm1b_control),
+    ] {
         if available >= offset + 12 && fadt[offset] == 1 {
             let extended = read_u64(&fadt, offset + 4);
             if let Ok(io) = u16::try_from(extended) {
@@ -408,35 +597,87 @@ fn read_fadt_power(
     Ok(())
 }
 
+fn read_facs(physical_offset: u64, address: u64, regions: &[MemoryRegion]) -> Option<Facs> {
+    let mut header = [0_u8; 8];
+    read_physical(physical_offset, address, &mut header, regions).ok()?;
+    let length = read_u32(&header, 4);
+    if length < 64 {
+        return None;
+    }
+    validate_range(address, usize::try_from(length).ok()?, regions).ok()?;
+    let mut bytes = [0_u8; 64];
+    read_physical(physical_offset, address, &mut bytes, regions).ok()?;
+    parse_facs(address, &bytes)
+}
+
+fn parse_facs(address: u64, bytes: &[u8; 64]) -> Option<Facs> {
+    if &bytes[..4] != b"FACS" {
+        return None;
+    }
+    let length = read_u32(bytes, 4);
+    if length < 64 {
+        return None;
+    }
+    Some(Facs {
+        address,
+        length,
+        version: bytes[32],
+        waking_vector_32: read_u32(bytes, 12),
+        waking_vector_64: read_u64(bytes, 24),
+    })
+}
+
 /// The sleep types of `\_S5`, from `Name (_S5, Package () { a, b, ... })`
 /// anywhere in a definition block. Each element may be Zero, One, or a
 /// byte, word or dword constant.
-fn aml_s5(body: &[u8]) -> Option<(u8, u8)> {
+fn aml_sleep(body: &[u8], state: u8) -> Option<(u8, u8)> {
+    let name = match state {
+        3 => *b"_S3_",
+        5 => *b"_S5_",
+        _ => return None,
+    };
     fn integer(bytes: &[u8], offset: usize) -> Option<(u64, usize)> {
         match *bytes.get(offset)? {
             0x00 => Some((0, 1)),
             0x01 => Some((1, 1)),
             0xff => Some((u64::MAX, 1)),
             0x0a => Some((u64::from(*bytes.get(offset + 1)?), 2)),
-            0x0b => Some((u64::from(u16::from_le_bytes(bytes.get(offset + 1..offset + 3)?.try_into().ok()?)), 3)),
-            0x0c => Some((u64::from(u32::from_le_bytes(bytes.get(offset + 1..offset + 5)?.try_into().ok()?)), 5)),
+            0x0b => Some((
+                u64::from(u16::from_le_bytes(
+                    bytes.get(offset + 1..offset + 3)?.try_into().ok()?,
+                )),
+                3,
+            )),
+            0x0c => Some((
+                u64::from(u32::from_le_bytes(
+                    bytes.get(offset + 1..offset + 5)?.try_into().ok()?,
+                )),
+                5,
+            )),
             _ => None,
         }
     }
     let mut start = 0;
-    while let Some(found) = body[start..].windows(4).position(|window| window == b"_S5_") {
+    while let Some(found) = body[start..].windows(4).position(|window| window == name) {
         let at = start + found;
         start = at + 4;
         // NameOp, optionally with a root prefix, before the name.
-        let named = at >= 1 && (body[at - 1] == 0x08 || (at >= 2 && body[at - 1] == b'\\' && body[at - 2] == 0x08));
+        let named = at >= 1
+            && (body[at - 1] == 0x08 || (at >= 2 && body[at - 1] == b'\\' && body[at - 2] == 0x08));
         if !named || body.get(at + 4) != Some(&0x12) {
             continue;
         }
-        let Ok((package_length, length_bytes)) = decode_aml_pkg_length(body, at + 5) else { continue };
+        let Ok((package_length, length_bytes)) = decode_aml_pkg_length(body, at + 5) else {
+            continue;
+        };
         let _ = package_length;
         let elements = at + 5 + length_bytes + 1;
-        let Some((a, used)) = integer(body, elements) else { continue };
-        let Some((b, _)) = integer(body, elements + used) else { continue };
+        let Some((a, used)) = integer(body, elements) else {
+            continue;
+        };
+        let Some((b, _)) = integer(body, elements + used) else {
+            continue;
+        };
         return Some(((a & 0x7) as u8, (b & 0x7) as u8));
     }
     None
@@ -1290,53 +1531,52 @@ fn aml_namespace_walk(
                 0x08 => {
                     let (name, value) = aml_name_string(bytes, offset + 1)?;
                     let path = aml_resolve_name(scope, name)?;
-                    // Recognize static PCI-root hardware/compatible IDs while
-                    // walking their owning device scope. This is intentionally
-                    // read-only: resource apertures are not published until
-                    // _CRS is decoded and validated separately.
+                    // Recognize static PCI-root IDs only when their owning
+                    // Device is already present. Unresolved AML names must not
+                    // make otherwise valid ACPI topology unavailable.
                     let pci_root_identity = (aml_name_is(path, *b"_HID")
                         || aml_name_is(path, *b"_CID"))
                         && aml_eisa_id(bytes, value).is_some_and(aml_is_pci_root_id);
                     if pci_root_identity {
-                        let owner = aml_parent_path(path).ok_or(Error::InvalidSignature)?;
-                        if owner != scope || !aml_has_device(records, *record_count, owner) {
-                            return Err(Error::InvalidSignature);
+                        if let Some(owner) = aml_parent_path(path)
+                            .filter(|owner| aml_has_device(records, *record_count, *owner))
+                        {
+                            aml_mark_pci_root(records, *record_count, owner)?;
                         }
-                        aml_mark_pci_root(records, *record_count, owner)?;
                     }
                     if aml_name_is(path, *b"_CRS") {
-                        let owner = aml_parent_path(path).ok_or(Error::InvalidSignature)?;
-                        if owner != scope || !aml_has_device(records, *record_count, owner) {
-                            return Err(Error::InvalidSignature);
-                        }
-                        // Retain only the bounded static ResourceTemplate on
-                        // its owning Device. Root identity may legally appear
-                        // later in the same Device, so root qualification and
-                        // descriptor validation happen after the namespace pass.
-                        if let Some(resource_template) = aml_static_buffer(bytes, value)? {
-                            aml_set_resource_template(
-                                records,
-                                *record_count,
-                                owner,
-                                bytes,
-                                resource_template,
-                            )?;
+                        if let Some(owner) = aml_parent_path(path)
+                            .filter(|owner| aml_has_device(records, *record_count, *owner))
+                        {
+                            // Retain only the bounded static ResourceTemplate on
+                            // its owning Device. Root identity may legally appear
+                            // later in the same Device, so root qualification and
+                            // descriptor validation happen after the namespace pass.
+                            if let Some(resource_template) = aml_static_buffer(bytes, value)? {
+                                aml_set_resource_template(
+                                    records,
+                                    *record_count,
+                                    owner,
+                                    bytes,
+                                    resource_template,
+                                )?;
+                            }
                         }
                     }
                     if aml_name_is(path, *b"_SEG") || aml_name_is(path, *b"_BBN") {
-                        let owner = aml_parent_path(path).ok_or(Error::InvalidSignature)?;
-                        if owner != scope || !aml_has_device(records, *record_count, owner) {
-                            return Err(Error::InvalidSignature);
+                        if let Some(owner) = aml_parent_path(path)
+                            .filter(|owner| aml_has_device(records, *record_count, *owner))
+                        {
+                            let number =
+                                aml_static_integer(bytes, value).ok_or(Error::InvalidSignature)?;
+                            aml_set_root_number(
+                                records,
+                                *record_count,
+                                owner,
+                                aml_name_is(path, *b"_SEG"),
+                                number,
+                            )?;
                         }
-                        let number =
-                            aml_static_integer(bytes, value).ok_or(Error::InvalidSignature)?;
-                        aml_set_root_number(
-                            records,
-                            *record_count,
-                            owner,
-                            aml_name_is(path, *b"_SEG"),
-                            number,
-                        )?;
                     }
                     match aml_skip_data_ref_object(bytes, value) {
                         Ok(next) if next <= end => {
@@ -1594,6 +1834,40 @@ pub fn self_test() -> bool {
     let checksum_rejected =
         validate_rsdp_v1(&rsdp[..RSDP_V1_LENGTH]) == Err(Error::InvalidChecksum);
 
+    let mut tpm2 = [0_u8; TPM2_TABLE_LENGTH];
+    tpm2[..4].copy_from_slice(b"TPM2");
+    tpm2[4..8].copy_from_slice(&(TPM2_TABLE_LENGTH as u32).to_le_bytes());
+    tpm2[40..48].copy_from_slice(&0xfed4_0000_u64.to_le_bytes());
+    tpm2[48..52].copy_from_slice(&6_u32.to_le_bytes());
+    let tpm2_valid = parse_tpm2(&tpm2)
+        == Some(Tpm2Info {
+            platform_class: 0,
+            control_area: 0xfed4_0000,
+            start_method: 6,
+        });
+    tpm2[40..48].fill(0);
+    let tpm2_zero_address_rejected = parse_tpm2(&tpm2).is_none();
+
+    let mut facs = [0_u8; 64];
+    facs[..4].copy_from_slice(b"FACS");
+    facs[4..8].copy_from_slice(&64_u32.to_le_bytes());
+    facs[12..16].copy_from_slice(&0x0009_8000_u32.to_le_bytes());
+    facs[24..32].copy_from_slice(&0x0000_0000_0009_8000_u64.to_le_bytes());
+    facs[32] = 2;
+    let facs_valid = parse_facs(0x0010_0000, &facs)
+        == Some(Facs {
+            address: 0x0010_0000,
+            length: 64,
+            version: 2,
+            waking_vector_32: 0x0009_8000,
+            waking_vector_64: 0x0000_0000_0009_8000,
+        });
+    facs[4..8].copy_from_slice(&63_u32.to_le_bytes());
+    let facs_short_rejected = parse_facs(0x0010_0000, &facs).is_none();
+    facs[4..8].copy_from_slice(&64_u32.to_le_bytes());
+    facs[..4].copy_from_slice(b"BAD!");
+    let facs_signature_rejected = parse_facs(0x0010_0000, &facs).is_none();
+
     let mut topology = Summary {
         local_apic_address: 0xfee0_0000,
         ..Summary::default()
@@ -1649,6 +1923,15 @@ pub fn self_test() -> bool {
         0x10, 0x0c, b'_', b'S', b'B', b'_', 0x5b, 0x82, 0x05, b'P', b'C', b'I', b'0',
     ];
     let aml_nested_walk = aml_namespace_walk(&aml_nested, &[], &mut aml_resources) == Ok((2, 0));
+    let aml_root_device_hid = [
+        0x5b, 0x82, 0x0f, b'P', b'C', b'I', b'0', 0x08, b'_', b'H', b'I', b'D', 0x0c, 0x41, 0xd0,
+        0x0a, 0x03,
+    ];
+    let aml_root_device_hid_walk =
+        aml_namespace_walk(&aml_root_device_hid, &[], &mut aml_resources) == Ok((2, 0));
+    let aml_unowned_root_hid = [0x08, b'_', b'H', b'I', b'D', 0x0c, 0x41, 0xd0, 0x0a, 0x03];
+    let aml_unowned_root_hid_walk =
+        aml_namespace_walk(&aml_unowned_root_hid, &[], &mut aml_resources) == Ok((1, 0));
 
     let aml_pkg_short = decode_aml_pkg_length(&[0x05], 0) == Ok((5, 1));
     let aml_pkg_multi = decode_aml_pkg_length(&[0x41, 0x02], 0) == Ok((33, 2));
@@ -1659,6 +1942,14 @@ pub fn self_test() -> bool {
         });
     let aml_name_valid = aml_name_seg(b"_CRS", 0) == Ok((*b"_CRS", 4));
     let aml_name_rejects_lower = aml_name_seg(b"_crs", 0) == Err(Error::InvalidSignature);
+    // A bounded AML fixture for the sleep-state objects. The package contains
+    // two byte constants, matching the ACPI `_S3`/`_S5` sleep-type shape.
+    let aml_sleep_fixture = [
+        0x08, b'_', b'S', b'3', b'_', 0x12, 0x07, 0x02, 0x0a, 0x03, 0x0a, 0x04,
+    ];
+    let aml_sleep_discovery = aml_sleep(&aml_sleep_fixture, 3) == Some((3, 4))
+        && aml_sleep(&aml_sleep_fixture, 5).is_none()
+        && aml_sleep(&aml_sleep_fixture, 4).is_none();
 
     let mut template = [0_u8; 44];
     template[0] = 0x87;
@@ -1756,6 +2047,11 @@ pub fn self_test() -> bool {
 
     valid
         && checksum_rejected
+        && tpm2_valid
+        && tpm2_zero_address_rejected
+        && facs_valid
+        && facs_short_rejected
+        && facs_signature_rejected
         && topology_valid
         && malformed_rejected
         && srat_valid
@@ -1763,11 +2059,14 @@ pub fn self_test() -> bool {
         && aml_scope_walk
         && aml_device_walk
         && aml_nested_walk
+        && aml_root_device_hid_walk
+        && aml_unowned_root_hid_walk
         && aml_pkg_short
         && aml_pkg_multi
         && aml_pkg_bounds
         && aml_name_valid
         && aml_name_rejects_lower
+        && aml_sleep_discovery
         && resource_template_valid
         && missing_end_tag_rejected
         && transactional_decode

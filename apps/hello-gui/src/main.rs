@@ -52,6 +52,40 @@
 //! and exits once the shell forwards it its key, or asks it to close. `c`
 //! opens a window larger than the old 320×240 surface cap.
 //!
+//! With `--3d-chrome-demo` it is a standalone proof of concept for a
+//! textured 3D desktop: it renders a small title-bar-like strip into an
+//! offscreen Canvas exactly as WovenShell's own chrome does today, then
+//! projects it through a perspective `Camera` as a tilted, texture-mapped
+//! quad (two `textured_triangle_3d` calls) instead of blitting it flat,
+//! before presenting the result normally. It does not touch WovenShell or
+//! any already-accepted compositor path; it exists to validate the
+//! rendering pipeline end to end before that wiring is attempted.
+//!
+//! With `--syscall-benchmark` it is a standalone performance-engineering
+//! micro-benchmark (Stage 30): 1000 round trips of the cheapest syscall
+//! (`current_pid`, no pointers, no capability check) timed with the CPU's
+//! own cycle counter (`RDTSC`, not the 100 Hz tick clock, which cannot
+//! resolve a single syscall). Reports min/average/max cycles; needs no
+//! capability beyond an ordinary process's own, so it runs unprivileged.
+//!
+//! With `--ipc-benchmark` it is the same kind of micro-benchmark for IPC: it
+//! sends and receives a one-byte message to and from itself
+//! `IPC_BENCHMARK_ITERATIONS` times, timing each round trip the same way.
+//!
+//! With `--fs-benchmark` it times `FS_BENCHMARK_ITERATIONS` seek+write and
+//! seek+read round trips of a 256-byte payload against a scratch file the
+//! kernel self-test pre-creates, reporting write and read timings
+//! separately.
+//!
+//! With `--compositor-benchmark` it times `COMPOSITOR_BENCHMARK_ITERATIONS`
+//! round trips of toggling one pixel of a placed window and flushing it to
+//! the framebuffer (`surface.write` + `compositor_present`), needing
+//! `DisplayIo`.
+//!
+//! With `--scheduler-benchmark` it times `SCHEDULER_BENCHMARK_ITERATIONS`
+//! round trips of `yield_now`, measuring the voluntary-yield path's own
+//! overhead when no other process contends for the CPU.
+//!
 //! With `--probe <handle>` it runs as an ordinary process and checks that the
 //! kernel refuses it everything it has no authority for: every compositor
 //! operation, and every operation on the surface `<handle>`, which belongs to
@@ -62,7 +96,10 @@
 
 use core::panic::PanicInfo;
 
-use libwoven::{rgb, syscall, Args, GraphicsSurface};
+use libwoven::{
+    graphics::{Camera, Color, DepthBuffer, Path, Point, Rect, Renderer, Transform, Vertex3, Vertex3Tex},
+    rgb, syscall, Args, GraphicsSurface,
+};
 
 libwoven::entry!(main);
 
@@ -70,6 +107,25 @@ const BACKGROUND: u32 = rgb(4, 12, 28);
 const TITLE_BAR: u32 = rgb(40, 220, 230);
 const CONTENT: u32 = rgb(230, 230, 240);
 const BORDER: u32 = rgb(0, 0, 0);
+
+const WOVEN_ICON: [u32; 16] = [
+    Color::WHITE.packed(),
+    Color::TITLE.packed(),
+    Color::TITLE.packed(),
+    Color::WHITE.packed(),
+    Color::TITLE.packed(),
+    Color::BLACK.packed(),
+    Color::BLACK.packed(),
+    Color::TITLE.packed(),
+    Color::TITLE.packed(),
+    Color::BLACK.packed(),
+    Color::BLACK.packed(),
+    Color::TITLE.packed(),
+    Color::WHITE.packed(),
+    Color::TITLE.packed(),
+    Color::TITLE.packed(),
+    Color::WHITE.packed(),
+];
 
 const WIDTH: u32 = 200;
 const HEIGHT: u32 = 120;
@@ -169,6 +225,275 @@ fn fail(code: u64) -> ! {
     libwoven::exit(code)
 }
 
+const SYSCALL_BENCHMARK_ITERATIONS: u64 = 1000;
+
+/// Standalone syscall-latency micro-benchmark (Stage 30 performance
+/// engineering): time `SYSCALL_BENCHMARK_ITERATIONS` round trips of
+/// `current_pid` (the cheapest syscall this ABI has: no pointers, no
+/// capability check, just the caller's own id) with the CPU's free-running
+/// cycle counter. Reports min/average/max cycles and exits PASSED as long
+/// as the counter advanced at all -- a benchmark reports numbers, it does
+/// not enforce a would-be-brittle latency threshold across unlike machines.
+fn syscall_benchmark() -> ! {
+    let mut min = u64::MAX;
+    let mut max = 0u64;
+    let mut total: u128 = 0;
+    for _ in 0..SYSCALL_BENCHMARK_ITERATIONS {
+        let start = libwoven::cycles();
+        let _ = libwoven::current_pid();
+        let elapsed = libwoven::cycles().wrapping_sub(start);
+        min = min.min(elapsed);
+        max = max.max(elapsed);
+        total += u128::from(elapsed);
+    }
+    let average = (total / u128::from(SYSCALL_BENCHMARK_ITERATIONS)) as u64;
+    let mut digits = [0u8; 20];
+    let _ = libwoven::print("hello-gui: syscall benchmark (current_pid) min=");
+    let _ =
+        libwoven::write(libwoven::syscall::STDOUT, libwoven::format_u64(min, &mut digits));
+    let _ = libwoven::print(" avg=");
+    let _ = libwoven::write(
+        libwoven::syscall::STDOUT,
+        libwoven::format_u64(average, &mut digits),
+    );
+    let _ = libwoven::print(" max=");
+    let _ = libwoven::write(libwoven::syscall::STDOUT, libwoven::format_u64(max, &mut digits));
+    let _ = libwoven::print(" cycles\n");
+    // The only sanity check a benchmark can make without being a brittle
+    // threshold: the counter genuinely advanced. A reading of exactly zero
+    // across 1000 samples would mean RDTSC (or the syscall path itself) is
+    // not doing anything, not that this machine is merely fast.
+    if average == 0 {
+        fail(320);
+    }
+    let _ = libwoven::print("hello-gui: syscall benchmark: PASSED\n");
+    libwoven::exit(0)
+}
+
+const IPC_BENCHMARK_ITERATIONS: u64 = 1000;
+
+/// Standalone IPC-latency micro-benchmark (Stage 30 performance engineering):
+/// time `IPC_BENCHMARK_ITERATIONS` round trips of a one-byte message this
+/// process sends to and receives from itself (permitted: `may_ipc_with`
+/// allows same-uid IPC, and a process shares its own uid). This isolates the
+/// enqueue/copy/dequeue cost of `message_send`+`message_receive` without the
+/// scheduling noise a second process would add. Reports min/average/max
+/// cycles; needs no capability beyond an ordinary process's own `Ipc`.
+fn ipc_benchmark() -> ! {
+    let self_pid = libwoven::current_pid();
+    let payload = [0x5au8];
+    let mut min = u64::MAX;
+    let mut max = 0u64;
+    let mut total: u128 = 0;
+    for _ in 0..IPC_BENCHMARK_ITERATIONS {
+        let mut buffer = [0u8; 1];
+        let start = libwoven::cycles();
+        if libwoven::message_send(self_pid, &payload).is_err() {
+            fail(321);
+        }
+        let Ok((length, sender)) = libwoven::message_receive(&mut buffer) else {
+            fail(322);
+        };
+        let elapsed = libwoven::cycles().wrapping_sub(start);
+        if length != 1 || buffer[0] != payload[0] || sender != self_pid {
+            fail(323);
+        }
+        min = min.min(elapsed);
+        max = max.max(elapsed);
+        total += u128::from(elapsed);
+    }
+    let average = (total / u128::from(IPC_BENCHMARK_ITERATIONS)) as u64;
+    let mut digits = [0u8; 20];
+    let _ = libwoven::print("hello-gui: ipc benchmark (self send+receive) min=");
+    let _ =
+        libwoven::write(libwoven::syscall::STDOUT, libwoven::format_u64(min, &mut digits));
+    let _ = libwoven::print(" avg=");
+    let _ = libwoven::write(
+        libwoven::syscall::STDOUT,
+        libwoven::format_u64(average, &mut digits),
+    );
+    let _ = libwoven::print(" max=");
+    let _ = libwoven::write(libwoven::syscall::STDOUT, libwoven::format_u64(max, &mut digits));
+    let _ = libwoven::print(" cycles\n");
+    if average == 0 {
+        fail(320);
+    }
+    let _ = libwoven::print("hello-gui: ipc benchmark: PASSED\n");
+    libwoven::exit(0)
+}
+
+const FS_BENCHMARK_ITERATIONS: u64 = 500;
+const FS_BENCHMARK_PAYLOAD: [u8; 256] = [0xa5u8; 256];
+
+/// Standalone filesystem-latency micro-benchmark (Stage 30 performance
+/// engineering): time `FS_BENCHMARK_ITERATIONS` round trips of a 256-byte
+/// `write_file`+`read` against an already-open descriptor on a scratch file
+/// the kernel self-test pre-creates. Reports write and read timings
+/// separately, since they are distinct syscalls with distinct costs; needs
+/// `FileRead`+`FileWrite` beyond an ordinary process's own.
+fn fs_benchmark() -> ! {
+    let Ok(descriptor) = libwoven::open("/tmp/fsbench") else {
+        fail(330);
+    };
+    let (mut write_min, mut write_max, mut write_total) = (u64::MAX, 0u64, 0u128);
+    let (mut read_min, mut read_max, mut read_total) = (u64::MAX, 0u64, 0u128);
+    for _ in 0..FS_BENCHMARK_ITERATIONS {
+        if libwoven::seek(descriptor, 0).is_err() {
+            fail(334);
+        }
+        let start = libwoven::cycles();
+        if libwoven::write_file(descriptor, &FS_BENCHMARK_PAYLOAD) != Ok(FS_BENCHMARK_PAYLOAD.len())
+        {
+            fail(331);
+        }
+        let elapsed = libwoven::cycles().wrapping_sub(start);
+        write_min = write_min.min(elapsed);
+        write_max = write_max.max(elapsed);
+        write_total += u128::from(elapsed);
+
+        if libwoven::seek(descriptor, 0).is_err() {
+            fail(335);
+        }
+        let mut buffer = [0u8; FS_BENCHMARK_PAYLOAD.len()];
+        let start = libwoven::cycles();
+        let Ok(length) = libwoven::read(descriptor, &mut buffer) else {
+            fail(332);
+        };
+        let elapsed = libwoven::cycles().wrapping_sub(start);
+        if length != FS_BENCHMARK_PAYLOAD.len() || buffer != FS_BENCHMARK_PAYLOAD {
+            fail(333);
+        }
+        read_min = read_min.min(elapsed);
+        read_max = read_max.max(elapsed);
+        read_total += u128::from(elapsed);
+    }
+    let write_average = (write_total / u128::from(FS_BENCHMARK_ITERATIONS)) as u64;
+    let read_average = (read_total / u128::from(FS_BENCHMARK_ITERATIONS)) as u64;
+    let mut digits = [0u8; 20];
+    let mut report = |label: &str, min: u64, average: u64, max: u64| {
+        let _ = libwoven::print(label);
+        let _ = libwoven::write(libwoven::syscall::STDOUT, libwoven::format_u64(min, &mut digits));
+        let _ = libwoven::print(" avg=");
+        let _ =
+            libwoven::write(libwoven::syscall::STDOUT, libwoven::format_u64(average, &mut digits));
+        let _ = libwoven::print(" max=");
+        let _ = libwoven::write(libwoven::syscall::STDOUT, libwoven::format_u64(max, &mut digits));
+        let _ = libwoven::print(" cycles\n");
+    };
+    report("hello-gui: fs benchmark write min=", write_min, write_average, write_max);
+    report("hello-gui: fs benchmark read min=", read_min, read_average, read_max);
+    if write_average == 0 || read_average == 0 {
+        fail(320);
+    }
+    let _ = libwoven::print("hello-gui: fs benchmark: PASSED\n");
+    libwoven::exit(0)
+}
+
+const COMPOSITOR_BENCHMARK_ITERATIONS: u64 = 500;
+
+/// Standalone compositor-present-latency micro-benchmark (Stage 30
+/// performance engineering): time `COMPOSITOR_BENCHMARK_ITERATIONS` round
+/// trips of changing one pixel of a placed window's surface and flushing
+/// it to the framebuffer (`surface.write` + `compositor_present`), timed
+/// with the cycle counter. A single unchanging frame would let the
+/// compositor skip undamaged work, understating real cost, so each
+/// iteration toggles a pixel to mark genuine damage. Needs `DisplayIo`.
+fn compositor_benchmark() -> ! {
+    let surface = match GraphicsSurface::create(32, 32) {
+        Ok(surface) => surface,
+        Err(_) => fail(340),
+    };
+    if surface.fill_rect(0, 0, 32, 32, BACKGROUND).is_err() {
+        fail(341);
+    }
+    if libwoven::compositor_claim().is_err() {
+        fail(342);
+    }
+    if surface.present(0, 0).is_err() {
+        fail(343);
+    }
+    if libwoven::compositor_present().is_err() {
+        fail(344);
+    }
+    let mut min = u64::MAX;
+    let mut max = 0u64;
+    let mut total: u128 = 0;
+    for iteration in 0..COMPOSITOR_BENCHMARK_ITERATIONS {
+        let toggled = if iteration % 2 == 0 { TITLE_BAR } else { BACKGROUND };
+        let start = libwoven::cycles();
+        if surface.write(0, 0, 1, 1, &[toggled]).is_err() {
+            fail(345);
+        }
+        if libwoven::compositor_present().is_err() {
+            fail(346);
+        }
+        let elapsed = libwoven::cycles().wrapping_sub(start);
+        min = min.min(elapsed);
+        max = max.max(elapsed);
+        total += u128::from(elapsed);
+    }
+    let average = (total / u128::from(COMPOSITOR_BENCHMARK_ITERATIONS)) as u64;
+    let mut digits = [0u8; 20];
+    let _ = libwoven::print("hello-gui: compositor benchmark (write+present) min=");
+    let _ =
+        libwoven::write(libwoven::syscall::STDOUT, libwoven::format_u64(min, &mut digits));
+    let _ = libwoven::print(" avg=");
+    let _ = libwoven::write(
+        libwoven::syscall::STDOUT,
+        libwoven::format_u64(average, &mut digits),
+    );
+    let _ = libwoven::print(" max=");
+    let _ = libwoven::write(libwoven::syscall::STDOUT, libwoven::format_u64(max, &mut digits));
+    let _ = libwoven::print(" cycles\n");
+    if average == 0 {
+        fail(320);
+    }
+    let _ = libwoven::print("hello-gui: compositor benchmark: PASSED\n");
+    libwoven::exit(0)
+}
+
+const SCHEDULER_BENCHMARK_ITERATIONS: u64 = 1000;
+
+/// Standalone scheduler-latency micro-benchmark (Stage 30 performance
+/// engineering): time `SCHEDULER_BENCHMARK_ITERATIONS` round trips of
+/// `yield_now` with the cycle counter. With no other runnable process
+/// contending for this CPU, the scheduler always re-selects this task
+/// immediately, so this measures the voluntary-yield path's own overhead
+/// (syscall entry, run-queue bookkeeping, syscall exit) rather than a
+/// context switch to different process state; needs no capability beyond
+/// an ordinary process's own.
+fn scheduler_benchmark() -> ! {
+    let mut min = u64::MAX;
+    let mut max = 0u64;
+    let mut total: u128 = 0;
+    for _ in 0..SCHEDULER_BENCHMARK_ITERATIONS {
+        let start = libwoven::cycles();
+        libwoven::yield_now();
+        let elapsed = libwoven::cycles().wrapping_sub(start);
+        min = min.min(elapsed);
+        max = max.max(elapsed);
+        total += u128::from(elapsed);
+    }
+    let average = (total / u128::from(SCHEDULER_BENCHMARK_ITERATIONS)) as u64;
+    let mut digits = [0u8; 20];
+    let _ = libwoven::print("hello-gui: scheduler benchmark (yield_now) min=");
+    let _ =
+        libwoven::write(libwoven::syscall::STDOUT, libwoven::format_u64(min, &mut digits));
+    let _ = libwoven::print(" avg=");
+    let _ = libwoven::write(
+        libwoven::syscall::STDOUT,
+        libwoven::format_u64(average, &mut digits),
+    );
+    let _ = libwoven::print(" max=");
+    let _ = libwoven::write(libwoven::syscall::STDOUT, libwoven::format_u64(max, &mut digits));
+    let _ = libwoven::print(" cycles\n");
+    if average == 0 {
+        fail(320);
+    }
+    let _ = libwoven::print("hello-gui: scheduler benchmark: PASSED\n");
+    libwoven::exit(0)
+}
+
 fn main(args: Args) -> ! {
     match args.get(1) {
         Some(b"--audio") => audio(),
@@ -186,6 +511,12 @@ fn main(args: Args) -> ! {
         Some(b"--scaled-compositor") => scaled_compositor(),
         Some(b"--desktop-client") => desktop_client(&args),
         Some(b"--wm-client") => wm_client(&args),
+        Some(b"--3d-chrome-demo") => three_d_chrome_demo(),
+        Some(b"--syscall-benchmark") => syscall_benchmark(),
+        Some(b"--ipc-benchmark") => ipc_benchmark(),
+        Some(b"--fs-benchmark") => fs_benchmark(),
+        Some(b"--compositor-benchmark") => compositor_benchmark(),
+        Some(b"--scheduler-benchmark") => scheduler_benchmark(),
         Some(_) => fail(250),
         None => run(Input::None),
     }
@@ -220,6 +551,71 @@ fn run(input: Input) -> ! {
     }
     if surface.fill_rect(10, 26, 180, 80, CONTENT).is_err() {
         fail(4);
+    }
+
+    // Stage 16.1: route a real visible frame through WovenGraphics' typed
+    // software renderer before uploading it to the kernel-owned surface.
+    let mut pixels = [0u32; 32 * 24];
+    let mut depth_values = [u16::MAX; 32 * 24];
+    let mut canvas = libwoven::Canvas::new(&mut pixels, 10, 10, 32, 24).unwrap();
+    let mut depth = DepthBuffer::new(&mut depth_values, 10, 10, 32, 24).unwrap();
+    {
+        let mut renderer = Renderer::new(&mut canvas);
+        depth.clear(u16::MAX);
+        renderer.vertical_gradient(
+            Rect::new(10, 10, 32, 16),
+            Color::TITLE,
+            Color::rgb(0, 80, 160),
+        );
+        renderer.horizontal_gradient(
+            Rect::new(10, 10, 32, 16),
+            Color::rgb(0, 80, 160),
+            Color::TITLE,
+        );
+        renderer.rounded_rect_blended(
+            Rect::new(12, 11, 28, 12),
+            3,
+            Color::WHITE,
+            48,
+        );
+        renderer.triangle_3d(
+            &mut depth,
+            Vertex3::new(18, 16, 80, Color::rgb(255, 90, 70)),
+            Vertex3::new(34, 12, 120, Color::rgb(255, 220, 70)),
+            Vertex3::new(30, 28, 120, Color::rgb(255, 70, 210)),
+        );
+        renderer.triangle_3d(
+            &mut depth,
+            Vertex3::new(18, 16, 80, Color::rgb(70, 180, 255)),
+            Vertex3::new(30, 28, 120, Color::rgb(70, 255, 170)),
+            Vertex3::new(14, 27, 120, Color::rgb(70, 100, 255)),
+        );
+        renderer.stroke(Rect::new(10, 10, 32, 16), Color::WHITE);
+        renderer.transformed_rect(
+            Rect::new(20, 13, 8, 7),
+            Transform::new(1 << 16, 1 << 15, 0, 1 << 16, 0, 0),
+            Color::rgb(255, 150, 40),
+        );
+        if !renderer.image_blended(12, 14, 4, 4, &WOVEN_ICON, 224) {
+            fail(40);
+        }
+        let _ = renderer.text_box(Rect::new(11, 11, 12, 14), "WH", Color::BLACK, 1);
+        renderer.blend(Rect::new(10, 26, 32, 8), Color::WHITE, 64);
+        let mut badge = Path::new();
+        let _ = badge.move_to(Point::new(12, 21));
+        let _ = badge.line_to(Point::new(22, 17));
+        let _ = badge.line_to(Point::new(32, 21));
+        let _ = badge.close();
+        let _ = renderer.fill_path_antialiased_blended(&badge, Color::rgb(20, 120, 180), 220);
+        let mut path = Path::new();
+        let _ = path.move_to(Point::new(15, 29));
+        if !path.quadratic_to(Point::new(22, 18), Point::new(29, 29)) {
+            fail(42);
+        }
+        renderer.stroke_path(&path, Color::TITLE);
+    }
+    if surface.write(10, 10, 32, 24, canvas.pixels()).is_err() {
+        fail(41);
     }
     // One stroke rather than four fills. Besides being clearer, this
     // exercises the stroke syscall path.
@@ -286,6 +682,9 @@ fn run(input: Input) -> ! {
         Ok(_) => fail(12),
         Err(_) => fail(13),
     }
+    let _ = libwoven::print("[S16G] WovenGraphics visual frame: PASSED\n");
+    let _ = libwoven::print("[S16G2] WovenGraphics 2D frame: PASSED\n");
+    let _ = libwoven::print("[S16G3D] WovenGraphics software 3D frame: PASSED\n");
     let _ = libwoven::print("hello-gui: framebuffer presented\n");
 
     match input {
@@ -300,6 +699,144 @@ fn run(input: Input) -> ! {
     drop(surface);
     let _ = libwoven::print("hello-gui: surface released\n");
 
+    libwoven::exit(0)
+}
+
+const CHROME_WIDTH: usize = 64;
+const CHROME_HEIGHT: usize = 16;
+const CHROME_FILL: u32 = rgb(40, 220, 230);
+
+/// The 3D chrome demo's buffers: a 200x120 u32 canvas plus a matching u16
+/// depth buffer is ~67 KiB, far over the 8 KiB user stack, so (like
+/// `AUDIO_PCM` above) these live in .bss instead.
+struct ChromeDemoBuffers {
+    chrome: core::cell::UnsafeCell<[u32; CHROME_WIDTH * CHROME_HEIGHT]>,
+    pixels: core::cell::UnsafeCell<[u32; WIDTH as usize * HEIGHT as usize]>,
+    depth: core::cell::UnsafeCell<[u16; WIDTH as usize * HEIGHT as usize]>,
+}
+
+// SAFETY: hello-gui is single-threaded and three_d_chrome_demo takes the
+// only reference to each field.
+unsafe impl Sync for ChromeDemoBuffers {}
+
+// All-zero initializers: a non-zero one (`[u16::MAX; _]` for the depth
+// buffer) cannot go in .bss and is instead stored as real data in the
+// image, which is exactly what bloated the installed file past the VFS's
+// 64 KiB node cap the first time this was written. `three_d_chrome_demo`
+// already calls `depth.clear(u16::MAX)` at runtime, so the static itself
+// only ever needs to be zero.
+static CHROME_DEMO: ChromeDemoBuffers = ChromeDemoBuffers {
+    chrome: core::cell::UnsafeCell::new([0; CHROME_WIDTH * CHROME_HEIGHT]),
+    pixels: core::cell::UnsafeCell::new([0; WIDTH as usize * HEIGHT as usize]),
+    depth: core::cell::UnsafeCell::new([0; WIDTH as usize * HEIGHT as usize]),
+};
+
+/// Standalone proof of concept for textured 3D chrome: render a small
+/// title-bar-like strip offscreen, project it through a perspective
+/// `Camera` as a tilted, texture-mapped quad, and present the result. Does
+/// not touch WovenShell or any already-accepted compositor path.
+fn three_d_chrome_demo() -> ! {
+    // 1. The "chrome": exactly what a flat 2D title bar would be -- a fill
+    //    and a label -- drawn into its own offscreen Canvas, unconnected to
+    //    any compositor surface. This is the thing the 3D stage below
+    //    projects; it never changes based on how it will be displayed.
+    // SAFETY: single-threaded; this is the only live reference.
+    let chrome_pixels = unsafe { &mut *CHROME_DEMO.chrome.get() };
+    let mut chrome = match libwoven::Canvas::new(chrome_pixels, 0, 0, CHROME_WIDTH, CHROME_HEIGHT) {
+        Some(canvas) => canvas,
+        None => fail(300),
+    };
+    {
+        let mut renderer = Renderer::new(&mut chrome);
+        renderer.fill(Rect::new(0, 0, CHROME_WIDTH, CHROME_HEIGHT), Color::rgb(40, 220, 230));
+        renderer.text(4, 4, "3D", Color::BLACK);
+    }
+
+    // 2. Project the chrome's four corners through a perspective camera: the
+    //    left edge stays at z=0 while the right edge recedes to z=40<<16, so
+    //    the quad visibly narrows toward the right -- real perspective, not
+    //    a flat blit scaled down.
+    let camera = Camera::new(90 << 16, 70 << 16, 100, 30);
+    let (Some(top_left), Some(top_right), Some(bottom_left), Some(bottom_right)) = (
+        camera.project(-30 << 16, -8 << 16, 0),
+        camera.project(30 << 16, -8 << 16, 40 << 16),
+        camera.project(-30 << 16, 8 << 16, 0),
+        camera.project(30 << 16, 8 << 16, 40 << 16),
+    ) else {
+        fail(301)
+    };
+    let vertex = |(x, y, depth): (i32, i32, u16), u: u8, v: u8| Vertex3Tex::new(x, y, depth, u, v);
+
+    // SAFETY: single-threaded; this is the only live reference.
+    let pixels = unsafe { &mut *CHROME_DEMO.pixels.get() };
+    let mut canvas = match libwoven::Canvas::new(pixels, 0, 0, WIDTH as usize, HEIGHT as usize) {
+        Some(canvas) => canvas,
+        None => fail(302),
+    };
+    canvas.fill_rect(0, 0, WIDTH as usize, HEIGHT as usize, BACKGROUND);
+    // SAFETY: single-threaded; this is the only live reference.
+    let depth_values = unsafe { &mut *CHROME_DEMO.depth.get() };
+    let mut depth = match DepthBuffer::new(depth_values, 0, 0, WIDTH as usize, HEIGHT as usize) {
+        Some(depth) => depth,
+        None => fail(303),
+    };
+    depth.clear(u16::MAX);
+    {
+        let mut renderer = Renderer::new(&mut canvas);
+        renderer.textured_triangle_3d(
+            &mut depth,
+            vertex(top_left, 0, 0),
+            vertex(top_right, 255, 0),
+            vertex(bottom_left, 0, 255),
+            &chrome,
+        );
+        renderer.textured_triangle_3d(
+            &mut depth,
+            vertex(top_right, 255, 0),
+            vertex(bottom_right, 255, 255),
+            vertex(bottom_left, 0, 255),
+            &chrome,
+        );
+    }
+    let _ = libwoven::print("hello-gui: 3d chrome projected\n");
+
+    // 3. Verify by reading back pixels, the same kernel-contract-test
+    //    reasoning as `run`'s step 4: well outside the projected quad, the
+    //    background must be untouched; well inside its near (left) edge,
+    //    away from where the label is drawn, the chrome's own fill colour
+    //    must have been sampled, proving the texture (not a flat colour)
+    //    reached the screen.
+    match canvas.get(10, 10) {
+        Some(color) if color == BACKGROUND => {}
+        _ => fail(304),
+    }
+    match canvas.get(65, 22) {
+        Some(color) if color == CHROME_FILL => {}
+        _ => fail(305),
+    }
+
+    // 4. Upload and present normally: everything from here on is the same
+    //    ordinary 2D path every other mode uses.
+    let surface = match GraphicsSurface::create(WIDTH, HEIGHT) {
+        Ok(surface) => surface,
+        Err(_) => fail(306),
+    };
+    if surface.write(0, 0, WIDTH as u16, HEIGHT as u16, canvas.pixels()).is_err() {
+        fail(307);
+    }
+    if libwoven::compositor_claim().is_err() {
+        fail(308);
+    }
+    if surface.present(0, 0).is_err() {
+        fail(309);
+    }
+    match libwoven::compositor_present() {
+        Ok(written) if written > 0 => {}
+        Ok(_) => fail(310),
+        Err(_) => fail(311),
+    }
+    let _ = libwoven::print("hello-gui: 3d chrome demo: PASSED\n");
+    drop(surface);
     libwoven::exit(0)
 }
 
@@ -1005,7 +1542,10 @@ fn desktop_client(args: &Args) -> ! {
 
     // Exactly our key, from the shell.
     let deadline = libwoven::ticks() + 6000;
-    let mut key = [0u8; 8];
+    // Room for the largest shell message this client must skip (WPBT is 10
+    // bytes). A message larger than the buffer is refused and stays queued,
+    // so an undersized buffer would spin on it and never see the key.
+    let mut key = [0u8; 16];
     loop {
         match libwoven::wait_any(libwoven::wait::MESSAGE, Some(deadline)) {
             Ok(0) | Err(_) => fail(188),
@@ -1044,6 +1584,21 @@ fn desktop_client(args: &Args) -> ! {
                 if libwoven::message_send(shell, b"NOTEPing").is_err() {
                     fail(189);
                 }
+                continue;
+            }
+            // A pointer move over this window's body: the shell forwards
+            // these to whatever client is under the pointer regardless of
+            // whether it asked for them (see `forward_pointer_move`), and a
+            // desktop client that only wants its one key has nothing to do
+            // with its own pointer coordinates.
+            if sender == shell && length == 8 && &key[..4] == b"WPMV" {
+                continue;
+            }
+            // Likewise a primary-button edge: a click in the body captures
+            // the pointer and the shell forwards the press and release
+            // (`forward_pointer_button`). Focus is the shell's job; this
+            // client still waits for its key.
+            if sender == shell && length == 10 && &key[..4] == b"WPBT" {
                 continue;
             }
             if sender != shell || length != 1 || key[0] != expected {

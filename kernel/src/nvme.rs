@@ -373,7 +373,11 @@ impl BlockDevice for NvmeController {
 }
 
 pub fn init() -> Result<u64, InitError> {
-    if let Some(sectors) = CONTROLLER.lock().as_ref().map(|controller| controller.sectors) {
+    if let Some(sectors) = CONTROLLER
+        .lock()
+        .as_ref()
+        .map(|controller| controller.sectors)
+    {
         return Ok(sectors);
     }
     init_at(find_controller().ok_or(InitError::MissingController)?)

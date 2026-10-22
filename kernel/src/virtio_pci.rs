@@ -68,18 +68,26 @@ impl DmaPages {
             .ok_or(Error::DmaUnavailable)?;
         // SAFETY: the frames were just allocated to this object.
         unsafe { ptr::write_bytes(virtual_address as *mut u8, 0, pages * PAGE_SIZE) };
-        Ok(Self { physical, virtual_address, pages })
+        Ok(Self {
+            physical,
+            virtual_address,
+            pages,
+        })
     }
 
     pub fn bytes_mut(&mut self) -> &mut [u8] {
         // SAFETY: owned, mapped through the physical-memory window, and
         // exclusively borrowed.
-        unsafe { core::slice::from_raw_parts_mut(self.virtual_address as *mut u8, self.pages * PAGE_SIZE) }
+        unsafe {
+            core::slice::from_raw_parts_mut(self.virtual_address as *mut u8, self.pages * PAGE_SIZE)
+        }
     }
 
     pub fn bytes(&self) -> &[u8] {
         // SAFETY: as above, shared.
-        unsafe { core::slice::from_raw_parts(self.virtual_address as *const u8, self.pages * PAGE_SIZE) }
+        unsafe {
+            core::slice::from_raw_parts(self.virtual_address as *const u8, self.pages * PAGE_SIZE)
+        }
     }
 }
 
@@ -159,6 +167,7 @@ pub struct Transport {
     notify_multiplier: u32,
     _isr: Region,
     pub device: Region2,
+    negotiated_features: u64,
 }
 
 /// The device-specific configuration region, for the device driver.
@@ -176,11 +185,17 @@ impl Transport {
     /// virtio 1.x with `wanted` device features (only those the device
     /// offers are accepted).
     pub fn new(device: pci::Device, wanted: u64) -> Result<Self, Error> {
-        let address = pci::Address { segment: device.segment, bus: device.bus, device: device.device, function: device.function };
+        let address = pci::Address {
+            segment: device.segment,
+            bus: device.bus,
+            device: device.device,
+            function: device.function,
+        };
         if !pci::enable_memory_bus_master(address) {
             return Err(Error::MmioUnavailable);
         }
-        let read = |offset: u8| pci::read_config_dword(device.bus, device.device, device.function, offset);
+        let read =
+            |offset: u8| pci::read_config_dword(device.bus, device.device, device.function, offset);
         let bar_base = |bar: u8| -> Option<u64> {
             let entry = device.bars.get(usize::from(bar))?;
             entry.valid.then_some(entry.address)
@@ -200,7 +215,9 @@ impl Transport {
                 let bar = word as u8;
                 let offset = u64::from(read(pointer + 8));
                 if let Some(base) = bar_base(bar) {
-                    let region = Some(Region { physical: base + offset });
+                    let region = Some(Region {
+                        physical: base + offset,
+                    });
                     match cfg_type {
                         CFG_COMMON if common.is_none() => common = region,
                         CFG_NOTIFY if notify.is_none() => {
@@ -221,6 +238,7 @@ impl Transport {
             notify_multiplier: multiplier,
             _isr: isr.ok_or(Error::MissingCapability)?,
             device: Region2(config.ok_or(Error::MissingCapability)?),
+            negotiated_features: 0,
         };
         let common = transport.common;
         // Reset, then acknowledge.
@@ -254,7 +272,10 @@ impl Transport {
             common.write8(0x14, STATUS_FAILED)?;
             return Err(Error::FeaturesRejected);
         }
-        Ok(transport)
+        Ok(Self {
+            negotiated_features: accepted,
+            ..transport
+        })
     }
 
     /// Set up queue `index` with [`QUEUE_SIZE`] descriptors.
@@ -277,7 +298,13 @@ impl Transport {
         let notify_off = u64::from(common.read16(0x1e)?);
         common.write16(0x1c, 1)?;
         let notify = self.notify.physical + notify_off * u64::from(self.notify_multiplier);
-        Ok(Queue { index, notify, memory, next_avail: 0, last_used: 0 })
+        Ok(Queue {
+            index,
+            notify,
+            memory,
+            next_avail: 0,
+            last_used: 0,
+        })
     }
 
     /// Tell the device the driver is ready.
@@ -286,9 +313,20 @@ impl Transport {
         self.common.write8(0x14, status)
     }
 
+    /// Features accepted during device negotiation. Drivers use this to
+    /// select optional protocol paths without guessing from device identity.
+    pub const fn negotiated_features(&self) -> u64 {
+        self.negotiated_features
+    }
+
     /// Send a device-readable request and wait for the device-writable
     /// response; returns the bytes the device wrote.
-    pub fn exchange(&self, queue: &mut Queue, request: (u64, u32), response: (u64, u32)) -> Result<u32, Error> {
+    pub fn exchange(
+        &self,
+        queue: &mut Queue,
+        request: (u64, u32),
+        response: (u64, u32),
+    ) -> Result<u32, Error> {
         queue.write_desc(0, request.0, request.1, DESC_F_NEXT, 1);
         queue.write_desc(1, response.0, response.1, DESC_F_WRITE, 0);
         let slot = usize::from(queue.next_avail % QUEUE_SIZE);
@@ -312,7 +350,12 @@ impl Transport {
             if used != queue.last_used {
                 let slot = usize::from(queue.last_used % QUEUE_SIZE);
                 let entry = USED_OFFSET + 4 + slot * 8;
-                let written = u32::from_le_bytes([bytes[entry + 4], bytes[entry + 5], bytes[entry + 6], bytes[entry + 7]]);
+                let written = u32::from_le_bytes([
+                    bytes[entry + 4],
+                    bytes[entry + 5],
+                    bytes[entry + 6],
+                    bytes[entry + 7],
+                ]);
                 queue.last_used = queue.last_used.wrapping_add(1);
                 return Ok(written);
             }

@@ -336,6 +336,7 @@ pub struct XhciController {
 
 impl XhciController {
     fn initialize(device: pci::Device) -> Result<Self, InitError> {
+        crate::serial::write_line(format_args!("[XHCI] controller initialization begin"));
         let bar = device
             .bars
             .iter()
@@ -350,6 +351,7 @@ impl XhciController {
         if !pci::enable_memory_bus_master(address) {
             return Err(InitError::MissingController);
         }
+        crate::serial::write_line(format_args!("[XHCI] PCI memory and bus mastering enabled"));
         let mmio = bar.address;
         let cap_length = mmio_read8(mmio)?;
         if cap_length < 0x20 {
@@ -369,9 +371,12 @@ impl XhciController {
 
         let command = mmio_read32(op_base)?;
         mmio_write32(op_base, command & !1)?;
+        crate::serial::write_line(format_args!("[XHCI] controller halt requested"));
         wait_until(op_base + 0x04, 1, 1)?;
         mmio_write32(op_base, (command & !1) | (1 << 1))?;
+        crate::serial::write_line(format_args!("[XHCI] controller reset requested"));
         wait_until(op_base, 1 << 1, 0)?;
+        crate::serial::write_line(format_args!("[XHCI] controller reset complete"));
 
         let mut dcbaa = DmaPage::allocate_zeroed().ok_or(InitError::DmaUnavailable)?;
         let command_page = DmaPage::allocate_zeroed().ok_or(InitError::DmaUnavailable)?;
@@ -399,9 +404,14 @@ impl XhciController {
         mmio_write64(interrupter + 0x18, event_ring.physical)?;
 
         mmio_write32(op_base, 1)?;
+        crate::serial::write_line(format_args!("[XHCI] controller start requested"));
         wait_until(op_base + 0x04, 1, 0)?;
 
         let connected_port = find_connected_port(op_base, max_ports)?;
+        crate::serial::write_line(format_args!(
+            "[XHCI] connected port {} found",
+            connected_port
+        ));
         let mut controller = Self {
             max_slots,
             max_ports,
@@ -439,7 +449,12 @@ impl XhciController {
             stashed_len: 0,
         };
         controller.reset_port(connected_port)?;
+        crate::serial::write_line(format_args!(
+            "[XHCI] port {} reset complete",
+            connected_port
+        ));
         controller.slot_id = controller.enable_slot()?;
+        crate::serial::write_line(format_args!("[XHCI] initial slot enabled"));
         Ok(controller)
     }
 
@@ -586,7 +601,12 @@ impl XhciController {
     }
 
     /// Configure the addressed device as a HID device from its configuration.
-    fn finish_hid(&mut self, descriptor: &DmaPage, total_length: usize, configuration: u8) -> Result<HidSummary, InitError> {
+    fn finish_hid(
+        &mut self,
+        descriptor: &DmaPage,
+        total_length: usize,
+        configuration: u8,
+    ) -> Result<HidSummary, InitError> {
         let hid = parse_hid_interface(&descriptor.bytes()[..total_length], configuration)
             .ok_or(InitError::HidNotFound)?;
 
@@ -1141,7 +1161,12 @@ impl XhciController {
             if count == MAX_INPUTS {
                 break;
             }
-            if self.inputs.iter().flatten().any(|device| device.port == port) {
+            if self
+                .inputs
+                .iter()
+                .flatten()
+                .any(|device| device.port == port)
+            {
                 continue;
             }
             let portsc = self.op_base + 0x400 + (u64::from(port - 1) * 0x10);
@@ -1167,14 +1192,18 @@ impl XhciController {
             }
             // A mass-storage device becomes the USB disk (Stage 13.18);
             // anything else is tried as an input device.
-            let Ok((descriptor, total_length, configuration)) =
-                self.address_device().and_then(|()| self.read_configuration())
+            let Ok((descriptor, total_length, configuration)) = self
+                .address_device()
+                .and_then(|()| self.read_configuration())
             else {
                 self.slot_id = 0;
                 continue;
             };
             if self.storage.is_none() {
-                if let Some(interface) = crate::usb_msc::parse_interface(&descriptor.bytes()[..total_length], configuration) {
+                if let Some(interface) = crate::usb_msc::parse_interface(
+                    &descriptor.bytes()[..total_length],
+                    configuration,
+                ) {
                     match self.attach_storage(port, interface) {
                         Ok(device) => {
                             crate::serial::write_line(format_args!(
@@ -1184,7 +1213,10 @@ impl XhciController {
                             self.storage = Some(device);
                         }
                         Err(error) => {
-                            crate::serial::write_line(format_args!("[USB] mass storage on port {}: {:?}", port, error));
+                            crate::serial::write_line(format_args!(
+                                "[USB] mass storage on port {}: {:?}",
+                                port, error
+                            ));
                         }
                     }
                     self.slot_id = 0;
@@ -1204,14 +1236,17 @@ impl XhciController {
                 };
                 // Report only on change: the enumeration's short idle period
                 // exists for the Stage 13.6 probe, not for input devices.
-                self.control_no_data(0x21, USB_REQUEST_SET_IDLE, 0, u16::from(hid.interface)).ok()?;
+                self.control_no_data(0x21, USB_REQUEST_SET_IDLE, 0, u16::from(hid.interface))
+                    .ok()?;
                 let limit = if layout.is_some() { MAX_REPORT } else { 8 };
                 Some(InputDevice {
                     slot_id: self.slot_id,
                     port,
                     kind: summary.kind,
                     layout,
-                    dci: (hid.endpoint_address & 0x0f).saturating_mul(2).saturating_add(1),
+                    dci: (hid.endpoint_address & 0x0f)
+                        .saturating_mul(2)
+                        .saturating_add(1),
                     length: cmp::min(usize::from(hid.max_packet), limit),
                     ring: self.hid_ring.take()?,
                     buffer: self.hid_buffer.take()?,
@@ -1245,8 +1280,15 @@ impl XhciController {
         }
         let mut descriptor = DmaPage::allocate_zeroed()?;
         // GET_DESCRIPTOR(Report), addressed to the interface.
-        self.control_in(0x81, USB_REQUEST_GET_DESCRIPTOR, 0x22 << 8, u16::from(hid.interface), &mut descriptor, length)
-            .ok()?;
+        self.control_in(
+            0x81,
+            USB_REQUEST_GET_DESCRIPTOR,
+            0x22 << 8,
+            u16::from(hid.interface),
+            &mut descriptor,
+            length,
+        )
+        .ok()?;
         crate::hid::parse(&descriptor.bytes()[..length]).ok()
     }
 
@@ -1266,7 +1308,10 @@ impl XhciController {
     /// its transfer. Runs under the controller lock and never waits; the
     /// reports are decoded and published by the caller after unlocking.
     #[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
-    fn service_inputs(&mut self, reports: &mut [(HidKind, usize, [u8; MAX_REPORT]); REPORTS_PER_PASS]) -> usize {
+    fn service_inputs(
+        &mut self,
+        reports: &mut [(HidKind, usize, [u8; MAX_REPORT]); REPORTS_PER_PASS],
+    ) -> usize {
         // Acknowledge first, so an event written while draining raises a
         // fresh interrupt rather than being folded into this one.
         let _ = mmio_write32(self.runtime_base + 0x20, 0b11);
@@ -1278,7 +1323,9 @@ impl XhciController {
         self.stashed_len -= stashed;
         count += stashed;
         while count < REPORTS_PER_PASS {
-            let Ok(Some(event)) = self.try_event() else { break };
+            let Ok(Some(event)) = self.try_event() else {
+                break;
+            };
             if let Some(report) = self.route_input_event(event) {
                 reports[count] = report;
                 count += 1;
@@ -1296,12 +1343,16 @@ impl XhciController {
         }
         let doorbell_base = self.doorbell_base;
         let slot = ((event.control >> 24) & 0xff) as u8;
-        let (index, device) = self.inputs.iter_mut().enumerate().find_map(|(index, device)| {
-            device
-                .as_mut()
-                .filter(|device| device.slot_id == slot && device.pending == event.parameter)
-                .map(|device| (index, device))
-        })?;
+        let (index, device) = self
+            .inputs
+            .iter_mut()
+            .enumerate()
+            .find_map(|(index, device)| {
+                device
+                    .as_mut()
+                    .filter(|device| device.slot_id == slot && device.pending == event.parameter)
+                    .map(|device| (index, device))
+            })?;
         let code = completion_code(event.status);
         let report = (code == 1 || code == 13).then(|| {
             fence(Ordering::Acquire);
@@ -1331,28 +1382,64 @@ impl XhciController {
     /// Configure the addressed device's Bulk-Only interface and bring the
     /// disk up: INQUIRY, TEST UNIT READY until ready, READ CAPACITY. Only
     /// 512-byte blocks addressable by 10-byte commands are accepted.
-    fn attach_storage(&mut self, port: u8, interface: crate::usb_msc::Interface) -> Result<StorageDevice, InitError> {
+    fn attach_storage(
+        &mut self,
+        port: u8,
+        interface: crate::usb_msc::Interface,
+    ) -> Result<StorageDevice, InitError> {
         let in_dci = endpoint_dci(interface.bulk_in)?;
         let out_dci = endpoint_dci(interface.bulk_out)?;
         if in_dci == out_dci {
             return Err(InitError::DescriptorInvalid);
         }
-        self.control_no_data(0x00, USB_REQUEST_SET_CONFIGURATION, u16::from(interface.configuration), 0)?;
+        self.control_no_data(
+            0x00,
+            USB_REQUEST_SET_CONFIGURATION,
+            u16::from(interface.configuration),
+            0,
+        )?;
 
         let in_ring = Ring::new(DmaPage::allocate_zeroed().ok_or(InitError::DmaUnavailable)?);
         let out_ring = Ring::new(DmaPage::allocate_zeroed().ok_or(InitError::DmaUnavailable)?);
         let mut input = DmaPage::allocate_zeroed().ok_or(InitError::DmaUnavailable)?;
-        let output = self.output_context.as_ref().ok_or(InitError::CommandFailed)?;
-        input.bytes_mut()[self.context_size..self.context_size * 2].copy_from_slice(&output.bytes()[..self.context_size]);
-        write_u32(input.bytes_mut(), 4, 1 | (1_u32 << in_dci) | (1_u32 << out_dci));
+        let output = self
+            .output_context
+            .as_ref()
+            .ok_or(InitError::CommandFailed)?;
+        input.bytes_mut()[self.context_size..self.context_size * 2]
+            .copy_from_slice(&output.bytes()[..self.context_size]);
+        write_u32(
+            input.bytes_mut(),
+            4,
+            1 | (1_u32 << in_dci) | (1_u32 << out_dci),
+        );
         let slot_offset = self.context_size;
-        let slot_dword0 = (read_u32(input.bytes(), slot_offset) & !(0x1f << 27)) | (u32::from(in_dci.max(out_dci)) << 27);
+        let slot_dword0 = (read_u32(input.bytes(), slot_offset) & !(0x1f << 27))
+            | (u32::from(in_dci.max(out_dci)) << 27);
         write_u32(input.bytes_mut(), slot_offset, slot_dword0);
         let speed = self.port_speed()?;
-        write_bluetooth_endpoint_context(input.bytes_mut(), self.context_size, in_dci, interface.bulk_in,
-            interface.bulk_in_max_packet, 0, speed, in_ring.page.physical, USB_ENDPOINT_BULK)?;
-        write_bluetooth_endpoint_context(input.bytes_mut(), self.context_size, out_dci, interface.bulk_out,
-            interface.bulk_out_max_packet, 0, speed, out_ring.page.physical, USB_ENDPOINT_BULK)?;
+        write_bluetooth_endpoint_context(
+            input.bytes_mut(),
+            self.context_size,
+            in_dci,
+            interface.bulk_in,
+            interface.bulk_in_max_packet,
+            0,
+            speed,
+            in_ring.page.physical,
+            USB_ENDPOINT_BULK,
+        )?;
+        write_bluetooth_endpoint_context(
+            input.bytes_mut(),
+            self.context_size,
+            out_dci,
+            interface.bulk_out,
+            interface.bulk_out_max_packet,
+            0,
+            speed,
+            out_ring.page.physical,
+            USB_ENDPOINT_BULK,
+        )?;
         fence(Ordering::Release);
         let command_ptr = self.command_ring.push(Trb {
             parameter: input.physical,
@@ -1390,22 +1477,45 @@ impl XhciController {
         // REQUEST SENSE clears the condition between attempts.
         let mut ready = false;
         for _ in 0..READY_ATTEMPTS {
-            if self.scsi(&mut device, &crate::usb_msc::test_unit_ready(), Direction::None).is_ok() {
+            if self
+                .scsi(
+                    &mut device,
+                    &crate::usb_msc::test_unit_ready(),
+                    Direction::None,
+                )
+                .is_ok()
+            {
                 ready = true;
                 break;
             }
-            let sensed = self.scsi(&mut device, &crate::usb_msc::request_sense(18), Direction::In(18)).is_ok();
+            let sensed = self
+                .scsi(
+                    &mut device,
+                    &crate::usb_msc::request_sense(18),
+                    Direction::In(18),
+                )
+                .is_ok();
             // NOT READY, MEDIUM NOT PRESENT: an empty card reader never settles.
-            if sensed && matches!(crate::usb_msc::parse_sense(&device.data.bytes()[..18]), Some((0x02, 0x3a, _))) {
+            if sensed
+                && matches!(
+                    crate::usb_msc::parse_sense(&device.data.bytes()[..18]),
+                    Some((0x02, 0x3a, _))
+                )
+            {
                 return Err(InitError::TransferFailed);
             }
         }
         if !ready {
             return Err(InitError::TransferFailed);
         }
-        self.scsi(&mut device, &crate::usb_msc::read_capacity(), Direction::In(8)).map_err(|_| InitError::TransferFailed)?;
-        let (blocks, block_size) =
-            crate::usb_msc::parse_capacity(&device.data.bytes()[..8]).ok_or(InitError::DescriptorInvalid)?;
+        self.scsi(
+            &mut device,
+            &crate::usb_msc::read_capacity(),
+            Direction::In(8),
+        )
+        .map_err(|_| InitError::TransferFailed)?;
+        let (blocks, block_size) = crate::usb_msc::parse_capacity(&device.data.bytes()[..8])
+            .ok_or(InitError::DescriptorInvalid)?;
         if block_size as usize != crate::block::SECTOR_SIZE || blocks > u64::from(u32::MAX) + 1 {
             return Err(InitError::DescriptorInvalid);
         }
@@ -1417,7 +1527,12 @@ impl XhciController {
     /// One Bulk-Only command: the command wrapper, the data stage into or
     /// out of `device.data`, and the status wrapper. Returns the bytes the
     /// data stage moved.
-    fn scsi(&mut self, device: &mut StorageDevice, command: &[u8], direction: Direction) -> Result<usize, StorageError> {
+    fn scsi(
+        &mut self,
+        device: &mut StorageDevice,
+        command: &[u8],
+        direction: Direction,
+    ) -> Result<usize, StorageError> {
         let (length, data_in) = match direction {
             Direction::None => (0, false),
             Direction::In(length) => (length, true),
@@ -1428,7 +1543,8 @@ impl XhciController {
         }
         let tag = device.tag;
         device.tag = device.tag.wrapping_add(1).max(1);
-        let block = crate::usb_msc::command_block(tag, length as u32, data_in, command).ok_or(StorageError::NoDisk)?;
+        let block = crate::usb_msc::command_block(tag, length as u32, data_in, command)
+            .ok_or(StorageError::NoDisk)?;
         device.wrappers.bytes_mut()[..crate::usb_msc::CBW_LENGTH].copy_from_slice(&block);
         let wrappers = device.wrappers.physical;
         self.bulk(device, false, wrappers, crate::usb_msc::CBW_LENGTH)?;
@@ -1447,11 +1563,21 @@ impl XhciController {
 
         const STATUS: usize = 256;
         device.wrappers.bytes_mut()[STATUS..STATUS + crate::usb_msc::CSW_LENGTH].fill(0);
-        let status = match self.bulk(device, true, wrappers + STATUS as u64, crate::usb_msc::CSW_LENGTH) {
+        let status = match self.bulk(
+            device,
+            true,
+            wrappers + STATUS as u64,
+            crate::usb_msc::CSW_LENGTH,
+        ) {
             Err(BulkError::Stall) => {
                 // A stalled status stage is retried once after clearing it.
                 self.clear_halt(device, true)?;
-                self.bulk(device, true, wrappers + STATUS as u64, crate::usb_msc::CSW_LENGTH)?
+                self.bulk(
+                    device,
+                    true,
+                    wrappers + STATUS as u64,
+                    crate::usb_msc::CSW_LENGTH,
+                )?
             }
             other => other?,
         };
@@ -1461,7 +1587,9 @@ impl XhciController {
         fence(Ordering::Acquire);
         let wrapper = &device.wrappers.bytes()[STATUS..STATUS + crate::usb_msc::CSW_LENGTH];
         match crate::usb_msc::parse_status(wrapper, tag, length as u32) {
-            Ok(crate::usb_msc::Status::Passed { residue }) => Ok(moved.min(length - residue as usize)),
+            Ok(crate::usb_msc::Status::Passed { residue }) => {
+                Ok(moved.min(length - residue as usize))
+            }
             Ok(crate::usb_msc::Status::Failed) => Err(StorageError::CheckCondition),
             Ok(crate::usb_msc::Status::PhaseError) | Err(_) => Err(StorageError::Transport),
         }
@@ -1470,21 +1598,42 @@ impl XhciController {
     /// One bulk transfer of `length` bytes at `physical`; returns the bytes
     /// moved. Events for other devices seen while waiting are routed: input
     /// reports are stashed for the input worker.
-    fn bulk(&mut self, device: &mut StorageDevice, data_in: bool, physical: u64, length: usize) -> Result<usize, BulkError> {
-        let (ring, dci) = if data_in { (&mut device.in_ring, device.in_dci) } else { (&mut device.out_ring, device.out_dci) };
+    fn bulk(
+        &mut self,
+        device: &mut StorageDevice,
+        data_in: bool,
+        physical: u64,
+        length: usize,
+    ) -> Result<usize, BulkError> {
+        let (ring, dci) = if data_in {
+            (&mut device.in_ring, device.in_dci)
+        } else {
+            (&mut device.out_ring, device.out_dci)
+        };
         // Normal TRB, interrupt on completion, and for IN, an event on a
         // short packet so a short read completes.
         let short = if data_in { 1 << 2 } else { 0 };
-        let pending = ring.push(Trb { parameter: physical, status: length as u32, control: (TRB_TYPE_NORMAL << 10) | (1 << 5) | short });
+        let pending = ring.push(Trb {
+            parameter: physical,
+            status: length as u32,
+            control: (TRB_TYPE_NORMAL << 10) | (1 << 5) | short,
+        });
         fence(Ordering::Release);
-        mmio_write32(self.doorbell_base + u64::from(device.slot_id) * 4, u32::from(dci)).map_err(|_| BulkError::Fault)?;
+        mmio_write32(
+            self.doorbell_base + u64::from(device.slot_id) * 4,
+            u32::from(dci),
+        )
+        .map_err(|_| BulkError::Fault)?;
         for _ in 0..POLL_LIMIT {
             let Some(event) = self.try_event().map_err(|_| BulkError::Fault)? else {
                 core::hint::spin_loop();
                 continue;
             };
             let slot = ((event.control >> 24) & 0xff) as u8;
-            if trb_type(event.control) == TRB_TYPE_TRANSFER_EVENT && slot == device.slot_id && event.parameter == pending {
+            if trb_type(event.control) == TRB_TYPE_TRANSFER_EVENT
+                && slot == device.slot_id
+                && event.parameter == pending
+            {
                 let residual = (event.status & 0x00ff_ffff) as usize;
                 return match completion_code(event.status) {
                     1 | 13 => Ok(length.saturating_sub(residual)),
@@ -1504,7 +1653,11 @@ impl XhciController {
 
     /// Clear a halted bulk endpoint: Reset Endpoint, point its ring past
     /// the stalled transfer, and CLEAR_FEATURE(ENDPOINT_HALT) on the device.
-    fn clear_halt(&mut self, device: &mut StorageDevice, data_in: bool) -> Result<(), StorageError> {
+    fn clear_halt(
+        &mut self,
+        device: &mut StorageDevice,
+        data_in: bool,
+    ) -> Result<(), StorageError> {
         let (dci, address) = if data_in {
             (device.in_dci, device.interface.bulk_in)
         } else {
@@ -1512,14 +1665,28 @@ impl XhciController {
         };
         let slot = u32::from(device.slot_id) << 24;
         let endpoint = u32::from(dci) << 16;
-        let command = self.command_ring.push(Trb { parameter: 0, status: 0, control: (TRB_TYPE_RESET_ENDPOINT << 10) | slot | endpoint });
+        let command = self.command_ring.push(Trb {
+            parameter: 0,
+            status: 0,
+            control: (TRB_TYPE_RESET_ENDPOINT << 10) | slot | endpoint,
+        });
         mmio_write32(self.doorbell_base, 0).map_err(|_| StorageError::Transport)?;
-        self.wait_command_completion(command).map_err(|_| StorageError::Transport)?;
-        let ring = if data_in { &device.in_ring } else { &device.out_ring };
+        self.wait_command_completion(command)
+            .map_err(|_| StorageError::Transport)?;
+        let ring = if data_in {
+            &device.in_ring
+        } else {
+            &device.out_ring
+        };
         let dequeue = (ring.page.physical + ring.index as u64 * 16) | u64::from(ring.cycle);
-        let command = self.command_ring.push(Trb { parameter: dequeue, status: 0, control: (TRB_TYPE_SET_TR_DEQUEUE << 10) | slot | endpoint });
+        let command = self.command_ring.push(Trb {
+            parameter: dequeue,
+            status: 0,
+            control: (TRB_TYPE_SET_TR_DEQUEUE << 10) | slot | endpoint,
+        });
         mmio_write32(self.doorbell_base, 0).map_err(|_| StorageError::Transport)?;
-        self.wait_command_completion(command).map_err(|_| StorageError::Transport)?;
+        self.wait_command_completion(command)
+            .map_err(|_| StorageError::Transport)?;
         // The control pipe is the disk's: lend it to the control helpers.
         let (saved_slot, saved_ring) = (self.slot_id, self.ep0_ring.take());
         self.slot_id = device.slot_id;
@@ -1532,17 +1699,33 @@ impl XhciController {
     }
 
     /// Read or write one 512-byte block of the USB disk.
-    fn storage_block(&mut self, lba: u64, write: Option<&[u8]>, read: Option<&mut [u8]>) -> Result<(), StorageError> {
+    fn storage_block(
+        &mut self,
+        lba: u64,
+        write: Option<&[u8]>,
+        read: Option<&mut [u8]>,
+    ) -> Result<(), StorageError> {
         let mut device = self.storage.take().ok_or(StorageError::NoDisk)?;
         let result = (|| {
-            let block = u32::try_from(lba).ok().filter(|_| lba < device.blocks).ok_or(StorageError::NoDisk)?;
+            let block = u32::try_from(lba)
+                .ok()
+                .filter(|_| lba < device.blocks)
+                .ok_or(StorageError::NoDisk)?;
             let size = crate::block::SECTOR_SIZE;
             let moved = if let Some(data) = write {
                 device.data.bytes_mut()[..size].copy_from_slice(data);
                 fence(Ordering::Release);
-                self.scsi(&mut device, &crate::usb_msc::read_write(true, block, 1), Direction::Out(size))?
+                self.scsi(
+                    &mut device,
+                    &crate::usb_msc::read_write(true, block, 1),
+                    Direction::Out(size),
+                )?
             } else {
-                self.scsi(&mut device, &crate::usb_msc::read_write(false, block, 1), Direction::In(size))?
+                self.scsi(
+                    &mut device,
+                    &crate::usb_msc::read_write(false, block, 1),
+                    Direction::In(size),
+                )?
             };
             if moved != size {
                 return Err(StorageError::Transport);
@@ -1558,7 +1741,13 @@ impl XhciController {
 
     fn storage_flush(&mut self) -> Result<(), StorageError> {
         let mut device = self.storage.take().ok_or(StorageError::NoDisk)?;
-        let result = self.scsi(&mut device, &crate::usb_msc::synchronize_cache(), Direction::None).map(|_| ());
+        let result = self
+            .scsi(
+                &mut device,
+                &crate::usb_msc::synchronize_cache(),
+                Direction::None,
+            )
+            .map(|_| ());
         self.storage = Some(device);
         result
     }
@@ -1601,7 +1790,11 @@ pub struct UsbDisk;
 #[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
 impl crate::block::BlockDevice for UsbDisk {
     fn sector_count(&self) -> u64 {
-        CONTROLLER.lock().as_ref().and_then(|controller| controller.storage.as_ref()).map_or(0, |device| device.blocks)
+        CONTROLLER
+            .lock()
+            .as_ref()
+            .and_then(|controller| controller.storage.as_ref())
+            .map_or(0, |device| device.blocks)
     }
 
     fn flush(&mut self) -> Result<(), crate::block::Error> {
@@ -1616,7 +1809,9 @@ impl crate::block::BlockDevice for UsbDisk {
         }
         let mut slot = CONTROLLER.lock();
         let controller = slot.as_mut().ok_or(crate::block::Error::DeviceFault)?;
-        controller.storage_block(lba, None, Some(sector)).map_err(storage_error)
+        controller
+            .storage_block(lba, None, Some(sector))
+            .map_err(storage_error)
     }
 
     fn write_sector(&mut self, lba: u64, sector: &[u8]) -> Result<(), crate::block::Error> {
@@ -1625,7 +1820,9 @@ impl crate::block::BlockDevice for UsbDisk {
         }
         let mut slot = CONTROLLER.lock();
         let controller = slot.as_mut().ok_or(crate::block::Error::DeviceFault)?;
-        controller.storage_block(lba, Some(sector), None).map_err(storage_error)
+        controller
+            .storage_block(lba, Some(sector), None)
+            .map_err(storage_error)
     }
 }
 
@@ -1652,7 +1849,12 @@ pub struct UsbDiskInfo {
 pub fn usb_disk_info() -> Option<UsbDiskInfo> {
     let slot = CONTROLLER.lock();
     let device = slot.as_ref()?.storage.as_ref()?;
-    Some(UsbDiskInfo { port: device.port, blocks: device.blocks, vendor: device.vendor, product: device.product })
+    Some(UsbDiskInfo {
+        port: device.port,
+        blocks: device.blocks,
+        vendor: device.vendor,
+        product: device.product,
+    })
 }
 
 /// Whether the controller lock is free right now (for a panic handler,
@@ -1680,7 +1882,10 @@ fn arm_input(doorbell_base: u64, device: &mut InputDevice) -> Result<(), InitErr
         control: (TRB_TYPE_NORMAL << 10) | (1 << 5),
     });
     fence(Ordering::Release);
-    mmio_write32(doorbell_base + (u64::from(device.slot_id) * 4), u32::from(device.dci))
+    mmio_write32(
+        doorbell_base + (u64::from(device.slot_id) * 4),
+        u32::from(device.dci),
+    )
 }
 
 /// The input interrupt vector (0 until input delivery starts).
@@ -1703,9 +1908,6 @@ pub struct InputSummary {
 /// vector fires. Without any keyboard or mouse, nothing is started.
 #[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
 pub fn start_input(driver: &'static str) -> Result<InputSummary, InitError> {
-    if INPUT_VECTOR.load(Ordering::Acquire) != 0 {
-        return input_summary().ok_or(InitError::InterruptUnavailable);
-    }
     let (keyboards, mice) = {
         let mut slot = CONTROLLER.lock();
         let controller = slot.as_mut().ok_or(InitError::MissingController)?;
@@ -1713,7 +1915,23 @@ pub fn start_input(driver: &'static str) -> Result<InputSummary, InitError> {
         count_inputs(controller)
     };
     if keyboards + mice == 0 {
-        return Ok(InputSummary { keyboards, mice, vector: 0 });
+        return Ok(InputSummary {
+            keyboards,
+            mice,
+            vector: 0,
+        });
+    }
+    if let Some(vector) =
+        (INPUT_VECTOR.load(Ordering::Acquire) != 0).then(|| INPUT_VECTOR.load(Ordering::Acquire))
+    {
+        // Enumeration above still runs when the HID interrupt worker already
+        // exists: a storage device may settle after a keyboard or mouse. Do
+        // not reinstall the vector or spawn a second input worker.
+        return Ok(InputSummary {
+            keyboards,
+            mice,
+            vector,
+        });
     }
     let vector = match crate::driver::enable_pci_interrupt(driver, crate::smp::bsp_apic_id(), 0) {
         Ok(crate::driver::PciInterruptLease::Msi(lease)) => lease.vector.vector,
@@ -1733,7 +1951,56 @@ pub fn start_input(driver: &'static str) -> Result<InputSummary, InitError> {
         .enable_interrupts()?;
     // Reports that completed before interrupts were enabled raised none.
     let _ = crate::task::signal_event(worker);
-    Ok(InputSummary { keyboards, mice, vector })
+    Ok(InputSummary {
+        keyboards,
+        mice,
+        vector,
+    })
+}
+
+/// Start physical USB input and mass-storage enumeration outside boot-critical
+/// driver bring-up. A real device may take several bounded transfer polls to
+/// settle; keeping that work on the service queue lets the session and the
+/// deferred live logger start while enumeration proceeds.
+#[cfg(not(feature = "qemu-test"))]
+pub fn start_input_deferred(driver: &'static str) -> Result<(), crate::task::SpawnError> {
+    let _ = driver;
+    crate::task::spawn_io_service("usb-enumerate", deferred_input_worker).map(|_| ())
+}
+
+#[cfg(not(feature = "qemu-test"))]
+fn deferred_input_worker() -> ! {
+    const RETRY_TICKS: u64 = 300;
+    let mut attempt = 0u32;
+    loop {
+        attempt = attempt.saturating_add(1);
+        let result = start_input("xhci0");
+        if usb_disk_info().is_some() {
+            match result {
+                Ok(summary) => crate::serial::write_line(format_args!(
+                    "[USB] deferred enumeration complete: keyboards={} mice={} vector={:#x} attempt={}",
+                    summary.keyboards, summary.mice, summary.vector, attempt
+                )),
+                Err(error) => crate::serial::write_line(format_args!(
+                    "[USB] mass storage ready; input enumeration incomplete: {:?} attempt={}",
+                    error, attempt
+                )),
+            }
+            break;
+        }
+        match result {
+            Ok(summary) => crate::serial::write_line(format_args!(
+                "[USB] deferred enumeration found no storage: keyboards={} mice={} vector={:#x} attempt={}; retrying",
+                summary.keyboards, summary.mice, summary.vector, attempt
+            )),
+            Err(error) => crate::serial::write_line(format_args!(
+                "[USB] deferred enumeration failed: {:?} attempt={}; retrying",
+                error, attempt
+            )),
+        }
+        crate::task::sleep_current(RETRY_TICKS);
+    }
+    crate::task::exit_current_task()
 }
 
 #[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
@@ -1741,11 +2008,15 @@ fn count_inputs(controller: &XhciController) -> (u8, u8) {
     let devices = controller.inputs.iter().flatten();
     // Report-protocol pointers count as mice; other report devices are
     // counted by `input_layouts`.
-    devices.fold((0, 0), |(keyboards, mice), device| match (device.kind, device.layout.map(|layout| layout.application)) {
-        (HidKind::Keyboard, _) => (keyboards + 1, mice),
-        (HidKind::Mouse, _) => (keyboards, mice + 1),
-        (_, Some(crate::hid::Application::Mouse | crate::hid::Application::Pointer)) => (keyboards, mice + 1),
-        _ => (keyboards, mice),
+    devices.fold((0, 0), |(keyboards, mice), device| {
+        match (device.kind, device.layout.map(|layout| layout.application)) {
+            (HidKind::Keyboard, _) => (keyboards + 1, mice),
+            (HidKind::Mouse, _) => (keyboards, mice + 1),
+            (_, Some(crate::hid::Application::Mouse | crate::hid::Application::Pointer)) => {
+                (keyboards, mice + 1)
+            }
+            _ => (keyboards, mice),
+        }
     })
 }
 
@@ -1757,13 +2028,20 @@ pub fn input_summary() -> Option<InputSummary> {
         return None;
     }
     let (keyboards, mice) = CONTROLLER.lock().as_ref().map(count_inputs)?;
-    Some(InputSummary { keyboards, mice, vector })
+    Some(InputSummary {
+        keyboards,
+        mice,
+        vector,
+    })
 }
 
 /// (reports copied, worker passes) since boot.
 #[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
 pub fn input_counters() -> (u64, u64) {
-    (INPUT_REPORTS.load(Ordering::Acquire), INPUT_PASSES.load(Ordering::Acquire))
+    (
+        INPUT_REPORTS.load(Ordering::Acquire),
+        INPUT_PASSES.load(Ordering::Acquire),
+    )
 }
 
 /// The worker: drain under the lock, publish after it, sleep until the
@@ -1777,7 +2055,10 @@ fn input_worker() -> ! {
     let mut decoders = [None; MAX_INPUTS];
     if let Some(controller) = CONTROLLER.lock().as_ref() {
         for (decoder, device) in decoders.iter_mut().zip(controller.inputs.iter()) {
-            *decoder = device.as_ref().and_then(|device| device.layout).map(crate::hid::Decoder::new);
+            *decoder = device
+                .as_ref()
+                .and_then(|device| device.layout)
+                .map(crate::hid::Decoder::new);
         }
     }
     loop {
@@ -1793,12 +2074,17 @@ fn input_worker() -> ! {
                 HidKind::Keyboard => {
                     let mut boot = [0u8; 8];
                     boot.copy_from_slice(&report[..8]);
-                    for key in keyboard_presses(boot, &mut held[index]).into_iter().flatten() {
+                    for key in keyboard_presses(boot, &mut held[index])
+                        .into_iter()
+                        .flatten()
+                    {
                         let _ = crate::woven_input::publish_key(key);
                     }
                 }
                 HidKind::Other => {
-                    let Some(decoder) = decoders[index].as_mut() else { continue };
+                    let Some(decoder) = decoders[index].as_mut() else {
+                        continue;
+                    };
                     let mut inputs = [None; crate::hid::MAX_EVENTS];
                     let count = decoder.decode(&report, &mut inputs);
                     for input in inputs[..count].iter().flatten() {
@@ -1831,9 +2117,32 @@ fn hid_event(input: crate::hid::Input) -> Event {
         Input::Relative { dx, dy } => Event::PointerMove { dx, dy },
         Input::Absolute { x, y } => Event::PointerAbsolute { x, y },
         Input::Wheel(vertical) => Event::Scroll { vertical },
-        Input::Button { index, pressed } => Event::PointerButton { button: index, pressed },
-        Input::Pen { x, y, pressure, touching } => Event::Pen { x, y, pressure, touching },
-        Input::Touch { contact, x, y, active } => Event::Touch { contact, x, y, active },
+        Input::Button { index, pressed } => Event::PointerButton {
+            button: index,
+            pressed,
+        },
+        Input::Pen {
+            x,
+            y,
+            pressure,
+            touching,
+        } => Event::Pen {
+            x,
+            y,
+            pressure,
+            touching,
+        },
+        Input::Touch {
+            contact,
+            x,
+            y,
+            active,
+        } => Event::Touch {
+            contact,
+            x,
+            y,
+            active,
+        },
         Input::Control { control, value } => Event::GameController { control, value },
     }
 }
@@ -1845,7 +2154,12 @@ pub fn input_layouts() -> alloc::vec::Vec<crate::hid::Application> {
         .lock()
         .as_ref()
         .map(|controller| {
-            controller.inputs.iter().flatten().filter_map(|device| device.layout.map(|layout| layout.application)).collect()
+            controller
+                .inputs
+                .iter()
+                .flatten()
+                .filter_map(|device| device.layout.map(|layout| layout.application))
+                .collect()
         })
         .unwrap_or_default()
 }
@@ -1883,11 +2197,19 @@ fn usage_key(usage: u8, shift: bool) -> Option<Key> {
     let character = match usage {
         0x04..=0x1d => {
             let letter = b'a' + (usage - 0x04);
-            if shift { letter.to_ascii_uppercase() } else { letter }
+            if shift {
+                letter.to_ascii_uppercase()
+            } else {
+                letter
+            }
         }
         0x1e..=0x27 => {
             let index = usize::from(usage - 0x1e);
-            if shift { SHIFTED_DIGITS[index] } else { DIGITS[index] }
+            if shift {
+                SHIFTED_DIGITS[index]
+            } else {
+                DIGITS[index]
+            }
         }
         0x28 => return Some(Key::Enter),
         0x2a => return Some(Key::Backspace),
@@ -1895,7 +2217,11 @@ fn usage_key(usage: u8, shift: bool) -> Option<Key> {
         0x2c => b' ',
         0x2d..=0x38 => {
             let index = usize::from(usage - 0x2d);
-            if shift { SHIFTED_PUNCTUATION[index] } else { PUNCTUATION[index] }
+            if shift {
+                SHIFTED_PUNCTUATION[index]
+            } else {
+                PUNCTUATION[index]
+            }
         }
         0x3a => return Some(Key::F1),
         0x3b => return Some(Key::F2),
@@ -1991,6 +2317,84 @@ pub fn poll_hid_report() -> Result<[u8; 8], InitError> {
 
 pub fn probe() -> bool {
     find_controller().is_some()
+}
+
+/// Read-only controller inventory for the physical diagnostic image. This
+/// deliberately does not enable PCI decoding, start/reset the controller,
+/// allocate DMA, or write any MMIO register.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ReadOnlyDiagnostic {
+    pub bar: u64,
+    pub cap_length: u8,
+    pub max_slots: u8,
+    pub max_ports: u8,
+    pub context_64: bool,
+    pub doorbell_offset: u32,
+    pub runtime_offset: u32,
+    pub command: u32,
+    pub status: u32,
+    pub config: u32,
+    pub connected_ports: u8,
+    pub enabled_ports: u8,
+    pub port_status: [u32; 16],
+    pub port_count: u8,
+}
+
+pub fn read_only_diagnostic() -> Result<ReadOnlyDiagnostic, InitError> {
+    let device = find_controller().ok_or(InitError::MissingController)?;
+    let bar = device
+        .bars
+        .iter()
+        .find(|bar| bar.valid && matches!(bar.kind, BarKind::Memory32 | BarKind::Memory64))
+        .ok_or(InitError::MissingMemoryBar)?;
+    let mmio = bar.address;
+    let cap_length = mmio_read8(mmio)?;
+    if cap_length < 0x20 {
+        return Err(InitError::InvalidRegisters);
+    }
+    let hcs1 = mmio_read32(mmio + 0x04)?;
+    let hcc1 = mmio_read32(mmio + 0x10)?;
+    let max_slots = (hcs1 & 0xff) as u8;
+    let max_ports = ((hcs1 >> 24) & 0xff) as u8;
+    let port_count = max_ports.min(16);
+    if max_slots == 0 || max_ports == 0 {
+        return Err(InitError::InvalidRegisters);
+    }
+    let op_base = mmio + u64::from(cap_length);
+    let command = mmio_read32(op_base)?;
+    let status = mmio_read32(op_base + 0x04)?;
+    let config = mmio_read32(op_base + 0x38)?;
+    let doorbell_offset = mmio_read32(mmio + 0x14)?;
+    let runtime_offset = mmio_read32(mmio + 0x18)?;
+    let mut port_status = [0u32; 16];
+    let mut connected_ports = 0;
+    let mut enabled_ports = 0;
+    for port in 1..=port_count {
+        let value = mmio_read32(op_base + 0x400 + (u64::from(port - 1) * 0x10))?;
+        port_status[usize::from(port - 1)] = value;
+        if value & 1 != 0 {
+            connected_ports += 1;
+        }
+        if value & (1 << 1) != 0 {
+            enabled_ports += 1;
+        }
+    }
+    Ok(ReadOnlyDiagnostic {
+        bar: mmio,
+        cap_length,
+        max_slots,
+        max_ports,
+        context_64: hcc1 & (1 << 2) != 0,
+        doorbell_offset,
+        runtime_offset,
+        command,
+        status,
+        config,
+        connected_ports,
+        enabled_ports,
+        port_status,
+        port_count,
+    })
 }
 
 fn find_controller() -> Option<pci::Device> {
@@ -2388,7 +2792,11 @@ pub fn input_self_test() -> bool {
     use alloc::vec::Vec;
 
     fn step(name: &str, ok: bool) -> bool {
-        crate::serial::write_line(format_args!("[S13.13] {} {}", name, if ok { "PASS" } else { "FAIL" }));
+        crate::serial::write_line(format_args!(
+            "[S13.13] {} {}",
+            name,
+            if ok { "PASS" } else { "FAIL" }
+        ));
         ok
     }
 
@@ -2410,13 +2818,19 @@ pub fn input_self_test() -> bool {
         && shifted[0] == Some(Key::Char('!'))
         && rollover.iter().all(Option::is_none)
         && held == before_rollover;
-    if !step("keyboard reports: presses once, shift, rollover ignored", decoding) {
+    if !step(
+        "keyboard reports: presses once, shift, rollover ignored",
+        decoding,
+    ) {
         return false;
     }
 
     let report = crate::drivers::bring_up();
     let xhci = report.drivers[2];
-    if !step("xhci0 bound and ready", matches!(xhci.outcome, crate::drivers::Outcome::Ready(_))) {
+    if !step(
+        "xhci0 bound and ready",
+        matches!(xhci.outcome, crate::drivers::Outcome::Ready(_)),
+    ) {
         return false;
     }
     let Some(summary) = input_summary() else {
@@ -2424,8 +2838,12 @@ pub fn input_self_test() -> bool {
     };
     let started = summary.keyboards == 1
         && summary.mice == 1
-        && (crate::interrupts::PCI_VECTOR_FIRST..=crate::interrupts::PCI_VECTOR_LAST).contains(&summary.vector);
-    if !step("one keyboard and one mouse, on a device interrupt vector", started) {
+        && (crate::interrupts::PCI_VECTOR_FIRST..=crate::interrupts::PCI_VECTOR_LAST)
+            .contains(&summary.vector);
+    if !step(
+        "one keyboard and one mouse, on a device interrupt vector",
+        started,
+    ) {
         return false;
     }
     // Nothing queued before the input arrives.
@@ -2434,7 +2852,13 @@ pub fn input_self_test() -> bool {
     let (reports_before, passes_before) = input_counters();
     crate::serial::write_line(format_args!("[S13.13] ready for input"));
 
-    let expected = [Key::Char('w'), Key::Char('h'), Key::Char('1'), Key::Char('A'), Key::Enter];
+    let expected = [
+        Key::Char('w'),
+        Key::Char('h'),
+        Key::Char('1'),
+        Key::Char('A'),
+        Key::Enter,
+    ];
     let mut keys = Vec::new();
     let mut motion = (0i32, 0i32);
     let mut clicks = Vec::new();
@@ -2447,7 +2871,9 @@ pub fn input_self_test() -> bool {
                     motion.0 += i32::from(dx);
                     motion.1 += i32::from(dy);
                 }
-                woven_input::Event::PointerButton { button, pressed } => clicks.push((button, pressed)),
+                woven_input::Event::PointerButton { button, pressed } => {
+                    clicks.push((button, pressed))
+                }
                 #[allow(unreachable_patterns)]
                 _ => {}
             }
@@ -2461,7 +2887,10 @@ pub fn input_self_test() -> bool {
         "[S13.13] received keys={:?} motion={:?} clicks={:?}",
         keys, motion, clicks
     ));
-    let keys_ok = step("typed keys arrive once each, in order, shift applied", keys == expected);
+    let keys_ok = step(
+        "typed keys arrive once each, in order, shift applied",
+        keys == expected,
+    );
     let mouse_ok = step(
         "mouse motion (right 40, down 25) and a left click arrive",
         motion == (40, 25) && clicks == [(0, true), (0, false)],
@@ -2500,7 +2929,11 @@ pub fn storage_self_test() -> bool {
     use alloc::vec::Vec;
 
     fn step(name: &str, ok: bool) -> bool {
-        crate::serial::write_line(format_args!("[S13.18] {} {}", name, if ok { "PASS" } else { "FAIL" }));
+        crate::serial::write_line(format_args!(
+            "[S13.18] {} {}",
+            name,
+            if ok { "PASS" } else { "FAIL" }
+        ));
         ok
     }
     fn pattern(lba: u64) -> [u8; 18] {
@@ -2517,7 +2950,10 @@ pub fn storage_self_test() -> bool {
     const WRITTEN: u64 = 64;
 
     let report = crate::drivers::bring_up();
-    if !step("xhci0 bound and ready", matches!(report.drivers[2].outcome, crate::drivers::Outcome::Ready(_))) {
+    if !step(
+        "xhci0 bound and ready",
+        matches!(report.drivers[2].outcome, crate::drivers::Outcome::Ready(_)),
+    ) {
         return false;
     }
     let Some(info) = usb_disk_info() else {
@@ -2527,16 +2963,26 @@ pub fn storage_self_test() -> bool {
         "[S13.18] disk on port {}: '{}' '{}', {} blocks",
         info.port,
         core::str::from_utf8(&info.vendor).unwrap_or("?").trim_end(),
-        core::str::from_utf8(&info.product).unwrap_or("?").trim_end(),
+        core::str::from_utf8(&info.product)
+            .unwrap_or("?")
+            .trim_end(),
         info.blocks
     ));
-    if !step("identified as QEMU's disk, 32 MiB of 512-byte blocks", &info.vendor[..4] == b"QEMU" && info.blocks == BLOCKS) {
+    if !step(
+        "identified as QEMU's disk, 32 MiB of 512-byte blocks",
+        &info.vendor[..4] == b"QEMU" && info.blocks == BLOCKS,
+    ) {
         return false;
     }
     let mut disk = UsbDisk;
     let mut sector = [0u8; SECTOR_SIZE];
-    let reads = (0..8u64).chain([BLOCKS - 1]).all(|lba| disk.read_sector(lba, &mut sector).is_ok() && sector[..18] == pattern(lba));
-    if !step("the host's pattern reads back, first and last blocks", reads) {
+    let reads = (0..8u64)
+        .chain([BLOCKS - 1])
+        .all(|lba| disk.read_sector(lba, &mut sector).is_ok() && sector[..18] == pattern(lba));
+    if !step(
+        "the host's pattern reads back, first and last blocks",
+        reads,
+    ) {
         return false;
     }
     let mut writes = true;
@@ -2554,10 +3000,16 @@ pub fn storage_self_test() -> bool {
             && sector[13..21] == lba.to_le_bytes()
             && sector[SECTOR_SIZE - 1] == lba as u8
     });
-    if !step("64 blocks written, flushed and read back", writes && readback) {
+    if !step(
+        "64 blocks written, flushed and read back",
+        writes && readback,
+    ) {
         return false;
     }
-    if !step("a block past the end is refused", disk.read_sector(BLOCKS, &mut sector).is_err()) {
+    if !step(
+        "a block past the end is refused",
+        disk.read_sector(BLOCKS, &mut sector).is_err(),
+    ) {
         return false;
     }
 
@@ -2576,7 +3028,9 @@ pub fn storage_self_test() -> bool {
     let mut lba = 100u64;
     // Storage I/O runs throughout: the keys arrive while transfers drain the
     // event ring.
-    while crate::timer::ticks().wrapping_sub(start) < 6000 && (keys.len() < expected.len() || verified < 300) {
+    while crate::timer::ticks().wrapping_sub(start) < 6000
+        && (keys.len() < expected.len() || verified < 300)
+    {
         if disk.read_sector(lba, &mut sector).is_ok() && sector[..18] == pattern(lba) {
             verified += 1;
         }
@@ -2588,9 +3042,18 @@ pub fn storage_self_test() -> bool {
         }
         crate::task::yield_now();
     }
-    crate::serial::write_line(format_args!("[S13.18] verified {} reads; keys {:?}", verified, keys));
-    let storage_ok = step("300 more reads verify, wrapping both bulk rings", verified >= 300);
-    let keys_ok = step("typed keys arrive once each, in order, during storage I/O", keys == expected);
+    crate::serial::write_line(format_args!(
+        "[S13.18] verified {} reads; keys {:?}",
+        verified, keys
+    ));
+    let storage_ok = step(
+        "300 more reads verify, wrapping both bulk rings",
+        verified >= 300,
+    );
+    let keys_ok = step(
+        "typed keys arrive once each, in order, during storage I/O",
+        keys == expected,
+    );
     storage_ok && keys_ok
 }
 
@@ -2605,15 +3068,25 @@ pub fn report_device_self_test() -> bool {
     use alloc::vec::Vec;
 
     fn step(name: &str, ok: bool) -> bool {
-        crate::serial::write_line(format_args!("[S13.16] {} {}", name, if ok { "PASS" } else { "FAIL" }));
+        crate::serial::write_line(format_args!(
+            "[S13.16] {} {}",
+            name,
+            if ok { "PASS" } else { "FAIL" }
+        ));
         ok
     }
     let report = crate::drivers::bring_up();
-    if !step("xhci0 bound and ready", matches!(report.drivers[2].outcome, crate::drivers::Outcome::Ready(_))) {
+    if !step(
+        "xhci0 bound and ready",
+        matches!(report.drivers[2].outcome, crate::drivers::Outcome::Ready(_)),
+    ) {
         return false;
     }
     let layouts = input_layouts();
-    crate::serial::write_line(format_args!("[S13.16] report-protocol devices: {:?}", layouts));
+    crate::serial::write_line(format_args!(
+        "[S13.16] report-protocol devices: {:?}",
+        layouts
+    ));
     let Some(summary) = input_summary() else {
         return step("input delivery started", false);
     };
@@ -2635,7 +3108,9 @@ pub fn report_device_self_test() -> bool {
         while let Some(event) = woven_input::poll() {
             match event {
                 woven_input::Event::PointerAbsolute { x, y } => positions.push((x, y)),
-                woven_input::Event::PointerButton { button, pressed } => clicks.push((button, pressed)),
+                woven_input::Event::PointerButton { button, pressed } => {
+                    clicks.push((button, pressed))
+                }
                 woven_input::Event::Scroll { vertical } => scrolls.push(vertical),
                 _ => {}
             }
@@ -2654,7 +3129,10 @@ pub fn report_device_self_test() -> bool {
         "absolute positions arrive scaled to the full range, in order",
         positions.first() == Some(&(8_192, 24_576)) && positions[1..].contains(&(24_576, 8_192)),
     );
-    let clicked = step("a left click arrives as press then release", clicks == [(0, true), (0, false)]);
+    let clicked = step(
+        "a left click arrives as press then release",
+        clicks == [(0, true), (0, false)],
+    );
     let scrolled = step("a wheel step up then down arrives", scrolls == [1, -1]);
     let irqs = crate::interrupts::pci_device_irq_count(summary.vector) - irqs_before;
     let interrupt = step("delivered by device interrupts", irqs > 0);

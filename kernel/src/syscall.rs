@@ -349,6 +349,9 @@ pub enum Number {
     ThreadGetTls = 135,
     /// thread handle, exit status -> 0 or ERROR; cancels an owned sibling
     ThreadCancel = 136,
+    /// Internal ELF PLT resolver: the entry stub supplies the GOT slot in R11
+    /// and receives the validated target address in RAX.
+    LazyBind = 137,
     /// own handle, packed destination and opacity (x | y<<24 | opacity<<56,
     /// x and y 24-bit signed, bits 48..56 zero), packed source region -> 0 or
     /// ERROR
@@ -375,9 +378,95 @@ pub enum Number {
     /// monitors, left to right in surface coordinates. Requires DisplayIo and
     /// the lease. (208 is reserved for audio recording.)
     GraphicsCompositorOutputs = 207,
-    /// action (0 power off, 1 restart) -> does not return when it works; an
-    /// error code says why the machine is still running. Needs PowerControl.
+    /// action (0 power off, 1 restart, 2 suspend) -> does not return when it
+    /// works; an error code says why the machine is still running or why
+    /// suspend is not yet safely resumable. Needs PowerControl.
     PowerControl = 209,
+    /// user buffer packing `[name_len u8][name][old_pin_len u8][old_pin]
+    /// [new_pin_len u8][new_pin]` (each part <= 16 bytes), buffer length ->
+    /// 0, or ERROR if `name` has no account, `old_pin` does not verify
+    /// against it, `new_pin` is empty or too long, or the caller lacks
+    /// AccountManage (the desktop session only).
+    AccountsChangePin = 210,
+    /// output `[power_off, suspend, restart]` capability bytes, length -> 0.
+    /// Requires PowerControl; no transition is performed.
+    PowerCapabilities = 235,
+    /// output `[hlt, monitor_mwait, invariant_tsc]` capability bytes, length -> 0.
+    /// Requires PowerControl; no CPU state is changed.
+    CpuIdleCapabilities = 236,
+    /// output `[available, base_mhz u32, maximum_mhz u32, bus_mhz u32]`, -> 0.
+    /// Requires PowerControl; no frequency state is changed.
+    CpuFrequencyInfo = 237,
+    /// output `[s3, facs, wake32, wake64, facs_version]`, length -> 0.
+    /// Requires PowerControl; no suspend state is changed.
+    SuspendResumeCapabilities = 238,
+    /// operation, source pointer/slot, source length -> bounded update result
+    #[cfg(any(feature = "stage27-5-test", feature = "system-apps"))]
+    UpdateTransaction = 239,
+    /// -> process-local endpoint handle, or ERROR
+    IpcEndpointCreate = 211,
+    /// name ptr, packed name length|client rights<<32, endpoint handle -> 0
+    IpcServicePublish = 212,
+    /// name ptr, name length -> 0
+    IpcServiceUnpublish = 213,
+    /// name ptr, name length -> process-local client handle, or ERROR
+    IpcServiceDiscover = 214,
+    /// endpoint handle, message ptr, message length -> 0
+    IpcMessageSend = 215,
+    /// endpoint handle, output buffer, capacity -> message length; the output
+    /// starts with the sender process id as a little-endian u64.
+    IpcMessageReceive = 216,
+    /// operation, source/name path pointer, path length -> catalog count
+    #[cfg(any(feature = "stage22-5-test", feature = "system-apps"))]
+    PackageTransaction = 217,
+    /// endpoint handle, bounded WAI1 request pointer, request length -> 0;
+    /// requires both Ipc and Ai capability
+    #[cfg(any(
+        feature = "stage23-1-test",
+        feature = "stage23-2-test",
+        feature = "stage23-3-test",
+        feature = "system-apps"
+    ))]
+    AiMessageSend = 218,
+    /// identity open buffer `[name_len][name][password_len][password]` -> session
+    #[cfg(any(feature = "stage24-5-test", feature = "system-apps"))]
+    IdentityOpen = 219,
+    /// session -> 0; owner-bound lock
+    #[cfg(any(feature = "stage20-12-test", feature = "stage24-5-test", feature = "system-apps"))]
+    IdentityLock = 220,
+    /// session, password buffer `[length][password]`, length -> 0
+    #[cfg(any(feature = "stage24-5-test", feature = "system-apps"))]
+    IdentityUnlock = 221,
+    /// session, password buffer `[length][password]`, length -> 0
+    #[cfg(any(feature = "stage24-5-test", feature = "system-apps"))]
+    IdentityElevate = 222,
+    /// session -> 0; owner-bound close
+    #[cfg(any(feature = "stage24-5-test", feature = "system-apps"))]
+    IdentityClose = 223,
+    #[cfg(any(feature = "stage20-12-test", feature = "system-apps"))]
+    IdentityOpenVerified = 224,
+    #[cfg(any(feature = "stage20-12-test", feature = "system-apps"))]
+    IdentityUnlockVerified = 225,
+    #[cfg(feature = "system-apps")]
+    IdentityAdminAddUser = 226,
+    #[cfg(feature = "system-apps")]
+    IdentityAdminDeleteUser = 227,
+    #[cfg(feature = "system-apps")]
+    IdentityAdminAddGroup = 228,
+    #[cfg(feature = "system-apps")]
+    IdentityAdminAddMember = 229,
+    #[cfg(feature = "system-apps")]
+    IdentityAdminRemoveMember = 230,
+    #[cfg(feature = "system-apps")]
+    IdentityAdminQuery = 231,
+    #[cfg(feature = "system-apps")]
+    IdentityAdminSetLockout = 232,
+    /// session -> consume one kernel-published TPM credential decision
+    #[cfg(feature = "system-apps")]
+    IdentityConsumeHardware = 233,
+    /// session -> request one physical TPM credential decision
+    #[cfg(feature = "system-apps")]
+    IdentityRequestHardware = 234,
 }
 
 pub fn entry_address() -> u64 {
@@ -553,6 +642,78 @@ fn sys_open(user_path: u64, length: u64) -> u64 {
             descriptor
         }
         Err(_) => SYSCALL_ERROR,
+    }
+}
+
+#[cfg(any(feature = "stage22-5-test", feature = "system-apps"))]
+fn sys_package_transaction(operation: u64, user_path: u64, length: u64) -> u64 {
+    if !matches!(operation, 1..=3)
+        || !crate::task::current_has(crate::capability::Capability::FileRead)
+        || !crate::task::current_has(crate::capability::Capability::FileWrite)
+        || !crate::task::current_has(crate::capability::Capability::StorageIo)
+    {
+        return SYSCALL_ERROR;
+    }
+    let Ok(length) = usize::try_from(length) else {
+        return SYSCALL_ERROR;
+    };
+    if length == 0 || length > MAX_PATH_SIZE {
+        return SYSCALL_ERROR;
+    }
+    let Some(mut path) = crate::heap::try_filled(0u8, MAX_PATH_SIZE) else {
+        return SYSCALL_ERROR;
+    };
+    if crate::paging::copy_from_current_user(user_path, &mut path[..length]).is_err() {
+        return SYSCALL_ERROR;
+    }
+    let Ok(path) = core::str::from_utf8(&path[..length]) else {
+        return SYSCALL_ERROR;
+    };
+    crate::package_service::transact(operation as u8, path, crate::timer::ticks())
+        .unwrap_or(SYSCALL_ERROR)
+}
+
+#[cfg(any(feature = "stage27-5-test", feature = "system-apps"))]
+fn sys_update_transaction(operation: u64, source_or_slot: u64, length: u64) -> u64 {
+    if !matches!(operation, 1..=5)
+        || !crate::task::current_has(crate::capability::Capability::FileRead)
+        || !crate::task::current_has(crate::capability::Capability::FileWrite)
+        || !crate::task::current_has(crate::capability::Capability::StorageIo)
+    {
+        return SYSCALL_ERROR;
+    }
+    let now = crate::timer::ticks();
+    match operation as u8 {
+        crate::update_service::OP_STAGE => {
+            let Ok(length) = usize::try_from(length) else {
+                return SYSCALL_ERROR;
+            };
+            if length == 0 || length > MAX_PATH_SIZE {
+                return SYSCALL_ERROR;
+            }
+            let mut path = [0u8; MAX_PATH_SIZE];
+            if crate::paging::copy_from_current_user(source_or_slot, &mut path[..length]).is_err() {
+                return SYSCALL_ERROR;
+            }
+            let Ok(path) = core::str::from_utf8(&path[..length]) else {
+                return SYSCALL_ERROR;
+            };
+            crate::update_service::transact(operation as u8, Some(path), 0, now)
+                .unwrap_or(SYSCALL_ERROR)
+        }
+        crate::update_service::OP_ACTIVATE
+        | crate::update_service::OP_BOOT_SUCCEEDED
+        | crate::update_service::OP_BOOT_FAILED => {
+            let Ok(slot) = usize::try_from(source_or_slot) else {
+                return SYSCALL_ERROR;
+            };
+            crate::update_service::transact(operation as u8, None, slot, now)
+                .unwrap_or(SYSCALL_ERROR)
+        }
+        crate::update_service::OP_QUERY => {
+            crate::update_service::transact(operation as u8, None, 0, now).unwrap_or(SYSCALL_ERROR)
+        }
+        _ => SYSCALL_ERROR,
     }
 }
 
@@ -798,6 +959,141 @@ fn sys_message_receive(user_buffer: u64, capacity: u64, user_sender: u64) -> u64
             Err(_) => return SYSCALL_ERROR,
         }
     }
+}
+
+fn copy_service_name(
+    user_name: u64,
+    length: u64,
+) -> Option<([u8; crate::config::MAX_IPC_SERVICE_NAME], usize)> {
+    let length = usize::try_from(length).ok()?;
+    if length == 0 || length > crate::config::MAX_IPC_SERVICE_NAME {
+        return None;
+    }
+    let mut name = [0u8; crate::config::MAX_IPC_SERVICE_NAME];
+    crate::paging::copy_from_current_user(user_name, &mut name[..length]).ok()?;
+    Some((name, length))
+}
+
+fn sys_ipc_endpoint_create() -> u64 {
+    if !crate::task::current_has(crate::capability::Capability::Ipc) {
+        return SYSCALL_ERROR;
+    }
+    crate::ipc::create_endpoint_object(crate::task::current_process_id())
+        .map_or(SYSCALL_ERROR, |handle| u64::from(handle.as_u32()))
+}
+
+fn sys_ipc_service_publish(user_name: u64, packed: u64, raw_handle: u64) -> u64 {
+    if !crate::task::current_has(crate::capability::Capability::Ipc)
+        || raw_handle > u64::from(u32::MAX)
+    {
+        return SYSCALL_ERROR;
+    }
+    let name_length = packed & 0xffff_ffff;
+    let client_rights = (packed >> 32) as u8;
+    let Some((name, length)) = copy_service_name(user_name, name_length) else {
+        return SYSCALL_ERROR;
+    };
+    crate::ipc::publish_service(
+        crate::task::current_process_id(),
+        &name[..length],
+        crate::ipc::Handle::from_u32(raw_handle as u32),
+        client_rights,
+    )
+    .map_or(SYSCALL_ERROR, |()| 0)
+}
+
+fn sys_ipc_service_unpublish(user_name: u64, length: u64) -> u64 {
+    if !crate::task::current_has(crate::capability::Capability::Ipc) {
+        return SYSCALL_ERROR;
+    }
+    let Some((name, length)) = copy_service_name(user_name, length) else {
+        return SYSCALL_ERROR;
+    };
+    crate::ipc::unpublish_service(crate::task::current_process_id(), &name[..length])
+        .map_or(SYSCALL_ERROR, |()| 0)
+}
+
+fn sys_ipc_service_discover(user_name: u64, length: u64) -> u64 {
+    if !crate::task::current_has(crate::capability::Capability::Ipc) {
+        return SYSCALL_ERROR;
+    }
+    let Some((name, length)) = copy_service_name(user_name, length) else {
+        return SYSCALL_ERROR;
+    };
+    crate::ipc::discover_service(crate::task::current_process_id(), &name[..length])
+        .map_or(SYSCALL_ERROR, |handle| u64::from(handle.as_u32()))
+}
+
+fn raw_ipc_handle(raw: u64) -> Option<crate::ipc::Handle> {
+    u32::try_from(raw).ok().map(crate::ipc::Handle::from_u32)
+}
+
+fn sys_ipc_message_send(raw_handle: u64, user_buffer: u64, length: u64) -> u64 {
+    if !crate::task::current_has(crate::capability::Capability::Ipc) {
+        return SYSCALL_ERROR;
+    }
+    let Some(handle) = raw_ipc_handle(raw_handle) else {
+        return SYSCALL_ERROR;
+    };
+    let Ok(length) = usize::try_from(length) else {
+        return SYSCALL_ERROR;
+    };
+    if length > crate::ipc::MAX_MESSAGE_SIZE {
+        return SYSCALL_ERROR;
+    }
+    let mut buffer = [0u8; crate::ipc::MAX_MESSAGE_SIZE];
+    if crate::paging::copy_from_current_user(user_buffer, &mut buffer[..length]).is_err() {
+        return SYSCALL_ERROR;
+    }
+    crate::ipc::send_handle(crate::task::current_process_id(), handle, &buffer[..length])
+        .map_or(SYSCALL_ERROR, |()| 0)
+}
+
+#[cfg(any(
+    feature = "stage23-1-test",
+    feature = "stage23-2-test",
+    feature = "stage23-3-test",
+    feature = "system-apps"
+))]
+fn sys_ai_message_send(raw_handle: u64, user_buffer: u64, length: u64) -> u64 {
+    if !crate::task::current_has(crate::capability::Capability::Ipc)
+        || !crate::task::current_has(crate::capability::Capability::Ai)
+    {
+        return SYSCALL_ERROR;
+    }
+    sys_ipc_message_send(raw_handle, user_buffer, length)
+}
+
+fn sys_ipc_message_receive(raw_handle: u64, user_buffer: u64, capacity: u64) -> u64 {
+    if !crate::task::current_has(crate::capability::Capability::Ipc) {
+        return SYSCALL_ERROR;
+    }
+    let Some(handle) = raw_ipc_handle(raw_handle) else {
+        return SYSCALL_ERROR;
+    };
+    let Ok(capacity) = usize::try_from(capacity) else {
+        return SYSCALL_ERROR;
+    };
+    if capacity < core::mem::size_of::<u64>()
+        || capacity > crate::ipc::MAX_MESSAGE_SIZE + core::mem::size_of::<u64>()
+    {
+        return SYSCALL_ERROR;
+    }
+    let message = match crate::ipc::receive_handle(crate::task::current_process_id(), handle) {
+        Ok(message) => message,
+        Err(_) => return SYSCALL_ERROR,
+    };
+    let output_length = core::mem::size_of::<u64>().saturating_add(message.payload().len());
+    if output_length > capacity {
+        return SYSCALL_ERROR;
+    }
+    let mut output = [0u8; crate::ipc::MAX_MESSAGE_SIZE + core::mem::size_of::<u64>()];
+    output[..8].copy_from_slice(&message.sender.to_le_bytes());
+    output[8..output_length].copy_from_slice(message.payload());
+    if crate::paging::copy_to_current_user(user_buffer, &output[..output_length]).is_err() {
+        return SYSCALL_ERROR;
+    }
+    output_length as u64
 }
 
 fn sys_pipe() -> u64 {
@@ -2249,7 +2545,12 @@ fn sys_audio_play(user_pcm: u64, length: u64) -> u64 {
         return SYSCALL_ERROR;
     }
     let result = crate::hda::play(&pcm);
-    crate::audit::record(actor, crate::audit::Action::AudioPlay, length as u64, result.is_ok());
+    crate::audit::record(
+        actor,
+        crate::audit::Action::AudioPlay,
+        length as u64,
+        result.is_ok(),
+    );
     result.map_or(SYSCALL_ERROR, |played| played as u64)
 }
 
@@ -2410,6 +2711,33 @@ pub extern "C" fn wovenhat_syscall_dispatch(
         value if value == Number::Fork as u64 => sys_fork(frame),
         value if value == Number::MessageSend as u64 => sys_message_send(arg0, arg1, arg2),
         value if value == Number::MessageReceive as u64 => sys_message_receive(arg0, arg1, arg2),
+        value if value == Number::IpcEndpointCreate as u64 => sys_ipc_endpoint_create(),
+        value if value == Number::IpcServicePublish as u64 => {
+            sys_ipc_service_publish(arg0, arg1, arg2)
+        }
+        value if value == Number::IpcServiceUnpublish as u64 => {
+            sys_ipc_service_unpublish(arg0, arg1)
+        }
+        value if value == Number::IpcServiceDiscover as u64 => sys_ipc_service_discover(arg0, arg1),
+        value if value == Number::IpcMessageSend as u64 => sys_ipc_message_send(arg0, arg1, arg2),
+        value if value == Number::IpcMessageReceive as u64 => {
+            sys_ipc_message_receive(arg0, arg1, arg2)
+        }
+        #[cfg(any(feature = "stage22-5-test", feature = "system-apps"))]
+        value if value == Number::PackageTransaction as u64 => {
+            sys_package_transaction(arg0, arg1, arg2)
+        }
+        #[cfg(any(feature = "stage27-5-test", feature = "system-apps"))]
+        value if value == Number::UpdateTransaction as u64 => {
+            sys_update_transaction(arg0, arg1, arg2)
+        }
+        #[cfg(any(
+            feature = "stage23-1-test",
+            feature = "stage23-2-test",
+            feature = "stage23-3-test",
+            feature = "system-apps"
+        ))]
+        value if value == Number::AiMessageSend as u64 => sys_ai_message_send(arg0, arg1, arg2),
         value if value == Number::Getuid as u64 => {
             IO_COMPLETIONS.fetch_or(IO_GETUID, Ordering::Release);
             u64::from(crate::task::current_credentials().uid)
@@ -2426,7 +2754,13 @@ pub extern "C" fn wovenhat_syscall_dispatch(
             crate::task::yield_now();
             0
         }
-        value if value == Number::Exit as u64 => crate::task::exit_current_process(arg0 as i32),
+        value if value == Number::Exit as u64 => {
+            if crate::task::begin_user_destructor_exit(frame, arg0 as i32) {
+                0
+            } else {
+                crate::task::exit_current_process(arg0 as i32)
+            }
+        }
         value if value == Number::ThreadCreate as u64 => {
             crate::task::create_user_thread(arg0, arg1)
                 .map(|id| id.raw())
@@ -2463,11 +2797,10 @@ pub extern "C" fn wovenhat_syscall_dispatch(
         value if value == Number::ThreadGetTls as u64 => crate::task::current_thread_id()
             .and_then(crate::thread::tls)
             .unwrap_or(SYSCALL_ERROR),
-        value if value == Number::ThreadCancel as u64 => crate::task::cancel_user_thread(
-            arg0,
-            arg1 as i32,
-        )
-        .map_or(SYSCALL_ERROR, |_| 0),
+        value if value == Number::ThreadCancel as u64 => {
+            crate::task::cancel_user_thread(arg0, arg1 as i32).map_or(SYSCALL_ERROR, |_| 0)
+        }
+        value if value == Number::LazyBind as u64 => crate::task::resolve_lazy_binding(frame),
         value if value == Number::Getpid as u64 => crate::task::current_process_id(),
         value if value == Number::Waitpid as u64 => match crate::task::wait_process(arg0) {
             Ok(exit_code) => crate::exit_status::encode(exit_code),
@@ -2572,9 +2905,7 @@ pub extern "C" fn wovenhat_syscall_dispatch(
             sys_compositor_blit_shared(arg0, arg1)
         }
         value if value == Number::WaitAny as u64 => sys_wait_any(arg0, arg1),
-        value if value == Number::WaitAnyObjects as u64 => {
-            sys_wait_any_objects(arg0, arg1, arg2)
-        }
+        value if value == Number::WaitAnyObjects as u64 => sys_wait_any_objects(arg0, arg1, arg2),
         value if value == Number::GraphicsSurfaceDamage as u64 => sys_graphics_damage(arg0, arg1),
         value if value == Number::GraphicsCompositorBlitDamage as u64 => {
             sys_compositor_blit_damage(arg0, arg1)
@@ -2640,7 +2971,74 @@ pub extern "C" fn wovenhat_syscall_dispatch(
         value if value == Number::AudioPlay as u64 => sys_audio_play(arg0, arg1),
         value if value == Number::AudioSetVolume as u64 => sys_audio_set_volume(arg0),
         value if value == Number::GraphicsCompositorOutputs as u64 => sys_compositor_outputs(arg0),
-        value if value == Number::PowerControl as u64 => sys_power_control(arg0),
+        value if value == Number::PowerControl as u64 => sys_power_control(arg0, frame),
+        value if value == Number::PowerCapabilities as u64 => sys_power_capabilities(arg0, arg1),
+        value if value == Number::CpuIdleCapabilities as u64 => {
+            sys_cpu_idle_capabilities(arg0, arg1)
+        }
+        value if value == Number::CpuFrequencyInfo as u64 => sys_cpu_frequency_info(arg0, arg1),
+        value if value == Number::SuspendResumeCapabilities as u64 => {
+            sys_suspend_resume_capabilities(arg0, arg1)
+        }
+        value if value == Number::AccountsChangePin as u64 => sys_accounts_change_pin(arg0, arg1),
+        #[cfg(any(feature = "stage24-5-test", feature = "system-apps"))]
+        value if value == Number::IdentityOpen as u64 => sys_identity_open(arg0, arg1),
+        #[cfg(any(feature = "stage20-12-test", feature = "stage24-5-test", feature = "system-apps"))]
+        value if value == Number::IdentityLock as u64 => sys_identity_lock(arg0),
+        #[cfg(any(feature = "stage24-5-test", feature = "system-apps"))]
+        value if value == Number::IdentityUnlock as u64 => {
+            sys_identity_password_action(arg0, arg1, arg2, false)
+        }
+        #[cfg(any(feature = "stage24-5-test", feature = "system-apps"))]
+        value if value == Number::IdentityElevate as u64 => {
+            sys_identity_password_action(arg0, arg1, arg2, true)
+        }
+        #[cfg(any(feature = "stage24-5-test", feature = "system-apps"))]
+        value if value == Number::IdentityClose as u64 => sys_identity_close(arg0),
+        #[cfg(any(feature = "stage20-12-test", feature = "system-apps"))]
+        value if value == Number::IdentityOpenVerified as u64 => {
+            sys_identity_open_verified(arg0, arg1)
+        }
+        #[cfg(any(feature = "stage20-12-test", feature = "system-apps"))]
+        value if value == Number::IdentityUnlockVerified as u64 => {
+            sys_identity_unlock_verified(arg0, arg1, arg2)
+        }
+        #[cfg(feature = "system-apps")]
+        value if value == Number::IdentityAdminAddUser as u64 => {
+            sys_identity_admin_add_user(arg0, arg1)
+        }
+        #[cfg(feature = "system-apps")]
+        value if value == Number::IdentityAdminDeleteUser as u64 => {
+            sys_identity_admin_delete_user(arg0)
+        }
+        #[cfg(feature = "system-apps")]
+        value if value == Number::IdentityAdminAddGroup as u64 => {
+            sys_identity_admin_add_group(arg0, arg1)
+        }
+        #[cfg(feature = "system-apps")]
+        value if value == Number::IdentityAdminAddMember as u64 => {
+            sys_identity_admin_group_member(arg0, arg1, true)
+        }
+        #[cfg(feature = "system-apps")]
+        value if value == Number::IdentityAdminRemoveMember as u64 => {
+            sys_identity_admin_group_member(arg0, arg1, false)
+        }
+        #[cfg(feature = "system-apps")]
+        value if value == Number::IdentityAdminQuery as u64 => {
+            sys_identity_admin_query(arg0, arg1, arg2)
+        }
+        #[cfg(feature = "system-apps")]
+        value if value == Number::IdentityAdminSetLockout as u64 => {
+            sys_identity_admin_set_lockout(arg0)
+        }
+        #[cfg(feature = "system-apps")]
+        value if value == Number::IdentityConsumeHardware as u64 => {
+            sys_identity_consume_hardware(arg0)
+        }
+        #[cfg(feature = "system-apps")]
+        value if value == Number::IdentityRequestHardware as u64 => {
+            sys_identity_request_hardware(arg0)
+        }
         _ => u64::MAX,
     };
 
@@ -2950,12 +3348,43 @@ fn pack_compositor_info(width: u32, height: u32, scale: u32) -> u64 {
 /// PowerControl, which only the desktop session holds; every request is in
 /// the security ledger. Returns only when the machine is still running:
 /// 1 no ACPI power-off, 2 the firmware refused ACPI mode, 3 ignored.
-fn sys_power_control(action: u64) -> u64 {
+fn sys_power_control(action: u64, frame: *const UserForkFrame) -> u64 {
     let actor = crate::task::current_task_id().as_u64();
-    let allowed = crate::task::current_has(crate::capability::Capability::PowerControl) && action <= 1;
+    let allowed =
+        crate::task::current_has(crate::capability::Capability::PowerControl) && action <= 2;
     crate::audit::record(actor, crate::audit::Action::PowerControl, action, allowed);
     if !allowed {
         return SYSCALL_ERROR;
+    }
+    if action == 2 {
+        if frame.is_null()
+            || !crate::task::current_kernel_stack_contains(
+                frame as u64,
+                core::mem::size_of::<UserForkFrame>(),
+            )
+        {
+            return 4;
+        }
+        let preparation = match crate::power::prepare_suspend() {
+            Ok(preparation) => preparation,
+            Err(error) => {
+                return match error {
+                    crate::power::PrepareError::NoSuspend => 5,
+                    crate::power::PrepareError::DriverRefused => 6,
+                    crate::power::PrepareError::TrampolineUnavailable => 7,
+                    crate::power::PrepareError::WakeVectorUnavailable => 8,
+                    crate::power::PrepareError::CpuCoordinationUnavailable => 9,
+                }
+            }
+        };
+        return match crate::power::enter_suspend(preparation, frame as *mut UserForkFrame) {
+            Ok(()) => 0,
+            Err(crate::power::SuspendError::NoSuspend) => 5,
+            Err(crate::power::SuspendError::AcpiModeRefused) => 10,
+            Err(crate::power::SuspendError::StillRunning) => 11,
+            Err(crate::power::SuspendError::RollbackFailed) => 12,
+            Err(crate::power::SuspendError::AlreadyPending) => 13,
+        };
     }
     if action == 1 {
         crate::power::reboot();
@@ -2967,18 +3396,575 @@ fn sys_power_control(action: u64) -> u64 {
     }
 }
 
+/// Report the firmware power transitions without performing one. The fixed
+/// three-byte result is copied only after validating the userspace range.
+fn sys_power_capabilities(user_buffer: u64, length: u64) -> u64 {
+    let actor = crate::task::current_task_id().as_u64();
+    let allowed = crate::task::current_has(crate::capability::Capability::PowerControl);
+    crate::audit::record(actor, crate::audit::Action::PowerControl, 2, allowed);
+    if !allowed || length < 3 {
+        return SYSCALL_ERROR;
+    }
+    let Some(power) = crate::hal::acpi::power() else {
+        return SYSCALL_ERROR;
+    };
+    let result = [
+        u8::from(power.s5.is_some()),
+        u8::from(power.s3.is_some()),
+        1,
+    ];
+    if crate::paging::copy_to_current_user(user_buffer, &result).is_err() {
+        return SYSCALL_ERROR;
+    }
+    0
+}
+
+/// Report CPU idle primitives without executing an idle instruction or
+/// changing per-CPU state. The fixed three-byte result is copied only after
+/// validating the userspace range.
+fn sys_cpu_idle_capabilities(user_buffer: u64, length: u64) -> u64 {
+    let actor = crate::task::current_task_id().as_u64();
+    let allowed = crate::task::current_has(crate::capability::Capability::PowerControl);
+    crate::audit::record(actor, crate::audit::Action::PowerControl, 3, allowed);
+    if !allowed || length < 3 {
+        return SYSCALL_ERROR;
+    }
+    let capabilities = crate::hal::cpu::idle_capabilities();
+    let result = [
+        u8::from(capabilities.hlt),
+        u8::from(capabilities.monitor_mwait),
+        u8::from(capabilities.invariant_tsc),
+    ];
+    if crate::paging::copy_to_current_user(user_buffer, &result).is_err() {
+        return SYSCALL_ERROR;
+    }
+    0
+}
+
+/// Report CPUID leaf 0x16 frequency inventory without changing CPU state.
+/// The fixed 13-byte result is copied only after validating the user range.
+fn sys_cpu_frequency_info(user_buffer: u64, length: u64) -> u64 {
+    let actor = crate::task::current_task_id().as_u64();
+    let allowed = crate::task::current_has(crate::capability::Capability::PowerControl);
+    crate::audit::record(actor, crate::audit::Action::PowerControl, 4, allowed);
+    if !allowed || length < 13 {
+        return SYSCALL_ERROR;
+    }
+    let mut result = [0u8; 13];
+    if let Some(info) = crate::hal::cpu::frequency_info() {
+        result[0] = 1;
+        result[1..5].copy_from_slice(&info.base_mhz.to_le_bytes());
+        result[5..9].copy_from_slice(&info.maximum_mhz.to_le_bytes());
+        result[9..13].copy_from_slice(&info.bus_mhz.to_le_bytes());
+    }
+    if crate::paging::copy_to_current_user(user_buffer, &result).is_err() {
+        return SYSCALL_ERROR;
+    }
+    0
+}
+
+/// Report the validated prerequisites for a future ACPI S3 transition and
+/// firmware wake path. This query never writes FACS or PM1 control state.
+fn sys_suspend_resume_capabilities(user_buffer: u64, length: u64) -> u64 {
+    let actor = crate::task::current_task_id().as_u64();
+    let allowed = crate::task::current_has(crate::capability::Capability::PowerControl);
+    crate::audit::record(actor, crate::audit::Action::PowerControl, 5, allowed);
+    if !allowed || length < 5 {
+        return SYSCALL_ERROR;
+    }
+    let Some(power) = crate::hal::acpi::power() else {
+        return SYSCALL_ERROR;
+    };
+    let mut result = [0_u8; 5];
+    result[0] = u8::from(power.s3.is_some());
+    if let Some(facs) = power.facs {
+        result[1] = 1;
+        result[2] = u8::from(facs.waking_vector_32 != 0);
+        result[3] = u8::from(facs.waking_vector_64 != 0);
+        result[4] = facs.version;
+    }
+    if crate::paging::copy_to_current_user(user_buffer, &result).is_err() {
+        return SYSCALL_ERROR;
+    }
+    0
+}
+
+/// Pull one `[len u8][bytes]` field (`len <= max`) from the front of
+/// `packed`, returning it and the remainder.
+fn split_length_prefixed(packed: &[u8], max: usize) -> Option<(&[u8], &[u8])> {
+    let (&length, rest) = packed.split_first()?;
+    let length = length as usize;
+    if length > max || length > rest.len() {
+        return None;
+    }
+    Some(rest.split_at(length))
+}
+
+/// Change a local account's own PIN. The buffer packs `[name_len u8][name]
+/// [old_pin_len u8][old_pin][new_pin_len u8][new_pin]`. Requires
+/// AccountManage, which only the desktop session holds; every attempt is in
+/// the security ledger, but never the PINs themselves.
+fn sys_accounts_change_pin(user_buffer: u64, length: u64) -> u64 {
+    const MAX_BUFFER: usize = 3 + crate::accounts::MAX_NAME + 2 * crate::accounts::MAX_PIN;
+    let actor = crate::task::current_task_id().as_u64();
+    if !crate::task::current_has(crate::capability::Capability::AccountManage) {
+        crate::audit::record(actor, crate::audit::Action::AccountChangePin, 0, false);
+        return SYSCALL_ERROR;
+    }
+    let Ok(length) = usize::try_from(length) else {
+        return SYSCALL_ERROR;
+    };
+    if length == 0 || length > MAX_BUFFER {
+        crate::audit::record(actor, crate::audit::Action::AccountChangePin, 0, false);
+        return SYSCALL_ERROR;
+    }
+    let mut buffer = [0u8; MAX_BUFFER];
+    if crate::paging::copy_from_current_user(user_buffer, &mut buffer[..length]).is_err() {
+        crate::audit::record(actor, crate::audit::Action::AccountChangePin, 0, false);
+        return SYSCALL_ERROR;
+    }
+    let packed = &buffer[..length];
+    let parsed =
+        split_length_prefixed(packed, crate::accounts::MAX_NAME).and_then(|(name, rest)| {
+            let (old_pin, rest) = split_length_prefixed(rest, crate::accounts::MAX_PIN)?;
+            let (new_pin, rest) = split_length_prefixed(rest, crate::accounts::MAX_PIN)?;
+            rest.is_empty().then_some((name, old_pin, new_pin))
+        });
+    let Some((name, old_pin, new_pin)) = parsed else {
+        crate::audit::record(actor, crate::audit::Action::AccountChangePin, 0, false);
+        return SYSCALL_ERROR;
+    };
+    #[cfg(feature = "system-apps")]
+    let result = crate::identity_runtime::change_pin(
+        crate::task::current_process_id(),
+        name,
+        old_pin,
+        new_pin,
+    );
+    #[cfg(not(feature = "system-apps"))]
+    let result = crate::accounts::change_pin(name, old_pin, new_pin);
+    crate::audit::record(
+        actor,
+        crate::audit::Action::AccountChangePin,
+        0,
+        result.is_ok(),
+    );
+    result.map_or(SYSCALL_ERROR, |()| 0)
+}
+
+#[cfg(any(feature = "stage24-5-test", feature = "system-apps"))]
+fn sys_identity_open(user_buffer: u64, length: u64) -> u64 {
+    const MAX_BUFFER: usize = 2 + crate::accounts::MAX_NAME + crate::accounts::MAX_PIN;
+    let Ok(length) = usize::try_from(length) else {
+        return SYSCALL_ERROR;
+    };
+    if length == 0 || length > MAX_BUFFER {
+        return SYSCALL_ERROR;
+    }
+    let mut buffer = [0u8; MAX_BUFFER];
+    if crate::paging::copy_from_current_user(user_buffer, &mut buffer[..length]).is_err() {
+        return SYSCALL_ERROR;
+    }
+    let Some((name, password)) = crate::identity_runtime::parse_open_buffer(&buffer[..length])
+    else {
+        return SYSCALL_ERROR;
+    };
+    let result = crate::identity_runtime::open(crate::task::current_process_id(), name, password);
+    crate::audit::record(
+        crate::task::current_task_id().as_u64(),
+        crate::audit::Action::IdentityOpen,
+        0,
+        result.is_ok(),
+    );
+    result.map(|session| session.0).unwrap_or(SYSCALL_ERROR)
+}
+
+#[cfg(any(feature = "stage20-12-test", feature = "stage24-5-test", feature = "system-apps"))]
+fn sys_identity_lock(session: u64) -> u64 {
+    let result = crate::identity_runtime::lock(
+        crate::task::current_process_id(),
+        libwoven::identity::SessionId(session),
+    );
+    crate::audit::record(
+        crate::task::current_task_id().as_u64(),
+        crate::audit::Action::IdentityLock,
+        session,
+        result.is_ok(),
+    );
+    result.map_or(SYSCALL_ERROR, |_| 0)
+}
+
+#[cfg(any(feature = "stage24-5-test", feature = "system-apps"))]
+fn sys_identity_password_action(session: u64, user_buffer: u64, length: u64, elevate: bool) -> u64 {
+    const MAX_BUFFER: usize = 1 + crate::accounts::MAX_PIN;
+    let Ok(length) = usize::try_from(length) else {
+        return SYSCALL_ERROR;
+    };
+    if length == 0 || length > MAX_BUFFER {
+        return SYSCALL_ERROR;
+    }
+    let mut buffer = [0u8; MAX_BUFFER];
+    if crate::paging::copy_from_current_user(user_buffer, &mut buffer[..length]).is_err() {
+        return SYSCALL_ERROR;
+    }
+    let Some(password) = crate::identity_runtime::parse_password_buffer(&buffer[..length]) else {
+        return SYSCALL_ERROR;
+    };
+    let owner = crate::task::current_process_id();
+    let result = if elevate {
+        crate::identity_runtime::elevate(owner, libwoven::identity::SessionId(session), password)
+    } else {
+        crate::identity_runtime::unlock(owner, libwoven::identity::SessionId(session), password)
+    };
+    crate::audit::record(
+        crate::task::current_task_id().as_u64(),
+        if elevate {
+            crate::audit::Action::IdentityElevate
+        } else {
+            crate::audit::Action::IdentityUnlock
+        },
+        session,
+        result.is_ok(),
+    );
+    result.map_or(SYSCALL_ERROR, |_| 0)
+}
+
+#[cfg(any(feature = "stage24-5-test", feature = "system-apps"))]
+fn sys_identity_close(session: u64) -> u64 {
+    let result = crate::identity_runtime::close(
+        crate::task::current_process_id(),
+        libwoven::identity::SessionId(session),
+    );
+    crate::audit::record(
+        crate::task::current_task_id().as_u64(),
+        crate::audit::Action::IdentityClose,
+        session,
+        result.is_ok(),
+    );
+    result.map_or(SYSCALL_ERROR, |_| 0)
+}
+
+#[cfg(feature = "system-apps")]
+fn sys_identity_consume_hardware(session: u64) -> u64 {
+    let result = crate::identity_runtime::consume_pending_hardware_decision(
+        crate::task::current_process_id(),
+        libwoven::identity::SessionId(session),
+    );
+    crate::audit::record(
+        crate::task::current_task_id().as_u64(),
+        crate::audit::Action::IdentityHardware,
+        session,
+        result.is_ok(),
+    );
+    result.map_or(SYSCALL_ERROR, |_| 0)
+}
+
+#[cfg(feature = "system-apps")]
+fn sys_identity_request_hardware(session: u64) -> u64 {
+    let result = crate::identity_runtime::request_hardware_decision(
+        crate::task::current_process_id(),
+        libwoven::identity::SessionId(session),
+    );
+    crate::audit::record(
+        crate::task::current_task_id().as_u64(),
+        crate::audit::Action::IdentityHardware,
+        session,
+        result.is_ok(),
+    );
+    result.map_or(SYSCALL_ERROR, |_| 0)
+}
+
+#[cfg(any(feature = "stage20-12-test", feature = "system-apps"))]
+fn sys_identity_open_verified(user_buffer: u64, length: u64) -> u64 {
+    const MAX_BUFFER: usize = 1 + crate::accounts::MAX_NAME + 32;
+    if !crate::task::current_has(crate::capability::Capability::AccountManage) {
+        return SYSCALL_ERROR;
+    }
+    let Ok(length) = usize::try_from(length) else {
+        return SYSCALL_ERROR;
+    };
+    if length == 0 || length > MAX_BUFFER {
+        return SYSCALL_ERROR;
+    }
+    let mut buffer = [0u8; MAX_BUFFER];
+    if crate::paging::copy_from_current_user(user_buffer, &mut buffer[..length]).is_err() {
+        return SYSCALL_ERROR;
+    }
+    let Some((name, rest)) = crate::identity_runtime::parse_length_prefixed(
+        &buffer[..length],
+        crate::accounts::MAX_NAME,
+    ) else {
+        return SYSCALL_ERROR;
+    };
+    let Ok(digest) = rest.try_into() else {
+        return SYSCALL_ERROR;
+    };
+    let result =
+        crate::identity_runtime::open_digest(crate::task::current_process_id(), name, &digest);
+    crate::audit::record(
+        crate::task::current_task_id().as_u64(),
+        crate::audit::Action::IdentityOpen,
+        0,
+        result.is_ok(),
+    );
+    result.map(|session| session.0).unwrap_or(SYSCALL_ERROR)
+}
+
+#[cfg(any(feature = "stage20-12-test", feature = "system-apps"))]
+fn sys_identity_unlock_verified(session: u64, user_buffer: u64, length: u64) -> u64 {
+    if !crate::task::current_has(crate::capability::Capability::AccountManage) || length != 32 {
+        return SYSCALL_ERROR;
+    }
+    let mut digest = [0u8; 32];
+    if crate::paging::copy_from_current_user(user_buffer, &mut digest).is_err() {
+        return SYSCALL_ERROR;
+    }
+    let result = crate::identity_runtime::unlock_digest(
+        crate::task::current_process_id(),
+        libwoven::identity::SessionId(session),
+        &digest,
+    );
+    crate::audit::record(
+        crate::task::current_task_id().as_u64(),
+        crate::audit::Action::IdentityUnlock,
+        session,
+        result.is_ok(),
+    );
+    result.map_or(SYSCALL_ERROR, |_| 0)
+}
+
+#[cfg(feature = "system-apps")]
+fn sys_identity_admin_add_user(user_buffer: u64, length: u64) -> u64 {
+    const MAX_BUFFER: usize = 3 + crate::accounts::MAX_NAME + crate::accounts::MAX_PIN;
+    let actor = crate::task::current_task_id().as_u64();
+    let Ok(length) = usize::try_from(length) else {
+        crate::audit::record(actor, crate::audit::Action::IdentityAdminAddUser, 0, false);
+        return SYSCALL_ERROR;
+    };
+    if length == 0 || length > MAX_BUFFER {
+        crate::audit::record(actor, crate::audit::Action::IdentityAdminAddUser, 0, false);
+        return SYSCALL_ERROR;
+    }
+    let mut buffer = [0u8; MAX_BUFFER];
+    if crate::paging::copy_from_current_user(user_buffer, &mut buffer[..length]).is_err() {
+        crate::audit::record(actor, crate::audit::Action::IdentityAdminAddUser, 0, false);
+        return SYSCALL_ERROR;
+    }
+    let Some((name, rest)) = crate::identity_runtime::parse_length_prefixed(
+        &buffer[..length],
+        crate::accounts::MAX_NAME,
+    ) else {
+        crate::audit::record(actor, crate::audit::Action::IdentityAdminAddUser, 0, false);
+        return SYSCALL_ERROR;
+    };
+    let Some((password, rest)) =
+        crate::identity_runtime::parse_length_prefixed(rest, crate::accounts::MAX_PIN)
+    else {
+        crate::audit::record(actor, crate::audit::Action::IdentityAdminAddUser, 0, false);
+        return SYSCALL_ERROR;
+    };
+    if rest.len() != 1 {
+        crate::audit::record(actor, crate::audit::Action::IdentityAdminAddUser, 0, false);
+        return SYSCALL_ERROR;
+    }
+    let result = crate::identity_runtime::admin_add_user(
+        crate::task::current_process_id(),
+        name,
+        password,
+        rest[0] != 0,
+    );
+    crate::audit::record(
+        actor,
+        crate::audit::Action::IdentityAdminAddUser,
+        0,
+        result.is_ok(),
+    );
+    result.map(|user| user.0 as u64).unwrap_or(SYSCALL_ERROR)
+}
+
+#[cfg(feature = "system-apps")]
+fn sys_identity_admin_delete_user(user: u64) -> u64 {
+    let actor = crate::task::current_task_id().as_u64();
+    let Ok(user) = u32::try_from(user) else {
+        crate::audit::record(
+            actor,
+            crate::audit::Action::IdentityAdminDeleteUser,
+            0,
+            false,
+        );
+        return SYSCALL_ERROR;
+    };
+    let result = crate::identity_runtime::admin_delete_user(
+        crate::task::current_process_id(),
+        libwoven::identity::UserId(user),
+    );
+    crate::audit::record(
+        actor,
+        crate::audit::Action::IdentityAdminDeleteUser,
+        u64::from(user),
+        result.is_ok(),
+    );
+    result.map_or(SYSCALL_ERROR, |_| 0)
+}
+
+#[cfg(feature = "system-apps")]
+fn sys_identity_admin_add_group(user_buffer: u64, length: u64) -> u64 {
+    const MAX_BUFFER: usize = 1 + crate::accounts::MAX_NAME;
+    let actor = crate::task::current_task_id().as_u64();
+    let Ok(length) = usize::try_from(length) else {
+        crate::audit::record(actor, crate::audit::Action::IdentityAdminAddGroup, 0, false);
+        return SYSCALL_ERROR;
+    };
+    if length == 0 || length > MAX_BUFFER {
+        crate::audit::record(actor, crate::audit::Action::IdentityAdminAddGroup, 0, false);
+        return SYSCALL_ERROR;
+    }
+    let mut buffer = [0u8; MAX_BUFFER];
+    if crate::paging::copy_from_current_user(user_buffer, &mut buffer[..length]).is_err() {
+        crate::audit::record(actor, crate::audit::Action::IdentityAdminAddGroup, 0, false);
+        return SYSCALL_ERROR;
+    }
+    let Some((name, rest)) = crate::identity_runtime::parse_length_prefixed(
+        &buffer[..length],
+        crate::accounts::MAX_NAME,
+    ) else {
+        crate::audit::record(actor, crate::audit::Action::IdentityAdminAddGroup, 0, false);
+        return SYSCALL_ERROR;
+    };
+    if !rest.is_empty() {
+        crate::audit::record(actor, crate::audit::Action::IdentityAdminAddGroup, 0, false);
+        return SYSCALL_ERROR;
+    }
+    let result = crate::identity_runtime::admin_add_group(crate::task::current_process_id(), name);
+    crate::audit::record(
+        actor,
+        crate::audit::Action::IdentityAdminAddGroup,
+        0,
+        result.is_ok(),
+    );
+    result.map(|group| group.0 as u64).unwrap_or(SYSCALL_ERROR)
+}
+
+#[cfg(feature = "system-apps")]
+fn sys_identity_admin_group_member(user: u64, group: u64, add: bool) -> u64 {
+    let actor = crate::task::current_task_id().as_u64();
+    let action = if add {
+        crate::audit::Action::IdentityAdminAddMember
+    } else {
+        crate::audit::Action::IdentityAdminRemoveMember
+    };
+    let (Ok(user), Ok(group)) = (u32::try_from(user), u32::try_from(group)) else {
+        crate::audit::record(actor, action, 0, false);
+        return SYSCALL_ERROR;
+    };
+    let result = crate::identity_runtime::admin_group_member(
+        crate::task::current_process_id(),
+        libwoven::identity::UserId(user),
+        libwoven::identity::GroupId(group),
+        add,
+    );
+    crate::audit::record(
+        actor,
+        action,
+        (u64::from(group) << 32) | u64::from(user),
+        result.is_ok(),
+    );
+    result.map_or(SYSCALL_ERROR, |_| 0)
+}
+
+#[cfg(feature = "system-apps")]
+fn sys_identity_admin_query(user_output: u64, capacity: u64, kind: u64) -> u64 {
+    const MAX_OUTPUT: usize = libwoven::identity::ADMIN_QUERY_MAX_BYTES;
+    let actor = crate::task::current_task_id().as_u64();
+    let Ok(capacity) = usize::try_from(capacity) else {
+        crate::audit::record(actor, crate::audit::Action::IdentityAdminQuery, kind, false);
+        return SYSCALL_ERROR;
+    };
+    let Ok(kind) = u8::try_from(kind) else {
+        crate::audit::record(actor, crate::audit::Action::IdentityAdminQuery, 0, false);
+        return SYSCALL_ERROR;
+    };
+    if capacity == 0 || capacity > MAX_OUTPUT || kind > libwoven::identity::ADMIN_QUERY_GROUPS {
+        crate::audit::record(
+            actor,
+            crate::audit::Action::IdentityAdminQuery,
+            u64::from(kind),
+            false,
+        );
+        return SYSCALL_ERROR;
+    }
+    let mut output = [0u8; MAX_OUTPUT];
+    let result = crate::identity_runtime::admin_query(
+        crate::task::current_process_id(),
+        kind,
+        &mut output[..capacity],
+    );
+    let Ok(length) = result else {
+        crate::audit::record(
+            actor,
+            crate::audit::Action::IdentityAdminQuery,
+            u64::from(kind),
+            false,
+        );
+        return SYSCALL_ERROR;
+    };
+    if crate::paging::copy_to_current_user(user_output, &output[..length]).is_err() {
+        crate::audit::record(
+            actor,
+            crate::audit::Action::IdentityAdminQuery,
+            u64::from(kind),
+            false,
+        );
+        return SYSCALL_ERROR;
+    }
+    crate::audit::record(
+        actor,
+        crate::audit::Action::IdentityAdminQuery,
+        u64::from(kind),
+        true,
+    );
+    length as u64
+}
+
+#[cfg(feature = "system-apps")]
+fn sys_identity_admin_set_lockout(failures: u64) -> u64 {
+    let actor = crate::task::current_task_id().as_u64();
+    let Ok(failures) = u8::try_from(failures) else {
+        crate::audit::record(
+            actor,
+            crate::audit::Action::IdentityAdminSetLockout,
+            0,
+            false,
+        );
+        return SYSCALL_ERROR;
+    };
+    let result =
+        crate::identity_runtime::admin_set_lockout(crate::task::current_process_id(), failures);
+    crate::audit::record(
+        actor,
+        crate::audit::Action::IdentityAdminSetLockout,
+        u64::from(failures),
+        result.is_ok(),
+    );
+    result.map_or(SYSCALL_ERROR, |_| 0)
+}
+
 /// The compositor surface's size and display scale. Requires `DisplayIo` and
 /// the lease: the geometry is the holder's to draw on.
 fn sys_compositor_outputs(user_outputs: u64) -> u64 {
     if !display_authorized() {
         return SYSCALL_ERROR;
     }
-    let Ok((outputs, count)) = crate::compositor::outputs_for(crate::task::current_process_id()) else {
+    let Ok((outputs, count)) = crate::compositor::outputs_for(crate::task::current_process_id())
+    else {
         return SYSCALL_ERROR;
     };
     let mut bytes = [0u8; crate::compositor::MAX_OUTPUTS * 16];
     for (output, chunk) in outputs.iter().zip(bytes.as_chunks_mut::<16>().0) {
-        for (value, field) in [output.0, output.1, output.2, output.3].iter().zip(chunk.as_chunks_mut::<4>().0) {
+        for (value, field) in [output.0, output.1, output.2, output.3]
+            .iter()
+            .zip(chunk.as_chunks_mut::<4>().0)
+        {
             *field = value.to_le_bytes();
         }
     }
@@ -3070,14 +4056,30 @@ fn encode_input(event: crate::woven_input::Event) -> Option<u64> {
             u64::from(x) | (u64::from(y) << 16),
         )),
         // contact | active << 8 | x << 16 | y << 32
-        Event::Touch { contact, x, y, active } => Some(packed(
+        Event::Touch {
+            contact,
+            x,
+            y,
+            active,
+        } => Some(packed(
             INPUT_KIND_TOUCH,
-            u64::from(contact) | (u64::from(active) << 8) | (u64::from(x) << 16) | (u64::from(y) << 32),
+            u64::from(contact)
+                | (u64::from(active) << 8)
+                | (u64::from(x) << 16)
+                | (u64::from(y) << 32),
         )),
         // x | y << 16 | pressure (10 bits) << 32 | touching << 48
-        Event::Pen { x, y, pressure, touching } => Some(packed(
+        Event::Pen {
+            x,
+            y,
+            pressure,
+            touching,
+        } => Some(packed(
             INPUT_KIND_PEN,
-            u64::from(x) | (u64::from(y) << 16) | (u64::from(pressure & 0x3ff) << 32) | (u64::from(touching) << 48),
+            u64::from(x)
+                | (u64::from(y) << 16)
+                | (u64::from(pressure & 0x3ff) << 32)
+                | (u64::from(touching) << 48),
         )),
         Event::GameController { control, value } => Some(packed(
             INPUT_KIND_GAME_CONTROLLER,

@@ -15,10 +15,15 @@
 
 extern crate alloc;
 
-#[cfg(feature = "physical-probe")]
+#[cfg(any(feature = "physical-probe", feature = "physical-wifi"))]
 mod physical_probe;
 
-#[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test", feature = "stage13-4-test"))]
+mod accounts;
+#[cfg(any(
+    not(feature = "qemu-test"),
+    feature = "stage13-12-test",
+    feature = "stage13-4-test"
+))]
 mod ahci;
 #[cfg(feature = "stage10-8-test")]
 mod async_acceptance;
@@ -41,19 +46,6 @@ mod console;
 mod deadline;
 mod device;
 mod display;
-#[cfg(any(
-    not(feature = "qemu-test"),
-    feature = "stage13-12-test",
-    feature = "stage13-1-test",
-    feature = "stage13-2-test",
-    feature = "stage13-3-test",
-    feature = "stage13-4-test",
-    feature = "stage13-5-test",
-    feature = "stage13-6-test",
-    feature = "stage13-7-test",
-    feature = "stage13-8-test",
-    feature = "stage13-9-test"
-))]
 mod driver;
 #[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
 mod drivers;
@@ -76,11 +68,24 @@ mod gpt;
 mod graphics;
 mod gui;
 mod hal;
-#[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
-mod hid;
-#[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test", feature = "stage13-8-test"))]
+#[cfg(any(
+    not(feature = "qemu-test"),
+    feature = "stage13-12-test",
+    feature = "stage13-8-test"
+))]
 mod hda;
 mod heap;
+#[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
+mod hid;
+#[cfg(any(
+    feature = "stage20-12-test",
+    feature = "stage24-4-test",
+    feature = "stage24-5-test",
+    feature = "system-apps"
+))]
+mod identity_runtime;
+#[cfg(any(feature = "stage24-3-test", feature = "system-apps"))]
+mod identity_storage;
 mod interrupts;
 mod ipc;
 mod irq_lock;
@@ -88,12 +93,15 @@ mod journal;
 mod keyboard;
 #[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
 mod livelog;
-mod session;
 mod memory;
 mod mouse;
 mod network;
 mod notifications;
-#[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test", feature = "stage13-3-test"))]
+#[cfg(any(
+    not(feature = "qemu-test"),
+    feature = "stage13-12-test",
+    feature = "stage13-3-test"
+))]
 mod nvme;
 mod page_cache;
 mod page_permissions;
@@ -102,13 +110,14 @@ mod panic;
 mod partition;
 mod permission;
 mod pic;
-mod power;
 mod pipe;
+mod power;
 mod rtc;
 mod secret_vault;
 #[cfg(feature = "secure-boot")]
 mod secure_boot;
 mod serial;
+mod session;
 mod shell;
 mod signed_app;
 mod smp;
@@ -120,6 +129,32 @@ mod storage;
 // themselves must not chain: each Stage 12 self-test block ends the boot, so
 // enabling 12.3 from 12.5 would exit before the 12.5 block ran.
 mod compositor;
+#[cfg(any(
+    feature = "stage21-1-test",
+    feature = "stage21-2-test",
+    feature = "stage21-3-test",
+    feature = "stage21-4-test",
+    feature = "stage21-5-test",
+    feature = "stage21-6-test",
+    feature = "stage21-7-test",
+    feature = "stage21-8-test",
+    feature = "stage21-9-test",
+    feature = "stage21-10-test",
+    feature = "stage21-11-test",
+    feature = "stage22-5-test",
+    feature = "system-apps"
+))]
+mod package;
+#[cfg(any(
+    feature = "stage21-7-test",
+    feature = "stage21-8-test",
+    feature = "stage21-9-test",
+    feature = "stage21-10-test",
+    feature = "stage21-11-test",
+    feature = "stage22-5-test",
+    feature = "system-apps"
+))]
+mod package_service;
 #[cfg(any(feature = "stage12-3-test", feature = "stage12-5-test"))]
 mod storage_manager;
 mod swap;
@@ -129,6 +164,11 @@ mod terminal;
 #[allow(dead_code)]
 mod thread;
 mod timer;
+mod tpm2;
+#[cfg(any(feature = "qemu-test", feature = "system-apps"))]
+mod update;
+#[cfg(any(feature = "stage27-5-test", feature = "system-apps"))]
+mod update_service;
 #[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
 mod usb_msc;
 mod user_address;
@@ -137,11 +177,19 @@ mod userspace;
 mod vfs;
 #[cfg(feature = "stage12-1-test")]
 mod vfs_api;
-mod virtio_net;
-#[cfg(any(not(feature = "qemu-test"), feature = "stage20-14-test", feature = "stage20-14b-test"))]
-mod virtio_pci;
-#[cfg(any(not(feature = "qemu-test"), feature = "stage20-14-test", feature = "stage20-14b-test"))]
+#[cfg(any(
+    not(feature = "qemu-test"),
+    feature = "stage20-14-test",
+    feature = "stage20-14b-test"
+))]
 mod virtio_gpu;
+mod virtio_net;
+#[cfg(any(
+    not(feature = "qemu-test"),
+    feature = "stage20-14-test",
+    feature = "stage20-14b-test"
+))]
+mod virtio_pci;
 // `storage_manager` seals records through this key vault, so the Stage 12.5
 // gate needs the module even though it does not run the Stage 12.3 self-test.
 #[cfg(feature = "stage13-10-test")]
@@ -161,11 +209,11 @@ mod wifi_backend;
 mod wifi_ccmp;
 #[cfg(feature = "stage13-9-test")]
 mod wifi_crypto;
-#[cfg(feature = "stage13-9-test")]
+#[cfg(any(feature = "stage13-9-test", feature = "physical-wifi"))]
 mod wifi_firmware;
 #[cfg(feature = "stage13-9-test")]
 mod wifi_gtk;
-#[cfg(feature = "stage13-9-test")]
+#[cfg(any(feature = "stage13-9-test", feature = "physical-wifi"))]
 mod wifi_hw;
 #[cfg(feature = "stage13-9-test")]
 mod wifi_link;
@@ -386,7 +434,7 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     });
     // The physical inventory image stops after RAM/paging checks, before
     // driver activation, disk/network I/O, AP startup or QEMU acceptance.
-    #[cfg(feature = "physical-probe")]
+    #[cfg(all(feature = "physical-probe", not(feature = "physical-wifi")))]
     physical_probe::run(&mut console, acpi.as_ref().ok());
 
     #[cfg(feature = "qemu-test")]
@@ -402,6 +450,8 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     ));
 
     let hardware = hal::init(acpi.as_ref().ok());
+    #[cfg(all(feature = "system-apps", not(feature = "qemu-test")))]
+    let tpm_info = acpi.as_ref().ok().and_then(|summary| summary.tpm2);
     if !hal::acpi::self_test() {
         console.println("ACPI PARSER: VALIDATION FAILED");
         halt();
@@ -425,6 +475,37 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
                 summary.numa_domains,
                 summary.truncated as u8,
             ));
+            if let Some(tpm2) = summary.tpm2 {
+                serial::write_line(format_args!(
+                    "[TPM] ACPI TPM2 present control={:#x} start_method={}",
+                    tpm2.control_area, tpm2.start_method
+                ));
+                let mut random = [0_u8; 16];
+                match tpm2::get_random(tpm2, &mut random) {
+                    Ok(length) => serial::write_line(format_args!(
+                        "[TPM] CRB GetRandom probe passed bytes={length}"
+                    )),
+                    Err(error) => serial::write_line(format_args!(
+                        "[TPM] CRB GetRandom probe unavailable: {error:?}"
+                    )),
+                }
+                random.fill(0);
+                let mut pcr7 = [0_u8; 32];
+                match tpm2::read_pcr_sha256(tpm2, 7, &mut pcr7) {
+                    Ok(()) => serial::write_line(format_args!(
+                        "[TPM] PCR7 SHA-256 read passed prefix={:02x}{:02x}{:02x}{:02x}",
+                        pcr7[0], pcr7[1], pcr7[2], pcr7[3]
+                    )),
+                    Err(error) => {
+                        serial::write_line(format_args!("[TPM] PCR7 read unavailable: {error:?}"))
+                    }
+                }
+                pcr7.fill(0);
+            } else {
+                serial::write_line(format_args!(
+                    "[TPM] ACPI TPM2 unavailable; hardware credential root not provisioned"
+                ));
+            }
         }
         Err(_) => console.println("ACPI TABLES: UNAVAILABLE"),
     }
@@ -824,6 +905,91 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         }
         serial::write_line(format_args!(
             "[S13.10AC] deferred AX200 IRQ -> CSR RX service: PASSED"
+        ));
+        if !wifi_hw::stage13_10ad_ax201_activation_self_test() {
+            serial::write_line(format_args!(
+                "[S13.10AD] AX201 integrated 22000 activation contract: FAILED"
+            ));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!(
+            "[S13.10AD] AX201 integrated 22000 activation contract: PASSED"
+        ));
+        if !wifi_firmware::stage13_10ae_ax201_firmware_prepare_self_test() {
+            serial::write_line(format_args!(
+                "[S13.10AE] AX201 firmware profile and DMA preparation: FAILED"
+            ));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!(
+            "[S13.10AE] AX201 firmware profile and DMA preparation: PASSED"
+        ));
+        if !wifi_firmware::stage13_10af_ax201_mmio_startup_self_test() {
+            serial::write_line(format_args!(
+                "[S13.10AF] AX201 22000 MMIO/PRPH startup adapter: FAILED"
+            ));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!(
+            "[S13.10AF] AX201 22000 MMIO/PRPH startup adapter: PASSED"
+        ));
+        if !wifi_firmware::stage13_10ag_ax201_driver_lifecycle_self_test() {
+            serial::write_line(format_args!(
+                "[S13.10AG] AX201 driver ownership/lifecycle: FAILED"
+            ));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!(
+            "[S13.10AG] AX201 driver ownership/lifecycle: PASSED"
+        ));
+        if !wifi_hw::stage13_10ai_ax201_queue_owner_self_test() {
+            serial::write_line(format_args!(
+                "[S13.10AI] AX201 physical DMA queue owner: FAILED"
+            ));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!(
+            "[S13.10AI] AX201 physical DMA queue owner: PASSED"
+        ));
+        if !wifi_firmware::stage13_10ah_ax201_firmware_provider_self_test() {
+            serial::write_line(format_args!(
+                "[S13.10AH] AX201 firmware-provider boundary: FAILED"
+            ));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!(
+            "[S13.10AH] AX201 firmware-provider boundary: PASSED"
+        ));
+        if !wifi_firmware::stage13_10aj_ax201_scan_control_self_test() {
+            serial::write_line(format_args!(
+                "[S13.10AJ] AX201 scan-control wire contract: FAILED"
+            ));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!(
+            "[S13.10AJ] AX201 scan-control wire contract: PASSED"
+        ));
+        #[cfg(feature = "stage13-9-test")]
+        if !wifi_firmware::stage13_10ak_ax201_phy_context_self_test() {
+            serial::write_line(format_args!(
+                "[S13.10AK] AX201 PHY-context wire contract: FAILED"
+            ));
+            qemu_test_exit_failure();
+        }
+        #[cfg(feature = "stage13-9-test")]
+        serial::write_line(format_args!(
+            "[S13.10AK] AX201 PHY-context wire contract: PASSED"
+        ));
+        #[cfg(feature = "stage13-9-test")]
+        if !wifi_firmware::stage13_10al_ax201_mac_binding_self_test() {
+            serial::write_line(format_args!(
+                "[S13.10AL] AX201 MAC/binding wire contract: FAILED"
+            ));
+            qemu_test_exit_failure();
+        }
+        #[cfg(feature = "stage13-9-test")]
+        serial::write_line(format_args!(
+            "[S13.10AL] AX201 MAC/binding wire contract: PASSED"
         ));
         if !wifi_backend::self_test() {
             serial::write_line(format_args!(
@@ -1333,10 +1499,19 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         // registry blits onto, sized to the framebuffer. Deferred to here
         // because its allocation needs a mapped heap.
         compositor::init_for_display();
+        boot_stage(&mut console, "BOOT LOADER [1/7]: graphics surface ready");
+        console.println("BOOT: starting CPU and interrupt setup");
     } else {
         console.println("KERNEL HEAP: SELF TEST FAILED");
         halt();
     }
+    #[cfg(feature = "qemu-test")]
+    if !tpm2::self_test() {
+        serial::write_line(format_args!("[TPM] CRB codec: FAILED"));
+        qemu_test_exit_failure();
+    }
+    #[cfg(feature = "qemu-test")]
+    serial::write_line(format_args!("[TPM] CRB codec: PASSED"));
     #[cfg(feature = "qemu-test")]
     if !heap::live_metadata_self_test() {
         serial::write_line(format_args!("[S6.HEAP] unbounded live metadata: FAILED"));
@@ -1400,6 +1575,7 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         }
 
         smp::start(acpi.ok(), physical_memory_offset.unwrap());
+        console.println("BOOT: CPUs online; probing PS/2 mouse");
         // Interrupts are still off: the mouse's command responses must not be
         // taken by an IRQ handler.
         let mouse_present = mouse::init();
@@ -1412,6 +1588,9 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
             }
         }
         x86_64::instructions::interrupts::enable();
+        console.println("BOOT: interrupts enabled; starting service workers");
+        #[cfg(feature = "physical-wifi")]
+        physical_probe::run_ax201_activation(&mut console, acpi.as_ref().ok());
         if !block_io::start_worker() {
             console.println("BLOCK I/O WORKER: START FAILED");
             halt();
@@ -1427,6 +1606,7 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
             console.println("ASYNC NETWORK WORKER: START FAILED");
             halt();
         }
+        console.println("BOOT: service workers ready; checking async I/O");
         if !block_io::async_completion_self_test() {
             console.println("BLOCK I/O COMPLETION: FAILED");
             halt();
@@ -1435,6 +1615,7 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
             console.println("PAGER: START FAILED");
             halt();
         }
+        boot_stage(&mut console, "BOOT LOADER [2/7]: scheduler and I/O ready");
 
         let ata_sectors = ata::init();
         if let Some(sectors) = ata_sectors {
@@ -1468,16 +1649,58 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
                 "[FS] FAT32 mount failed; continuing with RAM VFS"
             )),
         }
+        boot_stage(&mut console, "BOOT LOADER [3/7]: storage checked");
 
         for dir in ["/etc", "/var", "/home", "/tmp"] {
             let _ = vfs::mkdir(dir);
         }
 
+        // Persistent accounts (from a provisioned `/mnt/etc/wovenhat/accounts`)
+        // are a production concern, not a hardware-demo-only one: a real
+        // release image has no other way to carry real sign-in accounts.
+        // Finding none is not a failure (`install_persistent_accounts`
+        // returns `true` for that case) -- a machine with no accounts yet
+        // boots to an accounts-less session, which is what a first-boot
+        // setup step is for.
         #[cfg(feature = "system-apps")]
-        if !install_production_system_apps() {
-            serial::write_line(format_args!("[APPS] production catalog install failed"));
+        if !install_persistent_accounts() {
+            serial::write_line(format_args!(
+                "[SESSION] persistent account provisioning failed"
+            ));
             halt();
         }
+        // Sub-stage timing within [3/7]->[4/7]: this span was found (boot
+        // profiling, Stage 30) to dominate the whole boot -- 4323 of a
+        // ~4350-tick total boot under QEMU TCG -- and PBKDF2 account hashing
+        // (100,000 iterations, forced software-only SHA-256, no hardware
+        // extension this kernel ever uses) is the leading suspect, so its
+        // own sub-stage is split out to confirm or rule that out directly
+        // rather than by inference.
+        #[cfg(feature = "hardware-demo")]
+        {
+            if !install_hardware_demo_accounts() {
+                serial::write_line(format_args!("[DEMO] account provisioning failed"));
+                halt();
+            }
+            boot_stage(&mut console, "BOOT LOADER [3.1/7]: demo accounts hashed");
+        }
+
+        #[cfg(feature = "system-apps")]
+        {
+            if !install_production_system_apps() {
+                serial::write_line(format_args!("[APPS] production catalog install failed"));
+                halt();
+            }
+            boot_stage(
+                &mut console,
+                "BOOT LOADER [3.2/7]: system app catalog installed",
+            );
+            if !start_production_system_services() {
+                serial::write_line(format_args!("[SERVICES] production service startup failed"));
+                halt();
+            }
+        }
+        boot_stage(&mut console, "BOOT LOADER [4/7]: system files ready");
 
         match network::init() {
             Ok(()) => serial::write_line(format_args!(
@@ -1492,10 +1715,29 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         // Storage, USB and audio controllers: bound through the driver
         // manager; a missing or failing device never stops the boot.
         let driver_report = drivers::bring_up();
+
+        // Start live-log setup as soon as the USB controller and attached
+        // storage have been brought up. Its I/O remains on a service task,
+        // overlapping display, filesystem and session setup without blocking
+        // the foreground boot path.
+        match livelog::start_deferred() {
+            Ok(true) => serial::write_line(format_args!(
+                "[LIVELOG] startup queued; remaining boot continues"
+            )),
+            Ok(false) => serial::write_line(format_args!(
+                "[LIVELOG] startup already queued or logging already active"
+            )),
+            Err(error) => serial::write_line(format_args!(
+                "[LIVELOG] startup worker did not start: {:?}",
+                error
+            )),
+        }
+
         // A multi-head virtio-gpu becomes the desktop's monitors.
         if let Ok(heads) = compositor::attach_gpu_outputs() {
             serial::write_line(format_args!("[DISPLAY] virtio-gpu: {} monitors", heads));
         }
+        boot_stage(&mut console, "BOOT LOADER [5/7]: devices ready");
         // Without an ATA disk, mount the first ready NVMe or AHCI disk.
         if !storage::mnt_mounted() {
             if let Some((root, name)) = drivers::storage_root(&driver_report) {
@@ -1513,32 +1755,160 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
             }
         }
 
-        // Stage 13.19: booted from a WovenHat live stick, this boot's log
-        // is kept on the stick.
-        match livelog::start() {
-            Ok(boot) => serial::write_line(format_args!("[LIVELOG] boot {} is logged on the USB stick", boot)),
-            Err(error) => serial::write_line(format_args!("[LIVELOG] no live-test stick: {:?}", error)),
+        // The signed TPM policy records are release credential inputs. Load
+        // and revalidate them only after the durable WovenFS mount attempt;
+        // absence, invalid metadata, or any live TPM error leaves hardware
+        // credentials unavailable and must not block a usable desktop boot.
+        #[cfg(feature = "system-apps")]
+        match tpm_info {
+            None => serial::write_line(format_args!(
+                "[TPM] broker activation unavailable; no live TPM; hardware credentials disabled"
+            )),
+            Some(info) => match tpm2::activate_provisioned_hardware_credential_broker(info) {
+                Ok(()) => serial::write_line(format_args!(
+                    "[TPM] signed broker policy, credential root, and attestation key accepted; hardware credentials enabled"
+                )),
+                Err(tpm2::Error::Storage) => serial::write_line(format_args!(
+                    "[TPM] signed broker policy unavailable; hardware credentials disabled"
+                )),
+                Err(error) => serial::write_line(format_args!(
+                    "[TPM] broker activation rejected: {error:?}; hardware credentials disabled"
+                )),
+        }
         }
 
-        // The signed system-apps image boots directly into the Ring-3
-        // WovenShell session. The diagnostic shell is a recovery path, not
-        // a competing boot-time display or foreground terminal owner.
+        // A durable context is only a recovery candidate. Require a live TPM
+        // ContextLoad and immediately flush the restored session until the
+        // boot authority consumer is integrated; no filesystem record alone
+        // can create hardware credential authority.
         #[cfg(feature = "system-apps")]
-        let desktop_session_started = {
-            let accounts = vfs::stat("/etc/wovenhat/accounts").is_ok().then_some("/etc/wovenhat/accounts");
-            match session::start(WOVEN_SHELL_IMAGE, accounts) {
+        {
+            match tpm_info {
+            None => serial::write_line(format_args!(
+                "[TPM] context recovery unavailable; no live TPM; hardware credentials disabled"
+            )),
+            Some(info) => match tpm2::authorize_policy_session_custody(info) {
+                Err(error) => serial::write_line(format_args!(
+                    "[TPM] custody authorization unavailable: {error:?}; hardware credentials disabled"
+                )),
+                Ok(custody) => match tpm2::load_policy_session_snapshot(&custody) {
+                    Err(tpm2::Error::Storage) => serial::write_line(format_args!(
+                        "[TPM] no durable policy-session context; hardware credentials disabled"
+                    )),
+                    Err(error) => serial::write_line(format_args!(
+                        "[TPM] durable policy-session context rejected: {error:?}; hardware credentials disabled"
+                    )),
+                    Ok(mut snapshot) => match tpm2::load_policy_session(info, &mut snapshot) {
+                        Err(error) => serial::write_line(format_args!(
+                            "[TPM] policy-session ContextLoad rejected: {error:?}; hardware credentials disabled"
+                        )),
+                        Ok(mut lease) => match tpm2::flush_policy_session(info, &mut lease) {
+                            Ok(()) => serial::write_line(format_args!(
+                                "[TPM] durable policy-session context recovered and flushed; authority remains disabled"
+                            )),
+                            Err(error) => serial::write_line(format_args!(
+                                "[TPM] recovered policy-session cleanup failed: {error:?}; hardware credentials disabled"
+                            )),
+                        },
+                    },
+                },
+            },
+        }
+        }
+
+        // Stage 20.15: the WovenShell desktop is the session; F12 shows this
+        // diagnostic console instead.
+        //
+        // `session::start` only reports whether the process was spawned, not
+        // whether it ever reaches `compositor::activate_display()` -- a
+        // crash or a hang right after spawn looks identical to "running
+        // behind the compositor" from here. So this also waits, briefly and
+        // boundedly, for `session::active()` to confirm the desktop actually
+        // took the screen (or for the process to have already died trying),
+        // and keeps the outcome in `session_ready`/`session_status`. The
+        // diagnostic-shell fallback below is only ever shown when
+        // `!session_ready`: showing it unconditionally, as before, meant its
+        // `console.clear()` silently overwrote a successfully-started
+        // desktop's frame on any boot slow enough for the race to go the
+        // other way, which real hardware (unlike QEMU) apparently is.
+        #[cfg(feature = "system-apps")]
+        let session_status;
+        #[cfg(not(feature = "system-apps"))]
+        let session_status = alloc::string::String::new();
+        #[cfg(feature = "system-apps")]
+        let mut session_ready = false;
+        #[cfg(not(feature = "system-apps"))]
+        let session_ready = false;
+        // A spawned session that is still alive owns display and input even
+        // if it has not presented within the bounded wait; /bin/sh and the
+        // kernel F1 desktop are only the fallback when it never started or
+        // already died.
+        #[cfg(feature = "system-apps")]
+        let mut desktop_session_started = false;
+        #[cfg(not(feature = "system-apps"))]
+        let desktop_session_started = false;
+        #[cfg(feature = "system-apps")]
+        {
+            boot_stage(
+                &mut console,
+                "BOOT LOADER [6/7]: starting WovenShell desktop",
+            );
+            let accounts = vfs::stat("/etc/wovenhat/accounts")
+                .is_ok()
+                .then_some("/etc/wovenhat/accounts");
+            session_status = match session::start(WOVEN_SHELL_IMAGE, accounts) {
                 Ok(pid) => {
-                    serial::write_line(format_args!("[SESSION] WovenShell desktop started as pid {}", pid));
-                    true
+                    serial::write_line(format_args!(
+                        "[SESSION] WovenShell desktop started as pid {}",
+                        pid
+                    ));
+                    // Up to ~5s (100 Hz ticks), the same bounded-wait pattern
+                    // as the stage self-tests' local `until` helpers: no
+                    // assumption that this boot thread can sleep, only that
+                    // it can yield.
+                    const WAIT_TICKS: u64 = 500;
+                    let start = timer::ticks();
+                    loop {
+                        if session::active().is_some() {
+                            session_ready = true;
+                            break;
+                        }
+                        if !task::process_alive(pid) {
+                            break;
+                        }
+                        if timer::ticks().wrapping_sub(start) > WAIT_TICKS {
+                            break;
+                        }
+                        task::yield_now();
+                    }
+                    desktop_session_started = session_ready || task::process_alive(pid);
+                    if session_ready {
+                        console.println("DESKTOP SESSION: STARTED (F12 SWITCHES TO THIS CONSOLE)");
+                        boot_stage(&mut console, "BOOT LOADER [7/7]: desktop ready");
+                        alloc::format!("SESSION: started as pid {pid} (F12 shows the desktop)")
+                    } else if !task::process_alive(pid) {
+                        serial::write_line(format_args!(
+                            "[SESSION] pid {} exited before taking the display",
+                            pid
+                        ));
+                        alloc::format!("SESSION: pid {pid} exited before the desktop appeared")
+                    } else {
+                        serial::write_line(format_args!(
+                            "[SESSION] pid {} has not taken the display after {}ms",
+                            pid,
+                            WAIT_TICKS * 10
+                        ));
+                        alloc::format!(
+                            "SESSION: pid {pid} has not shown the desktop yet (still running)"
+                        )
+                    }
                 }
                 Err(error) => {
                     serial::write_line(format_args!("[SESSION] desktop not started: {:?}", error));
-                    false
+                    alloc::format!("SESSION: NOT STARTED ({error:?})")
                 }
-            }
-        };
-        #[cfg(not(feature = "system-apps"))]
-        let desktop_session_started = false;
+            };
+        }
 
         if desktop_session_started {
             serial::write_line(format_args!("[BOOT] desktop-first runtime ready"));
@@ -1582,11 +1952,20 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         let mut shell = Shell::new();
         let mut desktop_active = false;
 
-        // Only the text-mode fallback shows the diagnostic shell at boot.
-        // On graphical boots F12 switches to it through WovenInput.
-        if !desktop_session_started {
+        // This placeholder desktop and the diagnostic-shell banner below are
+        // a developer-only fallback for when WovenShell did not take the
+        // screen itself (`!session_ready`): a real user who gets this far
+        // never asked for an ACTIVATE/SECOND test window, so it is never
+        // shown once the desktop session is confirmed up. F12 still reaches
+        // the kernel's own diagnostic console either way (`woven_input`
+        // dispatches it to `session::toggle_console()` ahead of this loop).
+        if !session_ready {
+            console.println("");
             console.clear();
             console.println("WOVENHAT DIAGNOSTIC SHELL (F1 TO OPEN DESKTOP)");
+            if !session_status.is_empty() {
+                console.println(&session_status);
+            }
             shell.print_prompt(&mut console);
         }
 
@@ -1624,7 +2003,13 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
             // userspace read(0, ...) syscall and make the shell appear hung.
             if !userspace_foreground && !desktop_presenting {
                 if let Some(key) = keyboard::poll() {
-                    if matches!(key, keyboard::Key::F2 | keyboard::Key::F3 | keyboard::Key::F4 | keyboard::Key::F12) {
+                    if matches!(
+                        key,
+                        keyboard::Key::F2
+                            | keyboard::Key::F3
+                            | keyboard::Key::F4
+                            | keyboard::Key::F12
+                    ) {
                         // F2-F4 have no use in the kernel's own desktop.
                     } else if matches!(key, keyboard::Key::F1) && !desktop_session_started {
                         desktop_active = !desktop_active;
@@ -2577,7 +2962,20 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     // against it would fail on a disk it was never given. Every other
     // configuration, including the storage gate that owns this assertion, still
     // runs it unchanged.
-    #[cfg(not(feature = "stage15-2-test"))]
+    #[cfg(all(
+        not(feature = "stage15-2-test"),
+        not(feature = "stage21-6-test"),
+        not(feature = "stage21-7-test"),
+        not(feature = "stage21-8-test"),
+        not(feature = "stage21-9-test"),
+        not(feature = "stage21-10-test"),
+        not(feature = "stage21-11-test"),
+        not(feature = "stage22-1-test"),
+        not(feature = "stage22-2-test"),
+        not(feature = "stage22-3-test"),
+        not(feature = "stage22-5-test"),
+        not(feature = "stage24-3-test")
+    ))]
     match storage::live_mutation_self_test() {
         storage::LiveMutationTestStatus::Passed => {
             serial::write_line(format_args!(
@@ -3272,7 +3670,10 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
             qemu_test_exit_failure();
         };
         let loaded_entry = program.image.entry;
-        serial::write_line(format_args!("[S11.PLACEMENT] candidate=0x30000 entry={:#x} expected={:#x}", loaded_entry, expected_entry));
+        serial::write_line(format_args!(
+            "[S11.PLACEMENT] candidate=0x30000 entry={:#x} expected={:#x}",
+            loaded_entry, expected_entry
+        ));
         let Ok((pid, _)) = task::spawn_user_process("exit-status-fixture", program) else {
             serial::write_line(format_args!("[S11.STATUS] fixture spawn: FAILED"));
             qemu_test_exit_failure();
@@ -3287,16 +3688,28 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
                 }
             }
         };
-        if exit != 0 || loaded_entry != expected_entry || memory::stats().allocated_frames != frames
-            || task::process_count() != processes || ipc::endpoint_count() != endpoints
+        if exit != 0
+            || loaded_entry != expected_entry
+            || memory::stats().allocated_frames != frames
+            || task::process_count() != processes
+            || ipc::endpoint_count() != endpoints
             || thread::reap_owner(pid.as_u64()) != 0
         {
-            serial::write_line(format_args!("[S11.STATUS] fixture exit={} frames={}/{} processes={}/{} endpoints={}/{}: FAILED",
-                exit, memory::stats().allocated_frames, frames, task::process_count(), processes,
-                ipc::endpoint_count(), endpoints));
+            serial::write_line(format_args!(
+                "[S11.STATUS] fixture exit={} frames={}/{} processes={}/{} endpoints={}/{}: FAILED",
+                exit,
+                memory::stats().allocated_frames,
+                frames,
+                task::process_count(),
+                processes,
+                ipc::endpoint_count(),
+                endpoints
+            ));
             qemu_test_exit_failure();
         }
-        serial::write_line(format_args!("[S11.PLACEMENT] fixed ET_EXEC at nonzero ASLR candidate: PASSED"));
+        serial::write_line(format_args!(
+            "[S11.PLACEMENT] fixed ET_EXEC at nonzero ASLR candidate: PASSED"
+        ));
         let Some(pie) = userspace::load_pie_placement_probe() else {
             serial::write_line(format_args!("[S11.PLACEMENT] PIE preparation: FAILED"));
             qemu_test_exit_failure();
@@ -3319,14 +3732,22 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
                 }
             }
         };
-        if status != 37 || memory::stats().allocated_frames != frames
-            || task::process_count() != processes || ipc::endpoint_count() != endpoints
+        if status != 37
+            || memory::stats().allocated_frames != frames
+            || task::process_count() != processes
+            || ipc::endpoint_count() != endpoints
         {
-            serial::write_line(format_args!("[S11.PLACEMENT] PIE execution/teardown: FAILED"));
+            serial::write_line(format_args!(
+                "[S11.PLACEMENT] PIE execution/teardown: FAILED"
+            ));
             qemu_test_exit_failure();
         }
-        serial::write_line(format_args!("[S11.PLACEMENT] PIE executes with nonzero ASLR: PASSED"));
-        serial::write_line(format_args!("[S11.STATUS] libwoven signed exit status/ownership/teardown: PASSED"));
+        serial::write_line(format_args!(
+            "[S11.PLACEMENT] PIE executes with nonzero ASLR: PASSED"
+        ));
+        serial::write_line(format_args!(
+            "[S11.STATUS] libwoven signed exit status/ownership/teardown: PASSED"
+        ));
     }
     #[cfg(feature = "stage11-2-test")]
     {
@@ -3667,10 +4088,14 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     #[cfg(feature = "stage13-19-test")]
     {
         if !livelog::self_test() {
-            serial::write_line(format_args!("[S13.19] live-test log on the USB stick: FAILED"));
+            serial::write_line(format_args!(
+                "[S13.19] live-test log on the USB stick: FAILED"
+            ));
             qemu_test_exit_failure();
         }
-        serial::write_line(format_args!("[S13.19] live-test log on the USB stick: PASSED"));
+        serial::write_line(format_args!(
+            "[S13.19] live-test log on the USB stick: PASSED"
+        ));
         qemu_test_exit_success();
     }
     #[cfg(feature = "stage13-18-test")]
@@ -3782,6 +4207,15 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
             qemu_test_exit_failure();
         }
         serial::write_line(format_args!("[S20.14] two monitors: PASSED"));
+        qemu_test_exit_success();
+    }
+    #[cfg(feature = "stage24-59-test")]
+    {
+        if !stage24_59_change_pin_self_test() {
+            serial::write_line(format_args!("[S24.59] Change-PIN flow: FAILED"));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!("[S24.59] Change-PIN flow: PASSED"));
         qemu_test_exit_success();
     }
     #[cfg(feature = "stage20-13-test")]
@@ -4017,6 +4451,78 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         serial::write_line(format_args!("[S19.3] compositor presentation: PASSED"));
         qemu_test_exit_success();
     }
+    #[cfg(feature = "stage20-16-test")]
+    {
+        if !stage20_16_self_test() {
+            serial::write_line(format_args!("[S20.16] textured 3D chrome demo: FAILED"));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!("[S20.16] textured 3D chrome demo: PASSED"));
+        qemu_test_exit_success();
+    }
+    #[cfg(feature = "stage20-17-test")]
+    {
+        if !stage20_17_self_test() {
+            serial::write_line(format_args!("[S20.17] 3D desktop Quick Settings: FAILED"));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!("[S20.17] 3D desktop Quick Settings: PASSED"));
+        qemu_test_exit_success();
+    }
+    #[cfg(feature = "stage20-18-test")]
+    {
+        if !stage20_18_self_test() {
+            serial::write_line(format_args!("[S20.18] 3D desktop title bars: FAILED"));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!("[S20.18] 3D desktop title bars: PASSED"));
+        qemu_test_exit_success();
+    }
+    #[cfg(feature = "stage30-1-test")]
+    {
+        if !stage30_1_self_test() {
+            serial::write_line(format_args!("[S30.1] syscall benchmark: FAILED"));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!("[S30.1] syscall benchmark: PASSED"));
+        qemu_test_exit_success();
+    }
+    #[cfg(feature = "stage30-2-test")]
+    {
+        if !stage30_2_self_test() {
+            serial::write_line(format_args!("[S30.2] ipc benchmark: FAILED"));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!("[S30.2] ipc benchmark: PASSED"));
+        qemu_test_exit_success();
+    }
+    #[cfg(feature = "stage30-3-test")]
+    {
+        if !stage30_3_self_test() {
+            serial::write_line(format_args!("[S30.3] fs benchmark: FAILED"));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!("[S30.3] fs benchmark: PASSED"));
+        qemu_test_exit_success();
+    }
+    #[cfg(feature = "stage30-4-test")]
+    {
+        if !stage30_4_self_test() {
+            serial::write_line(format_args!("[S30.4] compositor benchmark: FAILED"));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!("[S30.4] compositor benchmark: PASSED"));
+        qemu_test_exit_success();
+    }
+    #[cfg(feature = "stage30-5-test")]
+    {
+        if !stage30_5_self_test() {
+            serial::write_line(format_args!("[S30.5] scheduler benchmark: FAILED"));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!("[S30.5] scheduler benchmark: PASSED"));
+        qemu_test_exit_success();
+    }
     #[cfg(feature = "stage19-2-test")]
     {
         if !stage19_2_self_test() {
@@ -4082,7 +4588,21 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         }
         qemu_test_exit_success();
     }
-    #[cfg(feature = "stage15-2-test")]
+    #[cfg(all(
+        feature = "stage15-2-test",
+        not(feature = "stage27-2-test"),
+        not(feature = "stage21-6-test"),
+        not(feature = "stage21-7-test"),
+        not(feature = "stage21-8-test"),
+        not(feature = "stage21-9-test"),
+        not(feature = "stage21-10-test"),
+        not(feature = "stage21-11-test"),
+        not(feature = "stage22-1-test"),
+        not(feature = "stage22-2-test"),
+        not(feature = "stage22-3-test"),
+        not(feature = "stage22-5-test"),
+        not(feature = "stage27-5-test")
+    ))]
     {
         if !wfs::stage15_2_self_test() {
             serial::write_line(format_args!("[S15.2] WovenFS physical device: FAILED"));
@@ -4154,6 +4674,288 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         serial::write_line(format_args!("[S15.9] exploit mitigations: PASSED"));
         qemu_test_exit_success();
     }
+    #[cfg(feature = "stage27-1-test")]
+    {
+        if !update::self_test() {
+            serial::write_line(format_args!("[S27.1] update A/B rollback: FAILED"));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!("[S27.1] update A/B rollback: PASSED"));
+        qemu_test_exit_success();
+    }
+    #[cfg(feature = "stage21-1-test")]
+    {
+        if !package::self_test() {
+            serial::write_line(format_args!("[S21.1] WovenPackages parser: FAILED"));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!("[S21.1] WovenPackages parser: PASSED"));
+        qemu_test_exit_success();
+    }
+
+    #[cfg(feature = "stage21-2-test")]
+    {
+        if !package::verification_self_test() {
+            serial::write_line(format_args!("[S21.2] WovenPackages signature: FAILED"));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!("[S21.2] WovenPackages signature: PASSED"));
+        qemu_test_exit_success();
+    }
+
+    #[cfg(feature = "stage21-3-test")]
+    {
+        if !package::store_self_test() {
+            serial::write_line(format_args!("[S21.3] WovenStore transaction: FAILED"));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!("[S21.3] WovenStore transaction: PASSED"));
+        qemu_test_exit_success();
+    }
+
+    #[cfg(feature = "stage21-4-test")]
+    {
+        if !package::batch_self_test() {
+            serial::write_line(format_args!("[S21.4] WovenStore batch: FAILED"));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!("[S21.4] WovenStore batch: PASSED"));
+        qemu_test_exit_success();
+    }
+
+    #[cfg(feature = "stage21-5-test")]
+    {
+        if !package::record_self_test() {
+            serial::write_line(format_args!("[S21.5] WovenStore record: FAILED"));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!("[S21.5] WovenStore record: PASSED"));
+        qemu_test_exit_success();
+    }
+    #[cfg(feature = "stage21-6-test")]
+    {
+        if !package::durable_self_test() {
+            serial::write_line(format_args!("[S21.6] WovenStore persistence: FAILED"));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!("[S21.6] WovenStore persistence: PASSED"));
+        qemu_test_exit_success();
+    }
+    #[cfg(feature = "stage21-7-test")]
+    {
+        if !package_service::self_test() {
+            serial::write_line(format_args!("[S21.7] WovenPackage install: FAILED"));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!("[S21.7] WovenPackage install: PASSED"));
+        qemu_test_exit_success();
+    }
+    #[cfg(feature = "stage21-8-test")]
+    {
+        if !package_service::recovery_self_test() {
+            serial::write_line(format_args!("[S21.8] WovenPackage recovery: FAILED"));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!("[S21.8] WovenPackage recovery: PASSED"));
+        qemu_test_exit_success();
+    }
+    #[cfg(feature = "stage21-9-test")]
+    {
+        if !package_service::update_remove_self_test() {
+            serial::write_line(format_args!("[S21.9] WovenPackage update/remove: FAILED"));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!("[S21.9] WovenPackage update/remove: PASSED"));
+        qemu_test_exit_success();
+    }
+    #[cfg(feature = "stage21-10-test")]
+    {
+        if !package_service::rollback_self_test() {
+            serial::write_line(format_args!("[S21.10] WovenPackage rollback: FAILED"));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!("[S21.10] WovenPackage rollback: PASSED"));
+        qemu_test_exit_success();
+    }
+    #[cfg(feature = "stage21-11-test")]
+    {
+        if !package_service::sandbox_self_test() {
+            serial::write_line(format_args!("[S21.11] WovenPackage sandbox: FAILED"));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!("[S21.11] WovenPackage sandbox: PASSED"));
+        qemu_test_exit_success();
+    }
+    #[cfg(feature = "stage22-1-test")]
+    {
+        if !ipc::stage8_6_runtime_probe() {
+            serial::write_line(format_args!("[S22.1] service IPC ABI: FAILED"));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!("[S22.1] service IPC ABI: PASSED"));
+        qemu_test_exit_success();
+    }
+    #[cfg(feature = "stage22-2-test")]
+    {
+        if !ipc::stage8_2_runtime_probe() {
+            serial::write_line(format_args!("[S22.2] handle IPC ABI: FAILED"));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!("[S22.2] handle IPC ABI: PASSED"));
+        qemu_test_exit_success();
+    }
+    #[cfg(all(feature = "stage22-3-test", not(feature = "stage27-5-test")))]
+    {
+        if !stage22_3_package_service_self_test() {
+            serial::write_line(format_args!("[S22.3] WovenPackage broker: FAILED"));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!("[S22.3] WovenPackage broker: PASSED"));
+        qemu_test_exit_success();
+    }
+    #[cfg(feature = "stage22-5-test")]
+    {
+        if !stage22_5_package_transaction_self_test() {
+            serial::write_line(format_args!("[S22.5] WovenPackage transactions: FAILED"));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!("[S22.5] WovenPackage transactions: PASSED"));
+        qemu_test_exit_success();
+    }
+    #[cfg(feature = "stage23-1-test")]
+    {
+        if !stage23_ai_broker_self_test(false) {
+            serial::write_line(format_args!("[S23.1] WovenAI broker: FAILED"));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!("[S23.1] WovenAI broker: PASSED"));
+        qemu_test_exit_success();
+    }
+    #[cfg(feature = "stage23-2-test")]
+    {
+        if !stage23_ai_broker_self_test(true) {
+            serial::write_line(format_args!("[S23.2] WovenAI local provider: FAILED"));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!("[S23.2] WovenAI local provider: PASSED"));
+        qemu_test_exit_success();
+    }
+    #[cfg(feature = "stage23-3-test")]
+    {
+        if !stage23_cloud_provider_self_test() {
+            serial::write_line(format_args!("[S23.3] WovenAI cloud provider: FAILED"));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!("[S23.3] WovenAI cloud provider: PASSED"));
+        qemu_test_exit_success();
+    }
+    #[cfg(feature = "stage23-4-test")]
+    {
+        if !stage23_ai_capability_security_self_test() {
+            serial::write_line(format_args!("[S23.4] WovenAI capability security: FAILED"));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!("[S23.4] WovenAI capability security: PASSED"));
+        qemu_test_exit_success();
+    }
+    #[cfg(feature = "stage23-5-test")]
+    {
+        if !stage23_semantic_search_self_test() {
+            serial::write_line(format_args!("[S23.5] WovenAI semantic search: FAILED"));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!("[S23.5] WovenAI semantic search: PASSED"));
+        qemu_test_exit_success();
+    }
+    #[cfg(feature = "stage23-6-test")]
+    {
+        if !stage23_assistant_action_self_test() {
+            serial::write_line(format_args!("[S23.6] WovenAssistant actions: FAILED"));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!("[S23.6] WovenAssistant actions: PASSED"));
+        qemu_test_exit_success();
+    }
+    #[cfg(feature = "stage23-7-test")]
+    {
+        if !stage23_security_monitor_self_test() {
+            serial::write_line(format_args!("[S23.7] WovenAI security monitor: FAILED"));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!("[S23.7] WovenAI security monitor: PASSED"));
+        qemu_test_exit_success();
+    }
+    #[cfg(feature = "stage24-1-test")]
+    {
+        if !stage24_identity_self_test() {
+            serial::write_line(format_args!("[S24.1] WovenIdentity core: FAILED"));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!("[S24.1] WovenIdentity core: PASSED"));
+        qemu_test_exit_success();
+    }
+    #[cfg(feature = "stage24-2-test")]
+    {
+        if !stage24_identity_snapshot_self_test() {
+            serial::write_line(format_args!("[S24.2] WovenIdentity snapshot: FAILED"));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!("[S24.2] WovenIdentity snapshot: PASSED"));
+        qemu_test_exit_success();
+    }
+    #[cfg(feature = "stage24-3-test")]
+    {
+        if !identity_storage::durable_self_test() {
+            serial::write_line(format_args!(
+                "[S24.3] WovenIdentity durable storage: FAILED"
+            ));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!(
+            "[S24.3] WovenIdentity durable storage: PASSED"
+        ));
+        qemu_test_exit_success();
+    }
+    #[cfg(feature = "stage24-4-test")]
+    {
+        if !identity_runtime::self_test() {
+            serial::write_line(format_args!("[S24.4] WovenIdentity task binding: FAILED"));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!("[S24.4] WovenIdentity task binding: PASSED"));
+        qemu_test_exit_success();
+    }
+    #[cfg(feature = "stage24-5-test")]
+    {
+        if !stage24_identity_syscall_frame_self_test() {
+            serial::write_line(format_args!("[S24.5] WovenIdentity syscall ABI: FAILED"));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!("[S24.5] WovenIdentity syscall ABI: PASSED"));
+        qemu_test_exit_success();
+    }
+    #[cfg(feature = "stage27-2-test")]
+    {
+        if !update::durable_self_test() {
+            serial::write_line(format_args!("[S27.2] durable update records: FAILED"));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!("[S27.2] durable update records: PASSED"));
+        qemu_test_exit_success();
+    }
+    #[cfg(feature = "stage27-5-test")]
+    {
+        if !update_service::self_test() {
+            serial::write_line(format_args!("[S27.5] update service: FAILED"));
+            qemu_test_exit_failure();
+        }
+        if !update_service::service_ipc_self_test(SYSTEM_APP_UPDATE) {
+            serial::write_line(format_args!("[S27.5] update service IPC: FAILED"));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!("[S27.5] update service: PASSED"));
+        qemu_test_exit_success();
+    }
     #[cfg(feature = "stage15-1-test")]
     {
         if !wfs::stage15_1_self_test() {
@@ -4205,13 +5007,7 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         qemu_test_exit_success();
     }
     #[cfg(feature = "stage11-compiler-test")]
-    {
-        if !userspace::compiler_loader_self_test() {
-            serial::write_line(format_args!("[S11.COMPILER] signed toolchain PIE: FAILED"));
-            qemu_test_exit_failure();
-        }
-        serial::write_line(format_args!("[S11.COMPILER] signed toolchain PIE: PASSED"));
-    }
+    run_compiler_loader_gate();
     #[cfg(feature = "stage11-5-test")]
     {
         if !userspace::elf_loader_self_test() || !userspace::shared_library_self_test() {
@@ -4927,6 +5723,86 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         ));
     }
     smp::self_test();
+    #[cfg(feature = "stage25-7-test")]
+    {
+        if !power::wake_trampoline_self_test() {
+            serial::write_line(format_args!("[S25.7] wake trampoline staging: FAILED"));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!("[S25.7] wake trampoline staging: PASSED"));
+        qemu_test_exit_success();
+    }
+    #[cfg(feature = "stage25-8-test")]
+    {
+        if !power::resume_context_self_test() {
+            serial::write_line(format_args!("[S25.8] CPU resume context: FAILED"));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!("[S25.8] CPU resume context: PASSED"));
+        qemu_test_exit_success();
+    }
+    #[cfg(feature = "stage25-9-test")]
+    {
+        if !hal::acpi::facs_wake_vector_self_test() {
+            serial::write_line(format_args!("[S25.9] FACS wake vector transaction: FAILED"));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!("[S25.9] FACS wake vector transaction: PASSED"));
+        qemu_test_exit_success();
+    }
+    #[cfg(feature = "stage25-10-test")]
+    {
+        if !smp::cpu_suspend_barrier_self_test() {
+            serial::write_line(format_args!("[S25.10] secondary CPU barrier: FAILED"));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!("[S25.10] secondary CPU barrier: PASSED"));
+        qemu_test_exit_success();
+    }
+    #[cfg(feature = "stage25-11-test")]
+    {
+        if !power::s3_control_self_test() {
+            serial::write_line(format_args!("[S25.11] PM1 S3 request encoding: FAILED"));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!("[S25.11] PM1 S3 request encoding: PASSED"));
+        qemu_test_exit_success();
+    }
+    #[cfg(feature = "stage25-12-test")]
+    {
+        if !power::resume_context_restore_self_test() {
+            serial::write_line(format_args!("[S25.12] CPU context restore: FAILED"));
+            qemu_test_exit_failure();
+        }
+        qemu_test_exit_failure();
+    }
+    #[cfg(feature = "stage25-13-test")]
+    {
+        if !power::wake_record_self_test() {
+            serial::write_line(format_args!("[S25.13] wake record integration: FAILED"));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!("[S25.13] wake record integration: PASSED"));
+        qemu_test_exit_success();
+    }
+    #[cfg(feature = "stage25-14-test")]
+    {
+        if !power::suspend_admission_self_test() {
+            serial::write_line(format_args!("[S25.14] suspend admission: FAILED"));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!("[S25.14] suspend admission: PASSED"));
+        qemu_test_exit_success();
+    }
+    #[cfg(feature = "stage25-15-test")]
+    {
+        if !power::suspend_resume_target_self_test() {
+            serial::write_line(format_args!("[S25.15] userspace resume target: FAILED"));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!("[S25.15] userspace resume target: PASSED"));
+        qemu_test_exit_success();
+    }
     serial::write_line(format_args!("[BOOT] ALL VALIDATIONS PASSED"));
     #[cfg(feature = "qemu-test")]
     qemu_test_exit_success();
@@ -4934,6 +5810,16 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     loop {
         x86_64::instructions::hlt();
     }
+}
+
+#[cfg(feature = "stage11-compiler-test")]
+#[inline(never)]
+fn run_compiler_loader_gate() {
+    if !userspace::compiler_loader_self_test() {
+        serial::write_line(format_args!("[S11.COMPILER] signed toolchain PIE: FAILED"));
+        qemu_test_exit_failure();
+    }
+    serial::write_line(format_args!("[S11.COMPILER] signed toolchain PIE: PASSED"));
 }
 
 #[cfg(feature = "qemu-test")]
@@ -5030,10 +5916,1039 @@ const SYSTEM_APP_SECURITY: &[u8] = include_bytes!(env!("WOVENHAT_SECURITY_IMAGE"
 const SYSTEM_APP_EDITOR: &[u8] = include_bytes!(env!("WOVENHAT_EDITOR_IMAGE"));
 #[cfg(any(feature = "stage19-app-catalog-test", feature = "system-apps"))]
 const SYSTEM_APP_IMAGES: &[u8] = include_bytes!(env!("WOVENHAT_IMAGES_IMAGE"));
-#[cfg(any(feature = "stage19-app-catalog-test", feature = "system-apps"))]
+#[cfg(any(
+    feature = "stage19-app-catalog-test",
+    feature = "stage27-5-test",
+    feature = "system-apps"
+))]
 const SYSTEM_APP_UPDATE: &[u8] = include_bytes!(env!("WOVENHAT_UPDATE_IMAGE"));
 #[cfg(any(feature = "stage19-app-catalog-test", feature = "system-apps"))]
 const SYSTEM_APP_STORE: &[u8] = include_bytes!(env!("WOVENHAT_STORE_IMAGE"));
+
+#[cfg(any(
+    all(feature = "stage22-3-test", not(feature = "stage27-5-test")),
+    feature = "stage22-5-test",
+    feature = "system-apps"
+))]
+const PACKAGE_SERVICE_IMAGE: &[u8] = include_bytes!(env!("WOVENHAT_PACKAGE_IMAGE"));
+
+#[cfg(feature = "stage22-5-test")]
+const PACKAGE_TRANSACTION_FIXTURE: &[u8] = include_bytes!(env!("WOVENHAT_PACKAGE_FIXTURE"));
+
+#[cfg(any(
+    feature = "stage23-1-test",
+    feature = "stage23-2-test",
+    feature = "stage23-3-test"
+))]
+const AI_SERVICE_IMAGE: &[u8] = include_bytes!(env!("WOVENHAT_AI_IMAGE"));
+#[cfg(any(
+    feature = "stage23-1-test",
+    feature = "stage23-2-test",
+    feature = "stage23-3-test"
+))]
+const AI_PROBE_IMAGE: &[u8] = include_bytes!(env!("WOVENHAT_AI_PROBE_IMAGE"));
+
+#[cfg(all(feature = "stage22-3-test", not(feature = "stage27-5-test")))]
+fn stage22_3_package_service_self_test() -> bool {
+    use libwoven::package_ipc::{Operation, Request, Response};
+
+    fn fail(reason: &str) -> bool {
+        serial::write_line(format_args!("[S22.3] {}", reason));
+        false
+    }
+
+    let Ok(verified) = signed_app::verify_package(PACKAGE_SERVICE_IMAGE) else {
+        return fail("broker signature rejected");
+    };
+    if elf::parse(verified.bytes()).is_err() {
+        return fail("broker ELF rejected");
+    }
+    let Some(program) = userspace::load_elf_with_argv_verified(
+        PACKAGE_SERVICE_IMAGE,
+        &["/bin/woven-package", "--service"],
+    ) else {
+        return fail("broker loader rejected");
+    };
+    let capabilities = capability::CapabilitySet::only(capability::Capability::Ipc)
+        .with(capability::Capability::FileRead);
+    if vfs::write_file("/tmp/vfs-self-test", b"package-query-fixture").is_err() {
+        return fail("query fixture storage write failed");
+    }
+    let Ok((pid, _, _)) = task::spawn_user_system_service("woven-package", program, capabilities)
+    else {
+        return fail("broker spawn failed");
+    };
+    let deadline = timer::ticks().wrapping_add(500);
+    let published = loop {
+        if let Ok(info) = ipc::service_info(b"woven.package") {
+            if info.owner == pid.as_u64() && info.client_rights == 1 {
+                break true;
+            }
+        }
+        if timer::ticks().wrapping_sub(deadline) < u64::MAX / 2 {
+            break false;
+        }
+        task::yield_now();
+    };
+    if !published {
+        let _ = task::kill_process(pid.as_u64(), 9);
+        return fail("broker service was not published");
+    }
+    let Ok(client_handle) = ipc::discover_service(pid.as_u64(), b"woven.package") else {
+        let _ = task::kill_process(pid.as_u64(), 9);
+        return fail("service discovery failed");
+    };
+    let request = Request {
+        operation: Operation::Query,
+        request_id: 0x22_03,
+        path: b"/tmp/vfs-self-test",
+    };
+    let mut bytes = [0u8; libwoven::package_ipc::MAX_MESSAGE_BYTES];
+    let Ok(length) = request.encode(&mut bytes) else {
+        let _ = task::kill_process(pid.as_u64(), 9);
+        return fail("request encoding failed");
+    };
+    if ipc::send_handle(pid.as_u64(), client_handle, &bytes[..length]).is_err() {
+        let _ = task::kill_process(pid.as_u64(), 9);
+        return fail("request send failed");
+    }
+    let deadline = timer::ticks().wrapping_add(500);
+    let mut response_ok = false;
+    loop {
+        if task::process_exited(pid) {
+            return fail("broker exited while handling request");
+        }
+        if let Ok((message, serial)) = ipc::peek(pid.as_u64()) {
+            if let Ok(response) = Response::decode(message.payload()) {
+                response_ok = response.request_id == request.request_id
+                    && response.status == 0
+                    && response.value == 1;
+            }
+            let _ = ipc::receive_if(pid.as_u64(), serial);
+            break;
+        }
+        if timer::ticks().wrapping_sub(deadline) < u64::MAX / 2 {
+            break;
+        }
+        task::yield_now();
+    }
+    let _ = task::kill_process(pid.as_u64(), 9);
+    let cleanup_deadline = timer::ticks().wrapping_add(500);
+    while !task::process_exited(pid) {
+        if timer::ticks().wrapping_sub(cleanup_deadline) < u64::MAX / 2 {
+            return fail("broker teardown timed out");
+        }
+        task::yield_now();
+    }
+    if task::wait_process(pid.as_u64()).is_err() {
+        return fail("broker reap failed");
+    }
+    if !response_ok {
+        return fail("broker response mismatch or timeout");
+    }
+    let service_deadline = timer::ticks().wrapping_add(500);
+    while ipc::service_info(b"woven.package").is_ok() {
+        if timer::ticks().wrapping_sub(service_deadline) < u64::MAX / 2 {
+            return fail("broker service cleanup timed out");
+        }
+        task::yield_now();
+    }
+    true
+}
+
+#[cfg(feature = "stage22-5-test")]
+fn stage22_5_package_transaction_self_test() -> bool {
+    use libwoven::package_ipc::{Operation, Request, Response};
+
+    fn fail(reason: &str) -> bool {
+        serial::write_line(format_args!("[S22.5] {}", reason));
+        false
+    }
+
+    fn request(
+        pid: task::ProcessId,
+        handle: ipc::Handle,
+        operation: Operation,
+        request_id: u64,
+        path: &'static [u8],
+    ) -> Option<Response> {
+        let request = Request {
+            operation,
+            request_id,
+            path,
+        };
+        let mut bytes = crate::heap::try_filled(0u8, libwoven::package_ipc::MAX_MESSAGE_BYTES)?;
+        let length = request.encode(&mut bytes).ok()?;
+        ipc::send_handle(pid.as_u64(), handle, &bytes[..length]).ok()?;
+        let deadline = timer::ticks().wrapping_add(500);
+        loop {
+            if task::process_exited(pid) {
+                return None;
+            }
+            if let Ok((message, serial)) = ipc::peek(pid.as_u64()) {
+                let response = Response::decode(message.payload()).ok();
+                let _ = ipc::receive_if(pid.as_u64(), serial);
+                return response;
+            }
+            if timer::ticks().wrapping_sub(deadline) < u64::MAX / 2 {
+                return None;
+            }
+            task::yield_now();
+        }
+    }
+
+    if !wfs::format_ata(64) {
+        return fail("native WovenFS format failed");
+    }
+    if vfs::write_file(
+        "/tmp/woven-package-fixture.wpkg",
+        PACKAGE_TRANSACTION_FIXTURE,
+    )
+    .is_err()
+    {
+        return fail("package fixture source write failed");
+    }
+    let Ok(verified) = signed_app::verify_package(PACKAGE_SERVICE_IMAGE) else {
+        return fail("broker signature rejected");
+    };
+    if elf::parse(verified.bytes()).is_err() {
+        return fail("broker ELF rejected");
+    }
+    let Some(program) = userspace::load_elf_with_argv_verified(
+        PACKAGE_SERVICE_IMAGE,
+        &["/bin/woven-package", "--service"],
+    ) else {
+        return fail("broker loader rejected");
+    };
+    let capabilities = capability::CapabilitySet::only(capability::Capability::Ipc)
+        .with(capability::Capability::FileRead)
+        .with(capability::Capability::FileWrite)
+        .with(capability::Capability::StorageIo);
+    let Ok((pid, _, _)) = task::spawn_user_system_service("woven-package", program, capabilities)
+    else {
+        return fail("broker spawn failed");
+    };
+    let deadline = timer::ticks().wrapping_add(500);
+    let published = loop {
+        if let Ok(info) = ipc::service_info(b"woven.package") {
+            if info.owner == pid.as_u64() && info.client_rights == 1 {
+                break true;
+            }
+        }
+        if timer::ticks().wrapping_sub(deadline) < u64::MAX / 2 {
+            break false;
+        }
+        task::yield_now();
+    };
+    if !published {
+        let _ = task::kill_process(pid.as_u64(), 9);
+        return fail("broker service was not published");
+    }
+    let Ok(client_handle) = ipc::discover_service(pid.as_u64(), b"woven.package") else {
+        let _ = task::kill_process(pid.as_u64(), 9);
+        return fail("service discovery failed");
+    };
+    let Some(response) = request(
+        pid,
+        client_handle,
+        Operation::Install,
+        0x22_05_01,
+        b"/tmp/woven-package-fixture.wpkg",
+    ) else {
+        let _ = task::kill_process(pid.as_u64(), 9);
+        return fail("install response timeout");
+    };
+    if response.status != 0 || response.value != 1 {
+        let _ = task::kill_process(pid.as_u64(), 9);
+        return fail("install response mismatch");
+    }
+    let Some(mut record) = crate::heap::try_filled(0u8, libwoven::store::MAX_RECORD_BYTES) else {
+        let _ = task::kill_process(pid.as_u64(), 9);
+        return fail("catalog buffer allocation failed");
+    };
+    let Ok(length) = wfs::read_vfs_path_durable("/wfs/packages/catalog.wstc", &mut record) else {
+        let _ = task::kill_process(pid.as_u64(), 9);
+        return fail("installed catalog read failed");
+    };
+    let Ok(installed) = libwoven::store::Store::decode_record(&record[..length]) else {
+        let _ = task::kill_process(pid.as_u64(), 9);
+        return fail("installed catalog decode failed");
+    };
+    if installed.entry(b"fixture").is_none() {
+        let _ = task::kill_process(pid.as_u64(), 9);
+        return fail("installed catalog entry missing");
+    }
+    let Some(response) = request(
+        pid,
+        client_handle,
+        Operation::Remove,
+        0x22_05_02,
+        b"/fixture",
+    ) else {
+        let _ = task::kill_process(pid.as_u64(), 9);
+        return fail("remove response timeout");
+    };
+    if response.status != 0 || response.value != 0 {
+        let _ = task::kill_process(pid.as_u64(), 9);
+        return fail("remove response mismatch");
+    }
+    let Ok(length) = wfs::read_vfs_path_durable("/wfs/packages/catalog.wstc", &mut record) else {
+        let _ = task::kill_process(pid.as_u64(), 9);
+        return fail("removed catalog read failed");
+    };
+    let Ok(removed) = libwoven::store::Store::decode_record(&record[..length]) else {
+        let _ = task::kill_process(pid.as_u64(), 9);
+        return fail("removed catalog decode failed");
+    };
+    if removed.entry(b"fixture").is_some() {
+        let _ = task::kill_process(pid.as_u64(), 9);
+        return fail("remove left catalog entry");
+    }
+    let Some(response) = request(
+        pid,
+        client_handle,
+        Operation::Rollback,
+        0x22_05_03,
+        b"/rollback",
+    ) else {
+        let _ = task::kill_process(pid.as_u64(), 9);
+        return fail("rollback response timeout");
+    };
+    if response.status != 0 || response.value != 1 {
+        let _ = task::kill_process(pid.as_u64(), 9);
+        return fail("rollback response mismatch");
+    }
+    let Ok(length) = wfs::read_vfs_path_durable("/wfs/packages/catalog.wstc", &mut record) else {
+        let _ = task::kill_process(pid.as_u64(), 9);
+        return fail("rollback catalog read failed");
+    };
+    let Ok(restored) = libwoven::store::Store::decode_record(&record[..length]) else {
+        let _ = task::kill_process(pid.as_u64(), 9);
+        return fail("rollback catalog decode failed");
+    };
+    if restored.entry(b"fixture").is_none() {
+        let _ = task::kill_process(pid.as_u64(), 9);
+        return fail("rollback did not restore catalog entry");
+    }
+    let _ = task::kill_process(pid.as_u64(), 9);
+    let cleanup_deadline = timer::ticks().wrapping_add(500);
+    while !task::process_exited(pid) {
+        if timer::ticks().wrapping_sub(cleanup_deadline) < u64::MAX / 2 {
+            return fail("broker teardown timed out");
+        }
+        task::yield_now();
+    }
+    if task::wait_process(pid.as_u64()).is_err() {
+        return fail("broker reap failed");
+    }
+    true
+}
+
+#[cfg(any(
+    feature = "stage23-1-test",
+    feature = "stage23-2-test",
+    feature = "stage23-3-test"
+))]
+fn stage23_ai_broker_self_test(local_provider: bool) -> bool {
+    fn fail(reason: &str) -> bool {
+        serial::write_line(format_args!("[S23] {}", reason));
+        false
+    }
+    let Ok(verified) = signed_app::verify_package(AI_SERVICE_IMAGE) else {
+        return fail("broker signature rejected");
+    };
+    if elf::parse(verified.bytes()).is_err() {
+        return fail("broker ELF rejected");
+    }
+    let service_args: &[&str] = if local_provider {
+        &["/bin/woven-ai", "--local"]
+    } else {
+        &["/bin/woven-ai"]
+    };
+    let Some(service_program) =
+        userspace::load_elf_with_argv_verified(AI_SERVICE_IMAGE, service_args)
+    else {
+        return fail("broker load failed");
+    };
+    let Ok((service_pid, _, _)) = task::spawn_user_system_service(
+        "woven-ai",
+        service_program,
+        capability::CapabilitySet::only(capability::Capability::Ipc),
+    ) else {
+        return fail("broker spawn failed");
+    };
+    let deadline = timer::ticks().wrapping_add(500);
+    loop {
+        if let Ok(info) = ipc::service_info(b"woven.ai") {
+            if info.owner == service_pid.as_u64() && info.client_rights == 1 {
+                break;
+            }
+        }
+        if task::process_exited(service_pid) || timer::ticks().wrapping_sub(deadline) < u64::MAX / 2
+        {
+            let _ = task::kill_process(service_pid.as_u64(), 9);
+            return fail("broker publication failed");
+        }
+        task::yield_now();
+    }
+    let Ok(verified) = signed_app::verify_package(AI_PROBE_IMAGE) else {
+        let _ = task::kill_process(service_pid.as_u64(), 9);
+        return fail("probe signature rejected");
+    };
+    if elf::parse(verified.bytes()).is_err() {
+        let _ = task::kill_process(service_pid.as_u64(), 9);
+        return fail("probe ELF rejected");
+    }
+    let denied_args: &[&str] = if local_provider {
+        &["/bin/woven-ai", "--probe-local"]
+    } else {
+        &["/bin/woven-ai", "--probe"]
+    };
+    let Some(denied_program) = userspace::load_elf_with_argv_verified(AI_PROBE_IMAGE, denied_args)
+    else {
+        let _ = task::kill_process(service_pid.as_u64(), 9);
+        return fail("denied probe load failed");
+    };
+    let Ok((denied_pid, _)) = task::spawn_user_process_with_package_capabilities(
+        "woven-ai-denied",
+        denied_program,
+        capability::CapabilitySet::only(capability::Capability::Ipc).bits(),
+    ) else {
+        let _ = task::kill_process(service_pid.as_u64(), 9);
+        return fail("denied probe spawn failed");
+    };
+    let denied_deadline = timer::ticks().wrapping_add(500);
+    while !task::process_exited(denied_pid) {
+        if timer::ticks().wrapping_sub(denied_deadline) < u64::MAX / 2 {
+            let _ = task::kill_process(denied_pid.as_u64(), 9);
+            let _ = task::kill_process(service_pid.as_u64(), 9);
+            return fail("denied probe timeout");
+        }
+        task::yield_now();
+    }
+    if task::wait_process(denied_pid.as_u64()) != Ok(112) {
+        let _ = task::kill_process(service_pid.as_u64(), 9);
+        return fail("Ai capability denial was not enforced");
+    }
+    let Some(probe_program) = userspace::load_elf_with_argv_verified(AI_PROBE_IMAGE, denied_args)
+    else {
+        let _ = task::kill_process(service_pid.as_u64(), 9);
+        return fail("probe load failed");
+    };
+    let Ok((probe_pid, _)) = task::spawn_user_process_with_package_capabilities(
+        "woven-ai-probe",
+        probe_program,
+        capability::CapabilitySet::only(capability::Capability::Ipc)
+            .with(capability::Capability::Ai)
+            .bits(),
+    ) else {
+        let _ = task::kill_process(service_pid.as_u64(), 9);
+        return fail("probe spawn failed");
+    };
+    let probe_deadline = timer::ticks().wrapping_add(500);
+    while !task::process_exited(probe_pid) {
+        if timer::ticks().wrapping_sub(probe_deadline) < u64::MAX / 2 {
+            let _ = task::kill_process(probe_pid.as_u64(), 9);
+            let _ = task::kill_process(service_pid.as_u64(), 9);
+            return fail("probe timeout");
+        }
+        task::yield_now();
+    }
+    let probe_status = task::wait_process(probe_pid.as_u64()).ok();
+    let _ = task::kill_process(service_pid.as_u64(), 9);
+    let service_deadline = timer::ticks().wrapping_add(500);
+    while !task::process_exited(service_pid) {
+        if timer::ticks().wrapping_sub(service_deadline) < u64::MAX / 2 {
+            return fail("broker teardown timeout");
+        }
+        task::yield_now();
+    }
+    if probe_status != Some(0) {
+        return fail("probe returned failure");
+    }
+    if task::wait_process(service_pid.as_u64()).is_err() {
+        return fail("broker reap failed");
+    }
+    true
+}
+
+#[cfg(feature = "stage23-3-test")]
+fn stage23_cloud_provider_self_test() -> bool {
+    use libwoven::ai_provider;
+
+    fn fail(reason: &str) -> bool {
+        serial::write_line(format_args!("[S23.3] {}", reason));
+        false
+    }
+    let Ok(verified) = signed_app::verify_package(AI_SERVICE_IMAGE) else {
+        return fail("provider signature rejected");
+    };
+    if elf::parse(verified.bytes()).is_err() {
+        return fail("provider ELF rejected");
+    }
+    let Some(provider_program) = userspace::load_elf_with_argv_verified(
+        AI_SERVICE_IMAGE,
+        &["/bin/woven-ai", "--cloud-plugin"],
+    ) else {
+        return fail("provider load failed");
+    };
+    let provider_capabilities = capability::CapabilitySet::only(capability::Capability::Ipc)
+        .with(capability::Capability::Secrets)
+        .with(capability::Capability::NetworkIo);
+    let Ok((provider_pid, _)) = task::spawn_user_process_with_package_capabilities(
+        "woven-ai-cloud-provider",
+        provider_program,
+        provider_capabilities.bits(),
+    ) else {
+        return fail("provider spawn failed");
+    };
+    let provider_deadline = timer::ticks().wrapping_add(500);
+    loop {
+        if let Ok(info) = ipc::service_info(ai_provider::SERVICE_NAME) {
+            if info.owner == provider_pid.as_u64() && info.client_rights == 1 {
+                break;
+            }
+        }
+        if task::process_exited(provider_pid)
+            || timer::ticks().wrapping_sub(provider_deadline) < u64::MAX / 2
+        {
+            let _ = task::kill_process(provider_pid.as_u64(), 9);
+            return fail("provider publication failed");
+        }
+        task::yield_now();
+    }
+    let Some(broker_program) =
+        userspace::load_elf_with_argv_verified(AI_SERVICE_IMAGE, &["/bin/woven-ai", "--cloud"])
+    else {
+        let _ = task::kill_process(provider_pid.as_u64(), 9);
+        return fail("cloud broker load failed");
+    };
+    let Ok((broker_pid, _, _)) = task::spawn_user_system_service(
+        "woven-ai-cloud-broker",
+        broker_program,
+        capability::CapabilitySet::only(capability::Capability::Ipc),
+    ) else {
+        let _ = task::kill_process(provider_pid.as_u64(), 9);
+        return fail("cloud broker spawn failed");
+    };
+    let broker_deadline = timer::ticks().wrapping_add(500);
+    loop {
+        if let Ok(info) = ipc::service_info(b"woven.ai") {
+            if info.owner == broker_pid.as_u64() && info.client_rights == 1 {
+                break;
+            }
+        }
+        if task::process_exited(broker_pid)
+            || timer::ticks().wrapping_sub(broker_deadline) < u64::MAX / 2
+        {
+            let _ = task::kill_process(broker_pid.as_u64(), 9);
+            let _ = task::kill_process(provider_pid.as_u64(), 9);
+            return fail("cloud broker publication failed");
+        }
+        task::yield_now();
+    }
+    let Ok(verified) = signed_app::verify_package(AI_PROBE_IMAGE) else {
+        let _ = task::kill_process(broker_pid.as_u64(), 9);
+        let _ = task::kill_process(provider_pid.as_u64(), 9);
+        return fail("cloud probe signature rejected");
+    };
+    if elf::parse(verified.bytes()).is_err() {
+        let _ = task::kill_process(broker_pid.as_u64(), 9);
+        let _ = task::kill_process(provider_pid.as_u64(), 9);
+        return fail("cloud probe ELF rejected");
+    }
+    let Some(denied_program) =
+        userspace::load_elf_with_argv_verified(AI_PROBE_IMAGE, &["/bin/woven-ai", "--probe-cloud"])
+    else {
+        let _ = task::kill_process(broker_pid.as_u64(), 9);
+        let _ = task::kill_process(provider_pid.as_u64(), 9);
+        return fail("denied cloud probe load failed");
+    };
+    let Ok((denied_pid, _)) = task::spawn_user_process_with_package_capabilities(
+        "woven-ai-cloud-denied",
+        denied_program,
+        capability::CapabilitySet::only(capability::Capability::Ipc).bits(),
+    ) else {
+        let _ = task::kill_process(broker_pid.as_u64(), 9);
+        let _ = task::kill_process(provider_pid.as_u64(), 9);
+        return fail("denied cloud probe spawn failed");
+    };
+    let denied_deadline = timer::ticks().wrapping_add(500);
+    while !task::process_exited(denied_pid) {
+        if timer::ticks().wrapping_sub(denied_deadline) < u64::MAX / 2 {
+            let _ = task::kill_process(denied_pid.as_u64(), 9);
+            let _ = task::kill_process(broker_pid.as_u64(), 9);
+            let _ = task::kill_process(provider_pid.as_u64(), 9);
+            return fail("denied cloud probe timeout");
+        }
+        task::yield_now();
+    }
+    if task::wait_process(denied_pid.as_u64()) != Ok(142) {
+        let _ = task::kill_process(broker_pid.as_u64(), 9);
+        let _ = task::kill_process(provider_pid.as_u64(), 9);
+        return fail("cloud Ai capability denial was not enforced");
+    }
+    let Some(probe_program) =
+        userspace::load_elf_with_argv_verified(AI_PROBE_IMAGE, &["/bin/woven-ai", "--probe-cloud"])
+    else {
+        let _ = task::kill_process(broker_pid.as_u64(), 9);
+        let _ = task::kill_process(provider_pid.as_u64(), 9);
+        return fail("cloud probe load failed");
+    };
+    let Ok((probe_pid, _)) = task::spawn_user_process_with_package_capabilities(
+        "woven-ai-cloud-probe",
+        probe_program,
+        capability::CapabilitySet::only(capability::Capability::Ipc)
+            .with(capability::Capability::Ai)
+            .bits(),
+    ) else {
+        let _ = task::kill_process(broker_pid.as_u64(), 9);
+        let _ = task::kill_process(provider_pid.as_u64(), 9);
+        return fail("cloud probe spawn failed");
+    };
+    let probe_deadline = timer::ticks().wrapping_add(500);
+    while !task::process_exited(probe_pid) {
+        if timer::ticks().wrapping_sub(probe_deadline) < u64::MAX / 2 {
+            let _ = task::kill_process(probe_pid.as_u64(), 9);
+            let _ = task::kill_process(broker_pid.as_u64(), 9);
+            let _ = task::kill_process(provider_pid.as_u64(), 9);
+            return fail("cloud probe timeout");
+        }
+        task::yield_now();
+    }
+    let status = task::wait_process(probe_pid.as_u64()).ok();
+    let _ = task::kill_process(broker_pid.as_u64(), 9);
+    let _ = task::kill_process(provider_pid.as_u64(), 9);
+    let cleanup_deadline = timer::ticks().wrapping_add(500);
+    while !task::process_exited(broker_pid) || !task::process_exited(provider_pid) {
+        if timer::ticks().wrapping_sub(cleanup_deadline) < u64::MAX / 2 {
+            return fail("cloud provider teardown timeout");
+        }
+        task::yield_now();
+    }
+    if status != Some(0) {
+        return fail("cloud probe returned failure");
+    }
+    if task::wait_process(broker_pid.as_u64()).is_err()
+        || task::wait_process(provider_pid.as_u64()).is_err()
+    {
+        return fail("cloud provider reap failed");
+    }
+    true
+}
+
+#[cfg(feature = "stage23-4-test")]
+fn stage23_ai_capability_security_self_test() -> bool {
+    use capability::{Capability, CapabilitySet};
+    use wovenguard::{
+        authorize_device_access, domain_ceiling, package_sandbox, DeviceClass, SecurityDomain,
+    };
+
+    fn fail(reason: &str) -> bool {
+        serial::write_line(format_args!("[S23.4] {}", reason));
+        false
+    }
+    let local = CapabilitySet::only(Capability::Ipc).with(Capability::Ai);
+    let Some(local_sandbox) = package_sandbox(local) else {
+        return fail("local AI profile rejected");
+    };
+    for capability in [
+        Capability::FileRead,
+        Capability::FileWrite,
+        Capability::NetworkIo,
+        Capability::Secrets,
+        Capability::Camera,
+        Capability::Microphone,
+        Capability::Usb,
+    ] {
+        if local.contains(capability) || local_sandbox.allows(capability) {
+            return fail("local AI profile widened a forbidden capability");
+        }
+    }
+    for device in [
+        DeviceClass::Network,
+        DeviceClass::Storage,
+        DeviceClass::Display,
+        DeviceClass::Input,
+        DeviceClass::Generic,
+    ] {
+        if local_sandbox.allows_device(device)
+            || authorize_device_access(local, local_sandbox, device).allowed
+        {
+            return fail("local AI profile exposed a device");
+        }
+    }
+    let cloud = local.with(Capability::Secrets).with(Capability::NetworkIo);
+    let Some(cloud_sandbox) = package_sandbox(cloud) else {
+        return fail("cloud AI profile rejected");
+    };
+    if !cloud_sandbox.allows(Capability::Secrets)
+        || !cloud_sandbox.allows_device(DeviceClass::Network)
+        || !authorize_device_access(cloud, cloud_sandbox, DeviceClass::Network).allowed
+    {
+        return fail("explicit cloud capabilities were not preserved");
+    }
+    for capability in [
+        Capability::FileRead,
+        Capability::FileWrite,
+        Capability::Camera,
+        Capability::Microphone,
+        Capability::Usb,
+    ] {
+        if cloud.contains(capability) || cloud_sandbox.allows(capability) {
+            return fail("cloud AI profile widened a forbidden capability");
+        }
+    }
+    let system = domain_ceiling(SecurityDomain::SystemService);
+    for capability in [
+        Capability::Ai,
+        Capability::Secrets,
+        Capability::Camera,
+        Capability::Microphone,
+    ] {
+        if system.contains(capability) {
+            return fail("system-service ceiling grants sensitive AI authority");
+        }
+    }
+    true
+}
+
+#[cfg(feature = "stage23-5-test")]
+fn stage23_semantic_search_self_test() -> bool {
+    use libwoven::semantic_search::{Entry, Error, Hit, Index, Kind, MAX_ENCODED_BYTES, MAX_HITS};
+
+    fn fail(reason: &str) -> bool {
+        serial::write_line(format_args!("[S23.5] {}", reason));
+        false
+    }
+    let mut index = Index::new();
+    let entries = [
+        (1, Kind::Application, b"Woven Terminal".as_slice()),
+        (2, Kind::File, b"network design document".as_slice()),
+        (3, Kind::Setting, b"network privacy settings".as_slice()),
+        (4, Kind::Message, b"message from the team".as_slice()),
+        (5, Kind::Document, b"production release guide".as_slice()),
+        (6, Kind::Command, b"open terminal".as_slice()),
+    ];
+    for (id, kind, title) in entries {
+        let Some(entry) = Entry::new(id, kind, title) else {
+            return fail("bounded entry construction failed");
+        };
+        if !index.insert(entry) {
+            return fail("bounded index insertion failed");
+        }
+    }
+    let mut hits = [Hit {
+        id: 0,
+        kind: Kind::File,
+        score: 0,
+    }; MAX_HITS];
+    let count = index.search(b"network settings", &mut hits);
+    if count != 2 || hits[0].id != 3 || hits[0].score != 2 || hits[1].id != 2 {
+        return fail("semantic ranking mismatch");
+    }
+    let count = index.search(b"TERMINAL", &mut hits);
+    if count != 2 || hits[0].id != 1 || hits[1].id != 6 {
+        return fail("case-insensitive search mismatch");
+    }
+    if !index.insert(Entry::new_owned(7, 99, Kind::Message, b"private system note").unwrap()) {
+        return fail("private entry insertion failed");
+    }
+    if index.search_for(8, b"private", &mut hits) != 0
+        || index.search_for(7, b"private", &mut hits) != 1
+    {
+        return fail("owner privacy filter mismatch");
+    }
+    let mut snapshot = [0u8; MAX_ENCODED_BYTES];
+    let Ok(length) = index.encode(&mut snapshot) else {
+        return fail("search snapshot encoding failed");
+    };
+    let Ok(restored) = Index::decode(&snapshot[..length]) else {
+        return fail("search snapshot decoding failed");
+    };
+    if restored.search_for(7, b"private", &mut hits) != 1 {
+        return fail("search snapshot privacy mismatch");
+    }
+    snapshot[10] ^= 1;
+    if !matches!(Index::decode(&snapshot[..length]), Err(Error::BadChecksum)) {
+        return fail("search snapshot checksum was not enforced");
+    }
+    true
+}
+
+#[cfg(feature = "stage23-6-test")]
+fn stage23_assistant_action_self_test() -> bool {
+    use libwoven::ai_assistant::{Action, ActionKind, Error, Plan};
+    use libwoven::Permission;
+
+    fn fail(reason: &str) -> bool {
+        serial::write_line(format_args!("[S23.6] {}", reason));
+        false
+    }
+    let mut plan = Plan::new();
+    let Ok(write_index) = plan.push(Action::new(ActionKind::WriteFile, b"/home/note.txt").unwrap())
+    else {
+        return fail("write action insertion failed");
+    };
+    let Ok(read_index) = plan.push(Action::new(ActionKind::ReadFile, b"/home/note.txt").unwrap())
+    else {
+        return fail("read action insertion failed");
+    };
+    if plan.authorize(write_index, &[Permission::FilesystemWrite], false)
+        != Err(Error::ConfirmationRequired)
+    {
+        return fail("write confirmation was not required");
+    }
+    if plan.authorize(write_index, &[Permission::FilesystemRead], true)
+        != Err(Error::PermissionDenied)
+    {
+        return fail("write permission was not denied");
+    }
+    if plan
+        .authorize(write_index, &[Permission::FilesystemWrite], true)
+        .is_err()
+    {
+        return fail("permitted write was rejected");
+    }
+    if plan
+        .authorize(read_index, &[Permission::FilesystemRead], false)
+        .is_err()
+    {
+        return fail("permitted read was rejected");
+    }
+    if plan.authorize(read_index, &[Permission::FilesystemWrite], true)
+        != Err(Error::PermissionDenied)
+    {
+        return fail("read permission mismatch");
+    }
+    true
+}
+
+#[cfg(feature = "stage23-7-test")]
+fn stage23_security_monitor_self_test() -> bool {
+    use libwoven::ai_monitor::{explain, Monitor, Severity};
+    use libwoven::security::{AuditAction, AuditEvent};
+
+    fn fail(reason: &str) -> bool {
+        serial::write_line(format_args!("[S23.7] {}", reason));
+        false
+    }
+    let denied = AuditEvent {
+        sequence: 17,
+        tick: 2,
+        cpu: 0,
+        action: AuditAction::WovenGuardDeny,
+        actor: 10,
+        target: 20,
+        detail: 30,
+        allowed: false,
+    };
+    let finding = explain(&denied);
+    if finding.severity != Severity::Warning
+        || finding.allowed
+        || &finding.explanation[..finding.explanation_len as usize]
+            != b"WovenGuard denied an authority request"
+    {
+        return fail("denial explanation mismatch");
+    }
+    let mut monitor = Monitor::new();
+    for _ in 0..libwoven::ai_monitor::MAX_FINDINGS {
+        if !monitor.observe(&denied) {
+            return fail("monitor capacity rejected a bounded event");
+        }
+    }
+    if monitor.observe(&denied) || monitor.get(0).is_none() {
+        return fail("monitor capacity/enumeration mismatch");
+    }
+    true
+}
+
+#[cfg(feature = "stage24-1-test")]
+fn stage24_identity_self_test() -> bool {
+    use libwoven::identity::{Authority, Error, SessionState, UserProfile};
+
+    fn fail(reason: &str) -> bool {
+        serial::write_line(format_args!("[S24.1] {}", reason));
+        false
+    }
+
+    let mut authority = Authority::new();
+    let Ok(group) = authority.add_group(b"users") else {
+        return fail("group creation failed");
+    };
+    let Ok(user) = authority.add_administrator(b"alice", group, b"qemu-salt", b"1234") else {
+        return fail("user creation failed");
+    };
+    let Ok(profile) = UserProfile::new(b"Alice Example") else {
+        return fail("profile validation failed");
+    };
+    if authority.set_profile(user, profile).is_err() {
+        return fail("profile update failed");
+    }
+    if authority.open_session(user, b"wrong") != Err(Error::WrongPassword) {
+        return fail("wrong password was accepted");
+    }
+    let Ok(session) = authority.open_session(user, b"1234") else {
+        return fail("session creation failed");
+    };
+    let Ok(view) = authority.view(session) else {
+        return fail("session view failed");
+    };
+    if view.uid != 1000 || view.state != SessionState::Active || view.elevated {
+        return fail("initial session state mismatch");
+    }
+    if authority.lock(session).is_err()
+        || authority.elevate(session, b"1234") != Err(Error::Locked)
+        || authority.unlock(session, b"1234").is_err()
+        || authority.elevate(session, b"1234").is_err()
+    {
+        return fail("lock/unlock/elevation lifecycle failed");
+    }
+    if authority
+        .view(session)
+        .map_or(true, |view| view.uid != 0 || !view.elevated)
+    {
+        return fail("elevated credentials were not reflected");
+    }
+    true
+}
+
+#[cfg(feature = "stage24-2-test")]
+fn stage24_identity_snapshot_self_test() -> bool {
+    use libwoven::identity::{Authority, Error, UserProfile, SNAPSHOT_BYTES};
+
+    fn fail(reason: &str) -> bool {
+        serial::write_line(format_args!("[S24.2] {}", reason));
+        false
+    }
+
+    let mut authority = Authority::new();
+    let Ok(group) = authority.add_group(b"users") else {
+        return fail("group creation failed");
+    };
+    let Ok(user) = authority.add_administrator(b"alice", group, b"qemu-salt", b"1234") else {
+        return fail("user creation failed");
+    };
+    if authority
+        .set_profile(user, UserProfile::new(b"Alice Example").unwrap())
+        .is_err()
+    {
+        return fail("profile update failed");
+    }
+    let Ok(session) = authority.open_session(user, b"1234") else {
+        return fail("session creation failed");
+    };
+    let mut snapshot = [0u8; SNAPSHOT_BYTES];
+    if authority.encode_snapshot(&mut snapshot) != Ok(SNAPSHOT_BYTES) {
+        return fail("snapshot encoding failed");
+    }
+    let mut restored = match Authority::decode_snapshot(&snapshot) {
+        Ok(authority) => authority,
+        Err(_) => return fail("snapshot decoding failed"),
+    };
+    if restored.view(session) != Err(Error::NotFound)
+        || restored.open_session(user, b"1234").is_err()
+    {
+        return fail("session state was incorrectly persisted");
+    }
+    snapshot[SNAPSHOT_BYTES - 1] ^= 1;
+    if !matches!(Authority::decode_snapshot(&snapshot), Err(Error::Corrupt)) {
+        return fail("tampered snapshot was accepted");
+    }
+    true
+}
+
+#[cfg(feature = "stage24-5-test")]
+fn stage24_identity_syscall_frame_self_test() -> bool {
+    let valid_open = [5, b'a', b'l', b'i', b'c', b'e', 4, b'1', b'2', b'3', b'4'];
+    let Some((name, password)) = identity_runtime::parse_open_buffer(&valid_open) else {
+        return false;
+    };
+    if name != b"alice" || password != b"1234" {
+        return false;
+    }
+    let malformed = [5, b'a', b'l', b'i', b'c', b'e', 4, b'1'];
+    if identity_runtime::parse_open_buffer(&malformed).is_some() {
+        return false;
+    }
+    let valid_password = [4, b'1', b'2', b'3', b'4'];
+    let Some(password) = identity_runtime::parse_password_buffer(&valid_password) else {
+        return false;
+    };
+    if password != b"1234" {
+        return false;
+    }
+    identity_runtime::parse_password_buffer(&[0]).is_none()
+}
+
+#[cfg(feature = "system-apps")]
+fn start_production_system_services() -> bool {
+    let capabilities = capability::CapabilitySet::only(capability::Capability::Ipc)
+        .with(capability::Capability::FileRead)
+        .with(capability::Capability::FileWrite)
+        .with(capability::Capability::StorageIo);
+    let Some(program) = userspace::load_elf_with_argv_verified(
+        PACKAGE_SERVICE_IMAGE,
+        &["/bin/woven-package", "--service"],
+    ) else {
+        serial::write_line(format_args!("[SERVICES] woven-package load failed"));
+        return false;
+    };
+    let Ok((pid, _, _)) = task::spawn_user_system_service("woven-package", program, capabilities)
+    else {
+        serial::write_line(format_args!("[SERVICES] woven-package spawn failed"));
+        return false;
+    };
+    let deadline = timer::ticks().wrapping_add(500);
+    loop {
+        if let Ok(info) = ipc::service_info(b"woven.package") {
+            if info.owner == pid.as_u64() && info.client_rights == 1 {
+                serial::write_line(format_args!(
+                    "[SERVICES] woven-package published as pid {}",
+                    pid.as_u64()
+                ));
+                break;
+            }
+        }
+        if task::process_exited(pid) || timer::ticks().wrapping_sub(deadline) < u64::MAX / 2 {
+            let _ = task::kill_process(pid.as_u64(), 9);
+            serial::write_line(format_args!("[SERVICES] woven-package publication failed"));
+            return false;
+        }
+        task::yield_now();
+    }
+
+    let Some(program) = userspace::load_elf_with_argv_verified(
+        SYSTEM_APP_UPDATE,
+        &["/bin/wovenhat-update", "--service"],
+    ) else {
+        serial::write_line(format_args!("[SERVICES] woven-update load failed"));
+        return false;
+    };
+    let Ok((pid, _, _)) = task::spawn_user_system_service("woven-update", program, capabilities)
+    else {
+        serial::write_line(format_args!("[SERVICES] woven-update spawn failed"));
+        return false;
+    };
+    let deadline = timer::ticks().wrapping_add(500);
+    loop {
+        if let Ok(info) = ipc::service_info(b"woven.update") {
+            if info.owner == pid.as_u64() && info.client_rights == 1 {
+                serial::write_line(format_args!(
+                    "[SERVICES] woven-update published as pid {}",
+                    pid.as_u64()
+                ));
+                return true;
+            }
+        }
+        if task::process_exited(pid) || timer::ticks().wrapping_sub(deadline) < u64::MAX / 2 {
+            let _ = task::kill_process(pid.as_u64(), 9);
+            serial::write_line(format_args!("[SERVICES] woven-update publication failed"));
+            return false;
+        }
+        task::yield_now();
+    }
+}
 
 #[cfg(feature = "system-apps")]
 fn install_production_system_apps() -> bool {
@@ -5051,70 +6966,70 @@ fn install_production_system_apps() -> bool {
             image: SYSTEM_APP_CALCULATOR,
             binary_path: "/bin/wovenhat-calculator",
             catalog_path: "/share/applications/woven-calculator.app",
-            catalog: b"Name=WovenCalculator\nExec=/bin/wovenhat-calculator\n",
+            catalog: b"Name=WovenCalculator\nExec=/bin/wovenhat-calculator --gui %p\n",
         },
         App {
             name: "woven-terminal",
             image: SYSTEM_APP_TERMINAL,
             binary_path: "/bin/wovenhat-terminal",
             catalog_path: "/share/applications/woven-terminal.app",
-            catalog: b"Name=WovenTerminal\nExec=/bin/wovenhat-terminal --interactive\n",
+            catalog: b"Name=WovenTerminal\nExec=/bin/wovenhat-terminal --gui %p\n",
         },
         App {
             name: "woven-files",
             image: SYSTEM_APP_FILES,
             binary_path: "/bin/wovenhat-files",
             catalog_path: "/share/applications/woven-files.app",
-            catalog: b"Name=WovenFiles\nExec=/bin/wovenhat-files\n",
+            catalog: b"Name=WovenFiles\nExec=/bin/wovenhat-files --gui %p\n",
         },
         App {
             name: "woven-monitor",
             image: SYSTEM_APP_MONITOR,
             binary_path: "/bin/wovenhat-monitor",
             catalog_path: "/share/applications/woven-monitor.app",
-            catalog: b"Name=WovenMonitor\nExec=/bin/wovenhat-monitor\n",
+            catalog: b"Name=WovenMonitor\nExec=/bin/wovenhat-monitor --gui %p\n",
         },
         App {
             name: "woven-settings",
             image: SYSTEM_APP_SETTINGS,
             binary_path: "/bin/wovenhat-settings",
             catalog_path: "/share/applications/woven-settings.app",
-            catalog: b"Name=WovenSettings\nExec=/bin/wovenhat-settings\n",
+            catalog: b"Name=WovenSettings\nExec=/bin/wovenhat-settings --gui %p\n",
         },
         App {
             name: "woven-security",
             image: SYSTEM_APP_SECURITY,
             binary_path: "/bin/wovenhat-security",
             catalog_path: "/share/applications/woven-security.app",
-            catalog: b"Name=WovenSecurity\nExec=/bin/wovenhat-security\n",
+            catalog: b"Name=WovenSecurity\nExec=/bin/wovenhat-security --gui %p\n",
         },
         App {
             name: "woven-editor",
             image: SYSTEM_APP_EDITOR,
             binary_path: "/bin/wovenhat-editor",
             catalog_path: "/share/applications/woven-editor.app",
-            catalog: b"Name=WovenEditor\nExec=/bin/wovenhat-editor\n",
+            catalog: b"Name=WovenEditor\nExec=/bin/wovenhat-editor --gui %p\n",
         },
         App {
             name: "woven-images",
             image: SYSTEM_APP_IMAGES,
             binary_path: "/bin/wovenhat-images",
             catalog_path: "/share/applications/woven-images.app",
-            catalog: b"Name=WovenImages\nExec=/bin/wovenhat-images\n",
+            catalog: b"Name=WovenImages\nExec=/bin/wovenhat-images --gui %p\n",
         },
         App {
             name: "woven-update",
             image: SYSTEM_APP_UPDATE,
             binary_path: "/bin/wovenhat-update",
             catalog_path: "/share/applications/woven-update.app",
-            catalog: b"Name=WovenUpdate\nExec=/bin/wovenhat-update\n",
+            catalog: b"Name=WovenUpdate\nExec=/bin/wovenhat-update --gui %p\n",
         },
         App {
             name: "woven-store",
             image: SYSTEM_APP_STORE,
             binary_path: "/bin/wovenhat-store",
             catalog_path: "/share/applications/woven-store.app",
-            catalog: b"Name=WovenStore\nExec=/bin/wovenhat-store\n",
+            catalog: b"Name=WovenStore\nExec=/bin/wovenhat-store --gui %p\n",
         },
     ];
     // Verify and parse all packages before changing the VFS. A malformed or
@@ -5202,7 +7117,130 @@ fn install_production_system_apps() -> bool {
         }
         catalogs += 1;
     }
-    serial::write_line(format_args!("[APPS] {} signed applications installed", installed));
+    serial::write_line(format_args!(
+        "[APPS] {} signed applications installed",
+        installed
+    ));
+    true
+}
+
+#[cfg(feature = "system-apps")]
+fn install_persistent_accounts() -> bool {
+    const SOURCE: &str = "/mnt/etc/wovenhat/accounts";
+    const TARGET: &str = "/etc/wovenhat/accounts";
+
+    let source = match vfs::stat(SOURCE) {
+        Ok(stat) if stat.kind == vfs::NodeKind::File => stat,
+        Ok(_) => {
+            serial::write_line(format_args!(
+                "[SESSION] persistent accounts path is not a file"
+            ));
+            return false;
+        }
+        Err(vfs::Error::NotFound) => return true,
+        Err(_) => return false,
+    };
+    if source.size == 0 || source.size > vfs::NODE_CAPACITY {
+        serial::write_line(format_args!(
+            "[SESSION] persistent accounts file has invalid size: {}",
+            source.size
+        ));
+        return false;
+    }
+
+    let mut data = alloc::vec![0u8; source.size];
+    let Ok(read) = vfs::read_all(SOURCE, &mut data) else {
+        serial::write_line(format_args!("[SESSION] persistent accounts read failed"));
+        return false;
+    };
+    if read != source.size || !has_valid_account_line(&data) {
+        serial::write_line(format_args!(
+            "[SESSION] persistent accounts file contains no valid account"
+        ));
+        return false;
+    }
+    for directory in ["/etc", "/etc/wovenhat"] {
+        match vfs::mkdir(directory) {
+            Ok(()) | Err(vfs::Error::AlreadyExists) => {}
+            Err(_) => return false,
+        }
+    }
+    if vfs::create_read_only(TARGET, &data).is_err() {
+        return false;
+    }
+    serial::write_line(format_args!(
+        "[SESSION] persistent accounts imported from {}",
+        SOURCE
+    ));
+    true
+}
+
+#[cfg(feature = "system-apps")]
+fn has_valid_account_line(data: &[u8]) -> bool {
+    data.split(|byte| *byte == b'\n').any(|line| {
+        let line = line.strip_suffix(b"\r").unwrap_or(line);
+        let mut fields = line.split(|byte| *byte == b':');
+        let (Some(name), Some(salt), Some(hash)) = (fields.next(), fields.next(), fields.next())
+        else {
+            return false;
+        };
+        fields.next().is_none()
+            && !name.is_empty()
+            && name.len() <= 16
+            && name.iter().all(|byte| (b' '..=b'~').contains(byte))
+            && !salt.is_empty()
+            && salt.len() <= 64
+            && salt.len().is_multiple_of(2)
+            && salt.iter().all(u8::is_ascii_hexdigit)
+            && hash.len() == 64
+            && hash.iter().all(u8::is_ascii_hexdigit)
+    })
+}
+
+#[cfg(feature = "hardware-demo")]
+fn install_hardware_demo_accounts() -> bool {
+    // These two lines are `name:salt-hex:hash-hex`, matching
+    // libwoven::accounts's format and PBKDF2_ITERATIONS exactly (ada:1234
+    // and lin:9876, the same fixed demo credentials this function has
+    // always installed) -- but the hash is precomputed, not recomputed by
+    // calling pbkdf2_hmac at every single boot. Boot profiling (Stage 30)
+    // measured that recomputation (2 accounts x 100,000 iterations,
+    // force-soft SHA-256 -- this kernel never uses a hardware SHA
+    // extension) at 4241 of this demo image's ~4350-tick total boot under
+    // QEMU TCG: effectively the entire boot. These credentials are public
+    // (a disposable demo account, not a secret), so precomputing them once
+    // loses nothing: the PBKDF2 work factor still protects them exactly as
+    // before, it is simply not redone on every boot of every test run.
+    const ACCOUNTS_PATH: &str = "/etc/wovenhat/accounts";
+    const ACCOUNTS: &str = concat!(
+        "ada:1122334455667788:",
+        "286eb6cda9bcda66eb2499be4bb94c44c19f4cc505d42cb7a70b7270c5da632b\n",
+        "lin:a0b1c2d3e4f50617:",
+        "cfefdcdc20fd0469dcf4c7203ee635341fe3cdc1e7102fdb51df263ad56d7f8f\n",
+    );
+    match vfs::stat(ACCOUNTS_PATH) {
+        Ok(_) => {
+            serial::write_line(format_args!(
+                "[DEMO] existing accounts preserved; demo accounts not installed"
+            ));
+            return true;
+        }
+        Err(vfs::Error::NotFound) => {}
+        Err(_) => return false,
+    }
+
+    for directory in ["/etc", "/etc/wovenhat"] {
+        match vfs::mkdir(directory) {
+            Ok(()) | Err(vfs::Error::AlreadyExists) => {}
+            Err(_) => return false,
+        }
+    }
+    if vfs::create_read_only(ACCOUNTS_PATH, ACCOUNTS.as_bytes()).is_err() {
+        return false;
+    }
+    serial::write_line(format_args!(
+        "[DEMO] sample accounts installed in volatile VFS (ada, lin)"
+    ));
     true
 }
 
@@ -5501,12 +7539,19 @@ fn stage16_1_self_test() -> bool {
     feature = "stage20-8-test",
     feature = "stage20-9-test",
     feature = "stage20-10-test",
+    feature = "stage20-18-test",
     feature = "stage20-11-test",
     feature = "stage20-12-test",
     feature = "stage13-15-test",
     feature = "stage20-13-test",
     feature = "stage20-14b-test",
-    feature = "stage20-15-test"
+    feature = "stage20-15-test",
+    feature = "stage20-16-test",
+    feature = "stage30-1-test",
+    feature = "stage30-2-test",
+    feature = "stage30-3-test",
+    feature = "stage30-4-test",
+    feature = "stage30-5-test",
 ))]
 const HELLO_GUI_IMAGE: &[u8] = include_bytes!(env!("WOVENHAT_HELLO_GUI_IMAGE"));
 
@@ -5535,8 +7580,15 @@ const HELLO_GUI_IMAGE: &[u8] = include_bytes!(env!("WOVENHAT_HELLO_GUI_IMAGE"));
     feature = "stage20-8-test",
     feature = "stage20-9-test",
     feature = "stage20-10-test",
+    feature = "stage20-18-test",
     feature = "stage20-11-test",
-    feature = "stage20-12-test"
+    feature = "stage20-12-test",
+    feature = "stage20-16-test",
+    feature = "stage30-1-test",
+    feature = "stage30-2-test",
+    feature = "stage30-3-test",
+    feature = "stage30-4-test",
+    feature = "stage30-5-test",
 ))]
 fn display_client_capabilities() -> capability::CapabilitySet {
     capability::CapabilitySet::only(capability::Capability::Console)
@@ -5567,8 +7619,15 @@ fn display_client_capabilities() -> capability::CapabilitySet {
     feature = "stage20-8-test",
     feature = "stage20-9-test",
     feature = "stage20-10-test",
+    feature = "stage20-18-test",
     feature = "stage20-11-test",
-    feature = "stage20-12-test"
+    feature = "stage20-12-test",
+    feature = "stage20-16-test",
+    feature = "stage30-1-test",
+    feature = "stage30-2-test",
+    feature = "stage30-3-test",
+    feature = "stage30-4-test",
+    feature = "stage30-5-test",
 ))]
 fn run_hello_gui(
     image: &[u8],
@@ -5593,11 +7652,18 @@ fn run_hello_gui(
 #[cfg(feature = "stage13-15-test")]
 fn stage13_15_self_test() -> bool {
     fn step(name: &str, ok: bool) -> bool {
-        serial::write_line(format_args!("[S13.15] {} {}", name, if ok { "PASS" } else { "FAIL" }));
+        serial::write_line(format_args!(
+            "[S13.15] {} {}",
+            name,
+            if ok { "PASS" } else { "FAIL" }
+        ));
         ok
     }
     let report = drivers::bring_up();
-    if !step("hda0 bound and ready", matches!(report.drivers[3].outcome, drivers::Outcome::Ready(_))) {
+    if !step(
+        "hda0 bound and ready",
+        matches!(report.drivers[3].outcome, drivers::Outcome::Ready(_)),
+    ) {
         return false;
     }
     let Some(info) = hda::audio_info() else {
@@ -5611,7 +7677,8 @@ fn stage13_15_self_test() -> bool {
         return false;
     }
     let installed = (vfs::stat("/bin").is_ok() || vfs::mkdir("/bin").is_ok())
-        && (vfs::stat("/bin/hello-gui").is_ok() || vfs::create_read_only("/bin/hello-gui", HELLO_GUI_IMAGE).is_ok());
+        && (vfs::stat("/bin/hello-gui").is_ok()
+            || vfs::create_read_only("/bin/hello-gui", HELLO_GUI_IMAGE).is_ok());
     if !step("hello-gui installed", installed) {
         return false;
     }
@@ -5620,9 +7687,13 @@ fn stage13_15_self_test() -> bool {
     let irqs_before = interrupts::pci_device_irq_count(info.vector);
     let plays_before = hda::audio_plays();
     let on_time_before = hda::audio_on_time();
-    let played = spawn_hello_gui(HELLO_GUI_IMAGE, &["/bin/hello-gui", "--audio"], Some(player))
-        .and_then(wait_hello_gui)
-        .map(|(_, status)| status);
+    let played = spawn_hello_gui(
+        HELLO_GUI_IMAGE,
+        &["/bin/hello-gui", "--audio"],
+        Some(player),
+    )
+    .and_then(wait_hello_gui)
+    .map(|(_, status)| status);
     let irqs = interrupts::pci_device_irq_count(info.vector) - irqs_before;
     serial::write_line(format_args!(
         "[S13.15] player exit={:?} completion interrupts={} plays={}",
@@ -5644,7 +7715,9 @@ fn stage13_15_self_test() -> bool {
     let denied = spawn_hello_gui(
         HELLO_GUI_IMAGE,
         &["/bin/hello-gui", "--audio"],
-        Some(capability::CapabilitySet::only(capability::Capability::Console)),
+        Some(capability::CapabilitySet::only(
+            capability::Capability::Console,
+        )),
     )
     .and_then(wait_hello_gui)
     .map(|(_, status)| status);
@@ -5677,11 +7750,18 @@ fn stage13_15_self_test() -> bool {
     feature = "stage20-8-test",
     feature = "stage20-9-test",
     feature = "stage20-10-test",
+    feature = "stage20-18-test",
     feature = "stage20-11-test",
     feature = "stage20-12-test",
     feature = "stage13-15-test",
     feature = "stage20-13-test",
-    feature = "stage20-14b-test"
+    feature = "stage20-14b-test",
+    feature = "stage20-16-test",
+    feature = "stage30-1-test",
+    feature = "stage30-2-test",
+    feature = "stage30-3-test",
+    feature = "stage30-4-test",
+    feature = "stage30-5-test",
 ))]
 fn spawn_hello_gui(
     image: &[u8],
@@ -5721,11 +7801,18 @@ fn spawn_hello_gui(
     feature = "stage20-8-test",
     feature = "stage20-9-test",
     feature = "stage20-10-test",
+    feature = "stage20-18-test",
     feature = "stage20-11-test",
     feature = "stage20-12-test",
     feature = "stage13-15-test",
     feature = "stage20-13-test",
-    feature = "stage20-14b-test"
+    feature = "stage20-14b-test",
+    feature = "stage20-16-test",
+    feature = "stage30-1-test",
+    feature = "stage30-2-test",
+    feature = "stage30-3-test",
+    feature = "stage30-4-test",
+    feature = "stage30-5-test",
 ))]
 fn wait_hello_gui(pid: task::ProcessId) -> Option<(task::ProcessId, Result<i32, task::WaitError>)> {
     let start = timer::ticks();
@@ -5750,11 +7837,13 @@ fn wait_hello_gui(pid: task::ProcessId) -> Option<(task::ProcessId, Result<i32, 
     feature = "stage20-8-test",
     feature = "stage20-9-test",
     feature = "stage20-10-test",
+    feature = "stage20-18-test",
     feature = "stage20-11-test",
     feature = "stage20-12-test",
     feature = "stage20-13-test",
     feature = "stage20-14b-test",
     feature = "stage20-15-test",
+    feature = "stage20-17-test",
     feature = "system-apps"
 ))]
 const WOVEN_SHELL_IMAGE: &[u8] = include_bytes!(env!("WOVENHAT_SHELL_IMAGE"));
@@ -5777,7 +7866,11 @@ fn stage20_14b_self_test() -> bool {
     const START_FILL: u32 = rgb(52, 96, 180);
 
     fn step(name: &str, ok: bool) -> bool {
-        serial::write_line(format_args!("[S20.14B] {} {}", name, if ok { "PASS" } else { "FAIL" }));
+        serial::write_line(format_args!(
+            "[S20.14B] {} {}",
+            name,
+            if ok { "PASS" } else { "FAIL" }
+        ));
         ok
     }
     fn until(limit: u64, condition: impl Fn() -> bool) -> bool {
@@ -5814,7 +7907,8 @@ fn stage20_14b_self_test() -> bool {
     }
     fn packet(dx: i16, screen_dy: i16, left: bool) -> bool {
         let dy = -screen_dy;
-        let flags = 0x08 | u8::from(left) | if dx < 0 { 0x10 } else { 0 } | if dy < 0 { 0x20 } else { 0 };
+        let flags =
+            0x08 | u8::from(left) | if dx < 0 { 0x10 } else { 0 } | if dy < 0 { 0x20 } else { 0 };
         [flags, dx as u8, dy as u8].into_iter().all(mouse::loopback)
     }
     fn move_by(mut dx: i32, mut dy: i32, left: bool) -> bool {
@@ -5844,15 +7938,20 @@ fn stage20_14b_self_test() -> bool {
         .with(capability::Capability::DisplayIo)
         .with(capability::Capability::InputIo)
         .with(capability::Capability::Ipc);
-    let Some(program) = userspace::load_elf_with_argv(WOVEN_SHELL_IMAGE, &["/bin/woven-shell"]) else {
+    let Some(program) = userspace::load_elf_with_argv(WOVEN_SHELL_IMAGE, &["/bin/woven-shell"])
+    else {
         return step("shell image loads", false);
     };
-    let Ok((shell, _, _)) = task::spawn_user_system_service("woven-shell", program, capabilities) else {
+    let Ok((shell, _, _)) = task::spawn_user_system_service("woven-shell", program, capabilities)
+    else {
         return step("shell spawned", false);
     };
     if !step(
         "shell took the display",
-        installed && until(3000, || compositor::holder() == Some(shell.as_u64()) && compositor::is_presenting()),
+        installed
+            && until(3000, || {
+                compositor::holder() == Some(shell.as_u64()) && compositor::is_presenting()
+            }),
     ) {
         return false;
     }
@@ -5863,22 +7962,36 @@ fn stage20_14b_self_test() -> bool {
     let scale = compositor::scale().unwrap_or(1) as i32;
     let primary = width / 2;
     let top = height - 24;
-    serial::write_line(format_args!("[S20.14B] desktop {}x{} at scale {}, primary {} wide", width, height, scale, primary));
+    serial::write_line(format_args!(
+        "[S20.14B] desktop {}x{} at scale {}, primary {} wide",
+        width, height, scale, primary
+    ));
     let wall = move |x: i32, y: i32| compositor::pixel(x, y) == Ok(wallpaper(x, y, height));
     let taskbar_on_primary_only = until(2000, || {
         compositor::pixel(6, top + 6) == Ok(START_FILL)
             && wall(primary + 7, top + 7)
             && wall(width - 7, top + 7)
     });
-    if !step("the taskbar spans the primary monitor only", taskbar_on_primary_only) {
+    if !step(
+        "the taskbar spans the primary monitor only",
+        taskbar_on_primary_only,
+    ) {
         return false;
     }
-    let client = capability::CapabilitySet::only(capability::Capability::Console).with(capability::Capability::Ipc);
+    let client = capability::CapabilitySet::only(capability::Capability::Console)
+        .with(capability::Capability::Ipc);
     let shell_arg = alloc::format!("{}", shell.as_u64());
-    let Some(_alpha) = spawn_hello_gui(HELLO_GUI_IMAGE, &["/bin/hello-gui", "--desktop-client", &shell_arg, "a"], Some(client)) else {
+    let Some(_alpha) = spawn_hello_gui(
+        HELLO_GUI_IMAGE,
+        &["/bin/hello-gui", "--desktop-client", &shell_arg, "a"],
+        Some(client),
+    ) else {
         return step("application A spawned", false);
     };
-    if !step("window A opens on the primary monitor", until(2000, || compositor::pixel(45, 45) == Ok(RED))) {
+    if !step(
+        "window A opens on the primary monitor",
+        until(2000, || compositor::pixel(45, 45) == Ok(RED)),
+    ) {
         return false;
     }
     // From the desktop's centre to A's title bar, then drag it one
@@ -5904,16 +8017,29 @@ fn stage20_14b_self_test() -> bool {
         ));
     }
     let dragged = stayed;
-    if !step("dragging A by its title bar moves it onto the second monitor", dragged) {
+    if !step(
+        "dragging A by its title bar moves it onto the second monitor",
+        dragged,
+    ) {
         return false;
     }
     // The surface is right; wait until it has reached the monitors too.
-    if !step("everything drawn has been presented to the monitors", until(1000, compositor::presented)) {
+    if !step(
+        "everything drawn has been presented to the monitors",
+        until(1000, compositor::presented),
+    ) {
         return false;
     }
     // Samples for the host captures: surface point -> head and physical
     // position at the centre of its scaled block.
-    let samples = [(45 + primary, 45), (45, 45), (6, top + 6), (primary + 7, top + 7), (100 + primary, 60), (primary / 2, height / 3)];
+    let samples = [
+        (45 + primary, 45),
+        (45, 45),
+        (6, top + 6),
+        (primary + 7, top + 7),
+        (100 + primary, 60),
+        (primary / 2, height / 3),
+    ];
     let head_width = primary * scale;
     for (x, y) in samples {
         let Ok(pixel) = compositor::pixel(x, y) else {
@@ -5928,16 +8054,25 @@ fn stage20_14b_self_test() -> bool {
             pixel
         ));
     }
-    serial::write_line(format_args!("[S20.14B] ready for capture {}x{}", head_width, height * scale));
+    serial::write_line(format_args!(
+        "[S20.14B] ready for capture {}x{}",
+        head_width,
+        height * scale
+    ));
     let start = timer::ticks();
     while timer::ticks().wrapping_sub(start) < 1500 {
         task::yield_now();
     }
-    if task::kill_process(shell.as_u64(), 9).is_err() || !until(1000, || task::process_exited(shell)) {
+    if task::kill_process(shell.as_u64(), 9).is_err()
+        || !until(1000, || task::process_exited(shell))
+    {
         return step("shell killed", false);
     }
     let _ = task::wait_process(shell.as_u64());
-    step("shell released the display", compositor::holder().is_none() && !compositor::is_presenting())
+    step(
+        "shell released the display",
+        compositor::holder().is_none() && !compositor::is_presenting(),
+    )
 }
 
 /// Stage 20.15 acceptance: the desktop as the session.
@@ -5957,7 +8092,11 @@ fn stage20_14b_self_test() -> bool {
 fn stage20_15_self_test() -> bool {
     use crate::display::rgb;
     fn step(name: &str, ok: bool) -> bool {
-        serial::write_line(format_args!("[S20.15] {} {}", name, if ok { "PASS" } else { "FAIL" }));
+        serial::write_line(format_args!(
+            "[S20.15] {} {}",
+            name,
+            if ok { "PASS" } else { "FAIL" }
+        ));
         ok
     }
     fn until(limit: u64, condition: impl Fn() -> bool) -> bool {
@@ -5974,7 +8113,8 @@ fn stage20_15_self_test() -> bool {
     }
     fn packet(dx: i16, screen_dy: i16, left: bool) -> bool {
         let dy = -screen_dy;
-        let flags = 0x08 | u8::from(left) | if dx < 0 { 0x10 } else { 0 } | if dy < 0 { 0x20 } else { 0 };
+        let flags =
+            0x08 | u8::from(left) | if dx < 0 { 0x10 } else { 0 } | if dy < 0 { 0x20 } else { 0 };
         [flags, dx as u8, dy as u8].into_iter().all(mouse::loopback)
     }
     fn move_by(mut dx: i32, mut dy: i32) -> bool {
@@ -6002,14 +8142,20 @@ fn stage20_15_self_test() -> bool {
         mask.fill_rect(bounds, 0x0100_0000);
         mask.draw_text(0, 0, name, color);
         (0..7).all(|row| {
-            (0..crate::font::text_width(name) as i32)
-                .all(|column| mask.pixel(column, row) != Some(color) || compositor::pixel(x + column, y + row) == Ok(color))
+            (0..crate::font::text_width(name) as i32).all(|column| {
+                mask.pixel(column, row) != Some(color)
+                    || compositor::pixel(x + column, y + row) == Ok(color)
+            })
         })
     }
 
     let catalog = (vfs::stat("/share").is_ok() || vfs::mkdir("/share").is_ok())
         && (vfs::stat("/share/applications").is_ok() || vfs::mkdir("/share/applications").is_ok())
-        && vfs::create_read_only("/share/applications/hello.app", b"Name=Hello\nExec=hello-gui --desktop-client %p a\n").is_ok()
+        && vfs::create_read_only(
+            "/share/applications/hello.app",
+            b"Name=Hello\nExec=hello-gui --desktop-client %p a\n",
+        )
+        .is_ok()
         && vfs::create_read_only("/bin/hello-gui", HELLO_GUI_IMAGE).is_ok();
     if !step("an application in the catalog", catalog) {
         return false;
@@ -6020,7 +8166,9 @@ fn stage20_15_self_test() -> bool {
     let presenting = || compositor::holder() == Some(shell) && compositor::is_presenting();
     if !step(
         "the session takes the display and input focus",
-        until(3000, || presenting() && woven_input::focus() == Some(shell) && session::active() == Some(shell)),
+        until(3000, || {
+            presenting() && woven_input::focus() == Some(shell) && session::active() == Some(shell)
+        }),
     ) {
         return false;
     }
@@ -6032,37 +8180,67 @@ fn stage20_15_self_test() -> bool {
     // F1: the launcher's first row is the catalog's application.
     // The launcher panel: x 4, three rows of 14 plus its border, above the
     // taskbar; the first match's text at (+6, +1 + 2 * 14 + 4).
-    let listed = key(0x3b) && until(1000, || text_at(4 + 6, top - 2 - 44 + 33, "Hello", rgb(255, 255, 255)));
+    let listed = key(0x3b)
+        && until(1000, || {
+            text_at(4 + 6, top - 2 - 44 + 33, "Hello", rgb(255, 255, 255))
+        });
     let closed = key(0x3b);
-    if !step("the launcher lists the installed application", listed && closed) {
+    if !step(
+        "the launcher lists the installed application",
+        listed && closed,
+    ) {
         return false;
     }
 
     // F12: the diagnostic console.
     let console = key(0x58)
-        && until(1000, || session::console_active() && !compositor::is_presenting() && woven_input::focus().is_none());
-    if !step("F12 shows the diagnostic console; the session's frames stop", console) {
+        && until(1000, || {
+            session::console_active()
+                && !compositor::is_presenting()
+                && woven_input::focus().is_none()
+        });
+    if !step(
+        "F12 shows the diagnostic console; the session's frames stop",
+        console,
+    ) {
         return false;
     }
     while keyboard::poll().is_some() {}
     let typed = mouse::keyboard_loopback(0x2d)
         && mouse::keyboard_loopback(0xad)
-        && until(500, || matches!(keyboard::poll(), Some(keyboard::Key::Char('x'))));
+        && until(500, || {
+            matches!(keyboard::poll(), Some(keyboard::Key::Char('x')))
+        });
     if !step("a key typed at the console reaches the kernel shell", typed) {
         return false;
     }
     let back = key(0x58)
-        && until(1000, || !session::console_active() && presenting() && woven_input::focus() == Some(shell));
+        && until(1000, || {
+            !session::console_active() && presenting() && woven_input::focus() == Some(shell)
+        });
     if !step("F12 returns to the desktop: display and focus", back) {
         return false;
     }
 
-    // Quick Settings, then its first row: Power off.
+    // Quick Settings, then its first row: Power off (8 rows now: Change PIN
+    // and Language were appended after Lock screen, so only the row-count
+    // term needs updating).
     let button = (width - 54 - 5 * 20, top + 4);
-    let power_row = (width - 4 - 164 + 28, top - 2 - (7 * 14 + 2) + 1 + 14 + 7);
+    let power_row = (width - 4 - 164 + 28, top - 2 - (11 * 14 + 2) + 1 + 14 + 7);
     let (px, py) = (width / 2, height / 2);
     let opened = move_by(button.0 + 8 - px, button.1 + 8 - py) && click();
-    if !step("Quick Settings opens", opened && until(1000, || text_at(power_row.0 - 28 + 6, power_row.1 - 3, "Power off", rgb(255, 255, 255)))) {
+    if !step(
+        "Quick Settings opens",
+        opened
+            && until(1000, || {
+                text_at(
+                    power_row.0 - 28 + 6,
+                    power_row.1 - 3,
+                    "Power off",
+                    rgb(255, 255, 255),
+                )
+            }),
+    ) {
         return false;
     }
     serial::write_line(format_args!("[S20.15] clicking Power off"));
@@ -6073,6 +8251,269 @@ fn stage20_15_self_test() -> bool {
         task::yield_now();
     }
     step("the machine turned off from the desktop", false)
+}
+
+/// Stage 24.59 acceptance: the Change-PIN flow through the real WovenShell UI.
+///
+/// This uses the production identity/session capability boundary, kernel-
+/// injected pointer and keyboard input, and the account-file boundary. It
+/// proves that the old PIN is rejected after the change and the new PIN works
+/// after the shell reloads its account record.
+#[cfg(feature = "stage24-59-test")]
+fn stage24_59_change_pin_self_test() -> bool {
+    use crate::display::{blend_pixel, rgb, Surface};
+    use pbkdf2::pbkdf2_hmac;
+    use sha2::Sha256;
+
+    const WALLPAPER_TOP: u32 = rgb(18, 42, 74);
+    const WALLPAPER_BOTTOM: u32 = rgb(64, 28, 88);
+    const WHITE: u32 = rgb(255, 255, 255);
+    const BLACK: u32 = rgb(0, 0, 0);
+    const UNSET: u32 = 0x0100_0000;
+
+    fn step(name: &str, ok: bool) -> bool {
+        serial::write_line(format_args!(
+            "[S24.59] {} {}",
+            name,
+            if ok { "PASS" } else { "FAIL" }
+        ));
+        ok
+    }
+    fn until(limit: u64, condition: impl Fn() -> bool) -> bool {
+        let start = timer::ticks();
+        loop {
+            if condition() {
+                return true;
+            }
+            if timer::ticks().wrapping_sub(start) > limit {
+                return false;
+            }
+            task::yield_now();
+        }
+    }
+    fn packet(dx: i16, screen_dy: i16, left: bool) -> bool {
+        let dy = -screen_dy;
+        let flags =
+            0x08 | u8::from(left) | if dx < 0 { 0x10 } else { 0 } | if dy < 0 { 0x20 } else { 0 };
+        [flags, dx as u8, dy as u8].into_iter().all(mouse::loopback)
+    }
+    fn move_by(mut dx: i32, mut dy: i32) -> bool {
+        while dx != 0 || dy != 0 {
+            let (sx, sy) = (dx.clamp(-100, 100), dy.clamp(-100, 100));
+            if !packet(sx as i16, sy as i16, false) {
+                return false;
+            }
+            dx -= sx;
+            dy -= sy;
+        }
+        true
+    }
+    fn click() -> bool {
+        packet(0, 0, true) && packet(0, 0, false)
+    }
+    fn keys(codes: &[u8]) -> bool {
+        codes.iter().all(|&code| mouse::keyboard_loopback(code))
+    }
+    fn wallpaper(x: i32, y: i32, height: i32) -> u32 {
+        let span = (height - 1).max(1);
+        let t = (y.clamp(0, span) * 255 / span) as u8;
+        let base = blend_pixel(WALLPAPER_BOTTOM, WALLPAPER_TOP, t);
+        if x % 32 == 0 || y % 32 == 0 {
+            blend_pixel(WHITE, base, 28)
+        } else {
+            base
+        }
+    }
+    fn account_line(name: &str, salt: &[u8], pin: &[u8]) -> alloc::string::String {
+        let mut hash = [0_u8; 32];
+        pbkdf2_hmac::<Sha256>(pin, salt, 100_000, &mut hash);
+        let mut line = alloc::format!("{name}:");
+        for byte in salt {
+            line.push_str(&alloc::format!("{byte:02x}"));
+        }
+        line.push(':');
+        for byte in hash {
+            line.push_str(&alloc::format!("{byte:02x}"));
+        }
+        line.push('\n');
+        line
+    }
+    fn hex(byte: u8) -> Option<u8> {
+        match byte {
+            b'0'..=b'9' => Some(byte - b'0'),
+            b'a'..=b'f' => Some(byte - b'a' + 10),
+            b'A'..=b'F' => Some(byte - b'A' + 10),
+            _ => None,
+        }
+    }
+    fn file_accepts(pin: &[u8]) -> bool {
+        let Ok(stat) = vfs::stat("/etc/wovenhat/accounts") else {
+            return false;
+        };
+        let mut data = alloc::vec![0_u8; stat.size];
+        if vfs::read_all("/etc/wovenhat/accounts", &mut data) != Ok(stat.size) {
+            return false;
+        }
+        let Some(line) = data
+            .split(|byte| *byte == b'\n')
+            .find(|line| line.starts_with(b"ada:"))
+        else {
+            return false;
+        };
+        let mut fields = line.split(|byte| *byte == b':');
+        let (Some(name), Some(salt_text), Some(hash_text)) =
+            (fields.next(), fields.next(), fields.next())
+        else {
+            return false;
+        };
+        if name != b"ada"
+            || fields.next().is_some()
+            || salt_text.len() % 2 != 0
+            || hash_text.len() != 64
+        {
+            return false;
+        }
+        let mut salt = [0_u8; 32];
+        if salt_text.len() / 2 > salt.len() {
+            return false;
+        }
+        for (index, pair) in salt_text.chunks(2).enumerate() {
+            let (Some(high), Some(low)) = (hex(pair[0]), hex(pair[1])) else {
+                return false;
+            };
+            salt[index] = (high << 4) | low;
+        }
+        let mut expected = [0_u8; 32];
+        pbkdf2_hmac::<Sha256>(pin, &salt[..salt_text.len() / 2], 100_000, &mut expected);
+        for (index, pair) in hash_text.chunks(2).enumerate() {
+            let (Some(high), Some(low)) = (hex(pair[0]), hex(pair[1])) else {
+                return false;
+            };
+            if expected[index] != ((high << 4) | low) {
+                return false;
+            }
+        }
+        true
+    }
+
+    let mut file = account_line("ada", b"\x11\x22\x33\x44\x55\x66\x77\x88", b"1234");
+    file.push_str(&account_line(
+        "lin",
+        b"\xa0\xb1\xc2\xd3\xe4\xf5\x06\x17",
+        b"9876",
+    ));
+    let written = (vfs::stat("/etc").is_ok() || vfs::mkdir("/etc").is_ok())
+        && vfs::mkdir("/etc/wovenhat").is_ok()
+        && vfs::create_read_only("/etc/wovenhat/accounts", file.as_bytes()).is_ok();
+    if !step("accounts fixture written", written) {
+        return false;
+    }
+    let Ok(shell) = session::start(WOVEN_SHELL_IMAGE, Some("/etc/wovenhat/accounts")) else {
+        return step("identity-capable shell started", false);
+    };
+    if !step(
+        "shell took the display and input focus",
+        until(3000, || {
+            compositor::holder() == Some(shell)
+                && compositor::is_presenting()
+                && session::active() == Some(shell)
+        }),
+    ) {
+        return false;
+    }
+    let Some((width, height)) = compositor::dimensions() else {
+        return step("desktop geometry", false);
+    };
+    let (width, height) = (width as i32, height as i32);
+    let top = height - 24;
+    let middle = height / 2;
+    let line = |y0: i32, text: &str| {
+        let x0 = (width - crate::font::text_width(text) as i32) / 2;
+        let mut mask = Surface::new(width as usize, 7);
+        let bounds = mask.bounds();
+        mask.fill_rect(bounds, UNSET);
+        mask.draw_text(x0, 0, text, WHITE);
+        (y0..y0 + 7).all(|y| {
+            (0..width).all(|x| {
+                let expected = if mask.pixel(x, y - y0) == Some(WHITE) {
+                    WHITE
+                } else {
+                    blend_pixel(BLACK, wallpaper(x, y, height), 160)
+                };
+                compositor::pixel(x, y) == Ok(expected)
+            })
+        })
+    };
+    if !step(
+        "ada sign-in prompt rendered",
+        until(1000, || {
+            line(middle - 60, "Sign in") && line(middle - 4, "Enter PIN")
+        }),
+    ) {
+        return false;
+    }
+    if !step(
+        "ada signs in",
+        keys(&[0x02, 0x03, 0x04, 0x05, 0x1c]) && until(1000, || !line(middle - 60, "Sign in")),
+    ) {
+        return false;
+    }
+    let button = (width - 54 - 5 * 20, top + 4);
+    // Row 6 of 8, "Change PIN": Language was appended after it, so only the
+    // row-count term needs updating, not the row index.
+    let change_row = (
+        width - 4 - 164 + 28,
+        top - 2 - (10 * 14 + 2) + 1 + 6 * 14 + 7,
+    );
+    let opened = move_by(button.0 + 8 - width / 2, button.1 + 8 - middle)
+        && click()
+        && until(1000, compositor::presented);
+    let chosen = opened
+        && move_by(change_row.0 - (button.0 + 8), change_row.1 - (button.1 + 8))
+        && click()
+        && until(1000, || line(middle - 34, "Change PIN"));
+    if !step("Quick Settings Change PIN opens", chosen) {
+        return false;
+    }
+    let change_keys = keys(&[
+        0x02, 0x03, 0x04, 0x05, 0x1c, // current 1234
+        0x07, 0x09, 0x1c, // new 68
+        0x07, 0x09, 0x1c, // confirm 68
+    ]);
+    let changed = change_keys && until(1000, || !line(middle - 34, "Change PIN"));
+    if !step("new PIN accepted and desktop restored", changed) {
+        return false;
+    }
+    if !step(
+        "old PIN is absent from the persisted record",
+        !file_accepts(b"1234"),
+    ) || !step(
+        "new PIN is present in the persisted record",
+        file_accepts(b"68"),
+    ) {
+        return false;
+    }
+    // Row 5 of 8, "Change PIN" and Language were both appended after
+    // "Lock screen", so only the row-count term needs updating.
+    let lock_row = (
+        width - 4 - 164 + 28,
+        top - 2 - (10 * 14 + 2) + 1 + 5 * 14 + 7,
+    );
+    let qs_reopened = move_by(button.0 + 8 - change_row.0, button.1 + 8 - change_row.1) && click();
+    let locked = qs_reopened
+        && move_by(lock_row.0 - (button.0 + 8), lock_row.1 - (button.1 + 8))
+        && click()
+        && until(1000, || line(middle - 34, "Locked"));
+    let old_refused = locked
+        && keys(&[0x02, 0x03, 0x04, 0x05, 0x1c])
+        && until(500, || line(middle - 4, "Wrong PIN"));
+    let new_works =
+        old_refused && keys(&[0x07, 0x09, 0x1c]) && until(1000, || !line(middle - 34, "Locked"));
+    if !step("old PIN is refused and new PIN unlocks", new_works) {
+        return false;
+    }
+    let _ = task::kill_process(shell, 9);
+    true
 }
 
 /// Stage 20.13 acceptance: workspaces. With real i8042 input the kernel
@@ -6101,7 +8542,11 @@ fn stage20_13_self_test() -> bool {
     const F4: u8 = 0x3e;
 
     fn step(name: &str, ok: bool) -> bool {
-        serial::write_line(format_args!("[S20.13] {} {}", name, if ok { "PASS" } else { "FAIL" }));
+        serial::write_line(format_args!(
+            "[S20.13] {} {}",
+            name,
+            if ok { "PASS" } else { "FAIL" }
+        ));
         ok
     }
     fn until(limit: u64, condition: impl Fn() -> bool) -> bool {
@@ -6128,7 +8573,8 @@ fn stage20_13_self_test() -> bool {
     }
     fn packet(dx: i16, screen_dy: i16, left: bool) -> bool {
         let dy = -screen_dy;
-        let flags = 0x08 | u8::from(left) | if dx < 0 { 0x10 } else { 0 } | if dy < 0 { 0x20 } else { 0 };
+        let flags =
+            0x08 | u8::from(left) | if dx < 0 { 0x10 } else { 0 } | if dy < 0 { 0x20 } else { 0 };
         [flags, dx as u8, dy as u8].into_iter().all(mouse::loopback)
     }
     fn move_by(mut dx: i32, mut dy: i32) -> bool {
@@ -6154,15 +8600,20 @@ fn stage20_13_self_test() -> bool {
         .with(capability::Capability::DisplayIo)
         .with(capability::Capability::InputIo)
         .with(capability::Capability::Ipc);
-    let Some(program) = userspace::load_elf_with_argv(WOVEN_SHELL_IMAGE, &["/bin/woven-shell"]) else {
+    let Some(program) = userspace::load_elf_with_argv(WOVEN_SHELL_IMAGE, &["/bin/woven-shell"])
+    else {
         return step("shell image loads", false);
     };
-    let Ok((shell, _, _)) = task::spawn_user_system_service("woven-shell", program, capabilities) else {
+    let Ok((shell, _, _)) = task::spawn_user_system_service("woven-shell", program, capabilities)
+    else {
         return step("shell spawned", false);
     };
     if !step(
         "shell took the display",
-        installed && until(3000, || compositor::holder() == Some(shell.as_u64()) && compositor::is_presenting()),
+        installed
+            && until(3000, || {
+                compositor::holder() == Some(shell.as_u64()) && compositor::is_presenting()
+            }),
     ) {
         return false;
     }
@@ -6176,7 +8627,11 @@ fn stage20_13_self_test() -> bool {
     let box_x = |index: i32| qs_x - 6 - (4 * 14 - 2) + index * 14;
     let current = move |index: i32| {
         (0..4).all(|other| {
-            let expected = if other == index { ENTRY_ACTIVE } else { ENTRY_INACTIVE };
+            let expected = if other == index {
+                ENTRY_ACTIVE
+            } else {
+                ENTRY_INACTIVE
+            };
             compositor::pixel(box_x(other) + 1, top + 5) == Ok(expected)
         })
     };
@@ -6185,70 +8640,117 @@ fn stage20_13_self_test() -> bool {
     let taskbar = move |x: i32, y: i32| blend_pixel(TASKBAR, wallpaper(x, y, height), 216);
     let no_entry = move || compositor::pixel(57, top + 5) == Ok(taskbar(57, top + 5));
     // The second entry slot (80 wide, 4 apart): only one window listed.
-    let one_entry = move || !no_entry() && compositor::pixel(141, top + 5) == Ok(taskbar(141, top + 5));
+    let one_entry =
+        move || !no_entry() && compositor::pixel(141, top + 5) == Ok(taskbar(141, top + 5));
     // B lies inside A's shadowed footprint, so with A showing a hidden B is
     // judged by its colour being gone and by the taskbar listing one window.
     let (a_x, a_y, b_x, b_y) = (45, 45, 162, 122);
     let b_hidden = move || compositor::pixel(b_x, b_y) != Ok(BLUE) && one_entry();
     // Both windows listed on the current workspace.
     let two_entries = move || {
-        matches!(compositor::pixel(141, top + 5), Ok(ENTRY_ACTIVE | ENTRY_INACTIVE)) && !no_entry()
+        matches!(
+            compositor::pixel(141, top + 5),
+            Ok(ENTRY_ACTIVE | ENTRY_INACTIVE)
+        ) && !no_entry()
     };
 
-    if !step("four workspaces, the first current", until(1000, || current(0))) {
+    if !step(
+        "four workspaces, the first current",
+        until(1000, || current(0)),
+    ) {
         return false;
     }
-    let client = capability::CapabilitySet::only(capability::Capability::Console).with(capability::Capability::Ipc);
+    let client = capability::CapabilitySet::only(capability::Capability::Console)
+        .with(capability::Capability::Ipc);
     let shell_arg = alloc::format!("{}", shell.as_u64());
-    let Some(_alpha) = spawn_hello_gui(HELLO_GUI_IMAGE, &["/bin/hello-gui", "--desktop-client", &shell_arg, "a"], Some(client)) else {
+    let Some(_alpha) = spawn_hello_gui(
+        HELLO_GUI_IMAGE,
+        &["/bin/hello-gui", "--desktop-client", &shell_arg, "a"],
+        Some(client),
+    ) else {
         return step("application A spawned", false);
     };
-    if !step("window A opens on workspace 1", until(2000, || compositor::pixel(a_x, a_y) == Ok(RED) && !no_entry())) {
+    if !step(
+        "window A opens on workspace 1",
+        until(2000, || {
+            compositor::pixel(a_x, a_y) == Ok(RED) && !no_entry()
+        }),
+    ) {
         return false;
     }
     let switched = keys(&[F3]) && until(1000, || current(1) && wall(a_x, a_y) && no_entry());
-    if !step("F3: workspace 2 is current; A and its entry are gone", switched) {
+    if !step(
+        "F3: workspace 2 is current; A and its entry are gone",
+        switched,
+    ) {
         return false;
     }
-    let Some(beta) = spawn_hello_gui(HELLO_GUI_IMAGE, &["/bin/hello-gui", "--desktop-client", &shell_arg, "b"], Some(client)) else {
+    let Some(beta) = spawn_hello_gui(
+        HELLO_GUI_IMAGE,
+        &["/bin/hello-gui", "--desktop-client", &shell_arg, "b"],
+        Some(client),
+    ) else {
         return step("application B spawned", false);
     };
     if !step(
         "window B opens on workspace 2, A stays hidden",
-        until(2000, || compositor::pixel(b_x, b_y) == Ok(BLUE) && wall(a_x, a_y)),
+        until(2000, || {
+            compositor::pixel(b_x, b_y) == Ok(BLUE) && wall(a_x, a_y)
+        }),
     ) {
         return false;
     }
     let (px, py) = (width / 2, height / 2);
     let clicked = move_by(box_x(0) + 2 - px, top + 8 - py)
         && click()
-        && until(1000, || current(0) && compositor::pixel(a_x, a_y) == Ok(RED) && b_hidden());
+        && until(1000, || {
+            current(0) && compositor::pixel(a_x, a_y) == Ok(RED) && b_hidden()
+        });
     if !step("clicking box 1 brings A back and hides B", clicked) {
         return false;
     }
     let moved = keys(&[F4])
-        && until(1000, || current(1) && compositor::pixel(a_x, a_y) == Ok(RED) && two_entries());
-    if !step("F4 moves A to workspace 2 and follows: A on top, both listed", moved) {
+        && until(1000, || {
+            current(1) && compositor::pixel(a_x, a_y) == Ok(RED) && two_entries()
+        });
+    if !step(
+        "F4 moves A to workspace 2 and follows: A on top, both listed",
+        moved,
+    ) {
         return false;
     }
-    let away = keys(&[F3]) && until(1000, || current(2) && wall(a_x, a_y) && wall(b_x, b_y) && no_entry());
+    let away = keys(&[F3])
+        && until(1000, || {
+            current(2) && wall(a_x, a_y) && wall(b_x, b_y) && no_entry()
+        });
     if !step("F3: workspace 3 shows neither", away) {
         return false;
     }
-    let killed = task::kill_process(beta.as_u64(), 9).is_ok() && until(1000, || task::process_exited(beta));
+    let killed =
+        task::kill_process(beta.as_u64(), 9).is_ok() && until(1000, || task::process_exited(beta));
     let _ = task::wait_process(beta.as_u64());
     // Workspace 3 -> 4 -> 1 -> 2.
     let back = killed
         && keys(&[F3, F3, F3])
-        && until(1000, || current(1) && compositor::pixel(a_x, a_y) == Ok(RED) && b_hidden());
-    if !step("B closed while hidden; back on workspace 2 only A remains", back) {
+        && until(1000, || {
+            current(1) && compositor::pixel(a_x, a_y) == Ok(RED) && b_hidden()
+        });
+    if !step(
+        "B closed while hidden; back on workspace 2 only A remains",
+        back,
+    ) {
         return false;
     }
-    if task::kill_process(shell.as_u64(), 9).is_err() || !until(1000, || task::process_exited(shell)) {
+    if task::kill_process(shell.as_u64(), 9).is_err()
+        || !until(1000, || task::process_exited(shell))
+    {
         return step("shell killed", false);
     }
     let _ = task::wait_process(shell.as_u64());
-    step("display returned to the terminal", compositor::holder().is_none() && !compositor::is_presenting())
+    step(
+        "display returned to the terminal",
+        compositor::holder().is_none() && !compositor::is_presenting(),
+    )
 }
 
 /// Stage 20.12 acceptance: signing in.
@@ -6267,7 +8769,7 @@ fn stage20_13_self_test() -> bool {
 #[cfg(feature = "stage20-12-test")]
 fn stage20_12_self_test() -> bool {
     use crate::display::{blend_pixel, rgb, Surface};
-    use sha2::{Digest, Sha256};
+    use sha2::Sha256;
 
     const WALLPAPER_TOP: u32 = rgb(18, 42, 74);
     const WALLPAPER_BOTTOM: u32 = rgb(64, 28, 88);
@@ -6308,10 +8810,8 @@ fn stage20_12_self_test() -> bool {
     }
     fn packet(dx: i16, screen_dy: i16, left: bool) -> bool {
         let dy = -screen_dy;
-        let flags = 0x08
-            | u8::from(left)
-            | if dx < 0 { 0x10 } else { 0 }
-            | if dy < 0 { 0x20 } else { 0 };
+        let flags =
+            0x08 | u8::from(left) | if dx < 0 { 0x10 } else { 0 } | if dy < 0 { 0x20 } else { 0 };
         [flags, dx as u8, dy as u8].into_iter().all(mouse::loopback)
     }
     fn move_by(mut dx: i32, mut dy: i32) -> bool {
@@ -6331,18 +8831,17 @@ fn stage20_12_self_test() -> bool {
     fn keys(codes: &[u8]) -> bool {
         codes.iter().all(|&code| mouse::keyboard_loopback(code))
     }
-    /// One accounts-file line: `name:salt-hex:SHA-256(salt || pin)-hex`.
+    /// One accounts-file line: `name:salt-hex:hash-hex`. Must match
+    /// `libwoven::accounts::{hash_pin, PBKDF2_ITERATIONS}`.
     fn account_line(name: &str, salt: &[u8], pin: &[u8]) -> alloc::string::String {
-        let mut hasher = Sha256::new();
-        hasher.update(salt);
-        hasher.update(pin);
-        let digest = hasher.finalize();
+        let mut hash = [0u8; 32];
+        pbkdf2::pbkdf2_hmac::<Sha256>(pin, salt, 100_000, &mut hash);
         let mut line = alloc::format!("{name}:");
         for byte in salt {
             line.push_str(&alloc::format!("{byte:02x}"));
         }
         line.push(':');
-        for byte in digest {
+        for byte in hash {
             line.push_str(&alloc::format!("{byte:02x}"));
         }
         line.push('\n');
@@ -6350,7 +8849,11 @@ fn stage20_12_self_test() -> bool {
     }
 
     let mut file = account_line("ada", b"\x11\x22\x33\x44\x55\x66\x77\x88", b"1234");
-    file.push_str(&account_line("lin", b"\xa0\xb1\xc2\xd3\xe4\xf5\x06\x17", b"9876"));
+    file.push_str(&account_line(
+        "lin",
+        b"\xa0\xb1\xc2\xd3\xe4\xf5\x06\x17",
+        b"9876",
+    ));
     // Boot creates /etc; make sure of it rather than assume.
     let written = (vfs::stat("/etc").is_ok() || vfs::mkdir("/etc").is_ok())
         && vfs::mkdir("/etc/wovenhat").is_ok()
@@ -6359,23 +8862,33 @@ fn stage20_12_self_test() -> bool {
     if !step("accounts file written (salted hashes, no PINs)", written) {
         return false;
     }
+    if !step(
+        "accounts loaded into the kernel identity authority",
+        identity_runtime::load_accounts_file("/etc/wovenhat/accounts").is_ok(),
+    ) {
+        return false;
+    }
     let capabilities = capability::CapabilitySet::only(capability::Capability::Console)
         .with(capability::Capability::DisplayIo)
         .with(capability::Capability::InputIo)
         .with(capability::Capability::Ipc)
-        .with(capability::Capability::FileRead);
+        .with(capability::Capability::FileRead)
+        .with(capability::Capability::AccountManage);
     let Some(program) = userspace::load_elf_with_argv(
         WOVEN_SHELL_IMAGE,
         &["/bin/woven-shell", "--accounts", "/etc/wovenhat/accounts"],
     ) else {
         return step("shell image loads", false);
     };
-    let Ok((shell, _, _)) = task::spawn_user_system_service("woven-shell", program, capabilities) else {
+    let Ok((shell, _, _)) = task::spawn_user_system_service("woven-shell", program, capabilities)
+    else {
         return step("shell spawned", false);
     };
     if !step(
         "shell took the display",
-        until(3000, || compositor::holder() == Some(shell.as_u64()) && compositor::is_presenting()),
+        until(3000, || {
+            compositor::holder() == Some(shell.as_u64()) && compositor::is_presenting()
+        }),
     ) {
         return false;
     }
@@ -6394,7 +8907,11 @@ fn stage20_12_self_test() -> bool {
         mask.draw_text(x0, 0, text, WHITE);
         (y0..y0 + 7).all(|y| {
             (0..width).all(|x| {
-                let expected = if mask.pixel(x, y - y0) == Some(WHITE) { WHITE } else { dim(x, y) };
+                let expected = if mask.pixel(x, y - y0) == Some(WHITE) {
+                    WHITE
+                } else {
+                    dim(x, y)
+                };
                 compositor::pixel(x, y) == Ok(expected)
             })
         })
@@ -6412,10 +8929,14 @@ fn stage20_12_self_test() -> bool {
     ) {
         return false;
     }
-    if !step("Tab chooses lin", keys(&[0x0f]) && until(500, || sign_in("  ada", "> lin", "Enter PIN"))) {
+    if !step(
+        "Tab chooses lin",
+        keys(&[0x0f]) && until(500, || sign_in("  ada", "> lin", "Enter PIN")),
+    ) {
         return false;
     }
-    let refused = keys(&[0x02, 0x03, 0x04, 0x05, 0x1c]) && until(500, || sign_in("  ada", "> lin", "Wrong PIN"));
+    let refused = keys(&[0x02, 0x03, 0x04, 0x05, 0x1c])
+        && until(500, || sign_in("  ada", "> lin", "Wrong PIN"));
     if !step("ada's PIN is refused for lin", refused) {
         return false;
     }
@@ -6432,34 +8953,55 @@ fn stage20_12_self_test() -> bool {
         mask.draw_text(0, 0, "lin", WHITE);
         (top + 9..top + 16).all(|y| {
             (name_x..name_x + 18).all(|x| {
-                let expected = if mask.pixel(x - name_x, y - (top + 9)) == Some(WHITE) { WHITE } else { taskbar(x, y) };
+                let expected = if mask.pixel(x - name_x, y - (top + 9)) == Some(WHITE) {
+                    WHITE
+                } else {
+                    taskbar(x, y)
+                };
                 compositor::pixel(x, y) == Ok(expected)
             })
         })
     };
     let signed_in = keys(&[0x0a, 0x09, 0x08, 0x07, 0x1c]) && until(1000, name_shown);
-    if !step("lin's PIN signs in; lin's name is on the taskbar", signed_in) {
+    if !step(
+        "lin's PIN signs in; lin's name is on the taskbar",
+        signed_in,
+    ) {
         return false;
     }
 
-    // Lock through Quick Settings: the lock screen wants lin's PIN.
-    let lock_row = (width - 4 - 164 + 28, top - 2 - (5 * 14 + 2) + 1 + 4 * 14 + 7);
+    // Lock through Quick Settings: the lock screen wants lin's PIN. Row 5 of
+    // 8 ("Lock screen"): this geometry was stale at QS_ROWS=5/row 4, from
+    // before Tiling moved "Lock screen" to row 5 -- Change PIN and Language
+    // were both appended after it since, so only the row-count term needed
+    // updating, not the row index.
+    let lock_row = (
+        width - 4 - 164 + 28,
+        top - 2 - (10 * 14 + 2) + 1 + 5 * 14 + 7,
+    );
     let (px, py) = (width / 2, height / 2);
     let locked = move_by(button.0 + 8 - px, button.1 + 8 - py)
         && click()
         && move_by(lock_row.0 - (button.0 + 8), lock_row.1 - (button.1 + 8))
         && click()
-        && until(1000, || line(middle - 34, "Locked") && line(middle - 4, "Enter PIN"));
+        && until(1000, || {
+            line(middle - 34, "Locked") && line(middle - 4, "Enter PIN")
+        });
     let lock_checks = locked
         && keys(&[0x02, 0x03, 0x04, 0x05, 0x1c])
         && until(500, || line(middle - 4, "Wrong PIN"))
         && keys(&[0x0a, 0x09, 0x08, 0x07, 0x1c])
         && until(1000, name_shown);
-    if !step("the lock screen refuses ada's PIN and takes lin's", lock_checks) {
+    if !step(
+        "the lock screen refuses ada's PIN and takes lin's",
+        lock_checks,
+    ) {
         return false;
     }
 
-    if task::kill_process(shell.as_u64(), 9).is_err() || !until(1000, || task::process_exited(shell)) {
+    if task::kill_process(shell.as_u64(), 9).is_err()
+        || !until(1000, || task::process_exited(shell))
+    {
         return step("shell killed", false);
     }
     let _ = task::wait_process(shell.as_u64());
@@ -6536,10 +9078,8 @@ fn stage20_11_self_test() -> bool {
     }
     fn packet(dx: i16, screen_dy: i16, left: bool) -> bool {
         let dy = -screen_dy;
-        let flags = 0x08
-            | u8::from(left)
-            | if dx < 0 { 0x10 } else { 0 }
-            | if dy < 0 { 0x20 } else { 0 };
+        let flags =
+            0x08 | u8::from(left) | if dx < 0 { 0x10 } else { 0 } | if dy < 0 { 0x20 } else { 0 };
         [flags, dx as u8, dy as u8].into_iter().all(mouse::loopback)
     }
     fn move_by(mut dx: i32, mut dy: i32) -> bool {
@@ -6565,15 +9105,21 @@ fn stage20_11_self_test() -> bool {
         .with(capability::Capability::DisplayIo)
         .with(capability::Capability::InputIo)
         .with(capability::Capability::Ipc);
-    let Some(program) = userspace::load_elf_with_argv(WOVEN_SHELL_IMAGE, &["/bin/woven-shell", "--pin", "2468"]) else {
+    let Some(program) =
+        userspace::load_elf_with_argv(WOVEN_SHELL_IMAGE, &["/bin/woven-shell", "--pin", "2468"])
+    else {
         return step("shell image loads", false);
     };
-    let Ok((shell, _, _)) = task::spawn_user_system_service("woven-shell", program, capabilities) else {
+    let Ok((shell, _, _)) = task::spawn_user_system_service("woven-shell", program, capabilities)
+    else {
         return step("shell spawned", false);
     };
     if !step(
         "shell took the display",
-        installed && until(3000, || compositor::holder() == Some(shell.as_u64()) && compositor::is_presenting()),
+        installed
+            && until(3000, || {
+                compositor::holder() == Some(shell.as_u64()) && compositor::is_presenting()
+            }),
     ) {
         return false;
     }
@@ -6582,12 +9128,20 @@ fn stage20_11_self_test() -> bool {
     };
     let (width, height) = (width as i32, height as i32);
     let top = height - 24;
-    let client = capability::CapabilitySet::only(capability::Capability::Console).with(capability::Capability::Ipc);
+    let client = capability::CapabilitySet::only(capability::Capability::Console)
+        .with(capability::Capability::Ipc);
     let shell_arg = alloc::format!("{}", shell.as_u64());
-    let Some(alpha) = spawn_hello_gui(HELLO_GUI_IMAGE, &["/bin/hello-gui", "--desktop-client", &shell_arg, "a"], Some(client)) else {
+    let Some(alpha) = spawn_hello_gui(
+        HELLO_GUI_IMAGE,
+        &["/bin/hello-gui", "--desktop-client", &shell_arg, "a"],
+        Some(client),
+    ) else {
         return step("application A spawned", false);
     };
-    if !step("window A opened", until(2000, || compositor::pixel(45, 45) == Ok(RED))) {
+    if !step(
+        "window A opened",
+        until(2000, || compositor::pixel(45, 45) == Ok(RED)),
+    ) {
         return false;
     }
 
@@ -6603,7 +9157,11 @@ fn stage20_11_self_test() -> bool {
         mask.draw_text(x0, 0, text, WHITE);
         (y0..y0 + 7).all(|y| {
             (0..width).all(|x| {
-                let expected = if mask.pixel(x, y - y0) == Some(WHITE) { WHITE } else { dim(x, y) };
+                let expected = if mask.pixel(x, y - y0) == Some(WHITE) {
+                    WHITE
+                } else {
+                    dim(x, y)
+                };
                 compositor::pixel(x, y) == Ok(expected)
             })
         })
@@ -6618,12 +9176,21 @@ fn stage20_11_self_test() -> bool {
         })
     };
     let screen = |prompt: &str, count: i32| {
-        line(middle - 34, "Locked") && line(middle - 4, prompt) && dots(count) && compositor::pixel(45, 45) == Ok(dim(45, 45))
+        line(middle - 34, "Locked")
+            && line(middle - 4, prompt)
+            && dots(count)
+            && compositor::pixel(45, 45) == Ok(dim(45, 45))
     };
 
-    // Quick Settings: the button, then its last row, "Lock screen".
+    // Quick Settings: the button, then row 5 of 8, "Lock screen" (this
+    // geometry was stale at QS_ROWS=5/row 4, from before Tiling moved
+    // "Lock screen" to row 5; Change PIN and Language were both appended
+    // after it since, so only the row-count term needed updating).
     let button = (width - 54 - 5 * 20 + 8, top + 12);
-    let lock_row = (width - 4 - 164 + 28, top - 2 - (5 * 14 + 2) + 1 + 4 * 14 + 7);
+    let lock_row = (
+        width - 4 - 164 + 28,
+        top - 2 - (10 * 14 + 2) + 1 + 5 * 14 + 7,
+    );
     let (mut px, mut py) = (width / 2, height / 2);
     let lock = |px: &mut i32, py: &mut i32| {
         let ok = move_by(button.0 - *px, button.1 - *py)
@@ -6633,12 +9200,18 @@ fn stage20_11_self_test() -> bool {
         (*px, *py) = lock_row;
         ok
     };
-    if !step("Quick Settings locks the screen; the window is hidden", lock(&mut px, &mut py) && until(1000, || screen("Enter PIN", 0))) {
+    if !step(
+        "Quick Settings locks the screen; the window is hidden",
+        lock(&mut px, &mut py) && until(1000, || screen("Enter PIN", 0)),
+    ) {
         return false;
     }
     // A key while locked reaches no application: A, waiting for x, must
     // still be running a second later.
-    let withheld = keys(&[0x2d]) && stays(100, || !task::process_exited(alpha) && screen("Enter PIN", 0));
+    let withheld = keys(&[0x2d])
+        && stays(100, || {
+            !task::process_exited(alpha) && screen("Enter PIN", 0)
+        });
     if !step("a key while locked reaches no application", withheld) {
         return false;
     }
@@ -6650,7 +9223,8 @@ fn stage20_11_self_test() -> bool {
     if !step("a wrong PIN says so and stays locked", wrong) {
         return false;
     }
-    let unlocked = keys(&[0x03, 0x05, 0x07, 0x09, 0x1c]) && until(1000, || compositor::pixel(45, 45) == Ok(RED));
+    let unlocked = keys(&[0x03, 0x05, 0x07, 0x09, 0x1c])
+        && until(1000, || compositor::pixel(45, 45) == Ok(RED));
     if !step("the right PIN unlocks and the window returns", unlocked) {
         return false;
     }
@@ -6660,7 +9234,9 @@ fn stage20_11_self_test() -> bool {
     }
 
     // Lockout: lock again, three wrong PINs, then the right one too soon.
-    let gone = until(1000, || compositor::pixel(45, 45) == Ok(wallpaper(45, 45, height)));
+    let gone = until(1000, || {
+        compositor::pixel(45, 45) == Ok(wallpaper(45, 45, height))
+    });
     let relocked = gone && lock(&mut px, &mut py) && until(1000, || screen("Enter PIN", 0));
     let locked_out = relocked
         && keys(&[0x02, 0x1c, 0x02, 0x1c, 0x02, 0x1c])
@@ -6672,7 +9248,10 @@ fn stage20_11_self_test() -> bool {
         && until(500, || !woven_input::pending(shell.as_u64()))
         && until(500, || screen("Try again shortly", 0))
         && stays(100, || screen("Try again shortly", 0));
-    if !step("three wrong PINs lock entry out; the right PIN is refused meanwhile", locked_out) {
+    if !step(
+        "three wrong PINs lock entry out; the right PIN is refused meanwhile",
+        locked_out,
+    ) {
         return false;
     }
     let started = timer::ticks();
@@ -6680,12 +9259,16 @@ fn stage20_11_self_test() -> bool {
         task::yield_now();
     }
     let after = keys(&[0x03, 0x05, 0x07, 0x09, 0x1c])
-        && until(1000, || compositor::pixel(45, 45) == Ok(wallpaper(45, 45, height)));
+        && until(1000, || {
+            compositor::pixel(45, 45) == Ok(wallpaper(45, 45, height))
+        });
     if !step("after the lockout the right PIN unlocks", after) {
         return false;
     }
 
-    if task::kill_process(shell.as_u64(), 9).is_err() || !until(1000, || task::process_exited(shell)) {
+    if task::kill_process(shell.as_u64(), 9).is_err()
+        || !until(1000, || task::process_exited(shell))
+    {
         return step("shell killed", false);
     }
     let _ = task::wait_process(shell.as_u64());
@@ -6764,15 +9347,20 @@ fn stage20_10_self_test() -> bool {
         }
         true
     }
-    fn region(x0: i32, y0: i32, width: i32, height: i32, expected: impl Fn(i32, i32) -> u32) -> bool {
-        (y0..y0 + height).all(|y| (x0..x0 + width).all(|x| compositor::pixel(x, y) == Ok(expected(x, y))))
+    fn region(
+        x0: i32,
+        y0: i32,
+        width: i32,
+        height: i32,
+        expected: impl Fn(i32, i32) -> u32,
+    ) -> bool {
+        (y0..y0 + height)
+            .all(|y| (x0..x0 + width).all(|x| compositor::pixel(x, y) == Ok(expected(x, y))))
     }
     fn packet(dx: i16, screen_dy: i16, left: bool) -> bool {
         let dy = -screen_dy;
-        let flags = 0x08
-            | u8::from(left)
-            | if dx < 0 { 0x10 } else { 0 }
-            | if dy < 0 { 0x20 } else { 0 };
+        let flags =
+            0x08 | u8::from(left) | if dx < 0 { 0x10 } else { 0 } | if dy < 0 { 0x20 } else { 0 };
         [flags, dx as u8, dy as u8].into_iter().all(mouse::loopback)
     }
     fn move_by(mut dx: i32, mut dy: i32) -> bool {
@@ -6792,9 +9380,15 @@ fn stage20_10_self_test() -> bool {
     /// The Quick Settings panel for a desktop `width`x`height`, with `rows`,
     /// over whatever `beneath` gives, skipping the cells under the pointer
     /// at `pointer`.
-    fn panel(width: i32, height: i32, rows: [&str; 6], beneath: impl Fn(i32, i32) -> u32, pointer: (i32, i32)) -> bool {
+    fn panel(
+        width: i32,
+        height: i32,
+        rows: [&str; 10],
+        beneath: impl Fn(i32, i32) -> u32,
+        pointer: (i32, i32),
+    ) -> bool {
         let top = height - 24;
-        let h = 7 * 14 + 2;
+        let h = 11 * 14 + 2;
         let (x0, y0) = (width - 4 - 164, top - 2 - h);
         let mut image = Surface::new(164, h as usize);
         let bounds = image.bounds();
@@ -6807,7 +9401,9 @@ fn stage20_10_self_test() -> bool {
         }
         (y0..y0 + h).all(|y| {
             (x0..x0 + 164).all(|x| {
-                if (pointer.0..pointer.0 + 7).contains(&x) && (pointer.1..pointer.1 + 10).contains(&y) {
+                if (pointer.0..pointer.0 + 7).contains(&x)
+                    && (pointer.1..pointer.1 + 10).contains(&y)
+                {
                     return true;
                 }
                 let expected = match image.pixel(x - x0, y - y0) {
@@ -6824,15 +9420,20 @@ fn stage20_10_self_test() -> bool {
         .with(capability::Capability::DisplayIo)
         .with(capability::Capability::InputIo)
         .with(capability::Capability::Ipc);
-    let Some(program) = userspace::load_elf_with_argv(WOVEN_SHELL_IMAGE, &["/bin/woven-shell"]) else {
+    let Some(program) = userspace::load_elf_with_argv(WOVEN_SHELL_IMAGE, &["/bin/woven-shell"])
+    else {
         return step("shell image loads", false);
     };
-    let Ok((shell, _, _)) = task::spawn_user_system_service("woven-shell", program, capabilities) else {
+    let Ok((shell, _, _)) = task::spawn_user_system_service("woven-shell", program, capabilities)
+    else {
         return step("shell spawned", false);
     };
     if !step(
         "shell took the display",
-        installed && until(3000, || compositor::holder() == Some(shell.as_u64()) && compositor::is_presenting()),
+        installed
+            && until(3000, || {
+                compositor::holder() == Some(shell.as_u64()) && compositor::is_presenting()
+            }),
     ) {
         return false;
     }
@@ -6841,12 +9442,20 @@ fn stage20_10_self_test() -> bool {
     };
     let (width, height) = (width as i32, height as i32);
     let top = height - 24;
-    let client = capability::CapabilitySet::only(capability::Capability::Console).with(capability::Capability::Ipc);
+    let client = capability::CapabilitySet::only(capability::Capability::Console)
+        .with(capability::Capability::Ipc);
     let shell_arg = alloc::format!("{}", shell.as_u64());
-    let Some(quiet) = spawn_hello_gui(HELLO_GUI_IMAGE, &["/bin/hello-gui", "--desktop-client", &shell_arg, "q"], Some(client)) else {
+    let Some(quiet) = spawn_hello_gui(
+        HELLO_GUI_IMAGE,
+        &["/bin/hello-gui", "--desktop-client", &shell_arg, "q"],
+        Some(client),
+    ) else {
         return step("application Q spawned", false);
     };
-    if !step("window Q opened", until(2000, || compositor::pixel(45, 45) == Ok(QUIET))) {
+    if !step(
+        "window Q opened",
+        until(2000, || compositor::pixel(45, 45) == Ok(QUIET)),
+    ) {
         return false;
     }
 
@@ -6854,7 +9463,7 @@ fn stage20_10_self_test() -> bool {
     // pixels apart: Power off and Restart (Stage 20.15), then the toggles at
     // rows 3-5 under the title, and Lock screen.
     let button = (width - 54 - 5 * 20, top + 4);
-    let panel_y = top - 2 - (7 * 14 + 2);
+    let panel_y = top - 2 - (11 * 14 + 2);
     let row = |index: i32| (width - 4 - 164 + 28, panel_y + 1 + (1 + index) * 14 + 7);
     let wall = move |x: i32, y: i32| wallpaper(x, y, height);
 
@@ -6862,8 +9471,24 @@ fn stage20_10_self_test() -> bool {
     let opened = move_by(button.0 + 8 - px, button.1 + 8 - py)
         && click()
         && until(1000, || {
-            panel(width, height, ["Power off", "Restart", "Display scale: 2x", "Do not disturb: Off", "Tiling: Off", "Lock screen"], wall, (button.0 + 8, button.1 + 8))
-                && compositor::pixel(button.0 + 1, button.1 + 1) == Ok(ENTRY_ACTIVE)
+            panel(
+                width,
+                height,
+                [
+                    "Power off",
+                    "Restart",
+                    "Display scale: 2x",
+                    "Do not disturb: Off",
+                    "Tiling: Off",
+                    "Lock screen",
+                    "Change PIN",
+                    "Language: English",
+                    "3D Desktop: Off",
+                    "Reduced Motion: Off",
+                ],
+                wall,
+                (button.0 + 8, button.1 + 8),
+            ) && compositor::pixel(button.0 + 1, button.1 + 1) == Ok(ENTRY_ACTIVE)
         });
     (px, py) = (button.0 + 8, button.1 + 8);
     if !step("the Quick Settings button opens its panel", opened) {
@@ -6875,7 +9500,26 @@ fn stage20_10_self_test() -> bool {
     let (dx, dy) = row(3);
     let dnd = move_by(dx - px, dy - py)
         && click()
-        && until(1000, || panel(width, height, ["Power off", "Restart", "Display scale: 2x", "Do not disturb: On", "Tiling: Off", "Lock screen"], wall, (dx, dy)));
+        && until(1000, || {
+            panel(
+                width,
+                height,
+                [
+                    "Power off",
+                    "Restart",
+                    "Display scale: 2x",
+                    "Do not disturb: On",
+                    "Tiling: Off",
+                    "Lock screen",
+                    "Change PIN",
+                    "Language: English",
+                    "3D Desktop: Off",
+                    "Reduced Motion: Off",
+                ],
+                wall,
+                (dx, dy),
+            )
+        });
     (px, py) = (dx, dy);
     if !step("Do Not Disturb turns on", dnd) {
         return false;
@@ -6893,7 +9537,10 @@ fn stage20_10_self_test() -> bool {
         // seen before a toast would be: the toast area must stay clear for a
         // full second, not just at one instant.
         && stays(100, || region(width - 188, 8, 180, 22, wall));
-    if !step("a notification under Do Not Disturb is counted but raises no toast", silenced) {
+    if !step(
+        "a notification under Do Not Disturb is counted but raises no toast",
+        silenced,
+    ) {
         return false;
     }
 
@@ -6904,7 +9551,24 @@ fn stage20_10_self_test() -> bool {
         && until(2000, || {
             compositor::pixel(5, top - 40) == Ok(QUIET)
                 && compositor::pixel(width - 300, 20) == Ok(QUIET)
-                && panel(width, height, ["Power off", "Restart", "Display scale: 2x", "Do not disturb: On", "Tiling: On", "Lock screen"], |_, _| QUIET, (tx, ty))
+                && panel(
+                    width,
+                    height,
+                    [
+                        "Power off",
+                        "Restart",
+                        "Display scale: 2x",
+                        "Do not disturb: On",
+                        "Tiling: On",
+                        "Lock screen",
+                        "Change PIN",
+                        "Language: English",
+                        "3D Desktop: Off",
+                        "Reduced Motion: Off",
+                    ],
+                    |_, _| QUIET,
+                    (tx, ty),
+                )
         });
     (px, py) = (tx, ty);
     if !step("tiling turns on and the window fills the work area", tiled) {
@@ -6919,19 +9583,45 @@ fn stage20_10_self_test() -> bool {
     let full = (width * 2, height * 2);
     let scaled = move_by(sx - px, sy - py)
         && click()
-        && until(2000, || compositor::scale() == Some(1) && compositor::dimensions() == Some((full.0 as u32, full.1 as u32)))
         && until(2000, || {
-            panel(full.0, full.1, ["Power off", "Restart", "Display scale: 1x", "Do not disturb: On", "Tiling: On", "Lock screen"], |x, y| wallpaper(x, y, full.1), (sx, sy))
+            compositor::scale() == Some(1)
+                && compositor::dimensions() == Some((full.0 as u32, full.1 as u32))
+        })
+        && until(2000, || {
+            panel(
+                full.0,
+                full.1,
+                [
+                    "Power off",
+                    "Restart",
+                    "Display scale: 1x",
+                    "Do not disturb: On",
+                    "Tiling: On",
+                    "Lock screen",
+                    "Change PIN",
+                    "Language: English",
+                    "3D Desktop: Off",
+                    "Reduced Motion: Off",
+                ],
+                |x, y| wallpaper(x, y, full.1),
+                (sx, sy),
+            )
         });
     (px, py) = (sx, sy);
     if !step("display scale 1x makes the desktop 1280x800", scaled) {
         return false;
     }
     // Back to 2x through the panel's scale row at the 1x geometry.
-    let back_row = (full.0 - 4 - 164 + 28, (full.1 - 24) - 2 - (7 * 14 + 2) + 1 + 3 * 14 + 7);
+    let back_row = (
+        full.0 - 4 - 164 + 28,
+        (full.1 - 24) - 2 - (11 * 14 + 2) + 1 + 3 * 14 + 7,
+    );
     let restored = move_by(back_row.0 - px, back_row.1 - py)
         && click()
-        && until(2000, || compositor::scale() == Some(2) && compositor::dimensions() == Some((width as u32, height as u32)));
+        && until(2000, || {
+            compositor::scale() == Some(2)
+                && compositor::dimensions() == Some((width as u32, height as u32))
+        });
     (px, py) = ((back_row.0).min(width - 1), (back_row.1).min(height - 1));
     if !step("display scale 2x restores 640x400", restored) {
         return false;
@@ -6940,15 +9630,347 @@ fn stage20_10_self_test() -> bool {
     // The button closes the panel; Q takes its key and exits.
     let closed = move_by(button.0 + 8 - px, button.1 + 8 - py)
         && click()
-        && until(1000, || region(width - 4 - 164 + 10, panel_y + 10, 100, 30, |_, _| QUIET) || region(width - 4 - 164 + 10, panel_y + 10, 100, 30, wall));
+        && until(1000, || {
+            region(width - 4 - 164 + 10, panel_y + 10, 100, 30, |_, _| QUIET)
+                || region(width - 4 - 164 + 10, panel_y + 10, 100, 30, wall)
+        });
     if !step("the button closes the panel", closed) {
         return false;
     }
-    let exited = mouse::keyboard_loopback(0x10) && wait_hello_gui(quiet).map(|(_, status)| status) == Some(Ok(0));
+    let exited = mouse::keyboard_loopback(0x10)
+        && wait_hello_gui(quiet).map(|(_, status)| status) == Some(Ok(0));
     if !step("Q takes its key and exits", exited) {
         return false;
     }
-    if task::kill_process(shell.as_u64(), 9).is_err() || !until(1000, || task::process_exited(shell)) {
+    if task::kill_process(shell.as_u64(), 9).is_err()
+        || !until(1000, || task::process_exited(shell))
+    {
+        return step("shell killed", false);
+    }
+    let _ = task::wait_process(shell.as_u64());
+    step(
+        "display returned to the terminal",
+        compositor::holder().is_none() && !compositor::is_presenting(),
+    )
+}
+
+/// Stage 20.17 acceptance: the 3D desktop mode's Quick Settings panel.
+///
+/// Toggling "3D Desktop" perspective-projects the panel (its bottom edge
+/// anchored, its top edge receded and narrowed) instead of blitting it
+/// flat. The kernel checks:
+/// - the flat panel's top-left corner is exactly where the 2D layout says;
+/// - after toggling 3D on, that same pixel is no longer panel content --
+///   the real (narrowed) top edge has moved inward, so wallpaper shows
+///   through -- while the panel's bottom-left corner, which the projection
+///   deliberately keeps anchored, is unchanged.
+///
+/// This does not claim the perspective math is pixel-perfect, only that a
+/// real, non-trivial 3D transform is applied and the content is still the
+/// same panel (same bottom anchor), not a different drawing.
+#[cfg(feature = "stage20-17-test")]
+fn stage20_17_self_test() -> bool {
+    use crate::display::rgb;
+    const ACCENT: u32 = rgb(90, 140, 220);
+    const WALLPAPER_TOP: u32 = rgb(18, 42, 74);
+    const WALLPAPER_BOTTOM: u32 = rgb(64, 28, 88);
+    const WHITE: u32 = rgb(255, 255, 255);
+
+    fn step(name: &str, ok: bool) -> bool {
+        serial::write_line(format_args!(
+            "[S20.17] {} {}",
+            name,
+            if ok { "PASS" } else { "FAIL" }
+        ));
+        ok
+    }
+    fn until(limit: u64, condition: impl Fn() -> bool) -> bool {
+        let start = timer::ticks();
+        loop {
+            if condition() {
+                return true;
+            }
+            if timer::ticks().wrapping_sub(start) > limit {
+                return false;
+            }
+            task::yield_now();
+        }
+    }
+    fn packet(dx: i16, screen_dy: i16, left: bool) -> bool {
+        let dy = -screen_dy;
+        let flags =
+            0x08 | u8::from(left) | if dx < 0 { 0x10 } else { 0 } | if dy < 0 { 0x20 } else { 0 };
+        [flags, dx as u8, dy as u8].into_iter().all(mouse::loopback)
+    }
+    fn move_by(mut dx: i32, mut dy: i32) -> bool {
+        while dx != 0 || dy != 0 {
+            let (sx, sy) = (dx.clamp(-100, 100), dy.clamp(-100, 100));
+            if !packet(sx as i16, sy as i16, false) {
+                return false;
+            }
+            dx -= sx;
+            dy -= sy;
+        }
+        true
+    }
+    fn click() -> bool {
+        packet(0, 0, true) && packet(0, 0, false)
+    }
+    fn wallpaper(x: i32, y: i32, height: i32) -> u32 {
+        let span = (height - 1).max(1);
+        let t = (y.clamp(0, span) * 255 / span) as u8;
+        let base = crate::display::blend_pixel(WALLPAPER_BOTTOM, WALLPAPER_TOP, t);
+        if x % 32 == 0 || y % 32 == 0 {
+            crate::display::blend_pixel(WHITE, base, 28)
+        } else {
+            base
+        }
+    }
+
+    let capabilities = capability::CapabilitySet::only(capability::Capability::Console)
+        .with(capability::Capability::DisplayIo)
+        .with(capability::Capability::InputIo)
+        .with(capability::Capability::Ipc);
+    let Some(program) = userspace::load_elf_with_argv(WOVEN_SHELL_IMAGE, &["/bin/woven-shell"])
+    else {
+        return step("shell image loads", false);
+    };
+    let Ok((shell, _, _)) = task::spawn_user_system_service("woven-shell", program, capabilities)
+    else {
+        return step("shell spawned", false);
+    };
+    if !step(
+        "shell took the display",
+        until(3000, || {
+            compositor::holder() == Some(shell.as_u64()) && compositor::is_presenting()
+        }),
+    ) {
+        return false;
+    }
+    let Some((width, height)) = compositor::dimensions() else {
+        return step("desktop geometry", false);
+    };
+    let (width, height) = (width as i32, height as i32);
+    let top = height - 24;
+    const QS_ROWS: i32 = 10;
+    const PANEL_ROW: i32 = 14;
+    const CENTER_WIDTH: i32 = 164;
+    let panel_height = (1 + QS_ROWS) * PANEL_ROW + 2;
+    let (panel_x, panel_y) = (width - 4 - CENTER_WIDTH, top - 2 - panel_height);
+
+    let button = (width - 54 - 5 * 20, top + 4);
+    let (mut px, mut py) = (width / 2, height / 2);
+    let opened = move_by(button.0 + 8 - px, button.1 + 8 - py)
+        && click()
+        && until(1000, || compositor::pixel(panel_x, panel_y) == Ok(ACCENT));
+    (px, py) = (button.0 + 8, button.1 + 8);
+    if !step("the flat panel's top-left corner is exactly where expected", opened) {
+        return false;
+    }
+
+    // The panel spans several tiles; the top-left check above only proves
+    // the first has rendered. Wait for the last one (the bottom-left
+    // corner) too before treating the flat panel as fully settled.
+    if !step(
+        "the flat panel's bottom-left corner settles before toggling 3D",
+        until(1000, || {
+            compositor::pixel(panel_x, panel_y + panel_height - 1) == Ok(ACCENT)
+        }),
+    ) {
+        return false;
+    }
+    let bottom_left_before = compositor::pixel(panel_x, panel_y + panel_height - 1);
+
+    // Row 8 of 9, "3D Desktop".
+    let toggle_row = (
+        width - 4 - CENTER_WIDTH + 28,
+        top - 2 - (QS_ROWS * PANEL_ROW + 2) + 1 + 8 * PANEL_ROW + 7,
+    );
+    let toggled = move_by(toggle_row.0 - px, toggle_row.1 - py) && click();
+    if !step("the 3D Desktop row is reachable and clicked", toggled) {
+        return false;
+    }
+    let projected = until(1000, || {
+        compositor::pixel(panel_x, panel_y) == Ok(wallpaper(panel_x, panel_y, height))
+    });
+    if !step(
+        "3D mode narrows the top edge: the old top-left corner is now wallpaper",
+        projected,
+    ) {
+        return false;
+    }
+    let anchored = bottom_left_before == Ok(ACCENT)
+        && until(1000, || {
+            compositor::pixel(panel_x, panel_y + panel_height - 1) == bottom_left_before
+        });
+    if !step(
+        "3D mode keeps the bottom edge anchored: the bottom-left corner is unchanged",
+        anchored,
+    ) {
+        return false;
+    }
+
+    if task::kill_process(shell.as_u64(), 9).is_err() || !until(1000, || task::process_exited(shell))
+    {
+        return step("shell killed", false);
+    }
+    let _ = task::wait_process(shell.as_u64());
+    step(
+        "display returned to the terminal",
+        compositor::holder().is_none() && !compositor::is_presenting(),
+    )
+}
+
+/// Stage 20.18 acceptance: the 3D desktop mode's window title bars.
+///
+/// The same toggle that perspective-projects the Quick Settings panel
+/// (Stage 20.17) also applies to every window's title-bar fill: the
+/// kernel checks that, with a real window open, the flat title bar's
+/// top-left corner is its fill colour, then after toggling 3D on, that
+/// same pixel is no longer the fill colour -- the real (narrowed) top
+/// edge has moved inward -- while the title bar's bottom-left corner,
+/// which the projection deliberately keeps anchored, is unchanged.
+#[cfg(feature = "stage20-18-test")]
+fn stage20_18_self_test() -> bool {
+    use crate::display::rgb;
+    const ACCENT: u32 = rgb(90, 140, 220);
+    const ACTIVE: u32 = rgb(70, 120, 210);
+    const RED: u32 = rgb(200, 60, 60);
+
+    fn step(name: &str, ok: bool) -> bool {
+        serial::write_line(format_args!(
+            "[S20.18] {} {}",
+            name,
+            if ok { "PASS" } else { "FAIL" }
+        ));
+        ok
+    }
+    fn until(limit: u64, condition: impl Fn() -> bool) -> bool {
+        let start = timer::ticks();
+        loop {
+            if condition() {
+                return true;
+            }
+            if timer::ticks().wrapping_sub(start) > limit {
+                return false;
+            }
+            task::yield_now();
+        }
+    }
+    fn packet(dx: i16, screen_dy: i16, left: bool) -> bool {
+        let dy = -screen_dy;
+        let flags =
+            0x08 | u8::from(left) | if dx < 0 { 0x10 } else { 0 } | if dy < 0 { 0x20 } else { 0 };
+        [flags, dx as u8, dy as u8].into_iter().all(mouse::loopback)
+    }
+    fn move_by(mut dx: i32, mut dy: i32) -> bool {
+        while dx != 0 || dy != 0 {
+            let (sx, sy) = (dx.clamp(-100, 100), dy.clamp(-100, 100));
+            if !packet(sx as i16, sy as i16, false) {
+                return false;
+            }
+            dx -= sx;
+            dy -= sy;
+        }
+        true
+    }
+    fn click() -> bool {
+        packet(0, 0, true) && packet(0, 0, false)
+    }
+
+    let capabilities = capability::CapabilitySet::only(capability::Capability::Console)
+        .with(capability::Capability::DisplayIo)
+        .with(capability::Capability::InputIo)
+        .with(capability::Capability::Ipc);
+    let Some(program) = userspace::load_elf_with_argv(WOVEN_SHELL_IMAGE, &["/bin/woven-shell"])
+    else {
+        return step("shell image loads", false);
+    };
+    let Ok((shell, _, _)) = task::spawn_user_system_service("woven-shell", program, capabilities)
+    else {
+        return step("shell spawned", false);
+    };
+    if !step(
+        "shell took the display",
+        until(3000, || {
+            compositor::holder() == Some(shell.as_u64()) && compositor::is_presenting()
+        }),
+    ) {
+        return false;
+    }
+    let Some((width, height)) = compositor::dimensions() else {
+        return step("desktop geometry", false);
+    };
+    let (width, height) = (width as i32, height as i32);
+    let top = height - 24;
+
+    let client_capabilities = capability::CapabilitySet::only(capability::Capability::Console)
+        .with(capability::Capability::Ipc);
+    let shell_arg = alloc::format!("{}", shell.as_u64());
+    let Some(_alpha) = spawn_hello_gui(
+        HELLO_GUI_IMAGE,
+        &["/bin/hello-gui", "--desktop-client", &shell_arg, "a"],
+        Some(client_capabilities),
+    ) else {
+        return step("application A spawned", false);
+    };
+    // A's window cascades to (40, 40), 120x80, its title bar above: (40, 26),
+    // 120 wide, 14 tall.
+    if !step(
+        "window A opened",
+        until(2000, || compositor::pixel(45, 45) == Ok(RED)),
+    ) {
+        return false;
+    }
+    if !step(
+        "the flat title bar's top-left corner is its fill colour",
+        until(500, || compositor::pixel(40, 26) == Ok(ACTIVE)),
+    ) {
+        return false;
+    }
+    if !step(
+        "the flat title bar's bottom-left corner settles before toggling 3D",
+        until(500, || compositor::pixel(40, 39) == Ok(ACTIVE)),
+    ) {
+        return false;
+    }
+
+    const QS_ROWS: i32 = 10;
+    const PANEL_ROW: i32 = 14;
+    const CENTER_WIDTH: i32 = 164;
+    let button = (width - 54 - 5 * 20, top + 4);
+    let (mut px, mut py) = (width / 2, height / 2);
+    let opened = move_by(button.0 + 8 - px, button.1 + 8 - py) && click();
+    (px, py) = (button.0 + 8, button.1 + 8);
+    if !step("the Quick Settings button opens its panel", opened) {
+        return false;
+    }
+    // Row 8 of 9, "3D Desktop".
+    let toggle_row = (
+        width - 4 - CENTER_WIDTH + 28,
+        top - 2 - (QS_ROWS * PANEL_ROW + 2) + 1 + 8 * PANEL_ROW + 7,
+    );
+    let toggled = move_by(toggle_row.0 - px, toggle_row.1 - py) && click();
+    if !step("the 3D Desktop row is reachable and clicked", toggled) {
+        return false;
+    }
+    let narrowed = until(1000, || compositor::pixel(40, 26) != Ok(ACTIVE));
+    if !step(
+        "3D mode narrows the title bar's top edge: the top-left corner is no longer the fill colour",
+        narrowed,
+    ) {
+        return false;
+    }
+    let anchored = until(1000, || compositor::pixel(40, 39) == Ok(ACTIVE));
+    if !step(
+        "3D mode keeps the title bar's bottom edge anchored: the bottom-left corner is unchanged",
+        anchored,
+    ) {
+        return false;
+    }
+
+    if task::kill_process(shell.as_u64(), 9).is_err() || !until(1000, || task::process_exited(shell))
+    {
         return step("shell killed", false);
     }
     let _ = task::wait_process(shell.as_u64());
@@ -7017,15 +10039,20 @@ fn stage20_9_self_test() -> bool {
             base
         }
     }
-    fn region(x0: i32, y0: i32, width: i32, height: i32, expected: impl Fn(i32, i32) -> u32) -> bool {
-        (y0..y0 + height).all(|y| (x0..x0 + width).all(|x| compositor::pixel(x, y) == Ok(expected(x, y))))
+    fn region(
+        x0: i32,
+        y0: i32,
+        width: i32,
+        height: i32,
+        expected: impl Fn(i32, i32) -> u32,
+    ) -> bool {
+        (y0..y0 + height)
+            .all(|y| (x0..x0 + width).all(|x| compositor::pixel(x, y) == Ok(expected(x, y))))
     }
     fn packet(dx: i16, screen_dy: i16, left: bool) -> bool {
         let dy = -screen_dy;
-        let flags = 0x08
-            | u8::from(left)
-            | if dx < 0 { 0x10 } else { 0 }
-            | if dy < 0 { 0x20 } else { 0 };
+        let flags =
+            0x08 | u8::from(left) | if dx < 0 { 0x10 } else { 0 } | if dy < 0 { 0x20 } else { 0 };
         [flags, dx as u8, dy as u8].into_iter().all(mouse::loopback)
     }
     fn move_by(mut dx: i32, mut dy: i32) -> bool {
@@ -7048,15 +10075,20 @@ fn stage20_9_self_test() -> bool {
         .with(capability::Capability::DisplayIo)
         .with(capability::Capability::InputIo)
         .with(capability::Capability::Ipc);
-    let Some(program) = userspace::load_elf_with_argv(WOVEN_SHELL_IMAGE, &["/bin/woven-shell"]) else {
+    let Some(program) = userspace::load_elf_with_argv(WOVEN_SHELL_IMAGE, &["/bin/woven-shell"])
+    else {
         return step("shell image loads", false);
     };
-    let Ok((shell, _, _)) = task::spawn_user_system_service("woven-shell", program, capabilities) else {
+    let Ok((shell, _, _)) = task::spawn_user_system_service("woven-shell", program, capabilities)
+    else {
         return step("shell spawned", false);
     };
     if !step(
         "shell took the display",
-        installed && until(3000, || compositor::holder() == Some(shell.as_u64()) && compositor::is_presenting()),
+        installed
+            && until(3000, || {
+                compositor::holder() == Some(shell.as_u64()) && compositor::is_presenting()
+            }),
     ) {
         return false;
     }
@@ -7066,12 +10098,20 @@ fn stage20_9_self_test() -> bool {
     let (width, height) = (width as i32, height as i32);
     let top = height - 24;
     let taskbar = move |x: i32, y: i32| blend_pixel(TASKBAR, wallpaper(x, y, height), 216);
-    let client = capability::CapabilitySet::only(capability::Capability::Console).with(capability::Capability::Ipc);
+    let client = capability::CapabilitySet::only(capability::Capability::Console)
+        .with(capability::Capability::Ipc);
     let shell_arg = alloc::format!("{}", shell.as_u64());
-    let Some(notes) = spawn_hello_gui(HELLO_GUI_IMAGE, &["/bin/hello-gui", "--desktop-client", &shell_arg, "n"], Some(client)) else {
+    let Some(notes) = spawn_hello_gui(
+        HELLO_GUI_IMAGE,
+        &["/bin/hello-gui", "--desktop-client", &shell_arg, "n"],
+        Some(client),
+    ) else {
         return step("application N spawned", false);
     };
-    if !step("window N opened", until(2000, || compositor::pixel(45, 45) == Ok(NOTES))) {
+    if !step(
+        "window N opened",
+        until(2000, || compositor::pixel(45, 45) == Ok(NOTES)),
+    ) {
         return false;
     }
 
@@ -7112,9 +10152,14 @@ fn stage20_9_self_test() -> bool {
         let bounds = image.bounds();
         image.fill_rect(bounds, ACCENT);
         image.draw_text(3, 2, digit, WHITE);
-        region(badge_x, badge_y, 10, 11, |x, y| image.pixel(x - badge_x, y - badge_y).unwrap_or(UNSET))
+        region(badge_x, badge_y, 10, 11, |x, y| {
+            image.pixel(x - badge_x, y - badge_y).unwrap_or(UNSET)
+        })
     };
-    if !step("a badge counts three unread notifications", until(1000, || badge("3"))) {
+    if !step(
+        "a badge counts three unread notifications",
+        until(1000, || badge("3")),
+    ) {
         return false;
     }
 
@@ -7127,7 +10172,12 @@ fn stage20_9_self_test() -> bool {
         let image = overlay((164, h), &|surface| {
             surface.fill_rect(Rect::new(1, 1, 162, 14), START_FILL);
             surface.draw_text(6, 5, "Notifications", WHITE);
-            surface.draw_text(164 - 6 - crate::font::text_width("Clear") as i32, 5, "Clear", WHITE);
+            surface.draw_text(
+                164 - 6 - crate::font::text_width("Clear") as i32,
+                5,
+                "Clear",
+                WHITE,
+            );
             if rows.is_empty() {
                 surface.draw_text(6, 1 + 14 + 4, "No notifications", WHITE);
             }
@@ -7139,12 +10189,19 @@ fn stage20_9_self_test() -> bool {
     };
     let (px, py) = (width / 2, height / 2);
     let (cx, cy) = (width - 20, top + 12);
-    let (x0, y0, _, full) = center(&["Notes: Battery 80%", "Notes: Mail: 3 new", "Notes: Build done"]);
+    let (x0, y0, _, full) = center(&[
+        "Notes: Battery 80%",
+        "Notes: Mail: 3 new",
+        "Notes: Build done",
+    ]);
     let opened = move_by(cx - px, cy - py)
         && click()
         && until(1000, || translucent(x0, y0, &full, PANEL_FILL))
         && until(500, || region(badge_x, badge_y, 10, 11, taskbar));
-    if !step("clicking the clock opens the center, newest first, and clears the badge", opened) {
+    if !step(
+        "clicking the clock opens the center, newest first, and clears the badge",
+        opened,
+    ) {
         return false;
     }
 
@@ -7159,16 +10216,21 @@ fn stage20_9_self_test() -> bool {
     }
     let closed = move_by(cx - clear_point.0, cy - clear_point.1)
         && click()
-        && until(1000, || region(ex, ey, 164, eh, |x, y| wallpaper(x, y, height)));
+        && until(1000, || {
+            region(ex, ey, 164, eh, |x, y| wallpaper(x, y, height))
+        });
     if !step("clicking the clock again closes it", closed) {
         return false;
     }
 
-    let exited = mouse::keyboard_loopback(0x31) && wait_hello_gui(notes).map(|(_, status)| status) == Some(Ok(0));
+    let exited = mouse::keyboard_loopback(0x31)
+        && wait_hello_gui(notes).map(|(_, status)| status) == Some(Ok(0));
     if !step("N takes its key and exits", exited) {
         return false;
     }
-    if task::kill_process(shell.as_u64(), 9).is_err() || !until(1000, || task::process_exited(shell)) {
+    if task::kill_process(shell.as_u64(), 9).is_err()
+        || !until(1000, || task::process_exited(shell))
+    {
         return step("shell killed", false);
     }
     let _ = task::wait_process(shell.as_u64());
@@ -7235,26 +10297,40 @@ fn stage20_8_self_test() -> bool {
             base
         }
     }
-    fn region(x0: i32, y0: i32, width: i32, height: i32, expected: impl Fn(i32, i32) -> u32) -> bool {
-        (y0..y0 + height).all(|y| (x0..x0 + width).all(|x| compositor::pixel(x, y) == Ok(expected(x, y))))
+    fn region(
+        x0: i32,
+        y0: i32,
+        width: i32,
+        height: i32,
+        expected: impl Fn(i32, i32) -> u32,
+    ) -> bool {
+        (y0..y0 + height)
+            .all(|y| (x0..x0 + width).all(|x| compositor::pixel(x, y) == Ok(expected(x, y))))
     }
     /// A title bar, with `shade` applied to each expected pixel (for a
     /// shadow falling across it).
-    fn title_bar(x: i32, y: i32, width: i32, text: &str, fill: u32, shade: impl Fn(i32, i32, u32) -> u32) -> bool {
+    fn title_bar(
+        x: i32,
+        y: i32,
+        width: i32,
+        text: &str,
+        fill: u32,
+        shade: impl Fn(i32, i32, u32) -> u32,
+    ) -> bool {
         let mut expected = Surface::new(width as usize, 14);
         let bounds = expected.bounds();
         expected.fill_rect(bounds, fill);
         expected.draw_text(4, 4, text, WHITE);
         expected.fill_rect(crate::display::Rect::new(width - 12, 2, 10, 10), CLOSE_FILL);
         expected.draw_text(width - 12 + 3, 4, "x", WHITE);
-        region(x, y, width, 14, |px, py| shade(px, py, expected.pixel(px - x, py - y).unwrap_or(UNSET)))
+        region(x, y, width, 14, |px, py| {
+            shade(px, py, expected.pixel(px - x, py - y).unwrap_or(UNSET))
+        })
     }
     fn packet(dx: i16, screen_dy: i16, left: bool) -> bool {
         let dy = -screen_dy;
-        let flags = 0x08
-            | u8::from(left)
-            | if dx < 0 { 0x10 } else { 0 }
-            | if dy < 0 { 0x20 } else { 0 };
+        let flags =
+            0x08 | u8::from(left) | if dx < 0 { 0x10 } else { 0 } | if dy < 0 { 0x20 } else { 0 };
         [flags, dx as u8, dy as u8].into_iter().all(mouse::loopback)
     }
     fn move_by(mut dx: i32, mut dy: i32, held: bool) -> bool {
@@ -7274,15 +10350,20 @@ fn stage20_8_self_test() -> bool {
         .with(capability::Capability::DisplayIo)
         .with(capability::Capability::InputIo)
         .with(capability::Capability::Ipc);
-    let Some(program) = userspace::load_elf_with_argv(WOVEN_SHELL_IMAGE, &["/bin/woven-shell"]) else {
+    let Some(program) = userspace::load_elf_with_argv(WOVEN_SHELL_IMAGE, &["/bin/woven-shell"])
+    else {
         return step("shell image loads", false);
     };
-    let Ok((shell, _, _)) = task::spawn_user_system_service("woven-shell", program, capabilities) else {
+    let Ok((shell, _, _)) = task::spawn_user_system_service("woven-shell", program, capabilities)
+    else {
         return step("shell spawned", false);
     };
     if !step(
         "shell took the display",
-        installed && until(3000, || compositor::holder() == Some(shell.as_u64()) && compositor::is_presenting()),
+        installed
+            && until(3000, || {
+                compositor::holder() == Some(shell.as_u64()) && compositor::is_presenting()
+            }),
     ) {
         return false;
     }
@@ -7291,18 +10372,30 @@ fn stage20_8_self_test() -> bool {
     };
     let (width, height) = (width as i32, height as i32);
     let top = height - 24;
-    let client = capability::CapabilitySet::only(capability::Capability::Console).with(capability::Capability::Ipc);
+    let client = capability::CapabilitySet::only(capability::Capability::Console)
+        .with(capability::Capability::Ipc);
     let shell_arg = alloc::format!("{}", shell.as_u64());
-    let Some(alpha) = spawn_hello_gui(HELLO_GUI_IMAGE, &["/bin/hello-gui", "--desktop-client", &shell_arg, "a"], Some(client)) else {
+    let Some(alpha) = spawn_hello_gui(
+        HELLO_GUI_IMAGE,
+        &["/bin/hello-gui", "--desktop-client", &shell_arg, "a"],
+        Some(client),
+    ) else {
         return step("application A spawned", false);
     };
     if !until(2000, || compositor::pixel(45, 45) == Ok(RED)) {
         return step("window A opened", false);
     }
-    let Some(beta) = spawn_hello_gui(HELLO_GUI_IMAGE, &["/bin/hello-gui", "--desktop-client", &shell_arg, "b"], Some(client)) else {
+    let Some(beta) = spawn_hello_gui(
+        HELLO_GUI_IMAGE,
+        &["/bin/hello-gui", "--desktop-client", &shell_arg, "b"],
+        Some(client),
+    ) else {
         return step("application B spawned", false);
     };
-    if !step("windows A and B opened", until(2000, || compositor::pixel(150, 100) == Ok(BLUE))) {
+    if !step(
+        "windows A and B opened",
+        until(2000, || compositor::pixel(150, 100) == Ok(BLUE)),
+    ) {
         return false;
     }
 
@@ -7331,9 +10424,13 @@ fn stage20_8_self_test() -> bool {
         && packet(0, 0, false)
         && move_by(600, top + 14 - 32, false)
         && until(2000, || {
-            region(0, 14, half, client_height, |_, _| RED) && title_bar(0, 0, half, "Alpha", ACTIVE, plain)
+            region(0, 14, half, client_height, |_, _| RED)
+                && title_bar(0, 0, half, "Alpha", ACTIVE, plain)
         });
-    if !step("dropping A on the left edge snaps it to the left half, resized", snapped) {
+    if !step(
+        "dropping A on the left edge snaps it to the left half, resized",
+        snapped,
+    ) {
         return false;
     }
 
@@ -7341,12 +10438,16 @@ fn stage20_8_self_test() -> bool {
     // resized, under the edge of A's shadow; A remains focused.
     let tiled = mouse::keyboard_loopback(0x3c)
         && until(2000, || {
-            region(half, 14, width - half, client_height, |x, y| a_shadow(x, y, BLUE))
-                && title_bar(half, 0, width - half, "Beta", INACTIVE, a_shadow)
+            region(half, 14, width - half, client_height, |x, y| {
+                a_shadow(x, y, BLUE)
+            }) && title_bar(half, 0, width - half, "Beta", INACTIVE, a_shadow)
                 && region(0, 14, half, client_height, |_, _| RED)
                 && title_bar(0, 0, half, "Alpha", ACTIVE, plain)
         });
-    if !step("F2 tiles the windows: master on the left, stack on the right", tiled) {
+    if !step(
+        "F2 tiles the windows: master on the left, stack on the right",
+        tiled,
+    ) {
         return false;
     }
 
@@ -7355,15 +10456,21 @@ fn stage20_8_self_test() -> bool {
     let exited = mouse::keyboard_loopback(0x3c)
         && mouse::keyboard_loopback(0x2d)
         && wait_hello_gui(alpha).map(|(_, status)| status) == Some(Ok(0))
-        && until(1000, || compositor::pixel(5, 300) == Ok(wallpaper(5, 300, height)))
+        && until(1000, || {
+            compositor::pixel(5, 300) == Ok(wallpaper(5, 300, height))
+        })
         && mouse::keyboard_loopback(0x15)
         && wait_hello_gui(beta).map(|(_, status)| status) == Some(Ok(0))
-        && until(1000, || compositor::pixel(half + 10, 300) == Ok(wallpaper(half + 10, 300, height)));
+        && until(1000, || {
+            compositor::pixel(half + 10, 300) == Ok(wallpaper(half + 10, 300, height))
+        });
     if !step("both applications take their keys and exit", exited) {
         return false;
     }
 
-    if task::kill_process(shell.as_u64(), 9).is_err() || !until(1000, || task::process_exited(shell)) {
+    if task::kill_process(shell.as_u64(), 9).is_err()
+        || !until(1000, || task::process_exited(shell))
+    {
         return step("shell killed", false);
     }
     let _ = task::wait_process(shell.as_u64());
@@ -7450,15 +10557,20 @@ fn stage20_7_self_test() -> bool {
         .with(capability::Capability::DisplayIo)
         .with(capability::Capability::InputIo)
         .with(capability::Capability::Ipc);
-    let Some(program) = userspace::load_elf_with_argv(WOVEN_SHELL_IMAGE, &["/bin/woven-shell"]) else {
+    let Some(program) = userspace::load_elf_with_argv(WOVEN_SHELL_IMAGE, &["/bin/woven-shell"])
+    else {
         return step("shell image loads", false);
     };
-    let Ok((shell, _, _)) = task::spawn_user_system_service("woven-shell", program, capabilities) else {
+    let Ok((shell, _, _)) = task::spawn_user_system_service("woven-shell", program, capabilities)
+    else {
         return step("shell spawned", false);
     };
     if !step(
         "shell took the display",
-        installed && until(3000, || compositor::holder() == Some(shell.as_u64()) && compositor::is_presenting()),
+        installed
+            && until(3000, || {
+                compositor::holder() == Some(shell.as_u64()) && compositor::is_presenting()
+            }),
     ) {
         return false;
     }
@@ -7480,9 +10592,14 @@ fn stage20_7_self_test() -> bool {
     let scale = compositor::scale().unwrap_or(1) as usize;
     let (sx, sy) = (x as usize * scale, y as usize * scale);
     let start_value = screen_pixel(sx, sy);
-    let client = capability::CapabilitySet::only(capability::Capability::Console).with(capability::Capability::Ipc);
+    let client = capability::CapabilitySet::only(capability::Capability::Console)
+        .with(capability::Capability::Ipc);
     let shell_arg = alloc::format!("{}", shell.as_u64());
-    let Some(alpha) = spawn_hello_gui(HELLO_GUI_IMAGE, &["/bin/hello-gui", "--desktop-client", &shell_arg, "a"], Some(client)) else {
+    let Some(alpha) = spawn_hello_gui(
+        HELLO_GUI_IMAGE,
+        &["/bin/hello-gui", "--desktop-client", &shell_arg, "a"],
+        Some(client),
+    ) else {
         return step("application A spawned", false);
     };
 
@@ -7525,21 +10642,33 @@ fn stage20_7_self_test() -> bool {
         duration,
         opacities
     ));
-    if !step("every sample is the window blended at some opacity, never decreasing", consistent)
-        || !step("the window passes through at least three intermediate opacities", intermediate >= 3)
-        || !step("the window ends fully opaque", samples.last() == Some(&RED))
+    if !step(
+        "every sample is the window blended at some opacity, never decreasing",
+        consistent,
+    ) || !step(
+        "the window passes through at least three intermediate opacities",
+        intermediate >= 3,
+    ) || !step("the window ends fully opaque", samples.last() == Some(&RED))
     {
         return false;
     }
     // Settled: the shell is back at its idle frame rate and the window stays
     // put.
-    let settled = until(500, || screen_pixel(sx, sy) == Some(RED) && compositor::pixel(x, y) == Ok(RED));
-    let exited = mouse::keyboard_loopback(0x2d) && wait_hello_gui(alpha).map(|(_, status)| status) == Some(Ok(0));
-    if !step("the window stays opaque once settled; A takes its key and exits", settled && exited) {
+    let settled = until(500, || {
+        screen_pixel(sx, sy) == Some(RED) && compositor::pixel(x, y) == Ok(RED)
+    });
+    let exited = mouse::keyboard_loopback(0x2d)
+        && wait_hello_gui(alpha).map(|(_, status)| status) == Some(Ok(0));
+    if !step(
+        "the window stays opaque once settled; A takes its key and exits",
+        settled && exited,
+    ) {
         return false;
     }
 
-    if task::kill_process(shell.as_u64(), 9).is_err() || !until(1000, || task::process_exited(shell)) {
+    if task::kill_process(shell.as_u64(), 9).is_err()
+        || !until(1000, || task::process_exited(shell))
+    {
         return step("shell killed", false);
     }
     let _ = task::wait_process(shell.as_u64());
@@ -7606,15 +10735,20 @@ fn stage20_6_self_test() -> bool {
             base
         }
     }
-    fn region(x0: i32, y0: i32, width: i32, height: i32, expected: impl Fn(i32, i32) -> u32) -> bool {
-        (y0..y0 + height).all(|y| (x0..x0 + width).all(|x| compositor::pixel(x, y) == Ok(expected(x, y))))
+    fn region(
+        x0: i32,
+        y0: i32,
+        width: i32,
+        height: i32,
+        expected: impl Fn(i32, i32) -> u32,
+    ) -> bool {
+        (y0..y0 + height)
+            .all(|y| (x0..x0 + width).all(|x| compositor::pixel(x, y) == Ok(expected(x, y))))
     }
     fn packet(dx: i16, screen_dy: i16, left: bool) -> bool {
         let dy = -screen_dy;
-        let flags = 0x08
-            | u8::from(left)
-            | if dx < 0 { 0x10 } else { 0 }
-            | if dy < 0 { 0x20 } else { 0 };
+        let flags =
+            0x08 | u8::from(left) | if dx < 0 { 0x10 } else { 0 } | if dy < 0 { 0x20 } else { 0 };
         [flags, dx as u8, dy as u8].into_iter().all(mouse::loopback)
     }
     fn move_by(mut dx: i32, mut dy: i32, held: bool) -> bool {
@@ -7645,15 +10779,20 @@ fn stage20_6_self_test() -> bool {
         .with(capability::Capability::DisplayIo)
         .with(capability::Capability::InputIo)
         .with(capability::Capability::Ipc);
-    let Some(program) = userspace::load_elf_with_argv(WOVEN_SHELL_IMAGE, &["/bin/woven-shell"]) else {
+    let Some(program) = userspace::load_elf_with_argv(WOVEN_SHELL_IMAGE, &["/bin/woven-shell"])
+    else {
         return step("shell image loads", false);
     };
-    let Ok((shell, _, _)) = task::spawn_user_system_service("woven-shell", program, capabilities) else {
+    let Ok((shell, _, _)) = task::spawn_user_system_service("woven-shell", program, capabilities)
+    else {
         return step("shell spawned", false);
     };
     if !step(
         "shell took the display",
-        installed && until(3000, || compositor::holder() == Some(shell.as_u64()) && compositor::is_presenting()),
+        installed
+            && until(3000, || {
+                compositor::holder() == Some(shell.as_u64()) && compositor::is_presenting()
+            }),
     ) {
         return false;
     }
@@ -7662,12 +10801,20 @@ fn stage20_6_self_test() -> bool {
     };
     let (width, height) = (width as i32, height as i32);
     let top = height - 24;
-    let client = capability::CapabilitySet::only(capability::Capability::Console).with(capability::Capability::Ipc);
+    let client = capability::CapabilitySet::only(capability::Capability::Console)
+        .with(capability::Capability::Ipc);
     let shell_arg = alloc::format!("{}", shell.as_u64());
-    let Some(alpha) = spawn_hello_gui(HELLO_GUI_IMAGE, &["/bin/hello-gui", "--desktop-client", &shell_arg, "a"], Some(client)) else {
+    let Some(alpha) = spawn_hello_gui(
+        HELLO_GUI_IMAGE,
+        &["/bin/hello-gui", "--desktop-client", &shell_arg, "a"],
+        Some(client),
+    ) else {
         return step("application A spawned", false);
     };
-    if !step("window A opened", until(2000, || compositor::pixel(45, 45) == Ok(RED))) {
+    if !step(
+        "window A opened",
+        until(2000, || compositor::pixel(45, 45) == Ok(RED)),
+    ) {
         return false;
     }
 
@@ -7678,9 +10825,11 @@ fn stage20_6_self_test() -> bool {
         surface.draw_text(6, 8, "Alpha ready", WHITE);
     });
     let toast = until(1000, || {
-        region(toast_x, toast_y, 180, 22, |x, y| match toast_overlay.pixel(x - toast_x, y - toast_y) {
-            Some(UNSET) | None => blend_pixel(TOAST_FILL, wallpaper(x, y, height), 216),
-            Some(pixel) => pixel,
+        region(toast_x, toast_y, 180, 22, |x, y| {
+            match toast_overlay.pixel(x - toast_x, y - toast_y) {
+                Some(UNSET) | None => blend_pixel(TOAST_FILL, wallpaper(x, y, height), 216),
+                Some(pixel) => pixel,
+            }
         })
     });
     if !step("the toast is translucent over the wallpaper", toast) {
@@ -7704,7 +10853,10 @@ fn stage20_6_self_test() -> bool {
                 && compositor::pixel(106, 340) == Ok(RED)
                 && compositor::pixel(102, 341) == Ok(RED)
         });
-    if !step("the pointer's transparent cells show the window beneath", pointer) {
+    if !step(
+        "the pointer's transparent cells show the window beneath",
+        pointer,
+    ) {
         return false;
     }
 
@@ -7752,7 +10904,10 @@ fn stage20_6_self_test() -> bool {
                 })
             })
         });
-    if !step("the launcher panel is translucent over a window and its shadow", panel) {
+    if !step(
+        "the launcher panel is translucent over a window and its shadow",
+        panel,
+    ) {
         return false;
     }
     // The pointer stays on top of the panel. The shell presents each layer
@@ -7768,14 +10923,18 @@ fn stage20_6_self_test() -> bool {
     }
 
     let closed = mouse::keyboard_loopback(0x3b)
-        && until(1000, || compositor::pixel(20, panel_y + 20) == Ok(wallpaper(20, panel_y + 20, height)))
+        && until(1000, || {
+            compositor::pixel(20, panel_y + 20) == Ok(wallpaper(20, panel_y + 20, height))
+        })
         && mouse::keyboard_loopback(0x2d)
         && wait_hello_gui(alpha).map(|(_, status)| status) == Some(Ok(0));
     if !step("panel closes; A takes its key and exits", closed) {
         return false;
     }
 
-    if task::kill_process(shell.as_u64(), 9).is_err() || !until(1000, || task::process_exited(shell)) {
+    if task::kill_process(shell.as_u64(), 9).is_err()
+        || !until(1000, || task::process_exited(shell))
+    {
         return step("shell killed", false);
     }
     let _ = task::wait_process(shell.as_u64());
@@ -7840,15 +10999,20 @@ fn stage20_5_self_test() -> bool {
             base
         }
     }
-    fn region(x0: i32, y0: i32, width: i32, height: i32, expected: impl Fn(i32, i32) -> u32) -> bool {
-        (y0..y0 + height).all(|y| (x0..x0 + width).all(|x| compositor::pixel(x, y) == Ok(expected(x, y))))
+    fn region(
+        x0: i32,
+        y0: i32,
+        width: i32,
+        height: i32,
+        expected: impl Fn(i32, i32) -> u32,
+    ) -> bool {
+        (y0..y0 + height)
+            .all(|y| (x0..x0 + width).all(|x| compositor::pixel(x, y) == Ok(expected(x, y))))
     }
     fn packet(dx: i16, screen_dy: i16, left: bool) -> bool {
         let dy = -screen_dy;
-        let flags = 0x08
-            | u8::from(left)
-            | if dx < 0 { 0x10 } else { 0 }
-            | if dy < 0 { 0x20 } else { 0 };
+        let flags =
+            0x08 | u8::from(left) | if dx < 0 { 0x10 } else { 0 } | if dy < 0 { 0x20 } else { 0 };
         [flags, dx as u8, dy as u8].into_iter().all(mouse::loopback)
     }
     fn move_by(mut dx: i32, mut dy: i32, held: bool) -> bool {
@@ -7887,15 +11051,20 @@ fn stage20_5_self_test() -> bool {
         .with(capability::Capability::DisplayIo)
         .with(capability::Capability::InputIo)
         .with(capability::Capability::Ipc);
-    let Some(program) = userspace::load_elf_with_argv(WOVEN_SHELL_IMAGE, &["/bin/woven-shell"]) else {
+    let Some(program) = userspace::load_elf_with_argv(WOVEN_SHELL_IMAGE, &["/bin/woven-shell"])
+    else {
         return step("shell image loads", false);
     };
-    let Ok((shell, _, _)) = task::spawn_user_system_service("woven-shell", program, capabilities) else {
+    let Ok((shell, _, _)) = task::spawn_user_system_service("woven-shell", program, capabilities)
+    else {
         return step("shell spawned", false);
     };
     if !step(
         "shell took the display",
-        installed && until(3000, || compositor::holder() == Some(shell.as_u64()) && compositor::is_presenting()),
+        installed
+            && until(3000, || {
+                compositor::holder() == Some(shell.as_u64()) && compositor::is_presenting()
+            }),
     ) {
         return false;
     }
@@ -7904,18 +11073,30 @@ fn stage20_5_self_test() -> bool {
     };
     let (width, height) = (width as i32, height as i32);
     let top = height - 24;
-    let client = capability::CapabilitySet::only(capability::Capability::Console).with(capability::Capability::Ipc);
+    let client = capability::CapabilitySet::only(capability::Capability::Console)
+        .with(capability::Capability::Ipc);
     let shell_arg = alloc::format!("{}", shell.as_u64());
-    let Some(alpha) = spawn_hello_gui(HELLO_GUI_IMAGE, &["/bin/hello-gui", "--desktop-client", &shell_arg, "a"], Some(client)) else {
+    let Some(alpha) = spawn_hello_gui(
+        HELLO_GUI_IMAGE,
+        &["/bin/hello-gui", "--desktop-client", &shell_arg, "a"],
+        Some(client),
+    ) else {
         return step("application A spawned", false);
     };
     if !until(2000, || compositor::pixel(45, 45) == Ok(RED)) {
         return step("window A opened", false);
     }
-    let Some(beta) = spawn_hello_gui(HELLO_GUI_IMAGE, &["/bin/hello-gui", "--desktop-client", &shell_arg, "b"], Some(client)) else {
+    let Some(beta) = spawn_hello_gui(
+        HELLO_GUI_IMAGE,
+        &["/bin/hello-gui", "--desktop-client", &shell_arg, "b"],
+        Some(client),
+    ) else {
         return step("application B spawned", false);
     };
-    if !step("windows A and B opened", until(2000, || compositor::pixel(150, 100) == Ok(BLUE))) {
+    if !step(
+        "windows A and B opened",
+        until(2000, || compositor::pixel(150, 100) == Ok(BLUE)),
+    ) {
         return false;
     }
 
@@ -7934,13 +11115,19 @@ fn stage20_5_self_test() -> bool {
     // visible strips (above B and left of it) carry the shallow ones.
     let b_focused = check(
         &[(a, false), (b, true)],
-        &[(164, 58, 8, 74), (72, 124, 100, 8), (160, 28, 4, 22), (42, 120, 22, 4)],
+        &[
+            (164, 58, 8, 74),
+            (72, 124, 100, 8),
+            (160, 28, 4, 22),
+            (42, 120, 22, 4),
+        ],
     );
     if !step("focused window B casts the deeper shadow", b_focused) {
         return false;
     }
     // A shadow pixel is really darker than the wallpaper there.
-    let darker = compositor::pixel(168, 128).is_ok_and(|pixel| pixel != wallpaper(168, 128, height));
+    let darker =
+        compositor::pixel(168, 128).is_ok_and(|pixel| pixel != wallpaper(168, 128, height));
     if !step("shadow pixels differ from the bare wallpaper", darker) {
         return false;
     }
@@ -7954,9 +11141,17 @@ fn stage20_5_self_test() -> bool {
     let a_focused = clicked
         && check(
             &[(b, false), (a, true)],
-            &[(160, 34, 8, 16), (48, 120, 16, 8), (164, 54, 4, 74), (68, 124, 100, 4)],
+            &[
+                (160, 34, 8, 16),
+                (48, 120, 16, 8),
+                (164, 54, 4, 74),
+                (68, 124, 100, 4),
+            ],
         );
-    if !step("raising A gives it the deeper shadow and B the shallow one", a_focused) {
+    if !step(
+        "raising A gives it the deeper shadow and B the shallow one",
+        a_focused,
+    ) {
         return false;
     }
 
@@ -7972,7 +11167,9 @@ fn stage20_5_self_test() -> bool {
         && check(&[(b, false), (low, true)], &[(160, top - 86, 8, 86)])
         && until(500, || {
             region(48, top, 120, 1, |_, _| ACCENT)
-                && region(48, top + 1, 120, 3, |x, y| blend_pixel(TASKBAR, wallpaper(x, y, height), 216))
+                && region(48, top + 1, 120, 3, |x, y| {
+                    blend_pixel(TASKBAR, wallpaper(x, y, height), 216)
+                })
         });
     if !step("shadows stop at the taskbar", edge) {
         return false;
@@ -7986,13 +11183,19 @@ fn stage20_5_self_test() -> bool {
         && mouse::keyboard_loopback(0x15)
         && wait_hello_gui(beta).map(|(_, status)| status) == Some(Ok(0))
         && until(1000, || {
-            region(164, 54, 8, 78, |x, y| wallpaper(x, y, height)) && compositor::pixel(150, 100) == Ok(wallpaper(150, 100, height))
+            region(164, 54, 8, 78, |x, y| wallpaper(x, y, height))
+                && compositor::pixel(150, 100) == Ok(wallpaper(150, 100, height))
         });
-    if !step("windows and their shadows go with their applications", exited) {
+    if !step(
+        "windows and their shadows go with their applications",
+        exited,
+    ) {
         return false;
     }
 
-    if task::kill_process(shell.as_u64(), 9).is_err() || !until(1000, || task::process_exited(shell)) {
+    if task::kill_process(shell.as_u64(), 9).is_err()
+        || !until(1000, || task::process_exited(shell))
+    {
         return step("shell killed", false);
     }
     let _ = task::wait_process(shell.as_u64());
@@ -8060,8 +11263,15 @@ fn stage20_4_self_test() -> bool {
             base
         }
     }
-    fn region(x0: i32, y0: i32, width: i32, height: i32, expected: impl Fn(i32, i32) -> u32) -> bool {
-        (y0..y0 + height).all(|y| (x0..x0 + width).all(|x| compositor::pixel(x, y) == Ok(expected(x, y))))
+    fn region(
+        x0: i32,
+        y0: i32,
+        width: i32,
+        height: i32,
+        expected: impl Fn(i32, i32) -> u32,
+    ) -> bool {
+        (y0..y0 + height)
+            .all(|y| (x0..x0 + width).all(|x| compositor::pixel(x, y) == Ok(expected(x, y))))
     }
     /// A title bar as the kernel renders it: fill, title text, and the
     /// close control at its right.
@@ -8073,14 +11283,14 @@ fn stage20_4_self_test() -> bool {
         let close = crate::display::Rect::new(width - 12, 2, 10, 10);
         expected.fill_rect(close, CLOSE_FILL);
         expected.draw_text(width - 12 + 3, 4, "x", WHITE);
-        region(x, y, width, 14, |px, py| expected.pixel(px - x, py - y).unwrap_or(UNSET))
+        region(x, y, width, 14, |px, py| {
+            expected.pixel(px - x, py - y).unwrap_or(UNSET)
+        })
     }
     fn packet(dx: i16, screen_dy: i16, left: bool) -> bool {
         let dy = -screen_dy;
-        let flags = 0x08
-            | u8::from(left)
-            | if dx < 0 { 0x10 } else { 0 }
-            | if dy < 0 { 0x20 } else { 0 };
+        let flags =
+            0x08 | u8::from(left) | if dx < 0 { 0x10 } else { 0 } | if dy < 0 { 0x20 } else { 0 };
         [flags, dx as u8, dy as u8].into_iter().all(mouse::loopback)
     }
     /// Relative motion in packets of at most 100 per axis, with the left
@@ -8101,7 +11311,8 @@ fn stage20_4_self_test() -> bool {
     const OWNER: u64 = 4300;
     let oversized = user_graphics::create(OWNER, user_graphics::MAX_WIDTH + 1, 1)
         == Err(SurfaceError::OutOfRange)
-        && user_graphics::create(OWNER, 1, user_graphics::MAX_HEIGHT + 1) == Err(SurfaceError::OutOfRange);
+        && user_graphics::create(OWNER, 1, user_graphics::MAX_HEIGHT + 1)
+            == Err(SurfaceError::OutOfRange);
     let whole = user_graphics::create(OWNER, 1024, 1024);
     let per_owner = oversized
         && OWNER_PIXEL_BUDGET == 1024 * 1024
@@ -8114,7 +11325,9 @@ fn stage20_4_self_test() -> bool {
         return false;
     }
     let owners = [4301u64, 4302, 4303, 4304];
-    let filled = owners.iter().all(|&owner| user_graphics::create(owner, 1024, 1024).is_ok());
+    let filled = owners
+        .iter()
+        .all(|&owner| user_graphics::create(owner, 1024, 1024).is_ok());
     let system = filled
         && user_graphics::create(4305, 1, 1) == Err(SurfaceError::SystemFull)
         && user_graphics::release_owner(owners[0]) == 1
@@ -8122,7 +11335,10 @@ fn stage20_4_self_test() -> bool {
     for owner in owners.into_iter().chain([4305]) {
         user_graphics::release_owner(owner);
     }
-    if !step("all processes together are held to the system budget", system) {
+    if !step(
+        "all processes together are held to the system budget",
+        system,
+    ) {
         return false;
     }
 
@@ -8132,15 +11348,20 @@ fn stage20_4_self_test() -> bool {
         .with(capability::Capability::DisplayIo)
         .with(capability::Capability::InputIo)
         .with(capability::Capability::Ipc);
-    let Some(program) = userspace::load_elf_with_argv(WOVEN_SHELL_IMAGE, &["/bin/woven-shell"]) else {
+    let Some(program) = userspace::load_elf_with_argv(WOVEN_SHELL_IMAGE, &["/bin/woven-shell"])
+    else {
         return step("shell image loads", false);
     };
-    let Ok((shell, _, _)) = task::spawn_user_system_service("woven-shell", program, capabilities) else {
+    let Ok((shell, _, _)) = task::spawn_user_system_service("woven-shell", program, capabilities)
+    else {
         return step("shell spawned", false);
     };
     if !step(
         "shell took the display",
-        installed && until(3000, || compositor::holder() == Some(shell.as_u64()) && compositor::is_presenting()),
+        installed
+            && until(3000, || {
+                compositor::holder() == Some(shell.as_u64()) && compositor::is_presenting()
+            }),
     ) {
         return false;
     }
@@ -8148,15 +11369,27 @@ fn stage20_4_self_test() -> bool {
         return step("desktop geometry", false);
     };
     let (width, height) = (width as i32, height as i32);
-    let client = capability::CapabilitySet::only(capability::Capability::Console).with(capability::Capability::Ipc);
+    let client = capability::CapabilitySet::only(capability::Capability::Console)
+        .with(capability::Capability::Ipc);
     let shell_arg = alloc::format!("{}", shell.as_u64());
-    let Some(alpha) = spawn_hello_gui(HELLO_GUI_IMAGE, &["/bin/hello-gui", "--desktop-client", &shell_arg, "a"], Some(client)) else {
+    let Some(alpha) = spawn_hello_gui(
+        HELLO_GUI_IMAGE,
+        &["/bin/hello-gui", "--desktop-client", &shell_arg, "a"],
+        Some(client),
+    ) else {
         return step("application A spawned", false);
     };
-    if !step("window A opened", until(2000, || compositor::pixel(45, 45) == Ok(RED))) {
+    if !step(
+        "window A opened",
+        until(2000, || compositor::pixel(45, 45) == Ok(RED)),
+    ) {
         return false;
     }
-    let Some(wide) = spawn_hello_gui(HELLO_GUI_IMAGE, &["/bin/hello-gui", "--desktop-client", &shell_arg, "c"], Some(client)) else {
+    let Some(wide) = spawn_hello_gui(
+        HELLO_GUI_IMAGE,
+        &["/bin/hello-gui", "--desktop-client", &shell_arg, "c"],
+        Some(client),
+    ) else {
         return step("wide application spawned", false);
     };
     // 400x260, larger than the old 320x240 cap, cascaded to (64, 64).
@@ -8164,7 +11397,10 @@ fn stage20_4_self_test() -> bool {
         && until(500, || {
             region(64, 64, 400, 260, |_, _| GREEN) && title_bar(64, 50, 400, "Wide", ACTIVE)
         });
-    if !step("a window larger than 320x240 opens, with a close control", opened) {
+    if !step(
+        "a window larger than 320x240 opens, with a close control",
+        opened,
+    ) {
         return false;
     }
 
@@ -8194,7 +11430,10 @@ fn stage20_4_self_test() -> bool {
                 && compositor::pixel(45, 45) == Ok(wallpaper(45, 45, height))
                 && compositor::pixel(100, 100) == Ok(GREEN)
         });
-    if !step("dragging the title bar moves the window and repaints both places", moved) {
+    if !step(
+        "dragging the title bar moves the window and repaints both places",
+        moved,
+    ) {
         return false;
     }
 
@@ -8204,18 +11443,27 @@ fn stage20_4_self_test() -> bool {
         && packet(0, 0, true)
         && packet(0, 0, false)
         && wait_hello_gui(wide).map(|(_, status)| status) == Some(Ok(0))
-        && until(1000, || compositor::pixel(300, 200) == Ok(wallpaper(300, 200, height)));
-    if !step("the close control asks the owner to close, and it does", closed) {
+        && until(1000, || {
+            compositor::pixel(300, 200) == Ok(wallpaper(300, 200, height))
+        });
+    if !step(
+        "the close control asks the owner to close, and it does",
+        closed,
+    ) {
         return false;
     }
     let typed = mouse::keyboard_loopback(0x2d)
         && wait_hello_gui(alpha).map(|(_, status)| status) == Some(Ok(0))
-        && until(1000, || compositor::pixel(345, 295) == Ok(wallpaper(345, 295, height)));
+        && until(1000, || {
+            compositor::pixel(345, 295) == Ok(wallpaper(345, 295, height))
+        });
     if !step("A keeps the focus, takes its key and exits", typed) {
         return false;
     }
 
-    if task::kill_process(shell.as_u64(), 9).is_err() || !until(1000, || task::process_exited(shell)) {
+    if task::kill_process(shell.as_u64(), 9).is_err()
+        || !until(1000, || task::process_exited(shell))
+    {
         return step("shell killed", false);
     }
     let _ = task::wait_process(shell.as_u64());
@@ -8627,9 +11875,14 @@ fn stage20_2_self_test() -> bool {
         let bounds = expected.bounds();
         expected.fill_rect(bounds, fill);
         expected.draw_text(4, 4, text, WHITE);
-        expected.fill_rect(crate::display::Rect::new(width - 12, 2, 10, 10), rgb(170, 60, 60));
+        expected.fill_rect(
+            crate::display::Rect::new(width - 12, 2, 10, 10),
+            rgb(170, 60, 60),
+        );
         expected.draw_text(width - 12 + 3, 4, "x", WHITE);
-        region(x, y, width, 14, |px, py| expected.pixel(px - x, py - y).unwrap_or(UNSET))
+        region(x, y, width, 14, |px, py| {
+            expected.pixel(px - x, py - y).unwrap_or(UNSET)
+        })
     }
     /// One PS/2 packet through the real auxiliary path.
     fn packet(dx: i16, screen_dy: i16, left: bool) -> bool {
@@ -9080,19 +12333,29 @@ fn stage20_1_self_test() -> bool {
             taskbar(x, y, height)
         })
         && region(ws_x, top + 1, qs_x - ws_x, 3, |x, y| taskbar(x, y, height))
-        && region(ws_x, top + 20, qs_x - ws_x, TASKBAR_HEIGHT - 20, |x, y| taskbar(x, y, height))
-        && region(qs_x + 16, top + 1, width - 80 - (qs_x + 16), TASKBAR_HEIGHT - 1, |x, y| {
+        && region(ws_x, top + 20, qs_x - ws_x, TASKBAR_HEIGHT - 20, |x, y| {
             taskbar(x, y, height)
         })
+        && region(
+            qs_x + 16,
+            top + 1,
+            width - 80 - (qs_x + 16),
+            TASKBAR_HEIGHT - 1,
+            |x, y| taskbar(x, y, height),
+        )
         && region(qs_x, top + 1, 16, 3, |x, y| taskbar(x, y, height))
-        && region(qs_x, top + 20, 16, TASKBAR_HEIGHT - 20, |x, y| taskbar(x, y, height));
+        && region(qs_x, top + 20, 16, TASKBAR_HEIGHT - 20, |x, y| {
+            taskbar(x, y, height)
+        });
     if !step("taskbar is translucent over the wallpaper", bar) {
         return false;
     }
     let qs_mask = text_mask(16, 16, 5, 5, "Q");
-    let qs = region(qs_x, top + 4, 16, 16, |x, y| match qs_mask.pixel(x - qs_x, y - (top + 4)) {
-        Some(WHITE) => WHITE,
-        _ => QS_FILL,
+    let qs = region(qs_x, top + 4, 16, 16, |x, y| {
+        match qs_mask.pixel(x - qs_x, y - (top + 4)) {
+            Some(WHITE) => WHITE,
+            _ => QS_FILL,
+        }
     });
     if !step("Quick Settings button and its label", qs) {
         return false;
@@ -9105,11 +12368,15 @@ fn stage20_1_self_test() -> bool {
         let digit = [b'1' + index as u8];
         let mask = text_mask(12, 16, 3, 5, core::str::from_utf8(&digit).unwrap_or("?"));
         let fill = if index == 0 { WS_ACTIVE } else { QS_FILL };
-        region(box_x, top + 4, 12, 16, |x, y| match mask.pixel(x - box_x, y - (top + 4)) {
-            Some(WHITE) => WHITE,
-            _ => fill,
+        region(box_x, top + 4, 12, 16, |x, y| {
+            match mask.pixel(x - box_x, y - (top + 4)) {
+                Some(WHITE) => WHITE,
+                _ => fill,
+            }
         }) && (index == 3 || region(box_x + 12, top + 4, 2, 16, |x, y| taskbar(x, y, height)))
-    }) && region(ws_x + 54, top + 4, qs_x - (ws_x + 54), 16, |x, y| taskbar(x, y, height));
+    }) && region(ws_x + 54, top + 4, qs_x - (ws_x + 54), 16, |x, y| {
+        taskbar(x, y, height)
+    });
     if !step("workspace switcher, workspace 1 current", switcher) {
         return false;
     }
@@ -10580,6 +13847,333 @@ fn stage19_2_self_test() -> bool {
     )
 }
 
+/// Acceptance for the standalone textured-3D-chrome proof of concept
+/// (`hello-gui --3d-chrome-demo`): a userspace program renders chrome
+/// offscreen, projects it through a perspective camera as a texture-mapped
+/// 3D quad (not a flat blit), and presents it. The app verifies its own
+/// render from userspace; this self-test re-reads the compositor from
+/// kernel space to confirm nothing unwound between app exit and the gate
+/// check, the same reasoning `stage19_2_self_test` uses.
+#[cfg(feature = "stage20-16-test")]
+fn stage20_16_self_test() -> bool {
+    fn step(name: &str, ok: bool) -> bool {
+        serial::write_line(format_args!(
+            "[S20.16] {} {}",
+            name,
+            if ok { "PASS" } else { "FAIL" }
+        ));
+        ok
+    }
+
+    if elf::parse(HELLO_GUI_IMAGE).is_err() {
+        return step("elf accepted by the loader", false);
+    }
+    if !step(
+        "install into the filesystem",
+        vfs::create_read_only("/bin/hello-gui", HELLO_GUI_IMAGE).is_ok(),
+    ) {
+        return false;
+    }
+    let mut readback = alloc::vec![0u8; HELLO_GUI_IMAGE.len()];
+    if !step(
+        "filesystem round-trip",
+        vfs::read_all("/bin/hello-gui", &mut readback) == Ok(HELLO_GUI_IMAGE.len())
+            && readback[..] == HELLO_GUI_IMAGE[..],
+    ) {
+        return false;
+    }
+    let Some((_pid, exit_status)) =
+        run_hello_gui(&readback, &["/bin/hello-gui", "--3d-chrome-demo"], true)
+    else {
+        return step(
+            "load, spawn with display authority, run to completion",
+            false,
+        );
+    };
+    let status = match exit_status {
+        Ok(code) => code as i64,
+        Err(_) => -1,
+    };
+    serial::write_line(format_args!("[S20.16] exit status {}", status));
+    if !step("application exits zero", exit_status == Ok(0)) {
+        return false;
+    }
+
+    // The near (left) edge of the projected quad, away from its label, must
+    // still show the chrome's own fill colour -- the same location and
+    // colour `three_d_chrome_demo` already checked from userspace, re-read
+    // from kernel space to confirm the compositor retained it after exit.
+    const CHROME_FILL: u32 = crate::display::rgb(40, 220, 230);
+    step(
+        "compositor retained the textured 3D quad after app exit",
+        crate::compositor::pixel(65, 22) == Ok(CHROME_FILL),
+    )
+}
+
+/// Acceptance for the standalone syscall-latency micro-benchmark
+/// (`hello-gui --syscall-benchmark`, Stage 30 performance engineering): an
+/// ordinary (no `DisplayIo`) userspace program times 1000 round trips of
+/// `current_pid` with its own cycle counter and exits zero. This gate only
+/// confirms the benchmark ran to completion and reported PASSED; the
+/// numbers themselves are a measurement, not a threshold this self-test
+/// enforces.
+#[cfg(feature = "stage30-1-test")]
+fn stage30_1_self_test() -> bool {
+    fn step(name: &str, ok: bool) -> bool {
+        serial::write_line(format_args!(
+            "[S30.1] {} {}",
+            name,
+            if ok { "PASS" } else { "FAIL" }
+        ));
+        ok
+    }
+
+    if elf::parse(HELLO_GUI_IMAGE).is_err() {
+        return step("elf accepted by the loader", false);
+    }
+    if !step(
+        "install into the filesystem",
+        vfs::create_read_only("/bin/hello-gui", HELLO_GUI_IMAGE).is_ok(),
+    ) {
+        return false;
+    }
+    let mut readback = alloc::vec![0u8; HELLO_GUI_IMAGE.len()];
+    if !step(
+        "filesystem round-trip",
+        vfs::read_all("/bin/hello-gui", &mut readback) == Ok(HELLO_GUI_IMAGE.len())
+            && readback[..] == HELLO_GUI_IMAGE[..],
+    ) {
+        return false;
+    }
+    // No DisplayIo: the benchmark needs no capability beyond an ordinary
+    // process's own, so this runs the plain `task::spawn_user_process` path.
+    let Some((_pid, exit_status)) =
+        run_hello_gui(&readback, &["/bin/hello-gui", "--syscall-benchmark"], false)
+    else {
+        return step(
+            "load and spawn as an ordinary process, run to completion",
+            false,
+        );
+    };
+    let status = match exit_status {
+        Ok(code) => code as i64,
+        Err(_) => -1,
+    };
+    serial::write_line(format_args!("[S30.1] exit status {}", status));
+    step("application exits zero", exit_status == Ok(0))
+}
+
+/// Stage 30.2 acceptance: hello-gui's `--ipc-benchmark` mode sends and
+/// receives a one-byte message to and from itself 1000 times, timing each
+/// round trip with the cycle counter, and exits zero. This gate only
+/// confirms the benchmark ran to completion and reported PASSED; the
+/// numbers themselves are a measurement, not a threshold this self-test
+/// enforces.
+#[cfg(feature = "stage30-2-test")]
+fn stage30_2_self_test() -> bool {
+    fn step(name: &str, ok: bool) -> bool {
+        serial::write_line(format_args!(
+            "[S30.2] {} {}",
+            name,
+            if ok { "PASS" } else { "FAIL" }
+        ));
+        ok
+    }
+
+    if elf::parse(HELLO_GUI_IMAGE).is_err() {
+        return step("elf accepted by the loader", false);
+    }
+    if !step(
+        "install into the filesystem",
+        vfs::create_read_only("/bin/hello-gui", HELLO_GUI_IMAGE).is_ok(),
+    ) {
+        return false;
+    }
+    let mut readback = alloc::vec![0u8; HELLO_GUI_IMAGE.len()];
+    if !step(
+        "filesystem round-trip",
+        vfs::read_all("/bin/hello-gui", &mut readback) == Ok(HELLO_GUI_IMAGE.len())
+            && readback[..] == HELLO_GUI_IMAGE[..],
+    ) {
+        return false;
+    }
+    // No DisplayIo: the benchmark needs no capability beyond an ordinary
+    // process's own Ipc, so this runs the plain `task::spawn_user_process`
+    // path and sends/receives to/from its own process id.
+    let Some((_pid, exit_status)) =
+        run_hello_gui(&readback, &["/bin/hello-gui", "--ipc-benchmark"], false)
+    else {
+        return step(
+            "load and spawn as an ordinary process, run to completion",
+            false,
+        );
+    };
+    let status = match exit_status {
+        Ok(code) => code as i64,
+        Err(_) => -1,
+    };
+    serial::write_line(format_args!("[S30.2] exit status {}", status));
+    step("application exits zero", exit_status == Ok(0))
+}
+
+/// Stage 30.3 acceptance: hello-gui's `--fs-benchmark` mode seeks, writes,
+/// seeks, and reads back a 256-byte payload against a pre-created scratch
+/// file 500 times, timing each operation with the cycle counter, and exits
+/// zero. This gate only confirms the benchmark ran to completion and
+/// reported PASSED; the numbers themselves are a measurement, not a
+/// threshold this self-test enforces.
+#[cfg(feature = "stage30-3-test")]
+fn stage30_3_self_test() -> bool {
+    fn step(name: &str, ok: bool) -> bool {
+        serial::write_line(format_args!(
+            "[S30.3] {} {}",
+            name,
+            if ok { "PASS" } else { "FAIL" }
+        ));
+        ok
+    }
+
+    if elf::parse(HELLO_GUI_IMAGE).is_err() {
+        return step("elf accepted by the loader", false);
+    }
+    let scratch = (vfs::stat("/tmp").is_ok() || vfs::mkdir("/tmp").is_ok())
+        && vfs::write_file("/tmp/fsbench", &[0u8; 256]).is_ok();
+    if !step(
+        "install into the filesystem and create the scratch file",
+        scratch && vfs::create_read_only("/bin/hello-gui", HELLO_GUI_IMAGE).is_ok(),
+    ) {
+        return false;
+    }
+    let mut readback = alloc::vec![0u8; HELLO_GUI_IMAGE.len()];
+    if !step(
+        "filesystem round-trip",
+        vfs::read_all("/bin/hello-gui", &mut readback) == Ok(HELLO_GUI_IMAGE.len())
+            && readback[..] == HELLO_GUI_IMAGE[..],
+    ) {
+        return false;
+    }
+    // No DisplayIo: the benchmark needs no capability beyond an ordinary
+    // process's own FileRead/FileWrite, so this runs the plain
+    // `task::spawn_user_process` path.
+    let Some((_pid, exit_status)) =
+        run_hello_gui(&readback, &["/bin/hello-gui", "--fs-benchmark"], false)
+    else {
+        return step(
+            "load and spawn as an ordinary process, run to completion",
+            false,
+        );
+    };
+    let status = match exit_status {
+        Ok(code) => code as i64,
+        Err(_) => -1,
+    };
+    serial::write_line(format_args!("[S30.3] exit status {}", status));
+    step("application exits zero", exit_status == Ok(0))
+}
+
+/// Stage 30.4 acceptance: hello-gui's `--compositor-benchmark` mode places a
+/// window, then toggles one pixel and flushes it to the framebuffer
+/// (`surface.write` + `compositor_present`) 500 times, timing each round
+/// trip with the cycle counter, and exits zero. This gate only confirms the
+/// benchmark ran to completion and reported PASSED; the numbers themselves
+/// are a measurement, not a threshold this self-test enforces.
+#[cfg(feature = "stage30-4-test")]
+fn stage30_4_self_test() -> bool {
+    fn step(name: &str, ok: bool) -> bool {
+        serial::write_line(format_args!(
+            "[S30.4] {} {}",
+            name,
+            if ok { "PASS" } else { "FAIL" }
+        ));
+        ok
+    }
+
+    if elf::parse(HELLO_GUI_IMAGE).is_err() {
+        return step("elf accepted by the loader", false);
+    }
+    if !step(
+        "install into the filesystem",
+        vfs::create_read_only("/bin/hello-gui", HELLO_GUI_IMAGE).is_ok(),
+    ) {
+        return false;
+    }
+    let mut readback = alloc::vec![0u8; HELLO_GUI_IMAGE.len()];
+    if !step(
+        "filesystem round-trip",
+        vfs::read_all("/bin/hello-gui", &mut readback) == Ok(HELLO_GUI_IMAGE.len())
+            && readback[..] == HELLO_GUI_IMAGE[..],
+    ) {
+        return false;
+    }
+    // Needs DisplayIo to claim the compositor and present, so this runs the
+    // service-spawn path with display authority.
+    let Some((_pid, exit_status)) =
+        run_hello_gui(&readback, &["/bin/hello-gui", "--compositor-benchmark"], true)
+    else {
+        return step(
+            "load and spawn with display authority, run to completion",
+            false,
+        );
+    };
+    let status = match exit_status {
+        Ok(code) => code as i64,
+        Err(_) => -1,
+    };
+    serial::write_line(format_args!("[S30.4] exit status {}", status));
+    step("application exits zero", exit_status == Ok(0))
+}
+
+/// Stage 30.5 acceptance: hello-gui's `--scheduler-benchmark` mode times
+/// 1000 `yield_now` round trips with the cycle counter and exits zero.
+/// This gate only confirms the benchmark ran to completion and reported
+/// PASSED; the numbers themselves are a measurement, not a threshold this
+/// self-test enforces.
+#[cfg(feature = "stage30-5-test")]
+fn stage30_5_self_test() -> bool {
+    fn step(name: &str, ok: bool) -> bool {
+        serial::write_line(format_args!(
+            "[S30.5] {} {}",
+            name,
+            if ok { "PASS" } else { "FAIL" }
+        ));
+        ok
+    }
+
+    if elf::parse(HELLO_GUI_IMAGE).is_err() {
+        return step("elf accepted by the loader", false);
+    }
+    if !step(
+        "install into the filesystem",
+        vfs::create_read_only("/bin/hello-gui", HELLO_GUI_IMAGE).is_ok(),
+    ) {
+        return false;
+    }
+    let mut readback = alloc::vec![0u8; HELLO_GUI_IMAGE.len()];
+    if !step(
+        "filesystem round-trip",
+        vfs::read_all("/bin/hello-gui", &mut readback) == Ok(HELLO_GUI_IMAGE.len())
+            && readback[..] == HELLO_GUI_IMAGE[..],
+    ) {
+        return false;
+    }
+    // No DisplayIo: the benchmark needs no capability beyond an ordinary
+    // process's own, so this runs the plain `task::spawn_user_process` path.
+    let Some((_pid, exit_status)) =
+        run_hello_gui(&readback, &["/bin/hello-gui", "--scheduler-benchmark"], false)
+    else {
+        return step(
+            "load and spawn as an ordinary process, run to completion",
+            false,
+        );
+    };
+    let status = match exit_status {
+        Ok(code) => code as i64,
+        Err(_) => -1,
+    };
+    serial::write_line(format_args!("[S30.5] exit status {}", status));
+    step("application exits zero", exit_status == Ok(0))
+}
+
 /// Stage 18.2 acceptance: a userspace program allocates a surface, draws into
 /// it through the graphics syscalls, reads pixels back for verification, and
 /// exits zero. End-to-end proof of the client surface primitive.
@@ -10637,6 +14231,27 @@ fn stage18_2_self_test() -> bool {
         "owner slots released on exit",
         crate::user_graphics::count_for(pid.as_u64()) == 0,
     )
+}
+
+/// Boot-stage timing (Stage 30 boot profiling -- "fast boot" is a named
+/// target). Ticks are 100 Hz, so this is coarse (10 ms resolution) but
+/// enough to see which stage of a slow boot is the slow one. The first call
+/// measures from tick 0 (the timer's own start), which is what "time to the
+/// first stage" should mean anyway.
+static BOOT_STAGE_CLOCK: AtomicU64 = AtomicU64::new(0);
+
+/// Print `label` on screen exactly as the unprofiled call did, and log how
+/// many ticks elapsed since the previous call (or boot start, for the
+/// first) to serial as `[BOOT PROFILE]`.
+fn boot_stage(console: &mut Console, label: &str) {
+    let now = timer::ticks();
+    let previous = BOOT_STAGE_CLOCK.swap(now, Ordering::AcqRel);
+    console.println(label);
+    serial::write_line(format_args!(
+        "[BOOT PROFILE] {} (+{} ticks)",
+        label,
+        now.saturating_sub(previous)
+    ));
 }
 
 /// Stop the machine after an unrecoverable boot or validation error.

@@ -166,10 +166,13 @@ impl MmioEntry {
 
 /// An owner-scoped device-register mapping. Raw [`map_mmio`] mappings are
 /// intentionally not represented by this token and are never revoked.
-#[cfg_attr(not(any(not(feature = "qemu-test"), feature = "stage13-12-test")), expect(
-    dead_code,
-    reason = "host kernel targets do not instantiate PCI driver lifecycle"
-))]
+#[cfg_attr(
+    not(any(not(feature = "qemu-test"), feature = "stage13-12-test")),
+    expect(
+        dead_code,
+        reason = "host kernel targets do not instantiate PCI driver lifecycle"
+    )
+)]
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub struct OwnedMmioMapping {
     slot: u16,
@@ -187,10 +190,13 @@ impl OwnedMmioMapping {
     pub const fn physical_address(self) -> u64 {
         self.physical
     }
-    #[cfg_attr(not(any(not(feature = "qemu-test"), feature = "stage13-12-test")), expect(
-        dead_code,
-        reason = "used by PCI driver lifecycle on freestanding target"
-    ))]
+    #[cfg_attr(
+        not(any(not(feature = "qemu-test"), feature = "stage13-12-test")),
+        expect(
+            dead_code,
+            reason = "used by PCI driver lifecycle on freestanding target"
+        )
+    )]
     pub const fn virtual_address(self) -> u64 {
         self.virtual_address
     }
@@ -879,7 +885,11 @@ pub fn share_user_range_in(
         // Map destination to the same frame.
         match unsafe {
             destination_mapper.map_to_with_table_flags(
-                page, frame, flags, ancestor_flags(flags), &mut *allocator,
+                page,
+                frame,
+                flags,
+                ancestor_flags(flags),
+                &mut *allocator,
             )
         } {
             Ok(flush) => {
@@ -1031,7 +1041,11 @@ pub fn try_break_cow(address_space: AddressSpace, fault_address: u64) -> bool {
     let mut allocator = memory::allocator();
     match unsafe {
         mapper.map_to_with_table_flags(
-            page, new_frame, new_flags, ancestor_flags(new_flags), &mut *allocator,
+            page,
+            new_frame,
+            new_flags,
+            ancestor_flags(new_flags),
+            &mut *allocator,
         )
     } {
         Ok(flush) => {
@@ -1042,7 +1056,11 @@ pub fn try_break_cow(address_space: AddressSpace, fault_address: u64) -> bool {
             // Best-effort restore of the old mapping.
             let _ = unsafe {
                 mapper.map_to_with_table_flags(
-                    page, old_frame, flags, ancestor_flags(flags), &mut *allocator,
+                    page,
+                    old_frame,
+                    flags,
+                    ancestor_flags(flags),
+                    &mut *allocator,
                 )
             };
             let _ = memory::deallocate_frame(new_frame);
@@ -1246,7 +1264,9 @@ pub fn destroy_user_address_space(
         let (first, last) = page_range(start, size)?;
         let first = usize::from(first.p4_index());
         let last = usize::from(last.p4_index());
-        if first > last { return Err(MapRangeError::InvalidRange); }
+        if first > last {
+            return Err(MapRangeError::InvalidRange);
+        }
         for index in first..=last {
             if private_root_branch(&paging, address_space, index)?.is_none() {
                 return Err(MapRangeError::MappingFailed);
@@ -1280,27 +1300,47 @@ fn private_root_branch(
     let root = page_table_at(paging.physical_memory_offset, space.root_address())
         .ok_or(MapRangeError::MappingFailed)?;
     let entry = &root[index];
-    if entry.is_unused() { return Ok(None); }
+    if entry.is_unused() {
+        return Ok(None);
+    }
     let kernel = page_table_at(paging.physical_memory_offset, paging.level_4_frame)
         .ok_or(MapRangeError::MappingFailed)?;
-    if entry.addr() == kernel[index].addr() { return Ok(None); }
+    if entry.addr() == kernel[index].addr() {
+        return Ok(None);
+    }
     if !entry.flags().contains(PageTableFlags::USER_ACCESSIBLE)
         || entry.flags().contains(PageTableFlags::HUGE_PAGE)
-    { return Err(MapRangeError::MappingFailed); }
-    Ok(Some(entry.frame().map_err(|_| MapRangeError::MappingFailed)?))
+    {
+        return Err(MapRangeError::MappingFailed);
+    }
+    Ok(Some(
+        entry.frame().map_err(|_| MapRangeError::MappingFailed)?,
+    ))
 }
 
 fn user_tables_are_empty(offset: u64, frame: PhysFrame<Size4KiB>, level: u8) -> bool {
-    let Some(table) = page_table_at(offset, frame.start_address().as_u64()) else { return false; };
+    let Some(table) = page_table_at(offset, frame.start_address().as_u64()) else {
+        return false;
+    };
     for entry in table.iter().filter(|entry| !entry.is_unused()) {
-        if level == 1 || entry.flags().contains(PageTableFlags::HUGE_PAGE) { return false; }
-        let Ok(child) = entry.frame() else { return false; };
-        if !user_tables_are_empty(offset, child, level - 1) { return false; }
+        if level == 1 || entry.flags().contains(PageTableFlags::HUGE_PAGE) {
+            return false;
+        }
+        let Ok(child) = entry.frame() else {
+            return false;
+        };
+        if !user_tables_are_empty(offset, child, level - 1) {
+            return false;
+        }
     }
     true
 }
 
-fn free_empty_user_tables(offset: u64, frame: PhysFrame<Size4KiB>, level: u8) -> Result<(), MapRangeError> {
+fn free_empty_user_tables(
+    offset: u64,
+    frame: PhysFrame<Size4KiB>,
+    level: u8,
+) -> Result<(), MapRangeError> {
     if level > 1 {
         let table = page_table_at(offset, frame.start_address().as_u64())
             .ok_or(MapRangeError::MappingFailed)?;
@@ -1309,14 +1349,19 @@ fn free_empty_user_tables(offset: u64, frame: PhysFrame<Size4KiB>, level: u8) ->
             free_empty_user_tables(offset, child, level - 1)?;
         }
     }
-    if !memory::deallocate_frame(frame) { return Err(MapRangeError::MappingFailed); }
+    if !memory::deallocate_frame(frame) {
+        return Err(MapRangeError::MappingFailed);
+    }
     Ok(())
 }
 
 /// The scheduler has retired the root on every CPU. PAGING serializes the
 /// validation/free passes; no new mapping can appear between them. Validate
 /// every branch before freeing anything, so omitted live ranges fail closed.
-fn reclaim_retired_user_root(paging: &PagingState, space: AddressSpace) -> Result<(), MapRangeError> {
+fn reclaim_retired_user_root(
+    paging: &PagingState,
+    space: AddressSpace,
+) -> Result<(), MapRangeError> {
     if space.root_address() == paging.level_4_frame || Cr3::read().0 == space.level_4_frame {
         return Err(MapRangeError::MappingFailed);
     }
@@ -1330,11 +1375,14 @@ fn reclaim_retired_user_root(paging: &PagingState, space: AddressSpace) -> Resul
     for index in 0..512 {
         if let Some(frame) = private_root_branch(paging, space, index)? {
             page_table_at_mut(paging.physical_memory_offset, space.root_address())
-                .ok_or(MapRangeError::MappingFailed)?[index].set_unused();
+                .ok_or(MapRangeError::MappingFailed)?[index]
+                .set_unused();
             free_empty_user_tables(paging.physical_memory_offset, frame, 3)?;
         }
     }
-    if !memory::deallocate_frame(space.level_4_frame) { return Err(MapRangeError::MappingFailed); }
+    if !memory::deallocate_frame(space.level_4_frame) {
+        return Err(MapRangeError::MappingFailed);
+    }
     Ok(())
 }
 
@@ -1848,10 +1896,13 @@ fn mmio_virtual_address(physical_page: u64, slot: usize) -> Result<u64, MapRange
 /// A page already mapped through the legacy shared API is rejected. This
 /// conservative rule prevents an owner from later unmapping a translation
 /// whose users are not represented by the owner token.
-#[cfg_attr(not(any(not(feature = "qemu-test"), feature = "stage13-12-test")), expect(
-    dead_code,
-    reason = "used by PCI driver lifecycle on freestanding target"
-))]
+#[cfg_attr(
+    not(any(not(feature = "qemu-test"), feature = "stage13-12-test")),
+    expect(
+        dead_code,
+        reason = "used by PCI driver lifecycle on freestanding target"
+    )
+)]
 pub fn map_mmio_owned(physical: u64, owner: u32) -> Result<OwnedMmioMapping, MapRangeError> {
     if owner == 0 {
         return Err(MapRangeError::InvalidRange);
@@ -1908,10 +1959,13 @@ pub fn map_mmio_owned(physical: u64, owner: u32) -> Result<OwnedMmioMapping, Map
 }
 
 /// Release one owner-scoped device-register mapping after device quiescence.
-#[cfg_attr(not(any(not(feature = "qemu-test"), feature = "stage13-12-test")), expect(
-    dead_code,
-    reason = "used by PCI driver lifecycle on freestanding target"
-))]
+#[cfg_attr(
+    not(any(not(feature = "qemu-test"), feature = "stage13-12-test")),
+    expect(
+        dead_code,
+        reason = "used by PCI driver lifecycle on freestanding target"
+    )
+)]
 pub fn release_mmio_owned(mapping: OwnedMmioMapping) -> Result<(), MapRangeError> {
     let mut state = PAGING.lock();
     let entry = state
@@ -1948,10 +2002,13 @@ pub fn release_mmio_owned(mapping: OwnedMmioMapping) -> Result<(), MapRangeError
 }
 
 /// Revoke every owner-scoped MMIO page before releasing a PCI function.
-#[cfg_attr(not(any(not(feature = "qemu-test"), feature = "stage13-12-test")), expect(
-    dead_code,
-    reason = "used by PCI driver lifecycle on freestanding target"
-))]
+#[cfg_attr(
+    not(any(not(feature = "qemu-test"), feature = "stage13-12-test")),
+    expect(
+        dead_code,
+        reason = "used by PCI driver lifecycle on freestanding target"
+    )
+)]
 pub fn revoke_mmio_owner(owner: u32) -> Result<(), MapRangeError> {
     if owner == 0 {
         return Err(MapRangeError::InvalidRange);

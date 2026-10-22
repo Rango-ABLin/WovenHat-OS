@@ -23,11 +23,13 @@ pub enum Error {
     /// The shell image is not a loadable program.
     Image,
     Spawn,
+    Identity,
 }
 
 #[cfg(any(feature = "system-apps", feature = "stage20-15-test"))]
 /// What the session may do: draw, take input, talk to applications, read
-/// the catalog, launch applications, play sound, and turn the machine off.
+/// the catalog, launch applications, play sound, turn the machine off, and
+/// change the signed-in account's own PIN.
 pub const CAPABILITIES: CapabilitySet = CapabilitySet::only(Capability::Console)
     .with(Capability::DisplayIo)
     .with(Capability::InputIo)
@@ -35,14 +37,21 @@ pub const CAPABILITIES: CapabilitySet = CapabilitySet::only(Capability::Console)
     .with(Capability::FileRead)
     .with(Capability::ProcessCreate)
     .with(Capability::AudioPlayback)
-    .with(Capability::PowerControl);
+    .with(Capability::PowerControl)
+    .with(Capability::AccountManage);
 
 #[cfg(any(feature = "system-apps", feature = "stage20-15-test"))]
 /// Start WovenShell from `image` as the session. With accounts, it opens
 /// at the sign-in screen.
 pub fn start(image: &[u8], accounts: Option<&str>) -> Result<u64, Error> {
+    #[cfg(feature = "system-apps")]
+    if let Some(path) = accounts {
+        crate::identity_runtime::load_durable_or_accounts(path).map_err(|_| Error::Identity)?;
+    }
     let program = match accounts {
-        Some(path) => crate::userspace::load_elf_with_argv(image, &["/bin/woven-shell", "--accounts", path]),
+        Some(path) => {
+            crate::userspace::load_elf_with_argv(image, &["/bin/woven-shell", "--accounts", path])
+        }
         None => crate::userspace::load_elf_with_argv(image, &["/bin/woven-shell"]),
     }
     .ok_or(Error::Image)?;
@@ -74,7 +83,9 @@ pub fn toggle_console() {
         crate::compositor::set_console(true);
         crate::woven_input::set_focus(None);
         crate::terminal::clear();
-        crate::terminal::write_bytes(b"WOVENHAT DIAGNOSTIC CONSOLE  (F12: BACK TO THE DESKTOP)\n> ");
+        crate::terminal::write_bytes(
+            b"WOVENHAT DIAGNOSTIC CONSOLE  (F12: BACK TO THE DESKTOP)\n> ",
+        );
         crate::serial::write_line(format_args!("[SESSION] diagnostic console"));
     } else {
         crate::compositor::set_console(false);

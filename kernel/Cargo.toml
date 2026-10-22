@@ -15,6 +15,7 @@ bench = false
 
 [features]
 physical-probe = []
+physical-wifi = ["physical-probe", "stage13-9-test"]
 qemu-test = []
 stage6-hotplug-test = ["qemu-test"]
 network-test = ["qemu-test"]
@@ -78,6 +79,19 @@ stage13-20-test = ["qemu-test", "stage13-12-test"]
 stage13-20b-test = ["qemu-test", "stage13-20-test"]
 # The WovenShell desktop as the session: F12 console, power off.
 stage20-15-test = ["qemu-test", "stage13-12-test"]
+stage25-7-test = ["qemu-test"]
+stage25-8-test = ["qemu-test"]
+stage25-9-test = ["qemu-test"]
+stage25-10-test = ["qemu-test"]
+stage25-11-test = ["qemu-test"]
+stage25-12-test = ["qemu-test"]
+stage25-13-test = ["qemu-test"]
+stage25-14-test = ["qemu-test"]
+stage25-15-test = ["qemu-test"]
+# Deterministic Change-PIN UI acceptance uses the production identity/session
+# capability boundary and the same kernel-injected pointer/keyboard path as
+# the earlier desktop tests.
+stage24-59-test = ["qemu-test", "system-apps"]
 stage14-1-test = ["network-test"]
 stage14-2-test = ["network-test", "stage14-1-test"]
 stage14-3-test = ["network-test", "stage14-2-test"]
@@ -98,12 +112,21 @@ stage15-6-test = ["qemu-test"]
 stage15-7-test = ["qemu-test"]
 stage15-8-test = ["qemu-test"]
 stage15-9-test = ["qemu-test"]
+stage27-1-test = ["qemu-test"]
+# Durable update records use the accepted native WovenFS device transaction
+# boundary; the Stage 27.2 gate runs before the inherited Stage 15.2 exit.
+stage27-2-test = ["qemu-test", "stage15-2-test"]
+# Privileged signed-update transaction boundary and signed Ring-3 daemon IPC;
+# reuse the accepted service-spawn plumbing without running its earlier exit gate.
+stage27-5-test = ["qemu-test", "stage15-2-test", "stage22-3-test"]
 # An application built outside the kernel, loaded from the filesystem.
 stage16-1-test = ["qemu-test"]
 # Three signed system applications installed through one bounded catalog plan.
 stage19-app-catalog-test = ["qemu-test"]
 # Production image build: install the signed system-app catalog during boot.
 system-apps = []
+# Disposable live-hardware demo: system apps plus documented sample accounts.
+hardware-demo = ["system-apps"]
 # Full printable-ASCII font and text layout.
 stage17-1-test = ["qemu-test"]
 # Owner-bound client surface registry for userspace graphics.
@@ -168,9 +191,50 @@ stage20-13-test = ["qemu-test"]
 stage20-14-test = ["qemu-test"]
 # The desktop across two monitors.
 stage20-14b-test = ["qemu-test"]
+# Standalone proof of concept: hello-gui --3d-chrome-demo.
+stage20-16-test = ["qemu-test"]
+# Stage 20.17: the 3D desktop mode's Quick Settings panel.
+stage20-17-test = ["qemu-test"]
+stage20-18-test = ["qemu-test"]
+# Standalone proof of concept: hello-gui --syscall-benchmark.
+stage30-1-test = ["qemu-test"]
+# Standalone proof of concept: hello-gui --ipc-benchmark.
+stage30-2-test = ["qemu-test"]
+stage30-3-test = ["qemu-test"]
+stage30-4-test = ["qemu-test"]
+stage30-5-test = ["qemu-test"]
+stage21-1-test = ["qemu-test"]
+stage21-2-test = ["qemu-test"]
+stage21-3-test = ["qemu-test"]
+stage21-4-test = ["qemu-test"]
+stage21-5-test = ["qemu-test"]
+stage21-6-test = ["qemu-test", "stage15-2-test"]
+stage21-7-test = ["qemu-test", "stage15-2-test"]
+stage21-8-test = ["qemu-test", "stage15-2-test"]
+stage21-9-test = ["qemu-test", "stage15-2-test"]
+stage21-10-test = ["qemu-test", "stage15-2-test"]
+stage21-11-test = ["qemu-test", "stage15-2-test"]
+stage22-1-test = ["qemu-test", "stage15-2-test"]
+stage22-2-test = ["qemu-test", "stage15-2-test"]
+stage22-3-test = ["qemu-test", "stage15-2-test"]
+# Ring-3 WovenPackage mutations use the accepted native WovenFS authority.
+stage22-5-test = ["qemu-test", "stage15-2-test"]
+stage23-1-test = ["qemu-test"]
+stage23-2-test = ["qemu-test"]
+stage23-3-test = ["qemu-test"]
+stage23-4-test = ["qemu-test"]
+stage23-5-test = ["qemu-test"]
+stage23-6-test = ["qemu-test"]
+stage23-7-test = ["qemu-test"]
+stage24-1-test = ["qemu-test"]
+stage24-2-test = ["qemu-test"]
+stage24-3-test = ["qemu-test"]
+stage24-4-test = ["qemu-test"]
+stage24-5-test = ["qemu-test"]
 stage1-5-test = ["qemu-test"]
 
 [dependencies]
+libwoven = { path = "../libwoven" }
 bootloader_api = "0.11.17"
 x86_64 = "0.15.5"
 spin = "0.10"
@@ -195,5 +259,7 @@ subtle = { version = "2.6", default-features = false }
 zeroize = { version = "1.8", default-features = false }
 ed25519-compact = { version = "2.6", default-features = false }
 sha2 = { version = "0.10.9", default-features = false, features = ["force-soft"] }
+rsa = { version = "0.9.9", default-features = false, features = ["sha2"] }
+p256 = { version = "0.13.2", default-features = false, features = ["ecdsa"] }
 [lints.rust]
 warnings = "deny"
