@@ -1,5 +1,20 @@
 # Stage status
 
+## Stage 28 read-only target-disk inventory and safety classification - 2026-10-22
+
+Added `scripts/inventory-target-disks.py` with fixture-driven parsing for
+normalized records, PowerShell `Get-Disk` JSON, and Linux `lsblk -J` JSON.
+The report can identify a uniquely marked Windows system/boot disk and marks
+removable, USB, external, and backup-labelled disks as protected candidates.
+It fails closed on missing or duplicate serials, invalid capacity, missing
+path/number, or ambiguous system-disk identity. The parser and CLI only read
+caller-supplied files; they do not execute discovery commands or touch devices.
+
+Five focused tests and Python compilation checks pass. This remains an
+inventory/classification boundary only: no target selection, partitioning,
+formatting, installation, ISO generation, or hardware qualification is
+claimed.
+
 ## Stage 28 ISO capability probe - 2026-10-22
 
 Added `scripts/probe-installer-iso.py` with focused host coverage in

@@ -1,5 +1,21 @@
 # WovenHat OS Architecture & Codebase Guide
 
+### Stage 28 - read-only target-disk inventory and safety classification
+
+`scripts/inventory-target-disks.py` is a pure parser/classifier for supplied
+JSON output. It supports normalized records plus the common JSON shapes of
+PowerShell `Get-Disk` and Linux `lsblk -J`; it never invokes either command.
+The normalized record retains path/number, serial, capacity, transport,
+removable, and system/boot flags. Classification protects removable and
+backup-labelled candidates and exposes a system disk only when exactly one
+record is marked system or boot.
+
+Stable identity is mandatory: every record needs a path or number, a serial,
+and a positive capacity, and serials must be unique. Any missing, duplicate,
+or ambiguous value makes `safe_target_selection` false. This boundary is
+read-only and informational; later installer work must add an independently
+reviewed target-selection policy before any partitioning or write operation.
+
 ### Stage 28 - ISO capability probe (unvalidated)
 
 `scripts/probe-installer-iso.py` is a read-only capability probe, not an ISO

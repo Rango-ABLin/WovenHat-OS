@@ -1,5 +1,16 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - Stage 28 read-only target-disk inventory slice (2026-10-22)
+
+Added the disjoint `scripts/inventory-target-disks.py` parser/classifier and
+`tests/test_target_disk_inventory.py`. It consumes only supplied JSON fixtures
+or captured PowerShell `Get-Disk` / Linux `lsblk -J` output, identifies a
+unique system/boot disk, marks removable/backup candidates protected, and
+fails closed on incomplete or ambiguous identity/capacity/serial data. It
+does not execute discovery commands or access physical disks. Five focused
+tests and Python compilation checks are required before commit. This does not
+claim installer partitioning or hardware qualification.
+
 ## Codex - Stage 28 ISO capability probe (2026-10-22)
 
 Added the disjoint, file-only `scripts/probe-installer-iso.py` and focused
