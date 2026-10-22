@@ -57,6 +57,12 @@ Prerequisites: the pinned nightly in `rust-toolchain.toml`
 (`nightly-2026-07-10`, which rustup installs automatically), Python 3, and QEMU
 with OVMF firmware.
 
+Supported production desktop configurations require at least 4 GiB of
+physical RAM. The kernel reports the discovered usable-memory total at boot
+and scales its frame allocator and growable heap from the bootloader memory
+map. Smaller QEMU profiles used by regression gates are intentional low-memory
+fixtures; they do not establish production support.
+
 The acceptance launchers keep Cargo's build and target directories inside the
 project, because Windows `%TEMP%` cleanup has previously deleted Cargo's
 intermediates mid-build and failed an entire chain. Use the same settings for

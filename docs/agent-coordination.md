@@ -1,5 +1,14 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - 4 GiB production memory floor (2026-10-22)
+
+Added the shared `MIN_SUPPORTED_RAM_BYTES`/`MIN_SUPPORTED_RAM_GIB` contract,
+usable-memory telemetry in the kernel, and installed-versus-minimum RAM data
+to `physical-host-preflight.ps1`. Interactive QEMU now defaults to 4 GiB;
+256 MiB acceptance profiles remain explicitly low-memory regression fixtures.
+This improves the production memory contract without claiming that fixed
+kernel object tables or the full scalability/release roadmap are complete.
+
 ## Codex - Stage 31 supported-suite matrix execution (2026-10-22)
 
 The five bounded suites in the planner all passed on 1/2/4 CPUs: memory,

@@ -356,8 +356,13 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         console.println("FRAME ALLOCATOR: OK");
         let memory_stats = memory::stats();
         serial::write_line(format_args!(
-            "[MEMORY] frame allocator NUMA domains={} regions={}",
-            memory_stats.numa_domains, memory_stats.usable_regions
+            "[MEMORY] usable_bytes={} minimum_supported_bytes={} minimum_supported_gib={} meets_minimum={} NUMA domains={} regions={}",
+            memory_stats.usable_bytes,
+            config::MIN_SUPPORTED_RAM_BYTES,
+            config::MIN_SUPPORTED_RAM_GIB,
+            memory_stats.usable_bytes >= config::MIN_SUPPORTED_RAM_BYTES,
+            memory_stats.numa_domains,
+            memory_stats.usable_regions
         ));
     } else {
         console.println("FRAME ALLOCATOR: SELF TEST FAILED");

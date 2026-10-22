@@ -28,7 +28,8 @@ def main():
     parser.add_argument('--qemu', default=shutil.which('qemu-system-x86_64') or r'C:\Program Files\qemu\qemu-system-x86_64.exe')
     parser.add_argument('--firmware', type=Path)
     parser.add_argument('--cpus', type=int, choices=(1, 2, 4), default=2)
-    parser.add_argument('--mem', default='512M')
+    parser.add_argument('--mem', default='4G',
+                        help='guest RAM (default: 4G, the supported production minimum)')
     parser.add_argument('--mode', choices=('hardware-demo', 'system-apps', 'plain'), default='hardware-demo',
                          help='hardware-demo (default): full desktop + demo sign-in (ada/1234, lin/9876) + all signed system apps; '
                               'system-apps: production app catalog, no demo accounts; plain: base kernel only')

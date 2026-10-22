@@ -1,5 +1,6 @@
 param(
     [ValidateSet(1, 2, 4)][int]$Cpus = 4,
+    [string]$Memory = "4G",
     [string]$Qemu = "C:\Program Files\qemu\qemu-system-x86_64.exe"
 )
 $ErrorActionPreference = "Stop"
@@ -11,7 +12,7 @@ try {
     & python (Join-Path $PSScriptRoot "scripts/create-fat32.py") $releaseDisk
     if ($LASTEXITCODE -ne 0) { throw "Data disk setup failed." }
     $releaseFirmware = Join-Path (Split-Path $Qemu) "share/edk2-x86_64-code.fd"
-    & $Qemu -machine pc -m 1024M -smp $Cpus `
+    & $Qemu -machine pc -m $Memory -smp $Cpus `
         -drive "if=pflash,format=raw,readonly=on,file=$releaseFirmware" `
         -drive "if=none,id=boot,format=raw,readonly=on,file=$releaseImage" `
         -device virtio-blk-pci,drive=boot,bootindex=1 `

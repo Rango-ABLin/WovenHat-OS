@@ -1,5 +1,20 @@
 # Stage status
 
+## 4 GiB production memory floor and scalable memory telemetry - 2026-10-22
+
+Defined the supported production minimum as 4 GiB through
+`kernel::config::MIN_SUPPORTED_RAM_BYTES`. Boot telemetry now reports usable
+bytes, the minimum, and whether the discovered allocator capacity meets it;
+the read-only Windows host preflight records the same comparison. The
+interactive QEMU launcher defaults to 4 GiB. The physical frame allocator
+continues to derive capacity from the bootloader memory map, and the kernel
+heap grows from remaining frames rather than a fixed machine-size assumption.
+
+The existing 256 MiB QEMU gates remain low-memory regression fixtures. This
+change does not claim that the complete OS is production-ready: fixed kernel
+object capacities, native hardware qualification, fault-injection coverage,
+and later roadmap stages remain separate scalability/release work.
+
 ## Stage 31 supported-suite matrix execution - 2026-10-22
 
 Completed the bounded planner's five existing suites on 1/2/4 CPUs: memory,

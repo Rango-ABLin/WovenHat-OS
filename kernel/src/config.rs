@@ -8,6 +8,12 @@
 /// Maximum number of tasks the scheduler can track (including kernel + idle).
 pub const MAX_TASKS: usize = 32;
 
+/// Minimum physical RAM for a supported production installation. Smaller
+/// machines remain useful for bounded CI/QEMU regression fixtures, but are
+/// not a supported desktop configuration.
+pub const MIN_SUPPORTED_RAM_BYTES: u64 = 4 * 1024 * 1024 * 1024;
+pub const MIN_SUPPORTED_RAM_GIB: u64 = 4;
+
 /// Maximum number of processes (user + kernel).
 pub const MAX_PROCESSES: usize = 32;
 
