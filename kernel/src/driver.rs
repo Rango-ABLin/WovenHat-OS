@@ -1506,6 +1506,20 @@ pub fn stage13_2_lifecycle_self_test() -> bool {
         clean, interrupt_ready
     ));
     crate::serial::write_line(format_args!("[S13.2] owner-mmio unbind={}", clean));
+    // A restart must acquire a new owner transaction after the previous
+    // generation has fully released its BAR and interrupt obligations. This
+    // is still a lifecycle acceptance, not a production crash supervisor:
+    // the caller explicitly requests the rebind and the same PCI identity is
+    // used only after the first teardown completed.
+    let restarted = clean
+        && bind_matching_pci(address, OWNER.wrapping_add(1)).is_some_and(|result| result.is_ok());
+    crate::serial::write_line(format_args!("[S13.2] driver restart bind={}", restarted));
+    let restarted_clean = restarted && unbind_pci_resources(NAME).is_ok();
+    crate::serial::write_line(format_args!(
+        "[S13.2] driver restart teardown={} leases={}",
+        restarted_clean,
+        pci_bar_leases(NAME)
+    ));
     let high_mmio = if clean {
         match crate::paging::map_mmio_owned(0x2000_0000_0000, OWNER.wrapping_add(3)) {
             Ok(mapping) => {
@@ -1548,7 +1562,7 @@ pub fn stage13_2_lifecycle_self_test() -> bool {
             }
         }
     };
-    if !clean || !remapped || !interrupt_ready || !high_mmio {
+    if !clean || !restarted_clean || !remapped || !interrupt_ready || !high_mmio {
         return false;
     }
     let rescan = hotplug_rescan().is_ok();

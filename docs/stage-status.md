@@ -1,5 +1,15 @@
 # Stage status
 
+## Stage 31 PCI driver restart slice - 2026-10-22
+
+The Stage 13.2 QEMU lifecycle gate now binds a discovered PCI function,
+activates its interrupt/BAR ownership, tears it down, binds it again under a
+fresh owner transaction, tears it down again, verifies zero remaining BAR
+leases, and completes generation-safe rescan. The 1-CPU gate passed with exit
+33. This is explicit driver rebind/teardown qualification, not automatic
+crash supervision or native hardware certification. Details are in
+`docs/audit-stage31-driver-restart-2026-10-22.md`.
+
 ## Stage 31 signed service restart slice - 2026-10-22
 
 The Stage 27.5 signed `woven-update` acceptance now kills and reaps the first

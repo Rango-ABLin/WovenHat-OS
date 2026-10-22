@@ -4062,6 +4062,15 @@ bootability, hardware qualification, or release certification.
 
 # SMP scalability and supported resource floor
 
+## Driver restart qualification boundary
+
+The Stage 13.2 lifecycle gate proves that a discovered PCI function can be
+bound, have its interrupt and BAR leases released in order, and be rebound
+under a fresh owner transaction before a second teardown and generation-safe
+rescan. This is the reusable teardown/rebind boundary. Automatic recovery
+after a driver crash still needs a supervisor policy, device-specific reset
+and replay rules, and hardware evidence.
+
 ## Service restart qualification boundary
 
 The signed Stage 27.5 update-service gate now proves a full orderly restart

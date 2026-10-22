@@ -4869,6 +4869,14 @@ uncommitted 3D work in `kernel/src/main.rs` and
 `apps/woven-shell/src/main.rs` was preserved. Physical USB HID, virtio-input,
 and device recovery remain open.
 
+**Codex PCI driver restart slice (Codex, 2026-10-22):** Extended the Stage
+13.2 QEMU lifecycle gate to bind a discovered PCI function, activate and
+release its interrupt/BAR resources, rebind under a fresh owner transaction,
+tear down again, verify zero BAR leases, and complete generation-safe rescan.
+The 1-CPU gate passed with exit 33. This is explicit driver rebind/teardown
+qualification, not automatic crash supervision or native hardware evidence;
+Claude's uncommitted 3D files remain untouched.
+
 **Codex signed service restart slice (Codex, 2026-10-22):** Extended the
 Stage 27.5 `woven-update` acceptance to terminate/reap the first signed daemon,
 verify service cleanup, reload and respawn the signed image, verify fresh
