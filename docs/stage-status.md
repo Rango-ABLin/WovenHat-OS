@@ -1,5 +1,24 @@
 # Stage status
 
+## Stage 28 disposable file-image filesystem formatter/verifier - 2026-10-22
+
+Added `scripts/format-file-image-fs.py` with focused coverage in
+`tests/test_file_image_filesystem.py`. The formatter consumes the prior
+layout builder's checksummed metadata and writes only its single data region.
+It emits deterministic FAT32-compatible metadata: BPB, backup boot sector,
+FSInfo and backup FSInfo, two matching FATs, reserved entries, root-cluster
+entry, and the fixed `WOVENHAT` label. Verification checks sector geometry,
+region bounds, FAT bounds/copies, auxiliary-sector pointers, signatures,
+determinism, and identity metadata.
+
+The operation is transactional for the disposable image: before/after-write
+and after-verification injected failures restore the original data region
+byte-for-byte. Symlinks, device/protected identities, missing authorization,
+multiple data regions, real mounts, and physical installation fail closed.
+The 34-test Stage 28 focused chain, Python compilation, and diff checks pass.
+This is not physical installation, bootloader formatting, hardware
+qualification, or release certification.
+
 ## Stage 28 disposable file-image layout builder and verifier - 2026-10-22
 
 Added `scripts/build-file-image-layout.py` and focused coverage in

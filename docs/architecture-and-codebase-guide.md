@@ -3918,3 +3918,20 @@ same-directory temporary files and atomic replacement. A retained backup
 allows verification or injected-failure rollback. Device paths, protected
 identities, mounting, formatting, partitioning, bootloader installation, and
 physical media are outside this boundary.
+
+## Stage 28 disposable file-image filesystem formatter/verifier
+
+`scripts/format-file-image-fs.py` consumes the layout builder's checksummed
+metadata and requires exactly one aligned `data` region. Its bounded format is
+FAT32-compatible with 512-byte sectors, one-sector clusters, 32 reserved
+sectors, two FAT copies, FSInfo at sector 1, backup boot/FSInfo sectors at 6/7,
+root cluster 2, and a deterministic `WOVENHAT` volume label. The formatter
+constructs the complete region in memory and writes no bytes outside that
+partition; verification rejects invalid geometry, bounds, copies, signatures,
+or nondeterministic metadata.
+
+The file-image transaction snapshots the selected region and restores it after
+any injected pre-write, post-write, or post-verification failure. The input
+must be an explicitly harness-created regular non-symlink file and all
+protected/device identities are rejected. No mount, partition API, physical
+disk, bootloader, or hardware qualification is involved.

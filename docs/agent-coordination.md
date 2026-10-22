@@ -1,5 +1,16 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - Stage 28 disposable file-image FAT32-compatible formatter (2026-10-22)
+
+Added the disjoint `scripts/format-file-image-fs.py` module and
+`tests/test_file_image_filesystem.py`. It consumes only the checksummed data
+region emitted by the prior file-image layout builder, writes deterministic
+FAT32-compatible boot-sector, FSInfo, dual-FAT, and root-cluster metadata,
+verifies all bounds and copies, and rolls the data region back on injected
+failure. It refuses symlinks, device/protected identities, unauthorized
+images, multiple data regions, and real mounts. This is disposable file-image
+formatting only; physical installation and hardware qualification remain open.
+
 ## Codex - Stage 28 disposable file-image layout builder and verifier (2026-10-22)
 
 Added the disjoint `scripts/build-file-image-layout.py` module and
