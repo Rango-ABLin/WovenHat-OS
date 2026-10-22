@@ -4,11 +4,12 @@
 
 Raised the static SMP control-plane limit from 4 to 16 CPUs and expanded the
 bounded scheduler/process/descriptor/IPC tables to 128 tasks, 128 processes,
-64 descriptors, 256 IPC objects, and 64 handles per process. The migration
-stress deadline now scales with its explicit probe workload; it does not drop
-assertions or reduce rounds. Production and host warning-denying Clippy pass.
-The 8- and 16-CPU memory/boot gates pass; other 8/16-CPU suite rows remain
-pending until separately executed.
+64 descriptors, 256 IPC objects, and 64 handles per process. Migration and
+preemption diagnostic budgets now scale with their explicit SMP workload; no
+assertions or rounds were removed. Production and host warning-denying Clippy
+pass. The supported memory, storage, network, security, and shell suites now
+pass on 1/2/4/8/16 CPUs; the 16-CPU storage and shell runs need an extended
+host TCG wall-clock budget but complete successfully.
 
 ## 4 GiB production memory floor and scalable memory telemetry - 2026-10-22
 
@@ -27,14 +28,21 @@ and later roadmap stages remain separate scalability/release work.
 
 ## Stage 31 supported-suite matrix execution - 2026-10-22
 
-Completed the bounded planner's five existing suites on 1/2/4 CPUs: memory,
-storage, network, security, and shell. All fifteen runs passed with exit 33.
-Fresh evidence is retained in the memory/storage/network/shell target
-directories and the `audit-artifacts/woven-security-{1,2,4}cpu` directories.
-This is a supported-suite regression matrix, not full Stage 31 acceptance:
-randomized failure injection, low-memory/disk-full/network-loss scenarios,
-driver/service restart, sudden-shutdown recovery, repeated-boot counts, and
-8/16-CPU execution remain open.
+Completed the bounded planner's five existing suites on 1/2/4/8/16 CPUs:
+memory, storage, network, security, and shell. All twenty-five supported-suite
+runs passed with exit 33. Fresh evidence is retained in the corresponding
+memory/storage/network/shell target directories and
+`audit-artifacts/woven-security-{1,2,4,8,16}cpu`. The complete Stage 31
+torture acceptance is still open: randomized failure injection, low-resource
+and loss scenarios, driver/service restart, sudden-shutdown recovery, and
+repeated-boot counts remain unimplemented.
+
+The 16-CPU shell gate initially exposed fixed preemption-test budgets; those
+budgets now scale with the bounded online topology and the rerun passes. A
+300-second shell harness window and a 900-second storage diagnostic window are
+host-emulation accommodations, not guest pass overrides. See
+`docs/audit-stage31-scalability-2026-10-22.md` for the exact commands and
+preserved evidence.
 
 ## Stage 31 memory and storage suite execution - 2026-10-22
 
@@ -53,12 +61,12 @@ explicit across the roadmap's 1/2/4/8/16 CPU matrix. It marks 8/16-CPU jobs
 blocked because the current acceptance harnesses support only 1/2/4, and it
 never launches QEMU, injects faults, or treats an omitted job as passed.
 
-The 16-CPU control plane now compiles and the full memory/boot suite passes on
-8 and 16 CPUs after increasing bounded scheduler/process capacity and scaling
-the migration-stress budget with its explicit workload. This is still the
-orchestration foundation only: the other suites need 8/16-CPU execution,
-randomized failure-injection contracts, low-resource scenarios,
-service/driver restart coverage, and repeated-boot acceptance evidence.
+The 16-CPU control plane compiles and the full supported suite passes on 8 and
+16 CPUs after increasing bounded scheduler/process capacity and scaling the
+SMP diagnostic budgets with their explicit workload. This remains the
+orchestration foundation only: randomized failure-injection contracts,
+low-resource scenarios, service/driver restart coverage, and repeated-boot
+acceptance evidence are still required for full Stage 31 acceptance.
 
 ## Stage 30 performance matrix rerun - 2026-10-22
 

@@ -295,7 +295,14 @@ def main():
                 for key in list('smptest') + ['ret']:
                     execute('send-key', {'keys': [{'type': 'qcode', 'data': key}], 'hold-time': 40})
                     time.sleep(0.1)
-                deadline = time.monotonic() + 60
+                # The SMP shell command runs the full migration/TLB suite on
+                # every requested CPU.  Under host TCG, the 16-CPU profile
+                # can legitimately take several minutes even though the
+                # guest is making progress; keep the normal 60-second gate
+                # for the supported 1/2/4/8 profiles and give the largest
+                # bounded profile a proportional diagnostic window.
+                smp_deadline = 300 if args.cpus == 16 else 60
+                deadline = time.monotonic() + smp_deadline
                 while '[SMP] acknowledged TLB shootdowns: PASSED' not in serial.read_text(errors='replace'):
                     if process.poll() is not None or time.monotonic() > deadline:
                         raise RuntimeError('Keyboard/SMP shell command failed; inspect shell-regression logs')

@@ -1421,10 +1421,15 @@ fn cpu_bound_probe() -> ! {
     let cpu = cpu_index();
     PREEMPT_STARTED[cpu].store(true, Ordering::Release);
     let start = unsafe { core::arch::x86_64::_rdtsc() };
+    // The probe deliberately performs no cooperative yield.  On a large SMP
+    // profile, host TCG must emulate more AP timer/IPI traffic before the
+    // peer can be scheduled, so the diagnostic budget scales with the
+    // bounded online topology rather than treating that work as a hang.
+    let tsc_budget = 10_000_000_000_u64.saturating_add(online_count() as u64 * 2_000_000_000);
     // No yield: only a hardware timer can schedule the peer on this CPU.
     while !PREEMPT_PEER[cpu].load(Ordering::Acquire) {
         assert!(
-            unsafe { core::arch::x86_64::_rdtsc() }.wrapping_sub(start) < 10_000_000_000,
+            unsafe { core::arch::x86_64::_rdtsc() }.wrapping_sub(start) < tsc_budget,
             "AP timer preemption timeout"
         );
         core::hint::spin_loop();
@@ -1446,7 +1451,8 @@ fn preemption_test() {
         unsafe { task::spawn_on(cpu, "preempt-peer", preemption_peer) }
             .expect("preemption peer slot");
     }
-    let deadline = crate::timer::ticks() + 500;
+    let deadline =
+        crate::timer::ticks().saturating_add(500_u64.saturating_add(online_count() as u64 * 64));
     while PREEMPT_DONE.load(Ordering::Acquire) < online_count() {
         assert!(
             crate::timer::ticks() < deadline,

@@ -4057,6 +4057,33 @@ uses the layout/formatter/EFI path and records separate executor and final-image
 digests. The harness verifies deterministic output and byte-for-byte rollback
 after injected failures. It does not establish physical installation,
 bootability, hardware qualification, or release certification.
+
+# SMP scalability and supported resource floor
+
+The current static SMP control plane supports up to 16 online CPUs through
+`kernel/src/smp.rs::MAX_CPUS`. A topology larger than that is deliberately
+bounded and must be rejected or reported as truncated; it is not silently
+treated as fully supported. Scheduler and process tables currently reserve
+128 tasks and 128 processes, with 64 file descriptors per process, 256 IPC
+objects, and 64 IPC handles per process. These are fixed, auditable capacities,
+not an arbitrary-memory promise; dynamic per-CPU/object allocation remains a
+future scalability stage.
+
+The supported production memory floor is 4 GiB, exposed as
+`kernel::config::MIN_SUPPORTED_RAM_BYTES`. Boot telemetry and the Windows
+preflight report usable/discovered memory and whether it meets that floor.
+The allocator still derives usable capacity from the bootloader memory map,
+and the interactive QEMU launcher defaults to 4 GiB. Existing 256 MiB QEMU
+fixtures are intentionally retained as low-memory regression tests and do not
+claim production support below the floor.
+
+The 1/2/4/8/16-CPU supported-suite matrix covers memory/boot, storage, network,
+security, and shell paths. Under host TCG, the largest storage and shell
+profiles require longer wall-clock harness budgets; those budgets only prevent
+false host timeouts. Guest completion markers, SMP assertions, and exit status
+remain mandatory. Failure injection, low-resource recovery, restart, sudden
+shutdown, repeated-boot, and native hardware qualification are separate open
+acceptance requirements.
 ## Stage 29 hardware qualification report boundary
 
 `scripts/qualify-hardware-report.py` is the report-only boundary for the
