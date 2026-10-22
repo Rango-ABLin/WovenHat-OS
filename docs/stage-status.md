@@ -1,5 +1,22 @@
 # Stage status
 
+## Stage 28 disposable UEFI boot artifact preparation and verifier - 2026-10-22
+
+Added `scripts/prepare-uefi-boot-artifact.py` with focused coverage in
+`tests/test_uefi_boot_artifact.py`. It consumes the prior disposable layout,
+locates its single ESP, and writes a bounded, checksummed envelope containing
+the exact `EFI/BOOT/BOOTX64.EFI` path and artifact bytes. It accepts either an
+explicit regular artifact file or a deterministic fixture. Writes are limited
+to the ESP and transactional rollback restores the complete ESP after injected
+failures.
+
+The envelope is a test-only file-image record, not a mounted FAT directory.
+Physical/device paths, symlinks, mounts, firmware flashing, bootloader
+installation, and hardware access fail closed. Artifact size is bounded to
+4 MiB. Verification reports `bootability: not-qualified`; no kernel
+bootability or QEMU boot acceptance is claimed. The Stage 28 focused chain,
+Python compilation, and diff checks pass.
+
 ## Stage 28 disposable file-image filesystem formatter/verifier - 2026-10-22
 
 Added `scripts/format-file-image-fs.py` with focused coverage in

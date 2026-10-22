@@ -1,5 +1,26 @@
 # WovenHat OS Architecture & Codebase Guide
 
+### Stage 28 - disposable UEFI boot artifact preparation and verifier
+
+`scripts/prepare-uefi-boot-artifact.py` is a disjoint, file-image-only
+boundary layered over the verified layout metadata. It requires one ESP and
+writes only that region. The envelope stores canonical metadata for the fixed
+UEFI fallback path `EFI/BOOT/BOOTX64.EFI`, the exact payload length, SHA-256,
+ESP-relative payload bounds, and the artifact bytes. The verifier rechecks the
+magic, JSON bounds, fixed path, size limit, payload containment, digest, and
+zero-filled tail. A deterministic fixture is available for repeatable tests;
+explicit source files must be regular, non-symlink files and are capped at
+4 MiB.
+
+The write transaction snapshots the entire ESP, fsyncs the new bytes, verifies
+the result, and restores the snapshot for injected failures. This envelope is
+not a FAT filesystem directory entry and does not invoke a mount, partitioner,
+firmware API, or bootloader installer. It does not parse PE/COFF signatures,
+validate Secure Boot signatures, hand off to firmware, or prove that the
+WovenHat kernel boots. The result is deliberately marked
+`bootability: not-qualified` until an independently generated artifact is
+booted and evidenced in QEMU.
+
 ### Stage 28 - disposable file-image layout builder and verifier
 
 `scripts/build-file-image-layout.py` is an isolated, test-only preparation

@@ -1,5 +1,17 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - Stage 28 disposable UEFI boot artifact preparation (2026-10-22)
+
+Added the disjoint `scripts/prepare-uefi-boot-artifact.py` module and
+`tests/test_uefi_boot_artifact.py`. It consumes only the verified disposable
+file-image layout, writes a bounded checksummed envelope and exact
+`EFI/BOOT/BOOTX64.EFI` payload into the ESP, and restores the complete ESP on
+injected failure. Explicit artifacts and a deterministic fixture are accepted;
+device paths, symlinks, mounts, firmware flashing, bootloader installation,
+and hardware access are refused. This is not a FAT mount or a bootability
+claim. Stage 28 focused tests, Python compilation, and diff checks are
+required before committing this slice.
+
 ## Codex - Stage 28 disposable file-image FAT32-compatible formatter (2026-10-22)
 
 Added the disjoint `scripts/format-file-image-fs.py` module and
