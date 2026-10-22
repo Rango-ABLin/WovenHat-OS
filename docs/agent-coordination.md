@@ -1,5 +1,19 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - Stage 31 process-crash containment (2026-10-22)
+
+Added the feature-gated `stage31-process-crash-test` probe and
+`scripts/test-stage31-process-crash.py`. A Ring-3 unmapped write is recorded as
+a user fault, the process is reaped with `-11`, and the kernel continues to
+the exit marker. QEMU passed on 1/2/4 CPUs; evidence is under
+`target/stage31-process-crash-{1,2,4}cpu`. The torture planner now marks only
+the process-crash scenario covered; driver crash, packet corruption, sudden
+shutdown, and service restart remain open.
+
+The implementation adds a small feature-gated userspace probe and acceptance
+block to the shared `kernel/src/main.rs`; Claude's unrelated 3D changes in
+that file remain uncommitted and were preserved.
+
 ## Codex - Stage 24.59 low-memory closure (2026-10-22)
 
 The 256 MiB Change-PIN fixture first exposed a bootstrap heap sizing defect:

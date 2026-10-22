@@ -1,5 +1,16 @@
 # Stage status
 
+## Stage 31 process-crash containment - 2026-10-22
+
+Added a feature-gated Ring-3 fault probe and QEMU harness. The probe writes to
+an unmapped user address; the kernel records the user fault, terminates only
+that process, and returns `-11` to the waiter. The gate passed on 1/2/4 CPUs
+with exit 33. Evidence is retained under
+`target/stage31-process-crash-{1,2,4}cpu`; the detailed audit is
+`docs/audit-stage31-process-crash-2026-10-22.md`. Driver crashes, service
+restart, packet corruption, sudden shutdown, and native hardware faults remain
+open.
+
 ## Stage 24.59 low-memory regression closure - 2026-10-22
 
 The 256 MiB Change-PIN regression fixture initially exhausted the proportional

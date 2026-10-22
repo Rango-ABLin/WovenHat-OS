@@ -4087,6 +4087,12 @@ remain mandatory. Failure injection, low-resource recovery, restart, sudden
 shutdown, repeated-boot, and native hardware qualification are separate open
 acceptance requirements.
 
+Stage 31 process-crash containment is separately exercised by a feature-gated
+Ring-3 probe on 1/2/4 CPUs. Its unmapped write must produce a user fault,
+reap only the faulting process with status `-11`, and leave the kernel alive
+to emit the QEMU success marker. This does not imply driver or service
+supervision; those require their own owner and restart acceptance.
+
 `scripts/test-stage31-repeated-boots.py` is the repeatability boundary for
 those suites. It serializes child harnesses because they use fixed ports and
 shared target paths, snapshots each run before evaluating its exit status, and

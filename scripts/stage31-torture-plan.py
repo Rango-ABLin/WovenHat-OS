@@ -41,7 +41,7 @@ FAULT_SCENARIOS = {
     "service-lifecycle": "covered-signed-update-service-1-2-4cpu",
     "packet-corruption": "open",
     "driver-crash": "open",
-    "process-crash": "open",
+    "process-crash": "covered-stage31-qemu-process-crash",
     "sudden-shutdown": "open",
     "whole-kernel-low-ram": "open",
 }

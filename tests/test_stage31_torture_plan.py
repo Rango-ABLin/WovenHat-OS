@@ -59,5 +59,5 @@ class Stage31TorturePlanTests(unittest.TestCase):
         self.assertEqual(scenarios["service-lifecycle"], "covered-signed-update-service-1-2-4cpu")
         self.assertEqual(scenarios["packet-corruption"], "open")
         self.assertEqual(scenarios["driver-crash"], "open")
-        self.assertEqual(scenarios["process-crash"], "open")
+        self.assertEqual(scenarios["process-crash"], "covered-stage31-qemu-process-crash")
         self.assertEqual(scenarios["sudden-shutdown"], "open")

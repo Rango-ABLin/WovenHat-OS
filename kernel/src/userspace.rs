@@ -62,6 +62,22 @@ fn aslr_mmap_base() -> Option<u64> {
 }
 const USER_CODE_SIZE: usize = 4096;
 
+#[cfg(feature = "stage31-process-crash-test")]
+global_asm!(
+    ".global wovenhat_stage31_process_crash_start",
+    ".global wovenhat_stage31_process_crash_end",
+    "wovenhat_stage31_process_crash_start:",
+    // This address is outside the process image and stack. The user-mode
+    // page-fault handler must terminate this process, not the kernel.
+    "mov rax, 0x400000300000",
+    "mov byte ptr [rax], 1",
+    // Unreachable if fault containment is working; retain a clean fallback.
+    "mov eax, 3",
+    "xor edi, edi",
+    "int 0x80",
+    "wovenhat_stage31_process_crash_end:",
+);
+
 global_asm!(
     ".global wovenhat_user_program_start",
     ".global wovenhat_user_program_end",
@@ -5045,6 +5061,23 @@ pub fn create_stub_process() -> Option<UserProgram> {
     };
     let elf = build_stub_elf(stub)?;
     load_elf(&elf)
+}
+
+/// Build the deterministic Stage 31 process-fault probe. It intentionally
+/// writes to an unmapped user address and must be reaped with `-11`.
+#[cfg(feature = "stage31-process-crash-test")]
+pub fn create_stage31_process_crash_process() -> Option<UserProgram> {
+    unsafe extern "C" {
+        static wovenhat_stage31_process_crash_start: u8;
+        static wovenhat_stage31_process_crash_end: u8;
+    }
+    // SAFETY: linker-delimited immutable bytes in the kernel image.
+    let stub = unsafe {
+        let start = &wovenhat_stage31_process_crash_start as *const u8;
+        let end = &wovenhat_stage31_process_crash_end as *const u8;
+        core::slice::from_raw_parts(start, end.offset_from(start) as usize)
+    };
+    load_elf(&build_stub_elf(stub)?)
 }
 
 #[cfg(feature = "stage10-8-test")]
