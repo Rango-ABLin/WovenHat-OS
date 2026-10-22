@@ -1,5 +1,27 @@
 # Stage status
 
+## Stage 28 bounded installer UI/state model - 2026-10-22
+
+Added `scripts/installer-ui-model.py`, a pure immutable state-transition model
+for the welcome, target-selection, partition-plan review, user/timezone/
+keyboard/network settings, progress, cancellation, success, and failure
+screens. It accepts only bounded caller-provided summaries: ordinary text is
+limited to 128 characters, error messages to 256, progress messages to 128,
+and progress is an integer in the inclusive range 0..100.
+
+The model requires a safe, unambiguous target summary, enforces the ordered
+screen flow, requires `confirm_install` with `confirmed: true` before any
+progress or success event, and rejects backward progress. Cancellation must
+complete through a separate cancellation state; cancelled and failure states
+are terminal and reject all further events. The model performs no disk or
+filesystem I/O and invokes no partition, format, bootloader, subprocess, or
+graphical UI operation.
+
+Focused host tests and Python compilation/diff checks pass. This is only a UI
+state model: no graphical installer, real installation executor, target-disk
+access, partitioning, formatting, bootloader installation, rollback, or ISO
+support is claimed.
+
 ## Stage 28 disposable file-backed installation executor - 2026-10-22
 
 Added `scripts/execute-file-install.py` as a test-only transaction boundary.

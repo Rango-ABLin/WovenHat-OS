@@ -1,5 +1,30 @@
 # WovenHat OS Architecture & Codebase Guide
 
+### Stage 28 - bounded installer UI/state model
+
+`scripts/installer-ui-model.py`
+is a pure Python state machine for the future WovenInstaller presentation
+layer. `InstallerState` contains only serializable screen, bounded summary,
+progress, confirmation, and error fields; it owns no device, file, process, or
+kernel handles. The legal flow is:
+
+`welcome -> target-selection -> partition-review -> settings -> progress`
+
+with cancellation from each active pre-terminal screen through
+`cancelling -> cancelled`, and fail-closed error transitions to `failure`.
+Success is legal only after explicit confirmation and 100 percent progress.
+Terminal cancelled, success, and failure states reject all events, so retrying
+requires a newly constructed state rather than an implicit continuation.
+
+The model bounds ordinary summaries to 128 characters, error messages to 256,
+progress messages to 128, rejects control characters, requires a caller to
+assert that a selected target is safe and unambiguous, and requires a literal
+`confirmed: true` event before progress can advance. This confirmation is an
+admission boundary for a future destructive executor; the current model does
+not execute or authorize any operation. It performs no disk discovery or
+access, filesystem work, partitioning, formatting, bootloader installation,
+subprocess invocation, graphical rendering, or installation.
+
 ### Stage 28 - immutable installer-plan validator
 
 `scripts/validate-installer-plan.py` consumes only caller-supplied JSON. The

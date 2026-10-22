@@ -1,5 +1,21 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - Stage 28 bounded installer UI/state model (2026-10-22)
+
+Added the disjoint `scripts/installer-ui-model.py` pure state machine and
+`tests/test_installer_ui_model.py`. It models welcome, target selection,
+partition-plan review, settings, progress, cancellation, success, and failure
+screens. Transitions reject illegal order, protected/ambiguous target
+summaries, overlong/control-character text, invalid/backward progress, and any
+progress or success before an explicit confirmation event. Cancellation and
+failure are terminal and fail closed; a fresh state is required to restart.
+
+The model stores only bounded caller-provided summaries and has no filesystem,
+device, subprocess, partition, format, bootloader, or graphical UI code. The
+confirmation gate is a future executor boundary, not an installation claim.
+Focused Stage 28 host tests, Python compilation, and diff checks must pass
+before this slice is committed.
+
 ## Codex - Stage 28 disposable file-backed installation executor (2026-10-22)
 
 Added the disjoint `scripts/execute-file-install.py` and
