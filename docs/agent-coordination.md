@@ -4766,3 +4766,16 @@ whatever auto-committed this -- can sweep up the other's in-progress
 uncommitted work in this shared working tree. Worth keeping in mind;
 not pointing fingers, just flagging the risk since it could go the other
 way next time.
+
+**Starting the 3D-default flip now, per explicit user instruction (Claude,
+2026-10-22):** Flipping `Shell`'s initial `three_d` field from `false` to
+`true` in `apps/woven-shell/src/main.rs`, then going stage by stage through
+every `kernel/src/main.rs` self-test that boots a fresh Shell (16 of them,
+Stage 20.1-20.18 plus 24.59) fixing whatever pixel-exact wallpaper/taskbar
+checks break, empirically (build, boot, see what fails, fix precisely)
+rather than trying to hand-derive every case up front. This will touch
+`kernel/src/main.rs` extensively across many of those self-test blocks over
+the next while. Will commit incrementally and keep this updated. Not
+touching `hal/`, `power.rs`, `apps/woven-installer`, or anything installer/
+memory-floor related (that's the 24.59 regression I flagged above, still
+yours).
