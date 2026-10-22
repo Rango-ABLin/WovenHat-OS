@@ -1,5 +1,15 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - Stage 28 kernel GPT layout writer (2026-10-22)
+
+Added `kernel::gpt::write_layout`, a bounded writer for protective MBR,
+aligned ESP/data GPT entries, primary/backup entry arrays, and primary/backup
+headers with CRCs. The existing GPT self-test now exercises the writer and
+re-parses both partitions. Kernel target Clippy, host all-target Clippy, and
+the normal system-apps 1-CPU QEMU gate passed. This remains a primitive only;
+the installer still needs target selection, FAT32 formatting, EFI handoff,
+provisioning, and service integration.
+
 ## Codex - Stage 28 real UEFI artifact ingress (2026-10-22)
 
 Added `scripts/extract-uefi-boot-artifact.py` with bounded, read-only GPT and

@@ -12,6 +12,19 @@ const EFI_SYSTEM_GUID: [u8; 16] = [
 const BASIC_DATA_GUID: [u8; 16] = [
     0xa2, 0xa0, 0xd0, 0xeb, 0xe5, 0xb9, 0x33, 0x44, 0x87, 0xc0, 0x68, 0xb6, 0xb7, 0x26, 0x99, 0xc7,
 ];
+const GPT_ENTRY_SIZE: usize = 128;
+const GPT_ENTRY_COUNT: usize = 128;
+const GPT_ENTRY_SECTORS: u64 = (GPT_ENTRY_SIZE * GPT_ENTRY_COUNT / SECTOR_SIZE) as u64;
+const GPT_FIRST_USABLE: u64 = 2 + GPT_ENTRY_SECTORS;
+const GPT_ALIGNMENT: u64 = 2048;
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub struct Layout {
+    pub esp_start_lba: u64,
+    pub esp_sectors: u64,
+    pub data_start_lba: u64,
+    pub data_sectors: u64,
+}
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Error {
@@ -21,6 +34,97 @@ pub enum Error {
     InvalidChecksum,
     Unsupported,
     OutOfBounds,
+}
+
+/// Write a deterministic protective-MBR/GPT layout to a writable block
+/// device. The caller supplies the exact ESP and data sizes; both partitions
+/// are aligned and the primary and backup GPT copies are written. Filesystem
+/// contents and boot artifacts are intentionally separate operations.
+pub fn write_layout(
+    device: &mut impl BlockDevice,
+    esp_sectors: u64,
+    data_sectors: u64,
+) -> Result<Layout, Error> {
+    if esp_sectors == 0 || data_sectors == 0 || device.is_read_only() {
+        return Err(Error::Block(BlockError::ReadOnly));
+    }
+    let last_lba = device
+        .sector_count()
+        .checked_sub(1)
+        .ok_or(Error::OutOfBounds)?;
+    let backup_entries = last_lba.checked_sub(GPT_ENTRY_SECTORS).ok_or(Error::OutOfBounds)?;
+    let last_usable = backup_entries.checked_sub(1).ok_or(Error::OutOfBounds)?;
+    let esp_start = align_lba(GPT_FIRST_USABLE);
+    let esp_last = esp_start.checked_add(esp_sectors - 1).ok_or(Error::OutOfBounds)?;
+    let data_start = align_lba(esp_last.checked_add(1).ok_or(Error::OutOfBounds)?);
+    let data_last = data_start.checked_add(data_sectors - 1).ok_or(Error::OutOfBounds)?;
+    if data_last > last_usable {
+        return Err(Error::OutOfBounds);
+    }
+
+    let disk_guid = [0x6d, 0x2f, 0x9a, 0x14, 0x4b, 0x70, 0x43, 0x51, 0x9c, 0x8e, 0x42, 0xa1, 0x3d, 0x0b, 0x77, 0x20];
+    let esp_guid = [0x12, 0x3c, 0x9e, 0x52, 0x6a, 0x1d, 0x4b, 0x8a, 0x91, 0x0c, 0x73, 0x55, 0x2f, 0x6a, 0x44, 0x18];
+    let data_guid = [0x28, 0x7a, 0x4e, 0x6c, 0x39, 0x10, 0x42, 0x9b, 0xa0, 0x16, 0x84, 0x7d, 0x55, 0x2c, 0x11, 0x62];
+    let mut entries = [0_u8; GPT_ENTRY_SIZE * GPT_ENTRY_COUNT];
+    write_entry(&mut entries[..GPT_ENTRY_SIZE], &EFI_SYSTEM_GUID, &esp_guid, esp_start, esp_last, b"EFI");
+    write_entry(&mut entries[GPT_ENTRY_SIZE..GPT_ENTRY_SIZE * 2], &BASIC_DATA_GUID, &data_guid, data_start, data_last, b"WOVENHAT");
+    let entries_crc = crc32(&entries);
+
+    let mut sector = [0_u8; SECTOR_SIZE];
+    sector[446 + 4] = 0xee;
+    sector[446 + 8..446 + 12].copy_from_slice(&1_u32.to_le_bytes());
+    sector[446 + 12..446 + 16].copy_from_slice(&(last_lba.min(u64::from(u32::MAX)) as u32).to_le_bytes());
+    sector[510..512].copy_from_slice(&[0x55, 0xaa]);
+    device.write_sector(0, &sector).map_err(Error::Block)?;
+
+    write_entries(device, 2, &entries)?;
+    write_entries(device, backup_entries, &entries)?;
+    let primary = gpt_header(1, last_lba, GPT_FIRST_USABLE, last_usable, disk_guid, 2, entries_crc);
+    let backup = gpt_header(last_lba, 1, GPT_FIRST_USABLE, last_usable, disk_guid, backup_entries, entries_crc);
+    device.write_sector(1, &primary).map_err(Error::Block)?;
+    device.write_sector(last_lba, &backup).map_err(Error::Block)?;
+    device.flush().map_err(Error::Block)?;
+    Ok(Layout { esp_start_lba: esp_start, esp_sectors, data_start_lba: data_start, data_sectors })
+}
+
+fn align_lba(value: u64) -> u64 {
+    value.div_ceil(GPT_ALIGNMENT) * GPT_ALIGNMENT
+}
+
+fn write_entries(device: &mut impl BlockDevice, start_lba: u64, entries: &[u8; GPT_ENTRY_SIZE * GPT_ENTRY_COUNT]) -> Result<(), Error> {
+    for (index, chunk) in entries.as_chunks::<SECTOR_SIZE>().0.iter().enumerate() {
+        device.write_sector(start_lba + index as u64, chunk).map_err(Error::Block)?;
+    }
+    Ok(())
+}
+
+fn write_entry(output: &mut [u8], kind: &[u8; 16], unique: &[u8; 16], first: u64, last: u64, name: &[u8]) {
+    output[..16].copy_from_slice(kind);
+    output[16..32].copy_from_slice(unique);
+    output[32..40].copy_from_slice(&first.to_le_bytes());
+    output[40..48].copy_from_slice(&last.to_le_bytes());
+    for (index, byte) in name.iter().take(36).enumerate() {
+        output[56 + index * 2..58 + index * 2].copy_from_slice(&u16::from(*byte).to_le_bytes());
+    }
+}
+
+fn gpt_header(current: u64, backup: u64, first: u64, last: u64, disk_guid: [u8; 16], entries_lba: u64, entries_crc: u32) -> [u8; SECTOR_SIZE] {
+    let mut header = [0_u8; SECTOR_SIZE];
+    header[..8].copy_from_slice(b"EFI PART");
+    header[8..12].copy_from_slice(&0x0001_0000_u32.to_le_bytes());
+    header[12..16].copy_from_slice(&(GPT_HEADER_MIN_SIZE as u32).to_le_bytes());
+    header[24..32].copy_from_slice(&current.to_le_bytes());
+    header[32..40].copy_from_slice(&backup.to_le_bytes());
+    header[40..48].copy_from_slice(&first.to_le_bytes());
+    header[48..56].copy_from_slice(&last.to_le_bytes());
+    header[56..72].copy_from_slice(&disk_guid);
+    header[72..80].copy_from_slice(&entries_lba.to_le_bytes());
+    header[80..84].copy_from_slice(&(GPT_ENTRY_COUNT as u32).to_le_bytes());
+    header[84..88].copy_from_slice(&(GPT_ENTRY_SIZE as u32).to_le_bytes());
+    header[88..92].copy_from_slice(&entries_crc.to_le_bytes());
+    let header_crc = crc32(&header[..GPT_HEADER_MIN_SIZE]);
+    header[16..20].copy_from_slice(&header_crc.to_le_bytes());
+    header
 }
 
 pub fn find_fat_partition(device: &mut impl BlockDevice) -> Result<Option<Partition>, Error> {
@@ -234,5 +338,20 @@ pub fn self_test() -> bool {
         return false;
     }
     let entries_corruption_rejected = find_fat_partition(&mut disk) == Err(Error::InvalidChecksum);
-    valid && header_corruption_rejected && entries_corruption_rejected
+    valid && header_corruption_rejected && entries_corruption_rejected && layout_self_test()
+}
+
+fn layout_self_test() -> bool {
+    let mut disk = RamDisk::<8192>::new();
+    let Ok(layout) = write_layout(&mut disk, 256, 512) else {
+        return false;
+    };
+    let Ok(partitions) = fat_partitions(&mut disk) else {
+        return false;
+    };
+    partitions.len() == 2
+        && partitions[0].start_lba == layout.esp_start_lba
+        && partitions[0].sectors == layout.esp_sectors
+        && partitions[1].start_lba == layout.data_start_lba
+        && partitions[1].sectors == layout.data_sectors
 }

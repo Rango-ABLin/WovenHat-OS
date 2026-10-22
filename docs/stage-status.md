@@ -1,5 +1,18 @@
 # Stage status
 
+## Stage 28 kernel GPT layout writer - 2026-10-22
+
+Added the first reusable kernel-side installation primitive:
+`kernel::gpt::write_layout` writes a validated, aligned protective MBR, primary
+and backup GPT headers, and primary and backup partition-entry arrays for an
+explicit EFI System Partition plus WovenHat data partition. The operation
+rejects read-only devices and geometry overflow, flushes after both copies,
+and is covered by the existing boot-time GPT self-test. Warning-denying kernel
+and host Clippy plus the normal system-apps 1-CPU QEMU gate pass.
+
+This is not yet the installer transaction: target selection, FAT32 formatting,
+EFI payload writing, provisioning, and service ABI integration remain open.
+
 ## Stage 28 real UEFI artifact ingress - 2026-10-22
 
 Added `scripts/extract-uefi-boot-artifact.py`, a read-only FAT16/FAT32 parser
