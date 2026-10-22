@@ -1,5 +1,16 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - Stage 28 bounded WovenInstaller Ring-3 application shell (2026-10-22)
+
+Added the disjoint `apps/woven-installer` freestanding application. It parses
+only a bounded snapshot carrying `validated=1`, renders the existing installer
+state-model screens as deterministic text, and exposes no install command or
+destructive capability. It does not access disks, filesystems, partitions,
+bootloaders, networking, subprocesses, or prior installer/recovery code.
+Host parser tests, freestanding build, and warning-denying freestanding
+Clippy are required. A QEMU gate is not meaningful for this standalone image
+without kernel boot integration, which is intentionally outside this slice.
+
 ## Codex - Stage 28 disposable UEFI boot artifact preparation (2026-10-22)
 
 Added the disjoint `scripts/prepare-uefi-boot-artifact.py` module and

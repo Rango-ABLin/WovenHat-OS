@@ -3956,3 +3956,18 @@ any injected pre-write, post-write, or post-verification failure. The input
 must be an explicitly harness-created regular non-symlink file and all
 protected/device identities are rejected. No mount, partition API, physical
 disk, bootloader, or hardware qualification is involved.
+# Stage 28 WovenInstaller shell boundary
+
+`apps/woven-installer` is a freestanding Ring-3 presentation adapter for the
+validated installer state model. Its input is a bounded semicolon-separated
+snapshot with an explicit `validated=1` marker, a plan field, and the state
+model's screen names. It stores borrowed caller bytes only; it performs no
+external I/O and has no access to installation authority. Parser validation
+rejects unknown/duplicate fields, control characters, overlong text, invalid
+progress, unvalidated plans, and screen-specific missing prerequisites.
+
+The binary's only output path is the existing bounded stdout/stderr API. The
+progress and success screens are deliberately non-operative and print
+`install_action=unavailable (fail-closed)`. A future graphical frontend or
+installer executor must be integrated through a separately reviewed authority
+boundary; this shell cannot be used to infer disk or bootloader support.

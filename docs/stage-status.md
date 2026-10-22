@@ -1,5 +1,23 @@
 # Stage status
 
+## Stage 28 bounded WovenInstaller Ring-3 application shell - 2026-10-22
+
+Added the disjoint `apps/woven-installer` no-std Ring-3 shell. It consumes a
+compact snapshot of the validated installer UI/state model and renders bounded
+welcome, target, partition-review, settings, progress, cancelling, cancelled,
+failure, and success screens through the deterministic textual fallback.
+Unknown fields, duplicate keys, control characters, invalid progress, missing
+prerequisites, and snapshots without `validated=1` fail closed. Progress and
+success are presentation states only; the output always identifies the install
+action as unavailable, and the app has no disk, partition, filesystem,
+bootloader, network, or subprocess path.
+
+The three host parser tests, freestanding `x86_64-unknown-none` release build,
+freestanding warning-denying Clippy, formatting check, and diff check pass.
+No QEMU gate is claimed: the app is not embedded into the kernel by this
+disjoint-only slice, so booting it in QEMU would not test the new behavior.
+Physical installation and release certification remain open.
+
 ## Stage 28 disposable UEFI boot artifact preparation and verifier - 2026-10-22
 
 Added `scripts/prepare-uefi-boot-artifact.py` with focused coverage in
