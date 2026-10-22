@@ -70,8 +70,14 @@ fn install_on_device(device: &mut dyn BlockDevice, plan_bytes: &[u8]) -> Result<
     // copy. A blank target is rejected rather than receiving a synthetic EFI
     // payload or an unbootable placeholder.
     let partitions = gpt::fat_partitions(&mut target).map_err(|_| Error::Gpt)?;
-    let source = partitions.first().copied().ok_or(Error::Artifact)?;
-    let artifact = read_boot_artifact(&mut target, source)?;
+    let mut artifact = None;
+    for source in partitions {
+        if let Ok(bytes) = read_boot_artifact(&mut target, source) {
+            artifact = Some(bytes);
+            break;
+        }
+    }
+    let artifact = artifact.ok_or(Error::Artifact)?;
 
     let layout = gpt::write_layout(&mut target, ESP_SECTORS, plan.data_sectors).map_err(|_| Error::Gpt)?;
     let esp_partition = crate::partition::Partition {
