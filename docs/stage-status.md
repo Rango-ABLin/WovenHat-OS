@@ -1,5 +1,20 @@
 # Stage status
 
+## Stage 28 disposable-image end-to-end acceptance harness - 2026-10-22
+
+Added `scripts/test-stage28-disposable-acceptance.py` and focused coverage in
+`tests/test_stage28_disposable_acceptance.py`. The harness creates a new
+temporary regular file, validates a canonical plan, exercises the existing
+file-backed executor including success and both injected rollback paths, then
+assembles and verifies the final disposable GPT-like image, FAT32-compatible
+data region, EFI artifact, and deterministic acceptance-manifest digests.
+It never accesses physical/device paths or mounts anything. The executor is
+kept on a separate disposable copy because its established whole-file mock
+filesystem replacement is not a partition-preserving installation operation.
+
+This is not physical installation, bootability qualification, hardware
+qualification, ISO generation, or release certification.
+
 ## Stage 28 WovenInstaller production system-app integration - 2026-10-22
 
 The signed `woven-installer.wapp` is embedded in the kernel's production

@@ -3996,3 +3996,20 @@ progress and success screens are deliberately non-operative and print
 `install_action=unavailable (fail-closed)`. A future graphical frontend or
 installer executor must be integrated through a separately reviewed authority
 boundary; this shell cannot be used to infer disk or bootloader support.
+
+# Stage 28 disposable acceptance composition
+
+The end-to-end disposable-image gate lives in
+`scripts/test-stage28-disposable-acceptance.py`. It imports the established
+Stage 28 Python boundaries without modifying them: plan validation, GPT-like
+file-image layout, FAT32-compatible data-region formatting, EFI artifact
+preparation, and file-backed executor transactions. Every image is created as
+a new bounded regular temporary file; no device path, mount, partitioning
+command, or physical media is reachable.
+
+The executor is intentionally tested on a copy because its contract atomically
+replaces a whole file with a mock filesystem payload. The final image therefore
+uses the layout/formatter/EFI path and records separate executor and final-image
+digests. The harness verifies deterministic output and byte-for-byte rollback
+after injected failures. It does not establish physical installation,
+bootability, hardware qualification, or release certification.

@@ -1,5 +1,18 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - Stage 28 disposable-image end-to-end acceptance harness (2026-10-22)
+
+Added only `scripts/test-stage28-disposable-acceptance.py`, its focused tests,
+and audit documentation. The harness composes the existing planner, disposable
+GPT-like layout builder, FAT32-compatible formatter, EFI artifact preparer, and
+file-backed executor on newly created regular temporary files. Executor
+success and before/after-replacement rollback are checked on a dedicated
+disposable copy because that existing executor intentionally replaces a whole
+file with a mock filesystem; the final partitioned image is then independently
+verified for GPT/layout, FAT32 data, EFI payload, and manifest digests.
+Physical/device paths and mounts are never accessed. This is not physical
+installation or release certification.
+
 ## Codex - Stage 28 WovenInstaller production system-app integration (2026-10-22)
 
 Embedded the eleventh signed `woven-installer.wapp` package into the kernel's
