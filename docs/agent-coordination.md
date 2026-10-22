@@ -14,6 +14,9 @@ non-elevated Windows session in
 `audit-artifacts/physical-host-20261022-131154-963/host.json`; no safe
 disposable physical target was available, so no native-disk write was
 attempted.
+The current-tree 2-CPU and 4-CPU storage gates reproduce the same S6.MEMORY
+stop and exit-0/no-marker result as the 1-CPU control, so the missing QEMU
+acceptance is now evidenced across all required CPU counts.
 
 ## Codex - Stage 28 kernel-backed physical installation transaction (2026-10-22)
 

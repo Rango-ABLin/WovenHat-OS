@@ -14,6 +14,9 @@ The read-only host preflight at
 `audit-artifacts/physical-host-20261022-131154-963/host.json` found one
 boot/system NVMe disk, no disposable target, and a non-elevated Windows
 session; it therefore correctly performed no native-disk test.
+The same control failure was reproduced at 2 and 4 CPUs: each QEMU run
+stopped after the identical S6.MEMORY marker and exited 0 without the normal
+exit-33 acceptance result.
 
 ## Stage 28 kernel-backed physical installation transaction - 2026-10-22
 
