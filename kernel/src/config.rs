@@ -74,8 +74,11 @@ pub const MAX_IO_SIZE: usize = 1024;
 /// Maximum VFS nodes (files) that can exist simultaneously.
 pub const MAX_VFS_NODES: usize = 64;
 
-/// Capacity of each VFS node data buffer (bytes).
-pub const VFS_NODE_CAPACITY: usize = 64 * 1024;
+/// Capacity of each VFS node data buffer (bytes). This is also the largest
+/// executable image `exec` reads from the VFS. It is 128 KiB because the
+/// WovenShell image outgrew 64 KiB (81,752 bytes after Stages 26.5 and
+/// 20.17/20.18). Never put a buffer of this size on a kernel stack.
+pub const VFS_NODE_CAPACITY: usize = 128 * 1024;
 
 /// Maximum ELF loadable segments accepted by the loader.
 pub const MAX_ELF_SEGMENTS: usize = 8;

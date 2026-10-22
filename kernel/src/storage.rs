@@ -421,7 +421,7 @@ fn import_directory(
             .ok()
             .flatten()
         {
-            let mut bytes = [0u8; vfs::NODE_CAPACITY];
+            let mut bytes = alloc::vec![0u8; vfs::NODE_CAPACITY];
             let checksum_ok = fat32::resolve_path(device, volume, &path[5..])
                 .ok()
                 .and_then(|entry| fat32::read_file(device, volume, entry, &mut bytes).ok())
@@ -933,7 +933,7 @@ fn recover_data_journal(
         if version == DATA_JOURNAL_VERSION {
             let expected_len = read_u32(&record, 14) as usize;
             let expected_checksum = read_u64(&record, 26);
-            let mut current = [0u8; vfs::NODE_CAPACITY];
+            let mut current = alloc::vec![0u8; vfs::NODE_CAPACITY];
             let current_len = match fat32::resolve_path(device, volume, relative) {
                 Ok(entry) if entry.attributes & DIRECTORY_ATTRIBUTE == 0 => {
                     Some(fat32::read_file(device, volume, entry, &mut current)?)
@@ -1850,7 +1850,7 @@ fn live_batch_recovery_self_test() -> Result<(), &'static str> {
      -> Result<(), &'static str> {
         let mut disk = block_io::primary_ata();
         // Heap, not stack. TASK_STACK_SIZE is 256 KiB and vfs::NODE_CAPACITY is
-        // 64 KiB, so two of these as locals would consume the entire task stack
+        // 128 KiB, so two of these as locals would consume the entire task stack
         // before this frame's own overhead or the callee's. The journal record
         // buffer in read_data_journal_record is heap-allocated for the same
         // reason.
@@ -2150,7 +2150,7 @@ pub fn persist_paths_atomic(paths: &[(&str, &[u8])]) -> Result<(), PersistError>
         {
             return Err(PersistError::BadName);
         }
-        let mut old = [0u8; vfs::NODE_CAPACITY];
+        let mut old = alloc::vec![0u8; vfs::NODE_CAPACITY];
         let mut disk = block_io::primary_ata();
         let old_length = read_existing_file_on_device(&mut disk, &path[5..], &mut old)
             .map_err(|_| PersistError::Failed)?;
@@ -2261,7 +2261,7 @@ pub fn persist_path(path: &str) -> Result<(), PersistError> {
     }
 
     // Heap, not stack. This function needs two NODE_CAPACITY buffers live at
-    // once, and NODE_CAPACITY is 64 KiB against a 256 KiB TASK_STACK_SIZE, so
+    // once, and NODE_CAPACITY is 128 KiB against a 256 KiB TASK_STACK_SIZE, so
     // as locals they would occupy the entire task stack with no margin for this
     // frame or any callee.
     let mut data = alloc::vec![0_u8; vfs::NODE_CAPACITY];

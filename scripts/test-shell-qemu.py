@@ -20,6 +20,83 @@ def build_woven_shell(root):
     subprocess.run(['cargo', 'build', '--release'], cwd=app_dir, env=env, check=True)
     return app_dir / 'target' / 'x86_64-unknown-none' / 'release' / 'wovenhat-woven-shell'
 
+def normal_boot_serial_errors(log: str, system_apps: bool) -> list[str]:
+    """Reject fatal evidence even when all positive boot markers appeared."""
+    errors = []
+    normalized = log.lower()
+    for marker in ('kernel panic', 'panicked at', 'security violation', 'security: failed'):
+        if marker in normalized:
+            errors.append(f'Guest serial contains fatal evidence: {marker}')
+    for line in log.splitlines():
+        if line.startswith(('[BOOT]', '[SESSION]', '[APPS]', '[SMP]')) and ('FAILED' in line or ' FAIL' in line):
+            errors.append(f'Contradictory normal boot failure marker: {line}')
+    expected = ('[BOOT] desktop-first runtime ready' if system_apps
+                else '[BOOT] shell-first runtime ready')
+    if expected not in log:
+        errors.append(f'Missing normal boot marker: {expected}')
+    if system_apps:
+        for marker in ('[APPS] 10 signed applications installed',
+                       '[SESSION] WovenShell desktop started',
+                       '[SESSION] diagnostic console',
+                       '[SESSION] back to the desktop'):
+            if marker not in log:
+                errors.append(f'Missing system-apps marker: {marker}')
+    if '[SMP] acknowledged TLB shootdowns: PASSED' not in log:
+        errors.append('Missing keyboard-driven SMP shell acceptance marker')
+    return errors
+
+
+
+def validate_desktop_frame(path: Path) -> tuple[int, int]:
+    """Require a complete, non-uniform QEMU P6 framebuffer capture.
+
+    A successful screendump command can still capture a blank screen. Keep
+    the PPM as evidence and fail the normal desktop boot acceptance if it
+    contains no visible content.
+    """
+    data = path.read_bytes()
+    # QEMU's screendump uses binary P6 with an optional comment in its header.
+    offset = 0
+    tokens = []
+    while len(tokens) < 4:
+        while offset < len(data) and data[offset] in b' \t\r\n':
+            offset += 1
+        if offset < len(data) and data[offset] == ord('#'):
+            end = data.find(b'\n', offset)
+            if end < 0:
+                raise ValueError('Unterminated PPM header comment')
+            offset = end + 1
+            continue
+        start = offset
+        while offset < len(data) and data[offset] not in b' \t\r\n#':
+            offset += 1
+        if start == offset:
+            raise ValueError('Incomplete PPM header')
+        tokens.append(data[start:offset])
+    try:
+        magic, width_raw, height_raw, maximum_raw = tokens
+        width, height, maximum = int(width_raw), int(height_raw), int(maximum_raw)
+    except ValueError as error:
+        raise ValueError('Invalid PPM dimensions or color depth') from error
+    if magic != b'P6' or width < 64 or height < 64 or maximum != 255:
+        raise ValueError('Invalid QEMU desktop framebuffer format or dimensions')
+    if offset >= len(data) or data[offset] not in b' \t\r\n':
+        raise ValueError('Missing PPM pixel separator')
+    # Exactly one delimiter follows maxval; further bytes are pixel content
+    # and may legitimately start with whitespace.
+    if data[offset:offset + 2] == b'\r\n':
+        offset += 2
+    else:
+        offset += 1
+    pixels = data[offset:]
+    if len(pixels) != width * height * 3:
+        raise ValueError('Truncated or oversized desktop framebuffer')
+    first = pixels[:3]
+    if all(pixels[index:index + 3] == first for index in range(0, len(pixels), 3)):
+        raise ValueError('Desktop framebuffer is a uniform blank image')
+    return width, height
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--qemu', default=shutil.which('qemu-system-x86_64') or r'C:\Program Files\qemu\qemu-system-x86_64.exe')
@@ -96,8 +173,12 @@ def main():
     image = subprocess.check_output(
         cargo_command + ['run', '--quiet', '--release'] + feature_arguments + target_arguments + ['--', '--print-image'],
         cwd=root, env=build_env, text=True).strip()
-    out = root / 'target' / f'shell-regression-{args.cpus}cpu'
-    out.mkdir(parents=True, exist_ok=True)
+    # Keep evidence for each CPU/boot mode distinct; a later run must not
+    # silently overwrite the previous run's serial or QEMU logs.
+    out = root / 'target' / 'shell-regression' / (
+        f'{"system-apps" if args.system_apps else "diagnostic"}-{args.cpus}cpu-{time.time_ns()}'
+    )
+    out.mkdir(parents=True, exist_ok=False)
     serial = out / 'serial.log'
     serial.write_text('')
     vars_copy = None
@@ -119,7 +200,9 @@ def main():
         process = subprocess.Popen(command, cwd=root, stdout=errors, stderr=errors, creationflags=flags)
         try:
             deadline = time.monotonic() + 180
-            while '[BOOT] shell-first runtime ready' not in serial.read_text(errors='replace'):
+            expected_boot = ('[BOOT] desktop-first runtime ready' if args.system_apps
+                             else '[BOOT] shell-first runtime ready')
+            while expected_boot not in serial.read_text(errors='replace'):
                 if process.poll() is not None or time.monotonic() > deadline:
                     raise RuntimeError('Normal boot failed; inspect shell-regression logs')
                 time.sleep(0.1)
@@ -175,6 +258,19 @@ def main():
                             if process.poll() is not None or time.monotonic() > deadline:
                                 raise RuntimeError('The demo account did not sign in; inspect shell-regression logs')
                             time.sleep(0.1)
+                    time.sleep(2)
+                    # Retain the framebuffer *before* switching to diagnostics.
+                    # A serial startup marker alone cannot prove that a desktop
+                    # frame is visible; reviewers must inspect this image.
+                    screenshot = out / 'desktop-before-f12.ppm'
+                    execute('screendump', {'filename': str(screenshot)})
+                    if not screenshot.is_file() or screenshot.stat().st_size == 0:
+                        raise RuntimeError('No pre-diagnostic display screenshot was captured')
+                    try:
+                        frame_width, frame_height = validate_desktop_frame(screenshot)
+                    except ValueError as error:
+                        raise RuntimeError(f'Invalid pre-F12 desktop framebuffer: {error}') from error
+                    print(f'Normal desktop first-frame evidence: {frame_width}x{frame_height}', flush=True)
                     execute('send-key', {'keys': [{'type': 'qcode', 'data': 'f12'}], 'hold-time': 40})
                     deadline = time.monotonic() + 30
                     while '[SESSION] diagnostic console' not in serial.read_text(errors='replace'):
@@ -189,8 +285,49 @@ def main():
                     if process.poll() is not None or time.monotonic() > deadline:
                         raise RuntimeError('Keyboard/SMP shell command failed; inspect shell-regression logs')
                     time.sleep(0.1)
-                execute('quit')
-            process.wait(timeout=5)
+                if args.system_apps:
+                    # Return to the graphical desktop through real QMP keyboard
+                    # input after verifying the diagnostic console's SMP path.
+                    execute('send-key', {'keys': [{'type': 'qcode', 'data': 'f12'}], 'hold-time': 40})
+                    deadline = time.monotonic() + 30
+                    while '[SESSION] back to the desktop' not in serial.read_text(errors='replace'):
+                        if process.poll() is not None or time.monotonic() > deadline:
+                            raise RuntimeError('F12 did not return focus to WovenShell')
+                        time.sleep(0.1)
+                    time.sleep(1)
+                    restored = out / 'desktop-after-f12-return.ppm'
+                    execute('screendump', {'filename': str(restored)})
+                    if not restored.is_file() or restored.stat().st_size == 0:
+                        raise RuntimeError('No restored-desktop framebuffer was captured')
+                    try:
+                        validate_desktop_frame(restored)
+                    except ValueError as error:
+                        raise RuntimeError(f'Invalid restored desktop framebuffer: {error}') from error
+                # Check the complete serial trace, not just the positive marker
+                # that ended the polling loop. A panic after boot is a failure.
+                evidence = serial.read_text(errors='replace')
+                failures = normal_boot_serial_errors(evidence, args.system_apps)
+                if failures:
+                    raise RuntimeError('; '.join(failures))
+                # With -no-reboot a guest crash also exits QEMU with status 0,
+                # so the guest must still be running when the harness quits.
+                if process.poll() is not None:
+                    raise RuntimeError('QEMU exited before the harness requested quit')
+                try:
+                    execute('quit')
+                except (ConnectionResetError, BrokenPipeError, json.JSONDecodeError):
+                    # QEMU can tear down the QMP socket before its 'quit'
+                    # reply is read (observed: reset with QEMU still alive,
+                    # then a clean exit). Completion is proven below by the
+                    # exit status and a final serial check, not by the reply.
+                    pass
+            exit_status = process.wait(timeout=5)
+            if exit_status != 0:
+                raise RuntimeError(f'QEMU exited with status {exit_status} after quit')
+            # The guest ran until QEMU stopped; re-check everything it logged.
+            failures = normal_boot_serial_errors(serial.read_text(errors='replace'), args.system_apps)
+            if failures:
+                raise RuntimeError('; '.join(failures))
         finally:
             if process.poll() is None:
                 process.kill()
