@@ -40,8 +40,8 @@ Added `scripts/stage31-torture-plan.py` and
 `tests/test_stage31_torture_plan.py`. The deterministic planner enumerates
 memory/storage/network/security/shell jobs across 1/2/4/8/16 CPUs and fails
 closed on plan tampering. The 16-CPU control plane and memory/boot suite now
-pass at 8/16 CPUs; the other suites still need those profiles, and executor,
-fault injection, and repeated-boot evidence remain open.
+pass at 8/16 CPUs; executor, fault injection, and full repeated-boot evidence
+remain open.
 
 ## Codex - Stage 30 performance matrix rerun (2026-10-22)
 

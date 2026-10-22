@@ -55,7 +55,7 @@ memory/storage/network/shell target directories and
 `audit-artifacts/woven-security-{1,2,4,8,16}cpu`. The complete Stage 31
 torture acceptance is still open: randomized failure injection, low-resource
 and loss scenarios, driver/service restart, sudden-shutdown recovery, and
-repeated-boot counts remain unimplemented.
+the full repeated-boot count remains unimplemented.
 
 The 16-CPU shell gate initially exposed fixed preemption-test budgets; those
 budgets now scale with the bounded online topology and the rerun passes. A
@@ -67,11 +67,12 @@ preserved evidence.
 ## Stage 31 memory and storage suite execution - 2026-10-22
 
 Executed the torture-plan memory and storage suites on 1/2/4 CPUs. All six
-runs passed with exit 33. Evidence is retained in
+runs passed with exit 33; the later supported 8/16 profiles also passed.
+Evidence is retained in
 `target/memory-regression-{1,2,4}-debug/` and
 `target/storage-regression-{1,2,4}-debug/`. Network, security, shell,
-failure-injection, low-resource, restart, and repeated-boot rows remain open;
-8/16-CPU rows remain blocked by the current harness capability.
+failure-injection, low-resource, restart, and full repeated-boot rows remain
+open.
 
 ## Stage 31 torture-plan boundary - 2026-10-22
 
