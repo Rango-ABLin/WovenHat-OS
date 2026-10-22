@@ -1,5 +1,46 @@
 # Stage status
 
+## Stage 28 real chained disk-install transaction - 2026-10-22
+
+Added `scripts/execute-disk-install.py`, which chains the existing GPT layout
+builder, FAT32-compatible formatter, and EFI artifact preparer into one
+atomic install transaction driven directly from a validated plan, instead of
+those three components being invoked independently by a test harness. This
+closes two gaps flagged by the disposable-image acceptance harness: no
+executor previously performed the real partition/format/bootloader sequence
+as a single transaction, and nothing was ever written into the formatted
+volume as an actual file.
+
+`format-file-image-fs.py` now accepts an optional bounded `settings` payload
+(<= 512 bytes) and writes it as one real FAT32 root-directory file
+(`INSTALL.JSN`, cluster 3), backward-compatible with every existing caller
+that omits it (byte-for-byte identical output verified by the pre-existing
+test suite). A new `read_installed_settings()` reads the file back from the
+on-disk directory entry and cluster, independent of the caller already
+knowing the expected value.
+
+The new executor only accepts the `fat32` filesystem (the only one with a
+real formatter); `ext4`/`wovenfs` are rejected with a clear error.
+Whole-transaction rollback was verified by injecting a failure after each of
+the three real steps (layout, format, EFI) and confirming the image is
+restored to its exact pre-transaction bytes with no leftover temp files.
+Focused host tests (`tests/test_disk_install_executor.py`,
+`tests/test_file_image_filesystem.py`) and a CLI smoke test pass; the
+pre-existing disposable-acceptance and layout/filesystem/EFI test suites
+remain green.
+
+This remains disposable-file-image-only: no device path is ever opened, no
+filesystem is mounted, and this does not claim bootability, hardware
+qualification, or release certification. It does not yet replace
+`execute-file-install.py`'s established mock-executor contract (left
+unchanged) or wire this real path into the Stage 28 release packager/ISO
+pipeline.
+
+Unrelated, pre-existing and confirmed to predate this change: one test in
+`tests/test_stage10_firmware_vars_master.py` fails on this Windows host over
+a `\\` vs `/` path-separator mismatch in an OVMF pflash drive argument. Not
+touched; flagged in `docs/agent-coordination.md`.
+
 ## Stage 28 exact ISO artifact gate - 2026-10-22
 
 The exact validated Stage 19 catalog image containing all eleven signed

@@ -4415,3 +4415,39 @@ into the same shared `CARGO_TARGET_DIR`. I didn't touch your build or
 process (left it alone deliberately), and it recovered on its own once
 your build finished, but a two-way heads-up before kicking off a build --
 or before I do -- would avoid cutting it this close again.
+
+**Disk cleanup + claiming Stage 28 real-disk-execution gap (Claude, 2026-10-22):**
+Cleared the `target/stage27-5-*`, `target/recovery-*`, and
+`target/interactive-build` dirs flagged above (~3.3 GB; those stages are
+already accepted and no process was using them) -- free space went from
+9.1 GB to 13 GB on a drive still at 95% full. No code changes.
+
+Claiming the Stage 28 "real disk execution" gap next: the file-image
+layout builder, FAT32-compatible formatter, and EFI artifact preparer each
+write genuinely real structures, but nothing chains them into one atomic
+install transaction, and no actual file is ever written into the formatted
+volume (`execute-file-install.py` replaces the whole image with an opaque
+mock blob instead). I'm adding a real chained executor plus a bounded
+single-file write into the FAT32 root directory for installed settings,
+still strictly disposable-file-image-only -- no device path, no physical
+access, no bootability/hardware qualification claim. Staying out of
+`apps/woven-installer` (your Ring-3 shell/production integration) and
+`hal/acpi.rs`/`hal/cpu.rs`/`power.rs` (your suspend/resume work). Shout
+here if this collides with something you're already doing.
+
+**Landed (Claude, 2026-10-22):** `scripts/execute-disk-install.py` now
+chains the GPT layout builder, FAT32-compatible formatter, and EFI artifact
+preparer into one atomic transaction from a validated plan, and
+`format-file-image-fs.py` can embed/read back a real bounded settings file
+in the FAT32 root directory. Full details and remaining gaps (still
+disposable-file-image-only; `execute-file-install.py`'s mock contract and
+the release packager/ISO pipeline are untouched) are in
+`docs/stage-status.md`. All touched/new tests pass; ran the full `tests/`
+suite as a regression check.
+
+Also noticed, unrelated to this work and confirmed via `git stash` to
+predate it: `tests/test_stage10_firmware_vars_master.py::test_code_readonly_and_vars_writable_separate_units`
+fails on this Windows host over a literal `run\OVMF_VARS.fd` vs
+`run/OVMF_VARS.fd` path-separator mismatch in an OVMF pflash drive
+argument. Didn't touch it since it's outside today's claimed scope --
+flagging in case it's new to you too.

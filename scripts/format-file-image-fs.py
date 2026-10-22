@@ -28,6 +28,9 @@ FSINFO_SECTOR = 1
 BACKUP_BOOT_SECTOR = 6
 BACKUP_FSINFO_SECTOR = 7
 ROOT_CLUSTER = 2
+SETTINGS_CLUSTER = 3
+SETTINGS_ENTRY_NAME = b"INSTALL JSN"
+MAX_SETTINGS_BYTES = SECTOR
 FAT32_EOC = 0x0FFFFFFF
 FAT32_BAD = 0x0FFFFFF7
 VOLUME_LABEL = b"WOVENHAT   "
@@ -39,6 +42,10 @@ PROTECTED_RE = re.compile(r"(?i)(system|boot|removable|usb|backup|external|physi
 
 class FormatError(ValueError):
     """A fail-closed disposable filesystem formatting error."""
+
+
+def _canonical(value: Any) -> bytes:
+    return (json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=True) + "\n").encode("utf-8")
 
 
 def _load_layout_module() -> Any:
@@ -167,15 +174,27 @@ def _fsinfo(clusters: int) -> bytes:
     return bytes(raw)
 
 
-def _fat(fat_sectors: int) -> bytes:
+def _fat(fat_sectors: int, extra: dict[int, int] | None = None) -> bytes:
     raw = bytearray(fat_sectors * SECTOR)
     struct.pack_into("<I", raw, 0, 0x0FFFFFF8)
     struct.pack_into("<I", raw, 4, FAT32_EOC)
     struct.pack_into("<I", raw, 8, FAT32_EOC)
+    for cluster, value in (extra or {}).items():
+        struct.pack_into("<I", raw, cluster * 4, value & 0x0FFFFFFF)
     return bytes(raw)
 
 
-def _volume(image: Path, metadata: dict[str, Any], region: dict[str, Any]) -> bytes:
+def _settings_entry(cluster: int, size: int) -> bytes:
+    raw = bytearray(32)
+    raw[0:11] = SETTINGS_ENTRY_NAME
+    raw[11] = 0x20
+    struct.pack_into("<H", raw, 20, (cluster >> 16) & 0xFFFF)
+    struct.pack_into("<H", raw, 26, cluster & 0xFFFF)
+    struct.pack_into("<I", raw, 28, size)
+    return bytes(raw)
+
+
+def _volume(image: Path, metadata: dict[str, Any], region: dict[str, Any], settings: dict[str, Any] | None = None) -> bytes:
     offset, size, region_sectors = _region_bounds(image, region)
     del offset
     fat_sectors, clusters, _ = _parameters(region_sectors)
@@ -184,7 +203,14 @@ def _volume(image: Path, metadata: dict[str, Any], region: dict[str, Any]) -> by
     raw = bytearray(size)
     boot = _boot_sector(region_sectors, fat_sectors, serial)
     info = _fsinfo(clusters)
-    fat = _fat(fat_sectors)
+    settings_payload: bytes | None = None
+    extra_fat: dict[int, int] = {}
+    if settings is not None:
+        settings_payload = _canonical(settings)
+        if len(settings_payload) > MAX_SETTINGS_BYTES:
+            raise FormatError("settings payload exceeds the bounded single-cluster size")
+        extra_fat[SETTINGS_CLUSTER] = FAT32_EOC
+    fat = _fat(fat_sectors, extra_fat or None)
     raw[0:SECTOR] = boot
     raw[SECTOR:2 * SECTOR] = info
     raw[BACKUP_BOOT_SECTOR * SECTOR:(BACKUP_BOOT_SECTOR + 1) * SECTOR] = boot
@@ -192,10 +218,46 @@ def _volume(image: Path, metadata: dict[str, Any], region: dict[str, Any]) -> by
     fat_start = FAT32_RESERVED * SECTOR
     raw[fat_start:fat_start + len(fat)] = fat
     raw[fat_start + len(fat):fat_start + 2 * len(fat)] = fat
+    if settings_payload is not None:
+        data_start = fat_start + 2 * len(fat)
+        root_entry = _settings_entry(SETTINGS_CLUSTER, len(settings_payload))
+        raw[data_start:data_start + len(root_entry)] = root_entry
+        settings_offset = data_start + (SETTINGS_CLUSTER - ROOT_CLUSTER) * SECTOR
+        raw[settings_offset:settings_offset + len(settings_payload)] = settings_payload
     return bytes(raw)
 
 
-def verify(image: Path, plan: Path, *, harness_created: bool = True) -> dict[str, Any]:
+def read_installed_settings(image: Path, plan: Path, *, harness_created: bool = True) -> dict[str, Any] | None:
+    """Read back the settings file written into the root directory, if any."""
+    image = _image(image, harness_created)
+    _, _, region = _read_layout(image, plan)
+    offset, size, region_sectors = _region_bounds(image, region)
+    fat_sectors, _, _ = _parameters(region_sectors)
+    fat_start = FAT32_RESERVED * SECTOR
+    data_start = fat_start + 2 * fat_sectors * SECTOR
+    with image.open("rb") as stream:
+        stream.seek(offset + data_start)
+        root_sector = stream.read(SECTOR)
+        entry = root_sector[:32]
+        if entry == b"\0" * 32:
+            return None
+        if entry[0:11] != SETTINGS_ENTRY_NAME or entry[11] != 0x20:
+            raise FormatError("root directory entry is not the expected settings file")
+        cluster = struct.unpack_from("<H", entry, 26)[0] | (struct.unpack_from("<H", entry, 20)[0] << 16)
+        file_size = struct.unpack_from("<I", entry, 28)[0]
+        if cluster != SETTINGS_CLUSTER or file_size <= 0 or file_size > MAX_SETTINGS_BYTES:
+            raise FormatError("settings directory entry is invalid")
+        stream.seek(offset + data_start + (cluster - ROOT_CLUSTER) * SECTOR)
+        payload = stream.read(file_size)
+    if len(payload) != file_size:
+        raise FormatError("settings file is truncated")
+    try:
+        return json.loads(payload.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise FormatError("settings file content is invalid") from exc
+
+
+def verify(image: Path, plan: Path, *, harness_created: bool = True, settings: dict[str, Any] | None = None) -> dict[str, Any]:
     image = _image(image, harness_created)
     layout, metadata, region = _read_layout(image, plan)
     offset, size, region_sectors = _region_bounds(image, region)
@@ -229,20 +291,20 @@ def verify(image: Path, plan: Path, *, harness_created: bool = True) -> dict[str
         raise FormatError("FAT reserved entry is invalid")
     if struct.unpack_from("<I", raw, fat_start + 8)[0] & 0x0FFFFFFF != FAT32_EOC:
         raise FormatError("root cluster entry is invalid")
-    expected = _volume(image, metadata, region)
+    expected = _volume(image, metadata, region, settings)
     if raw != expected:
         raise FormatError("filesystem metadata is not deterministic")
-    return {"valid": True, "filesystem": "fat32-compatible", "label": VOLUME_LABEL.decode().rstrip(), "first_lba": region["first_lba"], "last_lba": region["last_lba"], "fat_sectors": fat_sectors, "image_sha256": hashlib.sha256(raw).hexdigest(), "physical_access": "none", "layout_module": str(layout.__name__)}
+    return {"valid": True, "filesystem": "fat32-compatible", "label": VOLUME_LABEL.decode().rstrip(), "first_lba": region["first_lba"], "last_lba": region["last_lba"], "fat_sectors": fat_sectors, "image_sha256": hashlib.sha256(raw).hexdigest(), "physical_access": "none", "layout_module": str(layout.__name__), "settings_embedded": settings is not None}
 
 
-def format_image(image: Path, plan: Path, *, harness_created: bool = False, inject_failure: str | None = None) -> dict[str, Any]:
+def format_image(image: Path, plan: Path, *, harness_created: bool = False, inject_failure: str | None = None, settings: dict[str, Any] | None = None) -> dict[str, Any]:
     image = _image(image, harness_created)
     layout, metadata, region = _read_layout(image, plan)
     offset, size, _ = _region_bounds(image, region)
     with image.open("rb") as stream:
         stream.seek(offset)
         before = stream.read(size)
-    formatted = _volume(image, metadata, region)
+    formatted = _volume(image, metadata, region, settings)
     if inject_failure == "before-write":
         raise FormatError("injected failure before data-region write")
     try:
@@ -253,7 +315,7 @@ def format_image(image: Path, plan: Path, *, harness_created: bool = False, inje
             os.fsync(stream.fileno())
             if inject_failure == "after-write":
                 raise FormatError("injected failure after data-region write")
-            verify(image, plan, harness_created=True)
+            verify(image, plan, harness_created=True, settings=settings)
             if inject_failure == "after-verify":
                 raise FormatError("injected failure after verification")
     except (OSError, FormatError):
@@ -264,7 +326,7 @@ def format_image(image: Path, plan: Path, *, harness_created: bool = False, inje
             os.fsync(stream.fileno())
         raise
     del layout
-    return verify(image, plan, harness_created=True)
+    return verify(image, plan, harness_created=True, settings=settings)
 
 
 def main() -> int:
@@ -274,10 +336,12 @@ def main() -> int:
     parser.add_argument("--test-harness-created", action="store_true")
     parser.add_argument("--verify", action="store_true")
     parser.add_argument("--inject-failure", choices=("before-write", "after-write", "after-verify"))
+    parser.add_argument("--settings-file", type=Path, help="optional JSON settings to embed as a single root-directory file")
     args = parser.parse_args()
     try:
-        result = verify(args.image, args.validated_plan, harness_created=True) if args.verify else format_image(args.image, args.validated_plan, harness_created=args.test_harness_created, inject_failure=args.inject_failure)
-    except (FormatError, OSError) as exc:
+        settings = json.loads(args.settings_file.read_text(encoding="utf-8")) if args.settings_file else None
+        result = verify(args.image, args.validated_plan, harness_created=True, settings=settings) if args.verify else format_image(args.image, args.validated_plan, harness_created=args.test_harness_created, inject_failure=args.inject_failure, settings=settings)
+    except (FormatError, OSError, json.JSONDecodeError) as exc:
         print(json.dumps({"valid": False, "error": str(exc)}, sort_keys=True))
         return 2
     print(json.dumps(result, sort_keys=True))

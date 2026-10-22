@@ -81,6 +81,22 @@ class FileImageFilesystemTests(unittest.TestCase):
         with self.assertRaisesRegex(fs.FormatError, "harness"):
             fs.format_image(self.image, self.plan)
 
+    def test_embeds_and_reads_back_settings_file(self):
+        settings = {"user": {"username": "banda"}, "timezone": "UTC", "keyboard": "us", "network": {"mode": "disabled"}}
+        result = fs.format_image(self.image, self.plan, harness_created=True, settings=settings)
+        self.assertTrue(result["valid"])
+        self.assertTrue(result["settings_embedded"])
+        self.assertEqual(fs.read_installed_settings(self.image, self.plan), settings)
+        self.assertEqual(fs.verify(self.image, self.plan, settings=settings)["image_sha256"], result["image_sha256"])
+
+    def test_no_settings_leaves_root_directory_empty(self):
+        fs.format_image(self.image, self.plan, harness_created=True)
+        self.assertIsNone(fs.read_installed_settings(self.image, self.plan))
+
+    def test_oversized_settings_are_rejected(self):
+        with self.assertRaisesRegex(fs.FormatError, "bounded single-cluster"):
+            fs.format_image(self.image, self.plan, harness_created=True, settings={"padding": "x" * 1024})
+
 
 if __name__ == "__main__":
     unittest.main()
