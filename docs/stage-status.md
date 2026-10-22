@@ -35,6 +35,15 @@ available. Native TPM, USB installation, and hardware qualification therefore
 remain unqualified; the detailed safety report is
 `docs/audit-physical-readiness-2026-10-22.md`.
 
+## Stage 31 filesystem disk-full slice - 2026-10-22
+
+The WovenFS crash suite now includes a 48-sector low-resource volume test. It
+fills the data region, requires a subsequent two-sector write to return
+`NoSpace` without a partial commit, remounts the image, verifies the prior
+payload, and checks filesystem consistency. The complete host suite passes 16
+tests. This is filesystem-level disk-full evidence; whole-kernel low-RAM,
+device-fault, and physical-media exhaustion coverage remain open.
+
 ## WovenShell desktop: 3D mode extended to every floating panel and the lock screen - 2026-10-22
 
 Continuing the wallpaper/taskbar 3D work: the launcher panel, Notification

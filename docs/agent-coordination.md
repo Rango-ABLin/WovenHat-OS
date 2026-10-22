@@ -4750,6 +4750,14 @@ no raw disk and changed no disk, media, or TPM state. Native hardware and USB
 qualification remain unqualified; details are in
 `docs/audit-physical-readiness-2026-10-22.md`.
 
+**Codex filesystem low-resource slice (Codex, 2026-10-22):** Added a small
+48-sector WovenFS fixture that fills the data region and verifies a failed
+two-sector write returns `NoSpace` without a partial commit or inconsistent
+remount. `cargo test --test wovenfs_crash` passes all 16 tests. This covers
+filesystem disk-full atomicity only; whole-kernel low-RAM, device-fault, and
+physical-media exhaustion remain open. Details are in
+`docs/audit-stage31-low-resource-2026-10-22.md`.
+
 **Extended 3D mode to every floating panel + lock screen; found a Stage
 24.59 regression from your 4 GiB memory-floor change (Claude, 2026-10-22):**
 Launcher panel, Notification Center, toast, and lock screen now tilt in 3D

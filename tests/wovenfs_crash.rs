@@ -43,8 +43,12 @@ struct CrashDisk {
 
 impl CrashDisk {
     fn blank() -> Self {
+        Self::with_sectors(SECTORS)
+    }
+
+    fn with_sectors(sectors: usize) -> Self {
         Self {
-            image: Rc::new(RefCell::new(vec![[0; SECTOR_SIZE]; SECTORS])),
+            image: Rc::new(RefCell::new(vec![[0; SECTOR_SIZE]; sectors])),
             budget: Rc::new(Cell::new(None)),
             accepted: Rc::new(Cell::new(0)),
         }
@@ -119,6 +123,12 @@ fn formatted() -> CrashDisk {
     disk
 }
 
+fn formatted_small() -> CrashDisk {
+    let disk = CrashDisk::with_sectors(48);
+    Volume::format(disk.clone(), 8).expect("small format");
+    disk
+}
+
 /// Writes performed by `op` when nothing fails.
 fn write_count<F>(base: &CrashDisk, op: F) -> usize
 where
@@ -148,6 +158,47 @@ fn format_produces_a_consistent_mountable_volume() {
     assert_eq!(sb.root_inode, 1);
     assert!(sb.data_start < sb.total_blocks);
     assert_eq!(volume.read_dir(1).expect("root").count(), 0);
+}
+
+#[test]
+fn full_data_region_rejects_write_without_partial_commit() {
+    let disk = formatted_small();
+    let mut volume = mount_consistent(&disk, "small-volume setup");
+    let first = volume
+        .create(1, "first.bin", 0o644, 1)
+        .expect("first file");
+    let first_payload = vec![0x31_u8; SECTOR_SIZE * 7];
+    volume
+        .write_file(first, &first_payload, 2)
+        .expect("fill first file");
+
+    let second = volume
+        .create(1, "second.bin", 0o644, 3)
+        .expect("second file");
+    volume
+        .write_file(second, &[0x42_u8; SECTOR_SIZE], 4)
+        .expect("consume final data block");
+
+    let third = volume
+        .create(1, "third.bin", 0o644, 5)
+        .expect("third file metadata still fits");
+    assert_eq!(
+        volume.write_file(third, &[0x53_u8; SECTOR_SIZE * 2], 6),
+        Err(Error::NoSpace)
+    );
+    drop(volume);
+
+    let mut recovered = mount_consistent(&disk, "full-volume remount");
+    let first_entry = recovered.lookup(1, "first.bin").expect("first entry");
+    let mut output = vec![0_u8; MAX_FILE_SIZE];
+    let read = recovered
+        .read_file(first_entry.inode, &mut output)
+        .expect("first file remains readable");
+    assert_eq!(&output[..read], first_payload.as_slice());
+    let third_entry = recovered.lookup(1, "third.bin").expect("third entry");
+    let third_node = recovered.inode(third_entry.inode).expect("third inode");
+    assert_eq!(third_node.size, 0, "failed write published partial size");
+    recovered.check().expect("full volume remains consistent");
 }
 
 #[test]
