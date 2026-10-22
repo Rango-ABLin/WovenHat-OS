@@ -1,5 +1,20 @@
 # Stage status
 
+## Stage 29 hardware qualification laboratory boundary - 2026-10-22
+
+Added `scripts/qualify-hardware-report.py` and its focused test module. The
+tool is a read-only report boundary: it validates repository-relative evidence
+records, rejects duplicate observation identities and absolute evidence paths,
+and refuses to call QEMU or emulated results Tier 1. Classification is
+conservative: native failures are Tier 3, complete native coverage of all
+declared categories is Tier 1, and incomplete native coverage without a
+failure is Tier 2.
+
+This closes the software/lab-record foundation for Stage 29, but does not
+claim native hardware qualification. The current host preflight found no safe
+disposable target, so physical device runs, supported-model declarations, and
+the final Stage 29 acceptance matrix remain open.
+
 ## Stage 28 acceptance audit - 2026-10-22
 
 The first QEMU audit found a triple fault in the existing GPT self-test:

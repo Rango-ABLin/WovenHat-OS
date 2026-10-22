@@ -1,5 +1,16 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - Stage 29 hardware qualification laboratory boundary (2026-10-22)
+
+Added the read-only `scripts/qualify-hardware-report.py` manifest validator
+and `tests/test_hardware_qualification.py`. It requires versioned host and
+observation records, repository-relative evidence, unique IDs, and known
+hardware categories. Its conservative classifier reports Tier 3 for native
+failures, Tier 1 only for complete native category coverage, and Tier 2 for
+incomplete coverage without a failure; QEMU/emulated evidence cannot be
+marked Tier 1. This is the software/lab foundation only: no native hardware
+was exercised and Stage 29 acceptance remains open.
+
 ## Codex - Stage 28 acceptance audit and stack-fault repair (2026-10-22)
 
 The initial storage QEMU audit stopped after

@@ -1,4 +1,4 @@
-# WovenHat OS Architecture & Codebase Guide
+﻿# WovenHat OS Architecture & Codebase Guide
 
 ### Stage 28 - kernel-backed installation transaction
 
@@ -204,7 +204,7 @@ The bounded user stack is four pages (16 KiB) plus a guard page. The increase
 was required by the production shell diagnostic-path acceptance, which
 reproduced a user-mode stack write fault at the former 8 KiB boundary.
 
-### Stage 24.59 — Change-PIN credential synchronization
+### Stage 24.59 â€” Change-PIN credential synchronization
 
 The desktop Change-PIN path is a single kernel-authorized transaction across
 the identity authority and `/etc/wovenhat/accounts`. `kernel::accounts::change_pin`
@@ -627,23 +627,23 @@ their existing capability checks.
 
 `Authority` exposes bounded add/remove operations for supplementary group membership. The owner-bound runtime authorizes syscalls 229-230, persists the updated WID2 authority, and restores the prior live authority if publication fails. Primary-group removal is prohibited; audit actions distinguish the two mutations. UI/query integration and physical qualification remain separate.
 
-### Stage 24.12 — durable identity administration
+### Stage 24.12 â€” durable identity administration
 
 Admin mutations publish the new authority through WID2 and synchronize the
 trusted account file. The runtime retains a copy of the previous authority
 and attempts WID2 rollback if file publication fails. The SMP migration test
 waits for coverage-probe task reclamation before allocating stress slots.
 
-### Stage 24.11 — bounded identity administration ABI
+### Stage 24.11 â€” bounded identity administration ABI
 
-Syscalls 226–228 expose add-user, delete-user, and add-group operations to
+Syscalls 226â€“228 expose add-user, delete-user, and add-group operations to
 the trusted elevated administrator session. Requests are copied into bounded
 buffers; the policy rejects ordinary callers, self-deletion, and deletion of
 accounts with active sessions. Actions are recorded in the security ledger.
 The current slice changes the live authority only; durable account/WID2
 publication and UI integration remain separate work.
 
-### Stage 24.10 — kernel identity lockout/rate limiting
+### Stage 24.10 â€” kernel identity lockout/rate limiting
 
 `identity_runtime` keeps a fixed per-account failure table. Five failed
 password or verified-digest attempts impose a five-second tick-based cooldown;
@@ -652,14 +652,14 @@ authority is installed and fails closed if capacity is exhausted. WovenShell
 derives a candidate digest for each PIN entry so the kernel sees failed login
 manager attempts.
 
-### Stage 24.9 — live PIN rotation consistency
+### Stage 24.9 â€” live PIN rotation consistency
 
 The account-change syscall updates the owner-bound live `Authority` and the
 trusted account file together. It generates a fresh salt, verifies the old
 credential, and rolls the live authority back if the file rewrite fails.
 WovenShell reloads its bounded account cache after a successful change.
 
-### Stage 24.8 — WID2 runtime recovery
+### Stage 24.8 â€” WID2 runtime recovery
 
 System-apps startup calls the native `identity_storage::load` adapter before
 WovenShell starts. The newest checksum-valid WID2 copy is decoded into a fresh
@@ -667,29 +667,29 @@ WovenShell starts. The newest checksum-valid WID2 copy is decoded into a fresh
 to the bounded account-file bootstrap. No session state is persisted or
 restored by this path.
 
-### Stage 24.7 — WovenIdentity audit actions
+### Stage 24.7 â€” WovenIdentity audit actions
 
 Identity syscalls record valid open, lock, unlock, elevation, and close
 outcomes through `kernel::audit`. `libwoven::audit_read` maps the stable
-action IDs 26–30 to the public security ABI. The ledger records the calling
+action IDs 26â€“30 to the public security ABI. The ledger records the calling
 task, session target where applicable, and whether the operation was allowed.
 Malformed buffer handling remains fail-closed before an operation is formed;
 separate malformed-request telemetry is still a follow-up.
 
-### Stage 24.6 — live WovenIdentity runtime and WovenShell login
+### Stage 24.6 â€” live WovenIdentity runtime and WovenShell login
 
 `kernel/src/identity_runtime.rs` loads bounded account-file records into a
 fresh authority before the production session is spawned. WovenShell owns the
 interactive PIN verification; its `AccountManage` capability gates the
-verified-digest open/unlock syscalls 224–225, and the kernel compares the
+verified-digest open/unlock syscalls 224â€“225, and the kernel compares the
 digest against its own stored credential before applying the owner-bound
 process UID/GID. `task::exit_current_process` releases all bindings owned by
 the exiting process before scheduler teardown. Authenticated WID2 recovery,
 lockout, auditing, and PIN rotation remain separate prerequisites.
 
-### Stage 24.5 — WovenIdentity syscall ABI
+### Stage 24.5 â€” WovenIdentity syscall ABI
 
-Syscalls 219–223 are additive identity calls: open, lock, unlock, elevate, and
+Syscalls 219â€“223 are additive identity calls: open, lock, unlock, elevate, and
 close. Open carries `[name_len][name][password_len][password]`; password
 actions carry `[length][password]`. Kernel handlers reject bounded-buffer
 violations before calling `identity_runtime`, and the `libwoven::identity`
@@ -697,7 +697,7 @@ wrappers construct exact-length stack buffers. The ABI does not retain user
 pointers. Runtime snapshot loading, live Ring-3 exercise, teardown reclamation,
 audit, lockout, and shell migration are intentionally later acceptance slices.
 
-### Stage 24.4 — owner-bound kernel identity seam
+### Stage 24.4 â€” owner-bound kernel identity seam
 
 `kernel/src/identity_runtime.rs` keeps fixed session bindings `(SessionId,
 process_id)` separate from `PROCESS_TABLE`. It validates ownership before every
@@ -708,7 +708,7 @@ authority session and removes its binding. This stage preserves the existing
 the next slice must add bounded user-pointer framing, durable snapshot loading,
 exit/reap cleanup, audit actions, and WovenShell integration.
 
-### Stage 24.3 — kernel-authorized identity storage
+### Stage 24.3 â€” kernel-authorized identity storage
 
 `kernel/src/identity_storage.rs` is the narrow storage adapter. It accepts the
 kernel-only `AuthorizedWfsWriter`, validates the `WID1` snapshot, and writes a
@@ -718,7 +718,7 @@ chooses the newest valid one, while equal generations fail closed. The QEMU
 gate uses a disposable IDE image and leaves external media untouched. This
 adapter does not serialize sessions or perform task credential binding.
 
-### Stage 24.2 — WovenIdentity authenticated snapshot
+### Stage 24.2 â€” WovenIdentity authenticated snapshot
 
 `Authority::encode_snapshot` and `decode_snapshot` use the fixed-size `WID1`
 format defined by `libwoven::identity::SNAPSHOT_BYTES`. Records include only
@@ -729,7 +729,7 @@ duplicates before publishing a fresh authority. Sessions are deliberately
 absent from the format. The kernel must still provide authorized atomic
 filesystem persistence, recovery/key management, rotation, and task binding.
 
-### Stage 24.1 — WovenIdentity policy core
+### Stage 24.1 â€” WovenIdentity policy core
 
 `libwoven/src/identity.rs` is the allocation-free local identity policy core.
 `Authority` owns fixed-capacity users, groups, and sessions; `Credential`
@@ -944,7 +944,7 @@ hardware GPU presentation remain separate boundaries.
 
 `apps/woven-files/src/main.rs` now handles `WSIZ` by creating and sharing a
 replacement surface, publishing `WRSZ` before the bounded Canvas upload, and
-clamping requests to a loader-safe 480×320 static render target. The QEMU
+clamping requests to a loader-safe 480Ã—320 static render target. The QEMU
 resize gate passed on 1/2/4 CPUs. The `/mnt` listing remains read-only and
 bounded; file-operation input, pointer widgets, and hardware GPU output are
 separate boundaries.
@@ -953,7 +953,7 @@ separate boundaries.
 
 `apps/woven-store/src/gui.rs` now handles `WSIZ` by creating and sharing a
 replacement surface, publishing `WRSZ` before the bounded Canvas upload, and
-clamping requests to a loader-safe 480×320 static render target. The QEMU
+clamping requests to a loader-safe 480Ã—320 static render target. The QEMU
 resize gate passed on 1/2/4 CPUs. Store remains a read-only catalog; package
 mutation, pointer widgets, and hardware GPU output remain separate boundaries.
 
@@ -961,7 +961,7 @@ mutation, pointer widgets, and hardware GPU output remain separate boundaries.
 
 `apps/woven-update/src/gui.rs` now handles `WSIZ` by creating and sharing a
 replacement surface, publishing `WRSZ` before the bounded Canvas upload, and
-clamping requests to a loader-safe 480×320 static render target. The QEMU
+clamping requests to a loader-safe 480Ã—320 static render target. The QEMU
 resize gate passed on 1/2/4 CPUs. Update remains preflight-only and
 non-mutating; pointer widgets and hardware GPU output remain separate
 boundaries.
@@ -970,7 +970,7 @@ boundaries.
 
 `apps/woven-images/src/gui.rs` now handles `WSIZ` by creating and sharing a
 replacement surface, publishing `WRSZ` before the bounded Canvas upload, and
-clamping requests to a loader-safe 480×320 static render target. The QEMU
+clamping requests to a loader-safe 480Ã—320 static render target. The QEMU
 resize gate passed on 1/2/4 CPUs. Image decoding/editing, pointer widgets, and
 hardware GPU output remain separate boundaries.
 
@@ -978,7 +978,7 @@ hardware GPU output remain separate boundaries.
 
 `apps/woven-editor/src/gui.rs` now handles `WSIZ` by creating and sharing a
 replacement surface, publishing `WRSZ` before the bounded Canvas upload, and
-clamping requests to a loader-safe 480×320 static render target. The QEMU
+clamping requests to a loader-safe 480Ã—320 static render target. The QEMU
 resize gate passed on 1/2/4 CPUs. The desktop client remains read-only; CLI
 editing, pointer widgets, and hardware GPU output are separate boundaries.
 
@@ -986,7 +986,7 @@ editing, pointer widgets, and hardware GPU output are separate boundaries.
 
 `apps/woven-security/src/gui.rs` now handles `WSIZ` by creating and sharing a
 replacement surface, publishing `WRSZ` before the bounded Canvas upload, and
-clamping requests to a loader-safe 480×320 static render target. The QMP
+clamping requests to a loader-safe 480Ã—320 static render target. The QMP
 resize gate passed on 1/2/4 CPUs. Security remains read-only with audit output
 capped at 16 events; controls, pointer widgets, and hardware GPU output are
 not implied.
@@ -994,7 +994,7 @@ not implied.
 ## Graphics WovenMonitor bounded resize (2026-10-19)
 
 `apps/woven-monitor/src/gui.rs` now negotiates `WSIZ/WRSZ` replacement
-surfaces with a loader-safe 480×320 static Canvas cap and redraws its bounded
+surfaces with a loader-safe 480Ã—320 static Canvas cap and redraws its bounded
 telemetry snapshot after resizing. The QMP resize gate passed on 1/2/4 CPUs.
 Monitor remains read-only; pointer controls and hardware GPU output are not
 implied.
@@ -1002,7 +1002,7 @@ implied.
 ## Graphics WovenSettings bounded resize (2026-10-19)
 
 `apps/woven-settings/src/gui.rs` now handles `WSIZ` with a loader-safe static
-480×320 Canvas target, publishes a shared replacement surface with `WRSZ`, and
+480Ã—320 Canvas target, publishes a shared replacement surface with `WRSZ`, and
 redraws after the resize. The QMP resize gate passed on 1/2/4 CPUs. Settings
 remains read-only; pointer controls and hardware GPU output are not implied.
 
@@ -1010,7 +1010,7 @@ remains read-only; pointer controls and hardware GPU output are not implied.
 
 WovenShell allows five seconds for a client replacement surface to arrive.
 WovenCalculator and WovenTerminal handle `WSIZ`, clamp each requested
-dimension to a 480×320 static render target, share the new surface, and send
+dimension to a 480Ã—320 static render target, share the new surface, and send
 `WRSZ` before the potentially slow Canvas upload. The QMP resize gate passed
 on 1/2/4 CPUs. The cap is a deliberate Ring-3 image/stack safety boundary;
 other clients and hardware GPU presentation remain separate work.
@@ -1175,7 +1175,7 @@ malformed coverage and alternate sets fail closed.
 
 ## Graphics shared-font metric update (2026-10-19)
 
-The shared kernel font’s `text_width` and `line_count` use saturating
+The shared kernel fontâ€™s `text_width` and `line_count` use saturating
 accumulation, so WovenGraphics measurement remains defined for arbitrarily
 long UTF-8 input before layout applies its own bounded drawing rules.
 
@@ -1189,7 +1189,7 @@ addition to checking the far edge.
 
 `Canvas::draw_text` saturates cursor movement, glyph origins, and newline
 placement before calling the Canvas clip boundary, so the low-level text API
-shares the renderer’s overflow behavior.
+shares the rendererâ€™s overflow behavior.
 
 ## Graphics surface-coordinate invariant (2026-10-19)
 
@@ -1803,7 +1803,7 @@ log bytes retained in the in-memory ring even if no UART responds. This does
 not make a USB log possible while xHCI is hung; external serial capture is
 needed for a permanently stalled controller.
 
-## Stages 1–10 release evidence integrity (2026-10-16)
+## Stages 1â€“10 release evidence integrity (2026-10-16)
 
 Memory, storage, live-network and Stage 6 hotplug QEMU gates share
 `scripts/qemu_validation.py`: exact successful exit, line-anchored required
@@ -1811,7 +1811,7 @@ markers, and rejection of tagged failure/timeout or kernel panic anywhere in
 serial output. Expected user faults remain valid isolation evidence. Negative
 host tests exercise every consumer's imported validator. This changes no kernel
 ABI or lifecycle; full preservation is pending, not release acceptance. See
-the foundation release-validation audit and stages 1–10 release ledger.
+the foundation release-validation audit and stages 1â€“10 release ledger.
 
 ## Stage 19 WovenCalculator (2026-10-14)
 
@@ -1924,7 +1924,7 @@ header and entries. It is intentionally a codec, not a storage write: the
 package service must commit it through the authorized WovenFS writer and
 validate the decoded record before publishing the catalog.
 
-Stage 21.6’s kernel probe writes `/wfs/packages/catalog.wstc` only after
+Stage 21.6â€™s kernel probe writes `/wfs/packages/catalog.wstc` only after
 `UpdateState::authorized_writer` confirms the current task has
 `Capability::StorageIo`. It uses native WovenFS journaled path writes and
 direct checksum-verified readback, so the tested boundary does not rely on a
@@ -1968,7 +1968,7 @@ broker still needs to be built above it.
 ## Stage 22.1 userspace service IPC ABI (2026-10-20)
 
 The service registry's first userspace boundary is now explicit. Syscall 211
-creates an endpoint owned by the calling process. Syscalls 212–214 publish,
+creates an endpoint owned by the calling process. Syscalls 212â€“214 publish,
 unpublish, and discover a bounded service name; all four require
 `Capability::Ipc`. The publish argument carries the endpoint handle and
 client-rights mask, while the kernel validates the raw handle, copies the
@@ -2241,7 +2241,7 @@ power-loss injection/recovery, and physical USB qualification remain open.
 
 ## Release validation (2026-10-14)
 
-## Update/recovery track — bounded A/B activation state (2026-10-20)
+## Update/recovery track â€” bounded A/B activation state (2026-10-20)
 
 `kernel/src/update.rs` is the first Stage 27 increment. It provides an
 allocation-free two-slot transition object: staged candidates must advance the
@@ -2333,7 +2333,7 @@ Positions are scaled to 0..=32767 and pressure to 0..=1023.
 
 **WovenInput and userspace.** `Scroll`, `PointerAbsolute`, `Touch`, `Pen`
 and `GameController` are production events, encoded to userspace as input
-kinds 9–13 and decoded by libwoven's `InputEvent`.
+kinds 9â€“13 and decoded by libwoven's `InputEvent`.
 
 ## Stage 13.15 WovenAudio playback for userspace (2026-10-14)
 
@@ -2461,7 +2461,7 @@ Neither stops the boot. Ready drivers are added to the device registry
 **Rules for this code:**
 - A normal build compiles only the driver code it uses. The PCI hotplug
   functions stay gated to the Stage 13 tests.
-- Each driver module carries one `expect(dead_code, reason = …)`, active
+- Each driver module carries one `expect(dead_code, reason = â€¦)`, active
   only in production and in `stage13-12-test`. The reason names the APIs
   still waiting for production callers. The later Stage 13 closure steps
   (USB input, audio) remove it by giving those APIs callers.
@@ -2476,11 +2476,11 @@ Neither stops the boot. Ready drivers are added to the device registry
 - Storage is not yet mounted from NVMe or AHCI.
 - USB devices are not yet read, and audio is not yet exposed to userspace.
 
-## Stage 13.4–13.7 revalidation (2026-10-14)
+## Stage 13.4â€“13.7 revalidation (2026-10-14)
 
 The ordered AHCI/SATA, xHCI core, USB HID, and WovenInput software gates pass
 on 1/2/4 CPUs in the current tree. Their evidence is recorded in the
-[Stage 13.4–13.7 validation audit](audit-stage13-4-7-validation-2026-10-14.md).
+[Stage 13.4â€“13.7 validation audit](audit-stage13-4-7-validation-2026-10-14.md).
 The QEMU fixtures validate bounded ownership and protocol contracts; they do
 not substitute for native-controller or physical USB interoperability. USB
 mouse report decoding is still outside the accepted keyboard-only fixture.
@@ -2557,7 +2557,7 @@ Accepted loader placement correction (2026-10-15): the validated ELF kind now
 selects main-image placement. ET_EXEC ignores an offered ASLR delta; ET_DYN
 retains it. The signed graph loader, dependency ownership and library windows
 are preserved. A nonzero-candidate compiled static fixture and a biased PIC
-probe pass on 1/2/4 CPUs. Full host/lint, exact Stage 10.7 and Stage 10.8–11.5
+probe pass on 1/2/4 CPUs. Full host/lint, exact Stage 10.7 and Stage 10.8â€“11.5
 preservation passed in session 62865, exit 0, with all 500 inputs unchanged.
 See the executable-placement audit and Claude's source policy `6f02202d`.
 The compiler TLS gate was subsequently closed by the shared-library TLS
@@ -2572,7 +2572,7 @@ and rechecks in the original reap transaction. Process wait and thread join
 share a zero-extending 32-bit exit payload encoder, separate from 64-bit errors.
 The real libwoven fixture catches these boundaries and preserves original
 Stage 11.2 assertions. All three bounded corrections are accepted in prerequisite
-order on the unchanged 500-input baseline, with full Stage 10.7/10.8–11.5
+order on the unchanged 500-input baseline, with full Stage 10.7/10.8â€“11.5
 preservation on 1/2/4 CPUs and warning-denying host/fixture/kernel QA. See the
 three dedicated audits and combined evidence. None is a release/hardware
 qualification or complete compiler-TLS/loader interoperability.
@@ -2587,7 +2587,7 @@ handle-generation audit. This is separate from thread-record retirement.
 Durable host coverage is now part of `cargo test`; a `qemu-test`-guarded
 post-SMP probe exercises real installation rollback, queued escrow, waiters,
 lineage and frame cleanup. Its final revised full acceptance chain exited 0,
-including full Stage 10.7 and Stage 10.8–11.5 matrices on 1/2/4 CPUs. All 488
+including full Stage 10.7 and Stage 10.8â€“11.5 matrices on 1/2/4 CPUs. All 488
 frozen inputs matched at that increment's acceptance. Signed-status encoding
 has since passed its own separate 500-input acceptance;
 full runtime, release and hardware production closure remain open.
@@ -2596,7 +2596,7 @@ The registry now reserves generation `u32::MAX` as a permanent exhaustion
 sentinel: a free record at that value is never allocated again. All three
 release paths retain their existing checked generation advancement under the
 rank-10 registry guard. The accepted bounded correction has five actual-source
-host regressions plus full Stage 10.7 and Stage 10.8–11.5 preservation on
+host regressions plus full Stage 10.7 and Stage 10.8â€“11.5 preservation on
 1/2/4 CPUs with unchanged frozen sources; see the thread-generation audit.
 The exit-result ABI collision has since been corrected and accepted separately;
 compiler-compatible TLS remains open.
@@ -2766,8 +2766,8 @@ interrupt/DMA recovery qualification remain open. See the
 
 PCI persistent BAR admission diagnostics are guarded across the complete later
 feature family, not only the Stage 13 feature set. This keeps `-D warnings`
-meaningful when Stage 14–20 code compiles the shared PCI module. The live
-Stage 14.1–14.5D network matrices pass on 1/2/4 CPUs; hardware NIC and radio
+meaningful when Stage 14â€“20 code compiles the shared PCI module. The live
+Stage 14.1â€“14.5D network matrices pass on 1/2/4 CPUs; hardware NIC and radio
 qualification remains separate. See the [Stage 14 feature-gate audit](audit-stage14-feature-gates-2026-10-13.md).
 
 ## TCP close/drain repair (2026-09-24)
@@ -2883,8 +2883,8 @@ qualification remain separate gates.
 
 The AX201 owner now also has a distinct bounded data-TX ring: 32 hardware
 TFD slots and up to four owned encoded payloads. A payload is published only
-after its queue ID is checked against Intel's management (5–8) or data
-(10–30) DQA ranges, and is
+after its queue ID is checked against Intel's management (5â€“8) or data
+(10â€“30) DQA ranges, and is
 retained until an exact queue/index completion is decoded. The driver exposes
 this boundary is now exercised by the physical probe's post-ALIVE DQA and
 queue-allocation handshake. A tested management-frame submission still
@@ -2989,7 +2989,7 @@ currently has a monolithic Rust kernel, a UEFI boot image builder, embedded Ring
 programs, and host/QEMU acceptance harnesses. The supplied
 [master development roadmap](master-development-roadmap.md) defines future stages.
 
-## Stage 1–5 data journal boundary
+## Stage 1â€“5 data journal boundary
 
 FAT32 persistence retains the original single-file `WDJ1` journal and adds a
 separate bounded `WDJ2` batch journal. A batch contains at most sixteen file data
@@ -3026,10 +3026,10 @@ map wording that says 8 KiB is historical and is superseded by
 | `device.rs`, `keyboard.rs`, `mouse.rs`, `serial.rs`, `console.rs`, `terminal.rs`, `shell.rs` | Device registry, input (keyboard and PS/2 mouse both decode and publish at IRQ time), diagnostics and command interfaces |
 | `graphics.rs`, `gui.rs` | Kernel colour definitions and legacy framebuffer/GUI support; the userspace WovenGraphics abstraction lives in `libwoven::graphics` and feeds the existing compositor surface ABI. The userspace renderer also exposes bounded rounded panels, alpha-aware image blits, `Path` geometry with clipped opaque/alpha strokes and fills plus four-segment quadratic flattening, bounded eight-contour `CompoundPath` even-odd fills and strokes with integer 4x4 antialiasing, clipped vertical and horizontal gradients, deterministic signed-16.16 affine `Transform` values for clipped transformed rectangles, a shared-glyph `Font`/`TextMetrics` provider for bounded layout, wrapping and integer scaling, and a borrowed `TrueTypeFace` metadata/cmap/advance-metrics boundary with BMP format-4 and non-BMP format-12 lookup, bounded `fvar` axis metadata, validated borrowed `gvar` glyph-payload slices, simple and XY/transform/point-matched composite `glyf`/`loca` outlines, compound-path assembly, antialiased glyph raster entry point, advance-based text layout with optional legacy kerning, bounded character and word-level text-box line breaking, explicit LTR/RTL placement and shared bitmap fallback; `gvar` tuple delta application, hint execution, modern shaping, bidi and scripts remain open |
 | `rtc.rs` | CMOS real-time clock (UTC), behind the `ClockRead` syscall |
-| `font.rs`, `display.rs` | 5×7 ASCII font (also compiled into libwoven); `Surface` (opaque `blit`, `blit_region` for exposed-region redraw, uniform-opacity `blend`, `write_pixels` for client uploads), bounded `Damage` (regions that form exactly a rectangle merge; a full list collapses to one bounding box) and the single format-resolving presentation path (`present_scaled`, integer display scale, each row converted once and copied to the physical rows it covers; `present` is scale 1; `Surface::scaled_row` serves the virtio-gpu heads) |
-| `user_graphics.rs`, `compositor.rs` | Owner-tagged, generation-checked client surfaces (syscalls 98–101, 104), up to 1920×1200 within a 4 MB per-process and 16 MB system pixel budget, behind a preemption lock (not interrupts-off) with allocation and freeing outside it and the kernel-held compositor surface they are blitted onto (102–103); `blit` snapshots under the registry lock and releases it before taking the compositor lock, so the two rank-10 locks never nest. Presentation borrows the framebuffer through `terminal::with_framebuffer` (lock order compositor → terminal), and display ownership suppresses terminal rendering while the compositor presents. Userspace reaches the compositor only with `DisplayIo` and the single-holder lease (syscalls 105–106), released on exit; every client token is bound to the calling process before the registry sees it. A presenting holder also takes input focus: `woven_input` routes events to its private bounded queue (syscall 107, `InputIo`) until it exits; syscall 108 sleeps for the next event with a single registered waiter woken by `publish` after `FOCUS` is released (lock order scheduler → compositor → FOCUS). A client may share one of its surfaces with one process (syscall 109); the lease holder composites it with syscall 110, authorised by the slot's grant rather than the token. Syscall 111 sleeps over input and the pid mailbox at once; `ipc::send` wakes the mailbox's single waiter after releasing the IPC lock. Clients declare damage on their surfaces (syscall 112); the holder sleeps on it via `WaitAny` and copies only the damaged region (syscall 113). The boot compositor is sized to the framebuffer (clamped to 1920×1200), and every framebuffer writer, including the boot `Console`, goes through the terminal lock. Stacking, raise and per-window focus are window-manager policy in userspace (Stage 19.11), built on the lease, focus, `WaitAny`, shared surfaces and IPC |
+| `font.rs`, `display.rs` | 5Ã—7 ASCII font (also compiled into libwoven); `Surface` (opaque `blit`, `blit_region` for exposed-region redraw, uniform-opacity `blend`, `write_pixels` for client uploads), bounded `Damage` (regions that form exactly a rectangle merge; a full list collapses to one bounding box) and the single format-resolving presentation path (`present_scaled`, integer display scale, each row converted once and copied to the physical rows it covers; `present` is scale 1; `Surface::scaled_row` serves the virtio-gpu heads) |
+| `user_graphics.rs`, `compositor.rs` | Owner-tagged, generation-checked client surfaces (syscalls 98â€“101, 104), up to 1920Ã—1200 within a 4 MB per-process and 16 MB system pixel budget, behind a preemption lock (not interrupts-off) with allocation and freeing outside it and the kernel-held compositor surface they are blitted onto (102â€“103); `blit` snapshots under the registry lock and releases it before taking the compositor lock, so the two rank-10 locks never nest. Presentation borrows the framebuffer through `terminal::with_framebuffer` (lock order compositor â†’ terminal), and display ownership suppresses terminal rendering while the compositor presents. Userspace reaches the compositor only with `DisplayIo` and the single-holder lease (syscalls 105â€“106), released on exit; every client token is bound to the calling process before the registry sees it. A presenting holder also takes input focus: `woven_input` routes events to its private bounded queue (syscall 107, `InputIo`) until it exits; syscall 108 sleeps for the next event with a single registered waiter woken by `publish` after `FOCUS` is released (lock order scheduler â†’ compositor â†’ FOCUS). A client may share one of its surfaces with one process (syscall 109); the lease holder composites it with syscall 110, authorised by the slot's grant rather than the token. Syscall 111 sleeps over input and the pid mailbox at once; `ipc::send` wakes the mailbox's single waiter after releasing the IPC lock. Clients declare damage on their surfaces (syscall 112); the holder sleeps on it via `WaitAny` and copies only the damaged region (syscall 113). The boot compositor is sized to the framebuffer (clamped to 1920Ã—1200), and every framebuffer writer, including the boot `Console`, goes through the terminal lock. Stacking, raise and per-window focus are window-manager policy in userspace (Stage 19.11), built on the lease, focus, `WaitAny`, shared surfaces and IPC |
 | `panic.rs`, `benchmark.rs` | Failure reporting and existing benchmark support |
-| `libwoven/`, `apps/hello`, `apps/hello-gui`, `apps/woven-shell` | The userspace API (one thin wrapper per syscall, plus the typed `graphics::{Color, Rect, Renderer}` WovenGraphics boundary, `Canvas` software rendering, caller-owned `DepthBuffer`/`Vertex3` software 3D triangles, the shared kernel font, and a fixed-point `Spring` for animation, and `accounts`, local accounts held as a salt and `PBKDF2-HMAC-SHA256(PIN, salt, PBKDF2_ITERATIONS)`) and the Ring-3 programs. Each app is its own crate with a large-code-model `link.x` (whose `.l*` sections must be placed explicitly) and a `build.rs` that relinks when it changes. `woven-shell` is the desktop, with four workspaces (per-workspace stacks, a taskbar switcher, F3/F4): it holds the compositor lease and recomposes exposed rectangles from its own software layers and clients' shared surfaces (region blits, syscalls 120–121), hosting applications over an IPC protocol (`WOPN`, `TRAY`, `NOTE`, `WCLS`, and `WSIZ`/`WRSZ` for resizing; `libwoven::layout` tiles them); shadows and other translucent layers use region blends (syscalls 200–201), and text, borders and the pointer are overlays copied with a keyed blit that skips the transparent key (syscall 202), so nothing is read back from the screen. With `--accounts` it starts at a sign-in screen, and its lock screen asks for the signed-in account's PIN. A user stack is 8 KiB (`UserStack::SIZE`), so the shell keeps its tile buffer and desktop state in statics (.bss), never in `main`'s frame. The kernel's feature-gated VirtIO-GPU test path separately uses a bounded `VirglStream` encoder for checked VIRGL command framing; it is transport validation only until a visible GPU frame is accepted |
+| `libwoven/`, `apps/hello`, `apps/hello-gui`, `apps/woven-shell` | The userspace API (one thin wrapper per syscall, plus the typed `graphics::{Color, Rect, Renderer}` WovenGraphics boundary, `Canvas` software rendering, caller-owned `DepthBuffer`/`Vertex3` software 3D triangles, the shared kernel font, and a fixed-point `Spring` for animation, and `accounts`, local accounts held as a salt and `PBKDF2-HMAC-SHA256(PIN, salt, PBKDF2_ITERATIONS)`) and the Ring-3 programs. Each app is its own crate with a large-code-model `link.x` (whose `.l*` sections must be placed explicitly) and a `build.rs` that relinks when it changes. `woven-shell` is the desktop, with four workspaces (per-workspace stacks, a taskbar switcher, F3/F4): it holds the compositor lease and recomposes exposed rectangles from its own software layers and clients' shared surfaces (region blits, syscalls 120â€“121), hosting applications over an IPC protocol (`WOPN`, `TRAY`, `NOTE`, `WCLS`, and `WSIZ`/`WRSZ` for resizing; `libwoven::layout` tiles them); shadows and other translucent layers use region blends (syscalls 200â€“201), and text, borders and the pointer are overlays copied with a keyed blit that skips the transparent key (syscall 202), so nothing is read back from the screen. With `--accounts` it starts at a sign-in screen, and its lock screen asks for the signed-in account's PIN. A user stack is 8 KiB (`UserStack::SIZE`), so the shell keeps its tile buffer and desktop state in statics (.bss), never in `main`'s frame. The kernel's feature-gated VirtIO-GPU test path separately uses a bounded `VirglStream` encoder for checked VIRGL command framing; it is transport validation only until a visible GPU frame is accepted |
 | `tests/`, `scripts/`, `run-stage*-acceptance.ps1` | Host regressions, QEMU orchestration and stage preservation gates |
 
 ## Stage 6 filesystem concurrency boundary
@@ -3252,14 +3252,14 @@ later roadmap work.
 
 `async_events.rs` owns bounded generation-tagged timer and manual-reset event
 slots. Timer deadlines use the monotonic tick source and are pumped by an
-event-driven worker. Syscalls 87–94 expose create, wait, set, close and
+event-driven worker. Syscalls 87â€“94 expose create, wait, set, close and
 sleep-until operations; timer and event waits produce the same generic async
 completion records as other operations. Owner teardown cancels outstanding
 waiters and releases every slot.
 
 ## Stage 13.10 Bluetooth architecture
 
-Roadmap Stage 13.10 owns Bluetooth. Historical source/audit labels 13.10A–AC associated with AX200 are retained as historical Wi-Fi substage names under roadmap Stage 13.9 and must not be interpreted as Bluetooth milestones.
+Roadmap Stage 13.10 owns Bluetooth. Historical source/audit labels 13.10Aâ€“AC associated with AX200 are retained as historical Wi-Fi substage names under roadmap Stage 13.9 and must not be interpreted as Bluetooth milestones.
 
 Stage 13.10A introduces `bluetooth_hci.rs` as a hardware-independent HCI protocol boundary. It owns bounded command packet construction, Command Complete parsing, command-credit state, opcode matching, and controller-status validation. The module is feature-gated by `stage13-10-test` and deliberately does not depend on xHCI, allowing the HCI state machine to be validated without pretending a physical transport exists.
 
@@ -4057,3 +4057,14 @@ uses the layout/formatter/EFI path and records separate executor and final-image
 digests. The harness verifies deterministic output and byte-for-byte rollback
 after injected failures. It does not establish physical installation,
 bootability, hardware qualification, or release certification.
+## Stage 29 hardware qualification report boundary
+
+`scripts/qualify-hardware-report.py` is the report-only boundary for the
+hardware compatibility laboratory. It consumes a versioned JSON manifest and
+does not probe, mount, write, flash, or otherwise mutate a host. Every
+observation identifies a category, device, execution environment, result, and
+repository-relative evidence path. The classifier intentionally prevents
+QEMU/emulated evidence from claiming Tier 1: native failures are Tier 3,
+complete native coverage is Tier 1, and incomplete native coverage without a
+failure is Tier 2. This separates evidence collection from policy and keeps
+the release claim fail-closed until real hardware records exist.
