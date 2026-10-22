@@ -23,6 +23,13 @@ uncommitted graphics work. The timeout and serial logs are preserved under
 `target/storage-regression-4-debug/serial.log`; the release gate was not
 weakened or extended.
 
+Temporary serial tracing localized the stall to the live FAT32 directory-growth
+workload's queued ATA path. Across repeated 4-CPU runs, the stop moved among
+old-file reads and metadata/data journal operations, with no rejected worker
+event signal; this remains an unresolved block-I/O worker/ATA/SMP interaction,
+not a basis for a speculative filesystem patch. All tracing was removed after
+the diagnosis and the shared Claude worktree remains untouched.
+
 ## GFX-01 hybrid graphics baseline - 2026-10-22
 
 Applied the supplied Hybrid Graphics Architecture direction at GFX-01 only.

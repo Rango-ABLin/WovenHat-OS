@@ -23,6 +23,13 @@ Claude's uncommitted graphics changes. Logs remain under
 `target/storage-regression-4-debug/serial.log`; no timeout or assertion was
 weakened.
 
+Temporary tracing localized the stall to the live FAT32 directory-growth
+workload's queued ATA path. Repeated 4-CPU runs stopped at different old-file
+read or metadata/data-journal operations, with no rejected worker event signal.
+The worker/ATA/SMP interaction remains unresolved; all tracing was removed and
+no speculative filesystem change was made. Claude's dirty files remain
+untouched.
+
 ## Codex - Accept GFX-01 baseline and repair 3D taskbar footprint (2026-10-22)
 
 Applied the supplied hybrid-graphics direction at GFX-01: the versioned
